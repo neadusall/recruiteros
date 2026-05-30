@@ -199,6 +199,62 @@ section('8. Throttles: weekly invite cap, hourly + daily-total ceilings, presets
 }
 
 /* ============================================================ */
+section('9. Cold-outreach nuances: 1st-degree skip, auto-withdraw, suppression, auto-pause');
+{
+  // 1st-degree connections skip the invite and go straight to messaging
+  const { store: s6, engine: e6 } = freshEngine({ acceptRate: 1, replyRate: 0, failRate: 0 }, 3);
+  const acc = s6.insert('channelAccounts', A.build.channelAccount('linkedin', 'D1', { createdAt: START - 60 * DAY }));
+  const camp = s6.insert('campaigns', A.build.campaign({ name: 'D1', status: 'active', channelAccountIds: [acc.id] }));
+  const seq = s6.insert('sequences', A.build.sequence(camp.id, [
+    A.build.actionStep('linkedin', 'connect', { body: 'Hi {first_name}' }),
+    A.build.actionStep('linkedin', 'message', { body: 'Hey {first_name}', requireAccepted: true }),
+  ]));
+  s6.update('campaigns', camp.id, { sequenceId: seq.id });
+  const lead1 = s6.insert('leads', A.build.lead({ firstName: 'Already', email: 'a@ex.com', degree: '1st' }));
+  e6.enroll(camp.id, [lead1.id], START);
+  e6.fastForward(START, START + 5 * DAY, 6 * HOUR);
+  const evs1 = s6.where('events', ev => ev.leadId === lead1.id);
+  ok('1st-degree lead skips the connection request', evs1.some(ev => ev.type === 'connect' && ev.status === 'skipped'));
+  ok('1st-degree lead still gets the message', evs1.some(ev => ev.type === 'message' && ev.status === 'sent'));
+
+  // auto-withdraw stale invites
+  const { store: s7, engine: e7 } = freshEngine({ acceptRate: 0, replyRate: 0, failRate: 0 }, 9); // never accept
+  const acc7 = s7.insert('channelAccounts', A.build.channelAccount('linkedin', 'W', { createdAt: START - 60 * DAY, safety: Object.assign({}, A.DEFAULT_SAFETY, { withdrawInviteAfterDays: 5 }) }));
+  const camp7 = s7.insert('campaigns', A.build.campaign({ name: 'W', status: 'active', channelAccountIds: [acc7.id] }));
+  const seq7 = s7.insert('sequences', A.build.sequence(camp7.id, [A.build.actionStep('linkedin', 'connect', { body: 'Hi' }), A.build.actionStep('linkedin', 'message', { body: 'Hey', requireAccepted: true })]));
+  s7.update('campaigns', camp7.id, { sequenceId: seq7.id });
+  const lw = s7.insert('leads', A.build.lead({ firstName: 'Stale', email: 's@ex.com', degree: '2nd' }));
+  e7.enroll(camp7.id, [lw.id], START);
+  e7.fastForward(START, START + 20 * DAY, 6 * HOUR);
+  const enrW = s7.where('enrollments', en => en.leadId === lw.id)[0];
+  ok('stale unaccepted invite is auto-withdrawn', enrW.stopReason === 'invite_withdrawn', 'reason ' + enrW.stopReason);
+  ok('withdraw event recorded', s7.where('events', ev => ev.type === 'withdraw_invite').length >= 1);
+
+  // suppression: unsubscribe stops active enrollments and blocks re-enroll
+  const { store: s8, engine: e8 } = freshEngine();
+  const seeded8 = A.seedDemo(s8, START);
+  e8.enroll(seeded8.campaign.id, seeded8.leads.map(l => l.id), START);
+  const target = seeded8.leads[0];
+  e8.unsubscribe(target.email);
+  const enr8 = s8.where('enrollments', en => en.leadId === target.id)[0];
+  ok('unsubscribe stops the active enrollment', enr8.status === 'stopped' && enr8.stopReason === 'unsubscribed');
+  ok('unsubscribed email is on the suppression list', s8.blacklist().unsubscribed.includes(target.email.toLowerCase()));
+  ok('engine treats unsubscribed lead as blacklisted', e8.isBlacklisted(target) === true);
+
+  // auto-pause after repeated failures (LinkedIn-jail protection)
+  const { store: s9, engine: e9 } = freshEngine({ failRate: 1 }, 5); // every send fails
+  const acc9 = s9.insert('channelAccounts', A.build.channelAccount('linkedin', 'J', { createdAt: START - 60 * DAY, safety: Object.assign({}, A.DEFAULT_SAFETY, { maxConsecutiveErrors: 3 }) }));
+  const camp9 = s9.insert('campaigns', A.build.campaign({ name: 'J', status: 'active', channelAccountIds: [acc9.id] }));
+  const seq9 = s9.insert('sequences', A.build.sequence(camp9.id, [A.build.actionStep('linkedin', 'view')]));
+  s9.update('campaigns', camp9.id, { sequenceId: seq9.id });
+  const ids9 = []; for (let i = 0; i < 6; i++) ids9.push(s9.insert('leads', A.build.lead({ firstName: 'F' + i, email: 'f' + i + '@ex.com' })).id);
+  e9.enroll(camp9.id, ids9, START);
+  e9.fastForward(START, START + 2 * DAY, 2 * HOUR);
+  ok('campaign auto-pauses after repeated failures', s9.get('campaigns', camp9.id).status === 'paused', 'status ' + s9.get('campaigns', camp9.id).status);
+  ok('account flagged unhealthy', s9.get('channelAccounts', acc9.id).health === 'bad');
+}
+
+/* ============================================================ */
 console.log('\n' + (fail === 0 ? '\x1b[32m' : '\x1b[31m') + '─'.repeat(46) + '\x1b[0m');
 console.log((fail === 0 ? '\x1b[32m' : '\x1b[31m') + `  ${pass} passed, ${fail} failed\x1b[0m\n`);
 process.exit(fail === 0 ? 0 : 1);

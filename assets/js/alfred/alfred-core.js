@@ -78,6 +78,8 @@
     weeklyInviteCap: 100,                         // LinkedIn weekly invitation ceiling (hard ~100-200)
     hourlyMax:     12,                            // max actions per rolling hour (anti-burst)
     dailyTotalCap: 130,                           // max total actions/day across ALL types
+    maxConsecutiveErrors: 8,                       // auto-pause the account after this many failures in a row
+    pauseOnErrors: true,                           // LinkedIn-jail protection
   };
 
   // One-click safety profiles, following best practices from the major tools.
@@ -565,8 +567,8 @@
       const maxActions = opts.maxActions || 10000;
       const report = { processed: 0, sent: 0, deferred: 0, skipped: 0, completed: 0, failed: 0, accepted: 0, replied: 0 };
 
-      // 1) resolve simulated promises that have come due (accepts / replies)
-      store.all('enrollments').forEach(e => settlePromises(e, now, report));
+      // 1) resolve simulated promises (accepts/replies) + auto-withdraw stale invites
+      store.all('enrollments').forEach(e => { autoWithdraw(e, now, report); settlePromises(e, now, report); });
 
       // 2) process due enrollments, oldest first
       const due = store.where('enrollments', e =>
@@ -626,14 +628,23 @@
 
       // condition gate (e.g. "message only after connect accepted")
       const meta = CHANNELS[action.channel].actions[action.type] || {};
+
+      // already a 1st-degree connection? skip the invite, treat as connected.
+      if (action.type === 'connect' && /1|first/i.test(String(lead.degree || ''))) {
+        e.connectionAccepted = true; e.connectionSent = true;
+        logEvent(e, { type: 'connect', channel: 'linkedin', status: STATUS.event.SKIPPED, at: now, info: 'Already a 1st-degree connection' });
+        e.stepIndex++; e.nextRunAt = now + (acc ? limits.randomDelayMs(acc, rng) : MINUTE);
+        report.skipped++;
+        if (e.stepIndex >= steps.length) return complete(e, report);
+        store.save(); return;
+      }
+
       const needsAccepted = action.requireAccepted != null ? action.requireAccepted : meta.requiresAccepted;
       if ((needsAccepted || (step.condition && step.condition.type === 'if_accepted')) && !e.connectionAccepted) {
-        // hold until accepted; if the invite was never sent or already settled as
-        // not-accepted past the withdraw window, stop gracefully.
-        if (e.connectionSent && !e._pendingAccept) {
-          return stop(e, 'not_accepted', report);
-        }
-        e.nextRunAt = now + 6 * HOUR;       // re-check later
+        // not yet accepted: keep the prospect pending and re-check. autoWithdraw()
+        // times the invite out (and stops the enrollment) after the withdraw window,
+        // matching how a real LinkedIn pending invite behaves.
+        e.nextRunAt = now + 6 * HOUR;
         store.save();
         report.skipped++;
         return;
@@ -679,9 +690,20 @@
       if (!result.ok) {
         logEvent(e, { type: action.type, channel: action.channel, status: STATUS.event.FAILED, at: now, info: result.info, body: rendered.body });
         e.nextRunAt = now + 2 * HOUR;   // retry shortly
-        store.save(); report.failed++;
+        report.failed++;
+        // LinkedIn-jail protection: auto-pause the account after repeated failures.
+        if (useAcc) {
+          useAcc._consecFails = (useAcc._consecFails || 0) + 1;
+          const s = limits.safety(useAcc);
+          if (s.pauseOnErrors && useAcc._consecFails >= (s.maxConsecutiveErrors || 8)) {
+            useAcc.health = 'bad';
+            pauseAccountCampaigns(useAcc, 'repeated_errors', now);
+          }
+        }
+        store.save();
         return;
       }
+      if (useAcc) useAcc._consecFails = 0;   // healthy send resets the streak
 
       // success — record, count (per-action + daily total + hourly), schedule outcomes
       if (useAcc) {
@@ -704,6 +726,7 @@
 
       if (meta.opensRelationship) {
         e.connectionSent = true;
+        e.connectionSentAt = now;                 // for auto-withdraw of stale invites
         if (result.willAccept) e._pendingAccept = { at: now + (result.acceptInMs || DAY) };
       }
       if (result.willReply) e._pendingReply = { at: now + (result.replyInMs || DAY) };
@@ -742,6 +765,27 @@
     }
     function stop(e, reason, report) {
       e.status = STATUS.enrollment.STOPPED; e.stopReason = reason; e.nextRunAt = null; store.save(); report.skipped++;
+    }
+
+    // Auto-withdraw connection requests that were never accepted within the window.
+    function autoWithdraw(e, now, report) {
+      if (e.status !== STATUS.enrollment.ACTIVE) return;
+      if (!e.connectionSent || e.connectionAccepted || !e.connectionSentAt) return;
+      const acc = store.get('channelAccounts', e._channelAccountId);
+      const days = limits.safety(acc || {}).withdrawInviteAfterDays;
+      if (days && (now - e.connectionSentAt) > days * DAY) {
+        e._pendingAccept = null;
+        logEvent(e, { type: 'withdraw_invite', channel: 'linkedin', status: STATUS.event.SENT, at: now, info: 'Auto-withdrew a stale invite (' + days + 'd)' });
+        report.withdrawn = (report.withdrawn || 0) + 1;
+        stop(e, 'invite_withdrawn', report);
+      }
+    }
+
+    // Pause every campaign that uses this account (LinkedIn-jail protection).
+    function pauseAccountCampaigns(acc, reason, now) {
+      store.where('campaigns', c => (c.channelAccountIds || []).includes(acc.id) || (c.emailAccountIds || []).includes(acc.id))
+        .forEach(c => { if (c.status === STATUS.campaign.ACTIVE) { c.status = STATUS.campaign.PAUSED; c._pausedReason = reason; c._pausedAt = now; } });
+      store.save();
     }
 
     function logEvent(e, ev) {
