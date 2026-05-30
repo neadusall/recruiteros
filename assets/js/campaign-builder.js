@@ -10,16 +10,38 @@
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
   const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
 
-  /* ---- free sources (mirror freeSources.ts + built-ins) ---- */
-  const SOURCES = [
-    { id: "public_ats", ic: "🟢", name: "Public ATS boards", desc: "Greenhouse · Lever · Ashby", on: true },
-    { id: "extra_ats", ic: "🟦", name: "More ATS boards", desc: "Workable · SmartRecruiters · Recruitee", on: true },
-    { id: "sec_edgar", ic: "🏛️", name: "SEC EDGAR", desc: "Funding, IPO, M&A filings", on: true },
-    { id: "warn_notices", ic: "📉", name: "WARN notices", desc: "Official layoff filings", on: true },
-    { id: "usaspending", ic: "💵", name: "USAspending.gov", desc: "Federal contract awards", on: false },
-    { id: "hn_hiring", ic: "🧡", name: "HN Who is hiring", desc: "Monthly hiring thread", on: true },
-    { id: "github_org", ic: "🐙", name: "GitHub activity", desc: "Headcount + stack tells", on: false },
-    { id: "news_rss", ic: "📰", name: "News (Google RSS)", desc: "Funding, exec hires, expansion", on: true },
+  /* ---- signal types grouped by category (mirror registry.publicCategories) ----
+     Note: we expose WHAT the signals are, never WHICH sources provide them. ---- */
+  const SIGNAL_CATALOG = [
+    { category: "Capital & growth", motion: "business_dev", ic: "💰", types: [
+      { type: "funding_round", label: "Funding round", why: "New capital, new headcount, budget to fill it" },
+      { type: "ipo_or_s1", label: "IPO / S-1", why: "Public-company readiness, aggressive hiring" },
+      { type: "acquisition", label: "Acquisition", why: "Integration hiring + retention churn" },
+      { type: "grant_or_contract", label: "Grant / contract win", why: "Must staff up to deliver" },
+    ] },
+    { category: "Hiring intent", motion: "business_dev", ic: "📈", types: [
+      { type: "hiring_velocity", label: "Hiring surge", why: "A team stretched past capacity" },
+      { type: "job_repost", label: "Role reposted", why: "Struggling to fill, warm for help" },
+      { type: "job_posting", label: "New job posting", why: "A role is open right now" },
+    ] },
+    { category: "Leadership change", motion: "business_dev", ic: "👔", types: [
+      { type: "exec_hire", label: "New executive", why: "Rebuilds their org within 90 days" },
+      { type: "department_head_change", label: "New function lead", why: "Kicks off a team build-out" },
+    ] },
+    { category: "Footprint & strategy", motion: "business_dev", ic: "🌍", types: [
+      { type: "office_expansion", label: "Expansion", why: "Greenfield local team to build" },
+      { type: "market_entry", label: "New market", why: "Needs people who know the market" },
+      { type: "product_launch", label: "Product launch", why: "A team to build and sell it" },
+    ] },
+    { category: "Contraction", motion: "recruiting", ic: "📉", types: [
+      { type: "layoff", label: "Layoffs", why: "Great talent hits the market in batches" },
+      { type: "warn_notice", label: "WARN notice", why: "Dated, named, precise releases" },
+    ] },
+    { category: "Talent availability", motion: "recruiting", ic: "🧭", types: [
+      { type: "open_to_work", label: "Open to work", why: "The warmest candidate signal" },
+      { type: "tenure_milestone", label: "Tenure milestone", why: "When people quietly start looking" },
+      { type: "employer_distress", label: "Employer distress", why: "Their employer hit turbulence" },
+    ] },
   ];
 
   const INDUSTRIES = ["healthcare", "fintech", "saas", "ai_ml", "ecommerce", "cybersecurity", "edtech", "logistics", "climate"];
@@ -65,19 +87,39 @@
     return { function: fn, seniority: sen, isDecisionMaker: dm };
   }
 
+  /* ---- all signal types for a motion (flat) ---- */
+  const typesForMotion = (motion) =>
+    SIGNAL_CATALOG.filter(c => c.motion === motion).flatMap(c => c.types.map(t => t.type));
+
   /* ---- state ---- */
-  const state = { step: 1, sources: new Set(SOURCES.filter(s => s.on).map(s => s.id)),
-    motion: "business_dev", industries: new Set(), functions: new Set(["engineering"]),
+  const state = { step: 1, motion: "business_dev",
+    signalTypes: new Set(typesForMotion("business_dev")), // default: all signals for the motion
+    industries: new Set(), functions: new Set(["engineering"]),
     minSeniority: "vp", dmOnly: true, wantPhone: false, draft: null };
 
-  /* ---- step 1: sources ---- */
-  function renderSources() {
+  /* ---- step 1: signal-type picker (grouped by category, motion-aware) ---- */
+  function renderSignalPicker() {
     const g = $("#srcGrid"); g.innerHTML = "";
-    SOURCES.forEach(s => {
-      const card = el("div", "src" + (state.sources.has(s.id) ? " on" : ""));
-      card.innerHTML = `<span class="ic">${s.ic}</span><div><b>${s.name}</b><span>${s.desc}</span></div><span class="free">FREE</span>`;
-      card.addEventListener("click", () => { state.sources.has(s.id) ? state.sources.delete(s.id) : state.sources.add(s.id); renderSources(); });
-      g.appendChild(card);
+    SIGNAL_CATALOG.filter(c => c.motion === state.motion).forEach(cat => {
+      const head = el("div", null,
+        `<div style="display:flex;align-items:center;gap:8px;margin:14px 0 8px">
+           <span style="font-size:16px">${cat.ic}</span>
+           <b style="font-size:14px">${cat.category}</b>
+           <span class="free" style="margin-left:auto">always-on</span>
+         </div>`);
+      g.appendChild(head);
+      const grid = el("div", "src-grid");
+      cat.types.forEach(t => {
+        const on = state.signalTypes.has(t.type);
+        const card = el("div", "src" + (on ? " on" : ""));
+        card.innerHTML = `<span class="ic">📡</span><div><b>${t.label}</b><span>${t.why}</span></div>`;
+        card.addEventListener("click", () => {
+          state.signalTypes.has(t.type) ? state.signalTypes.delete(t.type) : state.signalTypes.add(t.type);
+          card.classList.toggle("on");
+        });
+        grid.appendChild(card);
+      });
+      g.appendChild(grid);
     });
   }
 
@@ -99,7 +141,7 @@
     const titleInc = $("#titleIncludes").value.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
     const locs = $("#locations").value.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
     const minSen = $("#minSeniority").value;
-    const pulled = SIGNALS.filter(s => state.sourceCovers(s)); // all seed signals "pulled"
+    const pulled = SIGNALS.filter(s => state.signalTypes.has(s.type)); // selected signal types
     const matched = pulled.filter(s => {
       if (s.motion !== state.motion) return false;
       if (state.industries.size && !state.industries.has(s.company.industry)) return false;
@@ -128,7 +170,6 @@
     return { pulled: pulled.length, matched: matched.length, targets,
       companies: new Set(targets.map(t => t.name)).size, people: 0, segments: segCount, cost };
   }
-  state.sourceCovers = () => true; // seed pool stands in for all enabled sources
 
   function reasonFor(s) {
     const e = s.evidence;
@@ -213,7 +254,11 @@
     else { state.draft = buildDraft(); renderReview(); renderSummary(); toast("Target list rebuilt"); }
   });
   $("#backBtn").addEventListener("click", () => showStep(Math.max(1, state.step - 1)));
-  $("#motion").addEventListener("change", e => { state.motion = e.target.value; });
+  $("#motion").addEventListener("change", e => {
+    state.motion = e.target.value;
+    state.signalTypes = new Set(typesForMotion(state.motion)); // select all for the new motion
+    renderSignalPicker();
+  });
   $("#minSeniority").addEventListener("change", e => { state.minSeniority = e.target.value; });
   $("#launchBtn").addEventListener("click", () => {
     const d = state.draft;
@@ -233,7 +278,7 @@
   function round(n) { return Math.round(n * 100) / 100; }
 
   /* ---- init ---- */
-  renderSources();
+  renderSignalPicker();
   renderChips($("#industryChips"), INDUSTRIES, state.industries);
   renderChips($("#functionChips"), FUNCTIONS, state.functions);
   wireToggle("#dmOnly", "dmOnly");

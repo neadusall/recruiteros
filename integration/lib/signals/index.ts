@@ -44,7 +44,10 @@ export {
   definitionsForMotion,
   definitionsInCategory,
   catalog,
+  publicCatalog,
+  publicCategories,
 } from "./registry";
+export type { PublicSignalDefinition } from "./registry";
 
 // Sources (connectors + the contract)
 export {

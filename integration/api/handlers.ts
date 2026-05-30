@@ -28,7 +28,8 @@ import {
 } from "./types";
 import { hasScope } from "./auth";
 import {
-  catalog,
+  publicCatalog,
+  publicCategories,
   collect,
   enrich,
   cheapFirstContactWaterfall,
@@ -68,13 +69,21 @@ export interface HandlerDeps {
 /* GET /v1/signals/catalog                                             */
 /* ------------------------------------------------------------------ */
 
-/** The catalog of every hiring signal RecruiterOS detects. Public-ish read. */
+/**
+ * The catalog of every hiring signal RecruiterOS detects — the customer-safe view. It
+ * exposes WHAT each signal is (type, label, category, why it matters, strength,
+ * freshness) but never WHICH sources/providers supply it. Pass `?grouped=1` for the
+ * category-grouped shape used by the UI's signal picker.
+ */
 export function getCatalog(req: AuthedRequest): ApiResponse {
   if (!hasScope(req.auth, "signals:read")) {
     return apiError(403, "forbidden", "Requires signals:read scope.");
   }
+  if (req.query.grouped === "1" || req.query.grouped === "true") {
+    return apiOk({ categories: publicCategories() });
+  }
   const motion = req.query.motion as ICP["motion"] | undefined;
-  const all = catalog();
+  const all = publicCatalog();
   const items = motion ? all.filter((d) => d.motion === motion) : all;
   return apiOk({ count: items.length, signals: items });
 }

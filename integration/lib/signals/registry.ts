@@ -549,7 +549,63 @@ export function definitionsInCategory(category: SignalDefinition["category"]): S
   return SIGNAL_DEFINITIONS.filter((d) => d.category === category);
 }
 
-/** The catalog as a plain array, for the public "what we watch" API endpoint. */
+/** The catalog as a plain array. INTERNAL — includes `emittedBy` (which sources
+ *  produce each signal). Do not return this from a customer-facing endpoint. */
 export function catalog(): SignalDefinition[] {
   return [...SIGNAL_DEFINITIONS];
+}
+
+/**
+ * A public-facing signal definition: what the signal IS, never who provides it. The
+ * `emittedBy` (source/provider) and `evidenceKeys` fields are stripped so the catalog can
+ * be exposed to customers without revealing the underlying data-source stack.
+ */
+export type PublicSignalDefinition = Omit<SignalDefinition, "emittedBy" | "evidenceKeys"> & {
+  /** Coarse, human label for the kind of signal, e.g. "Real-time". Generic by design. */
+  freshness: "real-time" | "daily" | "ongoing";
+};
+
+/** Generic freshness band derived from half-life — never names a source. */
+function freshnessOf(def: SignalDefinition): PublicSignalDefinition["freshness"] {
+  if (def.halfLifeHours <= 72) return "real-time";
+  if (def.halfLifeHours <= 24 * 21) return "daily";
+  return "ongoing";
+}
+
+/**
+ * The customer-safe catalog: signal type, label, category, motion, rationale, and a
+ * relative strength (0..1) — but NOT which providers supply it. Use this for any
+ * external "what we watch" surface (API, UI, docs).
+ */
+export function publicCatalog(): PublicSignalDefinition[] {
+  return SIGNAL_DEFINITIONS.map((d) => ({
+    type: d.type,
+    label: d.label,
+    category: d.category,
+    subject: d.subject,
+    motion: d.motion,
+    rationale: d.rationale,
+    baseWeight: d.baseWeight,
+    halfLifeHours: d.halfLifeHours,
+    freshness: freshnessOf(d),
+  }));
+}
+
+/** Signal categories with their member types — for grouped UI selection (no sources). */
+export function publicCategories(): Array<{
+  category: SignalDefinition["category"];
+  motion: SignalDefinition["motion"];
+  signals: Array<{ type: SignalType; label: string; rationale: string }>;
+}> {
+  const order: SignalDefinition["category"][] = [
+    "capital", "hiring_intent", "leadership", "footprint", "contraction", "people",
+  ];
+  return order.map((category) => {
+    const members = SIGNAL_DEFINITIONS.filter((d) => d.category === category);
+    return {
+      category,
+      motion: members[0]?.motion ?? "business_dev",
+      signals: members.map((d) => ({ type: d.type, label: d.label, rationale: d.rationale })),
+    };
+  });
 }
