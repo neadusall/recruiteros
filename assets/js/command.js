@@ -75,6 +75,7 @@
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New campaign", render: renderCampaigns },
+    studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
     content: { title: "Content Library", crumb: "Build", action: "＋ Add asset", render: renderContent },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
@@ -245,13 +246,63 @@
     var rows = savedRows + seedRows;
     if (!rows) rows = '<div class="empty">No ' + motion + " campaigns yet. Click ＋ New campaign to open the Studio.</div>";
     el.innerHTML = head("Campaigns", "The unit of work. Drag-and-drop multi-channel sequences, ICP, signals, and A/B variants in one place.") +
-      '<div class="btn-row" style="margin-bottom:14px"><a class="btn btn-primary btn-sm" href="campaign-studio.html?motion=' + motion + '">🧩 Open Campaign Studio</a>' +
+      '<div class="btn-row" style="margin-bottom:14px"><a class="btn btn-primary btn-sm" href="#studio">🧩 Open Campaign Studio</a>' +
       '<a class="btn btn-ghost btn-sm" href="campaign-builder.html">🧱 Target builder</a></div>' + rows;
 
-    // open a saved campaign in the Studio
+    // open a saved campaign in the embedded Studio (in-app route)
     Array.prototype.forEach.call(el.querySelectorAll("[data-open]"), function (card) {
-      card.addEventListener("click", function () { location.href = "campaign-studio.html?id=" + card.getAttribute("data-open"); });
+      card.addEventListener("click", function () { studioOpenId = card.getAttribute("data-open"); location.hash = "studio"; });
     });
+  }
+
+  /* ---------------- Campaign Studio (embedded drag-and-drop builder) ---------------- */
+  var studioOpenId = null; // set when opening a saved campaign from the Campaigns view
+
+  // Persistence the Studio writes through: localStorage is the source of truth so
+  // the static demo is fully alive; when LIVE it also upserts to the backend.
+  function studioStore() {
+    function all() { try { return JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); } catch (e) { return []; } }
+    return {
+      all: all,
+      save: function (c) {
+        var l = all().filter(function (x) { return x.id !== c.id; }); l.unshift(c);
+        localStorage.setItem("ros_campaigns", JSON.stringify(l));
+        if (LIVE) fetch(API + "/campaigns", { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(c) }).catch(function () {});
+      },
+      remove: function (id) {
+        localStorage.setItem("ros_campaigns", JSON.stringify(all().filter(function (x) { return x.id !== id; })));
+        if (LIVE) fetch(API + "/campaigns?id=" + encodeURIComponent(id), { method: "DELETE", credentials: "include" }).catch(function () {});
+      }
+    };
+  }
+
+  function renderStudio(el) {
+    if (typeof CampaignStudio === "undefined") { el.innerHTML = '<div class="empty">Campaign Studio failed to load.</div>'; return; }
+    var root = document.createElement("div");
+    el.appendChild(root);
+
+    // assignees = the workspace team; sending accounts = connected LinkedIn handles
+    var team = (SEED.team || []).map(function (m) { return m.isYou ? "You" : m.name; });
+    var assignees = team.concat(["BD desk", "Round-robin team", "Unassigned"]).filter(function (v, i, a) { return a.indexOf(v) === i; });
+    var accounts = SEED.accounts.linkedin.map(function (a) { return a.handle; }).concat(["auto-rotate"]);
+
+    CampaignStudio.mount(root, {
+      motion: motion === "bd" ? "bd" : "recruiting",
+      embedded: true,
+      openId: studioOpenId,
+      toast: toast,
+      assignees: assignees,
+      accounts: accounts,
+      store: studioStore(),
+      sendTestSms: function (to, body, done) {
+        if (LIVE) {
+          fetch(API + "/sms/send", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: to, text: body }) })
+            .then(function (r) { if (!r.ok) throw 0; done("Test SMS sent to " + to); })
+            .catch(function () { done("Could not send, check SMS setup in Connected"); });
+        } else done("Test SMS queued to " + to + " (demo)");
+      }
+    });
+    studioOpenId = null; // consumed
   }
 
   function renderOutreach(el) {
@@ -383,7 +434,7 @@
   /* ---------------- primary actions ---------------- */
   function primaryAction(key) {
     if (key === "team") { inviteRecruiter(); return; }
-    if (key === "campaigns") { location.href = "campaign-studio.html?motion=" + motion; return; }
+    if (key === "campaigns") { studioOpenId = null; location.hash = "studio"; return; }
     if (key === "connected") { SEED.integrations.forEach(function (i) { if (i.status === "yellow") i.status = "green"; }); render(); toast("Tested all connections"); return; }
     toast("Demo: " + key + " action. Wire to /api when the backend is deployed.");
   }

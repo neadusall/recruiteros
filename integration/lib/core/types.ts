@@ -58,6 +58,23 @@ export interface ChannelConfig {
   loxoListId?: string;           // ATS list to sync into
 }
 
+/**
+ * One step in a visually built sequence (the Campaign Studio drag-and-drop
+ * canvas). `key` identifies the block (e.g. "li_connect", "em_cold",
+ * "sms_send", "lg_delay"); `channel` routes the send; `delay` is the wait in
+ * days before the step fires; `cfg` holds the per-step config (subject, body,
+ * condition, A/B weights, assignee...).
+ */
+export interface SequenceStep {
+  uid: string;
+  key: string;
+  channel: Channel | "logic";
+  label: string;
+  ic?: string;
+  delay?: number;
+  cfg?: Record<string, unknown>;
+}
+
 /** A campaign: the unit of work for a targeting motion. */
 export interface Campaign {
   id: string;
@@ -74,6 +91,14 @@ export interface Campaign {
   dailyCap: number;
   status: "draft" | "active" | "paused";
   createdAt: string;
+  /** The visually built multi-channel sequence (Campaign Studio). Optional so
+   *  older signal-only campaigns stay valid. */
+  sequence?: SequenceStep[];
+  /** Who owns running this campaign (teammate name or "Round-robin team"). */
+  assignee?: string;
+  /** The sending account/handle this campaign uses (or "auto-rotate"). */
+  senderAccount?: string;
+  updatedAt?: string;
 }
 
 /** A person we are reaching: a BD buyer or a candidate. */

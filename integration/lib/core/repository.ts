@@ -19,6 +19,7 @@ export interface CoreRepository {
   getCampaign(id: string): Promise<Campaign | null>;
   listCampaigns(workspaceId: string): Promise<Campaign[]>;
   saveCampaign(c: Campaign): Promise<void>;
+  deleteCampaign(id: string): Promise<void>;
 
   // prospects
   getProspect(id: string): Promise<Prospect | null>;
@@ -46,6 +47,9 @@ class InMemoryCore implements CoreRepository {
   }
   async saveCampaign(c: Campaign) {
     this.campaigns.set(c.id, c);
+  }
+  async deleteCampaign(id: string) {
+    this.campaigns.delete(id);
   }
 
   async getProspect(id: string) {

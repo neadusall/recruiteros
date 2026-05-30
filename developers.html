@@ -167,7 +167,7 @@
         <div class="dev-panel" id="tab-webhooks">
           <div class="card">
             <h3>Webhooks</h3>
-            <p class="sub">Get a signed POST when a signal triggers or an enrichment finishes. Deliveries are HMAC-SHA256 signed with a per-hook secret, the same scheme as the Telnyx bridge.</p>
+            <p class="sub">Get a signed POST when a signal triggers or an enrichment finishes. Deliveries are HMAC-SHA256 signed with a per-hook secret.</p>
             <div id="hookList"></div>
             <div class="field"><label>Endpoint URL (https)</label><input id="hookUrl" placeholder="https://yourapp.com/webhooks/recruiteros" /></div>
             <div class="field"><label>Events</label>
@@ -203,7 +203,7 @@
           <div class="card">
             <h3>Quickstart</h3>
             <p class="sub">Enrich a hiring manager, cheapest-source-first, in one call.</p>
-            <div class="codeblock"><span class="c"># 1. Enrich a contact (free pattern → Icypeas → RapidAPI → verify)</span>
+            <div class="codeblock"><span class="c"># 1. Enrich a contact (cost-optimized waterfall, cheapest source first, verified)</span>
 curl https://api.recruiteros.co<span class="s">/v1/enrich</span> \
   -H <span class="s">"Authorization: Bearer rk_live_…"</span> \
   -H <span class="s">"Content-Type: application/json"</span> \

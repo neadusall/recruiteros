@@ -256,10 +256,17 @@
         blocks.forEach(function (b) {
           var item = el("div", "pal-block");
           item.draggable = true; item.dataset.key = b.key;
-          item.innerHTML = '<span class="pb-ic ch-' + b.channel + '">' + b.ic + '</span>' +
-            '<span class="pb-meta"><b>' + esc(b.label) + '</b><span>' + esc(b.desc) + '</span></span>';
+          item.title = "Drag onto the canvas, or click to add";
+          item.setAttribute("role", "button"); item.setAttribute("tabindex", "0");
+          item.innerHTML = '<span class="pb-grip" aria-hidden="true">⠿</span>' +
+            '<span class="pb-ic ch-' + b.channel + '">' + b.ic + '</span>' +
+            '<span class="pb-meta"><b>' + esc(b.label) + '</b><span>' + esc(b.desc) + '</span></span>' +
+            '<span class="pb-add" aria-hidden="true">＋</span>';
           item.addEventListener("dragstart", function (e) { drag = { type: "new", key: b.key }; item.classList.add("dragging"); e.dataTransfer.effectAllowed = "copy"; try { e.dataTransfer.setData("text/plain", b.key); } catch (x) {} });
           item.addEventListener("dragend", function () { item.classList.remove("dragging"); clearDrag(); });
+          // click-to-add (works on touch + when the palette can't be dragged)
+          item.addEventListener("click", function () { addBlock(b.key); });
+          item.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); addBlock(b.key); } });
           grp.appendChild(item);
         });
         wrap.appendChild(grp);
@@ -275,7 +282,17 @@
       var e = root.querySelector(".cs-empty"); if (e) e.classList.remove("drop-hot");
     }
     function indexOfUid(u) { for (var i = 0; i < state.steps.length; i++) if (state.steps[i].uid === u) return i; return -1; }
-    function insertStep(step, atIndex) { if (atIndex == null || atIndex > state.steps.length) atIndex = state.steps.length; state.steps.splice(atIndex, 0, step); state.selected = step.uid; renderCanvas(); }
+    function insertStep(step, atIndex) { if (atIndex == null || atIndex > state.steps.length) atIndex = state.steps.length; state.steps.splice(atIndex, 0, step); state.selected = step.uid; renderCanvas(); scrollToStep(step.uid); }
+    // Click-to-add: drop the block right after the selected step, else at the end.
+    function addBlock(key) {
+      var at = state.steps.length;
+      if (state.selected) { var i = indexOfUid(state.selected); if (i >= 0) at = i + 1; }
+      insertStep(mk(key), at);
+      toast(BLOCK[key].label + " added");
+    }
+    function scrollToStep(u) {
+      setTimeout(function () { var c = root.querySelector('.step[data-uid="' + u + '"]'); if (c && c.scrollIntoView) c.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, 30);
+    }
     function moveStep(u, toIndex) { var from = indexOfUid(u); if (from < 0) return; var step = state.steps.splice(from, 1)[0]; if (toIndex > from) toIndex--; state.steps.splice(Math.max(0, toIndex), 0, step); renderCanvas(); }
     function commitDrop(index) { if (!drag) return; if (drag.type === "new") insertStep(mk(drag.key), index); else if (drag.type === "move") moveStep(drag.uid, index); clearDrag(); }
     function attachDrop(node, indexFn) {
