@@ -629,10 +629,22 @@
         e.stepIndex++; store.save(); report.skipped++; return;
       }
 
+      // suppression: never contact unsubscribed / bounced / blacklisted leads
+      if (isBlacklisted(lead)) return stop(e, 'suppressed', report);
+
+      // choose the sending account. Email steps rotate across the campaign's
+      // mailboxes (cold-email inbox rotation); other channels use the bound account.
+      let useAcc = acc;
+      if (action.channel === 'email') {
+        const mb = pickEmailAccount(campaign, now);
+        if (mb) useAcc = mb;
+        else if (mb === null) { e.nextRunAt = now + DAY; e._lastHold = 'mailboxes_exhausted'; store.save(); report.deferred++; return; }
+      }
+
       // unified safety gate: working hours, weekend, per-action daily cap (warmup),
       // daily total ceiling, hourly anti-burst, weekly invite cap, pending cap.
-      if (acc) {
-        const verdict = limits.check(acc, meta.counts, now, { invite: meta.opensRelationship });
+      if (useAcc) {
+        const verdict = limits.check(useAcc, meta.counts, now, { invite: meta.opensRelationship });
         if (!verdict.allowed) {
           e.nextRunAt = verdict.retryAt || (now + HOUR);
           e._lastHold = verdict.reason;
@@ -645,7 +657,7 @@
       const adapter = adapterFor(action.channel);
       let result;
       try {
-        result = adapter.execute({ channel: action.channel, type: action.type, ...rendered }, { lead, account: acc, rng });
+        result = adapter.execute({ channel: action.channel, type: action.type, ...rendered }, { lead, account: useAcc, rng });
       } catch (err) {
         result = { ok: false, status: STATUS.event.FAILED, info: err.message };
       }
@@ -658,14 +670,23 @@
       }
 
       // success — record, count (per-action + daily total + hourly), schedule outcomes
-      if (acc) {
-        store.bump(acc.id, limits.dateStr(now), meta.counts, 1);
-        store.bump(acc.id, limits.dateStr(now), '__total', 1);
-        store.bump(acc.id, limits.dateHour(now), '__total', 1);
+      if (useAcc) {
+        store.bump(useAcc.id, limits.dateStr(now), meta.counts, 1);
+        store.bump(useAcc.id, limits.dateStr(now), '__total', 1);
+        store.bump(useAcc.id, limits.dateHour(now), '__total', 1);
       }
       e._lastChannel = action.channel;
-      logEvent(e, { type: action.type, channel: action.channel, status: STATUS.event.SENT, at: now, subject: rendered.subject, body: rendered.body, info: result.info });
+      e._lastAccountId = useAcc ? useAcc.id : null;
+      logEvent(e, { type: action.type, channel: action.channel, accountId: useAcc ? useAcc.id : null, status: STATUS.event.SENT, at: now, subject: rendered.subject, body: rendered.body, info: result.info });
       report.sent++;
+
+      // email bounce -> suppress + stop (deliverability protection)
+      if (result.bounced) {
+        logEvent(e, { type: 'bounce', channel: 'email', status: 'bounced', at: now, info: 'Hard bounce' });
+        suppress(lead.email, 'bounced');
+        report.bounced = (report.bounced || 0) + 1;
+        return stop(e, 'bounced', report);
+      }
 
       if (meta.opensRelationship) {
         e.connectionSent = true;
@@ -673,12 +694,13 @@
       }
       if (result.willReply) e._pendingReply = { at: now + (result.replyInMs || DAY) };
       if (result.opened) logEvent(e, { type: 'open', channel: action.channel, status: 'opened', at: now + 1 * HOUR, info: 'Email opened' });
+      if (result.clicked) logEvent(e, { type: 'click', channel: action.channel, status: 'clicked', at: now + 90 * MINUTE, info: 'Link clicked' });
 
       ensureThreadMessage(e, action, rendered, now);
 
       // advance, with a human-like random delay before the next step fires
       e.stepIndex++;
-      e.nextRunAt = now + (acc ? limits.randomDelayMs(acc, rng) : 5 * MINUTE);
+      e.nextRunAt = now + (useAcc ? limits.randomDelayMs(useAcc, rng) : 5 * MINUTE);
       if (e.stepIndex >= steps.length) return complete(e, report);
       store.save();
     }
