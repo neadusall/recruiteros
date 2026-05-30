@@ -752,3 +752,131 @@ footer { border-top: 1px solid var(--border); padding: 60px 0 40px; }
   .mini-row { grid-template-columns: 1.6fr 1.4fr 1fr; }
   .mini-cell:nth-child(4), .mini-cell:nth-child(5) { display: none; }
 }
+
+/* ============================================================
+   COMMERCIAL-GRADE POLISH LAYER (SaaS standard)
+   Appended: applies uniformly to every page via styles.css
+   ============================================================ */
+
+/* --- Accessibility: visible focus rings for keyboard users --- */
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--brand-2);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+:focus:not(:focus-visible) { outline: none; }
+
+/* --- Text selection --- */
+::selection { background: rgba(124, 92, 255, 0.35); color: #fff; }
+
+/* --- Refined custom scrollbar --- */
+* { scrollbar-width: thin; scrollbar-color: rgba(124,92,255,0.45) transparent; }
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(124,92,255,0.55), rgba(77,208,255,0.45));
+  border: 3px solid var(--bg);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, rgba(124,92,255,0.8), rgba(77,208,255,0.7)); }
+
+/* --- Scroll progress bar (top of viewport) --- */
+.scroll-progress {
+  position: fixed; top: 0; left: 0; height: 3px; width: 0%;
+  background: var(--grad); z-index: 200; pointer-events: none;
+  box-shadow: 0 0 12px rgba(124,92,255,0.7);
+  transition: width .08s linear;
+}
+
+/* --- Sticky nav gains depth once you scroll --- */
+.nav { transition: background .25s ease, box-shadow .25s ease, border-color .25s ease; }
+.nav.scrolled {
+  background: rgba(10, 10, 18, 0.86);
+  box-shadow: 0 10px 34px -22px rgba(0,0,0,0.9);
+  border-bottom-color: var(--border-strong);
+}
+
+/* --- Primary button: sheen sweep on hover --- */
+.btn-primary { position: relative; overflow: hidden; }
+.btn-primary::after {
+  content: ""; position: absolute; top: 0; left: -130%; width: 60%; height: 100%;
+  background: linear-gradient(110deg, transparent, rgba(255,255,255,0.45), transparent);
+  transform: skewX(-18deg); transition: left .55s ease;
+}
+.btn-primary:hover::after { left: 140%; }
+
+/* --- Card lift consistency for feature/quote/plan/step/pillar --- */
+.feature-card, .quote, .plan, .step, .pillar, .feat-module, .provider, .rstat, .stat {
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease, background .2s ease;
+}
+.quote:hover, .step:hover, .rstat:hover {
+  transform: translateY(-4px);
+  border-color: var(--border-strong);
+  box-shadow: 0 18px 40px -28px rgba(0,0,0,0.85);
+}
+
+/* --- Mobile nav: hamburger + slide-in drawer --- */
+.nav-toggle {
+  display: none; width: 42px; height: 42px; border-radius: 11px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border-strong);
+  align-items: center; justify-content: center; flex-direction: column; gap: 4px;
+}
+.nav-toggle span { display: block; width: 18px; height: 2px; background: var(--text); border-radius: 2px; transition: transform .25s, opacity .25s; }
+body.nav-open .nav-toggle span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+body.nav-open .nav-toggle span:nth-child(2) { opacity: 0; }
+body.nav-open .nav-toggle span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+.nav-scrim {
+  position: fixed; inset: 0; background: rgba(5,5,10,0.6); backdrop-filter: blur(2px);
+  opacity: 0; visibility: hidden; transition: opacity .25s; z-index: 90;
+}
+body.nav-open .nav-scrim { opacity: 1; visibility: visible; }
+
+@media (max-width: 980px) {
+  .nav-toggle { display: flex; }
+  .nav-cta { display: none; }
+  .nav-links {
+    position: fixed; top: 0; right: 0; height: 100dvh; width: min(86vw, 360px);
+    flex-direction: column; align-items: stretch; gap: 4px;
+    background: var(--bg-soft); border-left: 1px solid var(--border-strong);
+    padding: 84px 18px 28px; z-index: 95; overflow-y: auto;
+    transform: translateX(100%); transition: transform .3s cubic-bezier(.4,0,.2,1);
+    box-shadow: -30px 0 60px -30px rgba(0,0,0,0.9);
+  }
+  body.nav-open .nav-links { transform: translateX(0); }
+  .nav-links > a, .nav-links .has-drop > a {
+    display: block; padding: 14px 14px; border-radius: 11px; font-size: 16px;
+    border: 1px solid transparent;
+  }
+  .nav-links > a:hover, .nav-links .has-drop > a:hover { background: rgba(255,255,255,0.05); }
+  /* show OS sub-links inline (flatten the mega menu on mobile) */
+  .has-drop .drop.os-mega {
+    position: static; display: block; opacity: 1; visibility: visible; transform: none;
+    width: auto; background: transparent; border: none; box-shadow: none; padding: 4px 0 10px 10px;
+  }
+  .drop.os-mega .os-feature { display: none !important; }
+  .drop.os-mega .os-cols { display: block; }
+  .drop.os-mega .os-cols .mcol + .mcol { border-left: none; padding-left: 0; }
+  .drop.os-mega a:not(.os-feature) { font-size: 14px; padding: 9px 10px; }
+  .nav-mobile-cta { display: grid; gap: 10px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+  .nav-mobile-cta .btn { width: 100%; justify-content: center; }
+}
+
+/* --- Honor reduced-motion globally --- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .reveal { opacity: 1 !important; transform: none !important; }
+}
+
+/* --- Image rendering + lazy media polish --- */
+img { height: auto; }
+
+/* --- Print: clean, ink-friendly --- */
+@media print {
+  .aurora, .grid-bg, .noise, .scroll-progress, .nav, footer { display: none !important; }
+  body { background: #fff; color: #000; }
+}

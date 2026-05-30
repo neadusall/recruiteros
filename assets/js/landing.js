@@ -1,5 +1,59 @@
 /* RecruiterOS, landing interactions + FX */
 (function () {
+  /* ---------- Scroll progress bar ---------- */
+  const progress = document.createElement('div');
+  progress.className = 'scroll-progress';
+  document.body.appendChild(progress);
+
+  /* ---------- Sticky nav shadow on scroll ---------- */
+  const navEl = document.querySelector('.nav');
+  function onScroll() {
+    const st = window.scrollY || document.documentElement.scrollTop;
+    if (navEl) navEl.classList.toggle('scrolled', st > 12);
+    const docH = document.documentElement.scrollHeight - window.innerHeight;
+    progress.style.width = (docH > 0 ? (st / docH) * 100 : 0) + '%';
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  /* ---------- Mobile nav drawer (injected, no per-page HTML) ---------- */
+  (function mobileNav() {
+    const inner = document.querySelector('.nav .nav-inner');
+    const links = document.querySelector('.nav .nav-links');
+    if (!inner || !links) return;
+
+    const toggle = document.createElement('button');
+    toggle.className = 'nav-toggle';
+    toggle.setAttribute('aria-label', 'Open menu');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.innerHTML = '<span></span><span></span><span></span>';
+    inner.appendChild(toggle);
+
+    const scrim = document.createElement('div');
+    scrim.className = 'nav-scrim';
+    document.body.appendChild(scrim);
+
+    // Mirror the header CTAs into the drawer so mobile users can act.
+    const cta = document.querySelector('.nav .nav-cta');
+    if (cta && !links.querySelector('.nav-mobile-cta')) {
+      const wrap = document.createElement('div');
+      wrap.className = 'nav-mobile-cta';
+      wrap.innerHTML = cta.innerHTML;
+      links.appendChild(wrap);
+    }
+
+    function setOpen(open) {
+      document.body.classList.toggle('nav-open', open);
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+    }
+    toggle.addEventListener('click', () => setOpen(!document.body.classList.contains('nav-open')));
+    scrim.addEventListener('click', () => setOpen(false));
+    links.addEventListener('click', (e) => { if (e.target.tagName === 'A') setOpen(false); });
+    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
+    window.addEventListener('resize', () => { if (window.innerWidth > 980) setOpen(false); });
+  })();
+
   /* ---------- Reveal-on-scroll ---------- */
   const io = new IntersectionObserver(
     (entries) => {
@@ -46,7 +100,7 @@
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const q = encodeURIComponent(input.value.trim());
-      window.location.href = 'app.html' + (q ? '?q=' + q : '');
+      window.location.href = 'command.html' + (q ? '?q=' + q : '');
     });
   }
 

@@ -19,15 +19,32 @@
   function saveSim(t) { localStorage.setItem(SIM_KEY, String(t)); }
   let simNow = loadSim();
 
-  // seed a realistic demo on first run, then enroll its leads
+  // Start clean: a real, empty workspace with one starter campaign and NO fake
+  // leads. (Sample data is available on demand from the sidebar.)
   (function bootstrap() {
     if (!store.all('campaigns').length) {
-      const seeded = A.seedDemo(store, simNow - 8 * DAY); // start campaign 8 days "ago"
-      engine.enroll(seeded.campaign.id, seeded.leads.map(l => l.id), simNow - 8 * DAY);
-      engine.fastForward(simNow - 8 * DAY, simNow, 6 * HOUR); // warm it up so there's live data
+      const acc = store.all('channelAccounts')[0] || store.insert('channelAccounts', A.build.channelAccount('linkedin', 'My LinkedIn', { createdAt: simNow }));
+      const c = store.insert('campaigns', A.build.campaign({ name: 'My first campaign', status: 'draft', channelAccountIds: [acc.id] }));
+      const seq = store.insert('sequences', A.build.sequence(c.id, [
+        A.build.actionStep('linkedin', 'view'),
+        A.build.delayStep(1, 'days'),
+        A.build.actionStep('linkedin', 'connect', { body: 'Hi {first_name}, would love to connect.' }),
+        A.build.delayStep(2, 'days'),
+        A.build.actionStep('linkedin', 'message', { body: 'Thanks for connecting, {first_name}!', requireAccepted: true }),
+      ]));
+      store.update('campaigns', c.id, { sequenceId: seq.id });
       saveSim(simNow);
     }
   })();
+  function loadSampleData() {
+    const seeded = A.seedDemo(store, simNow - 8 * DAY);
+    if (seeded && seeded.campaign) {
+      engine.enroll(seeded.campaign.id, seeded.leads.map(l => l.id), simNow - 8 * DAY);
+      engine.fastForward(simNow - 8 * DAY, simNow, 6 * HOUR);
+      activeCampaignId = seeded.campaign.id;
+    }
+    renderAll(); toast('Sample campaign loaded for preview');
+  }
 
   /* ---- small helpers ---- */
   const $ = (s, r = document) => r.querySelector(s);
@@ -60,10 +77,23 @@
   /* ============================================================
      RENDER — top-level dispatcher
      ============================================================ */
+  function updateMode() {
+    const banner = $('#modeBanner'); if (!banner) return;
+    const c = campaign();
+    const reachable = window.StudioExt && window.StudioExt.env().canReach;
+    if (c && c._liveRoute && reachable) {
+      banner.style.borderColor = 'rgba(56,224,166,.35)';
+      banner.innerHTML = '🟢 <b>Live.</b> This campaign\'s LinkedIn steps run through your real account via the browser extension, with throttles and working hours enforced. The Test clock does not affect live sending.';
+    } else {
+      banner.style.borderColor = '';
+      banner.innerHTML = '🧪 <b>Test mode.</b> Actions are simulated so you can build and preview safely. To send for real, open the <b>LinkedIn Live</b> tab, connect the extension, link your account, then enable "Route this campaign through my real account".';
+    }
+  }
   function renderAll() {
     $('#simNow').textContent = '🕐 ' + fmtDate(simNow);
     renderCampaigns();
     renderHeader();
+    updateMode();
     renderTab(activeTab);
   }
   function renderTab(name) {
@@ -238,6 +268,19 @@
     $('#leadCount').textContent = leads.length + ' leads · ' + store.where('enrollments', e => e.campaignId === activeCampaignId).length + ' enrolled in this campaign';
     const enrolledLeadIds = new Set(store.where('enrollments', e => e.campaignId === activeCampaignId).map(e => e.leadId));
     const t = $('#leadsTable');
+    if (!leads.length) {
+      t.innerHTML = `<tbody><tr><td><div class="empty"><div class="big">🎯</div><h3>No leads yet</h3>
+        <p>Bring people in to start outreach. Three ways:</p>
+        <div class="row" style="justify-content:center;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <button class="a-btn primary sm" id="empSrc">⚡ Source from Sales Navigator</button>
+          <button class="a-btn sm" id="empImp">⇪ Import a CSV</button>
+          <button class="a-btn sm" id="empAdd">+ Add one manually</button>
+        </div></div></td></tr></tbody>`;
+      $('#empSrc') && $('#empSrc').addEventListener('click', () => $('#sourceSalesNav').click());
+      $('#empImp') && $('#empImp').addEventListener('click', () => $('#importLeads').click());
+      $('#empAdd') && $('#empAdd').addEventListener('click', () => $('#addLead').click());
+      return;
+    }
     t.innerHTML = `<thead><tr>
       <th style="width:30px"><input type="checkbox" id="lAll"></th>
       <th>Lead</th><th>Company</th><th>Title</th><th>Location</th><th>°</th><th>In campaign</th>
@@ -498,10 +541,17 @@
     const c = campaign(); if (!c) return;
     const seq = sequence();
     if (!seq || !seq.steps.length) { toast('Add sequence steps first', 'warn'); return; }
+    if (!store.all('leads').length) { toast('Add leads first (Leads tab)', 'warn'); switchTab('leads'); return; }
+    const live = c._liveRoute && window.StudioExt && window.StudioExt.env().canReach;
+    const n = store.all('leads').filter(l => !store.where('enrollments', e => e.campaignId === c.id && e.leadId === l.id).length).length;
+    if (live) {
+      if (!confirm('Launch LIVE? ' + n + ' leads will be enrolled and their LinkedIn steps will run through your real account, respecting your throttles and working hours. Continue?')) return;
+    } else {
+      if (n && !confirm('Launch in Test mode? ' + n + ' leads will be enrolled and simulated (no real sends). Turn on Live in the LinkedIn Live tab to send for real.')) return;
+    }
     engine.activateCampaign(c.id);
-    const all = store.all('leads').map(l => l.id);
-    const created = engine.enroll(c.id, all, simNow);
-    renderAll(); toast(created.length + ' new leads enrolled · campaign live');
+    const created = engine.enroll(c.id, store.all('leads').map(l => l.id), live ? Date.now() : simNow);
+    renderAll(); toast(created.length + ' enrolled · campaign ' + (live ? 'LIVE' : 'in test mode'));
   });
 
   function newCampaign() {
@@ -517,9 +567,10 @@
   $('#newCampaign').addEventListener('click', newCampaign);
   $('#topNewCampaign').addEventListener('click', (e) => { e.preventDefault(); newCampaign(); });
   $('#resetData').addEventListener('click', () => {
-    if (!confirm('Reset all studio data and reseed the demo?')) return;
+    if (!confirm('Reset this workspace? This clears all campaigns, leads, and history in your browser.')) return;
     store.reset(); localStorage.removeItem(SIM_KEY); location.reload();
   });
+  $('#loadSample') && $('#loadSample').addEventListener('click', loadSampleData);
 
   $$('[data-ff]').forEach(b => b.addEventListener('click', () => {
     const days = +b.dataset.ff; const to = simNow + days * DAY;
