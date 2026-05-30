@@ -21,10 +21,77 @@ pull(sources) → dedupe + corroborate → roll-up velocity → match + score (I
 | `types.ts` | Domain types + the full `SignalType` taxonomy |
 | `registry.ts` | **The catalog** — one `SignalDefinition` per signal (weight, half-life, sources) |
 | `sources.ts` | Pluggable `SignalSource` connectors that emit raw signals |
+| `freeSources.ts` | **The $0 tier** — free/public connectors (more ATS, remote boards, HN, USAspending, GitHub, News RSS) |
 | `scoring.ts` | ICP disqualifiers + the 0..100 composite score |
+| `filters.ts` | Filter + segment by industry, job title, function, seniority, geo, size, stage |
 | `waterfall.ts` | Clay-style enrichment: ordered providers, first/best, with provenance |
+| `rapidapi.ts` | Cheap-first contact providers (RapidAPI + Icypeas) + verify, premium as backup |
+| `campaignBuilder.ts` | Organize free signals into a reviewable pre-launch campaign draft |
 | `collector.ts` | Orchestrates the whole loop and fires `onTrigger` |
 | `index.ts` | Public API barrel — import from here |
+
+## The $0 path (free signal coverage)
+
+`freeSources()` returns connectors that hit only public/unauthenticated endpoints, so the
+entire company-side picture can be assembled for nothing before any paid call:
+
+| Connector | Free source | Signals |
+|-----------|-------------|---------|
+| `ExtraAtsSource` | Workable · SmartRecruiters · Recruitee public boards | job_posting, hiring_velocity |
+| `RemoteBoardsSource` | Remotive / RemoteOK JSON | job_posting (remote) |
+| `HackerNewsHiringSource` | HN "Who is hiring" (Algolia + Firebase) | job_posting |
+| `UsaSpendingSource` | USAspending.gov awards | grant_or_contract |
+| `GitHubOrgSource` | GitHub REST API | headcount_growth, tech_stack_change |
+| `NewsRssSource` | Google News RSS | funding_round, exec_hire, layoff, expansion, M&A |
+
+Combine with the built-in `PublicAtsSource` (Greenhouse/Lever/Ashby), `EdgarSource`
+(SEC), and `WarnNoticeSource` (layoffs) for full free coverage.
+
+## Filtering + segmentation
+
+`filters.ts` shapes the target list over already-collected free signals, before spending:
+
+```ts
+import { applyFilter, segmentBy, classifyTitle } from "@/integration/lib/signals";
+
+const targeted = applyFilter(signals, {
+  industries: ["healthcare", "saas"],
+  functions: ["engineering"],
+  titleIncludes: ["VP", "Head of", "Director"],
+  decisionMakersOnly: true,
+  locations: ["US", "remote"],
+});
+
+segmentBy(targeted, "function"); // grouped buckets for the review screen
+classifyTitle("VP of Engineering"); // → { function: "engineering", seniority: "vp", isDecisionMaker: true }
+```
+
+Title intelligence normalizes "VP of Eng", "Head of Engineering", and "Engineering
+Director" to one function + seniority, so a single filter matches them all.
+
+## Build a campaign before you launch (free)
+
+`buildCampaign()` turns free signals into a reviewable `CampaignDraft` — targets,
+segments, stats, and an enrichment **cost estimate** — without spending anything. Approve
+the draft, then `planLaunch()` emits the enrichment jobs + signal-grounded outreach seeds.
+
+```ts
+import { buildCampaign, planLaunch } from "@/integration/lib/signals";
+
+const draft = buildCampaign(freeSignals, {
+  name: "Series B healthcare · Eng leadership",
+  icp,
+  filter: { industries: ["healthcare"], functions: ["engineering"], decisionMakersOnly: true },
+  now: new Date().toISOString(),
+  maxTargets: 100,
+});
+
+draft.stats;        // signalsMatched, companies, people, top industries
+draft.costEstimate; // emailsToFind, est $ to enrich the whole list (cheap-first)
+const plan = planLaunch(draft); // enrichmentJobs[] + outreachSeeds[] once approved
+```
+
+Over the API: `POST /v1/campaigns/build` runs this end to end (free sources by default).
 
 ## The signal catalog (what we watch)
 

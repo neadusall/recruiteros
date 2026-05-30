@@ -39,6 +39,7 @@ interface Route {
 const ROUTES: Route[] = [
   { method: "GET", path: "/v1/signals/catalog", run: getCatalog },
   { method: "POST", path: "/v1/signals/collect", run: postCollect },
+  { method: "POST", path: "/v1/campaigns/build", run: postBuildCampaign },
   { method: "POST", path: "/v1/signals/ingest", run: postIngest },
   { method: "POST", path: "/v1/enrich", run: postEnrich },
   { method: "GET", path: "/v1/config", run: getConfig },

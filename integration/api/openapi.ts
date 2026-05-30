@@ -104,6 +104,44 @@ export const OPENAPI = {
         responses: { "200": { description: "Scored work-list + triggers" } },
       },
     },
+    "/v1/campaigns/build": {
+      post: {
+        summary: "Organize FREE signals into a reviewable campaign draft before launch",
+        description:
+          "Pulls from free/public sources, applies an industry/job-title filter, ranks " +
+          "and segments targets, and returns a cost estimate — without spending on enrichment.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  icp: { $ref: "#/components/schemas/ICP" },
+                  filter: {
+                    type: "object",
+                    properties: {
+                      industries: { type: "array", items: { type: "string" } },
+                      functions: { type: "array", items: { type: "string" } },
+                      titleIncludes: { type: "array", items: { type: "string" } },
+                      minSeniority: { type: "string" },
+                      decisionMakersOnly: { type: "boolean" },
+                      locations: { type: "array", items: { type: "string" } },
+                    },
+                  },
+                  watchlist: { type: "object" },
+                  maxTargets: { type: "integer" },
+                  wantPhone: { type: "boolean" },
+                },
+                required: ["name", "icp", "filter"],
+              },
+            },
+          },
+        },
+        responses: { "200": { description: "A reviewable CampaignDraft with targets, segments, and cost estimate" } },
+      },
+    },
     "/v1/signals/ingest": {
       post: {
         summary: "Push your own signal into RecruiterOS",

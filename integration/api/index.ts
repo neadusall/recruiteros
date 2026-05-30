@@ -26,6 +26,7 @@ export {
 export {
   getCatalog,
   postCollect,
+  postBuildCampaign,
   postIngest,
   postEnrich,
   getConfig,
