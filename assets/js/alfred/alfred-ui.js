@@ -289,7 +289,7 @@
       const e = store.where('enrollments', x => x.campaignId === activeCampaignId && x.leadId === l.id)[0];
       return `<tr>
         <td><input type="checkbox" data-lead="${l.id}" ${leadSel.has(l.id) ? 'checked' : ''}></td>
-        <td><span class="av"><span class="avatar2" style="background:${colorFor(l.fullName)}">${initials(l.fullName)}</span>${esc(l.fullName)}</span></td>
+        <td><span class="av"><span class="avatar2" style="background:${colorFor(l.fullName)}">${initials(l.fullName)}</span><span>${esc(l.fullName)}${(l.tags && l.tags.length) ? '<br>' + l.tags.map(tg => `<span class="tag">${esc(tg)}</span>`).join('') : ''}</span></span></td>
         <td>${esc(l.company)}</td><td class="dim">${esc(l.position || l.headline)}</td><td class="dim">${esc(l.location)}</td>
         <td><span class="deg">${esc(l.degree || '')}</span></td>
         <td>${enr ? `<span class="pillbar ${e.status==='replied'?'ok':e.status==='stopped'?'bad':'info'}">${e.status}</span>` : '<span class="dim">—</span>'}</td>
@@ -308,10 +308,11 @@
       <div class="a-field" style="flex:1"><label class="a-label">Title</label><input class="a-input" id="mTi"></div></div>
       <div class="a-field"><label class="a-label">Email</label><input class="a-input" id="mEm"></div>
       <div class="a-field"><label class="a-label">LinkedIn URL</label><input class="a-input" id="mUrl"></div>
+      <div class="a-field"><label class="a-label">Tags (comma-separated)</label><input class="a-input" id="mTags" placeholder="cto, fintech, warm-intro"></div>
       <div class="modal-foot"><button class="a-btn ghost" id="mCancel">Cancel</button><button class="a-btn primary" id="mSave">Add lead</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', () => {
-      const l = A.build.lead({ firstName: $('#mFn').value.trim(), lastName: $('#mLn').value.trim(), company: $('#mCo').value.trim(), position: $('#mTi').value.trim(), email: $('#mEm').value.trim(), profileUrl: $('#mUrl').value.trim(), source: 'manual' });
+      const l = A.build.lead({ firstName: $('#mFn').value.trim(), lastName: $('#mLn').value.trim(), company: $('#mCo').value.trim(), position: $('#mTi').value.trim(), email: $('#mEm').value.trim(), profileUrl: $('#mUrl').value.trim(), tags: $('#mTags').value.split(',').map(s => s.trim()).filter(Boolean), source: 'manual' });
       if (!l.fullName) { toast('Name required', 'warn'); return; }
       store.insert('leads', l); closeModal(); renderLeads(); toast('Lead added');
     });
