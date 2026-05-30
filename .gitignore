@@ -15,3 +15,4 @@ desktop.ini
 # build output (if a bundler is ever added)
 dist/
 .cache/
+.git-commit-msg.txt
