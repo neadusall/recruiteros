@@ -17,6 +17,7 @@ import { authenticate, type KeyStore } from "./auth";
 import {
   getCatalog,
   postCollect,
+  postBuildCampaign,
   postIngest,
   postEnrich,
   getConfig,

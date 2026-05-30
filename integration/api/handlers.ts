@@ -34,7 +34,10 @@ import {
   cheapFirstContactWaterfall,
   memoryStores,
   WebhookSource,
+  freeSources,
+  buildCampaign,
   type ICP,
+  type SignalFilter,
   type CollectReport,
   type EnrichmentReport,
 } from "../lib/signals";
@@ -147,6 +150,59 @@ export async function postIngest(req: AuthedRequest, deps: HandlerDeps): Promise
   }
   if (deps.ingestSignal) await deps.ingestSignal(req.auth.workspaceId, signal);
   return apiOk({ accepted: true, signal }, 202);
+}
+
+/* ------------------------------------------------------------------ */
+/* POST /v1/campaigns/build                                            */
+/* ------------------------------------------------------------------ */
+
+interface BuildBody {
+  name: string;
+  icp: ICP;
+  filter: SignalFilter;
+  watchlist?: { domains?: string[]; companyNames?: string[]; locations?: string[]; keywords?: string[] };
+  maxTargets?: number;
+  wantPhone?: boolean;
+  /** When true, only free sources are polled (default) — assemble the list for $0. */
+  freeOnly?: boolean;
+}
+
+/**
+ * Organize FREE signals into a reviewable campaign draft BEFORE launch. Pulls from the
+ * free/public connectors, applies the industry/job-title filter, ranks, segments, and
+ * returns the target list + cost estimate — all without spending on enrichment.
+ */
+export async function postBuildCampaign(req: AuthedRequest, deps: HandlerDeps): Promise<ApiResponse> {
+  if (!hasScope(req.auth, "signals:read")) {
+    return apiError(403, "forbidden", "Requires signals:read scope.");
+  }
+  const body = req.body as BuildBody | undefined;
+  if (!body?.icp || !body?.filter || !body?.name) {
+    return apiError(400, "invalid_request", "Body must include { name, icp, filter }.");
+  }
+  const stores = memoryStores();
+  let collected: CollectReport;
+  try {
+    collected = await collect({
+      icp: body.icp,
+      now: deps.now(),
+      sources: body.freeOnly === false ? undefined : freeSources(),
+      pull: { watchlist: body.watchlist, limit: 300 },
+      cursors: stores.cursors,
+      seen: stores.seen,
+    });
+  } catch (err) {
+    return apiError(502, "collect_failed", (err as Error).message);
+  }
+  const draft = buildCampaign(collected.ranked, {
+    name: body.name,
+    icp: body.icp,
+    filter: body.filter,
+    now: deps.now(),
+    maxTargets: body.maxTargets ?? 100,
+    wantPhone: body.wantPhone,
+  });
+  return apiOk({ draft, warnings: collected.warnings });
 }
 
 /* ------------------------------------------------------------------ */

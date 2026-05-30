@@ -1,44 +1,57 @@
 /* ============================================================
    Shared message protocol — the integration contract.
-   Loaded in BOTH the content script (window scope) and the
-   service worker (self scope, via importScripts). Defines the
-   message types every layer agrees on, so a host outreach tool
-   can talk to this extension without reading any other file.
+   Loaded in BOTH content scripts (window) and the service
+   worker (self, via importScripts). Every layer agrees on these
+   message types, so a host outreach tool can talk to the
+   extension without reading any other file.
    ============================================================ */
 (function (g) {
   'use strict';
 
-  // Message types. Direction noted as: who SENDS → who HANDLES.
   const TYPE = {
-    // host page / popup → background
-    PING:            'ros.ping',             // health check → { ok, version, account }
-    GET_STATE:       'ros.getState',         // → { queue, counts, settings, connected }
-    UPDATE_SETTINGS: 'ros.updateSettings',   // { settings }
-    ENQUEUE:         'ros.enqueue',          // { action } push one action onto the queue
-    ENQUEUE_BATCH:   'ros.enqueueBatch',     // { actions:[] }
-    SET_RUNNING:     'ros.setRunning',       // { running:boolean }
+    // host page / popup -> background
+    PING:            'ros.ping',
+    GET_STATE:       'ros.getState',
+    UPDATE_SETTINGS: 'ros.updateSettings',
+    CONNECT_ACCOUNT: 'ros.connectAccount',   // detect the logged-in LinkedIn user
+    SET_LIVE:        'ros.setLive',          // { live:boolean } real actions on/off
+    ENQUEUE:         'ros.enqueue',
+    ENQUEUE_BATCH:   'ros.enqueueBatch',
+    SET_RUNNING:     'ros.setRunning',
     CLEAR_QUEUE:     'ros.clearQueue',
+    TEST_ACTION:     'ros.testAction',       // run one action on the active tab now
 
-    // background → content script (active LinkedIn tab)
-    SCRAPE_PROFILE:  'ros.scrapeProfile',    // → ProfileRecord
-    SCRAPE_SEARCH:   'ros.scrapeSearch',     // → ProfileRecord[]
-    DO_ACTION:       'ros.doAction',         // { action } → ActionResult
+    // scraping (Sales Navigator)
+    SCRAPE_START:    'ros.scrapeStart',      // { url, maxPages, name } start a job
+    SCRAPE_PAGE:     'ros.scrapePage',       // content -> bg: one page of records
+    SCRAPE_PROGRESS: 'ros.scrapeProgress',   // bg -> popup (via state)
+    SCRAPE_STOP:     'ros.scrapeStop',
+    GET_DATASETS:    'ros.getDatasets',      // -> [{id,name,count,...}]
+    GET_DATASET:     'ros.getDataset',       // { id } -> full records
+    DELETE_DATASET:  'ros.deleteDataset',    // { id }
+    EXPORT_CSV:      'ros.exportCsv',        // { id } -> triggers a download
+    DATASET_TO_CAMPAIGN: 'ros.datasetToCampaign', // { id, campaignName }
 
-    // content script → background / host (events)
-    CAPTURE_LEAD:    'ros.captureLead',      // user clicked "capture" overlay → ProfileRecord
-    ACTION_RESULT:   'ros.actionResult',     // { action, result }
-    LOG:             'ros.log',              // { level, msg }
+    // background -> content (active LinkedIn tab)
+    GET_IDENTITY:    'ros.getIdentity',      // -> { name, publicId, ... }
+    SCRAPE_THIS:     'ros.scrapeThis',       // scrape the search page the tab is on
+    SCRAPE_ONE_PAGE: 'ros.scrapeOnePage',    // dry-run: scrape current page only
+    DO_ACTION:       'ros.doAction',         // { action } -> ActionResult
+
+    // content -> background (events)
+    CAPTURE_LEAD:    'ros.captureLead',
+    IDENTITY:        'ros.identity',
+    LOG:             'ros.log',
   };
 
-  // Canonical action shape the engine/adapter emit and the content script executes.
-  //   { id, type, channel:'linkedin', target:{ profileUrl, name }, payload:{ note?, subject?, body? }, meta:{} }
   const CHANNEL = 'linkedin';
-
-  // LinkedIn action verbs supported by the content script (maps 1:1 to Alfred engine).
   const ACTION = {
     VIEW: 'view', FOLLOW: 'follow', ENDORSE: 'endorse',
     CONNECT: 'connect', MESSAGE: 'message', INMAIL: 'inmail', LIKE: 'like',
   };
+
+  // Columns a scraped Sales Nav person carries (and the CSV header order).
+  const LEAD_FIELDS = ['fullName', 'firstName', 'lastName', 'headline', 'title', 'company', 'location', 'profileUrl', 'salesNavUrl', 'connectionDegree', 'datasetName', 'capturedAt'];
 
   function makeAction(type, target, payload, meta) {
     return {
@@ -49,7 +62,6 @@
     };
   }
 
-  // Promise wrapper over chrome.runtime.sendMessage (works in popup + content).
   function send(msg) {
     return new Promise((resolve) => {
       try {
@@ -61,5 +73,5 @@
     });
   }
 
-  g.ROS = { TYPE, ACTION, CHANNEL, makeAction, send, VERSION: '0.1.0' };
+  g.ROS = { TYPE, ACTION, CHANNEL, LEAD_FIELDS, makeAction, send, VERSION: '0.2.0' };
 })(typeof self !== 'undefined' ? self : this);

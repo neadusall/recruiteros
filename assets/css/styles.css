@@ -566,6 +566,41 @@ footer { border-top: 1px solid var(--border); padding: 60px 0 40px; }
 .drop.mega a .di { font-size: 16px; width: 20px; text-align: center; flex: none; }
 @media (max-width: 900px) { .drop.mega { display: none; } }
 
+/* Two-OS mega menus (Recruiter OS / BD OS) */
+.drop.os-mega {
+  width: 720px; left: 0;
+  transform: translateX(0) translateY(8px);
+  display: grid; grid-template-columns: 232px 1fr; gap: 16px; padding: 16px;
+}
+.has-drop:hover .drop.os-mega { transform: translateX(0) translateY(0); }
+.os-feature {
+  display: flex !important; flex-direction: column; gap: 7px;
+  padding: 20px !important; border-radius: 14px;
+  background: linear-gradient(160deg, rgba(124,92,255,0.20), rgba(124,92,255,0.03));
+  border: 1px solid rgba(124,92,255,0.35);
+}
+.drop.os-mega.bd .os-feature {
+  background: linear-gradient(160deg, rgba(77,208,255,0.20), rgba(77,208,255,0.03));
+  border-color: rgba(77,208,255,0.35);
+}
+.os-feature:hover { background: linear-gradient(160deg, rgba(124,92,255,0.28), rgba(124,92,255,0.06)) !important; }
+.drop.os-mega.bd .os-feature:hover { background: linear-gradient(160deg, rgba(77,208,255,0.28), rgba(77,208,255,0.06)) !important; }
+.os-feature .os-badge { font-weight: 800; font-size: 14px; color: var(--text); letter-spacing: -0.01em; }
+.os-feature b { font-size: 19px; color: var(--text); letter-spacing: -0.02em; }
+.os-feature .os-tag { font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
+.os-feature .os-go { margin-top: 6px; color: var(--brand-2); font-weight: 700; font-size: 13px; }
+.drop.os-mega.bd .os-feature .os-go { color: var(--brand-2); }
+.os-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; }
+.os-cols .mcol + .mcol { border-left: 1px solid var(--border); padding-left: 14px; }
+.os-cols h5 { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--text-dim); font-weight: 700; margin: 4px 12px 8px; }
+.drop.os-mega a:not(.os-feature) {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 12px; border-radius: 9px;
+  font-size: 13.5px; font-weight: 500; color: var(--text-muted);
+}
+.drop.os-mega a:not(.os-feature):hover { background: rgba(255,255,255,0.05); color: var(--text); }
+@media (max-width: 980px) { .drop.os-mega { display: none; } }
+
 /* Page hero */
 .page-hero { padding: 80px 0 40px; text-align: center; }
 .page-hero .eyebrow { margin-bottom: 22px; }

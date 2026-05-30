@@ -72,6 +72,7 @@
     else if (name === 'inbox') renderInbox();
     else if (name === 'templates') renderTemplates();
     else if (name === 'analytics') renderAnalytics();
+    else if (name === 'live') renderLive();
     else if (name === 'settings') renderSettings();
   }
 
@@ -482,6 +483,138 @@
     renderTab(name);
   }
   $$('#tabs .st-tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+
+  /* ============================================================
+     LINKEDIN LIVE — portal drives the browser extension
+     ============================================================ */
+  const Ext = window.StudioExt;
+  let scrapePoll = null;
+
+  function renderLive() {
+    if (!Ext) { $('#liveEnvBanner').style.display = 'block'; $('#liveEnvBanner').innerHTML = 'studio-bridge.js failed to load.'; return; }
+    const e = Ext.env();
+    const banner = $('#liveEnvBanner');
+    if (!e.canReach) { banner.style.display = 'block'; banner.innerHTML = '🧩 <b>To go live:</b> ' + esc(e.reason); }
+    else { banner.style.display = 'none'; }
+    $('#extId').value = Ext.getExtId();
+    // reflect persisted live-route toggle for this campaign
+    const c = campaign();
+    $('#liveRoute').checked = !!(c && c._liveRoute);
+    refreshExtStatus();
+    renderDatasets();
+  }
+
+  async function refreshExtStatus() {
+    const box = $('#extStatus'); const acc = $('#liAccount');
+    if (!Ext.env().canReach) { box.innerHTML = '<span class="pillbar warn">not connected</span>'; return; }
+    const p = await Ext.ping();
+    if (p && p.ok) {
+      box.innerHTML = `<span class="pillbar ok">extension v${esc(p.version)} connected</span>`;
+      $('#liveActions').checked = !!p.live;
+      acc.innerHTML = p.account
+        ? `<div class="acc-chip"><span class="healthdot good"></span><span style="font-size:18px">💼</span><div style="flex:1"><div style="font-size:13px;font-weight:600">${esc(p.account.name)}</div><div class="dim" style="font-size:11px">logged-in LinkedIn account</div></div></div>`
+        : '<p class="dim" style="font-size:12px">Extension connected. Now link your LinkedIn account.</p>';
+    } else {
+      box.innerHTML = `<span class="pillbar bad">${esc((p && p.info) || 'unreachable')}</span>`;
+    }
+  }
+
+  async function renderDatasets() {
+    const wrap = $('#dsList'); if (!wrap) return;
+    if (!Ext.env().canReach) { wrap.innerHTML = '<p class="dim" style="font-size:12px">Connect the extension to see scraped datasets.</p>'; return; }
+    const r = await Ext.getDatasets();
+    const list = (r && r.datasets) || [];
+    wrap.innerHTML = list.length ? list.map(d => `
+      <div class="acc-chip" style="align-items:stretch;flex-direction:column;gap:8px">
+        <div class="row" style="justify-content:space-between"><b style="font-size:13px">${esc(d.name)}</b><span class="pillbar info">${d.count} leads</span></div>
+        <div class="row wrap" style="gap:6px">
+          <button class="a-btn sm" data-import="${d.id}">→ Import as leads</button>
+          <button class="a-btn ghost sm" data-csv="${d.id}">⬇ CSV</button>
+        </div>
+      </div>`).join('') : '<p class="dim" style="font-size:12px">No datasets yet. Use “Source from Sales Navigator” on the Leads tab.</p>';
+    $$('[data-import]', wrap).forEach(b => b.addEventListener('click', () => importDataset(b.dataset.import)));
+    $$('[data-csv]', wrap).forEach(b => b.addEventListener('click', async () => { const r2 = await Ext.exportCsv(b.dataset.csv); toast(r2 && r2.ok ? 'Downloading CSV' : 'Export failed', r2 && r2.ok ? '' : 'warn'); }));
+  }
+
+  async function importDataset(id) {
+    const r = await Ext.getDataset(id);
+    if (!r || !r.ok) { toast('Could not load dataset', 'warn'); return; }
+    const recs = r.dataset.records || [];
+    let n = 0;
+    recs.forEach(rec => {
+      store.insert('leads', A.build.lead({
+        firstName: rec.firstName, lastName: rec.lastName, fullName: rec.fullName,
+        headline: rec.headline, company: rec.company, position: rec.title || rec.headline,
+        location: rec.location, profileUrl: rec.profileUrl || rec.salesNavUrl, degree: rec.connectionDegree,
+        source: 'sales-navigator',
+      })); n++;
+    });
+    toast(n + ' leads imported from "' + r.dataset.name + '"');
+    renderLeads();
+  }
+
+  $('#extConnect') && $('#extConnect').addEventListener('click', async () => {
+    Ext.setExtId($('#extId').value);
+    const p = await Ext.ping();
+    toast(p && p.ok ? 'Extension connected (v' + p.version + ')' : ('Cannot reach extension: ' + ((p && p.info) || '')), p && p.ok ? '' : 'warn');
+    renderLive();
+  });
+  $('#liConnect') && $('#liConnect').addEventListener('click', async () => {
+    const r = await Ext.connectAccount();
+    toast(r && r.ok ? ('Connected as ' + r.account.name) : ('Could not connect: ' + ((r && r.info) || '')), r && r.ok ? '' : 'warn');
+    refreshExtStatus();
+  });
+  $('#liveActions') && $('#liveActions').addEventListener('change', async (e) => {
+    if (e.target.checked && !confirm('Turn ON live actions? Real clicks will fire on LinkedIn from your account. Keep volumes humane and within ToS.')) { e.target.checked = false; return; }
+    const r = await Ext.setLive(e.target.checked);
+    toast(r && r.ok ? ('Live actions ' + (e.target.checked ? 'ON' : 'off')) : 'Failed', r && r.ok ? '' : 'warn');
+  });
+  $('#liveRoute') && $('#liveRoute').addEventListener('change', (e) => {
+    const c = campaign(); if (!c) return;
+    store.update('campaigns', c.id, { _liveRoute: e.target.checked });
+    if (e.target.checked) {
+      if (window.AlfredExtensionBridge) { engine.setAdapter('linkedin', window.AlfredExtensionBridge({ extensionId: Ext.getExtId(), mode: 'queue' })); toast('LinkedIn steps will route through your real account'); }
+      else toast('Load alfred-bridge.js to route live', 'warn');
+    } else { toast('Reverted to Simulated channel'); }
+  });
+  $('#refreshDs') && $('#refreshDs').addEventListener('click', renderDatasets);
+
+  /* ---- Sales Navigator sourcing (from the Leads tab) ---- */
+  $('#sourceSalesNav') && $('#sourceSalesNav').addEventListener('click', () => {
+    const reach = Ext && Ext.env();
+    modal(`<h2>⚡ Source from Sales Navigator</h2>
+      ${reach && !reach.canReach ? `<div class="banner" style="margin-bottom:14px">🧩 ${esc(reach.reason)}</div>` : ''}
+      <p class="dim" style="font-size:12.5px;margin-bottom:10px">Paste a Sales Navigator <b>people-search URL</b>. The extension opens it and pulls every person, page by page, into a dataset.</p>
+      <div class="a-field"><label class="a-label">Sales Navigator search URL</label><input class="a-input" id="snU" placeholder="https://www.linkedin.com/sales/search/people?query=..."></div>
+      <div class="row" style="gap:8px">
+        <div class="a-field" style="flex:2"><label class="a-label">Dataset name</label><input class="a-input" id="snN" placeholder="Berlin React leads"></div>
+        <div class="a-field" style="flex:1"><label class="a-label">Max pages</label><input class="a-input" id="snP" type="number" value="10" min="1" max="100"></div>
+      </div>
+      <div id="snProg" class="dim" style="font-size:12px;min-height:18px"></div>
+      <div class="modal-foot"><button class="a-btn ghost" id="snCancel">Close</button><button class="a-btn primary" id="snGo">Start scrape</button></div>`);
+    $('#snCancel').addEventListener('click', () => { if (scrapePoll) clearInterval(scrapePoll); closeModal(); });
+    $('#snGo').addEventListener('click', async () => {
+      if (!Ext || !Ext.env().canReach) { $('#snProg').textContent = (Ext && Ext.env().reason) || 'Extension unavailable'; return; }
+      const url = $('#snU').value.trim();
+      const r = await Ext.startScrape(url, $('#snN').value.trim(), +$('#snP').value);
+      if (!r || !r.ok) { $('#snProg').textContent = (r && r.info) || 'Could not start'; return; }
+      $('#snProg').textContent = 'Scrape started. A LinkedIn tab will open and page through results...';
+      const dsId = r.datasetId;
+      if (scrapePoll) clearInterval(scrapePoll);
+      scrapePoll = setInterval(async () => {
+        const st = await Ext.getState();
+        const sc = st && st.state && st.state.scrape;
+        if (sc) {
+          $('#snProg').innerHTML = `${sc.status === 'running' ? '⏳' : '✅'} page ${sc.page}/${sc.maxPages} · <b>${sc.total}</b> leads`;
+          if (sc.status !== 'running') {
+            clearInterval(scrapePoll); scrapePoll = null;
+            $('#snProg').innerHTML += ' — done. Importing...';
+            await importDataset(dsId); switchTab('leads'); closeModal();
+          }
+        }
+      }, 2000);
+    });
+  });
 
   /* ---- go ---- */
   renderAll();

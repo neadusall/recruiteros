@@ -1,0 +1,119 @@
+/**
+ * RecruiterOS · Core domain
+ *
+ * The shared models both operating systems run on: the Recruiting OS (placements)
+ * and the Business Development OS (job orders). One campaign is the atomic unit;
+ * a single hiring signal can create a placement AND a client at once, so the BD
+ * and Recruiting motions deliberately share these types.
+ *
+ * Modeled on the GTM-OS reference (Overview / Campaigns / Prospects / Outreach /
+ * Accounts / Connected / ATS / Response), mapped onto RecruiterOS naming.
+ */
+
+/** Which operating system a campaign belongs to. */
+export type Motion = "bd" | "recruiting";
+
+/** Every channel the platform can send and receive on. */
+export type Channel = "email" | "linkedin" | "sms" | "voice";
+
+/**
+ * The prospect lifecycle, shared across both motions. The labels differ in the
+ * UI per motion (BD: "Discovery booked" / "Mandate signed"; Recruiting:
+ * "Submitted" / "Placed") but the underlying stages are the same.
+ */
+export type ProspectStatus =
+  | "queued"          // discovered, awaiting the morning approval queue
+  | "in_sequence"     // active multi-channel drip
+  | "replied"         // any reply on any channel -> all sequences paused
+  | "booked"          // discovery call booked (BD) / candidate submitted (recruiting)
+  | "won"             // mandate signed (BD) / placed (recruiting)
+  | "nurture"         // 90-day or 6-month nurture track
+  | "closed_lost"
+  | "do_not_contact"; // suppressed across all channels
+
+/** The ideal-customer / ideal-candidate profile that scopes a campaign. */
+export interface ICP {
+  /** Account-side profile, e.g. "Series A-C fintech, 50-300 headcount, EU". */
+  accountProfile: string;
+  /** Persona to reach, e.g. "VP Engineering" (BD) or "Senior React" (recruiting). */
+  persona: string;
+  /** Hard disqualifiers that suppress a match, e.g. ["has internal TA team"]. */
+  disqualifiers: string[];
+}
+
+/** Buying / hiring signals a campaign listens for. */
+export type SignalKind =
+  | "fundraising"
+  | "hiring_velocity"
+  | "leadership_change"
+  | "expansion"
+  | "layoff"
+  | "tech_adoption";
+
+/** Per-campaign channel wiring (the "Connect Channels" phase). */
+export interface ChannelConfig {
+  instantlyCampaignId?: string;  // email (Instantly)
+  linkedinAccountId?: string;    // LinkedIn (Unipile / SalesRobot)
+  smsEnabled?: boolean;          // SMS (TalTxt + Telnyx 10DLC)
+  loxoListId?: string;           // ATS list to sync into
+}
+
+/** A campaign: the unit of work for a targeting motion. */
+export interface Campaign {
+  id: string;
+  workspaceId: string;
+  motion: Motion;
+  name: string;
+  goal: string;                  // one-sentence goal
+  icp: ICP;
+  signals: SignalKind[];
+  channels: ChannelConfig;
+  methodology: "hiring_manager_outreach" | "voice_first" | "seven_touch_drip";
+  /** Score at/above which a Day-14 voice note is allowed (HOT tier, default 80). */
+  voiceNoteThreshold: number;
+  dailyCap: number;
+  status: "draft" | "active" | "paused";
+  createdAt: string;
+}
+
+/** A person we are reaching: a BD buyer or a candidate. */
+export interface Prospect {
+  id: string;
+  workspaceId: string;
+  campaignId: string;
+  fullName: string;
+  firstName: string;
+  email?: string;
+  linkedinUrl?: string;
+  phone?: string;
+  company?: string;
+  title?: string;
+  /** ICP category bucket this prospect was matched into. */
+  category?: string;
+  status: ProspectStatus;
+  /** The channel the most recent inbound arrived on. */
+  lastChannel?: Channel;
+  /** Current drip touch (1..7), or null when paused / not yet sequenced. */
+  dripStage: number | null;
+  /** 0..100 composite warmth/intent score; >= voiceNoteThreshold unlocks voice. */
+  warmth: number;
+  /** Stamped when status flips to "booked". */
+  bookedAt?: string;
+  /** Mirror of the ATS person id once synced. */
+  atsPersonId?: string;
+  createdAt: string;
+}
+
+/** A single logged touch or system action, mirrored to the ATS as a person_event. */
+export interface ActivityEvent {
+  id: string;
+  workspaceId: string;
+  prospectId: string;
+  channel: Channel | "system";
+  /** e.g. "email_sent", "reply_received", "discovery_call_booked", "suppressed". */
+  type: string;
+  summary: string;
+  at: string;
+  /** Set once the ATS confirms the person_event. */
+  atsEventId?: string;
+}

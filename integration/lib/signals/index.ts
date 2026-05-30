@@ -136,3 +136,44 @@ export type {
   SeenStore,
   TriggerHandler,
 } from "./collector";
+
+// Free / public signal connectors (the $0 coverage tier)
+export {
+  ExtraAtsSource,
+  RemoteBoardsSource,
+  HackerNewsHiringSource,
+  UsaSpendingSource,
+  GitHubOrgSource,
+  NewsRssSource,
+  freeSources,
+} from "./freeSources";
+
+// Filtering + segmentation (industry / job title / function / seniority / geo)
+export {
+  classifyTitle,
+  titleOf,
+  industriesOf,
+  matchesFilter,
+  applyFilter,
+  segmentBy,
+} from "./filters";
+export type {
+  SignalFilter,
+  Segment,
+  JobFunction,
+  Seniority,
+  TitleIntel,
+} from "./filters";
+
+// Pre-launch campaign builder (organize free signals before spending)
+export {
+  buildCampaign,
+  planLaunch,
+} from "./campaignBuilder";
+export type {
+  CampaignDraft,
+  CampaignTarget,
+  CostEstimate,
+  BuildOptions,
+  LaunchPlan,
+} from "./campaignBuilder";

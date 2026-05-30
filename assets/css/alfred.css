@@ -181,6 +181,34 @@
   opacity: 0; transition: .3s; pointer-events: none; box-shadow: var(--shadow); }
 #a-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* ============================================================
+   Calm mode — dial down the busy color scheme for the Studio.
+   Tames the aurora/glow and mutes gradient accents so the
+   workspace reads as a calm tool, not a marketing page.
+   ============================================================ */
+body.studio-calm { background: #0c0c14; }
+body.studio-calm::before { opacity: .28; }                 /* ambient page glow */
+body.studio-calm .aurora { opacity: .18; filter: saturate(.7); }
+body.studio-calm .aurora .blob { filter: blur(110px); }
+body.studio-calm .grid-bg { opacity: .5; }
+
+/* Mute the gradient text to a single calm tone */
+body.studio-calm .kpi .big { background: none; -webkit-text-fill-color: initial; color: #c8c2ef; }
+
+/* Softer primary buttons (less neon) */
+body.studio-calm .a-btn.primary {
+  background: #5b50a8; color: #f4f4f8; box-shadow: none;
+}
+body.studio-calm .a-btn.primary:hover { background: #6a5fbd; }
+
+/* Calmer bar/meter fills */
+body.studio-calm .bar-fill, body.studio-calm .seq-node.sel { box-shadow: none; }
+body.studio-calm .bar-fill { background: #5b50a8; }
+body.studio-calm .seq-node.sel { border-color: #6a5fbd; }
+
+/* Banner less candy */
+body.studio-calm .banner { background: rgba(255,255,255,.03); border-color: var(--border); color: var(--text-muted); }
+
 .empty { text-align: center; padding: 50px 20px; color: var(--text-dim); }
 .empty .big { font-size: 44px; margin-bottom: 10px; }
 .banner { background: rgba(255,194,77,.08); border: 1px solid rgba(255,194,77,.25); border-radius: var(--radius-sm); padding: 11px 14px; font-size: 12.5px; color: var(--accent-amber); margin-bottom: 16px; }
