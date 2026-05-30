@@ -75,11 +75,69 @@ Bearer). Sign-up from a corporate domain auto-joins (or creates) that domain's
 workspace as enterprise; free-mail domains get a personal trial workspace.
 Passwordless magic-link sign-in is supported end to end.
 
+**Full login workflows** (all wired to pages on the marketing site):
+- Sign up -> `signup.html` -> `POST /api/auth/register`
+- Sign in -> `login.html` -> `POST /api/auth/login`
+- Forgot password -> `forgot-password.html` -> `POST /api/auth/reset` (never
+  reveals whether an email exists)
+- Reset password -> `reset-password.html?token=` -> `GET /api/auth/reset?token=`
+  to pre-validate, then `PUT /api/auth/reset` to set the new password; this
+  revokes all of that user's existing sessions and issues a fresh one.
+- Magic link -> `PUT /api/auth/magic-link`
+- `app.html` is now a portal redirect: signed-in -> `command.html`, else
+  `login.html`, so every "Open app" CTA flows into the auth workflow.
+
+**RBAC / admin sub-accounts** (`lib/auth/permissions.ts` + `lib/auth/team.ts`):
+three roles (owner / admin / member) with a capability matrix. Admins add
+recruiters (members) via emailed invite links (`?invite=` on signup);
+`AuthResult.capabilities` drives what the UI shows, and `api.requireCapability()`
+gates the routes. Recruiters are walled off from the Telnyx/SMS account, API
+keys, sending domains, the ATS connection, the Connected pre-flight, billing,
+and team management (those return 403). Endpoints: `GET/POST /api/team`,
+`PUT /api/team/accept`.
+
+## Integrations (all wired)
+
+Every external integration named in the reference has a real client in
+[`lib/providers/`](lib/providers/). Each extends a shared base that makes live
+`fetch` calls when its key is set and **dry-logs (no-op) when it isn't**, so the
+whole engine runs end to end with zero credentials and each integration lights
+up the instant you add its key, no code change.
+
+| Provider | File | Channel / use | Wired into |
+|---|---|---|---|
+| Instantly | `providers/instantly.ts` | Email send, pause, vitals, block-list | channels send, suppression DNC, health sweep |
+| Unipile | `providers/unipile.ts` | LinkedIn invite / DM / voice note | channels send |
+| SalesRobot | `providers/salesrobot.ts` | LinkedIn alt: add/pause/reply/tag/remove | channels send, suppression DNC |
+| TalTxt | `providers/taltxt.ts` | Post-engagement SMS, opt-out | channels send, suppression DNC |
+| Telnyx | `providers/telnyx.ts` | Raw 10DLC SMS, voice dialer + Premium AMD | channels send |
+| RapidAPI (JSearch) | `providers/rapidapi.ts` | Job scraper / signal pull | cadence signal step |
+| Fresh LinkedIn | `providers/freshlinkedin.ts` | Enrichment rung 1 (title/company) | channels `enrich()` |
+| Tomba | `providers/tomba.ts` | Enrichment rung 2 (email finder) | channels `enrich()` |
+| Loxo | `ats/loxo.ts` | ATS system of record | every person_event |
+
+**Webhook signatures** ([`providers/signatures.ts`](lib/providers/signatures.ts)):
+Instantly / Unipile / SalesRobot use HMAC-SHA256; TalTxt / Telnyx use ED25519.
+The Response webhook route verifies the signature over the raw body before
+processing (no-op until the secret is set).
+
+**Confirm wiring:** `GET /api/providers` returns every provider's
+configured-status (`configured N / total`); `POST /api/providers
+{"action":"verify-all"}` runs a live health check on all of them. The Connected
+tab's "Test all" calls each provider's real `verify()`.
+
+**Send + enrich:** [`lib/channels/`](lib/channels/) routes a touch to the right
+provider (email→Instantly, linkedin→Unipile/SalesRobot, sms→TalTxt/Telnyx,
+voice→Telnyx AMD) and logs a person_event per touch. The daily cadence calls
+`enrich()` at 7:30 and `pushApproved()` at 9:00 (`POST /api/campaigns/cadence
+{"action":"push"}`).
+
 ## Production seams (search for `TODO(prod)`)
 
 - `lib/core/repository.ts`, every `getRepository()` -> swap for Prisma.
-- `lib/response/suppression.ts` -> real DNC mirror to Instantly/SalesRobot/TalTxt.
-- `lib/ats/loxo.ts` -> set `LOXO_API_KEY` to go live.
-- `lib/connected/index.ts` -> real per-service verify endpoints.
 - `lib/auth/index.ts` `sendEmail` -> SMTP / Resend / SES.
-- webhook routes -> verify provider signatures before processing.
+- set each provider key in `.env` to flip it from dry-log to live (DNC mirror,
+  verify endpoints, channel sends, and webhook signatures all activate per-key).
+
+Already wired (no longer TODO): the DNC mirror, the Connected verify endpoints,
+webhook signature verification, and the channel send + enrichment layer.

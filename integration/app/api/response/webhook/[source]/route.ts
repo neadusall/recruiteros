@@ -9,6 +9,7 @@
 
 import { NextResponse } from "next/server";
 import { processInbound, type ResponseSource } from "../../../../../lib/response";
+import { verifyWebhook } from "../../../../../lib/providers";
 
 const SOURCES: ResponseSource[] = ["instantly", "unipile", "salesrobot", "taltxt"];
 
@@ -20,14 +21,19 @@ export async function POST(req: Request, { params }: { params: { source: string 
   const workspaceId = url.searchParams.get("ws") ?? req.headers.get("x-workspace-id") ?? "";
   if (!workspaceId) return NextResponse.json({ error: "missing_workspace" }, { status: 422 });
 
+  // Read the raw body once so the signature is checked over exact bytes.
+  const raw = await req.text();
+  if (!verifyWebhook(source, req, raw)) {
+    return NextResponse.json({ error: "bad_signature" }, { status: 401 });
+  }
+
   let payload: Record<string, unknown>;
   try {
-    payload = await req.json();
+    payload = raw ? JSON.parse(raw) : {};
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  // TODO(prod): verify the provider signature per source before processing.
   const processed = await processInbound(source, workspaceId, payload);
   if (!processed) return NextResponse.json({ ok: true, ignored: true });
 

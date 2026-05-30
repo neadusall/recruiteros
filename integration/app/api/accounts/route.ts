@@ -7,10 +7,10 @@ import {
   addLinkedInAccount, listLinkedInAccounts, addDomain, listDomains,
   addApiKey, listApiKeys, runHealthSweep, LINKEDIN_PLATFORMS, type LinkedInPlatform,
 } from "../../../lib/accounts";
-import { requireSession, body, ok, fail } from "../../../lib/api";
+import { requireCapability, body, ok, fail } from "../../../lib/api";
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "accounts:manage");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   return ok({
@@ -22,7 +22,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "accounts:manage");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);

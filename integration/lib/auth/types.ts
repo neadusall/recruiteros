@@ -42,17 +42,23 @@ export interface Session {
   expiresAt: string;
 }
 
-/** Short-lived token for email verification or magic-link sign-in. */
+/** Short-lived token for email verification, magic-link sign-in, or a team invite. */
 export interface EmailToken {
   token: string;
   email: string;
-  purpose: "verify" | "magic_link";
+  purpose: "verify" | "magic_link" | "invite" | "reset_password";
   expiresAt: string;
+  /** Set for invites: the workspace + role the invitee joins. */
+  workspaceId?: string;
+  role?: Role;
+  invitedByName?: string;
 }
 
 export interface AuthResult {
   user: Omit<User, "passwordHash">;
   workspace: Workspace;
   role: Role;
+  /** Capabilities granted to this role, so the UI shows only what they can use. */
+  capabilities: import("./permissions").Capability[];
   session: Session;
 }

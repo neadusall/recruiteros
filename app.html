@@ -3,126 +3,26 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RecruiterOS, Command Center</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <title>Opening RecruiterOS…</title>
   <link rel="stylesheet" href="assets/css/styles.css" />
-  <link rel="stylesheet" href="assets/css/app.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+  <script>
+    // The old prototype is now the portal entry point. Send signed-in users to
+    // the Command Center, everyone else to sign in. Keeps every "Open app" CTA
+    // across the marketing site flowing into the real auth workflow.
+    (function () {
+      var hasSession = false;
+      try { hasSession = !!localStorage.getItem("ros_ctx"); } catch (e) {}
+      location.replace(hasSession ? "command.html" : "login.html");
+    })();
+  </script>
 </head>
-<body class="app">
+<body class="auth-body">
   <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
-
-  <div class="shell">
-    <!-- SIDEBAR -->
-    <aside class="sidebar">
-      <a href="index.html" class="brand"><span class="logo">R</span><span>Recruiter<span class="os">OS</span></span></a>
-
-      <div class="side-section">Campaigns</div>
-      <div class="camp-list" id="campList"></div>
-      <button class="btn-new" id="newCampaign">＋ New campaign</button>
-
-      <div class="side-foot">
-        <div class="credits">
-          <small>Credits · <b id="creditsLeft">1,238</b> / 2,000</small>
-          <div class="bar"><i></i></div>
-        </div>
-        <div class="side-link">⚙️ Settings</div>
-        <div class="side-link">🔌 Integrations</div>
-        <div class="side-link" style="display:flex;align-items:center;gap:10px;">
-          <span class="avatar" style="width:26px;height:26px;font-size:11px;background:#7c5cff">JD</span> Jamie Dawson
-        </div>
-      </div>
-    </aside>
-
-    <!-- MAIN -->
-    <main class="main">
-      <div class="topbar">
-        <div>
-          <div class="crumb">Campaigns / <span id="crumbName">Senior React · Berlin</span></div>
-          <h1><span id="campTitle">Senior React · Berlin</span> <span class="status-pill live" id="campStatus">Live</span></h1>
-        </div>
-        <div class="spacer"></div>
-        <div class="top-stat"><b id="statTargets">0</b><span>Targets</span></div>
-        <div class="top-stat"><b id="statReached">0</b><span>Reached</span></div>
-        <div class="top-stat"><b id="statReplied">0</b><span>Replied</span></div>
-        <a class="btn btn-primary btn-sm" id="launchBtn">⚡ Launch sequence</a>
-      </div>
-
-      <!-- TABS -->
-      <div class="tabs" id="tabs">
-        <div class="tab active" data-tab="signals">📡 Signals <span class="count" id="cSignals">6</span></div>
-        <div class="tab" data-tab="targets">🎯 Targets &amp; Enrich <span class="count" id="cTargets">0</span></div>
-        <div class="tab" data-tab="outreach">✉️ Outreach</div>
-        <div class="tab" data-tab="sms">💬 Conversations <span class="count" id="cSms">3</span></div>
-        <div class="tab" data-tab="reporting">📊 Reporting</div>
-      </div>
-
-      <div class="panel-wrap">
-        <!-- SIGNALS -->
-        <section class="panel active" id="panel-signals">
-          <div class="signal-feed" id="signalFeed"></div>
-        </section>
-
-        <!-- TARGETS & ENRICH -->
-        <section class="panel" id="panel-targets">
-          <form class="search-bar" id="searchBar">
-            <span class="ico">⌕</span>
-            <input id="searchInput" type="text" autocomplete="off"
-              placeholder="Describe who you're looking for, e.g. senior React engineers in Berlin who left a startup recently" />
-            <button type="submit" class="btn btn-primary btn-sm" id="searchBtn">Search</button>
-          </form>
-          <div class="search-hints" id="searchHints">
-            <span class="chip">Senior React engineers in Berlin</span>
-            <span class="chip">Staff engineers open to remote</span>
-            <span class="chip">Frontend leads from failed startups</span>
-          </div>
-
-          <div class="ai-parse" id="aiParse"></div>
-
-          <div id="targetsContent">
-            <div class="empty-state">
-              <div class="big">🎯</div>
-              <h3>No targets yet</h3>
-              <p>Run a natural-language search above to populate your candidate grid.</p>
-            </div>
-          </div>
-        </section>
-
-        <!-- OUTREACH -->
-        <section class="panel" id="panel-outreach">
-          <div class="seq-layout">
-            <div>
-              <h3 style="margin-bottom:14px;font-size:16px;">Sequence steps</h3>
-              <div class="seq-steps" id="seqSteps"></div>
-            </div>
-            <div>
-              <h3 style="margin-bottom:14px;font-size:16px;">AI-drafted preview <span style="color:var(--text-dim);font-weight:400;font-size:13px;">· personalized for Anja Köhler</span></h3>
-              <div class="seq-preview" id="seqPreview"></div>
-            </div>
-          </div>
-        </section>
-
-        <!-- SMS / CONVERSATIONS -->
-        <section class="panel" id="panel-sms">
-          <div class="inbox">
-            <div class="thread-list" id="threadList"></div>
-            <div class="chat" id="chatArea"></div>
-          </div>
-        </section>
-
-        <!-- REPORTING -->
-        <section class="panel" id="panel-reporting">
-          <div class="report-stats" id="reportStats"></div>
-          <div class="report-cols" id="reportCols"></div>
-        </section>
-      </div>
-    </main>
-  </div>
-
-  <div class="toast" id="toast"></div>
-
-  <script src="assets/js/app.js"></script>
+  <noscript>
+    <p style="color:#fff;text-align:center;margin-top:40px;font-family:sans-serif">
+      Continue to <a href="login.html" style="color:#8be7ff">sign in</a>.
+    </p>
+  </noscript>
 </body>
 </html>

@@ -79,6 +79,14 @@
     <label class="p-check"><input type="checkbox" id="setWeekends" /> Pause on weekends</label>
 
     <div style="border-top:1px solid var(--border);margin:12px 0 10px;padding-top:10px">
+      <label class="p-field"><span>Safety preset</span>
+        <select id="setPreset"><option value="conservative">Conservative (safest)</option><option value="balanced">Balanced</option><option value="aggressive">Aggressive (higher risk)</option><option value="custom">Custom</option></select>
+      </label>
+      <span class="p-note">Daily caps per action. Throttle these to your comfort. Meters on the Outreach tab show today's usage.</span>
+      <div class="p-two" id="capGrid" style="margin-top:8px"></div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin:12px 0 10px;padding-top:10px">
       <label class="p-check"><input type="checkbox" id="brEnabled" /> <b>Browser-execution agent</b></label>
       <p class="p-note" style="margin:-2px 0 8px">Let the RecruiterOS backend drive outreach through THIS browser session. Actions are pulled from the bridge and run here.</p>
       <label class="p-field"><span>Bridge URL</span><input id="brUrl" placeholder="http://localhost:8787" /></label>

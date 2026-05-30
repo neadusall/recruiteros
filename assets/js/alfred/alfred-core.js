@@ -72,10 +72,46 @@
     timezone:      'local',
     randomDelayMin: 8,                            // minutes between consecutive actions
     randomDelayMax: 35,
+    speed:         'normal',                       // slow | normal | fast (maps to delays)
     pendingInviteCap: 500,                        // keep pending connection requests under this
     withdrawInviteAfterDays: 21,                  // auto-withdraw stale invites
-    weeklyInviteCap: 100,                         // LinkedIn weekly invitation ceiling
+    weeklyInviteCap: 100,                         // LinkedIn weekly invitation ceiling (hard ~100-200)
+    hourlyMax:     12,                            // max actions per rolling hour (anti-burst)
+    dailyTotalCap: 130,                           // max total actions/day across ALL types
   };
+
+  // One-click safety profiles, following best practices from the major tools.
+  // Each sets per-action daily caps AND the safety envelope together.
+  const SAFETY_PRESETS = {
+    conservative: {
+      label: 'Conservative', risk: 'lowest',
+      desc: 'Safest. Best for new, cold, or recently restricted accounts.',
+      dailyLimits: { connect: 15, message: 35, inmail: 5, view: 50, follow: 15, endorse: 10, like: 25 },
+      safety: { warmup: { enabled: true, startPct: 0.20, rampDays: 21 }, workingHours: { start: 9, end: 16 }, weekendsOff: true, randomDelayMin: 25, randomDelayMax: 75, speed: 'slow', pendingInviteCap: 200, withdrawInviteAfterDays: 14, weeklyInviteCap: 80, hourlyMax: 6, dailyTotalCap: 70 },
+    },
+    balanced: {
+      label: 'Balanced', risk: 'low',
+      desc: 'Recommended for warmed-up accounts in steady use.',
+      dailyLimits: { connect: 25, message: 60, inmail: 10, view: 80, follow: 30, endorse: 20, like: 40 },
+      safety: { warmup: { enabled: true, startPct: 0.30, rampDays: 14 }, workingHours: { start: 9, end: 17 }, weekendsOff: true, randomDelayMin: 8, randomDelayMax: 35, speed: 'normal', pendingInviteCap: 500, withdrawInviteAfterDays: 21, weeklyInviteCap: 100, hourlyMax: 12, dailyTotalCap: 130 },
+    },
+    aggressive: {
+      label: 'Aggressive', risk: 'elevated',
+      desc: 'Higher volume. Only for old, healthy, Sales Navigator accounts. Watch acceptance rate.',
+      dailyLimits: { connect: 40, message: 90, inmail: 15, view: 100, follow: 45, endorse: 30, like: 60 },
+      safety: { warmup: { enabled: true, startPct: 0.40, rampDays: 7 }, workingHours: { start: 8, end: 19 }, weekendsOff: false, randomDelayMin: 4, randomDelayMax: 18, speed: 'fast', pendingInviteCap: 800, withdrawInviteAfterDays: 28, weeklyInviteCap: 180, hourlyMax: 22, dailyTotalCap: 240 },
+    },
+  };
+  const SPEED_DELAYS = { slow: [25, 75], normal: [8, 35], fast: [4, 18] };
+
+  function applyPreset(acc, name) {
+    const p = SAFETY_PRESETS[name];
+    if (!p) return acc;
+    acc.dailyLimits = JSON.parse(JSON.stringify(p.dailyLimits));
+    acc.safety = Object.assign({}, DEFAULT_SAFETY, JSON.parse(JSON.stringify(p.safety)));
+    acc.preset = name;
+    return acc;
+  }
 
   const STATUS = {
     enrollment: { ACTIVE: 'active', PAUSED: 'paused', COMPLETED: 'completed', STOPPED: 'stopped', REPLIED: 'replied' },
@@ -304,12 +340,51 @@
 
     function randomDelayMs(acc, rng) {
       const s = safety(acc);
-      const span = s.randomDelayMax - s.randomDelayMin;
+      let lo = s.randomDelayMin, hi = s.randomDelayMax;
+      if (s.speed && SPEED_DELAYS[s.speed]) { lo = SPEED_DELAYS[s.speed][0]; hi = SPEED_DELAYS[s.speed][1]; }
       const r = rng ? rng() : Math.random();
-      return (s.randomDelayMin + r * span) * MINUTE;
+      return (lo + r * (hi - lo)) * MINUTE;
     }
 
-    return { safety, effectiveCap, remaining, nextAllowedTime, pendingInvites, randomDelayMs, dateStr, isWeekend };
+    function dateHour(ts) { return dateStr(ts) + '-' + String(new Date(ts).getHours()).padStart(2, '0'); }
+    // rolling 7-day connection-request count (LinkedIn weekly invite ceiling)
+    function weeklyInvites(acc, now) { let n = 0; for (let i = 0; i < 7; i++) n += store.getCount(acc.id, dateStr(now - i * DAY), 'connect'); return n; }
+    function dailyTotal(acc, now) { return store.getCount(acc.id, dateStr(now), '__total'); }
+    function hourlyTotal(acc, now) { return store.getCount(acc.id, dateHour(now), '__total'); }
+    function nextDayStartTs(acc, now) { const s = safety(acc); const d = new Date(now); d.setDate(d.getDate() + 1); d.setHours(s.workingHours.start, 0, 0, 0); return nextAllowedTime(acc, d.getTime()); }
+
+    // The single safety gate. Returns { allowed, reason, retryAt } so the engine
+    // can defer precisely and the UI can show WHY something is held.
+    function check(acc, action, now, opts) {
+      opts = opts || {};
+      const s = safety(acc);
+      const at = nextAllowedTime(acc, now);
+      if (at > now) return { allowed: false, reason: 'outside_hours', retryAt: at };
+      if (remaining(acc, action, now) <= 0) return { allowed: false, reason: 'daily_cap', retryAt: nextDayStartTs(acc, now) };
+      if (s.dailyTotalCap && dailyTotal(acc, now) >= s.dailyTotalCap) return { allowed: false, reason: 'daily_total', retryAt: nextDayStartTs(acc, now) };
+      if (s.hourlyMax && hourlyTotal(acc, now) >= s.hourlyMax) return { allowed: false, reason: 'hourly_cap', retryAt: now + HOUR };
+      if (opts.invite) {
+        if (s.weeklyInviteCap && weeklyInvites(acc, now) >= s.weeklyInviteCap) return { allowed: false, reason: 'weekly_invites', retryAt: now + DAY };
+        if (pendingInvites(acc) >= s.pendingInviteCap) return { allowed: false, reason: 'pending_cap', retryAt: now + DAY };
+      }
+      return { allowed: true };
+    }
+
+    // Snapshot for the monitoring dashboard: today's usage vs effective caps.
+    function usage(acc, now) {
+      now = now || Date.now();
+      const out = { actions: {}, total: dailyTotal(acc, now), totalCap: safety(acc).dailyTotalCap, hour: hourlyTotal(acc, now), hourCap: safety(acc).hourlyMax, weeklyInvites: weeklyInvites(acc, now), weeklyInviteCap: safety(acc).weeklyInviteCap, pending: pendingInvites(acc), pendingCap: safety(acc).pendingInviteCap, warmupPct: warmupPct(acc, now) };
+      const caps = acc.dailyLimits || DEFAULT_DAILY_LIMITS[acc.type] || {};
+      Object.keys(caps).forEach(a => { out.actions[a] = { used: store.getCount(acc.id, dateStr(now), a), cap: effectiveCap(acc, a, now), base: caps[a] }; });
+      return out;
+    }
+    function warmupPct(acc, now) {
+      const s = safety(acc); if (!s.warmup || !s.warmup.enabled) return 1;
+      const ageDays = Math.max(0, Math.floor(((now || Date.now()) - (acc.createdAt || now)) / DAY));
+      return Math.min(1, s.warmup.startPct + (1 - s.warmup.startPct) * (ageDays / s.warmup.rampDays));
+    }
+
+    return { safety, effectiveCap, remaining, nextAllowedTime, pendingInvites, randomDelayMs, dateStr, dateHour, isWeekend, weeklyInvites, dailyTotal, hourlyTotal, nextDayStartTs, check, usage, warmupPct };
   }
 
   /* ============================================================
@@ -524,18 +599,14 @@
         e.stepIndex++; store.save(); report.skipped++; return;
       }
 
-      // working-hours / weekend gate
+      // unified safety gate: working hours, weekend, per-action daily cap (warmup),
+      // daily total ceiling, hourly anti-burst, weekly invite cap, pending cap.
       if (acc) {
-        const allowed = limits.nextAllowedTime(acc, now);
-        if (allowed > now) { e.nextRunAt = allowed; store.save(); report.deferred++; return; }
-      }
-
-      // daily-limit + pending-invite gate
-      if (acc) {
-        const left = limits.remaining(acc, meta.counts, now);
-        if (left <= 0) { e.nextRunAt = nextDayStart(acc, now); store.save(); report.deferred++; return; }
-        if (meta.opensRelationship && limits.pendingInvites(acc) >= limits.safety(acc).pendingInviteCap) {
-          e.nextRunAt = now + DAY; store.save(); report.deferred++; return;
+        const verdict = limits.check(acc, meta.counts, now, { invite: meta.opensRelationship });
+        if (!verdict.allowed) {
+          e.nextRunAt = verdict.retryAt || (now + HOUR);
+          e._lastHold = verdict.reason;
+          store.save(); report.deferred++; return;
         }
       }
 
@@ -556,8 +627,12 @@
         return;
       }
 
-      // success — record, count, schedule promised outcomes
-      if (acc) store.bump(acc.id, limits.dateStr(now), meta.counts, 1);
+      // success — record, count (per-action + daily total + hourly), schedule outcomes
+      if (acc) {
+        store.bump(acc.id, limits.dateStr(now), meta.counts, 1);
+        store.bump(acc.id, limits.dateStr(now), '__total', 1);
+        store.bump(acc.id, limits.dateHour(now), '__total', 1);
+      }
       e._lastChannel = action.channel;
       logEvent(e, { type: action.type, channel: action.channel, status: STATUS.event.SENT, at: now, subject: rendered.subject, body: rendered.body, info: result.info });
       report.sent++;
@@ -792,8 +867,9 @@
      ============================================================ */
 
   return {
-    VERSION: '1.0.0',
+    VERSION: '1.1.0',
     CHANNELS, DEFAULT_DAILY_LIMITS, DEFAULT_SAFETY, STATUS,
+    SAFETY_PRESETS, SPEED_DELAYS, applyPreset,
     Store, Engine, Limits,
     SimulatedAdapter, LinkedInAdapter, EmailAdapter, TwitterAdapter,
     build, render, missingFields, pickVariant, makeRng, uid, seedDemo,

@@ -18,6 +18,12 @@
   var API = (window.RECRUITEROS_API_BASE || "") + "/api";
   var motion = localStorage.getItem("ros_motion") || "recruiting";
 
+  // RBAC: live sessions carry a capabilities array; the static demo has none, so
+  // we treat demo as full-access (owner) to keep it explorable. Recruiters
+  // (members) on a live backend only see what their role allows.
+  var CAPS = Array.isArray(ctx.capabilities) ? ctx.capabilities : null;
+  function can(cap) { return CAPS === null ? true : CAPS.indexOf(cap) >= 0; }
+
   /* ---------------- tiny dom helpers ---------------- */
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var view = $("#view");
@@ -56,6 +62,13 @@
   var hot = SEED.responses.filter(function (r) { return r.cls === "positive" || r.cls === "referral"; }).length;
   if (hot) { var bd = $("#badgeResponse"); bd.textContent = hot; bd.classList.add("show"); }
 
+  // RBAC: hide nav items + group labels the current role can't use.
+  Array.prototype.forEach.call(document.querySelectorAll("[data-cap]"), function (el) {
+    if (!can(el.getAttribute("data-cap"))) el.style.display = "none";
+  });
+  // Show the role on the workspace card.
+  if (ctx.role) { var wp = $("#wsPlan"); if (wp) wp.textContent = (ctx.workspace && ctx.workspace.plan ? ctx.workspace.plan + " · " : "") + ctx.role; }
+
   /* ---------------- router ---------------- */
   var ROUTES = {
     overview: { title: "Overview", crumb: "Operate", action: null, render: renderOverview },
@@ -64,9 +77,10 @@
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New campaign", render: renderCampaigns },
     outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
     content: { title: "Content Library", crumb: "Build", action: "＋ Add asset", render: renderContent },
-    accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts },
-    connected: { title: "Connected", crumb: "Connect", action: "Test all", render: renderConnected },
-    ats: { title: "ATS", crumb: "Connect", action: null, render: renderAts }
+    accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
+    connected: { title: "Connected", crumb: "Connect", action: "Test all", render: renderConnected, cap: "integrations:manage" },
+    ats: { title: "ATS", crumb: "Connect", action: null, render: renderAts, cap: "ats:manage" },
+    team: { title: "Team", crumb: "Admin", action: "＋ Invite recruiter", render: renderTeam, cap: "team:manage" }
   };
 
   function currentRoute() {
@@ -75,7 +89,9 @@
     var parts = h.split("/");
     if (parts[0] === "bd" || parts[0] === "recruiting") { motion = parts[0]; localStorage.setItem("ros_motion", motion); h = parts[1] || "overview"; }
     else h = parts[0];
-    return ROUTES[h] ? h : "overview";
+    if (!ROUTES[h]) return "overview";
+    if (ROUTES[h].cap && !can(ROUTES[h].cap)) return "overview"; // recruiter hit a gated route
+    return h;
   }
 
   function render() {
@@ -285,8 +301,61 @@
     }).join("");
   }
 
+  /* ---------------- Team (admin sub-accounts) ---------------- */
+  function renderTeam(el) {
+    el.innerHTML = head("Team",
+      "Add recruiters to this workspace and set what they can touch. Recruiters work the inbox, pipeline, sourcing, outreach and the dialer, but never see the Telnyx account, API keys, sending domains, the ATS connection, billing, or the team.");
+
+    // Permission matrix, so an admin sees exactly where the wall is.
+    var caps = [
+      ["Response inbox + act", true, true, true], ["Prospects + pipeline", true, true, true],
+      ["Sourcing + outreach", true, true, true], ["Voice dialer (use)", true, true, true],
+      ["Create campaigns", true, true, true], ["Activate campaigns", true, true, false],
+      ["LinkedIn accounts + domains", true, true, false], ["API keys", true, true, false],
+      ["Telnyx / SMS account", true, true, false], ["Integrations (Connected)", true, true, false],
+      ["ATS connection", true, true, false], ["Manage team", true, true, false],
+      ["Billing", true, false, false]
+    ];
+    var matrix = '<div class="card" style="margin-bottom:16px;overflow:auto"><h3>What each role can do</h3><table class="matrix"><thead><tr><th>Capability</th><th>Owner</th><th>Admin</th><th>Recruiter</th></tr></thead><tbody>' +
+      caps.map(function (r) {
+        return "<tr><td>" + esc(r[0]) + "</td>" + [1, 2, 3].map(function (i) {
+          return '<td>' + (r[i] ? '<span style="color:var(--accent-green)">✓</span>' : '<span class="muted">—</span>') + "</td>";
+        }).join("") + "</tr>";
+      }).join("") + "</tbody></table></div>";
+
+    var members = (SEED.team || []).map(function (m) {
+      return '<div class="integ"><span class="avatar" style="width:30px;height:30px;font-size:11px;background:' + colorFor(m.name) + '">' + esc(initials(m.name)) + "</span>" +
+        '<div class="meta"><b>' + esc(m.name) + (m.isYou ? ' <span class="muted">(you)</span>' : "") + "</b><small>" + esc(m.email) + "</small></div>" +
+        '<span class="cls cls-' + (m.role === "owner" ? "positive" : m.role === "admin" ? "soft_yes" : "unclassified") + '">' + esc(m.role) + "</span></div>";
+    }).join("");
+    var teamCard = '<div class="card"><h3>Members</h3>' + (members || '<div class="empty">No teammates yet. Invite your first recruiter.</div>') + "</div>";
+    el.innerHTML += matrix + teamCard;
+
+    if (LIVE) api("/team").then(function (d) {
+      if (d.members) { SEED.team = d.members; renderTeam(el); }
+    }).catch(function () {});
+  }
+
+  function inviteRecruiter() {
+    var email = prompt("Recruiter's work email:");
+    if (!email) return;
+    var role = (prompt("Role: admin or member (recruiter)?", "member") || "member").toLowerCase();
+    if (role !== "admin" && role !== "member") role = "member";
+    if (LIVE) {
+      fetch(API + "/team", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "invite", email: email, role: role }) })
+        .then(function (r) { return r.json(); })
+        .then(function () { toast("Invited " + email + " as " + role); })
+        .catch(function () { toast("Could not send invite"); });
+    } else {
+      SEED.team = (SEED.team || []).concat([{ name: email.split("@")[0], email: email, role: role, isYou: false }]);
+      var v = $("#view"); v.innerHTML = ""; renderTeam(v);
+      toast("Invited " + email + " as " + role + " (demo)");
+    }
+  }
+
   /* ---------------- primary actions ---------------- */
   function primaryAction(key) {
+    if (key === "team") { inviteRecruiter(); return; }
     if (key === "connected") { SEED.integrations.forEach(function (i) { if (i.status === "yellow") i.status = "green"; }); render(); toast("Tested all connections"); return; }
     toast("Demo: " + key + " action. Wire to /api when the backend is deployed.");
   }
@@ -435,6 +504,11 @@
         { vendor: "lever", label: "Lever", status: "placeholder" }
       ],
       atsActive: "loxo",
+      team: [
+        { name: (ctx.user && ctx.user.name) || "You", email: (ctx.user && ctx.user.email) || "you@company.com", role: ctx.role || "owner", isYou: true },
+        { name: "Sam Carter", email: "sam@company.com", role: "admin", isYou: false },
+        { name: "Riley Chen", email: "riley@company.com", role: "member", isYou: false }
+      ],
       objectMap: [
         { concept: "BD prospect", object: "Person + list", how: "POST /people/update_by_email" },
         { concept: "Activity (any touch)", object: "person_event", how: "POST /people/{id}/person_events" },

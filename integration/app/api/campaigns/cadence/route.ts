@@ -4,7 +4,7 @@
  *   { action: "approve" | "kill", draftId } -> act on a queued draft
  */
 
-import { runDailyCadence, approvalQueue, setDraftStatus, CADENCE_SCHEDULE } from "../../../../lib/campaigns";
+import { runDailyCadence, approvalQueue, setDraftStatus, pushApproved, CADENCE_SCHEDULE } from "../../../../lib/campaigns";
 import { requireSession, body, ok, fail } from "../../../../lib/api";
 
 export async function GET(req: Request) {
@@ -17,12 +17,16 @@ export async function POST(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
-  const b = await body<{ action?: string; draftId?: string }>(req);
+  const b = await body<{ action?: string; draftId?: string }>(req); // action: approve | kill | push | (run)
 
   if (b?.action === "approve" || b?.action === "kill") {
     if (!b.draftId) return fail("missing_draftId", 422);
     setDraftStatus(ws, b.draftId, b.action === "approve" ? "approved" : "killed");
     return ok({ ok: true });
+  }
+  if (b?.action === "push") {
+    // 9:00 step: send every approved draft on its channel via the providers.
+    return ok(await pushApproved(ws));
   }
   const run = await runDailyCadence(ws);
   return ok({ ...run, queue: approvalQueue(ws) });

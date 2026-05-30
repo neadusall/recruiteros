@@ -3,10 +3,10 @@
  */
 
 import { ATS_VENDORS, LOXO_OBJECT_MAP, getAts } from "../../../lib/ats";
-import { requireSession, ok } from "../../../lib/api";
+import { requireCapability, ok } from "../../../lib/api";
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "ats:manage");
   if ("response" in g) return g.response;
   return ok({ vendors: ATS_VENDORS, objectMap: LOXO_OBJECT_MAP, active: getAts().vendor });
 }

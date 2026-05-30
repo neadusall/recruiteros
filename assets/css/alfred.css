@@ -209,6 +209,17 @@ body.studio-calm .seq-node.sel { border-color: #6a5fbd; }
 /* Banner less candy */
 body.studio-calm .banner { background: rgba(255,255,255,.03); border-color: var(--border); color: var(--text-muted); }
 
+/* ---- live throttle monitoring ---- */
+.mon-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 18px; }
+.mon-row { display: flex; align-items: center; gap: 9px; font-size: 12.5px; padding: 3px 0; }
+.mon-row .mon-l { width: 130px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: capitalize; }
+.mon-row .mon-track { flex: 1; height: 7px; background: var(--surface-2); border-radius: 20px; overflow: hidden; }
+.mon-row .mon-fill { display: block; height: 100%; border-radius: 20px; background: #5b50a8; transition: width .3s; }
+.mon-row .mon-fill.ok { background: var(--accent-green); }
+.mon-row .mon-fill.warn { background: var(--accent-amber); }
+.mon-row .mon-fill.bad { background: var(--accent-red); }
+.mon-row .mon-v { min-width: 56px; text-align: right; font: 600 11.5px var(--mono); color: var(--text-dim); }
+
 .empty { text-align: center; padding: 50px 20px; color: var(--text-dim); }
 .empty .big { font-size: 44px; margin-bottom: 10px; }
 .banner { background: rgba(255,194,77,.08); border: 1px solid rgba(255,194,77,.25); border-radius: var(--radius-sm); padding: 11px 14px; font-size: 12.5px; color: var(--accent-amber); margin-bottom: 16px; }

@@ -164,6 +164,41 @@ section('7. Analytics roll up');
 }
 
 /* ============================================================ */
+section('8. Throttles: weekly invite cap, hourly + daily-total ceilings, presets');
+{
+  const { store: s5 } = freshEngine();
+  const lim = A.Limits(s5);
+  // presets
+  ok('exposes conservative/balanced/aggressive presets', !!(A.SAFETY_PRESETS.conservative && A.SAFETY_PRESETS.balanced && A.SAFETY_PRESETS.aggressive));
+  const acc = A.applyPreset(A.build.channelAccount('linkedin', 'P', { createdAt: START - 60 * DAY }), 'conservative');
+  s5.insert('channelAccounts', acc);
+  ok('preset sets conservative connect cap (15)', acc.dailyLimits.connect === 15, 'got ' + acc.dailyLimits.connect);
+  ok('preset sets a weekly invite cap (80)', acc.safety.weeklyInviteCap === 80);
+
+  // weekly invite cap: simulate 80 connects already this week across prior days
+  for (let i = 0; i < 7; i++) s5.bump(acc.id, lim.dateStr(START - i * DAY), 'connect', 12); // 84 across the rolling 7-day window
+  const wk = lim.check(acc, 'connect', START, { invite: true });
+  ok('weekly invite cap blocks once exceeded', !wk.allowed && wk.reason === 'weekly_invites', JSON.stringify(wk));
+
+  // hourly ceiling
+  const acc2 = s5.insert('channelAccounts', A.build.channelAccount('linkedin', 'H', { createdAt: START - 60 * DAY }));
+  for (let i = 0; i < acc2.safety.hourlyMax; i++) s5.bump(acc2.id, lim.dateHour(START), '__total', 1);
+  const hr = lim.check(acc2, 'view', START, {});
+  ok('hourly ceiling blocks bursts', !hr.allowed && hr.reason === 'hourly_cap', JSON.stringify(hr));
+
+  // daily total ceiling
+  const acc3 = s5.insert('channelAccounts', A.build.channelAccount('linkedin', 'T', { createdAt: START - 60 * DAY, safety: Object.assign({}, A.DEFAULT_SAFETY, { dailyTotalCap: 5, hourlyMax: 999 }) }));
+  for (let i = 0; i < 5; i++) s5.bump(acc3.id, lim.dateStr(START), '__total', 1);
+  const tot = lim.check(acc3, 'view', START, {});
+  ok('daily total ceiling blocks across all action types', !tot.allowed && tot.reason === 'daily_total', JSON.stringify(tot));
+
+  // usage snapshot for the monitoring dashboard
+  const u = lim.usage(acc, START);
+  ok('usage() reports per-action used/cap + totals', u.actions.connect && typeof u.actions.connect.cap === 'number' && typeof u.weeklyInvites === 'number');
+  ok('usage() reports warmup percent', u.warmupPct > 0 && u.warmupPct <= 1);
+}
+
+/* ============================================================ */
 console.log('\n' + (fail === 0 ? '\x1b[32m' : '\x1b[31m') + '─'.repeat(46) + '\x1b[0m');
 console.log((fail === 0 ? '\x1b[32m' : '\x1b[31m') + `  ${pass} passed, ${fail} failed\x1b[0m\n`);
 process.exit(fail === 0 ? 0 : 1);

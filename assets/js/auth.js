@@ -80,6 +80,17 @@
     if (password.length < 8 && page === "signup") return say("Password needs at least 8 characters.", "err");
 
     submitBtn.disabled = true;
+
+    // Joining via a team invite link (?invite=token) -> accept into that workspace.
+    var invite = new URLSearchParams(location.search).get("invite");
+    if (invite && page === "signup") {
+      say("Joining your team...", "busy");
+      api("/team/accept", "PUT", { token: invite, name: name, password: password })
+        .then(land)
+        .catch(function () { say("That invite is invalid or expired.", "err"); submitBtn.disabled = false; });
+      return;
+    }
+
     say(page === "signup" ? "Creating your workspace..." : "Signing you in...", "busy");
 
     var req = page === "signup"
@@ -123,12 +134,29 @@
     });
   }
 
+  // "Forgot?" -> send a reset link (prefilled with whatever email is typed).
+  var forgot = document.getElementById("forgot");
+  if (forgot) {
+    forgot.addEventListener("click", function (e) {
+      e.preventDefault();
+      var emailEl = document.getElementById("email");
+      var email = emailEl ? emailEl.value.trim() : "";
+      if (valid(email)) {
+        location.href = "forgot-password.html?email=" + encodeURIComponent(email);
+      } else {
+        location.href = "forgot-password.html";
+      }
+    });
+  }
+
   function prettyErr(code) {
     var map = {
       email_in_use: "That email already has an account. Try signing in.",
       invalid_credentials: "Email or password is incorrect.",
       weak_password: "Password needs at least 8 characters.",
       missing_fields: "Please fill in every field.",
+      invalid_or_expired_invite: "That invite is invalid or expired.",
+      already_member: "You're already on this team. Try signing in.",
     };
     return map[code] || "Something went wrong. Please try again.";
   }

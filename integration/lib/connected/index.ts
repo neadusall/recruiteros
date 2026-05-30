@@ -6,6 +6,7 @@
  */
 
 import { nowIso } from "../core/ids";
+import { getProvider, providerStatuses } from "../providers";
 import type { Motion } from "../core/types";
 
 export type IntegrationId =
@@ -61,23 +62,52 @@ export function configure(workspaceId: string, id: IntegrationId): Integration |
 }
 
 /**
- * Run the test endpoint for one integration. The reference build simulates the
- * call; wire the real per-service health check where marked. Pass succeeds ->
- * green, fails -> yellow with an error.
+ * Run the real verify endpoint for one integration via its provider client.
+ * Configured + verify passes -> green; configured but verify fails -> yellow
+ * with the error; not configured -> red. The `force` arg lets the demo flip a
+ * provider green without live credentials.
  */
-export async function testConnection(workspaceId: string, id: IntegrationId, ok = true, error?: string): Promise<Integration | null> {
+export async function testConnection(workspaceId: string, id: IntegrationId, force?: boolean, error?: string): Promise<Integration | null> {
   const i = wsState(workspaceId).get(id);
   if (!i) return null;
-  // TODO(prod): call the service's verify endpoint (Instantly /vitals, Loxo /me, ...).
-  i.status = ok ? "green" : "yellow";
   i.lastTestedAt = nowIso();
-  i.error = ok ? undefined : (error ?? "verification failed");
+
+  if (force) {
+    i.status = "green";
+    i.error = undefined;
+    return i;
+  }
+
+  const provider = getProvider(id);
+  const loxoConfigured = id === "loxo" && Boolean(process.env.LOXO_API_KEY);
+
+  if (!provider && !loxoConfigured) {
+    // No live client / not configured -> stay red unless a key exists.
+    i.status = i.status === "red" ? "red" : "yellow";
+    i.error = error ?? "not_configured";
+    return i;
+  }
+  if (provider && !provider.configured()) {
+    i.status = "red";
+    i.error = "not_configured";
+    return i;
+  }
+
+  const result = provider ? await provider.verify() : { ok: loxoConfigured };
+  i.status = result.ok ? "green" : "yellow";
+  i.error = result.ok ? undefined : (result.error ?? error ?? "verification failed");
   return i;
 }
 
+/** Live configured-status straight from the provider registry (for diagnostics). */
+export function providerHealth() {
+  return providerStatuses();
+}
+
+/** Run a real verify() for every configured integration ("Test all"). */
 export async function testAll(workspaceId: string): Promise<Integration[]> {
   const list = listIntegrations(workspaceId).filter((i) => i.status !== "red");
-  for (const i of list) await testConnection(workspaceId, i.id, true);
+  await Promise.all(list.map((i) => testConnection(workspaceId, i.id)));
   return listIntegrations(workspaceId);
 }
 

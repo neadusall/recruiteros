@@ -17,6 +17,7 @@
 
 import { getCore } from "../core/repository";
 import { rid, nowIso } from "../core/ids";
+import { enrich, sendTouch } from "../channels";
 import type { Campaign, Prospect } from "../core/types";
 
 export interface CadenceStage {
@@ -76,13 +77,53 @@ export async function runDailyCadence(workspaceId: string): Promise<{ drafted: n
       .slice(0, c.dailyCap);
 
     for (const p of prospects) {
-      // TODO(prod): signal pull (7:00) + enrich (7:30) before drafting.
+      // 7:30 enrich (real waterfall when keyed) -> merge resolved contact/role.
+      const e = await enrich(p);
+      if (e.email && !p.email) p.email = e.email;
+      if (e.title && !p.title) p.title = e.title;
+      if (e.company && !p.company) p.company = e.company;
+      if (e.source.length) await core.saveProspect(p);
+      // 7:45 draft.
       queue.push(draftFor(c, p));
     }
   }
 
   queues.set(workspaceId, queue);
   return { drafted: queue.length, campaigns: campaigns.length };
+}
+
+/**
+ * 9:00 push: send every approved draft on its channel via the real providers
+ * (dry-logs until keys are set), logging a person_event per touch. Returns the
+ * per-channel send results.
+ */
+export async function pushApproved(workspaceId: string): Promise<{ sent: number; results: any[] }> {
+  const core = getCore();
+  const queue = (queues.get(workspaceId) ?? []).filter((d) => d.status === "approved");
+  const results: any[] = [];
+  for (const d of queue) {
+    const prospect = await core.getProspect(d.prospectId);
+    if (!prospect) continue;
+    const campaign = await core.getCampaign(d.campaignId);
+    const res = await sendTouch(workspaceId, {
+      channel: d.channel === "voice" ? "voice" : d.channel,
+      prospect,
+      text: d.body,
+      subject: d.subject,
+      campaignChannelIds: {
+        instantlyCampaignId: campaign?.channels.instantlyCampaignId,
+        linkedinAccountId: campaign?.channels.linkedinAccountId,
+      },
+    });
+    // Advance the prospect into the live sequence on first send.
+    if (res.ok && prospect.status === "queued") {
+      prospect.status = "in_sequence";
+      prospect.dripStage = 1;
+      await core.saveProspect(prospect);
+    }
+    results.push({ draftId: d.id, ...res });
+  }
+  return { sent: results.filter((r) => r.ok).length, results };
 }
 
 function draftFor(c: Campaign, p: Prospect): DraftItem {

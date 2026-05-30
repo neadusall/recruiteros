@@ -35,6 +35,22 @@ export function requireSession(req: Request): { ctx: AuthResult } | { response: 
   return { ctx };
 }
 
+/**
+ * Guard: require a session AND a capability. Recruiters hitting an admin-only
+ * route (Telnyx, API keys, team, billing, ...) get a 403, not a 401.
+ */
+export function requireCapability(
+  req: Request,
+  cap: import("./auth/permissions").Capability,
+): { ctx: AuthResult } | { response: NextResponse } {
+  const g = requireSession(req);
+  if ("response" in g) return g;
+  if (!g.ctx.capabilities.includes(cap)) {
+    return { response: fail("forbidden", 403, { needs: cap }) };
+  }
+  return g;
+}
+
 /** Set the session cookie on a response (HttpOnly, 14d). */
 export function withSessionCookie(res: NextResponse, token: string): NextResponse {
   res.headers.append(

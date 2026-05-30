@@ -395,24 +395,44 @@
     // limits for the campaign's first account
     const c = campaign(); const acc = c && store.get('channelAccounts', (c.channelAccountIds || [])[0]);
     if (acc) {
+      acc.safety = Object.assign({}, A.DEFAULT_SAFETY, acc.safety || {});
+      const s = acc.safety;
+      $('#monAcc').textContent = acc.displayName;
+      $('#presetSel').value = acc.preset || 'custom';
+      $('#presetHint').textContent = (A.SAFETY_PRESETS[acc.preset] && A.SAFETY_PRESETS[acc.preset].desc) || 'Custom limits. Pick a preset to apply best-practice defaults, then fine-tune any value.';
+
+      // per-action daily caps
       const limits = acc.dailyLimits || {};
-      $('#limitsBox').innerHTML = Object.keys(limits).map(k => `<div class="limit-row"><span>${k}</span><input class="a-input" type="number" data-lim="${k}" value="${limits[k]}"></div>`).join('');
-      $$('[data-lim]').forEach(inp => inp.addEventListener('change', e => { acc.dailyLimits[e.target.dataset.lim] = +e.target.value; store.save(); toast('Limit updated'); }));
-      const s = acc.safety || A.DEFAULT_SAFETY;
+      $('#limitsBox').innerHTML = Object.keys(limits).map(k => `<div class="limit-row"><span>${k} / day</span><input class="a-input" type="number" min="0" data-lim="${k}" value="${limits[k]}"></div>`).join('') + `
+        <div class="limit-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:10px"><span>Warm-up enabled</span><input type="checkbox" id="sWarm" ${s.warmup.enabled ? 'checked' : ''}></div>
+        <div class="limit-row"><span>Warm-up start %</span><input class="a-input" type="number" min="5" max="100" id="sWpct" value="${Math.round(s.warmup.startPct * 100)}"></div>
+        <div class="limit-row"><span>Warm-up ramp (days)</span><input class="a-input" type="number" min="1" id="sWramp" value="${s.warmup.rampDays}"></div>`;
+      $$('[data-lim]').forEach(inp => inp.addEventListener('change', e => { acc.dailyLimits[e.target.dataset.lim] = +e.target.value; markCustom(acc); store.save(); renderSettings(); }));
+
+      // schedule, pacing, anti-burst throttles
       $('#safetyBox').innerHTML = `
-        <div class="limit-row"><span>Working hours start</span><input class="a-input" type="number" id="sStart" value="${s.workingHours.start}"></div>
-        <div class="limit-row"><span>Working hours end</span><input class="a-input" type="number" id="sEnd" value="${s.workingHours.end}"></div>
+        <div class="limit-row"><span>Working hours start</span><input class="a-input" type="number" min="0" max="23" id="sStart" value="${s.workingHours.start}"></div>
+        <div class="limit-row"><span>Working hours end</span><input class="a-input" type="number" min="1" max="24" id="sEnd" value="${s.workingHours.end}"></div>
         <div class="limit-row"><span>Pause on weekends</span><input type="checkbox" id="sWk" ${s.weekendsOff ? 'checked' : ''}></div>
-        <div class="limit-row"><span>Warm-up enabled</span><input type="checkbox" id="sWarm" ${s.warmup.enabled ? 'checked' : ''}></div>
-        <div class="limit-row"><span>Random delay min (min)</span><input class="a-input" type="number" id="sDmin" value="${s.randomDelayMin}"></div>
-        <div class="limit-row"><span>Random delay max (min)</span><input class="a-input" type="number" id="sDmax" value="${s.randomDelayMax}"></div>
-        <div class="limit-row"><span>Pending invite cap</span><input class="a-input" type="number" id="sPend" value="${s.pendingInviteCap}"></div>`;
-      const bind = (id, fn) => { const e = $('#' + id); e && e.addEventListener('change', ev => { fn(ev.target); store.save(); toast('Saved'); }); };
+        <div class="limit-row"><span>Speed</span><select class="a-select" id="sSpeed" style="width:auto">${['slow','normal','fast'].map(v => `<option ${s.speed===v?'selected':''}>${v}</option>`).join('')}</select></div>
+        <div class="limit-row"><span>Delay between actions (min)</span><span class="row" style="gap:6px"><input class="a-input" type="number" id="sDmin" value="${s.randomDelayMin}" style="width:60px"><span class="dim">to</span><input class="a-input" type="number" id="sDmax" value="${s.randomDelayMax}" style="width:60px"></span></div>
+        <div class="limit-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:10px"><span>Max per hour (anti-burst)</span><input class="a-input" type="number" id="sHr" value="${s.hourlyMax}"></div>
+        <div class="limit-row"><span>Max total / day</span><input class="a-input" type="number" id="sTot" value="${s.dailyTotalCap}"></div>
+        <div class="limit-row"><span>Weekly invite cap</span><input class="a-input" type="number" id="sWk7" value="${s.weeklyInviteCap}"></div>
+        <div class="limit-row"><span>Pending invite cap</span><input class="a-input" type="number" id="sPend" value="${s.pendingInviteCap}"></div>
+        <div class="limit-row"><span>Auto-withdraw invites after (days)</span><input class="a-input" type="number" id="sWd" value="${s.withdrawInviteAfterDays}"></div>`;
+      const bind = (id, fn) => { const e = $('#' + id); e && e.addEventListener('change', ev => { fn(ev.target); markCustom(acc); store.save(); renderMonitor(acc); toast('Saved'); }); };
+      bind('sWarm', t => acc.safety.warmup.enabled = t.checked); bind('sWpct', t => acc.safety.warmup.startPct = Math.max(0.05, Math.min(1, (+t.value) / 100))); bind('sWramp', t => acc.safety.warmup.rampDays = Math.max(1, +t.value));
       bind('sStart', t => acc.safety.workingHours.start = +t.value); bind('sEnd', t => acc.safety.workingHours.end = +t.value);
-      bind('sWk', t => acc.safety.weekendsOff = t.checked); bind('sWarm', t => acc.safety.warmup.enabled = t.checked);
+      bind('sWk', t => acc.safety.weekendsOff = t.checked);
+      bind('sSpeed', t => { acc.safety.speed = t.value; const d = A.SPEED_DELAYS[t.value]; if (d) { acc.safety.randomDelayMin = d[0]; acc.safety.randomDelayMax = d[1]; } renderSettings(); });
       bind('sDmin', t => acc.safety.randomDelayMin = +t.value); bind('sDmax', t => acc.safety.randomDelayMax = +t.value);
-      bind('sPend', t => acc.safety.pendingInviteCap = +t.value);
-    } else { $('#limitsBox').innerHTML = '<p class="dim">Connect an account first.</p>'; $('#safetyBox').innerHTML = ''; }
+      bind('sHr', t => acc.safety.hourlyMax = +t.value); bind('sTot', t => acc.safety.dailyTotalCap = +t.value);
+      bind('sWk7', t => acc.safety.weeklyInviteCap = +t.value); bind('sPend', t => acc.safety.pendingInviteCap = +t.value);
+      bind('sWd', t => acc.safety.withdrawInviteAfterDays = +t.value);
+
+      renderMonitor(acc);
+    } else { $('#limitsBox').innerHTML = '<p class="dim">Connect an account first.</p>'; $('#safetyBox').innerHTML = ''; $('#monitorBox').innerHTML = ''; $('#monAcc').textContent = ''; }
 
     const bl = store.blacklist();
     $('#blacklistBox').value = [...bl.domains, ...bl.emails, ...bl.names].join('\n');
@@ -423,6 +443,38 @@
       if (v.includes('@')) bl.emails.push(v); else if (v.includes('.') && !v.includes(' ')) bl.domains.push(v); else bl.names.push(v);
     });
     store.save(); toast('Blacklist saved');
+  });
+
+  /* ---- throttle presets + live monitoring ---- */
+  const monLimits = A.Limits(store);
+  function markCustom(acc) { acc.preset = 'custom'; }
+  function renderMonitor(acc) {
+    const box = $('#monitorBox'); if (!box) return;
+    if (!acc) { box.innerHTML = ''; return; }
+    const u = monLimits.usage(acc, simNow);
+    const bar = (used, cap, label) => {
+      const capped = cap && cap !== Infinity;
+      const pct = capped ? Math.min(100, used / cap * 100) : 0;
+      const cls = !capped ? '' : pct >= 100 ? 'bad' : pct >= 80 ? 'warn' : 'ok';
+      return `<div class="mon-row"><span class="mon-l">${label}</span><span class="mon-track"><span class="mon-fill ${cls}" style="width:${pct}%"></span></span><span class="mon-v">${used}${capped ? ' / ' + cap : ''}</span></div>`;
+    };
+    let html = '<div class="mon-grid">';
+    html += bar(u.total, u.totalCap, '🎯 Total today');
+    html += bar(u.hour, u.hourCap, '⏱ This hour');
+    html += bar(u.weeklyInvites, u.weeklyInviteCap, '📅 Invites this week');
+    html += bar(u.pending, u.pendingCap, '⏳ Pending invites');
+    html += '</div>';
+    const acts = Object.keys(u.actions);
+    if (acts.length) html += '<div class="mon-grid" style="margin-top:6px">' + acts.map(a => bar(u.actions[a].used, u.actions[a].cap, a)).join('') + '</div>';
+    html += `<div class="dim" style="font-size:11.5px;margin-top:8px">Warm-up: effective caps at <b>${Math.round(u.warmupPct * 100)}%</b> of base ${u.warmupPct < 1 ? '(ramping up as the account ages)' : '(fully warmed)'}.</div>`;
+    box.innerHTML = html;
+  }
+  $('#presetSel') && $('#presetSel').addEventListener('change', (e) => {
+    const c = campaign(); const acc = c && store.get('channelAccounts', (c.channelAccountIds || [])[0]);
+    if (!acc) return;
+    if (e.target.value === 'custom') { acc.preset = 'custom'; store.save(); renderSettings(); return; }
+    if (!confirm('Apply the ' + e.target.value + ' preset? It overwrites this account\'s caps and safety settings.')) { renderSettings(); return; }
+    A.applyPreset(acc, e.target.value); store.save(); renderSettings(); toast(e.target.value + ' preset applied');
   });
   $('#addAccount').addEventListener('click', () => {
     modal(`<h2>Connect account</h2>

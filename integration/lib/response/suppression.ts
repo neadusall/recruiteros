@@ -8,6 +8,7 @@
  */
 
 import { normalizePhone } from "../core/repository";
+import { instantly, salesrobot, taltxt } from "../providers";
 
 export interface SuppressionEntry {
   workspaceId: string;
@@ -48,13 +49,32 @@ export function listSuppression(workspaceId: string): SuppressionEntry[] {
 }
 
 /**
- * Push the opt-out to each provider's suppression endpoint. Stubbed to a log in
- * the reference build; wire the real calls (Instantly block-list, SalesRobot
- * removeProspect, TalTxt opt-out) where marked.
+ * Push the opt-out to each provider's suppression endpoint across every channel.
+ * Each call no-ops (dry-logs) until that provider's key is set, so this is safe
+ * to run with partial configuration. Failures are swallowed per-channel: an
+ * opt-out must never fail because one provider is down.
  */
 async function mirrorToPlatforms(entry: SuppressionEntry): Promise<void> {
-  // TODO(prod): Instantly  -> POST /api/v2/block-list
-  // TODO(prod): SalesRobot -> POST /removeProspect
-  // TODO(prod): TalTxt     -> contact.opt-out
+  const isEmail = (h: string) => h.includes("@");
+  const isPhone = (h: string) => /^\+?\d{6,}$/.test(h);
+  const tasks: Promise<unknown>[] = [];
+
+  for (const h of entry.handles) {
+    if (isEmail(h)) {
+      tasks.push(swallow(instantly.blocklistAdd(h)));        // email channel
+    } else if (isPhone(h)) {
+      tasks.push(swallow(taltxt.optOut(h)));                 // SMS channel
+    } else {
+      tasks.push(swallow(salesrobot.removeProspect(h)));     // LinkedIn channel (profile url)
+    }
+  }
+  await Promise.all(tasks);
   console.info("[suppression] DNC mirrored to all channels", entry.handles, entry.reason);
+}
+
+function swallow<T>(p: Promise<T>): Promise<T | null> {
+  return p.catch((e) => {
+    console.warn("[suppression] channel mirror failed", e?.message ?? e);
+    return null;
+  });
 }

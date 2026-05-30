@@ -5,26 +5,27 @@
  */
 
 import { listIntegrations, configure, testConnection, testAll, preflight, type IntegrationId } from "../../../lib/connected";
-import { requireSession, body, ok, fail } from "../../../lib/api";
+import { requireCapability, body, ok, fail } from "../../../lib/api";
 import type { Motion } from "../../../lib/core/types";
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "integrations:manage");
   if ("response" in g) return g.response;
   return ok({ integrations: listIntegrations(g.ctx.workspace.id) });
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "integrations:manage");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
-  const b = await body<{ action?: string; id?: IntegrationId; motion?: Motion; ok?: boolean }>(req);
+  const b = await body<{ action?: string; id?: IntegrationId; motion?: Motion; force?: boolean }>(req);
 
   switch (b?.action) {
     case "configure":
       return b.id ? ok({ integration: configure(ws, b.id) }) : fail("missing_id", 422);
     case "test":
-      return b.id ? ok({ integration: await testConnection(ws, b.id, b.ok ?? true) }) : fail("missing_id", 422);
+      // Real provider.verify() by default; pass force:true to flip green in demos.
+      return b.id ? ok({ integration: await testConnection(ws, b.id, b.force) }) : fail("missing_id", 422);
     case "test-all":
       return ok({ integrations: await testAll(ws) });
     case "preflight":

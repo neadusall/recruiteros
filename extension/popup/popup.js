@@ -6,6 +6,13 @@
   const $$ = (s) => Array.from(document.querySelectorAll(s));
   let state = null;
 
+  // best-practice daily caps + pacing per preset (mirrors the engine)
+  const PRESETS = {
+    conservative: { caps: { connect: 15, message: 35, inmail: 5, view: 50, follow: 15, endorse: 10, like: 25 }, pacing: { minSeconds: 90, maxSeconds: 240 } },
+    balanced: { caps: { connect: 25, message: 60, inmail: 10, view: 80, follow: 30, endorse: 20, like: 40 }, pacing: { minSeconds: 35, maxSeconds: 140 } },
+    aggressive: { caps: { connect: 40, message: 90, inmail: 15, view: 100, follow: 45, endorse: 30, like: 60 }, pacing: { minSeconds: 18, maxSeconds: 70 } },
+  };
+
   async function refresh() {
     const res = await send({ type: TYPE.GET_STATE });
     if (!res || !res.ok) { $('#acct').textContent = 'Extension error'; return; }
@@ -75,6 +82,11 @@
     $('#brUrl').value = br.url || '';
     $('#brToken').value = br.token || '';
     $('#brAccount').value = br.accountId || '';
+    // editable daily caps + preset
+    $('#setPreset').value = s.settings.preset || 'custom';
+    const capsEdit = s.settings.dailyLimits || {};
+    $('#capGrid').innerHTML = Object.keys(capsEdit).map(k => `<label class="p-field" style="margin:0"><span>${k}/day</span><input type="number" min="0" data-cap="${k}" value="${capsEdit[k]}"></label>`).join('');
+    $$('#capGrid [data-cap]').forEach(inp => inp.addEventListener('change', () => { $('#setPreset').value = 'custom'; }));
   }
 
   function item(type, name, status) {
@@ -134,9 +146,18 @@
     if (e.target.checked && !confirm('Turn ON live actions? Real clicks will fire on LinkedIn. Keep volumes humane and within ToS.')) { e.target.checked = false; return; }
     await send({ type: TYPE.SET_LIVE, live: e.target.checked }); refresh();
   });
+  $('#setPreset').addEventListener('change', (e) => {
+    const p = PRESETS[e.target.value]; if (!p) return;
+    $$('#capGrid [data-cap]').forEach(inp => { if (p.caps[inp.dataset.cap] != null) inp.value = p.caps[inp.dataset.cap]; });
+    $('#setGapMin').value = p.pacing.minSeconds; $('#setGapMax').value = p.pacing.maxSeconds;
+    flash(e.target.value + ' preset loaded, click Save');
+  });
   $('#saveSettings').addEventListener('click', async () => {
+    const dailyLimits = {}; $$('#capGrid [data-cap]').forEach(inp => { dailyLimits[inp.dataset.cap] = +inp.value; });
     await send({ type: TYPE.UPDATE_SETTINGS, settings: {
       backendBaseUrl: $('#setBackend').value.trim(),
+      preset: $('#setPreset').value,
+      dailyLimits,
       workingHours: { start: +$('#setStart').value, end: +$('#setEnd').value },
       pacing: { minSeconds: +$('#setGapMin').value, maxSeconds: +$('#setGapMax').value },
       weekendsOff: $('#setWeekends').checked,

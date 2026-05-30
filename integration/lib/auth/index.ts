@@ -15,9 +15,11 @@
 
 import { rid, nowIso, isoPlusHours } from "../core/ids";
 import { hashPassword, verifyPassword, randomToken } from "./crypto";
+import { capabilitiesFor } from "./permissions";
 import type { AuthResult, EmailToken, Membership, Role, Session, User, Workspace } from "./types";
 
 export * from "./types";
+export * from "./permissions";
 
 const store = {
   users: new Map<string, User>(),
@@ -69,6 +71,55 @@ export async function requestMagicLink(email: string): Promise<{ sent: true }> {
   await sendEmail(key, "Your RecruiterOS sign-in link",
     `Sign in: ${appUrl()}/login?token=${token.token}`);
   return { sent: true };
+}
+
+/**
+ * Forgot password: email a one-time reset link. Always returns { sent: true }
+ * even when the email is unknown, so the endpoint can't be used to enumerate
+ * accounts.
+ */
+export async function requestPasswordReset(email: string): Promise<{ sent: true }> {
+  const key = normEmail(email);
+  const user = userByEmail(key);
+  if (user) {
+    const token: EmailToken = { token: randomToken(), email: key, purpose: "reset_password", expiresAt: isoPlusHours(1) };
+    store.emailTokens.set(token.token, token);
+    await sendEmail(key, "Reset your RecruiterOS password",
+      `Reset your password: ${appUrl()}/reset-password.html?token=${token.token}`);
+  }
+  return { sent: true };
+}
+
+/** Check a reset token is valid without consuming it (so the page can render). */
+export function peekResetToken(token: string): { valid: boolean; email?: string } {
+  const t = store.emailTokens.get(token);
+  if (!t || t.purpose !== "reset_password" || Date.parse(t.expiresAt) < Date.now()) return { valid: false };
+  return { valid: true, email: t.email };
+}
+
+/**
+ * Complete a password reset: set the new password, invalidate the token and all
+ * existing sessions for that user, then issue a fresh session.
+ */
+export async function resetPassword(token: string, newPassword: string): Promise<AuthResult> {
+  if (newPassword.length < 8) throw authError("weak_password", 422);
+  const t = store.emailTokens.get(token);
+  if (!t || t.purpose !== "reset_password" || Date.parse(t.expiresAt) < Date.now()) {
+    throw authError("invalid_or_expired_token", 401);
+  }
+  store.emailTokens.delete(token);
+
+  const user = userByEmail(t.email);
+  if (!user) throw authError("not_found", 404);
+  user.passwordHash = hashPassword(newPassword);
+  user.emailVerified = true;
+
+  // Security: revoke every existing session for this user.
+  for (const [tok, s] of store.sessions) if (s.userId === user.id) store.sessions.delete(tok);
+
+  const m = primaryMembership(user.id);
+  const session = issueSession(user.id, m.workspaceId);
+  return result(user, store.workspaces.get(m.workspaceId)!, m.role, session);
 }
 
 export async function consumeMagicLink(token: string): Promise<AuthResult> {
@@ -182,7 +233,22 @@ function primaryMembership(userId: string): Membership {
 }
 function result(user: User, workspace: Workspace, role: Role, session: Session): AuthResult {
   const { passwordHash: _omit, ...safe } = user;
-  return { user: safe, workspace, role, session };
+  return { user: safe, workspace, role, capabilities: capabilitiesFor(role), session };
+}
+
+/** Issue a session for a known user+workspace and return the authed context. */
+export function issueSessionForUser(userId: string, workspaceId: string): AuthResult {
+  const user = store.users.get(userId);
+  const ws = store.workspaces.get(workspaceId);
+  if (!user || !ws) throw authError("not_found", 404);
+  const m = store.memberships.find((x) => x.userId === userId && x.workspaceId === workspaceId);
+  const session = issueSession(userId, workspaceId);
+  return result(user, ws, m?.role ?? "member", session);
+}
+
+/** Public email seam reused by team invites. */
+export async function sendWorkspaceEmail(to: string, subject: string, body: string): Promise<void> {
+  await sendEmail(to, subject, body);
 }
 function normEmail(e: string): string {
   return e.trim().toLowerCase();
