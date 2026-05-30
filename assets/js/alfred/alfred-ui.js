@@ -135,44 +135,104 @@
   /* ============================================================
      SEQUENCE BUILDER
      ============================================================ */
+  let dragFrom = null;
   function renderSequence() {
     const seq = sequence();
     const canvas = $('#seqCanvas'); canvas.innerHTML = '';
     if (!seq || !seq.steps.length) {
-      canvas.innerHTML = '<div class="empty"><div class="big">🧩</div><p>No steps yet. Add an action to begin your sequence.</p></div>';
+      canvas.innerHTML = '<div class="empty"><div class="big">🧩</div><p>No steps yet. Drag an action from the palette above, or click “Add action step”.</p></div>';
       $('#inspector').innerHTML = '<div class="empty"><div class="big">🧩</div><p>Add your first step.</p></div>';
+      wireCanvasDrop(canvas, seq);
       return;
     }
     seq.steps.forEach((step, i) => {
+      const node = el('div', 'seq-node' + (i === selectedStepIdx ? ' sel' : '') + (step.kind === 'delay' ? ' is-delay' : ''));
+      node.draggable = true; node.dataset.idx = i;
       if (step.kind === 'delay') {
-        canvas.appendChild(el('div', 'seq-delay', `⏱️ Wait ${step.delay.amount} ${step.delay.unit}`));
-        return;
+        node.style.padding = '9px 13px';
+        node.innerHTML = `<span class="sn-grip" title="Drag to reorder">⠿</span>
+          <div class="sn-ico" style="font-size:15px;width:30px;height:30px">⏱️</div>
+          <div class="sn-body"><div class="sn-title" style="font-size:13px">Wait ${step.delay.amount} ${step.delay.unit}</div></div>
+          <div class="sn-actions"><button class="sn-iconbtn" data-del="${i}" title="Delete">✕</button></div>`;
+      } else {
+        const meta = ACTION_CATALOG[step.action.channel].actions[step.action.type] || {};
+        const chMeta = ACTION_CATALOG[step.action.channel];
+        const cond = step.action.requireAccepted || (step.condition && step.condition.type === 'if_accepted')
+          ? '<span class="seq-cond">after accept</span>'
+          : (step.condition && step.condition.type === 'if_replied' ? '<span class="seq-cond">if replied</span>' : '');
+        node.innerHTML = `<span class="sn-grip" title="Drag to reorder">⠿</span>
+          <div class="sn-ico">${chMeta.icon}</div>
+          <div class="sn-body">
+            <div class="sn-title">${meta.label || step.action.type} ${cond}</div>
+            <div class="sn-sub">${chMeta.label} · ${esc(previewLine(step))}</div>
+          </div>
+          <div class="sn-actions">
+            <button class="sn-iconbtn" data-up="${i}" title="Move up">↑</button>
+            <button class="sn-iconbtn" data-down="${i}" title="Move down">↓</button>
+            <button class="sn-iconbtn" data-del="${i}" title="Delete">✕</button>
+          </div>`;
       }
-      const meta = ACTION_CATALOG[step.action.channel].actions[step.action.type] || {};
-      const chMeta = ACTION_CATALOG[step.action.channel];
-      const node = el('div', 'seq-node' + (i === selectedStepIdx ? ' sel' : ''));
-      const cond = step.action.requireAccepted || (step.condition && step.condition.type === 'if_accepted')
-        ? '<span class="seq-cond">after accept</span>'
-        : (step.condition && step.condition.type === 'if_replied' ? '<span class="seq-cond">if replied</span>' : '');
-      node.innerHTML = `
-        <div class="sn-ico">${chMeta.icon}</div>
-        <div class="sn-body">
-          <div class="sn-title">${meta.label || step.action.type} ${cond}</div>
-          <div class="sn-sub">${chMeta.label} · ${esc(previewLine(step))}</div>
-        </div>
-        <div class="sn-actions">
-          <button class="sn-iconbtn" data-up="${i}" title="Move up">↑</button>
-          <button class="sn-iconbtn" data-down="${i}" title="Move down">↓</button>
-          <button class="sn-iconbtn" data-del="${i}" title="Delete">✕</button>
-        </div>`;
-      node.addEventListener('click', (e) => { if (e.target.dataset.up == null && e.target.dataset.down == null && e.target.dataset.del == null) { selectedStepIdx = i; renderSequence(); } });
+      node.addEventListener('click', (e) => { if (!e.target.dataset.up && !e.target.dataset.down && !e.target.dataset.del) { selectedStepIdx = i; renderSequence(); } });
       canvas.appendChild(node);
       if (i < seq.steps.length - 1) { const rail = el('div', 'seq-rail'); rail.innerHTML = '<span class="line"></span>'; canvas.appendChild(rail); }
     });
-    $$('[data-up]', canvas).forEach(b => b.addEventListener('click', () => moveStep(+b.dataset.up, -1)));
-    $$('[data-down]', canvas).forEach(b => b.addEventListener('click', () => moveStep(+b.dataset.down, 1)));
-    $$('[data-del]', canvas).forEach(b => b.addEventListener('click', () => deleteStep(+b.dataset.del)));
+    $$('[data-up]', canvas).forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); moveStep(+b.dataset.up, -1); }));
+    $$('[data-down]', canvas).forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); moveStep(+b.dataset.down, 1); }));
+    $$('[data-del]', canvas).forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); deleteStep(+b.dataset.del); }));
+    wireNodeDnD(canvas);
+    wireCanvasDrop(canvas, seq);
     renderInspector();
+  }
+
+  function wireNodeDnD(canvas) {
+    const nodes = $$('.seq-node', canvas);
+    nodes.forEach(node => {
+      node.addEventListener('dragstart', (e) => { dragFrom = +node.dataset.idx; node.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'reorder'); });
+      node.addEventListener('dragend', () => { dragFrom = null; nodes.forEach(n => n.classList.remove('dragging', 'drop-before', 'drop-after')); });
+      node.addEventListener('dragover', (e) => { e.preventDefault(); const r = node.getBoundingClientRect(); const after = (e.clientY - r.top) > r.height / 2; node.classList.toggle('drop-after', after); node.classList.toggle('drop-before', !after); });
+      node.addEventListener('dragleave', () => node.classList.remove('drop-before', 'drop-after'));
+      node.addEventListener('drop', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const r = node.getBoundingClientRect(); const after = (e.clientY - r.top) > r.height / 2;
+        let target = (+node.dataset.idx) + (after ? 1 : 0);
+        const data = e.dataTransfer.getData('text/plain');
+        if (data && data.indexOf('add:') === 0) return insertStepAt(data.slice(4), target);
+        if (dragFrom != null) reorderStep(dragFrom, target);
+      });
+    });
+  }
+  function wireCanvasDrop(canvas, seq) {
+    canvas.addEventListener('dragover', (e) => { if ((dragFrom != null) || (e.dataTransfer.types || []).includes('text/plain')) { e.preventDefault(); canvas.classList.add('drop-active'); } });
+    canvas.addEventListener('dragleave', () => canvas.classList.remove('drop-active'));
+    canvas.addEventListener('drop', (e) => {
+      canvas.classList.remove('drop-active');
+      const data = e.dataTransfer.getData('text/plain');
+      if (data && data.indexOf('add:') === 0) { e.preventDefault(); insertStepAt(data.slice(4), (seq && seq.steps.length) || 0); }
+    });
+  }
+  function makeStepFromType(typeStr) {
+    if (typeStr === 'delay') return A.build.delayStep(2, 'days');
+    const [ch, type] = typeStr.split(':');
+    const fields = (type === 'connect') ? { body: 'Hi {first_name}, would love to connect.' }
+      : (type === 'message') ? { body: 'Thanks for connecting, {first_name}!', requireAccepted: ch === 'linkedin' }
+      : (type === 'email') ? { subject: 'Quick question, {first_name}', body: 'Hi {first_name},\n\n' }
+      : (type === 'inmail') ? { subject: 'Quick note, {first_name}', body: 'Hi {first_name},\n\n' } : {};
+    return A.build.actionStep(ch, type, fields);
+  }
+  function insertStepAt(typeStr, idx) {
+    const seq = sequence(); if (!seq) return;
+    const step = makeStepFromType(typeStr);
+    idx = Math.max(0, Math.min(idx, seq.steps.length));
+    seq.steps.splice(idx, 0, step);
+    selectedStepIdx = idx; store.save(); renderSequence(); toast('Step added');
+  }
+  function reorderStep(from, to) {
+    const seq = sequence(); if (!seq || from === to) return;
+    const [moved] = seq.steps.splice(from, 1);
+    if (to > from) to--;
+    to = Math.max(0, Math.min(to, seq.steps.length));
+    seq.steps.splice(to, 0, moved);
+    selectedStepIdx = to; store.save(); renderSequence();
   }
 
   function previewLine(step) {
@@ -210,8 +270,13 @@
       </div>
       <div class="a-field"><label class="a-label">Template</label><select class="a-select" id="iTpl">${tplOpts}</select></div>
       ${needsSubject ? `<div class="a-field"><label class="a-label">Subject</label><input class="a-input" id="iSubj" value="${esc(a.subject||'')}"></div>` : ''}
-      ${needsBody ? `<div class="a-field"><label class="a-label">${a.type==='connect'?'Connection note':'Message body'}</label><textarea class="a-textarea" id="iBody" placeholder="Hi {first_name}, ...">${esc(a.body||a.note||'')}</textarea></div>` : ''}
-      ${meta.requiresAccepted || a.type==='connect' ? '' : `<div class="a-field"><label class="row" style="font-size:12.5px;color:var(--text-muted)"><input type="checkbox" id="iAccept" ${a.requireAccepted?'checked':''} style="width:auto"> Only run after connection accepted</label></div>`}
+      ${needsBody && !(a.variants && a.variants.length) ? `<div class="a-field"><label class="a-label">${a.type==='connect'?'Connection note':'Message body'}</label><textarea class="a-textarea" id="iBody" placeholder="Hi {first_name}, ...">${esc(a.body||a.note||'')}</textarea></div>` : ''}
+      ${needsBody ? `<div class="a-field" id="iVarsWrap"><label class="a-label" style="display:flex;justify-content:space-between;align-items:center">A/B variants <button class="a-btn ghost sm" id="iAddVar" style="padding:2px 8px">+ Variant</button></label><div id="iVars"></div></div>` : ''}
+      ${a.type==='connect' ? '' : `<div class="a-field"><label class="a-label">Run condition</label><select class="a-select" id="iCond">
+          <option value="always">Always (after previous step)</option>
+          <option value="accept">Only after connection accepted</option>
+          <option value="reply">Only if they replied</option></select></div>
+        <div class="a-field" id="iElseWrap"><label class="a-label">If condition not met</label><select class="a-select" id="iElse"><option value="skip">Skip this step</option><option value="stop">Stop the sequence</option></select></div>`}
       <div class="a-label">Live preview · ${esc(firstLeadName())}</div>
       <div class="preview-box"><div class="preview-to" id="pvTo"></div><div id="pvBody"></div></div>
       <div class="warnflag" id="pvWarn"></div>`;
@@ -221,15 +286,55 @@
     $('#iTpl').addEventListener('change', e => { a.templateId = e.target.value || null; store.save(); renderSequence(); });
     $('#iSubj') && $('#iSubj').addEventListener('input', e => { a.subject = e.target.value; store.save(); updatePreview(step); });
     $('#iBody') && $('#iBody').addEventListener('input', e => { if (a.type === 'connect') a.note = e.target.value; a.body = e.target.value; store.save(); updatePreview(step); });
-    $('#iAccept') && $('#iAccept').addEventListener('change', e => { a.requireAccepted = e.target.checked; store.save(); renderSequence(); });
+
+    // condition editor
+    const condSel = $('#iCond');
+    if (condSel) {
+      const cur = a.requireAccepted || (step.condition && step.condition.type === 'if_accepted') ? 'accept'
+        : (step.condition && step.condition.type === 'if_replied') ? 'reply' : 'always';
+      condSel.value = cur;
+      const elseWrap = $('#iElseWrap'); if (elseWrap) elseWrap.style.display = cur === 'reply' ? 'block' : 'none';
+      if ($('#iElse') && step.condition) $('#iElse').value = step.condition.else || 'skip';
+      condSel.addEventListener('change', e => {
+        const v = e.target.value;
+        a.requireAccepted = v === 'accept';
+        step.condition = v === 'reply' ? { type: 'if_replied', else: ($('#iElse') && $('#iElse').value) || 'skip' } : { type: v === 'accept' ? 'if_accepted' : 'always' };
+        store.save(); renderSequence();
+      });
+      $('#iElse') && $('#iElse').addEventListener('change', e => { if (step.condition) { step.condition.else = e.target.value; store.save(); } });
+    }
+
+    // inline A/B variants
+    renderStepVariants(step);
+    $('#iAddVar') && $('#iAddVar').addEventListener('click', (e) => {
+      e.preventDefault();
+      if (!a.variants || !a.variants.length) a.variants = [{ label: 'A', weight: 1, body: a.body || a.note || '' }];
+      a.variants.push({ label: String.fromCharCode(65 + a.variants.length), weight: 1, body: '' });
+      store.save(); renderInspector();
+    });
     updatePreview(step);
+  }
+
+  function renderStepVariants(step) {
+    const wrap = $('#iVars'); if (!wrap) return;
+    const a = step.action;
+    if (!a.variants || !a.variants.length) { wrap.innerHTML = '<p class="dim" style="font-size:11.5px">One message. Add a variant to A/B test.</p>'; return; }
+    wrap.innerHTML = a.variants.map((v, i) => `
+      <div class="card" style="padding:9px;margin-bottom:6px">
+        <div class="row" style="justify-content:space-between;margin-bottom:5px"><b style="font-size:12px">Variant ${esc(v.label || String.fromCharCode(65 + i))}</b>
+          <span class="row" style="gap:6px"><input class="a-input" type="number" min="1" data-vw="${i}" value="${v.weight || 1}" style="width:54px" title="Traffic weight"><button class="a-btn ghost sm danger" data-vdel="${i}" style="padding:2px 7px">✕</button></span></div>
+        <textarea class="a-textarea" data-vb="${i}" style="min-height:64px">${esc(v.body || '')}</textarea>
+      </div>`).join('');
+    $$('[data-vb]', wrap).forEach(t => t.addEventListener('input', e => { a.variants[+e.target.dataset.vb].body = e.target.value; store.save(); updatePreview(step); }));
+    $$('[data-vw]', wrap).forEach(inp => inp.addEventListener('change', e => { a.variants[+e.target.dataset.vw].weight = Math.max(1, +e.target.value); store.save(); }));
+    $$('[data-vdel]', wrap).forEach(b => b.addEventListener('click', (e) => { e.preventDefault(); a.variants.splice(+b.dataset.vdel, 1); if (a.variants.length === 1) { a.body = a.variants[0].body; a.variants = []; } store.save(); renderInspector(); }));
   }
 
   function firstLead() { return store.all('leads')[0] || A.build.lead({ firstName: 'Anja', company: 'Trade Republic' }); }
   function firstLeadName() { const l = firstLead(); return l.fullName || l.firstName; }
   function updatePreview(step) {
     const a = step.action, lead = firstLead();
-    let subjSrc = a.subject, bodySrc = a.body || a.note;
+    let subjSrc = a.subject, bodySrc = (a.variants && a.variants.length) ? a.variants[0].body : (a.body || a.note);
     if (a.templateId) { const t = store.get('templates', a.templateId); if (t) { subjSrc = subjSrc || t.subject; bodySrc = bodySrc || A.pickVariant(t); } }
     const channelMeta = ACTION_CATALOG[a.channel];
     $('#pvTo') && ($('#pvTo').textContent = `${channelMeta.label} · to ${lead.fullName || lead.firstName}`);
@@ -263,12 +368,15 @@
      LEADS
      ============================================================ */
   let leadSel = new Set();
+  let leadFilter = '';
   function renderLeads() {
-    const leads = store.all('leads');
-    $('#leadCount').textContent = leads.length + ' leads · ' + store.where('enrollments', e => e.campaignId === activeCampaignId).length + ' enrolled in this campaign';
+    const allLeads = store.all('leads');
+    const q = leadFilter.trim().toLowerCase();
+    const leads = q ? allLeads.filter(l => (l.fullName + ' ' + l.company + ' ' + (l.tags || []).join(' ')).toLowerCase().includes(q)) : allLeads;
+    $('#leadCount').textContent = (q ? leads.length + ' of ' + allLeads.length : allLeads.length) + ' leads · ' + store.where('enrollments', e => e.campaignId === activeCampaignId).length + ' enrolled';
     const enrolledLeadIds = new Set(store.where('enrollments', e => e.campaignId === activeCampaignId).map(e => e.leadId));
     const t = $('#leadsTable');
-    if (!leads.length) {
+    if (!allLeads.length) {
       t.innerHTML = `<tbody><tr><td><div class="empty"><div class="big">🎯</div><h3>No leads yet</h3>
         <p>Bring people in to start outreach. Three ways:</p>
         <div class="row" style="justify-content:center;gap:8px;margin-top:10px;flex-wrap:wrap">
@@ -281,6 +389,7 @@
       $('#empAdd') && $('#empAdd').addEventListener('click', () => $('#addLead').click());
       return;
     }
+    if (!leads.length) { t.innerHTML = '<tbody><tr><td><div class="empty"><p>No leads match “' + esc(leadFilter) + '”.</p></div></td></tr></tbody>'; return; }
     t.innerHTML = `<thead><tr>
       <th style="width:30px"><input type="checkbox" id="lAll"></th>
       <th>Lead</th><th>Company</th><th>Title</th><th>Location</th><th>°</th><th>In campaign</th>
@@ -296,9 +405,23 @@
       </tr>`;
     }).join('')}</tbody>`;
     $('#lAll').addEventListener('change', e => { leads.forEach(l => e.target.checked ? leadSel.add(l.id) : leadSel.delete(l.id)); renderLeads(); });
-    $$('[data-lead]', t).forEach(cb => cb.addEventListener('change', e => { e.target.checked ? leadSel.add(e.target.dataset.lead) : leadSel.delete(e.target.dataset.lead); $('#enrollSelected').disabled = leadSel.size === 0; }));
-    $('#enrollSelected').disabled = leadSel.size === 0;
+    $$('[data-lead]', t).forEach(cb => cb.addEventListener('change', e => { e.target.checked ? leadSel.add(e.target.dataset.lead) : leadSel.delete(e.target.dataset.lead); updateLeadBulk(); }));
+    updateLeadBulk();
   }
+  function updateLeadBulk() { $('#enrollSelected').disabled = leadSel.size === 0; $('#tagSelected') && ($('#tagSelected').disabled = leadSel.size === 0); }
+  $('#leadFilter') && $('#leadFilter').addEventListener('input', (e) => { leadFilter = e.target.value; renderLeads(); $('#leadFilter').focus(); });
+  $('#tagSelected') && $('#tagSelected').addEventListener('click', () => {
+    if (!leadSel.size) return;
+    modal(`<h2>Tag ${leadSel.size} lead${leadSel.size > 1 ? 's' : ''}</h2>
+      <div class="a-field"><label class="a-label">Add tags (comma-separated)</label><input class="a-input" id="tgVal" placeholder="warm, q3-target"></div>
+      <div class="modal-foot"><button class="a-btn ghost" id="tgCancel">Cancel</button><button class="a-btn primary" id="tgSave">Apply</button></div>`);
+    $('#tgCancel').addEventListener('click', closeModal);
+    $('#tgSave').addEventListener('click', () => {
+      const tags = $('#tgVal').value.split(',').map(s => s.trim()).filter(Boolean);
+      if (tags.length) leadSel.forEach(id => { const l = store.get('leads', id); if (l) { l.tags = [...new Set([...(l.tags || []), ...tags])]; } });
+      store.save(); closeModal(); renderLeads(); toast('Tagged ' + leadSel.size + ' leads');
+    });
+  });
 
   $('#addLead').addEventListener('click', () => {
     modal(`<h2>Add lead</h2>
@@ -359,11 +482,27 @@
   }
   function renderChat() {
     const th = store.get('threads', activeThreadId); const chat = $('#chat'); if (!th) { chat.innerHTML = ''; return; }
-    chat.innerHTML = `<div class="chat-head"><span class="avatar2" style="background:${colorFor(th.name)};width:26px;height:26px;font-size:11px">${initials(th.name)}</span> ${esc(th.name)} ${th.hot ? '<span class="hotbadge">🔥 interest detected</span>' : ''}</div><div class="chat-body" id="chatBody"></div>`;
+    const enr = store.get('enrollments', th.enrollmentId);
+    chat.innerHTML = `<div class="chat-head"><span class="avatar2" style="background:${colorFor(th.name)};width:26px;height:26px;font-size:11px">${initials(th.name)}</span> ${esc(th.name)} ${th.hot ? '<span class="hotbadge">🔥 interest detected</span>' : ''}
+        <span class="spacer" style="flex:1"></span>
+        <button class="a-btn ghost sm" id="chHot" title="Toggle hot">${th.hot ? '★' : '☆'}</button>
+        ${enr && enr.status === 'replied' ? '<button class="a-btn ghost sm" id="chResume" title="Resume the automated sequence">▶ Resume</button>' : ''}
+      </div>
+      <div class="chat-body" id="chatBody"></div>
+      <form class="chat-compose" id="chForm"><input class="a-input" id="chMsg" placeholder="Write a reply..." autocomplete="off"><button class="a-btn primary sm" type="submit">Send</button></form>`;
     const body = $('#chatBody');
     th.messages.forEach(m => body.appendChild(el('div', 'bubble2 ' + (m.dir === 'out' ? 'out' : 'in'), esc(m.text))));
-    if (th.status === 'replied') body.appendChild(el('div', 'bubble2 sys', '↳ Prospect replied — sequence auto-paused, routed for a human reply'));
+    if (enr && enr.status === 'replied') body.appendChild(el('div', 'bubble2 sys', '↳ Prospect replied. Sequence auto-paused so you can take over.'));
     body.scrollTop = body.scrollHeight;
+    $('#chForm').addEventListener('submit', (e) => {
+      e.preventDefault(); const v = $('#chMsg').value.trim(); if (!v) return;
+      th.messages.push({ dir: 'out', text: v, channel: th.channel, at: simNow }); store.save();
+      $('#chMsg').value = ''; renderChat();
+    });
+    $('#chHot') && $('#chHot').addEventListener('click', () => { th.hot = !th.hot; store.save(); renderInbox(); });
+    $('#chResume') && $('#chResume').addEventListener('click', () => {
+      if (enr) { enr.status = 'active'; enr.nextRunAt = simNow; store.save(); toast('Sequence resumed for ' + th.name); renderInbox(); }
+    });
   }
 
   /* ============================================================
@@ -391,15 +530,28 @@
         <select class="a-select" id="tCh">${Object.keys(ACTION_CATALOG).map(c => `<option ${c===t.channel?'selected':''}>${c}</option>`).join('')}</select></div>
         <div class="a-field" style="flex:1"><label class="a-label">Action</label><input class="a-input" id="tAct" value="${esc(t.action)}"></div></div>
       <div class="a-field"><label class="a-label">Subject (email/InMail)</label><input class="a-input" id="tSubj" value="${esc(t.subject||'')}"></div>
-      <div class="a-field"><label class="a-label">Body</label><textarea class="a-textarea" id="tBody" style="min-height:120px">${esc(t.variants && t.variants.length ? t.variants[0].body : t.body)}</textarea></div>
+      <div class="a-field"><label class="a-label" style="display:flex;justify-content:space-between;align-items:center">Body / A&#47;B variants <button class="a-btn ghost sm" id="tAddVar" style="padding:2px 8px">+ A/B variant</button></label><div id="tVars"></div></div>
       <p class="dim" style="font-size:11.5px">Merge fields: {first_name} {last_name} {company} {position} {location} · spintax {{a|b}}</p>
       <div class="modal-foot">${id ? '<button class="a-btn danger ghost" id="tDel">Delete</button>' : ''}<span style="flex:1"></span><button class="a-btn ghost" id="tCancel">Cancel</button><button class="a-btn primary" id="tSave">Save</button></div>`);
+    let vars = (t.variants && t.variants.length) ? t.variants.map(v => ({ label: v.label, weight: v.weight || 1, body: v.body })) : [{ label: 'A', weight: 1, body: t.body || '' }];
+    function renderVars() {
+      $('#tVars').innerHTML = vars.map((v, i) => `
+        <div class="card" style="padding:9px;margin-bottom:6px">
+          ${vars.length > 1 ? `<div class="row" style="justify-content:space-between;margin-bottom:5px"><b style="font-size:12px">Variant ${esc(v.label || String.fromCharCode(65 + i))}</b><span class="row" style="gap:6px"><input class="a-input" type="number" min="1" data-w="${i}" value="${v.weight}" style="width:54px" title="Traffic weight"><button class="a-btn ghost sm danger" data-d="${i}" style="padding:2px 7px">✕</button></span></div>` : ''}
+          <textarea class="a-textarea" data-b="${i}" style="min-height:100px">${esc(v.body)}</textarea>
+        </div>`).join('');
+      $$('#tVars [data-b]').forEach(x => x.addEventListener('input', e => vars[+e.target.dataset.b].body = e.target.value));
+      $$('#tVars [data-w]').forEach(x => x.addEventListener('change', e => vars[+e.target.dataset.w].weight = Math.max(1, +e.target.value)));
+      $$('#tVars [data-d]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); vars.splice(+b.dataset.d, 1); renderVars(); }));
+    }
+    renderVars();
+    $('#tAddVar').addEventListener('click', e => { e.preventDefault(); vars.push({ label: String.fromCharCode(65 + vars.length), weight: 1, body: '' }); renderVars(); });
     $('#tCancel').addEventListener('click', closeModal);
     $('#tDel') && $('#tDel').addEventListener('click', () => { store.remove('templates', id); closeModal(); renderTemplates(); toast('Template deleted'); });
     $('#tSave').addEventListener('click', () => {
-      const patch = { name: $('#tName').value.trim(), channel: $('#tCh').value, action: $('#tAct').value.trim(), subject: $('#tSubj').value, body: $('#tBody').value };
-      if (id) { if (t.variants && t.variants.length) t.variants[0].body = patch.body; store.update('templates', id, patch); }
-      else store.insert('templates', A.build.template(patch));
+      vars.forEach((v, i) => v.label = v.label || String.fromCharCode(65 + i));
+      const patch = { name: $('#tName').value.trim(), channel: $('#tCh').value, action: $('#tAct').value.trim(), subject: $('#tSubj').value, body: vars[0].body, variants: vars.length > 1 ? vars : [] };
+      if (id) store.update('templates', id, patch); else store.insert('templates', A.build.template(patch));
       closeModal(); renderTemplates(); toast('Template saved');
     });
   }
@@ -555,6 +707,45 @@
     renderAll(); toast(created.length + ' enrolled · campaign ' + (live ? 'LIVE' : 'in test mode'));
   });
 
+  $('#campMenu') && $('#campMenu').addEventListener('click', openCampaignMenu);
+  function openCampaignMenu() {
+    const c = campaign(); if (!c) return;
+    const liAccts = store.where('channelAccounts', a => a.type === 'linkedin');
+    const emAccts = store.where('channelAccounts', a => a.type === 'email');
+    modal(`<h2>Campaign settings</h2>
+      <div class="a-field"><label class="a-label">Name</label><input class="a-input" id="cmName" value="${esc(c.name)}"></div>
+      <div class="a-field"><label class="a-label">LinkedIn account</label>
+        <select class="a-select" id="cmAcc"><option value="">(none)</option>${liAccts.map(a => `<option value="${a.id}" ${(c.channelAccountIds || [])[0] === a.id ? 'selected' : ''}>${esc(a.displayName)}</option>`).join('')}</select></div>
+      ${emAccts.length ? `<div class="a-field"><label class="a-label">Email mailboxes (rotation)</label><div style="display:grid;gap:5px">${emAccts.map(a => `<label class="row" style="font-size:12.5px;color:var(--text-muted)"><input type="checkbox" data-em="${a.id}" ${(c.emailAccountIds || []).includes(a.id) ? 'checked' : ''} style="width:auto"> ${esc(a.displayName)}</label>`).join('')}</div></div>` : ''}
+      <div class="modal-foot"><button class="a-btn danger ghost" id="cmDel">Delete</button><button class="a-btn ghost" id="cmDup">Duplicate</button><span style="flex:1"></span><button class="a-btn ghost" id="cmCancel">Cancel</button><button class="a-btn primary" id="cmSave">Save</button></div>`);
+    $('#cmCancel').addEventListener('click', closeModal);
+    $('#cmSave').addEventListener('click', () => {
+      const acc = $('#cmAcc').value;
+      const emails = $$('[data-em]').filter(cb => cb.checked).map(cb => cb.dataset.em);
+      store.update('campaigns', c.id, { name: $('#cmName').value.trim() || c.name, channelAccountIds: acc ? [acc] : [], emailAccountIds: emails });
+      closeModal(); renderAll(); toast('Campaign updated');
+    });
+    $('#cmDup').addEventListener('click', () => { duplicateCampaign(c); closeModal(); });
+    $('#cmDel').addEventListener('click', () => {
+      if (!confirm('Delete "' + c.name + '" and its sequence + enrollments? This cannot be undone.')) return;
+      const seqId = c.sequenceId;
+      store.where('enrollments', e => e.campaignId === c.id).forEach(e => store.remove('enrollments', e.id));
+      store.where('threads', t => t.campaignId === c.id).forEach(t => store.remove('threads', t.id));
+      if (seqId) store.remove('sequences', seqId);
+      store.remove('campaigns', c.id);
+      activeCampaignId = (store.all('campaigns')[0] || {}).id || null;
+      if (!activeCampaignId) newCampaign(); else { closeModal(); renderAll(); }
+      toast('Campaign deleted');
+    });
+  }
+  function duplicateCampaign(c) {
+    const seq = store.get('sequences', c.sequenceId);
+    const nc = store.insert('campaigns', A.build.campaign({ name: c.name + ' (copy)', status: 'draft', channelAccountIds: (c.channelAccountIds || []).slice(), emailAccountIds: (c.emailAccountIds || []).slice() }));
+    const ns = store.insert('sequences', A.build.sequence(nc.id, seq ? JSON.parse(JSON.stringify(seq.steps)) : []));
+    store.update('campaigns', nc.id, { sequenceId: ns.id });
+    activeCampaignId = nc.id; selectedStepIdx = 0; renderAll(); toast('Campaign duplicated');
+  }
+
   function newCampaign() {
     const c = store.insert('campaigns', A.build.campaign({ name: 'Untitled campaign', status: 'draft', channelAccountIds: store.all('channelAccounts').slice(0, 1).map(a => a.id) }));
     const seq = store.insert('sequences', A.build.sequence(c.id, [
@@ -587,6 +778,9 @@
     renderTab(name);
   }
   $$('#tabs .st-tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+
+  // palette drag sources (wired once)
+  $$('#seqPalette .pal-chip').forEach(chip => chip.addEventListener('dragstart', (e) => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData('text/plain', 'add:' + chip.dataset.add); }));
 
   /* ============================================================
      LINKEDIN LIVE — portal drives the browser extension

@@ -745,7 +745,9 @@
     function renderAction(action, lead) {
       const tpl = action.templateId ? store.get('templates', action.templateId) : null;
       const subjectSrc = action.subject != null ? action.subject : (tpl && tpl.subject) || '';
-      let bodySrc = action.body != null ? action.body : (tpl && pickVariant(tpl, rng)) || action.note || '';
+      let bodySrc;
+      if (action.variants && action.variants.length) bodySrc = pickVariant({ variants: action.variants, body: action.body }, rng); // inline A/B
+      else bodySrc = action.body != null ? action.body : (tpl && pickVariant(tpl, rng)) || action.note || '';
       return { subject: render(subjectSrc, lead, rng), body: render(bodySrc, lead, rng), note: render(action.note || '', lead, rng) };
     }
 

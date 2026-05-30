@@ -125,6 +125,7 @@
       motionToggle +
       '<span data-cs="status" class="cs-status-pill draft">draft</span>' +
       '<div class="cs-tool-actions">' +
+        '<button class="btn btn-ghost btn-sm cs-addblock-btn" data-cs="addblock">＋ Add block</button>' +
         '<button class="btn btn-ghost btn-sm" data-cs="new">＋ New</button>' +
         '<button class="btn btn-ghost btn-sm" data-cs="library">📚 Library</button>' +
         '<button class="btn btn-ghost btn-sm" data-cs="saveas">Save as</button>' +
@@ -158,6 +159,12 @@
       '<h3>Campaign library</h3>' +
       '<p class="sub">Every campaign you save lives here, for both the Recruiting OS and the BD OS. Open one to keep editing, duplicate it as a starting point, or delete it.</p>' +
       '<div data-cs="libList"></div>' +
+    '</div></div>' +
+    '<div class="cs-modal" data-cs="addModal"><div class="cs-modal-card">' +
+      '<button class="modal-close" data-cs="addClose">×</button>' +
+      '<h3>Add a block</h3>' +
+      '<p class="sub">Tap any block to add it to your sequence. It drops in after the selected step, or at the end.</p>' +
+      '<div data-cs="addList"></div>' +
     '</div></div>';
   }
 
@@ -273,13 +280,37 @@
       });
     }
 
-    /* ---------- drag engine ---------- */
+    /* ---------- drag engine (canvas-level, no dead zones) ---------- */
     var drag = null;
     function clearDrag() {
       drag = null;
-      Array.prototype.forEach.call(root.querySelectorAll(".step"), function (s) { s.classList.remove("drag-over-top", "drag-over-bot", "dragging"); });
-      var tail = $("canvas").querySelector(".drop-tail"); if (tail) tail.classList.remove("drop-hot");
+      Array.prototype.forEach.call(root.querySelectorAll(".step"), function (s) { s.classList.remove("dragging"); });
+      root.classList.remove("cs-dragging");
+      hideIndicator();
       var e = root.querySelector(".cs-empty"); if (e) e.classList.remove("drop-hot");
+    }
+    function hideIndicator() { var ind = $("canvas") && $("canvas").querySelector(".drop-indicator"); if (ind) ind.remove(); }
+    // Where would a drop at pointer-Y land? Returns a step index 0..len.
+    function indexFromY(y) {
+      var cards = Array.prototype.slice.call($("canvas").querySelectorAll(".step"));
+      for (var i = 0; i < cards.length; i++) { var r = cards[i].getBoundingClientRect(); if (y < r.top + r.height / 2) return i; }
+      return cards.length;
+    }
+    // Draw the insertion line at a given step index.
+    function showIndicator(idx) {
+      var canvas = $("canvas");
+      var ind = canvas.querySelector(".drop-indicator");
+      if (!ind) { ind = el("div", "drop-indicator"); }
+      var cards = Array.prototype.slice.call(canvas.querySelectorAll(".step"));
+      if (idx >= cards.length) { canvas.insertBefore(ind, canvas.querySelector(".drop-tail")); }
+      else { var card = cards[idx]; canvas.insertBefore(ind, card.previousSibling && card.previousSibling.classList && card.previousSibling.classList.contains("delay-wrap") ? card.previousSibling : card); }
+    }
+    // Auto-scroll the canvas column when dragging near its top/bottom edge.
+    function edgeScroll(y) {
+      var col = $("canvas").closest(".cs-col"); if (!col) return;
+      var r = col.getBoundingClientRect(); var pad = 64;
+      if (y < r.top + pad) col.scrollTop -= 14;
+      else if (y > r.bottom - pad) col.scrollTop += 14;
     }
     function indexOfUid(u) { for (var i = 0; i < state.steps.length; i++) if (state.steps[i].uid === u) return i; return -1; }
     function insertStep(step, atIndex) { if (atIndex == null || atIndex > state.steps.length) atIndex = state.steps.length; state.steps.splice(atIndex, 0, step); state.selected = step.uid; renderCanvas(); scrollToStep(step.uid); }
@@ -293,12 +324,26 @@
     function scrollToStep(u) {
       setTimeout(function () { var c = root.querySelector('.step[data-uid="' + u + '"]'); if (c && c.scrollIntoView) c.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, 30);
     }
-    function moveStep(u, toIndex) { var from = indexOfUid(u); if (from < 0) return; var step = state.steps.splice(from, 1)[0]; if (toIndex > from) toIndex--; state.steps.splice(Math.max(0, toIndex), 0, step); renderCanvas(); }
-    function commitDrop(index) { if (!drag) return; if (drag.type === "new") insertStep(mk(drag.key), index); else if (drag.type === "move") moveStep(drag.uid, index); clearDrag(); }
-    function attachDrop(node, indexFn) {
-      node.addEventListener("dragover", function (e) { if (!drag) return; e.preventDefault(); node.classList.add("drop-hot"); });
-      node.addEventListener("dragleave", function () { node.classList.remove("drop-hot"); });
-      node.addEventListener("drop", function (e) { e.preventDefault(); node.classList.remove("drop-hot"); commitDrop(indexFn()); });
+    function moveStep(u, toIndex) { var from = indexOfUid(u); if (from < 0) return; var step = state.steps.splice(from, 1)[0]; if (toIndex > from) toIndex--; toIndex = Math.max(0, Math.min(state.steps.length, toIndex)); state.steps.splice(toIndex, 0, step); state.selected = step.uid; renderCanvas(); }
+    function commitDrop(index) { if (!drag) return; var d = drag; if (d.type === "new") insertStep(mk(d.key), index); else if (d.type === "move") moveStep(d.uid, index); clearDrag(); }
+    // One drop zone for the whole canvas: events bubble up from cards/connectors,
+    // so there are no gaps where a drop is lost.
+    function wireCanvasDnD() {
+      var canvas = $("canvas");
+      canvas.addEventListener("dragover", function (e) {
+        if (!drag) return;
+        e.preventDefault(); e.dataTransfer.dropEffect = drag.type === "new" ? "copy" : "move";
+        root.classList.add("cs-dragging");
+        var empty = canvas.querySelector(".cs-empty");
+        if (empty) { empty.classList.add("drop-hot"); return; }
+        showIndicator(indexFromY(e.clientY)); edgeScroll(e.clientY);
+      });
+      canvas.addEventListener("dragleave", function (e) { if (e.target === canvas || !canvas.contains(e.relatedTarget)) { hideIndicator(); var em = canvas.querySelector(".cs-empty"); if (em) em.classList.remove("drop-hot"); } });
+      canvas.addEventListener("drop", function (e) {
+        if (!drag) return; e.preventDefault();
+        var idx = canvas.querySelector(".cs-empty") ? 0 : indexFromY(e.clientY);
+        commitDrop(idx);
+      });
     }
 
     /* ---------- canvas ---------- */
@@ -308,17 +353,16 @@
     function renderCanvas() {
       var c = $("canvas"); c.innerHTML = "";
       if (!state.steps.length) {
-        var empty = el("div", "cs-empty", '<div class="big">🧩</div><b>Drag a block here to start</b>' +
-          '<p style="margin-top:6px;font-size:13px">Pull LinkedIn, email, SMS, voice, or logic blocks from the left to build your sequence. Or load a template.</p>' +
+        var empty = el("div", "cs-empty", '<div class="big">🧩</div><b>Drag a block here, or click one to add</b>' +
+          '<p style="margin-top:6px;font-size:13px">Pull LinkedIn, email, SMS, voice, or logic blocks from the left to build your sequence. On a phone, tap a block or use ＋ Add block. Or start from a template.</p>' +
           '<button class="btn btn-ghost btn-sm" data-cs="loadStarter" style="margin-top:12px">Use a starter template</button>');
-        attachDrop(empty, function () { return 0; });
         c.appendChild(empty);
         empty.querySelector('[data-cs="loadStarter"]').addEventListener("click", function () { state.steps = starter(state.motion); state.selected = null; renderCanvas(); toast("Loaded " + (state.motion === "bd" ? "BD" : "Recruiting") + " starter"); });
         renderStats(); return;
       }
       c.appendChild(el("div", "canvas-start", '<span class="pin"></span> Prospect enters the sequence'));
       state.steps.forEach(function (step, i) { c.appendChild(connector(step)); c.appendChild(stepCard(step, i)); });
-      var tail = el("div", "drop-tail"); attachDrop(tail, function () { return state.steps.length; }); c.appendChild(tail);
+      c.appendChild(el("div", "drop-tail"));
       renderStats();
     }
 
@@ -347,13 +391,20 @@
       var card = el("div", "step" + (state.selected === step.uid ? " sel open" : ""));
       card.dataset.uid = step.uid; card.draggable = true;
       var num = step.key === "lg_delay" ? "⏱️" : "#" + countTouchesUpTo(i);
+      var lastIndex = state.steps.length - 1;
       card.innerHTML =
         '<div class="step-bar"></div>' +
         '<div class="step-head">' +
+          '<span class="s-grip" title="Drag to reorder" aria-hidden="true">⠿</span>' +
           '<span class="s-ic ch-' + step.channel + '">' + step.ic + '</span>' +
           '<span class="s-meta"><b>' + esc(step.label) + '</b><span class="s-sub">' + esc(summarize(step)) + '</span></span>' +
           '<span class="s-num">' + num + '</span>' +
-          '<span class="step-actions"><button class="s-btn dup" title="Duplicate">⧉</button><button class="s-btn del" title="Delete">🗑</button></span>' +
+          '<span class="step-actions">' +
+            '<button class="s-btn up" title="Move up"' + (i === 0 ? " disabled" : "") + '>↑</button>' +
+            '<button class="s-btn down" title="Move down"' + (i === lastIndex ? " disabled" : "") + '>↓</button>' +
+            '<button class="s-btn dup" title="Duplicate">⧉</button>' +
+            '<button class="s-btn del" title="Delete">🗑</button>' +
+          '</span>' +
         '</div><div class="step-config"></div>';
       card.querySelector(".step-bar").style.background = barColor(step.channel);
 
@@ -361,16 +412,16 @@
         if (e.target.closest(".s-btn")) return;
         state.selected = state.selected === step.uid ? null : step.uid; renderCanvas();
       });
+      card.querySelector(".up").addEventListener("click", function () { if (i > 0) moveStep(step.uid, i - 1); });
+      card.querySelector(".down").addEventListener("click", function () { if (i < lastIndex) moveStep(step.uid, i + 2); });
       card.querySelector(".dup").addEventListener("click", function () { var copy = JSON.parse(JSON.stringify(step)); copy.uid = uid(); insertStep(copy, i + 1); toast("Step duplicated"); });
-      card.querySelector(".del").addEventListener("click", function () { state.steps.splice(i, 1); if (state.selected === step.uid) state.selected = null; renderCanvas(); });
+      card.querySelector(".del").addEventListener("click", function () { state.steps.splice(i, 1); if (state.selected === step.uid) state.selected = null; renderCanvas(); toast("Step removed"); });
 
       if (state.selected === step.uid) renderConfig(card.querySelector(".step-config"), step);
 
-      card.addEventListener("dragstart", function (e) { drag = { type: "move", uid: step.uid }; card.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", step.uid); } catch (x) {} e.stopPropagation(); });
+      // initiating a drag-to-reorder; canvas-level handler does the positioning
+      card.addEventListener("dragstart", function (e) { drag = { type: "move", uid: step.uid }; card.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", step.uid); } catch (x) {} });
       card.addEventListener("dragend", function () { clearDrag(); });
-      card.addEventListener("dragover", function (e) { if (!drag) return; e.preventDefault(); var rect = card.getBoundingClientRect(); var top = (e.clientY - rect.top) < rect.height / 2; card.classList.toggle("drag-over-top", top); card.classList.toggle("drag-over-bot", !top); });
-      card.addEventListener("dragleave", function () { card.classList.remove("drag-over-top", "drag-over-bot"); });
-      card.addEventListener("drop", function (e) { e.preventDefault(); e.stopPropagation(); var rect = card.getBoundingClientRect(); var before = (e.clientY - rect.top) < rect.height / 2; commitDrop(i + (before ? 0 : 1)); });
       return card;
     }
 
@@ -479,6 +530,26 @@
     }
     function closeLibrary() { $("libModal").classList.remove("show"); }
 
+    /* ---------- add-block picker (universal / mobile path) ---------- */
+    function openAddBlock() {
+      var host = $("addList"); host.innerHTML = "";
+      CATALOG.forEach(function (g) {
+        var grp = el("div", "pal-group");
+        grp.appendChild(el("h5", null, '<span class="gd ch-' + g.channel + '"></span>' + esc(g.group)));
+        var wrap = el("div", "add-grid");
+        g.blocks.forEach(function (b) {
+          var item = el("button", "pal-block"); item.type = "button";
+          item.innerHTML = '<span class="pb-ic ch-' + b.channel + '">' + b.ic + '</span>' +
+            '<span class="pb-meta"><b>' + esc(b.label) + '</b><span>' + esc(b.desc) + '</span></span><span class="pb-add">＋</span>';
+          item.addEventListener("click", function () { addBlock(b.key); closeAddBlock(); });
+          wrap.appendChild(item);
+        });
+        grp.appendChild(wrap); host.appendChild(grp);
+      });
+      $("addModal").classList.add("show");
+    }
+    function closeAddBlock() { $("addModal").classList.remove("show"); }
+
     /* ---------- bind ---------- */
     $("name").addEventListener("input", function (e) { state.name = e.target.value || "Untitled campaign"; });
     $("goal").addEventListener("input", function (e) { state.goal = e.target.value; });
@@ -500,16 +571,20 @@
     $("library").addEventListener("click", openLibrary);
     $("libClose").addEventListener("click", closeLibrary);
     $("libModal").addEventListener("click", function (e) { if (e.target === $("libModal")) closeLibrary(); });
+    $("addblock").addEventListener("click", openAddBlock);
+    $("addClose").addEventListener("click", closeAddBlock);
+    $("addModal").addEventListener("click", function (e) { if (e.target === $("addModal")) closeAddBlock(); });
     $("launch").addEventListener("click", function () {
       if (!state.steps.filter(function (s) { return s.channel !== "logic"; }).length) { toast("Add at least one outreach touch first"); return; }
       state.status = state.status === "active" ? "paused" : "active"; save(true); syncMeta();
       toast(state.status === "active" ? "Campaign activated 🚀" : "Campaign paused");
     });
 
-    function onKey(e) { if (root.isConnected === false) { document.removeEventListener("keydown", onKey); return; } if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s" && root.querySelector(".cs-toolbar")) { e.preventDefault(); save(); } if (e.key === "Escape") closeLibrary(); }
+    function onKey(e) { if (root.isConnected === false) { document.removeEventListener("keydown", onKey); return; } if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s" && root.querySelector(".cs-toolbar")) { e.preventDefault(); save(); } if (e.key === "Escape") { closeLibrary(); closeAddBlock(); } }
     document.addEventListener("keydown", onKey);
 
     /* ---------- initial load ---------- */
+    wireCanvasDnD(); // attach the single canvas-level drop zone once (canvas node persists across renders)
     var openId = opts.openId;
     if (openId) { var found = store.all().filter(function (c) { return c.id === openId; })[0]; if (found) { loadCampaign(found); return controller(); } }
     state.steps = starter(state.motion);
