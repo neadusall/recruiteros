@@ -502,6 +502,7 @@
     $('#liveRoute').checked = !!(c && c._liveRoute);
     refreshExtStatus();
     renderDatasets();
+    renderBackend();
   }
 
   async function refreshExtStatus() {
@@ -529,11 +530,13 @@
         <div class="row" style="justify-content:space-between"><b style="font-size:13px">${esc(d.name)}</b><span class="pillbar info">${d.count} leads</span></div>
         <div class="row wrap" style="gap:6px">
           <button class="a-btn sm" data-import="${d.id}">→ Import as leads</button>
+          <button class="a-btn sm" data-push="${d.id}">🛰️ Push to backend</button>
           <button class="a-btn ghost sm" data-csv="${d.id}">⬇ CSV</button>
         </div>
       </div>`).join('') : '<p class="dim" style="font-size:12px">No datasets yet. Use “Source from Sales Navigator” on the Leads tab.</p>';
     $$('[data-import]', wrap).forEach(b => b.addEventListener('click', () => importDataset(b.dataset.import)));
     $$('[data-csv]', wrap).forEach(b => b.addEventListener('click', async () => { const r2 = await Ext.exportCsv(b.dataset.csv); toast(r2 && r2.ok ? 'Downloading CSV' : 'Export failed', r2 && r2.ok ? '' : 'warn'); }));
+    $$('[data-push]', wrap).forEach(b => b.addEventListener('click', () => pushDatasetToBackend(b.dataset.push)));
   }
 
   async function importDataset(id) {

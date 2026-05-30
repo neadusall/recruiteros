@@ -193,9 +193,33 @@
           </div>
           <div class="card">
             <h3 style="font-size:14px;margin-bottom:6px">🎯 Sourced datasets</h3>
-            <p class="dim" style="font-size:12px;margin-bottom:10px">Sales Navigator searches you've scraped. Import as leads or export CSV.</p>
+            <p class="dim" style="font-size:12px;margin-bottom:10px">Sales Navigator searches you've scraped. Import as leads, push to the backend, or export CSV.</p>
             <div id="dsList" style="display:grid;gap:8px"></div>
             <button class="a-btn sm" id="refreshDs" style="margin-top:10px">↻ Refresh</button>
+          </div>
+          <div class="card" style="grid-column:1/-1">
+            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+              <h3 style="font-size:14px">🛰️ RecruiterOS backend</h3>
+              <span id="beStatus"><span class="pillbar warn">checking...</span></span>
+            </div>
+            <p class="dim" style="font-size:12px;margin-bottom:10px">The team backend (workspaces, multi-account, server-side throttles, sequences, inbox). Leave the base blank when the portal is served by the backend; otherwise set its URL.</p>
+            <div class="row wrap" style="gap:8px;align-items:flex-end;margin-bottom:12px">
+              <div class="a-field" style="flex:1;margin:0"><label class="a-label">Backend base URL</label><input class="a-input" id="beBase" placeholder="(same origin) or http://localhost:3000"></div>
+              <button class="a-btn sm" id="beConnect">Connect backend</button>
+              <button class="a-btn ghost sm" id="beRefresh">↻</button>
+            </div>
+            <div class="row wrap" style="gap:16px;align-items:flex-start">
+              <div style="flex:1;min-width:240px">
+                <div class="a-label" style="margin-bottom:6px">Team LinkedIn accounts</div>
+                <div id="beAccounts"><p class="dim" style="font-size:12px">Connect the backend to list accounts.</p></div>
+              </div>
+              <div style="flex:1;min-width:240px">
+                <div class="a-label" style="margin-bottom:6px">Assign account to this campaign</div>
+                <select class="a-select" id="beAssign"><option value="">(none / Simulated)</option></select>
+                <div class="a-label" style="margin:12px 0 6px">Unified inbox</div>
+                <div id="beInbox"><p class="dim" style="font-size:12px">—</p></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -234,6 +258,7 @@
   <script src="assets/js/alfred/alfred-core.js"></script>
   <script src="extension/lib/alfred-bridge.js"></script>
   <script src="assets/js/alfred/studio-bridge.js"></script>
+  <script src="assets/js/alfred/backend.js"></script>
   <script src="assets/js/alfred/alfred-ui.js"></script>
 </body>
 </html>
