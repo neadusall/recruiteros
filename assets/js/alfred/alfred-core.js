@@ -160,6 +160,8 @@
       headline:   lead.headline || '',
       location:   lead.location || '',
       email:      lead.email || '',
+      unsubscribe_link: lead.unsubscribeUrl || ('https://recruiteros.co/u/' + (lead.id || '')),
+      sender_name: lead.senderName || '',
     };
     Object.assign(map, lead.customFields || {});
     let out = String(template)
@@ -403,6 +405,8 @@
       acceptRate: 0.38,        // connection request acceptance
       replyRate: 0.22,         // reply to a message/email after contact
       openRate: 0.55,          // email open
+      clickRate: 0.12,         // email link click
+      bounceRate: 0.03,        // email hard bounce -> suppress
       failRate: 0.02,          // transient send failure
     }, opts.rates);
     return {
@@ -419,10 +423,20 @@
           res.willAccept = rng() < P.acceptRate;
           res.acceptInMs = (6 * HOUR) + rng() * 3 * DAY;
         }
-        if (action.type === 'message' || action.type === 'inmail' || action.type === 'email' || action.type === 'tw_dm') {
+        if (action.type === 'email') {
+          // deliverability first: a hard bounce means nothing else happens
+          res.bounced = rng() < P.bounceRate;
+          if (!res.bounced) {
+            res.opened = rng() < P.openRate;
+            res.clicked = res.opened && rng() < (P.clickRate / Math.max(0.01, P.openRate));
+            res.willReply = rng() < P.replyRate;
+            res.replyInMs = (2 * HOUR) + rng() * 2 * DAY;
+          }
+          return res;
+        }
+        if (action.type === 'message' || action.type === 'inmail' || action.type === 'tw_dm') {
           res.willReply = rng() < P.replyRate;
           res.replyInMs = (2 * HOUR) + rng() * 2 * DAY;
-          if (meta.tracksOpen) res.opened = rng() < P.openRate;
         }
         return res;
       },
@@ -774,11 +788,17 @@
         accepted: count(ev => ev.status === STATUS.event.ACCEPTED),
         messages: count(ev => (ev.type === 'message' || ev.type === 'inmail') && ev.status === STATUS.event.SENT),
         emails: count(ev => ev.type === 'email' && ev.status === STATUS.event.SENT),
+        opens: count(ev => ev.type === 'open'),
+        clicks: count(ev => ev.type === 'click'),
+        bounces: count(ev => ev.type === 'bounce'),
         replies: enrollments.filter(e => e.repliedAt).length,
       };
       stats.acceptRate = stats.connectsSent ? +(stats.accepted / stats.connectsSent * 100).toFixed(1) : 0;
       const contacted = stats.messages + stats.emails + stats.connectsSent;
       stats.replyRate = contacted ? +(stats.replies / contacted * 100).toFixed(1) : 0;
+      stats.openRate = stats.emails ? +(stats.opens / stats.emails * 100).toFixed(1) : 0;
+      stats.clickRate = stats.emails ? +(stats.clicks / stats.emails * 100).toFixed(1) : 0;
+      stats.bounceRate = stats.emails ? +(stats.bounces / (stats.emails + stats.bounces) * 100).toFixed(1) : 0;
       store.update('campaigns', campaignId, { stats });
       return stats;
     }
@@ -805,11 +825,13 @@
       pauseCampaign: (id) => store.update('campaigns', id, { status: STATUS.campaign.PAUSED }),
       activateCampaign: (id) => store.update('campaigns', id, { status: STATUS.campaign.ACTIVE }),
       analytics, recomputeCampaignStats,
-      isBlacklisted,
+      isBlacklisted, emailAccountsFor, pickEmailAccount,
+      unsubscribe: (email) => suppress(email, 'unsubscribed'),
+      suppress,
       // run many days forward in `stepMs` increments (UI sim + tests)
       fastForward(fromTs, toTs, stepMs, onTick) {
         stepMs = stepMs || 6 * HOUR;
-        const agg = { sent: 0, accepted: 0, replied: 0, completed: 0, deferred: 0, failed: 0, skipped: 0, processed: 0 };
+        const agg = { sent: 0, accepted: 0, replied: 0, completed: 0, deferred: 0, failed: 0, skipped: 0, processed: 0, bounced: 0 };
         for (let t = fromTs; t <= toTs; t += stepMs) {
           const r = tick(t);
           Object.keys(agg).forEach(k => { agg[k] += r[k] || 0; });
@@ -841,6 +863,16 @@
       type, displayName, status: 'connected', health: 'good',
       dailyLimits: clone(DEFAULT_DAILY_LIMITS[type] || {}),
       safety: clone(DEFAULT_SAFETY),
+      createdAt: Date.now(),
+    }, over || {}),
+    // A cold-email mailbox (sending inbox). New mailboxes warm up slowly;
+    // start conservative and ramp. Used for inbox rotation.
+    emailAccount: (fromEmail, fromName, over) => Object.assign({
+      type: 'email', displayName: fromEmail, fromEmail, fromName: fromName || '',
+      provider: 'smtp', domain: (fromEmail || '').split('@')[1] || '',
+      status: 'connected', health: 'good',
+      dailyLimits: { email: 40 },                       // safe per-mailbox daily send
+      safety: Object.assign(clone(DEFAULT_SAFETY), { warmup: { enabled: true, startPct: 0.25, rampDays: 21 }, dailyTotalCap: 40, hourlyMax: 8 }),
       createdAt: Date.now(),
     }, over || {}),
     lead: (o) => Object.assign({
