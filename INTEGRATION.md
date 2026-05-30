@@ -57,9 +57,13 @@ inside RecruiterOS, and where every MeetAlfred feature lives.
 | **Browser (extension)** | The extension acts through the user's own session | No third-party API; the account owner runs it. Use the LinkedIn Live "Live actions" toggle. |
 | **Simulated (default)** | Nothing real; the engine models accepts/replies | Build, demo, and train risk-free. |
 
-The portal's `AlfredExtensionBridge` lets the engine route a campaign's LinkedIn
-steps through the extension (browser mode); the backend's `internalProvider`
-(`RECRUITEROS_OUTREACH_URL`) is the seam for a server-driven browser worker later.
+**Browser mode is fully wired** via the **Outreach Bridge** (`bridge/`): the backend's
+`internalProvider` POSTs actions to the bridge, the extension's agent drains them and
+performs them in the user's session, and accept/reply events forward back to the
+backend webhook so the cadence advances. Set `RECRUITEROS_OUTREACH_PROVIDER=internal`
+and `RECRUITEROS_OUTREACH_URL=http://localhost:8787`. See `bridge/README.md`. (The
+portal's `AlfredExtensionBridge` also lets the local engine route steps through the
+extension directly, for portal-only use without the backend cadence.)
 
 ## Where each MeetAlfred feature lives
 

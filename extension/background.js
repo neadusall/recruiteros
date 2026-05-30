@@ -23,6 +23,11 @@ const DEFAULT_STATE = {
     workingHours: CFG.workingHours,
     weekendsOff: CFG.weekendsOff,
     backendBaseUrl: CFG.backendBaseUrl,
+    // Browser-execution bridge: when enabled, this extension acts as the
+    // executor for the backend's cadence. It polls the outreach bridge for
+    // actions targeted at `accountId`, performs them in the user's session,
+    // and reports results. See bridge/outreach-bridge.cjs.
+    bridge: { enabled: false, url: CFG.bridge.url, token: CFG.bridge.token, accountId: '' },
   },
   queue: [],
   done: [],
@@ -42,7 +47,78 @@ chrome.runtime.onInstalled.addListener(async () => {
   log('info', 'RecruiterOS Outreach installed');
 });
 chrome.runtime.onStartup.addListener(() => chrome.alarms.create('ros-tick', { periodInMinutes: Math.max(0.5, CFG.tickMinutes || 1) }));
-chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'ros-tick') drainQueue(); });
+chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'ros-tick') { drainQueue(); agentTick(); } });
+
+/* ============================================================
+   BRIDGE AGENT — execute backend-driven actions in this session.
+   Polls the outreach bridge, navigates to the target profile,
+   performs the action via the content script, and reports back.
+   ============================================================ */
+let agentBusy = false;
+async function agentTick() {
+  if (agentBusy) return;
+  const s = await getState();
+  const b = s.settings.bridge || {};
+  if (!b.enabled || !b.url || !b.accountId) return;
+  if (!limiter.withinWorkingWindow(Date.now())) return;
+  agentBusy = true;
+  try {
+    const poll = await bridgeCall(b, '/agent/poll', { accountId: b.accountId });
+    const action = poll && poll.action;
+    if (!action) return;
+    const tab = await linkedInTab();
+    if (!tab) { log('warn', 'bridge: no LinkedIn tab to execute in'); return; }
+
+    // navigate to the target profile, then execute
+    let result;
+    try {
+      if (action.target && action.target.profileUrl) await navigateTab(tab.id, action.target.profileUrl);
+      const act = {
+        id: action.id, type: action.type, channel: 'linkedin',
+        target: action.target || {},
+        payload: action.payload || {},
+        meta: { live: s.settings.liveActions, bridge: true },
+      };
+      result = await dispatchToTab(tab.id, { type: TYPE.DO_ACTION, action: act });
+    } catch (e) { result = { ok: false, info: e.message }; }
+
+    await bridgeCall(b, '/agent/report', { actionId: action.id, ok: !!(result && result.ok), providerMessageId: action.id, info: result && result.info });
+    // account for the action against this session's caps too
+    const key = limiter.dateKey(Date.now()) + '|' + action.type;
+    s.counts[key] = (s.counts[key] || 0) + (result && result.ok ? 1 : 0);
+    recordDone(s, Object.assign({ id: action.id }, action), result, Date.now());
+    await setState({ counts: s.counts, done: s.done });
+    log(result && result.ok ? 'info' : 'warn', 'bridge action ' + action.type + ' -> ' + (result && result.ok ? 'ok' : 'failed'));
+  } catch (e) { log('error', 'agentTick: ' + e.message); }
+  finally { agentBusy = false; }
+}
+function bridgeCall(b, path, body) {
+  return fetch(b.url.replace(/\/$/, '') + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (b.token || '') },
+    body: JSON.stringify(body),
+  }).then(r => r.ok ? r.json() : null).catch(() => null);
+}
+// post an observed accept/reply event back to the bridge (forwarded to backend)
+async function bridgePostEvent(evt) {
+  const s = await getState(); const b = s.settings.bridge || {};
+  if (!b.enabled || !b.url) return;
+  return bridgeCall(b, '/agent/event', evt);
+}
+function navigateTab(tabId, url) {
+  return new Promise((resolve) => {
+    chrome.tabs.update(tabId, { url }, () => {
+      const onDone = (tid, info) => {
+        if (tid === tabId && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(onDone);
+          setTimeout(resolve, 1500); // let the SPA settle + content script attach
+        }
+      };
+      chrome.tabs.onUpdated.addListener(onDone);
+      setTimeout(() => { chrome.tabs.onUpdated.removeListener(onDone); resolve(); }, 15000); // hard cap
+    });
+  });
+}
 
 /* ---------------- message router ---------------- */
 function handle(msg, sender, sendResponse) {
@@ -72,6 +148,7 @@ function handle(msg, sender, sendResponse) {
       case TYPE.DATASET_TO_CAMPAIGN: return sendResponse(await datasetToCampaign(msg.id, msg.campaignName, s));
 
       case TYPE.CAPTURE_LEAD: await onCapturedLead(msg.profile, s); return sendResponse({ ok: true });
+      case TYPE.BRIDGE_EVENT: return sendResponse(await bridgePostEvent(msg.event) || { ok: true });
       case TYPE.LOG: log(msg.level || 'info', msg.msg); return sendResponse({ ok: true });
       default: return sendResponse({ ok: false, error: 'unknown message ' + (msg && msg.type) });
     }

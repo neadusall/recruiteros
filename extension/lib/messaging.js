@@ -41,6 +41,7 @@
     // content -> background (events)
     CAPTURE_LEAD:    'ros.captureLead',
     IDENTITY:        'ros.identity',
+    BRIDGE_EVENT:    'ros.bridgeEvent',     // observed accept/reply -> forward to bridge
     LOG:             'ros.log',
   };
 

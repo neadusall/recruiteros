@@ -77,7 +77,16 @@
       <label class="p-field"><span>Gap max (s)</span><input id="setGapMax" type="number" /></label>
     </div>
     <label class="p-check"><input type="checkbox" id="setWeekends" /> Pause on weekends</label>
-    <button id="saveSettings" class="p-btn primary sm" style="width:100%;margin-top:10px">Save settings</button>
+
+    <div style="border-top:1px solid var(--border);margin:12px 0 10px;padding-top:10px">
+      <label class="p-check"><input type="checkbox" id="brEnabled" /> <b>Browser-execution agent</b></label>
+      <p class="p-note" style="margin:-2px 0 8px">Let the RecruiterOS backend drive outreach through THIS browser session. Actions are pulled from the bridge and run here.</p>
+      <label class="p-field"><span>Bridge URL</span><input id="brUrl" placeholder="http://localhost:8787" /></label>
+      <label class="p-field"><span>Agent token</span><input id="brToken" placeholder="matches bridge AGENT_TOKEN" /></label>
+      <label class="p-field"><span>Backend account id (this session represents)</span><input id="brAccount" placeholder="liacc_..." /></label>
+    </div>
+
+    <button id="saveSettings" class="p-btn primary sm" style="width:100%;margin-top:6px">Save settings</button>
   </section>
 
   <script src="../lib/messaging.js"></script>

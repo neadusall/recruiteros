@@ -31,6 +31,15 @@
       hardMaxPages: 100,           // LinkedIn caps Sales Nav search near 2500 results
     },
 
+    // Browser-execution bridge (closes the backend -> browser seam).
+    // The backend's internalProvider posts actions to the bridge; this
+    // extension drains them. Set the URL/token, the account id, and enable
+    // it in the popup Settings (or here).
+    bridge: {
+      url: 'http://localhost:8787',   // where bridge/outreach-bridge.cjs runs
+      token: 'dev-outreach-token',    // must match the bridge AGENT_TOKEN
+    },
+
     tickMinutes: 1,
     brand: { name: 'RecruiterOS Outreach', accent: '#7c5cff' },
   };

@@ -70,6 +70,11 @@
     $('#setGapMin').value = s.settings.pacing.minSeconds;
     $('#setGapMax').value = s.settings.pacing.maxSeconds;
     $('#setWeekends').checked = !!s.settings.weekendsOff;
+    const br = s.settings.bridge || {};
+    $('#brEnabled').checked = !!br.enabled;
+    $('#brUrl').value = br.url || '';
+    $('#brToken').value = br.token || '';
+    $('#brAccount').value = br.accountId || '';
   }
 
   function item(type, name, status) {
@@ -135,6 +140,7 @@
       workingHours: { start: +$('#setStart').value, end: +$('#setEnd').value },
       pacing: { minSeconds: +$('#setGapMin').value, maxSeconds: +$('#setGapMax').value },
       weekendsOff: $('#setWeekends').checked,
+      bridge: { enabled: $('#brEnabled').checked, url: $('#brUrl').value.trim(), token: $('#brToken').value.trim(), accountId: $('#brAccount').value.trim() },
     }});
     flash('Settings saved'); refresh();
   });
