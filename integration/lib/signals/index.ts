@@ -104,6 +104,22 @@ export type {
   RunOptions,
 } from "./waterfall";
 
+// Cheap-first contact enrichment (RapidAPI marketplace + Icypeas, premium as backup)
+export {
+  rapidEmailFinder,
+  rapidPersonEnrich,
+  rapidPhoneFinder,
+  icypeasEmailFinder,
+  emailVerifier,
+  cheapFirstContactWaterfall,
+  cheapTier,
+} from "./rapidapi";
+export type {
+  CheapFirstOptions,
+  PersonEnrichment,
+  PhoneResult,
+} from "./rapidapi";
+
 // Collector (orchestration)
 export {
   collect,
