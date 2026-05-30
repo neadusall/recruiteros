@@ -215,7 +215,24 @@
   }
 
   function renderCampaigns(el) {
-    var rows = SEED.campaigns.filter(function (c) { return c.motion === motion; }).map(function (c) {
+    // Campaigns saved from the drag-and-drop Campaign Studio (localStorage), newest first.
+    var saved = [];
+    try { saved = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); } catch (e) {}
+    var savedRows = saved.filter(function (c) { return c.motion === motion; }).map(function (c) {
+      var pill = c.status === "active" ? "live" : "draft";
+      var touches = (c.steps || []).filter(function (s) { return s.key !== "lg_delay"; }).length;
+      var chans = {};
+      (c.steps || []).forEach(function (s) { if (s.channel && s.channel !== "logic") chans[s.channel] = 1; });
+      var chList = Object.keys(chans).map(function (x) { return x.replace("linkedin", "LinkedIn").replace("email", "Email").replace("sms", "SMS").replace("voice", "Voice"); });
+      return '<div class="card" style="margin-bottom:12px;cursor:pointer" data-open="' + esc(c.id) + '"><div style="display:flex;align-items:center;gap:10px">' +
+        '<span class="ni">🧩</span><b style="font-size:15px">' + esc(c.name) + "</b>" +
+        '<span class="status-pill ' + pill + '">' + esc(c.status) + "</span>" +
+        '<span class="lr-right" style="margin-left:auto">cap ' + (c.dailyCap || 25) + "/day</span></div>" +
+        '<div class="muted" style="font-size:13px;margin:6px 0 10px">' + esc(c.goal || "No goal set yet.") + "</div>" +
+        '<div class="muted" style="font-size:12.5px">' + touches + " touches across " + (chList.join(", ") || "no channels yet") + " · Studio sequence</div></div>";
+    }).join("");
+
+    var seedRows = SEED.campaigns.filter(function (c) { return c.motion === motion; }).map(function (c) {
       var pill = c.status === "active" ? "live" : "draft";
       return '<div class="card" style="margin-bottom:12px"><div style="display:flex;align-items:center;gap:10px">' +
         '<b style="font-size:15px">' + esc(c.name) + "</b>" +
@@ -223,8 +240,18 @@
         '<span class="lr-right" style="margin-left:auto">cap ' + c.dailyCap + "/day</span></div>" +
         '<div class="muted" style="font-size:13px;margin:6px 0 10px">' + esc(c.goal) + "</div>" +
         '<div class="muted" style="font-size:12.5px">Signals: ' + c.signals.map(esc).join(", ") + "</div></div>";
-    }).join("") || '<div class="empty">No ' + motion + " campaigns yet. Click ＋ New campaign.</div>";
-    el.innerHTML = head("Campaigns", "The unit of work. ICP, signals, channels, sequence and A/B variants in one place.") + rows;
+    }).join("");
+
+    var rows = savedRows + seedRows;
+    if (!rows) rows = '<div class="empty">No ' + motion + " campaigns yet. Click ＋ New campaign to open the Studio.</div>";
+    el.innerHTML = head("Campaigns", "The unit of work. Drag-and-drop multi-channel sequences, ICP, signals, and A/B variants in one place.") +
+      '<div class="btn-row" style="margin-bottom:14px"><a class="btn btn-primary btn-sm" href="campaign-studio.html?motion=' + motion + '">🧩 Open Campaign Studio</a>' +
+      '<a class="btn btn-ghost btn-sm" href="campaign-builder.html">🧱 Target builder</a></div>' + rows;
+
+    // open a saved campaign in the Studio
+    Array.prototype.forEach.call(el.querySelectorAll("[data-open]"), function (card) {
+      card.addEventListener("click", function () { location.href = "campaign-studio.html?id=" + card.getAttribute("data-open"); });
+    });
   }
 
   function renderOutreach(el) {
@@ -356,6 +383,7 @@
   /* ---------------- primary actions ---------------- */
   function primaryAction(key) {
     if (key === "team") { inviteRecruiter(); return; }
+    if (key === "campaigns") { location.href = "campaign-studio.html?motion=" + motion; return; }
     if (key === "connected") { SEED.integrations.forEach(function (i) { if (i.status === "yellow") i.status = "green"; }); render(); toast("Tested all connections"); return; }
     toast("Demo: " + key + " action. Wire to /api when the backend is deployed.");
   }
