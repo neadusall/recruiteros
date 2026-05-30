@@ -582,6 +582,69 @@
   });
   $('#refreshDs') && $('#refreshDs').addEventListener('click', renderDatasets);
 
+  /* ============================================================
+     RECRUITEROS BACKEND — team accounts, throttles, prospects, inbox
+     ============================================================ */
+  const Backend = window.RosBackend;
+
+  async function renderBackend() {
+    if (!Backend) return;
+    $('#beBase').value = Backend.getBase();
+    const ses = await Backend.session();
+    const st = $('#beStatus');
+    if (ses.ok) {
+      const ws = ses.data && (ses.data.workspace || {});
+      const user = ses.data && (ses.data.user || {});
+      st.innerHTML = `<span class="pillbar ok">${esc(ws.name || 'workspace')} · ${esc(user.name || user.email || 'member')}</span>`;
+    } else {
+      st.innerHTML = `<span class="pillbar warn">${esc(ses.info || 'offline')}</span>`;
+      $('#beAccounts').innerHTML = '<p class="dim" style="font-size:12px">' + esc(ses.info || 'Backend not connected.') + '</p>';
+      $('#beInbox').innerHTML = '<p class="dim" style="font-size:12px">—</p>';
+      return;
+    }
+    // team LinkedIn accounts (multi-account, quotas, warmup)
+    const acc = await Backend.accounts();
+    const list = (acc.ok && acc.data && acc.data.linkedin) || [];
+    $('#beAccounts').innerHTML = list.length ? list.map(a => {
+      const q = a.quotas || a.limits || {};
+      const warm = a.warmup || a.status || '';
+      return `<div class="acc-chip"><span class="healthdot ${/warm/i.test(warm) ? 'warn' : /flag|restrict/i.test(warm) ? 'bad' : 'good'}"></span>
+        <div style="flex:1"><div style="font-size:13px;font-weight:600">${esc(a.handle || a.displayName || a.id)}</div>
+        <div class="dim" style="font-size:11px">${esc(a.platform || 'linkedin')} · ${esc(warm)} · caps ${q.connects ?? q.invitesPerDay ?? '?'}c / ${q.dms ?? q.messagesPerDay ?? '?'}m / ${q.profileViews ?? q.profileViewsPerDay ?? '?'}v</div></div></div>`;
+    }).join('') : '<p class="dim" style="font-size:12px">No LinkedIn accounts yet. Add one in the backend (/api/accounts).</p>';
+    // assignment dropdown
+    const c = campaign();
+    const sel = $('#beAssign');
+    sel.innerHTML = '<option value="">(none / Simulated)</option>' + list.map(a => `<option value="${esc(a.id)}" ${c && c._backendAccountId === a.id ? 'selected' : ''}>${esc(a.handle || a.displayName || a.id)}</option>`).join('');
+    // inbox
+    const inb = await Backend.responses();
+    const items = (inb.ok && inb.data && inb.data.items) || [];
+    $('#beInbox').innerHTML = items.length
+      ? `<div class="pillbar info">${items.length} responses</div>` + items.slice(0, 3).map(m => `<div class="dim" style="font-size:11.5px;margin-top:4px">${esc(m.fromName || m.fromHandle || 'unknown')}: ${esc((m.text || '').slice(0, 60))}</div>`).join('')
+      : '<p class="dim" style="font-size:12px">Inbox empty.</p>';
+  }
+
+  async function pushDatasetToBackend(id) {
+    if (!Backend) { toast('Backend client missing', 'warn'); return; }
+    const ses = await Backend.session();
+    if (!ses.ok) { toast('Connect the backend first (LinkedIn Live tab)', 'warn'); switchTab('live'); return; }
+    const r = await Ext.getDataset(id);
+    if (!r || !r.ok) { toast('Could not load dataset', 'warn'); return; }
+    const recs = r.dataset.records || [];
+    const c = campaign();
+    const rows = recs.map(rec => Backend.toProspectRow(rec, c && c._backendCampaignId));
+    const res = await Backend.addProspectsBulk(rows);
+    toast(res.ok ? ('Pushed ' + rows.length + ' prospects to the backend') : ('Push failed: ' + (res.info || '')), res.ok ? '' : 'warn');
+  }
+
+  $('#beConnect') && $('#beConnect').addEventListener('click', async () => { Backend.setBase($('#beBase').value); await renderBackend(); toast('Backend base saved'); });
+  $('#beRefresh') && $('#beRefresh').addEventListener('click', renderBackend);
+  $('#beAssign') && $('#beAssign').addEventListener('change', (e) => {
+    const c = campaign(); if (!c) return;
+    store.update('campaigns', c.id, { _backendAccountId: e.target.value || null });
+    toast(e.target.value ? 'Account assigned to this campaign' : 'Account unassigned');
+  });
+
   /* ---- Sales Navigator sourcing (from the Leads tab) ---- */
   $('#sourceSalesNav') && $('#sourceSalesNav').addEventListener('click', () => {
     const reach = Ext && Ext.env();
