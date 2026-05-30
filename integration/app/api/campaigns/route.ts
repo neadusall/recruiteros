@@ -32,6 +32,39 @@ export async function POST(req: Request) {
 }
 
 /**
+ * PUT /api/campaigns -> upsert a campaign authored in the Campaign Studio.
+ * The Studio sends a richer object (steps, channels, etc.); we store it whole,
+ * scoped to the caller's workspace, so it persists and is shared across the team.
+ */
+export async function PUT(req: Request) {
+  const g = requireSession(req);
+  if ("response" in g) return g.response;
+  const b = await body<any>(req);
+  if (!b?.id || !b?.name) return fail("missing_fields", 422);
+  const campaign = {
+    ...b,
+    workspaceId: g.ctx.workspace.id,
+    motion: b.motion === "bd" ? "bd" : "recruiting",
+    status: b.status ?? "draft",
+    createdAt: b.createdAt ?? new Date().toISOString(),
+  };
+  await getCore().saveCampaign(campaign as any);
+  return ok({ campaign });
+}
+
+/** DELETE /api/campaigns?id=... -> remove a campaign from the workspace. */
+export async function DELETE(req: Request) {
+  const g = requireSession(req);
+  if ("response" in g) return g.response;
+  const id = new URL(req.url).searchParams.get("id");
+  if (!id) return fail("missing_id", 422);
+  const existing = await getCore().getCampaign(id);
+  if (existing && existing.workspaceId !== g.ctx.workspace.id) return fail("forbidden", 403);
+  await getCore().deleteCampaign(id);
+  return ok({ ok: true });
+}
+
+/**
  * PUT /api/campaigns -> upsert a Campaign Studio campaign (visual sequence).
  * Accepts the Studio snapshot (id, name, motion, status, steps[], account...)
  * and normalizes it onto the Campaign shape. Looser than POST: only id, name,

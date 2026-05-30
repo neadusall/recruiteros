@@ -16,3 +16,5 @@ desktop.ini
 dist/
 .cache/
 .git-commit-msg.txt
+integration/build-out.txt
+integration/srv.log

@@ -14,39 +14,55 @@
   var ctx = null;
   try { ctx = JSON.parse(localStorage.getItem("ros_ctx") || "null"); } catch (e) {}
   if (!ctx) { location.replace("login.html"); return; }
-  var LIVE = !ctx.demo && !!(window.RECRUITEROS_API_BASE);
   var API = (window.RECRUITEROS_API_BASE || "") + "/api";
   var motion = localStorage.getItem("ros_motion") || "recruiting";
 
-  // RBAC: live sessions carry a capabilities array; the static demo has none, so
-  // we treat demo as full-access (owner) to keep it explorable. Recruiters
-  // (members) on a live backend only see what their role allows.
-  var CAPS = Array.isArray(ctx.capabilities) ? ctx.capabilities : null;
-  function can(cap) { return CAPS === null ? true : CAPS.indexOf(cap) >= 0; }
+  // RBAC: the session carries the capabilities the user's role allows; the UI
+  // only shows what they can actually use.
+  var CAPS = Array.isArray(ctx.capabilities) ? ctx.capabilities : [];
+  function can(cap) { return CAPS.indexOf(cap) >= 0; }
 
   /* ---------------- tiny dom helpers ---------------- */
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var view = $("#view");
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function toast(t) { var el = $("#toast"); el.textContent = t; el.classList.add("show"); setTimeout(function () { el.classList.remove("show"); }, 2200); }
-  function api(path) { return fetch(API + path, { credentials: "include" }).then(function (r) { if (!r.ok) throw 0; return r.json(); }); }
+  // GET helper: resolves to parsed JSON, or null on any error (caller renders an
+  // empty/needs-setup state). The session cookie authenticates every call.
+  function api(path) {
+    return fetch(API + path, { credentials: "include" }).then(function (r) {
+      if (r.status === 401) { signOut(); throw 0; }
+      if (!r.ok) throw 0;
+      return r.json();
+    });
+  }
+  // Mutating call (POST/PUT/DELETE) -> { ok, status, data }.
+  function send(path, method, payload) {
+    return fetch(API + path, {
+      method: method, credentials: "include",
+      headers: payload ? { "Content-Type": "application/json" } : undefined,
+      body: payload ? JSON.stringify(payload) : undefined
+    }).then(function (r) {
+      if (r.status === 401) { signOut(); throw 0; }
+      return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, status: r.status, data: d }; });
+    });
+  }
 
-  /* ---------------- seed (mirrors the backend constants/rules) ---------------- */
-  var SEED = seed();
+  /* ---------------- reference content (product knowledge, not customer data) -- */
+  var REF = ref();
 
   /* ---------------- chrome ---------------- */
   $("#wsName").textContent = (ctx.workspace && ctx.workspace.name) || "Workspace";
-  $("#wsPlan").textContent = (ctx.workspace && ctx.workspace.plan) || "trial";
   $("#userName").textContent = (ctx.user && ctx.user.name) || "You";
   $("#userInitials").textContent = initials((ctx.user && ctx.user.name) || "You");
   var envPill = $("#envPill");
-  envPill.textContent = LIVE ? "live" : "demo";
-  envPill.classList.toggle("live", LIVE);
-  $("#signOut").addEventListener("click", function () {
-    if (LIVE) fetch(API + "/auth/session", { method: "DELETE", credentials: "include" });
+  if (envPill) envPill.style.display = "none"; // no demo/live badge: this is the product
+  function signOut() {
+    fetch(API + "/auth/session", { method: "DELETE", credentials: "include" }).catch(function () {});
     localStorage.removeItem("ros_ctx"); localStorage.removeItem("ros_session");
     location.href = "login.html";
-  });
+  }
+  $("#signOut").addEventListener("click", signOut);
 
   // motion toggle
   Array.prototype.forEach.call(document.querySelectorAll(".mt"), function (b) {
@@ -58,9 +74,20 @@
     });
   });
 
-  // response badge (count of hot, unreviewed)
-  var hot = SEED.responses.filter(function (r) { return r.cls === "positive" || r.cls === "referral"; }).length;
-  if (hot) { var bd = $("#badgeResponse"); bd.textContent = hot; bd.classList.add("show"); }
+  // Response badge: live count of hot, unreviewed replies from the API.
+  function refreshBadge() {
+    api("/response/list").then(function (d) {
+      var items = (d && d.items) || [];
+      var hot = items.filter(function (p) {
+        var c = p.classification && p.classification.class;
+        return c === "positive" || c === "referral";
+      }).length;
+      var bd = $("#badgeResponse");
+      if (!bd) return;
+      bd.textContent = hot; bd.classList.toggle("show", hot > 0);
+    }).catch(function () {});
+  }
+  refreshBadge();
 
   // RBAC: hide nav items + group labels the current role can't use.
   Array.prototype.forEach.call(document.querySelectorAll("[data-cap]"), function (el) {
@@ -121,30 +148,39 @@
   }
 
   function renderOverview(el) {
-    var o = SEED.overview;
-    var stats = o.capacity.map(function (c) {
-      return '<div class="stat"><span class="rag ' + c.status + '"></span><div class="sv">' + c.value + '</div><div class="sl">' + esc(c.label) + "</div></div>";
-    }).join("");
-    var kpis = [
-      ["Active prospects", o.activeProspects], ["Appointments today", o.appointmentsToday],
-      ["This week", o.appointmentsThisWeek], ["Warm convos today", o.warmConversationsToday],
-      [motion === "bd" ? "Won accounts" : "Placements", o.wonAccounts]
-    ].map(function (k) { return '<div class="stat"><div class="sv">' + k[1] + '</div><div class="sl">' + k[0] + "</div></div>"; }).join("");
-
-    var appts = o.recentAppointments.map(function (a) {
-      return '<div class="list-row"><div><div class="lr-main">' + esc(a.name) + '</div><div class="lr-sub">' + esc(a.channel || "") + "</div></div><div class=\"lr-right\">" + esc(a.at || "") + "</div></div>";
-    }).join("") || '<div class="empty">No appointments yet.</div>';
-
-    var drips = o.activeDrips.map(function (d) {
-      return '<div class="list-row"><div class="lr-main">' + esc(d.name) + '</div><div class="lr-right">' + esc(d.stage) + "</div></div>";
-    }).join("") || '<div class="empty">No active drips.</div>';
-
     el.innerHTML = head("Overview", "Real-time capacity and pipeline health for " + (ctx.workspace ? ctx.workspace.name : "your workspace") + ".") +
-      '<div class="stat-grid" style="margin-bottom:14px">' + stats + "</div>" +
-      '<div class="stat-grid" style="margin-bottom:18px">' + kpis + "</div>" +
-      '<div class="two-col"><div class="card"><h3>Recent appointments</h3>' + appts + "</div>" +
-      '<div class="card"><h3>Active drips</h3>' + drips + "</div></div>" +
+      '<div id="ovBody">' + loading() + "</div>" +
       '<div class="card" style="margin-top:16px"><h3>Daily cadence</h3>' + cadenceHtml() + "</div>";
+
+    api("/overview").then(function (o) {
+      o = o || {};
+      var cap = o.capacity || [];
+      var stats = cap.map(function (c) {
+        return '<div class="stat"><span class="rag ' + (c.status || "red") + '"></span><div class="sv">' + (c.value != null ? c.value : 0) + '</div><div class="sl">' + esc(c.label) + "</div></div>";
+      }).join("") || emptyCard("Connect your sending accounts and domains to see capacity.");
+      var kpis = [
+        ["Active prospects", o.activeProspects || 0], ["Appointments today", o.appointmentsToday || 0],
+        ["This week", o.appointmentsThisWeek || 0], ["Warm convos today", o.warmConversationsToday || 0],
+        [motion === "bd" ? "Won accounts" : "Placements", o.wonAccounts || 0]
+      ].map(function (k) { return '<div class="stat"><div class="sv">' + k[1] + '</div><div class="sl">' + k[0] + "</div></div>"; }).join("");
+
+      var appts = (o.recentAppointments || []).map(function (a) {
+        return '<div class="list-row"><div><div class="lr-main">' + esc(a.name) + '</div><div class="lr-sub">' + esc(a.channel || "") + "</div></div><div class=\"lr-right\">" + esc(a.at || "") + "</div></div>";
+      }).join("") || '<div class="empty">No appointments booked yet.</div>';
+
+      var drips = (o.activeDrips || []).map(function (d) {
+        return '<div class="list-row"><div class="lr-main">' + esc(d.name) + '</div><div class="lr-right">' + esc(d.stage) + "</div></div>";
+      }).join("") || '<div class="empty">No active drips yet. Launch a campaign to start.</div>';
+
+      var body = $("#ovBody"); if (!body) return;
+      body.innerHTML =
+        '<div class="stat-grid" style="margin-bottom:14px">' + stats + "</div>" +
+        '<div class="stat-grid" style="margin-bottom:18px">' + kpis + "</div>" +
+        '<div class="two-col"><div class="card"><h3>Recent appointments</h3>' + appts + "</div>" +
+        '<div class="card"><h3>Active drips</h3>' + drips + "</div></div>";
+    }).catch(function () {
+      var body = $("#ovBody"); if (body) body.innerHTML = needsSetup();
+    });
   }
 
   function renderResponse(el) {
@@ -160,9 +196,13 @@
     var listWrap = document.createElement("div");
     el.appendChild(listWrap);
 
+    var inbox = [];        // loaded from the API
+    var loaded = false;
     function paint() {
-      var items = SEED.responses.filter(function (r) { return active === "all" || r.channel === active; });
-      listWrap.innerHTML = items.map(respItem).join("") || '<div class="empty">Inbox is clear.</div>';
+      if (!loaded) { listWrap.innerHTML = loading(); return; }
+      var items = inbox.filter(function (r) { return active === "all" || r.channel === active; });
+      listWrap.innerHTML = items.map(respItem).join("") ||
+        '<div class="empty">No replies' + (active === "all" ? "" : " on " + active) + " yet. As your campaigns run, every reply lands here, auto-classified.</div>";
     }
     filter.addEventListener("click", function (e) {
       var cf = e.target.closest(".cf"); if (!cf) return;
@@ -172,8 +212,13 @@
     });
     paint();
 
-    // rules matrix
-    var rows = SEED.rules.map(function (r) {
+    api("/response/list").then(function (d) {
+      inbox = ((d && d.items) || []).map(mapProcessed);
+      loaded = true; paint();
+    }).catch(function () { loaded = true; paint(); });
+
+    // rules matrix (product reference: how every reply is classified + routed)
+    var rows = REF.rules.map(function (r) {
       return "<tr><td><span class=\"cls cls-" + r.cls + "\">" + esc(r.label) + "</span></td>" +
         "<td>" + r.triggers.map(esc).join(", ") + "</td>" +
         '<td class="acts">' + r.actions.map(esc).join(" → ") + "</td>" +
@@ -184,10 +229,6 @@
     matrix.style.marginTop = "18px";
     matrix.innerHTML = "<h3>Classification &amp; routing rules</h3><div style=\"overflow:auto\"><table class=\"matrix\"><thead><tr><th>Class</th><th>Triggers</th><th>System action</th><th>SLA</th></tr></thead><tbody>" + rows + "</tbody></table></div>";
     el.appendChild(matrix);
-
-    if (LIVE) api("/response/list").then(function (d) {
-      if (d.items && d.items.length) { SEED.responses = d.items.map(mapProcessed); paint(); }
-    }).catch(function () {});
   }
 
   function respItem(r) {
@@ -200,19 +241,27 @@
   }
 
   function renderProspects(el) {
-    var counts = SEED.prospects.reduce(function (m, p) { m[p.status] = (m[p.status] || 0) + 1; return m; }, {});
-    var stages = SEED.lifecycle.map(function (l) {
-      return '<div class="stage"><b>' + (counts[l.status] || 0) + "</b><span>" + esc(l[motion]) + "</span></div>";
-    }).join("");
-    var rows = SEED.prospects.map(function (p) {
-      return '<div class="list-row"><span class="avatar" style="width:28px;height:28px;font-size:11px;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) + "</span>" +
-        '<div><div class="lr-main">' + esc(p.fullName) + '</div><div class="lr-sub">' + esc((p.title || "") + (p.company ? " · " + p.company : "")) + "</div></div>" +
-        '<span class="cls cls-' + statusCls(p.status) + '" style="margin-left:auto">' + esc(statusLabel(p.status)) + "</span>" +
-        '<div class="lr-right">' + (p.dripStage ? "Touch " + p.dripStage : "") + "</div></div>";
-    }).join("");
     el.innerHTML = head("Prospects", "Your live pipeline, synced bidirectionally with the ATS.") +
-      '<div class="pipe">' + stages + "</div>" +
-      '<div class="card"><h3>Pipeline</h3>' + (rows || '<div class="empty">No prospects yet.</div>') + "</div>";
+      '<div id="prBody">' + loading() + "</div>";
+
+    api("/prospects").then(function (d) {
+      var list = (d && d.prospects) || [];
+      var lifecycle = (d && d.lifecycle) || REF.lifecycle;
+      var counts = list.reduce(function (m, p) { m[p.status] = (m[p.status] || 0) + 1; return m; }, {});
+      var stages = lifecycle.map(function (l) {
+        return '<div class="stage"><b>' + (counts[l.status] || 0) + "</b><span>" + esc(l[motion] || l.status) + "</span></div>";
+      }).join("");
+      var rows = list.map(function (p) {
+        return '<div class="list-row"><span class="avatar" style="width:28px;height:28px;font-size:11px;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) + "</span>" +
+          '<div><div class="lr-main">' + esc(p.fullName) + '</div><div class="lr-sub">' + esc((p.title || "") + (p.company ? " · " + p.company : "")) + "</div></div>" +
+          '<span class="cls cls-' + statusCls(p.status) + '" style="margin-left:auto">' + esc(statusLabel(p.status, lifecycle)) + "</span>" +
+          '<div class="lr-right">' + (p.dripStage ? "Touch " + p.dripStage : "") + "</div></div>";
+      }).join("");
+      var body = $("#prBody"); if (!body) return;
+      body.innerHTML = '<div class="pipe">' + stages + "</div>" +
+        '<div class="card"><h3>Pipeline</h3>' + (rows ||
+          '<div class="empty">No prospects yet. Add one with the button above, bulk-import a CSV, or let a campaign discover them.</div>') + "</div>";
+    }).catch(function () { var b = $("#prBody"); if (b) b.innerHTML = needsSetup(); });
   }
 
   function renderCampaigns(el) {
@@ -233,21 +282,28 @@
         '<div class="muted" style="font-size:12.5px">' + touches + " touches across " + (chList.join(", ") || "no channels yet") + " · Studio sequence</div></div>";
     }).join("");
 
-    var seedRows = SEED.campaigns.filter(function (c) { return c.motion === motion; }).map(function (c) {
-      var pill = c.status === "active" ? "live" : "draft";
-      return '<div class="card" style="margin-bottom:12px"><div style="display:flex;align-items:center;gap:10px">' +
-        '<b style="font-size:15px">' + esc(c.name) + "</b>" +
-        '<span class="status-pill ' + pill + '">' + c.status + "</span>" +
-        '<span class="lr-right" style="margin-left:auto">cap ' + c.dailyCap + "/day</span></div>" +
-        '<div class="muted" style="font-size:13px;margin:6px 0 10px">' + esc(c.goal) + "</div>" +
-        '<div class="muted" style="font-size:12.5px">Signals: ' + c.signals.map(esc).join(", ") + "</div></div>";
-    }).join("");
-
-    var rows = savedRows + seedRows;
-    if (!rows) rows = '<div class="empty">No ' + motion + " campaigns yet. Click ＋ New campaign to open the Studio.</div>";
+    var rows = savedRows;
+    if (!rows) rows = '<div class="empty">No ' + motion + " campaigns yet. Click ＋ New campaign to open the Studio and build your first multi-channel sequence.</div>";
     el.innerHTML = head("Campaigns", "The unit of work. Drag-and-drop multi-channel sequences, ICP, signals, and A/B variants in one place.") +
       '<div class="btn-row" style="margin-bottom:14px"><a class="btn btn-primary btn-sm" href="#studio">🧩 Open Campaign Studio</a>' +
-      '<a class="btn btn-ghost btn-sm" href="campaign-builder.html">🧱 Target builder</a></div>' + rows;
+      '<a class="btn btn-ghost btn-sm" href="campaign-builder.html">🧱 Target builder</a></div>' +
+      '<div id="cmpBody">' + rows + "</div>";
+
+    // Merge any server-side campaigns the backend knows about.
+    api("/campaigns").then(function (d) {
+      var server = (d && d.campaigns) || [];
+      if (!server.length) return;
+      var extra = server.filter(function (c) { return c.motion === motion; }).map(function (c) {
+        var pill = c.status === "active" ? "live" : "draft";
+        return '<div class="card" style="margin-bottom:12px"><div style="display:flex;align-items:center;gap:10px">' +
+          '<b style="font-size:15px">' + esc(c.name) + "</b>" +
+          '<span class="status-pill ' + pill + '">' + esc(c.status) + "</span>" +
+          '<span class="lr-right" style="margin-left:auto">cap ' + esc(c.dailyCap || 25) + "/day</span></div>" +
+          '<div class="muted" style="font-size:13px;margin:6px 0 10px">' + esc(c.goal || "") + "</div>" +
+          (c.signals && c.signals.length ? '<div class="muted" style="font-size:12.5px">Signals: ' + c.signals.map(esc).join(", ") + "</div>" : "") + "</div>";
+      }).join("");
+      var body = $("#cmpBody"); if (body && extra) body.insertAdjacentHTML("beforeend", extra);
+    }).catch(function () {});
 
     // open a saved campaign in the embedded Studio (in-app route)
     Array.prototype.forEach.call(el.querySelectorAll("[data-open]"), function (card) {
@@ -258,8 +314,8 @@
   /* ---------------- Campaign Studio (embedded drag-and-drop builder) ---------------- */
   var studioOpenId = null; // set when opening a saved campaign from the Campaigns view
 
-  // Persistence the Studio writes through: localStorage is the source of truth so
-  // the static demo is fully alive; when LIVE it also upserts to the backend.
+  // Persistence the Studio writes through: it upserts to the backend (the source
+  // of truth) and mirrors to localStorage as a fast local cache for instant load.
   function studioStore() {
     function all() { try { return JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); } catch (e) { return []; } }
     return {
@@ -267,11 +323,11 @@
       save: function (c) {
         var l = all().filter(function (x) { return x.id !== c.id; }); l.unshift(c);
         localStorage.setItem("ros_campaigns", JSON.stringify(l));
-        if (LIVE) fetch(API + "/campaigns", { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(c) }).catch(function () {});
+        send("/campaigns", "PUT", c).catch(function () {});
       },
       remove: function (id) {
         localStorage.setItem("ros_campaigns", JSON.stringify(all().filter(function (x) { return x.id !== id; })));
-        if (LIVE) fetch(API + "/campaigns?id=" + encodeURIComponent(id), { method: "DELETE", credentials: "include" }).catch(function () {});
+        fetch(API + "/campaigns?id=" + encodeURIComponent(id), { method: "DELETE", credentials: "include" }).catch(function () {});
       }
     };
   }
@@ -280,38 +336,48 @@
     if (typeof CampaignStudio === "undefined") { el.innerHTML = '<div class="empty">Campaign Studio failed to load.</div>'; return; }
     var root = document.createElement("div");
     el.appendChild(root);
-
-    // assignees = the workspace team; sending accounts = connected LinkedIn handles
-    var team = (SEED.team || []).map(function (m) { return m.isYou ? "You" : m.name; });
-    var assignees = team.concat(["BD desk", "Round-robin team", "Unassigned"]).filter(function (v, i, a) { return a.indexOf(v) === i; });
-    var accounts = SEED.accounts.linkedin.map(function (a) { return a.handle; }).concat(["auto-rotate"]);
-
-    CampaignStudio.mount(root, {
-      motion: motion === "bd" ? "bd" : "recruiting",
-      embedded: true,
-      openId: studioOpenId,
-      toast: toast,
-      assignees: assignees,
-      accounts: accounts,
-      store: studioStore(),
-      sendTestSms: function (to, body, done) {
-        if (LIVE) {
-          fetch(API + "/sms/send", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: to, text: body }) })
-            .then(function (r) { if (!r.ok) throw 0; done("Test SMS sent to " + to); })
-            .catch(function () { done("Could not send, check SMS setup in Connected"); });
-        } else done("Test SMS queued to " + to + " (demo)");
-      }
-    });
+    var openId = studioOpenId;
     studioOpenId = null; // consumed
+
+    function mount(assignees, accounts) {
+      CampaignStudio.mount(root, {
+        motion: motion === "bd" ? "bd" : "recruiting",
+        embedded: true,
+        openId: openId,
+        toast: toast,
+        assignees: assignees,
+        accounts: accounts,
+        store: studioStore(),
+        sendTestSms: function (to, body, done) {
+          send("/sms/send", "POST", { to: to, text: body })
+            .then(function (r) { done(r.ok ? "Test SMS sent to " + to : "Could not send. Check SMS setup in Connected."); })
+            .catch(function () { done("Could not reach the server."); });
+        }
+      });
+    }
+
+    // Assignees = the workspace team; sending accounts = connected LinkedIn handles.
+    Promise.all([
+      api("/team").catch(function () { return null; }),
+      api("/accounts").catch(function () { return null; })
+    ]).then(function (res) {
+      var members = (res[0] && res[0].members) || [];
+      var team = members.map(function (m) { return m.userId === ctx.user.id ? "You" : m.name; });
+      var assignees = team.concat(["Round-robin team", "Unassigned"]).filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+      if (assignees.length === 0) assignees = ["You", "Unassigned"];
+      var li = (res[1] && res[1].linkedin) || [];
+      var accounts = li.map(function (a) { return a.handle; }).concat(["auto-rotate"]);
+      mount(assignees, accounts);
+    });
   }
 
   function renderOutreach(el) {
-    var phases = SEED.phases.map(function (p) {
+    var phases = REF.phases.map(function (p) {
       return '<div class="phase"><div class="phase-h"><span class="phase-n">' + p.n + "</span><h4>" + esc(p.title) + '</h4><span class="phase-time">' + esc(p.time) + "</span></div>" +
         "<ul>" + p.items.map(function (i) { return "<li>" + esc(i) + "</li>"; }).join("") + "</ul>" +
         '<div class="done">✓ Done when: ' + esc(p.done) + "</div></div>";
     }).join("");
-    var touches = SEED.touches.map(function (t) {
+    var touches = REF.touches.map(function (t) {
       return '<div class="touch"><div class="day">Day ' + t.day + '</div><div><div class="tn">' + esc(t.name) +
         '<span class="chip-c">' + esc(t.channel) + "</span></div>" +
         '<div class="ti">' + esc(t.intent) + (t.constraints ? ' <span class="spark">(' + esc(t.constraints) + ")</span>" : "") + "</div></div></div>";
@@ -320,59 +386,118 @@
       '<div class="two-col"><div><h3 style="margin-bottom:10px">Deploy a campaign</h3>' + phases + "</div>" +
       '<div><div class="card"><h3>Sequence anatomy (28 days)</h3>' + touches + "</div>" +
       '<div class="card" style="margin-top:14px"><h3>Decision rules</h3><ul class="phase" style="border:0;padding:0;margin:0">' +
-      SEED.seqRules.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div></div></div>";
+      REF.seqRules.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div></div></div>";
   }
 
   function renderContent(el) {
-    var rows = SEED.assets.map(function (a) {
-      return '<div class="list-row"><div><div class="lr-main">' + esc(a.name) + '</div><div class="lr-sub">' + esc(a.type) + "</div></div>" +
-        '<div class="lr-right">' + (a.campaignIds.length ? a.campaignIds.length + " campaign(s)" : "unassigned") + "</div></div>";
-    }).join("") || '<div class="empty">No assets yet.</div>';
     el.innerHTML = head("Content Library", "Case studies and comp benchmarks the AI injects into Touch 2 and Touch 3.") +
-      '<div class="card">' + rows + "</div>";
+      '<div id="ctBody">' + loading() + "</div>";
+    api("/content").then(function (d) {
+      var assets = (d && d.assets) || [];
+      var rows = assets.map(function (a) {
+        var n = (a.campaignIds || []).length;
+        return '<div class="list-row"><div><div class="lr-main">' + esc(a.name) + '</div><div class="lr-sub">' + esc(a.type) + "</div></div>" +
+          '<div class="lr-right">' + (n ? n + " campaign(s)" : "unassigned") + "</div></div>";
+      }).join("") || '<div class="empty">No assets yet. Add a case study or comp benchmark, the AI weaves it into your value-drop touches.</div>';
+      var body = $("#ctBody"); if (body) body.innerHTML = '<div class="card">' + rows + "</div>";
+    }).catch(function () { var b = $("#ctBody"); if (b) b.innerHTML = needsSetup(); });
   }
 
   function renderAccounts(el) {
-    var li = SEED.accounts.linkedin.map(function (a) {
-      return '<div class="integ"><span class="dot3 ' + (a.warmup === "warmed" ? "" : "") + '" style="background:' + (a.warmup === "flagged" ? "var(--accent-red)" : a.warmup === "warmed" ? "var(--accent-green)" : "var(--accent-amber)") + '"></span>' +
-        '<div class="meta"><b>' + esc(a.handle) + "</b><small>" + esc(a.platform) + " · " + esc(a.warmup) + " · " + a.quotas.connects + " connects/day</small></div></div>";
-    }).join("");
-    var dom = SEED.accounts.domains.map(function (d) {
-      var color = d.health === "blacklisted" || d.bounceRate >= 0.02 ? "var(--accent-red)" : d.health === "healthy" ? "var(--accent-green)" : "var(--accent-amber)";
-      return '<div class="integ"><span class="dot3" style="background:' + color + '"></span><div class="meta"><b>' + esc(d.domain) + "</b><small>" + d.inboxes + " inboxes · " + esc(d.health) + " · bounce " + (d.bounceRate * 100).toFixed(1) + "%</small></div></div>";
-    }).join("");
     el.innerHTML = head("Accounts", "LinkedIn sending accounts, sending domains, and API keys. Health auto-syncs nightly.") +
-      '<div class="two-col"><div class="card"><h3>LinkedIn accounts</h3>' + (li || '<div class="empty">None yet.</div>') + "</div>" +
-      '<div class="card"><h3>Sending domains</h3>' + (dom || '<div class="empty">None yet.</div>') + "</div></div>";
+      '<div class="btn-row" style="margin-bottom:14px">' +
+      '<button class="btn btn-primary btn-sm" data-add="linkedin">＋ LinkedIn account</button>' +
+      '<button class="btn btn-ghost btn-sm" data-add="domain">＋ Sending domain</button>' +
+      '<button class="btn btn-ghost btn-sm" data-add="apikey">＋ API key</button></div>' +
+      '<div id="acBody">' + loading() + "</div>";
+
+    function load() {
+      api("/accounts").then(function (d) {
+        d = d || {};
+        var li = (d.linkedin || []).map(function (a) {
+          var q = (a.quotas && a.quotas.connects) || 0;
+          return '<div class="integ"><span class="dot3" style="background:' + (a.warmup === "flagged" ? "var(--accent-red)" : a.warmup === "warmed" ? "var(--accent-green)" : "var(--accent-amber)") + '"></span>' +
+            '<div class="meta"><b>' + esc(a.handle) + "</b><small>" + esc(a.platform) + " · " + esc(a.warmup) + " · " + q + " connects/day</small></div></div>";
+        }).join("") || '<div class="empty">No LinkedIn accounts connected yet.</div>';
+        var dom = (d.domains || []).map(function (x) {
+          var color = x.health === "blacklisted" || x.bounceRate >= 0.02 ? "var(--accent-red)" : x.health === "healthy" ? "var(--accent-green)" : "var(--accent-amber)";
+          return '<div class="integ"><span class="dot3" style="background:' + color + '"></span><div class="meta"><b>' + esc(x.domain) + "</b><small>" + (x.inboxes || 0) + " inboxes · " + esc(x.health) + " · bounce " + (((x.bounceRate || 0) * 100).toFixed(1)) + "%</small></div></div>";
+        }).join("") || '<div class="empty">No sending domains yet.</div>';
+        var keys = (d.apiKeys || []).map(function (k) {
+          return '<div class="integ"><span class="dot3" style="background:var(--accent-green)"></span><div class="meta"><b>' + esc(k.service) + "</b><small>" + esc(k.masked) + "</small></div></div>";
+        }).join("") || '<div class="empty">No API keys stored yet.</div>';
+        var body = $("#acBody"); if (!body) return;
+        body.innerHTML = '<div class="two-col"><div class="card"><h3>LinkedIn accounts</h3>' + li + "</div>" +
+          '<div class="card"><h3>Sending domains</h3>' + dom + "</div></div>" +
+          '<div class="card" style="margin-top:14px"><h3>API keys</h3>' + keys + "</div>";
+      }).catch(function () { var b = $("#acBody"); if (b) b.innerHTML = needsSetup(); });
+    }
+    load();
+
+    Array.prototype.forEach.call(el.querySelectorAll("[data-add]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var t = btn.getAttribute("data-add"), payload;
+        if (t === "linkedin") { var h = prompt("LinkedIn account email/username:"); if (!h) return; payload = { type: "linkedin", handle: h, platform: (prompt("Platform (unipile, salesrobot, ...):", "unipile") || "unipile") }; }
+        else if (t === "domain") { var dn = prompt("Sending domain (e.g. go-yourco.com):"); if (!dn) return; payload = { type: "domain", domain: dn, inboxes: 3 }; }
+        else { var svc = prompt("Service (Instantly, Telnyx, Loxo, ...):"); if (!svc) return; var key = prompt("API key for " + svc + ":"); if (!key) return; payload = { type: "apikey", service: svc, key: key }; }
+        send("/accounts", "POST", payload).then(function (r) {
+          toast(r.ok ? "Added" : "Could not add (" + (r.data.error || r.status) + ")"); if (r.ok) load();
+        }).catch(function () { toast("Could not reach the server."); });
+      });
+    });
   }
 
   function renderConnected(el) {
-    var rows = SEED.integrations.map(function (i) {
-      var color = i.status === "green" ? "var(--accent-green)" : i.status === "yellow" ? "var(--accent-amber)" : "var(--accent-red)";
-      var req = i.requiredFor.indexOf(motion) >= 0 ? '<span class="req-tag">required</span>' : "";
-      return '<div class="integ"><span class="dot3" style="background:' + color + '"></span><div class="meta"><b>' + esc(i.label) + "</b><small>" + esc(i.status) + "</small></div>" + req + "</div>";
-    }).join("");
-    var pre = SEED.integrations.filter(function (i) { return i.requiredFor.indexOf(motion) >= 0 && i.status !== "green"; });
-    var gate = pre.length ? '<div class="card" style="border-color:rgba(255,194,77,0.4);margin-bottom:14px"><b class="muted">⚠ ' + pre.length + " required integration(s) not green. Campaign activation is blocked for " + motion + ".</b></div>"
-      : '<div class="card" style="border-color:rgba(56,224,166,0.4);margin-bottom:14px"><b style="color:var(--accent-green)">✓ All required integrations are green. You can activate ' + motion + " campaigns.</b></div>";
     el.innerHTML = head("Connected", "Integration pre-flight. Red → Yellow → Green. All required must be green to activate.") +
-      gate + '<div class="card">' + rows + "</div>";
+      '<div id="cnBody">' + loading() + "</div>";
+
+    function load() {
+      api("/connected").then(function (d) {
+        var ints = (d && d.integrations) || [];
+        var rows = ints.map(function (i) {
+          var color = i.status === "green" ? "var(--accent-green)" : i.status === "yellow" ? "var(--accent-amber)" : "var(--accent-red)";
+          var req = (i.requiredFor || []).indexOf(motion) >= 0 ? '<span class="req-tag">required</span>' : "";
+          return '<div class="integ"><span class="dot3" style="background:' + color + '"></span><div class="meta"><b>' + esc(i.label) + "</b><small>" + esc(i.status) + (i.error ? " · " + esc(i.error) : "") + "</small></div>" +
+            '<button class="btn btn-ghost btn-sm" data-test="' + esc(i.id) + '">Test</button>' + req + "</div>";
+        }).join("") || '<div class="empty">No integrations available.</div>';
+        var pre = ints.filter(function (i) { return (i.requiredFor || []).indexOf(motion) >= 0 && i.status !== "green"; });
+        var gate = pre.length ? '<div class="card" style="border-color:rgba(255,194,77,0.4);margin-bottom:14px"><b class="muted">⚠ ' + pre.length + " required integration(s) not green. Campaign activation is blocked for " + motion + ".</b></div>"
+          : '<div class="card" style="border-color:rgba(56,224,166,0.4);margin-bottom:14px"><b style="color:var(--accent-green)">✓ All required integrations are green. You can activate ' + motion + " campaigns.</b></div>";
+        var body = $("#cnBody"); if (!body) return;
+        body.innerHTML = gate + '<div class="card">' + rows + "</div>";
+        Array.prototype.forEach.call(body.querySelectorAll("[data-test]"), function (btn) {
+          btn.addEventListener("click", function () {
+            btn.disabled = true; btn.textContent = "Testing...";
+            send("/connected", "POST", { action: "test", id: btn.getAttribute("data-test") })
+              .then(function () { load(); }).catch(function () { toast("Could not reach the server."); });
+          });
+        });
+      }).catch(function () { var b = $("#cnBody"); if (b) b.innerHTML = needsSetup(); });
+    }
+    load();
+    connectedReload = load; // let the "Test all" header button refresh
   }
+  var connectedReload = null;
 
   function renderAts(el) {
-    var vendors = SEED.atsVendors.map(function (v) {
-      return '<div class="integ"><span class="dot3" style="background:' + (v.status === "verified" ? "var(--accent-green)" : "var(--text-dim)") + '"></span><div class="meta"><b>' + esc(v.label) + "</b><small>" + esc(v.status) + (v.vendor === SEED.atsActive ? " · active" : "") + "</small></div></div>";
-    }).join("");
-    var map = SEED.objectMap.map(function (m) {
-      return '<div class="list-row"><div><div class="lr-main">' + esc(m.concept) + '</div><div class="lr-sub">' + esc(m.how) + '</div></div><div class="lr-right">' + esc(m.object) + "</div></div>";
-    }).join("");
     el.innerHTML = head("ATS", "Your system of record. Loxo is the verified, primary integration.") +
-      '<div class="two-col"><div class="card"><h3>Choose your ATS</h3>' + vendors + "</div>" +
-      '<div class="card"><h3>Loxo object mapping</h3>' + map + "</div></div>";
+      '<div id="atBody">' + loading() + "</div>";
+    api("/ats").then(function (d) {
+      d = d || {};
+      var vendors = (d.vendors || []).map(function (v) {
+        return '<div class="integ"><span class="dot3" style="background:' + (v.status === "verified" ? "var(--accent-green)" : "var(--text-dim)") + '"></span><div class="meta"><b>' + esc(v.label) + "</b><small>" + esc(v.status) + (v.vendor === d.active ? " · active" : "") + "</small></div></div>";
+      }).join("") || '<div class="empty">No ATS vendors available.</div>';
+      var map = (d.objectMap || []).map(function (m) {
+        return '<div class="list-row"><div><div class="lr-main">' + esc(m.concept) + '</div><div class="lr-sub">' + esc(m.how) + '</div></div><div class="lr-right">' + esc(m.object) + "</div></div>";
+      }).join("");
+      var body = $("#atBody"); if (!body) return;
+      body.innerHTML = '<div class="two-col"><div class="card"><h3>Choose your ATS</h3>' + vendors + "</div>" +
+        '<div class="card"><h3>Loxo object mapping</h3>' + map + "</div></div>";
+    }).catch(function () { var b = $("#atBody"); if (b) b.innerHTML = needsSetup(); });
   }
 
   function cadenceHtml() {
-    return SEED.cadence.map(function (c) {
+    return REF.cadence.map(function (c) {
       return '<div class="cad"><div class="ct">' + esc(c.at) + '</div><div><div class="cn">' + esc(c.name) +
         ' <span class="' + (c.automated ? "auto" : "manual") + '">' + (c.automated ? "AUTO" : "YOU") + "</span></div>" +
         '<div class="cd">' + esc(c.detail) + "</div></div></div>";
@@ -401,17 +526,32 @@
         }).join("") + "</tr>";
       }).join("") + "</tbody></table></div>";
 
-    var members = (SEED.team || []).map(function (m) {
-      return '<div class="integ"><span class="avatar" style="width:30px;height:30px;font-size:11px;background:' + colorFor(m.name) + '">' + esc(initials(m.name)) + "</span>" +
-        '<div class="meta"><b>' + esc(m.name) + (m.isYou ? ' <span class="muted">(you)</span>' : "") + "</b><small>" + esc(m.email) + "</small></div>" +
-        '<span class="cls cls-' + (m.role === "owner" ? "positive" : m.role === "admin" ? "soft_yes" : "unclassified") + '">' + esc(m.role) + "</span></div>";
-    }).join("");
-    var teamCard = '<div class="card"><h3>Members</h3>' + (members || '<div class="empty">No teammates yet. Invite your first recruiter.</div>') + "</div>";
-    el.innerHTML += matrix + teamCard;
+    el.innerHTML += matrix + '<div class="card"><h3>Members</h3><div id="tmBody">' + loading() + "</div></div>" +
+      '<div class="card" style="margin-top:14px"><h3>Pending invites</h3><div id="tmInvites"><div class="empty">None.</div></div></div>';
 
-    if (LIVE) api("/team").then(function (d) {
-      if (d.members) { SEED.team = d.members; renderTeam(el); }
-    }).catch(function () {});
+    api("/team").then(function (d) {
+      var members = (d && d.members) || [];
+      var rows = members.map(function (m) {
+        var you = m.userId === ctx.user.id;
+        var ctrl = (!you && (d.assignableRoles || []).length)
+          ? '<button class="btn btn-ghost btn-sm" data-remove="' + esc(m.userId) + '">Remove</button>' : "";
+        return '<div class="integ"><span class="avatar" style="width:30px;height:30px;font-size:11px;background:' + colorFor(m.name) + '">' + esc(initials(m.name)) + "</span>" +
+          '<div class="meta"><b>' + esc(m.name) + (you ? ' <span class="muted">(you)</span>' : "") + "</b><small>" + esc(m.email) + (m.emailVerified ? "" : " · unverified") + "</small></div>" +
+          '<span class="cls cls-' + (m.role === "owner" ? "positive" : m.role === "admin" ? "soft_yes" : "unclassified") + '">' + esc(m.role) + "</span>" + ctrl + "</div>";
+      }).join("") || '<div class="empty">No teammates yet. Invite your first recruiter with the button above.</div>';
+      var body = $("#tmBody"); if (body) body.innerHTML = rows;
+      var invs = ((d && d.invites) || []).map(function (i) {
+        return '<div class="integ"><span class="dot3" style="background:var(--accent-amber)"></span><div class="meta"><b>' + esc(i.email) + "</b><small>invited as " + esc(i.role) + "</small></div></div>";
+      }).join("");
+      var ib = $("#tmInvites"); if (ib) ib.innerHTML = invs || '<div class="empty">None.</div>';
+      if (body) Array.prototype.forEach.call(body.querySelectorAll("[data-remove]"), function (btn) {
+        btn.addEventListener("click", function () {
+          if (!confirm("Remove this teammate?")) return;
+          send("/team", "POST", { action: "remove", userId: btn.getAttribute("data-remove") })
+            .then(function (r) { toast(r.ok ? "Removed" : "Could not remove"); if (r.ok) renderTeam($("#view")); });
+        });
+      });
+    }).catch(function () { var b = $("#tmBody"); if (b) b.innerHTML = needsSetup(); });
   }
 
   function inviteRecruiter() {
@@ -419,24 +559,49 @@
     if (!email) return;
     var role = (prompt("Role: admin or member (recruiter)?", "member") || "member").toLowerCase();
     if (role !== "admin" && role !== "member") role = "member";
-    if (LIVE) {
-      fetch(API + "/team", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "invite", email: email, role: role }) })
-        .then(function (r) { return r.json(); })
-        .then(function () { toast("Invited " + email + " as " + role); })
-        .catch(function () { toast("Could not send invite"); });
-    } else {
-      SEED.team = (SEED.team || []).concat([{ name: email.split("@")[0], email: email, role: role, isYou: false }]);
-      var v = $("#view"); v.innerHTML = ""; renderTeam(v);
-      toast("Invited " + email + " as " + role + " (demo)");
-    }
+    send("/team", "POST", { action: "invite", email: email, role: role })
+      .then(function (r) {
+        if (r.ok) { toast("Invited " + email + " as " + role); renderTeam($("#view")); }
+        else toast("Could not invite (" + (r.data.error || r.status) + ")");
+      })
+      .catch(function () { toast("Could not reach the server."); });
   }
 
   /* ---------------- primary actions ---------------- */
   function primaryAction(key) {
     if (key === "team") { inviteRecruiter(); return; }
     if (key === "campaigns") { studioOpenId = null; location.hash = "studio"; return; }
-    if (key === "connected") { SEED.integrations.forEach(function (i) { if (i.status === "yellow") i.status = "green"; }); render(); toast("Tested all connections"); return; }
-    toast("Demo: " + key + " action. Wire to /api when the backend is deployed.");
+    if (key === "prospects") { addProspect(); return; }
+    if (key === "content") { addAsset(); return; }
+    if (key === "connected") {
+      toast("Testing all connections...");
+      send("/connected", "POST", { action: "test-all" })
+        .then(function (r) { toast(r.ok ? "Tested all connections" : "Could not test"); if (connectedReload) connectedReload(); })
+        .catch(function () { toast("Could not reach the server."); });
+      return;
+    }
+  }
+
+  function addProspect() {
+    var name = prompt("Prospect full name:"); if (!name) return;
+    var email = prompt("Email (optional):") || undefined;
+    var company = prompt("Company (optional):") || undefined;
+    var saved = [];
+    try { saved = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); } catch (e) {}
+    var campaignId = (saved[0] && saved[0].id) || prompt("Campaign id to add them to:");
+    if (!campaignId) { toast("Create a campaign first."); return; }
+    send("/prospects", "POST", { fullName: name, email: email, company: company, campaignId: campaignId })
+      .then(function (r) { if (r.ok) { toast("Prospect added"); renderProspects($("#view")); } else toast("Could not add (" + (r.data.error || r.status) + ")"); })
+      .catch(function () { toast("Could not reach the server."); });
+  }
+
+  function addAsset() {
+    var name = prompt("Asset name:"); if (!name) return;
+    var type = (prompt("Type: case_study, comp_benchmark, value_prop, video_script", "case_study") || "case_study");
+    var bodyText = prompt("Content / text:") || "";
+    send("/content", "POST", { name: name, type: type, body: bodyText })
+      .then(function (r) { if (r.ok) { toast("Asset added"); renderContent($("#view")); } else toast("Could not add (" + (r.data.error || r.status) + ")"); })
+      .catch(function () { toast("Could not reach the server."); });
   }
 
   /* ---------------- helpers ---------------- */
@@ -444,42 +609,27 @@
   function colorFor(n) { var c = ["#7c5cff", "#4dd0ff", "#ff7ac6", "#38e0a6", "#ffc24d"]; var s = 0; for (var i = 0; i < (n || "").length; i++) s += n.charCodeAt(i); return c[s % c.length]; }
   function clsLabel(c) { var m = { positive: "Positive", soft_yes: "Soft yes", referral: "Referral", timing_objection: "Timing", fit_objection: "Fit", not_interested: "Not interested", stop: "STOP", unclassified: "Review" }; return m[c] || c; }
   function statusCls(s) { var m = { booked: "positive", won: "positive", replied: "soft_yes", in_sequence: "soft_yes", nurture: "timing_objection", queued: "unclassified", closed_lost: "not_interested", do_not_contact: "stop" }; return m[s] || "unclassified"; }
-  function statusLabel(s) { var l = SEED.lifecycle.find(function (x) { return x.status === s; }); return l ? l[motion] : s; }
+  function statusLabel(s, lifecycle) {
+    var l = (lifecycle || REF.lifecycle).find(function (x) { return x.status === s; });
+    return l ? (l[motion] || l.status) : s;
+  }
   function mapProcessed(p) {
     return { name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken };
+  }
+  // shared UI states
+  function loading() { return '<div class="empty">Loading…</div>'; }
+  function emptyCard(msg) { return '<div class="empty">' + esc(msg) + "</div>"; }
+  function needsSetup() {
+    return '<div class="empty">Couldn\'t load this yet. If you just created your workspace, connect your tools under <a href="#connected">Connected</a> to get started.</div>';
   }
 
   render();
 
-  /* ---------------- seed data ---------------- */
-  function seed() {
+  /* ---------------- reference content (product knowledge, NOT customer data) -- */
+  // Everything here is how the product WORKS (rules, schedule, sequence anatomy,
+  // ATS mapping). All real customer data is fetched live from the API.
+  function ref() {
     return {
-      overview: {
-        capacity: [
-          { label: "LinkedIn accounts", value: 2, status: "green" },
-          { label: "Sending domains", value: 5, status: "green" },
-          { label: "Email capacity/day", value: 450, status: "green" },
-          { label: "LinkedIn capacity/day", value: 90, status: "green" }
-        ],
-        activeProspects: 184, appointmentsToday: 3, appointmentsThisWeek: 11, warmConversationsToday: 7, wonAccounts: 4,
-        recentAppointments: [
-          { name: "Marco Silva", channel: "linkedin", at: "today" },
-          { name: "Priya Desai", channel: "email", at: "today" },
-          { name: "Jonas Keller", channel: "sms", at: "yesterday" }
-        ],
-        activeDrips: [
-          { name: "Anja Köhler", stage: "Touch 3" }, { name: "Liam O'Brien", stage: "Touch 5" },
-          { name: "Sofia Rossi", stage: "Touch 1" }, { name: "Noah Berger", stage: "Touch 7" }
-        ]
-      },
-      responses: [
-        { name: "Marco Silva", channel: "linkedin", source: "unipile", text: "Yeah, Thursday afternoon works.", cls: "positive", actions: ["notify: call within 24h", "paused all sequences", "status → replied", "logged person_event"] },
-        { name: "Rahel Amanuel", channel: "email", source: "instantly", text: "Interesting, can you send the case study?", cls: "soft_yes", actions: ["queued asset", "tagged \"engaged\"", "advanced +1 touch", "logged person_event"] },
-        { name: "Priya Desai", channel: "sms", source: "taltxt", text: "Not me, but talk to my colleague Sam in Talent.", cls: "referral", actions: ["captured referralTo: Sam", "tagged \"advocate\"", "notify: new referral", "logged person_event"] },
-        { name: "Jonas Keller", channel: "email", source: "instantly", text: "Not now, maybe revisit in Q3.", cls: "timing_objection", actions: ["captured timing: Q3", "→ 90-day nurture", "status → nurture", "logged person_event"] },
-        { name: "Lena Dietrich", channel: "linkedin", source: "salesrobot", text: "We do all our recruiting internally, thanks.", cls: "fit_objection", actions: ["→ 6-month nurture", "tagged \"suppress-signals\"", "logged person_event"] },
-        { name: "Oskar Wendt", channel: "sms", source: "taltxt", text: "STOP", cls: "stop", actions: ["suppressed all channels + ATS DNC", "status → do_not_contact", "logged person_event"] }
-      ],
       rules: [
         { cls: "positive", label: "Positive", triggers: ["yes", "tell me more", "booking-link click"], actions: ["push notification", "pause all sequences", "status replied"], sla: "same day" },
         { cls: "soft_yes", label: "Soft yes", triggers: ["asks a question", "requests an asset"], actions: ["send asset", "tag engaged", "advance +1 touch"], sla: "4 hours" },
@@ -488,15 +638,6 @@
         { cls: "referral", label: "Referral", triggers: ["talk to X", "not me, but"], actions: ["capture referral", "tag advocate", "notify"], sla: "same day" },
         { cls: "stop", label: "STOP", triggers: ["stop", "unsubscribe", "remove me"], actions: ["suppress all channels", "do-not-contact"], sla: "immediate" }
       ],
-      prospects: [
-        { fullName: "Anja Köhler", title: "VP Engineering", company: "N26", status: "in_sequence", dripStage: 3 },
-        { fullName: "Marco Silva", title: "Staff Engineer", company: "Wise", status: "booked", dripStage: null },
-        { fullName: "Liam O'Brien", title: "Head of Talent", company: "Revolut", status: "in_sequence", dripStage: 5 },
-        { fullName: "Priya Desai", title: "Founder", company: "Lumen", status: "replied", dripStage: null },
-        { fullName: "Jonas Keller", title: "CTO", company: "Trade Republic", status: "nurture", dripStage: null },
-        { fullName: "Sofia Rossi", title: "Eng Manager", company: "Scalable", status: "queued", dripStage: null },
-        { fullName: "Noah Berger", title: "VP Product", company: "Pleo", status: "won", dripStage: null }
-      ],
       lifecycle: [
         { status: "queued", bd: "Queued", recruiting: "Queued" },
         { status: "in_sequence", bd: "In sequence", recruiting: "In sequence" },
@@ -504,11 +645,6 @@
         { status: "booked", bd: "Discovery booked", recruiting: "Submitted" },
         { status: "won", bd: "Mandate signed", recruiting: "Placed" },
         { status: "nurture", bd: "Nurture", recruiting: "Nurture" }
-      ],
-      campaigns: [
-        { name: "Senior React · Berlin", motion: "recruiting", goal: "Source senior React engineers open to a greenfield staff role.", signals: ["hiring_velocity", "leadership_change"], dailyCap: 25, status: "active" },
-        { name: "Fintech VPs · DACH", motion: "bd", goal: "Book discovery calls with VP Eng at recently funded fintechs.", signals: ["fundraising", "expansion"], dailyCap: 25, status: "active" },
-        { name: "Healthcare Nursing", motion: "recruiting", goal: "Pipeline travel nurses for Q3 mandates.", signals: ["hiring_velocity"], dailyCap: 25, status: "draft" }
       ],
       phases: [
         { n: 1, title: "Infrastructure pre-flight", time: "one-time", done: "Overview capacity strip is green", items: ["≥1 warmed LinkedIn account", "≥5 warmed domains", "RapidAPI job scraper", "Enrichment waterfall", "ATS connected", "TalTxt + Telnyx 10DLC"] },
@@ -598,4 +734,7 @@
       ]
     };
   }
+
+  /* The ATS object map is also exposed by GET /api/ats; this local copy is only a
+     fallback so the ATS screen renders if that call is briefly unavailable. */
 })();
