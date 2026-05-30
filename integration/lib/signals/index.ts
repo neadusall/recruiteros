@@ -1,0 +1,122 @@
+/**
+ * RecruiterOS · Signal Engine
+ * Public API barrel.
+ *
+ * Import from here, not from individual files:
+ *
+ *   import {
+ *     collect, catalog, contactWaterfall, enrich, rankSignals,
+ *     type Signal, type ICP, type SignalType,
+ *   } from "@/integration/lib/signals";
+ *
+ * The engine is four cooperating layers:
+ *   registry  — the catalog of every hiring signal we detect (the "framework")
+ *   sources   — pluggable connectors that emit raw signals (job boards, EDGAR, WARN…)
+ *   scoring   — ICP match + 0..100 ranking (Pull → Match → Score)
+ *   waterfall — Clay-style enrichment: ordered providers, first/best, with provenance
+ *   collector — orchestrates the whole loop end to end and triggers campaigns
+ */
+
+// Domain types + taxonomy
+export type {
+  SignalType,
+  SignalCategory,
+  SubjectKind,
+  Motion,
+  Signal,
+  SignalStatus,
+  SignalDefinition,
+  SignalScore,
+  ICP,
+  Company,
+  Person,
+  GeoPoint,
+  FundingStage,
+  SourceKind,
+  SourceRef,
+  PullResult,
+} from "./types";
+
+// Registry (the catalog / framework)
+export {
+  SIGNAL_DEFINITIONS,
+  getDefinition,
+  definitionsForMotion,
+  definitionsInCategory,
+  catalog,
+} from "./registry";
+
+// Sources (connectors + the contract)
+export {
+  PublicAtsSource,
+  EdgarSource,
+  WarnNoticeSource,
+  PeopleGraphSource,
+  WebhookSource,
+  defaultSources,
+  configuredSources,
+  makeSignal,
+  signalIdFrom,
+  defaultDedupeKey,
+  isoWeekOf,
+  getJson,
+  SourceError,
+} from "./sources";
+export type {
+  SignalSource,
+  PullContext,
+  WebhookSignalPayload,
+} from "./sources";
+
+// Scoring
+export {
+  scoreSignal,
+  rankSignals,
+  disqualify,
+  fitScore,
+  recencyScore,
+  corroborationScore,
+  urgencyScore,
+  headcountBand,
+} from "./scoring";
+export type { ScoreContext } from "./scoring";
+
+// Waterfall enrichment
+export {
+  runWaterfall,
+  enrich,
+  makeProvider,
+  contactWaterfall,
+  guessDomainProvider,
+  emailPatternProvider,
+  memoryCache,
+} from "./waterfall";
+export type {
+  EnrichmentProvider,
+  EnrichmentInput,
+  ProviderOutcome,
+  EnrichedValue,
+  WaterfallSpec,
+  WaterfallResult,
+  EnrichmentPlan,
+  EnrichmentReport,
+  EnrichmentCache,
+  RunOptions,
+} from "./waterfall";
+
+// Collector (orchestration)
+export {
+  collect,
+  pullAll,
+  dedupe,
+  rollUpVelocity,
+  memoryStores,
+  trackedTypesForMotion,
+} from "./collector";
+export type {
+  CollectOptions,
+  CollectReport,
+  CursorStore,
+  SeenStore,
+  TriggerHandler,
+} from "./collector";
