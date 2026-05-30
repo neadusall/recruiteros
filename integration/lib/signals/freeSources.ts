@@ -472,6 +472,103 @@ function hash(s: string): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* Product Hunt — free public RSS for product-launch signals           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Product Hunt's public RSS (free, no key) surfaces new product launches. A launch is a
+ * product_launch signal: a company shipping something new usually needs people to build
+ * and sell it. Good leading indicator for early-stage BD targeting.
+ */
+export class ProductHuntSource implements SignalSource {
+  readonly id = "product_hunt";
+  readonly kind: SourceKind = "social";
+  readonly emits: SignalType[] = ["product_launch"];
+  readonly label = "Product Hunt launches";
+
+  isConfigured(): boolean {
+    return true;
+  }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    const now = new Date().toISOString();
+    const signals: Signal[] = [];
+    const warnings: string[] = [];
+    const kw = (ctx.watchlist?.keywords ?? []).map((k) => k.toLowerCase());
+    try {
+      const xml = await getText("https://www.producthunt.com/feed");
+      for (const item of parseRssItems(xml).slice(0, ctx.limit ?? 40)) {
+        if (kw.length && !kw.some((k) => item.title.toLowerCase().includes(k))) continue;
+        const name = item.title.split(/[-–—:|]/)[0].trim();
+        signals.push(
+          makeSignal({
+            type: "product_launch",
+            title: `${name} launched on Product Hunt`,
+            detail: `${item.title}. A new launch usually means a team to build and sell it.`,
+            evidence: { product: name, launchedAt: item.pubDate, url: item.link },
+            source: { kind: this.kind, connector: this.id, url: item.link, externalId: `ph:${hash(item.link)}`, observedAt: now },
+            eventAt: item.pubDate ?? now,
+            ingestedAt: now,
+            anchor: name,
+            companyHint: { id: "", name },
+          }),
+        );
+      }
+    } catch (err) {
+      warnings.push(`producthunt: ${(err as Error).message}`);
+    }
+    return { signals, warnings };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Layoffs aggregate (layoffs.fyi-style) — free community feed         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A layoffs aggregate feed (point LAYOFFS_FEED_URL at a layoffs.fyi mirror, a community
+ * JSON export, or your own scraper). Complements the official WARN connector with the
+ * faster, broader, non-US-only coverage that community trackers provide. Emits both the
+ * company-side `layoff` and, for named individuals when present, `employer_distress`.
+ */
+export class LayoffsFeedSource implements SignalSource {
+  readonly id = "layoffs_feed";
+  readonly kind: SourceKind = "news";
+  readonly emits: SignalType[] = ["layoff", "employer_distress"];
+  readonly label = "Layoffs aggregate (layoffs.fyi-style)";
+
+  private feedUrl = process.env.LAYOFFS_FEED_URL ?? "";
+
+  isConfigured(): boolean {
+    return Boolean(this.feedUrl);
+  }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    if (!this.isConfigured()) return { signals: [], warnings: ["LAYOFFS_FEED_URL not configured"] };
+    const now = new Date().toISOString();
+    const rows = await getJson<LayoffRow[]>(this.feedUrl);
+    const signals = rows.slice(0, ctx.limit ?? 100).map((r) =>
+      makeSignal({
+        type: "layoff",
+        title: `${r.company} cut ${r.count ?? "staff"}${r.location ? ` in ${r.location}` : ""}`,
+        detail: `${r.company} reduced headcount${r.percent ? ` by ${r.percent}%` : ""}${r.industry ? ` (${r.industry})` : ""}. Strong people now reachable.`,
+        evidence: { affectedCount: r.count, reductionPct: r.percent, functions: r.functions, announcedAt: r.date, industry: r.industry },
+        source: { kind: this.kind, connector: this.id, url: r.source, externalId: `layoff:${hash(`${r.company}:${r.date}`)}`, observedAt: now },
+        eventAt: r.date ?? now,
+        ingestedAt: now,
+        anchor: r.company,
+        companyHint: { id: "", name: r.company, industry: r.industry },
+      }),
+    );
+    return { signals };
+  }
+}
+interface LayoffRow {
+  company: string; count?: number; percent?: number; location?: string;
+  industry?: string; functions?: string[]; date?: string; source?: string;
+}
+
+/* ------------------------------------------------------------------ */
 /* The free source set                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -488,5 +585,7 @@ export function freeSources(): SignalSource[] {
     new UsaSpendingSource(),
     new GitHubOrgSource(),
     new NewsRssSource(),
+    new ProductHuntSource(),
+    new LayoffsFeedSource(),
   ];
 }

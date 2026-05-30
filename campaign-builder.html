@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Campaign Builder, RecruiterOS</title>
+  <meta name="description" content="Organize free hiring signals into a targeted campaign before you launch. Filter by industry and job title, review the list, see the enrichment cost, then go, all assembled for $0." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+  <style>
+    .cb-wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+    .stepper{display:flex;gap:8px;margin:0 0 26px;flex-wrap:wrap}
+    .step{display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid rgba(255,255,255,.1);border-radius:999px;font-size:13px;font-weight:600;color:var(--text-dim)}
+    .step.active{background:rgba(124,92,255,.15);border-color:rgba(124,92,255,.5);color:#fff}
+    .step.done{color:#38e0a6;border-color:rgba(56,224,166,.4)}
+    .step .n{width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,.1);display:grid;place-items:center;font-size:12px}
+    .step.active .n{background:#7c5cff;color:#0a0a12}
+    .cb-grid{display:grid;grid-template-columns:1fr 320px;gap:22px;align-items:start}
+    @media(max-width:880px){.cb-grid{grid-template-columns:1fr}}
+    .card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:22px;margin-bottom:18px}
+    .card h3{margin:0 0 4px;font-size:17px}
+    .card .sub{color:var(--text-dim);font-size:13px;margin:0 0 16px}
+    .src-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    @media(max-width:560px){.src-grid{grid-template-columns:1fr}}
+    .src{display:flex;gap:11px;align-items:flex-start;padding:12px 14px;border:1px solid rgba(255,255,255,.1);border-radius:12px;cursor:pointer;transition:.15s}
+    .src:hover{border-color:rgba(124,92,255,.45)}
+    .src.on{background:rgba(124,92,255,.1);border-color:rgba(124,92,255,.5)}
+    .src .ic{font-size:18px}
+    .src b{font-size:14px;display:block}
+    .src span{font-size:12px;color:var(--text-dim)}
+    .src .free{font-family:'JetBrains Mono',monospace;font-size:10px;color:#38e0a6;border:1px solid rgba(56,224,166,.35);padding:1px 5px;border-radius:5px;margin-left:auto}
+    .chips{display:flex;flex-wrap:wrap;gap:7px}
+    .chip{padding:6px 11px;border:1px solid rgba(255,255,255,.12);border-radius:999px;font-size:13px;cursor:pointer;transition:.15s;user-select:none}
+    .chip:hover{border-color:rgba(124,92,255,.45)}
+    .chip.on{background:rgba(124,92,255,.18);border-color:rgba(124,92,255,.55);color:#fff}
+    .field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+    .field label{font-size:13px;color:var(--text-dim);font-weight:600}
+    .field input,.field select{background:#0c0c16;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;color:#fff;font-size:14px}
+    .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid rgba(255,255,255,.06)}
+    .switch{width:42px;height:24px;border-radius:999px;background:rgba(255,255,255,.14);position:relative;cursor:pointer;transition:.15s}
+    .switch.on{background:#7c5cff}
+    .switch i{position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.15s}
+    .switch.on i{left:21px}
+    .target{padding:14px;border:1px solid rgba(255,255,255,.09);border-radius:13px;margin-bottom:10px}
+    .target .top{display:flex;align-items:center;gap:10px}
+    .target .nm{font-weight:700}
+    .target .score{margin-left:auto;font-family:'JetBrains Mono',monospace;font-weight:700;padding:3px 9px;border-radius:7px}
+    .score.hi{background:rgba(56,224,166,.16);color:#38e0a6}.score.mid{background:rgba(255,194,77,.16);color:#ffc24d}.score.lo{background:rgba(255,255,255,.08);color:var(--text-dim)}
+    .target .reason{font-size:13px;color:var(--text);margin:8px 0 6px}
+    .badges{display:flex;flex-wrap:wrap;gap:6px}
+    .badge{font-size:11px;font-family:'JetBrains Mono',monospace;padding:2px 7px;border-radius:6px;background:rgba(124,92,255,.14);color:#b3a1ff}
+    .badge.need{background:rgba(255,194,77,.14);color:#ffc24d}
+    .summary{position:sticky;top:90px}
+    .stat{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:14px}
+    .stat b{font-family:'JetBrains Mono',monospace}
+    .seg{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;color:var(--text-dim)}
+    .cost{background:linear-gradient(135deg,rgba(124,92,255,.14),rgba(77,208,255,.08));border:1px solid rgba(124,92,255,.3);border-radius:14px;padding:16px;margin-top:14px}
+    .cost .big{font-size:26px;font-weight:800}
+    .free-tag{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:#38e0a6;font-weight:700;margin-bottom:10px}
+    .empty{text-align:center;padding:40px 20px;color:var(--text-dim)}
+    .empty .big{font-size:34px;margin-bottom:8px}
+  </style>
+</head>
+<body>
+  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+  <div class="grid-bg"></div>
+  <div class="noise"></div>
+
+  <header class="nav">
+    <div class="container nav-inner">
+      <a href="index.html" class="brand"><span class="logo">R</span><span>Recruiter<span class="os">OS</span></span></a>
+      <nav class="nav-links">
+        <a href="signals.html">Signals</a>
+        <a href="sourcing.html">Sourcing</a>
+        <a href="campaign-builder.html">Campaign Builder</a>
+        <a href="developers.html">Developers</a>
+        <a href="pricing.html">Pricing</a>
+      </nav>
+      <div class="nav-cta">
+        <a href="login.html" class="btn btn-ghost btn-sm">Log in</a>
+        <a href="command.html" class="btn btn-primary btn-sm">Open app →</a>
+      </div>
+    </div>
+  </header>
+
+  <section class="page-hero" style="padding-bottom:24px">
+    <div class="container">
+      <span class="eyebrow"><span class="dot"></span> Campaign Builder</span>
+      <h1>Build the campaign <span class="gradient-text">before you launch it.</span></h1>
+      <p class="lead">Pull live hiring signals from free public sources, filter to exactly the industry and job titles you want, review the target list and what it will cost to reach them, then launch. The whole list is assembled for $0 before you spend a cent on contact data.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="cb-wrap">
+      <div class="stepper" id="stepper">
+        <div class="step active" data-step="1"><span class="n">1</span> Sources</div>
+        <div class="step" data-step="2"><span class="n">2</span> Filter</div>
+        <div class="step" data-step="3"><span class="n">3</span> Review &amp; launch</div>
+      </div>
+
+      <div class="cb-grid">
+        <div class="cb-main">
+          <!-- STEP 1: SOURCES -->
+          <div class="card cb-step" data-step="1">
+            <h3>Free signal sources</h3>
+            <p class="sub">Every source here is public and free. Pick what to watch, RecruiterOS pulls and normalizes them into one stream.</p>
+            <div class="field" style="max-width:280px">
+              <label>Motion</label>
+              <select id="motion">
+                <option value="business_dev">Business Development (find clients hiring)</option>
+                <option value="recruiting">Recruiting (find available talent)</option>
+              </select>
+            </div>
+            <div class="src-grid" id="srcGrid"></div>
+          </div>
+
+          <!-- STEP 2: FILTER -->
+          <div class="card cb-step" data-step="2" style="display:none">
+            <h3>Target filter</h3>
+            <p class="sub">Narrow the stream to your ICP. All filtering runs over the free signals, before any spend.</p>
+            <div class="field"><label>Industry</label><div class="chips" id="industryChips"></div></div>
+            <div class="field"><label>Job function</label><div class="chips" id="functionChips"></div></div>
+            <div class="field"><label>Title contains (comma-separated)</label><input id="titleIncludes" placeholder="VP, Head of, Director" /></div>
+            <div class="field"><label>Minimum seniority</label>
+              <select id="minSeniority">
+                <option value="">Any</option>
+                <option value="senior">Senior+</option>
+                <option value="manager">Manager+</option>
+                <option value="director">Director+</option>
+                <option value="vp" selected>VP+</option>
+                <option value="c_level">C-level+</option>
+              </select>
+            </div>
+            <div class="field"><label>Location contains</label><input id="locations" placeholder="US, Berlin, remote" /></div>
+            <div class="toggle-row"><span>Decision-makers only</span><div class="switch on" id="dmOnly"><i></i></div></div>
+            <div class="toggle-row"><span>Also find direct phone numbers (raises cost)</span><div class="switch" id="wantPhone"><i></i></div></div>
+          </div>
+
+          <!-- STEP 3: REVIEW -->
+          <div class="card cb-step" data-step="3" style="display:none">
+            <h3>Target list</h3>
+            <p class="sub">Ranked by signal strength. Each row shows the reason to reach out and what still needs enrichment.</p>
+            <div id="targetList"></div>
+          </div>
+
+          <div style="display:flex;gap:10px;margin-top:4px">
+            <button class="btn btn-ghost btn-sm" id="backBtn" style="display:none">← Back</button>
+            <button class="btn btn-primary" id="nextBtn">Next: set filters →</button>
+          </div>
+        </div>
+
+        <!-- SUMMARY RAIL -->
+        <aside class="summary">
+          <div class="card">
+            <div class="free-tag">⬡ Assembled for $0</div>
+            <h3 style="margin-bottom:12px">Campaign summary</h3>
+            <div id="summaryStats">
+              <div class="stat"><span>Signals pulled</span><b id="sPulled">—</b></div>
+              <div class="stat"><span>After filter</span><b id="sMatched">—</b></div>
+              <div class="stat"><span>Targets</span><b id="sTargets">—</b></div>
+              <div class="stat"><span>Companies</span><b id="sCompanies">—</b></div>
+              <div class="stat"><span>People</span><b id="sPeople">—</b></div>
+            </div>
+            <div id="segWrap" style="margin-top:12px"></div>
+            <div class="cost" id="costPanel" style="display:none">
+              <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px">Estimated enrichment to reach the whole list</div>
+              <div class="big gradient-text" id="costBig">$0.00</div>
+              <div style="font-size:12px;color:var(--text-dim)" id="costBreak"></div>
+            </div>
+            <button class="btn btn-primary btn-sm" id="launchBtn" style="width:100%;margin-top:14px;display:none">🚀 Approve &amp; launch</button>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <div class="footer-grid">
+        <div><a href="index.html" class="brand"><span class="logo">R</span><span>Recruiter<span class="os">OS</span></span></a><p class="footer-blurb">The operating system for modern recruiting. Find, enrich, and reach any candidate from one programmable workspace.</p></div>
+        <div class="footer-col"><h4>Platform</h4><a href="signals.html">Signal Engine</a><a href="campaign-builder.html">Campaign Builder</a><a href="sourcing.html">Sourcing &amp; Enrich</a><a href="developers.html">Developers &amp; API</a><a href="integrations.html">Integrations</a></div>
+        <div class="footer-col"><h4>Company</h4><a href="platform.html">Platform overview</a><a href="pricing.html">Pricing</a><a href="command.html">Open app</a></div>
+        <div class="footer-col"><h4>Legal</h4><a href="#">Privacy</a><a href="#">Terms</a><a href="#">Security</a></div>
+      </div>
+      <div class="footer-bottom"><span>© 2026 RecruiterOS, Inc. · recruiteros.co</span><span>Made for recruiters who'd rather be talking to people.</span></div>
+    </div>
+  </footer>
+  <script src="assets/js/landing.js"></script>
+  <script src="assets/js/campaign-builder.js"></script>
+</body>
+</html>

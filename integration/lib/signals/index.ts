@@ -145,6 +145,8 @@ export {
   UsaSpendingSource,
   GitHubOrgSource,
   NewsRssSource,
+  ProductHuntSource,
+  LayoffsFeedSource,
   freeSources,
 } from "./freeSources";
 
