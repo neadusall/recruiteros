@@ -231,7 +231,7 @@
       const o = {};
       COLLECTIONS.forEach(c => { o[c] = []; });
       o.counters = {}; // { 'channelAccountId|YYYY-MM-DD|action': n }
-      o.blacklist = { emails: [], domains: [], profileUrls: [], names: [] };
+      o.blacklist = { emails: [], domains: [], profileUrls: [], names: [], unsubscribed: [], bounced: [] };
       o.meta = { version: 1, createdAt: Date.now() };
       return o;
     }
@@ -459,7 +459,7 @@
 
     function adapterFor(channel) { return adapters[channel] || SimulatedAdapter(); }
 
-    /* ---- blacklist enforcement ---- */
+    /* ---- blacklist + suppression enforcement ---- */
     function isBlacklisted(lead) {
       const bl = store.blacklist();
       const email = (lead.email || '').toLowerCase();
@@ -467,9 +467,39 @@
       return (
         bl.emails.includes(email) ||
         bl.domains.includes(domain) ||
+        (bl.unsubscribed || []).includes(email) ||
+        (bl.bounced || []).includes(email) ||
         (lead.profileUrl && bl.profileUrls.includes(lead.profileUrl)) ||
         bl.names.includes((lead.fullName || '').toLowerCase())
       );
+    }
+    // Add an email to a suppression list and stop its active enrollments.
+    function suppress(email, listName) {
+      email = (email || '').toLowerCase(); if (!email) return;
+      const bl = store.blacklist(); const list = bl[listName] || (bl[listName] = []);
+      if (!list.includes(email)) list.push(email);
+      store.where('leads', l => (l.email || '').toLowerCase() === email).forEach(l => {
+        store.where('enrollments', en => en.leadId === l.id && en.status === STATUS.enrollment.ACTIVE)
+          .forEach(en => { en.status = STATUS.enrollment.STOPPED; en.stopReason = listName; en.nextRunAt = null; });
+      });
+      store.save();
+    }
+
+    /* ---- email mailbox rotation (cold-email inbox rotation) ---- */
+    function emailAccountsFor(campaign) {
+      const ids = (campaign.emailAccountIds && campaign.emailAccountIds.length)
+        ? campaign.emailAccountIds
+        : store.where('channelAccounts', a => a.type === 'email').map(a => a.id);
+      return ids.map(id => store.get('channelAccounts', id)).filter(Boolean);
+    }
+    // Returns the mailbox with the most remaining quota today, or null if all
+    // are exhausted, or undefined if no mailboxes are configured (fall back).
+    function pickEmailAccount(campaign, now) {
+      const accts = emailAccountsFor(campaign);
+      if (!accts.length) return undefined;
+      let best = null, bestRem = -1;
+      accts.forEach(a => { const rem = limits.remaining(a, 'email', now); if (rem > bestRem) { bestRem = rem; best = a; } });
+      return bestRem > 0 ? best : null;
     }
 
     /* ---- enroll leads into a campaign ---- */
