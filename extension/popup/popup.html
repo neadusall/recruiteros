@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="p-head">
+    <span class="p-logo">R</span>
+    <div><div class="p-title">RecruiterOS Outreach</div><div class="p-sub" id="acct">Not connected</div></div>
+    <span class="p-status" id="statusDot" title="LinkedIn tab"></span>
+  </header>
+
+  <div class="p-run">
+    <button id="runToggle" class="p-btn primary">▶ Start</button>
+    <span class="p-runinfo" id="runInfo">Idle</span>
+  </div>
+
+  <nav class="p-tabs">
+    <button class="p-tab active" data-tab="queue">Queue</button>
+    <button class="p-tab" data-tab="limits">Limits</button>
+    <button class="p-tab" data-tab="settings">Settings</button>
+  </nav>
+
+  <section class="p-panel active" id="pp-queue">
+    <div class="p-row"><span class="p-k">Pending</span><span class="p-v" id="qCount">0</span></div>
+    <div id="queueList" class="p-list"></div>
+    <div class="p-row"><span class="p-k">Recent</span><span></span></div>
+    <div id="doneList" class="p-list"></div>
+    <button id="clearQueue" class="p-btn ghost sm" style="margin-top:8px">Clear queue</button>
+  </section>
+
+  <section class="p-panel" id="pp-limits">
+    <p class="p-note">Today's actions vs. daily caps (warm-up applies in the engine).</p>
+    <div id="limitMeters"></div>
+  </section>
+
+  <section class="p-panel" id="pp-settings">
+    <label class="p-field"><span>Backend URL (host tool)</span><input id="setBackend" placeholder="http://localhost:3000/api/linkedin" /></label>
+    <div class="p-two">
+      <label class="p-field"><span>Hours start</span><input id="setStart" type="number" /></label>
+      <label class="p-field"><span>Hours end</span><input id="setEnd" type="number" /></label>
+    </div>
+    <div class="p-two">
+      <label class="p-field"><span>Gap min (s)</span><input id="setGapMin" type="number" /></label>
+      <label class="p-field"><span>Gap max (s)</span><input id="setGapMax" type="number" /></label>
+    </div>
+    <label class="p-check"><input type="checkbox" id="setWeekends" /> Pause on weekends</label>
+    <button id="saveSettings" class="p-btn primary sm" style="width:100%;margin-top:10px">Save settings</button>
+    <p class="p-note" style="margin-top:10px">Safe-mode is ON in the content script — actions are simulated until selectors are wired. See README.</p>
+  </section>
+
+  <script src="../lib/messaging.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

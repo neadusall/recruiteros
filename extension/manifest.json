@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "RecruiterOS Outreach — LinkedIn Assistant",
+  "version": "0.1.0",
+  "description": "Wireframe LinkedIn capture + outreach assistant. Drops into an existing outreach tool via a clean message API and the Alfred engine adapter.",
+  "permissions": ["storage", "alarms", "scripting", "activeTab", "tabs", "notifications"],
+  "host_permissions": ["https://www.linkedin.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_title": "RecruiterOS Outreach",
+    "default_popup": "popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["lib/messaging.js", "content/linkedin.js"],
+      "css": ["content/overlay.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "externally_connectable": {
+    "matches": [
+      "http://localhost/*",
+      "http://127.0.0.1/*",
+      "https://*.recruiteros.co/*"
+    ]
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["content/overlay.css", "lib/messaging.js"],
+      "matches": ["https://www.linkedin.com/*"]
+    }
+  ]
+}
