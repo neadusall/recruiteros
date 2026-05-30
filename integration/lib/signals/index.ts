@@ -179,3 +179,31 @@ export type {
   BuildOptions,
   LaunchPlan,
 } from "./campaignBuilder";
+
+// Signal-grounded outreach generation (Bernays rapport ladder)
+export {
+  draftSequence,
+  circumstanceLine,
+} from "./messaging";
+export type {
+  Channel,
+  Rung,
+  MessageContext,
+  DraftedMessage,
+  DraftedSequence,
+  DraftOptions,
+} from "./messaging";
+
+// Campaign flow lifecycle (draft → enrich → draft copy → launch-ready)
+export {
+  prepareCampaign,
+  transition,
+  toSendItems,
+} from "./campaignFlow";
+export type {
+  CampaignState,
+  PreparedTarget,
+  LaunchReadyCampaign,
+  FlowDeps,
+  SendItem,
+} from "./campaignFlow";
