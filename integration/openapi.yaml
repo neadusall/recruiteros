@@ -1,0 +1,153 @@
+openapi: 3.0.3
+info:
+  title: RecruiterOS LinkedIn Engine API
+  version: "1.0.0"
+  description: >
+    Execution API for LinkedIn outreach inside the RecruiterOS framework.
+    Enroll prospects into rapport-first sequences, fire one-off actions,
+    receive provider webhooks, and drive the cadence on a schedule.
+    The engine is provider agnostic: integrate an external API (Unipile) or
+    run on your own internal LinkedIn outreach tools.
+servers:
+  - url: https://app.recruiteros.co
+security:
+  - bearerAuth: []
+paths:
+  /api/linkedin/enroll:
+    post:
+      summary: Enroll a prospect into a LinkedIn sequence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prospect, sequenceId, accountId]
+              properties:
+                prospect: { $ref: "#/components/schemas/Prospect" }
+                sequenceId: { type: string }
+                accountId: { type: string }
+      responses:
+        "201":
+          description: Enrollment created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enrollment: { $ref: "#/components/schemas/Enrollment" }
+        "404": { description: Sequence or account not found }
+        "409": { description: Account restricted or disconnected }
+        "422": { description: Missing required fields }
+  /api/linkedin/actions:
+    post:
+      summary: Execute a single LinkedIn action immediately
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountId, prospect, action]
+              properties:
+                accountId: { type: string }
+                prospect: { $ref: "#/components/schemas/Prospect" }
+                action:
+                  type: string
+                  enum: [connect, message, inmail, voice_note, profile_view, endorse, withdraw_invite]
+                text: { type: string }
+                subject: { type: string }
+                audio: { type: string }
+      responses:
+        "200":
+          description: Action result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result: { $ref: "#/components/schemas/ActionResult" }
+        "429": { description: Rate limited by account-safety gate }
+  /api/linkedin/webhook:
+    post:
+      summary: Provider webhook ingest (accepts, replies)
+      security: []
+      description: HMAC verified via x-unipile-signature header.
+      responses:
+        "200": { description: Processed }
+        "401": { description: Bad signature }
+  /api/linkedin/cron:
+    post:
+      summary: Advance the cadence (process due enrollments)
+      security: []
+      parameters:
+        - in: header
+          name: x-cron-secret
+          schema: { type: string }
+          required: true
+        - in: query
+          name: batch
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          description: Batch processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  processed: { type: integer }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Prospect:
+      type: object
+      required: [id, campaignId, fullName, firstName]
+      properties:
+        id: { type: string }
+        campaignId: { type: string }
+        fullName: { type: string }
+        firstName: { type: string }
+        providerProfileId: { type: string }
+        publicProfileUrl: { type: string }
+        headline: { type: string }
+        company: { type: string }
+        location: { type: string }
+        connectionDegree: { type: integer, enum: [1, 2, 3] }
+        context:
+          type: object
+          properties:
+            signal: { type: string }
+            recognition: { type: string }
+            notes: { type: array, items: { type: string } }
+            role:
+              type: object
+              properties:
+                title: { type: string }
+                comp: { type: string }
+                remote: { type: boolean }
+                stack: { type: array, items: { type: string } }
+    Enrollment:
+      type: object
+      properties:
+        id: { type: string }
+        prospectId: { type: string }
+        sequenceId: { type: string }
+        accountId: { type: string }
+        status:
+          type: string
+          enum: [active, paused_replied, completed, stopped, failed]
+        currentStepOrder: { type: integer }
+        nextRunAt: { type: string, nullable: true }
+        connectedAt: { type: string, nullable: true }
+    ActionResult:
+      type: object
+      properties:
+        ok: { type: boolean }
+        action: { type: string }
+        providerMessageId: { type: string }
+        error: { type: string }
+        deferredUntil: { type: string }

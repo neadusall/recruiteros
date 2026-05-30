@@ -1,0 +1,17 @@
+# dependencies (none required — this is a no-build static site)
+node_modules/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+
+# local env / secrets (for when real channel adapters get wired server-side)
+.env
+.env.local
+*.local
+
+# build output (if a bundler is ever added)
+dist/
+.cache/

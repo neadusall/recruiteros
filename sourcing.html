@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sourcing &amp; Enrichment, RecruiterOS</title>
+  <meta name="description" content="People-GPT natural-language search, candidate match scoring against your job description, and a Clay-style grid where every cell runs an AI agent." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+  <link rel="stylesheet" href="assets/css/app.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+</head>
+<body>
+  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+  <div class="grid-bg"></div>
+  <div class="noise"></div>
+
+  <header class="nav">
+    <div class="container nav-inner">
+      <a href="index.html" class="brand"><span class="logo">R</span><span>Recruiter<span class="os">OS</span></span></a>
+      <nav class="nav-links">
+        <div class="has-drop"><a href="platform.html">Platform</a>
+          <div class="drop"><a href="recruiting-os.html"><span class="di">👤</span><span><b>Recruiting OS</b><span>Find and place talent faster</span></span></a><a href="business-development-os.html"><span class="di">🏢</span><span><b>Business Development OS</b><span>Win clients and job orders</span></span></a>
+            <a href="signals.html"><span class="di">📡</span><span><b>Signal Engine</b><span>Trigger campaigns from market events</span></span></a>
+            <a href="sourcing.html"><span class="di">🎯</span><span><b>Sourcing &amp; Enrich</b><span>NL search + programmable grid</span></span></a>
+            <a href="outreach.html"><span class="di">✉️</span><span><b>Outreach</b><span>Multi-channel AI sequences</span></span></a><a href="linkedin.html"><span class="di">💼</span><span><b>LinkedIn Engine</b><span>Connect, message and convert at scale</span></span></a>
+            <a href="conversations.html"><span class="di">💬</span><span><b>Conversations</b><span>The Money Maker, AI SMS</span></span></a>
+            <a href="analytics.html"><span class="di">📊</span><span><b>Analytics</b><span>Live operational view</span></span></a>
+            <a href="integrations.html"><span class="di">🔗</span><span><b>Integrations</b><span>ATS, CRM &amp; data providers</span></span></a>
+          </div>
+        </div>
+        <a href="signals.html">Signals</a>
+        <a href="sourcing.html">Sourcing</a>
+        <a href="outreach.html">Outreach</a>
+        <a href="pricing.html">Pricing</a>
+      </nav>
+      <div class="nav-cta">
+        <a href="app.html" class="btn btn-ghost btn-sm">Log in</a>
+        <a href="app.html" class="btn btn-primary btn-sm">Open app →</a>
+      </div>
+    </div>
+  </header>
+
+  <section class="page-hero">
+    <div class="container">
+      <span class="eyebrow"><span class="dot"></span> Sourcing &amp; Enrichment</span>
+      <h1>Describe the hire. <span class="gradient-text">Get a scored shortlist.</span></h1>
+      <p class="lead">People-GPT search across 700M+ profiles, ranked against your job description, then enriched in a programmable grid where every cell can run an AI agent.</p>
+      <div class="hero-actions">
+        <a href="app.html?q=Senior%20React%20engineers%20in%20Berlin" class="btn btn-primary btn-lg">Try a live search →</a>
+        <a href="#scoring" class="btn btn-ghost btn-lg">See match scoring</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- 1. NL SEARCH -->
+  <section>
+    <div class="container">
+      <div class="split">
+        <div class="split-text reveal">
+          <div class="kicker">People-GPT search</div>
+          <h2>Search in plain English</h2>
+          <p>No boolean strings. No 14 filter dropdowns. Type what you're picturing and RecruiterOS translates intent into a precise query, then shows you why each person matched.</p>
+          <ul>
+            <li><b>Natural language in</b>, "design leaders who shipped at two startups"</li>
+            <li><b>700M+ profiles</b> of people and companies, continuously refreshed</li>
+            <li><b>Explained matches</b>, every result carries its reason for ranking</li>
+            <li><b>Refine by chat</b>, "only Berlin, drop agencies, add fintech" </li>
+          </ul>
+        </div>
+        <div class="mock reveal glow-border">
+          <div class="mock-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lbl">people-gpt</span></div>
+          <div class="mock-body">
+            <div class="search-bar" style="margin:0 0 14px"><span class="ico">⌕</span><input value="senior React engineers in Berlin who left a startup recently" readonly style="font-size:14px"/><span class="btn btn-primary btn-sm">Search</span></div>
+            <div class="ai-parse show" style="margin:0"><b>✦ Understood:</b> <span class="crit">Seniority: Senior+</span><span class="crit">Skill: React</span><span class="crit">Location: Berlin</span><span class="crit">Signal: recent movement</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. JD MATCH SCORING -->
+  <section id="scoring" class="tint">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">Match scoring</span>
+        <h2>Every candidate, scored against your job description</h2>
+        <p>Paste a job description or pull in a live job order. The AI extracts the must-haves and nice-to-haves, then scores and ranks every candidate 0-100, with a transparent breakdown and rationale.</p>
+      </div>
+      <div class="split">
+        <div class="mock reveal">
+          <div class="mock-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lbl">job description → requirements</span></div>
+          <div class="mock-body" style="font-size:13px;color:var(--text-muted)">
+            <div style="font-weight:600;color:var(--text);margin-bottom:8px">Sr. React Engineer, Trading UI</div>
+            <p style="margin:0 0 12px">"5+ yrs frontend, deep React + TypeScript, has owned a complex real-time UI, comfortable with design systems, Berlin or remote-EU…"</p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <span class="crit">Must: React (5y+)</span><span class="crit">Must: TypeScript</span><span class="crit">Must: real-time UI</span><span class="crit">Nice: design systems</span><span class="crit">Geo: Berlin / EU-remote</span>
+            </div>
+          </div>
+        </div>
+        <div class="split-text reveal">
+          <div class="kicker">How the score is built</div>
+          <h2>Transparent, not a black box</h2>
+          <ul>
+            <li><b>Skills match</b>, required vs. demonstrated, weighted by recency</li>
+            <li><b>Seniority &amp; scope</b>, has she operated at this level and ownership?</li>
+            <li><b>Domain &amp; context</b>, real-time / fintech / scale experience</li>
+            <li><b>Location &amp; logistics</b>, geo, visa, remote-readiness</li>
+            <li><b>Timing signal</b>, is she reachable right now?</li>
+          </ul>
+          <p style="margin-top:8px">Every score expands into a sentence of reasoning, so you trust the ranking, and can defend it to a hiring manager.</p>
+        </div>
+      </div>
+
+      <!-- scored shortlist mock -->
+      <div class="grid-scroll reveal" style="margin-top:14px">
+        <table class="grid">
+          <thead><tr><th>Candidate</th><th>Current role</th><th class="ai-col">✦ Skills</th><th class="ai-col">✦ Seniority</th><th class="ai-col">✦ Timing</th><th>Match</th></tr></thead>
+          <tbody>
+            <tr><td><span class="cell-name"><span class="avatar" style="background:#7c5cff">AK</span> Anja Köhler</span></td><td>Sr. Frontend · Trade Republic</td><td><span class="pill green">9/10</span></td><td><span class="pill green">Strong</span></td><td><span class="pill violet">Reorg · now</span></td><td><span class="score hi">94</span></td></tr>
+            <tr><td><span class="cell-name"><span class="avatar" style="background:#4dd0ff">MS</span> Marco Silva</span></td><td>Staff Eng · N26</td><td><span class="pill green">9/10</span></td><td><span class="pill green">Strong</span></td><td><span class="pill violet">Open to chats</span></td><td><span class="score hi">91</span></td></tr>
+            <tr><td><span class="cell-name"><span class="avatar" style="background:#38e0a6">TB</span> Tomas Berg</span></td><td>Sr. React · Zalando</td><td><span class="pill green">8/10</span></td><td><span class="pill amber">Good</span></td><td><span class="pill violet">Promo passed</span></td><td><span class="score hi">90</span></td></tr>
+            <tr><td><span class="cell-name"><span class="avatar" style="background:#ffc24d">YT</span> Yuki Tanaka</span></td><td>Sr. SWE · Delivery Hero</td><td><span class="pill amber">7/10</span></td><td><span class="pill amber">Good</span></td><td><span class="pill amber">5yr mark</span></td><td><span class="score mid">86</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. ENRICHMENT GRID -->
+  <section>
+    <div class="container">
+      <div class="split reverse">
+        <div class="split-text reveal">
+          <div class="kicker">The programmable grid</div>
+          <h2>Enrich like a spreadsheet, with AI in every cell</h2>
+          <p>Every candidate is a row. Every signal is a column. But unlike a spreadsheet, each cell can call an AI agent or a live API. Add a column, write a prompt, and watch the grid fill itself.</p>
+          <ul>
+            <li><b>Verified emails &amp; phones</b> from 50+ providers behind one cell</li>
+            <li><b>"Why now" research</b> summarized per person</li>
+            <li><b>Custom AI columns</b>, comp estimate, likelihood to move, personalized hook</li>
+            <li><b>Run on every row</b> in one click, or trigger per cell</li>
+          </ul>
+        </div>
+        <div class="mock reveal">
+          <div class="mock-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lbl">enrichment grid</span></div>
+          <div class="mock-body">
+            <div class="grid-scroll" style="border:none">
+              <table class="grid" style="min-width:0">
+                <thead><tr><th>Candidate</th><th class="ai-col">✉️ Email</th><th class="ai-col">✦ Likely to move</th><th class="ai-col">✦ Comp est.</th></tr></thead>
+                <tbody>
+                  <tr><td><span class="cell-name"><span class="avatar" style="background:#7c5cff">AK</span> Anja K.</span></td><td><span class="pill green">verified</span></td><td><span class="pill amber">High</span></td><td><span class="pill violet">$125k</span></td></tr>
+                  <tr><td><span class="cell-name"><span class="avatar" style="background:#4dd0ff">MS</span> Marco S.</span></td><td><span class="pill green">verified</span></td><td><span class="pill amber">High</span></td><td><span class="pill violet">$135k</span></td></tr>
+                  <tr><td><span class="cell-name"><span class="avatar" style="background:#ff7ac6">LD</span> Lena D.</span></td><td><span class="enrich-btn">Find email</span></td><td><span class="pill amber">Medium</span></td><td><span class="enrich-btn">Run</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. ICP & disqualifiers -->
+  <section class="tint">
+    <div class="container">
+      <div class="section-head reveal"><span class="eyebrow">Precision controls</span><h2>ICP, disqualifiers &amp; decision-maker discovery</h2><p>Define exactly who counts, and who doesn't, so the list stays clean and the score stays honest.</p></div>
+      <div class="feature-grid">
+        <div class="feature-card reveal"><div class="ficon">🎯</div><h3>Ideal Candidate Profile</h3><p>Codify the traits of your best hires once. Every search and score is measured against it automatically.</p></div>
+        <div class="feature-card reveal"><div class="ficon">🚫</div><h3>Disqualifiers</h3><p>Set hard filters, wrong seniority, agency-only background, non-portable visa, and they drop out before you ever see them.</p></div>
+        <div class="feature-card reveal"><div class="ficon">🧭</div><h3>Decision-maker discovery</h3><p>For BD campaigns, find the right buyer at a target account, the hiring manager, VP, or founder who signs the order.</p></div>
+        <div class="feature-card reveal"><div class="ficon">📋</div><h3>Prospect list building</h3><p>Roll matched people into a campaign list with daily caps, ready for enrichment and sequencing.</p></div>
+        <div class="feature-card reveal"><div class="ficon">🔁</div><h3>ATS de-duplication</h3><p>Cross-check every candidate against your pipeline so you never source someone you've already engaged.</p></div>
+        <div class="feature-card reveal"><div class="ficon">🧠</div><h3>Saved searches</h3><p>Searches become living lists, new matches that fit your criteria flow in automatically over time.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta-band"><div class="container"><div class="cta-inner reveal"><h2>Run a search. Score a shortlist. In 60 seconds.</h2><p>See People-GPT and match scoring on real candidate data.</p><a href="app.html?q=Senior%20React%20engineers%20in%20Berlin" class="btn btn-primary btn-lg">Open the live demo →</a></div></div></section>
+
+  <footer>
+    <div class="container">
+      <div class="footer-grid">
+        <div><a href="index.html" class="brand"><span class="logo">R</span><span>Recruiter<span class="os">OS</span></span></a><p class="footer-blurb">The operating system for modern recruiting. Find, enrich, and reach any candidate from one programmable workspace.</p></div>
+        <div class="footer-col"><h4>Platform</h4><a href="signals.html">Signal Engine</a><a href="sourcing.html">Sourcing &amp; Enrich</a><a href="outreach.html">Outreach</a><a href="linkedin.html">LinkedIn Engine</a><a href="conversations.html">Conversations</a><a href="analytics.html">Analytics</a><a href="integrations.html">Integrations</a></div>
+        <div class="footer-col"><h4>Company</h4><a href="platform.html">Platform overview</a><a href="recruiting-os.html">Recruiting OS</a><a href="business-development-os.html">Business Development OS</a><a href="about.html">Our story</a><a href="pricing.html">Pricing</a><a href="app.html">Open app</a></div>
+        <div class="footer-col"><h4>Legal</h4><a href="#">Privacy</a><a href="#">Terms</a><a href="#">Security</a><a href="#">GDPR</a></div>
+      </div>
+      <div class="footer-bottom"><span>© 2026 RecruiterOS, Inc. · recruiteros.co</span><span>Made for recruiters who'd rather be talking to people.</span></div>
+    </div>
+  </footer>
+  <script src="assets/js/landing.js"></script>
+</body>
+</html>

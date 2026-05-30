@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RecruiterOS, The AI Operating System for Recruiting</title>
+  <meta name="description" content="Find, enrich, and reach any candidate with AI. RecruiterOS combines natural-language people search with a programmable enrichment spreadsheet, sourcing, signals, and outreach in one place." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+</head>
+<body>
+
+  <!-- ambient FX layers -->
+  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+  <div class="grid-bg"></div>
+  <div class="noise"></div>
+
+  <!-- NAV -->
+  <header class="nav">
+    <div class="container nav-inner">
+      <a href="index.html" class="brand">
+        <span class="logo">R</span>
+        <span>Recruiter<span class="os">OS</span></span>
+      </a>
+      <nav class="nav-links">
+        <div class="has-drop"><a href="platform.html">Platform</a>
+          <div class="drop">
+            <a href="recruiting-os.html"><span class="di">👤</span><span><b>Recruiting OS</b><span>Find and place talent faster</span></span></a>
+            <a href="business-development-os.html"><span class="di">🏢</span><span><b>Business Development OS</b><span>Win clients and job orders</span></span></a>
+            <a href="signals.html"><span class="di">📡</span><span><b>Signal Engine</b><span>Trigger campaigns from market events</span></span></a>
+            <a href="sourcing.html"><span class="di">🎯</span><span><b>Sourcing and Enrich</b><span>NL search and programmable grid</span></span></a>
+            <a href="outreach.html"><span class="di">✉️</span><span><b>Outreach</b><span>Multi-channel AI sequences</span></span></a><a href="linkedin.html"><span class="di">💼</span><span><b>LinkedIn Engine</b><span>Connect, message and convert at scale</span></span></a>
+            <a href="conversations.html"><span class="di">💬</span><span><b>Conversations</b><span>The Money Maker, AI SMS</span></span></a>
+            <a href="analytics.html"><span class="di">📊</span><span><b>Analytics</b><span>Live operational view</span></span></a>
+            <a href="integrations.html"><span class="di">🔗</span><span><b>Integrations</b><span>ATS, CRM and data providers</span></span></a>
+          </div>
+        </div>
+        <a href="recruiting-os.html">Recruiting OS</a>
+        <a href="business-development-os.html">BD OS</a>
+        <a href="pricing.html">Pricing</a>
+      </nav>
+      <div class="nav-cta">
+        <a href="app.html" class="btn btn-ghost btn-sm">Log in</a>
+        <a href="app.html" class="btn btn-primary btn-sm">Open app →</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO -->
+  <section class="hero">
+    <canvas id="fxCanvas"></canvas>
+    <div class="container">
+      <span class="eyebrow"><span class="dot"></span> Now sourcing across 700M+ profiles</span>
+      <h1 class="hero-title">The operating system <br/>for <span class="gradient-text">modern recruiting</span>.</h1>
+      <p class="hero-sub">Stop stitching together eight tools. RecruiterOS runs every campaign, signals, sourcing, enrichment, outreach, SMS, and reporting, from one command center. Signal to placement, fully visible.</p>
+      <div class="hero-actions">
+        <a href="app.html" class="btn btn-primary btn-lg">Start sourcing free →</a>
+        <a href="#how" class="btn btn-ghost btn-lg">See how it works</a>
+      </div>
+      <p class="hero-note">No credit card · 25 free credits · Works with your ATS</p>
+
+      <!-- live-ish search demo -->
+      <form class="hero-search" id="heroSearch" action="app.html" method="get">
+        <span class="ico">⌕</span>
+        <input id="heroQuery" name="q" type="text" autocomplete="off"
+          placeholder="Find senior React engineers in Berlin who left a startup in the last 6 months…" />
+        <button type="submit" class="btn btn-primary btn-sm">Search</button>
+      </form>
+      <div class="hero-chips" id="heroChips">
+        <span class="chip">ML engineers open to remote</span>
+        <span class="chip">Fintech PMs who scaled 0→1</span>
+        <span class="chip">Nurses with ICU + Spanish</span>
+        <span class="chip">Ex-FAANG founders raising now</span>
+      </div>
+    </div>
+
+    <!-- social proof -->
+    <div class="container">
+      <div class="logos">
+        <p>Trusted by talent teams scaling fast</p>
+        <div class="marquee">
+          <div class="track">
+            <span>Northwind</span><span>Lumen</span><span>Hyperloop HR</span>
+            <span>Cobalt</span><span>Atlas Talent</span><span>Verve</span>
+            <span>Beacon</span><span>Forge Talent</span>
+            <span>Northwind</span><span>Lumen</span><span>Hyperloop HR</span>
+            <span>Cobalt</span><span>Atlas Talent</span><span>Verve</span>
+            <span>Beacon</span><span>Forge Talent</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY IT EXISTS / FRAGMENTATION -->
+  <section id="why">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">Why it exists</span>
+        <h2>Recruiters spend more time moving data than recruiting.</h2>
+        <p>The industry spent 20 years buying disconnected tools. RecruiterOS collapses the stack into one system that sits above every revenue-creating activity.</p>
+      </div>
+      <div class="frag-wrap reveal">
+        <div class="frag-tools">
+          <span class="frag-tool">Sourcing</span>
+          <span class="frag-tool">CRM</span>
+          <span class="frag-tool">ATS</span>
+          <span class="frag-tool">Email</span>
+          <span class="frag-tool">LinkedIn</span>
+          <span class="frag-tool">SMS</span>
+          <span class="frag-tool">Enrichment</span>
+          <span class="frag-tool">Reporting</span>
+          <span class="frag-tool">Apollo</span>
+          <span class="frag-tool">Clay</span>
+        </div>
+        <div class="frag-arrow">→</div>
+        <div class="frag-os">
+          <div class="logo-big">R</div>
+          <b>RecruiterOS</b>
+          <span>One command center. Complete visibility from signal to placement.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SIGNALS REPLACE COLD OUTREACH -->
+  <section id="signals">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">Signals, not spray-and-pray</span>
+        <h2>Signals replace cold outreach</h2>
+        <p>Every campaign starts with a trigger, a funding round, a new VP, a hiring surge. Context creates relevance. Relevance creates response.</p>
+      </div>
+      <div class="signal-cols reveal">
+        <div class="signal-card bad">
+          <div class="lbl">✕ Interruption-based</div>
+          <p class="msg">"Hi, are you hiring?"</p>
+          <p class="meta">Send 1,000 messages → hope 10 respond → hope 1 is interested.</p>
+        </div>
+        <div class="signal-card good">
+          <div class="lbl">✓ Signal-based</div>
+          <p class="msg">"I noticed you've posted three engineering leadership roles in the last 14 days while expanding into healthcare. Most teams hit capacity during that transition, curious how you're handling talent acquisition."</p>
+          <p class="meta">Triggered by: 3 new job posts + territory expansion signal.</p>
+        </div>
+      </div>
+      <div class="signal-flow reveal">
+        <span>Signal</span><span class="arr">→</span>
+        <span>Context</span><span class="arr">→</span>
+        <span>Relevance</span><span class="arr">→</span>
+        <span>Response</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- TWO REVENUE ENGINES -->
+  <section id="engines">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">One infrastructure</span>
+        <h2>Two revenue engines, one engine room</h2>
+        <p>Recruiting and business development are two expressions of the same motion. RecruiterOS runs both on shared infrastructure, so every recruiter becomes a business developer.</p>
+      </div>
+      <div class="engines reveal">
+        <a class="engine recruit" href="recruiting-os.html" style="text-decoration:none">
+          <span class="tag">THE RECRUITING OS</span>
+          <h3>Generate placements</h3>
+          <ul>
+            <li><b>Signals:</b> candidate movement, layoffs, promotions, career milestones</li>
+            <li><b>Action:</b> source, enrich, and reach the right talent first</li>
+            <li><b>Output:</b> filled roles, faster</li>
+          </ul>
+          <span class="more" style="color:#b9a6ff;font-weight:600;font-size:14px">Explore the Recruiting OS →</span>
+        </a>
+        <a class="engine bd" href="business-development-os.html" style="text-decoration:none">
+          <span class="tag">THE BUSINESS DEVELOPMENT OS</span>
+          <h3>Generate job orders</h3>
+          <ul>
+            <li><b>Signals:</b> funding, hiring surges, leadership changes, expansion</li>
+            <li><b>Action:</b> reach decision-makers with informed, timely outreach</li>
+            <li><b>Output:</b> new clients and job orders</li>
+          </ul>
+          <span class="more" style="color:#4dd0ff;font-weight:600;font-size:14px">Explore the BD OS →</span>
+        </a>
+      </div>
+      <div class="shared-infra reveal">
+        <b>Shared across both engines</b>
+        <div class="row">
+          <span>Same domains</span><span>Same CRM</span><span>Same ATS</span>
+          <span>Same enrichment</span><span>Same AI engine</span><span>Same reporting</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section id="features">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">Inside every campaign</span>
+        <h2>The campaign is the atomic unit of work</h2>
+        <p>Everything starts with a campaign. Signals, targets, enrichment, outreach, conversations, and reporting all live in one place, no more six disconnected dashboards.</p>
+      </div>
+      <div class="feature-grid">
+        <div class="feature-card reveal">
+          <div class="ficon">📡</div>
+          <h3>Signal engine</h3>
+          <p>Funding, new VPs, layoffs, hiring surges, M&A, expansion. RecruiterOS watches the market and starts every campaign with a reason to reach out.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="ficon">🧠</div>
+          <h3>People-GPT search</h3>
+          <p>Type what you want, "design leaders who've shipped at two startups." We translate intent into a precise query across 700M+ people and companies.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="ficon">⚡</div>
+          <h3>AI enrichment grid</h3>
+          <p>Add a column, write a prompt. Each row runs it, verified emails, "why now" research, fit scores. 50+ data providers behind one programmable cell.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="ficon">✉️</div>
+          <h3>Multi-channel outreach</h3>
+          <p>AI drafts personalized first-touch from each target's real history, then sequences across email, LinkedIn, and SMS, all from the campaign.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="ficon">💬</div>
+          <h3>Conversational SMS</h3>
+          <p>The Money Maker. An AI texting layer that understands context, replies intelligently, detects interest, and routes hot opportunities to humans.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="ficon">📊</div>
+          <h3>Live operational view</h3>
+          <p>Which signals book meetings? Which campaigns create job orders? Which messages convert? Run the firm on data, not intuition, in real time.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section id="how">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">From prompt to pipeline</span>
+        <h2>Three steps, zero spreadsheets to maintain</h2>
+      </div>
+      <div class="steps">
+        <div class="step reveal">
+          <span class="num">01, Describe</span>
+          <h3>Ask in plain English</h3>
+          <p>Write the candidate you're picturing. RecruiterOS builds the query, surfaces matches, and shows you why each one fits.</p>
+        </div>
+        <div class="step reveal">
+          <span class="num">02, Enrich</span>
+          <h3>Spin up signal columns</h3>
+          <p>Add AI + data columns to score, verify contact info, and summarize each person's "why now." The grid fills itself.</p>
+        </div>
+        <div class="step reveal">
+          <span class="num">03, Reach</span>
+          <h3>Send personalized outreach</h3>
+          <p>Approve AI-drafted messages and launch a sequence. Replies and stages sync straight back to your ATS.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRODUCT PREVIEW -->
+  <section>
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">Inside the workspace</span>
+        <h2>Your candidate list, supercharged</h2>
+        <p>This is the actual interface, open the live demo to run a search and watch columns enrich in real time.</p>
+      </div>
+      <div class="preview-wrap glow-border reveal">
+        <div class="preview-bar">
+          <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+          <span class="url">app.recruiteros.co/lists/senior-react-berlin</span>
+        </div>
+        <div class="preview-body">
+          <div class="mini-table">
+            <div class="mini-row head">
+              <div class="mini-cell">Candidate</div>
+              <div class="mini-cell">Current role</div>
+              <div class="mini-cell">✦ Why now (AI)</div>
+              <div class="mini-cell">Email</div>
+              <div class="mini-cell">Fit</div>
+            </div>
+            <div class="mini-row">
+              <div class="mini-cell"><span class="avatar" style="background:#7c5cff">AK</span> Anja Köhler</div>
+              <div class="mini-cell">Sr. Frontend @ Trade Republic</div>
+              <div class="mini-cell"><span class="pill violet">Team reorg · 4yr tenure</span></div>
+              <div class="mini-cell"><span class="pill green">verified</span></div>
+              <div class="mini-cell"><span class="pill green">94</span></div>
+            </div>
+            <div class="mini-row">
+              <div class="mini-cell"><span class="avatar" style="background:#4dd0ff">MS</span> Marco Silva</div>
+              <div class="mini-cell">Staff Eng @ N26</div>
+              <div class="mini-cell"><span class="pill violet">Posted "open to chats"</span></div>
+              <div class="mini-cell"><span class="pill green">verified</span></div>
+              <div class="mini-cell"><span class="pill green">91</span></div>
+            </div>
+            <div class="mini-row">
+              <div class="mini-cell"><span class="avatar" style="background:#ff7ac6">LD</span> Lena Dietrich</div>
+              <div class="mini-cell">Frontend Lead @ Pitch</div>
+              <div class="mini-cell"><span class="pill amber">Startup wound down</span></div>
+              <div class="mini-cell"><span class="pill green">verified</span></div>
+              <div class="mini-cell"><span class="pill amber">88</span></div>
+            </div>
+            <div class="mini-row">
+              <div class="mini-cell"><span class="avatar" style="background:#38e0a6">TB</span> Tomas Berg</div>
+              <div class="mini-cell">Sr. React Dev @ Zalando</div>
+              <div class="mini-cell"><span class="pill violet">Promo passed over</span></div>
+              <div class="mini-cell"><span class="pill green">verified</span></div>
+              <div class="mini-cell"><span class="pill green">90</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="text-align:center; margin-top:34px;" class="reveal">
+        <a href="app.html" class="btn btn-primary btn-lg">Open the live demo →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- THE MONEY MAKER: SMS -->
+  <section id="moneymaker">
+    <div class="container">
+      <div class="sms-wrap">
+        <div class="sms-copy reveal">
+          <span class="eyebrow" style="margin-bottom:18px;">The Money Maker</span>
+          <h2>An AI that texts back, and never sleeps</h2>
+          <p>Email and LinkedIn aren't enough. RecruiterOS adds an intelligent conversational SMS layer that sits between outbound activity and booked conversations.</p>
+          <ul>
+            <li><b>Understands context</b>, the campaign, the role, and every prior message</li>
+            <li><b>Replies intelligently</b> in real time, around the clock</li>
+            <li><b>Detects interest</b> and escalates the moment a lead heats up</li>
+            <li><b>Routes to humans</b> exactly when judgment creates the most value</li>
+          </ul>
+        </div>
+        <div class="phone reveal">
+          <div class="sms-head"><b>Marco S.</b> Staff Eng · campaign: Senior React</div>
+          <div class="bubble out">Hi Marco, saw N26 just reorged the web platform team. You've been there 4 years shipping the payments flow. Open to hearing about a staff role that's pure greenfield?</div>
+          <div class="bubble in">Maybe. Depends on the stack and whether it's remote.</div>
+          <div class="bubble out">Fully remote, React + TypeScript, you'd own architecture from day one. Comp is $120-145k. Worth a 15-min call Thursday?</div>
+          <div class="bubble in">Yeah, Thursday afternoon works.</div>
+          <div class="bubble note">🔥 Interest detected → routed to recruiter · meeting suggested</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LEVERAGE STATS -->
+  <section>
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">Compound leverage</span>
+        <h2>One operator becomes five</h2>
+        <p>AI handles research, enrichment, drafting, follow-ups, and signal detection. The recruiter focuses on relationships, conversations, and closing.</p>
+      </div>
+      <div class="stats reveal">
+        <div class="stat"><div class="big gradient-text" data-count="5" data-suffix="×">0×</div><div class="lbl">Output per recruiter</div></div>
+        <div class="stat"><div class="big gradient-text" data-count="9" data-suffix=" days">0 days</div><div class="lbl">Avg. time to fill senior roles</div></div>
+        <div class="stat"><div class="big gradient-text" data-count="2" data-suffix="×">0×</div><div class="lbl">Reply rate on signal outreach</div></div>
+        <div class="stat"><div class="big gradient-text">8→1</div><div class="lbl">Tools consolidated</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WAREHOUSE VS FACTORY -->
+  <section>
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">Bigger than an ATS</span>
+        <h2>An ATS documents. RecruiterOS creates.</h2>
+        <p>A system of record stores what happened. An operating system drives what happens next.</p>
+      </div>
+      <div class="compare reveal">
+        <div class="compare-card dim">
+          <div class="k">ATS = warehouse</div>
+          <h3>Documents the past</h3>
+          <ul>
+            <li>Stores candidates you already found</li>
+            <li>Holds jobs you already won</li>
+            <li>Tells you what happened</li>
+            <li>Tracks, but never originates</li>
+          </ul>
+        </div>
+        <div class="compare-card bright">
+          <div class="k">RecruiterOS = factory</div>
+          <h3>Generates the future</h3>
+          <ul>
+            <li>Finds candidates before competitors</li>
+            <li>Creates job orders from market signals</li>
+            <li>Drives what happens next</li>
+            <li>Every campaign compounds the system</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TESTIMONIALS -->
+  <section>
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">Loved by recruiters</span>
+        <h2>Fill roles in days, not quarters</h2>
+      </div>
+      <div class="quotes">
+        <div class="quote reveal">
+          <p>"It replaced three tools. I describe the hire, the list builds itself, and the 'why now' column tells me exactly who to message first."</p>
+          <div class="who"><span class="avatar" style="background:#7c5cff">PR</span><div><b>Priya R.</b><span>Head of Talent, Cobalt</span></div></div>
+        </div>
+        <div class="quote reveal">
+          <p>"The enrichment columns are witchcraft. Verified emails plus a tailored opener for every candidate, my response rate doubled."</p>
+          <div class="who"><span class="avatar" style="background:#4dd0ff">JM</span><div><b>Jordan M.</b><span>Founder, Atlas Talent</span></div></div>
+        </div>
+        <div class="quote reveal">
+          <p>"We went from a 6-week sourcing cycle to filling two senior roles in 9 days. The ATS sync means zero double-work."</p>
+          <div class="who"><span class="avatar" style="background:#ff7ac6">SO</span><div><b>Sam O.</b><span>Recruiting Lead, Verve</span></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRICING -->
+  <section id="pricing">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">Pricing</span>
+        <h2>Start free. Scale when you hire.</h2>
+        <p>Credits power search and enrichment. Every plan includes the full workspace.</p>
+      </div>
+      <div class="pricing">
+        <div class="plan reveal">
+          <h3>Starter</h3>
+          <div class="price">$0<span>/mo</span></div>
+          <p class="desc">For solo recruiters testing the waters.</p>
+          <ul>
+            <li>25 search + enrichment credits / mo</li>
+            <li>1 candidate list</li>
+            <li>Natural-language search</li>
+            <li>3 AI enrichment columns</li>
+            <li>Community support</li>
+          </ul>
+          <a href="app.html" class="btn btn-ghost">Get started</a>
+        </div>
+        <div class="plan featured glow-border reveal">
+          <span class="badge">Most popular</span>
+          <h3>Pro</h3>
+          <div class="price">$99<span>/mo</span></div>
+          <p class="desc">For recruiters running active pipelines.</p>
+          <ul>
+            <li>2,000 credits / mo</li>
+            <li>Unlimited lists & columns</li>
+            <li>Verified email + phone enrichment</li>
+            <li>Outreach sequences</li>
+            <li>Hiring-signal alerts</li>
+            <li>ATS sync (Greenhouse, Lever, Ashby)</li>
+          </ul>
+          <a href="app.html" class="btn btn-primary">Start 14-day trial</a>
+        </div>
+        <div class="plan reveal">
+          <h3>Team</h3>
+          <div class="price">$349<span>/mo</span></div>
+          <p class="desc">For talent teams sourcing at scale.</p>
+          <ul>
+            <li>10,000 pooled credits / mo</li>
+            <li>Up to 10 seats</li>
+            <li>Shared lists & templates</li>
+            <li>Custom enrichment integrations</li>
+            <li>SSO + audit log</li>
+            <li>Dedicated success manager</li>
+          </ul>
+          <a href="app.html" class="btn btn-ghost">Contact sales</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-band">
+    <div class="container">
+      <div class="cta-inner reveal">
+        <h2>Source your next hire in the next 10 minutes.</h2>
+        <p>Open the workspace, describe who you need, and watch the list build itself.</p>
+        <a href="app.html" class="btn btn-primary btn-lg">Open RecruiterOS →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <a href="index.html" class="brand"><span class="logo">R</span><span>Recruiter<span class="os">OS</span></span></a>
+          <p class="footer-blurb">The AI operating system for recruiting. Find, enrich, and reach any candidate from one programmable workspace.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Platform</h4>
+          <a href="recruiting-os.html">Recruiting OS</a>
+          <a href="business-development-os.html">Business Development OS</a>
+          <a href="signals.html">Signal Engine</a>
+          <a href="sourcing.html">Sourcing and Enrich</a>
+          <a href="outreach.html">Outreach</a>
+          <a href="linkedin.html">LinkedIn Engine</a><a href="conversations.html">Conversations</a>
+        </div>
+        <div class="footer-col">
+          <h4>Company</h4>
+          <a href="platform.html">Platform overview</a>
+          <a href="analytics.html">Analytics</a>
+          <a href="integrations.html">Integrations</a>
+          <a href="about.html">Our story</a>
+          <a href="pricing.html">Pricing</a>
+        </div>
+        <div class="footer-col">
+          <h4>Legal</h4>
+          <a href="#">Privacy</a>
+          <a href="#">Terms</a>
+          <a href="#">Security</a>
+          <a href="#">GDPR</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© 2026 RecruiterOS, Inc. All rights reserved.</span>
+        <span>Made for recruiters who'd rather be talking to people.</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="assets/js/landing.js"></script>
+</body>
+</html>

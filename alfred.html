@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Outreach Studio — RecruiterOS</title>
+  <meta name="description" content="Multi-channel outreach automation: build sequences across LinkedIn, email and X with warm-up safe limits, smart waits, and a live inbox. The MeetAlfred-style engine inside RecruiterOS." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+  <link rel="stylesheet" href="assets/css/app.css" />
+  <link rel="stylesheet" href="assets/css/alfred.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+</head>
+<body>
+  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+  <div class="grid-bg"></div>
+  <div class="noise"></div>
+
+  <header class="nav">
+    <div class="container nav-inner">
+      <a href="index.html" class="brand"><span class="logo">R</span><span>Recruiter<span class="os">OS</span></span></a>
+      <nav class="nav-links">
+        <a href="signals.html">Signals</a>
+        <a href="sourcing.html">Sourcing</a>
+        <a href="outreach.html">Outreach</a>
+        <a href="alfred.html" style="color:var(--text)">Studio</a>
+        <a href="pricing.html">Pricing</a>
+      </nav>
+      <div class="nav-cta">
+        <a href="app.html" class="btn btn-ghost btn-sm">Command center</a>
+        <a href="#" class="btn btn-primary btn-sm" id="topNewCampaign">+ New campaign</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="studio">
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="st-side">
+      <h4>Campaigns</h4>
+      <div class="camp-list" id="campList"></div>
+      <button class="a-btn ghost sm" id="newCampaign" style="width:100%">+ New campaign</button>
+
+      <div class="st-clock">
+        <div class="now" id="simNow">—</div>
+        <div class="dim" style="font-size:11px;margin-bottom:8px">Simulation clock · Simulated channel</div>
+        <div class="ff">
+          <button class="a-btn sm" data-ff="0.25">+6h</button>
+          <button class="a-btn sm" data-ff="1">+1 day</button>
+          <button class="a-btn sm" data-ff="7">+1 week</button>
+          <button class="a-btn sm" data-ff="30">+30 days</button>
+        </div>
+        <button class="a-btn ghost sm" id="resetData" style="width:100%;margin-top:8px">↺ Reset demo data</button>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <section class="st-main">
+      <div class="st-head">
+        <span class="cdot" id="headDot" style="width:10px;height:10px;border-radius:50%;background:var(--accent-green)"></span>
+        <h1 id="campTitle">—</h1>
+        <span class="cstatus active" id="campStatus">Active</span>
+        <span class="spacer"></span>
+        <button class="a-btn sm" id="toggleStatus">Pause</button>
+        <button class="a-btn primary sm" id="launchBtn">Enroll &amp; launch</button>
+      </div>
+
+      <div class="banner">
+        🛡️ Running on the <b>Simulated</b> channel — zero account risk. Connects, accepts, and replies are modeled
+        probabilistically over the sim clock. Swap in real LinkedIn / Email / X adapters server-side when you're ready.
+      </div>
+
+      <nav class="st-tabs" id="tabs">
+        <button class="st-tab active" data-tab="sequence">🧩 Sequence</button>
+        <button class="st-tab" data-tab="leads">🎯 Leads</button>
+        <button class="st-tab" data-tab="inbox">💬 Inbox</button>
+        <button class="st-tab" data-tab="templates">📚 Templates</button>
+        <button class="st-tab" data-tab="analytics">📊 Analytics</button>
+        <button class="st-tab" data-tab="settings">⚙️ Settings</button>
+      </nav>
+
+      <div class="st-panel active" id="panel-sequence">
+        <div class="seq-builder">
+          <div>
+            <div class="seq-canvas" id="seqCanvas"></div>
+            <div class="row wrap" style="margin-top:12px">
+              <button class="add-step" id="addAction">＋ Add action step</button>
+              <button class="add-step" id="addDelay" style="max-width:160px">＋ Add delay</button>
+            </div>
+          </div>
+          <div class="inspector" id="inspector">
+            <div class="empty"><div class="big">🧩</div><p>Select a step to edit it, or add your first step.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="st-panel" id="panel-leads">
+        <div class="row wrap" style="margin-bottom:14px">
+          <button class="a-btn primary sm" id="addLead">+ Add lead</button>
+          <button class="a-btn sm" id="importLeads">⇪ Import (paste)</button>
+          <button class="a-btn sm" id="enrollSelected" disabled>✉️ Enroll selected</button>
+          <span class="spacer"></span>
+          <span class="dim" id="leadCount" style="font-size:12px"></span>
+        </div>
+        <div class="card" style="padding:0;overflow:auto">
+          <table class="a-table" id="leadsTable"></table>
+        </div>
+      </div>
+
+      <div class="st-panel" id="panel-inbox">
+        <div class="inbox">
+          <div class="thread-list" id="threadList"></div>
+          <div class="chat" id="chat"><div class="empty"><div class="big">💬</div><p>Replies land here. Run the sim clock to generate conversations.</p></div></div>
+        </div>
+      </div>
+
+      <div class="st-panel" id="panel-templates">
+        <div class="row" style="margin-bottom:14px"><button class="a-btn primary sm" id="addTemplate">+ New template</button></div>
+        <div class="set-grid" id="templateList"></div>
+      </div>
+
+      <div class="st-panel" id="panel-analytics">
+        <div class="kpi-grid" id="kpiGrid"></div>
+        <div class="set-grid">
+          <div class="card"><h3 style="font-size:14px;margin-bottom:12px">Funnel</h3><div id="funnel"></div></div>
+          <div class="card"><h3 style="font-size:14px;margin-bottom:12px">Activity by channel</h3><div id="byChannel"></div></div>
+        </div>
+      </div>
+
+      <div class="st-panel" id="panel-settings">
+        <div class="set-grid">
+          <div class="card">
+            <h3 style="font-size:14px;margin-bottom:12px">🔌 Connected accounts</h3>
+            <div id="accList" style="display:grid;gap:9px"></div>
+            <button class="a-btn ghost sm" id="addAccount" style="margin-top:12px">+ Connect account</button>
+          </div>
+          <div class="card">
+            <h3 style="font-size:14px;margin-bottom:6px">🛡️ Daily limits &amp; warm-up</h3>
+            <p class="dim" style="font-size:12px;margin-bottom:10px">Caps per account per day. Warm-up ramps these from 30% → 100% over 14 days.</p>
+            <div id="limitsBox"></div>
+          </div>
+          <div class="card">
+            <h3 style="font-size:14px;margin-bottom:6px">⏰ Schedule &amp; safety</h3>
+            <div id="safetyBox"></div>
+          </div>
+          <div class="card">
+            <h3 style="font-size:14px;margin-bottom:6px">🚫 Blacklist</h3>
+            <p class="dim" style="font-size:12px;margin-bottom:10px">Emails, domains, or names that must never be contacted.</p>
+            <textarea class="a-textarea" id="blacklistBox" placeholder="acme.com&#10;jane@nope.com&#10;John Doe"></textarea>
+            <button class="a-btn sm" id="saveBlacklist" style="margin-top:8px">Save blacklist</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- modal + toast -->
+  <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
+  <div id="a-toast"></div>
+
+  <script src="assets/js/alfred/alfred-core.js"></script>
+  <script src="assets/js/alfred/alfred-ui.js"></script>
+</body>
+</html>
