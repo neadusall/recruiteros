@@ -72,9 +72,12 @@
     .combo input:focus{outline:none;border-color:rgba(124,92,255,.6)}
     .combo-drop{position:absolute;top:calc(100% + 6px);left:0;right:0;background:#13131f;border:1px solid rgba(255,255,255,.14);border-radius:12px;max-height:320px;overflow:auto;z-index:40;display:none;box-shadow:0 18px 50px rgba(0,0,0,.5)}
     .combo-drop.open{display:block}
-    .combo-sec{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);padding:10px 14px 4px;font-weight:700}
+    .combo-sec{position:sticky;top:0;background:#13131f;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);padding:10px 14px 4px;font-weight:700;display:flex;justify-content:space-between;align-items:center;z-index:1}
+    .combo-sec .sec-all{cursor:pointer;color:#9d86ff;font-weight:700;text-transform:none;letter-spacing:0}
+    .combo-sec .sec-all:hover{text-decoration:underline}
     .combo-opt{padding:9px 14px;font-size:14px;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
     .combo-opt:hover,.combo-opt.cur{background:rgba(124,92,255,.16)}
+    .combo-opt.sel{color:#38e0a6}
     .combo-opt .sec{font-size:11px;color:var(--text-dim)}
     .search-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
     .schip{display:inline-flex;align-items:center;gap:7px;background:rgba(124,92,255,.16);border:1px solid rgba(124,92,255,.4);border-radius:999px;padding:6px 8px 6px 13px;font-size:13px;font-weight:600}
@@ -170,6 +173,7 @@
           <input id="searchInput" placeholder="Search 250+ industries, e.g. Fintech, Healthcare, AI..." autocomplete="off" />
           <div class="combo-drop" id="searchDrop"></div>
         </div>
+        <button class="btn btn-ghost" id="browseBtn" title="Browse all industries">All industries ▾</button>
         <button class="btn btn-primary" id="pullBtn">Pull hiring signals →</button>
       </div>
       <div class="search-chips" id="searchChips"></div>

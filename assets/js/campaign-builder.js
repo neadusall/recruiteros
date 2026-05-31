@@ -168,17 +168,37 @@
 
   /* ---- forefront search: combobox ---- */
   const searchInput = $("#searchInput"), searchDrop = $("#searchDrop");
+  // Full grouped dropdown: every industry, grouped by sector, multi-select,
+  // with "+ all" to target an entire sector at once. Stays open while picking.
   function renderDrop(q) {
     if (state.mode === "company") { searchDrop.classList.remove("open"); return; }
-    const names = window.ROS_INDUSTRIES || [];
-    const ql = q.trim().toLowerCase();
-    const matches = (ql ? names.filter(i => i.name.toLowerCase().includes(ql)) : names).slice(0, 40);
-    if (!matches.length) { searchDrop.classList.remove("open"); return; }
-    searchDrop.innerHTML = matches.map(m =>
-      `<div class="combo-opt" data-ind="${m.name}"><span>${m.name}</span><span class="sec">${m.sector}</span></div>`).join("");
+    const all = window.ROS_INDUSTRIES || [];
+    const sectors = window.ROS_SECTORS || [];
+    const ql = (q || "").trim().toLowerCase();
+    const matches = ql ? all.filter(i => i.name.toLowerCase().includes(ql) || i.sector.toLowerCase().includes(ql)) : all;
+    if (!matches.length) { searchDrop.innerHTML = `<div class="combo-sec">No matches for "${q}"</div>`; searchDrop.classList.add("open"); return; }
+    const bySec = {};
+    matches.forEach(m => { (bySec[m.sector] = bySec[m.sector] || []).push(m); });
+    let html = "";
+    sectors.filter(s => bySec[s]).forEach(sec => {
+      html += `<div class="combo-sec">${sec}<span class="sec-all" data-sec="${sec}">+ all (${bySec[sec].length})</span></div>`;
+      bySec[sec].forEach(m => {
+        const on = state.industries.has(m.name);
+        html += `<div class="combo-opt${on ? " sel" : ""}" data-ind="${m.name}"><span>${on ? "✓ " : ""}${m.name}</span></div>`;
+      });
+    });
+    searchDrop.innerHTML = html;
     searchDrop.classList.add("open");
     $$(".combo-opt", searchDrop).forEach(o => o.addEventListener("mousedown", (e) => {
-      e.preventDefault(); addSelection(o.dataset.ind); searchInput.value = ""; renderDrop("");
+      e.preventDefault();
+      const n = o.dataset.ind;
+      if (state.industries.has(n)) state.industries.delete(n); else state.industries.add(n);
+      renderSearchChips(); renderDrop(searchInput.value);   // keep open, reflect selection
+    }));
+    $$(".sec-all", searchDrop).forEach(s => s.addEventListener("mousedown", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      (window.ROS_INDUSTRIES || []).filter(i => i.sector === s.dataset.sec).forEach(i => state.industries.add(i.name));
+      renderSearchChips(); renderDrop(searchInput.value);
     }));
   }
   function addSelection(val) {
@@ -205,7 +225,7 @@
 
   searchInput.addEventListener("input", (e) => renderDrop(e.target.value));
   searchInput.addEventListener("focus", (e) => renderDrop(e.target.value));
-  searchInput.addEventListener("blur", () => setTimeout(() => searchDrop.classList.remove("open"), 150));
+  searchInput.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== searchInput) searchDrop.classList.remove("open"); }, 150));
   searchInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -221,6 +241,15 @@
       : "Search 250+ industries, e.g. Fintech, Healthcare, AI...";
     renderSearchChips(); searchDrop.classList.remove("open");
   }));
+  // "All industries ▾" — open the full grouped dropdown without typing
+  $("#browseBtn").addEventListener("click", () => {
+    if (state.mode === "company") {
+      $$("#searchSeg .seg-btn").forEach(x => x.classList.toggle("active", x.dataset.mode === "industry"));
+      state.mode = "industry"; renderSearchChips();
+    }
+    if (searchDrop.classList.contains("open")) { searchDrop.classList.remove("open"); }
+    else { searchInput.value = ""; searchInput.focus(); renderDrop(""); }
+  });
   $("#pullBtn").addEventListener("click", runSearch);
 
   function runSearch() {
