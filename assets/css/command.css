@@ -189,6 +189,11 @@
 .acct-sep { height: 1px; background: var(--border); margin: 6px 4px; }
 .acct-group { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-dim); font-weight: 700; padding: 8px 10px 4px; }
 
+/* Sidebar footer chip: opens the same account menu, mirrors the uploaded photo */
+.side-link#userChip { border-radius: 10px; transition: background .12s ease; }
+.side-link#userChip:hover { background: var(--surface-2); }
+#userInitials.has-img { color: transparent; background-size: cover; background-position: center; }
+
 /* Working pipeline stage selector in Prospects */
 .stage-select { border: 1px solid var(--border-strong); border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; background: var(--surface); color: var(--text); cursor: pointer; }
 .stage-select:hover { border-color: var(--brand); }
