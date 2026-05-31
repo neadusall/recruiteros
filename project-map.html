@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>RecruiterOS — Project Map &amp; Wireframe</title>
+<style>
+  :root{
+    --bg:#070b14; --bg2:#0b1120; --panel:#0f1626; --panel2:#131c30;
+    --line:#1e2a44; --line2:#283655;
+    --ink:#e8eefc; --mut:#8aa0c6; --mut2:#5f7299;
+    --cyan:#36d6e7; --indigo:#7c8cff; --violet:#b06bff;
+    --green:#27d38a; --amber:#ffb23e; --red:#ff5d6c; --slate:#7689b0;
+    --grad:linear-gradient(100deg,#36d6e7,#7c8cff 45%,#b06bff);
+    --shadow:0 18px 50px -22px rgba(0,0,0,.85);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:
+      radial-gradient(1200px 600px at 12% -10%, rgba(124,140,255,.16), transparent 60%),
+      radial-gradient(1000px 560px at 100% 0%, rgba(54,214,231,.12), transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial;
+    -webkit-font-smoothing:antialiased;
+    padding:0 0 90px;
+  }
+  a{color:inherit}
+  .wrap{max-width:1240px;margin:0 auto;padding:0 22px}
+
+  /* Header */
+  header.top{
+    position:sticky;top:0;z-index:30;
+    backdrop-filter:blur(14px);
+    background:linear-gradient(180deg,rgba(7,11,20,.92),rgba(7,11,20,.72));
+    border-bottom:1px solid var(--line);
+  }
+  .topbar{display:flex;align-items:center;gap:18px;padding:16px 0}
+  .brand{display:flex;align-items:center;gap:12px;min-width:0}
+  .logo{
+    font-weight:800;font-size:21px;letter-spacing:-.4px;
+    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
+    background-size:200% auto;animation:sh 6s linear infinite;white-space:nowrap;
+  }
+  @keyframes sh{to{background-position:200% center}}
+  .sub{color:var(--mut);font-size:12.5px}
+  .grow{flex:1}
+  .live-pill{
+    display:inline-flex;align-items:center;gap:8px;text-decoration:none;
+    border:1px solid var(--line2);background:var(--panel);
+    padding:8px 13px;border-radius:999px;font-size:12.5px;color:var(--ink);white-space:nowrap;
+  }
+  .live-pill:hover{border-color:var(--cyan)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(39,211,138,.6);animation:pulse 2.2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(39,211,138,.55)}70%{box-shadow:0 0 0 9px rgba(39,211,138,0)}100%{box-shadow:0 0 0 0 rgba(39,211,138,0)}}
+  .ghost{
+    display:inline-flex;align-items:center;gap:7px;text-decoration:none;cursor:pointer;
+    border:1px solid var(--line2);background:transparent;color:var(--mut);
+    padding:8px 12px;border-radius:10px;font-size:12.5px;
+  }
+  .ghost:hover{color:var(--ink);border-color:var(--indigo)}
+
+  /* Hero strip */
+  .hero{padding:26px 0 8px}
+  .hero h1{margin:0 0 6px;font-size:26px;letter-spacing:-.6px}
+  .hero p{margin:0;color:var(--mut);max-width:760px}
+
+  /* Counters */
+  .stats{display:flex;flex-wrap:wrap;gap:12px;margin:20px 0 6px}
+  .stat{
+    flex:1;min-width:140px;border:1px solid var(--line);border-radius:14px;
+    background:linear-gradient(180deg,var(--panel),var(--bg2));padding:13px 15px;
+  }
+  .stat b{display:block;font-size:23px;letter-spacing:-.5px}
+  .stat span{color:var(--mut);font-size:12px}
+  .stat.green b{color:var(--green)} .stat.amber b{color:var(--amber)}
+  .stat.violet b{color:var(--violet)} .stat.cyan b{color:var(--cyan)}
+
+  /* Controls */
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:22px 0 16px;
+    position:sticky;top:71px;z-index:20;padding:12px 0;
+    background:linear-gradient(180deg,rgba(7,11,20,.96),rgba(7,11,20,.0));
+  }
+  .search{
+    flex:1;min-width:220px;display:flex;align-items:center;gap:9px;
+    border:1px solid var(--line2);background:var(--panel);border-radius:11px;padding:10px 13px;
+  }
+  .search input{border:0;background:transparent;color:var(--ink);outline:0;width:100%;font-size:14px}
+  .search svg{flex:none;opacity:.7}
+  .chips{display:flex;gap:7px;flex-wrap:wrap}
+  .chip{
+    cursor:pointer;border:1px solid var(--line2);background:var(--panel);color:var(--mut);
+    padding:8px 12px;border-radius:999px;font-size:12.5px;display:inline-flex;align-items:center;gap:7px;user-select:none;
+  }
+  .chip:hover{color:var(--ink)}
+  .chip.on{color:var(--ink);border-color:transparent;background:rgba(124,140,255,.18)}
+  .chip .c{width:8px;height:8px;border-radius:50%}
+  .chip small{color:var(--mut2);font-variant-numeric:tabular-nums}
+
+  /* Section */
+  section.grp{margin:8px 0 14px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--panel)}
+  .grp h2{
+    margin:0;display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none;
+    padding:15px 18px;font-size:14.5px;letter-spacing:.2px;
+    background:linear-gradient(180deg,var(--panel2),var(--panel));
+    border-bottom:1px solid var(--line);
+  }
+  .grp h2 .ic{font-size:17px}
+  .grp h2 .nm{font-weight:700}
+  .grp h2 .ds{color:var(--mut);font-weight:400;font-size:12.5px}
+  .grp h2 .ct{margin-left:auto;color:var(--mut2);font-size:12px}
+  .grp h2 .car{transition:transform .2s;color:var(--mut)}
+  .grp.collapsed h2 .car{transform:rotate(-90deg)}
+  .grp.collapsed .rows{display:none}
+
+  /* Rows */
+  .rows{padding:6px}
+  .row{
+    display:grid;grid-template-columns:230px 1fr 116px;gap:14px;align-items:start;
+    padding:12px 12px;border-radius:11px;border:1px solid transparent;
+  }
+  .row:hover{background:var(--bg2);border-color:var(--line)}
+  .row+.row{border-top:1px solid rgba(30,42,68,.5)}
+  .row:hover+.row{border-top-color:transparent}
+  .ttl a{font-weight:650;text-decoration:none}
+  .ttl a:hover{text-decoration:underline;text-decoration-color:var(--indigo)}
+  .url{display:block;margin-top:3px;font-size:11.5px;color:var(--cyan);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+  .url.muted{color:var(--mut2)}
+  .desc{color:var(--mut);font-size:13px}
+  .meta{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px}
+  .tag{font-size:10.5px;color:var(--mut2);border:1px solid var(--line2);border-radius:6px;padding:2px 7px}
+  .note{
+    margin-top:8px;width:100%;resize:vertical;min-height:0;height:34px;
+    border:1px dashed var(--line2);background:rgba(11,17,32,.6);color:var(--ink);
+    border-radius:8px;padding:6px 9px;font:12.5px ui-sans-serif,system-ui;outline:0;
+  }
+  .note:focus{border-style:solid;border-color:var(--indigo)}
+  .note::placeholder{color:var(--mut2)}
+  .stwrap{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+  .badge{
+    cursor:pointer;user-select:none;border:1px solid transparent;
+    padding:5px 10px;border-radius:999px;font-size:11.5px;font-weight:650;white-space:nowrap;
+    display:inline-flex;align-items:center;gap:6px;
+  }
+  .badge .c{width:7px;height:7px;border-radius:50%}
+  .badge:hover{filter:brightness(1.12)}
+  .b-live{background:rgba(39,211,138,.14);color:#7df0bf;border-color:rgba(39,211,138,.35)}
+  .b-live .c{background:var(--green)}
+  .b-polish{background:rgba(255,178,62,.13);color:#ffd494;border-color:rgba(255,178,62,.33)}
+  .b-polish .c{background:var(--amber)}
+  .b-todo{background:rgba(255,93,108,.13);color:#ff9aa4;border-color:rgba(255,93,108,.32)}
+  .b-todo .c{background:var(--red)}
+  .b-private{background:rgba(176,107,255,.14);color:#d2b4ff;border-color:rgba(176,107,255,.35)}
+  .b-private .c{background:var(--violet)}
+  .b-backend{background:rgba(118,137,176,.13);color:#aebdd9;border-color:rgba(118,137,176,.3)}
+  .b-backend .c{background:var(--slate)}
+  .pri{font-size:10.5px;color:var(--mut2);cursor:pointer;user-select:none}
+  .pri:hover{color:var(--ink)}
+  .pri .star{color:var(--amber)}
+
+  .empty{padding:40px;text-align:center;color:var(--mut2)}
+  footer{margin-top:30px;color:var(--mut2);font-size:12px;text-align:center}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:10px;color:var(--mut)}
+  .legend b{color:var(--ink)}
+  @media(max-width:760px){
+    .row{grid-template-columns:1fr}
+    .stwrap{flex-direction:row;align-items:center}
+    .controls{position:static}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap topbar">
+    <div class="brand">
+      <div class="logo">RecruiterOS</div>
+      <div class="sub">Project Map</div>
+    </div>
+    <div class="grow"></div>
+    <a class="live-pill" href="https://recruitersos.co/home" target="_blank" rel="noopener">
+      <span class="dot"></span> recruitersos.co
+    </a>
+    <a class="ghost" href="https://github.com/neadusall/recruiteros" target="_blank" rel="noopener">GitHub repo</a>
+    <button class="ghost" id="copyMd" title="Copy this map as Markdown">Copy as MD</button>
+    <button class="ghost" id="reset" title="Reset your saved statuses &amp; notes">Reset</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="hero">
+    <h1>The whole product, on one screen.</h1>
+    <p>Every page, route, and surface of RecruiterOS with its live URL. Click a status badge to recycle its state, star what to do next, and jot notes inline. Everything you change is saved in this browser so you can use this to organize the build.</p>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="controls">
+    <label class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="q" placeholder="Filter pages, URLs, notes…" autocomplete="off"/>
+    </label>
+    <div class="chips" id="filters"></div>
+  </div>
+
+  <div id="board"></div>
+
+  <footer>
+    <div class="legend">
+      <span><b style="color:#7df0bf">Live</b> shipped &amp; in production</span>
+      <span><b style="color:#ffd494">Polish</b> works, needs UX/copy love</span>
+      <span><b style="color:#ff9aa4">To build</b> planned / thin</span>
+      <span><b style="color:#d2b4ff">Private</b> owner-only / gated</span>
+      <span><b style="color:#aebdd9">Backend</b> API / infra, no public page</span>
+    </div>
+    <p style="margin-top:14px">Generated from the live codebase at <code>C:\Users\rrnea\recruiteros</code> · deployed on Hetzner <code>178.156.170.244</code>. Star ★ = your “do next”.</p>
+  </footer>
+</div>
+
+<script>
+/* ---------- DATA: the real RecruiterOS surface ---------- */
+const BASE="https://recruitersos.co";
+const STATUS={
+  live:{label:"Live",cls:"b-live"},
+  polish:{label:"Polish",cls:"b-polish"},
+  todo:{label:"To build",cls:"b-todo"},
+  private:{label:"Private",cls:"b-private"},
+  backend:{label:"Backend",cls:"b-backend"},
+};
+const ORDER=["live","polish","todo","private","backend"];
+
+const GROUPS=[
+  { id:"marketing", ic:"🏠", name:"Marketing Site", desc:"Public top-level pages — the first thing buyers see",
+    items:[
+      {t:"Home",          u:"/home",        s:"live",   d:"Hero, positioning, the 'signal to placement' thesis. Top of funnel.", tags:["index.html","Bernays copy"]},
+      {t:"Platform",      u:"/platform",    s:"live",   d:"How the whole operating system fits together end to end.", tags:["platform.html"]},
+      {t:"Features",      u:"/features",    s:"live",   d:"Master feature matrix across every module.", tags:["features.html"]},
+      {t:"Pricing",       u:"/pricing",     s:"polish", d:"Plans & tiers. Wire to the owner-console recommended pricing (Recruiting $299/$549/$999, BD $399/$699/$1,299).", tags:["pricing.html"]},
+      {t:"About",         u:"/about",       s:"live",   d:"Story, mission, the operator behind it.", tags:["about.html"]},
+      {t:"Help",          u:"/help",        s:"polish", d:"Support / docs hub. Thin — best for end users to grow this with onboarding & FAQs.", tags:["help.html"]},
+      {t:"Developers",    u:"/developers",  s:"live",   d:"API & dev console — catalog, collect, enrich, campaign build endpoints.", tags:["developers.html","OpenAPI"]},
+    ]},
+  { id:"os", ic:"🧭", name:"Operating Systems", desc:"The two motions sharing one infrastructure",
+    items:[
+      {t:"Recruiting OS",            u:"/recruiting-os",            s:"live", d:"The placements motion — candidate-side operating system.", tags:["recruiting-os.html"]},
+      {t:"Business Development OS",  u:"/business-development-os",  s:"live", d:"The job-orders motion — win clients from the same signals (1.3x pricing).", tags:["business-development-os.html"]},
+    ]},
+  { id:"modules", ic:"🧩", name:"Modules", desc:"The feature pillars (GTM-OS taxonomy)",
+    items:[
+      {t:"Signals",      u:"/signals",      s:"live",   d:"~40 hiring signals, free/public-first sourcing. The atomic trigger.", tags:["signals.html"]},
+      {t:"Sourcing",     u:"/sourcing",     s:"live",   d:"Search + enrich, led by JD-based candidate match scoring.", tags:["sourcing.html"]},
+      {t:"Outreach",     u:"/outreach",     s:"live",   d:"7 deployment phases, A/B variants, the rapport-first method (recognize→relate→invite→pitch→release).", tags:["outreach.html"]},
+      {t:"LinkedIn Engine", u:"/linkedin",  s:"live",   d:"Accept-triggered multi-channel LinkedIn outreach.", tags:["linkedin.html","Unipile/Alfred"]},
+      {t:"Conversations",u:"/conversations",s:"live",   d:"Response auto-classification, AI SMS 'Money Maker', Telnyx Premium AMD voice.", tags:["conversations.html"]},
+      {t:"Analytics",    u:"/analytics",    s:"polish", d:"Reporting surface. Best for end users: tie KPIs to the real persisted command-center data.", tags:["analytics.html"]},
+      {t:"Integrations", u:"/integrations", s:"live",   d:"Loxo, Greenhouse, Instantly, Unipile, TalTxt, Telnyx.", tags:["integrations.html"]},
+    ]},
+  { id:"app", ic:"⚡", name:"App / Portal", desc:"The real product the customer logs into",
+    items:[
+      {t:"Command Center", u:"/command", s:"live", d:"The working portal. Hash routes: #overview #prospects #response #builder #bd. Real /api fetches, persistent, live-only sending.", tags:["command.html","#hash routed","real data"]},
+      {t:"Target Builder", u:"/campaign-builder", s:"live", d:"Pre-launch campaign builder from free signals. Embeds in portal via ?embed=1. Approve & Launch creates a real campaign + bulk prospects.", tags:["campaign-builder.html","?embed=1"]},
+      {t:"Campaign Studio", u:"/campaign-studio", s:"polish", d:"Sequence/cadence studio. Confirm persistence path (PUT/DELETE /api/campaigns).", tags:["campaign-studio.html"]},
+      {t:"Alfred", u:"/alfred", s:"live", d:"User-owned internal LinkedIn/multi-channel outreach engine (MeetAlfred-style) + Chrome MV3 extension.", tags:["alfred.html","user-owned","extension/"]},
+      {t:"App (legacy)", u:"/app", s:"polish", d:"Earlier app shell. Decide: fold into Command Center or retire to avoid two front doors.", tags:["app.html"]},
+    ]},
+  { id:"auth", ic:"🔐", name:"Auth", desc:"Enterprise sign-up, login, recovery",
+    items:[
+      {t:"Log in",          u:"/login",           s:"live",   d:"Session login (PBKDF2). 'Log in' CTA target.", tags:["login.html"]},
+      {t:"Sign up",         u:"/signup",          s:"live",   d:"Corporate-email signup auto-provisions an enterprise workspace.", tags:["signup.html"]},
+      {t:"Forgot password", u:"/forgot-password", s:"live",   d:"Triggers Resend reset email (needs DNS verify in Resend).", tags:["forgot-password.html"]},
+      {t:"Reset password",  u:"/reset-password",  s:"live",   d:"Token-based reset completion.", tags:["reset-password.html"]},
+    ]},
+  { id:"owner", ic:"🛠️", name:"Owner Console", desc:"Private back office — you, the platform owner",
+    items:[
+      {t:"Owner Console", u:"#", live:false, s:"private", d:"Cost tracking, live pricing calculator, full account control (suspend/reset/delete). Served only at a private unguessable slug + owner-email gate. NOT linked anywhere.", tags:["owner-console.html","/<private-slug>","amber theme","noindex"]},
+    ]},
+  { id:"api", ic:"🔌", name:"Backend API", desc:"Next.js App Router routes (auth-gated, mostly POST)",
+    items:[
+      {t:"Auth",      u:"/api/auth/*",      s:"backend", d:"register, login, session, reset, magic-link, linkedin OAuth callback.", tags:["6 routes"]},
+      {t:"Campaigns", u:"/api/campaigns",   s:"backend", d:"CRUD + cadence (PUT upsert / DELETE for Studio persistence).", tags:["+ /cadence"]},
+      {t:"Prospects", u:"/api/prospects",   s:"backend", d:"Add, bulk-insert, stage transition. Durable Postgres snapshot.", tags:["action:bulk","transition"]},
+      {t:"Response",  u:"/api/response/*",  s:"backend", d:"list, actions (book/suppress), webhook/[source]. Classification pipeline.", tags:["3 routes"]},
+      {t:"Owner",     u:"/api/owner/*",     s:"backend", d:"overview, accounts (+id PATCH/DELETE, /reset), costs, pricing, spend, usage/ingest. requireOwner() 404 gate.", tags:["8 routes","owner-gated"]},
+      {t:"Enrichment",u:"/api/in-market",   s:"backend", d:"Signals catalog/collect/enrich + providers + connected preflight gate.", tags:["providers","connected"]},
+      {t:"SMS",       u:"/api/sms/*",       s:"backend", d:"send + webhook. AI SMS path (user-owned).", tags:["user-owned"]},
+      {t:"LinkedIn",  u:"/api/linkedin/*",  s:"backend", d:"enroll, actions, webhook, cron. Accept-triggered sequence engine.", tags:["4 routes"]},
+      {t:"Team / ATS / Accounts", u:"/api/team", s:"backend", d:"team (+accept), ats (Loxo object map), accounts, overview, content, dev/seed.", tags:["multi"]},
+    ]},
+  { id:"infra", ic:"📦", name:"Infra, Deploy & Docs", desc:"How it ships and stays up",
+    items:[
+      {t:"Docker + Compose", u:"#", live:false, s:"backend", d:"Multi-stage Next build serving marketing+portal+API from one origin. app + Caddy (auto-HTTPS) + postgres:16.", tags:["Dockerfile","docker-compose.yml","Caddyfile"]},
+      {t:"One-shot deploy",  u:"#", live:false, s:"live",    d:"curl deploy.sh | bash — generates secrets, writes .env.production. Redeploy: git pull && docker compose up -d --build.", tags:["deploy.sh"]},
+      {t:"Runbooks", u:"#", live:false, s:"live", d:"HETZNER-SETUP, GO-LIVE-WALKTHROUGH, DEPLOY, RESEND-SETUP, LINKEDIN-LOGIN-SETUP.", tags:["*.md"]},
+      {t:"Playbooks", u:"#", live:false, s:"live", d:"COPY-PLAYBOOK (Bernays persuasion), BACKEND.md, OWNER-CONSOLE.md, INTEGRATION.md.", tags:["reference"]},
+    ]},
+];
+
+/* ---------- persistence ---------- */
+const KEY="ros-projectmap-v1";
+let saved=JSON.parse(localStorage.getItem(KEY)||"{}"); // {id:{s,note,star}}
+function idOf(gi,ii){return GROUPS[gi].id+":"+ii}
+function persist(){localStorage.setItem(KEY,JSON.stringify(saved))}
+function rec(id){return saved[id]||(saved[id]={})}
+
+/* ---------- render ---------- */
+const board=document.getElementById("board");
+let activeFilter="all", query="";
+
+function curStatus(gi,ii){const r=saved[idOf(gi,ii)];return (r&&r.s)||GROUPS[gi].items[ii].s}
+
+function matches(gi,ii){
+  const it=GROUPS[gi].items[ii];
+  const r=saved[idOf(gi,ii)]||{};
+  if(activeFilter!=="all"){
+    if(activeFilter==="star"){ if(!r.star) return false; }
+    else if(curStatus(gi,ii)!==activeFilter) return false;
+  }
+  if(query){
+    const hay=(it.t+" "+it.u+" "+it.d+" "+(it.tags||[]).join(" ")+" "+(r.note||"")).toLowerCase();
+    if(!hay.includes(query)) return false;
+  }
+  return true;
+}
+
+function build(){
+  board.innerHTML="";
+  let shown=0;
+  GROUPS.forEach((g,gi)=>{
+    const visible=g.items.map((_,ii)=>ii).filter(ii=>matches(gi,ii));
+    if(!visible.length) return;
+    shown+=visible.length;
+    const sec=document.createElement("section");
+    sec.className="grp"+(g.collapsed?" collapsed":"");
+    const h=document.createElement("h2");
+    h.innerHTML=`<span class="ic">${g.ic}</span><span class="nm">${g.name}</span>
+      <span class="ds">${g.desc}</span><span class="ct">${visible.length}/${g.items.length}</span>
+      <span class="car">▾</span>`;
+    h.onclick=()=>{g.collapsed=!g.collapsed;build()};
+    sec.appendChild(h);
+    const rows=document.createElement("div");rows.className="rows";
+    visible.forEach(ii=>{
+      const it=g.items[ii], id=idOf(gi,ii), r=rec(id), st=curStatus(gi,ii), meta=STATUS[st];
+      const linkable=it.live!==false && it.u.startsWith("/");
+      const href=linkable?BASE+it.u:null;
+      const row=document.createElement("div");row.className="row";
+      const tags=(it.tags||[]).map(t=>`<span class="tag">${t}</span>`).join("");
+      row.innerHTML=`
+        <div class="ttl">
+          ${href?`<a href="${href}" target="_blank" rel="noopener">${it.t}</a>`:`<span style="font-weight:650">${it.t}</span>`}
+          <span class="url ${linkable?'':'muted'}">${it.u==='#'?'(local / not a page)':it.u}</span>
+        </div>
+        <div>
+          <div class="desc">${it.d}</div>
+          <div class="meta">${tags}</div>
+          <textarea class="note" placeholder="notes / what to do…">${r.note?r.note.replace(/</g,'&lt;'):""}</textarea>
+        </div>
+        <div class="stwrap">
+          <span class="badge ${meta.cls}" data-id="${id}"><span class="c"></span>${meta.label}</span>
+          <span class="pri" data-id="${id}">${r.star?'<span class="star">★</span> next':'☆ mark next'}</span>
+        </div>`;
+      // badge cycles status
+      row.querySelector(".badge").onclick=()=>{
+        const idx=ORDER.indexOf(curStatus(gi,ii));
+        rec(id).s=ORDER[(idx+1)%ORDER.length];persist();build();
+      };
+      row.querySelector(".pri").onclick=()=>{rec(id).star=!rec(id).star;persist();build()};
+      const ta=row.querySelector(".note");
+      ta.oninput=()=>{rec(id).note=ta.value;persist();renderStats()};
+      rows.appendChild(row);
+    });
+    sec.appendChild(rows);
+    board.appendChild(sec);
+  });
+  if(!shown){board.innerHTML='<div class="empty">No pages match that filter.</div>';}
+}
+
+/* ---------- stats + filter chips ---------- */
+function tally(){
+  const c={live:0,polish:0,todo:0,private:0,backend:0,star:0,total:0};
+  GROUPS.forEach((g,gi)=>g.items.forEach((_,ii)=>{
+    c.total++; c[curStatus(gi,ii)]++;
+    if((saved[idOf(gi,ii)]||{}).star) c.star++;
+  }));
+  return c;
+}
+function renderStats(){
+  const c=tally();
+  document.getElementById("stats").innerHTML=`
+    <div class="stat cyan"><b>${c.total}</b><span>total surfaces</span></div>
+    <div class="stat green"><b>${c.live}</b><span>live in production</span></div>
+    <div class="stat amber"><b>${c.polish}+${c.todo}</b><span>polish / to build</span></div>
+    <div class="stat violet"><b>${c.star}</b><span>starred “do next”</span></div>
+    <div class="stat"><b>${c.backend}</b><span>backend &amp; infra</span></div>`;
+}
+function renderFilters(){
+  const c=tally();
+  const defs=[["all","All",c.total,"#7c8cff"],["star","★ Next",c.star,"#ffb23e"],
+    ["live","Live",c.live,"#27d38a"],["polish","Polish",c.polish,"#ffb23e"],
+    ["todo","To build",c.todo,"#ff5d6c"],["private","Private",c.private,"#b06bff"],
+    ["backend","Backend",c.backend,"#7689b0"]];
+  document.getElementById("filters").innerHTML=defs.map(([k,l,n,col])=>
+    `<span class="chip ${activeFilter===k?'on':''}" data-f="${k}">
+      <span class="c" style="background:${col}"></span>${l}<small>${n}</small></span>`).join("");
+  document.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{
+    activeFilter=ch.dataset.f;renderFilters();build();
+  });
+}
+
+/* ---------- controls ---------- */
+document.getElementById("q").oninput=e=>{query=e.target.value.trim().toLowerCase();build()};
+document.getElementById("reset").onclick=()=>{
+  if(confirm("Reset all your saved statuses, stars and notes back to defaults?")){
+    saved={};persist();renderStats();renderFilters();build();
+  }
+};
+document.getElementById("copyMd").onclick=()=>{
+  let md="# RecruiterOS — Project Map\n\nLive: https://recruitersos.co\n\n";
+  GROUPS.forEach((g,gi)=>{
+    md+=`## ${g.ic} ${g.name}\n_${g.desc}_\n\n`;
+    g.items.forEach((it,ii)=>{
+      const r=saved[idOf(gi,ii)]||{}, st=curStatus(gi,ii);
+      const link=(it.live!==false&&it.u.startsWith("/"))?`${BASE}${it.u}`:it.u;
+      md+=`- ${r.star?'⭐ ':''}**[${it.t}](${link})** \`${STATUS[st].label}\` — ${it.d}`;
+      if(r.note) md+=`\n  - 📝 ${r.note}`;
+      md+="\n";
+    });
+    md+="\n";
+  });
+  navigator.clipboard.writeText(md).then(()=>{
+    const b=document.getElementById("copyMd");const o=b.textContent;b.textContent="Copied ✓";
+    setTimeout(()=>b.textContent=o,1400);
+  });
+};
+
+renderStats();renderFilters();build();
+</script>
+</body>
+</html>

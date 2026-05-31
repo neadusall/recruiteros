@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RecruiterOS — Help Center</title>
+<style>
+  :root{
+    --bg:#0b1224;
+    --card:#151f3b;
+    --card-hover:#1a2647;
+    --ink:#eef2ff;
+    --ink-soft:#b4c0e0;
+    --ink-dim:#8493bd;
+    --accent:#6c8cff;
+    --accent-2:#43e0c0;
+    --accent-ink:#0b1224;
+    --line:rgba(255,255,255,.09);
+    --radius:16px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    font-family:'Segoe UI',Inter,system-ui,-apple-system,sans-serif;
+    color:var(--ink);
+    background:
+      radial-gradient(1100px 600px at 50% -10%, rgba(108,140,255,.20), transparent 62%),
+      radial-gradient(900px 600px at 100% 0%, rgba(67,224,192,.10), transparent 55%),
+      var(--bg);
+    -webkit-font-smoothing:antialiased;
+    line-height:1.6;
+    min-height:100vh;
+  }
+
+  .brandbar{
+    display:inline-flex;align-items:center;gap:11px;
+    padding:20px 24px;text-decoration:none;color:inherit;
+  }
+  .brandbar:hover small{color:var(--accent-2)}
+  .backlink{
+    float:right;margin:22px 24px 0 0;color:var(--ink-soft);text-decoration:none;
+    font-size:13px;font-weight:600;border:1px solid var(--line);
+    padding:8px 14px;border-radius:10px;transition:.16s;
+  }
+  .backlink:hover{color:var(--ink);border-color:var(--accent);background:rgba(108,140,255,.12)}
+  .logo{
+    width:30px;height:30px;border-radius:9px;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    display:grid;place-items:center;color:var(--accent-ink);font-weight:900;font-size:15px;
+    box-shadow:0 6px 18px -6px var(--accent);
+  }
+  .brandbar b{font-weight:700;letter-spacing:.2px}
+  .brandbar small{display:block;font-weight:500;color:var(--ink-dim);font-size:11px;letter-spacing:.4px}
+
+  .hero{
+    max-width:720px;margin:0 auto;padding:40px 24px 0;text-align:center;
+  }
+  .hero h1{
+    font-size:clamp(28px,5vw,44px);line-height:1.12;margin:0 0 14px;letter-spacing:-.5px;
+  }
+  .hero p{font-size:clamp(15px,2vw,18px);color:var(--ink-soft);margin:0 0 32px}
+
+  /* ---------- the one search bar ---------- */
+  .searchbox{
+    position:relative;display:flex;align-items:center;gap:12px;
+    background:var(--card);border:1.5px solid var(--line);border-radius:16px;
+    padding:6px 8px 6px 18px;box-shadow:0 24px 60px -24px rgba(0,0,0,.8);
+    transition:.2s;
+  }
+  .searchbox:focus-within{border-color:var(--accent);box-shadow:0 0 0 4px rgba(108,140,255,.18),0 24px 60px -24px rgba(0,0,0,.8)}
+  .searchbox .mag{font-size:19px;opacity:.85}
+  .searchbox input{
+    flex:1;background:transparent;border:0;outline:0;color:var(--ink);
+    font:inherit;font-size:17px;padding:14px 0;min-width:0;
+  }
+  .searchbox input::placeholder{color:var(--ink-dim)}
+  .clearbtn{
+    border:0;background:rgba(255,255,255,.06);color:var(--ink-soft);
+    width:34px;height:34px;border-radius:9px;cursor:pointer;font-size:16px;
+    display:none;align-items:center;justify-content:center;transition:.15s;
+  }
+  .clearbtn:hover{background:rgba(255,255,255,.12);color:var(--ink)}
+  .searchbox.has-text .clearbtn{display:flex}
+
+  .hint{margin-top:14px;color:var(--ink-dim);font-size:13px}
+
+  /* ---------- chips ---------- */
+  .chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:20px}
+  .chip{
+    background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--ink-soft);
+    font:inherit;font-size:13px;padding:8px 14px;border-radius:20px;cursor:pointer;transition:.16s;
+  }
+  .chip:hover{background:rgba(108,140,255,.18);border-color:var(--accent);color:var(--ink)}
+
+  /* ---------- content area ---------- */
+  .content{max-width:760px;margin:0 auto;padding:38px 24px 110px}
+
+  .section-label{
+    font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;
+    color:var(--ink-dim);margin:0 0 14px;
+  }
+
+  /* result/article list */
+  .list{display:flex;flex-direction:column;gap:10px}
+  .item{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;
+    transition:border-color .18s,background .18s;
+  }
+  .item:hover{border-color:rgba(108,140,255,.45);background:var(--card-hover)}
+  .item-q{
+    display:flex;align-items:center;gap:13px;cursor:pointer;padding:17px 18px;
+    font-weight:600;font-size:15.5px;
+  }
+  .item-q .tag{
+    font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;
+    color:var(--accent-2);background:rgba(67,224,192,.1);padding:3px 8px;border-radius:6px;white-space:nowrap;
+  }
+  .item-q .qt{flex:1}
+  .item-q .arrow{color:var(--ink-dim);transition:.25s;font-size:13px}
+  .item.open .arrow{transform:rotate(90deg);color:var(--accent)}
+  .item-a{display:none;color:var(--ink-soft);font-size:14.5px}
+  .item.open .item-a{display:block}
+  .item-a-inner{padding:0 18px 18px;border-top:1px solid var(--line);padding-top:14px}
+
+  .empty{color:var(--ink-dim);text-align:center;padding:48px 0;font-size:15px}
+  mark{background:rgba(255,207,107,.35);color:var(--ink);border-radius:3px;padding:0 2px}
+
+  /* browse-by-topic grid (shown when search is empty) */
+  .topics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .topic{
+    text-align:left;background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:18px 16px;cursor:pointer;color:inherit;font:inherit;transition:.18s;
+  }
+  .topic:hover{transform:translateY(-3px);border-color:rgba(108,140,255,.5);background:var(--card-hover)}
+  .topic .ic{font-size:22px;display:block;margin-bottom:10px}
+  .topic h3{margin:0 0 4px;font-size:15px}
+  .topic p{margin:0;color:var(--ink-dim);font-size:12.5px}
+
+  .count{color:var(--ink-dim);font-size:13px;margin:0 0 14px}
+
+  .foot{text-align:center;color:var(--ink-dim);font-size:11.5px;margin-top:50px}
+
+  @media(max-width:680px){
+    .topics{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<a class="backlink" href="/">← Back to RecruiterOS</a>
+<a class="brandbar" href="/">
+  <div class="logo">R</div>
+  <div><b>RecruiterOS</b><small>Help Center</small></div>
+</a>
+
+<header class="hero">
+  <h1>How can we help?</h1>
+  <p>Search anything about RecruiterOS, or pick a topic to start.</p>
+  <div class="searchbox" id="searchbox">
+    <span class="mag">🔎</span>
+    <input id="q" type="text" placeholder="Search for an answer…" autocomplete="off" autofocus />
+    <button class="clearbtn" id="clear" aria-label="Clear">✕</button>
+  </div>
+  <div class="chips" id="chips"></div>
+</header>
+
+<main class="content" id="content"></main>
+
+<div class="foot">RecruiterOS Help Center · the operating system for recruiters</div>
+
+<script>
+/* ============================================================
+   HELP CENTER
+   Data sources and enrichment providers are described generally
+   on purpose. No vendor names, keys, or technical APIs are shown.
+   ============================================================ */
+
+const QA = [
+  // OVERVIEW
+  {cat:"Overview", q:"What is RecruiterOS?",
+   a:`RecruiterOS is an operating system for recruiters. It is one platform where you can spot hiring signals, source and enrich candidates, reach out by call, text, email, and LinkedIn, and track every conversation through your pipeline. The goal is to run your whole recruiting workflow in one place instead of jumping between tools.`},
+  {cat:"Overview", q:"Who is RecruiterOS for?",
+   a:`It is built for recruiters and recruiting teams: independent recruiters, agencies, and in house talent teams. Anyone whose job is to find, contact, and track candidates will feel at home.`},
+  {cat:"Overview", q:"What problem does it solve?",
+   a:`Recruiters usually juggle spreadsheets, separate phones, note apps, and disconnected sourcing tools. RecruiterOS replaces that patchwork with one workspace, so you spend less time on admin and tool switching and more time talking to people.`},
+  {cat:"Overview", q:"What are the two operating systems?",
+   a:`RecruiterOS gives you two connected motions on one platform. The Recruiting OS finds and places candidates. The Business Development OS wins new job orders and clients. They share the same signals and contact data, so one moment in the market can create a placement and a new client at the same time.`},
+  {cat:"Overview", q:"What makes RecruiterOS different?",
+   a:`Most tools handle one slice: a CRM here, a dialer there, a sourcing tool somewhere else. RecruiterOS unifies signals, sourcing, enrichment, calling, texting, email, LinkedIn outreach, and pipeline tracking in a single workspace, so the whole process flows without context switching.`},
+
+  // SIGNALS
+  {cat:"Signals", q:"What is a hiring signal?",
+   a:`A signal is a real moment that means someone is ready to hear from you, for example a new job posting, company growth or funding, a leadership change, or a team expanding. RecruiterOS tracks more than forty kinds of signals so you reach out at the right time, with a real reason.`},
+  {cat:"Signals", q:"Why do signals matter?",
+   a:`Most outreach fails because it arrives at the wrong time. Signals flip that. The idea is simple: signal, then context, then relevance, then response. Instead of cold outreach, you reach out informed, which gets far better replies.`},
+  {cat:"Signals", q:"Where do the signals come from?",
+   a:`Signals are gathered from a wide range of public and trusted sources about hiring activity and company changes. We describe signals by what they tell you and when to act, and we keep the specific technical sources behind the scenes.`},
+
+  // SOURCING & ENRICHMENT
+  {cat:"Sourcing", q:"How does sourcing work?",
+   a:`You search for people who fit a role, and RecruiterOS helps you find candidates and contacts quickly. It then ranks them so the strongest fits rise to the top.`},
+  {cat:"Sourcing", q:"What is match scoring?",
+   a:`Match scoring compares candidates against a job description and ranks how well each one fits. Instead of reading every profile from scratch, you see the best matches first and focus your time where it counts.`},
+  {cat:"Sourcing", q:"What is contact enrichment?",
+   a:`Enrichment automatically fills in missing details on a person's profile so you can reach them faster. Instead of manually digging for information, the platform completes the record and gets people call ready.`},
+  {cat:"Sourcing", q:"Where does the enrichment data come from?",
+   a:`Enrichment draws on trusted, behind the scenes data services. The specific providers and the technical details of how data is retrieved are kept private and handled securely on the server. They are never exposed in the app. We describe enrichment by what it does for you, not by the underlying sources.`},
+  {cat:"Sourcing", q:"Which data providers do you use?",
+   a:`We keep the specific data sources and providers confidential as a matter of security and privacy. What we can share is the outcome: enrichment reliably fills in the details you are missing so you can connect with people faster.`},
+
+  // OUTREACH
+  {cat:"Outreach", q:"How does outreach work?",
+   a:`You run multi step campaigns that unfold over time across channels. Messages can have A/B variants so the best performing version wins, and the whole sequence is anchored to the real signal that prompted the outreach, so it stays timely and relevant.`},
+  {cat:"Outreach", q:"What is the rapport first method?",
+   a:`It is a built in approach to messaging: recognize, relate, invite, pitch, release. You start by acknowledging something real about the person, build a connection, then invite a conversation before any pitch. It keeps outreach human instead of pushy.`},
+  {cat:"Outreach", q:"Can I reach people on more than one channel?",
+   a:`Yes. RecruiterOS supports outreach across call, text, email, and LinkedIn, so you can meet people on the channel where they actually respond, all coordinated from one campaign.`},
+
+  // DIALER
+  {cat:"Dialer", q:"How does the built in dialer work?",
+   a:`The dialer is a phone that lives inside the app and runs in your browser. There is no separate desk phone and nothing to install. It has a dialpad, supports click to call from any record, and handles both incoming and outgoing calls to real phone numbers.`},
+  {cat:"Dialer", q:"Can I make and receive real phone calls?",
+   a:`Yes. The dialer supports both outbound and inbound calls to and from real phone numbers, so you can reach people and they can reach you, all through the platform.`},
+  {cat:"Dialer", q:"Can I text candidates?",
+   a:`Yes. You can send and receive SMS and MMS messages in full conversation threads, including pictures and attachments, right alongside your calls and without leaving the app.`},
+  {cat:"Dialer", q:"What is click to call?",
+   a:`Click to call lets you start a call by clicking a person's record instead of dialing the number by hand. It is faster, and the call is automatically tied to the right person.`},
+  {cat:"Dialer", q:"Is there voicemail and call history?",
+   a:`Yes. The dialer handles voicemail when you cannot pick up, and every call is logged automatically and attached to the person, so you always have a record of who you spoke to and when.`},
+  {cat:"Dialer", q:"Do I need a separate phone or software?",
+   a:`No. Calling and texting work straight from your browser. There is no desk phone to set up and nothing extra to install.`},
+
+  // CONVERSATIONS & AI
+  {cat:"Conversations", q:"How are replies organized?",
+   a:`Incoming replies land in one place and are automatically sorted by type, so the hottest responses surface first and nothing important gets buried.`},
+  {cat:"Conversations", q:"Does it summarize my calls?",
+   a:`Yes. Calls can be transcribed and turned into a short summary with action items, overall sentiment, key topics, and a suggested follow up. A long call becomes a quick, useful recap so you can move fast without losing detail.`},
+  {cat:"Conversations", q:"Is there AI in the platform?",
+   a:`Yes, used to save you time: ranking candidate fit, sorting replies, and summarizing calls into clear next steps. It is there to speed up your judgment, not replace it.`},
+
+  // PIPELINE
+  {cat:"Pipeline", q:"How does pipeline management work?",
+   a:`You track your jobs and requisitions, then move candidates through stages, for example sourced, contacted, interviewing, and placed. It gives you a clear, visible view of where every candidate stands across all your open roles.`},
+  {cat:"Pipeline", q:"Can I manage multiple jobs at once?",
+   a:`Yes. You can track many jobs and requisitions at the same time and see at a glance where candidates stand across all of them.`},
+  {cat:"Pipeline", q:"What do the analytics show?",
+   a:`Analytics show what is actually working, broken down by campaign, channel, and pipeline stage, so you can double down on what gets responses and placements.`},
+
+  // SECURITY
+  {cat:"Security", q:"Is my data safe?",
+   a:`Security is built into the foundation of RecruiterOS. Sensitive credentials and data connections live only on the server, never in your browser, and the underlying data providers and integration details are kept confidential. The app only ever receives short lived, limited access when it needs to perform an action.`},
+  {cat:"Security", q:"How are the calling and data connections protected?",
+   a:`The powerful pieces, the calling infrastructure and the data sources, are kept server side. The browser is given only short lived, limited access to perform a specific action like placing a call, so those capabilities cannot be lifted out of the app or misused.`},
+  {cat:"Security", q:"Can someone extract your APIs or keys from the app?",
+   a:`No. Credentials, keys, and provider details never reach the browser. They stay on the server, and the client only gets temporary, scoped access. That is a deliberate design choice so the sensitive parts of the system stay protected.`},
+
+  // GETTING STARTED
+  {cat:"Getting started", q:"What does a typical workflow look like?",
+   a:`The core loop is: 1) Spot a signal that someone is ready. 2) Source and enrich the right people. 3) Reach out by call, text, email, or LinkedIn. 4) Track the conversation and advance them in the pipeline. One continuous loop in one tool.`},
+  {cat:"Getting started", q:"What are the main parts of the product?",
+   a:`Two connected parts: the marketing site where people learn about and sign up for it, and the application itself, which is the workspace where the recruiting happens. Inside the app the major areas are Signals, Sourcing and Enrichment, Outreach, the Dialer, Conversations, Pipeline, and Analytics.`},
+  {cat:"Getting started", q:"What technology is it built on?",
+   a:`It is a modern web application that runs in the browser, with calling and texting handled through cloud telephony and the sensitive infrastructure kept securely on the server. We focus the docs on what the platform does for you rather than internal technical or vendor specifics.`}
+];
+
+const TOPICS=[
+  {cat:"Overview", ic:"🏠", sub:"What it is and who it is for"},
+  {cat:"Signals", ic:"📡", sub:"Reaching people at the right moment"},
+  {cat:"Sourcing", ic:"🔍", sub:"Finding and enriching candidates"},
+  {cat:"Outreach", ic:"✉️", sub:"Multi step, multi channel campaigns"},
+  {cat:"Dialer", ic:"📞", sub:"Calling, texting, voicemail, history"},
+  {cat:"Conversations", ic:"💬", sub:"Replies and AI call summaries"},
+  {cat:"Pipeline", ic:"📊", sub:"Jobs, stages, and analytics"},
+  {cat:"Security", ic:"🔒", sub:"How your data is protected"},
+  {cat:"Getting started", ic:"🚀", sub:"Workflow and first steps"}
+];
+
+const CHIPS=["How does the dialer work?","What is a hiring signal?","Is my data safe?","Which data providers do you use?","Does it summarize my calls?"];
+
+/* ---------- elements ---------- */
+const qInput=document.getElementById('q');
+const box=document.getElementById('searchbox');
+const clearBtn=document.getElementById('clear');
+const contentEl=document.getElementById('content');
+const chipsEl=document.getElementById('chips');
+
+/* ---------- search helpers ---------- */
+const STOP=new Set("the a an is are do does how what why where can i my your you it of to in on for and or with use uses using".split(" "));
+function tokens(s){return s.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w=>w&&!STOP.has(w));}
+function score(item,qt){
+  const hay=(item.q+' '+item.a+' '+item.cat).toLowerCase();
+  let s=0;
+  qt.forEach(w=>{
+    if(item.q.toLowerCase().includes(w)) s+=4;
+    if(item.cat.toLowerCase().includes(w)) s+=2;
+    if(hay.includes(w)) s+=1;
+  });
+  return s;
+}
+function highlight(text,qt){
+  let out=text;
+  qt.forEach(w=>{
+    if(w.length<2) return;
+    out=out.replace(new RegExp('('+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'),'<mark>$1</mark>');
+  });
+  return out;
+}
+function itemHTML(it,qt,open){
+  return `<div class="item${open?' open':''}">
+    <div class="item-q">
+      <span class="tag">${it.cat}</span>
+      <span class="qt">${qt.length?highlight(it.q,qt):it.q}</span>
+      <span class="arrow">▶</span>
+    </div>
+    <div class="item-a"><div class="item-a-inner">${qt.length?highlight(it.a,qt):it.a}</div></div>
+  </div>`;
+}
+function wireItems(){
+  contentEl.querySelectorAll('.item-q').forEach(el=>{
+    el.addEventListener('click',()=>el.parentElement.classList.toggle('open'));
+  });
+}
+
+/* ---------- the three states: home / search results / topic ---------- */
+function renderHome(){
+  contentEl.innerHTML=`
+    <p class="section-label">Browse by topic</p>
+    <div class="topics">${TOPICS.map(t=>`
+      <button class="topic" data-cat="${t.cat}">
+        <span class="ic">${t.ic}</span>
+        <h3>${t.cat}</h3>
+        <p>${t.sub}</p>
+      </button>`).join('')}</div>`;
+  contentEl.querySelectorAll('.topic').forEach(b=>b.addEventListener('click',()=>renderTopic(b.dataset.cat)));
+}
+function renderTopic(cat){
+  const items=QA.filter(x=>x.cat===cat);
+  contentEl.innerHTML=`
+    <p class="section-label">${cat}</p>
+    <p class="count">${items.length} article${items.length>1?'s':''}</p>
+    <div class="list">${items.map((it,i)=>itemHTML(it,[],i===0)).join('')}</div>`;
+  wireItems();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function renderResults(qt){
+  const ranked=QA.map(it=>({it,s:score(it,qt)})).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).map(x=>x.it);
+  if(!ranked.length){
+    contentEl.innerHTML=`<div class="empty">No results. Try different words, for example "calling", "signals", "data", or "pipeline".</div>`;
+    return;
+  }
+  contentEl.innerHTML=`
+    <p class="count">${ranked.length} result${ranked.length>1?'s':''}</p>
+    <div class="list">${ranked.slice(0,10).map((it,i)=>itemHTML(it,qt,i===0)).join('')}</div>`;
+  wireItems();
+}
+
+/* ---------- input wiring ---------- */
+function update(){
+  const raw=qInput.value.trim();
+  box.classList.toggle('has-text',raw.length>0);
+  if(!raw){ renderHome(); return; }
+  renderResults(tokens(raw));
+}
+qInput.addEventListener('input',update);
+clearBtn.addEventListener('click',()=>{qInput.value='';qInput.focus();update();});
+
+chipsEl.innerHTML=CHIPS.map(c=>`<button class="chip">${c}</button>`).join('');
+chipsEl.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{
+  qInput.value=c.textContent;update();qInput.focus();
+}));
+
+/* keyboard: focus search on "/" */
+document.addEventListener('keydown',e=>{
+  if(e.key==='/' && document.activeElement!==qInput){e.preventDefault();qInput.focus();}
+  if(e.key==='Escape' && document.activeElement===qInput){qInput.value='';update();}
+});
+
+renderHome();
+</script>
+</body>
+</html>

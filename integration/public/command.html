@@ -15,6 +15,18 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
 </head>
 <body class="app">
+  <a href="/help" id="ros-help-fab" title="Help Center"><span>?</span> Help</a>
+  <style>
+    #ros-help-fab{
+      position:fixed;right:20px;bottom:20px;z-index:9999;
+      display:inline-flex;align-items:center;gap:8px;padding:11px 16px;border-radius:999px;
+      background:linear-gradient(135deg,#7c5cff,#4dd0ff);color:#0a0a12;
+      font-family:'Inter',system-ui,sans-serif;font-weight:700;font-size:14px;
+      text-decoration:none;box-shadow:0 10px 28px -8px rgba(124,92,255,.7);transition:transform .16s;
+    }
+    #ros-help-fab span{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:rgba(10,10,18,.18);font-weight:900}
+    #ros-help-fab:hover{transform:translateY(-2px)}
+  </style>
   <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
 
   <div class="shell">
@@ -54,14 +66,6 @@
         <div class="nav-group" data-cap="team:manage">Admin</div>
         <a class="nav-item" data-route="team" data-cap="team:manage"><span class="ni">👥</span> Team</a>
       </nav>
-
-      <div class="side-foot">
-        <div class="side-link" id="userChip">
-          <span class="avatar" style="width:26px;height:26px;font-size:11px;background:#7c5cff" id="userInitials">JD</span>
-          <span id="userName">Jamie Dawson</span>
-        </div>
-        <div class="side-link" id="signOut">↩︎ Sign out</div>
-      </div>
     </aside>
 
     <!-- MAIN -->
@@ -111,6 +115,7 @@
             <a class="acct-item" data-route="accounts" role="menuitem"><span class="ic">🔑</span> API keys &amp; security</a>
             <a class="acct-item" id="billingLink" role="menuitem"><span class="ic">💳</span> Billing &amp; plan</a>
             <a class="acct-item" href="/developers" role="menuitem"><span class="ic">⚙️</span> Developer API</a>
+            <a class="acct-item" href="/help" role="menuitem"><span class="ic">❓</span> Help Center</a>
 
             <div class="acct-sep"></div>
             <button class="acct-item danger" id="acctSignOut" role="menuitem"><span class="ic">↩︎</span> Sign out</button>

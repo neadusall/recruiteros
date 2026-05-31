@@ -296,9 +296,9 @@
       if (!state.nodes.length) { state.view = { panX: 28, panY: 24, zoom: 1 }; applyTransform(); return; }
       var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       state.nodes.forEach(function (n) { minX = Math.min(minX, n.x); minY = Math.min(minY, n.y); maxX = Math.max(maxX, n.x + NODE_W); maxY = Math.max(maxY, n.y + 92); });
-      var pad = 50, r = viewport.getBoundingClientRect();
+      var pad = 44, r = viewport.getBoundingClientRect();
       var cw = (maxX - minX) + pad * 2, ch = (maxY - minY) + pad * 2;
-      var z = clamp(Math.min(r.width / cw, r.height / ch, 1.3), 0.4, 1.3);
+      var z = clamp(Math.min(r.width / cw, r.height / ch, 1.6), 0.4, 1.6);
       state.view.zoom = z;
       state.view.panX = r.width / 2 - ((minX + maxX) / 2) * z;
       state.view.panY = r.height / 2 - ((minY + maxY) / 2) * z;
@@ -523,44 +523,29 @@
       setTimeout(fit, 60);
     }
 
-    /* ---------- collapsing a side panel auto-scales the steps ----------
-       When a rail collapses, the canvas gets wider, so we zoom the steps UP
-       by the same proportion (and back down when a panel reopens) so the
-       user gets a bigger working view without reaching for the zoom. */
-    function centerContentX() {
-      if (!state.nodes.length) return;
-      var minX = Infinity, maxX = -Infinity;
-      state.nodes.forEach(function (n) { minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x + NODE_W); });
-      state.view.panX = viewport.getBoundingClientRect().width / 2 - ((minX + maxX) / 2) * state.view.zoom;
-      applyTransform();
-    }
-    function zoomToFreedSpace(oldW) {
-      if (!state.nodes.length) return;
-      var newW = viewport.getBoundingClientRect().width;
-      if (!oldW || !newW || Math.abs(newW / oldW - 1) < 0.02) return;
-      setZoom(state.view.zoom * (newW / oldW)); // wider canvas -> bigger steps; narrower -> smaller
-      centerContentX();
-    }
+    /* ---------- collapsing / expanding a side panel reframes the canvas ----
+       Toggling a rail changes the room the canvas has, so we re-fit: pull every
+       step into view and zoom to fill the freed space. Runs after the column
+       transition (180ms) settles so the measurement is the final width. */
+    function refit() { setTimeout(fit, 230); }
     function setInspector(collapsed, silent) {
-      var oldW = viewport.getBoundingClientRect().width;
       $("grid").classList.toggle("insp-collapsed", collapsed);
       var btn = $("inspToggle");
       btn.innerHTML = collapsed ? "⟨" : "⟩";
       btn.title = collapsed ? "Expand panel" : "Collapse panel";
       try { localStorage.setItem("cs_insp_collapsed", collapsed ? "1" : "0"); } catch (e) {}
-      if (!silent) setTimeout(function () { zoomToFreedSpace(oldW); }, 240);
+      if (!silent) refit();
     }
     $("inspToggle").addEventListener("click", function () {
       setInspector(!$("grid").classList.contains("insp-collapsed"));
     });
     function setPalette(collapsed, silent) {
-      var oldW = viewport.getBoundingClientRect().width;
       $("grid").classList.toggle("pal-collapsed", collapsed);
       var btn = $("palToggle");
       btn.innerHTML = collapsed ? "⟩" : "⟨";
       btn.title = collapsed ? "Expand panel" : "Collapse panel";
       try { localStorage.setItem("cs_pal_collapsed", collapsed ? "1" : "0"); } catch (e) {}
-      if (!silent) setTimeout(function () { zoomToFreedSpace(oldW); }, 240);
+      if (!silent) refit();
     }
     $("palToggle").addEventListener("click", function () {
       setPalette(!$("grid").classList.contains("pal-collapsed"));
