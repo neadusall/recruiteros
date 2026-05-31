@@ -317,6 +317,88 @@
       "</div></div>";
   }
 
+  /* ---------------- In-Market Leads (BD: who is hiring right now) ------------ */
+  var inMarketResults = []; // last search, so Promote can find the full lead object
+
+  function renderInMarket(el) {
+    el.innerHTML = head("In-Market Leads",
+      "Find companies that are in the market for recruiting help right now. Search the live hiring market, we scan funding, hiring surges, new roles, exec hires and more, then promote the best into your pipeline.") +
+      '<form class="search-bar" id="imForm" style="margin-bottom:10px">' +
+      '<span class="ico">⌕</span>' +
+      '<input id="imQuery" type="text" autocomplete="off" placeholder="Who are you looking for? e.g. fintechs hiring senior engineers, healthcare orgs hiring nurses" />' +
+      '<button type="submit" class="btn btn-primary btn-sm" id="imSearchBtn">Search market</button>' +
+      "</form>" +
+      '<div class="search-hints" id="imHints">' +
+      ["SaaS companies hiring sales leaders", "Series A-B fintechs hiring engineers", "Hospitals hiring nurses", "Agencies posting many roles"]
+        .map(function (h) { return '<span class="chip" data-q="' + esc(h) + '">' + esc(h) + "</span>"; }).join("") +
+      "</div>" +
+      '<div id="imBody"><div class="empty">Search the market above, or pick a starting point. Results are ranked by hiring intent.</div></div>';
+
+    var form = $("#imForm"), input = $("#imQuery");
+    form.addEventListener("submit", function (e) { e.preventDefault(); runSearch(input.value.trim()); });
+    Array.prototype.forEach.call(el.querySelectorAll("#imHints .chip"), function (c) {
+      c.addEventListener("click", function () { input.value = c.getAttribute("data-q"); runSearch(input.value); });
+    });
+
+    function runSearch(q) {
+      var body = $("#imBody"); body.innerHTML = loading();
+      send("/in-market", "POST", { query: q, limit: 30 }).then(function (r) {
+        if (!r.ok) { body.innerHTML = needsSetup(); return; }
+        inMarketResults = (r.data && r.data.leads) || [];
+        if (!inMarketResults.length) {
+          body.innerHTML = '<div class="empty">No in-market companies matched yet. Try broader terms, or connect more signal sources under <a href="#connected">Connected</a>.</div>';
+          return;
+        }
+        body.innerHTML = inMarketResults.map(leadCard).join("");
+        Array.prototype.forEach.call(body.querySelectorAll("[data-promote]"), function (btn) {
+          btn.addEventListener("click", function () { promoteLead(btn.getAttribute("data-promote"), btn); });
+        });
+      }).catch(function () { body.innerHTML = needsSetup(); });
+    }
+  }
+
+  function leadCard(l) {
+    var score = Math.round(l.score || 0);
+    var scoreCls = score >= 75 ? "positive" : score >= 50 ? "soft_yes" : "unclassified";
+    var buyer = l.buyerName
+      ? '<div class="lr-sub">Buyer: <b>' + esc(l.buyerName) + "</b>" + (l.buyerTitle ? " · " + esc(l.buyerTitle) : "") + "</div>"
+      : '<div class="lr-sub muted">Decision-maker resolved on promote</div>';
+    var roles = (l.roles && l.roles.length) ? '<div class="lr-sub muted">Roles: ' + l.roles.slice(0, 4).map(esc).join(", ") + "</div>" : "";
+    var src = l.sourceUrl ? ' · <a href="' + esc(l.sourceUrl) + '" target="_blank" rel="noopener">source</a>' : "";
+    return '<div class="resp-item"><div class="resp-top">' +
+      '<span class="avatar" style="background:' + colorFor(l.company) + '">' + esc(initials(l.company)) + "</span>" +
+      '<div><div class="resp-name">' + esc(l.company) + (l.industry ? ' <span class="muted" style="font-weight:400">· ' + esc(l.industry) + "</span>" : "") + "</div>" +
+      '<div class="resp-chan">' + esc(l.headcountBand || "") + (l.location ? " · " + esc(l.location) : "") + "</div></div>" +
+      '<span class="cls cls-' + scoreCls + '" style="margin-left:auto" title="Hiring-intent score">' + score + "</span></div>" +
+      '<div class="resp-text">' + esc(l.reason) + src + "</div>" +
+      buyer + roles +
+      '<div class="resp-actions" style="margin-top:8px"><button class="resp-btn" data-promote="' + esc(l.id) + '">→ Promote to Prospects</button>' +
+      (l.scoreReasons && l.scoreReasons.length ? '<span class="resp-act">' + l.scoreReasons.slice(0, 3).map(esc).join(" · ") + "</span>" : "") +
+      "</div></div>";
+  }
+
+  function promoteLead(leadId, btn) {
+    var lead = inMarketResults.find(function (x) { return x.id === leadId; });
+    if (!lead) return;
+    var saved = [];
+    try { saved = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); } catch (e) {}
+    var camp = saved.filter(function (c) { return c.motion === motion; })[0] || saved[0];
+    function doPromote(campaignId) {
+      btn.disabled = true; btn.textContent = "Promoting...";
+      send("/in-market", "POST", { action: "promote", campaignId: campaignId, lead: lead }).then(function (r) {
+        if (r.ok) { btn.textContent = "✓ In Prospects"; btn.classList.add("ghost"); toast(lead.company + " promoted to Prospects"); }
+        else { btn.disabled = false; btn.textContent = "→ Promote to Prospects"; toast("Could not promote (" + (r.data.error || r.status) + ")"); }
+      }).catch(function () { btn.disabled = false; btn.textContent = "→ Promote to Prospects"; toast("Could not reach the server."); });
+    }
+    if (camp && camp.id) { doPromote(camp.id); return; }
+    // No campaign yet: create a holding BD campaign for promoted leads.
+    var c = { id: "camp_" + Math.random().toString(36).slice(2), name: "In-Market Pipeline", motion: motion, goal: "Companies promoted from In-Market Leads.", status: "active", dailyCap: 25, steps: [] };
+    send("/campaigns", "PUT", c).then(function () {
+      try { var l = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); l.unshift(c); localStorage.setItem("ros_campaigns", JSON.stringify(l)); } catch (e) {}
+      doPromote(c.id);
+    }).catch(function () { toast("Create a campaign first."); });
+  }
+
   function renderProspects(el) {
     el.innerHTML = head("Prospects", "Your live pipeline, synced bidirectionally with the ATS.") +
       '<div class="btn-row" style="margin-bottom:14px">' +
