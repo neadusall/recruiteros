@@ -19,15 +19,28 @@ const MIME = {
   '.woff2': 'font/woff2', '.map': 'application/json', '.yaml': 'text/yaml',
 };
 
+// Resolve a URL path to a file on disk. Supports clean URLs (e.g. /alfred ->
+// alfred.html) so the portal's extensionless nav links work locally, just like
+// they will once deployed behind a host that rewrites clean URLs.
+function resolveFile(urlPath, cb) {
+  const base = path.normalize(path.join(ROOT, urlPath));
+  if (!base.startsWith(ROOT)) return cb(null);
+  const candidates = path.extname(base)
+    ? [base]                                   // already has an extension
+    : [base, base + '.html', path.join(base, 'index.html')];
+  let i = 0;
+  (function next() {
+    if (i >= candidates.length) return cb(null);
+    const p = candidates[i++];
+    fs.stat(p, (err, st) => (!err && st.isFile()) ? cb(p) : next());
+  })();
+}
+
 const server = http.createServer((req, res) => {
   let urlPath = decodeURIComponent(req.url.split('?')[0]);
   if (urlPath === '/') urlPath = '/index.html';
-  // prevent path traversal
-  const filePath = path.normalize(path.join(ROOT, urlPath));
-  if (!filePath.startsWith(ROOT)) { res.writeHead(403); return res.end('Forbidden'); }
-
-  fs.stat(filePath, (err, st) => {
-    if (err || !st.isFile()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Not found: ' + urlPath); }
+  resolveFile(urlPath, (filePath) => {
+    if (!filePath) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Not found: ' + urlPath); }
     const ext = path.extname(filePath).toLowerCase();
     res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
     fs.createReadStream(filePath).pipe(res);
