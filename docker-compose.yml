@@ -1,5 +1,5 @@
 # RecruiterOS on Hetzner: app + Caddy (automatic HTTPS via Let's Encrypt).
-# Caddy terminates TLS for recruiteros.co and proxies to the Next app.
+# Caddy terminates TLS for recruitersos.co and proxies to the Next app.
 services:
   db:
     image: postgres:16-alpine

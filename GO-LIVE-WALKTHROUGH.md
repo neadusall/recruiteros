@@ -1,7 +1,7 @@
-# RecruiterOS, Go-Live Walkthrough (recruiteros.co on Hetzner)
+# RecruiterOS, Go-Live Walkthrough (recruitersos.co on Hetzner)
 
 Follow this top to bottom. It assumes nothing. ~20 minutes of work, then a wait
-for DNS. When you finish, https://recruiteros.co is live with HTTPS.
+for DNS. When you finish, https://recruitersos.co is live with HTTPS.
 
 ================================================================
 PART A, Make sure you have a Hetzner server
@@ -33,7 +33,7 @@ PART B, Point the domain at the server (GoDaddy DNS)
 
 1. Go to https://dcc.godaddy.com/control/portfolio (or godaddy.com -> sign in ->
    top-right person icon -> "My Products").
-2. Find "recruiteros.co". Click the 3 dots on its row -> "Edit DNS"
+2. Find "recruitersos.co". Click the 3 dots on its row -> "Edit DNS"
    (or click the domain, then "DNS" / "Manage DNS").
 
 3. FIRST, remove anything that hijacks the domain:
@@ -68,7 +68,7 @@ PART B, Point the domain at the server (GoDaddy DNS)
    - Leave the NS and SOA records alone. Leave any MX/email records alone.
 
 6. DNS takes 5-30 minutes to propagate. You can check from your PC later:
-   PowerShell:  nslookup recruiteros.co
+   PowerShell:  nslookup recruitersos.co
    It should return YOUR_SERVER_IP.
 
 ================================================================
@@ -109,18 +109,18 @@ What you'll see (a few minutes the first time):
    ------------------------------------------------------------
    1) Point DNS ...  A  @  YOUR_SERVER_IP   <- confirms the IP
    ...
-   3) Then open:  https://recruiteros.co/login.html
+   3) Then open:  https://recruitersos.co/login.html
 
 ================================================================
 PART D, First load + HTTPS
 ================================================================
 
-1. Wait until "nslookup recruiteros.co" returns YOUR_SERVER_IP (DNS propagated).
-2. Open https://recruiteros.co
+1. Wait until "nslookup recruitersos.co" returns YOUR_SERVER_IP (DNS propagated).
+2. Open https://recruitersos.co
    - The first hit may take a few seconds while Caddy fetches the HTTPS
      certificate from Let's Encrypt. Refresh once if needed.
    - You should land on the dark RecruiterOS homepage.
-3. Create your account at https://recruiteros.co/signup.html with your work
+3. Create your account at https://recruitersos.co/signup.html with your work
    email. A corporate-domain email provisions an enterprise workspace.
 
 ================================================================
@@ -128,7 +128,7 @@ TROUBLESHOOTING
 ================================================================
 
 - Blank/white page: you're on a stale tab or the bare IP before deploy finished.
-  Use the full https://recruiteros.co and hard-refresh (Ctrl+Shift+R).
+  Use the full https://recruitersos.co and hard-refresh (Ctrl+Shift+R).
 - "Your connection is not private" right after launch: the cert is still being
   issued. Wait 1-2 minutes and refresh. If it persists 10+ min, DNS probably
   isn't pointing at the server yet (recheck nslookup).

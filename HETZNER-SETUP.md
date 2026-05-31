@@ -1,7 +1,7 @@
 # RecruiterOS, Hetzner + GoDaddy go-live runbook
 
 This hosts everything (marketing site, portal, and the live API) on your own
-Hetzner server at https://recruiteros.co with automatic HTTPS.
+Hetzner server at https://recruitersos.co with automatic HTTPS.
 
 Architecture: Docker Compose runs two containers, the Next.js app (`app`,
 port 3000, internal) and **Caddy** which terminates TLS and reverse-proxies to
@@ -14,12 +14,12 @@ points at the server.
 - A Hetzner Cloud server (Ubuntu 22.04/24.04, the CX22 / 2 vCPU 4 GB tier is
   plenty). Note its public IPv4, e.g. `5.75.x.x`.
 - SSH access to it.
-- Your GoDaddy account for recruiteros.co.
+- Your GoDaddy account for recruitersos.co.
 
 ---
 
 ## 1. Point GoDaddy DNS at the server
-In GoDaddy, open **My Products → recruiteros.co → DNS → Manage Zones**, and set:
+In GoDaddy, open **My Products → recruitersos.co → DNS → Manage Zones**, and set:
 
 | Type  | Name | Value                | TTL  |
 |-------|------|----------------------|------|
@@ -28,7 +28,7 @@ In GoDaddy, open **My Products → recruiteros.co → DNS → Manage Zones**, an
 
 (If GoDaddy already has parking A records on `@`/`www`, edit them to your IP and
 delete the GoDaddy "Domain Forwarding".) DNS usually propagates in 5-30 min.
-Check with: `nslookup recruiteros.co`
+Check with: `nslookup recruitersos.co`
 
 Optional AAAA records if you use the server's IPv6.
 
@@ -75,7 +75,7 @@ docker compose logs -f caddy   # watch it obtain the TLS cert (ctrl-c to exit)
 First boot builds the image (a few minutes). Once DNS resolves to the server,
 Caddy issues the certificate automatically.
 
-Visit **https://recruiteros.co** , create an account with a work email, and you
+Visit **https://recruitersos.co** , create an account with a work email, and you
 land in a real Command Center backed by the live API. Corporate emails get an
 enterprise workspace.
 

@@ -25,7 +25,7 @@ The repo already has `vercel.json` and the prebuild sync wired.
 2. Go to vercel.com/new and import the `recruiteros` repo.
 3. Vercel reads `vercel.json` and builds the Next app in `integration/`.
 4. You get a live URL like `https://recruiteros.vercel.app`.
-5. Add your domain `recruiteros.co` in Vercel → Project → Domains.
+5. Add your domain `recruitersos.co` in Vercel → Project → Domains.
 
 ### CLI alternative
 

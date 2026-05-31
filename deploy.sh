@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="https://github.com/neadusall/recruiteros.git"
 DIR="/opt/recruiteros"
-DOMAIN="recruiteros.co"
+DOMAIN="recruitersos.co"
 
 say() { printf "\n\033[1;35m==> %s\033[0m\n" "$1"; }
 
@@ -87,7 +87,7 @@ cat <<EOF
 ------------------------------------------------------------
 RecruiterOS is starting.
 
-1) Point DNS at this server in GoDaddy (recruiteros.co -> DNS):
+1) Point DNS at this server in GoDaddy (recruitersos.co -> DNS):
      A   @     $(curl -s -4 ifconfig.me 2>/dev/null || echo YOUR_SERVER_IP)
      A   www   $(curl -s -4 ifconfig.me 2>/dev/null || echo YOUR_SERVER_IP)
 
