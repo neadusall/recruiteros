@@ -152,7 +152,7 @@ function lastOwner(workspaceId: string): boolean {
 }
 
 function appUrl(): string {
-  return process.env.RECRUITEROS_APP_URL ?? "https://app.recruiteros.co";
+  return process.env.RECRUITEROS_APP_URL ?? "https://app.recruitersos.co";
 }
 
 export { capabilitiesFor };

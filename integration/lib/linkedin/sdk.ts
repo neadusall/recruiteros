@@ -18,7 +18,7 @@ import type {
 } from "./types";
 
 export interface LinkedInClientOptions {
-  baseUrl: string;            // e.g. https://app.recruiteros.co
+  baseUrl: string;            // e.g. https://app.recruitersos.co
   token: string;              // RECRUITEROS_API_TOKEN
   fetchImpl?: typeof fetch;   // inject for tests / non-browser runtimes
 }

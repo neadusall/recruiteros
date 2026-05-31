@@ -204,14 +204,14 @@
             <h3>Quickstart</h3>
             <p class="sub">Enrich a hiring manager, cheapest-source-first, in one call.</p>
             <div class="codeblock"><span class="c"># 1. Enrich a contact (cost-optimized waterfall, cheapest source first, verified)</span>
-curl https://api.recruiteros.co<span class="s">/v1/enrich</span> \
+curl https://api.recruitersos.co<span class="s">/v1/enrich</span> \
   -H <span class="s">"Authorization: Bearer rk_live_…"</span> \
   -H <span class="s">"Content-Type: application/json"</span> \
   -d '<span class="s">{"subject":{"firstName":"Jamie","lastName":"Rao","companyName":"Verla Health"}}</span>'
 
 <span class="c"># → { resolved: { email: { value, confidence, providerId, cost } }, totalCost, trace }</span></div>
             <div class="codeblock" style="margin-top:14px"><span class="c">// 2. Push your own hiring signal in</span>
-<span class="k">await</span> fetch(<span class="s">"https://api.recruiteros.co/v1/signals/ingest"</span>, {
+<span class="k">await</span> fetch(<span class="s">"https://api.recruitersos.co/v1/signals/ingest"</span>, {
   method: <span class="s">"POST"</span>,
   headers: { Authorization: <span class="s">`Bearer ${KEY}`</span>, <span class="s">"Content-Type"</span>: <span class="s">"application/json"</span> },
   body: JSON.stringify({
@@ -222,7 +222,7 @@ curl https://api.recruiteros.co<span class="s">/v1/enrich</span> \
   })
 });</div>
             <div class="codeblock" style="margin-top:14px"><span class="c">// 3. Subscribe to triggers — get a signed POST when a signal fires</span>
-<span class="k">await</span> fetch(<span class="s">"https://api.recruiteros.co/v1/config/webhooks"</span>, {
+<span class="k">await</span> fetch(<span class="s">"https://api.recruitersos.co/v1/config/webhooks"</span>, {
   method: <span class="s">"POST"</span>, headers: { Authorization: <span class="s">`Bearer ${KEY}`</span> },
   body: JSON.stringify({ url: <span class="s">"https://yourapp.com/hooks"</span>, events: [<span class="s">"signal.triggered"</span>] })
 });</div>
@@ -266,7 +266,7 @@ curl https://api.recruiteros.co<span class="s">/v1/enrich</span> \
         </div>
       </div>
       <div class="footer-bottom">
-        <span>© 2026 RecruiterOS, Inc. · recruiteros.co</span>
+        <span>© 2026 RecruiterOS, Inc. · recruitersos.co</span>
         <span>Made for recruiters who would rather be talking to people.</span>
       </div>
     </div>

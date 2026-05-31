@@ -115,7 +115,7 @@ It's static, drop the folder on any host:
 - **Netlify:** drag the folder onto app.netlify.com/drop
 - **GitHub Pages:** push the folder and enable Pages
 
-Point **recruiteros.co** at whichever host you choose.
+Point **recruitersos.co** at whichever host you choose.
 
 ## Note
 

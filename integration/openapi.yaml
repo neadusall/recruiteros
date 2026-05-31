@@ -9,7 +9,7 @@ info:
     The engine is provider agnostic: integrate an external API (Unipile) or
     run on your own internal LinkedIn outreach tools.
 servers:
-  - url: https://app.recruiteros.co
+  - url: https://app.recruitersos.co
 security:
   - bearerAuth: []
 paths:

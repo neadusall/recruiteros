@@ -63,7 +63,7 @@ UNIPILE_API_KEY=...
 
 # Or use your own internal LinkedIn outreach service
 RECRUITEROS_OUTREACH_PROVIDER=internal
-RECRUITEROS_OUTREACH_URL=https://outreach.internal.recruiteros.co
+RECRUITEROS_OUTREACH_URL=https://outreach.internal.recruitersos.co
 RECRUITEROS_OUTREACH_TOKEN=...
 ```
 

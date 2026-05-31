@@ -308,7 +308,7 @@ function titleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 function appUrl(): string {
-  return process.env.RECRUITEROS_APP_URL ?? "https://app.recruiteros.co";
+  return process.env.RECRUITEROS_APP_URL ?? "https://app.recruitersos.co";
 }
 function authError(code: string, status: number): Error & { status: number } {
   const e = new Error(code) as Error & { status: number };

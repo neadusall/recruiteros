@@ -83,7 +83,7 @@
 
   var CONDITIONS = ["replied on any channel", "connection accepted", "email opened", "link clicked", "no reply", "marked HOT"];
   var DEFAULT_ASSIGNEES = ["You", "Jamie Dawson", "BD desk", "Round-robin team", "Unassigned"];
-  var DEFAULT_ACCOUNTS = ["jamie@recruiteros.co", "bd@recruiteros.co", "auto-rotate"];
+  var DEFAULT_ACCOUNTS = ["jamie@recruitersos.co", "bd@recruitersos.co", "auto-rotate"];
 
   function mkNode(key, cfg, x, y) { var b = BLOCK[key]; return { uid: uid(), key: key, channel: b.channel, label: b.label, ic: b.ic, cfg: cfg || {}, delay: 0, x: x || 60, y: y || 40 }; }
 

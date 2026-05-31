@@ -8,7 +8,7 @@
    Reaching the extension requires:
      • a Chromium browser with the extension loaded, AND
      • the portal served from an allowed origin (http://localhost or
-       *.recruiteros.co — see manifest externally_connectable).
+       *.recruitersos.co — see manifest externally_connectable).
    Opened from file:// it degrades gracefully (env().canReach=false)
    and the UI explains how to enable it.
    ============================================================ */

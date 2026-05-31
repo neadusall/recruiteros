@@ -19,7 +19,7 @@ export const OPENAPI = {
       "Find companies that are hiring and the hiring managers behind the roles, then " +
       "enrich them cheapest-source-first. Authenticate with a Bearer API key.",
   },
-  servers: [{ url: "https://api.recruiteros.co" }],
+  servers: [{ url: "https://api.recruitersos.co" }],
   security: [{ bearerAuth: [] }],
   components: {
     securitySchemes: {

@@ -162,7 +162,7 @@
       headline:   lead.headline || '',
       location:   lead.location || '',
       email:      lead.email || '',
-      unsubscribe_link: lead.unsubscribeUrl || ('https://recruiteros.co/u/' + (lead.id || '')),
+      unsubscribe_link: lead.unsubscribeUrl || ('https://recruitersos.co/u/' + (lead.id || '')),
       sender_name: lead.senderName || '',
     };
     Object.assign(map, lead.customFields || {});
@@ -946,7 +946,7 @@
     if (store.all('campaigns').length) return store;   // already seeded
 
     const accLi = store.insert('channelAccounts', build.channelAccount('linkedin', 'Jamie Rourke · LinkedIn', { createdAt: now - 20 * DAY }));
-    store.insert('channelAccounts', build.channelAccount('email', 'jamie@recruiteros.co', { createdAt: now - 30 * DAY }));
+    store.insert('channelAccounts', build.channelAccount('email', 'jamie@recruitersos.co', { createdAt: now - 30 * DAY }));
 
     const tplConnect = store.insert('templates', build.template({
       name: 'Greenfield React — connect', channel: 'linkedin', action: 'connect',

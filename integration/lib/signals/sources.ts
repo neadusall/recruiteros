@@ -321,7 +321,7 @@ export class EdgarSource implements SignalSource {
   readonly emits: SignalType[] = ["funding_round", "ipo_or_s1", "acquisition", "board_change"];
   readonly label = "SEC EDGAR filings";
 
-  private ua = process.env.SEC_EDGAR_USER_AGENT ?? "RecruiterOS signal-engine contact@recruiteros.co";
+  private ua = process.env.SEC_EDGAR_USER_AGENT ?? "RecruiterOS signal-engine contact@recruitersos.co";
 
   isConfigured(): boolean {
     return Boolean(this.ua);

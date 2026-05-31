@@ -21,8 +21,8 @@ export async function seedWorkspace(workspaceId: string): Promise<{ seeded: bool
   seeded.add(workspaceId);
 
   // Accounts + domains so Overview capacity is green.
-  addLinkedInAccount(workspaceId, "jamie@recruiteros.co", "unipile");
-  ["go-recruiteros.com", "try-recruiteros.com", "hey-recruiteros.com", "talk-recruiteros.com", "meet-recruiteros.com"]
+  addLinkedInAccount(workspaceId, "jamie@recruitersos.co", "unipile");
+  ["go-recruitersos.com", "try-recruitersos.com", "hey-recruitersos.com", "talk-recruitersos.com", "meet-recruitersos.com"]
     .forEach((d) => addDomain(workspaceId, d, 3));
 
   // Integrations -> green.

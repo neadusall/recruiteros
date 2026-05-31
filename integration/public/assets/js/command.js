@@ -694,13 +694,13 @@
       ],
       accounts: {
         linkedin: [
-          { handle: "jamie@recruiteros.co", platform: "unipile", warmup: "warmed", quotas: { connects: 20 } },
-          { handle: "bd@recruiteros.co", platform: "salesrobot", warmup: "in_warmup", quotas: { connects: 12 } }
+          { handle: "jamie@recruitersos.co", platform: "unipile", warmup: "warmed", quotas: { connects: 20 } },
+          { handle: "bd@recruitersos.co", platform: "salesrobot", warmup: "in_warmup", quotas: { connects: 12 } }
         ],
         domains: [
-          { domain: "go-recruiteros.com", inboxes: 3, health: "healthy", bounceRate: 0.004 },
-          { domain: "try-recruiteros.com", inboxes: 3, health: "healthy", bounceRate: 0.009 },
-          { domain: "hey-recruiteros.com", inboxes: 3, health: "warming", bounceRate: 0.0 }
+          { domain: "go-recruitersos.com", inboxes: 3, health: "healthy", bounceRate: 0.004 },
+          { domain: "try-recruitersos.com", inboxes: 3, health: "healthy", bounceRate: 0.009 },
+          { domain: "hey-recruitersos.com", inboxes: 3, health: "warming", bounceRate: 0.0 }
         ]
       },
       integrations: [
