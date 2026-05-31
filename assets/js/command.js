@@ -126,7 +126,7 @@
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New campaign", render: renderCampaigns },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
-    builder: { title: "Target Builder", crumb: "Build", action: null, render: renderBuilder },
+    builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
     content: { title: "Content Library", crumb: "Build", action: "＋ Add asset", render: renderContent },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
