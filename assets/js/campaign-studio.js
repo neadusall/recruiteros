@@ -432,6 +432,9 @@
     var pdrag = null, tempPath = null, paletteDrag = null;
     viewport.addEventListener("pointerdown", function (e) {
       if (e.button !== 0) return;
+      // Let the on-canvas controls (zoom / fit / tidy) and empty-state button
+      // handle their own clicks; don't start a pan or capture the pointer.
+      if (e.target.closest && e.target.closest(".cs-canvas-controls, .cs-empty-float")) return;
       var portOut = e.target.closest && e.target.closest(".port-out");
       var nodeEl0 = e.target.closest && e.target.closest(".cs-node");
       if (portOut && nodeEl0) {
