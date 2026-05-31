@@ -1035,13 +1035,12 @@
     var LOGO_KEY = "ros_logo_" + ((ctx.workspace && ctx.workspace.id) || "ws");
 
     var avatar = $("#acctAvatar"), avatarLg = $("#acctAvatarLg");
-    var sideAvatar = $("#userInitials"); // sidebar footer chip avatar, kept in sync
     $("#acctName").textContent = name;
     $("#acctEmail").textContent = email;
     $("#acctPlan").textContent = plan;
 
     function applyImg(dataUrl) {
-      [avatar, avatarLg, sideAvatar].forEach(function (a) {
+      [avatar, avatarLg].forEach(function (a) {
         if (!a) return;
         a.textContent = inits;
         if (dataUrl) { a.style.backgroundImage = "url(" + dataUrl + ")"; a.style.backgroundSize = "cover"; a.style.backgroundPosition = "center"; a.classList.add("has-img"); }
@@ -1053,15 +1052,7 @@
 
     function setOpen(o) { menu.hidden = !o; btn.setAttribute("aria-expanded", String(o)); }
     btn.addEventListener("click", function (e) { e.stopPropagation(); setOpen(menu.hidden); });
-    // The sidebar footer chip opens the same account menu, so there is one
-    // consistent place to manage your profile, photo, workspace and sign-out.
-    var sideChip = $("#userChip");
-    if (sideChip) {
-      sideChip.style.cursor = "pointer";
-      sideChip.setAttribute("title", "Account & settings");
-      sideChip.addEventListener("click", function (e) { e.stopPropagation(); setOpen(menu.hidden); });
-    }
-    document.addEventListener("click", function (e) { if (!acct.contains(e.target) && !(sideChip && sideChip.contains(e.target))) setOpen(false); });
+    document.addEventListener("click", function (e) { if (!acct.contains(e.target)) setOpen(false); });
     window.addEventListener("keydown", function (e) { if (e.key === "Escape") setOpen(false); });
 
     // Image upload, any size, downscaled to a 256px square data URL (cover-fit).
