@@ -48,7 +48,21 @@
   g.RosBackend = {
     getBase: () => base,
     setBase(b) { base = (b || '').trim(); try { localStorage.setItem(LS_BASE, base); } catch (_) {} },
-    async session() { const r = await req('/api/auth/session'); cachedSession = r.ok ? r.data : null; return r; },
+    async session() {
+      const r = await req('/api/auth/session');
+      if (r.ok && r.data && (r.data.user || r.data.workspace)) { cachedSession = r.data; return r; }
+      // Fall back to the portal's local session (set by login + local-backend shim),
+      // so the Backend tab connects standalone without the Next server running.
+      try {
+        const raw = (typeof localStorage !== 'undefined') && (localStorage.getItem('ros_ctx') || localStorage.getItem('ros_session'));
+        if (raw) {
+          const ctx = JSON.parse(raw);
+          const data = { user: ctx.user || (ctx.email ? ctx : null), workspace: ctx.workspace || (ctx.workspaceName ? { name: ctx.workspaceName } : null) };
+          if (data.user || data.workspace) { cachedSession = data; return { ok: true, status: 200, data }; }
+        }
+      } catch (_) {}
+      cachedSession = null; return r;
+    },
     isAuthed: () => !!cachedSession,
     accounts: () => req('/api/accounts'),
     responses: () => req('/api/response/list'),

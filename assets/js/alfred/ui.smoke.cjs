@@ -16,7 +16,7 @@ window.confirm = () => true; window.alert = () => {};
 
 console.log('\n\x1b[1mStudio DOM boot\x1b[0m');
 try {
-  ['assets/js/alfred/alfred-core.js', 'extension/lib/alfred-bridge.js', 'assets/js/alfred/studio-bridge.js', 'assets/js/alfred/backend.js', 'assets/js/alfred/alfred-ui.js']
+  ['assets/js/local-backend.js', 'assets/js/alfred/alfred-core.js', 'extension/lib/alfred-bridge.js', 'assets/js/alfred/studio-bridge.js', 'assets/js/alfred/backend.js', 'assets/js/alfred/alfred-ui.js']
     .forEach(p => window.eval(fs.readFileSync(path.join(ROOT, p), 'utf8')));
   ok('all scripts load without throwing', true);
 } catch (e) { ok('all scripts load without throwing', false, e.message); console.log(e.stack); process.exit(1); }

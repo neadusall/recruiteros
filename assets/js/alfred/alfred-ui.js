@@ -980,6 +980,18 @@
     });
   });
 
+  /* ---- embedded mode: hide the marketing chrome when hosted inside the portal
+     (iframe) or when opened with ?embed=1, so it reads as a native panel ---- */
+  (function embedMode() {
+    let embedded = false;
+    try { embedded = (window.self !== window.top) || new URLSearchParams(location.search).get('embed') === '1'; } catch (_) { embedded = true; }
+    if (embedded) {
+      document.body.classList.add('embedded');
+      const nav = document.querySelector('header.nav'); if (nav) nav.style.display = 'none';
+      const aurora = document.querySelector('.aurora'); if (aurora) aurora.style.display = 'none';
+    }
+  })();
+
   /* ---- go ---- */
   renderAll();
 })();

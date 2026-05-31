@@ -205,6 +205,11 @@
    Tames the aurora/glow and mutes gradient accents so the
    workspace reads as a calm tool, not a marketing page.
    ============================================================ */
+/* embedded inside the portal (iframe / ?embed=1): tighter, chromeless */
+body.embedded { background: transparent; }
+body.embedded .studio { padding-top: 10px; }
+body.embedded::before { display: none; }
+
 body.studio-calm { background: #0c0c14; }
 body.studio-calm::before { opacity: .28; }                 /* ambient page glow */
 body.studio-calm .aurora { opacity: .18; filter: saturate(.7); }
