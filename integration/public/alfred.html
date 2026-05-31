@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Outreach Studio — RecruiterOS</title>
+  <meta name="description" content="Multi-channel outreach automation: build sequences across LinkedIn, email and X with warm-up safe limits, smart waits, and a live inbox. The MeetAlfred-style engine inside RecruiterOS." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+  <link rel="stylesheet" href="assets/css/app.css" />
+  <link rel="stylesheet" href="assets/css/alfred.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+</head>
+<body class="studio-calm">
+  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+  <div class="grid-bg"></div>
+
+  <header class="nav">
+    <div class="container nav-inner">
+      <a href="index.html" class="brand"><span class="logo">R</span><span>Recruiter<span class="os">OS</span></span></a>
+      <nav class="nav-links">
+        <div class="has-drop"><a href="recruiting-os.html">Recruiter OS</a>
+          <div class="drop os-mega recruit">
+            <a class="os-feature" href="recruiting-os.html">
+              <span class="os-badge">👤 Recruiter OS</span>
+              <b>Win the placement</b>
+              <span class="os-tag">Find, engage, and place talent before anyone else even sees the signal.</span>
+              <span class="os-go">Explore Recruiter OS →</span>
+            </a>
+            <div class="os-cols">
+              <div class="mcol"><h5>Source</h5>
+                <a href="sourcing.html"><span class="di">🎯</span> People-GPT Search</a>
+                <a href="sourcing.html#scoring"><span class="di">🧮</span> JD Match Scoring</a>
+                <a href="sourcing.html"><span class="di">⚡</span> Enrichment Grid</a>
+                <a href="signals.html"><span class="di">📡</span> Candidate Signals</a>
+              </div>
+              <div class="mcol"><h5>Engage &amp; Close</h5>
+                <a href="outreach.html"><span class="di">✉️</span> Candidate Outreach</a>
+                <a href="linkedin.html"><span class="di">💼</span> LinkedIn Engine</a>
+                <a href="conversations.html"><span class="di">💬</span> Texting &amp; Voice</a>
+                <a href="analytics.html"><span class="di">📊</span> Placement Analytics</a>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="has-drop"><a href="business-development-os.html">BD OS</a>
+          <div class="drop os-mega bd">
+            <a class="os-feature" href="business-development-os.html">
+              <span class="os-badge">🏢 BD OS</span>
+              <b>Win the client</b>
+              <span class="os-tag">Turn hiring signals into job orders, so your desk never runs dry.</span>
+              <span class="os-go">Explore BD OS →</span>
+            </a>
+            <div class="os-cols">
+              <div class="mcol"><h5>Find</h5>
+                <a href="signals.html"><span class="di">📡</span> Account Signals</a>
+                <a href="sourcing.html"><span class="di">🧭</span> Decision-maker Discovery</a>
+                <a href="sourcing.html"><span class="di">⚡</span> Company Enrichment</a>
+              </div>
+              <div class="mcol"><h5>Win &amp; Track</h5>
+                <a href="outreach.html"><span class="di">✉️</span> Client Outreach</a>
+                <a href="conversations.html#amd"><span class="di">📞</span> Voice Dialer + AMD</a>
+                <a href="integrations.html"><span class="di">🗂️</span> CRM Pipeline</a>
+                <a href="analytics.html"><span class="di">📈</span> Job-order Analytics</a>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a href="features.html">Features</a>
+        <a href="alfred.html">Outreach Studio</a>
+        <a href="pricing.html">Pricing</a>
+      </nav>
+      <div class="nav-cta">
+        <a href="app.html" class="btn btn-ghost btn-sm">Command center</a>
+        <a href="#" class="btn btn-primary btn-sm" id="topNewCampaign">+ New campaign</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="studio">
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="st-side">
+      <h4>Campaigns</h4>
+      <div class="camp-list" id="campList"></div>
+      <button class="a-btn ghost sm" id="newCampaign" style="width:100%">+ New campaign</button>
+
+      <div class="st-clock">
+        <div class="now" id="simNow">—</div>
+        <div class="dim" style="font-size:11px;margin-bottom:8px">🧪 Test clock · fast-forward a simulated preview to see how a campaign will play out. Does not affect live sending.</div>
+        <div class="ff">
+          <button class="a-btn sm" data-ff="0.25">+6h</button>
+          <button class="a-btn sm" data-ff="1">+1 day</button>
+          <button class="a-btn sm" data-ff="7">+1 week</button>
+          <button class="a-btn sm" data-ff="30">+30 days</button>
+        </div>
+        <div class="row" style="gap:6px;margin-top:8px">
+          <button class="a-btn ghost sm" id="loadSample" style="flex:1">＋ Sample data</button>
+          <button class="a-btn ghost sm" id="resetData" style="flex:1">↺ Reset</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <section class="st-main">
+      <div class="st-head">
+        <span class="cdot" id="headDot" style="width:10px;height:10px;border-radius:50%;background:var(--accent-green)"></span>
+        <h1 id="campTitle">—</h1>
+        <span class="cstatus active" id="campStatus">Active</span>
+        <span class="spacer"></span>
+        <button class="a-btn sm" id="campMenu">⚙ Manage</button>
+        <button class="a-btn sm" id="toggleStatus">Pause</button>
+        <button class="a-btn primary sm" id="launchBtn">Enroll &amp; launch</button>
+      </div>
+
+      <div class="banner" id="modeBanner"></div>
+
+      <nav class="st-tabs" id="tabs">
+        <button class="st-tab active" data-tab="sequence">🧩 Sequence</button>
+        <button class="st-tab" data-tab="leads">🎯 Leads</button>
+        <button class="st-tab" data-tab="inbox">💬 Inbox</button>
+        <button class="st-tab" data-tab="templates">📚 Templates</button>
+        <button class="st-tab" data-tab="analytics">📊 Analytics</button>
+        <button class="st-tab" data-tab="live">🔗 LinkedIn Live</button>
+        <button class="st-tab" data-tab="settings">⚙️ Settings</button>
+      </nav>
+
+      <div class="st-panel active" id="panel-sequence">
+        <div class="seq-builder">
+          <div>
+            <div class="seq-palette" id="seqPalette">
+              <span class="pal-hint">Drag onto the flow:</span>
+              <span class="pal-chip" draggable="true" data-add="linkedin:view">👁 View</span>
+              <span class="pal-chip" draggable="true" data-add="linkedin:connect">💼 Connect</span>
+              <span class="pal-chip" draggable="true" data-add="linkedin:message">💬 Message</span>
+              <span class="pal-chip" draggable="true" data-add="linkedin:inmail">✉️ InMail</span>
+              <span class="pal-chip" draggable="true" data-add="linkedin:follow">➕ Follow</span>
+              <span class="pal-chip" draggable="true" data-add="linkedin:endorse">⭐ Endorse</span>
+              <span class="pal-chip" draggable="true" data-add="linkedin:like">👍 Like</span>
+              <span class="pal-chip" draggable="true" data-add="email:email">📧 Email</span>
+              <span class="pal-chip pal-delay" draggable="true" data-add="delay">⏱ Wait</span>
+            </div>
+            <div class="seq-canvas" id="seqCanvas"></div>
+            <div class="row wrap" style="margin-top:12px">
+              <button class="add-step" id="addAction">＋ Add action step</button>
+              <button class="add-step" id="addDelay" style="max-width:160px">＋ Add delay</button>
+            </div>
+          </div>
+          <div class="inspector" id="inspector">
+            <div class="empty"><div class="big">🧩</div><p>Select a step to edit it, or add your first step.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="st-panel" id="panel-leads">
+        <div class="row wrap" style="margin-bottom:14px">
+          <button class="a-btn primary sm" id="sourceSalesNav">⚡ Source from Sales Navigator</button>
+          <button class="a-btn sm" id="addLead">+ Add lead</button>
+          <button class="a-btn sm" id="importLeads">⇪ Import (paste/CSV)</button>
+          <button class="a-btn sm" id="enrollSelected" disabled>✉️ Enroll selected</button>
+          <button class="a-btn sm" id="tagSelected" disabled>🏷 Tag</button>
+          <input class="a-input" id="leadFilter" placeholder="Filter name / company / tag" style="width:200px;padding:6px 10px">
+          <span class="spacer"></span>
+          <span class="dim" id="leadCount" style="font-size:12px"></span>
+        </div>
+        <div class="card" style="padding:0;overflow:auto">
+          <table class="a-table" id="leadsTable"></table>
+        </div>
+      </div>
+
+      <div class="st-panel" id="panel-inbox">
+        <div class="inbox">
+          <div class="thread-list" id="threadList"></div>
+          <div class="chat" id="chat"><div class="empty"><div class="big">💬</div><p>Replies land here. Run the sim clock to generate conversations.</p></div></div>
+        </div>
+      </div>
+
+      <div class="st-panel" id="panel-templates">
+        <div class="row" style="margin-bottom:14px"><button class="a-btn primary sm" id="addTemplate">+ New template</button></div>
+        <div class="set-grid" id="templateList"></div>
+      </div>
+
+      <div class="st-panel" id="panel-analytics">
+        <div class="kpi-grid" id="kpiGrid"></div>
+        <div class="set-grid">
+          <div class="card"><h3 style="font-size:14px;margin-bottom:12px">Funnel</h3><div id="funnel"></div></div>
+          <div class="card"><h3 style="font-size:14px;margin-bottom:12px">Activity by channel</h3><div id="byChannel"></div></div>
+        </div>
+      </div>
+
+      <div class="st-panel" id="panel-live">
+        <div class="banner" id="liveEnvBanner" style="display:none"></div>
+        <div class="set-grid">
+          <div class="card">
+            <h3 style="font-size:14px;margin-bottom:6px">🧩 Browser extension</h3>
+            <p class="dim" style="font-size:12px;margin-bottom:10px">The portal drives LinkedIn through the RecruiterOS extension running in your browser. Paste its ID from <code>chrome://extensions</code>.</p>
+            <div class="a-field"><label class="a-label">Extension ID</label><input class="a-input" id="extId" placeholder="e.g. mdlk...32 chars" /></div>
+            <button class="a-btn primary sm" id="extConnect">Connect extension</button>
+            <div id="extStatus" style="margin-top:10px"></div>
+          </div>
+          <div class="card">
+            <h3 style="font-size:14px;margin-bottom:6px">💼 LinkedIn account</h3>
+            <div id="liAccount"><p class="dim" style="font-size:12px">Connect the extension, then link your logged-in LinkedIn account.</p></div>
+            <button class="a-btn sm" id="liConnect" style="margin-top:10px">Connect my LinkedIn</button>
+            <div class="a-field" style="margin-top:14px"><label class="row" style="font-size:12.5px;color:var(--text-muted)"><input type="checkbox" id="liveRoute" style="width:auto"> Route this campaign's LinkedIn steps through my real account</label></div>
+            <label class="row" style="font-size:12.5px;color:var(--text-muted)"><input type="checkbox" id="liveActions" style="width:auto"> Live actions (perform real clicks, not simulated)</label>
+          </div>
+          <div class="card">
+            <h3 style="font-size:14px;margin-bottom:6px">🎯 Sourced datasets</h3>
+            <p class="dim" style="font-size:12px;margin-bottom:10px">Sales Navigator searches you've scraped. Import as leads, push to the backend, or export CSV.</p>
+            <div id="dsList" style="display:grid;gap:8px"></div>
+            <button class="a-btn sm" id="refreshDs" style="margin-top:10px">↻ Refresh</button>
+          </div>
+          <div class="card" style="grid-column:1/-1">
+            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+              <h3 style="font-size:14px">🛰️ RecruiterOS backend</h3>
+              <span id="beStatus"><span class="pillbar warn">checking...</span></span>
+            </div>
+            <p class="dim" style="font-size:12px;margin-bottom:10px">The team backend (workspaces, multi-account, server-side throttles, sequences, inbox). Leave the base blank when the portal is served by the backend; otherwise set its URL.</p>
+            <div class="row wrap" style="gap:8px;align-items:flex-end;margin-bottom:12px">
+              <div class="a-field" style="flex:1;margin:0"><label class="a-label">Backend base URL</label><input class="a-input" id="beBase" placeholder="(same origin) or http://localhost:3000"></div>
+              <button class="a-btn sm" id="beConnect">Connect backend</button>
+              <button class="a-btn ghost sm" id="beRefresh">↻</button>
+            </div>
+            <div class="row wrap" style="gap:16px;align-items:flex-start">
+              <div style="flex:1;min-width:240px">
+                <div class="a-label" style="margin-bottom:6px">Team LinkedIn accounts</div>
+                <div id="beAccounts"><p class="dim" style="font-size:12px">Connect the backend to list accounts.</p></div>
+              </div>
+              <div style="flex:1;min-width:240px">
+                <div class="a-label" style="margin-bottom:6px">Assign account to this campaign</div>
+                <select class="a-select" id="beAssign"><option value="">(none / Simulated)</option></select>
+                <div class="a-label" style="margin:12px 0 6px">Unified inbox</div>
+                <div id="beInbox"><p class="dim" style="font-size:12px">—</p></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="st-panel" id="panel-settings">
+        <div class="card" style="margin-bottom:16px">
+          <div class="row wrap" style="justify-content:space-between;align-items:center;gap:10px">
+            <div>
+              <h3 style="font-size:14px">📊 Live monitoring · <span id="monAcc" class="dim"></span></h3>
+              <p class="dim" style="font-size:12px;margin:2px 0 0">Today's usage vs your effective caps for the campaign's account. Updates as the clock advances.</p>
+            </div>
+            <div class="row" style="gap:8px;align-items:center">
+              <span class="a-label" style="margin:0">Safety preset</span>
+              <select class="a-select" id="presetSel" style="width:auto">
+                <option value="conservative">Conservative</option>
+                <option value="balanced">Balanced</option>
+                <option value="aggressive">Aggressive</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+          </div>
+          <div id="presetHint" class="dim" style="font-size:11.5px;margin-top:6px"></div>
+          <div id="monitorBox" style="margin-top:12px"></div>
+        </div>
+        <div class="set-grid">
+          <div class="card">
+            <h3 style="font-size:14px;margin-bottom:12px">🔌 Connected accounts</h3>
+            <div id="accList" style="display:grid;gap:9px"></div>
+            <button class="a-btn ghost sm" id="addAccount" style="margin-top:12px">+ Connect account</button>
+          </div>
+          <div class="card">
+            <h3 style="font-size:14px;margin-bottom:6px">🛡️ Daily caps &amp; warm-up</h3>
+            <p class="dim" style="font-size:12px;margin-bottom:10px">Per-account, per-day caps. Warm-up ramps them from the start percent to 100% over the ramp window.</p>
+            <div id="limitsBox"></div>
+          </div>
+          <div class="card">
+            <h3 style="font-size:14px;margin-bottom:6px">⏰ Schedule, pacing &amp; throttles</h3>
+            <div id="safetyBox"></div>
+          </div>
+          <div class="card">
+            <h3 style="font-size:14px;margin-bottom:6px">🚫 Blacklist</h3>
+            <p class="dim" style="font-size:12px;margin-bottom:10px">Emails, domains, or names that must never be contacted.</p>
+            <textarea class="a-textarea" id="blacklistBox" placeholder="acme.com&#10;jane@nope.com&#10;John Doe"></textarea>
+            <button class="a-btn sm" id="saveBlacklist" style="margin-top:8px">Save blacklist</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- modal + toast -->
+  <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
+  <div id="a-toast"></div>
+
+  <script src="assets/js/local-backend.js"></script>
+  <script src="assets/js/alfred/alfred-core.js"></script>
+  <script src="extension/lib/alfred-bridge.js"></script>
+  <script src="assets/js/alfred/studio-bridge.js"></script>
+  <script src="assets/js/alfred/backend.js"></script>
+  <script src="assets/js/alfred/alfred-ui.js"></script>
+</body>
+</html>

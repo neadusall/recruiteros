@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Get started, RecruiterOS</title>
+  <meta name="description" content="Create your RecruiterOS workspace. Sign up with your work email and start turning hiring signals into placements and job orders." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+  <link rel="stylesheet" href="assets/css/auth.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+</head>
+<body class="auth-body">
+  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+  <div class="grid-bg"></div>
+
+  <div class="auth-split">
+    <!-- LEFT: pitch -->
+    <aside class="auth-aside">
+      <a href="index.html" class="brand"><span class="logo">R</span><span>Recruiter<span class="os">OS</span></span></a>
+      <h1>One workspace.<br /><span class="gradient-text">Two operating systems.</span></h1>
+      <p>Sign up with your work email and your whole team lands in the same workspace automatically. Run the Recruiter OS and the Business Development OS on one shared engine.</p>
+      <ul class="auth-points">
+        <li><span class="ap">📡</span> Signals to placements, on autopilot</li>
+        <li><span class="ap">💬</span> Every reply auto-classified and routed</li>
+        <li><span class="ap">🛡️</span> Enterprise SSO-lite: your domain, your org</li>
+        <li><span class="ap">⚡</span> Live in minutes, no install</li>
+      </ul>
+      <div class="auth-trust">Enterprise-grade security · SOC 2 aligned · Your ATS stays the source of truth</div>
+    </aside>
+
+    <!-- RIGHT: form -->
+    <main class="auth-card-wrap">
+      <div class="auth-card">
+        <div class="seg" id="seg">
+          <button class="seg-btn active" data-mode="signup">Create account</button>
+          <button class="seg-btn" data-mode="login" onclick="location.href='login.html'">Sign in</button>
+        </div>
+
+        <h2 id="title">Create your workspace</h2>
+        <p class="auth-sub">Start free. No credit card.</p>
+
+        <form id="authForm" autocomplete="on" novalidate>
+          <label class="fld">
+            <span>Full name</span>
+            <input id="name" type="text" placeholder="Jamie Dawson" autocomplete="name" required />
+          </label>
+          <label class="fld">
+            <span>Work email</span>
+            <input id="email" type="email" placeholder="you@company.com" autocomplete="email" required />
+          </label>
+          <label class="fld">
+            <span>Password</span>
+            <input id="password" type="password" placeholder="At least 8 characters" autocomplete="new-password" minlength="8" required />
+            <i class="strength" id="strength"></i>
+          </label>
+
+          <button type="submit" class="btn btn-primary btn-lg btn-block" id="submitBtn">Create account →</button>
+        </form>
+
+        <div class="or"><span>or</span></div>
+        <button class="btn btn-ghost btn-block" id="magicBtn">✉️ Email me a magic link</button>
+
+        <p class="auth-msg" id="msg"></p>
+        <p class="auth-fine">By continuing you agree to the <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.</p>
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/js/local-backend.js"></script>
+  <script src="assets/js/config.js"></script>
+  <script src="assets/js/auth.js"></script>
+</body>
+</html>

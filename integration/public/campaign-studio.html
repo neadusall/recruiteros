@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Campaign Studio, RecruiterOS</title>
+  <meta name="description" content="Drag and drop LinkedIn, email, SMS, and voice touches into a multi-channel sequence. Build, assign, save, and store campaigns for the Recruiting OS and the BD OS." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+  <link rel="stylesheet" href="assets/css/app.css" />
+  <link rel="stylesheet" href="assets/css/campaign-studio.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+</head>
+<body>
+  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+  <div class="grid-bg"></div>
+  <div class="noise"></div>
+
+  <header class="nav">
+    <div class="container nav-inner">
+      <a href="index.html" class="brand"><span class="logo">R</span><span>Recruiter<span class="os">OS</span></span></a>
+      <nav class="nav-links">
+        <div class="has-drop"><a href="recruiting-os.html">Recruiter OS</a>
+          <div class="drop os-mega recruit">
+            <a class="os-feature" href="recruiting-os.html">
+              <span class="os-badge">👤 Recruiter OS</span>
+              <b>Win the placement</b>
+              <span class="os-tag">Find, engage, and place talent before anyone else even sees the signal.</span>
+              <span class="os-go">Explore Recruiter OS →</span>
+            </a>
+            <div class="os-cols">
+              <div class="mcol"><h5>Source</h5>
+                <a href="sourcing.html"><span class="di">🎯</span> People-GPT Search</a>
+                <a href="signals.html"><span class="di">📡</span> Candidate Signals</a>
+                <a href="campaign-builder.html"><span class="di">🧱</span> Campaign Builder</a>
+              </div>
+              <div class="mcol"><h5>Engage &amp; Close</h5>
+                <a href="campaign-studio.html"><span class="di">🧩</span> Campaign Studio</a>
+                <a href="linkedin.html"><span class="di">💼</span> LinkedIn Engine</a>
+                <a href="conversations.html"><span class="di">💬</span> Texting &amp; Voice</a>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="has-drop"><a href="business-development-os.html">BD OS</a>
+          <div class="drop os-mega bd">
+            <a class="os-feature" href="business-development-os.html">
+              <span class="os-badge">🏢 BD OS</span>
+              <b>Win the client</b>
+              <span class="os-tag">Turn hiring signals into job orders, so your desk never runs dry.</span>
+              <span class="os-go">Explore BD OS →</span>
+            </a>
+            <div class="os-cols">
+              <div class="mcol"><h5>Find</h5>
+                <a href="signals.html"><span class="di">📡</span> Account Signals</a>
+                <a href="sourcing.html"><span class="di">🧭</span> Decision-maker Discovery</a>
+                <a href="campaign-builder.html"><span class="di">🧱</span> Campaign Builder</a>
+              </div>
+              <div class="mcol"><h5>Win &amp; Track</h5>
+                <a href="campaign-studio.html"><span class="di">🧩</span> Campaign Studio</a>
+                <a href="conversations.html#amd"><span class="di">📞</span> Voice Dialer + AMD</a>
+                <a href="analytics.html"><span class="di">📈</span> Job-order Analytics</a>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a href="features.html">Features</a>
+        <a href="alfred.html">Outreach Studio</a>
+        <a href="pricing.html">Pricing</a>
+      </nav>
+      <div class="nav-cta">
+        <a href="command.html" class="btn btn-ghost btn-sm">Command Center</a>
+        <a href="command.html#campaigns" class="btn btn-primary btn-sm">Open app →</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- The Campaign Studio mounts itself into this root (see campaign-studio.js). -->
+  <main id="csRoot"></main>
+
+  <script src="assets/js/landing.js"></script>
+  <script src="assets/js/campaign-studio.js"></script>
+</body>
+</html>
