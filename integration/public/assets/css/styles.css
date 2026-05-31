@@ -816,6 +816,9 @@ footer { border-top: 1px solid var(--border); padding: 60px 0 40px; }
 }
 
 /* --- Mobile nav: hamburger + slide-in drawer --- */
+/* The drawer mirrors the header CTAs; hide that clone on desktop so the
+   Log in / Open app buttons never appear twice. */
+.nav-mobile-cta { display: none; }
 .nav-toggle {
   display: none; width: 42px; height: 42px; border-radius: 11px;
   background: rgba(255,255,255,0.04); border: 1px solid var(--border-strong);
