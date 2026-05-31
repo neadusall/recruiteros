@@ -42,6 +42,6 @@ export async function processInbound(
 }
 
 /** Convenience for the inbox UI / list route. */
-export function recentResponses(workspaceId: string, limit = 100): ProcessedResponse[] {
+export function recentResponses(workspaceId: string, limit = 100): Promise<ProcessedResponse[]> {
   return getInbox().list(workspaceId, limit);
 }

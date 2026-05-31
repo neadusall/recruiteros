@@ -9,6 +9,6 @@ import { requireSession, ok } from "../../../../lib/api";
 export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
-  const items = recentResponses(g.ctx.workspace.id, 100);
+  const items = await recentResponses(g.ctx.workspace.id, 100);
   return ok({ items, rules: ROUTING_RULES, order: CLASS_ORDER });
 }

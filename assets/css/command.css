@@ -193,3 +193,10 @@
 .stage-select { border: 1px solid var(--border-strong); border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; background: var(--surface); color: var(--text); cursor: pointer; }
 .stage-select:hover { border-color: var(--brand); }
 .stage-select:disabled { opacity: .5; cursor: default; }
+
+/* Response inbox action buttons */
+.resp-btn { font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 8px; border: 1px solid var(--brand); background: rgba(124,92,255,0.14); color: #b9a6ff; cursor: pointer; }
+.resp-btn:hover { background: rgba(124,92,255,0.24); }
+.resp-btn.ghost { border-color: var(--border-strong); background: transparent; color: var(--text-muted); }
+.resp-btn.ghost:hover { color: var(--accent-red); border-color: var(--accent-red); }
+.resp-btn:disabled { opacity: .5; cursor: default; }

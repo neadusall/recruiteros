@@ -45,6 +45,7 @@ export async function overview(workspaceId: string): Promise<OverviewSnapshot> {
   const t = today();
   const booked = prospects.filter((p) => p.status === "booked");
   const appointmentsToday = booked.filter((p) => p.bookedAt === t).length;
+  const responses = await recentResponses(workspaceId);
 
   return {
     capacity: [
@@ -56,7 +57,7 @@ export async function overview(workspaceId: string): Promise<OverviewSnapshot> {
     activeProspects: prospects.filter((p) => p.status === "in_sequence").length,
     appointmentsToday,
     appointmentsThisWeek: booked.length,
-    warmConversationsToday: recentResponses(workspaceId).filter(
+    warmConversationsToday: responses.filter(
       (r) => r.classification.class === "positive" || r.classification.class === "soft_yes",
     ).length,
     wonAccounts: prospects.filter((p) => p.status === "won").length,

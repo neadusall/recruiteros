@@ -232,10 +232,29 @@
     });
     paint();
 
-    api("/response/list").then(function (d) {
-      inbox = ((d && d.items) || []).map(mapProcessed);
-      loaded = true; paint();
-    }).catch(function () { loaded = true; paint(); });
+    function load() {
+      api("/response/list").then(function (d) {
+        inbox = ((d && d.items) || []).map(mapProcessed);
+        loaded = true; paint(); wireActions();
+      }).catch(function () { loaded = true; paint(); });
+    }
+    load();
+
+    // Working inbox actions: Book / Suppress persist via the API and reload.
+    function wireActions() {
+      Array.prototype.forEach.call(listWrap.querySelectorAll("[data-act]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var act = btn.getAttribute("data-act"), pid = btn.getAttribute("data-pid");
+          if (!pid) { toast("This reply isn't linked to a prospect yet."); return; }
+          btn.disabled = true;
+          send("/response/actions", "POST", { action: act, prospectId: pid })
+            .then(function (r) {
+              if (r.ok) { toast(act === "book" ? "Marked booked" : "Suppressed (do-not-contact)"); load(); refreshBadge(); }
+              else { toast("Could not " + act + " (" + (r.data.error || r.status) + ")"); btn.disabled = false; }
+            }).catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+        });
+      });
+    }
 
     // rules matrix (product reference: how every reply is classified + routed)
     var rows = REF.rules.map(function (r) {
@@ -252,12 +271,16 @@
   }
 
   function respItem(r) {
+    var pid = r.prospectId ? ' data-pid="' + esc(r.prospectId) + '"' : "";
     return '<div class="resp-item"><div class="resp-top">' +
       '<span class="avatar" style="background:' + colorFor(r.name) + '">' + esc(initials(r.name)) + "</span>" +
       '<div><div class="resp-name">' + esc(r.name) + '</div><div class="resp-chan">' + esc(r.channel) + " · " + esc(r.source) + "</div></div>" +
       '<span class="cls cls-' + r.cls + '">' + esc(clsLabel(r.cls)) + "</span></div>" +
       '<div class="resp-text">"' + esc(r.text) + '"</div>' +
-      '<div class="resp-actions">' + r.actions.map(function (a) { return '<span class="resp-act">' + esc(a) + "</span>"; }).join("") + "</div></div>";
+      '<div class="resp-actions">' + r.actions.map(function (a) { return '<span class="resp-act">' + esc(a) + "</span>"; }).join("") +
+      '<button class="resp-btn" data-act="book"' + pid + '>📅 Book</button>' +
+      '<button class="resp-btn ghost" data-act="suppress"' + pid + '>🚫 Suppress</button>' +
+      "</div></div>";
   }
 
   function renderProspects(el) {
@@ -679,7 +702,7 @@
     return l ? (l[motion] || l.status) : s;
   }
   function mapProcessed(p) {
-    return { name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken };
+    return { name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken, prospectId: p.prospectId || (p.prospect && p.prospect.id) || null };
   }
   // shared UI states
   function loading() { return '<div class="empty">Loading…</div>'; }
