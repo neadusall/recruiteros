@@ -250,3 +250,16 @@
 .im-chip:hover { color: var(--text); border-color: var(--border-strong); transform: translateY(-1px); }
 .im-chip.active { background: var(--grad); color: #0a0a12; border-color: transparent; }
 .im-count { color: var(--text-muted); font-size: 13px; font-weight: 600; margin: 4px 0 12px; }
+
+/* ============================================================
+   Overview: lift the capacity + KPI numbers to the top so every
+   stat is fully visible without scrolling (tighter header + cards)
+   ============================================================ */
+.app .panel-wrap { padding-top: 16px; }
+#view .v-head { margin-bottom: 12px; }
+#view .v-head h2 { font-size: 19px; }
+#view .v-head p { font-size: 13px; margin-top: 2px; }
+.stat-grid { gap: 12px; }
+.stat { padding: 13px 16px; }
+.stat .sv { font-size: 25px; }
+.stat .sl { font-size: 12px; }
