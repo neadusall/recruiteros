@@ -737,4 +737,84 @@
 
   /* The ATS object map is also exposed by GET /api/ats; this local copy is only a
      fallback so the ATS screen renders if that call is briefly unavailable. */
+
+  /* ============================================================
+     Account menu (upper right): logo upload + enterprise dropdown
+     ============================================================ */
+  (function accountMenu() {
+    var btn = $("#acctBtn"), menu = $("#acctMenu"), acct = $("#acct");
+    if (!btn || !menu) return;
+
+    var name = (ctx.user && ctx.user.name) || "You";
+    var email = (ctx.user && ctx.user.email) || "you@company.com";
+    var plan = (ctx.workspace && ctx.workspace.plan) ? ctx.workspace.plan : "Workspace";
+    var inits = initials(name);
+    var LOGO_KEY = "ros_logo_" + ((ctx.workspace && ctx.workspace.id) || "ws");
+
+    var avatar = $("#acctAvatar"), avatarLg = $("#acctAvatarLg");
+    $("#acctName").textContent = name;
+    $("#acctEmail").textContent = email;
+    $("#acctPlan").textContent = plan;
+
+    function applyImg(dataUrl) {
+      [avatar, avatarLg].forEach(function (a) {
+        if (!a) return;
+        a.textContent = inits;
+        if (dataUrl) { a.style.backgroundImage = "url(" + dataUrl + ")"; a.classList.add("has-img"); }
+        else { a.style.backgroundImage = ""; a.classList.remove("has-img"); }
+      });
+    }
+    var saved = null; try { saved = localStorage.getItem(LOGO_KEY); } catch (e) {}
+    applyImg(saved);
+
+    function setOpen(o) { menu.hidden = !o; btn.setAttribute("aria-expanded", String(o)); }
+    btn.addEventListener("click", function (e) { e.stopPropagation(); setOpen(menu.hidden); });
+    document.addEventListener("click", function (e) { if (!acct.contains(e.target)) setOpen(false); });
+    window.addEventListener("keydown", function (e) { if (e.key === "Escape") setOpen(false); });
+
+    // Image upload, any size, downscaled to a 256px square data URL (cover-fit).
+    var fileInput = $("#logoFile");
+    if (fileInput) {
+      fileInput.addEventListener("change", function () {
+        var f = fileInput.files && fileInput.files[0];
+        if (!f) return;
+        if (!/^image\//.test(f.type)) { toast("Please choose an image file."); return; }
+        var reader = new FileReader();
+        reader.onload = function () {
+          var img = new Image();
+          img.onload = function () {
+            var S = 256, cv = document.createElement("canvas"); cv.width = cv.height = S;
+            var c = cv.getContext("2d");
+            var scale = Math.max(S / img.width, S / img.height);
+            var w = img.width * scale, h = img.height * scale;
+            c.drawImage(img, (S - w) / 2, (S - h) / 2, w, h);
+            var out = cv.toDataURL("image/png");
+            try { localStorage.setItem(LOGO_KEY, out); } catch (e) { toast("Image too large to save."); return; }
+            applyImg(out); toast("Logo updated");
+          };
+          img.src = reader.result;
+        };
+        reader.readAsDataURL(f);
+      });
+    }
+    var rm = $("#logoRemove");
+    if (rm) rm.addEventListener("click", function () {
+      try { localStorage.removeItem(LOGO_KEY); } catch (e) {}
+      applyImg(null); toast("Reset to initials");
+    });
+
+    Array.prototype.forEach.call(menu.querySelectorAll("[data-route]"), function (a) {
+      a.addEventListener("click", function () { setOpen(false); location.hash = a.getAttribute("data-route"); });
+    });
+    var billing = $("#billingLink");
+    if (billing) billing.addEventListener("click", function () { setOpen(false); location.hash = "accounts"; });
+
+    var ownerLink = $("#ownerLink");
+    if (ownerLink && (ctx.role === "owner" || can("workspace:delete"))) {
+      ownerLink.hidden = false;
+      ownerLink.addEventListener("click", function () { location.href = "/owner-console"; });
+    }
+    var so = $("#acctSignOut");
+    if (so) so.addEventListener("click", signOut);
+  })();
 })();

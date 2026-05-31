@@ -73,6 +73,48 @@
         <div class="spacer"></div>
         <div class="env-pill" id="envPill" title="Connection mode" style="display:none"></div>
         <a class="btn btn-primary btn-sm" id="primaryAction">＋ New campaign</a>
+
+        <!-- Account menu (upper right): logo/avatar + enterprise dropdown -->
+        <div class="acct" id="acct">
+          <button class="acct-btn" id="acctBtn" aria-haspopup="true" aria-expanded="false" title="Account & settings">
+            <span class="acct-avatar" id="acctAvatar">JD</span>
+            <span class="acct-caret">▾</span>
+          </button>
+          <div class="acct-menu" id="acctMenu" role="menu" hidden>
+            <div class="acct-head">
+              <span class="acct-avatar lg" id="acctAvatarLg">JD</span>
+              <div class="acct-id">
+                <b id="acctName">You</b>
+                <span id="acctEmail">you@company.com</span>
+                <span class="acct-plan" id="acctPlan">Workspace</span>
+              </div>
+            </div>
+
+            <label class="acct-upload" id="logoUpload">
+              <input type="file" id="logoFile" accept="image/*" hidden />
+              <span class="ic">🖼️</span>
+              <span>Change logo / photo</span>
+            </label>
+            <button class="acct-item" id="logoRemove" role="menuitem"><span class="ic">↺</span> Reset to initials</button>
+
+            <div class="acct-sep"></div>
+            <div class="acct-group">Workspace</div>
+            <a class="acct-item" data-route="accounts" role="menuitem"><span class="ic">🏢</span> Workspace &amp; branding</a>
+            <a class="acct-item" data-route="team" role="menuitem"><span class="ic">👥</span> Team &amp; roles</a>
+            <a class="acct-item" data-route="connected" role="menuitem"><span class="ic">🔌</span> Integrations</a>
+            <a class="acct-item" data-route="ats" role="menuitem"><span class="ic">🗂️</span> ATS &amp; data</a>
+
+            <div class="acct-sep"></div>
+            <div class="acct-group">Enterprise</div>
+            <a class="acct-item" id="ownerLink" role="menuitem" hidden><span class="ic">🛰️</span> Owner console</a>
+            <a class="acct-item" data-route="accounts" role="menuitem"><span class="ic">🔑</span> API keys &amp; security</a>
+            <a class="acct-item" id="billingLink" role="menuitem"><span class="ic">💳</span> Billing &amp; plan</a>
+            <a class="acct-item" href="/developers" role="menuitem"><span class="ic">⚙️</span> Developer API</a>
+
+            <div class="acct-sep"></div>
+            <button class="acct-item danger" id="acctSignOut" role="menuitem"><span class="ic">↩︎</span> Sign out</button>
+          </div>
+        </div>
       </div>
 
       <div class="panel-wrap">

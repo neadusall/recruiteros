@@ -112,6 +112,8 @@ export {
   rapidEmailFinder,
   rapidPersonEnrich,
   rapidPhoneFinder,
+  rapidMobileFinder,
+  rapidLandlineFinder,
   icypeasEmailFinder,
   emailVerifier,
   cheapFirstContactWaterfall,

@@ -144,7 +144,7 @@
         '<button class="btn btn-primary btn-sm" data-cs="launch">🚀 Activate</button>' +
       '</div>' +
     '</div>' +
-    '<div class="cs-grid">' +
+    '<div class="cs-grid" data-cs="grid">' +
       '<aside class="cs-col cs-palette"><h4 class="cs-col-title">Blocks</h4>' +
         '<input data-cs="palSearch" class="pal-search" placeholder="Search blocks..." />' +
         '<div data-cs="palette"></div></aside>' +
@@ -169,27 +169,35 @@
           '</div>' +
         '</div>' +
       '</section>' +
-      '<aside class="cs-col cs-inspector"><h4 class="cs-col-title">Campaign</h4>' +
-        '<div class="insp-field"><label>Goal</label><textarea data-cs="goal" rows="2" placeholder="Book discovery calls with VP Eng at recently funded fintechs."></textarea></div>' +
-        '<div class="insp-field"><label>Assigned to</label><select data-cs="assignee"></select></div>' +
-        '<div class="insp-field"><label>Sending account</label><select data-cs="account"></select></div>' +
-        '<div class="insp-field"><label>Daily cap (prospects/day)</label><input data-cs="cap" type="number" min="1" value="25" /></div>' +
-        '<div class="insp-field"><label>Voice-note threshold (warmth)</label><input data-cs="threshold" type="number" min="0" max="100" value="80" /></div>' +
-        '<div class="insp-node" data-cs="nodePanel" hidden>' +
-          '<h4 class="cs-col-title" style="display:flex;align-items:center;gap:8px">Selected step' +
-            '<button class="s-btn del" data-cs="nodeDel" title="Delete step" style="margin-left:auto">🗑</button></h4>' +
-          '<div class="insp-node-title" data-cs="nodeTitle"></div>' +
-          '<div data-cs="nodeConfig"></div>' +
+      '<aside class="cs-col cs-inspector" data-cs="inspector">' +
+        '<div class="insp-head">' +
+          '<button class="insp-toggle" data-cs="inspToggle" title="Collapse panel" aria-label="Collapse panel">⟩</button>' +
+          '<h4 class="cs-col-title insp-title">Campaign</h4>' +
         '</div>' +
-        '<h4 class="cs-col-title" style="margin-top:8px">Sequence stats</h4>' +
-        '<div class="insp-stats">' +
-          '<div class="stat"><span>Outreach touches</span><b data-cs="stTouches">0</b></div>' +
-          '<div class="stat"><span>Total steps</span><b data-cs="stSteps">0</b></div>' +
-          '<div class="stat"><span>Channels used</span><b data-cs="stChannels">0</b></div>' +
-          '<div class="stat"><span>Connections</span><b data-cs="stEdges">0</b></div>' +
-          '<div class="stat"><span>Span (days of waits)</span><b data-cs="stDays">0</b></div>' +
+        '<div class="insp-body" data-cs="inspBody">' +
+          '<div class="insp-field"><label>Goal</label><textarea data-cs="goal" rows="2" placeholder="Book discovery calls with VP Eng at recently funded fintechs."></textarea></div>' +
+          '<div class="insp-field"><label>Assigned to</label><select data-cs="assignee"></select></div>' +
+          '<div class="insp-field"><label>Sending account</label><select data-cs="account"></select></div>' +
+          '<div class="insp-row">' +
+            '<div class="insp-field"><label>Daily cap</label><input data-cs="cap" type="number" min="1" value="25" title="Prospects per day" /></div>' +
+            '<div class="insp-field"><label>Voice threshold</label><input data-cs="threshold" type="number" min="0" max="100" value="80" title="Warmth score that unlocks a voice note" /></div>' +
+          '</div>' +
+          '<div class="insp-node" data-cs="nodePanel" hidden>' +
+            '<h4 class="cs-col-title" style="display:flex;align-items:center;gap:8px">Selected step' +
+              '<button class="s-btn del" data-cs="nodeDel" title="Delete step" style="margin-left:auto">🗑</button></h4>' +
+            '<div class="insp-node-title" data-cs="nodeTitle"></div>' +
+            '<div data-cs="nodeConfig"></div>' +
+          '</div>' +
+          '<h4 class="cs-col-title" style="margin-top:8px">Sequence stats</h4>' +
+          '<div class="insp-stats">' +
+            '<div class="stat"><span>Outreach touches</span><b data-cs="stTouches">0</b></div>' +
+            '<div class="stat"><span>Total steps</span><b data-cs="stSteps">0</b></div>' +
+            '<div class="stat"><span>Channels used</span><b data-cs="stChannels">0</b></div>' +
+            '<div class="stat"><span>Connections</span><b data-cs="stEdges">0</b></div>' +
+            '<div class="stat"><span>Span (days of waits)</span><b data-cs="stDays">0</b></div>' +
+          '</div>' +
+          '<div class="mix-bar" data-cs="mixBar"></div><div class="mix-legend" data-cs="mixLegend"></div>' +
         '</div>' +
-        '<div class="mix-bar" data-cs="mixBar"></div><div class="mix-legend" data-cs="mixLegend"></div>' +
       '</aside>' +
     '</div>' +
     '<div class="cs-modal" data-cs="libModal"><div class="cs-modal-card">' +
@@ -505,6 +513,22 @@
       $("full").innerHTML = on ? "⤡ Exit full screen" : "⛶ Full screen";
       setTimeout(fit, 60);
     }
+
+    /* ---------- inspector collapse (more room for the canvas) ---------- */
+    function setInspector(collapsed) {
+      $("grid").classList.toggle("insp-collapsed", collapsed);
+      var btn = $("inspToggle");
+      btn.innerHTML = collapsed ? "⟨" : "⟩";
+      btn.title = collapsed ? "Expand panel" : "Collapse panel";
+      try { localStorage.setItem("cs_insp_collapsed", collapsed ? "1" : "0"); } catch (e) {}
+      setTimeout(fit, 180);
+    }
+    $("inspToggle").addEventListener("click", function () {
+      setInspector(!$("grid").classList.contains("insp-collapsed"));
+    });
+    var inspStart = false;
+    try { inspStart = localStorage.getItem("cs_insp_collapsed") === "1"; } catch (e) {}
+    if (inspStart) setInspector(true);
 
     /* ---------- inspector: selected node config ---------- */
     function renderInspectorNode() {

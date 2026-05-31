@@ -65,7 +65,11 @@ export interface EstimateOptions {
   emailsPerMonth: number;
   /** Override the default sequence length (sends per prospect). */
   sequenceStepsPerProspect?: number;
-  /** Pull phones too (recruiting often wants this; expensive). */
+  /** Pull mobile numbers (separate, expensive, low-yield on the cheap tier). */
+  wantMobile?: boolean;
+  /** Pull landline / direct-dial numbers (separate from mobile). */
+  wantLandline?: boolean;
+  /** Back-compat alias: pull BOTH mobile and landline. */
   wantPhone?: boolean;
   /** Run AI first-line personalization (default true). */
   aiPersonalize?: boolean;
@@ -119,7 +123,11 @@ export function estimateCost(opts: EstimateOptions): CostBreakdown {
   // Enrichment — per unique prospect.
   add("email_find", "Email find (waterfall)", "enrichment", prospects, "emails");
   add("email_verify", "Email verification", "enrichment", prospects, "emails");
-  if (opts.wantPhone) add("phone_find", "Phone find + validate", "enrichment", prospects, "phones");
+  // Phone is split into separate mobile + landline fields, each opt-in.
+  const wantMobile = opts.wantMobile ?? opts.wantPhone ?? false;
+  const wantLandline = opts.wantLandline ?? opts.wantPhone ?? false;
+  if (wantMobile) add("mobile_find", "Mobile phone find", "enrichment", prospects, "mobiles");
+  if (wantLandline) add("landline_find", "Landline / direct-dial find", "enrichment", prospects, "landlines");
 
   // AI — first-touch personalization per prospect + reply handling.
   if (opts.aiPersonalize !== false) {

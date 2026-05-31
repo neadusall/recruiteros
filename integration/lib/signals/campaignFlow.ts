@@ -40,7 +40,7 @@ export type CampaignState =
 export interface PreparedTarget {
   target: CampaignTarget;
   /** Resolved contact fields from the waterfall (email/phone/domain), if found. */
-  contact?: { email?: string; phone?: string; confidence?: number; cost?: number };
+  contact?: { email?: string; phone?: string; mobilePhone?: string; landlinePhone?: string; confidence?: number; cost?: number };
   /** The drafted, signal-grounded outreach sequence. */
   sequence?: DraftedSequence;
   /** Why a target was dropped from launch (no reachable contact, etc.). */
@@ -107,12 +107,19 @@ export async function prepareCampaign(
         const report = await deps.enrichSubject(subject);
         enrichmentCostUsd += report.totalCost;
         const email = report.resolved.email?.value as string | undefined;
-        const phone = report.resolved.phone?.value as string | undefined;
+        // Mobile and landline are resolved as separate fields; the generic
+        // `phone` field is the legacy single number. Primary phone = mobile first.
+        const mobilePhone = report.resolved.mobilePhone?.value as string | undefined;
+        const landlinePhone = report.resolved.landlinePhone?.value as string | undefined;
+        const genericPhone = report.resolved.phone?.value as string | undefined;
+        const phone = mobilePhone ?? landlinePhone ?? genericPhone;
         if (email || phone) {
           contact = {
             email,
             phone,
-            confidence: report.resolved.email?.confidence ?? report.resolved.phone?.confidence,
+            mobilePhone,
+            landlinePhone,
+            confidence: report.resolved.email?.confidence ?? report.resolved.mobilePhone?.confidence ?? report.resolved.phone?.confidence,
             cost: report.totalCost,
           };
         }

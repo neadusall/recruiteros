@@ -110,7 +110,12 @@ export interface Prospect {
   firstName: string;
   email?: string;
   linkedinUrl?: string;
+  /** Primary outreach number (SMS/voice). Defaults to mobile when known. */
   phone?: string;
+  /** Mobile number, enriched as its own field (separate provider rung). */
+  mobilePhone?: string;
+  /** Landline / direct-dial number, enriched separately from mobile. */
+  landlinePhone?: string;
   company?: string;
   title?: string;
   /** ICP category bucket this prospect was matched into. */

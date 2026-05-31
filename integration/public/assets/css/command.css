@@ -133,3 +133,53 @@
 .empty { color: var(--text-dim); text-align: center; padding: 36px 0; font-size: 14px; }
 .muted { color: var(--text-muted); }
 .spark { color: var(--brand-2); }
+
+/* ============================================================
+   Account menu (topbar, upper right) + enterprise dropdown
+   ============================================================ */
+.acct { position: relative; margin-left: 6px; }
+.acct-btn {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border-strong);
+  border-radius: 999px; padding: 4px 8px 4px 4px; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.acct-btn:hover { background: rgba(255,255,255,0.08); border-color: var(--brand); }
+.acct-caret { color: var(--text-dim); font-size: 11px; }
+
+/* Avatar shows an uploaded image (cover) or falls back to initials text */
+.acct-avatar {
+  width: 30px; height: 30px; border-radius: 50%;
+  display: grid; place-items: center; flex: none;
+  font-size: 12px; font-weight: 700; color: #0a0a12;
+  background: var(--grad); background-size: cover; background-position: center;
+  overflow: hidden;
+}
+.acct-avatar.has-img { color: transparent; }
+.acct-avatar.lg { width: 44px; height: 44px; font-size: 16px; }
+
+.acct-menu {
+  position: absolute; top: calc(100% + 10px); right: 0; width: 290px; z-index: 80;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 14px; box-shadow: var(--shadow); padding: 8px;
+  animation: acctIn .14s ease;
+}
+@keyframes acctIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.acct-menu[hidden] { display: none; }
+
+.acct-head { display: flex; gap: 12px; align-items: center; padding: 10px 10px 12px; }
+.acct-id { min-width: 0; }
+.acct-id b { display: block; font-size: 14px; }
+.acct-id span { display: block; font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-plan { margin-top: 4px; display: inline-block !important; font-size: 10px !important; text-transform: uppercase; letter-spacing: .06em; color: #b9a6ff !important; background: rgba(124,92,255,0.14); border: 1px solid rgba(124,92,255,0.3); padding: 2px 8px; border-radius: 999px; }
+
+.acct-upload, .acct-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 9px 10px; border-radius: 9px; font-size: 13.5px; color: var(--text-muted);
+  background: none; border: none; cursor: pointer;
+}
+.acct-upload:hover, .acct-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+.acct-item .ic, .acct-upload .ic { width: 18px; text-align: center; }
+.acct-item.danger:hover { color: var(--accent-red); background: rgba(255,107,107,0.08); }
+.acct-sep { height: 1px; background: var(--border); margin: 6px 4px; }
+.acct-group { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-dim); font-weight: 700; padding: 8px 10px 4px; }

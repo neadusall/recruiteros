@@ -21,7 +21,9 @@ export async function GET(req: Request) {
   const sharedOpts = {
     rateOverrides: cfg.rateOverrides,
     constants: cfg.constants,
-    wantPhone: boolParam(url, "phone"),
+    // Mobile + landline are separate opt-ins; ?phone=1 enables both (back-compat).
+    wantMobile: boolParam(url, "mobile") || boolParam(url, "phone"),
+    wantLandline: boolParam(url, "landline") || boolParam(url, "phone"),
     aiPersonalize: url.searchParams.has("ai") ? boolParam(url, "ai") : true,
     sequenceStepsPerProspect: numParam(url, "steps") || undefined,
     targetGrossMargin: margin || undefined,

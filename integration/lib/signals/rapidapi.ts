@@ -237,6 +237,72 @@ export const rapidPhoneFinder: EnrichmentProvider<PhoneResult> = makeProvider<Ph
 });
 
 /* ------------------------------------------------------------------ */
+/* Stage 3a/3b — SEPARATE mobile + landline finders (placeholder rungs) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Mobile and landline are resolved as SEPARATE fields, each with its own
+ * env-configured RapidAPI listing, so you can point a better/dedicated provider
+ * at each line type as you find cheap ones. Both are placeholders until you set
+ * their host/path; until then they report "not configured" and the waterfall
+ * simply skips them. The generic `rapidPhoneFinder` above still exists for the
+ * legacy single-`phone` field.
+ *
+ *   Mobile:   RAPIDAPI_MOBILE_HOST   + RAPIDAPI_MOBILE_PATH
+ *   Landline: RAPIDAPI_LANDLINE_HOST + RAPIDAPI_LANDLINE_PATH
+ *   Path templates accept {name} {company} {domain} {linkedin} placeholders, e.g.
+ *     "/find?name={name}&company={company}&domain={domain}"
+ */
+function makeLineFinder(
+  id: string,
+  label: string,
+  hostKey: string,
+  pathKey: string,
+): EnrichmentProvider<string> {
+  return makeProvider<string>({
+    id,
+    label,
+    cost: 1,
+    typicalConfidence: 0.45,
+    envKeys: ["RAPIDAPI_KEY", hostKey, pathKey],
+    fn: async ({ subject, resolved }: EnrichmentInput): Promise<ProviderOutcome<string>> => {
+      const host = process.env[hostKey]!;
+      const tpl = process.env[pathKey]!;
+      const name = String(subject.fullName ?? "");
+      const company = String(subject.companyName ?? "");
+      const linkedin = String(subject.linkedinUrl ?? "");
+      const domain = (resolved.domain?.value as string | undefined) ?? String(subject.domain ?? "");
+      if (!name && !company && !domain && !linkedin) return { status: "miss" };
+      const path = tpl
+        .replace("{name}", encodeURIComponent(name))
+        .replace("{company}", encodeURIComponent(company))
+        .replace("{domain}", encodeURIComponent(domain))
+        .replace("{linkedin}", encodeURIComponent(linkedin));
+      const data = await rapidGet<unknown>(host, path);
+      const number = pick(data, ["mobile", "cell", "phone", "phone_number", "direct_dial", "number"]);
+      if (!number) return { status: "miss", cost: 1 };
+      return { status: "hit", value: number, confidence: 0.5, cost: 1, raw: data };
+    },
+  });
+}
+
+/** Mobile-number finder. Configure RAPIDAPI_MOBILE_HOST / RAPIDAPI_MOBILE_PATH. */
+export const rapidMobileFinder: EnrichmentProvider<string> = makeLineFinder(
+  "rapidapi_mobile",
+  "RapidAPI mobile lookup",
+  "RAPIDAPI_MOBILE_HOST",
+  "RAPIDAPI_MOBILE_PATH",
+);
+
+/** Landline / direct-dial finder. Configure RAPIDAPI_LANDLINE_HOST / RAPIDAPI_LANDLINE_PATH. */
+export const rapidLandlineFinder: EnrichmentProvider<string> = makeLineFinder(
+  "rapidapi_landline",
+  "RapidAPI landline / direct-dial lookup",
+  "RAPIDAPI_LANDLINE_HOST",
+  "RAPIDAPI_LANDLINE_PATH",
+);
+
+/* ------------------------------------------------------------------ */
 /* Stage 1c — Icypeas: the cheapest CREDIBLE email API (recommended)   */
 /* ------------------------------------------------------------------ */
 
@@ -340,10 +406,18 @@ export interface CheapFirstOptions {
   /** Premium providers used ONLY as a backup, appended after the cheap tier. */
   backupEmailProviders?: EnrichmentProvider[];
   backupPhoneProviders?: EnrichmentProvider[];
+  /** Premium MOBILE backups, appended after the cheap mobile finder. */
+  backupMobileProviders?: EnrichmentProvider[];
+  /** Premium LANDLINE backups, appended after the cheap landline finder. */
+  backupLandlineProviders?: EnrichmentProvider[];
   /** Extra cheap email finders to try in order before the backups (RapidAPI listings). */
   extraEmailFinders?: EnrichmentProvider[];
-  /** Include the phone waterfall (off by default — phone is costly + low-yield). */
+  /** Legacy single-field phone waterfall (off by default — costly + low-yield). */
   includePhone?: boolean;
+  /** Resolve a MOBILE number into its own field (off by default). */
+  includeMobile?: boolean;
+  /** Resolve a LANDLINE / direct-dial number into its own field (off by default). */
+  includeLandline?: boolean;
   /** Global credit ceiling across the whole pipeline. */
   budget?: number;
 }
@@ -398,6 +472,31 @@ export function cheapFirstContactWaterfall(opts: CheapFirstOptions = {}): Enrich
         ...(opts.backupPhoneProviders ?? []), // premium phone backup
       ],
       mode: "first", // take the first usable number; phone calls are costly
+      acceptConfidence: 0.5,
+    });
+  }
+
+  // Mobile and landline are SEPARATE fields with their own cheap-first rung +
+  // premium backup, so each line type can be enriched (and priced) independently.
+  if (opts.includeMobile) {
+    steps.push({
+      field: "mobilePhone",
+      providers: [
+        rapidMobileFinder as EnrichmentProvider, // cheap first (placeholder until configured)
+        ...(opts.backupMobileProviders ?? []), // premium mobile reveal on miss
+      ],
+      mode: "first",
+      acceptConfidence: 0.5,
+    });
+  }
+  if (opts.includeLandline) {
+    steps.push({
+      field: "landlinePhone",
+      providers: [
+        rapidLandlineFinder as EnrichmentProvider, // cheap first (placeholder until configured)
+        ...(opts.backupLandlineProviders ?? []), // premium direct-dial reveal on miss
+      ],
+      mode: "first",
       acceptConfidence: 0.5,
     });
   }

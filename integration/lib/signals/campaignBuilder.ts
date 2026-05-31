@@ -245,7 +245,7 @@ function computeStats(considered: number, matched: number, targets: CampaignTarg
 function estimateCost(targets: CampaignTarget[], opts: BuildOptions): CostEstimate {
   const assumptions = {
     emailPerContactUsd: opts.costAssumptions?.emailPerContactUsd ?? 0.006, // Icypeas + verify, blended
-    phonePerContactUsd: opts.costAssumptions?.phonePerContactUsd ?? 0.25, // cheap marketplace + validate
+    phonePerContactUsd: opts.costAssumptions?.phonePerContactUsd ?? 0.02, // cheap-first RapidAPI lookup (mobile + landline enriched as separate fields downstream)
   };
   const emailsToFind = targets.filter((t) => t.needs.email).length;
   const phonesToFind = opts.wantPhone ? targets.filter((t) => t.needs.phone).length : 0;

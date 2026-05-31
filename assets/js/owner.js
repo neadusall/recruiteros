@@ -127,7 +127,8 @@
         fld("Target margin %", '<input id="cMargin" type="number" min="0" max="95" value="' + (Math.round((getParam("margin") || 0.85) * 100)) + '">') +
         fld("Operating system", '<select id="cMotion"><option value="recruiting">Recruiting OS</option><option value="bd">Business Development OS</option></select>') +
         '</div><div class="toggle-row" style="margin-top:12px">' +
-        '<label><input type="checkbox" id="cPhone"> Include phone enrichment</label>' +
+        '<label><input type="checkbox" id="cMobile"> Mobile enrichment</label>' +
+        '<label><input type="checkbox" id="cLandline"> Landline enrichment</label>' +
         '<label><input type="checkbox" id="cAi" checked> AI personalization</label>' +
         '<a class="btn btn-primary btn-sm" id="cRun">Recalculate</a></div>';
       if (p.calculator) html += '<div id="calcOut" style="margin-top:14px">' + recoCard(p.calculator, "Calculated") + '</div>';
@@ -144,7 +145,8 @@
 
       $("#view").innerHTML = html;
       var motionSel = $("#cMotion"); if (motionSel && getParam("motion")) motionSel.value = getParam("motion");
-      if ($("#cPhone")) $("#cPhone").checked = getParam("phone") === "1";
+      if ($("#cMobile")) $("#cMobile").checked = getParam("mobile") === "1" || getParam("phone") === "1";
+      if ($("#cLandline")) $("#cLandline").checked = getParam("landline") === "1" || getParam("phone") === "1";
       if ($("#cAi")) $("#cAi").checked = getParam("ai") !== "0";
       if ($("#cRun")) $("#cRun").addEventListener("click", runCalc);
     }).catch(fail);
@@ -161,7 +163,8 @@
     params.set("steps", $("#cSteps").value || "3");
     params.set("margin", ((Number($("#cMargin").value) || 85) / 100).toString());
     params.set("motion", $("#cMotion").value);
-    params.set("phone", $("#cPhone").checked ? "1" : "0");
+    params.set("mobile", $("#cMobile").checked ? "1" : "0");
+    params.set("landline", $("#cLandline").checked ? "1" : "0");
     params.set("ai", $("#cAi").checked ? "1" : "0");
     location.hash = "pricing?" + params.toString();
   }
