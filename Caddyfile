@@ -1,0 +1,6 @@
+# Automatic HTTPS for both apex and www. Caddy fetches and renews the
+# Let's Encrypt certificate on its own once DNS points here.
+recruiteros.co, www.recruiteros.co {
+	encode zstd gzip
+	reverse_proxy app:3000
+}

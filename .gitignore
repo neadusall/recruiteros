@@ -18,3 +18,7 @@ dist/
 .git-commit-msg.txt
 integration/build-out.txt
 integration/srv.log
+.env.production
+*.env
+integration/.next
+node_modules
