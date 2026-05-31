@@ -188,3 +188,8 @@
 .acct-item.danger:hover { color: var(--accent-red); background: rgba(255,107,107,0.08); }
 .acct-sep { height: 1px; background: var(--border); margin: 6px 4px; }
 .acct-group { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-dim); font-weight: 700; padding: 8px 10px 4px; }
+
+/* Working pipeline stage selector in Prospects */
+.stage-select { border: 1px solid var(--border-strong); border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; background: var(--surface); color: var(--text); cursor: pointer; }
+.stage-select:hover { border-color: var(--brand); }
+.stage-select:disabled { opacity: .5; cursor: default; }

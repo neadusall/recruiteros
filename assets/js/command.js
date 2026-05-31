@@ -264,25 +264,46 @@
     el.innerHTML = head("Prospects", "Your live pipeline, synced bidirectionally with the ATS.") +
       '<div id="prBody">' + loading() + "</div>";
 
-    api("/prospects").then(function (d) {
-      var list = (d && d.prospects) || [];
-      var lifecycle = (d && d.lifecycle) || REF.lifecycle;
-      var counts = list.reduce(function (m, p) { m[p.status] = (m[p.status] || 0) + 1; return m; }, {});
-      var stages = lifecycle.map(function (l) {
-        return '<div class="stage"><b>' + (counts[l.status] || 0) + "</b><span>" + esc(l[motion] || l.status) + "</span></div>";
-      }).join("");
-      var rows = list.map(function (p) {
-        return '<div class="list-row"><span class="avatar" style="width:28px;height:28px;font-size:11px;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) + "</span>" +
-          '<div><div class="lr-main">' + esc(p.fullName) + '</div><div class="lr-sub">' + esc((p.title || "") + (p.company ? " · " + p.company : "")) + "</div></div>" +
-          '<span class="cls cls-' + statusCls(p.status) + '" style="margin-left:auto">' + esc(statusLabel(p.status, lifecycle)) + "</span>" +
-          '<div class="lr-right">' + (p.dripStage ? "Touch " + p.dripStage : "") + "</div></div>";
-      }).join("");
-      var body = $("#prBody"); if (!body) return;
-      body.innerHTML = '<div class="pipe">' + stages + "</div>" +
-        '<div class="card"><h3>Pipeline</h3>' + (rows ||
-          '<div class="empty">No prospects yet. Add one with the button above, bulk-import a CSV, or let a campaign discover them.</div>') + "</div>";
-    }).catch(function () { var b = $("#prBody"); if (b) b.innerHTML = needsSetup(); });
+    function load() {
+      api("/prospects").then(function (d) {
+        var list = (d && d.prospects) || [];
+        var lifecycle = (d && d.lifecycle) || REF.lifecycle;
+        var counts = list.reduce(function (m, p) { m[p.status] = (m[p.status] || 0) + 1; return m; }, {});
+        var stages = lifecycle.map(function (l) {
+          return '<div class="stage"><b>' + (counts[l.status] || 0) + "</b><span>" + esc(l[motion] || l.status) + "</span></div>";
+        }).join("");
+        var rows = list.map(function (p) {
+          var opts = lifecycle.map(function (l) {
+            return '<option value="' + esc(l.status) + '"' + (l.status === p.status ? " selected" : "") + ">" + esc(l[motion] || l.status) + "</option>";
+          }).join("");
+          return '<div class="list-row"><span class="avatar" style="width:28px;height:28px;font-size:11px;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) + "</span>" +
+            '<div><div class="lr-main">' + esc(p.fullName) + '</div><div class="lr-sub">' + esc((p.title || "") + (p.company ? " · " + p.company : "")) + "</div></div>" +
+            '<select class="stage-select cls cls-' + statusCls(p.status) + '" data-pid="' + esc(p.id) + '" style="margin-left:auto">' + opts + "</select>" +
+            '<div class="lr-right">' + (p.dripStage ? "Touch " + p.dripStage : "") + "</div></div>";
+        }).join("");
+        var body = $("#prBody"); if (!body) return;
+        body.innerHTML = '<div class="pipe">' + stages + "</div>" +
+          '<div class="card"><h3>Pipeline</h3>' + (rows ||
+            '<div class="empty">No prospects yet. Click ＋ Add prospect above, or build a target list in the Target Builder.</div>') + "</div>";
+
+        // Working stage transitions: change the dropdown -> persist via the API.
+        Array.prototype.forEach.call(body.querySelectorAll(".stage-select"), function (sel) {
+          sel.addEventListener("change", function () {
+            var pid = sel.getAttribute("data-pid"), status = sel.value;
+            sel.disabled = true;
+            send("/prospects", "POST", { action: "transition", prospectId: pid, status: status })
+              .then(function (r) {
+                if (r.ok) { toast("Moved to " + statusLabel(status, lifecycle)); load(); }
+                else { toast("Could not update (" + (r.data.error || r.status) + ")"); sel.disabled = false; }
+              }).catch(function () { toast("Could not reach the server."); sel.disabled = false; });
+          });
+        });
+      }).catch(function () { var b = $("#prBody"); if (b) b.innerHTML = needsSetup(); });
+    }
+    load();
+    prospectsReload = load;
   }
+  var prospectsReload = null;
 
   function renderCampaigns(el) {
     // Campaigns saved from the drag-and-drop Campaign Studio (localStorage), newest first.
@@ -614,16 +635,29 @@
   }
 
   function addProspect() {
-    var name = prompt("Prospect full name:"); if (!name) return;
-    var email = prompt("Email (optional):") || undefined;
-    var company = prompt("Company (optional):") || undefined;
-    var saved = [];
-    try { saved = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); } catch (e) {}
-    var campaignId = (saved[0] && saved[0].id) || prompt("Campaign id to add them to:");
-    if (!campaignId) { toast("Create a campaign first."); return; }
-    send("/prospects", "POST", { fullName: name, email: email, company: company, campaignId: campaignId })
-      .then(function (r) { if (r.ok) { toast("Prospect added"); renderProspects($("#view")); } else toast("Could not add (" + (r.data.error || r.status) + ")"); })
-      .catch(function () { toast("Could not reach the server."); });
+    // Pull real campaigns from the API so this works on any device.
+    api("/campaigns").then(function (d) {
+      var camps = ((d && d.campaigns) || []).filter(function (c) { return c.motion === motion; });
+      if (!camps.length) { toast("Create a campaign first (＋ New campaign)."); location.hash = "campaigns"; return; }
+      var name = prompt("Prospect full name:"); if (!name) return;
+      var email = prompt("Email (optional):") || undefined;
+      var company = prompt("Company (optional):") || undefined;
+      var campaignId;
+      if (camps.length === 1) campaignId = camps[0].id;
+      else {
+        var menu = camps.map(function (c, i) { return (i + 1) + ". " + c.name; }).join("\n");
+        var pick = prompt("Add to which campaign?\n" + menu + "\n\nEnter a number:", "1");
+        var idx = parseInt(pick, 10) - 1;
+        if (isNaN(idx) || !camps[idx]) return;
+        campaignId = camps[idx].id;
+      }
+      send("/prospects", "POST", { fullName: name, email: email, company: company, campaignId: campaignId })
+        .then(function (r) {
+          if (r.ok) { toast("Prospect added"); if (prospectsReload) prospectsReload(); else renderProspects($("#view")); }
+          else toast("Could not add (" + (r.data.error || r.status) + ")");
+        })
+        .catch(function () { toast("Could not reach the server."); });
+    }).catch(function () { toast("Could not reach the server."); });
   }
 
   function addAsset() {
