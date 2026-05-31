@@ -1,0 +1,248 @@
+/**
+ * RecruiterOS · Billing · Cost-rate catalog (OWNER ONLY)
+ *
+ * The single source of truth for what every action ACTUALLY costs us. Every
+ * number here is a real unit cost (USD), not a price we charge. The owner
+ * console reads this to compute per-account cost, recommended pricing, and
+ * gross margin, and can override any rate at runtime (persisted snapshot).
+ *
+ * Philosophy carried from the rest of the engine: signals are FREE (public
+ * ATS + government + RSS), contact enrichment is CHEAPEST-FIRST (a waterfall
+ * blended cost, not a premium-provider price), and sending goes through the
+ * customer's own warmed inboxes (so the marginal send cost is the inbox, not a
+ * per-email API fee). These defaults are intentionally conservative (rounded
+ * UP) so the margin we quote is the floor, not the ceiling.
+ */
+
+export type RateCategory =
+  | "enrichment"
+  | "sending"
+  | "ai"
+  | "signals"
+  | "linkedin"
+  | "messaging"
+  | "infra";
+
+/** One cost driver. `unitCostUsd` is what WE pay per `unit`. */
+export interface CostRate {
+  id: string;
+  label: string;
+  category: RateCategory;
+  /** USD we pay per unit. 0 = free (e.g. public signal sources). */
+  unitCostUsd: number;
+  /** Human unit, for the UI ("per email resolved", "per inbox / month"). */
+  unit: string;
+  /** Where the number comes from / how to defend it in a board meeting. */
+  note: string;
+  /** Whether this cost scales per-prospect, per-send, or is fixed monthly. */
+  scales: "per_prospect" | "per_send" | "per_reply" | "monthly_capacity" | "monthly_fixed";
+}
+
+/**
+ * Capacity / behavioural constants used by the pricing math (not direct costs).
+ * Tunable in the console alongside the rates.
+ */
+export interface PricingConstants {
+  /** Sends per prospect across a sequence (drives unique-prospect count). */
+  sequenceStepsPerProspect: number;
+  /** Safe cold sends per warmed inbox per month (deliverability ceiling). */
+  sendsPerInboxMonth: number;
+  /** Inboxes hosted per sending domain (reference Accounts tab uses 3). */
+  inboxesPerDomain: number;
+  /** Share of prospects that reply (drives AI reply-classification volume). */
+  replyRate: number;
+  /** Target gross margin used to recommend a price (0..1). */
+  targetGrossMargin: number;
+  /** Email-find hit rate of the cheap-first waterfall (for coverage notes). */
+  emailWaterfallHitRate: number;
+}
+
+export const DEFAULT_CONSTANTS: PricingConstants = {
+  sequenceStepsPerProspect: 3,
+  sendsPerInboxMonth: 750,
+  inboxesPerDomain: 3,
+  replyRate: 0.04,
+  targetGrossMargin: 0.85,
+  emailWaterfallHitRate: 0.88,
+};
+
+/**
+ * Default unit costs. Edit here to change the shipped baseline; override at
+ * runtime via the console (PATCH /api/owner/costs) to tune without a deploy.
+ */
+export const DEFAULT_RATES: CostRate[] = [
+  // ---- Enrichment (the dominant variable cost; scales per unique prospect) ----
+  {
+    id: "email_find",
+    label: "Email find (waterfall)",
+    category: "enrichment",
+    unitCostUsd: 0.006,
+    unit: "per email resolved",
+    note: "Cheapest-first waterfall (RapidAPI listings + Icypeas-class ~$0.003) blended across a 3-5 provider fallthrough. No single source beats ~50% coverage; the waterfall reaches 80-95%.",
+    scales: "per_prospect",
+  },
+  {
+    id: "email_verify",
+    label: "Email verification",
+    category: "enrichment",
+    unitCostUsd: 0.001,
+    unit: "per email verified",
+    note: "Bulk SMTP/MX verification (e.g. Tomba/bouncer-class). Protects deliverability before a send touches a warmed inbox.",
+    scales: "per_prospect",
+  },
+  {
+    id: "phone_find",
+    label: "Phone find + validate (cheap-first, optional)",
+    category: "enrichment",
+    unitCostUsd: 0.02,
+    unit: "per phone resolved",
+    note: "Cheap-first RapidAPI phone-lookup listing at $0.004-0.02 PER CALL (rapidPhoneFinder). Marketplace phone hit rate is low (~30-50%) and you pay for misses, so blended ~$0.02-0.04 per resolved number incl. a validate pass. This is the DEFAULT phone path. OFF by default; switch on per campaign.",
+    scales: "per_prospect",
+  },
+  {
+    id: "phone_premium_backup",
+    label: "Phone — premium reveal (backup, on miss only)",
+    category: "enrichment",
+    unitCostUsd: 0.2,
+    unit: "per phone resolved",
+    note: "Premium direct-dial reveal (PDL / Apollo / ContactOut class), $0.10-0.78 each. ONLY reached when the cheap RapidAPI lookup misses, as a backup. NOT included in the base cost estimate — shown here so the fallback tier is auditable.",
+    scales: "per_prospect",
+  },
+
+  // ---- Sending (own warmed inboxes; marginal cost is the mailbox, not the API) ----
+  {
+    id: "inbox_month",
+    label: "Mailbox (sending inbox)",
+    category: "sending",
+    unitCostUsd: 2.5,
+    unit: "per inbox / month",
+    note: "Reseller Google Workspace / Microsoft 365 mailbox ($1.50-3). We provision enough warmed inboxes to carry the monthly send volume at a safe per-inbox rate.",
+    scales: "monthly_capacity",
+  },
+  {
+    id: "domain_month",
+    label: "Sending domain",
+    category: "sending",
+    unitCostUsd: 1.0,
+    unit: "per domain / month",
+    note: "Throwaway sending domain ($8-12/yr amortized) hosting ~3 inboxes each, kept separate from the primary domain to protect reputation.",
+    scales: "monthly_capacity",
+  },
+
+  // ---- AI (Claude; only first-touch personalization + reply handling scale) ----
+  {
+    id: "ai_personalize",
+    label: "AI personalization (first line)",
+    category: "ai",
+    unitCostUsd: 0.004,
+    unit: "per prospect",
+    note: "Claude Sonnet rapport-ladder first line, system prompt cached. ~800 in / 150 out tokens. Runs once per prospect, not per send.",
+    scales: "per_prospect",
+  },
+  {
+    id: "ai_classify_reply",
+    label: "AI reply classification",
+    category: "ai",
+    unitCostUsd: 0.001,
+    unit: "per reply processed",
+    note: "6-class response routing (interested / OOO / referral / not-now / no / unsub). Small prompt, only fires on actual replies.",
+    scales: "per_reply",
+  },
+
+  // ---- Person enrichment (put a NAME on a company-level free signal) ----
+  {
+    id: "person_enrich",
+    label: "Person enrich (Fresh LinkedIn data, optional)",
+    category: "enrichment",
+    unitCostUsd: 0.005,
+    unit: "per profile resolved",
+    note: "Fresh LinkedIn Profile Data on RapidAPI (~$49/mo for 10k credits = ~$0.005/lookup). Only needed when a free signal is company-level and we must resolve the hiring manager's name before the email step. NOT in the base estimate; add when a campaign sources company-level signals.",
+    scales: "per_prospect",
+  },
+
+  // ---- Signals (FREE public sources by default; one cheap paid augment) ----
+  {
+    id: "signals_free",
+    label: "Hiring/intent signals (public sources)",
+    category: "signals",
+    unitCostUsd: 0.0,
+    unit: "per signal",
+    note: "Greenhouse/Lever/Ashby/Workable/SmartRecruiters/Recruitee public boards, SEC EDGAR, WARN, USAspending, HN who-is-hiring, GitHub, Google News RSS. $0 marginal cost by design.",
+    scales: "per_prospect",
+  },
+  {
+    id: "signal_paid_api",
+    label: "Paid signal augment (RapidAPI JSearch, optional)",
+    category: "signals",
+    unitCostUsd: 0.002,
+    unit: "per search",
+    note: "RapidAPI JSearch job scraper (~$25-50/mo flat, or a few tenths of a cent per search). A cheap augment to the free boards for cross-board role coverage. NOT in the base estimate; free sources lead.",
+    scales: "per_prospect",
+  },
+
+  // ---- LinkedIn (per-seat SaaS, not per-message; Alfred internal is free) ----
+  {
+    id: "linkedin_seat_month",
+    label: "LinkedIn automation seat (optional)",
+    category: "linkedin",
+    unitCostUsd: 0.0,
+    unit: "per account / month",
+    note: "Alfred (internal engine) carries this at $0 = the default. Paid alternatives if a customer routes LinkedIn elsewhere: Unipile (~$10-30 per connected account/mo) or SalesRobot (~$99/mo per seat). Flat SaaS, does NOT scale per prospect.",
+    scales: "monthly_fixed",
+  },
+  {
+    id: "email_platform_month",
+    label: "Email sending platform (Instantly, optional)",
+    category: "sending",
+    unitCostUsd: 0.0,
+    unit: "per workspace / month",
+    note: "Default sending is the customer's own warmed inboxes ($0 platform fee). Instantly is an OPTIONAL alternative at ~$37-97/mo flat (Growth/Hypergrowth) if a customer prefers a managed sender. Flat SaaS, not per email.",
+    scales: "monthly_fixed",
+  },
+
+  // ---- Messaging (Telnyx; only if the AI SMS 'Money Maker' / voice is used) ----
+  {
+    id: "sms_segment",
+    label: "SMS segment (Telnyx)",
+    category: "messaging",
+    unitCostUsd: 0.004,
+    unit: "per segment",
+    note: "Telnyx A2P 10DLC outbound segment + carrier fees. Optional; only the AI SMS feature spends here.",
+    scales: "per_send",
+  },
+  {
+    id: "voice_minute",
+    label: "Voice minute (Telnyx)",
+    category: "messaging",
+    unitCostUsd: 0.007,
+    unit: "per minute",
+    note: "Telnyx outbound per-minute incl. Premium AMD. Optional; only the voice dialer spends here.",
+    scales: "per_send",
+  },
+
+  // ---- Infra (hosting/db/monitoring, allocated per active account) ----
+  {
+    id: "platform_account_month",
+    label: "Platform infra (allocated)",
+    category: "infra",
+    unitCostUsd: 4.0,
+    unit: "per active account / month",
+    note: "Hetzner VPS + Postgres + monitoring + email seam, divided across active accounts. Drops per-account as you scale.",
+    scales: "monthly_fixed",
+  },
+];
+
+/** Map id -> rate, applying any runtime overrides on top of the defaults. */
+export function resolveRates(overrides?: Record<string, number>): Record<string, CostRate> {
+  const map: Record<string, CostRate> = {};
+  for (const r of DEFAULT_RATES) {
+    map[r.id] = overrides && r.id in overrides ? { ...r, unitCostUsd: overrides[r.id] } : r;
+  }
+  return map;
+}
+
+/** Convenience: a single rate's unit cost with overrides applied. */
+export function rateCost(id: string, overrides?: Record<string, number>): number {
+  if (overrides && id in overrides) return overrides[id];
+  return DEFAULT_RATES.find((r) => r.id === id)?.unitCostUsd ?? 0;
+}

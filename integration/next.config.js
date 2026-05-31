@@ -1,12 +1,44 @@
 /** @type {import('next').NextConfig} */
 // Lenient on purpose: the lib/ modules are still evolving, so we don't want type
 // or lint noise to block the dev server or a build while wiring things up.
+
+// Every static page in public/ (without the .html). Clean URLs map to these.
+const PAGES = [
+  "about", "alfred", "analytics", "app", "business-development-os",
+  "campaign-builder", "campaign-studio", "command", "conversations",
+  "developers", "features", "forgot-password", "index", "integrations",
+  "linkedin", "login", "outreach", "owner-console", "platform", "pricing",
+  "recruiting-os", "reset-password", "signals", "signup", "sourcing",
+];
+
 module.exports = {
   reactStrictMode: true,
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
-  // The bare root should show the marketing site, not the API info page.
+
+  // Serve clean URLs: /login renders public/login.html, address bar stays clean.
+  async rewrites() {
+    const pageRewrites = PAGES.filter((p) => p !== "index").map((p) => ({
+      source: `/${p}`,
+      destination: `/${p}.html`,
+    }));
+    // /home is the clean homepage URL.
+    pageRewrites.push({ source: "/home", destination: "/index.html" });
+    return pageRewrites;
+  },
+
+  // Bounce the old .html URLs (and bare root) to the clean path, so links that
+  // still say /login.html land on /login. 301 so search engines learn the clean URL.
   async redirects() {
-    return [{ source: "/", destination: "/index.html", permanent: false }];
+    const htmlRedirects = PAGES.filter((p) => p !== "index").map((p) => ({
+      source: `/${p}.html`,
+      destination: `/${p}`,
+      permanent: true,
+    }));
+    return [
+      { source: "/", destination: "/home", permanent: false },
+      { source: "/index.html", destination: "/home", permanent: true },
+      ...htmlRedirects,
+    ];
   },
 };

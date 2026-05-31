@@ -30,6 +30,7 @@ const store = {
   memberships: [] as Membership[],
   sessions: new Map<string, Session>(),
   emailTokens: new Map<string, EmailToken>(),
+  suspended: new Set<string>(),                // workspaceIds locked by the owner
 };
 
 /* ---------------- durability (Postgres snapshot) ----------------
@@ -45,6 +46,7 @@ function serialize() {
     memberships: store.memberships,
     sessions: [...store.sessions.entries()],
     emailTokens: [...store.emailTokens.entries()],
+    suspended: [...store.suspended],
   };
 }
 function hydrate(s: any) {
@@ -56,6 +58,7 @@ function hydrate(s: any) {
   store.memberships = s.memberships || [];
   store.sessions = new Map(s.sessions || []);
   store.emailTokens = new Map(s.emailTokens || []);
+  store.suspended = new Set(s.suspended || []);
 }
 const persist = debouncedSaver(SNAP_KEY, serialize);
 
@@ -105,6 +108,7 @@ export async function login(email: string, password: string): Promise<AuthResult
     throw authError("invalid_credentials", 401);
   }
   const m = primaryMembership(user.id);
+  if (store.suspended.has(m.workspaceId)) throw authError("account_suspended", 403);
   const session = issueSession(user.id, m.workspaceId);
   persist();
   return result(user, store.workspaces.get(m.workspaceId)!, m.role, session);
@@ -211,6 +215,7 @@ export function sessionContext(token?: string | null): AuthResult | null {
   const user = store.users.get(s.userId);
   const ws = store.workspaces.get(s.workspaceId);
   if (!user || !ws) return null;
+  if (store.suspended.has(ws.id)) return null; // owner-locked: token is dead until unsuspended
   const m = store.memberships.find((x) => x.userId === user.id && x.workspaceId === ws.id);
   return result(user, ws, m?.role ?? "member", s);
 }
@@ -269,8 +274,44 @@ async function sendVerificationEmail(user: User): Promise<void> {
 }
 
 /** Email seam. Wire SMTP / Resend / SES here; logs in the reference build. */
+/**
+ * Sends a real email when RESEND_API_KEY is set (Resend HTTP API), otherwise
+ * logs to the console for local dev. EMAIL_FROM controls the sender; it must be
+ * a verified domain/address in your Resend account (e.g. "RecruiterOS
+ * <no-reply@recruitersos.co>").
+ */
 async function sendEmail(to: string, subject: string, body: string): Promise<void> {
-  console.info(`[email] -> ${to} :: ${subject}\n${body}`);
+  const key = process.env.RESEND_API_KEY;
+  const from = process.env.EMAIL_FROM || "RecruiterOS <onboarding@resend.dev>";
+  if (!key) {
+    console.info(`[email] (no RESEND_API_KEY, logging only) -> ${to} :: ${subject}\n${body}`);
+    return;
+  }
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from,
+        to: [to],
+        subject,
+        // Body lines may contain a link; render as simple HTML so it's clickable.
+        html: body
+          .split("\n")
+          .map((line) =>
+            line.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>'),
+          )
+          .join("<br>"),
+        text: body,
+      }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      console.error(`[email] Resend failed ${res.status}: ${detail}`);
+    }
+  } catch (e) {
+    console.error("[email] send error:", (e as Error).message);
+  }
 }
 
 function userByEmail(email: string): User | undefined {
@@ -314,6 +355,154 @@ function authError(code: string, status: number): Error & { status: number } {
   const e = new Error(code) as Error & { status: number };
   e.status = status;
   return e;
+}
+
+/* ================================================================== */
+/* OWNER ADMIN OPERATIONS                                              */
+/* Full visibility + hard controls over EVERY account. These are       */
+/* consumed only by the owner-gated console (requireOwner), never by    */
+/* the normal app. They mutate the live store and persist immediately.  */
+/* ================================================================== */
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  emailVerified: boolean;
+  hasPassword: boolean;
+  createdAt: string;
+}
+
+export interface AdminAccount {
+  workspaceId: string;
+  name: string;
+  domain?: string;
+  plan: string;
+  suspended: boolean;
+  createdAt: string;
+  members: AdminUser[];
+  activeSessions: number;
+  lastActiveAt?: string;
+}
+
+function adminMembersOf(workspaceId: string): AdminUser[] {
+  return store.memberships
+    .filter((m) => m.workspaceId === workspaceId)
+    .map((m) => {
+      const u = store.users.get(m.userId);
+      return u
+        ? {
+            id: u.id, email: u.email, name: u.name, role: m.role,
+            emailVerified: u.emailVerified, hasPassword: Boolean(u.passwordHash), createdAt: u.createdAt,
+          }
+        : null;
+    })
+    .filter(Boolean) as AdminUser[];
+}
+
+function sessionsOf(workspaceId: string): Session[] {
+  return [...store.sessions.values()].filter((s) => s.workspaceId === workspaceId);
+}
+
+function toAdminAccount(ws: Workspace): AdminAccount {
+  const sess = sessionsOf(ws.id);
+  const lastActiveAt = sess.map((s) => s.createdAt).sort().pop();
+  return {
+    workspaceId: ws.id, name: ws.name, domain: ws.domain, plan: ws.plan,
+    suspended: store.suspended.has(ws.id), createdAt: ws.createdAt,
+    members: adminMembersOf(ws.id),
+    activeSessions: sess.filter((s) => Date.parse(s.expiresAt) >= Date.now()).length,
+    lastActiveAt,
+  };
+}
+
+/** Every account (workspace) on the platform, with members + session activity. */
+export function adminListAccounts(): AdminAccount[] {
+  return [...store.workspaces.values()]
+    .map(toAdminAccount)
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+}
+
+/** Full detail on one account. */
+export function adminAccountDetail(workspaceId: string): AdminAccount | null {
+  const ws = store.workspaces.get(workspaceId);
+  return ws ? toAdminAccount(ws) : null;
+}
+
+/** Lock / unlock an account. Suspending kills every live session for it. */
+export function adminSetSuspended(workspaceId: string, suspended: boolean): boolean {
+  if (!store.workspaces.has(workspaceId)) return false;
+  if (suspended) {
+    store.suspended.add(workspaceId);
+    for (const [tok, s] of store.sessions) if (s.workspaceId === workspaceId) store.sessions.delete(tok);
+  } else {
+    store.suspended.delete(workspaceId);
+  }
+  persist();
+  return true;
+}
+
+/** Force-revoke every session for an account (forces re-login everywhere). */
+export function adminRevokeSessions(workspaceId: string): number {
+  let n = 0;
+  for (const [tok, s] of store.sessions) if (s.workspaceId === workspaceId) { store.sessions.delete(tok); n++; }
+  persist();
+  return n;
+}
+
+/** Set an explicit new password for one user. */
+export function adminSetPassword(userId: string, newPassword: string): boolean {
+  const u = store.users.get(userId);
+  if (!u) return false;
+  u.passwordHash = hashPassword(newPassword);
+  u.emailVerified = true;
+  for (const [tok, s] of store.sessions) if (s.userId === userId) store.sessions.delete(tok);
+  persist();
+  return true;
+}
+
+/** Reset a user's password to a fresh random temp value, returned once. */
+export function adminResetPasswordToTemp(userId: string): string | null {
+  const u = store.users.get(userId);
+  if (!u) return null;
+  const temp = `Ros-${randomToken().slice(0, 10)}`;
+  u.passwordHash = hashPassword(temp);
+  for (const [tok, s] of store.sessions) if (s.userId === userId) store.sessions.delete(tok);
+  persist();
+  return temp;
+}
+
+/**
+ * Delete an account outright: the workspace, its memberships, its sessions, the
+ * domain mapping, the suspend flag, and any user who belonged ONLY to it.
+ * (Cross-module DATA purge — prospects, campaigns, usage, sending infra — is
+ * orchestrated separately by the owner layer; this clears the identity side.)
+ */
+export function adminDeleteWorkspace(workspaceId: string): { deletedUsers: number; deletedSessions: number } | null {
+  const ws = store.workspaces.get(workspaceId);
+  if (!ws) return null;
+
+  const memberIds = store.memberships.filter((m) => m.workspaceId === workspaceId).map((m) => m.userId);
+  store.memberships = store.memberships.filter((m) => m.workspaceId !== workspaceId);
+
+  let deletedSessions = 0;
+  for (const [tok, s] of store.sessions) if (s.workspaceId === workspaceId) { store.sessions.delete(tok); deletedSessions++; }
+
+  let deletedUsers = 0;
+  for (const uid of memberIds) {
+    const stillMember = store.memberships.some((m) => m.userId === uid);
+    if (!stillMember) {
+      const u = store.users.get(uid);
+      if (u) { store.usersByEmail.delete(u.email); store.users.delete(uid); deletedUsers++; }
+    }
+  }
+
+  if (ws.domain) store.workspacesByDomain.delete(ws.domain);
+  store.suspended.delete(workspaceId);
+  store.workspaces.delete(workspaceId);
+  persist();
+  return { deletedUsers, deletedSessions };
 }
 
 /** Dev seeding / tests only. */

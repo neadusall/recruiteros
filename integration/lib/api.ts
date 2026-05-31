@@ -6,6 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { sessionContext, tokenFromRequest, type AuthResult } from "./auth";
+import { isOwnerEmail } from "./owner";
 
 export function ok(data: unknown, status = 200): NextResponse {
   return NextResponse.json(data, { status });
@@ -48,6 +49,19 @@ export function requireCapability(
   if (!g.ctx.capabilities.includes(cap)) {
     return { response: fail("forbidden", 403, { needs: cap }) };
   }
+  return g;
+}
+
+/**
+ * Guard: require the OWNER. This is the hard wall on the owner console — a valid
+ * session is not enough; the signed-in user's email must be on the OWNER_EMAIL
+ * allow-list. Anyone else (including workspace admins) gets a 404-style 403 so
+ * the console's existence isn't even confirmed.
+ */
+export function requireOwner(req: Request): { ctx: AuthResult } | { response: NextResponse } {
+  const g = requireSession(req);
+  if ("response" in g) return { response: fail("not_found", 404) };
+  if (!isOwnerEmail(g.ctx.user.email)) return { response: fail("not_found", 404) };
   return g;
 }
 

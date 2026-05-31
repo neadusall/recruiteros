@@ -120,6 +120,36 @@ export function runHealthSweep(workspaceId: string, vitals?: Record<string, { bo
   return alerts;
 }
 
+/**
+ * Hard-reset hook: drop every LinkedIn account, sending domain, and API key for
+ * a workspace. Returns counts removed (for the owner reset summary).
+ */
+export function purgeWorkspaceAccounts(workspaceId: string): { linkedin: number; domains: number; apiKeys: number } {
+  const count = {
+    linkedin: linkedinAccounts.filter((a) => a.workspaceId === workspaceId).length,
+    domains: domains.filter((d) => d.workspaceId === workspaceId).length,
+    apiKeys: apiKeys.filter((k) => k.workspaceId === workspaceId).length,
+  };
+  splice(linkedinAccounts, (a) => a.workspaceId === workspaceId);
+  splice(domains, (d) => d.workspaceId === workspaceId);
+  splice(apiKeys, (k) => k.workspaceId === workspaceId);
+  return count;
+}
+
+/** Remove every element matching `pred` from an array in place. */
+function splice<T>(arr: T[], pred: (x: T) => boolean): void {
+  for (let i = arr.length - 1; i >= 0; i--) if (pred(arr[i])) arr.splice(i, 1);
+}
+
+/** Counts for the owner account-detail panel. */
+export function workspaceAccountCounts(workspaceId: string): { linkedin: number; domains: number; apiKeys: number } {
+  return {
+    linkedin: listLinkedInAccounts(workspaceId).length,
+    domains: listDomains(workspaceId).length,
+    apiKeys: listApiKeys(workspaceId).length,
+  };
+}
+
 export const LINKEDIN_PLATFORMS: LinkedInPlatform[] = [
   "unipile", "salesrobot", "meet_alfred", "dripify", "heyreach", "lagrowthmachine",
   "phantombuster", "expandi", "waalaxy", "linkedhelper", "skylead", "closely",
