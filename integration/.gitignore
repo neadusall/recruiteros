@@ -4,3 +4,6 @@ next-env.d.ts
 *.tsbuildinfo
 .env
 .env.local
+# Secret owner-console URL slug + its published page (never commit the secret)
+.owner-console-slug
+public/owner-*.html

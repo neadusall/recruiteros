@@ -11,24 +11,28 @@ It is **hidden** (no link anywhere in the app, `noindex`) and **secure**
 
 ---
 
-## How to reach it
+## How to reach it (private, unguessable URL)
 
-1. **The link:** `https://app.recruitersos.co/owner-console.html`
-   (locally: `/owner-console.html` served by the Next app, or open the file).
-   It is not linked from any nav and is marked `noindex,nofollow`.
+The console is **NOT** served at any guessable path. `/owner-console` and
+`/owner-console.html` both 404. It exists only at a **secret slug**:
 
-2. **Log in as the owner.** Set `OWNER_EMAIL` in the environment to your email
+1. **The link:** `https://app.recruitersos.co/<slug>.html`, where `<slug>` is
+   your `OWNER_CONSOLE_SLUG`. If you don't set one, the build generates a stable
+   random slug into `integration/.owner-console-slug` and prints it in the build
+   log (`sync-public: OWNER CONSOLE (private) -> /owner-xxxxxxxx.html`). Treat the
+   URL like a password: not linked anywhere, `noindex,nofollow`, kept out of git.
+
+2. **Log in as the owner.** Set `OWNER_EMAIL` to your email
    (`neadusall@gmail.com` by default; comma-separate for more than one). Sign in
-   through the normal `/login.html` with that account, then open the console link.
+   through the normal `/login` with that account, then open the secret link.
 
-3. **Everyone else gets a 404.** `requireOwner()` wraps every `/api/owner/*`
-   route: a valid session is not enough — the signed-in email must be on the
-   allow-list, or the API returns `404 not_found` (it won't even confirm the
-   console exists). The page reveals nothing until the API confirms you.
+3. **Everyone else gets a 404 — twice over.** They can't *find* the page (secret
+   slug), and even if they did, `requireOwner()` wraps every `/api/owner/*` route:
+   a valid session isn't enough — the signed-in email must be on the allow-list or
+   the API returns `404 not_found`. Admins and recruiters have no path to it.
 
-> Want it even more obscure? It's a static file — rename `owner-console.html` to
-> anything (e.g. `owner-9f3a2c.html`) and the same gate still applies. The real
-> lock is `OWNER_EMAIL`, server-side.
+4. **To rotate the URL:** change `OWNER_CONSOLE_SLUG` (or delete
+   `integration/.owner-console-slug`) and rebuild. The old URL stops working.
 
 ---
 
