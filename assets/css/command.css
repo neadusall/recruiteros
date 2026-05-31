@@ -42,6 +42,11 @@
 .stat .sv { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
 .stat .sl { color: var(--text-muted); font-size: 12.5px; margin-top: 4px; }
 .stat .rag { position: absolute; top: 14px; right: 14px; width: 9px; height: 9px; border-radius: 50%; }
+.stat.clickable, .list-row.clickable { cursor: pointer; transition: transform .12s ease, border-color .12s ease, background .12s ease; }
+.stat.clickable:hover { transform: translateY(-2px); border-color: var(--brand); background: var(--surface-2); }
+.stat.clickable::after { content: "→"; position: absolute; right: 14px; bottom: 12px; color: var(--text-dim); opacity: 0; transition: opacity .12s ease; font-size: 14px; }
+.stat.clickable:hover::after { opacity: 1; }
+.list-row.clickable:hover { background: var(--surface-2); border-radius: 8px; }
 .rag.green { background: var(--accent-green); box-shadow: 0 0 10px var(--accent-green); }
 .rag.yellow { background: var(--accent-amber); box-shadow: 0 0 10px var(--accent-amber); }
 .rag.red { background: var(--accent-red); box-shadow: 0 0 10px var(--accent-red); }

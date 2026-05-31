@@ -154,22 +154,35 @@
 
     api("/overview").then(function (o) {
       o = o || {};
+      // Each capacity card deep-links to where you manage that resource. The
+      // capability check keeps recruiters from landing on a gated tab.
+      var capLink = { "LinkedIn accounts": "accounts", "Sending domains": "accounts", "Email capacity/day": "accounts", "LinkedIn capacity/day": "accounts" };
       var cap = o.capacity || [];
       var stats = cap.map(function (c) {
-        return '<div class="stat"><span class="rag ' + (c.status || "red") + '"></span><div class="sv">' + (c.value != null ? c.value : 0) + '</div><div class="sl">' + esc(c.label) + "</div></div>";
+        var route = capLink[c.label];
+        var go = (route && (!ROUTES[route].cap || can(ROUTES[route].cap))) ? ' data-go="' + route + '"' : "";
+        return '<div class="stat' + (go ? " clickable" : "") + '"' + go + '><span class="rag ' + (c.status || "red") + '"></span><div class="sv">' + (c.value != null ? c.value : 0) + '</div><div class="sl">' + esc(c.label) + "</div></div>";
       }).join("") || emptyCard("Connect your sending accounts and domains to see capacity.");
+      // KPI cards deep-link into the matching operational tab.
       var kpis = [
-        ["Active prospects", o.activeProspects || 0], ["Appointments today", o.appointmentsToday || 0],
-        ["This week", o.appointmentsThisWeek || 0], ["Warm convos today", o.warmConversationsToday || 0],
-        [motion === "bd" ? "Won accounts" : "Placements", o.wonAccounts || 0]
-      ].map(function (k) { return '<div class="stat"><div class="sv">' + k[1] + '</div><div class="sl">' + k[0] + "</div></div>"; }).join("");
+        ["Active prospects", o.activeProspects || 0, "prospects"],
+        ["Appointments today", o.appointmentsToday || 0, "prospects"],
+        ["This week", o.appointmentsThisWeek || 0, "prospects"],
+        ["Warm convos today", o.warmConversationsToday || 0, "response"],
+        [motion === "bd" ? "Won accounts" : "Placements", o.wonAccounts || 0, "prospects"]
+      ].map(function (k) {
+        var go = k[2] && (!ROUTES[k[2]].cap || can(ROUTES[k[2]].cap)) ? ' data-go="' + k[2] + '"' : "";
+        return '<div class="stat' + (go ? " clickable" : "") + '"' + go + '><div class="sv">' + k[1] + '</div><div class="sl">' + k[0] + "</div></div>";
+      }).join("");
 
+      var canPros = !ROUTES.prospects.cap || can(ROUTES.prospects.cap);
+      var rowGo = canPros ? ' data-go="prospects" class="list-row clickable"' : ' class="list-row"';
       var appts = (o.recentAppointments || []).map(function (a) {
-        return '<div class="list-row"><div><div class="lr-main">' + esc(a.name) + '</div><div class="lr-sub">' + esc(a.channel || "") + "</div></div><div class=\"lr-right\">" + esc(a.at || "") + "</div></div>";
+        return "<div" + rowGo + '><div><div class="lr-main">' + esc(a.name) + '</div><div class="lr-sub">' + esc(a.channel || "") + "</div></div><div class=\"lr-right\">" + esc(a.at || "") + "</div></div>";
       }).join("") || '<div class="empty">No appointments booked yet.</div>';
 
       var drips = (o.activeDrips || []).map(function (d) {
-        return '<div class="list-row"><div class="lr-main">' + esc(d.name) + '</div><div class="lr-right">' + esc(d.stage) + "</div></div>";
+        return "<div" + rowGo + '><div class="lr-main">' + esc(d.name) + '</div><div class="lr-right">' + esc(d.stage) + "</div></div>";
       }).join("") || '<div class="empty">No active drips yet. Launch a campaign to start.</div>';
 
       var body = $("#ovBody"); if (!body) return;
@@ -178,6 +191,12 @@
         '<div class="stat-grid" style="margin-bottom:18px">' + kpis + "</div>" +
         '<div class="two-col"><div class="card"><h3>Recent appointments</h3>' + appts + "</div>" +
         '<div class="card"><h3>Active drips</h3>' + drips + "</div></div>";
+
+      // Delegated navigation: any element with data-go jumps to that tab.
+      body.addEventListener("click", function (e) {
+        var t = e.target.closest("[data-go]"); if (!t) return;
+        location.hash = t.getAttribute("data-go");
+      });
     }).catch(function () {
       var body = $("#ovBody"); if (body) body.innerHTML = needsSetup();
     });
