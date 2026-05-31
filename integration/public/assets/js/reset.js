@@ -40,7 +40,7 @@
       localStorage.setItem("ros_ctx", JSON.stringify(auth));
     } catch (e) {}
     say("Password updated. Opening your command center...", "okk");
-    setTimeout(function () { location.href = "command.html"; }, 600);
+    setTimeout(function () { location.href = "/command"; }, 600);
   }
 
   /* ---------------- forgot-password.html ---------------- */

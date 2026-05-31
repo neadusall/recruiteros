@@ -17,7 +17,8 @@ import { instantly, unipile, salesrobot, taltxt, telnyx, freshLinkedin, tomba } 
 import { getCore } from "../core/repository";
 import { getAts } from "../ats";
 import { rid, nowIso } from "../core/ids";
-import type { Channel, Prospect } from "../core/types";
+import { classifyContactNumbers } from "../signals/phoneClassify";
+import type { Channel, Motion, Prospect } from "../core/types";
 
 export interface SendResult {
   ok: boolean;
@@ -113,6 +114,9 @@ export interface Enriched {
   email?: string;
   title?: string;
   company?: string;
+  /** Mobile / landline, split by the Telnyx line-type classify step. */
+  mobilePhone?: string;
+  landlinePhone?: string;
   source: string[];
 }
 
@@ -122,7 +126,7 @@ export interface Enriched {
  *   2. Tomba (email-finder from name + company domain)
  * Returns whatever was found; callers merge onto the prospect.
  */
-export async function enrich(prospect: Prospect): Promise<Enriched> {
+export async function enrich(prospect: Prospect, opts: { motion?: Motion } = {}): Promise<Enriched> {
   const out: Enriched = { source: [] };
 
   if (prospect.linkedinUrl && freshLinkedin.configured()) {
@@ -144,6 +148,19 @@ export async function enrich(prospect: Prospect): Promise<Enriched> {
       const email = r?.data?.email;
       if (email) { out.email = email; out.source.push("tomba"); }
     } catch { /* leave unresolved for manual entry */ }
+  }
+
+  // Line-type classify: split a known number into mobile vs landline via Telnyx
+  // (metered to the cost ledger). Skips when already split or no number/Telnyx.
+  if (prospect.phone && !prospect.mobilePhone && !prospect.landlinePhone) {
+    try {
+      const split = await classifyContactNumbers(
+        { phone: prospect.phone },
+        { workspaceId: prospect.workspaceId, motion: opts.motion },
+      );
+      if (split.mobilePhone) { out.mobilePhone = split.mobilePhone; out.source.push("telnyx_lookup"); }
+      if (split.landlinePhone) { out.landlinePhone = split.landlinePhone; out.source.push("telnyx_lookup"); }
+    } catch { /* classify is best-effort; leave numbers untyped */ }
   }
 
   return out;

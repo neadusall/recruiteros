@@ -100,7 +100,7 @@
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const q = encodeURIComponent(input.value.trim());
-      window.location.href = 'command.html' + (q ? '?q=' + q : '');
+      window.location.href = '/command' + (q ? '?q=' + q : '');
     });
   }
 

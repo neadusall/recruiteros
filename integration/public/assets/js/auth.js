@@ -41,7 +41,7 @@
       localStorage.setItem("ros_ctx", JSON.stringify(auth));
     } catch (e) {}
     say("Welcome, " + (auth.user ? auth.user.name : "") + ". Opening your command center...", "okk");
-    setTimeout(function () { location.href = "command.html"; }, 500);
+    setTimeout(function () { location.href = "/command"; }, 500);
   }
 
   function api(path, method, payload) {

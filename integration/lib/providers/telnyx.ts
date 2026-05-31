@@ -26,6 +26,19 @@ export class TelnyxClient extends ProviderClient {
     }
   }
 
+  /**
+   * Telnyx Number Lookup. Returns the carrier object incl. `type`
+   * (mobile / landline / voip / toll-free), the cheap + reliable way to split a
+   * found number into the mobile vs landline field. ~$0.0025/query (line-type).
+   *   GET /number_lookup/{phone}?type=carrier
+   */
+  numberLookup(phoneNumber: string) {
+    return this.request({
+      path: `/number_lookup/${encodeURIComponent(phoneNumber)}`,
+      query: { type: "carrier" },
+    });
+  }
+
   /** Send an SMS from the configured 10DLC number. */
   sendSms(to: string, text: string) {
     return this.request({

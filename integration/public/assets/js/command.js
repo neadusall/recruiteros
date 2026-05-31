@@ -13,7 +13,7 @@
   /* ---------------- auth gate ---------------- */
   var ctx = null;
   try { ctx = JSON.parse(localStorage.getItem("ros_ctx") || "null"); } catch (e) {}
-  if (!ctx) { location.replace("login.html"); return; }
+  if (!ctx) { location.replace("/login"); return; }
   var API = (window.RECRUITEROS_API_BASE || "") + "/api";
   var motion = localStorage.getItem("ros_motion") || "recruiting";
 
@@ -27,6 +27,27 @@
   var view = $("#view");
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function toast(t) { var el = $("#toast"); el.textContent = t; el.classList.add("show"); setTimeout(function () { el.classList.remove("show"); }, 2200); }
+
+  /* Reusable modal: openModal(title, sub, bodyHtml, onMount) -> returns close fn.
+     bodyHtml should include its own .modal-foot with buttons; onMount(root, close)
+     wires them. */
+  function openModal(title, sub, bodyHtml, onMount) {
+    var bg = document.createElement("div");
+    bg.className = "modal-bg";
+    bg.innerHTML = '<div class="modal-card"><button class="modal-x" aria-label="Close">×</button>' +
+      "<h3>" + esc(title) + "</h3>" + (sub ? '<div class="sub">' + esc(sub) + "</div>" : "") +
+      '<div class="modal-body"></div></div>';
+    document.body.appendChild(bg);
+    var card = bg.querySelector(".modal-card");
+    bg.querySelector(".modal-body").innerHTML = bodyHtml;
+    function close() { if (bg.parentNode) bg.parentNode.removeChild(bg); document.removeEventListener("keydown", onKey); }
+    function onKey(e) { if (e.key === "Escape") close(); }
+    bg.querySelector(".modal-x").addEventListener("click", close);
+    bg.addEventListener("click", function (e) { if (e.target === bg) close(); });
+    document.addEventListener("keydown", onKey);
+    if (onMount) onMount(card, close);
+    return close;
+  }
   // GET helper: resolves to parsed JSON, or null on any error (caller renders an
   // empty/needs-setup state). The session cookie authenticates every call.
   function api(path) {
@@ -60,7 +81,7 @@
   function signOut() {
     fetch(API + "/auth/session", { method: "DELETE", credentials: "include" }).catch(function () {});
     localStorage.removeItem("ros_ctx"); localStorage.removeItem("ros_session");
-    location.href = "login.html";
+    location.href = "/login";
   }
   $("#signOut").addEventListener("click", signOut);
 
@@ -285,7 +306,11 @@
 
   function renderProspects(el) {
     el.innerHTML = head("Prospects", "Your live pipeline, synced bidirectionally with the ATS.") +
+      '<div class="btn-row" style="margin-bottom:14px">' +
+      '<button class="btn btn-ghost btn-sm" id="importBtn">⇪ Import (CSV / paste)</button></div>' +
       '<div id="prBody">' + loading() + "</div>";
+
+    $("#importBtn").addEventListener("click", importProspects);
 
     function load() {
       api("/prospects").then(function (d) {
@@ -680,6 +705,81 @@
           else toast("Could not add (" + (r.data.error || r.status) + ")");
         })
         .catch(function () { toast("Could not reach the server."); });
+    }).catch(function () { toast("Could not reach the server."); });
+  }
+
+  /* Bulk import: paste CSV / TSV / lines. Header optional; recognizes
+     name,email,company,title,linkedin,phone in any order. Dedupe handled server-side. */
+  function importProspects() {
+    api("/campaigns").then(function (d) {
+      var camps = ((d && d.campaigns) || []).filter(function (c) { return c.motion === motion; });
+      if (!camps.length) { toast("Create a campaign first (＋ New campaign)."); location.hash = "campaigns"; return; }
+      var campOpts = camps.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + "</option>"; }).join("");
+      var bodyHtml =
+        '<label>Add to campaign</label><select id="impCamp">' + campOpts + "</select>" +
+        '<label>Paste rows (CSV, TSV, or one per line)</label>' +
+        '<textarea id="impText" placeholder="Jane Doe, jane@acme.com, Acme, VP Engineering&#10;John Smith, john@globex.com, Globex, Head of Talent"></textarea>' +
+        '<div class="imp-preview" id="impPrev">Columns auto-detected: name, email, company, title, linkedin, phone. A header row is optional.</div>' +
+        '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="impCancel">Cancel</button>' +
+        '<button class="btn btn-primary btn-sm" id="impGo">Import</button></div>';
+
+      openModal("Import prospects", "Paste from a spreadsheet, Apollo, LinkedIn export, anywhere.", bodyHtml, function (root, close) {
+        var ta = root.querySelector("#impText"), prev = root.querySelector("#impPrev");
+        function parse() {
+          var lines = ta.value.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+          if (!lines.length) return [];
+          // detect + drop a header row
+          var first = lines[0].toLowerCase();
+          var hasHeader = /(name|email|company|title|linkedin|phone)/.test(first) && /[,\t]/.test(first);
+          var cols = hasHeader ? first.split(/[,\t]/).map(function (s) { return s.trim(); }) : null;
+          if (hasHeader) lines.shift();
+          return lines.map(function (line) {
+            var parts = line.split(/[,\t]/).map(function (s) { return s.trim(); });
+            var row = {};
+            if (cols) {
+              cols.forEach(function (c, i) {
+                if (/name/.test(c)) row.fullName = parts[i];
+                else if (/email/.test(c)) row.email = parts[i];
+                else if (/company/.test(c)) row.company = parts[i];
+                else if (/title|role/.test(c)) row.title = parts[i];
+                else if (/linkedin|url/.test(c)) row.linkedinUrl = parts[i];
+                else if (/phone|mobile/.test(c)) row.phone = parts[i];
+              });
+            } else {
+              // positional: name, email, company, title
+              row.fullName = parts[0];
+              parts.slice(1).forEach(function (p) {
+                if (/@/.test(p)) row.email = p;
+                else if (/linkedin\.com/.test(p)) row.linkedinUrl = p;
+                else if (/^[+\d][\d\s().-]{6,}$/.test(p)) row.phone = p;
+                else if (!row.company) row.company = p;
+                else if (!row.title) row.title = p;
+              });
+            }
+            return row;
+          }).filter(function (r) { return r.fullName; });
+        }
+        ta.addEventListener("input", function () {
+          var n = parse().length;
+          prev.innerHTML = n ? "Ready to import <b>" + n + "</b> prospect" + (n === 1 ? "" : "s") + "." : "Paste rows above.";
+        });
+        root.querySelector("#impCancel").addEventListener("click", close);
+        root.querySelector("#impGo").addEventListener("click", function () {
+          var rows = parse();
+          if (!rows.length) { toast("Nothing to import, paste some rows."); return; }
+          var cid = root.querySelector("#impCamp").value;
+          rows.forEach(function (r) { r.campaignId = cid; });
+          var go = root.querySelector("#impGo"); go.disabled = true; go.textContent = "Importing…";
+          send("/prospects", "POST", { action: "bulk", rows: rows }).then(function (res) {
+            if (res.ok) {
+              var added = res.data && res.data.added != null ? res.data.added : rows.length;
+              var dup = res.data && res.data.deduped ? " (" + res.data.deduped + " already existed)" : "";
+              toast("Imported " + added + " prospect" + (added === 1 ? "" : "s") + dup);
+              close(); if (prospectsReload) prospectsReload();
+            } else { toast("Import failed (" + (res.data.error || res.status) + ")"); go.disabled = false; go.textContent = "Import"; }
+          }).catch(function () { toast("Could not reach the server."); go.disabled = false; go.textContent = "Import"; });
+        });
+      });
     }).catch(function () { toast("Could not reach the server."); });
   }
 

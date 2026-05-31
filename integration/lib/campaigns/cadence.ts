@@ -78,10 +78,12 @@ export async function runDailyCadence(workspaceId: string): Promise<{ drafted: n
 
     for (const p of prospects) {
       // 7:30 enrich (real waterfall when keyed) -> merge resolved contact/role.
-      const e = await enrich(p);
+      const e = await enrich(p, { motion: c.motion });
       if (e.email && !p.email) p.email = e.email;
       if (e.title && !p.title) p.title = e.title;
       if (e.company && !p.company) p.company = e.company;
+      if (e.mobilePhone && !p.mobilePhone) p.mobilePhone = e.mobilePhone;
+      if (e.landlinePhone && !p.landlinePhone) p.landlinePhone = e.landlinePhone;
       if (e.source.length) await core.saveProspect(p);
       // 7:45 draft.
       queue.push(draftFor(c, p));

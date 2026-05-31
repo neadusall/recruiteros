@@ -119,6 +119,8 @@ export {
   cheapFirstContactWaterfall,
   cheapTier,
 } from "./rapidapi";
+export { classifyLine, classifyContactNumbers, mapLineType } from "./phoneClassify";
+export type { LineType, ClassifyResult, ClassifyOptions } from "./phoneClassify";
 export type {
   CheapFirstOptions,
   PersonEnrichment,

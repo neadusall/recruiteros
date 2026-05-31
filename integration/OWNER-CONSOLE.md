@@ -80,7 +80,15 @@ each with its own waterfall rung. Three distinct jobs, three different best tool
 
 So the stack is: **Prospeo (find) → Telnyx (classify into mobile vs landline) →
 Trestle (reverse, optional)**, with an optional cheap RapidAPI find rung in front,
-always gated by the Telnyx classify step. Honest caveat: because no defensible cheap
+always gated by the Telnyx classify step.
+
+**Classify is LIVE-wired and metered.** During enrichment (`lib/channels/enrich`),
+any known number with no line type is run through Telnyx Number Lookup
+(`lib/signals/phoneClassify.ts`), routed into `mobilePhone` vs `landlinePhone`, and
+**each lookup is written to the cost ledger** (category `enrichment`, source
+`telnyx`, type `phone_classify`) — so it shows up in the console's Spend tab and on
+the account's cost-by-category, exactly like every other cost. It is a no-op (charges
+nothing) until `TELNYX_API_KEY` is set. Honest caveat: because no defensible cheap
 hit-rate exists, the true cost *per usable mobile* can't be pinned precisely — budget
 around the premium **~$0.39/mobile** found, plus **~$0.0025** to classify it. Email
 stays the workhorse (80–95% coverage, ~$0.007); phone is opt-in for a reason.
