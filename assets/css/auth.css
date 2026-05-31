@@ -91,3 +91,15 @@
   .auth-aside { display: none; }
   .auth-card-wrap { padding: 32px 18px; }
 }
+
+/* Show/hide password eye toggle (injected by auth.js/reset.js) */
+.pw-wrap { position: relative; display: block; }
+.pw-wrap input { width: 100%; padding-right: 44px; }
+.pw-eye {
+  position: absolute; top: 50%; right: 8px; transform: translateY(-50%);
+  width: 30px; height: 30px; display: grid; place-items: center;
+  background: none; border: none; cursor: pointer; font-size: 16px;
+  color: var(--text-dim); border-radius: 7px; line-height: 1;
+}
+.pw-eye:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+.pw-eye:focus-visible { outline: 2px solid var(--brand-2); outline-offset: 1px; }
