@@ -73,9 +73,7 @@
   var REF = ref();
 
   /* ---------------- chrome ---------------- */
-  $("#wsName").textContent = (ctx.workspace && ctx.workspace.name) || "Workspace";
-  $("#userName").textContent = (ctx.user && ctx.user.name) || "You";
-  $("#userInitials").textContent = initials((ctx.user && ctx.user.name) || "You");
+  var wsNameEl = $("#wsName"); if (wsNameEl) wsNameEl.textContent = (ctx.workspace && ctx.workspace.name) || "Workspace";
   var envPill = $("#envPill");
   if (envPill) envPill.style.display = "none"; // no demo/live badge: this is the product
   function signOut() {
@@ -83,7 +81,6 @@
     localStorage.removeItem("ros_ctx"); localStorage.removeItem("ros_session");
     location.href = "/login";
   }
-  $("#signOut").addEventListener("click", signOut);
 
   // motion toggle
   Array.prototype.forEach.call(document.querySelectorAll(".mt"), function (b) {
@@ -144,9 +141,16 @@
     var parts = h.split("/");
     if (parts[0] === "bd" || parts[0] === "recruiting") { motion = parts[0]; localStorage.setItem("ros_motion", motion); h = parts[1] || "overview"; }
     else h = parts[0];
+    // Aliases: #builder is the BD in-market industry search (the BD highlight).
+    var ALIAS = { builder: "inmarket", "in-market": "inmarket", leads: "inmarket" };
+    if (ALIAS[h]) h = ALIAS[h];
     if (!ROUTES[h]) return "overview";
+    // The in-market search is BD-only; landing there switches the workspace to BD
+    // rather than bouncing the user to Overview.
+    if (ROUTES[h].motionOnly && ROUTES[h].motionOnly !== motion) {
+      motion = ROUTES[h].motionOnly; localStorage.setItem("ros_motion", motion); syncMotionNav();
+    }
     if (ROUTES[h].cap && !can(ROUTES[h].cap)) return "overview"; // recruiter hit a gated route
-    if (ROUTES[h].motionOnly && ROUTES[h].motionOnly !== motion) return "overview"; // wrong motion
     return h;
   }
 
@@ -320,36 +324,61 @@
   /* ---------------- In-Market Leads (BD: who is hiring right now) ------------ */
   var inMarketResults = []; // last search, so Promote can find the full lead object
 
+  // Industries recruiters sell into. Drives the refined in-market search.
+  var IM_INDUSTRIES = [
+    "Technology / SaaS", "Fintech", "Healthcare", "Biotech / Pharma", "Manufacturing",
+    "Construction", "Legal", "Accounting / Finance", "Sales / GTM", "Marketing / Agency",
+    "Logistics / Supply Chain", "Hospitality", "Education", "Energy", "Real Estate",
+    "Insurance", "Retail / eCommerce", "Government / Public", "Nonprofit"
+  ];
+  var imSelectedIndustry = null;
+
   function renderInMarket(el) {
-    el.innerHTML = head("In-Market Leads",
-      "Find companies that are in the market for recruiting help right now. Search the live hiring market, we scan funding, hiring surges, new roles, exec hires and more, then promote the best into your pipeline.") +
-      '<form class="search-bar" id="imForm" style="margin-bottom:10px">' +
-      '<span class="ico">⌕</span>' +
-      '<input id="imQuery" type="text" autocomplete="off" placeholder="Who are you looking for? e.g. fintechs hiring senior engineers, healthcare orgs hiring nurses" />' +
-      '<button type="submit" class="btn btn-primary btn-sm" id="imSearchBtn">Search market</button>' +
-      "</form>" +
-      '<div class="search-hints" id="imHints">' +
-      ["SaaS companies hiring sales leaders", "Series A-B fintechs hiring engineers", "Hospitals hiring nurses", "Agencies posting many roles"]
-        .map(function (h) { return '<span class="chip" data-q="' + esc(h) + '">' + esc(h) + "</span>"; }).join("") +
+    el.innerHTML =
+      '<div class="im-hero">' +
+        '<h1 class="im-title">Who\'s hiring <span class="gradient-text">right now.</span></h1>' +
+        '<form class="im-search" id="imForm">' +
+          '<span class="ico">⌕</span>' +
+          '<input id="imQuery" type="text" autocomplete="off" placeholder="Search an industry or market, e.g. fintech, healthcare, manufacturing" />' +
+          '<button type="submit" class="btn btn-primary" id="imSearchBtn">Find in-market companies</button>' +
+        "</form>" +
+        '<div class="im-industries" id="imIndustries">' +
+          IM_INDUSTRIES.map(function (n) { return '<button type="button" class="im-chip" data-ind="' + esc(n) + '">' + esc(n) + "</button>"; }).join("") +
+        "</div>" +
       "</div>" +
-      '<div id="imBody"><div class="empty">Search the market above, or pick a starting point. Results are ranked by hiring intent.</div></div>';
+      '<div id="imBody"><div class="empty">Pick an industry to surface companies actively hiring in that market, ranked by hiring intent.</div></div>';
 
     var form = $("#imForm"), input = $("#imQuery");
-    form.addEventListener("submit", function (e) { e.preventDefault(); runSearch(input.value.trim()); });
-    Array.prototype.forEach.call(el.querySelectorAll("#imHints .chip"), function (c) {
-      c.addEventListener("click", function () { input.value = c.getAttribute("data-q"); runSearch(input.value); });
+    form.addEventListener("submit", function (e) { e.preventDefault(); imSelectedIndustry = null; syncChips(); runSearch(input.value.trim(), null); });
+    Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
+      c.addEventListener("click", function () {
+        var ind = c.getAttribute("data-ind");
+        imSelectedIndustry = (imSelectedIndustry === ind) ? null : ind;
+        syncChips();
+        if (imSelectedIndustry) { input.value = imSelectedIndustry; runSearch("", imSelectedIndustry); }
+      });
     });
 
-    function runSearch(q) {
+    function syncChips() {
+      Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
+        c.classList.toggle("active", c.getAttribute("data-ind") === imSelectedIndustry);
+      });
+    }
+
+    function runSearch(q, industry) {
       var body = $("#imBody"); body.innerHTML = loading();
-      send("/in-market", "POST", { query: q, limit: 30 }).then(function (r) {
+      var payload = { query: q, limit: 30 };
+      if (industry) payload.industries = [industry];
+      send("/in-market", "POST", payload).then(function (r) {
         if (!r.ok) { body.innerHTML = needsSetup(); return; }
         inMarketResults = (r.data && r.data.leads) || [];
         if (!inMarketResults.length) {
-          body.innerHTML = '<div class="empty">No in-market companies matched yet. Try broader terms, or connect more signal sources under <a href="#connected">Connected</a>.</div>';
+          body.innerHTML = '<div class="empty">No in-market companies matched yet. Try another industry, or connect more signal sources under <a href="#connected">Connected</a>.</div>';
           return;
         }
-        body.innerHTML = inMarketResults.map(leadCard).join("");
+        var label = industry || q;
+        body.innerHTML = '<div class="im-count">' + inMarketResults.length + " companies in market" + (label ? " · " + esc(label) : "") + "</div>" +
+          inMarketResults.map(leadCard).join("");
         Array.prototype.forEach.call(body.querySelectorAll("[data-promote]"), function (btn) {
           btn.addEventListener("click", function () { promoteLead(btn.getAttribute("data-promote"), btn); });
         });

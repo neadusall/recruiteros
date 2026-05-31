@@ -221,3 +221,32 @@
 .send-chan .cf { cursor: pointer; }
 .needs-key { font-size: 12px; color: var(--accent-amber); margin-top: 6px; display: none; }
 .needs-key.show { display: block; }
+
+/* ============================================================
+   In-Market Leads (the BD highlight): industry-led search hero
+   ============================================================ */
+.im-hero { padding: 8px 0 18px; }
+.im-title { font-size: clamp(26px, 3.4vw, 40px); letter-spacing: -0.02em; line-height: 1.05; margin-bottom: 16px; }
+.im-search {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 14px; padding: 8px 8px 8px 16px;
+  box-shadow: var(--shadow-glow);
+}
+.im-search .ico { color: var(--text-dim); font-size: 18px; }
+.im-search input {
+  flex: 1; background: none; border: none; outline: none;
+  color: var(--text); font: inherit; font-size: 16px; padding: 10px 4px;
+}
+.im-search input::placeholder { color: var(--text-dim); }
+.im-search .btn { white-space: nowrap; }
+.im-industries { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.im-chip {
+  appearance: none; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600;
+  padding: 7px 14px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-muted);
+  transition: all .12s ease;
+}
+.im-chip:hover { color: var(--text); border-color: var(--border-strong); transform: translateY(-1px); }
+.im-chip.active { background: var(--grad); color: #0a0a12; border-color: transparent; }
+.im-count { color: var(--text-muted); font-size: 13px; font-weight: 600; margin: 4px 0 12px; }
