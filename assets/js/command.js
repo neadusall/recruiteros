@@ -91,6 +91,7 @@
     b.addEventListener("click", function () {
       motion = b.dataset.motion; localStorage.setItem("ros_motion", motion);
       Array.prototype.forEach.call(document.querySelectorAll(".mt"), function (x) { x.classList.toggle("active", x === b); });
+      syncMotionNav();
       render();
     });
   });
@@ -117,10 +118,14 @@
   // Show the role on the workspace card.
   if (ctx.role) { var wp = $("#wsPlan"); if (wp) wp.textContent = (ctx.workspace && ctx.workspace.plan ? ctx.workspace.plan + " · " : "") + ctx.role; }
 
+  // Initial motion-specific nav visibility (In-Market Leads is BD-only).
+  syncMotionNav();
+
   /* ---------------- router ---------------- */
   var ROUTES = {
     overview: { title: "Overview", crumb: "Operate", action: null, render: renderOverview },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
+    inmarket: { title: "In-Market Leads", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New campaign", render: renderCampaigns },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
@@ -141,7 +146,15 @@
     else h = parts[0];
     if (!ROUTES[h]) return "overview";
     if (ROUTES[h].cap && !can(ROUTES[h].cap)) return "overview"; // recruiter hit a gated route
+    if (ROUTES[h].motionOnly && ROUTES[h].motionOnly !== motion) return "overview"; // wrong motion
     return h;
+  }
+
+  // Show/hide motion-specific nav items (e.g. In-Market Leads is BD-only).
+  function syncMotionNav() {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-motion-only]"), function (el) {
+      el.style.display = (el.getAttribute("data-motion-only") === motion) ? "" : "none";
+    });
   }
 
   function render() {
