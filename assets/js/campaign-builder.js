@@ -388,7 +388,35 @@
   $("#minSeniority").addEventListener("change", e => { state.minSeniority = e.target.value; });
   $("#launchBtn").addEventListener("click", () => {
     const d = state.draft;
-    toast(`Launching ${d.targets.length} prospects → enrichment + outreach. Est ${"$" + d.cost.total.toFixed(2)}.`);
+    const btn = $("#launchBtn");
+    btn.disabled = true; const restore = btn.textContent; btn.textContent = "Launching…";
+    const API = (window.RECRUITEROS_API_BASE || "") + "/api";
+    const motion = state.motion === "business_dev" ? "bd" : "recruiting";
+    const cid = "camp_" + Date.now().toString(36);
+    const term = (state.industries && state.industries.size ? Array.from(state.industries).join(", ") : "") || ($("#searchInput") && $("#searchInput").value) || "Signal";
+    const name = term + " · " + (motion === "bd" ? "BD" : "Talent");
+
+    fetch(API + "/campaigns", {
+      method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: cid, name: name, motion: motion, status: "active", dailyCap: 25,
+        goal: "Reach " + d.targets.length + " signal-matched prospects." }),
+    }).then((r) => r.json().then((j) => ({ ok: r.ok, data: j }))).then((res) => {
+      if (!res.ok) { toast("Sign in to launch a campaign."); btn.disabled = false; btn.textContent = restore; return; }
+      const rows = (d.targets || []).slice(0, 500).map((t) => ({
+        campaignId: cid, fullName: t.name, title: t.title, company: t.company, category: t.type,
+      }));
+      return fetch(API + "/prospects", {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bulk", rows: rows }),
+      }).then((r) => r.json()).then((pr) => {
+        const added = pr && pr.added != null ? pr.added : rows.length;
+        toast("Launched " + name + " · " + added + " prospects added. Opening pipeline…");
+        setTimeout(() => {
+          if (window.top !== window.self) { try { window.top.location.hash = "prospects"; } catch (e) {} }
+          else { location.href = "/command#prospects"; }
+        }, 1000);
+      });
+    }).catch(() => { toast("Could not reach the server."); btn.disabled = false; btn.textContent = restore; });
   });
 
   /* ---- toast ---- */
