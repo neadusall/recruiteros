@@ -103,6 +103,7 @@
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New campaign", render: renderCampaigns },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
+    builder: { title: "Target Builder", crumb: "Build", action: null, render: renderBuilder },
     outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
     content: { title: "Content Library", crumb: "Build", action: "＋ Add asset", render: renderContent },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
@@ -305,7 +306,7 @@
     if (!rows) rows = '<div class="empty">No ' + motion + " campaigns yet. Click ＋ New campaign to open the Studio and build your first multi-channel sequence.</div>";
     el.innerHTML = head("Campaigns", "The unit of work. Drag-and-drop multi-channel sequences, ICP, signals, and A/B variants in one place.") +
       '<div class="btn-row" style="margin-bottom:14px"><a class="btn btn-primary btn-sm" href="#studio">🧩 Open Campaign Studio</a>' +
-      '<a class="btn btn-ghost btn-sm" href="campaign-builder.html">🧱 Target builder</a></div>' +
+      '<a class="btn btn-ghost btn-sm" href="#builder">🧱 Target builder</a></div>' +
       '<div id="cmpBody">' + rows + "</div>";
 
     // Merge any server-side campaigns the backend knows about.
@@ -388,6 +389,17 @@
       var accounts = li.map(function (a) { return a.handle; }).concat(["auto-rotate"]);
       mount(assignees, accounts);
     });
+  }
+
+  /* ---------------- Target Builder (in-portal) ----------------
+     The signal -> target -> filter -> launch wizard, embedded inside the portal
+     chrome via an iframe so it lives in the tool, not as a standalone web page. */
+  function renderBuilder(el) {
+    el.innerHTML = head("Target Builder", "Search the market, pull live hiring signals, filter by ICP, and launch a campaign, all inside your workspace.") +
+      '<div class="card" style="padding:0;overflow:hidden">' +
+      '<iframe src="/campaign-builder?embed=1" title="Target Builder" ' +
+      'style="width:100%;height:calc(100vh - 220px);min-height:560px;border:0;border-radius:12px;background:var(--bg)"></iframe>' +
+      "</div>";
   }
 
   function renderOutreach(el) {

@@ -39,11 +39,16 @@
   display: grid; grid-template-columns: 280px 1fr 300px; gap: 0;
   transition: grid-template-columns .18s ease;
 }
-/* collapsed inspector -> a thin rail, so the canvas takes the freed space */
+/* collapse either side panel -> a thin rail, so the canvas takes the freed space */
 .cs-grid.insp-collapsed { grid-template-columns: 280px 1fr 42px; }
+.cs-grid.pal-collapsed { grid-template-columns: 42px 1fr 300px; }
+.cs-grid.pal-collapsed.insp-collapsed { grid-template-columns: 42px 1fr 42px; }
 .cs-grid.insp-collapsed .cs-inspector { padding: 12px 7px; overflow: hidden; }
 .cs-grid.insp-collapsed .insp-body,
 .cs-grid.insp-collapsed .insp-title { display: none; }
+.cs-grid.pal-collapsed .cs-palette { padding: 12px 7px; overflow: hidden; }
+.cs-grid.pal-collapsed .pal-body,
+.cs-grid.pal-collapsed .pal-title { display: none; }
 @media (max-width: 1180px) { .cs-grid { grid-template-columns: 240px 1fr; } .cs-inspector { display: none; } }
 @media (max-width: 820px) {
   .studio { height: auto; }
@@ -236,6 +241,12 @@
   transition: background .12s ease, color .12s ease;
 }
 .insp-toggle:hover { background: rgba(255,255,255,.09); color: var(--text); }
+/* palette head: title left, collapse toggle pinned right */
+.pal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.pal-title { margin: 0 !important; }
+.pal-head .insp-toggle { margin-left: auto; }
+.cs-grid.pal-collapsed .pal-head { justify-content: center; }
+.cs-grid.pal-collapsed .pal-head .insp-toggle { margin-left: 0; }
 .insp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
 .insp-row .insp-field { margin-bottom: 0; }
 

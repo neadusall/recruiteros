@@ -205,11 +205,11 @@
             <div class="field"><label>Title contains (comma-separated)</label><input id="titleIncludes" placeholder="VP, Head of, Director" /></div>
             <div class="field"><label>Minimum seniority</label>
               <select id="minSeniority">
-                <option value="">Any</option>
+                <option value="" selected>Any</option>
                 <option value="senior">Senior+</option>
                 <option value="manager">Manager+</option>
                 <option value="director">Director+</option>
-                <option value="vp" selected>VP+</option>
+                <option value="vp">VP+</option>
                 <option value="c_level">C-level+</option>
               </select>
             </div>
@@ -293,6 +293,17 @@
       </div>
     </div>
   </footer>
+  <script>
+    // When embedded inside the portal (Target Builder route), hide the marketing
+    // chrome so it reads as a native part of the command center.
+    if (new URLSearchParams(location.search).get("embed") === "1") {
+      document.documentElement.classList.add("embedded");
+      var s = document.createElement("style");
+      s.textContent = ".embedded .nav,.embedded footer,.embedded .aurora,.embedded .grid-bg,.embedded .noise{display:none!important}"
+        + " .embedded body{background:transparent} .embedded section:first-of-type{padding-top:8px}";
+      document.head.appendChild(s);
+    }
+  </script>
   <script src="assets/js/landing.js"></script>
   <script src="assets/js/industries.js"></script>
   <script src="assets/js/campaign-builder.js"></script>

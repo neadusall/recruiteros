@@ -40,8 +40,12 @@ Every cost driver in the platform, with its **real unit cost** (not a price):
 |---|---|---|---|
 | Enrichment | Email find (waterfall) | $0.006 / email | unique prospects |
 | Enrichment | Email verification | $0.001 / email | unique prospects |
-| Enrichment | Phone find + validate (cheap-first, optional) | $0.02 / phone | unique prospects |
-| Enrichment | Phone — premium reveal (backup, on miss only) | $0.20 / phone | unique prospects |
+| Enrichment | Mobile find (cheap rung, gated/unverified) | $0.02 / mobile | unique prospects |
+| Enrichment | Landline / direct-dial find (cheap rung) | $0.015 / landline | unique prospects |
+| Enrichment | Mobile premium reveal (realistic source: Prospeo) | $0.39 / mobile | unique prospects |
+| Enrichment | Landline premium reveal | $0.10 / landline | unique prospects |
+| Enrichment | Phone classify mobile vs landline (Telnyx) | $0.0025 / number | unique prospects |
+| Enrichment | Reverse lookup, number→owner (Trestle, optional) | $0.07 / lookup | unique prospects |
 | Sending | Mailbox | $2.50 / inbox / mo | send volume |
 | Sending | Sending domain | $1.00 / domain / mo | send volume |
 | AI | Personalization (first line) | $0.004 / prospect | unique prospects |
@@ -55,17 +59,31 @@ These are the shipped defaults in `lib/billing/rates.ts`. **Every one is editabl
 live** from the console's *Cost model* tab (persisted, no redeploy) so the pricing
 re-bases the instant you change a number.
 
-**Phone economics (read before turning phone on).** The cheap path is the RapidAPI
-phone-lookup listing at **$0.004–0.02 per call** (`rapidPhoneFinder`), not the
-$0.25 premium reveal. But cheap phone data is low-yield AND low-accuracy: expect a
-number back for ~30–50% of prospects, of which only ~40–60% are actually correct/
-current, so only **~15–30% of prospects end up with a usable direct/mobile** from
-the cheap tier alone. Always run the validation pass (it removes dead/wrong-type
-numbers, ~$0.005–0.01) — but validation confirms the number is *live*, not that it
-belongs to the right person. The premium reveal (`phone_premium_backup`, ~$0.20)
-is only hit on a miss and pushes correct-direct-dial coverage to ~40–60% total.
-Net: budget **~2× the per-resolved cost per *usable* phone** (~$0.04–0.06 cheap
-tier). Email stays the workhorse; phone is opt-in for a reason.
+**Phone enrichment — the verified recommendation (deep research, May 2026).** Mobile
+and landline are tracked as **separate fields** (`mobilePhone`, `landlinePhone`),
+each with its own waterfall rung. Three distinct jobs, three different best tools:
+
+- **FIND** a number (job A): there is **no trustworthy cheap RapidAPI listing** —
+  every public hit-rate/accuracy benchmark for cheap scrapers was refuted under
+  verification. The realistic reliable source is a premium finder: **Prospeo Mobile
+  Finder ~$0.39/mobile** (`POST api.prospeo.io/mobile-finder`, LinkedIn URL or
+  name+company), Datagma ~$0.33–0.49, Apollo ~$1.60. Any cheap RapidAPI rung you
+  wire in should be treated as unverified and **gated behind classify**, not trusted.
+- **CLASSIFY** mobile vs landline (job B) — *this is how the two fields get split
+  cleanly and cheaply*: **Telnyx Number Lookup ~$0.0025/number** (line-type), which
+  reuses the Telnyx integration you already have and programmatically returns
+  mobile/landline/VoIP + carrier. Twilio Lookup Line Type ($0.008) is the alternative.
+  Don't trust a scraper's own "mobile/landline" label — classify with Telnyx.
+- **REVERSE** lookup (job C, optional): **Trestle Reverse Phone ~$0.07/query** (number
+  → owner name + line type + alternate numbers), on RapidAPI or direct. For inbound
+  caller-ID and list cleaning.
+
+So the stack is: **Prospeo (find) → Telnyx (classify into mobile vs landline) →
+Trestle (reverse, optional)**, with an optional cheap RapidAPI find rung in front,
+always gated by the Telnyx classify step. Honest caveat: because no defensible cheap
+hit-rate exists, the true cost *per usable mobile* can't be pinned precisely — budget
+around the premium **~$0.39/mobile** found, plus **~$0.0025** to classify it. Email
+stays the workhorse (80–95% coverage, ~$0.007); phone is opt-in for a reason.
 
 The **usage ledger** (`lib/billing/ledger.ts`) is an append-only record of every
 cost event, per account, per operating system. Background workers report into it

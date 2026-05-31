@@ -145,9 +145,15 @@
       '</div>' +
     '</div>' +
     '<div class="cs-grid" data-cs="grid">' +
-      '<aside class="cs-col cs-palette"><h4 class="cs-col-title">Blocks</h4>' +
-        '<input data-cs="palSearch" class="pal-search" placeholder="Search blocks..." />' +
-        '<div data-cs="palette"></div></aside>' +
+      '<aside class="cs-col cs-palette">' +
+        '<div class="pal-head">' +
+          '<h4 class="cs-col-title pal-title">Blocks</h4>' +
+          '<button class="insp-toggle" data-cs="palToggle" title="Collapse panel" aria-label="Collapse blocks panel">⟨</button>' +
+        '</div>' +
+        '<div class="pal-body" data-cs="palBody">' +
+          '<input data-cs="palSearch" class="pal-search" placeholder="Search blocks..." />' +
+          '<div data-cs="palette"></div>' +
+        '</div></aside>' +
       '<section class="cs-canvas-col">' +
         '<div class="cs-viewport" data-cs="viewport">' +
           '<div class="cs-world" data-cs="world">' +
@@ -521,7 +527,7 @@
       btn.innerHTML = collapsed ? "⟨" : "⟩";
       btn.title = collapsed ? "Expand panel" : "Collapse panel";
       try { localStorage.setItem("cs_insp_collapsed", collapsed ? "1" : "0"); } catch (e) {}
-      setTimeout(fit, 180);
+      setTimeout(fit, 240);
     }
     $("inspToggle").addEventListener("click", function () {
       setInspector(!$("grid").classList.contains("insp-collapsed"));
@@ -529,6 +535,22 @@
     var inspStart = false;
     try { inspStart = localStorage.getItem("cs_insp_collapsed") === "1"; } catch (e) {}
     if (inspStart) setInspector(true);
+
+    /* ---------- palette collapse (more room for the canvas) ---------- */
+    function setPalette(collapsed) {
+      $("grid").classList.toggle("pal-collapsed", collapsed);
+      var btn = $("palToggle");
+      btn.innerHTML = collapsed ? "⟩" : "⟨";
+      btn.title = collapsed ? "Expand panel" : "Collapse panel";
+      try { localStorage.setItem("cs_pal_collapsed", collapsed ? "1" : "0"); } catch (e) {}
+      setTimeout(fit, 240);
+    }
+    $("palToggle").addEventListener("click", function () {
+      setPalette(!$("grid").classList.contains("pal-collapsed"));
+    });
+    var palStart = false;
+    try { palStart = localStorage.getItem("cs_pal_collapsed") === "1"; } catch (e) {}
+    if (palStart) setPalette(true);
 
     /* ---------- inspector: selected node config ---------- */
     function renderInspectorNode() {

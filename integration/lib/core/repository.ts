@@ -13,6 +13,7 @@ import type {
   Campaign,
   Prospect,
 } from "./types";
+import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 
 export interface CoreRepository {
   // campaigns
@@ -39,23 +40,52 @@ class InMemoryCore implements CoreRepository {
   prospects = new Map<string, Prospect>();
   activity: ActivityEvent[] = [];
 
+  /* ---- durability: snapshot to Postgres (no-op without DATABASE_URL) ---- */
+  private persist = debouncedSaver("core", () => ({
+    campaigns: [...this.campaigns.entries()],
+    prospects: [...this.prospects.entries()],
+    activity: this.activity,
+  }));
+  private hydrated: Promise<void> | null = null;
+  ready(): Promise<void> {
+    if (!this.hydrated) {
+      this.hydrated = dbEnabled()
+        ? loadSnapshot<any>("core").then((s) => {
+            if (!s) return;
+            this.campaigns = new Map(s.campaigns || []);
+            this.prospects = new Map(s.prospects || []);
+            this.activity = s.activity || [];
+          }).catch(() => {})
+        : Promise.resolve();
+    }
+    return this.hydrated;
+  }
+
   async getCampaign(id: string) {
+    await this.ready();
     return this.campaigns.get(id) ?? null;
   }
   async listCampaigns(workspaceId: string) {
+    await this.ready();
     return [...this.campaigns.values()].filter((c) => c.workspaceId === workspaceId);
   }
   async saveCampaign(c: Campaign) {
+    await this.ready();
     this.campaigns.set(c.id, c);
+    this.persist();
   }
   async deleteCampaign(id: string) {
+    await this.ready();
     this.campaigns.delete(id);
+    this.persist();
   }
 
   async getProspect(id: string) {
+    await this.ready();
     return this.prospects.get(id) ?? null;
   }
   async findProspectByEmail(workspaceId: string, email: string) {
+    await this.ready();
     const key = email.trim().toLowerCase();
     for (const p of this.prospects.values()) {
       if (p.workspaceId === workspaceId && p.email?.toLowerCase() === key) return p;
@@ -63,12 +93,14 @@ class InMemoryCore implements CoreRepository {
     return null;
   }
   async findProspectByLinkedin(workspaceId: string, url: string) {
+    await this.ready();
     for (const p of this.prospects.values()) {
       if (p.workspaceId === workspaceId && p.linkedinUrl === url) return p;
     }
     return null;
   }
   async findProspectByPhone(workspaceId: string, phone: string) {
+    await this.ready();
     const key = normalizePhone(phone);
     for (const p of this.prospects.values()) {
       if (p.workspaceId === workspaceId && p.phone && normalizePhone(p.phone) === key) return p;
@@ -76,6 +108,7 @@ class InMemoryCore implements CoreRepository {
     return null;
   }
   async listProspects(workspaceId: string, filter?: Partial<Pick<Prospect, "campaignId" | "status">>) {
+    await this.ready();
     return [...this.prospects.values()].filter(
       (p) =>
         p.workspaceId === workspaceId &&
@@ -84,13 +117,18 @@ class InMemoryCore implements CoreRepository {
     );
   }
   async saveProspect(p: Prospect) {
+    await this.ready();
     this.prospects.set(p.id, p);
+    this.persist();
   }
 
   async recordActivity(e: ActivityEvent) {
+    await this.ready();
     this.activity.push(e);
+    this.persist();
   }
   async listActivity(prospectId: string) {
+    await this.ready();
     return this.activity
       .filter((e) => e.prospectId === prospectId)
       .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
