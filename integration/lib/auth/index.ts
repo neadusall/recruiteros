@@ -17,6 +17,7 @@ import { rid, nowIso, isoPlusHours } from "../core/ids";
 import { hashPassword, verifyPassword, randomToken } from "./crypto";
 import { capabilitiesFor } from "./permissions";
 import type { AuthResult, EmailToken, Membership, Role, Session, User, Workspace } from "./types";
+import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 
 export * from "./types";
 export * from "./permissions";
@@ -31,12 +32,54 @@ const store = {
   emailTokens: new Map<string, EmailToken>(),
 };
 
+/* ---------------- durability (Postgres snapshot) ----------------
+   Accounts, workspaces and sessions survive restarts. With no DATABASE_URL the
+   loader returns null and persist() is a no-op, so dev still runs in-memory. */
+const SNAP_KEY = "auth";
+function serialize() {
+  return {
+    users: [...store.users.entries()],
+    usersByEmail: [...store.usersByEmail.entries()],
+    workspaces: [...store.workspaces.entries()],
+    workspacesByDomain: [...store.workspacesByDomain.entries()],
+    memberships: store.memberships,
+    sessions: [...store.sessions.entries()],
+    emailTokens: [...store.emailTokens.entries()],
+  };
+}
+function hydrate(s: any) {
+  if (!s) return;
+  store.users = new Map(s.users || []);
+  store.usersByEmail = new Map(s.usersByEmail || []);
+  store.workspaces = new Map(s.workspaces || []);
+  store.workspacesByDomain = new Map(s.workspacesByDomain || []);
+  store.memberships = s.memberships || [];
+  store.sessions = new Map(s.sessions || []);
+  store.emailTokens = new Map(s.emailTokens || []);
+}
+const persist = debouncedSaver(SNAP_KEY, serialize);
+
+// Boot: hydrate from the durable snapshot before serving requests.
+let hydrated: Promise<void> | null = null;
+export function ensureAuthReady(): Promise<void> {
+  if (!hydrated) {
+    hydrated = dbEnabled()
+      ? loadSnapshot<any>(SNAP_KEY).then(hydrate).catch(() => {})
+      : Promise.resolve();
+  }
+  return hydrated;
+}
+// Kick off hydration at module load so the snapshot is in memory by the time
+// the first request hits a synchronous guard (sessionContext).
+void ensureAuthReady();
+
 const SESSION_HOURS = 24 * 14;
 const FREE_DOMAINS = new Set(["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "proton.me"]);
 
 /* ---------------- public API ---------------- */
 
 export async function register(email: string, password: string, name: string): Promise<AuthResult> {
+  await ensureAuthReady();
   const key = normEmail(email);
   if (store.usersByEmail.has(key)) throw authError("email_in_use", 409);
   if (password.length < 8) throw authError("weak_password", 422);
@@ -51,16 +94,19 @@ export async function register(email: string, password: string, name: string): P
   const { workspace, role } = provisionWorkspace(user);
   await sendVerificationEmail(user);
   const session = issueSession(user.id, workspace.id);
+  persist();
   return result(user, workspace, role, session);
 }
 
 export async function login(email: string, password: string): Promise<AuthResult> {
+  await ensureAuthReady();
   const user = userByEmail(email);
   if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
     throw authError("invalid_credentials", 401);
   }
   const m = primaryMembership(user.id);
   const session = issueSession(user.id, m.workspaceId);
+  persist();
   return result(user, store.workspaces.get(m.workspaceId)!, m.role, session);
 }
 
@@ -102,6 +148,7 @@ export function peekResetToken(token: string): { valid: boolean; email?: string 
  * existing sessions for that user, then issue a fresh session.
  */
 export async function resetPassword(token: string, newPassword: string): Promise<AuthResult> {
+  await ensureAuthReady();
   if (newPassword.length < 8) throw authError("weak_password", 422);
   const t = store.emailTokens.get(token);
   if (!t || t.purpose !== "reset_password" || Date.parse(t.expiresAt) < Date.now()) {
@@ -119,10 +166,12 @@ export async function resetPassword(token: string, newPassword: string): Promise
 
   const m = primaryMembership(user.id);
   const session = issueSession(user.id, m.workspaceId);
+  persist();
   return result(user, store.workspaces.get(m.workspaceId)!, m.role, session);
 }
 
 export async function consumeMagicLink(token: string): Promise<AuthResult> {
+  await ensureAuthReady();
   const t = store.emailTokens.get(token);
   if (!t || t.purpose !== "magic_link" || Date.parse(t.expiresAt) < Date.now()) {
     throw authError("invalid_or_expired_token", 401);
@@ -141,6 +190,7 @@ export async function consumeMagicLink(token: string): Promise<AuthResult> {
   }
   const m = primaryMembership(user.id);
   const session = issueSession(user.id, m.workspaceId);
+  persist();
   return result(user, store.workspaces.get(m.workspaceId)!, m.role, session);
 }
 
@@ -167,6 +217,7 @@ export function sessionContext(token?: string | null): AuthResult | null {
 
 export function logout(token: string): void {
   store.sessions.delete(token);
+  persist();
 }
 
 /** Read the Bearer / cookie session token off a request. */

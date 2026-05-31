@@ -1,10 +1,28 @@
 # RecruiterOS on Hetzner: app + Caddy (automatic HTTPS via Let's Encrypt).
 # Caddy terminates TLS for recruiteros.co and proxies to the Next app.
 services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: recruiteros
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_env}
+      POSTGRES_DB: recruiteros
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recruiteros"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   app:
     build: .
     restart: unless-stopped
     env_file: .env.production
+    depends_on:
+      db:
+        condition: service_healthy
     expose:
       - "3000"
     # not published to the host directly; Caddy reaches it on the internal net
@@ -25,3 +43,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  pg_data:

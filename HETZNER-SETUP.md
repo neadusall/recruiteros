@@ -53,9 +53,17 @@ ufw allow OpenSSH && ufw allow 80 && ufw allow 443 && ufw --force enable
 git clone https://github.com/neadusall/recruiteros.git
 cd recruiteros
 cp .env.production.example .env.production
-nano .env.production     # fill in keys; set a long random RECRUITEROS_SESSION_SECRET
+nano .env.production
 ```
-Generate a secret quickly: `openssl rand -hex 32`
+In `.env.production` set:
+- `RECRUITEROS_SESSION_SECRET` to a long random string: `openssl rand -hex 32`
+- `POSTGRES_PASSWORD` to a strong password, e.g. `openssl rand -hex 16`
+- `DATABASE_URL` to use that SAME password:
+  `postgres://recruiteros:YOUR_PASSWORD@db:5432/recruiteros`
+- your `ANTHROPIC_API_KEY` and any channel keys you have
+
+The Postgres `db` service (in docker-compose) gives you durable accounts that
+survive restarts. Without `DATABASE_URL` the app still runs but in-memory only.
 
 ---
 
@@ -91,10 +99,9 @@ docker compose down            # stop everything
 ---
 
 ## Notes
-- **Data persistence:** the backend currently uses an in-memory store (resets on
-  `app` restart). Fine for launch/demo. For durable multi-user accounts, add a
-  database (Postgres) and point the repositories at it, the code is structured
-  for this (`integration/lib/*/repository.ts`). I can wire this next.
+- **Data persistence:** durable Postgres is wired in. The `db` service stores a
+  snapshot of accounts, workspaces and sessions, so signups survive restarts and
+  redeploys (`docker compose up -d --build` keeps the `pg_data` volume).
 - **Email sending** (magic links, verification) logs to the container by default
   until you set an SMTP/Resend key. Until then, use email + password sign-in.
 - **Secrets** live only in `.env.production` on the server, which is gitignored
