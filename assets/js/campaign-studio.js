@@ -112,6 +112,28 @@
     return { nodes: nodes, edges: edges };
   }
 
+  /* ---------------- merge fields + snippets (shared text tooling) -------
+     Merge fields are the customizable {{tokens}} the message engine fills in
+     per prospect; users can add their own and they appear in every message
+     field. Snippets are reusable blocks of written copy the user can pull
+     into any medium. Both persist in localStorage so they follow the user. */
+  var BASE_FIELDS = ["firstName", "lastName", "fullName", "company", "role", "title", "location", "industry", "signal", "me", "mySignature", "calendarLink"];
+  function getMergeFields() {
+    var custom = [];
+    try { custom = JSON.parse(localStorage.getItem("ros_merge_fields") || "[]"); } catch (e) {}
+    return BASE_FIELDS.concat(custom.filter(function (c) { return BASE_FIELDS.indexOf(c) < 0; }));
+  }
+  function addCustomField(name) {
+    name = String(name || "").trim().replace(/[^a-zA-Z0-9_]/g, "");
+    if (!name) return null;
+    var custom = []; try { custom = JSON.parse(localStorage.getItem("ros_merge_fields") || "[]"); } catch (e) {}
+    if (BASE_FIELDS.indexOf(name) < 0 && custom.indexOf(name) < 0) { custom.push(name); localStorage.setItem("ros_merge_fields", JSON.stringify(custom)); }
+    return name;
+  }
+  function getSnippets() { try { return JSON.parse(localStorage.getItem("ros_snippets") || "[]"); } catch (e) { return []; } }
+  function saveSnippetStore(s) { var l = getSnippets(); l.unshift(s); localStorage.setItem("ros_snippets", JSON.stringify(l.slice(0, 60))); }
+  function removeSnippet(i) { var l = getSnippets(); l.splice(i, 1); localStorage.setItem("ros_snippets", JSON.stringify(l)); }
+
   /* ---------------- default localStorage store ---------------- */
   var LS = "ros_campaigns";
   function lsAll() { try { return JSON.parse(localStorage.getItem(LS) || "[]"); } catch (e) { return []; } }
@@ -296,14 +318,17 @@
       if (!state.nodes.length) { state.view = { panX: 28, panY: 24, zoom: 1 }; applyTransform(); return; }
       var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       state.nodes.forEach(function (n) { minX = Math.min(minX, n.x); minY = Math.min(minY, n.y); maxX = Math.max(maxX, n.x + NODE_W); maxY = Math.max(maxY, n.y + 92); });
-      var pad = 50, r = viewport.getBoundingClientRect();
+      var pad = 44, r = viewport.getBoundingClientRect();
       var cw = (maxX - minX) + pad * 2, ch = (maxY - minY) + pad * 2;
-      var z = clamp(Math.min(r.width / cw, r.height / ch, 1.3), 0.4, 1.3);
+      var z = clamp(Math.min(r.width / cw, r.height / ch, 1.6), 0.4, 1.6);
       state.view.zoom = z;
       state.view.panX = r.width / 2 - ((minX + maxX) / 2) * z;
       state.view.panY = r.height / 2 - ((minY + maxY) / 2) * z;
       applyTransform();
     }
+    // Fit once layout has actually settled (avoids a bogus zoom when the
+    // viewport hasn't been measured yet on first paint).
+    function fitSoon() { requestAnimationFrame(function () { requestAnimationFrame(fit); }); setTimeout(fit, 180); }
     function ensureVisible(n) {
       var r = viewport.getBoundingClientRect();
       var sx = n.x * state.view.zoom + state.view.panX, sy = n.y * state.view.zoom + state.view.panY;
@@ -523,44 +548,29 @@
       setTimeout(fit, 60);
     }
 
-    /* ---------- collapsing a side panel auto-scales the steps ----------
-       When a rail collapses, the canvas gets wider, so we zoom the steps UP
-       by the same proportion (and back down when a panel reopens) so the
-       user gets a bigger working view without reaching for the zoom. */
-    function centerContentX() {
-      if (!state.nodes.length) return;
-      var minX = Infinity, maxX = -Infinity;
-      state.nodes.forEach(function (n) { minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x + NODE_W); });
-      state.view.panX = viewport.getBoundingClientRect().width / 2 - ((minX + maxX) / 2) * state.view.zoom;
-      applyTransform();
-    }
-    function zoomToFreedSpace(oldW) {
-      if (!state.nodes.length) return;
-      var newW = viewport.getBoundingClientRect().width;
-      if (!oldW || !newW || Math.abs(newW / oldW - 1) < 0.02) return;
-      setZoom(state.view.zoom * (newW / oldW)); // wider canvas -> bigger steps; narrower -> smaller
-      centerContentX();
-    }
+    /* ---------- collapsing / expanding a side panel reframes the canvas ----
+       Toggling a rail changes the room the canvas has, so we re-fit: pull every
+       step into view and zoom to fill the freed space. Runs after the column
+       transition (180ms) settles so the measurement is the final width. */
+    function refit() { setTimeout(fit, 230); }
     function setInspector(collapsed, silent) {
-      var oldW = viewport.getBoundingClientRect().width;
       $("grid").classList.toggle("insp-collapsed", collapsed);
       var btn = $("inspToggle");
       btn.innerHTML = collapsed ? "⟨" : "⟩";
       btn.title = collapsed ? "Expand panel" : "Collapse panel";
       try { localStorage.setItem("cs_insp_collapsed", collapsed ? "1" : "0"); } catch (e) {}
-      if (!silent) setTimeout(function () { zoomToFreedSpace(oldW); }, 240);
+      if (!silent) refit();
     }
     $("inspToggle").addEventListener("click", function () {
       setInspector(!$("grid").classList.contains("insp-collapsed"));
     });
     function setPalette(collapsed, silent) {
-      var oldW = viewport.getBoundingClientRect().width;
       $("grid").classList.toggle("pal-collapsed", collapsed);
       var btn = $("palToggle");
       btn.innerHTML = collapsed ? "⟩" : "⟨";
       btn.title = collapsed ? "Expand panel" : "Collapse panel";
       try { localStorage.setItem("cs_pal_collapsed", collapsed ? "1" : "0"); } catch (e) {}
-      if (!silent) setTimeout(function () { zoomToFreedSpace(oldW); }, 240);
+      if (!silent) refit();
     }
     $("palToggle").addEventListener("click", function () {
       setPalette(!$("grid").classList.contains("pal-collapsed"));
@@ -601,9 +611,8 @@
           host.appendChild(selectField("Sending account", accounts, step.cfg.account || state.account, function (v) { step.cfg.account = v; })); return;
         }
         var spec = FIELDS[f]; if (!spec) return;
-        host.appendChild(spec.type === "textarea"
-          ? textareaField(spec.label, step.cfg[spec.key] || "", spec.placeholder, function (v) { step.cfg[spec.key] = v; refreshSub(step); }, spec)
-          : textField(spec.label, step.cfg[spec.key] || "", function (v) { step.cfg[spec.key] = v; refreshSub(step); }, spec.placeholder));
+        host.appendChild(messageField(spec.label, step.cfg[spec.key] || "", function (v) { step.cfg[spec.key] = v; refreshSub(step); },
+          { textarea: spec.type === "textarea", placeholder: spec.placeholder, max: spec.max }));
       });
       if (b.testSend) host.appendChild(testSendPanel(step));
       if (!cfg.length && step.key.indexOf("lg_") !== 0) host.appendChild(hint("No configuration needed. This is an automated touch."));
@@ -615,6 +624,67 @@
     /* field factories */
     function wrapField(label) { var f = el("div", "cfg-field"); if (label) f.appendChild(el("label", null, esc(label))); return f; }
     function textField(label, val, on, ph) { var f = wrapField(label); var i = el("input"); i.type = "text"; i.value = val || ""; if (ph) i.placeholder = ph; i.addEventListener("input", function () { on(i.value); }); f.appendChild(i); return f; }
+
+    // Insert text at the caret of an input/textarea (keeps the caret after it).
+    function insertAtCursor(t, text) {
+      var s = t.selectionStart, e = t.selectionEnd;
+      if (typeof s === "number") { t.value = t.value.slice(0, s) + text + t.value.slice(e); var p = s + text.length; t.selectionStart = t.selectionEnd = p; }
+      else { t.value += text; }
+      t.focus();
+    }
+
+    /* The full message editor used for every written/SMS medium: subject,
+       body, note, sms and voice script. Write and manipulate text, insert
+       customizable {{fields}} (add your own), and pull in / save reusable
+       snippets so copy can be reused across mediums. */
+    function messageField(label, val, on, o) {
+      o = o || {};
+      var f = el("div", "cfg-field msg-field");
+      if (label) f.appendChild(el("label", null, esc(label)));
+      var input = o.textarea ? el("textarea") : el("input");
+      if (!o.textarea) input.type = "text";
+      if (o.textarea) input.rows = 4;
+      input.value = val || ""; if (o.placeholder) input.placeholder = o.placeholder;
+      var counter;
+      function fire() { on(input.value); if (counter) updateCount(); }
+      input.addEventListener("input", fire);
+      f.appendChild(input);
+
+      // field bar: every merge field as an insertable chip + add-your-own
+      var bar = el("div", "cfg-fieldbar");
+      getMergeFields().forEach(function (v) {
+        var chip = el("button", "var-chip"); chip.type = "button"; chip.textContent = "{{" + v + "}}"; chip.title = "Insert " + v;
+        chip.addEventListener("click", function () { insertAtCursor(input, "{{" + v + "}}"); fire(); });
+        bar.appendChild(chip);
+      });
+      var addBtn = el("button", "var-chip add", "＋ Field"); addBtn.type = "button"; addBtn.title = "Create a custom merge field";
+      addBtn.addEventListener("click", function () {
+        var name = addCustomField(prompt("Custom field name (letters, numbers, _ ), e.g. teamSize:", ""));
+        if (name) { insertAtCursor(input, "{{" + name + "}}"); fire(); renderInspectorNode(); toast("Field {{" + name + "}} added"); }
+      });
+      bar.appendChild(addBtn);
+      f.appendChild(bar);
+
+      // snippet bar: bring in saved copy, or save the current text for reuse
+      var snipBar = el("div", "cfg-snips");
+      var sel = el("select", "snip-select");
+      sel.appendChild(new Option("Insert saved text…", ""));
+      getSnippets().forEach(function (s, i) { sel.appendChild(new Option(s.name, String(i))); });
+      sel.addEventListener("change", function () { if (sel.value === "") return; var s = getSnippets()[+sel.value]; if (s) { insertAtCursor(input, s.text); fire(); } sel.value = ""; });
+      var saveBtn = el("button", "var-chip", "＋ Save snippet"); saveBtn.type = "button"; saveBtn.title = "Save the selected text (or all of it) for reuse anywhere";
+      saveBtn.addEventListener("click", function () {
+        var sel0 = input.selectionStart, sel1 = input.selectionEnd;
+        var text = (typeof sel0 === "number" && sel0 !== sel1) ? input.value.slice(sel0, sel1) : input.value;
+        if (!text.trim()) { toast("Write something first"); return; }
+        var name = prompt("Name this snippet:", text.replace(/\s+/g, " ").slice(0, 32));
+        if (name) { saveSnippetStore({ name: name, text: text }); renderInspectorNode(); toast("Snippet saved"); }
+      });
+      snipBar.appendChild(sel); snipBar.appendChild(saveBtn);
+      f.appendChild(snipBar);
+
+      if (o.max) { counter = el("div", "cfg-hint"); var updateCount = function () { var n = input.value.length; counter.textContent = n + " / " + o.max + " chars" + (n > o.max ? " - may split into 2 segments" : ""); counter.style.color = n > o.max ? "var(--accent-amber)" : ""; }; updateCount(); f.appendChild(counter); }
+      return f;
+    }
     function numField(label, val, on) { var f = wrapField(label); var i = el("input"); i.type = "number"; i.min = 0; i.value = val; i.addEventListener("input", function () { on(parseInt(i.value, 10) || 0); }); f.appendChild(i); return f; }
     function textareaField(label, val, ph, on, spec) {
       var f = wrapField(label); var t = el("textarea"); t.value = val || ""; if (ph) t.placeholder = ph;
@@ -802,9 +872,9 @@
 
     /* ---------- initial load ---------- */
     var openId = opts.openId;
-    if (openId) { var found = store.all().filter(function (c) { return c.id === openId; })[0]; if (found) { loadCampaign(found); setTimeout(fit, 40); return controller(); } }
+    if (openId) { var found = store.all().filter(function (c) { return c.id === openId; })[0]; if (found) { loadCampaign(found); fitSoon(); return controller(); } }
     var s0 = starter(state.motion); state.nodes = s0.nodes; state.edges = s0.edges;
-    syncMeta(); renderPalette(); renderNodes(); renderInspectorNode(); applyTransform(); setTimeout(fit, 40);
+    syncMeta(); renderPalette(); renderNodes(); renderInspectorNode(); applyTransform(); fitSoon();
 
     function controller() {
       return {

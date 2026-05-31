@@ -215,6 +215,17 @@
 .var-chip { font-family: var(--mono); font-size: 11px; padding: 3px 8px; border-radius: 6px; background: rgba(124,92,255,.14); color: #b9a6ff; cursor: pointer; border: none; }
 .var-chip:hover { background: rgba(124,92,255,.28); }
 
+/* message editor: merge-field chips + snippet bar (all messaging mediums) */
+.msg-field textarea { min-height: 92px; line-height: 1.5; }
+.cfg-fieldbar { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; max-height: 84px; overflow-y: auto; }
+.cfg-fieldbar .var-chip { white-space: nowrap; }
+.var-chip.add { background: rgba(56,224,166,.16); color: var(--accent-green); font-family: var(--font); font-weight: 700; }
+.var-chip.add:hover { background: rgba(56,224,166,.28); }
+.cfg-snips { display: flex; gap: 6px; margin-top: 7px; align-items: center; }
+.cfg-snips .snip-select { flex: 1; min-width: 0; background: #0c0c16; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; color: var(--text-muted); font-size: 12px; font-family: var(--font); }
+.cfg-snips .snip-select:focus { outline: none; border-color: var(--brand); }
+.cfg-snips .var-chip { font-family: var(--font); font-weight: 600; white-space: nowrap; }
+
 .cfg-toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
 .switch { width: 40px; height: 23px; border-radius: 999px; background: rgba(255,255,255,.14); position: relative; cursor: pointer; transition: .15s; flex-shrink: 0; }
 .switch.on { background: var(--brand); }
