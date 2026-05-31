@@ -198,6 +198,42 @@ export async function consumeMagicLink(token: string): Promise<AuthResult> {
   return result(user, store.workspaces.get(m.workspaceId)!, m.role, session);
 }
 
+/**
+ * Sign in (or sign up) via an OAuth identity provider, currently LinkedIn.
+ * Finds the user by email or creates a passwordless one, stores their LinkedIn
+ * profile URL + avatar on the user AND on the workspace (so the Alfred
+ * extension links to the same LinkedIn account), then issues a session.
+ */
+export async function upsertOAuthUser(profile: {
+  email: string;
+  name?: string;
+  picture?: string;
+  linkedinUrl?: string;
+}): Promise<AuthResult> {
+  await ensureAuthReady();
+  const key = normEmail(profile.email);
+  let user = userByEmail(key);
+  if (!user) {
+    user = {
+      id: rid("usr"), email: key, name: (profile.name || key.split("@")[0]).trim(),
+      passwordHash: null, emailVerified: true, createdAt: nowIso(),
+      linkedinUrl: profile.linkedinUrl, picture: profile.picture,
+    };
+    store.users.set(user.id, user);
+    store.usersByEmail.set(key, user.id);
+    provisionWorkspace(user);
+  } else {
+    user.emailVerified = true;
+    if (profile.linkedinUrl) user.linkedinUrl = profile.linkedinUrl;
+    if (profile.picture) user.picture = profile.picture;
+    if (profile.name && !user.name) user.name = profile.name;
+  }
+  const m = primaryMembership(user.id);
+  const session = issueSession(user.id, m.workspaceId);
+  persist();
+  return result(user, store.workspaces.get(m.workspaceId)!, m.role, session);
+}
+
 export function verifyEmail(token: string): boolean {
   const t = store.emailTokens.get(token);
   if (!t || t.purpose !== "verify" || Date.parse(t.expiresAt) < Date.now()) return false;

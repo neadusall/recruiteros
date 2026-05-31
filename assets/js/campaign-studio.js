@@ -523,37 +523,54 @@
       setTimeout(fit, 60);
     }
 
-    /* ---------- inspector collapse (more room for the canvas) ---------- */
-    function setInspector(collapsed) {
+    /* ---------- collapsing a side panel auto-scales the steps ----------
+       When a rail collapses, the canvas gets wider, so we zoom the steps UP
+       by the same proportion (and back down when a panel reopens) so the
+       user gets a bigger working view without reaching for the zoom. */
+    function centerContentX() {
+      if (!state.nodes.length) return;
+      var minX = Infinity, maxX = -Infinity;
+      state.nodes.forEach(function (n) { minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x + NODE_W); });
+      state.view.panX = viewport.getBoundingClientRect().width / 2 - ((minX + maxX) / 2) * state.view.zoom;
+      applyTransform();
+    }
+    function zoomToFreedSpace(oldW) {
+      if (!state.nodes.length) return;
+      var newW = viewport.getBoundingClientRect().width;
+      if (!oldW || !newW || Math.abs(newW / oldW - 1) < 0.02) return;
+      setZoom(state.view.zoom * (newW / oldW)); // wider canvas -> bigger steps; narrower -> smaller
+      centerContentX();
+    }
+    function setInspector(collapsed, silent) {
+      var oldW = viewport.getBoundingClientRect().width;
       $("grid").classList.toggle("insp-collapsed", collapsed);
       var btn = $("inspToggle");
       btn.innerHTML = collapsed ? "⟨" : "⟩";
       btn.title = collapsed ? "Expand panel" : "Collapse panel";
       try { localStorage.setItem("cs_insp_collapsed", collapsed ? "1" : "0"); } catch (e) {}
-      setTimeout(fit, 240);
+      if (!silent) setTimeout(function () { zoomToFreedSpace(oldW); }, 240);
     }
     $("inspToggle").addEventListener("click", function () {
       setInspector(!$("grid").classList.contains("insp-collapsed"));
     });
-    var inspStart = false;
-    try { inspStart = localStorage.getItem("cs_insp_collapsed") === "1"; } catch (e) {}
-    if (inspStart) setInspector(true);
-
-    /* ---------- palette collapse (more room for the canvas) ---------- */
-    function setPalette(collapsed) {
+    function setPalette(collapsed, silent) {
+      var oldW = viewport.getBoundingClientRect().width;
       $("grid").classList.toggle("pal-collapsed", collapsed);
       var btn = $("palToggle");
       btn.innerHTML = collapsed ? "⟩" : "⟨";
       btn.title = collapsed ? "Expand panel" : "Collapse panel";
       try { localStorage.setItem("cs_pal_collapsed", collapsed ? "1" : "0"); } catch (e) {}
-      setTimeout(fit, 240);
+      if (!silent) setTimeout(function () { zoomToFreedSpace(oldW); }, 240);
     }
     $("palToggle").addEventListener("click", function () {
       setPalette(!$("grid").classList.contains("pal-collapsed"));
     });
-    var palStart = false;
+    // Restore saved collapse state silently; the initial fit() owns the baseline zoom.
+    var inspStart = false, palStart = false;
+    try { inspStart = localStorage.getItem("cs_insp_collapsed") === "1"; } catch (e) {}
     try { palStart = localStorage.getItem("cs_pal_collapsed") === "1"; } catch (e) {}
-    if (palStart) setPalette(true);
+    if (inspStart) setInspector(true, true);
+    if (palStart) setPalette(true, true);
 
     /* ---------- inspector: selected node config ---------- */
     function renderInspectorNode() {

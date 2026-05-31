@@ -120,6 +120,19 @@
     });
   }
 
+  // Show an error passed back from OAuth (e.g. ?error=linkedin_bad_state).
+  var oauthErr = new URLSearchParams(location.search).get("error");
+  if (oauthErr) {
+    var msgMap = {
+      linkedin_not_configured: "LinkedIn sign-in isn't set up yet. Use email for now.",
+      linkedin_bad_state: "LinkedIn sign-in expired. Please try again.",
+      linkedin_token_failed: "LinkedIn sign-in failed. Please try again.",
+      linkedin_profile_failed: "Could not read your LinkedIn profile. Try email sign-in.",
+      linkedin_no_code: "LinkedIn sign-in was cancelled.",
+    };
+    say(msgMap[oauthErr] || "Sign-in failed. Please try again.", "err");
+  }
+
   // Consume ?token=... magic links landing back on login.html
   var token = new URLSearchParams(location.search).get("token");
   if (token && page === "login") {

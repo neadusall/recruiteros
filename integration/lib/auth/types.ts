@@ -13,10 +13,13 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  /** PBKDF2 hash; never store the raw password. Null for magic-link-only users. */
+  /** PBKDF2 hash; never store the raw password. Null for magic-link / OAuth-only users. */
   passwordHash: string | null;
   emailVerified: boolean;
   createdAt: string;
+  /** Captured from LinkedIn sign-in: public profile URL + avatar. */
+  linkedinUrl?: string;
+  picture?: string;
 }
 
 export interface Workspace {
