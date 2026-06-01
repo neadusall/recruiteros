@@ -130,7 +130,7 @@
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
-    campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New campaign", render: renderCampaigns },
+    campaigns: { title: "Campaigns", crumb: "Build", action: null, render: renderCampaigns },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
@@ -172,6 +172,7 @@
 
   function render() {
     var key = currentRoute();
+    if (key !== "campaigns") cmpEdit = null; // leave the sequence editor when navigating away
     var r = ROUTES[key];
     $("#pageTitle").textContent = r.title;
     $("#crumb").textContent = (ctx.workspace ? ctx.workspace.name + " / " : "") + r.crumb;
@@ -364,12 +365,42 @@
     company: "Search a company by name, e.g. Stripe, Verla Health, Brightwave"
   };
 
+  // Hiring-signal types you can filter the search by (company-side). Pulled from the
+  // engine's signal catalog; these are what the free/open sources can surface.
+  var IM_SIGNALS = [
+    { t: "job_posting", l: "📋 New job posting" },
+    { t: "hiring_velocity", l: "📈 Hiring surge" },
+    { t: "job_repost", l: "🔁 Role reposted" },
+    { t: "evergreen_role", l: "⏳ Long-open role" },
+    { t: "headcount_growth", l: "👥 Headcount growth" },
+    { t: "careers_page_launch", l: "🌐 Careers page launched" },
+    { t: "ats_detected", l: "🧩 ATS adopted" },
+    { t: "funding_round", l: "💰 Funding round" },
+    { t: "ipo_or_s1", l: "🏛️ IPO / S-1" },
+    { t: "acquisition", l: "🤝 Acquisition" },
+    { t: "merger", l: "🔗 Merger" },
+    { t: "revenue_milestone", l: "📊 Revenue milestone" },
+    { t: "grant_or_contract", l: "📜 Grant / contract win" },
+    { t: "exec_hire", l: "👔 New exec" },
+    { t: "department_head_change", l: "🧭 New function lead" },
+    { t: "exec_departure", l: "🚪 Exec departure" },
+    { t: "board_change", l: "🪑 Board change" },
+    { t: "office_expansion", l: "🏢 Expansion" },
+    { t: "market_entry", l: "🌍 New market" },
+    { t: "product_launch", l: "🚀 Product launch" },
+    { t: "partnership", l: "🤝 Partnership" },
+    { t: "tech_stack_change", l: "🛠️ Tech adoption" },
+    { t: "layoff", l: "📉 Layoff" },
+    { t: "warn_notice", l: "⚠️ WARN notice" }
+  ];
+  var imSelectedSignals = [];   // selected SignalType keys to filter the search by
+
   function imPickKey(leadId, role) { return leadId + "::" + (role || "__company"); }
   function imFindLead(id) { return inMarketResults.find(function (x) { return x.id === id; }); }
   function imVisibleLeads() { return inMarketResults.filter(function (l) { return Math.round(l.score || 0) >= imMinScore; }); }
 
   function renderInMarket(el) {
-    imPicks = {}; imMinScore = 0;
+    imPicks = {}; imMinScore = 0; imSelectedSignals = [];
     el.innerHTML =
       '<div class="im-hero">' +
         '<h1 class="im-title">Who\'s hiring <span class="gradient-text">right now.</span></h1>' +
@@ -386,6 +417,10 @@
         '<div class="im-industries" id="imIndustries">' +
           IM_INDUSTRIES.map(function (n) { return '<button type="button" class="im-chip" data-ind="' + esc(n) + '">' + esc(n) + "</button>"; }).join("") +
         "</div>" +
+        '<div class="im-sig-wrap"><div class="im-sig-label">Filter by hiring signal <span class="muted">— optional, click to toggle. Pulls from open / free sources.</span></div>' +
+          '<div class="im-signals" id="imSignals">' +
+            IM_SIGNALS.map(function (s) { return '<button type="button" class="im-sigchip" data-sig="' + esc(s.t) + '">' + esc(s.l) + "</button>"; }).join("") +
+          "</div></div>" +
       "</div>" +
       '<div id="imSaved"></div>' +
       '<div id="imBody"><div class="empty">Pick an industry to surface companies actively hiring in that market, ranked by hiring intent.</div></div>';
@@ -424,10 +459,42 @@
       });
     });
 
+    // Signal-type chips: toggle, then re-run the current search filtered to those signals.
+    Array.prototype.forEach.call(el.querySelectorAll(".im-sigchip"), function (c) {
+      c.addEventListener("click", function () {
+        var t = c.getAttribute("data-sig");
+        var i = imSelectedSignals.indexOf(t);
+        if (i >= 0) imSelectedSignals.splice(i, 1); else imSelectedSignals.push(t);
+        syncSigChips();
+        rerunSearch();
+      });
+    });
+
     function syncChips() {
       Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
         c.classList.toggle("active", c.getAttribute("data-ind") === imSelectedIndustry);
       });
+    }
+    function syncSigChips() {
+      Array.prototype.forEach.call(el.querySelectorAll(".im-sigchip"), function (c) {
+        c.classList.toggle("active", imSelectedSignals.indexOf(c.getAttribute("data-sig")) >= 0);
+      });
+    }
+
+    // Re-run whatever search is in context (industry / company / keyword), or a
+    // signals-only sweep when nothing else is chosen.
+    function rerunSearch() {
+      if (imMode === "company") {
+        var v = input.value.trim();
+        if (v) runSearch({ companyName: v }, v);
+        else if (imSelectedSignals.length) runSearch({}, "selected signals");
+      } else if (imSelectedIndustry) {
+        runSearch({ industries: [imSelectedIndustry] }, imSelectedIndustry);
+      } else {
+        var q = input.value.trim();
+        if (q) runSearch({ query: q }, q);
+        else if (imSelectedSignals.length) runSearch({}, "selected signals");
+      }
     }
 
     function runSearch(criteria, label) {
@@ -437,6 +504,7 @@
       if (criteria.companyName) payload.companyName = criteria.companyName;
       if (criteria.industries) payload.industries = criteria.industries;
       if (criteria.query) payload.query = criteria.query;
+      if (imSelectedSignals.length) payload.signalTypes = imSelectedSignals.slice();
       send("/in-market", "POST", payload).then(function (r) {
         if (!r.ok) { body.innerHTML = needsSetup(); return; }
         inMarketResults = (r.data && r.data.leads) || [];
@@ -795,51 +863,406 @@
     }).catch(function () { toast("Could not reach the server."); });
   }
 
+  /* ---------------- Campaigns (channel sequence builder) ----------------
+     Campaigns is where you AUTHOR the message sequences — one per channel
+     (Email / LinkedIn / SMS). Each opens a step-by-step editor modelled on a
+     dedicated outreach sequencer: a named sequence, ordered steps with delays,
+     merge fields + reusable custom variables, and a live overview. Assigning a
+     prospect list and deploying happens in Campaign Studio. */
+
+  var CHANNELS = {
+    email: { label: "Email", icon: "✉️", blurb: "Subject + body touches with merge fields and open/click tracking.", unit: "emails" },
+    linkedin: { label: "LinkedIn", icon: "🔗", blurb: "Connection requests, messages, InMail, and voice notes.", unit: "touches" },
+    sms: { label: "SMS", icon: "💬", blurb: "Short, compliant post-engagement texts.", unit: "texts" }
+  };
+  var STD_VARS = [
+    { key: "first_name", label: "First name" }, { key: "last_name", label: "Last name" },
+    { key: "company", label: "Company" }, { key: "title", label: "Job title" },
+    { key: "role", label: "Role hiring for" }, { key: "signal", label: "Trigger signal" },
+    { key: "sender_name", label: "Your name" }
+  ];
+  var LI_ACTIONS = [
+    { v: "connect", label: "Connection request" }, { v: "message", label: "Message" },
+    { v: "inmail", label: "InMail" }, { v: "voice_note", label: "Voice note" }
+  ];
+  function seqTemplate(channel) {
+    if (channel === "email") return [
+      { id: sid(), day: 0, tracking: true, subject: "{{role}} at {{company}} — quick idea", body: "Hi {{first_name}},\n\nNoticed {{signal}}. I work with people who'd be a strong fit for the {{role}} role — worth a short call this week?\n\nBest,\n{{sender_name}}" },
+      { id: sid(), day: 3, tracking: true, subject: "Re: {{role}}", body: "Following up, {{first_name}} — happy to send a couple of profiles if it's useful." },
+      { id: sid(), day: 5, tracking: true, subject: "Should I close the file?", body: "No worries if the timing's off, {{first_name}} — just let me know and I'll step back." }
+    ];
+    if (channel === "linkedin") return [
+      { id: sid(), day: 0, action: "connect", text: "" },
+      { id: sid(), day: 2, action: "message", text: "Thanks for connecting, {{first_name}}! Reaching out about {{signal}} — open to a quick chat?" },
+      { id: sid(), day: 5, action: "message", text: "Circling back in case this got buried — happy to share details whenever works." }
+    ];
+    return [
+      { id: sid(), day: 0, text: "Hi {{first_name}}, it's {{sender_name}} following up on {{role}} at {{company}}. Got 10 min this week? Reply STOP to opt out." }
+    ];
+  }
+  function sid() { return "s_" + Math.random().toString(36).slice(2, 9); }
+
+  // Sequence persistence: server is the source of truth, localStorage is a fast
+  // mirror so the list paints instantly and survives offline (same pattern as
+  // the Studio store).
+  function seqStore() {
+    function all() { try { return JSON.parse(localStorage.getItem("ros_sequences") || "[]"); } catch (e) { return []; } }
+    return {
+      all: all,
+      save: function (s) {
+        var l = all().filter(function (x) { return x.id !== s.id; }); l.unshift(s);
+        localStorage.setItem("ros_sequences", JSON.stringify(l));
+        send("/sequences", "PUT", s).catch(function () {});
+      },
+      remove: function (id) {
+        localStorage.setItem("ros_sequences", JSON.stringify(all().filter(function (x) { return x.id !== id; })));
+        fetch(API + "/sequences?id=" + encodeURIComponent(id), { method: "DELETE", credentials: "include" }).catch(function () {});
+      }
+    };
+  }
+
+  var cmpEdit = null; // null = home; else the sequence object being edited
+
   function renderCampaigns(el) {
-    // Campaigns saved from the drag-and-drop Campaign Studio (localStorage), newest first.
-    var saved = [];
-    try { saved = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); } catch (e) {}
-    var savedRows = saved.filter(function (c) { return c.motion === motion; }).map(function (c) {
-      var pill = c.status === "active" ? "live" : "draft";
-      var touches = (c.steps || []).filter(function (s) { return s.key !== "lg_delay"; }).length;
-      var chans = {};
-      (c.steps || []).forEach(function (s) { if (s.channel && s.channel !== "logic") chans[s.channel] = 1; });
-      var chList = Object.keys(chans).map(function (x) { return x.replace("linkedin", "LinkedIn").replace("email", "Email").replace("sms", "SMS").replace("voice", "Voice"); });
-      return '<div class="card" style="margin-bottom:12px;cursor:pointer" data-open="' + esc(c.id) + '"><div style="display:flex;align-items:center;gap:10px">' +
-        '<span class="ni">🧩</span><b style="font-size:15px">' + esc(c.name) + "</b>" +
-        '<span class="status-pill ' + pill + '">' + esc(c.status) + "</span>" +
-        '<span class="lr-right" style="margin-left:auto">cap ' + (c.dailyCap || 25) + "/day</span></div>" +
-        '<div class="muted" style="font-size:13px;margin:6px 0 10px">' + esc(c.goal || "No goal set yet.") + "</div>" +
-        '<div class="muted" style="font-size:12.5px">' + touches + " touches across " + (chList.join(", ") || "no channels yet") + " · Studio sequence</div></div>";
+    if (cmpEdit) { renderSeqEditor(el, cmpEdit); return; }
+    renderSeqHome(el);
+  }
+
+  function seqDuration(s) { return (s.steps || []).reduce(function (a, st) { return a + (parseInt(st.day, 10) || 0); }, 0); }
+
+  function renderSeqHome(el) {
+    var store = seqStore();
+    var cards = Object.keys(CHANNELS).map(function (ch) {
+      var c = CHANNELS[ch];
+      var n = store.all().filter(function (s) { return s.channel === ch && s.motion === motion; }).length;
+      return '<button class="seq-new" data-new="' + ch + '"><span class="seq-new-ic">' + c.icon + "</span>" +
+        '<span class="seq-new-t">' + c.label + " sequence</span>" +
+        '<span class="seq-new-b">' + esc(c.blurb) + "</span>" +
+        '<span class="seq-new-f">' + (n ? n + " saved · " : "") + "＋ New " + c.label + " sequence</span></button>";
     }).join("");
 
-    var rows = savedRows;
-    if (!rows) rows = '<div class="empty">No ' + motion + " campaigns yet. Click ＋ New campaign to open the Studio and build your first multi-channel sequence.</div>";
-    el.innerHTML = head("Campaigns", "The unit of work. Drag-and-drop multi-channel sequences, ICP, signals, and A/B variants in one place.") +
-      '<div class="btn-row" style="margin-bottom:14px"><a class="btn btn-primary btn-sm" href="#studio">🧩 Open Campaign Studio</a>' +
-      '<a class="btn btn-ghost btn-sm" href="#builder">🧱 Target builder</a></div>' +
-      '<div id="cmpBody">' + rows + "</div>";
+    el.innerHTML = head("Campaigns",
+      "Build your outreach sequences here — one per channel. Pick a channel to create the message steps; assign prospects and deploy from Campaign Studio.") +
+      '<div class="seq-new-grid">' + cards + "</div>" +
+      '<div class="v-head" style="margin-top:8px"><h2 style="font-size:16px">Your sequences</h2></div>' +
+      '<div id="seqList">' + loading() + "</div>";
 
-    // Merge any server-side campaigns the backend knows about.
-    api("/campaigns").then(function (d) {
-      var server = (d && d.campaigns) || [];
-      if (!server.length) return;
-      var extra = server.filter(function (c) { return c.motion === motion; }).map(function (c) {
-        var pill = c.status === "active" ? "live" : "draft";
-        return '<div class="card" style="margin-bottom:12px"><div style="display:flex;align-items:center;gap:10px">' +
-          '<b style="font-size:15px">' + esc(c.name) + "</b>" +
-          '<span class="status-pill ' + pill + '">' + esc(c.status) + "</span>" +
-          '<span class="lr-right" style="margin-left:auto">cap ' + esc(c.dailyCap || 25) + "/day</span></div>" +
-          '<div class="muted" style="font-size:13px;margin:6px 0 10px">' + esc(c.goal || "") + "</div>" +
-          (c.signals && c.signals.length ? '<div class="muted" style="font-size:12.5px">Signals: ' + c.signals.map(esc).join(", ") + "</div>" : "") + "</div>";
-      }).join("");
-      var body = $("#cmpBody"); if (body && extra) body.insertAdjacentHTML("beforeend", extra);
-    }).catch(function () {});
-
-    // open a saved campaign in the embedded Studio (in-app route)
-    Array.prototype.forEach.call(el.querySelectorAll("[data-open]"), function (card) {
-      card.addEventListener("click", function () { studioOpenId = card.getAttribute("data-open"); location.hash = "studio"; });
+    el.querySelector(".seq-new-grid").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-new]"); if (!b) return;
+      openEditor(newSequence(b.getAttribute("data-new")));
     });
+
+    paintList();
+
+    function paintList() {
+      // Local mirror first, then reconcile with the server.
+      render(store.all());
+      api("/sequences?motion=" + encodeURIComponent(motion)).then(function (d) {
+        var server = (d && d.sequences) || [];
+        if (server.length) {
+          // Server wins; refresh the local mirror so both stay in sync.
+          try { localStorage.setItem("ros_sequences", JSON.stringify(server.concat(store.all().filter(function (l) { return !server.some(function (s) { return s.id === l.id; }); })))); } catch (e) {}
+          render(store.all());
+        }
+      }).catch(function () {});
+    }
+
+    function render(list) {
+      var lb = $("#seqList"); if (!lb) return;
+      var mine = list.filter(function (s) { return s.motion === motion; });
+      if (!mine.length) { lb.innerHTML = '<div class="empty">No sequences yet. Pick a channel above to create your first one.</div>'; return; }
+      lb.innerHTML = mine.map(function (s) {
+        var c = CHANNELS[s.channel] || CHANNELS.email;
+        var n = (s.steps || []).length;
+        return '<div class="seq-row" data-edit="' + esc(s.id) + '"><span class="seq-ic">' + c.icon + "</span>" +
+          '<div class="seq-meta"><div class="seq-name">' + esc(s.name) + "</div>" +
+          '<div class="seq-sub"><span class="seq-chip ' + s.channel + '">' + c.label + "</span> " + n + " step" + (n === 1 ? "" : "s") + " · " + seqDuration(s) + " day" + (seqDuration(s) === 1 ? "" : "s") + "</div></div>" +
+          '<button class="btn btn-ghost btn-sm" data-deploy="' + esc(s.id) + '">Deploy in Studio</button>' +
+          '<button class="seq-del" data-del="' + esc(s.id) + '" title="Delete">🗑</button></div>';
+      }).join("");
+      Array.prototype.forEach.call(lb.querySelectorAll(".seq-row"), function (row) {
+        row.addEventListener("click", function (e) {
+          if (e.target.closest("[data-del]")) {
+            var id = e.target.closest("[data-del]").getAttribute("data-del");
+            if (!confirm("Delete this sequence?")) return;
+            store.remove(id); toast("Deleted"); paintList(); return;
+          }
+          if (e.target.closest("[data-deploy]")) { location.hash = "studio"; return; }
+          var eid = row.getAttribute("data-edit");
+          var seq = store.all().filter(function (x) { return x.id === eid; })[0];
+          if (seq) openEditor(seq);
+        });
+      });
+    }
+  }
+
+  function newSequence(channel) {
+    return { id: "seq_" + Date.now(), channel: channel, name: "New " + (CHANNELS[channel] || {}).label + " sequence",
+      motion: motion === "bd" ? "bd" : "recruiting", steps: seqTemplate(channel), tags: [], variables: [],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), _isNew: true };
+  }
+  function openEditor(seq) {
+    // Work on a deep copy so Cancel discards cleanly.
+    cmpEdit = JSON.parse(JSON.stringify(seq));
+    render();
+  }
+
+  function renderSeqEditor(el, seq) {
+    var C = CHANNELS[seq.channel] || CHANNELS.email;
+    var lastField = null; // last focused input/textarea, for merge-field insertion
+
+    el.innerHTML =
+      '<div class="seq-top">' +
+        '<button class="seq-back" id="seqBack">← Sequences</button>' +
+        '<span class="seq-edit-lbl">' + (seq._isNew ? "NEW" : "EDIT") + " · " + C.label.toUpperCase() + "</span>" +
+        '<div class="seq-top-actions"><button class="btn btn-ghost btn-sm" id="seqDeploy">Assign in Studio</button>' +
+        '<button class="btn btn-primary btn-sm" id="seqSave">Save changes</button></div>' +
+      "</div>" +
+      '<div class="seq-edit-grid">' +
+        '<div class="seq-main">' +
+          '<input class="seq-title" id="seqTitle" value="' + esc(seq.name) + '" placeholder="Sequence name" />' +
+          '<div class="seq-steps-h"><b>Steps</b> <span class="muted" id="seqStepCount"></span></div>' +
+          '<div class="seq-enroll">▷ Enrollment starts</div>' +
+          '<div id="seqSteps"></div>' +
+          '<button class="seq-add" id="seqAdd">＋ Add step</button>' +
+        "</div>" +
+        '<aside class="seq-rail">' +
+          '<div class="rail-card"><div class="rail-h">OVERVIEW</div><div class="rail-stats" id="seqOverview"></div></div>' +
+          '<div class="rail-card"><div class="rail-h">TAGS</div><div id="seqTags" class="rail-tags"></div></div>' +
+          '<div class="rail-card"><div class="rail-h">CUSTOM VARIABLES <button class="rail-add" id="seqAddVar">＋ Add</button></div>' +
+            '<div class="muted" style="font-size:11px;margin:2px 0 8px">Click any field to place your cursor, then click a variable to insert it.</div>' +
+            '<div id="seqVars" class="rail-vars"></div></div>' +
+          '<div class="rail-card"><div class="rail-h">MERGE FIELDS</div><div id="seqMerge" class="rail-vars"></div></div>' +
+        "</aside>" +
+      "</div>";
+
+    $("#seqBack").addEventListener("click", function () { cmpEdit = null; render(); });
+    $("#seqDeploy").addEventListener("click", function () { saveSeq(true); });
+    $("#seqSave").addEventListener("click", function () { saveSeq(false); });
+    $("#seqAdd").addEventListener("click", function () {
+      var last = seq.steps[seq.steps.length - 1];
+      seq.steps.push(seq.channel === "email" ? { id: sid(), day: 3, tracking: true, subject: "", body: "" }
+        : seq.channel === "linkedin" ? { id: sid(), day: 2, action: "message", text: "" }
+        : { id: sid(), day: 2, text: "" });
+      paintSteps();
+    });
+    $("#seqAddVar").addEventListener("click", function () {
+      var label = prompt("What does this variable hold? (e.g. Candidate A sell-in)");
+      if (!label) return;
+      var n = (seq.variables || []).length + 1;
+      seq.variables = seq.variables || [];
+      seq.variables.push({ key: "custom_variable" + n, label: label });
+      paintVars();
+    });
+
+    // Track focus so a merge/variable click inserts at the cursor.
+    el.addEventListener("focusin", function (e) {
+      if (e.target.matches("input.seq-f, textarea.seq-f")) lastField = e.target;
+    });
+
+    paintSteps(); paintVars(); paintMerge(); paintTags(); updateOverview();
+
+    /* ---- steps ---- */
+    function paintSteps() {
+      var host = $("#seqSteps"); if (!host) return;
+      host.innerHTML = seq.steps.map(function (st, i) { return stepCard(st, i); }).join("");
+      // wire each step
+      Array.prototype.forEach.call(host.querySelectorAll(".seq-step"), function (cardEl) {
+        var i = parseInt(cardEl.getAttribute("data-i"), 10);
+        cardEl.querySelector("[data-del-step]").addEventListener("click", function () {
+          seq.steps.splice(i, 1); paintSteps(); updateOverview();
+        });
+        var coll = cardEl.querySelector("[data-collapse]");
+        if (coll) coll.addEventListener("click", function () { cardEl.classList.toggle("collapsed"); });
+        // field bindings
+        Array.prototype.forEach.call(cardEl.querySelectorAll("[data-f]"), function (f) {
+          var key = f.getAttribute("data-f");
+          var ev = (f.type === "checkbox") ? "change" : "input";
+          f.addEventListener(ev, function () {
+            if (f.type === "checkbox") seq.steps[i][key] = f.checked;
+            else seq.steps[i][key] = (key === "day") ? (parseInt(f.value, 10) || 0) : f.value;
+            if (key === "day") updateOverview();
+            if (key === "text" && seq.channel === "sms") { var cc = cardEl.querySelector("[data-sms-count]"); if (cc) cc.textContent = smsCount(f.value); }
+            if (key === "action") paintSteps(); // LinkedIn fields depend on the action
+          });
+        });
+        var mt = cardEl.querySelector("[data-manual]");
+        if (mt) mt.addEventListener("click", function () { seq.steps[i].manualSend = !seq.steps[i].manualSend; mt.classList.toggle("on", seq.steps[i].manualSend); });
+      });
+      var sc = $("#seqStepCount"); if (sc) sc.textContent = "· " + seq.steps.length + " total";
+    }
+
+    function stepCard(st, i) {
+      var delayLbl = i === 0 ? "days after enrollment" : "days after previous step";
+      var head = '<div class="seq-step-h"><span class="seq-grip">≡</span><b>Step ' + (i + 1) + "</b>" +
+        '<span class="seq-chip ' + seq.channel + '">' + C.label + "</span>" +
+        (seq.channel === "email" ? '<label class="seq-manual"><span class="muted">Manual send</span><button type="button" class="or-sw' + (st.manualSend ? " on" : "") + '" data-manual></button></label>' : "") +
+        '<button class="seq-mini" data-collapse title="Collapse">▾</button>' +
+        '<button class="seq-mini" data-del-step title="Delete step">🗑</button></div>';
+      var delay = '<div class="seq-delay"><label>Delay</label><input class="seq-f seq-day" type="number" min="0" data-f="day" value="' + (st.day || 0) + '" /><span class="muted">' + delayLbl + "</span></div>";
+      return '<div class="seq-step" data-i="' + i + '">' + head + '<div class="seq-step-b">' + delay + channelFields(st) + "</div></div>";
+    }
+
+    function channelFields(st) {
+      if (seq.channel === "email") {
+        return fieldLabel("Subject") +
+          '<input class="seq-f seq-input" data-f="subject" value="' + esc(st.subject || "") + '" placeholder="Subject line" />' +
+          fieldLabel("Body") + bodyToolbar() +
+          '<textarea class="seq-f seq-area" data-f="body" rows="7" placeholder="Write your email… use merge fields like {{first_name}}">' + esc(st.body || "") + "</textarea>" +
+          '<label class="seq-check"><input class="seq-f" type="checkbox" data-f="tracking"' + (st.tracking ? " checked" : "") + " /> Enable open &amp; click tracking</label>";
+      }
+      if (seq.channel === "linkedin") {
+        var opts = LI_ACTIONS.map(function (a) { return '<option value="' + a.v + '"' + (st.action === a.v ? " selected" : "") + ">" + a.label + "</option>"; }).join("");
+        var sel = fieldLabel("Action") + '<select class="seq-f seq-input" data-f="action">' + opts + "</select>";
+        if (st.action === "inmail") {
+          return sel + fieldLabel("Subject") + '<input class="seq-f seq-input" data-f="subject" value="' + esc(st.subject || "") + '" placeholder="InMail subject" />' +
+            fieldLabel("Message") + '<textarea class="seq-f seq-area" data-f="text" rows="6" placeholder="InMail body…">' + esc(st.text || "") + "</textarea>";
+        }
+        var lbl = st.action === "connect" ? "Connection note (optional)" : st.action === "voice_note" ? "Voice note script" : "Message";
+        var ph = st.action === "connect" ? "Short note sent with the request — empty often accepts higher." : "Write your message… merge fields like {{first_name}} work here.";
+        return sel + fieldLabel(lbl) + '<textarea class="seq-f seq-area" data-f="text" rows="5" placeholder="' + esc(ph) + '">' + esc(st.text || "") + "</textarea>";
+      }
+      // sms
+      return fieldLabel("Message") +
+        '<textarea class="seq-f seq-area" data-f="text" rows="4" placeholder="Short text… keep it under 160 chars. Include an opt-out.">' + esc(st.text || "") + "</textarea>" +
+        '<div class="muted" style="font-size:11px;margin-top:4px" data-sms-count>' + smsCount(st.text || "") + "</div>";
+    }
+
+    function fieldLabel(t) { return '<div class="seq-flabel">' + esc(t) + ' <button type="button" class="seq-insert" data-insert>{} Insert merge field</button></div>'; }
+    function bodyToolbar() {
+      return '<div class="seq-toolbar"><button type="button" data-fmt="b"><b>B</b></button><button type="button" data-fmt="i"><i>I</i></button>' +
+        '<button type="button" data-fmt="ul">• List</button><button type="button" data-fmt="ol">1. List</button>' +
+        '<button type="button" class="seq-insert" data-insert>{} Insert merge field</button></div>';
+    }
+
+    /* ---- variables / merge fields ---- */
+    function paintVars() {
+      var host = $("#seqVars"); if (!host) return;
+      var vars = seq.variables || [];
+      host.innerHTML = vars.length ? vars.map(function (v) {
+        return '<div class="var-chip" data-ins-key="' + esc(v.key) + '"><code>{{' + esc(v.key) + "}}</code><span>" + esc(v.label) + "</span>" +
+          '<button class="var-x" data-del-var="' + esc(v.key) + '" title="Remove">×</button></div>';
+      }).join("") : '<div class="muted" style="font-size:12px">None yet. Add reusable values like "Candidate A sell-in".</div>';
+      Array.prototype.forEach.call(host.querySelectorAll(".var-chip"), function (chip) {
+        chip.addEventListener("click", function (e) {
+          if (e.target.closest("[data-del-var]")) {
+            var k = e.target.closest("[data-del-var]").getAttribute("data-del-var");
+            seq.variables = seq.variables.filter(function (v) { return v.key !== k; }); paintVars(); return;
+          }
+          insertToken(chip.getAttribute("data-ins-key"));
+        });
+      });
+    }
+    function paintMerge() {
+      var host = $("#seqMerge"); if (!host) return;
+      host.innerHTML = STD_VARS.map(function (v) {
+        return '<div class="var-chip" data-ins-key="' + v.key + '"><code>{{' + v.key + "}}</code><span>" + esc(v.label) + "</span></div>";
+      }).join("");
+      Array.prototype.forEach.call(host.querySelectorAll(".var-chip"), function (chip) {
+        chip.addEventListener("click", function () { insertToken(chip.getAttribute("data-ins-key")); });
+      });
+    }
+    function paintTags() {
+      var host = $("#seqTags"); if (!host) return;
+      var tags = seq.tags || [];
+      host.innerHTML = tags.map(function (t, i) { return '<span class="tag-chip">' + esc(t) + '<button data-del-tag="' + i + '">×</button></span>'; }).join("") +
+        '<button class="tag-add" id="seqAddTag">＋ Add tag</button>';
+      var add = $("#seqAddTag");
+      if (add) add.addEventListener("click", function () {
+        if ((seq.tags || []).length >= 10) { toast("Up to 10 tags."); return; }
+        var t = prompt("Tag:"); if (!t) return; seq.tags = (seq.tags || []).concat(t.trim()); paintTags();
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-del-tag]"), function (b) {
+        b.addEventListener("click", function () { seq.tags.splice(parseInt(b.getAttribute("data-del-tag"), 10), 1); paintTags(); });
+      });
+    }
+
+    function insertToken(key) {
+      var token = "{{" + key + "}}";
+      if (!lastField) { toast("Click into a subject or body first."); return; }
+      var f = lastField, start = f.selectionStart || 0, end = f.selectionEnd || 0, v = f.value;
+      f.value = v.slice(0, start) + token + v.slice(end);
+      var pos = start + token.length; f.focus(); try { f.setSelectionRange(pos, pos); } catch (e) {}
+      f.dispatchEvent(new Event("input", { bubbles: true })); // sync into seq
+    }
+
+    function updateOverview() {
+      var host = $("#seqOverview"); if (!host) return;
+      var dur = seqDuration(seq), n = seq.steps.length;
+      var cells = [["DURATION", dur + (dur === 1 ? " day" : " days")], ["STEPS", n]];
+      if (seq.channel === "email") {
+        cells.push([C.unit.toUpperCase(), seq.steps.length]);
+        cells.push(["TASKS", seq.steps.filter(function (s) { return s.manualSend; }).length]);
+      } else cells.push([C.unit.toUpperCase(), n]);
+      host.innerHTML = cells.map(function (c) { return '<div class="rail-stat"><b>' + c[1] + "</b><span>" + c[0] + "</span></div>"; }).join("");
+    }
+
+    // formatting toolbar (basic) — wrap selection / prefix lines in the focused body
+    el.addEventListener("click", function (e) {
+      var fmt = e.target.closest("[data-fmt]"); if (!fmt) return;
+      var f = lastField; if (!f || f.tagName !== "TEXTAREA") { toast("Click into the body first."); return; }
+      applyFormat(f, fmt.getAttribute("data-fmt"));
+    });
+
+    // Inline "{} Insert merge field" — focus the field this label/toolbar owns,
+    // then open a small picker of custom + standard variables.
+    el.addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-insert]"); if (!btn) return;
+      var step = btn.closest(".seq-step"); if (!step) return;
+      // The owned field is the next text input/textarea after this button.
+      var fields = Array.prototype.slice.call(step.querySelectorAll("input.seq-f, textarea.seq-f"));
+      var after = null, seen = false, walker = step.querySelectorAll("*");
+      Array.prototype.forEach.call(walker, function (node) {
+        if (node === btn) seen = true;
+        else if (seen && !after && (node.matches("input.seq-f") || node.matches("textarea.seq-f"))) after = node;
+      });
+      lastField = after || fields[fields.length - 1];
+      if (lastField) { lastField.focus(); }
+      openVarMenu(btn, seq.variables || []);
+    });
+
+    function openVarMenu(anchor, vars) {
+      var old = document.getElementById("seqVarMenu"); if (old) old.remove();
+      var menu = document.createElement("div"); menu.id = "seqVarMenu"; menu.className = "seq-varmenu";
+      var items = (vars || []).concat(STD_VARS);
+      menu.innerHTML = items.map(function (v) { return '<button data-k="' + esc(v.key) + '"><code>{{' + esc(v.key) + "}}</code><span>" + esc(v.label) + "</span></button>"; }).join("");
+      document.body.appendChild(menu);
+      var r = anchor.getBoundingClientRect();
+      menu.style.top = (r.bottom + 4) + "px"; menu.style.left = Math.min(r.left, window.innerWidth - 280) + "px";
+      function close() { menu.remove(); document.removeEventListener("click", outside, true); }
+      function outside(ev) { if (!menu.contains(ev.target) && ev.target !== anchor) close(); }
+      setTimeout(function () { document.addEventListener("click", outside, true); }, 0);
+      menu.addEventListener("click", function (ev) { var b = ev.target.closest("[data-k]"); if (!b) return; insertToken(b.getAttribute("data-k")); close(); });
+    }
+
+    function saveSeq(toStudio) {
+      var title = $("#seqTitle"); if (title) seq.name = (title.value || "").trim() || seq.name;
+      if (!seq.steps.length) { toast("Add at least one step."); return; }
+      delete seq._isNew;
+      seq.updatedAt = new Date().toISOString();
+      seqStore().save(seq);
+      toast("Sequence saved");
+      cmpEdit = null;
+      if (toStudio) location.hash = "studio"; else render();
+    }
+  }
+
+  function smsCount(t) {
+    var len = (t || "").length, seg = Math.max(1, Math.ceil(len / 160));
+    return len + " chars · " + seg + " segment" + (seg === 1 ? "" : "s");
+  }
+  function applyFormat(f, kind) {
+    var s = f.selectionStart || 0, e = f.selectionEnd || 0, v = f.value, sel = v.slice(s, e);
+    var out, caret;
+    if (kind === "b" || kind === "i") {
+      var w = kind === "b" ? "**" : "_"; out = v.slice(0, s) + w + (sel || "text") + w + v.slice(e); caret = s + w.length + (sel || "text").length + w.length;
+    } else {
+      var pre = kind === "ul" ? "- " : "1. ";
+      var lines = (sel || "item").split("\n").map(function (l) { return pre + l; }).join("\n");
+      out = v.slice(0, s) + lines + v.slice(e); caret = s + lines.length;
+    }
+    f.value = out; f.focus(); try { f.setSelectionRange(caret, caret); } catch (x) {}
+    f.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
   /* ---------------- Campaign Studio (embedded drag-and-drop builder) ---------------- */

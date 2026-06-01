@@ -52,6 +52,7 @@ export async function POST(req: Request) {
       geos: b?.geos,
       companyName: b?.companyName,
       titles: b?.titles,
+      signalTypes: b?.signalTypes,
       headcountBands: b?.headcountBands,
       limit: b?.limit,
     },

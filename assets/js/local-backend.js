@@ -108,6 +108,23 @@
       },
       team: { members: [{ userId: "u_local", name: name, role: "owner" }] },
       outreach: { enrichmentEnabled: true, jobSearchEnabled: true, creditsIncluded: 2000, creditsUsed: 420 },
+      sequences: [
+        {
+          id: "seq_demo1", channel: "email", name: "Job-board lead chase", motion: "recruiting",
+          tags: ["job board"],
+          variables: [
+            { key: "custom_variable1", label: "Role title" },
+            { key: "custom_variable2", label: "Candidate A sell-in" }
+          ],
+          steps: [
+            { id: "s1", day: 0, subject: "{{custom_variable1}} — two candidates ready", tracking: true,
+              body: "Hi {{first_name}},\n\nNoticed the {{custom_variable1}} role at {{company}}. I'm working with a couple of strong candidates based on the JD:\n\n{{custom_variable2}}\n\nWorth a quick call this week?\n\nBest,\n{{sender_name}}" },
+            { id: "s2", day: 3, subject: "Re: {{custom_variable1}}", tracking: true,
+              body: "Following up, {{first_name}} — happy to share full profiles if helpful." }
+          ],
+          createdAt: new Date(Date.now() - 864e5).toISOString(), updatedAt: new Date(Date.now() - 864e5).toISOString()
+        }
+      ],
       analytics: analyticsSeed(name)
     };
     return db;
@@ -269,18 +286,30 @@
         d.prospects.unshift(pros); save(d);
         return ok({ prospect: pros });
       }
-      // Default: a market search, filtered by company name OR industry/market.
+      // Default: a market search, filtered by company name OR industry/market,
+      // plus optional signal-type filter.
       var leads = d.inmarket.slice();
       var cn = ((body && body.companyName) || "").toLowerCase().trim();
       var inds = (body && body.industries) || null;
       var q = ((body && body.query) || "").toLowerCase().trim();
+      var sigTypes = (body && body.signalTypes) || null;
+      function indTokens(labels) {
+        var stop = { and: 1, or: 1, the: 1, of: 1, services: 1 };
+        var out = [];
+        labels.forEach(function (l) {
+          String(l).toLowerCase().split(/[^a-z0-9]+/).forEach(function (t) { if (t.length >= 3 && !stop[t]) out.push(t); });
+        });
+        return out;
+      }
       if (cn) {
         var byName = leads.filter(function (l) { return l.company.toLowerCase().indexOf(cn) >= 0; });
         leads = byName.length ? byName : leads;
       } else if (inds && inds.length) {
-        var want = inds.map(function (x) { return String(x).toLowerCase(); });
-        var byInd = leads.filter(function (l) { return want.indexOf(String(l.industryKey || "").toLowerCase()) >= 0; });
-        leads = byInd.length ? byInd : leads;
+        var toks = indTokens(inds);
+        leads = leads.filter(function (l) {
+          var hay = (l.company + " " + l.reason + " " + (l.industry || "") + " " + (l.industryKey || "")).toLowerCase();
+          return toks.some(function (t) { return hay.indexOf(t) >= 0; });
+        });
       } else if (q) {
         var terms = q.split(/\s+/).filter(function (t) { return t.length > 2; });
         var byQ = leads.filter(function (l) {
@@ -288,6 +317,10 @@
           return terms.some(function (t) { return hay.indexOf(t) >= 0; });
         });
         leads = byQ.length ? byQ : leads;
+      }
+      if (sigTypes && sigTypes.length) {
+        var bySig = leads.filter(function (l) { return sigTypes.indexOf(l.signalType) >= 0; });
+        leads = bySig.length ? bySig : leads;
       }
       return ok({ leads: leads, pulled: d.inmarket.length, warnings: [] });
     }
@@ -351,6 +384,25 @@
         return ok(buildOutreach(d, body.motion || mo));
       }
       return ok(buildOutreach(d, decodeURIComponent(mo)));
+    }
+    if (p === "/sequences") {
+      d.sequences = d.sequences || [];
+      if (method === "PUT" || method === "POST") {
+        var sq = body || {}; if (!sq.id) sq.id = "seq_" + Date.now();
+        sq.steps = sq.steps || []; sq.tags = sq.tags || []; sq.variables = sq.variables || [];
+        sq.updatedAt = new Date().toISOString(); if (!sq.createdAt) sq.createdAt = sq.updatedAt;
+        var si = -1; d.sequences.forEach(function (x, i) { if (x.id === sq.id) si = i; });
+        if (si >= 0) d.sequences[si] = sq; else d.sequences.unshift(sq);
+        save(d); return ok({ sequence: sq });
+      }
+      if (method === "DELETE") {
+        var sid = (qs.match(/id=([^&]+)/) || [])[1];
+        if (sid) { sid = decodeURIComponent(sid); d.sequences = d.sequences.filter(function (x) { return x.id !== sid; }); save(d); }
+        return ok({ ok: true });
+      }
+      var mo2 = (qs.match(/motion=([^&]+)/) || [])[1];
+      var list = mo2 ? d.sequences.filter(function (x) { return x.motion === decodeURIComponent(mo2); }) : d.sequences;
+      return ok({ sequences: list });
     }
     if (p === "/campaigns") {
       d.campaigns = d.campaigns || [];

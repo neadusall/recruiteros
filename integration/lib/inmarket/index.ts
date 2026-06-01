@@ -23,6 +23,7 @@ import {
   classifyTitle,
   type ICP,
   type Signal,
+  type SignalType,
   type Company,
   type Person,
   type JobFunction,
@@ -43,6 +44,8 @@ export interface InMarketQuery {
   companyName?: string;
   /** Decision-maker titles to anchor the buyer, e.g. ["VP Engineering", "Head of Talent"]. */
   titles?: string[];
+  /** Restrict to specific hiring-signal types (funding_round, hiring_velocity, …). */
+  signalTypes?: SignalType[];
   headcountBands?: Company["headcountBand"][];
   limit?: number;
 }
@@ -144,13 +147,37 @@ function icpFromQuery(q: InMarketQuery): ICP {
     titles: q.titles,
     headcountBands: q.headcountBands,
     // Company-side, hiring-intent signals are what "in market for recruiting" means.
-    signalTypes: [
+    // Honor an explicit signal-type selection from the UI; otherwise watch the core set.
+    signalTypes: (q.signalTypes && q.signalTypes.length) ? q.signalTypes : [
       "job_posting", "hiring_velocity", "job_repost", "evergreen_role",
       "headcount_growth", "careers_page_launch", "funding_round", "exec_hire",
       "department_head_change", "office_expansion",
     ],
     autoTriggerThreshold: 0,
   };
+}
+
+/** Tokens to match an industry by (from the label), ignoring connector words. */
+function industryTokens(labels: string[]): string[] {
+  const stop = new Set(["and", "or", "the", "of", "services", "industry"]);
+  return labels
+    .flatMap((l) => l.toLowerCase().split(/[^a-z0-9]+/))
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3 && !stop.has(t));
+}
+
+/** Does this signal plausibly belong to the requested industries? Matches the
+ *  resolved company industry first, then the signal's text (company name + roles +
+ *  detail) so job-board rows that carry no industry field still classify. */
+function matchesIndustry(s: Signal, tokens: string[]): boolean {
+  if (!tokens.length) return true;
+  const ind = (s.company?.industry ?? "").toLowerCase();
+  if (ind && tokens.some((t) => ind.includes(t))) return true;
+  const hay = (
+    (s.company?.name ?? "") + " " + s.title + " " + s.detail + " " +
+    (Array.isArray((s.evidence as any)?.roles) ? (s.evidence as any).roles.join(" ") : "")
+  ).toLowerCase();
+  return tokens.some((t) => hay.includes(t));
 }
 
 function geoText(c?: Company): string | undefined {
@@ -205,23 +232,36 @@ export async function searchInMarket(
     });
     const kw = (q.query ?? "").toLowerCase().trim();
     const nameKw = (q.companyName ?? "").toLowerCase().trim();
+    const indTokens = industryTokens(q.industries ?? []);
+    const wantTypes = new Set<SignalType>(q.signalTypes ?? []);
     let ranked = report.ranked.filter((s) => s.motion === "business_dev" && (s.score?.value ?? 0) > 0);
+
+    // Hard signal-type filter when the UI picked specific types (e.g. only "funding").
+    if (wantTypes.size) {
+      const before = ranked;
+      ranked = ranked.filter((s) => wantTypes.has(s.type));
+      if (ranked.length === 0) ranked = before; // selection too narrow → don't strand
+    }
+
     if (nameKw) {
       // Company-name search: match the resolved company name (or the headline) only.
       const before = ranked;
-      ranked = ranked.filter((s) => {
-        const name = (s.company?.name ?? s.title).toLowerCase();
-        return name.includes(nameKw);
-      });
+      ranked = ranked.filter((s) => (s.company?.name ?? s.title).toLowerCase().includes(nameKw));
       if (ranked.length === 0) ranked = before; // don't strand the user on a thin match
+    } else if (indTokens.length) {
+      // Industry search: ACTUALLY filter to companies that match the industry (this is
+      // the fix for "every industry returns the same list" — before, industry only
+      // re-ranked). Thin/empty results for a sector reflect real free-source coverage.
+      ranked = ranked.filter((s) => matchesIndustry(s, indTokens));
     } else if (kw) {
       // Light keyword refinement over the free-text box.
       const terms = kw.split(/\s+/).filter((t) => t.length > 2);
+      const before = ranked;
       ranked = ranked.filter((s) => {
         const hay = (s.title + " " + s.detail + " " + (s.company?.industry ?? "")).toLowerCase();
         return terms.some((t) => hay.includes(t));
       });
-      if (ranked.length === 0) ranked = report.ranked.filter((s) => s.motion === "business_dev"); // fall back, don't strand the user
+      if (ranked.length === 0) ranked = before; // don't strand the user
     }
     return {
       leads: ranked.slice(0, limit).map(toLead),
