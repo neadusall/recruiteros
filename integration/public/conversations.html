@@ -180,12 +180,30 @@
             <li><b>Outcomes dispatched to your ATS</b>, no manual call notes</li>
           </ul>
         </div>
-        <div class="mock reveal glow-border">
-          <div class="mock-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lbl">dialer Â· AMD live</span></div>
-          <div class="mock-body" style="display:grid;gap:10px;font-size:13px">
-            <div class="flow-item" style="padding:14px"><span class="fn" style="background:var(--accent-green)">âœ“</span><div><b>Marco Silva</b> Â· +49 â€¢â€¢â€¢ 4821<p style="margin:0;color:var(--accent-green)">HUMAN â†’ transferred to Jamie Â· 0:42 live</p></div></div>
-            <div class="flow-item" style="padding:14px"><span class="fn" style="background:var(--accent-amber);color:#0a0a12">ðŸ“©</span><div><b>Lena Dietrich</b> Â· +49 â€¢â€¢â€¢ 9077<p style="margin:0;color:var(--accent-amber)">MACHINE â†’ voicemail dropped Â· transcribing</p></div></div>
-            <div class="flow-item" style="padding:14px"><span class="fn">AI</span><div><b>Call summary Â· Oskar Wendt</b><p style="margin:0">"Open to remote React roles, wants $120k+, free to talk Tues. Next: send JD + book call." â†’ logged to ATS</p></div></div>
+        <div class="phone reveal glow-border">
+          <div class="call-head">
+            <span class="tag">Outbound Â· campaign: Senior React</span>
+            <b>Marco Silva</b>
+            <span class="num">+49 â€¢â€¢â€¢ 4821</span>
+          </div>
+          <div class="call-avatar">MS</div>
+          <div class="call-status">
+            <div class="timer">On call Â· 0:42</div>
+            <div class="live">Connected to Jamie Â· recording</div>
+          </div>
+          <div class="amd-badge human">âœ“ HUMAN DETECTED â†’ WARM TRANSFER</div>
+          <div class="wave"><i style="animation-delay:0s"></i><i style="animation-delay:.12s"></i><i style="animation-delay:.24s"></i><i style="animation-delay:.36s"></i><i style="animation-delay:.48s"></i><i style="animation-delay:.6s"></i><i style="animation-delay:.72s"></i><i style="animation-delay:.84s"></i><i style="animation-delay:.96s"></i><i style="animation-delay:1.08s"></i><i style="animation-delay:1.2s"></i><i style="animation-delay:1.32s"></i></div>
+          <div class="callpop"><b>Screen-pop:</b> Staff Eng at N26 Â· 4 yrs shipping payments. Why now: web-platform reorg. Target comp $120â€“145k.</div>
+          <div class="call-actions">
+            <button><span class="ic">ðŸ”‡</span>Mute</button>
+            <button><span class="ic">â¦¿</span>Keypad</button>
+            <button class="transfer"><span class="ic">â†ª</span>Transfer</button>
+            <button class="end"><span class="ic">â›Œ</span>End</button>
+          </div>
+          <div class="call-queue">
+            <span class="ql">Up next in the dialer</span>
+            <div class="qrow"><span class="qi" style="background:var(--accent-amber);color:#0a0a12">ðŸ“©</span><div><b>Lena Dietrich</b> Â· +49 â€¢â€¢â€¢ 9077<p>MACHINE â†’ voicemail dropped Â· transcribing</p></div></div>
+            <div class="qrow"><span class="qi" style="background:var(--grad);color:#0a0a12">AI</span><div><b>Call summary Â· Oskar Wendt</b><p>"Open to remote React, wants $120k+, free Tues." â†’ logged to ATS</p></div></div>
           </div>
         </div>
       </div>
@@ -273,7 +291,6 @@
           <a href="/help">Help Center</a>
           <a href="/platform">Platform overview</a>
           <a href="/about">Our story</a>
-          <a href="/command">Open app</a>
         </div>
       </div>
       <div class="footer-bottom">

@@ -39,7 +39,8 @@ export async function classifyReply(text: string): Promise<ClassifiedReply> {
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 200,
-    system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
+    // cache_control is honored by the API but untyped in this SDK version.
+    system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as any,
     messages: [
       {
         role: "user",

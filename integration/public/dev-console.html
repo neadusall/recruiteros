@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>RecruiterOS — Dev Console (Sessions)</title>
+<style>
+  :root{
+    --bg:#070b14; --bg2:#0b1120; --panel:#0f1626; --panel2:#131c30;
+    --line:#1e2a44; --line2:#283655;
+    --ink:#e8eefc; --mut:#8aa0c6; --mut2:#5f7299;
+    --cyan:#36d6e7; --indigo:#7c8cff; --violet:#b06bff;
+    --green:#27d38a; --amber:#ffb23e; --red:#ff5d6c; --slate:#7689b0;
+    --grad:linear-gradient(100deg,#36d6e7,#7c8cff 45%,#b06bff);
+    --shadow:0 18px 50px -22px rgba(0,0,0,.85);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 600px at 12% -10%, rgba(124,140,255,.16), transparent 60%),
+      radial-gradient(1000px 560px at 100% 0%, rgba(54,214,231,.12), transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial;
+    -webkit-font-smoothing:antialiased;
+    min-height:100%;
+  }
+  a{color:inherit}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* Header */
+  header.top{
+    position:sticky;top:0;z-index:30;
+    backdrop-filter:blur(14px);
+    background:linear-gradient(180deg,rgba(7,11,20,.92),rgba(7,11,20,.72));
+    border-bottom:1px solid var(--line);
+  }
+  .topbar{display:flex;align-items:center;gap:16px;padding:14px 22px}
+  .brand{display:flex;align-items:center;gap:12px;min-width:0}
+  .logo{
+    font-weight:800;font-size:20px;letter-spacing:-.4px;
+    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
+    background-size:200% auto;animation:sh 6s linear infinite;white-space:nowrap;
+  }
+  @keyframes sh{to{background-position:200% center}}
+  .sub{color:var(--mut);font-size:12.5px}
+  .grow{flex:1}
+  .ghost{
+    display:inline-flex;align-items:center;gap:7px;text-decoration:none;cursor:pointer;
+    border:1px solid var(--line2);background:transparent;color:var(--mut);
+    padding:8px 12px;border-radius:10px;font-size:12.5px;
+  }
+  .ghost:hover{color:var(--ink);border-color:var(--indigo)}
+  .live-pill{
+    display:inline-flex;align-items:center;gap:8px;text-decoration:none;
+    border:1px solid var(--line2);background:var(--panel);
+    padding:8px 13px;border-radius:999px;font-size:12.5px;color:var(--ink);white-space:nowrap;
+  }
+  .live-pill:hover{border-color:var(--cyan)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2.2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(39,211,138,.55)}70%{box-shadow:0 0 0 9px rgba(39,211,138,0)}100%{box-shadow:0 0 0 0 rgba(39,211,138,0)}}
+
+  /* Shell: left bar + detail */
+  .shell{display:grid;grid-template-columns:340px 1fr;gap:0;align-items:start}
+  aside.side{
+    position:sticky;top:57px;height:calc(100vh - 57px);overflow-y:auto;
+    border-right:1px solid var(--line);padding:16px 14px 60px;
+  }
+  aside.side::-webkit-scrollbar{width:10px}
+  aside.side::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px;border:3px solid var(--bg)}
+
+  .side-h{display:flex;align-items:center;gap:8px;margin:6px 4px 8px;font-size:11.5px;
+    letter-spacing:.12em;text-transform:uppercase;color:var(--mut2);font-weight:700}
+  .side-h .hgrow{flex:1}
+  .progress{font-size:11px;color:var(--mut2);font-variant-numeric:tabular-nums}
+
+  /* Structure tree */
+  .tree{margin:0 0 18px;padding:8px;border:1px solid var(--line);border-radius:13px;
+    background:linear-gradient(180deg,var(--panel),var(--bg2))}
+  .node{display:flex;gap:9px;align-items:flex-start;padding:7px 9px;border-radius:9px;cursor:pointer;
+    border:1px solid transparent}
+  .node:hover{background:var(--bg2);border-color:var(--line)}
+  .node.active{background:rgba(124,140,255,.16);border-color:transparent}
+  .node .nic{font-size:14px;line-height:1.4}
+  .node .nm{font-weight:650;font-size:13px}
+  .node .pth{display:block;font-size:11px;color:var(--cyan)}
+  .node .nd{font-size:11.5px;color:var(--mut);margin-top:1px}
+
+  /* Sessions list */
+  .track{margin:14px 4px 5px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut2);font-weight:700}
+  .sess{display:grid;grid-template-columns:18px 1fr auto;gap:9px;align-items:center;
+    padding:9px 10px;border-radius:10px;cursor:pointer;border:1px solid transparent;margin:2px 0}
+  .sess:hover{background:var(--bg2);border-color:var(--line)}
+  .sess.active{background:rgba(124,140,255,.16);border-color:transparent}
+  .sess .sd{width:9px;height:9px;border-radius:50%;background:var(--slate);justify-self:center}
+  .sess.s-todo  .sd{background:var(--red)}
+  .sess.s-doing .sd{background:var(--cyan)}
+  .sess.s-done  .sd{background:var(--green)}
+  .sess .stl{font-size:13px;font-weight:600;line-height:1.3}
+  .sess.s-done .stl{color:var(--mut);text-decoration:line-through;text-decoration-color:var(--mut2)}
+  .sess .snum{font-size:10.5px;color:var(--mut2);font-variant-numeric:tabular-nums}
+
+  /* Detail pane */
+  main.detail{padding:26px 30px 80px;max-width:920px}
+  .crumbs{font-size:12px;color:var(--mut2);margin-bottom:10px}
+  .crumbs b{color:var(--mut)}
+  .d-title{font-size:25px;letter-spacing:-.5px;margin:0 0 8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .badge{cursor:pointer;user-select:none;border:1px solid transparent;padding:5px 11px;border-radius:999px;
+    font-size:11.5px;font-weight:650;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+  .badge .c{width:7px;height:7px;border-radius:50%}
+  .badge:hover{filter:brightness(1.12)}
+  .s-todo-b{background:rgba(255,93,108,.13);color:#ff9aa4;border-color:rgba(255,93,108,.32)}
+  .s-todo-b .c{background:var(--red)}
+  .s-doing-b{background:rgba(54,214,231,.13);color:#9fe9f2;border-color:rgba(54,214,231,.32)}
+  .s-doing-b .c{background:var(--cyan)}
+  .s-done-b{background:rgba(39,211,138,.14);color:#7df0bf;border-color:rgba(39,211,138,.35)}
+  .s-done-b .c{background:var(--green)}
+  .tagpill{font-size:11px;color:var(--mut);border:1px solid var(--line2);border-radius:999px;padding:4px 10px}
+
+  .lede{color:var(--mut);font-size:15px;margin:4px 0 22px;max-width:760px}
+  .block{border:1px solid var(--line);border-radius:14px;background:var(--panel);margin:0 0 16px;overflow:hidden}
+  .block h3{margin:0;padding:13px 16px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);
+    border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--panel2),var(--panel))}
+  .block .body{padding:14px 16px}
+  .block p{margin:0 0 10px}
+  .block p:last-child{margin-bottom:0}
+
+  .files{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+  .files li a{display:flex;gap:10px;align-items:center;text-decoration:none;padding:8px 10px;border-radius:9px;
+    border:1px solid transparent}
+  .files li a:hover{background:var(--bg2);border-color:var(--line)}
+  .files .fpath{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--cyan);word-break:break-all}
+  .files .fnote{color:var(--mut2);font-size:11.5px;margin-left:auto;white-space:nowrap}
+  .files .arr{color:var(--mut2);font-size:12px}
+
+  .outcome{display:flex;gap:11px;align-items:flex-start;color:var(--mut)}
+  .outcome .oic{color:var(--green);font-size:16px;line-height:1.4}
+
+  textarea.note{width:100%;resize:vertical;min-height:78px;border:1px dashed var(--line2);
+    background:rgba(11,17,32,.6);color:var(--ink);border-radius:10px;padding:10px 12px;
+    font:13.5px/1.5 ui-sans-serif,system-ui;outline:0}
+  textarea.note:focus{border-style:solid;border-color:var(--indigo)}
+  textarea.note::placeholder{color:var(--mut2)}
+
+  .nav-prev{display:flex;justify-content:space-between;gap:12px;margin-top:24px}
+  .nav-prev .ghost{flex:1;justify-content:center}
+
+  .hint{color:var(--mut2);font-size:12px;margin-top:26px;border-top:1px solid var(--line);padding-top:14px}
+
+  @media(max-width:860px){
+    .shell{grid-template-columns:1fr}
+    aside.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}
+    main.detail{padding:22px 18px 60px}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">RecruiterOS</div>
+      <div class="sub">Dev Console · Sessions</div>
+    </div>
+    <div class="grow"></div>
+    <a class="live-pill" href="/project-map.html" title="The page/surface inventory"><span class="dot"></span> Project Map</a>
+    <a class="ghost" href="https://github.com/neadusall/recruiteros" target="_blank" rel="noopener">GitHub</a>
+    <button class="ghost" id="reset" title="Reset all session statuses & notes">Reset</button>
+  </div>
+</header>
+
+<div class="shell">
+  <!-- LEFT BAR: structure summary on top, sessions beneath -->
+  <aside class="side">
+    <div class="side-h"><span>📁 Project Structure</span></div>
+    <div class="tree" id="tree"></div>
+
+    <div class="side-h"><span>🗂 Sessions</span><span class="hgrow"></span><span class="progress" id="prog"></span></div>
+    <div id="sessList"></div>
+  </aside>
+
+  <!-- DETAIL PANE -->
+  <main class="detail" id="detail"></main>
+</div>
+
+<script>
+/* ============================================================
+   Dev Console — a navigator for building & deploying RecruiterOS.
+   Left bar = the repo's shape (structure) + the work backlog (sessions).
+   Click anything → its detail loads on the right. Statuses + notes
+   persist in this browser (localStorage), so it's your build tracker.
+   ============================================================ */
+const GH = "https://github.com/neadusall/recruiteros/blob/main/";
+const ghHref = p => GH.replace(/blob/, p.endsWith("/") ? "tree" : "blob") + p.replace(/\/$/, "");
+
+/* ---------- DATA: the four-layer shape of the repo ---------- */
+const STRUCTURE = [
+  { id:"portal", ic:"🖥️", nm:"Static portal", pth:"/ (repo root)",
+    nd:"No-build HTML/CSS/JS — marketing pages + the app shell.",
+    what:"The customer-facing surface and the app shell. Plain HTML5 + vanilla JS + CSS with no bundler or framework. At build time these files are synced into integration/public/ so the backend serves them from one origin.",
+    paths:[["index.html","Landing page"],["command.html","Command Center (the app)"],["alfred.html","Outreach Studio"],["assets/css/","Design system + per-surface styles"],["assets/js/","Page controllers (command.js, auth.js, app.js…)"]] },
+  { id:"backend", ic:"⚙️", nm:"Backend", pth:"integration/",
+    nd:"Next.js 14 + TypeScript — the real product.",
+    what:"Next.js 14 App Router + TypeScript. ~37 session-based /api routes, a separate /v1 public REST API, all domain logic under lib/, and a snapshot-KV persistence layer over Postgres that degrades to in-memory without DATABASE_URL.",
+    paths:[["integration/app/api/","~37 route handlers"],["integration/lib/","Domain modules (auth, linkedin, signals, response, billing…)"],["integration/lib/db/index.ts","Postgres snapshot KV"],["integration/lib/core/repository.ts","Persistence boundary"],["integration/api/","Public /v1 REST API"]] },
+  { id:"exec", ic:"🔗", nm:"Execution arm", pth:"extension/ · bridge/",
+    nd:"Chrome MV3 extension + Node relay that run real LinkedIn actions.",
+    what:"The arm that performs real outreach. A Manifest V3 Chrome extension drives LinkedIn/Sales Navigator in the user's own session (gated by a live flag, default OFF), and a small Node bridge relays queued actions between the backend cadence and the extension.",
+    paths:[["extension/","MV3 extension (content scripts, background, popup)"],["extension/lib/alfred-bridge.js","Alfred adapter → extension seam"],["bridge/outreach-bridge.cjs","Backend ↔ extension relay"]] },
+  { id:"alfred", ic:"🤖", nm:"Alfred engine", pth:"assets/js/alfred/",
+    nd:"The real, unit-tested automation core (browser + Node).",
+    what:"A MeetAlfred-style automation engine: data model, scheduler, account-safety rate limiter, warm-up ramp, and analytics. UMD — runs in the browser (window.Alfred) and under Node for tests. The Simulated adapter is fully working; live LinkedIn/Email/X adapters are stubs.",
+    paths:[["assets/js/alfred/alfred-core.js","Engine (store, limits, scheduler)"],["assets/js/alfred/alfred-ui.js","Studio controller + sim clock"],["assets/js/alfred/alfred.test.cjs","47-assertion test harness"]] },
+  { id:"ops", ic:"🚀", nm:"Deploy & ops", pth:"Dockerfile · *.sh · docs",
+    nd:"Two deploy paths (Vercel / Hetzner+Docker+Caddy) + runbooks.",
+    what:"Ships either to Vercel (zero-ops, no durable DB) or self-hosted on Hetzner via Docker Compose (Postgres + app + Caddy TLS), with a systemd auto-deploy watcher that redeploys on every push to main. A stack of markdown runbooks covers go-live end to end.",
+    paths:[["Dockerfile","Production image"],["docker-compose.yml","Postgres + app + Caddy"],["deploy.sh","One-shot bootstrap"],["auto-deploy.sh","Git-poll redeploy watcher"],["GO-LIVE-WALKTHROUGH.md","Step-by-step go-live"]] },
+];
+
+/* ---------- DATA: the build backlog, grouped into tracks ---------- */
+const TRACKS = [
+  { id:"A", name:"A · Get it live" },
+  { id:"B", name:"B · Make it durable & real" },
+  { id:"C", name:"C · Close functional gaps" },
+  { id:"D", name:"D · Harden" },
+  { id:"E", name:"E · Polish" },
+];
+
+const SESSIONS = [
+  /* ---- Track A ---- */
+  { id:"s1", track:"A", n:1, title:"First public deploy",
+    lede:"Stand up the backend on a host and confirm login works end to end — a URL where /login.html lands you in a real Command Center.",
+    scope:"Pick a deploy path (Vercel for zero-ops, or self-hosted Hetzner+Docker+Caddy for a durable DB). Build the Next app in integration/, point a domain at it, and verify the sign-up → session → Command Center flow over HTTPS.",
+    files:[["DEPLOY.md","both paths"],["vercel.json","Vercel"],["Dockerfile",""],["docker-compose.yml","Hetzner"],["Caddyfile","TLS proxy"],["GO-LIVE-WALKTHROUGH.md","runbook"]],
+    outcome:"A live URL serving the marketing site + portal + API from one origin, with a working real account." },
+  { id:"s2", track:"A", n:2, title:"Env & secrets audit",
+    lede:"Turn the three .env.example files into one filled, documented secrets sheet — required-to-boot vs optional-per-feature.",
+    scope:"Walk every variable across the env examples, decide which are mandatory for a first boot (session secret, owner email) vs which gate a specific feature (providers, OAuth, email), and record where each is set on the host.",
+    files:[[".env.production.example","root / prod"],["integration/.env.example","LinkedIn + enrichment"],["bridge/.env.example","relay tokens"]],
+    outcome:"A single source of truth for configuration; no silent dry-runs from missing keys you didn't know about." },
+  { id:"s3", track:"A", n:3, title:"Auto-deploy pipeline check",
+    lede:"Verify the push → live loop and document the rollback path.",
+    scope:"Confirm the systemd timer + git-poll watcher pulls and rebuilds within ~2 min of a push to main, that secrets and the DB volume survive a redeploy, and write down how to roll back a bad deploy.",
+    files:[["auto-deploy.sh","git-poll watcher"],["install-auto-deploy.sh","systemd setup"],["deploy.sh","bootstrap / redeploy"]],
+    outcome:"Confidence that shipping = git push, with a known recovery procedure." },
+
+  /* ---- Track B ---- */
+  { id:"s4", track:"B", n:4, title:"Turn on Postgres persistence",
+    lede:"Everything runs in-memory by default — provision a DB so state survives restarts, and decide if the snapshot-KV holds.",
+    scope:"Set DATABASE_URL, confirm modules hydrate from and save to the ros_kv snapshot table, and stress whether coarse JSON snapshots (last-write-wins, no transactions) are enough or whether real per-entity tables are warranted next.",
+    files:[["integration/lib/db/index.ts","snapshot KV"],["integration/lib/core/repository.ts","persistence boundary"]],
+    outcome:"Accounts, campaigns, and prospects persist across restarts on a real database." },
+  { id:"s5", track:"B", n:5, title:"Wire one real outreach provider",
+    lede:"Take LinkedIn outreach from simulated → live through Unipile (or the internal bridge), safely.",
+    scope:"Configure a provider, send one real connection request under the rate limiter, and confirm the accept/reply webhook releases the gated follow-up. Keep warm-up and daily caps in force throughout.",
+    files:[["integration/lib/linkedin/provider.ts","provider abstraction"],["integration/lib/providers/unipile.ts","Unipile adapter"],["integration/app/api/linkedin/enroll/route.ts","enroll route"],["integration/lib/linkedin/rateLimiter.ts","account safety"]],
+    outcome:"One real, safe LinkedIn touch fires and its reply routes back into the inbox." },
+  { id:"s6", track:"B", n:6, title:"Real people-search / signals data",
+    lede:"Replace mock search & enrichment with a live source.",
+    scope:"Stand up the signal collection + scoring pipeline against a real provider and the cheap-first enrichment waterfall. rapidapi.ts carries the most TODO markers — start there.",
+    files:[["integration/lib/signals/","collector + scoring"],["integration/lib/providers/","adapters"],["integration/lib/signals/rapidapi.ts","most TODOs"]],
+    outcome:"Searches and enrichment return real people/companies, with provenance tracked." },
+  { id:"s7", track:"B", n:7, title:"Email & SMS sending",
+    lede:"Get Resend and Telnyx actually delivering, with inbound webhooks landing in the response inbox.",
+    scope:"Verify the sending domain in Resend (auth records), wire Telnyx 10DLC SMS, and confirm inbound replies/delivery events ingest, classify, and route correctly.",
+    files:[["RESEND-SETUP.md","email domain"],["integration/lib/providers/telnyx.ts","SMS/voice"],["integration/lib/sms/","send + opt-out"],["integration/lib/response/","ingest + classify"]],
+    outcome:"Password resets, magic links, and SMS send for real; replies appear in the inbox." },
+
+  /* ---- Track C ---- */
+  { id:"s8", track:"C", n:8, title:"Front-end → API wiring audit",
+    lede:"Map which surfaces still run on mock JS vs talk to the real API.",
+    scope:"Catalog the mock demo controllers (app.js, campaign-studio.js, campaign-builder.js) against the wired ones (command.js, auth.js, owner.js) and produce a checklist of mock surfaces still to wire to /api.",
+    files:[["assets/js/app.js","mock demo shell"],["assets/js/command.js","real app shell"],["assets/js/config.js","API base"],["assets/js/local-backend.js","offline fallback"]],
+    outcome:"A clear list of what's still simulated in the UI and what to wire next." },
+  { id:"s9", track:"C", n:9, title:"Browser extension end-to-end",
+    lede:"Test the Chrome extension + bridge against a live LinkedIn session.",
+    scope:"Load the MV3 extension, confirm externally_connectable handshake with the Studio, run a queued action through the bridge, and verify accept/reply events post back to the backend webhook.",
+    files:[["extension/","MV3 extension"],["bridge/outreach-bridge.cjs","relay"],["extension/lib/alfred-bridge.js","adapter seam"]],
+    outcome:"The execution arm runs a real action and reports its outcome through the full loop." },
+  { id:"s10", track:"C", n:10, title:"ATS integration (Loxo)",
+    lede:"Finish the ATS adapter — it carries the most TODOs in the backend.",
+    scope:"Complete the Loxo client so prospects and stage transitions sync into the ATS, and confirm the object mapping round-trips.",
+    files:[["integration/lib/ats/index.ts","ATS facade"],["integration/lib/ats/loxo.ts","Loxo client"]],
+    outcome:"Prospects and pipeline moves sync to a real ATS." },
+  { id:"s11", track:"C", n:11, title:"Owner console & billing",
+    lede:"Exercise the private owner console and validate the billing ledger against real usage.",
+    scope:"Confirm the unguessable-slug publishing + owner-email gate, then ingest real usage events and verify spend/margin/pricing math in the ledger.",
+    files:[["integration/sync-public.cjs","secret slug publish"],["integration/app/api/owner/","owner routes"],["integration/lib/billing/","ledger + pricing"]],
+    outcome:"Accurate per-workspace cost/margin, reachable only by the owner." },
+
+  /* ---- Track D ---- */
+  { id:"s12", track:"D", n:12, title:"Security review",
+    lede:"Audit auth guards, webhook signatures, cron secrets, and the owner gate.",
+    scope:"Review session/capability/owner guards, verify webhook signature checks and cron-secret enforcement, and walk the LinkedIn OAuth flow. The /security-review skill on the diff is a good fit.",
+    files:[["integration/lib/auth/","sessions + RBAC"],["integration/lib/providers/signatures.ts","webhook verify"],["LINKEDIN-LOGIN-SETUP.md","OAuth flow"]],
+    outcome:"Every privileged path is gated and every inbound webhook is verified." },
+  { id:"s13", track:"D", n:13, title:"Test & typecheck pass",
+    lede:"Run the suites and close failures; tighten the loose build nets.",
+    scope:"Run npm run typecheck, the Alfred suite, and the bridge/smoke tests; the Next build currently ignores TS/ESLint errors — decide whether to keep that or gate deploys on green.",
+    files:[["assets/js/alfred/alfred.test.cjs","engine tests (47)"],["integration/smoke.cjs","backend flow"],["bridge/bridge.test.cjs","relay tests"],["integration/tsconfig.json","strict:false today"]],
+    outcome:"A green test baseline and a decision on build-time strictness." },
+
+  /* ---- Track E ---- */
+  { id:"s14", track:"E", n:14, title:"Marketing-site consistency",
+    lede:"Audit the ~27 root pages for dead links, stale copy, and root ↔ public drift.",
+    scope:"Sweep the marketing/feature pages for broken links and outdated claims, and confirm the sync step keeps root and integration/public/ in lockstep.",
+    files:[["index.html","landing"],["integration/sync-public.cjs","root → public sync"]],
+    outcome:"Consistent, link-clean public pages with no drift between the two copies." },
+  { id:"s15", track:"E", n:15, title:"Demo data & onboarding",
+    lede:"Make the seed flow produce a convincing first-run experience.",
+    scope:"Improve the seed so a brand-new signup lands in a populated, believable workspace rather than an empty shell.",
+    files:[["integration/lib/dev/seed.ts","seed data"],["integration/app/api/dev/seed/route.ts","seed route"]],
+    outcome:"New accounts feel alive from the first screen." },
+];
+
+/* ---------- STATUS model ---------- */
+const STATUS = {
+  todo:  { label:"To do",       cls:"s-todo",  bcls:"s-todo-b" },
+  doing: { label:"In progress", cls:"s-doing", bcls:"s-doing-b" },
+  done:  { label:"Done",        cls:"s-done",  bcls:"s-done-b" },
+};
+const ORDER = ["todo","doing","done"];
+
+/* ---------- persistence ---------- */
+const KEY = "ros-dev-sessions-v1";
+let saved = JSON.parse(localStorage.getItem(KEY) || "{}");   // { [sessId]: {status, note} }
+const rec = id => saved[id] || (saved[id] = {});
+const persist = () => localStorage.setItem(KEY, JSON.stringify(saved));
+const statusOf = id => (saved[id] && saved[id].status) || "todo";
+
+/* ---------- state ---------- */
+let sel = (location.hash || "#s1").replace(/^#/, "");
+const isStruct = id => STRUCTURE.some(s => s.id === id);
+const sessById = id => SESSIONS.find(s => s.id === id);
+const structById = id => STRUCTURE.find(s => s.id === id);
+
+/* ---------- left bar ---------- */
+const tree = document.getElementById("tree");
+const sessList = document.getElementById("sessList");
+
+function renderTree(){
+  tree.innerHTML = STRUCTURE.map(s => `
+    <div class="node ${sel===s.id?'active':''}" data-id="${s.id}">
+      <span class="nic">${s.ic}</span>
+      <span>
+        <span class="nm">${s.nm}</span>
+        <span class="pth mono">${s.pth}</span>
+        <span class="nd">${s.nd}</span>
+      </span>
+    </div>`).join("");
+  tree.querySelectorAll(".node").forEach(n => n.onclick = () => go(n.dataset.id));
+}
+
+function renderSessList(){
+  let html = "";
+  TRACKS.forEach(t => {
+    html += `<div class="track">${t.name}</div>`;
+    SESSIONS.filter(s => s.track === t.id).forEach(s => {
+      const st = statusOf(s.id);
+      html += `
+        <div class="sess ${STATUS[st].cls} ${sel===s.id?'active':''}" data-id="${s.id}">
+          <span class="sd"></span>
+          <span class="stl">${s.title}</span>
+          <span class="snum">#${s.n}</span>
+        </div>`;
+    });
+  });
+  sessList.innerHTML = html;
+  sessList.querySelectorAll(".sess").forEach(n => n.onclick = () => go(n.dataset.id));
+  const done = SESSIONS.filter(s => statusOf(s.id) === "done").length;
+  document.getElementById("prog").textContent = `${done}/${SESSIONS.length} done`;
+}
+
+/* ---------- detail pane ---------- */
+const detail = document.getElementById("detail");
+
+function fileList(files){
+  return `<ul class="files">` + files.map(([p, note]) => `
+    <li><a href="${ghHref(p)}" target="_blank" rel="noopener">
+      <span class="arr">${p.endsWith('/')?'📂':'📄'}</span>
+      <span class="fpath">${p}</span>
+      ${note?`<span class="fnote">${note}</span>`:""}
+    </a></li>`).join("") + `</ul>`;
+}
+
+function renderSession(s){
+  const st = statusOf(s.id), meta = STATUS[st];
+  const track = TRACKS.find(t => t.id === s.track);
+  detail.innerHTML = `
+    <div class="crumbs">Sessions / <b>${track.name}</b></div>
+    <h1 class="d-title">
+      <span>Session ${s.n} · ${s.title}</span>
+      <span class="badge ${meta.bcls}" id="statusBadge"><span class="c"></span>${meta.label}</span>
+    </h1>
+    <p class="lede">${s.lede}</p>
+
+    <div class="block"><h3>Scope</h3><div class="body"><p>${s.scope}</p></div></div>
+
+    <div class="block"><h3>Key files</h3><div class="body">${fileList(s.files)}</div></div>
+
+    <div class="block"><h3>Target outcome</h3><div class="body">
+      <div class="outcome"><span class="oic">✓</span><span>${s.outcome}</span></div>
+    </div></div>
+
+    <div class="block"><h3>Notes</h3><div class="body">
+      <textarea class="note" id="note" placeholder="What you tried, blockers, decisions…">${(rec(s.id).note||"").replace(/</g,'&lt;')}</textarea>
+    </div></div>
+
+    <div class="nav-prev">
+      <button class="ghost" id="prevBtn">← Previous</button>
+      <button class="ghost" id="cycleBtn">Set status: ${meta.label} →</button>
+      <button class="ghost" id="nextBtn">Next →</button>
+    </div>
+    <p class="hint">Click the status pill (or “Set status”) to cycle To&nbsp;do → In&nbsp;progress → Done. File names open on GitHub. Everything you change is saved in this browser.</p>`;
+
+  const cycle = () => { rec(s.id).status = ORDER[(ORDER.indexOf(statusOf(s.id))+1)%ORDER.length]; persist(); render(); };
+  document.getElementById("statusBadge").onclick = cycle;
+  document.getElementById("cycleBtn").onclick = cycle;
+  const ta = document.getElementById("note");
+  ta.oninput = () => { rec(s.id).note = ta.value; persist(); };
+  const idx = SESSIONS.indexOf(s);
+  document.getElementById("prevBtn").onclick = () => go(SESSIONS[(idx-1+SESSIONS.length)%SESSIONS.length].id);
+  document.getElementById("nextBtn").onclick = () => go(SESSIONS[(idx+1)%SESSIONS.length].id);
+}
+
+function renderStruct(s){
+  detail.innerHTML = `
+    <div class="crumbs">Project Structure</div>
+    <h1 class="d-title"><span>${s.ic} ${s.nm}</span><span class="tagpill mono">${s.pth}</span></h1>
+    <p class="lede">${s.what}</p>
+    <div class="block"><h3>Key paths</h3><div class="body">${fileList(s.paths)}</div></div>
+    <p class="hint">This is one of the four cooperating layers of the repo. Pick a session in the left bar to start work.</p>`;
+}
+
+function render(){
+  renderTree(); renderSessList();
+  if (isStruct(sel)) renderStruct(structById(sel));
+  else { const s = sessById(sel) || SESSIONS[0]; sel = s.id; renderSession(s); }
+}
+
+function go(id){ sel = id; location.hash = id; render(); detail.scrollIntoView({block:"start"}); }
+
+window.addEventListener("hashchange", () => { const h=location.hash.replace(/^#/,""); if(h && h!==sel){ sel=h; render(); }});
+document.getElementById("reset").onclick = () => {
+  if (confirm("Reset all session statuses and notes?")) { saved = {}; persist(); render(); }
+};
+
+render();
+</script>
+</body>
+</html>

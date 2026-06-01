@@ -50,7 +50,8 @@ export async function classify(text: string): Promise<Classification> {
     const res = await client.messages.create({
       model: MODEL,
       max_tokens: 250,
-      system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
+      // cache_control is honored by the API but untyped in this SDK version.
+      system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as any,
       messages: [
         {
           role: "user",

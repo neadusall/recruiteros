@@ -59,7 +59,8 @@ export async function handleInbound(text: string, ctx: ConversationContext): Pro
   const res = await client.messages.create({
     model: MODEL,
     max_tokens: 160,
-    system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
+    // cache_control is honored by the API but untyped in this SDK version.
+    system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as any,
     messages: [
       {
         role: "user",

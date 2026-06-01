@@ -585,9 +585,13 @@
     /* ---------- inspector: selected node config ---------- */
     function renderInspectorNode() {
       var panel = $("nodePanel");
-      if (!state.selected) { panel.hidden = true; return; }
-      var n = nodeById(state.selected); if (!n) { panel.hidden = true; return; }
+      var grid = $("grid");
+      var n = state.selected ? nodeById(state.selected) : null;
+      // When a step is selected, mark the grid so the inspector widens and the
+      // step editor floats to the top (see .node-selected rules in the CSS).
+      if (!n) { panel.hidden = true; grid.classList.remove("node-selected"); return; }
       panel.hidden = false;
+      grid.classList.add("node-selected");
       $("nodeTitle").innerHTML = '<span class="s-ic ch-' + n.channel + '" style="width:26px;height:26px;font-size:14px">' + n.ic + '</span> ' + esc(n.label);
       renderConfig($("nodeConfig"), n);
     }

@@ -760,22 +760,251 @@
       "</div>";
   }
 
+  /* ---------------- Outreach (sending readiness control panel) ----------------
+     The working interface for everything you need wired before you can send:
+     ATS, SMS (TalTxt), the enrichment waterfall + its credit balance, Job
+     Search (the white-labelled signal feed), sending domains down to each
+     inbox, and the LinkedIn accounts — each with live status, the switch to
+     turn it on, and a path to connect what's missing. Talks to /api/outreach. */
+  var orSnap = null;       // last /outreach snapshot
+  var orPanel = null;      // expanded drill-down: 'domains' | 'linkedin' | null
+
   function renderOutreach(el) {
-    var phases = REF.phases.map(function (p) {
-      return '<div class="phase"><div class="phase-h"><span class="phase-n">' + p.n + "</span><h4>" + esc(p.title) + '</h4><span class="phase-time">' + esc(p.time) + "</span></div>" +
-        "<ul>" + p.items.map(function (i) { return "<li>" + esc(i) + "</li>"; }).join("") + "</ul>" +
-        '<div class="done">✓ Done when: ' + esc(p.done) + "</div></div>";
-    }).join("");
-    var touches = REF.touches.map(function (t) {
-      return '<div class="touch"><div class="day">Day ' + t.day + '</div><div><div class="tn">' + esc(t.name) +
-        '<span class="chip-c">' + esc(t.channel) + "</span></div>" +
-        '<div class="ti">' + esc(t.intent) + (t.constraints ? ' <span class="spark">(' + esc(t.constraints) + ")</span>" : "") + "</div></div></div>";
-    }).join("");
-    el.innerHTML = head("Outreach", "The 7-phase deployment workflow and the 28-day multi-channel sequence.") +
-      '<div class="two-col"><div><h3 style="margin-bottom:10px">Deploy a campaign</h3>' + phases + "</div>" +
-      '<div><div class="card"><h3>Sequence anatomy (28 days)</h3>' + touches + "</div>" +
-      '<div class="card" style="margin-top:14px"><h3>Decision rules</h3><ul class="phase" style="border:0;padding:0;margin:0">' +
-      REF.seqRules.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div></div></div>";
+    var canInteg = can("integrations:manage");
+    var canAts = can("ats:manage");
+    var canAcct = can("accounts:manage");
+
+    el.innerHTML = head("Outreach",
+      "Your sending readiness in one place. Connect what's missing, watch your domains and LinkedIn warm up, top up enrichment credits, and switch the engine on.") +
+      '<div id="orBody">' + loading() + "</div>";
+
+    // One delegated listener for the whole panel — survives repaints.
+    $("#orBody").addEventListener("click", function (e) {
+      var t;
+      if ((t = e.target.closest("[data-toggle]"))) { doToggle(t.getAttribute("data-toggle"), t); return; }
+      if ((t = e.target.closest("[data-topup]"))) { topUpModal(); return; }
+      if ((t = e.target.closest("[data-connect]"))) { howToModal(t.getAttribute("data-connect")); return; }
+      if ((t = e.target.closest("[data-panel]"))) { var p = t.getAttribute("data-panel"); orPanel = (orPanel === p ? null : p); paint(); return; }
+      if ((t = e.target.closest("[data-go]"))) {
+        var route = t.getAttribute("data-go");
+        if (ROUTES[route] && ROUTES[route].cap && !can(ROUTES[route].cap)) { toast("Ask a workspace admin to set this up."); return; }
+        location.hash = route; return;
+      }
+    });
+
+    load();
+
+    function load() {
+      api("/outreach?motion=" + encodeURIComponent(motion))
+        .then(function (d) { orSnap = d || {}; paint(); })
+        .catch(function () { var b = $("#orBody"); if (b) b.innerHTML = needsSetup(); });
+    }
+
+    function doToggle(key, btn) {
+      if (!canInteg) { toast("Ask a workspace admin to change this."); return; }
+      var action = key === "enrichment" ? "toggle-enrichment" : "toggle-jobsearch";
+      var nowOn = !btn.classList.contains("on");
+      btn.classList.toggle("on", nowOn); // optimistic
+      send("/outreach", "POST", { action: action, on: nowOn, motion: motion }).then(function (r) {
+        if (r.ok) { orSnap = r.data; paint(); toast((key === "enrichment" ? "Enrichment" : "Job Search") + (nowOn ? " turned on" : " turned off")); }
+        else { btn.classList.toggle("on", !nowOn); toast("Could not update (" + (r.data.error || r.status) + ")"); }
+      }).catch(function () { btn.classList.toggle("on", !nowOn); toast("Could not reach the server."); });
+    }
+
+    function topUpModal() {
+      if (!canInteg) { toast("Ask a workspace admin to manage credits."); return; }
+      var amts = [1000, 5000, 10000];
+      var btns = amts.map(function (a) { return '<button class="btn btn-ghost" data-amt="' + a + '">+ ' + a.toLocaleString() + " credits</button>"; }).join("");
+      openModal("Add enrichment credits", "Credits are spent finding work emails and direct dials. They top up instantly for this demo.",
+        '<div class="btn-row" style="flex-wrap:wrap;gap:10px">' + btns + "</div>" +
+        '<div class="modal-foot"><button class="btn btn-ghost btn-sm" data-x>Close</button></div>',
+        function (root, close) {
+          root.querySelector("[data-x]").addEventListener("click", close);
+          Array.prototype.forEach.call(root.querySelectorAll("[data-amt]"), function (b) {
+            b.addEventListener("click", function () {
+              b.disabled = true;
+              send("/outreach", "POST", { action: "topup-credits", amount: parseInt(b.getAttribute("data-amt"), 10), motion: motion })
+                .then(function (r) { if (r.ok) { orSnap = r.data; paint(); toast("Credits added"); close(); } else { b.disabled = false; toast("Could not add credits"); } })
+                .catch(function () { b.disabled = false; toast("Could not reach the server."); });
+            });
+          });
+        });
+    }
+
+    function howToModal(which) {
+      var ats = which === "ats";
+      var title = ats ? "Connect your ATS" : "Connect SMS (TalTxt)";
+      var sub = ats ? "Loxo is the verified, primary ATS. Every reply, touch, and placement syncs once it's connected."
+        : "Add compliant post-engagement texting and opt-outs to your sequences.";
+      var steps = ats
+        ? ["Open the ATS tab and choose Loxo as your system of record.",
+           "Under Accounts → API key, add your Loxo API key (service: Loxo).",
+           "Go to Connected and press Test on Loxo until it turns green."]
+        : ["Get your TalTxt API key from your TalTxt dashboard.",
+           "Under Accounts → API key, add it (service: TalTxt).",
+           "Go to Connected and press Test on TalTxt until it turns green."];
+      var goRoute = ats ? "ats" : "connected";
+      var goCap = ats ? canAts : canInteg;
+      var foot = goCap
+        ? '<div class="modal-foot"><button class="btn btn-ghost btn-sm" data-x>Close</button><button class="btn btn-primary btn-sm" data-open>' + (ats ? "Open ATS settings" : "Open Connected") + "</button></div>"
+        : '<div class="modal-foot"><span class="muted" style="margin-right:auto">You don\'t have access — ask a workspace admin.</span><button class="btn btn-ghost btn-sm" data-x>Close</button></div>';
+      openModal(title, sub,
+        "<ol class=\"or-steps\">" + steps.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("") + "</ol>" + foot,
+        function (root, close) {
+          root.querySelector("[data-x]").addEventListener("click", close);
+          var op = root.querySelector("[data-open]");
+          if (op) op.addEventListener("click", function () { close(); location.hash = goRoute; });
+        });
+    }
+
+    function pill(state) {
+      var m = { ready: ["ready", "Ready"], warming: ["warming", "Warming up"], action: ["action", "Action needed"], off: ["off", "Off"] };
+      var x = m[state] || m.action;
+      return '<span class="or-pill ' + x[0] + '">' + x[1] + "</span>";
+    }
+    function bar(pct, cls) { return '<div class="or-bar"><span class="' + (cls || "") + '" style="width:' + Math.max(0, Math.min(100, pct || 0)) + '%"></span></div>'; }
+    function sw(on, key) { return '<button class="or-sw' + (on ? " on" : "") + '" role="switch" aria-checked="' + (on ? "true" : "false") + '" data-toggle="' + key + '"' + (canInteg ? "" : " disabled title='Admin only'") + "><span></span></button>"; }
+    function fmt(n) { return (n || 0).toLocaleString(); }
+
+    function card(opts) {
+      // opts: { icon, name, state, body, foot }
+      return '<div class="or-card or-' + (opts.state || "action") + '">' +
+        '<div class="or-card-h"><span class="or-ic">' + opts.icon + "</span>" +
+        '<div class="or-name">' + esc(opts.name) + "</div>" + pill(opts.state) + "</div>" +
+        '<div class="or-card-b">' + opts.body + "</div>" +
+        (opts.foot ? '<div class="or-card-f">' + opts.foot + "</div>" : "") + "</div>";
+    }
+
+    function paint() {
+      var body = $("#orBody"); if (!body || !orSnap) return;
+      var s = orSnap;
+      var pf = s.preflight || { ok: false, blocking: [] };
+      var gate = pf.ok
+        ? '<div class="or-gate ok">✓ All required tools are green — you can activate ' + esc(motion === "bd" ? "Business Development" : "Recruiting") + " campaigns.</div>"
+        : '<div class="or-gate warn">⚠ ' + ((pf.blocking || []).length) + " required tool(s) not ready yet. Connect the cards marked <b>Action needed</b> to activate " + esc(motion === "bd" ? "Business Development" : "Recruiting") + " campaigns.</div>";
+
+      // ATS
+      var ats = s.ats || {};
+      var atsCard = card({
+        icon: "🗂️", name: ats.label || "ATS", state: ats.state,
+        body: '<p class="or-detail">' + esc(ats.detail || "") + "</p>",
+        foot: ats.connected
+          ? '<button class="btn btn-ghost btn-sm" data-go="ats">Manage ATS</button>'
+          : '<button class="btn btn-primary btn-sm" data-connect="ats">How to connect</button>'
+      });
+
+      // SMS
+      var sms = s.sms || {};
+      var smsCard = card({
+        icon: "💬", name: sms.label || "SMS", state: sms.state,
+        body: '<p class="or-detail">' + esc(sms.detail || "") + "</p>",
+        foot: sms.connected
+          ? '<button class="btn btn-ghost btn-sm" data-go="connected">Manage</button>'
+          : '<button class="btn btn-primary btn-sm" data-connect="sms">How to connect</button>'
+      });
+
+      // Enrichment + credits
+      var en = s.enrichment || {}, cr = en.credits || {};
+      var enCard = card({
+        icon: "🧪", name: "Enrichment waterfall", state: en.state,
+        body: '<p class="or-detail">' + esc(en.detail || "") + "</p>" +
+          '<div class="or-credits"><div class="or-credit-top"><b>' + fmt(cr.remaining) + "</b> <span class=\"muted\">/ " + fmt(cr.included) + " credits</span></div>" +
+          bar(cr.pct, cr.low ? "warn" : "ok") + "</div>",
+        foot: '<div class="or-foot-row"><label class="or-swrap"><span class="muted">' + (en.enabled ? "On" : "Off") + "</span>" + sw(en.enabled, "enrichment") + "</label>" +
+          '<button class="btn btn-ghost btn-sm" data-topup' + (canInteg ? "" : " disabled") + ">Top up credits</button></div>"
+      });
+
+      // Job Search (white-labelled)
+      var js = s.jobSearch || {};
+      var jsCard = card({
+        icon: "🛰️", name: js.label || "Job Search", state: js.state,
+        body: '<p class="or-detail">' + esc(js.detail || "") + "</p>",
+        foot: '<label class="or-swrap"><span class="muted">' + (js.enabled ? "On" : "Off") + "</span>" + sw(js.enabled, "jobSearch") + "</label>"
+      });
+
+      // Domains
+      var dm = s.domains || { list: [] };
+      var dmCard = card({
+        icon: "📧", name: "Warm sending domains", state: dm.state,
+        body: '<p class="or-detail">' + (dm.total
+          ? "<b>" + dm.total + "</b> domain" + (dm.total === 1 ? "" : "s") + " · <b>" + (dm.inboxesWarm || 0) + "</b> of " + (dm.inboxesTotal || 0) + " inboxes warm" + (dm.inboxesWarming ? ", " + dm.inboxesWarming + " warming" : "")
+          : "No sending domains yet. Add one to start warming inboxes.") + "</p>",
+        foot: '<div class="or-foot-row">' +
+          (dm.total ? '<button class="btn btn-ghost btn-sm" data-panel="domains">' + (orPanel === "domains" ? "Hide details" : "Manage domains") + "</button>" : "") +
+          (canAcct ? '<button class="btn ' + (dm.total ? "btn-ghost" : "btn-primary") + ' btn-sm" data-go="accounts">＋ Add domain</button>' : "") + "</div>"
+      });
+
+      // LinkedIn
+      var li = s.linkedin || { list: [] };
+      var liCard = card({
+        icon: "🔗", name: "Warm LinkedIn accounts", state: li.state,
+        body: '<p class="or-detail">' + (li.total
+          ? "<b>" + li.warmed + "</b> of " + li.total + " warmed" + (li.flagged ? ' · <span style="color:var(--accent-red)">' + li.flagged + " flagged</span>" : "")
+          : "No LinkedIn accounts yet. Connect one to start warming it.") + "</p>",
+        foot: '<div class="or-foot-row">' +
+          (li.total ? '<button class="btn btn-ghost btn-sm" data-panel="linkedin">' + (orPanel === "linkedin" ? "Hide details" : "View accounts") + "</button>" : "") +
+          (canAcct ? '<button class="btn ' + (li.total ? "btn-ghost" : "btn-primary") + ' btn-sm" data-go="accounts">＋ Add account</button>' : "") + "</div>"
+      });
+
+      var panel = "";
+      if (orPanel === "domains") panel = domainsPanel(dm);
+      else if (orPanel === "linkedin") panel = linkedinPanel(li);
+
+      body.innerHTML = gate +
+        '<div class="or-grid">' + atsCard + smsCard + enCard + jsCard + dmCard + liCard + "</div>" +
+        panel + playbook();
+
+      // reflect the on/off label live as the switch is clicked (handled in doToggle repaint)
+    }
+
+    function domainsPanel(dm) {
+      var rows = (dm.list || []).map(function (d) {
+        var hp = d.state === "ready" ? "ready" : d.state === "action" ? "action" : "warming";
+        var inboxes = (d.inboxes || []).map(function (ib) {
+          var ip = ib.state === "warm" ? "ready" : ib.state === "paused" ? "action" : "warming";
+          return '<div class="or-inbox"><span class="or-dot ' + ip + '"></span><span class="or-email">' + esc(ib.email) + "</span>" +
+            '<span class="or-mini">' + (ib.state === "warm" ? "Warm" : ib.state === "paused" ? "Paused" : "Warming · " + ib.warmupPct + "%") + "</span>" +
+            '<div class="or-bar mini">' + '<span class="' + ip + '" style="width:' + ib.warmupPct + '%"></span></div></div>';
+        }).join("");
+        return '<div class="or-dom"><div class="or-dom-h"><b>' + esc(d.domain) + "</b>" + pill(d.state) +
+          '<span class="or-mini">bounce ' + ((d.bounceRate || 0) * 100).toFixed(1) + "% · " + esc(d.health) + "</span></div>" +
+          '<div class="or-inboxes">' + inboxes + "</div></div>";
+      }).join("");
+      return '<div class="card or-panel"><h3>Sending domains &amp; inboxes</h3>' +
+        '<p class="muted" style="margin-top:-4px">Each inbox warms on its own ramp. Keep volume low until every inbox is green; paused inboxes are auto-held when bounce climbs.</p>' +
+        (rows || '<div class="empty">No domains.</div>') + "</div>";
+    }
+
+    function linkedinPanel(li) {
+      var rows = (li.list || []).map(function (a) {
+        return '<div class="or-li"><div class="or-li-h"><b>' + esc(a.handle) + "</b>" + pill(a.state) +
+          '<span class="or-mini">' + a.warmupPct + "% warmed</span></div>" +
+          '<div class="or-bar">' + '<span class="' + (a.state === "ready" ? "ready" : a.state === "action" ? "action" : "warming") + '" style="width:' + a.warmupPct + '%"></span></div>' +
+          '<div class="or-mini" style="margin-top:6px">' + (a.limits.connects || 0) + " connects · " + (a.limits.dms || 0) + " DMs · " + (a.limits.profileViews || 0) + " views / day</div>" +
+          (a.issue ? '<div class="or-issue">' + esc(a.issue) + "</div>" : "") + "</div>";
+      }).join("");
+      return '<div class="card or-panel"><h3>LinkedIn accounts</h3>' +
+        '<p class="muted" style="margin-top:-4px">Daily limits ramp automatically as each account warms. Flagged accounts are paused until they recover.</p>' +
+        (rows || '<div class="empty">No accounts.</div>') + "</div>";
+    }
+
+    function playbook() {
+      var phases = REF.phases.map(function (p) {
+        return '<div class="phase"><div class="phase-h"><span class="phase-n">' + p.n + "</span><h4>" + esc(p.title) + '</h4><span class="phase-time">' + esc(p.time) + "</span></div>" +
+          "<ul>" + p.items.map(function (i) { return "<li>" + esc(i) + "</li>"; }).join("") + "</ul>" +
+          '<div class="done">✓ Done when: ' + esc(p.done) + "</div></div>";
+      }).join("");
+      var touches = REF.touches.map(function (t) {
+        return '<div class="touch"><div class="day">Day ' + t.day + '</div><div><div class="tn">' + esc(t.name) +
+          '<span class="chip-c">' + esc(t.channel) + "</span></div>" +
+          '<div class="ti">' + esc(t.intent) + (t.constraints ? ' <span class="spark">(' + esc(t.constraints) + ")</span>" : "") + "</div></div></div>";
+      }).join("");
+      return '<details class="or-playbook"><summary>Deployment playbook — 7 phases &amp; the 28-day sequence</summary>' +
+        '<div class="two-col" style="margin-top:14px"><div><h3 style="margin-bottom:10px">Deploy a campaign</h3>' + phases + "</div>" +
+        '<div><div class="card"><h3>Sequence anatomy (28 days)</h3>' + touches + "</div>" +
+        '<div class="card" style="margin-top:14px"><h3>Decision rules</h3><ul class="phase" style="border:0;padding:0;margin:0">' +
+        REF.seqRules.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div></div></div></details>";
+    }
   }
 
   /* ---------------- LinkedIn Automation ----------------
@@ -1400,7 +1629,7 @@
         { status: "nurture", bd: "Nurture", recruiting: "Nurture" }
       ],
       phases: [
-        { n: 1, title: "Infrastructure pre-flight", time: "one-time", done: "Overview capacity strip is green", items: ["≥1 warmed LinkedIn account", "≥5 warmed domains", "RapidAPI job scraper", "Enrichment waterfall", "ATS connected", "TalTxt + Telnyx 10DLC"] },
+        { n: 1, title: "Infrastructure pre-flight", time: "one-time", done: "Overview capacity strip is green", items: ["≥1 warmed LinkedIn account", "≥5 warmed domains", "Job Search signal feed", "Enrichment waterfall", "ATS connected", "TalTxt + Telnyx 10DLC"] },
         { n: 2, title: "Create campaign shell", time: "5 min", done: "Draft with ICP + signals", items: ["Name + one-line goal", "ICP definition", "≥1 signal enabled"] },
         { n: 3, title: "Search & discovery", time: "5 min", done: "Preview shows the right people", items: ["Role hiring for", "Persona title", "Decision-maker target", "Live query preview"] },
         { n: 4, title: "Connect channels", time: "3 min", done: "All channels show ✓", items: ["Instantly campaign id", "LinkedIn account", "TalTxt toggle", "Loxo list id"] },
@@ -1435,7 +1664,7 @@
       cadence: [
         { at: "07:00", name: "Pull signals", automated: true, detail: "Run enabled signal sources (last 24h)." },
         { at: "07:15", name: "Score & dedupe", automated: true, detail: "Composite score per ICP; dedupe vs ATS; top N advance." },
-        { at: "07:30", name: "Enrich", automated: true, detail: "Waterfall (Fresh LinkedIn + Tomba) finds contacts." },
+        { at: "07:30", name: "Enrich", automated: true, detail: "Enrichment waterfall finds work emails and direct dials." },
         { at: "07:45", name: "LLM draft", automated: true, detail: "Claude drafts email + LinkedIn + voice; A/B applied." },
         { at: "08:30", name: "Approval queue", automated: false, detail: "Edit / kill / approve; record HOT voice notes." },
         { at: "09:00", name: "Push to channels", automated: true, detail: "Instantly / Unipile / TalTxt; person_events logged." }
@@ -1459,9 +1688,9 @@
       integrations: [
         { id: "instantly", label: "Instantly (email)", status: "green", requiredFor: ["bd", "recruiting"] },
         { id: "unipile", label: "Unipile (LinkedIn)", status: "green", requiredFor: ["bd", "recruiting"] },
-        { id: "rapidapi", label: "RapidAPI (job scraper)", status: "green", requiredFor: ["bd", "recruiting"] },
-        { id: "fresh_linkedin", label: "Fresh LinkedIn (enrich)", status: "green", requiredFor: ["bd", "recruiting"] },
-        { id: "tomba", label: "Tomba (email lookup)", status: "yellow", requiredFor: ["bd"] },
+        { id: "rapidapi", label: "Job Search (signal feed)", status: "green", requiredFor: ["bd", "recruiting"] },
+        { id: "fresh_linkedin", label: "Profile enrichment", status: "green", requiredFor: ["bd", "recruiting"] },
+        { id: "tomba", label: "Email finder", status: "yellow", requiredFor: ["bd"] },
         { id: "loxo", label: "Loxo (ATS)", status: "green", requiredFor: ["bd", "recruiting"] },
         { id: "taltxt", label: "TalTxt (SMS)", status: "green", requiredFor: ["recruiting"] },
         { id: "telnyx", label: "Telnyx 10DLC", status: "green", requiredFor: ["recruiting"] }

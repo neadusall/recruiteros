@@ -10,7 +10,10 @@
 import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-type Guard = { ok: true } | { ok: false; response: NextResponse };
+// The optional `response` on the success branch keeps `auth.response` a valid
+// access without relying on control-flow narrowing, which the project's
+// non-strict tsconfig (strict:false) does not apply to discriminated unions.
+type Guard = { ok: true; response?: undefined } | { ok: false; response: NextResponse };
 
 export function requireAuth(req: Request): Guard {
   const token = bearer(req);

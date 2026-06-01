@@ -87,8 +87,11 @@ export function issueKey(input: {
 /* Verifying requests                                                  */
 /* ------------------------------------------------------------------ */
 
+// `code`/`message` are declared (optional) on the success branch too so the
+// router can read them after an `if (!result.ok)` check without depending on
+// discriminated-union narrowing, which strict:false does not perform.
 export type AuthResult =
-  | { ok: true; auth: AuthContext }
+  | { ok: true; auth: AuthContext; code?: undefined; message?: undefined }
   | { ok: false; code: "missing_token" | "malformed_token" | "invalid_token" | "revoked"; message: string };
 
 /** Extract the Bearer token from a request, accepting `Authorization` or `x-api-key`. */

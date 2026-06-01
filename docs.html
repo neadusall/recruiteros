@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Documentation — RecruiterOS</title>
+  <meta name="description" content="Complete documentation for RecruiterOS: the screens that make up the UI, the three-layer architecture, the Alfred outreach engine, environment variables, and everything you need to run the application locally or in production." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+
+  <style>
+    /* ── Docs-specific layout, built on the RecruiterOS design tokens ───────── */
+    .docs-shell {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 96px 24px 120px;
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+      gap: 56px;
+      align-items: start;
+    }
+    /* Sidebar table of contents */
+    .toc {
+      position: sticky;
+      top: 88px;
+      align-self: start;
+      max-height: calc(100vh - 110px);
+      overflow-y: auto;
+      padding-right: 8px;
+      font-size: 13.5px;
+    }
+    .toc h4 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: var(--text-dim);
+      margin: 18px 0 8px;
+      font-weight: 700;
+    }
+    .toc h4:first-child { margin-top: 0; }
+    .toc a {
+      display: block;
+      padding: 5px 10px;
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      text-decoration: none;
+      border-left: 2px solid transparent;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .toc a:hover { color: var(--text); background: var(--surface); }
+    .toc a.active { color: var(--text); border-left-color: var(--brand); background: var(--surface); }
+
+    /* Article column */
+    .docs-article { min-width: 0; }
+    .docs-article h1 {
+      font-size: 42px; line-height: 1.1; margin: 0 0 14px; font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+    .docs-lede { font-size: 18px; color: var(--text-muted); max-width: 68ch; margin: 0 0 8px; line-height: 1.6; }
+    .docs-article section { scroll-margin-top: 88px; padding-top: 40px; }
+    .docs-article h2 {
+      font-size: 26px; font-weight: 700; margin: 0 0 16px; letter-spacing: -0.01em;
+      padding-bottom: 10px; border-bottom: 1px solid var(--border);
+    }
+    .docs-article h3 { font-size: 17px; font-weight: 700; margin: 26px 0 10px; }
+    .docs-article p { color: var(--text-muted); line-height: 1.65; margin: 0 0 14px; max-width: 72ch; }
+    .docs-article ul, .docs-article ol { color: var(--text-muted); line-height: 1.65; max-width: 72ch; padding-left: 22px; }
+    .docs-article li { margin: 6px 0; }
+    .docs-article a { color: var(--brand-2); text-decoration: none; }
+    .docs-article a:hover { text-decoration: underline; }
+    .docs-article strong { color: var(--text); font-weight: 600; }
+
+    code, .mono { font-family: var(--mono); font-size: 0.88em; }
+    p code, li code, td code {
+      background: var(--surface-2); border: 1px solid var(--border);
+      padding: 1px 6px; border-radius: 6px; color: #c9b8ff;
+    }
+    pre {
+      background: #0d0d18; border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px 18px; overflow-x: auto;
+      margin: 0 0 18px; box-shadow: var(--shadow);
+    }
+    pre code { color: #d8dcff; font-size: 13px; line-height: 1.6; background: none; border: none; padding: 0; }
+    .cmt { color: var(--text-dim); }
+
+    /* Tables */
+    .docs-article table { width: 100%; border-collapse: collapse; margin: 4px 0 20px; font-size: 14px; }
+    .docs-article th, .docs-article td {
+      text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top;
+    }
+    .docs-article th { color: var(--text); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .docs-article td { color: var(--text-muted); }
+    .docs-article td:first-child { white-space: nowrap; }
+
+    /* Callouts */
+    .callout {
+      border: 1px solid var(--border); border-left: 3px solid var(--brand);
+      background: var(--surface); border-radius: var(--radius);
+      padding: 14px 18px; margin: 0 0 18px; font-size: 14.5px; color: var(--text-muted); line-height: 1.6;
+    }
+    .callout.note { border-left-color: var(--brand-2); }
+    .callout.warn { border-left-color: var(--accent-amber); }
+    .callout b { color: var(--text); }
+
+    /* Screen cards */
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin: 6px 0 8px; }
+    .scard {
+      border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius);
+      padding: 16px; transition: border-color .15s, transform .15s;
+    }
+    .scard:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+    .scard .sc-top { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+    .scard .ico { font-size: 19px; }
+    .scard h4 { margin: 0; font-size: 15px; font-weight: 700; }
+    .scard p { font-size: 13.5px; margin: 0 0 8px; line-height: 1.55; }
+    .scard .sc-link { font-size: 12.5px; font-family: var(--mono); }
+
+    /* Pills / badges */
+    .pill {
+      display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 700;
+      padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-strong);
+      color: var(--text-muted); margin-right: 6px;
+    }
+    .pill.get { color: var(--accent-green); border-color: rgba(56,224,166,.4); }
+    .pill.post { color: var(--brand-2); border-color: rgba(77,208,255,.4); }
+    .pill.layer { color: #c9b8ff; border-color: rgba(124,92,255,.4); }
+
+    /* Simple top bar */
+    .docs-nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 50; height: 60px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 24px; background: rgba(10,10,18,.72); backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+    }
+    .docs-nav .brand { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--text); font-weight: 700; }
+    .docs-nav .logo {
+      width: 28px; height: 28px; border-radius: 8px; background: var(--grad);
+      display: grid; place-items: center; color: #0a0a12; font-weight: 800;
+    }
+    .docs-nav .os { color: var(--brand); }
+    .docs-nav .links { display: flex; gap: 6px; align-items: center; }
+
+    @media (max-width: 880px) {
+      .docs-shell { grid-template-columns: 1fr; gap: 24px; }
+      .toc { position: static; max-height: none; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ambient FX layers (shared design system) -->
+  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+  <div class="grid-bg"></div>
+  <div class="noise"></div>
+
+  <!-- top bar -->
+  <header class="docs-nav">
+    <a href="/" class="brand"><span class="logo">R</span><span>Recruiter<span class="os">OS</span> <span style="color:var(--text-dim);font-weight:500">/ Docs</span></span></a>
+    <div class="links">
+      <a href="/help" class="btn btn-ghost btn-sm">Help Center</a>
+      <a href="/developers" class="btn btn-ghost btn-sm">API</a>
+      <a href="/command" class="btn btn-primary btn-sm">Open app →</a>
+    </div>
+  </header>
+
+  <div class="docs-shell">
+
+    <!-- ── Table of contents ─────────────────────────────────────────── -->
+    <aside class="toc" id="toc">
+      <h4>Start here</h4>
+      <a href="#overview">Overview</a>
+      <a href="#quickstart">Quick start</a>
+
+      <h4>The application UI</h4>
+      <a href="#ui-map">Screen map</a>
+      <a href="#ui-app">Command Center</a>
+      <a href="#ui-studio">Outreach &amp; Campaign Studio</a>
+      <a href="#ui-marketing">Marketing &amp; auth</a>
+
+      <h4>How it's built</h4>
+      <a href="#architecture">Architecture</a>
+      <a href="#alfred">The Alfred engine</a>
+      <a href="#assets">Files &amp; assets</a>
+
+      <h4>Running it</h4>
+      <a href="#run-static">Static site</a>
+      <a href="#run-backend">Backend (integration)</a>
+      <a href="#run-bridge">Bridge &amp; extension</a>
+      <a href="#env">Environment variables</a>
+      <a href="#deploy">Deployment</a>
+
+      <h4>Reference</h4>
+      <a href="#api">API</a>
+      <a href="#guides">Setup guides</a>
+    </aside>
+
+    <!-- ── Article ───────────────────────────────────────────────────── -->
+    <main class="docs-article">
+      <h1>RecruiterOS documentation</h1>
+      <p class="docs-lede">
+        RecruiterOS is the operating system for modern recruiting — a campaign-centric command
+        center where every revenue activity lives in one place. This page documents the whole
+        application: the screens that make up the UI, how the system is architected, and
+        everything you need to run it locally or ship it to production.
+      </p>
+
+      <!-- OVERVIEW -->
+      <section id="overview">
+        <h2>Overview</h2>
+        <p>
+          The product is built around a single idea: <strong>the campaign is the atomic unit of
+          work</strong>. Inside every campaign, five pillars run in sequence —
+          Signals catch the trigger, Targets &amp; Enrich build the list, Outreach sends the
+          multi-channel sequence, Conversations handles replies, and Reporting measures what worked.
+          Two revenue engines — <strong>Recruiting</strong> and <strong>Business Development</strong> —
+          run on one shared infrastructure.
+        </p>
+        <p>The codebase has three runnable layers, each independent:</p>
+        <table>
+          <thead><tr><th>Layer</th><th>What it is</th><th>Runs on</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill layer">Portal</span></td><td>The static site — every <code>.html</code> page plus <code>assets/</code>. The full UI. No build step.</td><td>Any static host / dev server</td></tr>
+            <tr><td><span class="pill layer">Backend</span></td><td><code>integration/</code> — a Next.js app that owns auth, data, webhooks, rate limits, and provider adapters.</td><td>Node — <code>localhost:3000</code></td></tr>
+            <tr><td><span class="pill layer">Edge</span></td><td>The Chrome <code>extension/</code> + <code>bridge/</code> that perform LinkedIn actions safely from the user's own session.</td><td>Browser + Node relay <code>:8787</code></td></tr>
+          </tbody>
+        </table>
+        <div class="callout note">
+          <b>Demo vs. real.</b> Most of the portal runs on realistic mock data so the experience
+          can be explored with zero setup. The <a href="/alfred">Outreach Studio</a> ships a
+          <em>real</em> engine (persistence, scheduler, safety limits, simulation clock), and the
+          <code>integration/</code> backend is the production path that wires in live providers.
+        </div>
+      </section>
+
+      <!-- QUICKSTART -->
+      <section id="quickstart">
+        <h2>Quick start</h2>
+        <p>The fastest way to see the product. No dependencies required.</p>
+        <pre><code><span class="cmt"># Option A — just open the landing page</span>
+start index.html
+
+<span class="cmt"># Option B — serve the folder with the zero-dependency dev server</span>
+node server.cjs
+<span class="cmt"># → http://localhost:5173/  (clean URLs: /command, /alfred, /docs …)</span>
+
+<span class="cmt"># Option C — Windows one-liner that launches the server and opens the Studio</span>
+.\START-STUDIO.ps1</code></pre>
+        <p>Then explore the app in this order:</p>
+        <ol>
+          <li>Open <a href="/command">Command Center</a> → <strong>Signals</strong> → <em>Build campaign from signal</em>.</li>
+          <li><strong>Prospects</strong> → run a search → <strong>Enrich</strong> cells, or add an <strong>＋ AI column</strong>.</li>
+          <li>Select rows → <strong>Add to sequence</strong> → review the AI-drafted <strong>Outreach</strong>.</li>
+          <li>Open <a href="/alfred">Outreach Studio</a> → build a sequence → <strong>Enroll</strong> leads → use the <strong>sim clock</strong> (<code>+1 day</code>, <code>+1 week</code>) and watch connections accept, messages send, and replies land in the Inbox.</li>
+          <li><strong>Response</strong> → reply to a conversation and watch the AI classify intent.</li>
+        </ol>
+      </section>
+
+      <!-- UI MAP -->
+      <section id="ui-map">
+        <h2>The application UI — screen map</h2>
+        <p>
+          Every screen is a standalone HTML page that shares the design system in
+          <code>assets/css/styles.css</code>. Pages link to one another with clean URLs
+          (e.g. <code>/sourcing</code> → <code>sourcing.html</code>), resolved by
+          <code>server.cjs</code> locally and by Next.js routing in production.
+        </p>
+      </section>
+
+      <!-- APP -->
+      <section id="ui-app">
+        <h2>Command Center &amp; product</h2>
+        <p>The authenticated application — where the actual work happens.</p>
+        <div class="card-grid">
+          <div class="scard"><div class="sc-top"><span class="ico">🧭</span><h4>Command Center</h4></div><p>The main dashboard: Overview, Campaigns, Prospects, Outreach, Response, Accounts, Connected, ATS — in one shell.</p><a class="sc-link" href="/command">/command</a></div>
+          <div class="scard"><div class="sc-top"><span class="ico">🚪</span><h4>App router</h4></div><p>Checks <code>localStorage.ros_ctx</code> for a session, then sends you to the Command Center or to login.</p><a class="sc-link" href="/app.html">/app</a></div>
+          <div class="scard"><div class="sc-top"><span class="ico">✉️</span><h4>Outreach Studio</h4></div><p>MeetAlfred-style multi-channel sequence builder with live inbox, sim clock, and analytics.</p><a class="sc-link" href="/alfred">/alfred</a></div>
+          <div class="scard"><div class="sc-top"><span class="ico">🎛️</span><h4>Campaign Studio</h4></div><p>Drag-and-drop canvas for building sequences across LinkedIn, email, SMS, and voice.</p><a class="sc-link" href="/campaign-studio">/campaign-studio</a></div>
+          <div class="scard"><div class="sc-top"><span class="ico">🧱</span><h4>Campaign Builder</h4></div><p>Turn hiring signals into a targeted campaign: pick signals, filter by industry/title, review list and cost.</p><a class="sc-link" href="/campaign-builder">/campaign-builder</a></div>
+          <div class="scard"><div class="sc-top"><span class="ico">👑</span><h4>Owner Console</h4></div><p>Gated admin dashboard: workspace management, billing, and user permissions.</p><a class="sc-link" href="/owner-console">/owner-console</a></div>
+        </div>
+      </section>
+
+      <!-- STUDIO detail -->
+      <section id="ui-studio">
+        <h2>Inside Outreach Studio &amp; Campaign Studio</h2>
+        <p>These two are the heart of execution. The Outreach Studio (<code>alfred.html</code>) is the most complete surface in the app:</p>
+        <ul>
+          <li><strong>Sequence</strong> — build a multi-step drip (connect → wait → message → email…) across LinkedIn / Email / X. Edit any step with a live, personalized preview.</li>
+          <li><strong>Leads</strong> — add or import prospects, select, and <strong>Enroll</strong> them into a sequence.</li>
+          <li><strong>Sim clock</strong> — <code>+1 day</code> / <code>+1 week</code> / <code>+30 days</code> buttons advance time so you can watch the campaign drip forward without waiting.</li>
+          <li><strong>Inbox</strong> — replies land here and auto-pause that prospect's sequence.</li>
+          <li><strong>Analytics</strong> — live funnel, accept/reply rates, activity by channel.</li>
+          <li><strong>Settings</strong> — per-account daily caps, warm-up ramp, working hours, weekend pause, random delays, blacklist.</li>
+        </ul>
+        <div class="callout">
+          <b>The core safety rule:</b> a connection-request step gates its follow-ups — messages
+          only fire <em>after</em> the invite is accepted. This is enforced in the engine and
+          unit-tested. Default limits are conservative: ~20 connects/day, 30→50 messages, &lt;100
+          views, a pending-invite cap, and a 14-day warm-up ramp from 30%→100%.
+        </div>
+      </section>
+
+      <!-- MARKETING + AUTH -->
+      <section id="ui-marketing">
+        <h2>Marketing, auth &amp; help pages</h2>
+        <h3>Public / marketing</h3>
+        <table>
+          <tbody>
+            <tr><td><a href="/">index</a></td><td>Landing page — the full product vision and hero search.</td></tr>
+            <tr><td><a href="/recruiting-os">recruiting-os</a></td><td>Recruiter OS hub — win the placement.</td></tr>
+            <tr><td><a href="/business-development-os">business-development-os</a></td><td>BD OS hub — turn hiring signals into job orders.</td></tr>
+            <tr><td><a href="/features">features</a></td><td>Every feature grouped by module.</td></tr>
+            <tr><td><a href="/platform">platform</a></td><td>Platform overview — campaigns as the atomic unit.</td></tr>
+            <tr><td><a href="/pricing">pricing</a></td><td>Credit-based billing (search, enrichment, outreach, SMS).</td></tr>
+            <tr><td><a href="/integrations">integrations</a></td><td>ATS/CRM sync and sending/enrichment/telephony infrastructure.</td></tr>
+            <tr><td><a href="/about">about</a></td><td>Company story.</td></tr>
+            <tr><td><a href="/sourcing">sourcing</a></td><td>People-GPT search, JD match scoring, the enrichment grid.</td></tr>
+            <tr><td><a href="/signals">signals</a></td><td>The Signal Engine — funding, hiring velocity, leadership changes, layoffs.</td></tr>
+            <tr><td><a href="/outreach">outreach</a></td><td>Multi-channel sequences and A/B variants.</td></tr>
+            <tr><td><a href="/conversations">conversations</a></td><td>"The Money Maker" — unified inbox, AI classification, SMS, voice dialer.</td></tr>
+            <tr><td><a href="/linkedin">linkedin</a></td><td>LinkedIn Engine — AI invites, accept-triggered follow-ups, account-safe sending.</td></tr>
+            <tr><td><a href="/analytics">analytics</a></td><td>Live operational analytics: signals→meetings, campaigns→job orders.</td></tr>
+          </tbody>
+        </table>
+        <h3>Auth</h3>
+        <p><a href="/login">login</a> · <a href="/signup">signup</a> · <a href="/forgot-password">forgot-password</a> · <a href="/reset-password">reset-password</a> — split-layout pages on <code>assets/css/auth.css</code>, handled by <code>assets/js/auth.js</code> (including the LinkedIn OAuth callback).</p>
+        <h3>Help &amp; internal</h3>
+        <p><a href="/help">help</a> (searchable FAQ) · <a href="/developers">developers</a> (API keys, endpoints, webhooks) · <a href="/project-map">project-map</a> (architecture wireframe + live status) · <code>dev-console</code> (session diagnostics).</p>
+      </section>
+
+      <!-- ARCHITECTURE -->
+      <section id="architecture">
+        <h2>Architecture</h2>
+        <p>The three layers communicate over a small set of seams designed to be swappable:</p>
+        <pre><code>┌─────────────────────────────────────────────────────────────┐
+│  PORTAL  (static *.html + assets/)                          │
+│  the entire UI · runs in any browser · no build step        │
+└───────────────┬─────────────────────────────────────────────┘
+                │  fetch() →  config.js points at the backend
+                ▼
+┌─────────────────────────────────────────────────────────────┐
+│  BACKEND  (integration/ — Next.js)   localhost:3000         │
+│  auth · campaigns · prospects · response inbox · signals    │
+│  billing · provider adapters (Unipile / Telnyx / simulated) │
+└───────┬───────────────────────────────────────┬─────────────┘
+        │ cloud provider (Unipile)               │ internal provider
+        │ — fully server-side                    ▼
+        │                              ┌────────────────────────┐
+        │                              │  BRIDGE  (:8787)        │
+        │                              │  per-account queues     │
+        │                              └──────────┬─────────────┘
+        │                                  poll / report
+        ▼                                         ▼
+   external APIs                       ┌────────────────────────┐
+   (LinkedIn, email, SMS)              │  EXTENSION (Chrome MV3) │
+                                       │  acts in the user's     │
+                                       │  own LinkedIn session   │
+                                       └────────────────────────┘</code></pre>
+        <p>
+          Outreach can run in one of three modes, selected per-account by
+          <code>RECRUITEROS_OUTREACH_PROVIDER</code>: <strong>simulated</strong> (default — zero
+          account risk), <strong>unipile</strong> (cloud, fully server-side), or
+          <strong>internal</strong> (the bridge + browser extension). The same campaign code drives
+          all three — only the adapter changes. See <a href="#guides">INTEGRATION.md</a> for the
+          full model.
+        </p>
+      </section>
+
+      <!-- ALFRED -->
+      <section id="alfred">
+        <h2>The Alfred engine</h2>
+        <p>
+          The outreach automation engine lives in <code>assets/js/alfred/</code>. It is the same
+          code in the browser (<code>window.Alfred</code>) and under Node (<code>require</code>),
+          which is what lets it lift to a backend later without a rewrite.
+        </p>
+        <pre><code>assets/js/alfred/
+├─ alfred-core.js   <span class="cmt">UMD engine — data model, store, limits, channel</span>
+│                   <span class="cmt">adapters, personalization, scheduler, analytics</span>
+├─ alfred-ui.js     <span class="cmt">browser controller for the Studio</span>
+├─ backend.js       <span class="cmt">backend integration hooks</span>
+├─ studio-bridge.js <span class="cmt">postMessage bridge to the extension</span>
+└─ alfred.test.cjs  <span class="cmt">Node test harness — 30 assertions</span></code></pre>
+        <p><strong>Storage</strong>, <strong>channel adapters</strong>, and the <strong>clock</strong> are pluggable seams. Today it runs on <code>localStorage</code> + a simulated adapter; swap in a DB and real LinkedIn/Email/X adapters server-side and the engine code doesn't change.</p>
+        <p>Run the engine tests (Node is the only requirement, and only for tests):</p>
+        <pre><code>node assets/js/alfred/alfred.test.cjs   <span class="cmt"># → 30 passed, 0 failed</span></code></pre>
+      </section>
+
+      <!-- ASSETS -->
+      <section id="assets">
+        <h2>Files &amp; assets</h2>
+        <pre><code>recruiteros/
+├─ *.html                 <span class="cmt">~27 pages: landing, marketing, app, auth, docs</span>
+├─ assets/
+│  ├─ css/
+│  │  ├─ styles.css        <span class="cmt">design system — tokens, aurora FX, base UI</span>
+│  │  ├─ app.css           <span class="cmt">Command Center shell</span>
+│  │  ├─ command.css       <span class="cmt">tabs, panels, campaign filters</span>
+│  │  ├─ campaign-studio.css
+│  │  ├─ alfred.css        <span class="cmt">Outreach Studio</span>
+│  │  ├─ auth.css          <span class="cmt">login / signup / reset</span>
+│  │  └─ owner.css         <span class="cmt">Owner Console</span>
+│  └─ js/
+│     ├─ landing.js  app.js  command.js  auth.js
+│     ├─ campaign-builder.js  campaign-studio.js  developers.js
+│     ├─ config.js          <span class="cmt">backend URL + endpoints</span>
+│     ├─ local-backend.js   <span class="cmt">in-memory mock backend (demo mode)</span>
+│     ├─ session-bridge.js  industries.js  pw-toggle.js  reset.js  owner.js
+│     └─ alfred/            <span class="cmt">the outreach engine (above)</span>
+├─ integration/            <span class="cmt">Next.js production backend</span>
+├─ bridge/                 <span class="cmt">per-account action relay (:8787)</span>
+├─ extension/              <span class="cmt">Chrome MV3 LinkedIn executor</span>
+├─ server.cjs              <span class="cmt">zero-dep static dev server (:5173)</span>
+└─ *.md                    <span class="cmt">setup &amp; deploy guides</span></code></pre>
+        <h3>Design tokens</h3>
+        <p>All pages inherit these custom properties from <code>styles.css</code> — reuse them rather than hard-coding colors:</p>
+        <pre><code>--bg:#0a0a12   --surface:#16161f   --surface-2:#1d1d2b
+--text:#f4f4f8 --text-muted:#a3a3b8 --text-dim:#6c6c82
+--brand:#7c5cff (violet)  --brand-2:#4dd0ff (cyan)  --brand-3:#ff7ac6 (pink)
+--accent-green:#38e0a6  --accent-amber:#ffc24d  --accent-red:#ff6b6b
+--grad: linear-gradient(120deg, #7c5cff 0%, #4dd0ff 100%)
+--font: 'Inter', …   --mono: 'JetBrains Mono', …
+--radius:14px  --maxw:1180px</code></pre>
+      </section>
+
+      <!-- RUN STATIC -->
+      <section id="run-static">
+        <h2>Running the static site</h2>
+        <p>The portal needs nothing but a browser. Three ways to serve it:</p>
+        <pre><code><span class="cmt"># zero-dependency dev server (recommended — gives you clean URLs)</span>
+node server.cjs                 <span class="cmt"># → http://localhost:5173</span>
+PORT=8080 node server.cjs       <span class="cmt"># override the port</span>
+
+<span class="cmt"># or just open the file</span>
+start index.html
+
+<span class="cmt"># or any static server you like</span>
+python -m http.server 8000</code></pre>
+        <p><code>server.cjs</code> serves the current folder and resolves extension-less clean URLs (<code>/alfred</code> → <code>alfred.html</code>), so links match production.</p>
+      </section>
+
+      <!-- RUN BACKEND -->
+      <section id="run-backend">
+        <h2>Running the backend (<code>integration/</code>)</h2>
+        <p>
+          The Next.js app in <code>integration/</code> is the production server. Its
+          <code>build</code> step syncs the root <code>*.html</code> pages and <code>assets/</code>
+          into <code>integration/public/</code> (via <code>sync-public.cjs</code>), so a single
+          Next.js process serves both the UI and the API.
+        </p>
+        <pre><code>cd integration
+npm install
+npm run build      <span class="cmt"># syncs *.html + assets into public/</span>
+npm run start      <span class="cmt"># → http://localhost:3000</span>
+
+node smoke.cjs     <span class="cmt"># end-to-end smoke test</span></code></pre>
+        <div class="callout note">
+          <b>Data persistence.</b> Out of the box the backend uses in-memory reference
+          repositories under <code>integration/lib/db/</code>. Swap these for a real database to
+          persist across restarts. With no provider keys set, outreach and SMS default to the
+          <em>simulated</em> provider.
+        </div>
+      </section>
+
+      <!-- RUN BRIDGE -->
+      <section id="run-bridge">
+        <h2>Bridge &amp; browser extension</h2>
+        <p>
+          The <strong>internal</strong> outreach provider runs LinkedIn actions from the user's own
+          browser session — account-native and safe. Two parts:
+        </p>
+        <ul>
+          <li><strong>Bridge</strong> (<code>bridge/outreach-bridge.cjs</code>) — a small relay on port <code>8787</code>. The backend enqueues actions (<code>/connect</code>, <code>/message</code>, <code>/inmail</code>, <code>/voice</code>, …); the extension polls (<code>/agent/poll</code>) and reports results (<code>/agent/report</code>); accept/reply events are forwarded to the backend webhook (<code>/agent/event</code>). Queues are in-memory by design — swap for Redis in production.</li>
+          <li><strong>Extension</strong> (<code>extension/</code>) — a Chrome MV3 extension. A background service worker holds the queue, limiter, and scheduler; a content script scrapes profiles and executes actions. <code>SAFE_MODE</code> is on by default (simulated). <code>extension/config.js</code> is the seam to edit: backend URL, daily caps, pacing, working hours.</li>
+        </ul>
+        <pre><code>cd bridge
+cp .env.example .env          <span class="cmt"># set OUTREACH_TOKEN, AGENT_TOKEN, BACKEND_WEBHOOK_*</span>
+node outreach-bridge.cjs      <span class="cmt"># → http://localhost:8787  (GET /health)</span>
+node bridge.test.cjs          <span class="cmt"># end-to-end self-test</span></code></pre>
+        <p>Load the extension via <code>chrome://extensions</code> → <em>Load unpacked</em> → select <code>extension/</code>. See <code>bridge/README.md</code> and <code>extension/README.md</code> for the full model.</p>
+      </section>
+
+      <!-- ENV -->
+      <section id="env">
+        <h2>Environment variables</h2>
+        <p>Set these for the <code>integration/</code> backend (see <code>.env.production.example</code>). Everything is optional — unset providers fall back to simulated mode.</p>
+        <table>
+          <thead><tr><th>Variable</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Claude API — reply classification &amp; message personalization</td></tr>
+            <tr><td><code>RECRUITEROS_OUTREACH_PROVIDER</code></td><td><code>simulated</code> (default) · <code>unipile</code> · <code>internal</code></td></tr>
+            <tr><td><code>RECRUITEROS_OUTREACH_URL</code></td><td>Bridge URL when using the <code>internal</code> provider</td></tr>
+            <tr><td><code>RECRUITEROS_SMS_PROVIDER</code></td><td><code>telnyx</code> or <code>internal</code></td></tr>
+            <tr><td><code>LINKEDIN_CLIENT_ID</code> / <code>_SECRET</code></td><td>LinkedIn OAuth login (see LINKEDIN-LOGIN-SETUP.md)</td></tr>
+            <tr><td><code>RESEND_API_KEY</code></td><td>Transactional email — password reset &amp; magic links (RESEND-SETUP.md)</td></tr>
+            <tr><td><code>TELNYX_API_KEY</code> / <code>TELNYX_PHONE_NUMBER</code></td><td>Two-way SMS (SMS-QUALIFICATION-SETUP.md)</td></tr>
+            <tr><td><code>LOXO_API_KEY</code></td><td>ATS sync</td></tr>
+            <tr><td><code>PORT</code></td><td>Override the listening port for <code>server.cjs</code> / bridge</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- DEPLOY -->
+      <section id="deploy">
+        <h2>Deployment</h2>
+        <p>Two supported paths:</p>
+        <h3>Static-only (the portal)</h3>
+        <p>Drop the folder on any static host — Vercel (<code>vercel</code> or drag-and-drop), Netlify (<code>app.netlify.com/drop</code>), or GitHub Pages. Point your domain at it. Good for the marketing site and the demo experience.</p>
+        <h3>Full app (portal + backend) on Hetzner</h3>
+        <p>
+          The production target is <code>https://recruitersos.co</code> on a Hetzner box, with Caddy
+          terminating HTTPS in front of the Dockerized Next.js app. The repo includes
+          <code>Dockerfile</code>, <code>docker-compose.yml</code>, <code>Caddyfile</code>,
+          <code>deploy.sh</code>, and an auto-deploy watcher (<code>auto-deploy.sh</code> /
+          <code>install-auto-deploy.sh</code>) that pulls and redeploys on push.
+        </p>
+        <p>Follow the guides in order: <strong>HETZNER-SETUP.md</strong> → <strong>GO-LIVE-WALKTHROUGH.md</strong> (DNS + Caddy) → <strong>DEPLOY.md</strong>.</p>
+      </section>
+
+      <!-- API -->
+      <section id="api">
+        <h2>API</h2>
+        <p>
+          The backend exposes a REST API under <code>/api</code>; the full contract is in
+          <code>integration/openapi.yaml</code> and browsable in the
+          <a href="/developers">Developer Console</a>. Representative routes:
+        </p>
+        <table>
+          <tbody>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/auth/session</code></td><td>Current user + connected LinkedIn accounts</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/accounts</code></td><td>The team's LinkedIn accounts</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/prospects</code></td><td>Bulk prospect upload</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/campaigns</code></td><td>List / create campaigns</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/response/list</code></td><td>Unified inbox of classified replies</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/linkedin/webhook</code></td><td>Inbound events (accepts, replies)</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/sms/send</code></td><td>Send an SMS</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/linkedin/cron</code></td><td>Cadence engine — server-side rate-limited execution</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- GUIDES -->
+      <section id="guides">
+        <h2>Setup guides &amp; references</h2>
+        <p>The markdown files in the repo root go deeper on specific topics:</p>
+        <table>
+          <tbody>
+            <tr><td><code>README.md</code></td><td>Quick start &amp; the product vision.</td></tr>
+            <tr><td><code>INTEGRATION.md</code></td><td>The three-layer outreach architecture and the three execution modes.</td></tr>
+            <tr><td><code>DEPLOY.md</code></td><td>Getting a live URL — local dev, Vercel, env vars, persistence notes.</td></tr>
+            <tr><td><code>HETZNER-SETUP.md</code></td><td>Initial server setup (Ubuntu, Docker, Caddy, firewall).</td></tr>
+            <tr><td><code>GO-LIVE-WALKTHROUGH.md</code></td><td>End-to-end go-live: DNS records, Caddy HTTPS, deploy script.</td></tr>
+            <tr><td><code>LINKEDIN-LOGIN-SETUP.md</code></td><td>LinkedIn OAuth app + callback configuration.</td></tr>
+            <tr><td><code>RESEND-SETUP.md</code></td><td>Email (Resend) domain verification + API key.</td></tr>
+            <tr><td><code>SMS-QUALIFICATION-SETUP.md</code></td><td>Telnyx two-way SMS and the intent classifier.</td></tr>
+            <tr><td><code>COPY-PLAYBOOK.md</code></td><td>Persuasion playbook applied to site copy and outreach.</td></tr>
+          </tbody>
+        </table>
+        <div class="callout">
+          Looking for something else? The <a href="/help">Help Center</a> covers user-facing FAQs,
+          the <a href="/developers">Developer Console</a> covers the API surface, and
+          <a href="/project-map">Project Map</a> shows the architecture wireframe with live status.
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script>
+    // Highlight the active TOC entry as you scroll.
+    (function () {
+      var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+      var map = {};
+      links.forEach(function (a) {
+        var id = a.getAttribute('href').slice(1);
+        var el = document.getElementById(id);
+        if (el) map[id] = a;
+      });
+      var sections = Object.keys(map).map(function (id) { return document.getElementById(id); });
+      var current = null;
+      function onScroll() {
+        var top = window.scrollY + 120;
+        var active = sections[0];
+        for (var i = 0; i < sections.length; i++) {
+          if (sections[i].offsetTop <= top) active = sections[i]; else break;
+        }
+        if (active && active.id !== current) {
+          if (current && map[current]) map[current].classList.remove('active');
+          current = active.id;
+          if (map[current]) map[current].classList.add('active');
+        }
+      }
+      window.addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+    })();
+  </script>
+</body>
+</html>

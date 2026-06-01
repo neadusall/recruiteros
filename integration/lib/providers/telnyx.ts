@@ -57,8 +57,12 @@ export class TelnyxClient extends ProviderClient {
    * Place an outbound call with Premium answering-machine detection.
    * On `call.machine.detection.ended`, the webhook decides: human -> transfer,
    * machine -> voicemail drop.
+   *
+   * `clientState` is round-tripped (base64 JSON) on every subsequent webhook for
+   * this call, so the handler can recover the workspace / prospect to bill and
+   * route without its own store.
    */
-  dialWithAmd(to: string, connectionId: string, webhookUrl: string) {
+  dialWithAmd(to: string, connectionId: string, webhookUrl: string, clientState?: Record<string, unknown>) {
     return this.request({
       method: "POST",
       path: "/calls",
@@ -68,7 +72,60 @@ export class TelnyxClient extends ProviderClient {
         connection_id: connectionId,
         answering_machine_detection: "premium",
         webhook_url: webhookUrl,
+        client_state: clientState ? encodeClientState(clientState) : undefined,
       },
     });
+  }
+
+  /* ----- Call-control actions (the voice webhook acts on the AMD result) ----- */
+
+  /**
+   * Warm-transfer a live human to the recruiter. Telnyx bridges a new leg to
+   * `to`; `from` is the caller ID the recruiter sees (defaults to our number).
+   *   POST /calls/{call_control_id}/actions/transfer
+   */
+  transferCall(callControlId: string, to: string, from?: string) {
+    return this.request({
+      method: "POST",
+      path: `/calls/${encodeURIComponent(callControlId)}/actions/transfer`,
+      body: { to, from: from || this.env("TELNYX_FROM_NUMBER") },
+    });
+  }
+
+  /**
+   * Drop a pre-recorded voicemail. Called after the machine greeting/beep ends so
+   * the message lands on the recording, not over the greeting.
+   *   POST /calls/{call_control_id}/actions/playback_start
+   */
+  playAudio(callControlId: string, audioUrl: string) {
+    return this.request({
+      method: "POST",
+      path: `/calls/${encodeURIComponent(callControlId)}/actions/playback_start`,
+      body: { audio_url: audioUrl },
+    });
+  }
+
+  /** Hang up a leg (after the voicemail drop finishes, or to abandon). */
+  hangup(callControlId: string) {
+    return this.request({
+      method: "POST",
+      path: `/calls/${encodeURIComponent(callControlId)}/actions/hangup`,
+      body: {},
+    });
+  }
+}
+
+/** Telnyx echoes client_state back base64-encoded on every webhook for a call. */
+export function encodeClientState(state: Record<string, unknown>): string {
+  return Buffer.from(JSON.stringify(state), "utf8").toString("base64");
+}
+
+/** Decode the client_state Telnyx round-trips on a voice webhook (safe on junk). */
+export function decodeClientState(raw?: string | null): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    return JSON.parse(Buffer.from(raw, "base64").toString("utf8")) ?? {};
+  } catch {
+    return {};
   }
 }
