@@ -12,7 +12,14 @@
 set -euo pipefail
 
 REPO="https://github.com/neadusall/recruiteros.git"
-DIR="/opt/recruiteros"
+# Use the existing checkout if there is one (the live server is /opt/recruitersos);
+# otherwise default to /opt/recruitersos for a fresh install. Overridable via env.
+DIR="${RECRUITEROS_DIR:-}"
+if [ -z "$DIR" ]; then
+  if [ -d /opt/recruitersos/.git ]; then DIR="/opt/recruitersos"
+  elif [ -d /opt/recruiteros/.git ]; then DIR="/opt/recruiteros"
+  else DIR="/opt/recruitersos"; fi
+fi
 DOMAIN="recruitersos.co"
 
 say() { printf "\n\033[1;35m==> %s\033[0m\n" "$1"; }
@@ -35,8 +42,9 @@ fi
 
 # --- 3. code ---
 if [ -d "$DIR/.git" ]; then
-  say "Updating existing checkout in $DIR"
-  git -C "$DIR" pull --ff-only
+  say "Updating existing checkout in $DIR (hard reset to origin/main)"
+  git -C "$DIR" fetch origin main --quiet
+  git -C "$DIR" reset --hard origin/main
 else
   say "Cloning repo into $DIR"
   git clone "$REPO" "$DIR"
@@ -78,6 +86,12 @@ fi
 # --- 5. launch ---
 say "Building and starting containers (this takes a few minutes the first time)"
 docker compose up -d --build
+
+# --- 6. auto-deploy watcher (idempotent; so future pushes go live on their own) ---
+if [ -f "$DIR/install-auto-deploy.sh" ]; then
+  say "Installing/refreshing the auto-deploy watcher"
+  bash "$DIR/install-auto-deploy.sh" || true
+fi
 
 say "Done. Containers:"
 docker compose ps
