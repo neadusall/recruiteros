@@ -87,6 +87,24 @@
 
   function mkNode(key, cfg, x, y) { var b = BLOCK[key]; return { uid: uid(), key: key, channel: b.channel, label: b.label, ic: b.ic, cfg: cfg || {}, delay: 0, x: x || 60, y: y || 40 }; }
 
+  /* ---- saved Campaigns sequences -> Studio blocks ----
+     A sequence authored in Campaigns (one channel, named) maps each of its
+     steps to the matching canvas block, so it can be dropped in as a unit. */
+  var SEQ_CHANNELS = [
+    { ch: "email", ic: "✉️", label: "Email" },
+    { ch: "linkedin", ic: "🔗", label: "LinkedIn" },
+    { ch: "sms", ic: "📱", label: "SMS / text" },
+  ];
+  function seqStepToBlock(step, channel, isFirstEmail) {
+    if (channel === "email") return { key: isFirstEmail ? "em_cold" : "em_followup", cfg: { subject: step.subject || "", body: step.body || "" } };
+    if (channel === "sms") return { key: "sms_send", cfg: { body: step.text || "" } };
+    var a = step.action || "message"; // linkedin
+    if (a === "connect") return { key: "li_connect", cfg: { withNote: !!(step.text && step.text.trim()), body: step.text || "" } };
+    if (a === "inmail") return { key: "li_inmail", cfg: { subject: step.subject || "", body: step.text || "" } };
+    if (a === "voice_note") return { key: "li_voice", cfg: { body: step.text || "" } };
+    return { key: "li_message", cfg: { body: step.text || "" } };
+  }
+
   /* ---- starter templates per motion: a vertical chain you can rearrange ---- */
   function starter(motion) {
     var seq = motion === "bd" ? [
@@ -204,6 +222,7 @@
         '</div>' +
         '<div class="insp-body" data-cs="inspBody">' +
           '<div class="insp-field"><label>Goal</label><textarea data-cs="goal" rows="2" placeholder="Book discovery calls with VP Eng at recently funded fintechs."></textarea></div>' +
+          '<div class="insp-field"><label>Audience (saved prospect list)</label><select data-cs="audience"></select><div class="insp-hint" data-cs="audienceHint"></div></div>' +
           '<div class="insp-field"><label>Assigned to</label><select data-cs="assignee"></select></div>' +
           '<div class="insp-field"><label>Sending account</label><select data-cs="account"></select></div>' +
           '<div class="insp-row">' +
@@ -250,6 +269,8 @@
     var store = opts.store || localStore;
     var assignees = opts.assignees || DEFAULT_ASSIGNEES;
     var accounts = opts.accounts || DEFAULT_ACCOUNTS;
+    var savedSequences = (opts.sequences || []).slice(); // named sequences from Campaigns
+    var prospectLists = (opts.prospectLists || []).slice(); // saved audiences from Prospects
 
     root.classList.add("studio");
     if (opts.embedded) root.classList.add("cs-embedded");
@@ -274,6 +295,7 @@
       motion: opts.motion === "bd" ? "bd" : "recruiting",
       status: "draft", assignee: assignees[0], account: accounts[0],
       dailyCap: 25, voiceThreshold: 80,
+      prospectListId: "", prospectListName: "",
       nodes: [], edges: [], selected: null,
       view: { panX: 28, panY: 24, zoom: 1 },
     };
@@ -281,6 +303,29 @@
     function fillSelect(node, items, val) { node.innerHTML = ""; items.forEach(function (o) { var op = el("option", null, esc(o)); op.value = o; if (o === val) op.selected = true; node.appendChild(op); }); }
     fillSelect($("assignee"), assignees, state.assignee);
     fillSelect($("account"), accounts, state.account);
+
+    // Audience = a saved prospect list (built under Prospects), assigned by name.
+    function fillAudience() {
+      var sel = $("audience"); if (!sel) return;
+      var opt0 = '<option value="">— No list assigned —</option>';
+      sel.innerHTML = opt0 + prospectLists.map(function (l) {
+        return '<option value="' + esc(l.id) + '"' + (l.id === state.prospectListId ? " selected" : "") + ">" + esc(l.name) + " (" + (l.prospectIds || []).length + ")</option>";
+      }).join("");
+      audienceHint();
+    }
+    function audienceHint() {
+      var h = $("audienceHint"); if (!h) return;
+      var l = prospectLists.filter(function (x) { return x.id === state.prospectListId; })[0];
+      h.textContent = l ? (l.prospectIds || []).length + " prospects will be enrolled when you deploy."
+        : (prospectLists.length ? "Pick a saved list to set who this campaign targets." : "No saved lists yet — build one under Prospects.");
+    }
+    fillAudience();
+    $("audience").addEventListener("change", function (e) {
+      state.prospectListId = e.target.value;
+      var l = prospectLists.filter(function (x) { return x.id === state.prospectListId; })[0];
+      state.prospectListName = l ? l.name : "";
+      audienceHint();
+    });
 
     function nodeById(u) { for (var i = 0; i < state.nodes.length; i++) if (state.nodes[i].uid === u) return state.nodes[i]; return null; }
     function nodeEl(u) { return nodesHost.querySelector('.cs-node[data-uid="' + u + '"]'); }
@@ -343,6 +388,41 @@
     function renderPalette() {
       var q = ($("palSearch").value || "").toLowerCase();
       var wrap = $("palette"); wrap.innerHTML = "";
+
+      // Saved sequences (from Campaigns) — pick one by name per channel and drop
+      // the whole micro-sequence onto the canvas, so the palette stays uncluttered.
+      if (savedSequences.length) {
+        var sg = el("div", "pal-group pal-seqs");
+        sg.appendChild(el("h5", null, '<span class="gd"></span>Saved sequences'));
+        SEQ_CHANNELS.forEach(function (c) {
+          var list = savedSequences.filter(function (s) { return s.channel === c.ch; });
+          var row = el("div", "pal-seq");
+          var opts = list.length
+            ? list.map(function (s) { return '<option value="' + esc(s.id) + '">' + esc(s.name) + " (" + (s.steps || []).length + ")</option>"; }).join("")
+            : '<option value="">None saved yet</option>';
+          row.innerHTML =
+            '<div class="pal-seq-h"><span class="pb-ic ch-' + c.ch + '">' + c.ic + "</span><b>" + c.label + " sequence</b>" +
+              (list.length ? '<span class="pal-seq-grip" title="Drag onto the canvas">⠿</span>' : "") + "</div>" +
+            '<div class="pal-seq-pick"><select data-seqsel="' + c.ch + '"' + (list.length ? "" : " disabled") + ">" + opts + "</select>" +
+              '<button class="pal-seq-add" data-seqadd="' + c.ch + '"' + (list.length ? "" : " disabled") + ">＋ Add</button></div>";
+          if (list.length) {
+            row.draggable = true;
+            row.addEventListener("dragstart", function (e) {
+              var sel = row.querySelector("select"); paletteSeqDrag = sel && sel.value; row.classList.add("dragging");
+              e.dataTransfer.effectAllowed = "copy"; try { e.dataTransfer.setData("text/plain", "seq:" + paletteSeqDrag); } catch (x) {}
+            });
+            row.addEventListener("dragend", function () { row.classList.remove("dragging"); paletteSeqDrag = null; });
+            row.querySelector("[data-seqadd]").addEventListener("click", function () {
+              var id = row.querySelector("select").value;
+              var seq = savedSequences.filter(function (s) { return s.id === id; })[0];
+              if (seq) insertSequence(seq, null, null);
+            });
+          }
+          sg.appendChild(row);
+        });
+        wrap.appendChild(sg);
+      }
+
       CATALOG.forEach(function (g) {
         var blocks = g.blocks.filter(function (b) { return !q || b.label.toLowerCase().indexOf(q) >= 0 || b.desc.toLowerCase().indexOf(q) >= 0; });
         if (!blocks.length) return;
@@ -384,6 +464,35 @@
       var n = addNodeAt(key, x, y, from); ensureVisible(n); toast(BLOCK[key].label + " added");
     }
     function duplicateNode(n) { var c = JSON.parse(JSON.stringify(n)); c.uid = uid(); c.x = n.x + 36; c.y = n.y + 36; state.nodes.push(c); state.selected = c.uid; renderNodes(); renderInspectorNode(); renderStats(); toast("Step duplicated"); }
+
+    // Drop a whole saved sequence onto the canvas as one chained group. When
+    // baseX/baseY are null it appends below the last node; otherwise it lands at
+    // that world point (a drag-drop) as a standalone chain.
+    function insertSequence(seq, baseX, baseY) {
+      if (!seq || !(seq.steps || []).length) { toast("That sequence has no steps yet."); return; }
+      var startX, startY, prevUid = null;
+      if (baseX == null) {
+        if (state.nodes.length) { var last = orderNodes().slice(-1)[0]; startX = last.x; startY = last.y + ROW_H; prevUid = last.uid; }
+        else { startX = 80; startY = 36; }
+      } else { startX = baseX; startY = baseY; }
+      var y = startY, emailCount = 0;
+      seq.steps.forEach(function (step) {
+        if ((step.day || 0) > 0) {
+          var d = mkNode("lg_delay", {}, startX, y); d.delay = step.day;
+          state.nodes.push(d); if (prevUid) state.edges.push({ id: uid("e"), from: prevUid, to: d.uid });
+          prevUid = d.uid; y += ROW_H;
+        }
+        var isFirstEmail = seq.channel === "email" && emailCount === 0; if (seq.channel === "email") emailCount++;
+        var mc = seqStepToBlock(step, seq.channel, isFirstEmail);
+        var n = mkNode(mc.key, mc.cfg, startX, y);
+        state.nodes.push(n); if (prevUid) state.edges.push({ id: uid("e"), from: prevUid, to: n.uid });
+        prevUid = n.uid; y += ROW_H;
+      });
+      state.selected = prevUid;
+      renderNodes(); renderInspectorNode(); renderStats();
+      var sel = nodeById(prevUid); if (sel) ensureVisible(sel);
+      toast('Added "' + seq.name + '" · ' + seq.steps.length + " step" + (seq.steps.length === 1 ? "" : "s"));
+    }
     function removeNode(u) {
       state.nodes = state.nodes.filter(function (n) { return n.uid !== u; });
       state.edges = state.edges.filter(function (e) { return e.from !== u && e.to !== u; });
@@ -454,7 +563,7 @@
     }
 
     /* ---------- pointer interactions: pan / move / connect ---------- */
-    var pdrag = null, tempPath = null, paletteDrag = null;
+    var pdrag = null, tempPath = null, paletteDrag = null, paletteSeqDrag = null;
     viewport.addEventListener("pointerdown", function (e) {
       if (e.button !== 0) return;
       // Let the on-canvas controls (zoom / fit / tidy) and empty-state button
@@ -520,11 +629,22 @@
     }, { passive: false });
 
     // palette drag -> drop on canvas at the drop point
-    viewport.addEventListener("dragover", function (e) { if (paletteDrag) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; viewport.classList.add("drop-hot"); } });
+    viewport.addEventListener("dragover", function (e) { if (paletteDrag || paletteSeqDrag) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; viewport.classList.add("drop-hot"); } });
     viewport.addEventListener("dragleave", function (e) { if (e.target === viewport) viewport.classList.remove("drop-hot"); });
     viewport.addEventListener("drop", function (e) {
       viewport.classList.remove("drop-hot");
-      var key = paletteDrag || (e.dataTransfer && e.dataTransfer.getData("text/plain")); if (!key || !BLOCK[key]) return;
+      var dt = (e.dataTransfer && e.dataTransfer.getData("text/plain")) || "";
+      // A dragged saved sequence (payload "seq:<id>") drops the whole chain.
+      var seqId = paletteSeqDrag || (dt.indexOf("seq:") === 0 ? dt.slice(4) : null);
+      if (seqId) {
+        var seq = savedSequences.filter(function (s) { return s.id === seqId; })[0];
+        if (!seq) return;
+        e.preventDefault();
+        var ws = screenToWorld(e.clientX, e.clientY);
+        insertSequence(seq, Math.round(ws.x - NODE_W / 2), Math.round(ws.y - 30));
+        return;
+      }
+      var key = paletteDrag || dt; if (!key || !BLOCK[key]) return;
       e.preventDefault();
       var w = screenToWorld(e.clientX, e.clientY);
       var n = addNodeAt(key, Math.round(w.x - NODE_W / 2), Math.round(w.y - 30), null);
@@ -754,6 +874,7 @@
       return {
         id: state.id || uid("camp"), name: state.name, goal: state.goal, motion: state.motion,
         status: state.status, assignee: state.assignee, account: state.account,
+        prospectListId: state.prospectListId, prospectListName: state.prospectListName,
         dailyCap: state.dailyCap, voiceThreshold: state.voiceThreshold,
         nodes: state.nodes.map(function (n) { return { uid: n.uid, key: n.key, channel: n.channel, label: n.label, ic: n.ic, cfg: n.cfg, delay: n.delay, x: n.x, y: n.y }; }),
         edges: state.edges.map(function (e) { return { id: e.id, from: e.from, to: e.to, label: e.label }; }),
@@ -775,6 +896,7 @@
       state.id = c.id; state.name = c.name; state.goal = c.goal || ""; state.motion = c.motion === "bd" ? "bd" : "recruiting";
       state.status = c.status || "draft"; state.assignee = c.assignee || assignees[0]; state.account = c.account || c.senderAccount || accounts[0];
       state.dailyCap = c.dailyCap || 25; state.voiceThreshold = c.voiceThreshold || c.voiceNoteThreshold || 80;
+      state.prospectListId = c.prospectListId || ""; state.prospectListName = c.prospectListName || "";
       if (c.nodes && c.nodes.length) {
         state.nodes = c.nodes.map(function (n) { return { uid: n.uid || uid(), key: n.key, channel: n.channel, label: n.label || (BLOCK[n.key] && BLOCK[n.key].label), ic: n.ic || (BLOCK[n.key] && BLOCK[n.key].ic), cfg: n.cfg || {}, delay: n.delay || 0, x: n.x || 80, y: n.y || 40 }; });
         state.edges = (c.edges || []).map(function (e) { return { id: e.id || uid("e"), from: e.from, to: e.to, label: e.label }; });
@@ -788,6 +910,7 @@
       state.selected = null;
       fillSelect($("assignee"), assignees, state.assignee);
       fillSelect($("account"), accounts, state.account);
+      fillAudience();
       syncMeta(); renderPalette(); renderNodes(); renderInspectorNode(); applyTransform();
     }
 

@@ -533,3 +533,13 @@
 .seq-varmenu span { color: var(--text-muted); }
 
 @media (max-width: 900px) { .seq-edit-grid { grid-template-columns: 1fr; } .seq-rail { position: static; } }
+
+/* Prospects · bulk selection */
+.pr-bulk { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 6px 0 12px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+.pr-selall { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-muted); cursor: pointer; }
+.pr-selall input { width: 16px; height: 16px; accent-color: var(--brand-2, #4dd0ff); cursor: pointer; }
+.pr-selcount { font-size: 12.5px; color: var(--text); }
+.pr-selcount.muted { color: var(--text-dim); }
+.pr-bulk-actions { margin-left: auto; display: flex; gap: 8px; }
+.pr-check { width: 16px; height: 16px; flex: none; accent-color: var(--brand-2, #4dd0ff); cursor: pointer; }
+.list-row.pr-selected { background: rgba(124, 140, 255, 0.08); border-radius: 8px; }

@@ -29,6 +29,7 @@ export interface CoreRepository {
   findProspectByPhone(workspaceId: string, phone: string): Promise<Prospect | null>;
   listProspects(workspaceId: string, filter?: Partial<Pick<Prospect, "campaignId" | "status">>): Promise<Prospect[]>;
   saveProspect(p: Prospect): Promise<void>;
+  deleteProspect(id: string): Promise<void>;
 
   // activity log (mirrors ATS person_events)
   recordActivity(e: ActivityEvent): Promise<void>;
@@ -119,6 +120,11 @@ class InMemoryCore implements CoreRepository {
   async saveProspect(p: Prospect) {
     await this.ready();
     this.prospects.set(p.id, p);
+    this.persist();
+  }
+  async deleteProspect(id: string) {
+    await this.ready();
+    this.prospects.delete(id);
     this.persist();
   }
 

@@ -324,3 +324,21 @@
    palette is visible, so keep it but it is equally usable everywhere. */
 .cs-addblock-btn { display: none; }
 @media (max-width: 820px) { .cs-addblock-btn { display: inline-flex; } }
+
+/* Palette · saved sequences (drop a named Campaigns sequence onto the canvas) */
+.pal-seqs { border: 1px solid var(--border, rgba(255,255,255,0.08)); border-radius: 12px; padding: 8px; margin-bottom: 12px; background: rgba(124, 140, 255, 0.05); }
+.pal-seq { border-radius: 9px; padding: 8px; }
+.pal-seq + .pal-seq { margin-top: 4px; border-top: 1px solid var(--border, rgba(255,255,255,0.08)); padding-top: 10px; }
+.pal-seq[draggable="true"] { cursor: grab; }
+.pal-seq.dragging { opacity: 0.5; }
+.pal-seq-h { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin-bottom: 7px; }
+.pal-seq-h b { font-weight: 650; }
+.pal-seq-grip { margin-left: auto; color: var(--text-dim, #6c6c82); letter-spacing: 1px; }
+.pal-seq-pick { display: flex; gap: 6px; }
+.pal-seq-pick select { flex: 1; min-width: 0; background: var(--bg-soft, #11111d); border: 1px solid var(--border, rgba(255,255,255,0.08)); color: var(--text, #fff); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 12px; }
+.pal-seq-pick select:disabled { opacity: 0.5; }
+.pal-seq-add { background: rgba(124, 140, 255, 0.18); border: 1px solid rgba(124, 140, 255, 0.4); color: #cdd4ff; border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.pal-seq-add:hover { background: rgba(124, 140, 255, 0.3); }
+.pal-seq-add:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.insp-hint { font-size: 11px; color: var(--text-dim, #6c6c82); margin-top: 5px; line-height: 1.4; }

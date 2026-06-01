@@ -745,7 +745,8 @@
       '<div class="btn-row" style="margin-bottom:12px">' +
       '<button class="btn btn-primary btn-sm" id="enrichAllBtn">⚡ Enrich all contacts</button>' +
       '<button class="btn btn-ghost btn-sm" id="importBtn">⇪ Import (CSV / paste)</button>' +
-      '<button class="btn btn-ghost btn-sm" id="liSearchBtn">🔗 Enrich LinkedIn searches</button></div>' +
+      '<button class="btn btn-ghost btn-sm" id="liSearchBtn">🔗 Enrich LinkedIn searches</button>' +
+      '<button class="btn btn-ghost btn-sm" id="prListsBtn">📁 Saved lists</button></div>' +
       '<div id="liProgress"></div>' +
       '<div class="pr-searchbar"><span class="ico">⌕</span>' +
       '<input id="prSearch" type="text" autocomplete="off" placeholder="Search prospects by name, job title, company, or keyword…" /></div>' +
@@ -754,8 +755,9 @@
     $("#importBtn").addEventListener("click", importProspects);
     $("#liSearchBtn").addEventListener("click", importLinkedInSearch);
     $("#enrichAllBtn").addEventListener("click", function () { enrichAllProspects(this); });
+    $("#prListsBtn").addEventListener("click", openListsModal);
 
-    var prAll = [], prLifecycle = REF.lifecycle, prFilter = "";
+    var prAll = [], prLifecycle = REF.lifecycle, prFilter = "", prSel = {};
     var searchEl = $("#prSearch");
     if (searchEl) searchEl.addEventListener("input", function () { prFilter = (searchEl.value || "").toLowerCase().trim(); paint(); });
 
@@ -777,7 +779,9 @@
       var contactLine = '<div class="lr-contact' + (contact.length ? "" : " muted") + '">' +
         (contact.length ? contact.join(" · ") : "No work contact yet") + "</div>";
       var enrichLbl = (p.email && p.phone) ? "↻ Re-enrich" : "⚡ Enrich contact";
-      return '<div class="list-row" data-pid="' + esc(p.id) + '"><span class="avatar" style="width:28px;height:28px;font-size:11px;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) + "</span>" +
+      return '<div class="list-row' + (prSel[p.id] ? " pr-selected" : "") + '" data-pid="' + esc(p.id) + '">' +
+        '<input type="checkbox" class="pr-check" data-pid="' + esc(p.id) + '"' + (prSel[p.id] ? " checked" : "") + ' />' +
+        '<span class="avatar" style="width:28px;height:28px;font-size:11px;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) + "</span>" +
         '<div class="lr-id"><div class="lr-main">' + esc(p.fullName) + '</div><div class="lr-sub">' + esc((p.title || "") + (p.company ? " · " + p.company : "")) + "</div>" + contactLine + "</div>" +
         '<button class="pr-enrich" data-enrich="' + esc(p.id) + '">' + enrichLbl + "</button>" +
         '<select class="stage-select cls cls-' + statusCls(p.status) + '" data-pid="' + esc(p.id) + '">' + opts + "</select>" +
@@ -794,11 +798,40 @@
       }).join("");
       var rows = list.map(function (p) { return rowHtml(p, lifecycle); }).join("");
       var countLbl = prFilter ? (list.length + " of " + prAll.length) : String(prAll.length);
+      var selIds = list.filter(function (p) { return prSel[p.id]; }).map(function (p) { return p.id; });
+      var allOn = list.length > 0 && selIds.length === list.length;
+      var bulk = '<div class="pr-bulk">' +
+        '<label class="pr-selall"><input type="checkbox" id="prSelAll"' + (allOn ? " checked" : "") + " /> Select all" + (prFilter ? " (filtered)" : "") + "</label>" +
+        (selIds.length
+          ? '<span class="pr-selcount">' + selIds.length + " selected</span>" +
+            '<span class="pr-bulk-actions"><button class="btn btn-primary btn-sm" id="prSaveList">💾 Save as list</button>' +
+            '<button class="btn btn-ghost btn-sm" id="prDelSel">🗑 Delete</button>' +
+            '<button class="btn btn-ghost btn-sm" id="prClearSel">Clear</button></span>'
+          : '<span class="pr-selcount muted">Select prospects to save them as a named list or delete in bulk.</span>') +
+        "</div>";
       body.innerHTML = '<div class="pipe">' + stages + "</div>" +
         '<div class="card"><h3>Pipeline <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl + "</span></h3>" +
+        bulk +
         (rows || '<div class="empty">' + (prFilter
           ? "No prospects match “" + esc(prFilter) + "”."
           : "No prospects yet. Import, pull from a LinkedIn search above, or promote from In-Market Leads.") + "</div>") + "</div>";
+
+      // Selection wiring
+      var selAll = $("#prSelAll");
+      if (selAll) selAll.addEventListener("change", function () {
+        list.forEach(function (p) { if (selAll.checked) prSel[p.id] = true; else delete prSel[p.id]; });
+        paint();
+      });
+      Array.prototype.forEach.call(body.querySelectorAll(".pr-check"), function (cb) {
+        cb.addEventListener("change", function () {
+          var pid = cb.getAttribute("data-pid");
+          if (cb.checked) prSel[pid] = true; else delete prSel[pid];
+          paint();
+        });
+      });
+      var saveBtn = $("#prSaveList"); if (saveBtn) saveBtn.addEventListener("click", function () { saveSelectedAsList(selIds); });
+      var delBtn = $("#prDelSel"); if (delBtn) delBtn.addEventListener("click", function () { deleteSelected(selIds); });
+      var clrBtn = $("#prClearSel"); if (clrBtn) clrBtn.addEventListener("click", function () { prSel = {}; paint(); });
 
       // Stage transitions: change the dropdown -> persist via the API.
       Array.prototype.forEach.call(body.querySelectorAll(".stage-select"), function (sel) {
@@ -837,6 +870,69 @@
         paint();
       }).catch(function () { var b = $("#prBody"); if (b) b.innerHTML = needsSetup(); });
     }
+
+    /* ---- saved prospect lists (named audiences) ---- */
+    function listStore() {
+      function all() { try { return JSON.parse(localStorage.getItem("ros_prospect_lists") || "[]"); } catch (e) { return []; } }
+      return {
+        all: all,
+        save: function (l) {
+          var arr = all().filter(function (x) { return x.id !== l.id; }); arr.unshift(l);
+          localStorage.setItem("ros_prospect_lists", JSON.stringify(arr));
+          send("/prospect-lists", "PUT", l).catch(function () {});
+        },
+        remove: function (id) {
+          localStorage.setItem("ros_prospect_lists", JSON.stringify(all().filter(function (x) { return x.id !== id; })));
+          fetch(API + "/prospect-lists?id=" + encodeURIComponent(id), { method: "DELETE", credentials: "include" }).catch(function () {});
+        }
+      };
+    }
+    function saveSelectedAsList(ids) {
+      if (!ids.length) return;
+      var name = prompt("Name this list (" + ids.length + " prospect" + (ids.length === 1 ? "" : "s") + "):");
+      if (!name) return;
+      var list = { id: "plist_" + Date.now(), name: name.trim(), prospectIds: ids.slice(), motion: motion === "bd" ? "bd" : "recruiting", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      listStore().save(list);
+      toast('Saved "' + list.name + '" · ' + ids.length + " prospect" + (ids.length === 1 ? "" : "s"));
+    }
+    function deleteSelected(ids) {
+      if (!ids.length) return;
+      if (!confirm("Delete " + ids.length + " prospect" + (ids.length === 1 ? "" : "s") + " from your pipeline? This can't be undone.")) return;
+      send("/prospects", "POST", { action: "delete", ids: ids }).then(function (r) {
+        if (r.ok) { toast("Deleted " + (r.data.deleted != null ? r.data.deleted : ids.length) + " prospect(s)"); prSel = {}; load(); }
+        else toast("Could not delete (" + (r.data.error || r.status) + ")");
+      }).catch(function () { toast("Could not reach the server."); });
+    }
+    function openListsModal() {
+      openModal("Saved prospect lists", "Pull these up in Campaign Studio to assign as a campaign's audience.",
+        '<div id="plBody">' + loading() + '</div><div class="modal-foot"><button class="btn btn-ghost btn-sm" data-x>Close</button></div>',
+        function (rootEl, close) {
+          rootEl.querySelector("[data-x]").addEventListener("click", close);
+          function paintLists(lists) {
+            var host = rootEl.querySelector("#plBody"); if (!host) return;
+            if (!lists.length) { host.innerHTML = '<div class="empty">No saved lists yet. Select prospects and click “Save as list”.</div>'; return; }
+            host.innerHTML = lists.map(function (l) {
+              return '<div class="integ"><span class="dot3" style="background:var(--brand-2)"></span><div class="meta"><b>' + esc(l.name) + "</b><small>" + (l.prospectIds || []).length + " prospects · " + esc(l.motion || "recruiting") + "</small></div>" +
+                '<button class="btn btn-ghost btn-sm" data-del-list="' + esc(l.id) + '">Delete</button></div>';
+            }).join("");
+            Array.prototype.forEach.call(host.querySelectorAll("[data-del-list]"), function (b) {
+              b.addEventListener("click", function () { if (!confirm("Delete this list? (The prospects themselves are not deleted.)")) return; listStore().remove(b.getAttribute("data-del-list")); loadLists(); });
+            });
+          }
+          function loadLists() {
+            paintLists(listStore().all());
+            api("/prospect-lists?motion=" + encodeURIComponent(motion)).then(function (d) {
+              var server = (d && d.lists) || [];
+              if (server.length) {
+                try { localStorage.setItem("ros_prospect_lists", JSON.stringify(server.concat(listStore().all().filter(function (l) { return !server.some(function (s) { return s.id === l.id; }); })))); } catch (e) {}
+                paintLists(listStore().all());
+              }
+            }).catch(function () {});
+          }
+          loadLists();
+        });
+    }
+
     load();
     prospectsReload = load;
   }
@@ -1293,7 +1389,7 @@
     var openId = studioOpenId;
     studioOpenId = null; // consumed
 
-    function mount(assignees, accounts) {
+    function mount(assignees, accounts, sequences, prospectLists) {
       CampaignStudio.mount(root, {
         motion: motion === "bd" ? "bd" : "recruiting",
         embedded: true,
@@ -1301,6 +1397,8 @@
         toast: toast,
         assignees: assignees,
         accounts: accounts,
+        sequences: sequences,
+        prospectLists: prospectLists,
         store: studioStore(),
         sendTestSms: function (to, body, done) {
           send("/sms/send", "POST", { to: to, text: body })
@@ -1310,10 +1408,14 @@
       });
     }
 
-    // Assignees = the workspace team; sending accounts = connected LinkedIn handles.
+    // Assignees = the workspace team; sending accounts = connected LinkedIn
+    // handles; sequences = the named micro-sequences authored under Campaigns,
+    // so they can be dropped onto the canvas by name.
     Promise.all([
       api("/team").catch(function () { return null; }),
-      api("/accounts").catch(function () { return null; })
+      api("/accounts").catch(function () { return null; }),
+      api("/sequences?motion=" + encodeURIComponent(motion)).catch(function () { return null; }),
+      api("/prospect-lists?motion=" + encodeURIComponent(motion)).catch(function () { return null; })
     ]).then(function (res) {
       var members = (res[0] && res[0].members) || [];
       var team = members.map(function (m) { return m.userId === ctx.user.id ? "You" : m.name; });
@@ -1321,7 +1423,20 @@
       if (assignees.length === 0) assignees = ["You", "Unassigned"];
       var li = (res[1] && res[1].linkedin) || [];
       var accounts = li.map(function (a) { return a.handle; }).concat(["auto-rotate"]);
-      mount(assignees, accounts);
+      // Server sequences, merged with the local mirror (covers just-saved ones),
+      // scoped to the current motion.
+      var server = (res[2] && res[2].sequences) || [];
+      var local = []; try { local = JSON.parse(localStorage.getItem("ros_sequences") || "[]"); } catch (e) {}
+      var byId = {}; server.concat(local).forEach(function (s) { if (s && s.id && !byId[s.id]) byId[s.id] = s; });
+      var sequences = Object.keys(byId).map(function (k) { return byId[k]; })
+        .filter(function (s) { return (s.motion === motion) || (!s.motion && motion === "recruiting"); });
+      // Saved prospect lists, server + local mirror, scoped to motion.
+      var serverL = (res[3] && res[3].lists) || [];
+      var localL = []; try { localL = JSON.parse(localStorage.getItem("ros_prospect_lists") || "[]"); } catch (e) {}
+      var lById = {}; serverL.concat(localL).forEach(function (l) { if (l && l.id && !lById[l.id]) lById[l.id] = l; });
+      var prospectLists = Object.keys(lById).map(function (k) { return lById[k]; })
+        .filter(function (l) { return !l.motion || l.motion === motion; });
+      mount(assignees, accounts, sequences, prospectLists);
     });
   }
 

@@ -342,6 +342,12 @@
           save(d);
           return ok({ prospect: pe, found: { email: !hadE && !!pe.email, phone: !hadP && !!pe.phone } });
         }
+        if (body.action === "delete" && body.ids) {
+          var del = {}; body.ids.forEach(function (x) { del[x] = 1; });
+          var before = d.prospects.length;
+          d.prospects = d.prospects.filter(function (x) { return !del[x.id]; });
+          save(d); return ok({ deleted: before - d.prospects.length });
+        }
         if (body.action === "bulk") { return ok({ added: (body.rows || []).length, deduped: 0 }); }
         if (body.action === "linkedin_search") {
           var people = linkedinSearchSeed(body.limit);
@@ -384,6 +390,24 @@
         return ok(buildOutreach(d, body.motion || mo));
       }
       return ok(buildOutreach(d, decodeURIComponent(mo)));
+    }
+    if (p === "/prospect-lists") {
+      d.prospectLists = d.prospectLists || [];
+      if (method === "PUT" || method === "POST") {
+        var pl = body || {}; if (!pl.id) pl.id = "plist_" + Date.now();
+        pl.prospectIds = pl.prospectIds || []; pl.updatedAt = new Date().toISOString(); if (!pl.createdAt) pl.createdAt = pl.updatedAt;
+        var pli = -1; d.prospectLists.forEach(function (x, i) { if (x.id === pl.id) pli = i; });
+        if (pli >= 0) d.prospectLists[pli] = pl; else d.prospectLists.unshift(pl);
+        save(d); return ok({ list: pl });
+      }
+      if (method === "DELETE") {
+        var lid = (qs.match(/id=([^&]+)/) || [])[1];
+        if (lid) { lid = decodeURIComponent(lid); d.prospectLists = d.prospectLists.filter(function (x) { return x.id !== lid; }); save(d); }
+        return ok({ ok: true });
+      }
+      var lmo = (qs.match(/motion=([^&]+)/) || [])[1];
+      var ll = lmo ? d.prospectLists.filter(function (x) { return !x.motion || x.motion === decodeURIComponent(lmo); }) : d.prospectLists;
+      return ok({ lists: ll });
     }
     if (p === "/sequences") {
       d.sequences = d.sequences || [];

@@ -46,6 +46,15 @@ export async function POST(req: Request) {
       return fail(e?.message ?? "import_failed", e?.status ?? 400);
     }
   }
+  if (b?.action === "delete" && Array.isArray(b.ids)) {
+    const core = getCore();
+    let deleted = 0;
+    for (const id of b.ids) {
+      const p = await core.getProspect(id);
+      if (p && p.workspaceId === ws) { await core.deleteProspect(id); deleted++; }
+    }
+    return ok({ deleted });
+  }
   if (b?.action === "transition") {
     if (!b.prospectId || !b.status) return fail("missing_fields", 422);
     const p = await transition(b.prospectId, b.status);
