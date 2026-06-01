@@ -122,13 +122,15 @@
   var ROUTES = {
     overview: { title: "Overview", crumb: "Operate", action: null, render: renderOverview },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
-    inmarket: { title: "In-Market Leads", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
+    inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New campaign", render: renderCampaigns },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
+    automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
     content: { title: "Content Library", crumb: "Build", action: "＋ Add asset", render: renderContent },
+    analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
     connected: { title: "Connected", crumb: "Connect", action: "Test all", render: renderConnected, cap: "integrations:manage" },
     ats: { title: "ATS", crumb: "Connect", action: null, render: renderAts, cap: "ats:manage" },
@@ -141,12 +143,13 @@
     var parts = h.split("/");
     if (parts[0] === "bd" || parts[0] === "recruiting") { motion = parts[0]; localStorage.setItem("ros_motion", motion); h = parts[1] || "overview"; }
     else h = parts[0];
-    // Aliases: #builder is the BD in-market industry search (the BD highlight).
-    var ALIAS = { builder: "inmarket", "in-market": "inmarket", leads: "inmarket" };
+    // Aliases. #builder stays the BD-branded entry (it forces BD via its own
+    // route); Hire Signals (#inmarket) is motion-agnostic and shows in both.
+    var ALIAS = { "in-market": "inmarket", leads: "inmarket" };
     if (ALIAS[h]) h = ALIAS[h];
     if (!ROUTES[h]) return "overview";
-    // The in-market search is BD-only; landing there switches the workspace to BD
-    // rather than bouncing the user to Overview.
+    // A motion-only route (e.g. the BD-only #builder) switches the workspace to
+    // its motion rather than bouncing the user to Overview.
     if (ROUTES[h].motionOnly && ROUTES[h].motionOnly !== motion) {
       motion = ROUTES[h].motionOnly; localStorage.setItem("ros_motion", motion); syncMotionNav();
     }
@@ -322,7 +325,12 @@
   }
 
   /* ---------------- In-Market Leads (BD: who is hiring right now) ------------ */
-  var inMarketResults = []; // last search, so Promote can find the full lead object
+  var inMarketResults = [];      // last search results (full lead objects)
+  var imMode = "industry";       // "industry" | "company"
+  var imSelectedIndustry = null;
+  var imMinScore = 0;            // narrow-down: minimum hiring-intent score shown
+  var imLabel = "";             // current result label, kept for re-renders
+  var imPicks = {};             // key -> { lead, manager } selected to push to Prospects
 
   // Industries recruiters sell into. Drives the refined in-market search.
   var IM_INDUSTRIES = [
@@ -331,15 +339,27 @@
     "Logistics / Supply Chain", "Hospitality", "Education", "Energy", "Real Estate",
     "Insurance", "Retail / eCommerce", "Government / Public", "Nonprofit"
   ];
-  var imSelectedIndustry = null;
+  var IM_PLACEHOLDER = {
+    industry: "Search an industry or market, e.g. fintech, healthcare, manufacturing",
+    company: "Search a company by name, e.g. Stripe, Verla Health, Brightwave"
+  };
+
+  function imPickKey(leadId, role) { return leadId + "::" + (role || "__company"); }
+  function imFindLead(id) { return inMarketResults.find(function (x) { return x.id === id; }); }
+  function imVisibleLeads() { return inMarketResults.filter(function (l) { return Math.round(l.score || 0) >= imMinScore; }); }
 
   function renderInMarket(el) {
+    imPicks = {}; imMinScore = 0;
     el.innerHTML =
       '<div class="im-hero">' +
         '<h1 class="im-title">Who\'s hiring <span class="gradient-text">right now.</span></h1>' +
+        '<div class="im-modes" id="imModes">' +
+          '<button type="button" class="im-mode active" data-mode="industry">By industry / market</button>' +
+          '<button type="button" class="im-mode" data-mode="company">By company name</button>' +
+        "</div>" +
         '<form class="im-search" id="imForm">' +
           '<span class="ico">⌕</span>' +
-          '<input id="imQuery" type="text" autocomplete="off" placeholder="Search an industry or market, e.g. fintech, healthcare, manufacturing" />' +
+          '<input id="imQuery" type="text" autocomplete="off" placeholder="' + esc(IM_PLACEHOLDER[imMode]) + '" />' +
           '<button type="submit" class="btn btn-primary" id="imSearchBtn">Find in-market companies</button>' +
         "</form>" +
         '<div class="im-industries" id="imIndustries">' +
@@ -349,13 +369,35 @@
       '<div id="imBody"><div class="empty">Pick an industry to surface companies actively hiring in that market, ranked by hiring intent.</div></div>';
 
     var form = $("#imForm"), input = $("#imQuery");
-    form.addEventListener("submit", function (e) { e.preventDefault(); imSelectedIndustry = null; syncChips(); runSearch(input.value.trim(), null); });
+
+    // Search mode toggle: industry/market OR company name — one or the other.
+    Array.prototype.forEach.call(el.querySelectorAll(".im-mode"), function (m) {
+      m.addEventListener("click", function () {
+        imMode = m.getAttribute("data-mode");
+        Array.prototype.forEach.call(el.querySelectorAll(".im-mode"), function (x) { x.classList.toggle("active", x === m); });
+        imSelectedIndustry = null; syncChips();
+        input.value = ""; input.placeholder = IM_PLACEHOLDER[imMode];
+        $("#imIndustries").style.display = (imMode === "industry") ? "" : "none";
+        $("#imBody").innerHTML = '<div class="empty">' + (imMode === "industry"
+          ? "Pick an industry to surface companies actively hiring in that market, ranked by hiring intent."
+          : "Type a company name to check if they’re hiring right now, and who owns the open roles.") + "</div>";
+        input.focus();
+      });
+    });
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var v = input.value.trim(); if (!v) return;
+      if (imMode === "company") { runSearch({ companyName: v }, v); }
+      else { imSelectedIndustry = null; syncChips(); runSearch({ query: v }, v); }
+    });
+
     Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
       c.addEventListener("click", function () {
         var ind = c.getAttribute("data-ind");
         imSelectedIndustry = (imSelectedIndustry === ind) ? null : ind;
         syncChips();
-        if (imSelectedIndustry) { input.value = imSelectedIndustry; runSearch("", imSelectedIndustry); }
+        if (imSelectedIndustry) { input.value = imSelectedIndustry; runSearch({ industries: [imSelectedIndustry] }, imSelectedIndustry); }
       });
     });
 
@@ -365,67 +407,164 @@
       });
     }
 
-    function runSearch(q, industry) {
+    function runSearch(criteria, label) {
       var body = $("#imBody"); body.innerHTML = loading();
-      var payload = { query: q, limit: 30 };
-      if (industry) payload.industries = [industry];
+      imPicks = {}; imMinScore = 0; imLabel = label || "";
+      var payload = { limit: 30 };
+      if (criteria.companyName) payload.companyName = criteria.companyName;
+      if (criteria.industries) payload.industries = criteria.industries;
+      if (criteria.query) payload.query = criteria.query;
       send("/in-market", "POST", payload).then(function (r) {
         if (!r.ok) { body.innerHTML = needsSetup(); return; }
         inMarketResults = (r.data && r.data.leads) || [];
-        if (!inMarketResults.length) {
-          body.innerHTML = '<div class="empty">No in-market companies matched yet. Try another industry, or connect more signal sources under <a href="#connected">Connected</a>.</div>';
-          return;
-        }
-        var label = industry || q;
-        body.innerHTML = '<div class="im-count">' + inMarketResults.length + " companies in market" + (label ? " · " + esc(label) : "") + "</div>" +
-          inMarketResults.map(leadCard).join("");
-        Array.prototype.forEach.call(body.querySelectorAll("[data-promote]"), function (btn) {
-          btn.addEventListener("click", function () { promoteLead(btn.getAttribute("data-promote"), btn); });
-        });
+        renderImResults();
       }).catch(function () { body.innerHTML = needsSetup(); });
     }
+  }
+
+  // Render the results region: a bulk toolbar (select-all + narrow-down) over the cards.
+  function renderImResults() {
+    var body = document.getElementById("imBody"); if (!body) return;
+    if (!inMarketResults.length) {
+      body.innerHTML = '<div class="empty">No in-market companies matched yet. Try another search, or connect more signal sources under <a href="#connected">Connected</a>.</div>';
+      return;
+    }
+    var leads = imVisibleLeads();
+    var bands = [["0", "All"], ["50", "50+"], ["75", "75+"]];
+    var toolbar =
+      '<div class="im-toolbar">' +
+        '<label class="im-checkall"><input type="checkbox" id="imAll"> Select all hiring managers</label>' +
+        '<span class="im-count">' + leads.length + " of " + inMarketResults.length + " companies" + (imLabel ? " · " + esc(imLabel) : "") + "</span>" +
+        '<div class="im-narrow" title="Narrow by hiring-intent score">' +
+          bands.map(function (b) { return '<button type="button" class="im-nbtn' + (String(imMinScore) === b[0] ? " active" : "") + '" data-min="' + b[0] + '">' + b[1] + "</button>"; }).join("") +
+        "</div>" +
+        '<button class="btn btn-primary btn-sm" id="imBulk" disabled>Push selected to Prospects</button>' +
+      "</div>";
+    body.innerHTML = toolbar + '<div id="imList">' + leads.map(leadCard).join("") + "</div>";
+    wireImResults(body);
+    updateImBulk();
   }
 
   function leadCard(l) {
     var score = Math.round(l.score || 0);
     var scoreCls = score >= 75 ? "positive" : score >= 50 ? "soft_yes" : "unclassified";
-    var buyer = l.buyerName
-      ? '<div class="lr-sub">Buyer: <b>' + esc(l.buyerName) + "</b>" + (l.buyerTitle ? " · " + esc(l.buyerTitle) : "") + "</div>"
-      : '<div class="lr-sub muted">Decision-maker resolved on promote</div>';
-    var roles = (l.roles && l.roles.length) ? '<div class="lr-sub muted">Roles: ' + l.roles.slice(0, 4).map(esc).join(", ") + "</div>" : "";
     var src = l.sourceUrl ? ' · <a href="' + esc(l.sourceUrl) + '" target="_blank" rel="noopener">source</a>' : "";
-    return '<div class="resp-item"><div class="resp-top">' +
-      '<span class="avatar" style="background:' + colorFor(l.company) + '">' + esc(initials(l.company)) + "</span>" +
-      '<div><div class="resp-name">' + esc(l.company) + (l.industry ? ' <span class="muted" style="font-weight:400">· ' + esc(l.industry) + "</span>" : "") + "</div>" +
-      '<div class="resp-chan">' + esc(l.headcountBand || "") + (l.location ? " · " + esc(l.location) : "") + "</div></div>" +
-      '<span class="cls cls-' + scoreCls + '" style="margin-left:auto" title="Hiring-intent score">' + score + "</span></div>" +
-      '<div class="resp-text">' + esc(l.reason) + src + "</div>" +
-      buyer + roles +
-      '<div class="resp-actions" style="margin-top:8px"><button class="resp-btn" data-promote="' + esc(l.id) + '">→ Promote to Prospects</button>' +
-      (l.scoreReasons && l.scoreReasons.length ? '<span class="resp-act">' + l.scoreReasons.slice(0, 3).map(esc).join(" · ") + "</span>" : "") +
-      "</div></div>";
+
+    // Deep dive: each open role mapped to the hiring manager who would own it. Each row
+    // is selectable as the prospect to push to Prospects + sequence.
+    var mgrs = (l.hiringManagers && l.hiringManagers.length) ? l.hiringManagers : null;
+    var rows;
+    if (mgrs) {
+      rows = mgrs.map(function (m) {
+        var who = m.managerName
+          ? '<b>' + esc(m.managerName) + "</b>"
+          : '<span class="muted">resolve on push</span>';
+        return '<label class="im-mgr"><input type="checkbox" class="im-pick" data-id="' + esc(l.id) + '" data-role="' + esc(m.role) + '" ' + (imPicks[imPickKey(l.id, m.role)] ? "checked" : "") + ">" +
+          '<span class="im-mgr-role">' + esc(m.role) + "</span>" +
+          '<span class="im-mgr-arrow">→</span>' +
+          '<span class="im-mgr-title">' + esc(m.managerTitle) + "</span>" +
+          '<span class="im-fn">' + esc(m.function) + "</span>" +
+          '<span class="im-mgr-who">' + who + "</span></label>";
+      }).join("");
+    } else {
+      // No role breakdown: offer the company's buyer / decision-maker as the prospect.
+      var who = l.buyerName ? '<b>' + esc(l.buyerName) + "</b>" : '<span class="muted">resolve on push</span>';
+      rows = '<label class="im-mgr"><input type="checkbox" class="im-pick" data-id="' + esc(l.id) + '" data-role="" ' + (imPicks[imPickKey(l.id, "")] ? "checked" : "") + ">" +
+        '<span class="im-mgr-role">Decision-maker</span>' +
+        '<span class="im-mgr-arrow">→</span>' +
+        '<span class="im-mgr-title">' + esc(l.buyerTitle || "Hiring manager") + "</span>" +
+        '<span class="im-mgr-who">' + who + "</span></label>";
+    }
+
+    return '<div class="im-lead" data-id="' + esc(l.id) + '">' +
+      '<div class="im-lead-head">' +
+        '<span class="avatar" style="background:' + colorFor(l.company) + '">' + esc(initials(l.company)) + "</span>" +
+        '<div class="im-lead-id"><div class="im-lead-name">' + esc(l.company) + (l.industry ? ' <span class="muted" style="font-weight:400">· ' + esc(l.industry) + "</span>" : "") + "</div>" +
+        '<div class="im-lead-meta">' + esc(l.headcountBand || "") + (l.location ? " · " + esc(l.location) : "") + "</div></div>" +
+        '<span class="cls cls-' + scoreCls + ' im-score" title="Hiring-intent score">' + score + "</span></div>" +
+      '<div class="im-reason">' + esc(l.reason) + src + "</div>" +
+      '<div class="im-managers"><div class="im-mgr-head">Hiring managers &amp; open roles <span class="muted">(' + (mgrs ? mgrs.length : 1) + ")</span></div>" + rows + "</div>" +
+      (l.scoreReasons && l.scoreReasons.length ? '<div class="im-lead-reasons">' + l.scoreReasons.slice(0, 3).map(esc).join(" · ") + "</div>" : "") +
+      "</div>";
   }
 
-  function promoteLead(leadId, btn) {
-    var lead = inMarketResults.find(function (x) { return x.id === leadId; });
-    if (!lead) return;
+  function wireImResults(body) {
+    // Per-manager selection.
+    Array.prototype.forEach.call(body.querySelectorAll(".im-pick"), function (cb) {
+      cb.addEventListener("change", function () {
+        var id = cb.getAttribute("data-id"), role = cb.getAttribute("data-role");
+        var lead = imFindLead(id); if (!lead) return;
+        var mgr = role ? (lead.hiringManagers || []).find(function (m) { return m.role === role; }) : null;
+        var key = imPickKey(id, role);
+        if (cb.checked) imPicks[key] = { lead: lead, manager: mgr || null };
+        else delete imPicks[key];
+        updateImBulk();
+      });
+    });
+    // Select all visible hiring managers.
+    var all = body.querySelector("#imAll");
+    if (all) all.addEventListener("change", function () {
+      Array.prototype.forEach.call(body.querySelectorAll(".im-pick"), function (cb) {
+        if (cb.checked !== all.checked) { cb.checked = all.checked; cb.dispatchEvent(new Event("change")); }
+      });
+    });
+    // Narrow-down by score.
+    Array.prototype.forEach.call(body.querySelectorAll(".im-nbtn"), function (b) {
+      b.addEventListener("click", function () { imMinScore = parseInt(b.getAttribute("data-min"), 10) || 0; renderImResults(); });
+    });
+    // Bulk push.
+    var bulk = body.querySelector("#imBulk");
+    if (bulk) bulk.addEventListener("click", bulkPushToProspects);
+  }
+
+  function updateImBulk() {
+    var n = Object.keys(imPicks).length;
+    var btn = document.getElementById("imBulk");
+    if (btn) { btn.disabled = n === 0; btn.textContent = n ? ("Push " + n + " to Prospects →") : "Push selected to Prospects"; }
+    var all = document.getElementById("imAll");
+    var picks = document.querySelectorAll(".im-pick");
+    if (all && picks.length) {
+      var checked = document.querySelectorAll(".im-pick:checked").length;
+      all.checked = checked === picks.length;
+      all.indeterminate = checked > 0 && checked < picks.length;
+    }
+  }
+
+  // Resolve (or create) the BD campaign that holds promoted in-market prospects.
+  function resolveBdCampaign(cb) {
     var saved = [];
     try { saved = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); } catch (e) {}
     var camp = saved.filter(function (c) { return c.motion === motion; })[0] || saved[0];
-    function doPromote(campaignId) {
-      btn.disabled = true; btn.textContent = "Promoting...";
-      send("/in-market", "POST", { action: "promote", campaignId: campaignId, lead: lead }).then(function (r) {
-        if (r.ok) { btn.textContent = "✓ In Prospects"; btn.classList.add("ghost"); toast(lead.company + " promoted to Prospects"); }
-        else { btn.disabled = false; btn.textContent = "→ Promote to Prospects"; toast("Could not promote (" + (r.data.error || r.status) + ")"); }
-      }).catch(function () { btn.disabled = false; btn.textContent = "→ Promote to Prospects"; toast("Could not reach the server."); });
-    }
-    if (camp && camp.id) { doPromote(camp.id); return; }
-    // No campaign yet: create a holding BD campaign for promoted leads.
-    var c = { id: "camp_" + Math.random().toString(36).slice(2), name: "In-Market Pipeline", motion: motion, goal: "Companies promoted from In-Market Leads.", status: "active", dailyCap: 25, steps: [] };
+    if (camp && camp.id) { cb(camp.id); return; }
+    var c = { id: "camp_" + Math.random().toString(36).slice(2), name: "In-Market Pipeline", motion: motion, goal: "Hiring managers promoted from In-Market Leads.", status: "active", dailyCap: 25, steps: [] };
     send("/campaigns", "PUT", c).then(function () {
       try { var l = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); l.unshift(c); localStorage.setItem("ros_campaigns", JSON.stringify(l)); } catch (e) {}
-      doPromote(c.id);
-    }).catch(function () { toast("Create a campaign first."); });
+      cb(c.id);
+    }).catch(function () { cb(null); });
+  }
+
+  // Push every selected hiring manager to Prospects (paired to its company) + sequence.
+  function bulkPushToProspects() {
+    var picks = Object.keys(imPicks).map(function (k) { return imPicks[k]; });
+    if (!picks.length) return;
+    var btn = document.getElementById("imBulk"); if (btn) btn.disabled = true;
+    resolveBdCampaign(function (campaignId) {
+      if (!campaignId) { toast("Create a campaign first."); if (btn) btn.disabled = false; return; }
+      var done = 0;
+      (function next(i) {
+        if (i >= picks.length) {
+          toast(done + " prospect" + (done === 1 ? "" : "s") + " pushed to Prospects");
+          imPicks = {}; renderImResults();
+          return;
+        }
+        if (btn) btn.textContent = "Pushing " + (i + 1) + "/" + picks.length + "…";
+        var payload = { action: "promote", campaignId: campaignId, lead: picks[i].lead };
+        if (picks[i].manager) payload.manager = picks[i].manager;
+        send("/in-market", "POST", payload)
+          .then(function (r) { if (r.ok) done++; next(i + 1); })
+          .catch(function () { next(i + 1); });
+      })(0);
+    });
   }
 
   function renderProspects(el) {
@@ -448,9 +587,16 @@
           var opts = lifecycle.map(function (l) {
             return '<option value="' + esc(l.status) + '"' + (l.status === p.status ? " selected" : "") + ">" + esc(l[motion] || l.status) + "</option>";
           }).join("");
-          return '<div class="list-row"><span class="avatar" style="width:28px;height:28px;font-size:11px;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) + "</span>" +
-            '<div><div class="lr-main">' + esc(p.fullName) + '</div><div class="lr-sub">' + esc((p.title || "") + (p.company ? " · " + p.company : "")) + "</div></div>" +
-            '<select class="stage-select cls cls-' + statusCls(p.status) + '" data-pid="' + esc(p.id) + '" style="margin-left:auto">' + opts + "</select>" +
+          var contact = [];
+          if (p.email) contact.push("✉ " + esc(p.email));
+          if (p.phone) contact.push("☎ " + esc(p.phone));
+          var contactLine = '<div class="lr-contact' + (contact.length ? "" : " muted") + '">' +
+            (contact.length ? contact.join(" · ") : "No work contact yet") + "</div>";
+          var enrichLbl = (p.email && p.phone) ? "↻ Re-enrich" : "⚡ Enrich contact";
+          return '<div class="list-row" data-pid="' + esc(p.id) + '"><span class="avatar" style="width:28px;height:28px;font-size:11px;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) + "</span>" +
+            '<div class="lr-id"><div class="lr-main">' + esc(p.fullName) + '</div><div class="lr-sub">' + esc((p.title || "") + (p.company ? " · " + p.company : "")) + "</div>" + contactLine + "</div>" +
+            '<button class="pr-enrich" data-enrich="' + esc(p.id) + '">' + enrichLbl + "</button>" +
+            '<select class="stage-select cls cls-' + statusCls(p.status) + '" data-pid="' + esc(p.id) + '">' + opts + "</select>" +
             '<div class="lr-right">' + (p.dripStage ? "Touch " + p.dripStage : "") + "</div></div>";
         }).join("");
         var body = $("#prBody"); if (!body) return;
@@ -468,6 +614,25 @@
                 if (r.ok) { toast("Moved to " + statusLabel(status, lifecycle)); load(); }
                 else { toast("Could not update (" + (r.data.error || r.status) + ")"); sel.disabled = false; }
               }).catch(function () { toast("Could not reach the server."); sel.disabled = false; });
+          });
+        });
+
+        // Enrich a prospect's outreach contact (company email + phone), cheapest-first.
+        Array.prototype.forEach.call(body.querySelectorAll(".pr-enrich"), function (btn) {
+          btn.addEventListener("click", function () {
+            var pid = btn.getAttribute("data-enrich");
+            var old = btn.textContent; btn.disabled = true; btn.textContent = "Enriching…";
+            send("/prospects", "POST", { action: "enrich", prospectId: pid }).then(function (r) {
+              if (r.ok) {
+                var f = (r.data && r.data.found) || {};
+                if (f.email || f.phone) {
+                  toast("Found " + [f.email ? "email" : "", f.phone ? "phone" : ""].filter(Boolean).join(" + "));
+                } else {
+                  toast("No new contact found — add a provider under Connected, or enter manually.");
+                }
+                load();
+              } else { btn.disabled = false; btn.textContent = old; toast("Could not enrich (" + (r.data.error || r.status) + ")"); }
+            }).catch(function () { btn.disabled = false; btn.textContent = old; toast("Could not reach the server."); });
           });
         });
       }).catch(function () { var b = $("#prBody"); if (b) b.innerHTML = needsSetup(); });
@@ -613,6 +778,186 @@
       REF.seqRules.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div></div></div>";
   }
 
+  /* ---------------- LinkedIn Automation ----------------
+     Drives the LinkedIn cadence engine from the portal: enroll prospects into
+     account-safe sequences, run the cadence on demand, and watch every touch
+     (connect, message, follow-up) advance through the daily limits. Talks to
+     the session-authed /api/automation façade over the engine. */
+  var autoState = null; // last /automation snapshot, so the enroll modal can read it
+
+  function renderAutomation(el) {
+    el.innerHTML = head("LinkedIn Automation",
+      "Enroll prospects into account-safe LinkedIn cadences. The engine paces every touch, connect, message, accept-triggered follow-up, inside each account's daily limits, and pauses the instant someone replies.") +
+      '<div class="btn-row" style="margin-bottom:14px">' +
+        '<button class="btn btn-primary btn-sm" id="autoEnroll">＋ Enroll a prospect</button>' +
+        '<button class="btn btn-ghost btn-sm" id="autoTick">▶ Run cadence now</button>' +
+      "</div>" +
+      '<div id="autoBody">' + loading() + "</div>";
+
+    $("#autoEnroll").addEventListener("click", function () { openEnrollModal(); });
+    $("#autoTick").addEventListener("click", function () {
+      var b = $("#autoTick"); b.disabled = true; b.textContent = "Running…";
+      send("/automation", "POST", { action: "tick" }).then(function (r) {
+        b.disabled = false; b.textContent = "▶ Run cadence now";
+        if (r.ok) { toast("Cadence ran · " + (r.data.processed || 0) + " step(s) processed"); load(); }
+        else toast("Could not run cadence (" + (r.data.error || r.status) + ")");
+      }).catch(function () { b.disabled = false; b.textContent = "▶ Run cadence now"; toast("Could not reach the server."); });
+    });
+
+    // Delegated, attached once: #autoBody persists across reloads, so wiring it
+    // inside paint() would stack a fresh handler on every reload.
+    $("#autoBody").addEventListener("click", function (e) {
+      var go = e.target.closest("[data-go]");
+      if (go) { location.hash = go.getAttribute("data-go"); return; }
+      var act = e.target.closest("[data-enr-act]"); if (!act) return;
+      var id = act.getAttribute("data-enr"), action = act.getAttribute("data-enr-act");
+      act.disabled = true;
+      send("/automation", "POST", { action: action, enrollmentId: id }).then(function (r) {
+        if (r.ok) { toast(action === "stop" ? "Enrollment stopped" : "Enrollment resumed"); load(); }
+        else { act.disabled = false; toast("Could not " + action + " (" + (r.data.error || r.status) + ")"); }
+      }).catch(function () { act.disabled = false; toast("Could not reach the server."); });
+    });
+
+    load();
+
+    function load() {
+      api("/automation").then(function (d) { autoState = d || {}; paint(); })
+        .catch(function () { var b = $("#autoBody"); if (b) b.innerHTML = needsSetup(); });
+    }
+
+    function paint() {
+      var body = $("#autoBody"); if (!body) return;
+      var s = autoState.stats || {};
+      var statCells = [
+        ["Connected accounts", s.accounts || 0, "accounts"],
+        ["Active enrollments", s.active || 0],
+        ["Replied (handed off)", s.replied || 0, "response"],
+        ["Completed", s.completed || 0],
+        ["Invites/day", s.invitesPerDay || 0, "accounts"]
+      ].map(function (k) {
+        var go = k[2] && (!ROUTES[k[2]] || !ROUTES[k[2]].cap || can(ROUTES[k[2]].cap)) ? ' data-go="' + k[2] + '"' : "";
+        return '<div class="stat' + (go ? " clickable" : "") + '"' + go + '><div class="sv">' + k[1] + '</div><div class="sl">' + esc(k[0]) + "</div></div>";
+      }).join("");
+
+      body.innerHTML =
+        '<div class="stat-grid" style="margin-bottom:18px">' + statCells + "</div>" +
+        '<div class="two-col">' +
+          '<div class="card"><h3>Live enrollments</h3>' + enrollmentsHtml() + "</div>" +
+          '<div><div class="card"><h3>Sending accounts</h3>' + accountsHtml() + "</div>" +
+          '<div class="card" style="margin-top:14px"><h3>Cadences</h3>' + sequencesHtml() + "</div></div>" +
+        "</div>" +
+        '<div class="card" style="margin-top:18px"><h3>Recent activity</h3>' + eventsHtml() + "</div>";
+    }
+
+    function enrollmentsHtml() {
+      var list = autoState.enrollments || [];
+      if (!list.length) {
+        return '<div class="empty">No one enrolled yet. Click ＋ Enroll a prospect to start an account-safe LinkedIn cadence.</div>';
+      }
+      return list.map(function (e) {
+        var step = (e.currentStepOrder || 0) + (e.totalSteps ? " / " + e.totalSteps : "");
+        var next = e.status === "active" && e.nextRunAt ? "Next: " + fmtWhen(e.nextRunAt) : autoEnrStatusLabel(e.status);
+        var canStop = e.status === "active" || e.status === "paused_replied";
+        var btn = canStop
+          ? '<button class="resp-btn ghost" data-enr-act="stop" data-enr="' + esc(e.id) + '">Stop</button>'
+          : (e.status === "stopped" ? '<button class="resp-btn" data-enr-act="resume" data-enr="' + esc(e.id) + '">Resume</button>' : "");
+        return '<div class="list-row"><span class="avatar" style="width:28px;height:28px;font-size:11px;background:' + colorFor(e.prospectName) + '">' + esc(initials(e.prospectName || "?")) + "</span>" +
+          '<div><div class="lr-main">' + esc(e.prospectName || e.prospectId) + (e.company ? ' <span class="muted" style="font-weight:400">· ' + esc(e.company) + "</span>" : "") + "</div>" +
+          '<div class="lr-sub">' + esc(e.sequenceName || "Sequence") + " · step " + esc(step) + "</div></div>" +
+          '<span class="cls cls-' + autoEnrCls(e.status) + '" style="margin-left:auto">' + esc(autoEnrStatusLabel(e.status)) + "</span>" +
+          '<div class="lr-right" style="min-width:120px;text-align:right">' + esc(next) + " " + btn + "</div></div>";
+      }).join("");
+    }
+
+    function accountsHtml() {
+      var list = autoState.accounts || [];
+      if (!list.length) {
+        return '<div class="empty">No LinkedIn sending accounts yet. Connect one under <a href="#accounts">Accounts</a> to enroll prospects.</div>';
+      }
+      return list.map(function (a) {
+        var lim = a.limits || {};
+        return '<div class="list-row"><div><div class="lr-main">' + esc(a.displayName) + '</div>' +
+          '<div class="lr-sub">' + (lim.invitesPerDay || 0) + " invites · " + (lim.messagesPerDay || 0) + " msgs · " + (lim.profileViewsPerDay || 0) + " views /day</div></div>" +
+          '<span class="cls cls-' + autoAcctCls(a.status) + '" style="margin-left:auto">' + esc(a.status) + "</span></div>";
+      }).join("");
+    }
+
+    function sequencesHtml() {
+      var list = autoState.sequences || [];
+      if (!list.length) return '<div class="empty">No cadences yet.</div>';
+      return list.map(function (sq) {
+        var steps = (sq.steps || []).slice().sort(function (a, b) { return a.order - b.order; })
+          .map(function (st) { return esc(autoActionLabel(st.action)); }).join(" → ");
+        return '<div class="list-row"><div><div class="lr-main">' + esc(sq.name) + '</div>' +
+          '<div class="lr-sub">' + steps + "</div></div>" +
+          '<div class="lr-right">' + (sq.steps || []).length + " steps</div></div>";
+      }).join("");
+    }
+
+    function eventsHtml() {
+      var list = autoState.events || [];
+      if (!list.length) return '<div class="empty">No activity yet. Enroll a prospect, then Run cadence now to fire the first touch.</div>';
+      return list.slice(0, 20).map(function (ev) {
+        var what = autoKindLabel(ev.kind) + (ev.action ? " · " + autoActionLabel(ev.action) : "");
+        return '<div class="list-row"><div class="lr-main">' + esc(what) + "</div>" +
+          '<div class="lr-right">' + esc(fmtWhen(ev.at)) + "</div></div>";
+      }).join("");
+    }
+
+    function openEnrollModal() {
+      var st = autoState || {};
+      var accts = st.accounts || [], seqs = st.sequences || [], pros = st.prospects || [];
+      if (!accts.length) { toast("Connect a LinkedIn account under Accounts first."); location.hash = "accounts"; return; }
+      if (!pros.length) { toast("Add a prospect first."); location.hash = "prospects"; return; }
+      var prosOpts = pros.map(function (p) {
+        var tag = p.enrolled ? " (enrolled)" : (p.hasLinkedin ? "" : " (no LinkedIn URL)");
+        return '<option value="' + esc(p.id) + '"' + (p.enrolled ? " disabled" : "") + ">" + esc(p.fullName) + (p.company ? " · " + esc(p.company) : "") + esc(tag) + "</option>";
+      }).join("");
+      var seqOpts = seqs.map(function (s) { return '<option value="' + esc(s.id) + '">' + esc(s.name) + "</option>"; }).join("");
+      var acctOpts = accts.map(function (a) {
+        return '<option value="' + esc(a.id) + '"' + (a.status === "ok" || a.status === "warming" ? "" : " disabled") + ">" + esc(a.displayName) + " (" + esc(a.status) + ")</option>";
+      }).join("");
+      var bodyHtml =
+        "<label>Prospect</label><select id=\"enrPros\">" + prosOpts + "</select>" +
+        "<label>Cadence</label><select id=\"enrSeq\">" + seqOpts + "</select>" +
+        "<label>Sending account</label><select id=\"enrAcct\">" + acctOpts + "</select>" +
+        '<div class="imp-preview">The first step runs on the next cadence tick, then the engine paces the rest within this account\'s daily limits.</div>' +
+        '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="enrCancel">Cancel</button>' +
+        '<button class="btn btn-primary btn-sm" id="enrGo">Enroll</button></div>';
+      openModal("Enroll into a LinkedIn cadence", "Pick who to reach, the cadence, and which account sends.", bodyHtml, function (root, close) {
+        root.querySelector("#enrCancel").addEventListener("click", close);
+        root.querySelector("#enrGo").addEventListener("click", function () {
+          var prospectId = root.querySelector("#enrPros").value;
+          var sequenceId = root.querySelector("#enrSeq").value;
+          var accountId = root.querySelector("#enrAcct").value;
+          if (!prospectId || !sequenceId || !accountId) { toast("Pick a prospect, cadence and account."); return; }
+          var go = root.querySelector("#enrGo"); go.disabled = true; go.textContent = "Enrolling…";
+          send("/automation", "POST", { action: "enroll", prospectId: prospectId, sequenceId: sequenceId, accountId: accountId })
+            .then(function (r) {
+              if (r.ok) { toast("Enrolled · cadence starts on the next tick"); close(); load(); }
+              else { go.disabled = false; go.textContent = "Enroll"; toast("Could not enroll (" + (r.data.error || r.status) + ")"); }
+            }).catch(function () { go.disabled = false; go.textContent = "Enroll"; toast("Could not reach the server."); });
+        });
+      });
+    }
+  }
+
+  // enrollment + engine vocabulary, mapped onto the shared classification colors
+  function autoEnrCls(s) { var m = { active: "soft_yes", paused_replied: "positive", completed: "unclassified", stopped: "stop", failed: "not_interested" }; return m[s] || "unclassified"; }
+  function autoEnrStatusLabel(s) { var m = { active: "Active", paused_replied: "Replied", completed: "Completed", stopped: "Stopped", failed: "Failed" }; return m[s] || s; }
+  function autoAcctCls(s) { var m = { ok: "positive", warming: "timing_objection", restricted: "not_interested", disconnected: "stop" }; return m[s] || "unclassified"; }
+  function autoActionLabel(a) { var m = { profile_view: "Profile view", endorse: "Endorse", connect: "Connect", message: "Message", inmail: "InMail", voice_note: "Voice note", withdraw_invite: "Withdraw invite" }; return m[a] || a; }
+  function autoKindLabel(k) { var m = { step_sent: "Step sent", step_deferred: "Step deferred", step_failed: "Step failed", invite_accepted: "Invite accepted", reply_received: "Reply received", reply_classified: "Reply classified", sequence_completed: "Sequence completed", enrollment_paused: "Paused", enrollment_stopped: "Stopped" }; return m[k] || k; }
+  // Compact relative/absolute timestamp for cadence schedule + activity.
+  function fmtWhen(iso) {
+    if (!iso) return "";
+    var t = Date.parse(iso); if (isNaN(t)) return "";
+    var diff = t - Date.now(), abs = Math.abs(diff), mins = Math.round(abs / 60000);
+    if (mins < 1) return "now";
+    var s = mins < 60 ? mins + "m" : mins < 1440 ? Math.round(mins / 60) + "h" : Math.round(mins / 1440) + "d";
+    return diff >= 0 ? "in " + s : s + " ago";
+  }
+
   function renderContent(el) {
     el.innerHTML = head("Content Library", "Case studies and comp benchmarks the AI injects into Touch 2 and Touch 3.") +
       '<div id="ctBody">' + loading() + "</div>";
@@ -625,6 +970,102 @@
       }).join("") || '<div class="empty">No assets yet. Add a case study or comp benchmark, the AI weaves it into your value-drop touches.</div>';
       var body = $("#ctBody"); if (body) body.innerHTML = '<div class="card">' + rows + "</div>";
     }).catch(function () { var b = $("#ctBody"); if (b) b.innerHTML = needsSetup(); });
+  }
+
+  /* ---------------- Analytics (signal → placement, live) ---------------- */
+  // The operational dashboard the marketing site promises: which signals create
+  // meetings, which channels and messages earn replies, which industries and
+  // recruiters convert, and the full funnel end to end. Motion-aware: recruiting
+  // measures placements, BD measures job orders. Reads /analytics, renders from
+  // the local seed when no backend is connected.
+  function renderAnalytics(el) {
+    var bd = motion === "bd";
+    el.innerHTML = head("Analytics",
+      "A live operational view of the whole motion, from signal to " + (bd ? "job order" : "placement") +
+      ". See what actually creates meetings, replies and revenue, not just activity.") +
+      '<div id="anBody">' + loading() + "</div>";
+
+    api("/analytics").then(function (a) {
+      var m = ((a || {})[bd ? "bd" : "recruiting"]) || {};
+      var body = $("#anBody"); if (!body) return;
+      if (!m.kpis) { body.innerHTML = emptyCard("No analytics yet. As your campaigns run, every signal, reply and meeting lands here."); return; }
+
+      // Top-line KPIs with week-over-week deltas.
+      var kpis = (m.kpis || []).map(function (k) {
+        var dir = k.dir === "down" ? "down" : "up";
+        return '<div class="rstat"><div class="big gradient-text">' + esc(k.value) + '</div><div class="lbl">' + esc(k.label) + "</div>" +
+          (k.delta ? '<div class="delta ' + dir + '">' + (dir === "down" ? "▼ " : "▲ ") + esc(k.delta) + "</div>" : "") + "</div>";
+      }).join("");
+
+      // Horizontal bar chart: each row scaled so the largest value fills the track.
+      function bars(items, suffix) {
+        items = items || [];
+        var max = items.reduce(function (mx, it) { return Math.max(mx, it.pct); }, 0) || 1;
+        return items.map(function (it) {
+          var w = Math.max(Math.round((it.pct / max) * 100), 8);
+          return '<div class="bar-row"><span class="blabel">' + esc(it.label) + '</span>' +
+            '<span class="btrack"><span class="bfill" style="width:' + w + '%">' + esc(it.pct) + (suffix || "") + "</span></span></div>";
+        }).join("") || '<div class="empty">No data yet.</div>';
+      }
+
+      // Funnel: each stage scaled to the first (largest) stage; right column shows
+      // stage-over-stage conversion.
+      var fn = m.funnel || [];
+      var top = fn.length ? fn[0].value : 1;
+      var funnel = fn.map(function (s, i) {
+        var w = Math.max(Math.round((s.value / (top || 1)) * 100), 6);
+        var conv = i > 0 && fn[i - 1].value ? Math.round((s.value / fn[i - 1].value) * 100) + "%" : "";
+        return '<div class="bar-row"><span class="blabel">' + esc(s.label) + '</span>' +
+          '<span class="btrack"><span class="bfill" style="width:' + w + '%">' + esc(s.value) + "</span></span>" +
+          '<span class="bval">' + esc(conv) + "</span></div>";
+      }).join("") || '<div class="empty">No funnel data yet.</div>';
+
+      // Message variants: reply + meeting rate per tested variant.
+      var variants = (m.variants || []).map(function (v) {
+        return '<div class="list-row"><div><div class="lr-main">' + esc(v.name) + '</div><div class="lr-sub">' +
+          esc(v.channel || "") + " · " + (v.sent || 0) + " sent</div></div>" +
+          '<div class="lr-right">' + esc(v.reply) + "% reply · " + esc(v.meeting) + "% mtg</div></div>";
+      }).join("") || '<div class="empty">No message variants tested yet.</div>';
+
+      // Recruiter efficiency: output per operator, not raw activity.
+      var winLabel = bd ? "job orders" : "placements";
+      var recruiters = (m.recruiters || []).map(function (r) {
+        return '<div class="list-row"><span class="avatar" style="background:' + colorFor(r.name) + '">' + esc(initials(r.name)) + "</span>" +
+          '<div><div class="lr-main">' + esc(r.name) + '</div><div class="lr-sub">' + (r.meetings || 0) + " meetings · " + (r.replies || 0) + " replies</div></div>" +
+          '<div class="lr-right">' + (r.wins || 0) + " " + winLabel + "</div></div>";
+      }).join("") || '<div class="empty">Invite recruiters to compare output per operator.</div>';
+
+      // Recent appointments booked through the system, tagged by source channel.
+      var canPros = !ROUTES.prospects.cap || can(ROUTES.prospects.cap);
+      var rowGo = canPros ? ' data-go="prospects" class="list-row clickable"' : ' class="list-row"';
+      var appts = (m.appointments || []).map(function (ap) {
+        return "<div" + rowGo + '><div><div class="lr-main">' + esc(ap.name) + '</div><div class="lr-sub">' +
+          esc(ap.channel || "") + (ap.company ? " · " + esc(ap.company) : "") + "</div></div>" +
+          '<div class="lr-right">' + esc(ap.at || "") + "</div></div>";
+      }).join("") || '<div class="empty">No appointments booked yet.</div>';
+
+      body.innerHTML =
+        '<div class="report-stats">' + kpis + "</div>" +
+        '<div class="report-cols">' +
+          '<div class="report-card"><h3>Meetings booked by signal type</h3>' + bars(m.bySignal, "%") + "</div>" +
+          '<div class="report-card"><h3>Reply rate by channel</h3>' + bars(m.byChannel, "%") + "</div>" +
+        "</div>" +
+        '<div class="two-col" style="margin-top:16px">' +
+          '<div class="card"><h3>' + (bd ? "Signal → job-order funnel" : "Signal → placement funnel") + "</h3>" + funnel + "</div>" +
+          '<div class="card"><h3>Best industries by conversion</h3>' + bars(m.industries, "%") + "</div>" +
+        "</div>" +
+        '<div class="two-col" style="margin-top:16px">' +
+          '<div class="card"><h3>Top message variants</h3>' + variants + "</div>" +
+          '<div class="card"><h3>Recruiter efficiency</h3>' + recruiters + "</div>" +
+        "</div>" +
+        '<div class="card" style="margin-top:16px"><h3>Recent appointments</h3>' + appts + "</div>";
+
+      // Delegated navigation: appointment rows jump into the pipeline.
+      body.addEventListener("click", function (e) {
+        var t = e.target.closest("[data-go]"); if (!t) return;
+        location.hash = t.getAttribute("data-go");
+      });
+    }).catch(function () { var b = $("#anBody"); if (b) b.innerHTML = needsSetup(); });
   }
 
   function renderAccounts(el) {

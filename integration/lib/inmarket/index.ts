@@ -20,25 +20,45 @@ import {
   freeSources,
   cheapFirstContactWaterfall,
   enrich,
+  classifyTitle,
   type ICP,
   type Signal,
   type Company,
   type Person,
+  type JobFunction,
 } from "../signals";
 import { addProspect } from "../prospects";
 import { rid } from "../core/ids";
 import type { Prospect } from "../core/types";
 
-/** What the UI sends to search the market. */
+/** What the UI sends to search the market. Search EITHER by industry/market OR by
+ *  company name — the two are mutually exclusive in the UI, but both narrow the same
+ *  ranked stream here. */
 export interface InMarketQuery {
   /** Free-text intent, e.g. "fintechs in NYC hiring senior backend engineers". */
   query?: string;
   industries?: string[];
   geos?: string[];
+  /** Company-name search: only surface companies whose name matches this text. */
+  companyName?: string;
   /** Decision-maker titles to anchor the buyer, e.g. ["VP Engineering", "Head of Talent"]. */
   titles?: string[];
   headcountBands?: Company["headcountBand"][];
   limit?: number;
+}
+
+/** One open role mapped to the person who would own filling it. The "deep dive"
+ *  into what a company's hiring actually looks like. */
+export interface HiringManagerLead {
+  /** The open role, as observed, e.g. "Senior Backend Engineer". */
+  role: string;
+  /** Function the role rolls up to, e.g. "engineering". */
+  function: JobFunction;
+  /** The title most likely to own the hire, e.g. "VP / Head of Engineering". */
+  managerTitle: string;
+  /** A real, resolved decision-maker name when the engine found one for this function. */
+  managerName?: string;
+  managerLinkedin?: string;
 }
 
 /** One in-market lead surfaced to the recruiter. */
@@ -61,9 +81,57 @@ export interface InMarketLead {
   buyerLinkedin?: string;
   /** Roles observed open, for context. */
   roles?: string[];
+  /** Deep dive: each open role mapped to the hiring manager who would own it. */
+  hiringManagers?: HiringManagerLead[];
   sourceUrl?: string;
   /** Carried so promote() can resolve the buyer + create the prospect. */
   raw?: { company?: Company; person?: Person };
+}
+
+/** The title most likely to own a hire for a given function — used to attribute a
+ *  hiring manager to each open role even before contact enrichment. */
+const MANAGER_TITLE_BY_FUNCTION: Record<JobFunction, string> = {
+  engineering: "VP / Head of Engineering",
+  product: "Head of Product / CPO",
+  design: "Head of Design",
+  data: "Head of Data / Analytics",
+  sales: "VP Sales / Revenue",
+  marketing: "Head of Marketing / CMO",
+  finance: "VP Finance / CFO",
+  operations: "VP / Head of Operations",
+  people_hr: "Head of Talent / People",
+  customer_success: "VP Customer Success",
+  legal: "General Counsel",
+  executive: "CEO / Founder",
+  other: "Hiring Manager",
+};
+
+/**
+ * Map each observed open role to the person who would own filling it. When the engine
+ * has already resolved a real decision-maker for the company, attach their name to the
+ * role whose function matches their title; everything else falls back to the canonical
+ * manager title for that function.
+ */
+function hiringManagersFor(roles: string[] | undefined, buyer?: Person): HiringManagerLead[] {
+  if (!roles || !roles.length) return [];
+  const buyerFn = buyer?.title ? classifyTitle(buyer.title).function : undefined;
+  const seen = new Set<string>();
+  const out: HiringManagerLead[] = [];
+  for (const role of roles) {
+    const key = role.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const fn = classifyTitle(role).function;
+    const matchesBuyer = !!buyerFn && (fn === buyerFn || buyerFn === "executive");
+    out.push({
+      role,
+      function: fn,
+      managerTitle: MANAGER_TITLE_BY_FUNCTION[fn],
+      managerName: matchesBuyer ? buyer?.fullName : undefined,
+      managerLinkedin: matchesBuyer ? buyer?.linkedinUrl : undefined,
+    });
+  }
+  return out;
 }
 
 /** Build a BD ICP from a loose search. Keyword disqualifiers keep noise down. */
@@ -112,6 +180,7 @@ function toLead(s: Signal): InMarketLead {
     buyerTitle: s.person?.title,
     buyerLinkedin: s.person?.linkedinUrl,
     roles,
+    hiringManagers: hiringManagersFor(roles, s.person),
     sourceUrl: s.sources && s.sources[0] ? s.sources[0].url : undefined,
     raw: { company: s.company, person: s.person },
   };
@@ -132,11 +201,20 @@ export async function searchInMarket(
       icp: icpFromQuery(q),
       now: nowIso,
       sources: freeSources(),
-      pull: { watchlist: [], limit: limit * 3 },
+      pull: { watchlist: {}, limit: limit * 3 },
     });
     const kw = (q.query ?? "").toLowerCase().trim();
+    const nameKw = (q.companyName ?? "").toLowerCase().trim();
     let ranked = report.ranked.filter((s) => s.motion === "business_dev" && (s.score?.value ?? 0) > 0);
-    if (kw) {
+    if (nameKw) {
+      // Company-name search: match the resolved company name (or the headline) only.
+      const before = ranked;
+      ranked = ranked.filter((s) => {
+        const name = (s.company?.name ?? s.title).toLowerCase();
+        return name.includes(nameKw);
+      });
+      if (ranked.length === 0) ranked = before; // don't strand the user on a thin match
+    } else if (kw) {
       // Light keyword refinement over the free-text box.
       const terms = kw.split(/\s+/).filter((t) => t.length > 2);
       ranked = ranked.filter((s) => {
@@ -156,29 +234,35 @@ export async function searchInMarket(
 }
 
 /**
- * Promote an in-market lead into the BD pipeline as a Prospect. Resolves the
- * buyer's contact cheapest-first (only now do we spend), then creates the
- * prospect on the given campaign. Returns the new prospect.
+ * Promote an in-market lead into the BD pipeline as a Prospect — paired to its company.
+ *
+ * The created prospect is a PERSON (the hiring manager), not the raw signal: when a
+ * `manager` is passed (a row the recruiter selected from the company's deep dive) that
+ * person becomes the prospect; otherwise we fall back to the company's resolved buyer.
+ * Either way the prospect carries the company name + domain so the Prospects section can
+ * enrich a company email + phone for outreach. Contact resolution is cheapest-first and
+ * best-effort here; with no provider keys set it no-ops and the recruiter enriches later.
  */
 export async function promoteLead(
   workspaceId: string,
   campaignId: string,
   lead: InMarketLead,
+  manager?: HiringManagerLead,
 ): Promise<Prospect> {
   let email: string | undefined;
   let phone: string | undefined;
 
-  const fullName = lead.buyerName || `${lead.company} (hiring manager)`;
+  // Resolve who the prospect actually is: the selected hiring manager, else the buyer.
+  const personName = manager?.managerName || lead.buyerName;
+  const fullName = personName || `${lead.company} — ${manager?.managerTitle || "hiring manager"}`;
+  const title = manager?.managerTitle || lead.buyerTitle;
+  const linkedinUrl = manager?.managerLinkedin || lead.buyerLinkedin;
   const company = lead.company;
-  const title = lead.buyerTitle;
   const domain = lead.domain || lead.raw?.company?.domain;
 
-  // Cheap-first contact enrichment, best-effort. Builds a cheapest-first plan and
-  // runs it; with no provider keys set every step no-ops, so this safely yields
-  // nothing and the recruiter can enrich later. Phone is left off (costly).
-  if (lead.buyerName && domain) {
+  if (personName && domain) {
     try {
-      const [first, ...rest] = lead.buyerName.split(/\s+/);
+      const [first, ...rest] = personName.split(/\s+/);
       const plan = cheapFirstContactWaterfall();
       const report = await enrich(
         plan,
@@ -186,11 +270,11 @@ export async function promoteLead(
           name: company,
           companyName: company,
           domain,
-          fullName: lead.buyerName,
+          fullName: personName,
           firstName: first,
           lastName: rest.join(" "),
-          linkedinUrl: lead.buyerLinkedin,
-          title: lead.buyerTitle,
+          linkedinUrl,
+          title,
         },
         { now: new Date().toISOString() },
       );
@@ -199,7 +283,7 @@ export async function promoteLead(
       if (typeof e === "string") email = e;
       if (typeof p === "string") phone = p;
     } catch {
-      /* leave unresolved; recruiter can enrich later */
+      /* leave unresolved; recruiter can enrich later from Prospects */
     }
   }
 
@@ -210,8 +294,9 @@ export async function promoteLead(
     email,
     phone,
     company,
+    companyDomain: domain,
     title,
-    linkedinUrl: lead.buyerLinkedin,
+    linkedinUrl,
     category: "in_market",
     warmth: Math.max(50, Math.round(lead.score)),
   });

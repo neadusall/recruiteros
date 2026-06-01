@@ -3,15 +3,15 @@
  *
  * GET  /api/in-market                 -> recently promoted in-market prospects (quick recap)
  * POST /api/in-market
- *   { query, industries?, geos?, titles?, headcountBands?, limit? }
+ *   { query, industries?, geos?, companyName?, titles?, headcountBands?, limit? }
  *       -> search the market for companies actively hiring (free sources, ranked)
- *   { action: "promote", campaignId, lead }
- *       -> enrich the buyer + create a Prospect on the campaign (seamless hand-off)
+ *   { action: "promote", campaignId, lead, manager? }
+ *       -> create a Prospect (the hiring manager, paired to the company) on the campaign
  *
  * BD motion only; the engine searches company-side hiring-intent signals.
  */
 
-import { searchInMarket, promoteLead, type InMarketLead } from "../../../lib/inmarket";
+import { searchInMarket, promoteLead, type InMarketLead, type HiringManagerLead } from "../../../lib/inmarket";
 import { getCore } from "../../../lib/core/repository";
 import { requireSession, body, ok, fail } from "../../../lib/api";
 
@@ -32,7 +32,12 @@ export async function POST(req: Request) {
   if (b?.action === "promote") {
     if (!b.campaignId || !b.lead) return fail("missing_fields", 422, { detail: "campaignId and lead required" });
     try {
-      const prospect = await promoteLead(ws, b.campaignId, b.lead as InMarketLead);
+      const prospect = await promoteLead(
+        ws,
+        b.campaignId,
+        b.lead as InMarketLead,
+        b.manager as HiringManagerLead | undefined,
+      );
       return ok({ prospect }, 201);
     } catch (e: any) {
       return fail(e.message ?? "promote_failed", e.status ?? 400);
@@ -45,6 +50,7 @@ export async function POST(req: Request) {
       query: b?.query,
       industries: b?.industries,
       geos: b?.geos,
+      companyName: b?.companyName,
       titles: b?.titles,
       headcountBands: b?.headcountBands,
       limit: b?.limit,

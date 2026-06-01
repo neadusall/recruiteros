@@ -38,6 +38,8 @@ export interface NewProspectInput {
   linkedinUrl?: string;
   phone?: string;
   company?: string;
+  /** Pairs the person to their company so outreach enrichment can resolve contact. */
+  companyDomain?: string;
   title?: string;
   category?: string;
   warmth?: number;
@@ -67,6 +69,7 @@ export async function addProspect(input: NewProspectInput): Promise<Prospect> {
     linkedinUrl: input.linkedinUrl ?? p.linkedinUrl,
     phone: input.phone ?? p.phone,
     company: input.company ?? p.company,
+    companyDomain: input.companyDomain ?? p.companyDomain,
     title: input.title ?? p.title,
     category: input.category ?? p.category,
   });
@@ -81,6 +84,69 @@ export async function addProspect(input: NewProspectInput): Promise<Prospect> {
   }
   await core.saveProspect(p);
   return p;
+}
+
+/**
+ * Enrich one prospect's outreach contact — company email + phone — cheapest-first.
+ *
+ * Uses the prospect's company domain (paired on promote) so the waterfall can hunt a
+ * work email and a direct-dial/mobile. Spend happens only here, on demand. With no
+ * provider keys set the waterfall no-ops and the prospect is returned unchanged, so this
+ * is always safe to call. Returns `{ prospect, found }` describing what was resolved.
+ */
+export async function enrichProspect(
+  workspaceId: string,
+  prospectId: string,
+): Promise<{ prospect: Prospect; found: { email: boolean; phone: boolean } }> {
+  const core = getCore();
+  const p = await core.getProspect(prospectId);
+  if (!p || p.workspaceId !== workspaceId) throw Object.assign(new Error("not_found"), { status: 404 });
+
+  const domain = p.companyDomain;
+  const [first, ...rest] = (p.fullName || "").trim().split(/\s+/);
+  let email = p.email;
+  let phone = p.phone;
+
+  try {
+    const { cheapFirstContactWaterfall, enrich } = await import("../signals");
+    const report = await enrich(
+      cheapFirstContactWaterfall(),
+      {
+        name: p.company,
+        companyName: p.company,
+        domain,
+        fullName: p.fullName,
+        firstName: first,
+        lastName: rest.join(" "),
+        linkedinUrl: p.linkedinUrl,
+        title: p.title,
+      },
+      { now: nowIso() },
+    );
+    const e = report.subject.email;
+    const ph = report.subject.phone;
+    if (typeof e === "string") email = e;
+    if (typeof ph === "string") phone = ph;
+  } catch {
+    /* leave unresolved; the recruiter can retry or add manually */
+  }
+
+  const found = { email: !!email && email !== p.email, phone: !!phone && phone !== p.phone };
+
+  // Update the existing record in place (don't route through addProspect — its
+  // email-dedupe would fork a second prospect when the original had no email yet).
+  p.email = email ?? p.email;
+  p.phone = phone ?? p.phone;
+  if (p.email) {
+    p.atsPersonId = await getAts().upsertPersonByEmail(p.email, {
+      name: p.fullName,
+      company: p.company,
+      title: p.title,
+      source: "outbound",
+    });
+  }
+  await core.saveProspect(p);
+  return { prospect: p, found };
 }
 
 /** Bulk CSV import with dedupe (one Person upsert per row). */

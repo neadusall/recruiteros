@@ -117,6 +117,9 @@ export interface Prospect {
   /** Landline / direct-dial number, enriched separately from mobile. */
   landlinePhone?: string;
   company?: string;
+  /** The prospect's company domain — pairs the person to their company so the
+   *  enrichment waterfall can resolve a company email + phone for outreach. */
+  companyDomain?: string;
   title?: string;
   /** ICP category bucket this prospect was matched into. */
   category?: string;

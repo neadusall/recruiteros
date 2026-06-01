@@ -3,10 +3,11 @@
  * POST /api/prospects        -> add one prospect (upserts the ATS Person)
  *   { action: "bulk", rows } -> CSV bulk upload with dedupe
  *   { action: "transition", prospectId, status } -> move lifecycle stage
+ *   { action: "enrich", prospectId } -> resolve company email + phone (cheapest-first)
  */
 
 import { getCore } from "../../../lib/core/repository";
-import { addProspect, bulkUpload, transition, LIFECYCLE, type NewProspectInput } from "../../../lib/prospects";
+import { addProspect, bulkUpload, transition, enrichProspect, LIFECYCLE, type NewProspectInput } from "../../../lib/prospects";
 import { requireSession, body, ok, fail } from "../../../lib/api";
 import type { ProspectStatus } from "../../../lib/core/types";
 
@@ -34,6 +35,14 @@ export async function POST(req: Request) {
     if (!b.prospectId || !b.status) return fail("missing_fields", 422);
     const p = await transition(b.prospectId, b.status);
     return p ? ok({ prospect: p }) : fail("not_found", 404);
+  }
+  if (b?.action === "enrich") {
+    if (!b.prospectId) return fail("missing_fields", 422);
+    try {
+      return ok(await enrichProspect(ws, b.prospectId));
+    } catch (e: any) {
+      return fail(e.message ?? "enrich_failed", e.status ?? 400);
+    }
   }
   if (!b?.fullName || !b?.campaignId) return fail("missing_fields", 422);
   const p = await addProspect({ ...b, workspaceId: ws });

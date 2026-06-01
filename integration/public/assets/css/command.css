@@ -249,7 +249,55 @@
 }
 .im-chip:hover { color: var(--text); border-color: var(--border-strong); transform: translateY(-1px); }
 .im-chip.active { background: var(--grad); color: #0a0a12; border-color: transparent; }
-.im-count { color: var(--text-muted); font-size: 13px; font-weight: 600; margin: 4px 0 12px; }
+.im-count { color: var(--text-muted); font-size: 13px; font-weight: 600; }
+
+/* Search-mode toggle: industry/market OR company name */
+.im-modes { display: inline-flex; gap: 4px; margin-bottom: 14px; padding: 4px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); }
+.im-mode { appearance: none; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; padding: 8px 16px; border-radius: 9px; border: none; background: transparent; color: var(--text-muted); transition: all .12s ease; }
+.im-mode:hover { color: var(--text); }
+.im-mode.active { background: var(--grad); color: #0a0a12; }
+
+/* Results toolbar: select-all + narrow-down + bulk push */
+.im-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 6px 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.im-checkall { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }
+.im-checkall input { width: 16px; height: 16px; accent-color: var(--brand); cursor: pointer; }
+.im-narrow { display: inline-flex; gap: 4px; padding: 3px; border-radius: 9px; background: var(--surface); border: 1px solid var(--border); }
+.im-nbtn { appearance: none; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); transition: all .12s ease; }
+.im-nbtn:hover { color: var(--text); }
+.im-nbtn.active { background: var(--brand); color: #fff; }
+.im-toolbar #imBulk { margin-left: auto; }
+
+/* Company lead card with selectable hiring-manager deep dive */
+.im-lead { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 18px; margin-bottom: 14px; transition: border-color .15s; }
+.im-lead:hover { border-color: var(--border-strong); }
+.im-lead-head { display: flex; align-items: center; gap: 12px; }
+.im-lead-head .avatar { width: 38px; height: 38px; font-size: 14px; }
+.im-lead-id { min-width: 0; }
+.im-lead-name { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+.im-lead-meta { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
+.im-score { margin-left: auto; }
+.im-reason { font-size: 13.5px; color: var(--text-muted); margin: 12px 0 14px; line-height: 1.5; }
+.im-reason a { color: var(--brand-2); }
+.im-managers { border-top: 1px solid var(--border); padding-top: 12px; }
+.im-mgr-head { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); margin-bottom: 10px; }
+.im-mgr { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 10px; border-radius: 9px; cursor: pointer; transition: background .12s; }
+.im-mgr:hover { background: var(--surface-2); }
+.im-mgr input { width: 16px; height: 16px; accent-color: var(--brand); cursor: pointer; flex: none; }
+.im-mgr-role { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.im-mgr-arrow { color: var(--text-dim); }
+.im-mgr-title { font-size: 13px; color: var(--text-muted); }
+.im-fn { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 99px; background: rgba(124,92,255,0.16); color: #b9a6ff; }
+.im-mgr-who { font-size: 12.5px; color: var(--text-muted); margin-left: auto; }
+.im-lead-reasons { font-size: 12px; color: var(--text-dim); margin-top: 12px; }
+
+/* Prospects: contact + enrich */
+.lr-id { min-width: 0; }
+.lr-contact { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+.lr-contact.muted { color: var(--text-dim); font-style: italic; }
+.list-row .stage-select { margin-left: 0; }
+.pr-enrich { appearance: none; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); margin-left: auto; transition: all .12s ease; }
+.pr-enrich:hover { border-color: var(--brand); color: #fff; }
+.pr-enrich:disabled { opacity: .6; cursor: default; }
 
 /* ============================================================
    Overview: lift the capacity + KPI numbers to the top so every
