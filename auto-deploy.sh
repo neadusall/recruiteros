@@ -6,7 +6,9 @@
 # Safe to run repeatedly: it does nothing when there is no new commit.
 set -euo pipefail
 
-DIR="/opt/recruiteros"
+# Resolve the repo dir from this script's own location, so the watcher works no
+# matter what the checkout is named (/opt/recruitersos, /opt/recruiteros, …).
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG="/var/log/recruiteros-deploy.log"
 BRANCH="main"
 

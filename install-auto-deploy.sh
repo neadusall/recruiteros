@@ -7,7 +7,9 @@
 #   bash /opt/recruiteros/install-auto-deploy.sh
 #
 set -euo pipefail
-DIR="/opt/recruiteros"
+# Resolve the repo dir from this script's own location, so install works no matter
+# what the checkout is named (/opt/recruitersos, /opt/recruiteros, …).
+DIR="$(cd "$(dirname "$0")" && pwd)"
 
 chmod +x "$DIR/auto-deploy.sh"
 
