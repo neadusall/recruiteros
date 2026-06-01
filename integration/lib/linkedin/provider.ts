@@ -49,6 +49,32 @@ export interface ProviderProfile {
   openProfile?: boolean;
 }
 
+export interface SearchProfilesOpts {
+  account: LinkedInAccount;
+  /**
+   * A LinkedIn / Sales Navigator / Recruiter search URL the recruiter pasted, or
+   * the search parameters the provider should run. The Unipile adapter accepts the
+   * raw URL straight from the address bar.
+   */
+  url: string;
+  /** Hard cap on profiles to pull (the adapter paginates up to this). */
+  limit?: number;
+}
+
+/** One person surfaced by a saved/Sales-Navigator search, before contact enrichment. */
+export interface SearchProfile {
+  providerProfileId: string;
+  fullName: string;
+  firstName?: string;
+  lastName?: string;
+  headline?: string;
+  title?: string;
+  company?: string;
+  location?: string;
+  publicProfileUrl?: string;
+  connectionDegree?: 1 | 2 | 3;
+}
+
 export interface ProviderChatMessage {
   providerMessageId: string;
   fromSelf: boolean;
@@ -59,6 +85,8 @@ export interface ProviderChatMessage {
 /** The contract every LinkedIn backend must satisfy. */
 export interface LinkedInProvider {
   resolveProfile(account: LinkedInAccount, identifier: string): Promise<ProviderProfile>;
+  /** Run a saved / Sales Navigator search URL and return the matching members. */
+  searchProfiles(opts: SearchProfilesOpts): Promise<SearchProfile[]>;
   sendConnection(opts: SendConnectionOpts): Promise<ActionResult>;
   withdrawInvite(account: LinkedInAccount, providerProfileId: string): Promise<ActionResult>;
   sendMessage(opts: SendMessageOpts): Promise<ActionResult>;
@@ -141,6 +169,57 @@ export const unipileProvider: LinkedInProvider = {
       connectionDegree: data.network_distance ? degreeMap[data.network_distance] : undefined,
       openProfile: data.is_open_profile,
     };
+  },
+
+  async searchProfiles({ account, url, limit = 100 }) {
+    const cap = Math.min(Math.max(limit, 1), 500);
+    const degreeMap: Record<string, 1 | 2 | 3> = { DISTANCE_1: 1, DISTANCE_2: 2, DISTANCE_3: 3 };
+    const out: SearchProfile[] = [];
+    let cursor: string | undefined;
+
+    // Unipile resolves a pasted classic / Sales Navigator / Recruiter search URL and
+    // pages through the results. We pull until we hit the cap or run out of pages.
+    do {
+      const qs = new URLSearchParams({ account_id: account.providerAccountId });
+      if (cursor) qs.set("cursor", cursor);
+      const data = await unipile<{
+        items?: Array<Record<string, any>>;
+        cursor?: string | null;
+      }>(`/linkedin/search?${qs.toString()}`, {
+        method: "POST",
+        body: JSON.stringify({ url, limit: Math.min(cap - out.length, 100) }),
+      });
+
+      for (const it of data.items ?? []) {
+        const first = it.first_name ?? it.firstName;
+        const last = it.last_name ?? it.lastName;
+        const fullName =
+          it.name ?? it.full_name ?? [first, last].filter(Boolean).join(" ").trim();
+        if (!fullName) continue;
+        const publicId = it.public_identifier ?? it.public_id;
+        const company =
+          it.current_company ?? it.company ?? it.company_name ?? it.organization;
+        out.push({
+          providerProfileId: it.provider_id ?? it.id ?? it.member_id ?? publicId,
+          fullName,
+          firstName: first,
+          lastName: last,
+          headline: it.headline,
+          title: it.title ?? it.current_position ?? it.position,
+          company: typeof company === "string" ? company : company?.name,
+          location: typeof it.location === "string" ? it.location : it.location?.name,
+          publicProfileUrl:
+            it.profile_url ??
+            (publicId ? `https://www.linkedin.com/in/${publicId}` : undefined),
+          connectionDegree: it.network_distance ? degreeMap[it.network_distance] : undefined,
+        });
+        if (out.length >= cap) break;
+      }
+
+      cursor = data.cursor ?? undefined;
+    } while (cursor && out.length < cap);
+
+    return out;
   },
 
   sendConnection({ account, prospect, note }) {
@@ -287,6 +366,14 @@ async function internal<T>(path: string, body: unknown): Promise<T> {
 export const internalProvider: LinkedInProvider = {
   async resolveProfile(account, identifier) {
     return internal("/resolve", { account: account.providerAccountId, identifier });
+  },
+  async searchProfiles({ account, url, limit = 100 }) {
+    const data = await internal<{ items?: SearchProfile[] }>("/search", {
+      account: account.providerAccountId,
+      url,
+      limit,
+    });
+    return (data.items ?? []).slice(0, limit);
   },
   sendConnection({ account, prospect, note }) {
     return attempt("connect", () => internal("/connect", { account: account.providerAccountId, prospect, note }));

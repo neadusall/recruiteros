@@ -107,6 +107,7 @@
         ]
       },
       team: { members: [{ userId: "u_local", name: name, role: "owner" }] },
+      outreach: { enrichmentEnabled: true, jobSearchEnabled: true, creditsIncluded: 2000, creditsUsed: 420 },
       analytics: analyticsSeed(name)
     };
     return db;
@@ -309,6 +310,14 @@
           return ok({ prospect: pe, found: { email: !hadE && !!pe.email, phone: !hadP && !!pe.phone } });
         }
         if (body.action === "bulk") { return ok({ added: (body.rows || []).length, deduped: 0 }); }
+        if (body.action === "linkedin_search") {
+          var people = linkedinSearchSeed(body.limit);
+          var newPros = people.map(function (m) {
+            return { id: "p_" + Date.now() + "_" + Math.floor(Math.random() * 9999), fullName: m.fullName, title: m.title, company: m.company, linkedinUrl: m.linkedinUrl, status: "queued", dripStage: 0, category: "linkedin_search" };
+          });
+          d.prospects = newPros.concat(d.prospects); save(d);
+          return ok({ added: newPros.length, deduped: 0, found: newPros.length, account: "demo-linkedin" });
+        }
         if (body.fullName) {
           var np = { id: "p_" + Date.now(), fullName: body.fullName, title: body.title || "", company: body.company || "", companyDomain: body.companyDomain, email: body.email, phone: body.phone, status: "queued", dripStage: 0, category: body.category };
           d.prospects.unshift(np); save(d); return ok({ prospect: np });
@@ -331,6 +340,18 @@
       }
       return ok({ integrations: d.connected });
     }
+    if (p === "/outreach") {
+      d.outreach = d.outreach || { enrichmentEnabled: true, jobSearchEnabled: true, creditsIncluded: 2000, creditsUsed: 420 };
+      var mo = (qs.match(/motion=([^&]+)/) || [])[1] || "recruiting";
+      if (method === "POST" && body) {
+        if (body.action === "toggle-enrichment") d.outreach.enrichmentEnabled = body.on !== false;
+        else if (body.action === "toggle-jobsearch") d.outreach.jobSearchEnabled = body.on !== false;
+        else if (body.action === "topup-credits") d.outreach.creditsIncluded += Math.max(0, parseInt(body.amount, 10) || 1000);
+        save(d);
+        return ok(buildOutreach(d, body.motion || mo));
+      }
+      return ok(buildOutreach(d, decodeURIComponent(mo)));
+    }
     if (p === "/campaigns") {
       d.campaigns = d.campaigns || [];
       if (method === "PUT" || method === "POST") {
@@ -348,6 +369,85 @@
     }
 
     return notFound();
+  }
+
+  /* Build the Outreach readiness snapshot the Command Center expects, from the
+     local seed (accounts + connected + outreach flags). Mirrors the real
+     /api/outreach shape so the static demo behaves identically. */
+  function buildOutreach(d, motion) {
+    var f = d.outreach;
+    var conn = function (id) { return (d.connected || []).filter(function (i) { return i.id === id; })[0] || {}; };
+    var locals = ["outreach", "hello", "team", "talent", "intro", "hi", "connect", "reach"];
+
+    // ATS + SMS from the generic connected entries.
+    var atsGreen = conn("ats").status === "green";
+    var smsI = conn("sms"), smsGreen = smsI.status === "green", smsYellow = smsI.status === "yellow";
+    var enGreen = conn("enrichment").status === "green";
+
+    var ats = { connected: atsGreen, label: "ATS (system of record)", state: atsGreen ? "ready" : "action",
+      detail: atsGreen ? "Connected — every reply and touch logs to your ATS." : "Not connected. Connect your ATS so prospects, replies, and placements sync automatically." };
+    var sms = { connected: smsGreen, label: "SMS (TalTxt)", state: smsGreen ? "ready" : smsYellow ? "warming" : "action",
+      detail: smsGreen ? "Connected — post-engagement texts and opt-outs are live." : smsYellow ? "Key added — run a test to verify your TalTxt connection." : "Not connected. Connect TalTxt to add compliant SMS to your sequences." };
+
+    var remaining = Math.max(0, f.creditsIncluded - f.creditsUsed);
+    var pct = f.creditsIncluded > 0 ? Math.round((remaining / f.creditsIncluded) * 100) : 0;
+    var low = remaining <= Math.max(50, Math.round(f.creditsIncluded * 0.1));
+    var enState = !f.enrichmentEnabled ? "off" : remaining <= 0 ? "action" : (low || !enGreen) ? "warming" : "ready";
+    var enrichment = { enabled: f.enrichmentEnabled, state: enState, healthy: enGreen,
+      credits: { included: f.creditsIncluded, used: f.creditsUsed, remaining: remaining, low: low, pct: pct },
+      detail: !f.enrichmentEnabled ? "Off. Turn on the waterfall to auto-find work emails and direct dials for new prospects."
+        : remaining <= 0 ? "Out of credits. Top up to keep finding contacts."
+        : low ? "Running low — " + remaining.toLocaleString() + " credits left."
+        : remaining.toLocaleString() + " of " + f.creditsIncluded.toLocaleString() + " credits available." };
+
+    var jobSearch = { enabled: f.jobSearchEnabled, label: "Job Search", state: f.jobSearchEnabled ? "ready" : "off", healthy: true,
+      detail: !f.jobSearchEnabled ? "Off. Turn on Job Search to pull live hiring signals into your campaigns." : "On — live hiring signals feed your daily cadence." };
+
+    // Domains down to the inbox.
+    var domList = (d.accounts.domains || []).map(function (x) {
+      var n = Math.max(1, x.inboxes || 1), paused = x.health === "blacklisted" || (x.bounceRate || 0) >= 0.02;
+      var inboxes = [];
+      for (var i = 0; i < n; i++) {
+        var st, wp;
+        if (paused) { st = "paused"; wp = 0; }
+        else if (x.health === "healthy") { st = "warm"; wp = 100; }
+        else { var warm = i < Math.ceil(n / 2); st = warm ? "warm" : "warming"; wp = warm ? 100 : Math.min(100, 45 + i * 10); }
+        inboxes.push({ email: locals[i % locals.length] + "@" + x.domain, state: st, warmupPct: wp });
+      }
+      var dstate = paused ? "action" : x.health === "healthy" ? "ready" : "warming";
+      return { id: x.id, domain: x.domain, health: x.health, bounceRate: x.bounceRate || 0, state: dstate, inboxes: inboxes };
+    });
+    var allIn = domList.reduce(function (a, x) { return a.concat(x.inboxes); }, []);
+    var warm = allIn.filter(function (i) { return i.state === "warm"; }).length;
+    var warming = allIn.filter(function (i) { return i.state === "warming"; }).length;
+    var dmState = !domList.length ? "action" : domList.some(function (x) { return x.state === "action"; }) ? "action" : warm > 0 ? (warming > 0 ? "warming" : "ready") : "warming";
+    var domains = { total: domList.length, inboxesTotal: allIn.length, inboxesWarm: warm, inboxesWarming: warming, state: dmState, list: domList };
+
+    // LinkedIn accounts.
+    var liList = (d.accounts.linkedin || []).map(function (a) {
+      var flagged = a.warmup === "flagged", warmed = a.warmup === "warmed";
+      var state = flagged ? "action" : warmed ? "ready" : "warming";
+      var wp = flagged ? 0 : warmed ? 100 : Math.min(95, Math.round(((a.quotas && a.quotas.connects) || 0) / 20 * 100));
+      var issue = flagged ? "Flagged by LinkedIn and paused. Lower daily actions and let it re-warm for a few days before resuming."
+        : warmed ? "" : "Warming up — daily limits are ramping automatically. Keep activity gentle until it's green.";
+      return { id: a.id, handle: a.handle, channel: "LinkedIn", warmup: a.warmup, warmupPct: wp, state: state,
+        limits: { connects: (a.quotas && a.quotas.connects) || 0, dms: (a.quotas && a.quotas.dms) || 25, profileViews: (a.quotas && a.quotas.profileViews) || 40 }, issue: issue };
+    });
+    var liWarmed = liList.filter(function (a) { return a.warmup === "warmed"; }).length;
+    var liFlagged = liList.filter(function (a) { return a.warmup === "flagged"; }).length;
+    var liState = !liList.length ? "action" : liFlagged > 0 ? "action" : liWarmed > 0 ? (liWarmed < liList.length ? "warming" : "ready") : "warming";
+    var linkedin = { total: liList.length, warmed: liWarmed, flagged: liFlagged, state: liState, list: liList };
+
+    // Pre-flight gate: required = ATS + SMS(recruiting) + enrichment + domains + LinkedIn ready.
+    var blocking = [];
+    if (!atsGreen) blocking.push("ats");
+    if (motion === "recruiting" && !smsGreen) blocking.push("sms");
+    if (enState === "action" || enState === "off") blocking.push("enrichment");
+    if (dmState === "action") blocking.push("domains");
+    if (liState === "action") blocking.push("linkedin");
+
+    return { ats: ats, sms: sms, enrichment: enrichment, jobSearch: jobSearch, domains: domains, linkedin: linkedin,
+      preflight: { ok: blocking.length === 0, blocking: blocking } };
   }
 
   function addAccount(d, body) {
@@ -481,6 +581,27 @@
         sourceUrl: "https://www.sec.gov/cgi-bin/browse-edgar"
       }
     ];
+  }
+
+  // Synthesize a list of LinkedIn search hits for the demo (no contact data yet —
+  // the recruiter enriches each prospect's email/phone/cell on demand afterwards).
+  function linkedinSearchSeed(limit) {
+    var firsts = ["Ava", "Liam", "Maya", "Noah", "Zoe", "Ethan", "Iris", "Owen", "Lena", "Theo", "Nina", "Cole", "Priya", "Marco", "Sara", "Dev"];
+    var lasts = ["Bennett", "Castillo", "Okafor", "Nguyen", "Rosales", "Fischer", "Haddad", "Park", "Larsson", "Mehta", "Romano", "Walsh", "Abe", "Costa"];
+    var titles = ["VP Engineering", "Head of Talent", "Director of Product", "CTO", "Engineering Manager", "Head of People", "VP Sales", "Chief of Staff"];
+    var cos = ["Verla Health", "Brightwave", "Northwind Robotics", "Lumen Retail", "Cumulus Logistics", "Halcyon AI", "Forge Labs", "Meridian Bank"];
+    var n = Math.max(1, Math.min(parseInt(limit, 10) || 12, 25));
+    var out = [];
+    for (var i = 0; i < n; i++) {
+      var f = firsts[i % firsts.length], l = lasts[(i * 3) % lasts.length];
+      out.push({
+        fullName: f + " " + l,
+        title: titles[i % titles.length],
+        company: cos[i % cos.length],
+        linkedinUrl: "https://www.linkedin.com/in/" + f.toLowerCase() + "-" + l.toLowerCase() + "-" + (i + 1),
+      });
+    }
+    return out;
   }
 
   // Synthesize a plausible work email + phone for the demo's enrichment step.

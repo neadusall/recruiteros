@@ -32,7 +32,7 @@ class ConsoleError extends Error {
 /* ---------------- model mapping ---------------- */
 
 /** Map a connected core LinkedIn account onto the engine's account shape. */
-function toEngineAccount(a: CoreAccount, ownerUserId: string): LinkedInAccount {
+export function toEngineAccount(a: CoreAccount, ownerUserId: string): LinkedInAccount {
   const status: LinkedInAccount["status"] =
     a.warmup === "flagged" ? "restricted" : !a.active ? "disconnected" : a.warmup === "in_warmup" ? "warming" : "ok";
   return {

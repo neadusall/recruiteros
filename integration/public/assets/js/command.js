@@ -25,6 +25,12 @@
   /* ---------------- tiny dom helpers ---------------- */
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var view = $("#view");
+
+  // Auto-refresh registry: views that poll for live data push their interval id
+  // here; render() clears them all when you navigate away, so nothing keeps
+  // fetching in the background.
+  var viewTimers = [];
+  function clearViewTimers() { viewTimers.forEach(function (t) { clearInterval(t); }); viewTimers = []; }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function toast(t) { var el = $("#toast"); el.textContent = t; el.classList.add("show"); setTimeout(function () { el.classList.remove("show"); }, 2200); }
 
@@ -174,6 +180,7 @@
     if (r.action) { pa.style.display = ""; pa.textContent = r.action; pa.onclick = function () { primaryAction(key); }; }
     else pa.style.display = "none";
     Array.prototype.forEach.call(document.querySelectorAll(".mt"), function (x) { x.classList.toggle("active", x.dataset.motion === motion); });
+    clearViewTimers(); // stop any auto-refresh from the view we're leaving
     view.innerHTML = "";
     r.render(view);
   }
@@ -570,10 +577,12 @@
   function renderProspects(el) {
     el.innerHTML = head("Prospects", "Your live pipeline, synced bidirectionally with the ATS.") +
       '<div class="btn-row" style="margin-bottom:14px">' +
-      '<button class="btn btn-ghost btn-sm" id="importBtn">⇪ Import (CSV / paste)</button></div>' +
+      '<button class="btn btn-ghost btn-sm" id="importBtn">⇪ Import (CSV / paste)</button>' +
+      '<button class="btn btn-ghost btn-sm" id="liSearchBtn">🔗 Enrich LinkedIn searches</button></div>' +
       '<div id="prBody">' + loading() + "</div>";
 
     $("#importBtn").addEventListener("click", importProspects);
+    $("#liSearchBtn").addEventListener("click", importLinkedInSearch);
 
     function load() {
       api("/prospects").then(function (d) {
@@ -760,22 +769,251 @@
       "</div>";
   }
 
+  /* ---------------- Outreach (sending readiness control panel) ----------------
+     The working interface for everything you need wired before you can send:
+     ATS, SMS (TalTxt), the enrichment waterfall + its credit balance, Job
+     Search (the white-labelled signal feed), sending domains down to each
+     inbox, and the LinkedIn accounts — each with live status, the switch to
+     turn it on, and a path to connect what's missing. Talks to /api/outreach. */
+  var orSnap = null;       // last /outreach snapshot
+  var orPanel = null;      // expanded drill-down: 'domains' | 'linkedin' | null
+
   function renderOutreach(el) {
-    var phases = REF.phases.map(function (p) {
-      return '<div class="phase"><div class="phase-h"><span class="phase-n">' + p.n + "</span><h4>" + esc(p.title) + '</h4><span class="phase-time">' + esc(p.time) + "</span></div>" +
-        "<ul>" + p.items.map(function (i) { return "<li>" + esc(i) + "</li>"; }).join("") + "</ul>" +
-        '<div class="done">✓ Done when: ' + esc(p.done) + "</div></div>";
-    }).join("");
-    var touches = REF.touches.map(function (t) {
-      return '<div class="touch"><div class="day">Day ' + t.day + '</div><div><div class="tn">' + esc(t.name) +
-        '<span class="chip-c">' + esc(t.channel) + "</span></div>" +
-        '<div class="ti">' + esc(t.intent) + (t.constraints ? ' <span class="spark">(' + esc(t.constraints) + ")</span>" : "") + "</div></div></div>";
-    }).join("");
-    el.innerHTML = head("Outreach", "The 7-phase deployment workflow and the 28-day multi-channel sequence.") +
-      '<div class="two-col"><div><h3 style="margin-bottom:10px">Deploy a campaign</h3>' + phases + "</div>" +
-      '<div><div class="card"><h3>Sequence anatomy (28 days)</h3>' + touches + "</div>" +
-      '<div class="card" style="margin-top:14px"><h3>Decision rules</h3><ul class="phase" style="border:0;padding:0;margin:0">' +
-      REF.seqRules.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div></div></div>";
+    var canInteg = can("integrations:manage");
+    var canAts = can("ats:manage");
+    var canAcct = can("accounts:manage");
+
+    el.innerHTML = head("Outreach",
+      "Your sending readiness in one place. Connect what's missing, watch your domains and LinkedIn warm up, top up enrichment credits, and switch the engine on.") +
+      '<div id="orBody">' + loading() + "</div>";
+
+    // One delegated listener for the whole panel — survives repaints.
+    $("#orBody").addEventListener("click", function (e) {
+      var t;
+      if ((t = e.target.closest("[data-toggle]"))) { doToggle(t.getAttribute("data-toggle"), t); return; }
+      if ((t = e.target.closest("[data-topup]"))) { topUpModal(); return; }
+      if ((t = e.target.closest("[data-connect]"))) { howToModal(t.getAttribute("data-connect")); return; }
+      if ((t = e.target.closest("[data-panel]"))) { var p = t.getAttribute("data-panel"); orPanel = (orPanel === p ? null : p); paint(); return; }
+      if ((t = e.target.closest("[data-go]"))) {
+        var route = t.getAttribute("data-go");
+        if (ROUTES[route] && ROUTES[route].cap && !can(ROUTES[route].cap)) { toast("Ask a workspace admin to set this up."); return; }
+        location.hash = route; return;
+      }
+    });
+
+    load();
+
+    function load() {
+      api("/outreach?motion=" + encodeURIComponent(motion))
+        .then(function (d) { orSnap = d || {}; paint(); })
+        .catch(function () { var b = $("#orBody"); if (b) b.innerHTML = needsSetup(); });
+    }
+
+    function doToggle(key, btn) {
+      if (!canInteg) { toast("Ask a workspace admin to change this."); return; }
+      var action = key === "enrichment" ? "toggle-enrichment" : "toggle-jobsearch";
+      var nowOn = !btn.classList.contains("on");
+      btn.classList.toggle("on", nowOn); // optimistic
+      send("/outreach", "POST", { action: action, on: nowOn, motion: motion }).then(function (r) {
+        if (r.ok) { orSnap = r.data; paint(); toast((key === "enrichment" ? "Enrichment" : "Job Search") + (nowOn ? " turned on" : " turned off")); }
+        else { btn.classList.toggle("on", !nowOn); toast("Could not update (" + (r.data.error || r.status) + ")"); }
+      }).catch(function () { btn.classList.toggle("on", !nowOn); toast("Could not reach the server."); });
+    }
+
+    function topUpModal() {
+      if (!canInteg) { toast("Ask a workspace admin to manage credits."); return; }
+      var amts = [1000, 5000, 10000];
+      var btns = amts.map(function (a) { return '<button class="btn btn-ghost" data-amt="' + a + '">+ ' + a.toLocaleString() + " credits</button>"; }).join("");
+      openModal("Add enrichment credits", "Credits are spent finding work emails and direct dials. They top up instantly for this demo.",
+        '<div class="btn-row" style="flex-wrap:wrap;gap:10px">' + btns + "</div>" +
+        '<div class="modal-foot"><button class="btn btn-ghost btn-sm" data-x>Close</button></div>',
+        function (root, close) {
+          root.querySelector("[data-x]").addEventListener("click", close);
+          Array.prototype.forEach.call(root.querySelectorAll("[data-amt]"), function (b) {
+            b.addEventListener("click", function () {
+              b.disabled = true;
+              send("/outreach", "POST", { action: "topup-credits", amount: parseInt(b.getAttribute("data-amt"), 10), motion: motion })
+                .then(function (r) { if (r.ok) { orSnap = r.data; paint(); toast("Credits added"); close(); } else { b.disabled = false; toast("Could not add credits"); } })
+                .catch(function () { b.disabled = false; toast("Could not reach the server."); });
+            });
+          });
+        });
+    }
+
+    function howToModal(which) {
+      var ats = which === "ats";
+      var title = ats ? "Connect your ATS" : "Connect SMS (TalTxt)";
+      var sub = ats ? "Loxo is the verified, primary ATS. Every reply, touch, and placement syncs once it's connected."
+        : "Add compliant post-engagement texting and opt-outs to your sequences.";
+      var steps = ats
+        ? ["Open the ATS tab and choose Loxo as your system of record.",
+           "Under Accounts → API key, add your Loxo API key (service: Loxo).",
+           "Go to Connected and press Test on Loxo until it turns green."]
+        : ["Get your TalTxt API key from your TalTxt dashboard.",
+           "Under Accounts → API key, add it (service: TalTxt).",
+           "Go to Connected and press Test on TalTxt until it turns green."];
+      var goRoute = ats ? "ats" : "connected";
+      var goCap = ats ? canAts : canInteg;
+      var foot = goCap
+        ? '<div class="modal-foot"><button class="btn btn-ghost btn-sm" data-x>Close</button><button class="btn btn-primary btn-sm" data-open>' + (ats ? "Open ATS settings" : "Open Connected") + "</button></div>"
+        : '<div class="modal-foot"><span class="muted" style="margin-right:auto">You don\'t have access — ask a workspace admin.</span><button class="btn btn-ghost btn-sm" data-x>Close</button></div>';
+      openModal(title, sub,
+        "<ol class=\"or-steps\">" + steps.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("") + "</ol>" + foot,
+        function (root, close) {
+          root.querySelector("[data-x]").addEventListener("click", close);
+          var op = root.querySelector("[data-open]");
+          if (op) op.addEventListener("click", function () { close(); location.hash = goRoute; });
+        });
+    }
+
+    function pill(state) {
+      var m = { ready: ["ready", "Ready"], warming: ["warming", "Warming up"], action: ["action", "Action needed"], off: ["off", "Off"] };
+      var x = m[state] || m.action;
+      return '<span class="or-pill ' + x[0] + '">' + x[1] + "</span>";
+    }
+    function bar(pct, cls) { return '<div class="or-bar"><span class="' + (cls || "") + '" style="width:' + Math.max(0, Math.min(100, pct || 0)) + '%"></span></div>'; }
+    function sw(on, key) { return '<button class="or-sw' + (on ? " on" : "") + '" role="switch" aria-checked="' + (on ? "true" : "false") + '" data-toggle="' + key + '"' + (canInteg ? "" : " disabled title='Admin only'") + "><span></span></button>"; }
+    function fmt(n) { return (n || 0).toLocaleString(); }
+
+    function card(opts) {
+      // opts: { icon, name, state, body, foot }
+      return '<div class="or-card or-' + (opts.state || "action") + '">' +
+        '<div class="or-card-h"><span class="or-ic">' + opts.icon + "</span>" +
+        '<div class="or-name">' + esc(opts.name) + "</div>" + pill(opts.state) + "</div>" +
+        '<div class="or-card-b">' + opts.body + "</div>" +
+        (opts.foot ? '<div class="or-card-f">' + opts.foot + "</div>" : "") + "</div>";
+    }
+
+    function paint() {
+      var body = $("#orBody"); if (!body || !orSnap) return;
+      var s = orSnap;
+      var pf = s.preflight || { ok: false, blocking: [] };
+      var gate = pf.ok
+        ? '<div class="or-gate ok">✓ All required tools are green — you can activate ' + esc(motion === "bd" ? "Business Development" : "Recruiting") + " campaigns.</div>"
+        : '<div class="or-gate warn">⚠ ' + ((pf.blocking || []).length) + " required tool(s) not ready yet. Connect the cards marked <b>Action needed</b> to activate " + esc(motion === "bd" ? "Business Development" : "Recruiting") + " campaigns.</div>";
+
+      // ATS
+      var ats = s.ats || {};
+      var atsCard = card({
+        icon: "🗂️", name: ats.label || "ATS", state: ats.state,
+        body: '<p class="or-detail">' + esc(ats.detail || "") + "</p>",
+        foot: ats.connected
+          ? '<button class="btn btn-ghost btn-sm" data-go="ats">Manage ATS</button>'
+          : '<button class="btn btn-primary btn-sm" data-connect="ats">How to connect</button>'
+      });
+
+      // SMS
+      var sms = s.sms || {};
+      var smsCard = card({
+        icon: "💬", name: sms.label || "SMS", state: sms.state,
+        body: '<p class="or-detail">' + esc(sms.detail || "") + "</p>",
+        foot: sms.connected
+          ? '<button class="btn btn-ghost btn-sm" data-go="connected">Manage</button>'
+          : '<button class="btn btn-primary btn-sm" data-connect="sms">How to connect</button>'
+      });
+
+      // Enrichment + credits
+      var en = s.enrichment || {}, cr = en.credits || {};
+      var enCard = card({
+        icon: "🧪", name: "Enrichment waterfall", state: en.state,
+        body: '<p class="or-detail">' + esc(en.detail || "") + "</p>" +
+          '<div class="or-credits"><div class="or-credit-top"><b>' + fmt(cr.remaining) + "</b> <span class=\"muted\">/ " + fmt(cr.included) + " credits</span></div>" +
+          bar(cr.pct, cr.low ? "warn" : "ok") + "</div>",
+        foot: '<div class="or-foot-row"><label class="or-swrap"><span class="muted">' + (en.enabled ? "On" : "Off") + "</span>" + sw(en.enabled, "enrichment") + "</label>" +
+          '<button class="btn btn-ghost btn-sm" data-topup' + (canInteg ? "" : " disabled") + ">Top up credits</button></div>"
+      });
+
+      // Job Search (white-labelled)
+      var js = s.jobSearch || {};
+      var jsCard = card({
+        icon: "🛰️", name: js.label || "Job Search", state: js.state,
+        body: '<p class="or-detail">' + esc(js.detail || "") + "</p>",
+        foot: '<label class="or-swrap"><span class="muted">' + (js.enabled ? "On" : "Off") + "</span>" + sw(js.enabled, "jobSearch") + "</label>"
+      });
+
+      // Domains
+      var dm = s.domains || { list: [] };
+      var dmCard = card({
+        icon: "📧", name: "Warm sending domains", state: dm.state,
+        body: '<p class="or-detail">' + (dm.total
+          ? "<b>" + dm.total + "</b> domain" + (dm.total === 1 ? "" : "s") + " · <b>" + (dm.inboxesWarm || 0) + "</b> of " + (dm.inboxesTotal || 0) + " inboxes warm" + (dm.inboxesWarming ? ", " + dm.inboxesWarming + " warming" : "")
+          : "No sending domains yet. Add one to start warming inboxes.") + "</p>",
+        foot: '<div class="or-foot-row">' +
+          (dm.total ? '<button class="btn btn-ghost btn-sm" data-panel="domains">' + (orPanel === "domains" ? "Hide details" : "Manage domains") + "</button>" : "") +
+          (canAcct ? '<button class="btn ' + (dm.total ? "btn-ghost" : "btn-primary") + ' btn-sm" data-go="accounts">＋ Add domain</button>' : "") + "</div>"
+      });
+
+      // LinkedIn
+      var li = s.linkedin || { list: [] };
+      var liCard = card({
+        icon: "🔗", name: "Warm LinkedIn accounts", state: li.state,
+        body: '<p class="or-detail">' + (li.total
+          ? "<b>" + li.warmed + "</b> of " + li.total + " warmed" + (li.flagged ? ' · <span style="color:var(--accent-red)">' + li.flagged + " flagged</span>" : "")
+          : "No LinkedIn accounts yet. Connect one to start warming it.") + "</p>",
+        foot: '<div class="or-foot-row">' +
+          (li.total ? '<button class="btn btn-ghost btn-sm" data-panel="linkedin">' + (orPanel === "linkedin" ? "Hide details" : "View accounts") + "</button>" : "") +
+          (canAcct ? '<button class="btn ' + (li.total ? "btn-ghost" : "btn-primary") + ' btn-sm" data-go="accounts">＋ Add account</button>' : "") + "</div>"
+      });
+
+      var panel = "";
+      if (orPanel === "domains") panel = domainsPanel(dm);
+      else if (orPanel === "linkedin") panel = linkedinPanel(li);
+
+      body.innerHTML = gate +
+        '<div class="or-grid">' + atsCard + smsCard + enCard + jsCard + dmCard + liCard + "</div>" +
+        panel + playbook();
+
+      // reflect the on/off label live as the switch is clicked (handled in doToggle repaint)
+    }
+
+    function domainsPanel(dm) {
+      var rows = (dm.list || []).map(function (d) {
+        var hp = d.state === "ready" ? "ready" : d.state === "action" ? "action" : "warming";
+        var inboxes = (d.inboxes || []).map(function (ib) {
+          var ip = ib.state === "warm" ? "ready" : ib.state === "paused" ? "action" : "warming";
+          return '<div class="or-inbox"><span class="or-dot ' + ip + '"></span><span class="or-email">' + esc(ib.email) + "</span>" +
+            '<span class="or-mini">' + (ib.state === "warm" ? "Warm" : ib.state === "paused" ? "Paused" : "Warming · " + ib.warmupPct + "%") + "</span>" +
+            '<div class="or-bar mini">' + '<span class="' + ip + '" style="width:' + ib.warmupPct + '%"></span></div></div>';
+        }).join("");
+        return '<div class="or-dom"><div class="or-dom-h"><b>' + esc(d.domain) + "</b>" + pill(d.state) +
+          '<span class="or-mini">bounce ' + ((d.bounceRate || 0) * 100).toFixed(1) + "% · " + esc(d.health) + "</span></div>" +
+          '<div class="or-inboxes">' + inboxes + "</div></div>";
+      }).join("");
+      return '<div class="card or-panel"><h3>Sending domains &amp; inboxes</h3>' +
+        '<p class="muted" style="margin-top:-4px">Each inbox warms on its own ramp. Keep volume low until every inbox is green; paused inboxes are auto-held when bounce climbs.</p>' +
+        (rows || '<div class="empty">No domains.</div>') + "</div>";
+    }
+
+    function linkedinPanel(li) {
+      var rows = (li.list || []).map(function (a) {
+        return '<div class="or-li"><div class="or-li-h"><b>' + esc(a.handle) + "</b>" + pill(a.state) +
+          '<span class="or-mini">' + a.warmupPct + "% warmed</span></div>" +
+          '<div class="or-bar">' + '<span class="' + (a.state === "ready" ? "ready" : a.state === "action" ? "action" : "warming") + '" style="width:' + a.warmupPct + '%"></span></div>' +
+          '<div class="or-mini" style="margin-top:6px">' + (a.limits.connects || 0) + " connects · " + (a.limits.dms || 0) + " DMs · " + (a.limits.profileViews || 0) + " views / day</div>" +
+          (a.issue ? '<div class="or-issue">' + esc(a.issue) + "</div>" : "") + "</div>";
+      }).join("");
+      return '<div class="card or-panel"><h3>LinkedIn accounts</h3>' +
+        '<p class="muted" style="margin-top:-4px">Daily limits ramp automatically as each account warms. Flagged accounts are paused until they recover.</p>' +
+        (rows || '<div class="empty">No accounts.</div>') + "</div>";
+    }
+
+    function playbook() {
+      var phases = REF.phases.map(function (p) {
+        return '<div class="phase"><div class="phase-h"><span class="phase-n">' + p.n + "</span><h4>" + esc(p.title) + '</h4><span class="phase-time">' + esc(p.time) + "</span></div>" +
+          "<ul>" + p.items.map(function (i) { return "<li>" + esc(i) + "</li>"; }).join("") + "</ul>" +
+          '<div class="done">✓ Done when: ' + esc(p.done) + "</div></div>";
+      }).join("");
+      var touches = REF.touches.map(function (t) {
+        return '<div class="touch"><div class="day">Day ' + t.day + '</div><div><div class="tn">' + esc(t.name) +
+          '<span class="chip-c">' + esc(t.channel) + "</span></div>" +
+          '<div class="ti">' + esc(t.intent) + (t.constraints ? ' <span class="spark">(' + esc(t.constraints) + ")</span>" : "") + "</div></div></div>";
+      }).join("");
+      return '<details class="or-playbook"><summary>Deployment playbook — 7 phases &amp; the 28-day sequence</summary>' +
+        '<div class="two-col" style="margin-top:14px"><div><h3 style="margin-bottom:10px">Deploy a campaign</h3>' + phases + "</div>" +
+        '<div><div class="card"><h3>Sequence anatomy (28 days)</h3>' + touches + "</div>" +
+        '<div class="card" style="margin-top:14px"><h3>Decision rules</h3><ul class="phase" style="border:0;padding:0;margin:0">' +
+        REF.seqRules.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div></div></div></details>";
+    }
   }
 
   /* ---------------- LinkedIn Automation ----------------
@@ -978,94 +1216,177 @@
   // recruiters convert, and the full funnel end to end. Motion-aware: recruiting
   // measures placements, BD measures job orders. Reads /analytics, renders from
   // the local seed when no backend is connected.
+  // Stage buckets for the live pipeline funnel. Status vocabularies differ
+  // between the local shim (queued/discovery_booked/placed) and the real backend
+  // (new/booked/won), so each bucket lists every synonym it should count.
+  var FN_CONTACTED = ["in_sequence", "contacted", "replied", "discovery_booked", "booked", "meeting", "won", "placed", "nurture"];
+  var FN_REPLIED = ["replied", "discovery_booked", "booked", "meeting", "won", "placed"];
+  var FN_MEETING = ["discovery_booked", "booked", "meeting", "won", "placed"];
+  var FN_WON = ["won", "placed"];
+
+  // Normalizers that read either response shape (real backend nests under
+  // inbound/classification; the local shim is flat).
+  function rChannel(p) { return (p.inbound && p.inbound.channel) || p.channel || "other"; }
+  function rClass(p) { return (p.classification && p.classification.class) || p.cls || "unclassified"; }
+
   function renderAnalytics(el) {
     var bd = motion === "bd";
     el.innerHTML = head("Analytics",
       "A live operational view of the whole motion, from signal to " + (bd ? "job order" : "placement") +
-      ". See what actually creates meetings, replies and revenue, not just activity.") +
+      ". KPIs, funnel, channels and appointments are computed from your live workspace; benchmark cards layer in once an analytics source is connected.") +
+      '<div class="an-tools" style="display:flex;align-items:center;gap:12px;margin-bottom:14px">' +
+        '<span style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600">' +
+          '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent-green);box-shadow:0 0 0 0 rgba(56,224,166,.6);animation:anPulse 2s infinite"></span>Live</span>' +
+        '<span id="anUpdated" class="muted" style="font-size:12px"></span>' +
+        '<span style="flex:1"></span>' +
+        '<button class="btn btn-ghost btn-sm" id="anRefresh">↻ Refresh</button>' +
+      "</div>" +
+      '<style>@keyframes anPulse{0%{box-shadow:0 0 0 0 rgba(56,224,166,.55)}70%{box-shadow:0 0 0 7px rgba(56,224,166,0)}100%{box-shadow:0 0 0 0 rgba(56,224,166,0)}}</style>' +
       '<div id="anBody">' + loading() + "</div>";
 
-    api("/analytics").then(function (a) {
-      var m = ((a || {})[bd ? "bd" : "recruiting"]) || {};
-      var body = $("#anBody"); if (!body) return;
-      if (!m.kpis) { body.innerHTML = emptyCard("No analytics yet. As your campaigns run, every signal, reply and meeting lands here."); return; }
-
-      // Top-line KPIs with week-over-week deltas.
-      var kpis = (m.kpis || []).map(function (k) {
-        var dir = k.dir === "down" ? "down" : "up";
-        return '<div class="rstat"><div class="big gradient-text">' + esc(k.value) + '</div><div class="lbl">' + esc(k.label) + "</div>" +
-          (k.delta ? '<div class="delta ' + dir + '">' + (dir === "down" ? "▼ " : "▲ ") + esc(k.delta) + "</div>" : "") + "</div>";
-      }).join("");
-
-      // Horizontal bar chart: each row scaled so the largest value fills the track.
-      function bars(items, suffix) {
-        items = items || [];
-        var max = items.reduce(function (mx, it) { return Math.max(mx, it.pct); }, 0) || 1;
-        return items.map(function (it) {
-          var w = Math.max(Math.round((it.pct / max) * 100), 8);
-          return '<div class="bar-row"><span class="blabel">' + esc(it.label) + '</span>' +
-            '<span class="btrack"><span class="bfill" style="width:' + w + '%">' + esc(it.pct) + (suffix || "") + "</span></span></div>";
-        }).join("") || '<div class="empty">No data yet.</div>';
-      }
-
-      // Funnel: each stage scaled to the first (largest) stage; right column shows
-      // stage-over-stage conversion.
-      var fn = m.funnel || [];
-      var top = fn.length ? fn[0].value : 1;
-      var funnel = fn.map(function (s, i) {
-        var w = Math.max(Math.round((s.value / (top || 1)) * 100), 6);
-        var conv = i > 0 && fn[i - 1].value ? Math.round((s.value / fn[i - 1].value) * 100) + "%" : "";
-        return '<div class="bar-row"><span class="blabel">' + esc(s.label) + '</span>' +
-          '<span class="btrack"><span class="bfill" style="width:' + w + '%">' + esc(s.value) + "</span></span>" +
-          '<span class="bval">' + esc(conv) + "</span></div>";
-      }).join("") || '<div class="empty">No funnel data yet.</div>';
-
-      // Message variants: reply + meeting rate per tested variant.
-      var variants = (m.variants || []).map(function (v) {
-        return '<div class="list-row"><div><div class="lr-main">' + esc(v.name) + '</div><div class="lr-sub">' +
-          esc(v.channel || "") + " · " + (v.sent || 0) + " sent</div></div>" +
-          '<div class="lr-right">' + esc(v.reply) + "% reply · " + esc(v.meeting) + "% mtg</div></div>";
-      }).join("") || '<div class="empty">No message variants tested yet.</div>';
-
-      // Recruiter efficiency: output per operator, not raw activity.
-      var winLabel = bd ? "job orders" : "placements";
-      var recruiters = (m.recruiters || []).map(function (r) {
-        return '<div class="list-row"><span class="avatar" style="background:' + colorFor(r.name) + '">' + esc(initials(r.name)) + "</span>" +
-          '<div><div class="lr-main">' + esc(r.name) + '</div><div class="lr-sub">' + (r.meetings || 0) + " meetings · " + (r.replies || 0) + " replies</div></div>" +
-          '<div class="lr-right">' + (r.wins || 0) + " " + winLabel + "</div></div>";
-      }).join("") || '<div class="empty">Invite recruiters to compare output per operator.</div>';
-
-      // Recent appointments booked through the system, tagged by source channel.
-      var canPros = !ROUTES.prospects.cap || can(ROUTES.prospects.cap);
-      var rowGo = canPros ? ' data-go="prospects" class="list-row clickable"' : ' class="list-row"';
-      var appts = (m.appointments || []).map(function (ap) {
-        return "<div" + rowGo + '><div><div class="lr-main">' + esc(ap.name) + '</div><div class="lr-sub">' +
-          esc(ap.channel || "") + (ap.company ? " · " + esc(ap.company) : "") + "</div></div>" +
-          '<div class="lr-right">' + esc(ap.at || "") + "</div></div>";
-      }).join("") || '<div class="empty">No appointments booked yet.</div>';
-
-      body.innerHTML =
-        '<div class="report-stats">' + kpis + "</div>" +
-        '<div class="report-cols">' +
-          '<div class="report-card"><h3>Meetings booked by signal type</h3>' + bars(m.bySignal, "%") + "</div>" +
-          '<div class="report-card"><h3>Reply rate by channel</h3>' + bars(m.byChannel, "%") + "</div>" +
-        "</div>" +
-        '<div class="two-col" style="margin-top:16px">' +
-          '<div class="card"><h3>' + (bd ? "Signal → job-order funnel" : "Signal → placement funnel") + "</h3>" + funnel + "</div>" +
-          '<div class="card"><h3>Best industries by conversion</h3>' + bars(m.industries, "%") + "</div>" +
-        "</div>" +
-        '<div class="two-col" style="margin-top:16px">' +
-          '<div class="card"><h3>Top message variants</h3>' + variants + "</div>" +
-          '<div class="card"><h3>Recruiter efficiency</h3>' + recruiters + "</div>" +
-        "</div>" +
-        '<div class="card" style="margin-top:16px"><h3>Recent appointments</h3>' + appts + "</div>";
-
-      // Delegated navigation: appointment rows jump into the pipeline.
-      body.addEventListener("click", function (e) {
-        var t = e.target.closest("[data-go]"); if (!t) return;
-        location.hash = t.getAttribute("data-go");
+    // Horizontal bar chart: rows scaled so the largest value fills the track.
+    function bars(items, suffix) {
+      items = items || [];
+      var max = items.reduce(function (mx, it) { return Math.max(mx, it.pct); }, 0) || 1;
+      return items.map(function (it) {
+        var w = Math.max(Math.round((it.pct / max) * 100), 8);
+        return '<div class="bar-row"><span class="blabel">' + esc(it.label) + '</span>' +
+          '<span class="btrack"><span class="bfill" style="width:' + w + '%">' + esc(it.pct) + (suffix || "") + "</span></span></div>";
+      }).join("") || '<div class="empty">No data yet.</div>';
+    }
+    // Tag a card title as live-computed or a curated benchmark.
+    function tag(kind) {
+      return kind === "live"
+        ? ' <span style="font-size:10.5px;font-weight:700;color:var(--accent-green);vertical-align:middle">● LIVE</span>'
+        : ' <span class="muted" style="font-size:10.5px;font-weight:700;vertical-align:middle">BENCHMARK</span>';
+    }
+    function notConnected(what) {
+      return '<div class="empty">No ' + esc(what) + " yet. Connect an analytics source (or let campaign data accrue) and this fills in.</div>";
+    }
+    function tally(list, keyFn, labelFn) {
+      var counts = {}, total = list.length;
+      list.forEach(function (x) { var k = keyFn(x); counts[k] = (counts[k] || 0) + 1; });
+      return Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).map(function (k) {
+        return { label: labelFn ? labelFn(k) : k, pct: total ? Math.round((counts[k] / total) * 100) : 0 };
       });
-    }).catch(function () { var b = $("#anBody"); if (b) b.innerHTML = needsSetup(); });
+    }
+
+    var canPros = !ROUTES.prospects.cap || can(ROUTES.prospects.cap);
+    var rowGo = canPros ? ' data-go="prospects" class="list-row clickable"' : ' class="list-row"';
+    var first = true;
+
+    function load() {
+      // Pull live operational data + (optional) curated benchmarks in parallel.
+      // Each call degrades to null so one missing endpoint never blanks the page.
+      Promise.all([
+        api("/overview").catch(function () { return null; }),
+        api("/prospects").catch(function () { return null; }),
+        api("/response/list").catch(function () { return null; }),
+        api("/analytics").catch(function () { return null; })
+      ]).then(function (res) {
+        var body = $("#anBody"); if (!body) return;
+        var ov = res[0] || {};
+        var prospects = (res[1] && res[1].prospects) || [];
+        var replies = (res[2] && res[2].items) || [];
+        var curated = ((res[3] || {})[bd ? "bd" : "recruiting"]) || {};
+
+        if (!ov.activeProspects && !prospects.length && !replies.length) {
+          body.innerHTML = needsSetup(); return;
+        }
+
+        // KPIs, live from /overview (same shape in shim + real backend).
+        var kpiDefs = [
+          { v: ov.activeProspects || 0, l: "Active prospects", s: "in sequence now" },
+          { v: ov.appointmentsThisWeek || 0, l: "Meetings this week", s: (ov.appointmentsToday || 0) + " booked today" },
+          { v: ov.warmConversationsToday || 0, l: "Warm convos today", s: "hot replies in play" },
+          { v: ov.wonAccounts || 0, l: bd ? "Won accounts" : "Placements", s: "closed this period" }
+        ];
+        var kpis = kpiDefs.map(function (k) {
+          return '<div class="rstat"><div class="big gradient-text">' + esc(k.v) + '</div><div class="lbl">' + esc(k.l) + "</div>" +
+            '<div class="delta up" style="color:var(--text-dim)">' + esc(k.s) + "</div></div>";
+        }).join("");
+
+        // Pipeline funnel, live from /prospects (portable status buckets).
+        function cnt(set) { return prospects.filter(function (p) { return set.indexOf(p.status) >= 0; }).length; }
+        var fn = [
+          { label: "Sourced", value: prospects.length },
+          { label: "Contacted", value: cnt(FN_CONTACTED) },
+          { label: "Replied", value: cnt(FN_REPLIED) },
+          { label: "Meetings", value: cnt(FN_MEETING) },
+          { label: bd ? "Won accounts" : "Placements", value: cnt(FN_WON) }
+        ];
+        var top = fn[0].value || 1;
+        var funnel = prospects.length ? fn.map(function (s, i) {
+          var w = Math.max(Math.round((s.value / top) * 100), 6);
+          var conv = i > 0 && fn[i - 1].value ? Math.round((s.value / fn[i - 1].value) * 100) + "%" : "";
+          return '<div class="bar-row"><span class="blabel">' + esc(s.label) + '</span>' +
+            '<span class="btrack"><span class="bfill" style="width:' + w + '%">' + esc(s.value) + "</span></span>" +
+            '<span class="bval">' + esc(conv) + "</span></div>";
+        }).join("") : notConnected("pipeline data");
+
+        // Replies by channel + reply-quality mix, live from /response/list.
+        var byChannel = replies.length ? bars(tally(replies, rChannel, function (c) { return c === "sms" ? "SMS" : c.charAt(0).toUpperCase() + c.slice(1); }), "%") : notConnected("replies");
+        var byQuality = replies.length ? bars(tally(replies, rClass, clsLabel), "%") : notConnected("replies");
+
+        // Curated benchmark cards (no live source): signal types, industries,
+        // message variants, recruiter efficiency. Absent against the real backend
+        // until an /analytics source is wired — they show a connect hint then.
+        var bySignal = (curated.bySignal && curated.bySignal.length) ? bars(curated.bySignal, "%") : notConnected("signal attribution");
+        var industries = (curated.industries && curated.industries.length) ? bars(curated.industries, "%") : notConnected("industry data");
+        var variants = (curated.variants || []).map(function (v) {
+          return '<div class="list-row"><div><div class="lr-main">' + esc(v.name) + '</div><div class="lr-sub">' +
+            esc(v.channel || "") + " · " + (v.sent || 0) + " sent</div></div>" +
+            '<div class="lr-right">' + esc(v.reply) + "% reply · " + esc(v.meeting) + "% mtg</div></div>";
+        }).join("") || notConnected("message variants tested");
+        var winLabel = bd ? "job orders" : "placements";
+        var recruiters = (curated.recruiters || []).map(function (r) {
+          return '<div class="list-row"><span class="avatar" style="background:' + colorFor(r.name) + '">' + esc(initials(r.name)) + "</span>" +
+            '<div><div class="lr-main">' + esc(r.name) + '</div><div class="lr-sub">' + (r.meetings || 0) + " meetings · " + (r.replies || 0) + " replies</div></div>" +
+            '<div class="lr-right">' + (r.wins || 0) + " " + winLabel + "</div></div>";
+        }).join("") || notConnected("per-recruiter output");
+
+        // Recent appointments, live from /overview.
+        var appts = (ov.recentAppointments || []).map(function (ap) {
+          return "<div" + rowGo + '><div><div class="lr-main">' + esc(ap.name) + '</div><div class="lr-sub">' +
+            esc(ap.channel || "") + (ap.company ? " · " + esc(ap.company) : "") + "</div></div>" +
+            '<div class="lr-right">' + esc(ap.at || "") + "</div></div>";
+        }).join("") || '<div class="empty">No appointments booked yet.</div>';
+
+        body.innerHTML =
+          '<div class="report-stats">' + kpis + "</div>" +
+          '<div class="report-cols">' +
+            '<div class="report-card"><h3>' + (bd ? "Signal → job-order funnel" : "Signal → placement funnel") + tag("live") + "</h3>" + funnel + "</div>" +
+            '<div class="report-card"><h3>Replies by channel' + tag("live") + "</h3>" + byChannel + "</div>" +
+          "</div>" +
+          '<div class="two-col" style="margin-top:16px">' +
+            '<div class="card"><h3>Reply quality mix' + tag("live") + "</h3>" + byQuality + "</div>" +
+            '<div class="card"><h3>Meetings booked by signal type' + tag("benchmark") + "</h3>" + bySignal + "</div>" +
+          "</div>" +
+          '<div class="two-col" style="margin-top:16px">' +
+            '<div class="card"><h3>Best industries by conversion' + tag("benchmark") + "</h3>" + industries + "</div>" +
+            '<div class="card"><h3>Top message variants' + tag("benchmark") + "</h3>" + variants + "</div>" +
+          "</div>" +
+          '<div class="two-col" style="margin-top:16px">' +
+            '<div class="card"><h3>Recruiter efficiency' + tag("benchmark") + "</h3>" + recruiters + "</div>" +
+            '<div class="card"><h3>Recent appointments' + tag("live") + "</h3>" + appts + "</div>" +
+          "</div>";
+
+        // Delegated navigation: appointment rows jump into the pipeline.
+        body.addEventListener("click", function (e) {
+          var t = e.target.closest("[data-go]"); if (!t) return;
+          location.hash = t.getAttribute("data-go");
+        });
+
+        var stamp = $("#anUpdated");
+        if (stamp) stamp.textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        first = false;
+      }).catch(function () { if (first) { var b = $("#anBody"); if (b) b.innerHTML = needsSetup(); } });
+    }
+
+    load();
+    var rb = $("#anRefresh"); if (rb) rb.addEventListener("click", load);
+    // Auto-refresh every 15s while this view is open; render() clears it on nav.
+    viewTimers.push(setInterval(load, 15000));
   }
 
   function renderAccounts(el) {
@@ -1348,6 +1669,62 @@
     }).catch(function () { toast("Could not reach the server."); });
   }
 
+  /* Enrich LinkedIn searches: paste a Sales Navigator / LinkedIn search URL; the
+     connected LinkedIn account pulls every matching member into the pipeline
+     (name, company, title, profile). Contact data (email / phone / cell) is then
+     enriched per-prospect on demand via the ⚡ Enrich button — discovery is free. */
+  function importLinkedInSearch() {
+    api("/campaigns").then(function (d) {
+      var camps = ((d && d.campaigns) || []).filter(function (c) { return c.motion === motion; });
+      if (!camps.length) { toast("Create a campaign first (＋ New campaign)."); location.hash = "campaigns"; return; }
+      var campOpts = camps.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + "</option>"; }).join("");
+      var bodyHtml =
+        '<label>Add to campaign</label><select id="liCamp">' + campOpts + "</select>" +
+        '<label>Sales Navigator or LinkedIn search URL</label>' +
+        '<input id="liUrl" type="url" placeholder="https://www.linkedin.com/sales/search/people?query=…" />' +
+        '<label>Max profiles to pull</label>' +
+        '<input id="liLimit" type="number" min="1" max="500" value="100" />' +
+        '<div class="imp-preview" id="liPrev">Run a search in Sales Navigator, copy the URL from the address bar, and paste it here. ' +
+        "We'll pull each member into Prospects — then enrich business email, phone &amp; cell per prospect from the pipeline.</div>" +
+        '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="liCancel">Cancel</button>' +
+        '<button class="btn btn-primary btn-sm" id="liGo">Pull profiles</button></div>';
+
+      openModal("Enrich LinkedIn searches", "Turn a Sales Navigator search into a prospect list.", bodyHtml, function (root, close) {
+        var urlEl = root.querySelector("#liUrl"), prev = root.querySelector("#liPrev");
+        function valid() { return /^https?:\/\/(www\.)?linkedin\.com\//i.test((urlEl.value || "").trim()); }
+        urlEl.addEventListener("input", function () {
+          prev.innerHTML = !urlEl.value.trim()
+            ? "Paste a LinkedIn / Sales Navigator search URL above."
+            : valid() ? "Ready to pull profiles from this search."
+              : "That doesn't look like a linkedin.com URL.";
+        });
+        root.querySelector("#liCancel").addEventListener("click", close);
+        root.querySelector("#liGo").addEventListener("click", function () {
+          var url = (urlEl.value || "").trim();
+          if (!valid()) { toast("Paste a LinkedIn or Sales Navigator search URL."); return; }
+          var cid = root.querySelector("#liCamp").value;
+          var limit = parseInt(root.querySelector("#liLimit").value, 10) || 100;
+          var go = root.querySelector("#liGo"); go.disabled = true; go.textContent = "Pulling…";
+          send("/prospects", "POST", { action: "linkedin_search", campaignId: cid, url: url, limit: limit }).then(function (res) {
+            if (res.ok) {
+              var r = res.data || {};
+              var dup = r.deduped ? " (" + r.deduped + " already in pipeline)" : "";
+              toast("Pulled " + (r.added || 0) + " prospect" + ((r.added === 1) ? "" : "s") + " from LinkedIn" + dup);
+              close(); if (prospectsReload) prospectsReload();
+            } else {
+              var err = res.data && res.data.error;
+              var msg = err === "no_linkedin_account" ? "Connect a LinkedIn account first (Accounts)."
+                : err === "not_a_search_url" ? "That's not a search URL — open a search in Sales Navigator and copy its URL."
+                : err === "not_a_linkedin_url" ? "Paste a linkedin.com URL."
+                : "Could not pull profiles (" + (err || res.status) + ")";
+              toast(msg); go.disabled = false; go.textContent = "Pull profiles";
+            }
+          }).catch(function () { toast("Could not reach the server."); go.disabled = false; go.textContent = "Pull profiles"; });
+        });
+      });
+    }).catch(function () { toast("Could not reach the server."); });
+  }
+
   function addAsset() {
     var name = prompt("Asset name:"); if (!name) return;
     var type = (prompt("Type: case_study, comp_benchmark, value_prop, video_script", "case_study") || "case_study");
@@ -1360,7 +1737,7 @@
   /* ---------------- helpers ---------------- */
   function initials(n) { return (n || "?").split(/\s+/).map(function (x) { return x[0]; }).slice(0, 2).join("").toUpperCase(); }
   function colorFor(n) { var c = ["#7c5cff", "#4dd0ff", "#ff7ac6", "#38e0a6", "#ffc24d"]; var s = 0; for (var i = 0; i < (n || "").length; i++) s += n.charCodeAt(i); return c[s % c.length]; }
-  function clsLabel(c) { var m = { positive: "Positive", soft_yes: "Soft yes", referral: "Referral", timing_objection: "Timing", fit_objection: "Fit", not_interested: "Not interested", stop: "STOP", unclassified: "Review" }; return m[c] || c; }
+  function clsLabel(c) { var m = { positive: "Positive", soft_yes: "Soft yes", referral: "Referral", timing: "Timing", timing_objection: "Timing", fit: "Fit", fit_objection: "Fit", not_interested: "Not interested", stop: "STOP", unclassified: "Review" }; return m[c] || c; }
   function statusCls(s) { var m = { booked: "positive", won: "positive", replied: "soft_yes", in_sequence: "soft_yes", nurture: "timing_objection", queued: "unclassified", closed_lost: "not_interested", do_not_contact: "stop" }; return m[s] || "unclassified"; }
   function statusLabel(s, lifecycle) {
     var l = (lifecycle || REF.lifecycle).find(function (x) { return x.status === s; });
@@ -1400,7 +1777,7 @@
         { status: "nurture", bd: "Nurture", recruiting: "Nurture" }
       ],
       phases: [
-        { n: 1, title: "Infrastructure pre-flight", time: "one-time", done: "Overview capacity strip is green", items: ["≥1 warmed LinkedIn account", "≥5 warmed domains", "RapidAPI job scraper", "Enrichment waterfall", "ATS connected", "TalTxt + Telnyx 10DLC"] },
+        { n: 1, title: "Infrastructure pre-flight", time: "one-time", done: "Overview capacity strip is green", items: ["≥1 warmed LinkedIn account", "≥5 warmed domains", "Job Search signal feed", "Enrichment waterfall", "ATS connected", "TalTxt + Telnyx 10DLC"] },
         { n: 2, title: "Create campaign shell", time: "5 min", done: "Draft with ICP + signals", items: ["Name + one-line goal", "ICP definition", "≥1 signal enabled"] },
         { n: 3, title: "Search & discovery", time: "5 min", done: "Preview shows the right people", items: ["Role hiring for", "Persona title", "Decision-maker target", "Live query preview"] },
         { n: 4, title: "Connect channels", time: "3 min", done: "All channels show ✓", items: ["Instantly campaign id", "LinkedIn account", "TalTxt toggle", "Loxo list id"] },
@@ -1435,7 +1812,7 @@
       cadence: [
         { at: "07:00", name: "Pull signals", automated: true, detail: "Run enabled signal sources (last 24h)." },
         { at: "07:15", name: "Score & dedupe", automated: true, detail: "Composite score per ICP; dedupe vs ATS; top N advance." },
-        { at: "07:30", name: "Enrich", automated: true, detail: "Waterfall (Fresh LinkedIn + Tomba) finds contacts." },
+        { at: "07:30", name: "Enrich", automated: true, detail: "Enrichment waterfall finds work emails and direct dials." },
         { at: "07:45", name: "LLM draft", automated: true, detail: "Claude drafts email + LinkedIn + voice; A/B applied." },
         { at: "08:30", name: "Approval queue", automated: false, detail: "Edit / kill / approve; record HOT voice notes." },
         { at: "09:00", name: "Push to channels", automated: true, detail: "Instantly / Unipile / TalTxt; person_events logged." }
@@ -1459,9 +1836,9 @@
       integrations: [
         { id: "instantly", label: "Instantly (email)", status: "green", requiredFor: ["bd", "recruiting"] },
         { id: "unipile", label: "Unipile (LinkedIn)", status: "green", requiredFor: ["bd", "recruiting"] },
-        { id: "rapidapi", label: "RapidAPI (job scraper)", status: "green", requiredFor: ["bd", "recruiting"] },
-        { id: "fresh_linkedin", label: "Fresh LinkedIn (enrich)", status: "green", requiredFor: ["bd", "recruiting"] },
-        { id: "tomba", label: "Tomba (email lookup)", status: "yellow", requiredFor: ["bd"] },
+        { id: "rapidapi", label: "Job Search (signal feed)", status: "green", requiredFor: ["bd", "recruiting"] },
+        { id: "fresh_linkedin", label: "Profile enrichment", status: "green", requiredFor: ["bd", "recruiting"] },
+        { id: "tomba", label: "Email finder", status: "yellow", requiredFor: ["bd"] },
         { id: "loxo", label: "Loxo (ATS)", status: "green", requiredFor: ["bd", "recruiting"] },
         { id: "taltxt", label: "TalTxt (SMS)", status: "green", requiredFor: ["recruiting"] },
         { id: "telnyx", label: "Telnyx 10DLC", status: "green", requiredFor: ["recruiting"] }
