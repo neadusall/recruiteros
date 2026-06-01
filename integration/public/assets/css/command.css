@@ -313,6 +313,42 @@
 /* Note line used in modals (e.g. LinkedIn import with no campaign yet) */
 .imp-note { font-size: 13px; color: var(--text-muted); background: var(--bg-soft); border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; margin: 6px 0; }
 
+/* In-Market search hint */
+.im-hint { font-size: 12.5px; color: var(--text-dim); margin: 12px 0 2px; max-width: 80ch; }
+
+/* Prospect search bar */
+.pr-searchbar { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 11px; padding: 7px 14px; margin-bottom: 14px; }
+.pr-searchbar .ico { color: var(--text-dim); font-size: 16px; }
+.pr-searchbar input { flex: 1; background: none; border: none; outline: none; color: var(--text); font: inherit; font-size: 14px; padding: 4px 2px; }
+.pr-searchbar input::placeholder { color: var(--text-dim); }
+
+/* LinkedIn pull progress bar */
+.li-prog { border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface); padding: 14px 16px; margin-bottom: 14px; }
+.li-prog.done { border-color: rgba(56,224,166,0.4); }
+.li-prog.error { border-color: rgba(255,107,107,0.4); }
+.li-prog-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.li-prog-title { font-weight: 700; font-size: 14px; }
+.li-prog-meta { margin-left: auto; font-size: 12.5px; color: var(--text-muted); font-family: var(--mono); }
+.li-prog-meta b { color: var(--accent-green); font-size: 14px; }
+.li-prog-sub { font-size: 12.5px; color: var(--text-dim); margin-top: 8px; }
+.li-prog-sub a { color: var(--brand-2); }
+.li-bar { height: 7px; border-radius: 99px; background: rgba(255,255,255,0.08); overflow: hidden; position: relative; }
+.li-bar-fill { display: block; height: 100%; border-radius: 99px; background: var(--grad); transition: width .3s ease; }
+.li-prog.done .li-bar-fill { background: var(--accent-green); }
+.li-bar-fill.indet { width: 40%; position: absolute; left: 0; animation: liIndet 1.1s ease-in-out infinite; }
+@keyframes liIndet { 0% { left: -40%; } 100% { left: 100%; } }
+
+/* CSV import: file input + column mapping */
+.imp-file { display: block; width: 100%; font: inherit; font-size: 13px; color: var(--text-muted); padding: 8px 10px; border: 1px dashed var(--border-strong); border-radius: 9px; background: var(--bg-soft); cursor: pointer; }
+.imp-file::file-selector-button { font: inherit; font-size: 12px; font-weight: 600; margin-right: 10px; padding: 5px 10px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); cursor: pointer; }
+.imp-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+.imp-check input { width: 15px; height: 15px; accent-color: var(--brand); }
+.imp-map { margin: 4px 0; }
+.imp-map-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); margin: 8px 0 8px; }
+.imp-map-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.imp-map-row .imp-col { flex: 1; font-size: 13px; color: var(--text); background: var(--bg-soft); border: 1px solid var(--border); border-radius: 7px; padding: 6px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imp-map-row select { flex: 0 0 150px; }
+
 /* ============================================================
    Overview: lift the capacity + KPI numbers to the top so every
    stat is fully visible without scrolling (tighter header + cards)

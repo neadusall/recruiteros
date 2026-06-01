@@ -192,8 +192,10 @@
 
   /* ---------------- views ---------------- */
 
+  // The page title already shows in the topbar (#pageTitle), so the in-view header
+  // renders only the description — no duplicate title — and sits tight under the header.
   function head(title, sub) {
-    return '<div class="v-head"><h2>' + esc(title) + "</h2>" + (sub ? "<p>" + esc(sub) + "</p>" : "") + "</div>";
+    return sub ? '<div class="v-head"><p>' + esc(sub) + "</p></div>" : "";
   }
 
   function renderOverview(el) {
@@ -339,12 +341,23 @@
   var imLabel = "";             // current result label, kept for re-renders
   var imPicks = {};             // key -> { lead, manager } selected to push to Prospects
 
-  // Industries recruiters sell into. Drives the refined in-market search.
+  // Industries + sub-sectors recruiters sell into. Drives the refined in-market search.
+  // (Free job-board coverage is strongest for the tech-adjacent rows; traditional
+  // verticals post on Workday/Taleo/iCIMS, so those return fewer free results — a paid
+  // data feed fills them out. See the note rendered above the chips.)
   var IM_INDUSTRIES = [
-    "Technology / SaaS", "Fintech", "Healthcare", "Biotech / Pharma", "Manufacturing",
-    "Construction", "Legal", "Accounting / Finance", "Sales / GTM", "Marketing / Agency",
-    "Logistics / Supply Chain", "Hospitality", "Education", "Energy", "Real Estate",
-    "Insurance", "Retail / eCommerce", "Government / Public", "Nonprofit"
+    "Technology / SaaS", "AI / Machine Learning", "Cybersecurity", "Data / Analytics",
+    "DevOps / Cloud", "Hardware / IoT", "Semiconductors", "Robotics", "Gaming",
+    "Fintech", "Banking", "Insurance", "Investment / PE / VC", "Crypto / Web3",
+    "Healthcare", "Biotech / Pharma", "Medical Devices", "Hospitals / Health Systems",
+    "Manufacturing", "Aerospace / Defense", "Automotive", "Industrial / Automation",
+    "Energy", "Oil & Gas", "Renewables / CleanTech", "Utilities", "Mining / Metals",
+    "Construction", "Architecture / Engineering", "Real Estate", "PropTech",
+    "Logistics / Supply Chain", "Freight / Transportation", "Warehousing",
+    "Retail / eCommerce", "Consumer Goods (CPG)", "Fashion / Apparel", "Food & Beverage",
+    "Agriculture / AgTech", "Hospitality", "Travel / Tourism", "Media / Entertainment",
+    "Telecom", "Education", "EdTech", "Legal", "Accounting / Tax", "Consulting",
+    "Marketing / Agency", "HR / Staffing", "Sales / GTM", "Government / Public", "Nonprofit"
   ];
   var IM_PLACEHOLDER = {
     industry: "Search an industry or market, e.g. fintech, healthcare, manufacturing",
@@ -369,6 +382,7 @@
           '<input id="imQuery" type="text" autocomplete="off" placeholder="' + esc(IM_PLACEHOLDER[imMode]) + '" />' +
           '<button type="submit" class="btn btn-primary" id="imSearchBtn">Find in-market companies</button>' +
         "</form>" +
+        '<div class="im-hint">Pick a sector, or type any industry, role, or keyword in the box above (e.g. “claims adjuster”, “RN”, “plant manager”, “solar”). Coverage is deepest for tech-adjacent sectors today — a paid data feed broadens the rest.</div>' +
         '<div class="im-industries" id="imIndustries">' +
           IM_INDUSTRIES.map(function (n) { return '<button type="button" class="im-chip" data-ind="' + esc(n) + '">' + esc(n) + "</button>"; }).join("") +
         "</div>" +
@@ -660,76 +674,99 @@
 
   function renderProspects(el) {
     el.innerHTML = head("Prospects", "Your live pipeline, synced bidirectionally with the ATS.") +
-      '<div class="btn-row" style="margin-bottom:14px">' +
+      '<div class="btn-row" style="margin-bottom:12px">' +
       '<button class="btn btn-primary btn-sm" id="enrichAllBtn">⚡ Enrich all contacts</button>' +
       '<button class="btn btn-ghost btn-sm" id="importBtn">⇪ Import (CSV / paste)</button>' +
       '<button class="btn btn-ghost btn-sm" id="liSearchBtn">🔗 Enrich LinkedIn searches</button></div>' +
+      '<div id="liProgress"></div>' +
+      '<div class="pr-searchbar"><span class="ico">⌕</span>' +
+      '<input id="prSearch" type="text" autocomplete="off" placeholder="Search prospects by name, job title, company, or keyword…" /></div>' +
       '<div id="prBody">' + loading() + "</div>";
 
     $("#importBtn").addEventListener("click", importProspects);
     $("#liSearchBtn").addEventListener("click", importLinkedInSearch);
     $("#enrichAllBtn").addEventListener("click", function () { enrichAllProspects(this); });
 
+    var prAll = [], prLifecycle = REF.lifecycle, prFilter = "";
+    var searchEl = $("#prSearch");
+    if (searchEl) searchEl.addEventListener("input", function () { prFilter = (searchEl.value || "").toLowerCase().trim(); paint(); });
+
+    // Keyword filter over name (incl. first name), job title, company, email, source.
+    function matches(p) {
+      if (!prFilter) return true;
+      var hay = ((p.fullName || "") + " " + (p.title || "") + " " + (p.company || "") + " " +
+        (p.email || "") + " " + (p.category || "")).toLowerCase();
+      return prFilter.split(/\s+/).every(function (t) { return hay.indexOf(t) >= 0; });
+    }
+
+    function rowHtml(p, lifecycle) {
+      var opts = lifecycle.map(function (l) {
+        return '<option value="' + esc(l.status) + '"' + (l.status === p.status ? " selected" : "") + ">" + esc(l[motion] || l.status) + "</option>";
+      }).join("");
+      var contact = [];
+      if (p.email) contact.push("✉ " + esc(p.email));
+      if (p.phone) contact.push("☎ " + esc(p.phone));
+      var contactLine = '<div class="lr-contact' + (contact.length ? "" : " muted") + '">' +
+        (contact.length ? contact.join(" · ") : "No work contact yet") + "</div>";
+      var enrichLbl = (p.email && p.phone) ? "↻ Re-enrich" : "⚡ Enrich contact";
+      return '<div class="list-row" data-pid="' + esc(p.id) + '"><span class="avatar" style="width:28px;height:28px;font-size:11px;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) + "</span>" +
+        '<div class="lr-id"><div class="lr-main">' + esc(p.fullName) + '</div><div class="lr-sub">' + esc((p.title || "") + (p.company ? " · " + p.company : "")) + "</div>" + contactLine + "</div>" +
+        '<button class="pr-enrich" data-enrich="' + esc(p.id) + '">' + enrichLbl + "</button>" +
+        '<select class="stage-select cls cls-' + statusCls(p.status) + '" data-pid="' + esc(p.id) + '">' + opts + "</select>" +
+        '<div class="lr-right">' + (p.dripStage ? "Touch " + p.dripStage : "") + "</div></div>";
+    }
+
+    function paint() {
+      var body = $("#prBody"); if (!body) return;
+      var lifecycle = prLifecycle;
+      var list = prAll.filter(matches);
+      var counts = list.reduce(function (m, p) { m[p.status] = (m[p.status] || 0) + 1; return m; }, {});
+      var stages = lifecycle.map(function (l) {
+        return '<div class="stage"><b>' + (counts[l.status] || 0) + "</b><span>" + esc(l[motion] || l.status) + "</span></div>";
+      }).join("");
+      var rows = list.map(function (p) { return rowHtml(p, lifecycle); }).join("");
+      var countLbl = prFilter ? (list.length + " of " + prAll.length) : String(prAll.length);
+      body.innerHTML = '<div class="pipe">' + stages + "</div>" +
+        '<div class="card"><h3>Pipeline <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl + "</span></h3>" +
+        (rows || '<div class="empty">' + (prFilter
+          ? "No prospects match “" + esc(prFilter) + "”."
+          : "No prospects yet. Import, pull from a LinkedIn search above, or promote from In-Market Leads.") + "</div>") + "</div>";
+
+      // Stage transitions: change the dropdown -> persist via the API.
+      Array.prototype.forEach.call(body.querySelectorAll(".stage-select"), function (sel) {
+        sel.addEventListener("change", function () {
+          var pid = sel.getAttribute("data-pid"), status = sel.value;
+          sel.disabled = true;
+          send("/prospects", "POST", { action: "transition", prospectId: pid, status: status })
+            .then(function (r) {
+              if (r.ok) { toast("Moved to " + statusLabel(status, lifecycle)); load(); }
+              else { toast("Could not update (" + (r.data.error || r.status) + ")"); sel.disabled = false; }
+            }).catch(function () { toast("Could not reach the server."); sel.disabled = false; });
+        });
+      });
+
+      // Enrich a prospect's outreach contact (company email + phone), cheapest-first.
+      Array.prototype.forEach.call(body.querySelectorAll(".pr-enrich"), function (btn) {
+        btn.addEventListener("click", function () {
+          var pid = btn.getAttribute("data-enrich");
+          var old = btn.textContent; btn.disabled = true; btn.textContent = "Enriching…";
+          send("/prospects", "POST", { action: "enrich", prospectId: pid }).then(function (r) {
+            if (r.ok) {
+              var f = (r.data && r.data.found) || {};
+              toast(f.email || f.phone ? ("Found " + [f.email ? "email" : "", f.phone ? "phone" : ""].filter(Boolean).join(" + "))
+                : "No new contact found — add a provider under Connected, or enter manually.");
+              load();
+            } else { btn.disabled = false; btn.textContent = old; toast("Could not enrich (" + (r.data.error || r.status) + ")"); }
+          }).catch(function () { btn.disabled = false; btn.textContent = old; toast("Could not reach the server."); });
+        });
+      });
+    }
+
     function load() {
       api("/prospects").then(function (d) {
-        var list = (d && d.prospects) || [];
-        var lifecycle = (d && d.lifecycle) || REF.lifecycle;
-        var counts = list.reduce(function (m, p) { m[p.status] = (m[p.status] || 0) + 1; return m; }, {});
-        var stages = lifecycle.map(function (l) {
-          return '<div class="stage"><b>' + (counts[l.status] || 0) + "</b><span>" + esc(l[motion] || l.status) + "</span></div>";
-        }).join("");
-        var rows = list.map(function (p) {
-          var opts = lifecycle.map(function (l) {
-            return '<option value="' + esc(l.status) + '"' + (l.status === p.status ? " selected" : "") + ">" + esc(l[motion] || l.status) + "</option>";
-          }).join("");
-          var contact = [];
-          if (p.email) contact.push("✉ " + esc(p.email));
-          if (p.phone) contact.push("☎ " + esc(p.phone));
-          var contactLine = '<div class="lr-contact' + (contact.length ? "" : " muted") + '">' +
-            (contact.length ? contact.join(" · ") : "No work contact yet") + "</div>";
-          var enrichLbl = (p.email && p.phone) ? "↻ Re-enrich" : "⚡ Enrich contact";
-          return '<div class="list-row" data-pid="' + esc(p.id) + '"><span class="avatar" style="width:28px;height:28px;font-size:11px;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) + "</span>" +
-            '<div class="lr-id"><div class="lr-main">' + esc(p.fullName) + '</div><div class="lr-sub">' + esc((p.title || "") + (p.company ? " · " + p.company : "")) + "</div>" + contactLine + "</div>" +
-            '<button class="pr-enrich" data-enrich="' + esc(p.id) + '">' + enrichLbl + "</button>" +
-            '<select class="stage-select cls cls-' + statusCls(p.status) + '" data-pid="' + esc(p.id) + '">' + opts + "</select>" +
-            '<div class="lr-right">' + (p.dripStage ? "Touch " + p.dripStage : "") + "</div></div>";
-        }).join("");
-        var body = $("#prBody"); if (!body) return;
-        body.innerHTML = '<div class="pipe">' + stages + "</div>" +
-          '<div class="card"><h3>Pipeline</h3>' + (rows ||
-            '<div class="empty">No prospects yet. Click ＋ Add prospect above, or build a target list in the Target Builder.</div>') + "</div>";
-
-        // Working stage transitions: change the dropdown -> persist via the API.
-        Array.prototype.forEach.call(body.querySelectorAll(".stage-select"), function (sel) {
-          sel.addEventListener("change", function () {
-            var pid = sel.getAttribute("data-pid"), status = sel.value;
-            sel.disabled = true;
-            send("/prospects", "POST", { action: "transition", prospectId: pid, status: status })
-              .then(function (r) {
-                if (r.ok) { toast("Moved to " + statusLabel(status, lifecycle)); load(); }
-                else { toast("Could not update (" + (r.data.error || r.status) + ")"); sel.disabled = false; }
-              }).catch(function () { toast("Could not reach the server."); sel.disabled = false; });
-          });
-        });
-
-        // Enrich a prospect's outreach contact (company email + phone), cheapest-first.
-        Array.prototype.forEach.call(body.querySelectorAll(".pr-enrich"), function (btn) {
-          btn.addEventListener("click", function () {
-            var pid = btn.getAttribute("data-enrich");
-            var old = btn.textContent; btn.disabled = true; btn.textContent = "Enriching…";
-            send("/prospects", "POST", { action: "enrich", prospectId: pid }).then(function (r) {
-              if (r.ok) {
-                var f = (r.data && r.data.found) || {};
-                if (f.email || f.phone) {
-                  toast("Found " + [f.email ? "email" : "", f.phone ? "phone" : ""].filter(Boolean).join(" + "));
-                } else {
-                  toast("No new contact found — add a provider under Connected, or enter manually.");
-                }
-                load();
-              } else { btn.disabled = false; btn.textContent = old; toast("Could not enrich (" + (r.data.error || r.status) + ")"); }
-            }).catch(function () { btn.disabled = false; btn.textContent = old; toast("Could not reach the server."); });
-          });
-        });
+        prAll = (d && d.prospects) || [];
+        prLifecycle = (d && d.lifecycle) || REF.lifecycle;
+        paint();
       }).catch(function () { var b = $("#prBody"); if (b) b.innerHTML = needsSetup(); });
     }
     load();
@@ -1703,66 +1740,122 @@
 
   /* Bulk import: paste CSV / TSV / lines. Header optional; recognizes
      name,email,company,title,linkedin,phone in any order. Dedupe handled server-side. */
+  // CSV/paste import with file upload + explicit column → field mapping. No campaign
+  // gate — a holding BD campaign is auto-created on import if none is chosen.
+  var IMP_FIELDS = [
+    ["", "— Ignore —"], ["fullName", "Full name"], ["firstName", "First name"],
+    ["lastName", "Last name"], ["email", "Email"], ["company", "Company"],
+    ["title", "Job title"], ["linkedinUrl", "LinkedIn URL"], ["phone", "Phone"]
+  ];
+  function guessField(header) {
+    var h = (header || "").toLowerCase();
+    if (/first\s*name|^first$|fname/.test(h)) return "firstName";
+    if (/last\s*name|^last$|lname|surname/.test(h)) return "lastName";
+    if (/full\s*name|^name$|contact/.test(h)) return "fullName";
+    if (/e-?mail/.test(h)) return "email";
+    if (/company|organization|org|employer|account/.test(h)) return "company";
+    if (/title|role|position|job/.test(h)) return "title";
+    if (/linkedin|profile|url/.test(h)) return "linkedinUrl";
+    if (/phone|mobile|cell|tel/.test(h)) return "phone";
+    return "";
+  }
+
   function importProspects() {
     api("/campaigns").then(function (d) {
-      var camps = ((d && d.campaigns) || []).filter(function (c) { return c.motion === motion; });
-      if (!camps.length) { toast("Create a campaign first (＋ New campaign)."); location.hash = "campaigns"; return; }
-      var campOpts = camps.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + "</option>"; }).join("");
-      var bodyHtml =
-        '<label>Add to campaign</label><select id="impCamp">' + campOpts + "</select>" +
-        '<label>Paste rows (CSV, TSV, or one per line)</label>' +
-        '<textarea id="impText" placeholder="Jane Doe, jane@acme.com, Acme, VP Engineering&#10;John Smith, john@globex.com, Globex, Head of Talent"></textarea>' +
-        '<div class="imp-preview" id="impPrev">Columns auto-detected: name, email, company, title, linkedin, phone. A header row is optional.</div>' +
-        '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="impCancel">Cancel</button>' +
-        '<button class="btn btn-primary btn-sm" id="impGo">Import</button></div>';
+      openImpModal(((d && d.campaigns) || []).filter(function (c) { return c.motion === motion; }));
+    }).catch(function () { openImpModal([]); });
+  }
 
-      openModal("Import prospects", "Paste from a spreadsheet, Apollo, LinkedIn export, anywhere.", bodyHtml, function (root, close) {
-        var ta = root.querySelector("#impText"), prev = root.querySelector("#impPrev");
-        function parse() {
-          var lines = ta.value.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
-          if (!lines.length) return [];
-          // detect + drop a header row
-          var first = lines[0].toLowerCase();
-          var hasHeader = /(name|email|company|title|linkedin|phone)/.test(first) && /[,\t]/.test(first);
-          var cols = hasHeader ? first.split(/[,\t]/).map(function (s) { return s.trim(); }) : null;
-          if (hasHeader) lines.shift();
-          return lines.map(function (line) {
-            var parts = line.split(/[,\t]/).map(function (s) { return s.trim(); });
-            var row = {};
-            if (cols) {
-              cols.forEach(function (c, i) {
-                if (/name/.test(c)) row.fullName = parts[i];
-                else if (/email/.test(c)) row.email = parts[i];
-                else if (/company/.test(c)) row.company = parts[i];
-                else if (/title|role/.test(c)) row.title = parts[i];
-                else if (/linkedin|url/.test(c)) row.linkedinUrl = parts[i];
-                else if (/phone|mobile/.test(c)) row.phone = parts[i];
-              });
-            } else {
-              // positional: name, email, company, title
-              row.fullName = parts[0];
-              parts.slice(1).forEach(function (p) {
-                if (/@/.test(p)) row.email = p;
-                else if (/linkedin\.com/.test(p)) row.linkedinUrl = p;
-                else if (/^[+\d][\d\s().-]{6,}$/.test(p)) row.phone = p;
-                else if (!row.company) row.company = p;
-                else if (!row.title) row.title = p;
-              });
-            }
-            return row;
-          }).filter(function (r) { return r.fullName; });
-        }
-        ta.addEventListener("input", function () {
-          var n = parse().length;
-          prev.innerHTML = n ? "Ready to import <b>" + n + "</b> prospect" + (n === 1 ? "" : "s") + "." : "Paste rows above.";
+  function openImpModal(camps) {
+    var campField = (camps && camps.length)
+      ? '<label>Add to campaign</label><select id="impCamp">' +
+          camps.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + "</option>"; }).join("") + "</select>"
+      : '<div class="imp-note">Imported prospects go to an auto-created <b>Imported prospects</b> campaign.</div>';
+    var bodyHtml =
+      campField +
+      '<label>Upload a CSV file</label>' +
+      '<input id="impFile" type="file" accept=".csv,.tsv,.txt" class="imp-file" />' +
+      '<label>…or paste rows (CSV / TSV)</label>' +
+      '<textarea id="impText" placeholder="name, email, company, title&#10;Jane Doe, jane@acme.com, Acme, VP Engineering"></textarea>' +
+      '<label class="imp-check"><input type="checkbox" id="impHeader" checked> First row is a header</label>' +
+      '<div id="impMap" class="imp-map"></div>' +
+      '<div class="imp-preview" id="impPrev">Upload a CSV or paste rows, then map each column to a field below.</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="impCancel">Cancel</button>' +
+      '<button class="btn btn-primary btn-sm" id="impGo">Import</button></div>';
+
+    openModal("Import prospects", "Upload a CSV (or paste), map the columns, and import.", bodyHtml, function (root, close) {
+      var ta = root.querySelector("#impText"), prev = root.querySelector("#impPrev");
+      var fileEl = root.querySelector("#impFile"), headerEl = root.querySelector("#impHeader");
+      var mapEl = root.querySelector("#impMap");
+      var mapping = null;    // array of field keys per column, set once columns are known
+
+      function delim(line) { return line.indexOf("\t") >= 0 ? "\t" : ","; }
+      function lines() { return ta.value.split(/\r?\n/).map(function (l) { return l.replace(/\s+$/, ""); }).filter(function (l) { return l.trim(); }); }
+      function columns() {
+        var ls = lines(); if (!ls.length) return [];
+        return ls[0].split(delim(ls[0])).map(function (s) { return s.trim(); });
+      }
+
+      function renderMap() {
+        var cols = columns();
+        if (cols.length < 2) { mapEl.innerHTML = ""; mapping = null; refreshPreview(); return; }
+        var hdr = headerEl.checked;
+        mapping = cols.map(function (c, i) { return hdr ? guessField(c) : ""; });
+        // positional fallback default when no header
+        if (!hdr) { var pos = ["fullName", "email", "company", "title"]; mapping = cols.map(function (_, i) { return pos[i] || ""; }); }
+        mapEl.innerHTML = '<div class="imp-map-title">Map your columns</div>' + cols.map(function (c, i) {
+          var sample = hdr ? c : ("col " + (i + 1));
+          var opts = IMP_FIELDS.map(function (f) { return '<option value="' + f[0] + '"' + (f[0] === mapping[i] ? " selected" : "") + ">" + esc(f[1]) + "</option>"; }).join("");
+          return '<div class="imp-map-row"><span class="imp-col">' + esc(sample) + '</span><select data-col="' + i + '">' + opts + "</select></div>";
+        }).join("");
+        Array.prototype.forEach.call(mapEl.querySelectorAll("select"), function (sel) {
+          sel.addEventListener("change", function () { mapping[parseInt(sel.getAttribute("data-col"), 10)] = sel.value; refreshPreview(); });
         });
-        root.querySelector("#impCancel").addEventListener("click", close);
-        root.querySelector("#impGo").addEventListener("click", function () {
-          var rows = parse();
-          if (!rows.length) { toast("Nothing to import, paste some rows."); return; }
-          var cid = root.querySelector("#impCamp").value;
+      }
+
+      function buildRows() {
+        var ls = lines(); if (!ls.length) return [];
+        var hdr = headerEl.checked, cols = columns();
+        var dataLines = (hdr && cols.length >= 2) ? ls.slice(1) : ls;
+        return dataLines.map(function (line) {
+          var parts = line.split(delim(line)).map(function (s) { return s.trim(); });
+          var row = {};
+          if (mapping && cols.length >= 2) {
+            mapping.forEach(function (field, i) { if (field && parts[i]) row[field] = parts[i]; });
+            if (!row.fullName && (row.firstName || row.lastName)) row.fullName = [row.firstName, row.lastName].filter(Boolean).join(" ");
+          } else {
+            // single column → treat as full name
+            row.fullName = parts[0];
+          }
+          delete row.firstName; delete row.lastName;
+          return row;
+        }).filter(function (r) { return r.fullName; });
+      }
+
+      function refreshPreview() {
+        var n = buildRows().length;
+        prev.innerHTML = n ? "Ready to import <b>" + n + "</b> prospect" + (n === 1 ? "" : "s") + "."
+          : (columns().length ? "Map at least the name column to import." : "Upload a CSV or paste rows above.");
+      }
+
+      ta.addEventListener("input", renderMap);
+      headerEl.addEventListener("change", renderMap);
+      fileEl.addEventListener("change", function () {
+        var f = fileEl.files && fileEl.files[0]; if (!f) return;
+        var reader = new FileReader();
+        reader.onload = function () { ta.value = String(reader.result || ""); renderMap(); };
+        reader.readAsText(f);
+      });
+
+      root.querySelector("#impCancel").addEventListener("click", close);
+      root.querySelector("#impGo").addEventListener("click", function () {
+        var rows = buildRows();
+        if (!rows.length) { toast("Nothing to import — map the name column."); return; }
+        var sel = root.querySelector("#impCamp");
+        var go = root.querySelector("#impGo"); go.disabled = true; go.textContent = "Importing…";
+        function send_rows(cid) {
+          if (!cid) { toast("Could not prepare a campaign."); go.disabled = false; go.textContent = "Import"; return; }
           rows.forEach(function (r) { r.campaignId = cid; });
-          var go = root.querySelector("#impGo"); go.disabled = true; go.textContent = "Importing…";
           send("/prospects", "POST", { action: "bulk", rows: rows }).then(function (res) {
             if (res.ok) {
               var added = res.data && res.data.added != null ? res.data.added : rows.length;
@@ -1771,9 +1864,11 @@
               close(); if (prospectsReload) prospectsReload();
             } else { toast("Import failed (" + (res.data.error || res.status) + ")"); go.disabled = false; go.textContent = "Import"; }
           }).catch(function () { toast("Could not reach the server."); go.disabled = false; go.textContent = "Import"; });
-        });
+        }
+        if (sel && sel.value) send_rows(sel.value);
+        else resolveBdCampaign(send_rows);
       });
-    }).catch(function () { toast("Could not reach the server."); });
+    });
   }
 
   /* Enrich LinkedIn searches: paste a Sales Navigator / LinkedIn search URL; the
@@ -1821,32 +1916,74 @@
         var url = (urlEl.value || "").trim();
         if (!valid()) { toast("Paste a LinkedIn or Sales Navigator search URL."); urlEl.focus(); return; }
         var limit = parseInt(root.querySelector("#liLimit").value, 10) || 100;
-        var go = root.querySelector("#liGo"); go.disabled = true; go.textContent = "Pulling…";
         var sel = root.querySelector("#liCamp");
-
-        function doPull(cid) {
-          if (!cid) { toast("Could not prepare a campaign."); go.disabled = false; go.textContent = "Pull profiles"; return; }
-          send("/prospects", "POST", { action: "linkedin_search", campaignId: cid, url: url, limit: limit }).then(function (res) {
-            if (res.ok) {
-              var r = res.data || {};
-              var dup = r.deduped ? " (" + r.deduped + " already in pipeline)" : "";
-              toast("Pulled " + (r.added || 0) + " prospect" + ((r.added === 1) ? "" : "s") + " from LinkedIn" + dup);
-              close(); if (prospectsReload) prospectsReload();
-            } else {
-              var err = res.data && res.data.error;
-              var msg = err === "no_linkedin_account" ? "Connect a LinkedIn account first (Accounts → LinkedIn)."
-                : err === "not_a_search_url" ? "That's not a search URL — open a people search in Sales Navigator/LinkedIn and copy its URL."
-                : err === "not_a_linkedin_url" ? "Paste a linkedin.com URL."
-                : "Could not pull profiles (" + (err || res.status) + ")";
-              toast(msg); go.disabled = false; go.textContent = "Pull profiles";
-            }
-          }).catch(function () { toast("Could not reach the server."); go.disabled = false; go.textContent = "Pull profiles"; });
-        }
-
-        if (sel && sel.value) doPull(sel.value);
-        else resolveBdCampaign(doPull);   // no campaign chosen → get/create a holding BD campaign
+        var chosen = (sel && sel.value) ? sel.value : null;
+        close();   // dismiss the popup right away; progress shows in the Prospects view
+        if (chosen) startLinkedInPull(chosen, url, limit);
+        else resolveBdCampaign(function (cid) {
+          if (!cid) { toast("Could not prepare a campaign."); return; }
+          startLinkedInPull(cid, url, limit);
+        });
       });
     });
+  }
+
+  // Drive the LinkedIn pull with a live progress bar in the Prospects view, then
+  // populate the pipeline. (Date.now() is fine here — this is browser code.)
+  function startLinkedInPull(cid, url, limit) {
+    var box = document.getElementById("liProgress");
+    if (!box) { location.hash = "prospects"; box = document.getElementById("liProgress"); }
+    if (!box) return;
+    var started = Date.now();
+    box.innerHTML =
+      '<div class="li-prog running"><div class="li-prog-top">' +
+        '<span class="li-prog-title">🔗 Pulling LinkedIn profiles…</span>' +
+        '<span class="li-prog-meta" id="liProgMeta">target ' + limit + " · 0s</span></div>" +
+        '<div class="li-bar"><span class="li-bar-fill indet"></span></div>' +
+        '<div class="li-prog-sub">Running your search and adding members to Prospects — this can take a moment.</div></div>';
+    var meta = document.getElementById("liProgMeta");
+    var tick = setInterval(function () {
+      var s = Math.round((Date.now() - started) / 1000);
+      if (meta) meta.textContent = "target " + limit + " · " + s + "s";
+    }, 1000);
+    viewTimers.push(tick);
+
+    send("/prospects", "POST", { action: "linkedin_search", campaignId: cid, url: url, limit: limit }).then(function (res) {
+      clearInterval(tick);
+      if (res.ok) { finishLinkedInPull(box, (res.data || {}).added || 0, (res.data || {}).deduped || 0); if (prospectsReload) prospectsReload(); }
+      else {
+        var err = res.data && res.data.error;
+        errorLinkedInPull(box, err === "no_linkedin_account" ? "Connect a LinkedIn account first (Accounts → LinkedIn)."
+          : err === "not_a_search_url" ? "That's not a search URL — copy a people-search URL from Sales Navigator/LinkedIn."
+          : err === "not_a_linkedin_url" ? "That wasn't a linkedin.com URL."
+          : "Could not pull profiles (" + (err || res.status) + ").");
+      }
+    }).catch(function () { clearInterval(tick); errorLinkedInPull(box, "Could not reach the server."); });
+  }
+
+  function finishLinkedInPull(box, added, deduped) {
+    var dup = deduped ? " · " + deduped + " already in pipeline" : "";
+    box.innerHTML =
+      '<div class="li-prog done"><div class="li-prog-top">' +
+        '<span class="li-prog-title">✓ LinkedIn pull complete</span>' +
+        '<span class="li-prog-meta"><b id="liCount">0</b> profiles added' + dup + "</span></div>" +
+        '<div class="li-bar"><span class="li-bar-fill" style="width:100%"></span></div>' +
+        '<div class="li-prog-sub">New prospects are in your pipeline below. <a href="#" id="liDismiss">Dismiss</a></div></div>';
+    var el = document.getElementById("liCount"), n = 0, step = Math.max(1, Math.round(added / 30));
+    var t = setInterval(function () { n = Math.min(added, n + step); if (el) el.textContent = n; if (n >= added) clearInterval(t); }, 30);
+    viewTimers.push(t);
+    var dz = document.getElementById("liDismiss");
+    if (dz) dz.addEventListener("click", function (e) { e.preventDefault(); box.innerHTML = ""; });
+  }
+
+  function errorLinkedInPull(box, msg) {
+    box.innerHTML =
+      '<div class="li-prog error"><div class="li-prog-top">' +
+        '<span class="li-prog-title">⚠ Could not pull profiles</span>' +
+        '<a href="#" id="liDismiss" class="li-prog-meta">Dismiss</a></div>' +
+        '<div class="li-prog-sub">' + esc(msg) + "</div></div>";
+    var dz = document.getElementById("liDismiss");
+    if (dz) dz.addEventListener("click", function (e) { e.preventDefault(); box.innerHTML = ""; });
   }
 
   function addAsset() {
