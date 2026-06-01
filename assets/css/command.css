@@ -299,6 +299,20 @@
 .pr-enrich:hover { border-color: var(--brand); color: #fff; }
 .pr-enrich:disabled { opacity: .6; cursor: default; }
 
+/* Saved hiring signals shelf (staging between search and Prospects) */
+.im-saved { border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface); padding: 16px 18px; margin: 4px 0 18px; }
+.im-saved-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.im-saved-head b { font-size: 15px; }
+.im-saved-head #imSavedPush { margin-left: auto; }
+.im-saved-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.im-saved-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; background: var(--bg-soft); font-size: 13px; }
+.im-saved-co { font-weight: 700; }
+.im-saved-x { appearance: none; cursor: pointer; margin-left: auto; border: none; background: transparent; color: var(--text-dim); font-size: 14px; padding: 2px 6px; border-radius: 6px; }
+.im-saved-x:hover { color: var(--accent-red); background: rgba(255,107,107,0.12); }
+
+/* Note line used in modals (e.g. LinkedIn import with no campaign yet) */
+.imp-note { font-size: 13px; color: var(--text-muted); background: var(--bg-soft); border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; margin: 6px 0; }
+
 /* ============================================================
    Overview: lift the capacity + KPI numbers to the top so every
    stat is fully visible without scrolling (tighter header + cards)

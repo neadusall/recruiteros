@@ -195,7 +195,7 @@ export async function searchInMarket(
   q: InMarketQuery,
   nowIso: string,
 ): Promise<{ leads: InMarketLead[]; pulled: number; warnings: string[] }> {
-  const limit = Math.min(Math.max(q.limit ?? 25, 1), 100);
+  const limit = Math.min(Math.max(q.limit ?? 25, 1), 300);
   try {
     const report = await collect({
       icp: icpFromQuery(q),

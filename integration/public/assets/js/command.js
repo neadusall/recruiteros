@@ -373,8 +373,10 @@
           IM_INDUSTRIES.map(function (n) { return '<button type="button" class="im-chip" data-ind="' + esc(n) + '">' + esc(n) + "</button>"; }).join("") +
         "</div>" +
       "</div>" +
+      '<div id="imSaved"></div>' +
       '<div id="imBody"><div class="empty">Pick an industry to surface companies actively hiring in that market, ranked by hiring intent.</div></div>';
 
+    renderSavedSignals();
     var form = $("#imForm"), input = $("#imQuery");
 
     // Search mode toggle: industry/market OR company name — one or the other.
@@ -417,7 +419,7 @@
     function runSearch(criteria, label) {
       var body = $("#imBody"); body.innerHTML = loading();
       imPicks = {}; imMinScore = 0; imLabel = label || "";
-      var payload = { limit: 30 };
+      var payload = { limit: 200 };
       if (criteria.companyName) payload.companyName = criteria.companyName;
       if (criteria.industries) payload.industries = criteria.industries;
       if (criteria.query) payload.query = criteria.query;
@@ -445,6 +447,7 @@
         '<div class="im-narrow" title="Narrow by hiring-intent score">' +
           bands.map(function (b) { return '<button type="button" class="im-nbtn' + (String(imMinScore) === b[0] ? " active" : "") + '" data-min="' + b[0] + '">' + b[1] + "</button>"; }).join("") +
         "</div>" +
+        '<button class="btn btn-ghost btn-sm" id="imSave" disabled>💾 Save as hiring signals</button>' +
         '<button class="btn btn-primary btn-sm" id="imBulk" disabled>Push selected to Prospects</button>' +
       "</div>";
     body.innerHTML = toolbar + '<div id="imList">' + leads.map(leadCard).join("") + "</div>";
@@ -522,12 +525,17 @@
     // Bulk push.
     var bulk = body.querySelector("#imBulk");
     if (bulk) bulk.addEventListener("click", bulkPushToProspects);
+    // Save selected as hiring signals (a staging step before Prospects).
+    var save = body.querySelector("#imSave");
+    if (save) save.addEventListener("click", saveSelectedSignals);
   }
 
   function updateImBulk() {
     var n = Object.keys(imPicks).length;
     var btn = document.getElementById("imBulk");
     if (btn) { btn.disabled = n === 0; btn.textContent = n ? ("Push " + n + " to Prospects →") : "Push selected to Prospects"; }
+    var save = document.getElementById("imSave");
+    if (save) { save.disabled = n === 0; save.textContent = n ? ("💾 Save " + n + " as hiring signals") : "💾 Save as hiring signals"; }
     var all = document.getElementById("imAll");
     var picks = document.querySelectorAll(".im-pick");
     if (all && picks.length) {
@@ -535,6 +543,82 @@
       all.checked = checked === picks.length;
       all.indeterminate = checked > 0 && checked < picks.length;
     }
+  }
+
+  /* ---- Saved hiring signals: a staging shelf between search and Prospects ---- */
+  function loadSavedSignals() { try { return JSON.parse(localStorage.getItem("ros_saved_signals") || "[]"); } catch (e) { return []; } }
+  function storeSavedSignals(arr) { try { localStorage.setItem("ros_saved_signals", JSON.stringify(arr)); } catch (e) {} }
+
+  // Save the currently-selected hiring managers to the shelf (deduped), without
+  // touching Prospects yet — the recruiter reviews them first.
+  function saveSelectedSignals() {
+    var picks = Object.keys(imPicks).map(function (k) { return imPicks[k]; });
+    if (!picks.length) return;
+    var saved = loadSavedSignals();
+    var seen = {};
+    saved.forEach(function (s) { seen[imPickKey(s.lead.id, s.manager ? s.manager.role : "")] = true; });
+    var added = 0;
+    picks.forEach(function (p) {
+      var key = imPickKey(p.lead.id, p.manager ? p.manager.role : "");
+      if (!seen[key]) { saved.push({ lead: p.lead, manager: p.manager || null }); seen[key] = true; added++; }
+    });
+    storeSavedSignals(saved);
+    toast("Saved " + added + " hiring signal" + (added === 1 ? "" : "s") + (added !== picks.length ? " (" + (picks.length - added) + " already saved)" : ""));
+    imPicks = {}; renderImResults(); renderSavedSignals();
+  }
+
+  // Render the saved-signals shelf at the top of the In-Market view.
+  function renderSavedSignals() {
+    var box = document.getElementById("imSaved"); if (!box) return;
+    var saved = loadSavedSignals();
+    if (!saved.length) { box.innerHTML = ""; return; }
+    box.innerHTML =
+      '<div class="im-saved"><div class="im-saved-head">' +
+        '<b>💾 Saved hiring signals</b> <span class="muted">(' + saved.length + ")</span>" +
+        '<button class="btn btn-primary btn-sm" id="imSavedPush">Push all to Prospects →</button>' +
+        '<button class="btn btn-ghost btn-sm" id="imSavedClear">Clear</button>' +
+      "</div><div class=\"im-saved-list\">" +
+        saved.map(function (s, i) {
+          var who = (s.manager && s.manager.managerName) || s.lead.buyerName || (s.manager && s.manager.managerTitle) || "Hiring manager";
+          var role = (s.manager && s.manager.role) ? s.manager.role : "Decision-maker";
+          return '<div class="im-saved-row"><span class="im-saved-co">' + esc(s.lead.company) + "</span>" +
+            '<span class="muted">' + esc(role) + " → " + esc(who) + "</span>" +
+            '<button class="im-saved-x" data-rm="' + i + '" title="Remove">✕</button></div>';
+        }).join("") +
+      "</div></div>";
+    var pushBtn = box.querySelector("#imSavedPush");
+    if (pushBtn) pushBtn.addEventListener("click", pushSavedToProspects);
+    var clearBtn = box.querySelector("#imSavedClear");
+    if (clearBtn) clearBtn.addEventListener("click", function () { storeSavedSignals([]); renderSavedSignals(); });
+    Array.prototype.forEach.call(box.querySelectorAll("[data-rm]"), function (x) {
+      x.addEventListener("click", function () {
+        var arr = loadSavedSignals(); arr.splice(parseInt(x.getAttribute("data-rm"), 10), 1);
+        storeSavedSignals(arr); renderSavedSignals();
+      });
+    });
+  }
+
+  // Promote every saved signal into Prospects (paired to its company), then clear the shelf.
+  function pushSavedToProspects() {
+    var saved = loadSavedSignals(); if (!saved.length) return;
+    var btn = document.getElementById("imSavedPush"); if (btn) btn.disabled = true;
+    resolveBdCampaign(function (campaignId) {
+      if (!campaignId) { toast("Create a campaign first."); if (btn) btn.disabled = false; return; }
+      var done = 0;
+      (function next(i) {
+        if (i >= saved.length) {
+          toast(done + " prospect" + (done === 1 ? "" : "s") + " pushed to Prospects");
+          storeSavedSignals([]); renderSavedSignals();
+          return;
+        }
+        if (btn) btn.textContent = "Pushing " + (i + 1) + "/" + saved.length + "…";
+        var payload = { action: "promote", campaignId: campaignId, lead: saved[i].lead };
+        if (saved[i].manager) payload.manager = saved[i].manager;
+        send("/in-market", "POST", payload)
+          .then(function (r) { if (r.ok) done++; next(i + 1); })
+          .catch(function () { next(i + 1); });
+      })(0);
+    });
   }
 
   // Resolve (or create) the BD campaign that holds promoted in-market prospects.
@@ -577,12 +661,14 @@
   function renderProspects(el) {
     el.innerHTML = head("Prospects", "Your live pipeline, synced bidirectionally with the ATS.") +
       '<div class="btn-row" style="margin-bottom:14px">' +
+      '<button class="btn btn-primary btn-sm" id="enrichAllBtn">⚡ Enrich all contacts</button>' +
       '<button class="btn btn-ghost btn-sm" id="importBtn">⇪ Import (CSV / paste)</button>' +
       '<button class="btn btn-ghost btn-sm" id="liSearchBtn">🔗 Enrich LinkedIn searches</button></div>' +
       '<div id="prBody">' + loading() + "</div>";
 
     $("#importBtn").addEventListener("click", importProspects);
     $("#liSearchBtn").addEventListener("click", importLinkedInSearch);
+    $("#enrichAllBtn").addEventListener("click", function () { enrichAllProspects(this); });
 
     function load() {
       api("/prospects").then(function (d) {
@@ -650,6 +736,27 @@
     prospectsReload = load;
   }
   var prospectsReload = null;
+
+  // Bulk-enrich every prospect missing a work email or phone, cheapest-first, in sequence.
+  function enrichAllProspects(btn) {
+    api("/prospects").then(function (d) {
+      var list = ((d && d.prospects) || []).filter(function (p) { return !(p.email && p.phone); });
+      if (!list.length) { toast("Every prospect already has an email and phone."); return; }
+      btn.disabled = true; var done = 0;
+      (function next(i) {
+        if (i >= list.length) {
+          btn.disabled = false; btn.textContent = "⚡ Enrich all contacts";
+          toast("Enriched " + done + " of " + list.length + " prospect" + (list.length === 1 ? "" : "s"));
+          if (prospectsReload) prospectsReload();
+          return;
+        }
+        btn.textContent = "Enriching " + (i + 1) + "/" + list.length + "…";
+        send("/prospects", "POST", { action: "enrich", prospectId: list[i].id })
+          .then(function (r) { var f = r.ok && r.data && r.data.found; if (f && (f.email || f.phone)) done++; next(i + 1); })
+          .catch(function () { next(i + 1); });
+      })(0);
+    }).catch(function () { toast("Could not reach the server."); });
+  }
 
   function renderCampaigns(el) {
     // Campaigns saved from the drag-and-drop Campaign Studio (localStorage), newest first.
@@ -1674,37 +1781,51 @@
      (name, company, title, profile). Contact data (email / phone / cell) is then
      enriched per-prospect on demand via the ⚡ Enrich button — discovery is free. */
   function importLinkedInSearch() {
+    // Load campaigns to offer a target, but NEVER block on it — the URL input must
+    // always show. If the user has no campaign, we auto-create one on submit.
     api("/campaigns").then(function (d) {
       var camps = ((d && d.campaigns) || []).filter(function (c) { return c.motion === motion; });
-      if (!camps.length) { toast("Create a campaign first (＋ New campaign)."); location.hash = "campaigns"; return; }
-      var campOpts = camps.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + "</option>"; }).join("");
-      var bodyHtml =
-        '<label>Add to campaign</label><select id="liCamp">' + campOpts + "</select>" +
-        '<label>Sales Navigator or LinkedIn search URL</label>' +
-        '<input id="liUrl" type="url" placeholder="https://www.linkedin.com/sales/search/people?query=…" />' +
-        '<label>Max profiles to pull</label>' +
-        '<input id="liLimit" type="number" min="1" max="500" value="100" />' +
-        '<div class="imp-preview" id="liPrev">Run a search in Sales Navigator, copy the URL from the address bar, and paste it here. ' +
-        "We'll pull each member into Prospects — then enrich business email, phone &amp; cell per prospect from the pipeline.</div>" +
-        '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="liCancel">Cancel</button>' +
-        '<button class="btn btn-primary btn-sm" id="liGo">Pull profiles</button></div>';
+      openLiModal(camps);
+    }).catch(function () { openLiModal([]); });
+  }
 
-      openModal("Enrich LinkedIn searches", "Turn a Sales Navigator search into a prospect list.", bodyHtml, function (root, close) {
-        var urlEl = root.querySelector("#liUrl"), prev = root.querySelector("#liPrev");
-        function valid() { return /^https?:\/\/(www\.)?linkedin\.com\//i.test((urlEl.value || "").trim()); }
-        urlEl.addEventListener("input", function () {
-          prev.innerHTML = !urlEl.value.trim()
-            ? "Paste a LinkedIn / Sales Navigator search URL above."
-            : valid() ? "Ready to pull profiles from this search."
-              : "That doesn't look like a linkedin.com URL.";
-        });
-        root.querySelector("#liCancel").addEventListener("click", close);
-        root.querySelector("#liGo").addEventListener("click", function () {
-          var url = (urlEl.value || "").trim();
-          if (!valid()) { toast("Paste a LinkedIn or Sales Navigator search URL."); return; }
-          var cid = root.querySelector("#liCamp").value;
-          var limit = parseInt(root.querySelector("#liLimit").value, 10) || 100;
-          var go = root.querySelector("#liGo"); go.disabled = true; go.textContent = "Pulling…";
+  function openLiModal(camps) {
+    var campField = (camps && camps.length)
+      ? '<label>Add to campaign</label><select id="liCamp">' +
+          camps.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + "</option>"; }).join("") +
+        "</select>"
+      : '<div class="imp-note" id="liCampNote">New prospects will be added to an auto-created <b>LinkedIn Imports</b> campaign.</div>';
+    var bodyHtml =
+      campField +
+      '<label>Sales Navigator or LinkedIn search URL</label>' +
+      '<input id="liUrl" type="url" autocomplete="off" placeholder="https://www.linkedin.com/sales/search/people?query=…" />' +
+      '<label>Max profiles to pull</label>' +
+      '<input id="liLimit" type="number" min="1" max="500" value="100" />' +
+      '<div class="imp-preview" id="liPrev">Run a search in Sales Navigator (or regular LinkedIn), copy the URL from the address bar, paste it above, and hit <b>Pull profiles</b>. ' +
+      "We'll pull each member into Prospects — then you enrich business email, phone &amp; cell per prospect from the pipeline.</div>" +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="liCancel">Cancel</button>' +
+      '<button class="btn btn-primary btn-sm" id="liGo">Pull profiles</button></div>';
+
+    openModal("Enrich LinkedIn searches", "Paste a Sales Navigator / LinkedIn search URL to turn it into a prospect list.", bodyHtml, function (root, close) {
+      var urlEl = root.querySelector("#liUrl"), prev = root.querySelector("#liPrev");
+      if (urlEl.focus) try { urlEl.focus(); } catch (e) {}
+      function valid() { return /^https?:\/\/(www\.)?linkedin\.com\//i.test((urlEl.value || "").trim()); }
+      urlEl.addEventListener("input", function () {
+        prev.innerHTML = !urlEl.value.trim()
+          ? "Paste a LinkedIn / Sales Navigator search URL above."
+          : valid() ? "✓ Ready to pull profiles from this search."
+            : "That doesn't look like a linkedin.com URL.";
+      });
+      root.querySelector("#liCancel").addEventListener("click", close);
+      root.querySelector("#liGo").addEventListener("click", function () {
+        var url = (urlEl.value || "").trim();
+        if (!valid()) { toast("Paste a LinkedIn or Sales Navigator search URL."); urlEl.focus(); return; }
+        var limit = parseInt(root.querySelector("#liLimit").value, 10) || 100;
+        var go = root.querySelector("#liGo"); go.disabled = true; go.textContent = "Pulling…";
+        var sel = root.querySelector("#liCamp");
+
+        function doPull(cid) {
+          if (!cid) { toast("Could not prepare a campaign."); go.disabled = false; go.textContent = "Pull profiles"; return; }
           send("/prospects", "POST", { action: "linkedin_search", campaignId: cid, url: url, limit: limit }).then(function (res) {
             if (res.ok) {
               var r = res.data || {};
@@ -1713,16 +1834,19 @@
               close(); if (prospectsReload) prospectsReload();
             } else {
               var err = res.data && res.data.error;
-              var msg = err === "no_linkedin_account" ? "Connect a LinkedIn account first (Accounts)."
-                : err === "not_a_search_url" ? "That's not a search URL — open a search in Sales Navigator and copy its URL."
+              var msg = err === "no_linkedin_account" ? "Connect a LinkedIn account first (Accounts → LinkedIn)."
+                : err === "not_a_search_url" ? "That's not a search URL — open a people search in Sales Navigator/LinkedIn and copy its URL."
                 : err === "not_a_linkedin_url" ? "Paste a linkedin.com URL."
                 : "Could not pull profiles (" + (err || res.status) + ")";
               toast(msg); go.disabled = false; go.textContent = "Pull profiles";
             }
           }).catch(function () { toast("Could not reach the server."); go.disabled = false; go.textContent = "Pull profiles"; });
-        });
+        }
+
+        if (sel && sel.value) doPull(sel.value);
+        else resolveBdCampaign(doPull);   // no campaign chosen → get/create a holding BD campaign
       });
-    }).catch(function () { toast("Could not reach the server."); });
+    });
   }
 
   function addAsset() {
