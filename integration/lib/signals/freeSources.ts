@@ -569,6 +569,135 @@ interface LayoffRow {
 }
 
 /* ------------------------------------------------------------------ */
+/* Global free job APIs (no key) — broad, cross-company hiring feeds    */
+/* These don't need a watchlist: they return who is hiring across the    */
+/* whole market, and several carry industry/category so the in-market    */
+/* industry filter can classify non-tech roles too.                      */
+/* ------------------------------------------------------------------ */
+
+/** Arbeitnow public job board API — free, no auth. Strong EU + remote coverage; carries
+ *  tags + job types we use for keyword/industry classification. */
+export class ArbeitnowSource implements SignalSource {
+  readonly id = "arbeitnow";
+  readonly kind: SourceKind = "job_board";
+  readonly emits: SignalType[] = ["job_posting"];
+  readonly label = "Arbeitnow job board (free API)";
+  isConfigured(): boolean { return true; }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    const now = new Date().toISOString();
+    const signals: Signal[] = [];
+    const warnings: string[] = [];
+    const kw = (ctx.watchlist?.keywords ?? []).map((k) => k.toLowerCase());
+    const want = (s: string) => !kw.length || kw.some((k) => s.toLowerCase().includes(k));
+    try {
+      const res = await getJson<{ data: ArbeitnowJob[] }>("https://www.arbeitnow.com/api/job-board-api");
+      for (const j of (res.data ?? []).slice(0, ctx.limit ?? 100)) {
+        if (!j.company_name || !j.title) continue;
+        if (!want(`${j.title} ${j.company_name} ${(j.tags ?? []).join(" ")}`)) continue;
+        signals.push(makeSignal({
+          type: "job_posting",
+          title: `${j.company_name} is hiring: ${j.title}`,
+          detail: `Open role "${j.title}"${j.location ? ` in ${j.location}` : ""}${j.remote ? " · remote" : ""}.`,
+          evidence: { roleTitle: j.title, location: j.location, applyUrl: j.url, tags: j.tags, remote: j.remote },
+          source: { kind: this.kind, connector: "arbeitnow", url: j.url, externalId: `arbeitnow:${j.slug}`, observedAt: now },
+          eventAt: j.created_at ? new Date(j.created_at * 1000).toISOString() : now,
+          ingestedAt: now,
+          anchor: j.company_name,
+          companyHint: { id: "", name: j.company_name, industry: (j.tags ?? [])[0] },
+        }));
+      }
+    } catch (err) { warnings.push(`arbeitnow: ${(err as Error).message}`); }
+    return { signals, warnings };
+  }
+}
+interface ArbeitnowJob { slug: string; company_name: string; title: string; tags?: string[]; job_types?: string[]; location?: string; url: string; remote?: boolean; created_at?: number }
+
+/** Jobicy remote-jobs API — free, no auth. Carries jobIndustry, mapped onto the company
+ *  so the industry filter classifies these roles accurately. */
+export class JobicySource implements SignalSource {
+  readonly id = "jobicy";
+  readonly kind: SourceKind = "job_board";
+  readonly emits: SignalType[] = ["job_posting"];
+  readonly label = "Jobicy remote jobs (free API)";
+  isConfigured(): boolean { return true; }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    const now = new Date().toISOString();
+    const signals: Signal[] = [];
+    const warnings: string[] = [];
+    const kw = (ctx.watchlist?.keywords ?? []).map((k) => k.toLowerCase());
+    const want = (s: string) => !kw.length || kw.some((k) => s.toLowerCase().includes(k));
+    try {
+      const count = Math.min(ctx.limit ?? 50, 50);
+      const res = await getJson<{ jobs: JobicyJob[] }>(`https://jobicy.com/api/v2/remote-jobs?count=${count}`);
+      for (const j of res.jobs ?? []) {
+        if (!j.companyName || !j.jobTitle) continue;
+        const industry = Array.isArray(j.jobIndustry) ? j.jobIndustry[0] : j.jobIndustry;
+        if (!want(`${j.jobTitle} ${j.companyName} ${industry ?? ""}`)) continue;
+        signals.push(makeSignal({
+          type: "job_posting",
+          title: `${j.companyName} is hiring (remote): ${j.jobTitle}`,
+          detail: `Remote role "${j.jobTitle}"${industry ? ` · ${industry}` : ""}${j.jobGeo ? ` · ${j.jobGeo}` : ""}.`,
+          evidence: { roleTitle: j.jobTitle, function: industry, location: j.jobGeo || "Remote", applyUrl: j.url, remote: true },
+          source: { kind: this.kind, connector: "jobicy", url: j.url, externalId: `jobicy:${j.id}`, observedAt: now },
+          eventAt: j.pubDate ?? now,
+          ingestedAt: now,
+          anchor: j.companyName,
+          companyHint: { id: "", name: j.companyName, industry, hiringLocations: [{ raw: j.jobGeo || "Remote", remote: true }] },
+        }));
+      }
+    } catch (err) { warnings.push(`jobicy: ${(err as Error).message}`); }
+    return { signals, warnings };
+  }
+}
+interface JobicyJob { id: number | string; url: string; jobTitle: string; companyName: string; jobIndustry?: string[] | string; jobGeo?: string; pubDate?: string }
+
+/** The Muse public jobs API — free, no key. Broad CROSS-INDUSTRY coverage (not just tech)
+ *  with category + company, which is the strongest free signal for non-tech sectors. */
+export class TheMuseSource implements SignalSource {
+  readonly id = "themuse";
+  readonly kind: SourceKind = "job_board";
+  readonly emits: SignalType[] = ["job_posting"];
+  readonly label = "The Muse jobs (free API)";
+  isConfigured(): boolean { return true; }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    const now = new Date().toISOString();
+    const signals: Signal[] = [];
+    const warnings: string[] = [];
+    const kw = (ctx.watchlist?.keywords ?? []).map((k) => k.toLowerCase());
+    const want = (s: string) => !kw.length || kw.some((k) => s.toLowerCase().includes(k));
+    const pages = Math.min(Math.ceil((ctx.limit ?? 60) / 20), 4);
+    try {
+      for (let page = 0; page < pages; page++) {
+        const res = await getJson<{ results: MuseJob[] }>(`https://www.themuse.com/api/public/jobs?page=${page}`);
+        for (const j of res.results ?? []) {
+          const company = j.company?.name;
+          if (!company || !j.name) continue;
+          const cat = (j.categories ?? [])[0]?.name;
+          const loc = (j.locations ?? [])[0]?.name;
+          if (!want(`${j.name} ${company} ${cat ?? ""}`)) continue;
+          signals.push(makeSignal({
+            type: "job_posting",
+            title: `${company} is hiring: ${j.name}`,
+            detail: `Open role "${j.name}"${cat ? ` · ${cat}` : ""}${loc ? ` in ${loc}` : ""}.`,
+            evidence: { roleTitle: j.name, function: cat, location: loc, applyUrl: j.refs?.landing_page },
+            source: { kind: this.kind, connector: "themuse", url: j.refs?.landing_page, externalId: `themuse:${j.id ?? j.name}`, observedAt: now },
+            eventAt: j.publication_date ?? now,
+            ingestedAt: now,
+            anchor: company,
+            companyHint: { id: "", name: company, industry: cat },
+          }));
+        }
+      }
+    } catch (err) { warnings.push(`themuse: ${(err as Error).message}`); }
+    return { signals, warnings };
+  }
+}
+interface MuseJob { id?: number; name: string; company?: { name: string }; categories?: { name: string }[]; locations?: { name: string }[]; publication_date?: string; refs?: { landing_page?: string } }
+
+/* ------------------------------------------------------------------ */
 /* The free source set                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -581,6 +710,9 @@ export function freeSources(): SignalSource[] {
   return [
     new ExtraAtsSource(),
     new RemoteBoardsSource(),
+    new ArbeitnowSource(),
+    new JobicySource(),
+    new TheMuseSource(),
     new HackerNewsHiringSource(),
     new UsaSpendingSource(),
     new GitHubOrgSource(),

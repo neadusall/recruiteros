@@ -778,11 +778,17 @@
       if (p.phone) contact.push("☎ " + esc(p.phone));
       var contactLine = '<div class="lr-contact' + (contact.length ? "" : " muted") + '">' +
         (contact.length ? contact.join(" · ") : "No work contact yet") + "</div>";
-      var enrichLbl = (p.email && p.phone) ? "↻ Re-enrich" : "⚡ Enrich contact";
+      // A "role placeholder" prospect: the hiring manager's real name isn't researched yet.
+      var pending = !p.linkedinUrl && (/ [—–] /.test(p.fullName || "") || /hiring manager/i.test(p.fullName || ""));
+      var name = pending
+        ? esc(p.title || "Hiring manager") + ' <span class="pr-pending">name pending research</span>'
+        : esc(p.fullName);
+      var enrichLbl = pending ? "🔎 Find hiring manager" : (p.email && p.phone) ? "↻ Re-enrich" : "⚡ Enrich contact";
       return '<div class="list-row' + (prSel[p.id] ? " pr-selected" : "") + '" data-pid="' + esc(p.id) + '">' +
         '<input type="checkbox" class="pr-check" data-pid="' + esc(p.id) + '"' + (prSel[p.id] ? " checked" : "") + ' />' +
-        '<span class="avatar" style="width:28px;height:28px;font-size:11px;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) + "</span>" +
-        '<div class="lr-id"><div class="lr-main">' + esc(p.fullName) + '</div><div class="lr-sub">' + esc((p.title || "") + (p.company ? " · " + p.company : "")) + "</div>" + contactLine + "</div>" +
+        '<span class="avatar" style="position:relative;width:30px;height:30px;font-size:11px;flex:none;background:' + colorFor(p.fullName) + '">' + esc(initials(pending ? (p.company || "?") : p.fullName)) +
+          (p.photoUrl && !pending ? '<img src="' + esc(p.photoUrl) + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;border-radius:50%;object-fit:cover" onerror="this.remove()" />' : "") + "</span>" +
+        '<div class="lr-id"><div class="lr-main">' + name + '</div><div class="lr-sub">' + esc((p.company ? p.company : "") + (pending && p.title ? "" : (p.title ? " · " + p.title : "")) + (p.location ? " · " + p.location : "")) + "</div>" + contactLine + "</div>" +
         '<button class="pr-enrich" data-enrich="' + esc(p.id) + '">' + enrichLbl + "</button>" +
         '<select class="stage-select cls cls-' + statusCls(p.status) + '" data-pid="' + esc(p.id) + '">' + opts + "</select>" +
         '<div class="lr-right">' + (p.dripStage ? "Touch " + p.dripStage : "") + "</div></div>";
@@ -850,12 +856,19 @@
       Array.prototype.forEach.call(body.querySelectorAll(".pr-enrich"), function (btn) {
         btn.addEventListener("click", function () {
           var pid = btn.getAttribute("data-enrich");
-          var old = btn.textContent; btn.disabled = true; btn.textContent = "Enriching…";
+          var researching = /Find hiring manager/.test(btn.textContent);
+          var old = btn.textContent; btn.disabled = true; btn.textContent = researching ? "Researching…" : "Enriching…";
           send("/prospects", "POST", { action: "enrich", prospectId: pid }).then(function (r) {
             if (r.ok) {
               var f = (r.data && r.data.found) || {};
-              toast(f.email || f.phone ? ("Found " + [f.email ? "email" : "", f.phone ? "phone" : ""].filter(Boolean).join(" + "))
-                : "No new contact found — add a provider under Connected, or enter manually.");
+              var pr = (r.data && r.data.prospect) || {};
+              var bits = [];
+              if (f.name) bits.push("hiring manager: " + (pr.fullName || "name"));
+              if (f.email) bits.push("email");
+              if (f.phone) bits.push("phone");
+              toast(bits.length ? ("Found " + bits.join(" + "))
+                : (researching ? "Couldn’t resolve a name yet — connect a LinkedIn account (Accounts → LinkedIn) so it can research the manager."
+                  : "No new contact found — add a provider under Connected, or enter manually."));
               load();
             } else { btn.disabled = false; btn.textContent = old; toast("Could not enrich (" + (r.data.error || r.status) + ")"); }
           }).catch(function () { btn.disabled = false; btn.textContent = old; toast("Could not reach the server."); });
@@ -2428,7 +2441,17 @@
           camps.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + "</option>"; }).join("") +
         "</select>"
       : '<div class="imp-note" id="liCampNote">New prospects will be added to an auto-created <b>LinkedIn Imports</b> campaign.</div>';
+    var extHtml =
+      '<div class="li-ext"><div class="li-ext-h">🧩 Pull real profiles with the Chrome extension <span class="li-ext-tag">recommended</span></div>' +
+        '<ol class="or-steps" style="margin-top:6px"><li>Install the RecruiterOS extension (Chrome → Extensions → Load unpacked → the <code>extension/</code> folder).</li>' +
+        '<li>Open the extension → Settings and paste the token + backend URL below.</li>' +
+        '<li>Open your Sales Navigator people-search and click <b>Scrape this search</b>. It pages through the whole list slowly &amp; naturally and posts every profile (photo, title, company, location) straight into Prospects — no Unipile needed.</li></ol>' +
+        '<div class="li-ext-row"><label>Ingest token</label><span class="li-copy"><code id="liTok">loading…</code><button class="btn btn-ghost btn-sm" id="liTokCopy">Copy</button></span></div>' +
+        '<div class="li-ext-row"><label>Backend URL</label><span class="li-copy"><code id="liBase">loading…</code><button class="btn btn-ghost btn-sm" id="liBaseCopy">Copy</button></span></div>' +
+      "</div>" +
+      '<div class="li-or">— or quick-pull without the extension —</div>';
     var bodyHtml =
+      extHtml +
       campField +
       '<label>Sales Navigator or LinkedIn search URL</label>' +
       '<input id="liUrl" type="url" autocomplete="off" placeholder="https://www.linkedin.com/sales/search/people?query=…" />' +
@@ -2439,7 +2462,20 @@
       '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="liCancel">Cancel</button>' +
       '<button class="btn btn-primary btn-sm" id="liGo">Pull profiles</button></div>';
 
-    openModal("Enrich LinkedIn searches", "Paste a Sales Navigator / LinkedIn search URL to turn it into a prospect list.", bodyHtml, function (root, close) {
+    openModal("Pull LinkedIn profiles", "Use the Chrome extension to scrape a Sales Navigator search into Prospects (recommended), or quick-pull from a URL.", bodyHtml, function (root, close) {
+      // Fill the extension token + backend URL, and wire copy buttons.
+      api("/ext-token").then(function (d) {
+        var tok = root.querySelector("#liTok"), base = root.querySelector("#liBase");
+        if (tok) tok.textContent = (d && d.token) || "—";
+        if (base) base.textContent = (d && d.backendBaseUrl) || (location.origin + "/api/linkedin");
+      }).catch(function () {});
+      function copyFrom(id, btn) {
+        var node = root.querySelector(id); if (!node) return;
+        navigator.clipboard.writeText(node.textContent).then(function () { var b = root.querySelector(btn); if (b) { var o = b.textContent; b.textContent = "Copied ✓"; setTimeout(function () { b.textContent = o; }, 1200); } });
+      }
+      var tc = root.querySelector("#liTokCopy"); if (tc) tc.addEventListener("click", function () { copyFrom("#liTok", "#liTokCopy"); });
+      var bc = root.querySelector("#liBaseCopy"); if (bc) bc.addEventListener("click", function () { copyFrom("#liBase", "#liBaseCopy"); });
+
       var urlEl = root.querySelector("#liUrl"), prev = root.querySelector("#liPrev");
       if (urlEl.focus) try { urlEl.focus(); } catch (e) {}
       function valid() { return /^https?:\/\/(www\.)?linkedin\.com\//i.test((urlEl.value || "").trim()); }

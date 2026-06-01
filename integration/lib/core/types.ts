@@ -121,6 +121,12 @@ export interface Prospect {
    *  enrichment waterfall can resolve a company email + phone for outreach. */
   companyDomain?: string;
   title?: string;
+  /** Profile photo URL (e.g. captured from a LinkedIn/Sales Nav search). */
+  photoUrl?: string;
+  /** City / region as shown on the profile. */
+  location?: string;
+  /** One-line LinkedIn headline. */
+  headline?: string;
   /** ICP category bucket this prospect was matched into. */
   category?: string;
   status: ProspectStatus;

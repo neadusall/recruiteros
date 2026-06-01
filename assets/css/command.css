@@ -294,6 +294,7 @@
 .lr-id { min-width: 0; }
 .lr-contact { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
 .lr-contact.muted { color: var(--text-dim); font-style: italic; }
+.pr-pending { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 99px; background: rgba(255,194,77,0.16); color: var(--accent-amber); margin-left: 8px; }
 .list-row .stage-select { margin-left: 0; }
 .pr-enrich { appearance: none; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); margin-left: auto; transition: all .12s ease; }
 .pr-enrich:hover { border-color: var(--brand); color: #fff; }

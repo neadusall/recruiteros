@@ -41,6 +41,9 @@ export interface NewProspectInput {
   /** Pairs the person to their company so outreach enrichment can resolve contact. */
   companyDomain?: string;
   title?: string;
+  photoUrl?: string;
+  location?: string;
+  headline?: string;
   category?: string;
   warmth?: number;
 }
@@ -71,6 +74,9 @@ export async function addProspect(input: NewProspectInput): Promise<Prospect> {
     company: input.company ?? p.company,
     companyDomain: input.companyDomain ?? p.companyDomain,
     title: input.title ?? p.title,
+    photoUrl: input.photoUrl ?? p.photoUrl,
+    location: input.location ?? p.location,
+    headline: input.headline ?? p.headline,
     category: input.category ?? p.category,
   });
 
@@ -87,20 +93,72 @@ export async function addProspect(input: NewProspectInput): Promise<Prospect> {
 }
 
 /**
- * Enrich one prospect's outreach contact — company email + phone — cheapest-first.
+ * Research the actual hiring manager behind a role — a REAL person, never invented.
  *
- * Uses the prospect's company domain (paired on promote) so the waterfall can hunt a
- * work email and a direct-dial/mobile. Spend happens only here, on demand. With no
- * provider keys set the waterfall no-ops and the prospect is returned unchanged, so this
- * is always safe to call. Returns `{ prospect, found }` describing what was resolved.
+ * Drives the workspace's connected LinkedIn account to search "<title> <company>" and
+ * returns the best-matching member (name + profile). With no connected account it
+ * returns null (the prospect stays a role placeholder until a research source exists).
+ * This is the only honest way to resolve a name: from a live people lookup, not a guess.
+ */
+export async function findHiringManager(
+  workspaceId: string,
+  q: { company?: string; title?: string },
+): Promise<{ fullName: string; title?: string; linkedinUrl?: string } | null> {
+  if (!q.company || !q.title) return null;
+  try {
+    const { listLinkedInAccounts } = await import("../accounts");
+    const { getProvider } = await import("../linkedin/provider");
+    const { toEngineAccount } = await import("../linkedin/console");
+    const core = listLinkedInAccounts(workspaceId).find((a) => a.active && a.warmup !== "flagged");
+    if (!core) return null;
+    const account = toEngineAccount(core, core.id);
+    const url =
+      "https://www.linkedin.com/search/results/people/?keywords=" +
+      encodeURIComponent(`${q.title} ${q.company}`);
+    const profiles = await getProvider().searchProfiles({ account, url, limit: 5 });
+    if (!profiles?.length) return null;
+    const co = q.company.toLowerCase();
+    const best = profiles.find((pr) => (pr.company ?? "").toLowerCase().includes(co)) ?? profiles[0];
+    if (!best?.fullName) return null;
+    return { fullName: best.fullName, title: best.title ?? q.title, linkedinUrl: best.publicProfileUrl };
+  } catch {
+    return null;
+  }
+}
+
+/** True when the prospect is still a role placeholder (no researched person yet). */
+function needsHiringManager(p: Prospect): boolean {
+  return !p.linkedinUrl && (/ [—–] /.test(p.fullName || "") || /hiring manager/i.test(p.fullName || ""));
+}
+
+/**
+ * Enrich one prospect — first RESEARCH the hiring manager's real name (if the prospect
+ * is still a role placeholder), then resolve company email + phone, cheapest-first.
+ *
+ * Name research drives the connected LinkedIn account; contact enrichment uses the
+ * waterfall over the company domain. Both no-op safely without a connected source, so
+ * this is always safe to call. Returns `{ prospect, found }` describing what was resolved.
  */
 export async function enrichProspect(
   workspaceId: string,
   prospectId: string,
-): Promise<{ prospect: Prospect; found: { email: boolean; phone: boolean } }> {
+): Promise<{ prospect: Prospect; found: { name: boolean; email: boolean; phone: boolean } }> {
   const core = getCore();
   const p = await core.getProspect(prospectId);
   if (!p || p.workspaceId !== workspaceId) throw Object.assign(new Error("not_found"), { status: 404 });
+
+  // Step 1: resolve the actual hiring manager (real person), if not already known.
+  let nameResolved = false;
+  if (needsHiringManager(p)) {
+    const hm = await findHiringManager(workspaceId, { company: p.company, title: p.title });
+    if (hm?.fullName) {
+      p.fullName = hm.fullName;
+      p.firstName = hm.fullName.trim().split(/\s+/)[0];
+      if (hm.title) p.title = hm.title;
+      if (hm.linkedinUrl) p.linkedinUrl = hm.linkedinUrl;
+      nameResolved = true;
+    }
+  }
 
   const domain = p.companyDomain;
   const [first, ...rest] = (p.fullName || "").trim().split(/\s+/);
@@ -131,7 +189,7 @@ export async function enrichProspect(
     /* leave unresolved; the recruiter can retry or add manually */
   }
 
-  const found = { email: !!email && email !== p.email, phone: !!phone && phone !== p.phone };
+  const found = { name: nameResolved, email: !!email && email !== p.email, phone: !!phone && phone !== p.phone };
 
   // Update the existing record in place (don't route through addProspect — its
   // email-dedupe would fork a second prospect when the original had no email yet).
