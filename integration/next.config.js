@@ -6,7 +6,7 @@
 const PAGES = [
   "about", "alfred", "analytics", "app", "business-development-os",
   "campaign-builder", "campaign-studio", "command", "conversations",
-  "developers", "features", "forgot-password", "index", "integrations",
+  "developers", "features", "forgot-password", "helpcenter", "index", "integrations",
   "linkedin", "login", "outreach", "platform", "pricing",
   "recruiting-os", "reset-password", "signals", "signup", "sourcing",
 ];
