@@ -47,7 +47,10 @@ async function getJob() { const { scrapeJob } = await chrome.storage.local.get('
 async function setJob(j) { await chrome.storage.local.set({ scrapeJob: j }); return j; }
 
 chrome.runtime.onInstalled.addListener(async () => {
-  await chrome.storage.local.set({ state: DEFAULT_STATE });
+  // Seed state ONLY if there is none — never wipe an existing connection/settings
+  // on reload/update (onInstalled fires on every unpacked refresh).
+  const { state } = await chrome.storage.local.get('state');
+  if (!state) await chrome.storage.local.set({ state: DEFAULT_STATE });
   chrome.alarms.create('ros-tick', { periodInMinutes: Math.max(0.5, CFG.tickMinutes || 1) });
   log('info', 'RecruiterOS Outreach installed');
 });

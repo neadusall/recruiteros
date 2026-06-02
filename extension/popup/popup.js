@@ -136,8 +136,9 @@
   /* ---- scrape ---- */
   $('#startScrape').addEventListener('click', async () => {
     const url = $('#snUrl').value.trim();
+    // No blocking prompt — the status line above already shows where leads go.
     const connected = state && state.settings && state.settings.backendBaseUrl && state.settings.backendApiKey;
-    if (!connected && !confirm('Not connected to the portal — these leads will only be saved in the extension (CSV) and will NOT appear under Prospects.\n\nConnect in the portal first (Enrich LinkedIn searches → Connect this workspace) to push them in. Start anyway?')) return;
+    if (!connected) flash('Heads up: not connected to the portal — leads will be local (CSV) until you Connect.');
     const r = await send({ type: TYPE.SCRAPE_START, url, name: $('#snName').value.trim(), maxPages: +$('#snPages').value });
     flash(r.ok ? 'Scrape started, opening the search...' : (r.info || 'Could not start'));
     setTimeout(refresh, 800);
