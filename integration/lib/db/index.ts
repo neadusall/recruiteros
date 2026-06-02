@@ -1,30 +1,36 @@
 /**
  * RecruiterOS · Persistence
- * A tiny, dependency-light durable layer over Postgres.
+ * A tiny, dependency-light durable layer. Modules keep fast in-memory stores;
+ * this snapshots them so state (accounts, sessions, workspaces, …) survives a
+ * restart. Each module calls `loadSnapshot(key)` once on boot and
+ * `saveSnapshot(key, data)` (debounced) after mutations.
  *
- * The engine's modules keep their fast in-memory stores; this adds a snapshot
- * key/value table so state survives restarts. Each module that opts in calls
- * `loadSnapshot(key)` once on boot and `saveSnapshot(key, data)` (debounced)
- * after mutations. No ORM, no migrations beyond the single table below.
+ * Backends, in priority order:
+ *   1. Postgres — only when DATABASE_URL is explicitly set (opt-in).
+ *   2. File     — when ROS_DATA_DIR is set (a mounted Docker volume in prod).
+ *                 This is the zero-config default: no DB, no password, no
+ *                 volume-init matching, no manual enable step — it just survives
+ *                 every redeploy. THIS is the durable default in production.
+ *   3. Memory   — neither set (local/static dev): load null, save no-op.
  *
- * If DATABASE_URL is not set (local dev without a db), it degrades gracefully:
- * load returns null, save is a no-op, so the app still runs in-memory.
+ * The "logged out + create a new account on every deploy" bug was an in-memory
+ * store with no durable backend; the file backend fixes it for good.
  */
 
 import { Pool } from "pg";
+import { promises as fs } from "fs";
+import * as path from "path";
 
 let pool: Pool | null = null;
 let ready: Promise<void> | null = null;
 
-/**
- * Resolve the Postgres connection string. Prefers DATABASE_URL, but SELF-HEALS:
- * if DATABASE_URL was never written to .env.production yet POSTGRES_PASSWORD is
- * present (it must be, for the compose `db` service), derive the standard
- * compose connection. This keeps accounts/sessions durable across redeploys
- * even on installs whose .env.production predates DATABASE_URL — the fix for the
- * "logged out + asked to create a new account on every deploy" bug.
- */
-function connString(): string | null {
+/** Durable file directory (a mounted volume in prod). */
+function fileDir(): string | null {
+  return process.env.ROS_DATA_DIR || null;
+}
+
+/** Postgres connection string, if a DB backend is in play. */
+function pgUrl(): string | null {
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
   if (process.env.POSTGRES_PASSWORD) {
     return `postgres://recruiteros:${process.env.POSTGRES_PASSWORD}@db:5432/recruiteros`;
@@ -32,24 +38,48 @@ function connString(): string | null {
   return null;
 }
 
-export function dbEnabled(): boolean {
-  return !!connString();
+type Mode = "pg" | "file" | "none";
+function mode(): Mode {
+  if (process.env.DATABASE_URL) return "pg"; // explicit Postgres wins
+  if (fileDir()) return "file";              // zero-config durable default
+  if (process.env.POSTGRES_PASSWORD) return "pg"; // legacy compose self-heal
+  return "none";
 }
 
+export function dbEnabled(): boolean {
+  return mode() !== "none";
+}
+
+/* ---------------- file backend ---------------- */
+function fpath(key: string): string {
+  return path.join(fileDir() as string, "snap_" + key.replace(/[^a-zA-Z0-9_-]/g, "_") + ".json");
+}
+async function fileLoad<T>(key: string): Promise<T | null> {
+  try {
+    return JSON.parse(await fs.readFile(fpath(key), "utf8")) as T;
+  } catch {
+    return null; // absent or unreadable -> start empty
+  }
+}
+async function fileSave(key: string, data: unknown): Promise<void> {
+  const dir = fileDir() as string;
+  await fs.mkdir(dir, { recursive: true });
+  const fp = fpath(key);
+  const tmp = fp + ".tmp";
+  await fs.writeFile(tmp, JSON.stringify(data));
+  await fs.rename(tmp, fp); // atomic replace
+}
+
+/* ---------------- postgres backend ---------------- */
 function getPool(): Pool | null {
-  const cs = connString();
+  const cs = pgUrl();
   if (!cs) return null;
   if (!pool) {
-    pool = new Pool({
-      connectionString: cs,
-      max: 5,
-      idleTimeoutMillis: 30_000,
-    });
+    pool = new Pool({ connectionString: cs, max: 5, idleTimeoutMillis: 30_000 });
   }
   return pool;
 }
-
-async function init(): Promise<void> {
+async function pgInit(): Promise<void> {
   const p = getPool();
   if (!p) return;
   await p.query(
@@ -60,21 +90,30 @@ async function init(): Promise<void> {
      )`,
   );
 }
-
 function whenReady(): Promise<void> {
-  if (!ready) ready = init().catch((e) => { console.error("[db] init failed:", e.message); });
+  if (!ready) ready = pgInit().catch((e) => { console.error("[db] init failed:", e.message); });
   return ready;
 }
 
-/** Real connectivity probe: true only if a query actually succeeds. */
+/** Real readiness probe: true only if the active backend actually works. */
 export async function dbPing(): Promise<boolean> {
+  if (mode() === "file") {
+    try {
+      await fs.mkdir(fileDir() as string, { recursive: true });
+      await fs.writeFile(path.join(fileDir() as string, ".probe"), String(Date.now()));
+      return true;
+    } catch {
+      return false;
+    }
+  }
   const p = getPool();
   if (!p) return false;
   try { await p.query("SELECT 1"); return true; } catch { return false; }
 }
 
-/** Load a JSON snapshot for `key`, or null if absent / db disabled. */
+/** Load a JSON snapshot for `key`, or null if absent / persistence disabled. */
 export async function loadSnapshot<T>(key: string): Promise<T | null> {
+  if (mode() === "file") return fileLoad<T>(key);
   const p = getPool();
   if (!p) return null;
   try {
@@ -87,8 +126,12 @@ export async function loadSnapshot<T>(key: string): Promise<T | null> {
   }
 }
 
-/** Upsert a JSON snapshot for `key`. No-op if db disabled. */
+/** Upsert a JSON snapshot for `key`. No-op if persistence disabled. */
 export async function saveSnapshot(key: string, data: unknown): Promise<void> {
+  if (mode() === "file") {
+    try { await fileSave(key, data); } catch (e) { console.error("[db] fileSave", key, (e as Error).message); }
+    return;
+  }
   const p = getPool();
   if (!p) return;
   try {
@@ -104,9 +147,8 @@ export async function saveSnapshot(key: string, data: unknown): Promise<void> {
 }
 
 /**
- * Debounced saver: returns a function you can call on every mutation; it
- * coalesces rapid writes into one save ~250ms later. Survives process exit via
- * a flush on the final timer.
+ * Debounced saver: call on every mutation; coalesces rapid writes into one save
+ * ~250ms later.
  */
 export function debouncedSaver(key: string, getData: () => unknown, ms = 250): () => void {
   let t: NodeJS.Timeout | null = null;

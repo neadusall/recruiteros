@@ -27,15 +27,16 @@ services:
     restart: unless-stopped
     env_file: .env.production
     environment:
-      # Pass the DB password through so lib/db can self-heal the connection when
-      # .env.production has no DATABASE_URL. Uses the SAME default expression as
-      # the db service, so the app and db agree on the password the pg volume was
-      # initialized with — making accounts/sessions durable with zero manual env
-      # editing. A real DATABASE_URL in .env.production still takes precedence.
+      # Durable persistence with ZERO config: the app snapshots accounts,
+      # sessions, workspaces, etc. to JSON files under /data — a named volume
+      # that survives every redeploy. No DB password, no volume-init matching,
+      # no manual enable step. This is what stops the "logged out + create a new
+      # account on every deploy" bug for good. (Set DATABASE_URL to opt into
+      # Postgres instead; it takes precedence.)
+      ROS_DATA_DIR: /data
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_env}
-    depends_on:
-      db:
-        condition: service_healthy
+    volumes:
+      - app_data:/data
     expose:
       - "3000"
     # not published to the host directly; Caddy reaches it on the internal net
@@ -57,3 +58,4 @@ volumes:
   caddy_data:
   caddy_config:
   pg_data:
+  app_data:   # durable JSON snapshots (accounts/sessions/workspaces) — survives redeploys
