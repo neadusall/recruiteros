@@ -33,17 +33,20 @@ export async function POST(req: Request) {
   const ws = await workspaceForToken(bearerToken(req));
   if (!ws) return fail("unauthorized", 401);
 
-  const b = await body<{ campaignName?: string; leads?: Lead[] }>(req);
+  const b = await body<{ campaignName?: string; leads?: Lead[]; motion?: string }>(req);
   const leads = Array.isArray(b?.leads) ? b!.leads : [];
   if (!leads.length) return fail("no_leads", 422);
-  const name = (b?.campaignName || "LinkedIn import").trim();
+  // Follow the portal's current motion so the leads land in the right folder
+  // (BD vs Recruiting); default to recruiting when unspecified.
+  const motion = b?.motion === "bd" ? "bd" : "recruiting";
+  const name = (b?.campaignName || (motion === "bd" ? "LinkedIn import (BD)" : "LinkedIn import")).trim();
 
   const core = getCore();
   const camps = await core.listCampaigns(ws);
   let camp = camps.find((c) => c.name === name);
   if (!camp) {
     camp = {
-      id: rid("camp"), workspaceId: ws, name, motion: "recruiting",
+      id: rid("camp"), workspaceId: ws, name, motion,
       goal: "Imported from LinkedIn / Sales Navigator", status: "draft",
       icp: {}, signals: [], steps: [], createdAt: nowIso(),
     } as any;

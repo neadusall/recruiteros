@@ -66,34 +66,52 @@
     return null;
   }
 
-  /* ---- lazy-load EVERY card on the page before scraping ----
-     Sales Navigator only renders the cards near the viewport, so scraping without
-     scrolling captures a partial page (the "43 of 304" symptom). We scroll the
-     list (window + inner container) in human-ish steps until the card count stops
-     growing, then return to the top. */
-  async function loadAllCards() {
-    var last = -1, stable = 0, tries = 0;
+  /* ---- scrape a page progressively WHILE scrolling ----
+     Sales Navigator VIRTUALIZES the list: as you scroll down, off-screen cards are
+     removed from the DOM (only ~10-15 exist at once). So "scroll then scrape" only
+     ever sees a fraction — the real cause of grabbing 43 of 304. Instead we crawl
+     down slowly and capture cards as they render, deduping, until we hit the bottom
+     with nothing new. This gets EVERY lead and reads like a human skimming. */
+  function keyish(r) { return ((r.profileUrl || r.salesNavUrl || ((r.fullName || '') + '|' + (r.company || ''))) + '').toLowerCase(); }
+  async function scrapePageProgressively(datasetName, onCount) {
     var box = resultsContainer();
-    while (stable < 3 && tries < 60) {
-      var n = document.querySelectorAll(SEL.name).length;
-      if (n === last) stable++; else { stable = 0; last = n; }
-      var step = Math.round(window.innerHeight * (0.55 + Math.random() * 0.35));
+    var map = new Map();
+    function collect() {
+      scrapeCurrentPage(datasetName).forEach(function (r) {
+        var k = keyish(r); if (k && k !== '|' && !map.has(k)) map.set(k, r);
+      });
+      if (onCount) onCount(map.size);
+    }
+    var pos = function () { return box ? box.scrollTop : (window.scrollY || document.documentElement.scrollTop); };
+    var maxPos = function () { return box ? (box.scrollHeight - box.clientHeight) : (document.documentElement.scrollHeight - window.innerHeight); };
+    if (box) box.scrollTop = 0; else window.scrollTo(0, 0);
+    await sleep(jitter(600, 1300));
+    collect();
+    var prev = -1, stall = 0, lastPos = -1, tries = 0;
+    while (tries < 150) {
+      var view = box ? box.clientHeight : window.innerHeight;
+      var step = Math.round(view * (0.40 + Math.random() * 0.30));   // partial viewport, human-ish
       if (box) box.scrollTop = box.scrollTop + step; else window.scrollBy(0, step);
-      window.scrollBy(0, Math.round(step * 0.3)); // nudge window too (layout varies)
-      await sleep(jitter(450, 950));
+      await sleep(jitter(700, 1700));   // let virtualized rows render before they recycle
+      collect();
+      var p = pos();
+      stall = (map.size === prev && Math.abs(p - lastPos) < 4) ? stall + 1 : 0;
+      prev = map.size; lastPos = p;
+      if (p >= maxPos() - 8 && stall >= 2) break;   // reached the bottom, nothing new
+      if (stall >= 6) break;                         // safety: scroll stuck
       tries++;
     }
-    // settle at the bottom, then ease back toward the top like a person would
-    await sleep(jitter(500, 1200));
-    if (box) box.scrollTop = 0; else window.scrollTo(0, 0);
-    return document.querySelectorAll(SEL.name).length;
+    await sleep(jitter(400, 900)); collect();
+    return Array.from(map.values());
   }
 
   /* ---- human dwell: stay on the page 20–50s (randomized), reading + scrolling,
      with an occasional longer "distracted" pause, before turning the page ---- */
   async function humanDwell(minMs, maxMs, onTick) {
     var total = jitter(minMs || 20000, maxMs || 50000);
-    if (Math.random() < 0.15) total += jitter(8000, 18000); // sometimes linger
+    var roll = Math.random();
+    if (roll < 0.07) total += jitter(60000, 150000);        // occasional "coffee break" (1–2.5 min)
+    else if (roll < 0.22) total += jitter(8000, 18000);     // or just linger a bit longer
     var start = Date.now();
     var box = resultsContainer();
     while (Date.now() - start < total) {
@@ -130,7 +148,7 @@
       out.push({
         fullName: nm.full || rawName, firstName: nm.first, lastName: nm.last,
         headline: window.ROS.cleanText(title), title: window.ROS.cleanText(title),
-        company: window.ROS.cleanText(txt(card, SEL.company)),
+        company: window.ROS.cleanCompany(txt(card, SEL.company)),
         location: window.ROS.cleanText(txt(card, SEL.location)),
         photoUrl,
         connectionDegree: txt(card, SEL.degree),
@@ -180,10 +198,11 @@
       return;
     }
 
-    // Scroll through the WHOLE page so every lazy-loaded card renders, then scrape.
-    const loaded = await loadAllCards();
-    banner('🔎 Reading page ' + page + ' · ' + loaded + ' on this page');
-    const records = scrapeCurrentPage(scrapeJob.name);
+    // Crawl the whole page slowly, capturing cards as they render (the list is
+    // virtualized, so we must scrape while scrolling, not after).
+    const records = await scrapePageProgressively(scrapeJob.name, function (n) {
+      banner('🔎 Reading page ' + page + ' · ' + n + ' captured on this page…');
+    });
     await send({ type: TYPE.SCRAPE_PAGE, datasetId: scrapeJob.datasetId, page, records });
 
     const more = hasNextPage();

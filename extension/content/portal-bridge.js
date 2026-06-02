@@ -47,6 +47,7 @@
       var settings = {
         backendBaseUrl: d.backendBaseUrl || '',
         backendApiKey: d.token || '',
+        backendMotion: d.motion === 'bd' ? 'bd' : 'recruiting',
       };
       try {
         chrome.runtime.sendMessage({ type: 'ros.updateSettings', settings: settings }, function () {

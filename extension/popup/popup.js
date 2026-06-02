@@ -36,6 +36,10 @@
       const stop = $('#stopScrape'); if (stop) stop.onclick = async () => { await send({ type: TYPE.SCRAPE_STOP, finished: false }); refresh(); };
     }
 
+    // scrape destination toggle (BD vs Recruiting)
+    const sm = s.settings.backendMotion || 'recruiting';
+    $$('#snMotion .seg').forEach(b => b.classList.toggle('active', b.dataset.motion === sm));
+
     // datasets
     $('#dsCount').textContent = (s.datasets || []).length;
     $('#datasetList').innerHTML = (s.datasets || []).length ? s.datasets.map(d => `
@@ -110,6 +114,13 @@
     flash(r.ok ? 'Connected as ' + r.account.name : (r.info || 'Could not connect'));
     refresh();
   });
+
+  /* ---- scrape destination: BD vs Recruiting ---- */
+  $$('#snMotion .seg').forEach(b => b.addEventListener('click', async () => {
+    $$('#snMotion .seg').forEach(x => x.classList.remove('active')); b.classList.add('active');
+    await send({ type: TYPE.UPDATE_SETTINGS, settings: { backendMotion: b.dataset.motion } });
+    flash('Scraping to ' + (b.dataset.motion === 'bd' ? 'Business Dev' : 'Recruiting') + ' folder');
+  }));
 
   /* ---- scrape ---- */
   $('#startScrape').addEventListener('click', async () => {

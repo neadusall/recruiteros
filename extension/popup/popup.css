@@ -61,6 +61,9 @@ body { width: 348px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
 .p-two { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .p-check { display: flex; align-items: center; gap: 7px; color: var(--text); font-size: 12.5px; margin: 6px 0; }
 .p-note { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.p-seg { display: flex; gap: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 9px; padding: 4px; }
+.p-seg .seg { flex: 1; background: none; border: none; color: var(--muted); font-size: 12.5px; font-weight: 700; padding: 8px 6px; border-radius: 6px; cursor: pointer; }
+.p-seg .seg.active { background: var(--brand); color: #fff; }
 .p-warn { background: rgba(224,107,107,.12); border: 1px solid rgba(224,107,107,.3); color: var(--red);
   border-radius: 7px; padding: 8px 10px; font-size: 11.5px; margin-bottom: 10px; }
 

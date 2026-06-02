@@ -105,6 +105,15 @@
       .trim();
   }
 
+  // Company name: de-junk, then strip trailing legal suffixes (Inc, LLC, Ltd, …)
+  // and any trailing commas. "Globex, Inc." -> "Globex", "Acme LLC" -> "Acme".
+  function cleanCompany(raw) {
+    var s = cleanText(raw);
+    var re = /[\s,]+(?:inc|llc|l\.l\.c|ltd|limited|corp|corporation|gmbh|plc|pllc|llp|lp|ag|s\.?a|bv|nv|pty|srl|oy|ab|kg|spa)\.?$/i;
+    for (var i = 0; i < 3 && re.test(s); i++) s = s.replace(re, '').replace(/[\s,]+$/, '');
+    return s.trim();
+  }
+
   // Normalize a public LinkedIn profile URL to https://www.linkedin.com/in/<slug>.
   function publicProfileUrl(href) {
     if (!href) return '';
@@ -112,5 +121,5 @@
     return m ? 'https://www.linkedin.com/in/' + m[1] : '';
   }
 
-  g.ROS = { TYPE, ACTION, CHANNEL, LEAD_FIELDS, makeAction, send, cleanName, cleanText, publicProfileUrl, VERSION: '0.3.0' };
+  g.ROS = { TYPE, ACTION, CHANNEL, LEAD_FIELDS, makeAction, send, cleanName, cleanText, cleanCompany, publicProfileUrl, VERSION: '0.3.0' };
 })(typeof self !== 'undefined' ? self : this);

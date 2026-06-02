@@ -26,6 +26,8 @@ const DEFAULT_STATE = {
     // Ingest token (from the app's "Enrich LinkedIn searches" dialog). Also used
     // as the bearer for the backend bridge agent endpoints (/api/linkedin/agent/*).
     backendApiKey: CFG.backendApiKey,
+    // Which portal folder scraped leads land in (set by the portal at Connect).
+    backendMotion: 'recruiting',
     // Browser-execution bridge: when enabled, this extension acts as the
     // executor for the backend's cadence. It polls the outreach bridge for
     // actions targeted at `accountId`, performs them in the user's session,
@@ -338,7 +340,7 @@ async function onScrapePage({ datasetId, page, records }) {
     // if the extension isn't connected to a backend yet.
     const s = await getState();
     const newOnes = (records || []).filter(function (r) { return r && (r.fullName); });
-    await relayToBackend(s, 'campaignFromDataset', { campaignName: ds.name, leads: newOnes });
+    await relayToBackend(s, 'campaignFromDataset', { campaignName: ds.name, leads: newOnes, motion: s.settings.backendMotion });
   }
   return { ok: true, total: ds.records.length };
 }
@@ -373,7 +375,8 @@ async function exportCsv(id) {
     if (c === 'fullName') return nm.full;
     if (c === 'firstName') return nm.first;
     if (c === 'lastName') return nm.last;
-    if (c === 'headline' || c === 'title' || c === 'company' || c === 'location') return R.cleanText(r[c]);
+    if (c === 'company') return R.cleanCompany(r[c]);
+    if (c === 'headline' || c === 'title' || c === 'location') return R.cleanText(r[c]);
     if (c === 'capturedAt') return new Date(r[c] || Date.now()).toISOString();
     return r[c];
   };

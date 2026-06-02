@@ -33,7 +33,7 @@
     }
   });
   function extPing() { try { window.postMessage({ source: "ros-portal", type: "ping" }, window.location.origin); } catch (e) {} }
-  function extConfigure(backendBaseUrl, token) { try { window.postMessage({ source: "ros-portal", type: "configure", backendBaseUrl: backendBaseUrl, token: token }, window.location.origin); } catch (e) {} }
+  function extConfigure(backendBaseUrl, token) { try { window.postMessage({ source: "ros-portal", type: "configure", backendBaseUrl: backendBaseUrl, token: token, motion: motion }, window.location.origin); } catch (e) {} }
 
   // RBAC: the session carries the capabilities the user's role allows; the UI
   // only shows what they can actually use.
