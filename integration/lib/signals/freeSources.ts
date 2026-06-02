@@ -464,6 +464,14 @@ function tag(block: string, name: string): string | undefined {
 function decode(s: string): string {
   return s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, '"');
 }
+/** Coerce a pubDate (ISO string or unix seconds/millis) to an ISO string. */
+function toIso(v: unknown, fallback: string): string {
+  if (typeof v === "string" && v) return v;
+  if (typeof v === "number" && isFinite(v)) {
+    try { return new Date(v > 1e12 ? v : v * 1000).toISOString(); } catch { return fallback; }
+  }
+  return fallback;
+}
 /** Tiny stable string hash (djb2) for dedupe ids — deterministic, no randomness. */
 function hash(s: string): string {
   let h = 5381;
@@ -697,6 +705,170 @@ export class TheMuseSource implements SignalSource {
 }
 interface MuseJob { id?: number; name: string; company?: { name: string }; categories?: { name: string }[]; locations?: { name: string }[]; publication_date?: string; refs?: { landing_page?: string } }
 
+/** Himalayas remote-jobs API — free, NO key/auth. Carries categories + salary +
+ *  company; categories map onto the company for the industry filter. */
+export class HimalayasSource implements SignalSource {
+  readonly id = "himalayas";
+  readonly kind: SourceKind = "job_board";
+  readonly emits: SignalType[] = ["job_posting"];
+  readonly label = "Himalayas remote jobs (free API)";
+  isConfigured(): boolean { return true; }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    const now = new Date().toISOString();
+    const signals: Signal[] = [];
+    const warnings: string[] = [];
+    const kw = (ctx.watchlist?.keywords ?? []).map((k) => k.toLowerCase());
+    const want = (s: string) => !kw.length || kw.some((k) => s.toLowerCase().includes(k));
+    try {
+      const limit = Math.min(ctx.limit ?? 100, 100);
+      const res = await getJson<{ jobs: HimalayasJob[] }>(`https://himalayas.app/jobs/api?limit=${limit}`);
+      for (const j of res.jobs ?? []) {
+        if (!j.companyName || !j.title) continue;
+        const cat = (j.categories ?? [])[0] ?? (j.parentCategories ?? [])[0];
+        if (!want(`${j.title} ${j.companyName} ${cat ?? ""}`)) continue;
+        const loc = (j.locationRestrictions ?? [])[0];
+        signals.push(makeSignal({
+          type: "job_posting",
+          title: `${j.companyName} is hiring (remote): ${j.title}`,
+          detail: `Remote role "${j.title}"${cat ? ` · ${cat}` : ""}${loc ? ` · ${loc}` : ""}.`,
+          evidence: { roleTitle: j.title, function: cat, location: loc || "Remote", applyUrl: j.applicationLink, remote: true },
+          source: { kind: this.kind, connector: "himalayas", url: j.applicationLink, externalId: `himalayas:${j.guid ?? j.title}`, observedAt: now },
+          eventAt: toIso(j.pubDate, now),
+          ingestedAt: now,
+          anchor: j.companyName,
+          companyHint: { id: "", name: j.companyName, industry: cat, hiringLocations: [{ raw: loc || "Remote", remote: true }] },
+        }));
+      }
+    } catch (err) { warnings.push(`himalayas: ${(err as Error).message}`); }
+    return { signals, warnings };
+  }
+}
+interface HimalayasJob { title: string; companyName: string; categories?: string[]; parentCategories?: string[]; locationRestrictions?: string[]; applicationLink?: string; pubDate?: string | number; guid?: string }
+
+/** Working Nomads jobs feed — free, NO key/auth. Top-level array with company +
+ *  category, classifies onto the company. */
+export class WorkingNomadsSource implements SignalSource {
+  readonly id = "working_nomads";
+  readonly kind: SourceKind = "job_board";
+  readonly emits: SignalType[] = ["job_posting"];
+  readonly label = "Working Nomads jobs (free API)";
+  isConfigured(): boolean { return true; }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    const now = new Date().toISOString();
+    const signals: Signal[] = [];
+    const warnings: string[] = [];
+    const kw = (ctx.watchlist?.keywords ?? []).map((k) => k.toLowerCase());
+    const want = (s: string) => !kw.length || kw.some((k) => s.toLowerCase().includes(k));
+    try {
+      const res = await getJson<WnJob[]>("https://www.workingnomads.com/api/exposed_jobs/");
+      for (const j of (Array.isArray(res) ? res : []).slice(0, ctx.limit ?? 100)) {
+        if (!j.company_name || !j.title) continue;
+        if (!want(`${j.title} ${j.company_name} ${j.category_name ?? ""} ${j.tags ?? ""}`)) continue;
+        signals.push(makeSignal({
+          type: "job_posting",
+          title: `${j.company_name} is hiring: ${j.title}`,
+          detail: `Remote role "${j.title}"${j.category_name ? ` · ${j.category_name}` : ""}${j.location ? ` · ${j.location}` : ""}.`,
+          evidence: { roleTitle: j.title, function: j.category_name, location: j.location || "Remote", applyUrl: j.url, remote: true },
+          source: { kind: this.kind, connector: "working_nomads", url: j.url, externalId: `wn:${j.url}`, observedAt: now },
+          eventAt: toIso(j.pub_date, now),
+          ingestedAt: now,
+          anchor: j.company_name,
+          companyHint: { id: "", name: j.company_name, industry: j.category_name },
+        }));
+      }
+    } catch (err) { warnings.push(`working_nomads: ${(err as Error).message}`); }
+    return { signals, warnings };
+  }
+}
+interface WnJob { url: string; title: string; company_name: string; category_name?: string; tags?: string; location?: string; pub_date?: string }
+
+/** We Work Remotely RSS — free, NO key/auth (attribution required). Title is
+ *  "Company: Role"; region + category give location + function. */
+export class WeWorkRemotelySource implements SignalSource {
+  readonly id = "wework_remotely";
+  readonly kind: SourceKind = "job_board";
+  readonly emits: SignalType[] = ["job_posting"];
+  readonly label = "We Work Remotely (free RSS)";
+  isConfigured(): boolean { return true; }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    const now = new Date().toISOString();
+    const signals: Signal[] = [];
+    const warnings: string[] = [];
+    const kw = (ctx.watchlist?.keywords ?? []).map((k) => k.toLowerCase());
+    const want = (s: string) => !kw.length || kw.some((k) => s.toLowerCase().includes(k));
+    try {
+      const xml = await getText("https://weworkremotely.com/remote-jobs.rss");
+      for (const b of xml.split(/<item>/).slice(1, (ctx.limit ?? 100) + 1)) {
+        const rawTitle = tag(b, "title"); const link = tag(b, "link");
+        if (!rawTitle || !link) continue;
+        const t = decode(rawTitle);
+        const idx = t.indexOf(": ");
+        if (idx <= 0) continue;
+        const company = t.slice(0, idx); const role = t.slice(idx + 2);
+        const region = tag(b, "region"); const cat = tag(b, "category");
+        if (!want(`${role} ${company} ${cat ?? ""}`)) continue;
+        signals.push(makeSignal({
+          type: "job_posting",
+          title: `${company} is hiring (remote): ${role}`,
+          detail: `Remote role "${role}"${cat ? ` · ${cat}` : ""}${region ? ` · ${region}` : ""}.`,
+          evidence: { roleTitle: role, function: cat, location: region || "Remote", applyUrl: link, remote: true },
+          source: { kind: this.kind, connector: "wework_remotely", url: link, externalId: `wwr:${tag(b, "guid") ?? link}`, observedAt: now },
+          eventAt: tag(b, "pubDate") ?? now,
+          ingestedAt: now,
+          anchor: company,
+          companyHint: { id: "", name: company, industry: cat },
+        }));
+      }
+    } catch (err) { warnings.push(`wework_remotely: ${(err as Error).message}`); }
+    return { signals, warnings };
+  }
+}
+
+/** Jobspresso RSS — free, NO key/auth. Company is in <dc:creator>; we strip the
+ *  trailing location to get a clean company name. */
+export class JobspressoSource implements SignalSource {
+  readonly id = "jobspresso";
+  readonly kind: SourceKind = "job_board";
+  readonly emits: SignalType[] = ["job_posting"];
+  readonly label = "Jobspresso (free RSS)";
+  isConfigured(): boolean { return true; }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    const now = new Date().toISOString();
+    const signals: Signal[] = [];
+    const warnings: string[] = [];
+    const kw = (ctx.watchlist?.keywords ?? []).map((k) => k.toLowerCase());
+    const want = (s: string) => !kw.length || kw.some((k) => s.toLowerCase().includes(k));
+    try {
+      const xml = await getText("https://jobspresso.co/feed/?post_type=job_listing");
+      for (const b of xml.split(/<item>/).slice(1, (ctx.limit ?? 100) + 1)) {
+        const title = tag(b, "title"); const link = tag(b, "link");
+        if (!title || !link) continue;
+        const creator = tag(b, "dc:creator");
+        const company = creator ? decode(creator).split(/<br|⚲|\n/i)[0].replace(/&nbsp;/g, " ").trim() : undefined;
+        if (!company) continue;
+        const role = decode(title);
+        if (!want(`${role} ${company}`)) continue;
+        signals.push(makeSignal({
+          type: "job_posting",
+          title: `${company} is hiring: ${role}`,
+          detail: `Open role "${role}" (remote, via Jobspresso).`,
+          evidence: { roleTitle: role, applyUrl: link, remote: true },
+          source: { kind: this.kind, connector: "jobspresso", url: link, externalId: `jobspresso:${tag(b, "guid") ?? link}`, observedAt: now },
+          eventAt: tag(b, "pubDate") ?? now,
+          ingestedAt: now,
+          anchor: company,
+          companyHint: { id: "", name: company },
+        }));
+      }
+    } catch (err) { warnings.push(`jobspresso: ${(err as Error).message}`); }
+    return { signals, warnings };
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* The free source set                                                 */
 /* ------------------------------------------------------------------ */
@@ -713,6 +885,10 @@ export function freeSources(): SignalSource[] {
     new ArbeitnowSource(),
     new JobicySource(),
     new TheMuseSource(),
+    new HimalayasSource(),
+    new WorkingNomadsSource(),
+    new WeWorkRemotelySource(),
+    new JobspressoSource(),
     new HackerNewsHiringSource(),
     new UsaSpendingSource(),
     new GitHubOrgSource(),
