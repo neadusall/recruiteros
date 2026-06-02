@@ -2584,9 +2584,11 @@
       if (res.ok) { finishLinkedInPull(box, (res.data || {}).added || 0, (res.data || {}).deduped || 0); if (prospectsReload) prospectsReload(); }
       else {
         var err = res.data && res.data.error;
+        var isUnavail = /^search_unavailable|^search_failed/.test(err || "");
         errorLinkedInPull(box, err === "no_linkedin_account" ? "Connect a LinkedIn account first (Accounts → LinkedIn)."
           : err === "not_a_search_url" ? "That's not a search URL — copy a people-search URL from Sales Navigator/LinkedIn."
           : err === "not_a_linkedin_url" ? "That wasn't a linkedin.com URL."
+          : isUnavail ? "No server-side LinkedIn provider is connected, so this URL can't be pulled directly. Use the Chrome extension’s “Scrape this search” button above — it pages through the search slowly and posts real profiles (with photos) straight into Prospects."
           : "Could not pull profiles (" + (err || res.status) + ").");
       }
     }).catch(function () { clearInterval(tick); errorLinkedInPull(box, "Could not reach the server."); });

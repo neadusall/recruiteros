@@ -72,6 +72,8 @@ export interface SearchProfile {
   company?: string;
   location?: string;
   publicProfileUrl?: string;
+  /** Profile photo URL (from the search card), when the provider exposes it. */
+  imageUrl?: string;
   connectionDegree?: 1 | 2 | 3;
 }
 
@@ -211,6 +213,7 @@ export const unipileProvider: LinkedInProvider = {
           publicProfileUrl:
             it.profile_url ??
             (publicId ? `https://www.linkedin.com/in/${publicId}` : undefined),
+          imageUrl: it.profile_picture_url ?? it.profile_picture ?? it.picture_url ?? it.image_url,
           connectionDegree: it.network_distance ? degreeMap[it.network_distance] : undefined,
         });
         if (out.length >= cap) break;

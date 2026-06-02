@@ -88,7 +88,11 @@ export async function importFromLinkedInSearch(
   try {
     profiles = await getProvider().searchProfiles({ account, url, limit });
   } catch (err) {
-    throw new ImportError(`search_failed: ${(err as Error).message}`, 502);
+    // Surface as a 4xx, NOT a 5xx: an unconfigured provider is a setup problem
+    // the recruiter can act on. Critically, a 5xx makes the static-demo fetch
+    // shim fall back and fabricate fake prospects (instant "added: N" that never
+    // appear in the real pipeline) — so we must keep this client-side.
+    throw new ImportError(`search_unavailable: ${(err as Error).message}`, 422);
   }
 
   const repo = getCore();
@@ -109,7 +113,10 @@ export async function importFromLinkedInSearch(
       campaignId: input.campaignId,
       fullName: p.fullName,
       title: p.title || p.headline,
+      headline: p.headline,
       company: p.company,
+      location: p.location,
+      photoUrl: p.imageUrl,
       linkedinUrl,
       category: input.category ?? "linkedin_search",
     });
