@@ -87,6 +87,14 @@ export interface InMarketLead {
   /** Deep dive: each open role mapped to the hiring manager who would own it. */
   hiringManagers?: HiringManagerLead[];
   sourceUrl?: string;
+  /** When the underlying signal fired (ISO) — used to detect renewed demand. */
+  signalAt?: string;
+  /** True when this company is already in Prospects but a fresh demand signal
+   *  (repost / surge / long-open) brought it back — a reason to re-engage. */
+  renewed?: boolean;
+  renewedReason?: string;
+  /** Auto-generated follow-up line for the renewed-demand case. */
+  renewedMessage?: string;
   /** Carried so promote() can resolve the buyer + create the prospect. */
   raw?: { company?: Company; person?: Person };
 }
@@ -209,8 +217,57 @@ function toLead(s: Signal): InMarketLead {
     roles,
     hiringManagers: hiringManagersFor(roles, s.person),
     sourceUrl: s.sources && s.sources[0] ? s.sources[0].url : undefined,
+    signalAt: s.eventAt || s.ingestedAt,
     raw: { company: s.company, person: s.person },
   };
+}
+
+/** Signal types meaning "still/again hiring → stronger demand"; these re-surface a
+ *  company even after it's been taken into Prospects, flagged for re-engagement. */
+const RENEWED_TYPES = new Set<SignalType>(["job_repost", "hiring_velocity", "evergreen_role"]);
+
+/** A reason + ready-to-send follow-up line for a renewed-demand lead, grounded in the
+ *  exact signal so the recruiter can re-engage with relevant messaging. */
+function renewedInfo(lead: InMarketLead): { reason: string; message: string } {
+  const co = lead.company;
+  const role = (lead.roles && lead.roles[0]) || lead.buyerTitle || "the role";
+  if (lead.signalType === "job_repost") {
+    return {
+      reason: "Reposted role — stronger demand",
+      message: `Quick follow-up on ${co} — I noticed the ${role} role was reposted. A repost usually means the search is dragging on. I have pre-vetted candidates matched to it and could send a couple over today. Worth a 15-minute call this week?`,
+    };
+  }
+  if (lead.signalType === "hiring_velocity") {
+    return {
+      reason: "Hiring surge — capacity strain",
+      message: `${co} is in a clear hiring surge right now. Teams scaling this fast hit capacity quickly — happy to take ${role} (and the others) off your plate with candidates ready to move. Open to a quick call?`,
+    };
+  }
+  return {
+    reason: "Long-open role — pipeline pain",
+    message: `The ${role} at ${co} has been open a while, which usually means the pipeline has gone thin. I have candidates matched to the JD — want me to send two or three to look at?`,
+  };
+}
+
+/**
+ * Per-workspace suppression WITH renewed-demand re-surfacing: companies already in
+ * Prospects are hidden — UNLESS a fresh demand signal (repost / surge / long-open) brings
+ * them back, in which case they re-appear flagged + with auto-generated follow-up copy, so
+ * a repeat need becomes a reason to re-engage rather than a silent duplicate.
+ */
+function applyTaken(leads: InMarketLead[], taken: Set<string>): InMarketLead[] {
+  if (!taken.size) return leads;
+  const out: InMarketLead[] = [];
+  for (const l of leads) {
+    const co = (l.company || "").toLowerCase().trim();
+    if (!taken.has(co)) { out.push(l); continue; }
+    if (RENEWED_TYPES.has(l.signalType as SignalType)) {
+      const info = renewedInfo(l);
+      out.push({ ...l, renewed: true, renewedReason: info.reason, renewedMessage: info.message });
+    }
+    // otherwise: already worked + no new demand signal → suppress
+  }
+  return out;
 }
 
 /**
@@ -293,7 +350,7 @@ export async function searchInMarket(
   // so you never re-target (and double-send to) a company you're already working. This is
   // per-workspace — the global pool is shared, but each user's taken-list is their own.
   const taken = workspaceId ? await takenCompanies(workspaceId) : new Set<string>();
-  const fresh = (arr: InMarketLead[]) => arr.filter((l) => !taken.has((l.company || "").toLowerCase().trim()));
+  const fresh = (arr: InMarketLead[]) => applyTaken(arr, taken);
 
   try {
     const { ensureAccumulator } = await import("./accumulator");
