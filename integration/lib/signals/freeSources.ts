@@ -869,6 +869,56 @@ export class JobspressoSource implements SignalSource {
   }
 }
 
+/** Adzuna job aggregator — millions of listings across many countries with SALARY
+ *  and a clean category label (great for non-tech industry classification). Free tier,
+ *  needs an app id + key (read from env; never committed). Configured only when both
+ *  ADZUNA_APP_ID and ADZUNA_APP_KEY are present, otherwise skipped. */
+export class AdzunaSource implements SignalSource {
+  readonly id = "adzuna";
+  readonly kind: SourceKind = "job_board";
+  readonly emits: SignalType[] = ["job_posting"];
+  readonly label = "Adzuna job aggregator (free key)";
+  isConfigured(): boolean { return !!(process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY); }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    const id = process.env.ADZUNA_APP_ID, key = process.env.ADZUNA_APP_KEY;
+    if (!id || !key) return { signals: [], warnings: [] };
+    const now = new Date().toISOString();
+    const signals: Signal[] = [];
+    const warnings: string[] = [];
+    const country = (process.env.ADZUNA_COUNTRY || "us").toLowerCase();
+    const kw = (ctx.watchlist?.keywords ?? []);
+    const what = kw.length ? `&what=${encodeURIComponent(kw.join(" "))}` : "";
+    try {
+      const perPage = Math.min(ctx.limit ?? 50, 50);
+      const url =
+        `https://api.adzuna.com/v1/api/jobs/${country}/search/1?app_id=${id}&app_key=${key}` +
+        `&results_per_page=${perPage}&content-type=application/json${what}`;
+      const res = await getJson<{ results: AdzunaJob[] }>(url);
+      for (const j of res.results ?? []) {
+        const company = j.company?.display_name;
+        const title = (j.title ?? "").replace(/<[^>]+>/g, "").trim();
+        if (!company || !title) continue;
+        const cat = j.category?.label;
+        const loc = j.location?.display_name;
+        signals.push(makeSignal({
+          type: "job_posting",
+          title: `${company} is hiring: ${title}`,
+          detail: `Open role "${title}"${cat ? ` · ${cat}` : ""}${loc ? ` in ${loc}` : ""}.`,
+          evidence: { roleTitle: title, function: cat, location: loc, applyUrl: j.redirect_url, salaryMin: j.salary_min, salaryMax: j.salary_max },
+          source: { kind: this.kind, connector: "adzuna", url: j.redirect_url, externalId: `adzuna:${j.id}`, observedAt: now },
+          eventAt: j.created ?? now,
+          ingestedAt: now,
+          anchor: company,
+          companyHint: { id: "", name: company, industry: cat },
+        }));
+      }
+    } catch (err) { warnings.push(`adzuna: ${(err as Error).message}`); }
+    return { signals, warnings };
+  }
+}
+interface AdzunaJob { id: string; title?: string; company?: { display_name?: string }; location?: { display_name?: string }; category?: { label?: string; tag?: string }; created?: string; redirect_url?: string; salary_min?: number; salary_max?: number }
+
 /* ------------------------------------------------------------------ */
 /* The free source set                                                 */
 /* ------------------------------------------------------------------ */
@@ -889,6 +939,7 @@ export function freeSources(): SignalSource[] {
     new WorkingNomadsSource(),
     new WeWorkRemotelySource(),
     new JobspressoSource(),
+    new AdzunaSource(),
     new HackerNewsHiringSource(),
     new UsaSpendingSource(),
     new GitHubOrgSource(),
