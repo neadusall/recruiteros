@@ -224,11 +224,19 @@ export async function searchInMarket(
 ): Promise<{ leads: InMarketLead[]; pulled: number; warnings: string[] }> {
   const limit = Math.min(Math.max(q.limit ?? 25, 1), 300);
   try {
+    // Tell the sources WHAT to search for, so aggregators (e.g. Adzuna) query the
+    // industry/role directly and return a deep list — instead of us pulling a generic
+    // batch and filtering it down to a handful. This is the fix for "Healthcare only
+    // shows a few": now Adzuna searches "healthcare" at the source.
+    const keywords: string[] = [];
+    if (q.companyName) keywords.push(q.companyName.trim());
+    if (q.query) keywords.push(...q.query.split(/\s+/).filter((t) => t.length > 2));
+    if (q.industries?.length) keywords.push(...industryTokens(q.industries));
     const report = await collect({
       icp: icpFromQuery(q),
       now: nowIso,
       sources: freeSources(),
-      pull: { watchlist: {}, limit: limit * 3 },
+      pull: { watchlist: keywords.length ? { keywords } : {}, limit: limit * 3 },
     });
     const kw = (q.query ?? "").toLowerCase().trim();
     const nameKw = (q.companyName ?? "").toLowerCase().trim();

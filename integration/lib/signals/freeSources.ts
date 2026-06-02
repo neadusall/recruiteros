@@ -889,29 +889,34 @@ export class AdzunaSource implements SignalSource {
     const country = (process.env.ADZUNA_COUNTRY || "us").toLowerCase();
     const kw = (ctx.watchlist?.keywords ?? []);
     const what = kw.length ? `&what=${encodeURIComponent(kw.join(" "))}` : "";
+    const perPage = 50;                                   // Adzuna's max page size
+    const pages = Math.min(Math.max(Math.ceil((ctx.limit ?? 50) / perPage), 1), 4); // up to 200
     try {
-      const perPage = Math.min(ctx.limit ?? 50, 50);
-      const url =
-        `https://api.adzuna.com/v1/api/jobs/${country}/search/1?app_id=${id}&app_key=${key}` +
-        `&results_per_page=${perPage}&content-type=application/json${what}`;
-      const res = await getJson<{ results: AdzunaJob[] }>(url);
-      for (const j of res.results ?? []) {
-        const company = j.company?.display_name;
-        const title = (j.title ?? "").replace(/<[^>]+>/g, "").trim();
-        if (!company || !title) continue;
-        const cat = j.category?.label;
-        const loc = j.location?.display_name;
-        signals.push(makeSignal({
-          type: "job_posting",
-          title: `${company} is hiring: ${title}`,
-          detail: `Open role "${title}"${cat ? ` · ${cat}` : ""}${loc ? ` in ${loc}` : ""}.`,
-          evidence: { roleTitle: title, function: cat, location: loc, applyUrl: j.redirect_url, salaryMin: j.salary_min, salaryMax: j.salary_max },
-          source: { kind: this.kind, connector: "adzuna", url: j.redirect_url, externalId: `adzuna:${j.id}`, observedAt: now },
-          eventAt: j.created ?? now,
-          ingestedAt: now,
-          anchor: company,
-          companyHint: { id: "", name: company, industry: cat },
-        }));
+      for (let page = 1; page <= pages; page++) {
+        const url =
+          `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}?app_id=${id}&app_key=${key}` +
+          `&results_per_page=${perPage}&content-type=application/json${what}`;
+        const res = await getJson<{ results: AdzunaJob[] }>(url);
+        const rows = res.results ?? [];
+        if (!rows.length) break;                          // no more pages
+        for (const j of rows) {
+          const company = j.company?.display_name;
+          const title = (j.title ?? "").replace(/<[^>]+>/g, "").trim();
+          if (!company || !title) continue;
+          const cat = j.category?.label;
+          const loc = j.location?.display_name;
+          signals.push(makeSignal({
+            type: "job_posting",
+            title: `${company} is hiring: ${title}`,
+            detail: `Open role "${title}"${cat ? ` · ${cat}` : ""}${loc ? ` in ${loc}` : ""}.`,
+            evidence: { roleTitle: title, function: cat, location: loc, applyUrl: j.redirect_url, salaryMin: j.salary_min, salaryMax: j.salary_max },
+            source: { kind: this.kind, connector: "adzuna", url: j.redirect_url, externalId: `adzuna:${j.id}`, observedAt: now },
+            eventAt: j.created ?? now,
+            ingestedAt: now,
+            anchor: company,
+            companyHint: { id: "", name: company, industry: cat },
+          }));
+        }
       }
     } catch (err) { warnings.push(`adzuna: ${(err as Error).message}`); }
     return { signals, warnings };
