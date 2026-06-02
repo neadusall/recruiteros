@@ -38,6 +38,9 @@ module.exports = {
     return [
       { source: "/", destination: "/home", permanent: false },
       { source: "/index.html", destination: "/home", permanent: true },
+      // The Help Center now lives at /helpcenter; forward the legacy /help URL.
+      { source: "/help", destination: "/helpcenter", permanent: true },
+      { source: "/help.html", destination: "/helpcenter", permanent: true },
       ...htmlRedirects,
     ];
   },
