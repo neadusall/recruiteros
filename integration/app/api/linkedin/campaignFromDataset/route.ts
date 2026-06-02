@@ -30,7 +30,7 @@ interface Lead {
 }
 
 export async function POST(req: Request) {
-  const ws = workspaceForToken(bearerToken(req));
+  const ws = await workspaceForToken(bearerToken(req));
   if (!ws) return fail("unauthorized", 401);
 
   const b = await body<{ campaignName?: string; leads?: Lead[] }>(req);

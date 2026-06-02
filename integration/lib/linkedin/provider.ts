@@ -15,6 +15,7 @@ import type {
   Prospect,
   ActionResult,
 } from "./types";
+import { backendBridgeProvider } from "./inbridge";
 
 export interface SendConnectionOpts {
   account: LinkedInAccount;
@@ -410,18 +411,24 @@ export const internalProvider: LinkedInProvider = {
 /**
  * Single place to choose the backend.
  *
- * RECRUITEROS_OUTREACH_PROVIDER=internal  -> use your own LinkedIn tools
- * RECRUITEROS_OUTREACH_PROVIDER=unipile   -> use the Unipile API (default)
+ * RECRUITEROS_OUTREACH_PROVIDER=self      -> our own in-backend bridge: the work
+ *                                            runs in the user's browser via the
+ *                                            Chrome extension, coordinated here
+ *                                            and persisted in the DB. No external
+ *                                            API, no separate process. (DEFAULT)
+ * RECRUITEROS_OUTREACH_PROVIDER=internal  -> a separate self-hosted bridge service
+ * RECRUITEROS_OUTREACH_PROVIDER=unipile   -> the Unipile API (third party)
  *
- * The whole engine is provider-agnostic, so you can integrate an external API
- * or run entirely on internal infrastructure without touching anything else.
+ * The whole engine is provider-agnostic, so swapping backends touches nothing else.
  */
 export function getProvider(): LinkedInProvider {
-  switch ((process.env.RECRUITEROS_OUTREACH_PROVIDER ?? "unipile").toLowerCase()) {
+  switch ((process.env.RECRUITEROS_OUTREACH_PROVIDER ?? "self").toLowerCase()) {
+    case "unipile":
+      return unipileProvider;
     case "internal":
       return internalProvider;
-    case "unipile":
+    case "self":
     default:
-      return unipileProvider;
+      return backendBridgeProvider;
   }
 }

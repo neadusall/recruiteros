@@ -14,7 +14,7 @@ export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
   const origin = new URL(req.url).origin;
-  return ok({ token: getOrCreateToken(g.ctx.workspace.id), backendBaseUrl: origin + "/api/linkedin" });
+  return ok({ token: await getOrCreateToken(g.ctx.workspace.id), backendBaseUrl: origin + "/api/linkedin" });
 }
 
 export async function POST(req: Request) {
@@ -22,6 +22,6 @@ export async function POST(req: Request) {
   if ("response" in g) return g.response;
   const b = await body<{ action?: string }>(req);
   const origin = new URL(req.url).origin;
-  const token = b?.action === "regenerate" ? regenerateToken(g.ctx.workspace.id) : getOrCreateToken(g.ctx.workspace.id);
+  const token = b?.action === "regenerate" ? await regenerateToken(g.ctx.workspace.id) : await getOrCreateToken(g.ctx.workspace.id);
   return ok({ token, backendBaseUrl: origin + "/api/linkedin" });
 }

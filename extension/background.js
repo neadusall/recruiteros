@@ -23,6 +23,9 @@ const DEFAULT_STATE = {
     workingHours: CFG.workingHours,
     weekendsOff: CFG.weekendsOff,
     backendBaseUrl: CFG.backendBaseUrl,
+    // Ingest token (from the app's "Enrich LinkedIn searches" dialog). Also used
+    // as the bearer for the backend bridge agent endpoints (/api/linkedin/agent/*).
+    backendApiKey: CFG.backendApiKey,
     // Browser-execution bridge: when enabled, this extension acts as the
     // executor for the backend's cadence. It polls the outreach bridge for
     // actions targeted at `accountId`, performs them in the user's session,
@@ -60,8 +63,16 @@ async function agentTick() {
   if (agentBusy) return;
   if (activeBridgeSearch) return;            // a search scrape owns the tab right now
   const s = await getState();
-  const b = s.settings.bridge || {};
-  if (!b.enabled || !b.url || !b.accountId) return;
+  // Prefer RecruiterOS's OWN backend bridge: the same backend URL + ingest token
+  // the user pastes for scraping also drives backend-queued actions (searches,
+  // connects, …) — no separate bridge process, no Unipile. The backend is
+  // workspace-scoped by the token, so no accountId is needed. Falls back to a
+  // standalone bridge only if one is explicitly configured.
+  const backendTok = s.settings.backendApiKey || (s.settings.bridge && s.settings.bridge.token);
+  const b = (s.settings.backendBaseUrl && backendTok)
+    ? { enabled: true, url: s.settings.backendBaseUrl, token: backendTok, accountId: '' }
+    : (s.settings.bridge || {});
+  if (!b.enabled || !b.url) return;
   if (!limiter.withinWorkingWindow(Date.now())) return;
   agentBusy = true;
   try {
