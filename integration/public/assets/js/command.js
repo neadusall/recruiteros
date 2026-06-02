@@ -17,6 +17,24 @@
   var API = (window.RECRUITEROS_API_BASE || "") + "/api";
   var motion = localStorage.getItem("ros_motion") || "recruiting";
 
+  /* ---------------- Chrome extension bridge ----------------
+     The extension's portal-bridge content script announces itself and accepts a
+     one-click "configure" (backend URL + ingest token) via window.postMessage, so
+     the user never copies/pastes. Set EXT_STORE_URL once published for "Add to Chrome". */
+  var EXT_STORE_URL = ""; // e.g. "https://chrome.google.com/webstore/detail/<id>"
+  var extState = { installed: false, version: "" };
+  window.addEventListener("message", function (e) {
+    if (e.source !== window || !e.data || e.data.source !== "ros-ext") return;
+    if (e.data.type === "present") {
+      extState.installed = true; extState.version = e.data.version || "";
+      document.dispatchEvent(new CustomEvent("ros-ext-present", { detail: extState }));
+    } else if (e.data.type === "configured") {
+      document.dispatchEvent(new CustomEvent("ros-ext-configured", { detail: e.data }));
+    }
+  });
+  function extPing() { try { window.postMessage({ source: "ros-portal", type: "ping" }, window.location.origin); } catch (e) {} }
+  function extConfigure(backendBaseUrl, token) { try { window.postMessage({ source: "ros-portal", type: "configure", backendBaseUrl: backendBaseUrl, token: token }, window.location.origin); } catch (e) {} }
+
   // RBAC: the session carries the capabilities the user's role allows; the UI
   // only shows what they can actually use.
   var CAPS = Array.isArray(ctx.capabilities) ? ctx.capabilities : [];
@@ -511,7 +529,7 @@
     function runSearch(criteria, label) {
       var body = $("#imBody"); body.innerHTML = loading();
       imPicks = {}; imMinScore = 0; imLabel = label || "";
-      var payload = { limit: 200 };
+      var payload = { limit: 500 };
       if (criteria.companyName) payload.companyName = criteria.companyName;
       if (criteria.industries) payload.industries = criteria.industries;
       if (criteria.query) payload.query = criteria.query;
@@ -2511,13 +2529,15 @@
       : '<div class="imp-note" id="liCampNote">New prospects will be added to an auto-created <b>LinkedIn Imports</b> campaign.</div>';
     var extHtml =
       '<div class="li-ext"><div class="li-ext-h">🧩 Pull real profiles with the Chrome extension <span class="li-ext-tag">recommended</span></div>' +
-        '<ol class="or-steps" style="margin-top:6px"><li>Install the RecruiterOS extension (Chrome → Extensions → Load unpacked → the <code>extension/</code> folder).</li>' +
-        '<li>Open the extension → Settings and paste the token + backend URL below.</li>' +
-        '<li>Open your Sales Navigator people-search and click <b>Scrape this search</b>. It pages through the whole list slowly &amp; naturally and posts every profile (photo, title, company, location) straight into Prospects — no Unipile needed.</li></ol>' +
-        '<div class="li-ext-row"><label>Ingest token</label><span class="li-copy"><code id="liTok">loading…</code><button class="btn btn-ghost btn-sm" id="liTokCopy">Copy</button></span></div>' +
-        '<div class="li-ext-row"><label>Backend URL</label><span class="li-copy"><code id="liBase">loading…</code><button class="btn btn-ghost btn-sm" id="liBaseCopy">Copy</button></span></div>' +
+        '<div id="liExtStatus" style="font-size:13px;margin:6px 0">Checking for the extension…</div>' +
+        '<div id="liExtActions" class="btn-row" style="margin:8px 0"></div>' +
+        '<div class="muted" style="font-size:12px;margin-top:4px">Once connected, run your Sales Navigator search and click <b>Scrape this search</b> in the extension — it pages through slowly and posts every profile (photo, title, company) straight into Prospects.</div>' +
+        '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12.5px;color:var(--text-muted,#aab)">Manual setup (advanced)</summary>' +
+          '<div class="li-ext-row" style="margin-top:6px"><label>Ingest token</label><span class="li-copy"><code id="liTok">loading…</code><button class="btn btn-ghost btn-sm" id="liTokCopy">Copy</button></span></div>' +
+          '<div class="li-ext-row"><label>Backend URL</label><span class="li-copy"><code id="liBase">loading…</code><button class="btn btn-ghost btn-sm" id="liBaseCopy">Copy</button></span></div>' +
+        '</details>' +
       "</div>" +
-      '<div class="li-or">— or quick-pull without the extension —</div>';
+      '<div class="li-or">— or quick-pull from a URL (needs the extension connected) —</div>';
     var bodyHtml =
       extHtml +
       campField +

@@ -158,7 +158,7 @@ function icpFromQuery(q: InMarketQuery): ICP {
 }
 
 /** Tokens to match an industry by (from the label), ignoring connector words. */
-function industryTokens(labels: string[]): string[] {
+export function industryTokens(labels: string[]): string[] {
   const stop = new Set(["and", "or", "the", "of", "services", "industry"]);
   return labels
     .flatMap((l) => l.toLowerCase().split(/[^a-z0-9]+/))
@@ -218,66 +218,97 @@ function toLead(s: Signal): InMarketLead {
  * only; returns ranked leads (highest intent first). Network failures degrade to
  * an empty list with a warning, never throw.
  */
+/** Dedupe leads by company (case-insensitive), keeping the highest-scored, score-sorted. */
+export function dedupeLeads(leads: InMarketLead[]): InMarketLead[] {
+  const by = new Map<string, InMarketLead>();
+  for (const l of leads) {
+    const key = (l.company || l.id).toLowerCase().trim();
+    if (!key) continue;
+    const cur = by.get(key);
+    if (!cur || (l.score ?? 0) > (cur.score ?? 0)) by.set(key, l);
+  }
+  return [...by.values()].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+}
+
+/**
+ * LIVE collect for a query → matched leads (the source-hitting path). Used both by the
+ * on-demand search fallback and by the background accumulator. Keywords are pushed to the
+ * sources so aggregators (Adzuna) query the industry/role directly.
+ */
+export async function collectLeads(q: InMarketQuery, nowIso: string, cap = 300): Promise<InMarketLead[]> {
+  const keywords: string[] = [];
+  if (q.companyName) keywords.push(q.companyName.trim());
+  if (q.query) keywords.push(...q.query.split(/\s+/).filter((t) => t.length > 2));
+  if (q.industries?.length) keywords.push(...industryTokens(q.industries));
+  const report = await collect({
+    icp: icpFromQuery(q),
+    now: nowIso,
+    sources: freeSources(),
+    pull: { watchlist: keywords.length ? { keywords } : {}, limit: cap },
+  });
+  const kw = (q.query ?? "").toLowerCase().trim();
+  const nameKw = (q.companyName ?? "").toLowerCase().trim();
+  const indTokens = industryTokens(q.industries ?? []);
+  const wantTypes = new Set<SignalType>(q.signalTypes ?? []);
+  let ranked = report.ranked.filter((s) => s.motion === "business_dev" && (s.score?.value ?? 0) > 0);
+  if (wantTypes.size) {
+    const before = ranked;
+    ranked = ranked.filter((s) => wantTypes.has(s.type));
+    if (ranked.length === 0) ranked = before;
+  }
+  if (nameKw) {
+    const before = ranked;
+    ranked = ranked.filter((s) => (s.company?.name ?? s.title).toLowerCase().includes(nameKw));
+    if (ranked.length === 0) ranked = before;
+  } else if (indTokens.length) {
+    ranked = ranked.filter((s) => matchesIndustry(s, indTokens));
+  } else if (kw) {
+    const terms = kw.split(/\s+/).filter((t) => t.length > 2);
+    const before = ranked;
+    ranked = ranked.filter((s) => {
+      const hay = (s.title + " " + s.detail + " " + (s.company?.industry ?? "")).toLowerCase();
+      return terms.some((t) => hay.includes(t));
+    });
+    if (ranked.length === 0) ranked = before;
+  }
+  return ranked.slice(0, cap).map(toLead);
+}
+
+/**
+ * Search the market. Reads from the ACCUMULATED POOL first (thousands of leads built up
+ * in the background, zero live API calls); only falls back to a live collect when the
+ * pool is thin for this query — and feeds those live results back into the pool. The
+ * background accumulator keeps the pool full, so over time searches stop hitting the
+ * providers (and the Adzuna trial) entirely. Fully resilient: any pool error degrades to
+ * the original live behavior.
+ */
 export async function searchInMarket(
   q: InMarketQuery,
   nowIso: string,
 ): Promise<{ leads: InMarketLead[]; pulled: number; warnings: string[] }> {
-  const limit = Math.min(Math.max(q.limit ?? 25, 1), 300);
+  const limit = Math.min(Math.max(q.limit ?? 25, 1), 1000);
   try {
-    // Tell the sources WHAT to search for, so aggregators (e.g. Adzuna) query the
-    // industry/role directly and return a deep list — instead of us pulling a generic
-    // batch and filtering it down to a handful. This is the fix for "Healthcare only
-    // shows a few": now Adzuna searches "healthcare" at the source.
-    const keywords: string[] = [];
-    if (q.companyName) keywords.push(q.companyName.trim());
-    if (q.query) keywords.push(...q.query.split(/\s+/).filter((t) => t.length > 2));
-    if (q.industries?.length) keywords.push(...industryTokens(q.industries));
-    const report = await collect({
-      icp: icpFromQuery(q),
-      now: nowIso,
-      sources: freeSources(),
-      pull: { watchlist: keywords.length ? { keywords } : {}, limit: limit * 3 },
-    });
-    const kw = (q.query ?? "").toLowerCase().trim();
-    const nameKw = (q.companyName ?? "").toLowerCase().trim();
-    const indTokens = industryTokens(q.industries ?? []);
-    const wantTypes = new Set<SignalType>(q.signalTypes ?? []);
-    let ranked = report.ranked.filter((s) => s.motion === "business_dev" && (s.score?.value ?? 0) > 0);
+    const { ensureAccumulator } = await import("./accumulator");
+    const { queryPool, mergeIntoPool } = await import("./pool");
+    ensureAccumulator(); // start the background collector (no-op once running)
 
-    // Hard signal-type filter when the UI picked specific types (e.g. only "funding").
-    if (wantTypes.size) {
-      const before = ranked;
-      ranked = ranked.filter((s) => wantTypes.has(s.type));
-      if (ranked.length === 0) ranked = before; // selection too narrow → don't strand
+    const pooled = await queryPool(q, limit);
+    if (pooled.length >= 24) {
+      return { leads: pooled, pulled: pooled.length, warnings: [] };
     }
-
-    if (nameKw) {
-      // Company-name search: match the resolved company name (or the headline) only.
-      const before = ranked;
-      ranked = ranked.filter((s) => (s.company?.name ?? s.title).toLowerCase().includes(nameKw));
-      if (ranked.length === 0) ranked = before; // don't strand the user on a thin match
-    } else if (indTokens.length) {
-      // Industry search: ACTUALLY filter to companies that match the industry (this is
-      // the fix for "every industry returns the same list" — before, industry only
-      // re-ranked). Thin/empty results for a sector reflect real free-source coverage.
-      ranked = ranked.filter((s) => matchesIndustry(s, indTokens));
-    } else if (kw) {
-      // Light keyword refinement over the free-text box.
-      const terms = kw.split(/\s+/).filter((t) => t.length > 2);
-      const before = ranked;
-      ranked = ranked.filter((s) => {
-        const hay = (s.title + " " + s.detail + " " + (s.company?.industry ?? "")).toLowerCase();
-        return terms.some((t) => hay.includes(t));
-      });
-      if (ranked.length === 0) ranked = before; // don't strand the user
-    }
-    return {
-      leads: ranked.slice(0, limit).map(toLead),
-      pulled: report.pulled,
-      warnings: report.warnings,
-    };
+    // Pool thin for this query → live collect, return it, and grow the pool.
+    const live = await collectLeads(q, nowIso, Math.max(limit, 200));
+    void mergeIntoPool(live).catch(() => {});
+    const merged = dedupeLeads([...pooled, ...live]).slice(0, limit);
+    return { leads: merged, pulled: merged.length, warnings: [] };
   } catch (err) {
-    return { leads: [], pulled: 0, warnings: [`search_failed: ${(err as Error).message}`] };
+    // Pool/accumulator unavailable → pure live fallback (original behavior).
+    try {
+      const live = await collectLeads(q, nowIso, Math.max(limit, 200));
+      return { leads: live.slice(0, limit), pulled: live.length, warnings: ["pool_unavailable"] };
+    } catch (e) {
+      return { leads: [], pulled: 0, warnings: [`search_failed: ${(e as Error).message}`] };
+    }
   }
 }
 

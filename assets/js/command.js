@@ -17,6 +17,24 @@
   var API = (window.RECRUITEROS_API_BASE || "") + "/api";
   var motion = localStorage.getItem("ros_motion") || "recruiting";
 
+  /* ---------------- Chrome extension bridge ----------------
+     The extension's portal-bridge content script announces itself and accepts a
+     one-click "configure" (backend URL + ingest token) via window.postMessage, so
+     the user never copies/pastes. Set EXT_STORE_URL once published for "Add to Chrome". */
+  var EXT_STORE_URL = ""; // e.g. "https://chrome.google.com/webstore/detail/<id>"
+  var extState = { installed: false, version: "" };
+  window.addEventListener("message", function (e) {
+    if (e.source !== window || !e.data || e.data.source !== "ros-ext") return;
+    if (e.data.type === "present") {
+      extState.installed = true; extState.version = e.data.version || "";
+      document.dispatchEvent(new CustomEvent("ros-ext-present", { detail: extState }));
+    } else if (e.data.type === "configured") {
+      document.dispatchEvent(new CustomEvent("ros-ext-configured", { detail: e.data }));
+    }
+  });
+  function extPing() { try { window.postMessage({ source: "ros-portal", type: "ping" }, window.location.origin); } catch (e) {} }
+  function extConfigure(backendBaseUrl, token) { try { window.postMessage({ source: "ros-portal", type: "configure", backendBaseUrl: backendBaseUrl, token: token }, window.location.origin); } catch (e) {} }
+
   // RBAC: the session carries the capabilities the user's role allows; the UI
   // only shows what they can actually use.
   var CAPS = Array.isArray(ctx.capabilities) ? ctx.capabilities : [];
@@ -511,7 +529,7 @@
     function runSearch(criteria, label) {
       var body = $("#imBody"); body.innerHTML = loading();
       imPicks = {}; imMinScore = 0; imLabel = label || "";
-      var payload = { limit: 200 };
+      var payload = { limit: 500 };
       if (criteria.companyName) payload.companyName = criteria.companyName;
       if (criteria.industries) payload.industries = criteria.industries;
       if (criteria.query) payload.query = criteria.query;
@@ -2511,13 +2529,15 @@
       : '<div class="imp-note" id="liCampNote">New prospects will be added to an auto-created <b>LinkedIn Imports</b> campaign.</div>';
     var extHtml =
       '<div class="li-ext"><div class="li-ext-h">🧩 Pull real profiles with the Chrome extension <span class="li-ext-tag">recommended</span></div>' +
-        '<ol class="or-steps" style="margin-top:6px"><li>Install the RecruiterOS extension (Chrome → Extensions → Load unpacked → the <code>extension/</code> folder).</li>' +
-        '<li>Open the extension → Settings and paste the token + backend URL below.</li>' +
-        '<li>Open your Sales Navigator people-search and click <b>Scrape this search</b>. It pages through the whole list slowly &amp; naturally and posts every profile (photo, title, company, location) straight into Prospects — no Unipile needed.</li></ol>' +
-        '<div class="li-ext-row"><label>Ingest token</label><span class="li-copy"><code id="liTok">loading…</code><button class="btn btn-ghost btn-sm" id="liTokCopy">Copy</button></span></div>' +
-        '<div class="li-ext-row"><label>Backend URL</label><span class="li-copy"><code id="liBase">loading…</code><button class="btn btn-ghost btn-sm" id="liBaseCopy">Copy</button></span></div>' +
+        '<div id="liExtStatus" style="font-size:13px;margin:6px 0">Checking for the extension…</div>' +
+        '<div id="liExtActions" class="btn-row" style="margin:8px 0"></div>' +
+        '<div class="muted" style="font-size:12px;margin-top:4px">Once connected, run your Sales Navigator search and click <b>Scrape this search</b> in the extension — it pages through slowly and posts every profile (photo, title, company) straight into Prospects.</div>' +
+        '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12.5px;color:var(--text-muted,#aab)">Manual setup (advanced)</summary>' +
+          '<div class="li-ext-row" style="margin-top:6px"><label>Ingest token</label><span class="li-copy"><code id="liTok">loading…</code><button class="btn btn-ghost btn-sm" id="liTokCopy">Copy</button></span></div>' +
+          '<div class="li-ext-row"><label>Backend URL</label><span class="li-copy"><code id="liBase">loading…</code><button class="btn btn-ghost btn-sm" id="liBaseCopy">Copy</button></span></div>' +
+        '</details>' +
       "</div>" +
-      '<div class="li-or">— or quick-pull without the extension —</div>';
+      '<div class="li-or">— or quick-pull from a URL (needs the extension connected) —</div>';
     var bodyHtml =
       extHtml +
       campField +
@@ -2531,8 +2551,10 @@
       '<button class="btn btn-primary btn-sm" id="liGo">Pull profiles</button></div>';
 
     openModal("Pull LinkedIn profiles", "Use the Chrome extension to scrape a Sales Navigator search into Prospects (recommended), or quick-pull from a URL.", bodyHtml, function (root, close) {
-      // Fill the extension token + backend URL, and wire copy buttons.
+      // Fill the extension token + backend URL (manual fallback) and wire copy buttons.
+      var extTokenData = null;
       api("/ext-token").then(function (d) {
+        extTokenData = d || {};
         var tok = root.querySelector("#liTok"), base = root.querySelector("#liBase");
         if (tok) tok.textContent = (d && d.token) || "—";
         if (base) base.textContent = (d && d.backendBaseUrl) || (location.origin + "/api/linkedin");
@@ -2543,6 +2565,39 @@
       }
       var tc = root.querySelector("#liTokCopy"); if (tc) tc.addEventListener("click", function () { copyFrom("#liTok", "#liTokCopy"); });
       var bc = root.querySelector("#liBaseCopy"); if (bc) bc.addEventListener("click", function () { copyFrom("#liBase", "#liBaseCopy"); });
+
+      // --- one-click extension detect + connect (no copy/paste) ---
+      function paintExt() {
+        var st = root.querySelector("#liExtStatus"), acts = root.querySelector("#liExtActions");
+        if (!st || !acts || !document.body.contains(root)) return;
+        if (extState.installed) {
+          st.innerHTML = '✅ Extension installed' + (extState.version ? ' <span class="muted">(v' + esc(extState.version) + ")</span>" : "");
+          acts.innerHTML = '<button class="btn btn-primary btn-sm" id="liExtConnect">🔗 Connect this workspace</button>';
+          root.querySelector("#liExtConnect").addEventListener("click", function () {
+            var b = this;
+            var token = extTokenData && extTokenData.token;
+            if (!token) { toast("Loading your ingest token — try again in a second."); return; }
+            b.disabled = true; b.textContent = "Connecting…";
+            extConfigure((extTokenData && extTokenData.backendBaseUrl) || (location.origin + "/api/linkedin"), token);
+          });
+        } else {
+          st.innerHTML = "⬇ Extension not detected.";
+          acts.innerHTML = (EXT_STORE_URL
+            ? '<a class="btn btn-primary btn-sm" href="' + esc(EXT_STORE_URL) + '" target="_blank" rel="noopener">➕ Add to Chrome</a> '
+            : '<span class="muted" style="font-size:12.5px">Install it (Chrome → Extensions → Developer mode → Load unpacked → the <code>extension/</code> folder). </span>') +
+            '<button class="btn btn-ghost btn-sm" id="liExtRecheck">Re-check</button>';
+          var rc = root.querySelector("#liExtRecheck"); if (rc) rc.addEventListener("click", extPing);
+        }
+      }
+      function onExtConfigured(e) {
+        if (!document.body.contains(root)) return;
+        var c = root.querySelector("#liExtConnect");
+        if (e.detail && e.detail.ok) { toast("Extension connected ✅ — searches run here automatically now."); if (c) { c.disabled = true; c.textContent = "✅ Connected"; } }
+        else { if (c) { c.disabled = false; c.textContent = "🔗 Connect this workspace"; } toast("Could not connect the extension" + (e.detail && e.detail.error ? " (" + e.detail.error + ")" : ".")); }
+      }
+      document.addEventListener("ros-ext-present", paintExt);
+      document.addEventListener("ros-ext-configured", onExtConfigured);
+      paintExt(); extPing();
 
       var urlEl = root.querySelector("#liUrl"), prev = root.querySelector("#liPrev");
       if (urlEl.focus) try { urlEl.focus(); } catch (e) {}
