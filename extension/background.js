@@ -193,7 +193,9 @@ function handle(msg, sender, sendResponse) {
     switch (msg && msg.type) {
       case TYPE.PING: return sendResponse({ ok: true, version: self.ROS.VERSION, account: s.account, connected: s.connected, live: s.settings.liveActions });
       case TYPE.GET_STATE: return sendResponse({ ok: true, state: await publicState(s) });
-      case TYPE.UPDATE_SETTINGS: await setState({ settings: Object.assign(s.settings, msg.settings || {}) }); return sendResponse({ ok: true });
+      case TYPE.UPDATE_SETTINGS: await setState({ settings: Object.assign(s.settings, msg.settings || {}) }); agentTick(); return sendResponse({ ok: true });
+      case 'ros.pokeAgent': agentTick(); return sendResponse({ ok: true }); // portal asked us to poll the backend now
+      case 'ros.connected': return sendResponse({ ok: true, version: self.ROS.VERSION, account: s.account }); // portal handshake
       case TYPE.SET_LIVE: await setState({ settings: Object.assign(s.settings, { liveActions: !!msg.live }) }); return sendResponse({ ok: true, live: !!msg.live });
       case TYPE.SET_RUNNING: await setState({ running: !!msg.running }); if (msg.running) drainQueue(); return sendResponse({ ok: true, running: !!msg.running });
       case TYPE.ENQUEUE: s.queue.push(normalize(msg.action)); await setState({ queue: s.queue }); return sendResponse({ ok: true, queued: s.queue.length });

@@ -2551,8 +2551,10 @@
       '<button class="btn btn-primary btn-sm" id="liGo">Pull profiles</button></div>';
 
     openModal("Pull LinkedIn profiles", "Use the Chrome extension to scrape a Sales Navigator search into Prospects (recommended), or quick-pull from a URL.", bodyHtml, function (root, close) {
-      // Fill the extension token + backend URL, and wire copy buttons.
+      // Fill the extension token + backend URL (manual fallback) and wire copy buttons.
+      var extTokenData = null;
       api("/ext-token").then(function (d) {
+        extTokenData = d || {};
         var tok = root.querySelector("#liTok"), base = root.querySelector("#liBase");
         if (tok) tok.textContent = (d && d.token) || "—";
         if (base) base.textContent = (d && d.backendBaseUrl) || (location.origin + "/api/linkedin");
@@ -2563,6 +2565,39 @@
       }
       var tc = root.querySelector("#liTokCopy"); if (tc) tc.addEventListener("click", function () { copyFrom("#liTok", "#liTokCopy"); });
       var bc = root.querySelector("#liBaseCopy"); if (bc) bc.addEventListener("click", function () { copyFrom("#liBase", "#liBaseCopy"); });
+
+      // --- one-click extension detect + connect (no copy/paste) ---
+      function paintExt() {
+        var st = root.querySelector("#liExtStatus"), acts = root.querySelector("#liExtActions");
+        if (!st || !acts || !document.body.contains(root)) return;
+        if (extState.installed) {
+          st.innerHTML = '✅ Extension installed' + (extState.version ? ' <span class="muted">(v' + esc(extState.version) + ")</span>" : "");
+          acts.innerHTML = '<button class="btn btn-primary btn-sm" id="liExtConnect">🔗 Connect this workspace</button>';
+          root.querySelector("#liExtConnect").addEventListener("click", function () {
+            var b = this;
+            var token = extTokenData && extTokenData.token;
+            if (!token) { toast("Loading your ingest token — try again in a second."); return; }
+            b.disabled = true; b.textContent = "Connecting…";
+            extConfigure((extTokenData && extTokenData.backendBaseUrl) || (location.origin + "/api/linkedin"), token);
+          });
+        } else {
+          st.innerHTML = "⬇ Extension not detected.";
+          acts.innerHTML = (EXT_STORE_URL
+            ? '<a class="btn btn-primary btn-sm" href="' + esc(EXT_STORE_URL) + '" target="_blank" rel="noopener">➕ Add to Chrome</a> '
+            : '<span class="muted" style="font-size:12.5px">Install it (Chrome → Extensions → Developer mode → Load unpacked → the <code>extension/</code> folder). </span>') +
+            '<button class="btn btn-ghost btn-sm" id="liExtRecheck">Re-check</button>';
+          var rc = root.querySelector("#liExtRecheck"); if (rc) rc.addEventListener("click", extPing);
+        }
+      }
+      function onExtConfigured(e) {
+        if (!document.body.contains(root)) return;
+        var c = root.querySelector("#liExtConnect");
+        if (e.detail && e.detail.ok) { toast("Extension connected ✅ — searches run here automatically now."); if (c) { c.disabled = true; c.textContent = "✅ Connected"; } }
+        else { if (c) { c.disabled = false; c.textContent = "🔗 Connect this workspace"; } toast("Could not connect the extension" + (e.detail && e.detail.error ? " (" + e.detail.error + ")" : ".")); }
+      }
+      document.addEventListener("ros-ext-present", paintExt);
+      document.addEventListener("ros-ext-configured", onExtConfigured);
+      paintExt(); extPing();
 
       var urlEl = root.querySelector("#liUrl"), prev = root.querySelector("#liPrev");
       if (urlEl.focus) try { urlEl.focus(); } catch (e) {}

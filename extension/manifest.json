@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "RecruiterOS Outreach — LinkedIn & Sales Navigator",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Connect your LinkedIn, scrape Sales Navigator searches into a downloadable database, and run safe multi-channel outreach campaigns.",
   "permissions": ["storage", "unlimitedStorage", "alarms", "scripting", "activeTab", "tabs", "downloads", "notifications"],
   "host_permissions": ["https://www.linkedin.com/*", "https://recruitersos.co/*", "https://*.recruitersos.co/*", "http://localhost/*"],
@@ -15,6 +15,11 @@
       "matches": ["https://www.linkedin.com/*"],
       "js": ["lib/messaging.js", "content/linkedin.js", "content/salesnav.js"],
       "css": ["content/overlay.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.recruitersos.co/*", "https://recruitersos.co/*", "http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["content/portal-bridge.js"],
       "run_at": "document_idle"
     }
   ],
