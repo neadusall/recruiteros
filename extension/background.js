@@ -329,8 +329,17 @@ async function onScrapePage({ datasetId, page, records }) {
   job.currentPage = page; job.total = ds.records.length;
   await setJob(job);
   log('info', 'Scraped page ' + page + ': +' + added + ' (total ' + ds.records.length + ')');
-  // If this dataset is fulfilling a backend search, stream what we have so far.
-  if (activeBridgeSearch && activeBridgeSearch.datasetId === datasetId) await streamBridgeSearch(ds.records, false);
+  if (activeBridgeSearch && activeBridgeSearch.datasetId === datasetId) {
+    // Backend-driven search: stream profiles back to the long-poll.
+    await streamBridgeSearch(ds.records, false);
+  } else if (added) {
+    // Manual "Scrape this search": push the new leads straight into the portal's
+    // Prospects (campaignFromDataset) so they show up live — no extra step. No-op
+    // if the extension isn't connected to a backend yet.
+    const s = await getState();
+    const newOnes = (records || []).filter(function (r) { return r && (r.fullName); });
+    await relayToBackend(s, 'campaignFromDataset', { campaignName: ds.name, leads: newOnes });
+  }
   return { ok: true, total: ds.records.length };
 }
 function keyOf(r) { return (r.salesNavUrl || r.profileUrl || (r.fullName + '|' + r.company) || '').toLowerCase(); }
@@ -395,12 +404,15 @@ function dispatchToTab(tabId, msg) {
 async function onCapturedLead(profile, s) { await relayToBackend(s, 'captureLead', { profile }); notify('Lead captured', (profile && profile.fullName) || 'Profile'); }
 async function relayToBackend(s, path, body) {
   const base = (s.settings && s.settings.backendBaseUrl) || CFG.backendBaseUrl; if (!base) return;
+  // Prefer the ingest token set by the portal's one-click Connect; fall back to config.
+  const token = (s.settings && s.settings.backendApiKey) || CFG.backendApiKey;
   try {
-    await fetch(base.replace(/\/$/, '') + '/' + path, {
+    const res = await fetch(base.replace(/\/$/, '') + '/' + path, {
       method: 'POST',
-      headers: Object.assign({ 'Content-Type': 'application/json' }, CFG.backendApiKey ? { Authorization: 'Bearer ' + CFG.backendApiKey } : {}),
+      headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { Authorization: 'Bearer ' + token } : {}),
       body: JSON.stringify(body),
     });
+    if (!res.ok) log('warn', 'backend relay ' + path + ' -> ' + res.status + (res.status === 401 ? ' (connect the extension in the portal first)' : ''));
   } catch (e) { log('warn', 'backend relay failed: ' + e.message); }
 }
 function notify(title, message) { try { chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon128.png', title, message }); } catch (_) {} }

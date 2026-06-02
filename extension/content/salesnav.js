@@ -46,13 +46,64 @@
   /* ---- wait until the result cards have actually rendered ---- */
   async function waitForResults(timeoutMs) {
     const start = Date.now();
-    while (Date.now() - start < (timeoutMs || 15000)) {
-      if (document.querySelectorAll(SEL.name).length > 0) { await sleep(500); return true; }
+    while (Date.now() - start < (timeoutMs || 20000)) {
+      if (document.querySelectorAll(SEL.name).length > 0) { await sleep(700); return true; }
       // nudge lazy-loaded lists
       window.scrollTo(0, document.body.scrollHeight * 0.6);
-      await sleep(500);
+      await sleep(700);
     }
     return document.querySelectorAll(SEL.name).length > 0;
+  }
+
+  /* ---- the scrollable results container (Sales Nav virtualizes the list) ---- */
+  function resultsContainer() {
+    var el = document.querySelector(SEL.name);
+    while (el && el !== document.body) {
+      var s = getComputedStyle(el);
+      if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 40) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  /* ---- lazy-load EVERY card on the page before scraping ----
+     Sales Navigator only renders the cards near the viewport, so scraping without
+     scrolling captures a partial page (the "43 of 304" symptom). We scroll the
+     list (window + inner container) in human-ish steps until the card count stops
+     growing, then return to the top. */
+  async function loadAllCards() {
+    var last = -1, stable = 0, tries = 0;
+    var box = resultsContainer();
+    while (stable < 3 && tries < 60) {
+      var n = document.querySelectorAll(SEL.name).length;
+      if (n === last) stable++; else { stable = 0; last = n; }
+      var step = Math.round(window.innerHeight * (0.55 + Math.random() * 0.35));
+      if (box) box.scrollTop = box.scrollTop + step; else window.scrollBy(0, step);
+      window.scrollBy(0, Math.round(step * 0.3)); // nudge window too (layout varies)
+      await sleep(jitter(450, 950));
+      tries++;
+    }
+    // settle at the bottom, then ease back toward the top like a person would
+    await sleep(jitter(500, 1200));
+    if (box) box.scrollTop = 0; else window.scrollTo(0, 0);
+    return document.querySelectorAll(SEL.name).length;
+  }
+
+  /* ---- human dwell: stay on the page 20–50s (randomized), reading + scrolling,
+     with an occasional longer "distracted" pause, before turning the page ---- */
+  async function humanDwell(minMs, maxMs, onTick) {
+    var total = jitter(minMs || 20000, maxMs || 50000);
+    if (Math.random() < 0.15) total += jitter(8000, 18000); // sometimes linger
+    var start = Date.now();
+    var box = resultsContainer();
+    while (Date.now() - start < total) {
+      var remain = total - (Date.now() - start);
+      if (onTick) onTick(Math.ceil(remain / 1000));
+      await sleep(Math.min(jitter(2500, 6000), Math.max(250, remain)));
+      // gentle, randomized scroll up/down — like skimming the results
+      var delta = Math.round(window.innerHeight * (0.15 + Math.random() * 0.5)) * (Math.random() < 0.5 ? 1 : -1);
+      if (box) box.scrollTop = Math.max(0, box.scrollTop + delta); else window.scrollBy(0, delta);
+    }
   }
 
   /* ---- scrape every person on the current page ---- */
@@ -113,15 +164,18 @@
     const page = pageOf(location.href);
     if ((scrapeJob.scrapedPages || []).includes(page)) return; // already did this page
 
-    banner('⏳ Scraping page ' + page + ' / ' + scrapeJob.maxPages + ' · ' + (scrapeJob.total || 0) + ' leads so far');
+    banner('⏳ Loading page ' + page + ' / ' + scrapeJob.maxPages + ' · ' + (scrapeJob.total || 0) + ' leads so far');
     const ok = await waitForResults();
     if (!ok) {
-      banner('⚠ No results detected on this page. Stopping.');
-      await send({ type: TYPE.SCRAPE_STOP });
-      setTimeout(clearBanner, 4000);
+      banner('⚠ No results on this page — reached the end. Done.');
+      await send({ type: TYPE.SCRAPE_STOP, finished: true });
+      setTimeout(clearBanner, 6000);
       return;
     }
 
+    // Scroll through the WHOLE page so every lazy-loaded card renders, then scrape.
+    const loaded = await loadAllCards();
+    banner('🔎 Reading page ' + page + ' · ' + loaded + ' on this page');
     const records = scrapeCurrentPage(scrapeJob.name);
     await send({ type: TYPE.SCRAPE_PAGE, datasetId: scrapeJob.datasetId, page, records });
 
@@ -129,8 +183,12 @@
     const reachedMax = page >= scrapeJob.maxPages;
     banner('✓ Page ' + page + ': +' + records.length + ' leads · ' + ((scrapeJob.total || 0) + records.length) + ' total');
 
-    if (records.length && more && !reachedMax) {
-      await sleep(jitter(scrapeJob.delayMin || 1200, scrapeJob.delayMax || 3200));
+    // Continue while there IS a next page and we're under the cap — do NOT stop just
+    // because one page rendered thin (that early-stop is what capped runs at ~43).
+    if (more && !reachedMax) {
+      await humanDwell(scrapeJob.delayMin || 20000, scrapeJob.delayMax || 50000, function (s) {
+        banner('✓ Page ' + page + ' done (' + ((scrapeJob.total || 0) + records.length) + ' total) · ⏳ pausing ' + s + 's (human pacing)…');
+      });
       location.href = urlForPage(scrapeJob.baseUrl, page + 1); // reload -> resumeJob() runs again
     } else {
       await send({ type: TYPE.SCRAPE_STOP, finished: true });

@@ -25,11 +25,12 @@
     workingHours: { start: 9, end: 18 },
     weekendsOff: true,
 
-    // Sales Navigator scraping.
+    // Sales Navigator scraping. Pacing is deliberately SLOW + randomized to look
+    // human and stay well under LinkedIn's radar (account safety > speed).
     scrape: {
-      pageDelayMin: 1200,          // ms between pages (jitter added) — keep humane
-      pageDelayMax: 3200,
-      defaultMaxPages: 10,         // 25 leads/page -> 250 leads; raise as needed
+      pageDelayMin: 20000,         // dwell 20–50s on each page (randomized), reading
+      pageDelayMax: 50000,         //   + gentle scrolling, before moving to the next
+      defaultMaxPages: 40,         // 25 leads/page -> up to 1000 leads per run
       hardMaxPages: 100,           // LinkedIn caps Sales Nav search near 2500 results
     },
 
