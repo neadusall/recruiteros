@@ -14,6 +14,18 @@ BRANCH="main"
 
 cd "$DIR" || { echo "$(date -u) no $DIR" >> "$LOG"; exit 0; }
 
+# One-time: switch ON database persistence (accounts + sessions survive restarts).
+# Runs once, guarded by a marker file; safe to leave here forever.
+if [ ! -f "$DIR/.db-enabled" ] && [ -f "$DIR/enable-db.sh" ]; then
+  echo "$(date -u) enabling DB persistence (one-time)..." >> "$LOG"
+  if bash "$DIR/enable-db.sh" >> "$LOG" 2>&1; then
+    touch "$DIR/.db-enabled"
+    echo "$(date -u) DB persistence enabled" >> "$LOG"
+  else
+    echo "$(date -u) enable-db failed, will retry next cycle" >> "$LOG"
+  fi
+fi
+
 # Fetch quietly; compare local vs remote.
 git fetch origin "$BRANCH" --quiet
 LOCAL=$(git rev-parse HEAD)

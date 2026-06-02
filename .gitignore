@@ -22,3 +22,6 @@ integration/srv.log
 *.env
 integration/.next
 node_modules
+
+# runtime marker: db persistence enabled once
+.db-enabled
