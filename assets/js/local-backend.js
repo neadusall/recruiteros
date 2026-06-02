@@ -322,6 +322,10 @@
         var bySig = leads.filter(function (l) { return sigTypes.indexOf(l.signalType) >= 0; });
         leads = bySig.length ? bySig : leads;
       }
+      // Suppress companies already taken into this workspace's Prospects (no dup outreach).
+      var taken = {};
+      (d.prospects || []).forEach(function (p) { if (p.company) taken[String(p.company).toLowerCase().trim()] = 1; });
+      leads = leads.filter(function (l) { return !taken[String(l.company || "").toLowerCase().trim()]; });
       return ok({ leads: leads, pulled: d.inmarket.length, warnings: [] });
     }
 

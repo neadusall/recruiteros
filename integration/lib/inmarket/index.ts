@@ -285,30 +285,56 @@ export async function collectLeads(q: InMarketQuery, nowIso: string, cap = 300):
 export async function searchInMarket(
   q: InMarketQuery,
   nowIso: string,
+  workspaceId?: string,
 ): Promise<{ leads: InMarketLead[]; pulled: number; warnings: string[] }> {
   const limit = Math.min(Math.max(q.limit ?? 25, 1), 1000);
+
+  // Per-user suppression: hide companies the workspace has already taken into Prospects,
+  // so you never re-target (and double-send to) a company you're already working. This is
+  // per-workspace — the global pool is shared, but each user's taken-list is their own.
+  const taken = workspaceId ? await takenCompanies(workspaceId) : new Set<string>();
+  const fresh = (arr: InMarketLead[]) => arr.filter((l) => !taken.has((l.company || "").toLowerCase().trim()));
+
   try {
     const { ensureAccumulator } = await import("./accumulator");
     const { queryPool, mergeIntoPool } = await import("./pool");
     ensureAccumulator(); // start the background collector (no-op once running)
 
-    const pooled = await queryPool(q, limit);
+    // Pull extra from the pool to backfill after suppression, then drop taken companies.
+    const pooled = fresh(await queryPool(q, limit + taken.size + 50));
     if (pooled.length >= 24) {
-      return { leads: pooled, pulled: pooled.length, warnings: [] };
+      return { leads: pooled.slice(0, limit), pulled: pooled.length, warnings: [] };
     }
     // Pool thin for this query → live collect, return it, and grow the pool.
     const live = await collectLeads(q, nowIso, Math.max(limit, 200));
     void mergeIntoPool(live).catch(() => {});
-    const merged = dedupeLeads([...pooled, ...live]).slice(0, limit);
+    const merged = fresh(dedupeLeads([...pooled, ...live])).slice(0, limit);
     return { leads: merged, pulled: merged.length, warnings: [] };
   } catch (err) {
     // Pool/accumulator unavailable → pure live fallback (original behavior).
     try {
-      const live = await collectLeads(q, nowIso, Math.max(limit, 200));
+      const live = fresh(await collectLeads(q, nowIso, Math.max(limit, 200)));
       return { leads: live.slice(0, limit), pulled: live.length, warnings: ["pool_unavailable"] };
     } catch (e) {
       return { leads: [], pulled: 0, warnings: [`search_failed: ${(e as Error).message}`] };
     }
+  }
+}
+
+/** Companies the workspace has already taken into Prospects (lowercased), so Hire
+ *  Signals can hide them and avoid duplicate outreach. Best-effort; empty on error. */
+async function takenCompanies(workspaceId: string): Promise<Set<string>> {
+  try {
+    const { getCore } = await import("../core/repository");
+    const prospects = await getCore().listProspects(workspaceId);
+    const set = new Set<string>();
+    for (const p of prospects) {
+      const c = (p.company || "").toLowerCase().trim();
+      if (c) set.add(c);
+    }
+    return set;
+  } catch {
+    return new Set<string>();
   }
 }
 
