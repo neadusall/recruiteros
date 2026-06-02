@@ -39,6 +39,15 @@
     // scrape destination toggle (BD vs Recruiting)
     const sm = s.settings.backendMotion || 'recruiting';
     $$('#snMotion .seg').forEach(b => b.classList.toggle('active', b.dataset.motion === sm));
+    // portal connection status — make it obvious leads go to the portal, not just CSV
+    const portalOn = !!(s.settings.backendBaseUrl && s.settings.backendApiKey);
+    const dest = $('#snDest');
+    if (dest) {
+      dest.className = 'p-dest ' + (portalOn ? 'on' : 'off');
+      dest.innerHTML = portalOn
+        ? '✅ Connected — leads post straight into your portal <b>Prospects</b> (' + (sm === 'bd' ? 'Business Dev' : 'Recruiting') + '), with photos &amp; data.'
+        : '⚠ <b>Not connected to the portal.</b> Leads save here only (CSV). In the portal: open <b>Enrich LinkedIn searches</b> → <b>Connect this workspace</b>.';
+    }
 
     // datasets
     $('#dsCount').textContent = (s.datasets || []).length;
@@ -127,6 +136,8 @@
   /* ---- scrape ---- */
   $('#startScrape').addEventListener('click', async () => {
     const url = $('#snUrl').value.trim();
+    const connected = state && state.settings && state.settings.backendBaseUrl && state.settings.backendApiKey;
+    if (!connected && !confirm('Not connected to the portal — these leads will only be saved in the extension (CSV) and will NOT appear under Prospects.\n\nConnect in the portal first (Enrich LinkedIn searches → Connect this workspace) to push them in. Start anyway?')) return;
     const r = await send({ type: TYPE.SCRAPE_START, url, name: $('#snName').value.trim(), maxPages: +$('#snPages').value });
     flash(r.ok ? 'Scrape started, opening the search...' : (r.info || 'Could not start'));
     setTimeout(refresh, 800);
