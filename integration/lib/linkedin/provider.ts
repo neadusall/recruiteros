@@ -426,7 +426,10 @@ export function getProvider(): LinkedInProvider {
     case "unipile":
       return unipileProvider;
     case "internal":
-      return internalProvider;
+      // 'internal' talks to a SEPARATE bridge service via RECRUITEROS_OUTREACH_URL.
+      // If that URL isn't set (e.g. the default generated env), there's no service
+      // to reach — fall back to our own in-backend bridge so it works out of the box.
+      return (process.env.RECRUITEROS_OUTREACH_URL ?? "").trim() ? internalProvider : backendBridgeProvider;
     case "self":
     default:
       return backendBridgeProvider;

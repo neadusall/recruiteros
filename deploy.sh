@@ -64,8 +64,9 @@ RECRUITEROS_APP_URL=https://${DOMAIN}
 ANTHROPIC_API_KEY=
 RECRUITEROS_LLM_MODEL=claude-sonnet-4-6
 
-# Outreach + texting providers (optional until you go live with sending)
-RECRUITEROS_OUTREACH_PROVIDER=internal
+# Outreach: 'self' = our own in-backend bridge (work runs in the Chrome
+# extension, coordinated here, no third party). 'unipile' for the hosted API.
+RECRUITEROS_OUTREACH_PROVIDER=self
 RECRUITEROS_OUTREACH_URL=
 RECRUITEROS_OUTREACH_TOKEN=
 RECRUITEROS_SMS_PROVIDER=telnyx
