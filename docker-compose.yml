@@ -4,9 +4,15 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Read POSTGRES_PASSWORD from the SAME file the app uses (.env.production),
+    # so the database and the app always share one password. Do NOT set it via
+    # `${POSTGRES_PASSWORD}` substitution here: Compose substitutes that from a
+    # file literally named `.env` (or the shell), never from .env.production —
+    # which silently gave the db a different password than the app, breaking
+    # persistence and logging everyone out on every deploy.
+    env_file: .env.production
     environment:
       POSTGRES_USER: recruiteros
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_env}
       POSTGRES_DB: recruiteros
     volumes:
       - pg_data:/var/lib/postgresql/data

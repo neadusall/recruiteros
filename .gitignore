@@ -23,5 +23,6 @@ integration/srv.log
 integration/.next
 node_modules
 
-# runtime marker: db persistence enabled once
+# runtime marker: db persistence enabled once (versioned)
 .db-enabled
+.db-enabled-v2

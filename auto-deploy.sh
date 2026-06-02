@@ -16,11 +16,18 @@ cd "$DIR" || { echo "$(date -u) no $DIR" >> "$LOG"; exit 0; }
 
 # One-time: switch ON database persistence (accounts + sessions survive restarts).
 # Runs once, guarded by a marker file; safe to leave here forever.
-if [ ! -f "$DIR/.db-enabled" ] && [ -f "$DIR/enable-db.sh" ]; then
-  echo "$(date -u) enabling DB persistence (one-time)..." >> "$LOG"
+#
+# Marker is versioned (-v2): earlier installs initialized the Postgres volume
+# with a password that did NOT match the app's (the db got it via Compose
+# `${POSTGRES_PASSWORD}` substitution from a nonexistent .env, while the app read
+# the real one from .env.production). That mismatch silently broke persistence.
+# Bumping the marker forces enable-db.sh to re-run ONCE on those installs, which
+# re-initializes the volume so the db and app share one password for good.
+if [ ! -f "$DIR/.db-enabled-v2" ] && [ -f "$DIR/enable-db.sh" ]; then
+  echo "$(date -u) enabling DB persistence (one-time, v2: fix password mismatch)..." >> "$LOG"
   if bash "$DIR/enable-db.sh" >> "$LOG" 2>&1; then
-    touch "$DIR/.db-enabled"
-    echo "$(date -u) DB persistence enabled" >> "$LOG"
+    touch "$DIR/.db-enabled-v2"
+    echo "$(date -u) DB persistence enabled (v2)" >> "$LOG"
   else
     echo "$(date -u) enable-db failed, will retry next cycle" >> "$LOG"
   fi
