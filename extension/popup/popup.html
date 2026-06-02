@@ -30,12 +30,12 @@
       <label class="p-field"><span>Dataset name</span><input id="snName" placeholder="e.g. Berlin React leads" /></label>
       <label class="p-field"><span>Max pages (~25/pg)</span><input id="snPages" type="number" value="10" min="1" max="100" /></label>
     </div>
-    <label class="p-field"><span>Send scraped leads to</span>
+    <div class="p-field"><span>Send scraped leads to</span>
       <div class="p-seg" id="snMotion">
         <button type="button" class="seg active" data-motion="recruiting">👤 Recruiting</button>
         <button type="button" class="seg" data-motion="bd">🏢 Business Dev</button>
       </div>
-    </label>
+    </div>
     <div class="p-row" style="gap:8px">
       <button id="dryRun" class="p-btn ghost sm">Test current page</button>
       <button id="startScrape" class="p-btn primary sm" style="flex:1">▶ Start full scrape</button>

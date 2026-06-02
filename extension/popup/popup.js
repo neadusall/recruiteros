@@ -116,8 +116,10 @@
   });
 
   /* ---- scrape destination: BD vs Recruiting ---- */
-  $$('#snMotion .seg').forEach(b => b.addEventListener('click', async () => {
+  $$('#snMotion .seg').forEach(b => b.addEventListener('click', async (ev) => {
+    ev.preventDefault();
     $$('#snMotion .seg').forEach(x => x.classList.remove('active')); b.classList.add('active');
+    if (state && state.settings) state.settings.backendMotion = b.dataset.motion; // keep render() from reverting
     await send({ type: TYPE.UPDATE_SETTINGS, settings: { backendMotion: b.dataset.motion } });
     flash('Scraping to ' + (b.dataset.motion === 'bd' ? 'Business Dev' : 'Recruiting') + ' folder');
   }));
