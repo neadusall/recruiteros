@@ -365,8 +365,20 @@ async function exportCsv(id) {
   const ds = (await getDatasets())[id]; if (!ds) return { ok: false, info: 'dataset not found' };
   const cols = LEAD_FIELDS;
   const esc = (v) => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const R = self.ROS;
+  // Clean each row on the way out (covers datasets scraped before cleaning landed):
+  // names -> "First Last", headline/title/company/location de-junked.
+  const cell = (r, c) => {
+    const nm = R.cleanName(r.fullName || ((r.firstName || '') + ' ' + (r.lastName || '')));
+    if (c === 'fullName') return nm.full;
+    if (c === 'firstName') return nm.first;
+    if (c === 'lastName') return nm.last;
+    if (c === 'headline' || c === 'title' || c === 'company' || c === 'location') return R.cleanText(r[c]);
+    if (c === 'capturedAt') return new Date(r[c] || Date.now()).toISOString();
+    return r[c];
+  };
   const rows = [cols.join(',')];
-  ds.records.forEach(r => rows.push(cols.map(c => esc(c === 'capturedAt' ? new Date(r[c] || Date.now()).toISOString() : r[c])).join(',')));
+  ds.records.forEach(r => rows.push(cols.map(c => esc(cell(r, c))).join(',')));
   const csv = rows.join('\r\n');
   const dataUrl = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
   const fname = ds.name.replace(/[^a-z0-9]+/gi, '_').slice(0, 60) + '.csv';

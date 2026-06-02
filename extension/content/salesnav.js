@@ -112,23 +112,30 @@
     document.querySelectorAll(SEL.name).forEach((nameEl) => {
       const card = nameEl.closest(SEL.resultItem) || nameEl.closest('li') || nameEl.parentElement;
       if (!card) return;
-      const fullName = nameEl.textContent.replace(/\s+/g, ' ').trim();
-      if (!fullName) return;
-      const [firstName, ...rest] = fullName.split(' ');
+      const rawName = nameEl.textContent.replace(/\s+/g, ' ').trim();
+      if (!rawName) return;
+      const nm = window.ROS.cleanName(rawName);   // "First Last", emojis/credentials stripped
       const leadA = card.querySelector(SEL.leadLink);
-      const pubA = card.querySelector(SEL.publicLink);
       const title = txt(card, SEL.title);
       const photoEl = card.querySelector(SEL.photo);
       const photoUrl = photoEl ? (photoEl.getAttribute('src') || photoEl.getAttribute('data-delayed-url') || '') : '';
+      // Public profile URL: scan every anchor in the card for a /in/ link (the
+      // person-name link, the photo link, or a hidden one), normalized.
+      let profileUrl = '';
+      const anchors = card.querySelectorAll('a[href]');
+      for (let i = 0; i < anchors.length; i++) {
+        const u = window.ROS.publicProfileUrl(anchors[i].getAttribute('href') || anchors[i].href);
+        if (u) { profileUrl = u; break; }
+      }
       out.push({
-        fullName, firstName, lastName: rest.join(' '),
-        headline: title, title,
-        company: txt(card, SEL.company),
-        location: txt(card, SEL.location),
+        fullName: nm.full || rawName, firstName: nm.first, lastName: nm.last,
+        headline: window.ROS.cleanText(title), title: window.ROS.cleanText(title),
+        company: window.ROS.cleanText(txt(card, SEL.company)),
+        location: window.ROS.cleanText(txt(card, SEL.location)),
         photoUrl,
         connectionDegree: txt(card, SEL.degree),
         salesNavUrl: leadA ? leadA.href.split('?')[0] : '',
-        profileUrl: pubA ? pubA.href.split('?')[0] : '',
+        profileUrl: profileUrl,
         datasetName: datasetName || '',
         source: 'sales-navigator',
         capturedAt: Date.now(),

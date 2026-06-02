@@ -74,5 +74,43 @@
     });
   }
 
-  g.ROS = { TYPE, ACTION, CHANNEL, LEAD_FIELDS, makeAction, send, VERSION: '0.2.0' };
+  /* ---- data cleaning (shared by the scraper + CSV export) ---- */
+
+  // Normalize a scraped display name to a clean "First Last": drop leading
+  // honorifics, cut at the first comma / pipe / paren / dash / symbol, strip
+  // emojis, and drop trailing credentials (MBA, PhD, Jr, …). Multi-word surnames
+  // that are all letters (e.g. "Van Der Berg") are kept.
+  function cleanName(raw) {
+    if (!raw) return { full: '', first: '', last: '' };
+    var s = String(raw).split(/\s[–—-]\s|[,|/()•·@]/u)[0];
+    s = s.replace(/[^\p{L}\p{M}.'’\- ]/gu, ' ').replace(/\s+/g, ' ').trim();
+    var words = s.split(' ').filter(Boolean);
+    var HON = /^(dr|mr|mrs|ms|miss|mx|prof|sir|madam)\.?$/i;
+    while (words.length && HON.test(words[0])) words.shift();
+    var SUF = /^(jr|sr|ii|iii|iv|phd|md|mba|cpa|cfa|esq|pmp|rn|do|jd|msc|bsc|ba|bs|ma|mph|dds|md)\.?$/i;
+    while (words.length > 1 && SUF.test(words[words.length - 1])) words.pop();
+    var first = words[0] || '';
+    var last = words.slice(1).join(' ');
+    return { full: (first + (last ? ' ' + last : '')).trim(), first: first, last: last };
+  }
+
+  // Strip emojis / decorative symbols from free text (headline, title, company,
+  // location) while keeping normal words + everyday punctuation.
+  function cleanText(raw) {
+    if (!raw) return '';
+    return String(raw)
+      .replace(/[^\p{L}\p{M}\p{N}.,&/()'’"+:#@%\- ]/gu, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\s+([,.])/g, '$1')
+      .trim();
+  }
+
+  // Normalize a public LinkedIn profile URL to https://www.linkedin.com/in/<slug>.
+  function publicProfileUrl(href) {
+    if (!href) return '';
+    var m = String(href).match(/linkedin\.com\/in\/([^/?#]+)/i) || String(href).match(/\/in\/([^/?#]+)/i);
+    return m ? 'https://www.linkedin.com/in/' + m[1] : '';
+  }
+
+  g.ROS = { TYPE, ACTION, CHANNEL, LEAD_FIELDS, makeAction, send, cleanName, cleanText, publicProfileUrl, VERSION: '0.3.0' };
 })(typeof self !== 'undefined' ? self : this);
