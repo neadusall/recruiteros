@@ -746,7 +746,9 @@
       '<button class="btn btn-primary btn-sm" id="enrichAllBtn">⚡ Enrich all contacts</button>' +
       '<button class="btn btn-ghost btn-sm" id="importBtn">⇪ Import (CSV / paste)</button>' +
       '<button class="btn btn-ghost btn-sm" id="liSearchBtn">🔗 Enrich LinkedIn searches</button>' +
-      '<button class="btn btn-ghost btn-sm" id="prListsBtn">📁 Saved lists</button></div>' +
+      '<button class="btn btn-ghost btn-sm" id="prListsBtn">📁 Saved lists</button>' +
+      '<select id="prSavedSelect" title="Open a saved search / list" style="margin-left:auto;background:var(--surface-2,#16161f);color:var(--text,#f4f4f8);border:1px solid var(--border,#2a2a36);border-radius:8px;padding:6px 11px;font-size:13px;max-width:240px"><option value="">📂 Saved searches…</option></select>' +
+      '</div>' +
       '<div id="liProgress"></div>' +
       '<div class="pr-searchbar"><span class="ico">⌕</span>' +
       '<input id="prSearch" type="text" autocomplete="off" placeholder="Search prospects by name, job title, company, or keyword…" /></div>' +
@@ -758,11 +760,31 @@
     $("#prListsBtn").addEventListener("click", openListsModal);
 
     var prAll = [], prLifecycle = REF.lifecycle, prFilter = "", prSel = {};
+    // Saved-search view: when a saved list is chosen, only its prospects show.
+    var prListIds = null, prListId = "", prListName = "";
+    var savedSelect = $("#prSavedSelect");
+    if (savedSelect) savedSelect.addEventListener("change", function () { selectSavedList(savedSelect.value); });
+    function selectSavedList(id) {
+      var l = id && listStore().all().filter(function (x) { return x.id === id; })[0];
+      if (!l) { prListIds = null; prListId = ""; prListName = ""; }
+      else { prListIds = {}; (l.prospectIds || []).forEach(function (pid) { prListIds[pid] = true; }); prListId = l.id; prListName = l.name; }
+      if (savedSelect) savedSelect.value = prListId;
+      paint();
+    }
+    // Rebuild the dropdown options from the saved lists for this motion.
+    function refreshSavedDropdown() {
+      if (!savedSelect) return;
+      var lists = listStore().all().filter(function (l) { return !l.motion || l.motion === motion; });
+      savedSelect.innerHTML = '<option value="">📂 Saved searches…</option>' +
+        lists.map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.name) + " · " + (l.prospectIds || []).length + "</option>"; }).join("");
+      savedSelect.value = prListId;
+    }
     var searchEl = $("#prSearch");
     if (searchEl) searchEl.addEventListener("input", function () { prFilter = (searchEl.value || "").toLowerCase().trim(); paint(); });
 
     // Keyword filter over name (incl. first name), job title, company, email, source.
     function matches(p) {
+      if (prListIds && !prListIds[p.id]) return false;   // viewing a saved search
       if (!prFilter) return true;
       var hay = ((p.fullName || "") + " " + (p.title || "") + " " + (p.company || "") + " " +
         (p.email || "") + " " + (p.category || "")).toLowerCase();
@@ -778,6 +800,13 @@
       if (p.phone) contact.push("☎ " + esc(p.phone));
       var contactLine = '<div class="lr-contact' + (contact.length ? "" : " muted") + '">' +
         (contact.length ? contact.join(" · ") : "No work contact yet") + "</div>";
+      // Experience summary: stored on the prospect, hidden by default so the row
+      // stays clean; expand on demand. Backend populates `experienceSummary`.
+      var exp = p.experienceSummary || p.experience || p.summary || "";
+      var expHtml = exp
+        ? '<button type="button" class="pr-exp-toggle" data-exp="' + esc(p.id) + '" style="background:none;border:0;color:var(--brand-2,#4dd0ff);font-size:12px;cursor:pointer;padding:3px 0 0">Experience ▾</button>' +
+          '<div class="pr-exp" id="exp_' + esc(p.id) + '" hidden style="margin-top:5px;font-size:12.5px;line-height:1.5;color:var(--text-muted,#aab);white-space:pre-line;max-width:640px">' + esc(exp) + "</div>"
+        : "";
       // A "role placeholder" prospect: the hiring manager's real name isn't researched yet.
       var pending = !p.linkedinUrl && (/ [—–] /.test(p.fullName || "") || /hiring manager/i.test(p.fullName || ""));
       var name = pending
@@ -788,7 +817,7 @@
         '<input type="checkbox" class="pr-check" data-pid="' + esc(p.id) + '"' + (prSel[p.id] ? " checked" : "") + ' />' +
         '<span class="avatar" style="position:relative;width:30px;height:30px;font-size:11px;flex:none;background:' + colorFor(p.fullName) + '">' + esc(initials(pending ? (p.company || "?") : p.fullName)) +
           (p.photoUrl && !pending ? '<img src="' + esc(p.photoUrl) + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;border-radius:50%;object-fit:cover" onerror="this.remove()" />' : "") + "</span>" +
-        '<div class="lr-id"><div class="lr-main">' + name + '</div><div class="lr-sub">' + esc((p.company ? p.company : "") + (pending && p.title ? "" : (p.title ? " · " + p.title : "")) + (p.location ? " · " + p.location : "")) + "</div>" + contactLine + "</div>" +
+        '<div class="lr-id"><div class="lr-main">' + name + '</div><div class="lr-sub">' + esc((p.company ? p.company : "") + (pending && p.title ? "" : (p.title ? " · " + p.title : "")) + (p.location ? " · " + p.location : "")) + "</div>" + contactLine + expHtml + "</div>" +
         '<button class="pr-enrich" data-enrich="' + esc(p.id) + '">' + enrichLbl + "</button>" +
         '<select class="stage-select cls cls-' + statusCls(p.status) + '" data-pid="' + esc(p.id) + '">' + opts + "</select>" +
         '<div class="lr-right">' + (p.dripStage ? "Touch " + p.dripStage : "") + "</div></div>";
@@ -815,12 +844,20 @@
             '<button class="btn btn-ghost btn-sm" id="prClearSel">Clear</button></span>'
           : '<span class="pr-selcount muted">Select prospects to save them as a named list or delete in bulk.</span>') +
         "</div>";
+      var listBanner = prListName
+        ? '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:8px 12px;border:1px solid var(--border,#2a2a36);border-radius:10px;font-size:13px;background:rgba(124,92,255,.08)">' +
+          '📂 Viewing saved search: <b>' + esc(prListName) + "</b> · " + list.length + " shown" +
+          '<button class="btn btn-ghost btn-sm" id="prShowAll" style="margin-left:auto">Show all prospects</button></div>'
+        : "";
       body.innerHTML = '<div class="pipe">' + stages + "</div>" +
         '<div class="card"><h3>Pipeline <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl + "</span></h3>" +
-        bulk +
-        (rows || '<div class="empty">' + (prFilter
+        listBanner + bulk +
+        (rows || '<div class="empty">' + (prListName
+          ? "This saved search has no matching prospects in your current pipeline."
+          : prFilter
           ? "No prospects match “" + esc(prFilter) + "”."
           : "No prospects yet. Import, pull from a LinkedIn search above, or promote from In-Market Leads.") + "</div>") + "</div>";
+      var showAll = $("#prShowAll"); if (showAll) showAll.addEventListener("click", function () { selectSavedList(""); });
 
       // Selection wiring
       var selAll = $("#prSelAll");
@@ -838,6 +875,17 @@
       var saveBtn = $("#prSaveList"); if (saveBtn) saveBtn.addEventListener("click", function () { saveSelectedAsList(selIds); });
       var delBtn = $("#prDelSel"); if (delBtn) delBtn.addEventListener("click", function () { deleteSelected(selIds); });
       var clrBtn = $("#prClearSel"); if (clrBtn) clrBtn.addEventListener("click", function () { prSel = {}; paint(); });
+
+      // Expand / collapse a prospect's experience summary (hidden by default).
+      Array.prototype.forEach.call(body.querySelectorAll(".pr-exp-toggle"), function (t) {
+        t.addEventListener("click", function () {
+          var box = body.querySelector("#exp_" + (window.CSS && CSS.escape ? CSS.escape(t.getAttribute("data-exp")) : t.getAttribute("data-exp")));
+          if (!box) return;
+          var open = box.hasAttribute("hidden");
+          if (open) box.removeAttribute("hidden"); else box.setAttribute("hidden", "");
+          t.textContent = open ? "Experience ▴" : "Experience ▾";
+        });
+      });
 
       // Stage transitions: change the dropdown -> persist via the API.
       Array.prototype.forEach.call(body.querySelectorAll(".stage-select"), function (sel) {
@@ -882,6 +930,14 @@
         prLifecycle = (d && d.lifecycle) || REF.lifecycle;
         paint();
       }).catch(function () { var b = $("#prBody"); if (b) b.innerHTML = needsSetup(); });
+      // Populate the Saved searches dropdown (local cache first, then merge server).
+      refreshSavedDropdown();
+      api("/prospect-lists?motion=" + encodeURIComponent(motion)).then(function (d) {
+        var server = (d && d.lists) || [];
+        if (!server.length) return;
+        try { localStorage.setItem("ros_prospect_lists", JSON.stringify(server.concat(listStore().all().filter(function (l) { return !server.some(function (s) { return s.id === l.id; }); })))); } catch (e) {}
+        refreshSavedDropdown();
+      }).catch(function () {});
     }
 
     /* ---- saved prospect lists (named audiences) ---- */
@@ -906,6 +962,7 @@
       if (!name) return;
       var list = { id: "plist_" + Date.now(), name: name.trim(), prospectIds: ids.slice(), motion: motion === "bd" ? "bd" : "recruiting", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       listStore().save(list);
+      refreshSavedDropdown();   // surface it in the Saved searches dropdown immediately
       toast('Saved "' + list.name + '" · ' + ids.length + " prospect" + (ids.length === 1 ? "" : "s"));
     }
     function deleteSelected(ids) {

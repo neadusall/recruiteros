@@ -17,6 +17,15 @@
             ▼                                        │ POST /agent/event
      backend POST /api/linkedin/webhook  <──────────┘
 
+   Search (internalProvider.searchProfiles -> /search): the backend posts a
+   pasted Sales Navigator / classic search URL and long-polls; the extension
+   claims the queued `search` action, pages through the results human-like in
+   the user's own session, and streams the scraped profiles back via
+   /agent/search-result until done. The long-poll then returns { items }.
+
+       backend POST /search (long-poll) ──► [ search action ] ──► /agent/poll
+       backend ◄── { items } ◄── /agent/search-result (partial…done) ◄── scrape
+
    Zero dependencies. Run:  node bridge/outreach-bridge.cjs
    Config via env (see bridge/.env.example):
      PORT                       default 8787
@@ -39,6 +48,13 @@ const queues = new Map();      // accountId -> [action]
 const byId = new Map();        // actionId -> action
 const chats = new Map();       // accountId|profileId -> [chatMessage]
 const events = [];             // audit of forwarded events
+const searchWaiters = new Map(); // actionId -> { resolve, items } (backend /search long-poll)
+
+// How long the backend's searchProfiles() call holds open while the extension
+// pages through the search. On timeout we return whatever the agent has posted
+// so far (the extension keeps streaming pages via /agent/search-result), so a
+// long scrape degrades to partial results instead of an error.
+const SEARCH_TIMEOUT_MS = +(process.env.SEARCH_TIMEOUT_MS || 110000);
 
 let seq = 0;
 function uid(p) { seq += 1; return p + '_' + Date.now().toString(36) + seq.toString(36); }
@@ -121,6 +137,27 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  /* ---- backend-facing search (internalProvider.searchProfiles -> /search) ----
+     Enqueues a `search` action for the extension to fulfil by paging through the
+     pasted Sales Navigator / classic search URL in the user's own session, then
+     long-polls until the agent streams the scraped profiles back (or we hit the
+     timeout and return whatever has arrived so far). Mirrors the Unipile path's
+     { items: SearchProfile[] } response so the engine is provider-agnostic. */
+  if (path === '/search') {
+    if (tok !== OUTREACH_TOKEN) return send(res, 401, { error: 'bad outreach token' });
+    const acc = body.account;
+    if (!acc || !body.url) return send(res, 422, { error: 'account and url are required' });
+    const action = enqueue('search', acc, {}, { url: body.url, limit: Math.max(1, Math.min(+body.limit || 100, 1000)) });
+    const items = await new Promise((resolve) => {
+      const waiter = { items: [], resolve };
+      searchWaiters.set(action.id, waiter);
+      setTimeout(() => {
+        if (searchWaiters.has(action.id)) { searchWaiters.delete(action.id); resolve(waiter.items); }
+      }, SEARCH_TIMEOUT_MS);
+    });
+    return send(res, 200, { items });
+  }
+
   /* ---- extension-facing ---- */
   if (path.startsWith('/agent/')) {
     if (tok !== AGENT_TOKEN) return send(res, 401, { error: 'bad agent token' });
@@ -136,6 +173,22 @@ const server = http.createServer(async (req, res) => {
       a.status = body.ok ? 'done' : 'failed';
       a.result = { ok: !!body.ok, providerMessageId: body.providerMessageId, info: body.info, at: new Date().toISOString() };
       return send(res, 200, { ok: true });
+    }
+    if (path === '/agent/search-result') {
+      // The extension streams scraped profiles for a `search` action. Each post
+      // carries the FULL set collected so far; `done` resolves the backend's
+      // long-poll. Partial posts let a timed-out /search still return results.
+      const a = byId.get(body.actionId);
+      if (!a || a.type !== 'search') return send(res, 404, { error: 'unknown search action' });
+      const items = Array.isArray(body.items) ? body.items : [];
+      const waiter = searchWaiters.get(body.actionId);
+      if (waiter) waiter.items = items;
+      a.result = { ok: true, count: items.length, at: new Date().toISOString() };
+      if (body.done) {
+        a.status = 'done';
+        if (waiter) { searchWaiters.delete(body.actionId); waiter.resolve(items); }
+      }
+      return send(res, 200, { ok: true, count: items.length });
     }
     if (path === '/agent/event') {
       // normalize to the backend's LinkedInWebhookEvent shape

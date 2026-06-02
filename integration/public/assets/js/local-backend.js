@@ -352,7 +352,7 @@
         if (body.action === "linkedin_search") {
           var people = linkedinSearchSeed(body.limit);
           var newPros = people.map(function (m) {
-            return { id: "p_" + Date.now() + "_" + Math.floor(Math.random() * 9999), fullName: m.fullName, title: m.title, company: m.company, linkedinUrl: m.linkedinUrl, status: "queued", dripStage: 0, category: "linkedin_search" };
+            return { id: "p_" + Date.now() + "_" + Math.floor(Math.random() * 9999), fullName: m.fullName, title: m.title, headline: m.headline, company: m.company, location: m.location, photoUrl: m.photoUrl, linkedinUrl: m.linkedinUrl, status: "queued", dripStage: 0, category: "linkedin_search" };
           });
           d.prospects = newPros.concat(d.prospects); save(d);
           return ok({ added: newPros.length, deduped: 0, found: newPros.length, account: "demo-linkedin" });
@@ -390,6 +390,10 @@
         return ok(buildOutreach(d, body.motion || mo));
       }
       return ok(buildOutreach(d, decodeURIComponent(mo)));
+    }
+    if (p === "/ext-token") {
+      if (!d.extToken) { d.extToken = "ext_demo_" + Math.random().toString(36).slice(2, 12); save(d); }
+      return ok({ token: d.extToken, backendBaseUrl: location.origin + "/api/linkedin" });
     }
     if (p === "/prospect-lists") {
       d.prospectLists = d.prospectLists || [];
@@ -666,14 +670,18 @@
     var lasts = ["Bennett", "Castillo", "Okafor", "Nguyen", "Rosales", "Fischer", "Haddad", "Park", "Larsson", "Mehta", "Romano", "Walsh", "Abe", "Costa"];
     var titles = ["VP Engineering", "Head of Talent", "Director of Product", "CTO", "Engineering Manager", "Head of People", "VP Sales", "Chief of Staff"];
     var cos = ["Verla Health", "Brightwave", "Northwind Robotics", "Lumen Retail", "Cumulus Logistics", "Halcyon AI", "Forge Labs", "Meridian Bank"];
-    var n = Math.max(1, Math.min(parseInt(limit, 10) || 12, 25));
+    var locs = ["San Francisco, CA", "New York, NY", "Austin, TX", "Remote (US)", "London, UK", "Berlin, DE", "Toronto, CA", "Boston, MA"];
+    var n = Math.max(1, Math.min(parseInt(limit, 10) || 12, 500));
     var out = [];
     for (var i = 0; i < n; i++) {
-      var f = firsts[i % firsts.length], l = lasts[(i * 3) % lasts.length];
+      var f = firsts[i % firsts.length], l = lasts[(i * 3 + Math.floor(i / firsts.length)) % lasts.length];
+      var title = titles[i % titles.length], co = cos[(i * 2) % cos.length];
       out.push({
         fullName: f + " " + l,
-        title: titles[i % titles.length],
-        company: cos[i % cos.length],
+        title: title, headline: title + " at " + co,
+        company: co,
+        location: locs[i % locs.length],
+        photoUrl: "https://i.pravatar.cc/96?u=" + encodeURIComponent(f + l + i),
         linkedinUrl: "https://www.linkedin.com/in/" + f.toLowerCase() + "-" + l.toLowerCase() + "-" + (i + 1),
       });
     }

@@ -8,8 +8,10 @@
   g.ROS_CONFIG = {
     // Host outreach tool this extension reports to. Captured leads, scraped
     // datasets, and action results POST here. Leave '' to stay local-only.
-    backendBaseUrl: '',            // e.g. 'http://localhost:5173/api/linkedin'
-    backendApiKey: '',             // sent as Authorization: Bearer <key>
+    // For RecruiterOS this points at the live backend; paste your ingest token
+    // from the app (Prospects -> 🔗 Connect extension) into backendApiKey.
+    backendBaseUrl: 'https://recruitersos.co/api/linkedin',
+    backendApiKey: '',             // paste your ext-token (sent as Authorization: Bearer <token>)
 
     // Real LinkedIn actions (clicks). OFF by default: actions are simulated
     // until you turn Live on in the popup AND selectors are confirmed.

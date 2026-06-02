@@ -23,6 +23,7 @@
     company: '[data-anonymize="company-name"]',
     location: '[data-anonymize="location"]',
     degree: '[data-anonymize="degree"], .artdeco-entity-lockup__degree',
+    photo: 'img[data-anonymize="entity-photo"], .artdeco-entity-lockup__image img, .presence-entity__image, img.ember-view[src*="profile-displayphoto"], img[src*="media.licdn.com"]',
     leadLink: 'a[href*="/sales/lead/"]',
     publicLink: 'a[href*="/in/"]',
     nextBtn: 'button[aria-label="Next"]',
@@ -66,11 +67,14 @@
       const leadA = card.querySelector(SEL.leadLink);
       const pubA = card.querySelector(SEL.publicLink);
       const title = txt(card, SEL.title);
+      const photoEl = card.querySelector(SEL.photo);
+      const photoUrl = photoEl ? (photoEl.getAttribute('src') || photoEl.getAttribute('data-delayed-url') || '') : '';
       out.push({
         fullName, firstName, lastName: rest.join(' '),
         headline: title, title,
         company: txt(card, SEL.company),
         location: txt(card, SEL.location),
+        photoUrl,
         connectionDegree: txt(card, SEL.degree),
         salesNavUrl: leadA ? leadA.href.split('?')[0] : '',
         profileUrl: pubA ? pubA.href.split('?')[0] : '',

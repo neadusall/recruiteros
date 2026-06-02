@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "description": "Connect your LinkedIn, scrape Sales Navigator searches into a downloadable database, and run safe multi-channel outreach campaigns.",
   "permissions": ["storage", "unlimitedStorage", "alarms", "scripting", "activeTab", "tabs", "downloads", "notifications"],
-  "host_permissions": ["https://www.linkedin.com/*"],
+  "host_permissions": ["https://www.linkedin.com/*", "https://recruitersos.co/*", "https://*.recruitersos.co/*", "http://localhost/*"],
   "background": { "service_worker": "background.js" },
   "action": {
     "default_title": "RecruiterOS Outreach",

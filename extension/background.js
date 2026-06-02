@@ -55,8 +55,10 @@ chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'ros-tick') { drainQue
    performs the action via the content script, and reports back.
    ============================================================ */
 let agentBusy = false;
+let activeBridgeSearch = null;   // { actionId, bridge, datasetId } while a backend search scrape runs
 async function agentTick() {
   if (agentBusy) return;
+  if (activeBridgeSearch) return;            // a search scrape owns the tab right now
   const s = await getState();
   const b = s.settings.bridge || {};
   if (!b.enabled || !b.url || !b.accountId) return;
@@ -66,6 +68,10 @@ async function agentTick() {
     const poll = await bridgeCall(b, '/agent/poll', { accountId: b.accountId });
     const action = poll && poll.action;
     if (!action) return;
+    // A backend-driven search: page through the URL human-like and stream the
+    // scraped profiles back. It manages its own tab + pacing, so we hand off and
+    // let the scrape loop report results (no DO_ACTION dispatch).
+    if (action.type === 'search') { await runBridgeSearch(b, action); return; }
     const tab = await linkedInTab();
     if (!tab) { log('warn', 'bridge: no LinkedIn tab to execute in'); return; }
 
@@ -119,6 +125,55 @@ function navigateTab(tabId, url) {
     });
   });
 }
+
+/* ---------------- bridge-driven search (backend searchProfiles) ----------------
+   The backend posts a `search` action with { url, limit }. We run it through the
+   SAME human-paced Sales Navigator scraper the popup uses (jittered page-to-page
+   pacing, resume-safe), and stream the scraped profiles back to the bridge as
+   each page lands, so the backend's long-poll gets results as they come. */
+async function runBridgeSearch(b, action) {
+  const url = action.payload && action.payload.url;
+  const limit = (action.payload && action.payload.limit) || 100;
+  if (!url) { await postSearchResult(b, action.id, [], true); return; }
+  // ~25 results per Sales Nav page; cap to the hard page limit.
+  const maxPages = Math.min(Math.max(1, Math.ceil(limit / 25)), CFG.scrape.hardMaxPages);
+  const started = await startScrape({ url, maxPages, name: 'Backend search · ' + new Date().toLocaleString() });
+  if (!started.ok) { await postSearchResult(b, action.id, [], true); return; }
+  // Hand control to the scrape loop; onScrapePage/stopScrape stream results to
+  // the bridge for this datasetId until the job finishes.
+  activeBridgeSearch = { actionId: action.id, bridge: b, datasetId: started.datasetId, limit };
+}
+
+// Push the profiles scraped so far for the active bridge search to the bridge.
+async function streamBridgeSearch(records, done) {
+  const a = activeBridgeSearch; if (!a) return;
+  const items = (records || []).slice(0, a.limit).map(toSearchProfile);
+  await postSearchResult(a.bridge, a.actionId, items, !!done);
+  if (done) activeBridgeSearch = null;
+}
+function postSearchResult(b, actionId, items, done) {
+  return bridgeCall(b, '/agent/search-result', { actionId, items, done });
+}
+
+// Map a scraped Sales Nav record onto the backend's SearchProfile shape.
+function toSearchProfile(r) {
+  const pub = r.profileUrl || '';
+  const slug = (pub.match(/\/in\/([^/?#]+)/) || [])[1] || '';
+  return {
+    providerProfileId: slug || r.salesNavUrl || pub || '',
+    fullName: r.fullName,
+    firstName: r.firstName,
+    lastName: r.lastName,
+    headline: r.headline,
+    title: r.title,
+    company: r.company,
+    location: r.location,
+    publicProfileUrl: pub || undefined,
+    imageUrl: r.photoUrl || undefined,
+    connectionDegree: degreeNum(r.connectionDegree),
+  };
+}
+function degreeNum(d) { const m = String(d == null ? '' : d).match(/([123])/); return m ? +m[1] : undefined; }
 
 /* ---------------- message router ---------------- */
 function handle(msg, sender, sendResponse) {
@@ -261,12 +316,19 @@ async function onScrapePage({ datasetId, page, records }) {
   job.currentPage = page; job.total = ds.records.length;
   await setJob(job);
   log('info', 'Scraped page ' + page + ': +' + added + ' (total ' + ds.records.length + ')');
+  // If this dataset is fulfilling a backend search, stream what we have so far.
+  if (activeBridgeSearch && activeBridgeSearch.datasetId === datasetId) await streamBridgeSearch(ds.records, false);
   return { ok: true, total: ds.records.length };
 }
 function keyOf(r) { return (r.salesNavUrl || r.profileUrl || (r.fullName + '|' + r.company) || '').toLowerCase(); }
 async function stopScrape(finished) {
   const job = await getJob(); if (!job) return { ok: true };
   job.status = finished ? 'done' : 'stopped'; await setJob(job);
+  // Close out a backend search: send the final result set so the long-poll resolves.
+  if (activeBridgeSearch && activeBridgeSearch.datasetId === job.datasetId) {
+    const ds = (await getDatasets())[job.datasetId];
+    await streamBridgeSearch((ds && ds.records) || [], true);
+  }
   if (finished) notify('Scrape complete', job.total + ' leads in "' + job.name + '"');
   return { ok: true, total: job.total, status: job.status };
 }
