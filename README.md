@@ -1,4 +1,4 @@
-# RecruiterOS.co
+# RecruiterOS — recruitersos.co
 
 **The operating system for modern recruiting.** A cross between Clay.com (a programmable
 data-enrichment spreadsheet) and Juicebox.ai (natural-language people search), reframed as
