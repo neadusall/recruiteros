@@ -597,13 +597,23 @@
         '<span class="im-mgr-who">' + who + "</span></label>";
     }
 
-    return '<div class="im-lead" data-id="' + esc(l.id) + '">' +
+    var renew = l.renewed
+      ? '<div class="im-renew"><div class="im-renew-top">🔥 <b>' + esc(l.renewedReason || "Renewed demand") + "</b> " +
+          '<span class="muted">— already in your Prospects, but hiring again. Re-engage:</span></div>' +
+          '<div class="im-renew-msg">' + esc(l.renewedMessage || "") + "</div>" +
+          '<button class="im-renew-copy" data-msg="' + esc(l.renewedMessage || "") + '">Copy follow-up message</button></div>'
+      : "";
+
+    return '<div class="im-lead' + (l.renewed ? " im-lead-renew" : "") + '" data-id="' + esc(l.id) + '">' +
       '<div class="im-lead-head">' +
         '<span class="avatar" style="background:' + colorFor(l.company) + '">' + esc(initials(l.company)) + "</span>" +
-        '<div class="im-lead-id"><div class="im-lead-name">' + esc(l.company) + (l.industry ? ' <span class="muted" style="font-weight:400">· ' + esc(l.industry) + "</span>" : "") + "</div>" +
+        '<div class="im-lead-id"><div class="im-lead-name">' + esc(l.company) +
+          (l.renewed ? ' <span class="im-renew-badge">🔥 Renewed</span>' : "") +
+          (l.industry ? ' <span class="muted" style="font-weight:400">· ' + esc(l.industry) + "</span>" : "") + "</div>" +
         '<div class="im-lead-meta">' + esc(l.headcountBand || "") + (l.location ? " · " + esc(l.location) : "") + "</div></div>" +
         '<span class="cls cls-' + scoreCls + ' im-score" title="Hiring-intent score">' + score + "</span></div>" +
       '<div class="im-reason">' + esc(l.reason) + src + "</div>" +
+      renew +
       '<div class="im-managers"><div class="im-mgr-head">Hiring managers &amp; open roles <span class="muted">(' + (mgrs ? mgrs.length : 1) + ")</span></div>" + rows + "</div>" +
       (l.scoreReasons && l.scoreReasons.length ? '<div class="im-lead-reasons">' + l.scoreReasons.slice(0, 3).map(esc).join(" · ") + "</div>" : "") +
       "</div>";
@@ -639,6 +649,15 @@
     // Save selected as hiring signals (a staging step before Prospects).
     var save = body.querySelector("#imSave");
     if (save) save.addEventListener("click", saveSelectedSignals);
+    // Copy the auto-generated renewed-demand follow-up message.
+    Array.prototype.forEach.call(body.querySelectorAll(".im-renew-copy"), function (btn) {
+      btn.addEventListener("click", function () {
+        var msg = btn.getAttribute("data-msg") || "";
+        var done = function () { btn.textContent = "✓ Copied"; setTimeout(function () { btn.textContent = "Copy follow-up message"; }, 1800); };
+        if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(msg).then(done).catch(done); }
+        else { try { var ta = document.createElement("textarea"); ta.value = msg; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); } catch (e) {} done(); }
+      });
+    });
   }
 
   function updateImBulk() {
