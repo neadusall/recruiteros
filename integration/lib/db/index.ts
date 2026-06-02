@@ -16,15 +16,32 @@ import { Pool } from "pg";
 let pool: Pool | null = null;
 let ready: Promise<void> | null = null;
 
+/**
+ * Resolve the Postgres connection string. Prefers DATABASE_URL, but SELF-HEALS:
+ * if DATABASE_URL was never written to .env.production yet POSTGRES_PASSWORD is
+ * present (it must be, for the compose `db` service), derive the standard
+ * compose connection. This keeps accounts/sessions durable across redeploys
+ * even on installs whose .env.production predates DATABASE_URL — the fix for the
+ * "logged out + asked to create a new account on every deploy" bug.
+ */
+function connString(): string | null {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  if (process.env.POSTGRES_PASSWORD) {
+    return `postgres://recruiteros:${process.env.POSTGRES_PASSWORD}@db:5432/recruiteros`;
+  }
+  return null;
+}
+
 export function dbEnabled(): boolean {
-  return !!process.env.DATABASE_URL;
+  return !!connString();
 }
 
 function getPool(): Pool | null {
-  if (!dbEnabled()) return null;
+  const cs = connString();
+  if (!cs) return null;
   if (!pool) {
     pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: cs,
       max: 5,
       idleTimeoutMillis: 30_000,
     });
@@ -47,6 +64,13 @@ async function init(): Promise<void> {
 function whenReady(): Promise<void> {
   if (!ready) ready = init().catch((e) => { console.error("[db] init failed:", e.message); });
   return ready;
+}
+
+/** Real connectivity probe: true only if a query actually succeeds. */
+export async function dbPing(): Promise<boolean> {
+  const p = getPool();
+  if (!p) return false;
+  try { await p.query("SELECT 1"); return true; } catch { return false; }
 }
 
 /** Load a JSON snapshot for `key`, or null if absent / db disabled. */

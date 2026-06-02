@@ -54,23 +54,34 @@
     if (onMount) onMount(card, close);
     return close;
   }
+  function delay(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+
   // GET helper: resolves to parsed JSON, or null on any error (caller renders an
   // empty/needs-setup state). The session cookie authenticates every call.
-  function api(path) {
+  // A 401 is retried once after a short delay before signing out: just after a
+  // redeploy the backend may still be hydrating its session store from the DB,
+  // and we must not nuke a valid local session during that boot window.
+  function api(path, _retried) {
     return fetch(API + path, { credentials: "include" }).then(function (r) {
-      if (r.status === 401) { signOut(); throw 0; }
+      if (r.status === 401) {
+        if (!_retried) return delay(1200).then(function () { return api(path, true); });
+        signOut(); throw 0;
+      }
       if (!r.ok) throw 0;
       return r.json();
     });
   }
-  // Mutating call (POST/PUT/DELETE) -> { ok, status, data }.
-  function send(path, method, payload) {
+  // Mutating call (POST/PUT/DELETE) -> { ok, status, data }. Same 401-retry guard.
+  function send(path, method, payload, _retried) {
     return fetch(API + path, {
       method: method, credentials: "include",
       headers: payload ? { "Content-Type": "application/json" } : undefined,
       body: payload ? JSON.stringify(payload) : undefined
     }).then(function (r) {
-      if (r.status === 401) { signOut(); throw 0; }
+      if (r.status === 401) {
+        if (!_retried) return delay(1200).then(function () { return send(path, method, payload, true); });
+        signOut(); throw 0;
+      }
       return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, status: r.status, data: d }; });
     });
   }
