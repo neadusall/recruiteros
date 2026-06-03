@@ -451,6 +451,9 @@
   var imSelectedSignals = [];   // selected SignalType keys to filter the search by
 
   function imPickKey(leadId, role) { return leadId + "::" + (role || "__company"); }
+  // Unique key per hiring-manager option (role + manager title), so the two managers we
+  // surface for a role can be selected independently.
+  function imMgrKey(m) { return (m && m.role ? m.role : "") + "||" + (m && m.managerTitle ? m.managerTitle : ""); }
   function imFindLead(id) { return inMarketResults.find(function (x) { return x.id === id; }); }
   function imVisibleLeads() { return inMarketResults.filter(function (l) { return Math.round(l.score || 0) >= imMinScore; }); }
 
@@ -670,7 +673,7 @@
         var who = m.managerName
           ? '<b>' + esc(m.managerName) + "</b>"
           : '<span class="muted">resolve on push</span>';
-        return '<label class="im-mgr"><input type="checkbox" class="im-pick" data-id="' + esc(l.id) + '" data-role="' + esc(m.role) + '" ' + (imPicks[imPickKey(l.id, m.role)] ? "checked" : "") + ">" +
+        return '<label class="im-mgr"><input type="checkbox" class="im-pick" data-id="' + esc(l.id) + '" data-mk="' + esc(imMgrKey(m)) + '" ' + (imPicks[imPickKey(l.id, imMgrKey(m))] ? "checked" : "") + ">" +
           '<span class="im-mgr-role">' + esc(m.role) + "</span>" +
           '<span class="im-mgr-arrow">→</span>' +
           '<span class="im-mgr-title">' + esc(m.managerTitle) + "</span>" +
@@ -680,7 +683,7 @@
     } else {
       // No role breakdown: offer the company's buyer / decision-maker as the prospect.
       var who = l.buyerName ? '<b>' + esc(l.buyerName) + "</b>" : '<span class="muted">resolve on push</span>';
-      rows = '<label class="im-mgr"><input type="checkbox" class="im-pick" data-id="' + esc(l.id) + '" data-role="" ' + (imPicks[imPickKey(l.id, "")] ? "checked" : "") + ">" +
+      rows = '<label class="im-mgr"><input type="checkbox" class="im-pick" data-id="' + esc(l.id) + '" data-mk="" ' + (imPicks[imPickKey(l.id, "")] ? "checked" : "") + ">" +
         '<span class="im-mgr-role">Decision-maker</span>' +
         '<span class="im-mgr-arrow">→</span>' +
         '<span class="im-mgr-title">' + esc(l.buyerTitle || "Hiring manager") + "</span>" +
@@ -697,10 +700,10 @@
     var nRoles = mgrs ? mgrs.length : 1;
     // The company checkbox is "checked" when every one of its managers is selected.
     var allChecked = mgrs
-      ? mgrs.every(function (m) { return imPicks[imPickKey(l.id, m.role)]; })
+      ? mgrs.every(function (m) { return imPicks[imPickKey(l.id, imMgrKey(m))]; })
       : !!imPicks[imPickKey(l.id, "")];
     var anyChecked = mgrs
-      ? mgrs.some(function (m) { return imPicks[imPickKey(l.id, m.role)]; })
+      ? mgrs.some(function (m) { return imPicks[imPickKey(l.id, imMgrKey(m))]; })
       : !!imPicks[imPickKey(l.id, "")];
     var metaBits = [];
     if (l.headcountBand) metaBits.push(esc(l.headcountBand));
@@ -738,10 +741,10 @@
     // Per-manager selection.
     Array.prototype.forEach.call(body.querySelectorAll(".im-pick"), function (cb) {
       cb.addEventListener("change", function () {
-        var id = cb.getAttribute("data-id"), role = cb.getAttribute("data-role");
+        var id = cb.getAttribute("data-id"), mk = cb.getAttribute("data-mk");
         var lead = imFindLead(id); if (!lead) return;
-        var mgr = role ? (lead.hiringManagers || []).find(function (m) { return m.role === role; }) : null;
-        var key = imPickKey(id, role);
+        var mgr = mk ? (lead.hiringManagers || []).find(function (m) { return imMgrKey(m) === mk; }) : null;
+        var key = imPickKey(id, mk);
         if (cb.checked) imPicks[key] = { lead: lead, manager: mgr || null };
         else delete imPicks[key];
         syncCoCheck(cb.closest(".im-lead"));
@@ -763,7 +766,7 @@
       imVisibleLeads().forEach(function (l) {
         var mgrs = (l.hiringManagers && l.hiringManagers.length) ? l.hiringManagers : null;
         if (mgrs) mgrs.forEach(function (m) {
-          var k = imPickKey(l.id, m.role);
+          var k = imPickKey(l.id, imMgrKey(m));
           if (on) imPicks[k] = { lead: l, manager: m }; else delete imPicks[k];
         });
         else { var k = imPickKey(l.id, ""); if (on) imPicks[k] = { lead: l, manager: null }; else delete imPicks[k]; }

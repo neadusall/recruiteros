@@ -117,11 +117,30 @@ const MANAGER_TITLE_BY_FUNCTION: Record<JobFunction, string> = {
   other: "Hiring Manager",
 };
 
+/** The hiring-manager ladder per function: the DIRECT manager who owns the day-to-day
+ *  hire, then the SENIOR leader who owns the function. Surfacing both gives the recruiter
+ *  more than one person to target per role, so they can refine who they reach. */
+const MANAGER_LADDER: Record<JobFunction, string[]> = {
+  engineering: ["Engineering Manager", "VP / Head of Engineering"],
+  product: ["Group Product Manager", "Head of Product / CPO"],
+  design: ["Design Manager", "Head of Design"],
+  data: ["Data / Analytics Manager", "Head of Data / Analytics"],
+  sales: ["Sales Manager", "VP Sales / Revenue"],
+  marketing: ["Marketing Manager", "Head of Marketing / CMO"],
+  finance: ["Finance Manager", "VP Finance / CFO"],
+  operations: ["Operations Manager", "VP / Head of Operations"],
+  people_hr: ["Talent / Recruiting Manager", "Head of Talent / People"],
+  customer_success: ["Customer Success Manager", "VP Customer Success"],
+  legal: ["Senior Counsel", "General Counsel"],
+  executive: ["Chief of Staff", "CEO / Founder"],
+  other: ["Hiring Manager", "Department Head"],
+};
+
 /**
- * Map each observed open role to the person who would own filling it. When the engine
- * has already resolved a real decision-maker for the company, attach their name to the
- * role whose function matches their title; everything else falls back to the canonical
- * manager title for that function.
+ * Map each observed open role to the people who would own filling it — the direct manager
+ * AND the function head, so the recruiter can target either or both. When the engine has
+ * resolved a real decision-maker whose function matches, attach their name to the senior
+ * rung; everything else stays a canonical title until enrichment resolves a person.
  */
 function hiringManagersFor(roles: string[] | undefined, buyer?: Person): HiringManagerLead[] {
   if (!roles || !roles.length) return [];
@@ -129,17 +148,23 @@ function hiringManagersFor(roles: string[] | undefined, buyer?: Person): HiringM
   const seen = new Set<string>();
   const out: HiringManagerLead[] = [];
   for (const role of roles) {
-    const key = role.trim().toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
+    const rkey = role.trim().toLowerCase();
+    if (!rkey) continue;
     const fn = classifyTitle(role).function;
+    const ladder = MANAGER_LADDER[fn] || [MANAGER_TITLE_BY_FUNCTION[fn]];
     const matchesBuyer = !!buyerFn && (fn === buyerFn || buyerFn === "executive");
-    out.push({
-      role,
-      function: fn,
-      managerTitle: MANAGER_TITLE_BY_FUNCTION[fn],
-      managerName: matchesBuyer ? buyer?.fullName : undefined,
-      managerLinkedin: matchesBuyer ? buyer?.linkedinUrl : undefined,
+    ladder.forEach((managerTitle, idx) => {
+      const k = rkey + "::" + managerTitle.toLowerCase();
+      if (seen.has(k)) return;
+      seen.add(k);
+      const attach = matchesBuyer && idx === ladder.length - 1; // real person → senior rung
+      out.push({
+        role,
+        function: fn,
+        managerTitle,
+        managerName: attach ? buyer?.fullName : undefined,
+        managerLinkedin: attach ? buyer?.linkedinUrl : undefined,
+      });
     });
   }
   return out;
