@@ -205,7 +205,8 @@ RecruiterOS is starting.
 
 To add API keys later:  nano $DIR/.env.production  &&  docker compose up -d
 
-OS Text (taltxt) — fill in its keys (Neon DATABASE_URL is required):
+OS Text (taltxt) — DB is auto-configured (shared Postgres). To SEND texts,
+fill in Telnyx / QStash / Anthropic keys:
    nano $DIR/money-maker-sms/.env.production  &&  docker compose up -d --build taltxt
    It then loads in the portal under the "OS Text" route, and at
    https://taltxt.${DOMAIN}
