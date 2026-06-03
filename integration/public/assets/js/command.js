@@ -3031,5 +3031,24 @@
     }
     var so = $("#acctSignOut");
     if (so) so.addEventListener("click", signOut);
+
+    // Appearance: light/dark theme toggle. Persists + applies to <html> (the
+    // pre-paint script in command.html sets it on load so there's no flash).
+    var themeSeg = $("#themeSeg");
+    if (themeSeg) {
+      var applyTheme = function (t) {
+        t = (t === "light") ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", t);
+        try { localStorage.setItem("ros_theme", t); } catch (e) {}
+        Array.prototype.forEach.call(themeSeg.querySelectorAll(".ts"), function (b) {
+          b.classList.toggle("active", b.getAttribute("data-theme") === t);
+        });
+      };
+      var saved = null; try { saved = localStorage.getItem("ros_theme"); } catch (e) {}
+      applyTheme(saved || document.documentElement.getAttribute("data-theme") || "dark");
+      Array.prototype.forEach.call(themeSeg.querySelectorAll(".ts"), function (b) {
+        b.addEventListener("click", function (e) { e.stopPropagation(); applyTheme(b.getAttribute("data-theme")); });
+      });
+    }
   })();
 })();
