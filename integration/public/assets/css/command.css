@@ -336,6 +336,26 @@
 .im-sigchip:hover { color: var(--text); border-color: var(--border-strong); transform: translateY(-1px); }
 .im-sigchip.active { background: rgba(124,92,255,0.18); color: #b9a6ff; border-color: rgba(124,92,255,0.5); }
 
+/* ---- In-Market cleaner layout: title up, multi-select groups, less busy ---- */
+.im-hero { padding: 2px 0 12px; }
+.im-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.im-title { font-size: clamp(22px, 2.6vw, 30px); margin-bottom: 0; line-height: 1.1; }
+.im-bar .im-modes { margin-left: auto; }
+.im-group { margin-top: 12px; }
+.im-group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.im-group-head-sub { margin: 0 0 8px; }
+.im-group-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); margin-right: 6px; }
+.im-mini { appearance: none; cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 600; padding: 4px 11px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-muted); transition: all .12s ease; }
+.im-mini:hover { color: var(--text); border-color: var(--brand); }
+.im-scroll { max-height: 124px; overflow-y: auto; padding: 10px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-soft); margin-top: 0; }
+.im-scroll::-webkit-scrollbar { width: 8px; } .im-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
+.im-sig-details { border: 1px solid var(--border); border-radius: 11px; padding: 0 14px; background: var(--surface); }
+.im-sig-details[open] { padding-bottom: 12px; }
+.im-group-summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 11px 0; color: var(--text); list-style: none; user-select: none; }
+.im-group-summary::-webkit-details-marker { display: none; }
+.im-group-summary::before { content: "▸"; color: var(--text-dim); margin-right: 8px; display: inline-block; }
+.im-sig-details[open] .im-group-summary::before { content: "▾"; }
+
 /* Prospect search bar */
 .pr-searchbar { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 11px; padding: 7px 14px; margin-bottom: 14px; }
 .pr-searchbar .ico { color: var(--text-dim); font-size: 16px; }

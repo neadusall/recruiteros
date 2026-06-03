@@ -366,7 +366,8 @@
   /* ---------------- In-Market Leads (BD: who is hiring right now) ------------ */
   var inMarketResults = [];      // last search results (full lead objects)
   var imMode = "industry";       // "industry" | "company"
-  var imSelectedIndustry = null;
+  var imSelectedIndustries = []; // multi-select industries
+  var imSearchTimer = null;      // debounce for chip-driven searches
   var imMinScore = 0;            // narrow-down: minimum hiring-intent score shown
   var imLabel = "";             // current result label, kept for re-renders
   var imTotal = 0;              // total companies available for this query in the pool (grows daily)
@@ -430,79 +431,50 @@
   function imVisibleLeads() { return inMarketResults.filter(function (l) { return Math.round(l.score || 0) >= imMinScore; }); }
 
   function renderInMarket(el) {
-    imPicks = {}; imMinScore = 0; imSelectedSignals = [];
+    imPicks = {}; imMinScore = 0; imSelectedSignals = []; imSelectedIndustries = [];
     el.innerHTML =
       '<div class="im-hero">' +
-        '<h1 class="im-title">Who\'s hiring <span class="gradient-text">right now.</span></h1>' +
-        '<div class="im-modes" id="imModes">' +
-          '<button type="button" class="im-mode active" data-mode="industry">By industry / market</button>' +
-          '<button type="button" class="im-mode" data-mode="company">By company name</button>' +
+        '<div class="im-bar">' +
+          '<h1 class="im-title">Who\'s hiring <span class="gradient-text">right now.</span></h1>' +
+          '<div class="im-modes" id="imModes">' +
+            '<button type="button" class="im-mode active" data-mode="industry">Industry / market</button>' +
+            '<button type="button" class="im-mode" data-mode="company">Company name</button>' +
+          "</div>" +
         "</div>" +
         '<form class="im-search" id="imForm">' +
           '<span class="ico">⌕</span>' +
           '<input id="imQuery" type="text" autocomplete="off" placeholder="' + esc(IM_PLACEHOLDER[imMode]) + '" />' +
-          '<button type="submit" class="btn btn-primary" id="imSearchBtn">Find in-market companies</button>' +
+          '<button type="submit" class="btn btn-primary" id="imSearchBtn">Find companies</button>' +
         "</form>" +
-        '<div class="im-hint">Pick a sector, or type any industry, role, or keyword in the box above (e.g. “claims adjuster”, “RN”, “plant manager”, “solar”). Coverage is deepest for tech-adjacent sectors today — a paid data feed broadens the rest.</div>' +
-        '<div class="im-industries" id="imIndustries">' +
-          IM_INDUSTRIES.map(function (n) { return '<button type="button" class="im-chip" data-ind="' + esc(n) + '">' + esc(n) + "</button>"; }).join("") +
+        // Industries — multi-select with Select all / Clear, in a compact scroll area.
+        '<div class="im-group" id="imIndGroup">' +
+          '<div class="im-group-head"><span class="im-group-title">Industries</span>' +
+            '<button type="button" class="im-mini" data-all="ind">Select all</button>' +
+            '<button type="button" class="im-mini" data-clear="ind">Clear</button></div>' +
+          '<div class="im-industries im-scroll" id="imIndustries">' +
+            IM_INDUSTRIES.map(function (n) { return '<button type="button" class="im-chip" data-ind="' + esc(n) + '">' + esc(n) + "</button>"; }).join("") +
+          "</div>" +
         "</div>" +
-        '<div class="im-sig-wrap"><div class="im-sig-label">Filter by hiring signal <span class="muted">— optional, click to toggle. Pulls from open / free sources.</span></div>' +
+        // Hiring signals — collapsed by default to de-clutter; Select all / Clear inside.
+        '<details class="im-group im-sig-details" id="imSigGroup">' +
+          '<summary class="im-group-summary">Hiring signals <span class="muted">— optional filter</span></summary>' +
+          '<div class="im-group-head im-group-head-sub">' +
+            '<button type="button" class="im-mini" data-all="sig">Select all</button>' +
+            '<button type="button" class="im-mini" data-clear="sig">Clear</button></div>' +
           '<div class="im-signals" id="imSignals">' +
             IM_SIGNALS.map(function (s) { return '<button type="button" class="im-sigchip" data-sig="' + esc(s.t) + '">' + esc(s.l) + "</button>"; }).join("") +
-          "</div></div>" +
+          "</div>" +
+        "</details>" +
       "</div>" +
       '<div id="imSaved"></div>' +
-      '<div id="imBody"><div class="empty">Pick an industry to surface companies actively hiring in that market, ranked by hiring intent.</div></div>';
+      '<div id="imBody"><div class="empty">Pick one or more industries (or Select all) to see who\'s hiring, ranked by hiring intent.</div></div>';
 
     renderSavedSignals();
     var form = $("#imForm"), input = $("#imQuery");
 
-    // Search mode toggle: industry/market OR company name — one or the other.
-    Array.prototype.forEach.call(el.querySelectorAll(".im-mode"), function (m) {
-      m.addEventListener("click", function () {
-        imMode = m.getAttribute("data-mode");
-        Array.prototype.forEach.call(el.querySelectorAll(".im-mode"), function (x) { x.classList.toggle("active", x === m); });
-        imSelectedIndustry = null; syncChips();
-        input.value = ""; input.placeholder = IM_PLACEHOLDER[imMode];
-        $("#imIndustries").style.display = (imMode === "industry") ? "" : "none";
-        $("#imBody").innerHTML = '<div class="empty">' + (imMode === "industry"
-          ? "Pick an industry to surface companies actively hiring in that market, ranked by hiring intent."
-          : "Type a company name to check if they’re hiring right now, and who owns the open roles.") + "</div>";
-        input.focus();
-      });
-    });
-
-    form.addEventListener("submit", function (e) {
-      e.preventDefault();
-      var v = input.value.trim(); if (!v) return;
-      if (imMode === "company") { runSearch({ companyName: v }, v); }
-      else { imSelectedIndustry = null; syncChips(); runSearch({ query: v }, v); }
-    });
-
-    Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
-      c.addEventListener("click", function () {
-        var ind = c.getAttribute("data-ind");
-        imSelectedIndustry = (imSelectedIndustry === ind) ? null : ind;
-        syncChips();
-        if (imSelectedIndustry) { input.value = imSelectedIndustry; runSearch({ industries: [imSelectedIndustry] }, imSelectedIndustry); }
-      });
-    });
-
-    // Signal-type chips: toggle, then re-run the current search filtered to those signals.
-    Array.prototype.forEach.call(el.querySelectorAll(".im-sigchip"), function (c) {
-      c.addEventListener("click", function () {
-        var t = c.getAttribute("data-sig");
-        var i = imSelectedSignals.indexOf(t);
-        if (i >= 0) imSelectedSignals.splice(i, 1); else imSelectedSignals.push(t);
-        syncSigChips();
-        rerunSearch();
-      });
-    });
-
     function syncChips() {
       Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
-        c.classList.toggle("active", c.getAttribute("data-ind") === imSelectedIndustry);
+        c.classList.toggle("active", imSelectedIndustries.indexOf(c.getAttribute("data-ind")) >= 0);
       });
     }
     function syncSigChips() {
@@ -511,21 +483,78 @@
       });
     }
 
-    // Re-run whatever search is in context (industry / company / keyword), or a
-    // signals-only sweep when nothing else is chosen.
-    function rerunSearch() {
+    // Build the active search from the current selections (multi-industry + signals + box).
+    function currentSearch() {
       if (imMode === "company") {
-        var v = input.value.trim();
-        if (v) runSearch({ companyName: v }, v);
-        else if (imSelectedSignals.length) runSearch({}, "selected signals");
-      } else if (imSelectedIndustry) {
-        runSearch({ industries: [imSelectedIndustry] }, imSelectedIndustry);
-      } else {
-        var q = input.value.trim();
-        if (q) runSearch({ query: q }, q);
-        else if (imSelectedSignals.length) runSearch({}, "selected signals");
+        var cv = input.value.trim();
+        return cv ? { criteria: { companyName: cv }, label: cv } : null;
       }
+      var crit = {}, labels = [];
+      if (imSelectedIndustries.length) {
+        crit.industries = imSelectedIndustries.slice();
+        labels.push(imSelectedIndustries.length === IM_INDUSTRIES.length ? "all industries"
+          : imSelectedIndustries.length === 1 ? imSelectedIndustries[0]
+          : imSelectedIndustries.length + " industries");
+      }
+      var q = input.value.trim();
+      if (q) { crit.query = q; labels.push(q); }
+      if (imSelectedSignals.length) labels.push(imSelectedSignals.length + " signal" + (imSelectedSignals.length === 1 ? "" : "s"));
+      if (!imSelectedIndustries.length && !q && !imSelectedSignals.length) return null;
+      return { criteria: crit, label: labels.join(" · ") };
     }
+    function runNow() {
+      clearTimeout(imSearchTimer);
+      var s = currentSearch();
+      if (s) runSearch(s.criteria, s.label);
+      else $("#imBody").innerHTML = '<div class="empty">Pick one or more industries (or Select all) to see who\'s hiring.</div>';
+    }
+    function scheduleSearch() { clearTimeout(imSearchTimer); imSearchTimer = setTimeout(runNow, 350); }
+
+    // Search mode toggle: industry/market OR company name.
+    Array.prototype.forEach.call(el.querySelectorAll(".im-mode"), function (m) {
+      m.addEventListener("click", function () {
+        imMode = m.getAttribute("data-mode");
+        Array.prototype.forEach.call(el.querySelectorAll(".im-mode"), function (x) { x.classList.toggle("active", x === m); });
+        input.value = ""; input.placeholder = IM_PLACEHOLDER[imMode];
+        $("#imIndGroup").style.display = (imMode === "industry") ? "" : "none";
+        $("#imSigGroup").style.display = (imMode === "industry") ? "" : "none";
+        $("#imBody").innerHTML = '<div class="empty">' + (imMode === "industry"
+          ? "Pick one or more industries (or Select all) to see who's hiring."
+          : "Type a company name to check if they're hiring right now, and who owns the open roles.") + "</div>";
+        input.focus();
+      });
+    });
+
+    form.addEventListener("submit", function (e) { e.preventDefault(); runNow(); });
+
+    // Industry chips: multi-select toggle → debounced search.
+    Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
+      c.addEventListener("click", function () {
+        var ind = c.getAttribute("data-ind");
+        var i = imSelectedIndustries.indexOf(ind);
+        if (i >= 0) imSelectedIndustries.splice(i, 1); else imSelectedIndustries.push(ind);
+        syncChips(); scheduleSearch();
+      });
+    });
+    // Signal chips: multi-select toggle → debounced search.
+    Array.prototype.forEach.call(el.querySelectorAll(".im-sigchip"), function (c) {
+      c.addEventListener("click", function () {
+        var t = c.getAttribute("data-sig");
+        var i = imSelectedSignals.indexOf(t);
+        if (i >= 0) imSelectedSignals.splice(i, 1); else imSelectedSignals.push(t);
+        syncSigChips(); scheduleSearch();
+      });
+    });
+    // Select all / Clear for each group.
+    Array.prototype.forEach.call(el.querySelectorAll(".im-mini"), function (b) {
+      b.addEventListener("click", function () {
+        if (b.getAttribute("data-all") === "ind") imSelectedIndustries = IM_INDUSTRIES.slice();
+        else if (b.getAttribute("data-clear") === "ind") imSelectedIndustries = [];
+        else if (b.getAttribute("data-all") === "sig") imSelectedSignals = IM_SIGNALS.map(function (s) { return s.t; });
+        else if (b.getAttribute("data-clear") === "sig") imSelectedSignals = [];
+        syncChips(); syncSigChips(); scheduleSearch();
+      });
+    });
 
     function runSearch(criteria, label) {
       var body = $("#imBody"); body.innerHTML = loading();
