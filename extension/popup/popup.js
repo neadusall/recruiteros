@@ -143,6 +143,19 @@
     flash('Scraping to ' + (b.dataset.motion === 'bd' ? 'Business Dev' : 'Recruiting') + ' folder');
   }));
 
+  /* ---- test portal connection (one-click diagnostic) ---- */
+  $('#testPush').addEventListener('click', async () => {
+    const b = $('#testPush'); b.disabled = true; b.textContent = 'Testing…';
+    const r = await send({ type: 'ros.testPush' });
+    b.disabled = false; b.textContent = '🔌 Test portal connection';
+    if (!r) { flash('No response from the extension worker.'); return; }
+    if (r.ok) flash('✓ Portal reachable — a "RecruiterOS Test" prospect was added. Check Prospects, then delete it.');
+    else if (r.noBackend || !r.base) flash('✗ Not connected — open the portal → Enrich LinkedIn searches → Connect this workspace.');
+    else if (!r.hasToken) flash('✗ No ingest token — click Connect this workspace in the portal.');
+    else flash('✗ Failed posting to ' + r.base + ' → ' + (r.error || 'unknown'));
+    refresh();
+  });
+
   /* ---- scrape ---- */
   $('#startScrape').addEventListener('click', async () => {
     const url = $('#snUrl').value.trim();

@@ -201,6 +201,13 @@ function handle(msg, sender, sendResponse) {
       case TYPE.UPDATE_SETTINGS: await setState({ settings: Object.assign(s.settings, msg.settings || {}) }); agentTick(); return sendResponse({ ok: true });
       case 'ros.pokeAgent': agentTick(); return sendResponse({ ok: true }); // portal asked us to poll the backend now
       case 'ros.connected': return sendResponse({ ok: true, version: self.ROS.VERSION, account: s.account }); // portal handshake
+      case 'ros.testPush': { // one-click diagnostic: push a single test lead to the portal
+        const tr = await relayToBackend(s, 'campaignFromDataset', {
+          campaignName: 'Connection test', motion: s.settings.backendMotion || 'recruiting',
+          leads: [{ fullName: 'RecruiterOS Test', title: 'Connection check', company: 'Test', profileUrl: '' }],
+        });
+        return sendResponse(Object.assign({ base: (s.settings && s.settings.backendBaseUrl) || '', hasToken: !!(s.settings && s.settings.backendApiKey) }, tr || { ok: false, error: 'no result' }));
+      }
       case TYPE.SET_LIVE: await setState({ settings: Object.assign(s.settings, { liveActions: !!msg.live }) }); return sendResponse({ ok: true, live: !!msg.live });
       case TYPE.SET_RUNNING: await setState({ running: !!msg.running }); if (msg.running) drainQueue(); return sendResponse({ ok: true, running: !!msg.running });
       case TYPE.ENQUEUE: s.queue.push(normalize(msg.action)); await setState({ queue: s.queue }); return sendResponse({ ok: true, queued: s.queue.length });
