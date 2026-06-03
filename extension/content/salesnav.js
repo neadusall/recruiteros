@@ -193,18 +193,14 @@
     return Object.keys(m).map(function (k) { return m[k]; });
   }
 
-  /* ---- progress banner injected on the page ---- */
+  /* ---- progress reporting ----
+     IMPORTANT: we inject NOTHING into the LinkedIn page (no banner, no badge) so
+     there's no scraper-added DOM for LinkedIn to detect. Progress is sent to the
+     background and shown only inside the EXTENSION POPUP. */
   function banner(html) {
-    let b = document.getElementById('ros-scrape-banner');
-    if (!b) {
-      b = document.createElement('div'); b.id = 'ros-scrape-banner';
-      b.style.cssText = 'position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:2147483000;background:#16161f;color:#f4f4f8;border:1px solid rgba(255,255,255,.16);border-radius:24px;padding:9px 18px;font:600 13px -apple-system,Segoe UI,sans-serif;box-shadow:0 10px 30px -8px rgba(0,0,0,.6)';
-      document.body.appendChild(b);
-    }
-    b.innerHTML = html;
-    return b;
+    try { send({ type: TYPE.SCRAPE_PROGRESS, text: String(html).replace(/<[^>]*>/g, '').trim() }); } catch (e) {}
   }
-  function clearBanner() { const b = document.getElementById('ros-scrape-banner'); if (b) b.remove(); }
+  function clearBanner() { try { send({ type: TYPE.SCRAPE_PROGRESS, text: '' }); } catch (e) {} }
 
   /* ---- the resumable driver ---- */
   async function resumeJob() {

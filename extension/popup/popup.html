@@ -17,9 +17,10 @@
   <nav class="p-tabs">
     <button class="p-tab active" data-tab="scrape">Scrape</button>
     <button class="p-tab" data-tab="data">Data</button>
-    <button class="p-tab" data-tab="outreach">Outreach</button>
-    <button class="p-tab" data-tab="settings">Settings</button>
   </nav>
+  <!-- Outreach + Settings live in the RecruiterOS portal, not the extension.
+       The extension is the scraper; the portal one-click "Connect" configures it. -->
+
 
   <!-- ============ SCRAPE ============ -->
   <section class="p-panel active" id="pp-scrape">
@@ -50,60 +51,6 @@
   <section class="p-panel" id="pp-data">
     <div class="p-row"><span class="p-k">Datasets</span><span class="p-v" id="dsCount">0</span></div>
     <div id="datasetList" class="p-list"></div>
-  </section>
-
-  <!-- ============ OUTREACH ============ -->
-  <section class="p-panel" id="pp-outreach">
-    <div class="p-run">
-      <button id="runToggle" class="p-btn primary sm">▶ Start</button>
-      <span class="p-runinfo" id="runInfo">Idle</span>
-      <span class="p-status" id="statusDot" title="LinkedIn tab"></span>
-    </div>
-    <div class="p-warn" id="liveWarn" style="display:none">⚠ Live actions ON. Real clicks will fire on LinkedIn.</div>
-    <div class="p-row"><span class="p-k">Pending</span><span class="p-v" id="qCount">0</span></div>
-    <div id="queueList" class="p-list"></div>
-    <p class="p-note" style="margin-top:6px">Test on the profile tab you have open:</p>
-    <div class="p-row" style="gap:8px">
-      <button id="testCapture" class="p-btn ghost sm">Capture profile</button>
-      <button id="testConnect" class="p-btn ghost sm">Send connection</button>
-    </div>
-    <div class="p-row" style="margin-top:10px"><span class="p-k">Today vs caps</span><span></span></div>
-    <div id="limitMeters"></div>
-  </section>
-
-  <!-- ============ SETTINGS ============ -->
-  <section class="p-panel" id="pp-settings">
-    <label class="p-check"><input type="checkbox" id="setLive" /> <b>Live actions</b> (perform real LinkedIn clicks)</label>
-    <p class="p-note" style="margin:-2px 0 10px">Off = simulated, zero risk. Turn on only after a dry run and keep volumes humane.</p>
-    <label class="p-field"><span>Backend URL — where leads post (e.g. https://recruitersos.co/api/linkedin)</span><input id="setBackend" placeholder="https://recruitersos.co/api/linkedin" /></label>
-    <label class="p-field"><span>Ingest token (portal → Enrich LinkedIn searches → Manual setup)</span><input id="setToken" placeholder="ext_..." /></label>
-    <div class="p-two">
-      <label class="p-field"><span>Hours start</span><input id="setStart" type="number" /></label>
-      <label class="p-field"><span>Hours end</span><input id="setEnd" type="number" /></label>
-    </div>
-    <div class="p-two">
-      <label class="p-field"><span>Gap min (s)</span><input id="setGapMin" type="number" /></label>
-      <label class="p-field"><span>Gap max (s)</span><input id="setGapMax" type="number" /></label>
-    </div>
-    <label class="p-check"><input type="checkbox" id="setWeekends" /> Pause on weekends</label>
-
-    <div style="border-top:1px solid var(--border);margin:12px 0 10px;padding-top:10px">
-      <label class="p-field"><span>Safety preset</span>
-        <select id="setPreset"><option value="conservative">Conservative (safest)</option><option value="balanced">Balanced</option><option value="aggressive">Aggressive (higher risk)</option><option value="custom">Custom</option></select>
-      </label>
-      <span class="p-note">Daily caps per action. Throttle these to your comfort. Meters on the Outreach tab show today's usage.</span>
-      <div class="p-two" id="capGrid" style="margin-top:8px"></div>
-    </div>
-
-    <div style="border-top:1px solid var(--border);margin:12px 0 10px;padding-top:10px">
-      <label class="p-check"><input type="checkbox" id="brEnabled" /> <b>Browser-execution agent</b></label>
-      <p class="p-note" style="margin:-2px 0 8px">Let the RecruiterOS backend drive outreach through THIS browser session. Actions are pulled from the bridge and run here.</p>
-      <label class="p-field"><span>Bridge URL</span><input id="brUrl" placeholder="http://localhost:8787" /></label>
-      <label class="p-field"><span>Agent token</span><input id="brToken" placeholder="matches bridge AGENT_TOKEN" /></label>
-      <label class="p-field"><span>Backend account id (this session represents)</span><input id="brAccount" placeholder="liacc_..." /></label>
-    </div>
-
-    <button id="saveSettings" class="p-btn primary sm" style="width:100%;margin-top:6px">Save settings</button>
   </section>
 
   <script src="../lib/messaging.js"></script>

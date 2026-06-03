@@ -29,9 +29,10 @@
     if (s.scrape) {
       const box = $('#scrapeStatus'); box.style.display = 'block';
       const running = s.scrape.status === 'running';
-      box.innerHTML = `<div class="p-row"><span>${running ? '⏳ Scraping' : s.scrape.status === 'done' ? '✅ Done' : '⏹ Stopped'}: <b>${s.scrape.name}</b></span></div>
+      box.innerHTML = `<div class="p-row"><span>${running ? '⏳ Scraping' : s.scrape.status === 'done' ? '✅ Done' : '⏹ Stopped'}: <b>${escapeHtml(s.scrape.name)}</b></span></div>
         <div class="p-row"><span class="p-k">Page</span><span>${s.scrape.page} / ${s.scrape.maxPages}</span></div>
         <div class="p-row"><span class="p-k">Leads captured</span><span class="p-v">${s.scrape.total}</span></div>
+        ${s.progress ? '<div class="p-note" style="margin-top:6px">' + escapeHtml(s.progress) + '</div>' : ''}
         ${running ? '<button id="stopScrape" class="p-btn ghost sm" style="width:100%;margin-top:6px">Stop</button>' : ''}`;
       const stop = $('#stopScrape'); if (stop) stop.onclick = async () => { await send({ type: TYPE.SCRAPE_STOP, finished: false }); refresh(); };
     }
@@ -73,51 +74,8 @@
     $$('[data-export]').forEach(b => b.onclick = async () => { const r = await send({ type: TYPE.EXPORT_CSV, id: b.dataset.export }); flash(r.ok ? 'Downloading ' + r.filename : 'Export failed: ' + r.info); });
     $$('[data-camp]').forEach(b => b.onclick = async () => { const r = await send({ type: TYPE.DATASET_TO_CAMPAIGN, id: b.dataset.camp }); flash(r.ok ? (r.via === 'backend' ? 'Sent ' + r.sent + ' leads to portal' : r.info) : 'Failed'); });
     $$('[data-del]').forEach(b => b.onclick = async () => { await send({ type: TYPE.DELETE_DATASET, id: b.dataset.del }); refresh(); });
-
-    // outreach
-    const toggle = $('#runToggle');
-    toggle.textContent = s.running ? '⏸ Pause' : '▶ Start';
-    toggle.classList.toggle('running', s.running);
-    $('#runInfo').textContent = s.running ? 'Running' : 'Idle';
-    $('#liveWarn').style.display = s.settings.liveActions ? 'block' : 'none';
-    $('#qCount').textContent = s.queue.length;
-    $('#queueList').innerHTML = s.queue.length ? s.queue.slice(0, 6).map(a => item(a.type, a.target && a.target.name, a.status)).join('')
-      : ((s.done || []).length ? (s.done.slice(-5).reverse().map(d => item(d.type, d.target && d.target.name, d.ok ? 'ok' : 'fail')).join('')) : '<div class="p-empty">No actions yet</div>');
-
-    // meters
-    const key = dateKey();
-    const caps = s.settings.dailyLimits || {};
-    $('#limitMeters').innerHTML = Object.keys(caps).map(a => {
-      const used = (s.counts || {})[key + '|' + a] || 0, cap = caps[a], pct = Math.min(100, used / cap * 100);
-      return `<div class="meter"><div class="ml"><span>${a}</span><span>${used} / ${cap}</span></div><div class="mt"><div class="mf ${used >= cap ? 'full' : ''}" style="width:${pct}%"></div></div></div>`;
-    }).join('');
-
-    // settings
-    $('#setLive').checked = !!s.settings.liveActions;
-    $('#setBackend').value = s.settings.backendBaseUrl || '';
-    $('#setToken').value = s.settings.backendApiKey || '';
-    $('#setStart').value = s.settings.workingHours.start;
-    $('#setEnd').value = s.settings.workingHours.end;
-    $('#setGapMin').value = s.settings.pacing.minSeconds;
-    $('#setGapMax').value = s.settings.pacing.maxSeconds;
-    $('#setWeekends').checked = !!s.settings.weekendsOff;
-    const br = s.settings.bridge || {};
-    $('#brEnabled').checked = !!br.enabled;
-    $('#brUrl').value = br.url || '';
-    $('#brToken').value = br.token || '';
-    $('#brAccount').value = br.accountId || '';
-    // editable daily caps + preset
-    $('#setPreset').value = s.settings.preset || 'custom';
-    const capsEdit = s.settings.dailyLimits || {};
-    $('#capGrid').innerHTML = Object.keys(capsEdit).map(k => `<label class="p-field" style="margin:0"><span>${k}/day</span><input type="number" min="0" data-cap="${k}" value="${capsEdit[k]}"></label>`).join('');
-    $$('#capGrid [data-cap]').forEach(inp => inp.addEventListener('change', () => { $('#setPreset').value = 'custom'; }));
+    // Outreach + Settings moved to the portal — the popup is the scraper only.
   }
-
-  function item(type, name, status) {
-    const cls = status === 'ok' ? 'ok' : status === 'fail' ? 'fail' : '';
-    return `<div class="p-item"><span class="pill ${cls}">${type}</span><span class="nm">${escapeHtml(name) || '—'}</span></div>`;
-  }
-  function dateKey() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
   function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
   let toastT; function flash(msg) { let t = $('#pToast'); if (!t) { t = document.createElement('div'); t.id = 'pToast'; t.className = 'p-toast'; document.body.appendChild(t); } t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2400); }
 
@@ -177,44 +135,7 @@
     });
   });
 
-  /* ---- outreach ---- */
-  $('#runToggle').addEventListener('click', async () => { await send({ type: TYPE.SET_RUNNING, running: !state.running }); refresh(); });
-  $('#testCapture').addEventListener('click', async () => {
-    const r = await send({ type: TYPE.TEST_ACTION, action: { type: ACTION.VIEW, target: {}, meta: { test: true } } });
-    flash(r && r.ok ? 'Profile read OK' : ('Failed: ' + (r && r.info)));
-  });
-  $('#testConnect').addEventListener('click', async () => {
-    if (!state.settings.liveActions && !confirm('Live actions are OFF, so this will be simulated. Continue?')) return;
-    if (state.settings.liveActions && !confirm('This sends a REAL connection request on the profile open in your active tab. Continue?')) return;
-    const r = await send({ type: TYPE.TEST_ACTION, action: { type: ACTION.CONNECT, target: {}, payload: {} } });
-    flash(r && r.ok ? (r.info || 'Connect sent') : ('Failed: ' + (r && r.info)));
-  });
-
-  /* ---- settings ---- */
-  $('#setLive').addEventListener('change', async (e) => {
-    if (e.target.checked && !confirm('Turn ON live actions? Real clicks will fire on LinkedIn. Keep volumes humane and within ToS.')) { e.target.checked = false; return; }
-    await send({ type: TYPE.SET_LIVE, live: e.target.checked }); refresh();
-  });
-  $('#setPreset').addEventListener('change', (e) => {
-    const p = PRESETS[e.target.value]; if (!p) return;
-    $$('#capGrid [data-cap]').forEach(inp => { if (p.caps[inp.dataset.cap] != null) inp.value = p.caps[inp.dataset.cap]; });
-    $('#setGapMin').value = p.pacing.minSeconds; $('#setGapMax').value = p.pacing.maxSeconds;
-    flash(e.target.value + ' preset loaded, click Save');
-  });
-  $('#saveSettings').addEventListener('click', async () => {
-    const dailyLimits = {}; $$('#capGrid [data-cap]').forEach(inp => { dailyLimits[inp.dataset.cap] = +inp.value; });
-    await send({ type: TYPE.UPDATE_SETTINGS, settings: {
-      backendBaseUrl: $('#setBackend').value.trim(),
-      backendApiKey: $('#setToken').value.trim(),
-      preset: $('#setPreset').value,
-      dailyLimits,
-      workingHours: { start: +$('#setStart').value, end: +$('#setEnd').value },
-      pacing: { minSeconds: +$('#setGapMin').value, maxSeconds: +$('#setGapMax').value },
-      weekendsOff: $('#setWeekends').checked,
-      bridge: { enabled: $('#brEnabled').checked, url: $('#brUrl').value.trim(), token: $('#brToken').value.trim(), accountId: $('#brAccount').value.trim() },
-    }});
-    flash('Settings saved'); refresh();
-  });
+  // Outreach + Settings are managed in the RecruiterOS portal now — no handlers here.
 
   refresh();
   setInterval(refresh, 2500);

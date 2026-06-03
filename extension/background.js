@@ -63,6 +63,7 @@ chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'ros-tick') { drainQue
    performs the action via the content script, and reports back.
    ============================================================ */
 let agentBusy = false;
+let scrapeStatusText = '';   // live scrape status shown in the popup (never on the LinkedIn page)
 let activeBridgeSearch = null;   // { actionId, bridge, datasetId } while a backend search scrape runs
 async function agentTick() {
   if (agentBusy) return;
@@ -220,6 +221,7 @@ function handle(msg, sender, sendResponse) {
 
       case TYPE.SCRAPE_START: return sendResponse(await startScrape(msg));
       case TYPE.SCRAPE_PAGE: return sendResponse(await onScrapePage(msg));
+      case TYPE.SCRAPE_PROGRESS: scrapeStatusText = msg.text || ''; return sendResponse({ ok: true });
       case TYPE.SCRAPE_STOP: return sendResponse(await stopScrape(msg.finished));
       case TYPE.GET_DATASETS: return sendResponse({ ok: true, datasets: await datasetSummaries() });
       case TYPE.GET_DATASET: { const d = (await getDatasets())[msg.id]; return sendResponse({ ok: !!d, dataset: d }); }
@@ -245,6 +247,7 @@ async function publicState(s) {
     queue: s.queue, done: s.done.slice(-20), counts: s.counts,
     datasets: await datasetSummaries(),
     scrape: job ? { status: job.status, total: job.total, page: job.currentPage, maxPages: job.maxPages, name: job.name, datasetId: job.datasetId } : null,
+    progress: scrapeStatusText,
     lastPush: s.lastPush || null,
   };
 }
