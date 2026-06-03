@@ -95,6 +95,7 @@
     // settings
     $('#setLive').checked = !!s.settings.liveActions;
     $('#setBackend').value = s.settings.backendBaseUrl || '';
+    $('#setToken').value = s.settings.backendApiKey || '';
     $('#setStart').value = s.settings.workingHours.start;
     $('#setEnd').value = s.settings.workingHours.end;
     $('#setGapMin').value = s.settings.pacing.minSeconds;
@@ -204,6 +205,7 @@
     const dailyLimits = {}; $$('#capGrid [data-cap]').forEach(inp => { dailyLimits[inp.dataset.cap] = +inp.value; });
     await send({ type: TYPE.UPDATE_SETTINGS, settings: {
       backendBaseUrl: $('#setBackend').value.trim(),
+      backendApiKey: $('#setToken').value.trim(),
       preset: $('#setPreset').value,
       dailyLimits,
       workingHours: { start: +$('#setStart').value, end: +$('#setEnd').value },

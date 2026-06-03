@@ -75,7 +75,8 @@
   <section class="p-panel" id="pp-settings">
     <label class="p-check"><input type="checkbox" id="setLive" /> <b>Live actions</b> (perform real LinkedIn clicks)</label>
     <p class="p-note" style="margin:-2px 0 10px">Off = simulated, zero risk. Turn on only after a dry run and keep volumes humane.</p>
-    <label class="p-field"><span>Backend URL (host tool, optional)</span><input id="setBackend" placeholder="http://localhost:5173/api/linkedin" /></label>
+    <label class="p-field"><span>Backend URL — where leads post (e.g. https://recruitersos.co/api/linkedin)</span><input id="setBackend" placeholder="https://recruitersos.co/api/linkedin" /></label>
+    <label class="p-field"><span>Ingest token (portal → Enrich LinkedIn searches → Manual setup)</span><input id="setToken" placeholder="ext_..." /></label>
     <div class="p-two">
       <label class="p-field"><span>Hours start</span><input id="setStart" type="number" /></label>
       <label class="p-field"><span>Hours end</span><input id="setEnd" type="number" /></label>
