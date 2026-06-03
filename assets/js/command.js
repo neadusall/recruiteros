@@ -610,7 +610,8 @@
     var bands = [["0", "All"], ["50", "50+"], ["75", "75+"]];
     var toolbar =
       '<div class="im-toolbar">' +
-        '<label class="im-checkall"><input type="checkbox" id="imAll"> Select all hiring managers</label>' +
+        '<label class="im-checkall"><input type="checkbox" id="imAll"> <b>Select all</b> <span class="muted">companies + managers</span></label>' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="imClearSel" style="display:none">Clear</button>' +
         '<span class="im-count">' + leads.length + " shown · <b>" + Math.max(imTotal, inMarketResults.length) + "</b> companies hiring" + (imLabel ? " in " + esc(imLabel) : "") + " <span class=\"muted\">(grows daily)</span></span>" +
         '<div class="im-narrow" title="Narrow by hiring-intent score">' +
           bands.map(function (b) { return '<button type="button" class="im-nbtn' + (String(imMinScore) === b[0] ? " active" : "") + '" data-min="' + b[0] + '">' + b[1] + "</button>"; }).join("") +
@@ -756,13 +757,25 @@
         });
       });
     });
-    // Select all visible hiring managers.
-    var all = body.querySelector("#imAll");
-    if (all) all.addEventListener("change", function () {
-      Array.prototype.forEach.call(body.querySelectorAll(".im-pick"), function (cb) {
-        if (cb.checked !== all.checked) { cb.checked = all.checked; cb.dispatchEvent(new Event("change")); }
+    // Select all / clear — operates directly on imPicks (fast for hundreds of cards),
+    // then reflects into every checkbox so it's visibly selected.
+    function setAllSelection(on) {
+      imVisibleLeads().forEach(function (l) {
+        var mgrs = (l.hiringManagers && l.hiringManagers.length) ? l.hiringManagers : null;
+        if (mgrs) mgrs.forEach(function (m) {
+          var k = imPickKey(l.id, m.role);
+          if (on) imPicks[k] = { lead: l, manager: m }; else delete imPicks[k];
+        });
+        else { var k = imPickKey(l.id, ""); if (on) imPicks[k] = { lead: l, manager: null }; else delete imPicks[k]; }
       });
-    });
+      Array.prototype.forEach.call(body.querySelectorAll(".im-pick"), function (cb) { cb.checked = on; });
+      Array.prototype.forEach.call(body.querySelectorAll(".im-co-check"), function (co) { co.checked = on; co.indeterminate = false; });
+      updateImBulk();
+    }
+    var all = body.querySelector("#imAll");
+    if (all) all.addEventListener("change", function () { setAllSelection(all.checked); });
+    var clr = body.querySelector("#imClearSel");
+    if (clr) clr.addEventListener("click", function () { if (all) all.checked = false; setAllSelection(false); });
     // Narrow-down by score.
     Array.prototype.forEach.call(body.querySelectorAll(".im-nbtn"), function (b) {
       b.addEventListener("click", function () { imMinScore = parseInt(b.getAttribute("data-min"), 10) || 0; renderImResults(); });
@@ -790,6 +803,8 @@
     if (btn) { btn.disabled = n === 0; btn.textContent = n ? ("Push " + n + " to Prospects →") : "Push selected to Prospects"; }
     var save = document.getElementById("imSave");
     if (save) { save.disabled = n === 0; save.textContent = n ? ("💾 Save " + n + " as hiring signals") : "💾 Save as hiring signals"; }
+    var clr = document.getElementById("imClearSel");
+    if (clr) clr.style.display = n ? "" : "none";
     var all = document.getElementById("imAll");
     var picks = document.querySelectorAll(".im-pick");
     if (all && picks.length) {
@@ -2883,6 +2898,11 @@
     var bodyHtml =
       extHtml +
       campField +
+      '<label>Engine</label>' +
+      '<select id="liEngine">' +
+        '<option value="unipile">Unipile API — paste a people-search URL</option>' +
+        '<option value="scraper">Open-source scraper — li_at cookie, profile or search URL</option>' +
+      '</select>' +
       '<label>Sales Navigator or LinkedIn search URL</label>' +
       '<input id="liUrl" type="url" autocomplete="off" placeholder="https://www.linkedin.com/sales/search/people?query=…" />' +
       '<label>Max profiles to pull</label>' +
@@ -2942,26 +2962,40 @@
       paintExt(); extPing();
 
       var urlEl = root.querySelector("#liUrl"), prev = root.querySelector("#liPrev");
+      var engineEl = root.querySelector("#liEngine");
       if (urlEl.focus) try { urlEl.focus(); } catch (e) {}
+      function engine() { return engineEl && engineEl.value === "scraper" ? "scraper" : "unipile"; }
+      function isProfileUrl(u) { return /linkedin\.com\/in\//i.test(u); }
       function valid() { return /^https?:\/\/(www\.)?linkedin\.com\//i.test((urlEl.value || "").trim()); }
-      urlEl.addEventListener("input", function () {
-        prev.innerHTML = !urlEl.value.trim()
-          ? "Paste a LinkedIn / Sales Navigator search URL above."
-          : valid() ? "✓ Ready to pull profiles from this search."
-            : "That doesn't look like a linkedin.com URL.";
-      });
+      function repaintPrev() {
+        var u = (urlEl.value || "").trim();
+        if (!u) { prev.innerHTML = engine() === "scraper"
+          ? "Paste a <b>profile URL</b> (linkedin.com/in/…) for a reliable single pull, or a people-search URL for a best-effort list."
+          : "Paste a LinkedIn / Sales Navigator search URL above."; return; }
+        if (!valid()) { prev.innerHTML = "That doesn't look like a linkedin.com URL."; return; }
+        if (engine() === "scraper") {
+          prev.innerHTML = isProfileUrl(u)
+            ? "✓ Ready to scrape this profile (cookie engine). Pulls slowly to stay under LinkedIn's radar."
+            : "✓ Ready — best-effort: the scraper pages through this search with delays. List markup can be brittle; a profile URL is more reliable.";
+        } else {
+          prev.innerHTML = "✓ Ready to pull profiles from this search.";
+        }
+      }
+      urlEl.addEventListener("input", repaintPrev);
+      if (engineEl) engineEl.addEventListener("change", repaintPrev);
       root.querySelector("#liCancel").addEventListener("click", close);
       root.querySelector("#liGo").addEventListener("click", function () {
         var url = (urlEl.value || "").trim();
         if (!valid()) { toast("Paste a LinkedIn or Sales Navigator search URL."); urlEl.focus(); return; }
         var limit = parseInt(root.querySelector("#liLimit").value, 10) || 100;
+        var eng = engine();
         var sel = root.querySelector("#liCamp");
         var chosen = (sel && sel.value) ? sel.value : null;
         close();   // dismiss the popup right away; progress shows in the Prospects view
-        if (chosen) startLinkedInPull(chosen, url, limit);
+        if (chosen) startLinkedInPull(chosen, url, limit, eng);
         else resolveBdCampaign(function (cid) {
           if (!cid) { toast("Could not prepare a campaign."); return; }
-          startLinkedInPull(cid, url, limit);
+          startLinkedInPull(cid, url, limit, eng);
         });
       });
     });
@@ -2969,17 +3003,21 @@
 
   // Drive the LinkedIn pull with a live progress bar in the Prospects view, then
   // populate the pipeline. (Date.now() is fine here — this is browser code.)
-  function startLinkedInPull(cid, url, limit) {
+  function startLinkedInPull(cid, url, limit, engine) {
+    engine = engine || "unipile";
+    var slow = engine === "scraper";
     var box = document.getElementById("liProgress");
     if (!box) { location.hash = "prospects"; box = document.getElementById("liProgress"); }
     if (!box) return;
     var started = Date.now();
     box.innerHTML =
       '<div class="li-prog running"><div class="li-prog-top">' +
-        '<span class="li-prog-title">🔗 Pulling LinkedIn profiles…</span>' +
+        '<span class="li-prog-title">🔗 ' + (slow ? "Scraping LinkedIn (cookie engine)…" : "Pulling LinkedIn profiles…") + '</span>' +
         '<span class="li-prog-meta" id="liProgMeta">target ' + limit + " · 0s</span></div>" +
         '<div class="li-bar"><span class="li-bar-fill indet"></span></div>' +
-        '<div class="li-prog-sub">Running your search and adding members to Prospects — this can take a moment.</div></div>';
+        '<div class="li-prog-sub">' + (slow
+          ? "Paging through slowly with human-like delays so the account stays safe — this can take a few minutes."
+          : "Running your search and adding members to Prospects — this can take a moment.") + "</div></div>";
     var meta = document.getElementById("liProgMeta");
     var tick = setInterval(function () {
       var s = Math.round((Date.now() - started) / 1000);
@@ -2987,13 +3025,19 @@
     }, 1000);
     viewTimers.push(tick);
 
-    send("/prospects", "POST", { action: "linkedin_search", campaignId: cid, url: url, limit: limit, motion: motion }).then(function (res) {
+    send("/prospects", "POST", { action: "linkedin_search", campaignId: cid, url: url, limit: limit, motion: motion, engine: engine }).then(function (res) {
       clearInterval(tick);
-      if (res.ok) { finishLinkedInPull(box, (res.data || {}).added || 0, (res.data || {}).deduped || 0); if (prospectsReload) prospectsReload(); }
+      if (res.ok) { finishLinkedInPull(box, (res.data || {}).added || 0, (res.data || {}).deduped || 0, (res.data || {}).warnings); if (prospectsReload) prospectsReload(); }
       else {
         var err = res.data && res.data.error;
         var isUnavail = /^search_unavailable|^search_failed/.test(err || "");
+        var isScrape = /^scrape_/.test(err || "");
         errorLinkedInPull(box, err === "no_linkedin_account" ? "Connect a LinkedIn account first (Accounts → LinkedIn)."
+          : err === "scraper_not_configured" ? "The scraper engine needs a LinkedIn session cookie. Set LINKEDIN_LI_AT (and SCRAPER_TOKEN) in the server env, or switch the engine to Unipile."
+          : /^scrape_429/.test(err || "") ? "LinkedIn rate-limited the scraper — it cools down automatically. Try again later or pull fewer profiles."
+          : /^scrape_401/.test(err || "") ? "The li_at cookie was rejected (expired or invalid). Refresh it from a logged-in browser."
+          : /^scrape_503/.test(err || "") ? "The scraper service is unreachable (still booting or not deployed). Try again shortly."
+          : isScrape ? "The scraper couldn't pull this URL (" + err + "). A profile URL (/in/…) is the most reliable."
           : err === "not_a_search_url" ? "That's not a search URL — copy a people-search URL from Sales Navigator/LinkedIn."
           : err === "not_a_linkedin_url" ? "That wasn't a linkedin.com URL."
           : isUnavail ? "No server-side LinkedIn provider is connected, so this URL can't be pulled directly. Use the Chrome extension’s “Scrape this search” button above — it pages through the search slowly and posts real profiles (with photos) straight into Prospects."
@@ -3002,13 +3046,16 @@
     }).catch(function () { clearInterval(tick); errorLinkedInPull(box, "Could not reach the server."); });
   }
 
-  function finishLinkedInPull(box, added, deduped) {
+  function finishLinkedInPull(box, added, deduped, warnings) {
     var dup = deduped ? " · " + deduped + " already in pipeline" : "";
+    var warn = (warnings && warnings.length)
+      ? '<div class="li-prog-sub" style="color:var(--warn,#c80)">⚠ ' + esc(warnings.join(" ")) + "</div>" : "";
     box.innerHTML =
       '<div class="li-prog done"><div class="li-prog-top">' +
         '<span class="li-prog-title">✓ LinkedIn pull complete</span>' +
         '<span class="li-prog-meta"><b id="liCount">0</b> profiles added' + dup + "</span></div>" +
         '<div class="li-bar"><span class="li-bar-fill" style="width:100%"></span></div>' +
+        warn +
         '<div class="li-prog-sub">New prospects are in your pipeline below. <a href="#" id="liDismiss">Dismiss</a></div></div>';
     var el = document.getElementById("liCount"), n = 0, step = Math.max(1, Math.round(added / 30));
     var t = setInterval(function () { n = Math.min(added, n + step); if (el) el.textContent = n; if (n >= added) clearInterval(t); }, 30);
