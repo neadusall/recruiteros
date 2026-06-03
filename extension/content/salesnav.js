@@ -292,4 +292,8 @@
   // auto-resume on every load of a search page
   if (document.readyState === 'complete') resumeJob();
   else window.addEventListener('load', resumeJob);
+
+  // Test hook (harmless in production) — lets the headless harness drive the real
+  // scraping functions against a simulated virtualized list. See salesnav.test.cjs.
+  try { window.__rosSN = { scrapeCurrentPage, scrapePageProgressively, keyish, mergeByKey, totalResults, hasNextPage, SEL }; } catch (e) {}
 })();
