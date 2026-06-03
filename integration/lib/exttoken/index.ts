@@ -4,71 +4,59 @@
  * The Chrome extension (Sales Navigator scraper / browser-execution agent) runs
  * in the user's own browser and can't carry the site session cookie cross-origin.
  * Instead the user copies a per-workspace ingest token from the app and pastes it
- * into the extension; the extension sends it as `Authorization: Bearer <token>`
- * when posting scraped leads to /api/linkedin/campaignFromDataset and when polling
- * the in-backend bridge at /api/linkedin/agent/*.
+ * into the extension (or one-click "Connect"); the extension sends it as
+ * `Authorization: Bearer <token>` when posting scraped leads to
+ * /api/linkedin/campaignFromDataset and when polling /api/linkedin/agent/*.
  *
- * Persisted via the shared DB snapshot layer, so a redeploy/restart does NOT
- * regenerate the token (no re-pasting into the extension). No-op without
- * DATABASE_URL — falls back to in-memory for local/static use.
+ * STATELESS + SIGNED: the token is `ext_<workspaceId>.<hmac>` where the hmac is
+ * HMAC-SHA256(workspaceId) under a stable server secret. Validation just
+ * re-computes and compares the signature — NO server-side storage. This means a
+ * backend restart / dev recompile (which used to wipe the in-memory map and cause
+ * spurious 401s) no longer invalidates a connected extension.
  */
 
-import { rid } from "../core/ids";
-import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
-const byWs = new Map<string, string>();    // workspaceId -> token
-const byToken = new Map<string, string>(); // token -> workspaceId
-
-const persist = debouncedSaver("exttoken", () => [...byWs.entries()]);
-
-let hydrated: Promise<void> | null = null;
-function ready(): Promise<void> {
-  if (!hydrated) {
-    hydrated = dbEnabled()
-      ? loadSnapshot<[string, string][]>("exttoken")
-          .then((rows) => {
-            for (const [ws, tok] of rows ?? []) {
-              byWs.set(ws, tok);
-              byToken.set(tok, ws);
-            }
-          })
-          .catch(() => {})
-      : Promise.resolve();
-  }
-  return hydrated;
+function secret(): string {
+  // Stable across restarts in prod (deploy.sh generates RECRUITEROS_SESSION_SECRET).
+  // The dev fallback keeps localhost working without any env set.
+  return process.env.RECRUITEROS_SESSION_SECRET || process.env.RECRUITEROS_API_TOKEN || "ros-ext-token-dev-secret";
 }
 
-function mint(): string {
-  return "ext_" + rid("k").replace(/[^a-zA-Z0-9]/g, "") + Math.random().toString(36).slice(2, 12);
+function sign(workspaceId: string): string {
+  return createHmac("sha256", secret()).update("ext:" + workspaceId).digest("base64url").slice(0, 32);
+}
+
+function makeToken(workspaceId: string): string {
+  return "ext_" + workspaceId + "." + sign(workspaceId);
 }
 
 export async function getOrCreateToken(workspaceId: string): Promise<string> {
-  await ready();
-  let t = byWs.get(workspaceId);
-  if (!t) {
-    t = mint();
-    byWs.set(workspaceId, t);
-    byToken.set(t, workspaceId);
-    persist();
-  }
-  return t;
+  return makeToken(workspaceId);
 }
 
+// Stateless tokens can't be revoked individually; "regenerate" returns the same
+// deterministic token. (Rotate RECRUITEROS_SESSION_SECRET to invalidate all.)
 export async function regenerateToken(workspaceId: string): Promise<string> {
-  await ready();
-  const old = byWs.get(workspaceId);
-  if (old) byToken.delete(old);
-  const t = mint();
-  byWs.set(workspaceId, t);
-  byToken.set(t, workspaceId);
-  persist();
-  return t;
+  return makeToken(workspaceId);
 }
 
 /** Resolve the workspace a bearer token belongs to, or undefined. */
 export async function workspaceForToken(token: string | null | undefined): Promise<string | undefined> {
-  await ready();
-  return token ? byToken.get(token) : undefined;
+  if (!token || token.slice(0, 4) !== "ext_") return undefined;
+  const body = token.slice(4);
+  const dot = body.lastIndexOf(".");
+  if (dot <= 0) return undefined;
+  const ws = body.slice(0, dot);
+  const sig = body.slice(dot + 1);
+  const expected = sign(ws);
+  if (sig.length !== expected.length) return undefined;
+  try {
+    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return undefined;
+  } catch {
+    return undefined;
+  }
+  return ws;
 }
 
 /** Parse "Authorization: Bearer <token>" from a request. */
