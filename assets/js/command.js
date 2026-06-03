@@ -2303,6 +2303,22 @@
       var grid = $("#slCreate"); if (!grid) return;
       grid.addEventListener("click", function (e) { var b = e.target.closest("[data-ch]"); if (b) openEditor(newSequence(b.getAttribute("data-ch"))); });
     }
+    // One-time starter sequences so the Library + Studio dropdown show the
+    // connection on a brand-new (empty) workspace. Guarded so it never
+    // re-seeds after the user edits/deletes them. Saved through the shared
+    // store, so they appear in Campaigns + Campaign Studio (by name) too.
+    function seedExamples() {
+      if (localStorage.getItem("ros_seq_seeded")) return;
+      try { localStorage.setItem("ros_seq_seeded", "1"); } catch (e) {}
+      var now = new Date().toISOString();
+      [["email", "Job-Board Lead Chase", ["job board"], "active"],
+       ["linkedin", "Connect → Signal Nurture", ["sourcing"], "inactive"],
+       ["sms", "Post-Reply Booking", ["hot"], "active"]].forEach(function (e, i) {
+        store.save({ id: "seq_ex" + Date.now() + i, channel: e[0], name: e[1], tags: e[2], status: e[3],
+          motion: motion === "bd" ? "bd" : "recruiting", owner: meName, variables: [], steps: seqTemplate(e[0]),
+          createdAt: now, updatedAt: now });
+      });
+    }
     function reload() {
       paint();
       api("/sequences").then(function (d) {
@@ -2310,8 +2326,9 @@
         if (server.length) {
           try { localStorage.setItem("ros_sequences", JSON.stringify(server.concat(store.all().filter(function (l) { return !server.some(function (s) { return s.id === l.id; }); })))); } catch (e) {}
         }
+        if (!store.all().length) seedExamples();
         paint();
-      }).catch(function () {});
+      }).catch(function () { if (!store.all().length) seedExamples(); paint(); });
     }
     reload();
   }
