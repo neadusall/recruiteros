@@ -170,6 +170,7 @@
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     campaigns: { title: "Campaigns", crumb: "Build", action: null, render: renderCampaigns },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
+    jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing },
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
@@ -1784,6 +1785,167 @@
       '<iframe src="/campaign-builder?embed=1" title="Target Builder" ' +
       'style="width:100%;height:calc(100vh - 220px);min-height:560px;border:0;border-radius:12px;background:var(--bg)"></iframe>' +
       "</div>";
+  }
+
+  /* ---------------- JD Sourcing ----------------
+     Upload a job description -> parse an ideal-candidate profile -> generate Boolean /
+     X-ray + LinkedIn searches -> run discovery (RapidAPI people-search) into a ranked,
+     deduped candidate list -> save it under a NAME here (staging) -> send it to
+     Candidates under that same name. Backend: /api/sourcing + lib/sourcing/*. */
+  function renderJdSourcing(el) {
+    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "" };
+
+    el.innerHTML =
+      '<style>' +
+      '.jd-chip{display:inline-block;background:#eef2f7;border-radius:12px;padding:2px 9px;margin:2px 4px 2px 0;font-size:12px}' +
+      '.jd-icp{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:8px}' +
+      '.jd-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}' +
+      '.jd-cap{font-size:12px}.jd-cap input{margin:0 4px}' +
+      '#jdName{width:100%;padding:9px;margin-bottom:8px}#jdText{width:100%;padding:9px;font:inherit}' +
+      '.jd-queries{max-height:220px;overflow:auto;border:1px solid #eee;border-radius:8px;padding:8px}' +
+      '.jd-q{padding:4px 0;font-size:13px}.jd-q-label{display:inline-block;min-width:260px;font-weight:600}' +
+      '.jd-tablewrap{max-height:460px;overflow:auto;border:1px solid #eee;border-radius:8px;margin-top:8px}' +
+      '.jd-table{width:100%;border-collapse:collapse;font-size:13px}.jd-table th,.jd-table td{text-align:left;padding:6px 8px;border-bottom:1px solid #f0f0f0}' +
+      '.jd-table th{position:sticky;top:0;background:#fafbfc}' +
+      '.jd-run{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0}' +
+      '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap}' +
+      '</style>' +
+      head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
+      '<div class="card">' +
+        '<input id="jdName" type="text" placeholder="Name this list — e.g. JAGGAER VP Sales · East" />' +
+        '<textarea id="jdText" rows="8" placeholder="Paste the full job description here…"></textarea>' +
+        '<div class="jd-actions">' +
+          '<button class="btn btn-primary btn-sm" id="jdAnalyze">Analyze JD</button>' +
+          '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>🧲 Find candidates</button>' +
+          '<span class="jd-cap muted">Max <input id="jdCap" type="number" min="100" max="5000" value="3000"> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="45"></span>' +
+          '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>💾 Save to JD Sourcing</button>' +
+        '</div>' +
+        '<div id="jdMsg" class="muted" style="margin-top:8px"></div>' +
+      '</div>' +
+      '<div id="jdPlan"></div>' +
+      '<div id="jdResults"></div>' +
+      '<div class="card"><h3>Saved sourcing lists</h3><div id="jdRuns">' + loading() + '</div></div>';
+
+    function msg(t) { var m = $("#jdMsg"); if (m) m.textContent = t || ""; }
+    function chips(arr) { return (arr || []).map(function (x) { return '<span class="jd-chip">' + esc(x) + '</span>'; }).join("") || '<span class="muted">—</span>'; }
+
+    function renderPlan() {
+      var host = $("#jdPlan"); if (!host) return;
+      if (!state.icp) { host.innerHTML = ""; return; }
+      var i = state.icp;
+      host.innerHTML = '<div class="card"><h3>Ideal candidate · ' + esc(i.label || "") + '</h3>' +
+        '<div class="jd-icp">' +
+          '<div><b>Titles</b><br>' + chips(i.titles) + '</div>' +
+          '<div><b>Geos</b><br>' + chips(i.geos) + '</div>' +
+          '<div><b>Target companies</b><br>' + chips(i.targetCompanies) + '</div>' +
+          '<div><b>Industries</b><br>' + chips(i.industries) + '</div>' +
+          '<div><b>Sells to</b><br>' + chips(i.sellsTo) + '</div>' +
+          '<div><b>Disqualifiers</b><br>' + chips(i.disqualifiers) + '</div>' +
+        '</div>' +
+        '<h4 style="margin-top:14px">Generated searches (' + state.queries.length + ')</h4>' +
+        '<div class="jd-queries">' + state.queries.map(function (q) {
+          return '<div class="jd-q"><span class="jd-q-label">' + esc(q.label) + '</span>' +
+            '<a href="' + esc(q.googleUrl) + '" target="_blank" rel="noopener">Google X-ray</a> · ' +
+            '<a href="' + esc(q.linkedinUrl) + '" target="_blank" rel="noopener">LinkedIn</a></div>';
+        }).join("") + '</div>' +
+        (state.note ? '<p class="muted" style="margin-top:10px">' + esc(state.note) + '</p>' : '') +
+      '</div>';
+    }
+
+    function renderResults() {
+      var host = $("#jdResults"); if (!host) return;
+      if (!state.candidates.length) { host.innerHTML = ""; return; }
+      var rows = state.candidates.slice(0, 300).map(function (c) {
+        return '<tr><td>' + c.fitScore + '</td><td>' + esc(c.fullName) + '</td><td>' + esc(c.title || c.headline || "") +
+          '</td><td>' + esc(c.company || "") + '</td><td>' + esc(c.location || "") + '</td>' +
+          '<td>' + (c.linkedinUrl ? '<a href="' + esc(c.linkedinUrl) + '" target="_blank" rel="noopener">view</a>' : '') + '</td></tr>';
+      }).join("");
+      host.innerHTML = '<div class="card"><h3>Ranked candidates · ' + state.candidates.length + '</h3>' +
+        (state.warnings.length ? '<p class="muted">⚠ ' + esc(state.warnings.join(" · ")) + '</p>' : '') +
+        '<div class="jd-tablewrap"><table class="jd-table"><thead><tr><th>Fit</th><th>Name</th><th>Title</th><th>Company</th><th>Location</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        (state.candidates.length > 300 ? '<p class="muted">Showing top 300 of ' + state.candidates.length + '. Save to keep the full set.</p>' : '') +
+      '</div>';
+    }
+
+    function loadRuns() {
+      api("/sourcing").then(function (d) {
+        var host = $("#jdRuns"); if (!host) return;
+        var runs = (d && d.runs) || [];
+        if (!runs.length) { host.innerHTML = '<p class="muted">No saved lists yet. Analyze a JD, find candidates, then Save.</p>'; return; }
+        host.innerHTML = runs.map(function (r) {
+          var n = r.candidates ? r.candidates.length : 0;
+          return '<div class="jd-run"><div><b>' + esc(r.name) + '</b> <span class="muted">· ' + n + ' candidates' +
+            (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates') : '') + '</span></div>' +
+            '<div class="jd-run-actions">' +
+              '<button class="btn btn-primary btn-sm" data-promote="' + esc(r.id) + '">Send to Candidates →</button>' +
+              '<button class="btn btn-ghost btn-sm" data-enrich="' + esc(r.id) + '">⚡ Enrich top 50</button>' +
+              '<button class="btn btn-ghost btn-sm" data-del="' + esc(r.id) + '">Delete</button>' +
+            '</div></div>';
+        }).join("");
+      }).catch(function () { var host = $("#jdRuns"); if (host) host.innerHTML = '<p class="muted">Could not load saved lists.</p>'; });
+    }
+
+    $("#jdAnalyze").addEventListener("click", function () {
+      var jd = $("#jdText").value.trim(); if (!jd) { msg("Paste a job description first."); return; }
+      state.jd = jd; msg("Analyzing…");
+      send("/sourcing", "POST", { action: "plan", jd: jd }).then(function (r) {
+        if (!r.ok) { msg("Analyze failed: " + ((r.data && r.data.error) || r.status)); return; }
+        state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || "";
+        $("#jdFind").disabled = false; msg(""); renderPlan();
+      });
+    });
+
+    $("#jdFind").addEventListener("click", function () {
+      if (!state.jd) { msg("Analyze a JD first."); return; }
+      var cap = parseInt($("#jdCap").value, 10) || 3000;
+      var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 45;
+      msg("Searching… finding and ranking profiles can take a moment.");
+      $("#jdFind").disabled = true;
+      send("/sourcing", "POST", { action: "run", jd: state.jd, cap: cap, minFit: minFit }).then(function (r) {
+        $("#jdFind").disabled = false;
+        if (!r.ok) { msg("Find failed: " + ((r.data && r.data.error) || r.status)); return; }
+        state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
+        state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
+        $("#jdSave").disabled = !state.candidates.length;
+        msg("Found " + state.candidates.length + " candidates (scanned " + (r.data.scanned || 0) + ").");
+        renderPlan(); renderResults();
+      });
+    });
+
+    $("#jdSave").addEventListener("click", function () {
+      var name = $("#jdName").value.trim(); if (!name) { msg("Give the list a name to save it."); $("#jdName").focus(); return; }
+      if (!state.icp) { msg("Analyze a JD first."); return; }
+      msg("Saving…");
+      send("/sourcing", "POST", { action: "save", name: name, jd: state.jd, icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings }).then(function (r) {
+        if (!r.ok) { msg("Save failed: " + ((r.data && r.data.error) || r.status)); return; }
+        msg('Saved "' + name + '" to JD Sourcing. Review it below, then send to Candidates.'); loadRuns();
+      });
+    });
+
+    $("#jdRuns").addEventListener("click", function (e) {
+      var t = e.target; if (t.tagName !== "BUTTON") return;
+      var id;
+      if ((id = t.getAttribute("data-promote"))) {
+        if (!confirm("Send this list to Candidates under its saved name?")) return;
+        t.disabled = true; t.textContent = "Sending…";
+        send("/sourcing", "POST", { action: "promote", id: id }).then(function (r) {
+          if (!r.ok) { t.disabled = false; t.textContent = "Send to Candidates →"; alert("Promote failed: " + ((r.data && r.data.error) || r.status)); return; }
+          alert('Sent ' + r.data.added + ' to Candidates as "' + r.data.name + '"' + (r.data.deduped ? (' (' + r.data.deduped + ' already in pipeline)') : '') + '.'); loadRuns();
+        });
+      } else if ((id = t.getAttribute("data-enrich"))) {
+        t.disabled = true; t.textContent = "Enriching…";
+        send("/sourcing", "POST", { action: "enrich", id: id, top: 50 }).then(function (r) {
+          t.disabled = false; t.textContent = "⚡ Enrich top 50";
+          if (!r.ok) { alert("Enrich failed: " + ((r.data && r.data.error) || r.status)); return; }
+          alert("Enriched " + r.data.enriched + " contacts."); loadRuns();
+        });
+      } else if ((id = t.getAttribute("data-del"))) {
+        if (!confirm("Delete this saved list?")) return;
+        send("/sourcing", "POST", { action: "delete", id: id }).then(loadRuns);
+      }
+    });
+
+    loadRuns();
   }
 
   /* ---------------- OS Text (taltxt), single sign-on embed ----------------

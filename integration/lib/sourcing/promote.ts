@@ -1,0 +1,115 @@
+/**
+ * RecruiterOS · JD Sourcing
+ * Promote a staged SourcingRun into the Candidates (Prospects) pipeline.
+ *
+ * The recruiter saves a run under a name in the JD Sourcing tab, reviews it, then
+ * promotes it. Promotion preserves that name end-to-end:
+ *   - a recruiting Campaign named after the run holds the prospects,
+ *   - every prospect is stamped category = run.name,
+ *   - a ProspectList named after the run captures the exact set,
+ * so the same list shows up in Candidates under the name it was saved as here.
+ *
+ * Discovery-only: no paid contact lookup happens at promotion. Contacts are enriched
+ * on demand from the Candidates tab (the existing cheapest-first waterfall), or for the
+ * top slice via the API's "enrich" action.
+ */
+
+import { getCore } from "../core/repository";
+import { addProspect } from "../prospects";
+import { createCampaign } from "../campaigns";
+import { upsertProspectList } from "../prospect-lists";
+import { getSourcingRun, saveSourcingRun } from "./store";
+
+export interface PromoteResult {
+  campaignId: string;
+  listId: string;
+  added: number;
+  deduped: number;
+  /** The name carried through from the JD Sourcing tab. */
+  name: string;
+}
+
+export interface PromoteOptions {
+  /** Only promote candidates at/above this fit score. Default 0 (all staged). */
+  minFit?: number;
+  /** Promote into an existing campaign instead of creating one. */
+  campaignId?: string;
+}
+
+/**
+ * Promote a saved run's candidates into Candidates under the run's name.
+ * Dedupes by LinkedIn URL against the existing pipeline (same guard as the importer).
+ */
+export async function promoteSourcingRun(
+  workspaceId: string,
+  runId: string,
+  opts: PromoteOptions = {},
+): Promise<PromoteResult> {
+  const run = getSourcingRun(workspaceId, runId);
+  if (!run) throw Object.assign(new Error("run_not_found"), { status: 404 });
+
+  const minFit = opts.minFit ?? 0;
+  const core = getCore();
+
+  // 1. The campaign that holds them — named after the saved run.
+  let campaignId = opts.campaignId;
+  if (!campaignId) {
+    const campaign = await createCampaign({
+      workspaceId,
+      motion: run.motion,
+      name: run.name,
+      goal: `Sourced candidates for: ${run.icp.label || run.name}`,
+      icp: {
+        accountProfile: run.icp.targetCompanies.slice(0, 8).join(", ") || run.icp.industries.join(", "),
+        persona: run.icp.titles[0] || run.icp.label,
+        disqualifiers: run.icp.disqualifiers,
+      },
+      signals: [],
+    });
+    campaignId = campaign.id;
+  }
+
+  // 2. Add each candidate as a Prospect, deduped by LinkedIn URL, stamped with the name.
+  const prospectIds: string[] = [];
+  let added = 0;
+  let deduped = 0;
+  for (const c of run.candidates) {
+    if (c.fitScore < minFit) continue;
+    if (c.linkedinUrl) {
+      const existing = await core.findProspectByLinkedin(workspaceId, c.linkedinUrl);
+      if (existing) { deduped++; prospectIds.push(existing.id); continue; }
+    }
+    const p = await addProspect({
+      workspaceId,
+      campaignId,
+      motion: run.motion,
+      fullName: c.fullName,
+      title: c.title || c.headline,
+      headline: c.headline,
+      company: c.company,
+      location: c.location,
+      photoUrl: c.imageUrl,
+      linkedinUrl: c.linkedinUrl,
+      email: c.email,
+      phone: c.phone,
+      category: run.name, // <- the saved name carries into Candidates
+    });
+    prospectIds.push(p.id);
+    added++;
+  }
+
+  // 3. A saved list under the same name capturing the exact set.
+  const list = upsertProspectList(workspaceId, {
+    name: run.name,
+    prospectIds,
+    motion: run.motion,
+  });
+
+  // 4. Record the promotion back on the run so the tab shows it's been sent.
+  run.promotedCampaignId = campaignId;
+  run.promotedListId = list.id;
+  run.promotedCount = added;
+  saveSourcingRun(workspaceId, { ...run });
+
+  return { campaignId, listId: list.id, added, deduped, name: run.name };
+}

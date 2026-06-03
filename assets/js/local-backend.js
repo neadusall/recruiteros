@@ -463,6 +463,104 @@
       return ok({ campaigns: d.campaigns });
     }
 
+    // --- JD Sourcing (offline demo) -------------------------------------------
+    // Mirrors /api/sourcing so the JD Sourcing tab is fully clickable with no
+    // server + no API keys. Data is clearly labeled SAMPLE/demo; once the real
+    // backend answers, this shim is a no-op (real /api/sourcing wins).
+    if (p === "/sourcing") {
+      d.sourcingRuns = d.sourcingRuns || [];
+      if (method === "GET") return ok({ runs: d.sourcingRuns });
+      var act = (body && body.action) || "plan";
+
+      function srcIcp(jd) {
+        var t = String(jd || "").toLowerCase();
+        var sales = /sales|account executive|revenue|quota|gtm|bookings/.test(t);
+        var vp = /\bvp\b|vice president|head of|director|chief|svp/.test(t);
+        var east = /east coast|new york|boston|atlanta|nyc|philadelphia|charlotte|d\.?c\.?/.test(t);
+        return {
+          label: (sales ? "Sales leadership" : "Leadership") + " — demo profile",
+          seniority: vp ? "vp" : "director", managesTeam: true,
+          titles: sales ? ["VP Sales", "Regional Vice President", "Area Vice President", "Enterprise Sales Director", "Regional Sales Director"]
+                        : ["Vice President", "Head of", "Senior Director", "Director"],
+          geos: east ? ["New York", "Boston", "Washington DC", "Atlanta", "Philadelphia", "Charlotte", "Miami"]
+                     : ["New York", "San Francisco", "Chicago", "Austin", "Remote"],
+          remoteOk: true,
+          industries: sales ? ["Enterprise SaaS", "Procurement / Source-to-Pay", "Spend management", "Supply chain"] : ["Enterprise software"],
+          targetCompanies: sales ? ["Coupa", "Ivalua", "GEP", "SAP Ariba", "Zycus", "Zip", "Tropic", "Icertis"]
+                                  : ["(set ANTHROPIC_API_KEY for real company targeting)"],
+          sellsTo: sales ? ["CFO", "CPO", "CIO", "COO"] : [],
+          verticals: ["Manufacturing", "Public Sector", "Higher Education", "Life Sciences", "Financial Services"],
+          mustHave: ["Enterprise SaaS sales leadership", "Team management", "Complex deal cycles"],
+          niceToHave: ["Procurement domain", "East Coast network"],
+          disqualifiers: ["Individual contributor only", "SMB-only experience"]
+        };
+      }
+      function srcQ(s) { return /\s/.test(s) ? '"' + s + '"' : s; }
+      function srcOr(a, c) { a = a.slice(0, c).map(srcQ); return a.length ? "(" + a.join(" OR ") + ")" : ""; }
+      function srcG(x) { return "https://www.google.com/search?q=" + encodeURIComponent(x); }
+      function srcLi(k) { return "https://www.linkedin.com/search/results/people/?keywords=" + encodeURIComponent(k) + "&origin=GLOBAL_SEARCH_HEADER"; }
+      function srcQueries(icp) {
+        var tg = srcOr(icp.titles.length ? icp.titles : ["VP Sales"], 4), gg = srcOr(icp.geos, 6), ig = srcOr(icp.industries, 4);
+        var lead = icp.titles[0] || "VP Sales", out = [];
+        icp.targetCompanies.forEach(function (co) {
+          var x = ["site:linkedin.com/in", tg, srcQ(co), gg].filter(Boolean).join(" ");
+          out.push({ group: co, label: lead + " @ " + co, xray: x, googleUrl: srcG(x), linkedinUrl: srcLi(co + " " + lead) });
+        });
+        if (ig) { var xi = ["site:linkedin.com/in", tg, ig, gg].filter(Boolean).join(" "); out.push({ group: "broad: industry", label: lead + " across target industries", xray: xi, googleUrl: srcG(xi), linkedinUrl: srcLi(lead) }); }
+        icp.geos.slice(0, 6).forEach(function (g) { var xg = ["site:linkedin.com/in", tg, ig, srcQ(g)].filter(Boolean).join(" "); out.push({ group: "broad: " + g, label: lead + " in " + g, xray: xg, googleUrl: srcG(xg), linkedinUrl: srcLi(lead + " " + g) }); });
+        return out;
+      }
+      function srcCandidates(icp) {
+        var F = ["Alex", "Jordan", "Morgan", "Taylor", "Casey", "Riley", "Jamie", "Avery", "Quinn", "Drew", "Cameron", "Reese", "Parker", "Skyler", "Hayden", "Rowan"];
+        var L = ["Bennett", "Carter", "Donovan", "Ellis", "Fletcher", "Greer", "Hale", "Ingram", "Jansen", "Keller", "Lawson", "Mercer", "Novak", "Osborne", "Pruitt", "Reyes"];
+        var rows = [], n = 0, cos = icp.targetCompanies.length ? icp.targetCompanies : ["Acme"];
+        for (var i = 0; i < cos.length; i++) {
+          for (var j = 0; j < 2; j++) {
+            var nm = F[(i * 2 + j) % F.length] + " " + L[(i * 3 + j) % L.length];
+            var ti = icp.titles[(i + j) % icp.titles.length];
+            var ge = icp.geos[(i + j) % icp.geos.length];
+            rows.push({ fullName: nm + " (sample)", title: ti, company: cos[i], location: ge, linkedinUrl: "https://www.linkedin.com/in/sample-" + (n + 1), fitScore: Math.max(46, 96 - n * 2), fitReasons: ['Title matches "' + ti + '"', "At target company " + cos[i], "In-target geo (" + ge + ")"], sourceGroup: cos[i], provider: "demo" });
+            n++;
+          }
+        }
+        return rows.sort(function (a, b) { return b.fitScore - a.fitScore; });
+      }
+
+      if (act === "plan") { var ip = srcIcp(body && body.jd); return ok({ icp: ip, queries: srcQueries(ip), note: "Demo preview (offline shim): sample profile + searches. Real parsing uses your Anthropic key; real discovery uses RapidAPI people-search." }); }
+      if (act === "run") { var ir = srcIcp(body && body.jd); var cr = srcCandidates(ir); return ok({ icp: ir, queries: srcQueries(ir), candidates: cr, scanned: cr.length * 7, warnings: ["Demo mode (offline): showing " + cr.length + " SAMPLE candidates. Connect RapidAPI people-search + Anthropic to source real people."] }); }
+      if (act === "save") {
+        var run = { id: (body && body.id) || "srun_" + Date.now(), workspaceId: d.workspace.id, name: (body && body.name) || "Untitled sourcing list", motion: (body && body.motion) || "recruiting", jd: (body && body.jd) || "", icp: (body && body.icp) || {}, queries: (body && body.queries) || [], candidates: (body && body.candidates) || [], warnings: (body && body.warnings) || [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+        var ei = -1; d.sourcingRuns.forEach(function (x, k) { if (x.id === run.id) ei = k; });
+        if (ei >= 0) d.sourcingRuns[ei] = run; else d.sourcingRuns.unshift(run);
+        save(d); return ok({ run: run });
+      }
+      if (act === "promote") {
+        var rp = null; d.sourcingRuns.forEach(function (x) { if (x.id === (body && body.id)) rp = x; });
+        if (!rp) return notFound();
+        d.prospects = d.prospects || []; d.prospectLists = d.prospectLists || [];
+        var added = 0, ids = [];
+        (rp.candidates || []).forEach(function (c) {
+          if ((body && body.minFit) && c.fitScore < body.minFit) return;
+          var pid = "p_src_" + Date.now() + "_" + added;
+          d.prospects.unshift({ id: pid, fullName: c.fullName, title: c.title, company: c.company, location: c.location, linkedinUrl: c.linkedinUrl, email: c.email, phone: c.phone, category: rp.name, motion: rp.motion, status: "queued", dripStage: 0, warmth: Math.max(50, c.fitScore || 50) });
+          ids.push(pid); added++;
+        });
+        var listId = "plist_" + Date.now();
+        d.prospectLists.unshift({ id: listId, name: rp.name, prospectIds: ids, motion: rp.motion, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+        rp.promotedCount = added; rp.promotedListId = listId; save(d);
+        return ok({ campaignId: "cmp_src_" + Date.now(), listId: listId, added: added, deduped: 0, name: rp.name });
+      }
+      if (act === "enrich") {
+        var re = null; d.sourcingRuns.forEach(function (x) { if (x.id === (body && body.id)) re = x; });
+        if (!re) return notFound();
+        var top = Math.min((body && body.top) || 50, (re.candidates || []).length), en = 0;
+        for (var z = 0; z < top; z++) { var cc = re.candidates[z]; if (cc && !cc.email) { cc.email = cc.fullName.toLowerCase().replace(/\(sample\)/g, "").replace(/[^a-z]+/g, ".").replace(/^\.|\.$/g, "") + "@" + (String(cc.company || "company").toLowerCase().replace(/[^a-z0-9]/g, "") || "company") + ".com"; en++; } }
+        save(d); return ok({ enriched: en, run: re });
+      }
+      if (act === "delete") { d.sourcingRuns = d.sourcingRuns.filter(function (x) { return x.id !== (body && body.id); }); save(d); return ok({ ok: true }); }
+      return ok({});
+    }
+
     return notFound();
   }
 
