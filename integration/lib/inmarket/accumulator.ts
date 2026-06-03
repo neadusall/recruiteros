@@ -28,9 +28,10 @@ const INDUSTRIES: string[] = [
   "Data / Analytics", "Sales / GTM",
 ];
 
-const CYCLE_MS = 3 * 60 * 60 * 1000;   // refresh every 3 hours
-const PER_CYCLE = 2;                    // industries per cycle (keeps provider calls low)
-const FIRST_DELAY_MS = 20_000;          // let the server settle before the first pull
+const CYCLE_MS = 90 * 60 * 1000;       // refresh every 90 minutes
+const PER_CYCLE = 3;                    // industries per cycle
+const COLLECT_CAP = 100;               // leads/sector → Adzuna pages = ceil(100/50)=2 (gentle)
+const FIRST_DELAY_MS = 12_000;          // let the server settle, then start pulling
 
 let started = false;
 let cursor = 0;
@@ -41,7 +42,7 @@ async function runCycle(): Promise<void> {
     const industry = INDUSTRIES[cursor % INDUSTRIES.length];
     cursor++;
     try {
-      const leads = await collectLeads({ industries: [industry], limit: 200 }, now, 200);
+      const leads = await collectLeads({ industries: [industry], limit: COLLECT_CAP }, now, COLLECT_CAP);
       await mergeIntoPool(leads);
     } catch {
       /* skip this industry this cycle; try the next on the following tick */

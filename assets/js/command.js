@@ -369,6 +369,7 @@
   var imSelectedIndustry = null;
   var imMinScore = 0;            // narrow-down: minimum hiring-intent score shown
   var imLabel = "";             // current result label, kept for re-renders
+  var imTotal = 0;              // total companies available for this query in the pool (grows daily)
   var imPicks = {};             // key -> { lead, manager } selected to push to Prospects
 
   // Industries + sub-sectors recruiters sell into. Drives the refined in-market search.
@@ -537,6 +538,7 @@
       send("/in-market", "POST", payload).then(function (r) {
         if (!r.ok) { body.innerHTML = needsSetup(); return; }
         inMarketResults = (r.data && r.data.leads) || [];
+        imTotal = (r.data && typeof r.data.pulled === "number") ? r.data.pulled : inMarketResults.length;
         renderImResults();
       }).catch(function () { body.innerHTML = needsSetup(); });
     }
@@ -554,7 +556,7 @@
     var toolbar =
       '<div class="im-toolbar">' +
         '<label class="im-checkall"><input type="checkbox" id="imAll"> Select all hiring managers</label>' +
-        '<span class="im-count">' + leads.length + " of " + inMarketResults.length + " companies" + (imLabel ? " · " + esc(imLabel) : "") + "</span>" +
+        '<span class="im-count">' + leads.length + " shown · <b>" + Math.max(imTotal, inMarketResults.length) + "</b> companies hiring" + (imLabel ? " in " + esc(imLabel) : "") + " <span class=\"muted\">(grows daily)</span></span>" +
         '<div class="im-narrow" title="Narrow by hiring-intent score">' +
           bands.map(function (b) { return '<button type="button" class="im-nbtn' + (String(imMinScore) === b[0] ? " active" : "") + '" data-min="' + b[0] + '">' + b[1] + "</button>"; }).join("") +
         "</div>" +

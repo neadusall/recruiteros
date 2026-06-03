@@ -357,16 +357,18 @@ export async function searchInMarket(
     const { queryPool, mergeIntoPool } = await import("./pool");
     ensureAccumulator(); // start the background collector (no-op once running)
 
-    // Pull extra from the pool to backfill after suppression, then drop taken companies.
-    const pooled = fresh(await queryPool(q, limit + taken.size + 50));
-    if (pooled.length >= 24) {
-      return { leads: pooled.slice(0, limit), pulled: pooled.length, warnings: [] };
+    // Pull the FULL matching set from the pool so `pulled` reflects the true total
+    // available for this industry (which grows daily as the accumulator fills the pool),
+    // even though we only display `limit`. Then drop taken companies.
+    const pooledAll = fresh(await queryPool(q, 10000));
+    if (pooledAll.length >= 24) {
+      return { leads: pooledAll.slice(0, limit), pulled: pooledAll.length, warnings: [] };
     }
     // Pool thin for this query → live collect, return it, and grow the pool.
     const live = await collectLeads(q, nowIso, Math.max(limit, 200));
     void mergeIntoPool(live).catch(() => {});
-    const merged = fresh(dedupeLeads([...pooled, ...live])).slice(0, limit);
-    return { leads: merged, pulled: merged.length, warnings: [] };
+    const merged = fresh(dedupeLeads([...pooledAll, ...live]));
+    return { leads: merged.slice(0, limit), pulled: merged.length, warnings: [] };
   } catch (err) {
     // Pool/accumulator unavailable → pure live fallback (original behavior).
     try {
