@@ -970,32 +970,33 @@
       var opts = lifecycle.map(function (l) {
         return '<option value="' + esc(l.status) + '"' + (l.status === p.status ? " selected" : "") + ">" + esc(l[motion] || l.status) + "</option>";
       }).join("");
-      var contact = [];
-      if (p.email) contact.push("✉ " + esc(p.email));
-      if (p.phone) contact.push("☎ " + esc(p.phone));
-      var contactLine = '<div class="lr-contact' + (contact.length ? "" : " muted") + '">' +
-        (contact.length ? contact.join(" · ") : "No work contact yet") + "</div>";
-      // Experience summary: stored on the prospect, hidden by default so the row
-      // stays clean; expand on demand. Backend populates `experienceSummary`.
       var exp = p.experienceSummary || p.experience || p.summary || "";
-      var expHtml = exp
-        ? '<button type="button" class="pr-exp-toggle" data-exp="' + esc(p.id) + '" style="background:none;border:0;color:var(--brand-2,#4dd0ff);font-size:12px;cursor:pointer;padding:3px 0 0">Experience ▾</button>' +
-          '<div class="pr-exp" id="exp_' + esc(p.id) + '" hidden style="margin-top:5px;font-size:12.5px;line-height:1.5;color:var(--text-muted,#aab);white-space:pre-line;max-width:640px">' + esc(exp) + "</div>"
-        : "";
       // A "role placeholder" prospect: the hiring manager's real name isn't researched yet.
       var pending = !p.linkedinUrl && (/ [—–] /.test(p.fullName || "") || /hiring manager/i.test(p.fullName || ""));
       var name = pending
-        ? esc(p.title || "Hiring manager") + ' <span class="pr-pending">name pending research</span>'
+        ? esc(p.title || "Hiring manager") + ' <span class="pr-pending">name pending</span>'
         : esc(p.fullName);
-      var enrichLbl = pending ? "🔎 Find hiring manager" : (p.email && p.phone) ? "↻ Re-enrich" : "⚡ Enrich contact";
-      return '<div class="list-row' + (prSel[p.id] ? " pr-selected" : "") + '" data-pid="' + esc(p.id) + '">' +
-        '<input type="checkbox" class="pr-check" data-pid="' + esc(p.id) + '"' + (prSel[p.id] ? " checked" : "") + ' />' +
-        '<span class="avatar" style="position:relative;width:30px;height:30px;font-size:11px;flex:none;background:' + colorFor(p.fullName) + '">' + esc(initials(pending ? (p.company || "?") : p.fullName)) +
-          (p.photoUrl && !pending ? '<img src="' + esc(p.photoUrl) + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;border-radius:50%;object-fit:cover" onerror="this.remove()" />' : "") + "</span>" +
-        '<div class="lr-id"><div class="lr-main">' + name + '</div><div class="lr-sub">' + esc((p.company ? p.company : "") + (pending && p.title ? "" : (p.title ? " · " + p.title : "")) + (p.location ? " · " + p.location : "")) + "</div>" + contactLine + expHtml + "</div>" +
-        '<button class="pr-enrich" data-enrich="' + esc(p.id) + '">' + enrichLbl + "</button>" +
-        '<select class="stage-select cls cls-' + statusCls(p.status) + '" data-pid="' + esc(p.id) + '">' + opts + "</select>" +
-        '<div class="lr-right">' + (p.dripStage ? "Touch " + p.dripStage : "") + "</div></div>";
+      var avatar = '<span class="avatar pr-av" style="position:relative;background:' + colorFor(p.fullName) + '">' + esc(initials(pending ? (p.company || "?") : p.fullName)) +
+        (p.photoUrl && !pending ? '<img src="' + esc(p.photoUrl) + '" alt="" onerror="this.remove()" />' : "") + "</span>";
+      var expToggle = exp ? ' <button type="button" class="pr-exp-toggle" data-exp="' + esc(p.id) + '">Experience ▾</button>' : "";
+      var li = p.linkedinUrl ? '<a class="pr-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : '<span class="pr-na">—</span>';
+      var enrichLbl = pending ? "🔎" : (p.email && p.phone) ? "↻" : "⚡";
+      var enrichTitle = pending ? "Find hiring manager" : (p.email && p.phone) ? "Re-enrich contact" : "Enrich contact";
+      var cell = function (v) { return v ? esc(v) : '<span class="pr-na">—</span>'; };
+      var tr = '<tr class="pr-row' + (prSel[p.id] ? " pr-selected" : "") + '" data-pid="' + esc(p.id) + '">' +
+        '<td class="pr-c-check"><input type="checkbox" class="pr-check" data-pid="' + esc(p.id) + '"' + (prSel[p.id] ? " checked" : "") + ' /></td>' +
+        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + name + expToggle + "</span></td>" +
+        "<td>" + cell(p.title) + "</td>" +
+        "<td>" + cell(p.company) + "</td>" +
+        '<td class="pr-c-email">' + (p.email ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a>" : '<span class="pr-na">—</span>') + "</td>" +
+        '<td class="pr-c-li">' + li + "</td>" +
+        "<td>" + cell(p.phone) + "</td>" +
+        "<td>" + cell(p.location) + "</td>" +
+        '<td><select class="stage-select cls cls-' + statusCls(p.status) + '" data-pid="' + esc(p.id) + '">' + opts + "</select></td>" +
+        '<td class="pr-c-act"><button class="pr-enrich" data-enrich="' + esc(p.id) + '" data-pending="' + (pending ? "1" : "") + '" title="' + enrichTitle + '">' + enrichLbl + "</button></td>" +
+        "</tr>";
+      if (exp) tr += '<tr class="pr-exp-row" id="exp_' + esc(p.id) + '" hidden><td></td><td colspan="9" class="pr-exp">' + esc(exp) + "</td></tr>";
+      return tr;
     }
 
     function paint() {
@@ -1010,28 +1011,30 @@
       var countLbl = prFilter ? (list.length + " of " + prAll.length) : String(prAll.length);
       var selIds = list.filter(function (p) { return prSel[p.id]; }).map(function (p) { return p.id; });
       var allOn = list.length > 0 && selIds.length === list.length;
-      var bulk = '<div class="pr-bulk">' +
-        '<label class="pr-selall"><input type="checkbox" id="prSelAll"' + (allOn ? " checked" : "") + " /> Select all" + (prFilter ? " (filtered)" : "") + "</label>" +
-        (selIds.length
-          ? '<span class="pr-selcount">' + selIds.length + " selected</span>" +
+      var bulk = selIds.length
+        ? '<div class="pr-bulk"><span class="pr-selcount">' + selIds.length + " selected</span>" +
             '<span class="pr-bulk-actions"><button class="btn btn-primary btn-sm" id="prSaveList">💾 Save as list</button>' +
             '<button class="btn btn-ghost btn-sm" id="prDelSel">🗑 Delete</button>' +
-            '<button class="btn btn-ghost btn-sm" id="prClearSel">Clear</button></span>'
-          : '<span class="pr-selcount muted">Select prospects to save them as a named list or delete in bulk.</span>') +
-        "</div>";
+            '<button class="btn btn-ghost btn-sm" id="prClearSel">Clear</button></span></div>'
+        : "";
       var listBanner = prListName
         ? '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:8px 12px;border:1px solid var(--border,#2a2a36);border-radius:10px;font-size:13px;background:rgba(124,92,255,.08)">' +
           '📂 Viewing saved search: <b>' + esc(prListName) + "</b> · " + list.length + " shown" +
           '<button class="btn btn-ghost btn-sm" id="prShowAll" style="margin-left:auto">Show all prospects</button></div>'
         : "";
-      body.innerHTML = '<div class="pipe">' + stages + "</div>" +
-        '<div class="card"><h3>Pipeline <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl + "</span></h3>" +
-        listBanner + bulk +
-        (rows || '<div class="empty">' + (prListName
+      var tableHead = '<thead><tr>' +
+        '<th class="pr-c-check"><input type="checkbox" id="prSelAll"' + (allOn ? " checked" : "") + ' title="Select all' + (prFilter ? " (filtered)" : "") + '" /></th>' +
+        "<th>Name</th><th>Job Title</th><th>Company</th><th>Email</th><th>LinkedIn</th><th>Phone</th><th>Location</th><th>Status</th><th></th></tr></thead>";
+      var table = rows
+        ? '<div class="pr-table-wrap"><table class="pr-table">' + tableHead + "<tbody>" + rows + "</tbody></table></div>"
+        : '<div class="empty">' + (prListName
           ? "This saved search has no matching prospects in your current pipeline."
           : prFilter
           ? "No " + prospectNoun() + "s match “" + esc(prFilter) + "”."
-          : "No " + prospectNoun() + "s yet. Import, pull from a LinkedIn search above" + (motion === "recruiting" ? "." : ", or promote from Hire Signals.")) + "</div>") + "</div>";
+          : "No " + prospectNoun() + "s yet. Import, pull from a LinkedIn search above" + (motion === "recruiting" ? "." : ", or promote from Hire Signals.")) + "</div>";
+      body.innerHTML = '<div class="pipe">' + stages + "</div>" +
+        '<div class="card" style="padding:0;overflow:hidden"><div class="pr-card-h"><h3>Pipeline <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl + "</span></h3>" +
+        listBanner + bulk + "</div>" + table + "</div>";
       var showAll = $("#prShowAll"); if (showAll) showAll.addEventListener("click", function () { selectSavedList(""); });
 
       // Selection wiring
@@ -1079,8 +1082,8 @@
       Array.prototype.forEach.call(body.querySelectorAll(".pr-enrich"), function (btn) {
         btn.addEventListener("click", function () {
           var pid = btn.getAttribute("data-enrich");
-          var researching = /Find hiring manager/.test(btn.textContent);
-          var old = btn.textContent; btn.disabled = true; btn.textContent = researching ? "Researching…" : "Enriching…";
+          var researching = btn.getAttribute("data-pending") === "1";
+          var old = btn.textContent; btn.disabled = true; btn.textContent = researching ? "…" : "…";
           send("/prospects", "POST", { action: "enrich", prospectId: pid }).then(function (r) {
             if (r.ok) {
               var f = (r.data && r.data.found) || {};

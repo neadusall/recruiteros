@@ -710,3 +710,33 @@ table.seqlib tbody tr:hover td { background: var(--surface-2); }
 html[data-theme="light"] .sl-status.off { background: rgba(16,18,40,.05); }
 .sl-actions { white-space: nowrap; text-align: right; }
 .sl-actions .btn { margin-left: 6px; }
+
+/* ---------------- Prospects / Candidates · spreadsheet (CSV-style) table ---------------- */
+.pr-card-h { padding: 15px 18px 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.pr-card-h h3 { margin: 0; }
+.pr-card-h .pr-bulk { border: 0; padding: 0; margin: 0 0 0 auto; }
+.pr-table-wrap { overflow-x: auto; }
+.pr-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.pr-table thead th { text-align: left; padding: 10px 14px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-dim); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-weight: 700; white-space: nowrap; background: var(--bg-soft); }
+.pr-table tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
+.pr-table tbody tr.pr-row:hover td { background: var(--surface-2); }
+.pr-table tr.pr-selected td { background: rgba(124, 140, 255, .08); }
+.pr-c-check { width: 36px; }
+.pr-table .pr-check { width: 16px; height: 16px; accent-color: var(--brand-2, #4dd0ff); cursor: pointer; vertical-align: middle; }
+.pr-av { width: 30px; height: 30px; font-size: 11px; display: inline-grid; place-items: center; border-radius: 50%; margin-right: 10px; vertical-align: middle; color: #fff; overflow: hidden; }
+.pr-av img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.pr-c-name { font-weight: 650; }
+.pr-name-t { vertical-align: middle; }
+.pr-c-email { font-family: var(--mono); font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.pr-c-email a { color: var(--text-muted); text-decoration: none; }
+.pr-c-email a:hover { color: var(--brand-2); }
+.pr-na { color: var(--text-dim); }
+.pr-li { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 5px; background: #0a66c2; color: #fff; font-weight: 700; font-size: 12px; text-decoration: none; }
+.pr-li:hover { filter: brightness(1.12); }
+.pr-c-act { text-align: right; }
+.pr-enrich { background: transparent; border: 1px solid var(--border-strong); border-radius: 7px; padding: 4px 9px; cursor: pointer; color: var(--text-muted); font-size: 14px; line-height: 1; }
+.pr-enrich:hover { color: var(--text); border-color: var(--brand); }
+.pr-table .stage-select { font-size: 11px; padding: 3px 9px; }
+.pr-exp-toggle { background: none; border: 0; color: var(--brand-2, #4dd0ff); font-size: 11.5px; cursor: pointer; padding: 0 0 0 4px; }
+.pr-exp-row { background: var(--bg-soft); }
+.pr-exp-row td.pr-exp { color: var(--text-muted); font-size: 12.5px; line-height: 1.5; white-space: pre-line; padding-top: 0; padding-bottom: 12px; }
