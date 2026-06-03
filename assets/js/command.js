@@ -1031,7 +1031,8 @@
       var allOn = list.length > 0 && selIds.length === list.length;
       var bulk = selIds.length
         ? '<div class="pr-bulk"><span class="pr-selcount">' + selIds.length + " selected</span>" +
-            '<span class="pr-bulk-actions"><button class="btn btn-primary btn-sm" id="prSaveList">💾 Save as list</button>' +
+            '<span class="pr-bulk-actions"><button class="btn btn-primary btn-sm" id="prEnrichSel">⚡ Enrich selected</button>' +
+            '<button class="btn btn-ghost btn-sm" id="prSaveList">💾 Save as list</button>' +
             '<button class="btn btn-ghost btn-sm" id="prDelSel">🗑 Delete</button>' +
             '<button class="btn btn-ghost btn-sm" id="prClearSel">Clear</button></span></div>'
         : "";
@@ -1069,6 +1070,7 @@
         });
       });
       var saveBtn = $("#prSaveList"); if (saveBtn) saveBtn.addEventListener("click", function () { saveSelectedAsList(selIds); });
+      var enrSelBtn = $("#prEnrichSel"); if (enrSelBtn) enrSelBtn.addEventListener("click", function () { enrichSelected(selIds, enrSelBtn); });
       var delBtn = $("#prDelSel"); if (delBtn) delBtn.addEventListener("click", function () { deleteSelected(selIds); });
       var clrBtn = $("#prClearSel"); if (clrBtn) clrBtn.addEventListener("click", function () { prSel = {}; paint(); });
 
@@ -1168,6 +1170,25 @@
         if (r.ok) { toast("Deleted " + (r.data.deleted != null ? r.data.deleted : ids.length) + " prospect(s)"); prSel = {}; load(); }
         else toast("Could not delete (" + (r.data.error || r.status) + ")");
       }).catch(function () { toast("Could not reach the server."); });
+    }
+    // Bulk-enrich the selected prospects, cheapest-first, one at a time (so we
+    // stay within provider rate limits) with live progress on the button.
+    function enrichSelected(ids, btn) {
+      if (!ids.length) return;
+      var total = ids.length, done = 0, found = 0;
+      btn.disabled = true;
+      (function next(i) {
+        if (i >= total) {
+          btn.disabled = false; btn.textContent = "⚡ Enrich selected";
+          toast("Enriched " + found + " of " + total + " — found new contact for " + found + (found === 1 ? " prospect" : " prospects"));
+          load();
+          return;
+        }
+        btn.textContent = "Enriching " + (i + 1) + "/" + total + "…";
+        send("/prospects", "POST", { action: "enrich", prospectId: ids[i] })
+          .then(function (r) { var f = r.ok && r.data && r.data.found; if (f && (f.email || f.phone || f.name)) found++; done++; next(i + 1); })
+          .catch(function () { next(i + 1); });
+      })(0);
     }
     function openListsModal() {
       openModal("Saved prospect lists", "Pull these up in Campaign Studio to assign as a campaign's audience.",
