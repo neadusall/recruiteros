@@ -48,7 +48,13 @@ services:
   taltxt:
     build: ./money-maker-sms
     restart: unless-stopped
-    # taltxt's own secrets (Neon, Telnyx, SMTP, QStash, Anthropic, AUTH_*).
+    # Reuses the shared `db` Postgres (its own `taltxt` database) — set
+    # DATABASE_URL=postgres://recruiteros:<POSTGRES_PASSWORD>@db:5432/taltxt in
+    # the env file below. Wait for Postgres to be healthy before starting.
+    depends_on:
+      db:
+        condition: service_healthy
+    # taltxt's own secrets (Telnyx, SMTP, QStash, Anthropic, AUTH_*, DATABASE_URL).
     # required:false so a missing/empty file never takes down the whole stack —
     # the container just runs without those keys until you fill it in.
     env_file:
