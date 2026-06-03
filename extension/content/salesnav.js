@@ -167,6 +167,23 @@
     return !!btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true';
   }
 
+  // Best-effort read of the search's total result count (for the done-summary
+  // reconciliation). Returns 0 if it can't be parsed (no false warnings then).
+  function totalResults() {
+    var el = document.querySelector(SEL.totalCount);
+    var txt = el ? el.textContent : '';
+    var m = /of\s+([\d,]+)/i.exec(txt || '') || /([\d,]{2,})\s*(results|leads)/i.exec(txt || '');
+    if (m) return parseInt(m[1].replace(/,/g, ''), 10) || 0;
+    return 0;
+  }
+
+  // Merge two capture passes, deduped by the same key the dataset uses.
+  function mergeByKey(a, b) {
+    var m = {};
+    (a || []).concat(b || []).forEach(function (r) { var k = keyish(r); if (k && k !== '|') m[k] = r; });
+    return Object.keys(m).map(function (k) { return m[k]; });
+  }
+
   /* ---- progress banner injected on the page ---- */
   function banner(html) {
     let b = document.getElementById('ros-scrape-banner');
@@ -200,13 +217,28 @@
 
     // Crawl the whole page slowly, capturing cards as they render (the list is
     // virtualized, so we must scrape while scrolling, not after).
-    const records = await scrapePageProgressively(scrapeJob.name, function (n) {
-      banner('🔎 Reading page ' + page + ' · ' + n + ' captured on this page…');
-    });
-    await send({ type: TYPE.SCRAPE_PAGE, datasetId: scrapeJob.datasetId, page, records });
+    const onCount = function (n) { banner('🔎 Reading page ' + page + ' · ' + n + ' captured on this page…'); };
+    let records = await scrapePageProgressively(scrapeJob.name, onCount);
 
     const more = hasNextPage();
     const reachedMax = page >= scrapeJob.maxPages;
+
+    // FAIL-SAFE: never page on from a thin page when more pages exist. A full Sales
+    // Nav page is ~25; if we got noticeably fewer AND there's a next page, the lower
+    // cards just didn't render in time — re-crawl (from the top) and merge, up to
+    // twice, before moving on. (The last page is legitimately allowed to be short.)
+    const FULL_PAGE = 20;
+    let retries = 0;
+    while (records.length < FULL_PAGE && more && retries < 2) {
+      banner('↻ Page ' + page + ' looked light (' + records.length + ') — double-checking before moving on…');
+      const box = resultsContainer(); if (box) box.scrollTop = 0;
+      try { window.scrollTo(0, 0); } catch (e) {}
+      await sleep(jitter(1400, 2800));
+      records = mergeByKey(records, await scrapePageProgressively(scrapeJob.name, onCount));
+      retries++;
+    }
+
+    await send({ type: TYPE.SCRAPE_PAGE, datasetId: scrapeJob.datasetId, page, records });
     banner('✓ Page ' + page + ': +' + records.length + ' leads · ' + ((scrapeJob.total || 0) + records.length) + ' total');
 
     // Continue while there IS a next page and we're under the cap — do NOT stop just
@@ -218,8 +250,18 @@
       location.href = urlForPage(scrapeJob.baseUrl, page + 1); // reload -> resumeJob() runs again
     } else {
       await send({ type: TYPE.SCRAPE_STOP, finished: true });
-      banner('✅ Done. ' + ((scrapeJob.total || 0) + records.length) + ' leads captured. Open the extension to export CSV.');
-      setTimeout(clearBanner, 8000);
+      const captured = (scrapeJob.total || 0) + records.length;
+      const expected = totalResults();
+      // Reconcile against the search's reported total — warn (don't hide) if short,
+      // and tell the user re-running is safe (duplicates are skipped).
+      if (reachedMax && more) {
+        banner('✅ Stopped at the ' + scrapeJob.maxPages + '-page cap · ' + captured + ' leads. Raise "Max pages" to go further.');
+      } else if (expected && captured < Math.floor(expected * 0.9)) {
+        banner('⚠ Done, but captured ' + captured + ' of ~' + expected + '. Some didn’t load — re-run the same search to catch the rest (dupes are skipped).');
+      } else {
+        banner('✅ Done. ' + captured + ' leads captured' + (expected ? ' of ~' + expected : '') + '. They’re in Prospects (and exportable as CSV).');
+      }
+      setTimeout(clearBanner, 12000);
     }
   }
 
