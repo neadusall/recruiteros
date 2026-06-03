@@ -45,9 +45,17 @@ fi
 echo "$(date -u) new commit $REMOTE (was $LOCAL), deploying..." >> "$LOG"
 git reset --hard "origin/$BRANCH" >> "$LOG" 2>&1
 # Pull/checkout submodules (OS Text / taltxt lives in money-maker-sms). reset
-# --hard does NOT touch submodule working trees, so do it explicitly or the
-# taltxt build context would be empty and `up --build` would fail.
-git submodule sync --recursive >> "$LOG" 2>&1
-git submodule update --init --recursive >> "$LOG" 2>&1
-docker compose up -d --build >> "$LOG" 2>&1
-echo "$(date -u) deploy complete" >> "$LOG"
+# --hard does NOT touch submodule working trees. TOLERATE failure (e.g. a private
+# submodule the server can't clone) — it must NEVER block the main app deploy.
+git submodule sync --recursive >> "$LOG" 2>&1 || true
+git submodule update --init --recursive >> "$LOG" 2>&1 || echo "$(date -u) submodule update failed — taltxt may be skipped" >> "$LOG"
+# Deploy. Try the full stack; if any service (e.g. taltxt) fails to build, fall
+# back to (re)building just the core app + db + caddy so app updates ALWAYS ship.
+if docker compose up -d --build >> "$LOG" 2>&1; then
+  echo "$(date -u) deploy complete (full stack)" >> "$LOG"
+else
+  echo "$(date -u) full build failed — deploying core only (skipping taltxt)" >> "$LOG"
+  docker compose up -d --build --no-deps app >> "$LOG" 2>&1 || true
+  docker compose up -d --no-deps db caddy >> "$LOG" 2>&1 || true
+  echo "$(date -u) deploy complete (core only)" >> "$LOG"
+fi
