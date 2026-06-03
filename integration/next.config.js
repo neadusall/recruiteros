@@ -8,7 +8,7 @@ const PAGES = [
   "campaign-builder", "campaign-studio", "command", "conversations",
   "developers", "features", "forgot-password", "helpcenter", "index", "integrations",
   "linkedin", "login", "outreach", "platform", "pricing",
-  "recruiting-os", "reset-password", "signals", "signup", "sourcing",
+  "recruiting-os", "reset-password", "signals", "signup", "sourcing", "text",
 ];
 
 module.exports = {

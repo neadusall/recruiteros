@@ -1786,27 +1786,14 @@
       "</div>";
   }
 
-  /* ---------------- OS Text (taltxt), single sign-on embed ----------------
-     OS Text is a separate app, but you're already signed into RecruiterOS — so
-     we drop you straight in, no second login. The iframe loads the portal's own
-     /api/ostext/enter endpoint, which (server-side, session-gated) signs you
-     into taltxt via its instant-access link and redirects into the app. The
-     access token stays on the server; it never reaches the page.
-
-     Local dev: set window.RECRUITEROS_OSTEXT_URL to a taltxt URL to embed it
-     directly (bypassing the SSO endpoint). */
-  var OSTEXT_SRC = (typeof window !== "undefined" && window.RECRUITEROS_OSTEXT_URL) || "/api/ostext/enter";
-
-  function ostextFrame(src) {
-    return '<div class="card" style="padding:0;overflow:hidden">' +
-      '<iframe src="' + esc(src) + '" title="OS Text" ' +
-      'style="width:100%;height:calc(100vh - 160px);min-height:620px;border:0;border-radius:12px;background:var(--bg)" ' +
-      'allow="clipboard-read; clipboard-write; microphone"></iframe>' +
-      "</div>";
-  }
-
+  /* ---------------- OS Text (taltxt) ----------------
+     OS Text lives at its own clean, full-screen URL (/text) rather than as a
+     panel inside the Command Center SPA — so the "OS Text" tab just sends you
+     there. /text embeds the app with single sign-on (see /api/ostext/enter), so
+     you land straight in with no second login. */
   function renderOstext(el) {
-    el.innerHTML = head("OS Text", "The texting engine, right inside your workspace.") + ostextFrame(OSTEXT_SRC);
+    el.innerHTML = head("OS Text", "Opening OS Text…");
+    if (typeof window !== "undefined") window.location.assign("/text");
   }
 
   /* ---------------- Outreach (sending readiness control panel) ----------------
