@@ -20,16 +20,16 @@
 .motion-toggle .mt:hover { color: var(--text); background: rgba(255, 255, 255, .05); }
 /* Active motion: bold, color-coded fill so it's obvious which one you're on.
    Recruiting = brand purple, BD = amber — warm vs cool = instantly distinct. */
-.motion-toggle .mt.active { transform: translateY(-1px); }
+/* Active changes ONLY color/shadow — never size or position — so the two tabs
+   stay identical width when you switch (no shrink/jump). */
 .motion-toggle .mt.active[data-motion="recruiting"] {
   background: linear-gradient(135deg, #7c5cff, #9d82ff); color: #fff;
-  box-shadow: 0 6px 16px -6px rgba(124, 92, 255, .75), inset 0 0 0 1px rgba(255, 255, 255, .18);
+  box-shadow: 0 4px 14px -6px rgba(124, 92, 255, .7), inset 0 0 0 1px rgba(255, 255, 255, .18);
 }
 .motion-toggle .mt.active[data-motion="bd"] {
   background: linear-gradient(135deg, #ffb020, #ff8a3c); color: #1b1206;
-  box-shadow: 0 6px 16px -6px rgba(255, 150, 40, .7), inset 0 0 0 1px rgba(255, 255, 255, .25);
+  box-shadow: 0 4px 14px -6px rgba(255, 150, 40, .65), inset 0 0 0 1px rgba(255, 255, 255, .25);
 }
-.motion-toggle .mt.active::after { content: "●"; font-size: 8px; opacity: .9; margin-left: 2px; }
 
 .cmd-nav { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; margin: 4px -6px; padding: 0 6px; }
 .nav-group { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin: 14px 6px 4px; font-weight: 700; }

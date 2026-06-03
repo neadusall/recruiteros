@@ -1620,6 +1620,26 @@
       "</div>";
   }
 
+  /* ---------------- OS Text (the moneymaker app, embedded) ----------------
+     The standalone OS Text application, embedded in the portal via an iframe so
+     it lives inside the tool. Point it at its deployment by setting
+     window.RECRUITEROS_OSTEXT_URL on the page, or the OSTEXT_URL constant below. */
+  var OSTEXT_URL = (typeof window !== "undefined" && window.RECRUITEROS_OSTEXT_URL) || "";
+  function renderOstext(el) {
+    if (!OSTEXT_URL) {
+      el.innerHTML = head("OS Text", "The moneymaker texting engine, right inside your workspace.") +
+        '<div class="empty" style="padding:40px;line-height:1.6">OS Text isn\'t connected yet.<br>' +
+        "Set its deployment URL — <code>window.RECRUITEROS_OSTEXT_URL</code> on this page, or the <code>OSTEXT_URL</code> constant in command.js — and the full app loads right here.</div>";
+      return;
+    }
+    el.innerHTML = head("OS Text", "The moneymaker texting engine, right inside your workspace.") +
+      '<div class="card" style="padding:0;overflow:hidden">' +
+      '<iframe src="' + esc(OSTEXT_URL) + '" title="OS Text" ' +
+      'style="width:100%;height:calc(100vh - 180px);min-height:600px;border:0;border-radius:12px;background:var(--bg)" ' +
+      'allow="clipboard-read; clipboard-write; microphone"></iframe>' +
+      "</div>";
+  }
+
   /* ---------------- Outreach (sending readiness control panel) ----------------
      The working interface for everything you need wired before you can send:
      ATS, SMS (TalTxt), the enrichment waterfall + its credit balance, Job
