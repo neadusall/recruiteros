@@ -74,7 +74,6 @@
      with nothing new. This gets EVERY lead and reads like a human skimming. */
   function keyish(r) { return ((r.profileUrl || r.salesNavUrl || ((r.fullName || '') + '|' + (r.company || ''))) + '').toLowerCase(); }
   async function scrapePageProgressively(datasetName, onCount) {
-    var box = resultsContainer();
     var map = new Map();
     function collect() {
       scrapeCurrentPage(datasetName).forEach(function (r) {
@@ -82,26 +81,27 @@
       });
       if (onCount) onCount(map.size);
     }
-    var pos = function () { return box ? box.scrollTop : (window.scrollY || document.documentElement.scrollTop); };
-    var maxPos = function () { return box ? (box.scrollHeight - box.clientHeight) : (document.documentElement.scrollHeight - window.innerHeight); };
-    if (box) box.scrollTop = 0; else window.scrollTo(0, 0);
-    await sleep(jitter(600, 1300));
-    collect();
-    var prev = -1, stall = 0, lastPos = -1, tries = 0;
-    while (tries < 150) {
-      var view = box ? box.clientHeight : window.innerHeight;
-      var step = Math.round(view * (0.40 + Math.random() * 0.30));   // partial viewport, human-ish
-      if (box) box.scrollTop = box.scrollTop + step; else window.scrollBy(0, step);
-      await sleep(jitter(700, 1700));   // let virtualized rows render before they recycle
+    // Pull the LAST rendered card into view each step. scrollIntoView scrolls
+    // whatever element actually contains the list, so this works no matter how
+    // Sales Nav nests/virtualizes it — and we collect before AND after each scroll
+    // so cards are captured before they recycle out of the DOM.
+    var prevSize = -1, stable = 0;
+    for (var i = 0; i < 120 && stable < 4; i++) {
       collect();
-      var p = pos();
-      stall = (map.size === prev && Math.abs(p - lastPos) < 4) ? stall + 1 : 0;
-      prev = map.size; lastPos = p;
-      if (p >= maxPos() - 8 && stall >= 2) break;   // reached the bottom, nothing new
-      if (stall >= 6) break;                         // safety: scroll stuck
-      tries++;
+      var cards = document.querySelectorAll(SEL.name);
+      var last = cards.length ? (cards[cards.length - 1].closest(SEL.resultItem) || cards[cards.length - 1]) : null;
+      try { if (last && last.scrollIntoView) last.scrollIntoView({ block: 'center' }); } catch (e) {}
+      var box = resultsContainer();
+      if (box) box.scrollTop = box.scrollHeight; else window.scrollTo(0, document.body.scrollHeight);
+      await sleep(jitter(650, 1400));   // let the next batch render before recycling
+      collect();
+      if (map.size === prevSize) stable++; else stable = 0;
+      prevSize = map.size;
     }
-    await sleep(jitter(400, 900)); collect();
+    // ease back to the top (human) and final sweep
+    try { window.scrollTo(0, 0); } catch (e) {}
+    await sleep(jitter(400, 800));
+    collect();
     return Array.from(map.values());
   }
 
