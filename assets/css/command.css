@@ -653,3 +653,28 @@ html[data-theme="light"] .seq-step-h { background: rgba(16, 18, 40, 0.02); }
 .theme-seg .ts { appearance: none; border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 999px; cursor: pointer; transition: all .12s ease; }
 .theme-seg .ts:hover { color: var(--text); }
 .theme-seg .ts.active { background: var(--surface-2); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .18); }
+
+/* ---------------- Light theme · structural surfaces ----------------
+   The shell/sidebar/topbar/tabs use hardcoded dark fills in app.css, so the
+   token override alone leaves them dark. Re-skin them here for a clean,
+   readable light UI (white sidebar, dark legible tabs). */
+html[data-theme="light"] .sidebar { background: #ffffff; }
+html[data-theme="light"] .topbar { background: rgba(255, 255, 255, 0.9); }
+html[data-theme="light"] .tabs { background: #ffffff; }
+
+/* Left-nav tabs: clearly visible on white, with a distinct active state. */
+html[data-theme="light"] .nav-item { color: #3a3d4d; }
+html[data-theme="light"] .nav-item:hover { background: #eef0f7; color: var(--text); }
+html[data-theme="light"] .nav-item.active { background: #e9ebf8; color: var(--text); box-shadow: inset 2px 0 0 var(--brand); }
+html[data-theme="light"] .nav-group { color: #9498ad; }
+
+/* Flip the dark-only translucent fills so they're visible on white. */
+html[data-theme="light"] .camp-item:hover,
+html[data-theme="light"] .side-link:hover,
+html[data-theme="light"] .add-btn { background: rgba(16, 18, 40, 0.05); }
+html[data-theme="light"] table.grid tbody tr:hover td { background: rgba(16, 18, 40, 0.03); }
+html[data-theme="light"] table.grid thead th { background: var(--surface-2); }
+
+/* Calm the ambient glow + grid so the light canvas stays clean. */
+html[data-theme="light"] body::before { opacity: 0.12; }
+html[data-theme="light"] .aurora { opacity: 0.16; }
