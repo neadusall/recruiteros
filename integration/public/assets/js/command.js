@@ -123,6 +123,12 @@
     b.addEventListener("click", function () {
       motion = b.dataset.motion; localStorage.setItem("ros_motion", motion);
       Array.prototype.forEach.call(document.querySelectorAll(".mt"), function (x) { x.classList.toggle("active", x === b); });
+      // If the current view belongs only to the other motion (e.g. Hire Signals is
+      // BD-only), leave it for Overview instead of bouncing the motion back.
+      var cur = (location.hash || "#overview").replace(/^#/, "").split("/").pop();
+      if (ROUTES[cur] && ROUTES[cur].motionOnly && ROUTES[cur].motionOnly !== motion && cur !== "overview") {
+        location.hash = "overview";
+      }
       syncMotionNav();
       render();
     });
@@ -157,10 +163,11 @@
   var ROUTES = {
     overview: { title: "Overview", crumb: "Operate", action: null, render: renderOverview },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
-    inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket },
+    inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     campaigns: { title: "Campaigns", crumb: "Build", action: null, render: renderCampaigns },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
+    ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
@@ -192,22 +199,35 @@
     return h;
   }
 
-  // Show/hide motion-specific nav items (e.g. In-Market Leads is BD-only).
+  // Recruiting calls them Candidates; BD calls them Prospects.
+  function prospectsLabel() { return motion === "recruiting" ? "Candidates" : "Prospects"; }
+  function prospectNoun() { return motion === "recruiting" ? "candidate" : "prospect"; }
+
+  // Show/hide motion-specific nav items (Hire Signals is BD-only) and relabel the
+  // Prospects/Candidates nav item for the active motion.
   function syncMotionNav() {
     Array.prototype.forEach.call(document.querySelectorAll("[data-motion-only]"), function (el) {
       el.style.display = (el.getAttribute("data-motion-only") === motion) ? "" : "none";
     });
+    var pn = document.querySelector('.nav-item[data-route="prospects"]');
+    if (pn) {
+      var ni = pn.querySelector(".ni");
+      pn.textContent = "";
+      if (ni) pn.appendChild(ni);
+      pn.appendChild(document.createTextNode(" " + prospectsLabel()));
+    }
   }
 
   function render() {
     var key = currentRoute();
     if (key !== "campaigns") cmpEdit = null; // leave the sequence editor when navigating away
     var r = ROUTES[key];
-    $("#pageTitle").textContent = r.title;
+    syncMotionNav(); // keep motion-only visibility + Prospects/Candidates label current
+    $("#pageTitle").textContent = (key === "prospects") ? prospectsLabel() : r.title;
     $("#crumb").textContent = (ctx.workspace ? ctx.workspace.name + " / " : "") + r.crumb;
     Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) { n.classList.toggle("active", n.dataset.route === key); });
     var pa = $("#primaryAction");
-    if (r.action) { pa.style.display = ""; pa.textContent = r.action; pa.onclick = function () { primaryAction(key); }; }
+    if (r.action) { pa.style.display = ""; pa.textContent = (key === "prospects") ? ("＋ Add " + prospectNoun()) : r.action; pa.onclick = function () { primaryAction(key); }; }
     else pa.style.display = "none";
     Array.prototype.forEach.call(document.querySelectorAll(".mt"), function (x) { x.classList.toggle("active", x.dataset.motion === motion); });
     clearViewTimers(); // stop any auto-refresh from the view we're leaving
@@ -830,7 +850,7 @@
       '</div>' +
       '<div id="liProgress"></div>' +
       '<div class="pr-searchbar"><span class="ico">⌕</span>' +
-      '<input id="prSearch" type="text" autocomplete="off" placeholder="Search prospects by name, job title, company, or keyword…" /></div>' +
+      '<input id="prSearch" type="text" autocomplete="off" placeholder="Search by name, job title, company, or keyword…" /></div>' +
       '<div id="prBody">' + loading() + "</div>";
 
     $("#importBtn").addEventListener("click", importProspects);
@@ -934,8 +954,8 @@
         (rows || '<div class="empty">' + (prListName
           ? "This saved search has no matching prospects in your current pipeline."
           : prFilter
-          ? "No prospects match “" + esc(prFilter) + "”."
-          : "No prospects yet. Import, pull from a LinkedIn search above, or promote from In-Market Leads.") + "</div>") + "</div>";
+          ? "No " + prospectNoun() + "s match “" + esc(prFilter) + "”."
+          : "No " + prospectNoun() + "s yet. Import, pull from a LinkedIn search above" + (motion === "recruiting" ? "." : ", or promote from Hire Signals.")) + "</div>") + "</div>";
       var showAll = $("#prShowAll"); if (showAll) showAll.addEventListener("click", function () { selectSavedList(""); });
 
       // Selection wiring
