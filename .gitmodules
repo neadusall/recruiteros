@@ -1,0 +1,4 @@
+[submodule "money-maker-sms"]
+	path = money-maker-sms
+	url = https://github.com/neadusall/money-maker-sms.git
+	branch = main

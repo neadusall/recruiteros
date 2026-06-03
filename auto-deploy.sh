@@ -44,5 +44,10 @@ fi
 
 echo "$(date -u) new commit $REMOTE (was $LOCAL), deploying..." >> "$LOG"
 git reset --hard "origin/$BRANCH" >> "$LOG" 2>&1
+# Pull/checkout submodules (OS Text / taltxt lives in money-maker-sms). reset
+# --hard does NOT touch submodule working trees, so do it explicitly or the
+# taltxt build context would be empty and `up --build` would fail.
+git submodule sync --recursive >> "$LOG" 2>&1
+git submodule update --init --recursive >> "$LOG" 2>&1
 docker compose up -d --build >> "$LOG" 2>&1
 echo "$(date -u) deploy complete" >> "$LOG"

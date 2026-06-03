@@ -41,11 +41,29 @@ services:
       - "3000"
     # not published to the host directly; Caddy reaches it on the internal net
 
+  # OS Text (taltxt): the standalone SMS app, embedded in the portal under the
+  # "OS Text" route via an iframe. Source is the money-maker-sms git submodule;
+  # Caddy serves it on its own subdomain (taltxt.recruitersos.co). It uses Neon
+  # (DATABASE_URL in its env file) for storage — no local Postgres needed.
+  taltxt:
+    build: ./money-maker-sms
+    restart: unless-stopped
+    # taltxt's own secrets (Neon, Telnyx, SMTP, QStash, Anthropic, AUTH_*).
+    # required:false so a missing/empty file never takes down the whole stack —
+    # the container just runs without those keys until you fill it in.
+    env_file:
+      - path: ./money-maker-sms/.env.production
+        required: false
+    expose:
+      - "3000"
+    # not published to the host directly; Caddy reaches it on the internal net
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       - app
+      - taltxt
     ports:
       - "80:80"
       - "443:443"
