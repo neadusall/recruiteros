@@ -11,9 +11,25 @@
 .ws-name { font-weight: 700; font-size: 14px; }
 .ws-plan { font-size: 11px; color: var(--brand-2); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px; font-family: var(--mono); }
 
-.motion-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 11px; padding: 4px; }
-.motion-toggle .mt { appearance: none; border: 0; cursor: pointer; padding: 8px; border-radius: 8px; background: transparent; color: var(--text-muted); font: inherit; font-weight: 600; font-size: 12.5px; }
-.motion-toggle .mt.active { background: var(--surface-2); color: var(--text); }
+.motion-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 5px; }
+.motion-toggle .mt {
+  appearance: none; border: 1px solid transparent; cursor: pointer; padding: 10px 8px; border-radius: 9px;
+  background: transparent; color: var(--text-muted); font: inherit; font-weight: 700; font-size: 13px; letter-spacing: .2px;
+  display: flex; align-items: center; justify-content: center; gap: 6px; line-height: 1; transition: all .14s ease;
+}
+.motion-toggle .mt:hover { color: var(--text); background: rgba(255, 255, 255, .05); }
+/* Active motion: bold, color-coded fill so it's obvious which one you're on.
+   Recruiting = brand purple, BD = amber — warm vs cool = instantly distinct. */
+.motion-toggle .mt.active { transform: translateY(-1px); }
+.motion-toggle .mt.active[data-motion="recruiting"] {
+  background: linear-gradient(135deg, #7c5cff, #9d82ff); color: #fff;
+  box-shadow: 0 6px 16px -6px rgba(124, 92, 255, .75), inset 0 0 0 1px rgba(255, 255, 255, .18);
+}
+.motion-toggle .mt.active[data-motion="bd"] {
+  background: linear-gradient(135deg, #ffb020, #ff8a3c); color: #1b1206;
+  box-shadow: 0 6px 16px -6px rgba(255, 150, 40, .7), inset 0 0 0 1px rgba(255, 255, 255, .25);
+}
+.motion-toggle .mt.active::after { content: "●"; font-size: 8px; opacity: .9; margin-left: 2px; }
 
 .cmd-nav { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; margin: 4px -6px; padding: 0 6px; }
 .nav-group { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin: 14px 6px 4px; font-weight: 700; }
