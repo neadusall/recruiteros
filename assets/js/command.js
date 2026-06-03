@@ -1786,65 +1786,27 @@
       "</div>";
   }
 
-  /* ---------------- OS Text (the taltxt app, embedded) ----------------
-     OS Text is a SEPARATE application living inside the portal. It has its own
-     secure login (passwordless email magic-link, access approved per member), so
-     selecting it first shows a short gate that lets the user sign up / log in,
-     then embeds the full app via an iframe.
+  /* ---------------- OS Text (taltxt), single sign-on embed ----------------
+     OS Text is a separate app, but you're already signed into RecruiterOS — so
+     we drop you straight in, no second login. The iframe loads the portal's own
+     /api/ostext/enter endpoint, which (server-side, session-gated) signs you
+     into taltxt via its instant-access link and redirects into the app. The
+     access token stays on the server; it never reaches the page.
 
-     It's served on its own subdomain. Override per-environment by setting
-     window.RECRUITEROS_OSTEXT_URL on the page (e.g. http://localhost:3100 for
-     local dev) — otherwise it points at the production subdomain below. */
-  var OSTEXT_URL = (typeof window !== "undefined" && window.RECRUITEROS_OSTEXT_URL) || "https://taltxt.recruitersos.co";
-  var ostextView = null; // null = show the sign-up/login gate; "login" | "app" = embed loaded
+     Local dev: set window.RECRUITEROS_OSTEXT_URL to a taltxt URL to embed it
+     directly (bypassing the SSO endpoint). */
+  var OSTEXT_SRC = (typeof window !== "undefined" && window.RECRUITEROS_OSTEXT_URL) || "/api/ostext/enter";
 
-  function ostextFrame(path) {
-    var src = OSTEXT_URL + (path || "");
+  function ostextFrame(src) {
     return '<div class="card" style="padding:0;overflow:hidden">' +
       '<iframe src="' + esc(src) + '" title="OS Text" ' +
-      'style="width:100%;height:calc(100vh - 200px);min-height:600px;border:0;border-radius:12px;background:var(--bg)" ' +
+      'style="width:100%;height:calc(100vh - 160px);min-height:620px;border:0;border-radius:12px;background:var(--bg)" ' +
       'allow="clipboard-read; clipboard-write; microphone"></iframe>' +
       "</div>";
   }
 
   function renderOstext(el) {
-    if (!OSTEXT_URL) {
-      el.innerHTML = head("OS Text", "The texting engine, right inside your workspace.") +
-        '<div class="empty" style="padding:40px;line-height:1.6">OS Text isn\'t connected yet.<br>' +
-        "Set its deployment URL — <code>window.RECRUITEROS_OSTEXT_URL</code> on this page, or the <code>OSTEXT_URL</code> constant in command.js — and the full app loads right here.</div>";
-      return;
-    }
-
-    // Once the user has chosen to enter, show the embedded app with a way back.
-    if (ostextView) {
-      el.innerHTML = head("OS Text", "The texting engine, right inside your workspace.") +
-        '<div style="display:flex;align-items:center;gap:10px;margin:-4px 0 12px">' +
-          '<a class="btn btn-ghost btn-sm" id="ostextBack">← Back</a>' +
-          '<span class="muted" style="font-size:13px">OS Text is a separate application — you sign in with its own secure login.</span>' +
-        "</div>" +
-        ostextFrame(ostextView === "login" ? "/login" : "");
-      var back = $("#ostextBack");
-      if (back) back.addEventListener("click", function () { ostextView = null; render(); });
-      return;
-    }
-
-    // Default: the gate. OS Text is its own app, so offer sign-up / log-in here.
-    el.innerHTML = head("OS Text", "The texting engine, right inside your workspace.") +
-      '<div class="card" style="max-width:600px;padding:30px;line-height:1.65">' +
-        '<div style="font-size:36px;line-height:1;margin-bottom:10px">💸</div>' +
-        '<h3 style="margin:0 0 8px;font-size:19px">A separate app, right inside your portal</h3>' +
-        '<p class="muted" style="margin:0 0 6px">OS Text is its own application with its own secure login. ' +
-          "Create an account or sign in with your email — we'll send a one-time link, no password to remember.</p>" +
-        '<p class="muted" style="margin:0 0 20px;font-size:13px">Access is approved per team member.</p>' +
-        '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
-          '<a class="btn btn-primary" id="ostextSignup">Sign up / Log in</a>' +
-          '<a class="btn btn-ghost" id="ostextOpen">Open OS Text</a>' +
-        "</div>" +
-      "</div>";
-    var su = $("#ostextSignup");
-    if (su) su.addEventListener("click", function () { ostextView = "login"; render(); });
-    var op = $("#ostextOpen");
-    if (op) op.addEventListener("click", function () { ostextView = "app"; render(); });
+    el.innerHTML = head("OS Text", "The texting engine, right inside your workspace.") + ostextFrame(OSTEXT_SRC);
   }
 
   /* ---------------- Outreach (sending readiness control panel) ----------------

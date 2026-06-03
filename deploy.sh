@@ -153,6 +153,22 @@ else
   [ -f money-maker-sms/.env.production ] && say "Keeping existing money-maker-sms/.env.production"
 fi
 
+# --- 4c. OS Text single sign-on: give the portal app the SAME instant-access
+# token taltxt uses, so it can sign portal users straight in (no second login).
+if [ -f money-maker-sms/.env.production ]; then
+  TX_TOKEN="$(grep -E '^ACCESS_TOKEN=' money-maker-sms/.env.production | head -1 | cut -d= -f2-)"
+  if [ -n "${TX_TOKEN:-}" ]; then
+    say "Wiring OS Text single sign-on token into .env.production"
+    if grep -q '^RECRUITEROS_OSTEXT_TOKEN=' .env.production; then
+      sed -i "s|^RECRUITEROS_OSTEXT_TOKEN=.*|RECRUITEROS_OSTEXT_TOKEN=${TX_TOKEN}|" .env.production
+    else
+      echo "RECRUITEROS_OSTEXT_TOKEN=${TX_TOKEN}" >> .env.production
+    fi
+    grep -q '^RECRUITEROS_OSTEXT_URL=' .env.production \
+      || echo "RECRUITEROS_OSTEXT_URL=https://taltxt.recruitersos.co" >> .env.production
+  fi
+fi
+
 # --- 5. launch ---
 say "Building and starting containers (this takes a few minutes the first time)"
 docker compose up -d --build
