@@ -1,13 +1,21 @@
 /**
- * GET /api/health -> liveness + whether durable persistence is actually working.
- *   { ok, db, dbConnected }  — db: a connection string is configured;
- *   dbConnected: a real query succeeded. If db is true but dbConnected is false,
- *   accounts/sessions will NOT survive a redeploy (fix the DB before relying on it).
+ * GET /api/health -> liveness + a precise view of whether durable persistence is
+ * actually wired in the RUNNING container. `ver` lets us confirm the backend
+ * container actually rebuilt; the env flags show whether the persistence config
+ * reached it (the fix for the "logged out / data wiped on every deploy" bug).
  */
 
 import { dbEnabled, dbPing } from "../../../lib/db";
 import { ok } from "../../../lib/api";
 
 export async function GET() {
-  return ok({ ok: true, db: dbEnabled(), dbConnected: await dbPing() });
+  return ok({
+    ok: true,
+    ver: "h4-filevol",                       // bump on deploy to confirm the container rebuilt
+    db: dbEnabled(),
+    dbConnected: await dbPing(),
+    hasDataDir: !!process.env.ROS_DATA_DIR,  // file persistence configured?
+    hasDbUrl: !!process.env.DATABASE_URL,    // explicit Postgres?
+    hasPgPw: !!process.env.POSTGRES_PASSWORD,
+  });
 }
