@@ -36,10 +36,12 @@ echo "==> Pushing taltxt schema (drizzle-kit push)"
 # and install devDeps (drizzle-kit) into the mount. `db:5432` resolves on the net.
 # Run as root with a writable cache: the taltxt image's default user (nextjs)
 # can't write node_modules into the root-owned host mount, which fails the push.
+# Force NODE_ENV=development + --include=dev: the image sets NODE_ENV=production,
+# which makes npm skip devDependencies — but drizzle-kit (the push tool) is one.
 docker compose run --rm --user root --entrypoint "" \
   -v "$DIR/money-maker-sms:/src" -w /src \
   -e DATABASE_URL="postgres://${DB_USER}:${PGPW}@db:5432/${DB_NAME}" \
-  -e npm_config_cache=/tmp/.npm -e HOME=/tmp \
-  taltxt sh -lc "npm install --no-audit --no-fund && npm run db:push"
+  -e npm_config_cache=/tmp/.npm -e HOME=/tmp -e NODE_ENV=development \
+  taltxt sh -lc "npm install --include=dev --no-audit --no-fund && npm run db:push"
 
 echo "==> Done. taltxt DB is ready (postgres://${DB_USER}:***@db:5432/${DB_NAME})."
