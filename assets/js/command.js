@@ -650,27 +650,52 @@
 
     var renew = l.renewed
       ? '<div class="im-renew"><div class="im-renew-top">🔥 <b>' + esc(l.renewedReason || "Renewed demand") + "</b> " +
-          '<span class="muted">— already in your Prospects, but hiring again. Re-engage:</span></div>' +
+          '<span class="muted">— already taken, but hiring again. Re-engage:</span></div>' +
           '<div class="im-renew-msg">' + esc(l.renewedMessage || "") + "</div>" +
           '<button class="im-renew-copy" data-msg="' + esc(l.renewedMessage || "") + '">Copy follow-up message</button></div>'
       : "";
 
+    var nRoles = mgrs ? mgrs.length : 1;
+    // The company checkbox is "checked" when every one of its managers is selected.
+    var allChecked = mgrs
+      ? mgrs.every(function (m) { return imPicks[imPickKey(l.id, m.role)]; })
+      : !!imPicks[imPickKey(l.id, "")];
+    var anyChecked = mgrs
+      ? mgrs.some(function (m) { return imPicks[imPickKey(l.id, m.role)]; })
+      : !!imPicks[imPickKey(l.id, "")];
+    var metaBits = [];
+    if (l.headcountBand) metaBits.push(esc(l.headcountBand));
+    if (l.location) metaBits.push(esc(l.location));
+    metaBits.push(nRoles + " open role" + (nRoles === 1 ? "" : "s"));
+
     return '<div class="im-lead' + (l.renewed ? " im-lead-renew" : "") + '" data-id="' + esc(l.id) + '">' +
       '<div class="im-lead-head">' +
+        '<input type="checkbox" class="im-co-check" data-id="' + esc(l.id) + '"' + (allChecked ? " checked" : "") + ' title="Select this company" />' +
         '<span class="avatar" style="background:' + colorFor(l.company) + '">' + esc(initials(l.company)) + "</span>" +
         '<div class="im-lead-id"><div class="im-lead-name">' + esc(l.company) +
           (l.renewed ? ' <span class="im-renew-badge">🔥 Renewed</span>' : "") +
           (l.industry ? ' <span class="muted" style="font-weight:400">· ' + esc(l.industry) + "</span>" : "") + "</div>" +
-        '<div class="im-lead-meta">' + esc(l.headcountBand || "") + (l.location ? " · " + esc(l.location) : "") + "</div></div>" +
+        '<div class="im-lead-meta">' + metaBits.join(" · ") + "</div></div>" +
         '<span class="cls cls-' + scoreCls + ' im-score" title="Hiring-intent score">' + score + "</span></div>" +
       '<div class="im-reason">' + esc(l.reason) + src + "</div>" +
       renew +
-      '<div class="im-managers"><div class="im-mgr-head">Hiring managers &amp; open roles <span class="muted">(' + (mgrs ? mgrs.length : 1) + ")</span></div>" + rows + "</div>" +
+      '<details class="im-managers-d"' + (anyChecked ? " open" : "") + '>' +
+        '<summary class="im-mgr-summary">👤 ' + nRoles + " hiring manager" + (nRoles === 1 ? "" : "s") + " &amp; open role" + (nRoles === 1 ? "" : "s") + "</summary>" +
+        '<div class="im-managers">' + rows + "</div></details>" +
       (l.scoreReasons && l.scoreReasons.length ? '<div class="im-lead-reasons">' + l.scoreReasons.slice(0, 3).map(esc).join(" · ") + "</div>" : "") +
       "</div>";
   }
 
   function wireImResults(body) {
+    // Keep a company's header checkbox in sync with its manager rows.
+    function syncCoCheck(card) {
+      if (!card) return;
+      var co = card.querySelector(".im-co-check"); if (!co) return;
+      var picks = card.querySelectorAll(".im-pick");
+      var checked = card.querySelectorAll(".im-pick:checked").length;
+      co.checked = picks.length > 0 && checked === picks.length;
+      co.indeterminate = checked > 0 && checked < picks.length;
+    }
     // Per-manager selection.
     Array.prototype.forEach.call(body.querySelectorAll(".im-pick"), function (cb) {
       cb.addEventListener("change", function () {
@@ -680,7 +705,17 @@
         var key = imPickKey(id, role);
         if (cb.checked) imPicks[key] = { lead: lead, manager: mgr || null };
         else delete imPicks[key];
+        syncCoCheck(cb.closest(".im-lead"));
         updateImBulk();
+      });
+    });
+    // Per-company checkbox: select/clear all of that company's managers at once.
+    Array.prototype.forEach.call(body.querySelectorAll(".im-co-check"), function (co) {
+      co.addEventListener("change", function () {
+        var card = co.closest(".im-lead"); if (!card) return;
+        Array.prototype.forEach.call(card.querySelectorAll(".im-pick"), function (cb) {
+          if (cb.checked !== co.checked) { cb.checked = co.checked; cb.dispatchEvent(new Event("change")); }
+        });
       });
     });
     // Select all visible hiring managers.

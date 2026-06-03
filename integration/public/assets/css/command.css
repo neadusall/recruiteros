@@ -316,6 +316,16 @@
 .im-renew-copy { appearance: none; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent-amber); background: transparent; color: var(--accent-amber); transition: all .12s ease; }
 .im-renew-copy:hover { background: rgba(255,194,77,0.14); }
 
+/* ---- Cleaner lead cards: company checkbox + collapsible managers ---- */
+.im-co-check { width: 17px; height: 17px; accent-color: var(--brand); cursor: pointer; flex: none; }
+.im-managers-d { margin-top: 8px; border-top: 1px solid var(--border); }
+.im-managers-d .im-managers { border-top: 0; padding-top: 2px; }
+.im-mgr-summary { cursor: pointer; list-style: none; font-size: 12.5px; font-weight: 600; color: var(--text-muted); padding: 9px 0 3px; user-select: none; }
+.im-mgr-summary::-webkit-details-marker { display: none; }
+.im-mgr-summary::before { content: "▸"; color: var(--text-dim); margin-right: 8px; display: inline-block; }
+.im-managers-d[open] .im-mgr-summary::before { content: "▾"; }
+.im-managers-d[open] .im-mgr-summary { color: var(--text); }
+
 /* Prospects: contact + enrich */
 .lr-id { min-width: 0; }
 .lr-contact { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
