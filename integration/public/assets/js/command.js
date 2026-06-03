@@ -2213,31 +2213,50 @@
   function renderContent(el) {
     var store = seqStore();
     var meName = (ctx.user && ctx.user.name) || "You";
-    var filter = "", mineOnly = false;
+    var filter = "", mineOnly = false, tagFilter = "";
     function fmtDate(iso) { try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch (e) { return ""; } }
+    function allTags() { var set = {}; store.all().forEach(function (s) { (s.tags || []).forEach(function (t) { set[t] = 1; }); }); return Object.keys(set).sort(); }
 
     el.innerHTML = head("Sequences", "Every outreach sequence in your workspace. Build them in Campaigns, then drop them into Campaign Studio to assign prospects and deploy.") +
       '<div class="seqlib-tools">' +
-        '<label class="seqlib-search"><span>⌕</span><input id="slSearch" placeholder="Search sequences, owners, tags…" autocomplete="off"/></label>' +
-        '<label class="sl-mine"><input type="checkbox" id="slMine"/> My sequences</label>' +
+        '<button class="sl-fbtn" id="slMine"><span>👤</span> My Sequences</button>' +
+        '<span class="sl-tagwrap"><button class="sl-fbtn" id="slTagBtn"><span>🏷</span> Tags <b id="slTagLbl"></b></button>' +
+          '<select id="slTag" class="sl-tagsel"><option value="">All tags</option></select></span>' +
+        '<label class="seqlib-search"><span>⌕</span><input id="slSearch" placeholder="Search…" autocomplete="off"/></label>' +
         '<span class="sl-count" id="slCount"></span>' +
       "</div>" +
       '<div id="slBody">' + loading() + "</div>";
 
     $("#slSearch").addEventListener("input", function () { filter = (this.value || "").toLowerCase().trim(); paint(); });
-    $("#slMine").addEventListener("change", function () { mineOnly = this.checked; paint(); });
+    $("#slMine").addEventListener("click", function () { mineOnly = !mineOnly; this.classList.toggle("active", mineOnly); paint(); });
+    var tagSel = $("#slTag");
+    tagSel.addEventListener("change", function () { tagFilter = this.value; var lbl = $("#slTagLbl"); if (lbl) lbl.textContent = tagFilter ? "· " + tagFilter : ""; $("#slTagBtn").classList.toggle("active", !!tagFilter); paint(); });
+    $("#slTagBtn").addEventListener("click", function () { try { tagSel.focus(); tagSel.click(); } catch (e) {} });
 
+    function syncTagOptions() {
+      var tags = allTags();
+      tagSel.innerHTML = '<option value="">All tags</option>' + tags.map(function (t) { return '<option value="' + esc(t) + '"' + (t === tagFilter ? " selected" : "") + ">" + esc(t) + "</option>"; }).join("");
+    }
     function matchesF(s) {
       if (mineOnly && (s.owner || "") !== meName) return false;
+      if (tagFilter && (s.tags || []).indexOf(tagFilter) < 0) return false;
       if (!filter) return true;
       return ((s.name || "") + " " + (s.owner || "") + " " + (s.tags || []).join(" ") + " " + (s.channel || "")).toLowerCase().indexOf(filter) >= 0;
+    }
+    function emptyCreate(msg) {
+      return '<div class="card" style="text-align:center;padding:34px 22px">' +
+        '<p class="muted" style="margin-bottom:18px">' + msg + "</p>" +
+        '<div class="seq-new-grid" id="slCreate" style="max-width:760px;margin:0 auto">' +
+        Object.keys(CHANNELS).map(function (ch) { var c = CHANNELS[ch]; return '<button class="seq-new" data-ch="' + ch + '"><span class="seq-new-ic">' + c.icon + "</span><span class=\"seq-new-t\">" + c.label + " sequence</span><span class=\"seq-new-b\">" + esc(c.blurb) + "</span></button>"; }).join("") +
+        "</div></div>";
     }
     function paint() {
       var list = store.all();
       var body = $("#slBody"); if (!body) return;
+      syncTagOptions();
       var rows = list.filter(matchesF).sort(function (a, b) { return (b.updatedAt || "") < (a.updatedAt || "") ? -1 : 1; });
       var cn = $("#slCount"); if (cn) cn.textContent = rows.length + " of " + list.length;
-      if (!list.length) { body.innerHTML = '<div class="empty">No sequences yet. Create one in <a href="#campaigns">Campaigns</a>, or hit ＋ New sequence above.</div>'; return; }
+      if (!list.length) { body.innerHTML = emptyCreate("No sequences yet — pick a channel to build your first one. It'll appear here and in Campaign Studio."); wireCreate(); return; }
       if (!rows.length) { body.innerHTML = '<div class="empty">No sequences match that filter.</div>'; return; }
       var trs = rows.map(function (s) {
         var c = CHANNELS[s.channel] || CHANNELS.email;
@@ -2251,13 +2270,17 @@
           "<td>" + tags + "</td>" +
           '<td><button class="sl-status ' + (active ? "on" : "off") + '" data-status="' + esc(s.id) + '">' + (active ? "● Active" : "● Inactive") + "</button></td>" +
           '<td class="muted">' + esc(fmtDate(s.createdAt)) + "</td>" +
-          '<td class="sl-actions"><button class="btn btn-ghost btn-sm" data-dup="' + esc(s.id) + '">Duplicate</button>' +
-            '<button class="btn btn-ghost btn-sm" data-edit="' + esc(s.id) + '">Edit</button></td></tr>';
+          '<td class="sl-actions"><button class="btn btn-ghost btn-sm" data-edit="' + esc(s.id) + '">Edit</button>' +
+            '<button class="btn btn-ghost btn-sm" data-dup="' + esc(s.id) + '">Duplicate</button>' +
+            '<button class="btn btn-ghost btn-sm" data-go="studio" title="Assign + deploy in Studio">Deploy</button></td></tr>';
       }).join("");
       body.innerHTML = '<div class="card" style="padding:0;overflow:auto"><table class="seqlib"><thead><tr>' +
         "<th>Sequence</th><th>Owner</th><th>Steps</th><th>Tags</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>" + trs + "</tbody></table></div>";
       Array.prototype.forEach.call(body.querySelectorAll("[data-edit]"), function (b) {
         b.addEventListener("click", function () { var s = store.all().filter(function (x) { return x.id === b.getAttribute("data-edit"); })[0]; if (s) openEditor(s); });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-go]"), function (b) {
+        b.addEventListener("click", function () { location.hash = b.getAttribute("data-go"); });
       });
       Array.prototype.forEach.call(body.querySelectorAll("[data-dup]"), function (b) {
         b.addEventListener("click", function () {
@@ -2275,6 +2298,10 @@
           store.save(s); reload();
         });
       });
+    }
+    function wireCreate() {
+      var grid = $("#slCreate"); if (!grid) return;
+      grid.addEventListener("click", function (e) { var b = e.target.closest("[data-ch]"); if (b) openEditor(newSequence(b.getAttribute("data-ch"))); });
     }
     function reload() {
       paint();
