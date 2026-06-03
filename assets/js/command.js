@@ -599,7 +599,8 @@
   function renderImResults() {
     var body = document.getElementById("imBody"); if (!body) return;
     if (!inMarketResults.length) {
-      body.innerHTML = '<div class="empty">No in-market companies matched yet. Try another search, or connect more signal sources under <a href="#connected">Connected</a>.</div>';
+      body.innerHTML = '<div class="empty">No in-market companies matched yet. Try another search, or connect more signal sources under <a href="#connected">Connected</a>.</div>' + imTickerHtml();
+      wireTicker(body);
       return;
     }
     var leads = imVisibleLeads();
@@ -616,29 +617,39 @@
       "</div>";
     body.innerHTML = toolbar + '<div id="imList">' + leads.map(leadCard).join("") + "</div>" + imTickerHtml();
     wireImResults(body);
+    wireTicker(body);
     updateImBulk();
   }
 
-  // Bottom-right running feed: how many new hiring companies were added to the pool,
-  // by day, and when it last updated.
+  // Pinned bottom-right running feed: how many new hiring companies were added to the
+  // pool, by day, and when it last updated. Always renders (shows a "building" state
+  // while the pool fills) and is dismissible.
   function imTickerHtml() {
-    if (!imStats) return "";
-    var added = imStats.addedToday || 0, total = imStats.total || 0;
-    var lastStr = "—";
-    if (imStats.lastAddedAt) {
-      try { lastStr = new Date(imStats.lastAddedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) {}
+    var s = imStats || { total: 0, addedToday: 0, lastAddedAt: null, days: [] };
+    var added = s.addedToday || 0, total = s.total || 0;
+    var lastStr = "filling now";
+    if (s.lastAddedAt) {
+      try { lastStr = new Date(s.lastAddedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) {}
     }
-    var log = (imStats.days || []).map(function (d) {
+    var log = (s.days || []).map(function (d) {
       var lbl = d.date;
       try { lbl = new Date(d.date + "T00:00:00").toLocaleDateString([], { month: "short", day: "numeric" }); } catch (e) {}
       return '<div class="im-tick-row"><span>' + esc(lbl) + "</span><b>+" + (d.added || 0) + "</b></div>";
     }).join("");
-    return '<div class="im-ticker">' +
-      '<div class="im-ticker-h">📈 Hiring-signal feed <span class="muted">· auto-updates ~every 90 min</span></div>' +
-      '<div class="im-ticker-main"><b>+' + added + '</b> new companies today · <b>' + total + '</b> in the pool</div>' +
+    var main = total > 0
+      ? '<b>+' + added + '</b> new companies today · <b>' + total + '</b> in the pool'
+      : "Building your hiring pool — first companies land within ~15 min, then it grows daily.";
+    return '<div class="im-ticker" id="imTicker">' +
+      '<button class="im-ticker-x" id="imTickerX" title="Hide">✕</button>' +
+      '<div class="im-ticker-h">📈 Hiring-signal feed <span class="muted">· updates ~90 min</span></div>' +
+      '<div class="im-ticker-main">' + main + "</div>" +
       '<div class="im-ticker-sub">Last update: ' + esc(lastStr) + "</div>" +
       (log ? '<div class="im-ticker-log">' + log + "</div>" : "") +
       "</div>";
+  }
+  function wireTicker(body) {
+    var x = body.querySelector("#imTickerX");
+    if (x) x.addEventListener("click", function () { var t = body.querySelector("#imTicker"); if (t) t.style.display = "none"; });
   }
 
   function leadCard(l) {
