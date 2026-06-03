@@ -171,7 +171,7 @@
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
-    content: { title: "Campaign Sequences Library", crumb: "Build", action: "＋ Add asset", render: renderContent },
+    content: { title: "Campaign Sequences Library", crumb: "Build", action: "＋ New sequence", render: renderContent },
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
     connected: { title: "Connected", crumb: "Connect", action: "Test all", render: renderConnected, cap: "integrations:manage" },
@@ -1333,13 +1333,16 @@
 
   function newSequence(channel) {
     return { id: "seq_" + Date.now(), channel: channel, name: "New " + (CHANNELS[channel] || {}).label + " sequence",
-      motion: motion === "bd" ? "bd" : "recruiting", steps: seqTemplate(channel), tags: [], variables: [],
+      motion: motion === "bd" ? "bd" : "recruiting", owner: (ctx.user && ctx.user.name) || "You", status: "inactive",
+      steps: seqTemplate(channel), tags: [], variables: [],
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), _isNew: true };
   }
   function openEditor(seq) {
-    // Work on a deep copy so Cancel discards cleanly.
+    // Work on a deep copy so Cancel discards cleanly. Editor lives on #campaigns,
+    // so jump there if we're opening from elsewhere (e.g. the Library).
     cmpEdit = JSON.parse(JSON.stringify(seq));
-    render();
+    if (currentRoute() !== "campaigns") location.hash = "campaigns";
+    else render();
   }
 
   function renderSeqEditor(el, seq) {
@@ -2178,18 +2181,103 @@
     return diff >= 0 ? "in " + s : s + " ago";
   }
 
+  /* ---------------- Campaign Sequences Library ----------------
+     The master list of every sequence in the workspace (table layout). Shares
+     one store (ros_sequences + /api/sequences) with Campaigns (which creates
+     them) and Campaign Studio (which drops + assigns them) — so all three work
+     off the same data. Create / Edit here open the same channel editor. */
+  function newSequenceFlow() {
+    openModal("New sequence", "Pick a channel to build.",
+      '<div class="seq-new-grid">' + Object.keys(CHANNELS).map(function (ch) {
+        var c = CHANNELS[ch];
+        return '<button class="seq-new" data-ch="' + ch + '"><span class="seq-new-ic">' + c.icon + "</span>" +
+          '<span class="seq-new-t">' + c.label + " sequence</span><span class=\"seq-new-b\">" + esc(c.blurb) + "</span></button>";
+      }).join("") + "</div>",
+      function (root, close) {
+        root.querySelector(".seq-new-grid").addEventListener("click", function (e) {
+          var b = e.target.closest("[data-ch]"); if (!b) return;
+          close(); openEditor(newSequence(b.getAttribute("data-ch")));
+        });
+      });
+  }
+
   function renderContent(el) {
-    el.innerHTML = head("Content Library", "Case studies and comp benchmarks the AI injects into Touch 2 and Touch 3.") +
-      '<div id="ctBody">' + loading() + "</div>";
-    api("/content").then(function (d) {
-      var assets = (d && d.assets) || [];
-      var rows = assets.map(function (a) {
-        var n = (a.campaignIds || []).length;
-        return '<div class="list-row"><div><div class="lr-main">' + esc(a.name) + '</div><div class="lr-sub">' + esc(a.type) + "</div></div>" +
-          '<div class="lr-right">' + (n ? n + " campaign(s)" : "unassigned") + "</div></div>";
-      }).join("") || '<div class="empty">No assets yet. Add a case study or comp benchmark, the AI weaves it into your value-drop touches.</div>';
-      var body = $("#ctBody"); if (body) body.innerHTML = '<div class="card">' + rows + "</div>";
-    }).catch(function () { var b = $("#ctBody"); if (b) b.innerHTML = needsSetup(); });
+    var store = seqStore();
+    var meName = (ctx.user && ctx.user.name) || "You";
+    var filter = "", mineOnly = false;
+    function fmtDate(iso) { try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch (e) { return ""; } }
+
+    el.innerHTML = head("Sequences", "Every outreach sequence in your workspace. Build them in Campaigns, then drop them into Campaign Studio to assign prospects and deploy.") +
+      '<div class="seqlib-tools">' +
+        '<label class="seqlib-search"><span>⌕</span><input id="slSearch" placeholder="Search sequences, owners, tags…" autocomplete="off"/></label>' +
+        '<label class="sl-mine"><input type="checkbox" id="slMine"/> My sequences</label>' +
+        '<span class="sl-count" id="slCount"></span>' +
+      "</div>" +
+      '<div id="slBody">' + loading() + "</div>";
+
+    $("#slSearch").addEventListener("input", function () { filter = (this.value || "").toLowerCase().trim(); paint(); });
+    $("#slMine").addEventListener("change", function () { mineOnly = this.checked; paint(); });
+
+    function matchesF(s) {
+      if (mineOnly && (s.owner || "") !== meName) return false;
+      if (!filter) return true;
+      return ((s.name || "") + " " + (s.owner || "") + " " + (s.tags || []).join(" ") + " " + (s.channel || "")).toLowerCase().indexOf(filter) >= 0;
+    }
+    function paint() {
+      var list = store.all();
+      var body = $("#slBody"); if (!body) return;
+      var rows = list.filter(matchesF).sort(function (a, b) { return (b.updatedAt || "") < (a.updatedAt || "") ? -1 : 1; });
+      var cn = $("#slCount"); if (cn) cn.textContent = rows.length + " of " + list.length;
+      if (!list.length) { body.innerHTML = '<div class="empty">No sequences yet. Create one in <a href="#campaigns">Campaigns</a>, or hit ＋ New sequence above.</div>'; return; }
+      if (!rows.length) { body.innerHTML = '<div class="empty">No sequences match that filter.</div>'; return; }
+      var trs = rows.map(function (s) {
+        var c = CHANNELS[s.channel] || CHANNELS.email;
+        var n = (s.steps || []).length;
+        var tags = (s.tags || []).map(function (t) { return '<span class="sl-tag">' + esc(t) + "</span>"; }).join("") || '<span class="muted">—</span>';
+        var active = s.status === "active";
+        return '<tr data-id="' + esc(s.id) + '">' +
+          '<td class="sl-name"><span class="seq-chip ' + s.channel + '">' + c.label + "</span> " + esc(s.name) + "</td>" +
+          "<td>" + esc(s.owner || "—") + "</td>" +
+          '<td class="sl-c">' + n + "</td>" +
+          "<td>" + tags + "</td>" +
+          '<td><button class="sl-status ' + (active ? "on" : "off") + '" data-status="' + esc(s.id) + '">' + (active ? "● Active" : "● Inactive") + "</button></td>" +
+          '<td class="muted">' + esc(fmtDate(s.createdAt)) + "</td>" +
+          '<td class="sl-actions"><button class="btn btn-ghost btn-sm" data-dup="' + esc(s.id) + '">Duplicate</button>' +
+            '<button class="btn btn-ghost btn-sm" data-edit="' + esc(s.id) + '">Edit</button></td></tr>';
+      }).join("");
+      body.innerHTML = '<div class="card" style="padding:0;overflow:auto"><table class="seqlib"><thead><tr>' +
+        "<th>Sequence</th><th>Owner</th><th>Steps</th><th>Tags</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>" + trs + "</tbody></table></div>";
+      Array.prototype.forEach.call(body.querySelectorAll("[data-edit]"), function (b) {
+        b.addEventListener("click", function () { var s = store.all().filter(function (x) { return x.id === b.getAttribute("data-edit"); })[0]; if (s) openEditor(s); });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-dup]"), function (b) {
+        b.addEventListener("click", function () {
+          var s = store.all().filter(function (x) { return x.id === b.getAttribute("data-dup"); })[0]; if (!s) return;
+          var copy = JSON.parse(JSON.stringify(s));
+          copy.id = "seq_" + Date.now(); copy.name = "Copy of " + s.name; copy.status = "inactive"; copy.owner = meName;
+          copy.createdAt = new Date().toISOString(); copy.updatedAt = copy.createdAt; delete copy._isNew;
+          store.save(copy); toast("Duplicated"); reload();
+        });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-status]"), function (b) {
+        b.addEventListener("click", function () {
+          var s = store.all().filter(function (x) { return x.id === b.getAttribute("data-status"); })[0]; if (!s) return;
+          s.status = (s.status === "active") ? "inactive" : "active"; s.updatedAt = new Date().toISOString();
+          store.save(s); reload();
+        });
+      });
+    }
+    function reload() {
+      paint();
+      api("/sequences").then(function (d) {
+        var server = (d && d.sequences) || [];
+        if (server.length) {
+          try { localStorage.setItem("ros_sequences", JSON.stringify(server.concat(store.all().filter(function (l) { return !server.some(function (s) { return s.id === l.id; }); })))); } catch (e) {}
+        }
+        paint();
+      }).catch(function () {});
+    }
+    reload();
   }
 
   /* ---------------- Analytics (signal → placement, live) ---------------- */
@@ -2540,7 +2628,7 @@
     if (key === "team") { inviteRecruiter(); return; }
     if (key === "campaigns") { studioOpenId = null; location.hash = "studio"; return; }
     if (key === "prospects") { addProspect(); return; }
-    if (key === "content") { addAsset(); return; }
+    if (key === "content") { newSequenceFlow(); return; }
     if (key === "connected") {
       toast("Testing all connections...");
       send("/connected", "POST", { action: "test-all" })

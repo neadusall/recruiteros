@@ -40,12 +40,18 @@ export interface CustomVariable {
   label: string; // "Simple Job Lead Title"
 }
 
+export type SequenceStatus = "active" | "inactive";
+
 export interface Sequence {
   id: string;
   workspaceId: string;
   channel: SeqChannel;
   name: string;
   motion: Motion;
+  /** Display owner (creator's name) — shown in the Sequences Library. */
+  owner?: string;
+  /** Active = enrolling/usable; inactive = draft. */
+  status: SequenceStatus;
   steps: SequenceStep[];
   tags: string[];
   variables: CustomVariable[];
@@ -70,6 +76,8 @@ export interface SequenceInput {
   channel: SeqChannel;
   name: string;
   motion?: Motion;
+  owner?: string;
+  status?: SequenceStatus;
   steps?: Partial<SequenceStep>[];
   tags?: string[];
   variables?: CustomVariable[];
@@ -95,6 +103,8 @@ export function upsertSequence(workspaceId: string, input: SequenceInput): Seque
   const tags = (input.tags ?? []).filter(Boolean).slice(0, 10);
   const variables = (input.variables ?? []).filter((v) => v && v.key);
 
+  const status: SequenceStatus = input.status === "active" ? "active" : "inactive";
+
   const existing = input.id ? getSequence(workspaceId, input.id) : undefined;
   if (existing) {
     existing.name = input.name || existing.name;
@@ -103,6 +113,8 @@ export function upsertSequence(workspaceId: string, input: SequenceInput): Seque
     existing.tags = tags;
     existing.variables = variables;
     if (input.motion) existing.motion = input.motion;
+    if (input.owner) existing.owner = input.owner;
+    if (input.status) existing.status = status;
     existing.updatedAt = nowIso();
     return existing;
   }
@@ -113,6 +125,8 @@ export function upsertSequence(workspaceId: string, input: SequenceInput): Seque
     channel,
     name: input.name || "Untitled sequence",
     motion: input.motion === "bd" ? "bd" : "recruiting",
+    owner: input.owner,
+    status,
     steps,
     tags,
     variables,
