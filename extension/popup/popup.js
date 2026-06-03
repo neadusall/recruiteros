@@ -44,9 +44,19 @@
     const dest = $('#snDest');
     if (dest) {
       dest.className = 'p-dest ' + (portalOn ? 'on' : 'off');
-      dest.innerHTML = portalOn
+      let line = portalOn
         ? '✅ Connected — leads post straight into your portal <b>Prospects</b> (' + (sm === 'bd' ? 'Business Dev' : 'Recruiting') + '), with photos &amp; data.'
         : '⚠ <b>Not connected to the portal.</b> Leads save here only (CSV). In the portal: open <b>Enrich LinkedIn searches</b> → <b>Connect this workspace</b>.';
+      // Last sync result — proof of whether leads actually reached the portal.
+      const lp = s.lastPush;
+      if (lp) {
+        const ago = Math.max(0, Math.round((Date.now() - lp.at) / 1000));
+        const when = ago < 60 ? ago + 's ago' : Math.round(ago / 60) + 'm ago';
+        line += lp.ok
+          ? '<br><span style="color:#8ff0cd">Last sync: ' + lp.count + ' → portal ✓ (' + when + ')</span>'
+          : '<br><span style="color:#ffb4b4">Last sync FAILED (' + when + '): ' + escapeHtml(lp.error || 'unknown') + '</span>';
+      }
+      dest.innerHTML = line;
     }
 
     // datasets

@@ -238,6 +238,7 @@ async function publicState(s) {
     queue: s.queue, done: s.done.slice(-20), counts: s.counts,
     datasets: await datasetSummaries(),
     scrape: job ? { status: job.status, total: job.total, page: job.currentPage, maxPages: job.maxPages, name: job.name, datasetId: job.datasetId } : null,
+    lastPush: s.lastPush || null,
   };
 }
 function normalize(a) { return Object.assign(self.ROS.makeAction(a.type, a.target, a.payload, a.meta), a, { status: 'queued' }); }
@@ -343,7 +344,11 @@ async function onScrapePage({ datasetId, page, records }) {
     // if the extension isn't connected to a backend yet.
     const s = await getState();
     const newOnes = (records || []).filter(function (r) { return r && (r.fullName); });
-    await relayToBackend(s, 'campaignFromDataset', { campaignName: ds.name, leads: newOnes, motion: s.settings.backendMotion });
+    const res = await relayToBackend(s, 'campaignFromDataset', { campaignName: ds.name, leads: newOnes, motion: s.settings.backendMotion });
+    // Record the result so the popup can SHOW whether leads reached the portal.
+    const lastPush = { at: Date.now(), count: newOnes.length, ok: !!(res && res.ok), error: res && res.error, motion: s.settings.backendMotion };
+    await setState({ lastPush: lastPush });
+    if (res && !res.ok) notify('Leads NOT synced to portal', (res.error || 'push failed') + ' — open the extension to fix.');
   }
   return { ok: true, total: ds.records.length };
 }
@@ -421,17 +426,21 @@ function dispatchToTab(tabId, msg) {
 }
 async function onCapturedLead(profile, s) { await relayToBackend(s, 'captureLead', { profile }); notify('Lead captured', (profile && profile.fullName) || 'Profile'); }
 async function relayToBackend(s, path, body) {
-  const base = (s.settings && s.settings.backendBaseUrl) || CFG.backendBaseUrl; if (!base) return;
+  const base = (s.settings && s.settings.backendBaseUrl) || CFG.backendBaseUrl;
+  if (!base) return { ok: false, noBackend: true, error: 'No backend URL — connect the extension in the portal.' };
   // Prefer the ingest token set by the portal's one-click Connect; fall back to config.
   const token = (s.settings && s.settings.backendApiKey) || CFG.backendApiKey;
+  if (!token) return { ok: false, noBackend: true, error: 'No ingest token — click Connect this workspace in the portal.' };
   try {
     const res = await fetch(base.replace(/\/$/, '') + '/' + path, {
       method: 'POST',
-      headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { Authorization: 'Bearer ' + token } : {}),
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
       body: JSON.stringify(body),
     });
-    if (!res.ok) log('warn', 'backend relay ' + path + ' -> ' + res.status + (res.status === 401 ? ' (connect the extension in the portal first)' : ''));
-  } catch (e) { log('warn', 'backend relay failed: ' + e.message); }
+    let data = null; try { data = await res.json(); } catch (e) {}
+    if (!res.ok) log('warn', 'backend relay ' + path + ' -> ' + res.status + (res.status === 401 ? ' (reconnect in the portal)' : ''));
+    return { ok: res.ok, status: res.status, data: data, error: res.ok ? null : ('HTTP ' + res.status + (data && data.error ? ' ' + data.error : '')) };
+  } catch (e) { log('warn', 'backend relay failed: ' + e.message); return { ok: false, error: 'Could not reach ' + base + ' (' + e.message + ')' }; }
 }
 function notify(title, message) { try { chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon128.png', title, message }); } catch (_) {} }
 function log(level, msg) { console[(level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log')]('[ROS]', msg); }
