@@ -391,6 +391,7 @@
   var imMinScore = 0;            // narrow-down: minimum hiring-intent score shown
   var imLabel = "";             // current result label, kept for re-renders
   var imTotal = 0;              // total companies available for this query in the pool (grows daily)
+  var imStats = null;          // accumulation activity (added today, total, daily log)
   var imPicks = {};             // key -> { lead, manager } selected to push to Prospects
 
   // Industries + sub-sectors recruiters sell into. Drives the refined in-market search.
@@ -588,6 +589,7 @@
         if (!r.ok) { body.innerHTML = needsSetup(); return; }
         inMarketResults = (r.data && r.data.leads) || [];
         imTotal = (r.data && typeof r.data.pulled === "number") ? r.data.pulled : inMarketResults.length;
+        imStats = (r.data && r.data.stats) || null;
         renderImResults();
       }).catch(function () { body.innerHTML = needsSetup(); });
     }
@@ -612,9 +614,31 @@
         '<button class="btn btn-ghost btn-sm" id="imSave" disabled>💾 Save as hiring signals</button>' +
         '<button class="btn btn-primary btn-sm" id="imBulk" disabled>Push selected to Prospects</button>' +
       "</div>";
-    body.innerHTML = toolbar + '<div id="imList">' + leads.map(leadCard).join("") + "</div>";
+    body.innerHTML = toolbar + '<div id="imList">' + leads.map(leadCard).join("") + "</div>" + imTickerHtml();
     wireImResults(body);
     updateImBulk();
+  }
+
+  // Bottom-right running feed: how many new hiring companies were added to the pool,
+  // by day, and when it last updated.
+  function imTickerHtml() {
+    if (!imStats) return "";
+    var added = imStats.addedToday || 0, total = imStats.total || 0;
+    var lastStr = "—";
+    if (imStats.lastAddedAt) {
+      try { lastStr = new Date(imStats.lastAddedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) {}
+    }
+    var log = (imStats.days || []).map(function (d) {
+      var lbl = d.date;
+      try { lbl = new Date(d.date + "T00:00:00").toLocaleDateString([], { month: "short", day: "numeric" }); } catch (e) {}
+      return '<div class="im-tick-row"><span>' + esc(lbl) + "</span><b>+" + (d.added || 0) + "</b></div>";
+    }).join("");
+    return '<div class="im-ticker">' +
+      '<div class="im-ticker-h">📈 Hiring-signal feed <span class="muted">· auto-updates ~every 90 min</span></div>' +
+      '<div class="im-ticker-main"><b>+' + added + '</b> new companies today · <b>' + total + '</b> in the pool</div>' +
+      '<div class="im-ticker-sub">Last update: ' + esc(lastStr) + "</div>" +
+      (log ? '<div class="im-ticker-log">' + log + "</div>" : "") +
+      "</div>";
   }
 
   function leadCard(l) {

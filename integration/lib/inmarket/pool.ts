@@ -30,7 +30,8 @@ function keyOf(l: InMarketLead): string {
 }
 
 /** Merge freshly collected leads into the pool (dedupe by company, keep highest score,
- *  refresh freshness, expire stale, cap size). No-op without a database. */
+ *  refresh freshness, expire stale, cap size), and record how many NEW companies were
+ *  added today for the activity ticker. No-op without a database. */
 export async function mergeIntoPool(leads: InMarketLead[]): Promise<void> {
   if (!leads.length) return;
   const now = Date.now();
@@ -39,10 +40,12 @@ export async function mergeIntoPool(leads: InMarketLead[]): Promise<void> {
     const k = keyOf(e.lead);
     if (k) byKey.set(k, e);
   }
+  let added = 0; // companies new to the pool this merge
   for (const l of leads) {
     const k = keyOf(l);
     if (!k) continue;
     const cur = byKey.get(k);
+    if (!cur) added++;
     if (!cur || (l.score ?? 0) >= (cur.lead.score ?? 0)) byKey.set(k, { lead: l, at: now });
     else cur.at = now; // keep the higher-scored lead, but mark it freshly seen
   }
@@ -50,6 +53,38 @@ export async function mergeIntoPool(leads: InMarketLead[]): Promise<void> {
   merged.sort((a, b) => (b.lead.score ?? 0) - (a.lead.score ?? 0));
   if (merged.length > MAX_POOL) merged = merged.slice(0, MAX_POOL);
   await saveSnapshot(KEY, merged);
+  await recordAdded(added, merged.length);
+}
+
+/* ---- Accumulation activity stats (the "newly added today" ticker) ---- */
+const STATS_KEY = "inmarket_pool_stats_v1";
+interface PoolStats { total: number; lastAddedAt: string | null; days: Record<string, number> }
+
+function today(): string { return new Date().toISOString().slice(0, 10); }
+
+async function recordAdded(added: number, total: number): Promise<void> {
+  const s = (await loadSnapshot<PoolStats>(STATS_KEY)) || { total: 0, lastAddedAt: null, days: {} };
+  s.total = total;
+  if (added > 0) {
+    const d = today();
+    s.days[d] = (s.days[d] || 0) + added;
+    s.lastAddedAt = new Date().toISOString();
+  }
+  // keep ~21 days of history
+  const keep = Object.keys(s.days).sort().slice(-21);
+  s.days = keep.reduce((m, k) => { m[k] = s.days[k]; return m; }, {} as Record<string, number>);
+  await saveSnapshot(STATS_KEY, s);
+}
+
+/** Activity stats for the UI ticker: total in pool, added today, last update, and the
+ *  recent per-day history (most recent first). */
+export async function poolStats(): Promise<{
+  total: number; addedToday: number; lastAddedAt: string | null;
+  days: Array<{ date: string; added: number }>;
+}> {
+  const s = (await loadSnapshot<PoolStats>(STATS_KEY)) || { total: 0, lastAddedAt: null, days: {} };
+  const days = Object.keys(s.days).sort().reverse().slice(0, 7).map((date) => ({ date, added: s.days[date] }));
+  return { total: s.total, addedToday: s.days[today()] || 0, lastAddedAt: s.lastAddedAt, days };
 }
 
 function leadMatches(lead: InMarketLead, q: InMarketQuery): boolean {

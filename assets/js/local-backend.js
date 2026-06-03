@@ -326,7 +326,7 @@
       var taken = {};
       (d.prospects || []).forEach(function (p) { if (p.company) taken[String(p.company).toLowerCase().trim()] = 1; });
       leads = leads.filter(function (l) { return !taken[String(l.company || "").toLowerCase().trim()]; });
-      return ok({ leads: leads, pulled: d.inmarket.length, warnings: [] });
+      return ok({ leads: leads, pulled: d.inmarket.length, warnings: [], stats: imDemoStats(d) });
     }
 
     if (p === "/prospects") {
@@ -702,6 +702,16 @@
   }
   function localPhone() {
     return "+1 (415) " + String(200 + Math.floor(Math.random() * 799)) + "-" + String(1000 + Math.floor(Math.random() * 8999));
+  }
+  // Demo accumulation stats for the Hire Signals activity feed.
+  function imDemoStats(d) {
+    var total = (d.inmarket || []).length;
+    var days = [];
+    for (var i = 0; i < 5; i++) {
+      var dt = new Date(); dt.setDate(dt.getDate() - i);
+      days.push({ date: dt.toISOString().slice(0, 10), added: 40 + Math.floor(Math.random() * 90) });
+    }
+    return { total: total, addedToday: days[0].added, lastAddedAt: new Date().toISOString(), days: days };
   }
 
   function ok(obj) { return resp(200, obj); }
