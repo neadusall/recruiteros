@@ -748,3 +748,12 @@ html[data-theme="light"] .sl-status.off { background: rgba(16,18,40,.05); }
 .sl-fbtn b { font-weight: 600; color: var(--brand-2); }
 .sl-tagwrap { position: relative; display: inline-block; }
 .sl-tagsel { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+
+/* Prospects bulk bar · enrich field checkboxes + status/sequence pickers */
+.pr-bulk-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pr-enrich-grp { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 9px; padding: 4px 8px; }
+.pr-enrich-grp label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.pr-enrich-grp input { accent-color: var(--brand-2, #4dd0ff); }
+.pr-seq-grp { display: inline-flex; align-items: center; gap: 6px; }
+.pr-bulk-sel { background: var(--surface); border: 1px solid var(--border-strong); color: var(--text); border-radius: 8px; padding: 6px 9px; font: inherit; font-size: 12.5px; cursor: pointer; max-width: 220px; }
+.pr-seqtag { display: inline-block; margin-left: 8px; font-size: 11px; color: var(--brand-2, #4dd0ff); background: rgba(77, 208, 255, .10); border: 1px solid rgba(77, 208, 255, .28); border-radius: 6px; padding: 1px 7px; vertical-align: middle; }

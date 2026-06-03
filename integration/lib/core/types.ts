@@ -132,6 +132,9 @@ export interface Prospect {
   headline?: string;
   /** ICP category bucket this prospect was matched into. */
   category?: string;
+  /** Assigned sequence (from the Campaign Sequences Library), by id + name. */
+  sequenceId?: string;
+  sequenceName?: string;
   status: ProspectStatus;
   /** The channel the most recent inbound arrived on. */
   lastChannel?: Channel;

@@ -340,11 +340,22 @@
         if (body.action === "enrich") {
           var pe = d.prospects.filter(function (x) { return x.id === body.prospectId; })[0];
           if (!pe) return notFound();
-          var hadE = !!pe.email, hadP = !!pe.phone;
-          if (!pe.email) pe.email = localEmail(pe.fullName, pe.companyDomain || pe.company);
-          if (!pe.phone) pe.phone = localPhone();
+          var hadE = !!pe.email, hadP = !!pe.phone, fld = body.field;
+          if (fld !== "phone" && !pe.email) pe.email = localEmail(pe.fullName, pe.companyDomain || pe.company);
+          if (fld !== "email" && !pe.phone) pe.phone = localPhone();
           save(d);
           return ok({ prospect: pe, found: { email: !hadE && !!pe.email, phone: !hadP && !!pe.phone } });
+        }
+        if (body.action === "bulk-update" && body.ids) {
+          var u = {}; body.ids.forEach(function (x) { u[x] = 1; });
+          var nu = 0;
+          d.prospects.forEach(function (x) {
+            if (!u[x.id]) return;
+            if (body.status) x.status = body.status;
+            if (body.sequenceId !== undefined) { x.sequenceId = body.sequenceId || undefined; x.sequenceName = body.sequenceName || undefined; if (body.sequenceId && !body.status) x.status = "in_sequence"; }
+            nu++;
+          });
+          save(d); return ok({ updated: nu });
         }
         if (body.action === "delete" && body.ids) {
           var del = {}; body.ids.forEach(function (x) { del[x] = 1; });

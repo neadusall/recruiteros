@@ -1003,7 +1003,8 @@
       var cell = function (v) { return v ? esc(v) : '<span class="pr-na">—</span>'; };
       var tr = '<tr class="pr-row' + (prSel[p.id] ? " pr-selected" : "") + '" data-pid="' + esc(p.id) + '">' +
         '<td class="pr-c-check"><input type="checkbox" class="pr-check" data-pid="' + esc(p.id) + '"' + (prSel[p.id] ? " checked" : "") + ' /></td>' +
-        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + name + expToggle + "</span></td>" +
+        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + name + expToggle +
+          (p.sequenceName ? '<span class="pr-seqtag" title="Assigned sequence">▸ ' + esc(p.sequenceName) + "</span>" : "") + "</span></td>" +
         "<td>" + cell(p.title) + "</td>" +
         "<td>" + cell(p.company) + "</td>" +
         '<td class="pr-c-email">' + (p.email ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a>" : '<span class="pr-na">—</span>') + "</td>" +
@@ -1029,12 +1030,27 @@
       var countLbl = prFilter ? (list.length + " of " + prAll.length) : String(prAll.length);
       var selIds = list.filter(function (p) { return prSel[p.id]; }).map(function (p) { return p.id; });
       var allOn = list.length > 0 && selIds.length === list.length;
+      var statusOpts = '<option value="">Set status…</option>' + lifecycle.map(function (l) {
+        return '<option value="' + esc(l.status) + '">' + esc(l[motion] || l.status) + "</option>";
+      }).join("");
+      var seqs = seqStore().all().filter(function (s) { return (s.motion || "recruiting") === motion; });
+      var seqOpts = '<option value="">Assign sequence…</option>' + seqs.map(function (s) {
+        var c = (CHANNELS[s.channel] || {}).label || s.channel;
+        return '<option value="' + esc(s.id) + '">' + esc(s.name) + " · " + esc(c) + "</option>";
+      }).join("");
       var bulk = selIds.length
         ? '<div class="pr-bulk"><span class="pr-selcount">' + selIds.length + " selected</span>" +
-            '<span class="pr-bulk-actions"><button class="btn btn-primary btn-sm" id="prEnrichSel">⚡ Enrich selected</button>' +
-            '<button class="btn btn-ghost btn-sm" id="prSaveList">💾 Save as list</button>' +
-            '<button class="btn btn-ghost btn-sm" id="prDelSel">🗑 Delete</button>' +
-            '<button class="btn btn-ghost btn-sm" id="prClearSel">Clear</button></span></div>'
+            '<span class="pr-bulk-actions">' +
+              '<span class="pr-enrich-grp">⚡ Enrich' +
+                '<label><input type="checkbox" id="prEnrEmail" checked /> Email</label>' +
+                '<label><input type="checkbox" id="prEnrPhone" checked /> Phone</label>' +
+                '<button class="btn btn-primary btn-sm" id="prEnrichSel">Run</button></span>' +
+              '<select class="pr-bulk-sel" id="prBulkStatus">' + statusOpts + "</select>" +
+              '<span class="pr-seq-grp"><select class="pr-bulk-sel" id="prBulkSeq">' + seqOpts + "</select>" +
+                '<button class="btn btn-ghost btn-sm" id="prSeqAssign">Assign</button></span>' +
+              '<button class="btn btn-ghost btn-sm" id="prSaveList">💾 Save as list</button>' +
+              '<button class="btn btn-ghost btn-sm" id="prDelSel">🗑 Delete</button>' +
+              '<button class="btn btn-ghost btn-sm" id="prClearSel">Clear</button></span></div>'
         : "";
       var listBanner = prListName
         ? '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:8px 12px;border:1px solid var(--border,#2a2a36);border-radius:10px;font-size:13px;background:rgba(124,92,255,.08)">' +
@@ -1071,6 +1087,11 @@
       });
       var saveBtn = $("#prSaveList"); if (saveBtn) saveBtn.addEventListener("click", function () { saveSelectedAsList(selIds); });
       var enrSelBtn = $("#prEnrichSel"); if (enrSelBtn) enrSelBtn.addEventListener("click", function () { enrichSelected(selIds, enrSelBtn); });
+      var stSel = $("#prBulkStatus"); if (stSel) stSel.addEventListener("change", function () { if (stSel.value) bulkSetStatus(selIds, stSel.value); });
+      var seqAssignBtn = $("#prSeqAssign"); if (seqAssignBtn) seqAssignBtn.addEventListener("click", function () {
+        var sel = $("#prBulkSeq"); if (!sel || !sel.value) { toast("Pick a sequence to assign."); return; }
+        assignSequence(selIds, sel.value, sel.options[sel.selectedIndex].text.split(" · ")[0]);
+      });
       var delBtn = $("#prDelSel"); if (delBtn) delBtn.addEventListener("click", function () { deleteSelected(selIds); });
       var clrBtn = $("#prClearSel"); if (clrBtn) clrBtn.addEventListener("click", function () { prSel = {}; paint(); });
 
@@ -1173,22 +1194,46 @@
     }
     // Bulk-enrich the selected prospects, cheapest-first, one at a time (so we
     // stay within provider rate limits) with live progress on the button.
+    // The Email / Phone checkboxes choose which field(s) to enrich individually.
     function enrichSelected(ids, btn) {
       if (!ids.length) return;
-      var total = ids.length, done = 0, found = 0;
+      var doEmail = $("#prEnrEmail") ? $("#prEnrEmail").checked : true;
+      var doPhone = $("#prEnrPhone") ? $("#prEnrPhone").checked : true;
+      if (!doEmail && !doPhone) { toast("Check Email and/or Phone first."); return; }
+      var field = (doEmail && doPhone) ? null : (doEmail ? "email" : "phone");
+      var total = ids.length, found = 0;
       btn.disabled = true;
       (function next(i) {
         if (i >= total) {
-          btn.disabled = false; btn.textContent = "⚡ Enrich selected";
-          toast("Enriched " + found + " of " + total + " — found new contact for " + found + (found === 1 ? " prospect" : " prospects"));
+          btn.disabled = false; btn.textContent = "Run";
+          toast("Enriched " + found + " of " + total + (field ? " (" + field + ")" : ""));
           load();
           return;
         }
-        btn.textContent = "Enriching " + (i + 1) + "/" + total + "…";
-        send("/prospects", "POST", { action: "enrich", prospectId: ids[i] })
-          .then(function (r) { var f = r.ok && r.data && r.data.found; if (f && (f.email || f.phone || f.name)) found++; done++; next(i + 1); })
+        btn.textContent = (i + 1) + "/" + total + "…";
+        var payload = { action: "enrich", prospectId: ids[i] };
+        if (field) payload.field = field;
+        send("/prospects", "POST", payload)
+          .then(function (r) { var f = r.ok && r.data && r.data.found; if (f && (f.email || f.phone || f.name)) found++; next(i + 1); })
           .catch(function () { next(i + 1); });
       })(0);
+    }
+    // Bulk-set a lifecycle status on the selected prospects.
+    function bulkSetStatus(ids, status) {
+      if (!ids.length || !status) return;
+      send("/prospects", "POST", { action: "bulk-update", ids: ids, status: status }).then(function (r) {
+        if (r.ok) { toast("Moved " + (r.data.updated != null ? r.data.updated : ids.length) + " to " + statusLabel(status, prLifecycle)); load(); }
+        else toast("Could not update (" + (r.data.error || r.status) + ")");
+      }).catch(function () { toast("Could not reach the server."); });
+    }
+    // Bulk-assign a saved sequence (from the Campaign Sequences Library) to the
+    // selected prospects, and move them into the sequence.
+    function assignSequence(ids, seqId, seqName) {
+      if (!ids.length || !seqId) return;
+      send("/prospects", "POST", { action: "bulk-update", ids: ids, sequenceId: seqId, sequenceName: seqName }).then(function (r) {
+        if (r.ok) { toast("Assigned " + (r.data.updated != null ? r.data.updated : ids.length) + " to “" + (seqName || "sequence") + "”"); load(); }
+        else toast("Could not assign (" + (r.data.error || r.status) + ")");
+      }).catch(function () { toast("Could not reach the server."); });
     }
     function openListsModal() {
       openModal("Saved prospect lists", "Pull these up in Campaign Studio to assign as a campaign's audience.",

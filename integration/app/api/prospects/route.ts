@@ -42,6 +42,7 @@ export async function POST(req: Request) {
         campaignId: b.campaignId,
         limit: b.limit,
         motion: b.motion === "bd" ? "bd" : b.motion === "recruiting" ? "recruiting" : undefined,
+        engine: b.engine === "scraper" ? "scraper" : "unipile",
       }));
     } catch (e: any) {
       return fail(e?.message ?? "import_failed", e?.status ?? 400);
@@ -64,10 +65,29 @@ export async function POST(req: Request) {
   if (b?.action === "enrich") {
     if (!b.prospectId) return fail("missing_fields", 422);
     try {
-      return ok(await enrichProspect(ws, b.prospectId));
+      const field = b.field === "email" ? "email" : b.field === "phone" ? "phone" : undefined;
+      return ok(await enrichProspect(ws, b.prospectId, field));
     } catch (e: any) {
       return fail(e.message ?? "enrich_failed", e.status ?? 400);
     }
+  }
+  // Bulk patch selected prospects: set status and/or assign a saved sequence.
+  if (b?.action === "bulk-update" && Array.isArray(b.ids)) {
+    const core = getCore();
+    let updated = 0;
+    for (const id of b.ids) {
+      const p = await core.getProspect(id);
+      if (!p || p.workspaceId !== ws) continue;
+      if (b.status) p.status = b.status;
+      if (b.sequenceId !== undefined) {
+        (p as any).sequenceId = b.sequenceId || undefined;
+        (p as any).sequenceName = b.sequenceName || undefined;
+        if (b.sequenceId && !b.status) p.status = "in_sequence";
+      }
+      await core.saveProspect(p);
+      updated++;
+    }
+    return ok({ updated });
   }
   if (!b?.fullName || !b?.campaignId) return fail("missing_fields", 422);
   const p = await addProspect({ ...b, workspaceId: ws });

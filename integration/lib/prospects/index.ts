@@ -144,6 +144,7 @@ function needsHiringManager(p: Prospect): boolean {
 export async function enrichProspect(
   workspaceId: string,
   prospectId: string,
+  field?: "email" | "phone",
 ): Promise<{ prospect: Prospect; found: { name: boolean; email: boolean; phone: boolean } }> {
   const core = getCore();
   const p = await core.getProspect(prospectId);
@@ -191,12 +192,17 @@ export async function enrichProspect(
     /* leave unresolved; the recruiter can retry or add manually */
   }
 
-  const found = { name: nameResolved, email: !!email && email !== p.email, phone: !!phone && phone !== p.phone };
+  const found = {
+    name: nameResolved,
+    email: field !== "phone" && !!email && email !== p.email,
+    phone: field !== "email" && !!phone && phone !== p.phone,
+  };
 
   // Update the existing record in place (don't route through addProspect — its
   // email-dedupe would fork a second prospect when the original had no email yet).
-  p.email = email ?? p.email;
-  p.phone = phone ?? p.phone;
+  // Honor the requested field so "Enrich email" / "Enrich phone" stay individual.
+  if (field !== "phone") p.email = email ?? p.email;
+  if (field !== "email") p.phone = phone ?? p.phone;
   if (p.email) {
     p.atsPersonId = await getAts().upsertPersonByEmail(p.email, {
       name: p.fullName,
