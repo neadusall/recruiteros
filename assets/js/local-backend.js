@@ -356,13 +356,13 @@
         if (body.action === "linkedin_search") {
           var people = linkedinSearchSeed(body.limit);
           var newPros = people.map(function (m) {
-            return { id: "p_" + Date.now() + "_" + Math.floor(Math.random() * 9999), fullName: m.fullName, title: m.title, headline: m.headline, company: m.company, location: m.location, photoUrl: m.photoUrl, linkedinUrl: m.linkedinUrl, status: "queued", dripStage: 0, category: "linkedin_search" };
+            return { id: "p_" + Date.now() + "_" + Math.floor(Math.random() * 9999), fullName: m.fullName, title: m.title, headline: m.headline, company: m.company, location: m.location, photoUrl: m.photoUrl, linkedinUrl: m.linkedinUrl, status: "queued", dripStage: 0, category: "linkedin_search", motion: (body.motion === "bd" ? "bd" : "recruiting") };
           });
           d.prospects = newPros.concat(d.prospects); save(d);
           return ok({ added: newPros.length, deduped: 0, found: newPros.length, account: "demo-linkedin" });
         }
         if (body.fullName) {
-          var np = { id: "p_" + Date.now(), fullName: body.fullName, title: body.title || "", company: body.company || "", companyDomain: body.companyDomain, email: body.email, phone: body.phone, status: "queued", dripStage: 0, category: body.category };
+          var np = { id: "p_" + Date.now(), fullName: body.fullName, title: body.title || "", company: body.company || "", companyDomain: body.companyDomain, email: body.email, phone: body.phone, status: "queued", dripStage: 0, category: body.category, motion: (body.motion === "bd" ? "bd" : "recruiting") };
           d.prospects.unshift(np); save(d); return ok({ prospect: np });
         }
       }
