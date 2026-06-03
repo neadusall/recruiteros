@@ -359,7 +359,7 @@ async function onScrapePage({ datasetId, page, records }) {
   }
   return { ok: true, total: ds.records.length };
 }
-function keyOf(r) { return (r.salesNavUrl || r.profileUrl || (r.fullName + '|' + r.company) || '').toLowerCase(); }
+function keyOf(r) { return ((r.salesNavUrl || r.profileUrl || (r.fullName + '|' + r.company + '|' + (r.title || ''))) + '').toLowerCase(); }
 async function stopScrape(finished) {
   const job = await getJob(); if (!job) return { ok: true };
   job.status = finished ? 'done' : 'stopped'; await setJob(job);

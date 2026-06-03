@@ -72,7 +72,12 @@
      ever sees a fraction — the real cause of grabbing 43 of 304. Instead we crawl
      down slowly and capture cards as they render, deduping, until we hit the bottom
      with nothing new. This gets EVERY lead and reads like a human skimming. */
-  function keyish(r) { return ((r.profileUrl || r.salesNavUrl || ((r.fullName || '') + '|' + (r.company || ''))) + '').toLowerCase(); }
+  // Dedup key: the Sales Nav lead URL is UNIQUE per card, so prefer it (a public
+  // /in/ URL can repeat across cards via shared connections). Falls back to the
+  // public URL, then name+company+title — so distinct people never collide.
+  function keyish(r) {
+    return ((r.salesNavUrl || r.profileUrl || ((r.fullName || '') + '|' + (r.company || '') + '|' + (r.title || ''))) + '').toLowerCase();
+  }
   async function scrapePageProgressively(datasetName, onCount) {
     var map = new Map();
     function collect() {
@@ -137,13 +142,17 @@
       const title = txt(card, SEL.title);
       const photoEl = card.querySelector(SEL.photo);
       const photoUrl = photoEl ? (photoEl.getAttribute('src') || photoEl.getAttribute('data-delayed-url') || '') : '';
-      // Public profile URL: scan every anchor in the card for a /in/ link (the
-      // person-name link, the photo link, or a hidden one), normalized.
+      // Public profile URL — the person's OWN link only: the anchor wrapping the
+      // name, else a /in/ link inside the SAME entity-lockup. We must NOT grab any
+      // /in/ in the card (mutual-connection / "also viewed" links), or several
+      // cards collide on the same URL and get deduped away (lost leads).
       let profileUrl = '';
-      const anchors = card.querySelectorAll('a[href]');
-      for (let i = 0; i < anchors.length; i++) {
-        const u = window.ROS.publicProfileUrl(anchors[i].getAttribute('href') || anchors[i].href);
-        if (u) { profileUrl = u; break; }
+      const nameAnchor = nameEl.closest('a[href]');
+      if (nameAnchor) profileUrl = window.ROS.publicProfileUrl(nameAnchor.getAttribute('href') || nameAnchor.href);
+      if (!profileUrl) {
+        const lock = nameEl.closest('.artdeco-entity-lockup, [class*="entity-lockup"], [class*="result-lockup"]') || card;
+        const a = lock.querySelector('a[href*="/in/"]');
+        if (a) profileUrl = window.ROS.publicProfileUrl(a.getAttribute('href') || a.href);
       }
       out.push({
         fullName: nm.full || rawName, firstName: nm.first, lastName: nm.last,
