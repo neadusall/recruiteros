@@ -45,6 +45,7 @@ export interface NewProspectInput {
   location?: string;
   headline?: string;
   category?: string;
+  motion?: Motion;
   warmth?: number;
 }
 
@@ -78,6 +79,7 @@ export async function addProspect(input: NewProspectInput): Promise<Prospect> {
     location: input.location ?? p.location,
     headline: input.headline ?? p.headline,
     category: input.category ?? p.category,
+    motion: input.motion ?? p.motion,
   });
 
   if (input.email) {

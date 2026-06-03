@@ -41,6 +41,7 @@ export async function POST(req: Request) {
         url: b.url,
         campaignId: b.campaignId,
         limit: b.limit,
+        motion: b.motion === "bd" ? "bd" : b.motion === "recruiting" ? "recruiting" : undefined,
       }));
     } catch (e: any) {
       return fail(e?.message ?? "import_failed", e?.status ?? 400);

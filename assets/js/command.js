@@ -122,6 +122,9 @@
     b.classList.toggle("active", b.dataset.motion === motion);
     b.addEventListener("click", function () {
       motion = b.dataset.motion; localStorage.setItem("ros_motion", motion);
+      // Remember the active motion server-side so LinkedIn scrapes from the
+      // Chrome extension land in this bucket (not a fixed one).
+      send("/ext-token", "POST", { action: "set-motion", motion: motion }).catch(function () {});
       Array.prototype.forEach.call(document.querySelectorAll(".mt"), function (x) { x.classList.toggle("active", x === b); });
       // If the current view belongs only to the other motion (e.g. Hire Signals is
       // BD-only), leave it for Overview instead of bouncing the motion back.
@@ -953,6 +956,9 @@
 
     // Keyword filter over name (incl. first name), job title, company, email, source.
     function matches(p) {
+      // Motion bucket: Recruiting and BD pipelines are separate. Legacy prospects
+      // with no motion default into Recruiting.
+      if ((p.motion || "recruiting") !== motion) return false;
       if (prListIds && !prListIds[p.id]) return false;   // viewing a saved search
       if (!prFilter) return true;
       var hay = ((p.fullName || "") + " " + (p.title || "") + " " + (p.company || "") + " " +
@@ -2655,7 +2661,7 @@
         if (isNaN(idx) || !camps[idx]) return;
         campaignId = camps[idx].id;
       }
-      send("/prospects", "POST", { fullName: name, email: email, company: company, campaignId: campaignId })
+      send("/prospects", "POST", { fullName: name, email: email, company: company, campaignId: campaignId, motion: motion })
         .then(function (r) {
           if (r.ok) { toast("Prospect added"); if (prospectsReload) prospectsReload(); else renderProspects($("#view")); }
           else toast("Could not add (" + (r.data.error || r.status) + ")");
@@ -2781,7 +2787,7 @@
         var go = root.querySelector("#impGo"); go.disabled = true; go.textContent = "Importing…";
         function send_rows(cid) {
           if (!cid) { toast("Could not prepare a campaign."); go.disabled = false; go.textContent = "Import"; return; }
-          rows.forEach(function (r) { r.campaignId = cid; });
+          rows.forEach(function (r) { r.campaignId = cid; r.motion = motion; });
           send("/prospects", "POST", { action: "bulk", rows: rows }).then(function (res) {
             if (res.ok) {
               var added = res.data && res.data.added != null ? res.data.added : rows.length;
@@ -2934,7 +2940,7 @@
     }, 1000);
     viewTimers.push(tick);
 
-    send("/prospects", "POST", { action: "linkedin_search", campaignId: cid, url: url, limit: limit }).then(function (res) {
+    send("/prospects", "POST", { action: "linkedin_search", campaignId: cid, url: url, limit: limit, motion: motion }).then(function (res) {
       clearInterval(tick);
       if (res.ok) { finishLinkedInPull(box, (res.data || {}).added || 0, (res.data || {}).deduped || 0); if (prospectsReload) prospectsReload(); }
       else {

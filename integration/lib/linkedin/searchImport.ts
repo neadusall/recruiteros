@@ -33,6 +33,8 @@ export interface ImportSearchInput {
   limit?: number;
   /** ICP bucket stamped on the created prospects. */
   category?: string;
+  /** Active motion — tags prospects so they land in the right bucket. */
+  motion?: "bd" | "recruiting";
 }
 
 export interface ImportSearchResult {
@@ -111,6 +113,7 @@ export async function importFromLinkedInSearch(
     await addProspect({
       workspaceId,
       campaignId: input.campaignId,
+      motion: input.motion,
       fullName: p.fullName,
       title: p.title || p.headline,
       headline: p.headline,

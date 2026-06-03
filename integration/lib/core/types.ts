@@ -106,6 +106,9 @@ export interface Prospect {
   id: string;
   workspaceId: string;
   campaignId: string;
+  /** Which motion's bucket this prospect belongs to (recruiting vs BD), so
+   *  scrapes/imports land only in the active motion's pipeline. */
+  motion?: Motion;
   fullName: string;
   firstName: string;
   email?: string;

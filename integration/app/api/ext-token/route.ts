@@ -8,7 +8,9 @@
  */
 
 import { getOrCreateToken, regenerateToken } from "../../../lib/exttoken";
+import { getImportMotion, setImportMotion } from "../../../lib/importmotion";
 import { requireSession, body, ok } from "../../../lib/api";
+import type { Motion } from "../../../lib/core/types";
 
 /**
  * The PUBLIC origin the browser/extension should call — NOT new URL(req.url).origin,
@@ -29,13 +31,20 @@ function publicOrigin(req: Request): string {
 export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
-  return ok({ token: await getOrCreateToken(g.ctx.workspace.id), backendBaseUrl: publicOrigin(req) + "/api/linkedin" });
+  const ws = g.ctx.workspace.id;
+  return ok({ token: await getOrCreateToken(ws), backendBaseUrl: publicOrigin(req) + "/api/linkedin", importMotion: await getImportMotion(ws) });
 }
 
 export async function POST(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
-  const b = await body<{ action?: string }>(req);
-  const token = b?.action === "regenerate" ? await regenerateToken(g.ctx.workspace.id) : await getOrCreateToken(g.ctx.workspace.id);
-  return ok({ token, backendBaseUrl: publicOrigin(req) + "/api/linkedin" });
+  const ws = g.ctx.workspace.id;
+  const b = await body<{ action?: string; motion?: Motion }>(req);
+  // The portal calls this on every motion toggle so extension scrapes land in
+  // the active bucket.
+  if (b?.action === "set-motion") {
+    return ok({ importMotion: await setImportMotion(ws, b.motion === "bd" ? "bd" : "recruiting") });
+  }
+  const token = b?.action === "regenerate" ? await regenerateToken(ws) : await getOrCreateToken(ws);
+  return ok({ token, backendBaseUrl: publicOrigin(req) + "/api/linkedin", importMotion: await getImportMotion(ws) });
 }

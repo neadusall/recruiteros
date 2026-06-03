@@ -14,6 +14,7 @@
 import { getCore } from "../../../../lib/core/repository";
 import { addProspect } from "../../../../lib/prospects";
 import { workspaceForToken, bearerToken } from "../../../../lib/exttoken";
+import { getImportMotion } from "../../../../lib/importmotion";
 import { rid, nowIso } from "../../../../lib/core/ids";
 import { body, ok, fail } from "../../../../lib/api";
 
@@ -36,9 +37,11 @@ export async function POST(req: Request) {
   const b = await body<{ campaignName?: string; leads?: Lead[]; motion?: string }>(req);
   const leads = Array.isArray(b?.leads) ? b!.leads : [];
   if (!leads.length) return fail("no_leads", 422);
-  // Follow the portal's current motion so the leads land in the right folder
-  // (BD vs Recruiting); default to recruiting when unspecified.
-  const motion = b?.motion === "bd" ? "bd" : "recruiting";
+  // Follow the portal's current motion so the leads land in the right bucket
+  // (BD vs Recruiting). Use the explicit body motion if sent, else the
+  // workspace's last-toggled import motion, else recruiting.
+  const motion: "bd" | "recruiting" =
+    b?.motion === "bd" ? "bd" : b?.motion === "recruiting" ? "recruiting" : await getImportMotion(ws);
   const name = (b?.campaignName || (motion === "bd" ? "LinkedIn import (BD)" : "LinkedIn import")).trim();
 
   const core = getCore();
@@ -64,6 +67,7 @@ export async function POST(req: Request) {
     await addProspect({
       workspaceId: ws,
       campaignId: camp.id,
+      motion,
       fullName: l.fullName,
       title: l.title || l.headline,
       headline: l.headline,
