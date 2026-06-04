@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OS Text, RecruiterOS</title>
+  <meta name="description" content="OS Text — the texting engine inside RecruiterOS." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+  <!-- Apply the saved light/dark theme before paint (no flash). -->
+  <script>(function(){try{var t=localStorage.getItem('ros_theme')||'dark';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+  <style>
+    :root{--bg:#0a0a12;--panel:#12121c;--text:#e9e9f2;--muted:#9aa3b2;--border:#23232f;--brand:#7c5cff;--brand2:#4dd0ff}
+    [data-theme="light"]{--bg:#f6f7fb;--panel:#ffffff;--text:#0a0a12;--muted:#5b6472;--border:#e3e6ef}
+    *{box-sizing:border-box}
+    html,body{margin:0;height:100%}
+    body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+    .bar{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--panel);flex:0 0 auto}
+    .brand{display:flex;align-items:center;gap:8px;font-weight:800;color:var(--text);text-decoration:none}
+    .logo{display:grid;place-items:center;width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#0a0a12;font-weight:900}
+    .os{background:linear-gradient(135deg,var(--brand),var(--brand2));-webkit-background-clip:text;background-clip:text;color:transparent}
+    .title{font-weight:700;opacity:.85}
+    .sp{flex:1}
+    .back{color:var(--muted);text-decoration:none;font-size:14px;font-weight:600;padding:7px 12px;border:1px solid var(--border);border-radius:8px;transition:color .15s,border-color .15s}
+    .back:hover{color:var(--text);border-color:var(--muted)}
+    iframe{flex:1 1 auto;width:100%;border:0;background:var(--bg)}
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <a href="/command" class="brand"><span class="logo">R</span><span>Recruiter<span class="os">OS</span></span></a>
+    <span class="title">· OS Text</span>
+    <span class="sp"></span>
+    <a href="/command" class="back">← Back to portal</a>
+  </div>
+  <!-- Single sign-on: /api/ostext/enter signs you into OS Text and lands you in
+       the app. No second login. -->
+  <iframe src="/api/ostext/enter" title="OS Text" allow="clipboard-read; clipboard-write; microphone"></iframe>
+
+  <script>
+    // OS Text needs a RecruiterOS session. If you hit this page signed out, the
+    // SSO endpoint would 401 inside the frame — so bounce to login instead.
+    fetch('/api/overview', { credentials: 'same-origin' })
+      .then(function (r) { if (r.status === 401) location.replace('/login'); })
+      .catch(function () {});
+  </script>
+</body>
+</html>

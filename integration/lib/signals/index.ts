@@ -214,3 +214,53 @@ export type {
   FlowDeps,
   SendItem,
 } from "./campaignFlow";
+
+// Hiring Engine: pull job orders (Indeed via proxy) → suppress crossover → pair the
+// decision-maker by job title. See ./hiring for the full submodule.
+export {
+  // pipeline
+  pullNetNewWithManagers,
+  // indeed connector (injected proxy/unlocker)
+  indeedSource,
+  IndeedSource,
+  defaultParseIndeed,
+  // suppression / coverage
+  memoryCoverageStore,
+  recordCoverage,
+  suppressCovered,
+  // hiring-manager resolution
+  resolveHiringManager,
+  hiringManagerTarget,
+  hiringManagerProvider,
+  hiringManagerWaterfall,
+  // people graphs
+  linkedInPeopleGraph,
+  httpPeopleGraph,
+  staticPeopleGraph,
+  // shared join key
+  companyAnchor,
+  companyKeys,
+  domainRoot,
+  roleKey,
+} from "./hiring";
+export type {
+  NetNewOptions,
+  NetNewReport,
+  PairedJob,
+  CoverageStore,
+  SuppressLevel,
+  SuppressResult,
+  HiringManagerTarget,
+  HiringManagerResolution,
+  RankedManager,
+  ConfidenceTier,
+  ResolveOptions,
+  PeopleGraph,
+  PeopleQuery,
+  PersonCandidate,
+  IndeedSourceOptions,
+  IndeedListing,
+  UnlockerFetch,
+  UnlockerResponse,
+  ManagerProviderOptions,
+} from "./hiring";

@@ -1,0 +1,8 @@
+# RecruiterOS LinkedIn scraper sidecar
+# Pinned so the image is reproducible. linkedin-scraper 3.1.x is the Playwright
+# rewrite (PersonScraper / login_with_cookie) we integrate against.
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+linkedin-scraper==3.1.2
+playwright==1.47.0

@@ -64,7 +64,7 @@
     ] },
     { group: "Voice", channel: "voice", blocks: [
       { key: "vo_call",      label: "Phone call",     ic: "📞", desc: "Telnyx dialer with Premium AMD", cfg: ["script"] },
-      { key: "vo_voicemail", label: "Voicemail drop", ic: "📭", desc: "Pre-recorded ringless voicemail", cfg: ["script"] },
+      { key: "vo_voicemail", label: "Voice drop", ic: "📭", desc: "Cloned-voice voicemail to a landline/VoIP (Voice Drops): first name + role splice in, mobiles filtered, local-window only", cfg: ["script"] },
     ] },
     { group: "Logic & flow", channel: "logic", blocks: [
       { key: "lg_delay",  label: "Wait / delay",   ic: "⏱️", desc: "Pause before the next step", cfg: ["delayOnly"] },

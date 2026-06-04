@@ -13,7 +13,7 @@
 import { rid, nowIso } from "../core/ids";
 import type { Motion } from "../core/types";
 
-export type SeqChannel = "email" | "linkedin" | "sms";
+export type SeqChannel = "email" | "linkedin" | "sms" | "voice";
 
 export type LinkedInAction = "connect" | "message" | "inmail" | "voice_note";
 
@@ -32,6 +32,9 @@ export interface SequenceStep {
   action?: LinkedInAction;
   /** Message text — used by linkedin (message/inmail/voice-note) + sms. */
   text?: string;
+  /** Voice drop touch: a reusable Voice Drops script id (lib/voice scripts). The
+   *  templated voicemail ({first_name}/{role}) rendered in the cloned voice. */
+  voiceScriptId?: string;
 }
 
 /** A reusable merge token the customer defines, e.g. {{custom_variable1}}. */

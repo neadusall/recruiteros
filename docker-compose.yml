@@ -41,6 +41,25 @@ services:
       - "3000"
     # not published to the host directly; Caddy reaches it on the internal net
 
+  # LinkedIn scraper sidecar: the open-source Playwright scraper behind the
+  # "Pull LinkedIn profiles" flow, as an ALTERNATIVE engine to Unipile. Heavy
+  # (Chromium) so it lives in its own container; the app reaches it on the
+  # internal net at http://scraper:8000 and NEVER exposes it publicly. Auth is a
+  # single li_at cookie (LINKEDIN_LI_AT); SCRAPER_TOKEN gates the scrape routes.
+  scraper:
+    build: ./scraper
+    restart: unless-stopped
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      # Single browser, serialized scrapes, conservative caps — set in engine.py
+      # but overridable here without a rebuild.
+      SCRAPER_HEADLESS: "true"
+    expose:
+      - "8000"
+    # not published to the host directly; only the app container calls it
+
   # OS Text (taltxt): the standalone SMS app, embedded in the portal under the
   # "OS Text" route via an iframe. Source is the money-maker-sms git submodule;
   # Caddy serves it on its own subdomain (taltxt.recruitersos.co). It uses Neon

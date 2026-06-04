@@ -171,7 +171,9 @@
     campaigns: { title: "Campaigns", crumb: "Build", action: null, render: renderCampaigns },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing },
+    data: { title: "Data", crumb: "Build", action: null, render: renderData },
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
+    voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
@@ -1787,6 +1789,338 @@
       "</div>";
   }
 
+  /* ---------------- Data ----------------
+     The people-data warehouse. Import the CSV you export from the provider's own
+     portal (or pull via the official API once a key is configured) -> records land
+     here, deduped + persisted -> search/browse manually, enrich email/phone, and
+     send to Candidates. Backend: /api/data + lib/data/*. */
+  var DATA_FIELDS = [
+    ["ignore", "— ignore —"], ["fullName", "Full name"], ["firstName", "First name"],
+    ["lastName", "Last name"], ["title", "Job title"], ["company", "Company"],
+    ["companyDomain", "Company domain"], ["industry", "Industry"], ["email", "Email"],
+    ["email2", "Email (secondary)"], ["phone", "Phone / mobile"], ["directPhone", "Direct phone"],
+    ["companyPhone", "Company phone"], ["linkedinUrl", "LinkedIn URL"], ["city", "City"],
+    ["state", "State"], ["country", "Country"], ["seniority", "Seniority"], ["providerId", "Provider id"]
+  ];
+
+  // Quote-aware delimited parse -> { headers, rows(objects keyed by header) }.
+  function parseDelimited(text) {
+    var s = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    if (!s.trim()) return { headers: [], rows: [] };
+    var delim = s.indexOf("\t") >= 0 && (s.indexOf("\t") < (s.indexOf(",") < 0 ? 1e9 : s.indexOf(","))) ? "\t" : ",";
+    var recs = [], field = "", row = [], inQ = false;
+    for (var i = 0; i < s.length; i++) {
+      var ch = s[i];
+      if (inQ) {
+        if (ch === '"') { if (s[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+        else field += ch;
+      } else if (ch === '"') inQ = true;
+      else if (ch === delim) { row.push(field); field = ""; }
+      else if (ch === "\n") { row.push(field); recs.push(row); row = []; field = ""; }
+      else field += ch;
+    }
+    if (field.length || row.length) { row.push(field); recs.push(row); }
+    recs = recs.filter(function (r) { return r.some(function (c) { return String(c).trim(); }); });
+    if (!recs.length) return { headers: [], rows: [] };
+    var headers = recs[0].map(function (h) { return String(h).trim(); });
+    var rows = recs.slice(1).map(function (r) {
+      var o = {}; headers.forEach(function (h, j) { o[h] = (r[j] != null ? String(r[j]).trim() : ""); }); return o;
+    });
+    return { headers: headers, rows: rows };
+  }
+
+  function renderData(el) {
+    el.innerHTML = head("Data", "Your people-data warehouse. Import an export from the provider portal, search and enrich it, and send records to Candidates.") +
+      '<style>' +
+      '.dt-stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
+      '.dt-stat{background:var(--panel,#16181d);border:1px solid var(--line,#262a33);border-radius:10px;padding:10px 14px;min-width:120px}' +
+      '.dt-stat b{display:block;font-size:20px;line-height:1.1}.dt-stat span{font-size:12px;color:var(--muted,#8b93a1)}' +
+      '.dt-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}' +
+      '.dt-bar input[type=search]{flex:1;min-width:200px;padding:8px 12px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit}' +
+      '.dt-chip{font-size:12px;display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border:1px solid var(--line,#262a33);border-radius:20px;cursor:pointer;user-select:none}' +
+      '.dt-chip.on{background:var(--accent,#3b82f6);border-color:transparent;color:#fff}' +
+      '.dt-table{width:100%;border-collapse:collapse;font-size:13px}' +
+      '.dt-table th,.dt-table td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line,#20242c);vertical-align:top}' +
+      '.dt-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8b93a1)}' +
+      '.dt-table tr:hover td{background:rgba(255,255,255,.02)}' +
+      '.dt-sub{color:var(--muted,#8b93a1);font-size:12px}' +
+      '.dt-pill{font-size:10px;padding:2px 6px;border-radius:6px;background:var(--line,#20242c);color:var(--muted,#8b93a1);text-transform:uppercase}' +
+      '.dt-miss{color:var(--muted,#5b626f)}' +
+      '.dt-act{display:flex;gap:4px;flex-wrap:wrap}' +
+      '.dt-prov{font-size:12px;color:var(--muted,#8b93a1);margin-bottom:12px}' +
+      '</style>' +
+      '<div class="card">' +
+        '<div id="dtProv" class="dt-prov"></div>' +
+        '<div id="dtStats" class="dt-stats"></div>' +
+        '<div class="dt-bar">' +
+          '<input type="search" id="dtQ" placeholder="Search name, title, company, email…" autocomplete="off">' +
+          '<span class="dt-chip" id="dtEmail">✉️ Has email</span>' +
+          '<span class="dt-chip" id="dtPhone">📞 Has phone</span>' +
+          '<button class="btn btn-primary btn-sm" id="dtImport">⬆ Import export</button>' +
+          '<button class="btn btn-ghost btn-sm" id="dtPull">⚡ Pull via API</button>' +
+        '</div>' +
+        '<div id="dtBulk" class="dt-bar" style="display:none">' +
+          '<span class="dt-sub" id="dtSelCount">0 selected</span>' +
+          '<button class="btn btn-sm" id="dtPromote">→ Send to Candidates</button>' +
+          '<button class="btn btn-ghost btn-sm" id="dtEnrichSel">✨ Enrich selected</button>' +
+          '<button class="btn btn-ghost btn-sm" id="dtDelete">🗑 Delete</button>' +
+        '</div>' +
+        '<div id="dtBody">' + loading() + '</div>' +
+      '</div>';
+
+    var state = { records: [], total: 0, filters: { q: "", hasEmail: false, hasPhone: false }, sel: {} };
+    var qEl = $("#dtQ", el), emailEl = $("#dtEmail", el), phoneEl = $("#dtPhone", el);
+    var bulkEl = $("#dtBulk", el), bodyEl = $("#dtBody", el);
+    var searchTimer = null;
+
+    function qstr() {
+      var p = [];
+      if (state.filters.q) p.push("q=" + encodeURIComponent(state.filters.q));
+      if (state.filters.hasEmail) p.push("hasEmail=1");
+      if (state.filters.hasPhone) p.push("hasPhone=1");
+      p.push("limit=500");
+      return p.length ? "?" + p.join("&") : "";
+    }
+
+    function paintStats(s, providers) {
+      s = s || { total: 0, withEmail: 0, withPhone: 0 };
+      $("#dtStats", el).innerHTML =
+        statCard(s.total, "records") + statCard(s.withEmail, "with email") +
+        statCard(s.withPhone, "with phone") + statCard(state.total, "matching filter");
+      var prov = (providers || []).map(function (p) {
+        return (p.configured ? "🟢 " : "⚪ ") + esc(p.label) + (p.configured ? " · live" : " · awaiting key");
+      }).join(" &nbsp;·&nbsp; ");
+      $("#dtProv", el).innerHTML = prov ? ("Providers: " + prov) : "";
+    }
+    function statCard(n, label) { return '<div class="dt-stat"><b>' + (Number(n) || 0).toLocaleString() + '</b><span>' + esc(label) + '</span></div>'; }
+
+    function load() {
+      api("/data" + qstr()).then(function (d) {
+        d = d || {};
+        state.records = d.records || [];
+        state.total = d.total || state.records.length;
+        paintStats(d.stats, d.providers);
+        paintTable();
+      }).catch(function () { bodyEl.innerHTML = '<div class="empty">Could not load the warehouse.</div>'; });
+    }
+
+    function paintTable() {
+      if (!state.records.length) {
+        bodyEl.innerHTML = '<div class="empty">No records yet. Click <b>Import export</b> to load a CSV you exported from the provider portal.</div>';
+        syncBulk(); return;
+      }
+      var rows = state.records.map(function (r) {
+        var loc = [r.city, r.state, r.country].filter(Boolean).join(", ");
+        var email = r.email ? esc(r.email) : '<button class="btn btn-ghost btn-sm" data-enrich="email" data-id="' + esc(r.id) + '">find email</button>';
+        var ph = (r.phone || r.directPhone) ? esc(r.phone || r.directPhone) : '<button class="btn btn-ghost btn-sm" data-enrich="phone" data-id="' + esc(r.id) + '">find phone</button>';
+        var li = r.linkedinUrl ? '<a href="' + esc(r.linkedinUrl) + '" target="_blank" rel="noopener">in ↗</a>' : '<span class="dt-miss">—</span>';
+        return '<tr>' +
+          '<td><input type="checkbox" data-pick="' + esc(r.id) + '"' + (state.sel[r.id] ? " checked" : "") + '></td>' +
+          '<td><b>' + esc(r.fullName) + '</b>' + (r.title ? '<div class="dt-sub">' + esc(r.title) + '</div>' : '') + (loc ? '<div class="dt-sub">' + esc(loc) + '</div>' : '') + '</td>' +
+          '<td>' + (r.company ? esc(r.company) : '<span class="dt-miss">—</span>') + (r.companyDomain ? '<div class="dt-sub">' + esc(r.companyDomain) + '</div>' : '') + '</td>' +
+          '<td>' + email + '</td>' +
+          '<td>' + ph + '</td>' +
+          '<td>' + li + '</td>' +
+          '<td><span class="dt-pill">' + esc(r.source || "—") + '</span></td>' +
+          '</tr>';
+      }).join("");
+      bodyEl.innerHTML =
+        '<div style="overflow:auto"><table class="dt-table"><thead><tr>' +
+        '<th><input type="checkbox" id="dtAll"></th><th>Name</th><th>Company</th><th>Email</th><th>Phone</th><th>LinkedIn</th><th>Source</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        (state.total > state.records.length ? '<div class="dt-sub" style="margin-top:8px">Showing ' + state.records.length + ' of ' + state.total.toLocaleString() + ' — refine your search to narrow.</div>' : '');
+
+      Array.prototype.forEach.call(bodyEl.querySelectorAll("[data-pick]"), function (cb) {
+        cb.addEventListener("change", function () { var id = cb.getAttribute("data-pick"); if (cb.checked) state.sel[id] = true; else delete state.sel[id]; syncBulk(); });
+      });
+      var all = $("#dtAll", el);
+      if (all) all.addEventListener("change", function () {
+        state.records.forEach(function (r) { if (all.checked) state.sel[r.id] = true; else delete state.sel[r.id]; });
+        paintTable();
+      });
+      Array.prototype.forEach.call(bodyEl.querySelectorAll("[data-enrich]"), function (b) {
+        b.addEventListener("click", function () { enrichOne(b.getAttribute("data-id"), b.getAttribute("data-enrich"), b); });
+      });
+      syncBulk();
+    }
+
+    function syncBulk() {
+      var n = Object.keys(state.sel).length;
+      bulkEl.style.display = n ? "" : "none";
+      var c = $("#dtSelCount", el); if (c) c.textContent = n + " selected";
+    }
+
+    function enrichOne(id, field, btn) {
+      if (btn) { btn.disabled = true; btn.textContent = "…"; }
+      send("/data", "POST", { action: "enrich", id: id, field: field }).then(function (res) {
+        if (res.ok && res.data && res.data.record) {
+          var i = state.records.findIndex(function (r) { return r.id === id; });
+          if (i >= 0) state.records[i] = res.data.record;
+          var f = res.data.found || {};
+          toast((f.email || f.phone) ? "Enriched ✓" : "Nothing new found");
+          paintTable();
+        } else { toast("Enrich failed"); if (btn) { btn.disabled = false; btn.textContent = "retry"; } }
+      }).catch(function () { toast("Could not reach the server."); if (btn) { btn.disabled = false; btn.textContent = "retry"; } });
+    }
+
+    // wiring
+    qEl.addEventListener("input", function () {
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () { state.filters.q = qEl.value.trim(); load(); }, 250);
+    });
+    emailEl.addEventListener("click", function () { state.filters.hasEmail = !state.filters.hasEmail; emailEl.classList.toggle("on", state.filters.hasEmail); load(); });
+    phoneEl.addEventListener("click", function () { state.filters.hasPhone = !state.filters.hasPhone; phoneEl.classList.toggle("on", state.filters.hasPhone); load(); });
+    $("#dtImport", el).addEventListener("click", function () { openDataImport(load); });
+    $("#dtPull", el).addEventListener("click", function () { openDataPull(load); });
+    $("#dtDelete", el).addEventListener("click", function () {
+      var ids = Object.keys(state.sel); if (!ids.length) return;
+      send("/data", "POST", { action: "delete", ids: ids }).then(function (res) {
+        if (res.ok) { toast("Deleted " + (res.data.deleted || ids.length)); state.sel = {}; load(); } else toast("Delete failed");
+      });
+    });
+    $("#dtEnrichSel", el).addEventListener("click", function () {
+      var ids = Object.keys(state.sel); if (!ids.length) return;
+      var btn = $("#dtEnrichSel", el); btn.disabled = true; btn.textContent = "Enriching… 0/" + ids.length;
+      var done = 0;
+      (function next(i) {
+        if (i >= ids.length) { btn.disabled = false; btn.textContent = "✨ Enrich selected"; toast("Enriched " + done + " record" + (done === 1 ? "" : "s")); load(); return; }
+        send("/data", "POST", { action: "enrich", id: ids[i] }).then(function (res) {
+          if (res.ok && res.data && res.data.found && (res.data.found.email || res.data.found.phone)) done++;
+          btn.textContent = "Enriching… " + (i + 1) + "/" + ids.length; next(i + 1);
+        }).catch(function () { next(i + 1); });
+      })(0);
+    });
+    $("#dtPromote", el).addEventListener("click", function () {
+      var ids = Object.keys(state.sel); if (!ids.length) return;
+      resolveBdCampaign(function (campaignId) {
+        if (!campaignId) { toast("Create a campaign first."); return; }
+        send("/data", "POST", { action: "promote", ids: ids, campaignId: campaignId, motion: motion }).then(function (res) {
+          if (res.ok) { toast("Sent " + (res.data.added || ids.length) + " to " + prospectsLabel()); state.sel = {}; syncBulk(); }
+          else toast("Promote failed");
+        });
+      });
+    });
+
+    load();
+  }
+
+  // Import modal: parse the exported CSV, auto-map columns (override per column), ingest.
+  function openDataImport(onDone) {
+    var bodyHtml =
+      '<label>Upload the CSV you exported from the provider portal</label>' +
+      '<input id="diFile" type="file" accept=".csv,.tsv,.txt" class="imp-file" />' +
+      '<label>…or paste rows (CSV / TSV, first row = headers)</label>' +
+      '<textarea id="diText" placeholder="Full Name,Job Title,Company,Email,Mobile Phone&#10;Jane Doe,VP Sales,Acme,jane@acme.com,+1..."></textarea>' +
+      '<div id="diMap" class="imp-map"></div>' +
+      '<div class="imp-preview" id="diPrev">Upload or paste an export to begin.</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="diCancel">Cancel</button>' +
+      '<button class="btn btn-primary btn-sm" id="diGo">Import</button></div>';
+    openModal("Import data export", "Map the columns (auto-detected) and import. Re-importing updates existing records — nothing is duplicated.", bodyHtml, function (root, close) {
+      var ta = root.querySelector("#diText"), fileEl = root.querySelector("#diFile");
+      var mapEl = root.querySelector("#diMap"), prev = root.querySelector("#diPrev");
+      var parsed = { headers: [], rows: [] }, mapping = {};
+
+      function rebuild() {
+        parsed = parseDelimited(ta.value);
+        mapping = {};
+        if (!parsed.headers.length) { mapEl.innerHTML = ""; prev.textContent = "Upload or paste an export to begin."; return; }
+        mapEl.innerHTML = '<div class="imp-map-title">Map your columns (' + parsed.rows.length + ' rows)</div>' +
+          parsed.headers.map(function (h, i) {
+            var guess = guessDataField(h);
+            mapping[h] = guess;
+            var opts = DATA_FIELDS.map(function (f) { return '<option value="' + f[0] + '"' + (f[0] === guess ? " selected" : "") + ">" + esc(f[1]) + "</option>"; }).join("");
+            return '<div class="imp-map-row"><span class="imp-col">' + esc(h) + '</span><select data-h="' + esc(h) + '">' + opts + "</select></div>";
+          }).join("");
+        Array.prototype.forEach.call(mapEl.querySelectorAll("select"), function (sel) {
+          sel.addEventListener("change", function () { mapping[sel.getAttribute("data-h")] = sel.value; refresh(); });
+        });
+        refresh();
+      }
+      function refresh() {
+        var named = parsed.rows.filter(function (r) {
+          var hasName = false;
+          for (var h in mapping) { if ((mapping[h] === "fullName" || mapping[h] === "firstName") && r[h]) hasName = true; }
+          return hasName;
+        }).length;
+        prev.innerHTML = parsed.rows.length ? ("Ready to import <b>" + named + "</b> of " + parsed.rows.length + " rows (rows need a name).") : "Upload or paste an export to begin.";
+      }
+      ta.addEventListener("input", rebuild);
+      fileEl.addEventListener("change", function () {
+        var f = fileEl.files && fileEl.files[0]; if (!f) return;
+        var reader = new FileReader();
+        reader.onload = function () { ta.value = String(reader.result || ""); rebuild(); };
+        reader.readAsText(f);
+      });
+      root.querySelector("#diCancel").addEventListener("click", close);
+      root.querySelector("#diGo").addEventListener("click", function () {
+        if (!parsed.rows.length) { toast("Nothing to import."); return; }
+        var go = root.querySelector("#diGo"); go.disabled = true; go.textContent = "Importing…";
+        send("/data", "POST", { action: "import", rows: parsed.rows, mapping: mapping }).then(function (res) {
+          if (res.ok) {
+            toast("Imported " + (res.data.added || 0) + " new, updated " + (res.data.updated || 0));
+            close(); if (onDone) onDone();
+          } else { toast("Import failed (" + (res.data.error || res.status) + ")"); go.disabled = false; go.textContent = "Import"; }
+        }).catch(function () { toast("Could not reach the server."); go.disabled = false; go.textContent = "Import"; });
+      });
+    });
+  }
+
+  // Client mirror of the backend header→field guess (best-effort; user can override).
+  function guessDataField(header) {
+    var h = String(header || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    function has() { for (var i = 0; i < arguments.length; i++) if (h.indexOf(arguments[i]) >= 0) return true; return false; }
+    if (has("linkedin")) return "linkedinUrl";
+    if (has("fullname") || h === "name" || h === "contactname") return "fullName";
+    if (has("firstname") || h === "first") return "firstName";
+    if (has("lastname") || h === "last" || h === "surname") return "lastName";
+    if (has("jobtitle", "title", "position")) return "title";
+    if (has("companydomain", "website", "companyurl", "domain")) return "companyDomain";
+    if (has("companyname") || h === "company" || h === "employer" || h === "account") return "company";
+    if (has("industry", "sector")) return "industry";
+    if (has("personalemail", "secondaryemail", "email2", "otheremail")) return "email2";
+    if (has("emailaddress", "workemail", "businessemail") || h === "email") return "email";
+    if (has("mobile", "cell")) return "phone";
+    if (has("directphone", "directdial", "directnumber")) return "directPhone";
+    if (has("companyphone", "hqphone", "mainphone", "officephone")) return "companyPhone";
+    if (h === "phone" || has("phonenumber", "phone1")) return "phone";
+    if (h === "city") return "city";
+    if (h === "state" || has("region", "province")) return "state";
+    if (h === "country") return "country";
+    if (has("seniority", "managementlevel", "joblevel")) return "seniority";
+    if (has("zoominfoid", "contactid", "personid", "recordid")) return "providerId";
+    return "ignore";
+  }
+
+  // Pull modal: programmatic pull via the official provider API (dormant until keyed).
+  function openDataPull(onDone) {
+    var bodyHtml =
+      '<label>Provider</label><select id="dpProvider"><option value="zoominfo">ZoomInfo (official API)</option></select>' +
+      '<label>Job title</label><input id="dpTitle" placeholder="VP of Sales">' +
+      '<label>Company</label><input id="dpCompany" placeholder="Acme">' +
+      '<label>Location</label><input id="dpLoc" placeholder="United States">' +
+      '<label>Max records</label><input id="dpLimit" type="number" value="50" min="1" max="100">' +
+      '<div class="imp-note">Uses the provider\'s official, licensed API. Dormant until <code>ZOOMINFO_API_KEY</code> is set — until then, use <b>Import export</b>.</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="dpCancel">Cancel</button>' +
+      '<button class="btn btn-primary btn-sm" id="dpGo">Pull</button></div>';
+    openModal("Pull via API", "Programmatic pull from the official provider API into your warehouse.", bodyHtml, function (root, close) {
+      root.querySelector("#dpCancel").addEventListener("click", close);
+      root.querySelector("#dpGo").addEventListener("click", function () {
+        var go = root.querySelector("#dpGo"); go.disabled = true; go.textContent = "Pulling…";
+        var query = {
+          title: root.querySelector("#dpTitle").value.trim(),
+          company: root.querySelector("#dpCompany").value.trim(),
+          location: root.querySelector("#dpLoc").value.trim(),
+          limit: parseInt(root.querySelector("#dpLimit").value, 10) || 50
+        };
+        send("/data", "POST", { action: "pull", provider: root.querySelector("#dpProvider").value, query: query }).then(function (res) {
+          if (res.ok) { toast("Pulled " + (res.data.added || 0) + " new, updated " + (res.data.updated || 0)); close(); if (onDone) onDone(); }
+          else if (res.status === 503) { toast("Provider not configured yet — use Import export."); go.disabled = false; go.textContent = "Pull"; }
+          else { toast("Pull failed (" + (res.data.error || res.status) + ")"); go.disabled = false; go.textContent = "Pull"; }
+        }).catch(function () { toast("Could not reach the server."); go.disabled = false; go.textContent = "Pull"; });
+      });
+    });
+  }
+
   /* ---------------- JD Sourcing ----------------
      Upload a job description -> parse an ideal-candidate profile -> generate Boolean /
      X-ray + LinkedIn searches -> run discovery (RapidAPI people-search) into a ranked,
@@ -1969,6 +2303,279 @@
 
   function renderOstext(el) {
     el.innerHTML = head("OS Text", "The texting engine, right inside your workspace.") + ostextFrame(OSTEXT_SRC);
+  }
+
+  /* ---------------- Voice Drops ----------------
+     Compliant landline/VoIP voicemail outreach. Premium AMD detects the voicemail
+     and drops a cloned-voice message with the first name + role spliced in. Mobiles
+     are filtered out and never dialed; each lead is dialed only inside its own local
+     window (default 6–7 PM). Three tabs: Campaigns, Voice & Consent, Test. Talks to
+     /api/voice/*. Shared by BD + Recruiting (the active motion tags the campaign). */
+  var VD_DEFAULT_SCRIPT =
+    "Hi {first_name}, this is {agent_name} with {agent_company}. I came across your {role} search and wanted to reach out — we help teams hire faster. If it’s useful, give me a call back at this number. Thanks {first_name}.";
+  var VD_CONSENT_TEXT =
+    "I consent to RecruiterOS creating and using a synthetic copy of my voice for outreach that I authorize.";
+
+  function renderVoiceDrops(el) {
+    var vd = { tab: "campaigns" };
+    el.innerHTML = head("Voice Drops",
+      "Personalized voicemail outreach to verified business landline/VoIP lines. Premium AMD finds the voicemail, then drops a cloned-voice message with the first name and role spliced in. Mobiles are filtered out and never dialed; each lead is dialed only inside its own local window (default 6–7 PM).") +
+      '<div class="vd-tabs" style="display:flex;gap:8px;margin:2px 0 16px;flex-wrap:wrap"></div>' +
+      '<div id="vdBody">' + loading() + "</div>";
+
+    function tabBar() {
+      var tabs = [["campaigns", "📞 Campaigns"], ["voice", "🎙️ Voice & Consent"], ["test", "🧪 Test"]];
+      $(".vd-tabs", el).innerHTML = tabs.map(function (t) {
+        return '<button class="btn btn-sm ' + (vd.tab === t[0] ? "btn-primary" : "") + '" data-vdtab="' + t[0] + '">' + t[1] + "</button>";
+      }).join("");
+    }
+    $(".vd-tabs", el).addEventListener("click", function (e) {
+      var b = e.target.closest("[data-vdtab]"); if (!b) return;
+      vd.tab = b.getAttribute("data-vdtab"); tabBar(); paint();
+    });
+
+    function paint() {
+      var body = $("#vdBody"); if (!body) return;
+      if (vd.tab === "campaigns") return paintCampaigns(body);
+      if (vd.tab === "voice") return paintVoice(body);
+      return paintTest(body);
+    }
+
+    /* ---- shared bits ---- */
+    function fieldChips(targetId) {
+      return ["first_name", "role", "company", "agent_name", "agent_company"].map(function (f) {
+        return '<button type="button" class="btn btn-sm" data-chip="' + f + '" data-target="' + targetId + '">{' + f + "}</button>";
+      }).join(" ");
+    }
+    function wireChips(scope) {
+      Array.prototype.forEach.call(scope.querySelectorAll("[data-chip]"), function (b) {
+        b.addEventListener("click", function () {
+          var ta = $("#" + b.getAttribute("data-target")); if (!ta) return;
+          var ins = "{" + b.getAttribute("data-chip") + "}";
+          var s = ta.selectionStart || ta.value.length;
+          ta.value = ta.value.slice(0, s) + ins + ta.value.slice(ta.selectionEnd || s);
+          ta.focus();
+        });
+      });
+    }
+    function statRow(stats) {
+      stats = stats || {};
+      var order = [["voicemail_delivered", "VM dropped", "#34d399"], ["dialing", "Dialing", "#ffc24d"],
+        ["scheduled", "Scheduled", "#8aa0c6"], ["queued", "Queued", "#8aa0c6"],
+        ["human_answered", "Human", "#b9a6ff"], ["no_answer", "No answer", "#8aa0c6"],
+        ["filtered_mobile", "Mobiles filtered", "#ff7a90"], ["suppressed", "Suppressed", "#ff7a90"]];
+      return '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px">' + order.map(function (o) {
+        return '<span style="font-size:13px"><b style="color:' + o[2] + '">' + (stats[o[0]] || 0) + "</b> <span class='muted'>" + o[1] + "</span></span>";
+      }).join("") + "</div>";
+    }
+
+    /* ---- Campaigns tab ---- */
+    function newCampaignForm() {
+      return '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+        inp("vdName", "Campaign name", "Q3 VP Sales — landlines") +
+        inp("vdCaller", "Approved 10DLC caller-ID (E.164)", "+13105551234") +
+        inp("vdAgentName", "Your name (stated on the call)", "Ryan") +
+        inp("vdAgentCompany", "Your firm (stated on the call)", "Executive Search") +
+        inp("vdWinStart", "Window start (local hour, 24h)", "18", "number") +
+        inp("vdWinEnd", "Window end (local hour, 24h)", "19", "number") +
+        inp("vdDailyCap", "Daily cap", "100", "number") +
+        inp("vdFreq", "Min days between attempts", "30", "number") +
+        "</div>" +
+        '<div style="margin-top:10px"><label class="muted" style="font-size:12px">Voicemail script — first name &amp; role splice in like an email merge</label>' +
+        '<div style="margin:4px 0">' + fieldChips("vdScript") + "</div>" +
+        '<textarea id="vdScript" rows="4" style="width:100%">' + esc(VD_DEFAULT_SCRIPT) + "</textarea>" +
+        '<div class="muted" style="font-size:12px;margin-top:4px">Sweet spot is 15–25s. Human-answer sign-off: “' + esc("Sorry, wrong number. Thanks.") + '” (editable per campaign).</div></div>' +
+        '<div style="margin-top:12px"><button class="btn btn-primary btn-sm" id="vdCreate">Create campaign</button></div>';
+    }
+    function inp(id, label, ph, type) {
+      return '<div><label class="muted" style="font-size:12px">' + esc(label) + '</label>' +
+        '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph) + '" style="width:100%" /></div>';
+    }
+    function campaignCard(c) {
+      var win = "6–7 PM"; try { win = hr(c.window.startHour) + "–" + hr(c.window.endHour); } catch (e) {}
+      var ready = c.consentAttested;
+      return '<div class="card" data-cid="' + c.id + '" style="margin-top:12px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center">' +
+        "<h3 style='margin:0'>" + esc(c.name) + ' <span class="muted" style="font-size:12px">· ' + esc(c.status) + "</span></h3>" +
+        '<span class="muted" style="font-size:12px">caller ' + esc(c.callerId || "—") + " · window " + esc(win) + " local · " + esc(c.motion) + "</span></div>" +
+        statRow(c.stats) +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' +
+        '<button class="btn btn-sm" data-vdact="import" data-cid="' + c.id + '">⬆ Import leads</button>' +
+        '<button class="btn btn-sm ' + (ready ? "" : "btn-primary") + '" data-vdact="attest" data-cid="' + c.id + '">' + (ready ? "✓ Consent attested" : "Attest consent") + "</button>" +
+        '<button class="btn btn-sm btn-primary" data-vdact="launch" data-cid="' + c.id + '">▶ Launch</button>' +
+        '<button class="btn btn-sm" data-vdact="run" data-cid="' + c.id + '">⏱ Run window now</button>' +
+        '<button class="btn btn-sm" data-vdact="del" data-cid="' + c.id + '">🗑</button></div>' +
+        '<div class="vd-msg muted" data-msg="' + c.id + '" style="font-size:12px;margin-top:8px"></div></div>';
+    }
+    function hr(h) { var n = ((h + 11) % 12) + 1; return n + (h < 12 ? " AM" : " PM"); }
+
+    function paintCampaigns(body) {
+      body.innerHTML = loading();
+      api("/voice/campaigns?motion=" + motion).then(function (d) {
+        var list = ((d && d.campaigns) || []).map(campaignCard).join("");
+        body.innerHTML = '<div class="card"><h3>New voice campaign</h3>' + newCampaignForm() + "</div>" +
+          (list || '<p class="muted" style="margin-top:16px">No voice campaigns yet — create one above.</p>') +
+          '<div style="margin-top:14px;padding:10px;border-radius:8px;background:rgba(255,255,255,.03)" class="muted">' +
+          '<b>Compliance:</b> only landline/VoIP leads are dialed (mobiles are stripped on import via Telnyx). Each lead is dialed only inside its own local time window (default 6–7 PM, hard-bounded to 8 AM–9 PM). Launch requires a consent attestation and an identifying script.</div>';
+        wireChips(body);
+        $("#vdCreate").addEventListener("click", createCampaign);
+        Array.prototype.forEach.call(body.querySelectorAll("[data-vdact]"), function (b) {
+          b.addEventListener("click", function () { campaignAction(b.getAttribute("data-vdact"), b.getAttribute("data-cid")); });
+        });
+      }).catch(function () { body.innerHTML = needsSetup(); });
+    }
+    function val(id) { var e = $("#" + id); return e ? e.value.trim() : ""; }
+    function createCampaign() {
+      var payload = {
+        name: val("vdName"), motion: motion, callerId: val("vdCaller"),
+        scriptTemplate: val("vdScript"),
+        persona: { agentName: val("vdAgentName") || "Ryan", agentCompany: val("vdAgentCompany") || "Executive Search" },
+        window: { startHour: parseInt(val("vdWinStart") || "18", 10), endHour: parseInt(val("vdWinEnd") || "19", 10) },
+        dailyCap: parseInt(val("vdDailyCap") || "100", 10), frequencyCapDays: parseInt(val("vdFreq") || "30", 10)
+      };
+      if (!payload.name) { toast("Name the campaign first."); return; }
+      send("/voice/campaigns", "PUT", payload).then(function (r) {
+        if (!r.ok) { toast("Create failed"); return; }
+        toast("Campaign created"); paint();
+      });
+    }
+    function setMsg(cid, t) { var m = $('[data-msg="' + cid + '"]'); if (m) m.innerHTML = t; }
+    function campaignAction(act, cid) {
+      if (act === "del") { send("/voice/campaigns?id=" + cid, "DELETE").then(function () { toast("Deleted"); paint(); }); return; }
+      if (act === "import") return importModal(cid);
+      if (act === "attest") {
+        send("/voice/campaigns", "POST", { action: "attest", campaignId: cid }).then(function (r) {
+          if (r.ok) { toast("Consent attested"); paint(); }
+        });
+        return;
+      }
+      if (act === "launch") {
+        send("/voice/campaigns", "POST", { action: "launch", campaignId: cid }).then(function (r) {
+          if (r.ok) { toast("Launched"); paint(); }
+          else { var errs = (r.data && r.data.errors) || ["Not ready"]; setMsg(cid, "⚠ " + errs.map(esc).join(" · ")); }
+        });
+        return;
+      }
+      if (act === "run") {
+        setMsg(cid, "Running this window…");
+        send("/voice/campaigns", "POST", { action: "run", campaignId: cid }).then(function (r) {
+          if (!r.ok) { setMsg(cid, "Run failed"); return; }
+          var s = r.data.summary || {};
+          setMsg(cid, "Dialed " + s.dialed + " · scheduled " + s.scheduled + " (outside window) · skipped " + s.skipped + " · synthesized " + s.synthesized + " / cached " + s.cached + (s.dryRun ? " · dry-run (no Telnyx/clone keys)" : ""));
+          paint();
+        });
+        return;
+      }
+    }
+    function importModal(cid) {
+      openModal("Import leads", "Paste rows: first_name, role, company, phone, location (one per line, header optional). Mobiles are auto-stripped — only landline/VoIP get dialed.",
+        '<textarea id="vdCsv" rows="8" style="width:100%" placeholder="Hector,VP Sales,Jaggaer,+18015551234,Salt Lake City UT"></textarea>' +
+        '<div class="modal-foot" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vdImportGo">Classify &amp; import</button></div>',
+        function (root, close) {
+          $("#vdImportGo", root).addEventListener("click", function () {
+            var leads = parseCsv($("#vdCsv", root).value);
+            if (!leads.length) { toast("No rows parsed"); return; }
+            send("/voice/campaigns", "POST", { action: "import", campaignId: cid, leads: leads }).then(function (r) {
+              close();
+              if (!r.ok) { toast("Import failed"); return; }
+              var s = r.data.summary || {};
+              toast("Imported " + s.imported + " · dialable " + s.dialable + " · mobiles stripped " + s.filteredMobile);
+              setMsg(cid, "Imported " + s.imported + " — " + s.dialable + " dialable landline/VoIP, " + s.filteredMobile + " mobiles stripped" + (s.noTimezone ? ", " + s.noTimezone + " missing a resolvable location" : ""));
+              paint();
+            });
+          });
+        });
+    }
+    function parseCsv(text) {
+      var lines = String(text || "").split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+      if (!lines.length) return [];
+      var out = [];
+      var first = lines[0].toLowerCase();
+      var hasHeader = /first|phone|role|name/.test(first) && /,/.test(first);
+      var start = hasHeader ? 1 : 0;
+      for (var i = start; i < lines.length; i++) {
+        var c = lines[i].split(",").map(function (x) { return x.trim(); });
+        if (!c.length) continue;
+        var phone = c[3] || c.find(function (x) { return /\+?\d{7,}/.test(x); }) || "";
+        if (!phone) continue;
+        out.push({ firstName: c[0] || "", role: c[1] || "", company: c[2] || "", phone: phone, location: c[4] || "" });
+      }
+      return out;
+    }
+
+    /* ---- Voice & Consent tab ---- */
+    function paintVoice(body) {
+      body.innerHTML = loading();
+      api("/voice/clones").then(function (d) {
+        d = d || {};
+        var cache = d.cache || { total: 0, byKind: {} };
+        var prov = d.provider || { configured: false, id: "—" };
+        var kinds = Object.keys(cache.byKind || {}).map(function (k) { return "<b>" + (cache.byKind[k]) + "</b> " + esc(k); }).join(" · ") || "none yet";
+        var consent = (d.consent || []).map(function (c) {
+          return '<div style="font-size:13px;margin-top:4px">🎙️ <b>' + esc(c.agentName) + "</b> " + (c.voiceId ? '<span class="muted">voice ' + esc(c.voiceId) + "</span>" : '<span class="muted">(no voice id)</span>') + "</div>";
+        }).join("") || '<p class="muted">No consented voices recorded yet.</p>';
+        body.innerHTML =
+          '<div class="card"><h3>Cloned voice &amp; consent</h3>' +
+          '<p class="muted" style="font-size:13px">Use your OWN voice, captured with a recorded consent statement. The clone provider is <b>' + esc(prov.id) + "</b> — " + (prov.configured ? "configured." : "not configured (dry-run; set VOICE_CLONE_API_KEY).") + "</p>" +
+          '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+          inp("vcName", "Whose voice (your name)", "Ryan") +
+          inp("vcVoiceId", "Provider voice id (optional)", "el_xxx") + "</div>" +
+          '<div style="margin-top:10px"><label class="muted" style="font-size:12px">Consent statement</label>' +
+          '<textarea id="vcStatement" rows="2" style="width:100%">' + esc(VD_CONSENT_TEXT) + "</textarea></div>" +
+          '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vcSave">Record consent</button></div></div>' +
+          '<div class="card" style="margin-top:14px"><h3>Cloned-snippet repository (the token-saver)</h3>' +
+          '<p class="muted" style="font-size:13px">First names, roles, and static prose are synthesized once and reused forever — repeat names/roles cost $0. Rendered segments: <b>' + (cache.total || 0) + "</b> (" + kinds + ").</p>" +
+          '<div>' + consent + "</div></div>";
+        $("#vcSave").addEventListener("click", function () {
+          var payload = { agentName: val("vcName"), statement: val("vcStatement"), voiceId: val("vcVoiceId") || undefined };
+          if (!payload.agentName || !payload.statement) { toast("Name + consent statement required"); return; }
+          send("/voice/clones", "POST", payload).then(function (r) {
+            if (r.ok) { toast("Consent recorded" + (r.data && r.data.dryRun ? " (dry-run)" : "")); paint(); }
+            else { toast("Save failed"); }
+          });
+        });
+      }).catch(function () { body.innerHTML = needsSetup(); });
+    }
+
+    /* ---- Test tab ---- */
+    function paintTest(body) {
+      body.innerHTML =
+        '<div class="card"><h3>Test a single drop</h3>' +
+        '<p class="muted" style="font-size:13px">Fire one personalized drop to a number YOU control to verify the path (classify → assemble cloned voicemail → dial with AMD). Skips the time window; otherwise identical to production.</p>' +
+        '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+        inp("vtTo", "Your test number (E.164)", "+13105551234") +
+        inp("vtFirst", "First name", "Hector") +
+        inp("vtRole", "Role", "VP of Sales") +
+        inp("vtCompany", "Company", "Jaggaer") +
+        inp("vtAgentName", "Your name", "Ryan") +
+        inp("vtAgentCompany", "Your firm", "Executive Search") + "</div>" +
+        '<div style="margin-top:10px"><div style="margin:4px 0">' + fieldChips("vtScript") + "</div>" +
+        '<textarea id="vtScript" rows="4" style="width:100%">' + esc(VD_DEFAULT_SCRIPT) + "</textarea></div>" +
+        '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vtGo">Send test drop</button></div>' +
+        '<div id="vtResult" style="margin-top:12px"></div></div>';
+      wireChips(body);
+      $("#vtGo").addEventListener("click", function () {
+        var payload = {
+          to: val("vtTo"), firstName: val("vtFirst"), role: val("vtRole"), company: val("vtCompany"),
+          scriptTemplate: val("vtScript"), motion: motion,
+          persona: { agentName: val("vtAgentName") || "Ryan", agentCompany: val("vtAgentCompany") || "Executive Search" }
+        };
+        if (!payload.to) { toast("Enter your test number"); return; }
+        $("#vtResult").innerHTML = loading();
+        send("/voice/test-drop", "POST", payload).then(function (r) {
+          if (!r.ok) { $("#vtResult").innerHTML = '<p class="muted">Test failed: ' + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status) + "</p>"; return; }
+          var d = r.data;
+          $("#vtResult").innerHTML = '<div style="padding:10px;border-radius:8px;background:rgba(255,255,255,.03)">' +
+            "<div style='font-size:13px'><b>Rendered (~" + d.estSeconds + "s" + (d.withinSweetSpot ? ", in the 15–25s sweet spot" : ", outside sweet spot") + "):</b></div>" +
+            '<div style="font-size:13px;margin:6px 0">“' + esc(d.rendered) + "”</div>" +
+            '<div class="muted" style="font-size:12px">segments ' + d.playlistLength + ' · synthesized ' + d.synthesized + ' · cached ' + d.cached + (d.dryRun ? ' · dry-run (no Telnyx/clone keys — nothing dialed)' : ' · dialing ' + esc(d.callControlId)) + '</div>' +
+            ((d.warnings && d.warnings.length) ? '<div style="font-size:12px;color:#ffc24d;margin-top:4px">⚠ ' + d.warnings.map(esc).join(" · ") + "</div>" : "") +
+            "</div>";
+        });
+      });
+    }
+
+    tabBar(); paint();
   }
 
   /* ---------------- Outreach (sending readiness control panel) ----------------
@@ -2433,7 +3040,8 @@
         '<label class="seqlib-search"><span>⌕</span><input id="slSearch" placeholder="Search…" autocomplete="off"/></label>' +
         '<span class="sl-count" id="slCount"></span>' +
       "</div>" +
-      '<div id="slBody">' + loading() + "</div>";
+      '<div id="slBody">' + loading() + "</div>" +
+      '<div id="slVoice" style="margin-top:18px"></div>';
 
     $("#slSearch").addEventListener("input", function () { filter = (this.value || "").toLowerCase().trim(); paint(); });
     $("#slMine").addEventListener("click", function () { mineOnly = !mineOnly; this.classList.toggle("active", mineOnly); paint(); });
@@ -2539,6 +3147,78 @@
       }).catch(function () { if (!store.all().length) seedExamples(); paint(); });
     }
     reload();
+    loadVoiceScripts();
+  }
+
+  /* Voice Drops scripts inside the Library: reusable cloned-voice voicemails,
+     managed here or in the Voice Drops panel, deployable as a "Voice drop" step in
+     Campaign Studio. A separate section (not the sequence table) since the data
+     shape + editor differ. Talks to /api/voice/scripts. */
+  function loadVoiceScripts() {
+    var host = $("#slVoice"); if (!host) return;
+    host.innerHTML = '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<h3 style="margin:0">📞 Voice Drops scripts <span class="muted" style="font-size:12px">· reusable cloned-voice voicemails</span></h3>' +
+      '<button class="btn btn-sm btn-primary" id="vsNew">＋ New voice script</button></div>' +
+      '<div id="vsList" style="margin-top:10px">' + loading() + "</div></div>";
+    $("#vsNew").addEventListener("click", function () { voiceScriptModal(null); });
+    paintVoiceScripts();
+  }
+  function paintVoiceScripts() {
+    var list = $("#vsList"); if (!list) return;
+    api("/voice/scripts?motion=" + motion).then(function (d) {
+      var rows = (d && d.scripts) || [];
+      if (!rows.length) {
+        list.innerHTML = '<p class="muted" style="font-size:13px">No voice scripts yet. Create one here or in the <a href="#voicedrops">Voice Drops</a> panel, then add it to a sequence as a “Voice drop” step in Campaign Studio.</p>';
+        return;
+      }
+      list.innerHTML = '<table class="seqlib"><thead><tr><th>Script</th><th>Preview</th><th>Length</th><th>Actions</th></tr></thead><tbody>' +
+        rows.map(function (s) {
+          var dot = s.withinSweetSpot ? "#34d399" : "#ffc24d";
+          return "<tr><td class=\"sl-name\"><span class=\"seq-chip\" style=\"background:#2a2440;color:#b9a6ff\">Voice</span> " + esc(s.name) + "</td>" +
+            '<td class="muted" style="max-width:340px">' + esc((s.preview || "").slice(0, 90)) + "…</td>" +
+            '<td><span style="color:' + dot + '">~' + (s.estSeconds || 0) + "s</span></td>" +
+            '<td class="sl-actions"><button class="btn btn-ghost btn-sm" data-vsedit="' + esc(s.id) + '">Edit</button>' +
+            '<button class="btn btn-ghost btn-sm" data-vsgo="studio" title="Add as a Voice drop step in Studio">Deploy</button>' +
+            '<button class="btn btn-ghost btn-sm" data-vsdel="' + esc(s.id) + '">Delete</button></td></tr>';
+        }).join("") + "</tbody></table>";
+      Array.prototype.forEach.call(list.querySelectorAll("[data-vsedit]"), function (b) {
+        b.addEventListener("click", function () { var s = rows.filter(function (x) { return x.id === b.getAttribute("data-vsedit"); })[0]; if (s) voiceScriptModal(s); });
+      });
+      Array.prototype.forEach.call(list.querySelectorAll("[data-vsdel]"), function (b) {
+        b.addEventListener("click", function () { send("/voice/scripts?id=" + b.getAttribute("data-vsdel"), "DELETE").then(function () { toast("Deleted"); paintVoiceScripts(); }); });
+      });
+      Array.prototype.forEach.call(list.querySelectorAll("[data-vsgo]"), function (b) {
+        b.addEventListener("click", function () { location.hash = b.getAttribute("data-vsgo"); });
+      });
+    }).catch(function () { list.innerHTML = '<p class="muted" style="font-size:13px">Voice Drops scripts unavailable.</p>'; });
+  }
+  function voiceScriptModal(s) {
+    var isEdit = !!s;
+    var chips = ["first_name", "role", "company", "agent_name", "agent_company"].map(function (f) {
+      return '<button type="button" class="btn btn-sm" data-vschip="' + f + '">{' + f + "}</button>";
+    }).join(" ");
+    openModal(isEdit ? "Edit voice script" : "New voice script", "First name & role splice in like an email merge. Sweet spot 15–25s.",
+      '<input id="vsName" placeholder="Script name" style="width:100%" value="' + esc(isEdit ? s.name : "") + '"/>' +
+      '<div style="margin:8px 0">' + chips + "</div>" +
+      '<textarea id="vsTpl" rows="4" style="width:100%">' + esc(isEdit ? s.template : VD_DEFAULT_SCRIPT) + "</textarea>" +
+      '<div class="modal-foot" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vsSave">Save to Library</button></div>',
+      function (root, close) {
+        Array.prototype.forEach.call(root.querySelectorAll("[data-vschip]"), function (b) {
+          b.addEventListener("click", function () {
+            var ta = $("#vsTpl", root); var ins = "{" + b.getAttribute("data-vschip") + "}";
+            var p = ta.selectionStart || ta.value.length;
+            ta.value = ta.value.slice(0, p) + ins + ta.value.slice(ta.selectionEnd || p); ta.focus();
+          });
+        });
+        $("#vsSave", root).addEventListener("click", function () {
+          var name = ($("#vsName", root).value || "").trim();
+          var tpl = ($("#vsTpl", root).value || "").trim();
+          if (!name || !tpl) { toast("Name + script required"); return; }
+          var payload = { name: name, template: tpl, motion: motion };
+          if (isEdit) payload.id = s.id;
+          send("/voice/scripts", "PUT", payload).then(function (r) { close(); if (r.ok) { toast("Saved to Library"); paintVoiceScripts(); } else toast("Save failed"); });
+        });
+      });
   }
 
   /* ---------------- Analytics (signal → placement, live) ---------------- */

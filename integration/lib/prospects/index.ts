@@ -82,8 +82,21 @@ export async function addProspect(input: NewProspectInput): Promise<Prospect> {
     motion: input.motion ?? p.motion,
   });
 
-  if (input.email) {
-    p.atsPersonId = await getAts().upsertPersonByEmail(input.email, {
+  // Free first pass: backfill missing email/phone from the Data warehouse (a record
+  // we already own) before any paid enrichment runs. Best-effort; never blocks an add.
+  if (!p.email || !p.phone) {
+    try {
+      const { backfillFromWarehouse } = await import("../data");
+      const hit = await backfillFromWarehouse(input.workspaceId, {
+        fullName: p.fullName, company: p.company, linkedinUrl: p.linkedinUrl, email: p.email, phone: p.phone,
+      });
+      if (hit.email && !p.email) p.email = hit.email;
+      if (hit.phone && !p.phone) p.phone = hit.phone;
+    } catch { /* warehouse empty or unavailable — leave gaps for paid enrichment */ }
+  }
+
+  if (p.email) {
+    p.atsPersonId = await getAts().upsertPersonByEmail(p.email, {
       name: p.fullName,
       company: p.company,
       title: p.title,

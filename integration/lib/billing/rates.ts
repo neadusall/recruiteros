@@ -184,6 +184,15 @@ export const DEFAULT_RATES: CostRate[] = [
     note: "6-class response routing (interested / OOO / referral / not-now / no / unsub). Small prompt, only fires on actual replies.",
     scales: "per_reply",
   },
+  {
+    id: "voice_clone_synthesis",
+    label: "Voice clone synthesis (cache-miss only)",
+    category: "ai",
+    unitCostUsd: 0.02,
+    unit: "per segment rendered",
+    note: "ElevenLabs-class TTS for a Voice Drops segment (static prose, a first name, or a role). Charged ONLY on a cache MISS — identical names/roles/prose are synthesized once and reused forever at $0, so per-lead cost trends to zero as the cloned-snippet repository fills. Voice Drops also spends voice_minute per dialed call.",
+    scales: "per_send",
+  },
 
   // ---- Person enrichment (put a NAME on a company-level free signal) ----
   {

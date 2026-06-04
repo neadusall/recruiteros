@@ -113,6 +113,21 @@ export class TelnyxClient extends ProviderClient {
       body: {},
     });
   }
+
+  /**
+   * Speak a line with Telnyx's built-in TTS. Used for the HONEST human-answer
+   * identifier and sign-off ("This is Ryan with Executive Search — is this
+   * Hector?" / "Sorry, wrong number. Thanks.") so the cloned-voice budget is
+   * reserved for the actual voicemail drops. Emits `call.speak.ended`.
+   *   POST /calls/{call_control_id}/actions/speak
+   */
+  speak(callControlId: string, text: string, opts?: { voice?: string; language?: string }) {
+    return this.request({
+      method: "POST",
+      path: `/calls/${encodeURIComponent(callControlId)}/actions/speak`,
+      body: { payload: text, voice: opts?.voice ?? "female", language: opts?.language ?? "en-US" },
+    });
+  }
 }
 
 /** Telnyx echoes client_state back base64-encoded on every webhook for a call. */
