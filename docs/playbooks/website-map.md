@@ -103,7 +103,8 @@ The real product backend. Static pages above are served from here in production
 - **API routes:** [integration/app/api/](integration/app/api/) — auth, campaigns, prospects, sms, linkedin, response, owner, ats, etc. (one folder per endpoint).
 - **Business logic:** [integration/lib/](integration/lib/) — signals, campaigns, outreach channels, linkedin, sms, response routing, billing, owner, auth, providers (Telnyx, Instantly, Unipile, RapidAPI, Tomba…).
 - **Public API surface:** [integration/api/](integration/api/) + [integration/openapi.yaml](integration/openapi.yaml).
-- **Docs:** [integration/README.md](integration/README.md), [integration/BACKEND.md](integration/BACKEND.md), [integration/OWNER-CONSOLE.md](integration/OWNER-CONSOLE.md), [integration/lib/signals/README.md](integration/lib/signals/README.md).
+- **Docs:** [integration/README.md](../../integration/README.md), [integration/BACKEND.md](../../integration/BACKEND.md), [integration/OWNER-CONSOLE.md](../../integration/OWNER-CONSOLE.md), [integration/lib/signals/README.md](../../integration/lib/signals/README.md).
+- **Backend per-domain reference:** [docs/platform/](../platform/) — what each `integration/lib/` domain does and where to start.
 
 ## 5. Browser extension — `extension/`
 
@@ -130,10 +131,18 @@ Local Node helper for outreach: [bridge/outreach-bridge.cjs](bridge/outreach-bri
 | [integration/sync-public.cjs](integration/sync-public.cjs) | Copies root `*.html` + `assets/` into `integration/public/` at build (and hides the owner console behind a secret slug). |
 | [.env.production.example](.env.production.example), [integration/.env.example](integration/.env.example), [bridge/.env.example](bridge/.env.example) | Environment templates. |
 
-**Setup / how-to docs (root):** [README.md](README.md), [DEPLOY.md](DEPLOY.md),
-[GO-LIVE-WALKTHROUGH.md](GO-LIVE-WALKTHROUGH.md), [HETZNER-SETUP.md](HETZNER-SETUP.md),
-[INTEGRATION.md](INTEGRATION.md), [RESEND-SETUP.md](RESEND-SETUP.md) (email),
-[LINKEDIN-LOGIN-SETUP.md](LINKEDIN-LOGIN-SETUP.md), [COPY-PLAYBOOK.md](COPY-PLAYBOOK.md) (copywriting voice/guidelines).
+**Setup / how-to docs:** [README.md](../../README.md) (root),
+[docs/STRUCTURE.md](../STRUCTURE.md) (project map),
+[setup/server/2-deploy.md](../setup/server/2-deploy.md),
+[setup/server/3-go-live-walkthrough.md](../setup/server/3-go-live-walkthrough.md),
+[setup/server/1-hetzner.md](../setup/server/1-hetzner.md),
+[setup/server/integration-architecture.md](../setup/server/integration-architecture.md),
+[setup/channels/email-resend.md](../setup/channels/email-resend.md) (email),
+[setup/channels/linkedin-login.md](../setup/channels/linkedin-login.md),
+[playbooks/copywriting-playbook.md](copywriting-playbook.md) (copywriting voice/guidelines).
+
+> Other repo-path links on this page (e.g. `integration/…`, `extension/…`, `server.cjs`) are written
+> relative to the **repo root** — open them from the project root, not from this file's folder.
 
 ---
 

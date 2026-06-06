@@ -4,13 +4,13 @@ Goal: turn on RecruiterOS's **email channel** so campaigns actually send cold
 outbound, get replies back into the inbox, and stay deliverable — using your own
 warmed sending domains/inboxes orchestrated by **Instantly.ai**.
 
-This is the cold-outbound companion to `RESEND-SETUP.md` (which only handles
+This is the cold-outbound companion to `email-resend.md` (which only handles
 transactional auth email: password resets, magic links). They are SEPARATE
 systems with separate keys:
 
 | | Sends | Provider | Key | Doc |
 |---|---|---|---|---|
-| **Transactional** | password reset, magic link, verify | Resend | `RESEND_API_KEY` | RESEND-SETUP.md |
+| **Transactional** | password reset, magic link, verify | Resend | `RESEND_API_KEY` | email-resend.md |
 | **Cold outbound** | campaign emails to prospects | Instantly | `INSTANTLY_API_KEY` | **this file** |
 
 > Until `INSTANTLY_API_KEY` is set, the email channel still runs end-to-end but
@@ -289,4 +289,4 @@ Notes
   `.env.production.example` now document `INSTANTLY_API_KEY`,
   `INSTANTLY_WEBHOOK_SECRET`, and the email-finding/verify keys.
 - The same Response pipeline also handles LinkedIn (Unipile/SalesRobot) and SMS
-  (TalTxt) replies — see `INTEGRATION.md` for the LinkedIn outreach side.
+  (TalTxt) replies — see `../server/integration-architecture.md` for the LinkedIn outreach side.

@@ -4,7 +4,7 @@
  *
  * Turns a campaign target (a company/person + the signal that surfaced them) into a
  * multi-touch sequence whose every message is anchored to that real signal. This is the
- * COPY-PLAYBOOK.md (Bernays) made executable: each touch plays a rapport-first rung
+ * docs/playbooks/copywriting-playbook.md (Bernays) made executable: each touch plays a rapport-first rung
  * (recognize → relate → invite → pitch → release) and the first line is the signal
  * itself, so outreach "arrives on time" instead of interrupting.
  *
@@ -63,7 +63,7 @@ export interface DraftedSequence {
 }
 
 /* ------------------------------------------------------------------ */
-/* House phrases (the cliché bank from COPY-PLAYBOOK.md)               */
+/* House phrases (the cliché bank from docs/playbooks/copywriting-playbook.md) */
 /* ------------------------------------------------------------------ */
 
 const HOUSE = {

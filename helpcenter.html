@@ -362,7 +362,7 @@ node server.cjs
           <code>RECRUITEROS_OUTREACH_PROVIDER</code>: <strong>simulated</strong> (default — zero
           account risk), <strong>unipile</strong> (cloud, fully server-side), or
           <strong>internal</strong> (the bridge + browser extension). The same campaign code drives
-          all three — only the adapter changes. See <a href="#guides">INTEGRATION.md</a> for the
+          all three — only the adapter changes. See <a href="#guides">docs/setup/server/integration-architecture.md</a> for the
           full model.
         </p>
       </section>
@@ -492,9 +492,9 @@ node bridge.test.cjs          <span class="cmt"># end-to-end self-test</span></c
             <tr><td><code>RECRUITEROS_OUTREACH_PROVIDER</code></td><td><code>simulated</code> (default) · <code>unipile</code> · <code>internal</code></td></tr>
             <tr><td><code>RECRUITEROS_OUTREACH_URL</code></td><td>Bridge URL when using the <code>internal</code> provider</td></tr>
             <tr><td><code>RECRUITEROS_SMS_PROVIDER</code></td><td><code>telnyx</code> or <code>internal</code></td></tr>
-            <tr><td><code>LINKEDIN_CLIENT_ID</code> / <code>_SECRET</code></td><td>LinkedIn OAuth login (see LINKEDIN-LOGIN-SETUP.md)</td></tr>
-            <tr><td><code>RESEND_API_KEY</code></td><td>Transactional email — password reset &amp; magic links (RESEND-SETUP.md)</td></tr>
-            <tr><td><code>TELNYX_API_KEY</code> / <code>TELNYX_PHONE_NUMBER</code></td><td>Two-way SMS (SMS-QUALIFICATION-SETUP.md)</td></tr>
+            <tr><td><code>LINKEDIN_CLIENT_ID</code> / <code>_SECRET</code></td><td>LinkedIn OAuth login (see docs/setup/channels/linkedin-login.md)</td></tr>
+            <tr><td><code>RESEND_API_KEY</code></td><td>Transactional email — password reset &amp; magic links (docs/setup/channels/email-resend.md)</td></tr>
+            <tr><td><code>TELNYX_API_KEY</code> / <code>TELNYX_PHONE_NUMBER</code></td><td>Two-way SMS (docs/setup/channels/sms-qualification.md)</td></tr>
             <tr><td><code>LOXO_API_KEY</code></td><td>ATS sync</td></tr>
             <tr><td><code>PORT</code></td><td>Override the listening port for <code>server.cjs</code> / bridge</td></tr>
           </tbody>
@@ -515,7 +515,7 @@ node bridge.test.cjs          <span class="cmt"># end-to-end self-test</span></c
           <code>deploy.sh</code>, and an auto-deploy watcher (<code>auto-deploy.sh</code> /
           <code>install-auto-deploy.sh</code>) that pulls and redeploys on push.
         </p>
-        <p>Follow the guides in order: <strong>HETZNER-SETUP.md</strong> → <strong>GO-LIVE-WALKTHROUGH.md</strong> (DNS + Caddy) → <strong>DEPLOY.md</strong>.</p>
+        <p>Follow the guides in order: <strong>docs/setup/server/1-hetzner.md</strong> → <strong>docs/setup/server/3-go-live-walkthrough.md</strong> (DNS + Caddy) → <strong>docs/setup/server/2-deploy.md</strong>.</p>
       </section>
 
       <!-- API -->
@@ -543,18 +543,19 @@ node bridge.test.cjs          <span class="cmt"># end-to-end self-test</span></c
       <!-- GUIDES -->
       <section id="guides">
         <h2>Setup guides &amp; references</h2>
-        <p>The markdown files in the repo root go deeper on specific topics:</p>
+        <p>The markdown files under <code>docs/</code> go deeper on specific topics:</p>
         <table>
           <tbody>
-            <tr><td><code>README.md</code></td><td>Quick start &amp; the product vision.</td></tr>
-            <tr><td><code>INTEGRATION.md</code></td><td>The three-layer outreach architecture and the three execution modes.</td></tr>
-            <tr><td><code>DEPLOY.md</code></td><td>Getting a live URL — local dev, Vercel, env vars, persistence notes.</td></tr>
-            <tr><td><code>HETZNER-SETUP.md</code></td><td>Initial server setup (Ubuntu, Docker, Caddy, firewall).</td></tr>
-            <tr><td><code>GO-LIVE-WALKTHROUGH.md</code></td><td>End-to-end go-live: DNS records, Caddy HTTPS, deploy script.</td></tr>
-            <tr><td><code>LINKEDIN-LOGIN-SETUP.md</code></td><td>LinkedIn OAuth app + callback configuration.</td></tr>
-            <tr><td><code>RESEND-SETUP.md</code></td><td>Email (Resend) domain verification + API key.</td></tr>
-            <tr><td><code>SMS-QUALIFICATION-SETUP.md</code></td><td>Telnyx two-way SMS and the intent classifier.</td></tr>
-            <tr><td><code>COPY-PLAYBOOK.md</code></td><td>Persuasion playbook applied to site copy and outreach.</td></tr>
+            <tr><td><code>README.md</code></td><td>Quick start &amp; the product vision. (repo root)</td></tr>
+            <tr><td><code>docs/STRUCTURE.md</code></td><td>The full project map — every folder &amp; where to develop each feature.</td></tr>
+            <tr><td><code>docs/setup/server/integration-architecture.md</code></td><td>The three-layer outreach architecture and the three execution modes.</td></tr>
+            <tr><td><code>docs/setup/server/2-deploy.md</code></td><td>Getting a live URL — local dev, Vercel, env vars, persistence notes.</td></tr>
+            <tr><td><code>docs/setup/server/1-hetzner.md</code></td><td>Initial server setup (Ubuntu, Docker, Caddy, firewall).</td></tr>
+            <tr><td><code>docs/setup/server/3-go-live-walkthrough.md</code></td><td>End-to-end go-live: DNS records, Caddy HTTPS, deploy script.</td></tr>
+            <tr><td><code>docs/setup/channels/linkedin-login.md</code></td><td>LinkedIn OAuth app + callback configuration.</td></tr>
+            <tr><td><code>docs/setup/channels/email-resend.md</code></td><td>Email (Resend) domain verification + API key.</td></tr>
+            <tr><td><code>docs/setup/channels/sms-qualification.md</code></td><td>Telnyx two-way SMS and the intent classifier.</td></tr>
+            <tr><td><code>docs/playbooks/copywriting-playbook.md</code></td><td>Persuasion playbook applied to site copy and outreach.</td></tr>
           </tbody>
         </table>
         <div class="callout">
