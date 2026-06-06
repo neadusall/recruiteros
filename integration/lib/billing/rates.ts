@@ -118,6 +118,15 @@ export const DEFAULT_RATES: CostRate[] = [
     scales: "per_prospect",
   },
   {
+    id: "apify_direct_dial",
+    label: "Direct-dial find (Apify ryanclinton / PDL)",
+    category: "enrichment",
+    unitCostUsd: 0.1,
+    unit: "per direct dial found",
+    note: "VERIFIED against the live actor (actor id ryanclinton~phone-number-finder): pay-per-result $0.10 per number FOUND (no-find records are free). The PERSON'S own direct line, looked up lazily at the email-sent trigger (Voice-Drop rule). Phone data comes from People Data Labs, so it ALSO needs your own PDL_API_KEY (free trial = 500 lookups / 30 days); without PDL it only website-scrapes a company line. Higher-trust than the cheap RapidAPI landline rung; still paired with the Telnyx classify step (phone_classify) before the voice channel dials it. Configure APIFY_TOKEN + PDL_API_KEY (+ APIFY_DIRECT_DIAL_ACTOR / APIFY_DIRECT_DIAL_MODE to override).",
+    scales: "per_prospect",
+  },
+  {
     id: "landline_premium_backup",
     label: "Landline, premium reveal (backup, on miss only)",
     category: "enrichment",

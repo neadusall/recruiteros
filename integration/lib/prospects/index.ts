@@ -182,9 +182,12 @@ export async function enrichProspect(
   let phone = p.phone;
 
   try {
-    const { cheapFirstContactWaterfall, enrich } = await import("../signals");
+    const { cheapFirstContactWaterfall, enrich, classifyLine } = await import("../signals");
+    // Resolve a direct dial (Apify ryanclinton actor → landlinePhone) whenever we're
+    // after a phone — this is the lazy direct-dial lookup the Voice-Drop rule depends on.
+    const wantPhone = field !== "email";
     const report = await enrich(
-      cheapFirstContactWaterfall(),
+      cheapFirstContactWaterfall({ includeLandline: wantPhone }),
       {
         name: p.company,
         companyName: p.company,
@@ -198,9 +201,40 @@ export async function enrichProspect(
       { now: nowIso() },
     );
     const e = report.subject.email;
-    const ph = report.subject.phone;
     if (typeof e === "string") email = e;
-    if (typeof ph === "string") phone = ph;
+
+    // A resolved direct dial gets confirmed by Telnyx (carrier line type) before the
+    // voice channel trusts it, and the find is metered to the cost ledger.
+    const dial = report.resolved.landlinePhone;
+    const dialNumber = typeof dial?.value === "string" ? dial.value : undefined;
+    if (dialNumber) {
+      // Meter ONLY a person-direct find, by the actual provider that found it, and only
+      // when that provider carries a known cost rate. A cheap RapidAPI rung with no rate
+      // is per-call infra cost, not a per-find charge — so it records nothing. A no-find
+      // never reaches here, so we never pay for a miss or a company switchboard.
+      const provId = dial?.providerId ?? "";
+      const { rateCost } = await import("../billing/rates");
+      const unitCostUsd = rateCost(provId);
+      if (unitCostUsd > 0) {
+        const { recordUsage } = await import("../billing/ledger");
+        recordUsage({
+          workspaceId,
+          motion: p.motion ?? "bd",
+          category: "enrichment",
+          type: provId,
+          source: provId.startsWith("apify") ? "apify" : "rapidapi",
+          quantity: 1,
+          unitCostUsd,
+          meta: { prospectId, number: dialNumber },
+        });
+      }
+      const cls = await classifyLine(dialNumber, { workspaceId, motion: p.motion ?? "bd" });
+      if (cls.landlinePhone) p.landlinePhone = cls.landlinePhone;
+      else if (cls.mobilePhone) p.mobilePhone = cls.mobilePhone;
+      phone = cls.landlinePhone ?? cls.mobilePhone ?? dialNumber;
+    } else if (typeof report.subject.phone === "string") {
+      phone = report.subject.phone;
+    }
   } catch {
     /* leave unresolved; the recruiter can retry or add manually */
   }

@@ -29,6 +29,7 @@ import {
   guessDomainProvider,
   emailPatternProvider,
 } from "./waterfall";
+import { apifyDirectDialFinder } from "./apify";
 
 /* ------------------------------------------------------------------ */
 /* Shared RapidAPI transport                                           */
@@ -262,7 +263,7 @@ function makeLineFinder(
   return makeProvider<string>({
     id,
     label,
-    cost: 1,
+    cost: 0.01, // USD estimate per RapidAPI call (per-call billing; tune to your listing)
     typicalConfidence: 0.45,
     envKeys: ["RAPIDAPI_KEY", hostKey, pathKey],
     fn: async ({ subject, resolved }: EnrichmentInput): Promise<ProviderOutcome<string>> => {
@@ -280,8 +281,8 @@ function makeLineFinder(
         .replace("{linkedin}", encodeURIComponent(linkedin));
       const data = await rapidGet<unknown>(host, path);
       const number = pick(data, ["mobile", "cell", "phone", "phone_number", "direct_dial", "number"]);
-      if (!number) return { status: "miss", cost: 1 };
-      return { status: "hit", value: number, confidence: 0.5, cost: 1, raw: data };
+      if (!number) return { status: "miss", cost: 0.01 }; // RapidAPI bills per call, even on a miss
+      return { status: "hit", value: number, confidence: 0.5, cost: 0.01, raw: data };
     },
   });
 }
@@ -420,6 +421,14 @@ export interface CheapFirstOptions {
   includeLandline?: boolean;
   /** Global credit ceiling across the whole pipeline. */
   budget?: number;
+  /**
+   * HARD USD ceiling on what a single contact's DIAL (mobile/landline) may cost.
+   * Defaults to RECRUITEROS_MAX_DIAL_USD, or $0.03. The waterfall skips any dial
+   * provider whose cost would push the per-contact dial spend over this ceiling, so
+   * a contact's dial spend NEVER exceeds it. NOTE: at $0.03 the $0.10 Apify direct-dial
+   * rung is always skipped — set this to >= 0.10 to unlock it.
+   */
+  maxDialUsd?: number;
 }
 
 /**
@@ -435,6 +444,11 @@ export interface CheapFirstOptions {
  * Order encodes the user's rule: cheapest sources first, premium only as a fallback.
  */
 export function cheapFirstContactWaterfall(opts: CheapFirstOptions = {}): EnrichmentPlan {
+  // Hard per-contact USD ceiling on the DIAL steps. Default $0.03; env-tunable.
+  // Providers pricier than the remaining cap are skipped, so dial spend stays <= cap.
+  const dialCapUsd =
+    opts.maxDialUsd ?? Number(process.env.RECRUITEROS_MAX_DIAL_USD ?? "0.03");
+
   const emailFinders: EnrichmentProvider[] = [
     emailPatternProvider as EnrichmentProvider, // free permutation guess
     icypeasEmailFinder as EnrichmentProvider, // cheapest credible API (~$0.003/email)
@@ -481,9 +495,10 @@ export function cheapFirstContactWaterfall(opts: CheapFirstOptions = {}): Enrich
   if (opts.includeMobile) {
     steps.push({
       field: "mobilePhone",
+      maxCost: dialCapUsd, // HARD per-contact USD cap on the dial (default $0.03)
       providers: [
-        rapidMobileFinder as EnrichmentProvider, // cheap first (placeholder until configured)
-        ...(opts.backupMobileProviders ?? []), // premium mobile reveal on miss
+        rapidMobileFinder as EnrichmentProvider, // cheap first (~$0.01/call, placeholder until configured)
+        ...(opts.backupMobileProviders ?? []), // premium mobile reveal on miss (also cap-gated)
       ],
       mode: "first",
       acceptConfidence: 0.5,
@@ -492,9 +507,11 @@ export function cheapFirstContactWaterfall(opts: CheapFirstOptions = {}): Enrich
   if (opts.includeLandline) {
     steps.push({
       field: "landlinePhone",
+      maxCost: dialCapUsd, // HARD per-contact USD cap on the dial (default $0.03)
       providers: [
-        rapidLandlineFinder as EnrichmentProvider, // cheap first (placeholder until configured)
-        ...(opts.backupLandlineProviders ?? []), // premium direct-dial reveal on miss
+        rapidLandlineFinder as EnrichmentProvider, // cheap first (~$0.01/call, placeholder until configured)
+        apifyDirectDialFinder as EnrichmentProvider, // ryanclinton actor $0.10/found — SKIPPED while cap < $0.10
+        ...(opts.backupLandlineProviders ?? []), // premium direct-dial reveal on miss (also cap-gated)
       ],
       mode: "first",
       acceptConfidence: 0.5,
