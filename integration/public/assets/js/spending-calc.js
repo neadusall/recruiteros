@@ -21,7 +21,7 @@
 (function () {
   "use strict";
 
-  var KEY = "ros_spend_calc_v2";
+  var KEY = "ros_spend_calc_v3";
 
   var DEFAULTS = {
     accounts: 1,
@@ -41,7 +41,7 @@
     // Cloned Voice (plan + per-drop synthesis + LLM script + 1-min send)
     voicePerAccount: 200, voicePlan: 39, voiceSynthCost: 0.01, voiceLlmCost: 0.004, voiceSendCost: 0.007,
     // LinkedIn outreach (per profile messaging + per-message AI)
-    linkedinProfilesPerAccount: 1, linkedinPerProfile: 5.50, linkedinMsgsPerAccount: 500, linkedinChars: 2000
+    linkedinProfilesPerAccount: 1, linkedinPerProfile: 55, linkedinMsgsPerAccount: 500, linkedinChars: 2000
   };
   var LADDER = [1, 2, 3, 5, 10, 25, 50];
 
