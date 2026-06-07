@@ -477,6 +477,8 @@
           '<input id="imQuery" type="text" autocomplete="off" placeholder="' + esc(IM_PLACEHOLDER[imMode]) + '" />' +
           '<button type="submit" class="btn btn-primary" id="imSearchBtn">Find companies</button>' +
         "</form>" +
+        // Daily import read — populated on open so you see today's intake immediately.
+        '<div id="imImportBanner" class="im-import"></div>' +
         // Industries — multi-select with Select all / Clear, in a compact scroll area.
         '<div class="im-group" id="imIndGroup">' +
           '<div class="im-group-head"><span class="im-group-title">Industries</span>' +
@@ -501,6 +503,7 @@
       '<div id="imBody"><div class="empty">Pick one or more industries (or Select all) to see who\'s hiring, ranked by hiring intent.</div></div>';
 
     renderSavedSignals();
+    loadImportBanner();
     var form = $("#imForm"), input = $("#imQuery");
 
     function syncChips() {
@@ -661,6 +664,30 @@
   function wireTicker(body) {
     var x = body.querySelector("#imTickerX");
     if (x) x.addEventListener("click", function () { var t = body.querySelector("#imTicker"); if (t) t.style.display = "none"; });
+  }
+
+  // Prominent daily-import banner at the top of Hire Signals — loads on open so today's
+  // intake from the free APIs is visible before you even search.
+  function loadImportBanner() {
+    api("/in-market").then(function (d) { if (d && d.stats) { imStats = d.stats; renderImportBanner(); } }).catch(function () {});
+    renderImportBanner(); // render whatever we have (or the "importing now" state) immediately
+  }
+  function renderImportBanner() {
+    var el = document.getElementById("imImportBanner"); if (!el) return;
+    var s = imStats || { total: 0, addedToday: 0, lastAddedAt: null, days: [] };
+    var added = s.addedToday || 0, total = s.total || 0;
+    var lastStr = "";
+    if (s.lastAddedAt) { try { lastStr = " · updated " + new Date(s.lastAddedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); } catch (e) {} }
+    var log = (s.days || []).slice(0, 5).map(function (d) {
+      var lbl = d.date; try { lbl = new Date(d.date + "T00:00:00").toLocaleDateString([], { month: "short", day: "numeric" }); } catch (e) {}
+      return '<span class="im-import-day">' + esc(lbl) + " <b>+" + (d.added || 0) + "</b></span>";
+    }).join("");
+    if (total > 0) {
+      el.innerHTML = '<div class="im-import-main">📈 <b>+' + added + '</b> companies imported today from free job APIs · <b>' + total + '</b> in your hiring pool' + esc(lastStr) + "</div>" +
+        (log ? '<div class="im-import-log">' + log + "</div>" : "");
+    } else {
+      el.innerHTML = '<div class="im-import-main">📈 Importing now from the free job APIs — first companies land within ~15 min, then this climbs every day.</div>';
+    }
   }
 
   function leadCard(l) {
