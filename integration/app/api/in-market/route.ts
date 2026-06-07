@@ -20,7 +20,16 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response;
   const all = await getCore().listProspects(g.ctx.workspace.id);
   const promoted = all.filter((p) => p.category === "in_market").slice(0, 50);
-  return ok({ promoted });
+  // Daily import read for the Hire Signals banner; also kick the accumulator so the
+  // pool fills even before the first search. Best-effort.
+  let stats: unknown;
+  try {
+    const { ensureAccumulator } = await import("../../../lib/inmarket/accumulator");
+    const { poolStats } = await import("../../../lib/inmarket/pool");
+    ensureAccumulator();
+    stats = await poolStats();
+  } catch { /* ignore */ }
+  return ok({ promoted, stats });
 }
 
 export async function POST(req: Request) {
