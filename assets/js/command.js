@@ -172,6 +172,7 @@
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing },
     data: { title: "Data", crumb: "Build", action: null, render: renderData },
+    sending: { title: "Sending", crumb: "Build", action: null, render: renderSending },
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
@@ -681,7 +682,8 @@
           '<span class="im-mgr-arrow">→</span>' +
           '<span class="im-mgr-title">' + esc(m.managerTitle) + "</span>" +
           '<span class="im-fn">' + esc(m.function) + "</span>" +
-          '<span class="im-mgr-who">' + who + "</span></label>";
+          '<span class="im-mgr-who">' + who + "</span>" +
+          (m.why ? '<span class="im-mgr-why" title="Why this owner">' + esc(m.why) + "</span>" : "") + "</label>";
       }).join("");
     } else {
       // No role breakdown: offer the company's buyer / decision-maker as the prospect.
@@ -724,9 +726,12 @@
         '<span class="cls cls-' + scoreCls + ' im-score" title="Hiring-intent score">' + score + "</span></div>" +
       '<div class="im-reason">' + esc(l.reason) + src + "</div>" +
       renew +
-      '<details class="im-managers-d"' + (anyChecked ? " open" : "") + '>' +
-        '<summary class="im-mgr-summary">👤 ' + nRoles + " hiring manager" + (nRoles === 1 ? "" : "s") + " &amp; open role" + (nRoles === 1 ? "" : "s") + "</summary>" +
-        '<div class="im-managers">' + rows + "</div></details>" +
+      '<details class="im-managers-d"' + ((anyChecked || l.aiRefined) ? " open" : "") + '>' +
+        '<summary class="im-mgr-summary">👤 ' + nRoles + " hiring manager" + (nRoles === 1 ? "" : "s") + " &amp; open role" + (nRoles === 1 ? "" : "s") +
+          (l.aiRefined ? ' <span class="im-ai-tag">🤖 AI-matched</span>' : "") + "</summary>" +
+        '<div class="im-managers">' + rows +
+          '<button type="button" class="im-ai-refine" data-id="' + esc(l.id) + '">' + (l.aiRefined ? "🤖 Re-run AI match" : "🤖 Refine with AI") + "</button>" +
+        "</div></details>" +
       (l.scoreReasons && l.scoreReasons.length ? '<div class="im-lead-reasons">' + l.scoreReasons.slice(0, 3).map(esc).join(" · ") + "</div>" : "") +
       "</div>";
   }
@@ -799,6 +804,28 @@
         var done = function () { btn.textContent = "✓ Copied"; setTimeout(function () { btn.textContent = "Copy follow-up message"; }, 1800); };
         if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(msg).then(done).catch(done); }
         else { try { var ta = document.createElement("textarea"); ta.value = msg; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); } catch (e) {} done(); }
+      });
+    });
+    // AI decision-maker refinement for a single company (on demand, uses the LLM key).
+    Array.prototype.forEach.call(body.querySelectorAll(".im-ai-refine"), function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        var id = btn.getAttribute("data-id");
+        var lead = imFindLead(id); if (!lead) return;
+        btn.disabled = true; btn.textContent = "🤖 Thinking…";
+        var roles = (lead.roles && lead.roles.length) ? lead.roles
+          : (lead.hiringManagers || []).map(function (m) { return m.role; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+        send("/in-market", "POST", { action: "refine_managers", lead: { company: lead.company, industry: lead.industry, headcountBand: lead.headcountBand, roles: roles } }).then(function (r) {
+          if (r.ok && r.data && r.data.hiringManagers && r.data.hiringManagers.length) {
+            lead.hiringManagers = r.data.hiringManagers; lead.aiRefined = true;
+            Object.keys(imPicks).forEach(function (k) { if (k.indexOf(id + "::") === 0) delete imPicks[k]; });
+            var y = window.scrollY; renderImResults(); window.scrollTo(0, y);
+            toast("AI matched the decision-makers for " + lead.company);
+          } else {
+            btn.disabled = false; btn.textContent = "🤖 Refine with AI";
+            toast((r.data && r.data.error) === "ai_unavailable" ? "Add ANTHROPIC_API_KEY to enable AI matching." : "Couldn't refine right now.");
+          }
+        }).catch(function () { btn.disabled = false; btn.textContent = "🤖 Refine with AI"; toast("Could not reach the server."); });
       });
     });
   }
@@ -2119,6 +2146,319 @@
         }).catch(function () { toast("Could not reach the server."); go.disabled = false; go.textContent = "Pull"; });
       });
     });
+  }
+
+  /* ---------------- Sending ----------------
+     Owned cold-email infrastructure. Provision a Hetzner MTA server, then FEED IN
+     DOMAINS — each one auto-generates DKIM, creates the Hetzner DNS zone, writes the
+     full record set (SPF/DKIM/DMARC/MX/tracking/return-path), and sets PTR on the IP.
+     The only manual step is a one-time nameserver delegation at the registrar.
+     Backend: /api/sending + lib/sending/*. */
+  function renderSending(el) {
+    el.innerHTML = head("Sending", "Your owned cold-email infrastructure. Provision an MTA server, feed in domains, and every DNS record (SPF, DKIM, DMARC, MX, PTR, tracking) is set automatically on Hetzner.") +
+      '<style>' +
+      '.sd-card{margin-bottom:16px}' +
+      '.sd-cfg{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin-bottom:14px}' +
+      '.sd-dot{display:inline-flex;align-items:center;gap:6px}' +
+      '.sd-step{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted,#8b93a1);margin-bottom:8px}' +
+      '.sd-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}' +
+      '.sd-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}' +
+      '.sd-table th,.sd-table td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line,#20242c);vertical-align:top}' +
+      '.sd-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8b93a1)}' +
+      '.sd-badge{font-size:11px;padding:2px 8px;border-radius:20px;white-space:nowrap}' +
+      '.sd-b-active{background:#10491f;color:#7ff0a0}.sd-b-wait{background:#4a3a10;color:#f0d27f}' +
+      '.sd-b-err{background:#4a1414;color:#f08f8f}.sd-b-prov{background:#15324a;color:#7fc4f0}.sd-b-pending{background:#262a33;color:#9aa3b2}' +
+      '.sd-chk{display:inline-flex;gap:5px;flex-wrap:wrap}' +
+      '.sd-chip{font-size:10px;padding:2px 7px;border-radius:6px;border:1px solid var(--line,#2a2f3a)}' +
+      '.sd-chip.ok{background:#10491f;color:#7ff0a0;border-color:transparent}' +
+      '.sd-chip.no{background:#20242c;color:#6b7280}' +
+      '.sd-ns{background:var(--bg,#0e0f13);border:1px dashed #f0d27f;border-radius:8px;padding:10px 12px;margin-top:8px;font-size:12px}' +
+      '.sd-ns code{background:rgba(255,255,255,.06);padding:2px 6px;border-radius:4px;font-family:monospace}' +
+      '.sd-mono{font-family:monospace;font-size:12px}' +
+      '#sdDomains{width:100%;min-height:90px;font-family:monospace;font-size:13px;padding:10px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit}' +
+      '</style>' +
+      '<div id="sdCfg" class="sd-cfg"></div>' +
+      '<div class="card sd-card"><div class="sd-step">Step 1 · MTA server (Hetzner)</div><div id="sdServers">' + loading() + '</div></div>' +
+      '<div class="card sd-card"><div class="sd-step">Step 2 · Feed in domains</div>' +
+        '<p class="muted" style="font-size:13px;margin:0 0 8px">Paste sending domains (one per line). Each is added and fully provisioned automatically — DKIM, zone, all records, PTR.</p>' +
+        '<textarea id="sdDomains" placeholder="recruitco.io&#10;recruiters-co.com&#10;recruitersteam.com"></textarea>' +
+        '<div class="sd-row" style="margin-top:8px"><button class="btn btn-primary btn-sm" id="sdAdd">⚡ Add &amp; auto-provision</button>' +
+        '<span class="muted" style="font-size:12px">Needs an active MTA server + Hetzner tokens.</span></div>' +
+      '</div>' +
+      '<div class="card sd-card"><div class="sd-row" style="justify-content:space-between"><div class="sd-step" style="margin:0">Domains</div>' +
+        '<div class="sd-row"><button class="btn btn-ghost btn-sm" id="sdTick">↻ Daily tick</button><button class="btn btn-ghost btn-sm" id="sdGov">🛡 Run governor</button></div></div>' +
+        '<div id="sdList">' + loading() + '</div></div>' +
+      '<div class="card sd-card"><div class="sd-step">Deliverability</div><div id="sdDeliv">' + loading() + '</div></div>' +
+      '<div class="card sd-card"><div class="sd-step">Seed inboxes (placement testing)</div><div id="sdSeeds">' + loading() + '</div></div>';
+
+    var state = { domains: [], servers: [], mailboxes: [], providers: { dns: false, cloud: false }, suppression: [], events: [], seeds: [], seedTests: [], stats: {} };
+
+    function badge(s) {
+      var m = { active: ["sd-b-active", "active"], awaiting_ns: ["sd-b-wait", "awaiting NS"], verifying: ["sd-b-prov", "verifying"],
+        provisioning: ["sd-b-prov", "provisioning"], error: ["sd-b-err", "error"], pending: ["sd-b-pending", "pending"], paused: ["sd-b-err", "paused"] };
+      var x = m[s] || ["sd-b-pending", s];
+      return '<span class="sd-badge ' + x[0] + '">' + esc(x[1]) + '</span>';
+    }
+
+    function load() {
+      api("/sending").then(function (d) {
+        d = d || {};
+        state.domains = d.domains || []; state.servers = d.servers || []; state.mailboxes = d.mailboxes || [];
+        state.providers = d.providers || { dns: false, cloud: false };
+        state.suppression = d.suppression || []; state.events = d.events || [];
+        state.seeds = d.seeds || []; state.seedTests = d.seedTests || []; state.stats = d.stats || {};
+        paintCfg(); paintServers(); paintList(); paintDeliv(); paintSeeds();
+      }).catch(function () { $("#sdList", el).innerHTML = '<div class="empty">Could not load sending infrastructure.</div>'; });
+    }
+
+    function paintCfg() {
+      var p = state.providers;
+      function dot(on, label) { return '<span class="sd-dot">' + (on ? "🟢" : "⚪") + ' ' + label + '</span>'; }
+      $("#sdCfg", el).innerHTML =
+        dot(p.cloud, "Hetzner Cloud") + dot(p.dns, "Hetzner DNS") +
+        dot(p.mta, "MTA send (SENDING_EMAIL_PROVIDER=mta)") + dot(p.snds, "MS SNDS") + dot(p.postmaster, "Google Postmaster");
+    }
+
+    function paintServers() {
+      var body = $("#sdServers", el);
+      var inp = 'padding:7px 10px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit';
+      var rows = state.servers.map(function (s) {
+        var act = s.status === "active";
+        var postal = s.postalReady ? '🟢 ready' : (s.postalApiKey ? '🟡 key set' : '⚪ not set');
+        return '<tr><td><b>' + esc(s.name) + '</b><div class="muted sd-mono">' + esc(s.hostname) + '</div></td>' +
+          '<td>' + (s.ip ? '<span class="sd-mono">' + esc(s.ip) + '</span>' : '<span class="muted">—</span>') + '</td>' +
+          '<td>' + (s.ptr ? '✅ ' + esc(s.ptr) : '<span class="muted">no PTR</span>') + '</td>' +
+          '<td>' + badge(s.status) + (s.lastError ? '<div class="muted" style="font-size:11px">' + esc(s.lastError) + '</div>' : '') + '</td>' +
+          '<td><span class="sd-mono" style="font-size:11px">Postal: ' + postal + '</span></td>' +
+          '<td>' + (act ? '<button class="btn btn-ghost btn-sm" data-postal="' + esc(s.id) + '">Postal creds</button>' : '<button class="btn btn-ghost btn-sm" data-prov-server="' + esc(s.id) + '">Provision</button>') + '</td></tr>' +
+          '<tr id="sdPostal-' + esc(s.id) + '" style="display:none"><td colspan="6"><div class="sd-row" style="padding:6px 0">' +
+            '<input data-phost="' + esc(s.id) + '" placeholder="https://' + esc(s.hostname) + '" value="' + esc(s.postalHost || ("https://" + s.hostname)) + '" style="flex:1;min-width:220px;' + inp + '">' +
+            '<input data-pkey="' + esc(s.id) + '" placeholder="X-Server-API-Key from Postal" style="flex:1;min-width:200px;' + inp + '">' +
+            '<button class="btn btn-sm" data-psave="' + esc(s.id) + '">Save</button>' +
+          '</div><div class="muted" style="font-size:11px">After the box boots, create an org + mail server in Postal at the host above, then paste its server API key here.</div></td></tr>';
+      }).join("");
+      body.innerHTML =
+        (state.servers.length ? '<table class="sd-table"><thead><tr><th>Server</th><th>IP</th><th>PTR / rDNS</th><th>Status</th><th>Postal</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<p class="muted" style="font-size:13px;margin:0 0 10px">No MTA server yet. Add one — it becomes the MX target + PTR host for all domains.</p>') +
+        '<div class="sd-row" style="margin-top:10px">' +
+          '<input id="sdSrvName" placeholder="server name (e.g. mta-1)" style="' + inp + '">' +
+          '<input id="sdSrvHost" placeholder="mail hostname (e.g. mail.recruitco.io)" style="flex:1;min-width:220px;' + inp + '">' +
+          '<button class="btn btn-sm" id="sdAddSrv">＋ Add server</button>' +
+        '</div>';
+      Array.prototype.forEach.call(body.querySelectorAll("[data-prov-server]"), function (b) {
+        b.addEventListener("click", function () { provisionServer(b.getAttribute("data-prov-server"), b); });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-postal]"), function (b) {
+        b.addEventListener("click", function () { var r = document.getElementById("sdPostal-" + b.getAttribute("data-postal")); if (r) r.style.display = r.style.display === "none" ? "" : "none"; });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-psave]"), function (b) {
+        b.addEventListener("click", function () {
+          var id = b.getAttribute("data-psave");
+          var host = body.querySelector('[data-phost="' + id + '"]').value.trim();
+          var key = body.querySelector('[data-pkey="' + id + '"]').value.trim();
+          if (!host || !key) { toast("Host + API key required"); return; }
+          send("/sending", "POST", { action: "set-postal", id: id, host: host, apiKey: key }).then(function (r) {
+            if (r.ok) { toast("Postal creds saved"); load(); } else toast("Save failed");
+          });
+        });
+      });
+      $("#sdAddSrv", el).addEventListener("click", function () {
+        var name = $("#sdSrvName", el).value.trim(), host = $("#sdSrvHost", el).value.trim();
+        if (!name || !host) { toast("Name + hostname required"); return; }
+        send("/sending", "POST", { action: "add-server", name: name, hostname: host }).then(function (r) {
+          if (r.ok) { toast("Server added — provision it to create the box + PTR"); load(); } else toast("Add failed (" + (r.data.error || r.status) + ")");
+        });
+      });
+    }
+
+    function provisionServer(id, btn) {
+      if (btn) { btn.disabled = true; btn.textContent = "Provisioning…"; }
+      send("/sending", "POST", { action: "provision-server", id: id }).then(function (r) {
+        if (r.ok) toast("Server provisioned — IP + PTR set"); else toast(r.data.error || "Provision failed");
+        load();
+      }).catch(function () { toast("Server error"); load(); });
+    }
+
+    function paintList() {
+      var body = $("#sdList", el);
+      if (!state.domains.length) { body.innerHTML = '<div class="empty">No domains yet. Paste some above and hit auto-provision.</div>'; return; }
+      body.innerHTML = state.domains.map(function (d) {
+        var chk = (d.checklist || []).map(function (c) {
+          return '<span class="sd-chip ' + (c.present ? "ok" : "no") + '">' + (c.present ? "✓ " : "") + esc(c.label) + '</span>';
+        }).join("");
+        var mboxes = state.mailboxes.filter(function (m) { return m.domainId === d.id; });
+        var ns = (d.status === "awaiting_ns" || d.status === "verifying") && d.nameservers && d.nameservers.length
+          ? '<div class="sd-ns">⚠️ One-time step: at your registrar, set this domain\'s nameservers to:<br>' +
+            d.nameservers.map(function (n) { return '<code>' + esc(n) + '</code>'; }).join(" ") +
+            '<br><span class="muted">Then click Verify. Everything else is already written into Hetzner DNS.</span></div>'
+          : '';
+        var m = d.metrics || { sent: 0, delivered: 0, bounced: 0, complained: 0 };
+        var pct = function (p, w) { return w > 0 ? ((p / w) * 100).toFixed(1) + "%" : "0%"; };
+        var metrics = m.sent ? '<div class="sd-chk" style="margin-top:6px">' +
+          '<span class="sd-chip">📤 ' + m.sent + ' sent</span>' +
+          '<span class="sd-chip ' + (m.bounced / m.sent > 0.02 ? "no" : "ok") + '">↩ ' + pct(m.bounced, m.sent) + ' bounce</span>' +
+          '<span class="sd-chip ' + (m.complained / m.sent > 0.001 ? "no" : "ok") + '">🚩 ' + pct(m.complained, m.sent) + ' complaint</span>' +
+          (d.reputation ? '<span class="sd-chip">⭐ rep: ' + esc(d.reputation.tier || "—") + '</span>' : '') +
+          '</div>' : '';
+        var warm = mboxes.length ? '<div class="muted" style="font-size:11px;margin-top:4px">warm-up: ' +
+          mboxes.map(function (x) { return esc(x.address.split("@")[0]) + " d" + x.warmupDay + " (" + x.sentToday + "/" + x.dailyCap + ")"; }).join(" · ") + '</div>' : '';
+        var paused = d.pausedReason ? '<div class="sd-chip no" style="margin-top:6px">⏸ paused: ' + esc(d.pausedReason) + '</div>' : '';
+        return '<div style="border:1px solid var(--line,#20242c);border-radius:10px;padding:12px;margin-bottom:10px">' +
+          '<div class="sd-row" style="justify-content:space-between">' +
+            '<div><b class="sd-mono">' + esc(d.domain) + '</b> ' + badge(d.status) + '</div>' +
+            '<div class="sd-row">' +
+              '<button class="btn btn-ghost btn-sm" data-verify="' + esc(d.id) + '">Verify</button>' +
+              '<button class="btn btn-ghost btn-sm" data-seedtest="' + esc(d.id) + '">Seed test</button>' +
+              '<button class="btn btn-ghost btn-sm" data-psetup="' + esc(d.id) + '">Postal setup</button>' +
+              '<button class="btn btn-ghost btn-sm" data-reprov="' + esc(d.id) + '">Re-provision</button>' +
+              '<button class="btn btn-ghost btn-sm" data-del="' + esc(d.id) + '">Delete</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="sd-chk" style="margin-top:8px">' + chk + '</div>' +
+          metrics + paused + ns +
+          '<div class="sd-row" style="margin-top:8px"><span class="muted" style="font-size:12px">' + mboxes.length + ' mailbox' + (mboxes.length === 1 ? '' : 'es') + '</span>' +
+            '<input data-mbox-addr="' + esc(d.id) + '" placeholder="ryan@' + esc(d.domain) + '" style="padding:6px 9px;border-radius:7px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit;font-size:12px">' +
+            '<button class="btn btn-ghost btn-sm" data-add-mbox="' + esc(d.id) + '">＋ mailbox</button></div>' +
+          warm +
+          '<div id="sdSetup-' + esc(d.id) + '"></div>' +
+          (d.lastError ? '<div class="muted" style="font-size:11px;margin-top:6px">' + esc(d.lastError) + '</div>' : '') +
+          '</div>';
+      }).join("");
+
+      Array.prototype.forEach.call(body.querySelectorAll("[data-verify]"), function (b) {
+        b.addEventListener("click", function () { act("verify-domain", b.getAttribute("data-verify"), b, "Verified"); });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-reprov]"), function (b) {
+        b.addEventListener("click", function () { act("provision-domain", b.getAttribute("data-reprov"), b, "Re-provisioned"); });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-del]"), function (b) {
+        b.addEventListener("click", function () { send("/sending", "POST", { action: "delete-domain", id: b.getAttribute("data-del") }).then(function () { load(); }); });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-add-mbox]"), function (b) {
+        b.addEventListener("click", function () {
+          var id = b.getAttribute("data-add-mbox");
+          var addr = body.querySelector('[data-mbox-addr="' + id + '"]').value.trim();
+          if (!addr) { toast("Enter an address"); return; }
+          send("/sending", "POST", { action: "add-mailbox", domainId: id, address: addr }).then(function (r) {
+            if (r.ok) { toast("Mailbox added (warming)"); load(); } else toast("Add failed");
+          });
+        });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-seedtest]"), function (b) {
+        b.addEventListener("click", function () {
+          b.disabled = true; b.textContent = "Sending…";
+          send("/sending", "POST", { action: "seed-test", domainId: b.getAttribute("data-seedtest") }).then(function (r) {
+            b.disabled = false; b.textContent = "Seed test";
+            toast(r.ok ? "Seed probes sent — placement fills in as seeds report" : (r.data.error || "Need seed inboxes first"));
+            load();
+          });
+        });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-psetup]"), function (b) {
+        b.addEventListener("click", function () {
+          var id = b.getAttribute("data-psetup");
+          var host = document.getElementById("sdSetup-" + id);
+          if (host && host.innerHTML) { host.innerHTML = ""; return; }
+          send("/sending", "POST", { action: "domain-setup", id: id }).then(function (r) {
+            if (!r.ok || !r.data.setup) { toast("No setup available"); return; }
+            var s = r.data.setup;
+            host.innerHTML = '<div class="sd-ns" style="border-color:#7fc4f0">🔑 Postal config for this domain (paste once into Postal):<br>' +
+              'Selector: <code>' + esc(s.selector) + '</code><br>' +
+              '<div class="muted" style="margin:4px 0">' + esc(s.note) + '</div>' +
+              (s.privateKeyPem ? '<details><summary style="cursor:pointer">Show DKIM private key</summary><textarea readonly style="width:100%;height:120px;font-family:monospace;font-size:11px;margin-top:4px">' + esc(s.privateKeyPem) + '</textarea></details>' : '') +
+              '</div>';
+          });
+        });
+      });
+    }
+
+    function paintDeliv() {
+      var body = $("#sdDeliv", el); if (!body) return;
+      var st = state.stats || {};
+      var tot = state.domains.reduce(function (a, d) { var m = d.metrics || {}; return { sent: a.sent + (m.sent || 0), bounced: a.bounced + (m.bounced || 0), complained: a.complained + (m.complained || 0), delivered: a.delivered + (m.delivered || 0) }; }, { sent: 0, bounced: 0, complained: 0, delivered: 0 });
+      var pct = function (p, w) { return w > 0 ? ((p / w) * 100).toFixed(2) + "%" : "—"; };
+      var ev = (state.events || []).slice(0, 20).map(function (e) {
+        var ic = { sent: "📤", delivered: "✅", bounce: "↩", complaint: "🚩", open: "👁" }[e.type] || "•";
+        return '<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--line,#1a1d24)">' + ic + ' <b>' + esc(e.type) + '</b> ' + esc(e.to || "") + (e.detail ? ' <span class="muted">' + esc(String(e.detail).slice(0, 60)) + '</span>' : '') + '</div>';
+      }).join("") || '<p class="muted" style="font-size:12px">No delivery events yet. They flow in from the Postal webhook (/api/sending/webhook).</p>';
+      body.innerHTML =
+        '<div class="dt-stats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">' +
+          '<div class="dt-stat"><b>' + (tot.sent || 0).toLocaleString() + '</b><span>sent</span></div>' +
+          '<div class="dt-stat"><b>' + pct(tot.bounced, tot.sent) + '</b><span>bounce rate</span></div>' +
+          '<div class="dt-stat"><b>' + pct(tot.complained, tot.sent) + '</b><span>complaint rate</span></div>' +
+          '<div class="dt-stat"><b>' + (st.suppressed || 0).toLocaleString() + '</b><span>suppressed</span></div>' +
+        '</div>' +
+        '<div class="muted" style="font-size:11px;margin-bottom:6px">Governor auto-pauses a domain at bounce&gt;2% or complaint&gt;0.1%. Webhook: <code class="sd-mono">/api/sending/webhook</code></div>' +
+        '<div class="sd-step" style="margin-top:8px">Recent events</div>' + ev;
+    }
+
+    function paintSeeds() {
+      var body = $("#sdSeeds", el); if (!body) return;
+      var inp = 'padding:6px 9px;border-radius:7px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit;font-size:12px';
+      var list = (state.seeds || []).map(function (s) {
+        return '<span class="sd-chip" style="margin:2px">' + esc(s.provider) + ': ' + esc(s.address) + ' <a href="#" data-delseed="' + esc(s.id) + '" style="color:#f08f8f">✕</a></span>';
+      }).join("") || '<span class="muted" style="font-size:12px">No seed inboxes yet. Add a few across Gmail/Outlook/Yahoo to run placement tests.</span>';
+      var tests = (state.seedTests || []).slice(0, 5).map(function (t) {
+        var done = t.status === "complete";
+        var label = done ? (t.inboxRatePct != null ? ('<b>' + t.inboxRatePct + '% inbox</b>') : 'complete') : 'sending…';
+        return '<div style="font-size:12px;padding:3px 0">' + esc(t.domainId) + ' · ' + label +
+          ' <span class="muted">' + t.results.map(function (r) { return r.provider + ":" + r.placement; }).join(" ") + '</span></div>';
+      }).join("");
+      body.innerHTML =
+        '<div style="margin-bottom:8px">' + list + '</div>' +
+        '<div class="sd-row"><select id="sdSeedProv" style="' + inp + '"><option value="gmail">Gmail</option><option value="outlook">Outlook</option><option value="yahoo">Yahoo</option><option value="other">Other</option></select>' +
+          '<input id="sdSeedAddr" placeholder="seed@gmail.com" style="flex:1;min-width:180px;' + inp + '">' +
+          '<button class="btn btn-ghost btn-sm" id="sdAddSeed">＋ Add seed</button></div>' +
+        (tests ? ('<div class="sd-step" style="margin-top:10px">Recent placement tests</div>' + tests) : '');
+      Array.prototype.forEach.call(body.querySelectorAll("[data-delseed]"), function (a) {
+        a.addEventListener("click", function (e) { e.preventDefault(); send("/sending", "POST", { action: "delete-seed", id: a.getAttribute("data-delseed") }).then(load); });
+      });
+      $("#sdAddSeed", el).addEventListener("click", function () {
+        var addr = $("#sdSeedAddr", el).value.trim(); if (!addr) { toast("Enter a seed address"); return; }
+        send("/sending", "POST", { action: "add-seed", provider: $("#sdSeedProv", el).value, address: addr }).then(function (r) {
+          if (r.ok) { toast("Seed added"); load(); } else toast("Add failed");
+        });
+      });
+    }
+
+    function act(action, id, btn, okMsg) {
+      if (btn) { btn.disabled = true; var t = btn.textContent; btn.textContent = "…"; }
+      send("/sending", "POST", { action: action, id: id }).then(function (r) {
+        if (r.ok) toast(okMsg); else toast(r.data.error || "Failed");
+        load();
+      }).catch(function () { toast("Server error"); load(); });
+    }
+
+    $("#sdTick", el).addEventListener("click", function () {
+      var b = $("#sdTick", el); b.disabled = true; b.textContent = "Running…";
+      send("/sending", "POST", { action: "daily-tick" }).then(function (r) {
+        b.disabled = false; b.textContent = "↻ Daily tick";
+        if (r.ok) { var rep = r.data.report || {}; toast("Tick: " + (rep.warmup ? rep.warmup.advanced + " ramped" : "") + (rep.paused && rep.paused.length ? ", " + rep.paused.length + " paused" : "")); load(); } else toast("Tick failed");
+      });
+    });
+    $("#sdGov", el).addEventListener("click", function () {
+      send("/sending", "POST", { action: "run-governor" }).then(function (r) {
+        if (r.ok) { var p = r.data.paused || []; toast(p.length ? ("Paused " + p.length + " domain(s)") : "All domains healthy"); load(); } else toast("Governor failed");
+      });
+    });
+
+    $("#sdAdd", el).addEventListener("click", function () {
+      var domains = $("#sdDomains", el).value.split(/[\s,]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+      if (!domains.length) { toast("Paste at least one domain"); return; }
+      var btn = $("#sdAdd", el); btn.disabled = true; btn.textContent = "Provisioning " + domains.length + "…";
+      send("/sending", "POST", { action: "add-domains", domains: domains }).then(function (r) {
+        btn.disabled = false; btn.textContent = "⚡ Add & auto-provision";
+        if (r.ok) {
+          var res = r.data.results || [];
+          var okN = res.filter(function (x) { return !x.error; }).length;
+          var errs = res.filter(function (x) { return x.error; });
+          toast("Provisioned " + okN + "/" + res.length + (errs.length ? " — " + (errs[0].error || "some errors") : ""));
+          $("#sdDomains", el).value = "";
+          load();
+        } else { toast("Failed (" + (r.data.error || r.status) + ")"); }
+      }).catch(function () { btn.disabled = false; btn.textContent = "⚡ Add & auto-provision"; toast("Could not reach server"); });
+    });
+
+    load();
   }
 
   /* ---------------- JD Sourcing ----------------

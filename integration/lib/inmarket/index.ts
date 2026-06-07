@@ -62,6 +62,10 @@ export interface HiringManagerLead {
   /** A real, resolved decision-maker name when the engine found one for this function. */
   managerName?: string;
   managerLinkedin?: string;
+  /** Short rationale when the owner was inferred by AI (e.g. "approves eng hires"). */
+  why?: string;
+  /** True when this manager was resolved by the AI inference rather than the heuristic. */
+  ai?: boolean;
 }
 
 /** One in-market lead surfaced to the recruiter. */

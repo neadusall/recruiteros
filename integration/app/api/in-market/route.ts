@@ -44,6 +44,24 @@ export async function POST(req: Request) {
     }
   }
 
+  // AI decision-maker inference for one company (on demand, uses ANTHROPIC_API_KEY).
+  if (b?.action === "refine_managers") {
+    const lead = (b.lead ?? {}) as Partial<InMarketLead>;
+    try {
+      const { aiHiringManagers } = await import("../../../lib/inmarket/aiManagers");
+      const hiringManagers = await aiHiringManagers({
+        company: lead.company ?? "",
+        industry: lead.industry,
+        headcountBand: lead.headcountBand,
+        roles: lead.roles ?? [],
+      });
+      if (!hiringManagers) return fail("ai_unavailable", 409, { detail: "set ANTHROPIC_API_KEY (or no roles)" });
+      return ok({ hiringManagers });
+    } catch (e: any) {
+      return fail(e?.message ?? "refine_failed", e?.status ?? 400);
+    }
+  }
+
   // Default: a market search.
   const result = await searchInMarket(
     {

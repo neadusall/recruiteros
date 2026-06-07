@@ -304,6 +304,11 @@
 .im-mgr-title { font-size: 13px; color: var(--text-muted); }
 .im-fn { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 99px; background: rgba(124,92,255,0.16); color: #b9a6ff; }
 .im-mgr-who { font-size: 12.5px; color: var(--text-muted); margin-left: auto; }
+.im-mgr-why { flex-basis: 100%; font-size: 11.5px; color: var(--text-dim); font-style: italic; margin-left: 26px; }
+.im-ai-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 99px; background: rgba(77,208,255,0.14); color: var(--brand-2); margin-left: 4px; }
+.im-ai-refine { appearance: none; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; margin-top: 8px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); transition: all .12s ease; }
+.im-ai-refine:hover { border-color: var(--brand-2); color: #fff; }
+.im-ai-refine:disabled { opacity: .6; cursor: default; }
 .im-lead-reasons { font-size: 12px; color: var(--text-dim); margin-top: 12px; }
 
 /* Renewed-demand lead (already in Prospects, but hiring again) */
@@ -757,3 +762,62 @@ html[data-theme="light"] .sl-status.off { background: rgba(16,18,40,.05); }
 .pr-seq-grp { display: inline-flex; align-items: center; gap: 6px; }
 .pr-bulk-sel { background: var(--surface); border: 1px solid var(--border-strong); color: var(--text); border-radius: 8px; padding: 6px 9px; font: inherit; font-size: 12.5px; cursor: pointer; max-width: 220px; }
 .pr-seqtag { display: inline-block; margin-left: 8px; font-size: 11px; color: var(--brand-2, #4dd0ff); background: rgba(77, 208, 255, .10); border: 1px solid rgba(77, 208, 255, .28); border-radius: 6px; padding: 1px 7px; vertical-align: middle; }
+
+/* ============================================================
+   2026 visual refresh — portal polish layer (loads last, so it
+   elevates existing components without touching structure).
+   ============================================================ */
+
+/* Brand mark + wordmark */
+.cmd-side .brand { font-weight: 800; letter-spacing: -0.02em; font-size: 19px; }
+.cmd-side .brand .logo {
+  width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px;
+  background: linear-gradient(135deg, #7c5cff, #4dd0ff); color: #0a0a12; font-weight: 900;
+  box-shadow: 0 6px 18px -6px rgba(124, 92, 255, .65);
+}
+.cmd-side .brand .os {
+  background: linear-gradient(120deg, #b9a6ff, #8be7ff); -webkit-background-clip: text;
+  background-clip: text; color: transparent; font-weight: 800;
+}
+
+/* Sidebar: subtle depth + glass */
+.sidebar.cmd-side { background: linear-gradient(180deg, rgba(24, 24, 34, .92), rgba(13, 13, 22, .82)); backdrop-filter: blur(14px); border-right: 1px solid var(--border); }
+html[data-theme="light"] .sidebar.cmd-side { background: linear-gradient(180deg, #ffffff, #f6f7fc); border-right-color: var(--border); }
+
+/* Nav items: smoother, with a gradient-tinted active state */
+.cmd-nav .nav-item { border-radius: 11px; transition: background .14s ease, color .14s ease, box-shadow .14s ease; }
+.cmd-nav .nav-item.active {
+  background: linear-gradient(90deg, rgba(124, 92, 255, .20), rgba(77, 208, 255, .05));
+  color: var(--text); box-shadow: inset 2px 0 0 var(--brand), 0 6px 18px -12px rgba(124, 92, 255, .8);
+}
+.cmd-nav .nav-group { opacity: .85; }
+.cmd-nav::-webkit-scrollbar { width: 8px; }
+.cmd-nav::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+
+/* Workspace card */
+.ws-card { border-radius: 14px; background: linear-gradient(180deg, var(--surface-2), var(--bg-soft)); }
+
+/* Cards: layered, modern depth + slightly larger radius */
+.card { border-radius: 16px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .03), 0 16px 44px -30px rgba(0, 0, 0, .75); }
+html[data-theme="light"] .card { box-shadow: 0 1px 2px rgba(20, 22, 50, .05), 0 14px 34px -26px rgba(20, 22, 50, .20); }
+
+/* Stat cards: animated top accent + hover lift */
+.stat { border-radius: 16px; }
+.stat::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; border-radius: 16px 16px 0 0; background: var(--grad); opacity: 0; transition: opacity .16s ease; }
+.stat:hover::before { opacity: .95; }
+
+/* Buttons: gradient primary with depth; refined ghost */
+.btn-primary { background: linear-gradient(135deg, #7c5cff, #5fa8ff); border: 0; color: #fff; box-shadow: 0 8px 22px -10px rgba(124, 92, 255, .75); transition: transform .12s ease, box-shadow .12s ease, filter .12s ease; }
+.btn-primary:hover { transform: translateY(-1px); filter: brightness(1.06); box-shadow: 0 13px 28px -10px rgba(124, 92, 255, .85); }
+.btn-ghost { transition: border-color .12s ease, color .12s ease, background .12s ease; }
+.btn-ghost:hover { border-color: var(--brand); color: var(--text); }
+
+/* Topbar: glass + tighter headline */
+.topbar { backdrop-filter: blur(10px); }
+.topbar h1, #pageTitle { letter-spacing: -0.025em; }
+
+/* Inputs/selects/textareas: brand focus glow */
+.main input:focus, .main select:focus, .main textarea:focus { box-shadow: 0 0 0 3px rgba(124, 92, 255, .20); }
+
+/* Tables: a touch more breathing room + crisp header */
+.pr-table thead th, table.seqlib thead th { backdrop-filter: blur(6px); }
