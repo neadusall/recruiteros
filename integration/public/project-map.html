@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
-<title>RecruiterOS — Project &amp; Backend Map</title>
+<title>RecruitersOS — Project &amp; Backend Map</title>
 <style>
   :root{
     --bg:#070b14; --bg2:#0b1120; --panel:#0f1626; --panel2:#131c30;
@@ -210,7 +210,7 @@
 <header class="top">
   <div class="wrap topbar">
     <div class="brand">
-      <div class="logo">RecruiterOS</div>
+      <div class="logo">RecruitersOS</div>
       <div class="sub">Project &amp; Backend Map</div>
     </div>
     <div class="grow"></div>
@@ -227,7 +227,7 @@
 <div class="wrap">
   <div class="hero">
     <h1>The whole product — and its whole backend — on one screen.</h1>
-    <p>Every page, route, module, data type, and interface of RecruiterOS. The front end up top, then the full backend: each <code>lib/</code> module with its exported functions &amp; types, every <code>/api</code> route with its HTTP methods &amp; auth gate, and the public <code>/v1</code> API. Filter to <b style="color:#9ce8db">Config</b> to see the tunable behavior surfaces you'd edit to change interfaces. Click a status to recycle it, star what to do next, jot notes — all saved in this browser.</p>
+    <p>Every page, route, module, data type, and interface of RecruitersOS. The front end up top, then the full backend: each <code>lib/</code> module with its exported functions &amp; types, every <code>/api</code> route with its HTTP methods &amp; auth gate, and the public <code>/v1</code> API. Filter to <b style="color:#9ce8db">Config</b> to see the tunable behavior surfaces you'd edit to change interfaces. Click a status to recycle it, star what to do next, jot notes — all saved in this browser.</p>
   </div>
 
   <div class="stats" id="stats"></div>
@@ -258,7 +258,7 @@
 </div>
 
 <script>
-/* ---------- DATA: the real RecruiterOS surface ---------- */
+/* ---------- DATA: the real RecruitersOS surface ---------- */
 const BASE="https://recruitersos.co";
 const STATUS={
   live:{label:"Live",cls:"b-live"},
@@ -585,8 +585,8 @@ const GROUPS=[
       {t:"Docker + Compose", u:"#", live:false, s:"infra", k:"infra", d:"Multi-stage Next build serving marketing+portal+API from one origin. app + Caddy (auto-HTTPS) + postgres:16.", tags:["Dockerfile","docker-compose.yml","Caddyfile"]},
       {t:"One-shot deploy",  u:"#", live:false, s:"live",  k:"infra", d:"curl deploy.sh | bash — generates secrets, writes .env.production. Redeploy: git pull && docker compose up -d --build.", tags:["deploy.sh","auto-deploy.sh"]},
       {t:"Auto-deploy watcher", u:"#", live:false, s:"live", k:"infra", d:"Auto-pull + redeploy on push (install-auto-deploy.sh).", tags:["install-auto-deploy.sh"]},
-      {t:"Runbooks", u:"#", live:false, s:"live", k:"infra", d:"HETZNER-SETUP, GO-LIVE-WALKTHROUGH, DEPLOY, RESEND-SETUP, LINKEDIN-LOGIN-SETUP.", tags:["*.md"]},
-      {t:"Playbooks", u:"#", live:false, s:"live", k:"infra", d:"COPY-PLAYBOOK (Bernays), BACKEND.md, OWNER-CONSOLE.md, INTEGRATION.md, openapi.yaml.", tags:["reference"]},
+      {t:"Setup docs", u:"#", live:false, s:"live", k:"infra", d:"docs/setup/server (1-hetzner, 2-deploy, 3-go-live) + docs/setup/channels (cold-email, email-resend, sms-qualification, linkedin-login).", tags:["docs/setup"]},
+      {t:"Playbooks & platform", u:"#", live:false, s:"live", k:"infra", d:"docs/playbooks/copywriting-playbook (Bernays), docs/platform/* (per-domain backend reference), integration BACKEND.md, OWNER-CONSOLE.md, openapi.yaml.", tags:["docs/"]},
       {t:"Bridge (outreach)", u:"#", live:false, s:"backend", k:"infra", d:"Standalone outreach bridge (outreach-bridge.cjs) + tests. Separate from integration/.", tags:["bridge/"]},
       {t:"Chrome extension", u:"#", live:false, s:"backend", k:"infra", d:"Alfred MV3 extension (background.js, content/, popup/) — user-owned LinkedIn automation.", tags:["extension/"]},
     ]},
@@ -741,7 +741,7 @@ document.getElementById("reset").onclick=()=>{
   }
 };
 document.getElementById("copyMd").onclick=()=>{
-  let md="# RecruiterOS — Project & Backend Map\n\nLive: https://recruitersos.co\n\n";
+  let md="# RecruitersOS — Project & Backend Map\n\nLive: https://recruitersos.co\n\n";
   GROUPS.forEach(g=>{
     if(g.band){md+=`\n# ${g.band}\n\n`;return;}
     md+=`## ${g.ic} ${g.name}\n_${g.desc}_\n\n`;

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
-<title>RecruiterOS — Project &amp; Backend Map</title>
+<title>RecruitersOS — Project &amp; Backend Map</title>
 <style>
   :root{
     --bg:#070b14; --bg2:#0b1120; --panel:#0f1626; --panel2:#131c30;
@@ -210,7 +210,7 @@
 <header class="top">
   <div class="wrap topbar">
     <div class="brand">
-      <div class="logo">RecruiterOS</div>
+      <div class="logo">RecruitersOS</div>
       <div class="sub">Project &amp; Backend Map</div>
     </div>
     <div class="grow"></div>
@@ -227,7 +227,7 @@
 <div class="wrap">
   <div class="hero">
     <h1>The whole product — and its whole backend — on one screen.</h1>
-    <p>Every page, route, module, data type, and interface of RecruiterOS. The front end up top, then the full backend: each <code>lib/</code> module with its exported functions &amp; types, every <code>/api</code> route with its HTTP methods &amp; auth gate, and the public <code>/v1</code> API. Filter to <b style="color:#9ce8db">Config</b> to see the tunable behavior surfaces you'd edit to change interfaces. Click a status to recycle it, star what to do next, jot notes — all saved in this browser.</p>
+    <p>Every page, route, module, data type, and interface of RecruitersOS. The front end up top, then the full backend: each <code>lib/</code> module with its exported functions &amp; types, every <code>/api</code> route with its HTTP methods &amp; auth gate, and the public <code>/v1</code> API. Filter to <b style="color:#9ce8db">Config</b> to see the tunable behavior surfaces you'd edit to change interfaces. Click a status to recycle it, star what to do next, jot notes — all saved in this browser.</p>
   </div>
 
   <div class="stats" id="stats"></div>
@@ -258,7 +258,7 @@
 </div>
 
 <script>
-/* ---------- DATA: the real RecruiterOS surface ---------- */
+/* ---------- DATA: the real RecruitersOS surface ---------- */
 const BASE="https://recruitersos.co";
 const STATUS={
   live:{label:"Live",cls:"b-live"},
@@ -741,7 +741,7 @@ document.getElementById("reset").onclick=()=>{
   }
 };
 document.getElementById("copyMd").onclick=()=>{
-  let md="# RecruiterOS — Project & Backend Map\n\nLive: https://recruitersos.co\n\n";
+  let md="# RecruitersOS — Project & Backend Map\n\nLive: https://recruitersos.co\n\n";
   GROUPS.forEach(g=>{
     if(g.band){md+=`\n# ${g.band}\n\n`;return;}
     md+=`## ${g.ic} ${g.name}\n_${g.desc}_\n\n`;

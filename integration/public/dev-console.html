@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
-<title>RecruiterOS — Dev Console (Sessions)</title>
+<title>RecruitersOS — Dev Console (Sessions)</title>
 <style>
   :root{
     --bg:#070b14; --bg2:#0b1120; --panel:#0f1626; --panel2:#131c30;
@@ -161,7 +161,7 @@
 <header class="top">
   <div class="topbar">
     <div class="brand">
-      <div class="logo">RecruiterOS</div>
+      <div class="logo">RecruitersOS</div>
       <div class="sub">Dev Console · Sessions</div>
     </div>
     <div class="grow"></div>
@@ -187,7 +187,7 @@
 
 <script>
 /* ============================================================
-   Dev Console — a navigator for building & deploying RecruiterOS.
+   Dev Console — a navigator for building & deploying RecruitersOS.
    Left bar = the repo's shape (structure) + the work backlog (sessions).
    Click anything → its detail loads on the right. Statuses + notes
    persist in this browser (localStorage), so it's your build tracker.
@@ -216,7 +216,7 @@ const STRUCTURE = [
   { id:"ops", ic:"🚀", nm:"Deploy & ops", pth:"Dockerfile · *.sh · docs",
     nd:"Two deploy paths (Vercel / Hetzner+Docker+Caddy) + runbooks.",
     what:"Ships either to Vercel (zero-ops, no durable DB) or self-hosted on Hetzner via Docker Compose (Postgres + app + Caddy TLS), with a systemd auto-deploy watcher that redeploys on every push to main. A stack of markdown runbooks covers go-live end to end.",
-    paths:[["Dockerfile","Production image"],["docker-compose.yml","Postgres + app + Caddy"],["deploy.sh","One-shot bootstrap"],["auto-deploy.sh","Git-poll redeploy watcher"],["GO-LIVE-WALKTHROUGH.md","Step-by-step go-live"]] },
+    paths:[["Dockerfile","Production image"],["docker-compose.yml","Postgres + app + Caddy"],["deploy.sh","One-shot bootstrap"],["auto-deploy.sh","Git-poll redeploy watcher"],["docs/setup/server/3-go-live-walkthrough.md","Step-by-step go-live"]] },
 ];
 
 /* ---------- DATA: the build backlog, grouped into tracks ---------- */
@@ -233,7 +233,7 @@ const SESSIONS = [
   { id:"s1", track:"A", n:1, title:"First public deploy",
     lede:"Stand up the backend on a host and confirm login works end to end — a URL where /login.html lands you in a real Command Center.",
     scope:"Pick a deploy path (Vercel for zero-ops, or self-hosted Hetzner+Docker+Caddy for a durable DB). Build the Next app in integration/, point a domain at it, and verify the sign-up → session → Command Center flow over HTTPS.",
-    files:[["DEPLOY.md","both paths"],["vercel.json","Vercel"],["Dockerfile",""],["docker-compose.yml","Hetzner"],["Caddyfile","TLS proxy"],["GO-LIVE-WALKTHROUGH.md","runbook"]],
+    files:[["docs/setup/server/2-deploy.md","both paths"],["vercel.json","Vercel"],["Dockerfile",""],["docker-compose.yml","Hetzner"],["Caddyfile","TLS proxy"],["docs/setup/server/3-go-live-walkthrough.md","runbook"]],
     outcome:"A live URL serving the marketing site + portal + API from one origin, with a working real account." },
   { id:"s2", track:"A", n:2, title:"Env & secrets audit",
     lede:"Turn the three .env.example files into one filled, documented secrets sheet — required-to-boot vs optional-per-feature.",
@@ -265,7 +265,7 @@ const SESSIONS = [
   { id:"s7", track:"B", n:7, title:"Email & SMS sending",
     lede:"Get Resend and Telnyx actually delivering, with inbound webhooks landing in the response inbox.",
     scope:"Verify the sending domain in Resend (auth records), wire Telnyx 10DLC SMS, and confirm inbound replies/delivery events ingest, classify, and route correctly.",
-    files:[["RESEND-SETUP.md","email domain"],["integration/lib/providers/telnyx.ts","SMS/voice"],["integration/lib/sms/","send + opt-out"],["integration/lib/response/","ingest + classify"]],
+    files:[["docs/setup/channels/email-resend.md","email domain"],["integration/lib/providers/telnyx.ts","SMS/voice"],["integration/lib/sms/","send + opt-out"],["integration/lib/response/","ingest + classify"]],
     outcome:"Password resets, magic links, and SMS send for real; replies appear in the inbox." },
 
   /* ---- Track C ---- */
@@ -294,7 +294,7 @@ const SESSIONS = [
   { id:"s12", track:"D", n:12, title:"Security review",
     lede:"Audit auth guards, webhook signatures, cron secrets, and the owner gate.",
     scope:"Review session/capability/owner guards, verify webhook signature checks and cron-secret enforcement, and walk the LinkedIn OAuth flow. The /security-review skill on the diff is a good fit.",
-    files:[["integration/lib/auth/","sessions + RBAC"],["integration/lib/providers/signatures.ts","webhook verify"],["LINKEDIN-LOGIN-SETUP.md","OAuth flow"]],
+    files:[["integration/lib/auth/","sessions + RBAC"],["integration/lib/providers/signatures.ts","webhook verify"],["docs/setup/channels/linkedin-login.md","OAuth flow"]],
     outcome:"Every privileged path is gated and every inbound webhook is verified." },
   { id:"s13", track:"D", n:13, title:"Test & typecheck pass",
     lede:"Run the suites and close failures; tighten the loose build nets.",
