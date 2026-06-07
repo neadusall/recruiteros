@@ -2749,15 +2749,15 @@
         inp("vdDailyCap", "Daily cap", "100", "number") +
         inp("vdFreq", "Min days between attempts", "30", "number") +
         "</div>" +
-        '<div style="margin-top:10px"><label class="muted" style="font-size:12px">Voicemail script — first name &amp; role splice in like an email merge</label>' +
-        '<div style="margin:4px 0">' + fieldChips("vdScript") + "</div>" +
-        '<textarea id="vdScript" rows="4" style="width:100%">' + esc(VD_DEFAULT_SCRIPT) + "</textarea>" +
-        '<div class="muted" style="font-size:12px;margin-top:4px">Sweet spot is 15–25s. Human-answer sign-off: “' + esc("Sorry, wrong number. Thanks.") + '” (editable per campaign).</div></div>' +
-        '<div style="margin-top:12px"><button class="btn btn-primary btn-sm" id="vdCreate">Create campaign</button></div>';
+        '<div class="vd-field vd-script"><label>Voicemail script <span>— first name &amp; role splice in like an email merge</span></label>' +
+        '<div class="vd-chips">' + fieldChips("vdScript") + "</div>" +
+        '<textarea id="vdScript" rows="4">' + esc(VD_DEFAULT_SCRIPT) + "</textarea>" +
+        '<div class="vd-hint">Sweet spot is 15–25s. Human-answer sign-off: “' + esc("Sorry, wrong number. Thanks.") + '” (editable per campaign).</div></div>' +
+        '<div class="vd-actions"><button class="btn btn-primary btn-sm" id="vdCreate">Create campaign</button></div>';
     }
     function inp(id, label, ph, type) {
-      return '<div><label class="muted" style="font-size:12px">' + esc(label) + '</label>' +
-        '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph) + '" style="width:100%" /></div>';
+      return '<div class="vd-field"><label>' + esc(label) + "</label>" +
+        '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph) + '" /></div>';
     }
     function campaignCard(c) {
       var win = "6–7 PM"; try { win = hr(c.window.startHour) + "–" + hr(c.window.endHour); } catch (e) {}
