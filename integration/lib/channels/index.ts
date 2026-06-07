@@ -37,23 +37,59 @@ export interface SendTouch {
   audioUrl?: string;
   campaignChannelIds?: { instantlyCampaignId?: string; linkedinAccountId?: string };
   linkedinProvider?: "unipile" | "salesrobot";
+  /** Voice campaign to enqueue this prospect into when an email is sent (the
+   *  reactive email-sent → voice-drop trigger). Falls back to the env default. */
+  voiceCampaignId?: string;
 }
 
 /** Send one touch on its channel, then log the activity to the ATS. */
 export async function sendTouch(workspaceId: string, t: SendTouch): Promise<SendResult> {
   let result: SendResult;
   try {
-    result = await dispatch(t);
+    result = await dispatch(workspaceId, t);
   } catch (e: any) {
     result = { ok: false, channel: t.channel, provider: "?", error: e?.message ?? String(e) };
   }
   await logTouch(workspaceId, t, result);
+
+  // Reactive trigger: emailing a prospect makes them eligible for a voicemail
+  // drop (RECRUITEROS-BACKEND.md §4-C). Opt-in, fire-and-forget — it must never
+  // block or fail the email send.
+  if (t.channel === "email" && result.ok) {
+    void triggerVoiceOnEmailSent(workspaceId, t).catch(() => { /* best-effort */ });
+  }
+
   return result;
 }
 
-async function dispatch(t: SendTouch): Promise<SendResult> {
+/** Enqueue the emailed prospect into its voice campaign (opt-in; dynamic import
+ *  so the voice engine is only loaded when the trigger is actually used). */
+async function triggerVoiceOnEmailSent(workspaceId: string, t: SendTouch): Promise<void> {
+  const { voiceOnSendEnabled, voiceOnEmailSent } = await import("../voice/onEmailSent");
+  if (!voiceOnSendEnabled()) return;
+  await voiceOnEmailSent(workspaceId, t.prospect, {
+    motion: t.prospect.motion,
+    voiceCampaignId: t.voiceCampaignId,
+  });
+}
+
+async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> {
   switch (t.channel) {
     case "email": {
+      // Owned MTA path (self-hosted infrastructure) when opted in; Instantly otherwise.
+      const { mtaPreferred, sendEmail } = await import("../providers/mta");
+      if (mtaPreferred() && t.prospect.email) {
+        const m = await sendEmail(workspaceId, {
+          to: t.prospect.email,
+          subject: t.subject ?? "",
+          htmlBody: t.text,
+          fromName: t.prospect.company ? undefined : undefined,
+        });
+        // A clean skip (no capacity / not ready) falls through to Instantly so a
+        // send is never silently dropped during warm-up.
+        if (m.ok) return { ok: true, channel: "email", provider: "mta", providerMessageId: m.messageId };
+        if (m.skipped === "suppressed") return { ok: false, channel: "email", provider: "mta", error: "suppressed" };
+      }
       const cid = t.campaignChannelIds?.instantlyCampaignId ?? "";
       const r: any = await instantly.addLeads(cid, [{ email: t.prospect.email ?? "", first_name: t.prospect.firstName, company_name: t.prospect.company, custom_variables: { subject: t.subject, body: t.text } }]);
       return { ok: true, channel: "email", provider: "instantly", dryRun: r?.dryRun, providerMessageId: r?.id };

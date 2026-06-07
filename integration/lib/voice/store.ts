@@ -98,6 +98,11 @@ export function getCampaign(workspaceId: string, id: string): VoiceCampaign | un
   return store.campaigns.find((c) => c.workspaceId === workspaceId && c.id === id);
 }
 
+/** All running campaigns across every workspace — drives the voice cron tick. */
+export function listRunningCampaigns(): VoiceCampaign[] {
+  return store.campaigns.filter((c) => c.status === "running");
+}
+
 export function upsertCampaign(workspaceId: string, input: VoiceCampaignInput): VoiceCampaign {
   const existing = input.id ? getCampaign(workspaceId, input.id) : undefined;
   const now = nowIso();
@@ -177,6 +182,33 @@ export function updateLead(campaignId: string, leadId: string, patch: Partial<Vo
   Object.assign(lead, patch);
   persist();
   return lead;
+}
+
+/**
+ * Append a single lead to a campaign and refresh its rollups — used by the
+ * reactive email-sent → voice-drop trigger, which adds leads one at a time
+ * (importLeads replaces the whole list, which would clobber an active campaign).
+ */
+export function addLead(workspaceId: string, campaignId: string, lead: VoiceLead): void {
+  const arr = store.leads[campaignId] ?? (store.leads[campaignId] = []);
+  arr.push(lead);
+  const c = getCampaign(workspaceId, campaignId);
+  if (c) {
+    c.leadCount = arr.filter((l) => l.outcome !== "filtered_mobile").length;
+    c.filteredMobileCount = arr.filter((l) => l.outcome === "filtered_mobile").length;
+    c.updatedAt = nowIso();
+  }
+  persist();
+}
+
+/** Find an existing lead in a campaign by prospect link or phone (dedup guard). */
+export function findLead(campaignId: string, match: { prospectId?: string; phone?: string }): VoiceLead | undefined {
+  const digits = (p?: string) => (p ?? "").replace(/\D/g, "");
+  const wantPhone = digits(match.phone);
+  return (store.leads[campaignId] ?? []).find((l) =>
+    (match.prospectId !== undefined && l.prospectId === match.prospectId) ||
+    (wantPhone !== "" && digits(l.phone) === wantPhone),
+  );
 }
 
 /* ---------------- consent (cloned voices) ---------------- */

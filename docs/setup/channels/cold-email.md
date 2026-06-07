@@ -1,5 +1,13 @@
 # Cold Email Setup — everything, end to end
 
+> **⚠️ Status — interim sender.** Instantly is the **current, as-built** email
+> sender, and this guide is accurate for it today. The **chosen direction is
+> self-hosted email** (Postal MTA + our own domains/mailboxes/warm-up/deliverability)
+> — see [`../../design/self-hosted-email-infrastructure.md`](../../design/self-hosted-email-infrastructure.md).
+> When that ships, the `email` channel swaps off Instantly; the **Sequences Library /
+> Campaign Studio / campaign + email-sequencing structure stays exactly the same** —
+> only the sender underneath changes.
+
 Goal: turn on RecruiterOS's **email channel** so campaigns actually send cold
 outbound, get replies back into the inbox, and stay deliverable — using your own
 warmed sending domains/inboxes orchestrated by **Instantly.ai**.
