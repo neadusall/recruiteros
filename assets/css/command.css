@@ -821,3 +821,60 @@ html[data-theme="light"] .card { box-shadow: 0 1px 2px rgba(20, 22, 50, .05), 0 
 
 /* Tables: a touch more breathing room + crisp header */
 .pr-table thead th, table.seqlib thead th { backdrop-filter: blur(6px); }
+
+/* ============================================================
+   Clean-structure pass — tighter rhythm, clearer hierarchy, a
+   calmer canvas. Visual only (spacing / type / density), so no
+   layout or functionality changes.
+   ============================================================ */
+
+/* ---- Sidebar: organized + dense without feeling cramped ---- */
+.sidebar.cmd-side { padding: 18px 12px; gap: 12px; }
+.cmd-nav { gap: 1px; }
+.cmd-nav .nav-group {
+  font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text-dim); margin: 15px 8px 5px; font-weight: 700;
+}
+.cmd-nav .nav-group:first-child { margin-top: 2px; }
+.cmd-nav .nav-item { padding: 8px 11px; font-size: 13.5px; gap: 11px; font-weight: 500; }
+.cmd-nav .nav-item .ni { width: 18px; flex: none; text-align: center; font-size: 15px; opacity: .9; }
+.cmd-nav .nav-item.active .ni { opacity: 1; }
+.ws-card { padding: 10px 12px; }
+.ws-name { font-size: 13.5px; }
+
+/* ---- Topbar: quiet crumb, confident title ---- */
+.topbar { gap: 14px; align-items: center; }
+.topbar .crumb { font-size: 10.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--text-dim); margin-bottom: 3px; }
+.topbar h1, #pageTitle { font-size: 22px; font-weight: 800; line-height: 1.1; }
+
+/* ---- Main content: consistent vertical rhythm ---- */
+.v-head { margin-bottom: 20px; }
+.v-head p { color: var(--text-muted); font-size: 14px; line-height: 1.5; max-width: 76ch; }
+
+/* ---- Cards + sections: one consistent system ---- */
+.card { padding: 18px 20px; }
+.card h3 { font-size: 14px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 14px; }
+.cards, .two-col, .stat-grid { gap: 16px; }
+
+/* ---- Controls: uniform radius/sizing so nothing looks ad-hoc ---- */
+.btn-sm { border-radius: 9px; }
+.main select, .main input[type="text"], .main input[type="url"], .main input[type="number"], .main input[type="email"], .main textarea {
+  border-radius: 9px;
+}
+
+/* ---- Calmer canvas so content leads, not the background ---- */
+.aurora { opacity: .42; }
+body::before { opacity: .35; }
+html[data-theme="light"] .aurora { opacity: .12; }
+
+/* ---- Empty states: centered, intentional ---- */
+.empty { padding: 30px 22px; color: var(--text-dim); font-size: 13.5px; line-height: 1.55; text-align: center; }
+
+/* ---- Profile menu ALWAYS on top ----
+   The topbar sits before the content (and iframe views like OS Text / Studio /
+   Target Builder) in the DOM, so without its own stacking context those paint
+   OVER the open account dropdown. Raise the topbar above content and lift the
+   menu so the profile panel is always superimposed in front. */
+.topbar { position: relative; z-index: 100; }
+.acct { z-index: 1000; }
+.acct-menu { z-index: 2000; }
