@@ -68,8 +68,9 @@
   }
 
   /* ---------------- router ---------------- */
-  var ROUTES = { overview: viewOverview, pricing: viewPricing, calculator: viewCalculator, spend: viewSpend, accounts: viewAccounts, costs: viewCosts };
-  var TITLES = { overview: "Overview", pricing: "Pricing", calculator: "Projection", spend: "Spend", accounts: "Accounts", costs: "Cost model" };
+  // Projection calculator moved to the in-app command center (Measure → Spending).
+  var ROUTES = { overview: viewOverview, pricing: viewPricing, spend: viewSpend, accounts: viewAccounts, costs: viewCosts };
+  var TITLES = { overview: "Overview", pricing: "Pricing", spend: "Spend", accounts: "Accounts", costs: "Cost model" };
   function route() {
     var r = (location.hash.replace("#", "") || "overview");
     if (!ROUTES[r]) r = "overview";

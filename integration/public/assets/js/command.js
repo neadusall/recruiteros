@@ -180,6 +180,7 @@
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "＋ New sequence", render: renderContent },
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
+    spending: { title: "Spending", crumb: "Measure", action: null, render: renderSpending },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
     connected: { title: "Connected", crumb: "Connect", action: "Test all", render: renderConnected, cap: "integrations:manage" },
     ats: { title: "ATS", crumb: "Connect", action: null, render: renderAts, cap: "ats:manage" },
@@ -3606,6 +3607,14 @@
   // inbound/classification; the local shim is flat).
   function rChannel(p) { return (p.inbound && p.inbound.channel) || p.channel || "other"; }
   function rClass(p) { return (p.classification && p.classification.class) || p.cls || "unclassified"; }
+
+  // Spending scenario planner — a live what-if cost model anyone can play with.
+  // The model + UI live in the self-contained spending-calc.js module so the
+  // underlying tools stay generic (no vendor names exposed here).
+  function renderSpending(el) {
+    if (window.SpendingCalc && window.SpendingCalc.mount) window.SpendingCalc.mount(el);
+    else el.innerHTML = '<div class="empty">Spending module did not load — refresh and try again.</div>';
+  }
 
   function renderAnalytics(el) {
     var bd = motion === "bd";

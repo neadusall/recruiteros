@@ -1,0 +1,72 @@
+/* RecruitersOS · Spending scenario planner — self-contained styles.
+   Namespaced under .sc so it can drop into any page (command center, etc.)
+   without colliding. Uses app-wide CSS vars + a local accent. */
+.sc { --sc-accent: #ffb020; --sc-accent2: #ff7849; }
+.sc * { box-sizing: border-box; }
+.sc-head h2 { font-size: 19px; margin: 0 0 4px; }
+.sc-head p { color: var(--text-muted, #9aa0aa); font-size: 13.5px; max-width: 70ch; margin: 0; }
+.sc-note { color: var(--text-dim, #777); font-size: 12px; }
+.sc-h3 { font-size: 13px; margin: 16px 0 8px; }
+
+/* accounts control */
+.sc-accounts { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin: 16px 0; }
+.sc-acc-ctl { display: inline-flex; align-items: center; gap: 8px; }
+.sc-acc-ctl input { width: 84px; text-align: center; font-family: var(--mono, monospace); font-size: 18px; font-weight: 700; background: var(--bg-soft, #1a1a22); border: 1px solid var(--border, #2a2a35); border-radius: 10px; color: var(--text, #fff); padding: 8px; }
+.sc-step { width: 38px; height: 40px; border-radius: 10px; border: 1px solid var(--border, #2a2a35); background: var(--bg-soft, #1a1a22); color: var(--text, #fff); font-size: 20px; font-weight: 700; cursor: pointer; }
+.sc-step:hover { border-color: var(--sc-accent); color: var(--sc-accent); }
+.sc-add { height: 40px; padding: 0 16px; border-radius: 10px; border: none; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; color: #0a0a12; background: linear-gradient(135deg, var(--sc-accent), var(--sc-accent2)); }
+.sc-acc-read { font-size: 13px; color: var(--text-muted, #9aa0aa); }
+.sc-acc-read strong { color: var(--sc-accent); font-family: var(--mono, monospace); }
+
+/* two-pane: inputs + sticky results */
+.sc-wrap { display: grid; grid-template-columns: 1fr 340px; gap: 18px; align-items: start; }
+.sc-inputs { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sc-card { background: var(--surface, #14141c); border: 1px solid var(--border, #2a2a35); border-radius: 14px; padding: 16px 18px; }
+.sc-card h3 { font-size: 14px; margin: 0 0 2px; }
+.sc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.sc-fld label { display: block; font-size: 12px; color: var(--text-muted, #9aa0aa); margin-bottom: 5px; font-weight: 600; }
+.sc-fld input { width: 100%; background: var(--bg-soft, #1a1a22); border: 1px solid var(--border, #2a2a35); border-radius: 9px; color: var(--text, #fff); padding: 9px 11px; font: inherit; font-size: 14px; }
+.sc-fld input:focus { outline: none; border-color: var(--sc-accent); }
+.sc-btnrow { margin-top: 2px; }
+.sc-reset { padding: 8px 14px; border-radius: 9px; border: 1px solid var(--border, #2a2a35); background: transparent; color: var(--text-muted, #9aa0aa); font: inherit; font-size: 13px; cursor: pointer; }
+.sc-reset:hover { color: var(--text, #fff); border-color: var(--sc-accent); }
+
+/* results pane */
+.sc-results { position: sticky; top: 18px; background: var(--surface, #14141c); border: 1px solid var(--border, #2a2a35); border-radius: 16px; padding: 20px; box-shadow: 0 0 0 1px rgba(255,176,32,0.10), 0 18px 40px -24px rgba(0,0,0,0.6); }
+.sc-hero { border-bottom: 1px solid var(--border, #2a2a35); padding-bottom: 14px; margin-bottom: 14px; }
+.sc-hl { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim, #777); }
+.sc-hv { font-size: 36px; font-weight: 800; letter-spacing: -0.025em; line-height: 1.05; margin-top: 4px; background: linear-gradient(135deg, var(--sc-accent), var(--sc-accent2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.sc-hv span { font-size: 15px; color: var(--text-muted, #9aa0aa); font-weight: 600; -webkit-text-fill-color: var(--text-muted, #9aa0aa); }
+.sc-hs { font-size: 13px; color: var(--sc-accent); font-weight: 600; margin-top: 4px; }
+.sc-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sc-metric { background: var(--bg-soft, #1a1a22); border: 1px solid var(--border, #2a2a35); border-radius: 10px; padding: 10px; text-align: center; }
+.sc-mv { font-family: var(--mono, monospace); font-size: 14px; font-weight: 700; color: var(--text, #fff); }
+.sc-ml { font-size: 10.5px; color: var(--text-dim, #777); margin-top: 3px; }
+
+/* bars */
+.sc-bars { display: flex; flex-direction: column; gap: 8px; }
+.sc-bar-row { display: grid; grid-template-columns: 120px 1fr 70px; align-items: center; gap: 10px; font-size: 12.5px; }
+.sc-bar-track { height: 10px; background: var(--bg-soft, #1a1a22); border-radius: 6px; overflow: hidden; }
+.sc-bar-fill { height: 100%; background: linear-gradient(90deg, var(--sc-accent), var(--sc-accent2)); border-radius: 6px; }
+.sc-bar-row .sc-num { text-align: right; font-family: var(--mono, monospace); color: var(--text-muted, #9aa0aa); }
+
+/* compact lines */
+.sc-lines { font-size: 12.5px; border-top: 1px solid var(--border, #2a2a35); padding-top: 8px; }
+.sc-tl { display: flex; justify-content: space-between; padding: 3px 0; color: var(--text-muted, #9aa0aa); }
+.sc-tl .v { font-family: var(--mono, monospace); color: var(--text, #fff); }
+
+/* scenario table */
+.sc-twrap { overflow-x: auto; }
+.sc-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 640px; }
+.sc-table th { text-align: left; color: var(--text-dim, #777); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 10px; border-bottom: 1px solid var(--border, #2a2a35); }
+.sc-table td { padding: 9px 10px; border-bottom: 1px solid var(--border, #2a2a35); }
+.sc-table .num { text-align: right; font-family: var(--mono, monospace); white-space: nowrap; }
+.sc-row { cursor: pointer; }
+.sc-row:hover td { background: rgba(255,176,32,0.06); }
+.sc-row.cur td { background: rgba(255,176,32,0.10); }
+.sc-row.cur td:first-child { box-shadow: inset 2px 0 0 var(--sc-accent); }
+
+@media (max-width: 900px) {
+  .sc-wrap { grid-template-columns: 1fr; }
+  .sc-results { position: static; }
+}
