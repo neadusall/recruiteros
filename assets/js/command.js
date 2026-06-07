@@ -2499,17 +2499,27 @@
 
     el.innerHTML =
       '<style>' +
-      '.jd-chip{display:inline-block;background:#eef2f7;border-radius:12px;padding:2px 9px;margin:2px 4px 2px 0;font-size:12px}' +
-      '.jd-icp{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:8px}' +
-      '.jd-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}' +
-      '.jd-cap{font-size:12px}.jd-cap input{margin:0 4px}' +
-      '#jdName{width:100%;padding:9px;margin-bottom:8px}#jdText{width:100%;padding:9px;font:inherit}' +
-      '.jd-queries{max-height:220px;overflow:auto;border:1px solid #eee;border-radius:8px;padding:8px}' +
-      '.jd-q{padding:4px 0;font-size:13px}.jd-q-label{display:inline-block;min-width:260px;font-weight:600}' +
-      '.jd-tablewrap{max-height:460px;overflow:auto;border:1px solid #eee;border-radius:8px;margin-top:8px}' +
-      '.jd-table{width:100%;border-collapse:collapse;font-size:13px}.jd-table th,.jd-table td{text-align:left;padding:6px 8px;border-bottom:1px solid #f0f0f0}' +
-      '.jd-table th{position:sticky;top:0;background:#fafbfc}' +
-      '.jd-run{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0}' +
+      '.jd-chip{display:inline-block;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:3px 10px;margin:2px 5px 2px 0;font-size:12px;color:var(--text-muted)}' +
+      '.jd-icp{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:12px}' +
+      '.jd-icp>div b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:7px;font-weight:700}' +
+      '.jd-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}' +
+      '.jd-cap{font-size:12.5px;color:var(--text-muted);display:inline-flex;align-items:center;gap:6px}' +
+      '.jd-cap input{width:62px;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px;margin:0 2px}' +
+      '#jdName,#jdText{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 13px}' +
+      '#jdName{margin-bottom:10px;font-weight:600}#jdText{line-height:1.55;resize:vertical;min-height:170px}' +
+      '#jdName::placeholder,#jdText::placeholder{color:var(--text-dim)}' +
+      '#jdName:focus,#jdText:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
+      '.jd-queries{max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:6px 12px;background:var(--bg-soft)}' +
+      '.jd-q{padding:8px 0;font-size:13px;border-bottom:1px solid var(--border)}.jd-q:last-child{border-bottom:0}' +
+      '.jd-q-label{display:inline-block;min-width:260px;font-weight:600}' +
+      '.jd-q a{color:var(--brand-2);text-decoration:none}.jd-q a:hover{text-decoration:underline}' +
+      '.jd-tablewrap{max-height:460px;overflow:auto;border:1px solid var(--border);border-radius:12px;margin-top:10px}' +
+      '.jd-table{width:100%;border-collapse:collapse;font-size:13px}' +
+      '.jd-table th,.jd-table td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}' +
+      '.jd-table tbody tr:hover td{background:var(--surface-2)}' +
+      '.jd-table th{position:sticky;top:0;background:var(--bg-soft);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);font-weight:700;white-space:nowrap}' +
+      '.jd-table a{color:var(--brand-2);text-decoration:none}.jd-table a:hover{text-decoration:underline}' +
+      '.jd-run{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}.jd-run:last-child{border-bottom:0}' +
       '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap}' +
       '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
