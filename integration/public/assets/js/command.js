@@ -180,7 +180,7 @@
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "＋ New sequence", render: renderContent },
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
-    spending: { title: "Spending", crumb: "Measure", action: null, render: renderSpending },
+    spending: { title: "Spending", crumb: "Measure", action: null, render: renderSpending, motionOnly: "bd" },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
     connected: { title: "Connected", crumb: "Connect", action: "Test all", render: renderConnected, cap: "integrations:manage" },
     ats: { title: "ATS", crumb: "Connect", action: null, render: renderAts, cap: "ats:manage" },
