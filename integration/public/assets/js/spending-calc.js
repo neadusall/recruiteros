@@ -24,14 +24,14 @@
     // (2,500 prospects × 3 emails/mo = 7,500 emails).
     prospectsPerAccount: 2500,
     stepsPerProspect: 3,
-    enrichPerAccount: 500,
+    enrichPerAccount: 2500,
     voicePerAccount: 200,
     // Email Sending (own inboxes + domains; counts auto-size to volume)
     inboxCost: 2.5, domainCost: 1.0, sendsPerInbox: 750, inboxesPerDomain: 3,
     // Hiring Signals (per lookup, optional one-time data pack)
     signalCost: 0.017, signalSetup: 85, signalSetupOn: 1,
-    // Contact Enrichment (per successful match)
-    enrichCost: 0.28,
+    // Contact Enrichment (per contact looked up)
+    enrichCost: 0.03,
     // Cloned Voice (monthly plan + per drop)
     voicePlan: 39, voiceCost: 0.01
   };
@@ -147,8 +147,8 @@
       fld("Include pack? (1 / 0)", "signalSetupOn", s.signalSetupOn, 1, 0));
 
     // Contact Enrichment (generic — was a named people-data vendor)
-    html += card("Contact Enrichment", "Resolving verified contact details for a person. Priced per successful match.",
-      fld("Cost / match ($)", "enrichCost", s.enrichCost, 0.01, 0));
+    html += card("Contact Enrichment", "Resolving verified contact details for a person. Priced per contact looked up.",
+      fld("Cost / contact ($)", "enrichCost", s.enrichCost, 0.01, 0));
 
     // Cloned Voice (generic — was a named voice vendor)
     html += card("Cloned Voice", "AI voicemail drops in a cloned voice. A flat monthly plan plus a per-drop cost.",
