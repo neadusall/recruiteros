@@ -16,7 +16,7 @@
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function toast(t) { var el = $("#toast"); el.textContent = t; el.classList.add("show"); setTimeout(function () { el.classList.remove("show"); }, 2400); }
-  function usd(n) { n = Number(n) || 0; return "$" + n.toLocaleString("en-US", { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 }); }
+  function usd(n, dp) { n = Number(n) || 0; if (dp != null) return "$" + n.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp }); return "$" + n.toLocaleString("en-US", { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 }); }
   function pct(n) { return (Number(n) || 0).toFixed(1) + "%"; }
 
   function api(path) {
@@ -68,8 +68,8 @@
   }
 
   /* ---------------- router ---------------- */
-  var ROUTES = { overview: viewOverview, pricing: viewPricing, spend: viewSpend, accounts: viewAccounts, costs: viewCosts };
-  var TITLES = { overview: "Overview", pricing: "Pricing", spend: "Spend", accounts: "Accounts", costs: "Cost model" };
+  var ROUTES = { overview: viewOverview, pricing: viewPricing, calculator: viewCalculator, spend: viewSpend, accounts: viewAccounts, costs: viewCosts };
+  var TITLES = { overview: "Overview", pricing: "Pricing", calculator: "Projection", spend: "Spend", accounts: "Accounts", costs: "Cost model" };
   function route() {
     var r = (location.hash.replace("#", "") || "overview");
     if (!ROUTES[r]) r = "overview";
@@ -185,6 +185,308 @@
   function recoCard(t, tag) {
     return '<div class="tier-grid"><div style="grid-column:1/-1">' + tierCard(t) + '</div></div>';
   }
+
+  /* ================= PROJECTION CALCULATOR ================= */
+  /* A forward-looking "what will this cost" calculator for the stack we're
+   * standing up: the new sending system, TheirStack signal credits, and
+   * Cartesia cloned-voice. Fully client-side and live — every keystroke
+   * recomputes. Inputs persist in localStorage so they survive navigation.
+   * Real-world defaults (June 2026):
+   *   TheirStack — 1 API credit = 1 job posting; ~$0.017/credit at Pro
+   *                ($169 / 10k), down to ~$0.0015/credit at volume.
+   *   Cartesia   — Startup $39/mo = 1.25M credits; IVC 1 credit/char (no
+   *                training), Pro Voice Cloning = one-time 1M-credit train
+   *                + 1.5 credits/char.
+   */
+  var CALC_DEFAULTS = {
+    // scale — everything scales off the recruiter count
+    recruiters: 5,
+    prospectsPerRec: 1000, emailsPerRec: 10000, recordingsPerRec: 400,
+    // emailing system (own warmed inboxes; inbox/domain counts auto-derive from volume)
+    inboxCost: 2.5, domainCost: 1.0, esp: 0, perKSends: 0,
+    sendsPerInbox: 750, inboxesPerDomain: 3,
+    // TheirStack signal credits
+    tsPrice: 85, tsCredits: 5000, tsPerProspect: 1, tsBilling: "onetime",
+    // People Data Labs person/phone enrichment (optional add-on to the signals)
+    pdlPrice: 0.28, pdlPerRec: 200,
+    // Cartesia cloned voice
+    cartFee: 39, cartCredits: 1250000, cartMode: "ivc", cartChars: 320
+  };
+  // Scenario ladder for the side-by-side "different number of recruiters" table.
+  var CALC_LADDER = [1, 3, 5, 10, 25, 50, 100];
+  // The package is modelled separately per operating system (Recruiting / BD),
+  // so each tab keeps its own saved inputs.
+  var calcMotion = localStorage.getItem("owner_calc_motion") || "recruiting";
+  function calcKey() { return "owner_calc__" + calcMotion; }
+  function motionName(m) { return (m || calcMotion) === "bd" ? "Business Development OS" : "Recruiting OS"; }
+  function calcState() {
+    var s = {};
+    try { s = JSON.parse(localStorage.getItem(calcKey()) || "{}"); } catch (e) { s = {}; }
+    // First load of the Recruiting tab inherits the pre-motion single bucket so
+    // previously-entered numbers carry over rather than reset.
+    if (!Object.keys(s).length && calcMotion === "recruiting") {
+      try { var legacy = JSON.parse(localStorage.getItem("owner_calc") || "{}"); if (Object.keys(legacy).length) s = legacy; } catch (e) {}
+    }
+    // Migrate the earlier account/total-volume schema into the recruiter model.
+    if (s.recruiters == null && s.accounts != null) {
+      var acc = Math.max(1, Number(s.accounts) || 1);
+      s.recruiters = acc;
+      if (s.prospects != null) s.prospectsPerRec = Math.round((Number(s.prospects) || 0) / acc);
+      if (s.emails != null) s.emailsPerRec = Math.round((Number(s.emails) || 0) / acc);
+      if (s.cartRecs != null) s.recordingsPerRec = Math.round((Number(s.cartRecs) || 0) / acc);
+    }
+    var out = {};
+    Object.keys(CALC_DEFAULTS).forEach(function (k) { out[k] = s[k] != null ? s[k] : CALC_DEFAULTS[k]; });
+    return out;
+  }
+  function saveCalcState(s) { try { localStorage.setItem(calcKey(), JSON.stringify(s)); } catch (e) {} }
+
+  /* Pure cost model — given a state, return every derived number. Reused by the
+   * results pane AND the scenario table (which just varies `recruiters`). */
+  function computeCalc(s) {
+    var recruiters = Math.max(0, Number(s.recruiters) || 0);
+    var prospects = recruiters * s.prospectsPerRec;
+    var emails = recruiters * s.emailsPerRec;
+    var recordings = recruiters * s.recordingsPerRec;
+
+    // Sending infra derives from the deliverability ceiling (how it really deploys).
+    var inboxes = s.sendsPerInbox > 0 ? Math.ceil(emails / s.sendsPerInbox) : 0;
+    var domains = s.inboxesPerDomain > 0 ? Math.ceil(inboxes / s.inboxesPerDomain) : 0;
+    var emailing = inboxes * s.inboxCost + domains * s.domainCost + s.esp + (emails / 1000) * s.perKSends;
+
+    // TheirStack signal credits.
+    var tsCreditPrice = s.tsCredits > 0 ? s.tsPrice / s.tsCredits : 0;
+    var tsCreditsUsed = prospects * s.tsPerProspect;
+    var tsUsedCost = tsCreditsUsed * tsCreditPrice;
+    var signalsRecurring, signalsOneTime;
+    if (s.tsBilling === "monthly") {
+      signalsRecurring = s.tsPrice + Math.max(0, tsCreditsUsed - s.tsCredits) * tsCreditPrice;
+      signalsOneTime = 0;
+    } else {
+      signalsRecurring = tsUsedCost;
+      signalsOneTime = s.tsPrice;
+    }
+
+    // People Data Labs — person/phone enrichment (only successful matches billed).
+    var pdlMatches = recruiters * s.pdlPerRec;
+    var pdlCost = pdlMatches * s.pdlPrice;
+
+    // Cartesia cloned voice.
+    var cartCreditPrice = s.cartCredits > 0 ? s.cartFee / s.cartCredits : 0;
+    var mult = s.cartMode === "pvc" ? 1.5 : 1;
+    var cartCreditsUsed = recordings * s.cartChars * mult;
+    var cartUsedCost = cartCreditsUsed * cartCreditPrice;
+    var voiceRecurring = Math.max(s.cartFee, cartUsedCost);
+    var voiceOneTime = s.cartMode === "pvc" ? 1000000 * cartCreditPrice : 0;
+
+    var recurring = emailing + signalsRecurring + pdlCost + voiceRecurring;
+    var oneTime = signalsOneTime + voiceOneTime;
+    return {
+      recruiters: recruiters, prospects: prospects, emails: emails, recordings: recordings,
+      inboxes: inboxes, domains: domains,
+      emailing: emailing, signalsRecurring: signalsRecurring, signalsOneTime: signalsOneTime,
+      pdlCost: pdlCost, pdlMatches: pdlMatches, pdlPrice: s.pdlPrice,
+      voiceRecurring: voiceRecurring, voiceOneTime: voiceOneTime,
+      recurring: recurring, oneTime: oneTime,
+      tsCreditPrice: tsCreditPrice, tsCreditsUsed: tsCreditsUsed, cartCreditPrice: cartCreditPrice,
+      perRecruiter: recruiters > 0 ? recurring / recruiters : 0,
+      perProspect: prospects > 0 ? recurring / prospects : 0,
+      perEmail: emails > 0 ? emailing / emails : 0,
+      perRecording: recordings > 0 ? voiceRecurring / recordings : 0
+    };
+  }
+  function assign(s, k, v) { var o = {}; Object.keys(s).forEach(function (x) { o[x] = s[x]; }); o[k] = v; return o; }
+
+  function viewCalculator() {
+    var s = calcState();
+    var html = '<div class="v-head"><h2>Projection · ' + esc(motionName()) + '</h2><p>Model what the stack will cost <em>before</em> you spend — the new sending system, TheirStack signals + People Data Labs enrichment, and Cartesia cloned voice. Everything scales off the recruiter count, so changing it re-derives the whole deploy (inboxes, domains, credits, voice) live. The table at the bottom compares different team sizes. Each operating system below keeps its own numbers; nothing here touches the ledger — it is a sandbox.</p></div>';
+
+    // Operating-system tabs — the package is presented for both motions, each with its own saved inputs.
+    html += '<div class="calc-motion" id="calcMotion">' +
+      '<button class="cm" data-motion="recruiting">Recruiting OS</button>' +
+      '<button class="cm" data-motion="bd">Business Development OS</button></div>';
+
+    html += '<div class="calc-wrap"><div class="calc-inputs">';
+
+    // Scale — recruiter-driven
+    html += card("Recruiters & per-seat volume", "The whole model scales from here. Set the team size and what one recruiter runs per month; totals derive automatically.",
+      grid(
+        xin("Recruiters on the system", "recruiters", s.recruiters, 1, 0) +
+        xin("Prospects / recruiter / mo", "prospectsPerRec", s.prospectsPerRec, 100, 0) +
+        xin("Emails / recruiter / mo", "emailsPerRec", s.emailsPerRec, 500, 0) +
+        xin("Voice recordings / recruiter / mo", "recordingsPerRec", s.recordingsPerRec, 50, 0)
+      ) + '<div id="scaleOut" class="calc-readout"></div>');
+
+    // Emailing system — counts auto-derive from send volume
+    html += card("Emailing system", "Inboxes & domains auto-derive from send volume at a safe deliverability ceiling — this is how the system actually provisions. (Reseller mailbox ≈ $1.50–3/mo, throwaway domain ≈ $1/mo.)",
+      grid(
+        xin("Cost / inbox / mo ($)", "inboxCost", s.inboxCost, 0.5, 0) +
+        xin("Cost / domain / mo ($)", "domainCost", s.domainCost, 0.5, 0) +
+        xin("Sends / inbox / mo", "sendsPerInbox", s.sendsPerInbox, 50, 1) +
+        xin("Inboxes / domain", "inboxesPerDomain", s.inboxesPerDomain, 1, 1) +
+        xin("Platform / ESP flat ($/mo)", "esp", s.esp, 5, 0) +
+        xin("API send cost ($ / 1k emails)", "perKSends", s.perKSends, 0.05, 0)
+      ) + '<div id="emailOut" class="calc-readout"></div>');
+
+    // TheirStack signals + People Data Labs enrichment
+    html += card("Hiring signals · TheirStack + People Data Labs", "TheirStack: 1 API credit = 1 job posting, 3 = 1 company (~$0.017/credit at Pro $169/10k, ~$0.0015 at volume). People Data Labs: person/phone enrichment, only successful matches are billed (~$0.28/match Pro, ~$0.20–0.25 at volume). Set PDL matches to 0 to leave it out.",
+      grid(
+        xin("TheirStack pack price ($)", "tsPrice", s.tsPrice, 5, 0) +
+        xin("Credits in pack", "tsCredits", s.tsCredits, 500, 0) +
+        xin("Credits / prospect", "tsPerProspect", s.tsPerProspect, 1, 0) +
+        xsel("Billing", "tsBilling", s.tsBilling, [["onetime", "Setup pack (one-time)"], ["monthly", "Monthly plan"]]) +
+        xin("PDL enrich ($ / match)", "pdlPrice", s.pdlPrice, 0.01, 0) +
+        xin("PDL matches / recruiter / mo", "pdlPerRec", s.pdlPerRec, 50, 0)
+      ) + '<div id="signalOut" class="calc-readout"></div>');
+
+    // Cartesia
+    html += card("Cloned voice · Cartesia", "Startup $39/mo = 1.25M credits. IVC = 1 credit/char (no training). Pro Voice Cloning = one-time 1M-credit training + 1.5 credits/char. A ~50-word voicemail ≈ 320 chars.",
+      grid(
+        xin("Plan fee ($/mo)", "cartFee", s.cartFee, 1, 0) +
+        xin("Credits included / mo", "cartCredits", s.cartCredits, 50000, 0) +
+        xsel("Cloning mode", "cartMode", s.cartMode, [["ivc", "Instant (IVC)"], ["pvc", "Pro clone (PVC)"]]) +
+        xin("Characters / recording", "cartChars", s.cartChars, 20, 0)
+      ));
+
+    html += '<div class="btn-row" style="margin-top:4px"><a class="btn btn-sm" id="calcReset">Reset to defaults</a></div>';
+    html += '</div>'; // /calc-inputs
+
+    // Results pane
+    html += '<div class="calc-results" id="calcResults"></div>';
+    html += '</div>'; // /calc-wrap
+
+    // Scenario comparison (full width)
+    html += '<div class="card" id="calcScenarios" style="margin-top:18px"></div>';
+
+    $("#view").innerHTML = html;
+
+    $$("#calcMotion .cm").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.motion === calcMotion);
+      b.addEventListener("click", function () {
+        calcMotion = b.dataset.motion;
+        localStorage.setItem("owner_calc_motion", calcMotion);
+        viewCalculator();
+      });
+    });
+    $$("#view [data-calc]").forEach(function (inp) {
+      inp.addEventListener("input", recompute);
+      inp.addEventListener("change", recompute);
+    });
+    $("#calcReset").addEventListener("click", function () {
+      localStorage.removeItem(calcKey()); viewCalculator();
+    });
+    recompute();
+  }
+
+  function card(title, sub, inner) {
+    return '<div class="card"><h3>' + esc(title) + '</h3>' + (sub ? '<p class="note" style="margin:-2px 0 12px">' + esc(sub) + '</p>' : '') + inner + '</div>';
+  }
+  function grid(inner) { return '<div class="calc">' + inner + '</div>'; }
+  function xin(label, id, val, step, min) {
+    return '<div class="fld"><label>' + esc(label) + '</label><input data-calc="' + id + '" type="number" step="' + step + '" min="' + (min == null ? 0 : min) + '" value="' + val + '"></div>';
+  }
+  function xsel(label, id, val, opts) {
+    var o = opts.map(function (p) { return '<option value="' + p[0] + '"' + (p[0] === val ? ' selected' : '') + '>' + esc(p[1]) + '</option>'; }).join("");
+    return '<div class="fld"><label>' + esc(label) + '</label><select data-calc="' + id + '">' + o + '</select></div>';
+  }
+
+  function recompute() {
+    var s = {};
+    $$("#view [data-calc]").forEach(function (inp) {
+      s[inp.dataset.calc] = inp.type === "number" ? (Number(inp.value) || 0) : inp.value;
+    });
+    // merge with defaults for anything not on screen, then persist
+    var full = calcState();
+    Object.keys(s).forEach(function (k) { full[k] = s[k]; });
+    saveCalcState(full);
+
+    var r = computeCalc(full);
+
+    // ---- live readouts under the input cards ----
+    var so = $("#scaleOut");
+    if (so) so.innerHTML = '<strong>' + r.recruiters + '</strong> recruiters → <strong>' + r.prospects.toLocaleString() +
+      '</strong> prospects · <strong>' + r.emails.toLocaleString() + '</strong> emails · <strong>' +
+      r.recordings.toLocaleString() + '</strong> voice drops / mo';
+    var eo = $("#emailOut");
+    if (eo) eo.innerHTML = 'Auto-derived: <strong>' + r.inboxes.toLocaleString() + '</strong> inboxes · <strong>' +
+      r.domains.toLocaleString() + '</strong> domains to carry ' + r.emails.toLocaleString() + ' emails/mo';
+    var sio = $("#signalOut");
+    if (sio) sio.innerHTML = 'TheirStack <strong>' + usd(r.signalsRecurring) + '</strong>/mo + PDL <strong>' + usd(r.pdlCost) +
+      '</strong>/mo (' + r.pdlMatches.toLocaleString() + ' matches) = <strong>' + usd(r.signalsRecurring + r.pdlCost) + '</strong>/mo';
+
+    // ---- results pane ----
+    var bars = {};
+    bars["Emailing system"] = round2(r.emailing);
+    bars["Signals · TheirStack"] = round2(r.signalsRecurring);
+    if (r.pdlCost > 0) bars["Person data · PDL"] = round2(r.pdlCost);
+    bars["Cloned voice · Cartesia"] = round2(r.voiceRecurring);
+
+    var html = '<div class="result-hero"><div class="rh-label">' + esc(motionName()) + ' · ' + r.recruiters + ' recruiter' + (r.recruiters === 1 ? '' : 's') + '</div>' +
+      '<div class="rh-value">' + usd(r.recurring) + '<span>/mo</span></div>' +
+      (r.oneTime > 0 ? '<div class="rh-sub">+ ' + usd(r.oneTime) + ' one-time setup</div>' : '') +
+      '</div>';
+
+    html += '<div class="result-metrics">' +
+      metric(usd(r.perRecruiter), "per recruiter / mo") +
+      metric(usd(r.perProspect, 4), "per prospect") +
+      metric(usd(r.perEmail, 4), "per email") +
+      '</div>';
+
+    html += '<h3 style="font-size:13px;margin:16px 0 8px">Where it goes (recurring)</h3>' + barsFromObj(bars);
+
+    html += '<h3 style="font-size:13px;margin:18px 0 8px">Effective rates</h3>' +
+      '<div class="tier-lines">' +
+      tl("TheirStack", "$" + fmt(r.tsCreditPrice, 5) + " / credit · " + Math.round(r.tsCreditsUsed).toLocaleString() + " credits used") +
+      (r.pdlCost > 0 ? tl("People Data Labs", "$" + fmt(r.pdlPrice, 2) + " / match · " + r.pdlMatches.toLocaleString() + " matches") : "") +
+      tl("Cartesia", "$" + fmt(r.cartCreditPrice * 1000, 4) + " / 1k chars · " + usd(r.perRecording, 4) + " / recording") +
+      tl("Emailing", usd(r.emailing) + " over " + r.inboxes + " inboxes · " + r.domains + " domains") +
+      '</div>';
+
+    if (r.oneTime > 0) {
+      html += '<h3 style="font-size:13px;margin:18px 0 8px">One-time setup</h3><div class="tier-lines">';
+      if (r.signalsOneTime > 0) html += tlv("TheirStack credit pack", usd(r.signalsOneTime));
+      if (r.voiceOneTime > 0) html += tlv("Cartesia PVC voice training", usd(r.voiceOneTime));
+      html += '<div class="tl total"><span>Total setup</span><span class="v">' + usd(r.oneTime) + '</span></div></div>';
+    }
+
+    html += '<p class="note" style="margin-top:14px">Annualized: <strong>' + usd(r.recurring * 12) + '/yr</strong> recurring' + (r.oneTime > 0 ? ' + ' + usd(r.oneTime) + ' once' : '') + '. Recruiting OS and Business Development OS share the same unit costs — switch the tab above to model each with its own team size and volumes.</p>';
+
+    $("#calcResults").innerHTML = html;
+
+    // ---- scenario comparison: same per-seat assumptions, varied team size ----
+    renderScenarios(full, r.recruiters);
+  }
+
+  function renderScenarios(full, current) {
+    var el = $("#calcScenarios"); if (!el) return;
+    var counts = CALC_LADDER.slice();
+    if (counts.indexOf(current) === -1 && current > 0) counts.push(current);
+    counts = counts.filter(function (v, i, a) { return a.indexOf(v) === i; }).sort(function (a, b) { return a - b; });
+
+    var html = '<h3>Cost by team size</h3><p class="note" style="margin:-2px 0 12px">Same per-recruiter assumptions, different headcount — your current row is highlighted. Watch cost-per-recruiter fall as fixed pieces (domains, the voice plan, signal packs) spread across more seats.</p>';
+    html += '<table class="otable"><thead><tr>' +
+      '<th>Recruiters</th><th class="num">Emails / mo</th><th class="num">Inboxes</th>' +
+      '<th class="num">Recurring / mo</th><th class="num">Per recruiter</th><th class="num">Setup (once)</th>' +
+      '</tr></thead><tbody>';
+    counts.forEach(function (n) {
+      var c = computeCalc(assign(full, "recruiters", n));
+      html += '<tr' + (n === current ? ' class="cur"' : '') + '>' +
+        '<td><strong>' + n + '</strong></td>' +
+        '<td class="num">' + c.emails.toLocaleString() + '</td>' +
+        '<td class="num">' + c.inboxes.toLocaleString() + '</td>' +
+        '<td class="num">' + usd(c.recurring) + '</td>' +
+        '<td class="num">' + usd(c.perRecruiter) + '</td>' +
+        '<td class="num">' + (c.oneTime > 0 ? usd(c.oneTime) : '—') + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }
+  function metric(v, l) { return '<div class="rmetric"><div class="rm-v">' + esc(v) + '</div><div class="rm-l">' + esc(l) + '</div></div>'; }
+  function tl(k, v) { return '<div class="tl"><span>' + esc(k) + '</span><span class="v" style="font-size:11.5px">' + esc(v) + '</span></div>'; }
+  function tlv(k, v) { return '<div class="tl"><span>' + esc(k) + '</span><span class="v">' + esc(v) + '</span></div>'; }
+  function fmt(n, dp) { return (Number(n) || 0).toFixed(dp == null ? 2 : dp); }
+  function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
   /* ================= SPEND ================= */
   function viewSpend() {
