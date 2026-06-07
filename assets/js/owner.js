@@ -463,24 +463,38 @@
     if (counts.indexOf(current) === -1 && current > 0) counts.push(current);
     counts = counts.filter(function (v, i, a) { return a.indexOf(v) === i; }).sort(function (a, b) { return a - b; });
 
-    var html = '<h3>Cost by team size</h3><p class="note" style="margin:-2px 0 12px">Same per-recruiter assumptions, different headcount — your current row is highlighted. Watch cost-per-recruiter fall as fixed pieces (domains, the voice plan, signal packs) spread across more seats.</p>';
-    html += '<table class="otable"><thead><tr>' +
-      '<th>Recruiters</th><th class="num">Emails / mo</th><th class="num">Inboxes</th>' +
-      '<th class="num">Recurring / mo</th><th class="num">Per recruiter</th><th class="num">Setup (once)</th>' +
+    var html = '<h3>Cost by team size</h3><p class="note" style="margin:-2px 0 12px">Same per-recruiter assumptions, different headcount. <strong>Click any row to load it above.</strong> Your current size is highlighted — watch cost-per-recruiter fall as the fixed pieces (the voice plan, signal pack, domains) spread across more seats.</p>';
+    html += '<div class="otable-wrap"><table class="otable scenario"><thead><tr>' +
+      '<th>Recruiters</th><th class="num">Email</th><th class="num">Signals + data</th><th class="num">Voice</th>' +
+      '<th class="num">Recurring / mo</th><th class="num">Per recruiter</th><th class="num">Setup</th>' +
       '</tr></thead><tbody>';
     counts.forEach(function (n) {
       var c = computeCalc(assign(full, "recruiters", n));
-      html += '<tr' + (n === current ? ' class="cur"' : '') + '>' +
+      html += '<tr class="clickrow' + (n === current ? ' cur' : '') + '" data-n="' + n + '">' +
         '<td><strong>' + n + '</strong></td>' +
-        '<td class="num">' + c.emails.toLocaleString() + '</td>' +
-        '<td class="num">' + c.inboxes.toLocaleString() + '</td>' +
-        '<td class="num">' + usd(c.recurring) + '</td>' +
+        '<td class="num">' + usd(c.emailing) + '</td>' +
+        '<td class="num">' + usd(c.signalsRecurring + c.pdlCost) + '</td>' +
+        '<td class="num">' + usd(c.voiceRecurring) + '</td>' +
+        '<td class="num"><strong>' + usd(c.recurring) + '</strong></td>' +
         '<td class="num">' + usd(c.perRecruiter) + '</td>' +
         '<td class="num">' + (c.oneTime > 0 ? usd(c.oneTime) : '—') + '</td>' +
         '</tr>';
     });
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
+    html += '<p class="note" style="margin-top:10px">Assumptions: ' + full.sendsPerInbox + ' sends/inbox · ' + full.inboxesPerDomain + ' inboxes/domain · ' +
+      full.tsPerProspect + ' TheirStack credit' + (full.tsPerProspect === 1 ? '' : 's') + '/prospect · ' +
+      full.pdlPerRec.toLocaleString() + ' PDL matches/recruiter @ $' + fmt(full.pdlPrice, 2) + '/match · Cartesia ' +
+      (full.cartMode === "pvc" ? "Pro clone" : "Instant") + '. Edit any input above to reshape every row.</p>';
     el.innerHTML = html;
+
+    $$("#calcScenarios .clickrow").forEach(function (tr) {
+      tr.addEventListener("click", function () {
+        var inp = $('#view [data-calc="recruiters"]');
+        if (inp) { inp.value = Number(tr.dataset.n) || 0; recompute(); }
+        var res = $("#calcResults");
+        if (res && res.scrollIntoView) res.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
   }
   function metric(v, l) { return '<div class="rmetric"><div class="rm-v">' + esc(v) + '</div><div class="rm-l">' + esc(l) + '</div></div>'; }
   function tl(k, v) { return '<div class="tl"><span>' + esc(k) + '</span><span class="v" style="font-size:11.5px">' + esc(v) + '</span></div>'; }

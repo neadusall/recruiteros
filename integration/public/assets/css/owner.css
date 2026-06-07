@@ -118,9 +118,13 @@
 .calc-readout { margin-top: 12px; padding: 9px 12px; background: var(--bg-soft); border: 1px dashed var(--border); border-radius: 9px; font-size: 12.5px; color: var(--text-muted); }
 .calc-readout strong { color: var(--owner); font-family: var(--mono); font-weight: 700; }
 
-/* scenario comparison: highlight the current team-size row */
+/* scenario comparison: highlight current row, keep wide table from breaking layout */
+.otable-wrap { overflow-x: auto; }
+.otable.scenario { min-width: 560px; }
+.otable.scenario td.num, .otable.scenario th.num { white-space: nowrap; }
 #calcScenarios .otable tr.cur td { background: rgba(255,176,32,0.10); }
 #calcScenarios .otable tr.cur td:first-child { box-shadow: inset 2px 0 0 var(--owner); }
+#calcScenarios .clickrow:hover td { background: rgba(255,176,32,0.06); }
 
 @media (max-width: 900px) {
   .calc-wrap { grid-template-columns: 1fr; }
