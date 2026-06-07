@@ -878,3 +878,50 @@ html[data-theme="light"] .aurora { opacity: .12; }
 .topbar { position: relative; z-index: 100; }
 .acct { z-index: 1000; }
 .acct-menu { z-index: 2000; }
+
+/* ============================================================
+   Professional polish v2 — typographic precision, crisper data
+   surfaces, consistent badges, refined scrollbars. Visual only.
+   ============================================================ */
+
+/* Type: smoother rendering + tabular figures wherever numbers line up */
+body.app { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+.stat .sv, .rail-stat b, .sl-c, .or-credit-top b,
+.pr-table td, table.seqlib td, table.grid td, .matrix td, .pipe .stage b { font-variant-numeric: tabular-nums; }
+
+/* Stat tiles: confident number, quiet label */
+.stat { padding: 18px 18px 16px; }
+.stat .sv { font-size: 30px; font-weight: 800; letter-spacing: -.025em; line-height: 1.05; }
+.stat .sl { font-size: 12px; color: var(--text-muted); margin-top: 6px; font-weight: 500; }
+.stat .rag { width: 8px; height: 8px; top: 16px; right: 16px; }
+
+/* Cards: hairline that sharpens on hover (subtle, professional) */
+.card { transition: border-color .14s ease, box-shadow .14s ease; }
+.card:hover { border-color: var(--border-strong); }
+
+/* Pipeline stage chips: even, legible */
+.pipe { gap: 12px; }
+.pipe .stage { border-radius: 14px; }
+.pipe .stage b { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+.pipe .stage span { font-size: 11.5px; color: var(--text-muted); }
+
+/* Badges/pills: one consistent weight + tracking */
+.cls, .status-pill, .or-pill, .sl-status, .seq-chip { font-weight: 700; letter-spacing: .02em; }
+.cls { font-size: 10.5px; padding: 3px 9px; }
+
+/* Buttons: crisp, even sizing */
+.btn { font-weight: 600; }
+.btn-sm { padding: 7px 12px; font-size: 13px; line-height: 1; }
+
+/* Refined thin scrollbars everywhere in the app */
+.app * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.app *::-webkit-scrollbar { width: 10px; height: 10px; }
+.app *::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+.app *::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+.app *::-webkit-scrollbar-track { background: transparent; }
+
+/* List rows / table rows: gentle separators, crisp hover */
+.pr-table tbody td, table.seqlib tbody td { border-bottom-color: var(--border); }
+
+/* Account button: a touch more refined */
+.acct-btn { transition: border-color .12s ease, background .12s ease; }
