@@ -2443,10 +2443,12 @@
       var base = filtered(null, false); // everything except the stage selection
       var counts = {}; var noStage = 0;
       base.forEach(function (r) { if (r.stage) counts[r.stage] = (counts[r.stage] || 0) + 1; else noStage++; });
-      var ordered = DT_STAGE_ORDER.filter(function (s) { return counts[s]; });
+      // Always show the full canonical pipeline (even at 0), then any extra
+      // stages present in the data, then a No-stage bucket — all clickable.
+      var ordered = DT_STAGE_ORDER.slice();
       Object.keys(counts).forEach(function (s) { if (ordered.indexOf(s) < 0) ordered.push(s); });
       var tabs = [["", "Total", base.length]];
-      ordered.forEach(function (s) { tabs.push([s, s, counts[s]]); });
+      ordered.forEach(function (s) { tabs.push([s, s, counts[s] || 0]); });
       if (noStage) tabs.push(["__none__", "No stage", noStage]);
       $("#cdTabs", el).innerHTML = tabs.map(function (t) {
         return '<div class="cd-tab' + (state.stage === t[0] ? " active" : "") + '" data-stage="' + esc(t[0]) + '">' + esc(t[1]) + '<span class="cd-tc">' + t[2] + '</span></div>';

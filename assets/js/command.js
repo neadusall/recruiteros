@@ -1952,14 +1952,22 @@
       ["current_client", "Current Client"], ["dead_opportunity", "Dead Opportunity"],
       ["do_not_prospect", "Do Not Prospect"], ["uncontacted", "Uncontacted"]
     ];
-    // Columns the table renders (Jobs/Type/Tags aren't sortable).
+    // Columns the table renders (Jobs/Type/Tags aren't sortable). Status is an
+    // inline picker per row — pick a status and the company moves under that tab.
     var COLS = [
       { key: "name", label: "Name", sort: true }, { key: "jobs", label: "Jobs", sort: false },
       { key: "url", label: "URL", sort: true }, { key: "location", label: "Location", sort: true },
       { key: "owner", label: "Creator", sort: true }, { key: "created", label: "Created Date", sort: true },
-      { key: "type", label: "Company Type", sort: false }, { key: "tags", label: "Tags", sort: false }
+      { key: "type", label: "Company Type", sort: false }, { key: "status", label: "Status", sort: true },
+      { key: "tags", label: "Tags", sort: false }
     ];
     var GRAD = ["#7c5cff,#4dd0ff", "#ff7ac6,#7c5cff", "#4dd0ff,#38e0a6", "#ffc24d,#ff7ac6", "#38e0a6,#4dd0ff", "#ff6b6b,#ffc24d"];
+    // Per-status accent — drives the inline picker + status pill colors.
+    var STATUS_COLOR = {
+      in_progress: "#ffc24d", active_opportunity: "#4dd0ff", current_client: "#38e0a6",
+      dead_opportunity: "#ff6b6b", do_not_prospect: "#8a8aa0", uncontacted: "#7c5cff"
+    };
+    function statusLabel(k) { for (var i = 0; i < TABS.length; i++) if (TABS[i][0] === k) return TABS[i][1]; return ""; }
 
     // Persistence: no backend store yet, so tags, status, added rows and deletions
     // survive in localStorage keyed by company name. SEED stays the source of truth
@@ -2443,10 +2451,12 @@
       var base = filtered(null, false); // everything except the stage selection
       var counts = {}; var noStage = 0;
       base.forEach(function (r) { if (r.stage) counts[r.stage] = (counts[r.stage] || 0) + 1; else noStage++; });
-      var ordered = DT_STAGE_ORDER.filter(function (s) { return counts[s]; });
+      // Always show the full canonical pipeline (even at 0), then any extra
+      // stages present in the data, then a No-stage bucket — all clickable.
+      var ordered = DT_STAGE_ORDER.slice();
       Object.keys(counts).forEach(function (s) { if (ordered.indexOf(s) < 0) ordered.push(s); });
       var tabs = [["", "Total", base.length]];
-      ordered.forEach(function (s) { tabs.push([s, s, counts[s]]); });
+      ordered.forEach(function (s) { tabs.push([s, s, counts[s] || 0]); });
       if (noStage) tabs.push(["__none__", "No stage", noStage]);
       $("#cdTabs", el).innerHTML = tabs.map(function (t) {
         return '<div class="cd-tab' + (state.stage === t[0] ? " active" : "") + '" data-stage="' + esc(t[0]) + '">' + esc(t[1]) + '<span class="cd-tc">' + t[2] + '</span></div>';

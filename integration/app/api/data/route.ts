@@ -16,11 +16,13 @@ import {
   type DataSource,
 } from "../../../lib/data";
 import { addProspect } from "../../../lib/prospects";
+import { ensureLumeSeed } from "../../../lib/data/autoseed";
 
 export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
+  await ensureLumeSeed(ws); // first-open auto-load of the bundled export (once, when empty)
   const u = new URL(req.url);
   const { records, total } = await listRecords(ws, {
     q: u.searchParams.get("q") ?? undefined,
