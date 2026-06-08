@@ -6,12 +6,15 @@
  *
  * Cost is organised by WHERE IT LIVES — three buckets:
  *   • Email outreach     = activity + sending + enrichment + message AI + signals
- *   • Voice outreach     = direct-dial enrichment (confirmed) + cloned voice
- *   • LinkedIn outreach  = per-profile messaging + message AI
+ *   • Voice outreach     = a LinkedIn-first reach funnel (see below) + cloned voice
+ *   • LinkedIn outreach  = per-profile messaging seat + message AI
  *
- * Direct dials are PDL-only by design: free/cheap sources can't confirm a number
- * is the person's own line (often a switchboard), so we only count confirmed,
- * person-attributed dials at the premium rate, scaled by a find rate.
+ * VOICE FUNNEL (cheapest path first):
+ *   Every target gets a LinkedIn connection request. The ~50% who ACCEPT get a
+ *   cloned-voice NOTE on LinkedIn (no phone number, no Telnyx send — cheap). The
+ *   ~50% who DON'T accept get a landline/VoIP enriched cheapest-first (Apify →
+ *   Apollo); where we find a number (~40%), they get an AMD voicemail drop. This
+ *   minimises the expensive enrichment + AMD path to only the non-connectors.
  *
  * Cost lines are deliberately GENERIC — real vendors/tools are never named where
  * a customer can see, only the function performed and an editable price.
@@ -21,7 +24,7 @@
 (function () {
   "use strict";
 
-  var KEY = "ros_spend_calc_v3";
+  var KEY = "ros_spend_calc_v4";
 
   var DEFAULTS = {
     accounts: 1,
@@ -36,11 +39,15 @@
     emailChars: 2000, llmPer1k: 0.005,
     // Hiring Signals (per lookup + optional one-time data pack)
     signalCost: 0.017, signalSetup: 85, signalSetupOn: 1,
-    // Direct Phone Numbers (PDL-only, confirmed): wanted × find rate → found
-    phonePerAccount: 500, phoneFindRate: 35, phoneFoundCost: 0.10, phoneCheckCost: 0.0025,
-    // Cloned Voice (plan + per-drop synthesis + LLM script + 1-min send)
-    voicePerAccount: 200, voicePlan: 39, voiceSynthCost: 0.01, voiceLlmCost: 0.004, voiceSendCost: 0.007,
-    // LinkedIn outreach (per profile messaging + per-message AI)
+    // Voice reach funnel — LinkedIn-first, AMD fallback
+    linkedinAcceptRate: 50,    // % of connection requests accepted → cloned-voice NOTE
+    landlineFillRate: 40,      // % of non-accepters we find a landline/VoIP for (Apify→Apollo)
+    landlineEnrichCost: 0.08,  // blended Apify → Apollo, per number FOUND
+    lineCheckCost: 0.0025,     // Telnyx line-type check (landline/VoIP only)
+    apolloPlan: 49,            // Apollo seat / mo (flat)
+    // Cloned voice delivery (per touch synth + LLM script; AMD adds a 1-min send)
+    voicePlan: 39, voiceSynthCost: 0.01, voiceLlmCost: 0.004, amdSendCost: 0.007,
+    // LinkedIn outreach (per profile messaging seat + per-message AI)
     linkedinProfilesPerAccount: 1, linkedinPerProfile: 55, linkedinMsgsPerAccount: 500, linkedinChars: 2000
   };
   var LADDER = [1, 2, 3, 5, 10, 25, 50];
@@ -51,6 +58,7 @@
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function usd(n, dp) { n = Number(n) || 0; if (dp != null) return "$" + n.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp }); return "$" + n.toLocaleString("en-US", { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 }); }
   function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+  function clamp01(n) { return Math.min(1, Math.max(0, (Number(n) || 0) / 100)); }
 
   function state() {
     var s = {};
@@ -67,34 +75,32 @@
     var accounts = Math.max(0, Number(s.accounts) || 0);
     var prospects = accounts * s.prospectsPerAccount;
     var emails = prospects * s.stepsPerProspect;
-    var voice = accounts * s.voicePerAccount;
 
     // --- Email outreach ---
     var inboxes = s.sendsPerInbox > 0 ? Math.ceil(emails / s.sendsPerInbox) : 0;
     var domains = s.inboxesPerDomain > 0 ? Math.ceil(inboxes / s.inboxesPerDomain) : 0;
     var emailSend = inboxes * s.inboxCost + domains * s.domainCost;
     var emailEnrich = prospects * (s.emailFindCost + s.emailVerifyCost);
-    var emailLlm = emails * (s.emailChars / 1000) * s.llmPer1k;   // AI writes each message
+    var emailLlm = emails * (s.emailChars / 1000) * s.llmPer1k;
     var signalRecurring = prospects * s.signalCost;
     var signalOneTime = s.signalSetupOn ? s.signalSetup : 0;
     var emailOutreach = emailSend + emailEnrich + emailLlm + signalRecurring;
 
-    // --- Voice outreach ---
-    // Direct dials are PDL-only & confirmed: you pay $0.10 per number FOUND,
-    // misses are free, find rate models PDL's coverage of your contacts.
-    var phoneWanted = accounts * s.phonePerAccount;
-    var phoneRate = Math.min(1, Math.max(0, (s.phoneFindRate || 0) / 100));
-    var phoneFound = Math.round(phoneWanted * phoneRate);
-    var phoneLookup = phoneFound * s.phoneFoundCost;
-    var phoneCheck = phoneFound * s.phoneCheckCost;   // line-type check (drop to landline/VoIP only)
-    var phoneEnrich = phoneLookup + phoneCheck;
-    var phoneBlended = phoneWanted > 0 ? phoneEnrich / phoneWanted : 0;
-    // Each drop = synthesis + LLM script + 1-min send.
-    var voicePerDrop = s.voiceSynthCost + s.voiceLlmCost + s.voiceSendCost;
-    var voiceRecurring = s.voicePlan + voice * voicePerDrop;
-    var voiceOutreach = phoneEnrich + voiceRecurring;
+    // --- Voice outreach (LinkedIn-first funnel) ---
+    var voiceTargets = prospects;                                  // everyone is a voice target
+    var liNotes = Math.round(voiceTargets * clamp01(s.linkedinAcceptRate));   // accepters → cloned voice NOTE
+    var amdCand = Math.max(0, voiceTargets - liNotes);             // non-accepters
+    var landFound = Math.round(amdCand * clamp01(s.landlineFillRate));        // Apify→Apollo finds a landline
+    var amdDrops = landFound;                                      // AMD drop only where we have a number
+    var landlineEnrich = landFound * (s.landlineEnrichCost + s.lineCheckCost);
+    var noteCost = liNotes * (s.voiceSynthCost + s.voiceLlmCost);  // native LinkedIn — no send fee
+    var amdCost = amdDrops * (s.voiceSynthCost + s.voiceLlmCost + s.amdSendCost);
+    var voiceFlat = s.voicePlan + s.apolloPlan;                    // Cartesia + Apollo seats
+    var voiceTouches = liNotes + amdDrops;
+    var voiceReachPct = voiceTargets > 0 ? voiceTouches / voiceTargets : 0;
+    var voiceOutreach = voiceFlat + landlineEnrich + noteCost + amdCost;
 
-    // --- LinkedIn outreach ---
+    // --- LinkedIn outreach (seat + message AI) ---
     var liProfiles = accounts * s.linkedinProfilesPerAccount;
     var liSeat = liProfiles * s.linkedinPerProfile;
     var liMsgs = accounts * s.linkedinMsgsPerAccount;
@@ -104,11 +110,12 @@
     var recurring = emailOutreach + voiceOutreach + linkedinOutreach;
     var oneTime = signalOneTime;
     return {
-      accounts: accounts, prospects: prospects, emails: emails, voice: voice,
+      accounts: accounts, prospects: prospects, emails: emails,
       inboxes: inboxes, domains: domains, emailSend: emailSend, emailEnrich: emailEnrich, emailLlm: emailLlm,
       signalRecurring: signalRecurring, signalOneTime: signalOneTime, emailOutreach: emailOutreach,
-      phoneWanted: phoneWanted, phoneFound: phoneFound, phoneEnrich: phoneEnrich, phoneBlended: phoneBlended,
-      voiceRecurring: voiceRecurring, voiceOutreach: voiceOutreach,
+      voiceTargets: voiceTargets, liNotes: liNotes, amdCand: amdCand, landFound: landFound, amdDrops: amdDrops,
+      landlineEnrich: landlineEnrich, noteCost: noteCost, amdCost: amdCost, voiceFlat: voiceFlat,
+      voiceTouches: voiceTouches, voiceReachPct: voiceReachPct, voiceOutreach: voiceOutreach,
       liProfiles: liProfiles, liSeat: liSeat, liMsgs: liMsgs, liLlm: liLlm, linkedinOutreach: linkedinOutreach,
       recurring: recurring, oneTime: oneTime,
       perAccount: accounts > 0 ? recurring / accounts : 0,
@@ -141,7 +148,7 @@
     var s = state();
 
     var html = '<div class="sc">';
-    html += '<div class="sc-head"><h2>Spending</h2><p>Model what your outreach will cost each month — start with one account and add more to see how it scales. Costs group by where they live: <strong>email</strong>, <strong>voice</strong>, and <strong>LinkedIn</strong> outreach. Every number is editable; the table at the bottom compares account counts. Live what-if sandbox.</p></div>';
+    html += '<div class="sc-head"><h2>Spending</h2><p>Model what your outreach will cost each month — start with one account and add more to see how it scales. Costs group by where they live: <strong>email</strong>, <strong>voice</strong>, and <strong>LinkedIn</strong>. Voice runs a LinkedIn-first funnel so the expensive enrichment + AMD path only hits the people who don\'t connect. Every number is editable.</p></div>';
 
     html += '<div class="sc-accounts">' +
       '<div class="sc-acc-ctl"><button class="sc-step" data-acc="-1">−</button>' +
@@ -164,26 +171,27 @@
     html += card("Email Enrichment & AI", "Finding + verifying each address, plus the AI that writes each message (per 1,000 characters — a 2,000-char email ≈ 2 units).",
       fld("Find / prospect ($)", "emailFindCost", s.emailFindCost, 0.001, 0) +
       fld("Verify / prospect ($)", "emailVerifyCost", s.emailVerifyCost, 0.001, 0) +
-      fld("Characters / email msg", "emailChars", s.emailChars, 100, 0) +
+      fld("Characters / message", "emailChars", s.emailChars, 100, 0) +
       fld("AI ($ / 1k chars)", "llmPer1k", s.llmPer1k, 0.001, 0), "scEnrichRead");
     html += card("Hiring Signals", "Lookups that surface companies actively hiring. Priced per lookup, with an optional one-time data pack.",
       fld("Cost / lookup ($)", "signalCost", s.signalCost, 0.005, 0) +
       fld("One-time data pack ($)", "signalSetup", s.signalSetup, 5, 0) +
       fld("Include pack? (1 / 0)", "signalSetupOn", s.signalSetupOn, 1, 0));
 
-    // ---- Voice outreach ----
-    html += section("Voice outreach");
-    html += card("Direct Phone Numbers", "Confirmed, person-attributed direct dials — paid per number FOUND (misses are free). Find rate models how many of your contacts have a findable direct line. Each found number is line-type checked so drops only go to landline / VoIP.",
-      fld("Numbers wanted / mo", "phonePerAccount", s.phonePerAccount, 50, 0) +
-      fld("Find rate (%)", "phoneFindRate", s.phoneFindRate, 5, 0) +
-      fld("Cost / number found ($)", "phoneFoundCost", s.phoneFoundCost, 0.01, 0) +
-      fld("Line-type check ($/number)", "phoneCheckCost", s.phoneCheckCost, 0.0005, 0), "scPhoneRead");
-    html += card("Cloned Voice", "AI voicemail drops in a cloned voice. Flat monthly plan + per drop: voice synthesis, the LLM that writes the script, and a ~1-minute send.",
-      fld("Voice drops / mo", "voicePerAccount", s.voicePerAccount, 25, 0) +
-      fld("Plan / mo ($)", "voicePlan", s.voicePlan, 1, 0) +
-      fld("Synthesis ($/drop)", "voiceSynthCost", s.voiceSynthCost, 0.005, 0) +
-      fld("LLM script ($/drop)", "voiceLlmCost", s.voiceLlmCost, 0.001, 0) +
-      fld("Send ($/drop, 1 min)", "voiceSendCost", s.voiceSendCost, 0.001, 0), "scVoiceRead");
+    // ---- Voice outreach (LinkedIn-first funnel) ----
+    html += section("Voice outreach — LinkedIn-first, AMD fallback");
+    html += card("Voice reach funnel", "Everyone gets a LinkedIn connection request first. Accepters get a cloned-voice NOTE (no phone, no send fee). Non-accepters get a landline/VoIP found cheapest-first, then an AMD voicemail drop where a number exists.",
+      fld("LinkedIn accept rate (%)", "linkedinAcceptRate", s.linkedinAcceptRate, 5, 0) +
+      fld("Landline/VoIP fill (%)", "landlineFillRate", s.landlineFillRate, 5, 0), "scFunnelRead");
+    html += card("Landline enrichment (cheapest-first)", "Direct landline/VoIP for the non-accepters — found via the cheap scraper waterfall first, then Apollo's API. A flat Apollo seat + a per-number-found cost; each found number is line-type checked so drops only go to landline/VoIP.",
+      fld("Apollo seat ($/mo)", "apolloPlan", s.apolloPlan, 5, 0) +
+      fld("Enrichment ($/found)", "landlineEnrichCost", s.landlineEnrichCost, 0.01, 0) +
+      fld("Line-type check ($/number)", "lineCheckCost", s.lineCheckCost, 0.0005, 0), "scEnrich2Read");
+    html += card("Cloned voice delivery", "Cloned-voice synthesis + the LLM that scripts each touch. LinkedIn notes send free (native); AMD drops add a ~1-minute Telnyx send.",
+      fld("Voice plan ($/mo)", "voicePlan", s.voicePlan, 1, 0) +
+      fld("Synthesis ($/touch)", "voiceSynthCost", s.voiceSynthCost, 0.005, 0) +
+      fld("LLM script ($/touch)", "voiceLlmCost", s.voiceLlmCost, 0.001, 0) +
+      fld("AMD send ($/drop, 1 min)", "amdSendCost", s.amdSendCost, 0.001, 0), "scDeliverRead");
 
     // ---- LinkedIn outreach ----
     html += section("LinkedIn outreach");
@@ -243,13 +251,19 @@
     if (enr) enr.innerHTML = 'Find+verify <strong>' + usd(r.emailEnrich) + '</strong> + message AI <strong>' + usd(r.emailLlm) +
       '</strong> (' + r.emails.toLocaleString() + ' msgs × ' + s.emailChars + ' chars)';
 
-    var pr = $("#scPhoneRead", root);
-    if (pr) pr.innerHTML = 'Of <strong>' + r.phoneWanted.toLocaleString() + '</strong> wanted, ≈<strong>' + r.phoneFound.toLocaleString() +
-      '</strong> found @ ' + usd(s.phoneFoundCost, 2) + ' = <strong>' + usd(r.phoneEnrich) + '</strong> → blended <strong>' + usd(r.phoneBlended, 3) + '</strong>/contact';
+    var fr = $("#scFunnelRead", root);
+    if (fr) fr.innerHTML = '<strong>' + r.voiceTargets.toLocaleString() + '</strong> targets → <strong>' + r.liNotes.toLocaleString() +
+      '</strong> LinkedIn notes (' + s.linkedinAcceptRate + '%) + <strong>' + r.amdCand.toLocaleString() + '</strong> non-accepters → <strong>' +
+      r.landFound.toLocaleString() + '</strong> landlines (' + s.landlineFillRate + '%) → <strong>' + r.amdDrops.toLocaleString() +
+      '</strong> AMD drops. Reached <strong>' + r.voiceTouches.toLocaleString() + '</strong> (' + Math.round(r.voiceReachPct * 100) + '%).';
 
-    var vr = $("#scVoiceRead", root);
-    if (vr) vr.innerHTML = '<strong>' + usd(s.voicePlan) + '</strong> plan + <strong>' + r.voice.toLocaleString() + '</strong> drops × (' +
-      usd(s.voiceSynthCost, 3) + ' synth + ' + usd(s.voiceLlmCost, 3) + ' LLM + ' + usd(s.voiceSendCost, 3) + ' send) = <strong>' + usd(r.voiceRecurring) + '</strong>/mo';
+    var e2 = $("#scEnrich2Read", root);
+    if (e2) e2.innerHTML = '<strong>' + r.landFound.toLocaleString() + '</strong> found × (' + usd(s.landlineEnrichCost, 2) + ' + ' + usd(s.lineCheckCost, 4) +
+      ') + Apollo ' + usd(s.apolloPlan) + ' = <strong>' + usd(r.landlineEnrich + s.apolloPlan) + '</strong>/mo';
+
+    var dr = $("#scDeliverRead", root);
+    if (dr) dr.innerHTML = 'Notes <strong>' + usd(r.noteCost) + '</strong> (no send) + AMD <strong>' + usd(r.amdCost) +
+      '</strong> (incl. 1-min send) + plan ' + usd(s.voicePlan);
 
     var li = $("#scLiRead", root);
     if (li) li.innerHTML = '<strong>' + r.liProfiles.toLocaleString() + '</strong> profile' + (r.liProfiles === 1 ? '' : 's') + ' × ' + usd(s.linkedinPerProfile) +
@@ -259,9 +273,10 @@
     b["Email Sending"] = round2(r.emailSend);
     b["Email Enrich + AI"] = round2(r.emailEnrich + r.emailLlm);
     b["Hiring Signals"] = round2(r.signalRecurring);
-    b["Direct Phone (confirmed)"] = round2(r.phoneEnrich);
-    b["Cloned Voice"] = round2(r.voiceRecurring);
-    b["LinkedIn"] = round2(r.linkedinOutreach);
+    b["LinkedIn voice notes"] = round2(r.noteCost);
+    b["AMD drops + enrichment"] = round2(r.amdCost + r.landlineEnrich);
+    b["Voice + Apollo seats"] = round2(r.voiceFlat);
+    b["LinkedIn messaging"] = round2(r.linkedinOutreach);
 
     var html = '<div class="sc-hero"><div class="sc-hl">Projected recurring · ' + r.accounts + ' account' + (r.accounts === 1 ? '' : 's') + '</div>' +
       '<div class="sc-hv">' + usd(r.recurring) + '<span>/mo</span></div>' +
@@ -269,7 +284,7 @@
 
     html += '<div class="sc-metrics">' +
       metric(usd(r.perAccount), "per account / mo") +
-      metric(usd(r.perEmail, 4), "per email") +
+      metric(Math.round(r.voiceReachPct * 100) + "%", "voice-reached") +
       metric(usd(r.recurring * 12), "per year") + '</div>';
 
     html += '<h3 class="sc-h3">Cost buckets</h3><div class="sc-lines">' +
@@ -279,12 +294,10 @@
 
     html += '<h3 class="sc-h3">Where it goes</h3>' + bars(b);
 
-    html += '<h3 class="sc-h3">At a glance</h3><div class="sc-lines">' +
-      tl("Emails / mo", r.emails.toLocaleString()) +
-      tl("Sending inboxes", r.inboxes.toLocaleString() + " · " + r.domains.toLocaleString() + " domains") +
-      tl("Direct dials found", r.phoneFound.toLocaleString() + " of " + r.phoneWanted.toLocaleString() + " (" + usd(r.phoneBlended, 3) + "/ea)") +
-      tl("Voice drops", r.voice.toLocaleString()) +
-      tl("LinkedIn profiles", r.liProfiles.toLocaleString()) + '</div>';
+    html += '<h3 class="sc-h3">Voice funnel</h3><div class="sc-lines">' +
+      tl("LinkedIn voice notes", r.liNotes.toLocaleString() + " (free send)") +
+      tl("Landlines found → AMD drops", r.landFound.toLocaleString() + " of " + r.amdCand.toLocaleString()) +
+      tl("Total voice-reached", r.voiceTouches.toLocaleString() + " of " + r.voiceTargets.toLocaleString()) + '</div>';
 
     $("#scResults", root).innerHTML = html;
     renderScenarios(root, s, r.accounts);
