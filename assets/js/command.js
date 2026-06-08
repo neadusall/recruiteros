@@ -1945,20 +1945,53 @@
       ["iCapital", "", "", "Josh Gurin", "12/23/2025"],
       ["reap", "https://getreap.com/", "", "Josh Gurin", "6/8/2026"]
     ];
-    var companies = SEED.map(function (r) {
-      return { name: r[0], url: r[1], location: r[2], owner: r[3], created: r[4], type: "Client", status: "", jobs: 0, tags: [] };
-    });
-
-    // Status tabs mirror the CRM pipeline. We don't track per-company status yet,
-    // so everything sits under Total and the rest read 0 (honest, like the source).
+    // Status tabs mirror the CRM pipeline; tabs are functional — set a company's
+    // status from the bulk bar and it moves under the matching tab.
     var TABS = [
       ["total", "Total"], ["in_progress", "In Progress"], ["active_opportunity", "Active Opportunity"],
       ["current_client", "Current Client"], ["dead_opportunity", "Dead Opportunity"],
       ["do_not_prospect", "Do Not Prospect"], ["uncontacted", "Uncontacted"]
     ];
+    // Columns the table renders (Jobs/Type/Tags aren't sortable).
+    var COLS = [
+      { key: "name", label: "Name", sort: true }, { key: "jobs", label: "Jobs", sort: false },
+      { key: "url", label: "URL", sort: true }, { key: "location", label: "Location", sort: true },
+      { key: "owner", label: "Creator", sort: true }, { key: "created", label: "Created Date", sort: true },
+      { key: "type", label: "Company Type", sort: false }, { key: "tags", label: "Tags", sort: false }
+    ];
     var GRAD = ["#7c5cff,#4dd0ff", "#ff7ac6,#7c5cff", "#4dd0ff,#38e0a6", "#ffc24d,#ff7ac6", "#38e0a6,#4dd0ff", "#ff6b6b,#ffc24d"];
-    var state = { q: "", tab: "total", sel: {} };
 
+    // Persistence: no backend store yet, so tags, status, added rows and deletions
+    // survive in localStorage keyed by company name. SEED stays the source of truth
+    // for base rows; we persist only user-contributed overrides.
+    var STORE_KEY = "ros_companies_v1";
+    var store = (function () { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { return {}; } })();
+    var meta = store.meta || {}, deleted = store.deleted || [];
+    var companies = [];
+    SEED.forEach(function (r) {
+      if (deleted.indexOf(r[0]) >= 0) return;
+      var m = meta[r[0]] || {};
+      companies.push({ name: r[0], url: r[1], location: r[2], owner: r[3], created: r[4], type: "Client", status: m.status || "", jobs: 0, tags: (m.tags || []).slice(), added: false });
+    });
+    (store.added || []).forEach(function (a) {
+      companies.unshift({ name: a.name, url: a.url || "", location: a.location || "", owner: a.owner || "You", created: a.created || "", type: a.type || "Client", status: a.status || "", jobs: 0, tags: (a.tags || []).slice(), added: true });
+    });
+    function persist() {
+      var m = {};
+      companies.forEach(function (c) {
+        if (c.added) return;
+        if ((c.tags && c.tags.length) || c.status) m[c.name] = { tags: c.tags, status: c.status };
+      });
+      var added = companies.filter(function (c) { return c.added; }).map(function (c) {
+        return { name: c.name, url: c.url, location: c.location, owner: c.owner, created: c.created, type: c.type, status: c.status, tags: c.tags };
+      });
+      try { localStorage.setItem(STORE_KEY, JSON.stringify({ meta: m, added: added, deleted: deleted })); } catch (e) {}
+    }
+
+    var state = { q: "", tab: "total", sel: {}, tags: [], sort: { key: null, dir: 1 } };
+
+    function findByName(n) { for (var i = 0; i < companies.length; i++) if (companies[i].name === n) return companies[i]; return null; }
+    function selected() { return companies.filter(function (c) { return state.sel[c.name]; }); }
     function initials(name) {
       var p = String(name || "").trim().split(/\s+/).filter(Boolean);
       return ((p.length > 1 ? p[0][0] + p[p.length - 1][0] : (p[0] || "?").slice(0, 1))).toUpperCase();
@@ -1968,18 +2001,37 @@
       for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
       return GRAD[h % GRAD.length];
     }
+    // Deterministic per-tag color so a given tag always reads the same hue.
+    function tagStyle(t) {
+      var h = 0; for (var i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0;
+      var hue = h % 360;
+      return "background:hsla(" + hue + ",70%,55%,.16);color:hsl(" + hue + ",75%,74%);border:1px solid hsla(" + hue + ",70%,55%,.34)";
+    }
     function href(u) { return /^https?:\/\//i.test(u) ? u : "https://" + u; }
+    function allTags() {
+      var set = {};
+      companies.forEach(function (c) { (c.tags || []).forEach(function (t) { set[t] = (set[t] || 0) + 1; }); });
+      return Object.keys(set).sort().map(function (t) { return [t, set[t]]; });
+    }
     function countFor(key) {
       if (key === "total") return companies.length;
       return companies.filter(function (c) { return c.status === key; }).length;
     }
+    function dateNum(s) { var p = String(s || "").split("/"); return p.length === 3 ? (+p[2] * 10000 + +p[0] * 100 + +p[1]) : 0; }
+    function sortVal(c, k) { return k === "created" ? dateNum(c.created) : String(c[k] || "").toLowerCase(); }
     function visible() {
       var q = state.q.trim().toLowerCase();
-      return companies.filter(function (c) {
+      var list = companies.filter(function (c) {
         if (state.tab !== "total" && c.status !== state.tab) return false;
+        if (state.tags.length && !state.tags.some(function (t) { return (c.tags || []).indexOf(t) >= 0; })) return false;
         if (!q) return true;
-        return (c.name + " " + c.url + " " + c.location + " " + c.owner).toLowerCase().indexOf(q) >= 0;
+        return (c.name + " " + c.url + " " + c.location + " " + c.owner + " " + (c.tags || []).join(" ")).toLowerCase().indexOf(q) >= 0;
       });
+      if (state.sort.key) {
+        var k = state.sort.key, d = state.sort.dir;
+        list = list.slice().sort(function (a, b) { var x = sortVal(a, k), y = sortVal(b, k); return x < y ? -d : x > y ? d : 0; });
+      }
+      return list;
     }
 
     el.innerHTML = head("Companies", "Your book of business — target accounts and active clients for the BD motion.") +
@@ -2017,6 +2069,22 @@
       '.co-miss{color:var(--text-dim)}' +
       '.co-pick{width:15px;height:15px;cursor:pointer;accent-color:var(--brand)}' +
       '.co-empty{padding:40px;text-align:center;color:var(--text-dim)}' +
+      '.co-table tbody tr.sel{background:rgba(124,92,255,.07)}' +
+      /* ---- tags ---- */
+      '.co-tags{display:flex;align-items:center;gap:5px;flex-wrap:wrap}' +
+      '.co-tag{display:inline-flex;align-items:center;gap:3px;font-size:11.5px;font-weight:600;padding:3px 5px 3px 9px;border-radius:7px;white-space:nowrap}' +
+      '.co-tagx{border:0;background:transparent;color:inherit;cursor:pointer;font-size:13px;line-height:1;opacity:.55;padding:0 1px}' +
+      '.co-tagx:hover{opacity:1}' +
+      '.co-tagadd{border:1px dashed var(--border-strong);background:transparent;color:var(--text-dim);cursor:pointer;border-radius:7px;min-width:22px;height:22px;padding:0 6px;display:inline-grid;place-items:center;font-size:12px}' +
+      '.co-tagadd:hover{color:var(--text);border-color:var(--brand)}' +
+      /* ---- tag filter bar + bulk bar ---- */
+      '.co-filter{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--text-dim)}' +
+      '.co-fchip{cursor:pointer;padding:4px 11px;border-radius:999px;border:1px solid var(--border);background:var(--bg-soft);color:var(--text-muted);font-size:12px;font-weight:600}' +
+      '.co-fchip:hover{color:var(--text)}' +
+      '.co-fchip.on{background:var(--surface-2);color:var(--text);border-color:var(--border-strong)}' +
+      '.co-bulk{display:none;align-items:center;gap:9px;flex-wrap:wrap;margin-top:12px;padding:10px 13px;border:1px solid var(--border);border-radius:10px;background:var(--bg-soft)}' +
+      '.co-bulk b{color:var(--text);font-size:13px}' +
+      '.co-bulk select{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 9px;font:inherit;font-size:12.5px;cursor:pointer}' +
       '</style>' +
       '<div class="card">' +
         '<div class="co-bar">' +
@@ -2028,18 +2096,18 @@
           '<button class="btn btn-primary btn-sm" id="coAdd">＋ Add Company</button>' +
         '</div>' +
         '<div class="co-tabs" id="coTabs"></div>' +
+        '<div class="co-filter" id="coFilter" style="display:none"></div>' +
+        '<div class="co-bulk" id="coBulk">' +
+          '<b id="coSelN">0 selected</b>' +
+          '<button class="btn btn-sm" id="coTagSel">＋ Tag</button>' +
+          '<select id="coStatusSel"><option value="">Set status…</option>' +
+            TABS.slice(1).map(function (t) { return '<option value="' + t[0] + '">' + esc(t[1]) + '</option>'; }).join("") +
+          '</select>' +
+          '<button class="btn btn-ghost btn-sm" id="coClearSel">Clear tags</button>' +
+          '<button class="btn btn-ghost btn-sm" id="coDelSel">🗑 Delete</button>' +
+        '</div>' +
         '<div class="co-wrap"><table class="co-table">' +
-          '<thead><tr>' +
-            '<th style="width:34px"><input type="checkbox" class="co-pick" id="coAll"></th>' +
-            '<th>Name<span class="co-sort">⇅</span></th>' +
-            '<th>Jobs</th>' +
-            '<th>URL<span class="co-sort">⇅</span></th>' +
-            '<th>Location<span class="co-sort">⇅</span></th>' +
-            '<th>Creator<span class="co-sort">⇅</span></th>' +
-            '<th>Created Date<span class="co-sort">⇅</span></th>' +
-            '<th>Company Type</th>' +
-            '<th>Tags</th>' +
-          '</tr></thead>' +
+          '<thead><tr id="coHead"></tr></thead>' +
           '<tbody id="coRows"></tbody>' +
         '</table></div>' +
       '</div>';
@@ -2050,13 +2118,40 @@
           esc(t[1]) + '<span class="co-ct">' + countFor(t[0]) + '</span></div>';
       }).join("");
     }
-    function rowHtml(c, idx) {
+    function paintFilter() {
+      var tags = allTags(), f = $("#coFilter", el);
+      if (!tags.length) { f.style.display = "none"; f.innerHTML = ""; state.tags = []; return; }
+      f.style.display = "flex";
+      f.innerHTML = '<span>Filter by tag:</span>' + tags.map(function (t) {
+        var on = state.tags.indexOf(t[0]) >= 0;
+        return '<span class="co-fchip' + (on ? " on" : "") + '" data-ftag="' + esc(t[0]) + '">' + esc(t[0]) + ' · ' + t[1] + '</span>';
+      }).join("") + (state.tags.length ? ' <span class="co-fchip" data-ftag="__clear">✕ Clear</span>' : "");
+    }
+    function paintHead() {
+      var vis = visible(), allOn = vis.length > 0 && vis.every(function (c) { return state.sel[c.name]; });
+      $("#coHead", el).innerHTML =
+        '<th style="width:34px"><input type="checkbox" class="co-pick" id="coAll"' + (allOn ? " checked" : "") + '></th>' +
+        COLS.map(function (col) {
+          var arrow = col.sort
+            ? '<span class="co-sort' + (state.sort.key === col.key ? " on" : "") + '">' + (state.sort.key === col.key ? (state.sort.dir > 0 ? "↑" : "↓") : "⇅") + '</span>'
+            : "";
+          return '<th' + (col.sort ? ' data-sort="' + col.key + '" style="cursor:pointer"' : "") + '>' + esc(col.label) + arrow + '</th>';
+        }).join("");
+    }
+    function tagsCell(c) {
+      var chips = (c.tags || []).map(function (t, j) {
+        return '<span class="co-tag" style="' + tagStyle(t) + '">' + esc(t) +
+          '<button class="co-tagx" data-untag="' + esc(c.name) + '" data-tagi="' + j + '" title="Remove">×</button></span>';
+      }).join("");
+      return '<div class="co-tags">' + chips + '<button class="co-tagadd" data-tagadd="' + esc(c.name) + '" title="Add tag">＋</button></div>';
+    }
+    function rowHtml(c) {
       var ext = c.url ? ' <a class="co-ext" href="' + esc(href(c.url)) + '" target="_blank" rel="noopener" title="Open site">↗</a>' : '';
       var urlCell = c.url
         ? '<a class="co-url" href="' + esc(href(c.url)) + '" target="_blank" rel="noopener">' + esc(c.url) + '</a>'
         : '<span class="co-miss">—</span>';
-      return '<tr>' +
-        '<td><input type="checkbox" class="co-pick" data-pick="' + idx + '"' + (state.sel[idx] ? " checked" : "") + '></td>' +
+      return '<tr' + (state.sel[c.name] ? ' class="sel"' : "") + '>' +
+        '<td><input type="checkbox" class="co-pick" data-pick="' + esc(c.name) + '"' + (state.sel[c.name] ? " checked" : "") + '></td>' +
         '<td><div class="co-name">' +
           '<div class="co-logo" style="background:linear-gradient(135deg,' + gradFor(c.name) + ')">' + esc(initials(c.name)) + '</div>' +
           '<a class="co-nm" href="#prospects">' + esc(c.name) + '</a>' + ext +
@@ -2067,45 +2162,101 @@
         '<td>' + esc(c.owner || "—") + '</td>' +
         '<td>' + esc(c.created || "—") + '</td>' +
         '<td><span class="co-type">' + esc(c.type) + '</span></td>' +
-        '<td><span class="co-miss">—</span></td>' +
+        '<td>' + tagsCell(c) + '</td>' +
       '</tr>';
     }
     function paintRows() {
       var rows = visible();
       $("#coRows", el).innerHTML = rows.length
-        ? rows.map(function (c) { return rowHtml(c, companies.indexOf(c)); }).join("")
+        ? rows.map(rowHtml).join("")
         : '<tr><td colspan="9"><div class="co-empty">No companies match.</div></td></tr>';
-      var all = $("#coAll", el); if (all) all.checked = rows.length > 0 && rows.every(function (c) { return state.sel[companies.indexOf(c)]; });
     }
-    function paint() { paintTabs(); paintRows(); }
+    function refreshBulk() {
+      var n = selected().length;
+      $("#coBulk", el).style.display = n ? "flex" : "none";
+      $("#coSelN", el).textContent = n + " selected";
+    }
+    function paint() { paintTabs(); paintFilter(); paintHead(); paintRows(); refreshBulk(); }
     paint();
 
+    function addTagsTo(list, label) {
+      if (!list.length) return;
+      var input = window.prompt("Add tag(s) for " + label + " — separate multiple with commas:", "");
+      if (input == null) return;
+      var tags = input.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+      if (!tags.length) return;
+      list.forEach(function (c) { tags.forEach(function (t) { if (c.tags.indexOf(t) < 0) c.tags.push(t); }); });
+      persist(); paint();
+    }
+
     var qEl = $("#coQ", el);
-    qEl.oninput = function () { state.q = qEl.value; paintRows(); };
+    qEl.oninput = function () { state.q = qEl.value; paint(); };
     $("#coTabs", el).addEventListener("click", function (e) {
       var t = e.target.closest(".co-tab"); if (!t) return;
       state.tab = t.getAttribute("data-tab"); paint();
     });
-    $("#coRows", el).addEventListener("change", function (e) {
+    $("#coFilter", el).addEventListener("click", function (e) {
+      var c = e.target.closest("[data-ftag]"); if (!c) return;
+      var t = c.getAttribute("data-ftag");
+      if (t === "__clear") state.tags = [];
+      else { var i = state.tags.indexOf(t); if (i >= 0) state.tags.splice(i, 1); else state.tags.push(t); }
+      paint();
+    });
+    var headEl = $("#coHead", el);
+    headEl.addEventListener("change", function (e) {
+      if (e.target.id !== "coAll") return;
+      var chk = e.target.checked;
+      visible().forEach(function (c) { state.sel[c.name] = chk; });
+      paint();
+    });
+    headEl.addEventListener("click", function (e) {
+      var th = e.target.closest("th[data-sort]"); if (!th) return;
+      var k = th.getAttribute("data-sort");
+      if (state.sort.key === k) state.sort.dir = -state.sort.dir; else { state.sort.key = k; state.sort.dir = 1; }
+      paint();
+    });
+    var rowsEl = $("#coRows", el);
+    rowsEl.addEventListener("change", function (e) {
       var cb = e.target.closest("[data-pick]"); if (!cb) return;
-      var i = cb.getAttribute("data-pick"); state.sel[i] = cb.checked;
+      state.sel[cb.getAttribute("data-pick")] = cb.checked;
+      paintRows(); paintHead(); refreshBulk();
     });
-    $("#coAll", el).addEventListener("change", function (e) {
-      visible().forEach(function (c) { state.sel[companies.indexOf(c)] = e.target.checked; });
-      paintRows();
+    rowsEl.addEventListener("click", function (e) {
+      var add = e.target.closest("[data-tagadd]");
+      if (add) { var c = findByName(add.getAttribute("data-tagadd")); if (c) addTagsTo([c], c.name); return; }
+      var rm = e.target.closest("[data-untag]");
+      if (rm) {
+        var co = findByName(rm.getAttribute("data-untag"));
+        if (co) { co.tags.splice(+rm.getAttribute("data-tagi"), 1); persist(); paint(); }
+      }
     });
+    $("#coTagSel", el).onclick = function () { addTagsTo(selected(), selected().length + " selected"); };
+    $("#coClearSel", el).onclick = function () { selected().forEach(function (c) { c.tags = []; }); persist(); paint(); };
+    $("#coStatusSel", el).onchange = function () {
+      var v = this.value; if (!v) return;
+      selected().forEach(function (c) { c.status = v; });
+      this.value = ""; persist(); paint();
+    };
+    $("#coDelSel", el).onclick = function () {
+      var sel = selected(); if (!sel.length) return;
+      if (!window.confirm("Delete " + sel.length + " compan" + (sel.length > 1 ? "ies" : "y") + "? This can't be undone.")) return;
+      sel.forEach(function (c) { if (!c.added && deleted.indexOf(c.name) < 0) deleted.push(c.name); });
+      companies = companies.filter(function (c) { return !state.sel[c.name]; });
+      state.sel = {}; persist(); paint();
+    };
     $("#coAdd", el).onclick = function () {
       var name = (window.prompt("Company name") || "").trim(); if (!name) return;
+      if (findByName(name)) { toast("That company already exists."); return; }
       var url = (window.prompt("Website URL (optional)") || "").trim();
       var now = new Date();
       companies.unshift({
         name: name, url: url, location: "", owner: (ctx.user && ctx.user.name) || "You",
         created: (now.getMonth() + 1) + "/" + now.getDate() + "/" + now.getFullYear(),
-        type: "Client", status: "", jobs: 0, tags: []
+        type: "Client", status: "", jobs: 0, tags: [], added: true
       });
-      paint();
+      persist(); paint();
     };
-    $("#coLists", el).onclick = function () { toast && toast("Lists are coming soon."); };
+    $("#coLists", el).onclick = function () { toast("Lists are coming soon."); };
   }
 
   // In the BD motion this route is the book of business (Companies); in recruiting
