@@ -1979,7 +1979,9 @@
     SEED.forEach(function (r) {
       if (deleted.indexOf(r[0]) >= 0) return;
       var m = meta[r[0]] || {};
-      companies.push({ name: r[0], url: r[1], location: r[2], owner: r[3], created: r[4], type: "Client", status: m.status || "", jobs: 0, tags: (m.tags || []).slice(), added: false });
+      // Seed rows are all Type=Client, so default their pipeline status to Current
+      // Client (real attribute, not invented). User can re-tab any row inline.
+      companies.push({ name: r[0], url: r[1], location: r[2], owner: r[3], created: r[4], type: "Client", status: m.status || "current_client", jobs: 0, tags: (m.tags || []).slice(), added: false });
     });
     (store.added || []).forEach(function (a) {
       companies.unshift({ name: a.name, url: a.url || "", location: a.location || "", owner: a.owner || "You", created: a.created || "", type: a.type || "Client", status: a.status || "", jobs: 0, tags: (a.tags || []).slice(), added: true });
@@ -2026,7 +2028,11 @@
       return companies.filter(function (c) { return c.status === key; }).length;
     }
     function dateNum(s) { var p = String(s || "").split("/"); return p.length === 3 ? (+p[2] * 10000 + +p[0] * 100 + +p[1]) : 0; }
-    function sortVal(c, k) { return k === "created" ? dateNum(c.created) : String(c[k] || "").toLowerCase(); }
+    function sortVal(c, k) {
+      if (k === "created") return dateNum(c.created);
+      if (k === "status") return statusLabel(c.status).toLowerCase();
+      return String(c[k] || "").toLowerCase();
+    }
     function visible() {
       var q = state.q.trim().toLowerCase();
       var list = companies.filter(function (c) {
@@ -2093,6 +2099,12 @@
       '.co-bulk{display:none;align-items:center;gap:9px;flex-wrap:wrap;margin-top:12px;padding:10px 13px;border:1px solid var(--border);border-radius:10px;background:var(--bg-soft)}' +
       '.co-bulk b{color:var(--text);font-size:13px}' +
       '.co-bulk select{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 9px;font:inherit;font-size:12.5px;cursor:pointer}' +
+      /* ---- inline status picker ---- */
+      '.co-status{appearance:none;-webkit-appearance:none;border:1px solid currentColor;border-radius:999px;padding:4px 24px 4px 22px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;background:transparent;position:relative;outline:none}' +
+      '.co-status option{background:var(--surface);color:var(--text)}' +
+      '.co-statusw{position:relative;display:inline-block}' +
+      '.co-statusw::before{content:"";position:absolute;left:9px;top:50%;width:7px;height:7px;border-radius:50%;background:currentColor;transform:translateY(-50%);pointer-events:none}' +
+      '.co-statusw::after{content:"▾";position:absolute;right:9px;top:50%;transform:translateY(-50%);font-size:9px;opacity:.7;pointer-events:none}' +
       '</style>' +
       '<div class="card">' +
         '<div class="co-bar">' +
@@ -2153,6 +2165,16 @@
       }).join("");
       return '<div class="co-tags">' + chips + '<button class="co-tagadd" data-tagadd="' + esc(c.name) + '" title="Add tag">＋</button></div>';
     }
+    function statusCell(c) {
+      var color = STATUS_COLOR[c.status] || "var(--text-dim)";
+      var opts = TABS.slice(1).map(function (t) {
+        return '<option value="' + t[0] + '"' + (c.status === t[0] ? " selected" : "") + '>' + esc(t[1]) + '</option>';
+      }).join("");
+      return '<span class="co-statusw" style="color:' + color + '">' +
+        '<select class="co-status" data-statusfor="' + esc(c.name) + '" style="color:' + color + '">' +
+          (c.status ? "" : '<option value="" selected>— Set status</option>') + opts +
+        '</select></span>';
+    }
     function rowHtml(c) {
       var ext = c.url ? ' <a class="co-ext" href="' + esc(href(c.url)) + '" target="_blank" rel="noopener" title="Open site">↗</a>' : '';
       var urlCell = c.url
@@ -2170,6 +2192,7 @@
         '<td>' + esc(c.owner || "—") + '</td>' +
         '<td>' + esc(c.created || "—") + '</td>' +
         '<td><span class="co-type">' + esc(c.type) + '</span></td>' +
+        '<td>' + statusCell(c) + '</td>' +
         '<td>' + tagsCell(c) + '</td>' +
       '</tr>';
     }
@@ -2177,7 +2200,7 @@
       var rows = visible();
       $("#coRows", el).innerHTML = rows.length
         ? rows.map(rowHtml).join("")
-        : '<tr><td colspan="9"><div class="co-empty">No companies match.</div></td></tr>';
+        : '<tr><td colspan="10"><div class="co-empty">No companies in this view.</div></td></tr>';
     }
     function refreshBulk() {
       var n = selected().length;
@@ -2225,6 +2248,8 @@
     });
     var rowsEl = $("#coRows", el);
     rowsEl.addEventListener("change", function (e) {
+      var ss = e.target.closest("[data-statusfor]");
+      if (ss) { var c = findByName(ss.getAttribute("data-statusfor")); if (c) { c.status = ss.value; persist(); paint(); } return; }
       var cb = e.target.closest("[data-pick]"); if (!cb) return;
       state.sel[cb.getAttribute("data-pick")] = cb.checked;
       paintRows(); paintHead(); refreshBulk();
