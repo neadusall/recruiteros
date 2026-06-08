@@ -214,6 +214,16 @@ export async function mailboxById(workspaceId: string, id: string): Promise<Mail
 }
 
 /**
+ * Distinct workspace ids that own at least one sending domain. Used by the
+ * scheduler-driven /api/sending/cron (which has no session) to run the daily
+ * warm-up / reputation / governor tick across every tenant.
+ */
+export async function listSendingWorkspaceIds(): Promise<string[]> {
+  await hydrate();
+  return [...new Set(state.domains.map((d) => d.workspaceId))];
+}
+
+/**
  * Global (cross-workspace) sender resolver for the webhook: given a "from"
  * address, find the mailbox + its domain + the owning workspace. Used only by
  * the Postal webhook, which has no session.

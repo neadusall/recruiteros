@@ -17,6 +17,7 @@ export {
   listMailboxes, addMailbox, saveMailbox, stats,
   listSuppression, suppress, isSuppressed, recentEvents,
   listSeeds, addSeed, deleteSeed, listSeedTests,
+  listSendingWorkspaceIds,
 } from "./store";
 
 export { generateDkimKeypair, dkimTxtValue } from "./dkim";
