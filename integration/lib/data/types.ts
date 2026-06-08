@@ -52,6 +52,16 @@ export interface DataRecord {
   state?: string;
   country?: string;
 
+  // Recruiting context (carried from an ATS/portal export — Loxo, etc.)
+  stage?: string;            // pipeline stage: Outbound, Submitted, Interviewing, Longlist…
+  tags?: string[];           // free tags / skills from the export
+  bio?: string;              // intake notes / candidate summary (long text)
+  compensation?: string;     // comp as exported, kept as a display string
+  owner?: string;            // recruiter who owns this record
+  recordType?: string;       // Candidate, Contact, …
+  origin?: string;           // where the export sourced it (LinkedIn, Loxo Source, …)
+  lastActivityAt?: string;   // most recent activity timestamp from the export
+
   // Provenance
   source: DataSource;
   providerId?: string;       // provider's own record id, for re-sync / de-dupe

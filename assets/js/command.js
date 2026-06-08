@@ -171,7 +171,7 @@
     campaigns: { title: "Campaigns", crumb: "Build", action: null, render: renderCampaigns },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing },
-    data: { title: "Data", crumb: "Build", action: null, render: renderData },
+    data: { title: "Candidates", crumb: "Build", action: null, render: renderData },
     sending: { title: "Sending", crumb: "Build", action: null, render: renderSending },
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
@@ -210,6 +210,9 @@
   // Recruiting calls them Candidates; BD calls them Prospects.
   function prospectsLabel() { return motion === "recruiting" ? "Candidates" : "Prospects"; }
   function prospectNoun() { return motion === "recruiting" ? "candidate" : "prospect"; }
+  // The "data" route is the people warehouse (Candidates) in recruiting, and the
+  // book-of-business company list (Companies) in BD.
+  function dataLabel() { return motion === "recruiting" ? "Candidates" : "Companies"; }
 
   // Show/hide motion-specific nav items (Hire Signals is BD-only) and relabel the
   // Prospects/Candidates nav item for the active motion.
@@ -217,13 +220,17 @@
     Array.prototype.forEach.call(document.querySelectorAll("[data-motion-only]"), function (el) {
       el.style.display = (el.getAttribute("data-motion-only") === motion) ? "" : "none";
     });
-    var pn = document.querySelector('.nav-item[data-route="prospects"]');
-    if (pn) {
-      var ni = pn.querySelector(".ni");
-      pn.textContent = "";
-      if (ni) pn.appendChild(ni);
-      pn.appendChild(document.createTextNode(" " + prospectsLabel()));
-    }
+    relabelNav('prospects', prospectsLabel());
+    relabelNav('data', dataLabel());
+  }
+  // Swap a nav item's text label while preserving its leading icon span.
+  function relabelNav(route, label) {
+    var n = document.querySelector('.nav-item[data-route="' + route + '"]');
+    if (!n) return;
+    var ni = n.querySelector(".ni");
+    n.textContent = "";
+    if (ni) n.appendChild(ni);
+    n.appendChild(document.createTextNode(" " + label));
   }
 
   function render() {
@@ -231,7 +238,7 @@
     if (key !== "campaigns") cmpEdit = null; // leave the sequence editor when navigating away
     var r = ROUTES[key];
     syncMotionNav(); // keep motion-only visibility + Prospects/Candidates label current
-    $("#pageTitle").textContent = (key === "prospects") ? prospectsLabel() : r.title;
+    $("#pageTitle").textContent = (key === "prospects") ? prospectsLabel() : (key === "data") ? dataLabel() : r.title;
     $("#crumb").textContent = (ctx.workspace ? ctx.workspace.name + " / " : "") + r.crumb;
     Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) { n.classList.toggle("active", n.dataset.route === key); });
     var pa = $("#primaryAction");
@@ -1855,7 +1862,10 @@
     ["companyDomain", "Company domain"], ["industry", "Industry"], ["email", "Email"],
     ["email2", "Email (secondary)"], ["phone", "Phone / mobile"], ["directPhone", "Direct phone"],
     ["companyPhone", "Company phone"], ["linkedinUrl", "LinkedIn URL"], ["city", "City"],
-    ["state", "State"], ["country", "Country"], ["seniority", "Seniority"], ["providerId", "Provider id"]
+    ["state", "State"], ["country", "Country"], ["seniority", "Seniority"],
+    ["stage", "Pipeline stage"], ["tags", "Tags / skills"], ["bio", "Notes / summary"],
+    ["compensation", "Compensation"], ["owner", "Owner / recruiter"], ["recordType", "Record type"],
+    ["origin", "Source / origin"], ["lastActivityAt", "Last activity date"], ["providerId", "Provider id"]
   ];
 
   // Quote-aware delimited parse -> { headers, rows(objects keyed by header) }.
@@ -1884,176 +1894,674 @@
     return { headers: headers, rows: rows };
   }
 
-  function renderData(el) {
-    el.innerHTML = head("Data", "Your people-data warehouse. Import an export from the provider portal, search and enrich it, and send records to Candidates.") +
-      '<style>' +
-      '.dt-stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
-      '.dt-stat{background:var(--panel,#16181d);border:1px solid var(--line,#262a33);border-radius:10px;padding:10px 14px;min-width:120px}' +
-      '.dt-stat b{display:block;font-size:20px;line-height:1.1}.dt-stat span{font-size:12px;color:var(--muted,#8b93a1)}' +
-      '.dt-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}' +
-      '.dt-bar input[type=search]{flex:1;min-width:200px;padding:8px 12px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit}' +
-      '.dt-chip{font-size:12px;display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border:1px solid var(--line,#262a33);border-radius:20px;cursor:pointer;user-select:none}' +
-      '.dt-chip.on{background:var(--accent,#3b82f6);border-color:transparent;color:#fff}' +
-      '.dt-table{width:100%;border-collapse:collapse;font-size:13px}' +
-      '.dt-table th,.dt-table td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line,#20242c);vertical-align:top}' +
-      '.dt-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8b93a1)}' +
-      '.dt-table tr:hover td{background:rgba(255,255,255,.02)}' +
-      '.dt-sub{color:var(--muted,#8b93a1);font-size:12px}' +
-      '.dt-pill{font-size:10px;padding:2px 6px;border-radius:6px;background:var(--line,#20242c);color:var(--muted,#8b93a1);text-transform:uppercase}' +
-      '.dt-miss{color:var(--muted,#5b626f)}' +
-      '.dt-act{display:flex;gap:4px;flex-wrap:wrap}' +
-      '.dt-prov{font-size:12px;color:var(--muted,#8b93a1);margin-bottom:12px}' +
-      '</style>' +
-      '<div class="card">' +
-        '<div id="dtProv" class="dt-prov"></div>' +
-        '<div id="dtStats" class="dt-stats"></div>' +
-        '<div class="dt-bar">' +
-          '<input type="search" id="dtQ" placeholder="Search name, title, company, email…" autocomplete="off">' +
-          '<span class="dt-chip" id="dtEmail">✉️ Has email</span>' +
-          '<span class="dt-chip" id="dtPhone">📞 Has phone</span>' +
-          '<button class="btn btn-primary btn-sm" id="dtImport">⬆ Import export</button>' +
-          '<button class="btn btn-ghost btn-sm" id="dtPull">⚡ Pull via API</button>' +
-        '</div>' +
-        '<div id="dtBulk" class="dt-bar" style="display:none">' +
-          '<span class="dt-sub" id="dtSelCount">0 selected</span>' +
-          '<button class="btn btn-sm" id="dtPromote">→ Send to Candidates</button>' +
-          '<button class="btn btn-ghost btn-sm" id="dtEnrichSel">✨ Enrich selected</button>' +
-          '<button class="btn btn-ghost btn-sm" id="dtDelete">🗑 Delete</button>' +
-        '</div>' +
-        '<div id="dtBody">' + loading() + '</div>' +
-      '</div>';
+  /* ============================ Candidates (Data warehouse) ============================
+     Full Loxo-style People view: a faceted left rail, stage tabs with live counts, a
+     bulk action toolbar, a select-all header, and a candidate-card feed. All filtering
+     is client-side over the loaded set (the warehouse is small + already in memory),
+     so tabs/facets/search are instant. Cards render ONLY real fields — never invented
+     experience, skills, or stages. */
+  var DT_STAGE_ORDER = ["Applied", "Longlist", "Shortlist", "Outbound", "Screening", "Submitted", "Interviewing", "Rejected", "Hired"];
+  // Each facet: [field key, label, value-extractor(record) -> string[]].
+  var DT_FACETS = [
+    ["title", "Title", function (r) { return r.title ? [r.title] : []; }],
+    ["company", "Company", function (r) { return r.company ? [r.company] : []; }],
+    ["location", "Location", function (r) { var v = [r.city, r.state].filter(Boolean).join(", "); return v ? [v] : []; }],
+    ["owner", "Owner", function (r) { return r.owner ? [r.owner] : []; }],
+    ["origin", "Source", function (r) { return r.origin ? [r.origin] : []; }],
+    ["recordType", "Type", function (r) { return r.recordType ? [r.recordType] : []; }],
+    ["stage", "Job Stage", function (r) { return r.stage ? [r.stage] : []; }],
+    ["tags", "Tags", function (r) { return Array.isArray(r.tags) ? r.tags : []; }]
+  ];
 
-    var state = { records: [], total: 0, filters: { q: "", hasEmail: false, hasPhone: false }, sel: {} };
-    var qEl = $("#dtQ", el), emailEl = $("#dtEmail", el), phoneEl = $("#dtPhone", el);
-    var bulkEl = $("#dtBulk", el), bodyEl = $("#dtBody", el);
-    var searchTimer = null;
+  // ---- BD "Companies" — book-of-business CRM list (Crelate-style) -------------
+  // Seeded from the Lume Search Partners company export. No backend store yet, so
+  // rows live in-memory; Add Company persists for the session only. Real attributes
+  // only — Jobs is 0 until wired to an openings count (we never fabricate counts).
+  function renderCompanies(el) {
+    var SEED = [
+      ["Arbor Infusion", "https://arborinfusion.com/", "", "Josh Gurin", "5/27/2026"],
+      ["CFO Squad LLC", "", "", "Josh Gurin", "11/3/2025"],
+      ["David Lawrence Centers", "", "", "Josh Gurin", "11/30/2025"],
+      ["Deepgram", "", "", "Josh Gurin", "6/4/2026"],
+      ["Eastern Healthcare Group", "ehg.care", "Clifton, NJ", "Noah Wilkowski", "5/26/2026"],
+      ["Everest", "", "", "Josh Gurin", "12/4/2025"],
+      ["Everest Reinsurance Company", "", "", "Josh Gurin", "12/4/2025"],
+      ["Everside Capital Partners", "", "", "Josh Gurin", "6/3/2026"],
+      ["Family Office", "", "", "Josh Gurin", "11/4/2025"],
+      ["Garden Springs Healthcare", "gardenspringshc.com", "Cleveland, OH", "Noah Wilkowski", "6/3/2026"],
+      ["JonesTrading", "", "", "Noah Wilkowski", "6/1/2026"],
+      ["MDManage", "mdmanage.com", "", "Noah Wilkowski", "5/26/2026"],
+      ["Mitek Systems", "", "", "Josh Gurin", "5/26/2026"],
+      ["Paragon Management SNF, LLC", "paragonmanagementsnf.com", "City of Glen Cove, NY", "Noah Wilkowski", "5/26/2026"],
+      ["Piping Rock Health Products", "", "", "Josh Gurin", "12/25/2025"],
+      ["Ralph Lauren", "", "", "Josh Gurin", "11/16/2025"],
+      ["Ramp", "", "", "Josh Gurin", "10/31/2025"],
+      ["Sunshine Lighting", "sunshinelighting.com", "Brooklyn, NY", "Noah Wilkowski", "6/3/2026"],
+      ["Teachers Federal Credit Union", "", "", "Ariel Grosser", "5/1/2026"],
+      ["Templeton & Company", "", "", "Josh Gurin", "1/2/2026"],
+      ["The Perfect Child ABA", "http://tpcaba.com", "", "Josh Gurin", "4/17/2026"],
+      ["Therapy Management Solutions", "https://therapyms.com/", "", "Josh Gurin", "5/26/2026"],
+      ["Wunderkind", "", "", "Josh Gurin", "6/1/2026"],
+      ["iCapital", "", "", "Josh Gurin", "12/23/2025"],
+      ["reap", "https://getreap.com/", "", "Josh Gurin", "6/8/2026"]
+    ];
+    var companies = SEED.map(function (r) {
+      return { name: r[0], url: r[1], location: r[2], owner: r[3], created: r[4], type: "Client", status: "", jobs: 0, tags: [] };
+    });
 
-    function qstr() {
-      var p = [];
-      if (state.filters.q) p.push("q=" + encodeURIComponent(state.filters.q));
-      if (state.filters.hasEmail) p.push("hasEmail=1");
-      if (state.filters.hasPhone) p.push("hasPhone=1");
-      p.push("limit=500");
-      return p.length ? "?" + p.join("&") : "";
+    // Status tabs mirror the CRM pipeline. We don't track per-company status yet,
+    // so everything sits under Total and the rest read 0 (honest, like the source).
+    var TABS = [
+      ["total", "Total"], ["in_progress", "In Progress"], ["active_opportunity", "Active Opportunity"],
+      ["current_client", "Current Client"], ["dead_opportunity", "Dead Opportunity"],
+      ["do_not_prospect", "Do Not Prospect"], ["uncontacted", "Uncontacted"]
+    ];
+    var GRAD = ["#7c5cff,#4dd0ff", "#ff7ac6,#7c5cff", "#4dd0ff,#38e0a6", "#ffc24d,#ff7ac6", "#38e0a6,#4dd0ff", "#ff6b6b,#ffc24d"];
+    var state = { q: "", tab: "total", sel: {} };
+
+    function initials(name) {
+      var p = String(name || "").trim().split(/\s+/).filter(Boolean);
+      return ((p.length > 1 ? p[0][0] + p[p.length - 1][0] : (p[0] || "?").slice(0, 1))).toUpperCase();
+    }
+    function gradFor(name) {
+      var h = 0, s = String(name || "");
+      for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      return GRAD[h % GRAD.length];
+    }
+    function href(u) { return /^https?:\/\//i.test(u) ? u : "https://" + u; }
+    function countFor(key) {
+      if (key === "total") return companies.length;
+      return companies.filter(function (c) { return c.status === key; }).length;
+    }
+    function visible() {
+      var q = state.q.trim().toLowerCase();
+      return companies.filter(function (c) {
+        if (state.tab !== "total" && c.status !== state.tab) return false;
+        if (!q) return true;
+        return (c.name + " " + c.url + " " + c.location + " " + c.owner).toLowerCase().indexOf(q) >= 0;
+      });
     }
 
-    function paintStats(s, providers) {
-      s = s || { total: 0, withEmail: 0, withPhone: 0 };
-      $("#dtStats", el).innerHTML =
-        statCard(s.total, "records") + statCard(s.withEmail, "with email") +
-        statCard(s.withPhone, "with phone") + statCard(state.total, "matching filter");
-      var prov = (providers || []).map(function (p) {
+    el.innerHTML = head("Companies", "Your book of business — target accounts and active clients for the BD motion.") +
+      '<style>' +
+      '.co-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}' +
+      '.co-search{flex:1;min-width:220px;display:flex;align-items:center;gap:9px;padding:9px 13px;border-radius:10px;border:1px solid var(--border);background:var(--bg-soft)}' +
+      '.co-search span{color:var(--text-dim);font-size:14px}' +
+      '.co-search input{flex:1;border:0;background:transparent;color:inherit;font:inherit;outline:none}' +
+      '.co-search input::placeholder{color:var(--text-dim)}' +
+      '.co-tool{display:grid;place-items:center;width:38px;height:38px;border-radius:10px;border:1px solid var(--border);background:var(--bg-soft);color:var(--text-muted);cursor:pointer;font-size:15px}' +
+      '.co-tool:hover{color:var(--text);border-color:var(--border-strong)}' +
+      '.co-pill{display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg-soft);color:var(--text-muted);cursor:pointer;font-weight:600;font-size:13px}' +
+      '.co-pill:hover{color:var(--text);border-color:var(--border-strong)}' +
+      '.co-tabs{display:flex;gap:2px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-top:16px}' +
+      '.co-tab{display:inline-flex;align-items:center;gap:7px;padding:11px 14px;cursor:pointer;color:var(--text-muted);font-weight:600;font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px}' +
+      '.co-tab:hover{color:var(--text)}' +
+      '.co-tab.on{color:var(--text);border-bottom-color:var(--brand)}' +
+      '.co-ct{font-size:11px;font-weight:700;min-width:20px;height:18px;padding:0 6px;border-radius:9px;background:var(--surface-2);color:var(--text-muted);display:inline-grid;place-items:center}' +
+      '.co-tab.on .co-ct{background:var(--brand);color:#fff}' +
+      '.co-wrap{overflow-x:auto}' +
+      '.co-table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:880px}' +
+      '.co-table thead th{text-align:left;padding:12px 14px;color:var(--text-dim);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;border-bottom:1px solid var(--border);white-space:nowrap}' +
+      '.co-sort{margin-left:5px;opacity:.45}' +
+      '.co-table tbody td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--text-muted);white-space:nowrap}' +
+      '.co-table tbody tr:hover{background:var(--bg-soft)}' +
+      '.co-name{display:flex;align-items:center;gap:11px;min-width:0}' +
+      '.co-logo{flex:0 0 auto;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:13px;color:#fff}' +
+      '.co-nm{font-weight:600;color:var(--text);text-decoration:none}' +
+      '.co-nm:hover{color:var(--brand-2)}' +
+      '.co-ext{color:var(--text-dim);text-decoration:none;font-size:12px}' +
+      '.co-ext:hover{color:var(--brand-2)}' +
+      '.co-jobs{display:inline-grid;place-items:center;min-width:30px;height:24px;padding:0 8px;border-radius:7px;background:var(--surface-2);color:var(--text-muted);font-weight:700;font-size:12px}' +
+      '.co-url{color:var(--text-muted);text-decoration:none}.co-url:hover{color:var(--brand-2)}' +
+      '.co-type{display:inline-block;padding:3px 10px;border-radius:7px;background:rgba(56,224,166,.14);color:var(--accent-green);font-size:12px;font-weight:600}' +
+      '.co-miss{color:var(--text-dim)}' +
+      '.co-pick{width:15px;height:15px;cursor:pointer;accent-color:var(--brand)}' +
+      '.co-empty{padding:40px;text-align:center;color:var(--text-dim)}' +
+      '</style>' +
+      '<div class="card">' +
+        '<div class="co-bar">' +
+          '<div class="co-search"><span>🔍</span><input type="search" id="coQ" placeholder="Search Companies…" autocomplete="off"></div>' +
+          '<button class="co-pill" id="coLists">☰ Lists</button>' +
+          '<button class="co-tool" title="Filter">⛃</button>' +
+          '<button class="co-tool" title="Sort">⇅</button>' +
+          '<button class="co-tool" title="Columns">⚙</button>' +
+          '<button class="btn btn-primary btn-sm" id="coAdd">＋ Add Company</button>' +
+        '</div>' +
+        '<div class="co-tabs" id="coTabs"></div>' +
+        '<div class="co-wrap"><table class="co-table">' +
+          '<thead><tr>' +
+            '<th style="width:34px"><input type="checkbox" class="co-pick" id="coAll"></th>' +
+            '<th>Name<span class="co-sort">⇅</span></th>' +
+            '<th>Jobs</th>' +
+            '<th>URL<span class="co-sort">⇅</span></th>' +
+            '<th>Location<span class="co-sort">⇅</span></th>' +
+            '<th>Creator<span class="co-sort">⇅</span></th>' +
+            '<th>Created Date<span class="co-sort">⇅</span></th>' +
+            '<th>Company Type</th>' +
+            '<th>Tags</th>' +
+          '</tr></thead>' +
+          '<tbody id="coRows"></tbody>' +
+        '</table></div>' +
+      '</div>';
+
+    function paintTabs() {
+      $("#coTabs", el).innerHTML = TABS.map(function (t) {
+        return '<div class="co-tab' + (state.tab === t[0] ? " on" : "") + '" data-tab="' + t[0] + '">' +
+          esc(t[1]) + '<span class="co-ct">' + countFor(t[0]) + '</span></div>';
+      }).join("");
+    }
+    function rowHtml(c, idx) {
+      var ext = c.url ? ' <a class="co-ext" href="' + esc(href(c.url)) + '" target="_blank" rel="noopener" title="Open site">↗</a>' : '';
+      var urlCell = c.url
+        ? '<a class="co-url" href="' + esc(href(c.url)) + '" target="_blank" rel="noopener">' + esc(c.url) + '</a>'
+        : '<span class="co-miss">—</span>';
+      return '<tr>' +
+        '<td><input type="checkbox" class="co-pick" data-pick="' + idx + '"' + (state.sel[idx] ? " checked" : "") + '></td>' +
+        '<td><div class="co-name">' +
+          '<div class="co-logo" style="background:linear-gradient(135deg,' + gradFor(c.name) + ')">' + esc(initials(c.name)) + '</div>' +
+          '<a class="co-nm" href="#prospects">' + esc(c.name) + '</a>' + ext +
+        '</div></td>' +
+        '<td><span class="co-jobs">' + (Number(c.jobs) || 0) + '</span></td>' +
+        '<td>' + urlCell + '</td>' +
+        '<td>' + (c.location ? esc(c.location) : '<span class="co-miss">—</span>') + '</td>' +
+        '<td>' + esc(c.owner || "—") + '</td>' +
+        '<td>' + esc(c.created || "—") + '</td>' +
+        '<td><span class="co-type">' + esc(c.type) + '</span></td>' +
+        '<td><span class="co-miss">—</span></td>' +
+      '</tr>';
+    }
+    function paintRows() {
+      var rows = visible();
+      $("#coRows", el).innerHTML = rows.length
+        ? rows.map(function (c) { return rowHtml(c, companies.indexOf(c)); }).join("")
+        : '<tr><td colspan="9"><div class="co-empty">No companies match.</div></td></tr>';
+      var all = $("#coAll", el); if (all) all.checked = rows.length > 0 && rows.every(function (c) { return state.sel[companies.indexOf(c)]; });
+    }
+    function paint() { paintTabs(); paintRows(); }
+    paint();
+
+    var qEl = $("#coQ", el);
+    qEl.oninput = function () { state.q = qEl.value; paintRows(); };
+    $("#coTabs", el).addEventListener("click", function (e) {
+      var t = e.target.closest(".co-tab"); if (!t) return;
+      state.tab = t.getAttribute("data-tab"); paint();
+    });
+    $("#coRows", el).addEventListener("change", function (e) {
+      var cb = e.target.closest("[data-pick]"); if (!cb) return;
+      var i = cb.getAttribute("data-pick"); state.sel[i] = cb.checked;
+    });
+    $("#coAll", el).addEventListener("change", function (e) {
+      visible().forEach(function (c) { state.sel[companies.indexOf(c)] = e.target.checked; });
+      paintRows();
+    });
+    $("#coAdd", el).onclick = function () {
+      var name = (window.prompt("Company name") || "").trim(); if (!name) return;
+      var url = (window.prompt("Website URL (optional)") || "").trim();
+      var now = new Date();
+      companies.unshift({
+        name: name, url: url, location: "", owner: (ctx.user && ctx.user.name) || "You",
+        created: (now.getMonth() + 1) + "/" + now.getDate() + "/" + now.getFullYear(),
+        type: "Client", status: "", jobs: 0, tags: []
+      });
+      paint();
+    };
+    $("#coLists", el).onclick = function () { toast && toast("Lists are coming soon."); };
+  }
+
+  // In the BD motion this route is the book of business (Companies); in recruiting
+  // it is the people database below.
+  function renderData(el) {
+    if (motion === "bd") return renderCompanies(el);
+    el.innerHTML = head("Candidates", "Your people database. Filter by stage, owner, title and more on the left; email, enrich, submit, or export the people you select.") +
+      '<style>' +
+      '.dt-sub{color:var(--muted,#8b93a1);font-size:12px}' +
+      '.dt-prov{font-size:12px;color:var(--muted,#8b93a1);margin-bottom:10px}' +
+      '.cd-wrap{display:grid;grid-template-columns:232px 1fr;gap:18px;align-items:start}' +
+      '@media(max-width:900px){.cd-wrap{grid-template-columns:1fr}}' +
+      '.cd-facets{position:sticky;top:8px;background:var(--panel,#16181d);border:1px solid var(--line,#262a33);border-radius:12px;padding:8px 10px;max-height:calc(100vh - 120px);overflow:auto}' +
+      '.cd-search{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit;margin:4px 0 6px}' +
+      '.cd-facet{border-bottom:1px solid var(--line,#20242c)}.cd-facet:last-child{border-bottom:0}' +
+      '.cd-fhead{display:flex;align-items:center;gap:6px;padding:10px 4px;cursor:pointer;font-size:13px;font-weight:600;user-select:none}' +
+      '.cd-fhead .cd-fc{font-size:11px;color:#fff;background:var(--accent,#3b82f6);border-radius:10px;padding:1px 7px}' +
+      '.cd-fcaret{margin-left:auto;color:var(--muted,#8b93a1);font-size:11px;transition:transform .15s}' +
+      '.cd-facet.open .cd-fcaret{transform:rotate(180deg)}' +
+      '.cd-fbody{padding:0 2px 10px}' +
+      '.cd-fopt{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 2px;cursor:pointer}' +
+      '.cd-fopt input{margin:0;flex:0 0 auto}' +
+      '.cd-fopt .cd-ol{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '.cd-fopt .cd-oc{color:var(--muted,#8b93a1);font-size:11px}' +
+      '.cd-more{font-size:12px;color:var(--accent,#3b82f6);cursor:pointer;padding:5px 2px}' +
+      '.cd-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px}' +
+      '.cd-tbtn{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:7px 11px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--panel,#16181d);color:inherit;cursor:pointer}' +
+      '.cd-tbtn:hover:not(:disabled){border-color:var(--accent,#3b82f6)}' +
+      '.cd-tbtn.primary{background:var(--accent,#3b82f6);border-color:transparent;color:#fff}' +
+      '.cd-tbtn:disabled{opacity:.4;cursor:not-allowed}' +
+      '.cd-tsep{width:1px;align-self:stretch;background:var(--line,#262a33);margin:2px 4px}' +
+      '.cd-spacer{flex:1}' +
+      '.cd-tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line,#262a33);margin-bottom:12px}' +
+      '.cd-tab{display:inline-flex;align-items:center;gap:7px;padding:9px 12px;font-size:13px;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted,#8b93a1)}' +
+      '.cd-tab.active{color:inherit;border-bottom-color:var(--accent,#3b82f6);font-weight:600}' +
+      '.cd-tab .cd-tc{font-size:11px;background:var(--line,#20242c);color:var(--muted,#8b93a1);border-radius:10px;padding:1px 7px}' +
+      '.cd-tab.active .cd-tc{background:var(--accent,#3b82f6);color:#fff}' +
+      '.cd-selbar{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted,#8b93a1);margin-bottom:10px}' +
+      '.cd-link{color:var(--accent,#3b82f6);cursor:pointer}' +
+      '.dt-list{display:flex;flex-direction:column;gap:14px}' +
+      '.dt-card{position:relative;background:var(--panel,#16181d);border:1px solid var(--line,#262a33);border-radius:14px;padding:16px 20px;transition:border-color .15s,box-shadow .15s}' +
+      '.dt-card:hover{border-color:var(--accent,#3b82f6);box-shadow:0 8px 26px -16px rgba(0,0,0,.6)}' +
+      '.dt-card.sel{border-color:var(--accent,#3b82f6)}' +
+      '.dt-pick{position:absolute;top:16px;right:18px;width:16px;height:16px;cursor:pointer}' +
+      '.cd-act{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted,#8b93a1);margin-bottom:12px}' +
+      '.cd-act b{color:var(--accent,#3b82f6);font-weight:600}' +
+      '.dt-head{display:flex;align-items:flex-start;gap:14px;padding-right:28px}' +
+      '.dt-avatar{flex:0 0 auto;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:18px;color:#fff;background:linear-gradient(135deg,#7c5cff,#4dd0ff)}' +
+      '.dt-id{flex:1;min-width:0}' +
+      '.dt-name{display:flex;align-items:center;gap:7px;font-size:16px;font-weight:700;line-height:1.2}' +
+      '.dt-name a.dt-li{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:4px;background:#0a66c2;color:#fff;font-size:11px;font-weight:800;text-decoration:none;flex:0 0 auto}' +
+      '.dt-title{font-size:13px;margin-top:2px}' +
+      '.dt-loc{font-size:12px;color:var(--muted,#8b93a1);margin-top:1px}' +
+      '.dt-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}' +
+      '.dt-contact{display:inline-flex;border:1px solid var(--line,#262a33);border-radius:9px;overflow:hidden}' +
+      '.dt-contact button{display:grid;place-items:center;width:38px;height:34px;border:0;background:transparent;color:inherit;cursor:pointer;font-size:15px;border-left:1px solid var(--line,#262a33)}' +
+      '.dt-contact button:first-child{border-left:0}' +
+      '.dt-contact button:hover{background:rgba(124,92,255,.12)}' +
+      '.dt-contact button.off{color:var(--muted,#5b626f)}' +
+      '.dt-contact button.off:hover{color:var(--accent,#3b82f6)}' +
+      '.dt-stage{font-size:12px;font-weight:600;padding:7px 15px;border-radius:8px;white-space:nowrap;border:1px solid transparent}' +
+      '.dt-add{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;padding:7px 15px;border-radius:8px;border:0;cursor:pointer;background:var(--accent,#3b82f6);color:#fff}' +
+      '.dt-add:hover{filter:brightness(1.08)}' +
+      '.dt-body{display:grid;grid-template-columns:1.4fr 1fr;gap:24px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line,#20242c)}' +
+      '@media(max-width:720px){.dt-body{grid-template-columns:1fr}.dt-actions{margin-left:0}}' +
+      '.dt-seclbl{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted,#8b93a1);margin-bottom:8px}' +
+      '.dt-exp-row{display:flex;gap:10px;align-items:flex-start}' +
+      '.dt-exp-ic{flex:0 0 auto;width:30px;height:30px;border-radius:7px;display:grid;place-items:center;background:var(--accent,#3b82f6);color:#fff;font-size:14px}' +
+      '.dt-exp-t{font-weight:600;font-size:13px}' +
+      '.dt-exp-c{font-size:12px;color:var(--muted,#8b93a1)}' +
+      '.dt-side-row{display:flex;gap:9px;align-items:center;font-size:13px;margin-bottom:8px}' +
+      '.dt-side-ic{flex:0 0 auto;width:26px;height:26px;border-radius:6px;display:grid;place-items:center;background:var(--accent,#3b82f6);color:#fff;font-size:12px}' +
+      '.dt-skills{margin-top:14px}' +
+      '.dt-tag{display:inline-block;font-size:12px;padding:5px 11px;border-radius:7px;background:var(--line,#20242c);color:var(--muted,#9aa3b2);margin:0 6px 6px 0}' +
+      '.cd-showmore{text-align:center;border-top:1px solid var(--line,#20242c);margin-top:14px;padding-top:10px;font-size:12px;color:var(--accent,#3b82f6);cursor:pointer}' +
+      '.cd-bio{font-size:12.5px;color:var(--muted,#9aa3b2);line-height:1.55;white-space:pre-wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line,#20242c)}' +
+      '</style>' +
+      '<div id="dtProv" class="dt-prov"></div>' +
+      '<div class="cd-wrap">' +
+        '<aside class="cd-facets"><input type="search" class="cd-search" id="cdSearch" placeholder="Search name, title, company…" autocomplete="off"><div id="cdFacets"></div></aside>' +
+        '<div class="cd-main">' +
+          '<div class="cd-toolbar" id="cdToolbar"></div>' +
+          '<div class="cd-tabs" id="cdTabs"></div>' +
+          '<div class="cd-selbar" id="cdSelbar"></div>' +
+          '<div id="dtBody">' + loading() + '</div>' +
+        '</div>' +
+      '</div>';
+
+    // all = everything loaded; sel = picked ids; stage = active tab; facets = {field:[vals]}
+    var state = { all: [], q: "", stage: "", facets: {}, sel: {}, open: {}, showAll: {}, bios: {}, providers: [] };
+    var bodyEl = $("#dtBody", el), searchTimer = null;
+
+    function load() {
+      api("/data?limit=1000").then(function (d) {
+        d = d || {};
+        state.all = d.records || [];
+        state.providers = d.providers || [];
+        paintProv();
+        renderAll();
+      }).catch(function () { bodyEl.innerHTML = '<div class="empty">Could not load the database.</div>'; });
+    }
+    function paintProv() {
+      var prov = (state.providers || []).map(function (p) {
         return (p.configured ? "🟢 " : "⚪ ") + esc(p.label) + (p.configured ? " · live" : " · awaiting key");
       }).join(" &nbsp;·&nbsp; ");
       $("#dtProv", el).innerHTML = prov ? ("Providers: " + prov) : "";
     }
-    function statCard(n, label) { return '<div class="dt-stat"><b>' + (Number(n) || 0).toLocaleString() + '</b><span>' + esc(label) + '</span></div>'; }
 
-    function load() {
-      api("/data" + qstr()).then(function (d) {
-        d = d || {};
-        state.records = d.records || [];
-        state.total = d.total || state.records.length;
-        paintStats(d.stats, d.providers);
-        paintTable();
-      }).catch(function () { bodyEl.innerHTML = '<div class="empty">Could not load the warehouse.</div>'; });
+    /* ---- filtering ---- */
+    function matchesQ(r) {
+      if (!state.q) return true;
+      var hay = (r.fullName + " " + (r.title || "") + " " + (r.company || "") + " " + (r.email || "") + " " + ((r.tags || []).join(" "))).toLowerCase();
+      return hay.indexOf(state.q.toLowerCase()) >= 0;
+    }
+    function facetFn(field) { for (var i = 0; i < DT_FACETS.length; i++) if (DT_FACETS[i][0] === field) return DT_FACETS[i][2]; return function () { return []; }; }
+    // Filter `all` by search + stage-tab + every facet, optionally skipping one facet
+    // (so that facet's own option counts reflect "what you could still add").
+    function filtered(exceptField, applyStage) {
+      return state.all.filter(function (r) {
+        if (!matchesQ(r)) return false;
+        if (applyStage !== false && state.stage) { if (state.stage === "__none__" ? r.stage : (r.stage || "") !== state.stage) return false; }
+        for (var f in state.facets) {
+          if (f === exceptField) continue;
+          var sel = state.facets[f]; if (!sel || !sel.length) continue;
+          var vals = facetFn(f)(r);
+          var hit = false; for (var i = 0; i < vals.length; i++) if (sel.indexOf(vals[i]) >= 0) { hit = true; break; }
+          if (!hit) return false;
+        }
+        return true;
+      });
+    }
+    function view() { return filtered(null, true); }
+
+    function renderAll() { paintFacets(); paintTabs(); paintToolbar(); paintFeed(); }
+
+    /* ---- facets ---- */
+    function paintFacets() {
+      var host = $("#cdFacets", el);
+      host.innerHTML = DT_FACETS.map(function (f) {
+        var field = f[0], label = f[1];
+        var base = filtered(field, true);
+        var counts = {};
+        base.forEach(function (r) { f[2](r).forEach(function (v) { counts[v] = (counts[v] || 0) + 1; }); });
+        var opts = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a] || (a < b ? -1 : 1); });
+        if (!opts.length) return "";
+        var sel = state.facets[field] || [];
+        var open = !!state.open[field];
+        var limit = state.showAll[field] ? opts.length : 8;
+        var body = opts.slice(0, limit).map(function (v) {
+          var on = sel.indexOf(v) >= 0;
+          return '<label class="cd-fopt"><input type="checkbox" data-facet="' + esc(field) + '" data-val="' + esc(v) + '"' + (on ? " checked" : "") + '>' +
+            '<span class="cd-ol" title="' + esc(v) + '">' + esc(v) + '</span><span class="cd-oc">' + counts[v] + '</span></label>';
+        }).join("");
+        if (opts.length > limit) body += '<div class="cd-more" data-more="' + esc(field) + '">Show ' + (opts.length - limit) + ' more</div>';
+        else if (state.showAll[field] && opts.length > 8) body += '<div class="cd-more" data-more="' + esc(field) + '">Show less</div>';
+        return '<div class="cd-facet' + (open ? " open" : "") + '">' +
+          '<div class="cd-fhead" data-fhead="' + esc(field) + '">' + esc(label) +
+            (sel.length ? '<span class="cd-fc">' + sel.length + '</span>' : '') +
+            '<span class="cd-fcaret">▾</span></div>' +
+          (open ? '<div class="cd-fbody">' + body + '</div>' : '') +
+        '</div>';
+      }).join("");
+
+      Array.prototype.forEach.call(host.querySelectorAll("[data-fhead]"), function (h) {
+        h.addEventListener("click", function () { var f = h.getAttribute("data-fhead"); state.open[f] = !state.open[f]; paintFacets(); });
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-facet]"), function (cb) {
+        cb.addEventListener("change", function () {
+          var f = cb.getAttribute("data-facet"), v = cb.getAttribute("data-val");
+          var arr = state.facets[f] || (state.facets[f] = []);
+          var i = arr.indexOf(v);
+          if (cb.checked) { if (i < 0) arr.push(v); } else if (i >= 0) arr.splice(i, 1);
+          if (!arr.length) delete state.facets[f];
+          renderAll();
+        });
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-more]"), function (m) {
+        m.addEventListener("click", function () { var f = m.getAttribute("data-more"); state.showAll[f] = !state.showAll[f]; paintFacets(); });
+      });
     }
 
-    function paintTable() {
-      if (!state.records.length) {
-        bodyEl.innerHTML = '<div class="empty">No records yet. Click <b>Import export</b> to load a CSV you exported from the provider portal.</div>';
-        syncBulk(); return;
-      }
-      var rows = state.records.map(function (r) {
-        var loc = [r.city, r.state, r.country].filter(Boolean).join(", ");
-        var email = r.email ? esc(r.email) : '<button class="btn btn-ghost btn-sm" data-enrich="email" data-id="' + esc(r.id) + '">find email</button>';
-        var ph = (r.phone || r.directPhone) ? esc(r.phone || r.directPhone) : '<button class="btn btn-ghost btn-sm" data-enrich="phone" data-id="' + esc(r.id) + '">find phone</button>';
-        var li = r.linkedinUrl ? '<a href="' + esc(r.linkedinUrl) + '" target="_blank" rel="noopener">in ↗</a>' : '<span class="dt-miss">—</span>';
-        return '<tr>' +
-          '<td><input type="checkbox" data-pick="' + esc(r.id) + '"' + (state.sel[r.id] ? " checked" : "") + '></td>' +
-          '<td><b>' + esc(r.fullName) + '</b>' + (r.title ? '<div class="dt-sub">' + esc(r.title) + '</div>' : '') + (loc ? '<div class="dt-sub">' + esc(loc) + '</div>' : '') + '</td>' +
-          '<td>' + (r.company ? esc(r.company) : '<span class="dt-miss">—</span>') + (r.companyDomain ? '<div class="dt-sub">' + esc(r.companyDomain) + '</div>' : '') + '</td>' +
-          '<td>' + email + '</td>' +
-          '<td>' + ph + '</td>' +
-          '<td>' + li + '</td>' +
-          '<td><span class="dt-pill">' + esc(r.source || "—") + '</span></td>' +
-          '</tr>';
+    /* ---- stage tabs ---- */
+    function paintTabs() {
+      var base = filtered(null, false); // everything except the stage selection
+      var counts = {}; var noStage = 0;
+      base.forEach(function (r) { if (r.stage) counts[r.stage] = (counts[r.stage] || 0) + 1; else noStage++; });
+      var ordered = DT_STAGE_ORDER.filter(function (s) { return counts[s]; });
+      Object.keys(counts).forEach(function (s) { if (ordered.indexOf(s) < 0) ordered.push(s); });
+      var tabs = [["", "Total", base.length]];
+      ordered.forEach(function (s) { tabs.push([s, s, counts[s]]); });
+      if (noStage) tabs.push(["__none__", "No stage", noStage]);
+      $("#cdTabs", el).innerHTML = tabs.map(function (t) {
+        return '<div class="cd-tab' + (state.stage === t[0] ? " active" : "") + '" data-stage="' + esc(t[0]) + '">' + esc(t[1]) + '<span class="cd-tc">' + t[2] + '</span></div>';
       }).join("");
-      bodyEl.innerHTML =
-        '<div style="overflow:auto"><table class="dt-table"><thead><tr>' +
-        '<th><input type="checkbox" id="dtAll"></th><th>Name</th><th>Company</th><th>Email</th><th>Phone</th><th>LinkedIn</th><th>Source</th>' +
-        '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
-        (state.total > state.records.length ? '<div class="dt-sub" style="margin-top:8px">Showing ' + state.records.length + ' of ' + state.total.toLocaleString() + ' — refine your search to narrow.</div>' : '');
+      Array.prototype.forEach.call($("#cdTabs", el).querySelectorAll("[data-stage]"), function (t) {
+        t.addEventListener("click", function () { state.stage = t.getAttribute("data-stage"); renderAll(); });
+      });
+    }
+
+    /* ---- toolbar ---- */
+    function paintToolbar() {
+      var n = Object.keys(state.sel).length, dis = n ? "" : " disabled";
+      $("#cdToolbar", el).innerHTML =
+        '<button class="cd-tbtn primary" id="cdAdd">＋ Add people ▾</button>' +
+        '<span class="cd-tsep"></span>' +
+        '<button class="cd-tbtn" id="cdDelete"' + dis + '>🗑 Delete</button>' +
+        '<span class="cd-tsep"></span>' +
+        '<button class="cd-tbtn" id="cdEmail"' + dis + '>✉️ Email</button>' +
+        '<button class="cd-tbtn" id="cdSms"' + dis + '>📱 SMS</button>' +
+        '<button class="cd-tbtn" id="cdFind"' + dis + '>🔎 Find contact</button>' +
+        '<button class="cd-tbtn" id="cdSubmit"' + dis + '>➤ Submit candidates</button>' +
+        '<span class="cd-spacer"></span>' +
+        '<button class="cd-tbtn" id="cdAddTo"' + dis + '>＋ Add to…</button>' +
+        '<button class="cd-tbtn" id="cdExport">⬇ Export</button>';
+      var sel = function () { return Object.keys(state.sel); };
+      $("#cdAdd", el).addEventListener("click", function () { openDataImport(load); });
+      $("#cdDelete", el).addEventListener("click", function () { if (n) delSel(); });
+      $("#cdEmail", el).addEventListener("click", function () { if (n) bulkEmail(); });
+      $("#cdSms", el).addEventListener("click", function () { if (n) bulkSms(); });
+      $("#cdFind", el).addEventListener("click", function () { if (n) enrichSel($("#cdFind", el)); });
+      $("#cdSubmit", el).addEventListener("click", function () { if (n) promote(sel()); });
+      $("#cdAddTo", el).addEventListener("click", function () { if (n) promote(sel()); });
+      $("#cdExport", el).addEventListener("click", function () { exportCsv(); });
+    }
+
+    /* ---- select-all header ---- */
+    function paintSelbar(rows) {
+      var n = Object.keys(state.sel).length;
+      var allSel = rows.length && rows.every(function (r) { return state.sel[r.id]; });
+      $("#cdSelbar", el).innerHTML =
+        '<span class="cd-link" id="cdUnsel">Unselect all</span><span>|</span>' +
+        '<span class="cd-link" id="cdSelAll">' + (allSel ? "Deselect" : "Select all") + " " + rows.length + '</span>' +
+        '<span>(' + n + ' selected)</span>';
+      $("#cdUnsel", el).addEventListener("click", function () { state.sel = {}; paintFeed(); paintToolbar(); });
+      $("#cdSelAll", el).addEventListener("click", function () {
+        if (allSel) rows.forEach(function (r) { delete state.sel[r.id]; });
+        else rows.forEach(function (r) { state.sel[r.id] = true; });
+        paintFeed(); paintToolbar();
+      });
+    }
+
+    /* ---- card rendering ---- */
+    function initials(name) {
+      var p = String(name || "").trim().split(/\s+/).filter(Boolean);
+      return ((p[0] || "?")[0] + (p.length > 1 ? p[p.length - 1][0] : "")).toUpperCase();
+    }
+    function sourceLabel(s) { return s === "zoominfo-api" ? "API" : s === "manual" ? "Manual" : "Imported"; }
+    function stageMeta(s) {
+      var map = { applied: ["#0ea5e9", "rgba(14,165,233,.16)"], longlist: ["#94a3b8", "rgba(148,163,184,.16)"], shortlist: ["#a855f7", "rgba(168,85,247,.16)"],
+        outbound: ["#e0961f", "rgba(245,158,11,.16)"], screening: ["#3b82f6", "rgba(59,130,246,.16)"], submitted: ["#e0961f", "rgba(245,158,11,.16)"],
+        interviewing: ["#22c55e", "rgba(34,197,94,.16)"], rejected: ["#ef4444", "rgba(239,68,68,.16)"], hired: ["#16a34a", "rgba(22,163,74,.2)"], contact: ["#94a3b8", "rgba(148,163,184,.16)"] };
+      return map[String(s || "").toLowerCase()] || ["#e0961f", "rgba(245,158,11,.16)"];
+    }
+    function relTime(s) {
+      if (!s) return "";
+      var t = Date.parse(String(s).replace(" ", "T")); if (isNaN(t)) return "";
+      var d = Math.max(0, Date.now() - t), m = Math.round(d / 60000);
+      if (m < 1) return "just now"; if (m < 60) return m + " min ago";
+      var h = Math.round(m / 60); if (h < 24) return h + " hr ago";
+      var dd = Math.round(h / 24); if (dd < 30) return dd + " day" + (dd === 1 ? "" : "s") + " ago";
+      var mo = Math.round(dd / 30); if (mo < 12) return mo + " mo ago";
+      return Math.round(mo / 12) + " yr ago";
+    }
+
+    function card(r) {
+      var loc = [r.city, r.state, r.country].filter(Boolean).join(", ");
+      var phone = r.phone || r.directPhone || r.companyPhone;
+      var li = r.linkedinUrl ? ' <a class="dt-li" href="' + esc(r.linkedinUrl) + '" target="_blank" rel="noopener" title="LinkedIn">in</a>' : '';
+      var emailBtn = r.email
+        ? '<button title="' + esc(r.email) + '" data-mail="' + esc(r.email) + '">✉️</button>'
+        : '<button class="off" title="Find email" data-enrich="email" data-id="' + esc(r.id) + '">✉️</button>';
+      var phoneBtn = phone
+        ? '<button title="' + esc(phone) + '" data-tel="' + esc(phone) + '">📞</button>'
+        : '<button class="off" title="Find phone" data-enrich="phone" data-id="' + esc(r.id) + '">📞</button>';
+
+      var sm = stageMeta(r.stage || r.recordType);
+      var stageLabel = r.stage || r.recordType || sourceLabel(r.source);
+      var stageBadge = '<span class="dt-stage" style="color:' + sm[0] + ';background:' + sm[1] + '">' + esc(stageLabel) + '</span>';
+
+      // Activity meta line (real owner + real last-activity time; never fabricated).
+      var rel = relTime(r.lastActivityAt);
+      var actBits = [];
+      if (r.stage) actBits.push('<b>' + esc(r.stage) + '</b>'); else if (r.recordType) actBits.push('<b>' + esc(r.recordType) + '</b>');
+      if (rel) actBits.push(esc(rel));
+      if (r.owner) actBits.push((r.recordType === "Contact" ? "owned by " : "with ") + esc(r.owner));
+      var act = actBits.length ? '<div class="cd-act">📋 ' + actBits.join(" · ") + '</div>' : '';
+
+      // EXPERIENCE: only the current role — we never invent prior history.
+      var exp = (r.title || r.company)
+        ? '<div class="dt-exp-row"><div class="dt-exp-ic">🏢</div><div>' +
+            (r.title ? '<div class="dt-exp-t">' + esc(r.title) + '</div>' : '') +
+            (r.company ? '<div class="dt-exp-c">' + esc(r.company) + '</div>' : '') +
+          '</div></div>'
+        : '<div class="dt-sub">No role on file.</div>';
+
+      var side = "";
+      if (r.company) side += '<div class="dt-side-row"><span class="dt-side-ic">🏢</span><span>' + esc(r.company) + (r.companyDomain ? ' · <span class="dt-sub">' + esc(r.companyDomain) + '</span>' : '') + '</span></div>';
+      if (loc) side += '<div class="dt-side-row"><span class="dt-side-ic">📍</span><span>' + esc(loc) + '</span></div>';
+      if (r.compensation) side += '<div class="dt-side-row"><span class="dt-side-ic">💰</span><span>' + esc(r.compensation) + '</span></div>';
+      if (!side) side = '<div class="dt-sub">—</div>';
+
+      // Skills/tags row -> real tags from the export (fallback to industry/seniority).
+      var tagList = (Array.isArray(r.tags) && r.tags.length) ? r.tags : [r.industry, r.seniority].filter(Boolean);
+      var tagHtml = tagList.map(function (t) { return '<span class="dt-tag">' + esc(t) + '</span>'; }).join("");
+      var skills = tagHtml ? '<div class="dt-skills"><div class="dt-seclbl">Skills &amp; tags</div>' + tagHtml + '</div>' : "";
+
+      // Bio / intake notes behind a SHOW MORE toggle.
+      var bioOpen = !!state.bios[r.id];
+      var bio = r.bio
+        ? '<div class="cd-showmore" data-bio="' + esc(r.id) + '">' + (bioOpen ? "Hide notes ▴" : "Show notes ▾") + '</div>' +
+          (bioOpen ? '<div class="cd-bio">' + esc(r.bio) + '</div>' : '')
+        : '';
+
+      return '<div class="dt-card' + (state.sel[r.id] ? ' sel' : '') + '" data-card="' + esc(r.id) + '">' +
+        '<input class="dt-pick" type="checkbox" data-pick="' + esc(r.id) + '"' + (state.sel[r.id] ? " checked" : "") + '>' +
+        act +
+        '<div class="dt-head">' +
+          '<div class="dt-avatar">' + esc(initials(r.fullName)) + '</div>' +
+          '<div class="dt-id">' +
+            '<div class="dt-name">' + esc(r.fullName) + li + '</div>' +
+            (r.title ? '<div class="dt-title">' + esc(r.title) + '</div>' : '') +
+            (loc ? '<div class="dt-loc">' + esc(loc) + '</div>' : '') +
+          '</div>' +
+          '<div class="dt-actions">' +
+            '<div class="dt-contact">' + emailBtn + phoneBtn + '</div>' +
+            stageBadge +
+            '<button class="dt-add" data-add="' + esc(r.id) + '">＋ Add to…</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="dt-body">' +
+          '<div><div class="dt-seclbl">Experience</div>' + exp + skills + '</div>' +
+          '<div>' + side + '</div>' +
+        '</div>' + bio +
+      '</div>';
+    }
+
+    function paintFeed() {
+      var rows = view();
+      paintSelbar(rows);
+      if (!state.all.length) {
+        bodyEl.innerHTML = '<div class="empty">No people yet.<br><br>' +
+          '<button class="cd-tbtn primary" id="cdSeed">⬇ Load Lume Search Partners export</button> &nbsp; ' +
+          '<button class="cd-tbtn" id="cdImport2">⬆ Import a CSV</button></div>';
+        var seed = $("#cdSeed", el); if (seed) seed.addEventListener("click", function () { seedLume(seed); });
+        var imp = $("#cdImport2", el); if (imp) imp.addEventListener("click", function () { openDataImport(load); });
+        return;
+      }
+      if (!rows.length) { bodyEl.innerHTML = '<div class="empty">No people match these filters.</div>'; return; }
+      bodyEl.innerHTML = '<div class="dt-list">' + rows.map(card).join("") + '</div>';
 
       Array.prototype.forEach.call(bodyEl.querySelectorAll("[data-pick]"), function (cb) {
-        cb.addEventListener("change", function () { var id = cb.getAttribute("data-pick"); if (cb.checked) state.sel[id] = true; else delete state.sel[id]; syncBulk(); });
-      });
-      var all = $("#dtAll", el);
-      if (all) all.addEventListener("change", function () {
-        state.records.forEach(function (r) { if (all.checked) state.sel[r.id] = true; else delete state.sel[r.id]; });
-        paintTable();
+        cb.addEventListener("change", function () {
+          var id = cb.getAttribute("data-pick");
+          if (cb.checked) state.sel[id] = true; else delete state.sel[id];
+          var c = bodyEl.querySelector('[data-card="' + id + '"]'); if (c) c.classList.toggle("sel", cb.checked);
+          paintSelbar(rows); paintToolbar();
+        });
       });
       Array.prototype.forEach.call(bodyEl.querySelectorAll("[data-enrich]"), function (b) {
         b.addEventListener("click", function () { enrichOne(b.getAttribute("data-id"), b.getAttribute("data-enrich"), b); });
       });
-      syncBulk();
+      Array.prototype.forEach.call(bodyEl.querySelectorAll("[data-mail]"), function (b) {
+        b.addEventListener("click", function () { location.href = "mailto:" + b.getAttribute("data-mail"); });
+      });
+      Array.prototype.forEach.call(bodyEl.querySelectorAll("[data-tel]"), function (b) {
+        b.addEventListener("click", function () { location.href = "tel:" + b.getAttribute("data-tel"); });
+      });
+      Array.prototype.forEach.call(bodyEl.querySelectorAll("[data-add]"), function (b) {
+        b.addEventListener("click", function () { promote([b.getAttribute("data-add")]); });
+      });
+      Array.prototype.forEach.call(bodyEl.querySelectorAll("[data-bio]"), function (b) {
+        b.addEventListener("click", function () { var id = b.getAttribute("data-bio"); state.bios[id] = !state.bios[id]; paintFeed(); });
+      });
     }
 
-    function syncBulk() {
-      var n = Object.keys(state.sel).length;
-      bulkEl.style.display = n ? "" : "none";
-      var c = $("#dtSelCount", el); if (c) c.textContent = n + " selected";
-    }
-
+    /* ---- record actions ---- */
     function enrichOne(id, field, btn) {
       if (btn) { btn.disabled = true; btn.textContent = "…"; }
       send("/data", "POST", { action: "enrich", id: id, field: field }).then(function (res) {
         if (res.ok && res.data && res.data.record) {
-          var i = state.records.findIndex(function (r) { return r.id === id; });
-          if (i >= 0) state.records[i] = res.data.record;
+          var i = state.all.findIndex(function (r) { return r.id === id; });
+          if (i >= 0) state.all[i] = res.data.record;
           var f = res.data.found || {};
           toast((f.email || f.phone) ? "Enriched ✓" : "Nothing new found");
-          paintTable();
-        } else { toast("Enrich failed"); if (btn) { btn.disabled = false; btn.textContent = "retry"; } }
-      }).catch(function () { toast("Could not reach the server."); if (btn) { btn.disabled = false; btn.textContent = "retry"; } });
+          paintFeed();
+        } else { toast("Enrich failed"); if (btn) { btn.disabled = false; btn.textContent = "↻"; } }
+      }).catch(function () { toast("Could not reach the server."); if (btn) { btn.disabled = false; btn.textContent = "↻"; } });
     }
-
-    // wiring
-    qEl.addEventListener("input", function () {
-      if (searchTimer) clearTimeout(searchTimer);
-      searchTimer = setTimeout(function () { state.filters.q = qEl.value.trim(); load(); }, 250);
-    });
-    emailEl.addEventListener("click", function () { state.filters.hasEmail = !state.filters.hasEmail; emailEl.classList.toggle("on", state.filters.hasEmail); load(); });
-    phoneEl.addEventListener("click", function () { state.filters.hasPhone = !state.filters.hasPhone; phoneEl.classList.toggle("on", state.filters.hasPhone); load(); });
-    $("#dtImport", el).addEventListener("click", function () { openDataImport(load); });
-    $("#dtPull", el).addEventListener("click", function () { openDataPull(load); });
-    $("#dtDelete", el).addEventListener("click", function () {
+    function enrichSel(btn) {
+      var ids = Object.keys(state.sel); if (!ids.length) return;
+      if (btn) { btn.disabled = true; }
+      var done = 0;
+      (function next(i) {
+        if (i >= ids.length) { if (btn) { btn.disabled = false; } toast("Enriched " + done + " record" + (done === 1 ? "" : "s")); load(); return; }
+        if (btn) btn.textContent = "Finding… " + (i + 1) + "/" + ids.length;
+        send("/data", "POST", { action: "enrich", id: ids[i] }).then(function (res) {
+          if (res.ok && res.data && res.data.found && (res.data.found.email || res.data.found.phone)) done++;
+          next(i + 1);
+        }).catch(function () { next(i + 1); });
+      })(0);
+    }
+    function delSel() {
       var ids = Object.keys(state.sel); if (!ids.length) return;
       send("/data", "POST", { action: "delete", ids: ids }).then(function (res) {
         if (res.ok) { toast("Deleted " + (res.data.deleted || ids.length)); state.sel = {}; load(); } else toast("Delete failed");
       });
-    });
-    $("#dtEnrichSel", el).addEventListener("click", function () {
-      var ids = Object.keys(state.sel); if (!ids.length) return;
-      var btn = $("#dtEnrichSel", el); btn.disabled = true; btn.textContent = "Enriching… 0/" + ids.length;
-      var done = 0;
-      (function next(i) {
-        if (i >= ids.length) { btn.disabled = false; btn.textContent = "✨ Enrich selected"; toast("Enriched " + done + " record" + (done === 1 ? "" : "s")); load(); return; }
-        send("/data", "POST", { action: "enrich", id: ids[i] }).then(function (res) {
-          if (res.ok && res.data && res.data.found && (res.data.found.email || res.data.found.phone)) done++;
-          btn.textContent = "Enriching… " + (i + 1) + "/" + ids.length; next(i + 1);
-        }).catch(function () { next(i + 1); });
-      })(0);
-    });
-    $("#dtPromote", el).addEventListener("click", function () {
-      var ids = Object.keys(state.sel); if (!ids.length) return;
+    }
+    function promote(ids) {
+      if (!ids || !ids.length) return;
       resolveBdCampaign(function (campaignId) {
         if (!campaignId) { toast("Create a campaign first."); return; }
         send("/data", "POST", { action: "promote", ids: ids, campaignId: campaignId, motion: motion }).then(function (res) {
-          if (res.ok) { toast("Sent " + (res.data.added || ids.length) + " to " + prospectsLabel()); state.sel = {}; syncBulk(); }
-          else toast("Promote failed");
+          if (res.ok) {
+            toast("Submitted " + (res.data.added || ids.length) + " to " + prospectsLabel());
+            ids.forEach(function (id) { delete state.sel[id]; });
+            renderAll();
+          } else toast("Submit failed");
         });
       });
+    }
+    function bulkEmail() {
+      var emails = Object.keys(state.sel).map(function (id) { var r = state.all.find(function (x) { return x.id === id; }); return r && r.email; }).filter(Boolean);
+      if (!emails.length) { toast("None of the selected have an email yet."); return; }
+      location.href = "mailto:?bcc=" + encodeURIComponent(emails.join(","));
+    }
+    function bulkSms() {
+      var phones = Object.keys(state.sel).map(function (id) { var r = state.all.find(function (x) { return x.id === id; }); return r && (r.phone || r.directPhone); }).filter(Boolean);
+      if (!phones.length) { toast("None of the selected have a phone yet."); return; }
+      location.href = "sms:" + phones[0];
+    }
+    function exportCsv() {
+      var rows = view(); if (!rows.length) { toast("Nothing to export."); return; }
+      var cols = ["fullName", "title", "company", "email", "phone", "city", "state", "stage", "owner", "origin", "tags", "linkedinUrl"];
+      var head2 = ["Name", "Title", "Company", "Email", "Phone", "City", "State", "Stage", "Owner", "Source", "Tags", "LinkedIn"];
+      function cell(v) { v = v == null ? "" : (Array.isArray(v) ? v.join("; ") : String(v)); return '"' + v.replace(/"/g, '""') + '"'; }
+      var csv = head2.join(",") + "\n" + rows.map(function (r) {
+        return cols.map(function (c) { return cell(c === "phone" ? (r.phone || r.directPhone) : r[c]); }).join(",");
+      }).join("\n");
+      var blob = new Blob([csv], { type: "text/csv" }), url = URL.createObjectURL(blob);
+      var a = document.createElement("a"); a.href = url; a.download = "candidates.csv"; a.click();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      toast("Exported " + rows.length + " row" + (rows.length === 1 ? "" : "s"));
+    }
+    function seedLume(btn) {
+      if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
+      send("/dev/seed-data", "POST", {}).then(function (res) {
+        if (res.ok) { toast("Loaded " + (res.data.added || 0) + " new, updated " + (res.data.updated || 0)); load(); }
+        else { toast("Load failed (" + (res.data.error || res.status) + ")"); if (btn) { btn.disabled = false; btn.textContent = "⬇ Load Lume Search Partners export"; } }
+      }).catch(function () { toast("Could not reach the server."); if (btn) { btn.disabled = false; btn.textContent = "⬇ Load Lume Search Partners export"; } });
+    }
+
+    // search wiring
+    $("#cdSearch", el).addEventListener("input", function (e) {
+      if (searchTimer) clearTimeout(searchTimer);
+      var v = e.target.value.trim();
+      searchTimer = setTimeout(function () { state.q = v; renderAll(); }, 200);
     });
 
     load();
@@ -2134,6 +2642,8 @@
     if (has("industry", "sector")) return "industry";
     if (has("personalemail", "secondaryemail", "email2", "otheremail")) return "email2";
     if (has("emailaddress", "workemail", "businessemail") || h === "email") return "email";
+    if (has("workphone")) return "companyPhone";
+    if (has("personalphone")) return "phone";
     if (has("mobile", "cell")) return "phone";
     if (has("directphone", "directdial", "directnumber")) return "directPhone";
     if (has("companyphone", "hqphone", "mainphone", "officephone")) return "companyPhone";
@@ -2142,7 +2652,15 @@
     if (h === "state" || has("region", "province")) return "state";
     if (h === "country") return "country";
     if (has("seniority", "managementlevel", "joblevel")) return "seniority";
-    if (has("zoominfoid", "contactid", "personid", "recordid")) return "providerId";
+    if (has("jobstage", "pipelinestage") || h === "stage" || h === "status") return "stage";
+    if (h === "tags" || h === "tag" || has("labels", "skills")) return "tags";
+    if (has("intake", "candidatesummary") || h === "notes" || h === "summary" || h === "bio" || h === "about") return "bio";
+    if (has("compensation", "salary") || h === "comp") return "compensation";
+    if (has("recordowner", "accountowner", "recruiter") || h === "owner") return "owner";
+    if (has("recordtype") || h === "type") return "recordType";
+    if (has("recentactivity", "lastactivity", "activitydate")) return "lastActivityAt";
+    if (has("leadsource") || h === "source" || h === "origin") return "origin";
+    if (has("zoominfoid", "contactid", "personid", "recordid") || h === "id") return "providerId";
     return "ignore";
   }
 

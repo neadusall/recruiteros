@@ -31,6 +31,14 @@ export const FIELD_KEYS: Array<[keyof DataRecordInput | "firstName" | "lastName"
   ["state", "State"],
   ["country", "Country"],
   ["seniority", "Seniority"],
+  ["stage", "Pipeline stage"],
+  ["tags", "Tags / skills"],
+  ["bio", "Notes / summary"],
+  ["compensation", "Compensation"],
+  ["owner", "Owner / recruiter"],
+  ["recordType", "Record type"],
+  ["origin", "Source / origin"],
+  ["lastActivityAt", "Last activity date"],
   ["providerId", "Provider record id"],
 ];
 
@@ -49,6 +57,8 @@ export function guessField(header: string): string {
   if (has("industry", "sector")) return "industry";
   if (has("emailaddress") || h === "email" || has("workemail", "businessemail")) return "email";
   if (has("personalemail", "secondaryemail", "email2", "otheremail")) return "email2";
+  if (has("workphone")) return "companyPhone";
+  if (has("personalphone")) return "phone";
   if (has("mobile", "cell")) return "phone";
   if (has("directphone", "directdial", "directnumber")) return "directPhone";
   if (has("companyphone", "hqphone", "mainphone", "officephone")) return "companyPhone";
@@ -57,7 +67,15 @@ export function guessField(header: string): string {
   if (h === "state" || has("region", "province")) return "state";
   if (h === "country") return "country";
   if (has("seniority", "managementlevel", "joblevel")) return "seniority";
-  if (has("zoominfoid", "contactid", "personid", "recordid")) return "providerId";
+  if (has("jobstage", "pipelinestage") || h === "stage" || h === "status") return "stage";
+  if (h === "tags" || h === "tag" || has("labels", "skills")) return "tags";
+  if (has("intake", "candidatesummary") || h === "notes" || h === "summary" || h === "bio" || h === "about") return "bio";
+  if (has("compensation", "salary") || h === "comp") return "compensation";
+  if (has("recordowner", "accountowner", "recruiter") || h === "owner") return "owner";
+  if (has("recordtype") || h === "type") return "recordType";
+  if (has("recentactivity", "lastactivity", "activitydate")) return "lastActivityAt";
+  if (has("leadsource") || h === "source" || h === "origin") return "origin";
+  if (has("zoominfoid", "contactid", "personid", "recordid") || h === "id") return "providerId";
   return "ignore";
 }
 
@@ -99,6 +117,10 @@ export function rowsToInputs(rows: Array<Record<string, unknown>>, opts: ImportO
     const fullName = rec.fullName || [firstName, lastName].filter(Boolean).join(" ");
     if (!fullName) continue;
 
+    const tags = rec.tags
+      ? rec.tags.split(/[;,]/).map((t) => t.trim()).filter(Boolean)
+      : undefined;
+
     out.push({
       fullName,
       firstName: firstName || fullName.trim().split(/\s+/)[0],
@@ -117,6 +139,14 @@ export function rowsToInputs(rows: Array<Record<string, unknown>>, opts: ImportO
       city: rec.city,
       state: rec.state,
       country: rec.country,
+      stage: rec.stage,
+      tags: tags && tags.length ? tags : undefined,
+      bio: rec.bio,
+      compensation: rec.compensation,
+      owner: rec.owner,
+      recordType: rec.recordType,
+      origin: rec.origin,
+      lastActivityAt: rec.lastActivityAt,
       source,
       providerId: rec.providerId,
       raw,
