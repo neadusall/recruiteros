@@ -221,7 +221,8 @@
       el.style.display = (el.getAttribute("data-motion-only") === motion) ? "" : "none";
     });
     relabelNav('prospects', prospectsLabel());
-    relabelNav('data', dataLabel());
+    // 'data' route has two fixed nav items (Candidates in recruiting, Companies in
+    // BD), shown by data-motion-only — no dynamic relabel needed.
   }
   // Swap a nav item's text label while preserving its leading icon span.
   function relabelNav(route, label) {
