@@ -2924,7 +2924,7 @@
       '<div class="card sd-card"><div class="sd-step">Deliverability</div><div id="sdDeliv">' + loading() + '</div></div>' +
       '<div class="card sd-card"><div class="sd-step">Seed inboxes (placement testing)</div><div id="sdSeeds">' + loading() + '</div></div>';
 
-    var state = { domains: [], servers: [], mailboxes: [], providers: { dns: false, cloud: false }, suppression: [], events: [], seeds: [], seedTests: [], stats: {}, health: { domains: [], mailboxes: [], overall: {} } };
+    var state = { domains: [], servers: [], mailboxes: [], providers: { dns: false, cloud: false }, suppression: [], events: [], seeds: [], seedTests: [], stats: {}, health: { domains: [], mailboxes: [], overall: {} }, engagement: {} };
 
     function badge(s) {
       var m = { active: ["sd-b-active", "active"], awaiting_ns: ["sd-b-wait", "awaiting NS"], verifying: ["sd-b-prov", "verifying"],
@@ -2941,6 +2941,7 @@
         state.suppression = d.suppression || []; state.events = d.events || [];
         state.seeds = d.seeds || []; state.seedTests = d.seedTests || []; state.stats = d.stats || {};
         state.health = d.health || { domains: [], mailboxes: [], overall: {} };
+        state.engagement = d.engagement || {};
         paintCfg(); paintServers(); paintList(); paintDeliv(); paintSeeds();
       }).catch(function () { $("#sdList", el).innerHTML = '<div class="empty">Could not load sending infrastructure.</div>'; });
     }
@@ -3137,6 +3138,7 @@
       var tiles = '<div class="dt-stats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
         tile(ov.healthScore != null ? ov.healthScore : "—", "domain health", ov.label) +
         tile(ov.warmthScore != null ? ov.warmthScore : "—", "mailbox warmth") +
+        tile(ov.ipWarmthScore != null ? ov.ipWarmthScore : "—", "shared-IP warmth") +
         tile(ov.canSend ? "Yes" : "No", "sending now", ov.canSend ? "healthy" : "at_risk") +
         tile(num(ov.capacityToday), "sends left today") +
         tile((ov.activeMailboxes || 0) + "/" + (ov.mailboxes || 0), "mailboxes warm") +
@@ -3174,13 +3176,27 @@
       var mbTable = '<div class="sd-step" style="margin-top:12px">Mailbox warmth</div>' +
         '<table class="sd-table"><thead><tr><th>Mailbox</th><th>Warmth</th><th>Warmup</th><th>Today</th><th>Left</th></tr></thead><tbody>' + mbRows + '</tbody></table>';
 
+      // Warm-up engagement loop (B): bidirectional warming at real provider inboxes.
+      var eng = state.engagement || {};
+      var engBadge = eng.enabled ? scorePill("warm") : scorePill("cold");
+      var engStat = function (v, l) { return '<span style="margin-right:14px"><b>' + (v != null ? v : 0) + '</b> <span class="muted" style="font-size:11px">' + l + '</span></span>'; };
+      var engBlock = '<div class="sd-step" style="margin-top:12px">Warm-up engagement loop ' + engBadge + '</div>' +
+        '<div style="font-size:12px;margin:4px 0 2px">' +
+          engStat(eng.sent, "sent (24h)") + engStat(eng.opened, "opened") + engStat(eng.replied, "replied") + engStat(eng.rescued, "rescued from spam") +
+        '</div>' +
+        '<div class="muted" style="font-size:11px">' +
+          (eng.enabled
+            ? 'Warming mailboxes email your seed inboxes; the seed client opens, replies, and rescues from spam over IMAP/SMTP. Driven by <code class="sd-mono">/api/sending/warmup/cron</code> (run every few minutes). Add seed inboxes below.'
+            : 'Off. Set <code class="sd-mono">SENDING_WARMUP_ENGAGE=1</code>, add Gmail/Outlook seed inboxes (with IMAP app-password creds) below, and schedule <code class="sd-mono">/api/sending/warmup/cron</code> to turn on the always-running loop.') +
+        '</div>';
+
       var ev = (state.events || []).slice(0, 15).map(function (e) {
         var ic = { sent: "📤", delivered: "✅", bounce: "↩", complaint: "🚩", open: "👁" }[e.type] || "•";
         return '<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--line,#1a1d24)">' + ic + ' <b>' + esc(e.type) + '</b> ' + esc(e.to || "") + (e.detail ? ' <span class="muted">' + esc(String(e.detail).slice(0, 60)) + '</span>' : '') + '</div>';
       }).join("") || '<p class="muted" style="font-size:12px">No delivery events yet. They flow in from the Postal webhook (/api/sending/webhook).</p>';
 
-      body.innerHTML = tiles + domTable + mbTable +
-        '<div class="muted" style="font-size:11px;margin:10px 0 6px">Fail-safe: the governor auto-pauses a domain (and its mailboxes) at bounce&gt;2%, complaint&gt;0.1%, spam&gt;0.3%, or a "bad" reputation tier. Warnings above flag a metric approaching its limit before the pause trips. Webhook: <code class="sd-mono">/api/sending/webhook</code> · daily tick: <code class="sd-mono">/api/sending/cron</code></div>' +
+      body.innerHTML = tiles + domTable + mbTable + engBlock +
+        '<div class="muted" style="font-size:11px;margin:10px 0 6px">Fail-safe: the governor auto-pauses a domain (and its mailboxes) at bounce&gt;2%, complaint&gt;0.1%, spam&gt;0.3%, or a "bad" reputation tier. The shared IP ramps on its own curve (50/day to ~1,000/day over ~3 weeks) so a cold IP is never slammed. Webhook: <code class="sd-mono">/api/sending/webhook</code> · daily tick: <code class="sd-mono">/api/sending/cron</code></div>' +
         '<div class="sd-step" style="margin-top:8px">Recent events</div>' + ev;
     }
 

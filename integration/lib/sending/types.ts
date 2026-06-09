@@ -99,6 +99,14 @@ export interface MtaServer {
   postalApiKey?: string;          // X-Server-API-Key (secret)
   postalReady?: boolean;          // creds present + last send/ping ok
 
+  // IP / pool warm-up — the shared IP ramps too, not just each mailbox. A cold
+  // IPv4 starts at zero trust; this caps TOTAL daily volume across all mailboxes
+  // on this server and climbs over ~2-4 weeks so the IP is never slammed cold.
+  warmupDay?: number;             // 0..N ramp progress for the IP
+  dailyCap?: number;              // current per-IP daily ceiling (ramps)
+  sentToday?: number;             // sends across all mailboxes on this IP today
+  sent?: number;                  // lifetime
+
   createdAt: string;
   updatedAt: string;
   lastError?: string;
@@ -195,4 +203,43 @@ export interface SeedTest {
   results: SeedResult[];
   /** % of seeds that landed in inbox (or promotions), once complete. */
   inboxRatePct?: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* Warm-up engagement (the always-running inbox-to-inbox loop)         */
+/* ------------------------------------------------------------------ */
+
+export type WarmupThreadStatus =
+  | "sent"      // our warming mailbox sent the warm-up message to a seed
+  | "rescued"   // seed found it in spam/junk and moved it to inbox + marked not-spam
+  | "opened"    // seed opened it (marked read)
+  | "replied"   // seed replied (the strongest positive signal)
+  | "failed";   // send or IMAP action errored
+
+/**
+ * One warm-up conversation: a warming mailbox (ours) -> a real provider seed inbox
+ * (Gmail/Outlook/Yahoo). The reputation-building actions happen AT the seed, over
+ * IMAP/SMTP, with no human intervention. The `tag` is a unique token carried in the
+ * subject + an X-ROS-Warmup header so the IMAP worker can find exactly our messages.
+ */
+export interface WarmupThread {
+  id: string;
+  workspaceId: string;
+  mailboxId: string;        // warming sender (ours)
+  mailboxAddress: string;
+  seedId: string;           // receiving real-provider inbox
+  seedAddress: string;
+  seedProvider: string;
+  subject: string;
+  tag: string;              // unique correlation token
+  messageId?: string;       // Message-ID we sent (threads the seed's reply)
+  status: WarmupThreadStatus;
+  rescuedFromSpam?: boolean;
+  opened?: boolean;
+  replied?: boolean;
+  /** Seed waits until this time before replying, so it never looks instant/botty. */
+  scheduledReplyAt?: string;
+  detail?: string;
+  createdAt: string;
+  updatedAt: string;
 }

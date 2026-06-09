@@ -9,14 +9,20 @@
  * The cap-ramp alone is the safe default and the bulk of the value.
  */
 
-import { allMailboxes, saveMailbox, getServer, getDomain } from "./store";
-import { capForDay } from "./caps";
-import { sendMessage, postalConfigured } from "./postal";
+import { allMailboxes, saveMailbox, listServers, saveServer } from "./store";
+import { capForDay, serverCapForDay } from "./caps";
+import { postalConfigured } from "./postal";
+import { runEngagement } from "./engagement";
 
 const CEILING = Number(process.env.SENDING_MAILBOX_CEILING || 50);
+const IP_CEILING = Number(process.env.SENDING_IP_CEILING || 1000);
 
-/** Advance every warming mailbox one ramp day; graduate at the ceiling. */
-export async function advanceWarmup(workspaceId: string): Promise<{ advanced: number; graduated: number }> {
+/**
+ * Advance every warming mailbox one ramp day (graduate at the ceiling), AND ramp
+ * each live server's shared-IP daily ceiling on its own slower curve — the IP is
+ * the long pole, so a cold IPv4 is warmed gently or every mailbox on it suffers.
+ */
+export async function advanceWarmup(workspaceId: string): Promise<{ advanced: number; graduated: number; ipsAdvanced: number }> {
   let advanced = 0;
   let graduated = 0;
   for (const m of await allMailboxes(workspaceId)) {
@@ -27,36 +33,25 @@ export async function advanceWarmup(workspaceId: string): Promise<{ advanced: nu
     advanced++;
     await saveMailbox(m);
   }
-  return { advanced, graduated };
+  let ipsAdvanced = 0;
+  for (const s of await listServers(workspaceId)) {
+    if (!postalConfigured(s)) continue;                       // only live IPs warm
+    if (serverCapForDay(s.warmupDay ?? 0, IP_CEILING) >= IP_CEILING) continue; // already warm
+    s.warmupDay = (s.warmupDay ?? 0) + 1;
+    s.dailyCap = serverCapForDay(s.warmupDay, IP_CEILING);
+    ipsAdvanced++;
+    await saveServer(s);
+  }
+  return { advanced, graduated, ipsAdvanced };
 }
 
 /**
- * Optional synthetic warm-up round: send a light, capped set of mailbox→mailbox
- * messages to build sending history. OFF unless SENDING_WARMUP_ENGAGE=1. Kept
- * deliberately small and slow; this is reputation-ASSISTING, not a guarantee.
+ * One warm-up engagement round. Delegates to the real bidirectional engine
+ * (engagement.ts): warming mailboxes -> real-provider seed inboxes, then the seed
+ * client rescues-from-spam / opens / replies over IMAP+SMTP. OFF unless
+ * SENDING_WARMUP_ENGAGE=1. Driven frequently by /api/sending/warmup/cron.
  */
 export async function runWarmupRound(workspaceId: string): Promise<{ sent: number; skipped: boolean }> {
-  if (process.env.SENDING_WARMUP_ENGAGE !== "1") return { sent: 0, skipped: true };
-  const boxes = (await allMailboxes(workspaceId)).filter((m) => m.status !== "paused");
-  if (boxes.length < 2) return { sent: 0, skipped: true };
-
-  let sent = 0;
-  const perRound = Math.min(boxes.length, 5); // small, slow
-  for (let i = 0; i < perRound; i++) {
-    const from = boxes[i];
-    const to = boxes[(i + 1) % boxes.length];
-    const domain = await getDomain(workspaceId, from.domainId);
-    const server = domain?.serverId ? await getServer(workspaceId, domain.serverId) : undefined;
-    if (!server || !postalConfigured(server)) continue;
-    try {
-      await sendMessage(server, {
-        from: from.address,
-        to: to.address,
-        subject: "Re: quick sync",
-        plainBody: "Thanks — sounds good, let's circle back this week.",
-      });
-      sent++;
-    } catch { /* skip */ }
-  }
-  return { sent, skipped: false };
+  const r = await runEngagement(workspaceId);
+  return { sent: r.sent, skipped: r.skipped };
 }

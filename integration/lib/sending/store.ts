@@ -9,7 +9,7 @@
 
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver } from "../db";
-import type { SendingDomain, MtaServer, Mailbox, SuppressionEntry, SendEvent, SeedAccount, SeedTest } from "./types";
+import type { SendingDomain, MtaServer, Mailbox, SuppressionEntry, SendEvent, SeedAccount, SeedTest, WarmupThread } from "./types";
 
 interface SendingState {
   domains: SendingDomain[];
@@ -19,11 +19,13 @@ interface SendingState {
   events: SendEvent[];     // capped recent feed
   seeds: SeedAccount[];
   seedTests: SeedTest[];
+  warmupThreads: WarmupThread[]; // capped recent warm-up engagement conversations
 }
 
 const KEY = "sending_infra_v1";
 const MAX_EVENTS = 500;
-let state: SendingState = { domains: [], servers: [], mailboxes: [], suppression: [], events: [], seeds: [], seedTests: [] };
+const MAX_WARMUP = 1000;
+let state: SendingState = { domains: [], servers: [], mailboxes: [], suppression: [], events: [], seeds: [], seedTests: [], warmupThreads: [] };
 let hydrated = false;
 let hydrating: Promise<void> | null = null;
 
@@ -42,6 +44,7 @@ async function hydrate(): Promise<void> {
         events: snap.events || [],
         seeds: snap.seeds || [],
         seedTests: snap.seedTests || [],
+        warmupThreads: snap.warmupThreads || [],
       };
       hydrated = true;
     })();
@@ -305,3 +308,31 @@ export async function listSeedTests(workspaceId: string, domainId?: string): Pro
   return state.seedTests.filter((t) => t.workspaceId === workspaceId && (!domainId || t.domainId === domainId)).slice(-50).reverse();
 }
 export async function saveSeedTest(): Promise<void> { await hydrate(); save(); }
+
+/* ---------------- warm-up engagement threads ---------------- */
+
+export async function addWarmupThread(t: Omit<WarmupThread, "id" | "createdAt" | "updatedAt">): Promise<WarmupThread> {
+  await hydrate();
+  const now = nowIso();
+  const rec: WarmupThread = { id: rid("warm"), createdAt: now, updatedAt: now, ...t };
+  state.warmupThreads.push(rec);
+  if (state.warmupThreads.length > MAX_WARMUP) state.warmupThreads = state.warmupThreads.slice(-MAX_WARMUP);
+  save();
+  return rec;
+}
+export async function saveWarmupThread(t: WarmupThread): Promise<void> {
+  await hydrate();
+  t.updatedAt = nowIso();
+  if (!state.warmupThreads.includes(t)) state.warmupThreads.push(t);
+  save();
+}
+/** All warm-up threads for a workspace (newest first). */
+export async function listWarmupThreads(workspaceId: string, limit = 100): Promise<WarmupThread[]> {
+  await hydrate();
+  return state.warmupThreads.filter((t) => t.workspaceId === workspaceId).slice(-limit).reverse();
+}
+/** Open threads (sent/rescued/opened, not yet replied/failed) the IMAP worker still acts on. */
+export async function openWarmupThreads(workspaceId: string): Promise<WarmupThread[]> {
+  await hydrate();
+  return state.warmupThreads.filter((t) => t.workspaceId === workspaceId && (t.status === "sent" || t.status === "rescued" || t.status === "opened"));
+}

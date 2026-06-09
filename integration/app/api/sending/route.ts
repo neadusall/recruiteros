@@ -25,6 +25,7 @@ import {
   checklist, providerStatus, HetznerNotConfigured,
   listSuppression, recentEvents, listSeeds, addSeed, deleteSeed, listSeedTests,
   runSeedTest, runSendingDaily, runGovernor, domainSetup, sendingHealth,
+  listWarmupThreads, engagementSummary, engagementEnabled, runEngagement,
 } from "../../../lib/sending";
 
 export async function GET(req: Request) {
@@ -33,10 +34,12 @@ export async function GET(req: Request) {
   const ws = g.ctx.workspace.id;
   const domains = await listDomains(ws);
   const mailboxes = await listMailboxes(ws);
+  const servers = await listServers(ws);
   const seedTests = await listSeedTests(ws);
+  const warmupThreads = await listWarmupThreads(ws, 200);
   return ok({
     domains: domains.map((d) => ({ ...d, dkimPrivateKeyPem: undefined, checklist: checklist(d.records) })),
-    servers: (await listServers(ws)).map((s) => ({ ...s, postalApiKey: s.postalApiKey ? "set" : undefined })),
+    servers: servers.map((s) => ({ ...s, postalApiKey: s.postalApiKey ? "set" : undefined })),
     mailboxes,
     stats: await stats(ws),
     providers: providerStatus(),
@@ -44,8 +47,10 @@ export async function GET(req: Request) {
     events: await recentEvents(50),
     seeds: await listSeeds(),
     seedTests,
-    // Computed warmth (per mailbox) + health (per domain) + roll-up for the UI.
-    health: sendingHealth(domains, mailboxes, seedTests),
+    // Computed warmth (per mailbox + shared IP) + health (per domain) + roll-up.
+    health: sendingHealth(domains, mailboxes, seedTests, servers),
+    // Warm-up engagement loop status (B): always-running inbox-to-inbox warming.
+    engagement: { enabled: engagementEnabled(), ...engagementSummary(warmupThreads) },
   });
 }
 
@@ -149,6 +154,10 @@ export async function POST(req: Request) {
 
   if (b?.action === "run-governor") {
     return ok({ paused: await runGovernor(ws) });
+  }
+
+  if (b?.action === "run-engagement") {
+    return ok({ report: await runEngagement(ws) });
   }
 
   return fail("unknown_action", 400);

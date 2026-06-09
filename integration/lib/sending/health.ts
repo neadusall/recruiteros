@@ -11,11 +11,14 @@
  * governor threshold shows as a warning BEFORE the pause trips.
  */
 
-import type { SendingDomain, Mailbox, SeedTest, DomainStatus } from "./types";
+import type { SendingDomain, Mailbox, SeedTest, DomainStatus, MtaServer } from "./types";
 import { THRESHOLDS } from "./governor";
+import { serverDailyCap } from "./caps";
 
 /** Steady-state daily ceiling a mailbox warms up to (mirrors warmup.ts). */
 const CEILING = Number(process.env.SENDING_MAILBOX_CEILING || 50);
+/** Steady-state per-IP daily ceiling (mirrors caps.ts). */
+const IP_CEILING = Number(process.env.SENDING_IP_CEILING || 1000);
 /** A domain needs this many sends before metric-based health is trusted. */
 const MIN_VOLUME = 50;
 
@@ -183,12 +186,47 @@ export function domainHealth(d: SendingDomain, latestSeed?: SeedTest): DomainHea
 }
 
 /* ------------------------------------------------------------------ */
+/* Server / shared-IP warmth                                           */
+/* ------------------------------------------------------------------ */
+
+export interface ServerHealth {
+  id: string;
+  name: string;
+  hostname: string;
+  ip?: string;
+  /** 0-100: how far the shared IP has ramped toward its steady daily ceiling. */
+  warmthScore: number;
+  warmupDay: number;
+  dailyCap: number;
+  ceiling: number;
+  sentToday: number;
+  capRemaining: number;
+  ready: boolean;
+}
+
+export function serverHealth(s: MtaServer): ServerHealth {
+  const cap = serverDailyCap(s);
+  const sentToday = s.sentToday ?? 0;
+  return {
+    id: s.id, name: s.name, hostname: s.hostname, ip: s.ip,
+    warmthScore: clamp(round((cap / IP_CEILING) * 100)),
+    warmupDay: s.warmupDay ?? 0,
+    dailyCap: cap,
+    ceiling: IP_CEILING,
+    sentToday,
+    capRemaining: Math.max(0, cap - sentToday),
+    ready: !!(s.postalHost && s.postalApiKey),
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Workspace roll-up                                                   */
 /* ------------------------------------------------------------------ */
 
 export interface SendingHealthSummary {
   domains: DomainHealthScore[];
   mailboxes: MailboxHealth[];
+  servers: ServerHealth[];
   overall: {
     /** Send-weighted average domain health (0-100). */
     healthScore: number;
@@ -204,6 +242,8 @@ export interface SendingHealthSummary {
     atRiskDomains: number;
     /** Remaining sends across the whole pool today. */
     capacityToday: number;
+    /** Average shared-IP warmth (0-100) — the long-pole constraint. */
+    ipWarmthScore: number;
     label: HealthLabel;
   };
 }
@@ -218,10 +258,11 @@ function latestSeedByDomain(tests: SeedTest[]): Map<string, SeedTest> {
   return out;
 }
 
-export function sendingHealth(domains: SendingDomain[], mailboxes: Mailbox[], seedTests: SeedTest[] = []): SendingHealthSummary {
+export function sendingHealth(domains: SendingDomain[], mailboxes: Mailbox[], seedTests: SeedTest[] = [], servers: MtaServer[] = []): SendingHealthSummary {
   const seeds = latestSeedByDomain(seedTests);
   const domainScores = domains.map((d) => domainHealth(d, seeds.get(d.id)));
   const mailboxScores = mailboxes.map(mailboxHealth);
+  const serverScores = servers.map(serverHealth);
 
   // Send-weighted health (busy domains matter more); fall back to a flat mean.
   const totalSent = domainScores.reduce((s, d) => s + d.sent, 0);
@@ -239,6 +280,9 @@ export function sendingHealth(domains: SendingDomain[], mailboxes: Mailbox[], se
   const canSend = mailboxScores.some((m) => !m.paused && m.capRemaining > 0);
   const pausedDomains = domainScores.filter((d) => d.paused).length;
   const atRiskDomains = domainScores.filter((d) => d.healthLabel === "at_risk").length;
+  const liveServers = serverScores.filter((s) => s.ready);
+  const ipWarmthScore = liveServers.length === 0 ? 0
+    : round(liveServers.reduce((s, x) => s + x.warmthScore, 0) / liveServers.length);
 
   const label: HealthLabel =
     pausedDomains > 0 || atRiskDomains > 0 ? "at_risk"
@@ -250,6 +294,7 @@ export function sendingHealth(domains: SendingDomain[], mailboxes: Mailbox[], se
   return {
     domains: domainScores,
     mailboxes: mailboxScores,
+    servers: serverScores,
     overall: {
       healthScore, warmthScore, canSend,
       domains: domainScores.length,
@@ -257,6 +302,7 @@ export function sendingHealth(domains: SendingDomain[], mailboxes: Mailbox[], se
       activeMailboxes, warmingMailboxes,
       pausedDomains, atRiskDomains,
       capacityToday,
+      ipWarmthScore,
       label,
     },
   };

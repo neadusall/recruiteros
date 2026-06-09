@@ -8,7 +8,7 @@
  * server exists). Falls back cleanly when nothing is ready.
  */
 
-import { pickMailbox, recordSend } from "../sending/caps";
+import { pickMailbox, recordSend, serverHasCapacity, recordServerSend } from "../sending/caps";
 import { getServer, getDomain, recordEvent, isSuppressed, saveServer } from "../sending/store";
 import { sendMessage, postalConfigured } from "../sending/postal";
 
@@ -52,6 +52,8 @@ export async function sendEmail(workspaceId: string, input: MtaSendInput): Promi
 
   const server = domain.serverId ? await getServer(workspaceId, domain.serverId) : undefined;
   if (!server || !postalConfigured(server)) return { ok: false, provider: "mta", skipped: "not_ready" };
+  // IP/pool warm-up ceiling: protect the shared IP even if a mailbox still has cap.
+  if (!serverHasCapacity(server)) return { ok: false, provider: "mta", skipped: "no_capacity" };
 
   const from = input.fromName ? `${input.fromName} <${mailbox.address}>` : mailbox.address;
   try {
@@ -66,6 +68,7 @@ export async function sendEmail(workspaceId: string, input: MtaSendInput): Promi
       trackClicks: true,
     });
     await recordSend(mailbox);
+    await recordServerSend(workspaceId, domain.serverId);
     if (domain.metrics) domain.metrics.sent += 1;
     await recordEvent({ type: "sent", domainId: domain.id, mailboxId: mailbox.id, to, detail: messageId });
     if (!server.postalReady) { server.postalReady = true; await saveServer(server); }

@@ -5,8 +5,8 @@
  * domain, spreading load so no single mailbox/domain burns.
  */
 
-import { allMailboxes, allDomains, saveMailbox } from "./store";
-import type { Mailbox, SendingDomain } from "./types";
+import { allMailboxes, allDomains, saveMailbox, getServer, saveServer } from "./store";
+import type { Mailbox, SendingDomain, MtaServer } from "./types";
 
 /**
  * Warm-up ramp: day 0 starts at 10/day and climbs ~+5/day to a steady ceiling.
@@ -14,6 +14,31 @@ import type { Mailbox, SendingDomain } from "./types";
  */
 export function capForDay(day: number, ceiling = 50): number {
   return Math.min(ceiling, 10 + day * 5);
+}
+
+/** Steady-state per-IP daily ceiling once the IP is fully warmed. */
+const IP_CEILING = Number(process.env.SENDING_IP_CEILING || 1000);
+
+/**
+ * IP/pool warm-up ramp: a shared IP starts at 50/day and climbs ~+50/day to its
+ * ceiling (~1,000/day) over ~3 weeks. This is the long pole — a cold IPv4 must be
+ * warmed gently or every mailbox on it suffers. Total daily sends across ALL
+ * mailboxes on a server are gated by this, on top of the per-mailbox caps.
+ */
+export function serverCapForDay(day: number, ceiling = IP_CEILING): number {
+  return Math.min(ceiling, 50 + day * 50);
+}
+export function serverDailyCap(s: MtaServer): number { return serverCapForDay(s.warmupDay ?? 0); }
+export function serverHasCapacity(s: MtaServer): boolean { return (s.sentToday ?? 0) < serverDailyCap(s); }
+
+/** Record a send against the server's shared-IP daily ceiling. */
+export async function recordServerSend(workspaceId: string, serverId?: string): Promise<void> {
+  if (!serverId) return;
+  const s = await getServer(workspaceId, serverId);
+  if (!s) return;
+  s.sentToday = (s.sentToday ?? 0) + 1;
+  s.sent = (s.sent ?? 0) + 1;
+  await saveServer(s);
 }
 
 /** A mailbox can send now if active/warming, not paused, and under its cap. */
@@ -49,9 +74,13 @@ export async function recordSend(m: Mailbox): Promise<void> {
   await saveMailbox(m);
 }
 
-/** Reset daily counters (call once per day from the daily tick). */
+/** Reset daily counters (call once per day from the daily tick) — mailboxes AND IPs. */
 export async function resetDaily(workspaceId: string): Promise<void> {
   for (const m of await allMailboxes(workspaceId)) {
     if (m.sentToday !== 0) { m.sentToday = 0; await saveMailbox(m); }
+  }
+  const { listServers } = await import("./store");
+  for (const s of await listServers(workspaceId)) {
+    if ((s.sentToday ?? 0) !== 0) { s.sentToday = 0; await saveServer(s); }
   }
 }

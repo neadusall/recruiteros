@@ -34,11 +34,13 @@ export { runGovernor, evaluateDomain, THRESHOLDS } from "./governor";
 export { refreshReputation, reputationConfigured } from "./reputation";
 export { runSeedTest, recordSeedResult } from "./seedtest";
 export { advanceWarmup, runWarmupRound } from "./warmup";
+export { runEngagement, engagementEnabled, engagementSummary } from "./engagement";
+export { listWarmupThreads } from "./store";
+export { pickMailbox, serverCapForDay, serverDailyCap, serverHasCapacity } from "./caps";
 export { runSendingDaily } from "./daily";
 export { applyDeliveryEvent, mapPostalEvent } from "./ingest";
-export { pickMailbox } from "./caps";
 export { sendingHealth, domainHealth, mailboxHealth } from "./health";
-export type { SendingHealthSummary, DomainHealthScore, MailboxHealth, HealthLabel, WarmthLabel } from "./health";
+export type { SendingHealthSummary, DomainHealthScore, MailboxHealth, ServerHealth, HealthLabel, WarmthLabel } from "./health";
 
 /** One call for the UI: which automations are wired? */
 export function providerStatus(): { dns: boolean; cloud: boolean; snds: boolean; postmaster: boolean; mta: boolean } {

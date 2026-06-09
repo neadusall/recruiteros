@@ -13,7 +13,7 @@ import { runGovernor } from "./governor";
 
 export interface DailyReport {
   reset: true;
-  warmup: { advanced: number; graduated: number };
+  warmup: { advanced: number; graduated: number; ipsAdvanced: number };
   reputationUpdated: number;
   paused: Array<{ domain: string; reason: string }>;
   warmupSent: number;
