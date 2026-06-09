@@ -407,7 +407,7 @@
   var imSearchTimer = null;      // debounce for chip-driven searches
   var imMinScore = 0;            // narrow-down: minimum hiring-intent score shown
   var imPostedWithin = 0;        // date search: only roles posted within the last N days (0 = any)
-  var imDmPerRole = 1;           // decision-makers shown per role (1 / 3 / 5) — one-click multi-touch
+  var imDmPerRole = 3;           // decision-makers shown per role (1 / 3 / 5) — defaults to 3 for multi-touch
   var imSelectedSizes = [];      // company headcount bands to narrow by (multi-select)
   var imConfirmedSizeOnly = false; // size search: only authoritative (Wikidata) headcounts
   var imLabel = "";             // current result label, kept for re-renders
@@ -592,7 +592,9 @@
       clearTimeout(imSearchTimer);
       var s = currentSearch();
       if (s) runSearch(s.criteria, s.label);
-      else $("#imBody").innerHTML = '<div class="empty">Pick one or more industries (or Select all) to see who\'s hiring.</div>';
+      else $("#imBody").innerHTML = '<div class="empty">' + (imMode === "company"
+        ? "Type a company name above — then your date, size and confirmed-only filters apply to it too."
+        : "Pick one or more industries (or Select all) to see who's hiring.") + "</div>";
     }
     function scheduleSearch() { clearTimeout(imSearchTimer); imSearchTimer = setTimeout(runNow, 350); }
 
