@@ -341,5 +341,228 @@
     });
   }
 
-  window.SpendingCalc = { mount: mount };
+  /* ===================================================================== *
+   *  AI VETTING cost model (Recruiting motion)
+   *
+   *  A focused "what does an hour on the phone cost" calculator for the inbound
+   *  AI Vetting agent. Only two cost drivers, exactly as scoped:
+   *    • Cloned voice — Cartesia cost structure (per minute SPOKEN)
+   *    • Telephony    — Telnyx (per call minute + number rental)
+   *
+   *  Key realism: across a 60-minute call the cloned voice only SPEAKS for part
+   *  of it (the candidate talks the rest), so Cartesia is billed on ~20 of every
+   *  60 minutes (editable). Telnyx bills the full 60. Everything is per-hour-first
+   *  so you can read cost/hour straight off the hero. Optional STT+LLM and
+   *  post-call scoring lines default to 0 to keep the model to the two drivers.
+   *
+   *  Mount with: window.SpendingCalc.mountVetting(rootEl)
+   * ===================================================================== */
+  var VKEY = "ros_vetting_cost_v1";
+  var VDEFAULTS = {
+    // Usage
+    hoursPerMonth: 40,        // phone-hours/mo the desk(s) are on calls
+    avgCallMin: 6,            // average vetting call length → derives calls/mo
+    talkMinPerHour: 20,       // minutes the cloned voice actually SPEAKS per hour
+    // Cloned voice — Cartesia
+    cartesiaPlan: 0,          // flat plan $/mo (0 = pay-as-you-go)
+    cartesiaPerMin: 0.025,    // $ per minute of generated (spoken) audio
+    // Telephony — Telnyx
+    telnyxPerMin: 0.007,      // $ per inbound call minute
+    numberRental: 1.0,        // $ per number / mo
+    numbers: 1,               // how many vetting numbers are live
+    // Optional extras (off by default — the two drivers above are the spec)
+    aiPerMin: 0,              // realtime STT+LLM $/min (whole call), if you include it
+    scoringPerCall: 0         // post-call LLM scoring $ per call
+  };
+  var VLADDER = [10, 20, 40, 80, 160, 320];
+
+  function vstate() {
+    var s = {};
+    try { s = JSON.parse(localStorage.getItem(VKEY) || "{}"); } catch (e) { s = {}; }
+    var o = {};
+    Object.keys(VDEFAULTS).forEach(function (k) { o[k] = s[k] != null ? s[k] : VDEFAULTS[k]; });
+    return o;
+  }
+  function vsave(s) { try { localStorage.setItem(VKEY, JSON.stringify(s)); } catch (e) {} }
+  function vassign(s, k, v) { var o = {}; Object.keys(s).forEach(function (x) { o[x] = s[x]; }); o[k] = v; return o; }
+
+  function computeVetting(s) {
+    var hours = Math.max(0, Number(s.hoursPerMonth) || 0);
+    var avgCall = Math.max(0.1, Number(s.avgCallMin) || 0);
+    var calls = (hours * 60) / avgCall;
+    var talkMin = Math.min(60, Math.max(0, Number(s.talkMinPerHour) || 0)); // per hour
+    var talkRatio = talkMin / 60;
+
+    // ---- per ONE hour on the phone (the headline unit) ----
+    var telnyxPerHour = 60 * s.telnyxPerMin;            // Telnyx bills every minute
+    var cartesiaPerHour = talkMin * s.cartesiaPerMin;   // Cartesia only the spoken minutes
+    var aiPerHour = 60 * s.aiPerMin;                    // optional STT+LLM, whole call
+    var variablePerHour = telnyxPerHour + cartesiaPerHour + aiPerHour;
+
+    // ---- monthly ----
+    var voiceMonthly = cartesiaPerHour * hours;         // talkMin × hours × cartesiaPerMin
+    var telnyxMinMonthly = telnyxPerHour * hours;
+    var aiMonthly = aiPerHour * hours;
+    var scoringMonthly = calls * s.scoringPerCall;
+    var cartesiaPlanMonthly = Number(s.cartesiaPlan) || 0;
+    var numberMonthly = (Number(s.numbers) || 0) * s.numberRental;
+
+    var recurring = voiceMonthly + telnyxMinMonthly + aiMonthly + scoringMonthly + cartesiaPlanMonthly + numberMonthly;
+    var fixedMonthly = cartesiaPlanMonthly + numberMonthly;
+    var allInPerHour = hours > 0 ? recurring / hours : variablePerHour; // incl. fixed at this volume
+    var perCall = calls > 0 ? recurring / calls : 0;
+    var voiceMinPerMonth = talkMin * hours;
+
+    return {
+      hours: hours, calls: calls, avgCall: avgCall, talkMin: talkMin, talkRatio: talkRatio,
+      telnyxPerHour: telnyxPerHour, cartesiaPerHour: cartesiaPerHour, aiPerHour: aiPerHour,
+      variablePerHour: variablePerHour, allInPerHour: allInPerHour, perCall: perCall,
+      voiceMonthly: voiceMonthly, telnyxMinMonthly: telnyxMinMonthly, aiMonthly: aiMonthly,
+      scoringMonthly: scoringMonthly, cartesiaPlanMonthly: cartesiaPlanMonthly, numberMonthly: numberMonthly,
+      fixedMonthly: fixedMonthly, recurring: recurring, voiceMinPerMonth: voiceMinPerMonth
+    };
+  }
+
+  function mountVetting(root) {
+    if (!root) return;
+    var s = vstate();
+
+    var html = '<div class="sc">';
+    html += '<div class="sc-head"><h2>Spending</h2><p>What the <strong>AI Vetting</strong> agent costs to run — modelled per <strong>hour on the phone</strong>. Two drivers only: your <strong>cloned voice</strong> (Cartesia, billed per minute spoken) and <strong>telephony</strong> (Telnyx, billed per call minute). Across a 60-minute call the agent only <em>speaks</em> for part of it — the candidate talks the rest — so Cartesia is billed on ~20 of every 60 minutes. Every number is editable.</p></div>';
+
+    html += '<div class="sc-wrap"><div class="sc-inputs">';
+
+    html += section("Usage");
+    html += card("Call volume", "How much time the desk(s) spend on calls. Calls per month are derived from the average call length.",
+      fld("Phone-hours / month", "hoursPerMonth", s.hoursPerMonth, 5, 0) +
+      fld("Avg call length (min)", "avgCallMin", s.avgCallMin, 1, 0.5) +
+      fld("Cloned voice speaks / hour (min)", "talkMinPerHour", s.talkMinPerHour, 1, 0), "vcUsageRead");
+
+    html += section("Cloned voice — Cartesia");
+    html += card("Cartesia voice", "Cost to synthesize your cloned voice. Billed only on the minutes the agent actually speaks (≈ talk time per hour). Per-minute is plan-dependent — edit to match your Cartesia tier.",
+      fld("Plan ($/mo, 0 = PAYG)", "cartesiaPlan", s.cartesiaPlan, 5, 0) +
+      fld("Voice ($ / min spoken)", "cartesiaPerMin", s.cartesiaPerMin, 0.005, 0), "vcVoiceRead");
+
+    html += section("Telephony — Telnyx");
+    html += card("Telnyx calls & numbers", "Inbound call minutes (every minute of the call) plus the monthly rental for each live vetting number.",
+      fld("Inbound ($ / call min)", "telnyxPerMin", s.telnyxPerMin, 0.001, 0) +
+      fld("Number rental ($/mo)", "numberRental", s.numberRental, 0.25, 0) +
+      fld("Live numbers", "numbers", s.numbers, 1, 0), "vcTelnyxRead");
+
+    html += section("Optional extras (off by default)");
+    html += card("Realtime AI & scoring", "Not part of the two headline drivers — leave at 0 to model voice + telephony only. STT+LLM is the live speech-to-text/brain per call minute; scoring is the one post-call analysis pass.",
+      fld("Realtime STT+LLM ($ / min)", "aiPerMin", s.aiPerMin, 0.005, 0) +
+      fld("Post-call scoring ($ / call)", "scoringPerCall", s.scoringPerCall, 0.005, 0), "vcExtrasRead");
+
+    html += '<div class="sc-btnrow"><button class="sc-reset" id="vcReset">Reset to defaults</button></div>';
+    html += '</div>'; // /sc-inputs
+
+    html += '<div class="sc-results" id="vcResults"></div>';
+    html += '</div>'; // /sc-wrap
+
+    html += '<div class="sc-card" id="vcScenarios" style="margin-top:18px"></div>';
+    html += '</div>'; // /sc
+
+    root.innerHTML = html;
+
+    $$("[data-sc]", root).forEach(function (inp) {
+      inp.addEventListener("input", function () { recomputeVetting(root); });
+      inp.addEventListener("change", function () { recomputeVetting(root); });
+    });
+    $("#vcReset", root).addEventListener("click", function () {
+      try { localStorage.removeItem(VKEY); } catch (e) {}
+      mountVetting(root);
+    });
+    recomputeVetting(root);
+  }
+
+  function recomputeVetting(root) {
+    var s = vstate();
+    $$("[data-sc]", root).forEach(function (inp) { s[inp.dataset.sc] = Number(inp.value) || 0; });
+    vsave(s);
+    var r = computeVetting(s);
+
+    var u = $("#vcUsageRead", root);
+    if (u) u.innerHTML = '<strong>' + r.hours.toLocaleString() + '</strong> hrs/mo → <strong>' + Math.round(r.calls).toLocaleString() +
+      '</strong> calls (' + r.avgCall + ' min avg) · voice speaks <strong>' + r.talkMin + '</strong> of every 60 min (' + Math.round(r.talkRatio * 100) + '%)';
+
+    var vv = $("#vcVoiceRead", root);
+    if (vv) vv.innerHTML = '<strong>' + r.talkMin + '</strong> min/hr × ' + usd(s.cartesiaPerMin, 3) + ' = <strong>' + usd(r.cartesiaPerHour, 2) +
+      '</strong>/hr · <strong>' + Math.round(r.voiceMinPerMonth).toLocaleString() + '</strong> spoken min/mo = <strong>' + usd(r.voiceMonthly) + '</strong>/mo';
+
+    var vt = $("#vcTelnyxRead", root);
+    if (vt) vt.innerHTML = '60 min × ' + usd(s.telnyxPerMin, 4) + ' = <strong>' + usd(r.telnyxPerHour, 2) + '</strong>/hr + ' +
+      (Number(s.numbers) || 0) + ' number' + ((Number(s.numbers) || 0) === 1 ? '' : 's') + ' × ' + usd(s.numberRental) + ' = <strong>' + usd(r.numberMonthly) + '</strong>/mo rental';
+
+    var ve = $("#vcExtrasRead", root);
+    if (ve) ve.innerHTML = (r.aiPerHour + r.scoringMonthly) > 0
+      ? 'STT+LLM <strong>' + usd(r.aiPerHour, 2) + '</strong>/hr + scoring <strong>' + usd(r.scoringMonthly) + '</strong>/mo'
+      : 'Excluded — modelling Cartesia + Telnyx only.';
+
+    // Per-hour breakdown bars
+    var b = {};
+    b["Telephony (Telnyx, 60 min)"] = round2(r.telnyxPerHour);
+    b["Cloned voice (Cartesia, " + r.talkMin + " min)"] = round2(r.cartesiaPerHour);
+    if (r.aiPerHour > 0) b["Realtime STT+LLM"] = round2(r.aiPerHour);
+
+    var html = '<div class="sc-hero"><div class="sc-hl">Cost per hour on the phone</div>' +
+      '<div class="sc-hv">' + usd(r.variablePerHour, 2) + '<span>/hr</span></div>' +
+      '<div class="sc-hs">' + usd(r.allInPerHour, 2) + '/hr all-in at ' + r.hours.toLocaleString() + ' hrs/mo (incl. plan + number rental)</div></div>';
+
+    html += '<div class="sc-metrics">' +
+      metric(usd(r.perCall, 2), "per vetting call") +
+      metric(usd(r.recurring), "per month") +
+      metric(usd(r.recurring * 12), "per year") + '</div>';
+
+    html += '<h3 class="sc-h3">Per-hour breakdown</h3>' + bars(b);
+
+    html += '<h3 class="sc-h3">Monthly cost</h3><div class="sc-lines">' +
+      tl("Cloned voice (Cartesia)", usd(r.voiceMonthly + r.cartesiaPlanMonthly) + " / mo") +
+      tl("Telephony minutes (Telnyx)", usd(r.telnyxMinMonthly) + " / mo") +
+      tl("Number rental (Telnyx)", usd(r.numberMonthly) + " / mo") +
+      ((r.aiMonthly + r.scoringMonthly) > 0 ? tl("Realtime AI + scoring", usd(r.aiMonthly + r.scoringMonthly) + " / mo") : "") +
+      tl("Total recurring", usd(r.recurring) + " / mo") + '</div>';
+
+    $("#vcResults", root).innerHTML = html;
+    renderVettingScenarios(root, s, r.hours);
+  }
+
+  function renderVettingScenarios(root, s, current) {
+    var el = $("#vcScenarios", root); if (!el) return;
+    var counts = VLADDER.slice();
+    if (counts.indexOf(current) === -1 && current > 0) counts.push(current);
+    counts = counts.filter(function (v, i, a) { return a.indexOf(v) === i; }).sort(function (a, b) { return a - b; });
+
+    var html = '<h3 class="sc-h3" style="margin-top:0">Cost by phone-hours per month</h3>' +
+      '<p class="sc-note" style="margin:-2px 0 12px">Same per-hour assumptions, different monthly volumes. <strong>Click any row to load it.</strong> Per-hour all-in falls as the plan + number rental spread across more hours.</p>';
+    html += '<div class="sc-twrap"><table class="sc-table"><thead><tr>' +
+      '<th>Hours / mo</th><th class="num">Calls / mo</th><th class="num">Cloned voice</th><th class="num">Telephony</th>' +
+      '<th class="num">Recurring / mo</th><th class="num">All-in / hr</th><th class="num">Per call</th>' +
+      '</tr></thead><tbody>';
+    counts.forEach(function (n) {
+      var c = computeVetting(vassign(s, "hoursPerMonth", n));
+      html += '<tr class="sc-row' + (n === current ? ' cur' : '') + '" data-n="' + n + '">' +
+        '<td><strong>' + n + '</strong></td>' +
+        '<td class="num">' + Math.round(c.calls).toLocaleString() + '</td>' +
+        '<td class="num">' + usd(c.voiceMonthly + c.cartesiaPlanMonthly) + '</td>' +
+        '<td class="num">' + usd(c.telnyxMinMonthly + c.numberMonthly) + '</td>' +
+        '<td class="num"><strong>' + usd(c.recurring) + '</strong></td>' +
+        '<td class="num">' + usd(c.allInPerHour, 2) + '</td>' +
+        '<td class="num">' + usd(c.perCall, 2) + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+
+    $$(".sc-row", el).forEach(function (tr) {
+      tr.addEventListener("click", function () {
+        var inp = $('[data-sc="hoursPerMonth"]', root);
+        if (inp) { inp.value = Number(tr.dataset.n) || 0; recomputeVetting(root); }
+        var res = $("#vcResults", root);
+        if (res && res.scrollIntoView) res.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+  }
+
+  window.SpendingCalc = { mount: mount, mountVetting: mountVetting };
 })();

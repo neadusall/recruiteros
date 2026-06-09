@@ -181,7 +181,7 @@
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "＋ New sequence", render: renderContent },
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
-    spending: { title: "Spending", crumb: "Measure", action: null, render: renderSpending, motionOnly: "bd" },
+    spending: { title: "Spending", crumb: "Measure", action: null, render: renderSpending },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
     connected: { title: "Connected", crumb: "Connect", action: "Test all", render: renderConnected, cap: "integrations:manage" },
     ats: { title: "ATS", crumb: "Connect", action: null, render: renderAts, cap: "ats:manage" },
@@ -4830,8 +4830,11 @@
   // The model + UI live in the self-contained spending-calc.js module so the
   // underlying tools stay generic (no vendor names exposed here).
   function renderSpending(el) {
-    if (window.SpendingCalc && window.SpendingCalc.mount) window.SpendingCalc.mount(el);
-    else el.innerHTML = '<div class="empty">Spending module did not load — refresh and try again.</div>';
+    if (!window.SpendingCalc) { el.innerHTML = '<div class="empty">Spending module did not load — refresh and try again.</div>'; return; }
+    // Recruiting motion models the AI Vetting tool (cloned voice + telephony per
+    // hour); BD keeps the full outreach scenario planner. Same look either way.
+    if (motion === "recruiting" && window.SpendingCalc.mountVetting) window.SpendingCalc.mountVetting(el);
+    else window.SpendingCalc.mount(el);
   }
 
   function renderAnalytics(el) {
