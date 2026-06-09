@@ -261,7 +261,35 @@ const QA = [
   {cat:"Getting started", q:"What are the main parts of the product?",
    a:`Two connected parts: the marketing site where people learn about and sign up for it, and the application itself, which is the workspace where the recruiting happens. Inside the app the major areas are Signals, Sourcing and Enrichment, Outreach, the Dialer, Conversations, Pipeline, and Analytics.`},
   {cat:"Getting started", q:"What technology is it built on?",
-   a:`It is a modern web application that runs in the browser, with calling and texting handled through cloud telephony and the sensitive infrastructure kept securely on the server. We focus the docs on what the platform does for you rather than internal technical or vendor specifics.`}
+   a:`It is a modern web application that runs in the browser, with calling and texting handled through cloud telephony and the sensitive infrastructure kept securely on the server. We focus the docs on what the platform does for you rather than internal technical or vendor specifics.`},
+
+  // AI VETTING
+  {cat:"AI Vetting", q:"What is AI Vetting?",
+   a:`AI Vetting lets you bind a job description to a phone number and your own cloned voice. A candidate opts in, then calls the number and talks to an AI recruiter that sounds like you. It greets them by name, references their background, asks the top few qualifying questions for that specific role, and tells them the next step. Every call is recorded, transcribed, summarized, and scored from 1 to 100. You set it up under Recruiting, on the AI Vetting tab.`},
+  {cat:"AI Vetting", q:"How does AI Vetting work, start to finish?",
+   a:`You create a "vetting desk": give it a name, paste the job description, pick a phone number, and choose your cloned voice. Candidates opt in through a short form, then call the number. The AI screens them in your voice, and when the call ends you get a transcript, a short summary, a 1 to 100 score, and a clear qualified or not decision with the reasons.`},
+  {cat:"AI Vetting", q:"Do I have to write the screening questions?",
+   a:`No. Paste the job description and the top three to four qualifiers are pulled from it automatically, focused on the role's most important, most disqualifying-if-missing requirements. You can preview and tweak them with one click, but you never have to write them from scratch.`},
+  {cat:"AI Vetting", q:"What does the pass threshold mean?",
+   a:`After each call the candidate is scored from 0 to 100. The pass threshold is the minimum score they must reach to be marked Qualified. The default is 70. Raise it to be more selective, lower it to let more people through. Must-have requirements act as hard gates on top of the score: missing one disqualifies a candidate even with a high score.`},
+  {cat:"AI Vetting", q:"How does the AI decide pass or fail?",
+   a:`For each requirement it lines up three things: what the candidate said on the call, their professional background from their profile, and how they answered, meaning whether they backed it up with specifics, owned it, and came across credibly. A candidate needs real evidence that meets the bar, delivered convincingly. A strong resume with vague or evasive answers can still fail, and a hard requirement their background does not support will not pass on talk alone.`},
+  {cat:"AI Vetting", q:"Does the agent use my own voice?",
+   a:`Yes. You select your cloned voice for the desk, and the agent speaks the entire call in it. A voice must be selected before a desk can go live, so candidates always hear you.`},
+  {cat:"AI Vetting", q:"Can I keep the hiring company confidential?",
+   a:`Yes. Leave the hiring company blank and the desk runs as a confidential search. The agent will not name the company, and if a candidate asks, it warmly explains that it is a confidential search and the company can be shared at the appropriate stage. Fill the company in and the agent can mention it naturally.`},
+  {cat:"AI Vetting", q:"What does the candidate hear at the end of the call?",
+   a:`If they qualify, the agent tells them they look like a strong fit, that you will send over the full job description, and asks them for an updated resume tailored to what was discussed. If they are not a fit, the agent gives a warm, honest "not the right fit this time" and lets them know you will keep them in mind for roles that better suit their background. It is spoken naturally, in your own words, and you can customize both.`},
+  {cat:"AI Vetting", q:"How do candidates opt in to be screened?",
+   a:`Each desk has an opt-in link you can share. The candidate enters their name, phone number, email, and profile link. Their number is matched when they call, so the agent already knows who they are and can speak directly to their experience.`},
+  {cat:"AI Vetting", q:"What is on the call scorecard?",
+   a:`An overall score from 1 to 100 across eight areas: communication, response quality and length, interpersonal presence, self-awareness, achievement orientation, problem solving, motivation, and cultural fit. Alongside it you get a pass or fail on each qualifier, a separate marketability score, a short summary of the conversation, the reasons they did or did not qualify, and the full transcript.`},
+  {cat:"AI Vetting", q:"What is the marketability score?",
+   a:`It is a 1 to 10 estimate of how likely a client is to grant an interview based on the candidate's background, scope, and relevance to the role, independent of how personable they were on the call. A candidate can score highly as a person and still be a weaker market fit for a specific search, so the two are kept separate.`},
+  {cat:"AI Vetting", q:"Can I move a phone number between roles?",
+   a:`Yes. When you set up a desk you pick from the numbers you have connected. A number already assigned to another role shows as taken so two roles cannot claim the same line. To reuse it, detach it from the first desk and assign it to the new one.`},
+  {cat:"AI Vetting", q:"How is the cost of AI Vetting calculated?",
+   a:`The Spending tab in the Recruiting section models the cost of running the vetting line, built around cost per hour on the phone. It combines the telephony cost for the full call with your cloned voice cost, factoring in that the voice only speaks part of each hour, about twenty of every sixty minutes by default since the candidate talks the rest. Every assumption is editable, and it shows you cost per call, per month, and per year.`}
 ];
 
 const TOPICS=[
@@ -270,13 +298,14 @@ const TOPICS=[
   {cat:"Sourcing", ic:"🔍", sub:"Finding and enriching candidates"},
   {cat:"Outreach", ic:"✉️", sub:"Multi step, multi channel campaigns"},
   {cat:"Dialer", ic:"📞", sub:"Calling, texting, voicemail, history"},
+  {cat:"AI Vetting", ic:"☎️", sub:"Inbound screening in your cloned voice"},
   {cat:"Conversations", ic:"💬", sub:"Replies and AI call summaries"},
   {cat:"Pipeline", ic:"📊", sub:"Jobs, stages, and analytics"},
   {cat:"Security", ic:"🔒", sub:"How your data is protected"},
   {cat:"Getting started", ic:"🚀", sub:"Workflow and first steps"}
 ];
 
-const CHIPS=["How does the dialer work?","What is a hiring signal?","Is my data safe?","Which data providers do you use?","Does it summarize my calls?"];
+const CHIPS=["What is AI Vetting?","How does the dialer work?","What is a hiring signal?","How does the AI decide pass or fail?","Does it summarize my calls?"];
 
 /* ---------- elements ---------- */
 const qInput=document.getElementById('q');

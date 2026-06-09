@@ -278,6 +278,7 @@ node server.cjs
           <div class="scard"><div class="sc-top"><span class="ico">✉️</span><h4>Outreach Studio</h4></div><p>MeetAlfred-style multi-channel sequence builder with live inbox, sim clock, and analytics.</p><a class="sc-link" href="/alfred">/alfred</a></div>
           <div class="scard"><div class="sc-top"><span class="ico">🎛️</span><h4>Campaign Studio</h4></div><p>Drag-and-drop canvas for building sequences across LinkedIn, email, SMS, and voice.</p><a class="sc-link" href="/campaign-studio">/campaign-studio</a></div>
           <div class="scard"><div class="sc-top"><span class="ico">🧱</span><h4>Campaign Builder</h4></div><p>Turn hiring signals into a targeted campaign: pick signals, filter by industry/title, review list and cost.</p><a class="sc-link" href="/campaign-builder">/campaign-builder</a></div>
+          <div class="scard"><div class="sc-top"><span class="ico">☎️</span><h4>AI Vetting</h4></div><p>Recruiting tab. Binds a JD + phone number + cloned voice into a "vetting desk": candidates opt in and call in, an AI recruiter screens them in your voice, and each call is recorded, transcribed, summarized, and scored 1–100. Qualifiers auto-pull from the JD; pass/fail weighs the JD must-haves against the call answer, the candidate's profile, and delivery. Backend: <code>integration/lib/vetting</code> + <code>app/api/vetting</code>; setup guide at <code>docs/setup/ai-vetting.md</code>.</p><a class="sc-link" href="/command#vetting">/command#vetting</a></div>
           <div class="scard"><div class="sc-top"><span class="ico">👑</span><h4>Owner Console</h4></div><p>Gated admin dashboard: workspace management, billing, and user permissions.</p><a class="sc-link" href="/owner-console">/owner-console</a></div>
         </div>
       </section>
@@ -494,7 +495,9 @@ node bridge.test.cjs          <span class="cmt"># end-to-end self-test</span></c
             <tr><td><code>RECRUITEROS_SMS_PROVIDER</code></td><td><code>telnyx</code> or <code>internal</code></td></tr>
             <tr><td><code>LINKEDIN_CLIENT_ID</code> / <code>_SECRET</code></td><td>LinkedIn OAuth login (see docs/setup/channels/linkedin-login.md)</td></tr>
             <tr><td><code>RESEND_API_KEY</code></td><td>Transactional email — password reset &amp; magic links (docs/setup/channels/email-resend.md)</td></tr>
-            <tr><td><code>TELNYX_API_KEY</code> / <code>TELNYX_PHONE_NUMBER</code></td><td>Two-way SMS (docs/setup/channels/sms-qualification.md)</td></tr>
+            <tr><td><code>TELNYX_API_KEY</code> / <code>TELNYX_PHONE_NUMBER</code></td><td>Two-way SMS, the voice dialer, and AI Vetting inbound calls (docs/setup/channels/sms-qualification.md)</td></tr>
+            <tr><td><code>VOICE_CLONE_API_KEY</code> / <code>VOICE_CLONE_VOICE_ID</code></td><td>Cloned-voice TTS for Voice Drops &amp; AI Vetting (the operator's own consented voice)</td></tr>
+            <tr><td><code>RECRUITEROS_VETTING_MODEL</code> / <code>_ENGINE_MODEL</code></td><td>AI Vetting: post-call scoring model &amp; the on-call assistant model (see docs/setup/ai-vetting.md)</td></tr>
             <tr><td><code>LOXO_API_KEY</code></td><td>ATS sync</td></tr>
             <tr><td><code>PORT</code></td><td>Override the listening port for <code>server.cjs</code> / bridge</td></tr>
           </tbody>
@@ -536,6 +539,12 @@ node bridge.test.cjs          <span class="cmt"># end-to-end self-test</span></c
             <tr><td><span class="pill post">POST</span></td><td><code>/api/linkedin/webhook</code></td><td>Inbound events (accepts, replies)</td></tr>
             <tr><td><span class="pill post">POST</span></td><td><code>/api/sms/send</code></td><td>Send an SMS</td></tr>
             <tr><td><span class="pill post">POST</span></td><td><code>/api/linkedin/cron</code></td><td>Cadence engine — server-side rate-limited execution</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/vetting/desks</code></td><td>AI Vetting desks (JD↔number↔voice); PUT auto-derives qualifiers, POST provisions/pauses/detaches</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/vetting/numbers</code></td><td>The operator's Telnyx numbers + which desk each is bound to</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/vetting/optin</code></td><td>Public candidate opt-in (name/phone/email/LinkedIn) — enriches background</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/vetting/context</code></td><td>Voice-engine webhook: resolve the caller → per-call greeting/context</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/vetting/webhook</code></td><td>Post-call webhook: transcript → 1–100 scorecard + qualify decision</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/vetting/calls</code></td><td>Scored inbound calls + transcripts for a desk</td></tr>
           </tbody>
         </table>
       </section>
@@ -548,6 +557,7 @@ node bridge.test.cjs          <span class="cmt"># end-to-end self-test</span></c
           <tbody>
             <tr><td><code>README.md</code></td><td>Quick start &amp; the product vision. (repo root)</td></tr>
             <tr><td><code>docs/STRUCTURE.md</code></td><td>The full project map — every folder &amp; where to develop each feature.</td></tr>
+            <tr><td><code>docs/setup/ai-vetting.md</code></td><td>AI Vetting — inbound conversational screening: setup, the scorecard, swapping numbers, and the engine-verify seam.</td></tr>
             <tr><td><code>docs/setup/server/integration-architecture.md</code></td><td>The three-layer outreach architecture and the three execution modes.</td></tr>
             <tr><td><code>docs/setup/server/2-deploy.md</code></td><td>Getting a live URL — local dev, Vercel, env vars, persistence notes.</td></tr>
             <tr><td><code>docs/setup/server/1-hetzner.md</code></td><td>Initial server setup (Ubuntu, Docker, Caddy, firewall).</td></tr>
