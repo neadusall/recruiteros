@@ -268,6 +268,15 @@
     // --- In-Market Leads: who is hiring right now (search + promote) ---
     if (p === "/in-market") {
       d.inmarket = d.inmarket || inMarketSeed();
+      // Stamp demo dates once: vary "posted online" and "added to database" across the seed
+      // so the date filter and the per-lead date stamps have something to show.
+      if (d.inmarket.length && !d.inmarket[0].postedAt) {
+        d.inmarket.forEach(function (l, i) {
+          var pd = new Date(); pd.setDate(pd.getDate() - (i % 21)); l.postedAt = pd.toISOString(); l.signalAt = l.signalAt || l.postedAt;
+          var ad = new Date(); ad.setDate(ad.getDate() - (i % 6)); l.addedAt = ad.toISOString();
+        });
+        save(d);
+      }
       if (method === "POST" && body && body.action === "promote") {
         var lead = body.lead || {}, mgr = body.manager || null;
         var person = (mgr && mgr.managerName) || lead.buyerName;
@@ -321,6 +330,12 @@
       if (sigTypes && sigTypes.length) {
         var bySig = leads.filter(function (l) { return sigTypes.indexOf(l.signalType) >= 0; });
         leads = bySig.length ? bySig : leads;
+      }
+      // Date search: only roles posted online within the last N days.
+      var pw = body && parseInt(body.postedWithinDays, 10);
+      if (pw) {
+        var cutoff = Date.now() - pw * 86400000;
+        leads = leads.filter(function (l) { var t = Date.parse(l.postedAt || l.signalAt || ""); return !isNaN(t) && t >= cutoff; });
       }
       // Suppress companies already taken into this workspace's Prospects (no dup outreach).
       var taken = {};

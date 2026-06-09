@@ -128,6 +128,68 @@ export class TelnyxClient extends ProviderClient {
       body: { payload: text, voice: opts?.voice ?? "female", language: opts?.language ?? "en-US" },
     });
   }
+
+  /* ===================================================================== *
+   *  AI Assistants (the INBOUND conversational agent — AI Vetting)
+   *
+   *  Telnyx's managed Voice-AI runs the real-time STT -> LLM -> TTS loop with
+   *  barge-in and turn detection for us; we supply the instructions, the cloned
+   *  ElevenLabs voice, the greeting, and two webhooks:
+   *    - dynamic_variables_webhook_url: called when a caller connects, so we can
+   *      return who they are (name + LinkedIn talking points) keyed by caller ID.
+   *    - the insight/transcription webhook: the finished transcript + recording,
+   *      which we score.
+   *
+   *  Endpoints follow Telnyx's /v2/ai/assistants surface. Treat number<->assistant
+   *  assignment as the operator-verify seam: confirm it against the current
+   *  Telnyx console/API for your account before going live.
+   * ===================================================================== */
+
+  /** Create an AI Assistant. Returns the created resource (incl. its id). */
+  createAssistant(body: AssistantConfig) {
+    return this.request({ method: "POST", path: "/ai/assistants", body });
+  }
+
+  /** Update an existing assistant's config (instructions/voice/greeting/webhooks). */
+  updateAssistant(assistantId: string, body: Partial<AssistantConfig>) {
+    return this.request({ method: "POST", path: `/ai/assistants/${encodeURIComponent(assistantId)}`, body });
+  }
+
+  deleteAssistant(assistantId: string) {
+    return this.request({ method: "DELETE", path: `/ai/assistants/${encodeURIComponent(assistantId)}` });
+  }
+
+  /**
+   * Bind an inbound phone number to an assistant so calls to it are answered by
+   * the agent. Telnyx exposes this as the assistant's phone-numbers collection.
+   */
+  assignNumberToAssistant(assistantId: string, phoneNumber: string) {
+    return this.request({
+      method: "POST",
+      path: `/ai/assistants/${encodeURIComponent(assistantId)}/phone_numbers`,
+      body: { phone_number: phoneNumber },
+    });
+  }
+}
+
+/** Shape of the Telnyx AI Assistant config we push (the fields we use). */
+export interface AssistantConfig {
+  name: string;
+  /** Underlying LLM the assistant reasons with (Telnyx-hosted model id). */
+  model?: string;
+  /** The full system prompt (human-likeness spec + JD + caller context slots). */
+  instructions: string;
+  /** First line spoken on answer; may contain {{dynamic_variables}}. */
+  greeting?: string;
+  /** Voice selector, e.g. "ElevenLabs.<voiceId>" for the recruiter's cloned voice. */
+  voice?: string;
+  voice_settings?: Record<string, unknown>;
+  /** Called per-call to resolve {{dynamic_variables}} (caller identity/context). */
+  dynamic_variables_webhook_url?: string;
+  /** Where Telnyx posts the finished transcript + recording for scoring. */
+  insight_settings?: Record<string, unknown>;
+  transcription?: Record<string, unknown>;
+  telephony_settings?: Record<string, unknown>;
 }
 
 /** Telnyx echoes client_state back base64-encoded on every webhook for a call. */

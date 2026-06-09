@@ -18,11 +18,14 @@ const KEY = "inmarket_pool_v1";
 const MAX_POOL = 8000;                         // cap the stored blob
 const TTL_MS = 30 * 24 * 60 * 60 * 1000;       // drop leads not seen for 30 days
 
-interface PoolEntry { lead: InMarketLead; at: number } // at = last-seen epoch ms
+interface PoolEntry { lead: InMarketLead; at: number; firstAt?: number } // at = last-seen, firstAt = first-seen (epoch ms)
 
 async function load(): Promise<PoolEntry[]> {
   const s = await loadSnapshot<PoolEntry[]>(KEY);
-  return Array.isArray(s) ? s : [];
+  if (!Array.isArray(s)) return [];
+  // Backfill firstAt for entries stored before we tracked it (approximate with last-seen).
+  for (const e of s) if (e.firstAt == null) e.firstAt = e.at;
+  return s;
 }
 
 function keyOf(l: InMarketLead): string {
@@ -46,8 +49,17 @@ export async function mergeIntoPool(leads: InMarketLead[]): Promise<void> {
     if (!k) continue;
     const cur = byKey.get(k);
     if (!cur) added++;
-    if (!cur || (l.score ?? 0) >= (cur.lead.score ?? 0)) byKey.set(k, { lead: l, at: now });
-    else cur.at = now; // keep the higher-scored lead, but mark it freshly seen
+    // Preserve the FIRST time we ever saw this company; stamp it onto the lead as addedAt
+    // so the UI can search by "added to our database" date.
+    const firstAt = cur?.firstAt ?? now;
+    if (!cur || (l.score ?? 0) >= (cur.lead.score ?? 0)) {
+      l.addedAt = new Date(firstAt).toISOString();
+      byKey.set(k, { lead: l, at: now, firstAt });
+    } else {
+      cur.at = now;                 // keep the higher-scored lead, mark it freshly seen
+      cur.firstAt = firstAt;
+      cur.lead.addedAt = new Date(firstAt).toISOString();
+    }
   }
   let merged = [...byKey.values()].filter((e) => now - e.at < TTL_MS);
   merged.sort((a, b) => (b.lead.score ?? 0) - (a.lead.score ?? 0));

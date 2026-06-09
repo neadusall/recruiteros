@@ -273,6 +273,15 @@ export const DEFAULT_RATES: CostRate[] = [
     note: "Telnyx outbound per-minute incl. Premium AMD. Optional; only the voice dialer spends here.",
     scales: "per_send",
   },
+  {
+    id: "ai_vetting_minute",
+    label: "AI Vetting minute (Telnyx Voice AI)",
+    category: "messaging",
+    unitCostUsd: 0.10,
+    unit: "per minute",
+    note: "Inbound conversational vetting call: Telnyx Voice-AI realtime loop (STT + LLM + cloned-voice TTS) per minute, plus the carrier minute. Optional; only the AI Vetting feature spends here. The post-call scoring pass is a separate, small LLM cost.",
+    scales: "per_send",
+  },
 
   // ---- Infra (hosting/db/monitoring, allocated per active account) ----
   {

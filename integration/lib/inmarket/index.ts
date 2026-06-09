@@ -51,6 +51,10 @@ export interface InMarketQuery {
   /** Restrict to specific hiring-signal types (funding_round, hiring_velocity, …). */
   signalTypes?: SignalType[];
   headcountBands?: Company["headcountBand"][];
+  /** Date search: only leads POSTED ONLINE within the last N days (1, 7, 30, …). */
+  postedWithinDays?: number;
+  /** Date search: only leads ADDED TO OUR DATABASE within the last N days. */
+  addedWithinDays?: number;
   limit?: number;
 }
 
@@ -97,6 +101,12 @@ export interface InMarketLead {
   sourceUrl?: string;
   /** When the underlying signal fired (ISO) — used to detect renewed demand. */
   signalAt?: string;
+  /** When the role was POSTED ONLINE (ISO) — the original posting/event date from the
+   *  source. Drives the "Posted within" date search. Falls back to ingest time. */
+  postedAt?: string;
+  /** When this company was FIRST ADDED TO OUR DATABASE (ISO) — stamped by the pool on first
+   *  insert, so you can target by how fresh a lead is to us vs. how fresh it is online. */
+  addedAt?: string;
   /** True when this company is already in Prospects but a fresh demand signal
    *  (repost / surge / long-open) brought it back — a reason to re-engage. */
   renewed?: boolean;
@@ -251,6 +261,7 @@ function toLead(s: Signal): InMarketLead {
     hiringManagers: hiringManagersFor(roles, s.person),
     sourceUrl: s.sources && s.sources[0] ? s.sources[0].url : undefined,
     signalAt: s.eventAt || s.ingestedAt,
+    postedAt: s.eventAt || s.ingestedAt,
     raw: { company: s.company, person: s.person },
   };
 }
@@ -301,6 +312,22 @@ function applyTaken(leads: InMarketLead[], taken: Set<string>): InMarketLead[] {
     // otherwise: already worked + no new demand signal → suppress
   }
   return out;
+}
+
+/** Keep only leads whose date falls within the requested window. Applied at SEARCH time
+ *  (never during accumulation, so ingestion still captures everything). `postedWithinDays`
+ *  filters on the online posting date; `addedWithinDays` on when we first stored it. */
+function applyDateFilter(leads: InMarketLead[], q: InMarketQuery, nowIso: string): InMarketLead[] {
+  const now = Date.parse(nowIso) || Date.now();
+  const within = (iso: string | undefined, days: number): boolean => {
+    if (!days) return true;
+    const t = iso ? Date.parse(iso) : NaN;
+    if (isNaN(t)) return false;            // no date → excluded when a window is requested
+    return now - t <= days * 24 * 60 * 60 * 1000;
+  };
+  const pd = q.postedWithinDays ?? 0, ad = q.addedWithinDays ?? 0;
+  if (!pd && !ad) return leads;
+  return leads.filter((l) => within(l.postedAt ?? l.signalAt, pd) && within(l.addedAt, ad));
 }
 
 /**
@@ -366,7 +393,13 @@ export async function collectLeads(q: InMarketQuery, nowIso: string, cap = 300):
     });
     if (ranked.length === 0) ranked = before;
   }
-  return ranked.slice(0, cap).map(toLead);
+  // Stamp "added to our DB" = now for freshly collected leads. The pool overrides this with
+  // the true first-seen time for companies it has already stored (see mergeIntoPool).
+  return ranked.slice(0, cap).map((s) => {
+    const l = toLead(s);
+    l.addedAt = nowIso;
+    return l;
+  });
 }
 
 /**
@@ -388,7 +421,7 @@ export async function searchInMarket(
   // so you never re-target (and double-send to) a company you're already working. This is
   // per-workspace — the global pool is shared, but each user's taken-list is their own.
   const taken = workspaceId ? await takenCompanies(workspaceId) : new Set<string>();
-  const fresh = (arr: InMarketLead[]) => applyTaken(arr, taken);
+  const fresh = (arr: InMarketLead[]) => applyDateFilter(applyTaken(arr, taken), q, nowIso);
 
   try {
     const { ensureAccumulator } = await import("./accumulator");
@@ -398,7 +431,7 @@ export async function searchInMarket(
 
     // Pull the FULL matching set from the pool so `pulled` reflects the true total
     // available for this industry (which grows daily as the accumulator fills the pool),
-    // even though we only display `limit`. Then drop taken companies.
+    // even though we only display `limit`. Then drop taken companies + apply date search.
     const pooledAll = fresh(await queryPool(q, 10000));
     if (pooledAll.length >= 24) {
       return { leads: pooledAll.slice(0, limit), pulled: pooledAll.length, warnings: [], stats };

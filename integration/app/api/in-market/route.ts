@@ -81,6 +81,8 @@ export async function POST(req: Request) {
       titles: b?.titles,
       signalTypes: b?.signalTypes,
       headcountBands: b?.headcountBands,
+      postedWithinDays: b?.postedWithinDays,
+      addedWithinDays: b?.addedWithinDays,
       limit: b?.limit,
     },
     new Date().toISOString(),

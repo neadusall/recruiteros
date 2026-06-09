@@ -405,6 +405,7 @@
   var imSelectedIndustries = []; // multi-select industries
   var imSearchTimer = null;      // debounce for chip-driven searches
   var imMinScore = 0;            // narrow-down: minimum hiring-intent score shown
+  var imPostedWithin = 0;        // date search: only roles posted within the last N days (0 = any)
   var imLabel = "";             // current result label, kept for re-renders
   var imTotal = 0;              // total companies available for this query in the pool (grows daily)
   var imStats = null;          // accumulation activity (added today, total, daily log)
@@ -486,6 +487,15 @@
           '<input id="imQuery" type="text" autocomplete="off" placeholder="' + esc(IM_PLACEHOLDER[imMode]) + '" />' +
           '<button type="submit" class="btn btn-primary" id="imSearchBtn">Find companies</button>' +
         "</form>" +
+        // Date search — filter to freshly-posted roles for warmer, more targeted outreach.
+        '<div class="im-daterow">' +
+          '<span class="im-datelbl">📅 Posted within</span>' +
+          '<select id="imPosted" class="im-date">' +
+            [["0", "Any time"], ["1", "Last 24 hours"], ["3", "Last 3 days"], ["7", "Last 7 days"], ["14", "Last 14 days"], ["30", "Last 30 days"]]
+              .map(function (o) { return '<option value="' + o[0] + '"' + (String(imPostedWithin) === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") +
+          "</select>" +
+          '<span class="im-datehint muted">Fresher posts = warmer outreach</span>' +
+        "</div>" +
         // Daily import read — populated on open so you see today's intake immediately.
         '<div id="imImportBanner" class="im-import"></div>' +
         // Industries — multi-select with Select all / Clear, in a compact scroll area.
@@ -570,6 +580,13 @@
 
     form.addEventListener("submit", function (e) { e.preventDefault(); runNow(); });
 
+    // Date search dropdown → re-run the current search filtered to fresh postings.
+    var postedSel = $("#imPosted");
+    if (postedSel) postedSel.addEventListener("change", function () {
+      imPostedWithin = parseInt(postedSel.value, 10) || 0;
+      runNow();
+    });
+
     // Industry chips: multi-select toggle → debounced search.
     Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
       c.addEventListener("click", function () {
@@ -607,6 +624,7 @@
       if (criteria.industries) payload.industries = criteria.industries;
       if (criteria.query) payload.query = criteria.query;
       if (imSelectedSignals.length) payload.signalTypes = imSelectedSignals.slice();
+      if (imPostedWithin) payload.postedWithinDays = imPostedWithin;
       send("/in-market", "POST", payload).then(function (r) {
         if (!r.ok) { body.innerHTML = needsSetup(); return; }
         inMarketResults = (r.data && r.data.leads) || [];
@@ -699,6 +717,19 @@
     }
   }
 
+  // Short relative time, e.g. "today", "2d ago", "3w ago" — for the lead date stamps.
+  function imRelTime(iso) {
+    if (!iso) return "";
+    var t = Date.parse(iso); if (isNaN(t)) return "";
+    var days = Math.floor((Date.now() - t) / 86400000);
+    if (days <= 0) return "today";
+    if (days === 1) return "1d ago";
+    if (days < 7) return days + "d ago";
+    if (days < 30) return Math.floor(days / 7) + "w ago";
+    if (days < 365) return Math.floor(days / 30) + "mo ago";
+    return Math.floor(days / 365) + "y ago";
+  }
+
   function leadCard(l) {
     var score = Math.round(l.score || 0);
     var scoreCls = score >= 75 ? "positive" : score >= 50 ? "soft_yes" : "unclassified";
@@ -750,6 +781,11 @@
     if (l.headcountBand) metaBits.push(esc(l.headcountBand));
     if (l.location) metaBits.push(esc(l.location));
     metaBits.push(nRoles + " open role" + (nRoles === 1 ? "" : "s"));
+    // Dates: when the role was posted online, and when we first added it to the database.
+    var posted = imRelTime(l.postedAt || l.signalAt);
+    if (posted) metaBits.push('<span class="im-date-tag" title="Posted online ' + esc(l.postedAt || l.signalAt || "") + '">📅 Posted ' + posted + "</span>");
+    var added = imRelTime(l.addedAt);
+    if (added) metaBits.push('<span class="im-date-tag im-date-added" title="Added to your database ' + esc(l.addedAt || "") + '">🆕 Added ' + added + "</span>");
 
     return '<div class="im-lead' + (l.renewed ? " im-lead-renew" : "") + '" data-id="' + esc(l.id) + '">' +
       '<div class="im-lead-head">' +
