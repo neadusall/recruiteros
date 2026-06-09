@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Speak with a recruiter</title>
+  <meta name="description" content="Opt in to talk through this opportunity with our recruiting team." />
+  <!--
+    AI Vetting · Candidate opt-in (REFERENCE PAGE)
+
+    A self-contained, brandable opt-in form. The recruiter shares this page's
+    link (the RecruiterOS desk card's "Opt-in link" button copies it with the
+    ?desk=<id> already attached). On submit it POSTs to /api/vetting/optin, which
+    stores the candidate keyed to the desk by phone and enriches their LinkedIn,
+    then shows the number to call.
+
+    The operator may replace this with their own page — it only needs to POST the
+    same JSON ({ deskId, firstName, lastName, phone, email, linkedinUrl }) to
+    /api/vetting/optin. Set window.OPTIN_API_BASE if the API is on another origin.
+  -->
+  <style>
+    :root { --bg:#0a0a12; --card:#14141f; --line:#262636; --txt:#eef0f6; --muted:#9aa0b4; --accent:#7c5cff; --accent2:#4dd0ff; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:'Inter',system-ui,-apple-system,sans-serif; background:radial-gradient(1200px 600px at 70% -10%, #1a1340 0, transparent 60%), var(--bg); color:var(--txt); min-height:100vh; display:grid; place-items:center; padding:24px; }
+    .wrap { width:100%; max-width:460px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:28px; box-shadow:0 30px 80px -30px rgba(0,0,0,.7); }
+    .eyebrow { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent2); font-weight:700; }
+    h1 { font-size:24px; margin:8px 0 4px; line-height:1.2; }
+    .sub { color:var(--muted); font-size:14px; margin:0 0 20px; }
+    label { display:block; font-size:12px; color:var(--muted); margin:14px 0 5px; }
+    input { width:100%; padding:11px 13px; border-radius:10px; border:1px solid var(--line); background:#0e0e18; color:var(--txt); font-size:15px; }
+    input:focus { outline:none; border-color:var(--accent); }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    button { margin-top:20px; width:100%; padding:13px; border:0; border-radius:12px; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#0a0a12; font-weight:800; font-size:15px; cursor:pointer; }
+    button:disabled { opacity:.6; cursor:default; }
+    .note { font-size:11px; color:var(--muted); margin-top:14px; line-height:1.5; }
+    .done { text-align:center; }
+    .done .num { font-size:26px; font-weight:800; margin:14px 0; color:var(--accent2); }
+    .err { color:#ff8aa0; font-size:13px; margin-top:10px; min-height:16px; }
+    a.call { display:inline-block; margin-top:6px; color:#0a0a12; background:linear-gradient(135deg,var(--accent),var(--accent2)); padding:12px 20px; border-radius:12px; font-weight:800; text-decoration:none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" id="card">
+      <div class="eyebrow" id="eyebrow">Recruiting</div>
+      <h1 id="title">Let's talk through this role</h1>
+      <p class="sub" id="sub">Drop your details below and we'll give you a number to call when you're ready. You'll speak with our recruiter directly.</p>
+
+      <form id="form">
+        <div class="row">
+          <div><label for="firstName">First name</label><input id="firstName" required autocomplete="given-name" /></div>
+          <div><label for="lastName">Last name</label><input id="lastName" required autocomplete="family-name" /></div>
+        </div>
+        <label for="phone">Mobile number</label>
+        <input id="phone" type="tel" required autocomplete="tel" placeholder="+1 385 555 1234" />
+        <label for="email">Email</label>
+        <input id="email" type="email" required autocomplete="email" placeholder="you@email.com" />
+        <label for="linkedinUrl">LinkedIn profile URL</label>
+        <input id="linkedinUrl" type="url" placeholder="https://www.linkedin.com/in/you" />
+        <button type="submit" id="submit">Get the number to call</button>
+        <div class="err" id="err"></div>
+        <p class="note">We use your number to recognize you when you call so the recruiter can speak to your background. We'll only contact you about this opportunity.</p>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var API = (window.OPTIN_API_BASE || "") + "/api/vetting/optin";
+      var params = new URLSearchParams(location.search);
+      var deskId = params.get("desk") || params.get("deskId") || "";
+
+      var $ = function (id) { return document.getElementById(id); };
+
+      // Personalize the header from the desk (role/company), if we can read it.
+      if (deskId) {
+        fetch(API + "?deskId=" + encodeURIComponent(deskId)).then(function (r) { return r.json(); }).then(function (d) {
+          if (!d || !d.desk) return;
+          var k = d.desk;
+          if (k.roleTitle) {
+            $("title").textContent = "Interested in the " + k.roleTitle + " role?";
+            $("eyebrow").textContent = (k.clientCompany ? k.clientCompany + " · " : "") + "Now hiring";
+          }
+          if (k.agentName) $("sub").textContent = "Drop your details and we'll give you a number to call. You'll speak directly with " + k.agentName + (k.agentCompany ? " at " + k.agentCompany : "") + ".";
+        }).catch(function () {});
+      }
+
+      $("form").addEventListener("submit", function (e) {
+        e.preventDefault();
+        $("err").textContent = "";
+        if (!deskId) { $("err").textContent = "This link is missing its job reference. Ask your recruiter for a fresh link."; return; }
+        var btn = $("submit"); btn.disabled = true; btn.textContent = "Submitting…";
+        var payload = {
+          deskId: deskId,
+          firstName: $("firstName").value.trim(),
+          lastName: $("lastName").value.trim(),
+          phone: $("phone").value.trim(),
+          email: $("email").value.trim(),
+          linkedinUrl: $("linkedinUrl").value.trim()
+        };
+        fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            if (!res.ok) {
+              $("err").textContent = (res.d && res.d.error === "not_found") ? "We couldn't find that role. Ask your recruiter for a fresh link." : "Something went wrong — please try again.";
+              btn.disabled = false; btn.textContent = "Get the number to call"; return;
+            }
+            var d = res.d;
+            var num = d.callNumber;
+            $("card").innerHTML =
+              '<div class="done"><div class="eyebrow">You\'re all set</div>' +
+              '<h1>Thanks, ' + escapeHtml(payload.firstName) + '</h1>' +
+              '<p class="sub">' + escapeHtml(d.message || "Give us a call when you're ready.") + '</p>' +
+              (num ? '<div class="num">' + escapeHtml(num) + '</div><a class="call" href="tel:' + escapeHtml(num.replace(/[^0-9+]/g, "")) + '">📞 Call now</a>' : '') +
+              '<p class="note" style="margin-top:18px">When you call, our recruiter will already know who you are.</p></div>';
+          })
+          .catch(function () {
+            $("err").textContent = "Network error — please try again.";
+            btn.disabled = false; btn.textContent = "Get the number to call";
+          });
+      });
+
+      function escapeHtml(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]; }); }
+    })();
+  </script>
+</body>
+</html>

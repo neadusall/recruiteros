@@ -78,6 +78,14 @@ export async function POST(req: Request) {
       const updated = markDeskSynced(ws, desk.id, { assistantId: res.assistantId, status: "live" });
       return ok({ desk: updated, dryRun: res.dryRun, numberBound: res.numberBound });
     }
+    case "detach": {
+      // Unbind the number from this desk (swap it onto another JD). Tears down
+      // the engine assistant so the number stops answering for this desk, and
+      // drops the desk back to draft until it's re-provisioned with a number.
+      await deprovisionDesk(desk);
+      const cleared = markDeskSynced(ws, desk.id, { assistantId: "", phoneNumber: "", status: "draft" });
+      return ok({ desk: cleared });
+    }
     case "pause":
       return ok({ desk: setDeskStatus(ws, desk.id, "paused") });
     case "resume":

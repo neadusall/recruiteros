@@ -39,6 +39,19 @@ export class TelnyxClient extends ProviderClient {
     });
   }
 
+  /**
+   * List the phone numbers on this Telnyx account (paginated). Used by AI
+   * Vetting to offer the operator a pick-list of their real numbers to bind to a
+   * job description, instead of typing one by hand.
+   *   GET /phone_numbers?page[size]=&page[number]=
+   */
+  listPhoneNumbers(pageSize = 100, pageNumber = 1) {
+    return this.request({
+      path: "/phone_numbers",
+      query: { "page[size]": pageSize, "page[number]": pageNumber },
+    });
+  }
+
   /** Send an SMS from the configured 10DLC number. */
   sendSms(to: string, text: string) {
     return this.request({

@@ -407,6 +407,8 @@
   var imSearchTimer = null;      // debounce for chip-driven searches
   var imMinScore = 0;            // narrow-down: minimum hiring-intent score shown
   var imPostedWithin = 0;        // date search: only roles posted within the last N days (0 = any)
+  var imDmPerRole = 1;           // decision-makers shown per role (1 / 3 / 5) — one-click multi-touch
+  var imSelectedSizes = [];      // company headcount bands to narrow by (multi-select)
   var imLabel = "";             // current result label, kept for re-renders
   var imTotal = 0;              // total companies available for this query in the pool (grows daily)
   var imStats = null;          // accumulation activity (added today, total, daily log)
@@ -469,11 +471,32 @@
   // Unique key per hiring-manager option (role + manager title), so the two managers we
   // surface for a role can be selected independently.
   function imMgrKey(m) { return (m && m.role ? m.role : "") + "||" + (m && m.managerTitle ? m.managerTitle : ""); }
+  // Company size bands (matches the backend headcountBand type) for the size-narrowing chips.
+  var IM_SIZES = [
+    { v: "1-10", l: "1–10" }, { v: "11-50", l: "11–50" }, { v: "51-200", l: "51–200" },
+    { v: "201-500", l: "201–500" }, { v: "501-1000", l: "501–1K" },
+    { v: "1001-5000", l: "1K–5K" }, { v: "5000+", l: "5K+" }
+  ];
+  // The decision-makers to show for a lead, grouped by role and sliced to imDmPerRole each,
+  // so the 1/3/5 control gives one-click multi-touch without re-fetching. Order is preserved
+  // (most-direct manager first), so "1" = the closest owner, "5" = the full ladder + recruiter.
+  function imRoleManagers(l) {
+    var all = (l && l.hiringManagers && l.hiringManagers.length) ? l.hiringManagers : null;
+    if (!all) return null;
+    var byRole = {}, order = [], out = [];
+    all.forEach(function (m) {
+      var r = m.role || "";
+      if (!byRole[r]) { byRole[r] = []; order.push(r); }
+      byRole[r].push(m);
+    });
+    order.forEach(function (r) { out = out.concat(byRole[r].slice(0, imDmPerRole)); });
+    return out;
+  }
   function imFindLead(id) { return inMarketResults.find(function (x) { return x.id === id; }); }
   function imVisibleLeads() { return inMarketResults.filter(function (l) { return Math.round(l.score || 0) >= imMinScore; }); }
 
   function renderInMarket(el) {
-    imPicks = {}; imMinScore = 0; imSelectedSignals = []; imSelectedIndustries = [];
+    imPicks = {}; imMinScore = 0; imSelectedSignals = []; imSelectedIndustries = []; imSelectedSizes = [];
     el.innerHTML =
       '<div class="im-hero">' +
         '<div class="im-bar">' +
@@ -497,6 +520,13 @@
           "</select>" +
           '<button type="button" class="btn btn-primary btn-sm" id="imPostedGo">Search this range</button>' +
           '<span class="im-datehint muted">Fresher posts = warmer outreach</span>' +
+        "</div>" +
+        // Company size — narrow by headcount band (multi-select chips). Click to refine.
+        '<div class="im-daterow im-sizerow">' +
+          '<span class="im-datelbl">👥 Company size</span>' +
+          IM_SIZES.map(function (s) { return '<button type="button" class="im-sizechip" data-size="' + esc(s.v) + '">' + esc(s.l) + "</button>"; }).join("") +
+          '<button type="button" class="im-mini" data-clear="size">Clear</button>' +
+          '<span class="im-datehint muted">Pick one or more to narrow</span>' +
         "</div>" +
         // Daily import read — populated on open so you see today's intake immediately.
         '<div id="imImportBanner" class="im-import"></div>' +
@@ -595,6 +625,23 @@
     if (postedSel) postedSel.addEventListener("change", function () { imPostedWithin = parseInt(postedSel.value, 10) || 0; });
     if (postedGo) postedGo.addEventListener("click", applyPosted);
 
+    // Company-size chips: multi-select toggle → re-run the search narrowed to those bands.
+    function syncSizeChips() {
+      Array.prototype.forEach.call(el.querySelectorAll(".im-sizechip"), function (c) {
+        c.classList.toggle("active", imSelectedSizes.indexOf(c.getAttribute("data-size")) >= 0);
+      });
+    }
+    Array.prototype.forEach.call(el.querySelectorAll(".im-sizechip"), function (c) {
+      c.addEventListener("click", function () {
+        var v = c.getAttribute("data-size");
+        var i = imSelectedSizes.indexOf(v);
+        if (i >= 0) imSelectedSizes.splice(i, 1); else imSelectedSizes.push(v);
+        syncSizeChips(); scheduleSearch();
+      });
+    });
+    var sizeClear = el.querySelector('[data-clear="size"]');
+    if (sizeClear) sizeClear.addEventListener("click", function () { imSelectedSizes = []; syncSizeChips(); scheduleSearch(); });
+
     // Industry chips: multi-select toggle → debounced search.
     Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
       c.addEventListener("click", function () {
@@ -633,6 +680,7 @@
       if (criteria.query) payload.query = criteria.query;
       if (imSelectedSignals.length) payload.signalTypes = imSelectedSignals.slice();
       if (imPostedWithin) payload.postedWithinDays = imPostedWithin;
+      if (imSelectedSizes.length) payload.headcountBands = imSelectedSizes.slice();
       send("/in-market", "POST", payload).then(function (r) {
         if (!r.ok) { body.innerHTML = needsSetup(); return; }
         inMarketResults = (r.data && r.data.leads) || [];
@@ -661,6 +709,10 @@
           (imPostedWithin ? ' <span class="im-date-active">📅 posted in last ' + imPostedWithin + " day" + (imPostedWithin === 1 ? "" : "s") + "</span>" : " <span class=\"muted\">(grows daily)</span>") + "</span>" +
         '<div class="im-narrow" title="Narrow by hiring-intent score">' +
           bands.map(function (b) { return '<button type="button" class="im-nbtn' + (String(imMinScore) === b[0] ? " active" : "") + '" data-min="' + b[0] + '">' + b[1] + "</button>"; }).join("") +
+        "</div>" +
+        '<div class="im-narrow im-dm" title="Decision-makers to contact per open role">' +
+          '<span class="im-dm-lbl">👤 Per role:</span>' +
+          [1, 3, 5].map(function (n) { return '<button type="button" class="im-nbtn' + (imDmPerRole === n ? " active" : "") + '" data-dm="' + n + '">' + n + "</button>"; }).join("") +
         "</div>" +
         '<button class="btn btn-ghost btn-sm" id="imSave" disabled>💾 Save as hiring signals</button>' +
         '<button class="btn btn-primary btn-sm" id="imBulk" disabled>Push selected to Prospects</button>' +
@@ -746,7 +798,7 @@
 
     // Deep dive: each open role mapped to the hiring manager who would own it. Each row
     // is selectable as the prospect to push to Prospects + sequence.
-    var mgrs = (l.hiringManagers && l.hiringManagers.length) ? l.hiringManagers : null;
+    var mgrs = imRoleManagers(l);
     var rows;
     if (mgrs) {
       rows = mgrs.map(function (m) {
@@ -853,7 +905,7 @@
     // then reflects into every checkbox so it's visibly selected.
     function setAllSelection(on) {
       imVisibleLeads().forEach(function (l) {
-        var mgrs = (l.hiringManagers && l.hiringManagers.length) ? l.hiringManagers : null;
+        var mgrs = imRoleManagers(l);
         if (mgrs) mgrs.forEach(function (m) {
           var k = imPickKey(l.id, imMgrKey(m));
           if (on) imPicks[k] = { lead: l, manager: m }; else delete imPicks[k];
@@ -868,9 +920,13 @@
     if (all) all.addEventListener("change", function () { setAllSelection(all.checked); });
     var clr = body.querySelector("#imClearSel");
     if (clr) clr.addEventListener("click", function () { if (all) all.checked = false; setAllSelection(false); });
-    // Narrow-down by score.
+    // Narrow-down by score, and the one-click 1/3/5 decision-makers-per-role control.
     Array.prototype.forEach.call(body.querySelectorAll(".im-nbtn"), function (b) {
-      b.addEventListener("click", function () { imMinScore = parseInt(b.getAttribute("data-min"), 10) || 0; renderImResults(); });
+      b.addEventListener("click", function () {
+        if (b.hasAttribute("data-dm")) imDmPerRole = parseInt(b.getAttribute("data-dm"), 10) || 1;
+        else imMinScore = parseInt(b.getAttribute("data-min"), 10) || 0;
+        renderImResults();
+      });
     });
     // Bulk push.
     var bulk = body.querySelector("#imBulk");
