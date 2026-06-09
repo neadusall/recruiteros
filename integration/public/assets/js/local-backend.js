@@ -337,6 +337,17 @@
         var cutoff = Date.now() - pw * 86400000;
         leads = leads.filter(function (l) { var t = Date.parse(l.postedAt || l.signalAt || ""); return !isNaN(t) && t >= cutoff; });
       }
+      // Give every company a size reading even if it's a guess (heuristic from open roles).
+      leads = leads.map(function (l) {
+        if (l.headcountBand) return l;
+        var n = (l.roles && l.roles.length) || 0;
+        var band = n >= 12 ? "201-500" : n >= 6 ? "51-200" : "11-50";
+        return Object.assign({}, l, { headcountBand: band, sizeEstimated: true });
+      });
+      // Confirmed-only: drop heuristic estimates, keep authoritative sizes.
+      if (body && body.confirmedSizeOnly) {
+        leads = leads.filter(function (l) { return l.headcountBand && !l.sizeEstimated; });
+      }
       // Company-size narrow: only leads whose headcount band is selected.
       var sizes = body && body.headcountBands;
       if (sizes && sizes.length) {

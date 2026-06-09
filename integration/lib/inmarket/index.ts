@@ -55,6 +55,9 @@ export interface InMarketQuery {
   postedWithinDays?: number;
   /** Date search: only leads ADDED TO OUR DATABASE within the last N days. */
   addedWithinDays?: number;
+  /** Size search: only leads with an AUTHORITATIVE (Wikidata) headcount — drop heuristic
+   *  estimates. Lets you narrow strictly on confirmed company sizes. */
+  confirmedSizeOnly?: boolean;
   limit?: number;
 }
 
@@ -343,10 +346,15 @@ function applyDateFilter(leads: InMarketLead[], q: InMarketQuery, nowIso: string
  *  (true narrowing). Free job-board leads often lack a size; Adzuna + contact enrichment
  *  fill it, so coverage of this filter grows as those are enabled. */
 function applySizeFilter(leads: InMarketLead[], q: InMarketQuery): InMarketLead[] {
+  let out = leads;
+  // Confirmed-only: keep authoritative/source sizes, drop only heuristic estimates.
+  if (q.confirmedSizeOnly) out = out.filter((l) => l.sizeEstimated !== true && !!l.headcountBand);
   const bands = q.headcountBands?.filter(Boolean) as string[] | undefined;
-  if (!bands?.length) return leads;
-  const set = new Set(bands);
-  return leads.filter((l) => !!l.headcountBand && set.has(l.headcountBand));
+  if (bands?.length) {
+    const set = new Set(bands);
+    out = out.filter((l) => !!l.headcountBand && set.has(l.headcountBand));
+  }
+  return out;
 }
 
 /**

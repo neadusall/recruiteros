@@ -409,6 +409,7 @@
   var imPostedWithin = 0;        // date search: only roles posted within the last N days (0 = any)
   var imDmPerRole = 1;           // decision-makers shown per role (1 / 3 / 5) — one-click multi-touch
   var imSelectedSizes = [];      // company headcount bands to narrow by (multi-select)
+  var imConfirmedSizeOnly = false; // size search: only authoritative (Wikidata) headcounts
   var imLabel = "";             // current result label, kept for re-renders
   var imTotal = 0;              // total companies available for this query in the pool (grows daily)
   var imStats = null;          // accumulation activity (added today, total, daily log)
@@ -526,7 +527,7 @@
           '<span class="im-datelbl">👥 Company size</span>' +
           IM_SIZES.map(function (s) { return '<button type="button" class="im-sizechip" data-size="' + esc(s.v) + '">' + esc(s.l) + "</button>"; }).join("") +
           '<button type="button" class="im-mini" data-clear="size">Clear</button>' +
-          '<span class="im-datehint muted">Pick one or more to narrow</span>' +
+          '<label class="im-confirmed" title="Show only companies with a confirmed (Wikidata) headcount — hide estimates"><input type="checkbox" id="imConfirmedSize"' + (imConfirmedSizeOnly ? " checked" : "") + "> Confirmed only</label>" +
         "</div>" +
         // Daily import read — populated on open so you see today's intake immediately.
         '<div id="imImportBanner" class="im-import"></div>' +
@@ -641,6 +642,8 @@
     });
     var sizeClear = el.querySelector('[data-clear="size"]');
     if (sizeClear) sizeClear.addEventListener("click", function () { imSelectedSizes = []; syncSizeChips(); scheduleSearch(); });
+    var confSize = $("#imConfirmedSize");
+    if (confSize) confSize.addEventListener("change", function () { imConfirmedSizeOnly = confSize.checked; scheduleSearch(); });
 
     // Industry chips: multi-select toggle → debounced search.
     Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
@@ -681,6 +684,7 @@
       if (imSelectedSignals.length) payload.signalTypes = imSelectedSignals.slice();
       if (imPostedWithin) payload.postedWithinDays = imPostedWithin;
       if (imSelectedSizes.length) payload.headcountBands = imSelectedSizes.slice();
+      if (imConfirmedSizeOnly) payload.confirmedSizeOnly = true;
       send("/in-market", "POST", payload).then(function (r) {
         if (!r.ok) { body.innerHTML = needsSetup(); return; }
         inMarketResults = (r.data && r.data.leads) || [];

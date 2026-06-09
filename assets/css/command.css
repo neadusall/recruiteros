@@ -408,6 +408,8 @@
 /* Company size in the lead meta */
 .im-size { white-space: nowrap; }
 .im-size-est { color: var(--text-dim); font-style: italic; }
+.im-confirmed { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); cursor: pointer; margin-left: 4px; }
+.im-confirmed input { cursor: pointer; }
 
 /* In-Market signal-type chips */
 .im-sig-wrap { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }

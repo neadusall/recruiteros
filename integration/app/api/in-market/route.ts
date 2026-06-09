@@ -83,6 +83,7 @@ export async function POST(req: Request) {
       headcountBands: b?.headcountBands,
       postedWithinDays: b?.postedWithinDays,
       addedWithinDays: b?.addedWithinDays,
+      confirmedSizeOnly: b?.confirmedSizeOnly,
       limit: b?.limit,
     },
     new Date().toISOString(),
