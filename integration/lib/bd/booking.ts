@@ -23,8 +23,20 @@ import type { Variant } from "./experiment";
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
 
-export function bookingUrl(): string {
-  return (process.env.RECRUITEROS_BOOKING_URL || "").trim();
+/**
+ * Each A/B model books on its own TidyCal type so the funnels never cross:
+ *   mpc          -> "Talent Intro" (lead with a specific candidate)
+ *   consultative -> "TMI Exchange" (talent-market-intelligence working session)
+ * Override per model with RECRUITEROS_BOOKING_URL_MPC / _CONSULTATIVE.
+ */
+const DEFAULT_BOOKING: Record<Variant, string> = {
+  mpc: "https://tidycal.com/talco/talent-intro",
+  consultative: "https://tidycal.com/talco/tmi-exchange",
+};
+
+export function bookingUrl(variant: Variant = "consultative"): string {
+  const env = variant === "mpc" ? process.env.RECRUITEROS_BOOKING_URL_MPC : process.env.RECRUITEROS_BOOKING_URL_CONSULTATIVE;
+  return (env || DEFAULT_BOOKING[variant]).trim();
 }
 export function bookingMode(): "send" | "draft" {
   return (process.env.RECRUITEROS_BOOKING_MODE || "send").toLowerCase() === "draft" ? "draft" : "send";
@@ -84,7 +96,7 @@ export async function generateEarnedAsk(
   lead: AskLead,
   opts: { channel: "email" | "linkedin"; priorContext?: string; variant?: Variant; candidate?: string } = { channel: "email" },
 ): Promise<{ subject?: string; body: string }> {
-  const url = bookingUrl();
+  const url = bookingUrl(opts.variant ?? "consultative");
   const system = opts.variant === "mpc" ? ASK_SYSTEM_MPC : ASK_SYSTEM_CONSULTATIVE;
   const brief = [
     lead.fullName ? `Name: ${lead.fullName}` : null,
@@ -141,7 +153,7 @@ export async function sendBookingAsk(
   p: { email?: string; firstName?: string; fullName?: string; title?: string; company?: string; industry?: string; profileSummary?: string },
   opts: { priorContext?: string; variant?: Variant; candidate?: string } = {},
 ): Promise<BookingAskResult> {
-  if (!bookingUrl()) return { ok: false, mode: "skipped", detail: "no_booking_url" };
+  if (!bookingUrl(opts.variant ?? "consultative")) return { ok: false, mode: "skipped", detail: "no_booking_url" };
 
   const lead: AskLead = {
     firstName: p.firstName,
