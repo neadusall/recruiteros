@@ -42,7 +42,7 @@ export async function POST(req: Request) {
   if (b?.action === "estimate") {
     const { estimatePushCost } = await import("../../../lib/inmarket/launch");
     const count = Number(b.count) || (Array.isArray(b.leads) ? b.leads.length : 0);
-    return ok({ estimate: estimatePushCost(count, { includeVoice: b.includeVoice !== false }) });
+    return ok({ estimate: estimatePushCost(count) });
   }
 
   // Kick the omnichannel orchestrator (n8n) right after an approved batch is promoted.

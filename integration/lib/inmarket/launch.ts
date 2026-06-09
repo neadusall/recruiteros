@@ -26,64 +26,80 @@ export interface CostLine {
   costUsd: number;
 }
 
+/** A leg that only fires for a SUBSET of prospects (HOT-tier voicemail, post-reply SMS), so
+ *  it is shown as a per-unit add-on rather than baked into every person's firm cost. */
+export interface ConditionalLine {
+  key: string;
+  label: string;
+  unitUsd: number;
+  basis: string;
+}
+
 export interface PushCostEstimate {
   count: number;
-  lines: CostLine[];
-  totalUsd: number;
-  perPersonUsd: number;
-  includeVoice: boolean;
+  /** Firm cost charged for EVERY prospect (enrichment + AI). qty/costUsd are ×count. */
+  perPersonLines: CostLine[];
+  perPersonUsd: number;   // firm subtotal for one prospect
+  firmTotalUsd: number;   // count × perPersonUsd — the reliable headline
+  /** Legs that only apply to a subset (not in the firm total). */
+  conditional: ConditionalLine[];
   dialCapUsd: number;
   notes: string[];
 }
 
-/** The hard per-contact dialing cap (person-direct only); never exceed without explicit
- *  config. Mirrors the Voice Drops cost discipline. */
+/** The hard per-contact direct-dial LOOKUP cap (person-direct only); the premium reveal is
+ *  skipped above this, so the cheap landline lookup is the firm cost. Mirrors Voice Drops. */
 function dialCapUsd(): number {
   const v = Number(process.env.RECRUITEROS_MAX_DIAL_USD);
   return Number.isFinite(v) && v > 0 ? v : 0.03;
 }
 
 /**
- * Upper-bound cost to push + enrich + sequence `count` selected people. `includeVoice`
- * (default true) adds the phone reveal + voicemail/voice-drop legs; turn it off for an
- * email/LinkedIn-only estimate. Email sends ride the customer's own warmed inboxes, so
- * there is no per-email charge here.
+ * Cost to push + enrich + sequence `count` selected people, modelled accurately:
+ *
+ *  - FIRM (every prospect): email find + verify, LinkedIn ID, phone classify + cheap
+ *    direct-dial lookup, and the once-per-prospect AI personalization. Email sends ride the
+ *    customer's own warmed inboxes (no per-email charge); the premium phone reveal is
+ *    skipped above the dial cap, so the cheap landline lookup is the firm phone cost.
+ *  - CONDITIONAL (a subset only, per sequence.ts): the voicemail/voice-drop fires only for
+ *    HOT-tier prospects (warmth >= 80, hotOnly), and SMS only post-reply — so they are
+ *    reported as per-unit add-ons, NOT multiplied into every person's total.
  */
-export function estimatePushCost(count: number, opts: { includeVoice?: boolean } = {}): PushCostEstimate {
+export function estimatePushCost(count: number): PushCostEstimate {
   const n = Math.max(0, Math.floor(count || 0));
-  const includeVoice = opts.includeVoice !== false;
   const maxDial = dialCapUsd();
-  const lines: CostLine[] = [];
-  const add = (key: string, label: string, unitUsd: number, qtyPer = 1) => {
-    const qty = n * qtyPer;
-    lines.push({ key, label, qty, unitUsd, costUsd: +(qty * unitUsd).toFixed(4) });
+  const perPersonLines: CostLine[] = [];
+  const add = (key: string, label: string, unitUsd: number) => {
+    perPersonLines.push({ key, label, qty: n, unitUsd, costUsd: +(n * unitUsd).toFixed(4) });
   };
 
-  // Enrichment (the third-party providers: email + LinkedIn ID; phone below).
+  // Firm, per-prospect.
   add("email_find", "Email find (cheapest-first waterfall)", rateCost("email_find"));
   add("email_verify", "Email verification", rateCost("email_verify"));
   add("person_enrich", "LinkedIn profile ID + data", rateCost("person_enrich"));
-  // AI personalization (LLM house-voice package per prospect).
+  add("phone_classify", "Phone classify (mobile vs landline)", rateCost("phone_classify"));
+  // Cheap landline / direct-dial lookup; premium reveal is blocked above the dial cap.
+  add("landline_find", "Direct-dial lookup (cheap-first)", Math.min(rateCost("landline_find"), maxDial));
   add("ai_personalize", "AI personalization (LLM, house voice)", rateCost("ai_personalize"));
 
-  if (includeVoice) {
-    add("phone_classify", "Phone classify (mobile vs landline)", rateCost("phone_classify"));
-    add("apify_direct_dial", "Direct-dial find (capped)", Math.min(rateCost("apify_direct_dial"), maxDial));
-    add("voice_minute", "Voicemail / voice-drop (~0.5 min)", +(rateCost("voice_minute") * 0.5).toFixed(4));
-    add("voice_clone_synthesis", "Cloned-voice render (amortized, cache-mostly)", +(rateCost("voice_clone_synthesis") * 0.3).toFixed(4));
-    add("sms_segment", "SMS touches (2 segments)", rateCost("sms_segment"), 2);
-  }
+  const perPersonUsd = +perPersonLines.reduce((s, l) => s + l.unitUsd, 0).toFixed(4);
+  const firmTotalUsd = +(n * perPersonUsd).toFixed(2);
 
-  const totalUsd = +lines.reduce((s, l) => s + l.costUsd, 0).toFixed(2);
-  const perPersonUsd = n ? +(totalUsd / n).toFixed(4) : 0;
-  const notes = [
-    "Email sends use your own warmed inboxes — no per-email charge.",
-    includeVoice
-      ? `Dialing is hard-capped at $${maxDial.toFixed(2)} per contact.`
-      : "Voicemail / voice-drops excluded from this estimate.",
-    "Upper-bound: a miss (no email/phone found) costs less than shown.",
+  // Conditional legs — per applicable prospect, NOT in the firm total.
+  const voicemailUnit = +(rateCost("voice_minute") * 0.5 + rateCost("voice_clone_synthesis") * 0.3).toFixed(4);
+  const conditional: ConditionalLine[] = [
+    { key: "voicemail", label: "Voicemail / voice-drop (Telnyx AMD → landline/VoIP)", unitUsd: voicemailUnit, basis: "per HOT-tier prospect (warmth ≥ 80) only" },
+    { key: "sms_segment", label: "SMS touch", unitUsd: rateCost("sms_segment"), basis: "per segment, only after a reply" },
   ];
-  return { count: n, lines, totalUsd, perPersonUsd, includeVoice, dialCapUsd: maxDial, notes };
+
+  const notes = [
+    "Per-person total is the FIRM cost charged for every prospect (enrichment + AI).",
+    "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80); SMS only after a reply — shown as add-ons, not in the per-person total.",
+    `Direct-dial uses the cheap lookup; the premium reveal is skipped above the $${maxDial.toFixed(2)}/contact cap.`,
+    "Email sends use your own warmed inboxes — no per-email charge. Upper-bound: a miss (no email/phone found) costs less.",
+  ];
+
+  return { count: n, perPersonLines, perPersonUsd, firmTotalUsd, conditional, dialCapUsd: maxDial, notes };
 }
 
 /**
