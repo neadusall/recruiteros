@@ -24,7 +24,7 @@ import {
   provisionDomainDns, verifyDomain, provisionServer,
   checklist, providerStatus, HetznerNotConfigured,
   listSuppression, recentEvents, listSeeds, addSeed, deleteSeed, listSeedTests,
-  runSeedTest, runSendingDaily, runGovernor, domainSetup,
+  runSeedTest, runSendingDaily, runGovernor, domainSetup, sendingHealth,
 } from "../../../lib/sending";
 
 export async function GET(req: Request) {
@@ -32,16 +32,20 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const domains = await listDomains(ws);
+  const mailboxes = await listMailboxes(ws);
+  const seedTests = await listSeedTests(ws);
   return ok({
     domains: domains.map((d) => ({ ...d, dkimPrivateKeyPem: undefined, checklist: checklist(d.records) })),
     servers: (await listServers(ws)).map((s) => ({ ...s, postalApiKey: s.postalApiKey ? "set" : undefined })),
-    mailboxes: await listMailboxes(ws),
+    mailboxes,
     stats: await stats(ws),
     providers: providerStatus(),
     suppression: (await listSuppression()).slice(0, 50),
     events: await recentEvents(50),
     seeds: await listSeeds(),
-    seedTests: await listSeedTests(ws),
+    seedTests,
+    // Computed warmth (per mailbox) + health (per domain) + roll-up for the UI.
+    health: sendingHealth(domains, mailboxes, seedTests),
   });
 }
 

@@ -2924,7 +2924,7 @@
       '<div class="card sd-card"><div class="sd-step">Deliverability</div><div id="sdDeliv">' + loading() + '</div></div>' +
       '<div class="card sd-card"><div class="sd-step">Seed inboxes (placement testing)</div><div id="sdSeeds">' + loading() + '</div></div>';
 
-    var state = { domains: [], servers: [], mailboxes: [], providers: { dns: false, cloud: false }, suppression: [], events: [], seeds: [], seedTests: [], stats: {} };
+    var state = { domains: [], servers: [], mailboxes: [], providers: { dns: false, cloud: false }, suppression: [], events: [], seeds: [], seedTests: [], stats: {}, health: { domains: [], mailboxes: [], overall: {} } };
 
     function badge(s) {
       var m = { active: ["sd-b-active", "active"], awaiting_ns: ["sd-b-wait", "awaiting NS"], verifying: ["sd-b-prov", "verifying"],
@@ -2940,6 +2940,7 @@
         state.providers = d.providers || { dns: false, cloud: false };
         state.suppression = d.suppression || []; state.events = d.events || [];
         state.seeds = d.seeds || []; state.seedTests = d.seedTests || []; state.stats = d.stats || {};
+        state.health = d.health || { domains: [], mailboxes: [], overall: {} };
         paintCfg(); paintServers(); paintList(); paintDeliv(); paintSeeds();
       }).catch(function () { $("#sdList", el).innerHTML = '<div class="empty">Could not load sending infrastructure.</div>'; });
     }
@@ -3107,20 +3108,79 @@
     function paintDeliv() {
       var body = $("#sdDeliv", el); if (!body) return;
       var st = state.stats || {};
-      var tot = state.domains.reduce(function (a, d) { var m = d.metrics || {}; return { sent: a.sent + (m.sent || 0), bounced: a.bounced + (m.bounced || 0), complained: a.complained + (m.complained || 0), delivered: a.delivered + (m.delivered || 0) }; }, { sent: 0, bounced: 0, complained: 0, delivered: 0 });
-      var pct = function (p, w) { return w > 0 ? ((p / w) * 100).toFixed(2) + "%" : "—"; };
-      var ev = (state.events || []).slice(0, 20).map(function (e) {
+      var h = state.health || { domains: [], mailboxes: [], overall: {} };
+      var ov = h.overall || {};
+      var tot = state.domains.reduce(function (a, d) { var m = d.metrics || {}; return { sent: a.sent + (m.sent || 0) }; }, { sent: 0 });
+      var num = function (n) { return (n == null ? "—" : Number(n).toLocaleString()); };
+      var pc = function (n) { return (n == null ? "—" : (Math.round(n * 10) / 10) + "%"); };
+
+      // healthy/warm -> green, watch/warming -> amber, at_risk/paused -> red, new/cold -> neutral
+      function scorePill(label) {
+        var m = { healthy: ["sd-b-active", "healthy"], warm: ["sd-b-active", "warm"], watch: ["sd-b-wait", "watch"],
+          warming: ["sd-b-wait", "warming"], at_risk: ["sd-b-err", "at risk"], paused: ["sd-b-err", "paused"],
+          "new": ["sd-b-pending", "new"], cold: ["sd-b-pending", "cold"] };
+        var x = m[label] || ["sd-b-pending", label || "—"];
+        return '<span class="sd-badge ' + x[0] + '">' + esc(x[1]) + '</span>';
+      }
+      function bar(score) {
+        var s = Math.max(0, Math.min(100, Number(score) || 0));
+        var cls = s >= 80 ? "ready" : s >= 55 ? "warming" : "action";
+        return '<span class="or-bar" style="display:inline-block;width:58px;vertical-align:middle;margin-right:6px"><span class="' + cls + '" style="width:' + s + '%"></span></span>';
+      }
+      function tile(value, label, pillLabel) {
+        return '<div class="dt-stat" style="background:var(--card,#14161c);border:1px solid var(--line,#1f232b);border-radius:9px;padding:9px 13px;min-width:92px">' +
+          '<b style="display:block;font-size:21px;line-height:1.1">' + value + '</b>' +
+          '<span class="muted" style="font-size:11px">' + esc(label) + '</span>' +
+          (pillLabel ? ' ' + scorePill(pillLabel) : "") + '</div>';
+      }
+
+      var tiles = '<div class="dt-stats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
+        tile(ov.healthScore != null ? ov.healthScore : "—", "domain health", ov.label) +
+        tile(ov.warmthScore != null ? ov.warmthScore : "—", "mailbox warmth") +
+        tile(ov.canSend ? "Yes" : "No", "sending now", ov.canSend ? "healthy" : "at_risk") +
+        tile(num(ov.capacityToday), "sends left today") +
+        tile((ov.activeMailboxes || 0) + "/" + (ov.mailboxes || 0), "mailboxes warm") +
+        tile(num(tot.sent), "sent (lifetime)") +
+        tile(num(st.suppressed || 0), "suppressed") +
+        (ov.pausedDomains ? tile(ov.pausedDomains, "domains paused", "paused") : "") +
+        '</div>';
+
+      // Per-domain health
+      var domRows = (h.domains || []).map(function (d) {
+        var warn = (d.warnings && d.warnings.length) ? '<div class="or-mini" style="color:#ffa3a3;margin-top:2px;font-size:11px">⚠ ' + esc(d.warnings.join(" · ")) + '</div>' : "";
+        return '<tr>' +
+          '<td><b>' + esc(d.domain) + '</b>' + warn + '</td>' +
+          '<td style="white-space:nowrap">' + bar(d.healthScore) + '<b>' + (d.healthScore != null ? d.healthScore : "—") + '</b> ' + scorePill(d.healthLabel) + '</td>' +
+          '<td>' + pc(d.bounceRatePct) + '</td>' +
+          '<td>' + pc(d.complaintRatePct) + '</td>' +
+          '<td>' + (d.deliveryRatePct ? d.deliveryRatePct + "%" : "—") + '</td>' +
+          '<td>' + (d.reputationTier ? esc(d.reputationTier) : "—") + '</td>' +
+          '<td>' + (d.inboxRatePct != null ? d.inboxRatePct + "%" : "—") + '</td>' +
+        '</tr>';
+      }).join("") || '<tr><td colspan="7" class="muted" style="font-size:12px">No sending domains yet — add them in Configuration above.</td></tr>';
+      var domTable = '<div class="sd-step" style="margin-top:8px">Domain health</div>' +
+        '<table class="sd-table"><thead><tr><th>Domain</th><th>Health</th><th>Bounce</th><th>Complaint</th><th>Delivered</th><th>Reputation</th><th>Inbox</th></tr></thead><tbody>' + domRows + '</tbody></table>';
+
+      // Per-mailbox warmth
+      var mbRows = (h.mailboxes || []).map(function (m) {
+        return '<tr>' +
+          '<td><b>' + esc(m.address) + '</b></td>' +
+          '<td style="white-space:nowrap">' + bar(m.warmthScore) + '<b>' + (m.warmthScore != null ? m.warmthScore : "—") + '</b> ' + scorePill(m.warmthLabel) + '</td>' +
+          '<td>day ' + (m.warmupDay != null ? m.warmupDay : "—") + '</td>' +
+          '<td>' + (m.sentToday != null ? m.sentToday : 0) + ' / ' + (m.dailyCap != null ? m.dailyCap : "—") + '</td>' +
+          '<td>' + (m.capRemaining != null ? m.capRemaining : "—") + '</td>' +
+        '</tr>';
+      }).join("") || '<tr><td colspan="5" class="muted" style="font-size:12px">No mailboxes yet — add them to a verified domain.</td></tr>';
+      var mbTable = '<div class="sd-step" style="margin-top:12px">Mailbox warmth</div>' +
+        '<table class="sd-table"><thead><tr><th>Mailbox</th><th>Warmth</th><th>Warmup</th><th>Today</th><th>Left</th></tr></thead><tbody>' + mbRows + '</tbody></table>';
+
+      var ev = (state.events || []).slice(0, 15).map(function (e) {
         var ic = { sent: "📤", delivered: "✅", bounce: "↩", complaint: "🚩", open: "👁" }[e.type] || "•";
         return '<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--line,#1a1d24)">' + ic + ' <b>' + esc(e.type) + '</b> ' + esc(e.to || "") + (e.detail ? ' <span class="muted">' + esc(String(e.detail).slice(0, 60)) + '</span>' : '') + '</div>';
       }).join("") || '<p class="muted" style="font-size:12px">No delivery events yet. They flow in from the Postal webhook (/api/sending/webhook).</p>';
-      body.innerHTML =
-        '<div class="dt-stats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">' +
-          '<div class="dt-stat"><b>' + (tot.sent || 0).toLocaleString() + '</b><span>sent</span></div>' +
-          '<div class="dt-stat"><b>' + pct(tot.bounced, tot.sent) + '</b><span>bounce rate</span></div>' +
-          '<div class="dt-stat"><b>' + pct(tot.complained, tot.sent) + '</b><span>complaint rate</span></div>' +
-          '<div class="dt-stat"><b>' + (st.suppressed || 0).toLocaleString() + '</b><span>suppressed</span></div>' +
-        '</div>' +
-        '<div class="muted" style="font-size:11px;margin-bottom:6px">Governor auto-pauses a domain at bounce&gt;2% or complaint&gt;0.1%. Webhook: <code class="sd-mono">/api/sending/webhook</code></div>' +
+
+      body.innerHTML = tiles + domTable + mbTable +
+        '<div class="muted" style="font-size:11px;margin:10px 0 6px">Fail-safe: the governor auto-pauses a domain (and its mailboxes) at bounce&gt;2%, complaint&gt;0.1%, spam&gt;0.3%, or a "bad" reputation tier. Warnings above flag a metric approaching its limit before the pause trips. Webhook: <code class="sd-mono">/api/sending/webhook</code> · daily tick: <code class="sd-mono">/api/sending/cron</code></div>' +
         '<div class="sd-step" style="margin-top:8px">Recent events</div>' + ev;
     }
 

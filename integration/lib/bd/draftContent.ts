@@ -42,9 +42,9 @@ export function leadFromProspect(
     industry: p.category && p.category !== "in_market" ? p.category : undefined,
     persona: inferPersona(p.title),
     hiringActivity: extra.hiringActivity,
-    companyContext: extra.companyContext ?? [p.headline, p.location].filter(Boolean).join(" · ") || undefined,
+    companyContext: extra.companyContext ?? ([p.headline, p.location].filter(Boolean).join(" · ") || undefined),
     // Ground in the prospect's own words when we have them.
-    profileSummary: extra.profileSummary ?? [p.headline, p.title && p.company ? `${p.title} at ${p.company}` : null, p.location].filter(Boolean).join(" · ") || undefined,
+    profileSummary: extra.profileSummary ?? ([p.headline, p.title && p.company ? `${p.title} at ${p.company}` : null, p.location].filter(Boolean).join(" · ") || undefined),
     sender: extra.sender,
     callbackNumber: extra.callbackNumber,
   };

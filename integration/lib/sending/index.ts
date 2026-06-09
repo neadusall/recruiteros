@@ -37,6 +37,8 @@ export { advanceWarmup, runWarmupRound } from "./warmup";
 export { runSendingDaily } from "./daily";
 export { applyDeliveryEvent, mapPostalEvent } from "./ingest";
 export { pickMailbox } from "./caps";
+export { sendingHealth, domainHealth, mailboxHealth } from "./health";
+export type { SendingHealthSummary, DomainHealthScore, MailboxHealth, HealthLabel, WarmthLabel } from "./health";
 
 /** One call for the UI: which automations are wired? */
 export function providerStatus(): { dns: boolean; cloud: boolean; snds: boolean; postmaster: boolean; mta: boolean } {
