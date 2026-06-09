@@ -411,6 +411,17 @@
 .im-confirmed { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); cursor: pointer; margin-left: 4px; }
 .im-confirmed input { cursor: pointer; }
 
+/* Push cost-estimate / approval modal */
+.pc-head { font-size: 13.5px; color: var(--text-muted); margin-bottom: 10px; }
+.pc-voice { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text); margin-bottom: 12px; cursor: pointer; }
+.pc-lines { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.pc-line { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
+.pc-line:last-child { border-bottom: 0; }
+.pc-line span:last-child { font-family: var(--mono); color: var(--text); }
+.pc-total { margin: 12px 0 6px; font-size: 15px; color: var(--text); text-align: right; }
+.pc-total b { color: var(--accent-green); }
+.pc-notes { font-size: 11.5px; line-height: 1.7; }
+
 /* In-Market signal-type chips */
 .im-sig-wrap { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
 .im-sig-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); margin-bottom: 10px; }

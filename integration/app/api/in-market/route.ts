@@ -38,6 +38,20 @@ export async function POST(req: Request) {
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);
 
+  // Cost estimate for pushing N selected people (shown in the approve/cancel gate).
+  if (b?.action === "estimate") {
+    const { estimatePushCost } = await import("../../../lib/inmarket/launch");
+    const count = Number(b.count) || (Array.isArray(b.leads) ? b.leads.length : 0);
+    return ok({ estimate: estimatePushCost(count, { includeVoice: b.includeVoice !== false }) });
+  }
+
+  // Kick the omnichannel orchestrator (n8n) right after an approved batch is promoted.
+  if (b?.action === "launch_outreach") {
+    const { kickOutreach } = await import("../../../lib/inmarket/launch");
+    const result = await kickOutreach({ workspaceId: ws, campaignId: b.campaignId, count: Number(b.count) || 0 });
+    return ok({ launch: result });
+  }
+
   if (b?.action === "promote") {
     if (!b.campaignId || !b.lead) return fail("missing_fields", 422, { detail: "campaignId and lead required" });
     try {

@@ -1085,17 +1085,63 @@
     }).catch(function () { cb(null); });
   }
 
-  // Push every selected hiring manager to Prospects (paired to its company) + sequence.
+  // "Push selected to Prospects" → first show an estimated cost to enrich (email + phone +
+  // LinkedIn ID) and run the outreach sequence, with Approve / Cancel. Nothing is spent until
+  // Approve. On approve we promote the batch, then kick the orchestrator (n8n) so the whole
+  // enrich → LLM-draft → email/LinkedIn/voicemail/voice-drop process starts.
   function bulkPushToProspects() {
     var picks = Object.keys(imPicks).map(function (k) { return imPicks[k]; });
     if (!picks.length) return;
+    var n = picks.length, est = null;
+    var body =
+      '<div class="pc">' +
+        '<div class="pc-head">Run <b>' + n + "</b> " + (n === 1 ? "person" : "people") + " through third-party enrichment + the outreach sequence.</div>" +
+        '<label class="pc-voice"><input type="checkbox" id="pcVoice" checked> Include voicemail + voice drops <span class="muted">(adds the phone reveal)</span></label>' +
+        '<div id="pcLines" class="pc-lines">' + loading() + "</div>" +
+        '<div class="pc-total" id="pcTotal"></div>' +
+        '<div class="pc-notes muted" id="pcNotes"></div>' +
+        '<div class="modal-foot">' +
+          '<button class="btn btn-ghost btn-sm" id="pcCancel">Cancel</button>' +
+          '<button class="btn btn-primary btn-sm" id="pcApprove" disabled>Approve &amp; launch</button>' +
+        "</div>" +
+      "</div>";
+    openModal("Launch outreach", "Estimated cost — approve to start", body, function (root, closeFn) {
+      var voiceCb = root.querySelector("#pcVoice");
+      var approve = root.querySelector("#pcApprove");
+      function fetchEst() {
+        approve.disabled = true;
+        root.querySelector("#pcLines").innerHTML = loading();
+        send("/in-market", "POST", { action: "estimate", count: n, includeVoice: voiceCb.checked }).then(function (r) {
+          if (!r.ok || !r.data || !r.data.estimate) { root.querySelector("#pcLines").innerHTML = '<div class="empty">Could not estimate cost.</div>'; return; }
+          est = r.data.estimate;
+          root.querySelector("#pcLines").innerHTML = est.lines.map(function (l) {
+            return '<div class="pc-line"><span>' + esc(l.label) + ' <span class="muted">×' + l.qty + "</span></span><span>$" + l.costUsd.toFixed(2) + "</span></div>";
+          }).join("");
+          root.querySelector("#pcTotal").innerHTML = "Estimated total: <b>$" + est.totalUsd.toFixed(2) + "</b> <span class=\"muted\">(~$" + est.perPersonUsd.toFixed(3) + "/person)</span>";
+          root.querySelector("#pcNotes").innerHTML = (est.notes || []).map(function (x) { return "• " + esc(x); }).join("<br>");
+          approve.disabled = false;
+        }).catch(function () { root.querySelector("#pcLines").innerHTML = '<div class="empty">Could not estimate cost.</div>'; });
+      }
+      voiceCb.addEventListener("change", fetchEst);
+      root.querySelector("#pcCancel").addEventListener("click", closeFn);
+      approve.addEventListener("click", function () { closeFn(); runBulkPush(picks); });
+      fetchEst();
+    });
+  }
+
+  // Approved: promote each selected person to Prospects, then nudge the orchestrator (n8n)
+  // to start the enrich → LLM-draft → email/LinkedIn/voicemail/voice-drop run immediately.
+  function runBulkPush(picks) {
     var btn = document.getElementById("imBulk"); if (btn) btn.disabled = true;
     resolveBdCampaign(function (campaignId) {
       if (!campaignId) { toast("Create a campaign first."); if (btn) btn.disabled = false; return; }
       var done = 0;
       (function next(i) {
         if (i >= picks.length) {
-          toast(done + " prospect" + (done === 1 ? "" : "s") + " pushed to Prospects");
+          if (btn) { btn.disabled = false; btn.textContent = "Push selected to Prospects"; }
+          // Kick the omnichannel orchestrator so the whole process starts now.
+          send("/in-market", "POST", { action: "launch_outreach", campaignId: campaignId, count: done }).catch(function () {});
+          toast(done + " pushed — outreach launching (email · LinkedIn · voicemail · drops)");
           imPicks = {}; renderImResults();
           return;
         }

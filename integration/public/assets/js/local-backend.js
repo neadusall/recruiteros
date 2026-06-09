@@ -267,6 +267,39 @@
 
     // --- In-Market Leads: who is hiring right now (search + promote) ---
     if (p === "/in-market") {
+      // Cost estimate for the push approval gate (mirrors lib/inmarket/launch.ts rates).
+      if (method === "POST" && body && body.action === "estimate") {
+        var n = parseInt(body.count, 10) || 0;
+        var voice = body.includeVoice !== false;
+        var cap = 0.03;
+        var lines = [
+          ["Email find (cheapest-first waterfall)", 0.006, 1],
+          ["Email verification", 0.001, 1],
+          ["LinkedIn profile ID + data", 0.005, 1],
+          ["AI personalization (LLM, house voice)", 0.004, 1]
+        ];
+        if (voice) {
+          lines.push(["Phone classify (mobile vs landline)", 0.0025, 1]);
+          lines.push(["Direct-dial find (capped)", Math.min(0.1, cap), 1]);
+          lines.push(["Voicemail / voice-drop (~0.5 min)", 0.0035, 1]);
+          lines.push(["Cloned-voice render (amortized)", 0.006, 1]);
+          lines.push(["SMS touches (2 segments)", 0.004, 2]);
+        }
+        var outLines = lines.map(function (l) { return { key: l[0], label: l[0], qty: n * l[2], unitUsd: l[1], costUsd: +(n * l[2] * l[1]).toFixed(4) }; });
+        var total = +outLines.reduce(function (s, l) { return s + l.costUsd; }, 0).toFixed(2);
+        return ok({ estimate: {
+          count: n, lines: outLines, totalUsd: total, perPersonUsd: n ? +(total / n).toFixed(4) : 0,
+          includeVoice: voice, dialCapUsd: cap,
+          notes: [
+            "Email sends use your own warmed inboxes — no per-email charge.",
+            voice ? "Dialing is hard-capped at $0.03 per contact." : "Voicemail / voice-drops excluded from this estimate.",
+            "Upper-bound: a miss (no email/phone found) costs less than shown."
+          ]
+        } });
+      }
+      if (method === "POST" && body && body.action === "launch_outreach") {
+        return ok({ launch: { triggered: false, queued: true, detail: "demo: prospects flow on next queue poll" } });
+      }
       d.inmarket = d.inmarket || inMarketSeed();
       // Stamp demo dates once: vary "posted online" and "added to database" across the seed
       // so the date filter and the per-lead date stamps have something to show.
