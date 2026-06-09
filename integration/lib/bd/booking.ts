@@ -19,6 +19,7 @@ import { sendEmail, mtaPreferred } from "../providers/mta";
 import { toHtml } from "./draftContent";
 import { inferPersona } from "./personaMessaging";
 import { sanitizeDashes } from "./sanitize";
+import { HOUSE_VOICE } from "./houseVoice";
 import type { Variant } from "./experiment";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -75,7 +76,9 @@ Method (follow exactly):
 - Never use pressure, false scarcity, "quick question", "circle back", flattery, or hype. No emojis, no hashtags, NO dashes of any kind (no em dashes, no en dashes, no hyphens; compounds as separate words). Plain text. Money in US dollars with $.
 - Keep it short: email 60-110 words with a quiet, specific subject; linkedin 300-500 characters.
 
-The reader should feel: "this person is genuinely offering me something useful and making it easy," never "this person is trying to get me on a sales call."`;
+The reader should feel: "this person is genuinely offering me something useful and making it easy," never "this person is trying to get me on a sales call."
+
+${HOUSE_VOICE}`;
 
 const ASK_SYSTEM_MPC = `You write a single, confident message from a well-connected recruiter (Ryan / Lume) to an executive who has shown some interest, inviting them to a short call to walk through a specific candidate. This is the forward Most-Placeable-Candidate ask: we have a strong, ready-to-move person who fits their world, and we lead with that.
 
@@ -90,7 +93,9 @@ Method (follow exactly):
 - No pressure beyond honest timing, no flattery, no hype, no emojis, no hashtags, NO dashes of any kind (no em dashes, no en dashes, no hyphens; compounds as separate words). Plain text. US dollars with $.
 - Keep it short: email 60-110 words with a quiet, specific subject; linkedin 300-500 characters.
 
-The reader should feel: "this person has someone I should actually meet," never "this is a mass sales pitch."`;
+The reader should feel: "this person has someone I should actually meet," never "this is a mass sales pitch."
+
+${HOUSE_VOICE}`;
 
 /** Generate the earned-ask message for one lead on one channel, in the given A/B model. */
 export async function generateEarnedAsk(

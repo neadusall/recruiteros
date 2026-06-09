@@ -23,6 +23,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { sanitizeMessage } from "./sanitize";
+import { HOUSE_VOICE } from "./houseVoice";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
@@ -286,7 +287,9 @@ HARD STYLE RULES (house standard):
 - Reference only the real, specific details provided. Do NOT invent facts, names, numbers, or events. If a detail is missing, write around it; never guess.
 - The market_observation must be defensible from the lead context provided.
 
-The prospect should finish reading and feel: "this person understands what we are likely trying to accomplish" - never "this recruiter saw our job posting." Every message reads as the continuation of a thoughtful business conversation, not the start of a sales process.`;
+The prospect should finish reading and feel: "this person understands what we are likely trying to accomplish", never "this recruiter saw our job posting." Every message reads as the continuation of a thoughtful business conversation, not the start of a sales process.
+
+${HOUSE_VOICE}`;
 
 /* ------------------------------------------------------------------ */
 /* Generation                                                          */

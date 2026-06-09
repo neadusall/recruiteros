@@ -19,6 +19,7 @@ import { nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 import type { Variant } from "./experiment";
 import { sanitizeDashes } from "./sanitize";
+import { HOUSE_VOICE } from "./houseVoice";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
@@ -270,7 +271,9 @@ Rules:
 - Channel limits:
   - email: 60-110 words, with a quiet, peer-level subject line (never a pitch).
   - linkedin_comment: <= 300 characters, reads as a natural, thoughtful comment a peer would leave on their content.
-  - linkedin_voice_note: a 20-35 second spoken script (~50-90 words), warm and conversational, written to be heard.`;
+  - linkedin_voice_note: a 20-35 second spoken script (~50-90 words), warm and conversational, written to be heard.
+
+${HOUSE_VOICE}`;
 
 /** Generate one nurture touch's content, grounded in the frozen lead context. */
 export async function generateNurtureTouch(lead: NurtureLead, touch: NurtureTouch): Promise<NurtureContent> {
