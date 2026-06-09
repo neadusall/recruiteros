@@ -3941,7 +3941,9 @@
         fld("vtfVoice", "Cloned voice ID (ElevenLabs; blank = default)", "voice_xxx") +
         fld("vtfThreshold", "Pass threshold (0–100)", "70", "number") +
         "</div>" +
-        '<div class="vt-section">Top qualifiers <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">— 3–4 max, worked in conversationally</span></div>' +
+        '<div class="vt-section">Top qualifiers <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">— auto-pulled from the JD; you don\'t need to fill these</span></div>' +
+        '<div class="vt-hint" style="margin:-2px 2px 8px">Leave these blank and we\'ll generate the top 3–4 from your job description when you save. Or generate now to review and tweak.</div>' +
+        '<div style="margin-bottom:8px"><button type="button" class="vt-btn" id="vtGenQ">✨ Generate from JD</button></div>' +
         qrow(0) + qrow(1) + qrow(2) + qrow(3) +
         '<div class="vt-section">Next step (spoken at the end of the call)</div>' +
         '<div class="vt-form-grid">' +
@@ -4034,6 +4036,24 @@
       });
       var cancel = $("#vtCancel");
       if (cancel) cancel.addEventListener("click", function () { vt.editing = null; paintDesks(body); });
+      var genQ = $("#vtGenQ");
+      if (genQ) genQ.addEventListener("click", function () {
+        var jd = $("#vtfJd") ? $("#vtfJd").value.trim() : "";
+        if (!jd) { toast("Paste the job description first."); return; }
+        genQ.disabled = true; genQ.textContent = "✨ Generating…";
+        send("/vetting/desks", "POST", { action: "generate-questions", jobDescription: jd, roleTitle: vget("vtfRole"), clientCompany: vget("vtfCompany") }).then(function (r) {
+          genQ.disabled = false; genQ.textContent = "✨ Generate from JD";
+          if (!r.ok) { toast((r.data && r.data.detail) || "Couldn’t generate — add ANTHROPIC_API_KEY."); return; }
+          var qs = (r.data && r.data.questions) || [];
+          for (var i = 0; i < 4; i++) {
+            var q = qs[i] || { prompt: "", passCriteria: "", mustHave: false };
+            if ($("#vtQp" + i)) $("#vtQp" + i).value = q.prompt || "";
+            if ($("#vtQc" + i)) $("#vtQc" + i).value = q.passCriteria || "";
+            if ($("#vtQm" + i)) $("#vtQm" + i).checked = !!q.mustHave;
+          }
+          toast("Pulled " + qs.length + " qualifier" + (qs.length === 1 ? "" : "s") + " from the JD — tweak if you like.");
+        }).catch(function () { genQ.disabled = false; genQ.textContent = "✨ Generate from JD"; toast("Couldn’t reach the server."); });
+      });
       Array.prototype.forEach.call(body.querySelectorAll("[data-vtact]"), function (b) {
         b.addEventListener("click", function () { deskAction(b.getAttribute("data-vtact"), b.getAttribute("data-id"), b, body); });
       });

@@ -3,18 +3,23 @@
  *   GET    /api/vetting/desks?motion=   -> this workspace's vetting desks (+candidate/call counts)
  *   PUT    /api/vetting/desks           -> create/update a desk (JD, questions, voice, number)
  *   DELETE /api/vetting/desks?id=       -> remove a desk (and deprovision its assistant)
- *   POST   /api/vetting/desks           -> { action: provision | pause | resume, deskId }
+ *   POST   /api/vetting/desks           -> { action: provision | pause | resume | detach | generate-questions, deskId }
  *
  * Session-gated. `provision` pushes the desk's config to the voice engine and
  * binds its number; with no Telnyx key this runs as a safe dry-run and the desk
  * still flips to "live" so the flow is exercisable end to end in dev.
+ *
+ * Qualifiers are AUTO-DERIVED: the operator never has to hand-write them. On PUT,
+ * when a desk has a job description but no qualifiers, the LLM extracts the top
+ * 3-4 from the JD. `generate-questions` does the same on demand (e.g. a preview
+ * button) without saving.
  */
 
 import { requireSession, body, ok, fail } from "../../../../lib/api";
 import type { Motion } from "../../../../lib/core/types";
 import {
   listDesks, getDesk, upsertDesk, deleteDesk, markDeskSynced, setDeskStatus,
-  listCandidates, listCalls, provisionDesk, deprovisionDesk,
+  listCandidates, listCalls, provisionDesk, deprovisionDesk, generateQualifiers,
   type VettingDeskInput,
 } from "../../../../lib/vetting";
 
@@ -40,7 +45,23 @@ export async function PUT(req: Request) {
   if ("response" in g) return g.response;
   const b = await body<VettingDeskInput>(req);
   if (!b?.name) return fail("missing_fields", 422);
-  const d = upsertDesk(g.ctx.workspace.id, b);
+  const ws = g.ctx.workspace.id;
+
+  // Auto-derive qualifiers: if the operator didn't supply any and the desk has
+  // (or is gaining) a job description with none stored yet, pull the top 3-4
+  // from the JD so they never have to hand-write screening questions.
+  const submitted = Array.isArray(b.questions) ? b.questions : undefined;
+  if (!submitted || submitted.length === 0) {
+    const existing = b.id ? getDesk(ws, b.id) : undefined;
+    const jd = b.jobDescription ?? existing?.jobDescription ?? "";
+    const hasStored = (existing?.questions?.length ?? 0) > 0;
+    if (jd.trim() && !hasStored) {
+      const generated = await generateQualifiers(jd, b.roleTitle ?? existing?.roleTitle, b.clientCompany ?? existing?.clientCompany);
+      if (generated.length) b.questions = generated;
+    }
+  }
+
+  const d = upsertDesk(ws, b);
   return ok({ desk: d });
 }
 
@@ -59,9 +80,20 @@ export async function POST(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
-  const b = await body<{ action?: string; deskId?: string }>(req);
-  if (!b?.action || !b?.deskId) return fail("missing_fields", 422);
+  const b = await body<{ action?: string; deskId?: string; jobDescription?: string; roleTitle?: string; clientCompany?: string }>(req);
+  if (!b?.action) return fail("missing_fields", 422);
 
+  // Preview-only qualifier generation — no deskId needed (used by the form's
+  // "Generate from JD" button before the desk is even saved).
+  if (b.action === "generate-questions") {
+    const jd = (b.jobDescription ?? (b.deskId ? getDesk(ws, b.deskId)?.jobDescription : "") ?? "").trim();
+    if (!jd) return fail("no_job_description", 422);
+    const questions = await generateQualifiers(jd, b.roleTitle, b.clientCompany);
+    if (!questions.length) return fail("generation_unavailable", 409, { detail: "Set ANTHROPIC_API_KEY to auto-generate qualifiers." });
+    return ok({ questions });
+  }
+
+  if (!b.deskId) return fail("missing_fields", 422);
   const desk = getDesk(ws, b.deskId);
   if (!desk) return fail("not_found", 404);
 
