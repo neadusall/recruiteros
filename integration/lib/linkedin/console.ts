@@ -37,7 +37,9 @@ export function toEngineAccount(a: CoreAccount, ownerUserId: string): LinkedInAc
     a.warmup === "flagged" ? "restricted" : !a.active ? "disconnected" : a.warmup === "in_warmup" ? "warming" : "ok";
   return {
     id: a.id,
-    providerAccountId: a.id,
+    // When Unipile is the provider, every API call needs the Unipile account id
+    // (the connected LinkedIn seat), not our internal account id.
+    providerAccountId: process.env.UNIPILE_ACCOUNT_ID || a.id,
     ownerUserId,
     displayName: a.handle,
     status,

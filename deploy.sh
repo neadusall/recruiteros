@@ -69,11 +69,17 @@ RECRUITEROS_APP_URL=https://${DOMAIN}
 ANTHROPIC_API_KEY=
 RECRUITEROS_LLM_MODEL=claude-sonnet-4-6
 
-# Outreach: 'self' = our own in-backend bridge (work runs in the Chrome
-# extension, coordinated here, no third party). 'unipile' for the hosted API.
-RECRUITEROS_OUTREACH_PROVIDER=self
+# Outreach: blank = auto (Unipile if its keys are set below, else 'self' = our own
+# in-backend bridge via the Chrome extension). Force with: self | unipile | internal.
+RECRUITEROS_OUTREACH_PROVIDER=
 RECRUITEROS_OUTREACH_URL=
 RECRUITEROS_OUTREACH_TOKEN=
+# Unipile (hosted LinkedIn API). Set all three to run LinkedIn automation server-side.
+# ACCOUNT_ID = the connected seat from GET https://<DSN>/api/v1/accounts -> items[].id
+UNIPILE_DSN=
+UNIPILE_API_KEY=
+UNIPILE_ACCOUNT_ID=
+UNIPILE_WEBHOOK_SECRET=
 RECRUITEROS_SMS_PROVIDER=telnyx
 TELNYX_API_KEY=
 TELNYX_MESSAGING_PROFILE_ID=

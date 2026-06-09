@@ -212,9 +212,9 @@ export const unipileProvider: LinkedInProvider = {
           company: typeof company === "string" ? company : company?.name,
           location: typeof it.location === "string" ? it.location : it.location?.name,
           publicProfileUrl:
-            it.profile_url ??
-            (publicId ? `https://www.linkedin.com/in/${publicId}` : undefined),
-          imageUrl: it.profile_picture_url ?? it.profile_picture ?? it.picture_url ?? it.image_url,
+            ((it.public_profile_url || it.profile_url ||
+              (publicId ? `https://www.linkedin.com/in/${publicId}` : "")) || "").split("?")[0] || undefined,
+          imageUrl: it.profile_picture_url ?? it.profile_picture_url_large ?? it.profile_picture ?? it.picture_url ?? it.image_url,
           connectionDegree: it.network_distance ? degreeMap[it.network_distance] : undefined,
         });
         if (out.length >= cap) break;
@@ -422,7 +422,11 @@ export const internalProvider: LinkedInProvider = {
  * The whole engine is provider-agnostic, so swapping backends touches nothing else.
  */
 export function getProvider(): LinkedInProvider {
-  switch ((process.env.RECRUITEROS_OUTREACH_PROVIDER ?? "self").toLowerCase()) {
+  // Auto-enable Unipile when its credentials are present (unless explicitly
+  // overridden), so wiring up Unipile is just setting UNIPILE_DSN + UNIPILE_API_KEY.
+  const explicit = (process.env.RECRUITEROS_OUTREACH_PROVIDER ?? "").toLowerCase();
+  const hasUnipile = !!(process.env.UNIPILE_DSN && process.env.UNIPILE_API_KEY);
+  switch (explicit || (hasUnipile ? "unipile" : "self")) {
     case "unipile":
       return unipileProvider;
     case "internal":
