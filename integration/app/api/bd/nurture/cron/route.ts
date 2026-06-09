@@ -17,8 +17,7 @@
 import { NextResponse } from "next/server";
 import { requireCronAuth } from "../../../../../lib/linkedin/auth";
 import { ensureNurtureReady, dueTouches, generateNurtureTouch, advance, addPending } from "../../../../../lib/bd/nurture";
-import { sendEmail, mtaPreferred } from "../../../../../lib/providers/mta";
-import { toHtml } from "../../../../../lib/bd/draftContent";
+import { dispatchNurture } from "../../../../../lib/bd/nurtureSend";
 
 async function run(req: Request) {
   const auth = requireCronAuth(req);
@@ -32,15 +31,11 @@ async function run(req: Request) {
   for (const { enrollment: e, touch } of due) {
     try {
       const content = await generateNurtureTouch(e.lead, touch);
+      const sent = await dispatchNurture(e, touch, content);
 
-      if (touch.channel === "email" && e.lead.email && mtaPreferred()) {
-        const m = await sendEmail(e.workspaceId, {
-          to: e.lead.email,
-          subject: content.subject ?? "",
-          htmlBody: toHtml(content.body),
-        });
-        results.push({ prospectId: e.prospectId, week: touch.week, channel: "email", sent: m.ok, provider: m.provider, skipped: m.skipped });
-      } else {
+      // A LinkedIn touch with no account/profile context is generated but not yet
+      // sendable — stash it so the operator / LinkedIn wiring can execute it.
+      if (sent.staged) {
         addPending(e.prospectId, {
           channel: touch.channel,
           week: touch.week,
@@ -48,8 +43,8 @@ async function run(req: Request) {
           body: content.body,
           generatedAt: at.toISOString(),
         });
-        results.push({ prospectId: e.prospectId, week: touch.week, channel: touch.channel, staged: true });
       }
+      results.push({ prospectId: e.prospectId, week: touch.week, ...sent });
 
       advance(e.prospectId, at);
     } catch (err: any) {

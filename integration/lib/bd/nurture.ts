@@ -60,6 +60,8 @@ export interface NurtureLead {
   email?: string;
   linkedinUrl?: string;
   providerProfileId?: string;
+  /** Unipile account to send LinkedIn nurture touches from (falls back to env). */
+  linkedinAccountId?: string;
 }
 
 export type NurtureStatus = "active" | "needs_review" | "paused" | "completed";

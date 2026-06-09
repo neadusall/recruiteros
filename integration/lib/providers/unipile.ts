@@ -59,4 +59,24 @@ export class UnipileClient extends ProviderClient {
       body: { account_id: accountId, attendees_ids: [providerProfileId], voice_message: audioUrl },
     });
   }
+
+  /** Recent posts authored by a member — used to pick a target for a nurture comment.
+   *  NOTE: confirm the exact path/shape against the current Unipile API; mirrors the
+   *  client's /api/v1/users/{identifier}/... convention. */
+  listPosts(accountId: string, providerProfileId: string, limit = 5) {
+    return this.request({
+      path: `/api/v1/users/${encodeURIComponent(providerProfileId)}/posts`,
+      query: { account_id: accountId, limit },
+    });
+  }
+
+  /** Leave a comment on a post (the nurture "comment on their post" touch).
+   *  NOTE: confirm the exact path/shape against the current Unipile API. */
+  commentOnPost(accountId: string, postId: string, text: string) {
+    return this.request({
+      method: "POST",
+      path: `/api/v1/posts/${encodeURIComponent(postId)}/comments`,
+      body: { account_id: accountId, text },
+    });
+  }
 }
