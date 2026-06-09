@@ -271,13 +271,13 @@
       if (method === "POST" && body && body.action === "estimate") {
         var n = parseInt(body.count, 10) || 0;
         var cap = 0.03;
-        // Firm per-person legs (every prospect).
+        // Firm per-person legs (every prospect) — full waterfall WITH premium fail-safes.
         var firm = [
-          ["Email find (cheapest-first waterfall)", 0.006],
+          ["Email — multi-provider waterfall (deep, 80-95%)", 0.006],
           ["Email verification", 0.001],
           ["LinkedIn profile ID + data", 0.005],
-          ["Phone classify (mobile vs landline)", 0.0025],
-          ["Direct-dial lookup (cheap-first)", Math.min(0.015, cap)],
+          ["Phone classify (route mobile vs landline)", 0.0025],
+          ["Phone reveal — cheap-first + premium fail-safe (capped $0.03)", Math.min(0.1, cap)],
           ["AI personalization (LLM, house voice)", 0.004]
         ];
         var perPersonLines = firm.map(function (l) { return { key: l[0], label: l[0], qty: n, unitUsd: l[1], costUsd: +(n * l[1]).toFixed(4) }; });
@@ -286,15 +286,14 @@
           count: n, perPersonLines: perPersonLines, perPersonUsd: perPersonUsd,
           firmTotalUsd: +(n * perPersonUsd).toFixed(2),
           conditional: [
-            { key: "voicemail", label: "Voicemail / voice-drop (Telnyx AMD → landline/VoIP)", unitUsd: 0.0095, basis: "per HOT-tier prospect (warmth ≥ 80) only" },
-            { key: "sms_segment", label: "SMS touch", unitUsd: 0.004, basis: "per segment, only after a reply" }
+            { key: "voicemail", label: "Voicemail / voice-drop (Telnyx AMD → landline/VoIP)", unitUsd: 0.0095, basis: "per HOT-tier prospect (warmth ≥ 80) only" }
           ],
           dialCapUsd: cap,
           notes: [
-            "Per-person total is the FIRM cost charged for every prospect (enrichment + AI).",
-            "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80); SMS only after a reply — shown as add-ons, not in the per-person total.",
-            "Direct-dial uses the cheap lookup; the premium reveal is skipped above the $0.03/contact cap.",
-            "Email sends use your own warmed inboxes — no per-email charge. Upper-bound: a miss costs less."
+            "Per-person total is the FIRM cost for every prospect — the full waterfall WITH premium fail-safes (cheap rung misses escalate to deeper providers to still resolve email + a number).",
+            "Phone reveal is taken to the $0.03/contact cap; no-find lookups are free, so a true miss costs less than the ceiling shown.",
+            "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80) — shown as an add-on, not in the per-person total.",
+            "Email sends use your own warmed inboxes — no per-email charge."
           ]
         } });
       }

@@ -73,30 +73,34 @@ export function estimatePushCost(count: number): PushCostEstimate {
     perPersonLines.push({ key, label, qty: n, unitUsd, costUsd: +(n * unitUsd).toFixed(4) });
   };
 
-  // Firm, per-prospect.
-  add("email_find", "Email find (cheapest-first waterfall)", rateCost("email_find"));
+  // Firm, per-prospect — modelled as the FULL waterfall with premium fail-safes, not just
+  // the cheap rung: if the cheap provider misses, the engine escalates to deeper providers
+  // to still resolve the email + a real number. email_find is already the blended multi-
+  // provider waterfall (80-95% coverage). The phone reveal is the cheap lookup PLUS the
+  // premium direct-dial fail-safe, taken to the per-contact cap (no-find lookups are free,
+  // so a true miss costs less than this ceiling).
+  add("email_find", "Email — multi-provider waterfall (deep, 80-95%)", rateCost("email_find"));
   add("email_verify", "Email verification", rateCost("email_verify"));
   add("person_enrich", "LinkedIn profile ID + data", rateCost("person_enrich"));
-  add("phone_classify", "Phone classify (mobile vs landline)", rateCost("phone_classify"));
-  // Cheap landline / direct-dial lookup; premium reveal is blocked above the dial cap.
-  add("landline_find", "Direct-dial lookup (cheap-first)", Math.min(rateCost("landline_find"), maxDial));
+  add("phone_classify", "Phone classify (route mobile vs landline)", rateCost("phone_classify"));
+  add("phone_reveal", `Phone reveal — cheap-first + premium fail-safe (capped $${maxDial.toFixed(2)})`, Math.min(rateCost("apify_direct_dial"), maxDial));
   add("ai_personalize", "AI personalization (LLM, house voice)", rateCost("ai_personalize"));
 
   const perPersonUsd = +perPersonLines.reduce((s, l) => s + l.unitUsd, 0).toFixed(4);
   const firmTotalUsd = +(n * perPersonUsd).toFixed(2);
 
-  // Conditional legs — per applicable prospect, NOT in the firm total.
+  // Conditional leg — per applicable prospect, NOT in the firm total. (No SMS — not part of
+  // the BD motion.) The voicemail/voice-drop is a Telnyx AMD drop to landline/VoIP.
   const voicemailUnit = +(rateCost("voice_minute") * 0.5 + rateCost("voice_clone_synthesis") * 0.3).toFixed(4);
   const conditional: ConditionalLine[] = [
     { key: "voicemail", label: "Voicemail / voice-drop (Telnyx AMD → landline/VoIP)", unitUsd: voicemailUnit, basis: "per HOT-tier prospect (warmth ≥ 80) only" },
-    { key: "sms_segment", label: "SMS touch", unitUsd: rateCost("sms_segment"), basis: "per segment, only after a reply" },
   ];
 
   const notes = [
-    "Per-person total is the FIRM cost charged for every prospect (enrichment + AI).",
-    "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80); SMS only after a reply — shown as add-ons, not in the per-person total.",
-    `Direct-dial uses the cheap lookup; the premium reveal is skipped above the $${maxDial.toFixed(2)}/contact cap.`,
-    "Email sends use your own warmed inboxes — no per-email charge. Upper-bound: a miss (no email/phone found) costs less.",
+    "Per-person total is the FIRM cost for every prospect — the full waterfall WITH premium fail-safes (cheap rung misses escalate to deeper providers to still resolve email + a number).",
+    `Phone reveal is taken to the $${maxDial.toFixed(2)}/contact cap; no-find lookups are free, so a true miss costs less than the ceiling shown.`,
+    "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80) — shown as an add-on, not in the per-person total.",
+    "Email sends use your own warmed inboxes — no per-email charge.",
   ];
 
   return { count: n, perPersonLines, perPersonUsd, firmTotalUsd, conditional, dialCapUsd: maxDial, notes };
