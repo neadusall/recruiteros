@@ -3904,7 +3904,7 @@
      step. Every call is recorded, transcribed, summarized, and scored 1–100 on
      the recruiter rubric. Talks to /api/vetting. */
   function renderVetting(el) {
-    var vt = { tab: "desks", deskId: null, editing: null };
+    var vt = { tab: "desks", deskId: null, editing: null, creating: false };
     el.innerHTML = head("AI Vetting",
       "Bind a job description to a phone number and your cloned voice. Candidates opt in, then call in and talk to an AI recruiter that sounds like you — it greets them by name, references their LinkedIn experience, asks your top 3–4 qualifiers, and tells them the next step. Each call is recorded, transcribed, summarized, and scored 1–100.") +
       '<div class="vt-view"><div class="vt-tabs"></div><div id="vtBody">' + loading() + "</div></div>";
@@ -4019,7 +4019,7 @@
         "</div>" +
         '<div class="vt-formactions">' +
         '<button class="vt-btn vt-btn-primary" id="vtSave">' + (d.id ? "Save changes" : "Create desk") + "</button>" +
-        (d.id ? '<button class="vt-btn vt-btn-ghost" id="vtCancel">Cancel</button>' : "") +
+        '<button class="vt-btn vt-btn-ghost" id="vtCancel">Cancel</button>' +
         "</div></div>";
     }
     function collectDesk() {
@@ -4091,23 +4091,34 @@
       }).then(function (data) {
         var list = (data && data.desks) || [];
         var editing = vt.editing ? list.filter(function (x) { return x.id === vt.editing; })[0] : null;
-        body.innerHTML = (editing ? deskForm(editing) : deskForm(null)) +
-          (list.length ? list.map(deskCard).join("") : '<div class="vt-empty">No vetting desks yet — create one above, paste a JD, set your qualifiers, then “Go live”.</div>');
+        var showForm = !!(vt.creating || editing);
+        // List is the primary view; the create form is revealed on demand so the
+        // desk doesn't open onto a wall of inputs.
+        var toolbar = '<div class="vt-toolbar"><span class="vt-count">' +
+          list.length + " vetting desk" + (list.length === 1 ? "" : "s") + "</span>" +
+          (showForm ? "" : '<button class="vt-btn vt-btn-primary" id="vtNew">＋ New vetting desk</button>') +
+          "</div>";
+        body.innerHTML = toolbar +
+          (showForm ? (editing ? deskForm(editing) : deskForm(null)) : "") +
+          (list.length ? list.map(deskCard).join("")
+            : (showForm ? "" : '<div class="vt-empty">No vetting desks yet. Click <b>New vetting desk</b>, paste a job description, pick a number and your voice, then go live.</div>'));
         wireDesks(body);
       }).catch(function () { body.innerHTML = needsSetup(); });
     }
     function wireDesks(body) {
+      var newBtn = $("#vtNew");
+      if (newBtn) newBtn.addEventListener("click", function () { vt.creating = true; vt.editing = null; paintDesks(body); });
       var saveBtn = $("#vtSave");
       if (saveBtn) saveBtn.addEventListener("click", function () {
         var p = collectDesk();
         if (!p.name) { toast("Name the desk first."); return; }
         send("/vetting/desks", "PUT", p).then(function (r) {
           if (!r.ok) { toast("Save failed"); return; }
-          toast(vt.editing ? "Desk updated" : "Desk created"); vt.editing = null; paintDesks(body);
+          toast(vt.editing ? "Desk updated" : "Desk created"); vt.editing = null; vt.creating = false; paintDesks(body);
         });
       });
       var cancel = $("#vtCancel");
-      if (cancel) cancel.addEventListener("click", function () { vt.editing = null; paintDesks(body); });
+      if (cancel) cancel.addEventListener("click", function () { vt.editing = null; vt.creating = false; paintDesks(body); });
       var genQ = $("#vtGenQ");
       if (genQ) genQ.addEventListener("click", function () {
         var jd = $("#vtfJd") ? $("#vtfJd").value.trim() : "";
