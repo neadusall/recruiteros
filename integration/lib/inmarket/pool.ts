@@ -144,6 +144,24 @@ function slugifyCompany(name: string): string {
     .trim();
 }
 
+/** A rotating slice of raw company NAMES from the pool (highest-scored first), to feed the
+ *  free company-size resolver (Wikidata) in the background. `offset` rotates over cycles. */
+export async function poolCompanyNames(offset: number, limit: number): Promise<{ names: string[]; total: number }> {
+  const pool = (await load()).sort((a, b) => (b.lead.score ?? 0) - (a.lead.score ?? 0));
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (let i = 0; i < pool.length; i++) {
+    const idx = (offset + i) % pool.length;
+    const nm = (pool[idx].lead.company || "").trim();
+    const k = nm.toLowerCase();
+    if (!nm || seen.has(k)) continue;
+    seen.add(k);
+    names.push(nm);
+    if (names.length >= limit) break;
+  }
+  return { names, total: pool.length };
+}
+
 /** A rotating slice of company slugs from the pool, to seed the watchlist-driven sources
  *  (ATS boards, GitHub orgs) so they deepen role coverage for known companies. Highest-
  *  scored first; `offset` rotates through the whole pool over successive cycles. */

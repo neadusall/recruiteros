@@ -13,7 +13,8 @@
  */
 
 import { collectLeads } from "./index";
-import { mergeIntoPool, poolCompanySlugs } from "./pool";
+import { mergeIntoPool, poolCompanySlugs, poolCompanyNames } from "./pool";
+import { enrichSizesBatch } from "./companySize";
 
 // Sectors to keep warm — mirrors the UI's industry chips (non-tech first, since those
 // are the sectors free remote boards miss and Adzuna fills).
@@ -34,11 +35,13 @@ const COLLECT_CAP = 120;               // leads/sector for the targeted pulls
 const VACUUM_CAP = 600;                // leads for the keyword-less breadth pull
 const SEED_COMPANIES = 40;             // pool companies probed for deeper roles per cycle
 const SEED_CAP = 300;                  // leads from the seeding pass
+const SIZE_BATCH = 30;                 // companies resolved for headcount (Wikidata) per cycle
 const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
 
 let started = false;
 let cursor = 0;
 let seedCursor = 0;
+let sizeCursor = 0;
 
 async function runCycle(): Promise<void> {
   const now = new Date().toISOString();
@@ -84,6 +87,19 @@ async function runCycle(): Promise<void> {
     }
   } catch {
     /* seeding is best-effort; skip this tick on any failure */
+  }
+
+  // 4) RESOLVE COMPANY SIZE — look up real headcounts for a rotating batch of pool companies
+  //    from Wikidata (free, keyless), cached so the size filter carries authoritative sizes
+  //    over time. Companies Wikidata doesn't cover fall back to a marked estimate at search.
+  try {
+    const { names, total } = await poolCompanyNames(sizeCursor, SIZE_BATCH);
+    if (names.length) {
+      sizeCursor = total ? (sizeCursor + names.length) % total : 0;
+      await enrichSizesBatch(names, SIZE_BATCH);
+    }
+  } catch {
+    /* size enrichment is best-effort */
   }
 }
 

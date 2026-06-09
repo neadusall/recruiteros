@@ -839,7 +839,13 @@
       ? mgrs.some(function (m) { return imPicks[imPickKey(l.id, imMgrKey(m))]; })
       : !!imPicks[imPickKey(l.id, "")];
     var metaBits = [];
-    if (l.headcountBand) metaBits.push(esc(l.headcountBand));
+    if (l.headcountBand) {
+      // Authoritative employee count when resolved (Wikidata); otherwise the band, marked
+      // "~ est." when it's only a heuristic guess so it's never mistaken for a confirmed size.
+      if (l.employeeCount) metaBits.push('<span class="im-size" title="Employees (Wikidata)">👥 ' + Number(l.employeeCount).toLocaleString() + " employees</span>");
+      else if (l.sizeEstimated) metaBits.push('<span class="im-size im-size-est" title="Estimated from hiring footprint — confirmed size grows as Adzuna/enrichment fill in">👥 ~' + esc(l.headcountBand) + " est.</span>");
+      else metaBits.push('<span class="im-size">👥 ' + esc(l.headcountBand) + "</span>");
+    }
     if (l.location) metaBits.push(esc(l.location));
     metaBits.push(nRoles + " open role" + (nRoles === 1 ? "" : "s"));
     // Dates: when the role was posted online, and when we first added it to the database.

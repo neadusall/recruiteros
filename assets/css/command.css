@@ -405,6 +405,10 @@
 .im-dm { align-items: center; gap: 4px; }
 .im-dm-lbl { font-size: 12px; color: var(--text-dim); margin-right: 2px; }
 
+/* Company size in the lead meta */
+.im-size { white-space: nowrap; }
+.im-size-est { color: var(--text-dim); font-style: italic; }
+
 /* In-Market signal-type chips */
 .im-sig-wrap { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
 .im-sig-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); margin-bottom: 10px; }

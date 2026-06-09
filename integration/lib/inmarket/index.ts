@@ -83,6 +83,10 @@ export interface InMarketLead {
   domain?: string;
   industry?: string;
   headcountBand?: string;
+  /** Exact employee count when an authoritative free source (Wikidata) had one. */
+  employeeCount?: number;
+  /** True when the headcount band is a heuristic estimate, not an authoritative lookup. */
+  sizeEstimated?: boolean;
   location?: string;
   /** The signal that says they're hiring, e.g. "Posted 9 engineering roles in 7 days". */
   reason: string;
@@ -436,7 +440,11 @@ export async function searchInMarket(
   // so you never re-target (and double-send to) a company you're already working. This is
   // per-workspace — the global pool is shared, but each user's taken-list is their own.
   const taken = workspaceId ? await takenCompanies(workspaceId) : new Set<string>();
-  const fresh = (arr: InMarketLead[]) => applySizeFilter(applyDateFilter(applyTaken(arr, taken), q, nowIso), q);
+  // Resolve company sizes (free: Wikidata cache + heuristic) so the size filter has data.
+  const { loadSizeMap, fillSizes } = await import("./companySize");
+  const sizeMap = await loadSizeMap().catch(() => ({} as Record<string, never>));
+  const fresh = (arr: InMarketLead[]) =>
+    applySizeFilter(applyDateFilter(applyTaken(fillSizes(arr, sizeMap as never), taken), q, nowIso), q);
 
   try {
     const { ensureAccumulator } = await import("./accumulator");
