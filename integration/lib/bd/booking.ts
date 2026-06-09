@@ -18,6 +18,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { sendEmail, mtaPreferred } from "../providers/mta";
 import { toHtml } from "./draftContent";
 import { inferPersona } from "./personaMessaging";
+import { sanitizeDashes } from "./sanitize";
 import type { Variant } from "./experiment";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -71,7 +72,7 @@ Method (follow exactly):
 - Make the ask LOW-FRICTION and OPTIONAL, with a built-in easy out: offer a short call OR to simply send it over. Example shape: "Happy to walk you through what I'm seeing other [role]s do about [X], worth a quick call, or easier if I just send it over?"
 - Frame the call as THEIRS: short (about 20 minutes), no pitch, they set the agenda, useful whether or not you ever work together.
 - Include the calendar link plainly when one is provided.
-- Never use pressure, false scarcity, "quick question", "circle back", flattery, or hype. No emojis, no em dashes, no hashtags. Plain text. Money in US dollars with $.
+- Never use pressure, false scarcity, "quick question", "circle back", flattery, or hype. No emojis, no hashtags, NO dashes of any kind (no em dashes, no en dashes, no hyphens; compounds as separate words). Plain text. Money in US dollars with $.
 - Keep it short: email 60-110 words with a quiet, specific subject; linkedin 300-500 characters.
 
 The reader should feel: "this person is genuinely offering me something useful and making it easy," never "this person is trying to get me on a sales call."`;
@@ -86,7 +87,7 @@ Method (follow exactly):
 - Frame the call as theirs: about 20 minutes, no obligation.
 - Include the calendar link plainly when one is provided.
 - ABSOLUTE TRUTH: never fabricate a candidate, name, number, client, or outcome. If no real candidate detail is provided, speak truthfully and generally about the talent we represent in their market; never invent a specific person.
-- No pressure beyond honest timing, no flattery, no hype, no emojis, no em dashes, no hashtags. Plain text. US dollars with $.
+- No pressure beyond honest timing, no flattery, no hype, no emojis, no hashtags, NO dashes of any kind (no em dashes, no en dashes, no hyphens; compounds as separate words). Plain text. US dollars with $.
 - Keep it short: email 60-110 words with a quiet, specific subject; linkedin 300-500 characters.
 
 The reader should feel: "this person has someone I should actually meet," never "this is a mass sales pitch."`;
@@ -128,10 +129,11 @@ export async function generateEarnedAsk(
   } catch {
     /* empty -> body "" */
   }
-  let body = typeof o.body === "string" ? o.body.trim() : "";
-  // Belt-and-suspenders: make sure the link is actually present on email asks.
+  let body = typeof o.body === "string" ? sanitizeDashes(o.body.trim()) : "";
+  // Belt-and-suspenders: make sure the link is actually present on email asks
+  // (appended AFTER sanitizing, and sanitizeDashes protects URLs anyway).
   if (url && body && !body.includes(url)) body += `\n\n${url}`;
-  return { subject: typeof o.subject === "string" ? o.subject.trim() : undefined, body };
+  return { subject: typeof o.subject === "string" ? sanitizeDashes(o.subject.trim()) : undefined, body };
 }
 
 export interface BookingAskResult {

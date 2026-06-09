@@ -22,6 +22,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { sanitizeMessage } from "./sanitize";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
@@ -280,7 +281,7 @@ SOCIAL PROOF — you may use measured framing: "We've noticed...", "A trend we'v
 
 HARD STYLE RULES (house standard):
 - Plain text only. No emojis. No hashtags. No links unless explicitly provided.
-- Never use em dashes or en dashes. Use commas or periods.
+- NO dashes of any kind: no em dashes, no en dashes, and no hyphens. Use commas or periods, and write compounds as separate words (e.g. "revenue cycle", "multi site", "PE backed").
 - All money in US dollars with a $ sign.
 - Reference only the real, specific details provided. Do NOT invent facts, names, numbers, or events. If a detail is missing, write around it; never guess.
 - The market_observation must be defensible from the lead context provided.
@@ -343,7 +344,7 @@ export async function generatePersonaMessage(lead: BdLead): Promise<PersonaMessa
 
   const raw = response.content.find((b) => b.type === "text");
   const text = raw && raw.type === "text" ? raw.text : "{}";
-  return normalize(safeJson(text), lead);
+  return sanitizeMessage(normalize(safeJson(text), lead));
 }
 
 /* ------------------------------------------------------------------ */

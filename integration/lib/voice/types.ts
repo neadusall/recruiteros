@@ -90,6 +90,10 @@ export interface VoiceLead {
   callControlId?: string;
   /** Link back to a RecruiterOS Prospect when imported from a saved list. */
   prospectId?: string;
+  /** Per-lead voicemail script (BD weekly waves set a unique, value-first script
+   *  each week). When present it OVERRIDES the campaign's scriptTemplate for this
+   *  lead, so each wave's drop is different. Still merge-templated + cloned + gated. */
+  customScript?: string;
 }
 
 /** Consent for one cloned voice — the operator's OWN voice, captured on record. */

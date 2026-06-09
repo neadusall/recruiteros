@@ -58,7 +58,7 @@ function defaultCampaignId(): string | undefined {
 export async function voiceOnEmailSent(
   workspaceId: string,
   prospect: Prospect,
-  opts: { motion?: Motion; voiceCampaignId?: string } = {},
+  opts: { motion?: Motion; voiceCampaignId?: string; voicemailScript?: string; allowReenqueue?: boolean } = {},
 ): Promise<VoiceOnSendResult> {
   if (!voiceOnSendEnabled()) return { queued: false, reason: "disabled" };
   await ensureVoiceReady();
@@ -74,8 +74,10 @@ export async function voiceOnEmailSent(
   const number = (prospect.landlinePhone || prospect.phone || "").trim();
   if (!number) return { queued: false, reason: "no_number", campaignId };
 
-  // Idempotent: don't enqueue the same prospect/number twice.
-  if (findLead(campaignId, { prospectId: prospect.id, phone: number })) {
+  // Idempotent by default: don't enqueue the same prospect/number twice. The
+  // weekly waves opt out (allowReenqueue) so each wave is a fresh lead = a fresh
+  // drop; because the frequency cap is per-lead, new leads are always eligible.
+  if (!opts.allowReenqueue && findLead(campaignId, { prospectId: prospect.id, phone: number })) {
     return { queued: false, reason: "already_queued", campaignId };
   }
 
@@ -103,6 +105,7 @@ export async function voiceOnEmailSent(
     outcome: dialable ? "queued" : "filtered_mobile",
     attempts: 0,
     prospectId: prospect.id,
+    customScript: opts.voicemailScript,
   };
   addLead(workspaceId, campaignId, lead);
 

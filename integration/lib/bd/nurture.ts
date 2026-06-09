@@ -18,11 +18,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import { nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 import type { Variant } from "./experiment";
+import { sanitizeDashes } from "./sanitize";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
 
-export type NurtureChannel = "email" | "linkedin_comment" | "linkedin_voice_note" | "ask_email";
+export type NurtureChannel = "email" | "linkedin_comment" | "linkedin_voice_note" | "ask_email" | "email_voice_wave";
 
 export interface NurtureTouch {
   /** Weeks after enrollment this touch becomes due. */
@@ -33,22 +34,35 @@ export interface NurtureTouch {
 }
 
 /**
- * The 6-month plan: ~9 value touches, mixed channels, rising familiarity. Personal
- * touches from the operator; every one is generated fresh against the lead's role,
- * industry, and background so it stays relevant over the whole window.
+ * The cadence after the Day-0 opener (email + LinkedIn connect + voicemail):
+ *
+ *   MONTH 1 — weekly reinforcement waves (weeks 1-4). Each wave is an email PAIRED
+ *   with a voicemail drop to their direct line, or a LinkedIn voice note when we
+ *   have no dialable number. Every wave opens a DIFFERENT door (a fresh angle), never
+ *   "did you get my email". The blitz stops the instant they reply (halt/pause).
+ *
+ *   THEN — the 6-month nurture (lighter, every few weeks): value touches across
+ *   LinkedIn comment / email / voice note, with one tactful earned ask.
+ *
+ * Every touch is generated fresh against the lead's exact role, industry, and
+ * background. A reply at any point halts everything and triggers the booking ask.
  */
 export const NURTURE_PLAN: NurtureTouch[] = [
-  { week: 2,  channel: "linkedin_comment",    intent: "React to something they recently posted, or a public development in their sector, adding one genuinely useful insight. No ask." },
-  { week: 4,  channel: "email",               intent: "Share one relevant industry trend or data point tied to their role's current pressures. End on a question, never a pitch." },
-  { week: 7,  channel: "linkedin_voice_note", intent: "A warm, peer-level check-in referencing a real shift in their world. 20-35s, spoken aloud, human." },
-  // Curiosity is established by now -> ONE earned, low-friction ask (value + optional call + link).
-  { week: 9,  channel: "ask_email",           intent: "After several value touches, make the one tactful, value-framed ask for a short working call." },
+  // --- Month 1: weekly waves (email + voicemail, LinkedIn voice note fallback). Day 0
+  //     is the opener (wave 1) from the initial funnel; these are waves 2, 3, 4. ---
+  { week: 1, channel: "email_voice_wave", intent: "Wave 2: a fresh, specific angle on their situation, a DIFFERENT pressure or market point than the opener. Lead with value; mention only in passing that you also left a quick note. No ask." },
+  { week: 2, channel: "email_voice_wave", intent: "Wave 3: a concrete example or option relevant to their open role or function. New value, not a continuation of the last one." },
+  { week: 3, channel: "email_voice_wave", intent: "Wave 4: a forward looking thought on their market and why it matters now. Warm, still value first, an optional soft invitation to connect." },
+  // --- Transition: the one tactful ask, after a month of value with no reply ---
+  { week: 4, channel: "ask_email",        intent: "After a month of value with no reply, the single tactful, value framed ask for a short working call." },
+  // --- Months 2-6: the lighter long nurture ---
+  { week: 8,  channel: "linkedin_comment",    intent: "React to something they recently posted, or a sector development, adding one genuinely useful insight. No ask." },
   { week: 11, channel: "email",               intent: "Offer a useful perspective on a challenge their function is likely facing this quarter." },
-  { week: 13, channel: "linkedin_comment",    intent: "Engage thoughtfully on their content or a sector development; reinforce that you genuinely follow their space." },
-  { week: 16, channel: "email",               intent: "A forward-looking observation about where their industry is heading and what it means for their role." },
-  { week: 19, channel: "linkedin_voice_note", intent: "A short, human voice note acknowledging the season/cycle in their business; offer one idea, no ask." },
-  { week: 22, channel: "email",               intent: "A concise, valuable resource or framing relevant to their exact function. Still no pitch." },
-  { week: 26, channel: "email",               intent: "A natural re-open: reflect on the past months in their market and invite an easy reply." },
+  { week: 14, channel: "linkedin_voice_note", intent: "A warm, peer level check in referencing a real shift in their world. About 30 seconds, spoken aloud, human." },
+  { week: 17, channel: "email",               intent: "A forward looking observation about where their industry is heading and what it means for their role." },
+  { week: 20, channel: "linkedin_comment",    intent: "Engage thoughtfully on their content or a sector development; reinforce that you genuinely follow their space." },
+  { week: 23, channel: "email",               intent: "A concise, valuable resource or framing relevant to their exact function. Still no pitch." },
+  { week: 26, channel: "email",               intent: "A natural reconnect: reflect on the past months in their market and invite an easy reply." },
 ];
 
 /** Frozen lead context so every touch stays grounded without re-deriving it. */
@@ -61,6 +75,11 @@ export interface NurtureLead {
   persona?: string;
   profileSummary?: string;
   email?: string;
+  /** Direct line + fallback number for the weekly wave's voicemail drop. */
+  landlinePhone?: string;
+  phone?: string;
+  /** Free-text location -> the voicemail engine resolves the calling-window timezone. */
+  location?: string;
   linkedinUrl?: string;
   providerProfileId?: string;
   /** Unipile account to send LinkedIn nurture touches from (falls back to env). */
@@ -120,6 +139,24 @@ function weeksMs(w: number): number {
   return w * 7 * 24 * 60 * 60 * 1000;
 }
 
+// Weekly waves vary the day-of-week and time-of-day so they never land on the
+// same weekday/time twice (looks human, not automated). Weekends roll to Monday.
+const WAVE_DAY_SHIFT = [0, 1, 3, 2];
+const WAVE_HOUR = [10, 14, 16, 11];
+
+/** When a touch at plan index `idx` becomes due. Waves get varied weekday + hour. */
+function scheduleTouchAt(enrolledAt: string, touch: NurtureTouch, idx: number): string {
+  const d = new Date(Date.parse(enrolledAt) + weeksMs(touch.week));
+  if (touch.channel === "email_voice_wave") {
+    d.setDate(d.getDate() + WAVE_DAY_SHIFT[idx % WAVE_DAY_SHIFT.length]);
+    d.setHours(WAVE_HOUR[idx % WAVE_HOUR.length], (idx * 13) % 60, 0, 0);
+    const dow = d.getDay();
+    if (dow === 6) d.setDate(d.getDate() + 2); // Saturday -> Monday
+    else if (dow === 0) d.setDate(d.getDate() + 1); // Sunday -> Monday
+  }
+  return d.toISOString();
+}
+
 /* ---------------- enrollment (also the de-dupe ledger) ---------------- */
 
 export function isEnrolled(prospectId: string): boolean {
@@ -153,7 +190,7 @@ export function enroll(
     hold: opts.hold,
     enrolledAt: now,
     nextTouchIndex: 0,
-    nextDueAt: new Date(Date.parse(now) + weeksMs(first.week)).toISOString(),
+    nextDueAt: scheduleTouchAt(now, first, 0),
     lead,
     touchesSent: 0,
     pending: [],
@@ -201,7 +238,7 @@ export function advance(prospectId: string, at: Date = new Date()): void {
     e.status = "completed";
   } else {
     const next = NURTURE_PLAN[e.nextTouchIndex];
-    e.nextDueAt = new Date(Date.parse(e.enrolledAt) + weeksMs(next.week)).toISOString();
+    e.nextDueAt = scheduleTouchAt(e.enrolledAt, next, e.nextTouchIndex);
   }
   persist();
 }
@@ -229,7 +266,7 @@ Rules:
 - Be specific to their EXACT role and industry. Speak their language, metrics, and current pressures. Generalize to any title or sector with real depth; never sound like a template.
 - Deliver one genuinely useful idea, observation, or acknowledgement. Never ask for a meeting or for business.
 - Ground only in the real context provided. Never invent facts, posts, numbers, events, or client outcomes.
-- Plain text. No emojis, no hashtags, no em dashes or en dashes, no links unless provided.
+- Plain text. No emojis, no hashtags, NO dashes of any kind (no em dashes, no en dashes, no hyphens; write compounds as separate words), no links unless provided.
 - Channel limits:
   - email: 60-110 words, with a quiet, peer-level subject line (never a pitch).
   - linkedin_comment: <= 300 characters, reads as a natural, thoughtful comment a peer would leave on their content.
@@ -271,7 +308,7 @@ export async function generateNurtureTouch(lead: NurtureLead, touch: NurtureTouc
   }
   return {
     channel: touch.channel,
-    subject: typeof o.subject === "string" ? o.subject.trim() : undefined,
-    body: typeof o.body === "string" ? o.body.trim() : "",
+    subject: typeof o.subject === "string" ? sanitizeDashes(o.subject.trim()) : undefined,
+    body: typeof o.body === "string" ? sanitizeDashes(o.body.trim()) : "",
   };
 }

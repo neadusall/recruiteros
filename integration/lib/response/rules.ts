@@ -14,12 +14,14 @@ export const ROUTING_RULES: Record<ResponseClass, RoutingRule> = {
     class: "positive",
     label: "Positive",
     triggers: ["yes", "tell me more", "booking-link click", "let's talk"],
+    // A positive reply STOPS everything and hands the live conversation to the
+    // operator. No auto-reply, no auto-sent link: pause all channels + nurture and
+    // ping the operator to correspond manually.
     actions: [
-      { kind: "push_notification", detail: "Hot lead, call within 24h" },
-      { kind: "send_booking_link", detail: "Tactful earned-ask + calendar link" },
+      { kind: "push_notification", detail: "Hot lead replied — correspond manually now" },
       { kind: "pause_all_sequences" },
       { kind: "set_status", detail: "replied" },
-      { kind: "log_activity", detail: "Positive reply" },
+      { kind: "log_activity", detail: "Positive reply (manual handoff)" },
     ],
     sla: "same_day",
     escalate: true,

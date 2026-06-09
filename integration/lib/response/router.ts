@@ -108,6 +108,9 @@ export async function route(
       case "set_status":
         if (prospect && action.detail && STATUS_MAP[action.detail]) {
           prospect.status = STATUS_MAP[action.detail];
+          // A positive reply (status -> replied) is an A/B "engaged" event, even though
+          // we now hand the conversation to the operator instead of auto-sending a link.
+          if (prospect.status === "replied") recordOutcome(prospect.id, "engaged");
           if (prospect.status === "booked") { prospect.bookedAt = today(); recordOutcome(prospect.id, "booked"); }
           prospect.lastChannel = inbound.channel;
           await core.saveProspect(prospect);

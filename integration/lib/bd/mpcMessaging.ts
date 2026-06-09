@@ -22,6 +22,7 @@ import {
   PERSONAS, INDUSTRY_INTEL, BUSINESS_TRIGGERS, CHANNEL_LIMITS,
   type Persona, type Industry, type BusinessTrigger, type BdLead, type PersonaMessage,
 } from "./personaMessaging";
+import { sanitizeMessage } from "./sanitize";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
@@ -76,7 +77,7 @@ CHANNEL RULES (lead with the candidate, end with a low-friction ask):
 - linkedin_voice_note: 20-35s spoken script (~50-90 words). Warm, confident, candidate-led.
 - voicemail: 20-25s spoken script (~50-65 words). Candidate, why-fit, the ask, then the callback number.
 
-HARD STYLE RULES: plain text only; no emojis, no hashtags, no em dashes or en dashes; US dollars with $; reference only real, provided details; the reader should feel "this person has someone I should actually meet," never "this is a mass pitch."`;
+HARD STYLE RULES: plain text only; no emojis, no hashtags; NO dashes of any kind (no em dashes, no en dashes, no hyphens) — write compounds as separate words; US dollars with $; reference only real, provided details; the reader should feel "this person has someone I should actually meet," never "this is a mass pitch."`;
 
 function leadBrief(lead: MpcLead): string {
   const first = lead.firstName ?? lead.fullName?.split(/\s+/)[0];
@@ -114,7 +115,7 @@ export async function generateMpcMessage(lead: MpcLead): Promise<PersonaMessage>
 
   const raw = response.content.find((b) => b.type === "text");
   const text = raw && raw.type === "text" ? raw.text : "{}";
-  return normalize(safeJson(text));
+  return sanitizeMessage(normalize(safeJson(text)));
 }
 
 function safeJson(s: string): Record<string, unknown> {

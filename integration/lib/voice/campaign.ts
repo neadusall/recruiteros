@@ -186,7 +186,9 @@ export async function runDueDrops(
     // Assemble the personalized voicemail (cache-aware: identical names/roles/
     // static prose are reused at zero cost).
     const vars: MergeVars = { firstName: lead.firstName, role: lead.role, company: lead.company };
-    const segments = segmentScript(c.scriptTemplate, vars, c.persona);
+    // A per-lead custom script (the weekly wave's unique voicemail) overrides the
+    // campaign template, so each wave's drop is different; otherwise use the template.
+    const segments = segmentScript(lead.customScript || c.scriptTemplate, vars, c.persona);
     const drop = await assembleDrop(segments, c.voiceId, client);
     sum.synthesized += drop.synthesized;
     sum.cached += drop.cached;
