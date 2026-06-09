@@ -86,6 +86,8 @@ Each folder is a self-contained domain. Pick the one that matches the feature:
 ```
 docs/
 ├── STRUCTURE.md              ← you are here (the project map)
+├── INFRASTRUCTURE.md         Full tech-stack inventory + cost model + go-live key checklist + open decisions
+├── RECRUITEROS-BACKEND.md    Sending + voice-drop backend wiring (companion to CLAUDE.md). Email = self-hosted MTA (Instantly interim)
 ├── platform/                 Per-category backend reference (integration/lib domains)
 │   ├── README.md             "find your feature" index → which domain + reference
 │   ├── outreach-and-messaging.md   channels · outreach · sms · voice · sequences · campaigns · content · response
@@ -110,7 +112,8 @@ docs/
 │   └── jaggaer-vp-sales-east-sourcing.csv   (used by the runbook above)
 └── design/                   Design / planning docs for in-flight work
     ├── jd-to-1000-prospects.md
-    └── bd-engine-next-steps.md
+    ├── bd-engine-next-steps.md
+    └── self-hosted-email-infrastructure.md   Build plan for the owned email sender (Postal MTA), replacing Instantly
 ```
 
 > **Developing a backend feature? Start at [`docs/platform/README.md`](platform/README.md)** —

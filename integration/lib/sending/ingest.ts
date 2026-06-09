@@ -1,0 +1,65 @@
+/**
+ * RecruiterOS · Delivery-event ingest
+ * Apply a normalized delivery event (from the Postal webhook) to the metrics +
+ * suppression + governor. One entry point so the webhook stays thin.
+ */
+
+import { resolveSender, saveDomain, saveMailbox, recordEvent, suppress } from "./store";
+import { ensureMetrics, runGovernor } from "./governor";
+import type { SendEvent } from "./types";
+
+export type DeliveryEventType = "delivered" | "bounce" | "complaint" | "open";
+
+/**
+ * Apply one event. `from` maps it to a domain/mailbox; `to` is the recipient
+ * (suppressed on bounce/complaint). Bumps counters, records the event, and runs
+ * the governor so a bad domain pauses immediately.
+ */
+export async function applyDeliveryEvent(ev: { type: DeliveryEventType; from: string; to: string; detail?: string }): Promise<void> {
+  const resolved = await resolveSender(ev.from);
+  if (!resolved) return;
+  const { workspaceId, mailbox, domain } = resolved;
+
+  if (domain) {
+    const m = ensureMetrics(domain);
+    if (ev.type === "delivered") m.delivered += 1;
+    else if (ev.type === "bounce") m.bounced += 1;
+    else if (ev.type === "complaint") m.complained += 1;
+    else if (ev.type === "open") m.opened += 1;
+    await saveDomain(domain);
+  }
+  if (mailbox) {
+    if (ev.type === "bounce") mailbox.bounced += 1;
+    if (ev.type === "complaint") mailbox.complained += 1;
+    await saveMailbox(mailbox);
+  }
+
+  if (ev.type === "bounce") await suppress(ev.to, "bounce", "postal");
+  if (ev.type === "complaint") await suppress(ev.to, "complaint", "postal");
+
+  await recordEvent({
+    type: ev.type as SendEvent["type"],
+    domainId: domain?.id,
+    mailboxId: mailbox?.id,
+    to: ev.to,
+    detail: ev.detail,
+  });
+
+  // Trip the governor right away on negative signals.
+  if (ev.type === "bounce" || ev.type === "complaint") await runGovernor(workspaceId);
+}
+
+/** Map a raw Postal webhook event name to our normalized type (or null to ignore). */
+export function mapPostalEvent(name: string): DeliveryEventType | null {
+  switch (name) {
+    case "MessageDelivered": return "delivered";
+    case "MessageDeliveryFailed":
+    case "MessageBounced":
+    case "MessageHeld": return "bounce";
+    case "MessageSpamComplaint":
+    case "DomainSpamComplaint": return "complaint";
+    case "MessageLoaded":
+    case "MessageLinkClicked": return "open";
+    default: return null;
+  }
+}

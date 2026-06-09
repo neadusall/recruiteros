@@ -13,8 +13,8 @@ in that folder unless noted.
 
 Everything for the voicemail loop is already built **except** the part that finds a
 person's direct phone number — that's what we just wired (the Apify "Direct Dials"
-actor). Get that one piece live and tested first. The bigger items (Winnr email,
-database) come after and are separate tracks.
+actor). Get that one piece live and tested first. The bigger items (self-hosted
+email, database) come after and are separate tracks.
 
 ---
 
@@ -115,17 +115,28 @@ These are the two larger decisions you made. They're real projects, not quick
 toggles. Tackle them one at a time, and tell me when you want to start one — I'll
 build it in small slices and stop for you to test each.
 
-### Track A — The automatic "email sent → voicemail" trigger
-Right now voicemail is scheduled as part of a sequence. The spec wants it to fire
-automatically the moment an email is sent. This is the **one genuine functional gap**
-left in the core loop — the voice machinery already works, nothing just *fires* it on
-send yet. **This is the smallest of the big items and the highest payoff.** Good one
-to do first.
+### Track A — The automatic "email sent → voicemail" trigger  ✅ BUILT
+The spec wants voicemail to fire automatically the moment an email is sent. **Done.**
+A successful email send now enqueues the prospect into a designated voice campaign
+(`lib/voice/onEmailSent.ts`, hooked into `sendTouch` in `lib/channels/index.ts`), and a
+new **voice cron** (`/api/voice/cron`, mirrors `/api/linkedin/cron`) ticks every running
+campaign through `runDueDrops` — so leads dial only inside their own local window, capped
+and line-type-filtered, reusing every existing gate. **OFF by default** (opt-in via
+`RECRUITEROS_VOICE_ON_SEND=1` + `RECRUITEROS_VOICE_ON_SEND_CAMPAIGN=<launched campaign id>`),
+so turning email on never silently starts cold-calling.
 
-### Track B — Winnr + Mailivery email
-Today email runs through Instantly. You chose to build the Winnr (50 mailboxes, your
-own tracking pixel, IMAP reply reading) + Mailivery (warmup) stack instead. This is a
-large net-new build. You'll need: Winnr API/SMTP creds and a Mailivery API key.
+**Owner steps to activate:** create + attest + launch a voice campaign, set the two env
+vars above, and point your scheduler at `POST /api/voice/cron` (with `x-cron-secret`) every
+~15 min during evening windows. Readiness is reported by `GET /api/preflight`.
+
+### Track B — Self-hosted email infrastructure
+Today email runs through Instantly (the interim sender). You chose to build our **own**
+sending stack instead — domains, mailboxes, **Postal MTA**, warm-up, and deliverability
+monitoring — and swap the `email` channel onto it. The Sequences Library / Campaign
+Studio / campaign + email-sequencing structure stays the same; only the sender underneath
+changes. This is a large net-new build, but the Phase-1 foundation (registry + DNS
+automation + Hetzner provisioning + the Sending tab) is already shipped. Full plan:
+`self-hosted-email-infrastructure.md`.
 
 ### Track C — Move data into a real database
 Today data is stored as JSON snapshots. You chose to migrate to proper SQL tables
