@@ -18,19 +18,27 @@ import { NextResponse } from "next/server";
 import { requireCronAuth } from "../../../../../lib/linkedin/auth";
 import { ensureNurtureReady, dueTouches, generateNurtureTouch, advance, addPending } from "../../../../../lib/bd/nurture";
 import { dispatchNurture } from "../../../../../lib/bd/nurtureSend";
+import { generateEarnedAsk } from "../../../../../lib/bd/booking";
+import { ensureExperimentReady } from "../../../../../lib/bd/experiment";
 
 async function run(req: Request) {
   const auth = requireCronAuth(req);
   if (!auth.ok) return auth.response;
 
   await ensureNurtureReady();
+  await ensureExperimentReady();
   const at = new Date();
   const due = dueTouches(at);
   const results: Array<Record<string, unknown>> = [];
 
   for (const { enrollment: e, touch } of due) {
     try {
-      const content = await generateNurtureTouch(e.lead, touch);
+      // The earned-ask rung uses the conversion copy in this prospect's A/B model;
+      // every other rung is a value touch.
+      const content =
+        touch.channel === "ask_email"
+          ? { channel: touch.channel, ...(await generateEarnedAsk(e.lead, { channel: "email", variant: e.lead.variant })) }
+          : await generateNurtureTouch(e.lead, touch);
       const sent = await dispatchNurture(e, touch, content);
 
       // A LinkedIn touch with no account/profile context is generated but not yet

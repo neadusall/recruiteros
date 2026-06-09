@@ -47,6 +47,7 @@ export type RoutingActionKind =
   | "push_notification"   // ping the recruiter
   | "pause_all_sequences" // stop every channel for this prospect
   | "advance_step"        // soft yes: send asset + nudge forward one touch
+  | "send_booking_link"   // positive: send the tactful earned-ask + calendar link
   | "send_asset"          // attach the campaign's case study / comp benchmark
   | "tag"                 // tag in the ATS ("engaged", "advocate", ...)
   | "set_status"          // flip the prospect lifecycle status

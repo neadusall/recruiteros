@@ -16,6 +16,7 @@ export const ROUTING_RULES: Record<ResponseClass, RoutingRule> = {
     triggers: ["yes", "tell me more", "booking-link click", "let's talk"],
     actions: [
       { kind: "push_notification", detail: "Hot lead, call within 24h" },
+      { kind: "send_booking_link", detail: "Tactful earned-ask + calendar link" },
       { kind: "pause_all_sequences" },
       { kind: "set_status", detail: "replied" },
       { kind: "log_activity", detail: "Positive reply" },

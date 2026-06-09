@@ -7,8 +7,10 @@
  */
 
 import { generatePersonaMessage, inferPersona, type BdLead, type PersonaMessage } from "./personaMessaging";
+import { generateMpcMessage } from "./mpcMessaging";
 import { renderSegment } from "../voice/clones";
 import { getVoiceClient } from "../voice/provider";
+import type { Variant } from "./experiment";
 import type { Prospect } from "../core/types";
 
 export interface DraftPayload {
@@ -22,6 +24,8 @@ export interface DraftPayload {
   voicemailScript: string;
   businessTrigger: string[];
   confidenceScore: number;
+  /** Which A/B model wrote this package. */
+  variant: Variant;
   /** Echoed back so callers can persist the frozen lead context (nurture grounding). */
   industry: string;
   persona: string;
@@ -63,9 +67,17 @@ export function toHtml(body: string): string {
     .join("\n");
 }
 
-/** Generate + flatten the full outreach package for one lead. */
-export async function draftContent(lead: BdLead, opts: { renderAudio?: boolean } = {}): Promise<DraftPayload> {
-  const message = await generatePersonaMessage(lead);
+/** Generate + flatten the full outreach package for one lead, in the given A/B model
+ *  ("mpc" = Most Placeable Candidate, forward; "consultative" = advisory). */
+export async function draftContent(
+  lead: BdLead,
+  opts: { renderAudio?: boolean; variant?: Variant; candidate?: string } = {},
+): Promise<DraftPayload> {
+  const variant: Variant = opts.variant ?? "consultative";
+  const message =
+    variant === "mpc"
+      ? await generateMpcMessage({ ...lead, candidate: opts.candidate })
+      : await generatePersonaMessage(lead);
 
   let voiceNoteAudioUrl: string | undefined;
   if (opts.renderAudio !== false && message.linkedin_voice_note) {
@@ -92,6 +104,7 @@ export async function draftContent(lead: BdLead, opts: { renderAudio?: boolean }
     voicemailScript: message.voicemail,
     businessTrigger: message.business_trigger,
     confidenceScore: message.confidence_score,
+    variant,
     industry: message.industry,
     persona: message.persona,
     message,

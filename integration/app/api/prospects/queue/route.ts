@@ -20,6 +20,7 @@ import { requireAuth } from "../../../../lib/linkedin/auth";
 import { getCore } from "../../../../lib/core/repository";
 import { draftContent, leadFromProspect } from "../../../../lib/bd/draftContent";
 import { ensureNurtureReady, isEnrolled, enroll, type NurtureLead } from "../../../../lib/bd/nurture";
+import { ensureExperimentReady, assignVariant, recordOutcome } from "../../../../lib/bd/experiment";
 
 function minConfidence(): number {
   const v = Number(process.env.RECRUITEROS_BD_MIN_CONFIDENCE);
@@ -39,20 +40,23 @@ export async function GET(req: Request) {
   const threshold = minConfidence();
 
   await ensureNurtureReady();
+  await ensureExperimentReady();
 
   const all = await getCore().listProspects(ws);
   // Signal-sourced BD prospects not yet enrolled (enrollment = the de-dupe ledger).
   const candidates = all.filter((p) => p.category === "in_market" && !isEnrolled(p.id)).slice(0, limit);
 
   const prospects: Array<Record<string, unknown>> = [];
-  const held: Array<{ id: string; confidenceScore: number }> = [];
+  const held: Array<{ id: string; confidenceScore: number; variant: string }> = [];
   const errors: Array<{ id: string; error: string }> = [];
 
   for (const p of candidates) {
+    // Stable 50/50 A/B assignment; every touch this prospect gets stays in this model.
+    const variant = assignVariant(p.id);
     let draft;
     try {
       const lead = leadFromProspect(p, { sender, callbackNumber, hiringActivity: (p as any).hiringSignal });
-      draft = await draftContent(lead, { renderAudio: true });
+      draft = await draftContent(lead, { renderAudio: true, variant });
     } catch (e: any) {
       errors.push({ id: p.id, error: e?.message ?? "generation_failed" });
       continue; // leave un-enrolled so a later pull retries
@@ -69,10 +73,12 @@ export async function GET(req: Request) {
       email: p.email,
       linkedinUrl: p.linkedinUrl,
       providerProfileId: (p as any).providerProfileId,
+      variant,
     };
 
     if (draft.confidenceScore >= threshold) {
       enroll(ws, p.id, frozen, { status: "active" });
+      recordOutcome(p.id, "enrolled");
       prospects.push({
         id: p.id,
         firstName: p.firstName,
@@ -80,6 +86,7 @@ export async function GET(req: Request) {
         email: p.email,
         linkedinUrl: p.linkedinUrl,
         providerProfileId: (p as any).providerProfileId,
+        variant,
         subject: draft.subject,
         html: draft.html,
         text: draft.text,
@@ -93,7 +100,7 @@ export async function GET(req: Request) {
       });
     } else {
       enroll(ws, p.id, frozen, { status: "needs_review", hold: "low_confidence" });
-      held.push({ id: p.id, confidenceScore: draft.confidenceScore });
+      held.push({ id: p.id, confidenceScore: draft.confidenceScore, variant });
     }
   }
 
