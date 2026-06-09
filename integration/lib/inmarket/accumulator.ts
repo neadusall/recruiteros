@@ -28,16 +28,34 @@ const INDUSTRIES: string[] = [
   "Data / Analytics", "Sales / GTM",
 ];
 
-const CYCLE_MS = 90 * 60 * 1000;       // refresh every 90 minutes
-const PER_CYCLE = 3;                    // industries per cycle
-const COLLECT_CAP = 100;               // leads/sector → Adzuna pages = ceil(100/50)=2 (gentle)
-const FIRST_DELAY_MS = 12_000;          // let the server settle, then start pulling
+const CYCLE_MS = 60 * 60 * 1000;       // refresh every 60 minutes
+const PER_CYCLE = 4;                    // targeted industries per cycle
+const COLLECT_CAP = 120;               // leads/sector for the targeted pulls
+const VACUUM_CAP = 600;                // leads for the keyword-less breadth pull
+const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
 
 let started = false;
 let cursor = 0;
 
 async function runCycle(): Promise<void> {
   const now = new Date().toISOString();
+
+  // 1) BREADTH VACUUM — pull every free board with NO industry keyword, so every hiring
+  //    company on every board enters the pool. Industry filtering still happens later at
+  //    SEARCH time (queryPool), so users keep their per-sector view. This is the main fix
+  //    for low inflow: the old per-industry pulls discarded ~90% of each board (a remote
+  //    SaaS role doesn't contain the token "healthcare"), starving the pool. The vacuum
+  //    keeps it all, and a higher cap also unlocks deeper pagination (e.g. The Muse).
+  try {
+    const all = await collectLeads({ limit: VACUUM_CAP }, now, VACUUM_CAP);
+    await mergeIntoPool(all);
+  } catch {
+    /* vacuum failed this tick; the targeted pulls below still run */
+  }
+
+  // 2) TARGETED DEPTH — rotate through sectors so the keyword-driven sources (Adzuna's
+  //    `what=`, Google News RSS) pull sector-specific companies the generic feeds under-
+  //    cover. This is where non-tech breadth comes from once Adzuna is keyed.
   for (let i = 0; i < PER_CYCLE; i++) {
     const industry = INDUSTRIES[cursor % INDUSTRIES.length];
     cursor++;
