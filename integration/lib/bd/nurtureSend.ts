@@ -39,10 +39,10 @@ export async function dispatchNurture(
   touch: NurtureTouch,
   content: NurtureContent,
 ): Promise<NurtureSendResult> {
-  // EMAIL — send now through the owned MTA.
-  if (touch.channel === "email") {
+  // EMAIL (incl. the earned-ask rung) — send now through the owned MTA.
+  if (touch.channel === "email" || touch.channel === "ask_email") {
     if (!e.lead.email || !mtaPreferred()) {
-      return { ok: false, channel: "email", staged: true, detail: "no_email_or_mta" };
+      return { ok: false, channel: touch.channel, staged: true, detail: "no_email_or_mta" };
     }
     const m = await sendEmail(e.workspaceId, {
       to: e.lead.email,

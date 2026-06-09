@@ -10,6 +10,7 @@ import { getAts } from "../ats";
 import { rid, nowIso, today } from "../core/ids";
 import { suppress } from "./suppression";
 import { ruleFor } from "./rules";
+import { variantOf, recordOutcome } from "../bd/experiment";
 import type { Classification, InboundResponse, ProcessedResponse } from "./types";
 import type { ProspectStatus } from "../core/types";
 
@@ -63,6 +64,36 @@ export async function route(
         taken.push("advanced +1 touch");
         break;
 
+      case "send_booking_link":
+        if (prospect) {
+          try {
+            recordOutcome(prospect.id, "engaged");
+            const { sendBookingAsk } = await import("../bd/booking");
+            const r = await sendBookingAsk(
+              inbound.workspaceId,
+              {
+                email: prospect.email,
+                firstName: prospect.firstName,
+                fullName: prospect.fullName,
+                title: prospect.title,
+                company: prospect.company,
+                profileSummary: prospect.headline,
+              },
+              { priorContext: inbound.text, variant: variantOf(prospect.id) },
+            );
+            taken.push(
+              r.mode === "send"
+                ? `sent booking ask (${r.provider})`
+                : r.mode === "draft"
+                  ? "drafted booking ask (one-click send)"
+                  : `booking ask skipped (${r.detail})`,
+            );
+          } catch (e: any) {
+            taken.push(`booking ask failed (${e?.message ?? "error"})`);
+          }
+        }
+        break;
+
       case "send_asset":
         taken.push("queued campaign asset (case study / comp benchmark)");
         break;
@@ -77,7 +108,7 @@ export async function route(
       case "set_status":
         if (prospect && action.detail && STATUS_MAP[action.detail]) {
           prospect.status = STATUS_MAP[action.detail];
-          if (prospect.status === "booked") prospect.bookedAt = today();
+          if (prospect.status === "booked") { prospect.bookedAt = today(); recordOutcome(prospect.id, "booked"); }
           prospect.lastChannel = inbound.channel;
           await core.saveProspect(prospect);
           taken.push(`status -> ${prospect.status}`);
@@ -143,6 +174,7 @@ export async function markBooked(prospectId: string): Promise<void> {
   p.status = "booked";
   p.bookedAt = today();
   await core.saveProspect(p);
+  recordOutcome(p.id, "booked");
   const ref = p.atsPersonId ?? p.email ?? prospectId;
   const eventId = await ats.pushPersonEvent({
     personRef: ref,

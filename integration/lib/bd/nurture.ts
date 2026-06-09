@@ -17,11 +17,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
+import type { Variant } from "./experiment";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
 
-export type NurtureChannel = "email" | "linkedin_comment" | "linkedin_voice_note";
+export type NurtureChannel = "email" | "linkedin_comment" | "linkedin_voice_note" | "ask_email";
 
 export interface NurtureTouch {
   /** Weeks after enrollment this touch becomes due. */
@@ -40,7 +41,9 @@ export const NURTURE_PLAN: NurtureTouch[] = [
   { week: 2,  channel: "linkedin_comment",    intent: "React to something they recently posted, or a public development in their sector, adding one genuinely useful insight. No ask." },
   { week: 4,  channel: "email",               intent: "Share one relevant industry trend or data point tied to their role's current pressures. End on a question, never a pitch." },
   { week: 7,  channel: "linkedin_voice_note", intent: "A warm, peer-level check-in referencing a real shift in their world. 20-35s, spoken aloud, human." },
-  { week: 10, channel: "email",               intent: "Offer a useful perspective on a challenge their function is likely facing this quarter." },
+  // Curiosity is established by now -> ONE earned, low-friction ask (value + optional call + link).
+  { week: 9,  channel: "ask_email",           intent: "After several value touches, make the one tactful, value-framed ask for a short working call." },
+  { week: 11, channel: "email",               intent: "Offer a useful perspective on a challenge their function is likely facing this quarter." },
   { week: 13, channel: "linkedin_comment",    intent: "Engage thoughtfully on their content or a sector development; reinforce that you genuinely follow their space." },
   { week: 16, channel: "email",               intent: "A forward-looking observation about where their industry is heading and what it means for their role." },
   { week: 19, channel: "linkedin_voice_note", intent: "A short, human voice note acknowledging the season/cycle in their business; offer one idea, no ask." },
@@ -62,6 +65,8 @@ export interface NurtureLead {
   providerProfileId?: string;
   /** Unipile account to send LinkedIn nurture touches from (falls back to env). */
   linkedinAccountId?: string;
+  /** A/B model this prospect is in, so nurture + the ask stay in the same model. */
+  variant?: Variant;
 }
 
 export type NurtureStatus = "active" | "needs_review" | "paused" | "completed";
