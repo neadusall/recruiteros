@@ -135,23 +135,26 @@ const MANAGER_TITLE_BY_FUNCTION: Record<JobFunction, string> = {
   other: "Hiring Manager",
 };
 
-/** The hiring-manager ladder per function: the DIRECT manager who owns the day-to-day
- *  hire, then the SENIOR leader who owns the function. Surfacing both gives the recruiter
- *  more than one person to target per role, so they can refine who they reach. */
+/** The hiring-manager ladder per function, DEEPEST FIRST-to-most-senior: the direct
+ *  manager, their director, the VP/function head, the C-level owner, and the in-house
+ *  talent/recruiting partner who runs the req. Surfacing up to five gives the recruiter a
+ *  one-click choice of how many people to touch per role (1 / 3 / 5) so a single open role
+ *  becomes multiple warm contacts at the company. The VP rung (index 2) is where a resolved
+ *  real decision-maker's name is attached. */
 const MANAGER_LADDER: Record<JobFunction, string[]> = {
-  engineering: ["Engineering Manager", "VP / Head of Engineering"],
-  product: ["Group Product Manager", "Head of Product / CPO"],
-  design: ["Design Manager", "Head of Design"],
-  data: ["Data / Analytics Manager", "Head of Data / Analytics"],
-  sales: ["Sales Manager", "VP Sales / Revenue"],
-  marketing: ["Marketing Manager", "Head of Marketing / CMO"],
-  finance: ["Finance Manager", "VP Finance / CFO"],
-  operations: ["Operations Manager", "VP / Head of Operations"],
-  people_hr: ["Talent / Recruiting Manager", "Head of Talent / People"],
-  customer_success: ["Customer Success Manager", "VP Customer Success"],
-  legal: ["Senior Counsel", "General Counsel"],
-  executive: ["Chief of Staff", "CEO / Founder"],
-  other: ["Hiring Manager", "Department Head"],
+  engineering: ["Engineering Manager", "Director of Engineering", "VP / Head of Engineering", "CTO", "Technical Recruiter / Talent Partner"],
+  product: ["Senior Product Manager", "Group Product Manager", "VP Product / Head of Product", "Chief Product Officer", "Recruiting / Talent Partner"],
+  design: ["Design Lead", "Design Manager", "Director of Design", "VP / Head of Design", "Recruiting / Talent Partner"],
+  data: ["Data / Analytics Manager", "Director of Data", "VP / Head of Data", "Chief Data Officer", "Technical Recruiter / Talent Partner"],
+  sales: ["Sales Manager", "Director of Sales", "VP Sales", "Chief Revenue Officer", "Sales Recruiter / Talent Partner"],
+  marketing: ["Marketing Manager", "Director of Marketing", "VP Marketing", "CMO", "Recruiting / Talent Partner"],
+  finance: ["Finance Manager", "Director of Finance", "VP Finance", "CFO", "Recruiting / Talent Partner"],
+  operations: ["Operations Manager", "Director of Operations", "VP / Head of Operations", "COO", "Recruiting / Talent Partner"],
+  people_hr: ["Recruiting Manager", "Talent Acquisition Lead", "Director of People", "VP People / CHRO", "Head of Talent"],
+  customer_success: ["Customer Success Manager", "Director of Customer Success", "VP Customer Success", "Chief Customer Officer", "Recruiting / Talent Partner"],
+  legal: ["Legal Counsel", "Senior Counsel", "Director of Legal", "General Counsel", "Recruiting / Talent Partner"],
+  executive: ["Chief of Staff", "VP / Head of Function", "COO", "CEO / Founder", "Head of Talent"],
+  other: ["Hiring Manager", "Senior Manager", "Department Head", "Director", "Recruiting / Talent Partner"],
 };
 
 /**
@@ -165,17 +168,18 @@ function hiringManagersFor(roles: string[] | undefined, buyer?: Person): HiringM
   const buyerFn = buyer?.title ? classifyTitle(buyer.title).function : undefined;
   const seen = new Set<string>();
   const out: HiringManagerLead[] = [];
-  for (const role of roles) {
+  for (const role of roles.slice(0, 8)) {            // bound payload across many open roles
     const rkey = role.trim().toLowerCase();
     if (!rkey) continue;
     const fn = classifyTitle(role).function;
     const ladder = MANAGER_LADDER[fn] || [MANAGER_TITLE_BY_FUNCTION[fn]];
     const matchesBuyer = !!buyerFn && (fn === buyerFn || buyerFn === "executive");
+    const attachIdx = Math.min(2, ladder.length - 1); // attach the resolved person at the VP rung
     ladder.forEach((managerTitle, idx) => {
       const k = rkey + "::" + managerTitle.toLowerCase();
       if (seen.has(k)) return;
       seen.add(k);
-      const attach = matchesBuyer && idx === ladder.length - 1; // real person → senior rung
+      const attach = matchesBuyer && idx === attachIdx; // real person → leadership rung
       out.push({
         role,
         function: fn,
@@ -330,6 +334,17 @@ function applyDateFilter(leads: InMarketLead[], q: InMarketQuery, nowIso: string
   return leads.filter((l) => within(l.postedAt ?? l.signalAt, pd) && within(l.addedAt, ad));
 }
 
+/** Narrow by company size: keep only leads whose resolved headcount band is in the
+ *  requested set. Leads with no resolved size are excluded when a size filter is active
+ *  (true narrowing). Free job-board leads often lack a size; Adzuna + contact enrichment
+ *  fill it, so coverage of this filter grows as those are enabled. */
+function applySizeFilter(leads: InMarketLead[], q: InMarketQuery): InMarketLead[] {
+  const bands = q.headcountBands?.filter(Boolean) as string[] | undefined;
+  if (!bands?.length) return leads;
+  const set = new Set(bands);
+  return leads.filter((l) => !!l.headcountBand && set.has(l.headcountBand));
+}
+
 /**
  * Search the market for companies in-market for recruiting help. Free sources
  * only; returns ranked leads (highest intent first). Network failures degrade to
@@ -421,7 +436,7 @@ export async function searchInMarket(
   // so you never re-target (and double-send to) a company you're already working. This is
   // per-workspace — the global pool is shared, but each user's taken-list is their own.
   const taken = workspaceId ? await takenCompanies(workspaceId) : new Set<string>();
-  const fresh = (arr: InMarketLead[]) => applyDateFilter(applyTaken(arr, taken), q, nowIso);
+  const fresh = (arr: InMarketLead[]) => applySizeFilter(applyDateFilter(applyTaken(arr, taken), q, nowIso), q);
 
   try {
     const { ensureAccumulator } = await import("./accumulator");

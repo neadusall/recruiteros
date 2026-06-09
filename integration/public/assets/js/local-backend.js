@@ -337,6 +337,11 @@
         var cutoff = Date.now() - pw * 86400000;
         leads = leads.filter(function (l) { var t = Date.parse(l.postedAt || l.signalAt || ""); return !isNaN(t) && t >= cutoff; });
       }
+      // Company-size narrow: only leads whose headcount band is selected.
+      var sizes = body && body.headcountBands;
+      if (sizes && sizes.length) {
+        leads = leads.filter(function (l) { return l.headcountBand && sizes.indexOf(l.headcountBand) >= 0; });
+      }
       // Suppress companies already taken into this workspace's Prospects (no dup outreach).
       var taken = {};
       (d.prospects || []).forEach(function (p) { if (p.company) taken[String(p.company).toLowerCase().trim()] = 1; });
