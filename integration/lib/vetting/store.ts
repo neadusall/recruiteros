@@ -175,6 +175,11 @@ export function findCandidate(deskId: string, phone: string): CandidateProfile |
   return store.candidates.find((c) => c.deskId === deskId && sameNumber(c.phone, phone));
 }
 
+/** Fetch a candidate by id (used by the scorer to pull their LinkedIn background). */
+export function getCandidateById(id: string): CandidateProfile | undefined {
+  return store.candidates.find((c) => c.id === id);
+}
+
 /**
  * Upsert a candidate from an opt-in submission. Dedupes per desk by phone so a
  * candidate who re-submits updates their record instead of creating a twin.

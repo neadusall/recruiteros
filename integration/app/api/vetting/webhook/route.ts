@@ -17,7 +17,7 @@ import { verifyTelnyxVoice } from "../../../../lib/providers";
 import { recordUsage } from "../../../../lib/billing/ledger";
 import { rateCost } from "../../../../lib/billing/rates";
 import {
-  findCallByEngineId, getDeskById, updateCall, scoreCall,
+  findCallByEngineId, getDeskById, updateCall, scoreCall, getCandidateById,
   type TranscriptTurn,
 } from "../../../../lib/vetting";
 
@@ -112,7 +112,9 @@ export async function POST(req: Request) {
   }
 
   try {
-    const s = await scoreCall(desk, transcript);
+    // Pair the JD must-haves against the call AND the caller's LinkedIn background.
+    const candidate = call.candidateId ? getCandidateById(call.candidateId) : undefined;
+    const s = await scoreCall(desk, transcript, candidate?.enrichment);
     updateCall(call.id, {
       status: "scored",
       scores: s.scores,

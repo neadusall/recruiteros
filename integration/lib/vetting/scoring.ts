@@ -20,6 +20,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type {
   VettingDesk, TranscriptTurn, RubricScores, QuestionVerdict, AgentRealismScore,
+  CandidateEnrichment,
 } from "./types";
 import { RUBRIC_MAX } from "./types";
 
@@ -42,7 +43,8 @@ Score the CANDIDATE on this 100-point rubric. Award whole numbers up to each cap
 Hidden signals to weigh inside the above: ownership language ("I led/implemented" vs "we/the team/my manager"), pace, listening (answers the ACTUAL question), executive presence (calm, doesn't over-explain).
 
 Also produce:
-- verdicts: for EACH provided qualifier id, a pass/fail against its passCriteria, the candidate's answer in one line, and a one-line rationale. If the topic never came up, pass=false and say it wasn't covered.
+- verdicts: for EACH provided qualifier id, decide PASS or FAIL. Each qualifier's passCriteria is derived from the job's MUST-HAVE requirements — treat it as the bar to clear. Judge it by pairing that bar against THREE things together: (a) what the candidate SAID on the call, (b) their LinkedIn experience/background (provided below, when available), and (c) HOW they answered — whether they backed it with specifics, owned it ("I led…"), answered the actual question, and came across credible vs. vague/evasive. Pass only when there's concrete, credible evidence — from the conversation and/or their background — that genuinely meets the bar AND the way they answered supports it. If the content fits on paper but the answer was vague, evasive, or unconvincing, lean FAIL and say why. If the topic never came up and nothing in their background speaks to it, pass=false ("not covered"). In each rationale, note where the evidence came from (call / background / both) and a word on delivery.
+- The "way they answer" — delivery, clarity, ownership, confidence under light pressure — is itself a DECIDING factor, not just color. A candidate who can't articulate a must-have convincingly should not pass it on paper credentials alone.
 - marketability (1-10 integer): how likely the CLIENT is to grant an interview, based ONLY on pedigree, company background, title progression, scope, and relevance to the role — independent of how personable they were. A strong person can be a weak market fit and vice-versa.
 - agentRealism (0-100) + notes: how HUMAN the RECRUITER (the "agent" turns) sounded — natural pacing, acknowledged before asking, didn't interrogate, no robotic/customer-support tells, didn't talk over the candidate. This judges OUR agent, not the candidate.
 - summary: 2-4 sentences recapping the conversation.
@@ -106,7 +108,11 @@ function transcriptText(turns: TranscriptTurn[]): string {
  * when the LLM client is unconfigured (so the webhook can surface a clean setup
  * hint); a malformed model response degrades to a zeroed, "needs review" result.
  */
-export async function scoreCall(desk: VettingDesk, transcript: TranscriptTurn[]): Promise<CallScore> {
+export async function scoreCall(
+  desk: VettingDesk,
+  transcript: TranscriptTurn[],
+  enrichment?: CandidateEnrichment,
+): Promise<CallScore> {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw Object.assign(new Error("anthropic_not_configured: set ANTHROPIC_API_KEY"), { status: 409 });
   }
@@ -118,13 +124,24 @@ export async function scoreCall(desk: VettingDesk, transcript: TranscriptTurn[])
     mustHave: q.mustHave,
   }));
 
+  const background =
+    enrichment && (enrichment.experience.length || enrichment.summary || enrichment.currentTitle)
+      ? "Candidate LinkedIn background (corroborating evidence for the qualifiers):\n" +
+        [
+          enrichment.currentTitle && `Current: ${enrichment.currentTitle}${enrichment.currentCompany ? ` at ${enrichment.currentCompany}` : ""}`,
+          enrichment.experience.length && `Experience: ${enrichment.experience.join("; ")}`,
+          enrichment.summary && `Summary: ${enrichment.summary}`,
+        ].filter(Boolean).join("\n")
+      : "Candidate LinkedIn background: (none on file — judge on the call alone).";
+
   const userContent =
     `Role: ${desk.roleTitle || "(see JD)"}${desk.clientCompany ? ` at ${desk.clientCompany}` : ""}\n\n` +
     `Pass threshold (0-100): ${desk.passThreshold}\n\n` +
-    `Qualifiers to judge:\n${JSON.stringify(qualifiers, null, 2)}\n\n` +
-    `Job description (context):\n"""\n${(desk.jobDescription || "").slice(0, 4000)}\n"""\n\n` +
+    `Qualifiers to judge (their passCriteria come from the job's must-haves):\n${JSON.stringify(qualifiers, null, 2)}\n\n` +
+    `Job description (the source of the must-have requirements):\n"""\n${(desk.jobDescription || "").slice(0, 4000)}\n"""\n\n` +
+    `${background}\n\n` +
     `Call transcript:\n"""\n${transcriptText(transcript).slice(0, 16000)}\n"""\n\n` +
-    `Return the scorecard JSON.`;
+    `For each qualifier, pair the job's requirement against what they SAID, their BACKGROUND above, and HOW they answered. Return the scorecard JSON.`;
 
   const response = await client.messages.create({
     model: MODEL,
