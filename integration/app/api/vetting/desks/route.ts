@@ -101,6 +101,7 @@ export async function POST(req: Request) {
     case "provision": {
       if (!desk.jobDescription.trim()) return fail("no_job_description", 422);
       if (!desk.phoneNumber) return fail("no_phone_number", 422);
+      if (!desk.voiceId) return fail("no_voice", 422, { detail: "Select your cloned voice before going live." });
       setDeskStatus(ws, desk.id, "provisioning");
       const res = await provisionDesk(desk);
       if (res.error) {

@@ -115,9 +115,9 @@ export function upsertDesk(workspaceId: string, input: VettingDeskInput): Vettin
     clientCompany: input.clientCompany ?? existing?.clientCompany,
     questions: normalizeQuestions(input.questions, existing?.questions ?? []),
     nextStepQualified: input.nextStepQualified ?? existing?.nextStepQualified ??
-      "I'll get your details over to the hiring team and we'll set up a longer conversation. Expect to hear from us within a couple of business days.",
+      "I think you could be a strong fit. Here's the next step: I'm going to send over the full job description, and I'd love for you to put together an updated resume that focuses on the things we just talked about and tailors it to this role. Once I have that back, I'll walk it through with the hiring team.",
     nextStepUnqualified: input.nextStepUnqualified ?? existing?.nextStepUnqualified ??
-      "I don't think this particular role is the right fit, but I'd like to keep you in mind for something closer to your background. I'll be in touch if something comes up.",
+      "I really appreciate you walking me through your background. Being straight with you, I don't think this particular role is the right fit overall — but your experience is genuinely strong, and I'd like to keep you in mind for other roles that line up better with what you've built. I'll hold onto your details and reach back out when something that fits comes across my desk.",
     persona,
     voiceId: input.voiceId ?? existing?.voiceId,
     phoneNumber: input.phoneNumber ?? existing?.phoneNumber,

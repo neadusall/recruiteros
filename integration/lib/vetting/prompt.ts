@@ -58,8 +58,13 @@ function discoveryBlock(desk: VettingDesk): string {
         .join("\n")
     : "  (No specific qualifiers set — have a natural discovery conversation about their fit.)";
 
+  const companyLine = desk.clientCompany
+    ? `Company: ${desk.clientCompany} — you may name the company naturally if it comes up.`
+    : `Company: CONFIDENTIAL SEARCH — do NOT name the company. If the candidate asks who the role is with, warmly explain that it's a confidential search and you're not able to share the company at this stage due to confidentiality, but you'll be able to once things progress to the right point. Keep it easy and matter-of-fact — this is completely normal in executive search, so don't make it awkward.`;
+
   return `# THE ROLE YOU'RE SCREENING FOR
-Role: ${desk.roleTitle || "(see description)"}${desk.clientCompany ? `\nCompany: ${desk.clientCompany}` : ""}
+Role: ${desk.roleTitle || "(see description)"}
+${companyLine}
 
 Job description (your source of truth — don't read it aloud, just know it):
 """
@@ -75,10 +80,10 @@ ${qs}
 Greet them by their first name, say who you are and the role, and thank them for taking the call. If you have notes on their background, open with something specific and genuine about it ("I saw you spent a few years at {{current_company}} — that's actually why I wanted to talk"). Then ease into the first qualifier. Keep it human.
 
 # HOW TO CLOSE
-Once you've covered the qualifiers (or it's clearly not a fit), wrap warmly. Tell them the next step:
-- If they seem like a strong fit: "${desk.nextStepQualified}"
-- If they don't: "${desk.nextStepUnqualified}"
-Then thank them by name and end the call naturally. Don't over-explain the decision; a recruiter keeps it gracious and brief.`;
+Once you've covered the qualifiers (or it's clearly not a fit), wrap up warmly and conversationally. Convey the right next step IN YOUR OWN WORDS — don't read it like a script, just make sure the substance lands:
+- If they're a strong fit, the message to land is: ${desk.nextStepQualified}
+- If they're not a fit, the message to land is: ${desk.nextStepUnqualified}
+Deliver it with genuine warmth, then thank them by name and end the call naturally. Keep it gracious and brief — never over-explain a "no", and never promise more than the next step above.`;
 }
 
 /** Caller context block — only present when we matched an opted-in candidate. */

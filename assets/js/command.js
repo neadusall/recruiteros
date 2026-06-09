@@ -3912,6 +3912,26 @@
         '<select id="vtfPhone">' + opts + "</select>" +
         '<div class="vt-hint">' + hint + "</div></div>";
     }
+    // Cloned-voice picker — REQUIRED to go live. Populated from the operator's
+    // own consented cloned voices (Voice Drops → Voice & Consent). The agent
+    // speaks the whole call in whichever voice is selected here.
+    function voiceSelect(d) {
+      var cur = d.voiceId || "";
+      var voices = vt.voices || [];
+      var opts = '<option value="">— select your cloned voice —</option>';
+      var hasCur = false;
+      voices.forEach(function (v) {
+        if (v.voiceId === cur) hasCur = true;
+        opts += '<option value="' + esc(v.voiceId) + '"' + (v.voiceId === cur ? " selected" : "") + ">" + esc(v.agentName || v.voiceId) + "</option>";
+      });
+      if (cur && !hasCur) opts += '<option value="' + esc(cur) + '" selected>' + esc(cur) + "</option>";
+      var hint = voices.length
+        ? "Required — the voice the agent speaks in on every call."
+        : "No cloned voices yet. Record one in Voice Drops → Voice &amp; Consent, then pick it here.";
+      return '<div class="vt-field"><label>Your cloned voice <span style="color:var(--vt-bad)">*</span></label>' +
+        '<select id="vtfVoice">' + opts + "</select>" +
+        '<div class="vt-hint">' + hint + "</div></div>";
+    }
 
     /* ============ Desks tab ============ */
     function deskForm(d) {
@@ -3929,7 +3949,7 @@
         '<div class="vt-form-grid">' +
         fld("vtfName", "Desk name (internal)", "VP Sales — East") +
         fld("vtfRole", "Role title (spoken on the call)", "VP of Sales") +
-        fld("vtfCompany", "Hiring company", "Acme Corp") +
+        fld("vtfCompany", "Hiring company (blank = confidential search)", "Acme Corp — or leave blank to keep it confidential") +
         numberSelect(d) +
         "</div>" +
         '<div class="vt-field vt-field-full" style="margin-top:14px"><label>Job description</label>' +
@@ -3938,17 +3958,18 @@
         '<div class="vt-form-grid">' +
         fld("vtfAgentName", "Your name (the agent introduces itself as)", "Ryan") +
         fld("vtfAgentCompany", "Your firm", "Executive Search") +
-        fld("vtfVoice", "Cloned voice ID (ElevenLabs; blank = default)", "voice_xxx") +
+        voiceSelect(d) +
         fld("vtfThreshold", "Pass threshold (0–100)", "70", "number") +
         "</div>" +
         '<div class="vt-section">Top qualifiers <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">— auto-pulled from the JD; you don\'t need to fill these</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">Leave these blank and we\'ll generate the top 3–4 from your job description when you save. Or generate now to review and tweak.</div>' +
         '<div style="margin-bottom:8px"><button type="button" class="vt-btn" id="vtGenQ">✨ Generate from JD</button></div>' +
         qrow(0) + qrow(1) + qrow(2) + qrow(3) +
-        '<div class="vt-section">Next step (spoken at the end of the call)</div>' +
+        '<div class="vt-section">Next step <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">— auto-filled; leave blank to use the friendly defaults</span></div>' +
+        '<div class="vt-hint" style="margin:-2px 2px 8px">Leave blank and the agent will, in its own natural words — <b>if qualified:</b> tell them they\'re a strong fit, that you\'ll send the full JD, and ask for an updated resume tailored to what you discussed. <b>If not a fit:</b> let them down kindly and say you\'ll keep them in mind for roles that better suit their background.</div>' +
         '<div class="vt-form-grid">' +
-        '<div class="vt-field"><label>If QUALIFIED</label><textarea id="vtfNextYes" rows="2">' + esc(d.nextStepQualified || "") + "</textarea></div>" +
-        '<div class="vt-field"><label>If NOT qualified</label><textarea id="vtfNextNo" rows="2">' + esc(d.nextStepUnqualified || "") + "</textarea></div>" +
+        '<div class="vt-field"><label>If QUALIFIED</label><textarea id="vtfNextYes" rows="3" placeholder="Leave blank to use the default above — or write your own.">' + esc(d.nextStepQualified || "") + "</textarea></div>" +
+        '<div class="vt-field"><label>If NOT qualified</label><textarea id="vtfNextNo" rows="3" placeholder="Leave blank to use the default above — or write your own.">' + esc(d.nextStepUnqualified || "") + "</textarea></div>" +
         "</div>" +
         '<div class="vt-formactions">' +
         '<button class="vt-btn vt-btn-primary" id="vtSave">' + (d.id ? "Save changes" : "Create desk") + "</button>" +
@@ -4015,6 +4036,11 @@
         vt.numbersDry = !!(nd && nd.dryRun);
         vt.numbersErr = (nd && nd.error) || null;
       }).catch(function () { vt.numbers = []; vt.numbersErr = "unreachable"; }).then(function () {
+        // The operator's own consented cloned voices — required to go live.
+        return api("/voice/clones").then(function (vd) {
+          vt.voices = ((vd && vd.consent) || []).filter(function (c) { return c.voiceId; });
+        }).catch(function () { vt.voices = []; });
+      }).then(function () {
         return api("/vetting/desks?motion=" + motion);
       }).then(function (data) {
         var list = (data && data.desks) || [];
