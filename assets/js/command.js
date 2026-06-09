@@ -3859,13 +3859,12 @@
     var vt = { tab: "desks", deskId: null, editing: null };
     el.innerHTML = head("AI Vetting",
       "Bind a job description to a phone number and your cloned voice. Candidates opt in, then call in and talk to an AI recruiter that sounds like you — it greets them by name, references their LinkedIn experience, asks your top 3–4 qualifiers, and tells them the next step. Each call is recorded, transcribed, summarized, and scored 1–100.") +
-      '<div class="vt-tabs" style="display:flex;gap:8px;margin:2px 0 16px;flex-wrap:wrap"></div>' +
-      '<div id="vtBody">' + loading() + "</div>";
+      '<div class="vt-view"><div class="vt-tabs"></div><div id="vtBody">' + loading() + "</div></div>";
 
     function tabBar() {
       var tabs = [["desks", "🎙️ Vetting Desks"], ["calls", "📋 Calls & Scores"]];
       $(".vt-tabs", el).innerHTML = tabs.map(function (t) {
-        return '<button class="btn btn-sm ' + (vt.tab === t[0] ? "btn-primary" : "") + '" data-vttab="' + t[0] + '">' + t[1] + "</button>";
+        return '<button class="vt-tab' + (vt.tab === t[0] ? " active" : "") + '" data-vttab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
     }
     $(".vt-tabs", el).addEventListener("click", function (e) {
@@ -3881,14 +3880,11 @@
 
     /* ---- small field helpers ---- */
     function fld(id, label, ph, type) {
-      return '<div class="vt-field"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">' + esc(label) + "</label>" +
-        '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph || "") + '" style="width:100%" /></div>';
+      return '<div class="vt-field"><label>' + esc(label) + "</label>" +
+        '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph || "") + '" /></div>';
     }
     function vget(id) { var e = $("#" + id); return e ? e.value.trim() : ""; }
-    function statusPill(s) {
-      var col = s === "live" ? "#34d399" : s === "paused" ? "#ffc24d" : "#8aa0c6";
-      return '<span style="font-size:12px;color:' + col + '">● ' + esc(s) + "</span>";
-    }
+    function statusPill(s) { return '<span class="vt-pill ' + esc(s) + '">' + esc(s) + "</span>"; }
     // Phone-number picker, populated from the operator's real Telnyx numbers
     // (vt.numbers, fetched in paintDesks). A number already bound to a DIFFERENT
     // desk is shown disabled so two JDs can't accidentally claim one line —
@@ -3907,12 +3903,12 @@
           (takenElsewhere ? " disabled" : "") + ">" + esc(n.phoneNumber) + esc(tag) + "</option>";
       });
       if (cur && !hasCur) opts += '<option value="' + esc(cur) + '" selected>' + esc(cur) + " (current)</option>";
-      var hint = vt.numbersDry ? "Dry-run: no Telnyx key, showing only bound numbers."
+      var hint = vt.numbersDry ? "Dry-run: no Telnyx key — showing only bound numbers."
         : vt.numbersErr ? ("Couldn’t reach Telnyx (" + esc(vt.numbersErr) + ").")
         : (nums.length + " number" + (nums.length === 1 ? "" : "s") + " on your Telnyx account.");
-      return '<div class="vt-field"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Inbound number (from your Telnyx account)</label>' +
-        '<select id="vtfPhone" style="width:100%">' + opts + "</select>" +
-        '<div class="muted" style="font-size:11px;margin-top:3px">' + hint + "</div></div>";
+      return '<div class="vt-field"><label>Inbound number (from your Telnyx account)</label>' +
+        '<select id="vtfPhone">' + opts + "</select>" +
+        '<div class="vt-hint">' + hint + "</div></div>";
     }
 
     /* ============ Desks tab ============ */
@@ -3921,34 +3917,39 @@
       var q = d.questions || [];
       function qrow(i) {
         var qq = q[i] || {};
-        return '<div style="display:grid;grid-template-columns:1fr 1fr 70px;gap:8px;margin-top:6px">' +
+        return '<div class="vt-qrow">' +
           '<input id="vtQp' + i + '" placeholder="Qualifier ' + (i + 1) + ' (e.g. Years owning a $5M quota)" value="' + esc(qq.prompt || "") + '" />' +
           '<input id="vtQc' + i + '" placeholder="What a PASS looks like" value="' + esc(qq.passCriteria || "") + '" />' +
-          '<label style="font-size:11px;display:flex;align-items:center;gap:4px;color:var(--muted)"><input id="vtQm' + i + '" type="checkbox" ' + (qq.mustHave ? "checked" : "") + " /> must</label></div>";
+          '<label class="vt-must"><input id="vtQm' + i + '" type="checkbox" ' + (qq.mustHave ? "checked" : "") + " /> must-have</label></div>";
       }
-      return '<div class="card" style="margin-top:12px"><h3 style="margin-top:0">' + (d.id ? "Edit desk" : "New vetting desk") + "</h3>" +
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+      return '<div class="vt-card"><h3>' + (d.id ? "Edit desk" : "New vetting desk") + "</h3>" +
+        '<div class="vt-section">The role</div>' +
+        '<div class="vt-form-grid">' +
         fld("vtfName", "Desk name (internal)", "VP Sales — East") +
         fld("vtfRole", "Role title (spoken on the call)", "VP of Sales") +
         fld("vtfCompany", "Hiring company", "Acme Corp") +
         numberSelect(d) +
+        "</div>" +
+        '<div class="vt-field vt-field-full" style="margin-top:14px"><label>Job description</label>' +
+        '<textarea id="vtfJd" rows="6" placeholder="Paste the full job description here. The agent uses this as its source of truth — it won\'t read it aloud.">' + esc(d.jobDescription || "") + "</textarea></div>" +
+        '<div class="vt-section">Your voice on the call</div>' +
+        '<div class="vt-form-grid">' +
         fld("vtfAgentName", "Your name (the agent introduces itself as)", "Ryan") +
         fld("vtfAgentCompany", "Your firm", "Executive Search") +
         fld("vtfVoice", "Cloned voice ID (ElevenLabs; blank = default)", "voice_xxx") +
         fld("vtfThreshold", "Pass threshold (0–100)", "70", "number") +
         "</div>" +
-        '<div class="vt-field" style="margin-top:10px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Job description</label>' +
-        '<textarea id="vtfJd" rows="6" style="width:100%" placeholder="Paste the full job description here. The agent uses this as its source of truth — it won\'t read it aloud.">' + esc(d.jobDescription || "") + "</textarea></div>" +
-        '<div style="margin-top:10px"><label style="font-size:12px;color:var(--muted)">Top qualifiers (3–4 max — the agent works these in conversationally, not as a checklist)</label>' +
-        qrow(0) + qrow(1) + qrow(2) + qrow(3) + "</div>" +
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">' +
-        '<div class="vt-field"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Next step if QUALIFIED (spoken)</label><textarea id="vtfNextYes" rows="2" style="width:100%">' + esc(d.nextStepQualified || "") + "</textarea></div>" +
-        '<div class="vt-field"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Next step if NOT qualified (spoken)</label><textarea id="vtfNextNo" rows="2" style="width:100%">' + esc(d.nextStepUnqualified || "") + "</textarea></div>" +
+        '<div class="vt-section">Top qualifiers <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">— 3–4 max, worked in conversationally</span></div>' +
+        qrow(0) + qrow(1) + qrow(2) + qrow(3) +
+        '<div class="vt-section">Next step (spoken at the end of the call)</div>' +
+        '<div class="vt-form-grid">' +
+        '<div class="vt-field"><label>If QUALIFIED</label><textarea id="vtfNextYes" rows="2">' + esc(d.nextStepQualified || "") + "</textarea></div>" +
+        '<div class="vt-field"><label>If NOT qualified</label><textarea id="vtfNextNo" rows="2">' + esc(d.nextStepUnqualified || "") + "</textarea></div>" +
         "</div>" +
-        '<div style="display:flex;gap:8px;margin-top:12px">' +
-        '<button class="btn btn-primary btn-sm" id="vtSave">' + (d.id ? "Save changes" : "Create desk") + "</button>" +
-        (d.id ? '<button class="btn btn-sm" id="vtCancel">Cancel</button>' : "") +
-        '</div></div>';
+        '<div class="vt-formactions">' +
+        '<button class="vt-btn vt-btn-primary" id="vtSave">' + (d.id ? "Save changes" : "Create desk") + "</button>" +
+        (d.id ? '<button class="vt-btn vt-btn-ghost" id="vtCancel">Cancel</button>' : "") +
+        "</div></div>";
     }
     function collectDesk() {
       var qs = [];
@@ -3974,28 +3975,32 @@
     }
     function deskCard(d) {
       var optinUrl = location.origin + "/vetting-optin?desk=" + d.id;
-      var actions = '<button class="btn btn-sm" data-vtact="edit" data-id="' + d.id + '">✎ Edit</button>';
+      var actions = '<button class="vt-btn" data-vtact="edit" data-id="' + d.id + '">✎ Edit</button>';
       if (d.status === "live") {
-        actions += '<button class="btn btn-sm" data-vtact="pause" data-id="' + d.id + '">⏸ Pause</button>';
+        actions += '<button class="vt-btn" data-vtact="pause" data-id="' + d.id + '">⏸ Pause</button>';
       } else if (d.status === "paused") {
-        actions += '<button class="btn btn-sm btn-primary" data-vtact="resume" data-id="' + d.id + '">▶ Resume</button>';
+        actions += '<button class="vt-btn vt-btn-primary" data-vtact="resume" data-id="' + d.id + '">▶ Resume</button>';
       } else {
-        actions += '<button class="btn btn-sm btn-primary" data-vtact="provision" data-id="' + d.id + '">📡 Go live</button>';
+        actions += '<button class="vt-btn vt-btn-primary" data-vtact="provision" data-id="' + d.id + '">📡 Go live</button>';
       }
-      if (d.phoneNumber) actions += '<button class="btn btn-sm" data-vtact="detach" data-id="' + d.id + '">⛓️‍💥 Detach #</button>';
-      actions += '<button class="btn btn-sm" data-vtact="copy" data-id="' + d.id + '" data-url="' + esc(optinUrl) + '">🔗 Opt-in link</button>' +
-        '<button class="btn btn-sm" data-vtact="viewcalls" data-id="' + d.id + '">📋 Calls (' + (d.callCount || 0) + ")</button>" +
-        '<button class="btn btn-sm" data-vtact="del" data-id="' + d.id + '">🗑</button>';
-      return '<div class="card" data-id="' + d.id + '" style="margin-top:12px">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
-        "<h3 style='margin:0'>" + esc(d.name) + ' <span class="muted" style="font-size:12px">· ' + esc(d.roleTitle || "no role title") + "</span></h3>" +
+      if (d.phoneNumber) actions += '<button class="vt-btn" data-vtact="detach" data-id="' + d.id + '">⛓️‍💥 Detach #</button>';
+      actions += '<button class="vt-btn" data-vtact="copy" data-id="' + d.id + '" data-url="' + esc(optinUrl) + '">🔗 Opt-in link</button>' +
+        '<button class="vt-btn" data-vtact="viewcalls" data-id="' + d.id + '">📋 Calls (' + (d.callCount || 0) + ")</button>" +
+        '<button class="vt-btn vt-btn-danger" data-vtact="del" data-id="' + d.id + '">🗑</button>';
+      var chips =
+        '<span class="vt-chip">📞 <b>' + esc(d.phoneNumber || "no number") + "</b></span>" +
+        '<span class="vt-chip">' + (d.questions ? d.questions.length : 0) + " qualifiers</span>" +
+        '<span class="vt-chip"><b>' + (d.candidateCount || 0) + "</b> opted in</span>" +
+        '<span class="vt-chip">pass ≥ <b>' + d.passThreshold + "</b></span>" +
+        '<span class="vt-chip">🎙️ ' + esc(d.voiceId || "default voice") + "</span>";
+      return '<div class="vt-desk" data-id="' + d.id + '">' +
+        '<div class="vt-desk-head">' +
+        '<h3 class="vt-desk-title">' + esc(d.name) + " <span>· " + esc(d.roleTitle || "no role title") + "</span></h3>" +
         statusPill(d.status) + "</div>" +
-        '<div class="muted" style="font-size:12px;margin-top:6px">' +
-        "📞 " + esc(d.phoneNumber || "no number yet") + " · " + (d.questions ? d.questions.length : 0) + " qualifiers · " +
-        (d.candidateCount || 0) + " opted in · pass ≥ " + d.passThreshold + " · voice " + esc(d.voiceId || "default") + "</div>" +
-        (d.jobDescription ? "" : '<div style="font-size:12px;color:#ffc24d;margin-top:6px">⚠ Add a job description before going live.</div>') +
-        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' + actions + "</div>" +
-        '<div class="vt-msg muted" data-msg="' + d.id + '" style="font-size:12px;margin-top:8px"></div></div>';
+        '<div class="vt-meta">' + chips + "</div>" +
+        (d.jobDescription ? "" : '<div class="vt-warn">⚠ Add a job description before going live.</div>') +
+        '<div class="vt-actions">' + actions + "</div>" +
+        '<div class="vt-msg" data-msg="' + d.id + '"></div></div>';
     }
     function paintDesks(body) {
       body.innerHTML = loading();
@@ -4011,7 +4016,7 @@
         var list = (data && data.desks) || [];
         var editing = vt.editing ? list.filter(function (x) { return x.id === vt.editing; })[0] : null;
         body.innerHTML = (editing ? deskForm(editing) : deskForm(null)) +
-          (list.length ? list.map(deskCard).join("") : '<p class="muted" style="margin-top:16px">No vetting desks yet — create one above, paste a JD, set your qualifiers, then “Go live”.</p>');
+          (list.length ? list.map(deskCard).join("") : '<div class="vt-empty">No vetting desks yet — create one above, paste a JD, set your qualifiers, then “Go live”.</div>');
         wireDesks(body);
       }).catch(function () { body.innerHTML = needsSetup(); });
     }
@@ -4033,7 +4038,7 @@
     }
     function deskMsg(id, text, warn) {
       var m = document.querySelector('[data-msg="' + id + '"]');
-      if (m) { m.textContent = text; m.style.color = warn ? "#ffc24d" : ""; }
+      if (m) { m.textContent = text; m.classList.toggle("warn", !!warn); }
     }
     function deskAction(act, id, btn, body) {
       if (act === "edit") { vt.editing = id; paintDesks(body); return; }
@@ -4085,21 +4090,21 @@
     }
     function scoreRing(total) {
       var b = band(total || 0);
-      return '<span style="display:inline-flex;align-items:center;justify-content:center;width:46px;height:46px;border-radius:50%;border:3px solid ' + b[1] + ';font-weight:700;font-size:15px">' + (total != null ? total : "—") + "</span>";
+      return '<span class="vt-ring" style="--pct:' + (total || 0) + ';--ring:' + b[1] + '">' + (total != null ? total : "—") + "</span>";
     }
     function callRow(c) {
       var b = band(c.totalScore || 0);
       var name = (c.candidate ? (c.candidate.firstName + " " + c.candidate.lastName) : (c.callerName || c.callerPhone));
-      var qual = c.qualified === true ? '<span style="color:#34d399">✓ Qualified</span>' : c.qualified === false ? '<span style="color:#ff7a90">✗ Not qualified</span>' : '<span class="muted">pending</span>';
+      var qual = c.qualified === true ? '<span class="vt-qual-yes">✓ Qualified</span>' : c.qualified === false ? '<span class="vt-qual-no">✗ Not qualified</span>' : '<span style="color:var(--text-dim)">pending</span>';
       var mkt = c.marketabilityScore != null ? (" · market " + c.marketabilityScore + "/10") : "";
-      return '<div class="card vt-call" data-call="' + c.id + '" style="margin-top:10px;cursor:pointer">' +
-        '<div style="display:flex;gap:14px;align-items:center">' + scoreRing(c.totalScore) +
+      return '<div class="vt-call" data-call="' + c.id + '">' +
+        '<div class="vt-call-top">' + scoreRing(c.totalScore) +
         '<div style="flex:1;min-width:0">' +
-        "<div style='font-weight:600'>" + esc(name) + ' <span class="muted" style="font-size:12px">· ' + esc(c.callerPhone) + "</span></div>" +
-        '<div style="font-size:12px;color:' + b[1] + '">' + b[0] + " · " + qual + mkt + (c.durationSec ? (" · " + Math.round(c.durationSec / 60) + "m") : "") + " · " + (c.status === "scored" ? "scored" : esc(c.status)) + "</div>" +
-        (c.summary ? '<div class="muted" style="font-size:12px;margin-top:4px">' + esc(c.summary) + "</div>" : "") +
+        '<div class="vt-call-name">' + esc(name) + " <span>· " + esc(c.callerPhone) + "</span></div>" +
+        '<div class="vt-call-sub" style="color:' + b[1] + '">' + b[0] + " · " + qual + mkt + (c.durationSec ? (" · " + Math.round(c.durationSec / 60) + "m") : "") + " · " + (c.status === "scored" ? "scored" : esc(c.status)) + "</div>" +
+        (c.summary ? '<div class="vt-call-summary">' + esc(c.summary) + "</div>" : "") +
         "</div></div>" +
-        '<div class="vt-call-detail" data-detail="' + c.id + '" style="display:none;margin-top:12px"></div></div>';
+        '<div class="vt-call-detail vt-detail" data-detail="' + c.id + '" style="display:none"></div></div>';
     }
     function paintCalls(body) {
       body.innerHTML = loading();
@@ -4111,9 +4116,9 @@
         var qs = vt.deskId ? ("?deskId=" + encodeURIComponent(vt.deskId)) : "";
         api("/vetting/calls" + qs).then(function (cd) {
           var calls = (cd && cd.calls) || [];
-          body.innerHTML = '<div class="card"><label style="font-size:12px;color:var(--muted)">Desk</label><br/>' +
-            '<select id="vtDeskSel" style="margin-top:4px">' + opts + "</select></div>" +
-            (calls.length ? calls.map(callRow).join("") : '<p class="muted" style="margin-top:16px">No calls yet. Share a desk’s opt-in link, then have a candidate call its number.</p>');
+          body.innerHTML = '<div class="vt-card"><div class="vt-select-wrap"><label>Desk</label>' +
+            '<select id="vtDeskSel">' + opts + "</select></div></div>" +
+            (calls.length ? calls.map(callRow).join("") : '<div class="vt-empty">No calls yet. Share a desk’s opt-in link, then have a candidate call its number.</div>');
           $("#vtDeskSel").addEventListener("change", function () { vt.deskId = this.value || null; paintCalls(body); });
           Array.prototype.forEach.call(body.querySelectorAll(".vt-call"), function (row) {
             row.addEventListener("click", function (e) {
@@ -4136,39 +4141,37 @@
     }
     function bar(label, v, max) {
       var pct = max ? Math.round((v / max) * 100) : 0;
-      var col = pct >= 75 ? "#34d399" : pct >= 50 ? "#7fd1ff" : pct >= 30 ? "#ffc24d" : "#ff7a90";
-      return '<div style="margin:5px 0"><div style="display:flex;justify-content:space-between;font-size:12px"><span>' + esc(label) + "</span><span>" + v + "/" + max + "</span></div>" +
-        '<div style="height:6px;border-radius:4px;background:rgba(255,255,255,.08)"><div style="height:6px;border-radius:4px;width:' + pct + '%;background:' + col + '"></div></div></div>';
+      return '<div class="vt-bar"><div class="vt-bar-h"><span>' + esc(label) + "</span><span>" + v + "/" + max + "</span></div>" +
+        '<div class="vt-bar-track"><div class="vt-bar-fill" style="width:' + pct + '%"></div></div></div>';
     }
     function callDetail(c) {
       var html = "";
       if (c.scores) {
-        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px">' +
+        html += '<div class="vt-scores">' +
           SCORE_CATS.map(function (s) { return bar(s[1], c.scores[s[0]] || 0, s[2]); }).join("") + "</div>";
       }
       if (c.marketabilityScore != null || c.agentRealism) {
-        html += '<div class="muted" style="font-size:12px;margin-top:8px">' +
-          (c.marketabilityScore != null ? "<b>Marketability:</b> " + c.marketabilityScore + "/10 (client-interview likelihood) " : "") +
-          (c.agentRealism ? " · <b>Agent realism:</b> " + c.agentRealism.score + "/100" : "") + "</div>";
-        if (c.agentRealism && c.agentRealism.notes) html += '<div class="muted" style="font-size:12px">' + esc(c.agentRealism.notes) + "</div>";
+        html += '<div class="vt-substat">' +
+          (c.marketabilityScore != null ? "<span><b>Marketability:</b> " + c.marketabilityScore + "/10 <span style='color:var(--text-dim)'>(client-interview likelihood)</span></span>" : "") +
+          (c.agentRealism ? "<span><b>Agent realism:</b> " + c.agentRealism.score + "/100</span>" : "") + "</div>";
+        if (c.agentRealism && c.agentRealism.notes) html += '<div class="vt-substat" style="margin-top:4px">' + esc(c.agentRealism.notes) + "</div>";
       }
-      if (c.qualifyRationale) html += '<div style="margin-top:10px;font-size:13px"><b>Why ' + (c.qualified ? "they qualify" : "they don’t qualify") + ":</b> " + esc(c.qualifyRationale) + "</div>";
+      if (c.qualifyRationale) html += '<div class="vt-rationale"><b>Why ' + (c.qualified ? "they qualify" : "they don’t qualify") + ":</b> " + esc(c.qualifyRationale) + "</div>";
       if (c.verdicts && c.verdicts.length) {
-        html += '<div style="margin-top:10px"><b style="font-size:13px">Qualifiers</b>' + c.verdicts.map(function (v) {
-          return '<div style="font-size:12px;margin-top:4px">' + (v.pass ? "✅" : "❌") + " " + esc(v.answer) + ' <span class="muted">— ' + esc(v.rationale) + "</span></div>";
+        html += '<div class="vt-verdicts"><h4>Qualifiers</h4>' + c.verdicts.map(function (v) {
+          return '<div class="vt-verdict">' + (v.pass ? "✅" : "❌") + ' <span class="vt-q-ans">' + esc(v.answer) + '</span> <span class="vt-q-rat">— ' + esc(v.rationale) + "</span></div>";
         }).join("") + "</div>";
       }
-      if (c.nextStepGiven) html += '<div class="muted" style="font-size:12px;margin-top:8px"><b>Next step told to candidate:</b> ' + esc(c.nextStepGiven) + "</div>";
-      if (c.recordingUrl) html += '<div style="margin-top:8px"><a class="btn btn-sm" href="' + esc(c.recordingUrl) + '" target="_blank" rel="noopener">▶ Recording</a></div>';
+      if (c.nextStepGiven) html += '<div class="vt-next"><b>Next step told to candidate:</b> ' + esc(c.nextStepGiven) + "</div>";
+      if (c.recordingUrl) html += '<div style="margin-top:12px"><a class="vt-btn" href="' + esc(c.recordingUrl) + '" target="_blank" rel="noopener">▶ Recording</a></div>';
       if (c.transcript && c.transcript.length) {
-        html += '<div style="margin-top:10px"><b style="font-size:13px">Transcript</b><div style="margin-top:6px;max-height:280px;overflow:auto;font-size:13px;line-height:1.5">' +
+        html += '<div class="vt-transcript"><div class="vt-tr-h">Transcript</div><div class="vt-tr-body">' +
           c.transcript.map(function (t) {
             var who = t.role === "agent" ? "You (AI)" : "Candidate";
-            var col = t.role === "agent" ? "#b9a6ff" : "#7fd1ff";
-            return '<div style="margin:3px 0"><b style="color:' + col + '">' + who + ":</b> " + esc(t.text) + "</div>";
+            return '<div class="vt-turn ' + (t.role === "agent" ? "agent" : "candidate") + '"><b>' + who + ":</b> " + esc(t.text) + "</div>";
           }).join("") + "</div></div>";
       }
-      return html || '<p class="muted">Call recorded; analysis pending.</p>';
+      return html || '<p style="color:var(--text-muted)">Call recorded; analysis pending.</p>';
     }
 
     tabBar(); paint();
