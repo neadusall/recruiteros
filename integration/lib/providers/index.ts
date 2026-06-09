@@ -16,6 +16,7 @@ import { TelnyxClient } from "./telnyx";
 import { RapidApiClient } from "./rapidapi";
 import { FreshLinkedInClient } from "./freshlinkedin";
 import { TombaClient } from "./tomba";
+import { TidyCalClient } from "./tidycal";
 import { LoxoAdapter } from "../ats/loxo";
 import type { ProviderClient, ProviderStatus } from "./http";
 
@@ -30,10 +31,11 @@ export const telnyx = new TelnyxClient();
 export const rapidapi = new RapidApiClient();
 export const freshLinkedin = new FreshLinkedInClient();
 export const tomba = new TombaClient();
+export const tidycal = new TidyCalClient();
 
 /** Everything that surfaces in the Connected tab (Loxo handled by the ATS adapter). */
 export const PROVIDERS: Record<string, ProviderClient> = {
-  instantly, unipile, salesrobot, taltxt, telnyx, rapidapi, fresh_linkedin: freshLinkedin, tomba,
+  instantly, unipile, salesrobot, taltxt, telnyx, rapidapi, fresh_linkedin: freshLinkedin, tomba, tidycal,
 };
 
 export function getProvider(id: string): ProviderClient | undefined {

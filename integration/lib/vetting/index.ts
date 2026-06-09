@@ -10,4 +10,5 @@ export * from "./prompt";
 export * from "./enrich";
 export * from "./qualifiers";
 export * from "./scoring";
+export * from "./tidycal";
 export * from "./assistant";

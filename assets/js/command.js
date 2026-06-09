@@ -3910,7 +3910,7 @@
       '<div class="vt-view"><div class="vt-tabs"></div><div id="vtBody">' + loading() + "</div></div>";
 
     function tabBar() {
-      var tabs = [["desks", "🎙️ Vetting Desks"], ["calls", "📋 Calls & Scores"]];
+      var tabs = [["desks", "🎙️ Vetting Desks"], ["calls", "📋 Calls & Scores"], ["bookings", "🗓️ Bookings"]];
       $(".vt-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="vt-tab' + (vt.tab === t[0] ? " active" : "") + '" data-vttab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -3923,6 +3923,7 @@
     function paint() {
       var body = $("#vtBody"); if (!body) return;
       if (vt.tab === "desks") return paintDesks(body);
+      if (vt.tab === "bookings") return paintBookings(body);
       return paintCalls(body);
     }
 
@@ -4277,6 +4278,64 @@
           }).join("") + "</div></div>";
       }
       return html || '<p style="color:var(--text-muted)">Call recorded; analysis pending.</p>';
+    }
+
+    /* ============ Bookings tab (TidyCal) ============ */
+    function bkWhen(s) {
+      if (!s) return "";
+      try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+      catch (e) { return esc(s); }
+    }
+    function bookingCard(b) {
+      var pill = b.status === "ready" ? ["live", "Ready"]
+        : b.status === "no_phone" ? ["paused", "Needs phone #"]
+        : ["paused", "No matching desk"];
+      var deskChip = b.deskName
+        ? '<span class="vt-chip">→ <b>' + esc(b.deskName) + "</b></span>"
+        : '<span class="vt-chip">⚠ no desk matches “' + esc(b.jobTitle || "—") + "”</span>";
+      var phoneChip = b.phone ? '<span class="vt-chip">📞 <b>' + esc(b.phone) + "</b></span>" : '<span class="vt-chip">📞 none on booking</span>';
+      var liChip = b.linkedinUrl ? '<span class="vt-chip">🔗 LinkedIn ✓</span>' : '<span class="vt-chip">🔗 no LinkedIn</span>';
+      return '<div class="vt-desk">' +
+        '<div class="vt-desk-head"><h3 class="vt-desk-title">' + esc(b.name || "Unknown") + ' <span>· ' + esc(b.jobTitle || "no role title") + "</span></h3>" +
+        '<span class="vt-pill ' + pill[0] + '">' + pill[1] + "</span></div>" +
+        '<div class="vt-meta">' + deskChip + phoneChip + liChip +
+        (b.startsAt ? '<span class="vt-chip">🕒 ' + esc(bkWhen(b.startsAt)) + "</span>" : "") + "</div></div>";
+    }
+    function bookingsView(r) {
+      r = r || {};
+      if (!r.configured) {
+        return '<div class="vt-card"><h3>Connect TidyCal</h3>' +
+          '<div class="vt-hint" style="margin-top:8px">Add your TidyCal token on the server (<code>TIDYCAL_API_TOKEN</code>) and bookings will appear here. Each is routed to the vetting desk whose role title matches the booking, the candidate\'s LinkedIn is researched before they call, and their phone is matched when they dial in. Add a <b>phone</b> and <b>LinkedIn URL</b> question to your TidyCal booking type so we can connect the call and prep the agent.</div></div>';
+      }
+      var head = '<div class="vt-card"><div class="vt-toolbar" style="margin:0">' +
+        '<span class="vt-count">' + (r.pulled || 0) + " upcoming booking" + ((r.pulled === 1) ? "" : "s") +
+        " · <span style=\"color:var(--vt-good)\">" + (r.ready || 0) + " ready</span>" +
+        (r.unmatched ? " · <span style=\"color:var(--vt-warn)\">" + r.unmatched + " no desk</span>" : "") +
+        (r.noPhone ? " · <span style=\"color:var(--vt-warn)\">" + r.noPhone + " need phone</span>" : "") + "</span>" +
+        '<button class="vt-btn vt-btn-primary" id="vtBkSync">↻ Sync now</button></div>' +
+        (r.error ? '<div class="vt-warn" style="margin-top:10px">⚠ TidyCal said: ' + esc(r.error) + ' — an MCP-scoped token may be rejected by the REST API; generate a personal access token at tidycal.com/integrations/oauth.</div>' : "") +
+        '<div class="vt-hint" style="margin-top:8px">“Sync now” pulls upcoming bookings, files each candidate under the matching desk, and researches their LinkedIn so the agent is ready when they call. Wire it to a schedule to run automatically.</div></div>';
+      var list = (r.bookings || []).map(bookingCard).join("") ||
+        '<div class="vt-empty">No upcoming bookings. New TidyCal bookings show up here on the next sync.</div>';
+      return head + list;
+    }
+    function wireBookings(body) {
+      var sync = $("#vtBkSync");
+      if (sync) sync.addEventListener("click", function () {
+        sync.disabled = true; sync.textContent = "↻ Syncing…";
+        send("/vetting/tidycal", "POST", { action: "sync" }).then(function (r) {
+          if (!r.ok) { sync.disabled = false; sync.textContent = "↻ Sync now"; toast("Sync failed"); return; }
+          var d = r.data || {};
+          toast("Synced — " + (d.ready || 0) + " ready, " + (d.pulled || 0) + " pulled");
+          body.innerHTML = bookingsView(d); wireBookings(body);
+        }).catch(function () { sync.disabled = false; sync.textContent = "↻ Sync now"; toast("Couldn’t reach the server."); });
+      });
+    }
+    function paintBookings(body) {
+      body.innerHTML = loading();
+      api("/vetting/tidycal").then(function (r) {
+        body.innerHTML = bookingsView(r); wireBookings(body);
+      }).catch(function () { body.innerHTML = needsSetup(); });
     }
 
     tabBar(); paint();
