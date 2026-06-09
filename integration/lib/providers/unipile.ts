@@ -10,9 +10,11 @@ import { ProviderClient } from "./http";
 export class UnipileClient extends ProviderClient {
   id = "unipile";
   label = "Unipile (LinkedIn)";
-  protected envKeys = ["UNIPILE_API_KEY", "UNIPILE_DSN"];
+  // Only the API key is a required secret; the DSN (this account's regional host)
+  // defaults to the configured instance and can be overridden by UNIPILE_DSN.
+  protected envKeys = ["UNIPILE_API_KEY"];
   protected get baseUrl() {
-    const dsn = this.env("UNIPILE_DSN");
+    const dsn = process.env.UNIPILE_DSN || "api48.unipile.com:17846";
     return dsn.startsWith("http") ? dsn : `https://${dsn}`;
   }
 
