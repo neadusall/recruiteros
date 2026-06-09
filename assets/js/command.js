@@ -175,6 +175,7 @@
     sending: { title: "Sending", crumb: "Build", action: null, render: renderSending },
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
+    vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
@@ -494,6 +495,7 @@
             [["0", "Any time"], ["1", "Last 24 hours"], ["3", "Last 3 days"], ["7", "Last 7 days"], ["14", "Last 14 days"], ["30", "Last 30 days"]]
               .map(function (o) { return '<option value="' + o[0] + '"' + (String(imPostedWithin) === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") +
           "</select>" +
+          '<button type="button" class="btn btn-primary btn-sm" id="imPostedGo">Search this range</button>' +
           '<span class="im-datehint muted">Fresher posts = warmer outreach</span>' +
         "</div>" +
         // Daily import read — populated on open so you see today's intake immediately.
@@ -580,12 +582,18 @@
 
     form.addEventListener("submit", function (e) { e.preventDefault(); runNow(); });
 
-    // Date search dropdown → re-run the current search filtered to fresh postings.
-    var postedSel = $("#imPosted");
-    if (postedSel) postedSel.addEventListener("change", function () {
-      imPostedWithin = parseInt(postedSel.value, 10) || 0;
-      runNow();
-    });
+    // Date search: pick a timeframe in the dropdown, then press the button to run the
+    // search for that range. The dropdown only stores the choice; the button triggers it,
+    // so the action is explicit and you get a clear loading state + updated count.
+    var postedSel = $("#imPosted"), postedGo = $("#imPostedGo");
+    function applyPosted() {
+      if (postedSel) imPostedWithin = parseInt(postedSel.value, 10) || 0;
+      var s = currentSearch();
+      if (s) runSearch(s.criteria, s.label);
+      else $("#imBody").innerHTML = '<div class="empty">Pick one or more industries (or Select all) first, then choose a timeframe and press <b>Search this range</b>.</div>';
+    }
+    if (postedSel) postedSel.addEventListener("change", function () { imPostedWithin = parseInt(postedSel.value, 10) || 0; });
+    if (postedGo) postedGo.addEventListener("click", applyPosted);
 
     // Industry chips: multi-select toggle → debounced search.
     Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
@@ -649,7 +657,8 @@
       '<div class="im-toolbar">' +
         '<label class="im-checkall"><input type="checkbox" id="imAll"> <b>Select all</b> <span class="muted">companies + managers</span></label>' +
         '<button type="button" class="btn btn-ghost btn-sm" id="imClearSel" style="display:none">Clear</button>' +
-        '<span class="im-count">' + leads.length + " shown · <b>" + Math.max(imTotal, inMarketResults.length) + "</b> companies hiring" + (imLabel ? " in " + esc(imLabel) : "") + " <span class=\"muted\">(grows daily)</span></span>" +
+        '<span class="im-count">' + leads.length + " shown · <b>" + Math.max(imTotal, inMarketResults.length) + "</b> companies hiring" + (imLabel ? " in " + esc(imLabel) : "") +
+          (imPostedWithin ? ' <span class="im-date-active">📅 posted in last ' + imPostedWithin + " day" + (imPostedWithin === 1 ? "" : "s") + "</span>" : " <span class=\"muted\">(grows daily)</span>") + "</span>" +
         '<div class="im-narrow" title="Narrow by hiring-intent score">' +
           bands.map(function (b) { return '<button type="button" class="im-nbtn' + (String(imMinScore) === b[0] ? " active" : "") + '" data-min="' + b[0] + '">' + b[1] + "</button>"; }).join("") +
         "</div>" +
@@ -3814,6 +3823,31 @@
       var col = s === "live" ? "#34d399" : s === "paused" ? "#ffc24d" : "#8aa0c6";
       return '<span style="font-size:12px;color:' + col + '">● ' + esc(s) + "</span>";
     }
+    // Phone-number picker, populated from the operator's real Telnyx numbers
+    // (vt.numbers, fetched in paintDesks). A number already bound to a DIFFERENT
+    // desk is shown disabled so two JDs can't accidentally claim one line —
+    // detach it from that desk first to swap it over.
+    function numberSelect(d) {
+      var cur = d.phoneNumber || "";
+      var nums = vt.numbers || [];
+      var opts = '<option value="">— no number yet —</option>';
+      var hasCur = false;
+      nums.forEach(function (n) {
+        var mine = (n.deskId && d.id && n.deskId === d.id);
+        var takenElsewhere = n.assigned && !mine;
+        if (n.phoneNumber === cur) hasCur = true;
+        var tag = mine ? " (this desk)" : takenElsewhere ? (" → " + (n.deskName || "another desk")) : (n.label ? (" · " + n.label) : "");
+        opts += '<option value="' + esc(n.phoneNumber) + '"' + (n.phoneNumber === cur ? " selected" : "") +
+          (takenElsewhere ? " disabled" : "") + ">" + esc(n.phoneNumber) + esc(tag) + "</option>";
+      });
+      if (cur && !hasCur) opts += '<option value="' + esc(cur) + '" selected>' + esc(cur) + " (current)</option>";
+      var hint = vt.numbersDry ? "Dry-run: no Telnyx key, showing only bound numbers."
+        : vt.numbersErr ? ("Couldn’t reach Telnyx (" + esc(vt.numbersErr) + ").")
+        : (nums.length + " number" + (nums.length === 1 ? "" : "s") + " on your Telnyx account.");
+      return '<div class="vt-field"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Inbound number (from your Telnyx account)</label>' +
+        '<select id="vtfPhone" style="width:100%">' + opts + "</select>" +
+        '<div class="muted" style="font-size:11px;margin-top:3px">' + hint + "</div></div>";
+    }
 
     /* ============ Desks tab ============ */
     function deskForm(d) {
@@ -3831,7 +3865,7 @@
         fld("vtfName", "Desk name (internal)", "VP Sales — East") +
         fld("vtfRole", "Role title (spoken on the call)", "VP of Sales") +
         fld("vtfCompany", "Hiring company", "Acme Corp") +
-        fld("vtfPhone", "Inbound number (E.164)", "+13855551234") +
+        numberSelect(d) +
         fld("vtfAgentName", "Your name (the agent introduces itself as)", "Ryan") +
         fld("vtfAgentCompany", "Your firm", "Executive Search") +
         fld("vtfVoice", "Cloned voice ID (ElevenLabs; blank = default)", "voice_xxx") +
@@ -3882,6 +3916,7 @@
       } else {
         actions += '<button class="btn btn-sm btn-primary" data-vtact="provision" data-id="' + d.id + '">📡 Go live</button>';
       }
+      if (d.phoneNumber) actions += '<button class="btn btn-sm" data-vtact="detach" data-id="' + d.id + '">⛓️‍💥 Detach #</button>';
       actions += '<button class="btn btn-sm" data-vtact="copy" data-id="' + d.id + '" data-url="' + esc(optinUrl) + '">🔗 Opt-in link</button>' +
         '<button class="btn btn-sm" data-vtact="viewcalls" data-id="' + d.id + '">📋 Calls (' + (d.callCount || 0) + ")</button>" +
         '<button class="btn btn-sm" data-vtact="del" data-id="' + d.id + '">🗑</button>';
@@ -3898,7 +3933,15 @@
     }
     function paintDesks(body) {
       body.innerHTML = loading();
-      api("/vetting/desks?motion=" + motion).then(function (data) {
+      // Pull the operator's Telnyx numbers first so the form can offer them as a
+      // pick-list (and mark which are already bound to another JD).
+      api("/vetting/numbers").then(function (nd) {
+        vt.numbers = (nd && nd.numbers) || [];
+        vt.numbersDry = !!(nd && nd.dryRun);
+        vt.numbersErr = (nd && nd.error) || null;
+      }).catch(function () { vt.numbers = []; vt.numbersErr = "unreachable"; }).then(function () {
+        return api("/vetting/desks?motion=" + motion);
+      }).then(function (data) {
         var list = (data && data.desks) || [];
         var editing = vt.editing ? list.filter(function (x) { return x.id === vt.editing; })[0] : null;
         body.innerHTML = (editing ? deskForm(editing) : deskForm(null)) +
@@ -3935,6 +3978,12 @@
         return;
       }
       if (act === "viewcalls") { vt.tab = "calls"; vt.deskId = id; tabBar(); paint(); return; }
+      if (act === "detach") {
+        if (!confirm("Unbind this number from the desk? The number stops answering for this JD and frees up to assign elsewhere.")) return;
+        deskMsg(id, "Detaching number…");
+        send("/vetting/desks", "POST", { action: "detach", deskId: id }).then(function () { toast("Number detached"); paintDesks(body); });
+        return;
+      }
       if (act === "del") {
         if (!confirm("Delete this vetting desk? Its number is unbound and call history is removed.")) return;
         send("/vetting/desks?id=" + encodeURIComponent(id), "DELETE").then(function () { toast("Desk deleted"); paintDesks(body); });

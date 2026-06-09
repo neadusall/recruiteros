@@ -175,6 +175,7 @@
     sending: { title: "Sending", crumb: "Build", action: null, render: renderSending },
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
+    vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
@@ -494,6 +495,7 @@
             [["0", "Any time"], ["1", "Last 24 hours"], ["3", "Last 3 days"], ["7", "Last 7 days"], ["14", "Last 14 days"], ["30", "Last 30 days"]]
               .map(function (o) { return '<option value="' + o[0] + '"' + (String(imPostedWithin) === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") +
           "</select>" +
+          '<button type="button" class="btn btn-primary btn-sm" id="imPostedGo">Search this range</button>' +
           '<span class="im-datehint muted">Fresher posts = warmer outreach</span>' +
         "</div>" +
         // Daily import read — populated on open so you see today's intake immediately.
@@ -580,12 +582,18 @@
 
     form.addEventListener("submit", function (e) { e.preventDefault(); runNow(); });
 
-    // Date search dropdown → re-run the current search filtered to fresh postings.
-    var postedSel = $("#imPosted");
-    if (postedSel) postedSel.addEventListener("change", function () {
-      imPostedWithin = parseInt(postedSel.value, 10) || 0;
-      runNow();
-    });
+    // Date search: pick a timeframe in the dropdown, then press the button to run the
+    // search for that range. The dropdown only stores the choice; the button triggers it,
+    // so the action is explicit and you get a clear loading state + updated count.
+    var postedSel = $("#imPosted"), postedGo = $("#imPostedGo");
+    function applyPosted() {
+      if (postedSel) imPostedWithin = parseInt(postedSel.value, 10) || 0;
+      var s = currentSearch();
+      if (s) runSearch(s.criteria, s.label);
+      else $("#imBody").innerHTML = '<div class="empty">Pick one or more industries (or Select all) first, then choose a timeframe and press <b>Search this range</b>.</div>';
+    }
+    if (postedSel) postedSel.addEventListener("change", function () { imPostedWithin = parseInt(postedSel.value, 10) || 0; });
+    if (postedGo) postedGo.addEventListener("click", applyPosted);
 
     // Industry chips: multi-select toggle → debounced search.
     Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
@@ -649,7 +657,8 @@
       '<div class="im-toolbar">' +
         '<label class="im-checkall"><input type="checkbox" id="imAll"> <b>Select all</b> <span class="muted">companies + managers</span></label>' +
         '<button type="button" class="btn btn-ghost btn-sm" id="imClearSel" style="display:none">Clear</button>' +
-        '<span class="im-count">' + leads.length + " shown · <b>" + Math.max(imTotal, inMarketResults.length) + "</b> companies hiring" + (imLabel ? " in " + esc(imLabel) : "") + " <span class=\"muted\">(grows daily)</span></span>" +
+        '<span class="im-count">' + leads.length + " shown · <b>" + Math.max(imTotal, inMarketResults.length) + "</b> companies hiring" + (imLabel ? " in " + esc(imLabel) : "") +
+          (imPostedWithin ? ' <span class="im-date-active">📅 posted in last ' + imPostedWithin + " day" + (imPostedWithin === 1 ? "" : "s") + "</span>" : " <span class=\"muted\">(grows daily)</span>") + "</span>" +
         '<div class="im-narrow" title="Narrow by hiring-intent score">' +
           bands.map(function (b) { return '<button type="button" class="im-nbtn' + (String(imMinScore) === b[0] ? " active" : "") + '" data-min="' + b[0] + '">' + b[1] + "</button>"; }).join("") +
         "</div>" +
@@ -3768,6 +3777,332 @@
             "</div>";
         });
       });
+    }
+
+    tabBar(); paint();
+  }
+
+  /* ---------------- AI Vetting (inbound conversational screening) --------------
+     A "vetting desk" binds one Job Description to one phone number and the
+     recruiter's cloned voice. Candidates opt in (a short form), then CALL the
+     number; a human-sounding AI recruiter greets them by name, references their
+     LinkedIn experience, asks the top 3–4 qualifiers, and tells them the next
+     step. Every call is recorded, transcribed, summarized, and scored 1–100 on
+     the recruiter rubric. Talks to /api/vetting. */
+  function renderVetting(el) {
+    var vt = { tab: "desks", deskId: null, editing: null };
+    el.innerHTML = head("AI Vetting",
+      "Bind a job description to a phone number and your cloned voice. Candidates opt in, then call in and talk to an AI recruiter that sounds like you — it greets them by name, references their LinkedIn experience, asks your top 3–4 qualifiers, and tells them the next step. Each call is recorded, transcribed, summarized, and scored 1–100.") +
+      '<div class="vt-tabs" style="display:flex;gap:8px;margin:2px 0 16px;flex-wrap:wrap"></div>' +
+      '<div id="vtBody">' + loading() + "</div>";
+
+    function tabBar() {
+      var tabs = [["desks", "🎙️ Vetting Desks"], ["calls", "📋 Calls & Scores"]];
+      $(".vt-tabs", el).innerHTML = tabs.map(function (t) {
+        return '<button class="btn btn-sm ' + (vt.tab === t[0] ? "btn-primary" : "") + '" data-vttab="' + t[0] + '">' + t[1] + "</button>";
+      }).join("");
+    }
+    $(".vt-tabs", el).addEventListener("click", function (e) {
+      var b = e.target.closest("[data-vttab]"); if (!b) return;
+      vt.tab = b.getAttribute("data-vttab"); tabBar(); paint();
+    });
+
+    function paint() {
+      var body = $("#vtBody"); if (!body) return;
+      if (vt.tab === "desks") return paintDesks(body);
+      return paintCalls(body);
+    }
+
+    /* ---- small field helpers ---- */
+    function fld(id, label, ph, type) {
+      return '<div class="vt-field"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">' + esc(label) + "</label>" +
+        '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph || "") + '" style="width:100%" /></div>';
+    }
+    function vget(id) { var e = $("#" + id); return e ? e.value.trim() : ""; }
+    function statusPill(s) {
+      var col = s === "live" ? "#34d399" : s === "paused" ? "#ffc24d" : "#8aa0c6";
+      return '<span style="font-size:12px;color:' + col + '">● ' + esc(s) + "</span>";
+    }
+    // Phone-number picker, populated from the operator's real Telnyx numbers
+    // (vt.numbers, fetched in paintDesks). A number already bound to a DIFFERENT
+    // desk is shown disabled so two JDs can't accidentally claim one line —
+    // detach it from that desk first to swap it over.
+    function numberSelect(d) {
+      var cur = d.phoneNumber || "";
+      var nums = vt.numbers || [];
+      var opts = '<option value="">— no number yet —</option>';
+      var hasCur = false;
+      nums.forEach(function (n) {
+        var mine = (n.deskId && d.id && n.deskId === d.id);
+        var takenElsewhere = n.assigned && !mine;
+        if (n.phoneNumber === cur) hasCur = true;
+        var tag = mine ? " (this desk)" : takenElsewhere ? (" → " + (n.deskName || "another desk")) : (n.label ? (" · " + n.label) : "");
+        opts += '<option value="' + esc(n.phoneNumber) + '"' + (n.phoneNumber === cur ? " selected" : "") +
+          (takenElsewhere ? " disabled" : "") + ">" + esc(n.phoneNumber) + esc(tag) + "</option>";
+      });
+      if (cur && !hasCur) opts += '<option value="' + esc(cur) + '" selected>' + esc(cur) + " (current)</option>";
+      var hint = vt.numbersDry ? "Dry-run: no Telnyx key, showing only bound numbers."
+        : vt.numbersErr ? ("Couldn’t reach Telnyx (" + esc(vt.numbersErr) + ").")
+        : (nums.length + " number" + (nums.length === 1 ? "" : "s") + " on your Telnyx account.");
+      return '<div class="vt-field"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Inbound number (from your Telnyx account)</label>' +
+        '<select id="vtfPhone" style="width:100%">' + opts + "</select>" +
+        '<div class="muted" style="font-size:11px;margin-top:3px">' + hint + "</div></div>";
+    }
+
+    /* ============ Desks tab ============ */
+    function deskForm(d) {
+      d = d || {};
+      var q = d.questions || [];
+      function qrow(i) {
+        var qq = q[i] || {};
+        return '<div style="display:grid;grid-template-columns:1fr 1fr 70px;gap:8px;margin-top:6px">' +
+          '<input id="vtQp' + i + '" placeholder="Qualifier ' + (i + 1) + ' (e.g. Years owning a $5M quota)" value="' + esc(qq.prompt || "") + '" />' +
+          '<input id="vtQc' + i + '" placeholder="What a PASS looks like" value="' + esc(qq.passCriteria || "") + '" />' +
+          '<label style="font-size:11px;display:flex;align-items:center;gap:4px;color:var(--muted)"><input id="vtQm' + i + '" type="checkbox" ' + (qq.mustHave ? "checked" : "") + " /> must</label></div>";
+      }
+      return '<div class="card" style="margin-top:12px"><h3 style="margin-top:0">' + (d.id ? "Edit desk" : "New vetting desk") + "</h3>" +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+        fld("vtfName", "Desk name (internal)", "VP Sales — East") +
+        fld("vtfRole", "Role title (spoken on the call)", "VP of Sales") +
+        fld("vtfCompany", "Hiring company", "Acme Corp") +
+        numberSelect(d) +
+        fld("vtfAgentName", "Your name (the agent introduces itself as)", "Ryan") +
+        fld("vtfAgentCompany", "Your firm", "Executive Search") +
+        fld("vtfVoice", "Cloned voice ID (ElevenLabs; blank = default)", "voice_xxx") +
+        fld("vtfThreshold", "Pass threshold (0–100)", "70", "number") +
+        "</div>" +
+        '<div class="vt-field" style="margin-top:10px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Job description</label>' +
+        '<textarea id="vtfJd" rows="6" style="width:100%" placeholder="Paste the full job description here. The agent uses this as its source of truth — it won\'t read it aloud.">' + esc(d.jobDescription || "") + "</textarea></div>" +
+        '<div style="margin-top:10px"><label style="font-size:12px;color:var(--muted)">Top qualifiers (3–4 max — the agent works these in conversationally, not as a checklist)</label>' +
+        qrow(0) + qrow(1) + qrow(2) + qrow(3) + "</div>" +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">' +
+        '<div class="vt-field"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Next step if QUALIFIED (spoken)</label><textarea id="vtfNextYes" rows="2" style="width:100%">' + esc(d.nextStepQualified || "") + "</textarea></div>" +
+        '<div class="vt-field"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Next step if NOT qualified (spoken)</label><textarea id="vtfNextNo" rows="2" style="width:100%">' + esc(d.nextStepUnqualified || "") + "</textarea></div>" +
+        "</div>" +
+        '<div style="display:flex;gap:8px;margin-top:12px">' +
+        '<button class="btn btn-primary btn-sm" id="vtSave">' + (d.id ? "Save changes" : "Create desk") + "</button>" +
+        (d.id ? '<button class="btn btn-sm" id="vtCancel">Cancel</button>' : "") +
+        '</div></div>';
+    }
+    function collectDesk() {
+      var qs = [];
+      for (var i = 0; i < 4; i++) {
+        var p = vget("vtQp" + i), c = vget("vtQc" + i);
+        if (p && c) {
+          var mEl = $("#vtQm" + i);
+          qs.push({ prompt: p, passCriteria: c, mustHave: mEl && mEl.checked });
+        }
+      }
+      var payload = {
+        name: vget("vtfName"), motion: motion, roleTitle: vget("vtfRole"), clientCompany: vget("vtfCompany"),
+        phoneNumber: vget("vtfPhone"), jobDescription: $("#vtfJd") ? $("#vtfJd").value : "",
+        voiceId: vget("vtfVoice"), passThreshold: parseInt(vget("vtfThreshold") || "70", 10),
+        persona: { agentName: vget("vtfAgentName") || "Ryan", agentCompany: vget("vtfAgentCompany") || "Executive Search" },
+        questions: qs
+      };
+      var ny = $("#vtfNextYes"), nn = $("#vtfNextNo");
+      if (ny && ny.value.trim()) payload.nextStepQualified = ny.value.trim();
+      if (nn && nn.value.trim()) payload.nextStepUnqualified = nn.value.trim();
+      if (vt.editing) payload.id = vt.editing;
+      return payload;
+    }
+    function deskCard(d) {
+      var optinUrl = location.origin + "/vetting-optin?desk=" + d.id;
+      var actions = '<button class="btn btn-sm" data-vtact="edit" data-id="' + d.id + '">✎ Edit</button>';
+      if (d.status === "live") {
+        actions += '<button class="btn btn-sm" data-vtact="pause" data-id="' + d.id + '">⏸ Pause</button>';
+      } else if (d.status === "paused") {
+        actions += '<button class="btn btn-sm btn-primary" data-vtact="resume" data-id="' + d.id + '">▶ Resume</button>';
+      } else {
+        actions += '<button class="btn btn-sm btn-primary" data-vtact="provision" data-id="' + d.id + '">📡 Go live</button>';
+      }
+      if (d.phoneNumber) actions += '<button class="btn btn-sm" data-vtact="detach" data-id="' + d.id + '">⛓️‍💥 Detach #</button>';
+      actions += '<button class="btn btn-sm" data-vtact="copy" data-id="' + d.id + '" data-url="' + esc(optinUrl) + '">🔗 Opt-in link</button>' +
+        '<button class="btn btn-sm" data-vtact="viewcalls" data-id="' + d.id + '">📋 Calls (' + (d.callCount || 0) + ")</button>" +
+        '<button class="btn btn-sm" data-vtact="del" data-id="' + d.id + '">🗑</button>';
+      return '<div class="card" data-id="' + d.id + '" style="margin-top:12px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
+        "<h3 style='margin:0'>" + esc(d.name) + ' <span class="muted" style="font-size:12px">· ' + esc(d.roleTitle || "no role title") + "</span></h3>" +
+        statusPill(d.status) + "</div>" +
+        '<div class="muted" style="font-size:12px;margin-top:6px">' +
+        "📞 " + esc(d.phoneNumber || "no number yet") + " · " + (d.questions ? d.questions.length : 0) + " qualifiers · " +
+        (d.candidateCount || 0) + " opted in · pass ≥ " + d.passThreshold + " · voice " + esc(d.voiceId || "default") + "</div>" +
+        (d.jobDescription ? "" : '<div style="font-size:12px;color:#ffc24d;margin-top:6px">⚠ Add a job description before going live.</div>') +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' + actions + "</div>" +
+        '<div class="vt-msg muted" data-msg="' + d.id + '" style="font-size:12px;margin-top:8px"></div></div>';
+    }
+    function paintDesks(body) {
+      body.innerHTML = loading();
+      // Pull the operator's Telnyx numbers first so the form can offer them as a
+      // pick-list (and mark which are already bound to another JD).
+      api("/vetting/numbers").then(function (nd) {
+        vt.numbers = (nd && nd.numbers) || [];
+        vt.numbersDry = !!(nd && nd.dryRun);
+        vt.numbersErr = (nd && nd.error) || null;
+      }).catch(function () { vt.numbers = []; vt.numbersErr = "unreachable"; }).then(function () {
+        return api("/vetting/desks?motion=" + motion);
+      }).then(function (data) {
+        var list = (data && data.desks) || [];
+        var editing = vt.editing ? list.filter(function (x) { return x.id === vt.editing; })[0] : null;
+        body.innerHTML = (editing ? deskForm(editing) : deskForm(null)) +
+          (list.length ? list.map(deskCard).join("") : '<p class="muted" style="margin-top:16px">No vetting desks yet — create one above, paste a JD, set your qualifiers, then “Go live”.</p>');
+        wireDesks(body);
+      }).catch(function () { body.innerHTML = needsSetup(); });
+    }
+    function wireDesks(body) {
+      var saveBtn = $("#vtSave");
+      if (saveBtn) saveBtn.addEventListener("click", function () {
+        var p = collectDesk();
+        if (!p.name) { toast("Name the desk first."); return; }
+        send("/vetting/desks", "PUT", p).then(function (r) {
+          if (!r.ok) { toast("Save failed"); return; }
+          toast(vt.editing ? "Desk updated" : "Desk created"); vt.editing = null; paintDesks(body);
+        });
+      });
+      var cancel = $("#vtCancel");
+      if (cancel) cancel.addEventListener("click", function () { vt.editing = null; paintDesks(body); });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-vtact]"), function (b) {
+        b.addEventListener("click", function () { deskAction(b.getAttribute("data-vtact"), b.getAttribute("data-id"), b, body); });
+      });
+    }
+    function deskMsg(id, text, warn) {
+      var m = document.querySelector('[data-msg="' + id + '"]');
+      if (m) { m.textContent = text; m.style.color = warn ? "#ffc24d" : ""; }
+    }
+    function deskAction(act, id, btn, body) {
+      if (act === "edit") { vt.editing = id; paintDesks(body); return; }
+      if (act === "copy") {
+        var url = btn.getAttribute("data-url");
+        if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { toast("Opt-in link copied"); });
+        else { window.prompt("Opt-in link", url); }
+        return;
+      }
+      if (act === "viewcalls") { vt.tab = "calls"; vt.deskId = id; tabBar(); paint(); return; }
+      if (act === "detach") {
+        if (!confirm("Unbind this number from the desk? The number stops answering for this JD and frees up to assign elsewhere.")) return;
+        deskMsg(id, "Detaching number…");
+        send("/vetting/desks", "POST", { action: "detach", deskId: id }).then(function () { toast("Number detached"); paintDesks(body); });
+        return;
+      }
+      if (act === "del") {
+        if (!confirm("Delete this vetting desk? Its number is unbound and call history is removed.")) return;
+        send("/vetting/desks?id=" + encodeURIComponent(id), "DELETE").then(function () { toast("Desk deleted"); paintDesks(body); });
+        return;
+      }
+      if (act === "provision") {
+        deskMsg(id, "Provisioning the agent and binding the number…");
+        send("/vetting/desks", "POST", { action: "provision", deskId: id }).then(function (r) {
+          if (!r.ok) { deskMsg(id, "Could not go live: " + ((r.data && r.data.detail) || (r.data && r.data.error) || r.status), true); return; }
+          if (r.data && r.data.dryRun) deskMsg(id, "Live in dry-run (no Telnyx key — the desk is configured but won’t take real calls until TELNYX_API_KEY is set).", true);
+          paintDesks(body);
+        });
+        return;
+      }
+      if (act === "pause" || act === "resume") {
+        send("/vetting/desks", "POST", { action: act, deskId: id }).then(function () { paintDesks(body); });
+      }
+    }
+
+    /* ============ Calls tab ============ */
+    var SCORE_CATS = [
+      ["communication", "Communication", 20], ["responseLength", "Response length", 10],
+      ["interpersonalPresence", "Interpersonal presence", 15], ["selfAwareness", "Self-awareness", 15],
+      ["achievementOrientation", "Achievement", 15], ["problemSolving", "Problem-solving", 10],
+      ["motivation", "Motivation", 10], ["culturalFit", "Cultural fit", 5]
+    ];
+    function band(total) {
+      if (total >= 90) return ["Exceptional candidate", "#34d399"];
+      if (total >= 80) return ["Strong hire", "#34d399"];
+      if (total >= 70) return ["Worth advancing", "#7fd1ff"];
+      if (total >= 60) return ["Borderline", "#ffc24d"];
+      return ["Do not advance", "#ff7a90"];
+    }
+    function scoreRing(total) {
+      var b = band(total || 0);
+      return '<span style="display:inline-flex;align-items:center;justify-content:center;width:46px;height:46px;border-radius:50%;border:3px solid ' + b[1] + ';font-weight:700;font-size:15px">' + (total != null ? total : "—") + "</span>";
+    }
+    function callRow(c) {
+      var b = band(c.totalScore || 0);
+      var name = (c.candidate ? (c.candidate.firstName + " " + c.candidate.lastName) : (c.callerName || c.callerPhone));
+      var qual = c.qualified === true ? '<span style="color:#34d399">✓ Qualified</span>' : c.qualified === false ? '<span style="color:#ff7a90">✗ Not qualified</span>' : '<span class="muted">pending</span>';
+      var mkt = c.marketabilityScore != null ? (" · market " + c.marketabilityScore + "/10") : "";
+      return '<div class="card vt-call" data-call="' + c.id + '" style="margin-top:10px;cursor:pointer">' +
+        '<div style="display:flex;gap:14px;align-items:center">' + scoreRing(c.totalScore) +
+        '<div style="flex:1;min-width:0">' +
+        "<div style='font-weight:600'>" + esc(name) + ' <span class="muted" style="font-size:12px">· ' + esc(c.callerPhone) + "</span></div>" +
+        '<div style="font-size:12px;color:' + b[1] + '">' + b[0] + " · " + qual + mkt + (c.durationSec ? (" · " + Math.round(c.durationSec / 60) + "m") : "") + " · " + (c.status === "scored" ? "scored" : esc(c.status)) + "</div>" +
+        (c.summary ? '<div class="muted" style="font-size:12px;margin-top:4px">' + esc(c.summary) + "</div>" : "") +
+        "</div></div>" +
+        '<div class="vt-call-detail" data-detail="' + c.id + '" style="display:none;margin-top:12px"></div></div>';
+    }
+    function paintCalls(body) {
+      body.innerHTML = loading();
+      api("/vetting/desks?motion=" + motion).then(function (dd) {
+        var desks = (dd && dd.desks) || [];
+        var opts = '<option value="">All desks</option>' + desks.map(function (d) {
+          return '<option value="' + d.id + '"' + (vt.deskId === d.id ? " selected" : "") + ">" + esc(d.name) + "</option>";
+        }).join("");
+        var qs = vt.deskId ? ("?deskId=" + encodeURIComponent(vt.deskId)) : "";
+        api("/vetting/calls" + qs).then(function (cd) {
+          var calls = (cd && cd.calls) || [];
+          body.innerHTML = '<div class="card"><label style="font-size:12px;color:var(--muted)">Desk</label><br/>' +
+            '<select id="vtDeskSel" style="margin-top:4px">' + opts + "</select></div>" +
+            (calls.length ? calls.map(callRow).join("") : '<p class="muted" style="margin-top:16px">No calls yet. Share a desk’s opt-in link, then have a candidate call its number.</p>');
+          $("#vtDeskSel").addEventListener("change", function () { vt.deskId = this.value || null; paintCalls(body); });
+          Array.prototype.forEach.call(body.querySelectorAll(".vt-call"), function (row) {
+            row.addEventListener("click", function (e) {
+              if (e.target.closest(".vt-call-detail")) return;
+              toggleCall(row.getAttribute("data-call"));
+            });
+          });
+        }).catch(function () { body.innerHTML = needsSetup(); });
+      }).catch(function () { body.innerHTML = needsSetup(); });
+    }
+    function toggleCall(id) {
+      var det = document.querySelector('[data-detail="' + id + '"]');
+      if (!det) return;
+      if (det.style.display !== "none") { det.style.display = "none"; det.innerHTML = ""; return; }
+      det.style.display = "block"; det.innerHTML = loading();
+      api("/vetting/calls?id=" + encodeURIComponent(id)).then(function (d) {
+        var c = d && d.call; if (!c) { det.innerHTML = '<p class="muted">Not found.</p>'; return; }
+        det.innerHTML = callDetail(c);
+      }).catch(function () { det.innerHTML = '<p class="muted">Could not load.</p>'; });
+    }
+    function bar(label, v, max) {
+      var pct = max ? Math.round((v / max) * 100) : 0;
+      var col = pct >= 75 ? "#34d399" : pct >= 50 ? "#7fd1ff" : pct >= 30 ? "#ffc24d" : "#ff7a90";
+      return '<div style="margin:5px 0"><div style="display:flex;justify-content:space-between;font-size:12px"><span>' + esc(label) + "</span><span>" + v + "/" + max + "</span></div>" +
+        '<div style="height:6px;border-radius:4px;background:rgba(255,255,255,.08)"><div style="height:6px;border-radius:4px;width:' + pct + '%;background:' + col + '"></div></div></div>';
+    }
+    function callDetail(c) {
+      var html = "";
+      if (c.scores) {
+        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px">' +
+          SCORE_CATS.map(function (s) { return bar(s[1], c.scores[s[0]] || 0, s[2]); }).join("") + "</div>";
+      }
+      if (c.marketabilityScore != null || c.agentRealism) {
+        html += '<div class="muted" style="font-size:12px;margin-top:8px">' +
+          (c.marketabilityScore != null ? "<b>Marketability:</b> " + c.marketabilityScore + "/10 (client-interview likelihood) " : "") +
+          (c.agentRealism ? " · <b>Agent realism:</b> " + c.agentRealism.score + "/100" : "") + "</div>";
+        if (c.agentRealism && c.agentRealism.notes) html += '<div class="muted" style="font-size:12px">' + esc(c.agentRealism.notes) + "</div>";
+      }
+      if (c.qualifyRationale) html += '<div style="margin-top:10px;font-size:13px"><b>Why ' + (c.qualified ? "they qualify" : "they don’t qualify") + ":</b> " + esc(c.qualifyRationale) + "</div>";
+      if (c.verdicts && c.verdicts.length) {
+        html += '<div style="margin-top:10px"><b style="font-size:13px">Qualifiers</b>' + c.verdicts.map(function (v) {
+          return '<div style="font-size:12px;margin-top:4px">' + (v.pass ? "✅" : "❌") + " " + esc(v.answer) + ' <span class="muted">— ' + esc(v.rationale) + "</span></div>";
+        }).join("") + "</div>";
+      }
+      if (c.nextStepGiven) html += '<div class="muted" style="font-size:12px;margin-top:8px"><b>Next step told to candidate:</b> ' + esc(c.nextStepGiven) + "</div>";
+      if (c.recordingUrl) html += '<div style="margin-top:8px"><a class="btn btn-sm" href="' + esc(c.recordingUrl) + '" target="_blank" rel="noopener">▶ Recording</a></div>';
+      if (c.transcript && c.transcript.length) {
+        html += '<div style="margin-top:10px"><b style="font-size:13px">Transcript</b><div style="margin-top:6px;max-height:280px;overflow:auto;font-size:13px;line-height:1.5">' +
+          c.transcript.map(function (t) {
+            var who = t.role === "agent" ? "You (AI)" : "Candidate";
+            var col = t.role === "agent" ? "#b9a6ff" : "#7fd1ff";
+            return '<div style="margin:3px 0"><b style="color:' + col + '">' + who + ":</b> " + esc(t.text) + "</div>";
+          }).join("") + "</div></div>";
+      }
+      return html || '<p class="muted">Call recorded; analysis pending.</p>';
     }
 
     tabBar(); paint();
