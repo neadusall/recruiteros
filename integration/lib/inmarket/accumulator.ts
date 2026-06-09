@@ -13,7 +13,7 @@
  */
 
 import { collectLeads } from "./index";
-import { mergeIntoPool } from "./pool";
+import { mergeIntoPool, poolCompanySlugs } from "./pool";
 
 // Sectors to keep warm — mirrors the UI's industry chips (non-tech first, since those
 // are the sectors free remote boards miss and Adzuna fills).
@@ -32,10 +32,13 @@ const CYCLE_MS = 60 * 60 * 1000;       // refresh every 60 minutes
 const PER_CYCLE = 4;                    // targeted industries per cycle
 const COLLECT_CAP = 120;               // leads/sector for the targeted pulls
 const VACUUM_CAP = 600;                // leads for the keyword-less breadth pull
+const SEED_COMPANIES = 40;             // pool companies probed for deeper roles per cycle
+const SEED_CAP = 300;                  // leads from the seeding pass
 const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
 
 let started = false;
 let cursor = 0;
+let seedCursor = 0;
 
 async function runCycle(): Promise<void> {
   const now = new Date().toISOString();
@@ -65,6 +68,22 @@ async function runCycle(): Promise<void> {
     } catch {
       /* skip this industry this cycle; try the next on the following tick */
     }
+  }
+
+  // 3) SEED ATS + GITHUB — feed a rotating slice of known pool companies (as slugs) to the
+  //    watchlist-driven sources (Workable/SmartRecruiters/Recruitee + GitHub orgs + News
+  //    RSS), which are otherwise inert without a company list. This deepens role/manager
+  //    coverage for companies already in the pool (more open roles -> richer velocity
+  //    roll-up -> more hiring managers). Slugs are best-effort; misses fail gracefully.
+  try {
+    const { slugs, total } = await poolCompanySlugs(seedCursor, SEED_COMPANIES);
+    if (slugs.length) {
+      seedCursor = total ? (seedCursor + slugs.length) % total : 0;
+      const leads = await collectLeads({ companyNames: slugs, limit: SEED_CAP }, now, SEED_CAP);
+      await mergeIntoPool(leads);
+    }
+  } catch {
+    /* seeding is best-effort; skip this tick on any failure */
   }
 }
 

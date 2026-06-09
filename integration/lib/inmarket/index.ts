@@ -42,6 +42,10 @@ export interface InMarketQuery {
   geos?: string[];
   /** Company-name search: only surface companies whose name matches this text. */
   companyName?: string;
+  /** Company slugs/names to feed the watchlist-driven sources (ATS boards, GitHub orgs,
+   *  News RSS). Used by the background accumulator to deepen role coverage for companies
+   *  already in the pool — not a user-facing filter. */
+  companyNames?: string[];
   /** Decision-maker titles to anchor the buyer, e.g. ["VP Engineering", "Head of Talent"]. */
   titles?: string[];
   /** Restrict to specific hiring-signal types (funding_round, hiring_velocity, …). */
@@ -326,11 +330,16 @@ export async function collectLeads(q: InMarketQuery, nowIso: string, cap = 300):
   if (q.companyName) keywords.push(q.companyName.trim());
   if (q.query) keywords.push(...q.query.split(/\s+/).filter((t) => t.length > 2));
   if (q.industries?.length) keywords.push(...industryTokens(q.industries));
+  const watchlist: { keywords?: string[]; companyNames?: string[] } = {};
+  if (keywords.length) watchlist.keywords = keywords;
+  // Feed company names/slugs to the watchlist-driven sources (ATS boards, GitHub, News)
+  // so they activate during background accumulation and deepen role coverage.
+  if (q.companyNames?.length) watchlist.companyNames = q.companyNames;
   const report = await collect({
     icp: icpFromQuery(q),
     now: nowIso,
     sources: freeSources(),
-    pull: { watchlist: keywords.length ? { keywords } : {}, limit: cap },
+    pull: { watchlist, limit: cap },
   });
   const kw = (q.query ?? "").toLowerCase().trim();
   const nameKw = (q.companyName ?? "").toLowerCase().trim();

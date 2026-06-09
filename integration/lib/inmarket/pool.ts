@@ -118,3 +118,34 @@ export async function queryPool(q: InMarketQuery, limit: number): Promise<InMark
 export async function poolSize(): Promise<number> {
   return (await load()).length;
 }
+
+/** Best-effort ATS/GitHub slug from a company display name: lowercased, legal suffixes
+ *  stripped, punctuation removed. e.g. "Stripe, Inc." -> "stripe". Not guaranteed to be a
+ *  real slug — the seeded sources fail gracefully on a miss — but resolves the common case
+ *  (single-word brands, the bulk of public ATS boards). */
+function slugifyCompany(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(inc|llc|ltd|corp|co|gmbh|plc|sa|ag|srl|bv|pte|group|holdings|technologies|labs|software|systems)\b/g, "")
+    .replace(/[.,&'"`/()]/g, " ")
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+/** A rotating slice of company slugs from the pool, to seed the watchlist-driven sources
+ *  (ATS boards, GitHub orgs) so they deepen role coverage for known companies. Highest-
+ *  scored first; `offset` rotates through the whole pool over successive cycles. */
+export async function poolCompanySlugs(offset: number, limit: number): Promise<{ slugs: string[]; total: number }> {
+  const pool = (await load()).sort((a, b) => (b.lead.score ?? 0) - (a.lead.score ?? 0));
+  const seen = new Set<string>();
+  const slugs: string[] = [];
+  for (let i = 0; i < pool.length; i++) {
+    const idx = (offset + i) % pool.length;
+    const s = slugifyCompany(pool[idx].lead.company || "");
+    if (s.length < 2 || seen.has(s)) continue;
+    seen.add(s);
+    slugs.push(s);
+    if (slugs.length >= limit) break;
+  }
+  return { slugs, total: pool.length };
+}

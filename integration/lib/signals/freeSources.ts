@@ -924,6 +924,153 @@ export class AdzunaSource implements SignalSource {
 }
 interface AdzunaJob { id: string; title?: string; company?: { display_name?: string }; location?: { display_name?: string }; category?: { label?: string; tag?: string }; created?: string; redirect_url?: string; salary_min?: number; salary_max?: number }
 
+/** RemoteOK public API — free, NO key/auth (attribution required, sent via User-Agent).
+ *  A dense, fast-refreshing remote-jobs feed with company + tags we use for industry
+ *  classification. The first array element is a legal/metadata object, skipped. */
+export class RemoteOkSource implements SignalSource {
+  readonly id = "remoteok";
+  readonly kind: SourceKind = "job_board";
+  readonly emits: SignalType[] = ["job_posting"];
+  readonly label = "RemoteOK (free API)";
+  isConfigured(): boolean { return true; }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    const now = new Date().toISOString();
+    const signals: Signal[] = [];
+    const warnings: string[] = [];
+    const kw = (ctx.watchlist?.keywords ?? []).map((k) => k.toLowerCase());
+    const want = (s: string) => !kw.length || kw.some((k) => s.toLowerCase().includes(k));
+    try {
+      const rows = await getJson<RemoteOkJob[]>("https://remoteok.com/api", {
+        headers: { "User-Agent": "RecruiterOS/1.0 (+https://recruitersos.co)", Accept: "application/json" },
+      });
+      for (const j of (Array.isArray(rows) ? rows : []).slice(0, (ctx.limit ?? 100) + 1)) {
+        if (!j.company || !j.position) continue; // skips the leading legal/metadata object
+        const tags = j.tags ?? [];
+        if (!want(`${j.position} ${j.company} ${tags.join(" ")}`)) continue;
+        signals.push(makeSignal({
+          type: "job_posting",
+          title: `${j.company} is hiring (remote): ${j.position}`,
+          detail: `Remote role "${j.position}"${tags.length ? ` · ${tags.slice(0, 3).join(", ")}` : ""}.`,
+          evidence: { roleTitle: j.position, location: j.location || "Remote", applyUrl: j.url || j.apply_url, tags, remote: true },
+          source: { kind: this.kind, connector: "remoteok", url: j.url || j.apply_url, externalId: `remoteok:${j.id ?? j.slug}`, observedAt: now },
+          eventAt: toIso(j.epoch, j.date ?? now),
+          ingestedAt: now,
+          anchor: j.company,
+          companyHint: { id: "", name: j.company, industry: tags[0], hiringLocations: [{ raw: j.location || "Remote", remote: true }] },
+        }));
+      }
+    } catch (err) { warnings.push(`remoteok: ${(err as Error).message}`); }
+    return { signals, warnings };
+  }
+}
+interface RemoteOkJob { id?: string; slug?: string; epoch?: number; date?: string; company?: string; position?: string; tags?: string[]; location?: string; url?: string; apply_url?: string }
+
+/** Findwork.dev jobs API — broad cross-industry coverage with company + keywords. Needs a
+ *  FREE API token (FINDWORK_API_KEY, read from env, never committed); skipped until set.
+ *  Get a key at findwork.dev/developers. */
+export class FindworkSource implements SignalSource {
+  readonly id = "findwork";
+  readonly kind: SourceKind = "job_board";
+  readonly emits: SignalType[] = ["job_posting"];
+  readonly label = "Findwork.dev jobs (free key)";
+  isConfigured(): boolean { return !!process.env.FINDWORK_API_KEY; }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    const key = process.env.FINDWORK_API_KEY;
+    if (!key) return { signals: [], warnings: [] };
+    const now = new Date().toISOString();
+    const signals: Signal[] = [];
+    const warnings: string[] = [];
+    const headers = { Authorization: `Token ${key}`, Accept: "application/json" };
+    const kw = (ctx.watchlist?.keywords ?? []);
+    const search = kw.length ? `&search=${encodeURIComponent(kw.join(" "))}` : "";
+    const pages = Math.min(Math.max(Math.ceil((ctx.limit ?? 50) / 50), 1), 3);
+    try {
+      for (let page = 1; page <= pages; page++) {
+        const res = await getJson<{ results: FindworkJob[] }>(
+          `https://findwork.dev/api/jobs/?sort_by=date${search}&page=${page}`, { headers },
+        );
+        const rows = res.results ?? [];
+        if (!rows.length) break;
+        for (const j of rows) {
+          const company = j.company_name; const role = j.role;
+          if (!company || !role) continue;
+          const kwTag = (j.keywords ?? [])[0];
+          signals.push(makeSignal({
+            type: "job_posting",
+            title: `${company} is hiring: ${role}`,
+            detail: `Open role "${role}"${j.location ? ` in ${j.location}` : ""}${j.remote ? " · remote" : ""}.`,
+            evidence: { roleTitle: role, location: j.location, applyUrl: j.url, keywords: j.keywords, remote: j.remote, employmentType: j.employment_type },
+            source: { kind: this.kind, connector: "findwork", url: j.url, externalId: `findwork:${j.id}`, observedAt: now },
+            eventAt: j.date_posted ?? now,
+            ingestedAt: now,
+            anchor: company,
+            companyHint: { id: "", name: company, industry: kwTag },
+          }));
+        }
+      }
+    } catch (err) { warnings.push(`findwork: ${(err as Error).message}`); }
+    return { signals, warnings };
+  }
+}
+interface FindworkJob { id: number | string; role: string; company_name: string; location?: string; remote?: boolean; url: string; keywords?: string[]; date_posted?: string; employment_type?: string }
+
+/** JobDataAPI (jobdataapi.com) — large aggregated feed with company + industry + country.
+ *  Needs a FREE API key (JOBDATA_API_KEY, read from env, never committed); skipped until
+ *  set. Get a key at jobdataapi.com. */
+export class JobdataSource implements SignalSource {
+  readonly id = "jobdata";
+  readonly kind: SourceKind = "job_board";
+  readonly emits: SignalType[] = ["job_posting"];
+  readonly label = "JobDataAPI (free key)";
+  isConfigured(): boolean { return !!process.env.JOBDATA_API_KEY; }
+
+  async pull(ctx: PullContext): Promise<PullResult> {
+    const key = process.env.JOBDATA_API_KEY;
+    if (!key) return { signals: [], warnings: [] };
+    const now = new Date().toISOString();
+    const signals: Signal[] = [];
+    const warnings: string[] = [];
+    const headers = { Authorization: `Api-Key ${key}`, Accept: "application/json" };
+    const kw = (ctx.watchlist?.keywords ?? []);
+    const title = kw.length ? `&title=${encodeURIComponent(kw.join(" "))}` : "";
+    const pages = Math.min(Math.max(Math.ceil((ctx.limit ?? 50) / 50), 1), 3);
+    try {
+      for (let page = 1; page <= pages; page++) {
+        const res = await getJson<{ results: JobdataJob[] }>(
+          `https://jobdataapi.com/api/jobs/?page_size=50&page=${page}${title}`, { headers },
+        );
+        const rows = res.results ?? [];
+        if (!rows.length) break;
+        for (const j of rows) {
+          const company = j.company?.name; const role = j.title;
+          if (!company || !role) continue;
+          const industry = j.company?.industry || (j.types ?? [])[0]?.name;
+          const loc = j.location || [j.city?.name, j.region?.name, j.country?.name].filter(Boolean).join(", ");
+          signals.push(makeSignal({
+            type: "job_posting",
+            title: `${company} is hiring: ${role}`,
+            detail: `Open role "${role}"${industry ? ` · ${industry}` : ""}${loc ? ` in ${loc}` : ""}.`,
+            evidence: { roleTitle: role, function: industry, location: loc, applyUrl: j.application_url },
+            source: { kind: this.kind, connector: "jobdata", url: j.application_url, externalId: `jobdata:${j.id}`, observedAt: now },
+            eventAt: j.published ?? now,
+            ingestedAt: now,
+            anchor: company,
+            companyHint: { id: "", name: company, industry },
+          }));
+        }
+      }
+    } catch (err) { warnings.push(`jobdata: ${(err as Error).message}`); }
+    return { signals, warnings };
+  }
+}
+interface JobdataJob {
+  id: number | string; title: string; company?: { name?: string; industry?: string };
+  location?: string; city?: { name?: string }; region?: { name?: string }; country?: { name?: string };
+  types?: Array<{ name?: string }>; application_url?: string; published?: string;
+}
+
 /* ------------------------------------------------------------------ */
 /* The free source set                                                 */
 /* ------------------------------------------------------------------ */
@@ -944,7 +1091,10 @@ export function freeSources(): SignalSource[] {
     new WorkingNomadsSource(),
     new WeWorkRemotelySource(),
     new JobspressoSource(),
+    new RemoteOkSource(),
     new AdzunaSource(),
+    new FindworkSource(),
+    new JobdataSource(),
     new HackerNewsHiringSource(),
     new UsaSpendingSource(),
     new GitHubOrgSource(),
