@@ -1092,13 +1092,13 @@
   function bulkPushToProspects() {
     var picks = Object.keys(imPicks).map(function (k) { return imPicks[k]; });
     if (!picks.length) return;
-    var n = picks.length, est = null;
+    var n = picks.length;
     var body =
       '<div class="pc">' +
         '<div class="pc-head">Run <b>' + n + "</b> " + (n === 1 ? "person" : "people") + " through third-party enrichment + the outreach sequence.</div>" +
-        '<label class="pc-voice"><input type="checkbox" id="pcVoice" checked> Include voicemail + voice drops <span class="muted">(adds the phone reveal)</span></label>' +
         '<div id="pcLines" class="pc-lines">' + loading() + "</div>" +
         '<div class="pc-total" id="pcTotal"></div>' +
+        '<div id="pcCond"></div>' +
         '<div class="pc-notes muted" id="pcNotes"></div>' +
         '<div class="modal-foot">' +
           '<button class="btn btn-ghost btn-sm" id="pcCancel">Cancel</button>' +
@@ -1106,26 +1106,28 @@
         "</div>" +
       "</div>";
     openModal("Launch outreach", "Estimated cost — approve to start", body, function (root, closeFn) {
-      var voiceCb = root.querySelector("#pcVoice");
       var approve = root.querySelector("#pcApprove");
-      function fetchEst() {
-        approve.disabled = true;
-        root.querySelector("#pcLines").innerHTML = loading();
-        send("/in-market", "POST", { action: "estimate", count: n, includeVoice: voiceCb.checked }).then(function (r) {
-          if (!r.ok || !r.data || !r.data.estimate) { root.querySelector("#pcLines").innerHTML = '<div class="empty">Could not estimate cost.</div>'; return; }
-          est = r.data.estimate;
-          root.querySelector("#pcLines").innerHTML = est.lines.map(function (l) {
-            return '<div class="pc-line"><span>' + esc(l.label) + ' <span class="muted">×' + l.qty + "</span></span><span>$" + l.costUsd.toFixed(2) + "</span></div>";
-          }).join("");
-          root.querySelector("#pcTotal").innerHTML = "Estimated total: <b>$" + est.totalUsd.toFixed(2) + "</b> <span class=\"muted\">(~$" + est.perPersonUsd.toFixed(3) + "/person)</span>";
-          root.querySelector("#pcNotes").innerHTML = (est.notes || []).map(function (x) { return "• " + esc(x); }).join("<br>");
-          approve.disabled = false;
-        }).catch(function () { root.querySelector("#pcLines").innerHTML = '<div class="empty">Could not estimate cost.</div>'; });
-      }
-      voiceCb.addEventListener("change", fetchEst);
+      send("/in-market", "POST", { action: "estimate", count: n }).then(function (r) {
+        if (!r.ok || !r.data || !r.data.estimate) { root.querySelector("#pcLines").innerHTML = '<div class="empty">Could not estimate cost.</div>'; return; }
+        var est = r.data.estimate;
+        // Firm per-person lines — charged for every prospect.
+        root.querySelector("#pcLines").innerHTML = (est.perPersonLines || []).map(function (l) {
+          return '<div class="pc-line"><span>' + esc(l.label) + ' <span class="muted">×' + l.qty + "</span></span><span>$" + l.costUsd.toFixed(2) + "</span></div>";
+        }).join("");
+        root.querySelector("#pcTotal").innerHTML = "Estimated total: <b>$" + (est.firmTotalUsd || 0).toFixed(2) + "</b> <span class=\"muted\">(firm · ~$" + (est.perPersonUsd || 0).toFixed(3) + "/person)</span>";
+        // Conditional add-ons — only fire for a subset; shown per-unit, not in the total.
+        var cond = est.conditional || [];
+        root.querySelector("#pcCond").innerHTML = cond.length
+          ? '<div class="pc-cond-h">Conditional add-ons <span class="muted">— only when triggered, not in the total above</span></div>' +
+            cond.map(function (c) {
+              return '<div class="pc-line pc-cond"><span>' + esc(c.label) + ' <span class="muted">' + esc(c.basis) + "</span></span><span>$" + (c.unitUsd || 0).toFixed(3) + "</span></div>";
+            }).join("")
+          : "";
+        root.querySelector("#pcNotes").innerHTML = (est.notes || []).map(function (x) { return "• " + esc(x); }).join("<br>");
+        approve.disabled = false;
+      }).catch(function () { root.querySelector("#pcLines").innerHTML = '<div class="empty">Could not estimate cost.</div>'; });
       root.querySelector("#pcCancel").addEventListener("click", closeFn);
       approve.addEventListener("click", function () { closeFn(); runBulkPush(picks); });
-      fetchEst();
     });
   }
 
@@ -4092,9 +4094,9 @@
       }).then(function (data) {
         var list = (data && data.desks) || [];
         var editing = vt.editing ? list.filter(function (x) { return x.id === vt.editing; })[0] : null;
-        var showForm = !!(vt.creating || editing);
-        // List is the primary view; the create form is revealed on demand so the
-        // desk doesn't open onto a wall of inputs.
+        // Once you have desks the list leads and the form is revealed on demand;
+        // with none yet, the form is shown by default so first-run isn't a bare button.
+        var showForm = !!(vt.creating || editing) || list.length === 0;
         var toolbar = '<div class="vt-toolbar"><span class="vt-count">' +
           list.length + " vetting desk" + (list.length === 1 ? "" : "s") + "</span>" +
           (showForm ? "" : '<button class="vt-btn vt-btn-primary" id="vtNew">＋ New vetting desk</button>') +
@@ -4305,7 +4307,7 @@
       r = r || {};
       if (!r.configured) {
         return '<div class="vt-card"><h3>Connect TidyCal</h3>' +
-          '<div class="vt-hint" style="margin-top:8px">Add your TidyCal token on the server (<code>TIDYCAL_API_TOKEN</code>) and bookings will appear here. Each is routed to the vetting desk whose role title matches the booking, the candidate\'s LinkedIn is researched before they call, and their phone is matched when they dial in. Add a <b>phone</b> and <b>LinkedIn URL</b> question to your TidyCal booking type so we can connect the call and prep the agent.</div></div>';
+          '<div class="vt-hint" style="margin-top:8px">Add your TidyCal token on the server (<code>TIDYCAL_API_TOKEN</code>) and bookings will appear here. Each is routed to the matching vetting desk, the candidate\'s LinkedIn is researched before they call, and their phone is matched when they dial in. Add three questions to your TidyCal booking type so we can route and prep: <b>Job title</b> (matched to a desk), <b>LinkedIn URL</b>, and <b>phone number</b>.</div></div>';
       }
       var head = '<div class="vt-card"><div class="vt-toolbar" style="margin:0">' +
         '<span class="vt-count">' + (r.pulled || 0) + " upcoming booking" + ((r.pulled === 1) ? "" : "s") +

@@ -25,10 +25,11 @@ function norm(s?: string): string {
   return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-/** A LinkedIn profile URL found anywhere in a string. */
+/** A LinkedIn profile URL found anywhere in a string (scheme optional). */
 function findLinkedIn(s?: string): string | undefined {
-  const m = (s || "").match(/https?:\/\/[^\s"']*linkedin\.com\/in\/[^\s"']+/i);
-  return m ? m[0] : undefined;
+  const m = (s || "").match(/(https?:\/\/)?(www\.)?linkedin\.com\/in\/[^\s"']+/i);
+  if (!m) return undefined;
+  return m[0].startsWith("http") ? m[0] : "https://" + m[0];
 }
 
 /** A phone-ish token (>= 10 digits) found in a string. */
@@ -50,7 +51,28 @@ export interface BookingMatch {
   status: "ready" | "unmatched" | "no_phone";
 }
 
-/** Pull the useful fields out of one TidyCal booking (tolerant of shapes). */
+/** Build a normalized {question label -> answer} map from a booking's questions. */
+function answerMap(questions: any[]): Record<string, string> {
+  const m: Record<string, string> = {};
+  for (const q of questions) {
+    const label = norm(q?.question ?? q?.title ?? q?.label ?? q?.name);
+    const ans = String(q?.answer ?? q?.value ?? q?.response ?? "").trim();
+    if (label && ans && !m[label]) m[label] = ans;
+  }
+  return m;
+}
+
+/** First answer whose label contains any of the given terms. */
+function byLabel(m: Record<string, string>, terms: string[]): string | undefined {
+  for (const key of Object.keys(m)) {
+    if (terms.some((t) => key.includes(t))) return m[key];
+  }
+  return undefined;
+}
+
+/** Pull the useful fields out of one TidyCal booking (tolerant of shapes).
+ *  Job title + LinkedIn URL + phone are read from the booking's custom QUESTION
+ *  answers (by label), falling back to the contact fields and the booking type. */
 function extract(booking: any, titleById: Record<string, string>): Omit<BookingMatch, "deskId" | "deskName" | "status"> {
   const contact = booking?.contact ?? {};
   const name = String(contact.name ?? booking?.name ?? "").trim();
@@ -61,18 +83,29 @@ function extract(booking: any, titleById: Record<string, string>): Omit<BookingM
     : Array.isArray(booking?.booking_questions)
       ? booking.booking_questions
       : [];
-  const answers = questions.map((q) => String(q?.answer ?? q?.value ?? "")).join("  ");
+  const m = answerMap(questions);
+  const answers = Object.values(m).join("  ");
 
+  // LinkedIn: prefer the labelled question, then contact, then any URL in answers.
   const linkedinUrl =
+    findLinkedIn(byLabel(m, ["linkedin"])) ??
     findLinkedIn(contact.linkedin) ?? findLinkedIn(booking?.linkedin) ?? findLinkedIn(answers);
+
+  // Phone: labelled question, then contact, then any phone-shaped answer.
   const phone =
-    (typeof contact.phone === "string" && findPhone(contact.phone)) ||
+    findPhone(byLabel(m, ["phone", "mobile", "cell", "number"])) ||
+    (typeof contact.phone === "string" ? findPhone(contact.phone) : undefined) ||
     findPhone(booking?.phone) ||
     findPhone(answers) ||
     undefined;
 
+  // Job title: the "Job title" question wins (most specific), then role/position,
+  // then the booking type's title as a fallback.
   const bt = booking?.booking_type ?? {};
   const jobTitle = String(
+    byLabel(m, ["job title", "jobtitle"]) ??
+    byLabel(m, ["role", "position"]) ??
+    byLabel(m, ["title"]) ??
     bt.title ?? booking?.booking_type_title ?? titleById[String(booking?.booking_type_id)] ?? "",
   ).trim();
 
