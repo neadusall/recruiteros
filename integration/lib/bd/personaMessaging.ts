@@ -176,20 +176,27 @@ export const CHANNEL_LIMITS = {
 /* IO types                                                            */
 /* ------------------------------------------------------------------ */
 
-/** The lead we are writing to. Industry/persona are optional: the model infers them from the
- *  title + company when omitted, and echoes its inference back in the output. */
+/** The lead we are writing to. Industry/persona are optional and NOT limited to the
+ *  curated tables: pass any industry string or any job title and the model reasons to
+ *  the same depth, inferring the persona/industry and echoing its inference back. */
 export interface BdLead {
   fullName?: string;
   firstName?: string;
   title?: string;
   company?: string;
-  industry?: Industry;
-  persona?: Persona;
+  /** A curated industry key OR any free-text industry; the model generalizes. */
+  industry?: Industry | (string & {});
+  /** A curated persona key OR left empty; the model infers from the exact title. */
+  persona?: Persona | (string & {});
   /** The observed, REAL hiring activity or event that surfaced this lead (the symptom).
    *  e.g. "posted a Tax Director and two Senior Manager roles in the last 30 days". */
   hiringActivity?: string;
   /** Optional extra true context: stage, headcount, recent funding/news, location. */
   companyContext?: string;
+  /** The prospect's own background, in their words: headline, recent roles, tenure,
+   *  specialties — pulled from their profile. Grounds the message in THEIR experience
+   *  and lets the model speak their exact role + industry vocabulary. Raises confidence. */
+  profileSummary?: string;
   /** Sender name for spoken-channel signoffs and the callback line. */
   sender?: string;
   /** Callback number for the voicemail close. Omitted -> the model uses a placeholder token. */
@@ -248,6 +255,12 @@ ${renderPersonaTable()}
 INDUSTRY INTELLIGENCE — reason from the current market themes when the industry is known:
 ${renderIndustryTable()}
 
+GENERALIZATION (CRITICAL) — the personas and industries above are EXEMPLARS of the depth required, not a closed list. You will receive titles and industries far outside them. For ANY job title and ANY industry, reason to the exact same depth:
+- Infer the persona's identity, the hidden pressures they operate under, the risks they fear, and the outcomes they want — derived from THIS specific title and seniority, not a generic bucket. A "VP of Revenue Operations", a "Director of Clinical Operations", a "Plant Manager", and a "Head of Trust & Safety" each live in a different world; write to that world.
+- Infer the industry's current, real market themes and the questions a respected insider in THAT sector would naturally raise.
+- Speak their language: use the vocabulary, metrics, and concerns native to their exact role and industry (a CFO hears "forecast accuracy"; a Head of Clinical Ops hears "site activation and protocol deviations"). Never sound generic, never sound like a template. The reader must feel you live in their world.
+- Echo the persona and industry you inferred back in the output fields.
+
 BUSINESS TRIGGERS — classify the hiring signal into one or more of: ${BUSINESS_TRIGGERS.join(", ")}.
 
 CONTENT FORMULA — every message follows Observation -> Interpretation -> Curiosity. Never pitch, never sell, never request a meeting, never ask for business. The message ends on a genuine question, not an ask.
@@ -258,6 +271,10 @@ CHANNEL RULES:
 - linkedin_message: 300-500 characters. Formula: industry observation, business implication, question. Goal: expand the conversation.
 - linkedin_voice_note: a 20-35 second script (~50-90 words). Formula: why I noticed, what it may indicate, question. Written to be spoken aloud, conversational.
 - voicemail: a 20-25 second script (~50-65 words). Formula: observation, business implication, question, then the callback number. Written to be spoken aloud.
+
+PROFILE GROUNDING — when the lead's own background (headline, recent roles, tenure, specialties) is provided, anchor at least one concrete, specific reference to THEIR experience or THEIR company in the message, so it could not have been sent to anyone else. Reference only what you are given; never embellish a detail you were not told.
+
+GROUNDING & CONFIDENCE — confidence_score reflects how defensibly the message is grounded in the SPECIFIC, REAL context you were given (title, company, industry, hiring signal, profile background), not how polished it reads. Score honestly: rich, specific context that lets you name a real pressure and a real observation -> high (0.8-1.0); thin context where you had to generalize the observation -> low (below 0.6). A low score is a signal that this lead needs human review or more enrichment before sending — do NOT inflate it, and never invent context to raise it.
 
 SOCIAL PROOF — you may use measured framing: "We've noticed...", "A trend we've observed...", "Several leaders we've spoken with...", "Organizations at your stage often...", "Companies making similar hires frequently...". You may NOT use "most companies", "everyone", "guaranteed", or "best". Never fabricate statistics. Never invent client outcomes.
 
@@ -280,10 +297,11 @@ function leadBrief(lead: BdLead): string {
     lead.fullName ? `Name: ${lead.fullName}${first ? ` (first name: ${first})` : ""}` : null,
     lead.title ? `Title: ${lead.title}` : null,
     lead.company ? `Company: ${lead.company}` : null,
-    lead.industry ? `Industry (known): ${INDUSTRY_INTEL[lead.industry]?.label ?? lead.industry}` : "Industry: infer from title and company, then echo it back",
-    lead.persona ? `Persona (known): ${PERSONAS[lead.persona]?.label ?? lead.persona}` : "Persona: infer from title, then echo it back",
+    lead.industry ? `Industry (given): ${INDUSTRY_INTEL[lead.industry as Industry]?.label ?? String(lead.industry)} (if outside the curated list, reason to the same depth and echo it back)` : "Industry: infer from title and company, then echo it back",
+    lead.persona ? `Persona (given): ${PERSONAS[lead.persona as Persona]?.label ?? String(lead.persona)} (if outside the curated list, infer from the exact title and echo it back)` : "Persona: infer from the exact title, then echo it back",
     lead.hiringActivity ? `Observed hiring activity (the symptom, REAL): ${lead.hiringActivity}` : "Observed hiring activity: (none provided - do not invent one)",
     lead.companyContext ? `Other true context: ${lead.companyContext}` : null,
+    lead.profileSummary ? `Prospect's own background (REAL, ground at least one specific reference in this): ${lead.profileSummary}` : null,
     `Sender (for spoken signoffs): ${lead.sender ?? "the Lume team"}`,
     `Callback number (voicemail close): ${lead.callbackNumber ?? "{{callbackNumber}}"}`,
   ].filter(Boolean).join("\n");
@@ -352,8 +370,8 @@ function normalize(o: Record<string, unknown>, lead: BdLead): PersonaMessage {
   const score = Number(o.confidence_score);
 
   return {
-    industry: str(o.industry) || (lead.industry ? INDUSTRY_INTEL[lead.industry].label : ""),
-    persona: str(o.persona) || (lead.persona ? PERSONAS[lead.persona].label : ""),
+    industry: str(o.industry) || (lead.industry ? (INDUSTRY_INTEL[lead.industry as Industry]?.label ?? String(lead.industry)) : ""),
+    persona: str(o.persona) || (lead.persona ? (PERSONAS[lead.persona as Persona]?.label ?? String(lead.persona)) : ""),
     business_trigger: triggers,
     executive_pressure: str(o.executive_pressure),
     likely_business_problem: str(o.likely_business_problem),
