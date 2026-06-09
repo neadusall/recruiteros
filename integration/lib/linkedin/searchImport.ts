@@ -182,11 +182,21 @@ export async function importFromLinkedInSearch(
   }
 
   // Pick a connected, non-flagged LinkedIn account to run the search through.
+  // If none is set up in the app but Unipile is configured, use the connected
+  // Unipile seat directly — so search works the moment Unipile keys are set.
   const core = listLinkedInAccounts(workspaceId).find((a) => a.active && a.warmup !== "flagged");
-  if (!core) {
+  const unipileAccountId = process.env.UNIPILE_ACCOUNT_ID;
+  if (!core && !unipileAccountId) {
     throw new ImportError("no_linkedin_account", 409);
   }
-  const account = toEngineAccount(core, ownerUserId);
+  const account = core
+    ? toEngineAccount(core, ownerUserId)
+    : {
+        id: unipileAccountId!, providerAccountId: unipileAccountId!, ownerUserId,
+        displayName: "Unipile LinkedIn", status: "ok" as const, premium: true, salesNavigator: true,
+        limits: { invitesPerDay: 25, messagesPerDay: 50, inmailsPerDay: 10, profileViewsPerDay: 80, workingHours: { startHour: 8, endHour: 18, days: [1, 2, 3, 4, 5] } },
+        timezone: "UTC",
+      };
 
   let profiles: SearchProfile[];
   try {
