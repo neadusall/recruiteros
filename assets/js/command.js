@@ -4078,24 +4078,26 @@
     }
     function paintDesks(body) {
       body.innerHTML = loading();
-      // Pull the operator's Telnyx numbers first so the form can offer them as a
-      // pick-list (and mark which are already bound to another JD).
-      api("/vetting/numbers").then(function (nd) {
-        vt.numbers = (nd && nd.numbers) || [];
-        vt.numbersDry = !!(nd && nd.dryRun);
-        vt.numbersErr = (nd && nd.error) || null;
-      }).catch(function () { vt.numbers = []; vt.numbersErr = "unreachable"; }).then(function () {
-        // The operator's own consented cloned voices — required to go live.
-        return api("/voice/clones").then(function (vd) {
-          vt.voices = ((vd && vd.consent) || []).filter(function (c) { return c.voiceId; });
-        }).catch(function () { vt.voices = []; });
-      }).then(function () {
-        return api("/vetting/desks?motion=" + motion);
-      }).then(function (data) {
-        var list = (data && data.desks) || [];
+      // Load the number pick-list, cloned voices, and the desk list — but NEVER
+      // let any one of them block the form. safe() turns a failed call into null
+      // so the create form always renders and a desk can always be made, even if
+      // Telnyx/voice/desk endpoints hiccup.
+      function safe(p) { return p.then(function (d) { return d; }, function () { return null; }); }
+      Promise.all([
+        safe(api("/vetting/numbers")),
+        safe(api("/voice/clones")),
+        safe(api("/vetting/desks?motion=" + motion))
+      ]).then(function (res) {
+        var nd = res[0] || {}, vd = res[1] || {}, data = res[2] || {};
+        vt.numbers = nd.numbers || [];
+        vt.numbersDry = !!nd.dryRun;
+        vt.numbersErr = nd.error || (res[0] ? null : "unreachable");
+        vt.voices = ((vd.consent) || []).filter(function (c) { return c.voiceId; });
+
+        var list = data.desks || [];
         var editing = vt.editing ? list.filter(function (x) { return x.id === vt.editing; })[0] : null;
         // Once you have desks the list leads and the form is revealed on demand;
-        // with none yet, the form is shown by default so first-run isn't a bare button.
+        // with none yet, the form is shown by default so first-run lands on it.
         var showForm = !!(vt.creating || editing) || list.length === 0;
         var toolbar = '<div class="vt-toolbar"><span class="vt-count">' +
           list.length + " vetting desk" + (list.length === 1 ? "" : "s") + "</span>" +
@@ -4103,10 +4105,9 @@
           "</div>";
         body.innerHTML = toolbar +
           (showForm ? (editing ? deskForm(editing) : deskForm(null)) : "") +
-          (list.length ? list.map(deskCard).join("")
-            : (showForm ? "" : '<div class="vt-empty">No vetting desks yet. Click <b>New vetting desk</b>, paste a job description, pick a number and your voice, then go live.</div>'));
+          (list.length ? list.map(deskCard).join("") : "");
         wireDesks(body);
-      }).catch(function () { body.innerHTML = needsSetup(); });
+      });
     }
     function wireDesks(body) {
       var newBtn = $("#vtNew");
@@ -4291,6 +4292,7 @@
     function bookingCard(b) {
       var pill = b.status === "ready" ? ["live", "Ready"]
         : b.status === "no_phone" ? ["paused", "Needs phone #"]
+        : b.status === "no_linkedin" ? ["paused", "Needs LinkedIn"]
         : ["paused", "No matching desk"];
       var deskChip = b.deskName
         ? '<span class="vt-chip">→ <b>' + esc(b.deskName) + "</b></span>"
@@ -4313,7 +4315,8 @@
         '<span class="vt-count">' + (r.pulled || 0) + " upcoming booking" + ((r.pulled === 1) ? "" : "s") +
         " · <span style=\"color:var(--vt-good)\">" + (r.ready || 0) + " ready</span>" +
         (r.unmatched ? " · <span style=\"color:var(--vt-warn)\">" + r.unmatched + " no desk</span>" : "") +
-        (r.noPhone ? " · <span style=\"color:var(--vt-warn)\">" + r.noPhone + " need phone</span>" : "") + "</span>" +
+        (r.noPhone ? " · <span style=\"color:var(--vt-warn)\">" + r.noPhone + " need phone</span>" : "") +
+        (r.noLinkedin ? " · <span style=\"color:var(--vt-warn)\">" + r.noLinkedin + " need LinkedIn</span>" : "") + "</span>" +
         '<button class="vt-btn vt-btn-primary" id="vtBkSync">↻ Sync now</button></div>' +
         (r.error ? '<div class="vt-warn" style="margin-top:10px">⚠ TidyCal said: ' + esc(r.error) + ' — an MCP-scoped token may be rejected by the REST API; generate a personal access token at tidycal.com/integrations/oauth.</div>' : "") +
         '<div class="vt-hint" style="margin-top:8px">“Sync now” pulls upcoming bookings, files each candidate under the matching desk, and researches their LinkedIn so the agent is ready when they call. Wire it to a schedule to run automatically.</div></div>';

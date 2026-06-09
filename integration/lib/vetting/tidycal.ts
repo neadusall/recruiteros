@@ -48,7 +48,7 @@ export interface BookingMatch {
   startsAt?: string;
   deskId?: string;
   deskName?: string;
-  status: "ready" | "unmatched" | "no_phone";
+  status: "ready" | "unmatched" | "no_phone" | "no_linkedin";
 }
 
 /** Build a normalized {question label -> answer} map from a booking's questions. */
@@ -141,6 +141,7 @@ export interface TidyCalSyncResult {
   ready: number;
   unmatched: number;
   noPhone: number;
+  noLinkedin: number;
   bookings: BookingMatch[];
   error?: string;
 }
@@ -151,7 +152,7 @@ export interface TidyCalSyncResult {
  * without touching anything. Never throws — surfaces an error string instead.
  */
 export async function syncTidyCalBookings(workspaceId: string, write = true): Promise<TidyCalSyncResult> {
-  const base: TidyCalSyncResult = { configured: tidycal.configured(), pulled: 0, ready: 0, unmatched: 0, noPhone: 0, bookings: [] };
+  const base: TidyCalSyncResult = { configured: tidycal.configured(), pulled: 0, ready: 0, unmatched: 0, noPhone: 0, noLinkedin: 0, bookings: [] };
   if (!tidycal.configured()) return base;
 
   let raw: any[] = [];
@@ -176,9 +177,13 @@ export async function syncTidyCalBookings(workspaceId: string, write = true): Pr
     const e = extract(b, titleById);
     if (!e.name && !e.email) continue; // junk row
     const desk = matchDesk(desks, e.jobTitle);
+    // Job title (routes to a desk) and LinkedIn (the research) are both required
+    // for a good call; phone is the inbound caller-ID key. Anything missing is
+    // flagged, not treated as ready.
     let status: BookingMatch["status"] = "ready";
     if (!desk) status = "unmatched";
     else if (!e.phone) status = "no_phone";
+    else if (!e.linkedinUrl) status = "no_linkedin";
 
     const row: BookingMatch = { ...e, deskId: desk?.id, deskName: desk?.name, status };
     out.push(row);
@@ -203,6 +208,7 @@ export async function syncTidyCalBookings(workspaceId: string, write = true): Pr
     ready: out.filter((r) => r.status === "ready").length,
     unmatched: out.filter((r) => r.status === "unmatched").length,
     noPhone: out.filter((r) => r.status === "no_phone").length,
+    noLinkedin: out.filter((r) => r.status === "no_linkedin").length,
     bookings: out.slice(0, 200),
   };
 }
