@@ -8,7 +8,22 @@
  *                  engine runs end to end with zero credentials and lights up the
  *                  moment a key is added, no code change.
  *  - verify():     each provider overrides with its real health endpoint.
+ *
+ * Per-workspace keys: when a request resolves a workspace's portal-saved keys it
+ * runs inside `runWithCreds(keys, fn)`. env() then resolves that context first,
+ * falling back to process.env — so the Connected "Test" verifies THIS workspace's
+ * keys, and the always-on engine still works off env when no context is set.
  */
+
+import { AsyncLocalStorage } from "async_hooks";
+
+/** Per-request override of resolved integration keys (workspace-scoped). */
+const credCtx = new AsyncLocalStorage<Record<string, string>>();
+
+/** Run `fn` with `keys` taking precedence over process.env for every provider. */
+export function runWithCreds<T>(keys: Record<string, string>, fn: () => T): T {
+  return credCtx.run(keys, fn);
+}
 
 export interface ProviderStatus {
   id: string;
@@ -35,12 +50,14 @@ export abstract class ProviderClient {
   protected abstract envKeys: string[];
   protected abstract baseUrl: string;
 
-  /** True when every required env var is set. */
+  /** True when every required key is set (per-workspace context, then env). */
   configured(): boolean {
-    return this.envKeys.every((k) => Boolean(process.env[k]));
+    return this.envKeys.every((k) => Boolean(this.env(k)));
   }
 
   protected env(key: string): string {
+    const ctx = credCtx.getStore();
+    if (ctx && ctx[key]) return ctx[key];
     return process.env[key] ?? "";
   }
 

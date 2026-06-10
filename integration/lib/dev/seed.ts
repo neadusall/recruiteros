@@ -10,7 +10,7 @@ import { rid, nowIso, today } from "../core/ids";
 import { createCampaign } from "../campaigns";
 import { addProspect } from "../prospects";
 import { addLinkedInAccount, addDomain } from "../accounts";
-import { configure, testConnection } from "../connected";
+import { seedGreen } from "../connected";
 import { processInbound } from "../response";
 import type { Campaign } from "../core/types";
 
@@ -25,10 +25,9 @@ export async function seedWorkspace(workspaceId: string): Promise<{ seeded: bool
   ["go-recruitersos.com", "try-recruitersos.com", "hey-recruitersos.com", "talk-recruitersos.com", "meet-recruitersos.com"]
     .forEach((d) => addDomain(workspaceId, d, 3));
 
-  // Integrations -> green.
-  for (const id of ["instantly", "unipile", "rapidapi", "fresh_linkedin", "loxo", "taltxt", "telnyx"] as const) {
-    configure(workspaceId, id);
-    await testConnection(workspaceId, id, true);
+  // Integrations -> green (demo seed; no live credentials needed).
+  for (const id of ["unipile", "rapidapi", "fresh_linkedin", "loxo", "taltxt", "telnyx"] as const) {
+    await seedGreen(workspaceId, id);
   }
 
   // Two campaigns (one per motion).

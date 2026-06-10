@@ -98,14 +98,8 @@
           { id: "k1", service: "Enrichment", masked: "•••• •••• 4821" }
         ]
       },
-      connected: [
-        { id: "email", label: "Email sending", status: "green", requiredFor: ["recruiting", "bd"] },
-        { id: "linkedin", label: "LinkedIn", status: "green", requiredFor: ["recruiting", "bd"] },
-        { id: "sms", label: "SMS texting", status: "yellow", error: "verify sender ID", requiredFor: [] },
-        { id: "voice", label: "Voice dialer", status: "green", requiredFor: [] },
-        { id: "enrichment", label: "Enrichment", status: "green", requiredFor: ["recruiting", "bd"] },
-        { id: "ats", label: "ATS sync", status: "yellow", error: "connect to go live", requiredFor: [] }
-      ],
+      connected: connectedCatalog(),
+      connectedKeys: {},
       ats: {
         active: "loxo",
         vendors: [
@@ -157,6 +151,47 @@
     };
     db.sequences = db.sequences.concat(demoRecruiterSequences());
     return db;
+  }
+
+  // Integration catalog — mirrors the real backend (integration/lib/connected).
+  // Each entry carries the step-by-step activation flow (blurb + steps + key
+  // fields) the admin follows in the Connect dialog. LinkedIn Automation is
+  // managed (RecruiterOS provides the Unipile account — no key from the admin);
+  // Instantly + SalesRobot are intentionally absent (email = self-hosted infra).
+  function connectedCatalog() {
+    return [
+      { id: "unipile", label: "LinkedIn Automation", status: "green", requiredFor: ["bd", "recruiting"],
+        blurb: "Sends connection invites, DMs and voice notes from your LinkedIn seats — fully managed by RecruiterOS, no API key to set up.",
+        fields: [{ key: "UNIPILE_ACCOUNT_ID", label: "LinkedIn account id", required: false, placeholder: "auto-filled once you connect a seat", hint: "Optional — leave blank to use the seat you connect in LinkedIn Automation." }],
+        steps: ["LinkedIn Automation is provided for you — RecruiterOS runs it on our managed account, so there's no key to enter.", "Open LinkedIn Automation in the sidebar and connect your LinkedIn profile through the secure hosted sign-in.", "Come back here and hit Test to confirm your seat is linked and ready."], present: [] },
+      { id: "rapidapi", label: "Job Search (signal feed)", status: "red", requiredFor: ["bd", "recruiting"],
+        blurb: "Daily job-posting pull that powers Hire Signals and 'role they're hiring for'.",
+        fields: [{ key: "RAPIDAPI_KEY", label: "RapidAPI key", required: true, secret: true, placeholder: "paste your RapidAPI key" }],
+        steps: ["Sign in at RapidAPI and subscribe to the JSearch API.", "Open the JSearch dashboard → copy your X-RapidAPI-Key.", "Paste it below, Save, then Test."],
+        docsUrl: "https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch", docsLabel: "JSearch on RapidAPI ↗", present: [] },
+      { id: "fresh_linkedin", label: "Profile enrichment", status: "red", requiredFor: ["bd", "recruiting"],
+        blurb: "First rung of the enrichment waterfall: title, company, seniority, recent moves.",
+        fields: [{ key: "FRESH_LINKEDIN_API_KEY", label: "RapidAPI key", required: true, secret: true, placeholder: "paste your RapidAPI key" }],
+        steps: ["On RapidAPI, subscribe to 'Fresh LinkedIn Profile Data'.", "Copy the X-RapidAPI-Key (often the same key as JSearch).", "Paste it below, Save, then Test."],
+        docsUrl: "https://rapidapi.com/freshdata-freshdata-default/api/fresh-linkedin-profile-data", docsLabel: "Fresh LinkedIn on RapidAPI ↗", present: [] },
+      { id: "tomba", label: "Email finder", status: "red", requiredFor: ["bd"],
+        blurb: "Second rung of the waterfall: corporate email from a name + company domain.",
+        fields: [{ key: "TOMBA_API_KEY", label: "Tomba key", required: true, secret: true, placeholder: "ta_xxxx…" }, { key: "TOMBA_SECRET", label: "Tomba secret", required: true, secret: true, placeholder: "ts_xxxx…" }],
+        steps: ["Create a Tomba account and open Dashboard → API.", "Copy both the Key (ta_…) and the Secret (ts_…).", "Paste both below, Save, then Test."],
+        docsUrl: "https://tomba.io/dashboard/api", docsLabel: "Tomba API keys ↗", present: [] },
+      { id: "taltxt", label: "TalTxt (SMS)", status: "red", requiredFor: ["recruiting"],
+        blurb: "Post-engagement SMS + opt-out mirror for the recruiting motion.",
+        fields: [{ key: "TALTXT_API_KEY", label: "API key", required: true, secret: true, placeholder: "paste your TalTxt API key" }, { key: "TALTXT_API_URL", label: "API URL", required: false, placeholder: "https://api.taltxt.io", hint: "Optional — leave blank for the default endpoint." }],
+        steps: ["Connect your TalTxt workspace and provision a 10DLC number.", "Copy the API key from TalTxt settings (and the API URL if self-hosted).", "Paste below, Save, then Test."], present: [] },
+      { id: "telnyx", label: "Telnyx 10DLC (SMS/voice)", status: "green", requiredFor: ["recruiting"],
+        blurb: "10DLC SMS plus the voice dialer with AMD — telephony for Voice Drops & AI Vetting.",
+        fields: [{ key: "TELNYX_API_KEY", label: "API key", required: true, secret: true, placeholder: "KEY01…" }, { key: "TELNYX_FROM_NUMBER", label: "From number (E.164)", required: false, placeholder: "+13105551234", hint: "Your Telnyx number outbound SMS/calls send from." }],
+        steps: ["In the Telnyx portal create an API key (Auth → API Keys → Create).", "Buy/port a number and complete 10DLC brand + campaign registration.", "Paste the API key (and from-number) below, Save, then Test."],
+        docsUrl: "https://portal.telnyx.com/#/app/api-keys", docsLabel: "Telnyx API keys ↗", present: ["TELNYX_API_KEY"] },
+      { id: "loxo", label: "Loxo (ATS)", status: "red", requiredFor: ["bd", "recruiting"],
+        blurb: "Your system of record. Connected on the ATS tab — pre-flighted here.",
+        fields: [], steps: ["Loxo connects on the ATS tab (it has a richer sync + webhook flow).", "Save its domain, slug and API key there; this row turns green once it verifies."], present: [] }
+    ];
   }
 
   // OS Text (taltxt) onboarding state — a fresh recruiting company starts with

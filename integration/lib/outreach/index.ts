@@ -205,9 +205,9 @@ function intg(list: Integration[], id: string): Integration | undefined {
 }
 
 /** Build the full Outreach readiness snapshot for a workspace + motion. */
-export function outreachSnapshot(workspaceId: string, motion: Motion): OutreachSnapshot {
+export async function outreachSnapshot(workspaceId: string, motion: Motion): Promise<OutreachSnapshot> {
   const f = getFeatures(workspaceId);
-  const ints = listIntegrations(workspaceId);
+  const ints = await listIntegrations(workspaceId);
 
   // ATS (Loxo, surfaced generically as "your ATS").
   const loxo = intg(ints, "loxo");
@@ -322,6 +322,6 @@ export function outreachSnapshot(workspaceId: string, motion: Motion): OutreachS
     jobSearch,
     domains,
     linkedin,
-    preflight: preflight(workspaceId, motion),
+    preflight: await preflight(workspaceId, motion),
   };
 }
