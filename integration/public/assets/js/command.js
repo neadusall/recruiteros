@@ -1646,7 +1646,10 @@
       },
       remove: function (id) {
         localStorage.setItem("ros_sequences", JSON.stringify(all().filter(function (x) { return x.id !== id; })));
-        fetch(API + "/sequences?id=" + encodeURIComponent(id), { method: "DELETE", credentials: "include" }).catch(function () {});
+        // Return the promise so callers can wait for the server to drop it
+        // before re-fetching (otherwise a reload's GET can race the DELETE and
+        // momentarily re-add the row from the server copy).
+        return fetch(API + "/sequences?id=" + encodeURIComponent(id), { method: "DELETE", credentials: "include" }).catch(function () {});
       }
     };
   }
@@ -4992,7 +4995,8 @@
           '<td class="muted">' + esc(fmtDate(s.createdAt)) + "</td>" +
           '<td class="sl-actions"><button class="btn btn-ghost btn-sm" data-edit="' + esc(s.id) + '">Edit</button>' +
             '<button class="btn btn-ghost btn-sm" data-dup="' + esc(s.id) + '">Duplicate</button>' +
-            '<button class="btn btn-ghost btn-sm" data-go="studio" title="Assign + deploy in Studio">Deploy</button></td></tr>';
+            '<button class="btn btn-ghost btn-sm" data-go="studio" title="Assign + deploy in Studio">Deploy</button>' +
+            '<button class="btn btn-ghost btn-sm sl-del" data-del="' + esc(s.id) + '" title="Delete this sequence">Delete</button></td></tr>';
       }).join("");
       body.innerHTML = '<div class="card" style="padding:0;overflow:auto"><table class="seqlib"><thead><tr>' +
         "<th>Sequence</th><th>Owner</th><th>Steps</th><th>Tags</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>" + trs + "</tbody></table></div>";
@@ -5016,6 +5020,15 @@
           var s = store.all().filter(function (x) { return x.id === b.getAttribute("data-status"); })[0]; if (!s) return;
           s.status = (s.status === "active") ? "inactive" : "active"; s.updatedAt = new Date().toISOString();
           store.save(s); reload();
+        });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-del]"), function (b) {
+        b.addEventListener("click", function () {
+          var id = b.getAttribute("data-del");
+          var s = store.all().filter(function (x) { return x.id === id; })[0]; if (!s) return;
+          if (!confirm("Delete “" + (s.name || "this sequence") + "”? This removes it from the Library, Campaigns and Campaign Studio for everyone, and can't be undone.")) return;
+          var p = store.remove(id); toast("Deleted"); paint(); // instant local removal
+          (p && p.then ? p : Promise.resolve()).then(reload); // then reconcile once the server has dropped it
         });
       });
     }

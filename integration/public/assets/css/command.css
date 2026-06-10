@@ -767,6 +767,7 @@ table.seqlib tbody tr:hover td { background: var(--surface-2); }
 html[data-theme="light"] .sl-status.off { background: rgba(16,18,40,.05); }
 .sl-actions { white-space: nowrap; text-align: right; }
 .sl-actions .btn { margin-left: 6px; }
+.sl-actions .sl-del:hover { background: rgba(255,90,108,.14); color: #ff8b96; border-color: rgba(255,90,108,.34); }
 
 /* ---------------- Prospects / Candidates · spreadsheet (CSV-style) table ---------------- */
 .pr-card-h { padding: 15px 18px 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
