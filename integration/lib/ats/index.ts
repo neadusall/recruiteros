@@ -10,6 +10,19 @@ import type { AtsAdapter, AtsVendor } from "./types";
 export * from "./types";
 export { LoxoAdapter };
 
+// Pull-direction surface (Loxo -> RecruiterOS): per-workspace credentials, the
+// read client, the sync engine, and webhook registration.
+export * from "./credentials";
+export { LoxoClient } from "./loxoClient";
+export {
+  syncLoxo,
+  testLoxo,
+  syncOnePerson,
+  syncOneCompany,
+  registerLoxoWebhooks,
+  type SyncReport,
+} from "./sync";
+
 /** Object-mapping reference, surfaced for the ATS settings UI. */
 export const LOXO_OBJECT_MAP = [
   { concept: "BD prospect", object: "Person + list 'BD Prospects'", how: "POST /people/update_by_email" },

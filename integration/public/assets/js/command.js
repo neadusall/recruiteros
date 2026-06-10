@@ -348,6 +348,11 @@
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
     spending: { title: "Spending", crumb: "Measure", action: null, render: renderSpending },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
+    // Admin launch-setup hub. Consolidates Integrations, ATS, Email Sending and
+    // Outreach behind one tab with an ordered readiness checklist. The four
+    // sub-routes below stay registered so deep links (#connected, #ats, …) and
+    // in-app cross-links keep resolving; they just have no standalone nav item.
+    setup: { title: "Setup", crumb: "Connect", action: null, render: renderSetup, cap: "integrations:manage" },
     connected: { title: "Connected", crumb: "Connect", action: "Test all", render: renderConnected, cap: "integrations:manage" },
     ats: { title: "ATS", crumb: "Connect", action: null, render: renderAts, cap: "ats:manage" },
     team: { title: "Team", crumb: "Admin", action: "＋ Invite recruiter", render: renderTeam, cap: "team:manage" }
@@ -2633,6 +2638,20 @@
 
     var state = { q: "", tab: "total", sel: {}, tags: [], sort: { key: null, dir: 1 } };
 
+    // Backend write-through: rows synced from the ATS carry a server id (_id).
+    // User edits to their status/tags persist to the server too, so the next
+    // Loxo sync (which never touches status/tags) keeps them.
+    function pushRemote(c) {
+      if (!c || !c._id) return;
+      send("/companies", "POST", { action: "patch", id: c._id, status: c.status, tags: c.tags, owner: c.owner, type: c.type }).catch(function () {});
+    }
+    function mergeTags(a, b) { var out = (a || []).slice(); (b || []).forEach(function (t) { if (out.indexOf(t) < 0) out.push(t); }); return out; }
+    function fmtDate(s) {
+      if (!s) return "";
+      var d = new Date(s); if (isNaN(d.getTime())) return String(s);
+      return (d.getMonth() + 1) + "/" + d.getDate() + "/" + d.getFullYear();
+    }
+
     function findByName(n) { for (var i = 0; i < companies.length; i++) if (companies[i].name === n) return companies[i]; return null; }
     function selected() { return companies.filter(function (c) { return state.sel[c.name]; }); }
     function initials(name) {
@@ -2746,6 +2765,7 @@
           '<button class="co-tool" title="Filter">⛃</button>' +
           '<button class="co-tool" title="Sort">⇅</button>' +
           '<button class="co-tool" title="Columns">⚙</button>' +
+          (can("ats:manage") ? '<button class="co-pill" id="coSync" title="Pull companies from your connected ATS">⟳ Sync Loxo</button>' : '') +
           '<button class="btn btn-primary btn-sm" id="coAdd">＋ Add Company</button>' +
         '</div>' +
         '<div class="co-tabs" id="coTabs"></div>' +
@@ -2843,13 +2863,56 @@
     function paint() { paintTabs(); paintFilter(); paintHead(); paintRows(); refreshBulk(); }
     paint();
 
+    // Merge in companies synced from the connected ATS (Loxo, etc.). These are
+    // the durable, server-side rows; the SEED + localStorage above is the offline
+    // demo fallback. A matching name is enriched in place; new names are added.
+    function mergeRemote(remote) {
+      (remote || []).forEach(function (r) {
+        var existing = findByName(r.name);
+        if (existing) {
+          existing._id = r.id; existing._remote = true; existing.source = r.source;
+          if (r.status) existing.status = r.status;
+          if (r.url && !existing.url) existing.url = r.url;
+          if (r.location && !existing.location) existing.location = r.location;
+          if (r.owner) existing.owner = r.owner;
+          if (typeof r.jobs === "number") existing.jobs = r.jobs;
+          if (r.type) existing.type = r.type;
+          if (r.tags && r.tags.length) existing.tags = mergeTags(existing.tags, r.tags);
+        } else {
+          companies.unshift({
+            name: r.name, url: r.url || "", location: r.location || "", owner: r.owner || "",
+            created: fmtDate(r.created || r.createdAt), type: r.type || "Company",
+            status: r.status || "uncontacted", jobs: r.jobs || 0, tags: (r.tags || []).slice(),
+            added: false, _id: r.id, _remote: true, source: r.source
+          });
+        }
+      });
+      paint();
+    }
+    api("/companies").then(function (resp) { mergeRemote((resp && resp.companies) || []); }).catch(function () {});
+
+    var syncBtn = $("#coSync", el);
+    if (syncBtn) syncBtn.onclick = function () {
+      syncBtn.disabled = true; var label = syncBtn.textContent; syncBtn.textContent = "Syncing…";
+      send("/companies", "POST", { action: "sync" }).then(function (r) {
+        syncBtn.disabled = false; syncBtn.textContent = label;
+        if (r.ok && r.data && r.data.report) {
+          var c = r.data.report.companies || {};
+          toast("Loxo sync: +" + (c.added || 0) + " new, " + (c.updated || 0) + " updated");
+          api("/companies").then(function (resp) { mergeRemote((resp && resp.companies) || []); });
+        } else {
+          toast((r.data && r.data.error) === "ats_not_connected" ? "Connect Loxo in the ATS tab first." : "Sync failed — check the ATS connection.");
+        }
+      }).catch(function () { syncBtn.disabled = false; syncBtn.textContent = label; toast("Sync failed."); });
+    };
+
     function addTagsTo(list, label) {
       if (!list.length) return;
       var input = window.prompt("Add tag(s) for " + label + " — separate multiple with commas:", "");
       if (input == null) return;
       var tags = input.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
       if (!tags.length) return;
-      list.forEach(function (c) { tags.forEach(function (t) { if (c.tags.indexOf(t) < 0) c.tags.push(t); }); });
+      list.forEach(function (c) { tags.forEach(function (t) { if (c.tags.indexOf(t) < 0) c.tags.push(t); }); pushRemote(c); });
       persist(); paint();
     }
 
@@ -2882,7 +2945,7 @@
     var rowsEl = $("#coRows", el);
     rowsEl.addEventListener("change", function (e) {
       var ss = e.target.closest("[data-statusfor]");
-      if (ss) { var c = findByName(ss.getAttribute("data-statusfor")); if (c) { c.status = ss.value; persist(); paint(); } return; }
+      if (ss) { var c = findByName(ss.getAttribute("data-statusfor")); if (c) { c.status = ss.value; pushRemote(c); persist(); paint(); } return; }
       var cb = e.target.closest("[data-pick]"); if (!cb) return;
       state.sel[cb.getAttribute("data-pick")] = cb.checked;
       paintRows(); paintHead(); refreshBulk();
@@ -2893,20 +2956,22 @@
       var rm = e.target.closest("[data-untag]");
       if (rm) {
         var co = findByName(rm.getAttribute("data-untag"));
-        if (co) { co.tags.splice(+rm.getAttribute("data-tagi"), 1); persist(); paint(); }
+        if (co) { co.tags.splice(+rm.getAttribute("data-tagi"), 1); pushRemote(co); persist(); paint(); }
       }
     });
     $("#coTagSel", el).onclick = function () { addTagsTo(selected(), selected().length + " selected"); };
-    $("#coClearSel", el).onclick = function () { selected().forEach(function (c) { c.tags = []; }); persist(); paint(); };
+    $("#coClearSel", el).onclick = function () { selected().forEach(function (c) { c.tags = []; pushRemote(c); }); persist(); paint(); };
     $("#coStatusSel", el).onchange = function () {
       var v = this.value; if (!v) return;
-      selected().forEach(function (c) { c.status = v; });
+      selected().forEach(function (c) { c.status = v; pushRemote(c); });
       this.value = ""; persist(); paint();
     };
     $("#coDelSel", el).onclick = function () {
       var sel = selected(); if (!sel.length) return;
       if (!window.confirm("Delete " + sel.length + " compan" + (sel.length > 1 ? "ies" : "y") + "? This can't be undone.")) return;
-      sel.forEach(function (c) { if (!c.added && deleted.indexOf(c.name) < 0) deleted.push(c.name); });
+      var remoteIds = sel.filter(function (c) { return c._id; }).map(function (c) { return c._id; });
+      if (remoteIds.length) send("/companies", "POST", { action: "delete", ids: remoteIds }).catch(function () {});
+      sel.forEach(function (c) { if (!c.added && !c._remote && deleted.indexOf(c.name) < 0) deleted.push(c.name); });
       companies = companies.filter(function (c) { return !state.sel[c.name]; });
       state.sel = {}; persist(); paint();
     };
@@ -3138,6 +3203,7 @@
         '<button class="cd-tbtn" id="cdSubmit"' + dis + '>➤ Submit candidates</button>' +
         '<span class="cd-spacer"></span>' +
         '<button class="cd-tbtn" id="cdAddTo"' + dis + '>＋ Add to…</button>' +
+        (can("ats:manage") ? '<button class="cd-tbtn" id="cdLoxo" title="Pull people from your connected ATS into Candidates">⟳ Sync Loxo</button>' : '') +
         '<button class="cd-tbtn" id="cdExport">⬇ Export</button>';
       var sel = function () { return Object.keys(state.sel); };
       $("#cdAdd", el).addEventListener("click", function () { openDataImport(load); });
@@ -3148,6 +3214,20 @@
       $("#cdSubmit", el).addEventListener("click", function () { if (n) promote(sel()); });
       $("#cdAddTo", el).addEventListener("click", function () { if (n) promote(sel()); });
       $("#cdExport", el).addEventListener("click", function () { exportCsv(); });
+      var loxoBtn = $("#cdLoxo", el);
+      if (loxoBtn) loxoBtn.addEventListener("click", function () {
+        loxoBtn.disabled = true; var t = loxoBtn.textContent; loxoBtn.textContent = "Syncing…";
+        send("/ats", "POST", { action: "sync", vendor: "loxo" }).then(function (r) {
+          loxoBtn.disabled = false; loxoBtn.textContent = t;
+          if (r.ok && r.data && r.data.report) {
+            var p = r.data.report.people || {};
+            toast("Loxo: +" + (p.added || 0) + " new candidates, " + (p.updated || 0) + " updated");
+            load();
+          } else {
+            toast((r.data && r.data.error) === "missing_credentials" ? "Connect Loxo in the ATS tab first." : "Sync failed — check the ATS connection.");
+          }
+        }).catch(function () { loxoBtn.disabled = false; loxoBtn.textContent = t; toast("Sync failed."); });
+      });
     }
 
     /* ---- select-all header ---- */
@@ -5267,13 +5347,22 @@
   function renderContent(el) {
     var store = seqStore();
     var meName = (ctx.user && ctx.user.name) || "You";
-    var filter = "", mineOnly = false, tagFilter = "";
+    var filter = "", mineOnly = false, tagFilter = "", ownerFilter = "";
     function fmtDate(iso) { try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch (e) { return ""; } }
     function allTags() { var set = {}; store.all().forEach(function (s) { (s.tags || []).forEach(function (t) { set[t] = 1; }); }); return Object.keys(set).sort(); }
+    // Every recruiter who owns a sequence in this motion — drives the owner filter
+    // so an admin can pull up all campaigns set up by any one recruiter.
+    function allOwners() {
+      var set = {};
+      store.all().forEach(function (s) { if ((!s.motion || s.motion === motion) && s.owner) set[s.owner] = 1; });
+      return Object.keys(set).sort();
+    }
 
-    el.innerHTML = head("Sequences", "Every " + (motion === "bd" ? "BD" : "recruiting") + " outreach sequence in your workspace. Build them in Campaigns, then drop them into Campaign Studio to assign prospects and deploy.") +
+    el.innerHTML = head("Sequences", "Every " + (motion === "bd" ? "BD" : "recruiting") + " campaign your recruiters set up lands here — one shared workspace library. Build in Campaigns, then assign + deploy in Campaign Studio.") +
       '<div class="seqlib-tools">' +
         '<button class="sl-fbtn" id="slMine"><span>👤</span> My Sequences</button>' +
+        '<span class="sl-tagwrap"><button class="sl-fbtn" id="slOwnerBtn"><span>🧑‍💼</span> Recruiter <b id="slOwnerLbl"></b></button>' +
+          '<select id="slOwner" class="sl-tagsel"><option value="">All recruiters</option></select></span>' +
         '<span class="sl-tagwrap"><button class="sl-fbtn" id="slTagBtn"><span>🏷</span> Tags <b id="slTagLbl"></b></button>' +
           '<select id="slTag" class="sl-tagsel"><option value="">All tags</option></select></span>' +
         '<label class="seqlib-search"><span>⌕</span><input id="slSearch" placeholder="Search…" autocomplete="off"/></label>' +
@@ -5283,7 +5372,10 @@
       '<div id="slVoice" style="margin-top:18px"></div>';
 
     $("#slSearch").addEventListener("input", function () { filter = (this.value || "").toLowerCase().trim(); paint(); });
-    $("#slMine").addEventListener("click", function () { mineOnly = !mineOnly; this.classList.toggle("active", mineOnly); paint(); });
+    $("#slMine").addEventListener("click", function () { mineOnly = !mineOnly; this.classList.toggle("active", mineOnly); if (mineOnly) { ownerFilter = ""; var os = $("#slOwner"); if (os) os.value = ""; $("#slOwnerBtn").classList.remove("active"); var ol = $("#slOwnerLbl"); if (ol) ol.textContent = ""; } paint(); });
+    var ownerSel = $("#slOwner");
+    ownerSel.addEventListener("change", function () { ownerFilter = this.value; var lbl = $("#slOwnerLbl"); if (lbl) lbl.textContent = ownerFilter ? "· " + ownerFilter : ""; $("#slOwnerBtn").classList.toggle("active", !!ownerFilter); if (ownerFilter) { mineOnly = false; $("#slMine").classList.remove("active"); } paint(); });
+    $("#slOwnerBtn").addEventListener("click", function () { try { ownerSel.focus(); ownerSel.click(); } catch (e) {} });
     var tagSel = $("#slTag");
     tagSel.addEventListener("change", function () { tagFilter = this.value; var lbl = $("#slTagLbl"); if (lbl) lbl.textContent = tagFilter ? "· " + tagFilter : ""; $("#slTagBtn").classList.toggle("active", !!tagFilter); paint(); });
     $("#slTagBtn").addEventListener("click", function () { try { tagSel.focus(); tagSel.click(); } catch (e) {} });
@@ -5291,12 +5383,15 @@
     function syncTagOptions() {
       var tags = allTags();
       tagSel.innerHTML = '<option value="">All tags</option>' + tags.map(function (t) { return '<option value="' + esc(t) + '"' + (t === tagFilter ? " selected" : "") + ">" + esc(t) + "</option>"; }).join("");
+      var owners = allOwners();
+      ownerSel.innerHTML = '<option value="">All recruiters</option>' + owners.map(function (o) { return '<option value="' + esc(o) + '"' + (o === ownerFilter ? " selected" : "") + ">" + esc(o) + "</option>"; }).join("");
     }
     function matchesF(s) {
       // Scope to the active motion (Recruiting / BD), like the rest of the app.
       // Legacy sequences with no motion stay visible in both.
       if (s.motion && s.motion !== motion) return false;
       if (mineOnly && (s.owner || "") !== meName) return false;
+      if (ownerFilter && (s.owner || "") !== ownerFilter) return false;
       if (tagFilter && (s.tags || []).indexOf(tagFilter) < 0) return false;
       if (!filter) return true;
       return ((s.name || "") + " " + (s.owner || "") + " " + (s.tags || []).join(" ") + " " + (s.channel || "")).toLowerCase().indexOf(filter) >= 0;
@@ -5914,6 +6009,153 @@
     });
   }
 
+  /* ---------------- Setup (admin launch hub) ----------------
+     One tab that consolidates everything an admin must stand up before the
+     workspace can launch: integrations, the ATS, owned email-sending infra and
+     outreach readiness. The default view is an ordered launch-readiness
+     checklist; each row drills into the real config screen via a sub-tab
+     (#setup/<section>), which delegates to that section's existing renderer. */
+  var SETUP_SECTIONS = [
+    { key: "", label: "Launch readiness", icon: "🚀" },
+    { key: "connected", label: "Integrations", icon: "🔌" },
+    { key: "ats", label: "ATS", icon: "🗂️" },
+    { key: "sending", label: "Email Sending", icon: "📨" },
+    { key: "outreach", label: "Outreach", icon: "✉️" }
+  ];
+
+  function setupStyles() {
+    return '<style>' +
+      '.setup-tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line,#1f232b);margin:0 0 16px}' +
+      '.setup-tab{display:inline-flex;align-items:center;gap:6px;padding:8px 13px;border-radius:8px 8px 0 0;color:var(--muted,#8b93a1);font-size:13px;font-weight:500;text-decoration:none;border:1px solid transparent;border-bottom:none;margin-bottom:-1px}' +
+      '.setup-tab:hover{color:var(--text,#e6e9ef)}' +
+      '.setup-tab.active{color:var(--text,#e6e9ef);background:var(--card,#14161c);border-color:var(--line,#1f232b)}' +
+      '.setup-tab .ni{font-size:14px}' +
+      '.setup-banner{border-radius:11px;padding:13px 16px;margin:0 0 16px;font-size:13.5px;font-weight:600}' +
+      '.setup-banner.ok{background:rgba(56,224,166,.1);border:1px solid rgba(56,224,166,.4);color:var(--accent-green,#38e0a6)}' +
+      '.setup-banner.warn{background:rgba(255,194,77,.08);border:1px solid rgba(255,194,77,.4);color:#f0d27f}' +
+      '.setup-steps{display:flex;flex-direction:column;gap:12px}' +
+      '.setup-step{display:flex;gap:14px;background:var(--card,#14161c);border:1px solid var(--line,#1f232b);border-radius:11px;padding:15px 17px}' +
+      '.setup-step.s-ready{border-color:rgba(56,224,166,.32)}' +
+      '.setup-step.s-action{border-color:rgba(240,120,120,.32)}' +
+      '.setup-num{flex:0 0 auto;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;background:var(--bg,#0e0f13);border:1px solid var(--line,#1f232b)}' +
+      '.setup-step.s-ready .setup-num{background:#10491f;color:#7ff0a0;border-color:transparent}' +
+      '.setup-main{flex:1;min-width:0}' +
+      '.setup-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}' +
+      '.setup-title{font-weight:600;font-size:15px}' +
+      '.setup-desc{color:var(--muted,#8b93a1);font-size:13px;margin:5px 0 7px;line-height:1.45}' +
+      '.setup-metric{font-size:12.5px;color:var(--text-dim,#9aa3b2)}' +
+      '.setup-track{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}' +
+      '.setup-chip{font-size:11px;padding:3px 9px;border-radius:20px;background:var(--bg,#0e0f13);border:1px solid var(--line,#2a2f3a);color:var(--muted,#8b93a1)}' +
+      '.setup-open{margin-left:auto;white-space:nowrap}' +
+      '.s-pill{font-size:11px;padding:2px 10px;border-radius:20px;font-weight:600}' +
+      '.s-pill.ready{background:#10491f;color:#7ff0a0}.s-pill.progress{background:#4a3a10;color:#f0d27f}' +
+      '.s-pill.action{background:#4a1414;color:#f08f8f}.s-pill.pending{background:#262a33;color:#9aa3b2}' +
+      '</style>';
+  }
+
+  function renderSetup(el) {
+    var detail = currentDetail();
+    var tabs = '<div class="setup-tabs">' + SETUP_SECTIONS.map(function (s) {
+      return '<a class="setup-tab' + (s.key === detail ? " active" : "") + '" href="#setup' + (s.key ? "/" + s.key : "") + '">' +
+        '<span class="ni">' + s.icon + '</span> ' + esc(s.label) + '</a>';
+    }).join("") + '</div>';
+    el.innerHTML = setupStyles() + tabs + '<div id="setupBody"></div>';
+    var body = el.querySelector("#setupBody");
+    if (detail === "connected") return renderConnected(body);
+    if (detail === "ats") return renderAts(body);
+    if (detail === "sending") return renderSending(body);
+    if (detail === "outreach") return renderOutreach(body);
+    return renderSetupOverview(body);
+  }
+
+  // The ordered launch checklist. Reads the same backends the sub-screens use and
+  // derives a Red/Amber/Green status + a one-line metric per step, so an admin
+  // sees at a glance what's left to stand up before going live.
+  function renderSetupOverview(body) {
+    var motionLabel = motion === "bd" ? "Business Development" : "Recruiting";
+    body.innerHTML = head("Setup",
+      "Everything an admin stands up before launch, in order. Connect your tools, choose your system of record, provision owned email-sending infrastructure, then confirm outreach is ready and switch the engine on.") +
+      '<div id="setupOv">' + loading() + '</div>';
+
+    // Step copy lives here so the loaded and error branches stay in sync.
+    var META = {
+      connected: { title: "Connect your tools", desc: "Integration pre-flight — every required tool must turn green before campaigns can activate.",
+        track: ["Each integration green", "API keys valid", "Telnyx / SMS reachable"] },
+      ats: { title: "Connect your ATS", desc: "Pick your system of record (Loxo is the verified primary). Replies, touches and placements sync once it's live.",
+        track: ["Vendor verified", "Object mapping reviewed", "Two-way sync confirmed"] },
+      sending: { title: "Provision email sending", desc: "Stand up your owned cold-email infrastructure — MTA server, domains and every DNS record (SPF/DKIM/DMARC/MX/PTR) set automatically, then warm the mailboxes.",
+        track: ["Domain health", "Mailbox + IP warmth", "Capacity / day", "Bounce & complaint rates"] },
+      outreach: { title: "Confirm outreach & switch on", desc: "The final pre-launch gate — enrichment credits topped up, domains and LinkedIn warmed, and the sending engine switched on.",
+        track: ["Pre-flight all green", "Enrichment credits", "Domain & LinkedIn warmup", "Engine on"] }
+    };
+    function mk(key, state, metric) { var m = META[key]; return { key: key, title: m.title, desc: m.desc, track: m.track, state: state, metric: metric }; }
+    function grab(path) { return api(path).then(function (d) { return d; }, function () { return null; }); }
+
+    function stepConnected(d) {
+      if (!d) return mk("connected", "pending", "Couldn't load integration status.");
+      var ints = d.integrations || [];
+      var req = ints.filter(function (i) { return (i.requiredFor || []).indexOf(motion) >= 0; });
+      var green = req.filter(function (i) { return i.status === "green"; }).length;
+      var state = !req.length ? "pending" : green === req.length ? "ready" : green > 0 ? "progress" : "action";
+      var metric = req.length ? (green + " of " + req.length + " required integrations green") : "No required integrations for this motion.";
+      return mk("connected", state, metric);
+    }
+    function stepAts(d) {
+      if (!d) return mk("ats", "pending", "Couldn't load ATS status.");
+      var active = d.active, av = (d.vendors || []).filter(function (v) { return v.vendor === active; })[0];
+      var state = !active ? "action" : (av && av.status === "verified") ? "ready" : "progress";
+      var metric = !active ? "No system of record chosen yet."
+        : "Active: " + ((av && av.label) || active) + (av && av.status === "verified" ? " · verified" : " · not verified yet");
+      return mk("ats", state, metric);
+    }
+    function stepSending(d) {
+      if (!d) return mk("sending", "pending", "Couldn't load sending infrastructure.");
+      var ov = (d.health && d.health.overall) || {}, domains = d.domains || [];
+      var serverUp = (d.servers || []).some(function (s) { return s.status === "active"; });
+      var state = (!serverUp && !domains.length) ? "action" : ov.canSend ? "ready" : "progress";
+      var metric = (!serverUp && !domains.length) ? "No MTA server or domains yet."
+        : (domains.length + " domain" + (domains.length === 1 ? "" : "s") + " · " +
+           (ov.activeMailboxes || 0) + "/" + (ov.mailboxes || 0) + " mailboxes warm" +
+           (ov.canSend ? " · sending now" : " · warming up"));
+      return mk("sending", state, metric);
+    }
+    function stepOutreach(d) {
+      if (!d) return mk("outreach", "pending", "Couldn't load outreach readiness.");
+      var pf = d.preflight || { ok: false, blocking: [] };
+      var cr = (d.enrichment && d.enrichment.credits) || {};
+      var state = pf.ok ? "ready" : "action";
+      var metric = pf.ok
+        ? ("All required tools green" + (cr.included ? " · " + (cr.remaining || 0).toLocaleString() + " enrichment credits left" : ""))
+        : ((pf.blocking || []).length + " required tool(s) not ready");
+      return mk("outreach", state, metric);
+    }
+    function sPill(state) {
+      var m = { ready: "Ready", progress: "In progress", action: "Action needed", pending: "—" };
+      return '<span class="s-pill ' + state + '">' + (m[state] || state) + '</span>';
+    }
+
+    Promise.all([grab("/connected"), grab("/ats"), grab("/sending"), grab("/outreach?motion=" + encodeURIComponent(motion))])
+      .then(function (res) {
+        var steps = [stepConnected(res[0]), stepAts(res[1]), stepSending(res[2]), stepOutreach(res[3])];
+        var ready = steps.filter(function (s) { return s.state === "ready"; }).length;
+        var banner = (ready === steps.length)
+          ? '<div class="setup-banner ok">✓ All systems are go — your ' + esc(motionLabel) + ' workspace is ready to launch.</div>'
+          : '<div class="setup-banner warn">' + ready + ' of ' + steps.length + ' setup steps ready. Finish the steps marked below to launch ' + esc(motionLabel) + '.</div>';
+        var rows = steps.map(function (s, i) {
+          return '<div class="setup-step s-' + s.state + '">' +
+            '<div class="setup-num">' + (s.state === "ready" ? "✓" : (i + 1)) + '</div>' +
+            '<div class="setup-main">' +
+              '<div class="setup-row"><span class="setup-title">' + esc(s.title) + '</span>' + sPill(s.state) +
+                '<a class="btn btn-ghost btn-sm setup-open" href="#setup/' + s.key + '">' + (s.state === "ready" ? "Review" : "Set up") + ' →</a></div>' +
+              '<div class="setup-desc">' + esc(s.desc) + '</div>' +
+              '<div class="setup-metric">' + esc(s.metric) + '</div>' +
+              '<div class="setup-track">' + s.track.map(function (t) { return '<span class="setup-chip">' + esc(t) + '</span>'; }).join("") + '</div>' +
+            '</div></div>';
+        }).join("");
+        var ov = document.getElementById("setupOv"); if (ov) ov.innerHTML = banner + '<div class="setup-steps">' + rows + '</div>';
+      });
+  }
+
   function renderConnected(el) {
     el.innerHTML = head("Connected", "Integration pre-flight. Red → Yellow → Green. All required must be green to activate.") +
       '<div id="cnBody">' + loading() + "</div>";
@@ -5947,20 +6189,134 @@
   var connectedReload = null;
 
   function renderAts(el) {
-    el.innerHTML = head("ATS", "Your system of record. Loxo is the verified, primary integration.") +
-      '<div id="atBody">' + loading() + "</div>";
+    el.innerHTML = head("ATS", "Your system of record. Connect Loxo to populate Candidates & Companies and keep them in sync.") +
+      '<style>' +
+      '.ats-grid{display:flex;flex-direction:column;gap:8px}' +
+      '.ats-v{display:flex;align-items:center;gap:12px;padding:13px 15px;border:1px solid var(--border);border-radius:11px;background:var(--bg-soft);cursor:pointer;text-align:left;width:100%}' +
+      '.ats-v:hover{border-color:var(--border-strong);background:var(--surface-2)}' +
+      '.ats-v .meta{flex:1;min-width:0}.ats-v .meta b{color:var(--text);display:block}.ats-v .meta small{color:var(--text-dim)}' +
+      '.ats-badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px}' +
+      '.ats-go{color:var(--text-dim);font-size:18px}' +
+      '.ats-fld{display:block;margin-bottom:12px}.ats-fld span{display:block;font-size:12px;color:var(--text-muted);margin-bottom:5px;font-weight:600}' +
+      '.ats-fld input{width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit}' +
+      '.ats-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}' +
+      '.ats-msg{min-height:18px;font-size:13px;margin:10px 0 0}' +
+      '</style><div id="atBody">' + loading() + "</div>";
+    function atsAgo(s) {
+      var t = Date.parse(s); if (isNaN(t)) return "recently";
+      var m = Math.floor((Date.now() - t) / 60000);
+      if (m < 1) return "just now"; if (m < 60) return m + "m ago";
+      var h = Math.floor(m / 60); if (h < 24) return h + "h ago";
+      return Math.floor(h / 24) + "d ago";
+    }
     api("/ats").then(function (d) {
       d = d || {};
+      var cfgByVendor = {};
+      (d.config || []).forEach(function (c) { cfgByVendor[c.vendor] = c; });
       var vendors = (d.vendors || []).map(function (v) {
-        return '<div class="integ"><span class="dot3" style="background:' + (v.status === "verified" ? "var(--accent-green)" : "var(--text-dim)") + '"></span><div class="meta"><b>' + esc(v.label) + "</b><small>" + esc(v.status) + (v.vendor === d.active ? " · active" : "") + "</small></div></div>";
+        var c = cfgByVendor[v.vendor] || {};
+        var st = c.status || (v.status === "verified" ? "red" : "red");
+        var connected = st === "green";
+        var badge = connected
+          ? '<span class="ats-badge" style="background:rgba(56,224,166,.16);color:var(--accent-green)">Connected</span>'
+          : st === "yellow"
+            ? '<span class="ats-badge" style="background:rgba(255,194,77,.16);color:var(--accent-amber)">Saved · test it</span>'
+            : (v.status === "verified"
+                ? '<span class="ats-badge" style="background:var(--surface-2);color:var(--text-dim)">Not connected</span>'
+                : '<span class="ats-badge" style="background:var(--surface-2);color:var(--text-dim)">Soon</span>');
+        var sub = connected && c.lastSyncAt ? "Last sync " + atsAgo(c.lastSyncAt)
+          : v.vendor === d.active ? "Active system of record"
+          : v.status === "verified" ? "Click to set up" : "Coming soon";
+        return '<button class="ats-v" data-vendor="' + esc(v.vendor) + '" data-status="' + esc(v.status) + '">' +
+          '<span class="dot3" style="background:' + (connected ? "var(--accent-green)" : st === "yellow" ? "var(--accent-amber)" : "var(--text-dim)") + '"></span>' +
+          '<div class="meta"><b>' + esc(v.label) + (v.vendor === d.active ? ' · active' : '') + '</b><small>' + esc(sub) + '</small></div>' +
+          badge + '<span class="ats-go">›</span></button>';
       }).join("") || '<div class="empty">No ATS vendors available.</div>';
       var map = (d.objectMap || []).map(function (m) {
         return '<div class="list-row"><div><div class="lr-main">' + esc(m.concept) + '</div><div class="lr-sub">' + esc(m.how) + '</div></div><div class="lr-right">' + esc(m.object) + "</div></div>";
       }).join("");
       var body = $("#atBody"); if (!body) return;
-      body.innerHTML = '<div class="two-col"><div class="card"><h3>Choose your ATS</h3>' + vendors + "</div>" +
+      body.innerHTML = '<div class="two-col"><div class="card"><h3>Choose your ATS</h3><p class="muted" style="margin:0 0 12px;font-size:13px">Click a provider to enter its credentials. Candidates flow into the Candidates database; companies into the BD Companies tab.</p><div class="ats-grid">' + vendors + "</div></div>" +
         '<div class="card"><h3>Loxo object mapping</h3>' + map + "</div></div>";
+      Array.prototype.forEach.call(body.querySelectorAll(".ats-v"), function (btn) {
+        btn.addEventListener("click", function () {
+          openAtsSetup(btn.getAttribute("data-vendor"), cfgByVendor[btn.getAttribute("data-vendor")] || {}, btn.getAttribute("data-status"), d.vendors);
+        });
+      });
     }).catch(function () { var b = $("#atBody"); if (b) b.innerHTML = needsSetup(); });
+  }
+
+  // Per-vendor connection dialog: enter domain/slug/API key, test, sync, and
+  // subscribe to the real-time feed. Loxo is fully wired; other vendors save
+  // credentials but verification/sync land as each adapter ships.
+  function openAtsSetup(vendor, cfg, vstatus, vendors) {
+    var label = (vendors || []).reduce(function (a, v) { return v.vendor === vendor ? v.label : a; }, vendor);
+    var isLoxo = vendor === "loxo";
+    var docLink = isLoxo ? '<a href="https://loxo.readme.io/reference/loxo-api" target="_blank" rel="noopener">Loxo API reference ↗</a>' : '';
+    var body =
+      (isLoxo ? '' : '<p class="muted" style="margin:0 0 12px;font-size:13px">' + esc(label) + ' verification & sync are on the roadmap. You can save credentials now; the live pull turns on when the adapter ships.</p>') +
+      '<label class="ats-fld"><span>Agency domain</span><input id="atsDomain" placeholder="app.loxo.co" value="' + esc(cfg.domain || "") + '" autocomplete="off"></label>' +
+      '<label class="ats-fld"><span>Agency slug</span><input id="atsSlug" placeholder="your-agency" value="' + esc(cfg.slug || "") + '" autocomplete="off"></label>' +
+      '<label class="ats-fld"><span>API key (Bearer token)' + (cfg.hasApiKey ? ' — saved, leave blank to keep' : '') + '</span><input id="atsKey" type="password" placeholder="' + (cfg.hasApiKey ? "•••••••• saved" : "paste from Loxo → Settings → API Keys") + '" autocomplete="off"></label>' +
+      '<p class="ats-msg" id="atsMsg">' + (cfg.error ? '<span style="color:var(--accent-red)">' + esc(cfg.error) + '</span>' : '') + '</p>' +
+      '<div class="ats-acts">' +
+        '<button class="btn btn-primary btn-sm" id="atsSave">Save</button>' +
+        (isLoxo ? '<button class="btn btn-sm" id="atsTest">Test connection</button>' : '') +
+        (isLoxo ? '<button class="btn btn-sm" id="atsSync">Sync now</button>' : '') +
+        (isLoxo ? '<button class="btn btn-ghost btn-sm" id="atsHook">Enable real-time</button>' : '') +
+        (cfg.hasApiKey ? '<button class="btn btn-ghost btn-sm" id="atsDisc" style="margin-left:auto;color:var(--accent-red)">Disconnect</button>' : '') +
+      '</div>' +
+      (docLink ? '<p class="muted" style="margin:12px 0 0;font-size:12px">Need help finding these? ' + docLink + ' · domain & slug come from Loxo Support.</p>' : '');
+
+    openModal("Connect " + label, "System of record", body, function (root, close) {
+      var msg = root.querySelector("#atsMsg");
+      function say(t, kind) { msg.innerHTML = '<span style="color:' + (kind === "err" ? "var(--accent-red)" : kind === "ok" ? "var(--accent-green)" : "var(--text-muted)") + '">' + esc(t) + "</span>"; }
+      function payload(extra) {
+        return Object.assign({ vendor: vendor, domain: root.querySelector("#atsDomain").value.trim(), slug: root.querySelector("#atsSlug").value.trim(), apiKey: root.querySelector("#atsKey").value.trim() }, extra || {});
+      }
+      function saveFirst() {
+        return send("/ats", "POST", payload({ action: "save" }));
+      }
+      root.querySelector("#atsSave").onclick = function () {
+        say("Saving…");
+        saveFirst().then(function (r) {
+          if (r.ok) { say("Saved. " + (isLoxo ? "Now test the connection." : "Credentials stored."), "ok"); cfg.hasApiKey = true; renderAts($("#view")); }
+          else say((r.data && r.data.error) || "Could not save.", "err");
+        }).catch(function () { say("Could not reach the server.", "err"); });
+      };
+      var testBtn = root.querySelector("#atsTest");
+      if (testBtn) testBtn.onclick = function () {
+        say("Saving + testing…");
+        saveFirst().then(function () { return send("/ats", "POST", { action: "test", vendor: vendor }); }).then(function (r) {
+          if (r.ok && r.data && r.data.ok) { say("Connected ✓ — Loxo responded.", "ok"); renderAts($("#view")); }
+          else say((r.data && r.data.error) || "Connection failed.", "err");
+        }).catch(function () { say("Could not reach the server.", "err"); });
+      };
+      var syncBtn = root.querySelector("#atsSync");
+      if (syncBtn) syncBtn.onclick = function () {
+        say("Pulling from Loxo… this can take a moment for large databases.");
+        saveFirst().then(function () { return send("/ats", "POST", { action: "sync", vendor: vendor }); }).then(function (r) {
+          if (r.ok && r.data && r.data.report) {
+            var p = r.data.report.people || {}, c = r.data.report.companies || {};
+            say("Synced ✓ — Candidates +" + (p.added || 0) + "/" + (p.updated || 0) + " upd · Companies +" + (c.added || 0) + "/" + (c.updated || 0) + " upd.", "ok");
+            renderAts($("#view"));
+          } else say((r.data && r.data.error) || "Sync failed — test the connection first.", "err");
+        }).catch(function () { say("Sync failed.", "err"); });
+      };
+      var hookBtn = root.querySelector("#atsHook");
+      if (hookBtn) hookBtn.onclick = function () {
+        say("Registering webhooks with Loxo…");
+        saveFirst().then(function () { return send("/ats", "POST", { action: "register-webhooks", vendor: vendor }); }).then(function (r) {
+          if (r.ok && r.data && r.data.registered) say("Real-time on ✓ — " + r.data.registered + " webhooks registered. Changes in Loxo now sync automatically.", "ok");
+          else say((r.data && r.data.error) === "loxo_rejected_webhooks" ? "Loxo rejected the webhooks — confirm webhooks are enabled for your account." : ((r.data && r.data.error) || "Could not register webhooks."), "err");
+        }).catch(function () { say("Could not reach the server.", "err"); });
+      };
+      var discBtn = root.querySelector("#atsDisc");
+      if (discBtn) discBtn.onclick = function () {
+        if (!window.confirm("Disconnect " + label + "? Stored credentials are removed. Synced records stay.")) return;
+        send("/ats", "POST", { action: "disconnect", vendor: vendor }).then(function () { close(); toast(label + " disconnected"); renderAts($("#view")); });
+      };
+    });
   }
 
   /* ---------------- Team (admin sub-accounts) ---------------- */

@@ -159,6 +159,18 @@ export async function deleteRecords(workspaceId: string, ids: string[]): Promise
   return n;
 }
 
+/** Delete by the source system's own id — used when a Loxo `destroy` arrives. */
+export async function deleteByProviderId(workspaceId: string, providerId: string): Promise<number> {
+  await hydrate();
+  const pid = String(providerId);
+  let n = 0;
+  for (let i = store.length - 1; i >= 0; i--) {
+    if (store[i].workspaceId === workspaceId && store[i].providerId === pid) { store.splice(i, 1); n++; }
+  }
+  if (n) save();
+  return n;
+}
+
 /** Counts for the Data tab header. */
 export async function stats(workspaceId: string): Promise<{ total: number; withEmail: number; withPhone: number; bySource: Record<string, number> }> {
   await hydrate();

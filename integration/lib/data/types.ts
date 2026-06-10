@@ -15,6 +15,7 @@
 export type DataSource =
   | "csv"            // imported from a file the user exported from the portal
   | "zoominfo-api"   // pulled via the official ZoomInfo Enterprise API
+  | "loxo"           // pulled from the connected Loxo ATS (people -> Candidates)
   | "manual";        // hand-added in the Data tab
 
 /** Verification state of a contact value, when the provider tells us. */

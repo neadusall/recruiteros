@@ -154,7 +154,33 @@
       ],
       analytics: analyticsSeed(name)
     };
+    db.sequences = db.sequences.concat(demoRecruiterSequences());
     return db;
+  }
+
+  // Sequences "set up by" the seeded recruiters, so the admin's Campaign Sequences
+  // Library is populated with every recruiter's campaigns out of the box (the
+  // Library shares this store, so anything a recruiter builds lands here too).
+  // Names line up with the seeded prospects/responses/appointments for coherence.
+  function demoRecruiterSequences() {
+    var d1 = new Date(Date.now() - 6 * 864e5).toISOString();
+    var d2 = new Date(Date.now() - 3 * 864e5).toISOString();
+    var d3 = new Date(Date.now() - 864e5).toISOString();
+    function email(s) { return [
+      { id: s + "_1", day: 0, subject: "{{custom_variable1}} at {{company}}", tracking: true, body: "Hi {{first_name}},\n\nSaw the {{custom_variable1}} opening — I'm working with strong candidates who fit. Worth a quick call?\n\n{{sender_name}}" },
+      { id: s + "_2", day: 3, subject: "Re: {{custom_variable1}}", tracking: true, body: "Following up, {{first_name}} — happy to share profiles." }
+    ]; }
+    function li(s) { return [
+      { id: s + "_1", day: 0, channel: "linkedin", body: "Hi {{first_name}}, I partner with teams hiring {{custom_variable1}} — open to connecting?" },
+      { id: s + "_2", day: 2, channel: "linkedin", body: "Thanks for connecting, {{first_name}} — have a couple of candidates worth a look." }
+    ]; }
+    return [
+      { id: "seq_ana_react", channel: "email", name: "Senior React · Berlin", motion: "recruiting", owner: "Ana Brandt", status: "active", tags: ["frontend", "berlin"], variables: [{ key: "custom_variable1", label: "Role title" }], steps: email("ar"), createdAt: d1, updatedAt: d3 },
+      { id: "seq_priya_fe", channel: "multi", name: "Frontend leads · scaleups", motion: "recruiting", owner: "Priya Nair", status: "active", tags: ["frontend"], variables: [{ key: "custom_variable1", label: "Role title" }], steps: email("pf").concat(li("pf2")), createdAt: d2, updatedAt: d3 },
+      { id: "seq_tom_staff", channel: "linkedin", name: "Staff eng · platform", motion: "recruiting", owner: "Tom Vogel", status: "inactive", tags: ["backend", "platform"], variables: [{ key: "custom_variable1", label: "Role title" }], steps: li("ts"), createdAt: d2, updatedAt: d2 },
+      { id: "seq_leo_fintech", channel: "email", name: "Series B fintech · BD", motion: "bd", owner: "Leo Marsh", status: "active", tags: ["fintech", "bd"], variables: [{ key: "custom_variable1", label: "Service" }], steps: email("lf"), createdAt: d1, updatedAt: d2 },
+      { id: "seq_ana_surge", channel: "multi", name: "Hiring-surge outreach · BD", motion: "bd", owner: "Ana Brandt", status: "inactive", tags: ["bd", "surge"], variables: [{ key: "custom_variable1", label: "Service" }], steps: email("as").concat(li("as2")), createdAt: d3, updatedAt: d3 }
+    ];
   }
 
   // Operational analytics for the Command Center dashboard. Split by motion so
@@ -273,6 +299,15 @@
           }
         });
       d.team._recruitersSeeded = true; changed = true;
+    }
+    // Backfill recruiter-owned sequences into the Campaign Sequences Library for
+    // sessions seeded before they existed (idempotent: only adds missing ids).
+    if (!d._recruiterSeqsSeeded) {
+      d.sequences = d.sequences || [];
+      demoRecruiterSequences().forEach(function (s) {
+        if (!d.sequences.some(function (x) { return x.id === s.id; })) d.sequences.push(s);
+      });
+      d._recruiterSeqsSeeded = true; changed = true;
     }
     return changed;
   }
@@ -562,7 +597,86 @@
       }
       return ok({ members: d.team.members, invites: d.team.invites, assignableRoles: assignableRoles });
     }
-    if (p === "/ats") return ok(d.ats);
+    if (p === "/ats") {
+      if (!d.ats.config) d.ats.config = [];
+      function atsCfg(v) { for (var i = 0; i < d.ats.config.length; i++) if (d.ats.config[i].vendor === v) return d.ats.config[i]; return null; }
+      if (method === "POST" && body) {
+        var vend = body.vendor || "loxo";
+        if (body.action === "save") {
+          var c = atsCfg(vend);
+          if (!c) { c = { vendor: vend, status: "red", hasApiKey: false }; d.ats.config.push(c); }
+          if (body.domain != null) c.domain = body.domain;
+          if (body.slug != null) c.slug = body.slug;
+          if (body.apiKey) c.hasApiKey = true;
+          c.status = (c.domain && c.slug && c.hasApiKey) ? "yellow" : "red";
+          c.error = null;
+          if (!d.ats.active) d.ats.active = vend;
+          save(d);
+          return ok({ saved: true, status: c.status, config: d.ats.config });
+        }
+        if (body.action === "test") {
+          var ct = atsCfg(vend);
+          if (!ct || !ct.hasApiKey) return ok({ ok: false, error: "Enter domain, agency slug, and API key first.", config: d.ats.config });
+          ct.status = "green"; ct.lastTestedAt = new Date().toISOString(); ct.error = null; save(d);
+          return ok({ ok: true, config: d.ats.config });
+        }
+        if (body.action === "sync") {
+          var cs = atsCfg(vend);
+          if (!cs || !cs.hasApiKey) return resp(400, { error: "missing_credentials" });
+          ensureCompanies(d);
+          var demo = loxoDemoCompanies(), addedC = 0;
+          demo.forEach(function (dc) { if (!d.companies.some(function (x) { return x.name === dc.name; })) { d.companies.unshift(dc); addedC++; } });
+          cs.lastSyncAt = new Date().toISOString(); cs.status = "green"; save(d);
+          return ok({ report: { ok: true, people: { added: 42, updated: 8, scanned: 50 }, companies: { added: addedC, updated: demo.length - addedC, scanned: demo.length } }, config: d.ats.config });
+        }
+        if (body.action === "set-active") { if (atsCfg(vend)) { d.ats.active = vend; save(d); } return ok({ active: vend }); }
+        if (body.action === "register-webhooks") { return ok({ registered: 6 }); }
+        if (body.action === "disconnect") {
+          d.ats.config = d.ats.config.filter(function (x) { return x.vendor !== vend; });
+          if (d.ats.active === vend) d.ats.active = (d.ats.config[0] || {}).vendor || null;
+          save(d);
+          return ok({ disconnected: vend, config: d.ats.config });
+        }
+        return resp(400, { error: "unknown_action" });
+      }
+      return ok({ vendors: d.ats.vendors, objectMap: d.ats.objectMap, active: d.ats.config.length ? d.ats.active : null, config: d.ats.config });
+    }
+
+    if (p === "/companies") {
+      ensureCompanies(d);
+      if (method === "POST" && body) {
+        if (body.action === "upsert" && body.companies) {
+          var a = 0, u = 0;
+          body.companies.forEach(function (ci) {
+            var ex = d.companies.filter(function (x) { return x.name === ci.name; })[0];
+            if (ex) { for (var k in ci) ex[k] = ci[k]; u++; }
+            else { var nc = { id: "co_" + Math.random().toString(36).slice(2, 8), status: "uncontacted", jobs: 0, tags: [], source: "manual" }; for (var k2 in ci) nc[k2] = ci[k2]; d.companies.unshift(nc); a++; }
+          });
+          save(d); return ok({ added: a, updated: u, total: a + u });
+        }
+        if (body.action === "patch" && body.id) {
+          var cp = d.companies.filter(function (x) { return x.id === body.id; })[0];
+          if (!cp) return resp(404, { error: "not_found" });
+          if (body.status) cp.status = body.status;
+          if (body.tags) cp.tags = body.tags;
+          if (body.owner != null) cp.owner = body.owner;
+          if (body.type != null) cp.type = body.type;
+          save(d); return ok({ company: cp });
+        }
+        if (body.action === "delete" && body.ids) {
+          d.companies = d.companies.filter(function (x) { return body.ids.indexOf(x.id) < 0; });
+          save(d); return ok({ removed: body.ids.length });
+        }
+        if (body.action === "sync") {
+          var demo2 = loxoDemoCompanies(), added2 = 0;
+          demo2.forEach(function (dc) { if (!d.companies.some(function (x) { return x.name === dc.name; })) { d.companies.unshift(dc); added2++; } });
+          save(d);
+          return ok({ report: { ok: true, people: { added: 42, updated: 8, scanned: 50 }, companies: { added: added2, updated: demo2.length - added2, scanned: demo2.length } } });
+        }
+        return resp(400, { error: "unknown_action" });
+      }
+      return ok({ companies: d.companies, total: d.companies.length, stats: { total: d.companies.length, byStatus: {}, bySource: {} } });
+    }
     if (p === "/accounts") {
       if (method === "POST") return addAccount(d, body);
       return ok(d.accounts);
@@ -1092,6 +1206,17 @@
     for (var j = 0; j < names.length; j++) if (low.indexOf(names[j]) >= 0) return true;
     return false;
   }
+  // Companies (BD book) demo store + a fake Loxo sync, so the offline portal can
+  // exercise the ATS → Companies flow without a live backend.
+  function ensureCompanies(d) { if (!d.companies) d.companies = []; return d.companies; }
+  function loxoDemoCompanies() {
+    return [
+      { id: "co_lx1", name: "Aperture Bio", url: "aperturebio.com", location: "Boston, MA", owner: "Loxo sync", type: "Prospect", status: "in_progress", jobs: 3, tags: ["loxo"], source: "loxo", providerId: "lx_1001", created: new Date().toISOString() },
+      { id: "co_lx2", name: "Northwind Robotics", url: "northwindrobotics.com", location: "Austin, TX", owner: "Loxo sync", type: "Prospect", status: "active_opportunity", jobs: 5, tags: ["loxo"], source: "loxo", providerId: "lx_1002", created: new Date().toISOString() },
+      { id: "co_lx3", name: "Vela Health", url: "velahealth.io", location: "Denver, CO", owner: "Loxo sync", type: "Client", status: "current_client", jobs: 2, tags: ["loxo"], source: "loxo", providerId: "lx_1003", created: new Date().toISOString() }
+    ];
+  }
+
   function imDemoStats(d) {
     var total = (d.inmarket || []).length;
     var days = [];

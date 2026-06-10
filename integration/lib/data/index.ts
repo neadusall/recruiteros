@@ -13,6 +13,7 @@ export {
   upsertRecords,
   saveRecord,
   deleteRecords,
+  deleteByProviderId,
   findRecordForPerson,
   stats,
   purgeWorkspaceData,
