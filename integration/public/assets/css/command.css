@@ -973,6 +973,8 @@ html[data-theme="light"] .sl-status.off { background: rgba(16,18,40,.05); }
   background: linear-gradient(120deg, #b9a6ff, #8be7ff); -webkit-background-clip: text;
   background-clip: text; color: transparent; font-weight: 800;
 }
+/* White-label: a workspace's own logo replaces the wordmark (fit, not crop). */
+.cmd-side .brand .brand-logo { display: block; max-width: 160px; max-height: 34px; width: auto; height: auto; object-fit: contain; }
 
 /* Sidebar: subtle depth + glass */
 .sidebar.cmd-side { background: linear-gradient(180deg, rgba(24, 24, 34, .92), rgba(13, 13, 22, .82)); backdrop-filter: blur(14px); border-right: 1px solid var(--border); }

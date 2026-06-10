@@ -6465,6 +6465,9 @@
       '.cn-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}' +
       '.cn-msg{min-height:18px;font-size:13px;margin:10px 0 0}' +
       '.req-tag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(255,194,77,.14);color:var(--accent-amber)}' +
+      '.acc-tag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;margin-right:4px;white-space:nowrap}' +
+      '.acc-tag.granted{background:rgba(124,92,255,.16);color:#b9a6ff}' +
+      '.acc-tag.own{background:rgba(56,224,166,.14);color:var(--accent-green)}' +
       '</style>' +
       '<div id="cnBody">' + loading() + "</div>";
 
@@ -6474,11 +6477,15 @@
         var rows = ints.map(function (i) {
           var sm = cnStatusMeta(i.status);
           var req = (i.requiredFor || []).indexOf(motion) >= 0 ? '<span class="req-tag">required</span>' : "";
+          // Where this workspace's key comes from: its own, operator-provided
+          // (billed), or — for the operator's own house workspace — nothing shown.
+          var acc = i.access === "granted" ? '<span class="acc-tag granted">via RecruiterOS · billed</span>'
+            : i.access === "own" ? '<span class="acc-tag own">your key</span>' : "";
           var sub = i.error ? esc(i.error) : esc(i.blurb || "");
           return '<button class="cn-v" data-id="' + esc(i.id) + '">' +
             '<span class="dot3" style="background:' + sm.color + '"></span>' +
             '<div class="meta"><b>' + esc(i.label) + '</b><small>' + sub + '</small></div>' +
-            req + '<span class="cn-badge" style="' + sm.badge + '">' + sm.label + '</span><span class="cn-go">›</span></button>';
+            acc + req + '<span class="cn-badge" style="' + sm.badge + '">' + sm.label + '</span><span class="cn-go">›</span></button>';
         }).join("") || '<div class="empty">No integrations available.</div>';
         var pre = ints.filter(function (i) { return (i.requiredFor || []).indexOf(motion) >= 0 && i.status !== "green"; });
         var gate = pre.length ? '<div class="card" style="border-color:rgba(255,194,77,0.4);margin-bottom:14px"><b class="muted">⚠ ' + pre.length + " required integration(s) not green yet. Campaign activation is blocked for " + motion + ". Click each below to set it up.</b></div>"
@@ -7387,6 +7394,92 @@
   /* ============================================================
      Account menu (upper right): logo upload + enterprise dropdown
      ============================================================ */
+  // White-label workspace logo: swap the sidebar "RecruitersOS" wordmark for the
+  // workspace's own logo. Renders for everyone; only admins (accounts:manage) get
+  // the upload/reset controls. Cached locally for a flash-free reload, then
+  // refreshed from /api/branding (authoritative + cross-device).
+  (function workspaceBrand() {
+    var link = $("#brandLink");
+    if (!link) return;
+    var word = link.querySelector(".brand-word");
+    var wsId = (ctx.workspace && ctx.workspace.id) || "ws";
+    var CACHE = "ros_brand_" + wsId;
+
+    function render(b) {
+      b = b || {};
+      var existing = link.querySelector(".brand-logo");
+      if (b.logoUrl) {
+        if (word) word.style.display = "none";
+        var img = existing || document.createElement("img");
+        img.className = "brand-logo";
+        img.alt = b.brandName || "Workspace logo";
+        img.src = b.logoUrl;
+        if (!existing) link.appendChild(img);
+      } else {
+        if (existing) existing.remove();
+        if (word) {
+          word.style.display = "";
+          if (b.brandName) word.textContent = b.brandName;
+          else word.innerHTML = 'Recruiters<span class="os">OS</span>';
+        }
+      }
+    }
+    function cache(b) { try { localStorage.setItem(CACHE, JSON.stringify(b || {})); } catch (e) {} }
+
+    // 1) Paint instantly from the last-known branding (no flash on reload).
+    var cached = null; try { cached = JSON.parse(localStorage.getItem(CACHE) || "null"); } catch (e) {}
+    if (cached) render(cached);
+
+    // 2) Refresh from the server (authoritative).
+    send("/branding", "GET").then(function (r) {
+      if (r && r.ok && r.data && r.data.branding) { render(r.data.branding); cache(r.data.branding); }
+    }).catch(function () {});
+
+    // 3) Admin-only controls.
+    var canEdit = (typeof can === "function") ? can("accounts:manage") : (ctx.role !== "member");
+    if (!canEdit) return;
+    var up = $("#brandUpload"), file = $("#brandFile"), reset = $("#brandReset");
+    if (up) up.hidden = false;
+    if (reset) reset.hidden = false;
+
+    function persist(patch, okMsg) {
+      send("/branding", "POST", patch).then(function (r) {
+        if (r && r.ok && r.data && r.data.branding) {
+          render(r.data.branding); cache(r.data.branding);
+          if (okMsg) toast(okMsg);
+        } else { toast((r && r.data && r.data.error === "logo_too_large") ? "That logo is too large — try a smaller image." : "Couldn't save the logo."); }
+      }).catch(function () { toast("Couldn't reach the server."); });
+    }
+
+    if (file) file.addEventListener("change", function () {
+      var f = file.files && file.files[0];
+      if (!f) return;
+      if (!/^image\//.test(f.type)) { toast("Please choose an image file."); return; }
+      var reader = new FileReader();
+      reader.onload = function () {
+        var img = new Image();
+        img.onload = function () {
+          // Fit inside 320x96 keeping aspect ratio, transparent background — a
+          // logo lockup, not a cropped square like the personal avatar.
+          var maxW = 320, maxH = 96;
+          var scale = Math.min(maxW / img.width, maxH / img.height, 1);
+          var w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+          var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+          cv.getContext("2d").drawImage(img, 0, 0, w, h);
+          persist({ logoUrl: cv.toDataURL("image/png") }, "Logo updated");
+        };
+        img.onerror = function () { toast("That image couldn't be read."); };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(f);
+      file.value = ""; // allow re-picking the same file later
+    });
+
+    if (reset) reset.addEventListener("click", function () {
+      persist({ action: "reset" }, "Reset to the RecruitersOS logo");
+    });
+  })();
+
   (function accountMenu() {
     var btn = $("#acctBtn"), menu = $("#acctMenu"), acct = $("#acct");
     if (!btn || !menu) return;
@@ -7458,7 +7551,9 @@
     var ownerLink = $("#ownerLink");
     if (ownerLink && (ctx.role === "owner" || can("workspace:delete"))) {
       ownerLink.hidden = false;
-      ownerLink.addEventListener("click", function () { location.href = "/owner-console"; });
+      // Gated doorway: server checks owner access, then forwards to the secret
+      // slug (the guessable /owner-console path 404s by design).
+      ownerLink.addEventListener("click", function () { location.href = "/api/owner/enter"; });
     }
 
     // Portal switch (owner/admin only): jump between the Admin and Recruiter

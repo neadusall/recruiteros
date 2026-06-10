@@ -17,12 +17,31 @@
 
 import { AsyncLocalStorage } from "async_hooks";
 
-/** Per-request override of resolved integration keys (workspace-scoped). */
-const credCtx = new AsyncLocalStorage<Record<string, string>>();
+/** Per-request credential context (workspace-scoped). */
+interface CredContext {
+  keys: Record<string, string>;
+  /**
+   * Isolated = a white-label customer workspace. Inside an isolated context a
+   * provider sees ONLY the keys handed to it; it must NOT fall back to the
+   * deployment's process.env (the house/operator keys). This is what stops a
+   * customer riding the operator's Telnyx/enrichment keys for free.
+   */
+  isolated: boolean;
+}
 
-/** Run `fn` with `keys` taking precedence over process.env for every provider. */
-export function runWithCreds<T>(keys: Record<string, string>, fn: () => T): T {
-  return credCtx.run(keys, fn);
+const credCtx = new AsyncLocalStorage<CredContext>();
+
+/**
+ * Run `fn` with `keys` taking precedence over process.env for every provider.
+ * Pass `{ isolated: true }` for a non-house workspace so the env fallback is
+ * suppressed and the workspace can only use the keys explicitly given to it.
+ */
+export function runWithCreds<T>(
+  keys: Record<string, string>,
+  fn: () => T,
+  opts?: { isolated?: boolean },
+): T {
+  return credCtx.run({ keys, isolated: !!(opts && opts.isolated) }, fn);
 }
 
 export interface ProviderStatus {
@@ -57,7 +76,11 @@ export abstract class ProviderClient {
 
   protected env(key: string): string {
     const ctx = credCtx.getStore();
-    if (ctx && ctx[key]) return ctx[key];
+    if (ctx) {
+      if (ctx.keys[key]) return ctx.keys[key];
+      // Isolated (customer) context: never fall through to the operator's env.
+      if (ctx.isolated) return "";
+    }
     return process.env[key] ?? "";
   }
 

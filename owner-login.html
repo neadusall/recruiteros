@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Owner sign-in</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+  <link rel="stylesheet" href="assets/css/auth.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23ffb020'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>$</text></svg>" />
+  <style>
+    /* Owner accent: gold/$, distinct from the purple customer portals. */
+    .owner-brand .logo { background: linear-gradient(135deg,#ffb020,#ff7849) !important; color:#0a0a12; }
+    .owner-brand .os { background: linear-gradient(120deg,#ffd27a,#ff9a5a); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  </style>
+</head>
+<body class="auth-body">
+  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+  <div class="grid-bg"></div>
+
+  <div class="auth-split">
+    <aside class="auth-aside">
+      <a href="/" class="brand owner-brand"><span class="logo">$</span><span>Owner<span class="os">OS</span></span></a>
+      <h1>The owner<br /><span class="gradient-text">command desk.</span></h1>
+      <p>Private back office for the platform operator: every account, what they spend, what they pay, and the levers to suspend, reset, or price them. This is not a customer portal.</p>
+      <ul class="auth-points">
+        <li><span class="ap">📊</span> Revenue, cost and margin across all accounts</li>
+        <li><span class="ap">👥</span> Every user and role on the platform</li>
+        <li><span class="ap">🗂️</span> Suspend, reset, or delete any workspace</li>
+      </ul>
+      <div class="auth-trust">Owner-only · access is checked server-side on every request</div>
+    </aside>
+
+    <main class="auth-card-wrap">
+      <div class="auth-card">
+        <h2 id="title">Owner sign-in</h2>
+        <p class="auth-sub">Sign in with your owner email to open the tracking console.</p>
+
+        <form id="ownerForm" autocomplete="on" novalidate>
+          <label class="fld">
+            <span>Owner email</span>
+            <input id="email" type="email" placeholder="you@yourcompany.com" autocomplete="email" required />
+          </label>
+          <label class="fld">
+            <span>Password</span>
+            <input id="password" type="password" placeholder="Your password" autocomplete="current-password" required />
+          </label>
+          <button type="submit" class="btn btn-primary btn-lg btn-block" id="submitBtn">Open Owner Console →</button>
+        </form>
+
+        <p class="auth-msg" id="msg"></p>
+        <p class="auth-fine">Not the owner? <a href="/login">Sign in to your workspace</a>.</p>
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/js/pw-toggle.js"></script>
+  <script src="assets/js/local-backend.js"></script>
+  <script src="assets/js/config.js"></script>
+  <script>
+    /* Owner sign-in: same auth backend as the app, but lands in the Owner
+     * Console instead of a workspace. Access itself is enforced server-side
+     * (requireOwner) — a non-owner who signs in here just hits the locked gate. */
+    (function () {
+      "use strict";
+      var API = (window.RECRUITEROS_API_BASE || "") + "/api/auth";
+      // Gated doorway: checks owner access server-side, then forwards to the
+      // console's secret slug. Never hardcode the slug in a public page.
+      var OWNER_CONSOLE = "/api/owner/enter";
+      var form = document.getElementById("ownerForm");
+      var msg = document.getElementById("msg");
+      var submitBtn = document.getElementById("submitBtn");
+      function say(t, k) { msg.textContent = t; msg.className = "auth-msg" + (k ? " " + k : ""); }
+      function valid(e) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e); }
+
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var email = document.getElementById("email").value.trim();
+        var password = document.getElementById("password").value;
+        if (!valid(email)) return say("Enter a valid email.", "err");
+        submitBtn.disabled = true;
+        say("Signing you in…", "busy");
+        fetch(API + "/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ email: email, password: password }),
+        }).then(function (r) {
+          return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || ("http_" + r.status)); return d; });
+        }).then(function (auth) {
+          try {
+            localStorage.setItem("ros_session", auth.token || (auth.session && auth.session.token) || "");
+            localStorage.setItem("ros_ctx", JSON.stringify(auth));
+          } catch (x) {}
+          say("Opening the Owner Console…", "okk");
+          setTimeout(function () { location.href = OWNER_CONSOLE; }, 400);
+        }).catch(function (err) {
+          var m = String(err.message || "");
+          if (/Failed to fetch|NetworkError/.test(m)) say("Can't reach the server. Check your connection.", "err");
+          else if (/invalid_credentials/.test(m)) say("Email or password is incorrect.", "err");
+          else say("Sign-in failed. Please try again.", "err");
+          submitBtn.disabled = false;
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

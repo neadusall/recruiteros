@@ -58,6 +58,7 @@ async function hydrate(): Promise<void> {
         // Mirror every saved key into the running process so the engine's
         // provider singletons pick them up on boot (single-operator runtime).
         for (const w of Object.values(store)) {
+          if (!shouldMirror(w.workspaceId)) continue; // never pollute env with a customer's keys
           for (const c of Object.values(w.integrations)) {
             if (c) applyEnv(c.keys);
           }
@@ -72,6 +73,23 @@ async function hydrate(): Promise<void> {
 function ws(workspaceId: string): WorkspaceCreds {
   if (!store[workspaceId]) store[workspaceId] = { workspaceId, integrations: {} };
   return store[workspaceId];
+}
+
+/**
+ * Should this workspace's keys be mirrored into the global process.env?
+ *
+ * Mirroring is how the always-on engine (crons/sends) picks up portal-saved keys
+ * off the provider singletons. In a white-label world that global is the HOUSE
+ * (operator) channel — a customer's keys must NOT pollute it (or they'd leak into
+ * other workspaces' env-fallback sends).
+ *
+ *  - HOUSE_WORKSPACE_ID set  -> mirror ONLY that workspace (strict isolation).
+ *  - HOUSE_WORKSPACE_ID unset -> mirror all (legacy single-operator behaviour, so
+ *    the operator's existing setup keeps working until they opt into isolation).
+ */
+function shouldMirror(workspaceId: string): boolean {
+  const houseId = (process.env.HOUSE_WORKSPACE_ID || "").trim();
+  return houseId ? workspaceId === houseId : true;
 }
 
 /** Mirror non-empty keys into process.env for the running instance. */
@@ -105,7 +123,7 @@ export async function saveKeys(
   cfg.error = undefined;
   cfg.updatedAt = nowIso();
   w.integrations[id] = cfg;
-  applyEnv(cfg.keys);
+  if (shouldMirror(workspaceId)) applyEnv(cfg.keys); // house only — keep customer keys out of global env
   save();
   return cfg;
 }

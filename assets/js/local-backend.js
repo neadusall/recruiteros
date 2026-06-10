@@ -353,6 +353,13 @@
       });
       d._recruiterSeqsSeeded = true; changed = true;
     }
+    // Swap the old simple integration list for the full step-by-step catalog
+    // (LinkedIn Automation managed, no SalesRobot) on pre-existing sessions.
+    if (!d._connectedCatalogV2) {
+      d.connected = connectedCatalog();
+      d.connectedKeys = {};
+      d._connectedCatalogV2 = true; changed = true;
+    }
     return changed;
   }
   function currentUser() {
@@ -411,6 +418,25 @@
         save(d);
       }
       return ok({ ostext: d.ostext });
+    }
+
+    // --- White-label branding: per-workspace logo / brand name / custom domain.
+    //     Persisted in the local DB so a swapped logo survives reloads with no
+    //     server running (mirrors lib/branding on the real backend). ---
+    if (p === "/branding") {
+      d.branding = d.branding || { workspaceId: (d.workspace && d.workspace.id) || "ws_local", domainStatus: "none" };
+      if (method === "POST" && body) {
+        if (body.action === "reset") {
+          d.branding = { workspaceId: d.branding.workspaceId, domainStatus: "none" };
+        } else {
+          ["logoUrl", "brandName", "customDomain"].forEach(function (k) {
+            if (typeof body[k] === "string") d.branding[k] = body[k].trim() || undefined;
+          });
+          if (!d.branding.customDomain) d.branding.domainStatus = "none";
+        }
+        save(d);
+      }
+      return ok({ branding: d.branding });
     }
 
     // --- In-Market Leads: who is hiring right now (search + promote) ---
@@ -747,10 +773,33 @@
       return ok(d.accounts);
     }
     if (p === "/connected") {
-      if (method === "POST" && body && body.action === "test") {
+      d.connected = d.connected || connectedCatalog();
+      d.connectedKeys = d.connectedKeys || {};
+      if (method === "POST" && body) {
         var hit = d.connected.filter(function (i) { return i.id === body.id; })[0];
-        if (hit && hit.status !== "green") { hit.status = "green"; delete hit.error; save(d); }
-        return ok({ tested: body.id });
+        if (body.action === "save" && hit) {
+          var store = d.connectedKeys[hit.id] = d.connectedKeys[hit.id] || {};
+          var keys = body.keys || {};
+          for (var k in keys) { if (Object.prototype.hasOwnProperty.call(keys, k) && keys[k]) store[k] = keys[k]; }
+          var fieldKeys = (hit.fields || []).map(function (f) { return f.key; });
+          hit.present = fieldKeys.filter(function (fk) { return !!store[fk]; });
+          var reqd = (hit.fields || []).filter(function (f) { return f.required; }).map(function (f) { return f.key; });
+          var allReq = reqd.every(function (fk) { return !!store[fk]; });
+          if (hit.status === "red" && (allReq || reqd.length === 0)) hit.status = "yellow";
+          delete hit.error; save(d);
+          return ok({ saved: true, status: hit.status });
+        }
+        if (body.action === "test" && hit) {
+          // Demo: a saved (or managed/no-key) integration verifies green.
+          hit.status = "green"; delete hit.error; save(d);
+          return ok({ result: { status: "green" } });
+        }
+        if (body.action === "disconnect" && hit) {
+          delete d.connectedKeys[hit.id]; hit.present = []; hit.status = "red"; delete hit.error; save(d);
+          return ok({ disconnected: true });
+        }
+        // Back-compat: bare test action.
+        if (body.action === "test") return ok({ result: { status: "green" } });
       }
       return ok({ integrations: d.connected });
     }

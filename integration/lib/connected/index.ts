@@ -21,6 +21,7 @@ import { nowIso } from "../core/ids";
 import { getProvider, providerStatuses } from "../providers";
 import { runWithCreds } from "../providers/http";
 import { saveKeys as storeSaveKeys, markTested, clearKeys, getKeys, resolvedKeys, statusOf } from "./credentials";
+import { isHouseWorkspace, isGranted, listGrants } from "./access";
 import type { Motion } from "../core/types";
 
 export type IntegrationId =
@@ -63,6 +64,10 @@ export interface Integration extends IntegrationMeta {
   present: string[];
   lastTestedAt?: string;
   error?: string;
+  /** How this workspace reaches the key: house env, own saved, operator-granted, or none. */
+  access: "house" | "own" | "granted" | "none";
+  /** True when the operator has granted this customer house-key access (billable). */
+  granted: boolean;
 }
 
 /**
@@ -190,26 +195,70 @@ function requiredKeys(id: IntegrationId): string[] {
   return (META_BY_ID.get(id)?.fields ?? []).filter((f) => f.required).map((f) => f.key);
 }
 
+/**
+ * The keys a workspace may actually use, and whether to run isolated. House
+ * workspace = its own saved keys with the normal env fallback. Customer = its
+ * own saved keys PLUS the house env keys for any integration the operator has
+ * granted, run isolated so nothing else leaks from env.
+ */
+export async function effectiveKeysFor(
+  workspaceId: string,
+): Promise<{ keys: Record<string, string>; isolated: boolean }> {
+  const own = await resolvedKeys(workspaceId);
+  if (isHouseWorkspace(workspaceId)) return { keys: own, isolated: false };
+  const keys: Record<string, string> = { ...own };
+  for (const id of await listGrants(workspaceId)) {
+    const meta = META_BY_ID.get(id);
+    if (!meta) continue;
+    for (const f of meta.fields) {
+      const houseVal = process.env[f.key];
+      if (!keys[f.key] && houseVal) keys[f.key] = houseVal; // lend the house key
+    }
+  }
+  return { keys, isolated: true };
+}
+
+/**
+ * Run `fn` with this workspace's effective, isolation-correct credentials. The
+ * single helper every workspace-scoped engine path (sends, crons, tests) should
+ * adopt so a customer can never ride the operator's keys uninvited.
+ */
+export async function withWorkspaceCreds<T>(
+  workspaceId: string,
+  fn: () => T | Promise<T>,
+): Promise<T> {
+  const { keys, isolated } = await effectiveKeysFor(workspaceId);
+  return await runWithCreds(keys, fn, { isolated });
+}
+
 /** Build the full per-integration view (metadata + live status) for a workspace. */
 export async function listIntegrations(workspaceId: string): Promise<Integration[]> {
   const out: Integration[] = [];
+  const house = isHouseWorkspace(workspaceId);
   for (const meta of CATALOG) {
     const saved = await statusOf(workspaceId, meta.id);
     const keys = await getKeys(workspaceId, meta.id);
-    // Env-configured (server secret) counts as present/connected even with no
-    // portal-saved key, so existing deployments keep their green lights.
-    const envOk = requiredKeys(meta.id).every((k) => Boolean(process.env[k]));
+    const granted = !house && (await isGranted(workspaceId, meta.id));
+    // The house keys (process.env) count as present ONLY for the house workspace
+    // or a customer the operator has granted this integration to. A plain
+    // customer must save its own key — it never inherits the operator's.
+    const mayUseEnv = house || granted;
+    const envOk = mayUseEnv && requiredKeys(meta.id).every((k) => Boolean(process.env[k]));
     const present = meta.fields
       .map((f) => f.key)
-      .filter((k) => Boolean(keys[k]) || Boolean(process.env[k]));
+      .filter((k) => Boolean(keys[k]) || (mayUseEnv && Boolean(process.env[k])));
     let status: ConnStatus = saved?.status ?? (envOk ? "yellow" : "red");
     if (!saved && envOk) status = "yellow";
+    const ownKeyPresent = meta.fields.some((f) => Boolean(keys[f.key]));
+    const access: Integration["access"] = house ? "house" : granted ? "granted" : ownKeyPresent ? "own" : "none";
     out.push({
       ...meta,
       status,
       present,
       lastTestedAt: saved?.lastTestedAt,
       error: saved?.error,
+      access,
+      granted,
     });
   }
   return out;
@@ -243,7 +292,9 @@ export async function testConnection(
   id: IntegrationId,
 ): Promise<{ status: ConnStatus; error?: string } | null> {
   if (!META_BY_ID.has(id)) return null;
-  const keys = await resolvedKeys(workspaceId);
+  // Isolation-correct keys: a customer tests only against its own (or granted)
+  // keys, never the operator's env. `isolated` suppresses the env fallback.
+  const { keys, isolated } = await effectiveKeysFor(workspaceId);
 
   // Make sure a stored row exists so the test result persists — including for
   // env-configured or Loxo setups that were never saved through the portal.
@@ -253,7 +304,9 @@ export async function testConnection(
 
   // Loxo verifies via its ATS adapter; here we just reflect whether a key exists.
   if (id === "loxo") {
-    const ok = Boolean(keys.LOXO_API_KEY || process.env.LOXO_API_KEY);
+    // env counts only when not isolated (house); a granted customer has the key
+    // lent into `keys` already, so this still passes for them.
+    const ok = Boolean(keys.LOXO_API_KEY) || (!isolated && Boolean(process.env.LOXO_API_KEY));
     await ensureRow();
     await markTested(workspaceId, id, ok, ok ? undefined : "connect_on_ats_tab");
     return { status: ok ? "green" : "yellow", error: ok ? undefined : "connect_on_ats_tab" };
@@ -276,7 +329,7 @@ export async function testConnection(
     await ensureRow();
     const cred = await markTested(workspaceId, id, result.ok, result.error);
     return { status: cred?.status ?? (result.ok ? "green" : "yellow"), error: result.ok ? undefined : result.error };
-  });
+  }, { isolated });
 }
 
 /**
