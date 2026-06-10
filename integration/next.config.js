@@ -16,6 +16,12 @@ module.exports = {
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
 
+  // Run instrumentation.ts on server boot (Next 14 needs this flag) so the Hire Signals
+  // background accumulator self-starts every deploy without waiting for a first request.
+  // instrumentation.ts guards its node-only import behind NEXT_RUNTIME === "nodejs", so the
+  // edge compile dead-code-eliminates it (no pg / node:crypto in the edge bundle).
+  experimental: { instrumentationHook: true },
+
   // Serve clean URLs: /login renders public/login.html, address bar stays clean.
   async rewrites() {
     const pageRewrites = PAGES.filter((p) => p !== "index").map((p) => ({

@@ -158,6 +158,25 @@ export async function purgeNonUsFromPool(): Promise<number> {
   return removed;
 }
 
+/** Drop every pool company we've authoritatively confirmed exceeds the employee cap (keys
+ *  from companySize.oversizedCompanyKeys). Keeps the pool SMB/mid-market and frees slots for
+ *  companies actually worth pursuing. Returns how many were removed. No-op without a DB. */
+export async function purgeOversizedFromPool(oversizedKeys: Set<string>): Promise<number> {
+  if (!oversizedKeys.size) return 0;
+  const pool = await load();
+  if (!pool.length) return 0;
+  const kept = pool.filter((e) => !oversizedKeys.has(keyOf(e.lead)));
+  const removed = pool.length - kept.length;
+  if (removed > 0) {
+    await saveSnapshot(KEY, kept);
+    // Keep the activity stats' total honest after the purge.
+    const s = (await loadSnapshot<PoolStats>(STATS_KEY)) || { total: 0, lastAddedAt: null, days: {} };
+    s.total = kept.length;
+    await saveSnapshot(STATS_KEY, s);
+  }
+  return removed;
+}
+
 /** Best-effort ATS/GitHub slug from a company display name: lowercased, legal suffixes
  *  stripped, punctuation removed. e.g. "Stripe, Inc." -> "stripe". Not guaranteed to be a
  *  real slug — the seeded sources fail gracefully on a miss — but resolves the common case
@@ -191,7 +210,7 @@ export async function poolCompanyNames(offset: number, limit: number): Promise<{
 
 /** Companies whose full ATS board we haven't pulled yet (or not in `staleMs`), highest-
  *  scored first — the background board-expansion works through these. */
-export async function poolCompaniesToExpand(limit: number, staleMs: number): Promise<Array<{ company: string; domain?: string }>> {
+export async function poolCompaniesToExpand(limit: number, staleMs: number, excludeKeys?: Set<string>): Promise<Array<{ company: string; domain?: string }>> {
   const now = Date.now();
   const pool = (await load()).sort((a, b) => (b.lead.score ?? 0) - (a.lead.score ?? 0));
   const out: Array<{ company: string; domain?: string }> = [];
@@ -199,6 +218,10 @@ export async function poolCompaniesToExpand(limit: number, staleMs: number): Pro
     const at = e.lead.boardExpandedAt ? Date.parse(e.lead.boardExpandedAt) : 0;
     if (at && now - at < staleMs) continue;           // recently expanded → skip
     if (!e.lead.company) continue;
+    // SMB priority: don't spend the expensive full-board pull on companies we've confirmed
+    // are over the employee cap — they're about to be purged anyway. Expansion effort goes
+    // to SMB/mid-market and not-yet-sized companies first.
+    if (excludeKeys?.has(keyOf(e.lead))) continue;
     out.push({ company: e.lead.company, domain: e.lead.domain });
     if (out.length >= limit) break;
   }

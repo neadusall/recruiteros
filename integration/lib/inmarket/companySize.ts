@@ -26,6 +26,11 @@ const FRESH_MS = 60 * 24 * 60 * 60 * 1000;   // re-check a known size after 60 d
 const NEG_MS = 14 * 24 * 60 * 60 * 1000;     // re-try an unresolved company after 14 days
 const UA = "RecruiterOS/1.0 (https://recruitersos.co)";
 
+/** Employee ceiling for the pool: we don't pursue enterprises bigger than this (SMB/mid-
+ *  market focus). Enforced on AUTHORITATIVE counts only — a company is excluded only when we
+ *  can positively confirm it's too big, never on a heuristic estimate. */
+export const MAX_EMPLOYEES = 5_000;
+
 interface SizeEntry { band: Band | null; count?: number; src: "wikidata" | "none"; at: number }
 type SizeMap = Record<string, SizeEntry>;
 
@@ -67,6 +72,19 @@ async function loadCache(): Promise<SizeMap> {
 /** The current size cache (company → band/count), for the search path to apply synchronously. */
 export async function loadSizeMap(): Promise<SizeMap> {
   return loadCache().catch(() => ({}));
+}
+
+/** Company keys (lowercased names) we've AUTHORITATIVELY confirmed exceed the employee cap,
+ *  so the accumulator can purge them from the pool. Heuristic estimates are never included —
+ *  only real Wikidata counts above `max`. Keys match pool keyOf() (lowercased company name). */
+export async function oversizedCompanyKeys(max = MAX_EMPLOYEES): Promise<Set<string>> {
+  const cache = await loadCache().catch(() => ({} as SizeMap));
+  const out = new Set<string>();
+  for (const k of Object.keys(cache)) {
+    const e = cache[k];
+    if (e && e.src === "wikidata" && typeof e.count === "number" && e.count > max) out.add(k);
+  }
+  return out;
 }
 
 async function getJson<T>(url: string): Promise<T | null> {
