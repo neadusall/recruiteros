@@ -184,8 +184,10 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .matrix td .acts { color: var(--text-muted); font-size: 12.5px; }
 
 /* Dashboard drill-downs: back link, capacity bars, email-auth pills */
-.back-link { color: var(--text-muted); cursor: pointer; text-decoration: none; }
-.back-link:hover { color: var(--brand); }
+.back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text); cursor: pointer; text-decoration: none; font-weight: 600; font-size: 13px; padding: 5px 12px 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); transition: background .12s, border-color .12s, color .12s; }
+.back-link .arr { font-size: 15px; line-height: 1; transition: transform .12s; }
+.back-link:hover { color: var(--brand); border-color: var(--brand); background: var(--surface); }
+.back-link:hover .arr { transform: translateX(-3px); }
 .cap-bar { height: 5px; border-radius: 3px; background: var(--surface-2); margin-top: 6px; overflow: hidden; }
 .cap-fill { height: 100%; border-radius: 3px; }
 .cap-fill.green { background: var(--accent-green); }
@@ -194,6 +196,54 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .auth { display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; padding: 1px 5px; border-radius: 5px; }
 .auth.ok { color: var(--accent-green); background: rgba(34, 197, 94, 0.12); }
 .auth.bad { color: var(--accent-red); background: rgba(239, 68, 68, 0.12); }
+
+/* Analytics drill-downs: clickable KPIs, campaign chips, conversation threads */
+.rstat.clickable { cursor: pointer; position: relative; transition: transform .12s ease, border-color .12s ease, background .12s ease; }
+.rstat.clickable:hover { transform: translateY(-2px); border-color: var(--brand); background: var(--surface-2); }
+.rstat.clickable::after { content: "→"; position: absolute; right: 16px; top: 16px; color: var(--text-dim); opacity: 0; transition: opacity .12s ease; font-size: 15px; }
+.rstat.clickable:hover::after { opacity: 1; }
+.an-more { color: var(--text-muted); text-decoration: none; }
+.an-more:hover { color: var(--brand); }
+.an-camp { color: var(--brand); text-decoration: none; font-weight: 600; cursor: pointer; }
+.an-camp:hover { text-decoration: underline; }
+.cls-pill { font-size: 10px; font-weight: 700; letter-spacing: .03em; padding: 1px 6px; border-radius: 999px; vertical-align: middle; color: var(--text-muted); background: var(--surface-2); }
+.cls-pill.positive { color: var(--accent-green); background: rgba(34, 197, 94, 0.12); }
+.cls-pill.referral { color: var(--brand); background: rgba(124, 140, 255, 0.14); }
+.cls-pill.soft_yes { color: var(--accent-amber); background: rgba(245, 158, 11, 0.14); }
+.an-conv { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; background: var(--surface); }
+.an-conv-head { display: flex; align-items: center; gap: 10px; }
+.an-conv-body { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.an-msg { font-size: 13px; line-height: 1.45; padding: 7px 11px; border-radius: 10px; max-width: 80%; }
+.an-msg-at { display: block; font-size: 10.5px; color: var(--text-dim); margin-bottom: 2px; }
+.an-msg.out { align-self: flex-start; background: var(--surface-2); color: var(--text-muted); border-bottom-left-radius: 3px; }
+.an-msg.in { align-self: flex-end; background: rgba(124, 140, 255, 0.12); color: var(--text); border-bottom-right-radius: 3px; }
+
+/* ---- Dashboard motion & polish ---- */
+/* Staggered entrance for the Dashboard (renders once per nav, so no replay jank;
+   Analytics auto-refreshes, so it deliberately stays out of this). */
+@keyframes ovRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+#ovBody .stat, #ovBody .two-col > .card { animation: ovRise .5s cubic-bezier(.2,.8,.2,1) both; }
+#ovBody .stat-grid .stat:nth-child(1) { animation-delay: .04s; }
+#ovBody .stat-grid .stat:nth-child(2) { animation-delay: .10s; }
+#ovBody .stat-grid .stat:nth-child(3) { animation-delay: .16s; }
+#ovBody .stat-grid .stat:nth-child(4) { animation-delay: .22s; }
+#ovBody .two-col > .card:nth-child(1) { animation-delay: .26s; }
+#ovBody .two-col > .card:nth-child(2) { animation-delay: .32s; }
+/* A faint always-on gradient accent on the capacity strip so it reads as "live". */
+#ovBody .stat-grid:first-child .stat::before { opacity: .5; }
+
+/* Capacity bars grow from the left on render (works for any target width). */
+.cap-fill { transform-origin: left center; animation: capGrow .7s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes capGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* Health dots pulse when not green — pulls the eye straight to what needs action. */
+@keyframes ragPulse { 0% { box-shadow: 0 0 0 0 currentColor; } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.rag.red { color: var(--accent-red); animation: ragPulse 1.8s infinite; }
+.rag.yellow { color: var(--accent-amber); animation: ragPulse 2.6s infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  #ovBody .stat, #ovBody .two-col > .card, .cap-fill, .rag.red, .rag.yellow { animation: none; }
+}
 
 /* phase checklist (Outreach) */
 .phase { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; background: var(--surface); }

@@ -32,92 +32,54 @@
       user: { id: "u_local", name: name, email: email },
       workspace: { id: "ws_local", name: company + " Talent", plan: "Trial" },
       capabilities: ["accounts:manage", "integrations:manage", "ats:manage", "team:manage"],
+      // Outcome fields only. The Dashboard's capacity strip + per-item drill-downs
+      // (LinkedIn accounts, domains, mailboxes, LinkedIn capacity) are computed
+      // live from the account pools in buildOverview(), so adding accounts/domains
+      // flows straight through. These fields feed Analytics + the active-campaigns
+      // list and pass through buildOverview() untouched.
       overview: {
-        capacity: [
-          { label: "LinkedIn accounts", value: 4, status: "green", detail: "linkedin-accounts" },
-          { label: "Sending domains", value: 6, status: "green", detail: "sending-domains" },
-          { label: "Email capacity/day", value: "420/day", status: "yellow", detail: "email-capacity" },
-          { label: "LinkedIn capacity/day", value: "180/day", status: "green", detail: "linkedin-capacity" }
-        ],
         activeProspects: 148, appointmentsToday: 3, appointmentsThisWeek: 14,
-        warmConversationsToday: 9, wonAccounts: 3,
+        warmConversationsToday: 9, wonAccounts: 3, repliesAwaiting: 7,
         recentAppointments: [
-          { name: "Marco Silva", channel: "SMS", at: "Today 10:15" },
-          { name: "Anja Köhler", channel: "LinkedIn", at: "Today 09:40" },
-          { name: "Priya Nair", channel: "Email", at: "Yesterday 16:20" }
+          { name: "Marco Silva", company: "N26", channel: "SMS", at: "Today 10:15", owner: "Ana Brandt", campaign: "Senior React · Berlin" },
+          { name: "Anja Köhler", company: "Trade Republic", channel: "LinkedIn", at: "Today 09:40", owner: "Ana Brandt", campaign: "Senior React · Berlin" },
+          { name: "Rahel Adler", company: "Solaris", channel: "Email", at: "Yesterday 16:20", owner: "Leo Marsh", campaign: "Series B fintech eng" }
         ],
         activeDrips: [
-          { name: "Senior React · Berlin", stage: "Touch 3 of 6" },
-          { name: "Series B fintech · BD", stage: "Touch 2 of 5" },
-          { name: "ICU nurses · contract", stage: "Touch 1 of 4" }
-        ],
-
-        // --- Dashboard drill-downs (per-item breakdowns behind each card) ---
-        // Individual LinkedIn accounts and their per-account daily health.
-        linkedinAccounts: [
-          { name: "Ana Brandt", recruiter: "Ana Brandt", status: "active", connectsUsed: 18, connectCap: 20, viewsUsed: 32, viewCap: 60, acceptance: 41, health: "green" },
-          { name: "Tom Vogel", recruiter: "Tom Vogel", status: "active", connectsUsed: 19, connectCap: 20, viewsUsed: 51, viewCap: 60, acceptance: 38, health: "green" },
-          { name: "Priya Nair", recruiter: "Priya Nair", status: "warming", connectsUsed: 8, connectCap: 12, viewsUsed: 14, viewCap: 30, acceptance: 29, health: "yellow" },
-          { name: "Leo Marsh", recruiter: "Leo Marsh", status: "active", connectsUsed: 20, connectCap: 20, viewsUsed: 47, viewCap: 60, acceptance: 44, health: "green" }
-        ],
-        // Individual sending domains, auth posture and reputation.
-        sendingDomains: [
-          { domain: "talent-os.co", status: "active", mailboxes: 4, reputation: 96, spf: true, dkim: true, dmarc: true, sentToday: 140, cap: 160, health: "green" },
-          { domain: "talent-os.io", status: "active", mailboxes: 3, reputation: 92, spf: true, dkim: true, dmarc: true, sentToday: 96, cap: 120, health: "green" },
-          { domain: "os-talent.com", status: "active", mailboxes: 3, reputation: 88, spf: true, dkim: true, dmarc: false, sentToday: 84, cap: 120, health: "yellow" },
-          { domain: "reachos.co", status: "active", mailboxes: 2, reputation: 90, spf: true, dkim: true, dmarc: true, sentToday: 60, cap: 80, health: "green" },
-          { domain: "reachos.io", status: "warming", mailboxes: 2, reputation: 71, spf: true, dkim: true, dmarc: true, sentToday: 18, cap: 40, health: "yellow" },
-          { domain: "getreachos.com", status: "warming", mailboxes: 2, reputation: 64, spf: true, dkim: false, dmarc: false, sentToday: 12, cap: 40, health: "red" }
-        ],
-        // Individual mailboxes — daily email capacity = sum of caps; health per box.
-        mailboxes: [
-          { address: "ana@talent-os.co", domain: "talent-os.co", dailyCap: 40, sentToday: 36, warmup: 95, deliverability: 98, health: "green" },
-          { address: "tom@talent-os.co", domain: "talent-os.co", dailyCap: 40, sentToday: 38, warmup: 93, deliverability: 97, health: "green" },
-          { address: "hello@talent-os.io", domain: "talent-os.io", dailyCap: 40, sentToday: 31, warmup: 90, deliverability: 96, health: "green" },
-          { address: "team@os-talent.com", domain: "os-talent.com", dailyCap: 40, sentToday: 28, warmup: 82, deliverability: 91, health: "yellow" },
-          { address: "priya@reachos.co", domain: "reachos.co", dailyCap: 40, sentToday: 30, warmup: 88, deliverability: 95, health: "green" },
-          { address: "leo@reachos.io", domain: "reachos.io", dailyCap: 20, sentToday: 9, warmup: 58, deliverability: 84, health: "yellow" },
-          { address: "growth@getreachos.com", domain: "getreachos.com", dailyCap: 20, sentToday: 6, warmup: 41, deliverability: 76, health: "red" }
-        ],
-        // Team-wide LinkedIn capacity (connection requests + profile views).
-        linkedinCapacity: {
-          connectsUsed: 65, connectTotal: 72, viewsUsed: 144, viewTotal: 210,
-          byAccount: [
-            { name: "Ana Brandt", connects: 18, connectCap: 20, views: 32, viewCap: 60 },
-            { name: "Tom Vogel", connects: 19, connectCap: 20, views: 51, viewCap: 60 },
-            { name: "Priya Nair", connects: 8, connectCap: 12, views: 14, viewCap: 30 },
-            { name: "Leo Marsh", connects: 20, connectCap: 20, views: 47, viewCap: 60 }
-          ]
-        },
-        // Active prospects being marketed to, grouped by recruiter campaign.
-        prospectCampaigns: [
-          { name: "Senior React · Berlin", recruiter: "Ana Brandt", motion: "recruiting", active: 42, channel: "Email + LinkedIn", stage: "Live" },
-          { name: "ICU nurses · contract", recruiter: "Priya Nair", motion: "recruiting", active: 30, channel: "SMS + Email", stage: "Live" },
-          { name: "Staff Eng · remote", recruiter: "Tom Vogel", motion: "recruiting", active: 28, channel: "LinkedIn", stage: "Live" },
-          { name: "Series B fintech · BD", recruiter: "Leo Marsh", motion: "bd", active: 26, channel: "Email", stage: "Live" },
-          { name: "DevOps · Munich", recruiter: "Ana Brandt", motion: "recruiting", active: 22, channel: "Email + LinkedIn", stage: "Paused" }
-        ],
-        // Today's booked meetings (Appointments today drill-down).
-        appointmentsTodayList: [
-          { name: "Marco Silva", channel: "SMS", at: "Today 10:15", recruiter: "Ana Brandt", campaign: "Senior React · Berlin" },
-          { name: "Anja Köhler", channel: "LinkedIn", at: "Today 09:40", recruiter: "Tom Vogel", campaign: "Staff Eng · remote" },
-          { name: "Dlamini Okeke", channel: "Email", at: "Today 08:30", recruiter: "Priya Nair", campaign: "ICU nurses · contract" }
+          { name: "Senior React · Berlin", recruiter: "Ana Brandt", stage: "Touch 3 of 6" },
+          { name: "Series B fintech · BD", recruiter: "Leo Marsh", stage: "Touch 2 of 5" },
+          { name: "ICU nurses · contract", recruiter: "Priya Nair", stage: "Touch 1 of 4" }
         ]
       },
+      // `owner` (the recruiter who runs the campaign) + `source` (the campaign)
+      // let Analytics drill-downs trace each warm conversation back to a specific
+      // recruiter's campaign. `thread` powers the "dive deeper" conversation view.
       response: [
-        { id: "r1", name: "Marco Silva", channel: "sms", source: "Senior React", cls: "positive", text: "Yeah, Thursday afternoon works.", actions: ["Routed to you", "Suggest times"] },
-        { id: "r2", name: "Rahel Adler", channel: "email", source: "Series B fintech", cls: "soft_yes", text: "Interesting, can you send details?", actions: ["AI replied", "Awaiting"] },
-        { id: "r3", name: "Jonas Klein", channel: "linkedin", source: "Staff eng", cls: "timing", text: "Not now, maybe Q3.", actions: ["Nurture", "Snooze 60d"] },
-        { id: "r4", name: "Priya Das", channel: "email", source: "ICU nurses", cls: "referral", text: "Not me, but talk to my colleague Sam.", actions: ["New prospect", "Thank"] },
-        { id: "r5", name: "Tom Berg", channel: "linkedin", source: "Senior React", cls: "fit", text: "Happy where I am, thanks.", actions: ["Close lost"] }
+        { id: "r1", name: "Marco Silva", channel: "sms", source: "Senior React · Berlin", owner: "Ana Brandt", cls: "positive", text: "Yeah, Thursday afternoon works.", actions: ["Routed to you", "Suggest times"],
+          thread: [
+            { from: "out", at: "Mon 09:12", text: "Hi Marco — building a staff frontend team in Berlin, your Trade Republic work stood out. Open to a quick chat this week?" },
+            { from: "in", at: "Mon 14:30", text: "Yeah, Thursday afternoon works." }
+          ] },
+        { id: "r2", name: "Rahel Adler", channel: "email", source: "Series B fintech eng", owner: "Leo Marsh", cls: "soft_yes", text: "Interesting, can you send details?", actions: ["AI replied", "Awaiting"],
+          thread: [
+            { from: "out", at: "Tue 08:00", text: "Rahel — a Series B fintech is hiring senior eng, comp band well above market. Worth a look?" },
+            { from: "in", at: "Tue 11:48", text: "Interesting, can you send details?" }
+          ] },
+        { id: "r3", name: "Jonas Klein", channel: "linkedin", source: "Staff eng · platform", owner: "Tom Vogel", cls: "timing", text: "Not now, maybe Q3.", actions: ["Nurture", "Snooze 60d"] },
+        { id: "r4", name: "Priya Das", channel: "email", source: "Frontend leads · scaleups", owner: "Priya Nair", cls: "referral", text: "Not me, but talk to my colleague Sam.", actions: ["New prospect", "Thank"],
+          thread: [
+            { from: "out", at: "Wed 10:05", text: "Priya — a scaleup is after a frontend lead. Could be a fit?" },
+            { from: "in", at: "Wed 10:51", text: "Not me, but talk to my colleague Sam." }
+          ] },
+        { id: "r5", name: "Tom Berg", channel: "linkedin", source: "Senior React · Berlin", owner: "Ana Brandt", cls: "fit", text: "Happy where I am, thanks.", actions: ["Close lost"] }
       ],
       prospects: [
-        { id: "p1", fullName: "Anja Köhler", title: "Sr. Frontend", company: "Trade Republic", status: "in_sequence", dripStage: 3 },
-        { id: "p2", fullName: "Marco Silva", title: "Staff Eng", company: "N26", status: "discovery_booked", dripStage: 4 },
-        { id: "p3", fullName: "Lena Dietrich", title: "Frontend Lead", company: "Pitch", status: "replied", dripStage: 2 },
-        { id: "p4", fullName: "Tomas Berg", title: "Sr. React Dev", company: "Zalando", status: "queued", dripStage: 0 },
-        { id: "p5", fullName: "Yuki Tanaka", title: "Sr. SWE", company: "Delivery Hero", status: "in_sequence", dripStage: 1 },
-        { id: "p6", fullName: "Oskar Wendt", title: "Sr. React Eng", company: "SoundCloud", status: "placed", dripStage: 6 }
+        { id: "p1", fullName: "Anja Köhler", title: "Sr. Frontend", company: "Trade Republic", status: "in_sequence", dripStage: 3, campaign: "Senior React · Berlin", owner: "Ana Brandt" },
+        { id: "p2", fullName: "Marco Silva", title: "Staff Eng", company: "N26", status: "discovery_booked", dripStage: 4, campaign: "Senior React · Berlin", owner: "Ana Brandt" },
+        { id: "p3", fullName: "Lena Dietrich", title: "Frontend Lead", company: "Pitch", status: "replied", dripStage: 2, campaign: "Frontend leads · scaleups", owner: "Priya Nair" },
+        { id: "p4", fullName: "Tomas Berg", title: "Sr. React Dev", company: "Zalando", status: "queued", dripStage: 0, campaign: "Senior React · Berlin", owner: "Ana Brandt" },
+        { id: "p5", fullName: "Yuki Tanaka", title: "Sr. SWE", company: "Delivery Hero", status: "in_sequence", dripStage: 1, campaign: "Series B fintech eng", owner: "Leo Marsh" },
+        { id: "p6", fullName: "Oskar Wendt", title: "Sr. React Eng", company: "SoundCloud", status: "placed", dripStage: 6, campaign: "Staff eng · platform", owner: "Tom Vogel" }
       ],
       inmarket: inMarketSeed(),
       content: [
@@ -347,7 +309,7 @@
 
     // --- command center reads ---
     var d = db();
-    if (p === "/overview") return ok(d.overview);
+    if (p === "/overview") return ok(buildOverview(d));
     if (p === "/analytics") return ok(d.analytics || analyticsSeed(d.user && d.user.name));
     if (p === "/response/list") return ok({ items: d.response });
 
@@ -860,6 +822,89 @@
 
     return { ats: ats, sms: sms, enrichment: enrichment, jobSearch: jobSearch, domains: domains, linkedin: linkedin,
       preflight: { ok: blocking.length === 0, blocking: blocking } };
+  }
+
+  // The Dashboard reads its capacity strip + per-item drill-downs from THIS, and
+  // everything here is derived live from the same account pools the Accounts tab
+  // manages (d.accounts.linkedin / d.accounts.domains) plus the team. So adding a
+  // LinkedIn account, sending domain or recruiter immediately flows through to the
+  // Dashboard with no separate wiring. Outcome fields (pipeline, appointments,
+  // active campaigns) pass through from d.overview untouched — those feed Analytics.
+  function buildOverview(d) {
+    var ov = d.overview || {};
+    var locals = ["ana", "tom", "priya", "leo", "sam", "max", "mia", "noah"];
+
+    // LinkedIn accounts → per-account daily outreach health.
+    var liAccts = (d.accounts.linkedin || []).map(function (a) {
+      var flagged = a.warmup === "flagged", warmed = a.warmup === "warmed";
+      var connectCap = (a.quotas && a.quotas.connects) || (warmed ? 20 : 8);
+      var viewCap = (a.quotas && a.quotas.profileViews) || (warmed ? 60 : 30);
+      // Deterministic "used so far today" derived from caps (no RNG).
+      var connectsUsed = flagged ? 0 : Math.round(connectCap * (warmed ? 0.9 : 0.6));
+      var viewsUsed = flagged ? 0 : Math.round(viewCap * (warmed ? 0.75 : 0.45));
+      return { name: a.handle, recruiter: a.handle,
+        status: flagged ? "flagged" : warmed ? "active" : "warming",
+        connectsUsed: connectsUsed, connectCap: connectCap, viewsUsed: viewsUsed, viewCap: viewCap,
+        acceptance: flagged ? 0 : warmed ? 41 : 28,
+        health: flagged ? "red" : warmed ? "green" : "yellow" };
+    });
+
+    // Sending domains → auth posture + reputation, and the mailboxes inside them.
+    var domains = [], mailboxes = [];
+    (d.accounts.domains || []).forEach(function (x) {
+      var blocked = x.health === "blacklisted" || (x.bounceRate || 0) >= 0.02;
+      var healthy = x.health === "healthy";
+      var n = Math.max(1, x.inboxes || 1), cap = 0;
+      for (var i = 0; i < n; i++) {
+        var warm = healthy || i < Math.ceil(n / 2);
+        var mc = warm ? 40 : 20; cap += mc;
+        mailboxes.push({ address: locals[i % locals.length] + "@" + x.domain, domain: x.domain,
+          dailyCap: mc, sentToday: blocked ? 2 : Math.round(mc * (warm ? 0.85 : 0.4)),
+          warmup: blocked ? 30 : warm ? 95 : 60, deliverability: blocked ? 70 : warm ? 97 : 88,
+          health: blocked ? "red" : warm ? "green" : "yellow" });
+      }
+      domains.push({ domain: x.domain, status: blocked ? "blocked" : healthy ? "active" : "warming",
+        mailboxes: n, reputation: blocked ? 55 : healthy ? 94 : 72,
+        spf: true, dkim: !blocked, dmarc: healthy,
+        sentToday: Math.round(cap * (healthy ? 0.85 : blocked ? 0.08 : 0.4)), cap: cap,
+        health: blocked ? "red" : healthy ? "green" : "yellow" });
+    });
+
+    // Team-wide LinkedIn capacity (sum across accounts).
+    function sum(list, k) { return list.reduce(function (s, a) { return s + (a[k] || 0); }, 0); }
+    var linkedinCapacity = {
+      connectsUsed: sum(liAccts, "connectsUsed"), connectTotal: sum(liAccts, "connectCap"),
+      viewsUsed: sum(liAccts, "viewsUsed"), viewTotal: sum(liAccts, "viewCap"),
+      byAccount: liAccts.map(function (a) { return { name: a.name, connects: a.connectsUsed, connectCap: a.connectCap, views: a.viewsUsed, viewCap: a.viewCap }; })
+    };
+
+    // RAG for a capacity headline: green if all healthy, red if empty/all bad.
+    function ragOf(list) {
+      if (!list.length) return "red";
+      var g = list.filter(function (x) { return x.health === "green"; }).length;
+      var r = list.filter(function (x) { return x.health === "red"; }).length;
+      if (g === list.length) return "green";
+      if (g === 0 && r > 0) return "red";
+      return "yellow";
+    }
+    var emailCap = sum(mailboxes, "dailyCap");
+    var capacity = [
+      { label: "LinkedIn accounts", value: liAccts.length, status: ragOf(liAccts), detail: "linkedin-accounts" },
+      { label: "Sending domains", value: domains.length, status: ragOf(domains), detail: "sending-domains" },
+      { label: "Email capacity/day", value: emailCap + "/day", status: ragOf(mailboxes), detail: "email-capacity" },
+      { label: "LinkedIn capacity/day", value: linkedinCapacity.connectTotal + "/day", status: ragOf(liAccts), detail: "linkedin-capacity" }
+    ];
+
+    // Pass outcome fields through; overwrite the infra fields with the live ones.
+    var out = {};
+    for (var k in ov) { if (ov.hasOwnProperty(k)) out[k] = ov[k]; }
+    out.capacity = capacity;
+    out.linkedinAccounts = liAccts;
+    out.sendingDomains = domains;
+    out.mailboxes = mailboxes;
+    out.linkedinCapacity = linkedinCapacity;
+    out.sendsToday = sum(mailboxes, "sentToday");
+    return out;
   }
 
   function addAccount(d, body) {
