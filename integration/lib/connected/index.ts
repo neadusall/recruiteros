@@ -190,6 +190,12 @@ const CATALOG: IntegrationMeta[] = [
 
 const META_BY_ID = new Map(CATALOG.map((c) => [c.id, c]));
 
+/** The integrations an operator can resell (grant) to a customer. Excludes the
+ *  managed LinkedIn automation (no key — the house provides it regardless). */
+export function grantableIntegrations(): { id: IntegrationId; label: string }[] {
+  return CATALOG.filter((c) => c.id !== "unipile").map((c) => ({ id: c.id, label: c.label }));
+}
+
 /** Required key names for an integration (gate red -> yellow). */
 function requiredKeys(id: IntegrationId): string[] {
   return (META_BY_ID.get(id)?.fields ?? []).filter((f) => f.required).map((f) => f.key);

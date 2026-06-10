@@ -6207,7 +6207,9 @@
     { key: "email", label: "Email sending", icon: "✉️" },
     { key: "ats", label: "ATS", icon: "🗂️" },
     { key: "voicedrops", label: "Voice Drops", icon: "📞" },
-    { key: "vetting", label: "AI Vetting", icon: "☎️" }
+    { key: "vetting", label: "AI Vetting", icon: "☎️" },
+    { key: "branding", label: "Branding", icon: "🎨" },
+    { key: "domain", label: "Custom domain", icon: "🌐" }
   ];
 
   function setupStyles() {
@@ -6253,7 +6255,159 @@
     if (detail === "ats") return renderAts(body);
     if (detail === "voicedrops") return renderVoiceSetup(body, "voicedrops");
     if (detail === "vetting") return renderVoiceSetup(body, "vetting");
+    if (detail === "branding") return renderBranding(body);
+    if (detail === "domain") return renderDomain(body);
     return renderSetupOverview(body);
+  }
+
+  /* ---- Branding (admin): make the portal the customer's own ----
+     Logo, brand name and accent color, all writing the per-workspace branding
+     store. Changes apply to the live chrome immediately via __rosApplyBrand. */
+  function renderBranding(el) {
+    el.innerHTML = head("Branding",
+      "Make the portal yours — your logo, your name, your accent color. Your team and your customers see this everywhere, including your login page.") +
+      '<div id="brBody">' + loading() + '</div>';
+
+    function refreshChrome(b) { if (window.__rosApplyBrand) window.__rosApplyBrand(b || {}); }
+
+    function load() {
+      api("/branding").then(function (d) {
+        var b = (d && d.branding) || {};
+        var box = $("#brBody"); if (!box) return;
+        var accent = b.accentColor || "#7c5cff";
+        box.innerHTML = '<div class="card">' +
+          '<div class="cn-fld"><span class="lab">Brand name</span><input id="brName" type="text" placeholder="RecruitersOS" value="' + esc(b.brandName || "") + '"><span class="hint">Used as the wordmark when there\'s no logo, in the browser tab, and on your login page.</span></div>' +
+          '<div class="cn-fld"><span class="lab">Accent color</span><input id="brAccent" type="color" value="' + esc(accent) + '" style="width:56px;height:36px;padding:2px;cursor:pointer"><span class="hint">Primary color for buttons and highlights across the portal.</span></div>' +
+          '<div class="cn-fld"><span class="lab">Logo</span>' +
+          (b.logoUrl ? '<img src="' + esc(b.logoUrl) + '" style="max-height:40px;max-width:190px;object-fit:contain;display:block;margin-bottom:8px">' : '<div class="setup-metric" style="margin-bottom:8px">No custom logo — the RecruitersOS wordmark shows.</div>') +
+          '<label class="btn btn-sm" style="cursor:pointer">📤 Upload logo<input id="brLogo" type="file" accept="image/*" hidden></label></div>' +
+          '<div class="cn-acts"><button class="btn btn-primary btn-sm" id="brSave">Save branding</button><button class="btn btn-ghost btn-sm" id="brReset">Reset to RecruitersOS</button></div>' +
+          '<p class="cn-msg" id="brMsg"></p></div>';
+
+        var msg = $("#brMsg");
+        function say(t, kind) { if (msg) { msg.textContent = t; msg.style.color = kind === "err" ? "var(--accent-red)" : kind === "ok" ? "var(--accent-green)" : "var(--text-dim)"; } }
+
+        $("#brSave").addEventListener("click", function () {
+          var patch = { brandName: ($("#brName").value || "").trim(), accentColor: $("#brAccent").value };
+          say("Saving…");
+          send("/branding", "POST", patch).then(function (r) {
+            if (r && r.ok && r.data && r.data.branding) { refreshChrome(r.data.branding); toast("Branding saved"); load(); }
+            else say("Couldn't save branding.", "err");
+          }).catch(function () { say("Couldn't reach the server.", "err"); });
+        });
+
+        $("#brReset").addEventListener("click", function () {
+          if (!confirm("Reset to the default RecruitersOS branding?")) return;
+          send("/branding", "POST", { action: "reset" }).then(function (r) {
+            refreshChrome((r && r.data && r.data.branding) || {}); toast("Reset to RecruitersOS"); load();
+          });
+        });
+
+        var logo = $("#brLogo");
+        if (logo) logo.addEventListener("change", function () {
+          var f = logo.files && logo.files[0];
+          if (!f) return;
+          if (!/^image\//.test(f.type)) { say("Please choose an image file.", "err"); return; }
+          var reader = new FileReader();
+          reader.onload = function () {
+            var img = new Image();
+            img.onload = function () {
+              var maxW = 320, maxH = 96, scale = Math.min(maxW / img.width, maxH / img.height, 1);
+              var w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+              var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+              cv.getContext("2d").drawImage(img, 0, 0, w, h);
+              say("Uploading…");
+              send("/branding", "POST", { logoUrl: cv.toDataURL("image/png") }).then(function (r) {
+                if (r && r.ok && r.data && r.data.branding) { refreshChrome(r.data.branding); toast("Logo updated"); load(); }
+                else say(r && r.data && r.data.error === "logo_too_large" ? "That logo is too large — try a smaller image." : "Couldn't save the logo.", "err");
+              });
+            };
+            img.onerror = function () { say("That image couldn't be read.", "err"); };
+            img.src = reader.result;
+          };
+          reader.readAsDataURL(f);
+        });
+      }).catch(function () { var box = $("#brBody"); if (box) box.innerHTML = needsSetup(); });
+    }
+    load();
+  }
+
+  /* ---- Custom domain (admin): run the portal on the customer's own domain ----
+     Add a domain, publish two DNS records (CNAME to point traffic at us + a TXT
+     token to prove ownership), then Verify. The host->workspace serving + TLS is
+     wired at the edge/deploy layer; this screen owns the domain record + proof. */
+  function renderDomain(el) {
+    el.innerHTML = head("Custom domain",
+      "Run your portal on your own domain — your recruiters sign in at your URL, fully branded. Add it, drop in two DNS records, then Verify. Until then your workspace stays on the RecruitersOS host.") +
+      '<style>' +
+      '.dom-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}' +
+      '.dom-tbl th{text-align:left;color:var(--text-dim);font-weight:600;padding:6px 10px;border-bottom:1px solid var(--border)}' +
+      '.dom-tbl td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}' +
+      '.dom-tbl code{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--text);word-break:break-all}' +
+      '.dom-stat{font-size:11px;font-weight:700;padding:2px 10px;border-radius:999px}' +
+      '</style><div id="domBody">' + loading() + '</div>';
+
+    function pill(status) {
+      var map = { verified: ["ready", "Verified ✓"], live: ["ready", "Live"], pending: ["progress", "Pending DNS"], none: ["pending", "Not set"] };
+      var m = map[status] || map.none;
+      return '<span class="s-pill ' + m[0] + '" style="margin-left:auto">' + m[1] + '</span>';
+    }
+
+    function load() {
+      api("/branding/domain").then(function (d) {
+        var b = (d && d.branding) || {};
+        var ins = (d && d.instructions) || null;
+        var domain = b.customDomain || "";
+        var status = b.domainStatus || "none";
+        var dom = $("#domBody"); if (!dom) return;
+        var html = '<div class="card">' +
+          '<div class="cn-fld"><span class="lab">Your domain</span>' +
+          '<input id="domInput" type="text" placeholder="app.yourcompany.com" value="' + esc(domain) + '"></div>' +
+          '<div class="cn-acts">' +
+          '<button class="btn btn-primary btn-sm" id="domSave">' + (domain ? "Update domain" : "Add domain") + '</button>' +
+          (domain ? '<button class="btn btn-ghost btn-sm" id="domVerify">Verify DNS</button><button class="btn btn-ghost btn-sm danger" id="domRemove">Remove</button>' : "") +
+          pill(status) + '</div><p class="cn-msg" id="domMsg"></p></div>';
+        if (ins && ins.records && ins.records.length) {
+          html += '<div class="card" style="margin-top:12px"><b>DNS records to add</b>' +
+            '<p class="setup-desc">Add both at your DNS provider, then hit Verify DNS. (TXT records can take a few minutes to propagate.)</p>' +
+            '<table class="dom-tbl"><thead><tr><th>Type</th><th>Host / Name</th><th>Value</th></tr></thead><tbody>' +
+            ins.records.map(function (r) {
+              return '<tr><td><b>' + esc(r.type) + '</b></td><td><code>' + esc(r.host) + '</code></td><td><code>' + esc(r.value) + '</code><div class="setup-metric" style="margin-top:3px">' + esc(r.note) + '</div></td></tr>';
+            }).join("") + '</tbody></table></div>';
+        }
+        dom.innerHTML = html;
+
+        var msg = $("#domMsg");
+        function say(t, kind) { if (msg) { msg.textContent = t; msg.style.color = kind === "err" ? "var(--accent-red)" : kind === "ok" ? "var(--accent-green)" : "var(--text-dim)"; } }
+
+        var save = $("#domSave");
+        if (save) save.addEventListener("click", function () {
+          var v = ($("#domInput").value || "").trim();
+          if (!v) { say("Enter a domain first.", "err"); return; }
+          save.disabled = true; say("Saving…");
+          send("/branding/domain", "POST", { action: "set", domain: v }).then(function (r) {
+            if (r && r.ok) { toast("Domain added — add the DNS records below."); load(); }
+            else { say((r && r.data && r.data.error === "invalid_domain") ? "That doesn't look like a valid domain." : "Couldn't save the domain.", "err"); save.disabled = false; }
+          }).catch(function () { say("Couldn't reach the server.", "err"); save.disabled = false; });
+        });
+
+        var verify = $("#domVerify");
+        if (verify) verify.addEventListener("click", function () {
+          verify.disabled = true; say("Checking DNS…");
+          send("/branding/domain", "POST", { action: "verify" }).then(function (r) {
+            if (r && r.ok && r.data && r.data.verified) { toast("Domain verified ✓"); load(); }
+            else { say(r && r.data && r.data.error === "txt_not_found" ? "TXT record not found yet — add it and give DNS a few minutes." : "Couldn't verify yet. Check the records and retry.", "err"); verify.disabled = false; }
+          }).catch(function () { say("Couldn't reach the server.", "err"); verify.disabled = false; });
+        });
+
+        var remove = $("#domRemove");
+        if (remove) remove.addEventListener("click", function () {
+          if (!confirm("Remove this custom domain? Your portal goes back to the RecruitersOS host.")) return;
+          send("/branding/domain", "POST", { action: "remove" }).then(function () { toast("Domain removed"); load(); });
+        });
+      }).catch(function () { var b = $("#domBody"); if (b) b.innerHTML = needsSetup(); });
+    }
+    load();
   }
 
   /* ---- Voice setup (admin): telephony provider + cloned voice ----
@@ -7423,8 +7577,17 @@
           else word.innerHTML = 'Recruiters<span class="os">OS</span>';
         }
       }
+      // Accent color -> primary brand variable (recolors buttons, highlights, …).
+      var root = document.documentElement;
+      if (b.accentColor) root.style.setProperty("--brand", b.accentColor);
+      else root.style.removeProperty("--brand");
+      // Product name -> page title; logo -> favicon.
+      if (b.brandName) document.title = b.brandName + " · Command Center";
+      if (b.logoUrl) { var fav = document.querySelector('link[rel="icon"]'); if (fav) fav.setAttribute("href", b.logoUrl); }
     }
     function cache(b) { try { localStorage.setItem(CACHE, JSON.stringify(b || {})); } catch (e) {} }
+    // Let the Setup → Branding screen push live changes back to the chrome.
+    window.__rosApplyBrand = function (b) { render(b); cache(b); };
 
     // 1) Paint instantly from the last-known branding (no flash on reload).
     var cached = null; try { cached = JSON.parse(localStorage.getItem(CACHE) || "null"); } catch (e) {}

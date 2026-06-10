@@ -18,6 +18,7 @@
 import { nowIso, rid } from "../core/ids";
 import { getCore } from "../core/repository";
 import { telnyx } from "../providers";
+import { withWorkspaceCreds } from "../connected";
 import { classifyLine } from "../signals/phoneClassify";
 import { recordUsage } from "../billing/ledger";
 import { rateCost } from "../billing/rates";
@@ -204,9 +205,12 @@ export async function runDueDrops(
     }
 
     // Dial with Premium AMD; the webhook plays the playlist onto the voicemail.
-    const res: any = await telnyx.dialWithAmd(lead.phone, connectionId(), `${appUrl()}/api/voice/webhook`, {
-      workspaceId, motion: c.motion, campaignId, leadId: lead.id, ref: lead.prospectId,
-    });
+    // Isolation: a customer's drops dial through their own Telnyx, not the house env.
+    const res: any = await withWorkspaceCreds(workspaceId, () =>
+      telnyx.dialWithAmd(lead.phone, connectionId(), `${appUrl()}/api/voice/webhook`, {
+        workspaceId, motion: c.motion, campaignId, leadId: lead.id, ref: lead.prospectId,
+      }),
+    );
     if (res?.dryRun) sum.dryRun = true;
     const ccid = res?.data?.call_control_id ?? `dry_${rid("call")}`;
 
@@ -253,9 +257,11 @@ export async function testDrop(workspaceId: string, motion: Motion, input: TestD
   const segments = segmentScript(input.scriptTemplate, vars, input.persona);
   const drop = await assembleDrop(segments, input.voiceId, client);
 
-  const res: any = await telnyx.dialWithAmd(input.to, connectionId(), `${appUrl()}/api/voice/webhook`, {
-    workspaceId, motion, test: true,
-  });
+  const res: any = await withWorkspaceCreds(workspaceId, () =>
+    telnyx.dialWithAmd(input.to, connectionId(), `${appUrl()}/api/voice/webhook`, {
+      workspaceId, motion, test: true,
+    }),
+  );
   const ccid = res?.data?.call_control_id ?? `dry_${rid("call")}`;
   registerPending({
     callControlId: ccid, campaignId: "test", leadId: "test", workspaceId, motion,

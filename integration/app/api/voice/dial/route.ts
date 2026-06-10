@@ -15,6 +15,7 @@
 
 import { NextResponse } from "next/server";
 import { telnyx } from "../../../../lib/providers";
+import { withWorkspaceCreds } from "../../../../lib/connected";
 import { requireAuth } from "../../../../lib/linkedin/auth";
 
 function appUrl(): string {
@@ -52,12 +53,18 @@ export async function POST(req: Request) {
   if (body.motion) clientState.motion = body.motion;
   if (body.ref !== undefined) clientState.ref = body.ref;
 
-  const result: any = await telnyx.dialWithAmd(
-    body.to,
-    connectionId,
-    `${appUrl()}/api/voice/webhook`,
-    Object.keys(clientState).length ? clientState : undefined,
-  );
+  // Isolation: a customer's dial uses their own Telnyx, never the operator's env.
+  // No workspaceId (raw house/engine call) -> unisolated, unchanged behaviour.
+  const dial = () =>
+    telnyx.dialWithAmd(
+      body.to!,
+      connectionId,
+      `${appUrl()}/api/voice/webhook`,
+      Object.keys(clientState).length ? clientState : undefined,
+    );
+  const result: any = body.workspaceId
+    ? await withWorkspaceCreds(body.workspaceId, dial)
+    : await dial();
 
   // dryRun (no TELNYX_API_KEY) still returns ok:true so the engine runs end to end.
   return NextResponse.json(

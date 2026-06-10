@@ -14,6 +14,7 @@
  */
 
 import { instantly, unipile, salesrobot, taltxt, telnyx, freshLinkedin, tomba } from "../providers";
+import { withWorkspaceCreds } from "../connected";
 import { getCore } from "../core/repository";
 import { getAts } from "../ats";
 import { rid, nowIso } from "../core/ids";
@@ -46,7 +47,10 @@ export interface SendTouch {
 export async function sendTouch(workspaceId: string, t: SendTouch): Promise<SendResult> {
   let result: SendResult;
   try {
-    result = await dispatch(workspaceId, t);
+    // Credential isolation: resolve the sending provider against THIS workspace's
+    // own (or operator-granted) keys — a customer never rides the house env keys.
+    // The house workspace runs unisolated, so nothing changes for the operator.
+    result = await withWorkspaceCreds(workspaceId, () => dispatch(workspaceId, t));
   } catch (e: any) {
     result = { ok: false, channel: t.channel, provider: "?", error: e?.message ?? String(e) };
   }
@@ -163,6 +167,13 @@ export interface Enriched {
  * Returns whatever was found; callers merge onto the prospect.
  */
 export async function enrich(prospect: Prospect, opts: { motion?: Motion } = {}): Promise<Enriched> {
+  // Isolation: the enrichment rungs (Fresh LinkedIn, Tomba, Telnyx line-type
+  // lookup) all cost money — resolve them against this workspace's own keys, not
+  // the operator's env, so a customer's enrichment bills to their own accounts.
+  return withWorkspaceCreds(prospect.workspaceId, () => enrichResolve(prospect, opts));
+}
+
+async function enrichResolve(prospect: Prospect, opts: { motion?: Motion } = {}): Promise<Enriched> {
   const out: Enriched = { source: [] };
 
   if (prospect.linkedinUrl && freshLinkedin.configured()) {

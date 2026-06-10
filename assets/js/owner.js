@@ -737,6 +737,17 @@
       '<a class="btn btn-sm" id="dwSuspend">' + (a.suspended ? "Unsuspend" : "Suspend") + '</a>' +
       '<a class="btn btn-sm" id="dwRevoke">Revoke sessions</a></div>';
 
+    // API access (reselling): lend house keys to this customer, with terms.
+    html += '<style>' +
+      '.grant-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line,#1f232b)}' +
+      '.grant-tog{display:flex;align-items:center;gap:7px;flex:1;min-width:150px}' +
+      '.g-fld{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted,#8b93a1)}' +
+      '.g-fld input{width:64px;padding:4px 7px;border-radius:7px;border:1px solid var(--line,#2a2f3a);background:var(--bg,#0e0f13);color:var(--text,#e6e9ef);font:inherit}' +
+      '</style>' +
+      '<h3 style="font-size:13px;margin:16px 0 6px">API access · reselling</h3>' +
+      '<div class="note" style="margin-bottom:8px">Lend your house API keys to this customer. When on, they use YOUR key for that tool; set the markup % and/or monthly fee your billing applies.</div>' +
+      '<div id="dwGrants">Loading…</div>';
+
     // recent usage
     if (d.recentUsage && d.recentUsage.length) {
       html += '<h3 style="font-size:13px;margin:16px 0 6px">Recent cost events</h3><table class="otable"><tbody>';
@@ -765,8 +776,34 @@
   function kv(k, v) { return '<div class="k">' + esc(k) + '</div><div class="v">' + v + '</div>'; }
   function fmtDate(s) { try { return new Date(s).toLocaleString(); } catch (e) { return s; } }
 
+  function loadGrants(wsId) {
+    api("/owner/grants?workspaceId=" + encodeURIComponent(wsId)).then(function (d) {
+      var grantable = (d && d.grantable) || [];
+      var grants = (d && d.grants) || {};
+      var box = $("#dwGrants"); if (!box) return;
+      box.innerHTML = grantable.map(function (g) {
+        var t = grants[g.id] || {}; var on = !!grants[g.id];
+        return '<div class="grant-row" data-gid="' + esc(g.id) + '">' +
+          '<label class="grant-tog"><input type="checkbox" class="g-on"' + (on ? " checked" : "") + '> <b>' + esc(g.label) + '</b></label>' +
+          '<span class="g-fld">Markup <input type="number" class="g-mk" min="0" step="1" value="' + (t.markupPct != null ? t.markupPct : "") + '">%</span>' +
+          '<span class="g-fld">Monthly $<input type="number" class="g-mo" min="0" step="1" value="' + (t.monthlyUsd != null ? t.monthlyUsd : "") + '"></span>' +
+          '<a class="btn btn-sm g-save">Save</a></div>';
+      }).join("") || '<div class="note">No resellable integrations.</div>';
+      $$("#dwGrants .grant-row").forEach(function (row) {
+        row.querySelector(".g-save").addEventListener("click", function () {
+          var mk = row.querySelector(".g-mk").value, mo = row.querySelector(".g-mo").value;
+          send("/owner/grants", "POST", {
+            workspaceId: wsId, id: row.dataset.gid, on: row.querySelector(".g-on").checked,
+            markupPct: mk === "" ? undefined : Number(mk), monthlyUsd: mo === "" ? undefined : Number(mo)
+          }).then(function (r) { if (r.ok) { toast("Saved " + row.dataset.gid); loadGrants(wsId); } else toast("Couldn't save"); });
+        });
+      });
+    }).catch(function () { var box = $("#dwGrants"); if (box) box.innerHTML = '<div class="note">Could not load grants.</div>'; });
+  }
+
   function wireDrawer(a) {
     var id = a.workspaceId;
+    loadGrants(id);
     $("#dwClose").addEventListener("click", closeDrawer);
     $("#dwSave").addEventListener("click", function () {
       send("/owner/accounts/" + id, "PATCH", {

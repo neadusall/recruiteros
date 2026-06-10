@@ -33,15 +33,28 @@ export function isHouseWorkspace(workspaceId: string): boolean {
 
 /* ---------------- grant store (operator lends a house key to a customer) ---- */
 
-const store = { grants: new Map<string, Set<IntegrationId>>() };
+/** Pricing the operator attaches to a granted integration (the resale terms). */
+export interface GrantTerms {
+  /** % added on top of the metered house cost when this customer uses the key. */
+  markupPct?: number;
+  /** Flat monthly fee for the access, if any. */
+  monthlyUsd?: number;
+  grantedAt: string;
+}
+
+const store = { grants: new Map<string, Map<IntegrationId, GrantTerms>>() };
 
 const SNAP_KEY = "integration_grants";
 function serialize() {
-  return { grants: [...store.grants.entries()].map(([ws, set]) => [ws, [...set]]) };
+  return {
+    grants: [...store.grants.entries()].map(([ws, m]) => [ws, [...m.entries()]]),
+  };
 }
 function hydrateFrom(s: any) {
   if (s?.grants) {
-    store.grants = new Map((s.grants as [string, IntegrationId[]][]).map(([ws, ids]) => [ws, new Set(ids)]));
+    store.grants = new Map(
+      (s.grants as [string, [IntegrationId, GrantTerms][]][]).map(([ws, entries]) => [ws, new Map(entries)]),
+    );
   }
 }
 const persist = debouncedSaver(SNAP_KEY, serialize);
@@ -55,10 +68,18 @@ export function ensureGrantsReady(): Promise<void> {
 }
 void ensureGrantsReady();
 
-/** Integrations the operator has granted this workspace house-key access to. */
+/** Integration ids the operator has granted this workspace house-key access to. */
 export async function listGrants(workspaceId: string): Promise<IntegrationId[]> {
   await ensureGrantsReady();
-  return [...(store.grants.get(workspaceId) ?? [])];
+  return [...(store.grants.get(workspaceId)?.keys() ?? [])];
+}
+
+/** Full grant terms for a workspace (for the owner console / billing flow). */
+export async function grantsFor(workspaceId: string): Promise<Record<string, GrantTerms>> {
+  await ensureGrantsReady();
+  const out: Record<string, GrantTerms> = {};
+  for (const [id, terms] of store.grants.get(workspaceId) ?? []) out[id] = terms;
+  return out;
 }
 
 export async function isGranted(workspaceId: string, id: IntegrationId): Promise<boolean> {
@@ -66,18 +87,29 @@ export async function isGranted(workspaceId: string, id: IntegrationId): Promise
   return store.grants.get(workspaceId)?.has(id) ?? false;
 }
 
-/** Operator-only: turn a grant on/off for a customer workspace. */
+/** Operator-only: turn a grant on/off for a customer workspace, with resale terms. */
 export async function setGrant(
   workspaceId: string,
   id: IntegrationId,
   on: boolean,
-): Promise<{ workspaceId: string; granted: IntegrationId[]; updatedAt: string }> {
+  terms?: { markupPct?: number; monthlyUsd?: number },
+): Promise<{ workspaceId: string; grants: Record<string, GrantTerms>; updatedAt: string }> {
   await ensureGrantsReady();
-  const set = store.grants.get(workspaceId) ?? new Set<IntegrationId>();
-  if (on) set.add(id);
-  else set.delete(id);
-  if (set.size) store.grants.set(workspaceId, set);
+  const m = store.grants.get(workspaceId) ?? new Map<IntegrationId, GrantTerms>();
+  if (on) {
+    const prev = m.get(id);
+    m.set(id, {
+      markupPct: terms?.markupPct ?? prev?.markupPct,
+      monthlyUsd: terms?.monthlyUsd ?? prev?.monthlyUsd,
+      grantedAt: prev?.grantedAt ?? nowIso(),
+    });
+  } else {
+    m.delete(id);
+  }
+  if (m.size) store.grants.set(workspaceId, m);
   else store.grants.delete(workspaceId);
   persist();
-  return { workspaceId, granted: [...set], updatedAt: nowIso() };
+  const out: Record<string, GrantTerms> = {};
+  for (const [k, v] of m) out[k] = v;
+  return { workspaceId, grants: out, updatedAt: nowIso() };
 }

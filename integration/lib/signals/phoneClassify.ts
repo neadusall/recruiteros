@@ -13,6 +13,7 @@
  */
 
 import { telnyx } from "../providers";
+import { withWorkspaceCreds } from "../connected";
 import { recordUsage } from "../billing/ledger";
 import { rateCost } from "../billing/rates";
 import type { Motion } from "../core/types";
@@ -63,23 +64,26 @@ export async function classifyLine(number: string, opts: ClassifyOptions = {}): 
   const clean = (number || "").trim();
   if (!clean) return base;
 
-  let lineType: LineType = "unknown";
-  let carrier: string | undefined;
-  let looked = false;
-
-  if (telnyx.configured()) {
+  // Isolation: resolve Telnyx against the workspace's own key (a customer never
+  // rides the operator's env). configured() must run inside the same context, so
+  // the whole lookup runs in the workspace's credential scope and returns its result.
+  const lookup = async (): Promise<{ lineType: LineType; carrier?: string; looked: boolean }> => {
+    if (!telnyx.configured()) return { lineType: "unknown", looked: false };
     try {
       const res: any = await telnyx.numberLookup(clean);
       if (res && !res.dryRun) {
-        looked = true;
         const c = res?.data?.carrier ?? res?.carrier ?? {};
-        lineType = mapLineType(c.type ?? res?.data?.type);
-        carrier = c.name ?? c.carrier_name;
+        return { lineType: mapLineType(c.type ?? res?.data?.type), carrier: c.name ?? c.carrier_name, looked: true };
       }
     } catch {
       /* lookup failed; leave unknown, charge nothing */
     }
-  }
+    return { lineType: "unknown", looked: false };
+  };
+  const got = opts.workspaceId ? await withWorkspaceCreds(opts.workspaceId, lookup) : await lookup();
+  const lineType: LineType = got.lineType;
+  const carrier = got.carrier;
+  const looked = got.looked;
 
   const result: ClassifyResult = { ...base, lineType, carrier, looked };
   if (lineType === "mobile") result.mobilePhone = clean;

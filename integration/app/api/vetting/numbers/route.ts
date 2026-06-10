@@ -12,6 +12,7 @@
 
 import { requireSession, ok } from "../../../../lib/api";
 import { telnyx } from "../../../../lib/providers";
+import { withWorkspaceCreds } from "../../../../lib/connected";
 import { listDesks } from "../../../../lib/vetting";
 
 /** Normalize a phone to its last 10 digits for assignment matching. */
@@ -38,7 +39,8 @@ export async function GET(req: Request) {
   let dryRun = false;
   let error: string | undefined;
   try {
-    const res: any = await telnyx.listPhoneNumbers(250, 1);
+    // Isolation: list THIS workspace's Telnyx numbers, not the operator's.
+    const res: any = await withWorkspaceCreds(ws, () => telnyx.listPhoneNumbers(250, 1));
     if (res?.dryRun) {
       dryRun = true;
     } else {

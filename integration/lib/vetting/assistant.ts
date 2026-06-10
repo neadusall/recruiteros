@@ -18,6 +18,7 @@
  */
 
 import { telnyx } from "../providers";
+import { withWorkspaceCreds } from "../connected";
 import type { AssistantConfig } from "../providers/telnyx";
 import type { VettingDesk } from "./types";
 import { buildAssistantInstructions, buildGreeting } from "./prompt";
@@ -79,30 +80,34 @@ export async function provisionDesk(desk: VettingDesk): Promise<ProvisionResult>
   const config = buildAssistantConfig(desk);
 
   try {
-    let assistantId = desk.assistantId;
-    let dryRun = false;
+    // Isolation: a customer's AI Vetting desk is provisioned on THEIR Telnyx
+    // account, never the operator's env key.
+    return await withWorkspaceCreds(desk.workspaceId, async () => {
+      let assistantId = desk.assistantId;
+      let dryRun = false;
 
-    if (assistantId) {
-      const res: any = await telnyx.updateAssistant(assistantId, config);
-      dryRun = Boolean(res?.dryRun);
-    } else {
-      const res: any = await telnyx.createAssistant(config);
-      dryRun = Boolean(res?.dryRun);
-      // In dry-run we mint a synthetic id so the desk still flips to "live" in dev.
-      assistantId = res?.data?.id ?? res?.id ?? (dryRun ? `dry_${desk.id}` : undefined);
-    }
+      if (assistantId) {
+        const res: any = await telnyx.updateAssistant(assistantId, config);
+        dryRun = Boolean(res?.dryRun);
+      } else {
+        const res: any = await telnyx.createAssistant(config);
+        dryRun = Boolean(res?.dryRun);
+        // In dry-run we mint a synthetic id so the desk still flips to "live" in dev.
+        assistantId = res?.data?.id ?? res?.id ?? (dryRun ? `dry_${desk.id}` : undefined);
+      }
 
-    if (!assistantId) {
-      return { dryRun, numberBound: false, error: "no_assistant_id" };
-    }
+      if (!assistantId) {
+        return { dryRun, numberBound: false, error: "no_assistant_id" };
+      }
 
-    let numberBound = false;
-    if (desk.phoneNumber) {
-      const bind: any = await telnyx.assignNumberToAssistant(assistantId, desk.phoneNumber);
-      numberBound = !bind?.error;
-    }
+      let numberBound = false;
+      if (desk.phoneNumber) {
+        const bind: any = await telnyx.assignNumberToAssistant(assistantId, desk.phoneNumber);
+        numberBound = !bind?.error;
+      }
 
-    return { assistantId, dryRun, numberBound };
+      return { assistantId, dryRun, numberBound };
+    });
   } catch (e: any) {
     return { dryRun: false, numberBound: false, error: e?.message || "provision_failed" };
   }
@@ -112,7 +117,7 @@ export async function provisionDesk(desk: VettingDesk): Promise<ProvisionResult>
 export async function deprovisionDesk(desk: VettingDesk): Promise<void> {
   if (!desk.assistantId || desk.assistantId.startsWith("dry_")) return;
   try {
-    await telnyx.deleteAssistant(desk.assistantId);
+    await withWorkspaceCreds(desk.workspaceId, () => telnyx.deleteAssistant(desk.assistantId!));
   } catch {
     /* best-effort */
   }

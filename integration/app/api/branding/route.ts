@@ -24,12 +24,13 @@ export async function POST(req: Request) {
     action?: string;
     logoUrl?: string;
     brandName?: string;
+    accentColor?: string;
     customDomain?: string;
   }>(req);
 
   if (b?.action === "reset") {
     // Blank everything -> back to the house "RecruitersOS" brand.
-    return ok({ branding: await setBranding(ws, { logoUrl: "", brandName: "", customDomain: "" }) });
+    return ok({ branding: await setBranding(ws, { logoUrl: "", brandName: "", accentColor: "", customDomain: "" }) });
   }
 
   // A logo data URL can be sizeable; keep a sane ceiling so a snapshot stays small.
@@ -38,6 +39,7 @@ export async function POST(req: Request) {
   const patch: Parameters<typeof setBranding>[1] = {};
   if (b?.logoUrl !== undefined) patch.logoUrl = b.logoUrl;
   if (b?.brandName !== undefined) patch.brandName = b.brandName;
+  if (b?.accentColor !== undefined) patch.accentColor = b.accentColor;
   if (b?.customDomain !== undefined) patch.customDomain = b.customDomain;
   if (Object.keys(patch).length === 0) return fail("nothing_to_save", 422);
 

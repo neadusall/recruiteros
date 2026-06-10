@@ -429,7 +429,7 @@
         if (body.action === "reset") {
           d.branding = { workspaceId: d.branding.workspaceId, domainStatus: "none" };
         } else {
-          ["logoUrl", "brandName", "customDomain"].forEach(function (k) {
+          ["logoUrl", "brandName", "accentColor", "customDomain"].forEach(function (k) {
             if (typeof body[k] === "string") d.branding[k] = body[k].trim() || undefined;
           });
           if (!d.branding.customDomain) d.branding.domainStatus = "none";
@@ -438,6 +438,33 @@
       }
       return ok({ branding: d.branding });
     }
+
+    // --- White-label custom domain: add / verify / remove (offline mirror of
+    //     lib/branding; verify just flips to "verified" with no real DNS). ---
+    if (p === "/branding/domain") {
+      d.branding = d.branding || { workspaceId: (d.workspace && d.workspace.id) || "ws_local", domainStatus: "none" };
+      if (method === "POST" && body) {
+        if (body.action === "set" && body.domain) {
+          d.branding.customDomain = String(body.domain).trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+          d.branding.domainStatus = "pending";
+          d.branding.domainToken = d.branding.domainToken || ("ros-verify-" + Math.random().toString(16).slice(2, 18));
+        } else if (body.action === "verify") {
+          if (d.branding.customDomain) d.branding.domainStatus = "verified";
+        } else if (body.action === "remove") {
+          delete d.branding.customDomain; delete d.branding.domainToken; d.branding.domainStatus = "none";
+        }
+        save(d);
+      }
+      var dins = d.branding.customDomain ? {
+        domain: d.branding.customDomain, status: d.branding.domainStatus,
+        records: [
+          { type: "CNAME", host: d.branding.customDomain, value: "app.recruitersos.co", note: "Point your domain at the RecruitersOS app." },
+          { type: "TXT", host: "_recruiteros." + d.branding.customDomain, value: d.branding.domainToken, note: "Proves you own the domain — required to verify." }
+        ]
+      } : null;
+      return ok({ branding: d.branding, instructions: dins });
+    }
+    if (p === "/branding/resolve") return ok({ branding: {} });
 
     // --- In-Market Leads: who is hiring right now (search + promote) ---
     if (p === "/in-market") {
