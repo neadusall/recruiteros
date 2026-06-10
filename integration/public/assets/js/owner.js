@@ -69,8 +69,8 @@
 
   /* ---------------- router ---------------- */
   // Projection calculator moved to the in-app command center (Measure → Spending).
-  var ROUTES = { overview: viewOverview, pricing: viewPricing, spend: viewSpend, people: viewPeople, accounts: viewAccounts, costs: viewCosts };
-  var TITLES = { overview: "Overview", pricing: "Pricing", spend: "Spend", people: "Users & roles", accounts: "Accounts", costs: "Cost model" };
+  var ROUTES = { overview: viewOverview, pricing: viewPricing, spend: viewSpend, people: viewPeople, accounts: viewAccounts, costs: viewCosts, security: viewSecurity };
+  var TITLES = { overview: "Overview", pricing: "Pricing", spend: "Spend", people: "Users & roles", accounts: "Accounts", costs: "Cost model", security: "Security" };
   function route() {
     var r = (location.hash.replace("#", "") || "overview");
     if (!ROUTES[r]) r = "overview";
@@ -877,6 +877,90 @@
     send("/owner/costs", "PATCH", { rateOverrides: rateOverrides, constants: constants }).then(function (res) {
       if (res.ok) toast("Cost model saved"); else toast("Save failed");
     });
+  }
+
+  /* ================= SECURITY (2FA) ================= */
+  /* Authenticator-app two-factor on the owner sign-in. Enrolling here protects
+   * every owner route behind a rolling code; one-time recovery codes are shown
+   * once at activation so a lost device never locks you out. */
+  function viewSecurity() {
+    api("/auth/2fa/status").then(function (st) {
+      var html = '<div class="v-head"><h2>Security</h2><p>Two-factor authentication (2FA) puts an authenticator-app code in front of your sign-in, so a stolen or guessed password alone can\'t get in. This protects your account everywhere — the owner console and the main app.</p></div>';
+      if (st.enabled) {
+        html += '<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><span class="pill active">2FA is ON</span>' +
+          '<span class="note" style="margin:0">' + st.recoveryRemaining + ' backup recovery code' + (st.recoveryRemaining === 1 ? '' : 's') + ' remaining</span></div>' +
+          '<p class="note">Your sign-in now requires a 6-digit code from your authenticator app. Keep your recovery codes somewhere safe — each works once if you lose your device.</p>' +
+          '<h3 style="font-size:13px;margin:16px 0 6px">Turn off 2FA</h3>' +
+          '<p class="note" style="margin-top:0">Enter a current code (or a recovery code) to disable it.</p>' +
+          '<div class="calc">' + fld("Authenticator or recovery code", '<input id="sfDisableCode" type="text" inputmode="numeric" placeholder="6-digit code">') + '</div>' +
+          '<div class="btn-row" style="margin-top:10px"><a class="btn btn-danger btn-sm" id="sfDisable">Disable 2FA</a></div>' +
+          '<div id="sfMsg"></div></div>';
+        $("#view").innerHTML = html;
+        $("#sfDisable").addEventListener("click", function () {
+          var code = $("#sfDisableCode").value.trim();
+          if (!code) { toast("Enter a code first"); return; }
+          send("/auth/2fa/disable", "POST", { code: code }).then(function (res) {
+            if (res.ok) { toast("2FA disabled"); viewSecurity(); }
+            else toast(res.data && res.data.error === "invalid_code" ? "That code isn't right" : "Could not disable");
+          });
+        });
+      } else {
+        html += '<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><span class="pill susp">2FA is OFF</span>' +
+          '<span class="note" style="margin:0">Your password is the only thing protecting your account.</span></div>' +
+          '<p class="note">Set it up in under a minute with Google Authenticator, Authy, 1Password, or any TOTP app.</p>' +
+          '<div class="btn-row" style="margin-top:10px"><a class="btn btn-primary btn-sm" id="sfBegin">Set up 2FA</a></div>' +
+          '<div id="sfSetup" style="margin-top:14px"></div></div>';
+        $("#view").innerHTML = html;
+        $("#sfBegin").addEventListener("click", beginSetup);
+      }
+    }).catch(fail);
+  }
+
+  function beginSetup() {
+    var btn = $("#sfBegin"); if (btn) btn.classList.add("disabled");
+    send("/auth/2fa/setup", "POST", {}).then(function (res) {
+      if (!res.ok) { toast("Could not start setup"); if (btn) btn.classList.remove("disabled"); return; }
+      var d = res.data;
+      var grouped = (d.secret || "").replace(/(.{4})/g, "$1 ").trim();
+      var html = '<div class="setup-step"><div class="step-n">1</div><div><strong>Add it to your authenticator app.</strong>' +
+        '<p class="note" style="margin:4px 0 8px">Open your app, choose “Add account → enter a setup key,” and type this key (account: your email). Use this manual key — never share it or paste it into a website.</p>' +
+        '<div class="secret-box" id="sfSecret">' + esc(grouped) + '</div>' +
+        '<div class="btn-row" style="margin-top:8px"><a class="btn btn-sm" id="sfCopy">Copy key</a></div></div></div>';
+      html += '<div class="setup-step"><div class="step-n">2</div><div><strong>Enter the 6-digit code it shows.</strong>' +
+        '<p class="note" style="margin:4px 0 8px">This confirms your app is configured correctly before we switch 2FA on.</p>' +
+        '<div class="calc">' + fld("Code from app", '<input id="sfCode" type="text" inputmode="numeric" placeholder="123456" maxlength="6">') + '</div>' +
+        '<div class="btn-row" style="margin-top:10px"><a class="btn btn-primary btn-sm" id="sfActivate">Activate 2FA</a></div></div></div>';
+      html += '<div id="sfResult"></div>';
+      $("#sfSetup").innerHTML = html;
+      if (btn) btn.style.display = "none";
+      $("#sfCopy").addEventListener("click", function () {
+        try { navigator.clipboard.writeText(d.secret); toast("Key copied"); } catch (e) { toast("Select and copy the key"); }
+      });
+      $("#sfActivate").addEventListener("click", function () {
+        var code = $("#sfCode").value.trim();
+        if (!code) { toast("Enter the code from your app"); return; }
+        send("/auth/2fa/enable", "POST", { code: code }).then(function (r2) {
+          if (!r2.ok) { toast(r2.data && r2.data.error === "invalid_code" ? "That code isn't right — try the current one" : "Activation failed"); return; }
+          showRecoveryCodes(r2.data.recoveryCodes || []);
+        });
+      });
+    });
+  }
+
+  function showRecoveryCodes(codes) {
+    var html = '<div class="card recovery-card" style="margin-top:14px"><div style="display:flex;align-items:center;gap:10px"><span class="pill active">2FA is ON</span><strong>Save your backup recovery codes</strong></div>' +
+      '<p class="note">These are shown <strong>once</strong>. Each works a single time if you lose your authenticator device. Store them in a password manager.</p>' +
+      '<div class="recovery-grid">' + codes.map(function (c) { return '<div class="rc">' + esc(c) + '</div>'; }).join("") + '</div>' +
+      '<div class="btn-row" style="margin-top:12px"><a class="btn btn-sm" id="rcCopy">Copy all</a><a class="btn btn-sm" id="rcDownload">Download .txt</a><a class="btn btn-primary btn-sm" id="rcDone">Done</a></div></div>';
+    $("#sfResult").innerHTML = html;
+    var blob = codes.join("\n");
+    $("#rcCopy").addEventListener("click", function () { try { navigator.clipboard.writeText(blob); toast("Copied"); } catch (e) { toast("Select and copy"); } });
+    $("#rcDownload").addEventListener("click", function () {
+      var a = document.createElement("a");
+      a.href = "data:text/plain;charset=utf-8," + encodeURIComponent("RecruiterOS 2FA recovery codes\n\n" + blob + "\n");
+      a.download = "recruiteros-recovery-codes.txt"; a.click();
+    });
+    $("#rcDone").addEventListener("click", function () { toast("2FA enabled"); viewSecurity(); });
   }
 
   function fail(status) {

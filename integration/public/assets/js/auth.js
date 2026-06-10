@@ -17,6 +17,7 @@
   var magicBtn = document.getElementById("magicBtn");
   var pw = document.getElementById("password");
   var strength = document.getElementById("strength");
+  var pendingChallenge = null; // set when a 2FA code is awaited
 
   function say(text, kind) {
     msg.textContent = text;
@@ -69,8 +70,52 @@
     say("Can't reach the server right now. Please check your connection and try again.", "err");
   }
 
+  // Second step of a 2FA sign-in: the password was accepted and we're holding a
+  // challenge; this submit carries the authenticator (or recovery) code.
+  function showTwoFactor(challenge) {
+    pendingChallenge = challenge;
+    form.querySelectorAll("label.fld").forEach(function (l) { l.style.display = "none"; });
+    [".or", ".btn-li", ".auth-fine"].forEach(function (sel) {
+      var el = document.querySelector(sel); if (el) el.style.display = "none";
+    });
+    if (magicBtn) magicBtn.style.display = "none";
+    var title = document.getElementById("title"); if (title) title.textContent = "Two-factor verification";
+    var sub = document.querySelector(".auth-sub"); if (sub) sub.textContent = "Open your authenticator app and enter the 6-digit code.";
+    var wrap = document.createElement("label");
+    wrap.className = "fld";
+    wrap.innerHTML = '<span>Authentication code</span><input id="twoFactorCode" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" required />';
+    form.insertBefore(wrap, submitBtn);
+    submitBtn.textContent = "Verify →";
+    submitBtn.disabled = false;
+    say("Lost your device? Enter one of your backup recovery codes instead.", "");
+    var codeEl = document.getElementById("twoFactorCode"); if (codeEl) codeEl.focus();
+  }
+
+  function onAuthResult(d) {
+    if (d && d.twoFactorRequired) return showTwoFactor(d.challenge);
+    land(d);
+  }
+
   form.addEventListener("submit", function (e) {
     e.preventDefault();
+
+    // 2FA step: redeem the challenge with the code instead of email/password.
+    if (pendingChallenge) {
+      var codeEl = document.getElementById("twoFactorCode");
+      var code = codeEl ? codeEl.value.trim() : "";
+      if (!code) return say("Enter your authentication code.", "err");
+      submitBtn.disabled = true;
+      say("Verifying...", "busy");
+      api("/2fa/login", "POST", { challenge: pendingChallenge, code: code })
+        .then(land)
+        .catch(function (err) {
+          if (/Failed to fetch|NetworkError/.test(String(err.message))) offline();
+          else say(prettyErr(err.message), "err");
+          submitBtn.disabled = false;
+        });
+      return;
+    }
+
     var email = document.getElementById("email").value.trim();
     var password = pw ? pw.value : "";
     var name = document.getElementById("name") ? document.getElementById("name").value.trim() : "";
@@ -106,7 +151,7 @@
       ? api("/register", "POST", { email: email, password: password, name: name })
       : api("/login", "POST", { email: email, password: password });
 
-    req.then(land).catch(handleErr);
+    req.then(onAuthResult).catch(handleErr);
 
     function handleErr(err) {
       if (/Failed to fetch|NetworkError/.test(String(err.message))) offline();
@@ -172,6 +217,8 @@
       missing_fields: "Please fill in every field.",
       invalid_or_expired_invite: "That invite is invalid or expired.",
       already_member: "You're already on this team. Try signing in.",
+      invalid_code: "That code isn't right. Check your authenticator app and try again.",
+      challenge_expired: "This sign-in timed out. Please enter your password again.",
     };
     return map[code] || "Something went wrong. Please try again.";
   }

@@ -20,6 +20,18 @@ export interface User {
   /** Captured from LinkedIn sign-in: public profile URL + avatar. */
   linkedinUrl?: string;
   picture?: string;
+  /** Optional TOTP second factor. Absent = never set up. */
+  twoFactor?: TwoFactor;
+}
+
+/** Authenticator-app second factor. `enabled` is false during pending setup
+ *  (secret generated but not yet confirmed with a valid code). */
+export interface TwoFactor {
+  secret: string;            // base32 TOTP secret
+  enabled: boolean;
+  /** sha256 hashes of the unused one-time recovery codes. */
+  recoveryHashes: string[];
+  enabledAt?: string;
 }
 
 export interface Workspace {
@@ -65,7 +77,7 @@ export interface EmailToken {
 }
 
 export interface AuthResult {
-  user: Omit<User, "passwordHash">;
+  user: Omit<User, "passwordHash" | "twoFactor">;
   workspace: Workspace;
   role: Role;
   /** Capabilities granted to this role, so the UI shows only what they can use. */
