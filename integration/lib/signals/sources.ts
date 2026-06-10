@@ -139,11 +139,21 @@ export function makeSignal(input: {
   };
 }
 
-/** Minimal JSON fetch with a clear error, shared by HTTP connectors. */
+/** Minimal JSON fetch with a clear error, shared by HTTP connectors.
+ *
+ * Hardened for the background accumulator's high-volume sequential pulls:
+ *  - a 10s timeout so one slow/hung public board can't stall the whole expansion loop;
+ *  - a descriptive User-Agent (SEC EDGAR policy requires one, and it's polite to the free
+ *    ATS/job-board endpoints we lean on). Both are overridable via `init`.
+ */
+const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
+const DEFAULT_USER_AGENT = "RecruiterOS/1.0 (+https://recruiteros.app; hiring-signals bot)";
+
 export async function getJson<T>(url: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(url, {
     ...init,
-    headers: { Accept: "application/json", ...(init.headers ?? {}) },
+    signal: init.signal ?? AbortSignal.timeout(DEFAULT_FETCH_TIMEOUT_MS),
+    headers: { Accept: "application/json", "User-Agent": DEFAULT_USER_AGENT, ...(init.headers ?? {}) },
   });
   if (!res.ok) {
     throw new SourceError(`${init.method ?? "GET"} ${url} failed: ${res.status}`, res.status);
@@ -182,7 +192,7 @@ export class PublicAtsSource implements SignalSource {
   }
 
   async pull(ctx: PullContext): Promise<PullResult> {
-    const slugs = (ctx.watchlist?.companyNames ?? []).slice(0, ctx.limit ?? 50);
+    const slugs = (ctx.watchlist?.companyNames ?? []).slice(0, ctx.limit ?? 150);
     const now = new Date().toISOString();
     const signals: Signal[] = [];
     const warnings: string[] = [];

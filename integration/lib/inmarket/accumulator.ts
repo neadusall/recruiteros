@@ -13,7 +13,7 @@
  */
 
 import { collectLeads } from "./index";
-import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, poolCompaniesToExpand, updateExpandedRoles } from "./pool";
+import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, poolCompaniesToExpand, updateExpandedRolesBatch } from "./pool";
 import { enrichSizesBatch } from "./companySize";
 import { resolveCompanyRoles } from "./companyRoles";
 
@@ -32,21 +32,34 @@ const INDUSTRIES: string[] = [
 
 const CYCLE_MS = 60 * 60 * 1000;       // refresh every 60 minutes
 const PER_CYCLE = 4;                    // targeted industries per cycle
-const COLLECT_CAP = 120;               // leads/sector for the targeted pulls
-const VACUUM_CAP = 600;                // leads for the keyword-less breadth pull
+const COLLECT_CAP = 160;               // leads/sector for the targeted pulls
+const VACUUM_CAP = 900;                // leads for the keyword-less breadth pull
 const SEED_COMPANIES = 40;             // pool companies probed for deeper roles per cycle
 const SEED_CAP = 300;                  // leads from the seeding pass
 const SIZE_BATCH = 30;                 // companies resolved for headcount (Wikidata) per cycle
-const EXPAND_BATCH = 18;               // companies whose FULL ATS board we pull per cycle
+const EXPAND_BATCH = 60;               // companies whose FULL ATS board we pull per cycle
 const EXPAND_STALE_MS = 3 * 24 * 60 * 60 * 1000; // re-pull a company's board after 3 days
 const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
 
 let started = false;
+let running = false;                    // overlap guard: never let two cycles run at once
 let cursor = 0;
 let seedCursor = 0;
 let sizeCursor = 0;
 
 async function runCycle(): Promise<void> {
+  // A cycle now does materially more work (bigger expansion batch); if one ever runs long,
+  // skip the next tick rather than stacking concurrent cycles that fight over the pool blob.
+  if (running) return;
+  running = true;
+  try {
+    await runCycleInner();
+  } finally {
+    running = false;
+  }
+}
+
+async function runCycleInner(): Promise<void> {
   const now = new Date().toISOString();
 
   // US-ONLY cleanup: prune any non-US leads still stored in the pool (one-time effect once
@@ -102,15 +115,21 @@ async function runCycle(): Promise<void> {
   //    This is what bulks the pool from "1 role per company" to whole boards (tens of roles).
   try {
     const targets = await poolCompaniesToExpand(EXPAND_BATCH, EXPAND_STALE_MS);
+    // Resolve each company's board sequentially (one request per host at a time — gentle on
+    // the public ATS endpoints), accumulate the results, then commit them all in a SINGLE
+    // pool write. This keeps a large EXPAND_BATCH cheap on the single-blob KV store.
+    const updates: Array<{ company: string; roleDetails: Array<{ title: string; postedAt?: string; location?: string }>; source: string }> = [];
     for (const t of targets) {
       try {
         const r = await resolveCompanyRoles(t.company, t.domain);
-        await updateExpandedRoles(t.company, {
+        updates.push({
+          company: t.company,
           roleDetails: r.roles.map((x) => ({ title: x.title, postedAt: x.postedAt, location: x.location })),
           source: r.source,
         });
       } catch { /* skip this company this cycle */ }
     }
+    if (updates.length) await updateExpandedRolesBatch(updates);
   } catch { /* best-effort */ }
 
   // 5) RESOLVE COMPANY SIZE — look up real headcounts for a rotating batch of pool companies

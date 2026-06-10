@@ -42,7 +42,7 @@ export interface CompanyRolesResult {
 
 const CACHE_KEY = "inmarket_company_roles_v1";
 const TTL_MS = 3 * 24 * 60 * 60 * 1000; // roles change; re-check after 3 days
-const MAX_ROLES = 80;
+const MAX_ROLES = 150;
 
 interface CacheEntry { result: CompanyRolesResult; at: number }
 

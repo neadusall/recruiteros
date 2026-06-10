@@ -15,7 +15,7 @@ import type { InMarketLead, InMarketQuery } from "./index";
 import { industryTokens, dedupeLeads } from "./index";
 
 const KEY = "inmarket_pool_v1";
-const MAX_POOL = 8000;                         // cap the stored blob
+const MAX_POOL = 15000;                        // cap the stored blob
 const TTL_MS = 30 * 24 * 60 * 60 * 1000;       // drop leads not seen for 30 days
 
 interface PoolEntry { lead: InMarketLead; at: number; firstAt?: number } // at = last-seen, firstAt = first-seen (epoch ms)
@@ -219,13 +219,45 @@ export async function updateExpandedRoles(
   if (!e) return;
   e.lead.boardExpandedAt = new Date().toISOString();
   if (payload.roleDetails.length) {
-    e.lead.roleDetails = payload.roleDetails.slice(0, 30);
+    e.lead.roleDetails = payload.roleDetails.slice(0, 150);
     e.lead.roles = e.lead.roleDetails.map((d) => d.title);
     e.lead.boardSource = payload.source;
     const newest = e.lead.roleDetails.map((d) => d.postedAt).filter(Boolean).sort().slice(-1)[0];
     if (newest) { e.lead.postedAt = newest; e.lead.signalAt = e.lead.signalAt || newest; }
   }
   await saveSnapshot(KEY, pool);
+}
+
+/** Batched board-expansion writer: applies MANY companies' full boards in ONE load + ONE
+ *  save, instead of rewriting the whole pool blob per company. This is what makes a large
+ *  per-cycle expansion batch safe on the single-blob KV store — without it, expanding N
+ *  companies serialized the entire pool N times. Same per-company semantics as
+ *  updateExpandedRoles (stamp boardExpandedAt either way; store up to 150 roles). */
+export async function updateExpandedRolesBatch(
+  updates: Array<{ company: string; roleDetails: Array<{ title: string; postedAt?: string; location?: string }>; source: string }>,
+): Promise<void> {
+  if (!updates.length) return;
+  const pool = await load();
+  const byKey = new Map<string, PoolEntry>();
+  for (const e of pool) { const k = keyOf(e.lead); if (k) byKey.set(k, e); }
+  const stamp = new Date().toISOString();
+  let touched = 0;
+  for (const u of updates) {
+    const key = (u.company || "").toLowerCase().trim();
+    if (!key) continue;
+    const e = byKey.get(key);
+    if (!e) continue;
+    e.lead.boardExpandedAt = stamp;
+    touched++;
+    if (u.roleDetails.length) {
+      e.lead.roleDetails = u.roleDetails.slice(0, 150);
+      e.lead.roles = e.lead.roleDetails.map((d) => d.title);
+      e.lead.boardSource = u.source;
+      const newest = e.lead.roleDetails.map((d) => d.postedAt).filter(Boolean).sort().slice(-1)[0];
+      if (newest) { e.lead.postedAt = newest; e.lead.signalAt = e.lead.signalAt || newest; }
+    }
+  }
+  if (touched) await saveSnapshot(KEY, pool);
 }
 
 /** A rotating slice of company slugs from the pool, to seed the watchlist-driven sources
