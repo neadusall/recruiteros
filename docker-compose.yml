@@ -35,6 +35,11 @@ services:
       # Postgres instead; it takes precedence.)
       ROS_DATA_DIR: /data
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_env}
+      # Owner Console allow-list (comma-separated). Only these emails can open
+      # the owner back office; everyone else gets a 404. Set here (env > env_file)
+      # so it's deterministic across deploys. neadusall@gmail.com is kept as a
+      # backup owner so a typo/missing account can't lock the console.
+      OWNER_EMAIL: "neadusall@gmail.com,ryan@recruiters.co"
     volumes:
       - app_data:/data
     expose:
