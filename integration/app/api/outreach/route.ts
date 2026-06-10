@@ -25,7 +25,7 @@ function motionOf(req: Request): Motion {
 export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
-  return ok(outreachSnapshot(g.ctx.workspace.id, motionOf(req)));
+  return ok(await outreachSnapshot(g.ctx.workspace.id, motionOf(req)));
 }
 
 export async function POST(req: Request) {
@@ -48,5 +48,5 @@ export async function POST(req: Request) {
     default:
       return fail("unknown_action", 400);
   }
-  return ok(outreachSnapshot(ws, motion));
+  return ok(await outreachSnapshot(ws, motion));
 }
