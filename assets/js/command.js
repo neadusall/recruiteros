@@ -1595,6 +1595,7 @@
   var STD_VARS = [
     { key: "first_name", label: "First name" }, { key: "last_name", label: "Last name" },
     { key: "company", label: "Company" }, { key: "title", label: "Job title" },
+    { key: "industry", label: "Industry" },
     { key: "role", label: "Role hiring for" }, { key: "signal", label: "Trigger signal" },
     { key: "sender_name", label: "Your name" }
   ];
@@ -1628,6 +1629,21 @@
     ];
     return [
       { id: sid(), day: 0, text: "Hi {{first_name}}, it's {{sender_name}} following up on {{role}} at {{company}}. Got 10 min this week? Reply STOP to opt out." }
+    ];
+  }
+  // A job-title + industry-specialist multi-channel cadence. Leans on {{title}}
+  // and {{industry}} throughout, and intentionally uses BOTH a LinkedIn voice
+  // note (a linkedin step with the voice_note action) and a cloned-voice
+  // voicemail drop (a voice step) as the two highest-converting touches.
+  function seqTemplateSpecialist() {
+    return [
+      { id: sid(), day: 0, channel: "linkedin", action: "connect", text: "Hi {{first_name}} — I focus on {{title}} talent across {{industry}} and kept coming across your name. Would love to connect." },
+      { id: sid(), day: 2, channel: "email", tracking: true, subject: "{{title}} in {{industry}} — worth a quick word?", body: "Hi {{first_name}},\n\nI specialise in {{title}} roles across {{industry}}, so {{company}} is squarely on my radar. I work with a short list of people who'd raise the bar for a team like yours.\n\nOpen to a 10-minute call this week to compare notes on the {{industry}} market?\n\nBest,\n{{sender_name}}" },
+      { id: sid(), day: 2, channel: "linkedin", action: "message", text: "Thanks for connecting, {{first_name}}! Just emailed you — I run a {{title}} desk in {{industry}} and had a couple of people in mind for {{company}}. Worth a quick chat?" },
+      { id: sid(), day: 3, channel: "linkedin", action: "voice_note", text: "Hi {{first_name}}, it's {{sender_name}} — recording this quick voice note rather than typing. I work the {{title}} side of {{industry}} and genuinely think there's a conversation worth having for {{company}}. Reply whenever suits." },
+      { id: sid(), day: 3, channel: "voice", voiceScriptId: "", text: "Hi {{first_name}}, it's {{sender_name}} — I left a note on email and LinkedIn. I specialise in {{title}} talent in {{industry}} and had a couple of names in mind for {{company}}. 30 seconds is all I need — give me a call back whenever works." },
+      { id: sid(), day: 4, channel: "email", tracking: true, subject: "Re: {{title}} in {{industry}}", body: "Following up, {{first_name}} — happy to send over two or three {{title}} profiles I think are a strong fit for {{industry}}. Want me to?" },
+      { id: sid(), day: 5, channel: "email", tracking: true, subject: "Should I close the file?", body: "No problem if the timing's off, {{first_name}}. I'll keep {{company}} on my {{industry}} list and circle back next quarter unless you'd like me to hold." }
     ];
   }
   function sid() { return "s_" + Math.random().toString(36).slice(2, 9); }
@@ -5062,18 +5078,29 @@
       // duplicates) so the template shows in both the Recruiting and BD
       // Campaigns views (which are motion-filtered) as well as the Library.
       var seeds = [
-        { id: "seq_tpl_multichannel", motion: "recruiting" },
-        { id: "seq_tpl_multichannel_bd", motion: "bd" }
+        { id: "seq_tpl_multichannel", motion: "recruiting",
+          name: "Multi-channel outreach — Email · LinkedIn · Voicemail",
+          tags: ["template", "multi-channel"], steps: seqTemplate("multi") },
+        { id: "seq_tpl_multichannel_bd", motion: "bd",
+          name: "Multi-channel outreach — Email · LinkedIn · Voicemail",
+          tags: ["template", "multi-channel"], steps: seqTemplate("multi") },
+        // Job-title + industry specialist cadence, with a LinkedIn voice note AND
+        // a cloned-voice voicemail drop built in.
+        { id: "seq_tpl_specialist", motion: "recruiting",
+          name: "Job-title & industry specialist — Voice Note + Voicemail",
+          tags: ["template", "multi-channel", "job title", "industry", "voice"], steps: seqTemplateSpecialist() },
+        { id: "seq_tpl_specialist_bd", motion: "bd",
+          name: "Job-title & industry specialist — Voice Note + Voicemail",
+          tags: ["template", "multi-channel", "job title", "industry", "voice"], steps: seqTemplateSpecialist() }
       ];
-      if (localStorage.getItem("ros_seq_tpl_multi") === "2") return;
-      try { localStorage.setItem("ros_seq_tpl_multi", "2"); } catch (e) {}
+      if (localStorage.getItem("ros_seq_tpl_multi") === "3") return;
+      try { localStorage.setItem("ros_seq_tpl_multi", "3"); } catch (e) {}
       var now = new Date().toISOString();
       seeds.forEach(function (sd) {
         if (store.all().some(function (s) { return s.id === sd.id; })) return;
-        store.save({ id: sd.id, channel: "multi",
-          name: "Multi-channel outreach — Email · LinkedIn · Voicemail",
-          tags: ["template", "multi-channel"], status: "active", motion: sd.motion,
-          owner: "RecruiterOS Templates", variables: [], steps: seqTemplate("multi"),
+        store.save({ id: sd.id, channel: "multi", name: sd.name,
+          tags: sd.tags, status: "active", motion: sd.motion,
+          owner: "RecruiterOS Templates", variables: [], steps: sd.steps,
           createdAt: now, updatedAt: now });
       });
     }
