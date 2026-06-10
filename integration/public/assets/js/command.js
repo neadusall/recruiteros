@@ -460,12 +460,14 @@
     if (detail) return renderOverviewDetail(el, detail);
 
     // The Dashboard is motion-scoped: BD shows the business-development pipeline,
-    // Recruiting shows the recruiting pipeline. In the recruiting motion an admin
-    // can drill into any single recruiter's numbers via the selector bar.
-    var showRecruiterBar = motion === "recruiting" && can("team:manage") && !IMP_TOKEN;
-    var sub = motion === "bd"
+    // Recruiting shows the recruiting pipeline. In either motion an admin sees the
+    // "All recruiters" roster (every recruiter's stats individually) and can drill
+    // into any single recruiter's numbers via the selector bar.
+    var showRecruiterBar = can("team:manage") && !IMP_TOKEN;
+    var sub = (motion === "bd"
       ? "Your BD sending engine — capacity, throughput and what's running right now. Pipeline outcomes live in Analytics."
-      : "Your recruiting sending engine — capacity, throughput and what's running right now." + (showRecruiterBar ? " Pick a recruiter to scope it." : "");
+      : "Your recruiting sending engine — capacity, throughput and what's running right now.")
+      + (showRecruiterBar ? " Pick a recruiter to scope it, or see every recruiter's stats below." : "");
     el.innerHTML = head("Dashboard", sub) +
       (showRecruiterBar ? '<div class="ov-recruiters" id="ovRecruiters">' + loading() + "</div>" : "") +
       '<div id="ovBody">' + loading() + "</div>";
@@ -525,21 +527,57 @@
         return '<div class="list-row clickable" data-go="' + al.go + '"><span class="rag ' + al.rag + '" style="width:9px;height:9px;border-radius:50%;display:inline-block;flex:none"></span><div><div class="lr-main">' + esc(al.main) + '</div><div class="lr-sub">' + esc(al.sub) + "</div></div></div>";
       }).join("") : '<div class="empty">All sending infrastructure healthy.</div>';
 
+      // "All recruiters" view (admin, no single recruiter selected): show every
+      // recruiter's high-level stats individually for the active motion.
+      var roster = (ovRecruiter == null && showRecruiterBar && (o.recruiters || []).length)
+        ? recruiterRosterHtml(o) : "";
+
       var body = $("#ovBody"); if (!body) return;
       body.innerHTML =
         '<div class="stat-grid" style="margin-bottom:14px">' + stats + "</div>" +
         '<div class="stat-grid" style="margin-bottom:18px">' + pace + "</div>" +
+        roster +
         '<div class="two-col"><div class="card"><h3>Active campaigns</h3>' + drips + "</div>" +
         '<div class="card"><h3>Capacity &amp; health alerts</h3>' + alertHtml + "</div></div>";
 
-      // Delegated navigation: any element with data-go jumps to that tab/drill-down.
+      // Delegated navigation: a recruiter row scopes the dashboard to that
+      // recruiter; anything with data-go jumps to that tab/drill-down.
       body.addEventListener("click", function (e) {
+        var r = e.target.closest("[data-rec]");
+        if (r) { ovRecruiter = r.getAttribute("data-rec") || null; renderOverview($("#view")); return; }
         var t = e.target.closest("[data-go]"); if (!t) return;
         location.hash = t.getAttribute("data-go");
       });
     }).catch(function () {
       var body = $("#ovBody"); if (body) body.innerHTML = needsSetup();
     });
+  }
+
+  // The "All recruiters" roster: one row per recruiter with their high-level
+  // stats for the active motion (so an admin can compare BD efforts and recruiting
+  // efforts per person). Driven by o.recruiters from /overview, which the backend
+  // keys to the real team members and scopes by motion. Clicking a row scopes the
+  // whole dashboard to that recruiter.
+  function recruiterRosterHtml(o) {
+    var recs = o.recruiters || [];
+    var winLabel = motion === "bd" ? "Job orders" : "Placements";
+    var hd = '<div class="card" style="margin:0 0 18px"><div class="lr-sub" style="margin-bottom:8px">' +
+      esc(motion === "bd" ? "Business Development" : "Recruiting") +
+      ' — every recruiter’s stats. Click a recruiter to scope the dashboard to them.</div>';
+    if (!recs.length) return hd + '<div class="empty">No recruiters on this workspace yet. Invite recruiters under Team.</div></div>';
+    var rows = recs.map(function (r) {
+      return '<tr class="clickable" data-rec="' + esc(r.userId || "") + '">' +
+        '<td><b>' + esc(r.name) + "</b></td>" +
+        "<td>" + (r.activeCampaigns || 0) + "</td>" +
+        "<td>" + (r.sentToday || 0) + "</td>" +
+        "<td>" + (r.connects || 0) + "</td>" +
+        "<td>" + (r.replies || 0) + "</td>" +
+        "<td>" + (r.meetings || 0) + "</td>" +
+        "<td><b>" + (r.wins || 0) + "</b></td></tr>";
+    }).join("");
+    return hd + '<div style="overflow:auto"><table class="matrix"><thead><tr>' +
+      "<th>Recruiter</th><th>Active campaigns</th><th>Sent today</th><th>Connects</th><th>Replies</th><th>Meetings</th><th>" + esc(winLabel) + "</th>" +
+      "</tr></thead><tbody>" + rows + "</tbody></table></div></div>";
   }
 
   // ---- Dashboard drill-downs (full sub-views under #overview/<slug>) ----
@@ -4165,8 +4203,177 @@
       "</div>";
   }
 
+  // OS Text is gated behind a one-time setup so a recruiting company can stand up
+  // compliant business texting (10DLC brand + number + consent) before sending.
+  // Once launched, the taltxt engine embeds as before. If the setup endpoint isn't
+  // present (e.g. the real backend hasn't shipped it), we fall back to embedding
+  // the engine directly so OS Text is never blocked in production.
   function renderOstext(el) {
-    el.innerHTML = head("OS Text", "The texting engine, right inside your workspace.") + ostextFrame(OSTEXT_SRC);
+    el.innerHTML = head("OS Text", "Stand up compliant business texting for your recruiters — register your number, set consent rules, then send right inside your workspace.") +
+      '<div id="osxBody">' + loading() + "</div>";
+    api("/ostext/setup").then(function (d) {
+      var st = osxNormalize((d && d.ostext) || {});
+      var host = $("#osxBody"); if (!host) return;
+      if (osxReady(st)) renderOstextEngine(host, st);
+      else renderOstextWizard(host, st);
+    }).catch(function () {
+      // No setup backend → don't block; embed the engine as before.
+      var host = $("#osxBody"); if (host) host.innerHTML = ostextFrame(OSTEXT_SRC);
+    });
+  }
+
+  function osxNormalize(st) {
+    st = st || {};
+    st.business = st.business || {};
+    st.brand = st.brand || { status: "not_started" };
+    st.number = st.number || { value: "" };
+    st.consent = st.consent || { optOut: "STOP", quietStart: "08:00", quietEnd: "21:00" };
+    st.candidatesConnected = !!st.candidatesConnected;
+    st.launched = !!st.launched;
+    return st;
+  }
+  function osxStates(st) {
+    var b = st.business || {};
+    return {
+      business: (b.legalName && b.ein && b.address) ? "ready" : "action",
+      brand: st.brand.status === "approved" ? "ready" : st.brand.status === "pending" ? "progress" : "action",
+      number: st.number.value ? "ready" : "action",
+      consent: st.consent.optIn ? "ready" : "action",
+      candidates: st.candidatesConnected ? "ready" : "action"
+    };
+  }
+  function osxAllReady(st) {
+    var s = osxStates(st);
+    return s.business === "ready" && s.brand === "ready" && s.number === "ready" && s.consent === "ready" && s.candidates === "ready";
+  }
+  function osxReady(st) { return osxAllReady(st) && st.launched; }
+
+  function osxSave(patch, msg) {
+    send("/ostext/setup", "POST", patch).then(function (r) {
+      if (r && r.ok) { if (msg) toast(msg); renderOstext($("#view")); }
+      else toast("Could not save — try again.");
+    }).catch(function () { toast("Could not reach the server."); });
+  }
+
+  function osxStyles() {
+    return '<style>' +
+      '.osx-form{margin-top:11px;display:grid;gap:11px;max-width:640px}' +
+      '.osx-fld{display:grid;gap:6px}' +
+      '.osx-fld>span{font-size:12.5px;color:var(--text-muted);font-weight:600}' +
+      '.osx-fld input,.osx-fld textarea{width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;color:var(--text);padding:9px 11px;font:inherit;font-size:14px}' +
+      '.osx-fld textarea{min-height:62px;resize:vertical;line-height:1.45}' +
+      '.osx-fld input:focus,.osx-fld textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
+      '.osx-two{display:grid;grid-template-columns:1fr 1fr;gap:11px}' +
+      '.osx-launch{margin-top:18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}' +
+      '.osx-num{font-family:var(--mono,monospace);font-weight:700}' +
+      '</style>';
+  }
+
+  function renderOstextEngine(host, st) {
+    host.innerHTML = osxStyles() +
+      '<div class="setup-banner ok" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+        '✓ OS Text is live on <span class="osx-num">' + esc(st.number.value || "your number") + '</span>' +
+        '<button class="btn btn-ghost btn-sm" id="osxSettings" style="margin-left:auto">⚙ Settings</button></div>' +
+      ostextFrame(OSTEXT_SRC);
+    var sb = host.querySelector("#osxSettings");
+    if (sb) sb.addEventListener("click", function () { osxSave({ launched: false }); });
+  }
+
+  function renderOstextWizard(host, st) {
+    var s = osxStates(st), ready = osxAllReady(st);
+    var doneN = ["business", "brand", "number", "consent", "candidates"].filter(function (k) { return s[k] === "ready"; }).length;
+    function osxFld(label, id, value, ph) { return '<label class="osx-fld"><span>' + esc(label) + '</span><input id="' + id + '" value="' + esc(value || "") + '" placeholder="' + esc(ph || "") + '" autocomplete="off"/></label>'; }
+    function osxArea(label, id, value) { return '<label class="osx-fld"><span>' + esc(label) + '</span><textarea id="' + id + '">' + esc(value || "") + '</textarea></label>'; }
+    function pill(state) { var m = { ready: "Ready", progress: "In review", action: "To do" }; return '<span class="s-pill ' + (state === "progress" ? "progress" : state === "ready" ? "ready" : "action") + '">' + (m[state] || state) + '</span>'; }
+    function card(n, key, title, desc, formHtml) {
+      var state = s[key];
+      return '<div class="setup-step s-' + state + '"><div class="setup-num">' + (state === "ready" ? "✓" : n) + '</div>' +
+        '<div class="setup-main"><div class="setup-row"><span class="setup-title">' + esc(title) + '</span>' + pill(state) + '</div>' +
+        '<div class="setup-desc">' + esc(desc) + '</div>' + formHtml + '</div></div>';
+    }
+
+    var b = st.business;
+    var businessForm = '<div class="osx-form">' +
+      osxFld("Legal business name", "osxLegal", b.legalName, "Acme Talent LLC") +
+      '<div class="osx-two">' + osxFld("EIN / Tax ID", "osxEin", b.ein, "12-3456789") + osxFld("Website", "osxWeb", b.website, "https://acme.com") + '</div>' +
+      osxFld("Business address", "osxAddr", b.address, "123 Main St, Austin, TX") +
+      osxFld("Support email", "osxEmail", b.supportEmail, "help@acme.com") +
+      '<div><button class="btn btn-primary btn-sm" data-osx="business">Save business profile</button></div></div>';
+
+    var br = st.brand, brandForm;
+    if (br.status === "approved") {
+      brandForm = '<div class="osx-form"><div class="setup-metric">✓ Brand &amp; campaign approved by the carriers — you can send A2P traffic.</div></div>';
+    } else if (br.status === "pending") {
+      brandForm = '<div class="osx-form"><div class="setup-metric">Submitted — carriers typically review A2P 10DLC in 1–3 business days.</div>' +
+        '<div><button class="btn btn-ghost btn-sm" data-osx="brand-approve">Mark approved (demo)</button></div></div>';
+    } else {
+      brandForm = '<div class="osx-form">' +
+        osxArea("Use case", "osxUse", br.useCase || "Recruiting outreach to candidates who opted in to be contacted about roles.") +
+        osxArea("Sample message", "osxSample", br.sample || "Hi {{first_name}}, it's {{recruiter}} at {{company}} about the {{role}} role. Open to a quick chat? Reply STOP to opt out.") +
+        '<div><button class="btn btn-primary btn-sm" data-osx="brand-submit">Submit for carrier registration</button></div></div>';
+    }
+
+    var numForm = st.number.value
+      ? '<div class="osx-form"><div class="setup-metric">Your texting number: <span class="osx-num">' + esc(st.number.value) + '</span></div>' +
+        '<div><button class="btn btn-ghost btn-sm" data-osx="number-release">Release &amp; choose another</button></div></div>'
+      : '<div class="osx-form">' + osxFld("Preferred area code", "osxArea", "", "512") +
+        '<div><button class="btn btn-primary btn-sm" data-osx="number">Provision a 10DLC number</button></div></div>';
+
+    var c = st.consent;
+    var consentForm = '<div class="osx-form">' +
+      osxArea("Opt-in / consent language", "osxOptIn", c.optIn || "By providing your number you agree to receive recruiting texts from {{company}}. Msg & data rates may apply. Reply STOP to opt out, HELP for help.") +
+      '<div class="osx-two">' + osxFld("Opt-out keyword", "osxOptOut", c.optOut || "STOP", "STOP") +
+        '<label class="osx-fld"><span>Quiet hours (local)</span><div class="osx-two"><input id="osxQs" type="time" value="' + esc(c.quietStart || "08:00") + '"/><input id="osxQe" type="time" value="' + esc(c.quietEnd || "21:00") + '"/></div></label></div>' +
+      '<div><button class="btn btn-primary btn-sm" data-osx="consent">Save consent rules</button></div></div>';
+
+    var candForm = st.candidatesConnected
+      ? '<div class="osx-form"><div class="setup-metric">✓ OS Text is reading from your Candidates pipeline.</div></div>'
+      : '<div class="osx-form"><div class="setup-metric">Let OS Text pull names &amp; numbers from your Candidates so you can text them directly.</div>' +
+        '<div><button class="btn btn-primary btn-sm" data-osx="candidates">Connect to Candidates</button></div></div>';
+
+    var banner = ready
+      ? '<div class="setup-banner ok">✓ All five steps complete — switch OS Text on to start texting candidates.</div>'
+      : '<div class="setup-banner warn">' + doneN + ' of 5 steps complete. Finish the steps below to turn on OS Text for your team.</div>';
+    var launch = '<div class="osx-launch"><button class="btn btn-primary" data-osx="launch"' + (ready ? "" : " disabled") + '>🚀 Turn on OS Text</button>' +
+      (ready ? '' : '<span class="muted" style="font-size:13px">Finish all five steps to enable.</span>') + '</div>';
+
+    host.innerHTML = osxStyles() + setupStyles() + banner +
+      '<div class="setup-steps">' +
+        card(1, "business", "Your business profile", "Carriers require your business details to register you for A2P 10DLC texting.", businessForm) +
+        card(2, "brand", "Register your texting brand (A2P 10DLC)", "Submit your brand + campaign so US carriers approve your recruiting texts.", brandForm) +
+        card(3, "number", "Get a texting number", "Provision a 10DLC-registered number to send and receive texts.", numForm) +
+        card(4, "consent", "Consent & compliance", "Set the opt-in language, opt-out keyword and quiet hours every text must honor.", consentForm) +
+        card(5, "candidates", "Connect your candidates", "Point OS Text at your Candidates pipeline so you can text them in a click.", candForm) +
+      '</div>' + launch;
+
+    function val(id) { var e = document.getElementById(id); return e ? (e.value || "").trim() : ""; }
+    host.addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-osx]"); if (!btn) return;
+      var act = btn.getAttribute("data-osx");
+      if (act === "business") {
+        var legalName = val("osxLegal"), ein = val("osxEin");
+        if (!legalName || !ein) { toast("Add at least the legal name and EIN."); return; }
+        osxSave({ business: { legalName: legalName, ein: ein, website: val("osxWeb"), address: val("osxAddr"), supportEmail: val("osxEmail") } }, "Business profile saved");
+      } else if (act === "brand-submit") {
+        osxSave({ brand: { status: "pending", useCase: val("osxUse"), sample: val("osxSample") } }, "Submitted for carrier registration");
+      } else if (act === "brand-approve") {
+        osxSave({ brand: { status: "approved" } }, "Brand approved");
+      } else if (act === "number") {
+        var area = (val("osxArea") || "512").replace(/\D/g, "").slice(0, 3) || "512";
+        var num = "+1 (" + area + ") 555-0" + ("00" + (parseInt(area, 10) % 1000)).slice(-3);
+        osxSave({ number: { value: num } }, "Number provisioned");
+      } else if (act === "number-release") {
+        osxSave({ number: { value: "" } });
+      } else if (act === "consent") {
+        var optIn = val("osxOptIn"); if (!optIn) { toast("Add your opt-in language."); return; }
+        osxSave({ consent: { optIn: optIn, optOut: val("osxOptOut") || "STOP", quietStart: val("osxQs") || "08:00", quietEnd: val("osxQe") || "21:00" } }, "Consent rules saved");
+      } else if (act === "candidates") {
+        osxSave({ candidatesConnected: true }, "Connected to Candidates");
+      } else if (act === "launch") {
+        if (!osxAllReady(st)) { toast("Finish all five steps first."); return; }
+        osxSave({ launched: true }, "OS Text is live");
+      }
+    });
   }
 
   /* ---------------- Voice Drops ----------------
@@ -5997,7 +6204,10 @@
   var SETUP_SECTIONS = [
     { key: "", label: "Launch readiness", icon: "🚀" },
     { key: "connected", label: "Integrations", icon: "🔌" },
-    { key: "ats", label: "ATS", icon: "🗂️" }
+    { key: "email", label: "Email sending", icon: "✉️" },
+    { key: "ats", label: "ATS", icon: "🗂️" },
+    { key: "voicedrops", label: "Voice Drops", icon: "📞" },
+    { key: "vetting", label: "AI Vetting", icon: "☎️" }
   ];
 
   function setupStyles() {
@@ -6039,8 +6249,96 @@
     el.innerHTML = setupStyles() + tabs + '<div id="setupBody"></div>';
     var body = el.querySelector("#setupBody");
     if (detail === "connected") return renderConnected(body);
+    if (detail === "email") return renderSending(body);
     if (detail === "ats") return renderAts(body);
+    if (detail === "voicedrops") return renderVoiceSetup(body, "voicedrops");
+    if (detail === "vetting") return renderVoiceSetup(body, "vetting");
     return renderSetupOverview(body);
+  }
+
+  /* ---- Voice setup (admin): telephony provider + cloned voice ----
+     Both Voice Drops and AI Vetting run on the same two dependencies — Telnyx as
+     the telephony provider, and the operator's consented cloned voice. This panel
+     stands both up in the Setup hub: connect/Test Telnyx inline (reusing the
+     Integrations Connect dialog), record a consented voice clone, and see a
+     readiness gate. Running campaigns / desks stays in the feature tab. */
+  function renderVoiceSetup(el, which) {
+    var cfg = which === "vetting"
+      ? { title: "AI Vetting setup", featureRoute: "vetting", featureLabel: "Open AI Vetting →",
+          intro: "AI Vetting answers inbound candidate calls with an AI recruiter in your cloned voice. It needs Telnyx for the phone number + call handling, and a consented cloned voice. Bind a job description to a number inside AI Vetting once both are green.",
+          extra: "Each vetting desk binds one job description to one of your Telnyx numbers and this voice — set that up per-desk in AI Vetting." }
+      : { title: "Voice Drops setup", featureRoute: "voicedrops", featureLabel: "Open Voice Drops →",
+          intro: "Voice Drops leaves a personalized cloned-voice voicemail on verified business landlines/VoIP. It needs Telnyx (Premium AMD + outbound calling) and a consented cloned voice. Mobiles are filtered and never dialed.",
+          extra: "Launching a drop also requires a per-campaign consent attestation and an identifying script — done inside Voice Drops." };
+
+    el.innerHTML = head(cfg.title,
+      "Telephony provider + your cloned voice. Stand both up here, then run it from the feature tab.") +
+      '<div id="vsReady" style="margin-bottom:14px"></div>' +
+      '<div class="card"><h3>📞 Telephony provider — Telnyx</h3>' +
+      '<p class="muted" style="font-size:13px;margin:4px 0 10px">The calling engine for SMS, the dialer (AMD), and AI Vetting. Connect your Telnyx API key and a from-number, then Test.</p>' +
+      '<div id="vsTel">' + loading() + '</div></div>' +
+      '<div class="card" style="margin-top:14px"><h3>🎙️ Cloned voice &amp; consent</h3>' +
+      '<p class="muted" style="font-size:13px;margin:4px 0 10px">Use your OWN voice, captured with a recorded consent statement. Repeat names/roles are synthesized once and reused, so cost stays near zero.</p>' +
+      '<div id="vsVoice">' + loading() + '</div></div>' +
+      '<div class="card" style="margin-top:14px"><p class="muted" style="font-size:13px;margin:0">' + esc(cfg.extra) + '</p>' +
+      '<div style="margin-top:10px"><a class="btn btn-primary btn-sm" href="#' + cfg.featureRoute + '">' + esc(cfg.featureLabel) + '</a></div></div>';
+
+    var st = { telnyx: null, clones: [], provConfigured: false };
+    function paintReady() {
+      var telOk = st.telnyx && st.telnyx.status === "green";
+      var voiceOk = (st.clones || []).length > 0;
+      var ready = telOk && voiceOk;
+      var b = $("#vsReady"); if (!b) return;
+      b.innerHTML = '<div class="setup-banner ' + (ready ? "ok" : "warn") + '">' +
+        (ready ? "✓ " + esc(cfg.title.replace(" setup", "")) + " is ready — Telnyx connected and a cloned voice on file."
+          : "Finish setup: " + [telOk ? null : "connect & test Telnyx", voiceOk ? null : "record a cloned voice"].filter(Boolean).join(" · ") + ".") +
+        '</div>';
+    }
+    function loadTelnyx() {
+      api("/connected").then(function (d) {
+        var ints = (d && d.integrations) || [];
+        st.telnyx = ints.filter(function (x) { return x.id === "telnyx"; })[0] || null;
+        var box = $("#vsTel"); if (!box) return;
+        if (!st.telnyx) { box.innerHTML = '<p class="muted">Telnyx integration unavailable.</p>'; return; }
+        var sm = cnStatusMeta(st.telnyx.status);
+        box.innerHTML = '<div class="cn-grid"><button class="cn-v" id="vsTelBtn">' +
+          '<span class="dot3" style="background:' + sm.color + '"></span>' +
+          '<div class="meta"><b>Telnyx</b><small>' + (st.telnyx.error ? esc(st.telnyx.error) : "SMS + voice (AMD) + AI Vetting telephony") + '</small></div>' +
+          '<span class="cn-badge" style="' + sm.badge + '">' + sm.label + '</span><span class="cn-go">›</span></button></div>';
+        $("#vsTelBtn").addEventListener("click", function () { openIntegrationSetup(st.telnyx, loadTelnyx); });
+        paintReady();
+      }).catch(function () { var b = $("#vsTel"); if (b) b.innerHTML = needsSetup(); });
+    }
+    function loadVoice() {
+      api("/voice/clones").then(function (d) {
+        d = d || {};
+        st.clones = d.consent || [];
+        var prov = d.provider || { configured: false, id: "—" };
+        st.provConfigured = prov.configured;
+        var list = (st.clones).map(function (c) {
+          return '<div style="font-size:13px;margin-top:4px">🎙️ <b>' + esc(c.agentName) + "</b> " + (c.voiceId ? '<span class="muted">voice ' + esc(c.voiceId) + "</span>" : '<span class="muted">(no voice id)</span>') + "</div>";
+        }).join("") || '<p class="muted" style="font-size:13px">No consented voices yet.</p>';
+        var box = $("#vsVoice"); if (!box) return;
+        box.innerHTML =
+          '<p class="muted" style="font-size:12px;margin:0 0 8px">Clone provider: <b>' + esc(prov.id) + "</b> — " + (prov.configured ? "configured." : "not configured (dry-run; set VOICE_CLONE_API_KEY).") + "</p>" +
+          '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+          '<label class="cn-fld"><span class="lab">Whose voice (your name)</span><input id="vsName" placeholder="Ryan"></label>' +
+          '<label class="cn-fld"><span class="lab">Provider voice id (optional)</span><input id="vsVoiceId" placeholder="el_xxx"></label></div>' +
+          '<label class="cn-fld"><span class="lab">Consent statement</span><textarea id="vsStmt" rows="2" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit">' + esc(typeof VD_CONSENT_TEXT !== "undefined" ? VD_CONSENT_TEXT : "I consent to the use of my voice for outreach on behalf of my firm.") + '</textarea></label>' +
+          '<div style="margin-top:6px"><button class="btn btn-primary btn-sm" id="vsSave">Record consent</button></div>' +
+          '<div style="margin-top:10px">' + list + '</div>';
+        $("#vsSave").addEventListener("click", function () {
+          var payload = { agentName: ($("#vsName").value || "").trim(), statement: ($("#vsStmt").value || "").trim(), voiceId: ($("#vsVoiceId").value || "").trim() || undefined };
+          if (!payload.agentName || !payload.statement) { toast("Name + consent statement required"); return; }
+          send("/voice/clones", "POST", payload).then(function (r) {
+            if (r.ok) { toast("Consent recorded" + (r.data && r.data.dryRun ? " (dry-run)" : "")); loadVoice(); }
+            else toast("Save failed");
+          }).catch(function () { toast("Could not reach the server."); });
+        });
+        paintReady();
+      }).catch(function () { var b = $("#vsVoice"); if (b) b.innerHTML = needsSetup(); });
+    }
+    loadTelnyx(); loadVoice();
   }
 
   // The ordered launch checklist. Reads the same backends the sub-screens use and
@@ -6059,6 +6357,8 @@
     var META = {
       connected: { title: "Connect your tools", desc: "Integration pre-flight — every required tool must turn green before campaigns can activate.",
         track: ["Each integration green", "API keys valid", "Telnyx / SMS reachable"], link: "setup/connected" },
+      email: { title: "Stand up email sending", desc: "Add your sending domains — each is auto-provisioned (DKIM, DNS, PTR), warmed, and placement-tested before it sends.",
+        track: ["≥1 MTA server active", "Domains provisioned", "Mailboxes warming"], link: "setup/email" },
       ats: { title: "Connect your ATS", desc: "Pick your system of record (Loxo is the verified primary). Replies, touches and placements sync once it's live.",
         track: ["Vendor verified", "Object mapping reviewed", "Two-way sync confirmed"], link: "setup/ats" },
       team: { title: "Add your recruiters", desc: "Invite the recruiters you'll assign campaigns to. They work the inbox, pipeline and dialer — never the back office.",
@@ -6079,6 +6379,15 @@
       var state = !req.length ? "pending" : green === req.length ? "ready" : green > 0 ? "progress" : "action";
       var metric = req.length ? (green + " of " + req.length + " required integrations green") : "No required integrations for this motion.";
       return mk("connected", state, metric);
+    }
+    function stepEmail(d) {
+      if (!d) return mk("email", "pending", "Couldn't load email-sending status.");
+      var domains = d.domains || [];
+      var active = domains.filter(function (x) { return x.status === "active"; }).length;
+      var state = !domains.length ? "action" : active > 0 ? (active < domains.length ? "progress" : "ready") : "progress";
+      var metric = !domains.length ? "No sending domains yet — add your first to auto-provision."
+        : active + " of " + domains.length + " domain" + (domains.length === 1 ? "" : "s") + " active";
+      return mk("email", state, metric);
     }
     function stepAts(d) {
       if (!d) return mk("ats", "pending", "Couldn't load ATS status.");
@@ -6112,9 +6421,9 @@
       return '<span class="s-pill ' + state + '">' + (m[state] || state) + '</span>';
     }
 
-    Promise.all([grab("/connected"), grab("/ats"), grab("/team"), grab("/prospects"), grab("/campaigns"), grab("/sequences")])
+    Promise.all([grab("/connected"), grab("/ats"), grab("/team"), grab("/prospects"), grab("/campaigns"), grab("/sequences"), grab("/sending")])
       .then(function (res) {
-        var steps = [stepConnected(res[0]), stepAts(res[1]), stepTeam(res[2]), stepAudience(res[3]), stepCampaign(res[4], res[5])];
+        var steps = [stepConnected(res[0]), stepEmail(res[6]), stepAts(res[1]), stepTeam(res[2]), stepAudience(res[3]), stepCampaign(res[4], res[5])];
         var ready = steps.filter(function (s) { return s.state === "ready"; }).length;
         var banner = (ready === steps.length)
           ? '<div class="setup-banner ok">✓ All systems are go — your ' + esc(motionLabel) + ' workspace is ready to launch.</div>'
@@ -6134,29 +6443,53 @@
       });
   }
 
+  function cnStatusMeta(status) {
+    if (status === "green") return { color: "var(--accent-green)", label: "Connected", badge: "background:rgba(56,224,166,.16);color:var(--accent-green)" };
+    if (status === "yellow") return { color: "var(--accent-amber)", label: "Saved · test it", badge: "background:rgba(255,194,77,.16);color:var(--accent-amber)" };
+    return { color: "var(--text-dim)", label: "Not connected", badge: "background:var(--surface-2);color:var(--text-dim)" };
+  }
+
   function renderConnected(el) {
-    el.innerHTML = head("Connected", "Integration pre-flight. Red → Yellow → Green. All required must be green to activate.") +
+    el.innerHTML = head("Integrations", "Connect every tool right here — enter its keys, follow the steps, then Test. Red → Yellow → Green; all required must be green to activate campaigns.") +
+      '<style>' +
+      '.cn-grid{display:flex;flex-direction:column;gap:8px}' +
+      '.cn-v{display:flex;align-items:center;gap:12px;padding:13px 15px;border:1px solid var(--border);border-radius:11px;background:var(--bg-soft);cursor:pointer;text-align:left;width:100%}' +
+      '.cn-v:hover{border-color:var(--border-strong);background:var(--surface-2)}' +
+      '.cn-v .meta{flex:1;min-width:0}.cn-v .meta b{color:var(--text);display:block}.cn-v .meta small{color:var(--text-dim);display:block;margin-top:1px}' +
+      '.cn-badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap}' +
+      '.cn-go{color:var(--text-dim);font-size:18px}' +
+      '.cn-fld{display:block;margin-bottom:12px}.cn-fld span.lab{display:block;font-size:12px;color:var(--text-muted);margin-bottom:5px;font-weight:600}' +
+      '.cn-fld input{width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit}' +
+      '.cn-fld .hint{display:block;font-size:11px;color:var(--text-dim);margin-top:4px}' +
+      '.cn-steps{margin:0 0 14px;padding-left:18px;font-size:13px;color:var(--text-dim);line-height:1.6}' +
+      '.cn-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}' +
+      '.cn-msg{min-height:18px;font-size:13px;margin:10px 0 0}' +
+      '.req-tag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(255,194,77,.14);color:var(--accent-amber)}' +
+      '</style>' +
       '<div id="cnBody">' + loading() + "</div>";
 
     function load() {
       api("/connected").then(function (d) {
         var ints = (d && d.integrations) || [];
         var rows = ints.map(function (i) {
-          var color = i.status === "green" ? "var(--accent-green)" : i.status === "yellow" ? "var(--accent-amber)" : "var(--accent-red)";
+          var sm = cnStatusMeta(i.status);
           var req = (i.requiredFor || []).indexOf(motion) >= 0 ? '<span class="req-tag">required</span>' : "";
-          return '<div class="integ"><span class="dot3" style="background:' + color + '"></span><div class="meta"><b>' + esc(i.label) + "</b><small>" + esc(i.status) + (i.error ? " · " + esc(i.error) : "") + "</small></div>" +
-            '<button class="btn btn-ghost btn-sm" data-test="' + esc(i.id) + '">Test</button>' + req + "</div>";
+          var sub = i.error ? esc(i.error) : esc(i.blurb || "");
+          return '<button class="cn-v" data-id="' + esc(i.id) + '">' +
+            '<span class="dot3" style="background:' + sm.color + '"></span>' +
+            '<div class="meta"><b>' + esc(i.label) + '</b><small>' + sub + '</small></div>' +
+            req + '<span class="cn-badge" style="' + sm.badge + '">' + sm.label + '</span><span class="cn-go">›</span></button>';
         }).join("") || '<div class="empty">No integrations available.</div>';
         var pre = ints.filter(function (i) { return (i.requiredFor || []).indexOf(motion) >= 0 && i.status !== "green"; });
-        var gate = pre.length ? '<div class="card" style="border-color:rgba(255,194,77,0.4);margin-bottom:14px"><b class="muted">⚠ ' + pre.length + " required integration(s) not green. Campaign activation is blocked for " + motion + ".</b></div>"
+        var gate = pre.length ? '<div class="card" style="border-color:rgba(255,194,77,0.4);margin-bottom:14px"><b class="muted">⚠ ' + pre.length + " required integration(s) not green yet. Campaign activation is blocked for " + motion + ". Click each below to set it up.</b></div>"
           : '<div class="card" style="border-color:rgba(56,224,166,0.4);margin-bottom:14px"><b style="color:var(--accent-green)">✓ All required integrations are green. You can activate ' + motion + " campaigns.</b></div>";
         var body = $("#cnBody"); if (!body) return;
-        body.innerHTML = gate + '<div class="card">' + rows + "</div>";
-        Array.prototype.forEach.call(body.querySelectorAll("[data-test]"), function (btn) {
+        body.innerHTML = gate + '<div class="card"><div class="cn-grid">' + rows + "</div></div>";
+        Array.prototype.forEach.call(body.querySelectorAll(".cn-v"), function (btn) {
           btn.addEventListener("click", function () {
-            btn.disabled = true; btn.textContent = "Testing...";
-            send("/connected", "POST", { action: "test", id: btn.getAttribute("data-test") })
-              .then(function () { load(); }).catch(function () { toast("Could not reach the server."); });
+            var id = btn.getAttribute("data-id");
+            if (id === "loxo") { location.hash = "setup/ats"; return; }
+            openIntegrationSetup(ints.filter(function (x) { return x.id === id; })[0], load);
           });
         });
       }).catch(function () { var b = $("#cnBody"); if (b) b.innerHTML = needsSetup(); });
@@ -6165,6 +6498,81 @@
     connectedReload = load; // let the "Test all" header button refresh
   }
   var connectedReload = null;
+
+  // Per-integration Connect dialog: shows the setup steps, takes the keys, saves
+  // them to this workspace (no redeploy), then runs the real provider.verify().
+  // Mirrors the Loxo/ATS flow so every tool is stood up the same way.
+  function openIntegrationSetup(integ, onChange) {
+    if (!integ) return;
+    var present = integ.present || [];
+    var fields = (integ.fields || []).map(function (f) {
+      var saved = present.indexOf(f.key) >= 0;
+      var ph = saved && f.secret ? "•••••••• saved" : (f.placeholder || "");
+      var lab = esc(f.label) + (f.required ? ' <span style="color:var(--accent-red)">*</span>' : ' <span class="muted">(optional)</span>') +
+        (saved && f.secret ? ' <span class="muted">— saved, leave blank to keep</span>' : '');
+      return '<label class="cn-fld"><span class="lab">' + lab + '</span>' +
+        '<input data-key="' + esc(f.key) + '" type="' + (f.secret ? "password" : "text") + '" placeholder="' + esc(ph) + '" autocomplete="off">' +
+        (f.hint ? '<span class="hint">' + esc(f.hint) + '</span>' : '') + '</label>';
+    }).join("");
+    var steps = (integ.steps || []).length
+      ? '<ol class="cn-steps">' + integ.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join("") + '</ol>' : '';
+    var docs = integ.docsUrl ? '<p class="muted" style="margin:12px 0 0;font-size:12px">Where to find these: <a href="' + esc(integ.docsUrl) + '" target="_blank" rel="noopener">' + esc(integ.docsLabel || "Provider docs ↗") + '</a></p>' : '';
+    var hasSaved = present.length > 0;
+    var hasFields = (integ.fields || []).length > 0;
+    var body = (integ.blurb ? '<p class="muted" style="margin:0 0 12px;font-size:13px">' + esc(integ.blurb) + '</p>' : '') +
+      steps + fields +
+      '<p class="cn-msg" id="cnMsg">' + (integ.error ? '<span style="color:var(--accent-red)">' + esc(integ.error) + '</span>' : '') + '</p>' +
+      (hasFields ? '<div class="cn-acts">' +
+        '<button class="btn btn-primary btn-sm" id="cnSave">Save</button>' +
+        '<button class="btn btn-sm" id="cnTest">Test connection</button>' +
+        (hasSaved ? '<button class="btn btn-ghost btn-sm" id="cnDisc" style="margin-left:auto;color:var(--accent-red)">Disconnect</button>' : '') +
+      '</div>' : '') + docs;
+
+    openModal("Connect " + integ.label, integ.blurb || "Integration setup", body, function (root, close) {
+      var msg = root.querySelector("#cnMsg");
+      function say(t, kind) { msg.innerHTML = '<span style="color:' + (kind === "err" ? "var(--accent-red)" : kind === "ok" ? "var(--accent-green)" : "var(--text-muted)") + '">' + esc(t) + "</span>"; }
+      function collect() {
+        var keys = {};
+        Array.prototype.forEach.call(root.querySelectorAll("[data-key]"), function (inp) {
+          var v = (inp.value || "").trim();
+          if (v) keys[inp.getAttribute("data-key")] = v;
+        });
+        return keys;
+      }
+      function saveFirst() { return send("/connected", "POST", { action: "save", id: integ.id, keys: collect() }); }
+      var saveBtn = root.querySelector("#cnSave");
+      if (saveBtn) saveBtn.onclick = function () {
+        say("Saving…");
+        saveFirst().then(function (r) {
+          if (r.ok) { say("Saved. Now test the connection.", "ok"); if (onChange) onChange(); }
+          else say((r.data && r.data.error) || "Could not save.", "err");
+        }).catch(function () { say("Could not reach the server.", "err"); });
+      };
+      var testBtn = root.querySelector("#cnTest");
+      if (testBtn) testBtn.onclick = function () {
+        say("Saving + testing…");
+        saveFirst().then(function () { return send("/connected", "POST", { action: "test", id: integ.id }); }).then(function (r) {
+          var res = r.data && r.data.result;
+          if (r.ok && res && res.status === "green") say("Connected ✓ — verified.", "ok");
+          else say(cnTestErr(res), "err");
+          if (onChange) onChange();
+        }).catch(function () { say("Could not reach the server.", "err"); });
+      };
+      var disc = root.querySelector("#cnDisc");
+      if (disc) disc.onclick = function () {
+        if (!window.confirm("Disconnect " + integ.label + "? The saved keys for this workspace are removed.")) return;
+        send("/connected", "POST", { action: "disconnect", id: integ.id }).then(function () { close(); toast(integ.label + " disconnected"); if (onChange) onChange(); });
+      };
+    });
+  }
+
+  function cnTestErr(res) {
+    if (!res) return "Test failed — could not reach the provider.";
+    if (res.error === "not_configured") return "Add the required key(s) above and Save before testing.";
+    if (res.error === "no_client") return "No client available for this integration.";
+    if (res.error === "connect_on_ats_tab") return "Connect Loxo on the ATS tab.";
+    return "Connection failed" + (res.error ? " — " + res.error : "") + ". Check the key and try again.";
+  }
 
   function renderAts(el) {
     el.innerHTML = head("ATS", "Your system of record. Connect Loxo to populate Candidates & Companies and keep them in sync.") +

@@ -152,10 +152,19 @@
           createdAt: new Date(Date.now() - 864e5).toISOString(), updatedAt: new Date(Date.now() - 864e5).toISOString()
         }
       ],
-      analytics: analyticsSeed(name)
+      analytics: analyticsSeed(name),
+      ostext: defaultOstext()
     };
     db.sequences = db.sequences.concat(demoRecruiterSequences());
     return db;
+  }
+
+  // OS Text (taltxt) onboarding state — a fresh recruiting company starts with
+  // nothing set up and walks the in-app step-by-step wizard to go live.
+  function defaultOstext() {
+    return { business: {}, brand: { status: "not_started" }, number: { value: "" },
+      consent: { optOut: "STOP", quietStart: "08:00", quietEnd: "21:00" },
+      candidatesConnected: false, launched: false };
   }
 
   // Sequences "set up by" the seeded recruiters, so the admin's Campaign Sequences
@@ -344,9 +353,30 @@
 
     // --- command center reads ---
     var d = db();
-    if (p === "/overview") return ok(buildOverview(d));
+    if (p === "/overview") {
+      var ovM = /(?:^|&)motion=([^&]+)/.exec(qs);
+      return ok(buildOverview(d, ovM ? decodeURIComponent(ovM[1]) : "recruiting"));
+    }
     if (p === "/analytics") return ok(d.analytics || analyticsSeed(d.user && d.user.name));
     if (p === "/response/list") return ok({ items: d.response });
+
+    // --- OS Text setup: the step-by-step go-live state (10DLC brand, number,
+    //     consent) a recruiting company completes before texting turns on.
+    if (p === "/ostext/setup") {
+      d.ostext = d.ostext || defaultOstext();
+      if (method === "POST" && body) {
+        ["business", "brand", "number", "consent"].forEach(function (k) {
+          if (body[k]) {
+            d.ostext[k] = d.ostext[k] || {};
+            for (var f in body[k]) { if (Object.prototype.hasOwnProperty.call(body[k], f)) d.ostext[k][f] = body[k][f]; }
+          }
+        });
+        if (typeof body.candidatesConnected === "boolean") d.ostext.candidatesConnected = body.candidatesConnected;
+        if (typeof body.launched === "boolean") d.ostext.launched = body.launched;
+        save(d);
+      }
+      return ok({ ostext: d.ostext });
+    }
 
     // --- In-Market Leads: who is hiring right now (search + promote) ---
     if (p === "/in-market") {
@@ -944,7 +974,8 @@
   // LinkedIn account, sending domain or recruiter immediately flows through to the
   // Dashboard with no separate wiring. Outcome fields (pipeline, appointments,
   // active campaigns) pass through from d.overview untouched — those feed Analytics.
-  function buildOverview(d) {
+  function buildOverview(d, motion) {
+    motion = motion === "bd" ? "bd" : "recruiting";
     var ov = d.overview || {};
     var locals = ["ana", "tom", "priya", "leo", "sam", "max", "mia", "noah"];
 
@@ -1018,7 +1049,34 @@
     out.mailboxes = mailboxes;
     out.linkedinCapacity = linkedinCapacity;
     out.sendsToday = sum(mailboxes, "sentToday");
+    out.recruiters = recruiterRollup(d, motion);
     return out;
+  }
+
+  // Per-recruiter high-level stats for the Dashboard "All recruiters" roster.
+  // Driven off the real team members (role "member") so the roster matches who is
+  // actually on the workspace. Activity/outcome numbers are derived
+  // deterministically (no RNG, stable across reloads) and scaled by motion, with
+  // each recruiter's real owned-campaign count mixed in. A future real backend
+  // swaps these derived numbers for measured ones; the shape stays the same.
+  function recruiterRollup(d, motion) {
+    var members = ((d.team && d.team.members) || []).filter(function (m) { return m.role === "member"; });
+    var scale = motion === "bd" ? 0.72 : 1; // BD runs lower volume than recruiting
+    function hash(s) { var h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = (h * 16777619) >>> 0; } return h; }
+    return members.map(function (m) {
+      var seed = hash((m.userId || m.name || "x") + "|" + motion);
+      var owned = (d.sequences || []).filter(function (s) { return s.owner === m.name && (s.motion || "recruiting") === motion; });
+      var active = owned.filter(function (s) { return s.status === "active"; }).length || (1 + (seed % 3));
+      return {
+        userId: m.userId, name: m.name,
+        activeCampaigns: active,
+        sentToday: Math.round((46 + (seed % 70)) * scale),
+        connects: Math.round((9 + ((seed >> 4) % 26)) * scale),
+        replies: Math.round((6 + ((seed >> 8) % 20)) * scale),
+        meetings: Math.round((2 + ((seed >> 12) % 9)) * scale),
+        wins: (seed >> 16) % 4
+      };
+    });
   }
 
   function addAccount(d, body) {

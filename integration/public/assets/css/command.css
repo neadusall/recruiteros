@@ -182,6 +182,8 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .matrix th, .matrix td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .matrix th { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; }
 .matrix td .acts { color: var(--text-muted); font-size: 12.5px; }
+.matrix tbody tr.clickable { cursor: pointer; }
+.matrix tbody tr.clickable:hover td { background: var(--surface-2); }
 
 /* Dashboard drill-downs: back link, capacity bars, email-auth pills */
 .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text); cursor: pointer; text-decoration: none; font-weight: 600; font-size: 13px; padding: 5px 12px 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); transition: background .12s, border-color .12s, color .12s; }
