@@ -145,7 +145,7 @@ function buildInstructions(
     status,
     records: [
       { type: "CNAME", host: domain, value: cnameTarget(), note: "Point your domain at the RecruitersOS app." },
-      { type: "TXT", host: verifyHost(domain), value: token, note: "Proves you own the domain — required to verify." },
+      { type: "TXT", host: verifyHost(domain), value: token, note: "Proves you own the domain (required to verify)." },
     ],
   };
 }

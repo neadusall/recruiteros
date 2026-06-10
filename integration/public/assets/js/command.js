@@ -6265,7 +6265,7 @@
      store. Changes apply to the live chrome immediately via __rosApplyBrand. */
   function renderBranding(el) {
     el.innerHTML = head("Branding",
-      "Make the portal yours — your logo, your name, your accent color. Your team and your customers see this everywhere, including your login page.") +
+      "Make the portal yours: your logo, your name, your accent color. Your team and your customers see this everywhere, including your login page.") +
       '<div id="brBody">' + loading() + '</div>';
 
     function refreshChrome(b) { if (window.__rosApplyBrand) window.__rosApplyBrand(b || {}); }
@@ -6279,7 +6279,7 @@
           '<div class="cn-fld"><span class="lab">Brand name</span><input id="brName" type="text" placeholder="RecruitersOS" value="' + esc(b.brandName || "") + '"><span class="hint">Used as the wordmark when there\'s no logo, in the browser tab, and on your login page.</span></div>' +
           '<div class="cn-fld"><span class="lab">Accent color</span><input id="brAccent" type="color" value="' + esc(accent) + '" style="width:56px;height:36px;padding:2px;cursor:pointer"><span class="hint">Primary color for buttons and highlights across the portal.</span></div>' +
           '<div class="cn-fld"><span class="lab">Logo</span>' +
-          (b.logoUrl ? '<img src="' + esc(b.logoUrl) + '" style="max-height:40px;max-width:190px;object-fit:contain;display:block;margin-bottom:8px">' : '<div class="setup-metric" style="margin-bottom:8px">No custom logo — the RecruitersOS wordmark shows.</div>') +
+          (b.logoUrl ? '<img src="' + esc(b.logoUrl) + '" style="max-height:40px;max-width:190px;object-fit:contain;display:block;margin-bottom:8px">' : '<div class="setup-metric" style="margin-bottom:8px">No custom logo. The RecruitersOS wordmark shows.</div>') +
           '<label class="btn btn-sm" style="cursor:pointer">📤 Upload logo<input id="brLogo" type="file" accept="image/*" hidden></label></div>' +
           '<div class="cn-acts"><button class="btn btn-primary btn-sm" id="brSave">Save branding</button><button class="btn btn-ghost btn-sm" id="brReset">Reset to RecruitersOS</button></div>' +
           '<p class="cn-msg" id="brMsg"></p></div>';
@@ -6319,7 +6319,7 @@
               say("Uploading…");
               send("/branding", "POST", { logoUrl: cv.toDataURL("image/png") }).then(function (r) {
                 if (r && r.ok && r.data && r.data.branding) { refreshChrome(r.data.branding); toast("Logo updated"); load(); }
-                else say(r && r.data && r.data.error === "logo_too_large" ? "That logo is too large — try a smaller image." : "Couldn't save the logo.", "err");
+                else say(r && r.data && r.data.error === "logo_too_large" ? "That logo is too large. Try a smaller image." : "Couldn't save the logo.", "err");
               });
             };
             img.onerror = function () { say("That image couldn't be read.", "err"); };
@@ -6338,7 +6338,7 @@
      wired at the edge/deploy layer; this screen owns the domain record + proof. */
   function renderDomain(el) {
     el.innerHTML = head("Custom domain",
-      "Run your portal on your own domain — your recruiters sign in at your URL, fully branded. Add it, drop in two DNS records, then Verify. Until then your workspace stays on the RecruitersOS host.") +
+      "Run your portal on your own domain, where your recruiters sign in at your URL, fully branded. Add it, drop in two DNS records, then Verify. Until then your workspace stays on the RecruitersOS host.") +
       '<style>' +
       '.dom-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}' +
       '.dom-tbl th{text-align:left;color:var(--text-dim);font-weight:600;padding:6px 10px;border-bottom:1px solid var(--border)}' +
@@ -6386,7 +6386,7 @@
           if (!v) { say("Enter a domain first.", "err"); return; }
           save.disabled = true; say("Saving…");
           send("/branding/domain", "POST", { action: "set", domain: v }).then(function (r) {
-            if (r && r.ok) { toast("Domain added — add the DNS records below."); load(); }
+            if (r && r.ok) { toast("Domain added. Add the DNS records below."); load(); }
             else { say((r && r.data && r.data.error === "invalid_domain") ? "That doesn't look like a valid domain." : "Couldn't save the domain.", "err"); save.disabled = false; }
           }).catch(function () { say("Couldn't reach the server.", "err"); save.disabled = false; });
         });
@@ -6396,7 +6396,7 @@
           verify.disabled = true; say("Checking DNS…");
           send("/branding/domain", "POST", { action: "verify" }).then(function (r) {
             if (r && r.ok && r.data && r.data.verified) { toast("Domain verified ✓"); load(); }
-            else { say(r && r.data && r.data.error === "txt_not_found" ? "TXT record not found yet — add it and give DNS a few minutes." : "Couldn't verify yet. Check the records and retry.", "err"); verify.disabled = false; }
+            else { say(r && r.data && r.data.error === "txt_not_found" ? "TXT record not found yet. Add it and give DNS a few minutes." : "Couldn't verify yet. Check the records and retry.", "err"); verify.disabled = false; }
           }).catch(function () { say("Couldn't reach the server.", "err"); verify.disabled = false; });
         });
 

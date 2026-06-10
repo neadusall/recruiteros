@@ -459,7 +459,7 @@
         domain: d.branding.customDomain, status: d.branding.domainStatus,
         records: [
           { type: "CNAME", host: d.branding.customDomain, value: "app.recruitersos.co", note: "Point your domain at the RecruitersOS app." },
-          { type: "TXT", host: "_recruiteros." + d.branding.customDomain, value: d.branding.domainToken, note: "Proves you own the domain — required to verify." }
+          { type: "TXT", host: "_recruiteros." + d.branding.customDomain, value: d.branding.domainToken, note: "Proves you own the domain (required to verify)." }
         ]
       } : null;
       return ok({ branding: d.branding, instructions: dins });
