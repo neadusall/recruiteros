@@ -10,9 +10,39 @@
 (function () {
   "use strict";
 
+  /* ---------------- auth gate + admin "view as recruiter" ----------------
+     An admin can open a specific recruiter's portal exactly as that recruiter
+     sees it, without their password. The Admin Portal hands off via
+     /recruiter#imp=<base64({token,ctx})>, where token is a real recruiter
+     session minted by the backend (team:manage gated, members-only).
+
+     We keep the handoff in sessionStorage (PER TAB) and send the token as a
+     Bearer header on every API call. The admin's own HttpOnly cookie +
+     localStorage session in other tabs is never touched, so the admin stays
+     signed in as themselves everywhere else while this one tab "is" the recruiter. */
+  var IMP_TOKEN = null;
+  (function detectImpersonation() {
+    var m = (location.hash || "").match(/[#&]imp=([^&]+)/);
+    if (m) {
+      try {
+        var payload = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
+        if (payload && payload.token && payload.ctx) {
+          sessionStorage.setItem("ros_imp_token", payload.token);
+          sessionStorage.setItem("ros_imp_ctx", JSON.stringify(payload.ctx));
+        }
+      } catch (e) {}
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+    }
+    try { IMP_TOKEN = sessionStorage.getItem("ros_imp_token") || null; } catch (e) {}
+  })();
+
   /* ---------------- auth gate ---------------- */
   var ctx = null;
-  try { ctx = JSON.parse(localStorage.getItem("ros_ctx") || "null"); } catch (e) {}
+  if (IMP_TOKEN) {
+    try { ctx = JSON.parse(sessionStorage.getItem("ros_imp_ctx") || "null"); } catch (e) {}
+  } else {
+    try { ctx = JSON.parse(localStorage.getItem("ros_ctx") || "null"); } catch (e) {}
+  }
   if (!ctx) { location.replace("/login"); return; }
   var API = (window.RECRUITEROS_API_BASE || "") + "/api";
   var motion = localStorage.getItem("ros_motion") || "recruiting";
@@ -60,6 +90,8 @@
     "voice:dial", "content:view", "analytics:view"
   ];
   var portal = (function () {
+    // Impersonating a recruiter is always the Recruiter Portal, full stop.
+    if (IMP_TOKEN) return "recruiter";
     var p = (location.pathname || "").replace(/\/+$/, "").split("/").pop().toLowerCase();
     if (p === "recruiter") return "recruiter";
     if (p === "admin" || p === "command") return "admin";
@@ -68,8 +100,10 @@
     return ctx.role === "member" ? "recruiter" : "admin";
   })();
   // A member who somehow reaches the Admin Portal is sent to their own portal.
-  if (portal === "admin" && ctx.role === "member") { location.replace("/recruiter"); return; }
-  try { localStorage.setItem("ros_portal", portal); } catch (e) {}
+  if (portal === "admin" && ctx.role === "member" && !IMP_TOKEN) { location.replace("/recruiter"); return; }
+  // Don't persist the portal while impersonating — ros_portal is shared across
+  // tabs and would bleed the recruiter view into the admin's other tabs.
+  if (!IMP_TOKEN) { try { localStorage.setItem("ros_portal", portal); } catch (e) {} }
   // In the Recruiter Portal the visible capabilities are floored at the recruiter
   // set, so an owner previewing it sees EXACTLY what a recruiter sees.
   if (portal === "recruiter") CAPS = CAPS.filter(function (c) { return MEMBER_CAPS.indexOf(c) >= 0; });
@@ -115,8 +149,15 @@
   // A 401 is retried once after a short delay before signing out: just after a
   // redeploy the backend may still be hydrating its session store from the DB,
   // and we must not nuke a valid local session during that boot window.
+  // When impersonating a recruiter, every call carries that recruiter's session
+  // as a Bearer token, which the backend honors over the (admin's) cookie.
+  function authHeaders(base) {
+    var h = base || {};
+    if (IMP_TOKEN) h["Authorization"] = "Bearer " + IMP_TOKEN;
+    return h;
+  }
   function api(path, _retried) {
-    return fetch(API + path, { credentials: "include" }).then(function (r) {
+    return fetch(API + path, { credentials: "include", headers: authHeaders() }).then(function (r) {
       if (r.status === 401) {
         if (!_retried) return delay(1200).then(function () { return api(path, true); });
         signOut(); throw 0;
@@ -129,7 +170,7 @@
   function send(path, method, payload, _retried) {
     return fetch(API + path, {
       method: method, credentials: "include",
-      headers: payload ? { "Content-Type": "application/json" } : undefined,
+      headers: authHeaders(payload ? { "Content-Type": "application/json" } : {}),
       body: payload ? JSON.stringify(payload) : undefined
     }).then(function (r) {
       if (r.status === 401) {
@@ -148,9 +189,18 @@
   var envPill = $("#envPill");
   if (envPill) envPill.style.display = "none"; // no demo/live badge: this is the product
   function signOut() {
+    // While impersonating, "sign out" must NOT touch the admin's real session
+    // (shared cookie/localStorage) — just drop the per-tab impersonation.
+    if (IMP_TOKEN) { exitImpersonation(); return; }
     fetch(API + "/auth/session", { method: "DELETE", credentials: "include" }).catch(function () {});
     localStorage.removeItem("ros_ctx"); localStorage.removeItem("ros_session");
     location.href = "/login";
+  }
+  // Leave a recruiter view-as session and return to the Admin Portal in this tab.
+  function exitImpersonation() {
+    try { sessionStorage.removeItem("ros_imp_token"); sessionStorage.removeItem("ros_imp_ctx"); } catch (e) {}
+    IMP_TOKEN = null;
+    location.replace("/admin");
   }
 
   // motion toggle
@@ -209,12 +259,26 @@
     document.title = (portal === "recruiter" ? "Recruiter Portal" : "Admin Portal") + ", RecruitersOS";
   })();
 
+  // View-as banner: a persistent strip making it unmistakable that an admin is
+  // inside a specific recruiter's portal, with one click back to Admin.
+  if (IMP_TOKEN) {
+    var bn = document.createElement("div");
+    bn.className = "imp-banner";
+    bn.innerHTML = '<span>👁️ Admin view-as — you are inside <b>' +
+      esc((ctx.user && (ctx.user.name || ctx.user.email)) || "a recruiter") +
+      "</b>'s Recruiter Portal</span><button type=\"button\" id=\"impExit\">Exit to Admin Portal</button>";
+    document.body.appendChild(bn);
+    document.body.classList.add("has-imp-banner");
+    var ieBtn = bn.querySelector("#impExit");
+    if (ieBtn) ieBtn.addEventListener("click", exitImpersonation);
+  }
+
   // Initial motion-specific nav visibility (In-Market Leads is BD-only).
   syncMotionNav();
 
   /* ---------------- router ---------------- */
   var ROUTES = {
-    overview: { title: "Overview", crumb: "Operate", action: null, render: renderOverview },
+    overview: { title: "Dashboard", crumb: "Operate", action: null, render: renderOverview },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
@@ -316,9 +380,8 @@
   }
 
   function renderOverview(el) {
-    el.innerHTML = head("Overview", "Real-time capacity and pipeline health for " + (ctx.workspace ? ctx.workspace.name : "your workspace") + ".") +
-      '<div id="ovBody">' + loading() + "</div>" +
-      '<div class="card" style="margin-top:16px"><h3>Daily cadence</h3>' + cadenceHtml() + "</div>";
+    el.innerHTML = head("Dashboard", "Real-time capacity and pipeline health for " + (ctx.workspace ? ctx.workspace.name : "your workspace") + ".") +
+      '<div id="ovBody">' + loading() + "</div>";
 
     api("/overview").then(function (o) {
       o = o || {};
@@ -5651,6 +5714,56 @@
     return map[code] || ("Could not invite (" + code + ")");
   }
 
+  /* Admin "view as recruiter": pick a recruiter and drop straight into their
+     Recruiter Portal — exactly what they see, no password. Lists the workspace's
+     members (recruiters only) and mints a per-tab impersonation session for the
+     chosen one via /api/team/impersonate. */
+  function openRecruiterPicker() {
+    var bodyHtml =
+      '<p class="muted" style="margin:0 0 12px">Dive into a recruiter\'s portal exactly as they see it — no login needed. Pick who to view.</p>' +
+      '<div id="rpList">' + loading() + "</div>" +
+      '<div class="modal-foot"><button class="btn btn-ghost" id="rpSelf">Preview the empty Recruiter Portal (as yourself)</button></div>';
+    openModal("Open a recruiter's portal", "Admin view-as", bodyHtml, function (root, close) {
+      root.querySelector("#rpSelf").addEventListener("click", function () { close(); window.open("/recruiter", "ros-recruiter"); });
+      api("/team").then(function (d) {
+        var recruiters = ((d && d.members) || []).filter(function (m) { return m.role === "member"; });
+        var listEl = root.querySelector("#rpList");
+        if (!listEl) return;
+        if (!recruiters.length) {
+          listEl.innerHTML = '<div class="empty">No recruiters in this workspace yet. Invite one from the Team tab, then dive into their portal here.</div>';
+          return;
+        }
+        listEl.innerHTML = recruiters.map(function (m) {
+          return '<button type="button" class="integ rp-row" data-uid="' + esc(m.userId) + '" ' +
+            'style="width:100%;text-align:left;cursor:pointer;background:none;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;padding:8px 10px">' +
+            '<span class="avatar" style="width:30px;height:30px;font-size:11px;background:' + colorFor(m.name) + '">' + esc(initials(m.name)) + "</span>" +
+            '<div class="meta"><b>' + esc(m.name) + (m.emailVerified ? "" : " · unverified") + "</b><small>" + esc(m.email) + "</small></div>" +
+            '<span class="cls cls-unclassified">Enter →</span></button>';
+        }).join("");
+        Array.prototype.forEach.call(listEl.querySelectorAll(".rp-row"), function (btn) {
+          btn.addEventListener("click", function () {
+            var uid = btn.getAttribute("data-uid");
+            btn.disabled = true; btn.style.opacity = ".6";
+            send("/team/impersonate", "POST", { userId: uid }).then(function (r) {
+              if (!r.ok || !r.data || !r.data.token) {
+                btn.disabled = false; btn.style.opacity = "";
+                toast("Could not open portal (" + ((r.data && r.data.error) || r.status) + ")");
+                return;
+              }
+              var handoff = {
+                token: r.data.token,
+                ctx: { user: r.data.user, workspace: r.data.workspace, role: r.data.role, capabilities: r.data.capabilities, session: r.data.session }
+              };
+              var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(handoff))));
+              close();
+              window.open("/recruiter#imp=" + encodeURIComponent(b64), "ros-rec-" + uid);
+            }).catch(function () { btn.disabled = false; btn.style.opacity = ""; toast("Could not reach the server."); });
+          });
+        });
+      }).catch(function () { var l = root.querySelector("#rpList"); if (l) l.innerHTML = needsSetup(); });
+    });
+  }
+
   /* ---------------- primary actions ---------------- */
   function primaryAction(key) {
     if (key === "team") { inviteRecruiter(); return; }
@@ -6264,7 +6377,8 @@
       var openAdmin = $("#openAdminPortal");
       var openRecruiter = $("#openRecruiterPortal");
       if (openAdmin) openAdmin.addEventListener("click", function () { window.open("/admin", "ros-admin"); });
-      if (openRecruiter) openRecruiter.addEventListener("click", function () { window.open("/recruiter", "ros-recruiter"); });
+      // Pick WHICH recruiter to dive into (view-as), no password needed.
+      if (openRecruiter) openRecruiter.addEventListener("click", function () { setOpen(false); openRecruiterPicker(); });
     }
     var so = $("#acctSignOut");
     if (so) so.addEventListener("click", signOut);

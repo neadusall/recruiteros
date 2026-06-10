@@ -124,6 +124,21 @@ export async function acceptInvite(token: string, name: string, password?: strin
   return issueSessionForUser(userId, t.workspaceId!);
 }
 
+/**
+ * Admin "view as recruiter": mint a session for a recruiter in this workspace so
+ * an admin can open that recruiter's portal exactly as they see it, no password.
+ * Hard wall: the target must be a RECRUITER (role "member") in the SAME
+ * workspace — never another admin or owner (no privilege escalation). The caller
+ * (the route) has already verified the actor holds team:manage.
+ */
+export function impersonateMember(workspaceId: string, userId: string): AuthResult {
+  const store = devAuthStore();
+  const m = store.memberships.find((x) => x.userId === userId && x.workspaceId === workspaceId);
+  if (!m) throw err("not_found", 404);
+  if (m.role !== "member") throw err("can_only_view_recruiters", 403);
+  return issueSessionForUser(userId, workspaceId);
+}
+
 /** Change a member's role (cannot change the last owner; admins can't mint owners). */
 export function setRole(actorRole: Role, workspaceId: string, userId: string, role: Role): TeamMember[] {
   const store = devAuthStore();
