@@ -18,6 +18,13 @@ import { hashPassword, verifyPassword, randomToken } from "./crypto";
 import { capabilitiesFor } from "./permissions";
 import type { AuthResult, EmailToken, Membership, Role, Session, User, Workspace } from "./types";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
+import {
+  generateTotpSecret,
+  otpauthUri,
+  verifyTotp,
+  generateRecoveryCodes,
+  hashRecoveryCode,
+} from "./totp";
 
 export * from "./types";
 export * from "./permissions";
@@ -101,7 +108,17 @@ export async function register(email: string, password: string, name: string): P
   return result(user, workspace, role, session);
 }
 
-export async function login(email: string, password: string): Promise<AuthResult> {
+/**
+ * Step one of sign-in. Verifies the password, then EITHER issues a session
+ * ({ status: "ok" }) or, when the user has TOTP enabled, withholds the session
+ * and returns a short-lived challenge ({ status: "twoFactor" }) that the client
+ * redeems with completeTwoFactorLogin() once it has the 6-digit code.
+ */
+export type LoginResult =
+  | { status: "ok"; auth: AuthResult }
+  | { status: "twoFactor"; challenge: string };
+
+export async function login(email: string, password: string): Promise<LoginResult> {
   await ensureAuthReady();
   const user = userByEmail(email);
   if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
@@ -109,9 +126,116 @@ export async function login(email: string, password: string): Promise<AuthResult
   }
   const m = primaryMembership(user.id);
   if (store.suspended.has(m.workspaceId)) throw authError("account_suspended", 403);
+
+  if (user.twoFactor?.enabled) {
+    return { status: "twoFactor", challenge: createTwoFactorChallenge(user.id, m.workspaceId) };
+  }
   const session = issueSession(user.id, m.workspaceId);
   persist();
-  return result(user, store.workspaces.get(m.workspaceId)!, m.role, session);
+  return { status: "ok", auth: result(user, store.workspaces.get(m.workspaceId)!, m.role, session) };
+}
+
+/* ---------------- two-factor (TOTP) ---------------- */
+
+/** Short-lived (in-memory) login challenges: password OK, awaiting the code. */
+interface TwoFactorChallenge { userId: string; workspaceId: string; expiresAt: number; }
+const twoFactorChallenges = new Map<string, TwoFactorChallenge>();
+const CHALLENGE_TTL_MS = 5 * 60 * 1000;
+
+function createTwoFactorChallenge(userId: string, workspaceId: string): string {
+  const token = randomToken();
+  twoFactorChallenges.set(token, { userId, workspaceId, expiresAt: Date.now() + CHALLENGE_TTL_MS });
+  return token;
+}
+
+/**
+ * Step two of sign-in for 2FA users: redeem the challenge with a TOTP code (or a
+ * one-time recovery code) and get the real session. The challenge is consumed on
+ * success; wrong codes leave it valid until it expires so the user can retry.
+ */
+export function completeTwoFactorLogin(challenge: string, code: string): AuthResult {
+  const ch = twoFactorChallenges.get(challenge);
+  if (!ch || ch.expiresAt < Date.now()) {
+    twoFactorChallenges.delete(challenge);
+    throw authError("challenge_expired", 401);
+  }
+  if (!verifyTwoFactorCode(ch.userId, code)) throw authError("invalid_code", 401);
+  twoFactorChallenges.delete(challenge);
+  if (store.suspended.has(ch.workspaceId)) throw authError("account_suspended", 403);
+  const out = issueSessionForUser(ch.userId, ch.workspaceId);
+  persist();
+  return out;
+}
+
+/** Whether a user has an active second factor. */
+export function userHasTwoFactor(userId: string): boolean {
+  return store.users.get(userId)?.twoFactor?.enabled === true;
+}
+
+export function twoFactorStatus(userId: string): { enabled: boolean; pending: boolean; recoveryRemaining: number } {
+  const tf = store.users.get(userId)?.twoFactor;
+  return {
+    enabled: tf?.enabled === true,
+    pending: Boolean(tf) && tf!.enabled === false,
+    recoveryRemaining: tf?.recoveryHashes.length ?? 0,
+  };
+}
+
+/**
+ * Begin enrollment: mint a fresh secret (not yet active) and return the data the
+ * authenticator app needs. Refuses if 2FA is already live (disable it first).
+ */
+export function beginTwoFactorSetup(userId: string): { secret: string; otpauthUri: string } {
+  const user = store.users.get(userId);
+  if (!user) throw authError("not_found", 404);
+  if (user.twoFactor?.enabled) throw authError("already_enabled", 409);
+  const secret = generateTotpSecret();
+  user.twoFactor = { secret, enabled: false, recoveryHashes: [] };
+  persist();
+  return { secret, otpauthUri: otpauthUri(secret, user.email) };
+}
+
+/**
+ * Confirm enrollment: the user proves they configured their app by entering a
+ * live code. On success 2FA goes active and we mint one-time recovery codes
+ * (returned ONCE — only their hashes are stored).
+ */
+export function confirmTwoFactorSetup(userId: string, code: string): { recoveryCodes: string[] } {
+  const user = store.users.get(userId);
+  if (!user?.twoFactor) throw authError("setup_not_started", 409);
+  if (user.twoFactor.enabled) throw authError("already_enabled", 409);
+  if (!verifyTotp(user.twoFactor.secret, code)) throw authError("invalid_code", 401);
+  const recoveryCodes = generateRecoveryCodes(10);
+  user.twoFactor.enabled = true;
+  user.twoFactor.enabledAt = nowIso();
+  user.twoFactor.recoveryHashes = recoveryCodes.map(hashRecoveryCode);
+  persist();
+  return { recoveryCodes };
+}
+
+/** Turn 2FA off. Requires a current code (or recovery code) to prove possession. */
+export function disableTwoFactor(userId: string, code: string): boolean {
+  const user = store.users.get(userId);
+  if (!user?.twoFactor?.enabled) return true;
+  if (!verifyTwoFactorCode(userId, code)) throw authError("invalid_code", 401);
+  delete user.twoFactor;
+  persist();
+  return true;
+}
+
+/** Verify a TOTP code or consume a one-time recovery code. */
+export function verifyTwoFactorCode(userId: string, code: string): boolean {
+  const tf = store.users.get(userId)?.twoFactor;
+  if (!tf?.enabled) return false;
+  if (verifyTotp(tf.secret, code)) return true;
+  const h = hashRecoveryCode(code);
+  const idx = tf.recoveryHashes.indexOf(h);
+  if (idx !== -1) {
+    tf.recoveryHashes.splice(idx, 1); // one-time use
+    persist();
+    return true;
+  }
+  return false;
 }
 
 export async function requestMagicLink(email: string): Promise<{ sent: true }> {
@@ -405,7 +529,8 @@ function primaryMembership(userId: string): Membership {
   return m;
 }
 function result(user: User, workspace: Workspace, role: Role, session: Session): AuthResult {
-  const { passwordHash: _omit, ...safe } = user;
+  // Never expose the password hash OR the 2FA secret/recovery hashes to clients.
+  const { passwordHash: _omit, twoFactor: _tf, ...safe } = user;
   return { user: safe, workspace, role, capabilities: capabilitiesFor(role), session };
 }
 
