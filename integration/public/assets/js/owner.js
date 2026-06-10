@@ -69,8 +69,8 @@
 
   /* ---------------- router ---------------- */
   // Projection calculator moved to the in-app command center (Measure → Spending).
-  var ROUTES = { overview: viewOverview, pricing: viewPricing, spend: viewSpend, accounts: viewAccounts, costs: viewCosts };
-  var TITLES = { overview: "Overview", pricing: "Pricing", spend: "Spend", accounts: "Accounts", costs: "Cost model" };
+  var ROUTES = { overview: viewOverview, pricing: viewPricing, spend: viewSpend, people: viewPeople, accounts: viewAccounts, costs: viewCosts };
+  var TITLES = { overview: "Overview", pricing: "Pricing", spend: "Spend", people: "Users & roles", accounts: "Accounts", costs: "Cost model" };
   function route() {
     var r = (location.hash.replace("#", "") || "overview");
     if (!ROUTES[r]) r = "overview";
@@ -112,6 +112,130 @@
     var max = Math.max.apply(null, entries.map(function (e) { return e[1]; })) || 1;
     return '<div class="bars">' + entries.map(function (e) {
       return '<div class="bar-row"><div>' + esc(e[0]) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + Math.max(2, (e[1] / max) * 100) + '%"></div></div><div class="num">' + usd(e[1]) + '</div></div>';
+    }).join("") + '</div>';
+  }
+
+  /* ================= PEOPLE (users & roles) ================= */
+  /* Who is on the platform and what they can do: account / admin / recruiter
+   * counts, the LLM-vs-enrichment spend split, a per-account headcount + activity
+   * rollup, and a searchable roster of every user with the functions their role
+   * grants. Rows open the existing account drawer for full control. */
+  var peopleData = null;
+  var peopleQuery = "";
+  var peopleRole = "all";
+
+  function viewPeople() {
+    api("/owner/people?window=" + win).then(function (p) {
+      peopleData = p;
+      var t = p.totals, s = p.spend;
+      var html = '<div class="v-head"><h2>Users &amp; roles</h2><p>Everyone on the platform and what they can do, plus the LLM and enrichment spend driving it. Counts are live; cost is for the selected window (' + esc(win) + '). Click any row to open full account controls.</p></div>';
+
+      html += '<div class="stat-grid">' +
+        stat(t.accounts, "Accounts (" + t.activeAccounts + " active)") +
+        stat(t.users, "Total users") +
+        stat(t.admins, "Admins") +
+        stat(t.recruiters, "Recruiters") +
+        stat(usd(s.llmUsd), "LLM spend · " + esc(win), s.llmUsd ? "bad" : "") +
+        stat(usd(s.enrichmentUsd), "Enrichment · " + esc(win), s.enrichmentUsd ? "bad" : "") +
+        '</div>';
+
+      var roleBars = { "Owners": t.owners, "Admins": t.admins, "Recruiters": t.recruiters };
+      var spendBars = {};
+      spendBars["LLM (AI)"] = s.llmUsd;
+      spendBars["Enrichment"] = s.enrichmentUsd;
+      if (s.sendingUsd) spendBars["Sending"] = s.sendingUsd;
+      if (s.signalsUsd) spendBars["Signals"] = s.signalsUsd;
+      if (s.messagingUsd) spendBars["Messaging"] = s.messagingUsd;
+      if (s.linkedinUsd) spendBars["LinkedIn"] = s.linkedinUsd;
+      if (s.infraUsd) spendBars["Infra"] = s.infraUsd;
+      if (s.otherUsd) spendBars["Other"] = s.otherUsd;
+
+      html += '<div class="two-col" style="margin-top:18px">' +
+        '<div class="card"><h3>Headcount by role</h3>' + countBars(roleBars) + '</div>' +
+        '<div class="card"><h3>Spend by function · ' + esc(win) + '</h3>' + barsFromObj(spendBars) + '</div></div>';
+
+      // Per-account headcount + activity + cost
+      html += '<div class="card" style="margin-top:14px"><h3>Accounts &amp; team</h3>';
+      if (!p.accounts.length) html += '<p class="note">No accounts yet. They appear here the moment someone signs up.</p>';
+      else {
+        html += '<div class="otable-wrap"><table class="otable"><thead><tr>' +
+          '<th>Account</th><th class="num">Admins</th><th class="num">Recruiters</th><th class="num">Sessions</th><th class="num">Activity</th><th class="num">LLM</th><th class="num">Enrich</th><th class="num">Cost</th><th>Status</th>' +
+          '</tr></thead><tbody>';
+        p.accounts.forEach(function (a) {
+          html += '<tr class="clickrow" data-id="' + esc(a.workspaceId) + '">' +
+            '<td><div class="lr-main">' + esc(a.name) + '</div><div class="lr-sub note">' + esc(a.domain || a.plan) + '</div></td>' +
+            '<td class="num">' + a.admins + '</td>' +
+            '<td class="num">' + a.recruiters + '</td>' +
+            '<td class="num">' + a.activeSessions + '</td>' +
+            '<td class="num">' + a.activityEvents.toLocaleString() + '</td>' +
+            '<td class="num">' + usd(a.llmUsd) + '</td>' +
+            '<td class="num">' + usd(a.enrichmentUsd) + '</td>' +
+            '<td class="num">' + usd(a.costUsd) + '</td>' +
+            '<td>' + (a.suspended ? '<span class="pill susp">Suspended</span>' : '<span class="pill active">Active</span>') + '</td>' +
+            '</tr>';
+        });
+        html += '</tbody></table></div>';
+      }
+      html += '</div>';
+
+      // User roster with search + role filter
+      html += '<div class="card" style="margin-top:14px"><div class="v-head" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap">' +
+        '<div><h3 style="margin:0">User roster</h3><p class="note" style="margin:2px 0 0">Every user across every account, with the functions their role grants. Click a row to manage their account.</p></div>' +
+        '<div style="display:flex;gap:8px;align-items:center">' +
+        '<select id="peopleRole" class="role-filter"><option value="all">All roles</option><option value="owner">Owners</option><option value="admin">Admins</option><option value="member">Recruiters</option></select>' +
+        '<input id="peopleSearch" type="text" placeholder="Search name, email, account…" class="people-search" value="' + esc(peopleQuery) + '">' +
+        '</div></div>';
+      html += '<div id="rosterWrap"></div></div>';
+
+      $("#view").innerHTML = html;
+      $$("#view .clickrow").forEach(function (tr) { tr.addEventListener("click", function () { openAccount(tr.dataset.id); }); });
+      var sel = $("#peopleRole"); if (sel) { sel.value = peopleRole; sel.addEventListener("change", function () { peopleRole = sel.value; renderRoster(); }); }
+      var box = $("#peopleSearch"); if (box) box.addEventListener("input", function () { peopleQuery = box.value; renderRoster(); });
+      renderRoster();
+    }).catch(fail);
+  }
+
+  function roleChip(role) {
+    var label = role === "owner" ? "Owner" : role === "admin" ? "Admin" : "Recruiter";
+    return '<span class="role-chip role-' + esc(role) + '">' + label + '</span>';
+  }
+
+  function renderRoster() {
+    var wrap = $("#rosterWrap"); if (!wrap || !peopleData) return;
+    var q = peopleQuery.trim().toLowerCase();
+    var rows = (peopleData.users || []).filter(function (u) {
+      if (peopleRole !== "all" && u.role !== peopleRole) return false;
+      if (!q) return true;
+      return (u.name + " " + u.email + " " + u.workspace).toLowerCase().indexOf(q) !== -1;
+    });
+    if (!rows.length) { wrap.innerHTML = '<p class="note">No users match.</p>'; return; }
+    var html = '<div class="otable-wrap"><table class="otable"><thead><tr>' +
+      '<th>User</th><th>Role</th><th>Account</th><th class="num">Functions</th><th>Verified</th><th>Joined</th>' +
+      '</tr></thead><tbody>';
+    rows.forEach(function (u) {
+      var caps = (u.capabilities || []).map(function (c) { return c.replace(/:/g, " · "); }).join("\n");
+      html += '<tr class="clickrow" data-id="' + esc(u.workspaceId) + '">' +
+        '<td><div class="lr-main">' + esc(u.name) + '</div><div class="lr-sub mono">' + esc(u.email) + '</div></td>' +
+        '<td>' + roleChip(u.role) + (u.suspended ? ' <span class="pill susp">susp</span>' : '') + '</td>' +
+        '<td>' + esc(u.workspace) + ' <span class="note">' + esc(u.plan) + '</span></td>' +
+        '<td class="num"><span class="fn-count" title="' + esc(caps) + '">' + (u.capabilities || []).length + ' fns</span></td>' +
+        '<td>' + (u.emailVerified ? '<span class="pill active">yes</span>' : '<span class="note">no</span>') + '</td>' +
+        '<td class="note">' + fmtDate(u.createdAt) + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table></div>';
+    wrap.innerHTML = html;
+    $$("#rosterWrap .clickrow").forEach(function (tr) { tr.addEventListener("click", function () { openAccount(tr.dataset.id); }); });
+  }
+
+  /* Count bars (integers, not dollars) — reuses the bar visual from cost rollups. */
+  function countBars(obj) {
+    var entries = Object.keys(obj || {}).map(function (k) { return [k, Number(obj[k]) || 0]; });
+    var total = entries.reduce(function (s, e) { return s + e[1]; }, 0);
+    if (!total) return '<p class="note">No users yet.</p>';
+    var max = Math.max.apply(null, entries.map(function (e) { return e[1]; })) || 1;
+    return '<div class="bars">' + entries.map(function (e) {
+      return '<div class="bar-row"><div>' + esc(e[0]) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + Math.max(2, (e[1] / max) * 100) + '%"></div></div><div class="num">' + e[1].toLocaleString() + '</div></div>';
     }).join("") + '</div>';
   }
 
