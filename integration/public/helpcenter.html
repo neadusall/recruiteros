@@ -171,6 +171,7 @@
     <aside class="toc" id="toc">
       <h4>Start here</h4>
       <a href="#overview">Overview</a>
+      <a href="#whats-new">What's new</a>
       <a href="#quickstart">Quick start</a>
 
       <h4>The application UI</h4>
@@ -232,6 +233,55 @@
           <em>real</em> engine (persistence, scheduler, safety limits, simulation clock), and the
           <code>integration/</code> backend is the production path that wires in live providers.
         </div>
+      </section>
+
+      <!-- WHAT'S NEW -->
+      <section id="whats-new">
+        <h2>What's new — 10 June 2026</h2>
+        <p>
+          A large batch of admin, billing, and pipeline upgrades shipped today. The notes below
+          are organized by area; each maps to one or more commits on <code>main</code>.
+        </p>
+
+        <h3>Portals &amp; access</h3>
+        <ul>
+          <li><strong>Admin / Recruiter portal split.</strong> Admins and recruiters now get distinct portals, each with its own navigation. Recruiters join by <em>invite only</em>, and an admin can switch between portals from the account menu.</li>
+          <li><strong>Admin "view-as".</strong> An admin can dive straight into a specific recruiter's portal — no password, no re-login — to see exactly what that recruiter sees and manage their campaigns.</li>
+          <li><strong>Motion toggle.</strong> Business Development sits on the left, Recruiting on the right, consistently across the app. The account menu spacing was tightened so every item fits.</li>
+        </ul>
+
+        <h3>Billing</h3>
+        <ul>
+          <li><strong>14-day free trial + paywall</strong> on the Admin Portal. A new workspace runs free for 14 days, then hits a paywall until a plan is active.</li>
+        </ul>
+
+        <h3>Setup hub &amp; ATS</h3>
+        <ul>
+          <li><strong>Setup hub.</strong> Integrations, ATS, Email Sending, and Outreach readiness are consolidated into one admin <strong>Setup</strong> tab, fronted by an ordered launch-readiness (go-live) checklist; each row drills into the real config screen.</li>
+          <li><strong>Loxo ATS integration.</strong> Per-workspace ATS credentials are entered in the portal (never baked into server env), with a pull-sync engine that brings Loxo <em>People</em> in as Candidates and syncs <em>Companies</em>, plus real-time webhooks and a polling cron. Connect it under <strong>Setup → ATS</strong>.</li>
+        </ul>
+
+        <h3>Dashboard &amp; Analytics</h3>
+        <ul>
+          <li><strong>Motion-scoped Dashboard</strong> with a per-recruiter drill-down and an "All recruiters" stats roster, in both Business Development and Recruiting.</li>
+          <li><strong>Clickable Analytics.</strong> Every KPI now opens a who's-who drill-down — <em>Active prospects</em>, <em>Meetings this week</em>, <em>Warm conversations</em> (with the message thread rendered inline), and <em>Placements / Won accounts</em> — and every row is traceable back to the recruiter and campaign behind it.</li>
+          <li>A more <strong>prominent "← Back to Dashboard"</strong> control on every Dashboard drill-down.</li>
+        </ul>
+
+        <h3>Campaign Sequences Library</h3>
+        <ul>
+          <li>New multi-channel templates (Email + LinkedIn + Voicemail, plus a job-title + industry specialist template), scoped to the active motion, each seeded as a single row, with a per-row <strong>Delete</strong> action.</li>
+        </ul>
+
+        <h3>Hire Signals (BD)</h3>
+        <ul>
+          <li>US-only ingestion and search, an SMB focus (&lt;5K-employee cap with small-company priority), self-starting daily ingestion with auto board-expansion and per-role dates, a <em>"Find all open roles"</em> dive into a company's own ATS board, and an opt-in verified <strong>direct-dial reveal</strong> (person-direct landline/VoIP).</li>
+        </ul>
+
+        <h3>Navigation</h3>
+        <ul>
+          <li>A new <strong>Setup</strong> section, <strong>JD Sourcing</strong> scoped to the Recruiting motion, <strong>Hire Signals</strong> surfaced under BD, campaigns consolidated into one hub, and a trimmed nav (Spending / Email Sending / Outreach removed as standalone items).</li>
+        </ul>
       </section>
 
       <!-- QUICKSTART -->
