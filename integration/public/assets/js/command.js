@@ -4948,7 +4948,7 @@
     function fmtDate(iso) { try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch (e) { return ""; } }
     function allTags() { var set = {}; store.all().forEach(function (s) { (s.tags || []).forEach(function (t) { set[t] = 1; }); }); return Object.keys(set).sort(); }
 
-    el.innerHTML = head("Sequences", "Every outreach sequence in your workspace. Build them in Campaigns, then drop them into Campaign Studio to assign prospects and deploy.") +
+    el.innerHTML = head("Sequences", "Every " + (motion === "bd" ? "BD" : "recruiting") + " outreach sequence in your workspace. Build them in Campaigns, then drop them into Campaign Studio to assign prospects and deploy.") +
       '<div class="seqlib-tools">' +
         '<button class="sl-fbtn" id="slMine"><span>👤</span> My Sequences</button>' +
         '<span class="sl-tagwrap"><button class="sl-fbtn" id="slTagBtn"><span>🏷</span> Tags <b id="slTagLbl"></b></button>' +
@@ -4970,6 +4970,9 @@
       tagSel.innerHTML = '<option value="">All tags</option>' + tags.map(function (t) { return '<option value="' + esc(t) + '"' + (t === tagFilter ? " selected" : "") + ">" + esc(t) + "</option>"; }).join("");
     }
     function matchesF(s) {
+      // Scope to the active motion (Recruiting / BD), like the rest of the app.
+      // Legacy sequences with no motion stay visible in both.
+      if (s.motion && s.motion !== motion) return false;
       if (mineOnly && (s.owner || "") !== meName) return false;
       if (tagFilter && (s.tags || []).indexOf(tagFilter) < 0) return false;
       if (!filter) return true;
@@ -4984,11 +4987,14 @@
     }
     function paint() {
       var list = store.all();
+      // Sequences in the active motion (the Library is motion-scoped, like the
+      // rest of the app). Legacy no-motion sequences count toward the current one.
+      var inMotion = list.filter(function (s) { return !s.motion || s.motion === motion; });
       var body = $("#slBody"); if (!body) return;
       syncTagOptions();
       var rows = list.filter(matchesF).sort(function (a, b) { return (b.updatedAt || "") < (a.updatedAt || "") ? -1 : 1; });
-      var cn = $("#slCount"); if (cn) cn.textContent = rows.length + " of " + list.length;
-      if (!list.length) { body.innerHTML = emptyCreate("No sequences yet — pick a channel to build your first one. It'll appear here and in Campaign Studio."); wireCreate(); return; }
+      var cn = $("#slCount"); if (cn) cn.textContent = rows.length + " of " + inMotion.length;
+      if (!inMotion.length) { body.innerHTML = emptyCreate("No " + (motion === "bd" ? "BD" : "recruiting") + " sequences yet — pick a channel to build your first one. It'll appear here and in Campaign Studio."); wireCreate(); return; }
       if (!rows.length) { body.innerHTML = '<div class="empty">No sequences match that filter.</div>'; return; }
       var trs = rows.map(function (s) {
         var c = CHANNELS[s.channel] || CHANNELS.email;
@@ -5082,8 +5088,18 @@
         if (store.all().some(function (s) { return s.id === id; })) store.remove(id);
       });
 
-      // Exactly ONE record per template (stable id). The Library lists every
-      // motion, so a single copy is all it takes — no duplicate rows.
+      // One-time migration: these templates belong to the BD motion, not
+      // Recruiting. Flip any existing recruiting-seeded copy over to BD (guarded
+      // so it won't fight a deliberate later change).
+      if (!localStorage.getItem("ros_seq_tpl_bdmove")) {
+        try { localStorage.setItem("ros_seq_tpl_bdmove", "1"); } catch (e) {}
+        ["seq_tpl_multichannel", "seq_tpl_specialist"].forEach(function (id) {
+          var s = store.all().filter(function (x) { return x.id === id; })[0];
+          if (s && s.motion !== "bd") { s.motion = "bd"; s.updatedAt = new Date().toISOString(); store.save(s); }
+        });
+      }
+
+      // Exactly ONE record per template (stable id), seeded under the BD motion.
       var seeds = [
         { id: "seq_tpl_multichannel",
           name: "Multi-channel outreach — Email · LinkedIn · Voicemail",
@@ -5094,13 +5110,13 @@
           name: "Job-title & industry specialist — Voice Note + Voicemail",
           tags: ["template", "multi-channel", "job title", "industry", "voice"], steps: seqTemplateSpecialist() }
       ];
-      if (localStorage.getItem("ros_seq_tpl_multi") === "4") return;
-      try { localStorage.setItem("ros_seq_tpl_multi", "4"); } catch (e) {}
+      if (localStorage.getItem("ros_seq_tpl_multi") === "5") return;
+      try { localStorage.setItem("ros_seq_tpl_multi", "5"); } catch (e) {}
       var now = new Date().toISOString();
       seeds.forEach(function (sd) {
         if (store.all().some(function (s) { return s.id === sd.id; })) return;
         store.save({ id: sd.id, channel: "multi", name: sd.name,
-          tags: sd.tags, status: "active", motion: "recruiting",
+          tags: sd.tags, status: "active", motion: "bd",
           owner: "RecruiterOS Templates", variables: [], steps: sd.steps,
           createdAt: now, updatedAt: now });
       });
