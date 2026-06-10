@@ -131,6 +131,25 @@ export async function poolSize(): Promise<number> {
   return (await load()).length;
 }
 
+/** One-time cleanup: drop every stored lead we can't positively place in the United States,
+ *  so the existing pool matches the US-only policy. Returns how many were removed. No-op
+ *  without a database. */
+export async function purgeNonUsFromPool(): Promise<number> {
+  const { isUsLead } = await import("./geo");
+  const pool = await load();
+  if (!pool.length) return 0;
+  const kept = pool.filter((e) => isUsLead(e.lead));
+  const removed = pool.length - kept.length;
+  if (removed > 0) {
+    await saveSnapshot(KEY, kept);
+    // Keep the activity stats' total honest after the purge.
+    const s = (await loadSnapshot<PoolStats>(STATS_KEY)) || { total: 0, lastAddedAt: null, days: {} };
+    s.total = kept.length;
+    await saveSnapshot(STATS_KEY, s);
+  }
+  return removed;
+}
+
 /** Best-effort ATS/GitHub slug from a company display name: lowercased, legal suffixes
  *  stripped, punctuation removed. e.g. "Stripe, Inc." -> "stripe". Not guaranteed to be a
  *  real slug — the seeded sources fail gracefully on a miss — but resolves the common case

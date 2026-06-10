@@ -31,6 +31,7 @@ import {
 import { addProspect } from "../prospects";
 import { rid } from "../core/ids";
 import type { Prospect } from "../core/types";
+import { isUsSignal, isUsLead } from "./geo";
 
 /** What the UI sends to search the market. Search EITHER by industry/market OR by
  *  company name — the two are mutually exclusive in the UI, but both narrow the same
@@ -260,7 +261,7 @@ function toLead(s: Signal): InMarketLead {
     domain: s.company?.domain,
     industry: s.company?.industry,
     headcountBand: s.company?.headcountBand,
-    location: geoText(s.company),
+    location: geoText(s.company) || (typeof (ev as any).location === "string" ? (ev as any).location : undefined),
     reason: s.detail || s.title,
     signalType: s.type,
     score: s.score?.value ?? 0,
@@ -420,6 +421,9 @@ export async function collectLeads(q: InMarketQuery, nowIso: string, cap = 300):
     });
     if (ranked.length === 0) ranked = before;
   }
+  // US-ONLY: drop any signal we can't positively place in the United States (the recruiter
+  // works US roles only). Applied at ingestion so nothing non-US ever enters the pool.
+  ranked = ranked.filter((s) => isUsSignal(s));
   // Stamp "added to our DB" = now for freshly collected leads. The pool overrides this with
   // the true first-seen time for companies it has already stored (see mergeIntoPool).
   return ranked.slice(0, cap).map((s) => {
@@ -452,7 +456,7 @@ export async function searchInMarket(
   const { loadSizeMap, fillSizes } = await import("./companySize");
   const sizeMap = await loadSizeMap().catch(() => ({} as Record<string, never>));
   const fresh = (arr: InMarketLead[]) =>
-    applySizeFilter(applyDateFilter(applyTaken(fillSizes(arr, sizeMap as never), taken), q, nowIso), q);
+    applySizeFilter(applyDateFilter(applyTaken(fillSizes(arr.filter(isUsLead), sizeMap as never), taken), q, nowIso), q);
 
   try {
     const { ensureAccumulator } = await import("./accumulator");

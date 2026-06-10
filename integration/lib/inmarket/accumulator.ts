@@ -13,7 +13,7 @@
  */
 
 import { collectLeads } from "./index";
-import { mergeIntoPool, poolCompanySlugs, poolCompanyNames } from "./pool";
+import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool } from "./pool";
 import { enrichSizesBatch } from "./companySize";
 
 // Sectors to keep warm — mirrors the UI's industry chips (non-tech first, since those
@@ -45,6 +45,10 @@ let sizeCursor = 0;
 
 async function runCycle(): Promise<void> {
   const now = new Date().toISOString();
+
+  // US-ONLY cleanup: prune any non-US leads still stored in the pool (one-time effect once
+  // it's clean; cheap to re-run each cycle as a guard).
+  try { await purgeNonUsFromPool(); } catch { /* best-effort */ }
 
   // 1) BREADTH VACUUM — pull every free board with NO industry keyword, so every hiring
   //    company on every board enters the pool. Industry filtering still happens later at

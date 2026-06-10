@@ -306,6 +306,8 @@
         return ok({ launch: { triggered: false, queued: true, detail: "demo: prospects flow on next queue poll" } });
       }
       d.inmarket = d.inmarket || inMarketSeed();
+      // US-ONLY: prune any seed leads not located in the United States.
+      d.inmarket = d.inmarket.filter(function (l) { return isUsLocShim(l.location); });
       // Stamp demo dates once: vary "posted online" and "added to database" across the seed
       // so the date filter and the per-lead date stamps have something to show.
       if (d.inmarket.length && !d.inmarket[0].postedAt) {
@@ -882,6 +884,21 @@
     return "+1 (415) " + String(200 + Math.floor(Math.random() * 799)) + "-" + String(1000 + Math.floor(Math.random() * 8999));
   }
   // Demo accumulation stats for the Hire Signals activity feed.
+  // US-only location check for the demo (mirror of lib/inmarket/geo.ts, lighter).
+  function isUsLocShim(text) {
+    var t = String(text || "").trim(); if (!t) return false;
+    var low = t.toLowerCase();
+    var nonUs = ["canada","toronto","vancouver","montreal","united kingdom","u.k.","uk","england","london","manchester","ireland","dublin","germany","berlin","munich","france","paris","spain","madrid","barcelona","netherlands","amsterdam","belgium","italy","rome","milan","switzerland","zurich","sweden","stockholm","norway","denmark","poland","india","bangalore","mumbai","delhi","singapore","hong kong","japan","tokyo","china","australia","sydney","melbourne","brazil","mexico","europe","emea","apac","latam","asia","worldwide","anywhere","global","international"];
+    for (var i = 0; i < nonUs.length; i++) { var re = new RegExp("(^|[^a-z])" + nonUs[i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "([^a-z]|$)"); if (re.test(low)) return false; }
+    if (/united states|u\.s\.a\.?|\busa\b/i.test(t)) return true;
+    if (/\bUS\b/.test(t) || /\(US\)/i.test(t) || /\bU\.S\.?\b/.test(t)) return true;
+    var states = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"];
+    var m = t.match(/,\s*([A-Za-z]{2})(?:[^A-Za-z]|$)/);
+    if (m && states.indexOf(m[1].toUpperCase()) >= 0) return true;
+    var names = ["california","texas","new york","florida","massachusetts","washington","illinois","georgia","colorado","virginia","oregon","arizona","north carolina","pennsylvania","michigan","ohio","district of columbia"];
+    for (var j = 0; j < names.length; j++) if (low.indexOf(names[j]) >= 0) return true;
+    return false;
+  }
   function imDemoStats(d) {
     var total = (d.inmarket || []).length;
     var days = [];
