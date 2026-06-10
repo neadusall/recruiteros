@@ -333,7 +333,7 @@
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
-    campaigns: { title: "Campaigns", crumb: "Build", action: null, render: renderCampaigns },
+    campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New sequence", render: renderCampaignsHub },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting" },
     data: { title: "Candidates", crumb: "Build", action: null, render: renderData },
@@ -445,11 +445,13 @@
   // Capacity labels -> drill-down detail slug. Used when the backend doesn't
   // stamp a `detail` on the capacity row itself (e.g. the real server).
   var CAP_DETAIL = {
-    "LinkedIn accounts": "linkedin-accounts",
-    "Sending domains": "sending-domains",
     "Email capacity/day": "email-capacity",
     "LinkedIn capacity/day": "linkedin-capacity"
   };
+
+  // LinkedIn accounts and sending domains are not surfaced in the recruiter
+  // portal (either motion) — these capacity cards are dropped from the strip.
+  var HIDE_CAP = { "LinkedIn accounts": 1, "Sending domains": 1 };
 
   var ovRecruiter = null; // admin per-recruiter Dashboard scope (userId, or null = whole workspace)
 
@@ -488,12 +490,12 @@
       o = o || {};
       // Each capacity card drills into the per-item breakdown for that resource
       // (individual accounts / domains / mailboxes / team capacity).
-      var cap = o.capacity || [];
+      var cap = (o.capacity || []).filter(function (c) { return !HIDE_CAP[c.label]; });
       var stats = cap.map(function (c) {
         var slug = c.detail || CAP_DETAIL[c.label];
         var go = slug ? ' data-go="overview/' + slug + '"' : "";
         return '<div class="stat' + (go ? " clickable" : "") + '"' + go + '><span class="rag ' + (c.status || "red") + '"></span><div class="sv">' + (c.value != null ? c.value : 0) + '</div><div class="sl">' + esc(c.label) + "</div></div>";
-      }).join("") || emptyCard("Connect your sending accounts and domains to see capacity.");
+      }).join("") || emptyCard("Connect your sending accounts to see capacity.");
       // Engine throughput today — pure sending activity + capacity utilisation.
       // No replies, meetings, conversions or per-recruiter results: every outcome
       // lives in Analytics, so the Dashboard and Analytics never track the same
@@ -516,9 +518,8 @@
       }).join("") || '<div class="empty">No active campaigns yet. Launch one to start.</div>';
 
       // Capacity & health alerts — sending infrastructure that needs attention.
+      // LinkedIn accounts and sending domains are not surfaced in this portal.
       var alerts = [];
-      (o.linkedinAccounts || []).forEach(function (a) { if (a.health && a.health !== "green") alerts.push({ rag: a.health, main: a.name, sub: "LinkedIn · " + a.status, go: "overview/linkedin-accounts" }); });
-      (o.sendingDomains || []).forEach(function (x) { if (x.health && x.health !== "green") alerts.push({ rag: x.health, main: x.domain, sub: "Domain · reputation " + x.reputation, go: "overview/sending-domains" }); });
       (o.mailboxes || []).forEach(function (m) { if (m.health && m.health !== "green") alerts.push({ rag: m.health, main: m.address, sub: "Mailbox · warmup " + m.warmup + "%", go: "overview/email-capacity" }); });
       var alertHtml = alerts.length ? alerts.map(function (al) {
         return '<div class="list-row clickable" data-go="' + al.go + '"><span class="rag ' + al.rag + '" style="width:9px;height:9px;border-radius:50%;display:inline-block;flex:none"></span><div><div class="lr-main">' + esc(al.main) + '</div><div class="lr-sub">' + esc(al.sub) + "</div></div></div>";
@@ -543,8 +544,6 @@
 
   // ---- Dashboard drill-downs (full sub-views under #overview/<slug>) ----
   var OV_DETAILS = {
-    "linkedin-accounts": { title: "LinkedIn accounts", sub: "Each connected LinkedIn seat and its per-day outreach health." },
-    "sending-domains": { title: "Sending domains", sub: "Every sending domain, its auth posture and reputation." },
     "email-capacity": { title: "Email capacity", sub: "Daily send capacity per mailbox and the health of each inbox." },
     "linkedin-capacity": { title: "LinkedIn capacity", sub: "Team-wide connection requests and profile views used today." }
   };
@@ -583,33 +582,6 @@
   }
 
   function ovDetailHtml(detail, o) {
-    if (detail === "linkedin-accounts") {
-      var accts = o.linkedinAccounts || [];
-      if (!accts.length) return emptyCard("No LinkedIn accounts connected yet. Add seats under Accounts.");
-      return '<div class="card"><div style="overflow:auto"><table class="matrix"><thead><tr>' +
-        "<th>Account</th><th>Status</th><th>Connection requests</th><th>Profile views</th><th>Acceptance</th><th>Health</th></tr></thead><tbody>" +
-        accts.map(function (a) {
-          return "<tr><td><b>" + esc(a.name) + "</b></td><td>" + esc(a.status) + "</td>" +
-            "<td>" + a.connectsUsed + " / " + a.connectCap + capBar(a.connectsUsed, a.connectCap) + "</td>" +
-            "<td>" + a.viewsUsed + " / " + a.viewCap + capBar(a.viewsUsed, a.viewCap) + "</td>" +
-            "<td>" + a.acceptance + "%</td><td>" + healthPill(a.health) + "</td></tr>";
-        }).join("") + "</tbody></table></div></div>";
-    }
-    if (detail === "sending-domains") {
-      var doms = o.sendingDomains || [];
-      if (!doms.length) return emptyCard("No sending domains connected yet. Add domains under Accounts.");
-      return '<div class="card"><div style="overflow:auto"><table class="matrix"><thead><tr>' +
-        "<th>Domain</th><th>Status</th><th>Mailboxes</th><th>Reputation</th><th>SPF / DKIM / DMARC</th><th>Sent today</th><th>Health</th></tr></thead><tbody>" +
-        doms.map(function (d) {
-          var auth = [["SPF", d.spf], ["DKIM", d.dkim], ["DMARC", d.dmarc]].map(function (x) {
-            return '<span class="auth ' + (x[1] ? "ok" : "bad") + '">' + x[0] + "</span>";
-          }).join(" ");
-          return "<tr><td><b>" + esc(d.domain) + "</b></td><td>" + esc(d.status) + "</td>" +
-            "<td>" + d.mailboxes + "</td><td>" + d.reputation + "</td><td>" + auth + "</td>" +
-            "<td>" + d.sentToday + " / " + d.cap + capBar(d.sentToday, d.cap) + "</td>" +
-            "<td>" + healthPill(d.health) + "</td></tr>";
-        }).join("") + "</tbody></table></div></div>";
-    }
     if (detail === "email-capacity") {
       var boxes = o.mailboxes || [];
       if (!boxes.length) return emptyCard("No mailboxes connected yet. Add mailboxes under Accounts.");
@@ -1997,6 +1969,30 @@
 
   var cmpEdit = null; // null = home; else the sequence object being edited
 
+  // One home for the whole campaign workflow: see everything (Library), build a
+  // sequence (Build), and assign + launch it for a recruiter (Deploy). Three
+  // sub-tabs over the existing renderers — same pattern as the Setup hub — so an
+  // admin creates and deploys campaigns in one place. The studio/content routes
+  // stay registered for deep links.
+  var CAMPAIGN_SECTIONS = [
+    { key: "", label: "Library", icon: "📚" },
+    { key: "build", label: "Build", icon: "🎯" },
+    { key: "deploy", label: "Deploy", icon: "🚀" }
+  ];
+  function renderCampaignsHub(el) {
+    var detail = currentDetail();
+    if (cmpEdit && detail !== "deploy") detail = "build"; // an open editor lives in Build
+    var tabs = '<div class="setup-tabs">' + CAMPAIGN_SECTIONS.map(function (s) {
+      return '<a class="setup-tab' + (s.key === detail ? " active" : "") + '" href="#campaigns' + (s.key ? "/" + s.key : "") + '">' +
+        '<span class="ni">' + s.icon + '</span> ' + esc(s.label) + '</a>';
+    }).join("") + '</div>';
+    el.innerHTML = setupStyles() + tabs + '<div id="campHubBody"></div>';
+    var body = el.querySelector("#campHubBody");
+    if (detail === "build") return renderCampaigns(body);
+    if (detail === "deploy") return renderStudio(body);
+    return renderContent(body);
+  }
+
   function renderCampaigns(el) {
     if (cmpEdit) { renderSeqEditor(el, cmpEdit); return; }
     renderSeqHome(el);
@@ -2061,7 +2057,7 @@
             if (!confirm("Delete this sequence?")) return;
             store.remove(id); toast("Deleted"); paintList(); return;
           }
-          if (e.target.closest("[data-deploy]")) { location.hash = "studio"; return; }
+          if (e.target.closest("[data-deploy]")) { location.hash = "campaigns/deploy"; return; }
           var eid = row.getAttribute("data-edit");
           var seq = store.all().filter(function (x) { return x.id === eid; })[0];
           if (seq) openEditor(seq);
@@ -2077,10 +2073,10 @@
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), _isNew: true };
   }
   function openEditor(seq) {
-    // Work on a deep copy so Cancel discards cleanly. Editor lives on #campaigns,
-    // so jump there if we're opening from elsewhere (e.g. the Library).
+    // Work on a deep copy so Cancel discards cleanly. The editor lives in the
+    // Campaigns hub's Build tab, so jump there if we're opening from elsewhere.
     cmpEdit = JSON.parse(JSON.stringify(seq));
-    if (currentRoute() !== "campaigns") location.hash = "campaigns";
+    if (currentRoute() !== "campaigns" || currentDetail() !== "build") location.hash = "campaigns/build";
     else render();
   }
 
@@ -2374,7 +2370,7 @@
       seqStore().save(seq);
       toast("Sequence saved");
       cmpEdit = null;
-      if (toStudio) location.hash = "studio"; else render();
+      if (toStudio) location.hash = "campaigns/deploy"; else render();
     }
   }
 
@@ -5432,7 +5428,7 @@
           '<td class="muted">' + esc(fmtDate(s.createdAt)) + "</td>" +
           '<td class="sl-actions"><button class="btn btn-ghost btn-sm" data-edit="' + esc(s.id) + '">Edit</button>' +
             '<button class="btn btn-ghost btn-sm" data-dup="' + esc(s.id) + '">Duplicate</button>' +
-            '<button class="btn btn-ghost btn-sm" data-go="studio" title="Assign + deploy in Studio">Deploy</button>' +
+            '<button class="btn btn-ghost btn-sm" data-go="campaigns/deploy" title="Assign + deploy">Deploy</button>' +
             '<button class="btn btn-ghost btn-sm sl-del" data-del="' + esc(s.id) + '" title="Delete this sequence">Delete</button></td></tr>';
       }).join("");
       body.innerHTML = '<div class="card" style="padding:0;overflow:auto"><table class="seqlib"><thead><tr>' +
@@ -5963,42 +5959,28 @@
   }
 
   function renderAccounts(el) {
-    el.innerHTML = head("Accounts", "LinkedIn sending accounts, sending domains, and API keys. Health auto-syncs nightly.") +
+    el.innerHTML = head("Accounts", "API keys for your connected services. Health auto-syncs nightly.") +
       '<div class="btn-row" style="margin-bottom:14px">' +
-      '<button class="btn btn-primary btn-sm" data-add="linkedin">＋ LinkedIn account</button>' +
-      '<button class="btn btn-ghost btn-sm" data-add="domain">＋ Sending domain</button>' +
-      '<button class="btn btn-ghost btn-sm" data-add="apikey">＋ API key</button></div>' +
+      '<button class="btn btn-primary btn-sm" data-add="apikey">＋ API key</button></div>' +
       '<div id="acBody">' + loading() + "</div>";
 
     function load() {
       api("/accounts").then(function (d) {
         d = d || {};
-        var li = (d.linkedin || []).map(function (a) {
-          var q = (a.quotas && a.quotas.connects) || 0;
-          return '<div class="integ"><span class="dot3" style="background:' + (a.warmup === "flagged" ? "var(--accent-red)" : a.warmup === "warmed" ? "var(--accent-green)" : "var(--accent-amber)") + '"></span>' +
-            '<div class="meta"><b>' + esc(a.handle) + "</b><small>" + esc(a.platform) + " · " + esc(a.warmup) + " · " + q + " connects/day</small></div></div>";
-        }).join("") || '<div class="empty">No LinkedIn accounts connected yet.</div>';
-        var dom = (d.domains || []).map(function (x) {
-          var color = x.health === "blacklisted" || x.bounceRate >= 0.02 ? "var(--accent-red)" : x.health === "healthy" ? "var(--accent-green)" : "var(--accent-amber)";
-          return '<div class="integ"><span class="dot3" style="background:' + color + '"></span><div class="meta"><b>' + esc(x.domain) + "</b><small>" + (x.inboxes || 0) + " inboxes · " + esc(x.health) + " · bounce " + (((x.bounceRate || 0) * 100).toFixed(1)) + "%</small></div></div>";
-        }).join("") || '<div class="empty">No sending domains yet.</div>';
         var keys = (d.apiKeys || []).map(function (k) {
           return '<div class="integ"><span class="dot3" style="background:var(--accent-green)"></span><div class="meta"><b>' + esc(k.service) + "</b><small>" + esc(k.masked) + "</small></div></div>";
         }).join("") || '<div class="empty">No API keys stored yet.</div>';
         var body = $("#acBody"); if (!body) return;
-        body.innerHTML = '<div class="two-col"><div class="card"><h3>LinkedIn accounts</h3>' + li + "</div>" +
-          '<div class="card"><h3>Sending domains</h3>' + dom + "</div></div>" +
-          '<div class="card" style="margin-top:14px"><h3>API keys</h3>' + keys + "</div>";
+        body.innerHTML = '<div class="card"><h3>API keys</h3>' + keys + "</div>";
       }).catch(function () { var b = $("#acBody"); if (b) b.innerHTML = needsSetup(); });
     }
     load();
 
     Array.prototype.forEach.call(el.querySelectorAll("[data-add]"), function (btn) {
       btn.addEventListener("click", function () {
-        var t = btn.getAttribute("data-add"), payload;
-        if (t === "linkedin") { var h = prompt("LinkedIn account email/username:"); if (!h) return; payload = { type: "linkedin", handle: h, platform: (prompt("Platform (unipile, salesrobot, ...):", "unipile") || "unipile") }; }
-        else if (t === "domain") { var dn = prompt("Sending domain (e.g. go-yourco.com):"); if (!dn) return; payload = { type: "domain", domain: dn, inboxes: 3 }; }
-        else { var svc = prompt("Service (Instantly, Telnyx, Loxo, ...):"); if (!svc) return; var key = prompt("API key for " + svc + ":"); if (!key) return; payload = { type: "apikey", service: svc, key: key }; }
+        var svc = prompt("Service (Instantly, Telnyx, Loxo, ...):"); if (!svc) return;
+        var key = prompt("API key for " + svc + ":"); if (!key) return;
+        var payload = { type: "apikey", service: svc, key: key };
         send("/accounts", "POST", payload).then(function (r) {
           toast(r.ok ? "Added" : "Could not add (" + (r.data.error || r.status) + ")"); if (r.ok) load();
         }).catch(function () { toast("Could not reach the server."); });
@@ -6071,13 +6053,22 @@
       '<div id="setupOv">' + loading() + '</div>';
 
     // Step copy lives here so the loaded and error branches stay in sync.
+    // The full go-live path in dependency order: stand up the back office, then
+    // add recruiters, an audience, and a campaign to assign. `link` is where each
+    // step's "Set up →" jumps (a sub-tab for infra, a route for the rest).
     var META = {
       connected: { title: "Connect your tools", desc: "Integration pre-flight — every required tool must turn green before campaigns can activate.",
-        track: ["Each integration green", "API keys valid", "Telnyx / SMS reachable"] },
+        track: ["Each integration green", "API keys valid", "Telnyx / SMS reachable"], link: "setup/connected" },
       ats: { title: "Connect your ATS", desc: "Pick your system of record (Loxo is the verified primary). Replies, touches and placements sync once it's live.",
-        track: ["Vendor verified", "Object mapping reviewed", "Two-way sync confirmed"] }
+        track: ["Vendor verified", "Object mapping reviewed", "Two-way sync confirmed"], link: "setup/ats" },
+      team: { title: "Add your recruiters", desc: "Invite the recruiters you'll assign campaigns to. They work the inbox, pipeline and dialer — never the back office.",
+        track: ["≥1 recruiter invited", "Roles set", "Assignable in Campaigns"], link: "team" },
+      audience: { title: "Load an audience", desc: "Import or source the people your campaigns will reach, so there's someone to enroll.",
+        track: ["≥1 prospect / candidate", "Lists ready to enroll"], link: "data" },
+      campaign: { title: "Build & assign a campaign", desc: "Create a sequence, then deploy it to a recruiter — all in the Campaigns hub.",
+        track: ["≥1 sequence built", "Assigned to a recruiter", "Launched"], link: "campaigns" }
     };
-    function mk(key, state, metric) { var m = META[key]; return { key: key, title: m.title, desc: m.desc, track: m.track, state: state, metric: metric }; }
+    function mk(key, state, metric) { var m = META[key]; return { key: key, title: m.title, desc: m.desc, track: m.track, link: m.link, state: state, metric: metric }; }
     function grab(path) { return api(path).then(function (d) { return d; }, function () { return null; }); }
 
     function stepConnected(d) {
@@ -6097,14 +6088,33 @@
         : "Active: " + ((av && av.label) || active) + (av && av.status === "verified" ? " · verified" : " · not verified yet");
       return mk("ats", state, metric);
     }
+    function stepTeam(d) {
+      if (!d) return mk("team", "pending", "Couldn't load the team.");
+      var recs = (d.members || []).filter(function (m) { return m.role === "member"; }).length;
+      return mk("team", recs > 0 ? "ready" : "action", recs > 0 ? (recs + " recruiter" + (recs === 1 ? "" : "s") + " ready to assign") : "No recruiters yet — invite your first.");
+    }
+    function stepAudience(d) {
+      if (!d) return mk("audience", "pending", "Couldn't load your audience.");
+      var n = (d.prospects || []).length;
+      return mk("audience", n > 0 ? "ready" : "action", n > 0 ? (n + " in your pipeline ready to enroll") : "No prospects or candidates loaded yet.");
+    }
+    function stepCampaign(camps, seqs) {
+      var nc = (camps && camps.campaigns) ? camps.campaigns.length : 0;
+      var ns = (seqs && seqs.sequences) ? seqs.sequences.length : 0;
+      var state = nc > 0 ? "ready" : ns > 0 ? "progress" : "action";
+      var metric = nc > 0 ? (nc + " campaign" + (nc === 1 ? "" : "s") + " built & assigned")
+        : ns > 0 ? (ns + " sequence" + (ns === 1 ? "" : "s") + " built — deploy one to a recruiter")
+        : "No campaigns yet — build your first sequence.";
+      return mk("campaign", state, metric);
+    }
     function sPill(state) {
       var m = { ready: "Ready", progress: "In progress", action: "Action needed", pending: "—" };
       return '<span class="s-pill ' + state + '">' + (m[state] || state) + '</span>';
     }
 
-    Promise.all([grab("/connected"), grab("/ats")])
+    Promise.all([grab("/connected"), grab("/ats"), grab("/team"), grab("/prospects"), grab("/campaigns"), grab("/sequences")])
       .then(function (res) {
-        var steps = [stepConnected(res[0]), stepAts(res[1])];
+        var steps = [stepConnected(res[0]), stepAts(res[1]), stepTeam(res[2]), stepAudience(res[3]), stepCampaign(res[4], res[5])];
         var ready = steps.filter(function (s) { return s.state === "ready"; }).length;
         var banner = (ready === steps.length)
           ? '<div class="setup-banner ok">✓ All systems are go — your ' + esc(motionLabel) + ' workspace is ready to launch.</div>'
@@ -6114,7 +6124,7 @@
             '<div class="setup-num">' + (s.state === "ready" ? "✓" : (i + 1)) + '</div>' +
             '<div class="setup-main">' +
               '<div class="setup-row"><span class="setup-title">' + esc(s.title) + '</span>' + sPill(s.state) +
-                '<a class="btn btn-ghost btn-sm setup-open" href="#setup/' + s.key + '">' + (s.state === "ready" ? "Review" : "Set up") + ' →</a></div>' +
+                '<a class="btn btn-ghost btn-sm setup-open" href="#' + s.link + '">' + (s.state === "ready" ? "Review" : "Set up") + ' →</a></div>' +
               '<div class="setup-desc">' + esc(s.desc) + '</div>' +
               '<div class="setup-metric">' + esc(s.metric) + '</div>' +
               '<div class="setup-track">' + s.track.map(function (t) { return '<span class="setup-chip">' + esc(t) + '</span>'; }).join("") + '</div>' +
@@ -6443,7 +6453,7 @@
   /* ---------------- primary actions ---------------- */
   function primaryAction(key) {
     if (key === "team") { inviteRecruiter(); return; }
-    if (key === "campaigns") { studioOpenId = null; location.hash = "studio"; return; }
+    if (key === "campaigns") { newSequenceFlow(); return; }
     if (key === "prospects") { addProspect(); return; }
     if (key === "content") { newSequenceFlow(); return; }
     if (key === "connected") {
