@@ -1,11 +1,11 @@
 /* Copies the static site (../*.html + ../assets) into public/ so Next serves
    the real pages alongside the API from one origin. Runs on prebuild.
 
-   The OWNER CONSOLE is special: it is NEVER served at a guessable path. Instead
-   it is published only at a private, unguessable slug (from OWNER_CONSOLE_SLUG,
-   or a stable random one persisted to .owner-console-slug). So the owner reaches
-   it at /<slug>.html and nobody else can find it; the owner-email API gate is the
-   second lock. */
+   The OWNER CONSOLE is served at the clean URL /owner-console (rewritten to
+   owner-console.html). The real lock is the owner-email API gate (requireOwner)
+   on every /api/owner/* call — a logged-out or non-owner visitor just gets 403s
+   and no data. We ALSO keep publishing it at the legacy private slug (from
+   OWNER_CONSOLE_SLUG or .owner-console-slug) so old bookmarks keep working. */
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
 const root = path.join(__dirname, '..'), pub = path.join(__dirname, 'public');
 fs.mkdirSync(pub, { recursive: true });
@@ -23,16 +23,16 @@ function ownerSlug() {
 }
 const slug = ownerSlug();
 
-// Copy every page EXCEPT the owner console (which must not exist at a known name).
+// Copy every page, including the owner console at its clean name (owner-console.html).
 for (const f of fs.readdirSync(root)) {
-  if (!f.endsWith('.html') || f === OWNER_FILE) continue;
+  if (!f.endsWith('.html')) continue;
   fs.copyFileSync(path.join(root, f), path.join(pub, f));
 }
 
-// Scrub any stale/guessable owner-console copy + any previous slug page, then
-// publish the console only at the current secret slug.
+// Drop stale random-slug copies from previous builds (keep the current one), then
+// publish the console at the legacy private slug too, so old bookmarks still work.
 for (const f of fs.readdirSync(pub)) {
-  if (f === OWNER_FILE || (/^owner-[0-9a-f]+\.html$/.test(f) && f !== slug + '.html')) {
+  if (/^owner-[0-9a-f]+\.html$/.test(f) && f !== slug + '.html') {
     try { fs.unlinkSync(path.join(pub, f)); } catch (e) {}
   }
 }
@@ -49,4 +49,4 @@ function cpdir(src, dst) {
 }
 if (fs.existsSync(path.join(root, 'assets'))) cpdir(path.join(root, 'assets'), path.join(pub, 'assets'));
 console.log('sync-public: pages + assets copied into integration/public');
-console.log('sync-public: OWNER CONSOLE (private) -> /' + slug + '.html');
+console.log('sync-public: OWNER CONSOLE -> /owner-console  (also /' + slug + '.html for old bookmarks)');
