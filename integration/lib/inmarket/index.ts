@@ -171,7 +171,7 @@ const MANAGER_LADDER: Record<JobFunction, string[]> = {
  * resolved a real decision-maker whose function matches, attach their name to the senior
  * rung; everything else stays a canonical title until enrichment resolves a person.
  */
-function hiringManagersFor(roles: string[] | undefined, buyer?: Person): HiringManagerLead[] {
+export function hiringManagersFor(roles: string[] | undefined, buyer?: Person): HiringManagerLead[] {
   if (!roles || !roles.length) return [];
   const buyerFn = buyer?.title ? classifyTitle(buyer.title).function : undefined;
   const seen = new Set<string>();

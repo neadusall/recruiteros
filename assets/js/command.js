@@ -873,8 +873,10 @@
       renew +
       '<details class="im-managers-d"' + ((anyChecked || l.aiRefined) ? " open" : "") + '>' +
         '<summary class="im-mgr-summary">👤 ' + nRoles + " hiring manager" + (nRoles === 1 ? "" : "s") + " &amp; open role" + (nRoles === 1 ? "" : "s") +
+          (l.allRoles ? ' <span class="im-ai-tag">🔎 full board' + (l.allRolesSource ? " · " + esc(l.allRolesSource) : "") + "</span>" : "") +
           (l.aiRefined ? ' <span class="im-ai-tag">🤖 AI-matched</span>' : "") + "</summary>" +
         '<div class="im-managers">' + rows +
+          '<button type="button" class="im-all-roles" data-id="' + esc(l.id) + '">' + (l.allRoles ? "🔎 Roles refreshed" : "🔎 Find all open roles") + "</button>" +
           '<button type="button" class="im-ai-refine" data-id="' + esc(l.id) + '">' + (l.aiRefined ? "🤖 Re-run AI match" : "🤖 Refine with AI") + "</button>" +
         "</div></details>" +
       (l.scoreReasons && l.scoreReasons.length ? '<div class="im-lead-reasons">' + l.scoreReasons.slice(0, 3).map(esc).join(" · ") + "</div>" : "") +
@@ -955,6 +957,33 @@
         else { try { var ta = document.createElement("textarea"); ta.value = msg; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); } catch (e) {} done(); }
       });
     });
+    // Dive into the company's own public ATS board → EVERY open role they're hiring for.
+    Array.prototype.forEach.call(body.querySelectorAll(".im-all-roles"), function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        var id = btn.getAttribute("data-id");
+        var lead = imFindLead(id); if (!lead) return;
+        btn.disabled = true; btn.textContent = "🔎 Scanning their board…";
+        send("/in-market", "POST", { action: "company_roles", company: lead.company, domain: lead.domain }).then(function (r) {
+          if (r.ok && r.data && r.data.hiringManagers && r.data.hiringManagers.length) {
+            // Merge the full board's roles + managers into the lead, de-duped by role::title.
+            var have = {};
+            (lead.hiringManagers || []).forEach(function (m) { have[imMgrKey(m)] = 1; });
+            var merged = (lead.hiringManagers || []).slice();
+            r.data.hiringManagers.forEach(function (m) { if (!have[imMgrKey(m)]) { have[imMgrKey(m)] = 1; merged.push(m); } });
+            lead.hiringManagers = merged;
+            lead.roles = (r.data.roles || []).slice();
+            lead.allRoles = true; lead.allRolesSource = r.data.source || "";
+            var y = window.scrollY; renderImResults(); window.scrollTo(0, y);
+            toast(lead.company + ": " + (r.data.total || 0) + " open role" + ((r.data.total === 1) ? "" : "s") + (r.data.source ? " via " + r.data.source : ""));
+          } else {
+            btn.disabled = false; btn.textContent = "🔎 Find all open roles";
+            toast("No public job board found for " + lead.company + ".");
+          }
+        }).catch(function () { btn.disabled = false; btn.textContent = "🔎 Find all open roles"; toast("Could not reach the server."); });
+      });
+    });
+
     // AI decision-maker refinement for a single company (on demand, uses the LLM key).
     Array.prototype.forEach.call(body.querySelectorAll(".im-ai-refine"), function (btn) {
       btn.addEventListener("click", function (e) {

@@ -45,6 +45,23 @@ export async function POST(req: Request) {
     return ok({ estimate: estimatePushCost(count, { directDial: b.directDial === true }) });
   }
 
+  // Dive into ONE company's own public ATS board → every open role they're hiring for
+  // (no aggregator API), with a hiring manager mapped to each. On-demand (deep-dive button).
+  if (b?.action === "company_roles") {
+    const company = String(b.company ?? "").trim();
+    if (!company) return fail("missing_company", 422);
+    try {
+      const { resolveCompanyRoles } = await import("../../../lib/inmarket/companyRoles");
+      const { hiringManagersFor } = await import("../../../lib/inmarket");
+      const r = await resolveCompanyRoles(company, b.domain ? String(b.domain) : undefined);
+      const roleTitles = r.roles.map((x) => x.title);
+      const hiringManagers = hiringManagersFor(roleTitles);
+      return ok({ roles: roleTitles, detail: r.roles, hiringManagers, source: r.source, total: roleTitles.length });
+    } catch (e: any) {
+      return fail(e?.message ?? "company_roles_failed", e?.status ?? 400);
+    }
+  }
+
   // Kick the omnichannel orchestrator (n8n) right after an approved batch is promoted.
   if (b?.action === "launch_outreach") {
     const { kickOutreach } = await import("../../../lib/inmarket/launch");

@@ -305,6 +305,29 @@
       if (method === "POST" && body && body.action === "launch_outreach") {
         return ok({ launch: { triggered: false, queued: true, detail: "demo: prospects flow on next queue poll" } });
       }
+      // Demo: dive into a company's board → a fuller set of open roles + a manager each.
+      if (method === "POST" && body && body.action === "company_roles") {
+        var demoRoles = [
+          "Senior Backend Engineer", "Staff Software Engineer", "Engineering Manager", "Product Designer",
+          "Senior Product Manager", "Account Executive", "Sales Development Rep", "Customer Success Manager",
+          "Data Analyst", "Senior Recruiter", "Finance Manager", "Marketing Manager"
+        ];
+        function fnFor(t) {
+          var s = t.toLowerCase();
+          if (/engineer|developer|devops|platform/.test(s)) return ["engineering", "VP / Head of Engineering"];
+          if (/product manager|product/.test(s)) return ["product", "VP Product / Head of Product"];
+          if (/design/.test(s)) return ["design", "VP / Head of Design"];
+          if (/data|analyst/.test(s)) return ["data", "VP / Head of Data"];
+          if (/sales|account exec|sdr|development rep/.test(s)) return ["sales", "VP Sales"];
+          if (/customer success/.test(s)) return ["customer_success", "VP Customer Success"];
+          if (/recruit|talent|people/.test(s)) return ["people_hr", "VP People / CHRO"];
+          if (/finance/.test(s)) return ["finance", "VP Finance"];
+          if (/marketing/.test(s)) return ["marketing", "VP Marketing"];
+          return ["other", "Department Head"];
+        }
+        var hm = demoRoles.map(function (t) { var f = fnFor(t); return { role: t, function: f[0], managerTitle: f[1] }; });
+        return ok({ roles: demoRoles, hiringManagers: hm, source: "Greenhouse", total: demoRoles.length });
+      }
       d.inmarket = d.inmarket || inMarketSeed();
       // US-ONLY: prune any seed leads not located in the United States.
       d.inmarket = d.inmarket.filter(function (l) { return isUsLocShim(l.location); });
