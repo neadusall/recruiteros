@@ -271,13 +271,13 @@
       if (method === "POST" && body && body.action === "estimate") {
         var n = parseInt(body.count, 10) || 0;
         var cap = 0.03;
-        // Firm per-person legs (every prospect) — full waterfall WITH premium fail-safes.
+        // Firm per-person legs (every prospect) — cheapest-first resolution.
         var firm = [
           ["Email — multi-provider waterfall (deep, 80-95%)", 0.006],
           ["Email verification", 0.001],
           ["LinkedIn profile ID + data", 0.005],
           ["Phone classify (route mobile vs landline)", 0.0025],
-          ["Phone reveal — cheap-first + premium fail-safe (capped $0.03)", Math.min(0.1, cap)],
+          ["Phone lookup (cheap-first)", 0.015],
           ["AI personalization (LLM, house voice)", 0.004]
         ];
         var perPersonLines = firm.map(function (l) { return { key: l[0], label: l[0], qty: n, unitUsd: l[1], costUsd: +(n * l[1]).toFixed(4) }; });
@@ -286,14 +286,15 @@
           count: n, perPersonLines: perPersonLines, perPersonUsd: perPersonUsd,
           firmTotalUsd: +(n * perPersonUsd).toFixed(2),
           conditional: [
+            { key: "deep_dial", label: "Deep direct-dial reveal (premium fail-safe · Apify + PDL)", unitUsd: 0.1, basis: "per number FOUND when we dial/voicemail — no-find is free; needs the dial cap ≥ $0.10 (now $0.03)" },
             { key: "voicemail", label: "Voicemail / voice-drop (Telnyx AMD → landline/VoIP)", unitUsd: 0.0095, basis: "per HOT-tier prospect (warmth ≥ 80) only" }
           ],
           dialCapUsd: cap,
           notes: [
-            "Per-person total is the FIRM cost for every prospect — the full waterfall WITH premium fail-safes (cheap rung misses escalate to deeper providers to still resolve email + a number).",
-            "Phone reveal is taken to the $0.03/contact cap; no-find lookups are free, so a true miss costs less than the ceiling shown.",
-            "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80) — shown as an add-on, not in the per-person total.",
-            "Email sends use your own warmed inboxes — no per-email charge."
+            "Per-person total is the FIRM cheapest-first resolution charged for every prospect (email waterfall + LinkedIn + cheap phone + AI).",
+            "Email is already the blended multi-provider waterfall (80-95%) — its fail-safe is baked into the $0.006.",
+            "The DEEP direct-dial reveal is the $0.10 premium fail-safe — it fires only when we actually dial/voicemail a contact, and a no-find lookup is free. It honors RECRUITEROS_MAX_DIAL_USD (now $0.03); raise it to $0.10 to let the reveal run.",
+            "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80). Email sends use your own warmed inboxes — no per-email charge."
           ]
         } });
       }

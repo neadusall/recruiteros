@@ -73,34 +73,38 @@ export function estimatePushCost(count: number): PushCostEstimate {
     perPersonLines.push({ key, label, qty: n, unitUsd, costUsd: +(n * unitUsd).toFixed(4) });
   };
 
-  // Firm, per-prospect — modelled as the FULL waterfall with premium fail-safes, not just
-  // the cheap rung: if the cheap provider misses, the engine escalates to deeper providers
-  // to still resolve the email + a real number. email_find is already the blended multi-
-  // provider waterfall (80-95% coverage). The phone reveal is the cheap lookup PLUS the
-  // premium direct-dial fail-safe, taken to the per-contact cap (no-find lookups are free,
-  // so a true miss costs less than this ceiling).
+  // FIRM, per-prospect — the cheapest-first resolution that runs for everyone. email_find is
+  // already the blended multi-provider waterfall (80-95% coverage), so the email fail-safe is
+  // baked in. Phone here is the CHEAP lookup; the premium direct-dial reveal is a separate,
+  // deeper leg below (it fires lazily at the dial/voicemail step, not for every prospect).
   add("email_find", "Email — multi-provider waterfall (deep, 80-95%)", rateCost("email_find"));
   add("email_verify", "Email verification", rateCost("email_verify"));
   add("person_enrich", "LinkedIn profile ID + data", rateCost("person_enrich"));
   add("phone_classify", "Phone classify (route mobile vs landline)", rateCost("phone_classify"));
-  add("phone_reveal", `Phone reveal — cheap-first + premium fail-safe (capped $${maxDial.toFixed(2)})`, Math.min(rateCost("apify_direct_dial"), maxDial));
+  add("landline_find", "Phone lookup (cheap-first)", rateCost("landline_find"));
   add("ai_personalize", "AI personalization (LLM, house voice)", rateCost("ai_personalize"));
 
   const perPersonUsd = +perPersonLines.reduce((s, l) => s + l.unitUsd, 0).toFixed(4);
   const firmTotalUsd = +(n * perPersonUsd).toFixed(2);
 
-  // Conditional leg — per applicable prospect, NOT in the firm total. (No SMS — not part of
-  // the BD motion.) The voicemail/voice-drop is a Telnyx AMD drop to landline/VoIP.
+  // Conditional legs — per applicable prospect, NOT in the firm total. (No SMS — not BD.)
+  //  - Deep direct-dial reveal: the $0.10 PREMIUM fail-safe (Apify + PDL) that actually
+  //    resolves the person's direct number when the cheap rung missed. Fires lazily at the
+  //    dial/voicemail step; no-find lookups are FREE. Honors the dial cap (default $0.03 —
+  //    raise RECRUITEROS_MAX_DIAL_USD to >= $0.10 to let it run; otherwise it's skipped and
+  //    fill stays low by design).
+  //  - Voicemail/voice-drop: Telnyx AMD drop to landline/VoIP, HOT-tier only.
   const voicemailUnit = +(rateCost("voice_minute") * 0.5 + rateCost("voice_clone_synthesis") * 0.3).toFixed(4);
   const conditional: ConditionalLine[] = [
+    { key: "deep_dial", label: "Deep direct-dial reveal (premium fail-safe · Apify + PDL)", unitUsd: rateCost("apify_direct_dial"), basis: `per number FOUND when we dial/voicemail — no-find is free; needs the dial cap ≥ $0.10 (now $${maxDial.toFixed(2)})` },
     { key: "voicemail", label: "Voicemail / voice-drop (Telnyx AMD → landline/VoIP)", unitUsd: voicemailUnit, basis: "per HOT-tier prospect (warmth ≥ 80) only" },
   ];
 
   const notes = [
-    "Per-person total is the FIRM cost for every prospect — the full waterfall WITH premium fail-safes (cheap rung misses escalate to deeper providers to still resolve email + a number).",
-    `Phone reveal is taken to the $${maxDial.toFixed(2)}/contact cap; no-find lookups are free, so a true miss costs less than the ceiling shown.`,
-    "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80) — shown as an add-on, not in the per-person total.",
-    "Email sends use your own warmed inboxes — no per-email charge.",
+    "Per-person total is the FIRM cheapest-first resolution charged for every prospect (email waterfall + LinkedIn + cheap phone + AI).",
+    "Email is already the blended multi-provider waterfall (80-95%) — its fail-safe is baked into the $0.006.",
+    `The DEEP direct-dial reveal is the $${rateCost("apify_direct_dial").toFixed(2)} premium fail-safe — it fires only when we actually dial/voicemail a contact, and a no-find lookup is free. It honors RECRUITEROS_MAX_DIAL_USD (now $${maxDial.toFixed(2)}); raise it to $0.10 to let the reveal run.`,
+    "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80). Email sends use your own warmed inboxes — no per-email charge.",
   ];
 
   return { count: n, perPersonLines, perPersonUsd, firmTotalUsd, conditional, dialCapUsd: maxDial, notes };
