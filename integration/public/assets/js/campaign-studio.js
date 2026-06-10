@@ -171,8 +171,8 @@
   function template(opts) {
     var motionToggle = opts.embedded ? "" :
       '<div class="cs-motion">' +
-        '<button class="mt active" data-motion="recruiting">👤 Recruiting</button>' +
         '<button class="mt" data-motion="bd">🏢 BD</button>' +
+        '<button class="mt active" data-motion="recruiting">👤 Recruiting</button>' +
       '</div>';
     return '' +
     '<div class="cs-toolbar">' +

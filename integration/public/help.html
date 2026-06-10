@@ -289,13 +289,30 @@ const QA = [
   {cat:"AI Vetting", q:"Can I move a phone number between roles?",
    a:`Yes. When you set up a desk you pick from the numbers you have connected. A number already assigned to another role shows as taken so two roles cannot claim the same line. To reuse it, detach it from the first desk and assign it to the new one.`},
   {cat:"AI Vetting", q:"How is the cost of AI Vetting calculated?",
-   a:`The Spending tab in the Recruiting section models the cost of running the vetting line, built around cost per hour on the phone. It combines the telephony cost for the full call with your cloned voice cost, factoring in that the voice only speaks part of each hour, about twenty of every sixty minutes by default since the candidate talks the rest. Every assumption is editable, and it shows you cost per call, per month, and per year.`}
+   a:`The Spending tab in the Recruiting section models the cost of running the vetting line, built around cost per hour on the phone. It combines the telephony cost for the full call with your cloned voice cost, factoring in that the voice only speaks part of each hour, about twenty of every sixty minutes by default since the candidate talks the rest. Every assumption is editable, and it shows you cost per call, per month, and per year.`},
+
+  // JD SOURCING
+  {cat:"JD Sourcing", q:"What is JD Sourcing?",
+   a:`JD Sourcing turns a job description into a ranked list of people worth reaching out to for that role. You paste the JD, and the platform works out who the ideal candidate is, goes and finds matching people, scores how well each one fits, and hands you a ranked list you can save and work. It is the hiring mirror of the rest of the platform: instead of finding companies to sell to, it finds people to hire. You will find it under Business Development, on the JD Sourcing tab.`},
+  {cat:"JD Sourcing", q:"How does JD Sourcing work, start to finish?",
+   a:`Five steps. 1) Paste the job description. 2) The platform reads it and builds an ideal-candidate profile: the titles to look for, seniority, locations, industries, and a list of real companies that employ this kind of person. 3) It searches for matching people and pulls back their profiles. 4) Every person is scored from 0 to 100 on how well they fit, with a short reason for the score, and the strongest rise to the top. 5) You save the result under a name, review it, and promote the ones you want into your Candidates pipeline under that same name.`},
+  {cat:"JD Sourcing", q:"Do I have to build the search myself?",
+   a:`No. You only paste the job description. The platform builds the candidate profile and the searches for you, including expanding vague locations like "East Coast" into real metros and suggesting the competitor companies worth poaching from. You can run it as is and review the results.`},
+  {cat:"JD Sourcing", q:"How are candidates ranked?",
+   a:`Each person gets a fit score from 0 to 100 measured against the role. The biggest factors are how closely their title matches, whether they work at one of the target companies, and whether they are in the right location, with leadership level and industry adding on top. Anything you flagged as a dealbreaker drops a person out. Every score comes with a plain language reason, so you can see why someone landed where they did instead of trusting a black box.`},
+  {cat:"JD Sourcing", q:"What does saving a run under a name do?",
+   a:`When you save a sourcing result you give it a name, and that name follows the list everywhere. When you promote the candidates, they land in your Candidates pipeline grouped under that same name, so the set you sourced for a role stays together and is easy to find later.`},
+  {cat:"JD Sourcing", q:"When does it cost money to source?",
+   a:`Finding and ranking candidates is free — you can run a search, review the list, and save it without spending anything. You only spend when you ask the platform to look up contact details like email and phone for the people you actually want to reach, and even then only for the ones you choose. Nothing is enriched automatically.`},
+  {cat:"JD Sourcing", q:"Will it ever invent candidates to fill the list?",
+   a:`No. If there is nothing to search with, the list comes back empty with a clear note rather than padded with made up people. For senior or very narrow roles it will also tell you honestly that the truly qualified pool is likely a few hundred, not thousands. The counts are real.`}
 ];
 
 const TOPICS=[
   {cat:"Overview", ic:"🏠", sub:"What it is and who it is for"},
   {cat:"Signals", ic:"📡", sub:"Reaching people at the right moment"},
   {cat:"Sourcing", ic:"🔍", sub:"Finding and enriching candidates"},
+  {cat:"JD Sourcing", ic:"🎯", sub:"Job description to a ranked candidate list"},
   {cat:"Outreach", ic:"✉️", sub:"Multi step, multi channel campaigns"},
   {cat:"Dialer", ic:"📞", sub:"Calling, texting, voicemail, history"},
   {cat:"AI Vetting", ic:"☎️", sub:"Inbound screening in your cloned voice"},
@@ -305,7 +322,7 @@ const TOPICS=[
   {cat:"Getting started", ic:"🚀", sub:"Workflow and first steps"}
 ];
 
-const CHIPS=["What is AI Vetting?","How does the dialer work?","What is a hiring signal?","How does the AI decide pass or fail?","Does it summarize my calls?"];
+const CHIPS=["What is JD Sourcing?","What is AI Vetting?","How does the dialer work?","What is a hiring signal?","How does the AI decide pass or fail?"];
 
 /* ---------- elements ---------- */
 const qInput=document.getElementById('q');
