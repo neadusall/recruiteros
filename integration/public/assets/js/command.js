@@ -5074,32 +5074,33 @@
     // user who deletes it won't see it re-seed. Saved through the shared store,
     // so it shows in the Library, Campaigns and Campaign Studio alike.
     function seedTemplate() {
-      // Seed one copy per motion (stable ids → every browser converges, no
-      // duplicates) so the template shows in both the Recruiting and BD
-      // Campaigns views (which are motion-filtered) as well as the Library.
+      // Self-healing cleanup: earlier we seeded a Recruiting AND a BD copy of
+      // each template, which showed as two identical Library rows. Drop the
+      // redundant BD copies wherever they still linger. Runs every load (cheap)
+      // so it converges even if a stale browser re-pushes one.
+      ["seq_tpl_multichannel_bd", "seq_tpl_specialist_bd"].forEach(function (id) {
+        if (store.all().some(function (s) { return s.id === id; })) store.remove(id);
+      });
+
+      // Exactly ONE record per template (stable id). The Library lists every
+      // motion, so a single copy is all it takes — no duplicate rows.
       var seeds = [
-        { id: "seq_tpl_multichannel", motion: "recruiting",
-          name: "Multi-channel outreach — Email · LinkedIn · Voicemail",
-          tags: ["template", "multi-channel"], steps: seqTemplate("multi") },
-        { id: "seq_tpl_multichannel_bd", motion: "bd",
+        { id: "seq_tpl_multichannel",
           name: "Multi-channel outreach — Email · LinkedIn · Voicemail",
           tags: ["template", "multi-channel"], steps: seqTemplate("multi") },
         // Job-title + industry specialist cadence, with a LinkedIn voice note AND
         // a cloned-voice voicemail drop built in.
-        { id: "seq_tpl_specialist", motion: "recruiting",
-          name: "Job-title & industry specialist — Voice Note + Voicemail",
-          tags: ["template", "multi-channel", "job title", "industry", "voice"], steps: seqTemplateSpecialist() },
-        { id: "seq_tpl_specialist_bd", motion: "bd",
+        { id: "seq_tpl_specialist",
           name: "Job-title & industry specialist — Voice Note + Voicemail",
           tags: ["template", "multi-channel", "job title", "industry", "voice"], steps: seqTemplateSpecialist() }
       ];
-      if (localStorage.getItem("ros_seq_tpl_multi") === "3") return;
-      try { localStorage.setItem("ros_seq_tpl_multi", "3"); } catch (e) {}
+      if (localStorage.getItem("ros_seq_tpl_multi") === "4") return;
+      try { localStorage.setItem("ros_seq_tpl_multi", "4"); } catch (e) {}
       var now = new Date().toISOString();
       seeds.forEach(function (sd) {
         if (store.all().some(function (s) { return s.id === sd.id; })) return;
         store.save({ id: sd.id, channel: "multi", name: sd.name,
-          tags: sd.tags, status: "active", motion: sd.motion,
+          tags: sd.tags, status: "active", motion: "recruiting",
           owner: "RecruiterOS Templates", variables: [], steps: sd.steps,
           createdAt: now, updatedAt: now });
       });
