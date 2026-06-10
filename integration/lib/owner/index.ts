@@ -18,11 +18,14 @@ import {
   adminDeleteWorkspace,
   type AdminAccount,
 } from "../auth";
+import { capabilitiesFor } from "../auth/permissions";
+import type { Role } from "../auth/types";
 import {
   workspaceCost,
   workspaceCostByCategory,
   workspaceEvents,
   purgeWorkspaceUsage,
+  spendRollup,
   type SpendWindow,
 } from "../billing/ledger";
 import { workspaceAccountCounts, purgeWorkspaceAccounts } from "../accounts";
@@ -114,6 +117,178 @@ export function fullAccountDetail(workspaceId: string, window: SpendWindow = "30
   const acc = adminAccountDetail(workspaceId);
   if (!acc) return null;
   return { account: joinAccount(acc, window), recentUsage: workspaceEvents(workspaceId, 50) };
+}
+
+/* ---------------- people / users view ---------------- */
+
+/**
+ * The "who is on the platform and what can they do" view. Everything the owner
+ * asked to track in one shape: how many accounts / admins / recruiters exist,
+ * the LLM vs enrichment spend split, a flat roster of every user (with the
+ * capabilities their role grants — i.e. the functions they can perform), and a
+ * per-account rollup of headcount, activity, and cost.
+ */
+export interface PeopleUser {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  /** What this role is allowed to do — their functions on the platform. */
+  capabilities: string[];
+  workspaceId: string;
+  workspace: string;
+  plan: string;
+  suspended: boolean;
+  emailVerified: boolean;
+  hasPassword: boolean;
+  createdAt: string;
+}
+
+export interface PeopleAccount {
+  workspaceId: string;
+  name: string;
+  domain?: string;
+  plan: string;
+  suspended: boolean;
+  members: number;
+  owners: number;
+  admins: number;
+  recruiters: number;
+  activeSessions: number;
+  lastActiveAt?: string;
+  /** Activity events this workspace logged within the window. */
+  activityEvents: number;
+  costUsd: number;
+  llmUsd: number;
+  enrichmentUsd: number;
+}
+
+export interface PeopleOverview {
+  window: SpendWindow;
+  totals: {
+    accounts: number;
+    activeAccounts: number;
+    suspendedAccounts: number;
+    users: number;
+    owners: number;
+    admins: number;
+    recruiters: number;
+    activeSessions: number;
+  };
+  spend: {
+    llmUsd: number;
+    enrichmentUsd: number;
+    sendingUsd: number;
+    signalsUsd: number;
+    messagingUsd: number;
+    linkedinUsd: number;
+    infraUsd: number;
+    otherUsd: number;
+    totalUsd: number;
+  };
+  roles: Record<Role, number>;
+  users: PeopleUser[];
+  accounts: PeopleAccount[];
+}
+
+function windowStartMs(window: SpendWindow): number {
+  if (window === "all") return 0;
+  const now = Date.now();
+  if (window === "today") return now - 24 * 3600 * 1000;
+  if (window === "7d") return now - 7 * 24 * 3600 * 1000;
+  return now - 30 * 24 * 3600 * 1000;
+}
+
+export function peopleOverview(window: SpendWindow = "30d"): PeopleOverview {
+  const accounts = adminListAccounts();
+  const roll = spendRollup(window);
+  const since = windowStartMs(window);
+
+  // Activity events per workspace within the window.
+  const core = devCore();
+  const activityByWs = new Map<string, number>();
+  for (const e of core.activity) {
+    if (Date.parse(e.at) < since) continue;
+    activityByWs.set(e.workspaceId, (activityByWs.get(e.workspaceId) ?? 0) + 1);
+  }
+
+  const roles: Record<Role, number> = { owner: 0, admin: 0, member: 0 };
+  const users: PeopleUser[] = [];
+  const peopleAccounts: PeopleAccount[] = [];
+
+  for (const acc of accounts) {
+    let owners = 0, admins = 0, recruiters = 0;
+    for (const m of acc.members) {
+      if (m.role === "owner") owners++;
+      else if (m.role === "admin") admins++;
+      else recruiters++;
+      roles[m.role] = (roles[m.role] ?? 0) + 1;
+      users.push({
+        id: m.id,
+        name: m.name,
+        email: m.email,
+        role: m.role,
+        capabilities: capabilitiesFor(m.role),
+        workspaceId: acc.workspaceId,
+        workspace: acc.name,
+        plan: acc.plan,
+        suspended: acc.suspended,
+        emailVerified: m.emailVerified,
+        hasPassword: m.hasPassword,
+        createdAt: m.createdAt,
+      });
+    }
+    const byCat = workspaceCostByCategory(acc.workspaceId, window);
+    peopleAccounts.push({
+      workspaceId: acc.workspaceId,
+      name: acc.name,
+      domain: acc.domain,
+      plan: acc.plan,
+      suspended: acc.suspended,
+      members: acc.members.length,
+      owners, admins, recruiters,
+      activeSessions: acc.activeSessions,
+      lastActiveAt: acc.lastActiveAt,
+      activityEvents: activityByWs.get(acc.workspaceId) ?? 0,
+      costUsd: workspaceCost(acc.workspaceId, window),
+      llmUsd: byCat["ai"] ?? 0,
+      enrichmentUsd: byCat["enrichment"] ?? 0,
+    });
+  }
+
+  // Roster: most recently created first.
+  users.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  // Accounts: biggest teams first.
+  peopleAccounts.sort((a, b) => b.members - a.members);
+
+  const cat = roll.byCategory;
+  return {
+    window,
+    totals: {
+      accounts: accounts.length,
+      activeAccounts: accounts.filter((a) => !a.suspended).length,
+      suspendedAccounts: accounts.filter((a) => a.suspended).length,
+      users: users.length,
+      owners: roles.owner,
+      admins: roles.admin,
+      recruiters: roles.member,
+      activeSessions: accounts.reduce((s, a) => s + a.activeSessions, 0),
+    },
+    spend: {
+      llmUsd: cat["ai"] ?? 0,
+      enrichmentUsd: cat["enrichment"] ?? 0,
+      sendingUsd: cat["sending"] ?? 0,
+      signalsUsd: cat["signals"] ?? 0,
+      messagingUsd: cat["messaging"] ?? 0,
+      linkedinUsd: cat["linkedin"] ?? 0,
+      infraUsd: cat["infra"] ?? 0,
+      otherUsd: cat["other"] ?? 0,
+      totalUsd: roll.totalCostUsd,
+    },
+    roles,
+    users,
+    accounts: peopleAccounts,
+  };
 }
 
 /** Owner-set price / tier / notes for an account. */
