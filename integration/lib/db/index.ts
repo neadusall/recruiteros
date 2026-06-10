@@ -24,9 +24,21 @@ import * as path from "path";
 let pool: Pool | null = null;
 let ready: Promise<void> | null = null;
 
-/** Durable file directory (a mounted volume in prod). */
+/** Default on-disk store path used in production when ROS_DATA_DIR is unset. */
+const DEFAULT_PROD_DATA_DIR = "/var/lib/recruiteros";
+
+/**
+ * Durable file directory. Prefer an explicit ROS_DATA_DIR (a mounted volume).
+ * If it's unset BUT we're in production, fall back to a fixed on-disk path so the
+ * store (accounts, sessions, workspaces) survives redeploys regardless — without
+ * this, an unconfigured prod box keeps everything in memory and every deploy wipes
+ * all users + sessions (the "logged out / account gone after every deploy" bug).
+ * Local/static dev (NODE_ENV !== "production") stays in memory: no stray files.
+ */
 function fileDir(): string | null {
-  return process.env.ROS_DATA_DIR || null;
+  if (process.env.ROS_DATA_DIR) return process.env.ROS_DATA_DIR;
+  if (process.env.NODE_ENV === "production") return DEFAULT_PROD_DATA_DIR;
+  return null;
 }
 
 /** Postgres connection string, if a DB backend is in play. */
