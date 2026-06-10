@@ -38,6 +38,42 @@
   // RBAC: the session carries the capabilities the user's role allows; the UI
   // only shows what they can actually use.
   var CAPS = Array.isArray(ctx.capabilities) ? ctx.capabilities : [];
+
+  /* ---------------- portal mode (Admin vs Recruiter) ----------------
+     One engine, two faces. The Admin Portal is the agency "brain" (configure
+     APIs/tools, manage the team, control what recruiters can touch). The
+     Recruiter Portal is the same app scoped to the recruiter surface.
+
+     How we pick the portal:
+       1. URL path wins   -> /recruiter => "recruiter", /admin|/command => "admin"
+       2. else role       -> member => "recruiter", owner/admin => "admin"
+     Persisted to ros_portal so refreshes are stable.
+
+     A real recruiter (role "member") can NEVER reach the Admin Portal; if they
+     land on /admin we bounce them to /recruiter. An owner/admin opening
+     /recruiter previews the recruiter surface on their own session (no second
+     login) — that's how both portals are edited side by side. */
+  var MEMBER_CAPS = [
+    "overview:view", "response:view", "response:act",
+    "prospects:view", "prospects:edit", "sourcing:run",
+    "campaigns:view", "campaigns:create", "outreach:send",
+    "voice:dial", "content:view", "analytics:view"
+  ];
+  var portal = (function () {
+    var p = (location.pathname || "").replace(/\/+$/, "").split("/").pop().toLowerCase();
+    if (p === "recruiter") return "recruiter";
+    if (p === "admin" || p === "command") return "admin";
+    var saved = null; try { saved = localStorage.getItem("ros_portal"); } catch (e) {}
+    if (saved === "recruiter" || saved === "admin") return saved;
+    return ctx.role === "member" ? "recruiter" : "admin";
+  })();
+  // A member who somehow reaches the Admin Portal is sent to their own portal.
+  if (portal === "admin" && ctx.role === "member") { location.replace("/recruiter"); return; }
+  try { localStorage.setItem("ros_portal", portal); } catch (e) {}
+  // In the Recruiter Portal the visible capabilities are floored at the recruiter
+  // set, so an owner previewing it sees EXACTLY what a recruiter sees.
+  if (portal === "recruiter") CAPS = CAPS.filter(function (c) { return MEMBER_CAPS.indexOf(c) >= 0; });
+
   function can(cap) { return CAPS.indexOf(cap) >= 0; }
 
   /* ---------------- tiny dom helpers ---------------- */
@@ -156,8 +192,22 @@
   Array.prototype.forEach.call(document.querySelectorAll("[data-cap]"), function (el) {
     if (!can(el.getAttribute("data-cap"))) el.style.display = "none";
   });
-  // Show the role on the workspace card.
-  if (ctx.role) { var wp = $("#wsPlan"); if (wp) wp.textContent = (ctx.workspace && ctx.workspace.plan ? ctx.workspace.plan + " · " : "") + ctx.role; }
+  // Show the role on the workspace card. In the Recruiter Portal the role label
+  // reads "recruiter" regardless of the viewer's real role (an owner previewing
+  // should see the recruiter's-eye view, not "owner").
+  if (ctx.role) {
+    var wp = $("#wsPlan");
+    var shownRole = portal === "recruiter" ? "recruiter" : ctx.role;
+    if (wp) wp.textContent = (ctx.workspace && ctx.workspace.plan ? ctx.workspace.plan + " · " : "") + shownRole;
+  }
+
+  // Portal identity: each portal says plainly what it is.
+  (function () {
+    var badge = $("#portalBadge");
+    var label = portal === "recruiter" ? "🧑‍💼 Recruiter Portal" : "🛡️ Admin Portal";
+    if (badge) { badge.textContent = label; badge.setAttribute("data-portal", portal); }
+    document.title = (portal === "recruiter" ? "Recruiter Portal" : "Admin Portal") + ", RecruitersOS";
+  })();
 
   // Initial motion-specific nav visibility (In-Market Leads is BD-only).
   syncMotionNav();
@@ -5550,16 +5600,55 @@
   }
 
   function inviteRecruiter() {
-    var email = prompt("Recruiter's work email:");
-    if (!email) return;
-    var role = (prompt("Role: admin or member (recruiter)?", "member") || "member").toLowerCase();
-    if (role !== "admin" && role !== "member") role = "member";
-    send("/team", "POST", { action: "invite", email: email, role: role })
-      .then(function (r) {
-        if (r.ok) { toast("Invited " + email + " as " + role); renderTeam($("#view")); }
-        else toast("Could not invite (" + (r.data.error || r.status) + ")");
-      })
-      .catch(function () { toast("Could not reach the server."); });
+    // Owners may also mint admins; admins can only add recruiters. The session's
+    // assignableRoles (from /api/team) is authoritative — fall back to recruiter.
+    var canMintAdmin = ctx.role === "owner";
+    var roleField = canMintAdmin
+      ? '<label class="fld"><span>Role</span><select id="invRole">' +
+          '<option value="member" selected>Recruiter — works the inbox, pipeline, sourcing, outreach &amp; dialer</option>' +
+          '<option value="admin">Admin — full control, manages tools &amp; the team</option>' +
+        '</select></label>'
+      : '<input type="hidden" id="invRole" value="member" />';
+    var foot = '<div class="modal-foot"><button class="btn btn-ghost" id="invCancel">Cancel</button>' +
+      '<button class="btn btn-primary" id="invSend">Send invite →</button></div>';
+    var bodyHtml =
+      '<p class="muted" style="margin:0 0 14px">They join <b>' + esc((ctx.workspace && ctx.workspace.name) || "this workspace") +
+        '</b> through an emailed link and land in the Recruiter Portal. They inherit the tools you\'ve configured here — they can use them but never manage them.</p>' +
+      '<label class="fld"><span>Work email</span><input id="invEmail" type="email" placeholder="recruiter@company.com" autocomplete="off" /></label>' +
+      roleField +
+      '<p class="auth-msg" id="invMsg" style="min-height:18px"></p>' + foot;
+
+    openModal("Invite a recruiter", "Add someone to this workspace", bodyHtml, function (root, close) {
+      var emailEl = root.querySelector("#invEmail");
+      var roleEl = root.querySelector("#invRole");
+      var sendBtn = root.querySelector("#invSend");
+      var msgEl = root.querySelector("#invMsg");
+      if (emailEl) emailEl.focus();
+      root.querySelector("#invCancel").addEventListener("click", close);
+      function submit() {
+        var email = (emailEl.value || "").trim();
+        var role = (roleEl && roleEl.value) === "admin" ? "admin" : "member";
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { msgEl.textContent = "Enter a valid email."; msgEl.className = "auth-msg err"; return; }
+        sendBtn.disabled = true; msgEl.textContent = "Sending invite..."; msgEl.className = "auth-msg busy";
+        send("/team", "POST", { action: "invite", email: email, role: role })
+          .then(function (r) {
+            if (r.ok) { close(); toast("Invited " + email + " as " + (role === "admin" ? "admin" : "recruiter")); renderTeam($("#view")); }
+            else { sendBtn.disabled = false; msgEl.textContent = inviteErr((r.data && r.data.error) || r.status); msgEl.className = "auth-msg err"; }
+          })
+          .catch(function () { sendBtn.disabled = false; msgEl.textContent = "Could not reach the server."; msgEl.className = "auth-msg err"; });
+      }
+      sendBtn.addEventListener("click", submit);
+      if (emailEl) emailEl.addEventListener("keydown", function (e) { if (e.key === "Enter") submit(); });
+    });
+  }
+
+  function inviteErr(code) {
+    var map = {
+      already_member: "They're already on this team.",
+      role_not_assignable: "You can't assign that role.",
+      missing_fields: "Fill in the email and role."
+    };
+    return map[code] || ("Could not invite (" + code + ")");
   }
 
   /* ---------------- primary actions ---------------- */
@@ -6163,6 +6252,19 @@
     if (ownerLink && (ctx.role === "owner" || can("workspace:delete"))) {
       ownerLink.hidden = false;
       ownerLink.addEventListener("click", function () { location.href = "/owner-console"; });
+    }
+
+    // Portal switch (owner/admin only): jump between the Admin and Recruiter
+    // portals. Opens in a new tab so both stay live at once on one login — this
+    // is how the owner edits/previews both side by side. Real recruiters never
+    // see this group (they only have the Recruiter Portal).
+    var switchGroup = $("#portalSwitch");
+    if (switchGroup && ctx.role !== "member") {
+      switchGroup.hidden = false;
+      var openAdmin = $("#openAdminPortal");
+      var openRecruiter = $("#openRecruiterPortal");
+      if (openAdmin) openAdmin.addEventListener("click", function () { window.open("/admin", "ros-admin"); });
+      if (openRecruiter) openRecruiter.addEventListener("click", function () { window.open("/recruiter", "ros-recruiter"); });
     }
     var so = $("#acctSignOut");
     if (so) so.addEventListener("click", signOut);

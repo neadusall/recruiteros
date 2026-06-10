@@ -35,13 +35,20 @@
     });
   }
 
-  function land(auth) {
+  // Land in the right portal. A recruiter (role "member", e.g. someone who just
+  // accepted an invite) goes to the Recruiter Portal; an admin/owner goes to the
+  // Admin Portal. The portal pages are the same app, scoped by role.
+  function land(auth, forcePortal) {
+    var portal = forcePortal || (auth && auth.role === "member" ? "recruiter" : "admin");
     try {
       localStorage.setItem("ros_session", auth.token || (auth.session && auth.session.token) || "");
       localStorage.setItem("ros_ctx", JSON.stringify(auth));
+      localStorage.setItem("ros_portal", portal);
     } catch (e) {}
-    say("Welcome, " + (auth.user ? auth.user.name : "") + ". Opening your command center...", "okk");
-    setTimeout(function () { location.href = "/command"; }, 500);
+    var dest = portal === "recruiter" ? "/recruiter" : "/admin";
+    say("Welcome, " + (auth.user ? auth.user.name : "") + ". Opening your " +
+      (portal === "recruiter" ? "Recruiter" : "Admin") + " Portal...", "okk");
+    setTimeout(function () { location.href = dest; }, 500);
   }
 
   function api(path, method, payload) {
@@ -85,7 +92,11 @@
         body: JSON.stringify({ token: invite, name: name, password: password }),
       }).then(function (r) {
         return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || ("http_" + r.status)); return d; });
-      }).then(land).catch(handleErr);
+      }).then(function (auth) {
+        // Invited users land in the portal their role implies (recruiters ->
+        // Recruiter Portal; an invited admin -> Admin Portal).
+        land(auth, auth && auth.role === "admin" ? "admin" : "recruiter");
+      }).catch(handleErr);
       return;
     }
 

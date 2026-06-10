@@ -38,6 +38,9 @@
     <aside class="sidebar cmd-side">
       <a href="/" class="brand"><span>Recruiters<span class="os">OS</span></span></a>
 
+      <!-- Portal identity: says plainly which portal you're in (Admin vs Recruiter). -->
+      <div class="portal-badge" id="portalBadge" data-portal="admin">🛡️ Admin Portal</div>
+
       <div class="ws-card" id="wsCard">
         <div class="ws-name" id="wsName">Workspace</div>
         <div class="ws-plan" id="wsPlan">Trial</div>
@@ -142,6 +145,13 @@
             <a class="acct-item" id="billingLink" role="menuitem"><span class="ic">💳</span> Billing &amp; plan</a>
             <a class="acct-item" href="/developers" role="menuitem"><span class="ic">⚙️</span> Developer API</a>
             <a class="acct-item" href="/helpcenter" role="menuitem"><span class="ic">❓</span> Help Center</a>
+
+            <div class="acct-sep" id="portalSwitchSep"></div>
+            <div class="acct-group" id="portalSwitch" hidden>
+              <div style="padding:0 4px 6px">Switch portal</div>
+              <a class="acct-item" id="openAdminPortal" role="menuitem"><span class="ic">🛡️</span> Open Admin Portal</a>
+              <a class="acct-item" id="openRecruiterPortal" role="menuitem"><span class="ic">🧑‍💼</span> Open Recruiter Portal</a>
+            </div>
 
             <div class="acct-sep"></div>
             <button class="acct-item danger" id="acctSignOut" role="menuitem"><span class="ic">↩︎</span> Sign out</button>

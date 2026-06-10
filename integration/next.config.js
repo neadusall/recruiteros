@@ -30,6 +30,11 @@ module.exports = {
     }));
     // /home is the clean homepage URL.
     pageRewrites.push({ source: "/home", destination: "/index.html" });
+    // Admin & Recruiter portals are the SAME app (command.html), scoped by role.
+    // command.js reads the URL path to decide which portal to render, so both
+    // clean URLs serve the one file.
+    pageRewrites.push({ source: "/admin", destination: "/command.html" });
+    pageRewrites.push({ source: "/recruiter", destination: "/command.html" });
     return pageRewrites;
   },
 

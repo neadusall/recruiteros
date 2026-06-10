@@ -19,10 +19,16 @@ const MIME = {
   '.woff2': 'font/woff2', '.map': 'application/json', '.yaml': 'text/yaml',
 };
 
+// Clean-URL aliases that map to a shared file. The Admin and Recruiter portals
+// are the SAME app (command.html); command.js reads the path to pick which
+// portal to render. Mirrors the rewrites in integration/next.config.js.
+const ALIASES = { '/admin': '/command.html', '/recruiter': '/command.html' };
+
 // Resolve a URL path to a file on disk. Supports clean URLs (e.g. /alfred ->
 // alfred.html) so the portal's extensionless nav links work locally, just like
 // they will once deployed behind a host that rewrites clean URLs.
 function resolveFile(urlPath, cb) {
+  if (ALIASES[urlPath]) urlPath = ALIASES[urlPath];
   const base = path.normalize(path.join(ROOT, urlPath));
   if (!base.startsWith(ROOT)) return cb(null);
   const candidates = path.extname(base)
