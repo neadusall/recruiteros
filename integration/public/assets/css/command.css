@@ -44,6 +44,17 @@
 .imp-banner button:hover { background: #0a0a12; }
 body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 
+/* Dashboard per-recruiter selector (admin, recruiting motion): chips that scope
+   the whole dashboard to one recruiter's book of business. */
+.ov-recruiters { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 16px; }
+.ov-chip {
+  appearance: none; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600;
+  padding: 7px 13px; border-radius: 999px; border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text-muted); transition: all .12s ease;
+}
+.ov-chip:hover { border-color: var(--brand); color: var(--text); }
+.ov-chip.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+
 .motion-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 5px; }
 .motion-toggle .mt {
   appearance: none; border: 1px solid transparent; cursor: pointer; padding: 10px 8px; border-radius: 9px;
@@ -140,6 +151,18 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .matrix th, .matrix td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .matrix th { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; }
 .matrix td .acts { color: var(--text-muted); font-size: 12.5px; }
+
+/* Dashboard drill-downs: back link, capacity bars, email-auth pills */
+.back-link { color: var(--text-muted); cursor: pointer; text-decoration: none; }
+.back-link:hover { color: var(--brand); }
+.cap-bar { height: 5px; border-radius: 3px; background: var(--surface-2); margin-top: 6px; overflow: hidden; }
+.cap-fill { height: 100%; border-radius: 3px; }
+.cap-fill.green { background: var(--accent-green); }
+.cap-fill.yellow { background: var(--accent-amber); }
+.cap-fill.red { background: var(--accent-red); }
+.auth { display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; padding: 1px 5px; border-radius: 5px; }
+.auth.ok { color: var(--accent-green); background: rgba(34, 197, 94, 0.12); }
+.auth.bad { color: var(--accent-red); background: rgba(239, 68, 68, 0.12); }
 
 /* phase checklist (Outreach) */
 .phase { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; background: var(--surface); }

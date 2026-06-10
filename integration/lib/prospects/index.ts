@@ -46,6 +46,8 @@ export interface NewProspectInput {
   headline?: string;
   category?: string;
   motion?: Motion;
+  /** The recruiter who owns this prospect (the creating user). */
+  ownerId?: string;
   warmth?: number;
 }
 
@@ -80,6 +82,7 @@ export async function addProspect(input: NewProspectInput): Promise<Prospect> {
     headline: input.headline ?? p.headline,
     category: input.category ?? p.category,
     motion: input.motion ?? p.motion,
+    ownerId: p.ownerId ?? input.ownerId,
   });
 
   // Free first pass: backfill missing email/phone from the Data warehouse (a record

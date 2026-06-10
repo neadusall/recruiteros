@@ -109,6 +109,10 @@ export interface Prospect {
   /** Which motion's bucket this prospect belongs to (recruiting vs BD), so
    *  scrapes/imports land only in the active motion's pipeline. */
   motion?: Motion;
+  /** The recruiter (member) who owns this prospect — the user who created or
+   *  imported it. Powers the per-recruiter Dashboard drill-down. Unset for
+   *  legacy/admin-created records (counted only in the workspace-wide view). */
+  ownerId?: string;
   fullName: string;
   firstName: string;
   email?: string;

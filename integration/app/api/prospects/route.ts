@@ -31,7 +31,7 @@ export async function POST(req: Request) {
   const b = await body<any>(req);
 
   if (b?.action === "bulk" && Array.isArray(b.rows)) {
-    const rows: NewProspectInput[] = b.rows.map((r: any) => ({ ...r, workspaceId: ws }));
+    const rows: NewProspectInput[] = b.rows.map((r: any) => ({ ...r, workspaceId: ws, ownerId: g.ctx.user.id }));
     return ok(await bulkUpload(rows));
   }
   if (b?.action === "linkedin_search") {
@@ -90,6 +90,8 @@ export async function POST(req: Request) {
     return ok({ updated });
   }
   if (!b?.fullName || !b?.campaignId) return fail("missing_fields", 422);
-  const p = await addProspect({ ...b, workspaceId: ws });
+  // Attribute the prospect to the recruiter who created it (powers the
+  // per-recruiter Dashboard drill-down).
+  const p = await addProspect({ ...b, workspaceId: ws, ownerId: g.ctx.user.id });
   return ok({ prospect: p }, 201);
 }

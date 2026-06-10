@@ -34,9 +34,23 @@ function rag(value: number, yellow: number, green: number): "green" | "yellow" |
   return "red";
 }
 
-export async function overview(workspaceId: string): Promise<OverviewSnapshot> {
+export interface OverviewScope {
+  /** Show only this motion's pipeline (BD vs recruiting). Unset = both. */
+  motion?: "bd" | "recruiting";
+  /** Show only prospects owned by this recruiter (per-recruiter drill-down). */
+  ownerId?: string;
+}
+
+export async function overview(workspaceId: string, scope: OverviewScope = {}): Promise<OverviewSnapshot> {
   const core = getCore();
-  const prospects = await core.listProspects(workspaceId);
+  const all = await core.listProspects(workspaceId);
+  // Motion buckets the pipeline; unset legacy records default to recruiting (the
+  // app's default motion). ownerId narrows to one recruiter's book of business.
+  const prospects = all.filter((p) => {
+    if (scope.motion && (p.motion ?? "recruiting") !== scope.motion) return false;
+    if (scope.ownerId && p.ownerId !== scope.ownerId) return false;
+    return true;
+  });
   const accounts = listLinkedInAccounts(workspaceId).filter((a) => a.active);
   const domains = listDomains(workspaceId).filter((d) => d.active);
   const emailCapacity = domains.reduce((s, d) => s + d.inboxes * 30, 0); // ~30/inbox/day warmed

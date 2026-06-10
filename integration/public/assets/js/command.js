@@ -322,6 +322,16 @@
     return h;
   }
 
+  // The segment after the route in the hash drives in-route drill-downs, e.g.
+  // "#overview/linkedin-accounts" (or "#bd/overview/linkedin-accounts") -> the
+  // route stays "overview" and the detail is "linkedin-accounts".
+  function currentDetail() {
+    var h = (location.hash || "").replace(/^#/, "");
+    var parts = h.split("/");
+    if (parts[0] === "bd" || parts[0] === "recruiting") parts.shift();
+    return parts[1] || "";
+  }
+
   // Recruiting calls them Candidates; BD calls them Prospects.
   function prospectsLabel() { return motion === "recruiting" ? "Candidates" : "Prospects"; }
   function prospectNoun() { return motion === "recruiting" ? "candidate" : "prospect"; }
@@ -379,30 +389,69 @@
     return sub ? '<div class="v-head"><p>' + esc(sub) + "</p></div>" : "";
   }
 
+  // Capacity labels -> drill-down detail slug. Used when the backend doesn't
+  // stamp a `detail` on the capacity row itself (e.g. the real server).
+  var CAP_DETAIL = {
+    "LinkedIn accounts": "linkedin-accounts",
+    "Sending domains": "sending-domains",
+    "Email capacity/day": "email-capacity",
+    "LinkedIn capacity/day": "linkedin-capacity"
+  };
+
+  var ovRecruiter = null; // admin per-recruiter Dashboard scope (userId, or null = whole workspace)
+
   function renderOverview(el) {
-    el.innerHTML = head("Dashboard", "Real-time capacity and pipeline health for " + (ctx.workspace ? ctx.workspace.name : "your workspace") + ".") +
+    var detail = currentDetail();
+    if (detail) return renderOverviewDetail(el, detail);
+
+    // The Dashboard is motion-scoped: BD shows the business-development pipeline,
+    // Recruiting shows the recruiting pipeline. In the recruiting motion an admin
+    // can drill into any single recruiter's numbers via the selector bar.
+    var showRecruiterBar = motion === "recruiting" && can("team:manage") && !IMP_TOKEN;
+    var sub = motion === "bd"
+      ? "Business-development pipeline health for " + (ctx.workspace ? ctx.workspace.name : "your workspace") + "."
+      : "Recruiting pipeline health" + (showRecruiterBar ? " — pick a recruiter to see just their numbers." : ".");
+    el.innerHTML = head("Dashboard", sub) +
+      (showRecruiterBar ? '<div class="ov-recruiters" id="ovRecruiters">' + loading() + "</div>" : "") +
       '<div id="ovBody">' + loading() + "</div>";
 
-    api("/overview").then(function (o) {
+    if (showRecruiterBar) {
+      api("/team").then(function (d) {
+        var recs = ((d && d.members) || []).filter(function (m) { return m.role === "member"; });
+        var bar = $("#ovRecruiters"); if (!bar) return;
+        function chip(id, label) {
+          return '<button type="button" class="ov-chip' + (ovRecruiter === id ? " active" : "") +
+            '" data-rec="' + (id == null ? "" : esc(id)) + '">' + esc(label) + "</button>";
+        }
+        bar.innerHTML = chip(null, "All recruiters") + recs.map(function (m) { return chip(m.userId, m.name); }).join("");
+        Array.prototype.forEach.call(bar.querySelectorAll(".ov-chip"), function (b) {
+          b.addEventListener("click", function () { ovRecruiter = b.getAttribute("data-rec") || null; renderOverview($("#view")); });
+        });
+      }).catch(function () { var bar = $("#ovRecruiters"); if (bar) bar.innerHTML = ""; });
+    }
+
+    var ovQuery = "/overview?motion=" + encodeURIComponent(motion) + (ovRecruiter ? "&recruiter=" + encodeURIComponent(ovRecruiter) : "");
+    api(ovQuery).then(function (o) {
       o = o || {};
-      // Each capacity card deep-links to where you manage that resource. The
-      // capability check keeps recruiters from landing on a gated tab.
-      var capLink = { "LinkedIn accounts": "accounts", "Sending domains": "accounts", "Email capacity/day": "accounts", "LinkedIn capacity/day": "accounts" };
+      // Each capacity card drills into the per-item breakdown for that resource
+      // (individual accounts / domains / mailboxes / team capacity).
       var cap = o.capacity || [];
       var stats = cap.map(function (c) {
-        var route = capLink[c.label];
-        var go = (route && (!ROUTES[route].cap || can(ROUTES[route].cap))) ? ' data-go="' + route + '"' : "";
+        var slug = c.detail || CAP_DETAIL[c.label];
+        var go = slug ? ' data-go="overview/' + slug + '"' : "";
         return '<div class="stat' + (go ? " clickable" : "") + '"' + go + '><span class="rag ' + (c.status || "red") + '"></span><div class="sv">' + (c.value != null ? c.value : 0) + '</div><div class="sl">' + esc(c.label) + "</div></div>";
       }).join("") || emptyCard("Connect your sending accounts and domains to see capacity.");
-      // KPI cards deep-link into the matching operational tab.
+      // KPI cards: Active prospects and Appointments today drill into their own
+      // breakdowns; the rest deep-link into the matching operational tab.
       var kpis = [
-        ["Active prospects", o.activeProspects || 0, "prospects"],
-        ["Appointments today", o.appointmentsToday || 0, "prospects"],
+        ["Active prospects", o.activeProspects || 0, "overview/active-prospects"],
+        ["Appointments today", o.appointmentsToday || 0, "overview/appointments-today"],
         ["This week", o.appointmentsThisWeek || 0, "prospects"],
         ["Warm convos today", o.warmConversationsToday || 0, "response"],
         [motion === "bd" ? "Won accounts" : "Placements", o.wonAccounts || 0, "prospects"]
       ].map(function (k) {
-        var go = k[2] && (!ROUTES[k[2]].cap || can(ROUTES[k[2]].cap)) ? ' data-go="' + k[2] + '"' : "";
+        var base = k[2].split("/")[0];
+        var go = base && (!ROUTES[base].cap || can(ROUTES[base].cap)) ? ' data-go="' + k[2] + '"' : "";
         return '<div class="stat' + (go ? " clickable" : "") + '"' + go + '><div class="sv">' + k[1] + '</div><div class="sl">' + k[0] + "</div></div>";
       }).join("");
 
@@ -423,7 +472,7 @@
         '<div class="two-col"><div class="card"><h3>Recent appointments</h3>' + appts + "</div>" +
         '<div class="card"><h3>Active drips</h3>' + drips + "</div></div>";
 
-      // Delegated navigation: any element with data-go jumps to that tab.
+      // Delegated navigation: any element with data-go jumps to that tab/drill-down.
       body.addEventListener("click", function (e) {
         var t = e.target.closest("[data-go]"); if (!t) return;
         location.hash = t.getAttribute("data-go");
@@ -431,6 +480,136 @@
     }).catch(function () {
       var body = $("#ovBody"); if (body) body.innerHTML = needsSetup();
     });
+  }
+
+  // ---- Dashboard drill-downs (full sub-views under #overview/<slug>) ----
+  var OV_DETAILS = {
+    "linkedin-accounts": { title: "LinkedIn accounts", sub: "Each connected LinkedIn seat and its per-day outreach health." },
+    "sending-domains": { title: "Sending domains", sub: "Every sending domain, its auth posture and reputation." },
+    "email-capacity": { title: "Email capacity", sub: "Daily send capacity per mailbox and the health of each inbox." },
+    "linkedin-capacity": { title: "LinkedIn capacity", sub: "Team-wide connection requests and profile views used today." },
+    "active-prospects": { title: "Active prospects", sub: "Prospects being marketed to right now, by recruiter campaign." },
+    "appointments-today": { title: "Appointments today", sub: "Every meeting booked today, with channel, recruiter and source." }
+  };
+
+  function renderOverviewDetail(el, detail) {
+    var meta = OV_DETAILS[detail];
+    if (!meta) { location.hash = "overview"; return; }
+    el.innerHTML =
+      '<div class="v-head" style="display:flex;align-items:baseline;gap:12px">' +
+        '<a class="back-link clickable" data-go="overview" style="font-weight:600">← Dashboard</a>' +
+        '<p style="margin:0">' + esc(meta.sub) + "</p></div>" +
+      '<h2 style="margin:6px 0 14px">' + esc(meta.title) + "</h2>" +
+      '<div id="ovDetailBody">' + loading() + "</div>";
+
+    // Back link + any in-detail navigation.
+    el.addEventListener("click", function (e) {
+      var t = e.target.closest("[data-go]"); if (!t) return;
+      location.hash = t.getAttribute("data-go");
+    });
+
+    api("/overview").then(function (o) {
+      o = o || {};
+      var host = $("#ovDetailBody"); if (!host) return;
+      host.innerHTML = ovDetailHtml(detail, o);
+    }).catch(function () {
+      var host = $("#ovDetailBody"); if (host) host.innerHTML = needsSetup();
+    });
+  }
+
+  // Reusable health pill + percent-bar helpers for the drill-downs.
+  function healthPill(h) { return '<span class="rag ' + (h || "red") + '"></span>'; }
+  function capBar(used, total) {
+    var pct = total ? Math.min(100, Math.round((used / total) * 100)) : 0;
+    var rag = pct >= 90 ? "red" : pct >= 70 ? "yellow" : "green";
+    return '<div class="cap-bar"><div class="cap-fill ' + rag + '" style="width:' + pct + '%"></div></div>';
+  }
+
+  function ovDetailHtml(detail, o) {
+    if (detail === "linkedin-accounts") {
+      var accts = o.linkedinAccounts || [];
+      if (!accts.length) return emptyCard("No LinkedIn accounts connected yet. Add seats under Accounts.");
+      return '<div class="card"><div style="overflow:auto"><table class="matrix"><thead><tr>' +
+        "<th>Account</th><th>Status</th><th>Connection requests</th><th>Profile views</th><th>Acceptance</th><th>Health</th></tr></thead><tbody>" +
+        accts.map(function (a) {
+          return "<tr><td><b>" + esc(a.name) + "</b></td><td>" + esc(a.status) + "</td>" +
+            "<td>" + a.connectsUsed + " / " + a.connectCap + capBar(a.connectsUsed, a.connectCap) + "</td>" +
+            "<td>" + a.viewsUsed + " / " + a.viewCap + capBar(a.viewsUsed, a.viewCap) + "</td>" +
+            "<td>" + a.acceptance + "%</td><td>" + healthPill(a.health) + "</td></tr>";
+        }).join("") + "</tbody></table></div></div>";
+    }
+    if (detail === "sending-domains") {
+      var doms = o.sendingDomains || [];
+      if (!doms.length) return emptyCard("No sending domains connected yet. Add domains under Accounts.");
+      return '<div class="card"><div style="overflow:auto"><table class="matrix"><thead><tr>' +
+        "<th>Domain</th><th>Status</th><th>Mailboxes</th><th>Reputation</th><th>SPF / DKIM / DMARC</th><th>Sent today</th><th>Health</th></tr></thead><tbody>" +
+        doms.map(function (d) {
+          var auth = [["SPF", d.spf], ["DKIM", d.dkim], ["DMARC", d.dmarc]].map(function (x) {
+            return '<span class="auth ' + (x[1] ? "ok" : "bad") + '">' + x[0] + "</span>";
+          }).join(" ");
+          return "<tr><td><b>" + esc(d.domain) + "</b></td><td>" + esc(d.status) + "</td>" +
+            "<td>" + d.mailboxes + "</td><td>" + d.reputation + "</td><td>" + auth + "</td>" +
+            "<td>" + d.sentToday + " / " + d.cap + capBar(d.sentToday, d.cap) + "</td>" +
+            "<td>" + healthPill(d.health) + "</td></tr>";
+        }).join("") + "</tbody></table></div></div>";
+    }
+    if (detail === "email-capacity") {
+      var boxes = o.mailboxes || [];
+      if (!boxes.length) return emptyCard("No mailboxes connected yet. Add mailboxes under Accounts.");
+      var totalCap = boxes.reduce(function (s, b) { return s + (b.dailyCap || 0); }, 0);
+      var totalSent = boxes.reduce(function (s, b) { return s + (b.sentToday || 0); }, 0);
+      var summary = '<div class="stat-grid" style="margin-bottom:14px">' +
+        '<div class="stat"><div class="sv">' + boxes.length + '</div><div class="sl">Mailboxes</div></div>' +
+        '<div class="stat"><div class="sv">' + totalCap + '</div><div class="sl">Email capacity/day</div></div>' +
+        '<div class="stat"><div class="sv">' + totalSent + '</div><div class="sl">Sent today</div></div></div>';
+      return summary + '<div class="card"><div style="overflow:auto"><table class="matrix"><thead><tr>' +
+        "<th>Mailbox</th><th>Domain</th><th>Sent today</th><th>Warmup</th><th>Deliverability</th><th>Health</th></tr></thead><tbody>" +
+        boxes.map(function (b) {
+          return "<tr><td><b>" + esc(b.address) + "</b></td><td>" + esc(b.domain) + "</td>" +
+            "<td>" + b.sentToday + " / " + b.dailyCap + capBar(b.sentToday, b.dailyCap) + "</td>" +
+            "<td>" + b.warmup + "%</td><td>" + b.deliverability + "%</td><td>" + healthPill(b.health) + "</td></tr>";
+        }).join("") + "</tbody></table></div></div>";
+    }
+    if (detail === "linkedin-capacity") {
+      var lc = o.linkedinCapacity || {};
+      var by = lc.byAccount || [];
+      var summary = '<div class="stat-grid" style="margin-bottom:14px">' +
+        '<div class="stat"><div class="sv">' + (lc.connectsUsed || 0) + " / " + (lc.connectTotal || 0) + '</div><div class="sl">Connection requests today</div>' + capBar(lc.connectsUsed || 0, lc.connectTotal || 0) + "</div>" +
+        '<div class="stat"><div class="sv">' + (lc.viewsUsed || 0) + " / " + (lc.viewTotal || 0) + '</div><div class="sl">Profile views today</div>' + capBar(lc.viewsUsed || 0, lc.viewTotal || 0) + "</div></div>";
+      var table = !by.length ? "" : '<div class="card"><h3>By account</h3><div style="overflow:auto"><table class="matrix"><thead><tr>' +
+        "<th>Account</th><th>Connection requests</th><th>Profile views</th></tr></thead><tbody>" +
+        by.map(function (a) {
+          return "<tr><td><b>" + esc(a.name) + "</b></td>" +
+            "<td>" + a.connects + " / " + a.connectCap + capBar(a.connects, a.connectCap) + "</td>" +
+            "<td>" + a.views + " / " + a.viewCap + capBar(a.views, a.viewCap) + "</td></tr>";
+        }).join("") + "</tbody></table></div></div>";
+      return summary + table;
+    }
+    if (detail === "active-prospects") {
+      var camps = (o.prospectCampaigns || []).filter(function (c) { return !c.motion || c.motion === motion; });
+      if (!camps.length) return emptyCard("No active campaigns marketing to prospects yet.");
+      var total = camps.reduce(function (s, c) { return s + (c.active || 0); }, 0);
+      var canCamp = !ROUTES.campaigns.cap || can(ROUTES.campaigns.cap);
+      var rowGo = canCamp ? ' data-go="campaigns" class="list-row clickable"' : ' class="list-row"';
+      var summary = '<div class="stat-grid" style="margin-bottom:14px">' +
+        '<div class="stat"><div class="sv">' + total + '</div><div class="sl">Active prospects</div></div>' +
+        '<div class="stat"><div class="sv">' + camps.length + '</div><div class="sl">Recruiter campaigns</div></div></div>';
+      return summary + '<div class="card"><h3>By recruiter campaign</h3>' +
+        camps.map(function (c) {
+          return "<div" + rowGo + '><div><div class="lr-main">' + esc(c.name) + '</div><div class="lr-sub">' + esc(c.recruiter) + " · " + esc(c.channel) + ' · ' + esc(c.stage) + '</div></div><div class="lr-right"><b>' + (c.active || 0) + "</b> active</div></div>";
+        }).join("") + "</div>";
+    }
+    if (detail === "appointments-today") {
+      var appts = o.appointmentsTodayList || [];
+      if (!appts.length) return emptyCard("No meetings booked today yet.");
+      var canPros = !ROUTES.prospects.cap || can(ROUTES.prospects.cap);
+      var rowGo = canPros ? ' data-go="prospects" class="list-row clickable"' : ' class="list-row"';
+      return '<div class="card"><h3>' + appts.length + ' booked today</h3>' +
+        appts.map(function (a) {
+          return "<div" + rowGo + '><div><div class="lr-main">' + esc(a.name) + '</div><div class="lr-sub">' + esc(a.channel || "") + " · " + esc(a.recruiter || "") + " · " + esc(a.campaign || "") + '</div></div><div class="lr-right">' + esc(a.at || "") + "</div></div>";
+        }).join("") + "</div>";
+    }
+    return emptyCard("Nothing to show here yet.");
   }
 
   function renderResponse(el) {
@@ -5602,14 +5781,6 @@
       body.innerHTML = '<div class="two-col"><div class="card"><h3>Choose your ATS</h3>' + vendors + "</div>" +
         '<div class="card"><h3>Loxo object mapping</h3>' + map + "</div></div>";
     }).catch(function () { var b = $("#atBody"); if (b) b.innerHTML = needsSetup(); });
-  }
-
-  function cadenceHtml() {
-    return REF.cadence.map(function (c) {
-      return '<div class="cad"><div class="ct">' + esc(c.at) + '</div><div><div class="cn">' + esc(c.name) +
-        ' <span class="' + (c.automated ? "auto" : "manual") + '">' + (c.automated ? "AUTO" : "YOU") + "</span></div>" +
-        '<div class="cd">' + esc(c.detail) + "</div></div></div>";
-    }).join("");
   }
 
   /* ---------------- Team (admin sub-accounts) ---------------- */

@@ -27,16 +27,17 @@
     var name = (user && user.name) || "Jamie Dawson";
     var email = (user && user.email) || "you@company.com";
     var company = email.split("@")[1] ? titleCase(email.split("@")[1].split(".")[0]) : "Your Company";
+    var emailDomain = email.split("@")[1] || "company.com";
     var db = {
       user: { id: "u_local", name: name, email: email },
       workspace: { id: "ws_local", name: company + " Talent", plan: "Trial" },
       capabilities: ["accounts:manage", "integrations:manage", "ats:manage", "team:manage"],
       overview: {
         capacity: [
-          { label: "Email capacity", value: "420/day", status: "green" },
-          { label: "LinkedIn seats", value: 2, status: "green" },
-          { label: "SMS sender", value: "verify", status: "yellow" },
-          { label: "Dialer", value: "ready", status: "green" }
+          { label: "LinkedIn accounts", value: 4, status: "green", detail: "linkedin-accounts" },
+          { label: "Sending domains", value: 6, status: "green", detail: "sending-domains" },
+          { label: "Email capacity/day", value: "420/day", status: "yellow", detail: "email-capacity" },
+          { label: "LinkedIn capacity/day", value: "180/day", status: "green", detail: "linkedin-capacity" }
         ],
         activeProspects: 148, appointmentsToday: 3, appointmentsThisWeek: 14,
         warmConversationsToday: 9, wonAccounts: 3,
@@ -49,6 +50,58 @@
           { name: "Senior React · Berlin", stage: "Touch 3 of 6" },
           { name: "Series B fintech · BD", stage: "Touch 2 of 5" },
           { name: "ICU nurses · contract", stage: "Touch 1 of 4" }
+        ],
+
+        // --- Dashboard drill-downs (per-item breakdowns behind each card) ---
+        // Individual LinkedIn accounts and their per-account daily health.
+        linkedinAccounts: [
+          { name: "Ana Brandt", recruiter: "Ana Brandt", status: "active", connectsUsed: 18, connectCap: 20, viewsUsed: 32, viewCap: 60, acceptance: 41, health: "green" },
+          { name: "Tom Vogel", recruiter: "Tom Vogel", status: "active", connectsUsed: 19, connectCap: 20, viewsUsed: 51, viewCap: 60, acceptance: 38, health: "green" },
+          { name: "Priya Nair", recruiter: "Priya Nair", status: "warming", connectsUsed: 8, connectCap: 12, viewsUsed: 14, viewCap: 30, acceptance: 29, health: "yellow" },
+          { name: "Leo Marsh", recruiter: "Leo Marsh", status: "active", connectsUsed: 20, connectCap: 20, viewsUsed: 47, viewCap: 60, acceptance: 44, health: "green" }
+        ],
+        // Individual sending domains, auth posture and reputation.
+        sendingDomains: [
+          { domain: "talent-os.co", status: "active", mailboxes: 4, reputation: 96, spf: true, dkim: true, dmarc: true, sentToday: 140, cap: 160, health: "green" },
+          { domain: "talent-os.io", status: "active", mailboxes: 3, reputation: 92, spf: true, dkim: true, dmarc: true, sentToday: 96, cap: 120, health: "green" },
+          { domain: "os-talent.com", status: "active", mailboxes: 3, reputation: 88, spf: true, dkim: true, dmarc: false, sentToday: 84, cap: 120, health: "yellow" },
+          { domain: "reachos.co", status: "active", mailboxes: 2, reputation: 90, spf: true, dkim: true, dmarc: true, sentToday: 60, cap: 80, health: "green" },
+          { domain: "reachos.io", status: "warming", mailboxes: 2, reputation: 71, spf: true, dkim: true, dmarc: true, sentToday: 18, cap: 40, health: "yellow" },
+          { domain: "getreachos.com", status: "warming", mailboxes: 2, reputation: 64, spf: true, dkim: false, dmarc: false, sentToday: 12, cap: 40, health: "red" }
+        ],
+        // Individual mailboxes — daily email capacity = sum of caps; health per box.
+        mailboxes: [
+          { address: "ana@talent-os.co", domain: "talent-os.co", dailyCap: 40, sentToday: 36, warmup: 95, deliverability: 98, health: "green" },
+          { address: "tom@talent-os.co", domain: "talent-os.co", dailyCap: 40, sentToday: 38, warmup: 93, deliverability: 97, health: "green" },
+          { address: "hello@talent-os.io", domain: "talent-os.io", dailyCap: 40, sentToday: 31, warmup: 90, deliverability: 96, health: "green" },
+          { address: "team@os-talent.com", domain: "os-talent.com", dailyCap: 40, sentToday: 28, warmup: 82, deliverability: 91, health: "yellow" },
+          { address: "priya@reachos.co", domain: "reachos.co", dailyCap: 40, sentToday: 30, warmup: 88, deliverability: 95, health: "green" },
+          { address: "leo@reachos.io", domain: "reachos.io", dailyCap: 20, sentToday: 9, warmup: 58, deliverability: 84, health: "yellow" },
+          { address: "growth@getreachos.com", domain: "getreachos.com", dailyCap: 20, sentToday: 6, warmup: 41, deliverability: 76, health: "red" }
+        ],
+        // Team-wide LinkedIn capacity (connection requests + profile views).
+        linkedinCapacity: {
+          connectsUsed: 65, connectTotal: 72, viewsUsed: 144, viewTotal: 210,
+          byAccount: [
+            { name: "Ana Brandt", connects: 18, connectCap: 20, views: 32, viewCap: 60 },
+            { name: "Tom Vogel", connects: 19, connectCap: 20, views: 51, viewCap: 60 },
+            { name: "Priya Nair", connects: 8, connectCap: 12, views: 14, viewCap: 30 },
+            { name: "Leo Marsh", connects: 20, connectCap: 20, views: 47, viewCap: 60 }
+          ]
+        },
+        // Active prospects being marketed to, grouped by recruiter campaign.
+        prospectCampaigns: [
+          { name: "Senior React · Berlin", recruiter: "Ana Brandt", motion: "recruiting", active: 42, channel: "Email + LinkedIn", stage: "Live" },
+          { name: "ICU nurses · contract", recruiter: "Priya Nair", motion: "recruiting", active: 30, channel: "SMS + Email", stage: "Live" },
+          { name: "Staff Eng · remote", recruiter: "Tom Vogel", motion: "recruiting", active: 28, channel: "LinkedIn", stage: "Live" },
+          { name: "Series B fintech · BD", recruiter: "Leo Marsh", motion: "bd", active: 26, channel: "Email", stage: "Live" },
+          { name: "DevOps · Munich", recruiter: "Ana Brandt", motion: "recruiting", active: 22, channel: "Email + LinkedIn", stage: "Paused" }
+        ],
+        // Today's booked meetings (Appointments today drill-down).
+        appointmentsTodayList: [
+          { name: "Marco Silva", channel: "SMS", at: "Today 10:15", recruiter: "Ana Brandt", campaign: "Senior React · Berlin" },
+          { name: "Anja Köhler", channel: "LinkedIn", at: "Today 09:40", recruiter: "Tom Vogel", campaign: "Staff Eng · remote" },
+          { name: "Dlamini Okeke", channel: "Email", at: "Today 08:30", recruiter: "Priya Nair", campaign: "ICU nurses · contract" }
         ]
       },
       response: [
@@ -106,7 +159,19 @@
           { concept: "Placement", object: "Placement", how: "Fee and start date on close" }
         ]
       },
-      team: { members: [{ userId: "u_local", name: name, role: "owner" }] },
+      team: {
+        members: [
+          { userId: "u_local", name: name, email: email, role: "owner", emailVerified: true },
+          // Seeded recruiters so campaigns can be assigned to real people out of the
+          // box (these names match the dashboard drill-down demo data). They are
+          // assignable in both the BD and Recruiting motions via Campaign Studio.
+          { userId: "u_ana", name: "Ana Brandt", email: "ana@" + emailDomain, role: "member", emailVerified: true },
+          { userId: "u_tom", name: "Tom Vogel", email: "tom@" + emailDomain, role: "member", emailVerified: true },
+          { userId: "u_priya", name: "Priya Nair", email: "priya@" + emailDomain, role: "member", emailVerified: true },
+          { userId: "u_leo", name: "Leo Marsh", email: "leo@" + emailDomain, role: "member", emailVerified: true }
+        ],
+        invites: []
+      },
       outreach: { enrichmentEnabled: true, jobSearchEnabled: true, creditsIncluded: 2000, creditsUsed: 420 },
       sequences: [
         {
@@ -226,7 +291,28 @@
   function db() {
     var d = load();
     if (!d) { d = seed(currentUser()); save(d); }
+    else if (migrate(d)) { save(d); }
     return d;
+  }
+  // One-time, idempotent upgrades for sessions seeded before a feature shipped.
+  // Returns true if it mutated `d` (so the caller persists). The `_recruitersSeeded`
+  // flag means a later "remove" sticks instead of the recruiters reappearing.
+  function migrate(d) {
+    var changed = false;
+    d.team = d.team || { members: [] };
+    d.team.members = d.team.members || [];
+    if (!d.team._recruitersSeeded) {
+      var owner = d.team.members[0] || {};
+      var dom = (owner.email && owner.email.split("@")[1]) || "company.com";
+      [["u_ana", "Ana Brandt", "ana"], ["u_tom", "Tom Vogel", "tom"], ["u_priya", "Priya Nair", "priya"], ["u_leo", "Leo Marsh", "leo"]]
+        .forEach(function (r) {
+          if (!d.team.members.some(function (m) { return m.userId === r[0]; })) {
+            d.team.members.push({ userId: r[0], name: r[1], email: r[2] + "@" + dom, role: "member", emailVerified: true });
+          }
+        });
+      d.team._recruitersSeeded = true; changed = true;
+    }
+    return changed;
   }
   function currentUser() {
     try { var c = JSON.parse(LS.getItem("ros_ctx") || "null"); if (c && c.user) return c.user; } catch (e) {}
@@ -487,7 +573,33 @@
       return ok({ prospects: d.prospects });
     }
     if (p === "/content") return ok({ assets: d.content });
-    if (p === "/team") return ok({ members: d.team.members });
+    if (p === "/team") {
+      d.team.invites = d.team.invites || [];
+      // The local owner can mint admins + recruiters; surfaced so the Team tab
+      // shows Remove controls and the right invite roles.
+      var assignableRoles = ["admin", "member"];
+      if (method === "POST" && body) {
+        if (body.action === "invite") {
+          var iemail = (body.email || "").trim().toLowerCase();
+          var irole = body.role === "admin" ? "admin" : "member";
+          if (!iemail) return resp(400, { error: "missing_fields" });
+          if (d.team.members.some(function (m) { return (m.email || "").toLowerCase() === iemail; })) return resp(400, { error: "already_member" });
+          // Demo: an invite immediately becomes an active, assignable member so the
+          // admin can assign campaigns to them right away (no email round-trip).
+          var nm = titleCase(iemail.split("@")[0].replace(/[._-]+/g, " "));
+          d.team.members.push({ userId: "u_" + Math.random().toString(36).slice(2, 9), name: nm, email: iemail, role: irole, emailVerified: false });
+          save(d);
+          return ok({ invited: iemail, role: irole, members: d.team.members });
+        }
+        if (body.action === "remove") {
+          // Drop the named member, but never the owner.
+          d.team.members = d.team.members.filter(function (m) { return m.userId === "u_local" || m.userId !== body.userId; });
+          save(d);
+          return ok({ removed: body.userId, members: d.team.members });
+        }
+      }
+      return ok({ members: d.team.members, invites: d.team.invites, assignableRoles: assignableRoles });
+    }
     if (p === "/ats") return ok(d.ats);
     if (p === "/accounts") {
       if (method === "POST") return addAccount(d, body);
