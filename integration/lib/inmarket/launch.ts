@@ -65,9 +65,10 @@ function dialCapUsd(): number {
  *    HOT-tier prospects (warmth >= 80, hotOnly), and SMS only post-reply — so they are
  *    reported as per-unit add-ons, NOT multiplied into every person's total.
  */
-export function estimatePushCost(count: number): PushCostEstimate {
+export function estimatePushCost(count: number, opts: { directDial?: boolean } = {}): PushCostEstimate {
   const n = Math.max(0, Math.floor(count || 0));
   const maxDial = dialCapUsd();
+  const directDial = opts.directDial === true;
   const perPersonLines: CostLine[] = [];
   const add = (key: string, label: string, unitUsd: number) => {
     perPersonLines.push({ key, label, qty: n, unitUsd, costUsd: +(n * unitUsd).toFixed(4) });
@@ -95,15 +96,37 @@ export function estimatePushCost(count: number): PushCostEstimate {
   //    fill stays low by design).
   //  - Voicemail/voice-drop: Telnyx AMD drop to landline/VoIP, HOT-tier only.
   const voicemailUnit = +(rateCost("voice_minute") * 0.5 + rateCost("voice_clone_synthesis") * 0.3).toFixed(4);
-  const conditional: ConditionalLine[] = [
-    { key: "deep_dial", label: "Deep direct-dial reveal (premium fail-safe · Apify + PDL)", unitUsd: rateCost("apify_direct_dial"), basis: `per number FOUND when we dial/voicemail — no-find is free; needs the dial cap ≥ $0.10 (now $${maxDial.toFixed(2)})` },
-    { key: "voicemail", label: "Voicemail / voice-drop (Telnyx AMD → landline/VoIP)", unitUsd: voicemailUnit, basis: "per HOT-tier prospect (warmth ≥ 80) only" },
-  ];
+  const ddPrice = rateCost("apify_direct_dial");
+  const conditional: ConditionalLine[] = [];
+  if (directDial) {
+    // The setting is ON for this push — the deep reveal runs for every pushed prospect.
+    conditional.push({
+      key: "deep_dial",
+      label: "Verified direct dial — person-direct landline/VoIP (Apify + PDL)",
+      unitUsd: ddPrice,
+      basis: "per number FOUND (no-find is free) · mobiles + switchboards rejected",
+    });
+  } else {
+    conditional.push({
+      key: "deep_dial_off",
+      label: "Verified direct dial (off — enable the setting to run it)",
+      unitUsd: ddPrice,
+      basis: "$0.10 per number found when enabled; person-direct landline/VoIP only",
+    });
+  }
+  conditional.push({
+    key: "voicemail",
+    label: "Voicemail / voice-drop (Telnyx AMD → landline/VoIP)",
+    unitUsd: voicemailUnit,
+    basis: "per HOT-tier prospect (warmth ≥ 80) only",
+  });
 
   const notes = [
     "Per-person total is the FIRM cheapest-first resolution charged for every prospect (email waterfall + LinkedIn + cheap phone + AI).",
     "Email is already the blended multi-provider waterfall (80-95%) — its fail-safe is baked into the $0.006.",
-    `The DEEP direct-dial reveal is the $${rateCost("apify_direct_dial").toFixed(2)} premium fail-safe — it fires only when we actually dial/voicemail a contact, and a no-find lookup is free. It honors RECRUITEROS_MAX_DIAL_USD (now $${maxDial.toFixed(2)}); raise it to $0.10 to let the reveal run.`,
+    directDial
+      ? `Direct dial is ON: the $${ddPrice.toFixed(2)} Apify+PDL reveal runs for every pushed prospect — a person-direct landline/VoIP only (mobiles + switchboards dropped), and a no-find lookup is free.`
+      : `Direct dial is OFF: enable the Hire Signals setting to run the $${ddPrice.toFixed(2)} Apify+PDL reveal (person-direct landline/VoIP only; no-find free).`,
     "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80). Email sends use your own warmed inboxes — no per-email charge.",
   ];
 

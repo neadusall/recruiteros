@@ -285,15 +285,19 @@
         return ok({ estimate: {
           count: n, perPersonLines: perPersonLines, perPersonUsd: perPersonUsd,
           firmTotalUsd: +(n * perPersonUsd).toFixed(2),
-          conditional: [
-            { key: "deep_dial", label: "Deep direct-dial reveal (premium fail-safe · Apify + PDL)", unitUsd: 0.1, basis: "per number FOUND when we dial/voicemail — no-find is free; needs the dial cap ≥ $0.10 (now $0.03)" },
+          conditional: (body.directDial
+            ? [{ key: "deep_dial", label: "Verified direct dial — person-direct landline/VoIP (Apify + PDL)", unitUsd: 0.1, basis: "per number FOUND (no-find is free) · mobiles + switchboards rejected" }]
+            : [{ key: "deep_dial_off", label: "Verified direct dial (off — enable the setting to run it)", unitUsd: 0.1, basis: "$0.10 per number found when enabled; person-direct landline/VoIP only" }]
+          ).concat([
             { key: "voicemail", label: "Voicemail / voice-drop (Telnyx AMD → landline/VoIP)", unitUsd: 0.0095, basis: "per HOT-tier prospect (warmth ≥ 80) only" }
-          ],
+          ]),
           dialCapUsd: cap,
           notes: [
             "Per-person total is the FIRM cheapest-first resolution charged for every prospect (email waterfall + LinkedIn + cheap phone + AI).",
             "Email is already the blended multi-provider waterfall (80-95%) — its fail-safe is baked into the $0.006.",
-            "The DEEP direct-dial reveal is the $0.10 premium fail-safe — it fires only when we actually dial/voicemail a contact, and a no-find lookup is free. It honors RECRUITEROS_MAX_DIAL_USD (now $0.03); raise it to $0.10 to let the reveal run.",
+            body.directDial
+              ? "Direct dial is ON: the $0.10 Apify+PDL reveal runs for every pushed prospect — a person-direct landline/VoIP only (mobiles + switchboards dropped), and a no-find lookup is free."
+              : "Direct dial is OFF: enable the setting to run the $0.10 Apify+PDL reveal (person-direct landline/VoIP only; no-find free).",
             "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80). Email sends use your own warmed inboxes — no per-email charge."
           ]
         } });

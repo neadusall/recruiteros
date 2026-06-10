@@ -1089,13 +1089,22 @@
   // LinkedIn ID) and run the outreach sequence, with Approve / Cancel. Nothing is spent until
   // Approve. On approve we promote the batch, then kick the orchestrator (n8n) so the whole
   // enrich → LLM-draft → email/LinkedIn/voicemail/voice-drop process starts.
+  // Persisted Hire Signals setting: opt-in to fetch verified person-direct landline/VoIP
+  // numbers ($0.10/found) on push. Off by default — never runs automatically.
+  function imDirectDialOn() { try { return localStorage.getItem("ros_im_directdial") === "1"; } catch (e) { return false; } }
+  function setImDirectDial(on) { try { localStorage.setItem("ros_im_directdial", on ? "1" : "0"); } catch (e) {} }
+
   function bulkPushToProspects() {
     var picks = Object.keys(imPicks).map(function (k) { return imPicks[k]; });
     if (!picks.length) return;
     var n = picks.length;
+    var dd = imDirectDialOn();
     var body =
       '<div class="pc">' +
         '<div class="pc-head">Run <b>' + n + "</b> " + (n === 1 ? "person" : "people") + " through third-party enrichment + the outreach sequence.</div>" +
+        '<label class="pc-voice" title="Resolve each contact\'s OWN direct line — a landline/VoIP only (never a switchboard, never a mobile). $0.10 per number found; a no-find is free.">' +
+          '<input type="checkbox" id="pcDirectDial"' + (dd ? " checked" : "") + "> Find verified direct dials " +
+          '<span class="muted">(person-direct landline/VoIP · $0.10/found, no-find free)</span></label>' +
         '<div id="pcLines" class="pc-lines">' + loading() + "</div>" +
         '<div class="pc-total" id="pcTotal"></div>' +
         '<div id="pcCond"></div>' +
@@ -1107,33 +1116,38 @@
       "</div>";
     openModal("Launch outreach", "Estimated cost — approve to start", body, function (root, closeFn) {
       var approve = root.querySelector("#pcApprove");
-      send("/in-market", "POST", { action: "estimate", count: n }).then(function (r) {
-        if (!r.ok || !r.data || !r.data.estimate) { root.querySelector("#pcLines").innerHTML = '<div class="empty">Could not estimate cost.</div>'; return; }
-        var est = r.data.estimate;
-        // Firm per-person lines — charged for every prospect.
-        root.querySelector("#pcLines").innerHTML = (est.perPersonLines || []).map(function (l) {
-          return '<div class="pc-line"><span>' + esc(l.label) + ' <span class="muted">×' + l.qty + "</span></span><span>$" + l.costUsd.toFixed(2) + "</span></div>";
-        }).join("");
-        root.querySelector("#pcTotal").innerHTML = "Estimated total: <b>$" + (est.firmTotalUsd || 0).toFixed(2) + "</b> <span class=\"muted\">(firm · ~$" + (est.perPersonUsd || 0).toFixed(3) + "/person)</span>";
-        // Conditional add-ons — only fire for a subset; shown per-unit, not in the total.
-        var cond = est.conditional || [];
-        root.querySelector("#pcCond").innerHTML = cond.length
-          ? '<div class="pc-cond-h">Conditional add-ons <span class="muted">— only when triggered, not in the total above</span></div>' +
-            cond.map(function (c) {
-              return '<div class="pc-line pc-cond"><span>' + esc(c.label) + ' <span class="muted">' + esc(c.basis) + "</span></span><span>$" + (c.unitUsd || 0).toFixed(3) + "</span></div>";
-            }).join("")
-          : "";
-        root.querySelector("#pcNotes").innerHTML = (est.notes || []).map(function (x) { return "• " + esc(x); }).join("<br>");
-        approve.disabled = false;
-      }).catch(function () { root.querySelector("#pcLines").innerHTML = '<div class="empty">Could not estimate cost.</div>'; });
+      var ddCb = root.querySelector("#pcDirectDial");
+      function fetchEst() {
+        approve.disabled = true;
+        root.querySelector("#pcLines").innerHTML = loading();
+        send("/in-market", "POST", { action: "estimate", count: n, directDial: ddCb.checked }).then(function (r) {
+          if (!r.ok || !r.data || !r.data.estimate) { root.querySelector("#pcLines").innerHTML = '<div class="empty">Could not estimate cost.</div>'; return; }
+          var est = r.data.estimate;
+          root.querySelector("#pcLines").innerHTML = (est.perPersonLines || []).map(function (l) {
+            return '<div class="pc-line"><span>' + esc(l.label) + ' <span class="muted">×' + l.qty + "</span></span><span>$" + l.costUsd.toFixed(2) + "</span></div>";
+          }).join("");
+          root.querySelector("#pcTotal").innerHTML = "Estimated total: <b>$" + (est.firmTotalUsd || 0).toFixed(2) + "</b> <span class=\"muted\">(firm · ~$" + (est.perPersonUsd || 0).toFixed(3) + "/person)</span>";
+          var cond = est.conditional || [];
+          root.querySelector("#pcCond").innerHTML = cond.length
+            ? '<div class="pc-cond-h">Per-hit / conditional <span class="muted">— pay-per-use, not in the firm total</span></div>' +
+              cond.map(function (c) {
+                return '<div class="pc-line pc-cond"><span>' + esc(c.label) + ' <span class="muted">' + esc(c.basis) + "</span></span><span>$" + (c.unitUsd || 0).toFixed(3) + "</span></div>";
+              }).join("")
+            : "";
+          root.querySelector("#pcNotes").innerHTML = (est.notes || []).map(function (x) { return "• " + esc(x); }).join("<br>");
+          approve.disabled = false;
+        }).catch(function () { root.querySelector("#pcLines").innerHTML = '<div class="empty">Could not estimate cost.</div>'; });
+      }
+      ddCb.addEventListener("change", function () { setImDirectDial(ddCb.checked); fetchEst(); });
       root.querySelector("#pcCancel").addEventListener("click", closeFn);
-      approve.addEventListener("click", function () { closeFn(); runBulkPush(picks); });
+      approve.addEventListener("click", function () { closeFn(); runBulkPush(picks, ddCb.checked); });
+      fetchEst();
     });
   }
 
   // Approved: promote each selected person to Prospects, then nudge the orchestrator (n8n)
   // to start the enrich → LLM-draft → email/LinkedIn/voicemail/voice-drop run immediately.
-  function runBulkPush(picks) {
+  function runBulkPush(picks, findDirectDial) {
     var btn = document.getElementById("imBulk"); if (btn) btn.disabled = true;
     resolveBdCampaign(function (campaignId) {
       if (!campaignId) { toast("Create a campaign first."); if (btn) btn.disabled = false; return; }
@@ -1143,13 +1157,14 @@
           if (btn) { btn.disabled = false; btn.textContent = "Push selected to Prospects"; }
           // Kick the omnichannel orchestrator so the whole process starts now.
           send("/in-market", "POST", { action: "launch_outreach", campaignId: campaignId, count: done }).catch(function () {});
-          toast(done + " pushed — outreach launching (email · LinkedIn · voicemail · drops)");
+          toast(done + " pushed — outreach launching" + (findDirectDial ? " (+ direct-dial reveal)" : ""));
           imPicks = {}; renderImResults();
           return;
         }
         if (btn) btn.textContent = "Pushing " + (i + 1) + "/" + picks.length + "…";
         var payload = { action: "promote", campaignId: campaignId, lead: picks[i].lead };
         if (picks[i].manager) payload.manager = picks[i].manager;
+        if (findDirectDial) payload.findDirectDial = true;
         send("/in-market", "POST", payload)
           .then(function (r) { if (r.ok) done++; next(i + 1); })
           .catch(function () { next(i + 1); });

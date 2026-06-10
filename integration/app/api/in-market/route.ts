@@ -42,7 +42,7 @@ export async function POST(req: Request) {
   if (b?.action === "estimate") {
     const { estimatePushCost } = await import("../../../lib/inmarket/launch");
     const count = Number(b.count) || (Array.isArray(b.leads) ? b.leads.length : 0);
-    return ok({ estimate: estimatePushCost(count) });
+    return ok({ estimate: estimatePushCost(count, { directDial: b.directDial === true }) });
   }
 
   // Kick the omnichannel orchestrator (n8n) right after an approved batch is promoted.
@@ -60,6 +60,7 @@ export async function POST(req: Request) {
         b.campaignId,
         b.lead as InMarketLead,
         b.manager as HiringManagerLead | undefined,
+        { findDirectDial: b.findDirectDial === true },
       );
       return ok({ prospect }, 201);
     } catch (e: any) {

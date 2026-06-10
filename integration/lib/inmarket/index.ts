@@ -515,6 +515,7 @@ export async function promoteLead(
   campaignId: string,
   lead: InMarketLead,
   manager?: HiringManagerLead,
+  opts?: { findDirectDial?: boolean },
 ): Promise<Prospect> {
   let email: string | undefined;
   let phone: string | undefined;
@@ -551,6 +552,21 @@ export async function promoteLead(
       if (typeof p === "string") phone = p;
     } catch {
       /* leave unresolved; recruiter can enrich later from Prospects */
+    }
+  }
+
+  // OPT-IN verified direct-dial: only when the Hire Signals "Find direct dials" setting is on.
+  // Resolves the PERSON'S own line and accepts ONLY a landline/VoIP (never a switchboard,
+  // never a mobile). On a hit it becomes the prospect's primary number; misses are free.
+  if (opts?.findDirectDial && personName && (company || domain)) {
+    try {
+      const { resolveDirectDial } = await import("./directDial");
+      const dd = await resolveDirectDial(workspaceId, "bd", {
+        fullName: personName, company, companyName: company, domain, email, title, linkedinUrl,
+      });
+      if (dd.phone) phone = dd.phone; // verified person-direct landline/VoIP
+    } catch {
+      /* best-effort; keep whatever the cheap waterfall resolved */
     }
   }
 
