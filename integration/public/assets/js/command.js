@@ -435,7 +435,8 @@
   ];
   var IM_PLACEHOLDER = {
     industry: "Search an industry or market, e.g. fintech, healthcare, manufacturing",
-    company: "Search a company by name, e.g. Stripe, Verla Health, Brightwave"
+    company: "Search a company by name, e.g. Stripe, Verla Health, Brightwave",
+    title: "Search by job title (keywords), e.g. controller, backend engineer, account executive"
   };
 
   // Hiring-signal types you can filter the search by (company-side). Pulled from the
@@ -505,6 +506,7 @@
           '<div class="im-modes" id="imModes">' +
             '<button type="button" class="im-mode active" data-mode="industry">Industry / market</button>' +
             '<button type="button" class="im-mode" data-mode="company">Company name</button>' +
+            '<button type="button" class="im-mode" data-mode="title">Job title</button>' +
           "</div>" +
         "</div>" +
         '<form class="im-search" id="imForm">' +
@@ -575,6 +577,10 @@
         var cv = input.value.trim();
         return cv ? { criteria: { companyName: cv }, label: cv } : null;
       }
+      if (imMode === "title") {
+        var tv = input.value.trim();
+        return tv ? { criteria: { roleQuery: tv }, label: 'hiring "' + tv + '"' } : null;
+      }
       var crit = {}, labels = [];
       if (imSelectedIndustries.length) {
         crit.industries = imSelectedIndustries.slice();
@@ -594,6 +600,8 @@
       if (s) runSearch(s.criteria, s.label);
       else $("#imBody").innerHTML = '<div class="empty">' + (imMode === "company"
         ? "Type a company name above — then your date, size and confirmed-only filters apply to it too."
+        : imMode === "title"
+        ? "Type a job title (keywords) above — we'll surface every US company hiring that role, and show only the matching roles per company."
         : "Pick one or more industries (or Select all) to see who's hiring.") + "</div>";
     }
     function scheduleSearch() { clearTimeout(imSearchTimer); imSearchTimer = setTimeout(runNow, 350); }
@@ -608,6 +616,8 @@
         $("#imSigGroup").style.display = (imMode === "industry") ? "" : "none";
         $("#imBody").innerHTML = '<div class="empty">' + (imMode === "industry"
           ? "Pick one or more industries (or Select all) to see who's hiring."
+          : imMode === "title"
+          ? "Type a job title (keywords) to find every US company hiring that role — showing only the matching roles per company."
           : "Type a company name to check if they're hiring right now, and who owns the open roles.") + "</div>";
         input.focus();
       });
@@ -683,6 +693,7 @@
       if (criteria.companyName) payload.companyName = criteria.companyName;
       if (criteria.industries) payload.industries = criteria.industries;
       if (criteria.query) payload.query = criteria.query;
+      if (criteria.roleQuery) payload.roleQuery = criteria.roleQuery;
       if (imSelectedSignals.length) payload.signalTypes = imSelectedSignals.slice();
       if (imPostedWithin) payload.postedWithinDays = imPostedWithin;
       if (imSelectedSizes.length) payload.headcountBands = imSelectedSizes.slice();
@@ -812,7 +823,8 @@
           ? '<b>' + esc(m.managerName) + "</b>"
           : '<span class="muted">resolve on push</span>';
         return '<label class="im-mgr"><input type="checkbox" class="im-pick" data-id="' + esc(l.id) + '" data-mk="' + esc(imMgrKey(m)) + '" ' + (imPicks[imPickKey(l.id, imMgrKey(m))] ? "checked" : "") + ">" +
-          '<span class="im-mgr-role">' + esc(m.role) + "</span>" +
+          '<span class="im-mgr-role">' + esc(m.role) +
+            (m.postedAt && imRelTime(m.postedAt) ? ' <span class="im-mgr-posted" title="Posted on their board ' + esc(m.postedAt) + '">📅 ' + imRelTime(m.postedAt) + "</span>" : "") + "</span>" +
           '<span class="im-mgr-arrow">→</span>' +
           '<span class="im-mgr-title">' + esc(m.managerTitle) + "</span>" +
           '<span class="im-fn">' + esc(m.function) + "</span>" +

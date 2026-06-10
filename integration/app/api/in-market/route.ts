@@ -110,6 +110,7 @@ export async function POST(req: Request) {
       industries: b?.industries,
       geos: b?.geos,
       companyName: b?.companyName,
+      roleQuery: b?.roleQuery,
       titles: b?.titles,
       signalTypes: b?.signalTypes,
       headcountBands: b?.headcountBands,

@@ -22,6 +22,14 @@ export interface CompanyRole {
   location?: string;
   department?: string;
   url?: string;
+  /** When the role was posted on the company's own board (ISO), when the ATS exposes it. */
+  postedAt?: string;
+}
+
+function toIso(v: unknown): string | undefined {
+  if (typeof v === "string" && v.trim()) return v.trim();
+  if (typeof v === "number" && isFinite(v)) { try { return new Date(v > 1e12 ? v : v * 1000).toISOString(); } catch { return undefined; } }
+  return undefined;
 }
 
 export interface CompanyRolesResult {
@@ -60,40 +68,40 @@ function slugsFor(company: string, domain?: string): string[] {
 /* --- One ATS board fetch per provider; returns [] on any miss/non-board. --- */
 
 async function greenhouse(slug: string): Promise<CompanyRole[]> {
-  const r = await getJson<{ jobs?: Array<{ title: string; location?: { name?: string }; departments?: { name?: string }[]; absolute_url?: string }> }>(
+  const r = await getJson<{ jobs?: Array<{ title: string; location?: { name?: string }; departments?: { name?: string }[]; absolute_url?: string; updated_at?: string; first_published?: string }> }>(
     `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(slug)}/jobs?content=false`,
   );
-  return (r.jobs ?? []).map((j) => ({ title: j.title, location: j.location?.name, department: j.departments?.[0]?.name, url: j.absolute_url }));
+  return (r.jobs ?? []).map((j) => ({ title: j.title, location: j.location?.name, department: j.departments?.[0]?.name, url: j.absolute_url, postedAt: toIso(j.first_published) ?? toIso(j.updated_at) }));
 }
 async function lever(slug: string): Promise<CompanyRole[]> {
-  const r = await getJson<Array<{ text: string; categories?: { location?: string; team?: string }; hostedUrl?: string }>>(
+  const r = await getJson<Array<{ text: string; categories?: { location?: string; team?: string }; hostedUrl?: string; createdAt?: number }>>(
     `https://api.lever.co/v0/postings/${encodeURIComponent(slug)}?mode=json`,
   );
-  return (Array.isArray(r) ? r : []).map((p) => ({ title: p.text, location: p.categories?.location, department: p.categories?.team, url: p.hostedUrl }));
+  return (Array.isArray(r) ? r : []).map((p) => ({ title: p.text, location: p.categories?.location, department: p.categories?.team, url: p.hostedUrl, postedAt: toIso(p.createdAt) }));
 }
 async function ashby(slug: string): Promise<CompanyRole[]> {
-  const r = await getJson<{ jobs?: Array<{ title: string; location?: string; department?: string; jobUrl?: string }> }>(
+  const r = await getJson<{ jobs?: Array<{ title: string; location?: string; department?: string; jobUrl?: string; publishedAt?: string }> }>(
     `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(slug)}`,
   );
-  return (r.jobs ?? []).map((j) => ({ title: j.title, location: j.location, department: j.department, url: j.jobUrl }));
+  return (r.jobs ?? []).map((j) => ({ title: j.title, location: j.location, department: j.department, url: j.jobUrl, postedAt: toIso(j.publishedAt) }));
 }
 async function workable(slug: string): Promise<CompanyRole[]> {
-  const r = await getJson<{ jobs?: Array<{ title: string; location?: { location_str?: string }; department?: string; url?: string }> }>(
+  const r = await getJson<{ jobs?: Array<{ title: string; location?: { location_str?: string }; department?: string; url?: string; published_on?: string }> }>(
     `https://apply.workable.com/api/v1/widget/accounts/${encodeURIComponent(slug)}?details=true`,
   );
-  return (r.jobs ?? []).map((j) => ({ title: j.title, location: j.location?.location_str, department: j.department, url: j.url }));
+  return (r.jobs ?? []).map((j) => ({ title: j.title, location: j.location?.location_str, department: j.department, url: j.url, postedAt: toIso(j.published_on) }));
 }
 async function smartrecruiters(slug: string): Promise<CompanyRole[]> {
-  const r = await getJson<{ content?: Array<{ name: string; location?: { city?: string }; department?: { label?: string }; ref?: string }> }>(
+  const r = await getJson<{ content?: Array<{ name: string; location?: { city?: string }; department?: { label?: string }; ref?: string; releasedDate?: string }> }>(
     `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(slug)}/postings`,
   );
-  return (r.content ?? []).map((j) => ({ title: j.name, location: j.location?.city, department: j.department?.label, url: j.ref }));
+  return (r.content ?? []).map((j) => ({ title: j.name, location: j.location?.city, department: j.department?.label, url: j.ref, postedAt: toIso(j.releasedDate) }));
 }
 async function recruitee(slug: string): Promise<CompanyRole[]> {
-  const r = await getJson<{ offers?: Array<{ title: string; location?: string; department?: string; careers_url?: string }> }>(
+  const r = await getJson<{ offers?: Array<{ title: string; location?: string; department?: string; careers_url?: string; published_at?: string }> }>(
     `https://${encodeURIComponent(slug)}.recruitee.com/api/offers/`,
   );
-  return (r.offers ?? []).map((o) => ({ title: o.title, location: o.location, department: o.department, url: o.careers_url }));
+  return (r.offers ?? []).map((o) => ({ title: o.title, location: o.location, department: o.department, url: o.careers_url, postedAt: toIso(o.published_at) }));
 }
 
 const PROVIDERS: Array<{ name: string; fn: (slug: string) => Promise<CompanyRole[]> }> = [

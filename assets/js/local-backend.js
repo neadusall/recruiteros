@@ -394,6 +394,19 @@
         var bySig = leads.filter(function (l) { return sigTypes.indexOf(l.signalType) >= 0; });
         leads = bySig.length ? bySig : leads;
       }
+      // Title search (keyword within role title): keep companies with a matching role, and
+      // NARROW each to just those roles + their managers (the "separation").
+      var rq = body && body.roleQuery && String(body.roleQuery).trim();
+      if (rq) {
+        var rtoks = rq.toLowerCase().split(/[^a-z0-9+#]+/).filter(function (t) { return t.length >= 2; });
+        var roleMatch = function (t) { var low = String(t || "").toLowerCase(); return rtoks.some(function (k) { return low.indexOf(k) >= 0; }); };
+        leads = leads.map(function (l) {
+          var roles = (l.roles || []).filter(roleMatch);
+          var mgrs = (l.hiringManagers || []).filter(function (m) { return roleMatch(m.role); });
+          if (!roles.length && !mgrs.length) return null;
+          return Object.assign({}, l, { roles: roles.length ? roles : l.roles, hiringManagers: mgrs.length ? mgrs : l.hiringManagers });
+        }).filter(Boolean);
+      }
       // Date search: only roles posted online within the last N days.
       var pw = body && parseInt(body.postedWithinDays, 10);
       if (pw) {

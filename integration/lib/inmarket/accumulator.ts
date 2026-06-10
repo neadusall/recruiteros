@@ -13,8 +13,9 @@
  */
 
 import { collectLeads } from "./index";
-import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool } from "./pool";
+import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, poolCompaniesToExpand, updateExpandedRoles } from "./pool";
 import { enrichSizesBatch } from "./companySize";
+import { resolveCompanyRoles } from "./companyRoles";
 
 // Sectors to keep warm — mirrors the UI's industry chips (non-tech first, since those
 // are the sectors free remote boards miss and Adzuna fills).
@@ -36,6 +37,8 @@ const VACUUM_CAP = 600;                // leads for the keyword-less breadth pul
 const SEED_COMPANIES = 40;             // pool companies probed for deeper roles per cycle
 const SEED_CAP = 300;                  // leads from the seeding pass
 const SIZE_BATCH = 30;                 // companies resolved for headcount (Wikidata) per cycle
+const EXPAND_BATCH = 18;               // companies whose FULL ATS board we pull per cycle
+const EXPAND_STALE_MS = 3 * 24 * 60 * 60 * 1000; // re-pull a company's board after 3 days
 const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
 
 let started = false;
@@ -93,7 +96,24 @@ async function runCycle(): Promise<void> {
     /* seeding is best-effort; skip this tick on any failure */
   }
 
-  // 4) RESOLVE COMPANY SIZE — look up real headcounts for a rotating batch of pool companies
+  // 4) AUTO-EXPAND BOARDS — for a rotating batch of pool companies, pull their OWN public ATS
+  //    board and store EVERY open role (titles + per-role posting dates) onto the lead, so a
+  //    company that surfaced from one listing automatically shows all of its roles — no click.
+  //    This is what bulks the pool from "1 role per company" to whole boards (tens of roles).
+  try {
+    const targets = await poolCompaniesToExpand(EXPAND_BATCH, EXPAND_STALE_MS);
+    for (const t of targets) {
+      try {
+        const r = await resolveCompanyRoles(t.company, t.domain);
+        await updateExpandedRoles(t.company, {
+          roleDetails: r.roles.map((x) => ({ title: x.title, postedAt: x.postedAt, location: x.location })),
+          source: r.source,
+        });
+      } catch { /* skip this company this cycle */ }
+    }
+  } catch { /* best-effort */ }
+
+  // 5) RESOLVE COMPANY SIZE — look up real headcounts for a rotating batch of pool companies
   //    from Wikidata (free, keyless), cached so the size filter carries authoritative sizes
   //    over time. Companies Wikidata doesn't cover fall back to a marked estimate at search.
   try {

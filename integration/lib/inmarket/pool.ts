@@ -104,6 +104,14 @@ function leadMatches(lead: InMarketLead, q: InMarketQuery): boolean {
   if (q.companyName) {
     return lead.company.toLowerCase().includes(q.companyName.toLowerCase().trim());
   }
+  // Title search: at least one open role's TITLE must match the keywords (substring).
+  if (q.roleQuery && q.roleQuery.trim()) {
+    const toks = q.roleQuery.toLowerCase().split(/[^a-z0-9+#]+/).filter((t) => t.length >= 2);
+    if (toks.length) {
+      const titles = (lead.roleDetails?.map((d) => d.title) ?? lead.roles ?? []).join(" || ").toLowerCase();
+      if (!toks.some((t) => titles.includes(t))) return false;
+    }
+  }
   const toks = industryTokens(q.industries ?? []);
   if (toks.length) {
     const hay = (lead.company + " " + (lead.industry ?? "") + " " + lead.reason + " " + (lead.roles?.join(" ") ?? "")).toLowerCase();
@@ -179,6 +187,45 @@ export async function poolCompanyNames(offset: number, limit: number): Promise<{
     if (names.length >= limit) break;
   }
   return { names, total: pool.length };
+}
+
+/** Companies whose full ATS board we haven't pulled yet (or not in `staleMs`), highest-
+ *  scored first — the background board-expansion works through these. */
+export async function poolCompaniesToExpand(limit: number, staleMs: number): Promise<Array<{ company: string; domain?: string }>> {
+  const now = Date.now();
+  const pool = (await load()).sort((a, b) => (b.lead.score ?? 0) - (a.lead.score ?? 0));
+  const out: Array<{ company: string; domain?: string }> = [];
+  for (const e of pool) {
+    const at = e.lead.boardExpandedAt ? Date.parse(e.lead.boardExpandedAt) : 0;
+    if (at && now - at < staleMs) continue;           // recently expanded → skip
+    if (!e.lead.company) continue;
+    out.push({ company: e.lead.company, domain: e.lead.domain });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** Store a company's FULL board (titles + per-role dates) onto its pool lead, so searches and
+ *  the deep-dive show every role they're hiring for. Stamps boardExpandedAt either way (a
+ *  no-board company is marked so we don't keep retrying it every cycle). */
+export async function updateExpandedRoles(
+  company: string,
+  payload: { roleDetails: Array<{ title: string; postedAt?: string; location?: string }>; source: string },
+): Promise<void> {
+  const key = (company || "").toLowerCase().trim();
+  if (!key) return;
+  const pool = await load();
+  const e = pool.find((x) => keyOf(x.lead) === key);
+  if (!e) return;
+  e.lead.boardExpandedAt = new Date().toISOString();
+  if (payload.roleDetails.length) {
+    e.lead.roleDetails = payload.roleDetails.slice(0, 30);
+    e.lead.roles = e.lead.roleDetails.map((d) => d.title);
+    e.lead.boardSource = payload.source;
+    const newest = e.lead.roleDetails.map((d) => d.postedAt).filter(Boolean).sort().slice(-1)[0];
+    if (newest) { e.lead.postedAt = newest; e.lead.signalAt = e.lead.signalAt || newest; }
+  }
+  await saveSnapshot(KEY, pool);
 }
 
 /** A rotating slice of company slugs from the pool, to seed the watchlist-driven sources

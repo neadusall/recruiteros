@@ -43,6 +43,9 @@ export interface InMarketQuery {
   geos?: string[];
   /** Company-name search: only surface companies whose name matches this text. */
   companyName?: string;
+  /** Job-title keyword search: only surface companies hiring a role whose TITLE matches
+   *  these keywords (substring, not exact), and narrow each company to just those roles. */
+  roleQuery?: string;
   /** Company slugs/names to feed the watchlist-driven sources (ATS boards, GitHub orgs,
    *  News RSS). Used by the background accumulator to deepen role coverage for companies
    *  already in the pool — not a user-facing filter. */
@@ -78,6 +81,8 @@ export interface HiringManagerLead {
   why?: string;
   /** True when this manager was resolved by the AI inference rather than the heuristic. */
   ai?: boolean;
+  /** When this role was posted on the company's own board (ISO), when known. */
+  postedAt?: string;
 }
 
 /** One in-market lead surfaced to the recruiter. */
@@ -104,6 +109,12 @@ export interface InMarketLead {
   buyerLinkedin?: string;
   /** Roles observed open, for context. */
   roles?: string[];
+  /** The company's FULL board when auto-expanded from their own ATS (title + date + loc). */
+  roleDetails?: Array<{ title: string; postedAt?: string; location?: string }>;
+  /** Which ATS the full board came from, e.g. "Greenhouse"; set once expanded. */
+  boardSource?: string;
+  /** When we last pulled the company's full board (ISO) — drives the rotation. */
+  boardExpandedAt?: string;
   /** Deep dive: each open role mapped to the hiring manager who would own it. */
   hiringManagers?: HiringManagerLead[];
   sourceUrl?: string;
@@ -171,18 +182,24 @@ const MANAGER_LADDER: Record<JobFunction, string[]> = {
  * resolved a real decision-maker whose function matches, attach their name to the senior
  * rung; everything else stays a canonical title until enrichment resolves a person.
  */
-export function hiringManagersFor(roles: string[] | undefined, buyer?: Person): HiringManagerLead[] {
+export function hiringManagersFor(
+  roles: string[] | undefined,
+  buyer?: Person,
+  roleDates?: Record<string, string>,
+  cap = 8,
+): HiringManagerLead[] {
   if (!roles || !roles.length) return [];
   const buyerFn = buyer?.title ? classifyTitle(buyer.title).function : undefined;
   const seen = new Set<string>();
   const out: HiringManagerLead[] = [];
-  for (const role of roles.slice(0, 8)) {            // bound payload across many open roles
+  for (const role of roles.slice(0, cap)) {          // bound payload across many open roles
     const rkey = role.trim().toLowerCase();
     if (!rkey) continue;
     const fn = classifyTitle(role).function;
     const ladder = MANAGER_LADDER[fn] || [MANAGER_TITLE_BY_FUNCTION[fn]];
     const matchesBuyer = !!buyerFn && (fn === buyerFn || buyerFn === "executive");
     const attachIdx = Math.min(2, ladder.length - 1); // attach the resolved person at the VP rung
+    const postedAt = roleDates ? roleDates[rkey] : undefined;
     ladder.forEach((managerTitle, idx) => {
       const k = rkey + "::" + managerTitle.toLowerCase();
       if (seen.has(k)) return;
@@ -194,6 +211,7 @@ export function hiringManagersFor(roles: string[] | undefined, buyer?: Person): 
         managerTitle,
         managerName: attach ? buyer?.fullName : undefined,
         managerLinkedin: attach ? buyer?.linkedinUrl : undefined,
+        postedAt,
       });
     });
   }
@@ -326,6 +344,56 @@ function applyTaken(leads: InMarketLead[], taken: Set<string>): InMarketLead[] {
   return out;
 }
 
+/** Tokenize a title query into lowercased keywords (>=2 chars). */
+function roleTokens(q?: string): string[] {
+  return (q ?? "").toLowerCase().split(/[^a-z0-9+#]+/).filter((t) => t.length >= 2);
+}
+
+/**
+ * Read-time view of a lead:
+ *  - regenerate hiring managers from the company's FULL expanded board (so 1/3/5 + push work
+ *    across every role, with each role's posting date attached), and
+ *  - when a title search is active, NARROW the lead to only the roles whose title matches the
+ *    keywords (the "separation") — returning null when nothing matches so it's filtered out.
+ */
+function expandLeadView(lead: InMarketLead, tokens: string[]): InMarketLead | null {
+  const details = lead.roleDetails && lead.roleDetails.length ? lead.roleDetails : null;
+  let titles = details ? details.map((d) => d.title) : (lead.roles ?? []);
+  let kept = details;
+
+  if (tokens.length) {
+    const match = (t: string) => { const low = t.toLowerCase(); return tokens.some((k) => low.includes(k)); };
+    if (kept) { kept = kept.filter((d) => match(d.title)); titles = kept.map((d) => d.title); }
+    else titles = titles.filter(match);
+    if (!titles.length) return null;             // no role matches this title search → drop
+  }
+  if (!details && !lead.hiringManagers?.length && !titles.length) return lead;
+
+  // Build the role->postedAt map and regenerate managers across the (possibly narrowed) set.
+  const roleDates: Record<string, string> = {};
+  if (kept) for (const d of kept) if (d.postedAt) roleDates[d.title.trim().toLowerCase()] = d.postedAt;
+  const buyer = lead.buyerName || lead.buyerTitle
+    ? ({ fullName: lead.buyerName, title: lead.buyerTitle, linkedinUrl: lead.buyerLinkedin } as Person)
+    : undefined;
+  const managers = titles.length ? hiringManagersFor(titles, buyer, roleDates, 30) : lead.hiringManagers;
+
+  // Freshest role date becomes the lead's postedAt so the date filter reflects live demand.
+  let postedAt = lead.postedAt;
+  if (kept && kept.length) {
+    const newest = kept.map((d) => d.postedAt).filter(Boolean).sort().slice(-1)[0];
+    if (newest) postedAt = newest;
+  }
+  return { ...lead, roles: titles, roleDetails: kept ?? lead.roleDetails, hiringManagers: managers, postedAt };
+}
+
+/** Apply the read-time expansion + title separation across a set of leads. */
+function applyRoleView(leads: InMarketLead[], q: InMarketQuery): InMarketLead[] {
+  const tokens = roleTokens(q.roleQuery);
+  const out: InMarketLead[] = [];
+  for (const l of leads) { const v = expandLeadView(l, tokens); if (v) out.push(v); }
+  return out;
+}
+
 /** Keep only leads whose date falls within the requested window. Applied at SEARCH time
  *  (never during accumulation, so ingestion still captures everything). `postedWithinDays`
  *  filters on the online posting date; `addedWithinDays` on when we first stored it. */
@@ -385,6 +453,10 @@ export async function collectLeads(q: InMarketQuery, nowIso: string, cap = 300):
   if (q.companyName) keywords.push(q.companyName.trim());
   if (q.query) keywords.push(...q.query.split(/\s+/).filter((t) => t.length > 2));
   if (q.industries?.length) keywords.push(...industryTokens(q.industries));
+  // Title search: push the title keywords to the sources (Adzuna `what=`, board filters) so
+  // the live pull targets that role directly — this is what boosts title-specific volume.
+  const titleToks = roleTokens(q.roleQuery);
+  if (titleToks.length) keywords.push(...titleToks);
   const watchlist: { keywords?: string[]; companyNames?: string[] } = {};
   if (keywords.length) watchlist.keywords = keywords;
   // Feed company names/slugs to the watchlist-driven sources (ATS boards, GitHub, News)
@@ -418,6 +490,16 @@ export async function collectLeads(q: InMarketQuery, nowIso: string, cap = 300):
     ranked = ranked.filter((s) => {
       const hay = (s.title + " " + s.detail + " " + (s.company?.industry ?? "")).toLowerCase();
       return terms.some((t) => hay.includes(t));
+    });
+    if (ranked.length === 0) ranked = before;
+  }
+  // Title search: keep only signals whose role TITLE matches the keywords (live-pull path).
+  if (titleToks.length) {
+    const before = ranked;
+    ranked = ranked.filter((s) => {
+      const rt = ((s.evidence as any)?.roleTitle ?? "") + " " + s.title;
+      const low = rt.toLowerCase();
+      return titleToks.some((t) => low.includes(t));
     });
     if (ranked.length === 0) ranked = before;
   }
@@ -456,7 +538,7 @@ export async function searchInMarket(
   const { loadSizeMap, fillSizes } = await import("./companySize");
   const sizeMap = await loadSizeMap().catch(() => ({} as Record<string, never>));
   const fresh = (arr: InMarketLead[]) =>
-    applySizeFilter(applyDateFilter(applyTaken(fillSizes(arr.filter(isUsLead), sizeMap as never), taken), q, nowIso), q);
+    applySizeFilter(applyDateFilter(applyTaken(applyRoleView(fillSizes(arr.filter(isUsLead), sizeMap as never), q), taken), q, nowIso), q);
 
   try {
     const { ensureAccumulator } = await import("./accumulator");
