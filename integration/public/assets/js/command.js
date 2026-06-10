@@ -335,23 +335,20 @@
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     campaigns: { title: "Campaigns", crumb: "Build", action: null, render: renderCampaigns },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
-    jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing },
+    jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting" },
     data: { title: "Candidates", crumb: "Build", action: null, render: renderData },
-    sending: { title: "Email Sending", crumb: "Build", action: null, render: renderSending },
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
-    outreach: { title: "Outreach", crumb: "Build", action: null, render: renderOutreach },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "＋ New sequence", render: renderContent },
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
-    spending: { title: "Spending", crumb: "Measure", action: null, render: renderSpending },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
-    // Admin launch-setup hub. Consolidates Integrations, ATS, Email Sending and
-    // Outreach behind one tab with an ordered readiness checklist. The four
-    // sub-routes below stay registered so deep links (#connected, #ats, …) and
-    // in-app cross-links keep resolving; they just have no standalone nav item.
+    // Admin launch-setup hub. Consolidates Integrations and ATS behind one tab
+    // with an ordered readiness checklist. The two sub-routes below stay
+    // registered so deep links (#connected, #ats) and in-app cross-links keep
+    // resolving; they just have no standalone nav item.
     setup: { title: "Setup", crumb: "Connect", action: null, render: renderSetup, cap: "integrations:manage" },
     connected: { title: "Connected", crumb: "Connect", action: "Test all", render: renderConnected, cap: "integrations:manage" },
     ats: { title: "ATS", crumb: "Connect", action: null, render: renderAts, cap: "ats:manage" },
@@ -6018,9 +6015,7 @@
   var SETUP_SECTIONS = [
     { key: "", label: "Launch readiness", icon: "🚀" },
     { key: "connected", label: "Integrations", icon: "🔌" },
-    { key: "ats", label: "ATS", icon: "🗂️" },
-    { key: "sending", label: "Email Sending", icon: "📨" },
-    { key: "outreach", label: "Outreach", icon: "✉️" }
+    { key: "ats", label: "ATS", icon: "🗂️" }
   ];
 
   function setupStyles() {
@@ -6063,8 +6058,6 @@
     var body = el.querySelector("#setupBody");
     if (detail === "connected") return renderConnected(body);
     if (detail === "ats") return renderAts(body);
-    if (detail === "sending") return renderSending(body);
-    if (detail === "outreach") return renderOutreach(body);
     return renderSetupOverview(body);
   }
 
@@ -6074,7 +6067,7 @@
   function renderSetupOverview(body) {
     var motionLabel = motion === "bd" ? "Business Development" : "Recruiting";
     body.innerHTML = head("Setup",
-      "Everything an admin stands up before launch, in order. Connect your tools, choose your system of record, provision owned email-sending infrastructure, then confirm outreach is ready and switch the engine on.") +
+      "Everything an admin stands up before launch, in order. Connect your tools and choose your system of record, then switch the engine on.") +
       '<div id="setupOv">' + loading() + '</div>';
 
     // Step copy lives here so the loaded and error branches stay in sync.
@@ -6082,11 +6075,7 @@
       connected: { title: "Connect your tools", desc: "Integration pre-flight — every required tool must turn green before campaigns can activate.",
         track: ["Each integration green", "API keys valid", "Telnyx / SMS reachable"] },
       ats: { title: "Connect your ATS", desc: "Pick your system of record (Loxo is the verified primary). Replies, touches and placements sync once it's live.",
-        track: ["Vendor verified", "Object mapping reviewed", "Two-way sync confirmed"] },
-      sending: { title: "Provision email sending", desc: "Stand up your owned cold-email infrastructure — MTA server, domains and every DNS record (SPF/DKIM/DMARC/MX/PTR) set automatically, then warm the mailboxes.",
-        track: ["Domain health", "Mailbox + IP warmth", "Capacity / day", "Bounce & complaint rates"] },
-      outreach: { title: "Confirm outreach & switch on", desc: "The final pre-launch gate — enrichment credits topped up, domains and LinkedIn warmed, and the sending engine switched on.",
-        track: ["Pre-flight all green", "Enrichment credits", "Domain & LinkedIn warmup", "Engine on"] }
+        track: ["Vendor verified", "Object mapping reviewed", "Two-way sync confirmed"] }
     };
     function mk(key, state, metric) { var m = META[key]; return { key: key, title: m.title, desc: m.desc, track: m.track, state: state, metric: metric }; }
     function grab(path) { return api(path).then(function (d) { return d; }, function () { return null; }); }
@@ -6108,35 +6097,14 @@
         : "Active: " + ((av && av.label) || active) + (av && av.status === "verified" ? " · verified" : " · not verified yet");
       return mk("ats", state, metric);
     }
-    function stepSending(d) {
-      if (!d) return mk("sending", "pending", "Couldn't load sending infrastructure.");
-      var ov = (d.health && d.health.overall) || {}, domains = d.domains || [];
-      var serverUp = (d.servers || []).some(function (s) { return s.status === "active"; });
-      var state = (!serverUp && !domains.length) ? "action" : ov.canSend ? "ready" : "progress";
-      var metric = (!serverUp && !domains.length) ? "No MTA server or domains yet."
-        : (domains.length + " domain" + (domains.length === 1 ? "" : "s") + " · " +
-           (ov.activeMailboxes || 0) + "/" + (ov.mailboxes || 0) + " mailboxes warm" +
-           (ov.canSend ? " · sending now" : " · warming up"));
-      return mk("sending", state, metric);
-    }
-    function stepOutreach(d) {
-      if (!d) return mk("outreach", "pending", "Couldn't load outreach readiness.");
-      var pf = d.preflight || { ok: false, blocking: [] };
-      var cr = (d.enrichment && d.enrichment.credits) || {};
-      var state = pf.ok ? "ready" : "action";
-      var metric = pf.ok
-        ? ("All required tools green" + (cr.included ? " · " + (cr.remaining || 0).toLocaleString() + " enrichment credits left" : ""))
-        : ((pf.blocking || []).length + " required tool(s) not ready");
-      return mk("outreach", state, metric);
-    }
     function sPill(state) {
       var m = { ready: "Ready", progress: "In progress", action: "Action needed", pending: "—" };
       return '<span class="s-pill ' + state + '">' + (m[state] || state) + '</span>';
     }
 
-    Promise.all([grab("/connected"), grab("/ats"), grab("/sending"), grab("/outreach?motion=" + encodeURIComponent(motion))])
+    Promise.all([grab("/connected"), grab("/ats")])
       .then(function (res) {
-        var steps = [stepConnected(res[0]), stepAts(res[1]), stepSending(res[2]), stepOutreach(res[3])];
+        var steps = [stepConnected(res[0]), stepAts(res[1])];
         var ready = steps.filter(function (s) { return s.state === "ready"; }).length;
         var banner = (ready === steps.length)
           ? '<div class="setup-banner ok">✓ All systems are go — your ' + esc(motionLabel) + ' workspace is ready to launch.</div>'
