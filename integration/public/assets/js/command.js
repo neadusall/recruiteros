@@ -6240,7 +6240,7 @@
         '<div class="card"><h3>Loxo object mapping</h3>' + map + "</div></div>";
       Array.prototype.forEach.call(body.querySelectorAll(".ats-v"), function (btn) {
         btn.addEventListener("click", function () {
-          openAtsSetup(btn.getAttribute("data-vendor"), cfgByVendor[btn.getAttribute("data-vendor")] || {}, btn.getAttribute("data-status"), d.vendors);
+          openAtsSetup(btn.getAttribute("data-vendor"), cfgByVendor[btn.getAttribute("data-vendor")] || {}, btn.getAttribute("data-status"), d.vendors, el);
         });
       });
     }).catch(function () { var b = $("#atBody"); if (b) b.innerHTML = needsSetup(); });
@@ -6249,7 +6249,8 @@
   // Per-vendor connection dialog: enter domain/slug/API key, test, sync, and
   // subscribe to the real-time feed. Loxo is fully wired; other vendors save
   // credentials but verification/sync land as each adapter ships.
-  function openAtsSetup(vendor, cfg, vstatus, vendors) {
+  function openAtsSetup(vendor, cfg, vstatus, vendors, host) {
+    var refresh = function () { renderAts(host || $("#view")); };
     var label = (vendors || []).reduce(function (a, v) { return v.vendor === vendor ? v.label : a; }, vendor);
     var isLoxo = vendor === "loxo";
     var docLink = isLoxo ? '<a href="https://loxo.readme.io/reference/loxo-api" target="_blank" rel="noopener">Loxo API reference ↗</a>' : '';
@@ -6280,7 +6281,7 @@
       root.querySelector("#atsSave").onclick = function () {
         say("Saving…");
         saveFirst().then(function (r) {
-          if (r.ok) { say("Saved. " + (isLoxo ? "Now test the connection." : "Credentials stored."), "ok"); cfg.hasApiKey = true; renderAts($("#view")); }
+          if (r.ok) { say("Saved. " + (isLoxo ? "Now test the connection." : "Credentials stored."), "ok"); cfg.hasApiKey = true; refresh(); }
           else say((r.data && r.data.error) || "Could not save.", "err");
         }).catch(function () { say("Could not reach the server.", "err"); });
       };
@@ -6288,7 +6289,7 @@
       if (testBtn) testBtn.onclick = function () {
         say("Saving + testing…");
         saveFirst().then(function () { return send("/ats", "POST", { action: "test", vendor: vendor }); }).then(function (r) {
-          if (r.ok && r.data && r.data.ok) { say("Connected ✓ — Loxo responded.", "ok"); renderAts($("#view")); }
+          if (r.ok && r.data && r.data.ok) { say("Connected ✓ — Loxo responded.", "ok"); refresh(); }
           else say((r.data && r.data.error) || "Connection failed.", "err");
         }).catch(function () { say("Could not reach the server.", "err"); });
       };
@@ -6299,7 +6300,7 @@
           if (r.ok && r.data && r.data.report) {
             var p = r.data.report.people || {}, c = r.data.report.companies || {};
             say("Synced ✓ — Candidates +" + (p.added || 0) + "/" + (p.updated || 0) + " upd · Companies +" + (c.added || 0) + "/" + (c.updated || 0) + " upd.", "ok");
-            renderAts($("#view"));
+            refresh();
           } else say((r.data && r.data.error) || "Sync failed — test the connection first.", "err");
         }).catch(function () { say("Sync failed.", "err"); });
       };
@@ -6314,7 +6315,7 @@
       var discBtn = root.querySelector("#atsDisc");
       if (discBtn) discBtn.onclick = function () {
         if (!window.confirm("Disconnect " + label + "? Stored credentials are removed. Synced records stay.")) return;
-        send("/ats", "POST", { action: "disconnect", vendor: vendor }).then(function () { close(); toast(label + " disconnected"); renderAts($("#view")); });
+        send("/ats", "POST", { action: "disconnect", vendor: vendor }).then(function () { close(); toast(label + " disconnected"); refresh(); });
       };
     });
   }
