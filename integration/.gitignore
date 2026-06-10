@@ -4,6 +4,7 @@ next-env.d.ts
 *.tsbuildinfo
 .env
 .env.local
-# Secret owner-console URL slug + its published page (never commit the secret)
-.owner-console-slug
+# The published owner-console page is regenerated at build (never commit it).
+# The slug itself IS committed (in .owner-console-slug) so the URL is stable and
+# known across deploys; override it per-environment with OWNER_CONSOLE_SLUG.
 public/owner-*.html
