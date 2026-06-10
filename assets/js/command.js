@@ -744,8 +744,9 @@
   // pool, by day, and when it last updated. Always renders (shows a "building" state
   // while the pool fills) and is dismissible.
   function imTickerHtml() {
-    var s = imStats || { total: 0, addedToday: 0, lastAddedAt: null, days: [] };
+    var s = imStats || { total: 0, openPositions: 0, windowDays: 90, addedToday: 0, lastAddedAt: null, days: [] };
     var added = s.addedToday || 0, total = s.total || 0;
+    var positions = s.openPositions || 0, win = s.windowDays || 90;
     var lastStr = "filling now";
     if (s.lastAddedAt) {
       try { lastStr = new Date(s.lastAddedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) {}
@@ -756,7 +757,7 @@
       return '<div class="im-tick-row"><span>' + esc(lbl) + "</span><b>+" + (d.added || 0) + "</b></div>";
     }).join("");
     var main = total > 0
-      ? '<b>+' + added + '</b> new companies today · <b>' + total + '</b> in the pool'
+      ? '<b>' + positions.toLocaleString() + '</b> open positions · <b>' + total.toLocaleString() + '</b> companies (last ' + win + 'd) · <b>+' + added + '</b> today'
       : "Building your hiring pool — first companies land within ~15 min, then it grows daily.";
     return '<div class="im-ticker" id="imTicker">' +
       '<button class="im-ticker-x" id="imTickerX" title="Hide">✕</button>' +
@@ -779,8 +780,9 @@
   }
   function renderImportBanner() {
     var el = document.getElementById("imImportBanner"); if (!el) return;
-    var s = imStats || { total: 0, addedToday: 0, lastAddedAt: null, days: [] };
+    var s = imStats || { total: 0, openPositions: 0, windowDays: 90, addedToday: 0, lastAddedAt: null, days: [] };
     var added = s.addedToday || 0, total = s.total || 0;
+    var positions = s.openPositions || 0, win = s.windowDays || 90;
     var lastStr = "";
     if (s.lastAddedAt) { try { lastStr = " · updated " + new Date(s.lastAddedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); } catch (e) {} }
     var log = (s.days || []).slice(0, 5).map(function (d) {
@@ -788,7 +790,7 @@
       return '<span class="im-import-day">' + esc(lbl) + " <b>+" + (d.added || 0) + "</b></span>";
     }).join("");
     if (total > 0) {
-      el.innerHTML = '<div class="im-import-main">📈 <b>+' + added + '</b> companies imported today from free job APIs · <b>' + total + '</b> in your hiring pool' + esc(lastStr) + "</div>" +
+      el.innerHTML = '<div class="im-import-main">📈 <b>' + positions.toLocaleString() + '</b> open positions across <b>' + total.toLocaleString() + '</b> companies in your hiring pool (last ' + win + ' days) · <b>+' + added + '</b> companies imported today' + esc(lastStr) + "</div>" +
         (log ? '<div class="im-import-log">' + log + "</div>" : "");
     } else {
       el.innerHTML = '<div class="im-import-main">📈 Importing now from the free job APIs — first companies land within ~15 min, then this climbs every day.</div>';

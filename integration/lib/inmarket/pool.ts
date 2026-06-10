@@ -16,7 +16,8 @@ import { industryTokens, dedupeLeads } from "./index";
 
 const KEY = "inmarket_pool_v1";
 const MAX_POOL = 15000;                        // cap the stored blob
-const TTL_MS = 30 * 24 * 60 * 60 * 1000;       // drop leads not seen for 30 days
+const TTL_MS = 90 * 24 * 60 * 60 * 1000;       // keep a 90-day window of hiring activity
+export const WINDOW_DAYS = 90;                 // the DB retention window, surfaced in the UI
 
 interface PoolEntry { lead: InMarketLead; at: number; firstAt?: number } // at = last-seen, firstAt = first-seen (epoch ms)
 
@@ -70,7 +71,12 @@ export async function mergeIntoPool(leads: InMarketLead[]): Promise<void> {
 
 /* ---- Accumulation activity stats (the "newly added today" ticker) ---- */
 const STATS_KEY = "inmarket_pool_stats_v1";
-interface PoolStats { total: number; lastAddedAt: string | null; days: Record<string, number> }
+interface PoolStats {
+  total: number;                 // companies currently in the pool
+  positions?: number;            // total open roles summed across the pool (live)
+  lastAddedAt: string | null;
+  days: Record<string, number>;  // companies added, by day
+}
 
 function today(): string { return new Date().toISOString().slice(0, 10); }
 
@@ -82,21 +88,47 @@ async function recordAdded(added: number, total: number): Promise<void> {
     s.days[d] = (s.days[d] || 0) + added;
     s.lastAddedAt = new Date().toISOString();
   }
-  // keep ~21 days of history
-  const keep = Object.keys(s.days).sort().slice(-21);
+  // keep a 90-day history (matches the DB window)
+  const keep = Object.keys(s.days).sort().slice(-WINDOW_DAYS);
   s.days = keep.reduce((m, k) => { m[k] = s.days[k]; return m; }, {} as Record<string, number>);
   await saveSnapshot(STATS_KEY, s);
 }
 
-/** Activity stats for the UI ticker: total in pool, added today, last update, and the
- *  recent per-day history (most recent first). */
+/** Count the open roles a lead represents: its expanded board if we have it, else the role(s)
+ *  it surfaced with, else 1 (a hiring company always has at least the role that surfaced it). */
+function positionsOf(l: InMarketLead): number {
+  return (l.roleDetails?.length || l.roles?.length || 1);
+}
+
+/** Recompute and persist the live aggregate metrics (companies + total open positions across
+ *  the whole pool). Called at the end of each accumulator cycle so the Hire Signals banner
+ *  shows a running, daily-growing open-positions count without the read path summing 15k
+ *  leads on every request. No-op without a database. */
+export async function recomputePoolMetrics(): Promise<{ total: number; positions: number }> {
+  const pool = await load();
+  const total = pool.length;
+  let positions = 0;
+  for (const e of pool) positions += positionsOf(e.lead);
+  const s = (await loadSnapshot<PoolStats>(STATS_KEY)) || { total: 0, lastAddedAt: null, days: {} };
+  s.total = total;
+  s.positions = positions;
+  await saveSnapshot(STATS_KEY, s);
+  return { total, positions };
+}
+
+/** Activity stats for the UI ticker: companies in pool, total open positions, added today,
+ *  last update, the 90-day DB window, and the recent per-day history (most recent first). */
 export async function poolStats(): Promise<{
-  total: number; addedToday: number; lastAddedAt: string | null;
+  total: number; openPositions: number; windowDays: number;
+  addedToday: number; lastAddedAt: string | null;
   days: Array<{ date: string; added: number }>;
 }> {
   const s = (await loadSnapshot<PoolStats>(STATS_KEY)) || { total: 0, lastAddedAt: null, days: {} };
   const days = Object.keys(s.days).sort().reverse().slice(0, 7).map((date) => ({ date, added: s.days[date] }));
-  return { total: s.total, addedToday: s.days[today()] || 0, lastAddedAt: s.lastAddedAt, days };
+  return {
+    total: s.total, openPositions: s.positions || 0, windowDays: WINDOW_DAYS,
+    addedToday: s.days[today()] || 0, lastAddedAt: s.lastAddedAt, days,
+  };
 }
 
 function leadMatches(lead: InMarketLead, q: InMarketQuery): boolean {

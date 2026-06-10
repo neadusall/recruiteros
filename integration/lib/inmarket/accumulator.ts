@@ -13,7 +13,7 @@
  */
 
 import { collectLeads } from "./index";
-import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, poolCompaniesToExpand, updateExpandedRolesBatch, purgeOversizedFromPool } from "./pool";
+import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, poolCompaniesToExpand, updateExpandedRolesBatch, purgeOversizedFromPool, recomputePoolMetrics } from "./pool";
 import { enrichSizesBatch, oversizedCompanyKeys } from "./companySize";
 import { resolveCompanyRoles } from "./companyRoles";
 
@@ -148,9 +148,9 @@ async function runCycleInner(): Promise<void> {
       sizeCursor = total ? (sizeCursor + names.length) % total : 0;
       await enrichSizesBatch(names, SIZE_BATCH);
     }
-    // Enforce the <10K-employee policy: drop any pool company Wikidata has now confirmed is
-    // over the cap. Re-read the set so it includes companies resolved THIS cycle. Authoritative
-    // counts only — heuristic estimates are never purged.
+    // Enforce the employee cap (companySize.MAX_EMPLOYEES): drop any pool company Wikidata has
+    // now confirmed is over it. Re-read the set so it includes companies resolved THIS cycle.
+    // Authoritative counts only — heuristic estimates are never purged.
     try {
       oversized = await oversizedCompanyKeys();
       if (oversized.size) await purgeOversizedFromPool(oversized);
@@ -158,6 +158,11 @@ async function runCycleInner(): Promise<void> {
   } catch {
     /* size enrichment is best-effort */
   }
+
+  // 6) RECOMPUTE METRICS — after this cycle's merges, expansions and purges, refresh the live
+  //    aggregates (companies + total open positions across the 90-day pool) so the Hire Signals
+  //    banner shows a running, daily-growing count without summing the whole pool per request.
+  try { await recomputePoolMetrics(); } catch { /* best-effort */ }
 }
 
 /**
