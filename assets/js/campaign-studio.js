@@ -91,13 +91,19 @@
      A sequence authored in Campaigns (one channel, named) maps each of its
      steps to the matching canvas block, so it can be dropped in as a unit. */
   var SEQ_CHANNELS = [
+    { ch: "multi", ic: "🔀", label: "Multi-channel" },
     { ch: "email", ic: "✉️", label: "Email" },
     { ch: "linkedin", ic: "🔗", label: "LinkedIn" },
     { ch: "sms", ic: "📱", label: "SMS / text" },
   ];
+  // Resolve the channel for one step: its own (multi sequences) or the sequence's.
+  function stepChannel(step, seqChannel) {
+    return (seqChannel === "multi" && step.channel) ? step.channel : (step.channel || seqChannel);
+  }
   function seqStepToBlock(step, channel, isFirstEmail) {
     if (channel === "email") return { key: isFirstEmail ? "em_cold" : "em_followup", cfg: { subject: step.subject || "", body: step.body || "" } };
     if (channel === "sms") return { key: "sms_send", cfg: { body: step.text || "" } };
+    if (channel === "voice") return { key: "vo_voicemail", cfg: { body: step.text || "" } };
     var a = step.action || "message"; // linkedin
     if (a === "connect") return { key: "li_connect", cfg: { withNote: !!(step.text && step.text.trim()), body: step.text || "" } };
     if (a === "inmail") return { key: "li_inmail", cfg: { subject: step.subject || "", body: step.text || "" } };
@@ -482,8 +488,9 @@
           state.nodes.push(d); if (prevUid) state.edges.push({ id: uid("e"), from: prevUid, to: d.uid });
           prevUid = d.uid; y += ROW_H;
         }
-        var isFirstEmail = seq.channel === "email" && emailCount === 0; if (seq.channel === "email") emailCount++;
-        var mc = seqStepToBlock(step, seq.channel, isFirstEmail);
+        var ch = stepChannel(step, seq.channel);
+        var isFirstEmail = ch === "email" && emailCount === 0; if (ch === "email") emailCount++;
+        var mc = seqStepToBlock(step, ch, isFirstEmail);
         var n = mkNode(mc.key, mc.cfg, startX, y);
         state.nodes.push(n); if (prevUid) state.edges.push({ id: uid("e"), from: prevUid, to: n.uid });
         prevUid = n.uid; y += ROW_H;

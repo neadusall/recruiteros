@@ -13,7 +13,9 @@
 import { rid, nowIso } from "../core/ids";
 import type { Motion } from "../core/types";
 
-export type SeqChannel = "email" | "linkedin" | "sms" | "voice";
+/** A single touch channel. "multi" is reserved for the *sequence* (see below) —
+ *  a step itself is always one concrete channel. */
+export type SeqChannel = "email" | "linkedin" | "sms" | "voice" | "multi";
 
 export type LinkedInAction = "connect" | "message" | "inmail" | "voice_note";
 
@@ -21,6 +23,10 @@ export interface SequenceStep {
   id: string;
   /** Days to wait after the previous step (0 on the first step = enroll day). */
   day: number;
+  /** The channel this step runs on. Optional for single-channel sequences (it
+   *  inherits the sequence's channel); REQUIRED in a "multi" sequence, where
+   *  each step picks its own channel (email / linkedin / sms / voice). */
+  channel?: Exclude<SeqChannel, "multi">;
   /** Email touch. */
   subject?: string;
   body?: string;
@@ -30,7 +36,7 @@ export interface SequenceStep {
   tracking?: boolean;
   /** LinkedIn touch. */
   action?: LinkedInAction;
-  /** Message text — used by linkedin (message/inmail/voice-note) + sms. */
+  /** Message text — used by linkedin (message/inmail/voice-note) + sms + voice. */
   text?: string;
   /** Voice drop touch: a reusable Voice Drops script id (lib/voice scripts). The
    *  templated voicemail ({first_name}/{role}) rendered in the cloned voice. */
@@ -48,6 +54,8 @@ export type SequenceStatus = "active" | "inactive";
 export interface Sequence {
   id: string;
   workspaceId: string;
+  /** "multi" = a single cross-channel cadence whose steps mix email / LinkedIn /
+   *  voicemail-drop touches (each step carries its own `channel`). */
   channel: SeqChannel;
   name: string;
   motion: Motion;
@@ -86,22 +94,28 @@ export interface SequenceInput {
   variables?: CustomVariable[];
 }
 
+const STEP_CHANNELS: SeqChannel[] = ["email", "linkedin", "sms", "voice"];
+
 function normSteps(steps?: Partial<SequenceStep>[]): SequenceStep[] {
   return (steps ?? []).map((s) => ({
     id: s.id || rid("step"),
     day: Number.isFinite(s.day as number) ? Math.max(0, Math.round(s.day as number)) : 0,
+    channel: STEP_CHANNELS.includes(s.channel as SeqChannel) ? s.channel : undefined,
     subject: s.subject,
     body: s.body,
     manualSend: s.manualSend,
     tracking: s.tracking,
     action: s.action,
     text: s.text,
+    voiceScriptId: s.voiceScriptId,
   }));
 }
 
+const SEQ_CHANNELS: SeqChannel[] = ["email", "linkedin", "sms", "voice", "multi"];
+
 /** Create or update a sequence, normalizing steps and stamping ids/timestamps. */
 export function upsertSequence(workspaceId: string, input: SequenceInput): Sequence {
-  const channel: SeqChannel = ["email", "linkedin", "sms"].includes(input.channel) ? input.channel : "email";
+  const channel: SeqChannel = SEQ_CHANNELS.includes(input.channel) ? input.channel : "email";
   const steps = normSteps(input.steps);
   const tags = (input.tags ?? []).filter(Boolean).slice(0, 10);
   const variables = (input.variables ?? []).filter((v) => v && v.key);

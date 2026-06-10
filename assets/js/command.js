@@ -1586,8 +1586,12 @@
   var CHANNELS = {
     email: { label: "Email", icon: "✉️", blurb: "Subject + body touches with merge fields and open/click tracking.", unit: "emails" },
     linkedin: { label: "LinkedIn", icon: "🔗", blurb: "Connection requests, messages, InMail, and voice notes.", unit: "touches" },
-    sms: { label: "SMS", icon: "💬", blurb: "Short, compliant post-engagement texts.", unit: "texts" }
+    sms: { label: "SMS", icon: "💬", blurb: "Short, compliant post-engagement texts.", unit: "texts" },
+    voice: { label: "Voice", icon: "📞", blurb: "Cloned-voice voicemail drops to landline / VoIP.", unit: "drops" },
+    multi: { label: "Multi-channel", icon: "🔀", blurb: "One cadence that mixes email, LinkedIn and voicemail-drop touches.", unit: "touches" }
   };
+  // Per-step channels selectable inside a multi-channel sequence.
+  var STEP_CHANNELS = ["email", "linkedin", "voice"];
   var STD_VARS = [
     { key: "first_name", label: "First name" }, { key: "last_name", label: "Last name" },
     { key: "company", label: "Company" }, { key: "title", label: "Job title" },
@@ -1608,6 +1612,19 @@
       { id: sid(), day: 0, action: "connect", text: "" },
       { id: sid(), day: 2, action: "message", text: "Thanks for connecting, {{first_name}}! Reaching out about {{signal}} — open to a quick chat?" },
       { id: sid(), day: 5, action: "message", text: "Circling back in case this got buried — happy to share details whenever works." }
+    ];
+    if (channel === "voice") return [
+      { id: sid(), day: 0, voiceScriptId: "", text: "Hi {{first_name}}, this is {{sender_name}} — I work with people on the {{role}} side and had a quick idea for {{company}}. I'll follow up by email, but feel free to call me back. Thanks!" }
+    ];
+    if (channel === "multi") return [
+      // A generic, industry-agnostic cross-channel cadence: warm on LinkedIn,
+      // open + follow up by email, and break the pattern with a voicemail drop.
+      { id: sid(), day: 0, channel: "linkedin", action: "connect", text: "" },
+      { id: sid(), day: 2, channel: "email", tracking: true, subject: "{{role}} at {{company}} — quick idea", body: "Hi {{first_name}},\n\nNoticed {{signal}}. I work with people who'd be a strong fit for the {{role}} role — worth a short call this week?\n\nBest,\n{{sender_name}}" },
+      { id: sid(), day: 2, channel: "linkedin", action: "message", text: "Thanks for connecting, {{first_name}}! Just sent a note over email about {{role}} — happy to share a couple of profiles if useful." },
+      { id: sid(), day: 3, channel: "voice", voiceScriptId: "", text: "Hi {{first_name}}, it's {{sender_name}} — left you a note on email and LinkedIn about the {{role}} search. 30 seconds is all I need; call me back whenever works." },
+      { id: sid(), day: 3, channel: "email", tracking: true, subject: "Re: {{role}}", body: "Following up, {{first_name}} — happy to send a couple of profiles if it's useful. Want me to?" },
+      { id: sid(), day: 4, channel: "email", tracking: true, subject: "Should I close the file?", body: "No worries if the timing's off, {{first_name}} — just let me know and I'll step back." }
     ];
     return [
       { id: sid(), day: 0, text: "Hi {{first_name}}, it's {{sender_name}} following up on {{role}} at {{company}}. Got 10 min this week? Reply STOP to opt out." }
@@ -1725,7 +1742,13 @@
 
   function renderSeqEditor(el, seq) {
     var C = CHANNELS[seq.channel] || CHANNELS.email;
+    var isMulti = seq.channel === "multi";
     var lastField = null; // last focused input/textarea, for merge-field insertion
+    var voiceScripts = []; // populated async; bound to voice steps via a picker
+
+    // The effective channel for a single step: its own (in a multi sequence) or
+    // the sequence's channel for single-channel sequences / legacy steps.
+    function stepCh(st) { return (isMulti && st.channel) ? st.channel : (st.channel || seq.channel); }
 
     el.innerHTML =
       '<div class="seq-top">' +
@@ -1755,13 +1778,35 @@
     $("#seqBack").addEventListener("click", function () { cmpEdit = null; render(); });
     $("#seqDeploy").addEventListener("click", function () { saveSeq(true); });
     $("#seqSave").addEventListener("click", function () { saveSeq(false); });
-    $("#seqAdd").addEventListener("click", function () {
-      var last = seq.steps[seq.steps.length - 1];
-      seq.steps.push(seq.channel === "email" ? { id: sid(), day: 3, tracking: true, subject: "", body: "" }
-        : seq.channel === "linkedin" ? { id: sid(), day: 2, action: "message", text: "" }
-        : { id: sid(), day: 2, text: "" });
-      paintSteps();
+    function blankStep(ch) {
+      if (ch === "email") return { id: sid(), day: 3, channel: isMulti ? "email" : undefined, tracking: true, subject: "", body: "" };
+      if (ch === "linkedin") return { id: sid(), day: 2, channel: isMulti ? "linkedin" : undefined, action: "message", text: "" };
+      if (ch === "voice") return { id: sid(), day: 2, channel: isMulti ? "voice" : undefined, voiceScriptId: "", text: "" };
+      return { id: sid(), day: 2, channel: isMulti ? "sms" : undefined, text: "" };
+    }
+    $("#seqAdd").addEventListener("click", function (e) {
+      if (!isMulti) { seq.steps.push(blankStep(seq.channel)); paintSteps(); return; }
+      // Multi-channel: pick which channel the new step runs on.
+      openStepChannelMenu(e.currentTarget);
     });
+    function openStepChannelMenu(anchor) {
+      var old = document.getElementById("seqAddMenu"); if (old) old.remove();
+      var menu = document.createElement("div"); menu.id = "seqAddMenu"; menu.className = "seq-varmenu";
+      menu.innerHTML = STEP_CHANNELS.map(function (ch) {
+        var c = CHANNELS[ch];
+        return '<button data-ch="' + ch + '"><code>' + c.icon + "</code><span>" + esc(c.label) + " step</span></button>";
+      }).join("");
+      document.body.appendChild(menu);
+      var r = anchor.getBoundingClientRect();
+      menu.style.top = (r.bottom + 4) + "px"; menu.style.left = Math.min(r.left, window.innerWidth - 280) + "px";
+      function close() { menu.remove(); document.removeEventListener("click", outside, true); }
+      function outside(ev) { if (!menu.contains(ev.target) && ev.target !== anchor) close(); }
+      setTimeout(function () { document.addEventListener("click", outside, true); }, 0);
+      menu.addEventListener("click", function (ev) {
+        var b = ev.target.closest("[data-ch]"); if (!b) return;
+        seq.steps.push(blankStep(b.getAttribute("data-ch"))); close(); paintSteps(); updateOverview();
+      });
+    }
     $("#seqAddVar").addEventListener("click", function () {
       var label = prompt("What does this variable hold? (e.g. Candidate A sell-in)");
       if (!label) return;
@@ -1798,7 +1843,7 @@
             if (f.type === "checkbox") seq.steps[i][key] = f.checked;
             else seq.steps[i][key] = (key === "day") ? (parseInt(f.value, 10) || 0) : f.value;
             if (key === "day") updateOverview();
-            if (key === "text" && seq.channel === "sms") { var cc = cardEl.querySelector("[data-sms-count]"); if (cc) cc.textContent = smsCount(f.value); }
+            if (key === "text" && stepCh(seq.steps[i]) === "sms") { var cc = cardEl.querySelector("[data-sms-count]"); if (cc) cc.textContent = smsCount(f.value); }
             if (key === "action") paintSteps(); // LinkedIn fields depend on the action
           });
         });
@@ -1809,10 +1854,11 @@
     }
 
     function stepCard(st, i) {
+      var ch = stepCh(st), cc = CHANNELS[ch] || CHANNELS.email;
       var delayLbl = i === 0 ? "days after enrollment" : "days after previous step";
       var head = '<div class="seq-step-h"><span class="seq-grip">≡</span><b>Step ' + (i + 1) + "</b>" +
-        '<span class="seq-chip ' + seq.channel + '">' + C.label + "</span>" +
-        (seq.channel === "email" ? '<label class="seq-manual"><span class="muted">Manual send</span><button type="button" class="or-sw' + (st.manualSend ? " on" : "") + '" data-manual></button></label>' : "") +
+        '<span class="seq-chip ' + ch + '">' + cc.icon + " " + cc.label + "</span>" +
+        (ch === "email" ? '<label class="seq-manual"><span class="muted">Manual send</span><button type="button" class="or-sw' + (st.manualSend ? " on" : "") + '" data-manual></button></label>' : "") +
         '<button class="seq-mini" data-collapse title="Collapse">▾</button>' +
         '<button class="seq-mini" data-del-step title="Delete step">🗑</button></div>';
       var delay = '<div class="seq-delay"><label>Delay</label><input class="seq-f seq-day" type="number" min="0" data-f="day" value="' + (st.day || 0) + '" /><span class="muted">' + delayLbl + "</span></div>";
@@ -1820,14 +1866,24 @@
     }
 
     function channelFields(st) {
-      if (seq.channel === "email") {
+      var ch = stepCh(st);
+      if (ch === "voice") {
+        var opts = '<option value="">— No bound script (use text below) —</option>' +
+          voiceScripts.map(function (v) { return '<option value="' + esc(v.id) + '"' + (st.voiceScriptId === v.id ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("");
+        return fieldLabel("Voicemail script") +
+          '<select class="seq-f seq-input" data-f="voiceScriptId">' + opts + "</select>" +
+          '<div class="muted" style="font-size:11px;margin:4px 0">Bind a reusable Voice Drops script (cloned voice), or just write the talking points below. Drops to landline / VoIP only; mobiles are filtered.</div>' +
+          fieldLabel("Talking points") +
+          '<textarea class="seq-f seq-area" data-f="text" rows="4" placeholder="What the voicemail should say… {{first_name}} / {{role}} splice in like an email merge.">' + esc(st.text || "") + "</textarea>";
+      }
+      if (ch === "email") {
         return fieldLabel("Subject") +
           '<input class="seq-f seq-input" data-f="subject" value="' + esc(st.subject || "") + '" placeholder="Subject line" />' +
           fieldLabel("Body") + bodyToolbar() +
           '<textarea class="seq-f seq-area" data-f="body" rows="7" placeholder="Write your email… use merge fields like {{first_name}}">' + esc(st.body || "") + "</textarea>" +
           '<label class="seq-check"><input class="seq-f" type="checkbox" data-f="tracking"' + (st.tracking ? " checked" : "") + " /> Enable open &amp; click tracking</label>";
       }
-      if (seq.channel === "linkedin") {
+      if (ch === "linkedin") {
         var opts = LI_ACTIONS.map(function (a) { return '<option value="' + a.v + '"' + (st.action === a.v ? " selected" : "") + ">" + a.label + "</option>"; }).join("");
         var sel = fieldLabel("Action") + '<select class="seq-f seq-input" data-f="action">' + opts + "</select>";
         if (st.action === "inmail") {
@@ -1906,12 +1962,27 @@
       var host = $("#seqOverview"); if (!host) return;
       var dur = seqDuration(seq), n = seq.steps.length;
       var cells = [["DURATION", dur + (dur === 1 ? " day" : " days")], ["STEPS", n]];
-      if (seq.channel === "email") {
+      if (isMulti) {
+        ["email", "linkedin", "voice"].forEach(function (ch) {
+          var k = seq.steps.filter(function (s) { return stepCh(s) === ch; }).length;
+          if (k) cells.push([CHANNELS[ch].label.toUpperCase(), k]);
+        });
+      } else if (seq.channel === "email") {
         cells.push([C.unit.toUpperCase(), seq.steps.length]);
         cells.push(["TASKS", seq.steps.filter(function (s) { return s.manualSend; }).length]);
       } else cells.push([C.unit.toUpperCase(), n]);
       host.innerHTML = cells.map(function (c) { return '<div class="rail-stat"><b>' + c[1] + "</b><span>" + c[0] + "</span></div>"; }).join("");
     }
+
+    // Load reusable Voice Drops scripts so voice steps can bind one. Repaints the
+    // steps once they arrive (the picker starts with just the text-only option).
+    (function loadEditorVoiceScripts() {
+      if (!isMulti && seq.channel !== "voice") return;
+      api("/voice/scripts?motion=" + encodeURIComponent(seq.motion || motion)).then(function (d) {
+        voiceScripts = (d && d.scripts) || [];
+        if (voiceScripts.length) paintSteps();
+      }).catch(function () {});
+    })();
 
     // formatting toolbar (basic) — wrap selection / prefix lines in the focused body
     el.addEventListener("click", function (e) {
@@ -4905,8 +4976,15 @@
         var n = (s.steps || []).length;
         var tags = (s.tags || []).map(function (t) { return '<span class="sl-tag">' + esc(t) + "</span>"; }).join("") || '<span class="muted">—</span>';
         var active = s.status === "active";
+        var chip = '<span class="seq-chip ' + s.channel + '">' + (c.icon ? c.icon + " " : "") + c.label + "</span>";
+        if (s.channel === "multi") {
+          var mix = {};
+          (s.steps || []).forEach(function (st) { var k = st.channel || "email"; mix[k] = 1; });
+          var icons = Object.keys(mix).map(function (k) { return (CHANNELS[k] || {}).icon || ""; }).join(" ");
+          chip += ' <span class="muted" style="font-size:11px">' + icons + "</span>";
+        }
         return '<tr data-id="' + esc(s.id) + '">' +
-          '<td class="sl-name"><span class="seq-chip ' + s.channel + '">' + c.label + "</span> " + esc(s.name) + "</td>" +
+          '<td class="sl-name">' + chip + " " + esc(s.name) + "</td>" +
           "<td>" + esc(s.owner || "—") + "</td>" +
           '<td class="sl-c">' + n + "</td>" +
           "<td>" + tags + "</td>" +
@@ -4961,6 +5039,31 @@
           createdAt: now, updatedAt: now });
       });
     }
+    // The generic, industry-agnostic cross-channel template the team builds off
+    // of: Email + LinkedIn connect + voicemail drop in one cadence. Stable id so
+    // every browser converges on one record (no duplicates); own guard so a
+    // user who deletes it won't see it re-seed. Saved through the shared store,
+    // so it shows in the Library, Campaigns and Campaign Studio alike.
+    function seedTemplate() {
+      // Seed one copy per motion (stable ids → every browser converges, no
+      // duplicates) so the template shows in both the Recruiting and BD
+      // Campaigns views (which are motion-filtered) as well as the Library.
+      var seeds = [
+        { id: "seq_tpl_multichannel", motion: "recruiting" },
+        { id: "seq_tpl_multichannel_bd", motion: "bd" }
+      ];
+      if (localStorage.getItem("ros_seq_tpl_multi") === "2") return;
+      try { localStorage.setItem("ros_seq_tpl_multi", "2"); } catch (e) {}
+      var now = new Date().toISOString();
+      seeds.forEach(function (sd) {
+        if (store.all().some(function (s) { return s.id === sd.id; })) return;
+        store.save({ id: sd.id, channel: "multi",
+          name: "Multi-channel outreach — Email · LinkedIn · Voicemail",
+          tags: ["template", "multi-channel"], status: "active", motion: sd.motion,
+          owner: "RecruiterOS Templates", variables: [], steps: seqTemplate("multi"),
+          createdAt: now, updatedAt: now });
+      });
+    }
     function reload() {
       paint();
       api("/sequences").then(function (d) {
@@ -4969,8 +5072,9 @@
           try { localStorage.setItem("ros_sequences", JSON.stringify(server.concat(store.all().filter(function (l) { return !server.some(function (s) { return s.id === l.id; }); })))); } catch (e) {}
         }
         if (!store.all().length) seedExamples();
+        seedTemplate();
         paint();
-      }).catch(function () { if (!store.all().length) seedExamples(); paint(); });
+      }).catch(function () { if (!store.all().length) seedExamples(); seedTemplate(); paint(); });
     }
     reload();
     loadVoiceScripts();
