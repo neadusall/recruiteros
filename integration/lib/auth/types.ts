@@ -29,6 +29,13 @@ export interface Workspace {
   domain?: string;
   plan: "trial" | "team" | "enterprise";
   createdAt: string;
+  /** When the free 14-day admin trial ends (ISO). Admin sign-up needs no card
+   *  until this date; after it, the workspace must be on a paid plan. Unset for
+   *  legacy workspaces created before trials existed — those are grandfathered
+   *  (never gated). */
+  trialEndsAt?: string;
+  /** True once the workspace has an active paid subscription. */
+  paid?: boolean;
 }
 
 export interface Membership {

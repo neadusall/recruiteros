@@ -270,6 +270,47 @@ export function tokenFromRequest(req: Request): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+/* ---------------- trial / billing ---------------- */
+
+export interface TrialStatus {
+  /** Currently inside the free trial window. */
+  onTrial: boolean;
+  /** On a paid plan. */
+  paid: boolean;
+  /** Whole days left in the trial (0 once it ends). */
+  daysLeft: number;
+  /** Trial ended AND no paid plan -> the admin portal should prompt to subscribe. */
+  expired: boolean;
+  trialEndsAt?: string;
+}
+
+/**
+ * Trial state for a workspace. Legacy workspaces (no trialEndsAt) are
+ * grandfathered: never on a trial clock, never expired. Paid workspaces are
+ * always good. Otherwise we count down to trialEndsAt.
+ */
+export function trialStatus(ws: Workspace): TrialStatus {
+  if (ws.paid) return { onTrial: false, paid: true, daysLeft: 0, expired: false, trialEndsAt: ws.trialEndsAt };
+  if (!ws.trialEndsAt) return { onTrial: false, paid: false, daysLeft: 0, expired: false };
+  const msLeft = Date.parse(ws.trialEndsAt) - Date.now();
+  const daysLeft = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60 * 24)));
+  return { onTrial: msLeft > 0, paid: false, daysLeft, expired: msLeft <= 0, trialEndsAt: ws.trialEndsAt };
+}
+
+/**
+ * Mark a workspace paid / unpaid. This is the seam a real payment processor
+ * (Stripe) calls once a subscription is active; until that's wired, the billing
+ * route flips it directly. Promotes a trial workspace to the team plan.
+ */
+export function setWorkspacePaid(workspaceId: string, paid: boolean): TrialStatus | null {
+  const ws = store.workspaces.get(workspaceId);
+  if (!ws) return null;
+  ws.paid = paid;
+  if (paid && ws.plan === "trial") ws.plan = "team";
+  persist();
+  return trialStatus(ws);
+}
+
 /* ---------------- internals ---------------- */
 
 function provisionWorkspace(user: User): { workspace: Workspace; role: Role } {
@@ -289,6 +330,10 @@ function provisionWorkspace(user: User): { workspace: Workspace; role: Role } {
     domain: corporate ? domain : undefined,
     plan: corporate ? "enterprise" : "trial",
     createdAt: nowIso(),
+    // Every new admin workspace starts a 14-day free trial — full access, no card
+    // required until it ends.
+    trialEndsAt: isoPlusHours(24 * 14),
+    paid: false,
   };
   store.workspaces.set(ws.id, ws);
   if (corporate) store.workspacesByDomain.set(domain, ws.id);

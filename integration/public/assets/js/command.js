@@ -273,6 +273,57 @@
     if (ieBtn) ieBtn.addEventListener("click", exitImpersonation);
   }
 
+  /* ---------------- 14-day trial / paywall ----------------
+     Admin sign-up is free for 14 days — no card required until it ends. After
+     that the workspace must subscribe to keep the Admin Portal. Legacy
+     workspaces (no trialEndsAt) and paid workspaces are never gated, so no
+     existing account is ever locked out by this. Recruiters never see it. */
+  if (portal === "admin" && !IMP_TOKEN) (function trialGate() {
+    var ws = ctx.workspace || {};
+    var tr;
+    if (ws.paid) tr = { onTrial: false, expired: false, daysLeft: 0 };
+    else if (!ws.trialEndsAt) tr = { onTrial: false, expired: false, daysLeft: 0 };
+    else {
+      var ms = Date.parse(ws.trialEndsAt) - Date.now();
+      tr = { onTrial: ms > 0, expired: ms <= 0, daysLeft: Math.max(0, Math.ceil(ms / 86400000)) };
+    }
+    if (!can("billing:manage")) return; // only the owner manages billing
+
+    function subscribe(btn) {
+      if (btn) btn.disabled = true;
+      send("/billing", "POST", { action: "subscribe" }).then(function (r) {
+        if (r.ok) {
+          try { ctx.workspace.paid = true; localStorage.setItem("ros_ctx", JSON.stringify(ctx)); } catch (e) {}
+          location.reload();
+        } else { if (btn) btn.disabled = false; toast("Could not start subscription (" + ((r.data && r.data.error) || r.status) + ")"); }
+      }).catch(function () { if (btn) btn.disabled = false; toast("Could not reach the server."); });
+    }
+
+    if (tr.expired) {
+      var ov = document.createElement("div");
+      ov.className = "paywall";
+      ov.innerHTML =
+        '<div class="paywall-card"><div class="paywall-badge">Free trial ended</div>' +
+        "<h2>Your 14-day trial is over</h2>" +
+        "<p>Subscribe to keep your Admin Portal, your team and everything you've set up. Nothing is deleted — you'll pick up right where you left off.</p>" +
+        '<button class="btn btn-primary btn-lg btn-block" id="pwSub">Subscribe & keep working →</button>' +
+        '<button class="btn btn-ghost btn-block" id="pwOut" style="margin-top:8px">Sign out</button></div>';
+      document.body.appendChild(ov);
+      ov.querySelector("#pwSub").addEventListener("click", function () { subscribe(this); });
+      ov.querySelector("#pwOut").addEventListener("click", signOut);
+    } else if (tr.onTrial) {
+      var tb = document.createElement("div");
+      tb.className = "trial-banner";
+      tb.innerHTML = '<span>✨ <b>' + tr.daysLeft + " day" + (tr.daysLeft === 1 ? "" : "s") +
+        "</b> left in your free trial — no card needed until it ends.</span>" +
+        '<button type="button" id="trUpgrade">Add payment</button>';
+      var mainEl = document.querySelector(".main");
+      if (mainEl) mainEl.insertBefore(tb, mainEl.firstChild);
+      var up = tb.querySelector("#trUpgrade");
+      if (up) up.addEventListener("click", function () { subscribe(this); });
+    }
+  })();
+
   // Initial motion-specific nav visibility (In-Market Leads is BD-only).
   syncMotionNav();
 
