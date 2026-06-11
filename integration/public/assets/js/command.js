@@ -185,7 +185,13 @@
   var REF = ref();
 
   /* ---------------- chrome ---------------- */
-  var wsNameEl = $("#wsName"); if (wsNameEl) wsNameEl.textContent = (ctx.workspace && ctx.workspace.name) || "Workspace";
+  // The workspace card normally shows the workspace/company name. On Lume (our own
+  // tenant) show the signed-in person's name instead, so the card reads like a
+  // personal account and doesn't surface the company / white-label structure.
+  var wsNameEl = $("#wsName");
+  if (wsNameEl) wsNameEl.textContent =
+    (isLumeWorkspace() && ctx.user && ctx.user.name) ? ctx.user.name
+      : ((ctx.workspace && ctx.workspace.name) || "Workspace");
   var envPill = $("#envPill");
   if (envPill) envPill.style.display = "none"; // no demo/live badge: this is the product
   function signOut() {
@@ -277,6 +283,20 @@
     // A workspace that has set its own brand name is, by definition, white-labelled.
     var ownBrand = !!(ws.brandName && String(ws.brandName).trim());
     return ownBrand || WHITE_LABEL_DOMAINS.indexOf(wsDom) >= 0 || WHITE_LABEL_DOMAINS.indexOf(userDom) >= 0;
+  }
+  // Lume is OUR OWN white-label tenant. We manage its custom domain on the backend
+  // and deliberately keep the white-label scaffolding invisible to the Lume team:
+  // hide the self-service Custom domain tab, and show the signed-in PERSON (not the
+  // company name) on the workspace card, so nothing reads as a resold/white-label
+  // site. Every OTHER white-label workspace keeps the normal behaviour. Detection
+  // is synchronous (ctx-based) so chrome can branch without an async branding fetch.
+  function isLumeWorkspace() {
+    var ws = ctx.workspace || {};
+    var wsDom = ((ws.domain) || "").toLowerCase();
+    var userDom = (((ctx.user && ctx.user.email) || "").split("@")[1] || "").toLowerCase();
+    var cust = ((ws.customDomain) || "").toLowerCase();
+    return wsDom === "lumesp.com" || userDom === "lumesp.com" ||
+           cust === "app.lumesp.com" || cust.indexOf(".lumesp.com") >= 0;
   }
   var ON_HOUSE_HOST = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.host || "");
   var IS_HOUSE = ON_HOUSE_HOST && !isWhiteLabelWorkspace();
@@ -6371,7 +6391,14 @@
 
   function renderSetup(el) {
     var detail = currentDetail();
-    var tabs = '<div class="setup-tabs">' + SETUP_SECTIONS.map(function (s) {
+    // Lume (our own tenant) manages its custom domain on the backend — hide the
+    // self-service Custom domain tab there. All other workspaces keep it.
+    var sections = SETUP_SECTIONS.filter(function (s) {
+      return !(s.key === "domain" && isLumeWorkspace());
+    });
+    // Guard direct navigation to #setup/domain when the tab is hidden.
+    if (detail === "domain" && isLumeWorkspace()) detail = "";
+    var tabs = '<div class="setup-tabs">' + sections.map(function (s) {
       return '<a class="setup-tab' + (s.key === detail ? " active" : "") + '" href="#setup' + (s.key ? "/" + s.key : "") + '">' +
         '<span class="ni">' + s.icon + '</span> ' + esc(s.label) + '</a>';
     }).join("") + '</div>';
@@ -6476,7 +6503,8 @@
     var welcome = onboarding
       ? '<div class="card" style="border-color:var(--brand);margin-bottom:14px">' +
         '<h3 style="margin:0 0 4px">👋 Welcome — let\'s make this portal yours</h3>' +
-        '<p class="setup-metric" style="margin:0">Set your brand name, logo and accent color below. This is what you and your whole team see everywhere, including your sign-in page. When you\'re ready to run it on your own web address, head to <a href="#setup/domain">Custom domain →</a> (you can do that anytime).</p></div>'
+        '<p class="setup-metric" style="margin:0">Set your brand name, logo and accent color below. This is what you and your whole team see everywhere, including your sign-in page.' +
+        (isLumeWorkspace() ? "" : ' When you\'re ready to run it on your own web address, head to <a href="#setup/domain">Custom domain →</a> (you can do that anytime).') + '</p></div>'
       : "";
     el.innerHTML =
       '<div class="sx-hero"><div class="sx-ic">🎨</div><div><h2>Branding</h2>' +
@@ -6639,14 +6667,14 @@
       '<p>Run your portal on your own domain — your recruiters sign in at your URL, fully branded. Add it, drop in two DNS records, then Verify. Until then your workspace stays on ' + esc(PLATFORM_HOST) + '.</p></div></div>' +
       '<div id="domBody">' + loading() + '</div>';
 
-    function statusMeta(status, hostLabel) {
-      var map = {
-        verified: ["ok", "Verified", "Your domain is connected and serving."],
-        live: ["ok", "Live", "Your portal is live on this domain."],
-        pending: ["warn", "Pending DNS", "Add the records below, then Verify."],
-        none: ["off", "Not set", "No custom domain yet — your portal runs on " + hostLabel + "."]
-      };
-      return map[status] || map.none;
+    function steps3(status) {
+      if (status === "live") return ["done", "done", "done"];
+      if (status === "verified") return ["done", "done", "active"];
+      if (status === "pending") return ["done", "active", "todo"];
+      return ["active", "todo", "todo"];
+    }
+    function stepNode(n, t, cls) {
+      return '<div class="sx-step ' + cls + '"><div class="n">' + (cls === "done" ? "✓" : n) + '</div><div class="t">' + t + '</div></div>';
     }
 
     function load() {
@@ -6656,32 +6684,59 @@
         var domain = b.customDomain || "";
         var status = b.domainStatus || "none";
         var dom = $("#domBody"); if (!dom) return;
-        // A workspace with any branding is white-label — never name the house host.
-        var hostLabel = (IS_HOUSE && !(b.brandName || b.logoUrl || b.logoLightUrl || b.accentColor || b.customDomain)) ? "RecruitersOS host" : "the shared platform host";
-        var sm = statusMeta(status, hostLabel);
-        var html = '<div class="sx-card">' +
-          '<div class="sx-status"><span class="dot ' + sm[0] + '"></span>' +
-          '<div style="min-width:0"><div class="lab">' + (domain ? '<span class="sx-mono">' + esc(domain) + '</span>' : "No domain set") + '</div>' +
-          '<div class="sub">' + sm[1] + ' — ' + esc(sm[2]) + '</div></div>' +
-          '<span class="s-pill ' + (sm[0] === "ok" ? "ready" : sm[0] === "warn" ? "progress" : "pending") + '" style="margin-left:auto">' + sm[1] + (sm[0] === "ok" ? " ✓" : "") + '</span></div>' +
-          '<div style="height:1px;background:var(--border);margin:15px 0"></div>' +
-          '<div class="cn-fld"><span class="lab">Domain</span>' +
-          '<input id="domInput" type="text" placeholder="app.yourcompany.com" value="' + esc(domain) + '"><span class="hint">A subdomain you control, e.g. <code>app.yourcompany.com</code> or <code>portal.yourcompany.com</code>.</span></div>' +
+        var st = steps3(status);
+        var html = "";
+
+        // Success / verified banner up top — the win is the first thing they see.
+        if (status === "live") {
+          html += '<div class="sx-done"><div class="ic">🎉</div><div style="min-width:0;flex:1">' +
+            '<div style="font-weight:800;font-size:15px">You’re live on <span class="sx-mono">' + esc(domain) + '</span></div>' +
+            '<div style="font-size:12px;color:var(--text-dim);margin-top:2px">Your portal is serving on your own domain over HTTPS.</div></div>' +
+            '<a class="btn btn-primary btn-sm" href="https://' + esc(domain) + '" target="_blank" rel="noopener">Visit portal →</a></div>';
+        } else if (status === "verified") {
+          html += '<div class="sx-done"><div class="ic">✓</div><div style="min-width:0;flex:1">' +
+            '<div style="font-weight:800;font-size:15px">Verified — finishing up</div>' +
+            '<div style="font-size:12px;color:var(--text-dim);margin-top:2px">Ownership confirmed. Your HTTPS certificate is issued automatically the first time someone opens <span class="sx-mono">' + esc(domain) + '</span> — nothing to install.</div></div></div>';
+        }
+
+        // Card 1 — guided stepper + the domain field.
+        html += '<div class="sx-card"><div class="sx-steps">' +
+          stepNode("1", "Add your domain", st[0]) +
+          stepNode("2", "Add DNS records", st[1]) +
+          stepNode("3", "Verify &amp; go live", st[2]) +
+          '</div>' +
+          '<div style="height:1px;background:var(--border);margin:6px 0 16px"></div>' +
+          '<div class="cn-fld"><span class="lab">Your domain</span>' +
+          '<input id="domInput" type="text" placeholder="app.yourcompany.com" value="' + esc(domain) + '"><span class="hint">A subdomain you control — e.g. <code>app.yourcompany.com</code> or <code>portal.yourcompany.com</code>. The records below only point this name at us; the rest of your domain is untouched.</span></div>' +
           '<div class="cn-acts">' +
           '<button class="btn btn-primary btn-sm" id="domSave">' + (domain ? "Update domain" : "Add domain") + '</button>' +
-          (domain ? '<button class="btn btn-ghost btn-sm" id="domVerify">Verify DNS</button><button class="btn btn-ghost btn-sm danger" id="domRemove">Remove</button>' : "") +
+          (domain ? '<button class="btn btn-ghost btn-sm danger" id="domRemove" style="margin-left:auto">Remove</button>' : "") +
           '</div><p class="cn-msg" id="domMsg"></p></div>';
+
+        // Card 2 — DNS records, with both Name and Value individually copyable.
         if (ins && ins.records && ins.records.length) {
-          html += '<div class="sx-card"><div class="sx-eyebrow">DNS records</div>' +
-            '<h3>Add these at your DNS provider</h3>' +
-            '<p class="sx-sub">Add both records, then hit <b>Verify DNS</b>. TXT records can take a few minutes to propagate.</p>' +
+          var txt = null, i;
+          for (i = 0; i < ins.records.length; i++) { if (ins.records[i].type === "TXT") { txt = ins.records[i]; break; } }
+          var fullHost = txt ? txt.host : ("_recruiteros." + domain);
+          var parts = domain.split("."); var root = parts.length > 2 ? parts.slice(-2).join(".") : domain;
+          var shortHost = fullHost.indexOf("." + root) > -1 ? fullHost.replace("." + root, "") : fullHost;
+
+          html += '<div class="sx-card"><div class="sx-eyebrow">Step 2 · DNS records</div>' +
+            '<h3>Add these two records at your DNS provider</h3>' +
+            '<p class="sx-sub">Copy each field into your domain’s DNS settings, then hit <b>Verify</b>. New records usually propagate within a few minutes.</p>' +
             '<div class="sx-dns">' +
             ins.records.map(function (r) {
-              return '<div class="sx-rec"><div class="sx-rec-top"><span class="sx-rec-type">' + esc(r.type) + '</span><span class="sx-rec-host">' + esc(r.host) + '</span></div>' +
-                '<div class="sx-rec-val"><code>' + esc(r.value) + '</code><button class="sx-copy" data-copy="' + esc(r.value) + '">Copy</button></div>' +
-                (r.note ? '<div class="sx-rec-note">' + esc(r.note) + '</div>' : "") + '</div>';
-            }).join("") + '</div></div>';
+              var purpose = r.type === "CNAME" ? "Points your domain to us" : r.type === "TXT" ? "Proves you own it" : "";
+              return '<div class="sx-rec"><div class="sx-rec-top"><span class="sx-rec-type">' + esc(r.type) + '</span><span class="sx-rec-purpose">' + purpose + '</span></div>' +
+                '<div class="sx-rec-field"><span class="sx-rec-k">Name</span><div class="sx-rec-val"><code>' + esc(r.host) + '</code><button class="sx-copy" data-copy="' + esc(r.host) + '">Copy</button></div></div>' +
+                '<div class="sx-rec-field"><span class="sx-rec-k">Value</span><div class="sx-rec-val"><code>' + esc(r.value) + '</code><button class="sx-copy" data-copy="' + esc(r.value) + '">Copy</button></div></div>' +
+                '</div>';
+            }).join("") + '</div>' +
+            '<div class="sx-tip"><span class="ti">💡</span><div>Some providers (GoDaddy, Namecheap, Cloudflare) add your domain to the <b>Name</b> automatically. If yours does, enter just <code>' + esc(shortHost) + '</code> for the TXT record instead of the full name — otherwise paste exactly what’s shown.</div></div>' +
+            (status !== "live" ? '<div class="cn-acts" style="margin-top:15px;align-items:center"><button class="btn btn-primary btn-sm" id="domVerify">Verify DNS</button><span style="font-size:11.5px;color:var(--text-dim)">🔒 HTTPS is set up automatically — no certificate to install.</span></div>' : "") +
+            '</div>';
         }
+
         dom.innerHTML = html;
 
         Array.prototype.forEach.call(dom.querySelectorAll(".sx-copy"), function (btn) {
