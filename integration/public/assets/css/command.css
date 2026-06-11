@@ -977,14 +977,15 @@ html[data-theme="light"] .sl-status.off { background: rgba(16,18,40,.05); }
    logo (dark + light) renders at an identical size with no skew or clipping; the
    in-frame zoom is what sizes the mark. */
 .cmd-side .brand { overflow: visible; line-height: 0; }
-.cmd-side .brand .brand-logo { display: block; height: 44px; width: auto; max-width: 200px; object-fit: contain; }
+.cmd-side .brand .brand-logo { display: block; height: 44px; width: auto; max-width: 220px; object-fit: contain; }
 
 /* Logo-fit adjuster modal */
 .logo-adj-ov { position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,.55); display: grid; place-items: center; padding: 20px; }
 .logo-adj { background: var(--surface, #14161c); border: 1px solid var(--border); border-radius: 14px; padding: 18px; width: min(440px, 94vw); box-shadow: 0 24px 60px -12px rgba(0,0,0,.6); }
 .logo-adj h3 { color: var(--text); }
 .logo-adj-stage { border-radius: 10px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 12px; }
-.logo-adj .la-cv { display: block; width: 100%; height: auto; cursor: grab; touch-action: none; }
+.logo-adj-stage { display: grid; place-items: center; min-height: 120px; }
+.logo-adj .la-cv { display: block; width: auto; height: auto; max-width: 100%; max-height: 48vh; cursor: grab; touch-action: none; }
 .logo-adj .la-cv:active { cursor: grabbing; }
 .la-zoom { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-dim); margin-bottom: 14px; }
 .la-zoom input { flex: 1; }

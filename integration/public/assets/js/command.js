@@ -6273,7 +6273,6 @@
      same logo overlays whatever theme is active. Calls onDone(dataUrl). */
   function openLogoAdjuster(file, opts, onDone) {
     opts = opts || {};
-    var EX_W = 640, EX_H = 192; // export resolution; sidebar logo is ~10:3
     var bg = opts.bg === "light" ? "#f6f7fc" : "#181822";
     var img = new Image();
     var reader = new FileReader();
@@ -6285,14 +6284,20 @@
     reader.readAsDataURL(file);
 
     function build() {
-      var base = Math.min(EX_W / img.width, EX_H / img.height); // contain baseline at zoom 1
+      // The export frame follows the LOGO'S OWN aspect ratio, so at zoom 1 it is
+      // exactly the uploaded logo — nothing is forced into a fixed shape, padded,
+      // or stretched. Zoom > 1 crops in tighter; zoom < 1 adds breathing room.
+      var aspect = img.width / img.height;
+      var EX_H = 240, EX_W = Math.round(EX_H * aspect);
+      if (EX_W > 1200) { EX_W = 1200; EX_H = Math.round(1200 / aspect); }
+      var base = EX_H / img.height; // at zoom 1 the logo fills the frame exactly
       var st = { zoom: 1, x: 0, y: 0 };
       var ov = document.createElement("div");
       ov.className = "logo-adj-ov";
       ov.innerHTML =
         '<div class="logo-adj" role="dialog" aria-label="Adjust logo">' +
         '<h3 style="margin:0 0 4px">Adjust logo' + (opts.label ? " · " + esc(opts.label) : "") + '</h3>' +
-        '<p class="muted" style="margin:0 0 12px;font-size:13px">Drag to move, slide to zoom. This is exactly how it sits in the sidebar — aspect ratio is kept, so it never stretches.</p>' +
+        '<p class="muted" style="margin:0 0 12px;font-size:13px">This is exactly how it appears in the sidebar, at your logo\'s real proportions. It\'s ready as-is; drag to nudge and zoom to crop tighter if you want.</p>' +
         '<div class="logo-adj-stage" style="background:' + bg + '"><canvas class="la-cv"></canvas></div>' +
         '<label class="la-zoom">🔍 <input type="range" id="laZoom" min="0.2" max="3" step="0.01" value="1"></label>' +
         '<div class="la-acts"><button class="btn btn-sm" id="laReset">Reset</button><span style="flex:1"></span><button class="btn btn-ghost btn-sm" id="laCancel">Cancel</button><button class="btn btn-primary btn-sm" id="laUse">Use logo</button></div>' +
