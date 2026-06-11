@@ -174,14 +174,18 @@ p { margin: 0; }
 /* ---- Team ---- */
 .team { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 28px; margin-top: 48px; }
 .member { text-align: center; display: block; }
-.member img, .member__mono { width: 150px; height: 150px; border-radius: 50%; margin: 0 auto 16px; border: 4px solid var(--bg-tint); }
+.member__pic { position: relative; display: inline-block; margin: 0 auto 16px; }
+.member img, .member__mono { width: 150px; height: 150px; border-radius: 50%; border: 4px solid var(--bg-tint); display: block; }
 .member img { object-fit: cover; }
 .member__mono { display: grid; place-items: center; background: linear-gradient(135deg, var(--navy), var(--teal)); color: #fff; font-size: 46px; font-weight: 600; letter-spacing: 1px; }
+.member__li { position: absolute; right: 8px; bottom: 10px; width: 30px; height: 30px; border-radius: 7px; overflow: hidden; box-shadow: 0 2px 6px rgba(28,42,58,.3); transition: transform .18s ease; }
+.member__li svg { width: 100%; height: 100%; display: block; }
 .member h3 { font-size: 19px; color: var(--navy); }
 .member span { color: var(--teal); font-size: 14px; }
 a.member.is-link { transition: transform .18s ease; }
 a.member.is-link:hover { transform: translateY(-3px); }
 a.member.is-link:hover h3 { color: var(--teal); }
+a.member.is-link:hover .member__li { transform: scale(1.08); }
 
 /* ---- Contact / forms ---- */
 .contact { background: linear-gradient(180deg, var(--bg-soft), #fff); }
