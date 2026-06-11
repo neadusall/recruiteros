@@ -109,7 +109,17 @@ export async function syncLoxo(workspaceId: string, opts: { full?: boolean } = {
     await markSynced(workspaceId, "loxo", new Date().toISOString());
     return report;
   } catch (e: any) {
-    return { ok: false, people: report.people, companies: report.companies, error: e?.message ?? "sync_failed" };
+    // Surface Loxo's own explanation (the response body) alongside the status code,
+    // so a 4xx like 422 tells us WHICH field/param Loxo rejected instead of a bare
+    // "loxo_422". Without this the real cause is invisible in the UI.
+    const detail = e?.detail ? String(e.detail).replace(/\s+/g, " ").trim() : "";
+    const msg = e?.message ?? "sync_failed";
+    return {
+      ok: false,
+      people: report.people,
+      companies: report.companies,
+      error: detail ? `${msg}: ${detail}` : msg,
+    };
   }
 }
 
