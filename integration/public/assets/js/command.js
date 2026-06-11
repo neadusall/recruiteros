@@ -263,6 +263,27 @@
     document.title = portalName + (houseHost ? ", RecruitersOS" : "");
   })();
 
+  // House vs white-label identity. The house product name (RecruitersOS /
+  // RecruiterOS) may ONLY surface in a genuine house/operator context. A
+  // white-label CUSTOMER workspace (e.g. Lume) must never see it anywhere — even
+  // when it's accessed on the house host (recruitersos.co/admin) — so the test is
+  // workspace-aware, not just host-aware. Every house-brand string resolves to
+  // neutral, brand-agnostic wording for white-label.
+  var WHITE_LABEL_DOMAINS = ["lumesp.com"]; // extend per resold customer
+  function isWhiteLabelWorkspace() {
+    var ws = ctx.workspace || {};
+    var wsDom = ((ws.domain) || "").toLowerCase();
+    var userDom = (((ctx.user && ctx.user.email) || "").split("@")[1] || "").toLowerCase();
+    // A workspace that has set its own brand name is, by definition, white-labelled.
+    var ownBrand = !!(ws.brandName && String(ws.brandName).trim());
+    return ownBrand || WHITE_LABEL_DOMAINS.indexOf(wsDom) >= 0 || WHITE_LABEL_DOMAINS.indexOf(userDom) >= 0;
+  }
+  var ON_HOUSE_HOST = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.host || "");
+  var IS_HOUSE = ON_HOUSE_HOST && !isWhiteLabelWorkspace();
+  var HOUSE_BRAND = "RecruitersOS";
+  var PLATFORM_LABEL = IS_HOUSE ? "RecruiterOS" : "the platform"; // "via X · billed"
+  var PLATFORM_HOST = IS_HOUSE ? "RecruitersOS host" : "the shared platform host";
+
   // View-as banner: a persistent strip making it unmistakable that an admin is
   // inside a specific recruiter's portal, with one click back to Admin.
   if (IMP_TOKEN) {
@@ -286,8 +307,8 @@
     var ws = ctx.workspace || {};
     // White-label customer workspaces are billed by the operator (via the resale
     // model), NOT by the platform's built-in 14-day trial — so they never see the
-    // "Add payment" banner or the trial paywall. Extend this list per customer.
-    var WHITE_LABEL_DOMAINS = ["lumesp.com"];
+    // "Add payment" banner or the trial paywall. Billing exemption keys off the
+    // resold-domain list only (see module-level WHITE_LABEL_DOMAINS — extend there).
     var wsDom = ((ws.domain) || "").toLowerCase();
     var userDom = (((ctx.user && ctx.user.email) || "").split("@")[1] || "").toLowerCase();
     if (WHITE_LABEL_DOMAINS.indexOf(wsDom) >= 0 || WHITE_LABEL_DOMAINS.indexOf(userDom) >= 0) return;
@@ -4403,7 +4424,7 @@
   var VD_DEFAULT_SCRIPT =
     "Hi {first_name}, this is {agent_name} with {agent_company}. I came across your {role} search and wanted to reach out — we help teams hire faster. If it’s useful, give me a call back at this number. Thanks {first_name}.";
   var VD_CONSENT_TEXT =
-    "I consent to RecruiterOS creating and using a synthetic copy of my voice for outreach that I authorize.";
+    "I consent to the creation and use of a synthetic copy of my voice for outreach that I authorize.";
 
   function renderVoiceDrops(el) {
     var vd = { tab: "campaigns" };
@@ -5753,7 +5774,7 @@
         if (store.all().some(function (s) { return s.id === sd.id; })) return;
         store.save({ id: sd.id, channel: "multi", name: sd.name,
           tags: sd.tags, status: "active", motion: "bd",
-          owner: "RecruiterOS Templates", variables: [], steps: sd.steps,
+          owner: IS_HOUSE ? "RecruiterOS Templates" : "Platform Templates", variables: [], steps: sd.steps,
           createdAt: now, updatedAt: now });
       });
     }
@@ -6322,6 +6343,29 @@
       '.sx-chk.todo .mk{background:var(--bg-soft);border:1px solid var(--border-strong);color:var(--text-dim)}' +
       '.sx-chk.done{color:var(--text)}' +
       '.sx-ring{position:relative;width:54px;height:54px;flex:0 0 auto}' +
+      /* guided stepper (custom domain) */
+      '.sx-steps{display:flex;align-items:flex-start;margin:2px 0 4px}' +
+      '.sx-step{flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;position:relative}' +
+      '.sx-step .n{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:800;font-family:var(--mono);background:var(--bg-soft);border:1.5px solid var(--border-strong);color:var(--text-dim);transition:all .2s;position:relative;z-index:1}' +
+      '.sx-step .t{font-size:12px;font-weight:700;color:var(--text-dim);line-height:1.2}' +
+      '.sx-step::before,.sx-step::after{content:"";position:absolute;top:14px;height:2px;background:var(--border-strong);z-index:0}' +
+      '.sx-step::before{left:0;right:50%;margin-right:19px}' +
+      '.sx-step::after{left:50%;right:0;margin-left:19px}' +
+      '.sx-step:first-child::before{display:none}.sx-step:last-child::after{display:none}' +
+      '.sx-step.active .n{background:var(--grad);border-color:transparent;color:#fff;box-shadow:0 0 0 4px rgba(124,92,255,.18)}' +
+      '.sx-step.active .t{color:var(--text)}' +
+      '.sx-step.done .n{background:rgba(46,204,113,.16);border-color:var(--accent-green);color:var(--accent-green)}' +
+      '.sx-step.done .t{color:var(--text-muted)}' +
+      '.sx-step.done::before,.sx-step.done::after{background:var(--accent-green);opacity:.45}' +
+      /* per-record name/value fields + provider tip + success banner */
+      '.sx-rec-purpose{font-size:11.5px;color:var(--text-dim)}' +
+      '.sx-rec-field{display:flex;align-items:center;gap:11px;margin-top:8px}' +
+      '.sx-rec-k{flex:0 0 44px;font-size:10.5px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em}' +
+      '.sx-tip{display:flex;gap:10px;align-items:flex-start;background:rgba(77,208,255,.06);border:1px solid var(--border);border-radius:11px;padding:11px 13px;margin-top:13px;font-size:12px;color:var(--text-muted);line-height:1.55}' +
+      '.sx-tip .ti{flex:0 0 auto;font-size:14px;line-height:1.3}' +
+      '.sx-tip b{color:var(--text)}.sx-tip code{font-family:var(--mono);font-size:11.5px;background:var(--bg-soft);border:1px solid var(--border);border-radius:5px;padding:1px 5px}' +
+      '.sx-done{display:flex;align-items:center;gap:13px;background:linear-gradient(135deg,rgba(46,204,113,.12),rgba(46,204,113,.03));border:1px solid rgba(46,204,113,.3);border-radius:14px;padding:14px 16px;margin-bottom:14px}' +
+      '.sx-done .ic{flex:0 0 auto;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:18px;background:rgba(46,204,113,.18);border:1px solid rgba(46,204,113,.35)}' +
       '</style>';
   }
 
@@ -6455,6 +6499,10 @@
         var b = (d && d.branding) || {};
         var box = $("#brBody"); if (!box) return;
         var accent = b.accentColor || "#7c5cff";
+        // A workspace with ANY branding set is white-label — never surface the
+        // house brand here, even if host/workspace detection was inconclusive.
+        var houseBrand = IS_HOUSE && !(b.brandName || b.logoUrl || b.logoLightUrl || b.accentColor);
+        var defName = houseBrand ? HOUSE_BRAND : "your brand";
         var swHtml = ACCENTS.map(function (c) {
           return '<span class="sx-sw' + (c.toLowerCase() === accent.toLowerCase() ? " on" : "") + '" data-c="' + c + '" style="background:' + c + '" title="' + c + '"></span>';
         }).join("");
@@ -6462,7 +6510,7 @@
           /* ---- left: controls ---- */
           '<div>' +
           '<div class="sx-card"><div class="sx-eyebrow">Identity</div>' +
-          '<div class="cn-fld"><span class="lab">Brand name</span><input id="brName" type="text" placeholder="RecruitersOS" value="' + esc(b.brandName || "") + '"><span class="hint">Used as the wordmark when there\'s no logo, in the browser tab, and on your login page.</span></div>' +
+          '<div class="cn-fld"><span class="lab">Brand name</span><input id="brName" type="text" placeholder="' + esc(defName) + '" value="' + esc(b.brandName || "") + '"><span class="hint">Used as the wordmark when there\'s no logo, in the browser tab, and on your login page.</span></div>' +
           '<div class="cn-fld" style="margin-bottom:4px"><span class="lab">Accent color</span>' +
           '<div class="sx-colorrow"><input id="brAccent" type="color" value="' + esc(accent) + '" style="width:46px;height:34px;padding:2px;border-radius:9px;cursor:pointer;border:1px solid var(--border);background:var(--bg-soft)">' +
           '<span class="sx-hex" id="brHex">' + esc(accent) + '</span>' +
@@ -6482,7 +6530,7 @@
           (b.logoLightUrl ? '<button class="btn btn-ghost btn-sm brLogoRemove" data-key="logoLightUrl">Remove</button>' : "") +
           '</div><span class="hint">A colored logo for Light appearance. Falls back to the dark logo if empty.</span></div>' +
           '</div>' +
-          '<div class="cn-acts" style="margin-top:14px"><button class="btn btn-primary btn-sm" id="brSave">Save branding</button><button class="btn btn-ghost btn-sm" id="brReset">Reset to RecruitersOS</button></div>' +
+          '<div class="cn-acts" style="margin-top:14px"><button class="btn btn-primary btn-sm" id="brSave">Save branding</button><button class="btn btn-ghost btn-sm" id="brReset">' + (houseBrand ? "Reset to RecruitersOS" : "Reset to default") + '</button></div>' +
           '<p class="cn-msg" id="brMsg"></p>' +
           '</div>' +
           /* ---- right: live preview ---- */
@@ -6500,7 +6548,7 @@
 
         // Live preview painter — reflects the current (unsaved) name/color/logo.
         function paintPreview() {
-          var nm = ($("#brName").value || "").trim() || "RecruitersOS";
+          var nm = ($("#brName").value || "").trim() || defName;
           var col = $("#brAccent").value || "#7c5cff";
           var logo = $("#brPrevLogo"); if (!logo) return;
           logo.innerHTML = b.logoUrl
@@ -6535,9 +6583,9 @@
         });
 
         $("#brReset").addEventListener("click", function () {
-          if (!confirm("Reset to the default RecruitersOS branding?")) return;
+          if (!confirm(houseBrand ? "Reset to the default RecruitersOS branding?" : "Reset to the default branding?")) return;
           send("/branding", "POST", { action: "reset" }).then(function (r) {
-            refreshChrome((r && r.data && r.data.branding) || {}); toast("Reset to RecruitersOS"); load();
+            refreshChrome((r && r.data && r.data.branding) || {}); toast(houseBrand ? "Reset to RecruitersOS" : "Branding reset"); load();
           });
         });
 
@@ -6588,15 +6636,15 @@
   function renderDomain(el) {
     el.innerHTML =
       '<div class="sx-hero"><div class="sx-ic">🌐</div><div><h2>Custom domain</h2>' +
-      '<p>Run your portal on your own domain — your recruiters sign in at your URL, fully branded. Add it, drop in two DNS records, then Verify. Until then your workspace stays on the RecruitersOS host.</p></div></div>' +
+      '<p>Run your portal on your own domain — your recruiters sign in at your URL, fully branded. Add it, drop in two DNS records, then Verify. Until then your workspace stays on ' + esc(PLATFORM_HOST) + '.</p></div></div>' +
       '<div id="domBody">' + loading() + '</div>';
 
-    function statusMeta(status) {
+    function statusMeta(status, hostLabel) {
       var map = {
         verified: ["ok", "Verified", "Your domain is connected and serving."],
         live: ["ok", "Live", "Your portal is live on this domain."],
         pending: ["warn", "Pending DNS", "Add the records below, then Verify."],
-        none: ["off", "Not set", "No custom domain yet — your portal runs on the RecruitersOS host."]
+        none: ["off", "Not set", "No custom domain yet — your portal runs on " + hostLabel + "."]
       };
       return map[status] || map.none;
     }
@@ -6608,7 +6656,9 @@
         var domain = b.customDomain || "";
         var status = b.domainStatus || "none";
         var dom = $("#domBody"); if (!dom) return;
-        var sm = statusMeta(status);
+        // A workspace with any branding is white-label — never name the house host.
+        var hostLabel = (IS_HOUSE && !(b.brandName || b.logoUrl || b.logoLightUrl || b.accentColor || b.customDomain)) ? "RecruitersOS host" : "the shared platform host";
+        var sm = statusMeta(status, hostLabel);
         var html = '<div class="sx-card">' +
           '<div class="sx-status"><span class="dot ' + sm[0] + '"></span>' +
           '<div style="min-width:0"><div class="lab">' + (domain ? '<span class="sx-mono">' + esc(domain) + '</span>' : "No domain set") + '</div>' +
@@ -6670,7 +6720,7 @@
 
         var remove = $("#domRemove");
         if (remove) remove.addEventListener("click", function () {
-          if (!confirm("Remove this custom domain? Your portal goes back to the RecruitersOS host.")) return;
+          if (!confirm("Remove this custom domain? Your portal goes back to " + hostLabel + ".")) return;
           send("/branding/domain", "POST", { action: "remove" }).then(function () { toast("Domain removed"); load(); });
         });
       }).catch(function () { var b = $("#domBody"); if (b) b.innerHTML = needsSetup(); });
@@ -6909,7 +6959,7 @@
           var req = (i.requiredFor || []).indexOf(motion) >= 0 ? '<span class="req-tag">required</span>' : "";
           // Where this workspace's key comes from: its own, operator-provided
           // (billed), or — for the operator's own house workspace — nothing shown.
-          var acc = i.access === "granted" ? '<span class="acc-tag granted">via RecruiterOS · billed</span>'
+          var acc = i.access === "granted" ? '<span class="acc-tag granted">via ' + esc(PLATFORM_LABEL) + ' · billed</span>'
             : i.access === "own" ? '<span class="acc-tag own">your key</span>' : "";
           var sub = i.error ? esc(i.error) : esc(i.blurb || "");
           return '<button class="cn-v" data-id="' + esc(i.id) + '">' +
@@ -7903,9 +7953,12 @@
       } else {
         if (existing) existing.remove();
         if (word) {
-          word.style.display = "";
-          if (b.brandName) word.textContent = b.brandName;
-          else word.innerHTML = 'Recruiters<span class="os">OS</span>';
+          if (b.brandName) { word.style.display = ""; word.textContent = b.brandName; }
+          // No logo and no brand name: only the house domain may show the house
+          // wordmark. On a white-label domain leave it blank — the preset/logo
+          // fallback below fills it, and we never flash the house brand.
+          else if (IS_HOUSE) { word.style.display = ""; word.innerHTML = 'Recruiters<span class="os">OS</span>'; }
+          else { word.textContent = ""; }
         }
       }
       // Accent color -> primary brand variable (recolors buttons, highlights, …).
