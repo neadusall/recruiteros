@@ -82,7 +82,12 @@ export async function syncLoxo(workspaceId: string, opts: { full?: boolean } = {
       const res = await client.listPeople({ perPage: PER_PAGE, scrollId, updatedAfter });
       if (!res.items.length) break;
       report.people.scanned += res.items.length;
-      const inputs = res.items.map(loxoPersonToDataRecord);
+      // Loxo's LIST endpoint returns summary records WITHOUT emails/phones — those
+      // live only on the per-person detail endpoint (GET /people/{id}). Hydrate each
+      // record's full detail so contact info actually lands in the warehouse. Falls
+      // back to the list item if a detail fetch fails.
+      const full = await hydrate(res.items, (id) => client.getPerson(id));
+      const inputs = full.map(loxoPersonToDataRecord);
       const r = await upsertRecords(workspaceId, inputs);
       report.people.added += r.added;
       report.people.updated += r.updated;
@@ -97,7 +102,10 @@ export async function syncLoxo(workspaceId: string, opts: { full?: boolean } = {
       const res = await client.listCompanies({ perPage: PER_PAGE, scrollId, updatedAfter });
       if (!res.items.length) break;
       report.companies.scanned += res.items.length;
-      const inputs = res.items.map(loxoCompanyToRecord);
+      // Same as people: the list is a summary; fetch each company's detail so the
+      // full record (contacts, address, etc.) comes through.
+      const full = await hydrate(res.items, (id) => client.getCompany(id));
+      const inputs = full.map(loxoCompanyToRecord);
       const r = await upsertCompanies(workspaceId, inputs);
       report.companies.added += r.added;
       report.companies.updated += r.updated;
@@ -245,4 +253,37 @@ export async function registerLoxoWebhooks(workspaceId: string, baseUrl: string)
 
 function zero() {
   return { added: 0, updated: 0, scanned: 0 };
+}
+
+/** Max concurrent detail fetches — polite to Loxo's rate limits, still fast. */
+const DETAIL_CONCURRENCY = 6;
+
+/**
+ * Replace each summary list item with its full detail record (which carries the
+ * emails/phones the list omits). Bounded concurrency keeps us within Loxo's rate
+ * limits; if a detail fetch fails or returns nothing, we keep the summary item so
+ * the record still imports (just without the extra fields).
+ */
+async function hydrate(
+  items: any[],
+  fetchOne: (id: string | number) => Promise<any | null>,
+): Promise<any[]> {
+  const out: any[] = new Array(items.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (next < items.length) {
+      const idx = next++;
+      const item = items[idx];
+      const id = item?.id;
+      if (id == null) {
+        out[idx] = item;
+        continue;
+      }
+      const full = await fetchOne(id).catch(() => null);
+      out[idx] = full || item;
+    }
+  }
+  const workers = Array.from({ length: Math.min(DETAIL_CONCURRENCY, items.length) }, worker);
+  await Promise.all(workers);
+  return out;
 }
