@@ -16,7 +16,7 @@
  */
 
 import { nowIso } from "../core/ids";
-import { loadSnapshot, debouncedSaver } from "../db";
+import { loadSnapshot, saveSnapshot, debouncedSaver } from "../db";
 import type { AtsVendor } from "./types";
 
 const KEY = "ats_credentials_v1";
@@ -113,11 +113,16 @@ export async function saveVendorConfig(
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
-  if (fields.domain !== undefined) cfg.domain = stripScheme(fields.domain);
-  if (fields.slug !== undefined) cfg.slug = fields.slug.trim();
-  // Blank apiKey in an edit means "leave the saved key untouched".
-  if (fields.apiKey) cfg.apiKey = fields.apiKey.trim();
-  if (fields.webhookSecret) cfg.webhookSecret = fields.webhookSecret.trim();
+  // A blank field in an edit means "leave the saved value untouched" — NEVER
+  // overwrite a stored credential with an empty string. The form re-saves on
+  // every Test/Sync click, so a momentarily-empty field must not wipe a good
+  // value (that surfaced as a spurious "missing_credentials" on Sync).
+  const domain = fields.domain !== undefined ? stripScheme(fields.domain) : undefined;
+  if (domain) cfg.domain = domain;
+  const slug = fields.slug !== undefined ? fields.slug.trim() : undefined;
+  if (slug) cfg.slug = slug;
+  if (fields.apiKey && fields.apiKey.trim()) cfg.apiKey = fields.apiKey.trim();
+  if (fields.webhookSecret && fields.webhookSecret.trim()) cfg.webhookSecret = fields.webhookSecret.trim();
   if (!cfg.webhookSecret) cfg.webhookSecret = genSecret(workspaceId, vendor);
   cfg.status = cfg.apiKey && cfg.domain && cfg.slug ? "yellow" : "red";
   cfg.error = undefined;
@@ -125,7 +130,12 @@ export async function saveVendorConfig(
   w.vendors[vendor] = cfg;
   // First vendor connected becomes active automatically.
   if (!w.active) w.active = vendor;
-  save();
+  // Flush credentials SYNCHRONOUSLY rather than on the 250ms debounce: a redeploy
+  // (auto-deploy fires on every push to main) restarts the single app container,
+  // and an unflushed debounced write would be lost — the next process boots without
+  // the key and Sync fails with "missing_credentials". Awaiting the snapshot makes
+  // the key durable before this request returns.
+  await saveSnapshot(KEY, store);
   return cfg;
 }
 

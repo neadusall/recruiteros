@@ -1406,6 +1406,13 @@
   /* ---------------- fetch interception ---------------- */
   var nativeFetch = window.fetch ? window.fetch.bind(window) : null;
   var isFile = location.protocol === "file:";
+  // Once ANY real API call has succeeded, we know this deployment has a real
+  // backend. From then on we must NEVER substitute the local mock for a real
+  // response — including 5xx errors. Previously a real 502 (e.g. a Loxo sync
+  // that hit a 403, or a genuine server error) was discarded and replaced with
+  // the local mock's answer, which fabricated a misleading "missing_credentials"
+  // and hid the true server error. The mock is a demo/offline fallback only.
+  var realBackendSeen = false;
 
   window.fetch = function (input, init) {
     var url = typeof input === "string" ? input : (input && input.url) || "";
@@ -1423,9 +1430,18 @@
 
     // Otherwise try the real backend first, fall back locally on any failure.
     return nativeFetch(input, init).then(function (r) {
-      if (r && (r.ok || (r.status >= 400 && r.status < 500))) return r; // real server answered
+      if (r && r.ok) realBackendSeen = true;
+      // Real backend confirmed: surface its response verbatim, errors included,
+      // so the UI shows the true server message instead of a mock decoy.
+      if (realBackendSeen) return r;
+      // No real backend confirmed yet (demo/half-deployed): keep the original
+      // behavior where a 5xx falls back to the local workspace.
+      if (r && (r.ok || (r.status >= 400 && r.status < 500))) return r;
       return route(url, method, body);
-    }).catch(function () {
+    }).catch(function (e) {
+      // Network failure. If a real backend was already confirmed, surface the
+      // failure rather than silently serving stale demo data; otherwise fall back.
+      if (realBackendSeen) throw e;
       return route(url, method, body);
     });
   };
