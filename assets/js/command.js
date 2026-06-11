@@ -6257,6 +6257,71 @@
       '.s-pill{font-size:11px;padding:2px 10px;border-radius:20px;font-weight:600}' +
       '.s-pill.ready{background:#10491f;color:#7ff0a0}.s-pill.progress{background:#4a3a10;color:#f0d27f}' +
       '.s-pill.action{background:#4a1414;color:#f08f8f}.s-pill.pending{background:#262a33;color:#9aa3b2}' +
+      /* ---- Premium setup chrome (branding / domain / voice) ---- */
+      '.sx-hero{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:18px;padding:20px 22px;margin:0 0 18px;display:flex;gap:16px;align-items:flex-start;background:radial-gradient(130% 150% at 0% 0%,rgba(124,92,255,.20),transparent 52%),radial-gradient(120% 150% at 100% 0%,rgba(77,208,255,.13),transparent 52%),var(--surface)}' +
+      '.sx-hero::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,rgba(124,92,255,.5),rgba(77,208,255,.35),transparent)}' +
+      '.sx-hero .sx-ic{flex:0 0 auto;width:48px;height:48px;border-radius:14px;display:grid;place-items:center;font-size:24px;background:linear-gradient(145deg,rgba(124,92,255,.25),rgba(77,208,255,.18));border:1px solid var(--border-strong);box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}' +
+      '.sx-hero h2{font-size:21px;letter-spacing:-.02em;margin:0;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}' +
+      '.sx-hero p{color:var(--text-muted);font-size:13.5px;margin:5px 0 0;max-width:72ch;line-height:1.5}' +
+      '.sx-cols{display:grid;grid-template-columns:minmax(0,1.18fr) minmax(0,.82fr);gap:16px;align-items:start}' +
+      '@media(max-width:860px){.sx-cols{grid-template-columns:1fr}}' +
+      '.sx-card{position:relative;background:linear-gradient(180deg,var(--surface),var(--bg-soft));border:1px solid var(--border);border-radius:16px;padding:18px 20px}' +
+      '.sx-card+.sx-card{margin-top:14px}' +
+      '.sx-card h3{font-size:14px;letter-spacing:.01em;margin:0 0 3px;display:flex;align-items:center;gap:8px}' +
+      '.sx-card>.sx-sub{color:var(--text-dim);font-size:12.5px;margin:0 0 14px;line-height:1.45}' +
+      '.sx-eyebrow{font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--text-dim);font-weight:700;margin:0 0 11px;display:flex;align-items:center;gap:7px}' +
+      '.sx-eyebrow::before{content:"";width:14px;height:2px;border-radius:2px;background:var(--grad)}' +
+      '.sx-swatches{display:flex;gap:9px;flex-wrap:wrap;align-items:center}' +
+      '.sx-sw{width:28px;height:28px;border-radius:9px;cursor:pointer;border:2px solid transparent;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);transition:transform .1s ease}' +
+      '.sx-sw:hover{transform:scale(1.12)}' +
+      '.sx-sw.on{border-color:#fff;box-shadow:0 0 0 2px var(--bg),0 6px 18px -6px rgba(0,0,0,.7)}' +
+      '.sx-colorrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}' +
+      '.sx-hex{font-family:var(--mono);font-size:12px;color:var(--text-muted);background:var(--bg-soft);border:1px solid var(--border);border-radius:7px;padding:5px 9px;letter-spacing:.04em;text-transform:uppercase}' +
+      /* live brand preview */
+      '.sx-prev{position:sticky;top:14px;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--bg)}' +
+      '.sx-prev-bar{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-dim);font-weight:700;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface)}' +
+      '.sx-prev-body{padding:16px;background:radial-gradient(120% 80% at 100% 0%,rgba(124,92,255,.10),transparent 60%)}' +
+      '.sx-prev-side{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:13px;display:flex;flex-direction:column;gap:11px}' +
+      '.sx-prev-logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px;letter-spacing:-.01em}' +
+      '.sx-prev-logo .dot{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:14px;color:#fff;font-weight:800}' +
+      '.sx-prev-logo img{max-height:30px;max-width:150px;object-fit:contain;display:block}' +
+      '.sx-prev-nav{display:flex;flex-direction:column;gap:5px}' +
+      '.sx-prev-nav span{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--text-muted);padding:7px 9px;border-radius:8px}' +
+      '.sx-prev-nav span.on{color:#fff;font-weight:600}' +
+      '.sx-prev-nav span i{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.6;font-style:normal}' +
+      '.sx-prev-btn{margin-top:2px;align-self:flex-start;color:#fff;font-size:12px;font-weight:700;padding:8px 15px;border-radius:9px;border:none}' +
+      '.sx-prev-cap{font-size:11px;color:var(--text-dim);margin-top:11px;text-align:center}' +
+      '.sx-logo-frame{display:inline-flex;align-items:center;justify-content:center;min-width:120px;height:62px;padding:0 16px;border-radius:11px;border:1px solid var(--border)}' +
+      '.sx-logo-frame img{max-height:42px;max-width:190px;object-fit:contain;display:block}' +
+      '.sx-logo-empty{font-size:12px;color:var(--text-dim)}' +
+      /* status header for domain / readiness */
+      '.sx-status{display:flex;align-items:center;gap:14px;flex-wrap:wrap}' +
+      '.sx-status .dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto}' +
+      '.sx-status .dot.ok{background:var(--accent-green);box-shadow:0 0 12px var(--accent-green)}' +
+      '.sx-status .dot.warn{background:var(--accent-amber);box-shadow:0 0 12px var(--accent-amber)}' +
+      '.sx-status .dot.off{background:var(--text-dim)}' +
+      '.sx-status .lab{font-size:15px;font-weight:700}' +
+      '.sx-status .sub{font-size:12.5px;color:var(--text-dim)}' +
+      '.sx-mono{font-family:var(--mono);font-size:13px;color:var(--text)}' +
+      /* dns records */
+      '.sx-dns{display:flex;flex-direction:column;gap:10px;margin-top:6px}' +
+      '.sx-rec{border:1px solid var(--border);border-radius:12px;padding:13px 15px;background:var(--bg-soft)}' +
+      '.sx-rec-top{display:flex;align-items:center;gap:9px;margin-bottom:9px}' +
+      '.sx-rec-type{font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 9px;border-radius:6px;background:rgba(124,92,255,.16);color:#b9a6ff;letter-spacing:.06em}' +
+      '.sx-rec-host{font-family:var(--mono);font-size:12.5px;color:var(--text-muted)}' +
+      '.sx-rec-val{display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:9px 11px}' +
+      '.sx-rec-val code{font-family:var(--mono);font-size:12.5px;color:var(--text);word-break:break-all;flex:1;min-width:0}' +
+      '.sx-copy{flex:0 0 auto;cursor:pointer;font-size:11px;font-weight:700;color:var(--text-muted);background:var(--surface);border:1px solid var(--border-strong);border-radius:7px;padding:5px 11px;transition:all .12s}' +
+      '.sx-copy:hover{color:var(--text);border-color:var(--brand)}' +
+      '.sx-rec-note{font-size:11.5px;color:var(--text-dim);margin-top:7px}' +
+      /* readiness checklist */
+      '.sx-checks{display:flex;flex-direction:column;gap:9px;margin-top:4px}' +
+      '.sx-chk{display:flex;align-items:center;gap:11px;font-size:13px;color:var(--text-muted)}' +
+      '.sx-chk .mk{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;flex:0 0 auto}' +
+      '.sx-chk.done .mk{background:rgba(56,224,166,.18);color:var(--accent-green)}' +
+      '.sx-chk.todo .mk{background:var(--bg-soft);border:1px solid var(--border-strong);color:var(--text-dim)}' +
+      '.sx-chk.done{color:var(--text)}' +
+      '.sx-ring{position:relative;width:54px;height:54px;flex:0 0 auto}' +
       '</style>';
   }
 
@@ -6369,16 +6434,20 @@
         '<h3 style="margin:0 0 4px">👋 Welcome — let\'s make this portal yours</h3>' +
         '<p class="setup-metric" style="margin:0">Set your brand name, logo and accent color below. This is what you and your whole team see everywhere, including your sign-in page. When you\'re ready to run it on your own web address, head to <a href="#setup/domain">Custom domain →</a> (you can do that anytime).</p></div>'
       : "";
-    el.innerHTML = head("Branding",
-      "Make the portal yours: your logo, your name, your accent color. Your team and your customers see this everywhere, including your login page.") +
+    el.innerHTML =
+      '<div class="sx-hero"><div class="sx-ic">🎨</div><div><h2>Branding</h2>' +
+      '<p>Make the portal yours — your logo, your name, your accent color. Your team and your customers see this everywhere, including your sign-in page.</p></div></div>' +
       welcome +
       '<div id="brBody">' + loading() + '</div>';
 
+    // Accent presets — curated, on-brand options plus the platform default.
+    var ACCENTS = ["#7c5cff", "#4dd0ff", "#38e0a6", "#ff7ac6", "#ffc24d", "#ff6b6b", "#5b8def", "#a78bfa", "#10b981"];
+
     function refreshChrome(b) { if (window.__rosApplyBrand) window.__rosApplyBrand(b || {}); }
-    function brLogoPreview(url, bg) {
-      var bgc = bg === "light" ? "#f6f7fc" : "#181822";
-      if (!url) return '<div class="setup-metric" style="margin:0 0 2px">No ' + bg + ' logo' + (bg === "light" ? " (uses the dark logo)." : ".") + '</div>';
-      return '<div style="display:inline-block;padding:9px 13px;border-radius:9px;background:' + bgc + ';border:1px solid var(--border)"><img src="' + esc(url) + '" style="max-height:38px;max-width:180px;object-fit:contain;display:block"></div>';
+    function brLogoFrame(url, bg) {
+      var bgc = bg === "light" ? "#f6f7fc" : "#13131c";
+      if (!url) return '<div class="sx-logo-frame" style="background:' + bgc + '"><span class="sx-logo-empty">No ' + bg + ' logo' + (bg === "light" ? " — uses dark" : "") + '</span></div>';
+      return '<div class="sx-logo-frame" style="background:' + bgc + '"><img src="' + esc(url) + '"></div>';
     }
 
     function load() {
@@ -6386,25 +6455,75 @@
         var b = (d && d.branding) || {};
         var box = $("#brBody"); if (!box) return;
         var accent = b.accentColor || "#7c5cff";
-        box.innerHTML = '<div class="card">' +
+        var swHtml = ACCENTS.map(function (c) {
+          return '<span class="sx-sw' + (c.toLowerCase() === accent.toLowerCase() ? " on" : "") + '" data-c="' + c + '" style="background:' + c + '" title="' + c + '"></span>';
+        }).join("");
+        box.innerHTML = '<div class="sx-cols">' +
+          /* ---- left: controls ---- */
+          '<div>' +
+          '<div class="sx-card"><div class="sx-eyebrow">Identity</div>' +
           '<div class="cn-fld"><span class="lab">Brand name</span><input id="brName" type="text" placeholder="RecruitersOS" value="' + esc(b.brandName || "") + '"><span class="hint">Used as the wordmark when there\'s no logo, in the browser tab, and on your login page.</span></div>' +
-          '<div class="cn-fld"><span class="lab">Accent color</span><input id="brAccent" type="color" value="' + esc(accent) + '" style="width:56px;height:36px;padding:2px;cursor:pointer"><span class="hint">Primary color for buttons and highlights across the portal.</span></div>' +
-          '<div class="cn-fld"><span class="lab">Logo size</span><input id="brScale" type="range" min="0.4" max="3" step="0.02" value="' + (b.logoScale || 1) + '" style="width:220px;max-width:100%"><span class="hint">Make the sidebar logo bigger or smaller. Drag for a live preview, release to save.</span></div>' +
-          '<div class="cn-fld"><span class="lab">Logo · dark appearance</span>' +
-          brLogoPreview(b.logoUrl, "dark") +
-          '<div style="display:flex;gap:8px;margin-top:6px"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoUrl" data-bg="dark" type="file" accept="image/*" hidden></label>' +
+          '<div class="cn-fld" style="margin-bottom:4px"><span class="lab">Accent color</span>' +
+          '<div class="sx-colorrow"><input id="brAccent" type="color" value="' + esc(accent) + '" style="width:46px;height:34px;padding:2px;border-radius:9px;cursor:pointer;border:1px solid var(--border);background:var(--bg-soft)">' +
+          '<span class="sx-hex" id="brHex">' + esc(accent) + '</span>' +
+          '<div class="sx-swatches" id="brSwatches">' + swHtml + '</div></div>' +
+          '<span class="hint">Primary color for buttons and highlights across the portal.</span></div>' +
+          '</div>' +
+          '<div class="sx-card"><div class="sx-eyebrow">Logo</div>' +
+          '<div class="cn-fld"><span class="lab">Sidebar logo size</span><input id="brScale" type="range" min="0.4" max="3" step="0.02" value="' + (b.logoScale || 1) + '" style="width:100%;max-width:280px;accent-color:var(--brand)"><span class="hint">Drag for a live preview, release to save.</span></div>' +
+          '<div class="cn-fld"><span class="lab">Dark appearance</span>' +
+          brLogoFrame(b.logoUrl, "dark") +
+          '<div style="display:flex;gap:8px;margin-top:8px"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoUrl" data-bg="dark" type="file" accept="image/*" hidden></label>' +
           (b.logoUrl ? '<button class="btn btn-ghost btn-sm brLogoRemove" data-key="logoUrl">Remove</button>' : "") +
           '</div><span class="hint">A transparent or light logo that reads on the dark sidebar.</span></div>' +
-          '<div class="cn-fld"><span class="lab">Logo · light appearance</span>' +
-          brLogoPreview(b.logoLightUrl, "light") +
-          '<div style="display:flex;gap:8px;margin-top:6px"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoLightUrl" data-bg="light" type="file" accept="image/*" hidden></label>' +
+          '<div class="cn-fld" style="margin-bottom:0"><span class="lab">Light appearance</span>' +
+          brLogoFrame(b.logoLightUrl, "light") +
+          '<div style="display:flex;gap:8px;margin-top:8px"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoLightUrl" data-bg="light" type="file" accept="image/*" hidden></label>' +
           (b.logoLightUrl ? '<button class="btn btn-ghost btn-sm brLogoRemove" data-key="logoLightUrl">Remove</button>' : "") +
-          '</div><span class="hint">A colored logo for when appearance is Light. Falls back to the dark logo if empty.</span></div>' +
-          '<div class="cn-acts"><button class="btn btn-primary btn-sm" id="brSave">Save branding</button><button class="btn btn-ghost btn-sm" id="brReset">Reset to RecruitersOS</button></div>' +
-          '<p class="cn-msg" id="brMsg"></p></div>';
+          '</div><span class="hint">A colored logo for Light appearance. Falls back to the dark logo if empty.</span></div>' +
+          '</div>' +
+          '<div class="cn-acts" style="margin-top:14px"><button class="btn btn-primary btn-sm" id="brSave">Save branding</button><button class="btn btn-ghost btn-sm" id="brReset">Reset to RecruitersOS</button></div>' +
+          '<p class="cn-msg" id="brMsg"></p>' +
+          '</div>' +
+          /* ---- right: live preview ---- */
+          '<div class="sx-prev"><div class="sx-prev-bar">Live preview</div><div class="sx-prev-body">' +
+          '<div class="sx-prev-side" id="brPrevSide">' +
+          '<div class="sx-prev-logo" id="brPrevLogo"></div>' +
+          '<div class="sx-prev-nav"><span class="on" id="brPrevNav"><i></i> Dashboard</span><span><i></i> Campaigns</span><span><i></i> Candidates</span></div>' +
+          '<button class="sx-prev-btn" id="brPrevBtn">New campaign</button>' +
+          '</div><div class="sx-prev-cap">This is what your team & login page see.</div>' +
+          '</div></div>' +
+          '</div>';
 
         var msg = $("#brMsg");
         function say(t, kind) { if (msg) { msg.textContent = t; msg.style.color = kind === "err" ? "var(--accent-red)" : kind === "ok" ? "var(--accent-green)" : "var(--text-dim)"; } }
+
+        // Live preview painter — reflects the current (unsaved) name/color/logo.
+        function paintPreview() {
+          var nm = ($("#brName").value || "").trim() || "RecruitersOS";
+          var col = $("#brAccent").value || "#7c5cff";
+          var logo = $("#brPrevLogo"); if (!logo) return;
+          logo.innerHTML = b.logoUrl
+            ? '<img src="' + esc(b.logoUrl) + '">'
+            : '<span class="dot" style="background:linear-gradient(145deg,' + col + ',' + col + 'cc)">' + esc(nm.charAt(0).toUpperCase() || "R") + '</span><span>' + esc(nm) + '</span>';
+          var nav = $("#brPrevNav"); if (nav) { nav.style.background = col + "22"; nav.style.color = col; }
+          var btn = $("#brPrevBtn"); if (btn) btn.style.background = "linear-gradient(135deg," + col + "," + col + "cc)";
+          var hex = $("#brHex"); if (hex) hex.textContent = col;
+        }
+        paintPreview();
+
+        $("#brName").addEventListener("input", paintPreview);
+        function setAccent(c) {
+          $("#brAccent").value = c;
+          Array.prototype.forEach.call($("#brSwatches").querySelectorAll(".sx-sw"), function (s) {
+            s.classList.toggle("on", s.getAttribute("data-c").toLowerCase() === c.toLowerCase());
+          });
+          paintPreview();
+        }
+        $("#brAccent").addEventListener("input", function () { setAccent($("#brAccent").value); });
+        Array.prototype.forEach.call($("#brSwatches").querySelectorAll(".sx-sw"), function (s) {
+          s.addEventListener("click", function () { setAccent(s.getAttribute("data-c")); });
+        });
 
         $("#brSave").addEventListener("click", function () {
           var patch = { brandName: ($("#brName").value || "").trim(), accentColor: $("#brAccent").value };
@@ -6467,20 +6586,19 @@
      token to prove ownership), then Verify. The host->workspace serving + TLS is
      wired at the edge/deploy layer; this screen owns the domain record + proof. */
   function renderDomain(el) {
-    el.innerHTML = head("Custom domain",
-      "Run your portal on your own domain, where your recruiters sign in at your URL, fully branded. Add it, drop in two DNS records, then Verify. Until then your workspace stays on the RecruitersOS host.") +
-      '<style>' +
-      '.dom-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}' +
-      '.dom-tbl th{text-align:left;color:var(--text-dim);font-weight:600;padding:6px 10px;border-bottom:1px solid var(--border)}' +
-      '.dom-tbl td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}' +
-      '.dom-tbl code{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--text);word-break:break-all}' +
-      '.dom-stat{font-size:11px;font-weight:700;padding:2px 10px;border-radius:999px}' +
-      '</style><div id="domBody">' + loading() + '</div>';
+    el.innerHTML =
+      '<div class="sx-hero"><div class="sx-ic">🌐</div><div><h2>Custom domain</h2>' +
+      '<p>Run your portal on your own domain — your recruiters sign in at your URL, fully branded. Add it, drop in two DNS records, then Verify. Until then your workspace stays on the RecruitersOS host.</p></div></div>' +
+      '<div id="domBody">' + loading() + '</div>';
 
-    function pill(status) {
-      var map = { verified: ["ready", "Verified ✓"], live: ["ready", "Live"], pending: ["progress", "Pending DNS"], none: ["pending", "Not set"] };
-      var m = map[status] || map.none;
-      return '<span class="s-pill ' + m[0] + '" style="margin-left:auto">' + m[1] + '</span>';
+    function statusMeta(status) {
+      var map = {
+        verified: ["ok", "Verified", "Your domain is connected and serving."],
+        live: ["ok", "Live", "Your portal is live on this domain."],
+        pending: ["warn", "Pending DNS", "Add the records below, then Verify."],
+        none: ["off", "Not set", "No custom domain yet — your portal runs on the RecruitersOS host."]
+      };
+      return map[status] || map.none;
     }
 
     function load() {
@@ -6490,22 +6608,42 @@
         var domain = b.customDomain || "";
         var status = b.domainStatus || "none";
         var dom = $("#domBody"); if (!dom) return;
-        var html = '<div class="card">' +
-          '<div class="cn-fld"><span class="lab">Your domain</span>' +
-          '<input id="domInput" type="text" placeholder="app.yourcompany.com" value="' + esc(domain) + '"></div>' +
+        var sm = statusMeta(status);
+        var html = '<div class="sx-card">' +
+          '<div class="sx-status"><span class="dot ' + sm[0] + '"></span>' +
+          '<div style="min-width:0"><div class="lab">' + (domain ? '<span class="sx-mono">' + esc(domain) + '</span>' : "No domain set") + '</div>' +
+          '<div class="sub">' + sm[1] + ' — ' + esc(sm[2]) + '</div></div>' +
+          '<span class="s-pill ' + (sm[0] === "ok" ? "ready" : sm[0] === "warn" ? "progress" : "pending") + '" style="margin-left:auto">' + sm[1] + (sm[0] === "ok" ? " ✓" : "") + '</span></div>' +
+          '<div style="height:1px;background:var(--border);margin:15px 0"></div>' +
+          '<div class="cn-fld"><span class="lab">Domain</span>' +
+          '<input id="domInput" type="text" placeholder="app.yourcompany.com" value="' + esc(domain) + '"><span class="hint">A subdomain you control, e.g. <code>app.yourcompany.com</code> or <code>portal.yourcompany.com</code>.</span></div>' +
           '<div class="cn-acts">' +
           '<button class="btn btn-primary btn-sm" id="domSave">' + (domain ? "Update domain" : "Add domain") + '</button>' +
           (domain ? '<button class="btn btn-ghost btn-sm" id="domVerify">Verify DNS</button><button class="btn btn-ghost btn-sm danger" id="domRemove">Remove</button>' : "") +
-          pill(status) + '</div><p class="cn-msg" id="domMsg"></p></div>';
+          '</div><p class="cn-msg" id="domMsg"></p></div>';
         if (ins && ins.records && ins.records.length) {
-          html += '<div class="card" style="margin-top:12px"><b>DNS records to add</b>' +
-            '<p class="setup-desc">Add both at your DNS provider, then hit Verify DNS. (TXT records can take a few minutes to propagate.)</p>' +
-            '<table class="dom-tbl"><thead><tr><th>Type</th><th>Host / Name</th><th>Value</th></tr></thead><tbody>' +
+          html += '<div class="sx-card"><div class="sx-eyebrow">DNS records</div>' +
+            '<h3>Add these at your DNS provider</h3>' +
+            '<p class="sx-sub">Add both records, then hit <b>Verify DNS</b>. TXT records can take a few minutes to propagate.</p>' +
+            '<div class="sx-dns">' +
             ins.records.map(function (r) {
-              return '<tr><td><b>' + esc(r.type) + '</b></td><td><code>' + esc(r.host) + '</code></td><td><code>' + esc(r.value) + '</code><div class="setup-metric" style="margin-top:3px">' + esc(r.note) + '</div></td></tr>';
-            }).join("") + '</tbody></table></div>';
+              return '<div class="sx-rec"><div class="sx-rec-top"><span class="sx-rec-type">' + esc(r.type) + '</span><span class="sx-rec-host">' + esc(r.host) + '</span></div>' +
+                '<div class="sx-rec-val"><code>' + esc(r.value) + '</code><button class="sx-copy" data-copy="' + esc(r.value) + '">Copy</button></div>' +
+                (r.note ? '<div class="sx-rec-note">' + esc(r.note) + '</div>' : "") + '</div>';
+            }).join("") + '</div></div>';
         }
         dom.innerHTML = html;
+
+        Array.prototype.forEach.call(dom.querySelectorAll(".sx-copy"), function (btn) {
+          btn.addEventListener("click", function () {
+            var v = btn.getAttribute("data-copy");
+            try {
+              if (navigator.clipboard) navigator.clipboard.writeText(v);
+            } catch (e) {}
+            var was = btn.textContent; btn.textContent = "Copied ✓"; btn.style.color = "var(--accent-green)";
+            setTimeout(function () { btn.textContent = was; btn.style.color = ""; }, 1400);
+          });
+        });
 
         var msg = $("#domMsg");
         function say(t, kind) { if (msg) { msg.textContent = t; msg.style.color = kind === "err" ? "var(--accent-red)" : kind === "ok" ? "var(--accent-green)" : "var(--text-dim)"; } }
@@ -6548,24 +6686,25 @@
      readiness gate. Running campaigns / desks stays in the feature tab. */
   function renderVoiceSetup(el, which) {
     var cfg = which === "vetting"
-      ? { title: "AI Vetting setup", featureRoute: "vetting", featureLabel: "Open AI Vetting →",
+      ? { title: "AI Vetting setup", icon: "☎️", featureRoute: "vetting", featureLabel: "Open AI Vetting →",
           intro: "AI Vetting answers inbound candidate calls with an AI recruiter in your cloned voice. It needs Telnyx for the phone number + call handling, and a consented cloned voice. Bind a job description to a number inside AI Vetting once both are green.",
           extra: "Each vetting desk binds one job description to one of your Telnyx numbers and this voice — set that up per-desk in AI Vetting." }
-      : { title: "Voice Drops setup", featureRoute: "voicedrops", featureLabel: "Open Voice Drops →",
+      : { title: "Voice Drops setup", icon: "📞", featureRoute: "voicedrops", featureLabel: "Open Voice Drops →",
           intro: "Voice Drops leaves a personalized cloned-voice voicemail on verified business landlines/VoIP. It needs Telnyx (Premium AMD + outbound calling) and a consented cloned voice. Mobiles are filtered and never dialed.",
           extra: "Launching a drop also requires a per-campaign consent attestation and an identifying script — done inside Voice Drops." };
 
-    el.innerHTML = head(cfg.title,
-      "Telephony provider + your cloned voice. Stand both up here, then run it from the feature tab.") +
-      '<div id="vsReady" style="margin-bottom:14px"></div>' +
-      '<div class="card"><h3>📞 Telephony provider — Telnyx</h3>' +
-      '<p class="muted" style="font-size:13px;margin:4px 0 10px">The calling engine for SMS, the dialer (AMD), and AI Vetting. Connect your Telnyx API key and a from-number, then Test.</p>' +
+    el.innerHTML =
+      '<div class="sx-hero"><div class="sx-ic">' + cfg.icon + '</div><div><h2>' + esc(cfg.title.replace(" setup", "")) + '</h2>' +
+      '<p>' + esc(cfg.intro) + '</p></div></div>' +
+      '<div id="vsReady" style="margin-bottom:16px"></div>' +
+      '<div class="sx-card"><div class="sx-eyebrow">Step 1 · Telephony</div><h3>📞 Telnyx</h3>' +
+      '<p class="sx-sub">The calling engine for SMS, the dialer (AMD), and AI Vetting. Connect your Telnyx API key and a from-number, then Test.</p>' +
       '<div id="vsTel">' + loading() + '</div></div>' +
-      '<div class="card" style="margin-top:14px"><h3>🎙️ Cloned voice &amp; consent</h3>' +
-      '<p class="muted" style="font-size:13px;margin:4px 0 10px">Use your OWN voice, captured with a recorded consent statement. Repeat names/roles are synthesized once and reused, so cost stays near zero.</p>' +
+      '<div class="sx-card"><div class="sx-eyebrow">Step 2 · Voice</div><h3>🎙️ Cloned voice &amp; consent</h3>' +
+      '<p class="sx-sub">Use your OWN voice, captured with a recorded consent statement. Repeat names/roles are synthesized once and reused, so cost stays near zero.</p>' +
       '<div id="vsVoice">' + loading() + '</div></div>' +
-      '<div class="card" style="margin-top:14px"><p class="muted" style="font-size:13px;margin:0">' + esc(cfg.extra) + '</p>' +
-      '<div style="margin-top:10px"><a class="btn btn-primary btn-sm" href="#' + cfg.featureRoute + '">' + esc(cfg.featureLabel) + '</a></div></div>';
+      '<div class="sx-card"><p class="sx-sub" style="margin:0">' + esc(cfg.extra) + '</p>' +
+      '<div style="margin-top:12px"><a class="btn btn-primary btn-sm" href="#' + cfg.featureRoute + '">' + esc(cfg.featureLabel) + '</a></div></div>';
 
     var st = { telnyx: null, clones: [], provConfigured: false };
     function paintReady() {
@@ -6573,9 +6712,16 @@
       var voiceOk = (st.clones || []).length > 0;
       var ready = telOk && voiceOk;
       var b = $("#vsReady"); if (!b) return;
-      b.innerHTML = '<div class="setup-banner ' + (ready ? "ok" : "warn") + '">' +
-        (ready ? "✓ " + esc(cfg.title.replace(" setup", "")) + " is ready — Telnyx connected and a cloned voice on file."
-          : "Finish setup: " + [telOk ? null : "connect & test Telnyx", voiceOk ? null : "record a cloned voice"].filter(Boolean).join(" · ") + ".") +
+      var done = (telOk ? 1 : 0) + (voiceOk ? 1 : 0);
+      function chk(ok, label) {
+        return '<div class="sx-chk ' + (ok ? "done" : "todo") + '"><span class="mk">' + (ok ? "✓" : "·") + '</span>' + esc(label) + '</div>';
+      }
+      b.innerHTML = '<div class="sx-card" style="' + (ready ? "border-color:rgba(56,224,166,.4)" : "border-color:rgba(255,194,77,.32)") + '">' +
+        '<div class="sx-status"><span class="dot ' + (ready ? "ok" : "warn") + '"></span>' +
+        '<div><div class="lab">' + (ready ? cfg.title.replace(" setup", "") + " is ready" : "Almost there — " + done + " of 2 done") + '</div>' +
+        '<div class="sub">' + (ready ? "Telnyx connected and a cloned voice on file." : "Finish both steps below to go live.") + '</div></div>' +
+        '<span class="s-pill ' + (ready ? "ready" : "progress") + '" style="margin-left:auto">' + (ready ? "Ready ✓" : done + "/2") + '</span></div>' +
+        '<div class="sx-checks" style="margin-top:14px">' + chk(telOk, "Telnyx connected & tested") + chk(voiceOk, "Consented cloned voice on file") + '</div>' +
         '</div>';
     }
     function loadTelnyx() {

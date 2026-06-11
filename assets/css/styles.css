@@ -27,6 +27,15 @@
   --grad-warm: linear-gradient(120deg, #ff7ac6 0%, #ffc24d 100%);
   --grad-text: linear-gradient(120deg, #b9a6ff 0%, #8be7ff 60%, #ffb3e3 100%);
 
+  /* Legacy aliases: a lot of inline-styled chrome (setup tabs/steps, pills,
+     pickers) was written against --line/--muted/--card with hardcoded dark
+     fallbacks. They were never defined, so they pinned to dark in BOTH themes.
+     Define them here (matching the old fallbacks → dark is unchanged) and
+     re-map them in the light block so that chrome re-skins cleanly. */
+  --line: #262a33;
+  --muted: #8b93a1;
+  --card: #16161f;
+
   --radius: 14px;
   --radius-sm: 9px;
   --radius-lg: 22px;
