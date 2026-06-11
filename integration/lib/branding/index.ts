@@ -140,7 +140,11 @@ export function normalizeDomain(input: string): string {
     .replace(/\.$/, "");
 }
 
-const verifyHost = (domain: string) => "_recruiteros." + domain;
+// Neutral, brand-agnostic verification label so a white-label customer's DNS
+// never shows the house brand. The legacy "_recruiteros" label is still accepted
+// at verify time (below) so domains added before this change don't break.
+const verifyHost = (domain: string) => "_platform-verify." + domain;
+const legacyVerifyHost = (domain: string) => "_recruiteros." + domain;
 
 function buildInstructions(
   domain: string,
@@ -151,7 +155,7 @@ function buildInstructions(
     domain,
     status,
     records: [
-      { type: "CNAME", host: domain, value: cnameTarget(), note: "Point your domain at the RecruitersOS app." },
+      { type: "CNAME", host: domain, value: cnameTarget(), note: "Point your domain at your portal." },
       { type: "TXT", host: verifyHost(domain), value: token, note: "Proves you own the domain (required to verify)." },
     ],
   };
@@ -193,8 +197,17 @@ export async function verifyCustomDomain(
   let verified = false;
   let error: string | undefined;
   try {
-    const records = await dns.resolveTxt(verifyHost(domain));
-    verified = records.some((chunks) => chunks.join("").trim() === token);
+    // Check the neutral label first, then the legacy "_recruiteros" label so
+    // domains that published the old record before the rename still verify.
+    const hosts = [verifyHost(domain), legacyVerifyHost(domain)];
+    for (const host of hosts) {
+      try {
+        const records = await dns.resolveTxt(host);
+        if (records.some((chunks) => chunks.join("").trim() === token)) { verified = true; break; }
+      } catch (inner: any) {
+        if (!(inner?.code === "ENOTFOUND" || inner?.code === "ENODATA")) throw inner;
+      }
+    }
     if (!verified) error = "txt_not_found";
   } catch (e: any) {
     error = e?.code === "ENOTFOUND" || e?.code === "ENODATA" ? "txt_not_found" : e?.message || "dns_error";

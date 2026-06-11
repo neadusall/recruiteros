@@ -161,9 +161,9 @@
   function connectedCatalog() {
     return [
       { id: "unipile", label: "LinkedIn Automation", status: "green", requiredFor: ["bd", "recruiting"],
-        blurb: "Sends connection invites, DMs and voice notes from your LinkedIn seats — fully managed by RecruiterOS, no API key to set up.",
+        blurb: "Sends connection invites, DMs and voice notes from your LinkedIn seats — fully managed for you, no API key to set up.",
         fields: [{ key: "UNIPILE_ACCOUNT_ID", label: "LinkedIn account id", required: false, placeholder: "auto-filled once you connect a seat", hint: "Optional — leave blank to use the seat you connect in LinkedIn Automation." }],
-        steps: ["LinkedIn Automation is provided for you — RecruiterOS runs it on our managed account, so there's no key to enter.", "Open LinkedIn Automation in the sidebar and connect your LinkedIn profile through the secure hosted sign-in.", "Come back here and hit Test to confirm your seat is linked and ready."], present: [] },
+        steps: ["LinkedIn Automation is provided for you on a managed account, so there's no key to enter.", "Open LinkedIn Automation in the sidebar and connect your LinkedIn profile through the secure hosted sign-in.", "Come back here and hit Test to confirm your seat is linked and ready."], present: [] },
       { id: "rapidapi", label: "Job Search (signal feed)", status: "red", requiredFor: ["bd", "recruiting"],
         blurb: "Daily job-posting pull that powers Hire Signals and 'role they're hiring for'.",
         fields: [{ key: "RAPIDAPI_KEY", label: "RapidAPI key", required: true, secret: true, placeholder: "paste your RapidAPI key" }],
@@ -459,8 +459,8 @@
       var dins = d.branding.customDomain ? {
         domain: d.branding.customDomain, status: d.branding.domainStatus,
         records: [
-          { type: "CNAME", host: d.branding.customDomain, value: "app.recruitersos.co", note: "Point your domain at the RecruitersOS app." },
-          { type: "TXT", host: "_recruiteros." + d.branding.customDomain, value: d.branding.domainToken, note: "Proves you own the domain (required to verify)." }
+          { type: "CNAME", host: d.branding.customDomain, value: "recruitersos.co", note: "Point your domain at your portal." },
+          { type: "TXT", host: "_platform-verify." + d.branding.customDomain, value: d.branding.domainToken, note: "Proves you own the domain (required to verify)." }
         ]
       } : null;
       return ok({ branding: d.branding, instructions: dins });

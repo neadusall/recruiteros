@@ -78,7 +78,7 @@ const CATALOG: IntegrationMeta[] = [
   {
     id: "unipile",
     label: "LinkedIn Automation",
-    blurb: "Sends connection invites, DMs and voice notes from your LinkedIn seats — fully managed by RecruiterOS, no API key to set up.",
+    blurb: "Sends connection invites, DMs and voice notes from your LinkedIn seats — fully managed for you, no API key to set up.",
     requiredFor: ["bd", "recruiting"],
     // Managed: RecruiterOS provides the underlying automation account (server-side
     // UNIPILE_API_KEY), so the admin never enters a key. They only connect their
@@ -88,7 +88,7 @@ const CATALOG: IntegrationMeta[] = [
       { key: "UNIPILE_ACCOUNT_ID", label: "LinkedIn account id", required: false, placeholder: "auto-filled once you connect a seat", hint: "Optional — leave blank to use the seat you connect in LinkedIn Automation." },
     ],
     steps: [
-      "LinkedIn Automation is provided for you — RecruiterOS runs it on our managed account, so there's no Unipile key to enter.",
+      "LinkedIn Automation is provided for you on a managed account, so there's no Unipile key to enter.",
       "Open LinkedIn Automation in the sidebar and connect your LinkedIn profile through the secure hosted sign-in.",
       "Come back here and hit Test to confirm your seat is linked and ready to send.",
     ],
