@@ -152,11 +152,17 @@ export class LoxoClient {
 /* ---------------- helpers ---------------- */
 
 function pageQuery(opts: { perPage?: number; scrollId?: string; updatedAfter?: string }): string {
+  // Loxo's People and Companies list endpoints paginate by SCROLL CURSOR only.
+  // `page`/`per_page` belong to the jobs endpoint; sending `per_page` here makes
+  // Loxo reject the request with HTTP 422. We therefore send only `scroll_id`
+  // (omitted on the first page) and let Loxo control the page size.
+  //
+  // `updated_at_min` is intentionally NOT sent: it isn't a confirmed parameter
+  // on these endpoints and an unrecognized param also 422s. Sync runs a full
+  // scroll each time; upserts are idempotent so re-scanning is safe. Re-add an
+  // incremental filter only once Loxo's exact param name is verified.
   const p = new URLSearchParams();
-  p.set("per_page", String(Math.min(opts.perPage ?? 100, 100)));
   if (opts.scrollId) p.set("scroll_id", opts.scrollId);
-  // Loxo accepts an updated-since filter on list endpoints; harmless if ignored.
-  if (opts.updatedAfter) p.set("updated_at_min", opts.updatedAfter);
   const s = p.toString();
   return s ? `?${s}` : "";
 }
