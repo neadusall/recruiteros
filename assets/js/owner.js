@@ -926,6 +926,7 @@
   function viewSecurity() {
     api("/auth/2fa/status").then(function (st) {
       var html = '<div class="v-head"><h2>Security</h2><p>Two-factor authentication (2FA) puts an authenticator-app code in front of your sign-in, so a stolen or guessed password alone can\'t get in. This protects your account everywhere — the owner console and the main app.</p></div>';
+      html += '<div class="card" id="emailHealth" style="margin-bottom:14px"><p class="note">Checking email delivery…</p></div>';
       if (st.enabled) {
         html += '<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><span class="pill active">2FA is ON</span>' +
           '<span class="note" style="margin:0">' + st.recoveryRemaining + ' backup recovery code' + (st.recoveryRemaining === 1 ? '' : 's') + ' remaining</span></div>' +
@@ -936,6 +937,7 @@
           '<div class="btn-row" style="margin-top:10px"><a class="btn btn-danger btn-sm" id="sfDisable">Disable 2FA</a></div>' +
           '<div id="sfMsg"></div></div>';
         $("#view").innerHTML = html;
+        loadEmailHealth();
         $("#sfDisable").addEventListener("click", function () {
           var code = $("#sfDisableCode").value.trim();
           if (!code) { toast("Enter a code first"); return; }
@@ -951,9 +953,37 @@
           '<div class="btn-row" style="margin-top:10px"><a class="btn btn-primary btn-sm" id="sfBegin">Set up 2FA</a></div>' +
           '<div id="sfSetup" style="margin-top:14px"></div></div>';
         $("#view").innerHTML = html;
+        loadEmailHealth();
         $("#sfBegin").addEventListener("click", beginSetup);
       }
     }).catch(fail);
+  }
+
+  /* Email delivery health: is outbound email wired, and a one-click real test
+   * send so the owner can confirm password-reset/verification emails deliver
+   * (or see the exact provider rejection). */
+  function loadEmailHealth() {
+    var box = $("#emailHealth"); if (!box) return;
+    api("/owner/email-health").then(function (d) {
+      var on = d && d.configured;
+      box.innerHTML = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">' +
+        (on ? '<span class="pill active">Email ON</span>' : '<span class="pill susp">Email OFF</span>') +
+        '<strong>Password reset &amp; verification emails</strong></div>' +
+        (on
+          ? '<p class="note">Sending from <span class="mono">' + esc(d.from) + '</span>. Send yourself a test to confirm delivery.</p>'
+          : '<p class="note"><strong>No email provider is configured</strong>, so reset/verification emails are never sent — only logged. Set <span class="mono">RESEND_API_KEY</span> + <span class="mono">EMAIL_FROM</span> in the server\'s <span class="mono">.env.production</span> and redeploy. Then test here.</p>') +
+        '<div class="btn-row" style="margin-top:8px"><a class="btn btn-sm" id="ehTest">Send test email to me</a></div>' +
+        '<div id="ehResult"></div>';
+      $("#ehTest").addEventListener("click", function () {
+        var r = $("#ehResult"); r.innerHTML = '<p class="note">Sending…</p>';
+        send("/owner/email-health", "POST", {}).then(function (res) {
+          var x = res.data || {};
+          if (x.ok) r.innerHTML = '<p class="note" style="color:var(--accent-green)">✓ Sent to ' + esc(x.to) + '. Check your inbox (and spam).</p>';
+          else if (x.reason === "no_provider") r.innerHTML = '<p class="note" style="color:var(--accent-red)">No provider configured — set RESEND_API_KEY on the server first.</p>';
+          else r.innerHTML = '<p class="note" style="color:var(--accent-red)">Provider rejected it (' + esc(String(x.status || x.reason)) + '): ' + esc(String(x.detail || "").slice(0, 240)) + '</p>';
+        }).catch(function () { r.innerHTML = '<p class="note" style="color:var(--accent-red)">Couldn\'t reach the server.</p>'; });
+      });
+    }).catch(function () { box.innerHTML = '<p class="note">Email status unavailable.</p>'; });
   }
 
   function beginSetup() {

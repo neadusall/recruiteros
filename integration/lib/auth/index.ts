@@ -558,6 +558,57 @@ async function sendEmail(to: string, subject: string, body: string, fromOverride
   }
 }
 
+/* ---------------- email health / diagnostics (owner-only) ---------------- */
+
+/** Whether outbound email is wired, and the sender on file. No secrets leaked. */
+export function emailConfig(): { configured: boolean; from: string } {
+  return {
+    configured: Boolean(process.env.RESEND_API_KEY),
+    from: process.env.EMAIL_FROM || "RecruiterOS <onboarding@resend.dev>",
+  };
+}
+
+export interface EmailDiagnostic {
+  ok: boolean;
+  /** "no_provider" | "sent" | "rejected" | "error" */
+  reason: string;
+  status?: number;
+  detail?: string;
+  from: string;
+  to: string;
+}
+
+/**
+ * Send a real test email and report exactly what happened — so the owner can
+ * confirm deliverability (or see the precise Resend rejection, e.g. an
+ * unverified sender domain) without guessing. Mirrors sendEmail's transport.
+ */
+export async function sendDiagnosticEmail(to: string): Promise<EmailDiagnostic> {
+  const key = process.env.RESEND_API_KEY;
+  const from = process.env.EMAIL_FROM || "RecruiterOS <onboarding@resend.dev>";
+  if (!key) {
+    return { ok: false, reason: "no_provider", from, to,
+      detail: "RESEND_API_KEY is not set in production — emails are only logged, never sent." };
+  }
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from, to: [to],
+        subject: "RecruiterOS email test",
+        text: "This is a test from your RecruiterOS owner console. If you received this, password-reset and verification emails will deliver.",
+        html: "This is a test from your RecruiterOS owner console. If you received this, password-reset and verification emails will deliver.",
+      }),
+    });
+    if (res.ok) return { ok: true, reason: "sent", status: res.status, from, to };
+    const detail = await res.text().catch(() => "");
+    return { ok: false, reason: "rejected", status: res.status, detail, from, to };
+  } catch (e) {
+    return { ok: false, reason: "error", detail: (e as Error).message, from, to };
+  }
+}
+
 function userByEmail(email: string): User | undefined {
   const id = store.usersByEmail.get(normEmail(email));
   return id ? store.users.get(id) : undefined;
