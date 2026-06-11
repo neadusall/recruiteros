@@ -121,9 +121,10 @@ export async function workspaceForDomain(domain: string): Promise<string | null>
 
 /* ---------------- custom domain lifecycle ---------------- */
 
-/** Where customers point their CNAME. Set WHITE_LABEL_CNAME_TARGET to your app host. */
+/** Where customers point their CNAME. Defaults to the live app host (which
+ *  resolves to the server); override with WHITE_LABEL_CNAME_TARGET if needed. */
 function cnameTarget(): string {
-  return process.env.WHITE_LABEL_CNAME_TARGET || "app.recruitersos.co";
+  return process.env.WHITE_LABEL_CNAME_TARGET || "recruitersos.co";
 }
 
 /** Normalize user input to a bare hostname (strip scheme/path/trailing dot). */

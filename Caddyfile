@@ -1,3 +1,13 @@
+# On-demand TLS for white-label customer domains: Caddy mints a Let's Encrypt
+# cert the first time a new host is seen, but ONLY after the `ask` endpoint
+# confirms a workspace has claimed that domain — so a random domain pointed here
+# can't exhaust our cert rate limits.
+{
+	on_demand_tls {
+		ask http://app:3000/api/branding/allowed
+	}
+}
+
 # Automatic HTTPS for both apex and www. Caddy fetches and renews the
 # Let's Encrypt certificate on its own once DNS points here.
 recruitersos.co, www.recruitersos.co {
@@ -11,4 +21,16 @@ recruitersos.co, www.recruitersos.co {
 taltxt.recruitersos.co {
 	encode zstd gzip
 	reverse_proxy taltxt:3000
+}
+
+# White-label customer domains (e.g. app.lumesp.com). This catch-all matches any
+# HTTPS host not handled by a block above; `on_demand` issues the cert (gated by
+# the `ask` endpoint), then proxies to the app, which brands the login/signup
+# pages per-host via /api/branding/resolve. Customers CNAME their domain here.
+https:// {
+	encode zstd gzip
+	tls {
+		on_demand
+	}
+	reverse_proxy app:3000
 }
