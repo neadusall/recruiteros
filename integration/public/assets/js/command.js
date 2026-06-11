@@ -7850,8 +7850,8 @@
     var ownerLink = $("#ownerLink");
     if (ownerLink && (ctx.role === "owner" || can("workspace:delete"))) {
       ownerLink.hidden = false;
-      // Gated doorway: server checks owner access, then forwards to the secret
-      // slug (the guessable /owner-console path 404s by design).
+      // Gated doorway: the server confirms owner access, then forwards to the
+      // single clean console URL (/owner-console). Non-owners get a 404 here.
       ownerLink.addEventListener("click", function () { location.href = "/api/owner/enter"; });
     }
 

@@ -1,0 +1,9 @@
+Portal,URL,Access email / who,Auth gate,Notes
+Public site / login,https://recruitersos.co/login,Any account,Public,Entry point for everyone
+Admin Portal (your house workspace),https://recruitersos.co/admin,neadusall@gmail.com,Login + owner/admin role,Full admin; your own workspace has no trial paywall
+Recruiter Portal (house),https://recruitersos.co/recruiter,Your recruiters' emails (member role),Login + member role,Recruiter-facing surface; an admin who opens /admin as a member is bounced here
+Owner Console (spending / revenue / all accounts),https://recruitersos.co/owner-console,neadusall@gmail.com ONLY,OWNER_EMAIL server-side gate (non-owners get 404),"Where spend / cost / margin live. Reach it via the account menu -> Owner console, or /api/owner/enter"
+Owner sign-in page,https://recruitersos.co/owner-login,neadusall@gmail.com,Owner email,Sign in here to open the Owner Console
+LUME white-label Admin,https://app.lumesp.com/admin,A @lumesp.com admin,Login + admin role on the LUME workspace,"Same app with LUME branding; live once LUME's DNS CNAME -> recruitersos.co + TXT verify is done"
+LUME white-label Recruiter,https://app.lumesp.com/recruiter,A @lumesp.com recruiter,Login + member role,LUME's recruiters
+OS Text (SMS engine),https://taltxt.recruitersos.co,Logged-in recruiting workspace,Workspace session,Embedded inside the portal's OS Text tab
