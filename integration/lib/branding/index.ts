@@ -18,6 +18,7 @@ import { randomBytes } from "crypto";
 import { promises as dns } from "dns";
 import { nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
+import { presetForHost } from "./presets";
 
 export interface Branding {
   workspaceId: string;
@@ -205,9 +206,27 @@ export async function verifyCustomDomain(
 /** Public branding for a host (custom-domain login/signup pages). Logo + name only. */
 export async function publicBrandingForHost(
   host: string,
-): Promise<{ logoUrl?: string; logoLightUrl?: string; logoScale?: number; brandName?: string; accentColor?: string } | null> {
+): Promise<{ logoUrl?: string; logoLightUrl?: string; logoScale?: number; brandName?: string; accentColor?: string; faviconUrl?: string } | null> {
   const ws = await workspaceForDomain(host);
-  if (!ws) return null;
-  const b = await getBranding(ws);
-  return { logoUrl: b.logoUrl, logoLightUrl: b.logoLightUrl, logoScale: b.logoScale, brandName: b.brandName, accentColor: b.accentColor };
+  if (ws) {
+    const b = await getBranding(ws);
+    // A workspace that has actually set branding always wins over a built-in preset.
+    if (b.logoUrl || b.brandName || b.accentColor) {
+      return { logoUrl: b.logoUrl, logoLightUrl: b.logoLightUrl, logoScale: b.logoScale, brandName: b.brandName, accentColor: b.accentColor };
+    }
+  }
+  // No workspace (or an unconfigured one): fall back to a built-in white-label preset
+  // so flagship domains (e.g. app.lumesp.com) are branded from the first paint.
+  const preset = presetForHost(host);
+  if (preset) {
+    return {
+      logoUrl: preset.logoUrl,
+      logoLightUrl: preset.logoLightUrl,
+      logoScale: preset.logoScale,
+      brandName: preset.brandName,
+      accentColor: preset.accentColor,
+      faviconUrl: preset.faviconUrl,
+    };
+  }
+  return null;
 }

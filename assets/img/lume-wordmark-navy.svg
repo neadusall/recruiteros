@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 230 58" fill="none" role="img" aria-label="Lume Search Partners">
+  <defs>
+    <linearGradient id="arc" x1="70" y1="20" x2="160" y2="6" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0080A0"/>
+      <stop offset="1" stop-color="#19A9C9"/>
+    </linearGradient>
+  </defs>
+  <path d="M74 18 A34 34 0 0 1 156 18" stroke="url(#arc)" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <text x="115" y="41" text-anchor="middle" font-family="'Helvetica Neue',Arial,sans-serif" font-weight="700" font-size="33" letter-spacing="4" fill="#1C2A3A">LUME</text>
+  <text x="115" y="53" text-anchor="middle" font-family="'Helvetica Neue',Arial,sans-serif" font-weight="600" font-size="8.5" letter-spacing="5.5" fill="#5A6B7B">SEARCH PARTNERS</text>
+</svg>

@@ -1,0 +1,4 @@
+# Cloudflare Pages redirects.
+# Canonical host = www.lumesp.com (the domain stays on GoDaddy DNS, which can't
+# CNAME a bare apex to Pages — so the apex 301-forwards to www at GoDaddy, and
+# www is the only host Pages serves). No host redirect needed here.

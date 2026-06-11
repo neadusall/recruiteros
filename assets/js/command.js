@@ -256,7 +256,11 @@
     var badge = $("#portalBadge");
     var label = portal === "recruiter" ? "🧑‍💼 Recruiter Portal" : "🛡️ Admin Portal";
     if (badge) { badge.textContent = label; badge.setAttribute("data-portal", portal); }
-    document.title = (portal === "recruiter" ? "Recruiter Portal" : "Admin Portal") + ", RecruitersOS";
+    // On a white-label custom domain, never suffix the house product name; the
+    // workspace/preset brand name (applied below) takes over the tab title.
+    var houseHost = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.host || "");
+    var portalName = portal === "recruiter" ? "Recruiter Portal" : "Admin Portal";
+    document.title = portalName + (houseHost ? ", RecruitersOS" : "");
   })();
 
   // View-as banner: a persistent strip making it unmistakable that an admin is
@@ -7733,6 +7737,9 @@
     function render(b) {
       b = b || {};
       lastBranding = b;
+      // Un-hide the wordmark the instant we have a brand to paint (the white-label
+      // head guard hides it on a custom domain to avoid a house-brand flash).
+      try { document.documentElement.classList.remove("wl-hide"); } catch (e) {}
       // Pick the logo for the current appearance: a transparent/light logo for the
       // dark theme, a colored logo for the light theme. Either falls back to the
       // other if only one is set.
@@ -7757,11 +7764,18 @@
       }
       // Accent color -> primary brand variable (recolors buttons, highlights, …).
       var root = document.documentElement;
-      if (b.accentColor) root.style.setProperty("--brand", b.accentColor);
-      else root.style.removeProperty("--brand");
-      // Product name -> page title; logo -> favicon.
+      if (b.accentColor) {
+        root.style.setProperty("--brand", b.accentColor);
+        if (window.__wlTheme) window.__wlTheme(b.accentColor); // full palette recolor (grad/aurora)
+      } else root.style.removeProperty("--brand");
+      // Product name -> page title; logo/preset mark -> favicon.
       if (b.brandName) document.title = b.brandName + " · Command Center";
-      if (logo) { var fav = document.querySelector('link[rel="icon"]'); if (fav) fav.setAttribute("href", logo); }
+      var favHref = b.faviconUrl || logo;
+      if (favHref) {
+        var fav = document.querySelector('link[rel="icon"]');
+        if (!fav) { fav = document.createElement("link"); fav.rel = "icon"; document.head.appendChild(fav); }
+        fav.setAttribute("href", favHref);
+      }
       // Quick-upload label reflects which appearance's logo it will set.
       var ul = document.getElementById("brandUploadLabel");
       if (ul) ul.textContent = "Change " + (theme === "light" ? "light" : "dark") + " logo";
@@ -7776,7 +7790,20 @@
 
     // 2) Refresh from the server (authoritative).
     send("/branding", "GET").then(function (r) {
-      if (r && r.ok && r.data && r.data.branding) { render(r.data.branding); cache(r.data.branding); }
+      var b = r && r.ok && r.data && r.data.branding;
+      var configured = b && (b.logoUrl || b.logoLightUrl || b.brandName || b.accentColor);
+      if (configured) { render(b); cache(b); return; }
+      // Workspace hasn't set its own branding yet. On a white-label custom domain,
+      // fall back to the host's built-in brand preset so the portal still shows the
+      // customer's identity (never the house "RecruitersOS" wordmark).
+      var host = location.host || "";
+      var houseHost = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(host);
+      if (houseHost) return;
+      var base = (window.RECRUITEROS_API_BASE || "") + "/api";
+      fetch(base + "/branding/resolve?host=" + encodeURIComponent(host))
+        .then(function (res) { return res.json(); })
+        .then(function (d) { var pb = d && d.branding; if (pb && (pb.logoUrl || pb.brandName)) { render(pb); cache(pb); } })
+        .catch(function () {});
     }).catch(function () {});
 
     // 2b) Swap the dark/light logo live when the appearance toggle flips data-theme.

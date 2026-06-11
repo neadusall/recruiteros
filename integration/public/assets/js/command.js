@@ -256,7 +256,11 @@
     var badge = $("#portalBadge");
     var label = portal === "recruiter" ? "🧑‍💼 Recruiter Portal" : "🛡️ Admin Portal";
     if (badge) { badge.textContent = label; badge.setAttribute("data-portal", portal); }
-    document.title = (portal === "recruiter" ? "Recruiter Portal" : "Admin Portal") + ", RecruitersOS";
+    // On a white-label custom domain, never suffix the house product name; the
+    // workspace/preset brand name (applied below) takes over the tab title.
+    var houseHost = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.host || "");
+    var portalName = portal === "recruiter" ? "Recruiter Portal" : "Admin Portal";
+    document.title = portalName + (houseHost ? ", RecruitersOS" : "");
   })();
 
   // View-as banner: a persistent strip making it unmistakable that an admin is
@@ -7035,9 +7039,18 @@
       }).join("") || '<div class="empty">No teammates yet. Invite your first recruiter with the button above.</div>';
       var body = $("#tmBody"); if (body) body.innerHTML = rows;
       var invs = ((d && d.invites) || []).map(function (i) {
-        return '<div class="integ"><span class="dot3" style="background:var(--accent-amber)"></span><div class="meta"><b>' + esc(i.email) + "</b><small>invited as " + esc(i.role) + "</small></div></div>";
+        var copy = i.link ? '<button class="btn btn-ghost btn-sm" data-invlink="' + esc(i.link) + '">Copy link</button>' : "";
+        return '<div class="integ"><span class="dot3" style="background:var(--accent-amber)"></span><div class="meta"><b>' + esc(i.email) + "</b><small>invited as " + esc(i.role) + "</small></div>" + copy + "</div>";
       }).join("");
       var ib = $("#tmInvites"); if (ib) ib.innerHTML = invs || '<div class="empty">None.</div>';
+      if (ib) Array.prototype.forEach.call(ib.querySelectorAll("[data-invlink]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var link = btn.getAttribute("data-invlink");
+          try { navigator.clipboard.writeText(link); } catch (e) {}
+          var t = btn.textContent; btn.textContent = "Copied ✓";
+          setTimeout(function () { btn.textContent = t; }, 1500);
+        });
+      });
       if (body) Array.prototype.forEach.call(body.querySelectorAll("[data-remove]"), function (btn) {
         btn.addEventListener("click", function () {
           if (!confirm("Remove this teammate?")) return;
@@ -7078,10 +7091,13 @@
         var email = (emailEl.value || "").trim();
         var role = (roleEl && roleEl.value) === "admin" ? "admin" : "member";
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { msgEl.textContent = "Enter a valid email."; msgEl.className = "auth-msg err"; return; }
-        sendBtn.disabled = true; msgEl.textContent = "Sending invite..."; msgEl.className = "auth-msg busy";
+        sendBtn.disabled = true; msgEl.textContent = "Creating invite..."; msgEl.className = "auth-msg busy";
         send("/team", "POST", { action: "invite", email: email, role: role })
           .then(function (r) {
-            if (r.ok) { close(); toast("Invited " + email + " as " + (role === "admin" ? "admin" : "recruiter")); renderTeam($("#view")); }
+            if (r.ok) {
+              renderTeam($("#view")); // refresh the list underneath
+              showInviteLink(root, email, role, (r.data && r.data.link) || "");
+            }
             else { sendBtn.disabled = false; msgEl.textContent = inviteErr((r.data && r.data.error) || r.status); msgEl.className = "auth-msg err"; }
           })
           .catch(function () { sendBtn.disabled = false; msgEl.textContent = "Could not reach the server."; msgEl.className = "auth-msg err"; });
@@ -7098,6 +7114,32 @@
       missing_fields: "Fill in the email and role."
     };
     return map[code] || ("Could not invite (" + code + ")");
+  }
+
+  // After an invite is created, show a copyable join link so the admin can send
+  // it themselves (the link also goes by email when a provider is configured).
+  function showInviteLink(root, email, role, link) {
+    var msgEl = root.querySelector("#invMsg");
+    if (!msgEl) return;
+    var label = role === "admin" ? "admin" : "recruiter";
+    msgEl.className = "auth-msg";
+    msgEl.innerHTML = '<div style="text-align:left">' +
+      '<p style="color:var(--accent-green);font-weight:600;margin:0 0 8px">✓ Invite created for ' + esc(email) + ' (' + label + ').</p>' +
+      '<p class="muted" style="font-size:12px;margin:0 0 6px">Send them this link to join — it works even if email isn\'t set up yet:</p>' +
+      '<div style="display:flex;gap:6px"><input id="invLinkBox" readonly value="' + esc(link) + '" style="flex:1;min-width:0;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12px"/>' +
+      '<button class="btn btn-sm" id="invCopyBtn" type="button">Copy</button></div></div>';
+    var box = root.querySelector("#invLinkBox");
+    var copyBtn = root.querySelector("#invCopyBtn");
+    if (copyBtn) copyBtn.onclick = function () {
+      if (box) box.select();
+      try { navigator.clipboard.writeText(link); } catch (e) { try { document.execCommand("copy"); } catch (e2) {} }
+      copyBtn.textContent = "Copied ✓";
+      setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500);
+    };
+    var sb = root.querySelector("#invSend");
+    if (sb) { sb.disabled = false; sb.textContent = "Invite another"; }
+    var em = root.querySelector("#invEmail");
+    if (em) { em.value = ""; em.focus(); }
   }
 
   /* Admin "view as recruiter": pick a recruiter and drop straight into their
@@ -7695,6 +7737,9 @@
     function render(b) {
       b = b || {};
       lastBranding = b;
+      // Un-hide the wordmark the instant we have a brand to paint (the white-label
+      // head guard hides it on a custom domain to avoid a house-brand flash).
+      try { document.documentElement.classList.remove("wl-hide"); } catch (e) {}
       // Pick the logo for the current appearance: a transparent/light logo for the
       // dark theme, a colored logo for the light theme. Either falls back to the
       // other if only one is set.
@@ -7719,11 +7764,18 @@
       }
       // Accent color -> primary brand variable (recolors buttons, highlights, …).
       var root = document.documentElement;
-      if (b.accentColor) root.style.setProperty("--brand", b.accentColor);
-      else root.style.removeProperty("--brand");
-      // Product name -> page title; logo -> favicon.
+      if (b.accentColor) {
+        root.style.setProperty("--brand", b.accentColor);
+        if (window.__wlTheme) window.__wlTheme(b.accentColor); // full palette recolor (grad/aurora)
+      } else root.style.removeProperty("--brand");
+      // Product name -> page title; logo/preset mark -> favicon.
       if (b.brandName) document.title = b.brandName + " · Command Center";
-      if (logo) { var fav = document.querySelector('link[rel="icon"]'); if (fav) fav.setAttribute("href", logo); }
+      var favHref = b.faviconUrl || logo;
+      if (favHref) {
+        var fav = document.querySelector('link[rel="icon"]');
+        if (!fav) { fav = document.createElement("link"); fav.rel = "icon"; document.head.appendChild(fav); }
+        fav.setAttribute("href", favHref);
+      }
       // Quick-upload label reflects which appearance's logo it will set.
       var ul = document.getElementById("brandUploadLabel");
       if (ul) ul.textContent = "Change " + (theme === "light" ? "light" : "dark") + " logo";
@@ -7738,7 +7790,20 @@
 
     // 2) Refresh from the server (authoritative).
     send("/branding", "GET").then(function (r) {
-      if (r && r.ok && r.data && r.data.branding) { render(r.data.branding); cache(r.data.branding); }
+      var b = r && r.ok && r.data && r.data.branding;
+      var configured = b && (b.logoUrl || b.logoLightUrl || b.brandName || b.accentColor);
+      if (configured) { render(b); cache(b); return; }
+      // Workspace hasn't set its own branding yet. On a white-label custom domain,
+      // fall back to the host's built-in brand preset so the portal still shows the
+      // customer's identity (never the house "RecruitersOS" wordmark).
+      var host = location.host || "";
+      var houseHost = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(host);
+      if (houseHost) return;
+      var base = (window.RECRUITEROS_API_BASE || "") + "/api";
+      fetch(base + "/branding/resolve?host=" + encodeURIComponent(host))
+        .then(function (res) { return res.json(); })
+        .then(function (d) { var pb = d && d.branding; if (pb && (pb.logoUrl || pb.brandName)) { render(pb); cache(pb); } })
+        .catch(function () {});
     }).catch(function () {});
 
     // 2b) Swap the dark/light logo live when the appearance toggle flips data-theme.

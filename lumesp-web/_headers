@@ -1,0 +1,14 @@
+# Cloudflare Pages response headers.
+/*
+  X-Frame-Options: SAMEORIGIN
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+
+# Long-cache fingerprinted-ish static assets; HTML stays revalidated by default.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/styles.css
+  Cache-Control: public, max-age=86400
+/main.js
+  Cache-Control: public, max-age=86400

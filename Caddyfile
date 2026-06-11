@@ -24,6 +24,21 @@ taltxt.recruitersos.co {
 	reverse_proxy taltxt:3000
 }
 
+# Lume Search Partners — static white-label MARKETING site, served from this same
+# box (the keeper). Apex is canonical; www 301-redirects to it. These named blocks
+# are more specific than the catch-all below, so they always win; the portal host
+# app.lumesp.com is NOT named here and correctly falls through to the catch-all
+# (on-demand TLS -> the app). Automatic HTTPS issues once the A-record points here.
+lumesp.com {
+	encode zstd gzip
+	root * /srv/lumesp
+	file_server
+}
+
+www.lumesp.com {
+	redir https://lumesp.com{uri} permanent
+}
+
 # Catch-all for white-label CUSTOM DOMAINS (e.g. app.acme.com). The explicit
 # blocks above are more specific and always win, so house traffic never reaches
 # here. Any other host gets an on-demand Let's Encrypt cert — gated by the

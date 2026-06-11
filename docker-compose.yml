@@ -84,6 +84,8 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Static white-label marketing site (lumesp.com) served by Caddy from here.
+      - ./lumesp-web:/srv/lumesp:ro
       - caddy_data:/data
       - caddy_config:/config
 
