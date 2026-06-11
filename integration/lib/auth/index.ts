@@ -524,9 +524,9 @@ async function sendVerificationEmail(user: User): Promise<void> {
  * a verified domain/address in your Resend account (e.g. "RecruiterOS
  * <no-reply@recruitersos.co>").
  */
-async function sendEmail(to: string, subject: string, body: string): Promise<void> {
+async function sendEmail(to: string, subject: string, body: string, fromOverride?: string): Promise<void> {
   const key = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM || "RecruiterOS <onboarding@resend.dev>";
+  const from = fromOverride || process.env.EMAIL_FROM || "RecruiterOS <onboarding@resend.dev>";
   if (!key) {
     console.info(`[email] (no RESEND_API_KEY, logging only) -> ${to} :: ${subject}\n${body}`);
     return;
@@ -583,9 +583,38 @@ export function issueSessionForUser(userId: string, workspaceId: string): AuthRe
   return result(user, ws, m?.role ?? "member", session);
 }
 
-/** Public email seam reused by team invites. */
-export async function sendWorkspaceEmail(to: string, subject: string, body: string): Promise<void> {
-  await sendEmail(to, subject, body);
+/**
+ * Public email seam reused by team invites. When a workspaceId is given and that
+ * workspace is white-labeled with a verified custom domain, the email is sent
+ * FROM that workspace's own domain under its brand name — so a customer's
+ * correspondence carries NO reference to the house (recruitersos.co). Falls back
+ * to the house sender for the operator's own workspace / unbranded workspaces.
+ */
+export async function sendWorkspaceEmail(
+  to: string,
+  subject: string,
+  body: string,
+  workspaceId?: string,
+): Promise<void> {
+  let from: string | undefined;
+  if (workspaceId) {
+    try {
+      const { getBranding } = await import("../branding");
+      const b = await getBranding(workspaceId);
+      if (b.customDomain && (b.domainStatus === "verified" || b.domainStatus === "live")) {
+        const apex = registrableDomain(b.customDomain);
+        const name = b.brandName || store.workspaces.get(workspaceId)?.name || apex;
+        from = `${name} <no-reply@${apex}>`;
+      }
+    } catch {}
+  }
+  await sendEmail(to, subject, body, from);
+}
+
+/** Reduce a host to its registrable domain (app.lumesp.com -> lumesp.com). */
+function registrableDomain(host: string): string {
+  const parts = (host || "").trim().toLowerCase().replace(/\.$/, "").split(".");
+  return parts.length <= 2 ? parts.join(".") : parts.slice(-2).join(".");
 }
 function normEmail(e: string): string {
   return e.trim().toLowerCase();
@@ -594,7 +623,7 @@ function titleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 function appUrl(): string {
-  return process.env.RECRUITEROS_APP_URL ?? "https://app.recruitersos.co";
+  return process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
 }
 function authError(code: string, status: number): Error & { status: number } {
   const e = new Error(code) as Error & { status: number };

@@ -35,7 +35,7 @@ import {
 import type { VoiceCampaign, VoiceLead, DropOutcome } from "./types";
 
 function appUrl(): string {
-  return process.env.RECRUITEROS_APP_URL ?? "https://app.recruitersos.co";
+  return process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
 }
 function connectionId(): string {
   return process.env.TELNYX_CONNECTION_ID ?? "";

@@ -20,7 +20,7 @@ export async function GET(req: Request) {
   const ws = g.ctx.workspace.id;
   return ok({
     members: listMembers(ws, g.ctx.user.id),
-    invites: listInvites(ws),
+    invites: await listInvites(ws),
     assignableRoles: ASSIGNABLE_ROLES[g.ctx.role],
   });
 }

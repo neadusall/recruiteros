@@ -62,7 +62,9 @@
 
         <div class="or"><span>or</span></div>
         <a class="btn btn-li btn-block" href="/api/auth/linkedin"><span class="li-i">in</span> Sign up with LinkedIn</a>
-        <button class="btn btn-ghost btn-block" id="magicBtn" style="margin-top:10px">✉️ Email me a magic link</button>
+        <!-- Magic-link signup hidden until an email provider is configured (it needs
+             outbound email; the name+email+password form above works without it). -->
+        <button class="btn btn-ghost btn-block" id="magicBtn" hidden style="margin-top:10px;display:none">✉️ Email me a magic link</button>
 
         <p class="auth-msg" id="msg"></p>
         <p class="auth-fine">By continuing you agree to the <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.</p>

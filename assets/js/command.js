@@ -7035,9 +7035,18 @@
       }).join("") || '<div class="empty">No teammates yet. Invite your first recruiter with the button above.</div>';
       var body = $("#tmBody"); if (body) body.innerHTML = rows;
       var invs = ((d && d.invites) || []).map(function (i) {
-        return '<div class="integ"><span class="dot3" style="background:var(--accent-amber)"></span><div class="meta"><b>' + esc(i.email) + "</b><small>invited as " + esc(i.role) + "</small></div></div>";
+        var copy = i.link ? '<button class="btn btn-ghost btn-sm" data-invlink="' + esc(i.link) + '">Copy link</button>' : "";
+        return '<div class="integ"><span class="dot3" style="background:var(--accent-amber)"></span><div class="meta"><b>' + esc(i.email) + "</b><small>invited as " + esc(i.role) + "</small></div>" + copy + "</div>";
       }).join("");
       var ib = $("#tmInvites"); if (ib) ib.innerHTML = invs || '<div class="empty">None.</div>';
+      if (ib) Array.prototype.forEach.call(ib.querySelectorAll("[data-invlink]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var link = btn.getAttribute("data-invlink");
+          try { navigator.clipboard.writeText(link); } catch (e) {}
+          var t = btn.textContent; btn.textContent = "Copied ✓";
+          setTimeout(function () { btn.textContent = t; }, 1500);
+        });
+      });
       if (body) Array.prototype.forEach.call(body.querySelectorAll("[data-remove]"), function (btn) {
         btn.addEventListener("click", function () {
           if (!confirm("Remove this teammate?")) return;
@@ -7078,10 +7087,13 @@
         var email = (emailEl.value || "").trim();
         var role = (roleEl && roleEl.value) === "admin" ? "admin" : "member";
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { msgEl.textContent = "Enter a valid email."; msgEl.className = "auth-msg err"; return; }
-        sendBtn.disabled = true; msgEl.textContent = "Sending invite..."; msgEl.className = "auth-msg busy";
+        sendBtn.disabled = true; msgEl.textContent = "Creating invite..."; msgEl.className = "auth-msg busy";
         send("/team", "POST", { action: "invite", email: email, role: role })
           .then(function (r) {
-            if (r.ok) { close(); toast("Invited " + email + " as " + (role === "admin" ? "admin" : "recruiter")); renderTeam($("#view")); }
+            if (r.ok) {
+              renderTeam($("#view")); // refresh the list underneath
+              showInviteLink(root, email, role, (r.data && r.data.link) || "");
+            }
             else { sendBtn.disabled = false; msgEl.textContent = inviteErr((r.data && r.data.error) || r.status); msgEl.className = "auth-msg err"; }
           })
           .catch(function () { sendBtn.disabled = false; msgEl.textContent = "Could not reach the server."; msgEl.className = "auth-msg err"; });
@@ -7098,6 +7110,32 @@
       missing_fields: "Fill in the email and role."
     };
     return map[code] || ("Could not invite (" + code + ")");
+  }
+
+  // After an invite is created, show a copyable join link so the admin can send
+  // it themselves (the link also goes by email when a provider is configured).
+  function showInviteLink(root, email, role, link) {
+    var msgEl = root.querySelector("#invMsg");
+    if (!msgEl) return;
+    var label = role === "admin" ? "admin" : "recruiter";
+    msgEl.className = "auth-msg";
+    msgEl.innerHTML = '<div style="text-align:left">' +
+      '<p style="color:var(--accent-green);font-weight:600;margin:0 0 8px">✓ Invite created for ' + esc(email) + ' (' + label + ').</p>' +
+      '<p class="muted" style="font-size:12px;margin:0 0 6px">Send them this link to join — it works even if email isn\'t set up yet:</p>' +
+      '<div style="display:flex;gap:6px"><input id="invLinkBox" readonly value="' + esc(link) + '" style="flex:1;min-width:0;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12px"/>' +
+      '<button class="btn btn-sm" id="invCopyBtn" type="button">Copy</button></div></div>';
+    var box = root.querySelector("#invLinkBox");
+    var copyBtn = root.querySelector("#invCopyBtn");
+    if (copyBtn) copyBtn.onclick = function () {
+      if (box) box.select();
+      try { navigator.clipboard.writeText(link); } catch (e) { try { document.execCommand("copy"); } catch (e2) {} }
+      copyBtn.textContent = "Copied ✓";
+      setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500);
+    };
+    var sb = root.querySelector("#invSend");
+    if (sb) { sb.disabled = false; sb.textContent = "Invite another"; }
+    var em = root.querySelector("#invEmail");
+    if (em) { em.value = ""; em.focus(); }
   }
 
   /* Admin "view as recruiter": pick a recruiter and drop straight into their

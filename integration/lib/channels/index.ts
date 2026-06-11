@@ -217,4 +217,4 @@ function guessDomain(company: string): string {
   return company.toLowerCase().replace(/[^a-z0-9]/g, "") + ".com";
 }
 function cap(s: string): string { return s.charAt(0).toUpperCase() + s.slice(1); }
-function appUrl(): string { return process.env.RECRUITEROS_APP_URL ?? "https://app.recruitersos.co"; }
+function appUrl(): string { return process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co"; }

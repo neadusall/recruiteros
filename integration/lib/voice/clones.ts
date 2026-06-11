@@ -28,7 +28,7 @@ function cacheDir(): string {
 }
 
 function appUrl(): string {
-  return process.env.RECRUITEROS_APP_URL ?? "https://app.recruitersos.co";
+  return process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
 }
 
 /** Disk-safe file name for a (voice, key) pair. */

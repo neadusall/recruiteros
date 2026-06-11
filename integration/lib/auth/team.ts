@@ -9,6 +9,7 @@
 import { rid, nowIso, isoPlusHours } from "../core/ids";
 import { capabilitiesFor, ASSIGNABLE_ROLES } from "./permissions";
 import { devAuthStore, issueSessionForUser, sendWorkspaceEmail } from "./index";
+import { getBranding } from "../branding";
 import type { AuthResult, Membership, Role } from "./types";
 
 export interface TeamMember {
@@ -45,11 +46,34 @@ export function listMembers(workspaceId: string, youUserId?: string): TeamMember
 }
 
 /** Pending invites still outstanding for a workspace. */
-export function listInvites(workspaceId: string): { email: string; role: Role; expiresAt: string }[] {
+export async function listInvites(
+  workspaceId: string,
+): Promise<{ email: string; role: Role; expiresAt: string; link: string }[]> {
   const store = devAuthStore();
+  const base = await workspaceLinkBase(workspaceId);
   return [...store.emailTokens.values()]
     .filter((t) => t.purpose === "invite" && t.workspaceId === workspaceId)
-    .map((t) => ({ email: t.email, role: t.role ?? "member", expiresAt: t.expiresAt }));
+    .map((t) => ({ email: t.email, role: t.role ?? "member", expiresAt: t.expiresAt, link: joinUrl(base, t.token) }));
+}
+
+/**
+ * The base URL for a workspace's customer-facing links. A white-label workspace
+ * with a verified custom domain (e.g. app.lumesp.com) gets links on ITS OWN
+ * domain — never recruitersos.co — so invite/join correspondence carries no
+ * reference to the house brand. Everyone else uses the house app URL.
+ */
+async function workspaceLinkBase(workspaceId: string): Promise<string> {
+  try {
+    const b = await getBranding(workspaceId);
+    if (b.customDomain && (b.domainStatus === "verified" || b.domainStatus === "live")) {
+      return `https://${b.customDomain}`;
+    }
+  } catch {}
+  return appUrl();
+}
+
+function joinUrl(base: string, token: string): string {
+  return base.replace(/\/$/, "") + "/signup.html?invite=" + token;
 }
 
 /**
@@ -62,7 +86,7 @@ export async function inviteMember(
   workspaceId: string,
   email: string,
   role: Role,
-): Promise<{ invited: true; email: string; role: Role }> {
+): Promise<{ invited: true; email: string; role: Role; link: string }> {
   if (!ASSIGNABLE_ROLES[actorRole].includes(role)) throw err("role_not_assignable", 403);
   const store = devAuthStore();
   const key = email.trim().toLowerCase();
@@ -85,12 +109,18 @@ export async function inviteMember(
   store.emailTokens.set(token.token, token);
 
   const ws = store.workspaces.get(workspaceId);
+  const base = await workspaceLinkBase(workspaceId);
+  const link = joinUrl(base, token.token);
+  // Email it when a provider is configured; the link is ALSO returned so the
+  // admin can copy + send it themselves (works with no email set up). Subject
+  // uses the workspace's own name (branding), not the house brand.
   await sendWorkspaceEmail(
     key,
-    `${actorName} invited you to ${ws?.name ?? "RecruiterOS"}`,
-    `Join the workspace as ${role}: ${appUrl()}/signup.html?invite=${token.token}`,
+    `${actorName} invited you to ${ws?.name ?? "your workspace"}`,
+    `Join the workspace as ${role}: ${link}`,
+    workspaceId,
   );
-  return { invited: true, email: key, role };
+  return { invited: true, email: key, role, link };
 }
 
 /**
@@ -167,7 +197,7 @@ function lastOwner(workspaceId: string): boolean {
 }
 
 function appUrl(): string {
-  return process.env.RECRUITEROS_APP_URL ?? "https://app.recruitersos.co";
+  return process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
 }
 
 export { capabilitiesFor };

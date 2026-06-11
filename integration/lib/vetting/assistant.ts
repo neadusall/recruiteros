@@ -24,7 +24,7 @@ import type { VettingDesk } from "./types";
 import { buildAssistantInstructions, buildGreeting } from "./prompt";
 
 function appUrl(): string {
-  return process.env.RECRUITEROS_APP_URL ?? "https://app.recruitersos.co";
+  return process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
 }
 
 /** Telnyx voice selector for the recruiter's cloned ElevenLabs voice. */
