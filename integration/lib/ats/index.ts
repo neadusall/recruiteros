@@ -20,8 +20,13 @@ export {
   syncOnePerson,
   syncOneCompany,
   registerLoxoWebhooks,
+  pushPersonToLoxo,
+  pushCompanyToLoxo,
+  loxoIsActive,
   type SyncReport,
+  type PushResult,
 } from "./sync";
+export { dataRecordToLoxoPerson, companyToLoxoCompany } from "./map";
 
 /** Object-mapping reference, surfaced for the ATS settings UI. */
 export const LOXO_OBJECT_MAP = [

@@ -66,6 +66,45 @@ function hydrate(s: any) {
   store.sessions = new Map(s.sessions || []);
   store.emailTokens = new Map(s.emailTokens || []);
   store.suspended = new Set(s.suspended || []);
+  backfillDomainIndex();
+}
+
+/**
+ * Self-heal the domain -> workspace index so corporate-domain auto-join (and the
+ * shared integrations that ride on it, e.g. the ATS connection) holds even for
+ * workspaces created before this index existed. Two passes:
+ *   1) re-index any workspace that already carries a .domain but is missing.
+ *   2) legacy heal: a corporate workspace with no .domain set — infer it from
+ *      the OWNER's email, but ONLY when it's unambiguous (exactly one workspace
+ *      owned by that domain), so we never wrongly merge two orgs.
+ * Idempotent; runs on every hydrate.
+ */
+function backfillDomainIndex(): void {
+  let changed = false;
+  for (const ws of store.workspaces.values()) {
+    if (ws.domain && store.workspacesByDomain.get(ws.domain) !== ws.id) {
+      store.workspacesByDomain.set(ws.domain, ws.id);
+      changed = true;
+    }
+  }
+  const byDomain = new Map<string, Set<string>>(); // corporate domain -> owner workspace ids
+  for (const m of store.memberships) {
+    if (m.role !== "owner") continue;
+    const u = store.users.get(m.userId);
+    const dom = u?.email?.split("@")[1]?.toLowerCase();
+    if (!dom || FREE_DOMAINS.has(dom) || store.workspacesByDomain.has(dom)) continue;
+    if (!byDomain.has(dom)) byDomain.set(dom, new Set());
+    byDomain.get(dom)!.add(m.workspaceId);
+  }
+  for (const [dom, wsIds] of byDomain) {
+    if (wsIds.size !== 1) continue; // ambiguous -> leave it alone
+    const ws = store.workspaces.get([...wsIds][0]);
+    if (!ws) continue;
+    if (!ws.domain) ws.domain = dom;
+    store.workspacesByDomain.set(dom, ws.id);
+    changed = true;
+  }
+  if (changed) persist();
 }
 const persist = debouncedSaver(SNAP_KEY, serialize);
 

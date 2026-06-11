@@ -9,6 +9,7 @@ export {
   getCompany,
   upsertCompanies,
   patchCompany,
+  setCompanyProvider,
   deleteCompanies,
   deleteByProviderId,
   deleteBySource,

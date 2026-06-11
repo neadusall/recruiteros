@@ -17,6 +17,7 @@ import {
 } from "../../../lib/data";
 import { addProspect } from "../../../lib/prospects";
 import { ensureLumeSeed } from "../../../lib/data/autoseed";
+import { loxoIsActive, pushPersonToLoxo } from "../../../lib/ats";
 
 export async function GET(req: Request) {
   const g = requireSession(req);
@@ -68,7 +69,14 @@ export async function POST(req: Request) {
     if (!rec) return fail("not_found", 404);
     const field = b.field === "email" ? "email" : b.field === "phone" ? "phone" : undefined;
     const { record, found } = await enrichRecord(rec, field);
-    return ok({ record, found });
+    // Write-back: when we resolve new contact info, mirror it to Loxo so the ATS
+    // stays current. Best-effort; never fails the enrich. Push only on this
+    // user action — keeps the sync/webhook pull path loop-free.
+    let push: unknown = undefined;
+    if (found && b.push !== false && (await loxoIsActive(ws))) {
+      push = await pushPersonToLoxo(ws, b.id).catch((e) => ({ ok: false, error: e?.message }));
+    }
+    return ok({ record, found, push });
   }
 
   if (b?.action === "promote" && Array.isArray(b.ids)) {

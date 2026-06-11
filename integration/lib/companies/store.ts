@@ -160,6 +160,17 @@ export async function patchCompany(
   return rec;
 }
 
+/** Stamp the Loxo (source) id onto a company after a successful create push. */
+export async function setCompanyProvider(workspaceId: string, id: string, providerId: string, source = "loxo"): Promise<void> {
+  await hydrate();
+  const rec = store.find((c) => c.workspaceId === workspaceId && c.id === id);
+  if (!rec) return;
+  rec.providerId = providerId;
+  rec.source = source as CompanyRecord["source"];
+  rec.updatedAt = nowIso();
+  save();
+}
+
 export async function deleteCompanies(workspaceId: string, ids: string[]): Promise<number> {
   await hydrate();
   const set = new Set(ids);

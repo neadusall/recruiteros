@@ -47,8 +47,16 @@
       localStorage.setItem("ros_portal", portal);
     } catch (e) {}
     var dest = portal === "recruiter" ? "/recruiter" : "/admin";
-    say("Welcome, " + (auth.user ? auth.user.name : "") + ". Opening your " +
-      (portal === "recruiter" ? "Recruiter" : "Admin") + " Portal...", "okk");
+    // De-facto white-label onboarding: a brand-new admin signup lands straight on
+    // the Branding setup so making the portal theirs is the first thing they do.
+    var freshAdminSignup = page === "signup" && portal === "admin";
+    if (freshAdminSignup) {
+      try { localStorage.setItem("ros_onboard", "1"); } catch (e) {}
+      dest = "/admin#setup/branding";
+    }
+    say("Welcome, " + (auth.user ? auth.user.name : "") + ". " +
+      (freshAdminSignup ? "Let's make the portal yours..." : "Opening your " +
+        (portal === "recruiter" ? "Recruiter" : "Admin") + " Portal..."), "okk");
     setTimeout(function () { location.href = dest; }, 500);
   }
 

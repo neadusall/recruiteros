@@ -20,7 +20,7 @@ import {
   type CompanyStatus,
   type CompanySource,
 } from "../../../lib/companies";
-import { syncLoxo, getActiveVendor } from "../../../lib/ats";
+import { syncLoxo, getActiveVendor, loxoIsActive, pushCompanyToLoxo } from "../../../lib/ats";
 import { requireSession, body, ok, fail, context } from "../../../lib/api";
 
 export async function GET(req: Request) {
@@ -46,7 +46,19 @@ export async function POST(req: Request) {
 
   if (b?.action === "upsert" && Array.isArray(b.companies)) {
     const res = await upsertCompanies(ws, b.companies);
-    return ok({ added: res.added, updated: res.updated, total: res.added + res.updated });
+    // Write-back new/edited companies to Loxo (best-effort). We push the rows we
+    // just wrote, matched by name, so a company added in the tool appears in Loxo.
+    let pushed = 0;
+    if (b.push !== false && (await loxoIsActive(ws))) {
+      const names = new Set(b.companies.map((c: any) => (c?.name || "").toLowerCase()));
+      const { companies } = await listCompanies(ws, {});
+      for (const co of companies) {
+        if (!names.has((co.name || "").toLowerCase())) continue;
+        const r = await pushCompanyToLoxo(ws, co.id).catch(() => null);
+        if (r && r.ok) pushed++;
+      }
+    }
+    return ok({ added: res.added, updated: res.updated, total: res.added + res.updated, pushed });
   }
 
   if (b?.action === "patch" && b.id) {
@@ -56,7 +68,14 @@ export async function POST(req: Request) {
       owner: b.owner,
       type: b.type,
     });
-    return rec ? ok({ company: rec }) : fail("not_found", 404);
+    if (!rec) return fail("not_found", 404);
+    // Write-back: mirror the edit to Loxo (create-or-update). Best-effort — a
+    // push failure must not fail the local edit. Skipped when Loxo isn't active.
+    let push: unknown = undefined;
+    if (b.push !== false && (await loxoIsActive(ws))) {
+      push = await pushCompanyToLoxo(ws, b.id).catch((e) => ({ ok: false, error: e?.message }));
+    }
+    return ok({ company: rec, push });
   }
 
   if (b?.action === "delete" && Array.isArray(b.ids)) {

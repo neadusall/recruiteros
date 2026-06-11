@@ -11,8 +11,8 @@
  * short page. A hard page cap keeps any single run bounded.
  */
 
-import { upsertRecords } from "../data";
-import { upsertCompanies } from "../companies";
+import { upsertRecords, getRecord, saveRecord } from "../data";
+import { upsertCompanies, getCompany, setCompanyProvider } from "../companies";
 import {
   getVendorConfig,
   markTested,
@@ -21,7 +21,12 @@ import {
   type AtsVendorConfig,
 } from "./credentials";
 import { LoxoClient } from "./loxoClient";
-import { loxoPersonToDataRecord, loxoCompanyToRecord } from "./map";
+import {
+  loxoPersonToDataRecord,
+  loxoCompanyToRecord,
+  dataRecordToLoxoPerson,
+  companyToLoxoCompany,
+} from "./map";
 
 const MAX_PAGES = 50; // 50 * 100 = up to 5,000 records per object per run
 const PER_PAGE = 100;
@@ -126,6 +131,57 @@ export async function syncOneCompany(workspaceId: string, companyId: string): Pr
   if (!company) return false;
   await upsertCompanies(workspaceId, [loxoCompanyToRecord(company)]);
   return true;
+}
+
+/* ============================================================
+   Write-back: RecruiterOS -> Loxo (the PUSH direction).
+
+   Called ONLY from user-initiated API actions (a status edit, an
+   enrichment), never from the sync/webhook code paths — so a push that
+   makes Loxo fire a webhook back at us just re-pulls the same data
+   idempotently and stops. No echo loop.
+   ============================================================ */
+
+export interface PushResult { ok: boolean; created?: boolean; providerId?: string; error?: string; skipped?: boolean }
+
+/** Push one warehouse record (Candidate) to Loxo: update if linked, else create. */
+export async function pushPersonToLoxo(workspaceId: string, recordId: string): Promise<PushResult> {
+  const client = clientFor(await getVendorConfig(workspaceId, "loxo"));
+  if (!client) return { ok: false, skipped: true, error: "missing_credentials" };
+  const rec = await getRecord(workspaceId, recordId);
+  if (!rec) return { ok: false, error: "not_found" };
+  const body = dataRecordToLoxoPerson(rec);
+  if (rec.providerId) {
+    const r = await client.updatePerson(rec.providerId, body);
+    return r.ok ? { ok: true, providerId: rec.providerId } : { ok: false, error: r.error || `loxo_${r.status}` };
+  }
+  const r = await client.createPerson(body);
+  if (!r.ok) return { ok: false, error: r.error || `loxo_${r.status}` };
+  if (r.id) { rec.providerId = r.id; rec.source = "loxo"; await saveRecord(rec); }
+  return { ok: true, created: true, providerId: r.id };
+}
+
+/** Push one company to Loxo: update if linked, else create (and link back). */
+export async function pushCompanyToLoxo(workspaceId: string, companyId: string): Promise<PushResult> {
+  const client = clientFor(await getVendorConfig(workspaceId, "loxo"));
+  if (!client) return { ok: false, skipped: true, error: "missing_credentials" };
+  const rec = await getCompany(workspaceId, companyId);
+  if (!rec) return { ok: false, error: "not_found" };
+  const body = companyToLoxoCompany(rec);
+  if (rec.providerId) {
+    const r = await client.updateCompany(rec.providerId, body);
+    return r.ok ? { ok: true, providerId: rec.providerId } : { ok: false, error: r.error || `loxo_${r.status}` };
+  }
+  const r = await client.createCompany(body);
+  if (!r.ok) return { ok: false, error: r.error || `loxo_${r.status}` };
+  if (r.id) await setCompanyProvider(workspaceId, companyId, r.id);
+  return { ok: true, created: true, providerId: r.id };
+}
+
+/** Is Loxo the active, connected ATS for this workspace? Gate for write-back. */
+export async function loxoIsActive(workspaceId: string): Promise<boolean> {
+  const cfg = await getVendorConfig(workspaceId, "loxo");
+  return Boolean(cfg && cfg.domain && cfg.slug && cfg.apiKey);
 }
 
 /**

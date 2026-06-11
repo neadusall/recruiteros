@@ -40,6 +40,15 @@ a sync.
 - `app/api/loxo/cron/route.ts` — `requireCronAuth` → `syncLoxo` for every connected workspace.
 - `app/api/loxo/webhook/route.ts` — per-workspace secret-verified receiver; fetches the changed record and upserts/deletes it.
 
+## Write-back (RecruiterOS → Loxo)
+Edits made in the tool mirror to Loxo, create-or-update by `providerId`:
+- **Company** edits (status/tags/owner/type, or a new company added) → `POST/PUT /companies`. Wired in `app/api/companies/route.ts` (`patch` + `upsert`).
+- **Candidate** enrichment (email/phone resolved in the tool) → `POST/PUT /people`. Wired in `app/api/data/route.ts` (`enrich`).
+- A brand-new record with no `providerId` is **created** in Loxo and its returned id is stored back, so later edits become updates (no duplicates).
+- Push functions: `pushCompanyToLoxo` / `pushPersonToLoxo` in `lib/ats/sync.ts`; reverse mappers `companyToLoxoCompany` / `dataRecordToLoxoPerson` in `lib/ats/map.ts`.
+- **Loop-safe:** push fires ONLY from user-initiated API actions, never from the sync/webhook pull path. A push that makes Loxo webhook us back just re-pulls the same data idempotently and stops. Every push is best-effort — a failure never blocks the local edit (returned as `{ push: { ok, error } }`). Pass `push:false` in the request body to skip.
+- Reverse mappers are conservative (only non-empty, cleanly-mapped fields) so a push never blanks Loxo data the user didn't touch. The exact create/update body shape (`{ person: {...} }` / `{ company: {...} }`) may need tuning against your account's API — it's the one place to adjust.
+
 ## Keeping it updated
 - **Webhooks** (real-time): registered on **Enable real-time**; each event re-fetches the record by id.
 - **Polling** (safety net): point a scheduler at `GET /api/loxo/cron` with header

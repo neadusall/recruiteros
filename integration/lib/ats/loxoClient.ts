@@ -92,6 +92,39 @@ export class LoxoClient {
     return res.ok;
   }
 
+  /* ---------------- writes (RecruiterOS -> Loxo) ---------------- */
+
+  /** Create a Person. `person` is the Loxo-shaped body (see map.ts). */
+  async createPerson(person: Record<string, unknown>): Promise<{ ok: boolean; id?: string; status: number; error?: string }> {
+    return this.write("POST", "/people", { person });
+  }
+
+  /** Update a Person by Loxo id. */
+  async updatePerson(id: string | number, person: Record<string, unknown>): Promise<{ ok: boolean; id?: string; status: number; error?: string }> {
+    return this.write("PUT", `/people/${id}`, { person });
+  }
+
+  async createCompany(company: Record<string, unknown>): Promise<{ ok: boolean; id?: string; status: number; error?: string }> {
+    return this.write("POST", "/companies", { company });
+  }
+
+  async updateCompany(id: string | number, company: Record<string, unknown>): Promise<{ ok: boolean; id?: string; status: number; error?: string }> {
+    return this.write("PUT", `/companies/${id}`, { company });
+  }
+
+  /** Shared write path: returns the new/updated record id when Loxo reports one. */
+  private async write(method: string, path: string, body: unknown): Promise<{ ok: boolean; id?: string; status: number; error?: string }> {
+    try {
+      const res = await this.raw(method, path, body);
+      if (!res.ok) return { ok: false, status: res.status, error: await errText(res) };
+      const json = await res.json().catch(() => ({}));
+      const id = json?.id ?? json?.person?.id ?? json?.company?.id;
+      return { ok: true, status: res.status, id: id != null ? String(id) : undefined };
+    } catch (e: any) {
+      return { ok: false, status: 0, error: e?.message ?? "network_error" };
+    }
+  }
+
   /* ---------------- low level ---------------- */
 
   private async get(path: string): Promise<any> {

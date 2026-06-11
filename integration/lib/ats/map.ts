@@ -150,6 +150,62 @@ export function loxoCompanyToRecord(c: Loxo): CompanyInput {
   };
 }
 
+/* ============================================================
+   Reverse mappers (RecruiterOS -> Loxo), for write-back.
+   Kept conservative: we only send fields that map cleanly, so a
+   push never blanks or corrupts data the user didn't touch.
+   ============================================================ */
+
+type RosPerson = {
+  fullName?: string; firstName?: string; lastName?: string; title?: string;
+  company?: string; companyDomain?: string; email?: string; email2?: string;
+  phone?: string; directPhone?: string; linkedinUrl?: string;
+  city?: string; state?: string; country?: string; bio?: string; compensation?: string;
+};
+
+/** RecruiterOS warehouse record -> Loxo person body. Only non-empty fields. */
+export function dataRecordToLoxoPerson(r: RosPerson): Record<string, any> {
+  const body: Record<string, any> = {};
+  if (r.fullName) body.name = r.fullName;
+  if (r.firstName) body.first_name = r.firstName;
+  if (r.lastName) body.last_name = r.lastName;
+  if (r.title) body.current_title = r.title;
+  if (r.company) body.company_name = r.company;
+  if (r.linkedinUrl) body.linkedin_url = r.linkedinUrl;
+  if (r.city) body.city = r.city;
+  if (r.state) body.state = r.state;
+  if (r.country) body.country = r.country;
+  if (r.bio) body.description = r.bio;
+  if (r.compensation) body.compensation = r.compensation;
+  const emails = [r.email, r.email2].filter(Boolean).map((value) => ({ value }));
+  if (emails.length) body.emails = emails;
+  const phones = [
+    r.phone ? { value: r.phone, phone_type: "mobile" } : null,
+    r.directPhone ? { value: r.directPhone, phone_type: "work" } : null,
+  ].filter(Boolean);
+  if (phones.length) body.phones = phones;
+  return body;
+}
+
+type RosCompany = {
+  name?: string; url?: string; location?: string; owner?: string; type?: string;
+  raw?: Record<string, string>;
+};
+
+/** RecruiterOS company -> Loxo company body. Only non-empty fields. */
+export function companyToLoxoCompany(c: RosCompany): Record<string, any> {
+  const body: Record<string, any> = {};
+  if (c.name) body.name = c.name;
+  if (c.url) body.url = c.url;
+  if (c.location) {
+    // "City, ST" -> city/state best-effort; otherwise send as a single field.
+    const parts = c.location.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length >= 2) { body.city = parts[0]; body.state = parts[1]; }
+    else body.city = c.location;
+  }
+  return body;
+}
+
 function mapCompanyStatus(c: Loxo): CompanyStatus {
   const s = String(c.status?.name ?? c.status ?? c.company_status ?? "").toLowerCase();
   if (s.includes("client") || s.includes("won")) return "current_client";
