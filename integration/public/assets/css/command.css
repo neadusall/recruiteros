@@ -850,6 +850,10 @@ html[data-theme="light"] {
   --line: #e3e6ef;
   --muted: #5b6273;
   --card: #ffffff;
+  /* --panel backs the Candidates/Companies cards, filter rail and toolbar (set
+     inline in command.js with a dark #16181d fallback). Without a light value it
+     stayed dark on the light shell — dark boxes with invisible text. */
+  --panel: #ffffff;
 }
 /* dark-only translucent fills that need flipping so they're visible on white */
 html[data-theme="light"] .motion-toggle .mt:hover { background: rgba(16, 18, 40, 0.05); }
