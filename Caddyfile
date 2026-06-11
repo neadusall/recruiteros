@@ -1,3 +1,14 @@
+# Global options. On-demand TLS lets us obtain a certificate for any customer's
+# white-label domain the moment it's first requested — but ONLY after our app
+# confirms (via the `ask` endpoint) that the domain is a verified custom domain
+# of a real workspace. Without that gate, on-demand TLS would be a cert-issuance
+# DoS vector, so the catch-all block below depends on it.
+{
+	on_demand_tls {
+		ask http://app:3000/api/caddyask
+	}
+}
+
 # Automatic HTTPS for both apex and www. Caddy fetches and renews the
 # Let's Encrypt certificate on its own once DNS points here.
 recruitersos.co, www.recruitersos.co {
@@ -11,4 +22,17 @@ recruitersos.co, www.recruitersos.co {
 taltxt.recruitersos.co {
 	encode zstd gzip
 	reverse_proxy taltxt:3000
+}
+
+# Catch-all for white-label CUSTOM DOMAINS (e.g. app.acme.com). The explicit
+# blocks above are more specific and always win, so house traffic never reaches
+# here. Any other host gets an on-demand Let's Encrypt cert — gated by the
+# `ask` endpoint above, which only says yes for verified workspace domains —
+# and is proxied to the same app. Certs persist in the caddy_data volume.
+https:// {
+	tls {
+		on_demand
+	}
+	encode zstd gzip
+	reverse_proxy app:3000
 }

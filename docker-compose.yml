@@ -40,6 +40,10 @@ services:
       # so it's deterministic across deploys. neadusall@gmail.com is kept as a
       # backup owner so a typo/missing account can't lock the console.
       OWNER_EMAIL: "neadusall@gmail.com,ryan@recruiters.co"
+      # White-label custom domains: the host customers CNAME their domain to.
+      # Must resolve to this server — recruitersos.co already has the A record and
+      # is served by Caddy, so on-demand TLS can issue certs for the CNAMEd host.
+      WHITE_LABEL_CNAME_TARGET: recruitersos.co
     volumes:
       - app_data:/data
     expose:
