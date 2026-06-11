@@ -33,6 +33,24 @@ if [ ! -f "$DIR/.db-enabled-v2" ] && [ -f "$DIR/enable-db.sh" ]; then
   fi
 fi
 
+# One-time: force-recreate the app + caddy so they pick up the CURRENT compose
+# config that a plain `up -d --build` can miss on a long-lived container — the
+# app's `environment:` block (ROS_DATA_DIR=/data + the app_data volume mount,
+# WHITE_LABEL_CNAME_TARGET, OWNER_EMAIL, RESEND_API_KEY, …) AND Caddy's
+# bind-mounted Caddyfile (the white-label on-demand-TLS catch-all). Without this,
+# accounts kept getting wiped on deploy and custom domains never got a cert.
+# Marker-guarded (runs exactly once), same pattern as the DB step above, and
+# placed before the up-to-date early-exit so it runs even with no new commit.
+if [ ! -f "$DIR/.edge-recreate-v1" ]; then
+  echo "$(date -u) one-time: force-recreate app+caddy (load compose env + Caddyfile)..." >> "$LOG"
+  if docker compose up -d --force-recreate app caddy >> "$LOG" 2>&1; then
+    touch "$DIR/.edge-recreate-v1"
+    echo "$(date -u) app+caddy force-recreated" >> "$LOG"
+  else
+    echo "$(date -u) edge recreate failed, will retry next cycle" >> "$LOG"
+  fi
+fi
+
 # Fetch quietly; compare local vs remote.
 git fetch origin "$BRANCH" --quiet
 LOCAL=$(git rev-parse HEAD)
