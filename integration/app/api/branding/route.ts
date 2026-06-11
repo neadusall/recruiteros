@@ -24,6 +24,7 @@ export async function POST(req: Request) {
     action?: string;
     logoUrl?: string;
     logoLightUrl?: string;
+    logoScale?: number;
     brandName?: string;
     accentColor?: string;
     customDomain?: string;
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
 
   if (b?.action === "reset") {
     // Blank everything -> back to the house "RecruitersOS" brand.
-    return ok({ branding: await setBranding(ws, { logoUrl: "", logoLightUrl: "", brandName: "", accentColor: "", customDomain: "" }) });
+    return ok({ branding: await setBranding(ws, { logoUrl: "", logoLightUrl: "", logoScale: undefined, brandName: "", accentColor: "", customDomain: "" }) });
   }
 
   // A logo data URL can be sizeable; keep a sane ceiling so a snapshot stays small.
@@ -41,6 +42,9 @@ export async function POST(req: Request) {
   const patch: Parameters<typeof setBranding>[1] = {};
   if (b?.logoUrl !== undefined) patch.logoUrl = b.logoUrl;
   if (b?.logoLightUrl !== undefined) patch.logoLightUrl = b.logoLightUrl;
+  if (b?.logoScale !== undefined && typeof b.logoScale === "number" && isFinite(b.logoScale)) {
+    patch.logoScale = Math.max(0.5, Math.min(2.2, b.logoScale)); // clamp to a sane range
+  }
   if (b?.brandName !== undefined) patch.brandName = b.brandName;
   if (b?.accentColor !== undefined) patch.accentColor = b.accentColor;
   if (b?.customDomain !== undefined) patch.customDomain = b.customDomain;

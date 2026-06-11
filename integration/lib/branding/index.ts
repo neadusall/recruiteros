@@ -25,6 +25,8 @@ export interface Branding {
   logoUrl?: string;
   /** Customer's logo for the LIGHT appearance. Blank = falls back to logoUrl. */
   logoLightUrl?: string;
+  /** Sidebar logo display scale (1 = default height). ~0.5–2.2. */
+  logoScale?: number;
   /** Wordmark text shown when there's no logo (e.g. "LUME"). Blank = "RecruitersOS". */
   brandName?: string;
   /** Accent color (hex, e.g. "#7c5cff") driving the portal's primary/brand color. */
@@ -44,7 +46,7 @@ export interface Branding {
 
 /** The shape a workspace is allowed to change about its own branding. */
 export type BrandingPatch = Partial<
-  Pick<Branding, "logoUrl" | "logoLightUrl" | "brandName" | "accentColor" | "customDomain" | "domainStatus" | "domainToken">
+  Pick<Branding, "logoUrl" | "logoLightUrl" | "logoScale" | "brandName" | "accentColor" | "customDomain" | "domainStatus" | "domainToken">
 >;
 
 export interface DomainRecord {
@@ -201,9 +203,9 @@ export async function verifyCustomDomain(
 /** Public branding for a host (custom-domain login/signup pages). Logo + name only. */
 export async function publicBrandingForHost(
   host: string,
-): Promise<{ logoUrl?: string; logoLightUrl?: string; brandName?: string; accentColor?: string } | null> {
+): Promise<{ logoUrl?: string; logoLightUrl?: string; logoScale?: number; brandName?: string; accentColor?: string } | null> {
   const ws = await workspaceForDomain(host);
   if (!ws) return null;
   const b = await getBranding(ws);
-  return { logoUrl: b.logoUrl, logoLightUrl: b.logoLightUrl, brandName: b.brandName, accentColor: b.accentColor };
+  return { logoUrl: b.logoUrl, logoLightUrl: b.logoLightUrl, logoScale: b.logoScale, brandName: b.brandName, accentColor: b.accentColor };
 }

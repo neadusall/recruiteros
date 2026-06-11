@@ -280,6 +280,13 @@
      existing account is ever locked out by this. Recruiters never see it. */
   if (portal === "admin" && !IMP_TOKEN) (function trialGate() {
     var ws = ctx.workspace || {};
+    // White-label customer workspaces are billed by the operator (via the resale
+    // model), NOT by the platform's built-in 14-day trial — so they never see the
+    // "Add payment" banner or the trial paywall. Extend this list per customer.
+    var WHITE_LABEL_DOMAINS = ["lumesp.com"];
+    var wsDom = ((ws.domain) || "").toLowerCase();
+    var userDom = (((ctx.user && ctx.user.email) || "").split("@")[1] || "").toLowerCase();
+    if (WHITE_LABEL_DOMAINS.indexOf(wsDom) >= 0 || WHITE_LABEL_DOMAINS.indexOf(userDom) >= 0) return;
     var tr;
     if (ws.paid) tr = { onTrial: false, expired: false, daysLeft: 0 };
     else if (!ws.trialEndsAt) tr = { onTrial: false, expired: false, daysLeft: 0 };
@@ -6288,8 +6295,9 @@
       // exactly the uploaded logo — nothing is forced into a fixed shape, padded,
       // or stretched. Zoom > 1 crops in tighter; zoom < 1 adds breathing room.
       var aspect = img.width / img.height;
-      var EX_H = 240, EX_W = Math.round(EX_H * aspect);
-      if (EX_W > 1200) { EX_W = 1200; EX_H = Math.round(1200 / aspect); }
+      // High export resolution keeps the logo crisp on hi-DPI screens.
+      var EX_H = 480, EX_W = Math.round(EX_H * aspect);
+      if (EX_W > 2400) { EX_W = 2400; EX_H = Math.round(2400 / aspect); }
       var base = EX_H / img.height; // at zoom 1 the logo fills the frame exactly
       var st = { zoom: 1, x: 0, y: 0 };
       var ov = document.createElement("div");
@@ -6299,7 +6307,7 @@
         '<h3 style="margin:0 0 4px">Adjust logo' + (opts.label ? " · " + esc(opts.label) : "") + '</h3>' +
         '<p class="muted" style="margin:0 0 12px;font-size:13px">This is exactly how it appears in the sidebar, at your logo\'s real proportions. It\'s ready as-is; drag to nudge and zoom to crop tighter if you want.</p>' +
         '<div class="logo-adj-stage" style="background:' + bg + '"><canvas class="la-cv"></canvas></div>' +
-        '<label class="la-zoom">🔍 <input type="range" id="laZoom" min="0.2" max="3" step="0.01" value="1"></label>' +
+        '<label class="la-zoom">🔍 <input type="range" id="laZoom" min="0.1" max="5" step="0.01" value="1"></label>' +
         '<div class="la-acts"><button class="btn btn-sm" id="laReset">Reset</button><span style="flex:1"></span><button class="btn btn-ghost btn-sm" id="laCancel">Cancel</button><button class="btn btn-primary btn-sm" id="laUse">Use logo</button></div>' +
         '</div>';
       document.body.appendChild(ov);
@@ -6309,6 +6317,8 @@
       var cx = cv.getContext("2d");
       function compose(ctx, withBg) {
         ctx.clearRect(0, 0, EX_W, EX_H);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high"; // crisp downscale
         if (withBg) { ctx.fillStyle = bg; ctx.fillRect(0, 0, EX_W, EX_H); }
         var dw = img.width * base * st.zoom, dh = img.height * base * st.zoom;
         ctx.drawImage(img, (EX_W - dw) / 2 + st.x, (EX_H - dh) / 2 + st.y, dw, dh);
@@ -6375,6 +6385,7 @@
         box.innerHTML = '<div class="card">' +
           '<div class="cn-fld"><span class="lab">Brand name</span><input id="brName" type="text" placeholder="RecruitersOS" value="' + esc(b.brandName || "") + '"><span class="hint">Used as the wordmark when there\'s no logo, in the browser tab, and on your login page.</span></div>' +
           '<div class="cn-fld"><span class="lab">Accent color</span><input id="brAccent" type="color" value="' + esc(accent) + '" style="width:56px;height:36px;padding:2px;cursor:pointer"><span class="hint">Primary color for buttons and highlights across the portal.</span></div>' +
+          '<div class="cn-fld"><span class="lab">Logo size</span><input id="brScale" type="range" min="0.5" max="2.2" step="0.02" value="' + (b.logoScale || 1) + '" style="width:220px;max-width:100%"><span class="hint">Make the sidebar logo bigger or smaller. Drag for a live preview, release to save.</span></div>' +
           '<div class="cn-fld"><span class="lab">Logo · dark appearance</span>' +
           brLogoPreview(b.logoUrl, "dark") +
           '<div style="display:flex;gap:8px;margin-top:6px"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoUrl" data-bg="dark" type="file" accept="image/*" hidden></label>' +
@@ -6406,6 +6417,19 @@
             refreshChrome((r && r.data && r.data.branding) || {}); toast("Reset to RecruitersOS"); load();
           });
         });
+
+        var scaleEl = $("#brScale");
+        if (scaleEl) {
+          scaleEl.addEventListener("input", function () {
+            refreshChrome(Object.assign({}, b, { logoScale: parseFloat(scaleEl.value) || 1 }));
+          });
+          scaleEl.addEventListener("change", function () {
+            var v = parseFloat(scaleEl.value) || 1;
+            send("/branding", "POST", { logoScale: v }).then(function (r) {
+              if (r && r.ok && r.data && r.data.branding) { b = r.data.branding; refreshChrome(b); toast("Logo size saved"); }
+            });
+          });
+        }
 
         Array.prototype.forEach.call(box.querySelectorAll(".brLogoFile"), function (input) {
           input.addEventListener("change", function () {
@@ -7683,6 +7707,7 @@
         img.className = "brand-logo";
         img.alt = b.brandName || "Workspace logo";
         img.src = logo;
+        img.style.height = Math.round(44 * (b.logoScale || 1)) + "px"; // user logo-size control
         if (!existing) link.appendChild(img);
       } else {
         if (existing) existing.remove();
