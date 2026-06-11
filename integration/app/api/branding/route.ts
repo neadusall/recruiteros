@@ -35,15 +35,16 @@ export async function POST(req: Request) {
     return ok({ branding: await setBranding(ws, { logoUrl: "", logoLightUrl: "", logoScale: undefined, brandName: "", accentColor: "", customDomain: "" }) });
   }
 
-  // A logo data URL can be sizeable; keep a sane ceiling so a snapshot stays small.
-  if (b?.logoUrl && b.logoUrl.length > 600_000) return fail("logo_too_large", 413);
-  if (b?.logoLightUrl && b.logoLightUrl.length > 600_000) return fail("logo_too_large", 413);
+  // Allow large logos/pictures. The adjuster downscales, but a high-res or photo
+  // logo can still be a few MB as a data URL — keep a generous ceiling.
+  if (b?.logoUrl && b.logoUrl.length > 6_000_000) return fail("logo_too_large", 413);
+  if (b?.logoLightUrl && b.logoLightUrl.length > 6_000_000) return fail("logo_too_large", 413);
 
   const patch: Parameters<typeof setBranding>[1] = {};
   if (b?.logoUrl !== undefined) patch.logoUrl = b.logoUrl;
   if (b?.logoLightUrl !== undefined) patch.logoLightUrl = b.logoLightUrl;
   if (b?.logoScale !== undefined && typeof b.logoScale === "number" && isFinite(b.logoScale)) {
-    patch.logoScale = Math.max(0.5, Math.min(2.2, b.logoScale)); // clamp to a sane range
+    patch.logoScale = Math.max(0.4, Math.min(3, b.logoScale)); // clamp to a sane range
   }
   if (b?.brandName !== undefined) patch.brandName = b.brandName;
   if (b?.accentColor !== undefined) patch.accentColor = b.accentColor;

@@ -6385,7 +6385,7 @@
         box.innerHTML = '<div class="card">' +
           '<div class="cn-fld"><span class="lab">Brand name</span><input id="brName" type="text" placeholder="RecruitersOS" value="' + esc(b.brandName || "") + '"><span class="hint">Used as the wordmark when there\'s no logo, in the browser tab, and on your login page.</span></div>' +
           '<div class="cn-fld"><span class="lab">Accent color</span><input id="brAccent" type="color" value="' + esc(accent) + '" style="width:56px;height:36px;padding:2px;cursor:pointer"><span class="hint">Primary color for buttons and highlights across the portal.</span></div>' +
-          '<div class="cn-fld"><span class="lab">Logo size</span><input id="brScale" type="range" min="0.5" max="2.2" step="0.02" value="' + (b.logoScale || 1) + '" style="width:220px;max-width:100%"><span class="hint">Make the sidebar logo bigger or smaller. Drag for a live preview, release to save.</span></div>' +
+          '<div class="cn-fld"><span class="lab">Logo size</span><input id="brScale" type="range" min="0.4" max="3" step="0.02" value="' + (b.logoScale || 1) + '" style="width:220px;max-width:100%"><span class="hint">Make the sidebar logo bigger or smaller. Drag for a live preview, release to save.</span></div>' +
           '<div class="cn-fld"><span class="lab">Logo · dark appearance</span>' +
           brLogoPreview(b.logoUrl, "dark") +
           '<div style="display:flex;gap:8px;margin-top:6px"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoUrl" data-bg="dark" type="file" accept="image/*" hidden></label>' +

@@ -977,7 +977,7 @@ html[data-theme="light"] .sl-status.off { background: rgba(16,18,40,.05); }
    logo (dark + light) renders at an identical size with no skew or clipping; the
    in-frame zoom is what sizes the mark. */
 .cmd-side .brand { overflow: visible; line-height: 0; }
-.cmd-side .brand .brand-logo { display: block; height: 44px; width: auto; max-width: 220px; object-fit: contain; }
+.cmd-side .brand .brand-logo { display: block; height: 44px; width: auto; max-width: 100%; object-fit: contain; }
 
 /* Logo-fit adjuster modal */
 .logo-adj-ov { position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,.55); display: grid; place-items: center; padding: 20px; }

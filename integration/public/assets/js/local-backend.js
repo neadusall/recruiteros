@@ -432,7 +432,7 @@
           ["logoUrl", "logoLightUrl", "brandName", "accentColor", "customDomain"].forEach(function (k) {
             if (typeof body[k] === "string") d.branding[k] = body[k].trim() || undefined;
           });
-          if (typeof body.logoScale === "number" && isFinite(body.logoScale)) d.branding.logoScale = Math.max(0.5, Math.min(2.2, body.logoScale));
+          if (typeof body.logoScale === "number" && isFinite(body.logoScale)) d.branding.logoScale = Math.max(0.4, Math.min(3, body.logoScale));
           if (!d.branding.customDomain) d.branding.domainStatus = "none";
         }
         save(d);
