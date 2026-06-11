@@ -123,9 +123,11 @@ export async function workspaceForDomain(domain: string): Promise<string | null>
 
 /* ---------------- custom domain lifecycle ---------------- */
 
-/** Where customers point their CNAME. Set WHITE_LABEL_CNAME_TARGET to your app host. */
+/** Where customers point their CNAME. Defaults to the live host that actually
+ *  resolves to the server (compose also sets WHITE_LABEL_CNAME_TARGET, but the
+ *  code default must be correct in case that env isn't applied). */
 function cnameTarget(): string {
-  return process.env.WHITE_LABEL_CNAME_TARGET || "app.recruitersos.co";
+  return process.env.WHITE_LABEL_CNAME_TARGET || "recruitersos.co";
 }
 
 /** Normalize user input to a bare hostname (strip scheme/path/trailing dot). */
