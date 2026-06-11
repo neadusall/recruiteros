@@ -223,13 +223,23 @@ export async function registerLoxoWebhooks(workspaceId: string, baseUrl: string)
   }
 
   const ids: string[] = [];
+  let firstError = "";
   for (const w of wanted) {
-    const created = await client.createWebhook(w.item_type, w.action, endpoint).catch(() => null);
-    const id = created?.id ?? created?.webhook?.id;
-    if (id) ids.push(String(id));
+    const created = await client
+      .createWebhook(w.item_type, w.action, endpoint)
+      .catch((e: any) => ({ ok: false, id: undefined, status: 0, error: e?.message ?? "network_error" }));
+    if (created.ok && created.id) {
+      ids.push(created.id);
+    } else if (!firstError) {
+      // Remember WHY Loxo rejected the first one, so the UI can show the real
+      // reason (our payload vs. webhooks not enabled for the account) instead of
+      // a bare "loxo_rejected_webhooks".
+      const detail = created.error ? String(created.error).replace(/\s+/g, " ").trim() : "";
+      firstError = `loxo_${created.status}${detail ? `: ${detail}` : ""}`;
+    }
   }
   await setWebhookIds(workspaceId, "loxo", ids);
-  if (!ids.length) return { registered: 0, error: "loxo_rejected_webhooks" };
+  if (!ids.length) return { registered: 0, error: firstError || "loxo_rejected_webhooks" };
   return { registered: ids.length };
 }
 

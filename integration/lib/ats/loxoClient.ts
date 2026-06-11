@@ -81,10 +81,16 @@ export class LoxoClient {
     return (json.webhooks || json.results || json.data || (Array.isArray(json) ? json : [])) as any[];
   }
 
-  async createWebhook(item_type: string, action: string, endpoint_url: string): Promise<any | null> {
+  async createWebhook(
+    item_type: string,
+    action: string,
+    endpoint_url: string,
+  ): Promise<{ ok: boolean; id?: string; status: number; error?: string }> {
     const res = await this.raw("POST", `/webhooks`, { item_type, action, endpoint_url });
-    if (!res.ok) return null;
-    return res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, status: res.status, error: await errText(res) };
+    const json = await res.json().catch(() => ({} as any));
+    const id = json?.id ?? json?.webhook?.id;
+    return { ok: true, status: res.status, id: id != null ? String(id) : undefined };
   }
 
   async deleteWebhook(id: string | number): Promise<boolean> {
