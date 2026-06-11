@@ -24,8 +24,13 @@ import * as path from "path";
 let pool: Pool | null = null;
 let ready: Promise<void> | null = null;
 
-/** Default on-disk store path used in production when ROS_DATA_DIR is unset. */
-const DEFAULT_PROD_DATA_DIR = "/var/lib/recruiteros";
+/**
+ * Default on-disk store path used in production when ROS_DATA_DIR is unset.
+ * This is "/data" to match the named volume the compose mounts there
+ * (app_data:/data) — so the store lands on the durable volume even if the
+ * ROS_DATA_DIR env var didn't make it into the running container.
+ */
+const DEFAULT_PROD_DATA_DIR = "/data";
 
 /**
  * Durable file directory. Prefer an explicit ROS_DATA_DIR (a mounted volume).
