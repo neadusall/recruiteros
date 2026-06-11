@@ -3014,9 +3014,16 @@
       companies.unshift({
         name: name, url: url, location: "", owner: (ctx.user && ctx.user.name) || "You",
         created: (now.getMonth() + 1) + "/" + now.getDate() + "/" + now.getFullYear(),
-        type: "Client", status: "", jobs: 0, tags: [], added: true
+        type: "Client", status: "uncontacted", jobs: 0, tags: [], added: true
       });
       persist(); paint();
+      // Persist server-side too (durable + pushes to Loxo when connected). The
+      // next mergeRemote() attaches the backend id; failure just leaves it local.
+      send("/companies", "POST", { action: "upsert", companies: [{ name: name, url: url, owner: (ctx.user && ctx.user.name) || "You", type: "Client", status: "uncontacted", source: "manual" }] })
+        .then(function (r) {
+          if (r && r.ok && r.data && r.data.pushed) toast("Added · pushed to Loxo");
+          api("/companies").then(function (resp) { mergeRemote((resp && resp.companies) || []); }).catch(function () {});
+        }).catch(function () {});
     };
     $("#coLists", el).onclick = function () { toast("Lists are coming soon."); };
   }
@@ -6260,15 +6267,100 @@
     return renderSetupOverview(body);
   }
 
+  /* Logo-fit adjuster: drag + zoom the uploaded image onto the sidebar's logo
+     frame so it sits naturally and never skews (aspect ratio is always preserved).
+     Previews on the chosen appearance background; exports a TRANSPARENT PNG so the
+     same logo overlays whatever theme is active. Calls onDone(dataUrl). */
+  function openLogoAdjuster(file, opts, onDone) {
+    opts = opts || {};
+    var EX_W = 640, EX_H = 192; // export resolution; sidebar logo is ~10:3
+    var bg = opts.bg === "light" ? "#f6f7fc" : "#181822";
+    var img = new Image();
+    var reader = new FileReader();
+    reader.onload = function () {
+      img.onload = build;
+      img.onerror = function () { toast("That image couldn't be read."); };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+
+    function build() {
+      var base = Math.min(EX_W / img.width, EX_H / img.height); // contain baseline at zoom 1
+      var st = { zoom: 1, x: 0, y: 0 };
+      var ov = document.createElement("div");
+      ov.className = "logo-adj-ov";
+      ov.innerHTML =
+        '<div class="logo-adj" role="dialog" aria-label="Adjust logo">' +
+        '<h3 style="margin:0 0 4px">Adjust logo' + (opts.label ? " · " + esc(opts.label) : "") + '</h3>' +
+        '<p class="muted" style="margin:0 0 12px;font-size:13px">Drag to move, slide to zoom. This is exactly how it sits in the sidebar — aspect ratio is kept, so it never stretches.</p>' +
+        '<div class="logo-adj-stage" style="background:' + bg + '"><canvas class="la-cv"></canvas></div>' +
+        '<label class="la-zoom">🔍 <input type="range" id="laZoom" min="0.2" max="3" step="0.01" value="1"></label>' +
+        '<div class="la-acts"><button class="btn btn-sm" id="laReset">Reset</button><span style="flex:1"></span><button class="btn btn-ghost btn-sm" id="laCancel">Cancel</button><button class="btn btn-primary btn-sm" id="laUse">Use logo</button></div>' +
+        '</div>';
+      document.body.appendChild(ov);
+
+      var cv = ov.querySelector(".la-cv");
+      cv.width = EX_W; cv.height = EX_H;
+      var cx = cv.getContext("2d");
+      function compose(ctx, withBg) {
+        ctx.clearRect(0, 0, EX_W, EX_H);
+        if (withBg) { ctx.fillStyle = bg; ctx.fillRect(0, 0, EX_W, EX_H); }
+        var dw = img.width * base * st.zoom, dh = img.height * base * st.zoom;
+        ctx.drawImage(img, (EX_W - dw) / 2 + st.x, (EX_H - dh) / 2 + st.y, dw, dh);
+      }
+      function draw() { compose(cx, true); }
+      draw();
+
+      var dragging = false, lastX = 0, lastY = 0;
+      function ratio() { return EX_W / (cv.clientWidth || EX_W); }
+      function onMove(e) { if (!dragging) return; var r = ratio(); st.x += (e.clientX - lastX) * r; st.y += (e.clientY - lastY) * r; lastX = e.clientX; lastY = e.clientY; draw(); }
+      cv.addEventListener("mousedown", function (e) { dragging = true; lastX = e.clientX; lastY = e.clientY; e.preventDefault(); });
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", function () { dragging = false; });
+      cv.addEventListener("touchstart", function (e) { var t = e.touches[0]; dragging = true; lastX = t.clientX; lastY = t.clientY; }, { passive: true });
+      cv.addEventListener("touchmove", function (e) { if (!dragging) return; var t = e.touches[0], r = ratio(); st.x += (t.clientX - lastX) * r; st.y += (t.clientY - lastY) * r; lastX = t.clientX; lastY = t.clientY; draw(); e.preventDefault(); }, { passive: false });
+      cv.addEventListener("touchend", function () { dragging = false; });
+
+      var zoom = ov.querySelector("#laZoom");
+      zoom.addEventListener("input", function () { st.zoom = parseFloat(zoom.value) || 1; draw(); });
+      ov.querySelector("#laReset").addEventListener("click", function () { st = { zoom: 1, x: 0, y: 0 }; zoom.value = "1"; draw(); });
+      function close() { window.removeEventListener("mousemove", onMove); ov.remove(); }
+      ov.querySelector("#laCancel").addEventListener("click", close);
+      ov.addEventListener("click", function (e) { if (e.target === ov) close(); });
+      ov.querySelector("#laUse").addEventListener("click", function () {
+        var out = document.createElement("canvas"); out.width = EX_W; out.height = EX_H;
+        compose(out.getContext("2d"), false); // transparent export
+        var url = out.toDataURL("image/png");
+        close(); onDone(url);
+      });
+    }
+  }
+
   /* ---- Branding (admin): make the portal the customer's own ----
      Logo, brand name and accent color, all writing the per-workspace branding
      store. Changes apply to the live chrome immediately via __rosApplyBrand. */
   function renderBranding(el) {
+    // First-run after signup: a one-time welcome that frames branding as step one
+    // of making this their own white-label portal. Cleared once shown.
+    var onboarding = false;
+    try { onboarding = localStorage.getItem("ros_onboard") === "1"; } catch (e) {}
+    if (onboarding) { try { localStorage.removeItem("ros_onboard"); } catch (e) {} }
+    var welcome = onboarding
+      ? '<div class="card" style="border-color:var(--brand);margin-bottom:14px">' +
+        '<h3 style="margin:0 0 4px">👋 Welcome — let\'s make this portal yours</h3>' +
+        '<p class="setup-metric" style="margin:0">Set your brand name, logo and accent color below. This is what you and your whole team see everywhere, including your sign-in page. When you\'re ready to run it on your own web address, head to <a href="#setup/domain">Custom domain →</a> (you can do that anytime).</p></div>'
+      : "";
     el.innerHTML = head("Branding",
       "Make the portal yours: your logo, your name, your accent color. Your team and your customers see this everywhere, including your login page.") +
+      welcome +
       '<div id="brBody">' + loading() + '</div>';
 
     function refreshChrome(b) { if (window.__rosApplyBrand) window.__rosApplyBrand(b || {}); }
+    function brLogoPreview(url, bg) {
+      var bgc = bg === "light" ? "#f6f7fc" : "#181822";
+      if (!url) return '<div class="setup-metric" style="margin:0 0 2px">No ' + bg + ' logo' + (bg === "light" ? " (uses the dark logo)." : ".") + '</div>';
+      return '<div style="display:inline-block;padding:9px 13px;border-radius:9px;background:' + bgc + ';border:1px solid var(--border)"><img src="' + esc(url) + '" style="max-height:38px;max-width:180px;object-fit:contain;display:block"></div>';
+    }
 
     function load() {
       api("/branding").then(function (d) {
@@ -6278,9 +6370,16 @@
         box.innerHTML = '<div class="card">' +
           '<div class="cn-fld"><span class="lab">Brand name</span><input id="brName" type="text" placeholder="RecruitersOS" value="' + esc(b.brandName || "") + '"><span class="hint">Used as the wordmark when there\'s no logo, in the browser tab, and on your login page.</span></div>' +
           '<div class="cn-fld"><span class="lab">Accent color</span><input id="brAccent" type="color" value="' + esc(accent) + '" style="width:56px;height:36px;padding:2px;cursor:pointer"><span class="hint">Primary color for buttons and highlights across the portal.</span></div>' +
-          '<div class="cn-fld"><span class="lab">Logo</span>' +
-          (b.logoUrl ? '<img src="' + esc(b.logoUrl) + '" style="max-height:40px;max-width:190px;object-fit:contain;display:block;margin-bottom:8px">' : '<div class="setup-metric" style="margin-bottom:8px">No custom logo. The RecruitersOS wordmark shows.</div>') +
-          '<label class="btn btn-sm" style="cursor:pointer">📤 Upload logo<input id="brLogo" type="file" accept="image/*" hidden></label></div>' +
+          '<div class="cn-fld"><span class="lab">Logo · dark appearance</span>' +
+          brLogoPreview(b.logoUrl, "dark") +
+          '<div style="display:flex;gap:8px;margin-top:6px"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoUrl" data-bg="dark" type="file" accept="image/*" hidden></label>' +
+          (b.logoUrl ? '<button class="btn btn-ghost btn-sm brLogoRemove" data-key="logoUrl">Remove</button>' : "") +
+          '</div><span class="hint">A transparent or light logo that reads on the dark sidebar.</span></div>' +
+          '<div class="cn-fld"><span class="lab">Logo · light appearance</span>' +
+          brLogoPreview(b.logoLightUrl, "light") +
+          '<div style="display:flex;gap:8px;margin-top:6px"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoLightUrl" data-bg="light" type="file" accept="image/*" hidden></label>' +
+          (b.logoLightUrl ? '<button class="btn btn-ghost btn-sm brLogoRemove" data-key="logoLightUrl">Remove</button>' : "") +
+          '</div><span class="hint">A colored logo for when appearance is Light. Falls back to the dark logo if empty.</span></div>' +
           '<div class="cn-acts"><button class="btn btn-primary btn-sm" id="brSave">Save branding</button><button class="btn btn-ghost btn-sm" id="brReset">Reset to RecruitersOS</button></div>' +
           '<p class="cn-msg" id="brMsg"></p></div>';
 
@@ -6303,29 +6402,27 @@
           });
         });
 
-        var logo = $("#brLogo");
-        if (logo) logo.addEventListener("change", function () {
-          var f = logo.files && logo.files[0];
-          if (!f) return;
-          if (!/^image\//.test(f.type)) { say("Please choose an image file.", "err"); return; }
-          var reader = new FileReader();
-          reader.onload = function () {
-            var img = new Image();
-            img.onload = function () {
-              var maxW = 320, maxH = 96, scale = Math.min(maxW / img.width, maxH / img.height, 1);
-              var w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
-              var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-              cv.getContext("2d").drawImage(img, 0, 0, w, h);
+        Array.prototype.forEach.call(box.querySelectorAll(".brLogoFile"), function (input) {
+          input.addEventListener("change", function () {
+            var f = input.files && input.files[0]; if (!f) return;
+            if (!/^image\//.test(f.type)) { say("Please choose an image file.", "err"); return; }
+            var key = input.getAttribute("data-key"), bgk = input.getAttribute("data-bg");
+            openLogoAdjuster(f, { bg: bgk, label: bgk === "light" ? "light mode" : "dark mode" }, function (dataUrl) {
+              var patch = {}; patch[key] = dataUrl;
               say("Uploading…");
-              send("/branding", "POST", { logoUrl: cv.toDataURL("image/png") }).then(function (r) {
+              send("/branding", "POST", patch).then(function (r) {
                 if (r && r.ok && r.data && r.data.branding) { refreshChrome(r.data.branding); toast("Logo updated"); load(); }
                 else say(r && r.data && r.data.error === "logo_too_large" ? "That logo is too large. Try a smaller image." : "Couldn't save the logo.", "err");
               });
-            };
-            img.onerror = function () { say("That image couldn't be read.", "err"); };
-            img.src = reader.result;
-          };
-          reader.readAsDataURL(f);
+            });
+            input.value = "";
+          });
+        });
+        Array.prototype.forEach.call(box.querySelectorAll(".brLogoRemove"), function (btn) {
+          btn.addEventListener("click", function () {
+            var patch = {}; patch[btn.getAttribute("data-key")] = "";
+            send("/branding", "POST", patch).then(function (r) { if (r && r.ok && r.data && r.data.branding) { refreshChrome(r.data.branding); toast("Logo removed"); load(); } });
+          });
         });
       }).catch(function () { var box = $("#brBody"); if (box) box.innerHTML = needsSetup(); });
     }
@@ -6802,7 +6899,12 @@
     var isLoxo = vendor === "loxo";
     var docLink = isLoxo ? '<a href="https://loxo.readme.io/reference/loxo-api" target="_blank" rel="noopener">Loxo API reference ↗</a>' : '';
     var body =
-      (isLoxo ? '' : '<p class="muted" style="margin:0 0 12px;font-size:13px">' + esc(label) + ' verification & sync are on the roadmap. You can save credentials now; the live pull turns on when the adapter ships.</p>') +
+      (isLoxo ? '<div class="ats-help" style="margin:0 0 14px;padding:11px 13px;border:1px solid var(--border);border-radius:9px;background:var(--bg-soft);font-size:12.5px;line-height:1.55;color:var(--text-muted)">' +
+        '<b style="color:var(--text)">Where to find these</b><br>' +
+        '<b>Domain</b> — the host you log into Loxo on, e.g. <code>app.loxo.co</code> (no https://).<br>' +
+        '<b>Slug</b> — the agency id in your Loxo URL after <code>/agencies/</code> (no spaces).<br>' +
+        '<b>API key</b> — Loxo → Settings → API Keys (admin only). If it\'s missing, ask Loxo Support to enable Open API.' +
+        '</div>' : '<p class="muted" style="margin:0 0 12px;font-size:13px">' + esc(label) + ' verification & sync are on the roadmap. You can save credentials now; the live pull turns on when the adapter ships.</p>') +
       '<label class="ats-fld"><span>Agency domain</span><input id="atsDomain" placeholder="app.loxo.co" value="' + esc(cfg.domain || "") + '" autocomplete="off"></label>' +
       '<label class="ats-fld"><span>Agency slug</span><input id="atsSlug" placeholder="your-agency" value="' + esc(cfg.slug || "") + '" autocomplete="off"></label>' +
       '<label class="ats-fld"><span>API key (Bearer token)' + (cfg.hasApiKey ? ' — saved, leave blank to keep' : '') + '</span><input id="atsKey" type="password" placeholder="' + (cfg.hasApiKey ? "•••••••• saved" : "paste from Loxo → Settings → API Keys") + '" autocomplete="off"></label>' +
@@ -7559,15 +7661,23 @@
     var wsId = (ctx.workspace && ctx.workspace.id) || "ws";
     var CACHE = "ros_brand_" + wsId;
 
+    var lastBranding = {};
+    function currentTheme() { return document.documentElement.getAttribute("data-theme") || "dark"; }
     function render(b) {
       b = b || {};
+      lastBranding = b;
+      // Pick the logo for the current appearance: a transparent/light logo for the
+      // dark theme, a colored logo for the light theme. Either falls back to the
+      // other if only one is set.
+      var theme = currentTheme();
+      var logo = theme === "light" ? (b.logoLightUrl || b.logoUrl) : (b.logoUrl || b.logoLightUrl);
       var existing = link.querySelector(".brand-logo");
-      if (b.logoUrl) {
+      if (logo) {
         if (word) word.style.display = "none";
         var img = existing || document.createElement("img");
         img.className = "brand-logo";
         img.alt = b.brandName || "Workspace logo";
-        img.src = b.logoUrl;
+        img.src = logo;
         if (!existing) link.appendChild(img);
       } else {
         if (existing) existing.remove();
@@ -7583,7 +7693,7 @@
       else root.style.removeProperty("--brand");
       // Product name -> page title; logo -> favicon.
       if (b.brandName) document.title = b.brandName + " · Command Center";
-      if (b.logoUrl) { var fav = document.querySelector('link[rel="icon"]'); if (fav) fav.setAttribute("href", b.logoUrl); }
+      if (logo) { var fav = document.querySelector('link[rel="icon"]'); if (fav) fav.setAttribute("href", logo); }
     }
     function cache(b) { try { localStorage.setItem(CACHE, JSON.stringify(b || {})); } catch (e) {} }
     // Let the Setup → Branding screen push live changes back to the chrome.
@@ -7598,6 +7708,12 @@
       if (r && r.ok && r.data && r.data.branding) { render(r.data.branding); cache(r.data.branding); }
     }).catch(function () {});
 
+    // 2b) Swap the dark/light logo live when the appearance toggle flips data-theme.
+    try {
+      new MutationObserver(function () { render(lastBranding); })
+        .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    } catch (e) {}
+
     // 3) Admin-only controls.
     var canEdit = (typeof can === "function") ? can("accounts:manage") : (ctx.role !== "member");
     if (!canEdit) return;
@@ -7610,7 +7726,7 @@
         if (r && r.ok && r.data && r.data.branding) {
           render(r.data.branding); cache(r.data.branding);
           if (okMsg) toast(okMsg);
-        } else { toast((r && r.data && r.data.error === "logo_too_large") ? "That logo is too large — try a smaller image." : "Couldn't save the logo."); }
+        } else { toast((r && r.data && r.data.error === "logo_too_large") ? "That logo is too large. Try a smaller image." : "Couldn't save the logo."); }
       }).catch(function () { toast("Couldn't reach the server."); });
     }
 
@@ -7618,23 +7734,11 @@
       var f = file.files && file.files[0];
       if (!f) return;
       if (!/^image\//.test(f.type)) { toast("Please choose an image file."); return; }
-      var reader = new FileReader();
-      reader.onload = function () {
-        var img = new Image();
-        img.onload = function () {
-          // Fit inside 320x96 keeping aspect ratio, transparent background — a
-          // logo lockup, not a cropped square like the personal avatar.
-          var maxW = 320, maxH = 96;
-          var scale = Math.min(maxW / img.width, maxH / img.height, 1);
-          var w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
-          var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-          cv.getContext("2d").drawImage(img, 0, 0, w, h);
-          persist({ logoUrl: cv.toDataURL("image/png") }, "Logo updated");
-        };
-        img.onerror = function () { toast("That image couldn't be read."); };
-        img.src = reader.result;
-      };
-      reader.readAsDataURL(f);
+      // Open the fit adjuster (drag + zoom) so the logo sits naturally; this quick
+      // control sets the DARK-appearance logo. Set the light one in Setup → Branding.
+      openLogoAdjuster(f, { bg: (document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"), label: "workspace logo" }, function (dataUrl) {
+        persist({ logoUrl: dataUrl }, "Logo updated");
+      });
       file.value = ""; // allow re-picking the same file later
     });
 

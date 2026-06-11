@@ -21,8 +21,10 @@ import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 
 export interface Branding {
   workspaceId: string;
-  /** Customer's logo as a small data URL (or hosted URL). Blank = default wordmark. */
+  /** Customer's logo for the DARK appearance (small data URL / hosted URL). Blank = default wordmark. */
   logoUrl?: string;
+  /** Customer's logo for the LIGHT appearance. Blank = falls back to logoUrl. */
+  logoLightUrl?: string;
   /** Wordmark text shown when there's no logo (e.g. "LUME"). Blank = "RecruitersOS". */
   brandName?: string;
   /** Accent color (hex, e.g. "#7c5cff") driving the portal's primary/brand color. */
@@ -42,7 +44,7 @@ export interface Branding {
 
 /** The shape a workspace is allowed to change about its own branding. */
 export type BrandingPatch = Partial<
-  Pick<Branding, "logoUrl" | "brandName" | "accentColor" | "customDomain" | "domainStatus" | "domainToken">
+  Pick<Branding, "logoUrl" | "logoLightUrl" | "brandName" | "accentColor" | "customDomain" | "domainStatus" | "domainToken">
 >;
 
 export interface DomainRecord {
@@ -98,7 +100,7 @@ export async function setBranding(workspaceId: string, patch: BrandingPatch): Pr
   const cur = await getBranding(workspaceId);
   const next: Branding = { ...cur, ...patch, workspaceId, updatedAt: nowIso() };
   // Normalise blanks to undefined so callers fall back to the default wordmark.
-  for (const k of ["logoUrl", "brandName", "accentColor", "customDomain", "domainToken"] as const) {
+  for (const k of ["logoUrl", "logoLightUrl", "brandName", "accentColor", "customDomain", "domainToken"] as const) {
     if (next[k] !== undefined && String(next[k]).trim() === "") next[k] = undefined;
   }
   if (!next.customDomain) { next.domainStatus = "none"; next.domainToken = undefined; }
@@ -199,9 +201,9 @@ export async function verifyCustomDomain(
 /** Public branding for a host (custom-domain login/signup pages). Logo + name only. */
 export async function publicBrandingForHost(
   host: string,
-): Promise<{ logoUrl?: string; brandName?: string; accentColor?: string } | null> {
+): Promise<{ logoUrl?: string; logoLightUrl?: string; brandName?: string; accentColor?: string } | null> {
   const ws = await workspaceForDomain(host);
   if (!ws) return null;
   const b = await getBranding(ws);
-  return { logoUrl: b.logoUrl, brandName: b.brandName, accentColor: b.accentColor };
+  return { logoUrl: b.logoUrl, logoLightUrl: b.logoLightUrl, brandName: b.brandName, accentColor: b.accentColor };
 }

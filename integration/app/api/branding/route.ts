@@ -23,6 +23,7 @@ export async function POST(req: Request) {
   const b = await body<{
     action?: string;
     logoUrl?: string;
+    logoLightUrl?: string;
     brandName?: string;
     accentColor?: string;
     customDomain?: string;
@@ -30,14 +31,16 @@ export async function POST(req: Request) {
 
   if (b?.action === "reset") {
     // Blank everything -> back to the house "RecruitersOS" brand.
-    return ok({ branding: await setBranding(ws, { logoUrl: "", brandName: "", accentColor: "", customDomain: "" }) });
+    return ok({ branding: await setBranding(ws, { logoUrl: "", logoLightUrl: "", brandName: "", accentColor: "", customDomain: "" }) });
   }
 
   // A logo data URL can be sizeable; keep a sane ceiling so a snapshot stays small.
   if (b?.logoUrl && b.logoUrl.length > 600_000) return fail("logo_too_large", 413);
+  if (b?.logoLightUrl && b.logoLightUrl.length > 600_000) return fail("logo_too_large", 413);
 
   const patch: Parameters<typeof setBranding>[1] = {};
   if (b?.logoUrl !== undefined) patch.logoUrl = b.logoUrl;
+  if (b?.logoLightUrl !== undefined) patch.logoLightUrl = b.logoLightUrl;
   if (b?.brandName !== undefined) patch.brandName = b.brandName;
   if (b?.accentColor !== undefined) patch.accentColor = b.accentColor;
   if (b?.customDomain !== undefined) patch.customDomain = b.customDomain;

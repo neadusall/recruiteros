@@ -429,7 +429,7 @@
         if (body.action === "reset") {
           d.branding = { workspaceId: d.branding.workspaceId, domainStatus: "none" };
         } else {
-          ["logoUrl", "brandName", "accentColor", "customDomain"].forEach(function (k) {
+          ["logoUrl", "logoLightUrl", "brandName", "accentColor", "customDomain"].forEach(function (k) {
             if (typeof body[k] === "string") d.branding[k] = body[k].trim() || undefined;
           });
           if (!d.branding.customDomain) d.branding.domainStatus = "none";
