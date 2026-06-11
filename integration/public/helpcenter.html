@@ -339,20 +339,43 @@
       <section id="email">
         <h2>Email sending</h2>
         <p>
-          Set up your sending domains and mailboxes so outreach email goes out reliably. Add a domain and it
-          is provisioned for you with the right records, warm-up, and rotation built in, so your deliverability
-          stays healthy as you scale.
+          Cold email only works at scale if your sending reputation stays healthy. This screen stands up and
+          protects that reputation for you, so you can ramp volume without landing in spam.
         </p>
+        <ul>
+          <li><strong>Add a sending domain</strong> (e.g. <code>go-yourfirm.com</code>) and it's auto-provisioned:
+            the right DNS records — <strong>SPF, DKIM, DMARC</strong> and reverse-DNS/PTR — are generated so
+            mailbox providers trust your mail.</li>
+          <li><strong>Mailboxes &amp; warm-up</strong>: each new domain's inboxes are warmed gradually — sending
+            volume ramps over days and weeks instead of a cold spike, which is what gets new domains flagged.</li>
+          <li><strong>Rotation</strong>: outreach is spread automatically across your domains and inboxes, keeping
+            every mailbox under a safe daily limit.</li>
+          <li><strong>Health monitoring</strong>: bounce rate, spam placement and warm-up progress are tracked
+            per domain with a clear green / amber / red signal, so you always know what's safe to send from.</li>
+        </ul>
+        <div class="callout note"><b>Use dedicated outreach domains</b> — never your primary company domain — so a
+          deliverability issue can never touch your real, day-to-day email.</div>
       </section>
 
       <!-- ATS -->
       <section id="ats">
         <h2>Your ATS</h2>
         <p>
-          Connect your applicant tracking system as your single source of truth. People and companies sync
-          into the platform, and every touch the platform makes is written back, so your ATS always reflects
-          reality. Connect it once in Setup and keep working where you already do.
+          Connect your applicant tracking system so it stays the single source of truth and you never
+          double-enter data. Set it up once in <em>Setup → ATS</em>: pick your vendor, paste your credentials,
+          then Test.
         </p>
+        <ul>
+          <li><strong>Two-way sync</strong>: people and companies flow in from your ATS, and every touch the
+            platform makes — emails, calls, texts, stage changes, placements — is written back, so your ATS
+            always reflects what actually happened.</li>
+          <li><strong>Field mapping</strong>: your ATS fields are mapped to the platform's so names, titles,
+            stages and owners line up. Review the mapping once during setup.</li>
+          <li><strong>Stays current</strong>: ongoing sync (plus webhooks where your ATS supports them) keeps both
+            sides up to date automatically — no manual exports.</li>
+        </ul>
+        <div class="callout note">Loxo is the verified primary ATS. Others connect the same way; the screen tells
+          you what each needs.</div>
       </section>
 
       <!-- TELEPHONY -->
@@ -450,124 +473,207 @@
       <section id="dashboard">
         <h2>Dashboard</h2>
         <p>
-          Your at-a-glance view of the operation: active prospects, meetings today and this week, warm
-          conversations, replies waiting on you, and your active campaigns. A capacity strip shows how much
-          sending headroom you have, so you know when to add more.
+          The screen you land on — a live command view of the whole operation, scoped to whichever mode
+          (Recruiting or BD) you're in.
         </p>
+        <ul>
+          <li><strong>Live metrics</strong>: active prospects in flight, meetings booked today and this week,
+            warm conversations underway, and replies still waiting on you.</li>
+          <li><strong>Active campaigns</strong>: every running campaign with its progress, so you can see what's
+            moving without opening each one.</li>
+          <li><strong>Capacity strip</strong>: how much sending headroom you have left today across email and
+            LinkedIn. When it's near full, that's your cue to add more domains or seats before you throttle.</li>
+          <li><strong>Drill in anywhere</strong>: most tiles are clickable and jump straight to the list or
+            screen behind the number.</li>
+        </ul>
       </section>
 
       <!-- CANDIDATES -->
       <section id="candidates">
         <h2>Candidates</h2>
         <p>
-          Your people store for recruiting. Import lists, search and enrich contacts, and promote the best
-          into active campaigns. Candidates and prospects are kept separate on purpose, so your sourcing pool
-          and your active outreach never get tangled.
+          Your people store for recruiting — the searchable pool you source from <em>before</em> anyone enters
+          active outreach.
         </p>
+        <ul>
+          <li><strong>Import &amp; build</strong>: bring in lists (CSV, or via your connected tools) to grow the
+            pool.</li>
+          <li><strong>Search &amp; filter</strong>: find people by title, company, location, skills and more.</li>
+          <li><strong>Enrich</strong>: fill in missing titles, companies, emails and phone numbers from your
+            enrichment tools — one person at a time or in bulk.</li>
+          <li><strong>Promote to a campaign</strong>: move the strongest candidates into an active sequence when
+            they're ready to be worked.</li>
+        </ul>
+        <div class="callout note"><b>Candidates vs Prospects.</b> They're separate on purpose: <em>Candidates</em>
+          is your sourcing pool, <em>Prospects</em> is who's in active outreach. Keeping them apart means your
+          pipeline stays clean and your pool stays intact.</div>
       </section>
 
       <!-- CAMPAIGNS -->
       <section id="campaigns">
         <h2>Campaigns &amp; the Sequences Library</h2>
         <p>
-          A <strong>campaign</strong> is a goal with an audience and a multi-step <strong>sequence</strong>
-          that runs across channels, email, LinkedIn, SMS, and voice. Build and edit the steps in the
-          <strong>Campaign Studio</strong>: choose the channel for each touch, the timing, and the message.
+          A <strong>campaign</strong> pairs an audience with a goal and a multi-step <strong>sequence</strong>
+          that runs automatically across channels.
         </p>
-        <p>
-          The <strong>Sequences Library</strong> holds reusable multi-channel templates (including LinkedIn
-          voice notes and voicemail drops) that you can drop into any campaign and tweak. Campaigns activate
-          once the required tools for that mode are green in Setup.
-        </p>
+        <ul>
+          <li><strong>Multi-channel steps</strong>: each step picks its own channel — email, a LinkedIn
+            connection / message / voice note, SMS, or a voicemail drop — with its own delay and message.</li>
+          <li><strong>Campaign Studio</strong>: the visual builder where you add, reorder and edit steps, set the
+            wait between touches, and personalize copy with merge fields (first name, role, company…).</li>
+          <li><strong>Sequences Library</strong>: a shelf of reusable templates (seeded ones included) you can
+            drop into any campaign and tweak — so you never rebuild a proven sequence from scratch.</li>
+          <li><strong>Activation gate</strong>: a campaign only goes live once the tools its channels need are
+            <span class="pill get">green</span> in Setup (a LinkedIn step needs LinkedIn connected, an SMS step
+            needs your number, and so on).</li>
+        </ul>
       </section>
 
       <!-- OUTREACH -->
       <section id="outreach">
         <h2>Outreach &amp; replies</h2>
         <p>
-          Every reply across every channel lands in one inbox. Each one is auto-classified (interested,
-          not now, referral, stop) and routed to the right recruiter. Positive replies are surfaced first
-          so your team books the hot ones before anything goes cold, and opt-outs are honored automatically
-          everywhere.
+          One unified inbox for every reply across every channel, so nothing slips through the cracks and no
+          warm lead goes cold while it sits in a tool nobody checks.
         </p>
+        <ul>
+          <li><strong>Auto-classification</strong>: each reply is tagged — <em>interested, soft yes, referral,
+            not now, not interested,</em> or <em>stop</em> — so you can triage at a glance.</li>
+          <li><strong>Smart routing</strong>: replies go to the right recruiter (the campaign owner), and
+            positive ones float to the top so the hot leads get worked first.</li>
+          <li><strong>Suggested next action</strong>: each conversation shows a recommended follow-up so reps
+            always know the next move.</li>
+          <li><strong>Automatic opt-outs</strong>: a STOP or unsubscribe on any channel is honored on every
+            channel, instantly, with no manual list cleanup.</li>
+        </ul>
       </section>
 
       <!-- JD SOURCING -->
       <section id="jdsourcing">
         <h2>JD Sourcing <span class="pill">Recruiting</span></h2>
-        <p>
-          Paste a job description and the platform finds and ranks matching candidates for you. Stage the
-          results under a name, review them, and promote the best into your Candidates store and into a
-          campaign. A fast way to go from an open role to a worked pipeline.
-        </p>
+        <p>Turn an open role into a worked pipeline in minutes, straight from the job description.</p>
+        <ol>
+          <li><strong>Paste the job description</strong> and the platform searches for people who match it.</li>
+          <li><strong>Ranked matches</strong>: results are scored against the JD, so the strongest fits rise to
+            the top instead of you scrolling a flat list.</li>
+          <li><strong>Stage under a name</strong>: save the batch as its own group so you can review it without
+            cluttering your main Candidates pool.</li>
+          <li><strong>Promote</strong> the best into your Candidates store and straight into a campaign.</li>
+        </ol>
       </section>
 
       <!-- SIGNALS -->
       <section id="signals">
         <h2>Hire Signals <span class="pill">BD</span></h2>
-        <p>
-          Companies that are hiring right now surface as fresh BD leads, along with the role they're hiring
-          for, so you can reach out at exactly the right moment with a reason to talk.
-        </p>
+        <p>Companies that are hiring <em>right now</em>, surfaced as fresh BD leads with a built-in reason to reach out.</p>
+        <ul>
+          <li><strong>Live job-posting signals</strong>: see which companies just opened roles — and exactly which
+            role — pulled from current job postings.</li>
+          <li><strong>A reason to talk</strong>: "I saw you're hiring a [role]" is a warm, timely opener that lands
+            far better than a cold pitch.</li>
+          <li><strong>Straight into outreach</strong>: turn a signal into a prospect and drop them into a BD
+            campaign without leaving the screen.</li>
+        </ul>
       </section>
 
       <!-- OS TEXT -->
       <section id="ostext">
         <h2>OS Text <span class="pill">Recruiting</span></h2>
-        <p>
-          Two-way texting for recruiting, built in. After a short go-live checklist (business registration,
-          your number, and consent), you can text candidates and see replies right alongside your other
-          channels. Opt-outs are honored automatically across every channel.
-        </p>
+        <p>Compliant two-way texting with candidates, built right into the Command Center.</p>
+        <ul>
+          <li><strong>Go-live checklist</strong>: a short one-time setup — register your business (10DLC),
+            provision a number, and capture consent — so your texts actually deliver. See
+            <a href="#telephony">Phone &amp; texting</a> for the full walkthrough.</li>
+          <li><strong>Two-way threads</strong>: send and receive texts, with every reply showing up alongside your
+            other channels in Outreach.</li>
+          <li><strong>Compliance built in</strong>: STOP / HELP keywords and opt-outs are handled automatically,
+            across every channel.</li>
+        </ul>
       </section>
 
       <!-- AI VETTING -->
       <section id="vetting">
         <h2>AI Vetting <span class="pill">Recruiting</span></h2>
         <p>
-          Screen candidates by phone, automatically. Set up a "desk" by binding a job description, your phone
-          number, and your own cloned voice. Candidates opt in and receive a call from an AI recruiter that
-          asks your questions in your voice. Every call is <strong>recorded, transcribed, and scored</strong>,
-          and you review a scorecard for each one. Swap the number on a desk whenever you need to.
+          Phone-screen candidates automatically, in your own voice, so your recruiters only spend live time on
+          the ones worth it.
         </p>
+        <ul>
+          <li><strong>Set up a "desk"</strong>: bind a job description, one of your phone numbers, and your
+            consented cloned voice. Each desk screens for one role.</li>
+          <li><strong>Candidates opt in and get a call</strong> from an AI recruiter that asks your questions in
+            your voice and holds a natural back-and-forth — not a rigid IVR.</li>
+          <li><strong>Recorded, transcribed &amp; scored</strong>: every call produces a recording, a full
+            transcript, and a 1–100 fit score against the role.</li>
+          <li><strong>Review scorecards</strong>: read the transcript and score per candidate, then push the
+            strong ones forward. Swap a desk's number anytime without rebuilding it.</li>
+        </ul>
+        <div class="callout note">Requires Telnyx and a consented cloned voice — stand both up in
+          <em>Setup → AI Vetting</em>.</div>
       </section>
 
       <!-- VOICE DROPS -->
       <section id="voicedrops">
         <h2>Voice Drops</h2>
         <p>
-          Drop a personalized voicemail in your own cloned voice straight to a contact's landline, inside
-          their local calling window, with consent and identification built in. A respectful way to
-          re-engage at scale without dialing live, available in both modes.
+          Leave a personalized voicemail in your own cloned voice — with no live dial — to re-engage at scale,
+          respectfully. Available in both Recruiting and BD.
         </p>
+        <ul>
+          <li><strong>Cloned-voice voicemail</strong>: the message is synthesized in your consented voice and
+            personalized per contact (name, role, company).</li>
+          <li><strong>Landlines / VoIP only</strong>: mobile numbers are filtered out and never dialed — drops
+            land on business lines.</li>
+          <li><strong>Timezone-aware</strong>: each drop fires inside the contact's local calling window, never at
+            an odd hour.</li>
+          <li><strong>Consent &amp; identification</strong>: a per-campaign consent attestation and an identifying
+            script are required before a drop can run.</li>
+        </ul>
+        <div class="callout note">Set up your phone tool and cloned voice in <em>Setup → Voice Drops</em>.</div>
       </section>
 
       <!-- ANALYTICS -->
       <section id="analytics">
         <h2>Analytics</h2>
-        <p>
-          Outcomes over time: replies, meetings booked, and conversion broken down by campaign and by
-          recruiter. See what's working, spot what's stalling, and double down on the plays that land.
-        </p>
+        <p>Outcomes over time, so you can see what's actually working and where to push harder.</p>
+        <ul>
+          <li><strong>By campaign</strong>: replies, positive-reply rate, meetings booked, and conversion for each
+            campaign.</li>
+          <li><strong>By recruiter</strong>: activity and results per team member, so you can coach to the
+            numbers.</li>
+          <li><strong>Trends</strong>: how the figures move week over week — spot what's improving and what's
+            stalling before it costs you a month.</li>
+        </ul>
+        <div class="callout note">Analytics measures <em>outcomes</em>; the Dashboard shows live <em>activity</em>
+          and sending capacity. Use them together — one tells you what happened, the other what's happening now.</div>
       </section>
 
       <!-- BILLING -->
       <section id="billing">
         <h2>Billing &amp; plan</h2>
         <p>
-          View your plan and manage billing from the account menu in the top-right, under
-          <strong>Billing &amp; plan</strong>. Your usage of the tools you connect is billed by those tools
-          directly to your own accounts.
+          Open the account menu (top-right) → <strong>Billing &amp; plan</strong> to see your plan and manage
+          payment.
         </p>
+        <ul>
+          <li><strong>Your tools, your accounts</strong>: usage of the tools you connect — email, enrichment,
+            phone/SMS — is billed by those providers directly to your own accounts, so you only ever pay for what
+            you use.</li>
+          <li><strong>Plan &amp; seats</strong>: your platform plan and any seat limits are shown here.</li>
+        </ul>
       </section>
 
       <!-- SUPPORT -->
       <section id="support">
         <h2>Getting help</h2>
-        <p>
-          The <strong>?</strong> Help button is always in the bottom corner of the app and brings you back
-          here. For anything this guide doesn't cover, reach out to your account contact.
-        </p>
+        <ul>
+          <li><strong>The ? Help button</strong> sits in the bottom corner of the app on every screen and brings
+            you right back to this guide.</li>
+          <li><strong>This guide</strong> covers every screen and how to set it up — use the table of contents on
+            the left to jump straight to what you need.</li>
+          <li><strong>Still stuck?</strong> Reach out to your account contact for anything this guide doesn't
+            cover.</li>
+        </ul>
       </section>
 
     </main>
@@ -633,17 +739,25 @@
         }
         if (!isHouse) {
           // White-label customer with a logo but no brand name: render the logo as
-          // the wordmark and neutralise the prose — the house name never appears.
+          // the wordmark, like "[logo] Help Center" — no orphan slash, no wrap, and
+          // the house name never appears.
           var navBrand = document.querySelector(".docs-nav .brand-name");
-          if (navBrand) {
+          var navWrap = navBrand && navBrand.parentNode; // the inner <span> holding wordmark + " / Help Center"
+          var star = document.querySelector(".docs-nav .brand .logo");
+          if (navWrap) {
+            navWrap.innerHTML = "";
+            navWrap.style.cssText = "display:inline-flex;align-items:center;gap:9px;white-space:nowrap";
             if (logo) {
               var img = document.createElement("img");
               img.src = logo; img.alt = "Help Center";
-              img.style.cssText = "max-height:26px;max-width:160px;object-fit:contain;vertical-align:middle";
-              navBrand.parentNode.replaceChild(img, navBrand);
-              var star = document.querySelector(".docs-nav .brand .logo");
-              if (star) star.style.display = "none";
-            } else { navBrand.textContent = ""; }
+              img.style.cssText = "height:24px;max-width:150px;object-fit:contain;display:block";
+              navWrap.appendChild(img);
+              if (star) star.style.display = "none"; // logo is the wordmark now
+            }
+            var lbl = document.createElement("span");
+            lbl.textContent = "Help Center";
+            lbl.style.cssText = logo ? "color:var(--text-dim);font-weight:500" : "color:var(--text);font-weight:700";
+            navWrap.appendChild(lbl);
           }
           var h1Brand = document.querySelector(".docs-article h1 .brand-name");
           if (h1Brand) h1Brand.textContent = ""; // → "Help Center"
