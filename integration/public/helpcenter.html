@@ -359,9 +359,65 @@
       <section id="telephony">
         <h2>Phone &amp; texting</h2>
         <p>
-          Voice (Voice Drops, AI Vetting) and SMS (OS Text) run on your own phone tools. Connect your phone
-          service, pick the number you send from, and complete any required business-texting registration.
-          You can pick or swap the number you use for each feature at any time.
+          Voice (Voice Drops, AI Vetting, the dialer) and SMS (OS Text and AI texting) run on your own
+          <strong>Telnyx</strong> account. You bring your Telnyx API key and a phone number; the platform
+          does the calling and texting through it. Before US carriers will deliver your business texts you
+          must complete a one-time <strong>10DLC registration</strong> (also called A2P) in Telnyx. Voice
+          calls don't need 10DLC — but you set the number up in the same place, so do both at once.
+        </p>
+
+        <h3>What 10DLC is (and why it's required)</h3>
+        <p>
+          10DLC = <em>Application-to-Person messaging over a 10-digit long code</em>. US carriers (AT&amp;T,
+          Verizon, T-Mobile) only deliver business SMS from numbers tied to a registered <strong>Brand</strong>
+          (your company) and <strong>Campaign</strong> (your use case). Until that's approved, texts are
+          filtered or blocked. You register once; then every number on that campaign sends reliably.
+        </p>
+
+        <h3>Set it up in Telnyx — step by step</h3>
+        <ol>
+          <li><strong>Create your Telnyx account</strong> at <code>telnyx.com</code> and add a payment method
+            (Billing → Payments). 10DLC registration and numbers require billing to be active.</li>
+          <li><strong>Create an API key</strong>: <em>Account → API Keys → Create API Key</em>. Copy it
+            somewhere safe — you'll paste it into the platform at the end.</li>
+          <li><strong>Register your Brand</strong>: <em>Messaging → 10DLC → Brands → Create Brand</em>. Enter
+            your <strong>legal business name, EIN / Tax ID, business address, website, and a contact</strong>.
+            These must match your real registered business — mismatches are the #1 cause of rejection.</li>
+          <li><strong>Register a Campaign</strong> under that brand: <em>10DLC → Campaigns → Create Campaign</em>.
+            Pick the use case that fits recruiting outreach (commonly <strong>Mixed</strong> or
+            <strong>Low Volume Mixed</strong>), provide 2–3 <strong>sample messages</strong>, describe how
+            people <strong>opt in</strong>, and confirm you honor <strong>STOP / HELP</strong> keywords.</li>
+          <li><strong>Buy a number</strong>: <em>Numbers → Buy Numbers</em> → choose a local long-code number
+            with both <strong>SMS and Voice</strong> features.</li>
+          <li><strong>Create a Messaging Profile</strong> (<em>Messaging → Messaging Profiles</em>), assign
+            your number to it, and link the number to your <strong>approved campaign</strong>.</li>
+          <li><strong>Enable voice on the number</strong> so calls work too: assign it to a Voice / Call-Control
+            connection (<em>Voice → Programmable Voice</em>). For best answer rates, also set your
+            <strong>caller-ID name (CNAM)</strong> on the number.</li>
+          <li><strong>Connect it to the platform</strong>: in <em>Setup → Integrations → Telnyx</em>, paste your
+            <strong>API key</strong> and your <strong>from-number</strong> (E.164, e.g. <code>+13105551234</code>),
+            then <strong>Save</strong> and <strong>Test</strong>. Pick that number for each feature in
+            <em>Setup → Voice Drops / AI Vetting</em> and in <em>OS Text</em>.</li>
+        </ol>
+
+        <div class="callout note">
+          <b>Timeline &amp; cost.</b> Brand approval is usually minutes to a day; campaign approval by the
+          carriers typically takes <strong>1–3 business days</strong>. Telnyx charges a small one-time brand
+          fee and a low monthly campaign fee, plus per-message carrier fees — all billed by Telnyx to your
+          account. Don't launch SMS campaigns until your campaign shows <strong>Approved</strong>.
+        </div>
+
+        <div class="callout warn">
+          <b>Stay compliant — it protects your delivery.</b> Only text people who opted in, include your
+          business name in messages, and always honor <strong>STOP</strong> (opt-out) and <strong>HELP</strong>.
+          Carriers police this; violations get a campaign suspended. Voice calls follow calling-hour and
+          consent rules in your region.
+        </div>
+
+        <p>
+          Once your Telnyx key is connected and your number is on an approved campaign, <strong>all calls and
+          SMS</strong> across Voice Drops, AI Vetting, the dialer, and OS Text run through your own number. You
+          can swap the number a feature uses at any time without re-registering.
         </p>
       </section>
 

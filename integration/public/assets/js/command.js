@@ -6803,7 +6803,7 @@
       '<p>' + esc(cfg.intro) + '</p></div></div>' +
       '<div id="vsReady" style="margin-bottom:16px"></div>' +
       '<div class="sx-card"><div class="sx-eyebrow">Step 1 · Telephony</div><h3>📞 Telnyx</h3>' +
-      '<p class="sx-sub">The calling engine for SMS, the dialer (AMD), and AI Vetting. Connect your Telnyx API key and a from-number, then Test.</p>' +
+      '<p class="sx-sub">The calling engine for SMS, the dialer (AMD), and AI Vetting. Connect your Telnyx API key and a from-number, then Test. New to Telnyx? Follow the <a href="/helpcenter#telephony" target="_blank" rel="noopener" style="color:var(--brand-2)">10DLC setup guide</a> to register your brand &amp; campaign so calls and SMS deliver.</p>' +
       '<div id="vsTel">' + loading() + '</div></div>' +
       '<div class="sx-card"><div class="sx-eyebrow">Step 2 · Voice</div><h3>🎙️ Cloned voice &amp; consent</h3>' +
       '<p class="sx-sub">Use your OWN voice, captured with a recorded consent statement. Repeat names/roles are synthesized once and reused, so cost stays near zero.</p>' +
