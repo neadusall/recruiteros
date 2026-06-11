@@ -6,7 +6,6 @@
 
 import { requireOwner, ok } from "../../../../lib/api";
 import { listFullAccounts } from "../../../../lib/owner";
-import { totalMrr } from "../../../../lib/owner/store";
 import { spendRollup, type SpendWindow } from "../../../../lib/billing/ledger";
 
 export async function GET(req: Request) {
@@ -18,7 +17,11 @@ export async function GET(req: Request) {
 
   const accounts = listFullAccounts(window);
   const roll = spendRollup(window);
-  const mrr = totalMrr();
+  // MRR = monthly price on file, except at-cost accounts contribute their own
+  // cost (they pay cost, not a marked-up price) so platform profit stays honest.
+  const mrr = round(
+    accounts.reduce((s, a) => s + (a.atCost ? a.costUsd : a.monthlyPriceUsd), 0),
+  );
   const cost = roll.totalCostUsd;
   const grossProfit = round(mrr - cost);
 

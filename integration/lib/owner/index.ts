@@ -63,6 +63,8 @@ export interface FullAccount extends AdminAccount {
   /** Revenue minus cost (window cost vs monthly price; see note in console). */
   grossProfitUsd: number;
   grossMarginPct: number;
+  /** Owner granted this account at-cost (no-margin) access. */
+  atCost: boolean;
   /** Platform usage counts for the detail panel. */
   counts: {
     prospects: number;
@@ -90,9 +92,12 @@ function countsFor(workspaceId: string): FullAccount["counts"] {
 function joinAccount(acc: AdminAccount, window: SpendWindow): FullAccount {
   const meta = getAccountMeta(acc.workspaceId);
   const costUsd = workspaceCost(acc.workspaceId, window);
+  const atCost = meta.atCost === true;
   const price = meta.monthlyPriceUsd || 0;
-  const grossProfitUsd = round(price - costUsd);
-  const grossMarginPct = price > 0 ? round((grossProfitUsd / price) * 100, 1) : 0;
+  // At-cost accounts pay exactly what they cost, so they net zero profit/margin
+  // (never shown as a loss). Everyone else: revenue = monthly price on file.
+  const grossProfitUsd = atCost ? 0 : round(price - costUsd);
+  const grossMarginPct = atCost ? 0 : price > 0 ? round((grossProfitUsd / price) * 100, 1) : 0;
   return {
     ...acc,
     meta,
@@ -101,6 +106,7 @@ function joinAccount(acc: AdminAccount, window: SpendWindow): FullAccount {
     monthlyPriceUsd: price,
     grossProfitUsd,
     grossMarginPct,
+    atCost,
     counts: countsFor(acc.workspaceId),
   };
 }
@@ -294,7 +300,7 @@ export function peopleOverview(window: SpendWindow = "30d"): PeopleOverview {
 /** Owner-set price / tier / notes for an account. */
 export function updateAccountMeta(
   workspaceId: string,
-  patch: Partial<Pick<AccountMeta, "monthlyPriceUsd" | "tier" | "notes">>,
+  patch: Partial<Pick<AccountMeta, "monthlyPriceUsd" | "tier" | "notes" | "atCost">>,
 ): AccountMeta {
   return setAccountMeta(workspaceId, patch);
 }

@@ -676,6 +676,7 @@
     }).catch(fail);
   }
   function marginCell(a) {
+    if (a.atCost) return '<span class="pill atcost">At cost</span>';
     if (!a.monthlyPriceUsd) return '<span class="note">—</span>';
     var c = a.grossMarginPct >= 80 ? "margin-good" : a.grossMarginPct >= 50 ? "margin-mid" : "margin-bad";
     return '<span class="' + c + '">' + pct(a.grossMarginPct) + '</span>';
@@ -703,7 +704,7 @@
       kv("Active sessions", a.activeSessions) +
       kv("Price / mo", usd(a.monthlyPriceUsd)) +
       kv("Cost · " + esc(win), usd(a.costUsd)) +
-      kv("Gross margin", a.monthlyPriceUsd ? pct(a.grossMarginPct) + " (" + usd(a.grossProfitUsd) + ")" : "—") +
+      kv("Gross margin", a.atCost ? '<span class="pill atcost">At cost · no margin</span>' : a.monthlyPriceUsd ? pct(a.grossMarginPct) + " (" + usd(a.grossProfitUsd) + ")" : "—") +
       (m.lastResetAt ? kv("Last reset", fmtDate(m.lastResetAt)) : "") +
       '</div>';
 
@@ -733,6 +734,7 @@
       fld("Tier label", '<input id="dwTier" type="text" value="' + esc(m.tier || "") + '">') +
       '</div>' +
       '<div class="fld" style="margin-top:10px"><label>Notes</label><input id="dwNotes" type="text" value="' + esc(m.notes || "") + '"></div>' +
+      '<label class="atcost-row"><input type="checkbox" id="dwAtCost"' + (m.atCost ? " checked" : "") + '> <span><strong>At cost — no margin.</strong> Grant this account the tool at exactly what it costs us. Profit/margin show 0 (never a loss) and MRR counts their cost.</span></label>' +
       '<div class="btn-row"><a class="btn btn-primary btn-sm" id="dwSave">Save billing</a>' +
       '<a class="btn btn-sm" id="dwSuspend">' + (a.suspended ? "Unsuspend" : "Suspend") + '</a>' +
       '<a class="btn btn-sm" id="dwRevoke">Revoke sessions</a></div>';
@@ -808,7 +810,8 @@
     $("#dwSave").addEventListener("click", function () {
       send("/owner/accounts/" + id, "PATCH", {
         monthlyPriceUsd: Number($("#dwPrice").value) || 0,
-        tier: $("#dwTier").value, notes: $("#dwNotes").value
+        tier: $("#dwTier").value, notes: $("#dwNotes").value,
+        atCost: $("#dwAtCost").checked
       }).then(function (res) { if (res.ok) { toast("Billing saved"); openAccount(id); refreshList(); } else toast("Save failed"); });
     });
     $("#dwSuspend").addEventListener("click", function () {

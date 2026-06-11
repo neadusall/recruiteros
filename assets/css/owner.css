@@ -32,6 +32,10 @@
 .pill.susp { background: rgba(255,90,90,0.14); color: var(--accent-red); }
 .pill.motion-bd { background: rgba(124,92,255,0.16); color: var(--brand-2); }
 .pill.motion-recruiting { background: rgba(255,176,32,0.16); color: var(--owner); }
+.pill.atcost { background: rgba(56,189,248,0.16); color: #38bdf8; }
+.atcost-row { display: flex; gap: 9px; align-items: flex-start; margin: 12px 0 4px; font-size: 12.5px; color: var(--text-muted); cursor: pointer; line-height: 1.5; }
+.atcost-row input { margin-top: 2px; flex: 0 0 auto; }
+.atcost-row strong { color: var(--text); }
 
 .margin-good { color: var(--accent-green); font-weight: 700; }
 .margin-mid { color: var(--owner); font-weight: 700; }

@@ -28,7 +28,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const g = requireOwner(req);
   if ("response" in g) return g.response;
   const b = await body<{
-    monthlyPriceUsd?: number; tier?: string; notes?: string; suspended?: boolean;
+    monthlyPriceUsd?: number; tier?: string; notes?: string; suspended?: boolean; atCost?: boolean;
   }>(req);
   if (!b) return fail("bad_request", 400);
 
@@ -40,6 +40,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (typeof b.monthlyPriceUsd === "number") metaPatch.monthlyPriceUsd = b.monthlyPriceUsd;
   if (typeof b.tier === "string") metaPatch.tier = b.tier;
   if (typeof b.notes === "string") metaPatch.notes = b.notes;
+  if (typeof b.atCost === "boolean") metaPatch.atCost = b.atCost;
   const meta = Object.keys(metaPatch).length ? updateAccountMeta(params.id, metaPatch) : undefined;
 
   const detail = fullAccountDetail(params.id);

@@ -17,6 +17,12 @@ export interface AccountMeta {
   /** Free-form tier label ("5k", "10k", "20k", "custom"). */
   tier?: string;
   notes?: string;
+  /**
+   * At-cost access: the owner grants this account the tool with NO margin — they
+   * pay exactly what they cost us. When true the console treats revenue = cost,
+   * so gross profit/margin show 0 (not a loss) and MRR counts their cost.
+   */
+  atCost?: boolean;
   lastResetAt?: string;
   updatedAt: string;
 }
@@ -53,7 +59,7 @@ export function getAccountMeta(workspaceId: string): AccountMeta {
 
 export function setAccountMeta(
   workspaceId: string,
-  patch: Partial<Pick<AccountMeta, "monthlyPriceUsd" | "tier" | "notes" | "lastResetAt">>,
+  patch: Partial<Pick<AccountMeta, "monthlyPriceUsd" | "tier" | "notes" | "atCost" | "lastResetAt">>,
 ): AccountMeta {
   const cur = getAccountMeta(workspaceId);
   const next: AccountMeta = { ...cur, ...patch, workspaceId, updatedAt: nowIso() };
