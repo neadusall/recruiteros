@@ -12,7 +12,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
 
   <style>
-    /* ── Docs-specific layout, built on the RecruitersOS design tokens ───────── */
+    /* ── Docs-specific layout, built on the shared design tokens ───────── */
     .docs-shell {
       max-width: 1240px;
       margin: 0 auto;
@@ -158,9 +158,8 @@
 
   <!-- top bar -->
   <header class="docs-nav">
-    <a href="/" class="brand"><span class="logo">R</span><span>Recruiters<span class="os">OS</span> <span style="color:var(--text-dim);font-weight:500">/ Help Center</span></span></a>
+    <a href="/" class="brand"><span class="logo">★</span><span><span class="brand-name">RecruitersOS</span> <span style="color:var(--text-dim);font-weight:500">/ Help Center</span></span></a>
     <div class="links">
-      <a href="/developers" class="btn btn-ghost btn-sm">API</a>
       <a href="/command" class="btn btn-primary btn-sm">Open app →</a>
     </div>
   </header>
@@ -173,455 +172,341 @@
       <a href="#overview">Overview</a>
       <a href="#whats-new">What's new</a>
       <a href="#quickstart">Quick start</a>
+      <a href="#motions">Recruiting &amp; BD</a>
 
-      <h4>The application UI</h4>
-      <a href="#ui-map">Screen map</a>
-      <a href="#ui-app">Command Center</a>
-      <a href="#ui-studio">Outreach &amp; Campaign Studio</a>
-      <a href="#ui-marketing">Marketing &amp; auth</a>
+      <h4>Your portal &amp; team</h4>
+      <a href="#portals">Admin &amp; Recruiter portals</a>
+      <a href="#team">Your team &amp; roles</a>
 
-      <h4>How it's built</h4>
-      <a href="#architecture">Architecture</a>
-      <a href="#alfred">The Alfred engine</a>
-      <a href="#assets">Files &amp; assets</a>
+      <h4>Set up &amp; go live</h4>
+      <a href="#setup">The Setup hub</a>
+      <a href="#integrations">Connecting your tools</a>
+      <a href="#email">Email sending</a>
+      <a href="#ats">Your ATS</a>
+      <a href="#telephony">Phone &amp; texting</a>
+      <a href="#branding">Branding</a>
+      <a href="#domain">Your own domain</a>
 
-      <h4>Running it</h4>
-      <a href="#run-static">Static site</a>
-      <a href="#run-backend">Backend (integration)</a>
-      <a href="#run-bridge">Bridge &amp; extension</a>
-      <a href="#env">Environment variables</a>
-      <a href="#deploy">Deployment</a>
+      <h4>Find, engage &amp; screen</h4>
+      <a href="#dashboard">Dashboard</a>
+      <a href="#candidates">Candidates</a>
+      <a href="#campaigns">Campaigns &amp; Sequences</a>
+      <a href="#outreach">Outreach &amp; replies</a>
+      <a href="#jdsourcing">JD Sourcing</a>
+      <a href="#signals">Hire Signals</a>
+      <a href="#ostext">OS Text</a>
+      <a href="#vetting">AI Vetting</a>
+      <a href="#voicedrops">Voice Drops</a>
 
-      <h4>Reference</h4>
-      <a href="#api">API</a>
-      <a href="#guides">Setup guides</a>
+      <h4>Measure &amp; manage</h4>
+      <a href="#analytics">Analytics</a>
+      <a href="#billing">Billing &amp; plan</a>
+      <a href="#support">Getting help</a>
     </aside>
 
     <!-- ── Article ───────────────────────────────────────────────────── -->
     <main class="docs-article">
       <h1><span class="brand-name">RecruitersOS</span> Help Center</h1>
       <p class="docs-lede">
-        <span class="brand-name">RecruitersOS</span> is the operating system for modern recruiting: a campaign-centric command
-        center where every revenue activity lives in one place. This page documents the whole
-        application: the screens that make up the UI, how the system is architected, and
-        everything you need to run it locally or ship it to production.
+        <span class="brand-name">RecruitersOS</span> brings sourcing, multi-channel outreach, automated
+        screening, every reply, and your pipeline into one command center, so your team works from a
+        single screen instead of juggling tools. This guide walks through every screen and how to set
+        the platform up to go live.
       </p>
 
       <!-- OVERVIEW -->
       <section id="overview">
         <h2>Overview</h2>
         <p>
-          The product is built around a single idea: <strong>the campaign is the atomic unit of
-          work</strong>. Inside every campaign, five pillars run in sequence —
-          Signals catch the trigger, Targets &amp; Enrich build the list, Outreach sends the
-          multi-channel sequence, Conversations handles replies, and Reporting measures what worked.
-          Two revenue engines — <strong>Recruiting</strong> and <strong>Business Development</strong> —
-          run on one shared infrastructure.
+          Everything you do lives in the <strong>Command Center</strong>: find people, reach out across
+          channels, let automation handle the first pass, work your replies, and move deals through your
+          pipeline. The platform runs two work modes and you pick which one you're in at any moment:
         </p>
-        <p>The codebase has three runnable layers, each independent:</p>
-        <table>
-          <thead><tr><th>Layer</th><th>What it is</th><th>Runs on</th></tr></thead>
-          <tbody>
-            <tr><td><span class="pill layer">Portal</span></td><td>The static site — every <code>.html</code> page plus <code>assets/</code>. The full UI. No build step.</td><td>Any static host / dev server</td></tr>
-            <tr><td><span class="pill layer">Backend</span></td><td><code>integration/</code> — a Next.js app that owns auth, data, webhooks, rate limits, and provider adapters.</td><td>Node — <code>localhost:3000</code></td></tr>
-            <tr><td><span class="pill layer">Edge</span></td><td>The Chrome <code>extension/</code> + <code>bridge/</code> that perform LinkedIn actions safely from the user's own session.</td><td>Browser + Node relay <code>:8787</code></td></tr>
-          </tbody>
-        </table>
-        <div class="callout note">
-          <b>Demo vs. real.</b> Most of the portal runs on realistic mock data so the experience
-          can be explored with zero setup. The <a href="/alfred">Outreach Studio</a> ships a
-          <em>real</em> engine (persistence, scheduler, safety limits, simulation clock), and the
-          <code>integration/</code> backend is the production path that wires in live providers.
+        <div class="card-grid">
+          <div class="scard"><div class="sc-top"><span class="ico">👤</span><h4>Recruiting</h4></div><p>Source and place candidates: build a pipeline, screen, and book interviews.</p></div>
+          <div class="scard"><div class="sc-top"><span class="ico">🏢</span><h4>Business Development</h4></div><p>Win and grow clients: find companies hiring now and book discovery calls.</p></div>
         </div>
+        <p>
+          Each mode has its own campaigns, audiences, and dashboards. Use the <strong>BD / Recruiting</strong>
+          toggle in the sidebar to switch; the whole workspace re-scopes to that mode.
+        </p>
       </section>
 
       <!-- WHAT'S NEW -->
       <section id="whats-new">
-        <h2>What's new — 10 June 2026</h2>
-        <p>
-          A large batch of admin, billing, and pipeline upgrades shipped today. The notes below
-          are organized by area; each maps to one or more commits on <code>main</code>.
-        </p>
-
-        <h3>Portals &amp; access</h3>
+        <h2>What's new</h2>
         <ul>
-          <li><strong>Admin / Recruiter portal split.</strong> Admins and recruiters now get distinct portals, each with its own navigation. Recruiters join by <em>invite only</em>, and an admin can switch between portals from the account menu.</li>
-          <li><strong>Admin "view-as".</strong> An admin can dive straight into a specific recruiter's portal — no password, no re-login — to see exactly what that recruiter sees and manage their campaigns.</li>
-          <li><strong>Motion toggle.</strong> Business Development sits on the left, Recruiting on the right, consistently across the app. The account menu spacing was tightened so every item fits.</li>
-        </ul>
-
-        <h3>Billing</h3>
-        <ul>
-          <li><strong>14-day free trial + paywall</strong> on the Admin Portal. A new workspace runs free for 14 days, then hits a paywall until a plan is active.</li>
-        </ul>
-
-        <h3>Setup hub &amp; ATS</h3>
-        <ul>
-          <li><strong>Setup hub.</strong> Integrations, ATS, Email Sending, and Outreach readiness are consolidated into one admin <strong>Setup</strong> tab, fronted by an ordered launch-readiness (go-live) checklist; each row drills into the real config screen.</li>
-          <li><strong>Loxo ATS integration.</strong> Per-workspace ATS credentials are entered in the portal (never baked into server env), with a pull-sync engine that brings Loxo <em>People</em> in as Candidates and syncs <em>Companies</em>, plus real-time webhooks and a polling cron. Connect it under <strong>Setup → ATS</strong>.</li>
-        </ul>
-
-        <h3>Dashboard &amp; Analytics</h3>
-        <ul>
-          <li><strong>Motion-scoped Dashboard</strong> with a per-recruiter drill-down and an "All recruiters" stats roster, in both Business Development and Recruiting.</li>
-          <li><strong>Clickable Analytics.</strong> Every KPI now opens a who's-who drill-down — <em>Active prospects</em>, <em>Meetings this week</em>, <em>Warm conversations</em> (with the message thread rendered inline), and <em>Placements / Won accounts</em> — and every row is traceable back to the recruiter and campaign behind it.</li>
-          <li>A more <strong>prominent "← Back to Dashboard"</strong> control on every Dashboard drill-down.</li>
-        </ul>
-
-        <h3>Campaign Sequences Library</h3>
-        <ul>
-          <li>New multi-channel templates (Email + LinkedIn + Voicemail, plus a job-title + industry specialist template), scoped to the active motion, each seeded as a single row, with a per-row <strong>Delete</strong> action.</li>
-        </ul>
-
-        <h3>Hire Signals (BD)</h3>
-        <ul>
-          <li>US-only ingestion and search, an SMB focus (&lt;5K-employee cap with small-company priority), self-starting daily ingestion with auto board-expansion and per-role dates, a <em>"Find all open roles"</em> dive into a company's own ATS board, and an opt-in verified <strong>direct-dial reveal</strong> (person-direct landline/VoIP).</li>
-        </ul>
-
-        <h3>Navigation</h3>
-        <ul>
-          <li>A new <strong>Setup</strong> section, <strong>JD Sourcing</strong> scoped to the Recruiting motion, <strong>Hire Signals</strong> surfaced under BD, campaigns consolidated into one hub, and a trimmed nav (Spending / Email Sending / Outreach removed as standalone items).</li>
+          <li><strong>Make it yours.</strong> Upload your logo (a separate one for dark and light appearance), set your brand name and accent color, and run the portal on your own web address.</li>
+          <li><strong>AI Vetting.</strong> Automated phone screening in your own cloned voice, every call recorded, transcribed, and scored.</li>
+          <li><strong>Setup hub.</strong> One place to connect your tools and track launch readiness at a glance.</li>
+          <li><strong>Campaign Sequences Library.</strong> Reusable multi-channel templates you can drop into any campaign.</li>
+          <li><strong>Hire Signals.</strong> Companies hiring right now, surfaced as fresh BD leads.</li>
         </ul>
       </section>
 
-      <!-- QUICKSTART -->
+      <!-- QUICK START -->
       <section id="quickstart">
         <h2>Quick start</h2>
-        <p>The fastest way to see the product. No dependencies required.</p>
-        <pre><code><span class="cmt"># Option A — just open the landing page</span>
-start index.html
-
-<span class="cmt"># Option B — serve the folder with the zero-dependency dev server</span>
-node server.cjs
-<span class="cmt"># → http://localhost:5173/  (clean URLs: /command, /alfred, /helpcenter …)</span>
-
-<span class="cmt"># Option C — Windows one-liner that launches the server and opens the Studio</span>
-.\START-STUDIO.ps1</code></pre>
-        <p>Then explore the app in this order:</p>
         <ol>
-          <li>Open <a href="/command">Command Center</a> → <strong>Signals</strong> → <em>Build campaign from signal</em>.</li>
-          <li><strong>Prospects</strong> → run a search → <strong>Enrich</strong> cells, or add an <strong>＋ AI column</strong>.</li>
-          <li>Select rows → <strong>Add to sequence</strong> → review the AI-drafted <strong>Outreach</strong>.</li>
-          <li>Open <a href="/alfred">Outreach Studio</a> → build a sequence → <strong>Enroll</strong> leads → use the <strong>sim clock</strong> (<code>+1 day</code>, <code>+1 week</code>) and watch connections accept, messages send, and replies land in the Inbox.</li>
-          <li><strong>Response</strong> → reply to a conversation and watch the AI classify intent.</li>
+          <li><strong>Sign in</strong> and set your appearance (light or dark) from the account menu in the top-right.</li>
+          <li><strong>Open Setup</strong> and work the launch checklist: connect your tools, set up email sending, connect your ATS, and set up your phone tools for voice and texting.</li>
+          <li><strong>Make it yours</strong> in <em>Setup → Branding</em> (logo, name, accent color), and optionally add your own domain in <em>Setup → Custom domain</em>.</li>
+          <li><strong>Invite your recruiters</strong> from <em>Team</em>. They get their own Recruiter Portal.</li>
+          <li><strong>Build a campaign</strong>, add an audience, and launch. Replies land in your inbox; booked meetings and pipeline show on the Dashboard.</li>
         </ol>
+        <div class="callout note">Required tools must show <b>green</b> in Setup before a mode's campaigns can activate, that's your "ready to launch" gate.</div>
       </section>
 
-      <!-- UI MAP -->
-      <section id="ui-map">
-        <h2>The application UI — screen map</h2>
-        <p>
-          Every screen is a standalone HTML page that shares the design system in
-          <code>assets/css/styles.css</code>. Pages link to one another with clean URLs
-          (e.g. <code>/sourcing</code> → <code>sourcing.html</code>), resolved by
-          <code>server.cjs</code> locally and by Next.js routing in production.
-        </p>
+      <!-- MOTIONS -->
+      <section id="motions">
+        <h2>Recruiting &amp; BD</h2>
+        <p>The same platform, two modes. A few tabs are specific to one mode:</p>
+        <table>
+          <thead><tr><th>Mode</th><th>What it's for</th><th>Mode-specific tabs</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Recruiting</strong></td><td>Place candidates</td><td>Candidates, JD Sourcing, AI Vetting, OS Text, Voice Drops</td></tr>
+            <tr><td><strong>BD</strong></td><td>Win clients</td><td>Companies, Hire Signals, Voice Drops</td></tr>
+          </tbody>
+        </table>
+        <p>Shared by both: Dashboard, Campaigns, Outreach &amp; replies, Analytics, Team, and all of Setup.</p>
       </section>
 
-      <!-- APP -->
-      <section id="ui-app">
-        <h2>Command Center &amp; product</h2>
-        <p>The authenticated application — where the actual work happens.</p>
+      <!-- PORTALS -->
+      <section id="portals">
+        <h2>Admin &amp; Recruiter portals</h2>
+        <p>Everyone uses the same app; what you see depends on your role.</p>
         <div class="card-grid">
-          <div class="scard"><div class="sc-top"><span class="ico">🧭</span><h4>Command Center</h4></div><p>The main dashboard: Overview, Campaigns, Prospects, Outreach, Response, Accounts, Connected, ATS — in one shell.</p><a class="sc-link" href="/command">/command</a></div>
-          <div class="scard"><div class="sc-top"><span class="ico">🚪</span><h4>App router</h4></div><p>Checks <code>localStorage.ros_ctx</code> for a session, then sends you to the Command Center or to login.</p><a class="sc-link" href="/app.html">/app</a></div>
-          <div class="scard"><div class="sc-top"><span class="ico">✉️</span><h4>Outreach Studio</h4></div><p>MeetAlfred-style multi-channel sequence builder with live inbox, sim clock, and analytics.</p><a class="sc-link" href="/alfred">/alfred</a></div>
-          <div class="scard"><div class="sc-top"><span class="ico">🎛️</span><h4>Campaign Studio</h4></div><p>Drag-and-drop canvas for building sequences across LinkedIn, email, SMS, and voice.</p><a class="sc-link" href="/campaign-studio">/campaign-studio</a></div>
-          <div class="scard"><div class="sc-top"><span class="ico">🧱</span><h4>Campaign Builder</h4></div><p>Turn hiring signals into a targeted campaign: pick signals, filter by industry/title, review list and cost.</p><a class="sc-link" href="/campaign-builder">/campaign-builder</a></div>
-          <div class="scard"><div class="sc-top"><span class="ico">☎️</span><h4>AI Vetting</h4></div><p>Recruiting tab. Binds a JD + phone number + cloned voice into a "vetting desk": candidates opt in and call in, an AI recruiter screens them in your voice, and each call is recorded, transcribed, summarized, and scored 1–100. Qualifiers auto-pull from the JD; pass/fail weighs the JD must-haves against the call answer, the candidate's profile, and delivery. Backend: <code>integration/lib/vetting</code> + <code>app/api/vetting</code>; setup guide at <code>docs/setup/ai-vetting.md</code>.</p><a class="sc-link" href="/command#vetting">/command#vetting</a></div>
-          <div class="scard"><div class="sc-top"><span class="ico">👑</span><h4>Owner Console</h4></div><p>Gated admin dashboard: workspace management, billing, and user permissions.</p><a class="sc-link" href="/owner-console">/owner-console</a></div>
+          <div class="scard"><div class="sc-top"><span class="ico">🛡️</span><h4>Admin Portal</h4></div><p>Full control: setup &amp; integrations, branding, your team, campaigns, and analytics.</p></div>
+          <div class="scard"><div class="sc-top"><span class="ico">🧑‍💼</span><h4>Recruiter Portal</h4></div><p>The day-to-day surface for recruiters: their pipeline, replies, sourcing, outreach, and dialer. No billing, integrations, or team management.</p></div>
         </div>
+        <p>As an admin you can preview the Recruiter Portal as any recruiter from the account menu, so you always see exactly what your team sees.</p>
       </section>
 
-      <!-- STUDIO detail -->
-      <section id="ui-studio">
-        <h2>Inside Outreach Studio &amp; Campaign Studio</h2>
-        <p>These two are the heart of execution. The Outreach Studio (<code>alfred.html</code>) is the most complete surface in the app:</p>
-        <ul>
-          <li><strong>Sequence</strong> — build a multi-step drip (connect → wait → message → email…) across LinkedIn / Email / X. Edit any step with a live, personalized preview.</li>
-          <li><strong>Leads</strong> — add or import prospects, select, and <strong>Enroll</strong> them into a sequence.</li>
-          <li><strong>Sim clock</strong> — <code>+1 day</code> / <code>+1 week</code> / <code>+30 days</code> buttons advance time so you can watch the campaign drip forward without waiting.</li>
-          <li><strong>Inbox</strong> — replies land here and auto-pause that prospect's sequence.</li>
-          <li><strong>Analytics</strong> — live funnel, accept/reply rates, activity by channel.</li>
-          <li><strong>Settings</strong> — per-account daily caps, warm-up ramp, working hours, weekend pause, random delays, blacklist.</li>
-        </ul>
-        <div class="callout">
-          <b>The core safety rule:</b> a connection-request step gates its follow-ups — messages
-          only fire <em>after</em> the invite is accepted. This is enforced in the engine and
-          unit-tested. Default limits are conservative: ~20 connects/day, 30→50 messages, &lt;100
-          views, a pending-invite cap, and a 14-day warm-up ramp from 30%→100%.
-        </div>
-      </section>
-
-      <!-- MARKETING + AUTH -->
-      <section id="ui-marketing">
-        <h2>Marketing, auth &amp; help pages</h2>
-        <h3>Public / marketing</h3>
-        <table>
-          <tbody>
-            <tr><td><a href="/">index</a></td><td>Landing page — the full product vision and hero search.</td></tr>
-            <tr><td><a href="/recruiting-os">recruiting-os</a></td><td>Recruiter OS hub — win the placement.</td></tr>
-            <tr><td><a href="/business-development-os">business-development-os</a></td><td>BD OS hub — turn hiring signals into job orders.</td></tr>
-            <tr><td><a href="/features">features</a></td><td>Every feature grouped by module.</td></tr>
-            <tr><td><a href="/platform">platform</a></td><td>Platform overview — campaigns as the atomic unit.</td></tr>
-            <tr><td><a href="/integrations">integrations</a></td><td>ATS/CRM sync and sending/enrichment/telephony infrastructure.</td></tr>
-            <tr><td><a href="/about">about</a></td><td>Company story.</td></tr>
-            <tr><td><a href="/sourcing">sourcing</a></td><td>People-GPT search, JD match scoring, the enrichment grid.</td></tr>
-            <tr><td><a href="/signals">signals</a></td><td>The Signal Engine — funding, hiring velocity, leadership changes, layoffs.</td></tr>
-            <tr><td><a href="/outreach">outreach</a></td><td>Multi-channel sequences and A/B variants.</td></tr>
-            <tr><td><a href="/conversations">conversations</a></td><td>"The Money Maker" — unified inbox, AI classification, SMS, voice dialer.</td></tr>
-            <tr><td><a href="/linkedin">linkedin</a></td><td>LinkedIn Engine — AI invites, accept-triggered follow-ups, account-safe sending.</td></tr>
-            <tr><td><a href="/analytics">analytics</a></td><td>Live operational analytics: signals→meetings, campaigns→job orders.</td></tr>
-          </tbody>
-        </table>
-        <h3>Auth</h3>
-        <p><a href="/login">login</a> · <a href="/signup">signup</a> · <a href="/forgot-password">forgot-password</a> · <a href="/reset-password">reset-password</a> — split-layout pages on <code>assets/css/auth.css</code>, handled by <code>assets/js/auth.js</code> (including the LinkedIn OAuth callback).</p>
-        <h3>Help &amp; internal</h3>
-        <p><a href="/developers">developers</a> (API keys, endpoints, webhooks) · <a href="/project-map">project-map</a> (architecture wireframe + live status) · <code>dev-console</code> (session diagnostics).</p>
-      </section>
-
-      <!-- ARCHITECTURE -->
-      <section id="architecture">
-        <h2>Architecture</h2>
-        <p>The three layers communicate over a small set of seams designed to be swappable:</p>
-        <pre><code>┌─────────────────────────────────────────────────────────────┐
-│  PORTAL  (static *.html + assets/)                          │
-│  the entire UI · runs in any browser · no build step        │
-└───────────────┬─────────────────────────────────────────────┘
-                │  fetch() →  config.js points at the backend
-                ▼
-┌─────────────────────────────────────────────────────────────┐
-│  BACKEND  (integration/ — Next.js)   localhost:3000         │
-│  auth · campaigns · prospects · response inbox · signals    │
-│  billing · provider adapters (Unipile / Telnyx / simulated) │
-└───────┬───────────────────────────────────────┬─────────────┘
-        │ cloud provider (Unipile)               │ internal provider
-        │ — fully server-side                    ▼
-        │                              ┌────────────────────────┐
-        │                              │  BRIDGE  (:8787)        │
-        │                              │  per-account queues     │
-        │                              └──────────┬─────────────┘
-        │                                  poll / report
-        ▼                                         ▼
-   external APIs                       ┌────────────────────────┐
-   (LinkedIn, email, SMS)              │  EXTENSION (Chrome MV3) │
-                                       │  acts in the user's     │
-                                       │  own LinkedIn session   │
-                                       └────────────────────────┘</code></pre>
+      <!-- TEAM -->
+      <section id="team">
+        <h2>Your team &amp; roles</h2>
         <p>
-          Outreach can run in one of three modes, selected per-account by
-          <code>RECRUITEROS_OUTREACH_PROVIDER</code>: <strong>simulated</strong> (default — zero
-          account risk), <strong>unipile</strong> (cloud, fully server-side), or
-          <strong>internal</strong> (the bridge + browser extension). The same campaign code drives
-          all three — only the adapter changes. See <a href="#guides">docs/setup/server/integration-architecture.md</a> for the
-          full model.
+          Add recruiters from the <strong>Team</strong> tab. They receive an invite, sign in, and land in
+          their Recruiter Portal. Admins run the workspace (setup, branding, billing, and integrations)
+          while recruiters do the daily work and are walled off from anything that touches credentials or
+          billing. You can change a person's role at any time.
         </p>
       </section>
 
-      <!-- ALFRED -->
-      <section id="alfred">
-        <h2>The Alfred engine</h2>
+      <!-- SETUP -->
+      <section id="setup">
+        <h2>The Setup hub</h2>
         <p>
-          The outreach automation engine lives in <code>assets/js/alfred/</code>. It is the same
-          code in the browser (<code>window.Alfred</code>) and under Node (<code>require</code>),
-          which is what lets it lift to a backend later without a rewrite.
-        </p>
-        <pre><code>assets/js/alfred/
-├─ alfred-core.js   <span class="cmt">UMD engine — data model, store, limits, channel</span>
-│                   <span class="cmt">adapters, personalization, scheduler, analytics</span>
-├─ alfred-ui.js     <span class="cmt">browser controller for the Studio</span>
-├─ backend.js       <span class="cmt">backend integration hooks</span>
-├─ studio-bridge.js <span class="cmt">postMessage bridge to the extension</span>
-└─ alfred.test.cjs  <span class="cmt">Node test harness — 30 assertions</span></code></pre>
-        <p><strong>Storage</strong>, <strong>channel adapters</strong>, and the <strong>clock</strong> are pluggable seams. Today it runs on <code>localStorage</code> + a simulated adapter; swap in a DB and real LinkedIn/Email/X adapters server-side and the engine code doesn't change.</p>
-        <p>Run the engine tests (Node is the only requirement, and only for tests):</p>
-        <pre><code>node assets/js/alfred/alfred.test.cjs   <span class="cmt"># → 30 passed, 0 failed</span></code></pre>
-      </section>
-
-      <!-- ASSETS -->
-      <section id="assets">
-        <h2>Files &amp; assets</h2>
-        <pre><code>recruiteros/
-├─ *.html                 <span class="cmt">~27 pages: landing, marketing, app, auth, docs</span>
-├─ assets/
-│  ├─ css/
-│  │  ├─ styles.css        <span class="cmt">design system — tokens, aurora FX, base UI</span>
-│  │  ├─ app.css           <span class="cmt">Command Center shell</span>
-│  │  ├─ command.css       <span class="cmt">tabs, panels, campaign filters</span>
-│  │  ├─ campaign-studio.css
-│  │  ├─ alfred.css        <span class="cmt">Outreach Studio</span>
-│  │  ├─ auth.css          <span class="cmt">login / signup / reset</span>
-│  │  └─ owner.css         <span class="cmt">Owner Console</span>
-│  └─ js/
-│     ├─ landing.js  app.js  command.js  auth.js
-│     ├─ campaign-builder.js  campaign-studio.js  developers.js
-│     ├─ config.js          <span class="cmt">backend URL + endpoints</span>
-│     ├─ local-backend.js   <span class="cmt">in-memory mock backend (demo mode)</span>
-│     ├─ session-bridge.js  industries.js  pw-toggle.js  reset.js  owner.js
-│     └─ alfred/            <span class="cmt">the outreach engine (above)</span>
-├─ integration/            <span class="cmt">Next.js production backend</span>
-├─ bridge/                 <span class="cmt">per-account action relay (:8787)</span>
-├─ extension/              <span class="cmt">Chrome MV3 LinkedIn executor</span>
-├─ server.cjs              <span class="cmt">zero-dep static dev server (:5173)</span>
-└─ *.md                    <span class="cmt">setup &amp; deploy guides</span></code></pre>
-        <h3>Design tokens</h3>
-        <p>All pages inherit these custom properties from <code>styles.css</code> — reuse them rather than hard-coding colors:</p>
-        <pre><code>--bg:#0a0a12   --surface:#16161f   --surface-2:#1d1d2b
---text:#f4f4f8 --text-muted:#a3a3b8 --text-dim:#6c6c82
---brand:#7c5cff (violet)  --brand-2:#4dd0ff (cyan)  --brand-3:#ff7ac6 (pink)
---accent-green:#38e0a6  --accent-amber:#ffc24d  --accent-red:#ff6b6b
---grad: linear-gradient(120deg, #7c5cff 0%, #4dd0ff 100%)
---font: 'Inter', …   --mono: 'JetBrains Mono', …
---radius:14px  --maxw:1180px</code></pre>
-      </section>
-
-      <!-- RUN STATIC -->
-      <section id="run-static">
-        <h2>Running the static site</h2>
-        <p>The portal needs nothing but a browser. Three ways to serve it:</p>
-        <pre><code><span class="cmt"># zero-dependency dev server (recommended — gives you clean URLs)</span>
-node server.cjs                 <span class="cmt"># → http://localhost:5173</span>
-PORT=8080 node server.cjs       <span class="cmt"># override the port</span>
-
-<span class="cmt"># or just open the file</span>
-start index.html
-
-<span class="cmt"># or any static server you like</span>
-python -m http.server 8000</code></pre>
-        <p><code>server.cjs</code> serves the current folder and resolves extension-less clean URLs (<code>/alfred</code> → <code>alfred.html</code>), so links match production.</p>
-      </section>
-
-      <!-- RUN BACKEND -->
-      <section id="run-backend">
-        <h2>Running the backend (<code>integration/</code>)</h2>
-        <p>
-          The Next.js app in <code>integration/</code> is the production server. Its
-          <code>build</code> step syncs the root <code>*.html</code> pages and <code>assets/</code>
-          into <code>integration/public/</code> (via <code>sync-public.cjs</code>), so a single
-          Next.js process serves both the UI and the API.
-        </p>
-        <pre><code>cd integration
-npm install
-npm run build      <span class="cmt"># syncs *.html + assets into public/</span>
-npm run start      <span class="cmt"># → http://localhost:3000</span>
-
-node smoke.cjs     <span class="cmt"># end-to-end smoke test</span></code></pre>
-        <div class="callout note">
-          <b>Data persistence.</b> Out of the box the backend uses in-memory reference
-          repositories under <code>integration/lib/db/</code>. Swap these for a real database to
-          persist across restarts. With no provider keys set, outreach and SMS default to the
-          <em>simulated</em> provider.
-        </div>
-      </section>
-
-      <!-- RUN BRIDGE -->
-      <section id="run-bridge">
-        <h2>Bridge &amp; browser extension</h2>
-        <p>
-          The <strong>internal</strong> outreach provider runs LinkedIn actions from the user's own
-          browser session — account-native and safe. Two parts:
+          One place to stand everything up before you launch. A <strong>launch-readiness checklist</strong>
+          shows what's done and what still needs attention. Setup is organized into sections:
         </p>
         <ul>
-          <li><strong>Bridge</strong> (<code>bridge/outreach-bridge.cjs</code>) — a small relay on port <code>8787</code>. The backend enqueues actions (<code>/connect</code>, <code>/message</code>, <code>/inmail</code>, <code>/voice</code>, …); the extension polls (<code>/agent/poll</code>) and reports results (<code>/agent/report</code>); accept/reply events are forwarded to the backend webhook (<code>/agent/event</code>). Queues are in-memory by design — swap for Redis in production.</li>
-          <li><strong>Extension</strong> (<code>extension/</code>) — a Chrome MV3 extension. A background service worker holds the queue, limiter, and scheduler; a content script scrapes profiles and executes actions. <code>SAFE_MODE</code> is on by default (simulated). <code>extension/config.js</code> is the seam to edit: backend URL, daily caps, pacing, working hours.</li>
+          <li><strong>Integrations</strong>: connect the tools your workspace uses.</li>
+          <li><strong>Email sending</strong>: your sending domains and mailboxes.</li>
+          <li><strong>ATS</strong>: your system of record.</li>
+          <li><strong>Voice Drops</strong> &amp; <strong>AI Vetting</strong>: your phone tools and cloned voice.</li>
+          <li><strong>Branding</strong>: your logo, name, and color.</li>
+          <li><strong>Custom domain</strong>: run the portal on your own web address.</li>
         </ul>
-        <pre><code>cd bridge
-cp .env.example .env          <span class="cmt"># set OUTREACH_TOKEN, AGENT_TOKEN, BACKEND_WEBHOOK_*</span>
-node outreach-bridge.cjs      <span class="cmt"># → http://localhost:8787  (GET /health)</span>
-node bridge.test.cjs          <span class="cmt"># end-to-end self-test</span></code></pre>
-        <p>Load the extension via <code>chrome://extensions</code> → <em>Load unpacked</em> → select <code>extension/</code>. See <code>bridge/README.md</code> and <code>extension/README.md</code> for the full model.</p>
       </section>
 
-      <!-- ENV -->
-      <section id="env">
-        <h2>Environment variables</h2>
-        <p>Set these for the <code>integration/</code> backend (see <code>.env.production.example</code>). Everything is optional — unset providers fall back to simulated mode.</p>
-        <table>
-          <thead><tr><th>Variable</th><th>Purpose</th></tr></thead>
-          <tbody>
-            <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Claude API — reply classification &amp; message personalization</td></tr>
-            <tr><td><code>RECRUITEROS_OUTREACH_PROVIDER</code></td><td><code>simulated</code> (default) · <code>unipile</code> · <code>internal</code></td></tr>
-            <tr><td><code>RECRUITEROS_OUTREACH_URL</code></td><td>Bridge URL when using the <code>internal</code> provider</td></tr>
-            <tr><td><code>RECRUITEROS_SMS_PROVIDER</code></td><td><code>telnyx</code> or <code>internal</code></td></tr>
-            <tr><td><code>LINKEDIN_CLIENT_ID</code> / <code>_SECRET</code></td><td>LinkedIn OAuth login (see docs/setup/channels/linkedin-login.md)</td></tr>
-            <tr><td><code>RESEND_API_KEY</code></td><td>Transactional email — password reset &amp; magic links (docs/setup/channels/email-resend.md)</td></tr>
-            <tr><td><code>TELNYX_API_KEY</code> / <code>TELNYX_PHONE_NUMBER</code></td><td>Two-way SMS, the voice dialer, and AI Vetting inbound calls (docs/setup/channels/sms-qualification.md)</td></tr>
-            <tr><td><code>VOICE_CLONE_API_KEY</code> / <code>VOICE_CLONE_VOICE_ID</code></td><td>Cloned-voice TTS for Voice Drops &amp; AI Vetting (the operator's own consented voice)</td></tr>
-            <tr><td><code>RECRUITEROS_VETTING_MODEL</code> / <code>_ENGINE_MODEL</code></td><td>AI Vetting: post-call scoring model &amp; the on-call assistant model (see docs/setup/ai-vetting.md)</td></tr>
-            <tr><td><code>LOXO_API_KEY</code></td><td>ATS sync</td></tr>
-            <tr><td><code>PORT</code></td><td>Override the listening port for <code>server.cjs</code> / bridge</td></tr>
-          </tbody>
-        </table>
-      </section>
-
-      <!-- DEPLOY -->
-      <section id="deploy">
-        <h2>Deployment</h2>
-        <p>Two supported paths:</p>
-        <h3>Static-only (the portal)</h3>
-        <p>Drop the folder on any static host — Vercel (<code>vercel</code> or drag-and-drop), Netlify (<code>app.netlify.com/drop</code>), or GitHub Pages. Point your domain at it. Good for the marketing site and the demo experience.</p>
-        <h3>Full app (portal + backend) on Hetzner</h3>
+      <!-- INTEGRATIONS -->
+      <section id="integrations">
+        <h2>Connecting your tools</h2>
         <p>
-          The production target is <code>https://recruitersos.co</code> on a Hetzner box, with Caddy
-          terminating HTTPS in front of the Dockerized Next.js app. The repo includes
-          <code>Dockerfile</code>, <code>docker-compose.yml</code>, <code>Caddyfile</code>,
-          <code>deploy.sh</code>, and an auto-deploy watcher (<code>auto-deploy.sh</code> /
-          <code>install-auto-deploy.sh</code>) that pulls and redeploys on push.
+          Each tool connects right here in the portal, no waiting on anyone. Open a tool, follow its short
+          steps, paste your key, <strong>Save</strong>, then <strong>Test</strong>. Status walks from
+          <span class="pill">red</span> (not set up) to <span class="pill">yellow</span> (saved) to
+          <span class="pill get">green</span> (verified). All required tools must be green before that mode's
+          campaigns can activate.
         </p>
-        <p>Follow the guides in order: <strong>docs/setup/server/1-hetzner.md</strong> → <strong>docs/setup/server/3-go-live-walkthrough.md</strong> (DNS + Caddy) → <strong>docs/setup/server/2-deploy.md</strong>.</p>
+        <p>The tools you bring, by category:</p>
+        <ul>
+          <li><strong>LinkedIn automation</strong>: send connection requests, messages, and voice notes from your seat.</li>
+          <li><strong>Contact enrichment</strong>: fill in titles, companies, emails, and phone numbers.</li>
+          <li><strong>Job-posting signals</strong>: power Hire Signals and "the role they're hiring for."</li>
+          <li><strong>Texting</strong> and your <strong>phone service</strong>: for OS Text, Voice Drops, and AI Vetting.</li>
+        </ul>
+        <div class="callout note"><b>Your accounts stay yours.</b> Every workspace connects its own tools, kept private and separate from everyone else's. Where your provider offers it, your provider may instead enable a tool for you on a billed basis.</div>
       </section>
 
-      <!-- API -->
-      <section id="api">
-        <h2>API</h2>
+      <!-- EMAIL -->
+      <section id="email">
+        <h2>Email sending</h2>
         <p>
-          The backend exposes a REST API under <code>/api</code>; the full contract is in
-          <code>integration/openapi.yaml</code> and browsable in the
-          <a href="/developers">Developer Console</a>. Representative routes:
+          Set up your sending domains and mailboxes so outreach email goes out reliably. Add a domain and it
+          is provisioned for you with the right records, warm-up, and rotation built in, so your deliverability
+          stays healthy as you scale.
         </p>
-        <table>
-          <tbody>
-            <tr><td><span class="pill get">GET</span></td><td><code>/api/auth/session</code></td><td>Current user + connected LinkedIn accounts</td></tr>
-            <tr><td><span class="pill get">GET</span></td><td><code>/api/accounts</code></td><td>The team's LinkedIn accounts</td></tr>
-            <tr><td><span class="pill post">POST</span></td><td><code>/api/prospects</code></td><td>Bulk prospect upload</td></tr>
-            <tr><td><span class="pill get">GET</span></td><td><code>/api/campaigns</code></td><td>List / create campaigns</td></tr>
-            <tr><td><span class="pill get">GET</span></td><td><code>/api/response/list</code></td><td>Unified inbox of classified replies</td></tr>
-            <tr><td><span class="pill post">POST</span></td><td><code>/api/linkedin/webhook</code></td><td>Inbound events (accepts, replies)</td></tr>
-            <tr><td><span class="pill post">POST</span></td><td><code>/api/sms/send</code></td><td>Send an SMS</td></tr>
-            <tr><td><span class="pill post">POST</span></td><td><code>/api/linkedin/cron</code></td><td>Cadence engine — server-side rate-limited execution</td></tr>
-            <tr><td><span class="pill get">GET</span></td><td><code>/api/vetting/desks</code></td><td>AI Vetting desks (JD↔number↔voice); PUT auto-derives qualifiers, POST provisions/pauses/detaches</td></tr>
-            <tr><td><span class="pill get">GET</span></td><td><code>/api/vetting/numbers</code></td><td>The operator's Telnyx numbers + which desk each is bound to</td></tr>
-            <tr><td><span class="pill post">POST</span></td><td><code>/api/vetting/optin</code></td><td>Public candidate opt-in (name/phone/email/LinkedIn) — enriches background</td></tr>
-            <tr><td><span class="pill post">POST</span></td><td><code>/api/vetting/context</code></td><td>Voice-engine webhook: resolve the caller → per-call greeting/context</td></tr>
-            <tr><td><span class="pill post">POST</span></td><td><code>/api/vetting/webhook</code></td><td>Post-call webhook: transcript → 1–100 scorecard + qualify decision</td></tr>
-            <tr><td><span class="pill get">GET</span></td><td><code>/api/vetting/calls</code></td><td>Scored inbound calls + transcripts for a desk</td></tr>
-          </tbody>
-        </table>
       </section>
 
-      <!-- GUIDES -->
-      <section id="guides">
-        <h2>Setup guides &amp; references</h2>
-        <p>The markdown files under <code>docs/</code> go deeper on specific topics:</p>
-        <table>
-          <tbody>
-            <tr><td><code>README.md</code></td><td>Quick start &amp; the product vision. (repo root)</td></tr>
-            <tr><td><code>docs/STRUCTURE.md</code></td><td>The full project map — every folder &amp; where to develop each feature.</td></tr>
-            <tr><td><code>docs/setup/ai-vetting.md</code></td><td>AI Vetting — inbound conversational screening: setup, the scorecard, swapping numbers, and the engine-verify seam.</td></tr>
-            <tr><td><code>docs/setup/server/integration-architecture.md</code></td><td>The three-layer outreach architecture and the three execution modes.</td></tr>
-            <tr><td><code>docs/setup/server/2-deploy.md</code></td><td>Getting a live URL — local dev, Vercel, env vars, persistence notes.</td></tr>
-            <tr><td><code>docs/setup/server/1-hetzner.md</code></td><td>Initial server setup (Ubuntu, Docker, Caddy, firewall).</td></tr>
-            <tr><td><code>docs/setup/server/3-go-live-walkthrough.md</code></td><td>End-to-end go-live: DNS records, Caddy HTTPS, deploy script.</td></tr>
-            <tr><td><code>docs/setup/channels/linkedin-login.md</code></td><td>LinkedIn OAuth app + callback configuration.</td></tr>
-            <tr><td><code>docs/setup/channels/email-resend.md</code></td><td>Email (Resend) domain verification + API key.</td></tr>
-            <tr><td><code>docs/setup/channels/sms-qualification.md</code></td><td>Telnyx two-way SMS and the intent classifier.</td></tr>
-            <tr><td><code>docs/playbooks/copywriting-playbook.md</code></td><td>Persuasion playbook applied to site copy and outreach.</td></tr>
-          </tbody>
-        </table>
-        <div class="callout">
-          Looking for something else? The <a href="/developers">Developer Console</a> covers the API surface, and
-          <a href="/project-map">Project Map</a> shows the architecture wireframe with live status.
-        </div>
+      <!-- ATS -->
+      <section id="ats">
+        <h2>Your ATS</h2>
+        <p>
+          Connect your applicant tracking system as your single source of truth. People and companies sync
+          into the platform, and every touch the platform makes is written back, so your ATS always reflects
+          reality. Connect it once in Setup and keep working where you already do.
+        </p>
+      </section>
+
+      <!-- TELEPHONY -->
+      <section id="telephony">
+        <h2>Phone &amp; texting</h2>
+        <p>
+          Voice (Voice Drops, AI Vetting) and SMS (OS Text) run on your own phone tools. Connect your phone
+          service, pick the number you send from, and complete any required business-texting registration.
+          You can pick or swap the number you use for each feature at any time.
+        </p>
+      </section>
+
+      <!-- BRANDING -->
+      <section id="branding">
+        <h2>Branding</h2>
+        <p>Make the portal unmistakably yours, in <em>Setup → Branding</em>:</p>
+        <ul>
+          <li><strong>Brand name</strong>: replaces the wordmark, the browser tab, and the text on your sign-in page.</li>
+          <li><strong>Accent color</strong>: recolors buttons and highlights across the whole portal.</li>
+          <li><strong>Logo</strong>: upload one logo for <strong>dark</strong> appearance and one for <strong>light</strong>; the sidebar swaps automatically when you toggle appearance. (Set just one and it's used for both.)</li>
+          <li><strong>Fit &amp; size</strong>: when you upload, a quick adjuster lets you drag and zoom so the logo sits perfectly, and a <strong>Logo size</strong> slider scales it up or down. Large images are welcome.</li>
+        </ul>
+        <p>Your branding shows everywhere, sidebar, browser tab, your sign-in and signup pages, and this Help Center.</p>
+      </section>
+
+      <!-- DOMAIN -->
+      <section id="domain">
+        <h2>Your own domain</h2>
+        <p>Run the portal on your own web address so your team and candidates only ever see your brand.</p>
+        <ol>
+          <li>Go to <em>Setup → Custom domain</em> and enter your domain (for example <code>app.yourcompany.com</code>).</li>
+          <li>Add the <strong>two DNS records</strong> it shows you at your domain provider, one points traffic at the platform, one proves you own the domain.</li>
+          <li>Click <strong>Verify</strong>. Once verified and live, your team signs in at your URL, fully branded.</li>
+        </ol>
+        <div class="callout note">DNS can take a few minutes to propagate. If verification doesn't pass on the first try, give it a moment and retry.</div>
+      </section>
+
+      <!-- DASHBOARD -->
+      <section id="dashboard">
+        <h2>Dashboard</h2>
+        <p>
+          Your at-a-glance view of the operation: active prospects, meetings today and this week, warm
+          conversations, replies waiting on you, and your active campaigns. A capacity strip shows how much
+          sending headroom you have, so you know when to add more.
+        </p>
+      </section>
+
+      <!-- CANDIDATES -->
+      <section id="candidates">
+        <h2>Candidates</h2>
+        <p>
+          Your people store for recruiting. Import lists, search and enrich contacts, and promote the best
+          into active campaigns. Candidates and prospects are kept separate on purpose, so your sourcing pool
+          and your active outreach never get tangled.
+        </p>
+      </section>
+
+      <!-- CAMPAIGNS -->
+      <section id="campaigns">
+        <h2>Campaigns &amp; the Sequences Library</h2>
+        <p>
+          A <strong>campaign</strong> is a goal with an audience and a multi-step <strong>sequence</strong>
+          that runs across channels, email, LinkedIn, SMS, and voice. Build and edit the steps in the
+          <strong>Campaign Studio</strong>: choose the channel for each touch, the timing, and the message.
+        </p>
+        <p>
+          The <strong>Sequences Library</strong> holds reusable multi-channel templates (including LinkedIn
+          voice notes and voicemail drops) that you can drop into any campaign and tweak. Campaigns activate
+          once the required tools for that mode are green in Setup.
+        </p>
+      </section>
+
+      <!-- OUTREACH -->
+      <section id="outreach">
+        <h2>Outreach &amp; replies</h2>
+        <p>
+          Every reply across every channel lands in one inbox. Each one is auto-classified (interested,
+          not now, referral, stop) and routed to the right recruiter. Positive replies are surfaced first
+          so your team books the hot ones before anything goes cold, and opt-outs are honored automatically
+          everywhere.
+        </p>
+      </section>
+
+      <!-- JD SOURCING -->
+      <section id="jdsourcing">
+        <h2>JD Sourcing <span class="pill">Recruiting</span></h2>
+        <p>
+          Paste a job description and the platform finds and ranks matching candidates for you. Stage the
+          results under a name, review them, and promote the best into your Candidates store and into a
+          campaign. A fast way to go from an open role to a worked pipeline.
+        </p>
+      </section>
+
+      <!-- SIGNALS -->
+      <section id="signals">
+        <h2>Hire Signals <span class="pill">BD</span></h2>
+        <p>
+          Companies that are hiring right now surface as fresh BD leads, along with the role they're hiring
+          for, so you can reach out at exactly the right moment with a reason to talk.
+        </p>
+      </section>
+
+      <!-- OS TEXT -->
+      <section id="ostext">
+        <h2>OS Text <span class="pill">Recruiting</span></h2>
+        <p>
+          Two-way texting for recruiting, built in. After a short go-live checklist (business registration,
+          your number, and consent), you can text candidates and see replies right alongside your other
+          channels. Opt-outs are honored automatically across every channel.
+        </p>
+      </section>
+
+      <!-- AI VETTING -->
+      <section id="vetting">
+        <h2>AI Vetting <span class="pill">Recruiting</span></h2>
+        <p>
+          Screen candidates by phone, automatically. Set up a "desk" by binding a job description, your phone
+          number, and your own cloned voice. Candidates opt in and receive a call from an AI recruiter that
+          asks your questions in your voice. Every call is <strong>recorded, transcribed, and scored</strong>,
+          and you review a scorecard for each one. Swap the number on a desk whenever you need to.
+        </p>
+      </section>
+
+      <!-- VOICE DROPS -->
+      <section id="voicedrops">
+        <h2>Voice Drops</h2>
+        <p>
+          Drop a personalized voicemail in your own cloned voice straight to a contact's landline, inside
+          their local calling window, with consent and identification built in. A respectful way to
+          re-engage at scale without dialing live, available in both modes.
+        </p>
+      </section>
+
+      <!-- ANALYTICS -->
+      <section id="analytics">
+        <h2>Analytics</h2>
+        <p>
+          Outcomes over time: replies, meetings booked, and conversion broken down by campaign and by
+          recruiter. See what's working, spot what's stalling, and double down on the plays that land.
+        </p>
+      </section>
+
+      <!-- BILLING -->
+      <section id="billing">
+        <h2>Billing &amp; plan</h2>
+        <p>
+          View your plan and manage billing from the account menu in the top-right, under
+          <strong>Billing &amp; plan</strong>. Your usage of the tools you connect is billed by those tools
+          directly to your own accounts.
+        </p>
+      </section>
+
+      <!-- SUPPORT -->
+      <section id="support">
+        <h2>Getting help</h2>
+        <p>
+          The <strong>?</strong> Help button is always in the bottom corner of the app and brings you back
+          here. For anything this guide doesn't cover, reach out to your account contact.
+        </p>
       </section>
 
     </main>
