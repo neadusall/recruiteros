@@ -10,6 +10,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="assets/css/styles.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+  <!-- White-label anti-flash guard: on a customer host (e.g. app.lumesp.com) the
+       house brand must NEVER paint. Before first paint, neutralise the title +
+       favicon and hide the wordmark until the resolver below fills in the
+       customer's brand. No-op on the house domain (recruitersos.co / localhost). -->
+  <script>(function(){try{var h=location.host||"";if(/(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(h))return;document.documentElement.classList.add("wl-hide");document.title="Help Center";var f=document.querySelector('link[rel=icon]');if(f)f.removeAttribute("href");var s=document.createElement("style");s.textContent=".wl-hide .brand-name{visibility:hidden}";document.head.appendChild(s);}catch(e){}})();</script>
 
   <style>
     /* ── Docs-specific layout, built on the shared design tokens ───────── */
@@ -543,27 +548,70 @@
 
   <script>
     // White-label: brand the Help Center to the current workspace, so a customer
-    // (e.g. LUME) sees THEIR name, not RecruitersOS. Resolves session branding first
-    // (the exact workspace you're signed into), then host-based (custom domain),
-    // then falls back to the default "RecruitersOS" already in the markup.
+    // (e.g. LUME) sees THEIR name and favicon, NEVER RecruitersOS. Resolves session
+    // branding first (the exact workspace you're signed into), then host-based
+    // (custom domain / built-in preset). On a customer host the house wordmark is
+    // hidden by the head guard and is revealed ONLY once a customer brand is in
+    // place — so the house brand can never flash or fall through.
     (function () {
       var API = (window.RECRUITEROS_API_BASE || "") + "/api";
-      function apply(name) {
-        if (!name) return;
-        Array.prototype.forEach.call(document.querySelectorAll(".brand-name"), function (el) { el.textContent = name; });
-        document.title = name + " Help Center";
+      var isHouse = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.host || "");
+      function reveal() { try { document.documentElement.classList.remove("wl-hide"); } catch (e) {} }
+      function setFavicon(href) {
+        if (!href) return;
+        var l = document.querySelector('link[rel="icon"]');
+        if (!l) { l = document.createElement("link"); l.rel = "icon"; document.head.appendChild(l); }
+        l.setAttribute("href", href);
+      }
+      function applyBranding(b) {
+        b = b || {};
+        var name = b.brandName;
+        var logo = b.logoUrl || b.logoLightUrl; // dark help-center page → dark-appearance logo
+        if (name) {
+          // Named brand (house or a customer who set a name): use it everywhere.
+          Array.prototype.forEach.call(document.querySelectorAll(".brand-name"), function (el) { el.textContent = name; });
+          document.title = name + " Help Center";
+          setFavicon(b.faviconUrl || logo);
+          reveal();
+          return;
+        }
+        if (!isHouse) {
+          // White-label customer with a logo but no brand name: render the logo as
+          // the wordmark and neutralise the prose — the house name never appears.
+          var navBrand = document.querySelector(".docs-nav .brand-name");
+          if (navBrand) {
+            if (logo) {
+              var img = document.createElement("img");
+              img.src = logo; img.alt = "Help Center";
+              img.style.cssText = "max-height:26px;max-width:160px;object-fit:contain;vertical-align:middle";
+              navBrand.parentNode.replaceChild(img, navBrand);
+              var star = document.querySelector(".docs-nav .brand .logo");
+              if (star) star.style.display = "none";
+            } else { navBrand.textContent = ""; }
+          }
+          var h1Brand = document.querySelector(".docs-article h1 .brand-name");
+          if (h1Brand) h1Brand.textContent = ""; // → "Help Center"
+          var ledeBrand = document.querySelector(".docs-lede .brand-name");
+          if (ledeBrand) ledeBrand.textContent = "This platform"; // keeps the sentence readable
+          document.title = "Help Center";
+          setFavicon(b.faviconUrl || logo);
+          reveal();
+          return;
+        }
+        // House host with no brand set: keep the default "RecruitersOS" markup.
+        reveal();
       }
       function byHost() {
         return fetch(API + "/branding/resolve?host=" + encodeURIComponent(location.host))
           .then(function (r) { return r.json(); })
-          .then(function (d) { apply(d && d.branding && d.branding.brandName); })
-          .catch(function () {});
+          .then(function (d) { applyBranding(d && d.branding); })
+          .catch(function () { if (isHouse) reveal(); });
       }
       fetch(API + "/branding", { credentials: "include" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
-          var n = d && d.branding && d.branding.brandName;
-          if (n) apply(n); else return byHost();
+          var b = d && d.branding;
+          if (b && (b.brandName || b.logoUrl || b.logoLightUrl)) applyBranding(b); else return byHost();
         })
         .catch(byHost);
     })();
