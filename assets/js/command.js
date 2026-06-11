@@ -7694,6 +7694,9 @@
       // Product name -> page title; logo -> favicon.
       if (b.brandName) document.title = b.brandName + " · Command Center";
       if (logo) { var fav = document.querySelector('link[rel="icon"]'); if (fav) fav.setAttribute("href", logo); }
+      // Quick-upload label reflects which appearance's logo it will set.
+      var ul = document.getElementById("brandUploadLabel");
+      if (ul) ul.textContent = "Change " + (theme === "light" ? "light" : "dark") + " logo";
     }
     function cache(b) { try { localStorage.setItem(CACHE, JSON.stringify(b || {})); } catch (e) {} }
     // Let the Setup → Branding screen push live changes back to the chrome.
@@ -7717,9 +7720,8 @@
     // 3) Admin-only controls.
     var canEdit = (typeof can === "function") ? can("accounts:manage") : (ctx.role !== "member");
     if (!canEdit) return;
-    var up = $("#brandUpload"), file = $("#brandFile"), reset = $("#brandReset");
+    var up = $("#brandUpload"), file = $("#brandFile");
     if (up) up.hidden = false;
-    if (reset) reset.hidden = false;
 
     function persist(patch, okMsg) {
       send("/branding", "POST", patch).then(function (r) {
@@ -7734,16 +7736,16 @@
       var f = file.files && file.files[0];
       if (!f) return;
       if (!/^image\//.test(f.type)) { toast("Please choose an image file."); return; }
-      // Open the fit adjuster (drag + zoom) so the logo sits naturally; this quick
-      // control sets the DARK-appearance logo. Set the light one in Setup → Branding.
-      openLogoAdjuster(f, { bg: (document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"), label: "workspace logo" }, function (dataUrl) {
-        persist({ logoUrl: dataUrl }, "Logo updated");
+      // Theme-aware: this sets the logo for the CURRENT appearance — the
+      // transparent logo in dark mode, the colored logo in light mode. Toggle
+      // appearance and upload again to set the other.
+      var isLight = document.documentElement.getAttribute("data-theme") === "light";
+      var key = isLight ? "logoLightUrl" : "logoUrl";
+      openLogoAdjuster(f, { bg: isLight ? "light" : "dark", label: isLight ? "light theme" : "dark theme" }, function (dataUrl) {
+        var patch = {}; patch[key] = dataUrl;
+        persist(patch, (isLight ? "Light" : "Dark") + " logo updated");
       });
       file.value = ""; // allow re-picking the same file later
-    });
-
-    if (reset) reset.addEventListener("click", function () {
-      persist({ action: "reset" }, "Reset to the RecruitersOS logo");
     });
   })();
 
