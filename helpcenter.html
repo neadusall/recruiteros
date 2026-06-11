@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Help Center — RecruitersOS</title>
-  <meta name="description" content="Complete documentation for RecruitersOS: the screens that make up the UI, the three-layer architecture, the Alfred outreach engine, environment variables, and everything you need to run the application locally or in production." />
+  <title>RecruitersOS Help Center</title>
+  <meta name="description" content="Help & documentation for your recruiting platform: the screens that make up the UI, the workflow, and how everything fits together." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
@@ -199,9 +199,9 @@
 
     <!-- ── Article ───────────────────────────────────────────────────── -->
     <main class="docs-article">
-      <h1>RecruitersOS Help Center</h1>
+      <h1><span class="brand-name">RecruitersOS</span> Help Center</h1>
       <p class="docs-lede">
-        RecruitersOS is the operating system for modern recruiting — a campaign-centric command
+        <span class="brand-name">RecruitersOS</span> is the operating system for modern recruiting: a campaign-centric command
         center where every revenue activity lives in one place. This page documents the whole
         application: the screens that make up the UI, how the system is architected, and
         everything you need to run it locally or ship it to production.
@@ -653,6 +653,34 @@ node bridge.test.cjs          <span class="cmt"># end-to-end self-test</span></c
       }
       window.addEventListener('scroll', onScroll, { passive: true });
       onScroll();
+    })();
+  </script>
+
+  <script>
+    // White-label: brand the Help Center to the current workspace, so a customer
+    // (e.g. LUME) sees THEIR name, not RecruitersOS. Resolves session branding first
+    // (the exact workspace you're signed into), then host-based (custom domain),
+    // then falls back to the default "RecruitersOS" already in the markup.
+    (function () {
+      var API = (window.RECRUITEROS_API_BASE || "") + "/api";
+      function apply(name) {
+        if (!name) return;
+        Array.prototype.forEach.call(document.querySelectorAll(".brand-name"), function (el) { el.textContent = name; });
+        document.title = name + " Help Center";
+      }
+      function byHost() {
+        return fetch(API + "/branding/resolve?host=" + encodeURIComponent(location.host))
+          .then(function (r) { return r.json(); })
+          .then(function (d) { apply(d && d.branding && d.branding.brandName); })
+          .catch(function () {});
+      }
+      fetch(API + "/branding", { credentials: "include" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          var n = d && d.branding && d.branding.brandName;
+          if (n) apply(n); else return byHost();
+        })
+        .catch(byHost);
     })();
   </script>
 </body>
