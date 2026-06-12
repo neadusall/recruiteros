@@ -30,6 +30,7 @@ import { draftVoiceScript } from "./draft";
 import { assembleDrop, type VoiceRef } from "./clones";
 import { getVoiceClientFor } from "./provider";
 import { checkWindow, resolveTimezone, type WindowCheck } from "./compliance";
+import { toE164 } from "./phone";
 import {
   getCampaign, getLeads, setLeads, updateLead, recordDrop, registerPending,
   getPending, clearPending, listConsent,
@@ -57,31 +58,6 @@ function connectionId(): string {
   // Resolved inside the per-lead withWorkspaceCreds() wrap below, so a customer
   // dials on their own Telnyx connection, not the house env one.
   return cred("TELNYX_CONNECTION_ID");
-}
-
-/**
- * Normalize any operator-entered number to strict E.164 (e.g. +14792740716) so
- * Telnyx never 422s on a "(479) 274-0716", "479-274-0716", "1 479 274 0716", or
- * "+1 (479) 274-0716" style input. NANP (US/Canada) is the default plan:
- *   - 10 digits        -> +1XXXXXXXXXX (bare local number)
- *   - 11 digits w/ "1" -> +1XXXXXXXXXX (long-distance prefix)
- * A value already carrying a "+" is trusted and just stripped of separators.
- * International numbers entered without the "+" but with a country code (11-15
- * digits) are kept as written. Returns "" when there aren't enough digits to be
- * a real number, so callers can skip un-diallable junk.
- */
-export function toE164(raw: string): string {
-  const trimmed = (raw || "").trim();
-  if (!trimmed) return "";
-  if (trimmed.startsWith("+")) {
-    const digits = trimmed.replace(/\D/g, "");
-    return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : "";
-  }
-  const digits = trimmed.replace(/\D/g, "");
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-  if (digits.length >= 11 && digits.length <= 15) return `+${digits}`;
-  return "";
 }
 
 /* ---------------- import + mobile strip ---------------- */
@@ -282,16 +258,23 @@ export async function runDueDrops(
     if (res?.dryRun) sum.dryRun = true;
     const ccid = res?.data?.call_control_id ?? `dry_${rid("call")}`;
 
+    // Attribute this drop to the library script it was built from, so per-script
+    // performance can be tallied once the outcome lands. A per-lead customScript
+    // or an AI rewrite is not one of the named library scripts, so it carries no
+    // scriptId — only the shared campaign template does.
+    const dropScriptId = (!lead.customScript && !c.aiCustomize) ? c.scriptId : undefined;
+
     registerPending({
       callControlId: ccid, campaignId, leadId: lead.id, workspaceId, motion: c.motion,
       playlist: drop.playlist, idx: 0,
       signoff: c.persona.signoff,
       identifier: identifierLine(c.persona, lead.firstName),
+      scriptId: dropScriptId,
     });
     updateLead(campaignId, lead.id, {
       outcome: "dialing", attempts: lead.attempts + 1, lastAttemptAt: nowIso(), callControlId: ccid,
     });
-    recordDrop({ workspaceId, campaignId, leadId: lead.id, outcome: "dialing", callControlId: ccid, meta: { dryRun: Boolean(res?.dryRun) } });
+    recordDrop({ workspaceId, campaignId, leadId: lead.id, outcome: "dialing", callControlId: ccid, meta: { dryRun: Boolean(res?.dryRun), scriptId: dropScriptId } });
     sum.dialed++;
   }
 
@@ -398,11 +381,13 @@ export async function testDrop(workspaceId: string, motion: Motion, input: TestD
 export async function recordOutcome(callControlId: string, outcome: DropOutcome, meta?: Record<string, unknown>): Promise<void> {
   const pending = getPending(callControlId);
   if (!pending) return;
-  const { workspaceId, campaignId, leadId, motion } = pending;
+  const { workspaceId, campaignId, leadId, motion, scriptId } = pending;
 
   if (campaignId !== "test") {
     updateLead(campaignId, leadId, { outcome });
-    recordDrop({ workspaceId, campaignId, leadId, outcome, callControlId, meta });
+    // Carry the script attribution onto the terminal outcome so scriptStats can
+    // tally delivery/connect rates per library script.
+    recordDrop({ workspaceId, campaignId, leadId, outcome, callControlId, meta: { ...meta, scriptId } });
 
     // Mirror to the ATS person timeline when the lead links to a Prospect.
     const lead = getLeads(campaignId).find((l) => l.id === leadId);

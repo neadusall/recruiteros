@@ -13,12 +13,14 @@
 
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
+import { toE164 } from "./phone";
 import type { Motion } from "../core/types";
 import {
   type VoiceCampaign, type VoiceCampaignInput, type VoiceLead,
   type VoiceConsent, type VoiceScript, type DropOutcome,
   DEFAULT_PERSONA, DEFAULT_WINDOW,
 } from "./types";
+import { DEFAULT_VOICE_SCRIPTS } from "./seedScripts";
 
 /** One queued/active call's playback plan, consulted by the voice webhook. */
 export interface PendingDrop {
@@ -35,6 +37,9 @@ export interface PendingDrop {
   signoff: string;
   /** Honest identifier text for the human-answer branch. */
   identifier: string;
+  /** Library script this drop was built from, carried through to the terminal
+   *  outcome so per-script performance can be tallied (see scriptStats). */
+  scriptId?: string;
   /** Count of TTS lines spoken so far on the human-answer branch. */
   spoken?: number;
   createdAt: string;
@@ -59,6 +64,9 @@ const store = {
   scripts: [] as VoiceScript[],
   drops: [] as DropLog[],
   pending: {} as Record<string, PendingDrop>,
+  /** Workspaces whose default scripts have been seeded (so a deleted seed
+   *  is not resurrected on the next read). */
+  seeded: {} as Record<string, boolean>,
 };
 
 /* ---------------- durability ---------------- */
@@ -74,6 +82,17 @@ function hydrate(s: any) {
   store.scripts = s.scripts ?? [];
   store.drops = s.drops ?? [];
   store.pending = s.pending ?? {};
+  store.seeded = s.seeded ?? {};
+  // One-time backfill: any lead persisted before E.164 normalization existed
+  // (stored as "479-274-0716" etc.) is coerced in place so it dials cleanly.
+  // toE164("") on a junk number returns "", so guard: keep the original if
+  // normalization can't produce a real number, rather than blanking it.
+  for (const arr of Object.values(store.leads)) {
+    for (const lead of arr) {
+      const e164 = toE164(lead.phone);
+      if (e164 && e164 !== lead.phone) lead.phone = e164;
+    }
+  }
 }
 const persist = debouncedSaver(SNAP_KEY, serialize);
 
@@ -117,6 +136,9 @@ export function upsertCampaign(workspaceId: string, input: VoiceCampaignInput): 
     status: input.status ?? existing?.status ?? "draft",
     persona,
     scriptTemplate: input.scriptTemplate ?? existing?.scriptTemplate ?? "",
+    // An explicit "" detaches attribution (the script was hand-edited away from the
+    // named library script); absent keeps the existing link; an id (re)sets it.
+    scriptId: input.scriptId === "" ? undefined : (input.scriptId ?? existing?.scriptId),
     voiceId: input.voiceId ?? existing?.voiceId,
     voiceProvider: input.voiceProvider ?? existing?.voiceProvider,
     callerId: input.callerId ?? existing?.callerId ?? "",
@@ -214,6 +236,10 @@ export function updateLead(campaignId: string, leadId: string, patch: Partial<Vo
  */
 export function addLead(workspaceId: string, campaignId: string, lead: VoiceLead): void {
   const arr = store.leads[campaignId] ?? (store.leads[campaignId] = []);
+  // Normalize at this ingestion path too (signal->lead feeds, dedup, etc.) so a
+  // lead added outside importLeads is still stored as "+14792740716".
+  const e164 = toE164(lead.phone);
+  if (e164) lead.phone = e164;
   arr.push(lead);
   const c = getCampaign(workspaceId, campaignId);
   if (c) {
@@ -270,7 +296,29 @@ export function deleteConsent(workspaceId: string, id: string): boolean {
 
 /* ---------------- script library ---------------- */
 
+/**
+ * Seed a workspace's script library with the default natural-speech voicemail
+ * scripts (see seedScripts.ts) the first time it is read. Idempotent: gated by a
+ * per-workspace marker so a default the operator deletes is not resurrected, and
+ * an id that already exists is never duplicated. Seeds insert as ordinary rows,
+ * so they are editable/deletable/attributable like any hand-written script.
+ */
+export function ensureSeedScripts(workspaceId: string): void {
+  if (store.seeded[workspaceId]) return;
+  const now = nowIso();
+  for (const seed of DEFAULT_VOICE_SCRIPTS) {
+    if (store.scripts.some((s) => s.id === seed.id && s.workspaceId === workspaceId)) continue;
+    store.scripts.push({
+      id: seed.id, workspaceId, motion: seed.motion, name: seed.name,
+      template: seed.template, createdAt: now, updatedAt: now,
+    });
+  }
+  store.seeded[workspaceId] = true;
+  persist();
+}
+
 export function listScripts(workspaceId: string, motion?: Motion): VoiceScript[] {
+  ensureSeedScripts(workspaceId);
   return store.scripts
     .filter((s) => s.workspaceId === workspaceId && (!motion || s.motion === motion))
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
@@ -326,6 +374,50 @@ export function campaignStats(campaignId: string): Record<DropOutcome, number> {
   };
   for (const l of getLeads(campaignId)) base[l.outcome] = (base[l.outcome] ?? 0) + 1;
   return base;
+}
+
+/** Per-script outcome tally — the "learn from responses" rollup. */
+export interface ScriptPerformance {
+  /** Real dial attempts that reached a phone (delivered + answered + no-answer). */
+  dialed: number;
+  voicemail_delivered: number;
+  human_answered: number;
+  no_answer: number;
+  failed: number;
+  /** voicemail_delivered / dialed, 0-1 (0 when nothing dialed yet). */
+  deliveryRate: number;
+  /** (voicemail_delivered + human_answered) / dialed, 0-1 — reached a contact. */
+  connectRate: number;
+}
+
+/**
+ * Tally terminal drop outcomes per library script, across a workspace. Drops are
+ * stamped with the script they were built from (meta.scriptId) at dial time, so
+ * this answers "which script gets picked up / lands a voicemail most often" —
+ * the signal the operator uses to keep the winner and retire the rest. Only
+ * terminal, billable-dial outcomes count; "dialing"/"queued" rows are ignored.
+ */
+export function scriptStats(workspaceId: string): Record<string, ScriptPerformance> {
+  const out: Record<string, ScriptPerformance> = {};
+  const blank = (): ScriptPerformance => ({
+    dialed: 0, voicemail_delivered: 0, human_answered: 0, no_answer: 0,
+    failed: 0, deliveryRate: 0, connectRate: 0,
+  });
+  for (const d of store.drops) {
+    if (d.workspaceId !== workspaceId) continue;
+    const sid = typeof d.meta?.scriptId === "string" ? d.meta.scriptId : undefined;
+    if (!sid) continue;
+    const p = (out[sid] ??= blank());
+    if (d.outcome === "voicemail_delivered") { p.voicemail_delivered++; p.dialed++; }
+    else if (d.outcome === "human_answered") { p.human_answered++; p.dialed++; }
+    else if (d.outcome === "no_answer") { p.no_answer++; p.dialed++; }
+    else if (d.outcome === "failed") { p.failed++; }
+  }
+  for (const p of Object.values(out)) {
+    p.deliveryRate = p.dialed ? p.voicemail_delivered / p.dialed : 0;
+    p.connectRate = p.dialed ? (p.voicemail_delivered + p.human_answered) / p.dialed : 0;
+  }
+  return out;
 }
 
 /* ---------------- pending per-call playback plan ---------------- */
