@@ -4602,6 +4602,25 @@
     "Hi {first_name}... this is {agent_name}, with {agent_company}. I came across your {role} search, and wanted to reach out. We help teams hire faster. If it’s useful, give me a call back, at this number. Thanks {first_name}.";
   var VD_CONSENT_TEXT =
     "I consent to the creation and use of a synthetic copy of my voice for outreach that I authorize.";
+  /* Shown under the script box so anyone writing a custom script formats it for
+     natural cloned-voice delivery (same pause structure as the default). */
+  var VD_PAUSE_GUIDE =
+    '<div style="margin-top:10px;padding:10px 12px;border:1px solid #2a2440;border-radius:8px;background:#171327;font-size:12px;line-height:1.55">' +
+      '<div style="color:#b9a6ff;font-weight:600;margin-bottom:6px">🗣️ Format custom scripts the same way</div>' +
+      '<div class="muted" style="margin-bottom:8px">The voice reads your punctuation literally. Pacing comes from how you write it, so match this structure:</div>' +
+      '<ul style="margin:0 0 8px 18px;padding:0">' +
+        '<li><b style="color:#e6e1f5">...</b> &nbsp;= one short beat (a held pause). Drop it after the greeting and before the ask.</li>' +
+        '<li>One thought per <b style="color:#e6e1f5">sentence</b>. End each with a period so it lands, then breathes.</li>' +
+        '<li>Use <b style="color:#e6e1f5">commas</b> for tiny breaths, including around their name (Hi {first_name}...) and before the phone-number line.</li>' +
+        '<li>Keep sentences <b style="color:#e6e1f5">short</b>. No dashes, no numerals (write "two", not "2"), keep contractions ("it\'s", "we\'ll").</li>' +
+      "</ul>" +
+      '<div class="muted" style="margin-bottom:3px">Reads like this:</div>' +
+      '<div style="font-style:italic;color:#cdc6e6;background:#0f0c1c;border-radius:6px;padding:7px 9px">' +
+        'Hi {first_name}<b style="color:#7c5cff">...</b> this is {agent_name}<b style="color:#7c5cff">,</b> with {agent_company}<b style="color:#7c5cff">.</b> ' +
+        'I came across your {role} search<b style="color:#7c5cff">,</b> and wanted to reach out<b style="color:#7c5cff">.</b> ' +
+        'We help teams hire faster<b style="color:#7c5cff">.</b> If it’s useful<b style="color:#7c5cff">,</b> give me a call back<b style="color:#7c5cff">,</b> at this number<b style="color:#7c5cff">.</b> Thanks {first_name}<b style="color:#7c5cff">.</b>' +
+      "</div>" +
+    "</div>";
 
   function renderVoiceDrops(el) {
     var vd = { tab: "campaigns", creating: false, scripts: [], prefill: null };
@@ -4816,6 +4835,7 @@
         '<input id="seName" placeholder="Script name (e.g. Q3 VP Sales, warm)" style="width:100%" value="' + esc(isEdit ? s.name : "") + '"/>' +
         '<div style="margin:8px 0">' + fieldChips("seTpl") + "</div>" +
         '<textarea id="seTpl" rows="5" style="width:100%">' + esc(isEdit ? s.template : VD_DEFAULT_SCRIPT) + "</textarea>" +
+        VD_PAUSE_GUIDE +
         '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<button class="btn btn-sm" id="seAi">✨ AI customize</button>' +
         '<button class="btn btn-sm" id="seListen">🔊 Listen</button><span class="muted" id="seListenOut" style="font-size:12px"></span></div>' +
@@ -6447,6 +6467,7 @@
       '<input id="vsName" placeholder="Script name" style="width:100%" value="' + esc(isEdit ? s.name : "") + '"/>' +
       '<div style="margin:8px 0">' + chips + "</div>" +
       '<textarea id="vsTpl" rows="4" style="width:100%">' + esc(isEdit ? s.template : VD_DEFAULT_SCRIPT) + "</textarea>" +
+      VD_PAUSE_GUIDE +
       '<div class="modal-foot" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vsSave">Save to Library</button></div>',
       function (root, close) {
         Array.prototype.forEach.call(root.querySelectorAll("[data-vschip]"), function (b) {
