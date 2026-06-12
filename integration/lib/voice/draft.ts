@@ -50,6 +50,15 @@ HARD RULES (never break):
 - US dollars with a $ sign if money is mentioned.
 - Warm, specific, human, never salesy.
 
+PACING MODEL — match this rhythm exactly (it is tuned for the TTS engine; copy the punctuation pattern, not the words):
+"Hi {first_name}... this is {agent_name}, with {agent_company}. I came across your {role} search, and wanted to reach out. We help teams hire faster. If it's useful, give me a call back, at this number. Thanks {first_name}."
+Notice the rhythm to reproduce:
+- One held beat ("...") right after the name in the opener, then never again.
+- A vocative comma around the recipient's name and a comma before "with {firm}" so the intro doesn't rush.
+- Each idea is its own short sentence ending in a period, so the voice breathes between them.
+- A comma right before the call-back / phone line to slow the delivery on the ask.
+- Plain, warm spoken phrasing with contractions — it should sound like a person leaving a voicemail, not reading a paragraph.
+
 Return STRICT JSON only: {"text": string}. No prose outside the JSON.`;
 
 export interface DraftVoiceInput {
