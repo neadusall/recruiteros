@@ -6513,6 +6513,16 @@
       '<div style="margin:8px 0">' + chips + "</div>" +
       '<textarea id="vsTpl" rows="4" style="width:100%">' + esc(isEdit ? s.template : VD_DEFAULT_SCRIPT) + "</textarea>" +
       VD_PAUSE_GUIDE +
+      // Ring a real landline/VoIP you control with this script so you can pick up,
+      // let it roll to voicemail, and confirm the drop actually lands. Uses the
+      // same /voice/test-drop path as the Voice Drops Test tab: skips the calling
+      // window for the manual test, every other safeguard stays on.
+      '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07)">' +
+      '<label style="display:block;font-size:12px;color:#8aa0c6;margin-bottom:4px">Test it on a real phone <span style="color:#6b7a99">- landline or VoIP number you control (E.164), let it roll to voicemail to check the drop</span></label>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<input id="vsTestTo" type="tel" placeholder="+13105551234" style="flex:1;min-width:180px" />' +
+      '<button class="btn btn-sm" id="vsTestCall">📞 Test call</button></div>' +
+      '<div class="muted" id="vsTestOut" style="font-size:12px;margin-top:6px"></div></div>' +
       '<div class="modal-foot" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vsSave">Save to Library</button></div>',
       function (root, close) {
         Array.prototype.forEach.call(root.querySelectorAll("[data-vschip]"), function (b) {
@@ -6521,6 +6531,22 @@
             var p = ta.selectionStart || ta.value.length;
             ta.value = ta.value.slice(0, p) + ins + ta.value.slice(ta.selectionEnd || p); ta.focus();
           });
+        });
+        $("#vsTestCall", root).addEventListener("click", function () {
+          var tpl = ($("#vsTpl", root).value || "").trim();
+          var to = ($("#vsTestTo", root).value || "").trim();
+          if (!tpl) { toast("Write a script first"); return; }
+          if (!to) { toast("Enter a landline/VoIP number to test"); return; }
+          var out = $("#vsTestOut", root); if (out) out.innerHTML = loading();
+          send("/voice/test-drop", "POST", { to: to, scriptTemplate: tpl, motion: motion }).then(function (r) {
+            if (!out) return;
+            if (!r.ok) { out.innerHTML = '<span style="color:#ff7a90">Test failed: ' + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status) + "</span>"; return; }
+            var d = r.data || {};
+            out.innerHTML = '<b style="color:#34d399">Rendered (~' + d.estSeconds + "s" +
+              (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside sweet spot") + "):</b> “" + esc(d.rendered || "") + "” · " +
+              (d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
+              ((d.warnings && d.warnings.length) ? ' · <span style="color:#ffc24d">⚠ ' + d.warnings.map(esc).join(" · ") + "</span>" : "");
+          }).catch(function () { if (out) out.innerHTML = '<span style="color:#ff7a90">Could not reach the server.</span>'; });
         });
         $("#vsSave", root).addEventListener("click", function () {
           var name = ($("#vsName", root).value || "").trim();
