@@ -25,14 +25,20 @@ export async function POST(req: Request) {
   const persona = { ...DEFAULT_PERSONA, ...(b?.persona || {}) };
   const motion: Motion = b?.motion === "bd" ? "bd" : "recruiting";
 
-  const result = await testDrop(g.ctx.workspace.id, motion, {
-    to,
-    firstName: b?.firstName,
-    role: b?.role,
-    company: b?.company,
-    scriptTemplate,
-    persona,
-    voiceId: b?.voiceId,
-  });
-  return ok(result);
+  try {
+    const result = await testDrop(g.ctx.workspace.id, motion, {
+      to,
+      firstName: b?.firstName,
+      role: b?.role,
+      company: b?.company,
+      scriptTemplate,
+      persona,
+      voiceId: b?.voiceId,
+    });
+    return ok(result);
+  } catch (e: any) {
+    // Never leak a bare 500 to the Test tab — surface the real reason so the
+    // operator can act on it (bad voice id, Telnyx 4xx, missing key, ...).
+    return fail("test_failed", 502, { detail: e?.message || "unexpected error firing the test drop" });
+  }
 }

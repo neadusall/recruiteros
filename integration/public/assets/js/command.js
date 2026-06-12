@@ -4935,11 +4935,17 @@
       return '<div class="vd-field"><label>' + esc(label) + "</label><select id=\"" + id + "\">" + opts + "</select></div>";
     }
     function hrClock(h) { var n = ((h + 11) % 12) + 1; return n + ":00 " + (h < 12 ? "AM" : "PM"); }
-    /* Strong, clean spend estimate for a run of `cap` drops, from the real cost
-       catalog: Telnyx per-minute (incl. Premium AMD), cloned-voice TTS synthesis
-       per sentence, the landline/VoIP line check, and the LLM draft when AI-customize
-       is on. Word count → duration drives the minute + synthesis math. */
+    /* Real per-drop spend, straight from the cost catalog (lib/billing/rates.ts):
+       Telnyx voice minute incl. Premium AMD ($0.007/min), the landline/VoIP line
+       check ($0.0025/number), and — only when AI-customize is on — a fresh LLM
+       script ($0.004/lead) plus fresh cloned-voice synthesis ($0.02/sentence).
+       The cloned voice itself is a ONE-TIME setup (part of the TTS plan): in
+       placeholder mode the whole script is synthesized once and reused free, so
+       per-drop voice cost is ~$0. Premium AMD never lands every dial; ~2 of 3 roll
+       to voicemail, so a toggle re-bases the number onto drops that actually land. */
     var VD_RATE = { voiceMinute: 0.007, synthPerSentence: 0.02, lineCheck: 0.0025, aiDraft: 0.004, callOverheadSec: 20 };
+    var VD_LAND_RATE = 0.65;   // share of dialed calls that actually drop a voicemail (Premium AMD, in-window)
+    var vdLandedView = false;  // headline toggle: false = every drop sent, true = per voicemail that lands
     function estimateScriptShape(text) {
       var words = String(text || "").split(/\s+/).filter(Boolean).length;
       var sentences = (String(text || "").match(/[^.!?]+[.!?]+/g) || []).length || (words ? 1 : 0);
@@ -4947,43 +4953,58 @@
       return { words: words, sentences: sentences, seconds: seconds };
     }
     function usd(n) { return "$" + (n < 1 ? (n === 0 ? "0.00" : n.toFixed(3).replace(/0+$/, "").replace(/\.$/, ".00")) : n.toFixed(2)); }
-    /* Two price models, side by side so the operator sees the trade-off:
-        · Placeholders, one shared script; first name & role merge in. The cloned
-          voice is synthesized ONCE and reused free for every lead, no LLM cost.
-        · AI-customized, the LLM rewrites each lead's drop (kept to 15-25s); each
-          one is unique, so it synthesizes fresh and adds a small LLM draft cost.
-       Both share the Telnyx per-minute (incl. Premium AMD) + the landline/VoIP
-       line check, which scale per drop either way. */
-    function computeModel(cap, sentences, minutes, ai) {
-      var telnyx = cap * minutes * VD_RATE.voiceMinute;
-      var lineCheck = cap * VD_RATE.lineCheck;
-      var voice = ai ? cap * sentences * VD_RATE.synthPerSentence : sentences * VD_RATE.synthPerSentence;
-      var llm = ai ? cap * VD_RATE.aiDraft : 0;
-      return { telnyx: telnyx, lineCheck: lineCheck, voice: voice, llm: llm, total: telnyx + lineCheck + voice + llm };
+    /* One clean cost split, no jargon:
+        · one-time — the cloned voice is set up once. In placeholder mode the whole
+          script is synthesized once here and reused free for every lead.
+        · per drop — the Telnyx call minute + line check on every dial, plus, in
+          AI-customize mode, a fresh LLM script and fresh synthesis per lead. */
+    function computeCost(cap, sentences, minutes, ai) {
+      var callMin = minutes * VD_RATE.voiceMinute;
+      var perDrop = callMin + VD_RATE.lineCheck + (ai ? sentences * VD_RATE.synthPerSentence + VD_RATE.aiDraft : 0);
+      var oneTime = ai ? 0 : sentences * VD_RATE.synthPerSentence; // placeholders: synth once, reuse free
+      return { perDrop: perDrop, oneTime: oneTime, running: cap * perDrop, total: oneTime + cap * perDrop, callMin: callMin };
     }
     function renderEstimate() {
       var box = $("#vdEst"); if (!box) return;
       var cap = Math.max(0, parseInt(val("vdDailyCap") || "0", 10) || 0);
-      var aiOn = !!(($("#vdAiCustomize") || {}).checked);
+      var ai = !!(($("#vdAiCustomize") || {}).checked);
       var shape = estimateScriptShape(val("vdScript"));
       var minutes = Math.max(1, Math.ceil((shape.seconds + VD_RATE.callOverheadSec) / 60));
-      var ph = computeModel(cap, shape.sentences, minutes, false);
-      var aim = computeModel(cap, shape.sentences, minutes, true);
-      function modelCard(title, m, active, withLlm) {
-        return '<div style="flex:1;min-width:210px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04)' +
-          (active ? ";box-shadow:inset 0 0 0 1px #34d399" : "") + '">' +
-          '<div style="display:flex;align-items:baseline;gap:8px"><b style="font-size:12.5px">' + esc(title) + "</b>" +
-          (active ? '<span style="font-size:10.5px;font-weight:700;color:#34d399">● ACTIVE</span>' : "") +
-          '<span style="flex:1"></span><span style="font-size:17px;font-weight:700;color:' + (active ? "#34d399" : "#cdd6ea") + '">~' + usd(m.total) + "</span></div>" +
-          '<div class="muted" style="font-size:11.5px;margin-top:4px">Telnyx AMD ' + usd(m.telnyx) + " · cloned voice " + usd(m.voice) +
-          (withLlm ? " · AI script " + usd(m.llm) : "") + " · line check " + usd(m.lineCheck) + "</div></div>";
+      var c = computeCost(cap, shape.sentences, minutes, ai);
+      var landed = Math.round(cap * VD_LAND_RATE);
+
+      // The big number flips between "all drops sent" and "per voicemail that lands".
+      var bigNum, bigCap;
+      if (vdLandedView) {
+        bigNum = usd(landed > 0 ? c.total / landed : 0);
+        bigCap = "per voicemail that lands · about " + landed + " of " + cap + " land · " + usd(c.total) + " total";
+      } else {
+        bigNum = usd(c.total);
+        bigCap = "to send " + cap + " drop" + (cap === 1 ? "" : "s") +
+          (cap > 0 ? " · about " + usd(c.perDrop) + " each" : "");
       }
+
+      var toggle =
+        '<label style="display:inline-flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;margin-top:9px;color:#8aa0c6">' +
+        '<input type="checkbox" id="vdLandedToggle"' + (vdLandedView ? " checked" : "") + ' style="cursor:pointer"> ' +
+        'Show cost per voicemail that lands <span style="opacity:.7">(~2 of 3 dials roll to voicemail)</span></label>';
+
+      var lines =
+        '<div class="muted" style="font-size:11.5px;margin-top:9px;line-height:1.6">' +
+        '• One-time: cloned voice setup + first synthesis <b>' + usd(c.oneTime) + '</b> (then reused free)<br>' +
+        '• Every drop: ' + minutes + ' min Telnyx call <b>' + usd(c.callMin) + '</b> + line check <b>' + usd(VD_RATE.lineCheck) + '</b>' +
+        (ai ? '<br>• AI-customize adds, per lead: fresh script <b>' + usd(VD_RATE.aiDraft) + '</b> + fresh voice <b>' + usd(shape.sentences * VD_RATE.synthPerSentence) + '</b>' : '') +
+        '</div>';
+
       box.innerHTML =
-        '<div style="font-size:12px;margin:0 0 6px" class="muted">💸 Estimated spend for up to <b style="color:#cdd6ea">' + cap + "</b> drop" + (cap === 1 ? "" : "s") +
-        " · ~" + shape.seconds + "s each, " + minutes + " min/call billed · pick a model with the AI-customize toggle above</div>" +
-        '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
-        modelCard("Placeholders (no LLM)", ph, !aiOn, false) +
-        modelCard("AI-customized (LLM)", aim, aiOn, true) + "</div>";
+        '<div style="padding:13px 15px;border-radius:12px;background:rgba(52,211,153,.07);box-shadow:inset 0 0 0 1px rgba(52,211,153,.35)">' +
+        '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">' +
+        '<span style="font-size:27px;font-weight:800;color:#34d399;line-height:1">~' + bigNum + '</span>' +
+        '<span class="muted" style="font-size:12.5px">' + bigCap + '</span></div>' +
+        toggle + lines + '</div>';
+
+      var lt = $("#vdLandedToggle");
+      if (lt) lt.addEventListener("change", function () { vdLandedView = lt.checked; renderEstimate(); });
     }
     function campaignCard(c) {
       var win = "7-9 PM"; try { win = hr(c.window.startHour) + "-" + hr(c.window.endHour); } catch (e) {}
@@ -5255,19 +5276,31 @@
 
     /* ---- Test tab ---- */
     function paintTest(body) {
+      var grpLabel = function (t) {
+        return '<div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin:14px 0 6px">' + t + "</div>";
+      };
       body.innerHTML =
         '<div class="card"><h3>Test a single drop</h3>' +
-        '<p class="muted" style="font-size:13px">Fire one personalized drop to a number YOU control to verify the path (classify → assemble cloned voicemail → dial with AMD). Skips the time window; otherwise identical to production.</p>' +
-        '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
-        inp("vtTo", "Your test number (E.164)", "+13105551234") +
+        '<p class="muted" style="font-size:13px">Fire one personalized drop to a number YOU control, so you can hear the path end to end (render → assemble cloned voicemail → dial with AMD). The time window is skipped; everything else matches production.</p>' +
+
+        grpLabel("1 · Where to send the test") +
+        '<div style="max-width:360px">' + inp("vtTo", "Your test number (E.164)", "+13105551234") + "</div>" +
+
+        grpLabel("2 · The prospect (the call is personalized for them)") +
+        '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
         inp("vtFirst", "First name", "Hector") +
         inp("vtRole", "Role", "VP of Sales") +
-        inp("vtCompany", "Company", "Jaggaer") +
+        inp("vtCompany", "Company", "Jaggaer") + "</div>" +
+
+        grpLabel("3 · You (the voice and firm heard on the voicemail)") +
+        '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
         inp("vtAgentName", "Your name", "Ryan") +
         inp("vtAgentCompany", "Your firm", "Executive Search") + "</div>" +
-        '<div style="margin-top:10px"><div style="margin:4px 0">' + fieldChips("vtScript") + "</div>" +
+
+        grpLabel("4 · Script") +
+        '<div><div style="margin:4px 0">' + fieldChips("vtScript") + "</div>" +
         '<textarea id="vtScript" rows="4" style="width:100%">' + esc(VD_DEFAULT_SCRIPT) + "</textarea></div>" +
-        '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" id="vtGo">Send test drop</button>' +
+        '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" id="vtGo">📞 Send test drop</button>' +
         '<button class="btn btn-sm" id="vtAi">✨ AI customize</button>' +
         '<button class="btn btn-sm" id="vtListen">🔊 Listen first</button></div>' +
         '<div id="vtResult" style="margin-top:12px"></div></div>';
@@ -5295,12 +5328,24 @@
         if (!payload.to) { toast("Enter your test number"); return; }
         $("#vtResult").innerHTML = loading();
         send("/voice/test-drop", "POST", payload).then(function (r) {
-          if (!r.ok) { $("#vtResult").innerHTML = '<p class="muted">Test failed: ' + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status) + "</p>"; return; }
+          if (!r.ok) {
+            var why = (r.data && r.data.detail) || (r.data && r.data.error) || ("HTTP " + r.status);
+            $("#vtResult").innerHTML =
+              '<div style="padding:10px;border-radius:8px;background:rgba(255,122,144,.08);border:1px solid rgba(255,122,144,.25)">' +
+              '<b style="color:#ff7a90">Test failed.</b> <span style="font-size:13px">' + esc(why) + "</span></div>";
+            return;
+          }
           var d = r.data;
+          var status = d.dialError
+            ? '<span style="color:#ff7a90">dial failed (' + esc(d.dialError) + ")</span>"
+            : d.dryRun
+              ? '<span style="color:#ffc24d">dry-run — no Telnyx/clone keys set, nothing was dialed</span>'
+              : '<span style="color:#34d399">dialing now → ' + esc(d.callControlId) + "</span>";
           $("#vtResult").innerHTML = '<div style="padding:10px;border-radius:8px;background:rgba(255,255,255,.03)">' +
-            "<div style='font-size:13px'><b>Rendered (~" + d.estSeconds + "s" + (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside sweet spot") + "):</b></div>" +
+            "<div style='font-size:13px'><b>Rendered (~" + d.estSeconds + "s" + (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside the 15-25s sweet spot") + "):</b></div>" +
             '<div style="font-size:13px;margin:6px 0">“' + esc(d.rendered) + "”</div>" +
-            '<div class="muted" style="font-size:12px">segments ' + d.playlistLength + ' · synthesized ' + d.synthesized + ' · cached ' + d.cached + (d.dryRun ? ' · dry-run (no Telnyx/clone keys, nothing dialed)' : ' · dialing ' + esc(d.callControlId)) + '</div>' +
+            '<div style="font-size:12px;margin-top:6px">' + status + "</div>" +
+            '<div class="muted" style="font-size:12px;margin-top:2px">segments ' + d.playlistLength + " · synthesized " + d.synthesized + " · cached " + d.cached + "</div>" +
             ((d.warnings && d.warnings.length) ? '<div style="font-size:12px;color:#ffc24d;margin-top:4px">⚠ ' + d.warnings.map(esc).join(" · ") + "</div>" : "") +
             "</div>";
         });

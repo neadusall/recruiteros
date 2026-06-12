@@ -295,15 +295,36 @@ export async function testDrop(workspaceId: string, motion: Motion, input: TestD
   const vars: MergeVars = { firstName: input.firstName, role: input.role, company: input.company };
   const rendered = renderScript(input.scriptTemplate, vars, input.persona);
   const chk = checkScript(rendered, input.persona);
+  const warnings = [...chk.warnings];
 
+  // Assemble the cloned-voice playlist. A synthesis failure (bad voice id, clone
+  // quota, provider 4xx) must NOT abort the test — we still want to show the
+  // rendered script and dial the honest identifier. Degrade to a dry playlist and
+  // tell the operator exactly what failed.
   const segments = segmentScript(input.scriptTemplate, vars, input.persona);
-  const drop = await assembleDrop(segments, voice);
+  let drop: Awaited<ReturnType<typeof assembleDrop>>;
+  try {
+    drop = await assembleDrop(segments, voice);
+  } catch (e: any) {
+    warnings.push(`Voice synthesis failed (${e?.message || "error"}); dialed without the cloned drop.`);
+    drop = { playlist: [], synthesized: 0, cached: 0, dryRun: true };
+  }
 
-  const res: any = await withWorkspaceCreds(workspaceId, () =>
-    telnyx.dialWithAmd(input.to, connectionId(), `${appUrl()}/api/voice/webhook`, {
-      workspaceId, motion, test: true,
-    }),
-  );
+  // Dial. A Telnyx error here is reported, not thrown, so the operator sees the
+  // script rendered fine and knows precisely which leg failed.
+  let res: any = { dryRun: true };
+  let dialError: string | undefined;
+  try {
+    res = await withWorkspaceCreds(workspaceId, () =>
+      telnyx.dialWithAmd(input.to, connectionId(), `${appUrl()}/api/voice/webhook`, {
+        workspaceId, motion, test: true,
+      }),
+    );
+  } catch (e: any) {
+    dialError = e?.message || "dial failed";
+    warnings.push(`Dial failed (${dialError}).`);
+  }
+
   const ccid = res?.data?.call_control_id ?? `dry_${rid("call")}`;
   registerPending({
     callControlId: ccid, campaignId: "test", leadId: "test", workspaceId, motion,
@@ -316,10 +337,11 @@ export async function testDrop(workspaceId: string, motion: Motion, input: TestD
     ok: true,
     callControlId: ccid,
     dryRun: Boolean(res?.dryRun) || drop.dryRun,
+    dialError,
     rendered,
     estSeconds: chk.seconds,
     withinSweetSpot: chk.withinSweetSpot,
-    warnings: chk.warnings,
+    warnings,
     playlistLength: drop.playlist.length,
     synthesized: drop.synthesized,
     cached: drop.cached,
