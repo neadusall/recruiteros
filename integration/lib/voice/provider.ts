@@ -84,8 +84,18 @@ class ElevenLabsClient implements VoiceCloneClient {
       headers: { "xi-api-key": this.key(), "Content-Type": "application/json", Accept: "audio/mpeg" },
       body: JSON.stringify({
         text,
-        model_id: "eleven_turbo_v2",
-        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+        // Mirrors the values dialed in on the ElevenLabs playground for this
+        // voice (Ryan Nead). Drops are pre-rendered + cached, so we use the most
+        // natural production model, not a low-latency one. eleven_turbo_v2 was
+        // deprecated; multilingual v2 reads numbers/prosody more naturally.
+        model_id: "eleven_multilingual_v2",
+        voice_settings: {
+          stability: 0.46,
+          similarity_boost: 0.36,
+          style: 0.03,
+          use_speaker_boost: false,
+          speed: 0.97,
+        },
       }),
     });
     if (!res.ok) {
