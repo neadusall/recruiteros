@@ -83,6 +83,16 @@
     .fill.done { background:var(--ok); }
     .goal__total { margin-top:14px; padding-top:12px; border-top:1px solid var(--line); font-size:13.5px; color:var(--muted); text-align:center; }
     .goal__total b { color:var(--navy); font-size:17px; }
+    .steps { background:var(--bg-soft); border:1px solid var(--line); border-radius:var(--radius-sm); padding:16px 18px; margin-bottom:18px; }
+    .steps__title { font-size:13px; font-weight:600; color:var(--navy); text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px; }
+    .step { display:flex; gap:12px; margin:14px 0; font-size:14px; color:var(--navy-700); line-height:1.55; }
+    .step__n { flex:none; width:26px; height:26px; border-radius:50%; background:var(--teal); color:#fff; font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center; }
+    .step b { color:var(--navy); }
+    .howto { margin-top:9px; display:flex; flex-direction:column; gap:7px; background:var(--bg); border:1px solid var(--line); border-radius:9px; padding:11px 13px; font-size:13px; color:var(--muted); line-height:1.5; }
+    .howto b { color:var(--teal-600); }
+    .rows-head { font-size:14px; font-weight:600; color:var(--navy); margin:4px 0 10px; }
+    .rows-head span { font-weight:400; color:var(--muted); font-size:12.5px; display:block; margin-top:2px; }
+    .field-hint { font-size:11px; color:var(--muted); font-weight:400; }
     .gate { text-align:center; padding:30px 10px; }
     .footer { text-align:center; color:var(--muted); font-size:12px; margin-top:22px; }
     @media (max-width:560px){ .seedrow{ grid-template-columns:1fr 1fr; } .seedrow .prov{ grid-column:1 / -1; } .seedrow .del{ grid-column:1 / -1; width:100%; } }
@@ -115,35 +125,46 @@
       </div>
       <div class="card">
         <div class="why">
-          <b>Why we're doing this:</b> these inboxes quietly build sending reputation so Lume's emails reach real inboxes instead of spam — which is what turns outreach into placements.
-          <ul>
-            <li>Create each account, turn on <b>2-step verification</b>, and generate an <b>app password</b> (a one-time code that lets our system connect — <i>not</i> your normal password).</li>
-            <li><b>You never have to open or check these again.</b> Once connected, our system runs them automatically.</li>
-            <li>Paste each address + app password below. We confirm each connection instantly.</li>
-          </ul>
+          <b>Why this matters:</b> these inboxes build trust with Gmail, Outlook & Yahoo so Lume's emails land in real inboxes instead of spam. Set one up once and our system runs it forever — <b>you never have to open it again.</b>
+        </div>
+
+        <div class="steps">
+          <div class="steps__title">Do this for each account — just 3 steps</div>
+
+          <div class="step"><span class="step__n">1</span><div>
+            <b>Create the email account.</b> Make a new Gmail, Outlook, or Yahoo account. Use a real-looking name (like firstname.lastname) and add a recovery phone when asked — that keeps it from getting locked.
+            <div class="howto"><b>Tip:</b> don't make them all at once on the same Wi-Fi. Spread them out — some at home, some on your phone's data — over a day or two. 2–3 at a time, then a break.</div>
+          </div></div>
+
+          <div class="step"><span class="step__n">2</span><div>
+            <b>Turn on 2-step verification, then create an "app password."</b> This is a one-time code that lets our system connect safely — it is <i>not</i> your normal password.
+            <div class="howto">
+              <div><b>Gmail:</b> Account → Security → turn on 2-Step Verification → search "App passwords" → generate one. Also turn on IMAP (Settings → "Forwarding and POP/IMAP").</div>
+              <div><b>Outlook:</b> account.microsoft.com → Security → Advanced security → turn on two-step → "Create a new app password."</div>
+              <div><b>Yahoo:</b> Account Security → turn on two-step → "Generate app password" → choose "Other app."</div>
+            </div>
+          </div></div>
+
+          <div class="step"><span class="step__n">3</span><div>
+            <b>Paste it below.</b> Pick the provider, type the email address and the app password. A green ✓ means it connected — and the bars above climb toward 99. That's it!
+          </div></div>
         </div>
 
         <div class="name-row">
-          <label for="staffName">Your name</label>
+          <label for="staffName">Step A · Your name</label>
           <input id="staffName" placeholder="e.g. Jordan Smith" autocomplete="name">
         </div>
 
+        <div class="rows-head">Step B · Add your accounts
+          <span>We've started you with rows for Gmail, Outlook & Yahoo. Use the dropdown to set each row's provider. Click "＋ Add another inbox" for more.</span>
+        </div>
         <div class="rows" id="rows"></div>
         <button class="addbtn" id="addRow">＋ Add another inbox</button>
 
-        <button class="submit" id="submit">Connect my inboxes</button>
+        <button class="submit" id="submit">✓ Connect my inboxes</button>
         <div class="err" id="err"></div>
         <div class="tally" id="tally"></div>
-
-        <details>
-          <summary>How to generate an app password (Gmail · Outlook · Yahoo)</summary>
-          <ol>
-            <li><b>Gmail:</b> Account → Security → turn on 2-Step Verification → search "App passwords" → generate one → also enable IMAP in Gmail Settings → "Forwarding and POP/IMAP".</li>
-            <li><b>Outlook / Hotmail:</b> account.microsoft.com → Security → Advanced security options → turn on two-step verification → "Create a new app password".</li>
-            <li><b>Yahoo:</b> Account Security → turn on two-step verification → "Generate app password" → pick "Other app".</li>
-          </ol>
-          Paste the app password exactly as shown (spaces are fine — we strip them).
-        </details>
+        <p style="font-size:12px;color:var(--muted);margin-top:14px;text-align:center">Stuck on a row? A fresh app password almost always fixes a red ✕. Connected accounts stay connected — you can come back and add more anytime.</p>
       </div>
       <div class="footer">© Lume Search Partners · This is an internal setup page.</div>
     </div>
@@ -204,7 +225,7 @@
             '<option value="gmail">Gmail</option><option value="outlook">Outlook</option><option value="yahoo">Yahoo</option><option value="other">Other</option>' +
           '</select></div>' +
           '<div><label>Email address</label><input class="f-addr" type="email" placeholder="name@gmail.com" autocomplete="off"></div>' +
-          '<div><label>App password</label><input class="f-pass" type="text" placeholder="xxxx xxxx xxxx xxxx" autocomplete="off"></div>' +
+          '<div><label>App password <span class="field-hint">(not your normal password)</span></label><input class="f-pass" type="text" placeholder="xxxx xxxx xxxx xxxx" autocomplete="off"></div>' +
           '<button class="del" title="Remove">✕</button>' +
           '<div class="status"></div>';
         row.querySelector(".f-prov").value = provider || "gmail";
