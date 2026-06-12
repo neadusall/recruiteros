@@ -59,6 +59,31 @@ function connectionId(): string {
   return cred("TELNYX_CONNECTION_ID");
 }
 
+/**
+ * Normalize any operator-entered number to strict E.164 (e.g. +14792740716) so
+ * Telnyx never 422s on a "(479) 274-0716", "479-274-0716", "1 479 274 0716", or
+ * "+1 (479) 274-0716" style input. NANP (US/Canada) is the default plan:
+ *   - 10 digits        -> +1XXXXXXXXXX (bare local number)
+ *   - 11 digits w/ "1" -> +1XXXXXXXXXX (long-distance prefix)
+ * A value already carrying a "+" is trusted and just stripped of separators.
+ * International numbers entered without the "+" but with a country code (11-15
+ * digits) are kept as written. Returns "" when there aren't enough digits to be
+ * a real number, so callers can skip un-diallable junk.
+ */
+export function toE164(raw: string): string {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("+")) {
+    const digits = trimmed.replace(/\D/g, "");
+    return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : "";
+  }
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  if (digits.length >= 11 && digits.length <= 15) return `+${digits}`;
+  return "";
+}
+
 /* ---------------- import + mobile strip ---------------- */
 
 export interface RawLead {
@@ -91,7 +116,9 @@ export async function importLeads(
   const leads: VoiceLead[] = [];
 
   for (const r of raw) {
-    const phone = (r.phone || "").trim();
+    // Coerce to E.164 at the boundary so everything stored/classified/dialed
+    // downstream is "+14792740716"-shaped and Telnyx never rejects it.
+    const phone = toE164(r.phone || "");
     if (!phone) continue;
     const cls = await classifyLine(phone, { workspaceId, motion });
     const lineType = cls.lineType;
@@ -248,7 +275,7 @@ export async function runDueDrops(
     // Dial with Premium AMD; the webhook plays the playlist onto the voicemail.
     // Isolation: a customer's drops dial through their own Telnyx, not the house env.
     const res: any = await withWorkspaceCreds(workspaceId, () =>
-      telnyx.dialWithAmd(lead.phone, connectionId(), `${appUrl()}/api/voice/webhook`, {
+      telnyx.dialWithAmd(toE164(lead.phone), connectionId(), `${appUrl()}/api/voice/webhook`, {
         workspaceId, motion: c.motion, campaignId, leadId: lead.id, ref: lead.prospectId,
       }),
     );
@@ -316,13 +343,14 @@ export async function testDrop(workspaceId: string, motion: Motion, input: TestD
   let dialError: string | undefined;
   try {
     res = await withWorkspaceCreds(workspaceId, () =>
-      telnyx.dialWithAmd(input.to, connectionId(), `${appUrl()}/api/voice/webhook`, {
+      telnyx.dialWithAmd(toE164(input.to), connectionId(), `${appUrl()}/api/voice/webhook`, {
         workspaceId, motion, test: true,
       }),
     );
   } catch (e: any) {
+    // Surfaced as the first-class `dialError` field (rendered distinctly by the
+    // UI), so it's NOT also pushed into `warnings` — that would double it.
     dialError = e?.message || "dial failed";
-    warnings.push(`Dial failed (${dialError}).`);
   }
 
   const ccid = res?.data?.call_control_id ?? `dry_${rid("call")}`;
@@ -333,10 +361,22 @@ export async function testDrop(workspaceId: string, motion: Motion, input: TestD
     identifier: identifierLine(input.persona, input.firstName),
   });
 
+  // Distinguish the three dial outcomes so the UI never says "nothing dialed"
+  // about a call it actually attempted and Telnyx rejected:
+  //   dialed  = a real call went out (have a call_control_id)
+  //   dryRun  = provider unconfigured, nothing was attempted (a clean no-op)
+  //   failed  = a real attempt was made and errored (dialError carries why)
+  const dialDryRun = Boolean(res?.dryRun) && !dialError;
+  const dialed = !dialDryRun && !dialError;
+
   return {
     ok: true,
     callControlId: ccid,
-    dryRun: Boolean(res?.dryRun) || drop.dryRun,
+    dialed,
+    // dryRun reflects ONLY the dial now (was the call a genuine no-op?), not the
+    // clone-synthesis path — a missing clone key still lets the dial be real.
+    dryRun: dialDryRun,
+    cloneDryRun: drop.dryRun,
     dialError,
     rendered,
     estSeconds: chk.seconds,
