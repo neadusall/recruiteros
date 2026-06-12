@@ -4599,7 +4599,7 @@
      window (default 7-9 PM). Three tabs: Campaigns, Voice & Consent, Test. Talks to
      /api/voice/*. Shared by BD + Recruiting (the active motion tags the campaign). */
   var VD_DEFAULT_SCRIPT =
-    "Hi {first_name}, this is {agent_name} with {agent_company}. I came across your {role} search and wanted to reach out, we help teams hire faster. If it’s useful, give me a call back at this number. Thanks {first_name}.";
+    "Hi {first_name}... this is {agent_name}, with {agent_company}. I came across your {role} search, and wanted to reach out. We help teams hire faster. If it’s useful, give me a call back, at this number. Thanks {first_name}.";
   var VD_CONSENT_TEXT =
     "I consent to the creation and use of a synthetic copy of my voice for outreach that I authorize.";
 
