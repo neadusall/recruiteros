@@ -20,7 +20,7 @@
 import { rid } from "../core/ids";
 import { classifyLine, type LineType } from "../signals/phoneClassify";
 import { resolveTimezone } from "./compliance";
-import { ensureVoiceReady, getCampaign, addLead, findLead } from "./store";
+import { ensureVoiceReady, getCampaign, addLead, findLead, findAutoPilot } from "./store";
 import type { VoiceLead } from "./types";
 import type { Prospect, Motion } from "../core/types";
 
@@ -60,14 +60,21 @@ export async function voiceOnEmailSent(
   prospect: Prospect,
   opts: { motion?: Motion; voiceCampaignId?: string; voicemailScript?: string; allowReenqueue?: boolean } = {},
 ): Promise<VoiceOnSendResult> {
-  if (!voiceOnSendEnabled()) return { queued: false, reason: "disabled" };
   await ensureVoiceReady();
 
-  const campaignId = opts.voiceCampaignId || defaultCampaignId();
+  // Target resolution: an explicitly linked campaign, then the env default, then
+  // the workspace's always-on AUTOPILOT campaign for this motion.
+  const autoPilot = findAutoPilot(workspaceId, opts.motion);
+  const campaignId = opts.voiceCampaignId || defaultCampaignId() || autoPilot?.id;
   if (!campaignId) return { queued: false, reason: "no_campaign" };
 
   const campaign = getCampaign(workspaceId, campaignId);
   if (!campaign) return { queued: false, reason: "no_campaign" };
+
+  // An autopilot target is always-on by design (no env switch needed). Otherwise
+  // the reactive trigger only fires when RECRUITEROS_VOICE_ON_SEND is set, so
+  // turning email on never silently starts cold-calling.
+  if (!campaign.autoPilot && !voiceOnSendEnabled()) return { queued: false, reason: "disabled" };
   if (campaign.status === "paused") return { queued: false, reason: "campaign_paused", campaignId };
 
   // Prefer the explicitly enriched direct line; fall back to the primary number.

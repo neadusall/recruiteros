@@ -10,6 +10,7 @@
 
 import { requireSession, body, ok, fail } from "../../../../lib/api";
 import { withWorkspaceCreds } from "../../../../lib/connected";
+import { cred } from "../../../../lib/providers/http";
 import {
   listConsent, upsertConsent, deleteConsent, cacheStats, getVoiceClient, getVoiceClientFor,
   voiceProviderStatuses, verifyVoiceProvider, type VoiceProvider,
@@ -18,13 +19,24 @@ import {
 export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
-  const client = getVoiceClient();
+  const ws = g.ctx.workspace.id;
+  // Resolve provider status the workspace-aware way — the SAME credential context
+  // the Test button uses — so a key entered as a workspace credential (not an env
+  // var) is reported as connected here too. Reading these outside the context only
+  // saw process.env, which made the setup gate show "not connected" even with keys
+  // saved and voices on file.
+  const status = await withWorkspaceCreds(ws, () => {
+    const client = getVoiceClient();
+    return {
+      provider: { id: client.id, configured: client.configured() }, // default (back-compat)
+      providers: voiceProviderStatuses(),                            // [{ id, configured }] per vendor
+      defaultVoiceConfigured: Boolean(cred("VOICE_CLONE_VOICE_ID")),
+    };
+  });
   return ok({
-    consent: listConsent(g.ctx.workspace.id),
+    consent: listConsent(ws),
     cache: await cacheStats(),
-    provider: { id: client.id, configured: client.configured() }, // default (back-compat)
-    providers: voiceProviderStatuses(),                            // [{ id, configured }] per vendor
-    defaultVoiceConfigured: Boolean(process.env.VOICE_CLONE_VOICE_ID),
+    ...status,
   });
 }
 

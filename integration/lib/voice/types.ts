@@ -164,6 +164,25 @@ export interface VoiceCampaign {
    * attestation, frequency/daily caps, dry-run safety. Off for real campaigns;
    * the loud UI badge exists so it's never left on by accident. */
   testMode?: boolean;
+  /**
+   * AI CUSTOMIZE: when true, each lead's drop is rewritten per-lead by the LLM
+   * drafter (see draft.ts) following the channel window (AMD 15-25s) + the speech
+   * and compliance rules, instead of using the one shared scriptTemplate. The
+   * script template still seeds the AI's direction. Identification is re-checked
+   * on the AI output; if it fails (or the LLM errs) the drop falls back to the
+   * templated script, so a missing key never blocks a campaign. Off by default —
+   * per-lead scripts are unique, so they synthesize fresh (less cache reuse). */
+  aiCustomize?: boolean;
+  /**
+   * ALWAYS-ON AUTOPILOT: when true this is the workspace's evergreen campaign —
+   * leads fed into the system (the email-sent → voice-drop trigger, or an import)
+   * are auto-enqueued here and the dial tick keeps sending to due leads with no
+   * manual launch. Attesting consent flips it straight to "running" and it stays
+   * running. One autopilot campaign per workspace+motion is used as the reactive
+   * target; pairs naturally with aiCustomize so each incoming lead gets a fresh,
+   * in-window drop. Every compliance gate still applies (consent, window, line
+   * filter, caps). */
+  autoPilot?: boolean;
   /* ---- compliance gates (all must be satisfied before launch) ---- */
   /** Operator attested a lawful basis (consent / business relationship). */
   consentAttested: boolean;
@@ -192,6 +211,8 @@ export interface VoiceCampaignInput {
   frequencyCapDays?: number;
   consentAttested?: boolean;
   testMode?: boolean;
+  aiCustomize?: boolean;
+  autoPilot?: boolean;
 }
 
 /** Defaults applied to a new persona / window when the operator omits them. */

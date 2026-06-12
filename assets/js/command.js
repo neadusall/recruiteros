@@ -4604,14 +4604,26 @@
     "I consent to the creation and use of a synthetic copy of my voice for outreach that I authorize.";
 
   function renderVoiceDrops(el) {
-    var vd = { tab: "campaigns" };
+    var vd = { tab: "campaigns", creating: false, scripts: [], prefill: null };
     el.innerHTML = head("Voice Drops",
-      "Personalized voicemail outreach to verified business landline/VoIP lines. Premium AMD finds the voicemail, then drops a cloned-voice message with the first name and role spliced in. Mobiles are filtered out and never dialed; each lead is dialed only inside its own local window (default 7–9 PM).") +
+      "Cloned-voice voicemail to verified business landlines. Mobiles are filtered out and never dialed; each lead is dialed only inside its own local window (default 7–9 PM).") +
+      '<div class="vd-summary" style="margin:0 0 14px;padding:12px 14px;border-radius:12px;background:rgba(255,255,255,.04);font-size:12.5px;line-height:1.55">' +
+      '<b style="font-size:13px">How it works</b>' +
+      '<div class="muted" style="margin-top:6px">' +
+      'Your script is just an <b>example</b>. Pick your engine: <b>Placeholders</b> merge first name &amp; role into one shared script (cheapest — the voice is synthesized once, reused free), or <b>AI-customize</b> lets the LLM rewrite each lead’s drop. Either way it follows the same rules:' +
+      '</div>' +
+      '<div class="muted" style="margin-top:6px">' +
+      '• <b>Length</b> — 15–25s for AMD voicemail, 20–45s for LinkedIn voice notes.<br>' +
+      '• <b>After-hours</b> — sent 7–9 PM in each lead’s OWN local time, clamped to a lawful 8 AM–9 PM envelope.<br>' +
+      '• <b>Landline/VoIP only</b> — every number is line-checked; mobiles are stripped and never dialed.<br>' +
+      '• <b>Honest + natural</b> — always states your real name &amp; firm, formatted for natural speech, never invents referrals or claims.<br>' +
+      '• <b>Estimated spend</b> — the campaign builder shows live cost for both models before you launch.' +
+      '</div></div>' +
       '<div class="vd-tabs" style="display:flex;gap:8px;margin:2px 0 16px;flex-wrap:wrap"></div>' +
       '<div id="vdBody">' + loading() + "</div>";
 
     function tabBar() {
-      var tabs = [["campaigns", "📞 Campaigns"], ["voice", "🎙️ Voice"], ["test", "🧪 Test"]];
+      var tabs = [["campaigns", "📞 Campaigns"], ["scripts", "📝 Scripts"], ["voice", "🎙️ Voice"], ["test", "🧪 Test"]];
       $(".vd-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="btn btn-sm ' + (vd.tab === t[0] ? "btn-primary" : "") + '" data-vdtab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -4624,6 +4636,7 @@
     function paint() {
       var body = $("#vdBody"); if (!body) return;
       if (vd.tab === "campaigns") return paintCampaigns(body);
+      if (vd.tab === "scripts") return paintScripts(body);
       if (vd.tab === "voice") return paintVoice(body);
       return paintTest(body);
     }
@@ -4651,7 +4664,9 @@
         ["scheduled", "Scheduled", "#8aa0c6"], ["queued", "Queued", "#8aa0c6"],
         ["human_answered", "Human", "#b9a6ff"], ["no_answer", "No answer", "#8aa0c6"],
         ["filtered_mobile", "Mobiles filtered", "#ff7a90"], ["suppressed", "Suppressed", "#ff7a90"]];
-      return '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px">' + order.map(function (o) {
+      var shown = order.filter(function (o) { return (stats[o[0]] || 0) > 0; });
+      if (!shown.length) return '<div class="muted" style="font-size:12px;margin-top:8px">No activity yet.</div>';
+      return '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px">' + shown.map(function (o) {
         return '<span style="font-size:13px"><b style="color:' + o[2] + '">' + (stats[o[0]] || 0) + "</b> <span class='muted'>" + o[1] + "</span></span>";
       }).join("") + "</div>";
     }
@@ -4690,68 +4705,366 @@
       }).catch(function () { mount.innerHTML = '<span class="muted">Could not reach the server.</span>'; });
     }
 
+    /* Ask the backend LLM to customize the script in a textarea, following the
+       channel window (AMD 15–25s) + the speech/compliance rules, then drop the
+       result back into the box. Seeded by whatever's already typed. */
+    function aiCustomizeInto(taId, outId, opts) {
+      opts = opts || {};
+      var ta = $("#" + taId); if (!ta) return;
+      var out = outId ? $("#" + outId) : null;
+      var seed = (ta.value || "").trim();
+      if (out) out.textContent = "✨ customizing…";
+      send("/voice/draft", "POST", {
+        channel: opts.channel || "amd",
+        templated: opts.templated !== false,
+        seed: seed,
+        persona: opts.persona,
+        firstName: opts.firstName, role: opts.role, company: opts.company,
+      }).then(function (r) {
+        if (!r.ok || !r.data) { if (out) out.textContent = "AI customize failed."; return; }
+        var d = r.data;
+        if (d.dryRun || !d.text) {
+          if (out) out.innerHTML = '<span class="muted">' + esc((d.warnings && d.warnings[0]) || "Connect an Anthropic API key to use AI customize.") + "</span>";
+          if (d.text) ta.value = d.text;
+          if (typeof renderEstimate === "function") renderEstimate();
+          return;
+        }
+        ta.value = d.text;
+        if (out) out.innerHTML = '<span class="muted">✨ AI · ~' + d.seconds + "s" +
+          (d.withinWindow ? ", in window" : ", outside window") + (d.identifies ? "" : " · ⚠ add your name/firm") + "</span>";
+        if (typeof renderEstimate === "function") renderEstimate();
+      }).catch(function () { if (out) out.textContent = "Could not reach the server."; });
+    }
+
+    /* ---- Scripts tab: a saved library of reusable voicemail scripts ----
+       The database of cloned-voice voicemails. Save as many as you like, listen to
+       any one BEFORE deploying, then pick one when you build a campaign. Talks to
+       /api/voice/scripts (shared with the Campaign Sequences Library) so the same
+       scripts show in both the admin and recruiter portals. */
+    function loadScripts(cb) {
+      api("/voice/scripts?motion=" + motion).then(function (d) {
+        vd.scripts = (d && d.scripts) || [];
+        if (cb) cb();
+      }).catch(function () { vd.scripts = vd.scripts || []; if (cb) cb(); });
+    }
+    function scriptPickerOptions() {
+      var opts = '<option value="">— start from scratch, or pick a saved script —</option>';
+      (vd.scripts || []).forEach(function (s) {
+        opts += '<option value="' + esc(s.id) + '">' + esc(s.name) + " (~" + (s.estSeconds || 0) + "s)</option>";
+      });
+      return opts;
+    }
+    function scriptCard(s) {
+      var dot = s.withinSweetSpot ? "#34d399" : "#ffc24d";
+      var len = "~" + (s.estSeconds || 0) + "s" + (s.withinSweetSpot ? " · in the 15–25s sweet spot" : " · outside the 15–25s sweet spot");
+      return '<div class="card" data-sid="' + esc(s.id) + '" style="margin-top:12px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px">' +
+        "<h3 style='margin:0'>" + esc(s.name) + ' <span class="muted" style="font-size:12px">· ' + esc(s.motion || motion) + "</span></h3>" +
+        '<span style="font-size:12px;color:' + dot + '">' + esc(len) + "</span></div>" +
+        '<div class="muted" style="font-size:13px;margin:8px 0">“' + esc(s.preview || s.template || "") + '”</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+        '<button class="btn btn-sm btn-primary" data-sact="use" data-sid="' + esc(s.id) + '">Use in a campaign</button>' +
+        '<button class="btn btn-ghost btn-sm" data-sact="listen" data-sid="' + esc(s.id) + '">🔊 Listen first</button>' +
+        '<button class="btn btn-ghost btn-sm" data-sact="edit" data-sid="' + esc(s.id) + '">✎ Edit</button>' +
+        '<span style="flex:1"></span>' +
+        '<button class="btn btn-ghost btn-sm" data-sact="del" data-sid="' + esc(s.id) + '">🗑</button></div>' +
+        '<div class="muted" data-spv="' + esc(s.id) + '" style="font-size:12px;margin-top:8px"></div></div>';
+    }
+    function paintScripts(body) {
+      body.innerHTML = loading();
+      loadScripts(function () {
+        var rows = vd.scripts || [];
+        var toolbar = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
+          '<span class="muted" style="font-size:13px">' + rows.length + " saved script" + (rows.length === 1 ? "" : "s") +
+          " · listen to any one before you deploy it, then pick it when you build a campaign</span>" +
+          '<button class="btn btn-primary btn-sm" id="vsbNew">＋ New script</button></div>';
+        if (!rows.length) {
+          body.innerHTML = toolbar + '<div class="card"><p class="muted" style="font-size:13px">No saved scripts yet. ' +
+            "Build a library of reusable cloned-voice voicemails here — first name &amp; role splice in like an email merge — " +
+            "then pick one when you create a campaign. Sweet spot is 15–25s.</p></div>";
+        } else {
+          body.innerHTML = toolbar + rows.map(scriptCard).join("");
+        }
+        var nb = $("#vsbNew", body); if (nb) nb.addEventListener("click", function () { scriptEditor(null); });
+        Array.prototype.forEach.call(body.querySelectorAll("[data-sact]"), function (b) {
+          b.addEventListener("click", function () {
+            var act = b.getAttribute("data-sact"), id = b.getAttribute("data-sid");
+            var s = (vd.scripts || []).filter(function (x) { return x.id === id; })[0];
+            if (act === "del") {
+              if (!confirm("Delete this script from your library?")) return;
+              send("/voice/scripts?id=" + encodeURIComponent(id), "DELETE").then(function () { toast("Deleted"); paintScripts(body); });
+              return;
+            }
+            if (!s) return;
+            if (act === "listen") { previewInto($('[data-spv="' + id + '"]'), { scriptTemplate: s.template }); return; }
+            if (act === "edit") { scriptEditor(s); return; }
+            if (act === "use") {
+              vd.prefill = { name: s.name, template: s.template };
+              vd.creating = true; vd.tab = "campaigns"; tabBar(); paint();
+              return;
+            }
+          });
+        });
+      });
+    }
+    /* Create/edit one saved script, with a Listen button so the operator hears the
+       cloned voicemail BEFORE saving or deploying it. */
+    function scriptEditor(s) {
+      var isEdit = !!s;
+      openModal(isEdit ? "Edit voice script" : "New voice script",
+        "First name & role splice in like an email merge. Sweet spot is 15–25s — listen before you save.",
+        '<input id="seName" placeholder="Script name (e.g. Q3 VP Sales — warm)" style="width:100%" value="' + esc(isEdit ? s.name : "") + '"/>' +
+        '<div style="margin:8px 0">' + fieldChips("seTpl") + "</div>" +
+        '<textarea id="seTpl" rows="5" style="width:100%">' + esc(isEdit ? s.template : VD_DEFAULT_SCRIPT) + "</textarea>" +
+        '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<button class="btn btn-sm" id="seAi">✨ AI customize</button>' +
+        '<button class="btn btn-sm" id="seListen">🔊 Listen</button><span class="muted" id="seListenOut" style="font-size:12px"></span></div>' +
+        '<div class="modal-foot" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="seSave">Save script</button></div>',
+        function (root, close) {
+          wireChips(root);
+          $("#seAi", root).addEventListener("click", function () {
+            aiCustomizeInto("seTpl", "seListenOut", { templated: true });
+          });
+          $("#seListen", root).addEventListener("click", function () {
+            var tpl = ($("#seTpl", root).value || "").trim();
+            if (!tpl) { toast("Write a script first"); return; }
+            previewInto($("#seListenOut", root), { scriptTemplate: tpl });
+          });
+          $("#seSave", root).addEventListener("click", function () {
+            var name = ($("#seName", root).value || "").trim();
+            var tpl = ($("#seTpl", root).value || "").trim();
+            if (!name || !tpl) { toast("Name + script required"); return; }
+            var payload = { name: name, template: tpl, motion: motion };
+            if (isEdit) payload.id = s.id;
+            send("/voice/scripts", "PUT", payload).then(function (r) {
+              close();
+              if (r.ok) { toast("Saved"); if (vd.tab === "scripts") paintScripts($("#vdBody")); }
+              else toast("Save failed");
+            });
+          });
+        });
+    }
+
     /* ---- Campaigns tab ---- */
     function newCampaignForm() {
       return '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
         inp("vdName", "Campaign name", "Q3 VP Sales — landlines") +
-        inp("vdCaller", "Approved 10DLC caller-ID (E.164)", "+13105551234") +
+        '<div class="vd-field" id="vdCallerField"><label>Approved 10DLC caller-ID (E.164)</label>' +
+        '<input id="vdCaller" type="text" placeholder="+13105551234" /></div>' +
         inp("vdAgentName", "Your name (stated on the call)", "Ryan") +
         inp("vdAgentCompany", "Your firm (stated on the call)", "Executive Search") +
-        inp("vdWinStart", "Window start (local hour, 24h)", "19", "number") +
-        inp("vdWinEnd", "Window end (local hour, 24h)", "21", "number") +
+        hourSelect("vdWinStart", "Send window — start (local time)", 19) +
+        hourSelect("vdWinEnd", "Send window — end (local time)", 21) +
         inp("vdDailyCap", "Daily cap", "100", "number") +
         inp("vdFreq", "Min days between attempts", "30", "number") +
         "</div>" +
+        '<div class="vd-hint" style="margin:6px 0 2px">Drops land after hours, in each lead’s OWN local time (default 7–09 PM), so the line rolls to voicemail. Clamped to a lawful 8 AM–9 PM envelope.</div>' +
         '<label style="display:flex;align-items:center;gap:8px;margin:10px 0;font-size:13px;cursor:pointer">' +
-        '<input type="checkbox" id="vdTestMode"> <span><b>Test mode</b> — ignore the calling window so Run/cron dials at any hour (for testing only; every other safeguard stays on).</span></label>' +
-        '<div class="vd-field vd-script"><label>Voicemail script <span>— first name &amp; role splice in like an email merge</span></label>' +
+        '<input type="checkbox" id="vdTestMode"> <span><b>Test mode</b> — ignore the calling window (testing only; every other safeguard stays on).</span></label>' +
+        '<label style="display:flex;align-items:center;gap:8px;margin:10px 0;font-size:13px;cursor:pointer">' +
+        '<input type="checkbox" id="vdAiCustomize"> <span><b>AI-customize per lead</b> — the AI rewrites each drop from your script below, kept to 15–25s and the speech rules. More natural, but each lead synthesizes fresh (a little more spend).</span></label>' +
+        '<label style="display:flex;align-items:center;gap:8px;margin:10px 0;font-size:13px;cursor:pointer">' +
+        '<input type="checkbox" id="vdAutoPilot"> <span><b>Always-on autopilot</b> — keep this campaign running and auto-send to leads as they’re fed into the system (email-sent trigger or import). Turns on AI-customize so every incoming lead gets a fresh, in-window drop. Consent + all safeguards still required.</span></label>' +
+        '<div class="vd-field vd-script"><label>Start from a saved script <span>— pick one from your library, or write your own below</span></label>' +
+        '<select id="vdScriptPick" style="width:100%">' + scriptPickerOptions() + "</select></div>" +
+        '<div class="vd-field vd-script"><label>Voicemail script <span>— an example; the AI customizes the rest. First name &amp; role splice in like an email merge</span></label>' +
         '<div class="vd-chips">' + fieldChips("vdScript") + "</div>" +
         '<textarea id="vdScript" rows="4">' + esc(VD_DEFAULT_SCRIPT) + "</textarea>" +
         '<div class="vd-hint">Sweet spot is 15–25s. Human-answer sign-off: “' + esc("Sorry, wrong number. Thanks.") + '” (editable per campaign).</div></div>' +
-        '<div class="vd-actions"><button class="btn btn-primary btn-sm" id="vdCreate">Create campaign</button></div>';
+        '<div class="vd-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary btn-sm" id="vdCreate">Create campaign</button>' +
+        '<button class="btn btn-sm" id="vdAi">✨ AI customize</button>' +
+        '<button class="btn btn-sm" id="vdListen">🔊 Listen first</button>' +
+        '<span class="muted" id="vdListenOut" style="font-size:12px"></span></div>' +
+        '<div id="vdEst" class="vd-est" style="margin-top:12px"></div>';
     }
     function inp(id, label, ph, type) {
       return '<div class="vd-field"><label>' + esc(label) + "</label>" +
         '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph) + '" /></div>';
+    }
+    /* AM/PM hour picker (cleaner than military time). Option values stay 0–23 so
+       the backend window math is unchanged; labels read "7:00 PM". */
+    function hourSelect(id, label, def) {
+      var opts = "";
+      for (var h = 0; h < 24; h++) opts += '<option value="' + h + '"' + (h === def ? " selected" : "") + ">" + esc(hrClock(h)) + "</option>";
+      return '<div class="vd-field"><label>' + esc(label) + "</label><select id=\"" + id + "\">" + opts + "</select></div>";
+    }
+    function hrClock(h) { var n = ((h + 11) % 12) + 1; return n + ":00 " + (h < 12 ? "AM" : "PM"); }
+    /* Strong, clean spend estimate for a run of `cap` drops, from the real cost
+       catalog: Telnyx per-minute (incl. Premium AMD), cloned-voice TTS synthesis
+       per sentence, the landline/VoIP line check, and the LLM draft when AI-customize
+       is on. Word count → duration drives the minute + synthesis math. */
+    var VD_RATE = { voiceMinute: 0.007, synthPerSentence: 0.02, lineCheck: 0.0025, aiDraft: 0.004, callOverheadSec: 20 };
+    function estimateScriptShape(text) {
+      var words = String(text || "").split(/\s+/).filter(Boolean).length;
+      var sentences = (String(text || "").match(/[^.!?]+[.!?]+/g) || []).length || (words ? 1 : 0);
+      var seconds = Math.max(1, Math.round(words / 2.5));
+      return { words: words, sentences: sentences, seconds: seconds };
+    }
+    function usd(n) { return "$" + (n < 1 ? (n === 0 ? "0.00" : n.toFixed(3).replace(/0+$/, "").replace(/\.$/, ".00")) : n.toFixed(2)); }
+    /* Two price models, side by side so the operator sees the trade-off:
+        · Placeholders — one shared script; first name & role merge in. The cloned
+          voice is synthesized ONCE and reused free for every lead, no LLM cost.
+        · AI-customized — the LLM rewrites each lead's drop (kept to 15–25s); each
+          one is unique, so it synthesizes fresh and adds a small LLM draft cost.
+       Both share the Telnyx per-minute (incl. Premium AMD) + the landline/VoIP
+       line check, which scale per drop either way. */
+    function computeModel(cap, sentences, minutes, ai) {
+      var telnyx = cap * minutes * VD_RATE.voiceMinute;
+      var lineCheck = cap * VD_RATE.lineCheck;
+      var voice = ai ? cap * sentences * VD_RATE.synthPerSentence : sentences * VD_RATE.synthPerSentence;
+      var llm = ai ? cap * VD_RATE.aiDraft : 0;
+      return { telnyx: telnyx, lineCheck: lineCheck, voice: voice, llm: llm, total: telnyx + lineCheck + voice + llm };
+    }
+    function renderEstimate() {
+      var box = $("#vdEst"); if (!box) return;
+      var cap = Math.max(0, parseInt(val("vdDailyCap") || "0", 10) || 0);
+      var aiOn = !!(($("#vdAiCustomize") || {}).checked);
+      var shape = estimateScriptShape(val("vdScript"));
+      var minutes = Math.max(1, Math.ceil((shape.seconds + VD_RATE.callOverheadSec) / 60));
+      var ph = computeModel(cap, shape.sentences, minutes, false);
+      var aim = computeModel(cap, shape.sentences, minutes, true);
+      function modelCard(title, m, active, withLlm) {
+        return '<div style="flex:1;min-width:210px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04)' +
+          (active ? ";box-shadow:inset 0 0 0 1px #34d399" : "") + '">' +
+          '<div style="display:flex;align-items:baseline;gap:8px"><b style="font-size:12.5px">' + esc(title) + "</b>" +
+          (active ? '<span style="font-size:10.5px;font-weight:700;color:#34d399">● ACTIVE</span>' : "") +
+          '<span style="flex:1"></span><span style="font-size:17px;font-weight:700;color:' + (active ? "#34d399" : "#cdd6ea") + '">~' + usd(m.total) + "</span></div>" +
+          '<div class="muted" style="font-size:11.5px;margin-top:4px">Telnyx AMD ' + usd(m.telnyx) + " · cloned voice " + usd(m.voice) +
+          (withLlm ? " · AI script " + usd(m.llm) : "") + " · line check " + usd(m.lineCheck) + "</div></div>";
+      }
+      box.innerHTML =
+        '<div style="font-size:12px;margin:0 0 6px" class="muted">💸 Estimated spend for up to <b style="color:#cdd6ea">' + cap + "</b> drop" + (cap === 1 ? "" : "s") +
+        " · ~" + shape.seconds + "s each, " + minutes + " min/call billed · pick a model with the AI-customize toggle above</div>" +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+        modelCard("Placeholders (no LLM)", ph, !aiOn, false) +
+        modelCard("AI-customized (LLM)", aim, aiOn, true) + "</div>";
     }
     function campaignCard(c) {
       var win = "7–9 PM"; try { win = hr(c.window.startHour) + "–" + hr(c.window.endHour); } catch (e) {}
       var ready = c.consentAttested;
       var testOn = !!c.testMode;
       var testBadge = testOn ? ' <span style="font-size:11px;font-weight:700;color:#0b0b0b;background:#ffc24d;border-radius:4px;padding:1px 6px">⚠ TEST MODE — window ignored</span>' : "";
+      var autoBadge = c.autoPilot ? ' <span style="font-size:11px;font-weight:700;color:#0b0b0b;background:#34d399;border-radius:4px;padding:1px 6px">♾ AUTOPILOT</span>' : "";
+      var aiBadge = c.aiCustomize ? ' <span style="font-size:11px;font-weight:700;color:#cdd6ea;background:#2a2440;border-radius:4px;padding:1px 6px">✨ AI</span>' : "";
       return '<div class="card" data-cid="' + c.id + '" style="margin-top:12px' + (testOn ? ";box-shadow:inset 0 0 0 1px #ffc24d" : "") + '">' +
         '<div style="display:flex;justify-content:space-between;align-items:center">' +
-        "<h3 style='margin:0'>" + esc(c.name) + ' <span class="muted" style="font-size:12px">· ' + esc(c.status) + "</span>" + testBadge + "</h3>" +
+        "<h3 style='margin:0'>" + esc(c.name) + ' <span class="muted" style="font-size:12px">· ' + esc(c.status) + "</span>" + autoBadge + aiBadge + testBadge + "</h3>" +
         '<span class="muted" style="font-size:12px">caller ' + esc(c.callerId || "—") + " · window " + esc(win) + " local · " + esc(c.motion) + "</span></div>" +
         statRow(c.stats) +
-        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' +
-        '<button class="btn btn-sm" data-vdact="import" data-cid="' + c.id + '">⬆ Import leads</button>' +
-        '<button class="btn btn-sm ' + (ready ? "" : "btn-primary") + '" data-vdact="attest" data-cid="' + c.id + '">' + (ready ? "✓ Consent attested" : "Attest consent") + "</button>" +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">' +
         '<button class="btn btn-sm btn-primary" data-vdact="launch" data-cid="' + c.id + '">▶ Launch</button>' +
-        '<button class="btn btn-sm" data-vdact="run" data-cid="' + c.id + '">⏱ Run window now</button>' +
-        '<button class="btn btn-sm" data-vdact="preview" data-cid="' + c.id + '">🔊 Preview</button>' +
-        '<button class="btn btn-sm" data-vdact="testmode" data-cid="' + c.id + '" data-test="' + (testOn ? "1" : "0") + '">' + (testOn ? "🟡 Test mode: ON" : "Test mode: off") + "</button>" +
-        '<button class="btn btn-sm" data-vdact="del" data-cid="' + c.id + '">🗑</button></div>' +
+        '<button class="btn btn-sm" data-vdact="run" data-cid="' + c.id + '">⏱ Run now</button>' +
+        '<button class="btn btn-sm" data-vdact="import" data-cid="' + c.id + '">⬆ Import</button>' +
+        '<button class="btn btn-sm ' + (ready ? "" : "btn-primary") + '" data-vdact="attest" data-cid="' + c.id + '">' + (ready ? "✓ Consent" : "Attest consent") + "</button>" +
+        '<span style="flex:1"></span>' +
+        '<button class="btn btn-ghost btn-sm" data-vdact="preview" data-cid="' + c.id + '">🔊 Preview</button>' +
+        '<button class="btn btn-ghost btn-sm" data-vdact="testmode" data-cid="' + c.id + '" data-test="' + (testOn ? "1" : "0") + '">' + (testOn ? "🟡 Test: on" : "Test: off") + "</button>" +
+        '<button class="btn btn-ghost btn-sm" data-vdact="del" data-cid="' + c.id + '">🗑</button></div>' +
         '<div class="vd-msg muted" data-msg="' + c.id + '" style="font-size:12px;margin-top:8px"></div></div>';
     }
     function hr(h) { var n = ((h + 11) % 12) + 1; return n + (h < 12 ? " AM" : " PM"); }
 
     function paintCampaigns(body) {
       body.innerHTML = loading();
+      // Load the saved-script library first so the create form's picker is populated.
+      loadScripts(function () {
       api("/voice/campaigns?motion=" + motion).then(function (d) {
-        var list = ((d && d.campaigns) || []).map(campaignCard).join("");
-        body.innerHTML = '<div class="card"><h3>New voice campaign</h3>' + newCampaignForm() + "</div>" +
-          (list || '<p class="muted" style="margin-top:16px">No voice campaigns yet — create one above.</p>') +
-          '<div style="margin-top:14px;padding:10px;border-radius:8px;background:rgba(255,255,255,.03)" class="muted">' +
-          '<b>Compliance:</b> only landline/VoIP leads are dialed (mobiles are stripped on import via Telnyx). Each lead is dialed only inside its own local time window (default 7–9 PM, hard-bounded to 8 AM–9 PM). Launch requires a consent attestation and an identifying script.</div>';
+        var camps = (d && d.campaigns) || [];
+        var showForm = vd.creating || camps.length === 0;
+        var toolbar = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
+          '<span class="muted" style="font-size:13px">' + camps.length + " voice campaign" + (camps.length === 1 ? "" : "s") + "</span>" +
+          (showForm ? "" : '<button class="btn btn-primary btn-sm" id="vdNew">＋ New campaign</button>') + "</div>";
+        var form = showForm
+          ? '<div class="card"><h3>New voice campaign</h3>' + newCampaignForm() +
+            (camps.length ? '<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" id="vdCancel">Cancel</button></div>' : "") + "</div>"
+          : "";
+        body.innerHTML = toolbar + form + camps.map(campaignCard).join("") +
+          '<div class="muted" style="margin-top:14px;padding:10px;border-radius:8px;background:rgba(255,255,255,.03);font-size:12px">' +
+          'Only landline/VoIP leads are dialed (mobiles stripped on import). Each lead is dialed inside its local window (default 7–9 PM). Launch requires a consent attestation and an identifying script.</div>';
         wireChips(body);
-        $("#vdCreate").addEventListener("click", createCampaign);
+        var nb = $("#vdNew"); if (nb) nb.addEventListener("click", function () { vd.creating = true; paint(); });
+        var cb = $("#vdCancel"); if (cb) cb.addEventListener("click", function () { vd.creating = false; paint(); });
+        var cr = $("#vdCreate"); if (cr) cr.addEventListener("click", createCampaign);
+        // Saved-script picker → drop the chosen template into the script box.
+        var pick = $("#vdScriptPick");
+        if (pick) pick.addEventListener("change", function () {
+          var s = (vd.scripts || []).filter(function (x) { return x.id === pick.value; })[0];
+          if (!s) return;
+          var ta = $("#vdScript"); if (ta) ta.value = s.template;
+          var nm = $("#vdName"); if (nm && !nm.value.trim()) nm.value = s.name + " — campaign";
+          renderEstimate();
+        });
+        // Listen to the assembled cloned voicemail before creating/launching.
+        var lb = $("#vdListen");
+        if (lb) lb.addEventListener("click", function () {
+          var tpl = val("vdScript"); if (!tpl) { toast("Write or pick a script first"); return; }
+          previewInto($("#vdListenOut"), {
+            scriptTemplate: tpl,
+            persona: { agentName: val("vdAgentName") || "Ryan", agentCompany: val("vdAgentCompany") || "Executive Search" },
+          });
+        });
+        // AI-customize the script in place (preview the LLM rewrite before saving).
+        var aib = $("#vdAi");
+        if (aib) aib.addEventListener("click", function () {
+          aiCustomizeInto("vdScript", "vdListenOut", { templated: true,
+            persona: { agentName: val("vdAgentName") || "Ryan", agentCompany: val("vdAgentCompany") || "Executive Search" } });
+        });
+        // Live spend estimate — recompute as the cap, script, or model changes.
+        ["vdDailyCap", "vdScript"].forEach(function (id) {
+          var e = $("#" + id); if (e) e.addEventListener("input", renderEstimate);
+        });
+        var aic = $("#vdAiCustomize"); if (aic) aic.addEventListener("change", renderEstimate);
+        // Autopilot implies AI-customize (every incoming lead gets a fresh drop).
+        var apc = $("#vdAutoPilot");
+        if (apc) apc.addEventListener("change", function () {
+          if (apc.checked && aic) aic.checked = true;
+          renderEstimate();
+        });
+        renderEstimate();
+        // Prefill from a library "Use in a campaign" action.
+        if (vd.prefill) {
+          var pta = $("#vdScript"); if (pta && vd.prefill.template) pta.value = vd.prefill.template;
+          var pnm = $("#vdName"); if (pnm && vd.prefill.name && !pnm.value.trim()) pnm.value = vd.prefill.name + " — campaign";
+          vd.prefill = null;
+        }
+        // Upgrade the caller-ID text box to a dropdown of the operator's real
+        // Telnyx numbers (falls back to manual entry when none / not keyed).
+        if ($("#vdCallerField")) upgradeCaller();
         Array.prototype.forEach.call(body.querySelectorAll("[data-vdact]"), function (b) {
           b.addEventListener("click", function () { campaignAction(b.getAttribute("data-vdact"), b.getAttribute("data-cid")); });
         });
       }).catch(function () { body.innerHTML = needsSetup(); });
+      });
     }
     function val(id) { var e = $("#" + id); return e ? e.value.trim() : ""; }
+    /* Swap the caller-ID text input for a dropdown of the operator's approved
+       Telnyx numbers. Keeps the same #vdCaller id so val()/createCampaign read it
+       unchanged. If the account has no numbers (not keyed / dry-run / shim), the
+       plain text input is left in place so a number can still be typed. The
+       dropdown's "type manually" option restores the text input on demand. */
+    function upgradeCaller() {
+      var field = $("#vdCallerField"); if (!field) return;
+      api("/voice/numbers").then(function (d) {
+        var nums = (d && d.numbers) || [];
+        if (!nums.length) return; // keep the manual text input
+        var cur = val("vdCaller");
+        var opts = nums.map(function (n) {
+          return '<option value="' + esc(n.phoneNumber) + '"' + (n.phoneNumber === cur ? " selected" : "") + ">" +
+            esc(n.phoneNumber) + (n.label ? " · " + esc(n.label) : "") + "</option>";
+        }).join("");
+        field.innerHTML = "<label>Approved 10DLC caller-ID</label>" +
+          '<select id="vdCaller"><option value="">— pick a number —</option>' + opts +
+          '<option value="__manual__">— type a number manually —</option></select>' +
+          '<div class="vd-hint">' + nums.length + " number" + (nums.length === 1 ? "" : "s") + " on your Telnyx account.</div>";
+        var sel = $("#vdCaller");
+        if (sel) sel.addEventListener("change", function () {
+          if (sel.value !== "__manual__") return;
+          field.innerHTML = "<label>Approved 10DLC caller-ID (E.164)</label>" +
+            '<input id="vdCaller" type="text" placeholder="+13105551234" />';
+          var t = $("#vdCaller"); if (t) t.focus();
+        });
+      }).catch(function () { /* keep the manual text input */ });
+    }
     function createCampaign() {
       var payload = {
         name: val("vdName"), motion: motion, callerId: val("vdCaller"),
@@ -4759,12 +5072,14 @@
         persona: { agentName: val("vdAgentName") || "Ryan", agentCompany: val("vdAgentCompany") || "Executive Search" },
         window: { startHour: parseInt(val("vdWinStart") || "19", 10), endHour: parseInt(val("vdWinEnd") || "21", 10) },
         dailyCap: parseInt(val("vdDailyCap") || "100", 10), frequencyCapDays: parseInt(val("vdFreq") || "30", 10),
-        testMode: !!(($("#vdTestMode") || {}).checked)
+        testMode: !!(($("#vdTestMode") || {}).checked),
+        aiCustomize: !!(($("#vdAiCustomize") || {}).checked),
+        autoPilot: !!(($("#vdAutoPilot") || {}).checked)
       };
       if (!payload.name) { toast("Name the campaign first."); return; }
       send("/voice/campaigns", "PUT", payload).then(function (r) {
         if (!r.ok) { toast("Create failed"); return; }
-        toast("Campaign created"); paint();
+        toast("Campaign created"); vd.creating = false; paint();
       });
     }
     function setMsg(cid, t) { var m = $('[data-msg="' + cid + '"]'); if (m) m.innerHTML = t; }
@@ -4906,10 +5221,17 @@
         inp("vtAgentCompany", "Your firm", "Executive Search") + "</div>" +
         '<div style="margin-top:10px"><div style="margin:4px 0">' + fieldChips("vtScript") + "</div>" +
         '<textarea id="vtScript" rows="4" style="width:100%">' + esc(VD_DEFAULT_SCRIPT) + "</textarea></div>" +
-        '<div style="margin-top:10px;display:flex;gap:8px"><button class="btn btn-primary btn-sm" id="vtGo">Send test drop</button>' +
+        '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" id="vtGo">Send test drop</button>' +
+        '<button class="btn btn-sm" id="vtAi">✨ AI customize</button>' +
         '<button class="btn btn-sm" id="vtListen">🔊 Listen first</button></div>' +
         '<div id="vtResult" style="margin-top:12px"></div></div>';
       wireChips(body);
+      $("#vtAi").addEventListener("click", function () {
+        aiCustomizeInto("vtScript", "vtResult", {
+          templated: false, firstName: val("vtFirst"), role: val("vtRole"), company: val("vtCompany"),
+          persona: { agentName: val("vtAgentName") || "Ryan", agentCompany: val("vtAgentCompany") || "Executive Search" },
+        });
+      });
       $("#vtListen").addEventListener("click", function () {
         var tpl = val("vtScript");
         if (!tpl) { toast("Write a script first"); return; }
@@ -7309,7 +7631,7 @@
       '<p class="sx-sub">The calling engine behind Voice Drops — it places the calls and uses Premium AMD to find the voicemail. Connect your Telnyx API key and a caller-ID number, then Test. New to Telnyx? Follow the <a href="/helpcenter#telephony" target="_blank" rel="noopener" style="color:var(--brand-2)">10DLC setup guide</a> to register your brand &amp; campaign so your calls connect.</p>' +
       '<div id="vsTel">' + loading() + '</div></div>' +
       '<div class="sx-card"><div class="sx-eyebrow">Step 2 · Voice</div><h3>🎙️ Your voice</h3>' +
-      '<p class="sx-sub">Paste your ElevenLabs or Cartesia voice id — no cloning needed.</p>' +
+      '<p class="sx-sub">Paste your ElevenLabs or Cartesia voice id. Cloning of voices takes place within the portals of these two third party providers.</p>' +
       '<div id="vsVoice">' + loading() + '</div></div>' +
       '<div class="sx-card"><p class="sx-sub" style="margin:0">' + esc(cfg.extra) + '</p>' +
       '<div style="margin-top:12px"><a class="btn btn-primary btn-sm" href="#' + cfg.featureRoute + '">' + esc(cfg.featureLabel) + '</a></div></div>';
@@ -7368,7 +7690,8 @@
         }
         var list = (st.clones).map(function (c) {
           var pid = c.provider || "elevenlabs";
-          return '<div style="font-size:13px;margin-top:4px">🎙️ <b>' + esc(c.agentName) + "</b> <span class=\"muted\">" + esc(pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span></div>";
+          return '<div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px">🎙️ <b>' + esc(c.agentName) + "</b> <span class=\"muted\">" + esc(pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span>" +
+            '<button class="btn btn-ghost btn-sm" data-vsdel="' + esc(c.id) + '" title="Delete this voice" style="margin-left:auto">🗑️</button></div>';
         }).join("") || '<p class="muted" style="font-size:13px">No voices yet.</p>';
         var box = $("#vsVoice"); if (!box) return;
         box.innerHTML =
@@ -7400,6 +7723,16 @@
               if (msg) msg.innerHTML = okk ? '<span style="color:#34d399">✓ key works</span>' : '<span style="color:#ff7a90">✗ ' + esc((r.data && r.data.error) || "failed") + '</span>';
               if (okk) loadVoice();
             }).catch(function () { if (msg) msg.textContent = "error"; });
+          });
+        });
+        Array.prototype.forEach.call(box.querySelectorAll("[data-vsdel]"), function (btn) {
+          btn.addEventListener("click", function () {
+            var id = btn.getAttribute("data-vsdel");
+            if (!confirm("Delete this voice from your list? It is not removed from ElevenLabs or Cartesia.")) return;
+            send("/voice/clones", "POST", { action: "delete", id: id }).then(function (r) {
+              if (r.ok) { toast("Voice deleted"); loadVoice(); }
+              else toast("Delete failed");
+            }).catch(function () { toast("Could not reach the server."); });
           });
         });
         paintReady();

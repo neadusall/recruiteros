@@ -29,6 +29,33 @@ export const VM_MAX_SECONDS = 25;
 /** Average speaking rate (~150 wpm = 2.5 words/sec) for duration estimates. */
 const WORDS_PER_SEC = 2.5;
 
+/**
+ * The two cloned-voice delivery channels have different ideal lengths:
+ *  - amd       : a landline/VoIP voicemail drop — 15-25s (a quick, callable nudge)
+ *  - voicenote : a LinkedIn voice note — 20-45s (a touch longer, more conversational)
+ * The AI drafter targets the right window per channel, and validation flags a
+ * script that lands outside it.
+ */
+export type VoiceChannel = "amd" | "voicenote";
+
+export interface ChannelWindow {
+  minSeconds: number;
+  maxSeconds: number;
+  /** Human label for prompts + UI copy. */
+  label: string;
+}
+
+export const CHANNEL_WINDOWS: Record<VoiceChannel, ChannelWindow> = {
+  amd: { minSeconds: VM_MIN_SECONDS, maxSeconds: VM_MAX_SECONDS, label: "landline voicemail (AMD)" },
+  voicenote: { minSeconds: 20, maxSeconds: 45, label: "LinkedIn voice note" },
+};
+
+/** Approx spoken-word budget for a channel's window (at ~2.5 words/sec). */
+export function wordBudget(channel: VoiceChannel): { min: number; max: number } {
+  const w = CHANNEL_WINDOWS[channel];
+  return { min: Math.round(w.minSeconds * WORDS_PER_SEC), max: Math.round(w.maxSeconds * WORDS_PER_SEC) };
+}
+
 export interface MergeVars {
   firstName?: string;
   role?: string;
@@ -64,12 +91,14 @@ export interface ScriptCheck {
 }
 
 /**
- * Validate a rendered voicemail: must identify the firm and should land in the
- * 15-25s window. Identification is REQUIRED — a drop that doesn't say who is
- * calling is rejected upstream (no anonymous/misleading drops).
+ * Validate a rendered voicemail for a given channel: must identify the firm and
+ * should land in that channel's window (AMD 15-25s, LinkedIn voice note 20-45s).
+ * Identification is REQUIRED — a drop that doesn't say who is calling is rejected
+ * upstream (no anonymous/misleading drops).
  */
-export function checkScript(rendered: string, persona: VoicePersona): ScriptCheck {
+export function checkScriptFor(rendered: string, persona: VoicePersona, channel: VoiceChannel = "amd"): ScriptCheck {
   const seconds = estimateSeconds(rendered);
+  const win = CHANNEL_WINDOWS[channel];
   const lower = rendered.toLowerCase();
   const identifies =
     lower.includes(persona.agentCompany.toLowerCase()) ||
@@ -79,15 +108,20 @@ export function checkScript(rendered: string, persona: VoicePersona): ScriptChec
   if (!identifies) {
     warnings.push("Script must identify you or your firm by name — add {agent_name}/{agent_company}.");
   }
-  if (seconds < VM_MIN_SECONDS) warnings.push(`Too short (~${seconds}s); aim for ${VM_MIN_SECONDS}-${VM_MAX_SECONDS}s.`);
-  if (seconds > VM_MAX_SECONDS) warnings.push(`Too long (~${seconds}s); trim toward ${VM_MAX_SECONDS}s.`);
+  if (seconds < win.minSeconds) warnings.push(`Too short (~${seconds}s); aim for ${win.minSeconds}-${win.maxSeconds}s for a ${win.label}.`);
+  if (seconds > win.maxSeconds) warnings.push(`Too long (~${seconds}s); trim toward ${win.maxSeconds}s for a ${win.label}.`);
 
   return {
     seconds,
-    withinSweetSpot: seconds >= VM_MIN_SECONDS && seconds <= VM_MAX_SECONDS,
+    withinSweetSpot: seconds >= win.minSeconds && seconds <= win.maxSeconds,
     identifies,
     warnings,
   };
+}
+
+/** AMD-channel validation (15-25s). Back-compat alias of checkScriptFor(..,"amd"). */
+export function checkScript(rendered: string, persona: VoicePersona): ScriptCheck {
+  return checkScriptFor(rendered, persona, "amd");
 }
 
 /**

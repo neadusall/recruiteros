@@ -26,6 +26,7 @@ import { rateCost } from "../billing/rates";
 import type { Motion } from "../core/types";
 
 import { segmentScript, renderScript, checkScript, identifierLine, type MergeVars } from "./script";
+import { draftVoiceScript } from "./draft";
 import { assembleDrop, type VoiceRef } from "./clones";
 import { getVoiceClientFor } from "./provider";
 import { checkWindow, resolveTimezone, type WindowCheck } from "./compliance";
@@ -210,9 +211,26 @@ export async function runDueDrops(
     // Assemble the personalized voicemail (cache-aware: identical names/roles/
     // static prose are reused at zero cost).
     const vars: MergeVars = { firstName: lead.firstName, role: lead.role, company: lead.company };
-    // A per-lead custom script (the weekly wave's unique voicemail) overrides the
-    // campaign template, so each wave's drop is different; otherwise use the template.
-    const segments = segmentScript(lead.customScript || c.scriptTemplate, vars, c.persona);
+    // Script selection, in priority order:
+    //  1) a per-lead custom script (a weekly wave's unique voicemail), else
+    //  2) an AI-customized per-lead script when the campaign opts in — draft.ts
+    //     enforces the 15-25s AMD window + the speech/compliance rules, seeded by
+    //     the campaign template. Identification is re-checked; a failure (or any
+    //     LLM error) falls back to the template, so it can never block a drop, else
+    //  3) the shared campaign template.
+    let scriptText = lead.customScript || c.scriptTemplate;
+    if (!lead.customScript && c.aiCustomize) {
+      try {
+        const ai = await withWorkspaceCreds(workspaceId, () =>
+          draftVoiceScript({
+            channel: "amd", persona: c.persona, vars, templated: false, seed: c.scriptTemplate,
+            context: [lead.role ? `role: ${lead.role}` : "", lead.company ? `company: ${lead.company}` : ""].filter(Boolean).join(", ") || undefined,
+          }),
+        );
+        if (ai.text && ai.identifies) scriptText = ai.text; // keep honest identification
+      } catch { /* fall back to the template */ }
+    }
+    const segments = segmentScript(scriptText, vars, c.persona);
     const drop = await assembleDrop(segments, voice);
     sum.synthesized += drop.synthesized;
     sum.cached += drop.cached;

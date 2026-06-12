@@ -125,6 +125,8 @@ export function upsertCampaign(workspaceId: string, input: VoiceCampaignInput): 
     frequencyCapDays: input.frequencyCapDays ?? existing?.frequencyCapDays ?? 30,
     consentAttested: input.consentAttested ?? existing?.consentAttested ?? false,
     testMode: input.testMode ?? existing?.testMode ?? false,
+    aiCustomize: input.aiCustomize ?? existing?.aiCustomize ?? false,
+    autoPilot: input.autoPilot ?? existing?.autoPilot ?? false,
     consentAttestedBy: existing?.consentAttestedBy,
     consentAttestedAt: existing?.consentAttestedAt,
     leadCount: existing?.leadCount ?? 0,
@@ -132,6 +134,11 @@ export function upsertCampaign(workspaceId: string, input: VoiceCampaignInput): 
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
+  // Always-on autopilot: once consent is attested it runs continuously, so a lead
+  // fed in is dialed on the next tick without a manual launch.
+  if (merged.autoPilot && merged.consentAttested && merged.status !== "paused" && merged.status !== "done") {
+    merged.status = "running";
+  }
   if (existing) {
     Object.assign(existing, merged);
   } else {
@@ -148,9 +155,23 @@ export function attestConsent(workspaceId: string, id: string, by: string): Voic
   c.consentAttested = true;
   c.consentAttestedBy = by;
   c.consentAttestedAt = nowIso();
+  // Autopilot starts sending the moment it has a lawful basis — no manual launch.
+  if (c.autoPilot && c.status !== "paused" && c.status !== "done") c.status = "running";
   c.updatedAt = nowIso();
   persist();
   return c;
+}
+
+/**
+ * The workspace's always-on autopilot campaign for a motion — the reactive
+ * target for leads fed in when no campaign is named explicitly. Prefers a
+ * consent-attested one (only those can actually dial).
+ */
+export function findAutoPilot(workspaceId: string, motion?: Motion): VoiceCampaign | undefined {
+  const all = store.campaigns.filter(
+    (c) => c.workspaceId === workspaceId && c.autoPilot && c.status !== "done" && (!motion || c.motion === motion),
+  );
+  return all.find((c) => c.consentAttested) ?? all[0];
 }
 
 export function deleteCampaign(workspaceId: string, id: string): boolean {
