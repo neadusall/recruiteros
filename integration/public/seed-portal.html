@@ -69,7 +69,7 @@
         <div class="why">
           <b>Why we're doing this:</b> these inboxes quietly build sending reputation so our real emails land in the inbox, not spam.
           <ul>
-            <li>Create each account, turn on <b>2-step verification</b>, and generate an <b>app password</b> (a one-time code that lets our server connect — <i>not</i> your normal password).</li>
+            <li>Create each account, turn on <b>2-step verification</b>, and generate an <b>app password</b> (a one-time code that lets our server connect, <i>not</i> your normal password).</li>
             <li><b>You never have to open or check these again.</b> Once connected, our server handles everything automatically.</li>
             <li>Paste each address + app password below. We test the connection instantly and show a green check.</li>
           </ul>
@@ -94,7 +94,7 @@
             <li><b>Outlook / Hotmail:</b> account.microsoft.com → Security → Advanced security options → turn on two-step verification → "Create a new app password".</li>
             <li><b>Yahoo:</b> Account Security → turn on two-step verification → "Generate app password" → pick "Other app".</li>
           </ol>
-          Paste the app password exactly as shown (spaces are fine — we strip them).
+          Paste the app password exactly as shown (spaces are fine, we strip them).
         </details>
       </div>
     </div>
@@ -119,13 +119,13 @@
         .then(function(r){ return r.json().then(function(d){ return { ok:r.ok, d:d }; }); })
         .then(function(res){
           if (!res.ok) { showGate(res.d && res.d.error === "portal_disabled" ? "The setup portal is turned off right now." : "This link isn't valid or has expired."); return; }
-          $("sub").textContent = "Create 3 Gmail, 3 Outlook, and 3 Yahoo accounts (more from family & friends is a big help). Add a row for each, paste its app password, and we'll connect them — you won't need to touch them again.";
+          $("sub").textContent = "Create 3 Gmail, 3 Outlook, and 3 Yahoo accounts (more from family & friends is a big help). Add a row for each, paste its app password, and we'll connect them, you won't need to touch them again.";
           $("app").style.display = "";
           for (var i=0;i<3;i++) addRow("gmail");
           for (var j=0;j<3;j++) addRow("outlook");
           for (var k=0;k<3;k++) addRow("yahoo");
         })
-        .catch(function(){ showGate("Couldn't reach the server — try again in a moment."); });
+        .catch(function(){ showGate("Couldn't reach the server, try again in a moment."); });
 
       function showGate(msg){ $("title").style.display="none"; $("sub").style.display="none"; $("eyebrow").style.display="none"; $("gateMsg").textContent = msg; $("gate").style.display=""; }
 
@@ -166,20 +166,20 @@
         .then(function(r){ return r.json().then(function(d){ return { ok:r.ok, d:d }; }); })
         .then(function(res){
           btn.disabled = false; btn.textContent = "Connect my inboxes";
-          if (!res.ok) { $("err").textContent = (res.d && res.d.error === "invalid_token") ? "This link isn't valid anymore — ask for a fresh one." : "Something went wrong — please try again."; return; }
+          if (!res.ok) { $("err").textContent = (res.d && res.d.error === "invalid_token") ? "This link isn't valid anymore, ask for a fresh one." : "Something went wrong, please try again."; return; }
           var byAddr = {};
           (res.d.results||[]).forEach(function(r){ byAddr[(r.address||"").toLowerCase()] = r; });
           accounts.forEach(function(a){
             var r = byAddr[a.address.toLowerCase()]; if (!r) return;
             var st = a.row.querySelector(".status");
             a.row.classList.remove("ok","bad"); st.classList.remove("ok","bad");
-            if (r.ok) { a.row.classList.add("ok"); st.classList.add("ok"); st.textContent = "✓ Connected — you're done with this one, no need to open it again."; }
-            else { a.row.classList.add("bad"); st.classList.add("bad"); st.textContent = "✕ " + esc(r.error || "Couldn't connect — check the app password."); }
+            if (r.ok) { a.row.classList.add("ok"); st.classList.add("ok"); st.textContent = "✓ Connected, you're done with this one, no need to open it again."; }
+            else { a.row.classList.add("bad"); st.classList.add("bad"); st.textContent = "✕ " + esc(r.error || "Couldn't connect, check the app password."); }
           });
           var v = res.d.verified || 0, n = res.d.registered || 0;
-          $("tally").innerHTML = "<b>" + v + "</b> of " + n + " inboxes connected. " + (v < n ? "Fix the red ones (usually a fresh app password) and submit again — connected ones stay connected." : "All set — thank you! You can close this page.");
+          $("tally").innerHTML = "<b>" + v + "</b> of " + n + " inboxes connected. " + (v < n ? "Fix the red ones (usually a fresh app password) and submit again, connected ones stay connected." : "All set, thank you! You can close this page.");
         })
-        .catch(function(){ btn.disabled=false; btn.textContent="Connect my inboxes"; $("err").textContent = "Network error — please try again."; });
+        .catch(function(){ btn.disabled=false; btn.textContent="Connect my inboxes"; $("err").textContent = "Network error, please try again."; });
       });
     })();
   </script>

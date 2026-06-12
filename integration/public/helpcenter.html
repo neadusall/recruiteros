@@ -344,16 +344,16 @@
         </p>
         <ul>
           <li><strong>Add a sending domain</strong> (e.g. <code>go-yourfirm.com</code>) and it's auto-provisioned:
-            the right DNS records — <strong>SPF, DKIM, DMARC</strong> and reverse-DNS/PTR — are generated so
+            the right DNS records, <strong>SPF, DKIM, DMARC</strong> and reverse-DNS/PTR, are generated so
             mailbox providers trust your mail.</li>
-          <li><strong>Mailboxes &amp; warm-up</strong>: each new domain's inboxes are warmed gradually — sending
+          <li><strong>Mailboxes &amp; warm-up</strong>: each new domain's inboxes are warmed gradually, sending
             volume ramps over days and weeks instead of a cold spike, which is what gets new domains flagged.</li>
           <li><strong>Rotation</strong>: outreach is spread automatically across your domains and inboxes, keeping
             every mailbox under a safe daily limit.</li>
           <li><strong>Health monitoring</strong>: bounce rate, spam placement and warm-up progress are tracked
             per domain with a clear green / amber / red signal, so you always know what's safe to send from.</li>
         </ul>
-        <div class="callout note"><b>Use dedicated outreach domains</b> — never your primary company domain — so a
+        <div class="callout note"><b>Use dedicated outreach domains</b>, never your primary company domain, so a
           deliverability issue can never touch your real, day-to-day email.</div>
       </section>
 
@@ -367,12 +367,12 @@
         </p>
         <ul>
           <li><strong>Two-way sync</strong>: people and companies flow in from your ATS, and every touch the
-            platform makes — emails, calls, texts, stage changes, placements — is written back, so your ATS
+            platform makes, emails, calls, texts, stage changes, placements, is written back, so your ATS
             always reflects what actually happened.</li>
           <li><strong>Field mapping</strong>: your ATS fields are mapped to the platform's so names, titles,
             stages and owners line up. Review the mapping once during setup.</li>
           <li><strong>Stays current</strong>: ongoing sync (plus webhooks where your ATS supports them) keeps both
-            sides up to date automatically — no manual exports.</li>
+            sides up to date automatically, no manual exports.</li>
         </ul>
         <div class="callout note">Loxo is the verified primary ATS. Others connect the same way; the screen tells
           you what each needs.</div>
@@ -386,7 +386,7 @@
           <strong>Telnyx</strong> account. You bring your Telnyx API key and a phone number; the platform
           does the calling and texting through it. Before US carriers will deliver your business texts you
           must complete a one-time <strong>10DLC registration</strong> (also called A2P) in Telnyx. Voice
-          calls don't need 10DLC — but you set the number up in the same place, so do both at once.
+          calls don't need 10DLC, but you set the number up in the same place, so do both at once.
         </p>
 
         <h3>What 10DLC is (and why it's required)</h3>
@@ -397,18 +397,18 @@
           filtered or blocked. You register once; then every number on that campaign sends reliably.
         </p>
 
-        <h3>Set it up in Telnyx — step by step</h3>
+        <h3>Set it up in Telnyx, step by step</h3>
         <ol>
           <li><strong>Create your Telnyx account</strong> at <code>telnyx.com</code> and add a payment method
             (Billing → Payments). 10DLC registration and numbers require billing to be active.</li>
           <li><strong>Create an API key</strong>: <em>Account → API Keys → Create API Key</em>. Copy it
-            somewhere safe — you'll paste it into the platform at the end.</li>
+            somewhere safe, you'll paste it into the platform at the end.</li>
           <li><strong>Register your Brand</strong>: <em>Messaging → 10DLC → Brands → Create Brand</em>. Enter
             your <strong>legal business name, EIN / Tax ID, business address, website, and a contact</strong>.
-            These must match your real registered business — mismatches are the #1 cause of rejection.</li>
+            These must match your real registered business, mismatches are the #1 cause of rejection.</li>
           <li><strong>Register a Campaign</strong> under that brand: <em>10DLC → Campaigns → Create Campaign</em>.
             Pick the use case that fits recruiting outreach (commonly <strong>Mixed</strong> or
-            <strong>Low Volume Mixed</strong>), provide 2–3 <strong>sample messages</strong>, describe how
+            <strong>Low Volume Mixed</strong>), provide 2-3 <strong>sample messages</strong>, describe how
             people <strong>opt in</strong>, and confirm you honor <strong>STOP / HELP</strong> keywords.</li>
           <li><strong>Buy a number</strong>: <em>Numbers → Buy Numbers</em> → choose a local long-code number
             with both <strong>SMS and Voice</strong> features.</li>
@@ -425,13 +425,13 @@
 
         <div class="callout note">
           <b>Timeline &amp; cost.</b> Brand approval is usually minutes to a day; campaign approval by the
-          carriers typically takes <strong>1–3 business days</strong>. Telnyx charges a small one-time brand
-          fee and a low monthly campaign fee, plus per-message carrier fees — all billed by Telnyx to your
+          carriers typically takes <strong>1-3 business days</strong>. Telnyx charges a small one-time brand
+          fee and a low monthly campaign fee, plus per-message carrier fees, all billed by Telnyx to your
           account. Don't launch SMS campaigns until your campaign shows <strong>Approved</strong>.
         </div>
 
         <div class="callout warn">
-          <b>Stay compliant — it protects your delivery.</b> Only text people who opted in, include your
+          <b>Stay compliant, it protects your delivery.</b> Only text people who opted in, include your
           business name in messages, and always honor <strong>STOP</strong> (opt-out) and <strong>HELP</strong>.
           Carriers police this; violations get a campaign suspended. Voice calls follow calling-hour and
           consent rules in your region.
@@ -473,7 +473,7 @@
       <section id="dashboard">
         <h2>Dashboard</h2>
         <p>
-          The screen you land on — a live command view of the whole operation, scoped to whichever mode
+          The screen you land on, a live command view of the whole operation, scoped to whichever mode
           (Recruiting or BD) you're in.
         </p>
         <ul>
@@ -492,7 +492,7 @@
       <section id="candidates">
         <h2>Candidates</h2>
         <p>
-          Your people store for recruiting — the searchable pool you source from <em>before</em> anyone enters
+          Your people store for recruiting, the searchable pool you source from <em>before</em> anyone enters
           active outreach.
         </p>
         <ul>
@@ -500,7 +500,7 @@
             pool.</li>
           <li><strong>Search &amp; filter</strong>: find people by title, company, location, skills and more.</li>
           <li><strong>Enrich</strong>: fill in missing titles, companies, emails and phone numbers from your
-            enrichment tools — one person at a time or in bulk.</li>
+            enrichment tools, one person at a time or in bulk.</li>
           <li><strong>Promote to a campaign</strong>: move the strongest candidates into an active sequence when
             they're ready to be worked.</li>
         </ul>
@@ -517,12 +517,12 @@
           that runs automatically across channels.
         </p>
         <ul>
-          <li><strong>Multi-channel steps</strong>: each step picks its own channel — email, a LinkedIn
-            connection / message / voice note, SMS, or a voicemail drop — with its own delay and message.</li>
+          <li><strong>Multi-channel steps</strong>: each step picks its own channel, email, a LinkedIn
+            connection / message / voice note, SMS, or a voicemail drop, with its own delay and message.</li>
           <li><strong>Campaign Studio</strong>: the visual builder where you add, reorder and edit steps, set the
             wait between touches, and personalize copy with merge fields (first name, role, company…).</li>
           <li><strong>Sequences Library</strong>: a shelf of reusable templates (seeded ones included) you can
-            drop into any campaign and tweak — so you never rebuild a proven sequence from scratch.</li>
+            drop into any campaign and tweak, so you never rebuild a proven sequence from scratch.</li>
           <li><strong>Activation gate</strong>: a campaign only goes live once the tools its channels need are
             <span class="pill get">green</span> in Setup (a LinkedIn step needs LinkedIn connected, an SMS step
             needs your number, and so on).</li>
@@ -537,8 +537,8 @@
           warm lead goes cold while it sits in a tool nobody checks.
         </p>
         <ul>
-          <li><strong>Auto-classification</strong>: each reply is tagged — <em>interested, soft yes, referral,
-            not now, not interested,</em> or <em>stop</em> — so you can triage at a glance.</li>
+          <li><strong>Auto-classification</strong>: each reply is tagged, <em>interested, soft yes, referral,
+            not now, not interested,</em> or <em>stop</em>, so you can triage at a glance.</li>
           <li><strong>Smart routing</strong>: replies go to the right recruiter (the campaign owner), and
             positive ones float to the top so the hot leads get worked first.</li>
           <li><strong>Suggested next action</strong>: each conversation shows a recommended follow-up so reps
@@ -567,8 +567,8 @@
         <h2>Hire Signals <span class="pill">BD</span></h2>
         <p>Companies that are hiring <em>right now</em>, surfaced as fresh BD leads with a built-in reason to reach out.</p>
         <ul>
-          <li><strong>Live job-posting signals</strong>: see which companies just opened roles — and exactly which
-            role — pulled from current job postings.</li>
+          <li><strong>Live job-posting signals</strong>: see which companies just opened roles, and exactly which
+            role, pulled from current job postings.</li>
           <li><strong>A reason to talk</strong>: "I saw you're hiring a [role]" is a warm, timely opener that lands
             far better than a cold pitch.</li>
           <li><strong>Straight into outreach</strong>: turn a signal into a prospect and drop them into a BD
@@ -581,8 +581,8 @@
         <h2>OS Text <span class="pill">Recruiting</span></h2>
         <p>Compliant two-way texting with candidates, built right into the Command Center.</p>
         <ul>
-          <li><strong>Go-live checklist</strong>: a short one-time setup — register your business (10DLC),
-            provision a number, and capture consent — so your texts actually deliver. See
+          <li><strong>Go-live checklist</strong>: a short one-time setup, register your business (10DLC),
+            provision a number, and capture consent, so your texts actually deliver. See
             <a href="#telephony">Phone &amp; texting</a> for the full walkthrough.</li>
           <li><strong>Two-way threads</strong>: send and receive texts, with every reply showing up alongside your
             other channels in Outreach.</li>
@@ -602,13 +602,13 @@
           <li><strong>Set up a "desk"</strong>: bind a job description, one of your phone numbers, and your
             consented cloned voice. Each desk screens for one role.</li>
           <li><strong>Candidates opt in and get a call</strong> from an AI recruiter that asks your questions in
-            your voice and holds a natural back-and-forth — not a rigid IVR.</li>
+            your voice and holds a natural back-and-forth, not a rigid IVR.</li>
           <li><strong>Recorded, transcribed &amp; scored</strong>: every call produces a recording, a full
-            transcript, and a 1–100 fit score against the role.</li>
+            transcript, and a 1-100 fit score against the role.</li>
           <li><strong>Review scorecards</strong>: read the transcript and score per candidate, then push the
             strong ones forward. Swap a desk's number anytime without rebuilding it.</li>
         </ul>
-        <div class="callout note">Requires Telnyx and a consented cloned voice — stand both up in
+        <div class="callout note">Requires Telnyx and a consented cloned voice, stand both up in
           <em>Setup → AI Vetting</em>.</div>
       </section>
 
@@ -616,13 +616,13 @@
       <section id="voicedrops">
         <h2>Voice Drops</h2>
         <p>
-          Leave a personalized voicemail in your own cloned voice — with no live dial — to re-engage at scale,
+          Leave a personalized voicemail in your own cloned voice, with no live dial, to re-engage at scale,
           respectfully. Available in both Recruiting and BD.
         </p>
         <ul>
           <li><strong>Cloned-voice voicemail</strong>: the message is synthesized in your consented voice and
             personalized per contact (name, role, company).</li>
-          <li><strong>Landlines / VoIP only</strong>: mobile numbers are filtered out and never dialed — drops
+          <li><strong>Landlines / VoIP only</strong>: mobile numbers are filtered out and never dialed, drops
             land on business lines.</li>
           <li><strong>Timezone-aware</strong>: each drop fires inside the contact's local calling window, never at
             an odd hour.</li>
@@ -641,11 +641,11 @@
             campaign.</li>
           <li><strong>By recruiter</strong>: activity and results per team member, so you can coach to the
             numbers.</li>
-          <li><strong>Trends</strong>: how the figures move week over week — spot what's improving and what's
+          <li><strong>Trends</strong>: how the figures move week over week, spot what's improving and what's
             stalling before it costs you a month.</li>
         </ul>
         <div class="callout note">Analytics measures <em>outcomes</em>; the Dashboard shows live <em>activity</em>
-          and sending capacity. Use them together — one tells you what happened, the other what's happening now.</div>
+          and sending capacity. Use them together, one tells you what happened, the other what's happening now.</div>
       </section>
 
       <!-- BILLING -->
@@ -656,8 +656,8 @@
           payment.
         </p>
         <ul>
-          <li><strong>Your tools, your accounts</strong>: usage of the tools you connect — email, enrichment,
-            phone/SMS — is billed by those providers directly to your own accounts, so you only ever pay for what
+          <li><strong>Your tools, your accounts</strong>: usage of the tools you connect, email, enrichment,
+            phone/SMS, is billed by those providers directly to your own accounts, so you only ever pay for what
             you use.</li>
           <li><strong>Plan &amp; seats</strong>: your platform plan and any seat limits are shown here.</li>
         </ul>
@@ -669,7 +669,7 @@
         <ul>
           <li><strong>The ? Help button</strong> sits in the bottom corner of the app on every screen and brings
             you right back to this guide.</li>
-          <li><strong>This guide</strong> covers every screen and how to set it up — use the table of contents on
+          <li><strong>This guide</strong> covers every screen and how to set it up, use the table of contents on
             the left to jump straight to what you need.</li>
           <li><strong>Still stuck?</strong> Reach out to your account contact for anything this guide doesn't
             cover.</li>
@@ -714,7 +714,7 @@
     // branding first (the exact workspace you're signed into), then host-based
     // (custom domain / built-in preset). On a customer host the house wordmark is
     // hidden by the head guard and is revealed ONLY once a customer brand is in
-    // place — so the house brand can never flash or fall through.
+    // place, so the house brand can never flash or fall through.
     (function () {
       var API = (window.RECRUITEROS_API_BASE || "") + "/api";
       var isHouse = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.host || "");
@@ -739,7 +739,7 @@
         }
         if (!isHouse) {
           // White-label customer with a logo but no brand name: render the logo as
-          // the wordmark, like "[logo] Help Center" — no orphan slash, no wrap, and
+          // the wordmark, like "[logo] Help Center", no orphan slash, no wrap, and
           // the house name never appears.
           var navBrand = document.querySelector(".docs-nav .brand-name");
           var navWrap = navBrand && navBrand.parentNode; // the inner <span> holding wordmark + " / Help Center"

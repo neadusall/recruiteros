@@ -22,11 +22,12 @@ import { getProvider, providerStatuses } from "../providers";
 import { runWithCreds } from "../providers/http";
 import { saveKeys as storeSaveKeys, markTested, clearKeys, getKeys, resolvedKeys, statusOf } from "./credentials";
 import { isHouseWorkspace, isGranted, listGrants } from "./access";
+import { verifyVoiceProvider } from "../voice/provider";
 import type { Motion } from "../core/types";
 
 export type IntegrationId =
   | "instantly" | "salesrobot" | "unipile" | "rapidapi" | "fresh_linkedin"
-  | "tomba" | "loxo" | "taltxt" | "telnyx";
+  | "tomba" | "loxo" | "taltxt" | "telnyx" | "elevenlabs" | "cartesia";
 
 export type ConnStatus = "red" | "yellow" | "green";
 
@@ -176,9 +177,41 @@ const CATALOG: IntegrationMeta[] = [
     docsLabel: "Telnyx API keys ↗",
   },
   {
+    id: "elevenlabs",
+    label: "ElevenLabs (cloned voice)",
+    blurb: "The cloned voice for Voice Drops and AI Vetting. Paste your ElevenLabs API key.",
+    requiredFor: [],
+    fields: [
+      { key: "VOICE_CLONE_API_KEY", label: "API key", required: true, secret: true, placeholder: "sk_…" },
+    ],
+    steps: [
+      "In ElevenLabs, open your profile, then API Keys.",
+      "Create a key and copy it.",
+      "Paste below, Save, then Test.",
+    ],
+    docsUrl: "https://elevenlabs.io/app/settings/api-keys",
+    docsLabel: "ElevenLabs API keys",
+  },
+  {
+    id: "cartesia",
+    label: "Cartesia (cloned voice)",
+    blurb: "Alternative cloned-voice provider for Voice Drops and AI Vetting. Paste your Cartesia API key.",
+    requiredFor: [],
+    fields: [
+      { key: "CARTESIA_API_KEY", label: "API key", required: true, secret: true, placeholder: "sk_car_…" },
+    ],
+    steps: [
+      "In Cartesia, open API Keys.",
+      "Create a key and copy it.",
+      "Paste below, Save, then Test.",
+    ],
+    docsUrl: "https://play.cartesia.ai/keys",
+    docsLabel: "Cartesia API keys",
+  },
+  {
     id: "loxo",
     label: "Loxo (ATS)",
-    blurb: "Your system of record. Connected on the ATS tab — pre-flighted here.",
+    blurb: "Your system of record. Connected on the ATS tab, pre-flighted here.",
     requiredFor: ["bd", "recruiting"],
     fields: [],
     steps: [
@@ -316,6 +349,17 @@ export async function testConnection(
     await ensureRow();
     await markTested(workspaceId, id, ok, ok ? undefined : "connect_on_ats_tab");
     return { status: ok ? "green" : "yellow", error: ok ? undefined : "connect_on_ats_tab" };
+  }
+
+  // Cloned-voice providers verify through the voice module (not the generic
+  // provider registry), using this workspace's saved key.
+  if (id === "elevenlabs" || id === "cartesia") {
+    return runWithCreds(keys, async () => {
+      const result = await verifyVoiceProvider(id);
+      await ensureRow();
+      const cred = await markTested(workspaceId, id, result.ok, result.error);
+      return { status: cred?.status ?? (result.ok ? "green" : "yellow"), error: result.ok ? undefined : result.error };
+    }, { isolated });
   }
 
   const provider = getProvider(id);

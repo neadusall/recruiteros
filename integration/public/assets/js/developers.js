@@ -112,7 +112,7 @@
     out.innerHTML = `<h3>Copy your secret now</h3><p class="sub">Shown once. RecruiterOS stores only a hash, you cannot retrieve it again.</p>
       <div class="codeblock">${secret}</div>`;
     $("#keyList").parentElement.insertBefore(out, $("#keyList").nextSibling);
-    toast("Key created — copy the secret");
+    toast("Key created, copy the secret");
   });
 
   /* ---------------- providers (waterfall) ---------------- */

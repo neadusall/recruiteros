@@ -1,16 +1,16 @@
 /* ============================================================
-   Alfred Core — Multi-channel outreach automation engine
+   Alfred Core, Multi-channel outreach automation engine
    A MeetAlfred-style sequence engine for RecruiterOS.
 
    Runs unchanged in two environments:
-     • Browser  — loaded as a classic <script>, attaches window.Alfred
-                  (works over file:// — no build step, matching RecruiterOS)
-     • Node     — require('./alfred-core.js') for tests / a future backend
+     • Browser , loaded as a classic <script>, attaches window.Alfred
+                  (works over file://, no build step, matching RecruiterOS)
+     • Node    , require('./alfred-core.js') for tests / a future backend
 
    Design seams (so this lifts to a real SaaS backend later):
-     • Storage   — pluggable backend (localStorage | in-memory | swap for DB)
-     • Channels  — pluggable adapters (Simulated default | LinkedIn/Email/X)
-     • Clock     — every engine op takes an explicit `now`, so time is
+     • Storage  , pluggable backend (localStorage | in-memory | swap for DB)
+     • Channels , pluggable adapters (Simulated default | LinkedIn/Email/X)
+     • Clock    , every engine op takes an explicit `now`, so time is
                    injectable: tests fast-forward, the UI runs a sim clock,
                    a backend passes the real wall clock.
    ============================================================ */
@@ -21,7 +21,7 @@
   'use strict';
 
   /* ============================================================
-     0. Constants — MeetAlfred-faithful action surface & limits
+     0. Constants, MeetAlfred-faithful action surface & limits
      ============================================================ */
 
   // Channels and the actions each supports (the "scope of work").
@@ -124,18 +124,18 @@
   const DAY = 86400000, HOUR = 3600000, MINUTE = 60000;
 
   /* ============================================================
-     1. Utilities — id, seeded RNG, clone, merge-field render
+     1. Utilities, id, seeded RNG, clone, merge-field render
      ============================================================ */
 
   let _idSeq = 0;
   function uid(prefix) {
     _idSeq += 1;
-    // time + counter + small random — unique without external deps
+    // time + counter + small random, unique without external deps
     return (prefix || 'id') + '_' + Date.now().toString(36) + _idSeq.toString(36) +
       Math.floor(Math.random() * 1e6).toString(36);
   }
 
-  // Mulberry32 — small deterministic PRNG so simulations/tests are reproducible.
+  // Mulberry32, small deterministic PRNG so simulations/tests are reproducible.
   function makeRng(seed) {
     let a = seed >>> 0 || 1;
     return function () {
@@ -191,7 +191,7 @@
   }
 
   /* ============================================================
-     2. Storage — pluggable persistence backend
+     2. Storage, pluggable persistence backend
      ============================================================ */
 
   function MemoryStorage() {
@@ -216,7 +216,7 @@
   }
 
   /* ============================================================
-     3. Store — typed collections over a storage backend
+     3. Store, typed collections over a storage backend
      ============================================================ */
 
   const COLLECTIONS = [
@@ -284,7 +284,7 @@
   }
 
   /* ============================================================
-     4. Limits — warm-up, daily caps, working hours, weekends
+     4. Limits, warm-up, daily caps, working hours, weekends
      ============================================================ */
 
   function dateStr(ts) {
@@ -392,7 +392,7 @@
   }
 
   /* ============================================================
-     5. Channels — adapter interface + Simulated/LinkedIn/Email/X
+     5. Channels, adapter interface + Simulated/LinkedIn/Email/X
      ============================================================ */
 
   // An adapter executes a single rendered action against a channel and returns
@@ -402,7 +402,7 @@
 
   function SimulatedAdapter(opts) {
     opts = opts || {};
-    // Outcome probabilities — tuned to feel like real B2B outreach.
+    // Outcome probabilities, tuned to feel like real B2B outreach.
     const P = Object.assign({
       acceptRate: 0.38,        // connection request acceptance
       replyRate: 0.22,         // reply to a message/email after contact
@@ -450,7 +450,7 @@
     return {
       id, label, supports: () => true,
       connect() { return { ok: false, status: 'unconfigured', info: label + ' adapter needs credentials (see channels.connect)' }; },
-      execute() { throw new Error(label + ' adapter not configured — running in Simulated mode is required until credentials + a server-side worker are wired. Browser/file:// cannot legally drive ' + label + '.'); },
+      execute() { throw new Error(label + ' adapter not configured, running in Simulated mode is required until credentials + a server-side worker are wired. Browser/file:// cannot legally drive ' + label + '.'); },
     };
   }
   const LinkedInAdapter = () => stubAdapter('linkedin', 'LinkedIn');
@@ -458,7 +458,7 @@
   const TwitterAdapter = () => stubAdapter('twitter', 'X/Twitter');
 
   /* ============================================================
-     6. Engine — enrollment + the tick() scheduler
+     6. Engine, enrollment + the tick() scheduler
      ============================================================ */
 
   function Engine(config) {
@@ -597,7 +597,7 @@
         e.repliedAt = now;
         e._pendingReply = null;
         e.status = STATUS.enrollment.REPLIED;            // reply pauses the sequence (smart wait)
-        logEvent(e, { type: 'reply', channel: e._lastChannel || 'email', status: STATUS.event.REPLIED, at: now, info: 'Prospect replied — sequence paused' });
+        logEvent(e, { type: 'reply', channel: e._lastChannel || 'email', status: STATUS.event.REPLIED, at: now, info: 'Prospect replied, sequence paused' });
         ensureThread(e, now);
         report.replied++;
         store.save();
@@ -614,7 +614,7 @@
       if (e.stepIndex >= steps.length) { return complete(e, report); }
       const step = steps[e.stepIndex];
 
-      /* delay step — just schedule the next run */
+      /* delay step, just schedule the next run */
       if (step.kind === 'delay') {
         e.nextRunAt = now + delayMs(step.delay);
         e.stepIndex++;
@@ -705,7 +705,7 @@
       }
       if (useAcc) useAcc._consecFails = 0;   // healthy send resets the streak
 
-      // success — record, count (per-action + daily total + hourly), schedule outcomes
+      // success, record, count (per-action + daily total + hourly), schedule outcomes
       if (useAcc) {
         store.bump(useAcc.id, limits.dateStr(now), meta.counts, 1);
         store.bump(useAcc.id, limits.dateStr(now), '__total', 1);
@@ -889,7 +889,7 @@
   }
 
   /* ============================================================
-     7. Builders — ergonomic factory helpers for the data model
+     7. Builders, ergonomic factory helpers for the data model
      ============================================================ */
 
   function pickVariant(template, rng) {
@@ -938,7 +938,7 @@
   };
 
   /* ============================================================
-     8. Seed — a realistic demo workspace (matches RecruiterOS tone)
+     8. Seed, a realistic demo workspace (matches RecruiterOS tone)
      ============================================================ */
 
   function seedDemo(store, now) {
@@ -949,20 +949,20 @@
     store.insert('channelAccounts', build.channelAccount('email', 'jamie@recruitersos.co', { createdAt: now - 30 * DAY }));
 
     const tplConnect = store.insert('templates', build.template({
-      name: 'Greenfield React — connect', channel: 'linkedin', action: 'connect',
-      body: 'Hi {first_name}, your work on the {company} order flow is genuinely impressive — would love to connect.',
+      name: 'Greenfield React, connect', channel: 'linkedin', action: 'connect',
+      body: 'Hi {first_name}, your work on the {company} order flow is genuinely impressive, would love to connect.',
     }));
     const tplMsg = store.insert('templates', build.template({
-      name: 'Greenfield React — message', channel: 'linkedin', action: 'message',
+      name: 'Greenfield React, message', channel: 'linkedin', action: 'message',
       variants: [
-        { label: 'Direct', weight: 1, body: 'Thanks for connecting, {first_name}. I\'m hiring a staff React engineer (remote, greenfield, $120–145k) where you\'d own architecture from day one. Worth a 15-min call this week?' },
-        { label: 'Curiosity', weight: 1, body: '{first_name}, quick one — after {company}, are you open to owning a greenfield React platform end-to-end? Remote, staff-level. Happy to share details.' },
+        { label: 'Direct', weight: 1, body: 'Thanks for connecting, {first_name}. I\'m hiring a staff React engineer (remote, greenfield, $120-145k) where you\'d own architecture from day one. Worth a 15-min call this week?' },
+        { label: 'Curiosity', weight: 1, body: '{first_name}, quick one, after {company}, are you open to owning a greenfield React platform end-to-end? Remote, staff-level. Happy to share details.' },
       ],
     }));
     const tplEmail = store.insert('templates', build.template({
       name: 'Breakup + value', channel: 'email', action: 'email',
       subject: 'Closing the loop, {first_name}',
-      body: 'Hi {first_name},\n\nI\'ll close the loop here. If a remote, architecture-owning React role ever becomes interesting, my door\'s open.\n\n— Jamie',
+      body: 'Hi {first_name},\n\nI\'ll close the loop here. If a remote, architecture-owning React role ever becomes interesting, my door\'s open.\n\n- Jamie',
     }));
 
     const leadsSeed = [

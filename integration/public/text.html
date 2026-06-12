@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OS Text, RecruitersOS</title>
-  <meta name="description" content="OS Text — the texting engine inside RecruitersOS." />
+  <meta name="description" content="OS Text, the texting engine inside RecruitersOS." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -41,7 +41,7 @@
 
   <script>
     // OS Text needs a RecruitersOS session. If you hit this page signed out, the
-    // SSO endpoint would 401 inside the frame — so bounce to login instead.
+    // SSO endpoint would 401 inside the frame, so bounce to login instead.
     fetch('/api/overview', { credentials: 'same-origin' })
       .then(function (r) { if (r.status === 401) location.replace('/login'); })
       .catch(function () {});

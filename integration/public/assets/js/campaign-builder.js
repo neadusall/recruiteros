@@ -241,7 +241,7 @@
       : "Search 250+ industries, e.g. Fintech, Healthcare, AI...";
     renderSearchChips(); searchDrop.classList.remove("open");
   }));
-  // "All industries ▾" — open the full grouped dropdown without typing
+  // "All industries ▾", open the full grouped dropdown without typing
   $("#browseBtn").addEventListener("click", () => {
     if (state.mode === "company") {
       $$("#searchSeg .seg-btn").forEach(x => x.classList.toggle("active", x.dataset.mode === "industry"));
@@ -362,7 +362,7 @@
       card.innerHTML = `<div class="top"><span class="nm">${t.name}</span>
         <span class="badge">${t.title}</span><span class="badge">${(t.industry || "").toString()}</span>
         <span class="score ${sc}">${t.score}</span></div>
-        <div class="reason">${cap(t.reason)} — reach <b>${t.name}</b>, ${t.title} at ${t.company}.</div>
+        <div class="reason">${cap(t.reason)}, reach <b>${t.name}</b>, ${t.title} at ${t.company}.</div>
         <div class="badges"><span class="badge">${t.type}</span><span class="badge">${t.function}</span>
           <span class="badge">${t.location || ""}</span>
           ${t.needs.email ? '<span class="badge need">needs email</span>' : ""}
@@ -372,11 +372,11 @@
   }
   function renderSummary() {
     const d = state.draft;
-    $("#sPulled").textContent = d ? d.pulled : "—";
-    $("#sMatched").textContent = d ? d.matched : "—";
-    $("#sTargets").textContent = d ? d.targets.length : "—";
-    $("#sCompanies").textContent = d ? d.companies : "—";
-    $("#sPeople").textContent = d ? d.people : "—";
+    $("#sPulled").textContent = d ? d.pulled : "-";
+    $("#sMatched").textContent = d ? d.matched : "-";
+    $("#sTargets").textContent = d ? d.targets.length : "-";
+    $("#sCompanies").textContent = d ? d.companies : "-";
+    $("#sPeople").textContent = d ? d.people : "-";
     const segWrap = $("#segWrap"); segWrap.innerHTML = "";
     if (d && Object.keys(d.segments).length) {
       segWrap.appendChild(el("div", null, `<div style="font-size:12px;color:var(--text-dim);margin-bottom:4px">Segments</div>`));

@@ -313,7 +313,7 @@
     // Audience = a saved prospect list (built under Prospects), assigned by name.
     function fillAudience() {
       var sel = $("audience"); if (!sel) return;
-      var opt0 = '<option value="">— No list assigned —</option>';
+      var opt0 = '<option value="">- No list assigned -</option>';
       sel.innerHTML = opt0 + prospectLists.map(function (l) {
         return '<option value="' + esc(l.id) + '"' + (l.id === state.prospectListId ? " selected" : "") + ">" + esc(l.name) + " (" + (l.prospectIds || []).length + ")</option>";
       }).join("");
@@ -323,7 +323,7 @@
       var h = $("audienceHint"); if (!h) return;
       var l = prospectLists.filter(function (x) { return x.id === state.prospectListId; })[0];
       h.textContent = l ? (l.prospectIds || []).length + " prospects will be enrolled when you deploy."
-        : (prospectLists.length ? "Pick a saved list to set who this campaign targets." : "No saved lists yet — build one under Prospects.");
+        : (prospectLists.length ? "Pick a saved list to set who this campaign targets." : "No saved lists yet, build one under Prospects.");
     }
     fillAudience();
     $("audience").addEventListener("change", function (e) {
@@ -395,7 +395,7 @@
       var q = ($("palSearch").value || "").toLowerCase();
       var wrap = $("palette"); wrap.innerHTML = "";
 
-      // Saved sequences (from Campaigns) — pick one by name per channel and drop
+      // Saved sequences (from Campaigns), pick one by name per channel and drop
       // the whole micro-sequence onto the canvas, so the palette stays uncluttered.
       if (savedSequences.length) {
         var sg = el("div", "pal-group pal-seqs");

@@ -1,5 +1,5 @@
 /* ============================================================
-   Alfred Outreach Studio — browser controller
+   Alfred Outreach Studio, browser controller
    Wires alfred.html to the Alfred engine (window.Alfred).
    Persists to localStorage; runs a simulation clock so you can
    watch multi-day campaigns drip against the Simulated channel.
@@ -75,7 +75,7 @@
   const ACTION_CATALOG = A.CHANNELS; // {linkedin:{actions:{...}}, email, twitter}
 
   /* ============================================================
-     RENDER — top-level dispatcher
+     RENDER, top-level dispatcher
      ============================================================ */
   function updateMode() {
     const banner = $('#modeBanner'); if (!banner) return;
@@ -261,7 +261,7 @@
     const meta = ACTION_CATALOG[a.channel].actions[a.type] || {};
     const needsBody = (meta.needs || []).some(n => n.indexOf('body') === 0) || a.type === 'connect';
     const needsSubject = (meta.needs || []).includes('subject');
-    const tplOpts = '<option value="">— inline copy —</option>' + store.all('templates').map(t => `<option value="${t.id}" ${a.templateId===t.id?'selected':''}>${esc(t.name)}</option>`).join('');
+    const tplOpts = '<option value="">- inline copy -</option>' + store.all('templates').map(t => `<option value="${t.id}" ${a.templateId===t.id?'selected':''}>${esc(t.name)}</option>`).join('');
 
     insp.innerHTML = `<h3>${ACTION_CATALOG[a.channel].icon} Edit step</h3>
       <div class="row" style="gap:8px">
@@ -401,7 +401,7 @@
         <td><span class="av"><span class="avatar2" style="background:${colorFor(l.fullName)}">${initials(l.fullName)}</span><span>${esc(l.fullName)}${(l.tags && l.tags.length) ? '<br>' + l.tags.map(tg => `<span class="tag">${esc(tg)}</span>`).join('') : ''}</span></span></td>
         <td>${esc(l.company)}</td><td class="dim">${esc(l.position || l.headline)}</td><td class="dim">${esc(l.location)}</td>
         <td><span class="deg">${esc(l.degree || '')}</span></td>
-        <td>${enr ? `<span class="pillbar ${e.status==='replied'?'ok':e.status==='stopped'?'bad':'info'}">${e.status}</span>` : '<span class="dim">—</span>'}</td>
+        <td>${enr ? `<span class="pillbar ${e.status==='replied'?'ok':e.status==='stopped'?'bad':'info'}">${e.status}</span>` : '<span class="dim">-</span>'}</td>
       </tr>`;
     }).join('')}</tbody>`;
     $('#lAll').addEventListener('change', e => { leads.forEach(l => e.target.checked ? leadSel.add(l.id) : leadSel.delete(l.id)); renderLeads(); });
@@ -576,7 +576,7 @@
     const evs = store.where('events', e => e.campaignId === activeCampaignId && e.status === 'sent');
     const byCh = {}; evs.forEach(e => { byCh[e.channel] = (byCh[e.channel] || 0) + 1; });
     const max = Math.max(1, ...Object.values(byCh));
-    $('#byChannel').innerHTML = Object.keys(byCh).length ? Object.entries(byCh).map(([k, v]) => `<div class="bar-row"><span class="bl">${ACTION_CATALOG[k] ? ACTION_CATALOG[k].icon : ''} ${k}</span><span class="bar-track"><span class="bar-fill" style="width:${v / max * 100}%"></span></span><span class="dim">${v}</span></div>`).join('') : '<p class="dim">No activity yet — enroll leads and advance the clock.</p>';
+    $('#byChannel').innerHTML = Object.keys(byCh).length ? Object.entries(byCh).map(([k, v]) => `<div class="bar-row"><span class="bl">${ACTION_CATALOG[k] ? ACTION_CATALOG[k].icon : ''} ${k}</span><span class="bar-track"><span class="bar-fill" style="width:${v / max * 100}%"></span></span><span class="dim">${v}</span></div>`).join('') : '<p class="dim">No activity yet, enroll leads and advance the clock.</p>';
   }
 
   /* ============================================================
@@ -783,7 +783,7 @@
   $$('#seqPalette .pal-chip').forEach(chip => chip.addEventListener('dragstart', (e) => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData('text/plain', 'add:' + chip.dataset.add); }));
 
   /* ============================================================
-     LINKEDIN LIVE — portal drives the browser extension
+     LINKEDIN LIVE, portal drives the browser extension
      ============================================================ */
   const Ext = window.StudioExt;
   let scrapePoll = null;
@@ -881,7 +881,7 @@
   $('#refreshDs') && $('#refreshDs').addEventListener('click', renderDatasets);
 
   /* ============================================================
-     RECRUITEROS BACKEND — team accounts, throttles, prospects, inbox
+     RECRUITEROS BACKEND, team accounts, throttles, prospects, inbox
      ============================================================ */
   const Backend = window.RosBackend;
 
@@ -897,7 +897,7 @@
     } else {
       st.innerHTML = `<span class="pillbar warn">${esc(ses.info || 'offline')}</span>`;
       $('#beAccounts').innerHTML = '<p class="dim" style="font-size:12px">' + esc(ses.info || 'Backend not connected.') + '</p>';
-      $('#beInbox').innerHTML = '<p class="dim" style="font-size:12px">—</p>';
+      $('#beInbox').innerHTML = '<p class="dim" style="font-size:12px">-</p>';
       return;
     }
     // team LinkedIn accounts (multi-account, quotas, warmup)
@@ -972,7 +972,7 @@
           $('#snProg').innerHTML = `${sc.status === 'running' ? '⏳' : '✅'} page ${sc.page}/${sc.maxPages} · <b>${sc.total}</b> leads`;
           if (sc.status !== 'running') {
             clearInterval(scrapePoll); scrapePoll = null;
-            $('#snProg').innerHTML += ' — done. Importing...';
+            $('#snProg').innerHTML += ', done. Importing...';
             await importDataset(dsId); switchTab('leads'); closeModal();
           }
         }

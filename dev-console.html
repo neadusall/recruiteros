@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
-<title>RecruitersOS — Dev Console (Sessions)</title>
+<title>RecruitersOS, Dev Console (Sessions)</title>
 <style>
   :root{
     --bg:#070b14; --bg2:#0b1120; --panel:#0f1626; --panel2:#131c30;
@@ -187,7 +187,7 @@
 
 <script>
 /* ============================================================
-   Dev Console — a navigator for building & deploying RecruitersOS.
+   Dev Console, a navigator for building & deploying RecruitersOS.
    Left bar = the repo's shape (structure) + the work backlog (sessions).
    Click anything → its detail loads on the right. Statuses + notes
    persist in this browser (localStorage), so it's your build tracker.
@@ -198,11 +198,11 @@ const ghHref = p => GH.replace(/blob/, p.endsWith("/") ? "tree" : "blob") + p.re
 /* ---------- DATA: the four-layer shape of the repo ---------- */
 const STRUCTURE = [
   { id:"portal", ic:"🖥️", nm:"Static portal", pth:"/ (repo root)",
-    nd:"No-build HTML/CSS/JS — marketing pages + the app shell.",
+    nd:"No-build HTML/CSS/JS, marketing pages + the app shell.",
     what:"The customer-facing surface and the app shell. Plain HTML5 + vanilla JS + CSS with no bundler or framework. At build time these files are synced into integration/public/ so the backend serves them from one origin.",
     paths:[["index.html","Landing page"],["command.html","Command Center (the app)"],["alfred.html","Outreach Studio"],["assets/css/","Design system + per-surface styles"],["assets/js/","Page controllers (command.js, auth.js, app.js…)"]] },
   { id:"backend", ic:"⚙️", nm:"Backend", pth:"integration/",
-    nd:"Next.js 14 + TypeScript — the real product.",
+    nd:"Next.js 14 + TypeScript, the real product.",
     what:"Next.js 14 App Router + TypeScript. ~37 session-based /api routes, a separate /v1 public REST API, all domain logic under lib/, and a snapshot-KV persistence layer over Postgres that degrades to in-memory without DATABASE_URL.",
     paths:[["integration/app/api/","~37 route handlers"],["integration/lib/","Domain modules (auth, linkedin, signals, response, billing…)"],["integration/lib/db/index.ts","Postgres snapshot KV"],["integration/lib/core/repository.ts","Persistence boundary"],["integration/api/","Public /v1 REST API"]] },
   { id:"exec", ic:"🔗", nm:"Execution arm", pth:"extension/ · bridge/",
@@ -211,7 +211,7 @@ const STRUCTURE = [
     paths:[["extension/","MV3 extension (content scripts, background, popup)"],["extension/lib/alfred-bridge.js","Alfred adapter → extension seam"],["bridge/outreach-bridge.cjs","Backend ↔ extension relay"]] },
   { id:"alfred", ic:"🤖", nm:"Alfred engine", pth:"assets/js/alfred/",
     nd:"The real, unit-tested automation core (browser + Node).",
-    what:"A MeetAlfred-style automation engine: data model, scheduler, account-safety rate limiter, warm-up ramp, and analytics. UMD — runs in the browser (window.Alfred) and under Node for tests. The Simulated adapter is fully working; live LinkedIn/Email/X adapters are stubs.",
+    what:"A MeetAlfred-style automation engine: data model, scheduler, account-safety rate limiter, warm-up ramp, and analytics. UMD, runs in the browser (window.Alfred) and under Node for tests. The Simulated adapter is fully working; live LinkedIn/Email/X adapters are stubs.",
     paths:[["assets/js/alfred/alfred-core.js","Engine (store, limits, scheduler)"],["assets/js/alfred/alfred-ui.js","Studio controller + sim clock"],["assets/js/alfred/alfred.test.cjs","47-assertion test harness"]] },
   { id:"ops", ic:"🚀", nm:"Deploy & ops", pth:"Dockerfile · *.sh · docs",
     nd:"Two deploy paths (Vercel / Hetzner+Docker+Caddy) + runbooks.",
@@ -231,12 +231,12 @@ const TRACKS = [
 const SESSIONS = [
   /* ---- Track A ---- */
   { id:"s1", track:"A", n:1, title:"First public deploy",
-    lede:"Stand up the backend on a host and confirm login works end to end — a URL where /login.html lands you in a real Command Center.",
+    lede:"Stand up the backend on a host and confirm login works end to end, a URL where /login.html lands you in a real Command Center.",
     scope:"Pick a deploy path (Vercel for zero-ops, or self-hosted Hetzner+Docker+Caddy for a durable DB). Build the Next app in integration/, point a domain at it, and verify the sign-up → session → Command Center flow over HTTPS.",
     files:[["docs/setup/server/2-deploy.md","both paths"],["vercel.json","Vercel"],["Dockerfile",""],["docker-compose.yml","Hetzner"],["Caddyfile","TLS proxy"],["docs/setup/server/3-go-live-walkthrough.md","runbook"]],
     outcome:"A live URL serving the marketing site + portal + API from one origin, with a working real account." },
   { id:"s2", track:"A", n:2, title:"Env & secrets audit",
-    lede:"Turn the three .env.example files into one filled, documented secrets sheet — required-to-boot vs optional-per-feature.",
+    lede:"Turn the three .env.example files into one filled, documented secrets sheet, required-to-boot vs optional-per-feature.",
     scope:"Walk every variable across the env examples, decide which are mandatory for a first boot (session secret, owner email) vs which gate a specific feature (providers, OAuth, email), and record where each is set on the host.",
     files:[[".env.production.example","root / prod"],["integration/.env.example","LinkedIn + enrichment"],["bridge/.env.example","relay tokens"]],
     outcome:"A single source of truth for configuration; no silent dry-runs from missing keys you didn't know about." },
@@ -248,7 +248,7 @@ const SESSIONS = [
 
   /* ---- Track B ---- */
   { id:"s4", track:"B", n:4, title:"Turn on Postgres persistence",
-    lede:"Everything runs in-memory by default — provision a DB so state survives restarts, and decide if the snapshot-KV holds.",
+    lede:"Everything runs in-memory by default, provision a DB so state survives restarts, and decide if the snapshot-KV holds.",
     scope:"Set DATABASE_URL, confirm modules hydrate from and save to the ros_kv snapshot table, and stress whether coarse JSON snapshots (last-write-wins, no transactions) are enough or whether real per-entity tables are warranted next.",
     files:[["integration/lib/db/index.ts","snapshot KV"],["integration/lib/core/repository.ts","persistence boundary"]],
     outcome:"Accounts, campaigns, and prospects persist across restarts on a real database." },
@@ -259,7 +259,7 @@ const SESSIONS = [
     outcome:"One real, safe LinkedIn touch fires and its reply routes back into the inbox." },
   { id:"s6", track:"B", n:6, title:"Real people-search / signals data",
     lede:"Replace mock search & enrichment with a live source.",
-    scope:"Stand up the signal collection + scoring pipeline against a real provider and the cheap-first enrichment waterfall. rapidapi.ts carries the most TODO markers — start there.",
+    scope:"Stand up the signal collection + scoring pipeline against a real provider and the cheap-first enrichment waterfall. rapidapi.ts carries the most TODO markers, start there.",
     files:[["integration/lib/signals/","collector + scoring"],["integration/lib/providers/","adapters"],["integration/lib/signals/rapidapi.ts","most TODOs"]],
     outcome:"Searches and enrichment return real people/companies, with provenance tracked." },
   { id:"s7", track:"B", n:7, title:"Email & SMS sending",
@@ -280,7 +280,7 @@ const SESSIONS = [
     files:[["extension/","MV3 extension"],["bridge/outreach-bridge.cjs","relay"],["extension/lib/alfred-bridge.js","adapter seam"]],
     outcome:"The execution arm runs a real action and reports its outcome through the full loop." },
   { id:"s10", track:"C", n:10, title:"ATS integration (Loxo)",
-    lede:"Finish the ATS adapter — it carries the most TODOs in the backend.",
+    lede:"Finish the ATS adapter, it carries the most TODOs in the backend.",
     scope:"Complete the Loxo client so prospects and stage transitions sync into the ATS, and confirm the object mapping round-trips.",
     files:[["integration/lib/ats/index.ts","ATS facade"],["integration/lib/ats/loxo.ts","Loxo client"]],
     outcome:"Prospects and pipeline moves sync to a real ATS." },
@@ -298,7 +298,7 @@ const SESSIONS = [
     outcome:"Every privileged path is gated and every inbound webhook is verified." },
   { id:"s13", track:"D", n:13, title:"Test & typecheck pass",
     lede:"Run the suites and close failures; tighten the loose build nets.",
-    scope:"Run npm run typecheck, the Alfred suite, and the bridge/smoke tests; the Next build currently ignores TS/ESLint errors — decide whether to keep that or gate deploys on green.",
+    scope:"Run npm run typecheck, the Alfred suite, and the bridge/smoke tests; the Next build currently ignores TS/ESLint errors, decide whether to keep that or gate deploys on green.",
     files:[["assets/js/alfred/alfred.test.cjs","engine tests (47)"],["integration/smoke.cjs","backend flow"],["bridge/bridge.test.cjs","relay tests"],["integration/tsconfig.json","strict:false today"]],
     outcome:"A green test baseline and a decision on build-time strictness." },
 

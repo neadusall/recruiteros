@@ -228,7 +228,7 @@
     $$("#rosterWrap .clickrow").forEach(function (tr) { tr.addEventListener("click", function () { openAccount(tr.dataset.id); }); });
   }
 
-  /* Count bars (integers, not dollars) — reuses the bar visual from cost rollups. */
+  /* Count bars (integers, not dollars), reuses the bar visual from cost rollups. */
   function countBars(obj) {
     var entries = Object.keys(obj || {}).map(function (k) { return [k, Number(obj[k]) || 0]; });
     var total = entries.reduce(function (s, e) { return s + e[1]; }, 0);
@@ -314,17 +314,17 @@
   /* ================= PROJECTION CALCULATOR ================= */
   /* A forward-looking "what will this cost" calculator for the stack we're
    * standing up: the new sending system, TheirStack signal credits, and
-   * Cartesia cloned-voice. Fully client-side and live — every keystroke
+   * Cartesia cloned-voice. Fully client-side and live, every keystroke
    * recomputes. Inputs persist in localStorage so they survive navigation.
    * Real-world defaults (June 2026):
-   *   TheirStack — 1 API credit = 1 job posting; ~$0.017/credit at Pro
+   *   TheirStack, 1 API credit = 1 job posting; ~$0.017/credit at Pro
    *                ($169 / 10k), down to ~$0.0015/credit at volume.
-   *   Cartesia   — Startup $39/mo = 1.25M credits; IVC 1 credit/char (no
+   *   Cartesia  , Startup $39/mo = 1.25M credits; IVC 1 credit/char (no
    *                training), Pro Voice Cloning = one-time 1M-credit train
    *                + 1.5 credits/char.
    */
   var CALC_DEFAULTS = {
-    // scale — everything scales off the recruiter count
+    // scale, everything scales off the recruiter count
     recruiters: 5,
     prospectsPerRec: 1000, emailsPerRec: 10000, recordingsPerRec: 400,
     // emailing system (own warmed inboxes; inbox/domain counts auto-derive from volume)
@@ -366,7 +366,7 @@
   }
   function saveCalcState(s) { try { localStorage.setItem(calcKey(), JSON.stringify(s)); } catch (e) {} }
 
-  /* Pure cost model — given a state, return every derived number. Reused by the
+  /* Pure cost model, given a state, return every derived number. Reused by the
    * results pane AND the scenario table (which just varies `recruiters`). */
   function computeCalc(s) {
     var recruiters = Math.max(0, Number(s.recruiters) || 0);
@@ -392,7 +392,7 @@
       signalsOneTime = s.tsPrice;
     }
 
-    // People Data Labs — person/phone enrichment (only successful matches billed).
+    // People Data Labs, person/phone enrichment (only successful matches billed).
     var pdlMatches = recruiters * s.pdlPerRec;
     var pdlCost = pdlMatches * s.pdlPrice;
 
@@ -424,16 +424,16 @@
 
   function viewCalculator() {
     var s = calcState();
-    var html = '<div class="v-head"><h2>Projection · ' + esc(motionName()) + '</h2><p>Model what the stack will cost <em>before</em> you spend — the new sending system, TheirStack signals + People Data Labs enrichment, and Cartesia cloned voice. Everything scales off the recruiter count, so changing it re-derives the whole deploy (inboxes, domains, credits, voice) live. The table at the bottom compares different team sizes. Each operating system below keeps its own numbers; nothing here touches the ledger — it is a sandbox.</p></div>';
+    var html = '<div class="v-head"><h2>Projection · ' + esc(motionName()) + '</h2><p>Model what the stack will cost <em>before</em> you spend, the new sending system, TheirStack signals + People Data Labs enrichment, and Cartesia cloned voice. Everything scales off the recruiter count, so changing it re-derives the whole deploy (inboxes, domains, credits, voice) live. The table at the bottom compares different team sizes. Each operating system below keeps its own numbers; nothing here touches the ledger, it is a sandbox.</p></div>';
 
-    // Operating-system tabs — the package is presented for both motions, each with its own saved inputs.
+    // Operating-system tabs, the package is presented for both motions, each with its own saved inputs.
     html += '<div class="calc-motion" id="calcMotion">' +
       '<button class="cm" data-motion="recruiting">Recruiting OS</button>' +
       '<button class="cm" data-motion="bd">Business Development OS</button></div>';
 
     html += '<div class="calc-wrap"><div class="calc-inputs">';
 
-    // Scale — recruiter-driven
+    // Scale, recruiter-driven
     html += card("Recruiters & per-seat volume", "The whole model scales from here. Set the team size and what one recruiter runs per month; totals derive automatically.",
       grid(
         xin("Recruiters on the system", "recruiters", s.recruiters, 1, 0) +
@@ -442,8 +442,8 @@
         xin("Voice recordings / recruiter / mo", "recordingsPerRec", s.recordingsPerRec, 50, 0)
       ) + '<div id="scaleOut" class="calc-readout"></div>');
 
-    // Emailing system — counts auto-derive from send volume
-    html += card("Emailing system", "Inboxes & domains auto-derive from send volume at a safe deliverability ceiling — this is how the system actually provisions. (Reseller mailbox ≈ $1.50–3/mo, throwaway domain ≈ $1/mo.)",
+    // Emailing system, counts auto-derive from send volume
+    html += card("Emailing system", "Inboxes & domains auto-derive from send volume at a safe deliverability ceiling, this is how the system actually provisions. (Reseller mailbox ≈ $1.50-3/mo, throwaway domain ≈ $1/mo.)",
       grid(
         xin("Cost / inbox / mo ($)", "inboxCost", s.inboxCost, 0.5, 0) +
         xin("Cost / domain / mo ($)", "domainCost", s.domainCost, 0.5, 0) +
@@ -454,7 +454,7 @@
       ) + '<div id="emailOut" class="calc-readout"></div>');
 
     // TheirStack signals + People Data Labs enrichment
-    html += card("Hiring signals · TheirStack + People Data Labs", "TheirStack: 1 API credit = 1 job posting, 3 = 1 company (~$0.017/credit at Pro $169/10k, ~$0.0015 at volume). People Data Labs: person/phone enrichment, only successful matches are billed (~$0.28/match Pro, ~$0.20–0.25 at volume). Set PDL matches to 0 to leave it out.",
+    html += card("Hiring signals · TheirStack + People Data Labs", "TheirStack: 1 API credit = 1 job posting, 3 = 1 company (~$0.017/credit at Pro $169/10k, ~$0.0015 at volume). People Data Labs: person/phone enrichment, only successful matches are billed (~$0.28/match Pro, ~$0.20-0.25 at volume). Set PDL matches to 0 to leave it out.",
       grid(
         xin("TheirStack pack price ($)", "tsPrice", s.tsPrice, 5, 0) +
         xin("Credits in pack", "tsCredits", s.tsCredits, 500, 0) +
@@ -574,7 +574,7 @@
       html += '<div class="tl total"><span>Total setup</span><span class="v">' + usd(r.oneTime) + '</span></div></div>';
     }
 
-    html += '<p class="note" style="margin-top:14px">Annualized: <strong>' + usd(r.recurring * 12) + '/yr</strong> recurring' + (r.oneTime > 0 ? ' + ' + usd(r.oneTime) + ' once' : '') + '. Recruiting OS and Business Development OS share the same unit costs — switch the tab above to model each with its own team size and volumes.</p>';
+    html += '<p class="note" style="margin-top:14px">Annualized: <strong>' + usd(r.recurring * 12) + '/yr</strong> recurring' + (r.oneTime > 0 ? ' + ' + usd(r.oneTime) + ' once' : '') + '. Recruiting OS and Business Development OS share the same unit costs, switch the tab above to model each with its own team size and volumes.</p>';
 
     $("#calcResults").innerHTML = html;
 
@@ -588,7 +588,7 @@
     if (counts.indexOf(current) === -1 && current > 0) counts.push(current);
     counts = counts.filter(function (v, i, a) { return a.indexOf(v) === i; }).sort(function (a, b) { return a - b; });
 
-    var html = '<h3>Cost by team size</h3><p class="note" style="margin:-2px 0 12px">Same per-recruiter assumptions, different headcount. <strong>Click any row to load it above.</strong> Your current size is highlighted — watch cost-per-recruiter fall as the fixed pieces (the voice plan, signal pack, domains) spread across more seats.</p>';
+    var html = '<h3>Cost by team size</h3><p class="note" style="margin:-2px 0 12px">Same per-recruiter assumptions, different headcount. <strong>Click any row to load it above.</strong> Your current size is highlighted, watch cost-per-recruiter fall as the fixed pieces (the voice plan, signal pack, domains) spread across more seats.</p>';
     html += '<div class="otable-wrap"><table class="otable scenario"><thead><tr>' +
       '<th>Recruiters</th><th class="num">Email</th><th class="num">Signals + data</th><th class="num">Voice</th>' +
       '<th class="num">Recurring / mo</th><th class="num">Per recruiter</th><th class="num">Setup</th>' +
@@ -602,7 +602,7 @@
         '<td class="num">' + usd(c.voiceRecurring) + '</td>' +
         '<td class="num"><strong>' + usd(c.recurring) + '</strong></td>' +
         '<td class="num">' + usd(c.perRecruiter) + '</td>' +
-        '<td class="num">' + (c.oneTime > 0 ? usd(c.oneTime) : '—') + '</td>' +
+        '<td class="num">' + (c.oneTime > 0 ? usd(c.oneTime) : '-') + '</td>' +
         '</tr>';
     });
     html += '</tbody></table></div>';
@@ -677,7 +677,7 @@
   }
   function marginCell(a) {
     if (a.atCost) return '<span class="pill atcost">At cost</span>';
-    if (!a.monthlyPriceUsd) return '<span class="note">—</span>';
+    if (!a.monthlyPriceUsd) return '<span class="note">-</span>';
     var c = a.grossMarginPct >= 80 ? "margin-good" : a.grossMarginPct >= 50 ? "margin-mid" : "margin-bad";
     return '<span class="' + c + '">' + pct(a.grossMarginPct) + '</span>';
   }
@@ -700,11 +700,11 @@
       kv("Status", a.suspended ? '<span class="pill susp">Suspended</span>' : '<span class="pill active">Active</span>') +
       kv("Plan", esc(a.plan)) +
       kv("Created", fmtDate(a.createdAt)) +
-      kv("Last active", a.lastActiveAt ? fmtDate(a.lastActiveAt) : "—") +
+      kv("Last active", a.lastActiveAt ? fmtDate(a.lastActiveAt) : "-") +
       kv("Active sessions", a.activeSessions) +
       kv("Price / mo", usd(a.monthlyPriceUsd)) +
       kv("Cost · " + esc(win), usd(a.costUsd)) +
-      kv("Gross margin", a.atCost ? '<span class="pill atcost">At cost · no margin</span>' : a.monthlyPriceUsd ? pct(a.grossMarginPct) + " (" + usd(a.grossProfitUsd) + ")" : "—") +
+      kv("Gross margin", a.atCost ? '<span class="pill atcost">At cost · no margin</span>' : a.monthlyPriceUsd ? pct(a.grossMarginPct) + " (" + usd(a.grossProfitUsd) + ")" : "-") +
       (m.lastResetAt ? kv("Last reset", fmtDate(m.lastResetAt)) : "") +
       '</div>';
 
@@ -734,7 +734,7 @@
       fld("Tier label", '<input id="dwTier" type="text" value="' + esc(m.tier || "") + '">') +
       '</div>' +
       '<div class="fld" style="margin-top:10px"><label>Notes</label><input id="dwNotes" type="text" value="' + esc(m.notes || "") + '"></div>' +
-      '<label class="atcost-row"><input type="checkbox" id="dwAtCost"' + (m.atCost ? " checked" : "") + '> <span><strong>At cost — no margin.</strong> Grant this account the tool at exactly what it costs us. Profit/margin show 0 (never a loss) and MRR counts their cost.</span></label>' +
+      '<label class="atcost-row"><input type="checkbox" id="dwAtCost"' + (m.atCost ? " checked" : "") + '> <span><strong>At cost, no margin.</strong> Grant this account the tool at exactly what it costs us. Profit/margin show 0 (never a loss) and MRR counts their cost.</span></label>' +
       '<div class="btn-row"><a class="btn btn-primary btn-sm" id="dwSave">Save billing</a>' +
       '<a class="btn btn-sm" id="dwSuspend">' + (a.suspended ? "Unsuspend" : "Suspend") + '</a>' +
       '<a class="btn btn-sm" id="dwRevoke">Revoke sessions</a></div>';
@@ -925,12 +925,12 @@
    * once at activation so a lost device never locks you out. */
   function viewSecurity() {
     api("/auth/2fa/status").then(function (st) {
-      var html = '<div class="v-head"><h2>Security</h2><p>Two-factor authentication (2FA) puts an authenticator-app code in front of your sign-in, so a stolen or guessed password alone can\'t get in. This protects your account everywhere — the owner console and the main app.</p></div>';
+      var html = '<div class="v-head"><h2>Security</h2><p>Two-factor authentication (2FA) puts an authenticator-app code in front of your sign-in, so a stolen or guessed password alone can\'t get in. This protects your account everywhere, the owner console and the main app.</p></div>';
       html += '<div class="card" id="emailHealth" style="margin-bottom:14px"><p class="note">Checking email delivery…</p></div>';
       if (st.enabled) {
         html += '<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><span class="pill active">2FA is ON</span>' +
           '<span class="note" style="margin:0">' + st.recoveryRemaining + ' backup recovery code' + (st.recoveryRemaining === 1 ? '' : 's') + ' remaining</span></div>' +
-          '<p class="note">Your sign-in now requires a 6-digit code from your authenticator app. Keep your recovery codes somewhere safe — each works once if you lose your device.</p>' +
+          '<p class="note">Your sign-in now requires a 6-digit code from your authenticator app. Keep your recovery codes somewhere safe, each works once if you lose your device.</p>' +
           '<h3 style="font-size:13px;margin:16px 0 6px">Turn off 2FA</h3>' +
           '<p class="note" style="margin-top:0">Enter a current code (or a recovery code) to disable it.</p>' +
           '<div class="calc">' + fld("Authenticator or recovery code", '<input id="sfDisableCode" type="text" inputmode="numeric" placeholder="6-digit code">') + '</div>' +
@@ -971,7 +971,7 @@
         '<strong>Password reset &amp; verification emails</strong></div>' +
         (on
           ? '<p class="note">Sending from <span class="mono">' + esc(d.from) + '</span>. Send yourself a test to confirm delivery.</p>'
-          : '<p class="note"><strong>No email provider is configured</strong>, so reset/verification emails are never sent — only logged. Set <span class="mono">RESEND_API_KEY</span> + <span class="mono">EMAIL_FROM</span> in the server\'s <span class="mono">.env.production</span> and redeploy. Then test here.</p>') +
+          : '<p class="note"><strong>No email provider is configured</strong>, so reset/verification emails are never sent, only logged. Set <span class="mono">RESEND_API_KEY</span> + <span class="mono">EMAIL_FROM</span> in the server\'s <span class="mono">.env.production</span> and redeploy. Then test here.</p>') +
         '<div class="btn-row" style="margin-top:8px"><a class="btn btn-sm" id="ehTest">Send test email to me</a></div>' +
         '<div id="ehResult"></div>';
       $("#ehTest").addEventListener("click", function () {
@@ -979,7 +979,7 @@
         send("/owner/email-health", "POST", {}).then(function (res) {
           var x = res.data || {};
           if (x.ok) r.innerHTML = '<p class="note" style="color:var(--accent-green)">✓ Sent to ' + esc(x.to) + '. Check your inbox (and spam).</p>';
-          else if (x.reason === "no_provider") r.innerHTML = '<p class="note" style="color:var(--accent-red)">No provider configured — set RESEND_API_KEY on the server first.</p>';
+          else if (x.reason === "no_provider") r.innerHTML = '<p class="note" style="color:var(--accent-red)">No provider configured, set RESEND_API_KEY on the server first.</p>';
           else r.innerHTML = '<p class="note" style="color:var(--accent-red)">Provider rejected it (' + esc(String(x.status || x.reason)) + '): ' + esc(String(x.detail || "").slice(0, 240)) + '</p>';
         }).catch(function () { r.innerHTML = '<p class="note" style="color:var(--accent-red)">Couldn\'t reach the server.</p>'; });
       });
@@ -993,7 +993,7 @@
       var d = res.data;
       var grouped = (d.secret || "").replace(/(.{4})/g, "$1 ").trim();
       var html = '<div class="setup-step"><div class="step-n">1</div><div><strong>Add it to your authenticator app.</strong>' +
-        '<p class="note" style="margin:4px 0 8px">Open your app, choose “Add account → enter a setup key,” and type this key (account: your email). Use this manual key — never share it or paste it into a website.</p>' +
+        '<p class="note" style="margin:4px 0 8px">Open your app, choose “Add account → enter a setup key,” and type this key (account: your email). Use this manual key, never share it or paste it into a website.</p>' +
         '<div class="secret-box" id="sfSecret">' + esc(grouped) + '</div>' +
         '<div class="btn-row" style="margin-top:8px"><a class="btn btn-sm" id="sfCopy">Copy key</a></div></div></div>';
       html += '<div class="setup-step"><div class="step-n">2</div><div><strong>Enter the 6-digit code it shows.</strong>' +
@@ -1010,7 +1010,7 @@
         var code = $("#sfCode").value.trim();
         if (!code) { toast("Enter the code from your app"); return; }
         send("/auth/2fa/enable", "POST", { code: code }).then(function (r2) {
-          if (!r2.ok) { toast(r2.data && r2.data.error === "invalid_code" ? "That code isn't right — try the current one" : "Activation failed"); return; }
+          if (!r2.ok) { toast(r2.data && r2.data.error === "invalid_code" ? "That code isn't right, try the current one" : "Activation failed"); return; }
           showRecoveryCodes(r2.data.recoveryCodes || []);
         });
       });

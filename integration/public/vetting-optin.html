@@ -14,7 +14,7 @@
     stores the candidate keyed to the desk by phone and enriches their LinkedIn,
     then shows the number to call.
 
-    The operator may replace this with their own page — it only needs to POST the
+    The operator may replace this with their own page, it only needs to POST the
     same JSON ({ deskId, firstName, lastName, phone, email, linkedinUrl }) to
     /api/vetting/optin. Set window.OPTIN_API_BASE if the API is on another origin.
   -->
@@ -103,7 +103,7 @@
           .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
           .then(function (res) {
             if (!res.ok) {
-              $("err").textContent = (res.d && res.d.error === "not_found") ? "We couldn't find that role. Ask your recruiter for a fresh link." : "Something went wrong — please try again.";
+              $("err").textContent = (res.d && res.d.error === "not_found") ? "We couldn't find that role. Ask your recruiter for a fresh link." : "Something went wrong, please try again.";
               btn.disabled = false; btn.textContent = "Get the number to call"; return;
             }
             var d = res.d;
@@ -116,7 +116,7 @@
               '<p class="note" style="margin-top:18px">When you call, our recruiter will already know who you are.</p></div>';
           })
           .catch(function () {
-            $("err").textContent = "Network error — please try again.";
+            $("err").textContent = "Network error, please try again.";
             btn.disabled = false; btn.textContent = "Get the number to call";
           });
       });

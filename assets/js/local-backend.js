@@ -57,18 +57,18 @@
       response: [
         { id: "r1", name: "Marco Silva", channel: "sms", source: "Senior React · Berlin", owner: "Ana Brandt", cls: "positive", text: "Yeah, Thursday afternoon works.", actions: ["Routed to you", "Suggest times"],
           thread: [
-            { from: "out", at: "Mon 09:12", text: "Hi Marco — building a staff frontend team in Berlin, your Trade Republic work stood out. Open to a quick chat this week?" },
+            { from: "out", at: "Mon 09:12", text: "Hi Marco, building a staff frontend team in Berlin, your Trade Republic work stood out. Open to a quick chat this week?" },
             { from: "in", at: "Mon 14:30", text: "Yeah, Thursday afternoon works." }
           ] },
         { id: "r2", name: "Rahel Adler", channel: "email", source: "Series B fintech eng", owner: "Leo Marsh", cls: "soft_yes", text: "Interesting, can you send details?", actions: ["AI replied", "Awaiting"],
           thread: [
-            { from: "out", at: "Tue 08:00", text: "Rahel — a Series B fintech is hiring senior eng, comp band well above market. Worth a look?" },
+            { from: "out", at: "Tue 08:00", text: "Rahel, a Series B fintech is hiring senior eng, comp band well above market. Worth a look?" },
             { from: "in", at: "Tue 11:48", text: "Interesting, can you send details?" }
           ] },
         { id: "r3", name: "Jonas Klein", channel: "linkedin", source: "Staff eng · platform", owner: "Tom Vogel", cls: "timing", text: "Not now, maybe Q3.", actions: ["Nurture", "Snooze 60d"] },
         { id: "r4", name: "Priya Das", channel: "email", source: "Frontend leads · scaleups", owner: "Priya Nair", cls: "referral", text: "Not me, but talk to my colleague Sam.", actions: ["New prospect", "Thank"],
           thread: [
-            { from: "out", at: "Wed 10:05", text: "Priya — a scaleup is after a frontend lead. Could be a fit?" },
+            { from: "out", at: "Wed 10:05", text: "Priya, a scaleup is after a frontend lead. Could be a fit?" },
             { from: "in", at: "Wed 10:51", text: "Not me, but talk to my colleague Sam." }
           ] },
         { id: "r5", name: "Tom Berg", channel: "linkedin", source: "Senior React · Berlin", owner: "Ana Brandt", cls: "fit", text: "Happy where I am, thanks.", actions: ["Close lost"] }
@@ -138,10 +138,10 @@
             { key: "custom_variable2", label: "Candidate A sell-in" }
           ],
           steps: [
-            { id: "s1", day: 0, subject: "{{custom_variable1}} — two candidates ready", tracking: true,
+            { id: "s1", day: 0, subject: "{{custom_variable1}}, two candidates ready", tracking: true,
               body: "Hi {{first_name}},\n\nNoticed the {{custom_variable1}} role at {{company}}. I'm working with a couple of strong candidates based on the JD:\n\n{{custom_variable2}}\n\nWorth a quick call this week?\n\nBest,\n{{sender_name}}" },
             { id: "s2", day: 3, subject: "Re: {{custom_variable1}}", tracking: true,
-              body: "Following up, {{first_name}} — happy to share full profiles if helpful." }
+              body: "Following up, {{first_name}}, happy to share full profiles if helpful." }
           ],
           createdAt: new Date(Date.now() - 864e5).toISOString(), updatedAt: new Date(Date.now() - 864e5).toISOString()
         }
@@ -153,16 +153,16 @@
     return db;
   }
 
-  // Integration catalog — mirrors the real backend (integration/lib/connected).
+  // Integration catalog, mirrors the real backend (integration/lib/connected).
   // Each entry carries the step-by-step activation flow (blurb + steps + key
   // fields) the admin follows in the Connect dialog. LinkedIn Automation is
-  // managed (RecruiterOS provides the Unipile account — no key from the admin);
+  // managed (RecruiterOS provides the Unipile account, no key from the admin);
   // Instantly + SalesRobot are intentionally absent (email = self-hosted infra).
   function connectedCatalog() {
     return [
       { id: "unipile", label: "LinkedIn Automation", status: "green", requiredFor: ["bd", "recruiting"],
-        blurb: "Sends connection invites, DMs and voice notes from your LinkedIn seats — fully managed for you, no API key to set up.",
-        fields: [{ key: "UNIPILE_ACCOUNT_ID", label: "LinkedIn account id", required: false, placeholder: "auto-filled once you connect a seat", hint: "Optional — leave blank to use the seat you connect in LinkedIn Automation." }],
+        blurb: "Sends connection invites, DMs and voice notes from your LinkedIn seats, fully managed for you, no API key to set up.",
+        fields: [{ key: "UNIPILE_ACCOUNT_ID", label: "LinkedIn account id", required: false, placeholder: "auto-filled once you connect a seat", hint: "Optional, leave blank to use the seat you connect in LinkedIn Automation." }],
         steps: ["LinkedIn Automation is provided for you on a managed account, so there's no key to enter.", "Open LinkedIn Automation in the sidebar and connect your LinkedIn profile through the secure hosted sign-in.", "Come back here and hit Test to confirm your seat is linked and ready."], present: [] },
       { id: "rapidapi", label: "Job Search (signal feed)", status: "red", requiredFor: ["bd", "recruiting"],
         blurb: "Daily job-posting pull that powers Hire Signals and 'role they're hiring for'.",
@@ -181,7 +181,7 @@
         docsUrl: "https://tomba.io/dashboard/api", docsLabel: "Tomba API keys ↗", present: [] },
       { id: "taltxt", label: "TalTxt (SMS)", status: "red", requiredFor: ["recruiting"],
         blurb: "Post-engagement SMS + opt-out mirror for the recruiting motion.",
-        fields: [{ key: "TALTXT_API_KEY", label: "API key", required: true, secret: true, placeholder: "paste your TalTxt API key" }, { key: "TALTXT_API_URL", label: "API URL", required: false, placeholder: "https://api.taltxt.io", hint: "Optional — leave blank for the default endpoint." }],
+        fields: [{ key: "TALTXT_API_KEY", label: "API key", required: true, secret: true, placeholder: "paste your TalTxt API key" }, { key: "TALTXT_API_URL", label: "API URL", required: false, placeholder: "https://api.taltxt.io", hint: "Optional, leave blank for the default endpoint." }],
         steps: ["Connect your TalTxt workspace and provision a 10DLC number.", "Copy the API key from TalTxt settings (and the API URL if self-hosted).", "Paste below, Save, then Test."], present: [] },
       { id: "telnyx", label: "Telnyx (calling engine)", status: "green", requiredFor: ["recruiting"],
         blurb: "The calling engine for Voice Drops. Add your API key and the number you call from.",
@@ -189,12 +189,12 @@
         steps: ["Create an API key in Telnyx (Auth → API Keys).", "Add a 10DLC-registered number to call from.", "Paste below, Save, then Test."],
         docsUrl: "https://portal.telnyx.com/#/app/api-keys", docsLabel: "Telnyx API keys ↗", present: ["TELNYX_API_KEY"] },
       { id: "loxo", label: "Loxo (ATS)", status: "red", requiredFor: ["bd", "recruiting"],
-        blurb: "Your system of record. Connected on the ATS tab — pre-flighted here.",
+        blurb: "Your system of record. Connected on the ATS tab, pre-flighted here.",
         fields: [], steps: ["Loxo connects on the ATS tab (it has a richer sync + webhook flow).", "Save its domain, slug and API key there; this row turns green once it verifies."], present: [] }
     ];
   }
 
-  // OS Text (taltxt) onboarding state — a fresh recruiting company starts with
+  // OS Text (taltxt) onboarding state, a fresh recruiting company starts with
   // nothing set up and walks the in-app step-by-step wizard to go live.
   function defaultOstext() {
     return { business: {}, brand: { status: "not_started" }, number: { value: "" },
@@ -211,12 +211,12 @@
     var d2 = new Date(Date.now() - 3 * 864e5).toISOString();
     var d3 = new Date(Date.now() - 864e5).toISOString();
     function email(s) { return [
-      { id: s + "_1", day: 0, subject: "{{custom_variable1}} at {{company}}", tracking: true, body: "Hi {{first_name}},\n\nSaw the {{custom_variable1}} opening — I'm working with strong candidates who fit. Worth a quick call?\n\n{{sender_name}}" },
-      { id: s + "_2", day: 3, subject: "Re: {{custom_variable1}}", tracking: true, body: "Following up, {{first_name}} — happy to share profiles." }
+      { id: s + "_1", day: 0, subject: "{{custom_variable1}} at {{company}}", tracking: true, body: "Hi {{first_name}},\n\nSaw the {{custom_variable1}} opening, I'm working with strong candidates who fit. Worth a quick call?\n\n{{sender_name}}" },
+      { id: s + "_2", day: 3, subject: "Re: {{custom_variable1}}", tracking: true, body: "Following up, {{first_name}}, happy to share profiles." }
     ]; }
     function li(s) { return [
-      { id: s + "_1", day: 0, channel: "linkedin", body: "Hi {{first_name}}, I partner with teams hiring {{custom_variable1}} — open to connecting?" },
-      { id: s + "_2", day: 2, channel: "linkedin", body: "Thanks for connecting, {{first_name}} — have a couple of candidates worth a look." }
+      { id: s + "_1", day: 0, channel: "linkedin", body: "Hi {{first_name}}, I partner with teams hiring {{custom_variable1}}, open to connecting?" },
+      { id: s + "_2", day: 2, channel: "linkedin", body: "Thanks for connecting, {{first_name}}, have a couple of candidates worth a look." }
     ]; }
     return [
       { id: "seq_ana_react", channel: "email", name: "Senior React · Berlin", motion: "recruiting", owner: "Ana Brandt", status: "active", tags: ["frontend", "berlin"], variables: [{ key: "custom_variable1", label: "Role title" }], steps: email("ar"), createdAt: d1, updatedAt: d3 },
@@ -473,9 +473,9 @@
       if (method === "POST" && body && body.action === "estimate") {
         var n = parseInt(body.count, 10) || 0;
         var cap = 0.03;
-        // Firm per-person legs (every prospect) — cheapest-first resolution.
+        // Firm per-person legs (every prospect), cheapest-first resolution.
         var firm = [
-          ["Email — multi-provider waterfall (deep, 80-95%)", 0.006],
+          ["Email, multi-provider waterfall (deep, 80-95%)", 0.006],
           ["Email verification", 0.001],
           ["LinkedIn profile ID + data", 0.005],
           ["Phone classify (route mobile vs landline)", 0.0025],
@@ -488,19 +488,19 @@
           count: n, perPersonLines: perPersonLines, perPersonUsd: perPersonUsd,
           firmTotalUsd: +(n * perPersonUsd).toFixed(2),
           conditional: (body.directDial
-            ? [{ key: "deep_dial", label: "Verified direct dial — person-direct landline/VoIP (Apify + PDL)", unitUsd: 0.1, basis: "per number FOUND (no-find is free) · mobiles + switchboards rejected" }]
-            : [{ key: "deep_dial_off", label: "Verified direct dial (off — enable the setting to run it)", unitUsd: 0.1, basis: "$0.10 per number found when enabled; person-direct landline/VoIP only" }]
+            ? [{ key: "deep_dial", label: "Verified direct dial, person-direct landline/VoIP (Apify + PDL)", unitUsd: 0.1, basis: "per number FOUND (no-find is free) · mobiles + switchboards rejected" }]
+            : [{ key: "deep_dial_off", label: "Verified direct dial (off, enable the setting to run it)", unitUsd: 0.1, basis: "$0.10 per number found when enabled; person-direct landline/VoIP only" }]
           ).concat([
             { key: "voicemail", label: "Voicemail / voice-drop (Telnyx AMD → landline/VoIP)", unitUsd: 0.0095, basis: "per HOT-tier prospect (warmth ≥ 80) only" }
           ]),
           dialCapUsd: cap,
           notes: [
             "Per-person total is the FIRM cheapest-first resolution charged for every prospect (email waterfall + LinkedIn + cheap phone + AI).",
-            "Email is already the blended multi-provider waterfall (80-95%) — its fail-safe is baked into the $0.006.",
+            "Email is already the blended multi-provider waterfall (80-95%), its fail-safe is baked into the $0.006.",
             body.directDial
-              ? "Direct dial is ON: the $0.10 Apify+PDL reveal runs for every pushed prospect — a person-direct landline/VoIP only (mobiles + switchboards dropped), and a no-find lookup is free."
+              ? "Direct dial is ON: the $0.10 Apify+PDL reveal runs for every pushed prospect, a person-direct landline/VoIP only (mobiles + switchboards dropped), and a no-find lookup is free."
               : "Direct dial is OFF: enable the setting to run the $0.10 Apify+PDL reveal (person-direct landline/VoIP only; no-find free).",
-            "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80). Email sends use your own warmed inboxes — no per-email charge."
+            "Voicemail/voice-drops fire only for HOT-tier prospects (warmth ≥ 80). Email sends use your own warmed inboxes, no per-email charge."
           ]
         } });
       }
@@ -547,7 +547,7 @@
         var person = (mgr && mgr.managerName) || lead.buyerName;
         var pros = {
           id: "p_im_" + Date.now() + "_" + Math.floor(Math.random() * 1000),
-          fullName: person || (lead.company + " — " + ((mgr && mgr.managerTitle) || "hiring manager")),
+          fullName: person || (lead.company + ", " + ((mgr && mgr.managerTitle) || "hiring manager")),
           title: (mgr && mgr.managerTitle) || lead.buyerTitle || "",
           company: lead.company,
           companyDomain: lead.domain,
@@ -915,7 +915,7 @@
         var vp = /\bvp\b|vice president|head of|director|chief|svp/.test(t);
         var east = /east coast|new york|boston|atlanta|nyc|philadelphia|charlotte|d\.?c\.?/.test(t);
         return {
-          label: (sales ? "Sales leadership" : "Leadership") + " — demo profile",
+          label: (sales ? "Sales leadership" : "Leadership") + ", demo profile",
           seniority: vp ? "vp" : "director", managesTeam: true,
           titles: sales ? ["VP Sales", "Regional Vice President", "Area Vice President", "Enterprise Sales Director", "Regional Sales Director"]
                         : ["Vice President", "Head of", "Senior Director", "Director"],
@@ -1015,9 +1015,9 @@
     var enGreen = conn("enrichment").status === "green";
 
     var ats = { connected: atsGreen, label: "ATS (system of record)", state: atsGreen ? "ready" : "action",
-      detail: atsGreen ? "Connected — every reply and touch logs to your ATS." : "Not connected. Connect your ATS so prospects, replies, and placements sync automatically." };
+      detail: atsGreen ? "Connected, every reply and touch logs to your ATS." : "Not connected. Connect your ATS so prospects, replies, and placements sync automatically." };
     var sms = { connected: smsGreen, label: "SMS (TalTxt)", state: smsGreen ? "ready" : smsYellow ? "warming" : "action",
-      detail: smsGreen ? "Connected — post-engagement texts and opt-outs are live." : smsYellow ? "Key added — run a test to verify your TalTxt connection." : "Not connected. Connect TalTxt to add compliant SMS to your sequences." };
+      detail: smsGreen ? "Connected, post-engagement texts and opt-outs are live." : smsYellow ? "Key added, run a test to verify your TalTxt connection." : "Not connected. Connect TalTxt to add compliant SMS to your sequences." };
 
     var remaining = Math.max(0, f.creditsIncluded - f.creditsUsed);
     var pct = f.creditsIncluded > 0 ? Math.round((remaining / f.creditsIncluded) * 100) : 0;
@@ -1027,11 +1027,11 @@
       credits: { included: f.creditsIncluded, used: f.creditsUsed, remaining: remaining, low: low, pct: pct },
       detail: !f.enrichmentEnabled ? "Off. Turn on the waterfall to auto-find work emails and direct dials for new prospects."
         : remaining <= 0 ? "Out of credits. Top up to keep finding contacts."
-        : low ? "Running low — " + remaining.toLocaleString() + " credits left."
+        : low ? "Running low, " + remaining.toLocaleString() + " credits left."
         : remaining.toLocaleString() + " of " + f.creditsIncluded.toLocaleString() + " credits available." };
 
     var jobSearch = { enabled: f.jobSearchEnabled, label: "Job Search", state: f.jobSearchEnabled ? "ready" : "off", healthy: true,
-      detail: !f.jobSearchEnabled ? "Off. Turn on Job Search to pull live hiring signals into your campaigns." : "On — live hiring signals feed your daily cadence." };
+      detail: !f.jobSearchEnabled ? "Off. Turn on Job Search to pull live hiring signals into your campaigns." : "On, live hiring signals feed your daily cadence." };
 
     // Domains down to the inbox.
     var domList = (d.accounts.domains || []).map(function (x) {
@@ -1059,7 +1059,7 @@
       var state = flagged ? "action" : warmed ? "ready" : "warming";
       var wp = flagged ? 0 : warmed ? 100 : Math.min(95, Math.round(((a.quotas && a.quotas.connects) || 0) / 20 * 100));
       var issue = flagged ? "Flagged by LinkedIn and paused. Lower daily actions and let it re-warm for a few days before resuming."
-        : warmed ? "" : "Warming up — daily limits are ramping automatically. Keep activity gentle until it's green.";
+        : warmed ? "" : "Warming up, daily limits are ramping automatically. Keep activity gentle until it's green.";
       return { id: a.id, handle: a.handle, channel: "LinkedIn", warmup: a.warmup, warmupPct: wp, state: state,
         limits: { connects: (a.quotas && a.quotas.connects) || 0, dms: (a.quotas && a.quotas.dms) || 25, profileViews: (a.quotas && a.quotas.profileViews) || 40 }, issue: issue };
     });
@@ -1085,7 +1085,7 @@
   // manages (d.accounts.linkedin / d.accounts.domains) plus the team. So adding a
   // LinkedIn account, sending domain or recruiter immediately flows through to the
   // Dashboard with no separate wiring. Outcome fields (pipeline, appointments,
-  // active campaigns) pass through from d.overview untouched — those feed Analytics.
+  // active campaigns) pass through from d.overview untouched, those feed Analytics.
   function buildOverview(d, motion) {
     motion = motion === "bd" ? "bd" : "recruiting";
     var ov = d.overview || {};
@@ -1207,7 +1207,7 @@
       {
         id: "im1", company: "Verla Health", domain: "verlahealth.com", industry: "Digital health",
         industryKey: "healthcare", headcountBand: "51-200", location: "Boston, MA",
-        reason: "Posted 9 engineering roles in 7 days after a $40M Series B — scaling the platform team fast.",
+        reason: "Posted 9 engineering roles in 7 days after a $40M Series B, scaling the platform team fast.",
         signalType: "hiring_velocity", score: 91, scoreReasons: ["Series B fit", "9 roles in 7d", "healthcare ICP"],
         buyerName: "Priya Raman", buyerTitle: "VP Engineering", buyerLinkedin: "https://www.linkedin.com/in/example-praman",
         roles: ["Senior Backend Engineer", "Staff Platform Engineer", "Engineering Manager, Data", "Product Designer"],
@@ -1222,7 +1222,7 @@
       {
         id: "im2", company: "Brightwave", domain: "brightwave.io", industry: "Fintech / payments",
         industryKey: "fintech", headcountBand: "201-500", location: "New York, NY",
-        reason: "New VP Engineering (ex-Datadog) started 5 weeks ago — typically rebuilds platform teams within 90 days.",
+        reason: "New VP Engineering (ex-Datadog) started 5 weeks ago, typically rebuilds platform teams within 90 days.",
         signalType: "exec_hire", score: 84, scoreReasons: ["New exec <90d", "fintech ICP", "rebuild window"],
         buyerName: "Daniel Cho", buyerTitle: "VP Engineering", buyerLinkedin: "https://www.linkedin.com/in/example-dcho",
         roles: ["Senior Platform Engineer", "Engineering Manager", "Security Engineer", "Account Executive"],
@@ -1237,7 +1237,7 @@
       {
         id: "im3", company: "Northwind Robotics", domain: "northwindrobotics.com", industry: "Industrial automation",
         industryKey: "manufacturing", headcountBand: "51-200", location: "Detroit, MI",
-        reason: "Opened a second facility and posted 6 controls + mechanical roles — greenfield local team to build.",
+        reason: "Opened a second facility and posted 6 controls + mechanical roles, greenfield local team to build.",
         signalType: "office_expansion", score: 76, scoreReasons: ["Expansion", "6 roles", "greenfield team"],
         buyerName: null, buyerTitle: null, buyerLinkedin: null,
         roles: ["Controls Engineer", "Mechanical Engineer", "Manufacturing Operations Manager", "Supply Chain Analyst"],
@@ -1252,7 +1252,7 @@
       {
         id: "im4", company: "Lumen Retail", domain: "lumenretail.com", industry: "Retail / eCommerce",
         industryKey: "Retail / eCommerce", headcountBand: "501-1000", location: "Austin, TX",
-        reason: "Reposted a Head of Growth role twice in 30 days — struggling to fill a senior GTM seat.",
+        reason: "Reposted a Head of Growth role twice in 30 days, struggling to fill a senior GTM seat.",
         signalType: "job_repost", score: 72, scoreReasons: ["Reposted role", "senior GTM", "fill pain"],
         buyerName: "Mara Lindgren", buyerTitle: "CMO", buyerLinkedin: "https://www.linkedin.com/in/example-mlindgren",
         roles: ["Head of Growth", "Lifecycle Marketing Manager", "Senior Data Analyst"],
@@ -1266,7 +1266,7 @@
       {
         id: "im5", company: "Cumulus Logistics", domain: "cumuluslogistics.com", industry: "Logistics / supply chain",
         industryKey: "Logistics / Supply Chain", headcountBand: "201-500", location: "Chicago, IL",
-        reason: "Won a large 3PL contract — staffing up operations and engineering to deliver on a deadline.",
+        reason: "Won a large 3PL contract, staffing up operations and engineering to deliver on a deadline.",
         signalType: "grant_or_contract", score: 69, scoreReasons: ["Contract win", "deadline staffing"],
         buyerName: "Tom Becker", buyerTitle: "Head of Operations", buyerLinkedin: "https://www.linkedin.com/in/example-tbecker",
         roles: ["Operations Manager", "Logistics Engineer", "Backend Engineer"],
@@ -1295,7 +1295,7 @@
       {
         id: "im7", company: "Solara Energy", domain: "solaraenergy.com", industry: "Renewable energy",
         industryKey: "Energy", headcountBand: "201-500", location: "Denver, CO",
-        reason: "Entered two new states this quarter — building regional sales and field-ops teams from scratch.",
+        reason: "Entered two new states this quarter, building regional sales and field-ops teams from scratch.",
         signalType: "market_entry", score: 67, scoreReasons: ["New market", "regional build-out"],
         buyerName: "Grace Okafor", buyerTitle: "VP Sales", buyerLinkedin: "https://www.linkedin.com/in/example-gokafor",
         roles: ["Regional Sales Manager", "Field Operations Lead", "Solar Project Engineer"],
@@ -1309,7 +1309,7 @@
       {
         id: "im8", company: "Meridian Bank", domain: "meridianbank.com", industry: "Fintech / banking",
         industryKey: "fintech", headcountBand: "1001-5000", location: "Charlotte, NC",
-        reason: "S-1 filed last week — public-company readiness is driving aggressive finance, legal, and risk hiring.",
+        reason: "S-1 filed last week, public-company readiness is driving aggressive finance, legal, and risk hiring.",
         signalType: "ipo_or_s1", score: 79, scoreReasons: ["IPO/S-1", "compliance hiring", "fintech ICP"],
         buyerName: "Henry Walsh", buyerTitle: "CFO", buyerLinkedin: "https://www.linkedin.com/in/example-hwalsh",
         roles: ["Senior Financial Analyst", "Compliance Counsel", "Risk Manager", "Backend Engineer"],
@@ -1324,7 +1324,7 @@
     ];
   }
 
-  // Synthesize a list of LinkedIn search hits for the demo (no contact data yet —
+  // Synthesize a list of LinkedIn search hits for the demo (no contact data yet -
   // the recruiter enriches each prospect's email/phone/cell on demand afterwards).
   function linkedinSearchSeed(limit) {
     var firsts = ["Ava", "Liam", "Maya", "Noah", "Zoe", "Ethan", "Iris", "Owen", "Lena", "Theo", "Nina", "Cole", "Priya", "Marco", "Sara", "Dev"];
@@ -1408,7 +1408,7 @@
   var isFile = location.protocol === "file:";
   // Once ANY real API call has succeeded, we know this deployment has a real
   // backend. From then on we must NEVER substitute the local mock for a real
-  // response — including 5xx errors. Previously a real 502 (e.g. a Loxo sync
+  // response, including 5xx errors. Previously a real 502 (e.g. a Loxo sync
   // that hit a 403, or a genuine server error) was discarded and replaced with
   // the local mock's answer, which fabricated a misleading "missing_credentials"
   // and hid the true server error. The mock is a demo/offline fallback only.

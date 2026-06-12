@@ -4,19 +4,19 @@
  * dashboard. Account-based: starts at ONE account (2,500 prospects × 3 emails =
  * 7,500/mo); add accounts or change any number to see how spend scales.
  *
- * Cost is organised by WHERE IT LIVES — three buckets:
+ * Cost is organised by WHERE IT LIVES, three buckets:
  *   • Email outreach     = activity + sending + enrichment + message AI + signals
  *   • Voice outreach     = a LinkedIn-first reach funnel (see below) + cloned voice
  *   • LinkedIn outreach  = per-profile messaging seat + message AI
  *
  * VOICE FUNNEL (cheapest path first):
  *   Every target gets a LinkedIn connection request. The ~50% who ACCEPT get a
- *   cloned-voice NOTE on LinkedIn (no phone number, no Telnyx send — cheap). The
+ *   cloned-voice NOTE on LinkedIn (no phone number, no Telnyx send, cheap). The
  *   ~50% who DON'T accept get a landline/VoIP enriched cheapest-first (Apify →
  *   Apollo); where we find a number (~40%), they get an AMD voicemail drop. This
  *   minimises the expensive enrichment + AMD path to only the non-connectors.
  *
- * Cost lines are deliberately GENERIC — real vendors/tools are never named where
+ * Cost lines are deliberately GENERIC, real vendors/tools are never named where
  * a customer can see, only the function performed and an editable price.
  *
  * Mount with: window.SpendingCalc.mount(rootEl)
@@ -28,18 +28,18 @@
 
   var DEFAULTS = {
     accounts: 1,
-    // activity — emails derive from prospects × steps (2,500 × 3 = 7,500)
+    // activity, emails derive from prospects × steps (2,500 × 3 = 7,500)
     prospectsPerAccount: 2500,
     stepsPerProspect: 3,
     // Email Sending (own inboxes + domains; counts auto-size to volume)
     inboxCost: 2.5, domainCost: 1.0, sendsPerInbox: 750, inboxesPerDomain: 3,
     // Email enrichment (find + verify, per prospect)
     emailFindCost: 0.006, emailVerifyCost: 0.001,
-    // Message AI (writes each unique message) — shared rate for email + LinkedIn
+    // Message AI (writes each unique message), shared rate for email + LinkedIn
     emailChars: 2000, llmPer1k: 0.005,
     // Hiring Signals (per lookup + optional one-time data pack)
     signalCost: 0.017, signalSetup: 85, signalSetupOn: 1,
-    // Voice reach funnel — LinkedIn-first, AMD fallback
+    // Voice reach funnel, LinkedIn-first, AMD fallback
     linkedinAcceptRate: 50,    // % of connection requests accepted → cloned-voice NOTE
     landlineFillRate: 40,      // % of non-accepters we find a landline/VoIP for (Apify→Apollo)
     landlineEnrichCost: 0.08,  // blended Apify → Apollo, per number FOUND
@@ -93,7 +93,7 @@
     var landFound = Math.round(amdCand * clamp01(s.landlineFillRate));        // Apify→Apollo finds a landline
     var amdDrops = landFound;                                      // AMD drop only where we have a number
     var landlineEnrich = landFound * (s.landlineEnrichCost + s.lineCheckCost);
-    var noteCost = liNotes * (s.voiceSynthCost + s.voiceLlmCost);  // native LinkedIn — no send fee
+    var noteCost = liNotes * (s.voiceSynthCost + s.voiceLlmCost);  // native LinkedIn, no send fee
     var amdCost = amdDrops * (s.voiceSynthCost + s.voiceLlmCost + s.amdSendCost);
     var voiceFlat = s.voicePlan + s.apolloPlan;                    // Cartesia + Apollo seats
     var voiceTouches = liNotes + amdDrops;
@@ -148,7 +148,7 @@
     var s = state();
 
     var html = '<div class="sc">';
-    html += '<div class="sc-head"><h2>Spending</h2><p>Model what your outreach will cost each month — start with one account and add more to see how it scales. Costs group by where they live: <strong>email</strong>, <strong>voice</strong>, and <strong>LinkedIn</strong>. Voice runs a LinkedIn-first funnel so the expensive enrichment + AMD path only hits the people who don\'t connect. Every number is editable.</p></div>';
+    html += '<div class="sc-head"><h2>Spending</h2><p>Model what your outreach will cost each month, start with one account and add more to see how it scales. Costs group by where they live: <strong>email</strong>, <strong>voice</strong>, and <strong>LinkedIn</strong>. Voice runs a LinkedIn-first funnel so the expensive enrichment + AMD path only hits the people who don\'t connect. Every number is editable.</p></div>';
 
     html += '<div class="sc-accounts">' +
       '<div class="sc-acc-ctl"><button class="sc-step" data-acc="-1">−</button>' +
@@ -168,7 +168,7 @@
       fld("Cost / domain / mo ($)", "domainCost", s.domainCost, 0.5, 0) +
       fld("Sends / inbox / mo", "sendsPerInbox", s.sendsPerInbox, 50, 1) +
       fld("Inboxes / domain", "inboxesPerDomain", s.inboxesPerDomain, 1, 1), "scEmailRead");
-    html += card("Email Enrichment & AI", "Finding + verifying each address, plus the AI that writes each message (per 1,000 characters — a 2,000-char email ≈ 2 units).",
+    html += card("Email Enrichment & AI", "Finding + verifying each address, plus the AI that writes each message (per 1,000 characters, a 2,000-char email ≈ 2 units).",
       fld("Find / prospect ($)", "emailFindCost", s.emailFindCost, 0.001, 0) +
       fld("Verify / prospect ($)", "emailVerifyCost", s.emailVerifyCost, 0.001, 0) +
       fld("Characters / message", "emailChars", s.emailChars, 100, 0) +
@@ -179,11 +179,11 @@
       fld("Include pack? (1 / 0)", "signalSetupOn", s.signalSetupOn, 1, 0));
 
     // ---- Voice outreach (LinkedIn-first funnel) ----
-    html += section("Voice outreach — LinkedIn-first, AMD fallback");
+    html += section("Voice outreach, LinkedIn-first, AMD fallback");
     html += card("Voice reach funnel", "Everyone gets a LinkedIn connection request first. Accepters get a cloned-voice NOTE (no phone, no send fee). Non-accepters get a landline/VoIP found cheapest-first, then an AMD voicemail drop where a number exists.",
       fld("LinkedIn accept rate (%)", "linkedinAcceptRate", s.linkedinAcceptRate, 5, 0) +
       fld("Landline/VoIP fill (%)", "landlineFillRate", s.landlineFillRate, 5, 0), "scFunnelRead");
-    html += card("Landline enrichment (cheapest-first)", "Direct landline/VoIP for the non-accepters — found via the cheap scraper waterfall first, then Apollo's API. A flat Apollo seat + a per-number-found cost; each found number is line-type checked so drops only go to landline/VoIP.",
+    html += card("Landline enrichment (cheapest-first)", "Direct landline/VoIP for the non-accepters, found via the cheap scraper waterfall first, then Apollo's API. A flat Apollo seat + a per-number-found cost; each found number is line-type checked so drops only go to landline/VoIP.",
       fld("Apollo seat ($/mo)", "apolloPlan", s.apolloPlan, 5, 0) +
       fld("Enrichment ($/found)", "landlineEnrichCost", s.landlineEnrichCost, 0.01, 0) +
       fld("Line-type check ($/number)", "lineCheckCost", s.lineCheckCost, 0.0005, 0), "scEnrich2Read");
@@ -325,7 +325,7 @@
         '<td class="num">' + usd(c.linkedinOutreach) + '</td>' +
         '<td class="num"><strong>' + usd(c.recurring) + '</strong></td>' +
         '<td class="num">' + usd(c.perAccount) + '</td>' +
-        '<td class="num">' + (c.oneTime > 0 ? usd(c.oneTime) : '—') + '</td>' +
+        '<td class="num">' + (c.oneTime > 0 ? usd(c.oneTime) : '-') + '</td>' +
         '</tr>';
     });
     html += '</tbody></table></div>';
@@ -346,8 +346,8 @@
    *
    *  A focused "what does an hour on the phone cost" calculator for the inbound
    *  AI Vetting agent. Only two cost drivers, exactly as scoped:
-   *    • Cloned voice — Cartesia cost structure (per minute SPOKEN)
-   *    • Telephony    — Telnyx (per call minute + number rental)
+   *    • Cloned voice, Cartesia cost structure (per minute SPOKEN)
+   *    • Telephony   , Telnyx (per call minute + number rental)
    *
    *  Key realism: across a 60-minute call the cloned voice only SPEAKS for part
    *  of it (the candidate talks the rest), so Cartesia is billed on ~20 of every
@@ -363,14 +363,14 @@
     hoursPerMonth: 40,        // phone-hours/mo the desk(s) are on calls
     avgCallMin: 6,            // average vetting call length → derives calls/mo
     talkMinPerHour: 20,       // minutes the cloned voice actually SPEAKS per hour
-    // Cloned voice — Cartesia
+    // Cloned voice, Cartesia
     cartesiaPlan: 0,          // flat plan $/mo (0 = pay-as-you-go)
     cartesiaPerMin: 0.025,    // $ per minute of generated (spoken) audio
-    // Telephony — Telnyx
+    // Telephony, Telnyx
     telnyxPerMin: 0.007,      // $ per inbound call minute
     numberRental: 1.0,        // $ per number / mo
     numbers: 1,               // how many vetting numbers are live
-    // Optional extras (off by default — the two drivers above are the spec)
+    // Optional extras (off by default, the two drivers above are the spec)
     aiPerMin: 0,              // realtime STT+LLM $/min (whole call), if you include it
     scoringPerCall: 0         // post-call LLM scoring $ per call
   };
@@ -428,7 +428,7 @@
     var s = vstate();
 
     var html = '<div class="sc">';
-    html += '<div class="sc-head"><h2>Spending</h2><p>What the <strong>AI Vetting</strong> agent costs to run — modelled per <strong>hour on the phone</strong>. Two drivers only: your <strong>cloned voice</strong> (Cartesia, billed per minute spoken) and <strong>telephony</strong> (Telnyx, billed per call minute). Across a 60-minute call the agent only <em>speaks</em> for part of it — the candidate talks the rest — so Cartesia is billed on ~20 of every 60 minutes. Every number is editable.</p></div>';
+    html += '<div class="sc-head"><h2>Spending</h2><p>What the <strong>AI Vetting</strong> agent costs to run, modelled per <strong>hour on the phone</strong>. Two drivers only: your <strong>cloned voice</strong> (Cartesia, billed per minute spoken) and <strong>telephony</strong> (Telnyx, billed per call minute). Across a 60-minute call the agent only <em>speaks</em> for part of it, the candidate talks the rest, so Cartesia is billed on ~20 of every 60 minutes. Every number is editable.</p></div>';
 
     html += '<div class="sc-wrap"><div class="sc-inputs">';
 
@@ -438,19 +438,19 @@
       fld("Avg call length (min)", "avgCallMin", s.avgCallMin, 1, 0.5) +
       fld("Cloned voice speaks / hour (min)", "talkMinPerHour", s.talkMinPerHour, 1, 0), "vcUsageRead");
 
-    html += section("Cloned voice — Cartesia");
-    html += card("Cartesia voice", "Cost to synthesize your cloned voice. Billed only on the minutes the agent actually speaks (≈ talk time per hour). Per-minute is plan-dependent — edit to match your Cartesia tier.",
+    html += section("Cloned voice, Cartesia");
+    html += card("Cartesia voice", "Cost to synthesize your cloned voice. Billed only on the minutes the agent actually speaks (≈ talk time per hour). Per-minute is plan-dependent, edit to match your Cartesia tier.",
       fld("Plan ($/mo, 0 = PAYG)", "cartesiaPlan", s.cartesiaPlan, 5, 0) +
       fld("Voice ($ / min spoken)", "cartesiaPerMin", s.cartesiaPerMin, 0.005, 0), "vcVoiceRead");
 
-    html += section("Telephony — Telnyx");
+    html += section("Telephony, Telnyx");
     html += card("Telnyx calls & numbers", "Inbound call minutes (every minute of the call) plus the monthly rental for each live vetting number.",
       fld("Inbound ($ / call min)", "telnyxPerMin", s.telnyxPerMin, 0.001, 0) +
       fld("Number rental ($/mo)", "numberRental", s.numberRental, 0.25, 0) +
       fld("Live numbers", "numbers", s.numbers, 1, 0), "vcTelnyxRead");
 
     html += section("Optional extras (off by default)");
-    html += card("Realtime AI & scoring", "Not part of the two headline drivers — leave at 0 to model voice + telephony only. STT+LLM is the live speech-to-text/brain per call minute; scoring is the one post-call analysis pass.",
+    html += card("Realtime AI & scoring", "Not part of the two headline drivers, leave at 0 to model voice + telephony only. STT+LLM is the live speech-to-text/brain per call minute; scoring is the one post-call analysis pass.",
       fld("Realtime STT+LLM ($ / min)", "aiPerMin", s.aiPerMin, 0.005, 0) +
       fld("Post-call scoring ($ / call)", "scoringPerCall", s.scoringPerCall, 0.005, 0), "vcExtrasRead");
 
@@ -497,7 +497,7 @@
     var ve = $("#vcExtrasRead", root);
     if (ve) ve.innerHTML = (r.aiPerHour + r.scoringMonthly) > 0
       ? 'STT+LLM <strong>' + usd(r.aiPerHour, 2) + '</strong>/hr + scoring <strong>' + usd(r.scoringMonthly) + '</strong>/mo'
-      : 'Excluded — modelling Cartesia + Telnyx only.';
+      : 'Excluded, modelling Cartesia + Telnyx only.';
 
     // Per-hour breakdown bars
     var b = {};

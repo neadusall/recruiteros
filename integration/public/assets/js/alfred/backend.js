@@ -1,5 +1,5 @@
 /* ============================================================
-   RosBackend — portal client for the RecruiterOS Next.js backend
+   RosBackend, portal client for the RecruiterOS Next.js backend
    (the integration/ OS). Session-authenticated: the portal runs in
    the same browser the user logged into, so same-origin fetches carry
    the ros_session cookie.

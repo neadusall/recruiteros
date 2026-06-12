@@ -1,6 +1,6 @@
 /* RecruiterOS · White-label auth branding
  * On a customer's own domain, brand the login/signup screen with THEIR logo,
- * name, accent and favicon BEFORE anyone signs in — and never leak the house
+ * name, accent and favicon BEFORE anyone signs in, and never leak the house
  * brand. Resolves /api/branding/resolve?host=<host> (public; logo + name only).
  * No-op on the house domains (recruitersos.co / localhost).
  *
@@ -45,6 +45,6 @@
         }
       })
       .catch(function () {})
-      .then(reveal); // always reveal (success or failure) — never leave the brand hidden
+      .then(reveal); // always reveal (success or failure), never leave the brand hidden
   } catch (e) { reveal(); }
 })();

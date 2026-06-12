@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
-<title>RecruitersOS — Project &amp; Backend Map</title>
+<title>RecruitersOS, Project &amp; Backend Map</title>
 <style>
   :root{
     --bg:#070b14; --bg2:#0b1120; --panel:#0f1626; --panel2:#131c30;
@@ -226,8 +226,8 @@
 
 <div class="wrap">
   <div class="hero">
-    <h1>The whole product — and its whole backend — on one screen.</h1>
-    <p>Every page, route, module, data type, and interface of RecruitersOS. The front end up top, then the full backend: each <code>lib/</code> module with its exported functions &amp; types, every <code>/api</code> route with its HTTP methods &amp; auth gate, and the public <code>/v1</code> API. Filter to <b style="color:#9ce8db">Config</b> to see the tunable behavior surfaces you'd edit to change interfaces. Click a status to recycle it, star what to do next, jot notes — all saved in this browser.</p>
+    <h1>The whole product, and its whole backend, on one screen.</h1>
+    <p>Every page, route, module, data type, and interface of RecruitersOS. The front end up top, then the full backend: each <code>lib/</code> module with its exported functions &amp; types, every <code>/api</code> route with its HTTP methods &amp; auth gate, and the public <code>/v1</code> API. Filter to <b style="color:#9ce8db">Config</b> to see the tunable behavior surfaces you'd edit to change interfaces. Click a status to recycle it, star what to do next, jot notes, all saved in this browser.</p>
   </div>
 
   <div class="stats" id="stats"></div>
@@ -277,21 +277,21 @@ const ORDER=["live","polish","todo","config","private","backend"];
    mod "→ delegates to"  · gate auth note  · fns[] exported functions  · types[] exported types  */
 const GROUPS=[
   /* ============================ FRONT END ============================ */
-  { band:"Front end — what customers and buyers see" },
-  { id:"marketing", ic:"🏠", name:"Marketing Site", desc:"Public top-level pages — the first thing buyers see",
+  { band:"Front end, what customers and buyers see" },
+  { id:"marketing", ic:"🏠", name:"Marketing Site", desc:"Public top-level pages, the first thing buyers see",
     items:[
       {t:"Home",          u:"/home",        s:"live",   k:"page", d:"Hero, positioning, the 'signal to placement' thesis. Top of funnel.", tags:["index.html","Bernays copy"]},
       {t:"Platform",      u:"/platform",    s:"live",   k:"page", d:"How the whole operating system fits together end to end.", tags:["platform.html"]},
       {t:"Features",      u:"/features",    s:"live",   k:"page", d:"Master feature matrix across every module.", tags:["features.html"]},
       {t:"Pricing",       u:"/pricing",     s:"polish", k:"page", d:"Plans & tiers. Wire to owner-console recommended pricing (Recruiting $299/$549/$999, BD $399/$699/$1,299).", tags:["pricing.html"]},
       {t:"About",         u:"/about",       s:"live",   k:"page", d:"Story, mission, the operator behind it.", tags:["about.html"]},
-      {t:"Help",          u:"/help",        s:"polish", k:"page", d:"Support / docs hub. Thin — grow with onboarding & FAQs.", tags:["help.html"]},
-      {t:"Developers",    u:"/developers",  s:"live",   k:"page", d:"API & dev console — catalog, collect, enrich, campaign build endpoints.", tags:["developers.html","OpenAPI"]},
+      {t:"Help",          u:"/help",        s:"polish", k:"page", d:"Support / docs hub. Thin, grow with onboarding & FAQs.", tags:["help.html"]},
+      {t:"Developers",    u:"/developers",  s:"live",   k:"page", d:"API & dev console, catalog, collect, enrich, campaign build endpoints.", tags:["developers.html","OpenAPI"]},
     ]},
   { id:"os", ic:"🧭", name:"Operating Systems", desc:"The two motions sharing one infrastructure",
     items:[
-      {t:"Recruiting OS",            u:"/recruiting-os",            s:"live", k:"page", d:"The placements motion — candidate-side operating system.", tags:["recruiting-os.html"]},
-      {t:"Business Development OS",  u:"/business-development-os",  s:"live", k:"page", d:"The job-orders motion — win clients from the same signals (1.3x pricing).", tags:["business-development-os.html"]},
+      {t:"Recruiting OS",            u:"/recruiting-os",            s:"live", k:"page", d:"The placements motion, candidate-side operating system.", tags:["recruiting-os.html"]},
+      {t:"Business Development OS",  u:"/business-development-os",  s:"live", k:"page", d:"The job-orders motion, win clients from the same signals (1.3x pricing).", tags:["business-development-os.html"]},
     ]},
   { id:"modules", ic:"🧩", name:"Module Pages", desc:"The feature-pillar marketing pages (GTM-OS taxonomy)",
     items:[
@@ -318,13 +318,13 @@ const GROUPS=[
       {t:"Forgot password", u:"/forgot-password", s:"live", k:"page", d:"Triggers Resend reset email (needs DNS verify in Resend).", tags:["forgot-password.html"]},
       {t:"Reset password",  u:"/reset-password",  s:"live", k:"page", d:"Token-based reset completion; revokes existing sessions.", tags:["reset-password.html?token="]},
     ]},
-  { id:"owner-page", ic:"🛠️", name:"Owner Console (page)", desc:"Private back office — you, the platform owner",
+  { id:"owner-page", ic:"🛠️", name:"Owner Console (page)", desc:"Private back office, you, the platform owner",
     items:[
       {t:"Owner Console", u:"#", live:false, s:"private", k:"page", d:"Cost tracking, live pricing calculator, full account control (suspend/reset/delete). Served only at a private unguessable slug + owner-email gate. NOT linked anywhere.", tags:["owner-console.html","/<private-slug>","amber theme","noindex"]},
     ]},
 
   /* ============================ BACKEND ============================ */
-  { band:"Backend — every module, route, type & interface (integration/)" },
+  { band:"Backend, every module, route, type & interface (integration/)" },
 
   { id:"be-core", ic:"🧱", name:"Core domain & persistence", desc:"Shared models, the repository seam, HTTP helpers", backend:true,
     items:[
@@ -441,7 +441,7 @@ const GROUPS=[
         fns:["collect","pullAll","dedupe","rankSignals","enrich","draftSequence","buildCampaign","prepareCampaign"]},
       {t:"Collector", u:"integration/lib/signals/collector.ts", s:"backend", k:"module", d:"Orchestrates pull → dedupe → roll-up → score → trigger. Deterministic with injected stores + now.",
         fns:["pullAll","dedupe","rollUpVelocity","collect","memoryStores","trackedTypesForMotion"], types:["CursorStore","SeenStore","TriggerHandler","CollectOptions","CollectReport"]},
-      {t:"Signal registry", u:"integration/lib/signals/registry.ts", s:"config", k:"config", d:"The catalog — metadata for all 40+ signal types (base weight, half-life, sources, evidence keys). EDIT HERE to tune the catalog.",
+      {t:"Signal registry", u:"integration/lib/signals/registry.ts", s:"config", k:"config", d:"The catalog, metadata for all 40+ signal types (base weight, half-life, sources, evidence keys). EDIT HERE to tune the catalog.",
         fns:["SIGNAL_DEFINITIONS","getDefinition","definitionsForMotion","definitionsInCategory","catalog","publicCatalog","publicCategories"], types:["SignalDefinition","PublicSignalDefinition"]},
       {t:"Scoring", u:"integration/lib/signals/scoring.ts", s:"config", k:"config", d:"ICP match + signal scoring (fit, recency, corroboration, urgency → 0..100). EDIT HERE to change ranking.",
         fns:["disqualify","fitScore","recencyScore","corroborationScore","urgencyScore","scoreSignal","rankSignals","headcountBand"], types:["ScoreContext"]},
@@ -583,12 +583,12 @@ const GROUPS=[
   { id:"infra", ic:"📦", name:"Infra, Deploy & Docs", desc:"How it ships and stays up",
     items:[
       {t:"Docker + Compose", u:"#", live:false, s:"infra", k:"infra", d:"Multi-stage Next build serving marketing+portal+API from one origin. app + Caddy (auto-HTTPS) + postgres:16.", tags:["Dockerfile","docker-compose.yml","Caddyfile"]},
-      {t:"One-shot deploy",  u:"#", live:false, s:"live",  k:"infra", d:"curl deploy.sh | bash — generates secrets, writes .env.production. Redeploy: git pull && docker compose up -d --build.", tags:["deploy.sh","auto-deploy.sh"]},
+      {t:"One-shot deploy",  u:"#", live:false, s:"live",  k:"infra", d:"curl deploy.sh | bash, generates secrets, writes .env.production. Redeploy: git pull && docker compose up -d --build.", tags:["deploy.sh","auto-deploy.sh"]},
       {t:"Auto-deploy watcher", u:"#", live:false, s:"live", k:"infra", d:"Auto-pull + redeploy on push (install-auto-deploy.sh).", tags:["install-auto-deploy.sh"]},
       {t:"Setup docs", u:"#", live:false, s:"live", k:"infra", d:"docs/setup/server (1-hetzner, 2-deploy, 3-go-live) + docs/setup/channels (cold-email, email-resend, sms-qualification, linkedin-login).", tags:["docs/setup"]},
       {t:"Playbooks & platform", u:"#", live:false, s:"live", k:"infra", d:"docs/playbooks/copywriting-playbook (Bernays), docs/platform/* (per-domain backend reference), integration BACKEND.md, OWNER-CONSOLE.md, openapi.yaml.", tags:["docs/"]},
       {t:"Bridge (outreach)", u:"#", live:false, s:"backend", k:"infra", d:"Standalone outreach bridge (outreach-bridge.cjs) + tests. Separate from integration/.", tags:["bridge/"]},
-      {t:"Chrome extension", u:"#", live:false, s:"backend", k:"infra", d:"Alfred MV3 extension (background.js, content/, popup/) — user-owned LinkedIn automation.", tags:["extension/"]},
+      {t:"Chrome extension", u:"#", live:false, s:"backend", k:"infra", d:"Alfred MV3 extension (background.js, content/, popup/), user-owned LinkedIn automation.", tags:["extension/"]},
     ]},
 ];
 
@@ -741,7 +741,7 @@ document.getElementById("reset").onclick=()=>{
   }
 };
 document.getElementById("copyMd").onclick=()=>{
-  let md="# RecruitersOS — Project & Backend Map\n\nLive: https://recruitersos.co\n\n";
+  let md="# RecruitersOS, Project & Backend Map\n\nLive: https://recruitersos.co\n\n";
   GROUPS.forEach(g=>{
     if(g.band){md+=`\n# ${g.band}\n\n`;return;}
     md+=`## ${g.ic} ${g.name}\n_${g.desc}_\n\n`;
@@ -751,7 +751,7 @@ document.getElementById("copyMd").onclick=()=>{
       const link=linkable?`${BASE}${it.u}`:it.u;
       md+=`- ${r.star?'⭐ ':''}**[${it.t}](${link})** \`${STATUS[st].label}\``;
       if(it.meth&&it.meth.length) md+=` \`${it.meth.join(" ")}\``;
-      md+=` — ${it.d}`;
+      md+=`, ${it.d}`;
       if(it.mod) md+=` _(→ ${it.mod}${it.gate?`, ${it.gate}`:""})_`;
       if(it.fns&&it.fns.length) md+=`\n  - fns: ${it.fns.join(", ")}`;
       if(it.types&&it.types.length) md+=`\n  - types: ${it.types.join(", ")}`;
