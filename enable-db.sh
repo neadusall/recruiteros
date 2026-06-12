@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
 #
-# RecruiterOS, one-time: switch ON database persistence so accounts, workspaces,
-# and login sessions survive every redeploy. Without this the app runs in-memory
-# and forgets everyone each time the container restarts (i.e. on every update),
-# which is why you keep having to sign up again.
+# DEPRECATED / DISARMED — do not use.
 #
-# Safe to run: the app already resets on each deploy, so there is no data to lose.
-# This wires the app to the Postgres service that is already running, recreating
-# its volume so it initializes with a known password.
+# This script used to point the app at Postgres and `docker volume rm pg_data`
+# to re-init it with a fresh password. That was the single biggest cause of the
+# "logged out / account gone after every deploy" bug: it wiped every account
+# (and, since taltxt shares pg_data, OS Text's database too) and forced the app
+# onto a fragile pg backend whose password drifted out of sync.
 #
-#   Run once on the server:   bash /opt/recruiteros/enable-db.sh
+# The app now persists to the durable /data file volume (app_data, ROS_DATA_DIR
+# =/data) — see integration/lib/db mode(). That survives every redeploy with no
+# password to sync and nothing to volume-init. There is nothing to "enable".
 #
+# This script is kept only so old references don't error; it is now a safe no-op
+# and will NEVER delete a volume.
 set -euo pipefail
+
+echo "enable-db.sh is deprecated and does nothing: persistence now uses the"
+echo "durable /data file volume automatically. No action needed."
+exit 0
+
+# --- original destructive body retained below but unreachable (exit 0 above) ---
 
 # Resolve the repo dir from this script's own location (works regardless of the
 # checkout name: /opt/recruiteros, /opt/recruitersos, ...).

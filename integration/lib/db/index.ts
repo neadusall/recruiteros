@@ -57,8 +57,17 @@ function pgUrl(): string | null {
 
 type Mode = "pg" | "file" | "none";
 function mode(): Mode {
-  if (process.env.DATABASE_URL) return "pg"; // explicit Postgres wins
-  if (fileDir()) return "file";              // zero-config durable default
+  // The durable /data file volume is AUTHORITATIVE whenever it's available
+  // (ROS_DATA_DIR set, or any production boot). It survives every redeploy with
+  // no password to keep in sync and nothing to volume-init, so it MUST win over
+  // Postgres. A stray/stale DATABASE_URL in .env.production used to flip the app
+  // onto the fragile pg backend — where one password mismatch (or a wiped
+  // pg_data volume) silently emptied the account store and logged everyone out
+  // ("email or password is incorrect" for valid users). File-first kills that
+  // entire failure class for good. Postgres is now only a fallback for hosts
+  // with NO writable volume (e.g. serverless), opted into explicitly.
+  if (fileDir()) return "file";              // durable default — wins everywhere it exists
+  if (process.env.DATABASE_URL) return "pg"; // no file volume: explicit pg opt-in
   if (process.env.POSTGRES_PASSWORD) return "pg"; // legacy compose self-heal
   return "none";
 }

@@ -87,8 +87,13 @@ LOXO_API_KEY=
 
 # Secrets (auto-generated, do not share)
 RECRUITEROS_SESSION_SECRET=${SESSION}
+# POSTGRES_PASSWORD is for the SHARED Postgres that OS Text (taltxt) uses. The
+# main app does NOT persist to Postgres — it snapshots accounts/sessions to the
+# durable /data file volume (ROS_DATA_DIR=/data in compose), which survives every
+# redeploy with no password to sync. Do NOT add a DATABASE_URL here: it would
+# force the app back onto Postgres and re-introduce the "logged out on every
+# deploy / account gone" bug.
 POSTGRES_PASSWORD=${PGPW}
-DATABASE_URL=postgres://recruiteros:${PGPW}@db:5432/recruiteros
 EOF
   chmod 600 .env.production
 else

@@ -14,23 +14,25 @@ BRANCH="main"
 
 cd "$DIR" || { echo "$(date -u) no $DIR" >> "$LOG"; exit 0; }
 
-# One-time: switch ON database persistence (accounts + sessions survive restarts).
-# Runs once, guarded by a marker file; safe to leave here forever.
-#
-# Marker is versioned (-v2): earlier installs initialized the Postgres volume
-# with a password that did NOT match the app's (the db got it via Compose
-# `${POSTGRES_PASSWORD}` substitution from a nonexistent .env, while the app read
-# the real one from .env.production). That mismatch silently broke persistence.
-# Bumping the marker forces enable-db.sh to re-run ONCE on those installs, which
-# re-initializes the volume so the db and app share one password for good.
-if [ ! -f "$DIR/.db-enabled-v2" ] && [ -f "$DIR/enable-db.sh" ]; then
-  echo "$(date -u) enabling DB persistence (one-time, v2: fix password mismatch)..." >> "$LOG"
-  if bash "$DIR/enable-db.sh" >> "$LOG" 2>&1; then
-    touch "$DIR/.db-enabled-v2"
-    echo "$(date -u) DB persistence enabled (v2)" >> "$LOG"
-  else
-    echo "$(date -u) enable-db failed, will retry next cycle" >> "$LOG"
+# One-time: MIGRATE persistence off Postgres onto the durable /data file volume.
+# The app now snapshots accounts/sessions to /data (the app_data named volume),
+# which survives every redeploy with no password to sync — see lib/db mode().
+# Older installs still carry a `DATABASE_URL=...@db:5432/recruiteros` line in
+# .env.production that used to force the fragile pg backend (and enable-db.sh
+# even did `docker volume rm pg_data`, wiping every account on deploy). Strip
+# that line ONCE so the app can never be flipped back onto Postgres. taltxt's own
+# DATABASE_URL lives in money-maker-sms/.env.production and is left untouched.
+if [ ! -f "$DIR/.file-persistence-v1" ]; then
+  echo "$(date -u) one-time: migrating to /data file persistence (strip stale DATABASE_URL)..." >> "$LOG"
+  if [ -f "$DIR/.env.production" ] && grep -q '^DATABASE_URL=' "$DIR/.env.production"; then
+    grep -v '^DATABASE_URL=' "$DIR/.env.production" > "$DIR/.env.production.tmp" \
+      && mv "$DIR/.env.production.tmp" "$DIR/.env.production" \
+      && chmod 600 "$DIR/.env.production"
+    echo "$(date -u) removed stale DATABASE_URL from .env.production" >> "$LOG"
+    docker compose up -d --force-recreate app >> "$LOG" 2>&1 || true
   fi
+  touch "$DIR/.file-persistence-v1"
+  echo "$(date -u) file persistence active" >> "$LOG"
 fi
 
 # One-time: force-recreate the app + caddy so they pick up the CURRENT compose
