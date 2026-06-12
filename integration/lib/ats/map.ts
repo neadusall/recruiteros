@@ -60,19 +60,39 @@ function phoneOfType(list: any, type: string): string | undefined {
   return undefined;
 }
 
+const HTTP = /^https?:\/\//i;
+
+/** Pull the first http(s) URL out of a value that may be a string or {url|large|original|thumb|...}. */
+function urlFrom(v: any): string | undefined {
+  const direct = str(v);
+  if (direct && HTTP.test(direct)) return direct;
+  if (v && typeof v === "object") {
+    for (const key of ["url", "large", "original", "medium", "thumb", "thumbnail", "src", "href"]) {
+      const s = str(v[key]);
+      if (s && HTTP.test(s)) return s;
+    }
+  }
+  return undefined;
+}
+
 /**
- * Resolve an image/logo URL from Loxo's varied shapes. For each base name we try
- * `${base}_url`, the bare `${base}` (string), and `${base}.url` (nested object) —
- * e.g. profile_picture_url, profile_picture, profile_picture.url. Only returns
- * http(s) URLs so a stray non-URL value never renders a broken <img>.
+ * Resolve an image/logo URL from Loxo's varied shapes. Loxo's exact field name
+ * differs by account and endpoint, so we DON'T rely on a fixed name:
+ *   1) try the preferred base names (`${base}_url`, `${base}`, `${base}.url`), then
+ *   2) fall back to scanning EVERY field for an image-ish key (picture/photo/
+ *      avatar/logo/image/headshot/thumb) that holds an http(s) URL.
+ * Only http(s) values are accepted, so a stray non-URL never renders a broken img.
  */
 function imageUrl(o: Loxo, bases: string[]): string | undefined {
   for (const base of bases) {
-    const candidates = [o[`${base}_url`], o[base], o[base] && o[base].url];
-    for (const c of candidates) {
-      const s = str(c);
-      if (s && /^https?:\/\//i.test(s)) return s;
-    }
+    const hit = urlFrom(o[`${base}_url`]) || urlFrom(o[base]);
+    if (hit) return hit;
+  }
+  const rx = /(picture|photo|avatar|logo|image|headshot|thumb)/i;
+  for (const [k, v] of Object.entries(o)) {
+    if (!rx.test(k)) continue;
+    const hit = urlFrom(v);
+    if (hit) return hit;
   }
   return undefined;
 }
