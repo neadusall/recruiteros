@@ -47,6 +47,36 @@
   var API = (window.RECRUITEROS_API_BASE || "") + "/api";
   var motion = localStorage.getItem("ros_motion") || "recruiting";
 
+  // Image fallback cascade for <img onerror>: walk a `data-fb` chain of backup
+  // URLs (e.g. logo provider -> favicon), and when none load, remove the <img>
+  // so the initials/monogram underneath shows. Global so inline onerror can call it.
+  window.__imgCascade = function (img) {
+    var fb = img.getAttribute("data-fb");
+    if (fb) { img.removeAttribute("data-fb"); img.src = fb; }
+    else { img.remove(); }
+  };
+  // Build a domain-based company logo URL chain. Primary = a real logo service,
+  // fallback = Google's favicon, both free + keyless. Returns "" when no domain.
+  function hostFrom(s) {
+    if (!s) return "";
+    var h = String(s).trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "").split("/")[0].split("?")[0].trim().toLowerCase();
+    return h.indexOf(".") > 0 ? h : "";
+  }
+  function companyLogo(c) {
+    if (c && c.image) return { src: c.image, fb: "" };
+    var host = hostFrom((c && (c.domain || c.url)) || "");
+    if (!host) return null;
+    return { src: "https://logo.clearbit.com/" + host, fb: "https://www.google.com/s2/favicons?domain=" + host + "&sz=128" };
+  }
+  // Free candidate headshot by email (unavatar aggregates Gravatar/social/etc.).
+  // fallback=false makes it 404 when nothing is found, so onerror reveals initials.
+  function personPhoto(r) {
+    if (r && r.image) return r.image;
+    var email = r && r.email;
+    if (!email || email.indexOf("@") < 1) return "";
+    return "https://unavatar.io/" + encodeURIComponent(email) + "?fallback=false";
+  }
+
   /* ---------------- Chrome extension bridge ----------------
      The extension's portal-bridge content script announces itself and accepts a
      one-click "configure" (backend URL + ingest token) via window.postMessage, so
@@ -2921,7 +2951,7 @@
         '<td><input type="checkbox" class="co-pick" data-pick="' + esc(c.name) + '"' + (state.sel[c.name] ? " checked" : "") + '></td>' +
         '<td><div class="co-name">' +
           '<div class="co-logo" style="background:linear-gradient(135deg,' + gradFor(c.name) + ')">' + esc(initials(c.name)) +
-            (c.image ? '<img class="co-logo-img" src="' + esc(c.image) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') +
+            (function () { var L = companyLogo(c); return L ? '<img class="co-logo-img" src="' + esc(L.src) + '"' + (L.fb ? ' data-fb="' + esc(L.fb) + '"' : '') + ' alt="" loading="lazy" referrerpolicy="no-referrer" onerror="window.__imgCascade(this)">' : ''; })() +
           '</div>' +
           '<a class="co-nm" href="#prospects">' + esc(c.name) + '</a>' + ext +
         '</div></td>' +
@@ -3370,11 +3400,12 @@
       var phone = r.phone || r.directPhone || r.companyPhone;
       var li = r.linkedinUrl ? ' <a class="dt-li" href="' + esc(r.linkedinUrl) + '" target="_blank" rel="noopener" title="LinkedIn">in</a>' : '';
 
-      // Avatar: real photo when present, initials underneath as the fallback. The
-      // <img> sits over the initials; if it fails to load it removes itself and the
-      // initials show through.
+      // Avatar: real photo when present (ATS image, else a free email-based headshot
+      // lookup), initials underneath as the fallback. The <img> sits over the
+      // initials; if it fails to load it removes itself and the initials show through.
+      var photo = personPhoto(r);
       var avatar = '<div class="dt-avatar">' + esc(initials(r.fullName)) +
-        (r.image ? '<img class="dt-avatar-img" src="' + esc(r.image) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') +
+        (photo ? '<img class="dt-avatar-img" src="' + esc(photo) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') +
         '</div>';
 
       // Contact: show the actual email + phone as clean, clickable chips; fall back
@@ -6335,6 +6366,16 @@
       '.sx-sw.on{border-color:#fff;box-shadow:0 0 0 2px var(--bg),0 6px 18px -6px rgba(0,0,0,.7)}' +
       '.sx-colorrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}' +
       '.sx-hex{font-family:var(--mono);font-size:12px;color:var(--text-muted);background:var(--bg-soft);border:1px solid var(--border);border-radius:7px;padding:5px 9px;letter-spacing:.04em;text-transform:uppercase}' +
+      /* form fields (self-contained so the panel never depends on another view\'s styles) */
+      '.sx-card .cn-fld{display:block;margin-bottom:18px}' +
+      '.sx-card .cn-fld:last-child{margin-bottom:0}' +
+      '.sx-card .cn-fld .lab{display:block;font-size:12.5px;font-weight:600;color:var(--text);margin-bottom:7px}' +
+      '.sx-card .cn-fld .hint{display:block;font-size:11.5px;color:var(--text-dim);margin-top:7px;line-height:1.5;max-width:52ch}' +
+      '.sx-card .cn-fld input[type="text"]{width:100%;max-width:340px;background:var(--bg-soft);border:1px solid var(--border);border-radius:9px;padding:9px 12px;color:var(--text);font:inherit;font-size:13px;transition:border-color .15s,box-shadow .15s}' +
+      '.sx-card .cn-fld input[type="text"]:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent)}' +
+      '.sx-card .cn-fld input[type="range"]{display:block;margin:2px 0}' +
+      '.sx-uprow{display:flex;gap:8px;margin-top:10px}' +
+      '.cn-acts{display:flex;gap:9px;align-items:center;flex-wrap:wrap}' +
       /* live brand preview */
       '.sx-prev{position:sticky;top:14px;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--bg)}' +
       '.sx-prev-bar{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-dim);font-weight:700;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface)}' +
@@ -6566,12 +6607,12 @@
           '<div class="cn-fld"><span class="lab">Sidebar logo size</span><input id="brScale" type="range" min="0.4" max="3" step="0.02" value="' + (b.logoScale || 1) + '" style="width:100%;max-width:280px;accent-color:var(--brand)"><span class="hint">Drag for a live preview, release to save.</span></div>' +
           '<div class="cn-fld"><span class="lab">Dark appearance</span>' +
           brLogoFrame(b.logoUrl, "dark") +
-          '<div style="display:flex;gap:8px;margin-top:8px"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoUrl" data-bg="dark" type="file" accept="image/*" hidden></label>' +
+          '<div class="sx-uprow"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoUrl" data-bg="dark" type="file" accept="image/*" hidden></label>' +
           (b.logoUrl ? '<button class="btn btn-ghost btn-sm brLogoRemove" data-key="logoUrl">Remove</button>' : "") +
           '</div><span class="hint">A transparent or light logo that reads on the dark sidebar.</span></div>' +
           '<div class="cn-fld" style="margin-bottom:0"><span class="lab">Light appearance</span>' +
           brLogoFrame(b.logoLightUrl, "light") +
-          '<div style="display:flex;gap:8px;margin-top:8px"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoLightUrl" data-bg="light" type="file" accept="image/*" hidden></label>' +
+          '<div class="sx-uprow"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoLightUrl" data-bg="light" type="file" accept="image/*" hidden></label>' +
           (b.logoLightUrl ? '<button class="btn btn-ghost btn-sm brLogoRemove" data-key="logoLightUrl">Remove</button>' : "") +
           '</div><span class="hint">A colored logo for Light appearance. Falls back to the dark logo if empty.</span></div>' +
           '</div>' +

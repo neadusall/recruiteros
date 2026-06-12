@@ -42,6 +42,10 @@ export interface SendTouch {
   /** Voice campaign to enqueue this prospect into when an email is sent (the
    *  reactive email-sent → voice-drop trigger). Falls back to the env default. */
   voiceCampaignId?: string;
+  /** Outreach-analytics attribution, stamped onto the logged ActivityEvent. */
+  campaignId?: string;
+  variant?: string;
+  touch?: string;
 }
 
 /** Send one touch on its channel, then log the activity to the ATS. */

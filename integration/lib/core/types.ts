@@ -98,6 +98,8 @@ export interface Campaign {
   assignee?: string;
   /** The sending account/handle this campaign uses (or "auto-rotate"). */
   senderAccount?: string;
+  /** Outreach-Statistics promote-winners config (continuously refreshed when on). */
+  autopilot?: CampaignAutopilot;
   updatedAt?: string;
 }
 
@@ -165,4 +167,29 @@ export interface ActivityEvent {
   at: string;
   /** Set once the ATS confirms the person_event. */
   atsEventId?: string;
+  /** Outreach-analytics dimensions, stamped on sends so the Outreach Statistics
+   *  rollup can attribute every touch. Optional: legacy events lack them. */
+  campaignId?: string;
+  /** A/B variant or message archetype label (e.g. "fintech/vp/director"). */
+  variant?: string;
+  /** Sequence touch name (e.g. "Signal Opener", "Break-up"). */
+  touch?: string;
+}
+
+/** Outreach Statistics "promote winners" output, written onto a campaign. When
+ *  enabled it is continuously refreshed each cadence run, so the campaign stays
+ *  tuned to what is actually converting — the hands-off loop. */
+export interface CampaignAutopilot {
+  enabled: boolean;
+  appliedAt?: string;
+  /** The message archetype / A/B variant winning on positive-reply rate. */
+  winningVariant?: string;
+  /** Segments (industry/function/seniority) with the best positive-reply rate. */
+  winningSegments?: string[];
+  /** Best send hour (0-23) by reply rate. */
+  bestSendHour?: number;
+  /** Channels ordered best-first by positive-reply rate. */
+  channelEmphasis?: Channel[];
+  /** Human summary of what was applied. */
+  note?: string;
 }

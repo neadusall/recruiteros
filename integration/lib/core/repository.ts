@@ -34,6 +34,8 @@ export interface CoreRepository {
   // activity log (mirrors ATS person_events)
   recordActivity(e: ActivityEvent): Promise<void>;
   listActivity(prospectId: string): Promise<ActivityEvent[]>;
+  /** All activity for a workspace — powers the Outreach Statistics rollup. */
+  listAllActivity(workspaceId: string): Promise<ActivityEvent[]>;
 }
 
 class InMemoryCore implements CoreRepository {
@@ -137,6 +139,12 @@ class InMemoryCore implements CoreRepository {
     await this.ready();
     return this.activity
       .filter((e) => e.prospectId === prospectId)
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  }
+  async listAllActivity(workspaceId: string) {
+    await this.ready();
+    return this.activity
+      .filter((e) => e.workspaceId === workspaceId)
       .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   }
 }
