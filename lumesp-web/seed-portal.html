@@ -72,6 +72,17 @@
     .err { color:var(--bad); font-size:13px; margin-top:12px; min-height:16px; }
     .tally { font-size:13.5px; color:var(--muted); margin-top:14px; }
     .tally b { color:var(--ok); }
+    .goal { background:var(--bg); border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px; box-shadow:var(--shadow-md); margin-bottom:16px; }
+    .goal__head { font-size:14px; color:var(--navy); margin-bottom:14px; line-height:1.5; }
+    .goal__head b { color:var(--teal-600); }
+    .bars { display:flex; flex-direction:column; gap:12px; }
+    .bar__label { display:flex; justify-content:space-between; font-size:12.5px; color:var(--muted); margin-bottom:4px; font-weight:600; }
+    .bar__label b { color:var(--navy); }
+    .track { height:10px; background:var(--bg-blue); border-radius:999px; overflow:hidden; }
+    .fill { height:100%; width:0; background:linear-gradient(90deg,var(--teal),var(--teal-300)); border-radius:999px; transition:width .6s ease; }
+    .fill.done { background:var(--ok); }
+    .goal__total { margin-top:14px; padding-top:12px; border-top:1px solid var(--line); font-size:13.5px; color:var(--muted); text-align:center; }
+    .goal__total b { color:var(--navy); font-size:17px; }
     .gate { text-align:center; padding:30px 10px; }
     .footer { text-align:center; color:var(--muted); font-size:12px; margin-top:22px; }
     @media (max-width:560px){ .seedrow{ grid-template-columns:1fr 1fr; } .seedrow .prov{ grid-column:1 / -1; } .seedrow .del{ grid-column:1 / -1; width:100%; } }
@@ -93,6 +104,15 @@
     <p class="lead" id="sub">Loading…</p>
 
     <div id="app" style="display:none">
+      <div class="goal" id="goal">
+        <div class="goal__head">Team goal: <b>99 inboxes</b> — 33 Gmail · 33 Outlook · 33 Yahoo. Add your share below; these bars fill as the team connects accounts.</div>
+        <div class="bars">
+          <div class="bar"><div class="bar__label"><span>Gmail</span><b id="gCount">0 / 33</b></div><div class="track"><div class="fill" id="gFill"></div></div></div>
+          <div class="bar"><div class="bar__label"><span>Outlook</span><b id="oCount">0 / 33</b></div><div class="track"><div class="fill" id="oFill"></div></div></div>
+          <div class="bar"><div class="bar__label"><span>Yahoo</span><b id="yCount">0 / 33</b></div><div class="track"><div class="fill" id="yFill"></div></div></div>
+        </div>
+        <div class="goal__total">Connected so far: <b id="totalCount">0</b> of 99</div>
+      </div>
       <div class="card">
         <div class="why">
           <b>Why we're doing this:</b> these inboxes quietly build sending reputation so Lume's emails reach real inboxes instead of spam — which is what turns outreach into placements.
@@ -150,8 +170,9 @@
         .then(function(r){ return r.json().then(function(d){ return { ok:r.ok, d:d }; }); })
         .then(function(res){
           if (!res.ok) { showGate(res.d && res.d.error === "portal_disabled" ? "The setup portal is turned off right now." : "This link isn't valid or has expired."); return; }
-          $("sub").textContent = "Create 3 Gmail, 3 Outlook, and 3 Yahoo accounts (more from family & friends is a big help). Add a row for each, paste its app password, and we'll connect them — you won't need to touch them again.";
+          $("sub").textContent = "Add the inboxes you create here. Aim for about 3 of each to start — more from family & friends is a big help. Every one you connect fills the bars toward our team goal of 99.";
           $("app").style.display = "";
+          if (res.d.progress) renderProgress(res.d.progress);
           for (var i=0;i<3;i++) addRow("gmail");
           for (var j=0;j<3;j++) addRow("outlook");
           for (var k=0;k<3;k++) addRow("yahoo");
@@ -159,6 +180,21 @@
         .catch(function(){ showGate("Couldn't reach the server — try again in a moment."); });
 
       function showGate(msg){ $("title").style.display="none"; $("sub").style.display="none"; document.querySelector(".eyebrow").style.display="none"; $("gateMsg").textContent = msg; $("gate").style.display=""; }
+
+      function renderProgress(p){
+        if (!p || !p.byProvider) return;
+        var t = p.perProviderTarget || 33;
+        function set(countId, fillId, n){
+          n = n || 0;
+          var pct = Math.min(100, Math.round((n / t) * 100));
+          var c = $(countId); if (c) c.textContent = n + " / " + t;
+          var f = $(fillId); if (f){ f.style.width = pct + "%"; if (n >= t) f.classList.add("done"); else f.classList.remove("done"); }
+        }
+        set("gCount","gFill", p.byProvider.gmail);
+        set("oCount","oFill", p.byProvider.outlook);
+        set("yCount","yFill", p.byProvider.yahoo);
+        var tot = $("totalCount"); if (tot) tot.textContent = (p.total || 0);
+      }
 
       function addRow(provider){
         var row = document.createElement("div");
@@ -209,6 +245,7 @@
           });
           var v = res.d.verified || 0, n = res.d.registered || 0;
           $("tally").innerHTML = "<b>" + v + "</b> of " + n + " inboxes connected. " + (v < n ? "Fix the red ones (usually a fresh app password) and submit again — connected ones stay connected." : "All set — thank you! You can close this page.");
+          if (res.d.progress) renderProgress(res.d.progress);
         })
         .catch(function(){ btn.disabled=false; btn.textContent="Connect my inboxes"; $("err").textContent = "Network error — please try again."; });
       });

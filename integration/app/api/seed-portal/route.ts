@@ -18,7 +18,23 @@
 
 import { NextResponse } from "next/server";
 import { body } from "../../../lib/api";
-import { addSeed, setSeedVerification, verifySeedLogin } from "../../../lib/sending";
+import { addSeed, setSeedVerification, verifySeedLogin, listSeeds } from "../../../lib/sending";
+
+// Team goal: 33 connected inboxes per provider (99 total). Tunable via env.
+const TARGET_PER_PROVIDER = Number(process.env.SEED_PORTAL_TARGET_PER_PROVIDER || 33);
+
+/** Live progress toward the team goal — connected (IMAP-verified) inboxes per provider. */
+async function buildProgress() {
+  const seeds = await listSeeds();
+  const connected = (p: string) => seeds.filter((s) => s.provider === p && s.imapOk).length;
+  const byProvider = { gmail: connected("gmail"), outlook: connected("outlook"), yahoo: connected("yahoo") };
+  return {
+    perProviderTarget: TARGET_PER_PROVIDER,
+    total: byProvider.gmail + byProvider.outlook + byProvider.yahoo,
+    target: TARGET_PER_PROVIDER * 3,
+    byProvider,
+  };
+}
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -44,11 +60,11 @@ function tokenOk(given: unknown): boolean {
   return typeof given === "string" && given.trim() === want;
 }
 
-export function GET(req: Request) {
+export async function GET(req: Request) {
   if (!portalToken()) return json({ error: "portal_disabled" }, 503);
   const token = new URL(req.url).searchParams.get("token");
   if (!tokenOk(token)) return json({ error: "invalid_token" }, 403);
-  return json({ ok: true, org: ORG });
+  return json({ ok: true, org: ORG, progress: await buildProgress() });
 }
 
 const PROVIDERS = ["gmail", "outlook", "yahoo", "other"] as const;
@@ -89,5 +105,5 @@ export async function POST(req: Request) {
   }
 
   const verified = results.filter((r) => r.ok).length;
-  return json({ ok: true, registered: results.length, verified, results });
+  return json({ ok: true, registered: results.length, verified, results, progress: await buildProgress() });
 }
