@@ -5024,6 +5024,7 @@
         '<button class="btn btn-sm" data-vdact="import" data-cid="' + c.id + '">⬆ Import</button>' +
         '<button class="btn btn-sm ' + (ready ? "" : "btn-primary") + '" data-vdact="attest" data-cid="' + c.id + '">' + (ready ? "✓ Consent" : "Attest consent") + "</button>" +
         '<span style="flex:1"></span>' +
+        '<button class="btn btn-ghost btn-sm" data-vdact="editscript" data-cid="' + c.id + '">✎ Edit script</button>' +
         '<button class="btn btn-ghost btn-sm" data-vdact="preview" data-cid="' + c.id + '">🔊 Preview</button>' +
         '<button class="btn btn-ghost btn-sm" data-vdact="testmode" data-cid="' + c.id + '" data-test="' + (testOn ? "1" : "0") + '">' + (testOn ? "🟡 Test: on" : "Test: off") + "</button>" +
         '<button class="btn btn-ghost btn-sm" data-vdact="del" data-cid="' + c.id + '">🗑</button></div>' +
@@ -5037,6 +5038,7 @@
       loadScripts(function () {
       api("/voice/campaigns?motion=" + motion).then(function (d) {
         var camps = (d && d.campaigns) || [];
+        vd.camps = camps; // so the card's "Edit script" action can read the current template/persona
         var showForm = vd.creating || camps.length === 0;
         var toolbar = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
           '<span class="muted" style="font-size:13px">' + camps.length + " voice campaign" + (camps.length === 1 ? "" : "s") + "</span>" +
@@ -5152,6 +5154,7 @@
     function setMsg(cid, t) { var m = $('[data-msg="' + cid + '"]'); if (m) m.innerHTML = t; }
     function campaignAction(act, cid) {
       if (act === "del") { send("/voice/campaigns?id=" + cid, "DELETE").then(function () { toast("Deleted"); paint(); }); return; }
+      if (act === "editscript") return editCampaignScript(cid);
       if (act === "preview") { previewInto($('[data-msg="' + cid + '"]'), { campaignId: cid }); return; }
       if (act === "testmode") {
         var tb = $('[data-vdact="testmode"][data-cid="' + cid + '"]');
@@ -5186,6 +5189,65 @@
         });
         return;
       }
+    }
+    /* Quick in-place script edit straight from a campaign card: tweak the
+       voicemail wording so it sounds better, AI-customize it, listen to it, or
+       ring a real landline/VoIP to hear how it lands, then save it back onto the
+       campaign (partial PUT, leaves every other setting untouched). */
+    function editCampaignScript(cid) {
+      var c = (vd.camps || []).filter(function (x) { return x.id === cid; })[0] || {};
+      var persona = c.persona || {};
+      openModal("Edit voice script · " + (c.name || "campaign"),
+        "Tweak the wording so it sounds better. First name & role splice in like an email merge. Sweet spot is 15-25s, listen before you save.",
+        '<div style="margin:2px 0 8px">' + fieldChips("ceTpl") + "</div>" +
+        '<textarea id="ceTpl" rows="5" style="width:100%">' + esc(c.scriptTemplate || VD_DEFAULT_SCRIPT) + "</textarea>" +
+        '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<button class="btn btn-sm" id="ceAi">✨ AI customize</button>' +
+        '<button class="btn btn-sm" id="ceListen">🔊 Listen</button><span class="muted" id="ceListenOut" style="font-size:12px"></span></div>' +
+        '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07)">' +
+        '<label style="display:block;font-size:12px;color:#8aa0c6;margin-bottom:4px">Test it on a real phone <span style="color:#6b7a99">- landline or VoIP you control (E.164), let it roll to voicemail to hear the drop</span></label>' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<input id="ceTestTo" type="tel" placeholder="+13105551234" style="flex:1;min-width:180px" />' +
+        '<button class="btn btn-sm" id="ceTestCall">📞 Test call</button></div>' +
+        '<div class="muted" id="ceTestOut" style="font-size:12px;margin-top:6px"></div></div>' +
+        '<div class="modal-foot" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="ceSave">Save script</button></div>',
+        function (root, close) {
+          wireChips(root);
+          var personaOpt = { agentName: persona.agentName || "Ryan", agentCompany: persona.agentCompany || "Executive Search" };
+          $("#ceAi", root).addEventListener("click", function () {
+            aiCustomizeInto("ceTpl", "ceListenOut", { templated: true, persona: personaOpt });
+          });
+          $("#ceListen", root).addEventListener("click", function () {
+            var tpl = ($("#ceTpl", root).value || "").trim();
+            if (!tpl) { toast("Write a script first"); return; }
+            previewInto($("#ceListenOut", root), { scriptTemplate: tpl, persona: personaOpt });
+          });
+          $("#ceTestCall", root).addEventListener("click", function () {
+            var tpl = ($("#ceTpl", root).value || "").trim();
+            var to = ($("#ceTestTo", root).value || "").trim();
+            if (!tpl) { toast("Write a script first"); return; }
+            if (!to) { toast("Enter a landline/VoIP number to test"); return; }
+            var out = $("#ceTestOut", root); if (out) out.innerHTML = loading();
+            send("/voice/test-drop", "POST", { to: to, scriptTemplate: tpl, motion: c.motion || motion, persona: personaOpt }).then(function (r) {
+              if (!out) return;
+              if (!r.ok) { out.innerHTML = '<span style="color:#ff7a90">Test failed: ' + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status) + "</span>"; return; }
+              var d = r.data || {};
+              out.innerHTML = '<b style="color:#34d399">Rendered (~' + d.estSeconds + "s" +
+                (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside sweet spot") + "):</b> “" + esc(d.rendered || "") + "” · " +
+                (d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
+                ((d.warnings && d.warnings.length) ? ' · <span style="color:#ffc24d">⚠ ' + d.warnings.map(esc).join(" · ") + "</span>" : "");
+            }).catch(function () { if (out) out.innerHTML = '<span style="color:#ff7a90">Could not reach the server.</span>'; });
+          });
+          $("#ceSave", root).addEventListener("click", function () {
+            var tpl = ($("#ceTpl", root).value || "").trim();
+            if (!tpl) { toast("Write a script first"); return; }
+            send("/voice/campaigns", "PUT", { id: cid, scriptTemplate: tpl }).then(function (r) {
+              close();
+              if (r.ok) { toast("Script updated"); paint(); }
+              else toast("Save failed");
+            });
+          });
+        });
     }
     function importModal(cid) {
       openModal("Import leads", "Paste rows: first_name, role, company, phone, location (one per line, header optional). Mobiles are auto-stripped, only landline/VoIP get dialed.",
