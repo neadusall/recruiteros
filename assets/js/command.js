@@ -4819,6 +4819,16 @@
         '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<button class="btn btn-sm" id="seAi">✨ AI customize</button>' +
         '<button class="btn btn-sm" id="seListen">🔊 Listen</button><span class="muted" id="seListenOut" style="font-size:12px"></span></div>' +
+        // Place a REAL cloned-voice call to a landline/VoIP you control, straight from
+        // this modal, so you can hear the drop on an actual phone before saving. Same
+        // path as the Test tab (/voice/test-drop): skips the time window, every other
+        // safeguard stays on, and your own number is exempt from the mobile filter.
+        '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07)">' +
+        '<label style="display:block;font-size:12px;color:#8aa0c6;margin-bottom:4px">Test it on a real phone <span style="color:#6b7a99">- landline or VoIP number you control (E.164)</span></label>' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<input id="seTestTo" type="tel" placeholder="+13105551234" style="flex:1;min-width:180px" />' +
+        '<button class="btn btn-sm" id="seTestCall">📞 Test call</button></div>' +
+        '<div class="muted" id="seTestOut" style="font-size:12px;margin-top:6px"></div></div>' +
         '<div class="modal-foot" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="seSave">Save script</button></div>',
         function (root, close) {
           wireChips(root);
@@ -4829,6 +4839,22 @@
             var tpl = ($("#seTpl", root).value || "").trim();
             if (!tpl) { toast("Write a script first"); return; }
             previewInto($("#seListenOut", root), { scriptTemplate: tpl });
+          });
+          $("#seTestCall", root).addEventListener("click", function () {
+            var tpl = ($("#seTpl", root).value || "").trim();
+            var to = ($("#seTestTo", root).value || "").trim();
+            if (!tpl) { toast("Write a script first"); return; }
+            if (!to) { toast("Enter a landline/VoIP number to test"); return; }
+            var out = $("#seTestOut", root); if (out) out.innerHTML = loading();
+            send("/voice/test-drop", "POST", { to: to, scriptTemplate: tpl, motion: motion }).then(function (r) {
+              if (!out) return;
+              if (!r.ok) { out.innerHTML = '<span style="color:#ff7a90">Test failed: ' + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status) + "</span>"; return; }
+              var d = r.data || {};
+              out.innerHTML = '<b style="color:#34d399">Rendered (~' + d.estSeconds + "s" +
+                (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside sweet spot") + "):</b> “" + esc(d.rendered || "") + "” · " +
+                (d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
+                ((d.warnings && d.warnings.length) ? ' · <span style="color:#ffc24d">⚠ ' + d.warnings.map(esc).join(" · ") + "</span>" : "");
+            }).catch(function () { if (out) out.innerHTML = '<span style="color:#ff7a90">Could not reach the server.</span>'; });
           });
           $("#seSave", root).addEventListener("click", function () {
             var name = ($("#seName", root).value || "").trim();
@@ -6421,6 +6447,7 @@
       '<input id="vsName" placeholder="Script name" style="width:100%" value="' + esc(isEdit ? s.name : "") + '"/>' +
       '<div style="margin:8px 0">' + chips + "</div>" +
       '<textarea id="vsTpl" rows="4" style="width:100%">' + esc(isEdit ? s.template : VD_DEFAULT_SCRIPT) + "</textarea>" +
+      VD_PAUSE_GUIDE +
       '<div class="modal-foot" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vsSave">Save to Library</button></div>',
       function (root, close) {
         Array.prototype.forEach.call(root.querySelectorAll("[data-vschip]"), function (b) {
