@@ -8,7 +8,7 @@
  *  - Length is bounded by the delivery channel:
  *      · AMD landline voicemail   → 15-25 seconds
  *      · LinkedIn voice note       → 20-45 seconds
- *  - It MUST identify the caller (real name + real firm) — no anonymous drops.
+ *  - It MUST identify the caller (real name + real firm), no anonymous drops.
  *  - It is formatted for a one-sentence-at-a-time TTS engine (terminal
  *    punctuation per sentence, short sentences, contractions, spelled-out
  *    numbers, no em-dashes, "V.P." not "VP").
@@ -19,7 +19,7 @@
  *    reusable library script (the slots splice in at send time, preserving the
  *    sentence-cache reuse).
  *  - rendered: a finished, lead-specific script with the real name/role spliced
- *    in — used when customizing a single drop at send time.
+ *    in, used when customizing a single drop at send time.
  *
  * Dry-run safe: with no ANTHROPIC_API_KEY it returns the seed/example unchanged
  * and flags dryRun, so nothing breaks before the key is connected.
@@ -31,16 +31,17 @@ import {
   CHANNEL_WINDOWS, wordBudget, renderScript, checkScriptFor, estimateSeconds,
   type VoiceChannel, type MergeVars,
 } from "./script";
+import { stripDashes } from "../text/dashes";
 
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
 
 /** Fixed speech-formatting + compliance rules every voice script must obey. */
-const SYSTEM = `You write short scripts that are SPOKEN by a cloned human voice for recruiter outreach — either a landline voicemail (AMD) or a LinkedIn voice note. The text is fed to a text-to-speech engine ONE SENTENCE AT A TIME, so prosody comes entirely from punctuation. Write for the ear, not the eye.
+const SYSTEM = `You write short scripts that are SPOKEN by a cloned human voice for recruiter outreach, either a landline voicemail (AMD) or a LinkedIn voice note. The text is fed to a text-to-speech engine ONE SENTENCE AT A TIME, so prosody comes entirely from punctuation. Write for the ear, not the eye.
 
 HARD RULES (never break):
 - The script MUST identify the caller by their real name and firm. Anonymous or misleading messages are forbidden.
 - NEVER invent social proof or pretext. Do not say someone referred them, that you "heard they're hiring", or anything you were not told is true. Earn the call on real, specific substance only.
-- End EVERY sentence with terminal punctuation (. ? !). Keep sentences short — one idea each.
+- End EVERY sentence with terminal punctuation (. ? !). Keep sentences short, one idea each.
 - Use commas for phrase grouping and the vocative ("Thanks, {first_name}.").
 - Use "..." for at most ONE deliberate pause (e.g. after the opener). Do not sprinkle it.
 - NO em dashes or en dashes. Break into short sentences or use commas.
@@ -50,14 +51,14 @@ HARD RULES (never break):
 - US dollars with a $ sign if money is mentioned.
 - Warm, specific, human, never salesy.
 
-PACING MODEL — match this rhythm exactly (it is tuned for the TTS engine; copy the punctuation pattern, not the words):
+PACING MODEL, match this rhythm exactly (it is tuned for the TTS engine; copy the punctuation pattern, not the words):
 "Hi {first_name}... this is {agent_name}, with {agent_company}. I came across your {role} search, and wanted to reach out. We help teams hire faster. If it's useful, give me a call back, at this number. Thanks {first_name}."
 Notice the rhythm to reproduce:
 - One held beat ("...") right after the name in the opener, then never again.
 - A vocative comma around the recipient's name and a comma before "with {firm}" so the intro doesn't rush.
 - Each idea is its own short sentence ending in a period, so the voice breathes between them.
 - A comma right before the call-back / phone line to slow the delivery on the ask.
-- Plain, warm spoken phrasing with contractions — it should sound like a person leaving a voicemail, not reading a paragraph.
+- Plain, warm spoken phrasing with contractions, it should sound like a person leaving a voicemail, not reading a paragraph.
 
 Return STRICT JSON only: {"text": string}. No prose outside the JSON.`;
 
@@ -68,14 +69,14 @@ export interface DraftVoiceInput {
   vars?: MergeVars;
   /** An example script or talking points to take direction from (optional). */
   seed?: string;
-  /** Extra real context to weave in — a hiring signal, the value prop, role detail. */
+  /** Extra real context to weave in, a hiring signal, the value prop, role detail. */
   context?: string;
   /** Keep {first_name}/{role}/{company} slots in the output (reusable template). Default true. */
   templated?: boolean;
 }
 
 export interface DraftVoiceResult {
-  /** The customized script — a {slot} template when templated, else fully rendered. */
+  /** The customized script, a {slot} template when templated, else fully rendered. */
   text: string;
   /** Estimated spoken seconds of the rendered text. */
   seconds: number;
@@ -85,7 +86,7 @@ export interface DraftVoiceResult {
   warnings: string[];
   /** Model used, or null on dry-run. */
   model: string | null;
-  /** True when no LLM key — text is the seed/example unchanged. */
+  /** True when no LLM key, text is the seed/example unchanged. */
   dryRun: boolean;
 }
 
@@ -135,9 +136,9 @@ export async function draftVoiceScript(input: DraftVoiceInput): Promise<DraftVoi
   const win = CHANNEL_WINDOWS[channel];
   const templated = input.templated !== false;
 
-  // Dry-run: no key → hand back the seed/example as-is so the UI still works.
+  // Dry-run: no key, hand back the seed/example (dash-stripped) so the UI works.
   if (!process.env.ANTHROPIC_API_KEY) {
-    const text = (input.seed || "").trim();
+    const text = stripDashes((input.seed || "").trim());
     const chk = checkScriptFor(rendered(text, input), input.persona, channel);
     return {
       text, seconds: chk.seconds, channel, withinWindow: chk.withinSweetSpot,
@@ -165,7 +166,7 @@ export async function draftVoiceScript(input: DraftVoiceInput): Promise<DraftVoi
     return block && block.type === "text" ? safeText(block.text) : "";
   }
 
-  let text = await generate();
+  let text = stripDashes(await generate());
   let chk = checkScriptFor(rendered(text, input), input.persona, channel);
 
   // One corrective pass if it landed outside the window.
@@ -173,7 +174,7 @@ export async function draftVoiceScript(input: DraftVoiceInput): Promise<DraftVoi
     const dir = chk.seconds > win.maxSeconds
       ? `Your draft runs about ${chk.seconds} seconds, which is too long. Tighten it to ${win.minSeconds}-${win.maxSeconds} seconds (about ${wb.min}-${wb.max} words). Keep the same intent and all hard rules.`
       : `Your draft runs about ${chk.seconds} seconds, which is too short. Add one or two specific sentences to reach ${win.minSeconds}-${win.maxSeconds} seconds (about ${wb.min}-${wb.max} words). Keep all hard rules.`;
-    const retry = await generate(dir);
+    const retry = stripDashes(await generate(dir));
     if (retry) {
       const rchk = checkScriptFor(rendered(retry, input), input.persona, channel);
       // Take the retry if it's closer to the window.

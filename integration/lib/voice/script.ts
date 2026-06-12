@@ -16,6 +16,7 @@
  */
 
 import type { VoicePersona } from "./types";
+import { stripDashes } from "../text/dashes";
 
 /** Slots the engine knows how to splice. */
 export type Slot = "first_name" | "role" | "company" | "agent_name" | "agent_company";
@@ -171,9 +172,12 @@ export function splitSentences(text: string): string[] {
 }
 
 export function segmentScript(template: string, vars: MergeVars, persona: VoicePersona): ScriptSegment[] {
-  // Fill every slot, then split on sentence boundaries so each whole sentence is
-  // one cacheable, natural-sounding unit.
-  const rendered = renderScript(template, vars, persona);
+  // Fill every slot, strip any dash at this synthesis boundary (the cloned voice
+  // must never speak a dash — a "—" mis-cues the TTS prosody; see lib/text/dashes),
+  // then split on sentence boundaries so each whole sentence is one cacheable,
+  // natural-sounding unit. This is the HARD guard regardless of where the script
+  // came from: a hand-typed template, a per-lead customScript, or the AI drafter.
+  const rendered = stripDashes(renderScript(template, vars, persona));
   return splitSentences(rendered).map((sentence) => ({
     key: cacheKey("vm", sentence),
     text: sentence,
