@@ -13,8 +13,8 @@
   <!--
     Lume Search Partners · Seed-inbox staff portal (white-label)
 
-    Lives on www.lumesp.com but posts cross-origin to the RecruiterOS backend
-    (/api/seed-portal on app.recruitersos.co), which is CORS-open and token-guarded.
+    Lives on www.lumesp.com and posts to the Lume backend
+    (/api/seed-portal on app.lumesp.com), which is CORS-open and token-guarded.
     Staff create Gmail/Outlook/Yahoo accounts, generate an app password on each, and
     paste them here; the server logs in over IMAP and confirms each instantly.
 
@@ -138,7 +138,7 @@
   <script>
     (function () {
       // The page is hosted on lumesp.com; the API lives on the Lume backend
-      // (app.lumesp.com is served by RecruiterOS). CORS-open + token-guarded.
+      // (app.lumesp.com). CORS-open + token-guarded.
       var API = (window.SEED_API_BASE || "https://app.lumesp.com") + "/api/seed-portal";
       var params = new URLSearchParams(location.search);
       var token = params.get("token") || "";

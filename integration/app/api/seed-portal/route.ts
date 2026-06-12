@@ -32,7 +32,7 @@ export function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS });
 }
 
-const ORG = process.env.SEED_PORTAL_ORG || "RecruiterOS";
+const ORG = process.env.SEED_PORTAL_ORG || "Lume Search Partners";
 function portalToken(): string | null {
   const t = (process.env.SENDING_SEED_PORTAL_TOKEN || "").trim();
   return t || null;
