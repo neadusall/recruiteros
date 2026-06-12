@@ -24,6 +24,38 @@ import { cred } from "../providers/http";
 /** The TTS/clone vendors a voice id can belong to. */
 export type VoiceProvider = "elevenlabs" | "cartesia";
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * One synthesis HTTP call with bounded retry. TTS/clone vendors rate-limit by
+ * concurrency/quota (HTTP 429) and occasionally 5xx; a cloned voicemail is built
+ * from several segments, so without backoff a momentary 429 fails the whole drop.
+ * Retries 429/5xx a few times (honoring Retry-After), then surfaces
+ * `voice_clone_<status>` so the caller degrades to the honest non-cloned drop.
+ */
+async function synthRequest(url: string, init: RequestInit): Promise<Response> {
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, init);
+    } catch (e: any) {
+      // Network blip: retry a couple of times, then give up with a clear reason.
+      if (attempt === maxAttempts) throw new Error(`voice_clone_network: ${e?.message || "fetch failed"}`);
+      await sleep(Math.min(8000, 400 * 2 ** (attempt - 1)));
+      continue;
+    }
+    if (res.ok) return res;
+    const retryable = res.status === 429 || res.status >= 500;
+    if (!retryable || attempt === maxAttempts) throw new Error(`voice_clone_${res.status}`);
+    const ra = Number(res.headers.get("retry-after"));
+    const waitMs = Number.isFinite(ra) && ra > 0 ? Math.min(15000, ra * 1000) : Math.min(8000, 400 * 2 ** (attempt - 1));
+    await sleep(waitMs);
+  }
+  // Unreachable (loop either returns or throws), but satisfies the type checker.
+  throw new Error("voice_clone_exhausted");
+}
+
 export interface SynthResult {
   /** Rendered audio bytes (undefined on dry-run). */
   audio?: Buffer;
@@ -79,7 +111,7 @@ class ElevenLabsClient implements VoiceCloneClient {
       console.info(`[voice-clone:dry] synth "${text.slice(0, 48)}" (voice=${vid || "unset"})`);
       return { contentType: "audio/mpeg", dryRun: true };
     }
-    const res = await fetch(`${this.base}/text-to-speech/${encodeURIComponent(vid)}`, {
+    const res = await synthRequest(`${this.base}/text-to-speech/${encodeURIComponent(vid)}`, {
       method: "POST",
       headers: { "xi-api-key": this.key(), "Content-Type": "application/json", Accept: "audio/mpeg" },
       body: JSON.stringify({
@@ -98,9 +130,6 @@ class ElevenLabsClient implements VoiceCloneClient {
         },
       }),
     });
-    if (!res.ok) {
-      throw new Error(`voice_clone_${res.status}`);
-    }
     const audio = Buffer.from(await res.arrayBuffer());
     return { audio, contentType: "audio/mpeg", dryRun: false };
   }
@@ -164,7 +193,7 @@ class CartesiaClient implements VoiceCloneClient {
       console.info(`[voice-clone:dry] cartesia synth "${text.slice(0, 48)}" (voice=${vid || "unset"})`);
       return { contentType: "audio/mpeg", dryRun: true };
     }
-    const res = await fetch(`${this.base}/tts/bytes`, {
+    const res = await synthRequest(`${this.base}/tts/bytes`, {
       method: "POST",
       headers: {
         "X-API-Key": this.key(),
@@ -178,7 +207,6 @@ class CartesiaClient implements VoiceCloneClient {
         output_format: { container: "mp3", sample_rate: 44100, bit_rate: 128000 },
       }),
     });
-    if (!res.ok) throw new Error(`voice_clone_${res.status}`);
     const audio = Buffer.from(await res.arrayBuffer());
     return { audio, contentType: "audio/mpeg", dryRun: false };
   }

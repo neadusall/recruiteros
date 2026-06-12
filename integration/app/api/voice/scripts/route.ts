@@ -12,7 +12,7 @@ import { requireSession, body, ok, fail } from "../../../../lib/api";
 import type { Motion } from "../../../../lib/core/types";
 import {
   listScripts, upsertScript, deleteScript, renderScript, checkScript, segmentScript,
-  DEFAULT_PERSONA, type VoiceScript,
+  scriptStats, DEFAULT_PERSONA, type VoiceScript,
 } from "../../../../lib/voice";
 
 function asMotion(v: unknown): Motion | undefined {
@@ -23,12 +23,19 @@ export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
   const motion = asMotion(new URL(req.url).searchParams.get("motion"));
+  // Per-script outcome rollup ("learn from responses") so the Library can show
+  // which script lands voicemails / gets picked up most, and the operator can
+  // keep the winner and retire the rest.
+  const perf = scriptStats(g.ctx.workspace.id);
   // Attach a preview (rendered sample + duration estimate) so the Library can
   // show the operator roughly how long each drop runs.
   const scripts = listScripts(g.ctx.workspace.id, motion).map((s) => {
     const rendered = renderScript(s.template, { firstName: "there", role: "leader" }, DEFAULT_PERSONA);
     const chk = checkScript(rendered, DEFAULT_PERSONA);
-    return { ...s, preview: rendered, estSeconds: chk.seconds, withinSweetSpot: chk.withinSweetSpot };
+    return {
+      ...s, preview: rendered, estSeconds: chk.seconds, withinSweetSpot: chk.withinSweetSpot,
+      performance: perf[s.id] ?? null,
+    };
   });
   return ok({ scripts });
 }

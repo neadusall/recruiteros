@@ -4706,8 +4706,11 @@
         var urls = d.playlist;
         var secs = Math.max(1, Math.round((String(d.rendered || "").split(/\s+/).filter(Boolean).length) / 2.5));
         var label = d.clips + ' clips · ~' + secs + 's';
-        mount.innerHTML = '<button class="btn btn-sm btn-primary" id="pvPlay">▶ Play voicemail</button> <span class="muted" id="pvStat">' + label + '</span>';
+        mount.innerHTML = '<button class="btn btn-sm btn-primary" id="pvPlay">▶ Play voicemail</button> ' +
+          '<button class="btn btn-sm btn-ghost" id="pvDl">⬇ Download</button> ' +
+          '<span class="muted" id="pvStat">' + label + '</span>';
         var btn = mount.querySelector("#pvPlay"), stat = mount.querySelector("#pvStat");
+        var dl = mount.querySelector("#pvDl");
         var au = null, i = 0, playing = false;
         function stop() { if (au) { try { au.pause(); } catch (e) {} } playing = false; if (btn) btn.textContent = "▶ Play voicemail"; if (stat) stat.textContent = label; }
         function step() {
@@ -4721,6 +4724,29 @@
         btn.addEventListener("click", function () {
           if (playing) { stop(); return; }
           playing = true; i = 0; btn.textContent = "■ Stop"; step();
+        });
+        // Save the assembled voicemail as one MP3. The clips are same-origin,
+        // same-encoder segments, so concatenating the bytes yields a single
+        // playable file. If a fetch is blocked we fall back to opening the clips.
+        if (dl) dl.addEventListener("click", function () {
+          if (dl.disabled) return;
+          stop();
+          var orig = dl.textContent; dl.disabled = true; dl.textContent = "downloading…";
+          Promise.all(urls.map(function (u) {
+            return fetch(u).then(function (r) { if (!r.ok) throw new Error("http"); return r.blob(); });
+          })).then(function (blobs) {
+            var one = new Blob(blobs, { type: (blobs[0] && blobs[0].type) || "audio/mpeg" });
+            var href = URL.createObjectURL(one);
+            var a = document.createElement("a");
+            a.href = href; a.download = "voicemail-" + urls.length + "clips.mp3";
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(function () { URL.revokeObjectURL(href); }, 2000);
+            dl.disabled = false; dl.textContent = orig;
+          }).catch(function () {
+            dl.disabled = false; dl.textContent = orig;
+            if (stat) stat.textContent = "couldn't bundle, opening clips…";
+            urls.forEach(function (u) { window.open(u, "_blank"); });
+          });
         });
       }).catch(function () { mount.innerHTML = '<span class="muted">Could not reach the server.</span>'; });
     }
@@ -4774,6 +4800,14 @@
       });
       return opts;
     }
+    function scriptPerfBadge(p) {
+      // "Learn from responses" signal: how this script actually performs once dialed.
+      if (!p || !p.dialed) return '<span class="muted" style="font-size:12px">· no drops yet</span>';
+      var pct = Math.round((p.connectRate || 0) * 100);
+      var col = pct >= 35 ? "#34d399" : pct >= 15 ? "#ffc24d" : "#9aa4b2";
+      return '<span style="font-size:12px;color:' + col + '">· ' + pct + "% connect (" +
+        (p.voicemail_delivered || 0) + " VM / " + (p.human_answered || 0) + " live, " + p.dialed + " dialed)</span>";
+    }
     function scriptCard(s) {
       var dot = s.withinSweetSpot ? "#34d399" : "#ffc24d";
       var len = "~" + (s.estSeconds || 0) + "s" + (s.withinSweetSpot ? " · in the 15-25s sweet spot" : " · outside the 15-25s sweet spot");
@@ -4781,6 +4815,7 @@
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px">' +
         "<h3 style='margin:0'>" + esc(s.name) + ' <span class="muted" style="font-size:12px">· ' + esc(s.motion || motion) + "</span></h3>" +
         '<span style="font-size:12px;color:' + dot + '">' + esc(len) + "</span></div>" +
+        '<div style="margin:4px 0 2px">' + scriptPerfBadge(s.performance) + "</div>" +
         '<div class="muted" style="font-size:13px;margin:8px 0">“' + esc(s.preview || s.template || "") + '”</div>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
         '<button class="btn btn-sm btn-primary" data-sact="use" data-sid="' + esc(s.id) + '">Use in a campaign</button>' +
@@ -4873,7 +4908,7 @@
               var d = r.data || {};
               out.innerHTML = '<b style="color:#34d399">Rendered (~' + d.estSeconds + "s" +
                 (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside sweet spot") + "):</b> “" + esc(d.rendered || "") + "” · " +
-                (d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
+                (d.dialError ? '<span style="color:#ff7a90">dial failed (' + esc(d.dialError) + ")</span>" : d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
                 ((d.warnings && d.warnings.length) ? ' · <span style="color:#ffc24d">⚠ ' + d.warnings.map(esc).join(" · ") + "</span>" : "");
             }).catch(function () { if (out) out.innerHTML = '<span style="color:#ff7a90">Could not reach the server.</span>'; });
           });
@@ -5038,7 +5073,6 @@
         '<button class="btn btn-sm btn-primary" data-vdact="launch" data-cid="' + c.id + '">▶ Launch</button>' +
         '<button class="btn btn-sm" data-vdact="run" data-cid="' + c.id + '">⏱ Run now</button>' +
         '<button class="btn btn-sm" data-vdact="import" data-cid="' + c.id + '">⬆ Import</button>' +
-        '<button class="btn btn-sm ' + (ready ? "" : "btn-primary") + '" data-vdact="attest" data-cid="' + c.id + '">' + (ready ? "✓ Consent" : "Attest consent") + "</button>" +
         '<span style="flex:1"></span>' +
         '<button class="btn btn-ghost btn-sm" data-vdact="testmode" data-cid="' + c.id + '" data-test="' + (testOn ? "1" : "0") + '">' + (testOn ? "🟡 Test: on" : "Test: off") + "</button>" +
         '<button class="btn btn-ghost btn-sm" data-vdact="del" data-cid="' + c.id + '">🗑</button></div>' +
@@ -5075,6 +5109,10 @@
           if (!s) return;
           var ta = $("#vdScript"); if (ta) ta.value = s.template;
           var nm = $("#vdName"); if (nm && !nm.value.trim()) nm.value = s.name + ", campaign";
+          // Remember which library script was chosen so the campaign's drops are
+          // attributed to it (per-script performance). Cleared the moment the
+          // operator edits the text away from the named script, below.
+          vd.pickedScript = { id: s.id, template: s.template };
           renderEstimate();
         });
         // Listen to the assembled cloned voicemail before creating/launching.
@@ -5149,9 +5187,14 @@
       }).catch(function () { /* keep the manual text input */ });
     }
     function createCampaign() {
+      // Attribute drops to the chosen library script only while the text is still
+      // that script verbatim — once edited, the campaign owns its own copy and
+      // carries no scriptId (so per-script stats stay honest).
+      var picked = vd.pickedScript;
+      var scriptId = (picked && val("vdScript") === String(picked.template).trim()) ? picked.id : undefined;
       var payload = {
         name: val("vdName"), motion: motion, callerId: val("vdCaller"),
-        scriptTemplate: val("vdScript"),
+        scriptTemplate: val("vdScript"), scriptId: scriptId,
         persona: { agentName: val("vdAgentName") || "Ryan", agentCompany: val("vdAgentCompany") || "Executive Search" },
         window: { startHour: parseInt(val("vdWinStart") || "19", 10), endHour: parseInt(val("vdWinEnd") || "21", 10) },
         dailyCap: parseInt(val("vdDailyCap") || "100", 10), frequencyCapDays: parseInt(val("vdFreq") || "30", 10),
@@ -5248,14 +5291,21 @@
               var d = r.data || {};
               out.innerHTML = '<b style="color:#34d399">Rendered (~' + d.estSeconds + "s" +
                 (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside sweet spot") + "):</b> “" + esc(d.rendered || "") + "” · " +
-                (d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
+                (d.dialError ? '<span style="color:#ff7a90">dial failed (' + esc(d.dialError) + ")</span>" : d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
                 ((d.warnings && d.warnings.length) ? ' · <span style="color:#ffc24d">⚠ ' + d.warnings.map(esc).join(" · ") + "</span>" : "");
             }).catch(function () { if (out) out.innerHTML = '<span style="color:#ff7a90">Could not reach the server.</span>'; });
           });
           $("#ceSave", root).addEventListener("click", function () {
             var tpl = ($("#ceTpl", root).value || "").trim();
             if (!tpl) { toast("Write a script first"); return; }
-            send("/voice/campaigns", "PUT", { id: cid, scriptTemplate: tpl }).then(function (r) {
+            // If this campaign was attributed to a library script and the operator
+            // edited the text away from it, detach the attribution ("") so per-script
+            // stats only count the script as it was actually written.
+            var camp = (vd.camps || []).filter(function (x) { return x.id === cid; })[0] || {};
+            var lib = (vd.scripts || []).filter(function (x) { return x.id === camp.scriptId; })[0];
+            var payload = { id: cid, scriptTemplate: tpl };
+            if (camp.scriptId && !(lib && tpl === String(lib.template).trim())) payload.scriptId = "";
+            send("/voice/campaigns", "PUT", payload).then(function (r) {
               close();
               if (r.ok) { toast("Script updated"); paint(); }
               else toast("Save failed");
@@ -5351,6 +5401,26 @@
     }
 
     /* ---- Test tab ---- */
+    // Saved tests live in localStorage (same pattern as saved signals/campaigns),
+    // so you can park a configured drop, reload, and keep re-testing it before you
+    // approve it. Each row is the full form: number, prospect, persona, script.
+    function vtTestsLoad() { try { return JSON.parse(localStorage.getItem("ros_voice_tests") || "[]"); } catch (e) { return []; } }
+    function vtTestsStore(arr) { try { localStorage.setItem("ros_voice_tests", JSON.stringify(arr)); } catch (e) {} }
+    function vtTestOpts() {
+      var list = vtTestsLoad();
+      if (!list.length) return '<option value="">- no saved tests yet -</option>';
+      return '<option value="">- pick a saved test -</option>' + list.map(function (t) {
+        return '<option value="' + esc(t.id) + '">' + esc(t.name) + "</option>";
+      }).join("");
+    }
+    function vtRefreshSaved() { var s = $("#vtSaved"); if (s) s.innerHTML = vtTestOpts(); }
+    function vtSetVal(id, v) { var e = $("#" + id); if (e) e.value = (v == null ? "" : v); }
+    function vtSnapshot() {
+      return {
+        to: val("vtTo"), first: val("vtFirst"), role: val("vtRole"), company: val("vtCompany"),
+        agentName: val("vtAgentName"), agentCompany: val("vtAgentCompany"), script: val("vtScript")
+      };
+    }
     function paintTest(body) {
       var grpLabel = function (t) {
         return '<div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin:14px 0 6px">' + t + "</div>";
@@ -5358,6 +5428,14 @@
       body.innerHTML =
         '<div class="card"><h3>Test a single drop</h3>' +
         '<p class="muted" style="font-size:13px">Fire one personalized drop to a number YOU control, so you can hear the path end to end (render → assemble cloned voicemail → dial with AMD). The time window is skipped; everything else matches production.</p>' +
+
+        grpLabel("Saved tests") +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<select id="vtSaved" style="min-width:220px;max-width:100%">' + vtTestOpts() + "</select>" +
+        '<button class="btn btn-sm" id="vtLoad">Load</button>' +
+        '<button class="btn btn-sm" id="vtDelete">Delete</button>' +
+        '<button class="btn btn-sm" id="vtSaveAs">💾 Save current</button></div>' +
+        '<p class="muted" style="font-size:12px;margin:6px 0 0">Saved on this browser. Park a configured drop here, reload anytime, and keep re-testing the same one before you approve it. Saving under an existing name updates it.</p>' +
 
         grpLabel("1 · Where to send the test") +
         '<div style="max-width:360px">' + inp("vtTo", "Your test number (E.164)", "+13105551234") + "</div>" +
@@ -5381,6 +5459,36 @@
         '<button class="btn btn-sm" id="vtListen">🔊 Listen first</button></div>' +
         '<div id="vtResult" style="margin-top:12px"></div></div>';
       wireChips(body);
+      $("#vtSaveAs").addEventListener("click", function () {
+        var def = val("vtFirst") ? (val("vtFirst") + (val("vtCompany") ? " · " + val("vtCompany") : "")) : "My test";
+        var name = (window.prompt("Name this test", def) || "").trim();
+        if (!name) return;
+        var list = vtTestsLoad(), snap = vtSnapshot(), existing = null;
+        for (var i = 0; i < list.length; i++) { if (list[i].name.toLowerCase() === name.toLowerCase()) { existing = list[i]; break; } }
+        if (existing) { snap.name = name; snap.id = existing.id; for (var k in snap) existing[k] = snap[k]; }
+        else { snap.name = name; snap.id = "vt_" + Date.now() + "_" + Math.floor(Math.random() * 1e6); list.unshift(snap); }
+        vtTestsStore(list); vtRefreshSaved();
+        var sel = $("#vtSaved"); if (sel) sel.value = existing ? existing.id : list[0].id;
+        toast(existing ? "Test updated" : "Test saved");
+      });
+      $("#vtLoad").addEventListener("click", function () {
+        var id = ($("#vtSaved") || {}).value;
+        if (!id) { toast("Pick a saved test"); return; }
+        var t = vtTestsLoad().filter(function (x) { return x.id === id; })[0];
+        if (!t) { toast("Saved test not found"); vtRefreshSaved(); return; }
+        vtSetVal("vtTo", t.to); vtSetVal("vtFirst", t.first); vtSetVal("vtRole", t.role); vtSetVal("vtCompany", t.company);
+        vtSetVal("vtAgentName", t.agentName); vtSetVal("vtAgentCompany", t.agentCompany); vtSetVal("vtScript", t.script);
+        toast("Loaded “" + t.name + "”");
+      });
+      $("#vtDelete").addEventListener("click", function () {
+        var id = ($("#vtSaved") || {}).value;
+        if (!id) { toast("Pick a saved test"); return; }
+        var list = vtTestsLoad(), t = list.filter(function (x) { return x.id === id; })[0];
+        if (!t) { vtRefreshSaved(); return; }
+        if (!confirm("Delete saved test “" + t.name + "”? This only removes it from this browser.")) return;
+        vtTestsStore(list.filter(function (x) { return x.id !== id; })); vtRefreshSaved();
+        toast("Deleted");
+      });
       $("#vtAi").addEventListener("click", function () {
         aiCustomizeInto("vtScript", "vtResult", {
           templated: false, firstName: val("vtFirst"), role: val("vtRole"), company: val("vtCompany"),

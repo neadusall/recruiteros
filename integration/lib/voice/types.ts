@@ -145,6 +145,10 @@ export interface VoiceCampaign {
   persona: VoicePersona;
   /** Templated VM body ({first_name}/{role}/{company}). */
   scriptTemplate: string;
+  /** Library script this template was built from, if any. Stamped onto each drop
+   *  so per-script performance can be tallied (see scriptStats). Decoupled from
+   *  scriptTemplate so editing the campaign copy doesn't lose the attribution. */
+  scriptId?: string;
   /** Cloned voice used to render the drop (operator's consented voice). */
   voiceId?: string;
   /** TTS vendor for voiceId (default elevenlabs). */
@@ -203,6 +207,7 @@ export interface VoiceCampaignInput {
   status?: VoiceCampaign["status"];
   persona?: Partial<VoicePersona>;
   scriptTemplate?: string;
+  scriptId?: string;
   voiceId?: string;
   voiceProvider?: VoiceProvider;
   callerId?: string;

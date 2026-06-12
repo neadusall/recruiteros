@@ -168,7 +168,14 @@ export async function assembleDrop(
   segments: ScriptSegment[],
   voice: VoiceRef,
 ): Promise<AssembledDrop> {
-  const rendered = await Promise.all(segments.map((s) => renderSegment(s, voice)));
+  // Render segments ONE AT A TIME, not Promise.all. TTS/clone vendors rate-limit
+  // by concurrency, so firing every segment at once is the #1 cause of a 429 that
+  // would fail the whole drop. A voicemail is only a handful of segments, and
+  // cache hits are instant, so serial is plenty fast and far more stable.
+  const rendered: RenderedSegment[] = [];
+  for (const s of segments) {
+    rendered.push(await renderSegment(s, voice));
+  }
   return {
     playlist: rendered.map((r) => r.url),
     synthesized: rendered.filter((r) => r.synthesized).length,

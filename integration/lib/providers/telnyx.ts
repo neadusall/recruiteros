@@ -76,12 +76,25 @@ export class TelnyxClient extends ProviderClient {
    * route without its own store.
    */
   dialWithAmd(to: string, connectionId: string, webhookUrl: string, clientState?: Record<string, unknown>) {
+    const from = this.env("TELNYX_FROM_NUMBER");
+    // Preflight the inputs Telnyx would 422 on, but only when we're actually going
+    // to dial for real (configured). Unconfigured stays a dry-run via request().
+    // A clear "connection not set / number not E.164" beats an opaque telnyx_422.
+    if (this.configured()) {
+      const problems: string[] = [];
+      if (!from) problems.push("caller-ID number (TELNYX_FROM_NUMBER) is not set");
+      if (!connectionId) problems.push("call-control connection (TELNYX_CONNECTION_ID) is not set");
+      const dest = (to || "").trim();
+      if (!dest) problems.push("destination number is empty");
+      else if (!/^\+[1-9]\d{7,14}$/.test(dest)) problems.push(`destination "${to}" is not E.164 (e.g. +13105551234)`);
+      if (problems.length) throw new Error(`telnyx_config: ${problems.join("; ")}`);
+    }
     return this.request({
       method: "POST",
       path: "/calls",
       body: {
-        to,
-        from: this.env("TELNYX_FROM_NUMBER"),
+        to: (to || "").trim(),
+        from,
         connection_id: connectionId,
         answering_machine_detection: "premium",
         webhook_url: webhookUrl,

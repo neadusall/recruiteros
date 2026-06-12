@@ -125,7 +125,11 @@ export abstract class ProviderClient {
     const text = await res.text();
     const data = text ? safeJson(text) : {};
     if (!res.ok) {
-      const err = new Error(`${this.id}_${res.status}`) as Error & { status: number; body: unknown };
+      // Keep the `id_status` prefix (callers/UI read it) but append the provider's
+      // own reason when it gives one, so a 422 says WHY (e.g. "connection_id is
+      // invalid") instead of being an opaque code the operator can't act on.
+      const detail = providerErrorDetail(data);
+      const err = new Error(detail ? `${this.id}_${res.status}: ${detail}` : `${this.id}_${res.status}`) as Error & { status: number; body: unknown };
       err.status = res.status;
       err.body = data;
       throw err;
@@ -160,4 +164,27 @@ function safeJson(s: string): any {
   } catch {
     return { raw: s };
   }
+}
+
+/**
+ * Best-effort one-line reason out of a provider's JSON error body, so a failed
+ * request carries WHY, not just a status code. Handles the common shapes:
+ *  - Telnyx / JSON:API  { errors: [{ code, title, detail }] }
+ *  - ElevenLabs/FastAPI { detail: "..." } or { detail: { message } }
+ *  - generic            { message } / { error }
+ */
+function providerErrorDetail(body: any): string {
+  if (!body || typeof body !== "object") return "";
+  const errs = body.errors;
+  if (Array.isArray(errs) && errs.length) {
+    const e = errs[0] || {};
+    const msg = e.detail || e.title;
+    if (msg) return e.code ? `${msg} (${e.code})` : String(msg);
+  }
+  const d = body.detail;
+  if (typeof d === "string") return d;
+  if (d && typeof d === "object" && typeof d.message === "string") return d.message;
+  if (typeof body.message === "string") return body.message;
+  if (typeof body.error === "string") return body.error;
+  return "";
 }
