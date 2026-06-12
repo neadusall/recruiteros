@@ -5,16 +5,17 @@
  * reached it (the fix for the "logged out / data wiped on every deploy" bug).
  */
 
-import { statSync } from "fs";
+import { statSync, readFileSync } from "fs";
 import { dbEnabled, dbPing } from "../../../lib/db";
 import { ok } from "../../../lib/api";
 
 /**
- * Is /data a real persistent mount (the app_data named volume) rather than the
- * container's ephemeral writable layer? If /data sits on a DIFFERENT device than
- * "/", it's a separate mount = the durable volume. Same device = ephemeral, and
- * accounts written there are wiped on the next container rebuild. This is the
- * single fact that decides whether logins survive a deploy.
+ * Two independent reads on whether /data is durable:
+ *  - dataDirMounted: /data on a different device than "/" (named volume).
+ *  - dataDirIsMountpoint: /data appears as its own line in the kernel's
+ *    mountinfo — the authoritative "is this a mount point" answer, robust to
+ *    storage drivers where a bind/volume can share a device number with root.
+ * If EITHER is true, writes to /data survive a container rebuild.
  */
 function dataDirMounted(): boolean {
   try {
@@ -23,14 +24,26 @@ function dataDirMounted(): boolean {
     return false;
   }
 }
+function dataDirIsMountpoint(): boolean {
+  try {
+    const mi = readFileSync("/proc/self/mountinfo", "utf8");
+    return mi.split("\n").some((l) => {
+      const mp = l.split(" ")[4]; // 5th field = mount point
+      return mp === "/data" || mp?.startsWith("/data/");
+    });
+  } catch {
+    return false;
+  }
+}
 
 export async function GET() {
   return ok({
     ok: true,
-    ver: "h5-filevol-mountcheck",            // bump on deploy to confirm the container rebuilt
+    ver: "h6-mountinfo",                     // bump on deploy to confirm the container rebuilt
     db: dbEnabled(),
     dbConnected: await dbPing(),
-    dataDirMounted: dataDirMounted(),        // TRUE = durable across redeploys; FALSE = ephemeral
+    dataDirMounted: dataDirMounted(),        // device-diff heuristic
+    dataDirIsMountpoint: dataDirIsMountpoint(), // authoritative kernel mountinfo
     hasDataDir: !!process.env.ROS_DATA_DIR,  // file persistence configured?
     hasDbUrl: !!process.env.DATABASE_URL,    // explicit Postgres?
     hasPgPw: !!process.env.POSTGRES_PASSWORD,
