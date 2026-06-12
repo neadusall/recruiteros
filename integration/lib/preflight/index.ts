@@ -167,6 +167,14 @@ export function readiness(at: string): Readiness {
       "Set the per-provider webhook secrets so inbound webhooks are signature-verified in production.",
       "Verification is skipped (dev-safe) when a secret is unset — set them before going live.",
     ),
+    item(
+      "key_isolation", "White-label key isolation", "security", false,
+      has("HOUSE_WORKSPACE_ID"), missing("HOUSE_WORKSPACE_ID"),
+      "Set HOUSE_WORKSPACE_ID to your operator (house) workspace id BEFORE onboarding any external client. Until it is set, every workspace is treated as 'house' and a customer's saved keys mirror into the shared process.env — so customer credentials can ride the operator's env and bleed across workspaces.",
+      has("HOUSE_WORKSPACE_ID")
+        ? "Isolation ON — only the named house workspace uses env keys; every other workspace is sandboxed to its own/granted keys."
+        : "ISOLATION OFF (single-operator default). Safe for a solo instance, NOT safe once a second/white-label workspace exists.",
+    ),
   ];
 
   const required = items.filter((i) => i.required);

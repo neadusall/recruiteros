@@ -21,6 +21,7 @@ import { dispatchNurture } from "../../../../../lib/bd/nurtureSend";
 import { generateEarnedAsk } from "../../../../../lib/bd/booking";
 import { ensureExperimentReady } from "../../../../../lib/bd/experiment";
 import { voiceOnEmailSent, voiceOnSendEnabled } from "../../../../../lib/voice/onEmailSent";
+import { withWorkspaceCreds } from "../../../../../lib/connected";
 
 /** A minimal Prospect built from the frozen nurture lead, for the voicemail engine. */
 function leadProspect(e: NurtureEnrollment): any {
@@ -49,6 +50,10 @@ async function run(req: Request) {
 
   for (const { enrollment: e, touch } of due) {
     try {
+      // Credential isolation: this whole touch (email via MTA, voicemail dial,
+      // LinkedIn voice note) runs against THIS workspace's own/granted keys — a
+      // customer's nurture never rides the operator's Telnyx/Unipile/voice env.
+      await withWorkspaceCreds(e.workspaceId, async () => {
       // MONTH-1 WEEKLY WAVE: a value email PAIRED with a voicemail to their direct
       // line, falling back to a LinkedIn voice note when there is no dialable number.
       if (touch.channel === "email_voice_wave") {
@@ -82,7 +87,7 @@ async function run(req: Request) {
 
         results.push({ prospectId: e.prospectId, week: touch.week, channel: "email_voice_wave", email: emailSent, voicemail, fallbackVoiceNote });
         advance(e.prospectId, at);
-        continue;
+        return;
       }
 
       // The earned-ask rung uses the conversion copy in this prospect's A/B model;
@@ -107,6 +112,7 @@ async function run(req: Request) {
       results.push({ prospectId: e.prospectId, week: touch.week, ...sent });
 
       advance(e.prospectId, at);
+      });
     } catch (err: any) {
       // Do not advance on failure -> the touch is retried on the next tick.
       results.push({ prospectId: e.prospectId, week: touch.week, channel: touch.channel, error: err?.message ?? "touch_failed" });

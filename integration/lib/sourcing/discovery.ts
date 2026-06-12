@@ -19,12 +19,15 @@
 import type { CandidateICP, CandidateRow, DiscoveryOptions, SourcingQuery } from "./types";
 import { scoreCandidate } from "./score";
 import { scraperConfigured, scrapeSearchViaSidecar } from "../linkedin/scraperProvider";
+import { cred } from "../providers/http";
 
 /* ------------------------------------------------------------------ */
 /* RapidAPI people-search provider (configurable)                      */
 /* ------------------------------------------------------------------ */
 
-const RAPIDAPI_KEY = () => process.env.RAPIDAPI_KEY ?? "";
+// Billable key resolves workspace-first at call time (host/path are house routing
+// config, identical per workspace, so they stay on env).
+const RAPIDAPI_KEY = () => cred("RAPIDAPI_KEY");
 const PS_HOST = () => process.env.RAPIDAPI_PEOPLE_SEARCH_HOST ?? "";
 const PS_PATH = () => process.env.RAPIDAPI_PEOPLE_SEARCH_PATH ?? "/search/people"; // {query},{page} interpolated
 

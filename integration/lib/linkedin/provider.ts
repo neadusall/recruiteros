@@ -16,6 +16,7 @@ import type {
   ActionResult,
 } from "./types";
 import { backendBridgeProvider } from "./inbridge";
+import { cred } from "../providers/http";
 
 export interface SendConnectionOpts {
   account: LinkedInAccount;
@@ -105,8 +106,11 @@ export interface LinkedInProvider {
 /* Unipile implementation                                              */
 /* ------------------------------------------------------------------ */
 
-const DSN = process.env.UNIPILE_DSN ?? "";          // e.g. "api8.unipile.com:13456"
-const API_KEY = process.env.UNIPILE_API_KEY ?? "";
+// Resolve workspace-first at call time (never a module-load const) so a customer
+// wrapped in withWorkspaceCreds uses their own / operator-granted Unipile, not the
+// house env. e.g. DSN = "api8.unipile.com:13456".
+const DSN = () => cred("UNIPILE_DSN");
+const API_KEY = () => cred("UNIPILE_API_KEY");
 
 class UnipileError extends Error {
   constructor(message: string, readonly status: number, readonly body?: unknown) {
@@ -116,13 +120,15 @@ class UnipileError extends Error {
 }
 
 async function unipile<T>(path: string, init: RequestInit = {}): Promise<T> {
-  if (!DSN || !API_KEY) {
+  const dsn = DSN();
+  const apiKey = API_KEY();
+  if (!dsn || !apiKey) {
     throw new UnipileError("UNIPILE_DSN / UNIPILE_API_KEY are not configured", 500);
   }
-  const res = await fetch(`https://${DSN}/api/v1${path}`, {
+  const res = await fetch(`https://${dsn}/api/v1${path}`, {
     ...init,
     headers: {
-      "X-API-KEY": API_KEY,
+      "X-API-KEY": apiKey,
       "Content-Type": "application/json",
       Accept: "application/json",
       ...(init.headers ?? {}),
@@ -425,7 +431,7 @@ export function getProvider(): LinkedInProvider {
   // Auto-enable Unipile when its credentials are present (unless explicitly
   // overridden), so wiring up Unipile is just setting UNIPILE_DSN + UNIPILE_API_KEY.
   const explicit = (process.env.RECRUITEROS_OUTREACH_PROVIDER ?? "").toLowerCase();
-  const hasUnipile = !!(process.env.UNIPILE_DSN && process.env.UNIPILE_API_KEY);
+  const hasUnipile = !!(cred("UNIPILE_DSN") && cred("UNIPILE_API_KEY"));
   switch (explicit || (hasUnipile ? "unipile" : "self")) {
     case "unipile":
       return unipileProvider;

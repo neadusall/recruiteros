@@ -18,6 +18,7 @@
 import { getCore } from "../core/repository";
 import { rid, nowIso } from "../core/ids";
 import { enrich, sendTouch } from "../channels";
+import { pullForProspect } from "../content/library";
 import type { Campaign, Prospect } from "../core/types";
 
 export interface CadenceStage {
@@ -85,8 +86,8 @@ export async function runDailyCadence(workspaceId: string): Promise<{ drafted: n
       if (e.mobilePhone && !p.mobilePhone) p.mobilePhone = e.mobilePhone;
       if (e.landlinePhone && !p.landlinePhone) p.landlinePhone = e.landlinePhone;
       if (e.source.length) await core.saveProspect(p);
-      // 7:45 draft.
-      queue.push(draftFor(c, p));
+      // 7:45 draft — pull rich, motion-aware copy from the content library.
+      queue.push(...draftsFor(c, p));
     }
   }
 
@@ -128,17 +129,43 @@ export async function pushApproved(workspaceId: string): Promise<{ sent: number;
   return { sent: results.filter((r) => r.ok).length, results };
 }
 
-function draftFor(c: Campaign, p: Prospect): DraftItem {
-  // Placeholder draft; the real drafter (Claude) produces subject/body per touch.
-  return {
-    id: rid("draft"),
-    prospectId: p.id,
-    prospectName: p.fullName,
-    campaignId: c.id,
-    channel: "email",
-    subject: `${p.company ?? "your team"} just hit a hiring signal`,
-    body: `Hi ${p.firstName}, noticed ${p.company ?? "your company"} is moving on ${c.icp.persona}. Worth sending a quick note on how we'd help? (drafted ${nowIso().slice(0, 10)})`,
-    variantLabel: "Direct Hook",
-    status: "pending",
-  };
+/**
+ * 7:45 draft — pull the lead's day-0 touches from the parameterized content
+ * library (industry × function × seniority × signal × motion), instead of one
+ * generic line. Produces the opening email, the LinkedIn connect note, and, for
+ * warm prospects, the voicemail drop — each ready for the approval queue.
+ */
+function draftsFor(c: Campaign, p: Prospect): DraftItem[] {
+  const seq = pullForProspect({
+    title: p.title,
+    headline: p.headline,
+    industry: (p as { industry?: string }).industry || p.company,
+    company: p.company,
+    firstName: p.firstName,
+    fullName: p.fullName,
+    warmth: p.warmth,
+    motion: c.motion,
+    // Campaign's primary signal, if it maps to a known angle (resolver falls back
+    // to a generic opener otherwise — never throws on an unknown value).
+    signal: c.signals?.[0] as never,
+    voiceThreshold: c.voiceNoteThreshold,
+  });
+
+  const label = `${seq.resolved.industry}/${seq.resolved.function}/${seq.resolved.seniority}`;
+  const mk = (channel: DraftItem["channel"], subject: string | undefined, body: string): DraftItem => ({
+    id: rid("draft"), prospectId: p.id, prospectName: p.fullName, campaignId: c.id,
+    channel, subject, body, variantLabel: label, status: "pending",
+  });
+
+  const out: DraftItem[] = [];
+  const email = seq.touches.find((t) => t.channel === "email");
+  if (email) out.push(mk("email", email.subject, email.body));
+  const connect = seq.touches.find((t) => t.channel === "linkedin" && t.action === "connect");
+  if (connect) out.push(mk("linkedin", undefined, connect.body));
+  const voice = seq.touches.find((t) => t.channel === "voice"); // hot-only; present when warm
+  if (voice) out.push(mk("voice", undefined, voice.body));
+
+  // Never enqueue an empty prospect.
+  if (!out.length) out.push(mk("email", `A note for ${p.firstName}`, `Hi ${p.firstName}, worth a quick conversation? (${nowIso().slice(0, 10)})`));
+  return out;
 }

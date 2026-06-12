@@ -18,6 +18,7 @@
  */
 
 import { telnyx } from "../providers";
+import { cred } from "../providers/http";
 import { withWorkspaceCreds } from "../connected";
 import type { AssistantConfig } from "../providers/telnyx";
 import type { VettingDesk } from "./types";
@@ -29,7 +30,7 @@ function appUrl(): string {
 
 /** Telnyx voice selector for the recruiter's cloned ElevenLabs voice. */
 function voiceSelector(desk: VettingDesk): string {
-  const vid = desk.voiceId || process.env.VOICE_CLONE_VOICE_ID || "";
+  const vid = desk.voiceId || cred("VOICE_CLONE_VOICE_ID");
   // ElevenLabs voices are addressed as "ElevenLabs.<voice_id>" on Telnyx; fall
   // back to a natural Telnyx neural voice when no clone is set yet.
   return vid ? `ElevenLabs.${vid}` : "Telnyx.KokoroTTS.af_heart";
@@ -46,7 +47,7 @@ export function buildAssistantConfig(desk: VettingDesk): AssistantConfig {
     // Human timing knobs: low-latency cloned voice, allow the caller to barge in,
     // detect turns on natural pauses rather than fixed silence, slight variation.
     voice_settings: {
-      api_key_ref: process.env.TELNYX_ELEVENLABS_KEY_REF || undefined,
+      api_key_ref: cred("TELNYX_ELEVENLABS_KEY_REF") || undefined,
       stability: 0.45,
       similarity_boost: 0.85,
       style: 0.2,

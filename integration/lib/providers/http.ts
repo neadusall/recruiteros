@@ -44,6 +44,30 @@ export function runWithCreds<T>(
   return credCtx.run({ keys, isolated: !!(opts && opts.isolated) }, fn);
 }
 
+/**
+ * Resolve a credential the workspace-aware way: the active runWithCreds() context
+ * first, then process.env — EXCEPT inside an isolated (customer) context, where the
+ * env fallback is suppressed so a customer can never ride the operator's house key.
+ *
+ * Standalone modules (SMS, voice clone, enrichment, LinkedIn) must read provider
+ * keys through this, NOT `process.env.X` directly, or they bypass isolation even
+ * when wrapped in withWorkspaceCreds. Reading at module-load time (a top-level
+ * `const K = process.env.X`) is the same bug frozen in — always read at call time.
+ */
+export function cred(key: string): string {
+  const ctx = credCtx.getStore();
+  if (ctx) {
+    if (ctx.keys[key]) return ctx.keys[key];
+    if (ctx.isolated) return ""; // customer context: never fall through to house env
+  }
+  return process.env[key] ?? "";
+}
+
+/** Are we currently inside an isolated (white-label customer) credential context? */
+export function isIsolatedContext(): boolean {
+  return !!credCtx.getStore()?.isolated;
+}
+
 export interface ProviderStatus {
   id: string;
   label: string;
@@ -75,13 +99,7 @@ export abstract class ProviderClient {
   }
 
   protected env(key: string): string {
-    const ctx = credCtx.getStore();
-    if (ctx) {
-      if (ctx.keys[key]) return ctx.keys[key];
-      // Isolated (customer) context: never fall through to the operator's env.
-      if (ctx.isolated) return "";
-    }
-    return process.env[key] ?? "";
+    return cred(key);
   }
 
   /** Per-provider auth headers; override. Default: none. */

@@ -10,6 +10,8 @@
  * project): same account, same numbers, same messaging profile.
  */
 
+import { cred } from "../providers/http";
+
 export interface SmsSendOpts {
   from: string;          // E.164 sender number on your messaging profile
   to: string;            // E.164 recipient
@@ -34,24 +36,25 @@ export interface SmsProvider {
 /* Telnyx implementation                                               */
 /* ------------------------------------------------------------------ */
 
-const TELNYX_API_KEY = process.env.TELNYX_API_KEY ?? "";
-const MESSAGING_PROFILE_ID = process.env.TELNYX_MESSAGING_PROFILE_ID ?? "";
-
 export const telnyxSms: SmsProvider = {
   async send({ from, to, text }) {
-    if (!TELNYX_API_KEY) return { ok: false, error: "TELNYX_API_KEY not configured" };
+    // Workspace-first at call time: inside withWorkspaceCreds a customer sends on
+    // THEIR Telnyx key/profile, never the house env (see lib/providers/http.cred).
+    const apiKey = cred("TELNYX_API_KEY");
+    const messagingProfileId = cred("TELNYX_MESSAGING_PROFILE_ID");
+    if (!apiKey) return { ok: false, error: "TELNYX_API_KEY not configured" };
     try {
       const res = await fetch("https://api.telnyx.com/v2/messages", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${TELNYX_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           from,
           to,
           text,
-          messaging_profile_id: MESSAGING_PROFILE_ID || undefined,
+          messaging_profile_id: messagingProfileId || undefined,
         }),
       });
       const data = await res.json().catch(() => undefined);

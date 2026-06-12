@@ -15,6 +15,8 @@
  * consent flow.
  */
 
+import { cred } from "../providers/http";
+
 export interface SynthResult {
   /** Rendered audio bytes (undefined on dry-run). */
   audio?: Buffer;
@@ -43,13 +45,13 @@ class ElevenLabsClient implements VoiceCloneClient {
   private base = "https://api.elevenlabs.io/v1";
 
   private key(): string {
-    return process.env.VOICE_CLONE_API_KEY ?? "";
+    return cred("VOICE_CLONE_API_KEY");
   }
   configured(): boolean {
     return Boolean(this.key());
   }
   private defaultVoice(): string {
-    return process.env.VOICE_CLONE_VOICE_ID ?? "";
+    return cred("VOICE_CLONE_VOICE_ID");
   }
 
   async synthesize(text: string, voiceId?: string): Promise<SynthResult> {

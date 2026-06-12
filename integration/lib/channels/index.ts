@@ -14,6 +14,7 @@
  */
 
 import { instantly, unipile, salesrobot, taltxt, telnyx, freshLinkedin, tomba } from "../providers";
+import { cred } from "../providers/http";
 import { withWorkspaceCreds } from "../connected";
 import { getCore } from "../core/repository";
 import { getAts } from "../ats";
@@ -122,7 +123,7 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
     }
     case "voice": {
       const to = t.prospect.phone ?? "";
-      const r: any = await telnyx.dialWithAmd(to, process.env.TELNYX_CONNECTION_ID ?? "", `${appUrl()}/api/voice/webhook`);
+      const r: any = await telnyx.dialWithAmd(to, cred("TELNYX_CONNECTION_ID"), `${appUrl()}/api/voice/webhook`);
       return { ok: true, channel: "voice", provider: "telnyx", dryRun: r?.dryRun, providerMessageId: r?.data?.call_control_id };
     }
     default:

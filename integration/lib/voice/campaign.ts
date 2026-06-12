@@ -18,6 +18,7 @@
 import { nowIso, rid } from "../core/ids";
 import { getCore } from "../core/repository";
 import { telnyx } from "../providers";
+import { cred } from "../providers/http";
 import { withWorkspaceCreds } from "../connected";
 import { classifyLine } from "../signals/phoneClassify";
 import { recordUsage } from "../billing/ledger";
@@ -38,7 +39,9 @@ function appUrl(): string {
   return process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
 }
 function connectionId(): string {
-  return process.env.TELNYX_CONNECTION_ID ?? "";
+  // Resolved inside the per-lead withWorkspaceCreds() wrap below, so a customer
+  // dials on their own Telnyx connection, not the house env one.
+  return cred("TELNYX_CONNECTION_ID");
 }
 
 /* ---------------- import + mobile strip ---------------- */

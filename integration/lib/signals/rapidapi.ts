@@ -30,12 +30,16 @@ import {
   emailPatternProvider,
 } from "./waterfall";
 import { apifyDirectDialFinder } from "./apify";
+import { cred } from "../providers/http";
 
 /* ------------------------------------------------------------------ */
 /* Shared RapidAPI transport                                           */
 /* ------------------------------------------------------------------ */
 
-const RAPIDAPI_KEY = () => process.env.RAPIDAPI_KEY ?? "";
+// Workspace-first at call time so enrichment bills to the customer's own RapidAPI
+// account inside withWorkspaceCreds, never the operator's (cred() suppresses the
+// house env fallback in an isolated context).
+const RAPIDAPI_KEY = () => cred("RAPIDAPI_KEY");
 
 /** GET a RapidAPI endpoint with the standard marketplace auth headers. */
 async function rapidGet<T>(host: string, path: string): Promise<T> {

@@ -25,6 +25,7 @@ import type {
   SourceRef,
 } from "./types";
 import { getDefinition } from "./registry";
+import { cred } from "../providers/http";
 
 /* ------------------------------------------------------------------ */
 /* Connector contract                                                  */
@@ -500,8 +501,10 @@ export class PeopleGraphSource implements SignalSource {
   ];
   readonly label = "People graph (LinkedIn profile changes)";
 
-  private dsn = process.env.UNIPILE_DSN ?? "";
-  private apiKey = process.env.UNIPILE_API_KEY ?? "";
+  // Workspace-first at call time (not a constructor-frozen value) so a customer's
+  // people-graph pulls use their own / granted Unipile inside withWorkspaceCreds.
+  private get dsn() { return cred("UNIPILE_DSN"); }
+  private get apiKey() { return cred("UNIPILE_API_KEY"); }
 
   isConfigured(): boolean {
     return Boolean(this.dsn && this.apiKey);

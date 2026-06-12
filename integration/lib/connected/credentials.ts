@@ -63,6 +63,17 @@ async function hydrate(): Promise<void> {
             if (c) applyEnv(c.keys);
           }
         }
+        // Loud guard: with HOUSE_WORKSPACE_ID unset, shouldMirror() is true for ALL
+        // workspaces, so every workspace's saved keys land in the shared process.env
+        // (last-writer-wins) and a customer can ride the operator's env. Fine for a
+        // solo instance; a silent cross-tenant leak the moment a 2nd workspace exists.
+        if (!(process.env.HOUSE_WORKSPACE_ID || "").trim() && Object.keys(store).length > 1) {
+          console.warn(
+            `[creds] SECURITY: ${Object.keys(store).length} workspaces but HOUSE_WORKSPACE_ID is unset — ` +
+            `all workspace keys are mirrored into shared process.env (cross-tenant leak). ` +
+            `Set HOUSE_WORKSPACE_ID to your operator workspace id to isolate customers.`,
+          );
+        }
       }
       hydrated = true;
     })();

@@ -1,0 +1,576 @@
+{
+  "name": "RecruiterOS - Multi-Channel Outreach Router (4 Scenarios)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "recruiteros/outreach",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ros-n8n-webhook",
+      "name": "Person In (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        420
+      ],
+      "webhookId": "ros-n8n-webhook"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "// === EDIT THESE DEFAULTS (one place) =====================================\nconst CONFIG = {\n  baseUrl: 'https://YOUR-RECRUITEROS-HOST',   // your app origin, NO trailing slash\n  defaultCampaignId: 'CHANGE_ME',             // fallback campaign id\n  voiceNoteThreshold: 80,                      // warmth gate for voice (RecruiterOS default)\n};\n// =========================================================================\n\n// Accept {person:{...}}, a raw webhook body, or a flat object.\nconst p = $json.person || $json.body?.person || $json.body || $json;\n\nconst titleText = String(p.title || p.headline || '').toLowerCase();\n\n// --- job function (mirrors integration/lib/signals/filters.ts) ---\nconst FUNCTION_KEYWORDS = [\n  ['executive',        /(chief|ceo|founder|owner|president|managing director|partner)/],\n  ['engineering',      /(engineer|developer|swe|devops|sre|architect|backend|front[- ]?end|full[- ]?stack|programmer)/],\n  ['product',          /(product manager|product owner|head of product|cpo|product lead)/],\n  ['design',           /(designer|ux|ui|creative director)/],\n  ['data',             /(data scientist|data engineer|analytics|machine learning|ml engineer|data analyst)/],\n  ['sales',            /(sales|account executive|\\bae\\b|sdr|bdr|business development|revenue)/],\n  ['marketing',        /(marketing|growth|demand gen|brand|content lead|seo)/],\n  ['finance',          /(finance|accountant|controller|cfo|fp&a|treasur)/],\n  ['operations',       /(operations|\\bops\\b|coo|logistics|supply chain)/],\n  ['people_hr',        /(recruit|talent|people ops|\\bhr\\b|human resources|chro)/],\n  ['customer_success', /(customer success|csm|account manager)/],\n  ['legal',            /(legal|counsel|attorney|compliance)/],\n];\nlet fn = 'other';\nfor (const [name, re] of FUNCTION_KEYWORDS) { if (re.test(titleText)) { fn = name; break; } }\n\n// --- seniority (order matters: most senior first) ---\nconst SENIORITY_KEYWORDS = [\n  ['founder',  /(founder|co[- ]?founder|owner)/],\n  ['c_level',  /(chief|\\bceo\\b|\\bcfo\\b|\\bcoo\\b|\\bcto\\b|\\bcmo\\b|\\bcpo\\b|\\bcro\\b|\\bchro\\b|c-level|cxo)/],\n  ['vp',       /(\\bvp\\b|vice president|\\bsvp\\b|\\bevp\\b)/],\n  ['director', /(director|head of)/],\n  ['manager',  /(manager|team lead|principal)/],\n  ['senior',   /(senior|\\bsr\\.?\\b|staff)/],\n];\nlet sen = 'mid';\nfor (const [name, re] of SENIORITY_KEYWORDS) { if (re.test(titleText)) { sen = name; break; } }\nconst decisionRanks = ['manager','director','vp','c_level','founder'];\nconst isDecisionMaker = decisionRanks.includes(sen);\n\n// --- industry: explicit p.industry wins, else infer from company/headline ---\nconst INDUSTRY_KEYWORDS = [\n  ['healthcare',    /(health|clinic|hospital|medical|pharma|biotech|\\bcare\\b)/],\n  ['fintech',       /(fintech|\\bbank|payment|lending|insurance|insurtech|trading|crypto|wealth)/],\n  ['cybersecurity', /(security|cyber|infosec|appsec)/],\n  ['ai_ml',         /(\\bai\\b|artificial intelligence|machine learning|\\bml\\b|\\bllm\\b)/],\n  ['ecommerce',     /(ecommerce|e-commerce|retail|marketplace|shopify|\\bd2c\\b)/],\n  ['edtech',        /(edtech|education|learning|university|school)/],\n  ['logistics',     /(logistics|supply chain|freight|shipping|warehouse)/],\n  ['gaming',        /(gaming|game studio|esports)/],\n  ['climate',       /(climate|clean energy|sustainab|carbon|renewable)/],\n  ['saas',          /(saas|software|\\bcloud\\b|platform|\\bb2b\\b)/],\n];\nlet industry = 'general';\nconst industryText = String(p.industry || p.company || p.companyDescription || p.headline || '').toLowerCase();\nfor (const [name, re] of INDUSTRY_KEYWORDS) { if (re.test(industryText)) { industry = name; break; } }\nif (p.industry) industry = String(p.industry).toLowerCase().trim() || industry;\n\n// --- warmth + motion ---\nlet warmth = Number(p.warmth);\nif (!Number.isFinite(warmth)) warmth = 50;\nconst hot = warmth >= CONFIG.voiceNoteThreshold;\nconst motion = p.motion === 'recruiting' ? 'recruiting'\n             : p.motion === 'bd' ? 'bd'\n             : (fn === 'people_hr' || fn === 'engineering') ? 'recruiting' : 'bd';\n\n// --- scenario routing: SENIORITY x WARMTH (the 4 playbooks) ---\nlet scenario, scenarioName;\nif (isDecisionMaker && hot)        { scenario = 1; scenarioName = 'Decision-maker - warm: voice-first multi-channel'; }\nelse if (isDecisionMaker)          { scenario = 2; scenarioName = 'Decision-maker - cold: full 28-day multi-channel drip'; }\nelse if (warmth >= 35 || ['senior','manager','lead'].includes(sen) || ['engineering','product','sales'].includes(fn))\n                                   { scenario = 3; scenarioName = 'Manager / IC: LinkedIn-led + email'; }\nelse                               { scenario = 4; scenarioName = 'Cold / low-warmth: email-only nurture'; }\n\nreturn {\n  person: p,\n  classification: { function: fn, seniority: sen, isDecisionMaker, industry, warmth, hot, motion },\n  scenario,\n  scenarioName,\n  baseUrl: CONFIG.baseUrl.replace(/\\/$/, ''),\n  defaultCampaignId: CONFIG.defaultCampaignId,\n  voiceNoteThreshold: CONFIG.voiceNoteThreshold,\n};"
+      },
+      "id": "ros-n8n-classify-&-route",
+      "name": "Classify & Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ros-n8n-cond-1",
+                    "leftValue": "={{ $json.scenario }}",
+                    "rightValue": 1,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "S1 voice-first"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ros-n8n-cond-2",
+                    "leftValue": "={{ $json.scenario }}",
+                    "rightValue": 2,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "S2 multi-channel"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ros-n8n-cond-3",
+                    "leftValue": "={{ $json.scenario }}",
+                    "rightValue": 3,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "S3 linkedin-led"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ros-n8n-cond-4",
+                    "leftValue": "={{ $json.scenario }}",
+                    "rightValue": 4,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "S4 email-nurture"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "none"
+        }
+      },
+      "id": "ros-n8n-switch",
+      "name": "Route by Scenario",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        720,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const inb = $json;\nreturn {\n  ...inb,\n  plan: {\n    scenario: 1,\n    campaignId: inb.defaultCampaignId,          // <- route to the campaign that owns this segment's content\n    motion: inb.classification.motion,\n    methodology: \"voice_first\",\n    sequenceTag: \"scenario-1-voicefirst\",\n    contentTypes: \"value_prop,case_study,video_script\",\n    channels: \"linkedin_connect, linkedin_voice_note, voice_drop, email, linkedin_message\",\n    note: \"Warm decision-maker. Day0 email signal-opener + LinkedIn connect (no note). Day1 voicemail drop (cloned voice). Day2 LinkedIn voice note referencing the trigger. Day3 value drop. Highest-touch, fastest.\",\n  },\n};"
+      },
+      "id": "ros-n8n-scenario-1-playbook",
+      "name": "Scenario 1 Playbook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const inb = $json;\nreturn {\n  ...inb,\n  plan: {\n    scenario: 2,\n    campaignId: inb.defaultCampaignId,          // <- route to the campaign that owns this segment's content\n    motion: inb.classification.motion,\n    methodology: \"seven_touch_drip\",\n    sequenceTag: \"scenario-2-multichannel\",\n    contentTypes: \"value_prop,case_study,comp_benchmark\",\n    channels: \"email, linkedin_connect, linkedin_message, voice_drop, linkedin_voice_note\",\n    note: \"Cold decision-maker. Full 28-day anatomy: 7 email touches + 6 LinkedIn touches; voice note unlocks only once warmth >= threshold. Connect-before-DM enforced by RecruiterOS.\",\n  },\n};"
+      },
+      "id": "ros-n8n-scenario-2-playbook",
+      "name": "Scenario 2 Playbook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const inb = $json;\nreturn {\n  ...inb,\n  plan: {\n    scenario: 3,\n    campaignId: inb.defaultCampaignId,          // <- route to the campaign that owns this segment's content\n    motion: inb.classification.motion,\n    methodology: \"hiring_manager_outreach\",\n    sequenceTag: \"scenario-3-linkedin-led\",\n    contentTypes: \"value_prop,case_study\",\n    channels: \"linkedin_connect, linkedin_message, email\",\n    note: \"Manager / individual contributor. LinkedIn-led (connect -> engage -> DM), email as the fallback channel. No voicemail drop at this tier.\",\n  },\n};"
+      },
+      "id": "ros-n8n-scenario-3-playbook",
+      "name": "Scenario 3 Playbook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const inb = $json;\nreturn {\n  ...inb,\n  plan: {\n    scenario: 4,\n    campaignId: inb.defaultCampaignId,          // <- route to the campaign that owns this segment's content\n    motion: inb.classification.motion,\n    methodology: \"seven_touch_drip\",\n    sequenceTag: \"scenario-4-email-nurture\",\n    contentTypes: \"value_prop,comp_benchmark\",\n    channels: \"email\",\n    note: \"Cold / low-warmth. Email-only 7-touch nurture, slow cadence, ends on the break-up touch then moves to 90-day nurture.\",\n  },\n};"
+      },
+      "id": "ros-n8n-scenario-4-playbook",
+      "name": "Scenario 4 Playbook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "// Single consolidation point after the Switch. Every downstream node reads\n// from $('Assemble Plan') so it does not matter which scenario branch fired.\nreturn { ...$json };"
+      },
+      "id": "ros-n8n-assemble-plan",
+      "name": "Assemble Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Assemble Plan').item.json.baseUrl }}/api/sequences?motion={{ $('Assemble Plan').item.json.plan.motion }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "ros-n8n-fetch-sequences",
+      "name": "Fetch Sequences",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        420
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "RecruiterOS API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const plan = $('Assemble Plan').item.json;\nconst seqs = $json.sequences || [];\nconst tag = String(plan.plan.sequenceTag || '').toLowerCase();\n\nfunction match(s) {\n  const tags = (s.tags || []).map(t => String(t).toLowerCase());\n  const name = String(s.name || '').toLowerCase();\n  if (tags.includes(tag)) return 3;\n  if (name.includes(tag)) return 2;\n  return 0;\n}\nconst ranked = seqs.map(s => ({ s, score: match(s) })).filter(r => r.score > 0).sort((a, b) => b.score - a.score);\nconst chosen = ranked[0] && ranked[0].s;\n\nreturn {\n  ...plan,\n  sequenceId: chosen ? chosen.id : null,\n  sequenceName: chosen ? chosen.name : null,\n  sequenceWarning: chosen ? null\n    : 'No sequence tagged \"' + tag + '\" for motion ' + plan.plan.motion + '. Build a multi-channel sequence in Campaigns and tag it \"' + tag + '\".',\n};"
+      },
+      "id": "ros-n8n-pick-sequence",
+      "name": "Pick Sequence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Assemble Plan').item.json.baseUrl }}/api/prospects",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  fullName: $('Pick Sequence').item.json.person.fullName || $('Pick Sequence').item.json.person.name,\n  campaignId: $('Pick Sequence').item.json.plan.campaignId,\n  motion: $('Pick Sequence').item.json.plan.motion,\n  email: $('Pick Sequence').item.json.person.email,\n  linkedinUrl: $('Pick Sequence').item.json.person.linkedinUrl || $('Pick Sequence').item.json.person.linkedin,\n  phone: $('Pick Sequence').item.json.person.phone,\n  company: $('Pick Sequence').item.json.person.company,\n  companyDomain: $('Pick Sequence').item.json.person.companyDomain,\n  title: $('Pick Sequence').item.json.person.title,\n  headline: $('Pick Sequence').item.json.person.headline,\n  location: $('Pick Sequence').item.json.person.location,\n  warmth: $('Pick Sequence').item.json.classification.warmth\n}) }}",
+        "options": {}
+      },
+      "id": "ros-n8n-upsert-prospect",
+      "name": "Upsert Prospect",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        420
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "RecruiterOS API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Assemble Plan').item.json.baseUrl }}/api/prospects",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  action: 'bulk-update',\n  ids: [$('Upsert Prospect').item.json.prospect.id],\n  sequenceId: $('Pick Sequence').item.json.sequenceId,\n  sequenceName: $('Pick Sequence').item.json.sequenceName,\n  status: 'in_sequence'\n}) }}",
+        "options": {}
+      },
+      "id": "ros-n8n-enroll-in-sequence",
+      "name": "Enroll in Sequence",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        420
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "RecruiterOS API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Assemble Plan').item.json.baseUrl }}/api/content/craft?function={{ $('Assemble Plan').item.json.classification.function }}&seniority={{ $('Assemble Plan').item.json.classification.seniority }}&industry={{ $('Assemble Plan').item.json.classification.industry }}&motion={{ $('Assemble Plan').item.json.plan.motion }}&warmth={{ $('Assemble Plan').item.json.classification.warmth }}&company={{ encodeURIComponent($('Pick Sequence').item.json.person.company || '') }}&title={{ encodeURIComponent($('Pick Sequence').item.json.person.title || '') }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "ros-n8n-craft-preview",
+      "name": "Craft Preview",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        420
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "RecruiterOS API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Assemble Plan').item.json.baseUrl }}/api/campaigns/cadence",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({}) }}",
+        "options": {}
+      },
+      "id": "ros-n8n-trigger-cadence-draft",
+      "name": "Trigger Cadence Draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        420
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "RecruiterOS API"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Drafts the enrolled prospect into the approval queue (safe: does NOT auto-send). Remove if you run the daily cadence cron instead."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  ok: true,\n  scenario: $('Pick Sequence').item.json.scenario,\n  scenarioName: $('Pick Sequence').item.json.scenarioName,\n  classification: $('Pick Sequence').item.json.classification,\n  routedTo: {\n    campaignId: $('Pick Sequence').item.json.plan.campaignId,\n    methodology: $('Pick Sequence').item.json.plan.methodology,\n    channels: $('Pick Sequence').item.json.plan.channels\n  },\n  prospectId: $('Upsert Prospect').item.json.prospect.id,\n  sequence: { id: $('Pick Sequence').item.json.sequenceId, name: $('Pick Sequence').item.json.sequenceName },\n  craftedPreview: ($('Craft Preview').item.json.touches || []).map(t => ({ channel: t.channel, action: t.action, day: t.day, name: t.name, subject: t.subject, body: t.body })),\n  warnings: [\n    $('Pick Sequence').item.json.sequenceWarning\n  ].filter(Boolean)\n}) }}",
+        "options": {}
+      },
+      "id": "ros-n8n-respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2880,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Person In (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Classify & Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify & Route": {
+      "main": [
+        [
+          {
+            "node": "Route by Scenario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Scenario": {
+      "main": [
+        [
+          {
+            "node": "Scenario 1 Playbook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Scenario 2 Playbook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Scenario 3 Playbook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Scenario 4 Playbook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scenario 1 Playbook": {
+      "main": [
+        [
+          {
+            "node": "Assemble Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scenario 2 Playbook": {
+      "main": [
+        [
+          {
+            "node": "Assemble Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scenario 3 Playbook": {
+      "main": [
+        [
+          {
+            "node": "Assemble Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scenario 4 Playbook": {
+      "main": [
+        [
+          {
+            "node": "Assemble Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Plan": {
+      "main": [
+        [
+          {
+            "node": "Fetch Sequences",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Sequences": {
+      "main": [
+        [
+          {
+            "node": "Pick Sequence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Sequence": {
+      "main": [
+        [
+          {
+            "node": "Upsert Prospect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Prospect": {
+      "main": [
+        [
+          {
+            "node": "Enroll in Sequence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enroll in Sequence": {
+      "main": [
+        [
+          {
+            "node": "Craft Preview",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Craft Preview": {
+      "main": [
+        [
+          {
+            "node": "Trigger Cadence Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Cadence Draft": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateId": "recruiteros-outreach-router-v1"
+  },
+  "tags": [
+    {
+      "name": "recruiteros"
+    },
+    {
+      "name": "outreach"
+    }
+  ]
+}
