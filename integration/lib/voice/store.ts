@@ -238,6 +238,15 @@ export function upsertConsent(workspaceId: string, input: Partial<VoiceConsent> 
   return existing ?? rec;
 }
 
+/** Remove a saved voice (consent record) from a workspace. Returns true if one was removed. */
+export function deleteConsent(workspaceId: string, id: string): boolean {
+  const idx = store.consent.findIndex((c) => c.id === id && c.workspaceId === workspaceId);
+  if (idx === -1) return false;
+  store.consent.splice(idx, 1);
+  persist();
+  return true;
+}
+
 /* ---------------- script library ---------------- */
 
 export function listScripts(workspaceId: string, motion?: Motion): VoiceScript[] {

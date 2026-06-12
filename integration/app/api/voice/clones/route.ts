@@ -11,7 +11,7 @@
 import { requireSession, body, ok, fail } from "../../../../lib/api";
 import { withWorkspaceCreds } from "../../../../lib/connected";
 import {
-  listConsent, upsertConsent, cacheStats, getVoiceClient, getVoiceClientFor,
+  listConsent, upsertConsent, deleteConsent, cacheStats, getVoiceClient, getVoiceClientFor,
   voiceProviderStatuses, verifyVoiceProvider, type VoiceProvider,
 } from "../../../../lib/voice";
 
@@ -40,6 +40,14 @@ export async function POST(req: Request) {
     const provider: VoiceProvider = b?.provider === "cartesia" ? "cartesia" : "elevenlabs";
     const result = await withWorkspaceCreds(ws, () => verifyVoiceProvider(provider));
     return ok({ provider, ...result });
+  }
+
+  // Remove a saved voice from this workspace's list. Local only — it never
+  // deletes the voice on ElevenLabs/Cartesia, just drops our reference to it.
+  if (b?.action === "delete") {
+    const id = (b?.id || "").trim();
+    if (!id) return fail("missing_fields", 422, { detail: "an id is required" });
+    return ok({ removed: deleteConsent(ws, id) });
   }
 
   const agentName = (b?.agentName || "").trim();

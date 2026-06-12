@@ -4854,7 +4854,8 @@
         var voices = (d.consent || []).map(function (c) {
           var pid = c.provider || "elevenlabs";
           return '<div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:6px">🎙️ <b>' + esc(c.agentName) + "</b>" +
-            '<span class="muted">' + esc(pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span></div>";
+            '<span class="muted">' + esc(pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span>" +
+            '<button class="btn btn-ghost btn-sm" data-vcdel="' + esc(c.id) + '" title="Delete this voice" style="margin-left:auto">🗑️</button></div>';
         }).join("") || '<p class="muted">No voices yet — add one above.</p>';
         body.innerHTML =
           '<div class="card"><h3>Your voices</h3>' +
@@ -4876,6 +4877,16 @@
           send("/voice/clones", "POST", payload).then(function (r) {
             if (r.ok) { toast("Voice added"); paint(); }
             else { toast("Save failed"); }
+          });
+        });
+        Array.prototype.forEach.call(body.querySelectorAll("[data-vcdel]"), function (btn) {
+          btn.addEventListener("click", function () {
+            var id = btn.getAttribute("data-vcdel");
+            if (!confirm("Delete this voice from your list? It is not removed from ElevenLabs or Cartesia.")) return;
+            send("/voice/clones", "POST", { action: "delete", id: id }).then(function (r) {
+              if (r.ok) { toast("Voice deleted"); paint(); }
+              else { toast("Delete failed"); }
+            });
           });
         });
       }).catch(function () { body.innerHTML = needsSetup(); });
@@ -7298,7 +7309,7 @@
       '<p class="sx-sub">The calling engine behind Voice Drops — it places the calls and uses Premium AMD to find the voicemail. Connect your Telnyx API key and a caller-ID number, then Test. New to Telnyx? Follow the <a href="/helpcenter#telephony" target="_blank" rel="noopener" style="color:var(--brand-2)">10DLC setup guide</a> to register your brand &amp; campaign so your calls connect.</p>' +
       '<div id="vsTel">' + loading() + '</div></div>' +
       '<div class="sx-card"><div class="sx-eyebrow">Step 2 · Voice</div><h3>🎙️ Your voice</h3>' +
-      '<p class="sx-sub">Paste your ElevenLabs or Cartesia voice id — no cloning or approval here. Every word, name and role is synthesized once and saved, then reused for free, so you are never charged twice.</p>' +
+      '<p class="sx-sub">Paste your ElevenLabs or Cartesia voice id — no cloning needed.</p>' +
       '<div id="vsVoice">' + loading() + '</div></div>' +
       '<div class="sx-card"><p class="sx-sub" style="margin:0">' + esc(cfg.extra) + '</p>' +
       '<div style="margin-top:12px"><a class="btn btn-primary btn-sm" href="#' + cfg.featureRoute + '">' + esc(cfg.featureLabel) + '</a></div></div>';
@@ -7361,7 +7372,7 @@
         }).join("") || '<p class="muted" style="font-size:13px">No voices yet.</p>';
         var box = $("#vsVoice"); if (!box) return;
         box.innerHTML =
-          '<p class="muted" style="font-size:12px;margin:0 0 8px">Paste an ElevenLabs or Cartesia voice id — no cloning needed. Test the key so you know it will deploy (not silently dry-run):</p>' +
+          '<p class="muted" style="font-size:12px;margin:0 0 8px">Test the key to confirm it will deploy:</p>' +
           '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 12px">' + provRow("elevenlabs", "ElevenLabs", elOk) + provRow("cartesia", "Cartesia", caOk) + '</div>' +
           '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
           '<label class="cn-fld"><span class="lab">Provider</span><select id="vsProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option></select></label>' +
