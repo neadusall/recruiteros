@@ -255,7 +255,9 @@ export const VOICE_TEMPLATES: TouchTemplate[] = [
   },
 ];
 
-/** SMS: short post-engagement nudges (fire after a reply on another channel). */
+/** SMS: short post-engagement nudges (fire after a reply on another channel).
+ *  RECRUITING ONLY — SMS is deliberately excluded from the BD motion (BD uses
+ *  LinkedIn voice notes + voicemail drops as its spoken channels, never SMS). */
 export const SMS_TEMPLATES: TouchTemplate[] = [
   {
     id: "sms-0-nudge",
@@ -263,6 +265,7 @@ export const SMS_TEMPLATES: TouchTemplate[] = [
     day: 0,
     name: "SMS nudge",
     maxChars: 160,
+    motions: ["recruiting"],
     body: "{{first_name}}, {{sender}} here, following up on my note about {{cares_about}}. Open to a quick chat?",
   },
   {
@@ -271,6 +274,7 @@ export const SMS_TEMPLATES: TouchTemplate[] = [
     day: 3,
     name: "SMS value",
     maxChars: 160,
+    motions: ["recruiting"],
     body: "{{first_name}}, no rush. I have one quick example on {{function_pain}} if it helps. Want me to send it?",
   },
 ];

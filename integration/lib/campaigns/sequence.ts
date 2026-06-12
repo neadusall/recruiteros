@@ -8,7 +8,7 @@
  * cadence and the LLM drafter read these specs to know what to generate and when.
  */
 
-import type { Channel } from "../core/types";
+import type { Channel, Motion } from "../core/types";
 
 export interface TouchSpec {
   channel: Channel;
@@ -63,9 +63,14 @@ export const SEQUENCE_RULES = [
   "Day 28 no reply -> move to 90-day nurture.",
 ] as const;
 
-/** Full ordered timeline for a campaign, honoring the HOT-tier voice gate. */
-export function timeline(warmth: number, threshold = 80): TouchSpec[] {
-  const all = [...EMAIL_TOUCHES, ...LINKEDIN_TOUCHES, ...SMS_TOUCHES];
+/**
+ * Full ordered timeline for a campaign, honoring the HOT-tier voice gate.
+ * SMS is excluded from the BD motion by policy — BD's spoken channels are the
+ * LinkedIn voice note and the voicemail drop, never SMS. SMS runs in recruiting.
+ */
+export function timeline(warmth: number, threshold = 80, motion: Motion = "recruiting"): TouchSpec[] {
+  const all = [...EMAIL_TOUCHES, ...LINKEDIN_TOUCHES];
+  if (motion !== "bd") all.push(...SMS_TOUCHES);
   if (warmth >= threshold) all.push(VOICE_TOUCH);
   return all.sort((a, b) => a.day - b.day);
 }

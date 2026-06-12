@@ -50,6 +50,13 @@ export interface SendTouch {
 
 /** Send one touch on its channel, then log the activity to the ATS. */
 export async function sendTouch(workspaceId: string, t: SendTouch): Promise<SendResult> {
+  // BD policy: SMS is disabled for the business-development motion. BD's spoken
+  // channels are the LinkedIn voice note and the voicemail drop — never SMS.
+  // Hard block here so no sequence, drafter, or n8n misconfig can bypass it.
+  if (t.channel === "sms" && t.prospect.motion === "bd") {
+    return { ok: false, channel: "sms", provider: "blocked", error: "sms_disabled_for_bd" };
+  }
+
   let result: SendResult;
   try {
     // Credential isolation: resolve the sending provider against THIS workspace's
