@@ -98,6 +98,8 @@ export interface MtaServer {
   postalHost?: string;            // https://<mta host> (Postal web/API)
   postalApiKey?: string;          // X-Server-API-Key (secret)
   postalReady?: boolean;          // creds present + last send/ping ok
+  /** One-time secret the booting box uses to POST its Postal API key back (auto-bootstrap). */
+  bootstrapToken?: string;
 
   // IP / pool warm-up — the shared IP ramps too, not just each mailbox. A cold
   // IPv4 starts at zero trust; this caps TOTAL daily volume across all mailboxes
@@ -181,7 +183,21 @@ export interface SeedAccount {
   /** IMAP creds for an automated placement reader (optional; else manual/webhook). */
   imapHost?: string;
   imapUser?: string;
-  imapPass?: string;
+  imapPass?: string;        // app password (secret — encrypted at rest, never returned to the client)
+  /** Auth path. "app_password" today; "oauth" is the future-proof seam (Gmail/MS are deprecating app passwords). */
+  authMethod?: "app_password" | "oauth";
+
+  // Who/where it came from (staff self-registration via the seed portal).
+  addedBy?: string;         // staff member name from the portal
+  note?: string;
+
+  // Connector verification: did the server successfully log into this inbox over
+  // IMAP with the app password? Drives the "drivable" gate + the UI badge.
+  imapOk?: boolean;
+  imapVerifiedAt?: string;  // ISO of the last successful/attempted verify
+  lastError?: string;       // last verify error, friendly text
+
+  createdAt?: string;
 }
 
 export type Placement = "inbox" | "promotions" | "spam" | "missing" | "pending";

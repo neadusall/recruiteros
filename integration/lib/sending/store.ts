@@ -9,7 +9,15 @@
 
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver } from "../db";
+import { encryptSecret } from "./secrets";
 import type { SendingDomain, MtaServer, Mailbox, SuppressionEntry, SendEvent, SeedAccount, SeedTest, WarmupThread } from "./types";
+
+/** Per-workspace one-click auto-setup target the cron keeps driving toward. */
+export interface AutoSetupConfig {
+  enabled: boolean;
+  mailboxesPerDomain: number;
+  startedAt?: string;
+}
 
 interface SendingState {
   domains: SendingDomain[];
@@ -20,6 +28,7 @@ interface SendingState {
   seeds: SeedAccount[];
   seedTests: SeedTest[];
   warmupThreads: WarmupThread[]; // capped recent warm-up engagement conversations
+  autoSetup?: Record<string, AutoSetupConfig>; // keyed by workspaceId
 }
 
 const KEY = "sending_infra_v1";
@@ -45,6 +54,7 @@ async function hydrate(): Promise<void> {
         seeds: snap.seeds || [],
         seedTests: snap.seedTests || [],
         warmupThreads: snap.warmupThreads || [],
+        autoSetup: snap.autoSetup || {},
       };
       hydrated = true;
     })();
@@ -201,6 +211,24 @@ export async function stats(workspaceId: string): Promise<{ domains: number; act
   };
 }
 
+/* ---------------- auto-setup config ---------------- */
+
+export async function getAutoSetup(workspaceId: string): Promise<AutoSetupConfig | undefined> {
+  await hydrate();
+  return state.autoSetup?.[workspaceId];
+}
+export async function setAutoSetup(workspaceId: string, cfg: AutoSetupConfig): Promise<void> {
+  await hydrate();
+  if (!state.autoSetup) state.autoSetup = {};
+  state.autoSetup[workspaceId] = cfg;
+  save();
+}
+/** Workspaces with an active one-click setup the cron should keep advancing. */
+export async function listAutoSetupWorkspaceIds(): Promise<string[]> {
+  await hydrate();
+  return Object.entries(state.autoSetup || {}).filter(([, c]) => c.enabled).map(([ws]) => ws);
+}
+
 /* ---------------- raw collections (for the deliverability modules) ---------------- */
 
 export async function allMailboxes(workspaceId: string): Promise<Mailbox[]> {
@@ -281,10 +309,40 @@ export async function listSeeds(): Promise<SeedAccount[]> {
   await hydrate();
   return state.seeds;
 }
+export async function getSeed(id: string): Promise<SeedAccount | undefined> {
+  await hydrate();
+  return state.seeds.find((s) => s.id === id);
+}
+/**
+ * Add OR update a seed inbox, keyed by address (case-insensitive). Re-registering
+ * the same address — e.g. a staff member resubmitting with a corrected app
+ * password — updates the existing record instead of creating a duplicate. Returns
+ * the live record so the caller can verify it.
+ */
 export async function addSeed(input: Omit<SeedAccount, "id">): Promise<SeedAccount> {
   await hydrate();
-  const seed: SeedAccount = { id: rid("seed"), ...input };
+  const addr = input.address.toLowerCase().trim();
+  // Encrypt the app password before it ever touches the snapshot (no-op without a key).
+  const safe = { ...input, address: addr, imapPass: encryptSecret(input.imapPass) };
+  const existing = state.seeds.find((s) => s.address.toLowerCase() === addr);
+  if (existing) {
+    Object.assign(existing, safe);
+    save();
+    return existing;
+  }
+  const seed: SeedAccount = { id: rid("seed"), ...safe, createdAt: nowIso() };
   state.seeds.push(seed);
+  save();
+  return seed;
+}
+/** Record the result of a connector (IMAP login) verification on a seed. */
+export async function setSeedVerification(id: string, ok: boolean, error?: string): Promise<SeedAccount | undefined> {
+  await hydrate();
+  const seed = state.seeds.find((s) => s.id === id);
+  if (!seed) return undefined;
+  seed.imapOk = ok;
+  seed.imapVerifiedAt = nowIso();
+  seed.lastError = ok ? undefined : error;
   save();
   return seed;
 }

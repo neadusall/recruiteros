@@ -146,8 +146,25 @@ This table — not the Postal hookup — is the work. It's why a pilot must **pr
 > One-time manual step per domain: point the registrar's nameservers at Hetzner (UI shows them).
 >
 > **Remaining real-world wiring (needs live creds/infra, not more code):** finish Postal's OAuth-y
-> bits — register each domain in Postal with our DKIM key (UI surfaces the key + commands), connect
-> the seed-inbox IMAP reader that posts placement back, and the Postmaster OAuth token exchange.
+> bits — register each domain in Postal with our DKIM key (UI surfaces the key + commands), and the
+> Postmaster OAuth token exchange.
+>
+> **Seed connector + staff portal + safeguards (shipped 2026-06-12):** staff self-register the
+> Gmail/Outlook/Yahoo inboxes they create at `/seed-portal.html?token=…` (token-guarded by
+> `SENDING_SEED_PORTAL_TOKEN`, no per-submission limit). The server captures an **app password**, runs
+> `verifySeedLogin` (real IMAP login) so the connector is proven, and from then on the SERVER holds the
+> IMAP/SMTP session — nothing stays logged in on a laptop. Long-term safeguards now built in:
+> - **Encryption at rest** — app passwords are AES-256-GCM encrypted via `lib/sending/secrets.ts`
+>   (`SENDING_SECRET_KEY`); legacy plaintext still decrypts; GET never returns the secret.
+> - **Daily self-heal** — `runSeedMaintenance()` (in `/api/sending/cron`) re-verifies every seed login
+>   each tick, so a locked account / revoked app password shows up as "failing" in the console.
+> - **Automatic placement reader** — `readPlacement` + `readDuePlacements` connect to the seed inboxes
+>   and record inbox/spam/missing for pending probes (closes the old manual gap). Manual buttons:
+>   `reverify-seeds`, `read-placements`.
+> - **Readiness gate** — GET returns `seedSummary` (counts by provider, connected/drivable/failing,
+>   `warmupEngageOn`, `credsEncrypted`, `portalEnabled`) so the console shows whether warming can run.
+> - **OAuth seam** — `SeedAccount.authMethod` reserves the future Gmail/MS OAuth path (app passwords
+>   are being deprecated by both); not built yet — the one genuine remaining long-term item.
 
 
 - `lib/providers/mta.ts` — implements the send interface `lib/channels` already dispatches to; talks to Postal's API; returns message id + accepts delivery/bounce/complaint webhooks.

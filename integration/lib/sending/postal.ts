@@ -25,7 +25,25 @@ export class PostalNotReady extends Error {
  * Caddy. After boot, the operator runs `postal make-user` / creates an org+server
  * in the Postal UI and pastes the server API key back into RecruiterOS.
  */
-export function cloudInit(hostname: string): string {
+export function cloudInit(hostname: string, opts?: { callbackUrl?: string; callbackToken?: string; serverId?: string }): string {
+  // Best-effort auto-bootstrap: after Postal starts, create an org + mail server +
+  // API credential via the Rails console and POST the key back to RecruiterOS, so
+  // the owner never has to paste it. Heavily fenced (|| true) — if the console
+  // shape differs across Postal versions, install still succeeds and the owner
+  // pastes host+key once instead. Only emitted when a callback is provided.
+  const auto = opts?.callbackUrl && opts?.callbackToken
+    ? `
+  # Auto-bootstrap: mint an API key and report it back to RecruiterOS.
+  - |
+    KEY=$(/opt/postal/install/bin/postal console <<'RUBY' 2>/dev/null | tail -n1
+    org = Organization.find_or_create_by!(permalink: 'recruiteros') { |o| o.name = 'RecruiterOS' }
+    srv = org.servers.find_or_create_by!(permalink: 'ros') { |s| s.name = 'ros'; s.mode = 'Live' }
+    cred = srv.credentials.where(type: 'API').first_or_create!(name: 'recruiteros', key: SecureRandom.hex(16))
+    puts cred.key
+    RUBY
+    ) || true
+    if [ -n "$KEY" ]; then curl -fsS -X POST "${opts.callbackUrl}" -H "Content-Type: application/json" -d "{\\"token\\":\\"${opts.callbackToken}\\",\\"serverId\\":\\"${opts.serverId || ""}\\",\\"host\\":\\"https://${hostname}\\",\\"apiKey\\":\\"$KEY\\"}" || true; fi`
+    : "";
   return `#cloud-config
 package_update: true
 packages: [curl, git, ca-certificates]
@@ -38,7 +56,7 @@ runcmd:
   - /opt/postal/install/bin/postal initialize || true
   - /opt/postal/install/bin/postal start || true
   # Caddy fronts Postal's web/API on 443 with auto Let's Encrypt for ${hostname}.
-  - 'echo "${hostname} {\\n  reverse_proxy 127.0.0.1:5000\\n}" > /etc/caddy/Caddyfile' || true
+  - 'echo "${hostname} {\\n  reverse_proxy 127.0.0.1:5000\\n}" > /etc/caddy/Caddyfile' || true${auto}
 write_files:
   - path: /etc/postal-mta.txt
     content: |

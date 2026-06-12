@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Set up warm-up inboxes</title>
+  <meta name="description" content="Register the email inboxes you created so we can warm them automatically." />
+  <meta name="robots" content="noindex,nofollow" />
+  <!--
+    Seed-inbox staff portal (PUBLIC, token-guarded)
+
+    Staff create fresh Gmail/Outlook/Yahoo accounts, turn on 2-step verification,
+    generate an APP PASSWORD on each, and paste them here. On submit we POST to
+    /api/seed-portal, which registers each inbox AND runs a real IMAP login test,
+    so each row shows a live green check (or the exact fix needed).
+
+    The link must carry ?token=<SENDING_SEED_PORTAL_TOKEN>. Set window.SEED_API_BASE
+    if the API is on another origin. There is NO limit on the number of rows.
+  -->
+  <style>
+    :root { --bg:#0a0a12; --card:#14141f; --card2:#0e0e18; --line:#262636; --txt:#eef0f6; --muted:#9aa0b4; --accent:#7c5cff; --accent2:#4dd0ff; --ok:#46d39a; --bad:#ff7a93; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:'Inter',system-ui,-apple-system,sans-serif; background:radial-gradient(1100px 560px at 75% -12%, #1a1340 0, transparent 60%), var(--bg); color:var(--txt); min-height:100vh; padding:32px 18px; }
+    .wrap { width:100%; max-width:760px; margin:0 auto; }
+    .eyebrow { font-size:12px; letter-spacing:.13em; text-transform:uppercase; color:var(--accent2); font-weight:700; }
+    h1 { font-size:27px; margin:8px 0 6px; line-height:1.18; }
+    .sub { color:var(--muted); font-size:14.5px; margin:0 0 20px; line-height:1.55; max-width:620px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:22px; box-shadow:0 30px 80px -30px rgba(0,0,0,.7); }
+    .why { background:var(--card2); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:18px; font-size:13px; color:var(--muted); line-height:1.6; }
+    .why b { color:var(--txt); }
+    .why ul { margin:8px 0 0; padding-left:18px; }
+    .why li { margin:3px 0; }
+    label { display:block; font-size:12px; color:var(--muted); margin:0 0 5px; font-weight:600; }
+    input, select { width:100%; padding:11px 12px; border-radius:10px; border:1px solid var(--line); background:var(--card2); color:var(--txt); font-size:14.5px; }
+    input:focus, select:focus { outline:none; border-color:var(--accent); }
+    .name-row { margin-bottom:14px; }
+    .rows { display:flex; flex-direction:column; gap:10px; }
+    .seedrow { display:grid; grid-template-columns:120px 1fr 1fr 34px; gap:10px; align-items:end; background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:12px; }
+    .seedrow .status { grid-column:1 / -1; font-size:12px; min-height:0; }
+    .seedrow.ok { border-color:rgba(70,211,154,.5); }
+    .seedrow.bad { border-color:rgba(255,122,147,.5); }
+    .status.ok { color:var(--ok); }
+    .status.bad { color:var(--bad); }
+    .del { border:1px solid var(--line); background:transparent; color:var(--muted); border-radius:9px; height:42px; cursor:pointer; font-size:16px; }
+    .del:hover { color:var(--bad); border-color:var(--bad); }
+    .addbtn { margin-top:12px; width:100%; padding:11px; border:1px dashed var(--line); border-radius:11px; background:transparent; color:var(--accent2); font-weight:700; font-size:14px; cursor:pointer; }
+    .addbtn:hover { border-color:var(--accent2); }
+    .submit { margin-top:18px; width:100%; padding:14px; border:0; border-radius:12px; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#0a0a12; font-weight:800; font-size:15px; cursor:pointer; }
+    .submit:disabled { opacity:.55; cursor:default; }
+    .help { font-size:11.5px; color:var(--muted); margin-top:8px; line-height:1.55; }
+    .help a { color:var(--accent2); }
+    .err { color:var(--bad); font-size:13px; margin-top:12px; min-height:16px; }
+    details { margin-top:10px; font-size:12.5px; color:var(--muted); }
+    details summary { cursor:pointer; color:var(--accent2); font-weight:600; }
+    details ol { padding-left:18px; line-height:1.65; }
+    .gate { text-align:center; padding:40px 20px; }
+    .tally { font-size:13px; color:var(--muted); margin-top:14px; }
+    .tally b { color:var(--ok); }
+    @media (max-width:560px){ .seedrow{ grid-template-columns:1fr 1fr; } .seedrow .prov{ grid-column:1 / -1; } .seedrow .del{ grid-column:1 / -1; width:100%; } }
+  </style>
+</head>
+<body>
+  <div class="wrap" id="wrap">
+    <div class="eyebrow" id="eyebrow">Warm-up network</div>
+    <h1 id="title">Set up your warm-up inboxes</h1>
+    <p class="sub" id="sub">Loading…</p>
+    <div id="app" style="display:none">
+      <div class="card">
+        <div class="why">
+          <b>Why we're doing this:</b> these inboxes quietly build sending reputation so our real emails land in the inbox, not spam.
+          <ul>
+            <li>Create each account, turn on <b>2-step verification</b>, and generate an <b>app password</b> (a one-time code that lets our server connect — <i>not</i> your normal password).</li>
+            <li><b>You never have to open or check these again.</b> Once connected, our server handles everything automatically.</li>
+            <li>Paste each address + app password below. We test the connection instantly and show a green check.</li>
+          </ul>
+        </div>
+
+        <div class="name-row">
+          <label for="staffName">Your name</label>
+          <input id="staffName" placeholder="e.g. Jordan Smith" autocomplete="name" />
+        </div>
+
+        <div class="rows" id="rows"></div>
+        <button class="addbtn" id="addRow">＋ Add another inbox</button>
+
+        <button class="submit" id="submit">Connect my inboxes</button>
+        <div class="err" id="err"></div>
+        <div class="tally" id="tally"></div>
+
+        <details>
+          <summary>How to generate an app password (Gmail · Outlook · Yahoo)</summary>
+          <ol>
+            <li><b>Gmail:</b> Account → Security → turn on 2-Step Verification → search "App passwords" → generate one → also enable IMAP in Gmail Settings → "Forwarding and POP/IMAP".</li>
+            <li><b>Outlook / Hotmail:</b> account.microsoft.com → Security → Advanced security options → turn on two-step verification → "Create a new app password".</li>
+            <li><b>Yahoo:</b> Account Security → turn on two-step verification → "Generate app password" → pick "Other app".</li>
+          </ol>
+          Paste the app password exactly as shown (spaces are fine — we strip them).
+        </details>
+      </div>
+    </div>
+    <div class="gate card" id="gate" style="display:none">
+      <div class="eyebrow">Link problem</div>
+      <h1 style="font-size:20px" id="gateMsg">This link isn't valid.</h1>
+      <p class="sub">Ask your manager for a fresh setup link.</p>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var API = (window.SEED_API_BASE || "") + "/api/seed-portal";
+      var params = new URLSearchParams(location.search);
+      var token = params.get("token") || "";
+      var $ = function (id) { return document.getElementById(id); };
+      function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+
+      // Validate the link first; only show the form for a good token.
+      if (!token) { showGate("This link is missing its access token."); return; }
+      fetch(API + "?token=" + encodeURIComponent(token))
+        .then(function(r){ return r.json().then(function(d){ return { ok:r.ok, d:d }; }); })
+        .then(function(res){
+          if (!res.ok) { showGate(res.d && res.d.error === "portal_disabled" ? "The setup portal is turned off right now." : "This link isn't valid or has expired."); return; }
+          $("sub").textContent = "Create 3 Gmail, 3 Outlook, and 3 Yahoo accounts (more from family & friends is a big help). Add a row for each, paste its app password, and we'll connect them — you won't need to touch them again.";
+          $("app").style.display = "";
+          for (var i=0;i<3;i++) addRow("gmail");
+          for (var j=0;j<3;j++) addRow("outlook");
+          for (var k=0;k<3;k++) addRow("yahoo");
+        })
+        .catch(function(){ showGate("Couldn't reach the server — try again in a moment."); });
+
+      function showGate(msg){ $("title").style.display="none"; $("sub").style.display="none"; $("eyebrow").style.display="none"; $("gateMsg").textContent = msg; $("gate").style.display=""; }
+
+      function addRow(provider){
+        var row = document.createElement("div");
+        row.className = "seedrow";
+        row.innerHTML =
+          '<div class="prov"><label>Provider</label><select class="f-prov">' +
+            '<option value="gmail">Gmail</option><option value="outlook">Outlook</option><option value="yahoo">Yahoo</option><option value="other">Other</option>' +
+          '</select></div>' +
+          '<div><label>Email address</label><input class="f-addr" type="email" placeholder="name@gmail.com" autocomplete="off" /></div>' +
+          '<div><label>App password</label><input class="f-pass" type="text" placeholder="xxxx xxxx xxxx xxxx" autocomplete="off" /></div>' +
+          '<button class="del" title="Remove">✕</button>' +
+          '<div class="status"></div>';
+        row.querySelector(".f-prov").value = provider || "gmail";
+        row.querySelector(".del").addEventListener("click", function(){ row.remove(); });
+        $("rows").appendChild(row);
+      }
+      $("addRow").addEventListener("click", function(){ addRow("gmail"); });
+
+      $("submit").addEventListener("click", function(){
+        $("err").textContent = "";
+        var staffName = $("staffName").value.trim();
+        if (!staffName) { $("err").textContent = "Please add your name first."; return; }
+        var rows = Array.prototype.slice.call(document.querySelectorAll("#rows .seedrow"));
+        var accounts = [];
+        rows.forEach(function(row){
+          var addr = row.querySelector(".f-addr").value.trim();
+          var pass = row.querySelector(".f-pass").value.trim();
+          if (addr && pass) accounts.push({ row:row, provider: row.querySelector(".f-prov").value, address: addr, appPassword: pass });
+        });
+        if (!accounts.length) { $("err").textContent = "Fill in at least one inbox (address + app password)."; return; }
+
+        var btn = $("submit"); btn.disabled = true; btn.textContent = "Connecting…";
+        fetch(API, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({
+          token: token, staffName: staffName, accounts: accounts.map(function(a){ return { provider:a.provider, address:a.address, appPassword:a.appPassword }; })
+        }) })
+        .then(function(r){ return r.json().then(function(d){ return { ok:r.ok, d:d }; }); })
+        .then(function(res){
+          btn.disabled = false; btn.textContent = "Connect my inboxes";
+          if (!res.ok) { $("err").textContent = (res.d && res.d.error === "invalid_token") ? "This link isn't valid anymore — ask for a fresh one." : "Something went wrong — please try again."; return; }
+          var byAddr = {};
+          (res.d.results||[]).forEach(function(r){ byAddr[(r.address||"").toLowerCase()] = r; });
+          accounts.forEach(function(a){
+            var r = byAddr[a.address.toLowerCase()]; if (!r) return;
+            var st = a.row.querySelector(".status");
+            a.row.classList.remove("ok","bad"); st.classList.remove("ok","bad");
+            if (r.ok) { a.row.classList.add("ok"); st.classList.add("ok"); st.textContent = "✓ Connected — you're done with this one, no need to open it again."; }
+            else { a.row.classList.add("bad"); st.classList.add("bad"); st.textContent = "✕ " + esc(r.error || "Couldn't connect — check the app password."); }
+          });
+          var v = res.d.verified || 0, n = res.d.registered || 0;
+          $("tally").innerHTML = "<b>" + v + "</b> of " + n + " inboxes connected. " + (v < n ? "Fix the red ones (usually a fresh app password) and submit again — connected ones stay connected." : "All set — thank you! You can close this page.");
+        })
+        .catch(function(){ btn.disabled=false; btn.textContent="Connect my inboxes"; $("err").textContent = "Network error — please try again."; });
+      });
+    })();
+  </script>
+</body>
+</html>

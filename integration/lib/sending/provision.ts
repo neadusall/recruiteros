@@ -157,12 +157,20 @@ export async function provisionServer(workspaceId: string, serverId: string): Pr
     s.lastError = undefined;
     await saveServer(s);
 
+    // Best-effort auto-bootstrap of the Postal API key back to us (needs a public
+    // app URL + the one-time token minted at setup; absent either, the box just
+    // leaves the key for a one-time manual paste).
+    const appUrl = (process.env.RECRUITEROS_APP_URL || process.env.SENDING_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+    const callback = appUrl && s.bootstrapToken
+      ? { callbackUrl: `${appUrl}/api/sending/bootstrap`, callbackToken: s.bootstrapToken, serverId: s.id }
+      : undefined;
+
     const created = await createServer({
       name: s.name,
       serverType: s.serverType || env("SENDING_SERVER_TYPE", "cx22"),
       image: env("SENDING_IMAGE", "ubuntu-24.04"),
       location: s.location || env("SENDING_LOCATION", "ash"),
-      userData: cloudInit(s.hostname),   // installs Postal on first boot
+      userData: cloudInit(s.hostname, callback),   // installs Postal on first boot
     });
     s.hcloudServerId = created.id;
 

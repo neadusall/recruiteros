@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lume Search Partners — Email Setup</title>
+  <meta name="description" content="Set up the email inboxes that power Lume's outreach.">
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="icon" href="/favicon-lume.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Fragment+Mono&display=swap" rel="stylesheet">
+  <!--
+    Lume Search Partners · Seed-inbox staff portal (white-label)
+
+    Lives on www.lumesp.com but posts cross-origin to the RecruiterOS backend
+    (/api/seed-portal on app.recruitersos.co), which is CORS-open and token-guarded.
+    Staff create Gmail/Outlook/Yahoo accounts, generate an app password on each, and
+    paste them here; the server logs in over IMAP and confirms each instantly.
+
+    The link must carry ?token=<SENDING_SEED_PORTAL_TOKEN>. No limit on rows.
+  -->
+  <style>
+    :root {
+      --navy:#1C2A3A; --navy-700:#2B3A4D; --teal:#0080A0; --teal-600:#006C88; --teal-300:#19A9C9;
+      --ink:#1C2A3A; --muted:#5A6B7B; --line:#E2E9EE; --bg:#FFFFFF; --bg-soft:#F6F9FB; --bg-tint:#EAF6F6;
+      --ok:#0a8a4f; --bad:#c0392b; --radius:16px; --radius-sm:10px;
+      --shadow-sm:0 1px 2px rgba(28,42,58,.06), 0 4px 16px rgba(28,42,58,.05);
+      --shadow-md:0 8px 30px rgba(28,42,58,.10);
+      --font:'Poppins',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      --mono:'Fragment Mono',ui-monospace,Menlo,monospace;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:var(--font); color:var(--ink); background:var(--bg-soft); line-height:1.6; -webkit-font-smoothing:antialiased; }
+    a { color:var(--teal-600); }
+    .site-header { background:var(--bg); border-bottom:1px solid var(--line); }
+    .site-header .wrap { max-width:760px; margin:0 auto; padding:16px 20px; display:flex; align-items:center; gap:10px; }
+    .logo { display:flex; align-items:center; gap:10px; }
+    .logo__mark { width:34px; height:18px; }
+    .logo__word { font-weight:700; letter-spacing:.16em; color:var(--navy); }
+    .logo__sub { display:block; font-size:11px; letter-spacing:.12em; color:var(--muted); margin-top:-2px; }
+    .wrap { max-width:760px; margin:0 auto; padding:28px 20px 56px; }
+    .eyebrow { font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--teal); font-weight:600; }
+    h1 { font-size:28px; margin:8px 0 6px; letter-spacing:-.01em; color:var(--navy); }
+    .lead { color:var(--muted); font-size:15px; margin:0 0 22px; max-width:620px; }
+    .card { background:var(--bg); border:1px solid var(--line); border-radius:var(--radius); padding:24px; box-shadow:var(--shadow-md); }
+    .why { background:var(--bg-tint); border:1px solid var(--line); border-radius:var(--radius-sm); padding:16px 18px; margin-bottom:20px; font-size:13.5px; color:var(--navy-700); }
+    .why b { color:var(--navy); }
+    .why ul { margin:8px 0 0; padding-left:18px; }
+    .why li { margin:4px 0; }
+    label { display:block; font-size:12px; color:var(--muted); margin:0 0 5px; font-weight:600; }
+    input, select { width:100%; padding:11px 12px; border-radius:var(--radius-sm); border:1px solid var(--line); background:var(--bg); color:var(--ink); font-size:14.5px; font-family:var(--font); }
+    input:focus, select:focus { outline:none; border-color:var(--teal); box-shadow:0 0 0 3px rgba(0,128,160,.12); }
+    .name-row { margin-bottom:14px; }
+    .rows { display:flex; flex-direction:column; gap:10px; }
+    .seedrow { display:grid; grid-template-columns:120px 1fr 1fr 36px; gap:10px; align-items:end; background:var(--bg-soft); border:1px solid var(--line); border-radius:var(--radius-sm); padding:12px; }
+    .seedrow .status { grid-column:1 / -1; font-size:12.5px; }
+    .seedrow.ok { border-color:var(--ok); background:#f1faf5; }
+    .seedrow.bad { border-color:var(--bad); background:#fdf3f2; }
+    .status.ok { color:var(--ok); font-weight:500; }
+    .status.bad { color:var(--bad); }
+    .del { border:1px solid var(--line); background:var(--bg); color:var(--muted); border-radius:var(--radius-sm); height:42px; cursor:pointer; font-size:16px; }
+    .del:hover { color:var(--bad); border-color:var(--bad); }
+    .addbtn { margin-top:12px; width:100%; padding:11px; border:1px dashed var(--teal-300); border-radius:var(--radius-sm); background:var(--bg-tint); color:var(--teal-600); font-weight:600; font-size:14px; cursor:pointer; font-family:var(--font); }
+    .addbtn:hover { border-color:var(--teal); }
+    .submit { margin-top:18px; width:100%; padding:14px; border:0; border-radius:var(--radius-sm); background:var(--teal); color:#fff; font-weight:600; font-size:15px; cursor:pointer; font-family:var(--font); }
+    .submit:hover { background:var(--teal-600); }
+    .submit:disabled { opacity:.55; cursor:default; }
+    details { margin-top:12px; font-size:13px; color:var(--muted); }
+    details summary { cursor:pointer; color:var(--teal-600); font-weight:600; }
+    details ol { padding-left:18px; line-height:1.7; }
+    .err { color:var(--bad); font-size:13px; margin-top:12px; min-height:16px; }
+    .tally { font-size:13.5px; color:var(--muted); margin-top:14px; }
+    .tally b { color:var(--ok); }
+    .gate { text-align:center; padding:30px 10px; }
+    .footer { text-align:center; color:var(--muted); font-size:12px; margin-top:22px; }
+    @media (max-width:560px){ .seedrow{ grid-template-columns:1fr 1fr; } .seedrow .prov{ grid-column:1 / -1; } .seedrow .del{ grid-column:1 / -1; width:100%; } }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="logo" href="https://lumesp.com/" aria-label="Lume Search Partners home">
+        <img class="logo__mark" src="/assets/lume-mark.svg" alt="" width="34" height="18">
+        <span><span class="logo__word">LUME</span><span class="logo__sub">Search Partners</span></span>
+      </a>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="eyebrow">Internal · Email Setup</div>
+    <h1 id="title">Set up your email inboxes</h1>
+    <p class="lead" id="sub">Loading…</p>
+
+    <div id="app" style="display:none">
+      <div class="card">
+        <div class="why">
+          <b>Why we're doing this:</b> these inboxes quietly build sending reputation so Lume's emails reach real inboxes instead of spam — which is what turns outreach into placements.
+          <ul>
+            <li>Create each account, turn on <b>2-step verification</b>, and generate an <b>app password</b> (a one-time code that lets our system connect — <i>not</i> your normal password).</li>
+            <li><b>You never have to open or check these again.</b> Once connected, our system runs them automatically.</li>
+            <li>Paste each address + app password below. We confirm each connection instantly.</li>
+          </ul>
+        </div>
+
+        <div class="name-row">
+          <label for="staffName">Your name</label>
+          <input id="staffName" placeholder="e.g. Jordan Smith" autocomplete="name">
+        </div>
+
+        <div class="rows" id="rows"></div>
+        <button class="addbtn" id="addRow">＋ Add another inbox</button>
+
+        <button class="submit" id="submit">Connect my inboxes</button>
+        <div class="err" id="err"></div>
+        <div class="tally" id="tally"></div>
+
+        <details>
+          <summary>How to generate an app password (Gmail · Outlook · Yahoo)</summary>
+          <ol>
+            <li><b>Gmail:</b> Account → Security → turn on 2-Step Verification → search "App passwords" → generate one → also enable IMAP in Gmail Settings → "Forwarding and POP/IMAP".</li>
+            <li><b>Outlook / Hotmail:</b> account.microsoft.com → Security → Advanced security options → turn on two-step verification → "Create a new app password".</li>
+            <li><b>Yahoo:</b> Account Security → turn on two-step verification → "Generate app password" → pick "Other app".</li>
+          </ol>
+          Paste the app password exactly as shown (spaces are fine — we strip them).
+        </details>
+      </div>
+      <div class="footer">© Lume Search Partners · This is an internal setup page.</div>
+    </div>
+
+    <div class="gate card" id="gate" style="display:none">
+      <div class="eyebrow">Link problem</div>
+      <h1 style="font-size:20px" id="gateMsg">This link isn't valid.</h1>
+      <p class="lead" style="margin:6px auto 0">Ask your manager for a fresh setup link.</p>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      // The page is hosted on lumesp.com; the API lives on the Lume backend
+      // (app.lumesp.com is served by RecruiterOS). CORS-open + token-guarded.
+      var API = (window.SEED_API_BASE || "https://app.lumesp.com") + "/api/seed-portal";
+      var params = new URLSearchParams(location.search);
+      var token = params.get("token") || "";
+      var $ = function (id) { return document.getElementById(id); };
+      function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+
+      if (!token) { showGate("This link is missing its access token."); return; }
+      fetch(API + "?token=" + encodeURIComponent(token))
+        .then(function(r){ return r.json().then(function(d){ return { ok:r.ok, d:d }; }); })
+        .then(function(res){
+          if (!res.ok) { showGate(res.d && res.d.error === "portal_disabled" ? "The setup portal is turned off right now." : "This link isn't valid or has expired."); return; }
+          $("sub").textContent = "Create 3 Gmail, 3 Outlook, and 3 Yahoo accounts (more from family & friends is a big help). Add a row for each, paste its app password, and we'll connect them — you won't need to touch them again.";
+          $("app").style.display = "";
+          for (var i=0;i<3;i++) addRow("gmail");
+          for (var j=0;j<3;j++) addRow("outlook");
+          for (var k=0;k<3;k++) addRow("yahoo");
+        })
+        .catch(function(){ showGate("Couldn't reach the server — try again in a moment."); });
+
+      function showGate(msg){ $("title").style.display="none"; $("sub").style.display="none"; document.querySelector(".eyebrow").style.display="none"; $("gateMsg").textContent = msg; $("gate").style.display=""; }
+
+      function addRow(provider){
+        var row = document.createElement("div");
+        row.className = "seedrow";
+        row.innerHTML =
+          '<div class="prov"><label>Provider</label><select class="f-prov">' +
+            '<option value="gmail">Gmail</option><option value="outlook">Outlook</option><option value="yahoo">Yahoo</option><option value="other">Other</option>' +
+          '</select></div>' +
+          '<div><label>Email address</label><input class="f-addr" type="email" placeholder="name@gmail.com" autocomplete="off"></div>' +
+          '<div><label>App password</label><input class="f-pass" type="text" placeholder="xxxx xxxx xxxx xxxx" autocomplete="off"></div>' +
+          '<button class="del" title="Remove">✕</button>' +
+          '<div class="status"></div>';
+        row.querySelector(".f-prov").value = provider || "gmail";
+        row.querySelector(".del").addEventListener("click", function(){ row.remove(); });
+        $("rows").appendChild(row);
+      }
+      $("addRow").addEventListener("click", function(){ addRow("gmail"); });
+
+      $("submit").addEventListener("click", function(){
+        $("err").textContent = "";
+        var staffName = $("staffName").value.trim();
+        if (!staffName) { $("err").textContent = "Please add your name first."; return; }
+        var rows = Array.prototype.slice.call(document.querySelectorAll("#rows .seedrow"));
+        var accounts = [];
+        rows.forEach(function(row){
+          var addr = row.querySelector(".f-addr").value.trim();
+          var pass = row.querySelector(".f-pass").value.trim();
+          if (addr && pass) accounts.push({ row:row, provider: row.querySelector(".f-prov").value, address: addr, appPassword: pass });
+        });
+        if (!accounts.length) { $("err").textContent = "Fill in at least one inbox (address + app password)."; return; }
+
+        var btn = $("submit"); btn.disabled = true; btn.textContent = "Connecting…";
+        fetch(API, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({
+          token: token, staffName: staffName, accounts: accounts.map(function(a){ return { provider:a.provider, address:a.address, appPassword:a.appPassword }; })
+        }) })
+        .then(function(r){ return r.json().then(function(d){ return { ok:r.ok, d:d }; }); })
+        .then(function(res){
+          btn.disabled = false; btn.textContent = "Connect my inboxes";
+          if (!res.ok) { $("err").textContent = (res.d && res.d.error === "invalid_token") ? "This link isn't valid anymore — ask for a fresh one." : "Something went wrong — please try again."; return; }
+          var byAddr = {};
+          (res.d.results||[]).forEach(function(r){ byAddr[(r.address||"").toLowerCase()] = r; });
+          accounts.forEach(function(a){
+            var r = byAddr[a.address.toLowerCase()]; if (!r) return;
+            var st = a.row.querySelector(".status");
+            a.row.classList.remove("ok","bad"); st.classList.remove("ok","bad");
+            if (r.ok) { a.row.classList.add("ok"); st.classList.add("ok"); st.textContent = "✓ Connected — you're done with this one, no need to open it again."; }
+            else { a.row.classList.add("bad"); st.classList.add("bad"); st.textContent = "✕ " + esc(r.error || "Couldn't connect — check the app password."); }
+          });
+          var v = res.d.verified || 0, n = res.d.registered || 0;
+          $("tally").innerHTML = "<b>" + v + "</b> of " + n + " inboxes connected. " + (v < n ? "Fix the red ones (usually a fresh app password) and submit again — connected ones stay connected." : "All set — thank you! You can close this page.");
+        })
+        .catch(function(){ btn.disabled=false; btn.textContent="Connect my inboxes"; $("err").textContent = "Network error — please try again."; });
+      });
+    })();
+  </script>
+</body>
+</html>

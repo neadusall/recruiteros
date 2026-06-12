@@ -16,9 +16,16 @@ export {
   listServers, getServer, addServer, saveServer,
   listMailboxes, addMailbox, saveMailbox, stats,
   listSuppression, suppress, isSuppressed, recentEvents,
-  listSeeds, addSeed, deleteSeed, listSeedTests,
+  listSeeds, getSeed, addSeed, setSeedVerification, deleteSeed, listSeedTests,
   listSendingWorkspaceIds,
+  getAutoSetup, setAutoSetup, listAutoSetupWorkspaceIds,
 } from "./store";
+
+export { verifySeedLogin, seedDrivable, readPlacement } from "./seedClient";
+export { reverifyAllSeeds, readDuePlacements, runSeedMaintenance } from "./seedHealth";
+export { encryptionEnabled } from "./secrets";
+export { startAutoSetup, advanceAutoSetup, setupStatus, pauseAutoSetup } from "./setup";
+export type { SetupStatus, SetupGate } from "./setup";
 
 export { generateDkimKeypair, dkimTxtValue } from "./dkim";
 export { desiredRecords, checklist } from "./dns";

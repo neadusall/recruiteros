@@ -23,10 +23,19 @@ import {
   listMailboxes, addMailbox, stats,
   provisionDomainDns, verifyDomain, provisionServer,
   checklist, providerStatus, HetznerNotConfigured,
-  listSuppression, recentEvents, listSeeds, addSeed, deleteSeed, listSeedTests,
+  listSuppression, recentEvents, listSeeds, getSeed, addSeed, setSeedVerification, deleteSeed, listSeedTests,
   runSeedTest, runSendingDaily, runGovernor, domainSetup, sendingHealth,
   listWarmupThreads, engagementSummary, engagementEnabled, runEngagement,
+  verifySeedLogin, reverifyAllSeeds, readDuePlacements, seedDrivable, encryptionEnabled,
+  startAutoSetup, advanceAutoSetup, setupStatus, pauseAutoSetup,
 } from "../../../lib/sending";
+import type { SeedAccount } from "../../../lib/sending";
+
+/** Strip the app password before a seed ever goes to the client. */
+function publicSeed(s: SeedAccount) {
+  const { imapPass, imapUser, ...rest } = s;
+  return { ...rest, hasCreds: !!imapPass, drivable: !!(imapUser && imapPass) };
+}
 
 export async function GET(req: Request) {
   const g = requireSession(req);
@@ -37,6 +46,19 @@ export async function GET(req: Request) {
   const servers = await listServers(ws);
   const seedTests = await listSeedTests(ws);
   const warmupThreads = await listWarmupThreads(ws, 200);
+  const rawSeeds = await listSeeds();
+  const byProvider = (p: string) => rawSeeds.filter((s) => s.provider === p).length;
+  // Readiness: warming only actually RUNS when all three are true. Surface the gate.
+  const seedSummary = {
+    total: rawSeeds.length,
+    connected: rawSeeds.filter((s) => s.imapOk).length,
+    drivable: rawSeeds.filter((s) => seedDrivable(s)).length,
+    failing: rawSeeds.filter((s) => s.imapVerifiedAt && !s.imapOk).length,
+    byProvider: { gmail: byProvider("gmail"), outlook: byProvider("outlook"), yahoo: byProvider("yahoo"), other: byProvider("other") },
+    portalEnabled: !!process.env.SENDING_SEED_PORTAL_TOKEN,
+    credsEncrypted: encryptionEnabled(),
+    warmupEngageOn: engagementEnabled(),
+  };
   return ok({
     domains: domains.map((d) => ({ ...d, dkimPrivateKeyPem: undefined, checklist: checklist(d.records) })),
     servers: servers.map((s) => ({ ...s, postalApiKey: s.postalApiKey ? "set" : undefined })),
@@ -45,8 +67,11 @@ export async function GET(req: Request) {
     providers: providerStatus(),
     suppression: (await listSuppression()).slice(0, 50),
     events: await recentEvents(50),
-    seeds: await listSeeds(),
+    seeds: rawSeeds.map(publicSeed),
+    seedSummary,
     seedTests,
+    // One-click setup progress (server → DNS → verify → mailboxes) + remaining gates.
+    setup: await setupStatus(ws),
     // Computed warmth (per mailbox + shared IP) + health (per domain) + roll-up.
     health: sendingHealth(domains, mailboxes, seedTests, servers),
     // Warm-up engagement loop status (B): always-running inbox-to-inbox warming.
@@ -78,6 +103,24 @@ export async function POST(req: Request) {
       }
     }
     return ok({ results });
+  }
+
+  // ONE-CLICK SETUP: register domains + server, then drive the whole pipeline.
+  if (b?.action === "auto-setup") {
+    if (!Array.isArray(b.domains) || !b.domains.length) return fail("missing_fields", 422, { detail: "domains[] required" });
+    try {
+      return ok({ setup: await startAutoSetup(ws, { domains: b.domains, mailboxesPerDomain: b.mailboxesPerDomain, hostname: b.hostname }) });
+    } catch (e: any) { return guard(e); }
+  }
+  if (b?.action === "advance-setup") {
+    try { return ok({ setup: await advanceAutoSetup(ws) }); } catch (e: any) { return guard(e); }
+  }
+  if (b?.action === "setup-status") {
+    return ok({ setup: await setupStatus(ws) });
+  }
+  if (b?.action === "pause-setup") {
+    await pauseAutoSetup(ws);
+    return ok({ ok: true });
   }
 
   if (b?.action === "provision-domain") {
@@ -125,13 +168,52 @@ export async function POST(req: Request) {
 
   if (b?.action === "add-seed") {
     if (!b.address) return fail("missing_fields", 422);
-    return ok({ seed: await addSeed({ provider: b.provider || "other", address: String(b.address).trim(), imapHost: b.imapHost, imapUser: b.imapUser, imapPass: b.imapPass }) }, 201);
+    const address = String(b.address).trim();
+    // The app password is the credential; default the IMAP user to the address.
+    const appPass = (b.appPassword || b.imapPass || "").trim();
+    const seed = await addSeed({
+      provider: b.provider || "other",
+      address,
+      imapHost: b.imapHost,
+      imapUser: appPass ? (b.imapUser || address) : undefined,
+      imapPass: appPass || undefined,
+      addedBy: b.addedBy,
+      note: b.note,
+    });
+    // Run the connector test now if creds were supplied, so the owner sees the
+    // green check (or the exact reason) immediately on add.
+    if (appPass) {
+      const v = await verifySeedLogin(seed);
+      await setSeedVerification(seed.id, v.ok, v.error);
+      return ok({ seed: publicSeed((await getSeed(seed.id))!), verified: v.ok, error: v.error }, 201);
+    }
+    return ok({ seed: publicSeed(seed) }, 201);
+  }
+
+  // Re-run the IMAP connector test for an existing seed.
+  if (b?.action === "test-seed") {
+    if (!b.id) return fail("missing_fields", 422);
+    const seed = await getSeed(b.id);
+    if (!seed) return fail("not_found", 404);
+    const v = await verifySeedLogin(seed);
+    await setSeedVerification(seed.id, v.ok, v.error);
+    return ok({ seed: publicSeed((await getSeed(seed.id))!), verified: v.ok, error: v.error });
   }
 
   if (b?.action === "delete-seed") {
     if (!b.id) return fail("missing_fields", 422);
     await deleteSeed(b.id);
     return ok({ ok: true });
+  }
+
+  // Re-verify every seed login now (the cron does this daily; this is the manual button).
+  if (b?.action === "reverify-seeds") {
+    return ok({ report: await reverifyAllSeeds() });
+  }
+
+  // Read any pending placement probes back from the seed inboxes now.
+  if (b?.action === "read-placements") {
+    return ok({ report: await readDuePlacements() });
   }
 
   if (b?.action === "seed-test") {
