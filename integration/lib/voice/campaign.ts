@@ -26,13 +26,27 @@ import { rateCost } from "../billing/rates";
 import type { Motion } from "../core/types";
 
 import { segmentScript, renderScript, checkScript, identifierLine, type MergeVars } from "./script";
-import { assembleDrop } from "./clones";
-import { getVoiceClient } from "./provider";
-import { checkWindow, resolveTimezone } from "./compliance";
+import { assembleDrop, type VoiceRef } from "./clones";
+import { getVoiceClientFor } from "./provider";
+import { checkWindow, resolveTimezone, type WindowCheck } from "./compliance";
 import {
   getCampaign, getLeads, setLeads, updateLead, recordDrop, registerPending,
-  getPending, clearPending,
+  getPending, clearPending, listConsent,
 } from "./store";
+
+/**
+ * Pick which voice (provider + id) to synthesize a campaign/test in: an explicit
+ * voiceId wins; otherwise fall back to the workspace's most recently saved voice
+ * (bring-your-own ElevenLabs/Cartesia id); otherwise empty, so the provider's
+ * env default voice is used. Provider routing happens inside assembleDrop.
+ */
+function resolveVoiceRef(workspaceId: string, voiceId?: string, voiceProvider?: VoiceRef["provider"]): VoiceRef {
+  if (voiceId) return { provider: voiceProvider, voiceId };
+  const saved = listConsent(workspaceId).filter((v) => v.voiceId);
+  const latest = saved[saved.length - 1];
+  if (latest) return { provider: latest.provider, voiceId: latest.voiceId };
+  return {};
+}
 import type { VoiceCampaign, VoiceLead, DropOutcome } from "./types";
 
 function appUrl(): string {
@@ -171,7 +185,8 @@ export async function runDueDrops(
   const sum: RunSummary = { dialed: 0, scheduled: 0, skipped: 0, filtered: 0, synthesized: 0, cached: 0, dryRun: false };
   if (!c || c.status === "paused") return sum;
 
-  const client = getVoiceClient();
+  const voice = resolveVoiceRef(workspaceId, c.voiceId, c.voiceProvider);
+  const client = getVoiceClientFor(voice.provider);
   const leads = getLeads(campaignId);
 
   for (const lead of leads) {
@@ -182,8 +197,8 @@ export async function runDueDrops(
     // Test mode dials regardless of the clock (and regardless of an unresolved
     // timezone) so the queue can be drained on demand while testing. Every other
     // gate above/below still applies. Real campaigns leave this off.
-    const win = c.testMode
-      ? { allowed: true, timezone: lead.timezone }
+    const win: WindowCheck = c.testMode
+      ? { allowed: true, timezone: lead.timezone, localHour: -1 }
       : checkWindow(lead.location, c.window, at);
     lead.timezone = win.timezone ?? lead.timezone;
     if (!win.allowed) {
@@ -198,7 +213,7 @@ export async function runDueDrops(
     // A per-lead custom script (the weekly wave's unique voicemail) overrides the
     // campaign template, so each wave's drop is different; otherwise use the template.
     const segments = segmentScript(lead.customScript || c.scriptTemplate, vars, c.persona);
-    const drop = await assembleDrop(segments, c.voiceId, client);
+    const drop = await assembleDrop(segments, voice);
     sum.synthesized += drop.synthesized;
     sum.cached += drop.cached;
     if (drop.dryRun) sum.dryRun = true;
@@ -249,6 +264,7 @@ export interface TestDropInput {
   scriptTemplate: string;
   persona: VoiceCampaign["persona"];
   voiceId?: string;
+  voiceProvider?: VoiceRef["provider"];
 }
 
 /**
@@ -257,13 +273,13 @@ export interface TestDropInput {
  * own line) but still classifies, assembles, and dials exactly like production.
  */
 export async function testDrop(workspaceId: string, motion: Motion, input: TestDropInput) {
-  const client = getVoiceClient();
+  const voice = resolveVoiceRef(workspaceId, input.voiceId, input.voiceProvider);
   const vars: MergeVars = { firstName: input.firstName, role: input.role, company: input.company };
   const rendered = renderScript(input.scriptTemplate, vars, input.persona);
   const chk = checkScript(rendered, input.persona);
 
   const segments = segmentScript(input.scriptTemplate, vars, input.persona);
-  const drop = await assembleDrop(segments, input.voiceId, client);
+  const drop = await assembleDrop(segments, voice);
 
   const res: any = await withWorkspaceCreds(workspaceId, () =>
     telnyx.dialWithAmd(input.to, connectionId(), `${appUrl()}/api/voice/webhook`, {

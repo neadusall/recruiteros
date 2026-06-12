@@ -10,7 +10,8 @@
 
 import { requireSession, body, ok, fail } from "../../../../lib/api";
 import {
-  listConsent, upsertConsent, cacheStats, getVoiceClient,
+  listConsent, upsertConsent, cacheStats, getVoiceClient, getVoiceClientFor,
+  voiceProviderStatuses, type VoiceProvider,
 } from "../../../../lib/voice";
 
 export async function GET(req: Request) {
@@ -20,7 +21,8 @@ export async function GET(req: Request) {
   return ok({
     consent: listConsent(g.ctx.workspace.id),
     cache: await cacheStats(),
-    provider: { id: client.id, configured: client.configured() },
+    provider: { id: client.id, configured: client.configured() }, // default (back-compat)
+    providers: voiceProviderStatuses(),                            // [{ id, configured }] per vendor
     defaultVoiceConfigured: Boolean(process.env.VOICE_CLONE_VOICE_ID),
   });
 }
@@ -31,23 +33,29 @@ export async function POST(req: Request) {
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);
   const agentName = (b?.agentName || "").trim();
-  const statement = (b?.statement || "").trim();
-  if (!agentName || !statement) return fail("missing_fields", 422, { detail: "agentName and a consent statement are required" });
+  if (!agentName) return fail("missing_fields", 422, { detail: "a name is required" });
 
-  // Mint a cloned voice from the consent recording when one was supplied and the
-  // provider is configured; otherwise record the consent with any provided voiceId.
-  let voiceId: string | undefined = b?.voiceId;
+  // Bring-your-own-voice: the user pastes a provider voice id, no on-platform
+  // cloning or approval. A short attestation is recorded for compliance, with a
+  // sensible default so the flow stays one-step.
+  const provider: VoiceProvider = b?.provider === "cartesia" ? "cartesia" : "elevenlabs";
+  const statement = (b?.statement || "").trim()
+    || "I confirm I have the right to use this voice for outreach I authorize.";
+
+  // Legacy/optional: if a recording sample is supplied, mint a voice from it.
+  // The default path (paste-an-id) never hits this.
+  let voiceId: string | undefined = (b?.voiceId || "").trim() || undefined;
   let dryRun = false;
   if (b?.sampleBase64) {
     const sample = Buffer.from(String(b.sampleBase64), "base64");
-    const res = await getVoiceClient().createVoice({ name: agentName, sample, contentType: b?.contentType });
+    const res = await getVoiceClientFor(provider).createVoice({ name: agentName, sample, contentType: b?.contentType });
     dryRun = res.dryRun;
     if (res.error) return fail("clone_failed", 502, { detail: res.error });
     if (res.voiceId) voiceId = res.voiceId;
   }
 
   const consent = upsertConsent(ws, {
-    id: b?.id, agentName, statement, voiceId,
+    id: b?.id, agentName, statement, provider, voiceId,
     consentClipUrl: b?.consentClipUrl,
     attestedBy: g.ctx.user.email,
   });

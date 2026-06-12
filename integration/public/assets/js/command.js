@@ -4611,7 +4611,7 @@
       '<div id="vdBody">' + loading() + "</div>";
 
     function tabBar() {
-      var tabs = [["campaigns", "📞 Campaigns"], ["voice", "🎙️ Voice & Consent"], ["test", "🧪 Test"]];
+      var tabs = [["campaigns", "📞 Campaigns"], ["voice", "🎙️ Voice"], ["test", "🧪 Test"]];
       $(".vd-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="btn btn-sm ' + (vd.tab === t[0] ? "btn-primary" : "") + '" data-vdtab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -4805,34 +4805,40 @@
       return out;
     }
 
-    /* ---- Voice & Consent tab ---- */
+    /* ---- Voice tab: bring-your-own ElevenLabs / Cartesia voice id ---- */
     function paintVoice(body) {
       body.innerHTML = loading();
       api("/voice/clones").then(function (d) {
         d = d || {};
         var cache = d.cache || { total: 0, byKind: {} };
-        var prov = d.provider || { configured: false, id: "—" };
+        var provs = d.providers || [];
+        function ok(id) { var p = provs.filter(function (x) { return x.id === id; })[0]; return !!(p && p.configured); }
+        var elOk = ok("elevenlabs"), caOk = ok("cartesia");
         var kinds = Object.keys(cache.byKind || {}).map(function (k) { return "<b>" + (cache.byKind[k]) + "</b> " + esc(k); }).join(" · ") || "none yet";
-        var consent = (d.consent || []).map(function (c) {
-          return '<div style="font-size:13px;margin-top:4px">🎙️ <b>' + esc(c.agentName) + "</b> " + (c.voiceId ? '<span class="muted">voice ' + esc(c.voiceId) + "</span>" : '<span class="muted">(no voice id)</span>') + "</div>";
-        }).join("") || '<p class="muted">No consented voices recorded yet.</p>';
+        var voices = (d.consent || []).map(function (c) {
+          var pid = c.provider || "elevenlabs";
+          return '<div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:6px">🎙️ <b>' + esc(c.agentName) + "</b>" +
+            '<span class="muted">' + esc(pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span></div>";
+        }).join("") || '<p class="muted">No voices yet — add one above.</p>';
         body.innerHTML =
-          '<div class="card"><h3>Cloned voice &amp; consent</h3>' +
-          '<p class="muted" style="font-size:13px">Use your OWN voice, captured with a recorded consent statement. The clone provider is <b>' + esc(prov.id) + "</b> — " + (prov.configured ? "configured." : "not configured (dry-run; set VOICE_CLONE_API_KEY).") + "</p>" +
-          '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
-          inp("vcName", "Whose voice (your name)", "Ryan") +
-          inp("vcVoiceId", "Provider voice id (optional)", "el_xxx") + "</div>" +
-          '<div style="margin-top:10px"><label class="muted" style="font-size:12px">Consent statement</label>' +
-          '<textarea id="vcStatement" rows="2" style="width:100%">' + esc(VD_CONSENT_TEXT) + "</textarea></div>" +
-          '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vcSave">Record consent</button></div></div>' +
-          '<div class="card" style="margin-top:14px"><h3>Cloned-snippet repository (the token-saver)</h3>' +
-          '<p class="muted" style="font-size:13px">First names, roles, and static prose are synthesized once and reused forever — repeat names/roles cost $0. Rendered segments: <b>' + (cache.total || 0) + "</b> (" + kinds + ").</p>" +
-          '<div>' + consent + "</div></div>";
+          '<div class="card"><h3>Your voices</h3>' +
+          '<p class="muted" style="font-size:13px">Paste a voice id from ElevenLabs or Cartesia and you are ready — no cloning or approval here. ' +
+          'ElevenLabs: <b>' + (elOk ? "connected" : "set VOICE_CLONE_API_KEY") + '</b> · Cartesia: <b>' + (caOk ? "connected" : "set CARTESIA_API_KEY") + '</b>.</p>' +
+          '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
+          '<div class="vd-field"><label>Provider</label><select id="vcProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option></select></div>' +
+          inp("vcVoiceId", "Voice ID", "paste your voice id") +
+          inp("vcName", "Name (whose voice)", "Ryan") + "</div>" +
+          '<p class="muted" style="font-size:12px;margin:10px 0 0">No voice id yet? Create one and copy its id from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs ↗</a> or <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia ↗</a>.</p>' +
+          '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vcSave">Add voice</button></div></div>' +
+          '<div class="card" style="margin-top:14px"><h3>Reused audio — no re-charge</h3>' +
+          '<p class="muted" style="font-size:13px">Every word, name and role is synthesized once and saved, then reused for free — you are never charged twice for the same word in the same voice. Saved segments: <b>' + (cache.total || 0) + "</b> (" + kinds + ").</p>" +
+          '<div>' + voices + "</div></div>";
         $("#vcSave").addEventListener("click", function () {
-          var payload = { agentName: val("vcName"), statement: val("vcStatement"), voiceId: val("vcVoiceId") || undefined };
-          if (!payload.agentName || !payload.statement) { toast("Name + consent statement required"); return; }
+          var payload = { agentName: val("vcName"), voiceId: val("vcVoiceId") || undefined, provider: (($("#vcProvider") || {}).value) || "elevenlabs" };
+          if (!payload.agentName) { toast("Add a name"); return; }
+          if (!payload.voiceId) { toast("Paste a voice id"); return; }
           send("/voice/clones", "POST", payload).then(function (r) {
-            if (r.ok) { toast("Consent recorded" + (r.data && r.data.dryRun ? " (dry-run)" : "")); paint(); }
+            if (r.ok) { toast("Voice added"); paint(); }
             else { toast("Save failed"); }
           });
         });
@@ -7246,8 +7252,8 @@
       '<div class="sx-card"><div class="sx-eyebrow">Step 1 · Telephony</div><h3>📞 Telnyx</h3>' +
       '<p class="sx-sub">The calling engine behind Voice Drops — it places the calls and uses Premium AMD to find the voicemail. Connect your Telnyx API key and a caller-ID number, then Test. New to Telnyx? Follow the <a href="/helpcenter#telephony" target="_blank" rel="noopener" style="color:var(--brand-2)">10DLC setup guide</a> to register your brand &amp; campaign so your calls connect.</p>' +
       '<div id="vsTel">' + loading() + '</div></div>' +
-      '<div class="sx-card"><div class="sx-eyebrow">Step 2 · Voice</div><h3>🎙️ Cloned voice &amp; consent</h3>' +
-      '<p class="sx-sub">Use your OWN voice, captured with a recorded consent statement. Repeat names/roles are synthesized once and reused, so cost stays near zero.</p>' +
+      '<div class="sx-card"><div class="sx-eyebrow">Step 2 · Voice</div><h3>🎙️ Your voice</h3>' +
+      '<p class="sx-sub">Paste your ElevenLabs or Cartesia voice id — no cloning or approval here. Every word, name and role is synthesized once and saved, then reused for free, so you are never charged twice.</p>' +
       '<div id="vsVoice">' + loading() + '</div></div>' +
       '<div class="sx-card"><p class="sx-sub" style="margin:0">' + esc(cfg.extra) + '</p>' +
       '<div style="margin-top:12px"><a class="btn btn-primary btn-sm" href="#' + cfg.featureRoute + '">' + esc(cfg.featureLabel) + '</a></div></div>';
@@ -7289,25 +7295,31 @@
       api("/voice/clones").then(function (d) {
         d = d || {};
         st.clones = d.consent || [];
-        var prov = d.provider || { configured: false, id: "—" };
-        st.provConfigured = prov.configured;
+        var provs = d.providers || [];
+        function pok(id) { var p = provs.filter(function (x) { return x.id === id; })[0]; return !!(p && p.configured); }
+        var elOk = pok("elevenlabs"), caOk = pok("cartesia");
+        st.provConfigured = elOk || caOk;
         var list = (st.clones).map(function (c) {
-          return '<div style="font-size:13px;margin-top:4px">🎙️ <b>' + esc(c.agentName) + "</b> " + (c.voiceId ? '<span class="muted">voice ' + esc(c.voiceId) + "</span>" : '<span class="muted">(no voice id)</span>') + "</div>";
-        }).join("") || '<p class="muted" style="font-size:13px">No consented voices yet.</p>';
+          var pid = c.provider || "elevenlabs";
+          return '<div style="font-size:13px;margin-top:4px">🎙️ <b>' + esc(c.agentName) + "</b> <span class=\"muted\">" + esc(pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span></div>";
+        }).join("") || '<p class="muted" style="font-size:13px">No voices yet.</p>';
         var box = $("#vsVoice"); if (!box) return;
         box.innerHTML =
-          '<p class="muted" style="font-size:12px;margin:0 0 8px">Clone provider: <b>' + esc(prov.id) + "</b> — " + (prov.configured ? "configured." : "not configured (dry-run; set VOICE_CLONE_API_KEY).") + "</p>" +
-          '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
-          '<label class="cn-fld"><span class="lab">Whose voice (your name)</span><input id="vsName" placeholder="Ryan"></label>' +
-          '<label class="cn-fld"><span class="lab">Provider voice id (optional)</span><input id="vsVoiceId" placeholder="el_xxx"></label></div>' +
-          '<label class="cn-fld"><span class="lab">Consent statement</span><textarea id="vsStmt" rows="2" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit">' + esc(typeof VD_CONSENT_TEXT !== "undefined" ? VD_CONSENT_TEXT : "I consent to the use of my voice for outreach on behalf of my firm.") + '</textarea></label>' +
-          '<div style="margin-top:6px"><button class="btn btn-primary btn-sm" id="vsSave">Record consent</button></div>' +
+          '<p class="muted" style="font-size:12px;margin:0 0 8px">Paste an ElevenLabs or Cartesia voice id — no cloning needed. ElevenLabs: <b>' + (elOk ? "connected" : "set VOICE_CLONE_API_KEY") + '</b> · Cartesia: <b>' + (caOk ? "connected" : "set CARTESIA_API_KEY") + '</b>.</p>' +
+          '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
+          '<label class="cn-fld"><span class="lab">Provider</span><select id="vsProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option></select></label>' +
+          '<label class="cn-fld"><span class="lab">Voice ID</span><input id="vsVoiceId" placeholder="paste your voice id"></label>' +
+          '<label class="cn-fld"><span class="lab">Name (whose voice)</span><input id="vsName" placeholder="Ryan"></label></div>' +
+          '<p class="muted" style="font-size:12px;margin:10px 0 0">No voice id yet? Create one and copy its id from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs ↗</a> or <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia ↗</a>.</p>' +
+          '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vsSave">Add voice</button></div>' +
           '<div style="margin-top:10px">' + list + '</div>';
         $("#vsSave").addEventListener("click", function () {
-          var payload = { agentName: ($("#vsName").value || "").trim(), statement: ($("#vsStmt").value || "").trim(), voiceId: ($("#vsVoiceId").value || "").trim() || undefined };
-          if (!payload.agentName || !payload.statement) { toast("Name + consent statement required"); return; }
+          var payload = { agentName: ($("#vsName").value || "").trim(), voiceId: ($("#vsVoiceId").value || "").trim() || undefined, provider: (($("#vsProvider") || {}).value) || "elevenlabs" };
+          if (!payload.agentName) { toast("Add a name"); return; }
+          if (!payload.voiceId) { toast("Paste a voice id"); return; }
+          if (!(($("#vsAttest") || {}).checked)) { toast("Confirm you can use this voice"); return; }
           send("/voice/clones", "POST", payload).then(function (r) {
-            if (r.ok) { toast("Consent recorded" + (r.data && r.data.dryRun ? " (dry-run)" : "")); loadVoice(); }
+            if (r.ok) { toast("Voice added"); loadVoice(); }
             else toast("Save failed");
           }).catch(function () { toast("Could not reach the server."); });
         });

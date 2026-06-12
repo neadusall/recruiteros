@@ -2,20 +2,27 @@
  * RecruiterOS · Voice Drops · Voice-clone provider (pluggable)
  *
  * One small interface so the rest of the engine never knows which TTS/clone
- * vendor is wired. Ships an ElevenLabs-class adapter behind env keys; runs as a
- * safe dry-run (no audio, no spend) when unconfigured, exactly like the
+ * vendor is wired. Ships ElevenLabs AND Cartesia adapters behind env keys; runs
+ * as a safe dry-run (no audio, no spend) when unconfigured, exactly like the
  * ProviderClient HTTP base does for every other integration.
  *
- *   VOICE_CLONE_PROVIDER   provider id (default "elevenlabs")
- *   VOICE_CLONE_API_KEY    api key
- *   VOICE_CLONE_VOICE_ID   default cloned voice id (the operator's own voice)
+ * The fast path is bring-your-own-voice: a user pastes an ElevenLabs OR a
+ * Cartesia voice id (see VoiceConsent.provider) and we synthesize against the
+ * matching provider — no on-platform cloning/approval required.
  *
- * The cloned voice MUST be the operator's own, captured with the recorded
- * consent step (see VoiceConsent) — createVoice is only ever called from the
- * consent flow.
+ *   VOICE_CLONE_PROVIDER   default provider id ("elevenlabs" | "cartesia")
+ *   VOICE_CLONE_API_KEY    ElevenLabs api key
+ *   VOICE_CLONE_VOICE_ID   default ElevenLabs voice id
+ *   CARTESIA_API_KEY       Cartesia api key
+ *   CARTESIA_VOICE_ID      default Cartesia voice id
+ *   CARTESIA_MODEL         Cartesia model id (default "sonic-2")
+ *   CARTESIA_VERSION       Cartesia API version header (default "2024-11-13")
  */
 
 import { cred } from "../providers/http";
+
+/** The TTS/clone vendors a voice id can belong to. */
+export type VoiceProvider = "elevenlabs" | "cartesia";
 
 export interface SynthResult {
   /** Rendered audio bytes (undefined on dry-run). */
@@ -99,13 +106,75 @@ class ElevenLabsClient implements VoiceCloneClient {
   }
 }
 
-let singleton: VoiceCloneClient | null = null;
+/**
+ * Cartesia adapter (Sonic TTS, synthesize by voice id). Same dry-run contract as
+ * ElevenLabs; outputs mp3 so it caches identically and plays straight to Telnyx.
+ */
+class CartesiaClient implements VoiceCloneClient {
+  id = "cartesia";
+  private base = "https://api.cartesia.ai";
 
-/** The configured voice-clone client (one per process). */
-export function getVoiceClient(): VoiceCloneClient {
-  if (!singleton) {
-    // Only ElevenLabs is shipped; the env var is the seam to add more adapters.
-    singleton = new ElevenLabsClient();
+  private key(): string {
+    return cred("CARTESIA_API_KEY");
   }
-  return singleton;
+  configured(): boolean {
+    return Boolean(this.key());
+  }
+  private defaultVoice(): string {
+    return cred("CARTESIA_VOICE_ID");
+  }
+
+  async synthesize(text: string, voiceId?: string): Promise<SynthResult> {
+    const vid = voiceId || this.defaultVoice();
+    if (!this.configured() || !vid) {
+      console.info(`[voice-clone:dry] cartesia synth "${text.slice(0, 48)}" (voice=${vid || "unset"})`);
+      return { contentType: "audio/mpeg", dryRun: true };
+    }
+    const res = await fetch(`${this.base}/tts/bytes`, {
+      method: "POST",
+      headers: {
+        "X-API-Key": this.key(),
+        "Cartesia-Version": cred("CARTESIA_VERSION") || "2024-11-13",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model_id: cred("CARTESIA_MODEL") || "sonic-2",
+        transcript: text,
+        voice: { mode: "id", id: vid },
+        output_format: { container: "mp3", sample_rate: 44100, bit_rate: 128000 },
+      }),
+    });
+    if (!res.ok) throw new Error(`voice_clone_${res.status}`);
+    const audio = Buffer.from(await res.arrayBuffer());
+    return { audio, contentType: "audio/mpeg", dryRun: false };
+  }
+
+  // Bring-your-own-voice only: we never clone on Cartesia's side, users paste an
+  // existing voice id. Left as a safe no-op so the interface is satisfied.
+  async createVoice(): Promise<CreateVoiceResult> {
+    return { dryRun: true, error: "cartesia_clone_unsupported" };
+  }
+}
+
+const singletons: Partial<Record<VoiceProvider, VoiceCloneClient>> = {};
+
+/** Resolve the voice-clone client for a provider (defaults to VOICE_CLONE_PROVIDER, else elevenlabs). */
+export function getVoiceClientFor(provider?: VoiceProvider): VoiceCloneClient {
+  const p: VoiceProvider =
+    provider || ((cred("VOICE_CLONE_PROVIDER") as VoiceProvider) || "elevenlabs");
+  if (!singletons[p]) singletons[p] = p === "cartesia" ? new CartesiaClient() : new ElevenLabsClient();
+  return singletons[p]!;
+}
+
+/** The default voice-clone client (back-compat shim over getVoiceClientFor). */
+export function getVoiceClient(): VoiceCloneClient {
+  return getVoiceClientFor();
+}
+
+/** Configured-status for every provider — for the UI's "ready" checks. */
+export function voiceProviderStatuses(): Array<{ id: VoiceProvider; configured: boolean }> {
+  return (["elevenlabs", "cartesia"] as VoiceProvider[]).map((id) => ({
+    id,
+    configured: getVoiceClientFor(id).configured(),
+  }));
 }

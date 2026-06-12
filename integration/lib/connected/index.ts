@@ -160,17 +160,17 @@ const CATALOG: IntegrationMeta[] = [
   {
     id: "telnyx",
     label: "Telnyx (calling engine)",
-    blurb: "Powers Voice Drops — places the outbound calls and uses Premium AMD to find the voicemail, then drops your cloned-voice message. Connect your API key and the caller-ID number you dial from.",
+    blurb: "The calling engine for Voice Drops. Add your API key and the number you call from.",
     requiredFor: ["recruiting"],
     fields: [
       { key: "TELNYX_API_KEY", label: "API key", required: true, secret: true, placeholder: "KEY01…" },
-      { key: "TELNYX_FROM_NUMBER", label: "Caller-ID number (E.164)", required: false, placeholder: "+13105551234", hint: "The number your voicemail drops call from." },
-      { key: "TELNYX_MESSAGING_PROFILE_ID", label: "Messaging profile id", required: false, placeholder: "optional", hint: "Only needed if you also send SMS — not required for Voice Drops." },
+      { key: "TELNYX_FROM_NUMBER", label: "Caller-ID number (E.164)", required: false, placeholder: "+13105551234", hint: "The number you call from." },
+      { key: "TELNYX_MESSAGING_PROFILE_ID", label: "Messaging profile id", required: false, placeholder: "optional", hint: "Optional — SMS only." },
     ],
     steps: [
-      "In the Telnyx portal create an API key (Auth → API Keys → Create).",
-      "Buy or port a phone number to dial from, and finish 10DLC brand + campaign registration so your calls connect.",
-      "Paste the API key and your caller-ID number below, Save, then Test.",
+      "Create an API key in Telnyx (Auth → API Keys).",
+      "Add a 10DLC-registered number to call from.",
+      "Paste below, Save, then Test.",
     ],
     docsUrl: "https://portal.telnyx.com/#/app/api-keys",
     docsLabel: "Telnyx API keys ↗",

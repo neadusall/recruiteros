@@ -19,6 +19,7 @@
 
 import type { Motion } from "../core/types";
 import type { LineType } from "../signals/phoneClassify";
+import type { VoiceProvider } from "./provider";
 
 /** The auditable result of a single dial attempt. */
 export type DropOutcome =
@@ -103,7 +104,9 @@ export interface VoiceConsent {
   workspaceId: string;
   /** Whose voice this is (must match the persona agentName for a campaign). */
   agentName: string;
-  /** Provider voice id minted from the consent clip (eleven-labs-class). */
+  /** Which TTS vendor this voice id belongs to (default elevenlabs). */
+  provider?: VoiceProvider;
+  /** Provider voice id — pasted by the user (bring-your-own-voice). */
   voiceId?: string;
   /** Where the recorded consent clip is stored. */
   consentClipUrl?: string;
@@ -144,6 +147,8 @@ export interface VoiceCampaign {
   scriptTemplate: string;
   /** Cloned voice used to render the drop (operator's consented voice). */
   voiceId?: string;
+  /** TTS vendor for voiceId (default elevenlabs). */
+  voiceProvider?: VoiceProvider;
   /** Approved 10DLC / Telnyx number dialed FROM (one consistent caller-ID). */
   callerId: string;
   /** Local-time dial window per lead (default 7-9 PM). */
@@ -180,6 +185,7 @@ export interface VoiceCampaignInput {
   persona?: Partial<VoicePersona>;
   scriptTemplate?: string;
   voiceId?: string;
+  voiceProvider?: VoiceProvider;
   callerId?: string;
   window?: Partial<ComplianceWindow>;
   dailyCap?: number;

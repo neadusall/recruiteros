@@ -13,7 +13,6 @@
 import { sendEmail, mtaPreferred } from "../providers/mta";
 import { unipile } from "../providers";
 import { renderSegment } from "../voice/clones";
-import { getVoiceClient } from "../voice/provider";
 import { cred } from "../providers/http";
 import { toHtml } from "./draftContent";
 import type { NurtureEnrollment, NurtureTouch, NurtureContent } from "./nurture";
@@ -65,8 +64,7 @@ export async function dispatchNurture(
     try {
       const r = await renderSegment(
         { key: clipKey(content.body), text: content.body, kind: "static" },
-        cred("VOICE_CLONE_VOICE_ID") || undefined,
-        getVoiceClient(),
+        { voiceId: cred("VOICE_CLONE_VOICE_ID") || undefined },
       );
       audioUrl = r.url;
     } catch {

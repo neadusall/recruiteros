@@ -9,7 +9,6 @@
 import { generatePersonaMessage, inferPersona, type BdLead, type PersonaMessage } from "./personaMessaging";
 import { generateMpcMessage } from "./mpcMessaging";
 import { renderSegment } from "../voice/clones";
-import { getVoiceClient } from "../voice/provider";
 import { cred } from "../providers/http";
 import type { Variant } from "./experiment";
 import type { Prospect } from "../core/types";
@@ -85,8 +84,7 @@ export async function draftContent(
     try {
       const r = await renderSegment(
         { key: voiceNoteKey(message.linkedin_voice_note), text: message.linkedin_voice_note, kind: "static" },
-        cred("VOICE_CLONE_VOICE_ID") || undefined,
-        getVoiceClient(),
+        { voiceId: cred("VOICE_CLONE_VOICE_ID") || undefined },
       );
       voiceNoteAudioUrl = r.url;
     } catch {

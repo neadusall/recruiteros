@@ -21,7 +21,22 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { ScriptSegment } from "./script";
-import type { VoiceCloneClient } from "./provider";
+import { getVoiceClientFor, type VoiceProvider } from "./provider";
+
+/**
+ * Which voice to synthesize in: a provider + that provider's voice id. Either may
+ * be omitted — synthesize falls back to the provider's configured default voice,
+ * and an omitted provider falls back to VOICE_CLONE_PROVIDER.
+ */
+export interface VoiceRef {
+  provider?: VoiceProvider;
+  voiceId?: string;
+}
+
+/** Stable cache namespace for a voice so two providers never collide on an id. */
+function voiceKey(voice: VoiceRef): string {
+  return `${voice.provider || "el"}_${voice.voiceId || "default"}`;
+}
 
 function cacheDir(): string {
   return process.env.VOICE_CLONE_CACHE_DIR || join(process.cwd(), ".data", "voice-clones");
@@ -109,17 +124,17 @@ export interface RenderedSegment {
  */
 export async function renderSegment(
   seg: ScriptSegment,
-  voiceId: string | undefined,
-  client: VoiceCloneClient,
+  voice: VoiceRef,
 ): Promise<RenderedSegment> {
   const m = await loadManifest();
-  const file = fileFor(voiceId, seg.key);
+  const file = fileFor(voiceKey(voice), seg.key);
 
   if (m.entries[file]) {
     return { key: seg.key, url: audioUrl(file), cached: true, synthesized: false, dryRun: false };
   }
 
-  const out = await client.synthesize(seg.text, voiceId);
+  const client = getVoiceClientFor(voice.provider);
+  const out = await client.synthesize(seg.text, voice.voiceId);
   if (out.dryRun || !out.audio) {
     // No audio in dry-run; still hand back a URL so the playlist is complete and
     // the engine runs end to end. Not cached (nothing was rendered).
@@ -128,7 +143,7 @@ export async function renderSegment(
 
   await fs.mkdir(cacheDir(), { recursive: true });
   await fs.writeFile(join(cacheDir(), file), out.audio);
-  m.entries[file] = { key: seg.key, voiceId: voiceId || "default", bytes: out.audio.length, createdAt: new Date().toISOString() };
+  m.entries[file] = { key: seg.key, voiceId: voiceKey(voice), bytes: out.audio.length, createdAt: new Date().toISOString() };
   await saveManifest();
 
   return { key: seg.key, url: audioUrl(file), cached: false, synthesized: true, dryRun: false };
@@ -151,10 +166,9 @@ export interface AssembledDrop {
  */
 export async function assembleDrop(
   segments: ScriptSegment[],
-  voiceId: string | undefined,
-  client: VoiceCloneClient,
+  voice: VoiceRef,
 ): Promise<AssembledDrop> {
-  const rendered = await Promise.all(segments.map((s) => renderSegment(s, voiceId, client)));
+  const rendered = await Promise.all(segments.map((s) => renderSegment(s, voice)));
   return {
     playlist: rendered.map((r) => r.url),
     synthesized: rendered.filter((r) => r.synthesized).length,
