@@ -4656,6 +4656,40 @@
       }).join("") + "</div>";
     }
 
+    /* Listen to the assembled voicemail in-browser before launching. Fetches the
+       saved/cached audio clips for a script+voice and plays them in sequence. */
+    function previewInto(mount, payload) {
+      if (!mount) return;
+      mount.innerHTML = loading();
+      send("/voice/preview", "POST", payload).then(function (r) {
+        if (!r.ok) { mount.innerHTML = '<span class="muted">Preview failed.</span>'; return; }
+        var d = r.data || {};
+        if (d.dryRun || !((d.playlist || []).length)) {
+          mount.innerHTML = '<span class="muted">Connect a voice provider and add a voice id to hear it — currently dry-run (no audio).</span>';
+          return;
+        }
+        var urls = d.playlist;
+        var secs = Math.max(1, Math.round((String(d.rendered || "").split(/\s+/).filter(Boolean).length) / 2.5));
+        var label = d.clips + ' clips · ~' + secs + 's';
+        mount.innerHTML = '<button class="btn btn-sm btn-primary" id="pvPlay">▶ Play voicemail</button> <span class="muted" id="pvStat">' + label + '</span>';
+        var btn = mount.querySelector("#pvPlay"), stat = mount.querySelector("#pvStat");
+        var au = null, i = 0, playing = false;
+        function stop() { if (au) { try { au.pause(); } catch (e) {} } playing = false; if (btn) btn.textContent = "▶ Play voicemail"; if (stat) stat.textContent = label; }
+        function step() {
+          if (!playing || i >= urls.length) { stop(); return; }
+          au = new Audio(urls[i]);
+          if (stat) stat.textContent = "playing " + (i + 1) + "/" + urls.length;
+          au.onended = function () { i++; step(); };
+          au.onerror = function () { if (stat) stat.textContent = "audio error"; stop(); };
+          au.play().catch(function () { if (stat) stat.textContent = "tap Play to allow audio"; stop(); });
+        }
+        btn.addEventListener("click", function () {
+          if (playing) { stop(); return; }
+          playing = true; i = 0; btn.textContent = "■ Stop"; step();
+        });
+      }).catch(function () { mount.innerHTML = '<span class="muted">Could not reach the server.</span>'; });
+    }
+
     /* ---- Campaigns tab ---- */
     function newCampaignForm() {
       return '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
@@ -4695,6 +4729,7 @@
         '<button class="btn btn-sm ' + (ready ? "" : "btn-primary") + '" data-vdact="attest" data-cid="' + c.id + '">' + (ready ? "✓ Consent attested" : "Attest consent") + "</button>" +
         '<button class="btn btn-sm btn-primary" data-vdact="launch" data-cid="' + c.id + '">▶ Launch</button>' +
         '<button class="btn btn-sm" data-vdact="run" data-cid="' + c.id + '">⏱ Run window now</button>' +
+        '<button class="btn btn-sm" data-vdact="preview" data-cid="' + c.id + '">🔊 Preview</button>' +
         '<button class="btn btn-sm" data-vdact="testmode" data-cid="' + c.id + '" data-test="' + (testOn ? "1" : "0") + '">' + (testOn ? "🟡 Test mode: ON" : "Test mode: off") + "</button>" +
         '<button class="btn btn-sm" data-vdact="del" data-cid="' + c.id + '">🗑</button></div>' +
         '<div class="vd-msg muted" data-msg="' + c.id + '" style="font-size:12px;margin-top:8px"></div></div>';
@@ -4735,6 +4770,7 @@
     function setMsg(cid, t) { var m = $('[data-msg="' + cid + '"]'); if (m) m.innerHTML = t; }
     function campaignAction(act, cid) {
       if (act === "del") { send("/voice/campaigns?id=" + cid, "DELETE").then(function () { toast("Deleted"); paint(); }); return; }
+      if (act === "preview") { previewInto($('[data-msg="' + cid + '"]'), { campaignId: cid }); return; }
       if (act === "testmode") {
         var tb = $('[data-vdact="testmode"][data-cid="' + cid + '"]');
         var on = tb && tb.getAttribute("data-test") === "1";
@@ -4859,9 +4895,18 @@
         inp("vtAgentCompany", "Your firm", "Executive Search") + "</div>" +
         '<div style="margin-top:10px"><div style="margin:4px 0">' + fieldChips("vtScript") + "</div>" +
         '<textarea id="vtScript" rows="4" style="width:100%">' + esc(VD_DEFAULT_SCRIPT) + "</textarea></div>" +
-        '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vtGo">Send test drop</button></div>' +
+        '<div style="margin-top:10px;display:flex;gap:8px"><button class="btn btn-primary btn-sm" id="vtGo">Send test drop</button>' +
+        '<button class="btn btn-sm" id="vtListen">🔊 Listen first</button></div>' +
         '<div id="vtResult" style="margin-top:12px"></div></div>';
       wireChips(body);
+      $("#vtListen").addEventListener("click", function () {
+        var tpl = val("vtScript");
+        if (!tpl) { toast("Write a script first"); return; }
+        previewInto($("#vtResult"), {
+          scriptTemplate: tpl, firstName: val("vtFirst"), role: val("vtRole"), company: val("vtCompany"),
+          persona: { agentName: val("vtAgentName") || "Ryan", agentCompany: val("vtAgentCompany") || "Executive Search" },
+        });
+      });
       $("#vtGo").addEventListener("click", function () {
         var payload = {
           to: val("vtTo"), firstName: val("vtFirst"), role: val("vtRole"), company: val("vtCompany"),
@@ -7258,10 +7303,13 @@
       '<div class="sx-card"><p class="sx-sub" style="margin:0">' + esc(cfg.extra) + '</p>' +
       '<div style="margin-top:12px"><a class="btn btn-primary btn-sm" href="#' + cfg.featureRoute + '">' + esc(cfg.featureLabel) + '</a></div></div>';
 
-    var st = { telnyx: null, clones: [], provConfigured: false };
+    var st = { telnyx: null, clones: [], provConfigured: false, providerConfigured: {} };
     function paintReady() {
       var telOk = st.telnyx && st.telnyx.status === "green";
-      var voiceOk = (st.clones || []).length > 0;
+      // A voice only counts if a voice is on file AND its clone provider's key is
+      // actually connected — otherwise it would deploy into a silent dry-run.
+      var pc = st.providerConfigured || {};
+      var voiceOk = (st.clones || []).some(function (c) { return pc[(c.provider || "elevenlabs")]; });
       var ready = telOk && voiceOk;
       var b = $("#vsReady"); if (!b) return;
       var done = (telOk ? 1 : 0) + (voiceOk ? 1 : 0);
@@ -7271,9 +7319,9 @@
       b.innerHTML = '<div class="sx-card" style="' + (ready ? "border-color:rgba(56,224,166,.4)" : "border-color:rgba(255,194,77,.32)") + '">' +
         '<div class="sx-status"><span class="dot ' + (ready ? "ok" : "warn") + '"></span>' +
         '<div><div class="lab">' + (ready ? cfg.title.replace(" setup", "") + " is ready" : "Almost there — " + done + " of 2 done") + '</div>' +
-        '<div class="sub">' + (ready ? "Telnyx connected and a cloned voice on file." : "Finish both steps below to go live.") + '</div></div>' +
+        '<div class="sub">' + (ready ? "Telnyx connected and a voice provider in place." : "Finish both steps below to go live.") + '</div></div>' +
         '<span class="s-pill ' + (ready ? "ready" : "progress") + '" style="margin-left:auto">' + (ready ? "Ready ✓" : done + "/2") + '</span></div>' +
-        '<div class="sx-checks" style="margin-top:14px">' + chk(telOk, "Telnyx connected & tested") + chk(voiceOk, "Consented cloned voice on file") + '</div>' +
+        '<div class="sx-checks" style="margin-top:14px">' + chk(telOk, "Telnyx connected & tested") + chk(voiceOk, "Voice provider connected + voice on file") + '</div>' +
         '</div>';
     }
     function loadTelnyx() {
@@ -7299,13 +7347,22 @@
         function pok(id) { var p = provs.filter(function (x) { return x.id === id; })[0]; return !!(p && p.configured); }
         var elOk = pok("elevenlabs"), caOk = pok("cartesia");
         st.provConfigured = elOk || caOk;
+        st.providerConfigured = { elevenlabs: elOk, cartesia: caOk };
+        function provRow(id, label, okFlag) {
+          return '<span style="display:inline-flex;align-items:center;gap:7px;font-size:12px;padding:5px 9px;border-radius:8px;background:rgba(255,255,255,.04)">' +
+            '<span style="width:8px;height:8px;border-radius:50%;background:' + (okFlag ? "#34d399" : "#ff7a90") + '"></span>' +
+            '<b>' + label + '</b> <span class="muted">' + (okFlag ? "connected" : "not connected") + '</span>' +
+            '<button class="btn btn-sm" data-vptest="' + id + '" style="padding:2px 9px">Test</button>' +
+            '<span class="muted" data-vpmsg="' + id + '"></span></span>';
+        }
         var list = (st.clones).map(function (c) {
           var pid = c.provider || "elevenlabs";
           return '<div style="font-size:13px;margin-top:4px">🎙️ <b>' + esc(c.agentName) + "</b> <span class=\"muted\">" + esc(pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span></div>";
         }).join("") || '<p class="muted" style="font-size:13px">No voices yet.</p>';
         var box = $("#vsVoice"); if (!box) return;
         box.innerHTML =
-          '<p class="muted" style="font-size:12px;margin:0 0 8px">Paste an ElevenLabs or Cartesia voice id — no cloning needed. ElevenLabs: <b>' + (elOk ? "connected" : "set VOICE_CLONE_API_KEY") + '</b> · Cartesia: <b>' + (caOk ? "connected" : "set CARTESIA_API_KEY") + '</b>.</p>' +
+          '<p class="muted" style="font-size:12px;margin:0 0 8px">Paste an ElevenLabs or Cartesia voice id — no cloning needed. Test the key so you know it will deploy (not silently dry-run):</p>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 12px">' + provRow("elevenlabs", "ElevenLabs", elOk) + provRow("cartesia", "Cartesia", caOk) + '</div>' +
           '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
           '<label class="cn-fld"><span class="lab">Provider</span><select id="vsProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option></select></label>' +
           '<label class="cn-fld"><span class="lab">Voice ID</span><input id="vsVoiceId" placeholder="paste your voice id"></label>' +
@@ -7317,11 +7374,22 @@
           var payload = { agentName: ($("#vsName").value || "").trim(), voiceId: ($("#vsVoiceId").value || "").trim() || undefined, provider: (($("#vsProvider") || {}).value) || "elevenlabs" };
           if (!payload.agentName) { toast("Add a name"); return; }
           if (!payload.voiceId) { toast("Paste a voice id"); return; }
-          if (!(($("#vsAttest") || {}).checked)) { toast("Confirm you can use this voice"); return; }
           send("/voice/clones", "POST", payload).then(function (r) {
             if (r.ok) { toast("Voice added"); loadVoice(); }
             else toast("Save failed");
           }).catch(function () { toast("Could not reach the server."); });
+        });
+        Array.prototype.forEach.call(box.querySelectorAll("[data-vptest]"), function (btn) {
+          btn.addEventListener("click", function () {
+            var id = btn.getAttribute("data-vptest");
+            var msg = box.querySelector('[data-vpmsg="' + id + '"]');
+            if (msg) msg.textContent = "testing…";
+            send("/voice/clones", "POST", { action: "test", provider: id }).then(function (r) {
+              var okk = r.ok && r.data && r.data.ok;
+              if (msg) msg.innerHTML = okk ? '<span style="color:#34d399">✓ key works</span>' : '<span style="color:#ff7a90">✗ ' + esc((r.data && r.data.error) || "failed") + '</span>';
+              if (okk) loadVoice();
+            }).catch(function () { if (msg) msg.textContent = "error"; });
+          });
         });
         paintReady();
       }).catch(function () { var b = $("#vsVoice"); if (b) b.innerHTML = needsSetup(); });

@@ -9,9 +9,10 @@
  */
 
 import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { withWorkspaceCreds } from "../../../../lib/connected";
 import {
   listConsent, upsertConsent, cacheStats, getVoiceClient, getVoiceClientFor,
-  voiceProviderStatuses, type VoiceProvider,
+  voiceProviderStatuses, verifyVoiceProvider, type VoiceProvider,
 } from "../../../../lib/voice";
 
 export async function GET(req: Request) {
@@ -32,6 +33,15 @@ export async function POST(req: Request) {
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);
+
+  // Live-test a clone provider's key (the "Test" button) — isolation-correct so a
+  // customer tests their OWN key. Proves it'll deploy instead of dry-running.
+  if (b?.action === "test") {
+    const provider: VoiceProvider = b?.provider === "cartesia" ? "cartesia" : "elevenlabs";
+    const result = await withWorkspaceCreds(ws, () => verifyVoiceProvider(provider));
+    return ok({ provider, ...result });
+  }
+
   const agentName = (b?.agentName || "").trim();
   if (!agentName) return fail("missing_fields", 422, { detail: "a name is required" });
 

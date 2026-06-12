@@ -5,10 +5,11 @@
  *   "Hi {first_name}, this is {agent_name} with {agent_company}. I work with
  *    {role}s and wanted to reach out..."
  *
- * Only the variable slots ({first_name}, {role}, {company}) change per lead, so
- * the static prose is rendered ONCE per script+voice and the variable words are
- * cached and reused — that is what makes the clone-token cost go to zero after
- * the first time a given name/role is seen (see clones.ts).
+ * The rendered voicemail is synthesized one SENTENCE at a time (see
+ * segmentScript): whole sentences keep a natural intonation contour, and each
+ * sentence is cached by its exact text — so any repeated sentence (a shared
+ * greeting for the same first name, or any variable-free line) is reused for free
+ * and never re-synthesized (see clones.ts).
  *
  * The sweet spot for a landline voicemail is 15-25 seconds; this module
  * estimates duration and flags scripts that fall outside it.
@@ -101,53 +102,68 @@ export function identifierLine(persona: VoicePersona, firstName?: string): strin
 }
 
 /**
- * Break a rendered voicemail into the cacheable segments used by the clone
- * cache: the static lead-in (everything up to the first name), the per-name
- * snippet, the static middle, the per-role snippet, and the static tail. When a
- * template doesn't contain {first_name}/{role} the whole thing is one static
- * segment. Each segment carries a stable cache key so identical text (same name,
- * same role, same static prose) is only ever synthesized once.
+ * Break a rendered voicemail into cacheable segments — ONE PER SENTENCE.
+ *
+ * We synthesize whole sentences, not isolated words: a TTS voice given a full
+ * sentence produces a natural intonation contour, and the only seams are at
+ * sentence boundaries (where a human pauses anyway). The earlier word-level split
+ * (a name/role cut out mid-sentence) reset the prosody at every splice and sounded
+ * robotic. Caching still works: each sentence's key is its full text, so a repeated
+ * sentence — including "Hi Hector, this is Ryan…" for every other lead named
+ * Hector, and every variable-free sentence — reuses its audio for free. Only a
+ * sentence whose exact text is new is ever (re)synthesized.
  */
 export interface ScriptSegment {
-  /** Stable cache key (normalized text) — identical text reuses the same audio. */
+  /** Stable cache key (normalized text + hash) — identical text reuses the same audio. */
   key: string;
-  /** The literal text to synthesize for this segment. */
+  /** The literal text to synthesize for this segment (a full sentence). */
   text: string;
-  /** Variable segments (name/role) are reused across leads; static aren't. */
+  /** Kept for the cache-stats rollup; sentences are "static" (reused by exact text). */
   kind: "static" | "first_name" | "role" | "company";
 }
 
-export function segmentScript(template: string, vars: MergeVars, persona: VoicePersona): ScriptSegment[] {
-  // Resolve agent_* slots first (they're constant for the campaign), then split
-  // on the remaining lead-variable slots so each variable becomes its own
-  // cacheable segment.
-  const withAgent = template
-    .replace(/\{agent_name\}/g, persona.agentName)
-    .replace(/\{agent_company\}/g, persona.agentCompany);
-
-  const parts = withAgent.split(/(\{first_name\}|\{role\}|\{company\})/g);
-  const segments: ScriptSegment[] = [];
-  for (const part of parts) {
-    if (!part) continue;
-    if (part === "{first_name}") {
-      const text = vars.firstName?.trim() || "there";
-      segments.push({ key: cacheKey("name", text), text, kind: "first_name" });
-    } else if (part === "{role}") {
-      const text = vars.role?.trim() || "leader";
-      segments.push({ key: cacheKey("role", text), text, kind: "role" });
-    } else if (part === "{company}") {
-      const text = vars.company?.trim() || "your team";
-      segments.push({ key: cacheKey("company", text), text, kind: "company" });
-    } else {
-      const text = part.replace(/\s+/g, " ").trim();
-      if (text) segments.push({ key: cacheKey("static", text), text, kind: "static" });
-    }
+/** Split rendered prose into sentences, keeping terminal punctuation. */
+export function splitSentences(text: string): string[] {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return [];
+  const out: string[] = [];
+  const re = /[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(clean))) {
+    const s = m[0].trim();
+    if (s) out.push(s);
   }
-  return segments;
+  return out.length ? out : [clean];
 }
 
-/** Normalize text into a stable, reuse-friendly cache key. */
+export function segmentScript(template: string, vars: MergeVars, persona: VoicePersona): ScriptSegment[] {
+  // Fill every slot, then split on sentence boundaries so each whole sentence is
+  // one cacheable, natural-sounding unit.
+  const rendered = renderScript(template, vars, persona);
+  return splitSentences(rendered).map((sentence) => ({
+    key: cacheKey("vm", sentence),
+    text: sentence,
+    kind: "static" as const,
+  }));
+}
+
+/** Tiny stable string hash (FNV-1a, base36) — disambiguates long, similar text. */
+function hash36(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
+/**
+ * Normalize text into a stable, reuse-friendly cache key. A readable slug PLUS a
+ * hash of the full text, so two long sentences that share a 48-char prefix never
+ * collide onto the same cached audio.
+ */
 export function cacheKey(kind: string, text: string): string {
-  const norm = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
-  return `${kind}:${norm}`;
+  const full = text.toLowerCase().replace(/\s+/g, " ").trim();
+  const slug = full.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  return `${kind}:${slug}-${hash36(full)}`;
 }

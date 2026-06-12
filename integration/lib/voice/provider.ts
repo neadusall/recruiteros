@@ -40,6 +40,8 @@ export interface CreateVoiceResult {
 export interface VoiceCloneClient {
   id: string;
   configured(): boolean;
+  /** Live check that the API key actually works (so we know it'll deploy, not just dry-run). */
+  verify(): Promise<{ ok: boolean; error?: string }>;
   /** Synthesize one line in `voiceId` (defaults to the configured voice). */
   synthesize(text: string, voiceId?: string): Promise<SynthResult>;
   /** Mint a cloned voice from a consent recording (operator's own voice only). */
@@ -59,6 +61,16 @@ class ElevenLabsClient implements VoiceCloneClient {
   }
   private defaultVoice(): string {
     return cred("VOICE_CLONE_VOICE_ID");
+  }
+
+  async verify(): Promise<{ ok: boolean; error?: string }> {
+    if (!this.configured()) return { ok: false, error: "no_api_key" };
+    try {
+      const res = await fetch(`${this.base}/user`, { headers: { "xi-api-key": this.key() } });
+      return res.ok ? { ok: true } : { ok: false, error: `elevenlabs_${res.status}` };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || "elevenlabs_error" };
+    }
   }
 
   async synthesize(text: string, voiceId?: string): Promise<SynthResult> {
@@ -124,6 +136,18 @@ class CartesiaClient implements VoiceCloneClient {
     return cred("CARTESIA_VOICE_ID");
   }
 
+  async verify(): Promise<{ ok: boolean; error?: string }> {
+    if (!this.configured()) return { ok: false, error: "no_api_key" };
+    try {
+      const res = await fetch(`${this.base}/voices`, {
+        headers: { "X-API-Key": this.key(), "Cartesia-Version": cred("CARTESIA_VERSION") || "2024-11-13" },
+      });
+      return res.ok ? { ok: true } : { ok: false, error: `cartesia_${res.status}` };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || "cartesia_error" };
+    }
+  }
+
   async synthesize(text: string, voiceId?: string): Promise<SynthResult> {
     const vid = voiceId || this.defaultVoice();
     if (!this.configured() || !vid) {
@@ -177,4 +201,9 @@ export function voiceProviderStatuses(): Array<{ id: VoiceProvider; configured: 
     id,
     configured: getVoiceClientFor(id).configured(),
   }));
+}
+
+/** Live key check for one provider (the "Test" button — proves it'll deploy). */
+export function verifyVoiceProvider(provider?: VoiceProvider): Promise<{ ok: boolean; error?: string }> {
+  return getVoiceClientFor(provider).verify();
 }
