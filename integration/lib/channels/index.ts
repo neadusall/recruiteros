@@ -150,6 +150,7 @@ async function logTouch(workspaceId: string, t: SendTouch, r: SendResult): Promi
     channel: t.channel, type: `${t.channel}_sent`,
     summary: `${cap(t.channel)} via ${r.provider}${r.dryRun ? " (dry-run)" : ""}`,
     at: nowIso(), atsEventId: eventId,
+    campaignId: t.campaignId, variant: t.variant, touch: t.touch,
   });
 }
 

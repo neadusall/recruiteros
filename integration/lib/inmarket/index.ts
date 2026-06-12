@@ -523,11 +523,23 @@ export async function collectLeads(q: InMarketQuery, nowIso: string, cap = 300):
  * providers (and the Adzuna trial) entirely. Fully resilient: any pool error degrades to
  * the original live behavior.
  */
+/** Count companies by their hiring-signal type across the FULL matched set, so the
+ *  Hire Signals UI can show the actual number behind each reason + a true total
+ *  (independent of how many are displayed). Sorted most-common first. */
+export function signalBreakdown(leads: InMarketLead[]): Array<{ signalType: string; count: number }> {
+  const m = new Map<string, number>();
+  for (const l of leads) {
+    const t = l.signalType || "other";
+    m.set(t, (m.get(t) ?? 0) + 1);
+  }
+  return [...m.entries()].map(([signalType, count]) => ({ signalType, count })).sort((a, b) => b.count - a.count);
+}
+
 export async function searchInMarket(
   q: InMarketQuery,
   nowIso: string,
   workspaceId?: string,
-): Promise<{ leads: InMarketLead[]; pulled: number; warnings: string[]; stats?: unknown }> {
+): Promise<{ leads: InMarketLead[]; pulled: number; warnings: string[]; stats?: unknown; signalBreakdown?: Array<{ signalType: string; count: number }> }> {
   const limit = Math.min(Math.max(q.limit ?? 25, 1), 1000);
 
   // Per-user suppression: hide companies the workspace has already taken into Prospects,
@@ -555,20 +567,20 @@ export async function searchInMarket(
     // even though we only display `limit`. Then drop taken companies + apply date search.
     const pooledAll = fresh(await queryPool(q, 10000));
     if (pooledAll.length >= 24) {
-      return { leads: pooledAll.slice(0, limit), pulled: pooledAll.length, warnings: [], stats };
+      return { leads: pooledAll.slice(0, limit), pulled: pooledAll.length, warnings: [], stats, signalBreakdown: signalBreakdown(pooledAll) };
     }
     // Pool thin for this query → live collect, return it, and grow the pool.
     const live = await collectLeads(q, nowIso, Math.max(limit, 200));
     void mergeIntoPool(live).catch(() => {});
     const merged = fresh(dedupeLeads([...pooledAll, ...live]));
-    return { leads: merged.slice(0, limit), pulled: merged.length, warnings: [], stats };
+    return { leads: merged.slice(0, limit), pulled: merged.length, warnings: [], stats, signalBreakdown: signalBreakdown(merged) };
   } catch (err) {
     // Pool/accumulator unavailable → pure live fallback (original behavior).
     try {
       const live = fresh(await collectLeads(q, nowIso, Math.max(limit, 200)));
-      return { leads: live.slice(0, limit), pulled: live.length, warnings: ["pool_unavailable"] };
+      return { leads: live.slice(0, limit), pulled: live.length, warnings: ["pool_unavailable"], signalBreakdown: signalBreakdown(live) };
     } catch (e) {
-      return { leads: [], pulled: 0, warnings: [`search_failed: ${(e as Error).message}`] };
+      return { leads: [], pulled: 0, warnings: [`search_failed: ${(e as Error).message}`], signalBreakdown: [] };
     }
   }
 }
@@ -671,6 +683,9 @@ export async function promoteLead(
     title,
     linkedinUrl,
     category: "in_market",
+    // Carry the actual hiring signal through so the outreach drafter speaks to it.
+    signalType: lead.signalType,
+    signalReason: lead.reason,
     warmth: Math.max(50, Math.round(lead.score)),
   });
 }

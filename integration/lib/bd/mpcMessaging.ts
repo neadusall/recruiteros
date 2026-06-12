@@ -98,7 +98,7 @@ function leadBrief(lead: MpcLead): string {
   ].filter(Boolean).join("\n");
 }
 
-export async function generateMpcMessage(lead: MpcLead): Promise<PersonaMessage> {
+export async function generateMpcMessage(lead: MpcLead, angle?: string): Promise<PersonaMessage> {
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 1200,
@@ -108,6 +108,7 @@ export async function generateMpcMessage(lead: MpcLead): Promise<PersonaMessage>
         role: "user",
         content:
           `Generate the MPC outreach package for this lead.\n\nLEAD:\n${leadBrief(lead)}\n\n` +
+          (angle ? `METHODOLOGY FOR THIS VARIANT (apply throughout WITHOUT breaking any rule above; the house rules and channel limits still win): ${angle}\n\n` : "") +
           `Respond as strict JSON with exactly these keys and no prose outside the JSON:\n` +
           `{ "industry": string, "persona": string, "business_trigger": string[], "executive_pressure": string, ` +
           `"likely_business_problem": string, "market_observation": string, "email": { "subject": string, "body": string }, ` +

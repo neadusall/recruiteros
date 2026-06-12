@@ -39,6 +39,12 @@ export async function POST(req: Request) {
     html?: string;
     text?: string;
     voiceCampaignId?: string;
+    /** Self-learning attribution: the rich variant id (`family::methodology`),
+     *  campaign, and touch the queue assigned — must round-trip so logTouch can
+     *  stamp the activity and the optimizer can measure this methodology. */
+    variant?: string;
+    campaignId?: string;
+    touch?: string;
   };
   try {
     body = await req.json();
@@ -64,6 +70,9 @@ export async function POST(req: Request) {
     subject,
     text: htmlBody,
     voiceCampaignId: body.voiceCampaignId,
+    variant: body.variant,
+    campaignId: body.campaignId,
+    touch: body.touch,
   });
 
   return NextResponse.json(

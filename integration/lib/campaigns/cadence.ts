@@ -19,6 +19,7 @@ import { getCore } from "../core/repository";
 import { rid, nowIso } from "../core/ids";
 import { enrich, sendTouch } from "../channels";
 import { pullForProspect } from "../content/library";
+import { refreshAutopilots } from "../analytics/autopilot";
 import type { Campaign, Prospect } from "../core/types";
 
 export interface CadenceStage {
@@ -37,6 +38,18 @@ export const CADENCE_SCHEDULE: CadenceStage[] = [
   { at: "09:00", name: "Push to channels", automated: true, detail: "Emails -> Instantly, LinkedIn -> Unipile, SMS -> TalTxt; person_events logged." },
 ];
 
+/** Coarse campaign SignalKind -> a representative SignalType the content library
+ *  has a tailored opener for, so even a campaign-level signal (not a per-prospect
+ *  one) still speaks to the reason instead of falling back to a generic opener. */
+const KIND_TO_SIGNAL: Record<string, string> = {
+  fundraising: "funding_round",
+  hiring_velocity: "hiring_velocity",
+  leadership_change: "exec_hire",
+  expansion: "office_expansion",
+  layoff: "layoff",
+  tech_adoption: "tech_stack_change",
+};
+
 /** An item awaiting human approval in the 8:30 queue. */
 export interface DraftItem {
   id: string;
@@ -47,6 +60,8 @@ export interface DraftItem {
   subject?: string;
   body: string;
   variantLabel: string;
+  /** Sequence touch name (e.g. "Signal Opener") — attribution for Outreach Stats. */
+  touch?: string;
   status: "pending" | "approved" | "killed";
 }
 
@@ -69,6 +84,8 @@ export function setDraftStatus(workspaceId: string, draftId: string, status: Dra
  */
 export async function runDailyCadence(workspaceId: string): Promise<{ drafted: number; campaigns: number }> {
   const core = getCore();
+  // Hands-off loop: re-pin winners for any campaign on autopilot before drafting.
+  await refreshAutopilots(workspaceId).catch(() => { /* best-effort, never blocks the run */ });
   const campaigns = (await core.listCampaigns(workspaceId)).filter((c) => c.status === "active");
   const queue: DraftItem[] = [];
 
@@ -117,6 +134,10 @@ export async function pushApproved(workspaceId: string): Promise<{ sent: number;
         instantlyCampaignId: campaign?.channels.instantlyCampaignId,
         linkedinAccountId: campaign?.channels.linkedinAccountId,
       },
+      // Attribution for the Outreach Statistics rollup.
+      campaignId: d.campaignId,
+      variant: d.variantLabel,
+      touch: d.touch,
     });
     // Advance the prospect into the live sequence on first send.
     if (res.ok && prospect.status === "queued") {
@@ -145,27 +166,28 @@ function draftsFor(c: Campaign, p: Prospect): DraftItem[] {
     fullName: p.fullName,
     warmth: p.warmth,
     motion: c.motion,
-    // Campaign's primary signal, if it maps to a known angle (resolver falls back
-    // to a generic opener otherwise — never throws on an unknown value).
-    signal: c.signals?.[0] as never,
+    // Speak to the ACTUAL reason: prefer the signal that surfaced THIS prospect,
+    // else map the campaign's coarse SignalKind to a representative SignalType. The
+    // resolver falls back to a generic opener on an unknown value (never throws).
+    signal: (p.signalType || KIND_TO_SIGNAL[c.signals?.[0] ?? ""]) as never,
     voiceThreshold: c.voiceNoteThreshold,
   });
 
   const label = `${seq.resolved.industry}/${seq.resolved.function}/${seq.resolved.seniority}`;
-  const mk = (channel: DraftItem["channel"], subject: string | undefined, body: string): DraftItem => ({
+  const mk = (channel: DraftItem["channel"], subject: string | undefined, body: string, touch: string): DraftItem => ({
     id: rid("draft"), prospectId: p.id, prospectName: p.fullName, campaignId: c.id,
-    channel, subject, body, variantLabel: label, status: "pending",
+    channel, subject, body, variantLabel: label, touch, status: "pending",
   });
 
   const out: DraftItem[] = [];
   const email = seq.touches.find((t) => t.channel === "email");
-  if (email) out.push(mk("email", email.subject, email.body));
+  if (email) out.push(mk("email", email.subject, email.body, email.name));
   const connect = seq.touches.find((t) => t.channel === "linkedin" && t.action === "connect");
-  if (connect) out.push(mk("linkedin", undefined, connect.body));
+  if (connect) out.push(mk("linkedin", undefined, connect.body, connect.name));
   const voice = seq.touches.find((t) => t.channel === "voice"); // hot-only; present when warm
-  if (voice) out.push(mk("voice", undefined, voice.body));
+  if (voice) out.push(mk("voice", undefined, voice.body, voice.name));
 
   // Never enqueue an empty prospect.
-  if (!out.length) out.push(mk("email", `A note for ${p.firstName}`, `Hi ${p.firstName}, worth a quick conversation? (${nowIso().slice(0, 10)})`));
+  if (!out.length) out.push(mk("email", `A note for ${p.firstName}`, `Hi ${p.firstName}, worth a quick conversation? (${nowIso().slice(0, 10)})`, "Fallback"));
   return out;
 }

@@ -49,6 +49,9 @@ export interface NewProspectInput {
   /** The recruiter who owns this prospect (the creating user). */
   ownerId?: string;
   warmth?: number;
+  /** Hiring/buying signal that surfaced this prospect (carried into outreach). */
+  signalType?: string;
+  signalReason?: string;
 }
 
 /** Manual add or bulk-upload row -> creates/updates the ATS Person too. */
@@ -83,6 +86,8 @@ export async function addProspect(input: NewProspectInput): Promise<Prospect> {
     category: input.category ?? p.category,
     motion: input.motion ?? p.motion,
     ownerId: p.ownerId ?? input.ownerId,
+    signalType: input.signalType ?? p.signalType,
+    signalReason: input.signalReason ?? p.signalReason,
   });
 
   // Free first pass: backfill missing email/phone from the Data warehouse (a record

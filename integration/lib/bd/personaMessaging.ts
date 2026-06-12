@@ -315,7 +315,7 @@ function leadBrief(lead: BdLead): string {
  * Generate the full persona-grounded outreach package for one BD lead.
  * Returns the validated 12-field object; throws only on an unrecoverable API error.
  */
-export async function generatePersonaMessage(lead: BdLead): Promise<PersonaMessage> {
+export async function generatePersonaMessage(lead: BdLead, angle?: string): Promise<PersonaMessage> {
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 1200,
@@ -326,6 +326,7 @@ export async function generatePersonaMessage(lead: BdLead): Promise<PersonaMessa
         role: "user",
         content:
           `Generate the outreach package for this lead.\n\nLEAD:\n${leadBrief(lead)}\n\n` +
+          (angle ? `METHODOLOGY FOR THIS VARIANT (apply throughout WITHOUT breaking any rule above; the house rules and channel limits still win): ${angle}\n\n` : "") +
           `Respond as strict JSON with exactly these keys and no prose outside the JSON:\n` +
           `{\n` +
           `  "industry": string,\n` +

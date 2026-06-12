@@ -20,7 +20,8 @@ import { requireAuth } from "../../../../lib/linkedin/auth";
 import { getCore } from "../../../../lib/core/repository";
 import { draftContent, leadFromProspect } from "../../../../lib/bd/draftContent";
 import { ensureNurtureReady, isEnrolled, enroll, type NurtureLead } from "../../../../lib/bd/nurture";
-import { ensureExperimentReady, assignVariant, recordOutcome } from "../../../../lib/bd/experiment";
+import { ensureExperimentReady, recordOutcome } from "../../../../lib/bd/experiment";
+import { allocate, recordSample } from "../../../../lib/bd/methodology";
 
 function minConfidence(): number {
   const v = Number(process.env.RECRUITEROS_BD_MIN_CONFIDENCE);
@@ -51,12 +52,18 @@ export async function GET(req: Request) {
   const errors: Array<{ id: string; error: string }> = [];
 
   for (const p of candidates) {
-    // Stable 50/50 A/B assignment; every touch this prospect gets stays in this model.
-    const variant = assignVariant(p.id);
+    // Self-learning allocation: stable family A/B (mpc vs consultative), then a
+    // methodology inside it picked by the bandit (champion-heavy, with an
+    // exploration slice). The rich id `${family}::${methodology}` is what every
+    // send stamps, so analytics measures each methodology's positive-reply rate.
+    const alloc = await allocate(ws, "bd", p.id);
+    const variant = alloc.rich;
     let draft;
     try {
       const lead = leadFromProspect(p, { sender, callbackNumber, hiringActivity: (p as any).hiringSignal });
-      draft = await draftContent(lead, { renderAudio: true, variant });
+      draft = await draftContent(lead, { renderAudio: true, variant: alloc.family, angle: alloc.angle });
+      // Capture the latest real content for this methodology (winner promotion uses it).
+      await recordSample(ws, "bd", alloc.rich, { subject: draft.subject, body: draft.text });
     } catch (e: any) {
       errors.push({ id: p.id, error: e?.message ?? "generation_failed" });
       continue; // leave un-enrolled so a later pull retries
@@ -76,7 +83,7 @@ export async function GET(req: Request) {
       location: p.location,
       linkedinUrl: p.linkedinUrl,
       providerProfileId: (p as any).providerProfileId,
-      variant,
+      variant: alloc.family, // nurture's earned-ask reasons from the family model
     };
 
     if (draft.confidenceScore >= threshold) {

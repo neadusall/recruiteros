@@ -138,6 +138,12 @@ export interface Prospect {
   headline?: string;
   /** ICP category bucket this prospect was matched into. */
   category?: string;
+  /** The hiring/buying signal that surfaced this prospect (SignalType, e.g.
+   *  "job_repost"). Carried from Hire Signals so the outreach drafter speaks to
+   *  the actual REASON, not a generic opener. */
+  signalType?: string;
+  /** Human reason string for that signal, e.g. "Reposted the role twice in 30 days". */
+  signalReason?: string;
   /** Assigned sequence (from the Campaign Sequences Library), by id + name. */
   sequenceId?: string;
   sequenceName?: string;

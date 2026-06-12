@@ -426,6 +426,7 @@
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "＋ New sequence", render: renderContent },
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
+    "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: renderOutreachStats, cap: "team:manage" },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
     // Admin launch-setup hub. Consolidates Integrations and ATS behind one tab
     // with an ordered readiness checklist. The two sub-routes below stay
@@ -885,6 +886,40 @@
     { t: "warn_notice", l: "⚠️ WARN notice" }
   ];
   var imSelectedSignals = [];   // selected SignalType keys to filter the search by
+  var imBreakdown = [];         // [{signalType,count}] over the full matched set (the "why they're hiring" counts)
+  // SignalType -> human label (reuse the filter-chip labels), else prettify the key.
+  function imSignalLabel(t) {
+    for (var i = 0; i < IM_SIGNALS.length; i++) if (IM_SIGNALS[i].t === t) return IM_SIGNALS[i].l;
+    return String(t || "other").replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+  }
+  // The "Why they're hiring" panel: a count next to each actual signal + the total.
+  function imBreakdownHtml() {
+    var b = imBreakdown || [];
+    if (!b.length) return "";
+    var total = b.reduce(function (s, x) { return s + x.count; }, 0);
+    var max = b.reduce(function (m, x) { return Math.max(m, x.count); }, 0) || 1;
+    var rows = b.slice(0, 16).map(function (x) {
+      var w = Math.max(Math.round((x.count / max) * 100), 5);
+      return '<div style="display:flex;align-items:center;gap:10px;margin:5px 0;font-size:12.5px">' +
+        '<span style="flex:0 0 210px;color:var(--text-muted)">' + esc(imSignalLabel(x.signalType)) + "</span>" +
+        '<span style="flex:1;height:14px;background:var(--surface-2);border-radius:6px;overflow:hidden"><span style="display:block;height:100%;width:' + w + '%;background:var(--grad);border-radius:6px"></span></span>' +
+        '<span style="flex:0 0 56px;text-align:right;font-weight:700">' + x.count.toLocaleString() + "</span></div>";
+    }).join("");
+    var more = b.length > 16 ? '<div class="muted" style="font-size:11px;margin-top:4px">+' + (b.length - 16) + " more reasons</div>" : "";
+    return '<div style="border:1px solid var(--border);border-radius:14px;background:var(--surface);padding:16px 18px;margin:14px 0">' +
+      '<div style="font-weight:700;margin-bottom:8px">Why they’re hiring <span class="muted" style="font-weight:500;font-size:12px">· ' +
+        total.toLocaleString() + " signals across " + b.length + " reason" + (b.length === 1 ? "" : "s") + "</span></div>" +
+      rows + more + "</div>";
+  }
+  // Annotate the signal FILTER chips with their live counts, e.g. "💰 Funding round (12)".
+  function imUpdateSigChipCounts() {
+    var counts = {};
+    (imBreakdown || []).forEach(function (x) { counts[x.signalType] = x.count; });
+    Array.prototype.forEach.call(document.querySelectorAll(".im-sigchip"), function (c) {
+      var t = c.getAttribute("data-sig"); var n = counts[t] || 0;
+      c.textContent = n ? imSignalLabel(t) + " (" + n.toLocaleString() + ")" : imSignalLabel(t);
+    });
+  }
 
   function imPickKey(leadId, role) { return leadId + "::" + (role || "__company"); }
   // Unique key per hiring-manager option (role + manager title), so the two managers we
@@ -915,7 +950,7 @@
   function imVisibleLeads() { return inMarketResults.filter(function (l) { return Math.round(l.score || 0) >= imMinScore; }); }
 
   function renderInMarket(el) {
-    imPicks = {}; imMinScore = 0; imSelectedSignals = []; imSelectedIndustries = []; imSelectedSizes = [];
+    imPicks = {}; imMinScore = 0; imSelectedSignals = []; imSelectedIndustries = []; imSelectedSizes = []; imBreakdown = [];
     el.innerHTML =
       '<div class="im-hero">' +
         '<div class="im-bar">' +
@@ -1120,6 +1155,7 @@
         inMarketResults = (r.data && r.data.leads) || [];
         imTotal = (r.data && typeof r.data.pulled === "number") ? r.data.pulled : inMarketResults.length;
         imStats = (r.data && r.data.stats) || null;
+        imBreakdown = (r.data && r.data.signalBreakdown) || [];
         renderImResults();
       }).catch(function () { body.innerHTML = needsSetup(); });
     }
@@ -1151,9 +1187,10 @@
         '<button class="btn btn-ghost btn-sm" id="imSave" disabled>💾 Save as hiring signals</button>' +
         '<button class="btn btn-primary btn-sm" id="imBulk" disabled>Push selected to Prospects</button>' +
       "</div>";
-    body.innerHTML = toolbar + '<div id="imList">' + leads.map(leadCard).join("") + "</div>" + imTickerHtml();
+    body.innerHTML = toolbar + imBreakdownHtml() + '<div id="imList">' + leads.map(leadCard).join("") + "</div>" + imTickerHtml();
     wireImResults(body);
     wireTicker(body);
+    imUpdateSigChipCounts();
     updateImBulk();
   }
 
@@ -3761,6 +3798,8 @@
       '#sdDomains{width:100%;min-height:90px;font-family:monospace;font-size:13px;padding:10px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit}' +
       '</style>' +
       '<div id="sdCfg" class="sd-cfg"></div>' +
+      '<div class="card sd-card" style="border:1px solid var(--accent,#7c5cff)"><div class="sd-row" style="justify-content:space-between"><div class="sd-step" style="margin:0;color:var(--accent,#7c5cff)">⚡ One-click setup</div><span class="muted" style="font-size:11px">Provisions the MTA, DNS, and warming mailboxes — then the cron finishes it hands-off.</span></div>' +
+        '<div id="sdSetup">' + loading() + '</div></div>' +
       '<div class="card sd-card"><div class="sd-step">Step 1 · MTA server (Hetzner)</div><div id="sdServers">' + loading() + '</div></div>' +
       '<div class="card sd-card"><div class="sd-step">Step 2 · Feed in domains</div>' +
         '<p class="muted" style="font-size:13px;margin:0 0 8px">Paste sending domains (one per line). Each is added and fully provisioned automatically — DKIM, zone, all records, PTR.</p>' +
@@ -3792,8 +3831,59 @@
         state.seeds = d.seeds || []; state.seedTests = d.seedTests || []; state.stats = d.stats || {};
         state.health = d.health || { domains: [], mailboxes: [], overall: {} };
         state.engagement = d.engagement || {};
-        paintCfg(); paintServers(); paintList(); paintDeliv(); paintSeeds();
+        state.setup = d.setup || null; state.seedSummary = d.seedSummary || null;
+        paintSetup(); paintCfg(); paintServers(); paintList(); paintDeliv(); paintSeeds();
       }).catch(function () { $("#sdList", el).innerHTML = '<div class="empty">Could not load sending infrastructure.</div>'; });
+    }
+
+    function paintSetup() {
+      var body = $("#sdSetup", el); if (!body) return;
+      var s = state.setup;
+      var inp = 'padding:8px 10px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit;font-size:13px';
+      // Not started yet → show the single kickoff form.
+      if (!s || !s.enabled) {
+        body.innerHTML =
+          '<p class="muted" style="font-size:13px;margin:6px 0 10px">Paste your sending domains and pick how many warming mailboxes per domain. We provision the Hetzner box (Postal), write every DNS record, and create the mailboxes. You do two small things when prompted: point each domain\'s nameservers at Hetzner, and (if auto-bootstrap doesn\'t catch it) paste the Postal key once.</p>' +
+          '<textarea id="suDomains" placeholder="recruitco.io&#10;recruiters-co.com" style="width:100%;min-height:70px;font-family:monospace;' + inp + '"></textarea>' +
+          '<div class="sd-row" style="margin-top:8px"><label class="muted" style="font-size:12px">Mailboxes/domain</label>' +
+            '<input id="suPer" type="number" value="4" min="1" max="20" style="width:70px;' + inp + '">' +
+            '<button class="btn btn-primary btn-sm" id="suGo">⚡ Set it up</button></div>';
+        var go = $("#suGo", el); if (go) go.addEventListener("click", function () {
+          var doms = $("#suDomains", el).value.split(/\s+/).map(function (x) { return x.trim(); }).filter(Boolean);
+          if (!doms.length) { toast("Add at least one domain"); return; }
+          go.disabled = true; go.textContent = "Setting up…";
+          send("/sending", "POST", { action: "auto-setup", domains: doms, mailboxesPerDomain: parseInt($("#suPer", el).value, 10) || 4 }).then(function (r) {
+            toast(r.ok ? "Setup started — the cron will carry it to the finish" : (r.data && r.data.error) || "Setup failed"); load();
+          });
+        });
+        return;
+      }
+      // In progress / done → show the pipeline + the remaining gates.
+      var steps = [];
+      var srv = s.server;
+      steps.push(stepRow(srv && srv.ip ? "done" : (srv ? "wait" : "todo"), "MTA server", srv ? (srv.hostname + (srv.ip ? " · " + srv.ip : " · provisioning…")) : "creating…"));
+      steps.push(stepRow(srv && srv.postalReady ? "done" : (srv && srv.ip ? "wait" : "todo"), "Postal API", srv && srv.postalReady ? "connected" : "waiting for key (auto-bootstrap)"));
+      var act = s.totals.active, dn = s.totals.domains;
+      steps.push(stepRow(dn && act === dn ? "done" : (act ? "wait" : "todo"), "Domains verified", act + "/" + dn + " active"));
+      steps.push(stepRow(s.totals.mailboxes >= s.totals.mailboxTarget && s.totals.mailboxTarget > 0 ? "done" : "wait", "Warming mailboxes", s.totals.mailboxes + "/" + s.totals.mailboxTarget + " created"));
+
+      var gates = (s.gates || []).map(function (g) {
+        var ns = g.detail && g.detail.nameservers ? (g.detail.nameservers || []).map(function (n) { return '<code>' + esc(n) + '</code>'; }).join(" ") : "";
+        return '<div class="sd-ns"><b>' + esc(g.message) + '</b>' + (ns ? '<div style="margin-top:6px">Set these nameservers at your registrar: ' + ns + '</div>' : '') + '</div>';
+      }).join("");
+
+      body.innerHTML =
+        (s.done ? '<div class="sd-badge sd-b-active" style="margin-bottom:10px">✓ Setup complete — warming can run</div>' : '<div class="muted" style="font-size:12px;margin-bottom:10px">In progress — the daily cron advances this automatically; nothing else to click unless a gate below asks.</div>') +
+        '<div style="display:flex;flex-direction:column;gap:6px">' + steps.join("") + '</div>' +
+        (gates ? '<div style="margin-top:10px">' + gates + '</div>' : "") +
+        '<div class="sd-row" style="margin-top:12px"><button class="btn btn-ghost btn-sm" id="suAdvance">↻ Advance now</button>' +
+          '<button class="btn btn-ghost btn-sm" id="suPause">Pause auto-setup</button></div>';
+      var adv = $("#suAdvance", el); if (adv) adv.addEventListener("click", function () { adv.disabled = true; adv.textContent = "Advancing…"; send("/sending", "POST", { action: "advance-setup" }).then(function () { load(); }); });
+      var pz = $("#suPause", el); if (pz) pz.addEventListener("click", function () { send("/sending", "POST", { action: "pause-setup" }).then(load); });
+    }
+    function stepRow(state2, label, detail) {
+      var icon = state2 === "done" ? "✅" : state2 === "wait" ? "⏳" : "⬜";
+      return '<div style="display:flex;align-items:center;gap:10px;font-size:13px"><span>' + icon + '</span><b style="min-width:150px">' + esc(label) + '</b><span class="muted">' + esc(detail) + '</span></div>';
     }
 
     function paintCfg() {
@@ -4053,28 +4143,49 @@
     function paintSeeds() {
       var body = $("#sdSeeds", el); if (!body) return;
       var inp = 'padding:6px 9px;border-radius:7px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit;font-size:12px';
+      // Connector status per seed: green = server logged in over IMAP (drivable),
+      // amber = creds saved but not yet verified, grey = no app password yet.
       var list = (state.seeds || []).map(function (s) {
-        return '<span class="sd-chip" style="margin:2px">' + esc(s.provider) + ': ' + esc(s.address) + ' <a href="#" data-delseed="' + esc(s.id) + '" style="color:#f08f8f">✕</a></span>';
-      }).join("") || '<span class="muted" style="font-size:12px">No seed inboxes yet. Add a few across Gmail/Outlook/Yahoo to run placement tests.</span>';
+        var badge = s.imapOk ? '<span title="' + esc(s.imapVerifiedAt || '') + '" style="color:#46d39a">● connected</span>'
+          : s.hasCreds ? '<span title="' + esc(s.lastError || 'not verified yet') + '" style="color:#f0b34d">● ' + (s.lastError ? 'failed' : 'unverified') + '</span>'
+          : '<span style="color:#7b8194">● no app password</span>';
+        return '<div class="sd-chip" style="display:flex;align-items:center;gap:8px;margin:3px 0;justify-content:space-between">' +
+          '<span>' + esc(s.provider) + ': ' + esc(s.address) + (s.addedBy ? ' <span class="muted" style="font-size:11px">· ' + esc(s.addedBy) + '</span>' : '') + '</span>' +
+          '<span style="display:flex;align-items:center;gap:8px;font-size:11px">' + badge +
+            (s.hasCreds ? ' <a href="#" data-testseed="' + esc(s.id) + '" style="color:#4dd0ff">test</a>' : '') +
+            ' <a href="#" data-delseed="' + esc(s.id) + '" style="color:#f08f8f">✕</a></span></div>';
+      }).join("") || '<span class="muted" style="font-size:12px">No seed inboxes yet. Add a few across Gmail/Outlook/Yahoo, or send staff the self-setup link below.</span>';
       var tests = (state.seedTests || []).slice(0, 5).map(function (t) {
         var done = t.status === "complete";
         var label = done ? (t.inboxRatePct != null ? ('<b>' + t.inboxRatePct + '% inbox</b>') : 'complete') : 'sending…';
         return '<div style="font-size:12px;padding:3px 0">' + esc(t.domainId) + ' · ' + label +
           ' <span class="muted">' + t.results.map(function (r) { return r.provider + ":" + r.placement; }).join(" ") + '</span></div>';
       }).join("");
+      var portalLink = location.origin + "/seed-portal.html?token=YOUR_TOKEN";
       body.innerHTML =
         '<div style="margin-bottom:8px">' + list + '</div>' +
         '<div class="sd-row"><select id="sdSeedProv" style="' + inp + '"><option value="gmail">Gmail</option><option value="outlook">Outlook</option><option value="yahoo">Yahoo</option><option value="other">Other</option></select>' +
-          '<input id="sdSeedAddr" placeholder="seed@gmail.com" style="flex:1;min-width:180px;' + inp + '">' +
-          '<button class="btn btn-ghost btn-sm" id="sdAddSeed">＋ Add seed</button></div>' +
+          '<input id="sdSeedAddr" placeholder="seed@gmail.com" style="flex:1;min-width:150px;' + inp + '">' +
+          '<input id="sdSeedPass" placeholder="app password" style="flex:1;min-width:130px;' + inp + '">' +
+          '<button class="btn btn-ghost btn-sm" id="sdAddSeed">＋ Add &amp; test</button></div>' +
+        '<div class="muted" style="font-size:11px;margin-top:6px;line-height:1.5">Staff self-setup link (set <code class="sd-mono">SENDING_SEED_PORTAL_TOKEN</code>, then share with the token filled in): <code class="sd-mono">' + esc(portalLink) + '</code></div>' +
         (tests ? ('<div class="sd-step" style="margin-top:10px">Recent placement tests</div>' + tests) : '');
       Array.prototype.forEach.call(body.querySelectorAll("[data-delseed]"), function (a) {
         a.addEventListener("click", function (e) { e.preventDefault(); send("/sending", "POST", { action: "delete-seed", id: a.getAttribute("data-delseed") }).then(load); });
       });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-testseed]"), function (a) {
+        a.addEventListener("click", function (e) {
+          e.preventDefault(); a.textContent = "testing…";
+          send("/sending", "POST", { action: "test-seed", id: a.getAttribute("data-testseed") }).then(function (r) {
+            toast(r.ok && r.data.verified ? "Connected ✓" : (r.data && r.data.error) || "Login failed"); load();
+          });
+        });
+      });
       $("#sdAddSeed", el).addEventListener("click", function () {
         var addr = $("#sdSeedAddr", el).value.trim(); if (!addr) { toast("Enter a seed address"); return; }
-        send("/sending", "POST", { action: "add-seed", provider: $("#sdSeedProv", el).value, address: addr }).then(function (r) {
-          if (r.ok) { toast("Seed added"); load(); } else toast("Add failed");
+        var pass = $("#sdSeedPass", el).value.trim();
+        send("/sending", "POST", { action: "add-seed", provider: $("#sdSeedProv", el).value, address: addr, appPassword: pass }).then(function (r) {
+          if (r.ok) { toast(pass ? (r.data.verified ? "Seed added & connected ✓" : "Added, but login failed: " + (r.data.error || "")) : "Seed added (no app password — add one to connect)"); load(); } else toast("Add failed");
         });
       });
     }
@@ -6133,6 +6244,265 @@
     var rb = $("#anRefresh"); if (rb) rb.addEventListener("click", load);
     // Auto-refresh every 15s while this view is open; render() clears it on nav.
     viewTimers.push(setInterval(load, 15000));
+  }
+
+  // ===== Outreach Statistics =================================================
+  // Admin-only deep view: the full send -> reply -> meeting funnel plus the
+  // breakdowns that say what's landing and who's responding (message, segment,
+  // channel, touch, send-time, deliverability), and a promote-winners panel that
+  // pins the best config onto a campaign (with a hands-off auto-pilot toggle).
+  function renderOutreachStats(el) {
+    var since = "30";   // 7 | 30 | 90 | all
+    var chan = "";      // "" | email | linkedin | voice | sms
+
+    function rangeBtns() {
+      return [["7", "7d"], ["30", "30d"], ["90", "90d"], ["all", "All"]].map(function (r) {
+        return '<button class="btn btn-sm os-range ' + (r[0] === since ? "btn-primary" : "btn-ghost") + '" data-since="' + r[0] + '">' + r[1] + "</button>";
+      }).join("");
+    }
+    function chanSel() {
+      return '<select id="osChan" class="os-sel" style="background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:12.5px">' +
+        [["", "All channels"], ["email", "Email"], ["linkedin", "LinkedIn"], ["voice", "Voice"], ["sms", "SMS"]].map(function (c) {
+          return '<option value="' + c[0] + '"' + (c[0] === chan ? " selected" : "") + ">" + c[1] + "</option>";
+        }).join("") + "</select>";
+    }
+
+    el.innerHTML = head("Outreach Statistics",
+      "What's landing and who's responding. The full funnel from send to reply to meeting, broken down by message, segment, channel, touch and send-time, computed live from your sends and classified replies. Promote what's working into a campaign at the bottom.") +
+      '<div class="an-tools" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">' +
+        '<span style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600">' +
+          '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent-green);animation:anPulse 2s infinite"></span>Live</span>' +
+        '<span id="osUpdated" class="muted" style="font-size:12px"></span>' +
+        '<span style="flex:1"></span>' +
+        '<span id="osRange" style="display:inline-flex;gap:6px">' + rangeBtns() + "</span>" +
+        chanSel() +
+        '<button class="btn btn-ghost btn-sm" id="osRefresh">↻</button>' +
+      "</div>" +
+      '<style>@keyframes anPulse{0%{box-shadow:0 0 0 0 rgba(56,224,166,.55)}70%{box-shadow:0 0 0 7px rgba(56,224,166,0)}100%{box-shadow:0 0 0 0 rgba(56,224,166,0)}}' +
+      '.os-heat{display:flex;gap:3px;align-items:flex-end;height:54px}.os-heat .hb{flex:1;background:var(--surface-2);border-radius:3px 3px 0 0;position:relative}.os-heat .hb i{position:absolute;left:0;right:0;bottom:0;background:var(--grad);border-radius:3px 3px 0 0;display:block}</style>' +
+      '<div id="osBody">' + loading() + "</div>";
+
+    function bars(items, suffix) {
+      items = items || [];
+      var max = items.reduce(function (m, it) { return Math.max(m, it.pct || 0); }, 0) || 1;
+      return items.map(function (it) {
+        var w = Math.max(Math.round(((it.pct || 0) / max) * 100), 6);
+        var inside = it.disp != null ? it.disp : (it.pct + (suffix || ""));
+        return '<div class="bar-row"><span class="blabel">' + esc(it.label) + '</span>' +
+          '<span class="btrack"><span class="bfill" style="width:' + w + '%">' + esc(inside) + "</span></span>" +
+          (it.right != null ? '<span class="bval">' + esc(it.right) + "</span>" : "") + "</div>";
+      }).join("") || '<div class="empty">No data yet.</div>';
+    }
+    function dimRows(list) {
+      return (list || []).slice(0, 8).map(function (d) {
+        var badge = d.confident
+          ? ' <span class="cls-pill positive" title="Significant vs your average">▲ significant</span>'
+          : (d.contacted < 8 ? ' <span class="cls-pill" style="color:var(--text-dim);background:rgba(255,255,255,.05)">low volume</span>' : "");
+        var liftTxt = d.lift > 0 ? '<span style="color:var(--accent-green)">+' + d.lift + "</span>" : (d.lift < 0 ? '<span style="color:var(--accent-red)">' + d.lift + "</span>" : "0");
+        return '<div class="list-row"><div><div class="lr-main">' + esc(d.label) + badge + '</div>' +
+          '<div class="lr-sub">' + d.contacted + " contacted · " + d.sent + " sent · " + d.replyRate + "% reply · " + liftTxt + " pts</div></div>" +
+          '<div class="lr-right"><b>' + d.positiveRate + "%</b><div style=\"font-size:10.5px;color:var(--text-dim)\">positive</div></div></div>";
+      }).join("") || '<div class="empty">No data yet.</div>';
+    }
+    function spark(series, color) {
+      var n = (series || []).length; if (!n) return "";
+      var max = Math.max.apply(null, series.concat([1]));
+      var w = 320, h = 42, step = n > 1 ? w / (n - 1) : w;
+      var pts = series.map(function (v, i) { return (i * step).toFixed(1) + "," + (h - (v / max) * (h - 6) - 3).toFixed(1); }).join(" ");
+      return '<svg width="100%" viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none" style="display:block;height:42px"><polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>';
+    }
+
+    var first = true;
+    function load() {
+      Promise.all([
+        api("/analytics/outreach?since=" + since + "&motion=" + motion + (chan ? "&channel=" + chan : "")).catch(function () { return null; }),
+        api("/campaigns").catch(function () { return null; })
+      ]).then(function (res) {
+        var body = $("#osBody"); if (!body) return;
+        var s = res[0];
+        var camps = ((res[1] && res[1].campaigns) || []).filter(function (c) { return (c.motion || "recruiting") === motion; });
+        if (!s) { body.innerHTML = needsSetup(); return; }
+        var t = s.totals;
+        if (!t.prospectsContacted) {
+          body.innerHTML = '<div class="empty">No outreach sent in this window yet. Once the daily cadence pushes touches (or you wire your sending providers), this fills in with the live funnel and what is converting.</div>';
+          stamp(); first = false; return;
+        }
+
+        // KPIs.
+        var kpiDefs = [
+          { v: t.prospectsContacted, l: "Contacted", s: t.touchesSent + " touches sent" },
+          { v: t.replyRate + "%", l: "Reply rate", s: t.replied + " replied" },
+          { v: t.positiveRate + "%", l: "Positive rate", s: t.positive + " positive" },
+          { v: t.bookRate + "%", l: motion === "bd" ? "Meeting rate" : "Submit rate", s: t.booked + " booked" },
+          { v: (t.medianHoursToReply != null ? t.medianHoursToReply + "h" : "—"), l: "Median time to reply", s: "first response" }
+        ];
+        var kpis = kpiDefs.map(function (k) {
+          return '<div class="rstat"><div class="big gradient-text">' + esc(k.v) + '</div><div class="lbl">' + esc(k.l) + "</div>" +
+            '<div class="delta" style="color:var(--text-dim)">' + esc(k.s) + "</div></div>";
+        }).join("");
+
+        // Funnel.
+        var top = (s.funnel[0] && s.funnel[0].value) || 1;
+        var funnel = s.funnel.map(function (f, i) {
+          var w = Math.max(Math.round((f.value / top) * 100), 6);
+          var conv = i > 0 && s.funnel[i - 1].value ? Math.round((f.value / s.funnel[i - 1].value) * 100) + "%" : "";
+          return '<div class="bar-row"><span class="blabel">' + esc(f.label) + '</span>' +
+            '<span class="btrack"><span class="bfill" style="width:' + w + '%">' + esc(f.value) + "</span></span>" +
+            '<span class="bval">' + esc(conv) + "</span></div>";
+        }).join("");
+
+        // Channels.
+        var chBars = bars(s.byChannel.map(function (c) {
+          return { label: c.channel === "sms" ? "SMS" : c.channel.charAt(0).toUpperCase() + c.channel.slice(1), pct: c.positiveRate, right: c.sent + " sent · " + c.replyRate + "% reply" };
+        }), "%");
+
+        // Reply quality + touches.
+        var qBars = bars(s.replyQuality.map(function (q) { return { label: clsLabel(q.class), pct: q.pct, right: q.count }; }), "%");
+        var tBars = bars(s.byTouch.slice(0, 10).map(function (x) { return { label: x.touch + " · " + x.channel, pct: x.replyRate, right: x.sent + " sent" }; }), "%");
+
+        // Industry + send-hour heatmap.
+        var indBars = bars(s.byIndustry.slice(0, 10).map(function (d) { return { label: d.label, pct: d.positiveRate, right: d.contacted }; }), "%");
+        var hmax = s.bySendHour.reduce(function (m, h) { return Math.max(m, h.sent); }, 0) || 1;
+        var heat = '<div class="os-heat">' + s.bySendHour.map(function (h) {
+          var ht = Math.round((h.sent / hmax) * 100);
+          var rr = Math.min(h.replyRate, 100);
+          return '<span class="hb" style="height:' + Math.max(ht, 4) + '%" title="' + (h.hour < 10 ? "0" : "") + h.hour + ":00 — " + h.sent + " sent · " + h.replyRate + '% reply"><i style="height:' + rr + '%"></i></span>';
+        }).join("") + "</div><div class=\"muted\" style=\"font-size:11px;margin-top:6px\">Bar height = volume; fill = reply rate. Hover for the hour. Times in " + esc(s.meta.sendHourTimezone) + ".</div>";
+
+        // Deliverability.
+        var deliv = s.deliverability;
+        var delivHtml = deliv ? (
+          bars([
+            { label: "Open rate", pct: deliv.openRate, right: "" },
+            { label: "Bounce rate", pct: deliv.bounceRate, right: "" },
+            { label: "Spam rate", pct: deliv.spamRate, right: "" }
+          ], "%") +
+          '<div style="margin-top:10px">' + deliv.domains.map(function (d) {
+            return '<div class="list-row"><span class="rag ' + d.status + '"></span><div><div class="lr-main">' + esc(d.domain) + '</div>' +
+              '<div class="lr-sub">' + d.delivered + " delivered · " + d.openRate + "% open</div></div>" +
+              '<div class="lr-right">' + d.bounceRate + "% bounce · " + d.spamRate + "% spam</div></div>";
+          }).join("") + "</div>"
+        ) : '<div class="empty">No sending-domain metrics yet. Deliverability fills in once your owned MTA domains start sending.</div>';
+
+        // Trend sparklines.
+        var sent = s.trend.map(function (d) { return d.sent; });
+        var reps = s.trend.map(function (d) { return d.replies; });
+        var trendHtml =
+          '<div style="font-size:12px;color:var(--text-muted);margin-bottom:2px">Sent</div>' + spark(sent, "var(--brand)") +
+          '<div style="font-size:12px;color:var(--text-muted);margin:8px 0 2px">Replies</div>' + spark(reps, "var(--accent-green)");
+
+        // Recruiter leaderboard (only if owners are present).
+        var owners = (s.byOwner || []).filter(function (o) { return o.key; });
+        var ownerHtml = owners.length ? owners.slice(0, 8).map(function (o) {
+          return '<div class="list-row"><span class="avatar" style="background:' + colorFor(o.label) + '">' + esc(initials(o.label)) + "</span>" +
+            '<div><div class="lr-main">' + esc(o.label) + '</div><div class="lr-sub">' + o.sent + " sent · " + o.replyRate + "% reply</div></div>" +
+            '<div class="lr-right"><b>' + o.positiveRate + "%</b> positive</div></div>";
+        }).join("") : "";
+
+        // Promote-winners panel.
+        var recs = (s.recommendations || []).map(function (r) {
+          var b = r.confident
+            ? ' <span class="cls-pill positive">confident</span>'
+            : ' <span class="cls-pill" style="color:var(--accent-amber);background:rgba(245,158,11,.14)">needs volume</span>';
+          return '<div class="list-row"><div><div class="lr-main">' + esc(r.title) + b + '</div><div class="lr-sub">' + esc(r.detail) + "</div></div>" +
+            '<div class="lr-right">' + esc(r.metric) + "</div></div>";
+        }).join("") || '<div class="empty">Not enough outreach yet to recommend winners. Keep sending and check back.</div>';
+        var campOpts = camps.map(function (c) {
+          var on = c.autopilot && c.autopilot.enabled;
+          return '<option value="' + esc(c.id) + '" data-auto="' + (on ? "1" : "0") + '">' + esc(c.name) + (on ? " — autopilot ON" : "") + "</option>";
+        }).join("") || '<option value="">No campaigns yet</option>';
+        var winners = '<div class="card" style="margin-top:16px;border-color:var(--brand)"><h3>🤖 Promote winners into a campaign</h3>' +
+          '<p class="muted" style="margin:.2em 0 12px;font-size:12.5px">Pin the best message, segments, channel and send-time onto a campaign. Turn on Auto-pilot and the daily cadence re-applies it on every run, so the campaign keeps tracking whatever is converting. Hands off.</p>' +
+          recs +
+          '<div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">' +
+            '<select id="osCampaign" style="min-width:240px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:13px">' + campOpts + "</select>" +
+            '<button class="btn btn-primary btn-sm" id="osApply">Apply winners</button>' +
+            '<button class="btn btn-ghost btn-sm" id="osAuto">Toggle auto-pilot</button>' +
+            '<span id="osAutoState" class="muted" style="font-size:12px"></span>' +
+          "</div></div>";
+
+        var lowBanner = s.meta && s.meta.lowVolume
+          ? '<div class="empty" style="border:1px solid var(--accent-amber);background:rgba(245,158,11,.08);color:var(--text-muted);margin-bottom:14px;text-align:left">' +
+            '⚠ Low volume — fewer than ' + s.meta.minForConfidence + ' contacts in this view, so these rates are <b>directional, not yet statistically reliable</b>. “Confident” badges and auto-pilot winners only appear once a group clears that bar.</div>'
+          : "";
+        body.innerHTML =
+          lowBanner +
+          '<div class="report-stats">' + kpis + "</div>" +
+          '<div class="report-cols" style="margin-top:16px">' +
+            '<div class="report-card"><h3>Funnel: send → reply → meeting</h3>' + funnel + "</div>" +
+            '<div class="report-card"><h3>Channel performance</h3>' + chBars + "</div>" +
+          "</div>" +
+          '<div class="two-col" style="margin-top:16px">' +
+            '<div class="card"><h3>What’s landing — message performance</h3>' + dimRows(s.byVariant) + "</div>" +
+            '<div class="card"><h3>Who’s responding — top segments</h3>' + dimRows(s.bySegment) + "</div>" +
+          "</div>" +
+          '<div class="two-col" style="margin-top:16px">' +
+            '<div class="card"><h3>Reply quality mix</h3>' + qBars + "</div>" +
+            '<div class="card"><h3>Which touch earns the reply</h3>' + tBars + "</div>" +
+          "</div>" +
+          '<div class="two-col" style="margin-top:16px">' +
+            '<div class="card"><h3>Best industries by positive rate</h3>' + indBars + "</div>" +
+            '<div class="card"><h3>Best time to send</h3>' + heat + "</div>" +
+          "</div>" +
+          '<div class="two-col" style="margin-top:16px">' +
+            '<div class="card"><h3>Deliverability by domain <span class="muted" style="font-weight:500;font-size:11px">· ' + esc((s.meta && s.meta.deliverabilityWindow) || "per domain") + '</span></h3>' + delivHtml + "</div>" +
+            '<div class="card"><h3>30-day trend</h3>' + trendHtml + "</div>" +
+          "</div>" +
+          (ownerHtml ? '<div class="card" style="margin-top:16px"><h3>Recruiter leaderboard</h3>' + ownerHtml + "</div>" : "") +
+          winners;
+
+        wireWinners();
+        stamp(); first = false;
+      }).catch(function () { if (first) { var b = $("#osBody"); if (b) b.innerHTML = needsSetup(); } });
+    }
+
+    function wireWinners() {
+      var sel = $("#osCampaign"), apply = $("#osApply"), auto = $("#osAuto"), state = $("#osAutoState");
+      function syncState() {
+        if (!sel || !state) return;
+        var opt = sel.options[sel.selectedIndex];
+        var on = opt && opt.getAttribute("data-auto") === "1";
+        state.textContent = on ? "Auto-pilot is ON for this campaign." : "Auto-pilot is off.";
+        if (auto) auto.textContent = on ? "Turn auto-pilot off" : "Turn auto-pilot on";
+      }
+      if (sel) sel.addEventListener("change", syncState);
+      syncState();
+      if (apply) apply.addEventListener("click", function () {
+        if (!sel || !sel.value) return;
+        apply.disabled = true;
+        send("/analytics/outreach", "POST", { action: "apply", campaignId: sel.value }).then(function (r) {
+          apply.disabled = false;
+          var note = r && r.data && r.data.autopilot && r.data.autopilot.note;
+          toast(note ? "Applied: " + note : "Winners applied to campaign.");
+        }).catch(function () { apply.disabled = false; toast("Could not apply. Try again."); });
+      });
+      if (auto) auto.addEventListener("click", function () {
+        if (!sel || !sel.value) return;
+        var opt = sel.options[sel.selectedIndex];
+        var enable = !(opt && opt.getAttribute("data-auto") === "1");
+        auto.disabled = true;
+        send("/analytics/outreach", "POST", { action: "autopilot", campaignId: sel.value, enabled: enable }).then(function () {
+          auto.disabled = false;
+          if (opt) opt.setAttribute("data-auto", enable ? "1" : "0");
+          syncState();
+          toast(enable ? "Auto-pilot on — the campaign now self-tunes daily." : "Auto-pilot off.");
+        }).catch(function () { auto.disabled = false; toast("Could not change auto-pilot."); });
+      });
+    }
+
+    function stamp() { var u = $("#osUpdated"); if (u) u.textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
+
+    // Filter controls.
+    el.addEventListener("click", function (e) {
+      var r = e.target.closest(".os-range"); if (!r) return;
+      since = r.getAttribute("data-since");
+      var box = $("#osRange"); if (box) box.innerHTML = rangeBtns();
+      load();
+    });
+    var cs = $("#osChan"); if (cs) cs.addEventListener("change", function () { chan = cs.value; load(); });
+    var rf = $("#osRefresh"); if (rf) rf.addEventListener("click", load);
+    load();
+    viewTimers.push(setInterval(load, 30000));
   }
 
   // ---- Analytics drill-downs (full sub-views under #analytics/<slug>) ----

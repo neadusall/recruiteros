@@ -72,13 +72,13 @@ export function toHtml(body: string): string {
  *  ("mpc" = Most Placeable Candidate, forward; "consultative" = advisory). */
 export async function draftContent(
   lead: BdLead,
-  opts: { renderAudio?: boolean; variant?: Variant; candidate?: string } = {},
+  opts: { renderAudio?: boolean; variant?: Variant; candidate?: string; angle?: string } = {},
 ): Promise<DraftPayload> {
   const variant: Variant = opts.variant ?? "consultative";
   const message =
     variant === "mpc"
-      ? await generateMpcMessage({ ...lead, candidate: opts.candidate })
-      : await generatePersonaMessage(lead);
+      ? await generateMpcMessage({ ...lead, candidate: opts.candidate }, opts.angle)
+      : await generatePersonaMessage(lead, opts.angle);
 
   let voiceNoteAudioUrl: string | undefined;
   if (opts.renderAudio !== false && message.linkedin_voice_note) {
