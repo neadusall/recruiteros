@@ -60,6 +60,23 @@ function phoneOfType(list: any, type: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Resolve an image/logo URL from Loxo's varied shapes. For each base name we try
+ * `${base}_url`, the bare `${base}` (string), and `${base}.url` (nested object) —
+ * e.g. profile_picture_url, profile_picture, profile_picture.url. Only returns
+ * http(s) URLs so a stray non-URL value never renders a broken <img>.
+ */
+function imageUrl(o: Loxo, bases: string[]): string | undefined {
+  for (const base of bases) {
+    const candidates = [o[`${base}_url`], o[base], o[base] && o[base].url];
+    for (const c of candidates) {
+      const s = str(c);
+      if (s && /^https?:\/\//i.test(s)) return s;
+    }
+  }
+  return undefined;
+}
+
 function joinLocation(p: Loxo): string | undefined {
   const direct = str(p.location) || str(p.address);
   if (direct) return direct;
@@ -112,6 +129,7 @@ export function loxoPersonToDataRecord(p: Loxo): DataRecordInput {
     phone: mobile || anyPhone,
     directPhone: work,
     linkedinUrl: str(p.linkedin_url) || str(p.linkedin) || firstVal(p.social_profiles, ["url"]),
+    image: imageUrl(p, ["profile_picture", "avatar", "photo", "picture", "image"]),
     city: str(p.city),
     state: str(p.state) || str(p.region),
     country: str(p.country),
@@ -135,6 +153,7 @@ export function loxoCompanyToRecord(c: Loxo): CompanyInput {
   return {
     name: str(c.name) || "(unknown)",
     url,
+    image: imageUrl(c, ["logo", "profile_picture", "avatar", "image", "picture"]),
     location: joinLocation(c),
     owner: str(c.owner && (c.owner.name || c.owner)) || str(c.owned_by),
     type: str(c.company_type && (c.company_type.name || c.company_type)) || str(c.type) || "Company",

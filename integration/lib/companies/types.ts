@@ -26,6 +26,7 @@ export interface CompanyRecord {
 
   name: string;
   url?: string; // website / domain
+  image?: string; // company logo URL (from the ATS/provider), if any
   domain?: string; // normalized hostname, used for dedupe
   location?: string; // "City, State"
   owner?: string; // recruiter / account owner

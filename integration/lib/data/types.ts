@@ -49,6 +49,7 @@ export interface DataRecord {
 
   // Web + location
   linkedinUrl?: string;
+  image?: string;            // profile photo URL (from the ATS/provider), if any
   city?: string;
   state?: string;
   country?: string;

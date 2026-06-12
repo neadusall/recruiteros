@@ -2807,7 +2807,8 @@
       '.co-table tbody td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--text-muted);white-space:nowrap}' +
       '.co-table tbody tr:hover{background:var(--bg-soft)}' +
       '.co-name{display:flex;align-items:center;gap:11px;min-width:0}' +
-      '.co-logo{flex:0 0 auto;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:13px;color:#fff}' +
+      '.co-logo{position:relative;overflow:hidden;flex:0 0 auto;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:13px;color:#fff}' +
+      '.co-logo-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;background:#fff}' +
       '.co-nm{font-weight:600;color:var(--text);text-decoration:none}' +
       '.co-nm:hover{color:var(--brand-2)}' +
       '.co-ext{color:var(--text-dim);text-decoration:none;font-size:12px}' +
@@ -2919,7 +2920,9 @@
       return '<tr' + (state.sel[c.name] ? ' class="sel"' : "") + '>' +
         '<td><input type="checkbox" class="co-pick" data-pick="' + esc(c.name) + '"' + (state.sel[c.name] ? " checked" : "") + '></td>' +
         '<td><div class="co-name">' +
-          '<div class="co-logo" style="background:linear-gradient(135deg,' + gradFor(c.name) + ')">' + esc(initials(c.name)) + '</div>' +
+          '<div class="co-logo" style="background:linear-gradient(135deg,' + gradFor(c.name) + ')">' + esc(initials(c.name)) +
+            (c.image ? '<img class="co-logo-img" src="' + esc(c.image) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') +
+          '</div>' +
           '<a class="co-nm" href="#prospects">' + esc(c.name) + '</a>' + ext +
         '</div></td>' +
         '<td><span class="co-jobs">' + (Number(c.jobs) || 0) + '</span></td>' +
@@ -3125,19 +3128,22 @@
       '.cd-act{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted,#8b93a1);margin-bottom:12px}' +
       '.cd-act b{color:var(--accent,#3b82f6);font-weight:600}' +
       '.dt-head{display:flex;align-items:flex-start;gap:14px;padding-right:28px}' +
-      '.dt-avatar{flex:0 0 auto;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:18px;color:#fff;background:linear-gradient(135deg,#7c5cff,#4dd0ff)}' +
+      '.dt-avatar{position:relative;overflow:hidden;flex:0 0 auto;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:18px;color:#fff;background:linear-gradient(135deg,#7c5cff,#4dd0ff)}' +
+      '.dt-avatar-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit}' +
       '.dt-id{flex:1;min-width:0}' +
       '.dt-name{display:flex;align-items:center;gap:7px;font-size:16px;font-weight:700;line-height:1.2}' +
       '.dt-name a.dt-li{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:4px;background:#0a66c2;color:#fff;font-size:11px;font-weight:800;text-decoration:none;flex:0 0 auto}' +
       '.dt-title{font-size:13px;margin-top:2px}' +
       '.dt-loc{font-size:12px;color:var(--muted,#8b93a1);margin-top:1px}' +
       '.dt-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}' +
-      '.dt-contact{display:inline-flex;border:1px solid var(--line,#262a33);border-radius:9px;overflow:hidden}' +
-      '.dt-contact button{display:grid;place-items:center;width:38px;height:34px;border:0;background:transparent;color:inherit;cursor:pointer;font-size:15px;border-left:1px solid var(--line,#262a33)}' +
-      '.dt-contact button:first-child{border-left:0}' +
-      '.dt-contact button:hover{background:rgba(124,92,255,.12)}' +
-      '.dt-contact button.off{color:var(--muted,#5b626f)}' +
-      '.dt-contact button.off:hover{color:var(--accent,#3b82f6)}' +
+      // Clean, visible contact chips (email + phone shown in full).
+      '.dt-contactlist{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}' +
+      '.dt-cn{display:inline-flex;align-items:center;gap:7px;max-width:100%;font-size:12.5px;font-weight:600;color:var(--text,#e7eaf0);text-decoration:none;padding:6px 11px;border:1px solid var(--line,#262a33);border-radius:9px;background:var(--bg-soft,rgba(255,255,255,.02));transition:border-color .15s,background .15s,color .15s}' +
+      '.dt-cn:hover{border-color:var(--accent,#3b82f6);background:rgba(124,92,255,.10)}' +
+      '.dt-cn-ic{flex:0 0 auto;opacity:.6;font-size:13px}' +
+      '.dt-cn-v{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.dt-cn-off{cursor:pointer;color:var(--muted,#8b93a1);border-style:dashed}' +
+      '.dt-cn-off:hover{color:var(--accent,#3b82f6)}' +
       '.dt-stage{font-size:12px;font-weight:600;padding:7px 15px;border-radius:8px;white-space:nowrap;border:1px solid transparent}' +
       '.dt-add{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;padding:7px 15px;border-radius:8px;border:0;cursor:pointer;background:var(--accent,#3b82f6);color:#fff}' +
       '.dt-add:hover{filter:brightness(1.08)}' +
@@ -3363,12 +3369,23 @@
       var loc = [r.city, r.state, r.country].filter(Boolean).join(", ");
       var phone = r.phone || r.directPhone || r.companyPhone;
       var li = r.linkedinUrl ? ' <a class="dt-li" href="' + esc(r.linkedinUrl) + '" target="_blank" rel="noopener" title="LinkedIn">in</a>' : '';
-      var emailBtn = r.email
-        ? '<button title="' + esc(r.email) + '" data-mail="' + esc(r.email) + '">✉️</button>'
-        : '<button class="off" title="Find email" data-enrich="email" data-id="' + esc(r.id) + '">✉️</button>';
-      var phoneBtn = phone
-        ? '<button title="' + esc(phone) + '" data-tel="' + esc(phone) + '">📞</button>'
-        : '<button class="off" title="Find phone" data-enrich="phone" data-id="' + esc(r.id) + '">📞</button>';
+
+      // Avatar: real photo when present, initials underneath as the fallback. The
+      // <img> sits over the initials; if it fails to load it removes itself and the
+      // initials show through.
+      var avatar = '<div class="dt-avatar">' + esc(initials(r.fullName)) +
+        (r.image ? '<img class="dt-avatar-img" src="' + esc(r.image) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') +
+        '</div>';
+
+      // Contact: show the actual email + phone as clean, clickable chips; fall back
+      // to an enrich action only when the value is missing.
+      var emailCn = r.email
+        ? '<a class="dt-cn" href="mailto:' + esc(r.email) + '" title="Email"><span class="dt-cn-ic">✉</span><span class="dt-cn-v">' + esc(r.email) + '</span></a>'
+        : '<button class="dt-cn dt-cn-off" data-enrich="email" data-id="' + esc(r.id) + '"><span class="dt-cn-ic">✉</span><span class="dt-cn-v">Find email</span></button>';
+      var phoneCn = phone
+        ? '<a class="dt-cn" href="tel:' + esc(phone) + '" title="Call"><span class="dt-cn-ic">✆</span><span class="dt-cn-v">' + esc(phone) + '</span></a>'
+        : '<button class="dt-cn dt-cn-off" data-enrich="phone" data-id="' + esc(r.id) + '"><span class="dt-cn-ic">✆</span><span class="dt-cn-v">Find phone</span></button>';
+      var contact = '<div class="dt-contactlist">' + emailCn + phoneCn + '</div>';
 
       var sm = stageMeta(r.stage || r.recordType);
       var stageLabel = r.stage || r.recordType || sourceLabel(r.source);
@@ -3412,14 +3429,14 @@
         '<input class="dt-pick" type="checkbox" data-pick="' + esc(r.id) + '"' + (state.sel[r.id] ? " checked" : "") + '>' +
         act +
         '<div class="dt-head">' +
-          '<div class="dt-avatar">' + esc(initials(r.fullName)) + '</div>' +
+          avatar +
           '<div class="dt-id">' +
             '<div class="dt-name">' + esc(r.fullName) + li + '</div>' +
             (r.title ? '<div class="dt-title">' + esc(r.title) + '</div>' : '') +
             (loc ? '<div class="dt-loc">' + esc(loc) + '</div>' : '') +
+            contact +
           '</div>' +
           '<div class="dt-actions">' +
-            '<div class="dt-contact">' + emailBtn + phoneBtn + '</div>' +
             stageBadge +
             '<button class="dt-add" data-add="' + esc(r.id) + '">＋ Add to…</button>' +
           '</div>' +
