@@ -7730,8 +7730,8 @@
         st.providerConfigured = { elevenlabs: elOk, cartesia: caOk };
         function provRow(id, label, okFlag) {
           return '<span style="display:inline-flex;align-items:center;gap:7px;font-size:12px;padding:5px 9px;border-radius:8px;background:rgba(255,255,255,.04)">' +
-            '<span style="width:8px;height:8px;border-radius:50%;background:' + (okFlag ? "#34d399" : "#ff7a90") + '"></span>' +
-            '<b>' + label + '</b> <span class="muted">' + (okFlag ? "connected" : "not connected") + '</span>' +
+            '<span data-vpdot="' + id + '" style="width:8px;height:8px;border-radius:50%;background:' + (okFlag ? "#34d399" : "#ff7a90") + '"></span>' +
+            '<b>' + label + '</b> <span class="muted" data-vpstate="' + id + '">' + (okFlag ? "connected" : "not connected") + '</span>' +
             '<button class="btn btn-sm" data-vptest="' + id + '" style="padding:2px 9px">Test</button>' +
             '<span class="muted" data-vpmsg="' + id + '"></span></span>';
         }
@@ -7792,10 +7792,17 @@
           btn.addEventListener("click", function () {
             var id = btn.getAttribute("data-vptest");
             var msg = box.querySelector('[data-vpmsg="' + id + '"]');
+            var dot = box.querySelector('[data-vpdot="' + id + '"]');
+            var stateEl = box.querySelector('[data-vpstate="' + id + '"]');
             if (msg) msg.textContent = "testing…";
             send("/voice/clones", "POST", { action: "test", provider: id }).then(function (r) {
               var okk = r.ok && r.data && r.data.ok;
               if (msg) msg.innerHTML = okk ? '<span style="color:#34d399">✓ key works</span>' : '<span style="color:#ff7a90">✗ ' + esc((r.data && r.data.error) || "failed") + '</span>';
+              // Reflect the live test on the badge itself, so it can never read
+              // "connected" next to a rejected key (e.g. a 401). A present-but-
+              // invalid key turns amber + "key rejected", not green + "connected".
+              if (dot) dot.style.background = okk ? "#34d399" : "#ffc24d";
+              if (stateEl) stateEl.textContent = okk ? "connected" : "key rejected";
               if (okk) loadVoice();
             }).catch(function () { if (msg) msg.textContent = "error"; });
           });
