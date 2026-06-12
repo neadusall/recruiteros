@@ -68,13 +68,11 @@
     if (!host) return null;
     return { src: "https://logo.clearbit.com/" + host, fb: "https://www.google.com/s2/favicons?domain=" + host + "&sz=128" };
   }
-  // Free candidate headshot by email (unavatar aggregates Gravatar/social/etc.).
-  // fallback=false makes it 404 when nothing is found, so onerror reveals initials.
+  // Candidate headshot: ONLY a real photo the ATS/provider already gave us. We do
+  // NOT look one up from a candidate's email — that would send candidate PII to a
+  // third party. No image → the initials monogram shows.
   function personPhoto(r) {
-    if (r && r.image) return r.image;
-    var email = r && r.email;
-    if (!email || email.indexOf("@") < 1) return "";
-    return "https://unavatar.io/" + encodeURIComponent(email) + "?fallback=false";
+    return (r && r.image) || "";
   }
 
   /* ---------------- Chrome extension bridge ----------------

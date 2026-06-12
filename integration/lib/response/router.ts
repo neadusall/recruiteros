@@ -30,6 +30,23 @@ const STATUS_MAP: Record<string, ProspectStatus> = {
   won: "won",
 };
 
+/**
+ * The mpc/consultative A/B experiment is a BUSINESS DEVELOPMENT model only.
+ * Candidate (recruiting) outreach is a separate model, built later. Resolve a
+ * prospect's motion authoritatively (its own tag, else its campaign) so recruiting
+ * replies NEVER record into the BD experiment and skew its results.
+ */
+async function isBdMotion(
+  core: ReturnType<typeof getCore>,
+  prospect: { motion?: string; campaignId?: string } | null,
+): Promise<boolean> {
+  if (!prospect) return false;
+  if (prospect.motion) return prospect.motion === "bd";
+  if (!prospect.campaignId) return false;
+  const c = await core.getCampaign(prospect.campaignId);
+  return c?.motion === "bd";
+}
+
 export async function route(
   inbound: InboundResponse,
   cls: Classification,
@@ -43,6 +60,8 @@ export async function route(
 
   const prospect = inbound.prospectId ? await core.getProspect(inbound.prospectId) : null;
   const personRef = prospect?.atsPersonId ?? prospect?.email ?? inbound.fromHandle ?? "unknown";
+  // BD-only A/B experiment gate (candidate outreach is a separate model).
+  const bd = await isBdMotion(core, prospect);
 
   for (const action of rule.actions) {
     switch (action.kind) {
@@ -67,7 +86,7 @@ export async function route(
       case "send_booking_link":
         if (prospect) {
           try {
-            recordOutcome(prospect.id, "engaged");
+            if (bd) recordOutcome(prospect.id, "engaged");
             const { sendBookingAsk } = await import("../bd/booking");
             const r = await sendBookingAsk(
               inbound.workspaceId,
@@ -110,8 +129,9 @@ export async function route(
           prospect.status = STATUS_MAP[action.detail];
           // A positive reply (status -> replied) is an A/B "engaged" event, even though
           // we now hand the conversation to the operator instead of auto-sending a link.
-          if (prospect.status === "replied") recordOutcome(prospect.id, "engaged");
-          if (prospect.status === "booked") { prospect.bookedAt = today(); recordOutcome(prospect.id, "booked"); }
+          // BD-only: recruiting replies never enter the BD experiment.
+          if (prospect.status === "replied" && bd) recordOutcome(prospect.id, "engaged");
+          if (prospect.status === "booked") { prospect.bookedAt = today(); if (bd) recordOutcome(prospect.id, "booked"); }
           prospect.lastChannel = inbound.channel;
           await core.saveProspect(prospect);
           taken.push(`status -> ${prospect.status}`);
@@ -177,7 +197,8 @@ export async function markBooked(prospectId: string): Promise<void> {
   p.status = "booked";
   p.bookedAt = today();
   await core.saveProspect(p);
-  recordOutcome(p.id, "booked");
+  // BD-only experiment (candidate outreach is a separate model).
+  if (await isBdMotion(core, p)) recordOutcome(p.id, "booked");
   const ref = p.atsPersonId ?? p.email ?? prospectId;
   const eventId = await ats.pushPersonEvent({
     personRef: ref,

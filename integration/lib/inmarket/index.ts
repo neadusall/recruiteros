@@ -683,6 +683,9 @@ export async function promoteLead(
     title,
     linkedinUrl,
     category: "in_market",
+    // In-market promotion is a BUSINESS DEVELOPMENT motion — tag it so the BD-only
+    // A/B experiment + workflow apply, and candidate outreach stays separate.
+    motion: "bd",
     // Carry the actual hiring signal through so the outreach drafter speaks to it.
     signalType: lead.signalType,
     signalReason: lead.reason,

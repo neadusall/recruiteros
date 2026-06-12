@@ -1,6 +1,11 @@
 /**
  * RecruiterOS · BD · MPC (Most Placeable Candidate) — the model
  *
+ * SCOPE: BUSINESS DEVELOPMENT ONLY. MPC reaches a hiring company with a candidate.
+ * Candidate (recruiting) outreach is a deliberately separate model, built later;
+ * nothing here should be reused for it. The A/B experiment + competitor grounding
+ * this feeds are BD-only too (see lib/response/router isBdMotion gate).
+ *
  * The MPC play: instead of pitching recruiting services, you lead with a SPECIFIC,
  * in-demand candidate you represent who fits the target company's hiring need. It
  * converts because it is value-first (you bring talent, not an ask) and timely
