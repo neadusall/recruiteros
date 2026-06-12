@@ -457,6 +457,7 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 /* Renewed-demand lead (already in Prospects, but hiring again) */
 .im-lead-renew { border-color: rgba(255,194,77,0.5); box-shadow: inset 3px 0 0 var(--accent-amber); }
 .im-renew-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 8px; border-radius: 99px; background: rgba(255,194,77,0.18); color: var(--accent-amber); }
+.im-pipeline-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 8px; border-radius: 99px; background: rgba(120,170,255,0.16); color: #7aa6ff; }
 .im-renew { margin: 12px 0; padding: 12px 14px; border-radius: 11px; background: rgba(255,194,77,0.07); border: 1px solid rgba(255,194,77,0.3); }
 .im-renew-top { font-size: 13px; margin-bottom: 8px; }
 .im-renew-top b { color: var(--accent-amber); }

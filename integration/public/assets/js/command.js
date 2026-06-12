@@ -1332,6 +1332,7 @@
         '<span class="avatar" style="background:' + colorFor(l.company) + '">' + esc(initials(l.company)) + "</span>" +
         '<div class="im-lead-id"><div class="im-lead-name">' + esc(l.company) +
           (l.renewed ? ' <span class="im-renew-badge">🔥 Renewed</span>' : "") +
+          (l.inPipeline ? ' <span class="im-pipeline-badge" title="Already in your Prospects">✓ In pipeline</span>' : "") +
           (l.industry ? ' <span class="muted" style="font-weight:400">· ' + esc(l.industry) + "</span>" : "") + "</div>" +
         '<div class="im-lead-meta">' + metaBits.join(" · ") + "</div></div>" +
         '<span class="cls cls-' + scoreCls + ' im-score" title="Hiring-intent score">' + score + "</span></div>" +
@@ -5013,19 +5014,32 @@
       var testBadge = testOn ? ' <span style="font-size:11px;font-weight:700;color:#0b0b0b;background:#ffc24d;border-radius:4px;padding:1px 6px">⚠ TEST MODE, window ignored</span>' : "";
       var autoBadge = c.autoPilot ? ' <span style="font-size:11px;font-weight:700;color:#0b0b0b;background:#34d399;border-radius:4px;padding:1px 6px">♾ AUTOPILOT</span>' : "";
       var aiBadge = c.aiCustomize ? ' <span style="font-size:11px;font-weight:700;color:#cdd6ea;background:#2a2440;border-radius:4px;padding:1px 6px">✨ AI</span>' : "";
+      // Show the actual voicemail wording on the card, with its length vs. the
+      // 15-25s sweet spot and inline Edit / Listen, so the card explains itself.
+      var shape = estimateScriptShape(c.scriptTemplate || "");
+      var inSweet = shape.seconds >= 15 && shape.seconds <= 25;
+      var lenDot = inSweet ? "#34d399" : "#ffc24d";
+      var snip = String(c.scriptTemplate || "").replace(/\s+/g, " ").trim();
+      var snipShort = snip.slice(0, 150) + (snip.length > 150 ? "…" : "");
       return '<div class="card" data-cid="' + c.id + '" style="margin-top:12px' + (testOn ? ";box-shadow:inset 0 0 0 1px #ffc24d" : "") + '">' +
         '<div style="display:flex;justify-content:space-between;align-items:center">' +
         "<h3 style='margin:0'>" + esc(c.name) + ' <span class="muted" style="font-size:12px">· ' + esc(c.status) + "</span>" + autoBadge + aiBadge + testBadge + "</h3>" +
         '<span class="muted" style="font-size:12px">caller ' + esc(c.callerId || "-") + " · window " + esc(win) + " local · " + esc(c.motion) + "</span></div>" +
         statRow(c.stats) +
+        // The script, front and centre: what it says + how long + edit/listen.
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-top:12px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.03)">' +
+        '<div class="muted" style="font-size:12.5px;line-height:1.55;flex:1">“' + (snipShort ? esc(snipShort) : "No script yet.") + '”' +
+        '<div style="font-size:11px;color:' + lenDot + ';margin-top:5px">~' + shape.seconds + "s · " + (inSweet ? "in the 15-25s sweet spot" : "outside the 15-25s sweet spot") + "</div></div>" +
+        '<div style="display:flex;gap:6px;white-space:nowrap">' +
+        '<button class="btn btn-sm" data-vdact="editscript" data-cid="' + c.id + '">✎ Edit script</button>' +
+        '<button class="btn btn-ghost btn-sm" data-vdact="preview" data-cid="' + c.id + '">🔊 Listen</button></div></div>' +
+        // Lifecycle actions on the left; test toggle + remove on the right.
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">' +
         '<button class="btn btn-sm btn-primary" data-vdact="launch" data-cid="' + c.id + '">▶ Launch</button>' +
         '<button class="btn btn-sm" data-vdact="run" data-cid="' + c.id + '">⏱ Run now</button>' +
         '<button class="btn btn-sm" data-vdact="import" data-cid="' + c.id + '">⬆ Import</button>' +
         '<button class="btn btn-sm ' + (ready ? "" : "btn-primary") + '" data-vdact="attest" data-cid="' + c.id + '">' + (ready ? "✓ Consent" : "Attest consent") + "</button>" +
         '<span style="flex:1"></span>' +
-        '<button class="btn btn-ghost btn-sm" data-vdact="editscript" data-cid="' + c.id + '">✎ Edit script</button>' +
-        '<button class="btn btn-ghost btn-sm" data-vdact="preview" data-cid="' + c.id + '">🔊 Preview</button>' +
         '<button class="btn btn-ghost btn-sm" data-vdact="testmode" data-cid="' + c.id + '" data-test="' + (testOn ? "1" : "0") + '">' + (testOn ? "🟡 Test: on" : "Test: off") + "</button>" +
         '<button class="btn btn-ghost btn-sm" data-vdact="del" data-cid="' + c.id + '">🗑</button></div>' +
         '<div class="vd-msg muted" data-msg="' + c.id + '" style="font-size:12px;margin-top:8px"></div></div>';

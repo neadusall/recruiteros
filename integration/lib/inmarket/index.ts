@@ -132,6 +132,10 @@ export interface InMarketLead {
   renewedReason?: string;
   /** Auto-generated follow-up line for the renewed-demand case. */
   renewedMessage?: string;
+  /** True when this company is already in THIS workspace's Prospects. We surface it
+   *  flagged (an "In pipeline" badge) rather than hiding it, so the list is never
+   *  silently starved and the count stays honest. */
+  inPipeline?: boolean;
   /** Carried so promote() can resolve the buyer + create the prospect. */
   raw?: { company?: Company; person?: Person };
 }
@@ -324,24 +328,26 @@ function renewedInfo(lead: InMarketLead): { reason: string; message: string } {
 }
 
 /**
- * Per-workspace suppression WITH renewed-demand re-surfacing: companies already in
- * Prospects are hidden — UNLESS a fresh demand signal (repost / surge / long-open) brings
- * them back, in which case they re-appear flagged + with auto-generated follow-up copy, so
- * a repeat need becomes a reason to re-engage rather than a silent duplicate.
+ * Per-workspace pipeline-tagging (NOT hiding). Companies already in this workspace's
+ * Prospects are FLAGGED — never removed — so the Hire Signals list is never silently
+ * starved by a workspace that has worked a lot of companies (which is exactly what made
+ * the house/admin account look empty next to a fresh white-label account that reads the
+ * same global pool). Two flags:
+ *   - `inPipeline`: already in Prospects → UI shows an "In pipeline" badge.
+ *   - renewed-demand: a fresh signal (repost / surge / long-open) on an in-pipeline company
+ *     also gets the re-engage reason + auto follow-up copy, so a repeat need is actionable.
  */
 function applyTaken(leads: InMarketLead[], taken: Set<string>): InMarketLead[] {
   if (!taken.size) return leads;
-  const out: InMarketLead[] = [];
-  for (const l of leads) {
+  return leads.map((l) => {
     const co = (l.company || "").toLowerCase().trim();
-    if (!taken.has(co)) { out.push(l); continue; }
+    if (!taken.has(co)) return l;
     if (RENEWED_TYPES.has(l.signalType as SignalType)) {
       const info = renewedInfo(l);
-      out.push({ ...l, renewed: true, renewedReason: info.reason, renewedMessage: info.message });
+      return { ...l, inPipeline: true, renewed: true, renewedReason: info.reason, renewedMessage: info.message };
     }
-    // otherwise: already worked + no new demand signal → suppress
-  }
-  return out;
+    return { ...l, inPipeline: true };
+  });
 }
 
 /** Tokenize a title query into lowercased keywords (>=2 chars). */
@@ -564,7 +570,9 @@ export async function searchInMarket(
 
     // Pull the FULL matching set from the pool so `pulled` reflects the true total
     // available for this industry (which grows daily as the accumulator fills the pool),
-    // even though we only display `limit`. Then drop taken companies + apply date search.
+    // even though we only display `limit`. Already-in-Prospects companies are FLAGGED, not
+    // dropped, so a workspace that has worked many companies still sees the full pool (and
+    // the count never falls under the live-fallback threshold just from suppression).
     const pooledAll = fresh(await queryPool(q, 10000));
     if (pooledAll.length >= 24) {
       return { leads: pooledAll.slice(0, limit), pulled: pooledAll.length, warnings: [], stats, signalBreakdown: signalBreakdown(pooledAll) };
