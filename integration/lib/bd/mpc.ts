@@ -23,6 +23,7 @@
 import type { JobFunction, Seniority } from "../signals/filters";
 import type { SignalType } from "../signals/types";
 import { SIGNAL_ANGLES } from "../content/library";
+import { stripDashes } from "../text/dashes";
 
 /* ------------------------------- candidate ------------------------------ */
 
@@ -292,25 +293,27 @@ export function renderMpcOutreach(c: MpcCandidate, opts: MpcRenderOpts = {}): Mp
   const roleWord = FUNCTION_WORD[c.function];
   const senRole = [SENIORITY_WORD[c.seniority], roleWord].filter(Boolean).join(" ");
 
+  // House-voice failsafe on every field: never emit a dash.
   return {
     ok: true,
     email: {
-      subject: `${first}, ${article(senRole)} ${senRole} worth meeting`,
-      body:
+      subject: stripDashes(`${first}, ${article(senRole)} ${senRole} worth meeting`),
+      body: stripDashes(
         `Hi ${first},\n\n` +
         `${hook}\n\n` +
         `I'm representing ${teaser}\n\n` +
         `Given that, ${company} came to mind. Worth a short call to walk the profile, or I can send a one page summary. No pressure either way.\n\n` +
         `${sender}`,
+      ),
     },
-    linkedin_connection:
-      `${first}, I represent ${short}. Given what ${company} is building, worth connecting.`.slice(0, 250),
-    linkedin_message:
+    linkedin_connection: stripDashes(
+      `${first}, I represent ${short}. Given what ${company} is building, worth connecting.`).slice(0, 250),
+    linkedin_message: stripDashes(
       `${first}, ${hook} I'm working with ${teaser} They would fit what you're building at ${company}. ` +
-      `Open to a quick look, or should I send a one page summary?`,
+      `Open to a quick look, or should I send a one page summary?`),
     // Voicemail stays ~20-25s, so it leads with the COMPACT teaser, not the full one.
-    voicemail:
+    voicemail: stripDashes(
       `Hi ${first}, this is ${sender}. ${hook} I'm representing ${short}, and ${company} came to mind. ` +
-      `If it's useful, I can send a short summary or grab five minutes. Reach me at ${cb}. Thanks.`,
+      `If it's useful, I can send a short summary or grab five minutes. Reach me at ${cb}. Thanks.`),
   };
 }

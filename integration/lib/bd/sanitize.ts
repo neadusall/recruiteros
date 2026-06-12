@@ -1,30 +1,14 @@
 /**
  * RecruiterOS · BD · Copy sanitizer
- * House rule: NO dashes of any kind in outbound copy (em, en, or hyphen). The
- * engines are also instructed to avoid them, but this guarantees it on the way out.
- * URLs are protected so booking links (e.g. .../talent-intro) keep their hyphens.
+ * House rule: NO dashes of any kind in outbound copy (em, en, or hyphen). Delegates
+ * to the canonical failsafe in lib/text/dashes so there is ONE implementation used
+ * at every output boundary (content library, MPC, and this LLM path).
  */
 
-const URL_SPLIT = /(https?:\/\/\S+)/g;
+import { stripDashes } from "../text/dashes";
 
 /** Strip every dash from prose while leaving URLs untouched. */
-export function sanitizeDashes(text: string): string {
-  if (!text) return text;
-  return text
-    .split(URL_SPLIT)
-    .map((part, i) => {
-      if (i % 2 === 1) return part; // URL segment — leave exactly as is
-      return part
-        .replace(/\s*[—–]\s*/g, ", ") // em/en dash -> comma
-        .replace(/(\w)-(\w)/g, "$1 $2") // intra-word hyphen -> space (revenue-cycle -> revenue cycle)
-        .replace(/\s-\s/g, " ") // spaced hyphen -> space
-        .replace(/-/g, " ") // any remaining hyphen -> space
-        .replace(/ ,/g, ",")
-        .replace(/,{2,}/g, ",")
-        .replace(/[ \t]{2,}/g, " ");
-    })
-    .join("");
-}
+export const sanitizeDashes = stripDashes;
 
 /** Sanitize all outbound fields of a generated message package (structural, no type import). */
 export function sanitizeMessage<

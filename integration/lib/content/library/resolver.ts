@@ -19,6 +19,7 @@ import { SIGNAL_ANGLES } from "./signals";
 import { SENIORITY_TONE } from "./tone";
 import { TOUCH_TEMPLATES } from "./templates";
 import { classifyTitle, type JobFunction, type Seniority } from "../../signals/filters";
+import { stripDashes } from "../../text/dashes";
 
 /** Lenient function inference used only when the shared classifier returns "other"
  *  (its word-boundary regex misses common forms like "Engineering" / "Eng Lead").
@@ -181,7 +182,8 @@ function render(template: string, slots: Record<string, string>): string {
     .replace(/([,;:])\1+/g, "$1")
     .replace(/ {2,}/g, " ")
     .trim();
-  return sentenceCase(out);
+  // House-voice failsafe: never emit a dash (em/en/hyphen) in outbound copy.
+  return stripDashes(sentenceCase(out));
 }
 
 function clamp(s: string, max?: number): string {
