@@ -123,6 +123,7 @@ export function upsertCampaign(workspaceId: string, input: VoiceCampaignInput): 
     dailyCap: input.dailyCap ?? existing?.dailyCap ?? 100,
     frequencyCapDays: input.frequencyCapDays ?? existing?.frequencyCapDays ?? 30,
     consentAttested: input.consentAttested ?? existing?.consentAttested ?? false,
+    testMode: input.testMode ?? existing?.testMode ?? false,
     consentAttestedBy: existing?.consentAttestedBy,
     consentAttestedAt: existing?.consentAttestedAt,
     leadCount: existing?.leadCount ?? 0,

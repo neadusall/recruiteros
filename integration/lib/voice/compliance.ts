@@ -4,10 +4,10 @@
  * A voicemail drop is only allowed to fire inside the LEAD's own local-time
  * window. We derive the lead's timezone from their location (e.g. a Utah number
  * resolves to Mountain Time / America/Denver) and only dial when it is currently
- * inside the campaign's window there — default 6-7 PM local.
+ * inside the campaign's window there — default 7-9 PM local.
  *
  * Two layers of safety:
- *  1. The campaign window (operator-set, default 18:00-19:00).
+ *  1. The campaign window (operator-set, default 19:00-21:00).
  *  2. A HARD envelope (8 AM-9 PM local) that every window is clamped to, so a
  *     misconfigured campaign can never dial at an unlawful hour (TCPA calling
  *     hours are 8 AM-9 PM in the called party's local time).

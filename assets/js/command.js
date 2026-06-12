@@ -4596,7 +4596,7 @@
      Compliant landline/VoIP voicemail outreach. Premium AMD detects the voicemail
      and drops a cloned-voice message with the first name + role spliced in. Mobiles
      are filtered out and never dialed; each lead is dialed only inside its own local
-     window (default 6–7 PM). Three tabs: Campaigns, Voice & Consent, Test. Talks to
+     window (default 7–9 PM). Three tabs: Campaigns, Voice & Consent, Test. Talks to
      /api/voice/*. Shared by BD + Recruiting (the active motion tags the campaign). */
   var VD_DEFAULT_SCRIPT =
     "Hi {first_name}, this is {agent_name} with {agent_company}. I came across your {role} search and wanted to reach out — we help teams hire faster. If it’s useful, give me a call back at this number. Thanks {first_name}.";
@@ -4606,7 +4606,7 @@
   function renderVoiceDrops(el) {
     var vd = { tab: "campaigns" };
     el.innerHTML = head("Voice Drops",
-      "Personalized voicemail outreach to verified business landline/VoIP lines. Premium AMD finds the voicemail, then drops a cloned-voice message with the first name and role spliced in. Mobiles are filtered out and never dialed; each lead is dialed only inside its own local window (default 6–7 PM).") +
+      "Personalized voicemail outreach to verified business landline/VoIP lines. Premium AMD finds the voicemail, then drops a cloned-voice message with the first name and role spliced in. Mobiles are filtered out and never dialed; each lead is dialed only inside its own local window (default 7–9 PM).") +
       '<div class="vd-tabs" style="display:flex;gap:8px;margin:2px 0 16px;flex-wrap:wrap"></div>' +
       '<div id="vdBody">' + loading() + "</div>";
 
@@ -4663,11 +4663,13 @@
         inp("vdCaller", "Approved 10DLC caller-ID (E.164)", "+13105551234") +
         inp("vdAgentName", "Your name (stated on the call)", "Ryan") +
         inp("vdAgentCompany", "Your firm (stated on the call)", "Executive Search") +
-        inp("vdWinStart", "Window start (local hour, 24h)", "18", "number") +
-        inp("vdWinEnd", "Window end (local hour, 24h)", "19", "number") +
+        inp("vdWinStart", "Window start (local hour, 24h)", "19", "number") +
+        inp("vdWinEnd", "Window end (local hour, 24h)", "21", "number") +
         inp("vdDailyCap", "Daily cap", "100", "number") +
         inp("vdFreq", "Min days between attempts", "30", "number") +
         "</div>" +
+        '<label style="display:flex;align-items:center;gap:8px;margin:10px 0;font-size:13px;cursor:pointer">' +
+        '<input type="checkbox" id="vdTestMode"> <span><b>Test mode</b> — ignore the calling window so Run/cron dials at any hour (for testing only; every other safeguard stays on).</span></label>' +
         '<div class="vd-field vd-script"><label>Voicemail script <span>— first name &amp; role splice in like an email merge</span></label>' +
         '<div class="vd-chips">' + fieldChips("vdScript") + "</div>" +
         '<textarea id="vdScript" rows="4">' + esc(VD_DEFAULT_SCRIPT) + "</textarea>" +
@@ -4679,11 +4681,13 @@
         '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph) + '" /></div>';
     }
     function campaignCard(c) {
-      var win = "6–7 PM"; try { win = hr(c.window.startHour) + "–" + hr(c.window.endHour); } catch (e) {}
+      var win = "7–9 PM"; try { win = hr(c.window.startHour) + "–" + hr(c.window.endHour); } catch (e) {}
       var ready = c.consentAttested;
-      return '<div class="card" data-cid="' + c.id + '" style="margin-top:12px">' +
+      var testOn = !!c.testMode;
+      var testBadge = testOn ? ' <span style="font-size:11px;font-weight:700;color:#0b0b0b;background:#ffc24d;border-radius:4px;padding:1px 6px">⚠ TEST MODE — window ignored</span>' : "";
+      return '<div class="card" data-cid="' + c.id + '" style="margin-top:12px' + (testOn ? ";box-shadow:inset 0 0 0 1px #ffc24d" : "") + '">' +
         '<div style="display:flex;justify-content:space-between;align-items:center">' +
-        "<h3 style='margin:0'>" + esc(c.name) + ' <span class="muted" style="font-size:12px">· ' + esc(c.status) + "</span></h3>" +
+        "<h3 style='margin:0'>" + esc(c.name) + ' <span class="muted" style="font-size:12px">· ' + esc(c.status) + "</span>" + testBadge + "</h3>" +
         '<span class="muted" style="font-size:12px">caller ' + esc(c.callerId || "—") + " · window " + esc(win) + " local · " + esc(c.motion) + "</span></div>" +
         statRow(c.stats) +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' +
@@ -4691,6 +4695,7 @@
         '<button class="btn btn-sm ' + (ready ? "" : "btn-primary") + '" data-vdact="attest" data-cid="' + c.id + '">' + (ready ? "✓ Consent attested" : "Attest consent") + "</button>" +
         '<button class="btn btn-sm btn-primary" data-vdact="launch" data-cid="' + c.id + '">▶ Launch</button>' +
         '<button class="btn btn-sm" data-vdact="run" data-cid="' + c.id + '">⏱ Run window now</button>' +
+        '<button class="btn btn-sm" data-vdact="testmode" data-cid="' + c.id + '" data-test="' + (testOn ? "1" : "0") + '">' + (testOn ? "🟡 Test mode: ON" : "Test mode: off") + "</button>" +
         '<button class="btn btn-sm" data-vdact="del" data-cid="' + c.id + '">🗑</button></div>' +
         '<div class="vd-msg muted" data-msg="' + c.id + '" style="font-size:12px;margin-top:8px"></div></div>';
     }
@@ -4703,7 +4708,7 @@
         body.innerHTML = '<div class="card"><h3>New voice campaign</h3>' + newCampaignForm() + "</div>" +
           (list || '<p class="muted" style="margin-top:16px">No voice campaigns yet — create one above.</p>') +
           '<div style="margin-top:14px;padding:10px;border-radius:8px;background:rgba(255,255,255,.03)" class="muted">' +
-          '<b>Compliance:</b> only landline/VoIP leads are dialed (mobiles are stripped on import via Telnyx). Each lead is dialed only inside its own local time window (default 6–7 PM, hard-bounded to 8 AM–9 PM). Launch requires a consent attestation and an identifying script.</div>';
+          '<b>Compliance:</b> only landline/VoIP leads are dialed (mobiles are stripped on import via Telnyx). Each lead is dialed only inside its own local time window (default 7–9 PM, hard-bounded to 8 AM–9 PM). Launch requires a consent attestation and an identifying script.</div>';
         wireChips(body);
         $("#vdCreate").addEventListener("click", createCampaign);
         Array.prototype.forEach.call(body.querySelectorAll("[data-vdact]"), function (b) {
@@ -4717,8 +4722,9 @@
         name: val("vdName"), motion: motion, callerId: val("vdCaller"),
         scriptTemplate: val("vdScript"),
         persona: { agentName: val("vdAgentName") || "Ryan", agentCompany: val("vdAgentCompany") || "Executive Search" },
-        window: { startHour: parseInt(val("vdWinStart") || "18", 10), endHour: parseInt(val("vdWinEnd") || "19", 10) },
-        dailyCap: parseInt(val("vdDailyCap") || "100", 10), frequencyCapDays: parseInt(val("vdFreq") || "30", 10)
+        window: { startHour: parseInt(val("vdWinStart") || "19", 10), endHour: parseInt(val("vdWinEnd") || "21", 10) },
+        dailyCap: parseInt(val("vdDailyCap") || "100", 10), frequencyCapDays: parseInt(val("vdFreq") || "30", 10),
+        testMode: !!(($("#vdTestMode") || {}).checked)
       };
       if (!payload.name) { toast("Name the campaign first."); return; }
       send("/voice/campaigns", "PUT", payload).then(function (r) {
@@ -4729,6 +4735,15 @@
     function setMsg(cid, t) { var m = $('[data-msg="' + cid + '"]'); if (m) m.innerHTML = t; }
     function campaignAction(act, cid) {
       if (act === "del") { send("/voice/campaigns?id=" + cid, "DELETE").then(function () { toast("Deleted"); paint(); }); return; }
+      if (act === "testmode") {
+        var tb = $('[data-vdact="testmode"][data-cid="' + cid + '"]');
+        var on = tb && tb.getAttribute("data-test") === "1";
+        send("/voice/campaigns", "PUT", { id: cid, testMode: !on }).then(function (r) {
+          if (r.ok) { toast(!on ? "Test mode ON — calling window ignored" : "Test mode off — back to 7–9 PM local"); paint(); }
+          else { toast("Could not toggle test mode"); }
+        });
+        return;
+      }
       if (act === "import") return importModal(cid);
       if (act === "attest") {
         send("/voice/campaigns", "POST", { action: "attest", campaignId: cid }).then(function (r) {
@@ -7229,7 +7244,7 @@
       '<p>' + esc(cfg.intro) + '</p></div></div>' +
       '<div id="vsReady" style="margin-bottom:16px"></div>' +
       '<div class="sx-card"><div class="sx-eyebrow">Step 1 · Telephony</div><h3>📞 Telnyx</h3>' +
-      '<p class="sx-sub">The calling engine for SMS, the dialer (AMD), and AI Vetting. Connect your Telnyx API key and a from-number, then Test. New to Telnyx? Follow the <a href="/helpcenter#telephony" target="_blank" rel="noopener" style="color:var(--brand-2)">10DLC setup guide</a> to register your brand &amp; campaign so calls and SMS deliver.</p>' +
+      '<p class="sx-sub">The calling engine behind Voice Drops — it places the calls and uses Premium AMD to find the voicemail. Connect your Telnyx API key and a caller-ID number, then Test. New to Telnyx? Follow the <a href="/helpcenter#telephony" target="_blank" rel="noopener" style="color:var(--brand-2)">10DLC setup guide</a> to register your brand &amp; campaign so your calls connect.</p>' +
       '<div id="vsTel">' + loading() + '</div></div>' +
       '<div class="sx-card"><div class="sx-eyebrow">Step 2 · Voice</div><h3>🎙️ Cloned voice &amp; consent</h3>' +
       '<p class="sx-sub">Use your OWN voice, captured with a recorded consent statement. Repeat names/roles are synthesized once and reused, so cost stays near zero.</p>' +
@@ -7264,7 +7279,7 @@
         var sm = cnStatusMeta(st.telnyx.status);
         box.innerHTML = '<div class="cn-grid"><button class="cn-v" id="vsTelBtn">' +
           '<span class="dot3" style="background:' + sm.color + '"></span>' +
-          '<div class="meta"><b>Telnyx</b><small>' + (st.telnyx.error ? esc(st.telnyx.error) : "SMS + voice (AMD) + AI Vetting telephony") + '</small></div>' +
+          '<div class="meta"><b>Telnyx</b><small>' + (st.telnyx.error ? esc(st.telnyx.error) : "Outbound calling + Premium AMD voicemail detection") + '</small></div>' +
           '<span class="cn-badge" style="' + sm.badge + '">' + sm.label + '</span><span class="cn-go">›</span></button></div>';
         $("#vsTelBtn").addEventListener("click", function () { openIntegrationSetup(st.telnyx, loadTelnyx); });
         paintReady();
@@ -7487,8 +7502,7 @@
     var docs = integ.docsUrl ? '<p class="muted" style="margin:12px 0 0;font-size:12px">Where to find these: <a href="' + esc(integ.docsUrl) + '" target="_blank" rel="noopener">' + esc(integ.docsLabel || "Provider docs ↗") + '</a></p>' : '';
     var hasSaved = present.length > 0;
     var hasFields = (integ.fields || []).length > 0;
-    var body = (integ.blurb ? '<p class="muted" style="margin:0 0 12px;font-size:13px">' + esc(integ.blurb) + '</p>' : '') +
-      steps + fields +
+    var body = steps + fields +
       '<p class="cn-msg" id="cnMsg">' + (integ.error ? '<span style="color:var(--accent-red)">' + esc(integ.error) + '</span>' : '') + '</p>' +
       (hasFields ? '<div class="cn-acts">' +
         '<button class="btn btn-primary btn-sm" id="cnSave">Save</button>' +

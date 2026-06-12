@@ -12,9 +12,9 @@
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
 
-  --text: #f4f4f8;
-  --text-muted: #a3a3b8;
-  --text-dim: #6c6c82;
+  --text: #fbfbfe;
+  --text-muted: #d7dbe7;   /* secondary text — brightened for dark-UI legibility */
+  --text-dim: #b0b6c6;     /* tertiary/labels — brightened (was a dim #6c6c82) */
 
   --brand: #7c5cff;       /* violet */
   --brand-2: #4dd0ff;     /* cyan */
@@ -33,7 +33,7 @@
      Define them here (matching the old fallbacks → dark is unchanged) and
      re-map them in the light block so that chrome re-skins cleanly. */
   --line: #262a33;
-  --muted: #8b93a1;
+  --muted: #d2d7e2;        /* legacy alias for secondary text — brightened to match --text-muted */
   --card: #16161f;
 
   --radius: 14px;
@@ -56,7 +56,8 @@ body {
   font-family: var(--font);
   background: var(--bg);
   color: var(--text);
-  line-height: 1.55;
+  font-size: 16px;        /* explicit base so inherited copy reads larger across the UI */
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
 }

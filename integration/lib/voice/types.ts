@@ -56,14 +56,15 @@ export interface VoicePersona {
 
 /**
  * The local-time window a lead may be dialed in, in the LEAD's own timezone.
- * Default 18:00-19:00 (6-7 PM). The engine additionally clamps every window to a
- * hard TCPA-safe envelope (see HARD_WINDOW) so a misconfiguration can't dial at
- * an unlawful hour.
+ * Default 19:00-21:00 (7-9 PM): the late-evening slot where the line rolls
+ * straight to voicemail. The engine additionally clamps every window to a hard
+ * TCPA-safe envelope (see HARD_WINDOW) so a misconfiguration can't dial at an
+ * unlawful hour.
  */
 export interface ComplianceWindow {
-  /** Local start hour, 0-23 inclusive. Default 18 (6 PM). */
+  /** Local start hour, 0-23 inclusive. Default 19 (7 PM). */
   startHour: number;
-  /** Local end hour, 0-23 exclusive. Default 19 (7 PM). */
+  /** Local end hour, 0-23 exclusive. Default 21 (9 PM). */
   endHour: number;
 }
 
@@ -145,12 +146,19 @@ export interface VoiceCampaign {
   voiceId?: string;
   /** Approved 10DLC / Telnyx number dialed FROM (one consistent caller-ID). */
   callerId: string;
-  /** Local-time dial window per lead (default 6-7 PM). */
+  /** Local-time dial window per lead (default 7-9 PM). */
   window: ComplianceWindow;
   /** Max dials per run. */
   dailyCap: number;
   /** Minimum days between attempts to one lead (no rapid re-dialing). */
   frequencyCapDays: number;
+  /**
+   * TEST MODE: when true, the dial tick ignores the per-lead local-time window
+   * (and the unresolved-timezone skip) so a campaign can be exercised end-to-end
+   * at any hour. Every OTHER gate still holds — line-type filter, consent
+   * attestation, frequency/daily caps, dry-run safety. Off for real campaigns;
+   * the loud UI badge exists so it's never left on by accident. */
+  testMode?: boolean;
   /* ---- compliance gates (all must be satisfied before launch) ---- */
   /** Operator attested a lawful basis (consent / business relationship). */
   consentAttested: boolean;
@@ -177,6 +185,7 @@ export interface VoiceCampaignInput {
   dailyCap?: number;
   frequencyCapDays?: number;
   consentAttested?: boolean;
+  testMode?: boolean;
 }
 
 /** Defaults applied to a new persona / window when the operator omits them. */
@@ -186,4 +195,4 @@ export const DEFAULT_PERSONA: VoicePersona = {
   signoff: "Sorry, wrong number. Thanks.",
 };
 
-export const DEFAULT_WINDOW: ComplianceWindow = { startHour: 18, endHour: 19 };
+export const DEFAULT_WINDOW: ComplianceWindow = { startHour: 19, endHour: 21 };

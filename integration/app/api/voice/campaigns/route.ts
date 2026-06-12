@@ -36,7 +36,9 @@ export async function PUT(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
   const b = await body<VoiceCampaignInput>(req);
-  if (!b?.name) return fail("missing_fields", 422);
+  // Name is required to CREATE; an update (id present) may patch a subset of
+  // fields — e.g. flipping testMode — without resending everything.
+  if (!b?.id && !b?.name) return fail("missing_fields", 422);
   const c = upsertCampaign(g.ctx.workspace.id, b);
   return ok({ campaign: { ...c, stats: campaignStats(c.id) } });
 }

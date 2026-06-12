@@ -121,17 +121,17 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 /* generic section heads + cards */
 .v-head { margin-bottom: 18px; }
 .v-head h2 { font-size: 20px; letter-spacing: -0.01em; }
-.v-head p { color: var(--text-muted); font-size: 14px; margin-top: 4px; max-width: 70ch; }
+.v-head p { color: var(--text-muted); font-size: 15px; margin-top: 4px; max-width: 70ch; }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
-.card h3 { font-size: 15px; margin-bottom: 12px; }
+.card h3 { font-size: 16px; margin-bottom: 12px; }
 .cards { display: grid; gap: 14px; }
 
 /* stat grid (Overview) */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; }
 .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; position: relative; overflow: hidden; }
 .stat .sv { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
-.stat .sl { color: var(--text-muted); font-size: 12.5px; margin-top: 4px; }
+.stat .sl { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
 .stat .rag { position: absolute; top: 14px; right: 14px; width: 9px; height: 9px; border-radius: 50%; }
 .stat.clickable, .list-row.clickable { cursor: pointer; transition: transform .12s ease, border-color .12s ease, background .12s ease; }
 .stat.clickable:hover { transform: translateY(-2px); border-color: var(--brand); background: var(--surface-2); }

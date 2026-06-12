@@ -179,7 +179,12 @@ export async function runDueDrops(
     if (!eligible(lead, c.frequencyCapDays, at)) { sum.skipped++; continue; }
     if (sum.dialed >= c.dailyCap) break;
 
-    const win = checkWindow(lead.location, c.window, at);
+    // Test mode dials regardless of the clock (and regardless of an unresolved
+    // timezone) so the queue can be drained on demand while testing. Every other
+    // gate above/below still applies. Real campaigns leave this off.
+    const win = c.testMode
+      ? { allowed: true, timezone: lead.timezone }
+      : checkWindow(lead.location, c.window, at);
     lead.timezone = win.timezone ?? lead.timezone;
     if (!win.allowed) {
       updateLead(campaignId, lead.id, { outcome: "scheduled", timezone: lead.timezone });

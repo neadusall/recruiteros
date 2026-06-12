@@ -23,6 +23,7 @@ body.app::before { opacity: .5; }
   flex-direction: column;
   padding: 18px 14px;
   overflow-y: auto;
+  zoom: 1.06;   /* match the content zoom (smaller, so the nav still fits) */
 }
 .sidebar .brand { padding: 4px 8px 18px; font-size: 18px; }
 .side-section { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-dim); padding: 14px 10px 8px; font-weight: 700; }
@@ -83,7 +84,11 @@ body.app::before { opacity: .5; }
 .tab.active { color: var(--text); border-bottom-color: var(--brand); }
 .tab .count { font-size: 11px; background: var(--surface-2); border-radius: 99px; padding: 1px 8px; color: var(--text-dim); }
 
-.panel-wrap { flex: 1; overflow-y: auto; padding: 24px 26px 60px; }
+/* Global readability zoom: enlarges ALL main-content text (including inline px
+   sizes the per-rule bumps can't reach) without touching the fixed 100vh shell —
+   the content scrolls inside this region, so nothing clips. Tune this one number
+   to scale the whole UI up/down. */
+.panel-wrap { flex: 1; overflow-y: auto; padding: 24px 26px 60px; zoom: 1.12; }
 .panel { display: none; }
 .panel.active { display: block; }
 
