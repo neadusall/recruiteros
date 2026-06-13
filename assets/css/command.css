@@ -1033,7 +1033,7 @@ html[data-theme="light"] .sl-status.off { background: rgba(16,18,40,.05); }
 /* White-label workspace logo. The adjuster exports a fixed 10:3 frame, so every
    logo (dark + light) renders at an identical size with no skew or clipping; the
    in-frame zoom is what sizes the mark. */
-.cmd-side .brand { overflow: visible; line-height: 0; }
+.cmd-side .brand { overflow: visible; line-height: 1.1; }
 .cmd-side .brand .brand-logo { display: block; height: 44px; width: auto; max-width: 100%; object-fit: contain; }
 
 /* Logo-fit adjuster modal */
