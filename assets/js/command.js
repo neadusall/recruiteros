@@ -304,6 +304,11 @@
   // workspace-aware, not just host-aware. Every house-brand string resolves to
   // neutral, brand-agnostic wording for white-label.
   var WHITE_LABEL_DOMAINS = ["lumesp.com"]; // extend per resold customer
+  // Platform operator accounts. These run the product itself, so they are never
+  // subject to the built-in 14-day trial gate (no banner, no paywall). This is
+  // intentionally separate from WHITE_LABEL_DOMAINS so the operator still sees
+  // full house branding — it only waives billing. Match is by exact email.
+  var OPERATOR_EMAILS = ["neadusall@gmail.com"];
   function isWhiteLabelWorkspace() {
     var ws = ctx.workspace || {};
     var wsDom = ((ws.domain) || "").toLowerCase();
@@ -358,7 +363,9 @@
     // "Add payment" banner or the trial paywall. Billing exemption keys off the
     // resold-domain list only (see module-level WHITE_LABEL_DOMAINS, extend there).
     var wsDom = ((ws.domain) || "").toLowerCase();
-    var userDom = (((ctx.user && ctx.user.email) || "").split("@")[1] || "").toLowerCase();
+    var userEmail = ((ctx.user && ctx.user.email) || "").toLowerCase();
+    var userDom = (userEmail.split("@")[1] || "").toLowerCase();
+    if (OPERATOR_EMAILS.indexOf(userEmail) >= 0) return; // platform operator, never gated
     if (WHITE_LABEL_DOMAINS.indexOf(wsDom) >= 0 || WHITE_LABEL_DOMAINS.indexOf(userDom) >= 0) return;
     var tr;
     if (ws.paid) tr = { onTrial: false, expired: false, daysLeft: 0 };
@@ -9181,6 +9188,7 @@
     var link = $("#brandLink");
     if (!link) return;
     var word = link.querySelector(".brand-word");
+    var mark = link.querySelector(".logo"); // house "R" badge; shown only alongside the house wordmark
     var wsId = (ctx.workspace && ctx.workspace.id) || "ws";
     var CACHE = "ros_brand_" + wsId;
 
@@ -9200,6 +9208,7 @@
       var existing = link.querySelector(".brand-logo");
       if (logo) {
         if (word) word.style.display = "none";
+        if (mark) mark.style.display = "none"; // custom logo replaces the house mark
         var img = existing || document.createElement("img");
         img.className = "brand-logo";
         img.alt = b.brandName || "Workspace logo";
@@ -9209,12 +9218,12 @@
       } else {
         if (existing) existing.remove();
         if (word) {
-          if (b.brandName) { word.style.display = ""; word.textContent = b.brandName; }
+          if (b.brandName) { word.style.display = ""; word.textContent = b.brandName; if (mark) mark.style.display = "none"; }
           // No logo and no brand name: only the house domain may show the house
-          // wordmark. On a white-label domain leave it blank, the preset/logo
-          // fallback below fills it, and we never flash the house brand.
-          else if (IS_HOUSE) { word.style.display = ""; word.innerHTML = 'Recruiters<span class="os">OS</span>'; }
-          else { word.textContent = ""; }
+          // wordmark (and its "R" badge). On a white-label domain leave it blank,
+          // the preset/logo fallback below fills it, and we never flash the house brand.
+          else if (IS_HOUSE) { word.style.display = ""; word.innerHTML = 'Recruiters<span class="os">OS</span>'; if (mark) mark.style.display = ""; }
+          else { word.textContent = ""; if (mark) mark.style.display = "none"; }
         }
       }
       // Accent color -> primary brand variable (recolors buttons, highlights, …).
