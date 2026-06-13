@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Campaigns
+ * RecruitersOS · Campaigns
  * The Daily Cadence: the automated morning loop that runs every active campaign.
  *
  * Reference schedule:

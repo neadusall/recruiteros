@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine
+ * RecruitersOS · Signal Engine
  * Source abstraction + connectors.
  *
  * Every place a hiring signal can come from is wrapped behind one interface,
@@ -50,7 +50,7 @@ export interface PullContext {
 
 /**
  * The contract every signal source must satisfy. Implementations are stateless w.r.t.
- * RecruiterOS data — they receive a cursor and return one normalized page.
+ * RecruitersOS data — they receive a cursor and return one normalized page.
  */
 export interface SignalSource {
   /** Stable connector id, used in SourceRef.connector and for cursor storage. */
@@ -148,7 +148,7 @@ export function makeSignal(input: {
  *    ATS/job-board endpoints we lean on). Both are overridable via `init`.
  */
 const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
-const DEFAULT_USER_AGENT = "RecruiterOS/1.0 (+https://recruiteros.app; hiring-signals bot)";
+const DEFAULT_USER_AGENT = "RecruitersOS/1.0 (+https://recruiteros.app; hiring-signals bot)";
 
 export async function getJson<T>(url: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(url, {
@@ -332,7 +332,7 @@ export class EdgarSource implements SignalSource {
   readonly emits: SignalType[] = ["funding_round", "ipo_or_s1", "acquisition", "board_change"];
   readonly label = "SEC EDGAR filings";
 
-  private ua = process.env.SEC_EDGAR_USER_AGENT ?? "RecruiterOS signal-engine contact@recruitersos.co";
+  private ua = process.env.SEC_EDGAR_USER_AGENT ?? "RecruitersOS signal-engine contact@recruitersos.co";
 
   isConfigured(): boolean {
     return Boolean(this.ua);
@@ -592,7 +592,7 @@ interface UnipileProfileDelta {
 /**
  * A passive source: it does not poll. Partners (or the user's own systems — including
  * the Telnyx phone project's signed `call.summarized` events) POST normalized payloads
- * which the collector hands here for shaping. This is how RecruiterOS becomes a
+ * which the collector hands here for shaping. This is how RecruitersOS becomes a
  * platform: any system that sees a hiring signal can feed it in.
  */
 export class WebhookSource implements SignalSource {

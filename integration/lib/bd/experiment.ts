@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · BD · Outreach A/B experiment
+ * RecruitersOS · BD · Outreach A/B experiment
  *
  * Two outreach models run head to head on a deterministic 50/50 split:
  *   - "mpc"          Most Placeable Candidate: forward, leads with a specific

@@ -1,4 +1,4 @@
-# ATS integration — Loxo → RecruiterOS
+# ATS integration — Loxo → RecruitersOS
 
 Pulls **People → Candidates** (the Data warehouse) and **Companies → the BD
 company book**, and keeps them fresh via **webhooks + a polling cron**.
@@ -20,7 +20,7 @@ The same **⟳ Sync Loxo** action is on the Candidates toolbar and the Companies
 tab header (admin-only).
 
 ## Object mapping
-| Loxo | RecruiterOS | Where |
+| Loxo | RecruitersOS | Where |
 | --- | --- | --- |
 | Person | `DataRecord` (`recordType: "Candidate"`, `source: "loxo"`) | Data warehouse → Candidates tab |
 | Company | `CompanyRecord` (`source: "loxo"`) | BD Companies tab |
@@ -40,7 +40,7 @@ a sync.
 - `app/api/loxo/cron/route.ts` — `requireCronAuth` → `syncLoxo` for every connected workspace.
 - `app/api/loxo/webhook/route.ts` — per-workspace secret-verified receiver; fetches the changed record and upserts/deletes it.
 
-## Write-back (RecruiterOS → Loxo)
+## Write-back (RecruitersOS → Loxo)
 Edits made in the tool mirror to Loxo, create-or-update by `providerId`:
 - **Company** edits (status/tags/owner/type, or a new company added) → `POST/PUT /companies`. Wired in `app/api/companies/route.ts` (`patch` + `upsert`).
 - **Candidate** enrichment (email/phone resolved in the tool) → `POST/PUT /people`. Wired in `app/api/data/route.ts` (`enrich`).

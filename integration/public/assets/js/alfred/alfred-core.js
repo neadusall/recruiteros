@@ -1,10 +1,10 @@
 /* ============================================================
    Alfred Core, Multi-channel outreach automation engine
-   A MeetAlfred-style sequence engine for RecruiterOS.
+   A MeetAlfred-style sequence engine for RecruitersOS.
 
    Runs unchanged in two environments:
      • Browser , loaded as a classic <script>, attaches window.Alfred
-                  (works over file://, no build step, matching RecruiterOS)
+                  (works over file://, no build step, matching RecruitersOS)
      • Node    , require('./alfred-core.js') for tests / a future backend
 
    Design seams (so this lifts to a real SaaS backend later):
@@ -938,7 +938,7 @@
   };
 
   /* ============================================================
-     8. Seed, a realistic demo workspace (matches RecruiterOS tone)
+     8. Seed, a realistic demo workspace (matches RecruitersOS tone)
      ============================================================ */
 
   function seedDemo(store, now) {

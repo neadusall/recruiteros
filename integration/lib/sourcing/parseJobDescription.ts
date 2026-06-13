@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · JD Sourcing
+ * RecruitersOS · JD Sourcing
  * Parse a job description into a structured CandidateICP via the LLM.
  *
  * One cheap model call per JD (a JD is a few thousand tokens). We deliberately use a

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Hiring Engine
+ * RecruitersOS · Hiring Engine
  * The hiring-manager step as a waterfall provider.
  *
  * waterfall.ts is field-agnostic and explicitly calls out "the hiring manager for a role"

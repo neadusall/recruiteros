@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Branding (white-label)
+ * RecruitersOS · Branding (white-label)
  *
  * Per-workspace branding so every account can run the product under its OWN
  * name, logo and domain — the first brick of the white-label model. This is the

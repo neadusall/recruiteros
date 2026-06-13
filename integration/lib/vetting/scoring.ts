@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · AI Vetting · Call scoring
+ * RecruitersOS · AI Vetting · Call scoring
  *
  * After a call ends we have the transcript. One LLM pass turns it into the full
  * recruiter scorecard:

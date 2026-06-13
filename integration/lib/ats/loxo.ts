@@ -1,8 +1,8 @@
 /**
- * RecruiterOS · ATS
+ * RecruitersOS · ATS
  * Loxo adapter (the verified, primary integration).
  *
- * Object mapping (RecruiterOS -> Loxo), straight from the reference ATS tab:
+ * Object mapping (RecruitersOS -> Loxo), straight from the reference ATS tab:
  *   BD prospect        -> Person + list "BD Prospects"   POST /people/update_by_email
  *   Target company     -> Company (dynamic: icp_match, active_signals, signal_score)
  *   BD opportunity     -> Deal (one per pitch; -> Job when signed)

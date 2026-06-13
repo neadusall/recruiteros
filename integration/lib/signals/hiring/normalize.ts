@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Hiring Engine
+ * RecruitersOS · Hiring Engine
  * Entity normalization — the single join key shared by every source.
  *
  * Cross-source suppression only works if "Stripe, Inc." (an Indeed company name) and

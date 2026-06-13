@@ -15,7 +15,7 @@ STEP 1, Create a LinkedIn app (free, ~5 min)
 ================================================================
 1. Go to https://www.linkedin.com/developers/apps and click "Create app".
 2. Fill in:
-   - App name: RecruiterOS
+   - App name: RecruitersOS
    - LinkedIn Page: attach any company page you control (required; make a free
      one if needed).
    - Logo: upload anything.

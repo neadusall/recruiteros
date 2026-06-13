@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Providers · Webhook signature verification
+ * RecruitersOS · Providers · Webhook signature verification
  * One verifier per inbound source, so the Response webhook route can authenticate
  * every provider before processing.
  *

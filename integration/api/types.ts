@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Public API
+ * RecruitersOS · Public API
  * Transport-agnostic request/response shapes + integration domain types.
  *
  * The API layer is deliberately decoupled from any web framework. Handlers take a
@@ -9,7 +9,7 @@
  * "no framework coupling" rule the signals + LinkedIn engines follow.
  *
  * This is the contract a customer integrates against to plug their application into
- * RecruiterOS: authenticate with an API key, read the signal catalog, push their own
+ * RecruitersOS: authenticate with an API key, read the signal catalog, push their own
  * signals, run enrichment, and subscribe to webhooks.
  */
 

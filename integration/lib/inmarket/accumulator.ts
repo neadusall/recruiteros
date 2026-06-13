@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · In-Market background accumulator
+ * RecruitersOS · In-Market background accumulator
  *
  * Quietly builds up the signal pool so searches read from thousands of leads without
  * hitting providers live every time. Runs IN-PROCESS (a timer in the long-lived Next

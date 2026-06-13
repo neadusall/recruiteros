@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · In-Market → Prospects launch
+ * RecruitersOS · In-Market → Prospects launch
  *
  * Two things the "Push selected to Prospects" button needs:
  *   1. estimatePushCost() — a solid, itemized upper-bound of what it costs to run the

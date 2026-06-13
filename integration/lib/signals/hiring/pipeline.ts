@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Hiring Engine
+ * RecruitersOS · Hiring Engine
  * The end-to-end pipeline: pull job orders → suppress crossover → pair the manager.
  *
  * This is the orchestration the whole build exists for, in one call:

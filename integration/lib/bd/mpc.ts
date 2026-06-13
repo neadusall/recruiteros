@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · BD · MPC (Most Placeable Candidate) — the model
+ * RecruitersOS · BD · MPC (Most Placeable Candidate) — the model
  *
  * SCOPE: BUSINESS DEVELOPMENT ONLY. MPC reaches a hiring company with a candidate.
  * Candidate (recruiting) outreach is a deliberately separate model, built later;

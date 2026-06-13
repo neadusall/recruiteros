@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Providers · Instantly.ai (email channel)
+ * RecruitersOS · Providers · Instantly.ai (email channel)
  * Base: https://api.instantly.ai/api/v2 · Auth: Bearer.
  * Used for: pushing leads into a campaign, pausing on reply, domain vitals
  * (health sweep), and the block-list (DNC mirror).

@@ -138,7 +138,7 @@
     if (q('#ros-overlay') || /\/sales\//.test(location.pathname)) return; // Sales Nav has its own banner
     const host = document.createElement('div');
     host.id = 'ros-overlay';
-    host.innerHTML = '<button id="ros-capture" title="Capture this profile into RecruiterOS"><span class="ros-logo">R</span><span class="ros-label">Capture</span></button>';
+    host.innerHTML = '<button id="ros-capture" title="Capture this profile into RecruitersOS"><span class="ros-logo">R</span><span class="ros-label">Capture</span></button>';
     document.body.appendChild(host);
     q('#ros-capture').addEventListener('click', async () => {
       const profile = scrapeProfile();

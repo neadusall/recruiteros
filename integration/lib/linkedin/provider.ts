@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · LinkedIn Engine
+ * RecruitersOS · LinkedIn Engine
  * Provider abstraction + Unipile implementation.
  *
  * The rest of the engine talks to `LinkedInProvider`, never to a vendor SDK
@@ -348,7 +348,7 @@ export const unipileProvider: LinkedInProvider = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Internal RecruiterOS provider                                       */
+/* Internal RecruitersOS provider                                       */
 /*                                                                     */
 /* Use this when outreach runs through your OWN internal LinkedIn tools */
 /* rather than a third party. Point RECRUITEROS_OUTREACH_URL at your    */

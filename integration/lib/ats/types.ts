@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · ATS
+ * RecruitersOS · ATS
  * The system-of-record adapter contract.
  *
  * Loxo is the primary, fully-specced integration; Bullhorn / Crelate / JobAdder /

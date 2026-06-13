@@ -16,7 +16,7 @@ chmod +x "$DIR/auto-deploy.sh"
 # systemd service: runs the watcher once.
 cat > /etc/systemd/system/recruiteros-deploy.service <<EOF
 [Unit]
-Description=RecruiterOS auto-deploy (pull + redeploy on new commit)
+Description=RecruitersOS auto-deploy (pull + redeploy on new commit)
 After=network-online.target docker.service
 Wants=network-online.target
 
@@ -29,7 +29,7 @@ EOF
 # systemd timer: fires the service every 2 minutes.
 cat > /etc/systemd/system/recruiteros-deploy.timer <<EOF
 [Unit]
-Description=Run RecruiterOS auto-deploy every 2 minutes
+Description=Run RecruitersOS auto-deploy every 2 minutes
 
 [Timer]
 OnBootSec=1min

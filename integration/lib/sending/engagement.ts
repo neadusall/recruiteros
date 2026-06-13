@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Warm-up engagement engine (the always-running loop)
+ * RecruitersOS · Warm-up engagement engine (the always-running loop)
  * Replaces the old one-way stub with a real, bidirectional warm-up:
  *
  *   SEND   — each tick, a jittered handful of warming mailboxes send a tagged

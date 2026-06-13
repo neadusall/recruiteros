@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · BD · Nurture dispatch
+ * RecruitersOS · BD · Nurture dispatch
  * Sends one generated nurture touch on its channel:
  *   - email              -> owned MTA (no email->voicemail trigger on nurtures)
  *   - linkedin_voice_note -> render the script to a cloned-voice clip, Unipile voice note

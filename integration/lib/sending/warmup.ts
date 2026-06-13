@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Warm-up engine
+ * RecruitersOS · Warm-up engine
  * Ramps each mailbox's daily cap on a slow, organic-looking curve and graduates
  * it from "warming" to "active" once it reaches a steady ceiling.
  *

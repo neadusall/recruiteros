@@ -1,11 +1,11 @@
-# RecruiterOS · LinkedIn Engine (integration)
+# RecruitersOS · LinkedIn Engine (integration)
 
-Drop-in LinkedIn outreach execution for the RecruiterOS framework. It enrolls
+Drop-in LinkedIn outreach execution for the RecruitersOS framework. It enrolls
 prospects into rapport-first sequences, personalizes every touch with AI, sends
 through a provider, keeps accounts safe with strict limits, and reacts to
 replies in real time.
 
-It is **not standalone**. It mounts into your existing RecruiterOS app
+It is **not standalone**. It mounts into your existing RecruitersOS app
 (Next.js App Router + TypeScript) and reuses your data store.
 
 ## Design goals
@@ -17,7 +17,7 @@ It is **not standalone**. It mounts into your existing RecruiterOS app
 - **Account safe by default.** Conservative daily caps, working-hours windows,
   and human-like jitter, enforced before any action runs.
 - **Framework agnostic persistence.** The engine talks to a `Repository`
-  interface, so it sits on Prisma/Postgres or whatever RecruiterOS already uses.
+  interface, so it sits on Prisma/Postgres or whatever RecruitersOS already uses.
 
 ## Folder layout
 
@@ -32,7 +32,7 @@ integration/
     sequenceEngine.ts  The cadence brain (run steps, accept-triggers, pause)
     repository.ts      Persistence boundary (+ in-memory reference impl)
     auth.ts            Bearer / cron / webhook-signature guards
-    sdk.ts             Typed client your RecruiterOS backend imports
+    sdk.ts             Typed client your RecruitersOS backend imports
   app/api/linkedin/
     enroll/route.ts    POST enroll a prospect into a sequence
     actions/route.ts   POST fire a single action now
@@ -46,7 +46,7 @@ integration/
 
 ```bash
 npm i @anthropic-ai/sdk
-# copy the integration/ folder into your RecruiterOS app, then:
+# copy the integration/ folder into your RecruitersOS app, then:
 cp integration/.env.example .env.local   # fill in values
 ```
 
@@ -71,7 +71,7 @@ The internal adapter POSTs to `/connect`, `/message`, `/inmail`, `/voice`,
 `/view`, `/endorse`, `/withdraw`, `/resolve`, `/messages` on your service and
 expects an `ActionResult`-shaped reply. Match those and the engine just works.
 
-## Use it from RecruiterOS
+## Use it from RecruitersOS
 
 ```ts
 import { LinkedInClient } from "@/integration/lib/linkedin/sdk";

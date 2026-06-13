@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · In-Market · US-only geo filter
+ * RecruitersOS · In-Market · US-only geo filter
  *
  * The recruiter only works United States roles, so the pool, the live search, and the
  * background accumulator all filter to US locations — anything we can't positively confirm

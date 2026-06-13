@@ -1,8 +1,8 @@
-# RecruiterOS · Copy & Persuasion Playbook
+# RecruitersOS · Copy & Persuasion Playbook
 
 **Baseline:** Edward L. Bernays, *Propaganda* (1928) — the foundational text on
 influencing mass behavior. This playbook translates its principles into concrete rules
-for every word RecruiterOS publishes: the **website** and the **correspondence** (the
+for every word RecruitersOS publishes: the **website** and the **correspondence** (the
 recruiter→prospect and recruiter→candidate messages the platform sends).
 
 **The one idea that governs everything (Bernays' "interest coincidence"):**
@@ -91,7 +91,7 @@ Each principle below is stated in Bernays' terms, then mapped to **website copy*
 ### 9. Stereotype leverage — ride the belief they already hold
 - **Bernays:** use existing mental patterns instead of fighting them.
 - **Website:** recruiters already believe cold outreach is dying and timing wins. Agree
-  loudly, then position RecruiterOS as the obvious answer to a belief they already hold.
+  loudly, then position RecruitersOS as the obvious answer to a belief they already hold.
 - **Correspondence:** candidates already believe the 3–4 year mark is "time to look."
   Name it; don't argue it.
 
@@ -114,7 +114,7 @@ Each principle below is stated in Bernays' terms, then mapped to **website copy*
 5. **CTA** = a low-friction next step phrased as their gain, not our demand.
 
 **Voice rules (carry the existing brand standards):**
-- No em/en dashes — use commas. All money in USD ($). RecruiterOS wordmark, no "R" badge.
+- No em/en dashes — use commas. All money in USD ($). RecruitersOS wordmark, no "R" badge.
 - Second person ("you"), present tense, active voice.
 - One idea per sentence. Cut every adjective that a number could replace.
 - Each page owns ONE charged phrase and repeats it; the site shares a small vocabulary of

@@ -1,4 +1,4 @@
-/* RecruiterOS · Password reset client
+/* RecruitersOS · Password reset client
  *
  * Powers two pages against the real backend (no demo mode):
  *   forgot-password.html -> request a reset link (POST /api/auth/reset)

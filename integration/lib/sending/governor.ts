@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Deliverability governor
+ * RecruitersOS · Deliverability governor
  * The supervisor that pauses a mailbox/domain BEFORE it burns a pool. Evaluates
  * rolling metrics + reputation against hard thresholds and trips a pause with a
  * reason. Runs after every webhook update and on the daily tick.

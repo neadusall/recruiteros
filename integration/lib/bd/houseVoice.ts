@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · BD · House voice
+ * RecruitersOS · BD · House voice
  * The writing craft + persuasion logic injected (cached) into every BD content
  * engine, so all generated copy reads human and wins the reader the right way.
  * Craft rules adapted for outreach; persuasion grounded in Bernays' interest

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · AI Vetting · Qualifier extraction
+ * RecruitersOS · AI Vetting · Qualifier extraction
  *
  * The recruiter shouldn't have to hand-write screening questions. Given a job
  * description, one LLM pass pulls the TOP 3-4 things a first phone-screen must

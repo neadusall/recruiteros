@@ -2,7 +2,7 @@
 
 > **Decision (owner, this thread):** do NOT use Instantly or Winnr. Build our own sending
 > stack — domains, mailboxes, MTA(s), warm-up, deliverability monitoring — and plug it into
-> the existing RecruiterOS campaign engine. This doc is the concrete build plan, the cost
+> the existing RecruitersOS campaign engine. This doc is the concrete build plan, the cost
 > model, the real risks, and the phased rollout.
 >
 > Pairs with [`../INFRASTRUCTURE.md`](../INFRASTRUCTURE.md) §7b/§9.1 (this replaces the
@@ -22,7 +22,7 @@ inbox placement at scale."* That is exactly right, and it drives the whole plan:
    function**, not a one-time build.
 3. **Target volume (owner-set): 20,000–30,000 emails/month.** This is the real number — ~10×
    smaller than the 500-mailbox spec. The 500/30-server build is sized for 150k–500k/mo and is
-   **not needed** unless RecruiterOS goes multi-tenant/agency. At 20–30K/mo the right-sized,
+   **not needed** unless RecruitersOS goes multi-tenant/agency. At 20–30K/mo the right-sized,
    production-grade footprint is:
 
    | Component | Right-sized for 20–30K/mo | Why |
@@ -47,7 +47,7 @@ spend on 50–100 domains and 30 servers.
 ## 1. Architecture (target)
 
 ```
-  RecruiterOS app (cadence/campaignFlow)         ← already built
+  RecruitersOS app (cadence/campaignFlow)         ← already built
         │  dispatch(touch) via lib/channels
         ▼
   lib/providers/mta.ts  (NEW: our sending provider, swaps Instantly)
@@ -71,7 +71,7 @@ spend on 50–100 domains and 30 servers.
 
 ## 2. The 9 layers → concrete choices + where they live in code
 
-| Layer (your spec) | Choice / decision | RecruiterOS home |
+| Layer (your spec) | Choice / decision | RecruitersOS home |
 |---|---|---|
 | **1. Domains** | 5–8 to start → 50–100 at scale. Lookalike, NOT the corp domain. Register via Cloudflare/Porkbun (cheap + API for DNS automation). | `lib/sending/domains.ts` (registry + state) |
 | **2. DNS** | Per domain: SPF (`v=spf1 include:<mta> ~all`), DKIM 2048-bit, DMARC (`p=none`→`quarantine`→`reject`), PTR/rDNS matching mail host. Automate via Cloudflare API. | `lib/sending/dns.ts` (generate + verify records) |
@@ -200,7 +200,7 @@ enrichment+AI). 30K sends ÷ 3 touches ≈ 10K prospects → ~$110/mo variable. 
 > work you now own (manageable at this scale: ~10 min/day with the governor + dashboard).
 
 ### 4b. Future scale only — 500-mailbox / 30-server (~150k–500k sends/mo, NOT the current plan)
-Documented for reference; only relevant if RecruiterOS goes multi-tenant/agency. **Skip for now.**
+Documented for reference; only relevant if RecruitersOS goes multi-tenant/agency. **Skip for now.**
 
 | Item | Qty | Unit | Monthly |
 |---|---|---|---|

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · BD · MPC (Most Placeable Candidate) messaging
+ * RecruitersOS · BD · MPC (Most Placeable Candidate) messaging
  *
  * The forward model in the A/B test. Where personaMessaging earns a conversation
  * with advisory insight, this one LEADS WITH THE ASSET: a specific, high-caliber

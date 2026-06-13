@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Billing (OWNER ONLY)
+ * RecruitersOS · Billing (OWNER ONLY)
  * Cost-rate catalog, pricing engine, and the usage ledger in one import.
  *
  *   import { estimateCost, recommendPrice, recordUsage, spendRollup } from "../billing";

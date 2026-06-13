@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · In-Market · Verified direct-dial resolver (opt-in)
+ * RecruitersOS · In-Market · Verified direct-dial resolver (opt-in)
  *
  * Resolves the SPECIFIC person's OWN direct line, with two hard guarantees:
  *   1. PERSON-DIRECT, never a switchboard — the Apify "Direct Dials" actor (PDL-backed)

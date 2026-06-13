@@ -2,7 +2,7 @@
  * POST /api/email/send
  * Send one outreach email through the OWNED MTA (self-hosted Postal) sending
  * infrastructure — the server-to-server entry point the scheduler / n8n /
- * RecruiterOS backend calls to fire a single email. Mirrors /api/sms/send and
+ * RecruitersOS backend calls to fire a single email. Mirrors /api/sms/send and
  * /api/voice/dial (bearer-authed via RECRUITEROS_API_TOKEN).
  *
  * Body: { workspaceId, prospect, subject, html, voiceCampaignId? }

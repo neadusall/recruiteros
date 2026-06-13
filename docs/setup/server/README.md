@@ -1,6 +1,6 @@
 # `setup/server/` — get the app live
 
-Everything to take RecruiterOS from nothing to a working HTTPS URL. Follow the numbered guides in
+Everything to take RecruitersOS from nothing to a working HTTPS URL. Follow the numbered guides in
 order for a fresh install.
 
 | File | What it covers |

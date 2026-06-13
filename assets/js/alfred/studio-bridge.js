@@ -1,6 +1,6 @@
 /* ============================================================
    Studio ⇆ Extension bridge (portal side).
-   Lets the RecruiterOS portal drive the browser extension:
+   Lets the RecruitersOS portal drive the browser extension:
    connect the real LinkedIn account, kick off Sales Navigator
    scrapes, pull datasets, and route outreach through the user's
    own session.
@@ -28,7 +28,7 @@
     const hasChrome = !!(g.chrome && g.chrome.runtime && g.chrome.runtime.sendMessage);
     const proto = (g.location && g.location.protocol) || '';
     const okOrigin = proto === 'http:' || proto === 'https:';
-    if (!hasChrome) return { canReach: false, reason: proto === 'file:' ? 'Open the portal at http://localhost (run START-STUDIO.ps1), not from a file. Then load the extension.' : 'No Chromium extension API found. Use Chrome/Edge with the RecruiterOS extension installed.' };
+    if (!hasChrome) return { canReach: false, reason: proto === 'file:' ? 'Open the portal at http://localhost (run START-STUDIO.ps1), not from a file. Then load the extension.' : 'No Chromium extension API found. Use Chrome/Edge with the RecruitersOS extension installed.' };
     if (!okOrigin) return { canReach: false, reason: 'Serve the portal over http(s) so it can reach the extension.' };
     if (!extId) return { canReach: false, reason: 'Paste the extension ID from chrome://extensions.' };
     return { canReach: true };

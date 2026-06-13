@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# RecruiterOS, one-shot server bootstrap.
+# RecruitersOS, one-shot server bootstrap.
 # Run this ONCE on a fresh Hetzner Ubuntu server as root:
 #
 #   curl -fsSL https://raw.githubusercontent.com/neadusall/recruiteros/main/deploy.sh | bash
@@ -202,7 +202,7 @@ docker compose ps
 cat <<EOF
 
 ------------------------------------------------------------
-RecruiterOS is starting.
+RecruitersOS is starting.
 
 1) Point DNS at this server in GoDaddy (recruitersos.co -> DNS):
      A   @       $(curl -s -4 ifconfig.me 2>/dev/null || echo YOUR_SERVER_IP)

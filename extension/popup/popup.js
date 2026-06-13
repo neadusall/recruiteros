@@ -108,7 +108,7 @@
     const r = await send({ type: 'ros.testPush' });
     b.disabled = false; b.textContent = '🔌 Test portal connection';
     if (!r) { flash('No response from the extension worker.'); return; }
-    if (r.ok) flash('✓ Portal reachable — a "RecruiterOS Test" prospect was added. Check Prospects, then delete it.');
+    if (r.ok) flash('✓ Portal reachable — a "RecruitersOS Test" prospect was added. Check Prospects, then delete it.');
     else if (r.noBackend || !r.base) flash('✗ Not connected — open the portal → Enrich LinkedIn searches → Connect this workspace.');
     else if (!r.hasToken) flash('✗ No ingest token — click Connect this workspace in the portal.');
     else flash('✗ Failed posting to ' + r.base + ' → ' + (r.error || 'unknown'));
@@ -135,7 +135,7 @@
     });
   });
 
-  // Outreach + Settings are managed in the RecruiterOS portal now — no handlers here.
+  // Outreach + Settings are managed in the RecruitersOS portal now — no handlers here.
 
   refresh();
   setInterval(refresh, 2500);

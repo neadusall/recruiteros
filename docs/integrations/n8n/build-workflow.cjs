@@ -1,5 +1,5 @@
 /**
- * Generator for the RecruiterOS "Multi-Channel Outreach Router (4 Scenarios)"
+ * Generator for the RecruitersOS "Multi-Channel Outreach Router (4 Scenarios)"
  * n8n workflow. Run:  node docs/integrations/n8n/build-workflow.cjs
  * Emits recruiteros-outreach-router.json next to this file.
  *
@@ -22,7 +22,7 @@ const classifyCode = `
 const CONFIG = {
   baseUrl: 'https://YOUR-RECRUITEROS-HOST',   // your app origin, NO trailing slash
   defaultCampaignId: 'CHANGE_ME',             // fallback campaign id
-  voiceNoteThreshold: 80,                      // warmth gate for voice (RecruiterOS default)
+  voiceNoteThreshold: 80,                      // warmth gate for voice (RecruitersOS default)
 };
 // =========================================================================
 
@@ -124,7 +124,7 @@ const scenarioPlans = {
     sequenceTag: "scenario-2-multichannel",
     contentTypes: "value_prop,case_study,comp_benchmark",
     channels: "email, linkedin_connect, linkedin_message, voice_drop, linkedin_voice_note",
-    note: "Cold decision-maker. Full 28-day anatomy: 7 email touches + 6 LinkedIn touches; voice note unlocks only once warmth >= threshold. Connect-before-DM enforced by RecruiterOS.",
+    note: "Cold decision-maker. Full 28-day anatomy: 7 email touches + 6 LinkedIn touches; voice note unlocks only once warmth >= threshold. Connect-before-DM enforced by RecruitersOS.",
   },
   3: {
     methodology: "hiring_manager_outreach",
@@ -249,7 +249,7 @@ const httpGet = (name, urlExpr, pos) => ({
   type: "n8n-nodes-base.httpRequest",
   typeVersion: 4.2,
   position: pos,
-  credentials: { httpHeaderAuth: { id: "REPLACE_WITH_CREDENTIAL_ID", name: "RecruiterOS API" } },
+  credentials: { httpHeaderAuth: { id: "REPLACE_WITH_CREDENTIAL_ID", name: "RecruitersOS API" } },
 });
 
 const httpPost = (name, urlExpr, bodyExpr, pos) => ({
@@ -268,7 +268,7 @@ const httpPost = (name, urlExpr, bodyExpr, pos) => ({
   type: "n8n-nodes-base.httpRequest",
   typeVersion: 4.2,
   position: pos,
-  credentials: { httpHeaderAuth: { id: "REPLACE_WITH_CREDENTIAL_ID", name: "RecruiterOS API" } },
+  credentials: { httpHeaderAuth: { id: "REPLACE_WITH_CREDENTIAL_ID", name: "RecruitersOS API" } },
 });
 
 const codeNode = (name, code, pos) => ({
@@ -425,7 +425,7 @@ link("Craft Preview", "Trigger Cadence Draft");
 link("Trigger Cadence Draft", "Respond");
 
 const workflow = {
-  name: "RecruiterOS - Multi-Channel Outreach Router (4 Scenarios)",
+  name: "RecruitersOS - Multi-Channel Outreach Router (4 Scenarios)",
   nodes,
   connections,
   active: false,

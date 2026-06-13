@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · BD · The earned ask (conversion layer)
+ * RecruitersOS · BD · The earned ask (conversion layer)
  *
  * The opener + nurture deliberately never pitch — they earn attention. THIS is
  * where attention becomes a booked call, tactfully: once a prospect engages (a

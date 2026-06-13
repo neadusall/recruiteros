@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Content Library — Resolver
+ * RecruitersOS · Content Library — Resolver
  *
  * The pull engine. Given parameters (function × seniority × industry × signal ×
  * motion) it selects the right fragment packs, composes them into the multi-channel
@@ -215,7 +215,7 @@ function renderTouch(
 
 /**
  * Pull the full multi-channel sequence for a lead, by parameters. The warmth gate
- * mirrors RecruiterOS: hot-only touches (voicemail drop, LinkedIn voice note) are
+ * mirrors RecruitersOS: hot-only touches (voicemail drop, LinkedIn voice note) are
  * included only when warmth >= the voice threshold (default 80).
  */
 export function craftSequence(q: ContentQuery): CraftedSequence {

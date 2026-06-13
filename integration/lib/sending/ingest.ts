@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Delivery-event ingest
+ * RecruitersOS · Delivery-event ingest
  * Apply a normalized delivery event (from the Postal webhook) to the metrics +
  * suppression + governor. One entry point so the webhook stays thin.
  */

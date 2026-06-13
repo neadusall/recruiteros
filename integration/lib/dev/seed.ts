@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Dev seeder
+ * RecruitersOS · Dev seeder
  * Populates the in-memory stores so a freshly deployed instance shows a live
  * Overview, a full Response inbox, and a pipeline, without any external calls.
  * Safe to call repeatedly (idempotent per workspace via a guard).

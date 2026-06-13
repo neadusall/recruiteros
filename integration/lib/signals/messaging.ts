@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine
+ * RecruitersOS · Signal Engine
  * Signal-grounded outreach generation.
  *
  * Turns a campaign target (a company/person + the signal that surfaced them) into a
@@ -175,7 +175,7 @@ export async function draftSequence(
   const circumstance = circumstanceLine(signal);
   const relate = relateLine(signal);
   const first = ctx.firstName ?? ctx.fullName?.split(/\s+/)[0] ?? "there";
-  const sender = ctx.sender ?? "the RecruiterOS team";
+  const sender = ctx.sender ?? "the RecruitersOS team";
   const recognition = recognitionLine(signal, ctx);
 
   const steps: DraftedMessage[] = [];

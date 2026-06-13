@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Providers
+ * RecruitersOS · Providers
  * Shared HTTP base for every external integration.
  *
  * One consistent client so each provider file is just endpoints + shapes:

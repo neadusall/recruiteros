@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Channels
+ * RecruitersOS · Channels
  * The send layer: one façade that routes a touch to the right provider, and the
  * enrichment waterfall. This is what the daily cadence calls at 9:00 to push
  * approved drafts, and at 7:30 to resolve contacts.

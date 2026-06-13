@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Public API
+ * RecruitersOS · Public API
  * Barrel — mount the platform API in a few lines.
  *
  *   import { nextHandler, memoryKeyStore, issueKey } from "@/integration/api";

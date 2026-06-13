@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · BD · Draft content builder
+ * RecruitersOS · BD · Draft content builder
  * Shared helper that turns a lead/prospect into the n8n-ready outreach payload:
  * runs the persona engine, flattens the channels, and renders the LinkedIn
  * voice-note script into a cloned-voice clip. Used by both POST /api/bd/draft

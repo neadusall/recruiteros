@@ -26,7 +26,7 @@ Recruiter reads the scorecard in the AI Vetting tab.
 ```
 
 The real-time STT→LLM→cloned-voice-TTS loop (with barge-in and turn detection)
-is delegated to **Telnyx AI Assistant**. RecruiterOS owns everything else: the
+is delegated to **Telnyx AI Assistant**. RecruitersOS owns everything else: the
 JD↔number binding, candidate context + LinkedIn enrichment, the human-likeness
 instructions (`lib/vetting/prompt.ts`), and the scoring (`lib/vetting/scoring.ts`).
 Swapping the engine later is a one-file change (`lib/vetting/assistant.ts`).

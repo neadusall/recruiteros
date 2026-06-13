@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Owner · Cost config (OWNER ONLY)
+ * RecruitersOS · Owner · Cost config (OWNER ONLY)
  *
  * Runtime overrides for the cost model so the owner can tune rates and the
  * pricing constants (sequence length, sends/inbox, target margin, ...) from the

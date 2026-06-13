@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Sending infrastructure
+ * RecruitersOS · Sending infrastructure
  * Public barrel for the owned cold-email stack (domains, mailboxes, MTA servers,
  * DNS automation). Import from here.
  */

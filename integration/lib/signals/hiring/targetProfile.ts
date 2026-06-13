@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Hiring Engine
+ * RecruitersOS · Hiring Engine
  * Target-profile inference — turn a posted role into "who manages it."
  *
  * Indeed almost never names the hiring manager. But the manager over a role is, with high

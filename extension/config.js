@@ -8,7 +8,7 @@
   g.ROS_CONFIG = {
     // Host outreach tool this extension reports to. Captured leads, scraped
     // datasets, and action results POST here. Leave '' to stay local-only.
-    // For RecruiterOS this points at the live backend; paste your ingest token
+    // For RecruitersOS this points at the live backend; paste your ingest token
     // from the app (Prospects -> 🔗 Connect extension) into backendApiKey.
     backendBaseUrl: 'https://recruitersos.co/api/linkedin',
     backendApiKey: '',             // paste your ext-token (sent as Authorization: Bearer <token>)
@@ -44,6 +44,6 @@
     },
 
     tickMinutes: 1,
-    brand: { name: 'RecruiterOS Outreach', accent: '#7c5cff' },
+    brand: { name: 'RecruitersOS Outreach', accent: '#7c5cff' },
   };
 })(typeof self !== 'undefined' ? self : this);

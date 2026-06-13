@@ -1,4 +1,4 @@
-# `setup/` — stand up and configure RecruiterOS
+# `setup/` — stand up and configure RecruitersOS
 
 Step-by-step guides for getting the platform **running** and **connected to its channels**. If you're
 deploying for the first time or switching on a new outreach channel, you're in the right place.

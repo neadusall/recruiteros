@@ -1,12 +1,12 @@
 /**
- * RecruiterOS · Texting Platform (the Money Maker)
+ * RecruitersOS · Texting Platform (the Money Maker)
  * SMS provider abstraction + Telnyx implementation.
  *
  * Texting is the channel candidates actually answer, so it is a first-class
  * part of the system, not a bolt-on. The engine talks to `SmsProvider`; swap
  * Telnyx for your own gateway by implementing this interface.
  *
- * Reuses the already-built Telnyx telephony setup (see the RecruiterOS phone
+ * Reuses the already-built Telnyx telephony setup (see the RecruitersOS phone
  * project): same account, same numbers, same messaging profile.
  */
 

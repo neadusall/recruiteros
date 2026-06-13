@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Campaigns
+ * RecruitersOS · Campaigns
  * A/B variant selection + the kill rule.
  *
  * Reference framework: ONE variable per campaign, 50/50 baseline, >= 200 sends

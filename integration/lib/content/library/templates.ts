@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Content Library — Multi-channel touch templates
+ * RecruitersOS · Content Library — Multi-channel touch templates
  *
  * The 28-day sequence anatomy (lib/campaigns/sequence.ts) as composable templates.
  * Each body carries SLOT TOKENS the resolver fills from the selected fragment packs

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Overview
+ * RecruitersOS · Overview
  * The real-time dashboard rollup: capacity, pipeline health, and the day's
  * appointments / warm conversations / active drips. Pure read model computed
  * from the core store + accounts + inbox.

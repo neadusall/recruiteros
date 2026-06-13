@@ -1,6 +1,6 @@
 # Resend email setup, step by step (password reset, magic links)
 
-Goal: make RecruiterOS actually send emails (password reset, magic sign-in,
+Goal: make RecruitersOS actually send emails (password reset, magic sign-in,
 verification) from your own domain recruitersos.co.
 
 There are 4 parts:
@@ -98,11 +98,11 @@ PART C, Put the key on the server + redeploy
 
 4. Find these two lines (they already exist, currently blank). Set them:
        RESEND_API_KEY=re_paste_your_key_here
-       EMAIL_FROM=RecruiterOS <no-reply@recruitersos.co>
+       EMAIL_FROM=RecruitersOS <no-reply@recruitersos.co>
 
    - If your domain is NOT verified yet (Part B still pending) and you want to
      test NOW, temporarily use the sandbox sender instead:
-       EMAIL_FROM=RecruiterOS <onboarding@resend.dev>
+       EMAIL_FROM=RecruitersOS <onboarding@resend.dev>
      (Sandbox can only email YOUR OWN Resend account address. Switch to the
       no-reply@recruitersos.co line once the domain shows Verified.)
 
@@ -121,7 +121,7 @@ PART D, Test it
 1. Go to:  https://recruitersos.co/forgot-password
 2. Enter the email of a real account (for the first test, use the email you
    signed up to Resend with, especially if still on the sandbox sender).
-3. Submit. Within a minute you should get a "Reset your RecruiterOS password"
+3. Submit. Within a minute you should get a "Reset your RecruitersOS password"
    email. Click the link -> it opens /reset-password -> set a new password.
 
 If no email arrives, check the server logs:

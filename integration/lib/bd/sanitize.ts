@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · BD · Copy sanitizer
+ * RecruitersOS · BD · Copy sanitizer
  * House rule: NO dashes of any kind in outbound copy (em, en, or hyphen). Delegates
  * to the canonical failsafe in lib/text/dashes so there is ONE implementation used
  * at every output boundary (content library, MPC, and this LLM path).

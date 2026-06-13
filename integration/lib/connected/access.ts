@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Connected · Access control (white-label credential isolation)
+ * RecruitersOS · Connected · Access control (white-label credential isolation)
  *
  * The deployment env holds the HOUSE (operator) integration keys — Telnyx,
  * enrichment, RapidAPI, etc. In a single-operator world those keys were

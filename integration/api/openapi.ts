@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Public API
+ * RecruitersOS · Public API
  * Machine-readable OpenAPI 3.1 description.
  *
  * Serve this at `/v1/openapi.json` so integrators can generate typed clients, import the
@@ -13,7 +13,7 @@
 export const OPENAPI = {
   openapi: "3.1.0",
   info: {
-    title: "RecruiterOS Signal & Enrichment API",
+    title: "RecruitersOS Signal & Enrichment API",
     version: "1.0.0",
     description:
       "Find companies that are hiring and the hiring managers behind the roles, then " +
@@ -70,7 +70,7 @@ export const OPENAPI = {
   paths: {
     "/v1/signals/catalog": {
       get: {
-        summary: "List every hiring signal RecruiterOS detects",
+        summary: "List every hiring signal RecruitersOS detects",
         parameters: [
           { name: "motion", in: "query", schema: { type: "string", enum: ["recruiting", "business_dev"] } },
         ],
@@ -144,7 +144,7 @@ export const OPENAPI = {
     },
     "/v1/signals/ingest": {
       post: {
-        summary: "Push your own signal into RecruiterOS",
+        summary: "Push your own signal into RecruitersOS",
         requestBody: {
           required: true,
           content: {

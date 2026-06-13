@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Voice Drops · Store
+ * RecruitersOS · Voice Drops · Store
  *
  * In-memory reference store + debounced snapshot (SNAP_KEY "voice_drops"),
  * exactly like the billing ledger: survives restarts when DATABASE_URL / a file

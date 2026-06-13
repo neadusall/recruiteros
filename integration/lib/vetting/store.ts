@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · AI Vetting · Store
+ * RecruitersOS · AI Vetting · Store
  *
  * In-memory reference store + debounced snapshot (SNAP_KEY "ai_vetting"), the
  * same durability contract as Voice Drops and the billing ledger: survives

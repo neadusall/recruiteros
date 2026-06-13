@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Providers · Telnyx (SMS 10DLC + voice with AMD)
+ * RecruitersOS · Providers · Telnyx (SMS 10DLC + voice with AMD)
  * Base: https://api.telnyx.com/v2 · Auth: Bearer.
  * Used for: raw 10DLC SMS, and the BD/recruiting voice dialer with Premium
  * answering-machine detection (humans -> warm transfer, machines -> voicemail).

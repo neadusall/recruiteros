@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · In-Market signal pool
+ * RecruitersOS · In-Market signal pool
  *
  * A persistent, deduped index of hiring-signal leads accumulated in the background so
  * searches read from a deep pool (thousands of companies) instead of hitting providers

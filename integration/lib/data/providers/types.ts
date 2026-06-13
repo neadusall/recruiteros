@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Data providers
+ * RecruitersOS · Data providers
  * The seam between the warehouse and an external people-data source.
  *
  * Every ingestion path normalizes to DataRecordInput, so the warehouse, the Data

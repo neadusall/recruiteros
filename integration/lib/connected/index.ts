@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Connected
+ * RecruitersOS · Connected
  * Integration pre-flight + in-portal setup. Each integration is connected right
  * here: enter its keys, follow the steps, hit Test. Status walks Red
  * (unconfigured) -> Yellow (keys saved, unverified) -> Green (test passed).
@@ -12,7 +12,7 @@
  * Instantly (email) and SalesRobot (LinkedIn) are intentionally NOT in the
  * catalog: email sends through the self-hosted sending infrastructure (Setup ->
  * Email sending) and LinkedIn through the managed "LinkedIn Automation"
- * integration (Unipile-backed, RecruiterOS-provided — the admin connects a seat,
+ * integration (Unipile-backed, RecruitersOS-provided — the admin connects a seat,
  * not a key). Their provider clients remain in the registry as optional
  * fallbacks, just not surfaced as setup steps.
  */
@@ -81,7 +81,7 @@ const CATALOG: IntegrationMeta[] = [
     label: "LinkedIn Automation",
     blurb: "Sends connection invites, DMs and voice notes from your LinkedIn seats — fully managed for you, no API key to set up.",
     requiredFor: ["bd", "recruiting"],
-    // Managed: RecruiterOS provides the underlying automation account (server-side
+    // Managed: RecruitersOS provides the underlying automation account (server-side
     // UNIPILE_API_KEY), so the admin never enters a key. They only connect their
     // own LinkedIn seat through the hosted sign-in. The optional account id lets a
     // workspace pin a specific connected seat once linked.

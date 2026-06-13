@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine
+ * RecruitersOS · Signal Engine
  * Pre-launch campaign builder.
  *
  * The product flow the user asked for: "build out a campaign BEFORE we launch a campaign,

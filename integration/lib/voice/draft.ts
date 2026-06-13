@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Voice Drops · AI script drafter
+ * RecruitersOS · Voice Drops · AI script drafter
  *
  * The voicemail script the operator types is only an EXAMPLE. In practice the
  * script is customized per lead by an LLM that follows a fixed set of parameters

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · LinkedIn Engine
+ * RecruitersOS · LinkedIn Engine
  * AI classification of inbound replies.
  *
  * Mirrors the Response inbox auto-classification: every reply is sorted by

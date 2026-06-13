@@ -1,4 +1,4 @@
-/* RecruiterOS · Owner Console (private, owner-only)
+/* RecruitersOS · Owner Console (private, owner-only)
  *
  * The single-operator back office: business overview, pricing brain, unified
  * spend, full account control (see everyone, hard reset, delete), and the
@@ -1027,7 +1027,7 @@
     $("#rcCopy").addEventListener("click", function () { try { navigator.clipboard.writeText(blob); toast("Copied"); } catch (e) { toast("Select and copy"); } });
     $("#rcDownload").addEventListener("click", function () {
       var a = document.createElement("a");
-      a.href = "data:text/plain;charset=utf-8," + encodeURIComponent("RecruiterOS 2FA recovery codes\n\n" + blob + "\n");
+      a.href = "data:text/plain;charset=utf-8," + encodeURIComponent("RecruitersOS 2FA recovery codes\n\n" + blob + "\n");
       a.download = "recruiteros-recovery-codes.txt"; a.click();
     });
     $("#rcDone").addEventListener("click", function () { toast("2FA enabled"); viewSecurity(); });

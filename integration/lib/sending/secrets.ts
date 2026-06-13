@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Sending secrets at rest
+ * RecruitersOS · Sending secrets at rest
  * Encrypts seed-inbox app passwords (and any other sending secret) before they hit
  * the KV snapshot, so a leaked snapshot doesn't hand over a pile of real mailbox
  * logins. AES-256-GCM, keyed by SENDING_SECRET_KEY.

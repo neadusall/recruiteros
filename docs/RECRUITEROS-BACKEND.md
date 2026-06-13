@@ -2,7 +2,7 @@
 
 > Companion to CLAUDE.md. That file is the **brain** (who to contact + what to say, daily).
 > This file is the **machine** that actually sends, tracks opens, and fires voice drops.
-> RecruiterOS is YOUR app (UI + orchestration). The engines below plug into its backend.
+> RecruitersOS is YOUR app (UI + orchestration). The engines below plug into its backend.
 >
 > **Email-stack note (read first):** the email sender is **self-hosted** — our own domains,
 > mailboxes, **Postal MTA**, warm-up, and deliverability monitoring (see
@@ -36,7 +36,7 @@
                              └── Claude Code: builds these integrations + runs CLAUDE.md daily
 ```
 
-**Key rule:** RecruiterOS must OWN the email-open event (inject its own tracking pixel when
+**Key rule:** RecruitersOS must OWN the email-open event (inject its own tracking pixel when
 sending through our own mailboxes via Postal SMTP/API). The voice-drop trigger depends on it.
 Self-hosting makes this native — we control the MTA, so the pixel and the open/bounce/complaint
 webhooks are all ours.
@@ -189,10 +189,10 @@ Voice-drop worker:
 
 ## 5. INTEGRATION SPECS (what Claude Code needs to call)
 
-**Email sender — self-hosted MTA (Postal), the chosen stack.** RecruiterOS sends from **our own
+**Email sender — self-hosted MTA (Postal), the chosen stack.** RecruitersOS sends from **our own
 warmed mailboxes on our own domains**, through **Postal** (open-source MTA: HTTP API + SMTP, per-domain
 DKIM, suppression, delivery/bounce/complaint webhooks — built for programmatic SaaS sending). We own the
-tracking pixel so RecruiterOS owns the open event natively. The full architecture, the 9 infra layers, the
+tracking pixel so RecruitersOS owns the open event natively. The full architecture, the 9 infra layers, the
 deliverability engine (bounce/complaint/reputation/inbox-placement/abuse-prevention/auto-pause), the cost
 model, the risks, and the phased rollout live in
 [`design/self-hosted-email-infrastructure.md`](design/self-hosted-email-infrastructure.md). Code home:
@@ -312,7 +312,7 @@ on test contacts before touching production volume.
 
 ---
 
-## 8. AUDIT-FIRST CLAUDE CODE PROMPT — paste this in your RecruiterOS repo
+## 8. AUDIT-FIRST CLAUDE CODE PROMPT — paste this in your RecruitersOS repo
 
 > Read RECRUITEROS-BACKEND.md and CLAUDE.md. Do NOT change any code yet.
 >

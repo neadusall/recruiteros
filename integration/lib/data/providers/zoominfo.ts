@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · ZoomInfo provider (official API adapter)
+ * RecruitersOS · ZoomInfo provider (official API adapter)
  *
  * This is the DROP-IN for when the official ZoomInfo Enterprise API key arrives.
  * It is dormant until both env vars are set:

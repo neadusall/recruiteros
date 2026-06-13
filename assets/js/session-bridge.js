@@ -1,4 +1,4 @@
-/* RecruiterOS · Session bridge
+/* RecruitersOS · Session bridge
  * Runs before command.js. If there's no local ctx (e.g. the user just signed in
  * with LinkedIn and only has the HttpOnly session cookie), fetch the session
  * from the API and store it, so the portal boots without bouncing to login.

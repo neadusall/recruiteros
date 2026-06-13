@@ -5,7 +5,7 @@
  * Body: { prospect: Prospect, sequenceId: string, accountId: string }
  * Returns: { enrollment: Enrollment }
  *
- * This is the primary call RecruiterOS makes to start LinkedIn outreach.
+ * This is the primary call RecruitersOS makes to start LinkedIn outreach.
  */
 
 import { NextResponse } from "next/server";

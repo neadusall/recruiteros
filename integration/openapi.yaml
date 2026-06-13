@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: RecruiterOS LinkedIn Engine API
+  title: RecruitersOS LinkedIn Engine API
   version: "1.0.0"
   description: >
-    Execution API for LinkedIn outreach inside the RecruiterOS framework.
+    Execution API for LinkedIn outreach inside the RecruitersOS framework.
     Enroll prospects into rapport-first sequences, fire one-off actions,
     receive provider webhooks, and drive the cadence on a schedule.
     The engine is provider agnostic: integrate an external API (Unipile) or

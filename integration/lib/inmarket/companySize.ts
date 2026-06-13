@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Free company-size resolution
+ * RecruitersOS · Free company-size resolution
  *
  * Fills in a company's headcount band so the In-Market size filter is actually useful,
  * using ONLY free, keyless sources:
@@ -24,7 +24,7 @@ type Band = "1-10" | "11-50" | "51-200" | "201-500" | "501-1000" | "1001-5000" |
 const CACHE_KEY = "inmarket_company_size_v1";
 const FRESH_MS = 60 * 24 * 60 * 60 * 1000;   // re-check a known size after 60 days
 const NEG_MS = 14 * 24 * 60 * 60 * 1000;     // re-try an unresolved company after 14 days
-const UA = "RecruiterOS/1.0 (https://recruitersos.co)";
+const UA = "RecruitersOS/1.0 (https://recruitersos.co)";
 
 /** Employee ceiling for the pool: we don't pursue enterprises bigger than this (SMB/mid-
  *  market focus). Enforced on AUTHORITATIVE counts only — a company is excluded only when we

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Accounts
+ * RecruitersOS · Accounts
  * LinkedIn sending accounts, sending domains, and API keys, with the health /
  * warmup automations from the reference Accounts tab.
  *

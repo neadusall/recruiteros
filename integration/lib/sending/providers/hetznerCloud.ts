@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Hetzner Cloud API client
+ * RecruitersOS · Hetzner Cloud API client
  * https://docs.hetzner.cloud — provisions the MTA server and (critically) sets
  * the PTR / reverse DNS on its IPv4, which is NOT a zone record and must be set
  * on the IP itself. Auth: HCLOUD_TOKEN. Dormant until the token is set.

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · JD Sourcing
+ * RecruitersOS · JD Sourcing
  *
  * Types for the "upload a JD → get a ranked list of likely-fit candidates" flow.
  *

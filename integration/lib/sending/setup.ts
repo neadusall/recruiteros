@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · One-click sending setup orchestrator
+ * RecruitersOS · One-click sending setup orchestrator
  *
  * Turns the half-day of manual clicking (provision VPS → install Postal → DNS →
  * create mailboxes) into a single "Set it up" call that the daily cron then drives

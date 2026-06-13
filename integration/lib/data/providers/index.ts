@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Data providers registry
+ * RecruitersOS · Data providers registry
  * One place to discover available providers and resolve one by id.
  */
 

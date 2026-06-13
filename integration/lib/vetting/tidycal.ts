@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · AI Vetting · TidyCal sync
+ * RecruitersOS · AI Vetting · TidyCal sync
  *
  * Turns TidyCal bookings into pre-researched candidates on the right vetting
  * desk. For each upcoming booking we read:

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Auth · Permissions (RBAC)
+ * RecruitersOS · Auth · Permissions (RBAC)
  *
  * Three roles, one capability matrix. The owner creates the workspace; admins
  * run it and add recruiters; recruiters (members) do the daily work but are

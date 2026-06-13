@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Auth
+ * RecruitersOS · Auth
  * Sign-up / sign-in / sessions / magic links for the enterprise login.
  *
  * Flow:
@@ -281,7 +281,7 @@ export async function requestMagicLink(email: string): Promise<{ sent: true }> {
   const key = normEmail(email);
   const token: EmailToken = { token: randomToken(), email: key, purpose: "magic_link", expiresAt: isoPlusHours(1) };
   store.emailTokens.set(token.token, token);
-  await sendEmail(key, "Your RecruiterOS sign-in link",
+  await sendEmail(key, "Your RecruitersOS sign-in link",
     `Sign in: ${appUrl()}/login?token=${token.token}`);
   return { sent: true };
 }
@@ -297,7 +297,7 @@ export async function requestPasswordReset(email: string): Promise<{ sent: true 
   if (user) {
     const token: EmailToken = { token: randomToken(), email: key, purpose: "reset_password", expiresAt: isoPlusHours(1) };
     store.emailTokens.set(token.token, token);
-    await sendEmail(key, "Reset your RecruiterOS password",
+    await sendEmail(key, "Reset your RecruitersOS password",
       `Reset your password: ${appUrl()}/reset-password.html?token=${token.token}`);
   }
   return { sent: true };
@@ -513,7 +513,7 @@ function issueSession(userId: string, workspaceId: string): Session {
 async function sendVerificationEmail(user: User): Promise<void> {
   const t: EmailToken = { token: randomToken(), email: user.email, purpose: "verify", expiresAt: isoPlusHours(24) };
   store.emailTokens.set(t.token, t);
-  await sendEmail(user.email, "Verify your RecruiterOS email",
+  await sendEmail(user.email, "Verify your RecruitersOS email",
     `Confirm your email: ${appUrl()}/verify?token=${t.token}`);
 }
 
@@ -521,12 +521,12 @@ async function sendVerificationEmail(user: User): Promise<void> {
 /**
  * Sends a real email when RESEND_API_KEY is set (Resend HTTP API), otherwise
  * logs to the console for local dev. EMAIL_FROM controls the sender; it must be
- * a verified domain/address in your Resend account (e.g. "RecruiterOS
+ * a verified domain/address in your Resend account (e.g. "RecruitersOS
  * <no-reply@recruitersos.co>").
  */
 async function sendEmail(to: string, subject: string, body: string, fromOverride?: string): Promise<void> {
   const key = process.env.RESEND_API_KEY;
-  const from = fromOverride || process.env.EMAIL_FROM || "RecruiterOS <onboarding@resend.dev>";
+  const from = fromOverride || process.env.EMAIL_FROM || "RecruitersOS <onboarding@resend.dev>";
   if (!key) {
     console.info(`[email] (no RESEND_API_KEY, logging only) -> ${to} :: ${subject}\n${body}`);
     return;
@@ -564,7 +564,7 @@ async function sendEmail(to: string, subject: string, body: string, fromOverride
 export function emailConfig(): { configured: boolean; from: string } {
   return {
     configured: Boolean(process.env.RESEND_API_KEY),
-    from: process.env.EMAIL_FROM || "RecruiterOS <onboarding@resend.dev>",
+    from: process.env.EMAIL_FROM || "RecruitersOS <onboarding@resend.dev>",
   };
 }
 
@@ -585,7 +585,7 @@ export interface EmailDiagnostic {
  */
 export async function sendDiagnosticEmail(to: string): Promise<EmailDiagnostic> {
   const key = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM || "RecruiterOS <onboarding@resend.dev>";
+  const from = process.env.EMAIL_FROM || "RecruitersOS <onboarding@resend.dev>";
   if (!key) {
     return { ok: false, reason: "no_provider", from, to,
       detail: "RESEND_API_KEY is not set in production — emails are only logged, never sent." };
@@ -596,9 +596,9 @@ export async function sendDiagnosticEmail(to: string): Promise<EmailDiagnostic> 
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         from, to: [to],
-        subject: "RecruiterOS email test",
-        text: "This is a test from your RecruiterOS owner console. If you received this, password-reset and verification emails will deliver.",
-        html: "This is a test from your RecruiterOS owner console. If you received this, password-reset and verification emails will deliver.",
+        subject: "RecruitersOS email test",
+        text: "This is a test from your RecruitersOS owner console. If you received this, password-reset and verification emails will deliver.",
+        html: "This is a test from your RecruitersOS owner console. If you received this, password-reset and verification emails will deliver.",
       }),
     });
     if (res.ok) return { ok: true, reason: "sent", status: res.status, from, to };

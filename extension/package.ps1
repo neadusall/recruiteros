@@ -1,4 +1,4 @@
-# Packages the RecruiterOS Chrome extension into a Web Store-ready zip.
+# Packages the RecruitersOS Chrome extension into a Web Store-ready zip.
 #   PS> ./extension/package.ps1
 # Output: dist/recruiteros-extension-<version>.zip (manifest.json at the zip root).
 $ErrorActionPreference = 'Stop'

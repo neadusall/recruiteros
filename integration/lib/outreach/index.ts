@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Outreach readiness
+ * RecruitersOS · Outreach readiness
  *
  * The Outreach tab's control surface. It composes one snapshot of everything a
  * customer must have working to send: the ATS connection, SMS (TalTxt), the

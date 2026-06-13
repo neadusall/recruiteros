@@ -1,4 +1,4 @@
-# RecruiterOS production image
+# RecruitersOS production image
 # Builds the Next.js app in integration/ (which also serves the marketing
 # pages + portal from public/ via the prebuild sync) and runs it on :3000.
 FROM node:22-alpine AS build

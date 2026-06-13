@@ -1,4 +1,4 @@
-# RecruiterOS, Go-Live Walkthrough (recruitersos.co on Hetzner)
+# RecruitersOS, Go-Live Walkthrough (recruitersos.co on Hetzner)
 
 Follow this top to bottom. It assumes nothing. ~20 minutes of work, then a wait
 for DNS. When you finish, https://recruitersos.co is live with HTTPS.
@@ -119,7 +119,7 @@ PART D, First load + HTTPS
 2. Open https://recruitersos.co
    - The first hit may take a few seconds while Caddy fetches the HTTPS
      certificate from Let's Encrypt. Refresh once if needed.
-   - You should land on the dark RecruiterOS homepage.
+   - You should land on the dark RecruitersOS homepage.
 3. Create your account at https://recruitersos.co/signup.html with your work
    email. A corporate-domain email provisions an enterprise workspace.
 

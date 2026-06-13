@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Content Library — Seniority tone
+ * RecruitersOS · Content Library — Seniority tone
  * Register + CTA discipline per level. The resolver uses `cta` to fill the
  * {{cta}} slot and picks the envelope by seniority (executives get shorter).
  */

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Hiring Engine
+ * RecruitersOS · Hiring Engine
  * Coverage + suppression — "Indeed only surfaces what the free sources didn't."
  *
  * The user's rule, verbatim: a gated source (Indeed) must NEVER re-touch a company the

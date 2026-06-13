@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · JD Sourcing — barrel.
+ * RecruitersOS · JD Sourcing — barrel.
  *
  * The flow: parseJobDescription (JD→ICP) → generateQueries (ICP→searches) →
  * runDiscovery (searches→ranked candidates) → saveSourcingRun (stage under a name) →

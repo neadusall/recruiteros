@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Auth · Team management (admin sub-accounts)
+ * RecruitersOS · Auth · Team management (admin sub-accounts)
  *
  * Admins/owners add recruiters to their workspace, set roles, and remove them.
  * Recruiters join via an emailed invite link and never touch Telnyx, API keys,

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · DNS record computation
+ * RecruitersOS · DNS record computation
  * Given a sending domain + its MTA server, produce the EXACT record set required
  * for cold-email deliverability. This is the single source of truth for what
  * "correctly configured" means; the provisioner pushes these into Hetzner DNS

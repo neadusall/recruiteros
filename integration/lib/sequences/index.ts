@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Sequences
+ * RecruitersOS · Sequences
  *
  * A sequence is the *message content* for one channel — the ordered touches a
  * customer authors under Campaigns (Email / LinkedIn / SMS). It is deliberately

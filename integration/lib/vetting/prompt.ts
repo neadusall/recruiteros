@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · AI Vetting · Agent prompt builder
+ * RecruitersOS · AI Vetting · Agent prompt builder
  *
  * Builds the instruction string the voice engine runs the conversation on. This
  * is where 70-80% of perceived realism lives — the conversation design and

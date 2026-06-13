@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Import motion
+ * RecruitersOS · Import motion
  *
  * Per-workspace "where do LinkedIn scrapes land" preference. The portal writes
  * it whenever the user toggles Recruiting/BD; the Chrome extension's ingest

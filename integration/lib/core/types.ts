@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Core domain
+ * RecruitersOS · Core domain
  *
  * The shared models both operating systems run on: the Recruiting OS (placements)
  * and the Business Development OS (job orders). One campaign is the atomic unit;
@@ -7,7 +7,7 @@
  * and Recruiting motions deliberately share these types.
  *
  * Modeled on the GTM-OS reference (Overview / Campaigns / Prospects / Outreach /
- * Accounts / Connected / ATS / Response), mapped onto RecruiterOS naming.
+ * Accounts / Connected / ATS / Response), mapped onto RecruitersOS naming.
  */
 
 /** Which operating system a campaign belongs to. */

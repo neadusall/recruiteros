@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · AI Vetting · Public surface
+ * RecruitersOS · AI Vetting · Public surface
  * One import site for the API routes, the context webhook, and the post-call
  * scoring webhook.
  */

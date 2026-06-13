@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Companies
+ * RecruitersOS · Companies
  * Public surface for the BD company book.
  */
 

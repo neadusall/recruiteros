@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine
+ * RecruitersOS · Signal Engine
  * Filtering + segmentation — narrow the signal stream to exactly who you want to target.
  *
  * Scoring (./scoring) ranks signals; filtering DECIDES which ones belong in a campaign at

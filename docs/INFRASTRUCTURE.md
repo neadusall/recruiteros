@@ -1,4 +1,4 @@
-# RecruiterOS — Infrastructure, Tech Stack & Cost Model
+# RecruitersOS — Infrastructure, Tech Stack & Cost Model
 
 > **Status of this document:** a working reference for the *as-built* platform plus the
 > decisions left to make it a fully provisioned production model.

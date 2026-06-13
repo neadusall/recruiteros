@@ -1,5 +1,5 @@
 /* ============================================================
-   RecruiterOS, Command Center logic (mock-data demo)
+   RecruitersOS, Command Center logic (mock-data demo)
    ============================================================ */
 (function () {
   'use strict';

@@ -1,7 +1,7 @@
 /**
  * POST or GET /api/voice/cron
  * Drives Voice Drops. Call this every ~15 min (or every few minutes) from your
- * scheduler — Vercel Cron, a worker loop, or RecruiterOS's own job runner.
+ * scheduler — Vercel Cron, a worker loop, or RecruitersOS's own job runner.
  *
  * Each tick runs `runDueDrops` for every RUNNING voice campaign across all
  * workspaces: it dials only the leads currently inside their OWN local calling

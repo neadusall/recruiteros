@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Voice Drops · Phone normalization
+ * RecruitersOS · Voice Drops · Phone normalization
  *
  * One job: coerce any operator-entered number into strict E.164 (e.g.
  * +14792740716) so Telnyx never 422s and stored/dialed numbers are uniform.

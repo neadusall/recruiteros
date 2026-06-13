@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine · Apify direct-dial finder
+ * RecruitersOS · Signal Engine · Apify direct-dial finder
  *
  * The PERSON'S own direct line, resolved lazily at the email-sent trigger (the
  * Voice-Drop rule, Appendix A). Where the cheap RapidAPI landline rung tends to

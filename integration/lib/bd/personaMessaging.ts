@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · BD Persona Messaging
+ * RecruitersOS · BD Persona Messaging
  * Persona- and trigger-grounded business-development outreach generation.
  *
  * This is the BD-side companion to the rapport-rung drafter in ../linkedin/personalize.

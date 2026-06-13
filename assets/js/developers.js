@@ -1,5 +1,5 @@
 /* ============================================================
-   RecruiterOS · Developer console (interactive demo)
+   RecruitersOS · Developer console (interactive demo)
    Mirrors the real API in integration/api + the signals engine.
    Self-contained, no backend: simulates responses so an integrator
    can see exact request/response shapes before wiring their app.
@@ -109,7 +109,7 @@
     // Show the secret once, exactly like the real issueKey() contract.
     const out = el("div", "card");
     out.style.borderColor = "rgba(56,224,166,.4)";
-    out.innerHTML = `<h3>Copy your secret now</h3><p class="sub">Shown once. RecruiterOS stores only a hash, you cannot retrieve it again.</p>
+    out.innerHTML = `<h3>Copy your secret now</h3><p class="sub">Shown once. RecruitersOS stores only a hash, you cannot retrieve it again.</p>
       <div class="codeblock">${secret}</div>`;
     $("#keyList").parentElement.insertBefore(out, $("#keyList").nextSibling);
     toast("Key created, copy the secret");

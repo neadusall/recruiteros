@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Seed-inbox health maintenance
+ * RecruitersOS · Seed-inbox health maintenance
  * The safeguards that keep the seed network honest over time. Seeds are global
  * (not workspace-scoped), so these run ONCE per cron tick, not per workspace.
  *

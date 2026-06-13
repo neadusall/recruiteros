@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Public API
+ * RecruitersOS · Public API
  * Endpoint handlers — the actual platform surface a customer integrates against.
  *
  * Each handler is a pure function of (AuthedRequest, deps) → ApiResponse, wrapping the
@@ -70,7 +70,7 @@ export interface HandlerDeps {
 /* ------------------------------------------------------------------ */
 
 /**
- * The catalog of every hiring signal RecruiterOS detects — the customer-safe view. It
+ * The catalog of every hiring signal RecruitersOS detects — the customer-safe view. It
  * exposes WHAT each signal is (type, label, category, why it matters, strength,
  * freshness) but never WHICH sources/providers supply it. Pass `?grouped=1` for the
  * category-grouped shape used by the UI's signal picker.
@@ -142,7 +142,7 @@ export async function postCollect(req: AuthedRequest, deps: HandlerDeps): Promis
 /* POST /v1/signals/ingest                                             */
 /* ------------------------------------------------------------------ */
 
-/** Push a customer's own signal into RecruiterOS (their app as a source). */
+/** Push a customer's own signal into RecruitersOS (their app as a source). */
 export async function postIngest(req: AuthedRequest, deps: HandlerDeps): Promise<ApiResponse> {
   if (!hasScope(req.auth, "signals:write")) {
     return apiError(403, "forbidden", "Requires signals:write scope.");

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Response
+ * RecruitersOS · Response
  * Do-not-contact (DNC) suppression list.
  *
  * STOP / unsubscribe must be honored the instant it arrives and enforced at the

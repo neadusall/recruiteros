@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# RecruiterOS auto-deploy watcher.
+# RecruitersOS auto-deploy watcher.
 # Checks GitHub for new commits on main; if found, pulls and redeploys.
 # Designed to run every couple minutes via a systemd timer (see install below).
 # Safe to run repeatedly: it does nothing when there is no new commit.

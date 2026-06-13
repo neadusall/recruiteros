@@ -1,5 +1,5 @@
 /* ============================================================
-   RecruiterOS · Industry taxonomy
+   RecruitersOS · Industry taxonomy
    A broad, searchable list of industries (250+) grouped by sector.
    Used by the Campaign Builder's signal search. window.ROS_INDUSTRIES
    is a flat [{name, sector}] list; window.ROS_SECTORS is the sector order.

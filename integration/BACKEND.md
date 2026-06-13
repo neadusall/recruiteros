@@ -1,6 +1,6 @@
-# RecruiterOS Backend, built from the GTM-OS spec
+# RecruitersOS Backend, built from the GTM-OS spec
 
-This is the server-side engine for RecruiterOS, modeled tab-for-tab on the GTM
+This is the server-side engine for RecruitersOS, modeled tab-for-tab on the GTM
 Operating System reference (gtm-os-cyan.vercel.app). One workspace, two motions
 (Recruiting OS + Business Development OS), one shared engine. Every module is
 framework-agnostic with an in-memory reference store and a clear seam to swap in

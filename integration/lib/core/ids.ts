@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Core
+ * RecruitersOS · Core
  * Deterministic, dependency-free id + time helpers.
  *
  * Ids are prefixed by entity so they read well in logs and the inbox UI.

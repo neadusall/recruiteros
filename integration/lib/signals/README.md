@@ -1,4 +1,4 @@
-# RecruiterOS · Signal Engine
+# RecruitersOS · Signal Engine
 
 The framework that finds **companies that are hiring** and the **hiring managers** behind
 the roles, by watching the market for every hiring signal, scoring it against your ICP,
@@ -7,7 +7,7 @@ engine that enriches each match — domain, work email, phone, hiring manager �
 provider, cheapest-first.
 
 This is a framework-agnostic TypeScript module (no ORM, no vendor SDKs — `fetch` only),
-so it drops onto the RecruiterOS core models and sits alongside the LinkedIn Engine in
+so it drops onto the RecruitersOS core models and sits alongside the LinkedIn Engine in
 [`../linkedin`](../linkedin).
 
 ```

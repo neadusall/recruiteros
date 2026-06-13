@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Owner · Account metadata store (OWNER ONLY)
+ * RecruitersOS · Owner · Account metadata store (OWNER ONLY)
  *
  * Owner-private bookkeeping that doesn't belong on the customer-facing Workspace
  * object: the monthly price an account pays (so we can compute true margin), its

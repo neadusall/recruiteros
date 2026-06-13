@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Auth
+ * RecruitersOS · Auth
  * Enterprise identity: users, workspaces (orgs), memberships, sessions.
  *
  * Every other module is workspace-scoped, so auth is the root: a user signs up

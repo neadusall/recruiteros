@@ -102,7 +102,7 @@ in Campaign Studio. Keep Recruiting and BD motions **separate** (standing rule).
 ## 6. n8n conductor  *(designed, NOT deployed — the real build task)*
 
 Reference workflow: `docs/runbooks/n8n/BUILDER-PROMPT.md`. Every endpoint it calls
-already works; build the workflow and point it at RecruiterOS.
+already works; build the workflow and point it at RecruitersOS.
 
 - [ ] Deploy n8n instance
 - [ ] Env: `RECRUITEROS_BASE_URL`, `RECRUITEROS_API_TOKEN`, `RECRUITEROS_CRON_SECRET`,

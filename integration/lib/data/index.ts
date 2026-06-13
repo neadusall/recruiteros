@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Data warehouse
+ * RecruitersOS · Data warehouse
  * Public barrel. Import from here, not individual files.
  *
  *   import { listRecords, upsertRecords, rowsToInputs, enrichRecord } from "@/integration/lib/data";

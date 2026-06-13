@@ -1,4 +1,4 @@
-/* RecruiterOS · White-label auth branding
+/* RecruitersOS · White-label auth branding
  * On a customer's own domain, brand the login/signup screen with THEIR logo,
  * name, accent and favicon BEFORE anyone signs in, and never leak the house
  * brand. Resolves /api/branding/resolve?host=<host> (public; logo + name only).

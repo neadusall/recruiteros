@@ -1,5 +1,5 @@
 {
-  "name": "RecruiterOS - Multi-Channel Outreach Router (4 Scenarios)",
+  "name": "RecruitersOS - Multi-Channel Outreach Router (4 Scenarios)",
   "nodes": [
     {
       "parameters": {
@@ -22,7 +22,7 @@
       "parameters": {
         "mode": "runOnceForEachItem",
         "language": "javaScript",
-        "jsCode": "// === EDIT THESE DEFAULTS (one place) =====================================\nconst CONFIG = {\n  baseUrl: 'https://YOUR-RECRUITEROS-HOST',   // your app origin, NO trailing slash\n  defaultCampaignId: 'CHANGE_ME',             // fallback campaign id\n  voiceNoteThreshold: 80,                      // warmth gate for voice (RecruiterOS default)\n};\n// =========================================================================\n\n// Accept {person:{...}}, a raw webhook body, or a flat object.\nconst p = $json.person || $json.body?.person || $json.body || $json;\n\nconst titleText = String(p.title || p.headline || '').toLowerCase();\n\n// --- job function (mirrors integration/lib/signals/filters.ts) ---\nconst FUNCTION_KEYWORDS = [\n  ['executive',        /(chief|ceo|founder|owner|president|managing director|partner)/],\n  ['engineering',      /(engineer|developer|swe|devops|sre|architect|backend|front[- ]?end|full[- ]?stack|programmer)/],\n  ['product',          /(product manager|product owner|head of product|cpo|product lead)/],\n  ['design',           /(designer|ux|ui|creative director)/],\n  ['data',             /(data scientist|data engineer|analytics|machine learning|ml engineer|data analyst)/],\n  ['sales',            /(sales|account executive|\\bae\\b|sdr|bdr|business development|revenue)/],\n  ['marketing',        /(marketing|growth|demand gen|brand|content lead|seo)/],\n  ['finance',          /(finance|accountant|controller|cfo|fp&a|treasur)/],\n  ['operations',       /(operations|\\bops\\b|coo|logistics|supply chain)/],\n  ['people_hr',        /(recruit|talent|people ops|\\bhr\\b|human resources|chro)/],\n  ['customer_success', /(customer success|csm|account manager)/],\n  ['legal',            /(legal|counsel|attorney|compliance)/],\n];\nlet fn = 'other';\nfor (const [name, re] of FUNCTION_KEYWORDS) { if (re.test(titleText)) { fn = name; break; } }\n\n// --- seniority (order matters: most senior first) ---\nconst SENIORITY_KEYWORDS = [\n  ['founder',  /(founder|co[- ]?founder|owner)/],\n  ['c_level',  /(chief|\\bceo\\b|\\bcfo\\b|\\bcoo\\b|\\bcto\\b|\\bcmo\\b|\\bcpo\\b|\\bcro\\b|\\bchro\\b|c-level|cxo)/],\n  ['vp',       /(\\bvp\\b|vice president|\\bsvp\\b|\\bevp\\b)/],\n  ['director', /(director|head of)/],\n  ['manager',  /(manager|team lead|principal)/],\n  ['senior',   /(senior|\\bsr\\.?\\b|staff)/],\n];\nlet sen = 'mid';\nfor (const [name, re] of SENIORITY_KEYWORDS) { if (re.test(titleText)) { sen = name; break; } }\nconst decisionRanks = ['manager','director','vp','c_level','founder'];\nconst isDecisionMaker = decisionRanks.includes(sen);\n\n// --- industry: explicit p.industry wins, else infer from company/headline ---\nconst INDUSTRY_KEYWORDS = [\n  ['healthcare',    /(health|clinic|hospital|medical|pharma|biotech|\\bcare\\b)/],\n  ['fintech',       /(fintech|\\bbank|payment|lending|insurance|insurtech|trading|crypto|wealth)/],\n  ['cybersecurity', /(security|cyber|infosec|appsec)/],\n  ['ai_ml',         /(\\bai\\b|artificial intelligence|machine learning|\\bml\\b|\\bllm\\b)/],\n  ['ecommerce',     /(ecommerce|e-commerce|retail|marketplace|shopify|\\bd2c\\b)/],\n  ['edtech',        /(edtech|education|learning|university|school)/],\n  ['logistics',     /(logistics|supply chain|freight|shipping|warehouse)/],\n  ['gaming',        /(gaming|game studio|esports)/],\n  ['climate',       /(climate|clean energy|sustainab|carbon|renewable)/],\n  ['saas',          /(saas|software|\\bcloud\\b|platform|\\bb2b\\b)/],\n];\nlet industry = 'general';\nconst industryText = String(p.industry || p.company || p.companyDescription || p.headline || '').toLowerCase();\nfor (const [name, re] of INDUSTRY_KEYWORDS) { if (re.test(industryText)) { industry = name; break; } }\nif (p.industry) industry = String(p.industry).toLowerCase().trim() || industry;\n\n// --- warmth + motion ---\nlet warmth = Number(p.warmth);\nif (!Number.isFinite(warmth)) warmth = 50;\nconst hot = warmth >= CONFIG.voiceNoteThreshold;\nconst motion = p.motion === 'recruiting' ? 'recruiting'\n             : p.motion === 'bd' ? 'bd'\n             : (fn === 'people_hr' || fn === 'engineering') ? 'recruiting' : 'bd';\n\n// --- scenario routing: SENIORITY x WARMTH (the 4 playbooks) ---\nlet scenario, scenarioName;\nif (isDecisionMaker && hot)        { scenario = 1; scenarioName = 'Decision-maker - warm: voice-first multi-channel'; }\nelse if (isDecisionMaker)          { scenario = 2; scenarioName = 'Decision-maker - cold: full 28-day multi-channel drip'; }\nelse if (warmth >= 35 || ['senior','manager','lead'].includes(sen) || ['engineering','product','sales'].includes(fn))\n                                   { scenario = 3; scenarioName = 'Manager / IC: LinkedIn-led + email'; }\nelse                               { scenario = 4; scenarioName = 'Cold / low-warmth: email-only nurture'; }\n\nreturn {\n  person: p,\n  classification: { function: fn, seniority: sen, isDecisionMaker, industry, warmth, hot, motion },\n  scenario,\n  scenarioName,\n  baseUrl: CONFIG.baseUrl.replace(/\\/$/, ''),\n  defaultCampaignId: CONFIG.defaultCampaignId,\n  voiceNoteThreshold: CONFIG.voiceNoteThreshold,\n};"
+        "jsCode": "// === EDIT THESE DEFAULTS (one place) =====================================\nconst CONFIG = {\n  baseUrl: 'https://YOUR-RECRUITEROS-HOST',   // your app origin, NO trailing slash\n  defaultCampaignId: 'CHANGE_ME',             // fallback campaign id\n  voiceNoteThreshold: 80,                      // warmth gate for voice (RecruitersOS default)\n};\n// =========================================================================\n\n// Accept {person:{...}}, a raw webhook body, or a flat object.\nconst p = $json.person || $json.body?.person || $json.body || $json;\n\nconst titleText = String(p.title || p.headline || '').toLowerCase();\n\n// --- job function (mirrors integration/lib/signals/filters.ts) ---\nconst FUNCTION_KEYWORDS = [\n  ['executive',        /(chief|ceo|founder|owner|president|managing director|partner)/],\n  ['engineering',      /(engineer|developer|swe|devops|sre|architect|backend|front[- ]?end|full[- ]?stack|programmer)/],\n  ['product',          /(product manager|product owner|head of product|cpo|product lead)/],\n  ['design',           /(designer|ux|ui|creative director)/],\n  ['data',             /(data scientist|data engineer|analytics|machine learning|ml engineer|data analyst)/],\n  ['sales',            /(sales|account executive|\\bae\\b|sdr|bdr|business development|revenue)/],\n  ['marketing',        /(marketing|growth|demand gen|brand|content lead|seo)/],\n  ['finance',          /(finance|accountant|controller|cfo|fp&a|treasur)/],\n  ['operations',       /(operations|\\bops\\b|coo|logistics|supply chain)/],\n  ['people_hr',        /(recruit|talent|people ops|\\bhr\\b|human resources|chro)/],\n  ['customer_success', /(customer success|csm|account manager)/],\n  ['legal',            /(legal|counsel|attorney|compliance)/],\n];\nlet fn = 'other';\nfor (const [name, re] of FUNCTION_KEYWORDS) { if (re.test(titleText)) { fn = name; break; } }\n\n// --- seniority (order matters: most senior first) ---\nconst SENIORITY_KEYWORDS = [\n  ['founder',  /(founder|co[- ]?founder|owner)/],\n  ['c_level',  /(chief|\\bceo\\b|\\bcfo\\b|\\bcoo\\b|\\bcto\\b|\\bcmo\\b|\\bcpo\\b|\\bcro\\b|\\bchro\\b|c-level|cxo)/],\n  ['vp',       /(\\bvp\\b|vice president|\\bsvp\\b|\\bevp\\b)/],\n  ['director', /(director|head of)/],\n  ['manager',  /(manager|team lead|principal)/],\n  ['senior',   /(senior|\\bsr\\.?\\b|staff)/],\n];\nlet sen = 'mid';\nfor (const [name, re] of SENIORITY_KEYWORDS) { if (re.test(titleText)) { sen = name; break; } }\nconst decisionRanks = ['manager','director','vp','c_level','founder'];\nconst isDecisionMaker = decisionRanks.includes(sen);\n\n// --- industry: explicit p.industry wins, else infer from company/headline ---\nconst INDUSTRY_KEYWORDS = [\n  ['healthcare',    /(health|clinic|hospital|medical|pharma|biotech|\\bcare\\b)/],\n  ['fintech',       /(fintech|\\bbank|payment|lending|insurance|insurtech|trading|crypto|wealth)/],\n  ['cybersecurity', /(security|cyber|infosec|appsec)/],\n  ['ai_ml',         /(\\bai\\b|artificial intelligence|machine learning|\\bml\\b|\\bllm\\b)/],\n  ['ecommerce',     /(ecommerce|e-commerce|retail|marketplace|shopify|\\bd2c\\b)/],\n  ['edtech',        /(edtech|education|learning|university|school)/],\n  ['logistics',     /(logistics|supply chain|freight|shipping|warehouse)/],\n  ['gaming',        /(gaming|game studio|esports)/],\n  ['climate',       /(climate|clean energy|sustainab|carbon|renewable)/],\n  ['saas',          /(saas|software|\\bcloud\\b|platform|\\bb2b\\b)/],\n];\nlet industry = 'general';\nconst industryText = String(p.industry || p.company || p.companyDescription || p.headline || '').toLowerCase();\nfor (const [name, re] of INDUSTRY_KEYWORDS) { if (re.test(industryText)) { industry = name; break; } }\nif (p.industry) industry = String(p.industry).toLowerCase().trim() || industry;\n\n// --- warmth + motion ---\nlet warmth = Number(p.warmth);\nif (!Number.isFinite(warmth)) warmth = 50;\nconst hot = warmth >= CONFIG.voiceNoteThreshold;\nconst motion = p.motion === 'recruiting' ? 'recruiting'\n             : p.motion === 'bd' ? 'bd'\n             : (fn === 'people_hr' || fn === 'engineering') ? 'recruiting' : 'bd';\n\n// --- scenario routing: SENIORITY x WARMTH (the 4 playbooks) ---\nlet scenario, scenarioName;\nif (isDecisionMaker && hot)        { scenario = 1; scenarioName = 'Decision-maker - warm: voice-first multi-channel'; }\nelse if (isDecisionMaker)          { scenario = 2; scenarioName = 'Decision-maker - cold: full 28-day multi-channel drip'; }\nelse if (warmth >= 35 || ['senior','manager','lead'].includes(sen) || ['engineering','product','sales'].includes(fn))\n                                   { scenario = 3; scenarioName = 'Manager / IC: LinkedIn-led + email'; }\nelse                               { scenario = 4; scenarioName = 'Cold / low-warmth: email-only nurture'; }\n\nreturn {\n  person: p,\n  classification: { function: fn, seniority: sen, isDecisionMaker, industry, warmth, hot, motion },\n  scenario,\n  scenarioName,\n  baseUrl: CONFIG.baseUrl.replace(/\\/$/, ''),\n  defaultCampaignId: CONFIG.defaultCampaignId,\n  voiceNoteThreshold: CONFIG.voiceNoteThreshold,\n};"
       },
       "id": "ros-n8n-classify-&-route",
       "name": "Classify & Route",
@@ -167,7 +167,7 @@
       "parameters": {
         "mode": "runOnceForEachItem",
         "language": "javaScript",
-        "jsCode": "const inb = $json;\nreturn {\n  ...inb,\n  plan: {\n    scenario: 2,\n    campaignId: inb.defaultCampaignId,          // <- route to the campaign that owns this segment's content\n    motion: inb.classification.motion,\n    methodology: \"seven_touch_drip\",\n    sequenceTag: \"scenario-2-multichannel\",\n    contentTypes: \"value_prop,case_study,comp_benchmark\",\n    channels: \"email, linkedin_connect, linkedin_message, voice_drop, linkedin_voice_note\",\n    note: \"Cold decision-maker. Full 28-day anatomy: 7 email touches + 6 LinkedIn touches; voice note unlocks only once warmth >= threshold. Connect-before-DM enforced by RecruiterOS.\",\n  },\n};"
+        "jsCode": "const inb = $json;\nreturn {\n  ...inb,\n  plan: {\n    scenario: 2,\n    campaignId: inb.defaultCampaignId,          // <- route to the campaign that owns this segment's content\n    motion: inb.classification.motion,\n    methodology: \"seven_touch_drip\",\n    sequenceTag: \"scenario-2-multichannel\",\n    contentTypes: \"value_prop,case_study,comp_benchmark\",\n    channels: \"email, linkedin_connect, linkedin_message, voice_drop, linkedin_voice_note\",\n    note: \"Cold decision-maker. Full 28-day anatomy: 7 email touches + 6 LinkedIn touches; voice note unlocks only once warmth >= threshold. Connect-before-DM enforced by RecruitersOS.\",\n  },\n};"
       },
       "id": "ros-n8n-scenario-2-playbook",
       "name": "Scenario 2 Playbook",
@@ -242,7 +242,7 @@
       "credentials": {
         "httpHeaderAuth": {
           "id": "REPLACE_WITH_CREDENTIAL_ID",
-          "name": "RecruiterOS API"
+          "name": "RecruitersOS API"
         }
       }
     },
@@ -283,7 +283,7 @@
       "credentials": {
         "httpHeaderAuth": {
           "id": "REPLACE_WITH_CREDENTIAL_ID",
-          "name": "RecruiterOS API"
+          "name": "RecruitersOS API"
         }
       }
     },
@@ -309,7 +309,7 @@
       "credentials": {
         "httpHeaderAuth": {
           "id": "REPLACE_WITH_CREDENTIAL_ID",
-          "name": "RecruiterOS API"
+          "name": "RecruitersOS API"
         }
       }
     },
@@ -332,7 +332,7 @@
       "credentials": {
         "httpHeaderAuth": {
           "id": "REPLACE_WITH_CREDENTIAL_ID",
-          "name": "RecruiterOS API"
+          "name": "RecruitersOS API"
         }
       }
     },
@@ -358,7 +358,7 @@
       "credentials": {
         "httpHeaderAuth": {
           "id": "REPLACE_WITH_CREDENTIAL_ID",
-          "name": "RecruiterOS API"
+          "name": "RecruitersOS API"
         }
       },
       "notesInFlow": true,

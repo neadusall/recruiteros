@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Sending infrastructure
+ * RecruitersOS · Sending infrastructure
  * The owned cold-email stack: sending domains, mailboxes, MTA servers, and the
  * exact DNS record set each domain needs for deliverability.
  *

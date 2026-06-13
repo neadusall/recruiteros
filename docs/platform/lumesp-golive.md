@@ -5,7 +5,7 @@ Runbook to bring the Lume-branded portal live. The login/portal branding is **co
 `*.lumesp.com` host resolve to Lume (logo, name, teal `#0080A0`, favicon) with zero
 "RecruitersOS" leakage — verified on the dev server.
 
-`app.lumesp.com` is served by **RecruiterOS** (this app), NOT Cloudflare Pages. The
+`app.lumesp.com` is served by **RecruitersOS** (this app), NOT Cloudflare Pages. The
 marketing site `lumesp.com` is the separate Pages project.
 
 ## Status

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Loxo API client
+ * RecruitersOS · Loxo API client
  *
  * The read+write seam to Loxo's Open API. Every endpoint is formed from the
  * agency domain + slug and authenticates with a Bearer token, exactly as the
@@ -98,7 +98,7 @@ export class LoxoClient {
     return res.ok;
   }
 
-  /* ---------------- writes (RecruiterOS -> Loxo) ---------------- */
+  /* ---------------- writes (RecruitersOS -> Loxo) ---------------- */
 
   /** Create a Person. `person` is the Loxo-shaped body (see map.ts). */
   async createPerson(person: Record<string, unknown>): Promise<{ ok: boolean; id?: string; status: number; error?: string }> {

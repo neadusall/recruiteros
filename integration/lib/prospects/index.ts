@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Prospects
+ * RecruitersOS · Prospects
  * Pipeline lifecycle + the automation rules that move prospects between stages.
  *
  * The status lifecycle is shared across both motions (BD labels: Discovery

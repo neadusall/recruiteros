@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Integration credentials
+ * RecruitersOS · Integration credentials
  *
  * Per-workspace API keys + connection status for the Connected / Integrations
  * hub, entered IN THE PORTAL (no redeploy) — the same shape and durability as

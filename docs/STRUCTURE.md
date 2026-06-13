@@ -1,4 +1,4 @@
-# RecruiterOS — Project Structure & Developer Map
+# RecruitersOS — Project Structure & Developer Map
 
 > **Purpose:** a single map of the whole repo so you can find *where to build each thing*
 > and understand *why files live where they do*. Read the "Mental model" first, then jump
@@ -8,7 +8,7 @@
 
 ## Mental model (read this first)
 
-RecruiterOS is **one deployable: a Next.js app in [`integration/`](../integration/)** that serves
+RecruitersOS is **one deployable: a Next.js app in [`integration/`](../integration/)** that serves
 both the API *and* the marketing/portal pages from one origin. There are a few satellite pieces
 (a browser extension, a Python LinkedIn scraper sidecar, and the OS Text app as a git submodule).
 

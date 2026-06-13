@@ -52,7 +52,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   const { state } = await chrome.storage.local.get('state');
   if (!state) await chrome.storage.local.set({ state: DEFAULT_STATE });
   chrome.alarms.create('ros-tick', { periodInMinutes: Math.max(0.5, CFG.tickMinutes || 1) });
-  log('info', 'RecruiterOS Outreach installed');
+  log('info', 'RecruitersOS Outreach installed');
 });
 chrome.runtime.onStartup.addListener(() => chrome.alarms.create('ros-tick', { periodInMinutes: Math.max(0.5, CFG.tickMinutes || 1) }));
 chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'ros-tick') { drainQueue(); agentTick(); } });
@@ -69,7 +69,7 @@ async function agentTick() {
   if (agentBusy) return;
   if (activeBridgeSearch) return;            // a search scrape owns the tab right now
   const s = await getState();
-  // Prefer RecruiterOS's OWN backend bridge: the same backend URL + ingest token
+  // Prefer RecruitersOS's OWN backend bridge: the same backend URL + ingest token
   // the user pastes for scraping also drives backend-queued actions (searches,
   // connects, …) — no separate bridge process, no Unipile. The backend is
   // workspace-scoped by the token, so no accountId is needed. Falls back to a
@@ -205,7 +205,7 @@ function handle(msg, sender, sendResponse) {
       case 'ros.testPush': { // one-click diagnostic: push a single test lead to the portal
         const tr = await relayToBackend(s, 'campaignFromDataset', {
           campaignName: 'Connection test', motion: s.settings.backendMotion || 'recruiting',
-          leads: [{ fullName: 'RecruiterOS Test', title: 'Connection check', company: 'Test', profileUrl: '' }],
+          leads: [{ fullName: 'RecruitersOS Test', title: 'Connection check', company: 'Test', profileUrl: '' }],
         });
         return sendResponse(Object.assign({ base: (s.settings && s.settings.backendBaseUrl) || '', hasToken: !!(s.settings && s.settings.backendApiKey) }, tr || { ok: false, error: 'no result' }));
       }

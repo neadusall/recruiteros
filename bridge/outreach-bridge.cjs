@@ -1,5 +1,5 @@
 /* ============================================================
-   RecruiterOS Outreach Bridge — closes the browser-execution seam.
+   RecruitersOS Outreach Bridge — closes the browser-execution seam.
 
    The backend's `internalProvider` (RECRUITEROS_OUTREACH_PROVIDER=internal,
    RECRUITEROS_OUTREACH_URL -> this service) POSTs LinkedIn actions here.
@@ -226,7 +226,7 @@ function prospectTarget(p) {
 
 if (require.main === module) {
   server.listen(PORT, () => {
-    console.log('RecruiterOS Outreach Bridge on http://localhost:' + PORT);
+    console.log('RecruitersOS Outreach Bridge on http://localhost:' + PORT);
     console.log('  backend  -> set RECRUITEROS_OUTREACH_PROVIDER=internal, RECRUITEROS_OUTREACH_URL=http://localhost:' + PORT);
     console.log('  webhook  -> ' + (BACKEND_WEBHOOK_URL || '(not forwarding; set BACKEND_WEBHOOK_URL)'));
   });

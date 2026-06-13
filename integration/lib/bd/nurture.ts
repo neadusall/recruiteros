@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · BD · 6-month nurture drip
+ * RecruitersOS · BD · 6-month nurture drip
  *
  * Everyone we reach in the initial four-channel BD push is enrolled here so they
  * keep getting relevant, industry-driven value touches from the operator over ~26

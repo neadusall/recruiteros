@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Deliverability scoring
+ * RecruitersOS · Deliverability scoring
  * Turns the raw sending state (mailbox warm-up progress + domain delivery
  * metrics + reputation + inbox-placement seed tests) into the two numbers the
  * UI shows: a per-mailbox WARMTH score and a per-domain HEALTH score, plus a

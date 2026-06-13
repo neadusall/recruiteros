@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Voice Drops · Clone snippet cache (the token-saver)
+ * RecruitersOS · Voice Drops · Clone snippet cache (the token-saver)
  *
  * The cost trick: a voicemail is assembled from cacheable audio SEGMENTS, not
  * re-synthesized whole every time. Static prose (intro/middle/outro) renders

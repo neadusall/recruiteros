@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────
-# RecruiterOS Outreach Studio — one-command local launch (Windows)
+# RecruitersOS Outreach Studio — one-command local launch (Windows)
 #
 #   Right-click → "Run with PowerShell", or:
 #     powershell -ExecutionPolicy Bypass -File .\START-STUDIO.ps1
@@ -20,7 +20,7 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host ""
-Write-Host "Starting RecruiterOS portal on http://localhost:5173 ..." -ForegroundColor Cyan
+Write-Host "Starting RecruitersOS portal on http://localhost:5173 ..." -ForegroundColor Cyan
 Write-Host "Load the extension at chrome://extensions (Developer mode -> Load unpacked -> the 'extension' folder)," -ForegroundColor DarkGray
 Write-Host "copy its ID, then open the Studio -> LinkedIn Live tab and paste it." -ForegroundColor DarkGray
 Write-Host ""

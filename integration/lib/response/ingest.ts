@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Response
+ * RecruitersOS · Response
  * Webhook normalizers: turn each provider's raw reply payload into one
  * `InboundResponse`, then match it to a prospect.
  *

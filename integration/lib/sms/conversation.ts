@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Texting Platform
+ * RecruitersOS · Texting Platform
  * Two-way conversation handler.
  *
  * On every inbound text it: classifies intent, decides whether to auto-reply

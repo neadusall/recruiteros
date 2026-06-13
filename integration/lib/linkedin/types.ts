@@ -1,17 +1,17 @@
 /**
- * RecruiterOS · LinkedIn Engine
+ * RecruitersOS · LinkedIn Engine
  * Domain types shared across the integration.
  *
  * These types are intentionally framework-agnostic so they can be mapped onto
- * the RecruiterOS core models (Campaign, Prospect, Sequence) without coupling
+ * the RecruitersOS core models (Campaign, Prospect, Sequence) without coupling
  * the LinkedIn execution layer to any specific ORM.
  */
 
 /** A connected LinkedIn sending account (one seat). */
 export interface LinkedInAccount {
-  id: string;                 // RecruiterOS account id
+  id: string;                 // RecruitersOS account id
   providerAccountId: string;  // id in the underlying provider (e.g. Unipile)
-  ownerUserId: string;        // RecruiterOS user who owns the seat
+  ownerUserId: string;        // RecruitersOS user who owns the seat
   displayName: string;
   status: "ok" | "warming" | "restricted" | "disconnected";
   /** Premium / Sales Navigator unlocks InMail + open-profile messaging. */

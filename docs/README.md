@@ -1,6 +1,6 @@
 # `docs/` — all project documentation
 
-Everything that explains *how RecruiterOS works and how to run it* lives here. (Code-level docs
+Everything that explains *how RecruitersOS works and how to run it* lives here. (Code-level docs
 that belong next to their code — like `integration/BACKEND.md` — stay with the code.)
 
 **Start with [STRUCTURE.md](STRUCTURE.md)** — the full project map: every top-level folder, what it

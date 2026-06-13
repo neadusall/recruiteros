@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Companies
+ * RecruitersOS · Companies
  *
  * The BD motion's company table. Until now it lived only in the browser's
  * localStorage (assets/js/command.js); this is its durable server shape so a

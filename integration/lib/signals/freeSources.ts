@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine
+ * RecruitersOS · Signal Engine
  * Free / public signal connectors — the cheapest possible signal coverage.
  *
  * Goal: get as many hiring signals as possible for $0. These connectors hit public,
@@ -942,7 +942,7 @@ export class RemoteOkSource implements SignalSource {
     const want = (s: string) => !kw.length || kw.some((k) => s.toLowerCase().includes(k));
     try {
       const rows = await getJson<RemoteOkJob[]>("https://remoteok.com/api", {
-        headers: { "User-Agent": "RecruiterOS/1.0 (+https://recruitersos.co)", Accept: "application/json" },
+        headers: { "User-Agent": "RecruitersOS/1.0 (+https://recruitersos.co)", Accept: "application/json" },
       });
       for (const j of (Array.isArray(rows) ? rows : []).slice(0, (ctx.limit ?? 100) + 1)) {
         if (!j.company || !j.position) continue; // skips the leading legal/metadata object

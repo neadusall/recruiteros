@@ -1,4 +1,4 @@
-# RecruiterOS — recruitersos.co
+# RecruitersOS — recruitersos.co
 
 **The operating system for modern recruiting.** A cross between Clay.com (a programmable
 data-enrichment spreadsheet) and Juicebox.ai (natural-language people search), reframed as
@@ -62,7 +62,7 @@ Two revenue engines (Recruiting + Business Development) run on one shared infras
 
 ## Outreach Studio — the automation engine (`alfred.html`)
 
-A MeetAlfred-style, multi-channel outreach **automation engine**, built into RecruiterOS.
+A MeetAlfred-style, multi-channel outreach **automation engine**, built into RecruitersOS.
 Where the rest of the app is mock data, this is a **real engine** with persistence, a
 scheduler, safety limits, and a simulation clock.
 
@@ -94,7 +94,7 @@ assets/js/alfred/
 │                     Runs in the browser (window.Alfred) AND under Node (require).
 ├─ alfred-ui.js       Browser controller for the Studio.
 └─ alfred.test.cjs    Node test harness — 30 assertions, run it below.
-assets/css/alfred.css Studio styles (on the RecruiterOS design tokens).
+assets/css/alfred.css Studio styles (on the RecruitersOS design tokens).
 alfred.html           The Outreach Studio page.
 ```
 

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Providers · TalTxt (SMS channel, post-engagement)
+ * RecruitersOS · Providers · TalTxt (SMS channel, post-engagement)
  * Base: TALTXT_API_URL · Auth: Bearer.
  * Used for: sending the post-engagement SMS, and opt-out (DNC mirror). Inbound
  * replies + classification arrive via the TalTxt webhook (ingested separately).

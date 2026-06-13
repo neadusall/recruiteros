@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Sending provisioning orchestrator
+ * RecruitersOS · Sending provisioning orchestrator
  *
  * The "feed me domains, I do the rest" engine. For each domain:
  *   1. generate a DKIM keypair (in-app)

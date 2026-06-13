@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Hiring Engine
+ * RecruitersOS · Hiring Engine
  * People-graph abstraction — find the humans who match a target profile.
  *
  * The resolver never knows a vendor's name, exactly like the LinkedIn Engine wraps every

@@ -2,7 +2,7 @@
  * POST or GET /api/sending/cron
  * Drives the owned email infrastructure's daily maintenance. Call this once a
  * day (or every few hours — it is idempotent) from your scheduler — n8n, a
- * worker loop, or RecruiterOS's own job runner.
+ * worker loop, or RecruitersOS's own job runner.
  *
  * Each tick runs `runSendingDaily` for every workspace that owns a sending
  * domain: reset daily caps -> advance warm-up -> refresh reputation (SNDS) ->

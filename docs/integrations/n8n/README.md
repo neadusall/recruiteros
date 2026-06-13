@@ -1,16 +1,16 @@
-# RecruiterOS — Multi-Channel Outreach Router (n8n)
+# RecruitersOS — Multi-Channel Outreach Router (n8n)
 
 An importable n8n workflow that takes **one person** (with an industry + job title),
 classifies them, routes them into **one of four outreach scenarios**, couples the
 right **content** and the right **multi-channel sequence** to them, and enrolls them
-into RecruiterOS — which then runs the actual email / voice-drop / LinkedIn
+into RecruitersOS — which then runs the actual email / voice-drop / LinkedIn
 connect / LinkedIn message / LinkedIn voice-note cadence.
 
 - Workflow file: [`recruiteros-outreach-router.json`](recruiteros-outreach-router.json) — import this into n8n.
 - Generator (edit + regenerate): [`build-workflow.cjs`](build-workflow.cjs) — `node docs/integrations/n8n/build-workflow.cjs`.
 
-The **send path is RecruiterOS** (your decision): n8n classifies + selects content +
-selects the sequence, then hands off to RecruiterOS's cadence/sequence engine. That
+The **send path is RecruitersOS** (your decision): n8n classifies + selects content +
+selects the sequence, then hands off to RecruitersOS's cadence/sequence engine. That
 keeps compliance windows, warmup, mobile-strip, A/B, and activity logging in one
 place. n8n never touches Telnyx / Unipile / Instantly directly.
 
@@ -31,11 +31,11 @@ Routing happens in the **Classify & Route** node. Branches:
 (same `classifyTitle` logic as `integration/lib/signals/filters.ts`).
 
 ### Best practices baked in
-- **Connect before you DM** — LinkedIn DM steps require an accepted connection (enforced by RecruiterOS's sequence engine).
+- **Connect before you DM** — LinkedIn DM steps require an accepted connection (enforced by RecruitersOS's sequence engine).
 - **Warmth-gated voice** — voicemail drop / LinkedIn voice note only fire at/above the voice threshold, the single highest-converting touch reserved for HOT prospects.
 - **Signal-anchored opener** — first email/DM hooks the trigger event and asks "worth sending?", not "book a call".
 - **Reciprocity before the ask** — value drop / case study before any calendar link.
-- **Reply on any channel pauses all** — handled by RecruiterOS, not duplicated in n8n.
+- **Reply on any channel pauses all** — handled by RecruitersOS, not duplicated in n8n.
 
 To change any branch's channels, content, or which sequence it uses, edit the
 **Scenario N Playbook** node (or `scenarioPlans` in the generator).
@@ -45,7 +45,7 @@ To change any branch's channels, content, or which sequence it uses, edit the
 ## One-time setup
 
 ### 1. Create the n8n credential
-In n8n: **Credentials → New → Header Auth**, name it exactly **`RecruiterOS API`**.
+In n8n: **Credentials → New → Header Auth**, name it exactly **`RecruitersOS API`**.
 - **Name:** `Authorization`
 - **Value:** `Bearer <your-session-token>`
 
@@ -53,7 +53,7 @@ Get a token by calling `POST /api/auth/login` (email + password) and copying the
 returned token, or reuse a long-lived session token. Every `/api/*` route used here
 is workspace-scoped to that token.
 
-> After importing, open each HTTP Request node once and re-select the `RecruiterOS API`
+> After importing, open each HTTP Request node once and re-select the `RecruitersOS API`
 > credential (the import ships a placeholder credential id).
 
 ### 2. Set your defaults
@@ -67,7 +67,7 @@ const CONFIG = {
 ```
 
 ### 3. Create the segment campaigns, sequences, and content
-The router routes people *to things that must already exist* in RecruiterOS:
+The router routes people *to things that must already exist* in RecruitersOS:
 
 **a) Sequences** — one multi-channel ("multi") sequence per scenario, **tagged** so
 the router can find it. In Campaigns → Sequences, create and tag:
@@ -88,7 +88,7 @@ anatomy in `integration/lib/campaigns/sequence.ts` as the template.
 `GET /api/content/craft` with this lead's function / seniority / industry / signal /
 motion and returns the exact targeted, multi-channel copy that will be sent — rendered
 instantly from the pre-authored pool, no per-asset naming required. The same library
-also feeds the RecruiterOS cadence drafter, so the copy in the preview is the copy that
+also feeds the RecruitersOS cadence drafter, so the copy in the preview is the copy that
 gets enqueued for approval. (The legacy per-campaign asset library at `/api/content`
 still exists for hand-written one-offs, but is no longer required for targeting.)
 
@@ -153,7 +153,7 @@ job function.
 11. **Respond** — returns the routing summary, including the crafted preview.
 
 The actual sends (email via Instantly, voice drop via Telnyx, LinkedIn via Unipile)
-happen inside RecruiterOS on the sequence's schedule, after the approval-queue review.
+happen inside RecruitersOS on the sequence's schedule, after the approval-queue review.
 
 ---
 
@@ -171,4 +171,4 @@ single-purpose and easy to read.)
 
 - **More than 4 scenarios / different cutoffs:** edit the routing block at the bottom of **Classify & Route**, add a Switch output, add a Playbook node.
 - **Industry-specific channel mixes:** branch inside the relevant **Scenario N Playbook** node on `inb.classification.industry`.
-- **Direct-send variant:** swap **Enroll in Sequence** for direct provider HTTP calls if you ever move off the RecruiterOS send path (not recommended — you'd re-implement compliance gating).
+- **Direct-send variant:** swap **Enroll in Sequence** for direct provider HTTP calls if you ever move off the RecruitersOS send path (not recommended — you'd re-implement compliance gating).

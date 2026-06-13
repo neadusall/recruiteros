@@ -1,4 +1,4 @@
-# Deploying RecruiterOS (getting a live URL)
+# Deploying RecruitersOS (getting a live URL)
 
 The portal (login, Command Center, sessions) is a **server app**. It cannot run
 from a double-clicked file, it must be hosted. Everything below hosts the

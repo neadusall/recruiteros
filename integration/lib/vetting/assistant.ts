@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · AI Vetting · Voice-engine provisioning (Telnyx AI Assistant)
+ * RecruitersOS · AI Vetting · Voice-engine provisioning (Telnyx AI Assistant)
  *
  * Turns a vetting desk into a live, callable agent. This is the ONLY module that
  * knows the engine is Telnyx AI Assistant — the rest of the feature is engine-

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Hiring Engine
+ * RecruitersOS · Hiring Engine
  * Public API barrel — import the job-order → decision-maker pipeline from here.
  *
  *   import {

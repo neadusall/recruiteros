@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · House-voice failsafe — NO dashes in outbound copy.
+ * RecruitersOS · House-voice failsafe — NO dashes in outbound copy.
  *
  * House rule: outbound copy never contains a dash of any kind (em "—", en "–", or
  * hyphen "-"); compounds are written as separate words. The generators are also

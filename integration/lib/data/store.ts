@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Data warehouse store
+ * RecruitersOS · Data warehouse store
  *
  * Workspace-scoped table of DataRecords, held in memory for fast search and
  * snapshotted to the durable backend (ros_kv / file volume) so the warehouse

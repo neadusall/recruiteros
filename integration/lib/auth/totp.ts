@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Auth · TOTP (RFC 6238) + recovery codes
+ * RecruitersOS · Auth · TOTP (RFC 6238) + recovery codes
  *
  * Dependency-free time-based one-time passwords on node:crypto only. Used to put
  * a second factor in front of sign-in: the user scans/enters a base32 secret
@@ -12,7 +12,7 @@ import { createHmac, createHash, randomBytes, timingSafeEqual } from "node:crypt
 
 const STEP = 30; // seconds per code
 const DIGITS = 6;
-const ISSUER = "RecruiterOS";
+const ISSUER = "RecruitersOS";
 
 /* ---------------- base32 (RFC 4648, no padding) ---------------- */
 const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";

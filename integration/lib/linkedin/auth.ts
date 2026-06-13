@@ -1,8 +1,8 @@
 /**
- * RecruiterOS · LinkedIn Engine
+ * RecruitersOS · LinkedIn Engine
  * Auth helpers for the API surface.
  *
- *  - requireAuth: bearer token for calls from the RecruiterOS backend.
+ *  - requireAuth: bearer token for calls from the RecruitersOS backend.
  *  - requireCronAuth: shared secret for the scheduler.
  *  - verifyProviderSignature: HMAC check on inbound provider webhooks.
  */

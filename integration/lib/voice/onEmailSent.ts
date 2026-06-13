@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Voice Drops · Email-sent reactive trigger
+ * RecruitersOS · Voice Drops · Email-sent reactive trigger
  *
  * The Appendix-A rule (RECRUITEROS-BACKEND.md §4-C): emailing a prospect makes
  * them eligible for a voicemail drop. Rather than reimplement dialing, this

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Response (the Money Maker)
+ * RecruitersOS · Response (the Money Maker)
  * Types for the unified response inbox + auto-classification + routing.
  *
  * Mirrors the GTM-OS "Response" tab: every reply across email, LinkedIn and SMS

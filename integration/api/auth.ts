@@ -1,12 +1,12 @@
 /**
- * RecruiterOS · Public API
+ * RecruitersOS · Public API
  * API-key authentication + scope enforcement.
  *
  * Keys are presented as a Bearer token: `Authorization: Bearer rk_live_<id>.<secret>`.
  * Only a SHA-256 hash of the secret is ever stored, so a leaked database cannot be used
  * to call the API. Verification is constant-time to avoid timing oracles.
  *
- * The key store is pluggable (interface below). Wire it to the RecruiterOS DB in
+ * The key store is pluggable (interface below). Wire it to the RecruitersOS DB in
  * production; an in-memory implementation is provided for dev/tests.
  */
 

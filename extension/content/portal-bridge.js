@@ -1,5 +1,5 @@
 /* ============================================================
-   Portal bridge — runs ONLY on the RecruiterOS web app origins.
+   Portal bridge — runs ONLY on the RecruitersOS web app origins.
 
    Lets the portal (1) detect that the extension is installed and
    (2) auto-configure it in one click — pushing the backend URL +

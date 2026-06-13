@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Voice Drops · Script templating
+ * RecruitersOS · Voice Drops · Script templating
  *
  * A voicemail script is a template with merge slots, exactly like an email:
  *   "Hi {first_name}, this is {agent_name} with {agent_company}. I work with

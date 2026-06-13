@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Hiring Engine
+ * RecruitersOS · Hiring Engine
  * Indeed connector — a SignalSource whose network call is the injected unlocker.
  *
  * Indeed is HTML + Cloudflare + JS + CAPTCHA, not an open JSON API, so unlike the free

@@ -1,4 +1,4 @@
-# RecruiterOS, Hetzner + GoDaddy go-live runbook
+# RecruitersOS, Hetzner + GoDaddy go-live runbook
 
 This hosts everything (marketing site, portal, and the live API) on your own
 Hetzner server at https://recruitersos.co with automatic HTTPS.

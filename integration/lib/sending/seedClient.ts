@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Warm-up seed client (IMAP + SMTP)
+ * RecruitersOS · Warm-up seed client (IMAP + SMTP)
  * The hands at the real-provider inboxes. For each warm-up thread we sent from a
  * warming mailbox to a Gmail/Outlook/Yahoo seed, this connects to that seed over
  * IMAP and performs the reputation-building actions there:

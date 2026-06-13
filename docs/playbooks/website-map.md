@@ -1,4 +1,4 @@
-# RecruiterOS — Website Map (where to change what)
+# RecruitersOS — Website Map (where to change what)
 
 A single index of everything in this codebase, so you can find the exact file to
 edit for any change on the website. **Edit the files in the repo root.** The copies
@@ -45,7 +45,7 @@ structure, and layout; edit the linked CSS/JS (next column) for styling and beha
 
 | Page | What it is | CSS | JS |
 |---|---|---|---|
-| [app.html](app.html) | Tiny loader/redirect into the product ("Opening RecruiterOS…") | styles.css | *(inline)* |
+| [app.html](app.html) | Tiny loader/redirect into the product ("Opening RecruitersOS…") | styles.css | *(inline)* |
 | [command.html](command.html) | **Command Center** — Overview, Campaigns, Prospects, Outreach, Response, Accounts, Connected, ATS | styles.css, app.css, command.css, campaign-studio.css | command.js, campaign-studio.js, session-bridge.js, local-backend.js |
 | [campaign-builder.html](campaign-builder.html) | Build a targeted campaign from signals | styles.css | campaign-builder.js, industries.js, landing.js |
 | [campaign-studio.html](campaign-studio.html) | Drag-and-drop multi-channel sequence canvas | styles.css, app.css, campaign-studio.css | campaign-studio.js, landing.js |

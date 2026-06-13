@@ -54,7 +54,7 @@ const seq = pullForProspect({
 });
 // seq.touches -> ready-to-send email/LinkedIn/voice/SMS, day-sequenced.
 // Hot-only touches (voicemail drop, LinkedIn voice note) appear only when
-// warmth >= voiceThreshold (default 80), mirroring RecruiterOS.
+// warmth >= voiceThreshold (default 80), mirroring RecruitersOS.
 ```
 
 `pullForProspect` classifies the title into function + seniority and infers the

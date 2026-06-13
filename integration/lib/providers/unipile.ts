@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Providers · Unipile (LinkedIn channel)
+ * RecruitersOS · Providers · Unipile (LinkedIn channel)
  * Base: https://{UNIPILE_DSN}  ·  Auth: X-API-KEY.
  * Used for: sending connection invites, 1:1 DMs, and voice notes; reading
  * account status for the health sweep. Webhooks are ingested separately.

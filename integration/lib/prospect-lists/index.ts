@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Prospect lists
+ * RecruitersOS · Prospect lists
  *
  * A named, saved set of prospects (an audience). Recruiters select prospects in
  * bulk under Prospects, save the selection as a named list, and later pull that

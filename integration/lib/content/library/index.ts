@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Parameterized Content Library — public surface
+ * RecruitersOS · Parameterized Content Library — public surface
  *
  * Pull rich, on-voice, multi-channel outreach copy for any lead by parameters
  * (industry × function × seniority × signal × motion), rendered instantly from a

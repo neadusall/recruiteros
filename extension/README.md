@@ -1,4 +1,4 @@
-# RecruiterOS Outreach — Chrome Extension (wireframe)
+# RecruitersOS Outreach — Chrome Extension (wireframe)
 
 A Manifest V3 Chrome extension that does what the MeetAlfred extension does:
 **capture LinkedIn profiles** and **perform outreach actions from the user's own
@@ -32,7 +32,7 @@ the internals.
 ```
  ┌─────────────────────────┐   ros.* messages   ┌──────────────────────┐
  │  Host outreach tool      │ ◀───────────────▶ │  background.js (SW)   │
- │  (RecruiterOS Studio,    │                    │  queue · limiter ·   │
+ │  (RecruitersOS Studio,    │                    │  queue · limiter ·   │
  │   or any other tool)     │   alfred-bridge.js │  scheduler · relay   │
  │  + Alfred engine         │                    └─────────┬────────────┘
  └─────────────────────────┘                              │ chrome.tabs

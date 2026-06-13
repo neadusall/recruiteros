@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Extension ingest token
+ * RecruitersOS · Extension ingest token
  *
  * The Chrome extension (Sales Navigator scraper / browser-execution agent) runs
  * in the user's own browser and can't carry the site session cookie cross-origin.

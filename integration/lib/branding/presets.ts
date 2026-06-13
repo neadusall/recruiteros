@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Built-in white-label brand presets
+ * RecruitersOS · Built-in white-label brand presets
  *
  * Per-workspace branding (lib/branding) is the source of truth a customer edits
  * in Setup → Branding. But a flagship white-label tenant should look like itself

@@ -2,7 +2,7 @@
    Alfred ⇆ Extension bridge — THE integration seam.
 
    Load this in the HOST outreach tool (the web page running the
-   Alfred engine — e.g. RecruiterOS's Studio, or any other tool).
+   Alfred engine — e.g. RecruitersOS's Studio, or any other tool).
    It returns a LinkedIn channel adapter that satisfies the exact
    Alfred adapter interface:  { id, label, supports, connect, execute }
    …but instead of simulating, it forwards each action to THIS

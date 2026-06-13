@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Providers · Tomba (email lookup)
+ * RecruitersOS · Providers · Tomba (email lookup)
  * Base: https://api.tomba.io/v1 · Auth: X-Tomba-Key + X-Tomba-Secret.
  * Second rung of the enrichment waterfall: corporate email from name + domain.
  */

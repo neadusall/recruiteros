@@ -1,4 +1,4 @@
-/* RecruiterOS · Auth client
+/* RecruitersOS · Auth client
  *
  * Talks to the real backend at /api/auth/*. This is a production product: there
  * is no demo mode and no fake session. On success it lands the user in their

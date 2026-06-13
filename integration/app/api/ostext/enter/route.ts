@@ -8,7 +8,7 @@ export const runtime = "nodejs";
  * GET /api/ostext/enter
  *
  * Single sign-on into OS Text (taltxt). The portal's "OS Text" panel iframes
- * this. It is session-gated — you must already be signed into RecruiterOS — and
+ * this. It is session-gated — you must already be signed into RecruitersOS — and
  * then 302-redirects the iframe into taltxt's instant-access link, which sets
  * taltxt's own session cookie and drops the user straight into the app. No
  * second login.

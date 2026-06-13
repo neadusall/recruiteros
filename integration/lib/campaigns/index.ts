@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Campaigns
+ * RecruitersOS · Campaigns
  * Campaign creation + the 7-phase deployment workflow, plus barrel exports.
  */
 

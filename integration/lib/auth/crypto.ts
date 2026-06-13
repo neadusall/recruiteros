@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Auth
+ * RecruitersOS · Auth
  * Password hashing + token generation built on node:crypto only (no deps).
  * PBKDF2-SHA512, 210k iterations (OWASP 2024 floor), random per-user salt.
  */

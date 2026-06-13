@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Sending registry store
+ * RecruitersOS · Sending registry store
  *
  * Workspace-scoped registry of sending domains, MTA servers, and mailboxes —
  * held in memory for fast reads, snapshotted to the durable backend so the

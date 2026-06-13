@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · AI Vetting · Candidate enrichment
+ * RecruitersOS · AI Vetting · Candidate enrichment
  *
  * At opt-in we have a LinkedIn URL. We resolve it (once) into a small, human
  * slice the agent can reference on the call — current title/company plus a few

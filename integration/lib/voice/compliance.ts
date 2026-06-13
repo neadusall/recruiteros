@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Voice Drops · Time-zone compliance
+ * RecruitersOS · Voice Drops · Time-zone compliance
  *
  * A voicemail drop is only allowed to fire inside the LEAD's own local-time
  * window. We derive the lead's timezone from their location (e.g. a Utah number

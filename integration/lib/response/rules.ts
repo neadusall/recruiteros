@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Response
+ * RecruitersOS · Response
  * The classification + routing matrix.
  *
  * This is the literal table from the reference Response tab, encoded so the

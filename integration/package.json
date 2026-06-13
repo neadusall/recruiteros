@@ -2,7 +2,7 @@
   "name": "recruiteros-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "RecruiterOS integration backend — LinkedIn engine, campaigns, prospects, response inbox, team auth.",
+  "description": "RecruitersOS integration backend — LinkedIn engine, campaigns, prospects, response inbox, team auth.",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",

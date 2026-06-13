@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · JD Sourcing
+ * RecruitersOS · JD Sourcing
  * Promote a staged SourcingRun into the Candidates (Prospects) pipeline.
  *
  * The recruiter saves a run under a name in the JD Sourcing tab, reviews it, then

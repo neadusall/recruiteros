@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Voice Drops · Public surface
+ * RecruitersOS · Voice Drops · Public surface
  * One import site for the API routes + the voice webhook.
  */
 

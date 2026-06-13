@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Voice Drops · Seeded default scripts
+ * RecruitersOS · Voice Drops · Seeded default scripts
  *
  * A small, opinionated library of cloned-voice voicemail scripts that every
  * workspace starts with, so an operator can pick a proven, natural-sounding

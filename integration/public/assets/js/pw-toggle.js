@@ -1,4 +1,4 @@
-/* RecruiterOS · Show/hide password
+/* RecruitersOS · Show/hide password
  * Wraps every <input type="password"> with an eye toggle so users can verify
  * what they typed. Pure DOM, no dependencies; safe to include on any page. */
 (function () {

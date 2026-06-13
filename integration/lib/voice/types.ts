@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Voice Drops · Domain types
+ * RecruitersOS · Voice Drops · Domain types
  *
  * Voice Drops is the compliant landline/VoIP voicemail-outreach motion: dial a
  * verified BUSINESS direct line, use Telnyx Premium AMD to detect the voicemail,
@@ -90,7 +90,7 @@ export interface VoiceLead {
   lastAttemptAt?: string;
   /** Telnyx call_control_id of the most recent attempt. */
   callControlId?: string;
-  /** Link back to a RecruiterOS Prospect when imported from a saved list. */
+  /** Link back to a RecruitersOS Prospect when imported from a saved list. */
   prospectId?: string;
   /** Per-lead voicemail script (BD weekly waves set a unique, value-first script
    *  each week). When present it OVERRIDES the campaign's scriptTemplate for this

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · JD Sourcing
+ * RecruitersOS · JD Sourcing
  * Turn a CandidateICP into runnable searches.
  *
  * Two flavors per theme:

@@ -1,6 +1,6 @@
 # Solo Recruiter Outbound Model — 40 mailboxes
 
-The standing outbound model for **one recruiter** running BD on RecruiterOS's owned
+The standing outbound model for **one recruiter** running BD on RecruitersOS's owned
 email stack (self-hosted Postal MTA, not Google/M365 seats, not Instantly). Built for
 40 mailboxes out of the gate. Pairs with `docs/design/self-hosted-email-infrastructure.md`
 (cost model §4) and the live Sending → Deliverability dashboard.

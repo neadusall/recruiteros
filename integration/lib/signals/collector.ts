@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine
+ * RecruitersOS · Signal Engine
  * The collector — orchestration of the full signal flow.
  *
  * This is the conductor that implements the product's four-step loop end to end

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · BD · Self-learning outreach optimizer
+ * RecruitersOS · BD · Self-learning outreach optimizer
  *
  * The brain of the loop. Per (workspace, motion) it reads the live per-variant
  * analytics (positive-reply rate + two-proportion significance, already computed

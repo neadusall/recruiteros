@@ -1,12 +1,12 @@
 /**
- * RecruiterOS · LinkedIn Engine
+ * RecruitersOS · LinkedIn Engine
  * Repository: persistence boundary for the engine.
  *
  * Ships with an in-memory reference implementation so the engine runs end to
  * end out of the box. In production, implement `Repository` against your store
  * (Prisma/Postgres) and return it from `getRepository()`.
  *
- * Mapping guide (RecruiterOS core -> engine):
+ * Mapping guide (RecruitersOS core -> engine):
  *   Campaign.prospects  -> Prospect
  *   Campaign.sequence   -> Sequence (+ SequenceStep)
  *   ConnectedAccount    -> LinkedInAccount

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · API helpers
+ * RecruitersOS · API helpers
  * Thin glue every route shares: JSON parsing, the authed workspace context,
  * and a session cookie. Keeps the route handlers to a few lines each.
  */

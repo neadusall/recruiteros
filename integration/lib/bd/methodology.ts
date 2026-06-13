@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · BD · Methodology pool (self-learning outreach)
+ * RecruitersOS · BD · Methodology pool (self-learning outreach)
  *
  * The experiment layer (experiment.ts) runs the high-level family A/B: mpc vs
  * consultative. THIS layer goes a level deeper — inside each family it holds a

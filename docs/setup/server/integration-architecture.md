@@ -1,7 +1,7 @@
-# RecruiterOS Outreach — Integration Architecture
+# RecruitersOS Outreach — Integration Architecture
 
 How the three layers fit together to deliver MeetAlfred-class LinkedIn outreach
-inside RecruiterOS, and where every MeetAlfred feature lives.
+inside RecruitersOS, and where every MeetAlfred feature lives.
 
 ```
  ┌──────────────────────────────────────────────────────────────────────┐
@@ -30,7 +30,7 @@ inside RecruiterOS, and where every MeetAlfred feature lives.
 
 ## The end-to-end flow (a team member's day)
 
-1. **Sign in** to RecruiterOS (backend sets the `ros_session` cookie). Open the
+1. **Sign in** to RecruitersOS (backend sets the `ros_session` cookie). Open the
    **Outreach Studio** in the same browser.
 2. **LinkedIn Live tab → Connect backend.** The portal calls `GET /api/auth/session`
    and lists your team's **LinkedIn accounts** from `GET /api/accounts` with their

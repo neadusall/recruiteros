@@ -1,6 +1,6 @@
 # SMS qualification setup, step by step (texting that qualifies leads for you)
 
-Goal: turn on two-way texting so RecruiterOS can send a text, then on every
+Goal: turn on two-way texting so RecruitersOS can send a text, then on every
 reply automatically **qualify** the person, opt-outs get suppressed, hot leads
 get escalated to you, and everyone in between gets an on-brand AI reply that
 nudges toward a booked call. Texting is the channel people actually answer, so
@@ -23,7 +23,7 @@ You are wiring these together; they already exist in the repo:
 | The qualifier | `integration/lib/sms/conversation.ts` | On each inbound text: classify intent, then **stop / escalate / auto-reply**. |
 | Intent classifier | `integration/lib/linkedin/classify.ts` | Sorts a reply into positive / soft_yes / timing / fit / referral / not_interested / **stop**. Has a fast-path that catches opt-outs without an AI call. |
 | Inbound webhook | `integration/app/api/sms/webhook/route.ts` | `POST /api/sms/webhook`. Telnyx calls this on every received text. |
-| Outbound send API | `integration/app/api/sms/send/route.ts` | `POST /api/sms/send`. RecruiterOS (or you) fire a text from here. |
+| Outbound send API | `integration/app/api/sms/send/route.ts` | `POST /api/sms/send`. RecruitersOS (or you) fire a text from here. |
 | Mobile vs landline gate | `TELNYX_NUMBER_LOOKUP` env (see `.env.example`) | Cheap line-type check so you only text mobiles. |
 
 ### How qualification actually decides (the logic, in plain English)
@@ -41,7 +41,7 @@ Every inbound text runs through `handleInbound` in `conversation.ts`:
    sentences, no emojis, no em dashes, always proposing a concrete next step)
    and the webhook sends it automatically.
 
-The webhook returns `{ intent, escalate, replied, reason }` so RecruiterOS can
+The webhook returns `{ intent, escalate, replied, reason }` so RecruitersOS can
 log the decision and ping you when something is hot.
 
 ---
@@ -50,7 +50,7 @@ log the decision and ping you when something is hot.
 
   A. Get a Telnyx account + API key + a messaging-capable number
   B. Put the keys on the Hetzner server and redeploy
-  C. Point your Telnyx number's inbound webhook at RecruiterOS
+  C. Point your Telnyx number's inbound webhook at RecruitersOS
   D. Send a test text and watch it qualify
 
 (Optional E: turn on the mobile-vs-landline lookup. Optional F: send from your
@@ -59,7 +59,7 @@ own app via the send API.)
 ================================================================
 PART A, Telnyx account + API key + a number
 ================================================================
-If you already set up Telnyx for the RecruiterOS phone project, you can reuse
+If you already set up Telnyx for the RecruitersOS phone project, you can reuse
 the SAME account, key, and messaging profile, skip to step A5 to grab the
 messaging profile ID.
 
@@ -98,11 +98,11 @@ PART B, Put the keys on the server + redeploy
        TELNYX_MESSAGING_PROFILE_ID=paste_the_uuid_here
 
    Make sure these are also set (they power the AI qualifier; you likely set
-   them already for the rest of RecruiterOS):
+   them already for the rest of RecruitersOS):
        ANTHROPIC_API_KEY=...            # required for auto-replies + classify
        RECRUITEROS_LLM_MODEL=claude-sonnet-4-6
 
-   If RecruiterOS will call the outbound send API (Part F), it also needs:
+   If RecruitersOS will call the outbound send API (Part F), it also needs:
        RECRUITEROS_API_TOKEN=a_long_random_string   # bearer for /api/sms/send
 
 5. Save and exit nano:
@@ -161,7 +161,7 @@ the line type cheaply (~$0.0025/query) and reuses your `TELNYX_API_KEY`.
 1. On the server, in `.env.production`, add:
        TELNYX_NUMBER_LOOKUP=1
 2. Redeploy (`docker compose up -d --build`).
-3. RecruiterOS will gate sends to mobiles via:
+3. RecruitersOS will gate sends to mobiles via:
        GET https://api.telnyx.com/v2/number_lookup/{phone}?type=carrier
    (See the note block in `.env.example` for the exact line.)
 

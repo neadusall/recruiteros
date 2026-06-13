@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Hiring Engine
+ * RecruitersOS · Hiring Engine
  * resolveHiringManager — the core inference, end to end.
  *
  * Given a company and a posted role, query the people graph(s) for the target profile,

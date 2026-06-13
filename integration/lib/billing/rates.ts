@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Billing · Cost-rate catalog (OWNER ONLY)
+ * RecruitersOS · Billing · Cost-rate catalog (OWNER ONLY)
  *
  * The single source of truth for what every action ACTUALLY costs us. Every
  * number here is a real unit cost (USD), not a price we charge. The owner

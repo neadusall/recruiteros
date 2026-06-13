@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Billing · Pricing engine (OWNER ONLY)
+ * RecruitersOS · Billing · Pricing engine (OWNER ONLY)
  *
  * Turns the cost-rate catalog into two answers the owner actually needs:
  *   1. "What does an account that sends N emails/month COST me?"  -> estimateCost

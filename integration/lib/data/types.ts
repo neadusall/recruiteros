@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Data
+ * RecruitersOS · Data
  * The people-data warehouse: a workspace-scoped table of person records pulled
  * from a licensed external data provider (e.g. ZoomInfo) and held locally so
  * leads can be looked up + enriched without a live provider call every time.

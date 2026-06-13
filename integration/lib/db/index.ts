@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Persistence
+ * RecruitersOS · Persistence
  * A tiny, dependency-light durable layer. Modules keep fast in-memory stores;
  * this snapshots them so state (accounts, sessions, workspaces, …) survives a
  * restart. Each module calls `loadSnapshot(key)` once on boot and

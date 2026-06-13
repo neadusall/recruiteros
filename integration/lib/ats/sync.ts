@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Loxo sync engine
+ * RecruitersOS · Loxo sync engine
  *
  * Pulls People → the Data warehouse (as Candidates) and Companies → the BD
  * company book, for one workspace, using that workspace's stored Loxo
@@ -152,7 +152,7 @@ export async function syncOneCompany(workspaceId: string, companyId: string): Pr
 }
 
 /* ============================================================
-   Write-back: RecruiterOS -> Loxo (the PUSH direction).
+   Write-back: RecruitersOS -> Loxo (the PUSH direction).
 
    Called ONLY from user-initiated API actions (a status edit, an
    enrichment), never from the sync/webhook code paths — so a push that

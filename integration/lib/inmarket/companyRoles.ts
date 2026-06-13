@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · In-Market · Company role expansion ("what ELSE are they hiring for")
+ * RecruitersOS · In-Market · Company role expansion ("what ELSE are they hiring for")
  *
  * A company usually surfaces from ONE job listing, but it's almost always hiring for many
  * more. This resolves the company's OWN public ATS board and returns EVERY open role — with

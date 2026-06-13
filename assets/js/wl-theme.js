@@ -1,4 +1,4 @@
-/* RecruiterOS · White-label theme
+/* RecruitersOS · White-label theme
  * Re-skin the UI to a customer's accent color. The base CSS uses a violet/cyan
  * palette via --brand / --grad and a few hardcoded aurora blobs; a white-label
  * customer (e.g. Lume = teal #0080A0) needs ALL of it recolored, not just one

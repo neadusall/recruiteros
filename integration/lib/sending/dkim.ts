@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · DKIM
+ * RecruitersOS · DKIM
  * Generate a real 2048-bit RSA DKIM keypair in-app. The public key is formatted
  * for the DKIM DNS TXT record; the private key (PEM) is configured into the MTA
  * (Postal) so it signs outbound mail. Nothing is hand-entered.

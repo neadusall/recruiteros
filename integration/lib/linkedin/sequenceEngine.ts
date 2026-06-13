@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · LinkedIn Engine
+ * RecruitersOS · LinkedIn Engine
  * Sequence / cadence engine.
  *
  * This is the brain. It pulls due enrollments, runs the next allowed step
@@ -7,7 +7,7 @@
  * webhook events (accept-triggered follow-ups, pause-on-reply).
  *
  * Persistence is injected via `Repository` so this drops onto whatever store
- * RecruiterOS already uses (Prisma, Postgres, etc.). The engine itself holds no
+ * RecruitersOS already uses (Prisma, Postgres, etc.). The engine itself holds no
  * database dependency.
  */
 

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Response
+ * RecruitersOS · Response
  * The end-to-end pipeline: ingest -> match -> classify -> route -> record.
  *
  *   const out = await processInbound("instantly", workspaceId, rawWebhookBody);

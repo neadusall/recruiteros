@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · LinkedIn Engine
+ * RecruitersOS · LinkedIn Engine
  * AI message generation, structured around the rapport-first ladder.
  *
  * Every generated touch is bound to a "rung" so the sequence physically cannot

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Owner (OWNER ONLY)
+ * RecruitersOS · Owner (OWNER ONLY)
  *
  * The owner layer: who counts as the owner, the fully-joined account view
  * (identity + cost + revenue + infra + data counts), and the cross-module hard

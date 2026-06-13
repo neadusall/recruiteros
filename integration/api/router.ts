@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Public API
+ * RecruitersOS · Public API
  * Framework-agnostic router + runtime adapters.
  *
  * `handle()` authenticates, dispatches to the right handler, and returns a normalized

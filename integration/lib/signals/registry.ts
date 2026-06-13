@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine
+ * RecruitersOS · Signal Engine
  * The signal registry — the catalog of every hiring signal we detect.
  *
  * This is the canonical "framework of all hiring signals". Each entry describes one

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · JD Sourcing
+ * RecruitersOS · JD Sourcing
  * Discovery orchestrator — turn the JD-derived queries into a ranked candidate list.
  *
  * This is the part that "goes out and finds the people." It hands each Boolean /

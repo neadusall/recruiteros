@@ -8,7 +8,7 @@
 > Campaign Studio / campaign + email-sequencing structure stays exactly the same** —
 > only the sender underneath changes.
 
-Goal: turn on RecruiterOS's **email channel** so campaigns actually send cold
+Goal: turn on RecruitersOS's **email channel** so campaigns actually send cold
 outbound, get replies back into the inbox, and stay deliverable — using your own
 warmed sending domains/inboxes orchestrated by **Instantly.ai**.
 
@@ -31,7 +31,7 @@ systems with separate keys:
 
 ## How cold email works here (the architecture)
 
-RecruiterOS does NOT send email from its own server. The marginal cost and the
+RecruitersOS does NOT send email from its own server. The marginal cost and the
 deliverability both live in **your own warmed inboxes on throwaway sending
 domains**, kept separate from your primary domain to protect its reputation.
 Instantly is the orchestration layer that holds those inboxes, runs the drip,
@@ -81,7 +81,7 @@ There are **5 parts**. A + C alone make the channel send. B is what makes it
   A. Instantly account + API key
   B. Sending domains + inboxes + warmup (the deliverability work)
   C. Put the key on the server + redeploy
-  D. Create an Instantly campaign + link it to a RecruiterOS campaign
+  D. Create an Instantly campaign + link it to a RecruitersOS campaign
   E. Email-finding waterfall (so prospects without an email still get one)
   F. Wire the reply webhook (replies flow back into the inbox)
 ```
@@ -125,7 +125,7 @@ reputation also kills your transactional/auth email.
    via Google/Microsoft OAuth or IMAP/SMTP).
 5. **Turn on warmup** for every inbox and let it ramp for **2–3 weeks** before
    real volume. Instantly's warmup auto-sends/receives to build reputation.
-6. RecruiterOS reads these vitals back: `instantly.vitals(accountId)` (bounce +
+6. RecruitersOS reads these vitals back: `instantly.vitals(accountId)` (bounce +
    warmup status, the nightly health sweep) and `instantly.inboxPlacementTest()`
    (SpamAssassin / inbox-placement). These surface on the integrations health
    view — keep every domain "green" before scaling sends.
@@ -150,15 +150,15 @@ PART C — Put the key on the server + redeploy
    see Troubleshooting.
 
 ================================================================
-PART D — Create an Instantly campaign + link it to RecruiterOS
+PART D — Create an Instantly campaign + link it to RecruitersOS
 ================================================================
-RecruiterOS pushes leads into a *specific* Instantly campaign per RecruiterOS
+RecruitersOS pushes leads into a *specific* Instantly campaign per RecruitersOS
 campaign. The link is the field `ChannelConfig.instantlyCampaignId`.
 
 1. In Instantly, create a **campaign** (this holds the sending schedule, the
    inbox rotation, and tracking settings). Open it and copy its **campaign ID**
    from the URL (e.g. `…/campaign/<this-id>`).
-2. In RecruiterOS, on the campaign's **Connect Channels** step, set the email
+2. In RecruitersOS, on the campaign's **Connect Channels** step, set the email
    channel's Instantly campaign ID. This writes
    `campaign.channels.instantlyCampaignId`, which the 9:00 push reads
    (`cadence.ts` → `pushApproved` → `sendTouch`).
@@ -171,7 +171,7 @@ campaign. The link is the field `ChannelConfig.instantlyCampaignId`.
 > What actually gets pushed: `addLeads(instantlyCampaignId, [{ email, first_name,
 > company_name, custom_variables: { subject, body } }])`. The subject/body ride as
 > custom variables so your Instantly template can render them, OR you keep the
-> copy in Instantly and use RecruiterOS only to enroll the lead — either works.
+> copy in Instantly and use RecruitersOS only to enroll the lead — either works.
 
 ================================================================
 PART E — Email-finding waterfall (resolve a work email)

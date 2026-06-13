@@ -1,5 +1,5 @@
 /* ============================================================
-   Tiny zero-dependency static server for the RecruiterOS portal.
+   Tiny zero-dependency static server for the RecruitersOS portal.
    Serving over http://localhost lets the Outreach Studio reach the
    browser extension (file:// cannot — see manifest externally_connectable).
 
@@ -54,7 +54,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log('\n  RecruiterOS portal serving at:');
+  console.log('\n  RecruitersOS portal serving at:');
   console.log('   → http://localhost:' + PORT + '/alfred.html   (Outreach Studio)');
   console.log('   → http://localhost:' + PORT + '/app.html      (Command Center)');
   console.log('\n  Opened over localhost so the Studio can talk to the browser extension.');

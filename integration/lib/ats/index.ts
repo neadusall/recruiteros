@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · ATS
+ * RecruitersOS · ATS
  * Vendor selection. Loxo is verified; the rest are placeholders that share the
  * Loxo behavior so the engine runs against any selection until specced.
  */
@@ -10,7 +10,7 @@ import type { AtsAdapter, AtsVendor } from "./types";
 export * from "./types";
 export { LoxoAdapter };
 
-// Pull-direction surface (Loxo -> RecruiterOS): per-workspace credentials, the
+// Pull-direction surface (Loxo -> RecruitersOS): per-workspace credentials, the
 // read client, the sync engine, and webhook registration.
 export * from "./credentials";
 export { LoxoClient } from "./loxoClient";

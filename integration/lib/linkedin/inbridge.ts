@@ -1,7 +1,7 @@
 /**
- * RecruiterOS · In-backend LinkedIn bridge ("our own side", no Unipile)
+ * RecruitersOS · In-backend LinkedIn bridge ("our own side", no Unipile)
  *
- * This is the provider RecruiterOS uses by default: instead of a third-party API
+ * This is the provider RecruitersOS uses by default: instead of a third-party API
  * (Unipile) or a separate bridge process, the work runs in the user's OWN browser
  * via the Chrome extension, coordinated entirely inside this backend and persisted
  * in the database.
@@ -27,7 +27,7 @@ import type { ActionResult } from "./types";
 
 export interface BridgeAction {
   id: string;
-  accountId: string;                 // RecruiterOS LinkedIn account id (liacc_…)
+  accountId: string;                 // RecruitersOS LinkedIn account id (liacc_…)
   type: string;                      // search | connect | message | inmail | voice_note | profile_view | endorse | withdraw_invite
   target: Record<string, unknown>;
   payload: Record<string, unknown>;

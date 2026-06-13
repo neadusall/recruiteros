@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Billing · Usage ledger (OWNER ONLY)
+ * RecruitersOS · Billing · Usage ledger (OWNER ONLY)
  *
  * An append-only record of every cost we incur, per workspace, per motion. This
  * is the "track everything from a cost standpoint" spine: each enrichment call,

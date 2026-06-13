@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Data import
+ * RecruitersOS · Data import
  * Normalize CSV/portal-export rows into DataRecordInput.
  *
  * Rows arrive keyed by their ORIGINAL column header (exactly as exported). We map

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · AI Vetting · Domain types
+ * RecruitersOS · AI Vetting · Domain types
  *
  * AI Vetting is the INBOUND counterpart to Voice Drops. Instead of dialing out
  * and dropping a one-way voicemail, the recruiter stands up a "vetting desk":
@@ -15,7 +15,7 @@
  *
  * The hard real-time part (STT -> LLM -> cloned-voice TTS, barge-in, turn
  * detection) is delegated to a managed Voice-AI engine (Telnyx AI Assistant by
- * default). Everything that is RecruiterOS's value — the JD<->number binding,
+ * default). Everything that is RecruitersOS's value — the JD<->number binding,
  * the candidate context/LinkedIn enrichment, the human-likeness instructions,
  * and the scoring — lives here.
  *

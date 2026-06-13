@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Inbox-placement (seed) testing
+ * RecruitersOS · Inbox-placement (seed) testing
  * Send a probe through a domain/mailbox to a panel of seed inboxes across
  * providers (Gmail/Outlook/Yahoo), then score where each landed
  * (inbox/promotions/spam/missing). Placement must pass before a domain ramps.

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine
+ * RecruitersOS · Signal Engine
  * Domain types for the hiring-signal framework.
  *
  * The Signal Engine answers one question continuously: "who just became hire-able,
@@ -9,7 +9,7 @@
  * work-list that can auto-trigger a campaign.
  *
  * These types are intentionally framework-agnostic so they map cleanly onto the
- * RecruiterOS core models (Campaign, Account, Prospect) and onto the LinkedIn Engine
+ * RecruitersOS core models (Campaign, Account, Prospect) and onto the LinkedIn Engine
  * in ../linkedin without coupling to any ORM or vendor SDK.
  */
 
@@ -18,7 +18,7 @@
 /* ------------------------------------------------------------------ */
 
 /**
- * Every hiring signal RecruiterOS knows how to detect, grouped by what it tells you.
+ * Every hiring signal RecruitersOS knows how to detect, grouped by what it tells you.
  *
  * COMPANY-SIDE — "this company is (about to be) hiring", drives Business Development.
  * PEOPLE-SIDE  — "this person just became reachable", drives Recruiting.
@@ -97,7 +97,7 @@ export type SubjectKind = "company" | "person";
 /**
  * Static description of a signal type: what it means, how strong it is, how fast it
  * decays, and which sources can produce it. The ./registry holds one of these per
- * `SignalType`. This is the catalog RecruiterOS exposes as a service so users can see
+ * `SignalType`. This is the catalog RecruitersOS exposes as a service so users can see
  * exactly what is being watched and tune weighting.
  */
 export interface SignalDefinition {
@@ -161,7 +161,7 @@ export interface SourceRef {
 
 /** A company a signal resolves to, after entity resolution. */
 export interface Company {
-  id: string;                    // RecruiterOS canonical company id
+  id: string;                    // RecruitersOS canonical company id
   name: string;
   domain?: string;               // primary key for dedupe across sources
   linkedinUrl?: string;
@@ -253,7 +253,7 @@ export interface Signal {
 
   /** When the underlying event happened (best estimate, ISO). */
   eventAt: string;
-  /** When RecruiterOS first ingested it (ISO). */
+  /** When RecruitersOS first ingested it (ISO). */
   ingestedAt: string;
 
   /** Populated by the scorer; see ./scoring. */

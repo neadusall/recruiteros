@@ -1,7 +1,7 @@
 /**
  * POST or GET /api/bd/nurture/cron
  * Advances the 6-month BD nurture drip. Call every few hours (idempotent) from
- * the scheduler — n8n, a worker loop, or RecruiterOS's own job runner.
+ * the scheduler — n8n, a worker loop, or RecruitersOS's own job runner.
  *
  * Each tick finds every active enrollment whose next value-touch is due, generates
  * that touch fresh against the lead's role/industry/background, and dispatches it:

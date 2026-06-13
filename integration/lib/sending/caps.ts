@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Caps + rotation
+ * RecruitersOS · Caps + rotation
  * Per-mailbox daily caps with a warm-up ramp, and pool-aware mailbox selection:
  * pick the healthiest mailbox under its cap, on an active (verified, un-paused)
  * domain, spreading load so no single mailbox/domain burns.

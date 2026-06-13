@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · ATS mappers (Loxo → RecruiterOS)
+ * RecruitersOS · ATS mappers (Loxo → RecruitersOS)
  *
  * The single place that translates Loxo's person/company payloads into the
  * normalized shapes the rest of the app already understands:
@@ -190,7 +190,7 @@ export function loxoCompanyToRecord(c: Loxo): CompanyInput {
 }
 
 /* ============================================================
-   Reverse mappers (RecruiterOS -> Loxo), for write-back.
+   Reverse mappers (RecruitersOS -> Loxo), for write-back.
    Kept conservative: we only send fields that map cleanly, so a
    push never blanks or corrupts data the user didn't touch.
    ============================================================ */
@@ -202,7 +202,7 @@ type RosPerson = {
   city?: string; state?: string; country?: string; bio?: string; compensation?: string;
 };
 
-/** RecruiterOS warehouse record -> Loxo person body. Only non-empty fields. */
+/** RecruitersOS warehouse record -> Loxo person body. Only non-empty fields. */
 export function dataRecordToLoxoPerson(r: RosPerson): Record<string, any> {
   const body: Record<string, any> = {};
   if (r.fullName) body.name = r.fullName;
@@ -231,7 +231,7 @@ type RosCompany = {
   raw?: Record<string, string>;
 };
 
-/** RecruiterOS company -> Loxo company body. Only non-empty fields. */
+/** RecruitersOS company -> Loxo company body. Only non-empty fields. */
 export function companyToLoxoCompany(c: RosCompany): Record<string, any> {
   const body: Record<string, any> = {};
   if (c.name) body.name = c.name;

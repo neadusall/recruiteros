@@ -1,12 +1,12 @@
-# n8n infrastructure — RecruiterOS BD omnichannel (complete)
+# n8n infrastructure — RecruitersOS BD omnichannel (complete)
 
 The finished n8n build: hiring-signal → personalized 4-channel outreach → 6-month nurture, with
-de-dupe and reply-halt. n8n is the conductor; RecruiterOS owns every provider, gate, warm-up,
+de-dupe and reply-halt. n8n is the conductor; RecruitersOS owns every provider, gate, warm-up,
 content engine, and cost cap. Own internal email (Postal MTA) — never Instantly.
 
 ## The model
 ```
-  Hiring SIGNALS → prospects (RecruiterOS signal engine, internal)
+  Hiring SIGNALS → prospects (RecruitersOS signal engine, internal)
         │
   n8n FLOW A (schedule-pull):  GET /api/prospects/queue  ── content pre-attached, de-duped,
         │                                                    confidence-gated
@@ -36,10 +36,10 @@ content engine, and cost cap. Own internal email (Postal MTA) — never Instantl
 
 # PASTE THIS INTO n8n "Build with AI"
 
-Build an n8n workflow named **"RecruiterOS BD — Omnichannel Outreach"** that conducts a four-channel
-business-development funnel plus a six-month nurture, by calling the RecruiterOS HTTP API (BD motion).
-RecruiterOS owns every provider, gate, warm-up, content engine, and cost cap. This workflow ONLY
-calls RecruiterOS endpoints — make no direct SMTP/Telnyx/Unipile/email-provider calls anywhere.
+Build an n8n workflow named **"RecruitersOS BD — Omnichannel Outreach"** that conducts a four-channel
+business-development funnel plus a six-month nurture, by calling the RecruitersOS HTTP API (BD motion).
+RecruitersOS owns every provider, gate, warm-up, content engine, and cost cap. This workflow ONLY
+calls RecruitersOS endpoints — make no direct SMTP/Telnyx/Unipile/email-provider calls anywhere.
 
 Env variables (via `$env`):
 - `RECRUITEROS_BASE_URL`, `RECRUITEROS_API_TOKEN` (header `Authorization: Bearer {token}`),
@@ -60,7 +60,7 @@ Create FOUR flows in one workflow:
    `{ workspaceId: $env.RECRUITEROS_WS, prospect: { id: $json.id, firstName: $json.firstName,
    company: $json.company, email: $json.email }, subject: $json.subject, html: $json.html,
    voiceCampaignId: $env.RECRUITEROS_VOICE_CAMPAIGN_ID }`. Skip if no email. (This send auto-enqueues
-   the AMD voicemail inside RecruiterOS — do NOT add a dial node.)
+   the AMD voicemail inside RecruitersOS — do NOT add a dial node.)
 5. **HTTP "③ LinkedIn Enroll"** — `POST {{$env.RECRUITEROS_BASE_URL}}/api/linkedin/enroll`, bearer,
    JSON body `{ prospect: { id: $json.id, firstName: $json.firstName, company: $json.company,
    linkedinUrl: $json.linkedinUrl, providerProfileId: $json.providerProfileId },
@@ -98,7 +98,7 @@ Important behaviors:
 - HTTP nodes replace the item with their response; in every node after one, re-read prospect fields
   from the "Split Out" node via paired-item access.
 - Do NOT add an AMD/voice dial node — the voicemail is triggered by the email send and drained by
-  `/api/voice/cron`. AMD consent/window/cap/line-type gates are enforced inside RecruiterOS.
+  `/api/voice/cron`. AMD consent/window/cap/line-type gates are enforced inside RecruitersOS.
 - Voice Note is for connected prospects only. Never inline tokens/secrets. Leave inactive until env set.
 
 ---

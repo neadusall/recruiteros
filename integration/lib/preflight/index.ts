@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Preflight / readiness
+ * RecruitersOS · Preflight / readiness
  *
  * One honest answer to "is the system ready, and what's left for ME to do?".
  * Each item reports whether it's wired (by env presence only — never the secret

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Candidates auto-seed
+ * RecruitersOS · Candidates auto-seed
  * On first open of the Candidates tab, load the bundled Lume Search Partners
  * export into the workspace's warehouse — so the data is simply THERE without a
  * manual import step. Runs at most once per workspace (persisted marker) and

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Hetzner DNS API client
+ * RecruitersOS · Hetzner DNS API client
  * https://dns.hetzner.com/api-docs — manages zones + records so the full
  * deliverability record set is written automatically (no DNS console clicks).
  *

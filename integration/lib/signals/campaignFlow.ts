@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine
+ * RecruitersOS · Signal Engine
  * Campaign flow — the end-to-end lifecycle from signal to launch-ready.
  *
  * `campaignBuilder` assembles a reviewable draft for free. This module runs the rest of

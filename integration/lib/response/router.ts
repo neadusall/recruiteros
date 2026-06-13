@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Response
+ * RecruitersOS · Response
  * The router: executes a rule's actions against the prospect, the sequence
  * engine, the ATS and the suppression list. This is where a classified reply
  * becomes real-world state changes.

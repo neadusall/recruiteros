@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine
+ * RecruitersOS · Signal Engine
  * Waterfall data collection.
  *
  * A "waterfall" runs a list of providers for one piece of data in priority order and

@@ -1,8 +1,8 @@
 /**
- * RecruiterOS · LinkedIn Engine
+ * RecruitersOS · LinkedIn Engine
  * Client SDK.
  *
- * Import this in the RecruiterOS backend to drive LinkedIn outreach without
+ * Import this in the RecruitersOS backend to drive LinkedIn outreach without
  * hand-rolling fetch calls. It targets the REST routes in app/api/linkedin/*.
  *
  *   const li = new LinkedInClient({ baseUrl, token });

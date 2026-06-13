@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Reputation ingestion
+ * RecruitersOS · Reputation ingestion
  * Pulls sender reputation from the free authorities and writes a Reputation
  * snapshot onto each domain, which the governor reads:
  *

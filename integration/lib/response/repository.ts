@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Response
+ * RecruitersOS · Response
  * Inbox store: processed responses + idempotency on provider message ids.
  */
 

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Lume Search Partners export (raw rows)
+ * RecruitersOS · Lume Search Partners export (raw rows)
  * The real people-export CSV, parsed to raw header→value rows. Fed through the
  * SAME importer (`rowsToInputs`) as a manual upload, so the warehouse shape is
  * identical to clicking "Import export" with this file. Source of truth for the

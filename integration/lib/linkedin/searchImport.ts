@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · LinkedIn search import ("Enrich LinkedIn searches")
+ * RecruitersOS · LinkedIn search import ("Enrich LinkedIn searches")
  *
  * Turns a pasted LinkedIn / Sales Navigator search URL into Prospects. The
  * recruiter runs a search inside Sales Navigator, copies the URL, and drops it

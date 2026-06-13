@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Providers · Registry
+ * RecruitersOS · Providers · Registry
  * Single place every module reaches integrations through. Lazily instantiated
  * singletons, a status map for the Connected tab, and verifyAll for "Test all".
  *

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Parameterized Content Library — Taxonomy & Contract
+ * RecruitersOS · Parameterized Content Library — Taxonomy & Contract
  *
  * The "content pool" the engine pulls from the instant a lead is enriched. Unlike
  * the runtime LLM drafter (lib/bd/personaMessaging.ts), this library is authored

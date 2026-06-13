@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "RecruiterOS Backend",
+  title: "RecruitersOS Backend",
   description: "LinkedIn engine, campaigns, prospects, response inbox, and team auth API.",
 };
 

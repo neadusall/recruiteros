@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · ATS credentials
+ * RecruitersOS · ATS credentials
  *
  * Per-workspace connection settings for the system-of-record (Loxo today;
  * Bullhorn / Crelate / … reuse the same shape). Entered in the portal under the

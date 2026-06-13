@@ -1,4 +1,4 @@
-/* RecruiterOS · Local backend shim
+/* RecruitersOS · Local backend shim
  *
  * Makes the portal (login, signup, Command Center) fully functional with NO
  * server running, so opening the files directly just works. It intercepts
@@ -156,7 +156,7 @@
   // Integration catalog, mirrors the real backend (integration/lib/connected).
   // Each entry carries the step-by-step activation flow (blurb + steps + key
   // fields) the admin follows in the Connect dialog. LinkedIn Automation is
-  // managed (RecruiterOS provides the Unipile account, no key from the admin);
+  // managed (RecruitersOS provides the Unipile account, no key from the admin);
   // Instantly + SalesRobot are intentionally absent (email = self-hosted infra).
   function connectedCatalog() {
     return [

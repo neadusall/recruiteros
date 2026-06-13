@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Core
+ * RecruitersOS · Core
  * Platform repository: the single persistence boundary for every module.
  *
  * Ships an in-memory reference implementation so the whole engine runs end to

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Voice Drops · Voice-clone provider (pluggable)
+ * RecruitersOS · Voice Drops · Voice-clone provider (pluggable)
  *
  * One small interface so the rest of the engine never knows which TTS/clone
  * vendor is wired. Ships ElevenLabs AND Cartesia adapters behind env keys; runs

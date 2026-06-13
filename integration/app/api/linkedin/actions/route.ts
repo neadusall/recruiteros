@@ -2,7 +2,7 @@
  * POST /api/linkedin/actions
  * Execute a single LinkedIn action immediately (outside a sequence).
  *
- * Use this for one-off sends from RecruiterOS, manual recruiter actions, or
+ * Use this for one-off sends from RecruitersOS, manual recruiter actions, or
  * testing. The same account-safety gate applies.
  *
  * Body: { accountId, prospect, action, text?, subject?, audio? }

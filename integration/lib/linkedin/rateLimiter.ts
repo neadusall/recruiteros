@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · LinkedIn Engine
+ * RecruitersOS · LinkedIn Engine
  * Account-safety rate limiter.
  *
  * The fastest way to lose a LinkedIn seat is to behave like a bot. This module
@@ -9,7 +9,7 @@
  *   3. Human-like jitter between actions (randomized spacing).
  *
  * The counter store is pluggable. The default is in-memory for local/dev; in
- * production wire `setUsageStore()` to Redis or your RecruiterOS DB so caps are
+ * production wire `setUsageStore()` to Redis or your RecruitersOS DB so caps are
  * shared across workers.
  */
 

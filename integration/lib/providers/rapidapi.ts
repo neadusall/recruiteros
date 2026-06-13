@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Providers · RapidAPI JSearch (job scraper)
+ * RecruitersOS · Providers · RapidAPI JSearch (job scraper)
  * Base: https://jsearch.p.rapidapi.com · Auth: X-RapidAPI-Key + Host.
  * Used for: the daily signal pull / "role they're hiring for" enrichment.
  */

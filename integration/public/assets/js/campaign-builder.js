@@ -1,5 +1,5 @@
 /* ============================================================
-   RecruiterOS · Campaign Builder (interactive, standalone)
+   RecruitersOS · Campaign Builder (interactive, standalone)
    Forefront SEARCH (by industry or company) -> pulls hundreds of
    prospects (hiring manager + company + signal) -> refine -> review.
    Mirrors integration/lib/signals (freeSources -> filters ->

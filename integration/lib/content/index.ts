@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Content Library
+ * RecruitersOS · Content Library
  * The asset repository the LLM drafter injects into Touch 2 (value drop) and
  * Touch 3 (comparable proof). Case studies, comp benchmarks, value props, and
  * voice scripts, each assignable to one or more campaigns.

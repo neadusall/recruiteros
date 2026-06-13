@@ -1,4 +1,4 @@
-/* RecruiterOS, landing interactions + FX */
+/* RecruitersOS, landing interactions + FX */
 (function () {
   /* ---------- Scroll progress bar ---------- */
   const progress = document.createElement('div');

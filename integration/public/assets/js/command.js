@@ -1,4 +1,4 @@
-/* RecruiterOS · Command Center
+/* RecruitersOS · Command Center
  *
  * One screen that ties the whole GTM engine together: Overview, Response,
  * Prospects, Campaigns, Outreach, Content, Accounts, Connected, ATS.
@@ -298,7 +298,7 @@
   })();
 
   // House vs white-label identity. The house product name (RecruitersOS /
-  // RecruiterOS) may ONLY surface in a genuine house/operator context. A
+  // RecruitersOS) may ONLY surface in a genuine house/operator context. A
   // white-label CUSTOMER workspace (e.g. Lume) must never see it anywhere, even
   // when it's accessed on the house host (recruitersos.co/admin), so the test is
   // workspace-aware, not just host-aware. Every house-brand string resolves to
@@ -334,7 +334,7 @@
   var ON_HOUSE_HOST = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.host || "");
   var IS_HOUSE = ON_HOUSE_HOST && !isWhiteLabelWorkspace();
   var HOUSE_BRAND = "RecruitersOS";
-  var PLATFORM_LABEL = IS_HOUSE ? "RecruiterOS" : "the platform"; // "via X · billed"
+  var PLATFORM_LABEL = IS_HOUSE ? "RecruitersOS" : "the platform"; // "via X · billed"
   var PLATFORM_HOST = IS_HOUSE ? "RecruitersOS host" : "the shared platform host";
 
   // View-as banner: a persistent strip making it unmistakable that an admin is
@@ -6632,7 +6632,7 @@
         if (store.all().some(function (s) { return s.id === sd.id; })) return;
         store.save({ id: sd.id, channel: "multi", name: sd.name,
           tags: sd.tags, status: "active", motion: "bd",
-          owner: IS_HOUSE ? "RecruiterOS Templates" : "Platform Templates", variables: [], steps: sd.steps,
+          owner: IS_HOUSE ? "RecruitersOS Templates" : "Platform Templates", variables: [], steps: sd.steps,
           createdAt: now, updatedAt: now });
       });
     }

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Providers · SalesRobot (LinkedIn channel, alt)
+ * RecruitersOS · Providers · SalesRobot (LinkedIn channel, alt)
  * Base: https://app.salesrobot.co/public · Auth: two headers (authorization + customeruuid).
  * Used for: adding prospects to a SalesRobot campaign, pausing on reply, manual
  * DM replies, tagging (classification), and removal (DNC mirror).

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · JD Sourcing
+ * RecruitersOS · JD Sourcing
  * Staging store for saved sourcing runs.
  *
  * A SourcingRun is what the recruiter saves under a name in the JD Sourcing tab BEFORE

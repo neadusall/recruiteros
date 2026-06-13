@@ -134,7 +134,7 @@ more, so it carries a **1.3× willingness-to-pay multiplier**:
 | 10,000 | ~$81 | **$699** | ~88% |
 | 20,000 | ~$154 | **$1,299** | ~88% |
 
-**Why these numbers hold up against the market:** RecruiterOS replaces a stack
+**Why these numbers hold up against the market:** RecruitersOS replaces a stack
 (Clay-style enrichment $149-800/mo + Instantly-style sending $37-358/mo + Apollo
 $49-119/user + an AI layer). Bundling that into one "operating system" at
 $299-1,299/mo is well inside what those tools cost separately, while leaving you

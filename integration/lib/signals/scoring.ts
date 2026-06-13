@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine
+ * RecruitersOS · Signal Engine
  * ICP matching + signal scoring.
  *
  * This is the "Match → Score" stage of the product's Pull → Match → Score → Trigger

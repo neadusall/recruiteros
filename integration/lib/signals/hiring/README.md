@@ -1,4 +1,4 @@
-# RecruiterOS · Hiring Engine
+# RecruitersOS · Hiring Engine
 
 Pull job orders from gated boards (Indeed, via your proxy/unlocker), **suppress anything
 your free sources already found**, and **pair every net-new role with the decision-maker

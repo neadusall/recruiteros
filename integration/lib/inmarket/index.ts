@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · In-Market Leads (Business Development)
+ * RecruitersOS · In-Market Leads (Business Development)
  *
  * "Who is in the market for recruiting services right now?" This module turns a
  * recruiter's plain-language search into a ranked list of companies that are

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Companies store
+ * RecruitersOS · Companies store
  *
  * Workspace-scoped table of CompanyRecords, held in memory for fast search and
  * snapshotted to the durable backend (ros_kv / file volume) so the BD company

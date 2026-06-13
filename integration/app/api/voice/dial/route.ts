@@ -9,7 +9,7 @@
  * call-control events. `workspaceId`/`motion`/`ref` ride along in client_state so
  * the webhook can bill the minutes and correlate the call with zero state here.
  *
- * Used by RecruiterOS for the BD/recruiting voice dialer and by the cadence's
+ * Used by RecruitersOS for the BD/recruiting voice dialer and by the cadence's
  * voice channel. Mirrors /api/sms/send.
  */
 

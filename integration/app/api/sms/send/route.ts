@@ -3,7 +3,7 @@
  * Send a single SMS through the texting platform.
  *
  * Body: { from, to, text, ref? }
- * Used by RecruiterOS to fire a text from a campaign, a sequence step, or a
+ * Used by RecruitersOS to fire a text from a campaign, a sequence step, or a
  * manual recruiter action. The same provider powers AI auto-replies.
  */
 

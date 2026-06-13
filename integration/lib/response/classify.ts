@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Response
+ * RecruitersOS · Response
  * AI classification of inbound replies (the inbox auto-sort).
  *
  * Heuristic fast-path for the unambiguous cases (STOP especially must be instant

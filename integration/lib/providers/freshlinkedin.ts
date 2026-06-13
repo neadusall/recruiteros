@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Providers · Fresh LinkedIn Profile Data (enrichment)
+ * RecruitersOS · Providers · Fresh LinkedIn Profile Data (enrichment)
  * Base: https://fresh-linkedin-profile-data.p.rapidapi.com · Auth: X-RapidAPI-Key.
  * First rung of the enrichment waterfall: title, company, seniority, recent moves.
  */

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · AI decision-maker inference
+ * RecruitersOS · AI decision-maker inference
  *
  * Sharpens "who owns this hire" beyond the keyword heuristic: given a company, its
  * industry + size, and its open roles, an LLM infers the exact title(s) a recruiter

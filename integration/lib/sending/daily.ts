@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Sending daily tick
+ * RecruitersOS · Sending daily tick
  * One call the cadence/cron runs once a day per workspace:
  *   reset daily caps → advance warm-up → refresh reputation (SNDS) → run governor
  *   → optional warm-up engagement round.

@@ -1,12 +1,12 @@
 /**
- * RecruiterOS · LinkedIn Automation console
+ * RecruitersOS · LinkedIn Automation console
  *
  * Bridges the Command Center (cookie-session, browser) to the LinkedIn engine
  * (bearer/server-to-server). The engine's enroll/tick/webhook routes are meant
  * for the backend and the scheduler; this module is the thin, workspace-scoped
  * façade the UI talks to via the session-authed /api/automation route.
  *
- * It maps the core models the rest of RecruiterOS already manages onto the
+ * It maps the core models the rest of RecruitersOS already manages onto the
  * engine's framework-agnostic types:
  *   accounts.LinkedInAccount  -> linkedin/types.LinkedInAccount
  *   core.Prospect             -> linkedin/types.Prospect

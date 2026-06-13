@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Campaigns
+ * RecruitersOS · Campaigns
  * The 28-day multi-channel sequence anatomy, encoded.
  *
  * This is the reference "Sequence Anatomy" + "Per-Channel Touch Reference" as

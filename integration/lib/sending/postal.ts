@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Postal MTA integration
+ * RecruitersOS · Postal MTA integration
  *
  * Three jobs:
  *   1. cloudInit()      — user-data that installs Postal on a fresh Hetzner box.
@@ -23,20 +23,20 @@ export class PostalNotReady extends Error {
  * Cloud-init (user-data) to stand Postal up on Ubuntu 24.04 automatically:
  * Docker + the official Postal install, bound to the MTA hostname with TLS via
  * Caddy. After boot, the operator runs `postal make-user` / creates an org+server
- * in the Postal UI and pastes the server API key back into RecruiterOS.
+ * in the Postal UI and pastes the server API key back into RecruitersOS.
  */
 export function cloudInit(hostname: string, opts?: { callbackUrl?: string; callbackToken?: string; serverId?: string }): string {
   // Best-effort auto-bootstrap: after Postal starts, create an org + mail server +
-  // API credential via the Rails console and POST the key back to RecruiterOS, so
+  // API credential via the Rails console and POST the key back to RecruitersOS, so
   // the owner never has to paste it. Heavily fenced (|| true) — if the console
   // shape differs across Postal versions, install still succeeds and the owner
   // pastes host+key once instead. Only emitted when a callback is provided.
   const auto = opts?.callbackUrl && opts?.callbackToken
     ? `
-  # Auto-bootstrap: mint an API key and report it back to RecruiterOS.
+  # Auto-bootstrap: mint an API key and report it back to RecruitersOS.
   - |
     KEY=$(/opt/postal/install/bin/postal console <<'RUBY' 2>/dev/null | tail -n1
-    org = Organization.find_or_create_by!(permalink: 'recruiteros') { |o| o.name = 'RecruiterOS' }
+    org = Organization.find_or_create_by!(permalink: 'recruiteros') { |o| o.name = 'RecruitersOS' }
     srv = org.servers.find_or_create_by!(permalink: 'ros') { |s| s.name = 'ros'; s.mode = 'Live' }
     cred = srv.credentials.where(type: 'API').first_or_create!(name: 'recruiteros', key: SecureRandom.hex(16))
     puts cred.key
@@ -60,10 +60,10 @@ runcmd:
 write_files:
   - path: /etc/postal-mta.txt
     content: |
-      RecruiterOS MTA host ${hostname}.
+      RecruitersOS MTA host ${hostname}.
       Next: create an organization + mail server in the Postal UI, copy the
       server's API credential (X-Server-API-Key), and paste host+key into the
-      RecruiterOS Sending tab. Then add each domain with: postal default config.
+      RecruitersOS Sending tab. Then add each domain with: postal default config.
 `;
 }
 

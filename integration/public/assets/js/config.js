@@ -1,4 +1,4 @@
-/* RecruiterOS · Frontend config
+/* RecruitersOS · Frontend config
  *
  * Sets the backend API base for the portal pages. Empty string = same origin,
  * which is correct when the Next.js app (integration/) serves these pages or a

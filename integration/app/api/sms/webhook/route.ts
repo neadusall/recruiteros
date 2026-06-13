@@ -15,7 +15,7 @@ import { handleInbound, type ConversationContext } from "../../../../lib/sms/con
 
 /**
  * Look up conversation context (campaign, role, history) for a number.
- * Replace with a real lookup against your RecruiterOS store. The stub keeps the
+ * Replace with a real lookup against your RecruitersOS store. The stub keeps the
  * route runnable end to end.
  */
 async function loadContext(_from: string): Promise<ConversationContext & { recruiterNumber?: string }> {
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
     await getSmsProvider().send({ from: to, to: from, text: decision.autoReply });
   }
 
-  // The caller (RecruiterOS) should persist the decision and, on escalate,
+  // The caller (RecruitersOS) should persist the decision and, on escalate,
   // notify the recruiter. Returned here so a thin webhook can act on it too.
   return NextResponse.json({
     ok: true,

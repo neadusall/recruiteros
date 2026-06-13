@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · MTA send provider
+ * RecruitersOS · MTA send provider
  * The owned-infrastructure email sender that replaces Instantly. Picks a warmed
  * mailbox (caps/rotation), checks suppression, sends through that mailbox's
  * Postal server, and records the send for the deliverability engine.

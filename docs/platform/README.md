@@ -1,6 +1,6 @@
 # Platform Reference — `integration/lib/` domains
 
-This is the **develop-fast index** for the backend. Every feature of RecruiterOS lives in a
+This is the **develop-fast index** for the backend. Every feature of RecruitersOS lives in a
 domain folder under [`integration/lib/`](../../integration/lib/). Find your feature below, open the
 linked reference for the full breakdown (purpose, key files, entry points, where to start), then go
 straight to the `lib/<domain>/` folder and build.

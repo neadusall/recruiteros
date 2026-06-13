@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine
+ * RecruitersOS · Signal Engine
  * Cheap-first contact enrichment via RapidAPI (and similar marketplace APIs).
  *
  * Strategy: spend as little as possible. RapidAPI hosts dozens of email-finder,

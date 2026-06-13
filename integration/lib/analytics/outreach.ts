@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Outreach Statistics — aggregation engine
+ * RecruitersOS · Outreach Statistics — aggregation engine
  *
  * The read model behind the "Outreach Statistics" admin tab. It rolls up every
  * real signal the engine already records — sends (ActivityEvent `*_sent`),

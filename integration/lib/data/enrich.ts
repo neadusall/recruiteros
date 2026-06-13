@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Data enrichment
+ * RecruitersOS · Data enrichment
  *
  * Two jobs:
  *   1. enrichRecord — fill a warehouse record's missing email/phone via the

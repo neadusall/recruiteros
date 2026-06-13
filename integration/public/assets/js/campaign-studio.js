@@ -1,5 +1,5 @@
 /* ============================================================
-   RecruiterOS · Campaign Studio
+   RecruitersOS · Campaign Studio
    A dynamic, full-canvas, drag-and-drop multi-channel sequence builder.
 
    Build campaigns on a freeform 2D canvas: drop channel blocks anywhere,

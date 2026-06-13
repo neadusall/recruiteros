@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · LinkedIn scraper engine (client)
+ * RecruitersOS · LinkedIn scraper engine (client)
  *
  * Thin HTTP client to the Python `scraper` sidecar (Playwright + the open-source
  * linkedin-scraper). This is the ALTERNATIVE engine to Unipile for the "Pull

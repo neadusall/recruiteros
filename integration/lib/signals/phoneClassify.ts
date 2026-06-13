@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Signal Engine · Phone line-type classification
+ * RecruitersOS · Signal Engine · Phone line-type classification
  *
  * The cheap, reliable way to split a found number into MOBILE vs LANDLINE: run
  * it through Telnyx Number Lookup (~$0.0025/query, reuses the Telnyx integration

@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Outreach Statistics — promote-winners / autopilot
+ * RecruitersOS · Outreach Statistics — promote-winners / autopilot
  *
  * The hands-off loop. "Apply" reads the live recommendations for a campaign and
  * pins them onto `campaign.autopilot` (winning message archetype, top segments,

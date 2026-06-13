@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · Providers · TidyCal (scheduling — bookings feed)
+ * RecruitersOS · Providers · TidyCal (scheduling — bookings feed)
  * Base: https://tidycal.com/api · Auth: Bearer.
  *
  * AI Vetting uses TidyCal as a candidate source: when someone books, the booking

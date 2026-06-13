@@ -1,5 +1,5 @@
 /**
- * RecruiterOS · JD Sourcing
+ * RecruitersOS · JD Sourcing
  * Rule-based fit scoring of a discovered candidate against the ICP.
  *
  * Deliberately cheap and deterministic ($0, no model call) so we can score every one
