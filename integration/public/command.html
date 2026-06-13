@@ -19,7 +19,7 @@
   <!-- White-label anti-flash: on a customer domain, drop the house product name from
        the tab + the house favicon, and hide the wordmark until command.js paints the
        workspace/preset brand. Safety timeout reveals it even if branding can't load. -->
-  <script>(function(){try{var h=location.host||"";if(/(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(h))return;document.title="Command Center";var f=document.querySelector('link[rel=icon]');if(f)f.removeAttribute("href");var s=document.createElement("style");s.textContent=".wl-hide .brand-word,.wl-hide .brand .logo{visibility:hidden}";document.head.appendChild(s);var de=document.documentElement;de.classList.add("wl-hide");setTimeout(function(){de.classList.remove("wl-hide");},3000);}catch(e){}})();</script>
+  <script>(function(){try{var h=location.host||"";if(/(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(h))return;document.title="Command Center";var f=document.querySelector('link[rel=icon]');if(f)f.removeAttribute("href");var s=document.createElement("style");s.textContent=".wl-hide .brand-word{visibility:hidden}";document.head.appendChild(s);var de=document.documentElement;de.classList.add("wl-hide");setTimeout(function(){de.classList.remove("wl-hide");},3000);}catch(e){}})();</script>
 </head>
 <body class="app">
   <a href="/helpcenter" id="ros-help-fab" title="Help Center"><span>?</span> Help</a>
@@ -39,7 +39,7 @@
   <div class="shell">
     <!-- SIDEBAR -->
     <aside class="sidebar cmd-side">
-      <a href="/" class="brand" id="brandLink"><span class="logo">R</span><span class="brand-word">Recruiters<span class="os">OS</span></span></a>
+      <a href="/" class="brand" id="brandLink"><span class="brand-word">Recruiters<span class="os">OS</span></span></a>
 
       <!-- Portal identity: says plainly which portal you're in (Admin vs Recruiter). -->
       <div class="portal-badge" id="portalBadge" data-portal="admin">🛡️ Admin Portal</div>

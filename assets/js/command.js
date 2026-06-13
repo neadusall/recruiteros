@@ -9188,7 +9188,6 @@
     var link = $("#brandLink");
     if (!link) return;
     var word = link.querySelector(".brand-word");
-    var mark = link.querySelector(".logo"); // house "R" badge; shown only alongside the house wordmark
     var wsId = (ctx.workspace && ctx.workspace.id) || "ws";
     var CACHE = "ros_brand_" + wsId;
 
@@ -9208,7 +9207,6 @@
       var existing = link.querySelector(".brand-logo");
       if (logo) {
         if (word) word.style.display = "none";
-        if (mark) mark.style.display = "none"; // custom logo replaces the house mark
         var img = existing || document.createElement("img");
         img.className = "brand-logo";
         img.alt = b.brandName || "Workspace logo";
@@ -9218,12 +9216,12 @@
       } else {
         if (existing) existing.remove();
         if (word) {
-          if (b.brandName) { word.style.display = ""; word.textContent = b.brandName; if (mark) mark.style.display = "none"; }
+          if (b.brandName) { word.style.display = ""; word.textContent = b.brandName; }
           // No logo and no brand name: only the house domain may show the house
-          // wordmark (and its "R" badge). On a white-label domain leave it blank,
-          // the preset/logo fallback below fills it, and we never flash the house brand.
-          else if (IS_HOUSE) { word.style.display = ""; word.innerHTML = 'Recruiters<span class="os">OS</span>'; if (mark) mark.style.display = ""; }
-          else { word.textContent = ""; if (mark) mark.style.display = "none"; }
+          // wordmark. On a white-label domain leave it blank, the preset/logo
+          // fallback below fills it, and we never flash the house brand.
+          else if (IS_HOUSE) { word.style.display = ""; word.innerHTML = 'Recruiters<span class="os">OS</span>'; }
+          else { word.textContent = ""; }
         }
       }
       // Accent color -> primary brand variable (recolors buttons, highlights, …).
