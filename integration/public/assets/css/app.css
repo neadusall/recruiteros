@@ -91,6 +91,11 @@ body.app::before { opacity: .5; }
 .panel-wrap { flex: 1; overflow-y: auto; padding: 24px 26px 60px; zoom: 1.12; }
 .panel { display: none; }
 .panel.active { display: block; }
+/* The marketing stylesheet (styles.css) sets a global `section { padding: 90px 0 }`
+   for landing-page sections. The app's content container #view is a <section>, so
+   that rule leaked ~90px of top/bottom padding into every page, opening a large gap
+   under the topbar. panel-wrap already supplies the content padding, so zero it out. */
+#view { padding: 0; }
 
 /* ---------- Search bar (Targets) ---------- */
 .search-bar {
