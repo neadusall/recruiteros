@@ -2,27 +2,31 @@
  * RecruitersOS · Voice Drops · Voice-clone provider (pluggable)
  *
  * One small interface so the rest of the engine never knows which TTS/clone
- * vendor is wired. Ships ElevenLabs AND Cartesia adapters behind env keys; runs
- * as a safe dry-run (no audio, no spend) when unconfigured, exactly like the
- * ProviderClient HTTP base does for every other integration.
+ * vendor is wired. Ships ElevenLabs, Cartesia AND Hume (Octave) adapters behind
+ * env keys; runs as a safe dry-run (no audio, no spend) when unconfigured,
+ * exactly like the ProviderClient HTTP base does for every other integration.
  *
- * The fast path is bring-your-own-voice: a user pastes an ElevenLabs OR a
- * Cartesia voice id (see VoiceConsent.provider) and we synthesize against the
+ * The fast path is bring-your-own-voice: a user pastes an ElevenLabs, Cartesia
+ * OR Hume voice id (see VoiceConsent.provider) and we synthesize against the
  * matching provider — no on-platform cloning/approval required.
  *
- *   VOICE_CLONE_PROVIDER   default provider id ("elevenlabs" | "cartesia")
+ *   VOICE_CLONE_PROVIDER   default provider id ("elevenlabs" | "cartesia" | "hume")
  *   VOICE_CLONE_API_KEY    ElevenLabs api key
  *   VOICE_CLONE_VOICE_ID   default ElevenLabs voice id
  *   CARTESIA_API_KEY       Cartesia api key
  *   CARTESIA_VOICE_ID      default Cartesia voice id
  *   CARTESIA_MODEL         Cartesia model id (default "sonic-2")
  *   CARTESIA_VERSION       Cartesia API version header (default "2024-11-13")
+ *   HUME_API_KEY           Hume api key
+ *   HUME_VOICE_ID          default Hume voice id (Octave Voice Library / custom)
+ *   HUME_VOICE_SOURCE      which Hume voice pool the id lives in
+ *                          ("CUSTOM_VOICE" default | "HUME_AI")
  */
 
 import { cred } from "../providers/http";
 
 /** The TTS/clone vendors a voice id can belong to. */
-export type VoiceProvider = "elevenlabs" | "cartesia";
+export type VoiceProvider = "elevenlabs" | "cartesia" | "hume";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -218,13 +222,87 @@ class CartesiaClient implements VoiceCloneClient {
   }
 }
 
+/**
+ * Hume (Octave TTS) adapter. Synthesize by voice id against POST /v0/tts/file,
+ * which returns the rendered audio bytes directly — same dry-run contract as the
+ * others, and we request mp3 so it caches identically and plays straight to
+ * Telnyx. The pasted voice id is resolved against HUME_VOICE_SOURCE: "CUSTOM_VOICE"
+ * (a voice the operator saved to their account — the bring-your-own default) or
+ * "HUME_AI" (a preset from Hume's shared Voice Library).
+ */
+class HumeClient implements VoiceCloneClient {
+  id = "hume";
+  private base = "https://api.hume.ai/v0";
+
+  private key(): string {
+    return cred("HUME_API_KEY");
+  }
+  configured(): boolean {
+    return Boolean(this.key());
+  }
+  private defaultVoice(): string {
+    return cred("HUME_VOICE_ID");
+  }
+  /** Which Hume voice pool a pasted id belongs to (custom-saved by default). */
+  private voiceSource(): "CUSTOM_VOICE" | "HUME_AI" {
+    return cred("HUME_VOICE_SOURCE") === "HUME_AI" ? "HUME_AI" : "CUSTOM_VOICE";
+  }
+
+  async verify(): Promise<{ ok: boolean; error?: string }> {
+    if (!this.configured()) return { ok: false, error: "no_api_key" };
+    try {
+      // Listing the account's custom voices is a cheap authenticated read that
+      // proves the key works (so we know it'll deploy, not just dry-run).
+      const res = await fetch(`${this.base}/tts/voices?provider=CUSTOM_VOICE&page_number=0`, {
+        headers: { "X-Hume-Api-Key": this.key() },
+      });
+      return res.ok ? { ok: true } : { ok: false, error: `hume_${res.status}` };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || "hume_error" };
+    }
+  }
+
+  async synthesize(text: string, voiceId?: string): Promise<SynthResult> {
+    const vid = voiceId || this.defaultVoice();
+    if (!this.configured() || !vid) {
+      console.info(`[voice-clone:dry] hume synth "${text.slice(0, 48)}" (voice=${vid || "unset"})`);
+      return { contentType: "audio/mpeg", dryRun: true };
+    }
+    const res = await synthRequest(`${this.base}/tts/file`, {
+      method: "POST",
+      headers: {
+        "X-Hume-Api-Key": this.key(),
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      body: JSON.stringify({
+        utterances: [{ text, voice: { id: vid, provider: this.voiceSource() } }],
+        format: { type: "mp3" },
+        num_generations: 1,
+      }),
+    });
+    const audio = Buffer.from(await res.arrayBuffer());
+    return { audio, contentType: "audio/mpeg", dryRun: false };
+  }
+
+  // Bring-your-own-voice only: a user pastes a Hume voice id (custom or preset).
+  // Hume mints a saved voice from a prior generation_id rather than a raw sample
+  // upload, so the ElevenLabs-style "clone from a recording" path is a safe no-op.
+  async createVoice(): Promise<CreateVoiceResult> {
+    return { dryRun: true, error: "hume_clone_unsupported" };
+  }
+}
+
 const singletons: Partial<Record<VoiceProvider, VoiceCloneClient>> = {};
 
 /** Resolve the voice-clone client for a provider (defaults to VOICE_CLONE_PROVIDER, else elevenlabs). */
 export function getVoiceClientFor(provider?: VoiceProvider): VoiceCloneClient {
   const p: VoiceProvider =
     provider || ((cred("VOICE_CLONE_PROVIDER") as VoiceProvider) || "elevenlabs");
-  if (!singletons[p]) singletons[p] = p === "cartesia" ? new CartesiaClient() : new ElevenLabsClient();
+  if (!singletons[p]) {
+    singletons[p] =
+      p === "cartesia" ? new CartesiaClient() : p === "hume" ? new HumeClient() : new ElevenLabsClient();
+  }
   return singletons[p]!;
 }
 
@@ -235,7 +313,7 @@ export function getVoiceClient(): VoiceCloneClient {
 
 /** Configured-status for every provider — for the UI's "ready" checks. */
 export function voiceProviderStatuses(): Array<{ id: VoiceProvider; configured: boolean }> {
-  return (["elevenlabs", "cartesia"] as VoiceProvider[]).map((id) => ({
+  return (["elevenlabs", "cartesia", "hume"] as VoiceProvider[]).map((id) => ({
     id,
     configured: getVoiceClientFor(id).configured(),
   }));

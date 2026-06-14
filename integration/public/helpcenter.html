@@ -632,6 +632,39 @@
         </ul>
         <div class="callout note">Set up your phone tool and cloned voice in <em>Setup → Voice Drops</em>.</div>
 
+        <h3>Connecting your cloned voice (ElevenLabs, Cartesia, or Hume)</h3>
+        <p>
+          The voice itself comes from one of three interchangeable providers, <strong>ElevenLabs</strong>,
+          <strong>Cartesia</strong>, or <strong>Hume</strong> (Octave). Pick whichever you already use, you only
+          need one, and you can mix them across voices. It's <em>bring-your-own-voice</em>: you create and clone
+          the voice in the provider's own portal, then paste its voice id here. No cloning or approval happens on
+          RecruitersOS.
+        </p>
+        <ol>
+          <li><strong>Add your API key.</strong> In <em>Setup → Voice Drops</em> (or <em>Connected</em>), choose
+            your provider, paste its API key, and hit <strong>Save &amp; test</strong>. The row turns green the
+            moment the key verifies, so you know it'll deploy instead of running silent.
+            <ul>
+              <li>ElevenLabs, profile → <em>API Keys</em> (key stored as <code>VOICE_CLONE_API_KEY</code>).</li>
+              <li>Cartesia, <em>API Keys</em> (stored as <code>CARTESIA_API_KEY</code>).</li>
+              <li>Hume, <em>Settings → API keys</em> at platform.hume.ai (stored as <code>HUME_API_KEY</code>).</li>
+            </ul>
+          </li>
+          <li><strong>Paste a voice id.</strong> Create or pick a voice in the provider's portal and copy its id,
+            ElevenLabs <em>Voice Lab</em>, Cartesia <em>play.cartesia.ai</em>, or Hume's voice library. Back in
+            <em>Setup → Voice Drops</em>, select the matching <strong>Provider</strong>, paste the <strong>Voice
+            ID</strong>, give it a name, and add it.</li>
+          <li><strong>Hear it before you send.</strong> Hit <strong>Listen</strong> on any script to preview the
+            drop in that voice, then attach the voice to a campaign.</li>
+        </ol>
+        <div class="callout note">
+          <strong>Hume note:</strong> if your Hume id is a preset from Hume's shared Voice Library (rather than a
+          custom voice you saved to your own account), set <code>HUME_VOICE_SOURCE=HUME_AI</code>, it defaults to
+          <code>CUSTOM_VOICE</code>. To make any provider the default for new voices, set
+          <code>VOICE_CLONE_PROVIDER</code> to <code>elevenlabs</code>, <code>cartesia</code>, or
+          <code>hume</code>.
+        </div>
+
         <h3>Writing scripts that sound human</h3>
         <p>
           The cloned voice reads your punctuation literally, pacing and pauses come entirely from how you

@@ -49,7 +49,8 @@ export async function POST(req: Request) {
   // Live-test a clone provider's key (the "Test" button) — isolation-correct so a
   // customer tests their OWN key. Proves it'll deploy instead of dry-running.
   if (b?.action === "test") {
-    const provider: VoiceProvider = b?.provider === "cartesia" ? "cartesia" : "elevenlabs";
+    const provider: VoiceProvider =
+      b?.provider === "cartesia" || b?.provider === "hume" ? b.provider : "elevenlabs";
     const result = await withWorkspaceCreds(ws, () => verifyVoiceProvider(provider));
     return ok({ provider, ...result });
   }
@@ -68,7 +69,8 @@ export async function POST(req: Request) {
   // Bring-your-own-voice: the user pastes a provider voice id, no on-platform
   // cloning or approval. A short attestation is recorded for compliance, with a
   // sensible default so the flow stays one-step.
-  const provider: VoiceProvider = b?.provider === "cartesia" ? "cartesia" : "elevenlabs";
+  const provider: VoiceProvider =
+    b?.provider === "cartesia" || b?.provider === "hume" ? b.provider : "elevenlabs";
   const statement = (b?.statement || "").trim()
     || "I confirm I have the right to use this voice for outreach I authorize.";
 

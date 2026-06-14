@@ -5356,7 +5356,7 @@
       return out;
     }
 
-    /* ---- Voice tab: bring-your-own ElevenLabs / Cartesia voice id ---- */
+    /* ---- Voice tab: bring-your-own ElevenLabs / Cartesia / Hume voice id ---- */
     function paintVoice(body) {
       body.innerHTML = loading();
       api("/voice/clones").then(function (d) {
@@ -5364,7 +5364,7 @@
         var cache = d.cache || { total: 0, byKind: {} };
         var provs = d.providers || [];
         function ok(id) { var p = provs.filter(function (x) { return x.id === id; })[0]; return !!(p && p.configured); }
-        var elOk = ok("elevenlabs"), caOk = ok("cartesia");
+        var elOk = ok("elevenlabs"), caOk = ok("cartesia"), huOk = ok("hume");
         var kinds = Object.keys(cache.byKind || {}).map(function (k) { return "<b>" + (cache.byKind[k]) + "</b> " + esc(k); }).join(" · ") || "none yet";
         var voices = (d.consent || []).map(function (c) {
           var pid = c.provider || "elevenlabs";
@@ -5374,13 +5374,13 @@
         }).join("") || '<p class="muted">No voices yet, add one above.</p>';
         body.innerHTML =
           '<div class="card"><h3>Your voices</h3>' +
-          '<p class="muted" style="font-size:13px">Paste a voice id from ElevenLabs or Cartesia and you are ready, no cloning or approval here. ' +
-          'ElevenLabs: <b>' + (elOk ? "connected" : "set VOICE_CLONE_API_KEY") + '</b> · Cartesia: <b>' + (caOk ? "connected" : "set CARTESIA_API_KEY") + '</b>.</p>' +
+          '<p class="muted" style="font-size:13px">Paste a voice id from ElevenLabs, Cartesia or Hume and you are ready, no cloning or approval here. ' +
+          'ElevenLabs: <b>' + (elOk ? "connected" : "set VOICE_CLONE_API_KEY") + '</b> · Cartesia: <b>' + (caOk ? "connected" : "set CARTESIA_API_KEY") + '</b> · Hume: <b>' + (huOk ? "connected" : "set HUME_API_KEY") + '</b>.</p>' +
           '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
-          '<div class="vd-field"><label>Provider</label><select id="vcProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option></select></div>' +
+          '<div class="vd-field"><label>Provider</label><select id="vcProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option><option value="hume">Hume</option></select></div>' +
           inp("vcVoiceId", "Voice ID", "paste your voice id") +
           inp("vcName", "Name (whose voice)", "Ryan") + "</div>" +
-          '<p class="muted" style="font-size:12px;margin:10px 0 0">No voice id yet? Create one and copy its id from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs ↗</a> or <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia ↗</a>.</p>' +
+          '<p class="muted" style="font-size:12px;margin:10px 0 0">No voice id yet? Create one and copy its id from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs ↗</a>, <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia ↗</a> or <a href="https://platform.hume.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Hume ↗</a>.</p>' +
           '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vcSave">Add voice</button></div></div>' +
           '<div class="card" style="margin-top:14px"><h3>Reused audio, no re-charge</h3>' +
           '<p class="muted" style="font-size:13px">Every word, name and role is synthesized once and saved, then reused for free, you are never charged twice for the same word in the same voice. Saved segments: <b>' + (cache.total || 0) + "</b> (" + kinds + ").</p>" +
@@ -5397,7 +5397,7 @@
         Array.prototype.forEach.call(body.querySelectorAll("[data-vcdel]"), function (btn) {
           btn.addEventListener("click", function () {
             var id = btn.getAttribute("data-vcdel");
-            if (!confirm("Delete this voice from your list? It is not removed from ElevenLabs or Cartesia.")) return;
+            if (!confirm("Delete this voice from your list? It is not removed from ElevenLabs, Cartesia or Hume.")) return;
             send("/voice/clones", "POST", { action: "delete", id: id }).then(function (r) {
               if (r.ok) { toast("Voice deleted"); paint(); }
               else { toast("Delete failed"); }
@@ -7940,7 +7940,7 @@
       '<p class="sx-sub">The calling engine behind Voice Drops, it places the calls and uses Premium AMD to find the voicemail. Connect your Telnyx API key and a caller-ID number, then Test. New to Telnyx? Follow the <a href="/helpcenter#telephony" target="_blank" rel="noopener" style="color:var(--brand-2)">10DLC setup guide</a> to register your brand &amp; campaign so your calls connect.</p>' +
       '<div id="vsTel">' + loading() + '</div></div>' +
       '<div class="sx-card"><div class="sx-eyebrow">Step 2 · Voice</div><h3>🎙️ Your voice</h3>' +
-      '<p class="sx-sub">Paste your ElevenLabs or Cartesia voice id. Cloning of voices takes place within the portals of these two third party providers.</p>' +
+      '<p class="sx-sub">Paste your ElevenLabs, Cartesia or Hume voice id. Cloning of voices takes place within the portals of these third party providers.</p>' +
       '<div id="vsVoice">' + loading() + '</div></div>' +
       '<div class="sx-card"><p class="sx-sub" style="margin:0">' + esc(cfg.extra) + '</p>' +
       '<div style="margin-top:12px"><a class="btn btn-primary btn-sm" href="#' + cfg.featureRoute + '">' + esc(cfg.featureLabel) + '</a></div></div>';
@@ -7987,9 +7987,9 @@
         st.clones = d.consent || [];
         var provs = d.providers || [];
         function pok(id) { var p = provs.filter(function (x) { return x.id === id; })[0]; return !!(p && p.configured); }
-        var elOk = pok("elevenlabs"), caOk = pok("cartesia");
-        st.provConfigured = elOk || caOk;
-        st.providerConfigured = { elevenlabs: elOk, cartesia: caOk };
+        var elOk = pok("elevenlabs"), caOk = pok("cartesia"), huOk = pok("hume");
+        st.provConfigured = elOk || caOk || huOk;
+        st.providerConfigured = { elevenlabs: elOk, cartesia: caOk, hume: huOk };
         function provRow(id, label, okFlag) {
           return '<span style="display:inline-flex;align-items:center;gap:7px;font-size:12px;padding:5px 9px;border-radius:8px;background:rgba(255,255,255,.04)">' +
             '<span data-vpdot="' + id + '" style="width:8px;height:8px;border-radius:50%;background:' + (okFlag ? "#34d399" : "#ff7a90") + '"></span>' +
@@ -8005,16 +8005,16 @@
         var box = $("#vsVoice"); if (!box) return;
         box.innerHTML =
           '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 2fr auto;gap:10px;align-items:end;margin:0 0 8px">' +
-          '<label class="cn-fld"><span class="lab">Voice provider</span><select id="vsKeyProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option></select></label>' +
+          '<label class="cn-fld"><span class="lab">Voice provider</span><select id="vsKeyProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option><option value="hume">Hume</option></select></label>' +
           '<label class="cn-fld"><span class="lab">API key</span><input id="vsKeyInput" type="password" placeholder="paste your API key" autocomplete="off"></label>' +
           '<button class="btn btn-primary btn-sm" id="vsKeySave">Save &amp; test</button></div>' +
-          '<p class="muted" id="vsKeyMsg" style="font-size:12px;margin:0 0 12px">Paste your ElevenLabs or Cartesia API key, then Save. We test it right away so you know it will deploy.</p>' +
-          '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 12px">' + provRow("elevenlabs", "ElevenLabs", elOk) + provRow("cartesia", "Cartesia", caOk) + '</div>' +
+          '<p class="muted" id="vsKeyMsg" style="font-size:12px;margin:0 0 12px">Paste your ElevenLabs, Cartesia or Hume API key, then Save. We test it right away so you know it will deploy.</p>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 12px">' + provRow("elevenlabs", "ElevenLabs", elOk) + provRow("cartesia", "Cartesia", caOk) + provRow("hume", "Hume", huOk) + '</div>' +
           '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
-          '<label class="cn-fld"><span class="lab">Provider</span><select id="vsProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option></select></label>' +
+          '<label class="cn-fld"><span class="lab">Provider</span><select id="vsProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option><option value="hume">Hume</option></select></label>' +
           '<label class="cn-fld"><span class="lab">Voice ID</span><input id="vsVoiceId" placeholder="paste your voice id"></label>' +
           '<label class="cn-fld"><span class="lab">Name (whose voice)</span><input id="vsName" placeholder="Josh"></label></div>' +
-          '<p class="muted" style="font-size:12px;margin:10px 0 0">No voice id yet? Create one and copy its id from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs ↗</a> or <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia ↗</a>.</p>' +
+          '<p class="muted" style="font-size:12px;margin:10px 0 0">No voice id yet? Create one and copy its id from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs ↗</a>, <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia ↗</a> or <a href="https://platform.hume.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Hume ↗</a>.</p>' +
           '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vsSave">Add voice</button></div>' +
           '<div style="margin-top:10px">' + list + '</div>';
         // Plug in the provider API key, save it as a workspace credential, then
@@ -8024,7 +8024,7 @@
           var key = ($("#vsKeyInput").value || "").trim();
           var msg = $("#vsKeyMsg");
           if (!key) { toast("Paste your API key"); return; }
-          var envKey = prov === "cartesia" ? "CARTESIA_API_KEY" : "VOICE_CLONE_API_KEY";
+          var envKey = prov === "cartesia" ? "CARTESIA_API_KEY" : prov === "hume" ? "HUME_API_KEY" : "VOICE_CLONE_API_KEY";
           var keys = {}; keys[envKey] = key;
           if (msg) msg.textContent = "Saving…";
           send("/connected", "POST", { action: "save", id: prov, keys: keys }).then(function (r) {
@@ -8036,7 +8036,7 @@
             var okk = r.ok && r.data && r.data.ok;
             var input = $("#vsKeyInput"); if (input) input.value = "";
             if (msg) msg.innerHTML = okk
-              ? '<span style="color:#34d399">✓ Connected. ' + (prov === "cartesia" ? "Cartesia" : "ElevenLabs") + ' is ready to deploy.</span>'
+              ? '<span style="color:#34d399">✓ Connected. ' + (prov === "cartesia" ? "Cartesia" : prov === "hume" ? "Hume" : "ElevenLabs") + ' is ready to deploy.</span>'
               : '<span style="color:#ffc24d">Saved, but the test did not pass: ' + esc((r.data && r.data.error) || "check the key") + "</span>";
             loadVoice();
           }).catch(function () { if (msg) msg.textContent = "Could not reach the server."; });
@@ -8072,7 +8072,7 @@
         Array.prototype.forEach.call(box.querySelectorAll("[data-vsdel]"), function (btn) {
           btn.addEventListener("click", function () {
             var id = btn.getAttribute("data-vsdel");
-            if (!confirm("Delete this voice from your list? It is not removed from ElevenLabs or Cartesia.")) return;
+            if (!confirm("Delete this voice from your list? It is not removed from ElevenLabs, Cartesia or Hume.")) return;
             send("/voice/clones", "POST", { action: "delete", id: id }).then(function (r) {
               if (r.ok) { toast("Voice deleted"); loadVoice(); }
               else toast("Delete failed");

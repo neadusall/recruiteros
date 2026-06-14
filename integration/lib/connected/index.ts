@@ -27,7 +27,7 @@ import type { Motion } from "../core/types";
 
 export type IntegrationId =
   | "instantly" | "salesrobot" | "unipile" | "rapidapi" | "fresh_linkedin"
-  | "tomba" | "loxo" | "taltxt" | "telnyx" | "elevenlabs" | "cartesia";
+  | "tomba" | "loxo" | "taltxt" | "telnyx" | "elevenlabs" | "cartesia" | "hume";
 
 export type ConnStatus = "red" | "yellow" | "green";
 
@@ -212,6 +212,22 @@ const CATALOG: IntegrationMeta[] = [
     docsLabel: "Cartesia API keys",
   },
   {
+    id: "hume",
+    label: "Hume (cloned voice)",
+    blurb: "Alternative cloned-voice provider (Octave TTS) for Voice Drops and AI Vetting. Paste your Hume API key.",
+    requiredFor: [],
+    fields: [
+      { key: "HUME_API_KEY", label: "API key", required: true, secret: true, placeholder: "paste your Hume API key" },
+    ],
+    steps: [
+      "In the Hume platform, open Settings → API keys.",
+      "Create a key and copy it.",
+      "Paste below, Save, then Test.",
+    ],
+    docsUrl: "https://platform.hume.ai/settings/keys",
+    docsLabel: "Hume API keys",
+  },
+  {
     id: "loxo",
     label: "Loxo (ATS)",
     blurb: "Your system of record. Connected on the ATS tab, pre-flighted here.",
@@ -356,7 +372,7 @@ export async function testConnection(
 
   // Cloned-voice providers verify through the voice module (not the generic
   // provider registry), using this workspace's saved key.
-  if (id === "elevenlabs" || id === "cartesia") {
+  if (id === "elevenlabs" || id === "cartesia" || id === "hume") {
     return runWithCreds(keys, async () => {
       const result = await verifyVoiceProvider(id);
       await ensureRow();

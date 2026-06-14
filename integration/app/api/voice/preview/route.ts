@@ -31,7 +31,10 @@ export async function POST(req: Request) {
   let scriptTemplate = "";
   let persona = { ...DEFAULT_PERSONA };
   let voiceId: string | undefined = (b?.voiceId || "").trim() || undefined;
-  let provider: VoiceProvider | undefined = b?.provider === "cartesia" ? "cartesia" : b?.provider === "elevenlabs" ? "elevenlabs" : undefined;
+  let provider: VoiceProvider | undefined =
+    b?.provider === "cartesia" || b?.provider === "elevenlabs" || b?.provider === "hume"
+      ? b.provider
+      : undefined;
 
   if (b?.campaignId) {
     const c = getCampaign(ws, b.campaignId);
