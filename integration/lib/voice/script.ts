@@ -5,11 +5,13 @@
  *   "Hi {first_name}, this is {agent_name} with {agent_company}. I work with
  *    {role}s and wanted to reach out..."
  *
- * The rendered voicemail is synthesized one SENTENCE at a time (see
- * segmentScript): whole sentences keep a natural intonation contour, and each
- * sentence is cached by its exact text — so any repeated sentence (a shared
- * greeting for the same first name, or any variable-free line) is reused for free
- * and never re-synthesized (see clones.ts).
+ * The rendered voicemail is synthesized as ONE whole take (see segmentScript):
+ * a single TTS call gives one natural intonation contour across the message and,
+ * crucially, lets the dialer play it with a SINGLE playback so there is no dead
+ * air between phrases (per-sentence playback needed a webhook round-trip between
+ * each clip, which added ~1-2s of latency mid-voicemail). The full rendered script
+ * is cached by its exact text — an identical message is reused for free; a unique
+ * or AI-personalized script is synthesized once (see clones.ts).
  *
  * The sweet spot for a landline voicemail is 15-25 seconds; this module
  * estimates duration and flags scripts that fall outside it.
@@ -172,17 +174,26 @@ export function splitSentences(text: string): string[] {
 }
 
 export function segmentScript(template: string, vars: MergeVars, persona: VoicePersona): ScriptSegment[] {
-  // Fill every slot, strip any dash at this synthesis boundary (the cloned voice
-  // must never speak a dash — a "—" mis-cues the TTS prosody; see lib/text/dashes),
-  // then split on sentence boundaries so each whole sentence is one cacheable,
-  // natural-sounding unit. This is the HARD guard regardless of where the script
-  // came from: a hand-typed template, a per-lead customScript, or the AI drafter.
+  // Render the ENTIRE voicemail as ONE segment, synthesized in a single TTS call.
+  //
+  // Why not one-segment-per-sentence anymore: the webhook plays each segment with
+  // its own Telnyx `playback_start`, and the NEXT segment only fires after the
+  // `call.playback.ended` webhook round-trips back to us over the internet. That
+  // round-trip injects ~1-2s of dead air between every sentence on the live call —
+  // the "latency between phrases" operators heard. Generating the whole script in
+  // one request also gives a single, natural intonation contour across the message
+  // (no prosody reset at sentence seams), and one `playback_start` plays it
+  // gaplessly. Caching now keys on the FULL rendered script: an identical message
+  // (same name/role/company) reuses its audio for free; a unique or AI-personalized
+  // script is synthesized exactly once.
+  //
+  // We still fill every slot and strip any dash at this synthesis boundary (the
+  // cloned voice must never speak a dash — a "—" mis-cues the TTS prosody; see
+  // lib/text/dashes). HARD guard regardless of source: a hand-typed template, a
+  // per-lead customScript, or the AI drafter.
   const rendered = stripDashes(renderScript(template, vars, persona));
-  return splitSentences(rendered).map((sentence) => ({
-    key: cacheKey("vm", sentence),
-    text: sentence,
-    kind: "static" as const,
-  }));
+  if (!rendered) return [];
+  return [{ key: cacheKey("vm", rendered), text: rendered, kind: "static" as const }];
 }
 
 /** Tiny stable string hash (FNV-1a, base36) — disambiguates long, similar text. */
