@@ -7495,6 +7495,24 @@
       '.sx-card .cn-fld input[type="range"]{display:block;margin:2px 0}' +
       '.sx-uprow{display:flex;gap:8px;margin-top:10px}' +
       '.cn-acts{display:flex;gap:9px;align-items:center;flex-wrap:wrap}' +
+      /* voice-clone provider cards (Step 2) */
+      '.vp-list{display:flex;flex-direction:column;gap:10px}' +
+      '.vp{border:1px solid var(--border);border-radius:12px;padding:13px 15px;background:var(--bg-soft);transition:border-color .15s}' +
+      '.vp.on{border-color:var(--accent-green);box-shadow:0 0 0 1px rgba(56,224,166,.25)}' +
+      '.vp-head{display:flex;align-items:center;gap:9px;flex-wrap:wrap}' +
+      '.vp-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}' +
+      '.vp-name{font-size:13.5px;font-weight:700;color:var(--text)}' +
+      '.vp-state{font-size:12px;color:var(--text-dim)}' +
+      '.vp-chip{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:rgba(56,224,166,.16);color:var(--accent-green)}' +
+      '.vp-row{display:flex;gap:8px;margin-top:11px}' +
+      '.vp-key{flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:9px 12px;color:var(--text);font:inherit;font-size:13px;transition:border-color .15s,box-shadow .15s}' +
+      '.vp-key:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent)}' +
+      '.vp-msg{font-size:11.5px;color:var(--text-dim);margin-top:7px;line-height:1.45}' +
+      '.vp-msg a{color:var(--brand-2);text-decoration:none}.vp-msg a:hover{text-decoration:underline}' +
+      '.vc{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--bg-soft);margin-top:8px}' +
+      '.vc.on{border-color:var(--accent-green);background:rgba(56,224,166,.06)}' +
+      '.vc-name{font-size:13px;font-weight:600;color:var(--text)}' +
+      '.vc-meta{font-size:11.5px;color:var(--text-dim)}' +
       /* live brand preview */
       '.sx-prev{position:sticky;top:14px;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--bg)}' +
       '.sx-prev-bar{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-dim);font-weight:700;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface)}' +
@@ -7983,7 +8001,7 @@
       '<p class="sx-sub">The calling engine behind Voice Drops, it places the calls and uses Premium AMD to find the voicemail. Connect your Telnyx API key and a caller-ID number, then Test. New to Telnyx? Follow the <a href="/helpcenter#telephony" target="_blank" rel="noopener" style="color:var(--brand-2)">10DLC setup guide</a> to register your brand &amp; campaign so your calls connect.</p>' +
       '<div id="vsTel">' + loading() + '</div></div>' +
       '<div class="sx-card"><div class="sx-eyebrow">Step 2 · Voice</div><h3>🎙️ Your voice</h3>' +
-      '<p class="sx-sub">Paste your ElevenLabs, Cartesia or Hume voice id. Cloning of voices takes place within the portals of these third party providers.</p>' +
+      '<p class="sx-sub">Two quick steps: connect a voice provider (ElevenLabs, Cartesia or Hume) with its API key, then add the voice id you cloned in that provider\'s portal and mark it as the one to use.</p>' +
       '<div id="vsVoice">' + loading() + '</div></div>' +
       '<div class="sx-card"><p class="sx-sub" style="margin:0">' + esc(cfg.extra) + '</p>' +
       '<div style="margin-top:12px"><a class="btn btn-primary btn-sm" href="#' + cfg.featureRoute + '">' + esc(cfg.featureLabel) + '</a></div></div>';
@@ -7992,9 +8010,12 @@
     function paintReady() {
       var telOk = st.telnyx && st.telnyx.status === "green";
       // A voice only counts if a voice is on file AND its clone provider's key is
-      // actually connected, otherwise it would deploy into a silent dry-run.
+      // verified, otherwise it would deploy into a silent dry-run. Prefer the voice
+      // actually in use (the active one); fall back to "any usable voice exists".
       var pc = st.providerConfigured || {};
-      var voiceOk = (st.clones || []).some(function (c) { return pc[(c.provider || "elevenlabs")]; });
+      var voiceOk = st.active
+        ? Boolean(pc[(st.active.provider || "elevenlabs")])
+        : (st.clones || []).some(function (c) { return pc[(c.provider || "elevenlabs")]; });
       var ready = telOk && voiceOk;
       var b = $("#vsReady"); if (!b) return;
       var done = (telOk ? 1 : 0) + (voiceOk ? 1 : 0);
@@ -8024,66 +8045,125 @@
         paintReady();
       }).catch(function () { var b = $("#vsTel"); if (b) b.innerHTML = needsSetup(); });
     }
+    // The three cloned-voice providers. Each is set up on its own card: paste the
+    // key, Save & test, and the card reflects its real verified state.
+    var VOICE_PROVS = [
+      { id: "elevenlabs", label: "ElevenLabs", env: "VOICE_CLONE_API_KEY", ph: "sk_…", docs: "https://elevenlabs.io/app/settings/api-keys", lab: "https://elevenlabs.io/app/voice-lab" },
+      { id: "cartesia", label: "Cartesia", env: "CARTESIA_API_KEY", ph: "sk_car_…", docs: "https://play.cartesia.ai/keys", lab: "https://play.cartesia.ai" },
+      { id: "hume", label: "Hume", env: "HUME_API_KEY", ph: "paste your Hume API key", docs: "https://platform.hume.ai/settings/keys", lab: "https://platform.hume.ai" },
+    ];
     function loadVoice() {
-      api("/voice/clones").then(function (d) {
-        d = d || {};
+      // Two reads: the saved voices + which one is active (voice module), and the
+      // per-provider connection status (green=verified / yellow=saved-not-verified
+      // / red=no key) from the integrations catalog — so the dots tell the truth,
+      // not just "a key is present".
+      Promise.all([api("/voice/clones"), api("/connected")]).then(function (res) {
+        var d = res[0] || {}, cd = res[1] || {};
         st.clones = d.consent || [];
-        var provs = d.providers || [];
-        function pok(id) { var p = provs.filter(function (x) { return x.id === id; })[0]; return !!(p && p.configured); }
-        var elOk = pok("elevenlabs"), caOk = pok("cartesia"), huOk = pok("hume");
-        st.provConfigured = elOk || caOk || huOk;
-        st.providerConfigured = { elevenlabs: elOk, cartesia: caOk, hume: huOk };
-        function provRow(id, label, okFlag) {
-          return '<span style="display:inline-flex;align-items:center;gap:7px;font-size:12px;padding:5px 9px;border-radius:8px;background:rgba(255,255,255,.04)">' +
-            '<span data-vpdot="' + id + '" style="width:8px;height:8px;border-radius:50%;background:' + (okFlag ? "#34d399" : "#ff7a90") + '"></span>' +
-            '<b>' + label + '</b> <span class="muted" data-vpstate="' + id + '">' + (okFlag ? "connected" : "not connected") + '</span>' +
-            '<button class="btn btn-sm" data-vptest="' + id + '" style="padding:2px 9px">Test</button>' +
-            '<span class="muted" data-vpmsg="' + id + '"></span></span>';
+        st.activeVoiceId = d.activeVoiceId || null;
+        var ints = (cd && cd.integrations) || [];
+        function pstat(id) { var x = ints.filter(function (i) { return i.id === id; })[0]; return (x && x.status) || "red"; }
+        var pstatus = { elevenlabs: pstat("elevenlabs"), cartesia: pstat("cartesia"), hume: pstat("hume") };
+        st.providerConfigured = { elevenlabs: pstatus.elevenlabs === "green", cartesia: pstatus.cartesia === "green", hume: pstatus.hume === "green" };
+        st.provConfigured = st.providerConfigured.elevenlabs || st.providerConfigured.cartesia || st.providerConfigured.hume;
+
+        // Which voice is actually used on a drop: the pinned active one, else the
+        // most recently added. usedProvider drives the "in use" chip.
+        var active = st.clones.filter(function (c) { return c.id === st.activeVoiceId; })[0]
+          || (st.clones.length ? st.clones[st.clones.length - 1] : null);
+        st.active = active;
+        var usedProvider = active ? (active.provider || "elevenlabs") : null;
+
+        function provCard(p) {
+          var s = pstatus[p.id], ok = s === "green", saved = s !== "red", inUse = usedProvider === p.id;
+          var dotc = ok ? "var(--accent-green)" : saved ? "var(--accent-amber)" : "var(--text-dim)";
+          var stateTxt = ok ? "connected" : saved ? "saved · not verified" : "not connected";
+          var msgHtml = ok ? "Key saved in your portal and verified — ready to deploy."
+            : saved ? "Key saved, but the live test didn't pass. Paste it again, or hit Test."
+            : '<a href="' + p.docs + '" target="_blank" rel="noopener">Get your ' + p.label + ' API key ↗</a>';
+          return '<div class="vp' + (inUse ? " on" : "") + '">' +
+            '<div class="vp-head">' +
+              '<span class="vp-dot" data-vpdot="' + p.id + '" style="background:' + dotc + '"></span>' +
+              '<span class="vp-name">' + p.label + '</span>' +
+              '<span class="vp-state" data-vpstate="' + p.id + '">' + stateTxt + '</span>' +
+              (inUse ? '<span class="vp-chip">in use</span>' : "") +
+              (saved ? '<button class="btn btn-ghost btn-sm" data-vptest="' + p.id + '" style="margin-left:auto;padding:3px 11px">Test</button>' : '<span style="margin-left:auto"></span>') +
+            '</div>' +
+            '<div class="vp-row">' +
+              '<input class="vp-key" data-vpkey="' + p.id + '" type="password" autocomplete="off" placeholder="' + (saved ? "paste a new key to replace it" : p.ph) + '">' +
+              '<button class="btn btn-primary btn-sm" data-vpsave="' + p.id + '">Save &amp; test</button>' +
+            '</div>' +
+            '<div class="vp-msg" data-vpmsg="' + p.id + '">' + msgHtml + '</div>' +
+          '</div>';
         }
-        var list = (st.clones).map(function (c) {
-          var pid = c.provider || "elevenlabs";
-          return '<div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px">🎙️ <b>' + esc(c.agentName) + "</b> <span class=\"muted\">" + esc(pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span>" +
-            '<button class="btn btn-ghost btn-sm" data-vsdel="' + esc(c.id) + '" title="Delete this voice" style="margin-left:auto">🗑️</button></div>';
-        }).join("") || '<p class="muted" style="font-size:13px">No voices yet.</p>';
+
+        function voiceRow(c) {
+          var pid = c.provider || "elevenlabs", isActive = active && c.id === active.id, provOk = st.providerConfigured[pid];
+          return '<div class="vc' + (isActive ? " on" : "") + '">' +
+            '<span class="vp-dot" style="background:' + (provOk ? "var(--accent-green)" : "var(--accent-amber)") + '"></span>' +
+            '<div style="min-width:0"><div class="vc-name">🎙️ ' + esc(c.agentName) + '</div>' +
+            '<div class="vc-meta">' + esc(pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · no voice id") + (provOk ? "" : " · connect " + esc(pid) + " above to use") + '</div></div>' +
+            '<span style="margin-left:auto;display:flex;gap:7px;align-items:center;flex:0 0 auto">' +
+              (isActive ? '<span class="vp-chip">in use</span>' : '<button class="btn btn-ghost btn-sm" data-vsuse="' + esc(c.id) + '" style="padding:3px 11px">Use this</button>') +
+              '<button class="btn btn-ghost btn-sm" data-vsdel="' + esc(c.id) + '" title="Remove from your list" style="padding:3px 9px">🗑️</button>' +
+            '</span>' +
+          '</div>';
+        }
+
+        var voices = st.clones.length
+          ? st.clones.map(voiceRow).join("")
+          : '<p class="muted" style="font-size:12.5px;margin:4px 0 0">No voices added yet. Paste a cloned voice id below to add one.</p>';
+
         var box = $("#vsVoice"); if (!box) return;
         box.innerHTML =
-          '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 2fr auto;gap:10px;align-items:end;margin:0 0 8px">' +
-          '<label class="cn-fld"><span class="lab">Voice provider</span><select id="vsKeyProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option><option value="hume">Hume</option></select></label>' +
-          '<label class="cn-fld"><span class="lab">API key</span><input id="vsKeyInput" type="password" placeholder="paste your API key" autocomplete="off"></label>' +
-          '<button class="btn btn-primary btn-sm" id="vsKeySave">Save &amp; test</button></div>' +
-          '<p class="muted" id="vsKeyMsg" style="font-size:12px;margin:0 0 12px">Paste your ElevenLabs, Cartesia or Hume API key, then Save. We test it right away so you know it will deploy.</p>' +
-          '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 12px">' + provRow("elevenlabs", "ElevenLabs", elOk) + provRow("cartesia", "Cartesia", caOk) + provRow("hume", "Hume", huOk) + '</div>' +
-          '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
+          '<div class="sx-eyebrow" style="margin:2px 0 9px">Connect a provider</div>' +
+          '<p class="muted" style="font-size:12.5px;margin:0 0 12px">Set up whichever you use — you only need one. Paste that provider\'s API key and hit <b>Save &amp; test</b>; we save it to your portal and verify it live so you know it will deploy. The voice cloning itself happens inside the provider\'s own portal.</p>' +
+          '<div class="vp-list">' + VOICE_PROVS.map(provCard).join("") + '</div>' +
+          '<div class="sx-eyebrow" style="margin:20px 0 9px">Your voice</div>' +
+          '<p class="muted" style="font-size:12.5px;margin:0 0 10px">Add a cloned voice id, then pick which one is used for drops with <b>Use this</b>. The voice in use must have its provider connected above.</p>' +
+          '<div class="vd-grid" style="display:grid;grid-template-columns:0.9fr 1.4fr 1fr auto;gap:10px;align-items:end">' +
           '<label class="cn-fld"><span class="lab">Provider</span><select id="vsProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option><option value="hume">Hume</option></select></label>' +
-          '<label class="cn-fld"><span class="lab">Voice ID</span><input id="vsVoiceId" placeholder="paste your voice id"></label>' +
-          '<label class="cn-fld"><span class="lab">Name (whose voice)</span><input id="vsName" placeholder="Josh"></label></div>' +
-          '<p class="muted" style="font-size:12px;margin:10px 0 0">No voice id yet? Create one and copy its id from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs ↗</a>, <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia ↗</a> or <a href="https://platform.hume.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Hume ↗</a>.</p>' +
-          '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vsSave">Add voice</button></div>' +
-          '<div style="margin-top:10px">' + list + '</div>';
-        // Plug in the provider API key, save it as a workspace credential, then
-        // test it immediately so the operator knows it will deploy (not dry-run).
-        $("#vsKeySave").addEventListener("click", function () {
-          var prov = (($("#vsKeyProvider") || {}).value) || "elevenlabs";
-          var key = ($("#vsKeyInput").value || "").trim();
-          var msg = $("#vsKeyMsg");
-          if (!key) { toast("Paste your API key"); return; }
-          var envKey = prov === "cartesia" ? "CARTESIA_API_KEY" : prov === "hume" ? "HUME_API_KEY" : "VOICE_CLONE_API_KEY";
-          var keys = {}; keys[envKey] = key;
-          if (msg) msg.textContent = "Saving…";
-          send("/connected", "POST", { action: "save", id: prov, keys: keys }).then(function (r) {
-            if (!r.ok) { if (msg) msg.innerHTML = '<span style="color:#ff7a90">Save failed.</span>'; return null; }
-            if (msg) msg.textContent = "Testing the key…";
-            return send("/voice/clones", "POST", { action: "test", provider: prov });
-          }).then(function (r) {
-            if (!r) return;
-            var okk = r.ok && r.data && r.data.ok;
-            var input = $("#vsKeyInput"); if (input) input.value = "";
-            if (msg) msg.innerHTML = okk
-              ? '<span style="color:#34d399">✓ Connected. ' + (prov === "cartesia" ? "Cartesia" : prov === "hume" ? "Hume" : "ElevenLabs") + ' is ready to deploy.</span>'
-              : '<span style="color:#ffc24d">Saved, but the test did not pass: ' + esc((r.data && r.data.error) || "check the key") + "</span>";
-            loadVoice();
-          }).catch(function () { if (msg) msg.textContent = "Could not reach the server."; });
+          '<label class="cn-fld"><span class="lab">Voice ID</span><input id="vsVoiceId" type="text" placeholder="paste your voice id"></label>' +
+          '<label class="cn-fld"><span class="lab">Name (whose voice)</span><input id="vsName" type="text" placeholder="Josh"></label>' +
+          '<button class="btn btn-primary btn-sm" id="vsSave">Add voice</button></div>' +
+          '<p class="muted" style="font-size:11.5px;margin:8px 0 0">No voice id yet? Copy it from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs ↗</a>, <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia ↗</a> or <a href="https://platform.hume.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Hume ↗</a>.</p>' +
+          '<div style="margin-top:12px">' + voices + '</div>';
+
+        // Per-provider Save & test: save the key as a workspace credential, then
+        // verify it live so the card flips to its true state (green/amber).
+        Array.prototype.forEach.call(box.querySelectorAll("[data-vpsave]"), function (btn) {
+          btn.addEventListener("click", function () {
+            var id = btn.getAttribute("data-vpsave");
+            var p = VOICE_PROVS.filter(function (x) { return x.id === id; })[0];
+            var input = box.querySelector('[data-vpkey="' + id + '"]');
+            var msg = box.querySelector('[data-vpmsg="' + id + '"]');
+            var key = ((input && input.value) || "").trim();
+            if (!key) { if (msg) msg.innerHTML = '<span style="color:var(--accent-amber)">Paste your API key first.</span>'; if (input) input.focus(); return; }
+            var keys = {}; keys[p.env] = key;
+            var lbl = btn.textContent; btn.disabled = true; btn.textContent = "Saving…";
+            if (msg) msg.textContent = "Saving the key…";
+            send("/connected", "POST", { action: "save", id: id, keys: keys }).then(function (r) {
+              if (!r.ok || !(r.data && r.data.result && r.data.result.ok)) {
+                if (msg) msg.innerHTML = '<span style="color:#ff7a90">Could not save the key — try again.</span>';
+                return null;
+              }
+              if (msg) msg.textContent = "Testing the key live…";
+              // Test via /connected so the result is PERSISTED (markTested -> green),
+              // not just checked — otherwise the card would stay "saved · not verified".
+              return send("/connected", "POST", { action: "test", id: id });
+            }).then(function (r) {
+              btn.disabled = false; btn.textContent = lbl;
+              if (!r) return;
+              var okk = r.ok && r.data && r.data.result && r.data.result.status === "green";
+              if (input) input.value = "";
+              if (okk) { toast("✓ " + p.label + " connected & saved"); }
+              else { toast(p.label + " saved, but the test failed"); }
+              loadVoice();
+            }).catch(function () { btn.disabled = false; btn.textContent = lbl; if (msg) msg.innerHTML = '<span style="color:#ff7a90">Could not reach the server.</span>'; });
+          });
         });
+
+        // Add a bring-your-own voice id to the list.
         $("#vsSave").addEventListener("click", function () {
           var payload = { agentName: ($("#vsName").value || "").trim(), voiceId: ($("#vsVoiceId").value || "").trim() || undefined, provider: (($("#vsProvider") || {}).value) || "elevenlabs" };
           if (!payload.agentName) { toast("Add a name"); return; }
@@ -8093,31 +8173,44 @@
             else toast("Save failed");
           }).catch(function () { toast("Could not reach the server."); });
         });
+
+        // Re-test an already-saved provider.
         Array.prototype.forEach.call(box.querySelectorAll("[data-vptest]"), function (btn) {
           btn.addEventListener("click", function () {
             var id = btn.getAttribute("data-vptest");
             var msg = box.querySelector('[data-vpmsg="' + id + '"]');
             var dot = box.querySelector('[data-vpdot="' + id + '"]');
             var stateEl = box.querySelector('[data-vpstate="' + id + '"]');
-            if (msg) msg.textContent = "testing…";
-            send("/voice/clones", "POST", { action: "test", provider: id }).then(function (r) {
-              var okk = r.ok && r.data && r.data.ok;
-              if (msg) msg.innerHTML = okk ? '<span style="color:#34d399">✓ key works</span>' : '<span style="color:#ff7a90">✗ ' + esc((r.data && r.data.error) || "failed") + '</span>';
-              // Reflect the live test on the badge itself, so it can never read
-              // "connected" next to a rejected key (e.g. a 401). A present-but-
-              // invalid key turns amber + "key rejected", not green + "connected".
-              if (dot) dot.style.background = okk ? "#34d399" : "#ffc24d";
+            if (msg) msg.textContent = "Testing…";
+            // /connected test persists the verified result (green) so it survives reload.
+            send("/connected", "POST", { action: "test", id: id }).then(function (r) {
+              var rr = (r.data && r.data.result) || {};
+              var okk = r.ok && rr.status === "green";
+              if (dot) dot.style.background = okk ? "var(--accent-green)" : "var(--accent-amber)";
               if (stateEl) stateEl.textContent = okk ? "connected" : "key rejected";
-              if (okk) loadVoice();
-            }).catch(function () { if (msg) msg.textContent = "error"; });
+              if (msg) msg.innerHTML = okk ? '<span style="color:var(--accent-green)">✓ Verified — ready to deploy.</span>' : '<span style="color:var(--accent-amber)">✗ ' + esc(rr.error || "the key was rejected") + '</span>';
+              loadVoice();
+            }).catch(function () { if (msg) msg.textContent = "Could not reach the server."; });
           });
         });
+
+        // Pin which saved voice is the one used on drops.
+        Array.prototype.forEach.call(box.querySelectorAll("[data-vsuse]"), function (btn) {
+          btn.addEventListener("click", function () {
+            var id = btn.getAttribute("data-vsuse");
+            send("/voice/clones", "POST", { action: "set-active", id: id }).then(function (r) {
+              if (r.ok) { toast("Voice set as in use"); loadVoice(); }
+              else toast("Could not set the active voice");
+            }).catch(function () { toast("Could not reach the server."); });
+          });
+        });
+
         Array.prototype.forEach.call(box.querySelectorAll("[data-vsdel]"), function (btn) {
           btn.addEventListener("click", function () {
             var id = btn.getAttribute("data-vsdel");
-            if (!confirm("Delete this voice from your list? It is not removed from ElevenLabs, Cartesia or Hume.")) return;
+            if (!confirm("Remove this voice from your list? It is not deleted from ElevenLabs, Cartesia or Hume.")) return;
             send("/voice/clones", "POST", { action: "delete", id: id }).then(function (r) {
-              if (r.ok) { toast("Voice deleted"); loadVoice(); }
+              if (r.ok) { toast("Voice removed"); loadVoice(); }
               else toast("Delete failed");
             }).catch(function () { toast("Could not reach the server."); });
           });
