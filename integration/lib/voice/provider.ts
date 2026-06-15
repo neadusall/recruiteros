@@ -90,23 +90,52 @@ class ElevenLabsClient implements VoiceCloneClient {
   private base = "https://api.elevenlabs.io/v1";
 
   private key(): string {
-    return cred("VOICE_CLONE_API_KEY");
+    // Trim: keys pasted from the dashboard often carry a trailing space/newline,
+    // which makes a perfectly valid key 401. The header must be the bare token.
+    return cred("VOICE_CLONE_API_KEY").trim();
   }
   configured(): boolean {
     return Boolean(this.key());
   }
   private defaultVoice(): string {
-    return cred("VOICE_CLONE_VOICE_ID");
+    return cred("VOICE_CLONE_VOICE_ID").trim();
   }
 
   async verify(): Promise<{ ok: boolean; error?: string }> {
     if (!this.configured()) return { ok: false, error: "no_api_key" };
-    try {
-      const res = await fetch(`${this.base}/user`, { headers: { "xi-api-key": this.key() } });
-      return res.ok ? { ok: true } : { ok: false, error: `elevenlabs_${res.status}` };
-    } catch (e: any) {
-      return { ok: false, error: e?.message || "elevenlabs_error" };
+    // ElevenLabs returns 401 for BOTH a bad key AND a valid-but-scope-restricted
+    // key, distinguished only by the JSON body's `detail.status`. A new key scoped
+    // to e.g. "Text to Speech" 401s on /v1/user even though it synthesizes fine —
+    // that must NOT read as "key broken". So probe a few reads and inspect the
+    // body: `missing_permissions` proves the key authenticated (valid → accept it);
+    // `invalid_api_key` is a genuinely bad key (fail fast); any 2xx → valid.
+    const probes = ["/user", "/voices", "/models"];
+    let lastStatus = 0;
+    for (const path of probes) {
+      let res: Response;
+      try {
+        res = await fetch(`${this.base}${path}`, { headers: { "xi-api-key": this.key() } });
+      } catch (e: any) {
+        return { ok: false, error: e?.message || "elevenlabs_error" };
+      }
+      if (res.ok) return { ok: true };
+      lastStatus = res.status;
+      const detail = await res
+        .json()
+        .then((b: any) => {
+          const d = b?.detail;
+          return d && typeof d === "object" && d.status ? String(d.status) : typeof d === "string" ? d : "";
+        })
+        .catch(() => "");
+      // The key authenticated but lacks THIS endpoint's scope → the key is valid.
+      if (/missing_permission/i.test(detail)) return { ok: true };
+      // The key itself is rejected → no point probing further.
+      if (/invalid_api_key|api_key_not_found|invalid/i.test(detail)) return { ok: false, error: "elevenlabs_invalid_key" };
+      // 5xx is a transient ElevenLabs problem, not a bad key — surface as-is.
+      if (res.status >= 500) break;
     }
+    const hint = lastStatus === 401 || lastStatus === 403 ? "elevenlabs_unauthorized" : `elevenlabs_${lastStatus || "unverified"}`;
+    return { ok: false, error: hint };
   }
 
   async synthesize(text: string, voiceId?: string): Promise<SynthResult> {

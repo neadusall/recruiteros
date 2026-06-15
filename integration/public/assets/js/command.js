@@ -5383,39 +5383,60 @@
           return consent.filter(function (c) { return c.voiceId && (c.provider || "elevenlabs") === pid; }).slice(-1)[0] || null;
         }
         var resolvedVoice = activeProvider ? voiceForProvider(activeProvider) : (pinnedVoice || lastVoice);
-        // Prominent segmented engine picker: ● connected, ○ key not connected yet.
-        var engineBtns = PROV_IDS.map(function (pid) {
-          var on = activeProvider === pid;
-          return '<button data-vcprov="' + pid + '" class="btn ' + (on ? "btn-primary" : "btn-ghost") + ' btn-sm" ' +
-            'style="font-weight:600' + (on ? "" : "") + '">' + esc(provLabel[pid]) +
-            ' <span title="' + (provOk[pid] ? "key connected" : "key not connected") + '" style="opacity:.85">' + (provOk[pid] ? "●" : "○") + "</span></button>";
-        }).join("");
-        var resolvedLine = activeProvider
-          ? 'Using <b>' + esc(provLabel[activeProvider]) + "</b>" +
-            (resolvedVoice && resolvedVoice.voiceId
-              ? ' · voice <b>' + esc(resolvedVoice.agentName) + '</b> <span class="muted">(' + esc(resolvedVoice.voiceId) + ")</span>"
-              : ' · <span style="color:var(--accent-amber)">no voice id for this engine yet — add one below</span>') +
-            (provOk[activeProvider] ? "" : ' · <span style="color:var(--accent-amber)">' + esc(provLabel[activeProvider]) + " key not connected (runs as a safe dry-run until you connect it in Setup)</span>")
-          : '<span class="muted">No engine chosen yet — pick one above, or add a voice below and it auto-selects.</span>';
+        // Scoped styles for the engine picker (this tab doesn't load setupStyles).
+        // Lives at the top of body.innerHTML, so exactly one copy exists per paint.
+        var vdEngineCss =
+          "<style>" +
+          ".veng{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:2px}" +
+          ".veng-tile{position:relative;border:1.5px solid var(--border);border-radius:12px;padding:12px 13px 11px;background:var(--bg-soft);cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:8px;font:inherit;transition:border-color .15s,box-shadow .15s,background .15s}" +
+          ".veng-tile:hover{border-color:var(--brand)}" +
+          ".veng-tile.on{border-color:var(--brand);background:color-mix(in srgb,var(--brand) 9%,var(--bg-soft));box-shadow:0 0 0 1px var(--brand)}" +
+          ".veng-name{font-size:13.5px;font-weight:700;color:var(--text)}" +
+          ".veng-check{position:absolute;top:9px;right:11px;color:var(--brand);font-weight:800;font-size:13px;line-height:1}" +
+          ".veng-stat{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-dim)}" +
+          ".veng-dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}" +
+          ".veng-info{display:flex;align-items:flex-start;gap:9px;font-size:12.5px;line-height:1.5;margin-top:11px;padding:10px 12px;border-radius:10px;background:var(--bg-soft);border:1px solid var(--border)}" +
+          ".veng-info .ic{flex:0 0 auto;font-size:14px;line-height:1.3}" +
+          ".vrow{display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--bg-soft);margin-top:8px}" +
+          ".vrow.on{border-color:var(--brand);background:color-mix(in srgb,var(--brand) 7%,var(--bg-soft))}" +
+          ".vrow-pill{font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:999px;background:color-mix(in srgb,var(--brand) 16%,transparent);color:var(--brand);white-space:nowrap}" +
+          "</style>";
+        // Prominent engine picker: one selectable tile per provider, with a live
+        // connection dot. Clicking sets the active engine for tests + sends.
+        var engineTiles = '<div class="veng">' + PROV_IDS.map(function (pid) {
+          var on = activeProvider === pid, conn = provOk[pid];
+          return '<button type="button" class="veng-tile' + (on ? " on" : "") + '" data-vcprov="' + pid + '">' +
+            (on ? '<span class="veng-check">✓</span>' : "") +
+            '<span class="veng-name">' + esc(provLabel[pid]) + "</span>" +
+            '<span class="veng-stat"><span class="veng-dot" style="background:' + (conn ? "var(--accent-green)" : "var(--text-dim)") + '"></span>' + (conn ? "Connected" : "Not connected") + "</span>" +
+          "</button>";
+        }).join("") + "</div>";
+        var infoStrip = activeProvider
+          ? '<div class="veng-info"><span class="ic">' + (provOk[activeProvider] && resolvedVoice && resolvedVoice.voiceId ? "🎙️" : "⚠️") + "</span><div>" +
+              (resolvedVoice && resolvedVoice.voiceId
+                ? "Using <b>" + esc(provLabel[activeProvider]) + "</b> · voice <b>" + esc(resolvedVoice.agentName) + '</b> <span class="muted">(' + esc(resolvedVoice.voiceId) + ")</span>"
+                : "Engine <b>" + esc(provLabel[activeProvider]) + "</b> selected, but no voice id for it yet — add one below.") +
+              (provOk[activeProvider] ? "" : '<br><span style="color:var(--accent-amber)">' + esc(provLabel[activeProvider]) + " key not connected — runs as a safe dry-run until you connect it in Setup.</span>") +
+            "</div></div>"
+          : '<div class="veng-info"><span class="ic">👆</span><div>No engine chosen yet — pick one above, or add a voice below and it auto-selects.</div></div>';
         var voices = consent.map(function (c) {
           var pid = c.provider || "elevenlabs";
           var isActive = resolvedVoice && c.id === resolvedVoice.id;
           var control = isActive
-            ? '<span style="margin-left:auto;color:var(--brand-2);font-weight:600">✓ In use</span>'
+            ? '<span class="vrow-pill" style="margin-left:auto">✓ In use</span>'
             : '<button class="btn btn-ghost btn-sm" data-vcact="' + esc(c.id) + '" title="Use this voice (and its engine) for tests and sends" style="margin-left:auto">Use this</button>';
-          return '<div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:6px">🎙️ <b>' + esc(c.agentName) + "</b>" +
-            '<span class="muted">' + esc(provLabel[pid] || pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span>" +
+          return '<div class="vrow' + (isActive ? " on" : "") + '">🎙️ <b>' + esc(c.agentName) + "</b>" +
+            '<span class="muted" style="font-size:12px">' + esc(provLabel[pid] || pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span>" +
             control +
             '<button class="btn btn-ghost btn-sm" data-vcdel="' + esc(c.id) + '" title="Delete this voice">🗑️</button></div>';
         }).join("") || '<p class="muted">No voices yet, add one above.</p>';
         body.innerHTML =
+          vdEngineCss +
           '<div class="card" style="border-color:var(--brand-2)"><h3>🎙️ Voice engine — used for tests &amp; sends</h3>' +
           '<p class="muted" style="font-size:13px;margin:0 0 10px">Pick which provider every test drop, “Listen first” preview, and live campaign uses (unless a campaign sets its own). Choose once and it is defined.</p>' +
-          '<div style="display:flex;gap:8px;flex-wrap:wrap">' + engineBtns + "</div>" +
-          '<div style="font-size:13px;margin-top:10px">' + resolvedLine + "</div></div>" +
+          engineTiles + infoStrip + "</div>" +
           '<div class="card" style="margin-top:14px"><h3>Your voices</h3>' +
-          '<p class="muted" style="font-size:13px">Paste a voice id from ElevenLabs, Cartesia or Hume and you are ready, no cloning or approval here. ' +
-          'ElevenLabs: <b>' + (elOk ? "connected" : "set VOICE_CLONE_API_KEY") + '</b> · Cartesia: <b>' + (caOk ? "connected" : "set CARTESIA_API_KEY") + '</b> · Hume: <b>' + (huOk ? "connected" : "set HUME_API_KEY") + '</b>.</p>' +
+          '<p class="muted" style="font-size:13px">Paste a voice id from ElevenLabs, Cartesia or Hume and you are ready — no cloning or approval here. Connect each provider\'s API key in <b>Setup → Voice</b>.</p>' +
           '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
           '<div class="vd-field"><label>Provider</label><select id="vcProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option><option value="hume">Hume</option></select></div>' +
           inp("vcVoiceId", "Voice ID", "paste your voice id") +
@@ -8090,6 +8111,17 @@
       { id: "cartesia", label: "Cartesia", env: "CARTESIA_API_KEY", ph: "sk_car_…", docs: "https://play.cartesia.ai/keys", lab: "https://play.cartesia.ai" },
       { id: "hume", label: "Hume", env: "HUME_API_KEY", ph: "paste your Hume API key", docs: "https://platform.hume.ai/settings/keys", lab: "https://platform.hume.ai" },
     ];
+    // Turn a raw verify error code into a plain-English fix. The most common one
+    // is a scope-restricted ElevenLabs key: valid for TTS but missing read access.
+    function voiceErrText(code) {
+      if (!code) return "the key was rejected";
+      if (code === "elevenlabs_invalid_key")
+        return "ElevenLabs rejected this key — it's invalid or revoked. Copy it again from your ElevenLabs profile → API Keys (and check it's the right account).";
+      if (code === "elevenlabs_unauthorized" || code === "elevenlabs_401" || code === "elevenlabs_403")
+        return "key rejected or missing read access — in ElevenLabs, give the key permission to read User or Voices (or create a key with full access), then paste it again";
+      if (code === "no_api_key") return "no key saved yet";
+      return code;
+    }
     function loadVoice() {
       // Two reads: the saved voices + which one is active (voice module), and the
       // per-provider connection status (green=verified / yellow=saved-not-verified
@@ -8102,6 +8134,7 @@
         st.activeProvider = d.activeProvider || null;
         var ints = (cd && cd.integrations) || [];
         function pstat(id) { var x = ints.filter(function (i) { return i.id === id; })[0]; return (x && x.status) || "red"; }
+        function perr(id) { var x = ints.filter(function (i) { return i.id === id; })[0]; return (x && x.error) || ""; }
         var pstatus = { elevenlabs: pstat("elevenlabs"), cartesia: pstat("cartesia"), hume: pstat("hume") };
         st.providerConfigured = { elevenlabs: pstatus.elevenlabs === "green", cartesia: pstatus.cartesia === "green", hume: pstatus.hume === "green" };
         st.provConfigured = st.providerConfigured.elevenlabs || st.providerConfigured.cartesia || st.providerConfigured.hume;
@@ -8123,8 +8156,9 @@
           var s = pstatus[p.id], ok = s === "green", saved = s !== "red", inUse = usedProvider === p.id;
           var dotc = ok ? "var(--accent-green)" : saved ? "var(--accent-amber)" : "var(--text-dim)";
           var stateTxt = ok ? "connected" : saved ? "saved · not verified" : "not connected";
+          var savedErr = saved ? perr(p.id) : "";
           var msgHtml = ok ? "Key saved in your portal and verified — ready to deploy."
-            : saved ? "Key saved, but the live test didn't pass. Paste it again, or hit Test."
+            : saved ? '<span style="color:var(--accent-amber)">' + esc(savedErr ? voiceErrText(savedErr) : "Key saved, but the live test didn't pass. Paste it again, or hit Test.") + "</span>"
             : '<a href="' + p.docs + '" target="_blank" rel="noopener">Get your ' + p.label + ' API key ↗</a>';
           return '<div class="vp' + (inUse ? " on" : "") + '">' +
             '<div class="vp-head">' +
@@ -8207,7 +8241,7 @@
               if (input) input.value = "";
               if (okk) { toast("✓ " + p.label + " connected & saved"); }
               else { toast(p.label + " saved, but the test failed"); }
-              loadVoice();
+              loadVoice(); // re-render shows the persisted state + reason on the card
             }).catch(function () { btn.disabled = false; btn.textContent = lbl; if (msg) msg.innerHTML = '<span style="color:#ff7a90">Could not reach the server.</span>'; });
           });
         });
@@ -8237,7 +8271,7 @@
               var okk = r.ok && rr.status === "green";
               if (dot) dot.style.background = okk ? "var(--accent-green)" : "var(--accent-amber)";
               if (stateEl) stateEl.textContent = okk ? "connected" : "key rejected";
-              if (msg) msg.innerHTML = okk ? '<span style="color:var(--accent-green)">✓ Verified — ready to deploy.</span>' : '<span style="color:var(--accent-amber)">✗ ' + esc(rr.error || "the key was rejected") + '</span>';
+              if (msg) msg.innerHTML = okk ? '<span style="color:var(--accent-green)">✓ Verified — ready to deploy.</span>' : '<span style="color:var(--accent-amber)">✗ ' + esc(voiceErrText(rr.error)) + '</span>';
               loadVoice();
             }).catch(function () { if (msg) msg.textContent = "Could not reach the server."; });
           });
@@ -8517,6 +8551,8 @@
     if (res.error === "not_configured") return "Add the required key(s) above and Save before testing.";
     if (res.error === "no_client") return "No client available for this integration.";
     if (res.error === "connect_on_ats_tab") return "Connect Loxo on the ATS tab.";
+    if (res.error === "elevenlabs_invalid_key") return "ElevenLabs rejected this key — it's invalid or revoked. Copy it again from elevenlabs.io → Profile → API Keys (make sure it's from the right account).";
+    if (res.error === "elevenlabs_unauthorized") return "ElevenLabs rejected this key. If the key is correct, give it read access to User or Voices (or use a key with no restrictions), then paste it again.";
     return "Connection failed" + (res.error ? ", " + res.error : "") + ". Check the key and try again.";
   }
 
