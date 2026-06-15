@@ -83,6 +83,15 @@
     .fill.done { background:var(--ok); }
     .goal__total { margin-top:14px; padding-top:12px; border-top:1px solid var(--line); font-size:13.5px; color:var(--muted); text-align:center; }
     .goal__total b { color:var(--navy); font-size:17px; }
+    .board { margin-top:16px; padding-top:14px; border-top:1px solid var(--line); }
+    .board__title { font-size:12px; font-weight:600; color:var(--navy); text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px; }
+    .board__row { display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid var(--bg-soft); font-size:13.5px; }
+    .board__row:last-child { border-bottom:0; }
+    .board__rank { flex:none; width:20px; color:var(--muted); font-size:12px; text-align:right; }
+    .board__name { flex:1; color:var(--navy); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .board__count { flex:none; color:var(--ok); font-weight:600; }
+    .board__pending { flex:none; color:var(--muted); font-size:12px; }
+    .board__empty { font-size:13px; color:var(--muted); }
     .steps { background:var(--bg-soft); border:1px solid var(--line); border-radius:var(--radius-sm); padding:16px 18px; margin-bottom:18px; }
     .steps__title { font-size:13px; font-weight:600; color:var(--navy); text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px; }
     .step { display:flex; gap:12px; margin:14px 0; font-size:14px; color:var(--navy-700); line-height:1.55; }
@@ -122,6 +131,10 @@
           <div class="bar"><div class="bar__label"><span>Yahoo</span><b id="yCount">0 / 33</b></div><div class="track"><div class="fill" id="yFill"></div></div></div>
         </div>
         <div class="goal__total">Connected so far: <b id="totalCount">0</b> of 99</div>
+        <div class="board" id="board" style="display:none">
+          <div class="board__title">Who's set up what</div>
+          <div id="boardRows"></div>
+        </div>
       </div>
       <div class="card">
         <div class="why">
@@ -215,6 +228,30 @@
         set("oCount","oFill", p.byProvider.outlook);
         set("yCount","yFill", p.byProvider.yahoo);
         var tot = $("totalCount"); if (tot) tot.textContent = (p.total || 0);
+        renderBoard(p.byStaff);
+      }
+
+      // Per-staff leaderboard so the team can see who has connected what.
+      function renderBoard(rows){
+        var board = $("board"), holder = $("boardRows");
+        if (!board || !holder) return;
+        rows = Array.isArray(rows) ? rows : [];
+        board.style.display = "";
+        if (!rows.length){
+          holder.innerHTML = '<div class="board__empty">No inboxes connected yet — be the first to add yours below.</div>';
+          return;
+        }
+        holder.innerHTML = rows.map(function(r, i){
+          var name = esc(r.name || "Someone");
+          var c = r.connected || 0, pend = r.pending || 0;
+          var pendingLabel = pend ? '<span class="board__pending">' + pend + ' pending</span>' : '';
+          return '<div class="board__row">' +
+                   '<span class="board__rank">' + (i+1) + '</span>' +
+                   '<span class="board__name">' + name + '</span>' +
+                   '<span class="board__count">' + c + ' connected</span>' +
+                   pendingLabel +
+                 '</div>';
+        }).join("");
       }
 
       function addRow(provider){

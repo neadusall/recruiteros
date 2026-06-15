@@ -23,16 +23,32 @@ import { addSeed, setSeedVerification, verifySeedLogin, listSeeds } from "../../
 // Team goal: 33 connected inboxes per provider (99 total). Tunable via env.
 const TARGET_PER_PROVIDER = Number(process.env.SEED_PORTAL_TARGET_PER_PROVIDER || 33);
 
-/** Live progress toward the team goal — connected (IMAP-verified) inboxes per provider. */
+/** Live progress toward the team goal — connected (IMAP-verified) inboxes per provider,
+ *  plus a per-staff leaderboard so the team can see who has set up what. */
 async function buildProgress() {
   const seeds = await listSeeds();
   const connected = (p: string) => seeds.filter((s) => s.provider === p && s.imapOk).length;
   const byProvider = { gmail: connected("gmail"), outlook: connected("outlook"), yahoo: connected("yahoo") };
+
+  // Roll up by staff member (addedBy). "connected" = inbox passed the IMAP login test;
+  // "pending" = registered but not yet verified (usually a bad/expired app password).
+  const staff = new Map<string, { name: string; connected: number; pending: number }>();
+  for (const s of seeds) {
+    const name = (s.addedBy || "").trim();
+    if (!name) continue; // older/system seeds with no staff name don't belong on the board
+    const row = staff.get(name.toLowerCase()) || { name, connected: 0, pending: 0 };
+    if (s.imapOk) row.connected++; else row.pending++;
+    staff.set(name.toLowerCase(), row);
+  }
+  const byStaff = Array.from(staff.values())
+    .sort((a, b) => b.connected - a.connected || (a.connected + b.pending) - (b.connected + a.pending) || a.name.localeCompare(b.name));
+
   return {
     perProviderTarget: TARGET_PER_PROVIDER,
     total: byProvider.gmail + byProvider.outlook + byProvider.yahoo,
     target: TARGET_PER_PROVIDER * 3,
     byProvider,
+    byStaff,
   };
 }
 
