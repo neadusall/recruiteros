@@ -31,8 +31,17 @@ taltxt.recruitersos.co {
 # (on-demand TLS -> the app). Automatic HTTPS issues once the A-record points here.
 lumesp.com {
 	encode zstd gzip
-	root * /srv/lumesp
-	file_server
+	# /api/* is the jobs + applications backend (login, post/delete jobs, apply).
+	# Everything else is the static marketing site. The matcher is more specific,
+	# so API traffic is proxied and all other paths fall through to file_server.
+	@api path /api/*
+	handle @api {
+		reverse_proxy lume-jobs:3000
+	}
+	handle {
+		root * /srv/lumesp
+		file_server
+	}
 }
 
 www.lumesp.com {

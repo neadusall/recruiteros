@@ -73,12 +73,32 @@ services:
       - "3000"
     # not published to the host directly; Caddy reaches it on the internal net
 
+  # Lume jobs backend: powers the lumesp.com job board + the team /portal that
+  # adds/deletes jobs and collects applications. Dependency-free Node service;
+  # Caddy proxies only /api/* on lumesp.com to it. Data persists on its own
+  # named volume so postings/applications survive every redeploy.
+  lume-jobs:
+    build: ./lume-jobs
+    restart: unless-stopped
+    # Team login + cookie secret + optional email forwarding live in the shared
+    # env file. required:false so a missing file never takes down the stack —
+    # the service then runs with built-in defaults (change them before go-live).
+    env_file:
+      - path: .env.production
+        required: false
+    volumes:
+      - lume_jobs_data:/data
+    expose:
+      - "3000"
+    # not published to the host directly; Caddy reaches it on the internal net
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       - app
       - taltxt
+      - lume-jobs
     ports:
       - "80:80"
       - "443:443"
@@ -94,3 +114,4 @@ volumes:
   caddy_config:
   pg_data:
   app_data:   # durable JSON snapshots (accounts/sessions/workspaces) — survives redeploys
+  lume_jobs_data:  # lumesp.com job postings + applications — survives redeploys

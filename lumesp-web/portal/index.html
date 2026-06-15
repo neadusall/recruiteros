@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Manager — Lume Search Partners</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="/favicon-lume.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Fragment+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    body { background: var(--bg-soft); }
+    .pbar { background: var(--navy); color: #fff; }
+    .pbar .wrap { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; gap: 16px; }
+    .pbar .logo__sub, .pbar .logo__word { color: #fff; }
+    .pbar__title { font-weight: 600; font-size: 15px; opacity: .9; }
+    .pwrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+    /* Login */
+    .login { min-height: 72vh; display: grid; place-items: center; padding: 40px 16px; }
+    .login__card { width: 100%; max-width: 400px; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-md); padding: 34px; }
+    .login__card h1 { font-size: 22px; color: var(--navy); margin-bottom: 6px; }
+    .login__card p { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 8px; margin: 28px 0 24px; flex-wrap: wrap; }
+    .tab { border: 1px solid var(--line); background: #fff; color: var(--navy); padding: 9px 18px; border-radius: 999px; font: inherit; font-weight: 500; cursor: pointer; }
+    .tab.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+    .tab .count { opacity: .6; font-size: 12px; margin-left: 6px; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* Cards / layout */
+    .pcard { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 26px; margin-bottom: 22px; }
+    .pcard h2 { font-size: 18px; color: var(--navy); margin-bottom: 4px; }
+    .pcard .hint { color: var(--muted); font-size: 13.5px; margin: 0 0 20px; }
+    .form .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+    @media (max-width: 720px) { .form .row3 { grid-template-columns: 1fr; } }
+    .form label { display: block; font-weight: 500; font-size: 13.5px; color: var(--navy); margin-bottom: 6px; }
+    .form .sublabel { font-weight: 400; color: var(--muted); font-size: 12px; }
+    textarea { min-height: 96px; resize: vertical; }
+    .form__actions { display: flex; gap: 12px; align-items: center; margin-top: 18px; }
+
+    /* Job rows */
+    .jrow { display: flex; align-items: center; gap: 14px; padding: 16px 0; border-top: 1px solid var(--line); }
+    .jrow:first-child { border-top: 0; }
+    .jrow__main { flex: 1; min-width: 0; }
+    .jrow__title { font-weight: 600; color: var(--navy); }
+    .jrow__meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    .jtag { display: inline-block; background: var(--bg-tint); color: var(--teal-600); font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; margin-right: 8px; }
+    .jrow__actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .btn--sm { padding: 8px 14px; font-size: 13px; }
+    .btn--danger { background: #fff; color: #b42318; border: 1px solid #f1c4bf; }
+    .btn--danger:hover { background: #fdf3f2; }
+
+    /* Applications */
+    .app { padding: 18px 0; border-top: 1px solid var(--line); }
+    .app:first-child { border-top: 0; }
+    .app__top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .app__who { font-weight: 600; color: var(--navy); }
+    .app__role { color: var(--teal-600); font-size: 13px; font-weight: 500; }
+    .app__contact { color: var(--muted); font-size: 13px; margin-top: 4px; display: flex; gap: 16px; flex-wrap: wrap; }
+    .app__contact a { color: var(--teal-600); }
+    .app__msg { margin-top: 10px; background: var(--bg-soft); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 14px; white-space: pre-wrap; }
+    .app__time { color: var(--muted); font-size: 12px; }
+
+    .muted { color: var(--muted); }
+    .empty { text-align: center; color: var(--muted); padding: 40px 10px; }
+
+    /* Toast */
+    #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px); background: var(--navy); color: #fff; padding: 12px 20px; border-radius: 999px; box-shadow: var(--shadow-md); opacity: 0; pointer-events: none; transition: all .25s ease; font-size: 14px; z-index: 50; }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #toast.err { background: #b42318; }
+    .formerr { color: #b42318; font-size: 13.5px; min-height: 18px; }
+  </style>
+</head>
+<body>
+
+<!-- Login view -->
+<div id="loginView" class="login" hidden>
+  <form class="login__card form" id="loginForm">
+    <a class="logo" href="/" aria-label="Lume Search Partners home" style="margin-bottom:18px">
+      <img class="logo__mark" src="/assets/lume-mark.svg" alt="" width="34" height="18">
+      <span class="logo__text"><span class="logo__word" style="color:var(--navy)">LUME</span><span class="logo__sub">Search Partners</span></span>
+    </a>
+    <h1>Job Manager</h1>
+    <p>Sign in to post and manage opportunities on lumesp.com.</p>
+    <div class="field"><label>Username</label><input name="username" autocomplete="username" required></div>
+    <div class="field" style="margin-top:14px"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
+    <div class="formerr" id="loginErr" style="margin-top:12px"></div>
+    <button class="btn btn--primary" type="submit" style="width:100%;margin-top:6px">Sign in</button>
+  </form>
+</div>
+
+<!-- App view -->
+<div id="appView" hidden>
+  <div class="pbar">
+    <div class="wrap" style="max-width:1080px;margin:0 auto">
+      <a class="logo" href="/" aria-label="Lume Search Partners home">
+        <img class="logo__mark" src="/assets/lume-mark.svg" alt="" width="34" height="18">
+        <span class="logo__text"><span class="logo__word">LUME</span><span class="logo__sub">Search Partners</span></span>
+      </a>
+      <span class="pbar__title">Job Manager</span>
+      <button class="btn btn--ghost btn--sm" id="logoutBtn" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.4)">Sign out</button>
+    </div>
+  </div>
+
+  <div class="pwrap">
+    <div class="tabs">
+      <button class="tab active" data-tab="jobs">Jobs <span class="count" id="jobsCount"></span></button>
+      <button class="tab" data-tab="apps">Applications <span class="count" id="appsCount"></span></button>
+      <a class="tab" href="/jobs/" target="_blank" rel="noopener" style="text-decoration:none">View live board ↗</a>
+    </div>
+
+    <!-- JOBS PANEL -->
+    <section class="panel active" id="panel-jobs">
+      <div class="pcard">
+        <h2 id="formTitle">Post a new job</h2>
+        <p class="hint">Fill in the details below. It appears on the live board at lumesp.com/jobs instantly.</p>
+        <form class="form" id="jobForm">
+          <input type="hidden" name="id" id="jobId">
+          <div class="field"><label>Job title</label><input name="title" id="f_title" placeholder="e.g. General Counsel | Remote" required></div>
+          <div class="row3" style="margin-top:16px">
+            <div class="field">
+              <label>Category</label>
+              <input name="category" id="f_category" list="catList" placeholder="Select or type…" required>
+              <datalist id="catList">
+                <option value="Accounting &amp; Finance"></option>
+                <option value="Healthcare/ABA"></option>
+                <option value="Legal"></option>
+                <option value="Real Estate"></option>
+              </datalist>
+            </div>
+            <div class="field"><label>Location</label><input name="location" id="f_location" placeholder="e.g. Remote, or New York NY" required></div>
+            <div class="field"><label>Salary <span class="sublabel">(optional)</span></label><input name="salary" id="f_salary" placeholder="e.g. $120,000–$150,000"></div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label>Summary <span class="sublabel">— the overview paragraph(s) shown at the top of the role</span></label>
+            <textarea name="summary" id="f_summary" placeholder="Describe the role and the opportunity…"></textarea>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label>Responsibilities <span class="sublabel">— one bullet per line</span></label>
+            <textarea name="responsibilities" id="f_resp" placeholder="Lead the legal function&#10;Advise leadership on risk&#10;Manage outside counsel"></textarea>
+          </div>
+          <div class="formerr" id="jobErr" style="margin-top:12px"></div>
+          <div class="form__actions">
+            <button class="btn btn--primary" type="submit" id="jobSubmit">Publish job</button>
+            <button class="btn btn--ghost" type="button" id="jobCancel" hidden>Cancel edit</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="pcard">
+        <h2>Current openings</h2>
+        <p class="hint">Edit or remove any role. Changes go live immediately.</p>
+        <div id="jobsList"><p class="muted">Loading…</p></div>
+      </div>
+    </section>
+
+    <!-- APPLICATIONS PANEL -->
+    <section class="panel" id="panel-apps">
+      <div class="pcard">
+        <h2>Applications &amp; inquiries</h2>
+        <p class="hint">Everyone who applied to a role or contacted you through the site, newest first.</p>
+        <div id="appsList"><p class="muted">Loading…</p></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  var loginView = document.getElementById('loginView');
+  var appView = document.getElementById('appView');
+  var toastEl = document.getElementById('toast');
+  var toastTimer;
+
+  function toast(msg, isErr) {
+    toastEl.textContent = msg;
+    toastEl.className = 'show' + (isErr ? ' err' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.className = ''; }, 3200);
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+  function api(method, url, body) {
+    return fetch(url, {
+      method: method,
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (!r.ok) throw new Error(data.error || 'Something went wrong.');
+        return data;
+      });
+    });
+  }
+  function fmtDate(ms) {
+    try { return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); }
+    catch (_) { return ''; }
+  }
+
+  /* ---------------- auth ---------------- */
+  function showLogin() { appView.hidden = true; loginView.hidden = false; }
+  function showApp() { loginView.hidden = true; appView.hidden = false; loadJobs(); loadApps(); }
+
+  api('GET', '/api/me').then(function (d) { d.authed ? showApp() : showLogin(); }).catch(showLogin);
+
+  document.getElementById('loginForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var f = e.target, err = document.getElementById('loginErr');
+    err.textContent = '';
+    api('POST', '/api/login', { username: f.username.value, password: f.password.value })
+      .then(function () { f.reset(); showApp(); })
+      .catch(function (ex) { err.textContent = ex.message; });
+  });
+  document.getElementById('logoutBtn').addEventListener('click', function () {
+    api('POST', '/api/logout').then(showLogin).catch(showLogin);
+  });
+
+  /* ---------------- tabs ---------------- */
+  Array.prototype.forEach.call(document.querySelectorAll('.tab[data-tab]'), function (t) {
+    t.addEventListener('click', function () {
+      document.querySelectorAll('.tab[data-tab]').forEach(function (x) { x.classList.remove('active'); });
+      t.classList.add('active');
+      document.querySelectorAll('.panel').forEach(function (p) { p.classList.remove('active'); });
+      document.getElementById('panel-' + t.dataset.tab).classList.add('active');
+    });
+  });
+
+  /* ---------------- jobs ---------------- */
+  var jobForm = document.getElementById('jobForm');
+  var jobsList = document.getElementById('jobsList');
+
+  function resetForm() {
+    jobForm.reset();
+    document.getElementById('jobId').value = '';
+    document.getElementById('formTitle').textContent = 'Post a new job';
+    document.getElementById('jobSubmit').textContent = 'Publish job';
+    document.getElementById('jobCancel').hidden = true;
+    document.getElementById('jobErr').textContent = '';
+  }
+  document.getElementById('jobCancel').addEventListener('click', resetForm);
+
+  function loadJobs() {
+    api('GET', '/api/jobs').then(function (d) {
+      var jobs = d.jobs || [];
+      document.getElementById('jobsCount').textContent = jobs.length;
+      if (!jobs.length) { jobsList.innerHTML = '<p class="empty">No jobs yet. Add your first one above.</p>'; return; }
+      jobsList.innerHTML = jobs.map(function (j) {
+        return '<div class="jrow">' +
+          '<div class="jrow__main">' +
+            '<div class="jrow__title">' + esc(j.title) + '</div>' +
+            '<div class="jrow__meta"><span class="jtag">' + esc(j.category) + '</span>' +
+              esc(j.location) + (j.salary ? ' · ' + esc(j.salary) : '') + '</div>' +
+          '</div>' +
+          '<div class="jrow__actions">' +
+            '<button class="btn btn--ghost btn--sm" data-edit="' + esc(j.id) + '">Edit</button>' +
+            '<button class="btn btn--danger btn--sm" data-del="' + esc(j.id) + '" data-title="' + esc(j.title) + '">Delete</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      // store for edit lookups
+      window.__jobs = jobs;
+    }).catch(function (ex) { jobsList.innerHTML = '<p class="empty">' + esc(ex.message) + '</p>'; });
+  }
+
+  jobsList.addEventListener('click', function (e) {
+    var ed = e.target.getAttribute('data-edit');
+    var del = e.target.getAttribute('data-del');
+    if (ed) {
+      var j = (window.__jobs || []).filter(function (x) { return x.id === ed; })[0];
+      if (!j) return;
+      document.getElementById('jobId').value = j.id;
+      document.getElementById('f_title').value = j.title || '';
+      document.getElementById('f_category').value = j.category || '';
+      document.getElementById('f_location').value = j.location || '';
+      document.getElementById('f_salary').value = j.salary || '';
+      document.getElementById('f_summary').value = (Array.isArray(j.summary) ? j.summary.join('\n\n') : (j.summary || ''));
+      var items = [];
+      (j.sections || []).forEach(function (s) { (s.items || []).forEach(function (it) { items.push(it); }); });
+      document.getElementById('f_resp').value = items.join('\n');
+      document.getElementById('formTitle').textContent = 'Edit job';
+      document.getElementById('jobSubmit').textContent = 'Save changes';
+      document.getElementById('jobCancel').hidden = false;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    if (del) {
+      var title = e.target.getAttribute('data-title') || 'this job';
+      if (!confirm('Delete "' + title + '"? This removes it from the live board.')) return;
+      api('DELETE', '/api/jobs/' + encodeURIComponent(del)).then(function () {
+        toast('Job deleted'); loadJobs();
+      }).catch(function (ex) { toast(ex.message, true); });
+    }
+  });
+
+  jobForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var err = document.getElementById('jobErr'); err.textContent = '';
+    var summaryParas = document.getElementById('f_summary').value.split(/\n\s*\n/).map(function (s) { return s.trim().replace(/\s*\n\s*/g, ' '); }).filter(Boolean);
+    var payload = {
+      id: document.getElementById('jobId').value || undefined,
+      title: document.getElementById('f_title').value,
+      category: document.getElementById('f_category').value,
+      location: document.getElementById('f_location').value,
+      salary: document.getElementById('f_salary').value,
+      summary: summaryParas,
+      responsibilities: document.getElementById('f_resp').value
+    };
+    var btn = document.getElementById('jobSubmit'); var label = btn.textContent; btn.disabled = true; btn.textContent = 'Saving…';
+    api('POST', '/api/jobs', payload).then(function () {
+      toast(payload.id ? 'Job updated' : 'Job published');
+      resetForm(); loadJobs();
+    }).catch(function (ex) { err.textContent = ex.message; })
+      .then(function () { btn.disabled = false; btn.textContent = label; });
+  });
+
+  /* ---------------- applications ---------------- */
+  var appsList = document.getElementById('appsList');
+  function loadApps() {
+    api('GET', '/api/applications').then(function (d) {
+      var apps = d.applications || [];
+      document.getElementById('appsCount').textContent = apps.length;
+      if (!apps.length) { appsList.innerHTML = '<p class="empty">No applications yet.</p>'; return; }
+      appsList.innerHTML = apps.map(function (a) {
+        var contact = [];
+        if (a.email) contact.push('<a href="mailto:' + esc(a.email) + '">' + esc(a.email) + '</a>');
+        if (a.phone) contact.push('<a href="tel:' + esc(a.phone) + '">' + esc(a.phone) + '</a>');
+        if (a.company) contact.push(esc(a.company));
+        return '<div class="app">' +
+          '<div class="app__top">' +
+            '<div><span class="app__who">' + esc(a.name || 'Applicant') + '</span>' +
+              (a.jobTitle ? ' &nbsp;<span class="app__role">→ ' + esc(a.jobTitle) + '</span>' : '') +
+              '<div class="app__contact">' + contact.join('<span>·</span>') + '</div>' +
+            '</div>' +
+            '<div style="text-align:right"><span class="app__time">' + esc(fmtDate(a.createdAt)) + '</span><br>' +
+              '<button class="btn btn--danger btn--sm" data-delapp="' + esc(a.id) + '" style="margin-top:6px">Delete</button></div>' +
+          '</div>' +
+          (a.message ? '<div class="app__msg">' + esc(a.message) + '</div>' : '') +
+        '</div>';
+      }).join('');
+    }).catch(function (ex) { appsList.innerHTML = '<p class="empty">' + esc(ex.message) + '</p>'; });
+  }
+  appsList.addEventListener('click', function (e) {
+    var id = e.target.getAttribute('data-delapp');
+    if (!id) return;
+    if (!confirm('Delete this application?')) return;
+    api('DELETE', '/api/applications/' + encodeURIComponent(id)).then(function () {
+      toast('Deleted'); loadApps();
+    }).catch(function (ex) { toast(ex.message, true); });
+  });
+})();
+</script>
+</body>
+</html>

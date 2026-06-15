@@ -147,7 +147,6 @@ p { margin: 0; }
 .cat__img { height: 180px; width: 100%; object-fit: cover; }
 .cat__body { padding: 26px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
 .cat__body h3 { font-size: 22px; color: var(--navy); }
-.cat__lead { color: var(--muted); font-size: 14.5px; margin: -2px 0 2px; }
 .cat__jobs { display: flex; flex-direction: column; gap: 2px; }
 .cat__job { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 15px; }
 .cat__job:hover .cat__job-title { color: var(--teal); }
