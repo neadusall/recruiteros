@@ -29,10 +29,13 @@ const PASS = process.env.LUME_JOBS_PASS || 'lume-admin';
 const SECRET = process.env.LUME_JOBS_SECRET || crypto.createHash('sha256').update('lume::' + PASS).digest('hex');
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
 // Email notification of each application/inquiry. Primary path is Resend, reusing
-// the SAME RESEND_API_KEY + EMAIL_FROM the main app already has in .env.production
-// (so the sender domain is already verified). Web3Forms is an optional fallback.
+// the main app's RESEND_API_KEY from .env.production. The sender MUST be a Lume
+// address — these are lumesp.com leads, so they go out from lumesp.com, NOT the
+// shared recruitersos EMAIL_FROM. Override with LUME_EMAIL_FROM if needed; the
+// lumesp.com domain must be a verified sending domain in Resend. Web3Forms is an
+// optional fallback.
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const EMAIL_FROM = process.env.EMAIL_FROM || 'Lume Search Partners <onboarding@resend.dev>';
+const EMAIL_FROM = process.env.LUME_EMAIL_FROM || 'Lume Search Partners <no-reply@lumesp.com>';
 const WEB3FORMS_KEY = process.env.LUME_WEB3FORMS_KEY || '';
 // Who receives the lead alerts (comma-separated). Defaults to Josh + Ryan.
 const NOTIFY_EMAILS = (process.env.LUME_NOTIFY_EMAILS || 'josh@lumesp.com,ryan@lumesp.com')
