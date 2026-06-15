@@ -37,8 +37,10 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const EMAIL_FROM = process.env.LUME_EMAIL_FROM || 'Lume Search Partners <no-reply@lumesp.com>';
 const WEB3FORMS_KEY = process.env.LUME_WEB3FORMS_KEY || '';
-// Who receives the lead alerts (comma-separated). Defaults to Josh + Ryan.
-const NOTIFY_EMAILS = (process.env.LUME_NOTIFY_EMAILS || 'josh@lumesp.com,ryan@lumesp.com')
+// Who receives the lead alerts (comma-separated). Applications + SMS opt-ins go
+// to Ryan, who owns intake and the 10DLC consent records. Override with
+// LUME_NOTIFY_EMAILS to add/replace recipients.
+const NOTIFY_EMAILS = (process.env.LUME_NOTIFY_EMAILS || 'ryan@lumesp.com')
   .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
 
 /* ----------------------------------------------------------------- storage -- */
@@ -179,17 +181,32 @@ function readBody(req) {
 async function forwardApplication(app) {
   if (typeof fetch !== 'function') return;
   const subject = 'New application: ' + (app.jobTitle || 'Open role') + ' — lumesp.com';
+  const consentLine = app.smsConsent
+    ? 'SMS consent: YES — opted in to text messages'
+    : 'SMS consent: no';
   const lines = [
     'Role: ' + (app.jobTitle || '—'),
     'Name: ' + (app.name || '—'),
     'Email: ' + (app.email || '—'),
     'Phone: ' + (app.phone || '—'),
     'Company: ' + (app.company || '—'),
+    consentLine,
     '',
     (app.message || '(no message)'),
     '',
     'Submitted via lumesp.com' + (app.source ? ' (' + app.source + ')' : ''),
-  ].join('\n');
+  ];
+  if (app.smsConsent) {
+    // 10DLC proof of consent: timestamped, with the exact language agreed to.
+    lines.push(
+      '',
+      '— SMS opt-in record (10DLC) —',
+      'Opted in at: ' + new Date(app.createdAt || Date.now()).toISOString(),
+      'Opt-in page: ' + (app.consentUrl || app.source || '—'),
+      'Consent shown: ' + (app.consentText || '(language not captured)')
+    );
+  }
+  const body = lines.join('\n');
 
   // Primary: Resend to Josh + Ryan, reply-to the applicant so they can answer directly.
   if (RESEND_API_KEY && NOTIFY_EMAILS.length) {
@@ -202,8 +219,8 @@ async function forwardApplication(app) {
           to: NOTIFY_EMAILS,
           reply_to: app.email || undefined,
           subject: subject,
-          text: lines,
-          html: lines.split('\n').map(function (l) {
+          text: body,
+          html: body.split('\n').map(function (l) {
             return l ? l.replace(/&/g, '&amp;').replace(/</g, '&lt;') : '';
           }).join('<br>'),
         }),
@@ -227,6 +244,9 @@ async function forwardApplication(app) {
           replyto: app.email || '',
           Role: app.jobTitle || '', Name: app.name || '', Email: app.email || '',
           Company: app.company || '', Phone: app.phone || '', Message: app.message || '',
+          SMS_Consent: app.smsConsent ? 'YES — opted in' : 'no',
+          Consent_Shown: app.smsConsent ? (app.consentText || '') : '',
+          Opt_In_Page: app.smsConsent ? (app.consentUrl || '') : '',
         }),
       });
     } catch (_) { /* best-effort; the record is already stored in the portal */ }
@@ -288,6 +308,12 @@ const server = http.createServer(async (req, res) => {
         company: String(b.company || '').trim().slice(0, 200),
         phone: String(b.phone || '').trim().slice(0, 80),
         message: String(b.message || '').trim().slice(0, 5000),
+        // SMS / 10DLC consent record. We store the boolean plus the exact
+        // disclosure language the applicant agreed to and the page URL, which
+        // together are the auditable proof of express written consent.
+        smsConsent: b.smsConsent === true || b.smsConsent === 'yes' || b.smsConsent === 'true',
+        consentText: String(b.consentText || '').trim().slice(0, 2000),
+        consentUrl: String(b.consentUrl || '').trim().slice(0, 300),
         source: String(b.source || '').trim().slice(0, 200),
         createdAt: Date.now(),
       };
