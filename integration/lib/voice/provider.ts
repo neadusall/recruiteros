@@ -110,23 +110,29 @@ class ElevenLabsClient implements VoiceCloneClient {
     // body: `missing_permissions` proves the key authenticated (valid → accept it);
     // `invalid_api_key` is a genuinely bad key (fail fast); any 2xx → valid.
     const probes = ["/user", "/voices", "/models"];
+    const k = this.key();
     let lastStatus = 0;
     for (const path of probes) {
       let res: Response;
       try {
-        res = await fetch(`${this.base}${path}`, { headers: { "xi-api-key": this.key() } });
+        res = await fetch(`${this.base}${path}`, { headers: { "xi-api-key": k } });
       } catch (e: any) {
+        console.error(`[voice-clone:elevenlabs] verify ${path} network error: ${e?.message || e}`);
         return { ok: false, error: e?.message || "elevenlabs_error" };
       }
       if (res.ok) return { ok: true };
       lastStatus = res.status;
-      const detail = await res
-        .json()
-        .then((b: any) => {
-          const d = b?.detail;
-          return d && typeof d === "object" && d.status ? String(d.status) : typeof d === "string" ? d : "";
-        })
-        .catch(() => "");
+      const rawBody = await res.text().catch(() => "");
+      // TEMP DIAGNOSTIC: log exactly what ElevenLabs rejected so we can see whether
+      // it's a bad key vs a missing scope. Logs key LENGTH only, never the key.
+      console.error(
+        `[voice-clone:elevenlabs] verify ${path} -> ${res.status}; keyLen=${k.length}; body=${rawBody.slice(0, 400)}`,
+      );
+      let detail = "";
+      try {
+        const d = JSON.parse(rawBody)?.detail;
+        detail = d && typeof d === "object" && d.status ? String(d.status) : typeof d === "string" ? d : "";
+      } catch { /* non-JSON body */ }
       // The key authenticated but lacks THIS endpoint's scope → the key is valid.
       if (/missing_permission/i.test(detail)) return { ok: true };
       // The key itself is rejected → no point probing further.
