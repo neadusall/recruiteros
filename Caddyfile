@@ -26,9 +26,11 @@ taltxt.recruitersos.co {
 
 # Lume Search Partners — static white-label MARKETING site, served from this same
 # box (the keeper). Apex is canonical; www 301-redirects to it. These named blocks
-# are more specific than the catch-all below, so they always win; the portal host
-# app.lumesp.com is NOT named here and correctly falls through to the catch-all
-# (on-demand TLS -> the app). Automatic HTTPS issues once the A-record points here.
+# are more specific than the catch-all below, so they always win. The portal host
+# app.lumesp.com has its own named block (below) — it must NOT be left to the
+# catch-all, whose on-demand TLS is gated by /api/caddyask and would reject it
+# ("unknown domain"), so no cert would ever issue. Automatic HTTPS issues once the
+# A-record points here.
 lumesp.com {
 	encode zstd gzip
 	# /api/* is the jobs + applications backend (login, post/delete jobs, apply).
@@ -46,6 +48,18 @@ lumesp.com {
 
 www.lumesp.com {
 	redir https://lumesp.com{uri} permanent
+}
+
+# Lume app/portal host. seed-portal.html (served from lumesp.com) calls
+# https://app.lumesp.com/api/seed-portal, and other Lume app APIs land here too.
+# This MUST proxy to the RecruiterOS app (app:3000), where /api/seed-portal lives
+# — NOT to lume-jobs:3000 (that service has no such route). It needs its own
+# named block so Caddy issues a normal Let's Encrypt cert: the catch-all's
+# on-demand TLS is denied for this host by /api/caddyask. DNS A-record for
+# app.lumesp.com already points at this box.
+app.lumesp.com {
+	encode zstd gzip
+	reverse_proxy app:3000
 }
 
 # Catch-all for white-label CUSTOM DOMAINS (e.g. app.acme.com). The explicit
