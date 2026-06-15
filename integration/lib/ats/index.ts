@@ -28,6 +28,10 @@ export {
 } from "./sync";
 export { dataRecordToLoxoPerson, companyToLoxoCompany } from "./map";
 
+// In-process background sync: armed at server boot from instrumentation.ts so
+// connected workspaces stay fresh without an external scheduler.
+export { ensureAtsScheduler } from "./scheduler";
+
 /** Object-mapping reference, surfaced for the ATS settings UI. */
 export const LOXO_OBJECT_MAP = [
   { concept: "BD prospect", object: "Person + list 'BD Prospects'", how: "POST /people/update_by_email" },

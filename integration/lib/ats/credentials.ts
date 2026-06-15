@@ -214,6 +214,29 @@ export async function listConfiguredWorkspaces(): Promise<Array<{ workspaceId: s
 }
 
 /**
+ * Every workspace whose active vendor has a COMPLETE credential set (domain +
+ * slug + key), regardless of test status — drives the in-process scheduler.
+ * Unlike `listConfiguredWorkspaces`, this also returns "yellow" connections
+ * (saved but not yet verified) so the scheduler can self-heal them: test once,
+ * then sync. The `status` lets the caller decide whether to test or sync.
+ */
+export async function listSyncableWorkspaces(): Promise<
+  Array<{ workspaceId: string; vendor: AtsVendor; status: "yellow" | "green" }>
+> {
+  await hydrate();
+  const out: Array<{ workspaceId: string; vendor: AtsVendor; status: "yellow" | "green" }> = [];
+  for (const w of Object.values(store)) {
+    if (!w.active) continue;
+    const cfg = w.vendors[w.active];
+    if (!cfg || !cfg.domain || !cfg.slug || !cfg.apiKey) continue;
+    if (cfg.status === "green" || cfg.status === "yellow") {
+      out.push({ workspaceId: w.workspaceId, vendor: w.active, status: cfg.status });
+    }
+  }
+  return out;
+}
+
+/**
  * Redacted view for the UI: tells you whether a key is present and shows the
  * non-secret settings, but never the apiKey/webhookSecret themselves.
  */
