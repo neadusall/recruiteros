@@ -218,6 +218,16 @@ a.member.is-link:hover .member__li { transform: scale(1.08); }
 .sms-program p, .sms-program li { font-size: 13px; line-height: 1.6; }
 .sms-program ul { margin: 10px 0; }
 
+/* SMS opt-in — inviting benefit cards + contained form card */
+.benefit__icon { width: 46px; height: 46px; border-radius: 12px; background: var(--bg-tint); color: var(--teal); display: grid; place-items: center; margin-bottom: 16px; }
+.benefit__icon svg { width: 24px; height: 24px; stroke: currentColor; }
+.optin-card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-md); padding: 36px; max-width: 600px; margin: 0 auto; }
+.optin-card .form { margin-top: 24px; }
+.optin-trust { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 22px; margin: 28px auto 0; max-width: 600px; }
+.optin-trust span { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 7px; }
+.optin-trust svg { width: 15px; height: 15px; stroke: var(--teal); flex: none; }
+@media (max-width: 760px) { .optin-card { padding: 26px 20px; } }
+
 /* ---- Footer ---- */
 .site-footer { background: var(--navy); color: #c7d2dc; padding: 64px 0 32px; }
 .site-footer a { color: #c7d2dc; }
