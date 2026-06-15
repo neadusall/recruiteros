@@ -21,6 +21,7 @@ import {
   DEFAULT_PERSONA, DEFAULT_WINDOW,
 } from "./types";
 import { DEFAULT_VOICE_SCRIPTS } from "./seedScripts";
+import type { VoiceProvider } from "./provider";
 
 /** One queued/active call's playback plan, consulted by the voice webhook. */
 export interface PendingDrop {
@@ -285,10 +286,13 @@ export function upsertConsent(workspaceId: string, input: Partial<VoiceConsent> 
   if (existing) Object.assign(existing, rec);
   else store.consent.push(rec);
   // Pin the very first voice a workspace adds as its active engine, so there is
-  // always a defined voice for tests/sends the moment one exists (the operator
-  // can switch it later). Only auto-pins when nothing is active yet.
+  // always a defined voice + provider for tests/sends the moment one exists (the
+  // operator can switch either later). Only auto-pins when nothing is set yet.
   const settings = store.settings[workspaceId] ?? (store.settings[workspaceId] = {});
-  if (!settings.activeVoiceId && rec.voiceId) settings.activeVoiceId = rec.id;
+  if (rec.voiceId) {
+    if (!settings.activeVoiceId) settings.activeVoiceId = rec.id;
+    if (!settings.activeProvider) settings.activeProvider = rec.provider ?? "elevenlabs";
+  }
   persist();
   return existing ?? rec;
 }
@@ -329,7 +333,9 @@ export function getActiveVoice(workspaceId: string): VoiceConsent | undefined {
 
 /**
  * Set (or clear) the active voice for a workspace by consent id. Pass undefined
- * to clear. Returns the resolved active voice, or undefined when cleared/unknown.
+ * to clear. Picking a specific voice also flips the active PROVIDER to that
+ * voice's vendor, so the prominent engine selector always reflects reality.
+ * Returns the resolved active voice, or undefined when cleared/unknown.
  */
 export function setActiveVoice(workspaceId: string, id: string | undefined): VoiceConsent | undefined {
   const settings = store.settings[workspaceId] ?? (store.settings[workspaceId] = {});
@@ -337,8 +343,63 @@ export function setActiveVoice(workspaceId: string, id: string | undefined): Voi
   const voice = store.consent.find((c) => c.id === id && c.workspaceId === workspaceId);
   if (!voice) return undefined; // ignore unknown id — never pin a voice that isn't there
   settings.activeVoiceId = id;
+  settings.activeProvider = voice.provider ?? "elevenlabs";
   persist();
   return voice;
+}
+
+/**
+ * Pick the active TTS engine (provider) for a workspace — the prominent choice.
+ * Re-points the pinned voice to one belonging to that provider (most recent), or
+ * clears it so the resolver falls back to that provider's most-recent/env voice.
+ * Pass undefined to clear the engine choice entirely.
+ */
+export function setActiveProvider(workspaceId: string, provider: VoiceProvider | undefined): VoiceSettings {
+  const settings = store.settings[workspaceId] ?? (store.settings[workspaceId] = {});
+  settings.activeProvider = provider;
+  if (provider) {
+    const current = settings.activeVoiceId
+      ? store.consent.find((c) => c.id === settings.activeVoiceId && c.workspaceId === workspaceId)
+      : undefined;
+    if (!current || (current.provider ?? "elevenlabs") !== provider) {
+      const forProvider = store.consent.filter(
+        (c) => c.workspaceId === workspaceId && c.voiceId && (c.provider ?? "elevenlabs") === provider,
+      );
+      settings.activeVoiceId = forProvider.length ? forProvider[forProvider.length - 1].id : undefined;
+    }
+  }
+  persist();
+  return settings;
+}
+
+/**
+ * The provider + voiceId a drop should synthesize in, honoring the workspace's
+ * chosen engine. THE single source of truth shared by the test drop, the
+ * "Listen first" preview, and live campaign sends, so they never diverge:
+ *   1. chosen active PROVIDER → its pinned voice (if it matches), else that
+ *      provider's most-recent saved voice, else the provider with its env voice;
+ *   2. no provider chosen → the pinned active voice;
+ *   3. else the most recently saved voice;
+ *   4. else empty (the env default provider + voice).
+ */
+export function activeVoiceRef(workspaceId: string): { provider?: VoiceProvider; voiceId?: string } {
+  const settings = store.settings[workspaceId] ?? {};
+  const consent = store.consent.filter((c) => c.workspaceId === workspaceId && c.voiceId);
+  const pinned = settings.activeVoiceId ? consent.find((c) => c.id === settings.activeVoiceId) : undefined;
+
+  if (settings.activeProvider) {
+    if (pinned && (pinned.provider ?? "elevenlabs") === settings.activeProvider) {
+      return { provider: settings.activeProvider, voiceId: pinned.voiceId };
+    }
+    const forProvider = consent.filter((c) => (c.provider ?? "elevenlabs") === settings.activeProvider);
+    const latest = forProvider[forProvider.length - 1];
+    return latest ? { provider: settings.activeProvider, voiceId: latest.voiceId } : { provider: settings.activeProvider };
+  }
+
+  if (pinned) return { provider: pinned.provider, voiceId: pinned.voiceId };
+  const latest = consent[consent.length - 1];
+  if (latest) return { provider: latest.provider, voiceId: latest.voiceId };
+  return {};
 }
 
 /* ---------------- script library ---------------- */

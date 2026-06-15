@@ -125,6 +125,13 @@ export interface VoiceConsent {
  * saved last". A campaign may still override with its own voiceId.
  */
 export interface VoiceSettings {
+  /**
+   * The TTS engine the operator picked — the prominent, provider-level choice.
+   * When set, every drop synthesizes on this vendor (using the voice pinned in
+   * activeVoiceId if it belongs to this provider, else the most recent saved
+   * voice for it, else the provider's env default voice).
+   */
+  activeProvider?: VoiceProvider;
   /** Consent record id of the active voice. Resolves to its provider + voiceId. */
   activeVoiceId?: string;
 }

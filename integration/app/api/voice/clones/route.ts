@@ -13,9 +13,14 @@ import { withWorkspaceCreds } from "../../../../lib/connected";
 import { cred } from "../../../../lib/providers/http";
 import {
   listConsent, upsertConsent, deleteConsent, cacheStats, getVoiceClient, getVoiceClientFor,
-  voiceProviderStatuses, verifyVoiceProvider, getVoiceSettings, setActiveVoice,
+  voiceProviderStatuses, verifyVoiceProvider, getVoiceSettings, setActiveVoice, setActiveProvider,
   type VoiceProvider,
 } from "../../../../lib/voice";
+
+/** The three TTS engines a workspace can pick between. */
+function asProvider(v: unknown): VoiceProvider | undefined {
+  return v === "elevenlabs" || v === "cartesia" || v === "hume" ? v : undefined;
+}
 
 export async function GET(req: Request) {
   const g = requireSession(req);
@@ -37,8 +42,9 @@ export async function GET(req: Request) {
   return ok({
     consent: listConsent(ws),
     cache: await cacheStats(),
-    // The voice explicitly pinned for tests AND sends (resolves to a provider +
-    // voiceId). Null when none chosen yet — the UI then falls back to last-saved.
+    // The engine + voice explicitly chosen for tests AND sends. Null when none
+    // chosen yet — the UI then falls back to the most-recently-saved voice.
+    activeProvider: getVoiceSettings(ws).activeProvider ?? null,
     activeVoiceId: getVoiceSettings(ws).activeVoiceId ?? null,
     ...status,
   });
@@ -59,13 +65,23 @@ export async function POST(req: Request) {
     return ok({ provider, ...result });
   }
 
-  // Pin which saved voice is the active engine — the one used for the test drop,
-  // the "Listen first" preview, AND live campaign sends. Pass id:null to clear.
+  // Pick the active ENGINE (provider) — the prominent choice. Every test drop,
+  // "Listen first" preview, and live send then synthesizes on this vendor.
+  if (b?.action === "set-provider") {
+    const provider = asProvider(b?.provider);
+    if (b?.provider != null && !provider) return fail("bad_provider", 422, { detail: "provider must be elevenlabs, cartesia or hume" });
+    const settings = setActiveProvider(ws, provider);
+    return ok({ activeProvider: settings.activeProvider ?? null, activeVoiceId: settings.activeVoiceId ?? null });
+  }
+
+  // Pin which saved voice is the active one — the one used for the test drop, the
+  // "Listen first" preview, AND live campaign sends (also flips the active
+  // engine to that voice's provider). Pass id:null to clear.
   if (b?.action === "set-active") {
     const id = (b?.id || "").trim() || undefined;
     const active = setActiveVoice(ws, id);
     if (id && !active) return fail("not_found", 404, { detail: "no saved voice with that id" });
-    return ok({ activeVoiceId: active?.id ?? null });
+    return ok({ activeVoiceId: active?.id ?? null, activeProvider: getVoiceSettings(ws).activeProvider ?? null });
   }
 
   // Remove a saved voice from this workspace's list. Local only — it never

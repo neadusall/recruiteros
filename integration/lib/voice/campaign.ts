@@ -33,7 +33,7 @@ import { checkWindow, resolveTimezone, type WindowCheck } from "./compliance";
 import { toE164 } from "./phone";
 import {
   getCampaign, getLeads, setLeads, updateLead, recordDrop, registerPending,
-  getPending, clearPending, listConsent, getActiveVoice,
+  getPending, clearPending, activeVoiceRef,
 } from "./store";
 
 /**
@@ -49,12 +49,7 @@ import {
  */
 function resolveVoiceRef(workspaceId: string, voiceId?: string, voiceProvider?: VoiceRef["provider"]): VoiceRef {
   if (voiceId) return { provider: voiceProvider, voiceId };
-  const active = getActiveVoice(workspaceId);
-  if (active?.voiceId) return { provider: active.provider, voiceId: active.voiceId };
-  const saved = listConsent(workspaceId).filter((v) => v.voiceId);
-  const latest = saved[saved.length - 1];
-  if (latest) return { provider: latest.provider, voiceId: latest.voiceId };
-  return {};
+  return activeVoiceRef(workspaceId);
 }
 import type { VoiceCampaign, VoiceLead, DropOutcome } from "./types";
 

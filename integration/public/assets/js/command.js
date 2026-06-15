@@ -5367,31 +5367,52 @@
         var elOk = ok("elevenlabs"), caOk = ok("cartesia"), huOk = ok("hume");
         var kinds = Object.keys(cache.byKind || {}).map(function (k) { return "<b>" + (cache.byKind[k]) + "</b> " + esc(k); }).join(" · ") || "none yet";
         var provLabel = { elevenlabs: "ElevenLabs", cartesia: "Cartesia", hume: "Hume" };
-        // The voice explicitly pinned for tests AND sends. Falls back to the most
-        // recently saved voice server-side, but we surface the chosen one loudly.
+        var provOk = { elevenlabs: elOk, cartesia: caOk, hume: huOk };
+        var PROV_IDS = ["elevenlabs", "cartesia", "hume"];
+        // The engine + voice explicitly chosen for tests AND sends. The PROVIDER
+        // is the prominent choice; the voice used is the one that resolves for it.
         var activeId = d.activeVoiceId || null;
         var consent = d.consent || [];
-        var activeVoice = consent.filter(function (c) { return c.id === activeId; })[0]
-          || (activeId ? null : consent.filter(function (c) { return c.voiceId; }).slice(-1)[0]) || null;
-        var activeBanner = activeVoice
-          ? '🎙️ <b>' + esc(provLabel[activeVoice.provider || "elevenlabs"] || activeVoice.provider || "ElevenLabs") + '</b>' +
-            ' · ' + esc(activeVoice.agentName) + (activeVoice.voiceId ? ' <span class="muted">(' + esc(activeVoice.voiceId) + ')</span>' : "")
-          : '<span class="muted">No active voice yet — add one below, it becomes active automatically.</span>';
+        var lastVoice = consent.filter(function (c) { return c.voiceId; }).slice(-1)[0] || null;
+        var pinnedVoice = consent.filter(function (c) { return c.id === activeId; })[0] || null;
+        var activeProvider = d.activeProvider || (pinnedVoice && pinnedVoice.provider) || (lastVoice && lastVoice.provider) || null;
+        // Which saved voice actually plays for a given engine (pinned if it matches,
+        // else that engine's most recent saved voice).
+        function voiceForProvider(pid) {
+          if (pinnedVoice && (pinnedVoice.provider || "elevenlabs") === pid) return pinnedVoice;
+          return consent.filter(function (c) { return c.voiceId && (c.provider || "elevenlabs") === pid; }).slice(-1)[0] || null;
+        }
+        var resolvedVoice = activeProvider ? voiceForProvider(activeProvider) : (pinnedVoice || lastVoice);
+        // Prominent segmented engine picker: ● connected, ○ key not connected yet.
+        var engineBtns = PROV_IDS.map(function (pid) {
+          var on = activeProvider === pid;
+          return '<button data-vcprov="' + pid + '" class="btn ' + (on ? "btn-primary" : "btn-ghost") + ' btn-sm" ' +
+            'style="font-weight:600' + (on ? "" : "") + '">' + esc(provLabel[pid]) +
+            ' <span title="' + (provOk[pid] ? "key connected" : "key not connected") + '" style="opacity:.85">' + (provOk[pid] ? "●" : "○") + "</span></button>";
+        }).join("");
+        var resolvedLine = activeProvider
+          ? 'Using <b>' + esc(provLabel[activeProvider]) + "</b>" +
+            (resolvedVoice && resolvedVoice.voiceId
+              ? ' · voice <b>' + esc(resolvedVoice.agentName) + '</b> <span class="muted">(' + esc(resolvedVoice.voiceId) + ")</span>"
+              : ' · <span style="color:var(--accent-amber)">no voice id for this engine yet — add one below</span>') +
+            (provOk[activeProvider] ? "" : ' · <span style="color:var(--accent-amber)">' + esc(provLabel[activeProvider]) + " key not connected (runs as a safe dry-run until you connect it in Setup)</span>")
+          : '<span class="muted">No engine chosen yet — pick one above, or add a voice below and it auto-selects.</span>';
         var voices = consent.map(function (c) {
           var pid = c.provider || "elevenlabs";
-          var isActive = c.id === activeId || (!activeId && activeVoice && c.id === activeVoice.id);
+          var isActive = resolvedVoice && c.id === resolvedVoice.id;
           var control = isActive
-            ? '<span style="margin-left:auto;color:var(--brand-2);font-weight:600">✓ Active</span>'
-            : '<button class="btn btn-ghost btn-sm" data-vcact="' + esc(c.id) + '" title="Use this voice for tests and sends" style="margin-left:auto">Make active</button>';
+            ? '<span style="margin-left:auto;color:var(--brand-2);font-weight:600">✓ In use</span>'
+            : '<button class="btn btn-ghost btn-sm" data-vcact="' + esc(c.id) + '" title="Use this voice (and its engine) for tests and sends" style="margin-left:auto">Use this</button>';
           return '<div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:6px">🎙️ <b>' + esc(c.agentName) + "</b>" +
             '<span class="muted">' + esc(provLabel[pid] || pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span>" +
             control +
             '<button class="btn btn-ghost btn-sm" data-vcdel="' + esc(c.id) + '" title="Delete this voice">🗑️</button></div>';
         }).join("") || '<p class="muted">No voices yet, add one above.</p>';
         body.innerHTML =
-          '<div class="card" style="border-color:var(--brand-2)"><h3>Active engine — used for tests &amp; sends</h3>' +
-          '<p class="muted" style="font-size:13px;margin:0 0 6px">This is the one cloned voice every test drop, “Listen first” preview, and live campaign uses (unless a campaign sets its own). Pick it once and it is defined.</p>' +
-          '<div style="font-size:14px">' + activeBanner + '</div></div>' +
+          '<div class="card" style="border-color:var(--brand-2)"><h3>🎙️ Voice engine — used for tests &amp; sends</h3>' +
+          '<p class="muted" style="font-size:13px;margin:0 0 10px">Pick which provider every test drop, “Listen first” preview, and live campaign uses (unless a campaign sets its own). Choose once and it is defined.</p>' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap">' + engineBtns + "</div>" +
+          '<div style="font-size:13px;margin-top:10px">' + resolvedLine + "</div></div>" +
           '<div class="card" style="margin-top:14px"><h3>Your voices</h3>' +
           '<p class="muted" style="font-size:13px">Paste a voice id from ElevenLabs, Cartesia or Hume and you are ready, no cloning or approval here. ' +
           'ElevenLabs: <b>' + (elOk ? "connected" : "set VOICE_CLONE_API_KEY") + '</b> · Cartesia: <b>' + (caOk ? "connected" : "set CARTESIA_API_KEY") + '</b> · Hume: <b>' + (huOk ? "connected" : "set HUME_API_KEY") + '</b>.</p>' +
@@ -5411,6 +5432,15 @@
           send("/voice/clones", "POST", payload).then(function (r) {
             if (r.ok) { toast("Voice added"); paint(); }
             else { toast("Save failed"); }
+          });
+        });
+        Array.prototype.forEach.call(body.querySelectorAll("[data-vcprov]"), function (btn) {
+          btn.addEventListener("click", function () {
+            var pid = btn.getAttribute("data-vcprov");
+            send("/voice/clones", "POST", { action: "set-provider", provider: pid }).then(function (r) {
+              if (r.ok) { toast("Voice engine set to " + pid); paint(); }
+              else { toast("Could not set the engine"); }
+            });
           });
         });
         Array.prototype.forEach.call(body.querySelectorAll("[data-vcact]"), function (btn) {
@@ -5501,13 +5531,18 @@
       api("/voice/clones").then(function (d) {
         d = d || {}; var el = $("#vtEngine"); if (!el) return;
         var consent = d.consent || [], pl = { elevenlabs: "ElevenLabs", cartesia: "Cartesia", hume: "Hume" };
-        var av = consent.filter(function (c) { return c.id === d.activeVoiceId; })[0]
-          || consent.filter(function (c) { return c.voiceId; }).slice(-1)[0] || null;
-        el.innerHTML = av
-          ? 'Voice engine: <b style="color:var(--brand-2)">' + esc(pl[av.provider || "elevenlabs"] || av.provider) + '</b> · ' + esc(av.agentName) +
-            (av.voiceId ? ' <span class="muted">(' + esc(av.voiceId) + ')</span>' : "") +
+        var pinned = consent.filter(function (c) { return c.id === d.activeVoiceId; })[0] || null;
+        var lastV = consent.filter(function (c) { return c.voiceId; }).slice(-1)[0] || null;
+        var prov = d.activeProvider || (pinned && pinned.provider) || (lastV && lastV.provider) || null;
+        var av = prov
+          ? (pinned && (pinned.provider || "elevenlabs") === prov ? pinned
+             : consent.filter(function (c) { return c.voiceId && (c.provider || "elevenlabs") === prov; }).slice(-1)[0] || null)
+          : (pinned || lastV);
+        el.innerHTML = prov
+          ? 'Voice engine: <b style="color:var(--brand-2)">' + esc(pl[prov] || prov) + '</b>' +
+            (av && av.voiceId ? ' · ' + esc(av.agentName) + ' <span class="muted">(' + esc(av.voiceId) + ')</span>' : ' <span style="color:var(--accent-amber)">· no voice id for this engine yet</span>') +
             ' <span class="muted">— change in Voice &amp; Consent</span>'
-          : 'Voice engine: <span class="muted">none set — add a voice in Voice &amp; Consent (runs as a safe dry-run until then)</span>';
+          : 'Voice engine: <span class="muted">none set — pick one in Voice &amp; Consent (runs as a safe dry-run until then)</span>';
       }).catch(function () {});
       $("#vtSaveAs").addEventListener("click", function () {
         var def = val("vtFirst") ? (val("vtFirst") + (val("vtCompany") ? " · " + val("vtCompany") : "")) : "My test";
@@ -8010,12 +8045,15 @@
     function paintReady() {
       var telOk = st.telnyx && st.telnyx.status === "green";
       // A voice only counts if a voice is on file AND its clone provider's key is
-      // verified, otherwise it would deploy into a silent dry-run. Prefer the voice
-      // actually in use (the active one); fall back to "any usable voice exists".
+      // verified, otherwise it would deploy into a silent dry-run. When an engine
+      // is explicitly chosen, judge readiness against THAT engine (its key
+      // connected + a voice that resolves for it); otherwise "any usable voice".
       var pc = st.providerConfigured || {};
-      var voiceOk = st.active
-        ? Boolean(pc[(st.active.provider || "elevenlabs")])
-        : (st.clones || []).some(function (c) { return pc[(c.provider || "elevenlabs")]; });
+      var voiceOk = st.activeProvider
+        ? (Boolean(pc[st.activeProvider]) && Boolean(st.active))
+        : st.active
+          ? Boolean(pc[(st.active.provider || "elevenlabs")])
+          : (st.clones || []).some(function (c) { return pc[(c.provider || "elevenlabs")]; });
       var ready = telOk && voiceOk;
       var b = $("#vsReady"); if (!b) return;
       var done = (telOk ? 1 : 0) + (voiceOk ? 1 : 0);
@@ -8061,18 +8099,25 @@
         var d = res[0] || {}, cd = res[1] || {};
         st.clones = d.consent || [];
         st.activeVoiceId = d.activeVoiceId || null;
+        st.activeProvider = d.activeProvider || null;
         var ints = (cd && cd.integrations) || [];
         function pstat(id) { var x = ints.filter(function (i) { return i.id === id; })[0]; return (x && x.status) || "red"; }
         var pstatus = { elevenlabs: pstat("elevenlabs"), cartesia: pstat("cartesia"), hume: pstat("hume") };
         st.providerConfigured = { elevenlabs: pstatus.elevenlabs === "green", cartesia: pstatus.cartesia === "green", hume: pstatus.hume === "green" };
         st.provConfigured = st.providerConfigured.elevenlabs || st.providerConfigured.cartesia || st.providerConfigured.hume;
 
-        // Which voice is actually used on a drop: the pinned active one, else the
-        // most recently added. usedProvider drives the "in use" chip.
-        var active = st.clones.filter(function (c) { return c.id === st.activeVoiceId; })[0]
-          || (st.clones.length ? st.clones[st.clones.length - 1] : null);
+        // The active ENGINE is the prominent choice. The voice actually used on a
+        // drop is the one that resolves for that engine: the pinned voice if it
+        // belongs to the engine, else the engine's most recent saved voice.
+        var pinned = st.clones.filter(function (c) { return c.id === st.activeVoiceId; })[0] || null;
+        var lastVoice = st.clones.length ? st.clones[st.clones.length - 1] : null;
+        var usedProvider = st.activeProvider || (pinned && pinned.provider) || (lastVoice && lastVoice.provider) || null;
+        function voiceForProvider(pid) {
+          if (pinned && (pinned.provider || "elevenlabs") === pid) return pinned;
+          return st.clones.filter(function (c) { return c.voiceId && (c.provider || "elevenlabs") === pid; }).slice(-1)[0] || null;
+        }
+        var active = usedProvider ? voiceForProvider(usedProvider) : (pinned || lastVoice);
         st.active = active;
-        var usedProvider = active ? (active.provider || "elevenlabs") : null;
 
         function provCard(p) {
           var s = pstatus[p.id], ok = s === "green", saved = s !== "red", inUse = usedProvider === p.id;
@@ -8086,8 +8131,12 @@
               '<span class="vp-dot" data-vpdot="' + p.id + '" style="background:' + dotc + '"></span>' +
               '<span class="vp-name">' + p.label + '</span>' +
               '<span class="vp-state" data-vpstate="' + p.id + '">' + stateTxt + '</span>' +
-              (inUse ? '<span class="vp-chip">in use</span>' : "") +
-              (saved ? '<button class="btn btn-ghost btn-sm" data-vptest="' + p.id + '" style="margin-left:auto;padding:3px 11px">Test</button>' : '<span style="margin-left:auto"></span>') +
+              '<span style="margin-left:auto;display:flex;gap:7px;align-items:center">' +
+                (inUse
+                  ? '<span class="vp-chip">✓ in use</span>'
+                  : '<button class="btn btn-ghost btn-sm" data-vsprov="' + p.id + '" title="Use this engine for tests and sends" style="padding:3px 11px">Use this engine</button>') +
+                (saved ? '<button class="btn btn-ghost btn-sm" data-vptest="' + p.id + '" style="padding:3px 11px">Test</button>' : "") +
+              '</span>' +
             '</div>' +
             '<div class="vp-row">' +
               '<input class="vp-key" data-vpkey="' + p.id + '" type="password" autocomplete="off" placeholder="' + (saved ? "paste a new key to replace it" : p.ph) + '">' +
@@ -8116,8 +8165,8 @@
 
         var box = $("#vsVoice"); if (!box) return;
         box.innerHTML =
-          '<div class="sx-eyebrow" style="margin:2px 0 9px">Connect a provider</div>' +
-          '<p class="muted" style="font-size:12.5px;margin:0 0 12px">Set up whichever you use — you only need one. Paste that provider\'s API key and hit <b>Save &amp; test</b>; we save it to your portal and verify it live so you know it will deploy. The voice cloning itself happens inside the provider\'s own portal.</p>' +
+          '<div class="sx-eyebrow" style="margin:2px 0 9px">Pick &amp; connect your voice engine</div>' +
+          '<p class="muted" style="font-size:12.5px;margin:0 0 12px">You only need one. Paste that provider\'s API key and hit <b>Save &amp; test</b> (verified live so you know it will deploy), then hit <b>Use this engine</b> to make it the one every test drop and live send uses. The card marked <b>✓ in use</b> is the active engine. Cloning itself happens inside the provider\'s own portal.</p>' +
           '<div class="vp-list">' + VOICE_PROVS.map(provCard).join("") + '</div>' +
           '<div class="sx-eyebrow" style="margin:20px 0 9px">Your voice</div>' +
           '<p class="muted" style="font-size:12.5px;margin:0 0 10px">Add a cloned voice id, then pick which one is used for drops with <b>Use this</b>. The voice in use must have its provider connected above.</p>' +
@@ -8194,7 +8243,18 @@
           });
         });
 
-        // Pin which saved voice is the one used on drops.
+        // Pick which ENGINE (provider) is used on drops — the prominent choice.
+        Array.prototype.forEach.call(box.querySelectorAll("[data-vsprov]"), function (btn) {
+          btn.addEventListener("click", function () {
+            var pid = btn.getAttribute("data-vsprov");
+            send("/voice/clones", "POST", { action: "set-provider", provider: pid }).then(function (r) {
+              if (r.ok) { toast("Voice engine set to " + pid); loadVoice(); }
+              else toast("Could not set the engine");
+            }).catch(function () { toast("Could not reach the server."); });
+          });
+        });
+
+        // Pin which saved voice is the one used on drops (also flips the engine).
         Array.prototype.forEach.call(box.querySelectorAll("[data-vsuse]"), function (btn) {
           btn.addEventListener("click", function () {
             var id = btn.getAttribute("data-vsuse");

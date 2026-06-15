@@ -17,7 +17,7 @@
 import { requireSession, body, ok, fail } from "../../../../lib/api";
 import { withWorkspaceCreds } from "../../../../lib/connected";
 import {
-  getCampaign, getActiveVoice, segmentScript, assembleDrop, DEFAULT_PERSONA,
+  getCampaign, activeVoiceRef, segmentScript, assembleDrop, DEFAULT_PERSONA,
   type VoiceProvider,
 } from "../../../../lib/voice";
 
@@ -48,12 +48,12 @@ export async function POST(req: Request) {
   }
   if (!scriptTemplate) return fail("missing_fields", 422, { detail: "campaignId or scriptTemplate is required" });
 
-  // Fall back to the workspace's chosen ACTIVE voice, so "Listen first" previews
-  // the exact engine that real tests and sends will use (deterministic, not the
-  // most-recently-saved voice).
+  // Fall back to the workspace's chosen ACTIVE engine/voice, so "Listen first"
+  // previews the exact provider + voice that real tests and sends will use
+  // (deterministic — same resolver the campaign send path uses).
   if (!voiceId) {
-    const active = getActiveVoice(ws);
-    if (active?.voiceId) { voiceId = active.voiceId; provider = active.provider; }
+    const active = activeVoiceRef(ws);
+    if (active.voiceId || active.provider) { voiceId = active.voiceId; provider = active.provider; }
   }
 
   // Friendly sample values so the preview sounds like a real, personalized drop.
