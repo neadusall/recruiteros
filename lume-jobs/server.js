@@ -28,9 +28,15 @@ const PASS = process.env.LUME_JOBS_PASS || 'lume-admin';
 // (changing the password then invalidates old sessions, which is fine).
 const SECRET = process.env.LUME_JOBS_SECRET || crypto.createHash('sha256').update('lume::' + PASS).digest('hex');
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
-// Optional: forward each application to email via Web3Forms (server-side).
+// Email notification of each application/inquiry. Primary path is Resend, reusing
+// the SAME RESEND_API_KEY + EMAIL_FROM the main app already has in .env.production
+// (so the sender domain is already verified). Web3Forms is an optional fallback.
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const EMAIL_FROM = process.env.EMAIL_FROM || 'Lume Search Partners <onboarding@resend.dev>';
 const WEB3FORMS_KEY = process.env.LUME_WEB3FORMS_KEY || '';
-const NOTIFY_EMAIL = process.env.LUME_NOTIFY_EMAIL || 'info@lumesp.com';
+// Who receives the lead alerts (comma-separated). Defaults to Josh + Ryan.
+const NOTIFY_EMAILS = (process.env.LUME_NOTIFY_EMAILS || 'josh@lumesp.com,ryan@lumesp.com')
+  .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
 
 /* ----------------------------------------------------------------- storage -- */
 function ensureDataDir() {
@@ -168,26 +174,60 @@ function readBody(req) {
   });
 }
 async function forwardApplication(app) {
-  if (!WEB3FORMS_KEY || typeof fetch !== 'function') return;
-  try {
-    await fetch('https://api.web3forms.com/submit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
-        access_key: WEB3FORMS_KEY,
-        subject: 'New application: ' + (app.jobTitle || 'Open role') + ' — lumesp.com',
-        to: NOTIFY_EMAIL,
-        from_name: app.name || 'Applicant',
-        replyto: app.email || '',
-        Role: app.jobTitle || '',
-        Name: app.name || '',
-        Email: app.email || '',
-        Company: app.company || '',
-        Phone: app.phone || '',
-        Message: app.message || '',
-      }),
-    });
-  } catch (_) { /* delivery is best-effort; the record is already stored */ }
+  if (typeof fetch !== 'function') return;
+  const subject = 'New application: ' + (app.jobTitle || 'Open role') + ' — lumesp.com';
+  const lines = [
+    'Role: ' + (app.jobTitle || '—'),
+    'Name: ' + (app.name || '—'),
+    'Email: ' + (app.email || '—'),
+    'Phone: ' + (app.phone || '—'),
+    'Company: ' + (app.company || '—'),
+    '',
+    (app.message || '(no message)'),
+    '',
+    'Submitted via lumesp.com' + (app.source ? ' (' + app.source + ')' : ''),
+  ].join('\n');
+
+  // Primary: Resend to Josh + Ryan, reply-to the applicant so they can answer directly.
+  if (RESEND_API_KEY && NOTIFY_EMAILS.length) {
+    try {
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + RESEND_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: EMAIL_FROM,
+          to: NOTIFY_EMAILS,
+          reply_to: app.email || undefined,
+          subject: subject,
+          text: lines,
+          html: lines.split('\n').map(function (l) {
+            return l ? l.replace(/&/g, '&amp;').replace(/</g, '&lt;') : '';
+          }).join('<br>'),
+        }),
+      });
+      if (res.ok) return;
+      console.error('[email] Resend failed ' + res.status + ': ' + (await res.text().catch(function () { return ''; })));
+    } catch (e) { console.error('[email] Resend error: ' + (e && e.message)); }
+  }
+
+  // Fallback: Web3Forms (only if configured).
+  if (WEB3FORMS_KEY) {
+    try {
+      await fetch('https://api.web3forms.com/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          access_key: WEB3FORMS_KEY,
+          subject: subject,
+          to: NOTIFY_EMAILS.join(','),
+          from_name: app.name || 'Applicant',
+          replyto: app.email || '',
+          Role: app.jobTitle || '', Name: app.name || '', Email: app.email || '',
+          Company: app.company || '', Phone: app.phone || '', Message: app.message || '',
+        }),
+      });
+    } catch (_) { /* best-effort; the record is already stored in the portal */ }
+  }
 }
 
 /* -------------------------------------------------------------------- routes -- */
@@ -245,6 +285,7 @@ const server = http.createServer(async (req, res) => {
         company: String(b.company || '').trim().slice(0, 200),
         phone: String(b.phone || '').trim().slice(0, 80),
         message: String(b.message || '').trim().slice(0, 5000),
+        source: String(b.source || '').trim().slice(0, 200),
         createdAt: Date.now(),
       };
       const apps = loadApps();
