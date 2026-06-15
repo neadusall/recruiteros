@@ -212,6 +212,11 @@ a.member.is-link:hover .member__li { transform: scale(1.08); }
 .consent__text { font-size: 12.5px; line-height: 1.55; color: var(--muted); text-align: left; }
 .consent__text strong { color: var(--navy); font-weight: 600; }
 .consent__text a { color: var(--teal); text-decoration: underline; }
+/* SMS program disclosures shown below the opt-in form, in smaller print. */
+.sms-program { margin-top: 40px; padding-top: 28px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.sms-program h2 { font-size: 16px; color: var(--navy); }
+.sms-program p, .sms-program li { font-size: 13px; line-height: 1.6; }
+.sms-program ul { margin: 10px 0; }
 
 /* ---- Footer ---- */
 .site-footer { background: var(--navy); color: #c7d2dc; padding: 64px 0 32px; }
