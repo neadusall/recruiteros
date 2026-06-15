@@ -5366,14 +5366,33 @@
         function ok(id) { var p = provs.filter(function (x) { return x.id === id; })[0]; return !!(p && p.configured); }
         var elOk = ok("elevenlabs"), caOk = ok("cartesia"), huOk = ok("hume");
         var kinds = Object.keys(cache.byKind || {}).map(function (k) { return "<b>" + (cache.byKind[k]) + "</b> " + esc(k); }).join(" · ") || "none yet";
-        var voices = (d.consent || []).map(function (c) {
+        var provLabel = { elevenlabs: "ElevenLabs", cartesia: "Cartesia", hume: "Hume" };
+        // The voice explicitly pinned for tests AND sends. Falls back to the most
+        // recently saved voice server-side, but we surface the chosen one loudly.
+        var activeId = d.activeVoiceId || null;
+        var consent = d.consent || [];
+        var activeVoice = consent.filter(function (c) { return c.id === activeId; })[0]
+          || (activeId ? null : consent.filter(function (c) { return c.voiceId; }).slice(-1)[0]) || null;
+        var activeBanner = activeVoice
+          ? '🎙️ <b>' + esc(provLabel[activeVoice.provider || "elevenlabs"] || activeVoice.provider || "ElevenLabs") + '</b>' +
+            ' · ' + esc(activeVoice.agentName) + (activeVoice.voiceId ? ' <span class="muted">(' + esc(activeVoice.voiceId) + ')</span>' : "")
+          : '<span class="muted">No active voice yet — add one below, it becomes active automatically.</span>';
+        var voices = consent.map(function (c) {
           var pid = c.provider || "elevenlabs";
+          var isActive = c.id === activeId || (!activeId && activeVoice && c.id === activeVoice.id);
+          var control = isActive
+            ? '<span style="margin-left:auto;color:var(--brand-2);font-weight:600">✓ Active</span>'
+            : '<button class="btn btn-ghost btn-sm" data-vcact="' + esc(c.id) + '" title="Use this voice for tests and sends" style="margin-left:auto">Make active</button>';
           return '<div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:6px">🎙️ <b>' + esc(c.agentName) + "</b>" +
-            '<span class="muted">' + esc(pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span>" +
-            '<button class="btn btn-ghost btn-sm" data-vcdel="' + esc(c.id) + '" title="Delete this voice" style="margin-left:auto">🗑️</button></div>';
+            '<span class="muted">' + esc(provLabel[pid] || pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span>" +
+            control +
+            '<button class="btn btn-ghost btn-sm" data-vcdel="' + esc(c.id) + '" title="Delete this voice">🗑️</button></div>';
         }).join("") || '<p class="muted">No voices yet, add one above.</p>';
         body.innerHTML =
-          '<div class="card"><h3>Your voices</h3>' +
+          '<div class="card" style="border-color:var(--brand-2)"><h3>Active engine — used for tests &amp; sends</h3>' +
+          '<p class="muted" style="font-size:13px;margin:0 0 6px">This is the one cloned voice every test drop, “Listen first” preview, and live campaign uses (unless a campaign sets its own). Pick it once and it is defined.</p>' +
+          '<div style="font-size:14px">' + activeBanner + '</div></div>' +
+          '<div class="card" style="margin-top:14px"><h3>Your voices</h3>' +
           '<p class="muted" style="font-size:13px">Paste a voice id from ElevenLabs, Cartesia or Hume and you are ready, no cloning or approval here. ' +
           'ElevenLabs: <b>' + (elOk ? "connected" : "set VOICE_CLONE_API_KEY") + '</b> · Cartesia: <b>' + (caOk ? "connected" : "set CARTESIA_API_KEY") + '</b> · Hume: <b>' + (huOk ? "connected" : "set HUME_API_KEY") + '</b>.</p>' +
           '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
@@ -5392,6 +5411,15 @@
           send("/voice/clones", "POST", payload).then(function (r) {
             if (r.ok) { toast("Voice added"); paint(); }
             else { toast("Save failed"); }
+          });
+        });
+        Array.prototype.forEach.call(body.querySelectorAll("[data-vcact]"), function (btn) {
+          btn.addEventListener("click", function () {
+            var id = btn.getAttribute("data-vcact");
+            send("/voice/clones", "POST", { action: "set-active", id: id }).then(function (r) {
+              if (r.ok) { toast("Active voice set"); paint(); }
+              else { toast("Could not set active voice"); }
+            });
           });
         });
         Array.prototype.forEach.call(body.querySelectorAll("[data-vcdel]"), function (btn) {
@@ -5435,6 +5463,7 @@
       body.innerHTML =
         '<div class="card"><h3>Test a single drop</h3>' +
         '<p class="muted" style="font-size:13px">Fire one personalized drop to a number YOU control, so you can hear the path end to end (render → assemble cloned voicemail → dial with AMD). The time window is skipped; everything else matches production.</p>' +
+        '<div id="vtEngine" class="muted" style="font-size:12px;margin:-4px 0 4px">Voice engine: <span class="muted">…</span></div>' +
 
         grpLabel("Saved tests") +
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
@@ -5466,6 +5495,20 @@
         '<button class="btn btn-sm" id="vtListen">🔊 Listen first</button></div>' +
         '<div id="vtResult" style="margin-top:12px"></div></div>';
       wireChips(body);
+      // Show which cloned voice this test will actually use (the active engine),
+      // so "Send test drop" / "Listen first" are never ambiguous. Links to the
+      // Voice & Consent tab where it's chosen.
+      api("/voice/clones").then(function (d) {
+        d = d || {}; var el = $("#vtEngine"); if (!el) return;
+        var consent = d.consent || [], pl = { elevenlabs: "ElevenLabs", cartesia: "Cartesia", hume: "Hume" };
+        var av = consent.filter(function (c) { return c.id === d.activeVoiceId; })[0]
+          || consent.filter(function (c) { return c.voiceId; }).slice(-1)[0] || null;
+        el.innerHTML = av
+          ? 'Voice engine: <b style="color:var(--brand-2)">' + esc(pl[av.provider || "elevenlabs"] || av.provider) + '</b> · ' + esc(av.agentName) +
+            (av.voiceId ? ' <span class="muted">(' + esc(av.voiceId) + ')</span>' : "") +
+            ' <span class="muted">— change in Voice &amp; Consent</span>'
+          : 'Voice engine: <span class="muted">none set — add a voice in Voice &amp; Consent (runs as a safe dry-run until then)</span>';
+      }).catch(function () {});
       $("#vtSaveAs").addEventListener("click", function () {
         var def = val("vtFirst") ? (val("vtFirst") + (val("vtCompany") ? " · " + val("vtCompany") : "")) : "My test";
         var name = (window.prompt("Name this test", def) || "").trim();

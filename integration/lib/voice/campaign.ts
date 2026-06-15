@@ -33,17 +33,24 @@ import { checkWindow, resolveTimezone, type WindowCheck } from "./compliance";
 import { toE164 } from "./phone";
 import {
   getCampaign, getLeads, setLeads, updateLead, recordDrop, registerPending,
-  getPending, clearPending, listConsent,
+  getPending, clearPending, listConsent, getActiveVoice,
 } from "./store";
 
 /**
- * Pick which voice (provider + id) to synthesize a campaign/test in: an explicit
- * voiceId wins; otherwise fall back to the workspace's most recently saved voice
- * (bring-your-own ElevenLabs/Cartesia id); otherwise empty, so the provider's
- * env default voice is used. Provider routing happens inside assembleDrop.
+ * Pick which voice (provider + id) to synthesize a campaign/test in, in priority:
+ *   1. an explicit voiceId (a campaign/test override) always wins;
+ *   2. the workspace's chosen ACTIVE voice — the engine the operator pinned in
+ *      setup, so tests and live sends are deterministic, not "whatever was saved
+ *      last";
+ *   3. the most recently saved voice (back-compat for workspaces that never set
+ *      an active one);
+ *   4. empty, so the provider's env default voice is used.
+ * Provider routing happens inside assembleDrop.
  */
 function resolveVoiceRef(workspaceId: string, voiceId?: string, voiceProvider?: VoiceRef["provider"]): VoiceRef {
   if (voiceId) return { provider: voiceProvider, voiceId };
+  const active = getActiveVoice(workspaceId);
+  if (active?.voiceId) return { provider: active.provider, voiceId: active.voiceId };
   const saved = listConsent(workspaceId).filter((v) => v.voiceId);
   const latest = saved[saved.length - 1];
   if (latest) return { provider: latest.provider, voiceId: latest.voiceId };

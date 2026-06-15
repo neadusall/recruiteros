@@ -118,6 +118,18 @@ export interface VoiceConsent {
 }
 
 /**
+ * Per-workspace Voice Drops settings — the operator's explicit, deterministic
+ * choice of which cloned voice (and therefore which TTS engine) is used. Pins a
+ * specific saved consent voice so BOTH the test drop / "Listen first" preview AND
+ * live campaign sends synthesize in the same engine — never "whichever voice was
+ * saved last". A campaign may still override with its own voiceId.
+ */
+export interface VoiceSettings {
+  /** Consent record id of the active voice. Resolves to its provider + voiceId. */
+  activeVoiceId?: string;
+}
+
+/**
  * A reusable, templated voicemail script. The body uses {first_name}, {role},
  * and {company} merge slots, exactly like an email merge. Surfaces in the
  * Campaign Sequences Library as a reusable voice asset.

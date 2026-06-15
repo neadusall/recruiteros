@@ -143,10 +143,12 @@
   function gauss() { return (Math.random() + Math.random() + Math.random()) / 3 - 0.5; }
 
   function generatePool() {
+    // Prefer the REAL harvested database (public ATS boards) when available
+    // and we're in the business-development motion it covers.
+    if (REAL.db && state.motion === "business_dev") return poolFromReal();
     usedCo.clear(); usedPp.clear();
     const pool = [];
     if (state.mode === "company" && state.companies.size) {
-      // a handful of signals per named company
       [...state.companies].forEach(co => {
         const ind = "Selected";
         const n = rint(4, 9);
@@ -156,6 +158,32 @@
       const inds = state.industries.size ? [...state.industries] : ["SaaS", "Fintech", "Healthcare", "AI & Machine Learning"];
       inds.forEach(ind => { const n = PER_INDUSTRY + rint(-150, 350); for (let i = 0; i < n; i++) pool.push(genEntity(ind, state.motion)); });
     }
+    return pool;
+  }
+
+  /* ---- REAL data: expand harvested companies into per-role prospects ---- */
+  const REAL = { db: null };
+  function poolFromReal() {
+    let companies = REAL.db.signals.slice();
+    if (state.mode === "company" && state.companies.size) {
+      const want = [...state.companies].map(c => c.toLowerCase());
+      companies = companies.filter(s => want.some(w => s.company.toLowerCase().includes(w)));
+    } else if (state.industries.size) {
+      companies = companies.filter(s => state.industries.has(s.industry));
+    }
+    const pool = [];
+    companies.forEach(s => {
+      const roles = (s.sampleRoles && s.sampleRoles.length) ? s.sampleRoles : [{ title: "Open roles", function: "other", location: (s.locations || [])[0] }];
+      roles.forEach(r => {
+        pool.push({
+          type: s.type, motion: "business_dev", real: true, ats: s.ats,
+          evidence: { roleTitle: r.title, location: r.location || (s.locations || [])[0] || "Multiple", function: r.function, applyUrl: r.url, rolesPosted: s.rolesOpen },
+          person: { name: s.company, title: r.title },     // contact (hiring manager) revealed on enrichment
+          company: { name: s.company, industry: s.industry, location: r.location },
+          score: { value: s.score },
+        });
+      });
+    });
     return pool;
   }
 
@@ -312,7 +340,8 @@
       const intel = classifyTitle(s.evidence.roleTitle || s.person.title || "");
       return { name: s.person.name, company: s.company.name, title: s.person.title, function: intel.function,
         seniority: intel.seniority, industry: s.company.industry, location: s.evidence.location,
-        score: s.score.value, reason: reasonFor(s), type: s.type, needs: { email: true, phone: state.wantPhone } };
+        score: s.score.value, reason: reasonFor(s), type: s.type, real: !!s.real, ats: s.ats,
+        applyUrl: s.evidence.applyUrl, needs: { email: true, phone: state.wantPhone } };
     }).sort((a, b) => b.score - a.score);
 
     const segCount = {};
@@ -359,14 +388,19 @@
     d.targets.slice(0, RENDER_CAP).forEach(t => {
       const sc = t.score >= 85 ? "hi" : t.score >= 75 ? "mid" : "lo";
       const card = el("div", "target");
-      card.innerHTML = `<div class="top"><span class="nm">${t.name}</span>
+      const line = t.real
+        ? `${cap(t.reason)}. Open role: <b>${t.title}</b> (${t.function})${t.location ? " · " + t.location : ""}. Enrich to reveal the hiring manager.`
+        : `${cap(t.reason)}, reach <b>${t.name}</b>, ${t.title} at ${t.company}.`;
+      card.innerHTML = `<div class="top"><span class="nm">${t.company}</span>
         <span class="badge">${t.title}</span><span class="badge">${(t.industry || "").toString()}</span>
+        ${t.real ? `<span class="badge" style="color:#38e0a6;border:1px solid rgba(56,224,166,.4)">● live${t.ats ? " · " + t.ats : ""}</span>` : ""}
         <span class="score ${sc}">${t.score}</span></div>
-        <div class="reason">${cap(t.reason)}, reach <b>${t.name}</b>, ${t.title} at ${t.company}.</div>
+        <div class="reason">${line}</div>
         <div class="badges"><span class="badge">${t.type}</span><span class="badge">${t.function}</span>
           <span class="badge">${t.location || ""}</span>
           ${t.needs.email ? '<span class="badge need">needs email</span>' : ""}
-          ${t.needs.phone ? '<span class="badge need">needs phone</span>' : ""}</div>`;
+          ${t.needs.phone ? '<span class="badge need">needs phone</span>' : ""}
+          ${t.real && t.applyUrl ? `<a class="badge" href="${t.applyUrl}" target="_blank" rel="noopener" style="text-decoration:none">view role ↗</a>` : ""}</div>`;
       list.appendChild(card);
     });
   }
@@ -460,11 +494,36 @@
   function round(n) { return Math.round(n * 100) / 100; }
   function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
-  /* ---- init: auto-run a default search so the page opens full ---- */
+  /* ---- live-data banner ---- */
+  function showLiveBanner() {
+    if (!REAL.db) return;
+    const hero = document.querySelector(".search-hero");
+    if (!hero || document.getElementById("liveBanner")) return;
+    const b = el("div", null,
+      `<div id="liveBanner" style="display:flex;align-items:center;gap:8px;font-size:13px;color:#38e0a6;font-weight:600;margin:-4px 0 12px">
+         <span style="width:8px;height:8px;border-radius:50%;background:#38e0a6;box-shadow:0 0 8px #38e0a6"></span>
+         Live database: <b>${REAL.db.companies.toLocaleString()}</b> companies hiring,
+         <b>${REAL.db.totalOpenRoles.toLocaleString()}</b> open roles, pulled from public job boards.
+       </div>`);
+    hero.parentNode.insertBefore(b, hero.nextSibling);
+  }
+
+  /* ---- init: load the REAL harvested database, then open full ---- */
   renderSignalPicker();
   renderChips($("#functionChips"), FUNCS, state.functions);
   wireToggle("#dmOnly", "dmOnly");
   wireToggle("#wantPhone", "wantPhone");
   renderSearchChips();
-  runSearch();      // opens with hundreds of prospects across popular industries
+
+  fetch("assets/data/hiring-signals.json")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((db) => {
+      if (db && db.signals && db.signals.length) {
+        REAL.db = db;
+        // map real industry tags onto the search list so they're discoverable
+        showLiveBanner();
+      }
+    })
+    .catch(() => { /* file:// or offline → synthetic generator is the fallback */ })
+    .finally(() => runSearch());  // opens full either way (real DB if loaded, else samples)
 })();

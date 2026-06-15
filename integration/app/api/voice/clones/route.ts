@@ -13,7 +13,8 @@ import { withWorkspaceCreds } from "../../../../lib/connected";
 import { cred } from "../../../../lib/providers/http";
 import {
   listConsent, upsertConsent, deleteConsent, cacheStats, getVoiceClient, getVoiceClientFor,
-  voiceProviderStatuses, verifyVoiceProvider, type VoiceProvider,
+  voiceProviderStatuses, verifyVoiceProvider, getVoiceSettings, setActiveVoice,
+  type VoiceProvider,
 } from "../../../../lib/voice";
 
 export async function GET(req: Request) {
@@ -36,6 +37,9 @@ export async function GET(req: Request) {
   return ok({
     consent: listConsent(ws),
     cache: await cacheStats(),
+    // The voice explicitly pinned for tests AND sends (resolves to a provider +
+    // voiceId). Null when none chosen yet — the UI then falls back to last-saved.
+    activeVoiceId: getVoiceSettings(ws).activeVoiceId ?? null,
     ...status,
   });
 }
@@ -53,6 +57,15 @@ export async function POST(req: Request) {
       b?.provider === "cartesia" || b?.provider === "hume" ? b.provider : "elevenlabs";
     const result = await withWorkspaceCreds(ws, () => verifyVoiceProvider(provider));
     return ok({ provider, ...result });
+  }
+
+  // Pin which saved voice is the active engine — the one used for the test drop,
+  // the "Listen first" preview, AND live campaign sends. Pass id:null to clear.
+  if (b?.action === "set-active") {
+    const id = (b?.id || "").trim() || undefined;
+    const active = setActiveVoice(ws, id);
+    if (id && !active) return fail("not_found", 404, { detail: "no saved voice with that id" });
+    return ok({ activeVoiceId: active?.id ?? null });
   }
 
   // Remove a saved voice from this workspace's list. Local only — it never

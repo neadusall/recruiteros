@@ -17,7 +17,7 @@ import { toE164 } from "./phone";
 import type { Motion } from "../core/types";
 import {
   type VoiceCampaign, type VoiceCampaignInput, type VoiceLead,
-  type VoiceConsent, type VoiceScript, type DropOutcome,
+  type VoiceConsent, type VoiceScript, type DropOutcome, type VoiceSettings,
   DEFAULT_PERSONA, DEFAULT_WINDOW,
 } from "./types";
 import { DEFAULT_VOICE_SCRIPTS } from "./seedScripts";
@@ -64,6 +64,8 @@ const store = {
   scripts: [] as VoiceScript[],
   drops: [] as DropLog[],
   pending: {} as Record<string, PendingDrop>,
+  /** Per-workspace settings (the chosen active voice/engine). */
+  settings: {} as Record<string, VoiceSettings>,
   /** Workspaces whose default scripts have been seeded (so a deleted seed
    *  is not resurrected on the next read). */
   seeded: {} as Record<string, boolean>,
@@ -82,6 +84,7 @@ function hydrate(s: any) {
   store.scripts = s.scripts ?? [];
   store.drops = s.drops ?? [];
   store.pending = s.pending ?? {};
+  store.settings = s.settings ?? {};
   store.seeded = s.seeded ?? {};
   // One-time backfill: any lead persisted before E.164 normalization existed
   // (stored as "479-274-0716" etc.) is coerced in place so it dials cleanly.
@@ -281,6 +284,11 @@ export function upsertConsent(workspaceId: string, input: Partial<VoiceConsent> 
   };
   if (existing) Object.assign(existing, rec);
   else store.consent.push(rec);
+  // Pin the very first voice a workspace adds as its active engine, so there is
+  // always a defined voice for tests/sends the moment one exists (the operator
+  // can switch it later). Only auto-pins when nothing is active yet.
+  const settings = store.settings[workspaceId] ?? (store.settings[workspaceId] = {});
+  if (!settings.activeVoiceId && rec.voiceId) settings.activeVoiceId = rec.id;
   persist();
   return existing ?? rec;
 }
@@ -290,8 +298,47 @@ export function deleteConsent(workspaceId: string, id: string): boolean {
   const idx = store.consent.findIndex((c) => c.id === id && c.workspaceId === workspaceId);
   if (idx === -1) return false;
   store.consent.splice(idx, 1);
+  // If the deleted voice was the active engine, re-point to another saved voice
+  // (most recent) so "active" never dangles at a voice that no longer exists.
+  const settings = store.settings[workspaceId];
+  if (settings && settings.activeVoiceId === id) {
+    const remaining = store.consent.filter((c) => c.workspaceId === workspaceId && c.voiceId);
+    settings.activeVoiceId = remaining.length ? remaining[remaining.length - 1].id : undefined;
+  }
   persist();
   return true;
+}
+
+/* ---------------- per-workspace voice settings (active engine) ---------------- */
+
+/** The workspace's Voice Drops settings (chosen active voice/engine). */
+export function getVoiceSettings(workspaceId: string): VoiceSettings {
+  return store.settings[workspaceId] ?? {};
+}
+
+/**
+ * The active voice for a workspace — the one explicitly chosen for tests AND
+ * sends. Resolves the stored consent id to its record; returns undefined if none
+ * is set or the referenced voice was removed.
+ */
+export function getActiveVoice(workspaceId: string): VoiceConsent | undefined {
+  const id = store.settings[workspaceId]?.activeVoiceId;
+  if (!id) return undefined;
+  return store.consent.find((c) => c.id === id && c.workspaceId === workspaceId);
+}
+
+/**
+ * Set (or clear) the active voice for a workspace by consent id. Pass undefined
+ * to clear. Returns the resolved active voice, or undefined when cleared/unknown.
+ */
+export function setActiveVoice(workspaceId: string, id: string | undefined): VoiceConsent | undefined {
+  const settings = store.settings[workspaceId] ?? (store.settings[workspaceId] = {});
+  if (!id) { settings.activeVoiceId = undefined; persist(); return undefined; }
+  const voice = store.consent.find((c) => c.id === id && c.workspaceId === workspaceId);
+  if (!voice) return undefined; // ignore unknown id — never pin a voice that isn't there
+  settings.activeVoiceId = id;
+  persist();
+  return voice;
 }
 
 /* ---------------- script library ---------------- */
