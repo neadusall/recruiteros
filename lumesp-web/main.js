@@ -41,6 +41,12 @@ window.LumeForms = (function () {
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var fd = new FormData(form);
+      // SMS consent (10DLC): capture whether the box was ticked plus an audit
+      // trail — the exact disclosure language shown and the page URL — so we
+      // can prove express written consent for each opted-in number.
+      var consentBox = form.querySelector('input[name="smsConsent"]');
+      var smsConsent = !!(consentBox && consentBox.checked);
+      var consentEl = form.querySelector('.consent__text');
       var payload = {
         jobId: form.dataset.jobId || '',
         jobTitle: deriveTitle(form),
@@ -49,6 +55,9 @@ window.LumeForms = (function () {
         company: fd.get('company') || '',
         phone: fd.get('phone') || '',
         message: fd.get('message') || '',
+        smsConsent: smsConsent,
+        consentText: smsConsent && consentEl ? (consentEl.textContent || '').replace(/\s+/g, ' ').trim() : '',
+        consentUrl: location.href,
         source: location.pathname
       };
       if (status) { status.className = 'form__status'; status.textContent = ''; }

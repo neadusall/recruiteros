@@ -334,6 +334,7 @@
         if (a.email) contact.push('<a href="mailto:' + esc(a.email) + '">' + esc(a.email) + '</a>');
         if (a.phone) contact.push('<a href="tel:' + esc(a.phone) + '">' + esc(a.phone) + '</a>');
         if (a.company) contact.push(esc(a.company));
+        if (a.smsConsent) contact.push('<span style="display:inline-block;background:#e6f4f1;color:#0a7f72;font-weight:600;font-size:11px;padding:2px 8px;border-radius:999px" title="' + esc(a.consentText || 'Opted in to SMS') + '">✓ SMS opt-in</span>');
         return '<div class="app">' +
           '<div class="app__top">' +
             '<div><span class="app__who">' + esc(a.name || 'Applicant') + '</span>' +

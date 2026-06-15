@@ -205,6 +205,14 @@ a.member.is-link:hover .member__li { transform: scale(1.08); }
 .form__status.ok { display: block; background: var(--bg-tint); color: var(--teal-600); }
 .form__status.err { display: block; background: #FDECEC; color: #B23B3B; }
 
+/* ---- SMS / 10DLC consent ---- */
+.consent { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start;
+  background: var(--bg-tint); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 14px 16px; }
+.consent input[type="checkbox"] { width: 18px; height: 18px; margin: 2px 0 0; flex: none; accent-color: var(--teal); cursor: pointer; }
+.consent__text { font-size: 12.5px; line-height: 1.55; color: var(--muted); text-align: left; }
+.consent__text strong { color: var(--navy); font-weight: 600; }
+.consent__text a { color: var(--teal); text-decoration: underline; }
+
 /* ---- Footer ---- */
 .site-footer { background: var(--navy); color: #c7d2dc; padding: 64px 0 32px; }
 .site-footer a { color: #c7d2dc; }
