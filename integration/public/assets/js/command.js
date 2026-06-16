@@ -4256,6 +4256,16 @@
       '.jd-cost{display:inline-block;margin-left:10px;padding:4px 12px;border-radius:999px;background:linear-gradient(135deg,rgba(124,92,255,.16),rgba(80,200,255,.12));border:1px solid rgba(124,92,255,.4);color:var(--text);font-size:12.5px;font-weight:600;vertical-align:middle;transition:transform .12s ease;white-space:nowrap}' +
       '.jd-cost.bump{transform:scale(1.06)}' +
       '.jd-cost b{color:var(--brand-2);font-variant-numeric:tabular-nums}' +
+      '.jd-prog-head{display:flex;align-items:center;gap:9px;margin-bottom:9px;font-size:14px}' +
+      '.jd-prog-head .jd-prog-pct{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:700;color:var(--brand-2)}' +
+      '.jd-prog-dot{width:10px;height:10px;border-radius:50%;background:var(--brand-2);animation:jdpulse 1.3s infinite}' +
+      '@keyframes jdpulse{0%{box-shadow:0 0 0 0 rgba(124,92,255,.55)}70%{box-shadow:0 0 0 9px rgba(124,92,255,0)}100%{box-shadow:0 0 0 0 rgba(124,92,255,0)}}' +
+      '.jd-prog-track{height:11px;border-radius:999px;background:var(--bg-soft);border:1px solid var(--border);overflow:hidden}' +
+      '.jd-prog-fill{height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--brand),var(--brand-2));background-size:200% 100%;animation:jdflow 1.1s linear infinite;transition:width .3s ease}' +
+      '@keyframes jdflow{0%{background-position:0 0}100%{background-position:-200% 0}}' +
+      '.jd-prog-meta{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-size:12px}' +
+      '.jd-prog.done .jd-prog-dot{animation:none;background:#33d69f}' +
+      '.jd-prog.done .jd-prog-fill{animation:none;background:#33d69f}' +
       '#jdName,#jdText{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 13px}' +
       '#jdName{margin-bottom:10px;font-weight:600}#jdText{line-height:1.55;resize:vertical;min-height:170px}' +
       '#jdName::placeholder,#jdText::placeholder{color:var(--text-dim)}' +
@@ -4286,6 +4296,7 @@
         '</div>' +
         '<div id="jdMsg" class="muted" style="margin-top:8px"></div>' +
       '</div>' +
+      '<div class="card jd-prog" id="jdProgress" style="display:none"></div>' +
       '<div class="card" id="jdQueueCard" style="display:none"><h3>Queue <span class="muted" id="jdQueueCount"></span></h3>' +
         '<p class="muted" style="margin-top:-4px">Each queued JD runs in turn — search → rank → save — using the Max / min-fit set above. Keep this tab open while the queue runs; each finished list lands below with a downloadable CSV of LinkedIn URLs.</p>' +
         '<div id="jdQueueList"></div>' +
@@ -4297,8 +4308,8 @@
       '</div>' +
       '<div id="jdPlan"></div>' +
       '<div id="jdResults"></div>' +
-      '<div class="card"><h3>Saved sourcing lists <span class="jd-cap" style="float:right;font-weight:400">🔬 Deep-vet top <input id="jdVetTop" type="number" min="1" max="200" value="25"><span id="jdVetCost" class="jd-cost"></span></span></h3>' +
-        '<p class="muted" style="margin-top:-4px">Deep-vet reads each candidate\'s full work history against the JD and writes a verified score (0–100) + verdict — runs only on the top N by fit score that you set above. Costs a Claude call per candidate; takes a moment.</p>' +
+      '<div class="card"><h3>Saved sourcing lists <span class="jd-cap" style="float:right;font-weight:400">🔬 Deep-vet top <input id="jdVetTop" type="number" min="1" max="200" value="25"> · profile $<input id="jdProfUsd" type="number" min="0" step="0.001" value="0.01" title="RapidAPI per-profile-lookup cost (set to your Realtime LinkedIn Data Scraper rate)"> · plan $<input id="jdPlanUsd" type="number" min="0" step="1" value="0" title="Your monthly RapidAPI plan price">/mo<span id="jdVetCost" class="jd-cost"></span></span></h3>' +
+        '<p class="muted" style="margin-top:-4px">Deep-vet reads each candidate\'s full work history against the JD and writes a verified score (0–100) + verdict — runs only on the top N by fit score that you set above. Cost = one Claude Sonnet 4.6 call + one RapidAPI profile lookup per candidate (provider: Realtime LinkedIn Data Scraper). Set the profile $/lookup and your monthly plan $ to your actual tier — I couldn\'t read the live pricing page.</p>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
     function msg(t) { var m = $("#jdMsg"); if (m) m.textContent = t || ""; }
@@ -4395,22 +4406,69 @@
       toast("Downloaded " + rows.length + " URLs" + (hasVet ? " (with deep-vet columns)" : "") + (dropped ? (" · " + dropped + " rows had no URL") : ""));
     }
 
-    /* ---- Live deep-vet cost estimate (updates as the top-N toggle moves) ----
-       Per candidate: one Claude Sonnet 4.6 call (~2.5k input + ~0.45k output) plus
-       one RapidAPI profile lookup. Sonnet rates: $3 / 1M input, $15 / 1M output.
-       Profile lookup varies by listing (~$0.002–$0.02 / request). */
-    var VET = { inTok: 2500, outTok: 450, inUsd: 3 / 1e6, outUsd: 15 / 1e6, profLo: 0.002, profHi: 0.02 };
+    /* ---- Live deep-vet cost estimate (updates as the toggle / rates move) ----
+       Per candidate: one Claude Sonnet 4.6 call (~2.5k input + ~0.45k output, fixed)
+       plus one RapidAPI profile lookup (rate you set — provider-specific). Plus a flat
+       monthly RapidAPI plan cost. Sonnet rates: $3 / 1M input, $15 / 1M output. */
+    var VET = { inTok: 2500, outTok: 450, inUsd: 3 / 1e6, outUsd: 15 / 1e6 };
     function vetLlmPer() { return VET.inTok * VET.inUsd + VET.outTok * VET.outUsd; } // ≈ $0.0143
+    function numVal(id, dflt) { var e = $(id); var v = e ? parseFloat(e.value) : NaN; return isFinite(v) && v >= 0 ? v : dflt; }
     function updateVetCost() {
       var el = $("#jdVetCost"), topEl = $("#jdVetTop"); if (!el || !topEl) return;
       var n = Math.max(0, parseInt(topEl.value, 10) || 0);
+      var prof = numVal("#jdProfUsd", 0.01), plan = numVal("#jdPlanUsd", 0);
       if (!n) { el.textContent = ""; return; }
-      var per = vetLlmPer();
-      var lo = n * (per + VET.profLo), hi = n * (per + VET.profHi);
-      el.innerHTML = '≈ <b>$' + lo.toFixed(2) + '–$' + hi.toFixed(2) + '</b> ' +
-        '<span class="muted" style="font-weight:400">for ' + n + ' · Sonnet vet + profile lookup</span>';
+      var run = n * (vetLlmPer() + prof);
+      el.innerHTML = '≈ <b>$' + run.toFixed(2) + '</b> <span class="muted" style="font-weight:400">per run of ' + n +
+        ' (Sonnet $' + (n * vetLlmPer()).toFixed(2) + ' + ' + n + ' lookups $' + (n * prof).toFixed(2) + ')</span>' +
+        (plan > 0 ? ' <span class="muted">+</span> <b>$' + plan.toFixed(0) + '</b><span class="muted" style="font-weight:400">/mo plan</span>' : '');
       el.classList.add("bump"); setTimeout(function () { el.classList.remove("bump"); }, 130);
     }
+
+    /* ---- Real-time progress bar with live ETA ----
+       Discovery is one request (no server-side progress events), so the bar eases
+       toward 95% over an ETA estimated from the cap, then snaps to 100% on completion.
+       Honest about being an estimate; the phase labels track the real pipeline steps. */
+    var prog = { timer: null, start: 0, etaMs: 0 };
+    function fmtSecs(ms) { var s = Math.max(0, Math.round(ms / 1000)); return s >= 60 ? (Math.floor(s / 60) + "m " + (s % 60) + "s") : (s + "s"); }
+    function progTick() {
+      var host = $("#jdProgress"); if (!host || !prog.timer) return;
+      var fill = host.querySelector(".jd-prog-fill"), pct = host.querySelector(".jd-prog-pct"),
+        phase = host.querySelector("#jdProgPhase"), eta = host.querySelector("#jdProgEta");
+      var elapsed = Date.now() - prog.start;
+      var shown = Math.min(0.95, 1 - Math.exp(-elapsed / (prog.etaMs * 0.6)));
+      var p = Math.round(shown * 100);
+      if (fill) fill.style.width = p + "%"; if (pct) pct.textContent = p + "%";
+      if (phase && !host.dataset.staticPhase) phase.textContent = shown < 0.45 ? "Searching LinkedIn profiles…" : shown < 0.85 ? "Scoring & ranking candidates…" : "Almost done…";
+      if (eta) eta.textContent = "~" + fmtSecs(Math.max(0, prog.etaMs - elapsed)) + " left · " + fmtSecs(elapsed) + " elapsed";
+    }
+    function showProgress(title, etaSec, phaseText) {
+      var host = $("#jdProgress"); if (!host) return;
+      host.classList.remove("done"); host.style.display = "";
+      if (phaseText) host.dataset.staticPhase = "1"; else delete host.dataset.staticPhase;
+      host.innerHTML =
+        '<div class="jd-prog-head"><span class="jd-prog-dot"></span><b id="jdProgTitle">' + esc(title) + '</b>' +
+          '<span class="jd-prog-pct">0%</span></div>' +
+        '<div class="jd-prog-track"><div class="jd-prog-fill" style="width:0%"></div></div>' +
+        '<div class="jd-prog-meta muted"><span id="jdProgPhase">' + esc(phaseText || "Starting…") + '</span><span id="jdProgEta"></span></div>';
+      prog.start = Date.now(); prog.etaMs = Math.max(4, etaSec || 20) * 1000;
+      if (prog.timer) clearInterval(prog.timer);
+      prog.timer = setInterval(progTick, 200); progTick();
+    }
+    function setProgTitle(t) { var el = $("#jdProgTitle"); if (el) el.textContent = t; }
+    function finishProgress(label) {
+      if (prog.timer) { clearInterval(prog.timer); prog.timer = null; }
+      var host = $("#jdProgress"); if (!host) return;
+      host.classList.add("done");
+      var fill = host.querySelector(".jd-prog-fill"), pct = host.querySelector(".jd-prog-pct"),
+        phase = host.querySelector("#jdProgPhase"), eta = host.querySelector("#jdProgEta");
+      if (fill) fill.style.width = "100%"; if (pct) pct.textContent = "100%";
+      if (phase) phase.textContent = label || "Done"; if (eta) eta.textContent = "";
+      setTimeout(function () { var h = $("#jdProgress"); if (h && !prog.timer) h.style.display = "none"; }, 1600);
+    }
+    function hideProgress() { if (prog.timer) { clearInterval(prog.timer); prog.timer = null; } var h = $("#jdProgress"); if (h) { h.style.display = "none"; h.innerHTML = ""; } }
+    /** ETA seconds for a discovery run, estimated from the candidate cap. */
+    function findEta(cap) { return Math.min(150, Math.max(8, Math.round((cap || 3000) * 0.02))); }
 
     /* ---- Queue: run JD searches back-to-back, each saved + CSV-ready ---- */
     function renderQueue() {
@@ -4440,17 +4498,20 @@
       var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 45;
       state.running = true;
       var runBtn = $("#jdQueueRun"); if (runBtn) runBtn.disabled = true;
-      var prog = $("#jdQueueProg");
+      var progEl = $("#jdQueueProg");
       var total = state.queue.length, done = 0, failed = 0;
       function finish() {
         state.running = false; if (runBtn) runBtn.disabled = false;
-        if (prog) prog.textContent = "Done — saved " + done + (failed ? (", " + failed + " failed") : "") + ". Download CSVs below.";
+        if (progEl) progEl.textContent = "Done — saved " + done + (failed ? (", " + failed + " failed") : "") + ". Download CSVs below.";
+        finishProgress("Queue complete — saved " + done + (failed ? (", " + failed + " failed") : ""));
         renderQueue(); loadRuns();
       }
       function next() {
         if (!state.queue.length) return finish();
         var item = state.queue[0];
-        if (prog) prog.textContent = "Processing " + (done + failed + 1) + "/" + total + ": " + item.name + " …";
+        var idx = done + failed + 1;
+        if (progEl) progEl.textContent = "Processing " + idx + "/" + total + ": " + item.name + " …";
+        showProgress("Queue " + idx + "/" + total + ": " + item.name, findEta(cap));
         send("/sourcing", "POST", { action: "run", jd: item.jd, cap: cap, minFit: minFit }).then(function (r) {
           if (!r.ok || !r.data) { failed++; state.queue.shift(); renderQueue(); return next(); }
           var cands = r.data.candidates || [];
@@ -4477,14 +4538,16 @@
       if (!state.jd) { msg("Analyze a JD first."); return; }
       var cap = parseInt($("#jdCap").value, 10) || 3000;
       var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 45;
-      msg("Searching… finding and ranking profiles can take a moment.");
+      msg("");
       $("#jdFind").disabled = true;
+      showProgress("Finding candidates", findEta(cap));
       send("/sourcing", "POST", { action: "run", jd: state.jd, cap: cap, minFit: minFit }).then(function (r) {
         $("#jdFind").disabled = false;
-        if (!r.ok) { msg("Find failed: " + ((r.data && r.data.error) || r.status)); return; }
+        if (!r.ok) { finishProgress("Search failed"); msg("Find failed: " + ((r.data && r.data.error) || r.status)); return; }
         state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
         state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
         $("#jdSave").disabled = !state.candidates.length;
+        finishProgress("Found " + state.candidates.length + " candidates");
         msg("Found " + state.candidates.length + " candidates (scanned " + (r.data.scanned || 0) + ").");
         renderPlan(); renderResults();
       });
@@ -4514,9 +4577,11 @@
       } else if ((id = t.getAttribute("data-vet"))) {
         var topEl = $("#jdVetTop"); var top = topEl ? (parseInt(topEl.value, 10) || 25) : 25;
         t.disabled = true; t.textContent = "Vetting top " + top + "…";
+        showProgress("Deep-vetting top " + top, top * 3, "Reading work histories & scoring against the JD…");
         send("/sourcing", "POST", { action: "vet", id: id, top: top }).then(function (r) {
           t.disabled = false; t.textContent = "🔬 Deep-vet";
-          if (!r.ok) { alert("Deep-vet failed: " + ((r.data && r.data.error) || r.status)); return; }
+          if (!r.ok) { finishProgress("Deep-vet failed"); alert("Deep-vet failed: " + ((r.data && r.data.error) || r.status)); return; }
+          finishProgress("Deep-vetted " + (r.data.vetted || 0));
           var warn = (r.data.warnings || []).length ? ("\n\n" + r.data.warnings.slice(0, 3).join("\n")) : "";
           alert("Deep-vetted " + r.data.vetted + " candidate" + (r.data.vetted === 1 ? "" : "s") +
             (r.data.deep ? " against full work history." : " on surface fields only — set RAPIDAPI_PROFILE_HOST/PATH to vet full profiles.") +
@@ -4544,8 +4609,10 @@
       var i = t.getAttribute("data-qrm");
       if (i != null) { state.queue.splice(parseInt(i, 10), 1); renderQueue(); }
     });
-    var vetTopEl = $("#jdVetTop");
-    if (vetTopEl) { vetTopEl.addEventListener("input", updateVetCost); updateVetCost(); }
+    ["#jdVetTop", "#jdProfUsd", "#jdPlanUsd"].forEach(function (sel) {
+      var e = $(sel); if (e) e.addEventListener("input", updateVetCost);
+    });
+    updateVetCost();
 
     loadRuns();
   }

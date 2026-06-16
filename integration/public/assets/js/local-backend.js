@@ -174,6 +174,17 @@
         fields: [{ key: "FRESH_LINKEDIN_API_KEY", label: "RapidAPI key", required: true, secret: true, placeholder: "paste your RapidAPI key" }],
         steps: ["On RapidAPI, subscribe to 'Fresh LinkedIn Profile Data'.", "Copy the X-RapidAPI-Key (often the same key as JSearch).", "Paste it below, Save, then Test."],
         docsUrl: "https://rapidapi.com/freshdata-freshdata-default/api/fresh-linkedin-profile-data", docsLabel: "Fresh LinkedIn on RapidAPI ↗", present: [] },
+      { id: "jd_sourcing", label: "JD Sourcing (RapidAPI people search)", status: "red", requiredFor: [],
+        blurb: "Powers the JD Sourcing tab: people-search from a JD + profile-by-URL lookup for deep-vetting. Bring your own RapidAPI account.",
+        fields: [
+          { key: "RAPIDAPI_KEY", label: "RapidAPI key", required: true, secret: true, placeholder: "paste your RapidAPI key", hint: "Your own RapidAPI account key." },
+          { key: "RAPIDAPI_PEOPLE_SEARCH_HOST", label: "People-search host", required: true, placeholder: "realtime-linkedin-data-scraper.p.rapidapi.com" },
+          { key: "RAPIDAPI_PEOPLE_SEARCH_PATH", label: "People-search path", required: false, placeholder: "/search-people?keywords={query}&page={page}", hint: "{query}/{page} interpolated." },
+          { key: "RAPIDAPI_PROFILE_HOST", label: "Profile-lookup host (deep-vet)", required: false, placeholder: "realtime-linkedin-data-scraper.p.rapidapi.com" },
+          { key: "RAPIDAPI_PROFILE_PATH", label: "Profile-lookup path (deep-vet)", required: false, placeholder: "/profile?linkedin_url={url}", hint: "{url} interpolated." }
+        ],
+        steps: ["On RapidAPI, subscribe to a people-search listing (e.g. Realtime LinkedIn Data Scraper).", "Copy your X-RapidAPI-Key and the listing's X-RapidAPI-Host.", "Set the search path; for deep-vet add the profile host + path. Save."],
+        docsUrl: "https://rapidapi.com/kingmakerapi/api/realtime-linkedin-data-scraper/pricing", docsLabel: "Realtime LinkedIn Data Scraper — pricing ↗", present: [] },
       { id: "tomba", label: "Email finder", status: "red", requiredFor: ["bd"],
         blurb: "Second rung of the waterfall: corporate email from a name + company domain.",
         fields: [{ key: "TOMBA_API_KEY", label: "Tomba key", required: true, secret: true, placeholder: "ta_xxxx…" }, { key: "TOMBA_SECRET", label: "Tomba secret", required: true, secret: true, placeholder: "ts_xxxx…" }],

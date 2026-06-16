@@ -27,6 +27,7 @@ import type { Motion } from "../core/types";
 
 export type IntegrationId =
   | "instantly" | "salesrobot" | "unipile" | "rapidapi" | "fresh_linkedin"
+  | "jd_sourcing"
   | "tomba" | "loxo" | "taltxt" | "telnyx" | "elevenlabs" | "cartesia" | "hume";
 
 export type ConnStatus = "red" | "yellow" | "green";
@@ -125,6 +126,27 @@ const CATALOG: IntegrationMeta[] = [
     ],
     docsUrl: "https://rapidapi.com/freshdata-freshdata-default/api/fresh-linkedin-profile-data",
     docsLabel: "Fresh LinkedIn on RapidAPI ↗",
+  },
+  {
+    id: "jd_sourcing",
+    label: "JD Sourcing (RapidAPI people search)",
+    blurb: "Powers the JD Sourcing tab: people-search to find candidates from a JD, plus profile-by-URL lookup for deep-vetting. Bring your own RapidAPI account.",
+    requiredFor: [],
+    fields: [
+      { key: "RAPIDAPI_KEY", label: "RapidAPI key", required: true, secret: true, placeholder: "paste your RapidAPI key", hint: "Your own RapidAPI account key — billed to you for the searches and profile lookups." },
+      { key: "RAPIDAPI_PEOPLE_SEARCH_HOST", label: "People-search host", required: true, placeholder: "realtime-linkedin-data-scraper.p.rapidapi.com", hint: "The X-RapidAPI-Host of the people-search listing you subscribe to." },
+      { key: "RAPIDAPI_PEOPLE_SEARCH_PATH", label: "People-search path", required: false, placeholder: "/search-people?keywords={query}&page={page}", hint: "Search endpoint. {query} and {page} are interpolated. Leave blank for the default." },
+      { key: "RAPIDAPI_PROFILE_HOST", label: "Profile-lookup host (deep-vet)", required: false, placeholder: "realtime-linkedin-data-scraper.p.rapidapi.com", hint: "Host for fetching a full profile by URL — enables deep-vet against full work history. Often the same listing." },
+      { key: "RAPIDAPI_PROFILE_PATH", label: "Profile-lookup path (deep-vet)", required: false, placeholder: "/profile?linkedin_url={url}", hint: "Profile-by-URL endpoint. {url} is interpolated. Leave blank if you only want search." },
+    ],
+    steps: [
+      "On RapidAPI, subscribe to a people-search listing (e.g. Realtime LinkedIn Data Scraper).",
+      "Copy your X-RapidAPI-Key and the listing's X-RapidAPI-Host.",
+      "Set the search path (with {query}/{page}); for deep-vet, also set the profile host + path (with {url}).",
+      "Paste below, Save. JD Sourcing runs against your own RapidAPI account from then on.",
+    ],
+    docsUrl: "https://rapidapi.com/kingmakerapi/api/realtime-linkedin-data-scraper/pricing",
+    docsLabel: "Realtime LinkedIn Data Scraper — pricing ↗",
   },
   {
     id: "tomba",
