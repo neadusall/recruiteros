@@ -258,6 +258,9 @@
   // The workspace card normally shows the workspace/company name. On Lume (our own
   // tenant) show the signed-in person's name instead, so the card reads like a
   // personal account and doesn't surface the company / white-label structure.
+  // Declared before the workspace-label chrome below reads them (else hoisted-undefined -> .indexOf crash blanks the app).
+  var WHITE_LABEL_DOMAINS = ["lumesp.com"];
+  var OPERATOR_EMAILS = ["neadusall@gmail.com"];
   var wsNameEl = $("#wsName");
   if (wsNameEl) wsNameEl.textContent =
     (isLumeWorkspace() && ctx.user && ctx.user.name) ? ctx.user.name
@@ -422,6 +425,7 @@
     var wsDom = ((ws.domain) || "").toLowerCase();
     var userEmail = ((ctx.user && ctx.user.email) || "").toLowerCase();
     var userDom = (userEmail.split("@")[1] || "").toLowerCase();
+    if (!userEmail) return; // no identified user yet (session still loading): never show a billing gate
     if (OPERATOR_EMAILS.indexOf(userEmail) >= 0) return; // platform operator, never gated
     if (WHITE_LABEL_DOMAINS.indexOf(wsDom) >= 0 || WHITE_LABEL_DOMAINS.indexOf(userDom) >= 0) return;
     var tr;
@@ -4339,19 +4343,19 @@
       '.jd-refine input::placeholder{color:var(--text-dim)}' +
       '.jd-refine input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
       '.jd-refine-note{margin:9px 0 0;font-size:12.5px;color:var(--brand-2)}' +
-      '.jd-tips{margin-top:11px;padding:13px 16px;background:var(--bg-soft);border:1px solid var(--border);border-left:3px solid var(--brand);border-radius:11px;font-size:12.5px;color:var(--text-muted);line-height:1.5}' +
+      '.jd-tips{margin-top:8px;padding:10px 14px;background:var(--bg-soft);border:1px solid var(--border);border-left:3px solid var(--brand);border-radius:11px;font-size:12.5px;color:var(--text-muted);line-height:1.5}' +
       '.jd-tips>.jd-tips-h{color:var(--text);font-weight:700}' +
-      '.jd-tipgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px 24px;margin-top:10px}' +
+      '.jd-tipgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:4px 18px;margin-top:7px}' +
       '.jd-tipgrid>span{display:block;position:relative;padding-left:15px}' +
       '.jd-tipgrid>span::before{content:"";position:absolute;left:0;top:6px;width:6px;height:6px;border-radius:50%;background:linear-gradient(135deg,#7c5cff,var(--brand-2))}' +
       '.jd-tipgrid b{color:var(--brand-2);font-weight:600}' +
-      '.jd-builder{position:relative;overflow:hidden;padding:16px 18px;background:linear-gradient(135deg,rgba(124,92,255,.13),rgba(80,200,255,.06));border:1px solid rgba(124,92,255,.34);border-radius:14px;margin-bottom:14px;box-shadow:0 12px 36px -14px rgba(124,92,255,.4)}' +
+      '.jd-builder{position:relative;overflow:hidden;padding:13px 16px;background:linear-gradient(135deg,rgba(124,92,255,.13),rgba(80,200,255,.06));border:1px solid rgba(124,92,255,.34);border-radius:14px;margin-bottom:11px;box-shadow:0 12px 36px -14px rgba(124,92,255,.4)}' +
       '.jd-builder::after{content:"";position:absolute;top:-40%;right:-10%;width:240px;height:240px;background:radial-gradient(circle,rgba(124,92,255,.18),transparent 70%);pointer-events:none}' +
       '.jd-builder-h{position:relative;font-weight:800;font-size:15px;letter-spacing:.01em;margin-bottom:3px;background:linear-gradient(90deg,#7c5cff,var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
-      '.jd-builder-sub{font-size:12.5px;color:var(--text-muted);margin-bottom:11px}' +
+      '.jd-builder-sub{font-size:12.5px;color:var(--text-muted);margin-bottom:8px}' +
       '.jd-builder-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}' +
       '@media(max-width:640px){.jd-builder-row{grid-template-columns:1fr}}' +
-      '.jd-lead{font-size:13.5px;margin-bottom:12px}.jd-lead b{color:var(--text)}' +
+      '.jd-lead{font-size:13.5px;margin-bottom:8px}.jd-lead b{color:var(--text)}' +
       '.jd-builder input{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:9px;color:var(--text);font:inherit;font-size:13.5px;padding:9px 12px}' +
       '.jd-builder input::placeholder{color:var(--text-dim)}' +
       '.jd-builder input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
@@ -4363,14 +4367,14 @@
       '.jd-buildbar{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:12px 0 2px}' +
       '.jd-buildbar .muted{font-size:12px}' +
       '#jdName,#jdText,#jdbTitle,#jdbCompany,#jdbNotes,#jdbLocation{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 14px;margin:0;transition:border-color .12s,box-shadow .12s}' +
-      '#jdText{line-height:1.55;resize:vertical;min-height:150px}' +
+      '#jdText{line-height:1.55;resize:vertical;min-height:104px}' +
       '#jdName::placeholder,#jdText::placeholder,#jdbTitle::placeholder,#jdbCompany::placeholder,#jdbNotes::placeholder,#jdbLocation::placeholder{color:var(--text-dim)}' +
       '#jdName:focus,#jdText:focus,#jdbTitle:focus,#jdbCompany:focus,#jdbNotes:focus,#jdbLocation:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
-      '.jd-field{margin-bottom:12px}' +
+      '.jd-field{margin-bottom:8px}' +
       '.jd-field>label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:700;margin-bottom:6px}' +
       '.jd-opt{font-weight:500;text-transform:none;letter-spacing:0;opacity:.75;margin-left:7px}' +
-      '.jd-fieldgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px}.jd-fieldgrid>.jd-field{margin-bottom:0}' +
-      '@media(max-width:640px){.jd-fieldgrid{grid-template-columns:1fr;gap:0}.jd-fieldgrid>.jd-field{margin-bottom:12px}}' +
+      '.jd-fieldgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px}.jd-fieldgrid>.jd-field{margin-bottom:0}' +
+      '@media(max-width:640px){.jd-fieldgrid{grid-template-columns:1fr;gap:0}.jd-fieldgrid>.jd-field{margin-bottom:8px}}' +
       '.jd-queries{max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:6px 12px;background:var(--bg-soft)}' +
       '.jd-q{padding:8px 0;font-size:13px;border-bottom:1px solid var(--border)}.jd-q:last-child{border-bottom:0}' +
       '.jd-q-label{display:inline-block;min-width:260px;font-weight:600}' +
