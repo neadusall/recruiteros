@@ -4369,13 +4369,7 @@
       '<div class="card">' +
         '<div class="jd-cardhead"><h3 style="margin:0">Saved sourcing lists</h3>' +
           '<span class="jd-vetctl">Deep-vet top <input id="jdVetTop" type="number" min="1" max="200" value="25">' +
-            '<span id="jdVetCost" class="jd-cost"></span>' +
-            '<button type="button" id="jdRatesToggle" class="jd-ratelink">rates</button></span></div>' +
-        '<div id="jdRatesRow" class="jd-rates" style="display:none">' +
-          'Data&nbsp;$/profile <input id="jdProfUsd" type="number" min="0" step="0.001" value="0.005">' +
-          '<span style="opacity:.45">·</span> plan&nbsp;$<input id="jdPlanUsd" type="number" min="0" step="1" value="50">/mo' +
-          '<span style="opacity:.7;margin-left:6px">Set to your data plan\'s rate per profile.</span>' +
-        '</div>' +
+            '<span id="jdVetCost" class="jd-cost"></span></span></div>' +
         '<p class="jd-sub">Reads each shortlisted candidate\'s full career history against the role and returns a verified fit score and verdict — the first-pass screen your team would do by hand, across the whole list in seconds. Run it on the top N you choose.</p>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
@@ -4737,16 +4731,8 @@
       var i = t.getAttribute("data-qrm");
       if (i != null) { state.queue.splice(parseInt(i, 10), 1); renderQueue(); }
     });
-    ["#jdVetTop", "#jdProfUsd", "#jdPlanUsd"].forEach(function (sel) {
-      var e = $(sel); if (e) e.addEventListener("input", updateVetCost);
-    });
-    ["#jdCap", "#jdProfUsd"].forEach(function (sel) {
-      var e = $(sel); if (e) e.addEventListener("input", updateRunCost);
-    });
-    var ratesToggle = $("#jdRatesToggle");
-    if (ratesToggle) ratesToggle.addEventListener("click", function () {
-      var r = $("#jdRatesRow"); if (r) r.style.display = (r.style.display === "none" || !r.style.display) ? "flex" : "none";
-    });
+    var vetTopEl = $("#jdVetTop"); if (vetTopEl) vetTopEl.addEventListener("input", updateVetCost);
+    var capEl2 = $("#jdCap"); if (capEl2) capEl2.addEventListener("input", updateRunCost);
     var planHost = $("#jdPlan");
     if (planHost) {
       planHost.addEventListener("click", function (e) { if (e.target && e.target.id === "jdRefineBtn") doRefine(); });
