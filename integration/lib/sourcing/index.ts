@@ -12,7 +12,7 @@ export { refineIcp, type RefineResult } from "./refineSearch";
 export { draftJobDescription, type DraftInput } from "./draftJd";
 export { generateQueries } from "./generateQueries";
 export { scoreCandidate } from "./score";
-export { runDiscovery, rapidApiSearchConfigured, type DiscoveryResult } from "./discovery";
+export { runDiscovery, rapidApiSearchConfigured, verifySourcingSearch, type DiscoveryResult } from "./discovery";
 export { fetchFullProfile, profileFetchConfigured, type FullProfile, type ProfileExperience } from "./profile";
 export { deepVetCandidate, type VetResult } from "./deepVet";
 export {

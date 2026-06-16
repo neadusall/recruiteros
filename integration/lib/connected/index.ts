@@ -408,6 +408,19 @@ export async function testConnection(
     }, { isolated });
   }
 
+  // JD Sourcing has no provider client — verify with a live one-shot search so the
+  // button turns green when the listing actually answers (and shows the real error
+  // otherwise), instead of a confusing "no client available".
+  if (id === "jd_sourcing") {
+    return runWithCreds(keys, async () => {
+      await ensureRow();
+      const { verifySourcingSearch } = await import("../sourcing");
+      const result = await verifySourcingSearch();
+      const cred = await markTested(workspaceId, id, result.ok, result.error);
+      return { status: cred?.status ?? (result.ok ? "green" : "yellow"), error: result.ok ? undefined : result.error };
+    }, { isolated });
+  }
+
   const provider = getProvider(id);
   if (!provider) {
     await ensureRow();

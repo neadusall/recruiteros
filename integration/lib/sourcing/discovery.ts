@@ -37,6 +37,23 @@ export function rapidApiSearchConfigured(): boolean {
   return Boolean(RAPIDAPI_KEY() && PS_HOST());
 }
 
+/**
+ * Live one-shot health check for the Connected → JD Sourcing "Test connection".
+ * Fires a tiny search and reports whether the listing actually answered — so the
+ * button turns green on success and surfaces the real error (bad path / key /
+ * captcha) instead of a confusing "no client" message.
+ */
+export async function verifySourcingSearch(): Promise<{ ok: boolean; error?: string; found?: number }> {
+  if (!RAPIDAPI_KEY()) return { ok: false, error: "Add your RapidAPI key first." };
+  if (!PS_HOST()) return { ok: false, error: "Add the search host first." };
+  try {
+    const rows = await rapidApiPeopleSearch("recruiter", 1, 3);
+    return { ok: true, found: rows.length };
+  } catch (e: any) {
+    return { ok: false, error: (e && e.message) || "search request failed" };
+  }
+}
+
 function str(v: unknown): string | undefined {
   if (v == null) return undefined;
   const s = String(v).trim();
