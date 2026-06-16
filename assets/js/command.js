@@ -4279,6 +4279,11 @@
       '.jd-refine input::placeholder{color:var(--text-dim)}' +
       '.jd-refine input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
       '.jd-refine-note{margin:9px 0 0;font-size:12.5px;color:var(--brand-2)}' +
+      '.jd-tips{margin-top:11px;padding:12px 15px;background:var(--bg-soft);border:1px solid var(--border);border-radius:11px;font-size:12.5px;color:var(--text-muted);line-height:1.5}' +
+      '.jd-tips>.jd-tips-h{color:var(--text);font-weight:600}' +
+      '.jd-tipgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:5px 22px;margin-top:9px}' +
+      '.jd-tipgrid>span{display:block}' +
+      '.jd-tipgrid b{color:var(--brand-2);font-weight:600}' +
       '#jdName,#jdText{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 13px}' +
       '#jdName{margin-bottom:10px;font-weight:600}#jdText{line-height:1.55;resize:vertical;min-height:170px}' +
       '#jdName::placeholder,#jdText::placeholder{color:var(--text-dim)}' +
@@ -4300,6 +4305,18 @@
       '<div class="card">' +
         '<input id="jdName" type="text" placeholder="Name this list, e.g. JAGGAER VP Sales · East" />' +
         '<textarea id="jdText" rows="8" placeholder="Paste the full job description here…"></textarea>' +
+        '<div class="jd-tips"><span class="jd-tips-h">The sharper the JD, the better the shortlist — make sure it spells out:</span>' +
+          '<div class="jd-tipgrid">' +
+            '<span><b>Title &amp; level</b> — the exact role and seniority (and whether it leads a team)</span>' +
+            '<span><b>Target companies</b> — 5–10 competitors or peers worth poaching from</span>' +
+            '<span><b>Location</b> — the metros that matter, or state “remote”</span>' +
+            '<span><b>Industry / domain</b> — where strong candidates come from</span>' +
+            '<span><b>Must-have experience</b> — what they’ve actually done, not nice-to-haves</span>' +
+            '<span><b>Who they sell to</b> — buyer personas, for sales roles</span>' +
+            '<span><b>Deal-breakers</b> — what should rule a candidate out</span>' +
+            '<span><b>Proof of impact</b> — quota, scale, team size, or metrics to match on</span>' +
+          '</div>' +
+        '</div>' +
         '<div class="jd-actions">' +
           '<button class="btn btn-primary btn-sm" id="jdAnalyze">Analyze JD</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>🧲 Find candidates</button>' +
