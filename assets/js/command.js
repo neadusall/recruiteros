@@ -4320,7 +4320,7 @@
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
       '<div class="card">' +
         '<div class="jd-builder"><div class="jd-builder-h">✨ Build a sourcing-ready JD</div>' +
-          '<div class="jd-builder-sub">Give the essentials — we draft a tight, search-optimized brief and drop it below. Casts a smart wide net so you don\'t miss strong people with thin profiles.</div>' +
+          '<div class="jd-builder-sub">A title and company is enough — the AI writes a precise, wide-net brief that turns into a ranked shortlist of qualified candidates in minutes.</div>' +
           '<div class="jd-builder-row">' +
             '<input id="jdbTitle" type="text" placeholder="Job title — e.g. VP of Sales" />' +
             '<input id="jdbCompany" type="text" placeholder="Company name or URL (optional)" />' +
