@@ -81,6 +81,18 @@ async function hydrate(): Promise<void> {
   return hydrating;
 }
 
+/**
+ * Boot hook: load the saved-credential snapshot and mirror the house keys into
+ * process.env ONCE at server startup — before any request is served. Without this,
+ * mirroring is lazy (it only happens the first time a credentials function runs), so
+ * a tool that reads process.env directly (JD Sourcing's AI key, enrichment, voice,
+ * crons) fails right after a redeploy until someone happens to open the Connected
+ * page. Called from instrumentation.register(). Idempotent via the hydrate() guard.
+ */
+export async function ensureCredsHydrated(): Promise<void> {
+  await hydrate();
+}
+
 function ws(workspaceId: string): WorkspaceCreds {
   if (!store[workspaceId]) store[workspaceId] = { workspaceId, integrations: {} };
   return store[workspaceId];

@@ -17,6 +17,17 @@ export async function register(): Promise<void> {
   // dynamic imports — keeping the node-only worker graphs (pg, node:crypto, …) out of the
   // edge bundle. The body only ever runs in the long-lived Node.js server.
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // FIRST: mirror every saved portal credential into process.env at boot, before any
+    // request or worker runs. Saved keys live on the durable volume; without this eager
+    // load they only reach the running process lazily (first Connected-page touch), so a
+    // redeploy would leave JD Sourcing's AI key, enrichment, voice and crons "not
+    // configured" until someone opened Setup. This keeps every tool online across deploys.
+    try {
+      const { ensureCredsHydrated } = await import("./lib/connected/credentials");
+      await ensureCredsHydrated();
+    } catch {
+      /* never let an instrumentation hiccup block server startup */
+    }
     try {
       const { ensureAccumulator } = await import("./lib/inmarket/accumulator");
       ensureAccumulator();
