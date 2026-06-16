@@ -13,11 +13,10 @@
  * so when the data is thin.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import { anthropicClient } from "./anthropic";
 import type { CandidateICP, CandidateRow } from "./types";
 import type { FullProfile } from "./profile";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // Judgment work — default to the balanced tier; override via env.
 const MODEL = process.env.RECRUITEROS_VET_MODEL ?? process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
 
@@ -124,7 +123,7 @@ export async function deepVetCandidate(row: CandidateRow, icp: CandidateICP, pro
   if (!process.env.ANTHROPIC_API_KEY) {
     throw Object.assign(new Error("anthropic_not_configured: set ANTHROPIC_API_KEY"), { status: 409 });
   }
-  const response = await client.messages.create({
+  const response = await anthropicClient().messages.create({
     model: MODEL,
     max_tokens: 700,
     system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as any,

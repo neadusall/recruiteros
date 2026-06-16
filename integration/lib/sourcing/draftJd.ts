@@ -9,9 +9,8 @@
  * the inputs that make the search sharp. One generative call (default Sonnet tier).
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import { anthropicClient } from "./anthropic";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_DRAFT_MODEL ?? process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
 
 const SYSTEM = `You are an expert recruiter writing a concise, sourcing-optimized hiring brief — NOT a
@@ -79,7 +78,7 @@ export async function draftJobDescription(input: DraftInput): Promise<string> {
     base ? "Strengthen the existing material into a tight sourcing brief." : "Write the sourcing brief.",
   ].filter(Boolean);
 
-  const response = await client.messages.create({
+  const response = await anthropicClient().messages.create({
     model: MODEL,
     max_tokens: 1000,
     system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as any,

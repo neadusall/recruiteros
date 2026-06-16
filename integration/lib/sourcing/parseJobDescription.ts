@@ -9,10 +9,9 @@
  * Mirrors the client/model conventions already used in linkedin/classify.ts.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import { anthropicClient } from "./anthropic";
 import type { CandidateICP } from "./types";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // Extraction is cheap work — default to the fast tier; override via env if desired.
 const MODEL = process.env.RECRUITEROS_SOURCING_MODEL ?? process.env.RECRUITEROS_LLM_MODEL ?? "claude-haiku-4-5-20251001";
 
@@ -109,7 +108,7 @@ export async function parseJobDescription(jd: string): Promise<CandidateICP> {
     throw Object.assign(new Error("anthropic_not_configured: set ANTHROPIC_API_KEY"), { status: 409 });
   }
 
-  const response = await client.messages.create({
+  const response = await anthropicClient().messages.create({
     model: MODEL,
     max_tokens: 1200,
     system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as any,

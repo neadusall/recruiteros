@@ -8,11 +8,10 @@
  * One model call; the same cheap extraction tier as the JD parser.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import { anthropicClient } from "./anthropic";
 import type { CandidateICP } from "./types";
 import { normalizeIcpObject } from "./parseJobDescription";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_SOURCING_MODEL ?? process.env.RECRUITEROS_LLM_MODEL ?? "claude-haiku-4-5-20251001";
 
 const SYSTEM = `You refine an existing ideal-CANDIDATE profile (ICP) used for sourcing, applying the
@@ -40,7 +39,7 @@ export async function refineIcp(jd: string, current: CandidateICP, instruction: 
   if (!process.env.ANTHROPIC_API_KEY) {
     throw Object.assign(new Error("anthropic_not_configured: set ANTHROPIC_API_KEY"), { status: 409 });
   }
-  const response = await client.messages.create({
+  const response = await anthropicClient().messages.create({
     model: MODEL,
     max_tokens: 1400,
     system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as any,
