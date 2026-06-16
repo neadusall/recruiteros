@@ -23,7 +23,9 @@ export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
-  await ensureLumeSeed(ws); // first-open auto-load of the bundled export (once, when empty)
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? new URL(req.url).host;
+  await ensureLumeSeed(ws, host); // Lume portal: auto-load the bundled export; elsewhere: scrub it
+
   const u = new URL(req.url);
   const { records, total } = await listRecords(ws, {
     q: u.searchParams.get("q") ?? undefined,
