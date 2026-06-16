@@ -4462,7 +4462,7 @@
         '<div class="jd-actions">' +
           '<button class="btn btn-primary btn-sm" id="jdAnalyze">Analyze JD</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>🧲 Find candidates</button>' +
-          '<span class="jd-cap muted">Scan up to <input id="jdCap" type="number" min="100" max="5000" value="500" title="How many matching profiles to scan in this run. Higher = broader, slower."> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10" title="0 = show every profile the search finds (nothing filtered). Higher = keep only stronger matches. 10 is a wide net; 40+ is tight."></span>' +
+          '<span class="jd-cap muted">Scan up to <input id="jdCap" type="number" min="1" max="5000" value="500" title="Ceiling on candidates gathered per run. Not a minimum — runs return however many qualified people the search finds, up to this number."> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10" title="0 = show every profile the search finds (nothing filtered). Higher = keep only stronger matches. 10 is a wide net; 40+ is tight."></span>' +
           '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
           '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>💾 Save to JD Sourcing</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">➕ Add to queue</button>' +
