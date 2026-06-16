@@ -4258,7 +4258,9 @@
      deduped candidate list -> save it under a NAME here (staging) -> send it to
      Candidates under that same name. Backend: /api/sourcing + lib/sourcing/*. */
   function renderJdSourcing(el) {
-    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", queue: [], runs: [], running: false, refineNote: "" };
+    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", queue: [], runs: [], running: false, refineNote: "", location: "" };
+    function jdbLoc() { var e = $("#jdbLocation"); return e ? e.value.trim() : ""; }
+    function jdWithLoc(jd) { var loc = jdbLoc(); return loc ? (jd + "\n\nBased in: " + loc) : jd; }
 
     el.innerHTML =
       '<style>' +
@@ -4305,8 +4307,9 @@
       '.jd-builder::after{content:"";position:absolute;top:-40%;right:-10%;width:240px;height:240px;background:radial-gradient(circle,rgba(124,92,255,.18),transparent 70%);pointer-events:none}' +
       '.jd-builder-h{position:relative;font-weight:800;font-size:15px;letter-spacing:.01em;margin-bottom:3px;background:linear-gradient(90deg,#7c5cff,var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
       '.jd-builder-sub{font-size:12.5px;color:var(--text-muted);margin-bottom:11px}' +
-      '.jd-builder-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:9px}' +
+      '.jd-builder-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}' +
       '@media(max-width:640px){.jd-builder-row{grid-template-columns:1fr}}' +
+      '.jd-lead{font-size:13.5px;margin-bottom:12px}.jd-lead b{color:var(--text)}' +
       '.jd-builder input{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:9px;color:var(--text);font:inherit;font-size:13.5px;padding:9px 12px}' +
       '.jd-builder input::placeholder{color:var(--text-dim)}' +
       '.jd-builder input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
@@ -4317,10 +4320,15 @@
       '.jd-or span{padding:0 12px}' +
       '.jd-buildbar{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:12px 0 2px}' +
       '.jd-buildbar .muted{font-size:12px}' +
-      '#jdName,#jdText{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 13px}' +
-      '#jdName{margin-bottom:10px;font-weight:600}#jdText{line-height:1.55;resize:vertical;min-height:170px}' +
-      '#jdName::placeholder,#jdText::placeholder{color:var(--text-dim)}' +
-      '#jdName:focus,#jdText:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
+      '#jdName,#jdText,#jdbTitle,#jdbCompany,#jdbNotes,#jdbLocation{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 14px;margin:0;transition:border-color .12s,box-shadow .12s}' +
+      '#jdText{line-height:1.55;resize:vertical;min-height:150px}' +
+      '#jdName::placeholder,#jdText::placeholder,#jdbTitle::placeholder,#jdbCompany::placeholder,#jdbNotes::placeholder,#jdbLocation::placeholder{color:var(--text-dim)}' +
+      '#jdName:focus,#jdText:focus,#jdbTitle:focus,#jdbCompany:focus,#jdbNotes:focus,#jdbLocation:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
+      '.jd-field{margin-bottom:12px}' +
+      '.jd-field>label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:700;margin-bottom:6px}' +
+      '.jd-opt{font-weight:500;text-transform:none;letter-spacing:0;opacity:.75;margin-left:7px}' +
+      '.jd-fieldgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px}.jd-fieldgrid>.jd-field{margin-bottom:0}' +
+      '@media(max-width:640px){.jd-fieldgrid{grid-template-columns:1fr;gap:0}.jd-fieldgrid>.jd-field{margin-bottom:12px}}' +
       '.jd-queries{max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:6px 12px;background:var(--bg-soft)}' +
       '.jd-q{padding:8px 0;font-size:13px;border-bottom:1px solid var(--border)}.jd-q:last-child{border-bottom:0}' +
       '.jd-q-label{display:inline-block;min-width:260px;font-weight:600}' +
@@ -4336,13 +4344,16 @@
       '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
       '<div class="card">' +
-        '<div class="jd-builder-row">' +
-          '<input id="jdbTitle" type="text" placeholder="Job title, e.g. VP of Sales" />' +
-          '<input id="jdbCompany" type="text" placeholder="Company name or URL (optional)" />' +
+        '<div class="jd-lead"><b>Start with the role.</b> <span class="muted">Fill in what you know and paste any JD; the AI refines it into a strong, wide-net search.</span></div>' +
+        '<div class="jd-fieldgrid">' +
+          '<div class="jd-field"><label>Job title</label><input id="jdbTitle" type="text" placeholder="The role you are filling, e.g. VP of Sales, Director of Nursing" /></div>' +
+          '<div class="jd-field"><label>Company</label><input id="jdbCompany" type="text" placeholder="Name or website, used to find peers worth poaching from" /></div>' +
         '</div>' +
-        '<input id="jdbNotes" type="text" placeholder="Anything specific: seniority, location, must-haves (optional)" />' +
-        '<input id="jdName" type="text" placeholder="Name this list, e.g. JAGGAER VP Sales · East" />' +
-        '<textarea id="jdText" rows="8" placeholder="Paste your job description here. The more real detail you give, the stronger the search."></textarea>' +
+        '<div class="jd-field"><label>City &amp; state</label><input id="jdbLocation" type="text" placeholder="Where the role is based, e.g. Fair Lawn, NJ (saved with the list)" /></div>' +
+        '<div class="jd-field"><label>Anything specific <span class="jd-opt muted">optional</span></label><input id="jdbNotes" type="text" placeholder="Seniority, must-have experience, who they sell to, deal-breakers" /></div>' +
+        '<div class="jd-field"><label>List name</label><input id="jdName" type="text" placeholder="Name this list, e.g. JAGGAER VP Sales · East" /></div>' +
+        '<div class="jd-field"><label>Job description <span class="jd-opt muted">optional, or let the AI write it</span></label>' +
+          '<textarea id="jdText" rows="8" placeholder="Paste the job description here. The more real detail you give, the stronger the search."></textarea></div>' +
         '<div class="jd-builder"><div class="jd-builder-h">✨ Build a refined, sourcing-ready JD</div>' +
           '<div class="jd-builder-sub">Your input is the benchmark. The AI refines it, shores up the gaps, and widens the net into a precise, sourcing-ready brief. Stronger input means a stronger search. Run this first, then Analyze.</div>' +
           '<div class="jd-buildbar" style="margin-top:2px"><button class="btn btn-primary btn-sm" id="jdbBtn">✨ Build refined JD</button>' +
@@ -4529,6 +4540,7 @@
       var companyEl = $("#jdbCompany"), notesEl = $("#jdbNotes"), ta = $("#jdText");
       var company = companyEl ? companyEl.value.trim() : "";
       var notes = notesEl ? notesEl.value.trim() : "";
+      var loc = jdbLoc(); if (loc) notes = [notes, "Based in " + loc].filter(Boolean).join(". ");
       var base = ta ? ta.value.trim() : "";   // strengthen whatever's already in the box
       if (!title && !base) { titleEl.focus(); msg("Add a title, or paste a rough JD below, and we'll strengthen it."); return; }
       var btn = $("#jdbBtn"); if (btn) { btn.disabled = true; btn.textContent = "Working…"; }
@@ -4665,8 +4677,9 @@
 
     $("#jdAnalyze").addEventListener("click", function () {
       var jd = $("#jdText").value.trim(); if (!jd) { msg("Paste a job description first."); return; }
+      state.location = jdbLoc();
       state.jd = jd; msg("Analyzing…");
-      send("/sourcing", "POST", { action: "plan", jd: jd }).then(function (r) {
+      send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(jd) }).then(function (r) {
         if (!r.ok) { msg("Analyze failed: " + ((r.data && r.data.error) || r.status)); return; }
         state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
         $("#jdFind").disabled = false; msg(""); renderPlan(); updateRunCost();
@@ -4680,7 +4693,7 @@
       msg("");
       $("#jdFind").disabled = true;
       showProgress("Finding candidates", findEta(cap));
-      send("/sourcing", "POST", { action: "run", jd: state.jd, cap: cap, minFit: minFit }).then(function (r) {
+      send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), cap: cap, minFit: minFit }).then(function (r) {
         $("#jdFind").disabled = false;
         if (!r.ok) { finishProgress("Search failed"); msg("Find failed: " + ((r.data && r.data.error) || r.status)); return; }
         state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
