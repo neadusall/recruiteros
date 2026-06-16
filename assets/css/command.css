@@ -1220,6 +1220,49 @@ body.app { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibili
 .vd-hint { font-size: 12px; color: var(--text-muted); margin-top: 8px; line-height: 1.5; }
 .vd-actions { margin-top: 18px; display: flex; gap: 8px; }
 
+/* Section label above a group of fields */
+.vd-section-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-dim); margin: 20px 0 10px; padding-bottom: 7px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Inline info note (e.g. the after-hours delivery explainer) */
+.vd-note {
+  display: flex; gap: 10px; align-items: flex-start; margin: 16px 0 2px;
+  padding: 11px 13px; border-radius: 11px; font-size: 12.5px; line-height: 1.5;
+  color: var(--text-muted); background: rgba(124, 92, 255, .07);
+  border: 1px solid rgba(124, 92, 255, .22);
+}
+.vd-note b { color: var(--text); font-weight: 600; }
+.vd-note-ico { flex: 0 0 auto; font-size: 14px; line-height: 1.4; }
+
+/* Option cards with iOS-style toggles */
+.vd-toggles { display: flex; flex-direction: column; gap: 9px; }
+.vd-toggle {
+  display: flex; gap: 13px; align-items: flex-start; cursor: pointer;
+  padding: 13px 15px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface); transition: border-color .12s ease, background .12s ease;
+}
+.vd-toggle:hover { border-color: var(--border-strong); }
+.vd-toggle:has(.vd-toggle-cb:checked) { border-color: var(--brand); background: rgba(124, 92, 255, .06); }
+.vd-toggle-cb { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.vd-toggle-sw {
+  position: relative; flex: 0 0 auto; width: 38px; height: 22px; margin-top: 1px;
+  border-radius: 999px; background: var(--border-strong); transition: background .15s ease;
+}
+.vd-toggle-sw::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .3);
+  transition: transform .15s ease;
+}
+.vd-toggle-cb:checked + .vd-toggle-sw { background: linear-gradient(135deg, #7c5cff, #5fa8ff); }
+.vd-toggle-cb:checked + .vd-toggle-sw::after { transform: translateX(16px); }
+.vd-toggle-cb:focus-visible + .vd-toggle-sw { box-shadow: 0 0 0 3px rgba(124, 92, 255, .35); }
+.vd-toggle-txt { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.vd-toggle-txt b { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.vd-toggle-txt span { font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+
 /* Voice Drops tabs: clean pill row */
 .vd-tabs { gap: 8px !important; margin: 2px 0 18px !important; }
 .vd-tabs button, .vd-tabs .vd-tab {

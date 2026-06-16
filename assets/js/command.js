@@ -5059,13 +5059,13 @@
       '• <b>Honest + natural</b>, always states your real name &amp; firm, formatted for natural speech, never invents referrals or claims.<br>' +
       '• <b>Estimated spend</b>, the campaign builder shows live cost for both models before you launch.' +
       '</div></div>' +
-      '<div class="vd-tabs" style="display:flex;gap:8px;margin:2px 0 16px;flex-wrap:wrap"></div>' +
+      '<div class="vd-tabs" style="display:flex;flex-wrap:wrap"></div>' +
       '<div id="vdBody">' + loading() + "</div>";
 
     function tabBar() {
       var tabs = [["campaigns", "📞 Campaigns"], ["scripts", "📝 Scripts"], ["voice", "🎙️ Voice"], ["test", "🧪 Test"]];
       $(".vd-tabs", el).innerHTML = tabs.map(function (t) {
-        return '<button class="btn btn-sm ' + (vd.tab === t[0] ? "btn-primary" : "") + '" data-vdtab="' + t[0] + '">' + t[1] + "</button>";
+        return '<button class="vd-tab' + (vd.tab === t[0] ? " active" : "") + '" data-vdtab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
     }
     $(".vd-tabs", el).addEventListener("click", function (e) {
@@ -5360,19 +5360,20 @@
         inp("vdDailyCap", "Daily cap", "100", "number") +
         inp("vdFreq", "Min days between attempts", "30", "number") +
         "</div>" +
-        '<div class="vd-hint" style="margin:6px 0 2px">Drops land after hours, in each lead’s OWN local time (default 7-09 PM), so the line rolls to voicemail. Clamped to a lawful 8 AM-9 PM envelope.</div>' +
-        '<label style="display:flex;align-items:center;gap:8px;margin:10px 0;font-size:13px;cursor:pointer">' +
-        '<input type="checkbox" id="vdTestMode"> <span><b>Test mode</b>, ignore the calling window (testing only; every other safeguard stays on).</span></label>' +
-        '<label style="display:flex;align-items:center;gap:8px;margin:10px 0;font-size:13px;cursor:pointer">' +
-        '<input type="checkbox" id="vdAiCustomize"> <span><b>AI-customize per lead</b>, the AI rewrites each drop from your script below, kept to 15-25s and the speech rules. More natural, but each lead synthesizes fresh (a little more spend).</span></label>' +
-        '<label style="display:flex;align-items:center;gap:8px;margin:10px 0;font-size:13px;cursor:pointer">' +
-        '<input type="checkbox" id="vdAutoPilot"> <span><b>Always-on autopilot</b>, keep this campaign running and auto-send to leads as they’re fed into the system (email-sent trigger or import). Turns on AI-customize so every incoming lead gets a fresh, in-window drop. Consent + all safeguards still required.</span></label>' +
-        '<div class="vd-field vd-script"><label>Start from a saved script <span>- pick one from your library, or write your own below</span></label>' +
+        '<div class="vd-note"><span class="vd-note-ico">🌙</span><span>Drops land after hours, in each lead’s <b>own local time</b> (default 7–9 PM), so the line rolls to voicemail. Always clamped to a lawful 8 AM–9 PM envelope.</span></div>' +
+        '<div class="vd-section-label">Delivery &amp; safeguards</div>' +
+        '<div class="vd-toggles">' +
+        vdToggle("vdTestMode", "Test mode", "Ignore the calling window. Testing only — every other safeguard stays on.") +
+        vdToggle("vdAiCustomize", "AI-customize per lead", "The AI rewrites each drop from your script below, kept to 15–25s and the speech rules. More natural, but each lead synthesizes fresh (a little more spend).") +
+        vdToggle("vdAutoPilot", "Always-on autopilot", "Keep this campaign running and auto-send to leads as they’re fed in (email-sent trigger or import). Turns on AI-customize so every incoming lead gets a fresh, in-window drop. Consent + all safeguards still required.") +
+        "</div>" +
+        '<div class="vd-section-label" style="margin-top:20px">Voicemail script</div>' +
+        '<div class="vd-field vd-script" style="margin-top:0"><label>Start from a saved script <span>— pick one from your library, or write your own below</span></label>' +
         '<select id="vdScriptPick" style="width:100%">' + scriptPickerOptions() + "</select></div>" +
-        '<div class="vd-field vd-script"><label>Voicemail script <span>- an example; the AI customizes the rest. First name &amp; role splice in like an email merge</span></label>' +
+        '<div class="vd-field vd-script"><label>Your script <span>— an example; the AI customizes the rest. First name &amp; role splice in like an email merge</span></label>' +
         '<div class="vd-chips">' + fieldChips("vdScript") + "</div>" +
         '<textarea id="vdScript" rows="4">' + esc(VD_DEFAULT_SCRIPT) + "</textarea>" +
-        '<div class="vd-hint">Sweet spot is 15-25s. Human-answer sign-off: “' + esc("Sorry, wrong number. Thanks.") + '” (editable per campaign).</div></div>' +
+        '<div class="vd-hint">Sweet spot is 15–25s. Human-answer sign-off: “' + esc("Sorry, wrong number. Thanks.") + '” (editable per campaign).</div></div>' +
         '<div class="vd-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary btn-sm" id="vdCreate">Create campaign</button>' +
         '<button class="btn btn-sm" id="vdAi">✨ AI customize</button>' +
         '<button class="btn btn-sm" id="vdListen">🔊 Listen first</button>' +
@@ -5382,6 +5383,15 @@
     function inp(id, label, ph, type) {
       return '<div class="vd-field"><label>' + esc(label) + "</label>" +
         '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph) + '" /></div>';
+    }
+    /* A clean option card: title + description with an iOS-style toggle. The
+       checkbox keeps its original id so all existing wiring reads it unchanged. */
+    function vdToggle(id, title, desc) {
+      return '<label class="vd-toggle" for="' + id + '">' +
+        '<input type="checkbox" id="' + id + '" class="vd-toggle-cb" />' +
+        '<span class="vd-toggle-sw" aria-hidden="true"></span>' +
+        '<span class="vd-toggle-txt"><b>' + esc(title) + "</b><span>" + esc(desc) + "</span></span>" +
+        "</label>";
     }
     /* AM/PM hour picker (cleaner than military time). Option values stay 0-23 so
        the backend window math is unchanged; labels read "7:00 PM". */

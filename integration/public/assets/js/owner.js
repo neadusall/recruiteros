@@ -4,6 +4,23 @@
  * spend, full account control (see everyone, hard reset, delete), and the
  * editable cost model. Every call hits /api/owner/* which is walled to the
  * OWNER_EMAIL allow-list server-side; this script only renders what that allows.
+ *
+ * ── NAVIGATION (hash route → view function) ──────────────────────────────────
+ *   Registry + dispatcher:  var ROUTES = … ,  function route()
+ *   #overview    viewOverview    business KPIs + spend rollup
+ *   #pricing     viewPricing     published tiers (→ runCalc, tierCard, recoCard)
+ *   #spend       viewSpend       unified spend
+ *   #people      viewPeople      users & roles (→ renderRoster, roleChip)
+ *   #accounts    viewAccounts    full account control (see/reset/delete)
+ *   #costs       viewCosts       editable cost model
+ *   #security    viewSecurity
+ *   Projection calculator (cost model UI): viewCalculator, computeCalc,
+ *                                recompute, renderScenarios, calcState
+ *   Backend  api(path) / send(path,method,payload)  ← all /api/owner/* calls
+ *   Helpers  esc(), toast(), usd(), pct(), card(), grid(), fld()
+ *
+ * Source of truth is repo-root assets/js/; run integration/sync-public.cjs after
+ * editing (never edit integration/public/). See docs/STRUCTURE.md.
  */
 (function () {
   "use strict";
