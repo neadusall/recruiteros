@@ -4427,7 +4427,10 @@
       '.jd-table th{position:sticky;top:0;background:var(--bg-soft);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);font-weight:700;white-space:nowrap}' +
       '.jd-table a{color:var(--brand-2);text-decoration:none}.jd-table a:hover{text-decoration:underline}' +
       '.jd-run{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}.jd-run:last-child{border-bottom:0}' +
-      '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap}' +
+      '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}' +
+      '.jd-enrich-grp{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-muted);white-space:nowrap}' +
+      '.jd-enrichn{width:62px;padding:5px 7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-soft);color:var(--text);font:inherit;font-size:12.5px}' +
+      '.jd-enrichn:focus{outline:0;border-color:var(--brand)}' +
       '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
       '<ol class="jd-steps" id="jdSteps"></ol>' +
@@ -4448,8 +4451,8 @@
           '<div class="jd-helpsec"><h5>On a saved list</h5>' +
             '<p><b>CSV (URLs)</b>: Download the list as a spreadsheet of LinkedIn profile URLs.</p>' +
             '<p><b>Deep-vet</b>: Reads the top candidates\' full work history against the role and gives each a verified score and a short verdict.</p>' +
-            '<p><b>Enrich top 50</b>: Looks up business email and phone for the top fifty candidates.</p>' +
-            '<p><b>Send to Candidates</b>: Pushes the list into your Candidates pipeline under the same name.</p>' +
+            '<p><b>Enrich top N</b>: You choose how many of the top-ranked candidates to look up business email and phone for. Enrich as few or as many as you want, then push them into any campaign you like. Manual for now; you can wire it to run automatically once you have a campaign set up.</p>' +
+            '<p><b>Send to Candidates</b>: Pushes the list into your Candidates pipeline under the same name, ready to drop into a campaign.</p>' +
             '<p><b>Delete</b>: Removes the saved list. The people themselves are not deleted.</p>' +
           '</div>' +
         '</div>' +
@@ -4617,7 +4620,8 @@
               '<button class="btn btn-ghost btn-sm" data-csv="' + esc(r.id) + '">⬇ CSV (URLs)</button>' +
               '<button class="btn btn-ghost btn-sm" data-vet="' + esc(r.id) + '">🔬 Deep-vet</button>' +
               '<button class="btn btn-primary btn-sm" data-promote="' + esc(r.id) + '">Send to Candidates →</button>' +
-              '<button class="btn btn-ghost btn-sm" data-enrich="' + esc(r.id) + '">⚡ Enrich top 50</button>' +
+              '<span class="jd-enrich-grp">⚡ Enrich top <input type="number" class="jd-enrichn" min="1" max="' + Math.max(1, n) + '" value="' + Math.min(25, Math.max(1, n)) + '" title="Choose how many of the top-ranked candidates to enrich (business email + phone). You decide how many; costs apply per lookup."> ' +
+                '<button class="btn btn-ghost btn-sm" data-enrich="' + esc(r.id) + '">Enrich</button></span>' +
               '<button class="btn btn-ghost btn-sm" data-del="' + esc(r.id) + '">Delete</button>' +
             '</div></div>';
         }).join("");
@@ -4898,11 +4902,14 @@
           loadRuns();
         });
       } else if ((id = t.getAttribute("data-enrich"))) {
-        t.disabled = true; t.textContent = "Enriching…";
-        send("/sourcing", "POST", { action: "enrich", id: id, top: 50 }).then(function (r) {
-          t.disabled = false; t.textContent = "⚡ Enrich top 50";
+        var grp = t.closest(".jd-run");
+        var nEl = grp ? grp.querySelector(".jd-enrichn") : null;
+        var topN = nEl ? Math.max(1, parseInt(nEl.value, 10) || 25) : 25;
+        t.disabled = true; t.textContent = "Enriching " + topN + "…";
+        send("/sourcing", "POST", { action: "enrich", id: id, top: topN }).then(function (r) {
+          t.disabled = false; t.textContent = "Enrich";
           if (!r.ok) { alert("Enrich failed: " + ((r.data && r.data.error) || r.status)); return; }
-          alert("Enriched " + r.data.enriched + " contacts."); loadRuns();
+          alert("Enriched " + r.data.enriched + " contacts. They are ready to push into a campaign whenever you want."); loadRuns();
         });
       } else if ((id = t.getAttribute("data-del"))) {
         if (!confirm("Delete this saved list?")) return;
