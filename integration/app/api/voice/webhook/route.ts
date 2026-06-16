@@ -22,6 +22,7 @@
 import { NextResponse } from "next/server";
 import { telnyx, verifyTelnyxVoice } from "../../../../lib/providers";
 import { decodeClientState } from "../../../../lib/providers/telnyx";
+import { withWorkspaceCreds } from "../../../../lib/connected";
 import { recordUsage } from "../../../../lib/billing/ledger";
 import { rateCost } from "../../../../lib/billing/rates";
 import type { Motion } from "../../../../lib/core/types";
@@ -50,10 +51,39 @@ export async function POST(req: Request) {
   const state = decodeClientState(ev?.client_state);
   if (!ccid) return NextResponse.json({ ok: true, ignored: "no_call_control_id" });
 
+  // The follow-up call-control commands (speak / playback / hangup) MUST be
+  // issued on the SAME Telnyx account that PLACED the call. The dial is wrapped
+  // in withWorkspaceCreds, so a customer using their own Telnyx key has the call
+  // living on THEIR account — issuing the commands on the bare house singleton
+  // (a different or empty TELNYX_API_KEY) silently fails: dead air on a human
+  // answer, no message left on a machine. Recover the workspace from the pending
+  // plan (falls back to client_state) and run the whole handler under its creds.
+  const workspaceId =
+    getPending(ccid)?.workspaceId ||
+    (typeof state.workspaceId === "string" ? state.workspaceId : "");
+
+  const action = workspaceId
+    ? await withWorkspaceCreds(workspaceId, () => handleEvent(type, ccid, ev, state))
+    : await handleEvent(type, ccid, ev, state);
+
+  return NextResponse.json({ ok: true, event: type, action });
+}
+
+/**
+ * Route one Telnyx call-control event. Runs inside the call's workspace creds
+ * (see POST) so every telnyx.* action authenticates as the account that dialed.
+ */
+async function handleEvent(
+  type: string, ccid: string, ev: any, state: Record<string, unknown>,
+): Promise<string> {
   let action = "none";
 
   switch (type) {
-    // Premium AMD verdict: who/what answered.
+    // Premium AMD verdict: who/what answered. Telnyx names the event
+    // `call.machine.premium.detection.ended` in PREMIUM mode and
+    // `call.machine.detection.ended` in the basic modes — handle both, or a
+    // premium human-answer never gets the honest identifier (dead air).
+    case "call.machine.premium.detection.ended":
     case "call.machine.detection.ended": {
       const result = String(ev?.result ?? "").toLowerCase();
       if (result === "human" || result === "not_sure") {
@@ -136,7 +166,7 @@ export async function POST(req: Request) {
       action = "ignored";
   }
 
-  return NextResponse.json({ ok: true, event: type, action });
+  return action;
 }
 
 /**
