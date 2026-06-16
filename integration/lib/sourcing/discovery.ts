@@ -71,6 +71,13 @@ function mapRow(o: any): CandidateRow | null {
   const primary = str(o.primarySubtitle);
   let company = str(o.company) || str(o.company_name) || str(o.companyName) || str(o.current_company);
   if (!company && primary && / at /i.test(primary)) company = primary.split(/ at /i).slice(1).join(" at ").trim();
+  // Many listings embed the employer in the title line ("Software Engineer @ Google | …"
+  // or "VP Sales at Acme"); pull the company out so the target-company signal still scores.
+  if (!company) {
+    const t = str(o.title) || str(o.job_title) || str(o.headline);
+    const m = t && t.match(/\s(?:@|at)\s+(.+)$/i);
+    if (m) company = m[1].split(/[|·•·–—\-]| - /)[0].trim() || undefined;
+  }
   let url = str(o.linkedin_url) || str(o.linkedinUrl) || str(o.profile_url) || str(o.profileUrl) ||
     str(o.url) || str(o.link) || str(o.profileURL) || str(o.navigationUrl);
   if (url) url = url.split("?")[0]; // strip tracking params → clean URL + reliable dedupe
@@ -118,9 +125,18 @@ async function rapidApiPeopleSearch(term: string, page: number, count: number): 
     const url = `https://${host}${PS_PATH()}`;
     res = await fetch(url, { method: "POST", headers, body: JSON.stringify({ keywords: term, count }) });
   } else {
-    const path = PS_PATH().replace("{query}", encodeURIComponent(term)).replace("{page}", String(page));
-    const url = `https://${host}${path}${path.includes("{") || path.includes("query=") ? "" : (path.includes("?") ? "&" : "?") + "query=" + encodeURIComponent(term) + "&page=" + page}`;
-    res = await fetch(url, { headers });
+    // GET listing. A path that carries {query}/{page} placeholders is treated as a FULL
+    // template, so any listing's own parameter names work as-is — e.g. Fresh LinkedIn
+    // Scraper's `/api/v1/search/people?name={query}&page={page}&limit=10`. Without
+    // placeholders we fall back to the conventional ?query=&page= append.
+    const raw = PS_PATH();
+    const templated = raw.includes("{query}") || raw.includes("{page}");
+    let path = raw.replace(/\{query\}/g, encodeURIComponent(term)).replace(/\{page\}/g, String(page));
+    if (!templated) {
+      const sep = path.includes("?") ? "&" : "?";
+      path = `${path}${sep}query=${encodeURIComponent(term)}&page=${page}`;
+    }
+    res = await fetch(`https://${host}${path}`, { headers });
   }
   if (!res.ok) throw new Error(`rapidapi ${host} ${res.status}`);
   const data = await res.json().catch(() => ({}));
@@ -186,7 +202,9 @@ export async function runDiscovery(
       for (let page = 1; page <= maxPages && collected < perQuery; page++) {
         let rows: CandidateRow[] = [];
         try {
-          const term = post ? (query.keyword || query.label) : (query.xray || query.label);
+          // Keyword-first: modern people-search listings take a plain keyword (role + company/geo),
+          // not a Google X-ray boolean. Fall back to the X-ray only if no keyword was generated.
+          const term = query.keyword || query.label || query.xray;
           rows = await rapidApiPeopleSearch(term, page, Math.min(perQuery, 100));
         } catch (err) {
           warnings.push(`rapidapi(${query.group}${post ? "" : " p" + page}): ${(err as Error).message}`);

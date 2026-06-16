@@ -146,14 +146,14 @@ const CATALOG: IntegrationMeta[] = [
   {
     id: "jd_sourcing",
     label: "JD Sourcing (RapidAPI people search)",
-    blurb: "Powers the JD Sourcing tab — people-search to find candidates from a JD, plus profile lookup for deep-vetting. Bring your own RapidAPI account. Placeholders below are prefilled for the Linkedin Data Scraper API (API Builderz).",
+    blurb: "Powers the JD Sourcing tab — people-search to find candidates from a JD, plus profile lookup for deep-vetting. Bring your own RapidAPI account. Placeholders below are prefilled for the Fresh LinkedIn Scraper API (by SaleLeads) — a fast, server-side listing that works without a CAPTCHA.",
     requiredFor: [],
     fields: [
       { key: "RAPIDAPI_KEY", label: "RapidAPI key", required: true, secret: true, placeholder: "paste your RapidAPI key", hint: "Your own RapidAPI account key (the x-rapidapi-key value). Billed to you." },
       // --- Search (finds candidates) ---
-      { key: "RAPIDAPI_PEOPLE_SEARCH_HOST", label: "Search · host", required: true, placeholder: "realtime-linkedin-fresh-data.p.rapidapi.com", hint: "The listing's x-rapidapi-host (from any endpoint's cURL)." },
-      { key: "RAPIDAPI_PEOPLE_SEARCH_PATH", label: "Search · path", required: true, placeholder: "/search_people", hint: "The Search People endpoint path — the part after .com in its cURL." },
-      { key: "RAPIDAPI_PEOPLE_SEARCH_METHOD", label: "Search · method", required: false, placeholder: "POST", hint: "GET or POST. Enter POST for this listing (it sends {keywords,count} as a JSON body). Leave blank = GET." },
+      { key: "RAPIDAPI_PEOPLE_SEARCH_HOST", label: "Search · host", required: true, placeholder: "fresh-linkedin-scraper-api.p.rapidapi.com", hint: "The listing's x-rapidapi-host (from any endpoint's cURL)." },
+      { key: "RAPIDAPI_PEOPLE_SEARCH_PATH", label: "Search · path", required: true, placeholder: "/api/v1/search/people?name={query}&page={page}&limit=10", hint: "Full path including the query string. Put {query} where the search keyword goes and {page} for the page number — both are filled in automatically per search." },
+      { key: "RAPIDAPI_PEOPLE_SEARCH_METHOD", label: "Search · method", required: false, placeholder: "GET", hint: "GET or POST. Enter GET for the Fresh LinkedIn Scraper listing. Leave blank = GET." },
       // --- Deep-vet (reads full work history; optional) ---
       { key: "RAPIDAPI_PROFILE_HOST", label: "Deep-vet · host", required: false, placeholder: "realtime-linkedin-fresh-data.p.rapidapi.com", hint: "Usually the same host. Enables deep-vet against full work history. Leave blank to skip deep-vet." },
       { key: "RAPIDAPI_PROFILE_PATH", label: "Deep-vet · path", required: false, placeholder: "/person_deep", hint: "The profile-by-URL endpoint path." },
@@ -161,13 +161,13 @@ const CATALOG: IntegrationMeta[] = [
       { key: "RAPIDAPI_PROFILE_BODY_KEY", label: "Deep-vet · URL field", required: false, placeholder: "link", hint: "POST only: the body key the profile endpoint expects the URL under (person_deep uses 'link')." },
     ],
     steps: [
-      "Subscribe to the Linkedin Data Scraper API (API Builderz) on RapidAPI — the free Basic plan is enough to start.",
-      "SEARCH → host: realtime-linkedin-fresh-data.p.rapidapi.com · path: /search_people · method: POST",
-      "DEEP-VET → host: (same) · path: /person_deep · method: POST · URL field: link",
-      "Paste your RapidAPI key, fill the values above, Save. ('No client' on Test is expected — the JD Sourcing tab uses these directly.)",
+      "Subscribe to the Fresh LinkedIn Scraper API (by SaleLeads) on RapidAPI — the free plan is enough to start.",
+      "SEARCH → host: fresh-linkedin-scraper-api.p.rapidapi.com · path: /api/v1/search/people?name={query}&page={page}&limit=10 · method: GET",
+      "Paste your RapidAPI key, fill the three Search values above exactly, Save, then Test — it should go green.",
+      "DEEP-VET is optional — leave the Deep-vet fields blank for now; candidate search works without them.",
     ],
-    docsUrl: "https://rapidapi.com/search/linkedin%20data%20scraper",
-    docsLabel: "Linkedin Data Scraper API on RapidAPI ↗",
+    docsUrl: "https://rapidapi.com/saleleads-saleleads-default/api/fresh-linkedin-scraper-api",
+    docsLabel: "Fresh LinkedIn Scraper API on RapidAPI ↗",
   },
   {
     id: "tomba",
