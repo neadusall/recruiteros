@@ -4300,6 +4300,8 @@
       '.jd-or{display:flex;align-items:center;text-align:center;color:var(--text-dim);font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin:4px 0 12px}' +
       '.jd-or::before,.jd-or::after{content:"";flex:1;height:1px;background:var(--border)}' +
       '.jd-or span{padding:0 12px}' +
+      '.jd-buildbar{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:12px 0 2px}' +
+      '.jd-buildbar .muted{font-size:12px}' +
       '#jdName,#jdText{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 13px}' +
       '#jdName{margin-bottom:10px;font-weight:600}#jdText{line-height:1.55;resize:vertical;min-height:170px}' +
       '#jdName::placeholder,#jdText::placeholder{color:var(--text-dim)}' +
@@ -4319,29 +4321,28 @@
       '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
       '<div class="card">' +
-        '<div class="jd-builder"><div class="jd-builder-h">✨ Build a sourcing-ready JD</div>' +
-          '<div class="jd-builder-sub">Give what you\'ve got — a title, company, key details, or a rough JD in the box below — and the AI strengthens it into a precise, wide-net brief that becomes a ranked shortlist.</div>' +
-          '<div class="jd-builder-row">' +
-            '<input id="jdbTitle" type="text" placeholder="Job title — e.g. VP of Sales" />' +
-            '<input id="jdbCompany" type="text" placeholder="Company name or URL (optional)" />' +
-          '</div>' +
-          '<input id="jdbNotes" type="text" placeholder="Anything specific — seniority, location, must-haves (optional)" />' +
-          '<div class="jd-builder-act"><button class="btn btn-primary btn-sm" id="jdbBtn">✨ Build / strengthen</button>' +
-            '<span class="muted">We build on whatever you give us. Review, then Analyze.</span></div>' +
+        '<div class="jd-builder-row">' +
+          '<input id="jdbTitle" type="text" placeholder="Job title, e.g. VP of Sales" />' +
+          '<input id="jdbCompany" type="text" placeholder="Company name or URL (optional)" />' +
         '</div>' +
-        '<div class="jd-or"><span>or paste your own</span></div>' +
+        '<input id="jdbNotes" type="text" placeholder="Anything specific: seniority, location, must-haves (optional)" />' +
         '<input id="jdName" type="text" placeholder="Name this list, e.g. JAGGAER VP Sales · East" />' +
-        '<textarea id="jdText" rows="8" placeholder="Paste the full job description here…"></textarea>' +
-        '<div class="jd-tips"><span class="jd-tips-h">You bring the essentials — the AI does the heavy lifting. Cover what you can below; the more it has to work with, the sharper your shortlist:</span>' +
+        '<textarea id="jdText" rows="8" placeholder="Paste your job description here. The more real detail you give, the stronger the search."></textarea>' +
+        '<div class="jd-builder"><div class="jd-builder-h">✨ Build a refined, sourcing-ready JD</div>' +
+          '<div class="jd-builder-sub">Your input is the benchmark. The AI refines it, shores up the gaps, and widens the net into a precise, sourcing-ready brief. Stronger input means a stronger search. Run this first, then Analyze.</div>' +
+          '<div class="jd-buildbar" style="margin-top:2px"><button class="btn btn-primary btn-sm" id="jdbBtn">✨ Build refined JD</button>' +
+            '<span class="muted">Refines everything you entered above, then review and Analyze.</span></div>' +
+        '</div>' +
+        '<div class="jd-tips"><span class="jd-tips-h">You bring the essentials. The AI does the heavy lifting. Cover what you can below; the more it has to work with, the sharper your shortlist:</span>' +
           '<div class="jd-tipgrid">' +
-            '<span><b>Title &amp; level</b> — the exact role and seniority (and whether it leads a team)</span>' +
-            '<span><b>Target companies</b> — 5–10 competitors or peers worth poaching from</span>' +
-            '<span><b>Location</b> — the metros that matter, or state “remote”</span>' +
-            '<span><b>Industry / domain</b> — where strong candidates come from</span>' +
-            '<span><b>Must-have experience</b> — what they’ve actually done, not nice-to-haves</span>' +
-            '<span><b>Who they sell to</b> — buyer personas, for sales roles</span>' +
-            '<span><b>Deal-breakers</b> — what should rule a candidate out</span>' +
-            '<span><b>Proof of impact</b> — quota, scale, team size, or metrics to match on</span>' +
+            '<span><b>Title &amp; level</b>: the exact role and seniority, and whether it leads a team</span>' +
+            '<span><b>Target companies</b>: 5 to 10 competitors or peers worth poaching from</span>' +
+            '<span><b>Location</b>: the metros that matter, or just say remote</span>' +
+            '<span><b>Industry / domain</b>: where strong candidates come from</span>' +
+            '<span><b>Must-have experience</b>: what they have actually done, not nice-to-haves</span>' +
+            '<span><b>Who they sell to</b>: buyer personas, for sales roles</span>' +
+            '<span><b>Deal-breakers</b>: what should rule a candidate out</span>' +
+            '<span><b>Proof of impact</b>: quota, scale, team size, or metrics to match on</span>' +
           '</div>' +
         '</div>' +
         '<div class="jd-actions">' +
@@ -4356,7 +4357,7 @@
       '</div>' +
       '<div class="card jd-prog" id="jdProgress" style="display:none"></div>' +
       '<div class="card" id="jdQueueCard" style="display:none"><h3>Queue <span class="muted" id="jdQueueCount"></span></h3>' +
-        '<p class="muted" style="margin-top:-4px">Each queued JD runs in turn — search → rank → save — using the Max / min-fit set above. Keep this tab open while the queue runs; each finished list lands below with a downloadable CSV of LinkedIn URLs.</p>' +
+        '<p class="muted" style="margin-top:-4px">Each queued JD runs in turn (search, rank, save) using the Max and min-fit set above. Keep this tab open while the queue runs; each finished list lands below with a downloadable CSV of LinkedIn URLs.</p>' +
         '<div id="jdQueueList"></div>' +
         '<div class="jd-actions">' +
           '<button class="btn btn-primary btn-sm" id="jdQueueRun">▶ Run queue</button>' +
@@ -4367,10 +4368,10 @@
       '<div id="jdPlan"></div>' +
       '<div id="jdResults"></div>' +
       '<div class="card">' +
-        '<div class="jd-cardhead"><h3 style="margin:0">Saved sourcing lists</h3>' +
+        '<div class="jd-cardhead"><h3 style="margin:0">Your saved candidate lists</h3>' +
           '<span class="jd-vetctl">Deep-vet top <input id="jdVetTop" type="number" min="1" max="200" value="25">' +
             '<span id="jdVetCost" class="jd-cost"></span></span></div>' +
-        '<p class="jd-sub">Reads each shortlisted candidate\'s full career history against the role and returns a verified fit score and verdict — the first-pass screen your team would do by hand, across the whole list in seconds. Run it on the top N you choose.</p>' +
+        '<p class="jd-sub">Reads each shortlisted candidate\'s full career history against the role and returns a verified fit score and verdict. It is the first-pass screen your team would do by hand, across the whole list in seconds. Run it on the top N you choose.</p>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
     function msg(t) { var m = $("#jdMsg"); if (m) m.textContent = t || ""; }
@@ -4389,7 +4390,7 @@
           '<div><b>Sells to</b><br>' + chips(i.sellsTo) + '</div>' +
           '<div><b>Disqualifiers</b><br>' + chips(i.disqualifiers) + '</div>' +
         '</div>' +
-        '<div class="jd-refine"><input id="jdRefineInput" type="text" placeholder="Dive deeper — refine with AI, e.g. only Director+ who sold into manufacturing, exclude agencies" />' +
+        '<div class="jd-refine"><input id="jdRefineInput" type="text" placeholder="Dive deeper: refine with AI, e.g. only Director+ who sold into manufacturing, exclude agencies" />' +
           '<button class="btn btn-primary btn-sm" id="jdRefineBtn">✨ Refine</button></div>' +
         (state.refineNote ? '<p class="jd-refine-note">✨ ' + esc(state.refineNote) + '</p>' : '') +
         '<h4 style="margin-top:14px">Generated searches (' + state.queries.length + ')</h4>' +
@@ -4422,7 +4423,7 @@
         var host = $("#jdRuns"); if (!host) return;
         var runs = (d && d.runs) || [];
         state.runs = runs;
-        if (!runs.length) { host.innerHTML = '<p class="muted">No saved lists yet. Analyze a JD, find candidates, then Save — or queue several JDs above and ▶ Run queue.</p>'; return; }
+        if (!runs.length) { host.innerHTML = '<p class="muted">No saved lists yet. Analyze a JD, find candidates, then Save. Or queue several JDs above and run them with the Run queue button.</p>'; return; }
         host.innerHTML = runs.map(function (r) {
           var n = r.candidates ? r.candidates.length : 0;
           var urls = (r.candidates || []).filter(function (c) { return c.linkedinUrl; }).length;
@@ -4514,17 +4515,17 @@
       var company = companyEl ? companyEl.value.trim() : "";
       var notes = notesEl ? notesEl.value.trim() : "";
       var base = ta ? ta.value.trim() : "";   // strengthen whatever's already in the box
-      if (!title && !base) { titleEl.focus(); msg("Add a title — or paste a rough JD below — and we'll strengthen it."); return; }
+      if (!title && !base) { titleEl.focus(); msg("Add a title, or paste a rough JD below, and we'll strengthen it."); return; }
       var btn = $("#jdbBtn"); if (btn) { btn.disabled = true; btn.textContent = "Working…"; }
       msg(base ? "Strengthening what you gave us into a sourcing brief…" : "Drafting a sourcing-ready JD…");
       send("/sourcing", "POST", { action: "draft", title: title, company: company, companyUrl: company, notes: notes, base: base }).then(function (r) {
-        if (btn) { btn.disabled = false; btn.textContent = "✨ Build / strengthen"; }
+        if (btn) { btn.disabled = false; btn.textContent = "✨ Build refined JD"; }
         if (!r.ok) { msg("Build failed: " + ((r.data && r.data.error) || r.status)); return; }
         var jd = (r.data && r.data.jd) || "";
         if (ta && jd) { ta.value = jd; ta.focus(); }
         state.jd = jd;
         var nameEl = $("#jdName"); if (nameEl && !nameEl.value.trim() && title) nameEl.value = title + (company ? (" · " + company) : "");
-        msg(jd ? "Brief ready below — review/tweak, then Analyze JD." : "Couldn't build — add a few more details and try again.");
+        msg(jd ? "Brief ready below. Review or tweak it, then Analyze JD." : "Couldn't build it. Add a few more details and try again.");
       });
     }
 
@@ -4544,7 +4545,7 @@
         state.candidates = []; state.warnings = [];
         $("#jdFind").disabled = false; $("#jdSave").disabled = true;
         renderPlan(); renderResults(); updateRunCost();
-        msg("Search refined — review the updated profile, then Find candidates again.");
+        msg("Search refined. Review the updated profile, then Find candidates again.");
       });
     }
 
@@ -4616,7 +4617,7 @@
     }
     function runQueue() {
       if (state.running) return;
-      if (!state.queue.length) { msg("Queue is empty — add a JD with ➕ Add to queue."); return; }
+      if (!state.queue.length) { msg("Queue is empty. Add a JD with the Add to queue button."); return; }
       var cap = parseInt($("#jdCap").value, 10) || 3000;
       var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 45;
       state.running = true;
@@ -4625,8 +4626,8 @@
       var total = state.queue.length, done = 0, failed = 0;
       function finish() {
         state.running = false; if (runBtn) runBtn.disabled = false;
-        if (progEl) progEl.textContent = "Done — saved " + done + (failed ? (", " + failed + " failed") : "") + ". Download CSVs below.";
-        finishProgress("Queue complete — saved " + done + (failed ? (", " + failed + " failed") : ""));
+        if (progEl) progEl.textContent = "Done. Saved " + done + (failed ? (", " + failed + " failed") : "") + ". Download CSVs below.";
+        finishProgress("Queue complete. Saved " + done + (failed ? (", " + failed + " failed") : ""));
         renderQueue(); loadRuns();
       }
       function next() {
@@ -4707,7 +4708,7 @@
           finishProgress("Deep-vetted " + (r.data.vetted || 0));
           var warn = (r.data.warnings || []).length ? ("\n\n" + r.data.warnings.slice(0, 3).join("\n")) : "";
           alert("Deep-vetted " + r.data.vetted + " candidate" + (r.data.vetted === 1 ? "" : "s") +
-            (r.data.deep ? " against full work history." : " on surface fields only — set RAPIDAPI_PROFILE_HOST/PATH to vet full profiles.") +
+            (r.data.deep ? " against full work history." : " on surface fields only. Add the deep-vet profile endpoint in Setup to read full work history.") +
             " Ranked by verified score; download the CSV for the verdicts." + warn);
           loadRuns();
         });
@@ -4726,7 +4727,7 @@
 
     $("#jdQueueAdd").addEventListener("click", addToQueue);
     $("#jdQueueRun").addEventListener("click", runQueue);
-    $("#jdQueueClear").addEventListener("click", function () { if (state.running) { msg("Queue is running — let it finish."); return; } state.queue = []; renderQueue(); });
+    $("#jdQueueClear").addEventListener("click", function () { if (state.running) { msg("Queue is running. Let it finish."); return; } state.queue = []; renderQueue(); });
     $("#jdQueueList").addEventListener("click", function (e) {
       var t = e.target; if (t.tagName !== "BUTTON") return;
       var i = t.getAttribute("data-qrm");
