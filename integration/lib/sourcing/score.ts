@@ -2,59 +2,182 @@
  * RecruitersOS · JD Sourcing
  * Rule-based fit scoring of a discovered candidate against the ICP.
  *
- * Deliberately cheap and deterministic ($0, no model call) so we can score every one
- * of thousands of rows. The optional LLM re-score (top slice only) lives elsewhere; this
- * is the bulk ranker. Scores are 0..100 with a transparent reason list for the UI.
+ * Deterministic and free ($0, no model call) so we can score thousands of rows
+ * instantly. This is the cheap TRIAGE layer — it orders candidates and decides who
+ * earns a (paid) deep-vet; the LLM deep-vet (deepVet.ts) is the real qualifier that
+ * reads full work history. Stage-1's job is to be an honest, interpretable pre-vet rank.
  *
- * Signals, by weight:
- *   title match (40) · target-company match (25) · geography (20) ·
- *   seniority/leadership (10) · industry/keyword (5).  Disqualifiers zero the row.
+ * Design (weighted + normalized to 100, so the score reads like "% fit"):
+ *   function match 35 · seniority match 20 · target company/industry 15 ·
+ *   geography 15 · domain/must-have 15.
+ * Plus seniority MISMATCH penalties (too junior / overqualified), soft negatives,
+ * and a cap when there's no title to assess. Hard disqualifiers zero the row.
+ *
+ * Matching is token/phrase-boundary based — "Salesforce" no longer counts as "Sales",
+ * and "VP of Engineering" no longer matches a "VP Sales" ICP on the word "VP".
  */
 
 import type { CandidateICP, CandidateRow } from "./types";
 
-function hay(row: CandidateRow): string {
-  return [row.title, row.headline, row.company, row.location].filter(Boolean).join(" · ").toLowerCase();
+/* ------------------------------------------------------------------ */
+/* Tokenization & boundary-aware matching                              */
+/* ------------------------------------------------------------------ */
+
+function tokens(s: string | undefined): string[] {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter(Boolean);
 }
 
-function anyHit(text: string, needles: string[]): string | null {
-  for (const n of needles) {
-    const t = n.trim().toLowerCase();
-    if (t && text.includes(t)) return n;
-  }
+/** Token-boundary phrase match: "sales" hits "vp of sales" but NOT "salesforce". */
+function phraseHit(text: string, phrase: string): boolean {
+  const t = " " + tokens(text).join(" ") + " ";
+  const p = tokens(phrase).join(" ");
+  return p.length > 0 && t.includes(" " + p + " ");
+}
+
+/** First phrase from `needles` that hits `text` (token-boundary), or null. */
+function anyPhrase(text: string, needles: string[]): string | null {
+  for (const n of needles) if (n && phraseHit(text, n)) return n;
   return null;
 }
 
-const LEADERSHIP = ["vp", "vice president", "head of", "director", "rvp", "regional", "area", "chief", "svp"];
+/* ------------------------------------------------------------------ */
+/* Seniority bands                                                     */
+/* ------------------------------------------------------------------ */
+
+type Band = "ic" | "manager" | "director" | "vp" | "exec";
+const RANK: Record<Band, number> = { ic: 0, manager: 1, director: 2, vp: 3, exec: 4 };
+
+const VP_MARKERS = ["vice president", "vp", "rvp", "avp", "area vice president", "regional vice president"];
+const EXEC_MARKERS = ["chief", "ceo", "cfo", "coo", "cto", "cmo", "cro", "cio", "ciso", "svp", "evp", "senior vice president", "executive vice president", "president", "founder", "co founder", "owner", "managing partner", "managing director", "partner"];
+const DIRECTOR_MARKERS = ["director", "head of", "vp of"]; // "vp of" already caught above; harmless
+const MANAGER_MARKERS = ["manager", "supervisor", "team lead", "lead"];
+
+/** Infer the candidate's seniority band from their title/headline text. */
+function detectBand(titleText: string): Band {
+  // VP before EXEC so "vice president" isn't swallowed by the "president" marker.
+  if (anyPhrase(titleText, VP_MARKERS)) return "vp";
+  if (anyPhrase(titleText, EXEC_MARKERS)) return "exec";
+  if (anyPhrase(titleText, DIRECTOR_MARKERS)) return "director";
+  if (anyPhrase(titleText, MANAGER_MARKERS)) return "manager";
+  return "ic";
+}
+
+/* ------------------------------------------------------------------ */
+/* Function terms derived from the ICP titles                          */
+/* ------------------------------------------------------------------ */
+
+const SENIORITY_WORDS = new Set([
+  "vp", "svp", "evp", "rvp", "avp", "vice", "president", "chief", "head", "of",
+  "director", "senior", "sr", "junior", "jr", "lead", "manager", "mgr", "regional",
+  "area", "global", "national", "executive", "officer", "co", "founder", "owner",
+  "principal", "the", "and", "for", "a", "an",
+]);
+
+/** Strip seniority/leadership words from an ICP title to leave its FUNCTION phrase. */
+function functionPhrase(title: string): string {
+  return tokens(title).filter((w) => !SENIORITY_WORDS.has(w) && w.length >= 3).join(" ");
+}
+
+/** Unique function tokens across all ICP titles (for partial overlap credit). */
+function functionTerms(icp: CandidateICP): Set<string> {
+  const out = new Set<string>();
+  const src = icp.titles.length ? icp.titles : [];
+  for (const t of src) for (const w of functionPhrase(t).split(" ")) if (w) out.add(w);
+  // Fall back to industry tokens if the titles carried no function words.
+  if (!out.size) for (const ind of icp.industries) for (const w of tokens(ind)) if (w.length >= 3) out.add(w);
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Soft negatives                                                      */
+/* ------------------------------------------------------------------ */
+
+const SOFT_NEGATIVES = ["intern", "internship", "student", "trainee", "apprentice", "volunteer", "freelance", "freelancer", "seeking", "open to work", "unemployed"];
+
+/* ------------------------------------------------------------------ */
+/* Scorer                                                              */
+/* ------------------------------------------------------------------ */
+
+const WEIGHTS = { fn: 35, seniority: 20, company: 15, geo: 15, domain: 15 };
 
 export function scoreCandidate(row: CandidateRow, icp: CandidateICP): { fitScore: number; fitReasons: string[] } {
-  const text = hay(row);
-  const titleText = (row.title || row.headline || "").toLowerCase();
+  const fullText = [row.title, row.headline, row.company, row.location].filter(Boolean).join(" · ");
+  const titleText = (row.title || row.headline || "").trim();
   const reasons: string[] = [];
 
   // Hard disqualifiers zero the row immediately.
-  const dq = anyHit(text, icp.disqualifiers);
+  const dq = anyPhrase(fullText, icp.disqualifiers);
   if (dq) return { fitScore: 0, fitReasons: [`Disqualified: matches "${dq}"`] };
+
+  // No title to judge — we can't assess fit; cap low so company/geo can't inflate it.
+  if (!titleText) {
+    let s = 0;
+    if (anyPhrase((row.location || "").toLowerCase(), icp.geos)) { s += 8; reasons.push("In-target geo (no title to assess)"); }
+    if (anyPhrase((row.company || "").toLowerCase(), icp.targetCompanies)) { s += 10; reasons.push("At target company (no title to assess)"); }
+    reasons.unshift("No title on the record — can't verify fit");
+    return { fitScore: Math.min(25, s), fitReasons: reasons };
+  }
 
   let score = 0;
 
-  const titleHit = anyHit(titleText, icp.titles);
-  if (titleHit) { score += 40; reasons.push(`Title matches "${titleHit}"`); }
-  else if (anyHit(titleText, LEADERSHIP)) { score += 20; reasons.push("Leadership-level title"); }
+  /* 1. Function match (35) — what the person actually does. */
+  const titlePhrases = (icp.titles.length ? icp.titles : []).map(functionPhrase).filter(Boolean);
+  const exactFn = titlePhrases.find((p) => phraseHit(titleText, p));
+  if (exactFn) {
+    score += WEIGHTS.fn; reasons.push(`Function match: "${exactFn}"`);
+  } else {
+    const terms = functionTerms(icp);
+    const tt = new Set(tokens(titleText));
+    const hits = [...terms].filter((w) => tt.has(w));
+    if (hits.length) {
+      const partial = Math.min(WEIGHTS.fn - 7, hits.length * 14); // 1 hit→14, 2→28, capped < exact
+      score += partial; reasons.push(`Partial function match: ${hits.slice(0, 3).join(", ")}`);
+    } else {
+      reasons.push("No function match — likely a different role family");
+    }
+  }
 
-  const companyHit = anyHit((row.company || "").toLowerCase(), icp.targetCompanies);
-  if (companyHit) { score += 25; reasons.push(`At target company ${companyHit}`); }
+  /* 2. Seniority match (20) with mismatch penalties. */
+  const candBand = detectBand(titleText);
+  const targetRank = RANK[(icp.seniority as Band) ?? "director"];
+  const diff = candBand ? RANK[candBand] - targetRank : 0;
+  const ad = Math.abs(diff);
+  if (ad === 0) { score += WEIGHTS.seniority; reasons.push(`Seniority on target (${candBand})`); }
+  else if (ad === 1) { score += 12; reasons.push(`Seniority within one band (${candBand} vs ${icp.seniority})`); }
+  else if (ad === 2) { score += 4; reasons.push(diff < 0 ? `Likely too junior (${candBand})` : `Likely overqualified (${candBand})`); }
+  else { reasons.push(diff < 0 ? `Far too junior (${candBand})` : `Far overqualified (${candBand})`); }
+  if (icp.managesTeam && RANK[candBand] < RANK.manager) { score = Math.max(0, score - 6); reasons.push("Role needs a people-manager — candidate looks IC"); }
 
-  const geoHit = anyHit((row.location || "").toLowerCase(), icp.geos);
-  if (geoHit) { score += 20; reasons.push(`In-target geo (${geoHit})`); }
-  else if (icp.remoteOk && /remote/.test(text)) { score += 8; reasons.push("Remote (geo-flexible)"); }
+  /* 3. Target company / industry (15). */
+  const companyText = (row.company || "").toLowerCase();
+  const co = anyPhrase(companyText, icp.targetCompanies);
+  if (co) { score += WEIGHTS.company; reasons.push(`At target company ${co}`); }
+  else {
+    const ind = anyPhrase([row.company, row.headline].filter(Boolean).join(" "), icp.industries);
+    if (ind) { score += 8; reasons.push(`Adjacent — in-industry (${ind})`); }
+  }
 
-  if (icp.managesTeam && anyHit(titleText, LEADERSHIP)) { score += 10; reasons.push("Manages a team"); }
+  /* 4. Geography (15). */
+  const locText = (row.location || "").toLowerCase();
+  const geo = anyPhrase(locText, icp.geos);
+  if (geo) { score += WEIGHTS.geo; reasons.push(`In-target geo (${geo})`); }
+  else if (icp.remoteOk && /\bremote\b/.test(fullText.toLowerCase())) { score += 8; reasons.push("Remote (geo-flexible)"); }
 
-  const indHit = anyHit(text, icp.industries) || anyHit(text, icp.mustHave);
-  if (indHit) { score += 5; reasons.push(`Domain signal "${indHit}"`); }
+  /* 5. Domain / must-have signals (15). */
+  let domain = 0;
+  const mh = anyPhrase(fullText, icp.mustHave);
+  if (mh) { domain += 9; reasons.push(`Must-have signal "${mh}"`); }
+  const ind2 = anyPhrase(fullText, icp.industries);
+  if (ind2) { domain += 4; reasons.push(`Domain signal "${ind2}"`); }
+  const nh = anyPhrase(fullText, icp.niceToHave);
+  if (nh) { domain += 2; reasons.push(`Nice-to-have "${nh}"`); }
+  score += Math.min(WEIGHTS.domain, domain);
 
-  if (anyHit(text, icp.niceToHave)) { score += 3; reasons.push("Has a nice-to-have"); }
+  /* Soft negatives — penalize junior/transient markers on a senior search. */
+  if (targetRank >= RANK.director) {
+    const neg = anyPhrase(fullText, SOFT_NEGATIVES);
+    if (neg) { score = Math.max(0, score - 15); reasons.push(`Soft negative for a senior role: "${neg}"`); }
+  }
 
-  return { fitScore: Math.max(0, Math.min(100, score)), fitReasons: reasons };
+  return { fitScore: Math.max(0, Math.min(100, Math.round(score))), fitReasons: reasons };
 }

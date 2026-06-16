@@ -11,6 +11,8 @@ export { parseJobDescription } from "./parseJobDescription";
 export { generateQueries } from "./generateQueries";
 export { scoreCandidate } from "./score";
 export { runDiscovery, rapidApiSearchConfigured, type DiscoveryResult } from "./discovery";
+export { fetchFullProfile, profileFetchConfigured, type FullProfile, type ProfileExperience } from "./profile";
+export { deepVetCandidate, type VetResult } from "./deepVet";
 export {
   listSourcingRuns, getSourcingRun, saveSourcingRun, deleteSourcingRun,
   purgeWorkspaceSourcingRuns, type SaveRunInput,

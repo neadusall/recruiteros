@@ -77,6 +77,24 @@ export interface CandidateRow {
   sourceGroup?: string;
   /** Data source that produced the row (rapidapi / scraper / web). */
   provider?: string;
+
+  /* --- Stage-2 deep-vet (LLM reads the full profile vs the JD) ------------- */
+  /** 0..100 verified fit after reading the candidate's full work history. */
+  verifiedScore?: number;
+  /** Headline verdict from the deep-vet pass. */
+  verdict?: "strong" | "possible" | "weak" | "no";
+  /** Estimated years of role-relevant experience. */
+  yearsRelevant?: number;
+  /** What genuinely fits (from the work history, not the title line). */
+  vetStrengths?: string[];
+  /** Where the candidate falls short of the JD. */
+  vetGaps?: string[];
+  /** Risk flags: job_hopping, title_inflation, domain_mismatch, gap, etc. */
+  vetFlags?: string[];
+  /** One-line human-readable rationale for the verified score. */
+  vetRationale?: string;
+  /** True once the full profile was fetched (vs vetted on shallow fields only). */
+  profileFetched?: boolean;
 }
 
 /** A named, saved sourcing result that lives in the JD Sourcing tab (staging). */

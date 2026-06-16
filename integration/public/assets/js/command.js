@@ -4243,7 +4243,7 @@
      deduped candidate list -> save it under a NAME here (staging) -> send it to
      Candidates under that same name. Backend: /api/sourcing + lib/sourcing/*. */
   function renderJdSourcing(el) {
-    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "" };
+    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", queue: [], runs: [], running: false };
 
     el.innerHTML =
       '<style>' +
@@ -4253,6 +4253,9 @@
       '.jd-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}' +
       '.jd-cap{font-size:12.5px;color:var(--text-muted);display:inline-flex;align-items:center;gap:6px}' +
       '.jd-cap input{width:62px;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px;margin:0 2px}' +
+      '.jd-cost{display:inline-block;margin-left:10px;padding:4px 12px;border-radius:999px;background:linear-gradient(135deg,rgba(124,92,255,.16),rgba(80,200,255,.12));border:1px solid rgba(124,92,255,.4);color:var(--text);font-size:12.5px;font-weight:600;vertical-align:middle;transition:transform .12s ease;white-space:nowrap}' +
+      '.jd-cost.bump{transform:scale(1.06)}' +
+      '.jd-cost b{color:var(--brand-2);font-variant-numeric:tabular-nums}' +
       '#jdName,#jdText{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 13px}' +
       '#jdName{margin-bottom:10px;font-weight:600}#jdText{line-height:1.55;resize:vertical;min-height:170px}' +
       '#jdName::placeholder,#jdText::placeholder{color:var(--text-dim)}' +
@@ -4279,12 +4282,24 @@
           '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>🧲 Find candidates</button>' +
           '<span class="jd-cap muted">Max <input id="jdCap" type="number" min="100" max="5000" value="3000"> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="45"></span>' +
           '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>💾 Save to JD Sourcing</button>' +
+          '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">➕ Add to queue</button>' +
         '</div>' +
         '<div id="jdMsg" class="muted" style="margin-top:8px"></div>' +
       '</div>' +
+      '<div class="card" id="jdQueueCard" style="display:none"><h3>Queue <span class="muted" id="jdQueueCount"></span></h3>' +
+        '<p class="muted" style="margin-top:-4px">Each queued JD runs in turn — search → rank → save — using the Max / min-fit set above. Keep this tab open while the queue runs; each finished list lands below with a downloadable CSV of LinkedIn URLs.</p>' +
+        '<div id="jdQueueList"></div>' +
+        '<div class="jd-actions">' +
+          '<button class="btn btn-primary btn-sm" id="jdQueueRun">▶ Run queue</button>' +
+          '<button class="btn btn-ghost btn-sm" id="jdQueueClear">Clear queue</button>' +
+          '<span class="muted" id="jdQueueProg"></span>' +
+        '</div>' +
+      '</div>' +
       '<div id="jdPlan"></div>' +
       '<div id="jdResults"></div>' +
-      '<div class="card"><h3>Saved sourcing lists</h3><div id="jdRuns">' + loading() + '</div></div>';
+      '<div class="card"><h3>Saved sourcing lists <span class="jd-cap" style="float:right;font-weight:400">🔬 Deep-vet top <input id="jdVetTop" type="number" min="1" max="200" value="25"><span id="jdVetCost" class="jd-cost"></span></span></h3>' +
+        '<p class="muted" style="margin-top:-4px">Deep-vet reads each candidate\'s full work history against the JD and writes a verified score (0–100) + verdict — runs only on the top N by fit score that you set above. Costs a Claude call per candidate; takes a moment.</p>' +
+        '<div id="jdRuns">' + loading() + '</div></div>';
 
     function msg(t) { var m = $("#jdMsg"); if (m) m.textContent = t || ""; }
     function chips(arr) { return (arr || []).map(function (x) { return '<span class="jd-chip">' + esc(x) + '</span>'; }).join("") || '<span class="muted">-</span>'; }
@@ -4331,18 +4346,121 @@
       api("/sourcing").then(function (d) {
         var host = $("#jdRuns"); if (!host) return;
         var runs = (d && d.runs) || [];
-        if (!runs.length) { host.innerHTML = '<p class="muted">No saved lists yet. Analyze a JD, find candidates, then Save.</p>'; return; }
+        state.runs = runs;
+        if (!runs.length) { host.innerHTML = '<p class="muted">No saved lists yet. Analyze a JD, find candidates, then Save — or queue several JDs above and ▶ Run queue.</p>'; return; }
         host.innerHTML = runs.map(function (r) {
           var n = r.candidates ? r.candidates.length : 0;
-          return '<div class="jd-run"><div><b>' + esc(r.name) + '</b> <span class="muted">· ' + n + ' candidates' +
+          var urls = (r.candidates || []).filter(function (c) { return c.linkedinUrl; }).length;
+          var vetted = (r.candidates || []).filter(function (c) { return typeof c.verifiedScore === "number"; }).length;
+          return '<div class="jd-run"><div><b>' + esc(r.name) + '</b> <span class="muted">· ' + n + ' candidates · ' + urls + ' with LinkedIn URL' +
+            (vetted ? (' · ' + vetted + ' deep-vetted') : '') +
             (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates') : '') + '</span></div>' +
             '<div class="jd-run-actions">' +
+              '<button class="btn btn-ghost btn-sm" data-csv="' + esc(r.id) + '">⬇ CSV (URLs)</button>' +
+              '<button class="btn btn-ghost btn-sm" data-vet="' + esc(r.id) + '">🔬 Deep-vet</button>' +
               '<button class="btn btn-primary btn-sm" data-promote="' + esc(r.id) + '">Send to Candidates →</button>' +
               '<button class="btn btn-ghost btn-sm" data-enrich="' + esc(r.id) + '">⚡ Enrich top 50</button>' +
               '<button class="btn btn-ghost btn-sm" data-del="' + esc(r.id) + '">Delete</button>' +
             '</div></div>';
         }).join("");
       }).catch(function () { var host = $("#jdRuns"); if (host) host.innerHTML = '<p class="muted">Could not load saved lists.</p>'; });
+    }
+
+    /* ---- CSV export (LinkedIn URLs only — enrichment happens in your own tool) ---- */
+    function csvCell(v) { v = v == null ? "" : (Array.isArray(v) ? v.join("; ") : String(v)); return '"' + v.replace(/"/g, '""') + '"'; }
+    function csvSlug(s) { return ((s || "list").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase()) || "list"; }
+    function csvDownload(filename, csv) {
+      var blob = new Blob([csv], { type: "text/csv" }), url = URL.createObjectURL(blob);
+      var a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    }
+    function urlRows(cands) { return (cands || []).filter(function (c) { return c.linkedinUrl; }); }
+    function downloadRun(id) {
+      var run = state.runs.find(function (r) { return r.id === id; }); if (!run) { toast("List not loaded yet."); return; }
+      var rows = urlRows(run.candidates); if (!rows.length) { toast("No LinkedIn URLs in this list."); return; }
+      var cols = ["linkedinUrl", "fullName", "title", "company", "location", "fitScore", "sourceGroup"];
+      var head2 = ["LinkedIn URL", "Name", "Title", "Company", "Location", "Fit", "Source"];
+      var hasVet = rows.some(function (c) { return typeof c.verifiedScore === "number"; });
+      if (hasVet) {
+        // Lead with the deep-vetted, highest verified score first.
+        rows = rows.slice().sort(function (a, c) {
+          return (c.verifiedScore == null ? -1 : c.verifiedScore) - (a.verifiedScore == null ? -1 : a.verifiedScore);
+        });
+        cols = cols.concat(["verifiedScore", "verdict", "yearsRelevant", "vetFlags"]);
+        head2 = head2.concat(["Verified", "Verdict", "Years", "Flags"]);
+      }
+      var csv = head2.join(",") + "\n" + rows.map(function (c) { return cols.map(function (k) { return csvCell(c[k]); }).join(","); }).join("\n");
+      csvDownload(csvSlug(run.name) + "-linkedin-urls.csv", csv);
+      var dropped = (run.candidates || []).length - rows.length;
+      toast("Downloaded " + rows.length + " URLs" + (hasVet ? " (with deep-vet columns)" : "") + (dropped ? (" · " + dropped + " rows had no URL") : ""));
+    }
+
+    /* ---- Live deep-vet cost estimate (updates as the top-N toggle moves) ----
+       Per candidate: one Claude Sonnet 4.6 call (~2.5k input + ~0.45k output) plus
+       one RapidAPI profile lookup. Sonnet rates: $3 / 1M input, $15 / 1M output.
+       Profile lookup varies by listing (~$0.002–$0.02 / request). */
+    var VET = { inTok: 2500, outTok: 450, inUsd: 3 / 1e6, outUsd: 15 / 1e6, profLo: 0.002, profHi: 0.02 };
+    function vetLlmPer() { return VET.inTok * VET.inUsd + VET.outTok * VET.outUsd; } // ≈ $0.0143
+    function updateVetCost() {
+      var el = $("#jdVetCost"), topEl = $("#jdVetTop"); if (!el || !topEl) return;
+      var n = Math.max(0, parseInt(topEl.value, 10) || 0);
+      if (!n) { el.textContent = ""; return; }
+      var per = vetLlmPer();
+      var lo = n * (per + VET.profLo), hi = n * (per + VET.profHi);
+      el.innerHTML = '≈ <b>$' + lo.toFixed(2) + '–$' + hi.toFixed(2) + '</b> ' +
+        '<span class="muted" style="font-weight:400">for ' + n + ' · Sonnet vet + profile lookup</span>';
+      el.classList.add("bump"); setTimeout(function () { el.classList.remove("bump"); }, 130);
+    }
+
+    /* ---- Queue: run JD searches back-to-back, each saved + CSV-ready ---- */
+    function renderQueue() {
+      var card = $("#jdQueueCard"); if (!card) return;
+      card.style.display = state.queue.length ? "" : "none";
+      var cnt = $("#jdQueueCount"); if (cnt) cnt.textContent = state.queue.length ? ("· " + state.queue.length + " pending") : "";
+      var list = $("#jdQueueList"); if (!list) return;
+      list.innerHTML = state.queue.map(function (item, idx) {
+        return '<div class="jd-run"><div><b>' + esc(item.name) + '</b> <span class="muted">· ' + esc(item.jd.slice(0, 90).replace(/\s+/g, " ")) + '…</span></div>' +
+          '<div class="jd-run-actions"><button class="btn btn-ghost btn-sm" data-qrm="' + idx + '">Remove</button></div></div>';
+      }).join("");
+    }
+    function addToQueue() {
+      var name = $("#jdName").value.trim(), jd = $("#jdText").value.trim();
+      if (!jd) { msg("Paste a job description to queue it."); return; }
+      if (!name) name = "Sourcing list " + (state.queue.length + 1);
+      state.queue.push({ name: name, jd: jd });
+      $("#jdName").value = ""; $("#jdText").value = "";
+      state.jd = ""; state.icp = null; state.queries = []; state.candidates = []; state.warnings = [];
+      $("#jdFind").disabled = true; $("#jdSave").disabled = true; renderPlan(); renderResults();
+      msg("Added to queue (" + state.queue.length + "). Add more, then ▶ Run queue."); renderQueue();
+    }
+    function runQueue() {
+      if (state.running) return;
+      if (!state.queue.length) { msg("Queue is empty — add a JD with ➕ Add to queue."); return; }
+      var cap = parseInt($("#jdCap").value, 10) || 3000;
+      var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 45;
+      state.running = true;
+      var runBtn = $("#jdQueueRun"); if (runBtn) runBtn.disabled = true;
+      var prog = $("#jdQueueProg");
+      var total = state.queue.length, done = 0, failed = 0;
+      function finish() {
+        state.running = false; if (runBtn) runBtn.disabled = false;
+        if (prog) prog.textContent = "Done — saved " + done + (failed ? (", " + failed + " failed") : "") + ". Download CSVs below.";
+        renderQueue(); loadRuns();
+      }
+      function next() {
+        if (!state.queue.length) return finish();
+        var item = state.queue[0];
+        if (prog) prog.textContent = "Processing " + (done + failed + 1) + "/" + total + ": " + item.name + " …";
+        send("/sourcing", "POST", { action: "run", jd: item.jd, cap: cap, minFit: minFit }).then(function (r) {
+          if (!r.ok || !r.data) { failed++; state.queue.shift(); renderQueue(); return next(); }
+          var cands = r.data.candidates || [];
+          return send("/sourcing", "POST", { action: "save", name: item.name, jd: item.jd, icp: r.data.icp, queries: r.data.queries, candidates: cands, warnings: r.data.warnings }).then(function (s) {
+            if (s.ok) done++; else failed++;
+            state.queue.shift(); renderQueue(); next();
+          });
+        }).catch(function () { failed++; state.queue.shift(); renderQueue(); next(); });
+      }
+      next();
     }
 
     $("#jdAnalyze").addEventListener("click", function () {
@@ -4385,12 +4503,25 @@
     $("#jdRuns").addEventListener("click", function (e) {
       var t = e.target; if (t.tagName !== "BUTTON") return;
       var id;
+      if ((id = t.getAttribute("data-csv"))) { downloadRun(id); return; }
       if ((id = t.getAttribute("data-promote"))) {
         if (!confirm("Send this list to Candidates under its saved name?")) return;
         t.disabled = true; t.textContent = "Sending…";
         send("/sourcing", "POST", { action: "promote", id: id }).then(function (r) {
           if (!r.ok) { t.disabled = false; t.textContent = "Send to Candidates →"; alert("Promote failed: " + ((r.data && r.data.error) || r.status)); return; }
           alert('Sent ' + r.data.added + ' to Candidates as "' + r.data.name + '"' + (r.data.deduped ? (' (' + r.data.deduped + ' already in pipeline)') : '') + '.'); loadRuns();
+        });
+      } else if ((id = t.getAttribute("data-vet"))) {
+        var topEl = $("#jdVetTop"); var top = topEl ? (parseInt(topEl.value, 10) || 25) : 25;
+        t.disabled = true; t.textContent = "Vetting top " + top + "…";
+        send("/sourcing", "POST", { action: "vet", id: id, top: top }).then(function (r) {
+          t.disabled = false; t.textContent = "🔬 Deep-vet";
+          if (!r.ok) { alert("Deep-vet failed: " + ((r.data && r.data.error) || r.status)); return; }
+          var warn = (r.data.warnings || []).length ? ("\n\n" + r.data.warnings.slice(0, 3).join("\n")) : "";
+          alert("Deep-vetted " + r.data.vetted + " candidate" + (r.data.vetted === 1 ? "" : "s") +
+            (r.data.deep ? " against full work history." : " on surface fields only — set RAPIDAPI_PROFILE_HOST/PATH to vet full profiles.") +
+            " Ranked by verified score; download the CSV for the verdicts." + warn);
+          loadRuns();
         });
       } else if ((id = t.getAttribute("data-enrich"))) {
         t.disabled = true; t.textContent = "Enriching…";
@@ -4404,6 +4535,17 @@
         send("/sourcing", "POST", { action: "delete", id: id }).then(loadRuns);
       }
     });
+
+    $("#jdQueueAdd").addEventListener("click", addToQueue);
+    $("#jdQueueRun").addEventListener("click", runQueue);
+    $("#jdQueueClear").addEventListener("click", function () { if (state.running) { msg("Queue is running — let it finish."); return; } state.queue = []; renderQueue(); });
+    $("#jdQueueList").addEventListener("click", function (e) {
+      var t = e.target; if (t.tagName !== "BUTTON") return;
+      var i = t.getAttribute("data-qrm");
+      if (i != null) { state.queue.splice(parseInt(i, 10), 1); renderQueue(); }
+    });
+    var vetTopEl = $("#jdVetTop");
+    if (vetTopEl) { vetTopEl.addEventListener("input", updateVetCost); updateVetCost(); }
 
     loadRuns();
   }

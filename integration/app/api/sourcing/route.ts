@@ -6,15 +6,17 @@
  *   { action: "save", id?, name, jd, icp, queries, candidates } -> stage a named run
  *   { action: "promote", id, minFit? }             -> push a saved run into Candidates under its name
  *   { action: "enrich", id, top? }                 -> enrich contacts for the top N staged candidates
+ *   { action: "vet", id, top? }                    -> deep-vet the top N: read full profile vs JD, verified score
  *   { action: "delete", id }                       -> remove a saved run
  *
- * Discovery-only until promote; contact lookup is on demand. Session-gated.
+ * Discovery-only until promote; contact lookup and deep-vet are on demand. Session-gated.
  */
 
 import { requireSession, body, ok, fail } from "../../../lib/api";
 import {
   planSourcing, parseJobDescription, generateQueries, runDiscovery,
   listSourcingRuns, saveSourcingRun, deleteSourcingRun, getSourcingRun, promoteSourcingRun,
+  fetchFullProfile, profileFetchConfigured, deepVetCandidate,
 } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { nowIso } from "../../../lib/core/ids";
@@ -87,6 +89,40 @@ export async function POST(req: Request) {
       }
       saveSourcingRun(ws, { ...run });
       return ok({ enriched, run });
+    }
+
+    if (action === "vet") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      const top = Math.max(1, Math.min(b.top ?? 25, 200, run.candidates.length));
+      const haveProfiles = profileFetchConfigured();
+      const warnings: string[] = [];
+      let vetted = 0;
+      // Vet the top slice by current (rule) score. The full candidate objects are
+      // mutated in place, then the run is re-ranked by verified score.
+      const slice = [...run.candidates].sort((a, c) => c.fitScore - a.fitScore).slice(0, top);
+      for (const c of slice) {
+        let profile;
+        if (haveProfiles && c.linkedinUrl) {
+          try { profile = await fetchFullProfile(c.linkedinUrl); }
+          catch (err) { warnings.push(`profile(${c.fullName}): ${(err as Error).message}`); }
+        }
+        try {
+          const v = await deepVetCandidate(c, run.icp, profile);
+          c.verifiedScore = v.verifiedScore; c.verdict = v.verdict;
+          c.yearsRelevant = v.yearsRelevant; c.vetStrengths = v.strengths;
+          c.vetGaps = v.gaps; c.vetFlags = v.flags; c.vetRationale = v.rationale;
+          c.profileFetched = Boolean(profile && profile.experiences.length);
+          vetted++;
+        } catch (err) { warnings.push(`vet(${c.fullName}): ${(err as Error).message}`); }
+      }
+      // Re-rank: verified candidates first (by verifiedScore), then the rest by fit.
+      run.candidates.sort((a, c) =>
+        (c.verifiedScore ?? -1) - (a.verifiedScore ?? -1) || c.fitScore - a.fitScore);
+      if (!haveProfiles) warnings.push("profile_fetch_not_configured: set RAPIDAPI_PROFILE_HOST + RAPIDAPI_PROFILE_PATH to vet against full work history (vetted on surface fields only)");
+      saveSourcingRun(ws, { ...run });
+      return ok({ vetted, deep: haveProfiles, warnings, run });
     }
 
     if (action === "delete") {
