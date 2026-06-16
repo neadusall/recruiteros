@@ -489,7 +489,10 @@ function provisionWorkspace(user: User): { workspace: Workspace; role: Role } {
 
   const ws: Workspace = {
     id: rid("ws"),
-    name: corporate ? titleCase(domain.split(".")[0]) : `${titleCase(user.name)}'s workspace`,
+    // Personal (free-email) workspaces are named after the person who created it,
+    // by FIRST name — "Ryan's Workspace" — not the full name or an email/username.
+    // Corporate-domain workspaces keep the company name.
+    name: corporate ? titleCase(domain.split(".")[0]) : `${titleCase(firstName(user.name))}'s Workspace`,
     domain: corporate ? domain : undefined,
     plan: corporate ? "enterprise" : "trial",
     createdAt: nowIso(),
@@ -672,6 +675,9 @@ function normEmail(e: string): string {
 }
 function titleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+function firstName(s: string): string {
+  return (s || "").trim().split(/\s+/)[0] || "";
 }
 function appUrl(): string {
   return process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";

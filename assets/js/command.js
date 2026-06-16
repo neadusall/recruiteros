@@ -219,7 +219,7 @@
   var wsNameEl = $("#wsName");
   if (wsNameEl) wsNameEl.textContent =
     (isLumeWorkspace() && ctx.user && ctx.user.name) ? ctx.user.name
-      : ((ctx.workspace && ctx.workspace.name) || "Workspace");
+      : wsDisplayName();
   var envPill = $("#envPill");
   if (envPill) envPill.style.display = "none"; // no demo/live badge: this is the product
   function signOut() {
@@ -330,6 +330,21 @@
     var cust = ((ws.customDomain) || "").toLowerCase();
     return wsDom === "lumesp.com" || userDom === "lumesp.com" ||
            cust === "app.lumesp.com" || cust.indexOf(".lumesp.com") >= 0;
+  }
+  // The label shown for this workspace in the chrome (breadcrumb + workspace card).
+  // A PERSONAL workspace (a free-email signup, so no company domain) is named after
+  // the person who created it, by FIRST name, so it reads "Ryan's Workspace" rather
+  // than an email/username-derived string. Corporate (company-domain) and white-label
+  // workspaces keep their stored company/brand name.
+  function firstNameOf(s) { return String(s || "").trim().split(/\s+/)[0] || ""; }
+  function wsDisplayName() {
+    var ws = ctx.workspace || {};
+    var personal = !(ws.domain && String(ws.domain).trim());
+    if (personal && !isWhiteLabelWorkspace() && ctx.user && ctx.user.name) {
+      var fn = firstNameOf(ctx.user.name);
+      if (fn) return fn + "'s Workspace";
+    }
+    return ws.name || "Workspace";
   }
   var ON_HOUSE_HOST = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.host || "");
   var IS_HOUSE = ON_HOUSE_HOST && !isWhiteLabelWorkspace();
@@ -506,7 +521,7 @@
     var r = ROUTES[key];
     syncMotionNav(); // keep motion-only visibility + Prospects/Candidates label current
     $("#pageTitle").textContent = (key === "prospects") ? prospectsLabel() : (key === "data") ? dataLabel() : r.title;
-    $("#crumb").textContent = (ctx.workspace ? ctx.workspace.name + " / " : "") + r.crumb;
+    $("#crumb").textContent = (ctx.workspace ? wsDisplayName() + " / " : "") + r.crumb;
     Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) { n.classList.toggle("active", n.dataset.route === key); });
     var pa = $("#primaryAction");
     if (r.action) { pa.style.display = ""; pa.textContent = (key === "prospects") ? ("＋ Add " + prospectNoun()) : r.action; pa.onclick = function () { primaryAction(key); }; }
