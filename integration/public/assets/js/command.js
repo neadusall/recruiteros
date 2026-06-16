@@ -4324,6 +4324,11 @@
       '.jd-hints{margin:10px 0 0;display:flex;flex-direction:column;gap:8px;max-width:760px}' +
       '.jd-hint{font-size:12px;color:var(--text-muted);margin:0;line-height:1.55;padding-left:11px;border-left:2px solid var(--border-strong)}' +
       '.jd-hint b{color:var(--text)}' +
+      '.jd-help{margin:0 0 14px}' +
+      '.jd-helpbody{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px 26px;margin-top:4px}' +
+      '.jd-helpsec h5{margin:0 0 7px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:700}' +
+      '.jd-helpsec p{margin:0 0 8px;font-size:12.5px;color:var(--text-muted);line-height:1.5}' +
+      '.jd-helpsec p b{color:var(--text)}' +
       '.jd-steps{display:flex;gap:0;margin:0 0 14px;padding:0;list-style:none}' +
       '.jd-step{flex:1;position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;padding:0 6px}' +
       '.jd-step:not(:last-child)::after{content:"";position:absolute;top:15px;left:calc(50% + 19px);right:calc(-50% + 19px);height:2px;background:var(--border-strong);transition:background .2s}' +
@@ -4426,6 +4431,29 @@
       '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
       '<ol class="jd-steps" id="jdSteps"></ol>' +
+      '<details class="jd-tipsd jd-help"><summary>How this works <span class="muted">what each step, setting, and button does</span></summary>' +
+        '<div class="jd-helpbody">' +
+          '<div class="jd-helpsec"><h5>The flow</h5>' +
+            '<p><b>1 &middot; Build the brief</b>: Enter the role and anything you know. The AI refines your input into a strong, wide-net hiring brief and drops it in the Job description box.</p>' +
+            '<p><b>2 &middot; Analyze JD</b>: Turns that brief into an ideal-candidate profile, the titles, companies, locations, and must-haves the search will use.</p>' +
+            '<p><b>3 &middot; Find candidates</b>: Searches for real people matching the profile, scores each on fit, and returns a ranked list.</p>' +
+            '<p><b>4 &middot; Save to JD Sourcing</b>: Stores the list here under its name so you can return to it and act on it.</p>' +
+          '</div>' +
+          '<div class="jd-helpsec"><h5>Search settings</h5>' +
+            '<p><b>Min fit</b>: The match-strength bar, 0 to 100. Set 0 to see every profile found; raise it to keep only stronger matches (10 is wide, 40 and up is tight).</p>' +
+            '<p><b>Scan up to</b>: The ceiling on how many candidates a run gathers. Not a minimum, you get however many qualified people the search finds, up to this number.</p>' +
+            '<p><b>Dive deeper / Refine</b>: After Analyze, type a plain instruction (e.g. "only Director and up in medical devices, exclude agencies") to tighten or widen the profile, then search again.</p>' +
+            '<p><b>Add to queue</b>: Line up several briefs and run them back to back instead of one at a time.</p>' +
+          '</div>' +
+          '<div class="jd-helpsec"><h5>On a saved list</h5>' +
+            '<p><b>CSV (URLs)</b>: Download the list as a spreadsheet of LinkedIn profile URLs.</p>' +
+            '<p><b>Deep-vet</b>: Reads the top candidates\' full work history against the role and gives each a verified score and a short verdict.</p>' +
+            '<p><b>Enrich top 50</b>: Looks up business email and phone for the top fifty candidates.</p>' +
+            '<p><b>Send to Candidates</b>: Pushes the list into your Candidates pipeline under the same name.</p>' +
+            '<p><b>Delete</b>: Removes the saved list. The people themselves are not deleted.</p>' +
+          '</div>' +
+        '</div>' +
+      '</details>' +
       '<div class="card">' +
         '<div class="jd-lead2">✨ Start with the role</div>' +
         '<div class="jd-lead-sub">Fill in what you know and paste any JD. The AI refines it into a strong, wide-net search.</div>' +
