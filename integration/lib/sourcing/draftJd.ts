@@ -22,7 +22,9 @@ Cover, naturally and tightly (a few short paragraphs or compact bullets):
 - The exact role title and seniority (IC / manager / director / VP / exec), and whether it manages a team.
 - 5-10 REAL competitor or peer companies whose people would be ideal to source from. Use real, well-known
   companies in this exact space; NEVER invent company names. If unsure of competitors, name adjacent real ones.
-- Target locations / metros (expand vague geography to real metros), or state remote.
+- Target locations / metros (expand vague geography to real metros), or state remote. If a search
+  radius is given with the location (e.g. "within ~50 miles"), list EVERY metro/city within roughly
+  that estimated driving distance, not just the named city — wider radius means more metros.
 - The industry / domain that strong candidates come from.
 - Must-have experience and skills — what they've actually DONE, not nice-to-haves.
 - Required skills, tools, certifications, and licenses for THIS role (role-appropriate, e.g. RN license,

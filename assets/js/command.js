@@ -422,12 +422,15 @@
     // model), NOT by the platform's built-in 14-day trial, so they never see the
     // "Add payment" banner or the trial paywall. Billing exemption keys off the
     // resold-domain list only (see module-level WHITE_LABEL_DOMAINS, extend there).
-    var wsDom = ((ws.domain) || "").toLowerCase();
     var userEmail = ((ctx.user && ctx.user.email) || "").toLowerCase();
-    var userDom = (userEmail.split("@")[1] || "").toLowerCase();
     if (!userEmail) return; // no identified user yet (session still loading): never show a billing gate
     if (OPERATOR_EMAILS.indexOf(userEmail) >= 0) return; // platform operator, never gated
-    if (WHITE_LABEL_DOMAINS.indexOf(wsDom) >= 0 || WHITE_LABEL_DOMAINS.indexOf(userDom) >= 0) return;
+    // White-label / Lume customers are billed by the operator (resale model), NOT by
+    // the platform's trial, so they never see the banner or paywall. Use the same
+    // robust detection the rest of the chrome uses — it also covers Lume's custom
+    // domain (app.lumesp.com) and any own-branded workspace, which the old inline
+    // ws.domain-only check missed, so those accounts still saw the "14 days left" bar.
+    if (isWhiteLabelWorkspace() || isLumeWorkspace()) return;
     var tr;
     if (ws.paid) tr = { onTrial: false, expired: false, daysLeft: 0 };
     else if (!ws.trialEndsAt) tr = { onTrial: false, expired: false, daysLeft: 0 };
@@ -4306,7 +4309,10 @@
   function renderJdSourcing(el) {
     var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", queue: [], runs: [], running: false, refineNote: "", location: "" };
     function jdbLoc() { var e = $("#jdbLocation"); return e ? e.value.trim() : ""; }
-    function jdWithLoc(jd) { var loc = jdbLoc(); return loc ? (jd + "\n\nBased in: " + loc) : jd; }
+    function jdbRadius() { var e = $("#jdbRadius"); return e ? (parseInt(e.value, 10) || 0) : 0; }
+    function jdLocLabel() { var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " +" + r + "mi") : loc; }
+    function jdLocPhrase() { var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " (within ~" + r + " miles, include ALL surrounding metros and cities within that drive, not just " + loc + ")") : loc; }
+    function jdWithLoc(jd) { var p = jdLocPhrase(); return p ? (jd + "\n\nBased in: " + p) : jd; }
 
     el.innerHTML =
       '<style>' +
@@ -4373,6 +4379,17 @@
       '.jd-field{margin-bottom:8px}' +
       '.jd-field>label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:700;margin-bottom:6px}' +
       '.jd-opt{font-weight:500;text-transform:none;letter-spacing:0;opacity:.75;margin-left:7px}' +
+      '.jd-lead2{font-size:16px;font-weight:800;letter-spacing:.01em;margin:0 0 3px;background:linear-gradient(90deg,#7c5cff,var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
+      '.jd-lead-sub{font-size:12.5px;color:var(--text-muted);margin:0 0 12px}' +
+      '.jd-locrow{display:flex;gap:8px}.jd-locrow #jdbLocation{flex:1}' +
+      '#jdbRadius{background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:13px;padding:0 9px;cursor:pointer;flex:0 0 auto}' +
+      '#jdbRadius:focus{outline:0;border-color:var(--brand)}' +
+      '.jd-tipsd{margin-top:10px;font-size:12.5px;color:var(--text-muted)}' +
+      '.jd-tipsd>summary{cursor:pointer;color:var(--text-muted);font-weight:600;list-style:none;user-select:none}' +
+      '.jd-tipsd>summary::-webkit-details-marker{display:none}' +
+      '.jd-tipsd>summary::before{content:"▸ ";color:var(--brand-2)}' +
+      '.jd-tipsd[open]>summary::before{content:"▾ "}' +
+      '.jd-tipsd[open]>summary{margin-bottom:8px}' +
       '.jd-fieldgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px}.jd-fieldgrid>.jd-field{margin-bottom:0}' +
       '@media(max-width:640px){.jd-fieldgrid{grid-template-columns:1fr;gap:0}.jd-fieldgrid>.jd-field{margin-bottom:8px}}' +
       '.jd-queries{max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:6px 12px;background:var(--bg-soft)}' +
@@ -4390,22 +4407,28 @@
       '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
       '<div class="card">' +
-        '<div class="jd-lead"><b>Start with the role.</b> <span class="muted">Fill in what you know and paste any JD; the AI refines it into a strong, wide-net search.</span></div>' +
+        '<div class="jd-lead2">✨ Start with the role</div>' +
+        '<div class="jd-lead-sub">Fill in what you know and paste any JD. The AI refines it into a strong, wide-net search.</div>' +
         '<div class="jd-fieldgrid">' +
-          '<div class="jd-field"><label>Job title</label><input id="jdbTitle" type="text" placeholder="The role you are filling, e.g. VP of Sales, Director of Nursing" /></div>' +
-          '<div class="jd-field"><label>Company</label><input id="jdbCompany" type="text" placeholder="Name or website, used to find peers worth poaching from" /></div>' +
+          '<div class="jd-field"><label>Job title</label><input id="jdbTitle" type="text" placeholder="e.g. VP of Sales, Director of Nursing" /></div>' +
+          '<div class="jd-field"><label>Company</label><input id="jdbCompany" type="text" placeholder="Name or website (finds peers to poach)" /></div>' +
         '</div>' +
-        '<div class="jd-field"><label>City &amp; state</label><input id="jdbLocation" type="text" placeholder="Where the role is based, e.g. Fair Lawn, NJ (saved with the list)" /></div>' +
-        '<div class="jd-field"><label>Anything specific <span class="jd-opt muted">optional</span></label><input id="jdbNotes" type="text" placeholder="Seniority, must-have experience, who they sell to, deal-breakers" /></div>' +
-        '<div class="jd-field"><label>List name</label><input id="jdName" type="text" placeholder="Name this list, e.g. JAGGAER VP Sales · East" /></div>' +
+        '<div class="jd-fieldgrid">' +
+          '<div class="jd-field"><label>City &amp; state <span class="jd-opt muted">+ radius</span></label>' +
+            '<div class="jd-locrow"><input id="jdbLocation" type="text" placeholder="e.g. Fair Lawn, NJ" />' +
+              '<select id="jdbRadius" title="Expand beyond the exact metro by estimated drive distance">' +
+                '<option value="0">Exact</option><option value="25">+25mi</option><option value="50">+50mi</option><option value="100">+100mi</option><option value="250">+250mi</option>' +
+              '</select></div></div>' +
+          '<div class="jd-field"><label>List name</label><input id="jdName" type="text" placeholder="e.g. JAGGAER VP Sales · East" /></div>' +
+        '</div>' +
+        '<div class="jd-field"><label>Anything specific <span class="jd-opt muted">optional</span></label><input id="jdbNotes" type="text" placeholder="Seniority, certs/licenses, must-have experience, deal-breakers" /></div>' +
         '<div class="jd-field"><label>Job description <span class="jd-opt muted">optional, or let the AI write it</span></label>' +
-          '<textarea id="jdText" rows="8" placeholder="Paste the job description here. The more real detail you give, the stronger the search."></textarea></div>' +
-        '<div class="jd-builder"><div class="jd-builder-h">✨ Build a refined, sourcing-ready JD</div>' +
-          '<div class="jd-builder-sub">Your input is the benchmark. The AI refines it, shores up the gaps, and widens the net into a precise, sourcing-ready brief. Stronger input means a stronger search. Run this first, then Analyze.</div>' +
-          '<div class="jd-buildbar" style="margin-top:2px"><button class="btn btn-primary btn-sm" id="jdbBtn">✨ Build refined JD</button>' +
-            '<span class="muted">Refines everything you entered above, then review and Analyze.</span></div>' +
+          '<textarea id="jdText" rows="4" placeholder="Paste the job description here. The more real detail, the stronger the search."></textarea></div>' +
+        '<div class="jd-builder"><div class="jd-buildbar" style="margin:0;justify-content:space-between"><b class="jd-builder-h" style="margin:0">✨ Build a refined, sourcing-ready JD</b>' +
+          '<button class="btn btn-primary btn-sm" id="jdbBtn">✨ Build refined JD</button></div>' +
+          '<div class="jd-builder-sub" style="margin:7px 0 0">Your input is the benchmark; the AI refines it, fills the gaps, and widens the net. Run this first, then Analyze.</div>' +
         '</div>' +
-        '<div class="jd-tips"><span class="jd-tips-h">You bring the essentials. The AI does the heavy lifting. Cover what you can below; the more it has to work with, the sharper your shortlist:</span>' +
+        '<details class="jd-tipsd"><summary>What sharpens the search? <span class="muted">(optional guide)</span></summary>' +
           '<div class="jd-tipgrid">' +
             '<span><b>Title &amp; level</b>: the exact role and seniority, and whether it leads a team</span>' +
             '<span><b>Skills, tools &amp; licenses</b>: required certs, licenses, or systems (e.g. RN, CPA, AWS, Epic, Salesforce)</span>' +
@@ -4413,11 +4436,11 @@
             '<span><b>Must-have experience</b>: what they have actually done, not nice-to-haves</span>' +
             '<span><b>Industry / domain</b>: where strong candidates come from</span>' +
             '<span><b>Target companies</b>: competitors or peers worth poaching from</span>' +
-            '<span><b>Location</b>: the metros that matter, or just say remote</span>' +
+            '<span><b>Location &amp; radius</b>: the metros that matter (or remote), widened by the mileage you set</span>' +
             '<span><b>Proof of impact</b>: measurable results they can show (outcomes, scale, growth, metrics)</span>' +
             '<span><b>Deal-breakers</b>: what should rule a candidate out</span>' +
           '</div>' +
-        '</div>' +
+        '</details>' +
         '<div class="jd-actions">' +
           '<button class="btn btn-primary btn-sm" id="jdAnalyze">Analyze JD</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>🧲 Find candidates</button>' +
@@ -4588,7 +4611,7 @@
       var companyEl = $("#jdbCompany"), notesEl = $("#jdbNotes"), ta = $("#jdText");
       var company = companyEl ? companyEl.value.trim() : "";
       var notes = notesEl ? notesEl.value.trim() : "";
-      var loc = jdbLoc(); if (loc) notes = [notes, "Based in " + loc].filter(Boolean).join(". ");
+      var loc = jdLocPhrase(); if (loc) notes = [notes, "Based in " + loc].filter(Boolean).join(". ");
       var base = ta ? ta.value.trim() : "";   // strengthen whatever's already in the box
       if (!title && !base) { titleEl.focus(); msg("Add a title, or paste a rough JD below, and we'll strengthen it."); return; }
       var btn = $("#jdbBtn"); if (btn) { btn.disabled = true; btn.textContent = "Working…"; }
@@ -4725,7 +4748,7 @@
 
     $("#jdAnalyze").addEventListener("click", function () {
       var jd = $("#jdText").value.trim(); if (!jd) { msg("Paste a job description first."); return; }
-      state.location = jdbLoc();
+      state.location = jdLocLabel();
       state.jd = jd; msg("Analyzing…");
       send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(jd) }).then(function (r) {
         if (!r.ok) { msg("Analyze failed: " + ((r.data && r.data.error) || r.status)); return; }
@@ -4757,7 +4780,7 @@
       var name = $("#jdName").value.trim(); if (!name) { msg("Give the list a name to save it."); $("#jdName").focus(); return; }
       if (!state.icp) { msg("Analyze a JD first."); return; }
       msg("Saving…");
-      send("/sourcing", "POST", { action: "save", name: name, jd: state.jd, location: state.location || jdbLoc(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings }).then(function (r) {
+      send("/sourcing", "POST", { action: "save", name: name, jd: state.jd, location: state.location || jdLocLabel(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings }).then(function (r) {
         if (!r.ok) { msg("Save failed: " + ((r.data && r.data.error) || r.status)); return; }
         msg('Saved "' + name + '" to JD Sourcing. Review it below, then send to Candidates.'); loadRuns();
       });

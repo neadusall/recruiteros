@@ -39,6 +39,7 @@ Shape:
 
 Rules:
 - Expand vague geography into concrete metros (e.g. "East Coast" -> ["New York","Boston","Washington DC","Atlanta","Philadelphia","Charlotte","Miami"]).
+- If a location is given with a search radius (e.g. "within ~50 miles of Fair Lawn, NJ"), expand geos to EVERY metro, city, and town within roughly that estimated driving distance — the realistic commute/relocation range — not just the named city. Be generous and specific (e.g. for ~50mi of Fair Lawn, NJ include Newark, Jersey City, Paterson, New York, Yonkers, White Plains, Stamford, Edison, etc.). Larger radius = more metros.
 - targetCompanies must be REAL companies that employ this exact profile (competitors first, then adjacent). Never invent company names.
 - titles should include common variants (VP/RVP/Area VP/Regional Sales Director, etc.).
 - mustHave should capture required skills, tools, certifications, and licenses for THIS role (role-appropriate, e.g. RN license, CPA, PE, AWS, Epic/EHR, Salesforce) plus seniority/scope and measurable-impact signals — these are high-signal for any field, not just sales. Put soft/measurable extras in niceToHave.
