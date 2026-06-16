@@ -104,6 +104,8 @@ docs/
 │       ├── email-resend.md
 │       ├── sms-qualification.md
 │       └── linkedin-login.md
+├── changelog/                Dated session logs — what changed, why, and where it lives
+│   └── 2026-06-16-jd-sourcing-and-connections.md
 ├── playbooks/                How-to / reference playbooks
 │   ├── copywriting-playbook.md
 │   └── website-map.md
