@@ -17,7 +17,7 @@ import { requireSession, body, ok, fail } from "../../../lib/api";
 import {
   planSourcing, parseJobDescription, generateQueries, runDiscovery,
   listSourcingRuns, saveSourcingRun, deleteSourcingRun, getSourcingRun, promoteSourcingRun,
-  fetchFullProfile, profileFetchConfigured, deepVetCandidate, refineIcp,
+  fetchFullProfile, profileFetchConfigured, deepVetCandidate, refineIcp, draftJobDescription,
 } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { nowIso } from "../../../lib/core/ids";
@@ -39,6 +39,12 @@ export async function POST(req: Request) {
     if (action === "plan") {
       if (!b?.jd) return fail("missing_jd", 422);
       return ok(await planSourcing(b.jd));
+    }
+
+    if (action === "draft") {
+      if (!b?.title) return fail("missing_title", 422);
+      const jd = await draftJobDescription({ title: b.title, company: b.company, companyUrl: b.companyUrl, notes: b.notes });
+      return ok({ jd });
     }
 
     if (action === "refine") {

@@ -49,14 +49,23 @@ function mapRow(o: any): CandidateRow | null {
   const fullName = str(o.fullName) || str(o.full_name) || str(o.name) ||
     [str(o.firstName) || str(o.first_name), str(o.lastName) || str(o.last_name)].filter(Boolean).join(" ").trim();
   if (!fullName) return null;
+  // Some listings carry the role line in primarySubtitle ("CEO at Acme") and the
+  // location in secondarySubtitle; derive company from an "X at Y" primary.
+  const primary = str(o.primarySubtitle);
+  let company = str(o.company) || str(o.company_name) || str(o.companyName) || str(o.current_company);
+  if (!company && primary && / at /i.test(primary)) company = primary.split(/ at /i).slice(1).join(" at ").trim();
+  let url = str(o.linkedin_url) || str(o.linkedinUrl) || str(o.profile_url) || str(o.profileUrl) ||
+    str(o.url) || str(o.link) || str(o.profileURL) || str(o.navigationUrl);
+  if (url) url = url.split("?")[0]; // strip tracking params → clean URL + reliable dedupe
+  const pic = typeof o.profilePicture === "string" ? str(o.profilePicture) : str(o.profilePicture && o.profilePicture.profilePictureLink);
   return {
     fullName,
-    title: str(o.title) || str(o.job_title) || str(o.jobTitle) || str(o.position),
+    title: str(o.title) || str(o.job_title) || str(o.jobTitle) || str(o.position) || (primary && primary !== "--" ? primary : undefined),
     headline: str(o.headline) || str(o.summary),
-    company: str(o.company) || str(o.company_name) || str(o.companyName) || str(o.current_company),
-    location: str(o.location) || str(o.geo) || str(o.city) || str(o.region),
-    linkedinUrl: str(o.linkedin_url) || str(o.linkedinUrl) || str(o.profile_url) || str(o.profileUrl) || str(o.url) || str(o.link) || str(o.profileURL) || str(o.navigationUrl),
-    imageUrl: str(o.image) || str(o.photo) || str(o.profile_image) || str(o.imageUrl),
+    company,
+    location: str(o.location) || str(o.geo) || str(o.city) || str(o.region) || str(o.secondarySubtitle),
+    linkedinUrl: url,
+    imageUrl: str(o.image) || str(o.photo) || str(o.profile_image) || str(o.imageUrl) || pic,
     fitScore: 0,
     fitReasons: [],
     provider: "rapidapi",

@@ -4247,7 +4247,8 @@
 
     el.innerHTML =
       '<style>' +
-      '.jd-chip{display:inline-block;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:3px 10px;margin:2px 5px 2px 0;font-size:12px;color:var(--text-muted)}' +
+      '.jd-chip{display:inline-block;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:3px 11px;margin:2px 5px 2px 0;font-size:12px;color:var(--text-muted);transition:border-color .12s,color .12s}' +
+      '.jd-chip:hover{border-color:var(--brand);color:var(--text)}' +
       '.jd-icp{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:12px}' +
       '.jd-icp>div b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:7px;font-weight:700}' +
       '.jd-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}' +
@@ -4279,11 +4280,26 @@
       '.jd-refine input::placeholder{color:var(--text-dim)}' +
       '.jd-refine input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
       '.jd-refine-note{margin:9px 0 0;font-size:12.5px;color:var(--brand-2)}' +
-      '.jd-tips{margin-top:11px;padding:12px 15px;background:var(--bg-soft);border:1px solid var(--border);border-radius:11px;font-size:12.5px;color:var(--text-muted);line-height:1.5}' +
-      '.jd-tips>.jd-tips-h{color:var(--text);font-weight:600}' +
-      '.jd-tipgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:5px 22px;margin-top:9px}' +
-      '.jd-tipgrid>span{display:block}' +
+      '.jd-tips{margin-top:11px;padding:13px 16px;background:var(--bg-soft);border:1px solid var(--border);border-left:3px solid var(--brand);border-radius:11px;font-size:12.5px;color:var(--text-muted);line-height:1.5}' +
+      '.jd-tips>.jd-tips-h{color:var(--text);font-weight:700}' +
+      '.jd-tipgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px 24px;margin-top:10px}' +
+      '.jd-tipgrid>span{display:block;position:relative;padding-left:15px}' +
+      '.jd-tipgrid>span::before{content:"";position:absolute;left:0;top:6px;width:6px;height:6px;border-radius:50%;background:linear-gradient(135deg,#7c5cff,var(--brand-2))}' +
       '.jd-tipgrid b{color:var(--brand-2);font-weight:600}' +
+      '.jd-builder{position:relative;overflow:hidden;padding:16px 18px;background:linear-gradient(135deg,rgba(124,92,255,.13),rgba(80,200,255,.06));border:1px solid rgba(124,92,255,.34);border-radius:14px;margin-bottom:14px;box-shadow:0 12px 36px -14px rgba(124,92,255,.4)}' +
+      '.jd-builder::after{content:"";position:absolute;top:-40%;right:-10%;width:240px;height:240px;background:radial-gradient(circle,rgba(124,92,255,.18),transparent 70%);pointer-events:none}' +
+      '.jd-builder-h{position:relative;font-weight:800;font-size:15px;letter-spacing:.01em;margin-bottom:3px;background:linear-gradient(90deg,#7c5cff,var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
+      '.jd-builder-sub{font-size:12.5px;color:var(--text-muted);margin-bottom:11px}' +
+      '.jd-builder-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:9px}' +
+      '@media(max-width:640px){.jd-builder-row{grid-template-columns:1fr}}' +
+      '.jd-builder input{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:9px;color:var(--text);font:inherit;font-size:13.5px;padding:9px 12px}' +
+      '.jd-builder input::placeholder{color:var(--text-dim)}' +
+      '.jd-builder input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
+      '.jd-builder-act{display:flex;align-items:center;gap:11px;margin-top:10px}' +
+      '.jd-builder-act .muted{font-size:12px}' +
+      '.jd-or{display:flex;align-items:center;text-align:center;color:var(--text-dim);font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin:4px 0 12px}' +
+      '.jd-or::before,.jd-or::after{content:"";flex:1;height:1px;background:var(--border)}' +
+      '.jd-or span{padding:0 12px}' +
       '#jdName,#jdText{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 13px}' +
       '#jdName{margin-bottom:10px;font-weight:600}#jdText{line-height:1.55;resize:vertical;min-height:170px}' +
       '#jdName::placeholder,#jdText::placeholder{color:var(--text-dim)}' +
@@ -4303,9 +4319,20 @@
       '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
       '<div class="card">' +
+        '<div class="jd-builder"><div class="jd-builder-h">✨ Build a sourcing-ready JD</div>' +
+          '<div class="jd-builder-sub">Give the essentials — we draft a tight, search-optimized brief and drop it below. Casts a smart wide net so you don\'t miss strong people with thin profiles.</div>' +
+          '<div class="jd-builder-row">' +
+            '<input id="jdbTitle" type="text" placeholder="Job title — e.g. VP of Sales" />' +
+            '<input id="jdbCompany" type="text" placeholder="Company name or URL (optional)" />' +
+          '</div>' +
+          '<input id="jdbNotes" type="text" placeholder="Anything specific — seniority, location, must-haves (optional)" />' +
+          '<div class="jd-builder-act"><button class="btn btn-primary btn-sm" id="jdbBtn">✨ Build JD</button>' +
+            '<span class="muted">Review &amp; tweak the draft, then Analyze.</span></div>' +
+        '</div>' +
+        '<div class="jd-or"><span>or paste your own</span></div>' +
         '<input id="jdName" type="text" placeholder="Name this list, e.g. JAGGAER VP Sales · East" />' +
         '<textarea id="jdText" rows="8" placeholder="Paste the full job description here…"></textarea>' +
-        '<div class="jd-tips"><span class="jd-tips-h">The sharper the JD, the better the shortlist — make sure it spells out:</span>' +
+        '<div class="jd-tips"><span class="jd-tips-h">You bring the essentials — the AI does the heavy lifting. Cover what you can below; the more it has to work with, the sharper your shortlist:</span>' +
           '<div class="jd-tipgrid">' +
             '<span><b>Title &amp; level</b> — the exact role and seniority (and whether it leads a team)</span>' +
             '<span><b>Target companies</b> — 5–10 competitors or peers worth poaching from</span>' +
@@ -4485,6 +4512,27 @@
       el.title = "Estimated cost for one search run (" + reqs + " searches + AI parse)";
       bump(el);
     }
+    /** Build a sourcing-ready JD from a title + company (+ notes) and drop it in the box. */
+    function doBuildJd() {
+      var titleEl = $("#jdbTitle"); if (!titleEl) return;
+      var title = titleEl.value.trim();
+      if (!title) { titleEl.focus(); msg("Add a job title to build a JD."); return; }
+      var companyEl = $("#jdbCompany"), notesEl = $("#jdbNotes");
+      var company = companyEl ? companyEl.value.trim() : "";
+      var notes = notesEl ? notesEl.value.trim() : "";
+      var btn = $("#jdbBtn"); if (btn) { btn.disabled = true; btn.textContent = "Building…"; }
+      msg("Drafting a sourcing-ready JD…");
+      send("/sourcing", "POST", { action: "draft", title: title, company: company, companyUrl: company, notes: notes }).then(function (r) {
+        if (btn) { btn.disabled = false; btn.textContent = "✨ Build JD"; }
+        if (!r.ok) { msg("Build failed: " + ((r.data && r.data.error) || r.status)); return; }
+        var jd = (r.data && r.data.jd) || "";
+        var ta = $("#jdText"); if (ta && jd) { ta.value = jd; ta.focus(); }
+        state.jd = jd;
+        var nameEl = $("#jdName"); if (nameEl && !nameEl.value.trim()) nameEl.value = title + (company ? (" · " + company) : "");
+        msg(jd ? "JD drafted below — review/tweak, then Analyze JD." : "Couldn't draft a JD — add a note or two and try again.");
+      });
+    }
+
     /** "Dive deeper" — refine the ICP with a natural-language instruction (LLM). */
     function doRefine() {
       var inp = $("#jdRefineInput"); if (!inp) return;
@@ -4704,6 +4752,10 @@
       planHost.addEventListener("click", function (e) { if (e.target && e.target.id === "jdRefineBtn") doRefine(); });
       planHost.addEventListener("keydown", function (e) { if (e.target && e.target.id === "jdRefineInput" && (e.key === "Enter" || e.keyCode === 13)) { e.preventDefault(); doRefine(); } });
     }
+    var jdbBtn = $("#jdbBtn"); if (jdbBtn) jdbBtn.addEventListener("click", doBuildJd);
+    ["#jdbTitle", "#jdbCompany", "#jdbNotes"].forEach(function (sel) {
+      var e = $(sel); if (e) e.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.keyCode === 13) { ev.preventDefault(); doBuildJd(); } });
+    });
     updateVetCost();
 
     loadRuns();

@@ -9,6 +9,7 @@
 export * from "./types";
 export { parseJobDescription, normalizeIcpObject } from "./parseJobDescription";
 export { refineIcp, type RefineResult } from "./refineSearch";
+export { draftJobDescription, type DraftInput } from "./draftJd";
 export { generateQueries } from "./generateQueries";
 export { scoreCandidate } from "./score";
 export { runDiscovery, rapidApiSearchConfigured, type DiscoveryResult } from "./discovery";
