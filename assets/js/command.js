@@ -4321,7 +4321,9 @@
       '.jd-icp{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:12px}' +
       '.jd-icp>div b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:7px;font-weight:700}' +
       '.jd-empty{font-size:13.5px;color:var(--text);background:var(--bg-soft);border:1px solid var(--border-strong);border-left:3px solid #e0a33e;border-radius:10px;padding:12px 14px;margin:6px 0 0;line-height:1.5}' +
-      '.jd-hint{font-size:12px;color:var(--text-muted);margin:9px 0 0;line-height:1.55;max-width:740px}' +
+      '.jd-hints{margin:10px 0 0;display:flex;flex-direction:column;gap:8px;max-width:760px}' +
+      '.jd-hint{font-size:12px;color:var(--text-muted);margin:0;line-height:1.55;padding-left:11px;border-left:2px solid var(--border-strong)}' +
+      '.jd-hint b{color:var(--text)}' +
       '.jd-steps{display:flex;gap:0;margin:0 0 14px;padding:0;list-style:none}' +
       '.jd-step{flex:1;position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;padding:0 6px}' +
       '.jd-step:not(:last-child)::after{content:"";position:absolute;top:15px;left:calc(50% + 19px);right:calc(-50% + 19px);height:2px;background:var(--border-strong);transition:background .2s}' +
@@ -4467,7 +4469,10 @@
           '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>💾 Save to JD Sourcing</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">➕ Add to queue</button>' +
         '</div>' +
-        '<p class="jd-hint"><b>Min fit</b> is the match-strength bar, from 0 to 100. <b>Leave it at 0 to see every profile found</b>, with nothing filtered. Raise it to keep only the strongest matches: 10 casts a wide net, 40 and up runs tight. <b>Scan up to</b> sets how many profiles each run reviews.</p>' +
+        '<div class="jd-hints">' +
+          '<p class="jd-hint"><b>Min fit</b> &middot; the match-strength bar, from 0 to 100. Leave it at 0 to see every profile found, with nothing filtered. Raise it to keep only the strongest matches: 10 casts a wide net, 40 and up runs tight.</p>' +
+          '<p class="jd-hint"><b>Scan up to</b> &middot; the ceiling on how many candidates a run gathers. Not a minimum: you get however many qualified people the search finds, up to this number.</p>' +
+        '</div>' +
         '<div id="jdMsg" class="muted" style="margin-top:8px"></div>' +
       '</div>' +
       '<div class="card jd-prog" id="jdProgress" style="display:none"></div>' +
