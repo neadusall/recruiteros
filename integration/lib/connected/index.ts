@@ -27,7 +27,7 @@ import type { Motion } from "../core/types";
 
 export type IntegrationId =
   | "instantly" | "salesrobot" | "unipile" | "rapidapi" | "fresh_linkedin"
-  | "jd_sourcing"
+  | "jd_sourcing" | "ai"
   | "tomba" | "loxo" | "taltxt" | "telnyx" | "elevenlabs" | "cartesia" | "hume";
 
 export type ConnStatus = "red" | "yellow" | "green";
@@ -77,6 +77,22 @@ export interface Integration extends IntegrationMeta {
  * dedicated ATS tab (richer sync/webhook flow) but still pre-flighted here.
  */
 const CATALOG: IntegrationMeta[] = [
+  {
+    id: "ai",
+    label: "AI engine",
+    blurb: "The AI brain behind JD Sourcing — writes/strengthens job descriptions, parses them, powers AI refine, and scores deep-vet. Required for the JD Sourcing tab.",
+    requiredFor: [],
+    fields: [
+      { key: "ANTHROPIC_API_KEY", label: "AI API key", required: true, secret: true, placeholder: "sk-ant-…", hint: "From the Anthropic Console → API Keys. Powers JD build/parse/refine and deep-vet." },
+    ],
+    steps: [
+      "Go to console.anthropic.com → Settings → API Keys → Create Key.",
+      "Copy the key (starts with sk-ant-…).",
+      "Paste it below and Save. The JD Sourcing tab works immediately after.",
+    ],
+    docsUrl: "https://console.anthropic.com/settings/keys",
+    docsLabel: "Anthropic API Keys ↗",
+  },
   {
     id: "unipile",
     label: "LinkedIn Automation",
@@ -406,6 +422,14 @@ export async function testConnection(
       const cred = await markTested(workspaceId, id, result.ok, result.error);
       return { status: cred?.status ?? (result.ok ? "green" : "yellow"), error: result.ok ? undefined : result.error };
     }, { isolated });
+  }
+
+  // AI engine: just confirm the key is present (saved here, or house env when not isolated).
+  if (id === "ai") {
+    const ok = Boolean(keys.ANTHROPIC_API_KEY) || (!isolated && Boolean(process.env.ANTHROPIC_API_KEY));
+    await ensureRow();
+    await markTested(workspaceId, id, ok, ok ? undefined : "add_anthropic_key");
+    return { status: ok ? "green" : "red", error: ok ? undefined : "Add your AI API key" };
   }
 
   // JD Sourcing has no provider client — verify with a live one-shot search so the

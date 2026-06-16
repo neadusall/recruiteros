@@ -42,8 +42,8 @@ export async function POST(req: Request) {
     }
 
     if (action === "draft") {
-      if (!b?.title) return fail("missing_title", 422);
-      const jd = await draftJobDescription({ title: b.title, company: b.company, companyUrl: b.companyUrl, notes: b.notes });
+      if (!b?.title && !b?.base) return fail("missing_input", 422, { detail: "title or base required" });
+      const jd = await draftJobDescription({ title: b.title, company: b.company, companyUrl: b.companyUrl, notes: b.notes, base: b.base });
       return ok({ jd });
     }
 

@@ -4320,14 +4320,14 @@
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
       '<div class="card">' +
         '<div class="jd-builder"><div class="jd-builder-h">✨ Build a sourcing-ready JD</div>' +
-          '<div class="jd-builder-sub">A title and company is enough — the AI writes a precise, wide-net brief that turns into a ranked shortlist of qualified candidates in minutes.</div>' +
+          '<div class="jd-builder-sub">Give what you\'ve got — a title, company, key details, or a rough JD in the box below — and the AI strengthens it into a precise, wide-net brief that becomes a ranked shortlist.</div>' +
           '<div class="jd-builder-row">' +
             '<input id="jdbTitle" type="text" placeholder="Job title — e.g. VP of Sales" />' +
             '<input id="jdbCompany" type="text" placeholder="Company name or URL (optional)" />' +
           '</div>' +
           '<input id="jdbNotes" type="text" placeholder="Anything specific — seniority, location, must-haves (optional)" />' +
-          '<div class="jd-builder-act"><button class="btn btn-primary btn-sm" id="jdbBtn">✨ Build JD</button>' +
-            '<span class="muted">Review &amp; tweak the draft, then Analyze.</span></div>' +
+          '<div class="jd-builder-act"><button class="btn btn-primary btn-sm" id="jdbBtn">✨ Build / strengthen</button>' +
+            '<span class="muted">We build on whatever you give us. Review, then Analyze.</span></div>' +
         '</div>' +
         '<div class="jd-or"><span>or paste your own</span></div>' +
         '<input id="jdName" type="text" placeholder="Name this list, e.g. JAGGAER VP Sales · East" />' +
@@ -4510,20 +4510,21 @@
     function doBuildJd() {
       var titleEl = $("#jdbTitle"); if (!titleEl) return;
       var title = titleEl.value.trim();
-      if (!title) { titleEl.focus(); msg("Add a job title to build a JD."); return; }
-      var companyEl = $("#jdbCompany"), notesEl = $("#jdbNotes");
+      var companyEl = $("#jdbCompany"), notesEl = $("#jdbNotes"), ta = $("#jdText");
       var company = companyEl ? companyEl.value.trim() : "";
       var notes = notesEl ? notesEl.value.trim() : "";
-      var btn = $("#jdbBtn"); if (btn) { btn.disabled = true; btn.textContent = "Building…"; }
-      msg("Drafting a sourcing-ready JD…");
-      send("/sourcing", "POST", { action: "draft", title: title, company: company, companyUrl: company, notes: notes }).then(function (r) {
-        if (btn) { btn.disabled = false; btn.textContent = "✨ Build JD"; }
+      var base = ta ? ta.value.trim() : "";   // strengthen whatever's already in the box
+      if (!title && !base) { titleEl.focus(); msg("Add a title — or paste a rough JD below — and we'll strengthen it."); return; }
+      var btn = $("#jdbBtn"); if (btn) { btn.disabled = true; btn.textContent = "Working…"; }
+      msg(base ? "Strengthening what you gave us into a sourcing brief…" : "Drafting a sourcing-ready JD…");
+      send("/sourcing", "POST", { action: "draft", title: title, company: company, companyUrl: company, notes: notes, base: base }).then(function (r) {
+        if (btn) { btn.disabled = false; btn.textContent = "✨ Build / strengthen"; }
         if (!r.ok) { msg("Build failed: " + ((r.data && r.data.error) || r.status)); return; }
         var jd = (r.data && r.data.jd) || "";
-        var ta = $("#jdText"); if (ta && jd) { ta.value = jd; ta.focus(); }
+        if (ta && jd) { ta.value = jd; ta.focus(); }
         state.jd = jd;
-        var nameEl = $("#jdName"); if (nameEl && !nameEl.value.trim()) nameEl.value = title + (company ? (" · " + company) : "");
-        msg(jd ? "JD drafted below — review/tweak, then Analyze JD." : "Couldn't draft a JD — add a note or two and try again.");
+        var nameEl = $("#jdName"); if (nameEl && !nameEl.value.trim() && title) nameEl.value = title + (company ? (" · " + company) : "");
+        msg(jd ? "Brief ready below — review/tweak, then Analyze JD." : "Couldn't build — add a few more details and try again.");
       });
     }
 

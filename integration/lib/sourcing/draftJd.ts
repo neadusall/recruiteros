@@ -37,32 +37,41 @@ Cast a sensible WIDE net — recall matters because people rarely put everything
   over-tight rules cut strong people whose LinkedIn just doesn't spell everything out.
 - Frame must-haves as the core signal, knowing some qualified people won't list every detail.
 
+If the recruiter provides EXISTING MATERIAL (a rough JD, notes, or a prior brief), treat it as the
+FOUNDATION — do not start from scratch. Keep their real specifics (named companies, locations,
+titles, requirements, metrics), then strengthen, complete the gaps, and widen the net. Never discard
+their details or contradict them.
+
 Infer sensibly from the company and title. Prefer specific over generic, but favor recall over a
 narrow net. Do NOT include salary, benefits, EEO/legal boilerplate, or application instructions.
 Output plain text only — no markdown headings, no preamble such as "Here is" — just the brief, ready to paste.`;
 
 export interface DraftInput {
-  title: string;
+  title?: string;
   company?: string;
   companyUrl?: string;
   notes?: string;
+  /** Existing material to strengthen — a rough JD or prior brief the recruiter already has. */
+  base?: string;
 }
 
-/** Generate a sourcing-ready JD brief. Throws only if the model client is unconfigured. */
+/** Generate/strengthen a sourcing-ready JD brief. Throws only if the model client is unconfigured. */
 export async function draftJobDescription(input: DraftInput): Promise<string> {
   const title = (input.title || "").trim();
-  if (!title) return "";
+  const base = (input.base || "").trim();
+  if (!title && !base) return "";
   if (!process.env.ANTHROPIC_API_KEY) {
     throw Object.assign(new Error("anthropic_not_configured: set ANTHROPIC_API_KEY"), { status: 409 });
   }
   const company = [input.company, input.companyUrl].map((x) => (x || "").trim()).filter(Boolean).join(" · ");
   const lines = [
-    `Role title: ${title}`,
-    company ? `Hiring company: ${company}` : "Hiring company: (not provided — infer a typical employer for this role)",
+    title ? `Role title: ${title}` : "",
+    company ? `Hiring company: ${company}` : "",
     input.notes && input.notes.trim() ? `Extra notes from the recruiter: ${input.notes.trim().slice(0, 800)}` : "",
+    base ? `Existing material to strengthen (keep its real specifics, fill the gaps, widen the net):\n"""\n${base.slice(0, 8000)}\n"""` : "",
     "",
-    "Write the sourcing brief.",
-  ].filter((l) => l !== "" || true);
+    base ? "Strengthen the existing material into a tight sourcing brief." : "Write the sourcing brief.",
+  ].filter(Boolean);
 
   const response = await client.messages.create({
     model: MODEL,

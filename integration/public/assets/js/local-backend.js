@@ -160,6 +160,11 @@
   // Instantly + SalesRobot are intentionally absent (email = self-hosted infra).
   function connectedCatalog() {
     return [
+      { id: "ai", label: "AI engine", status: "red", requiredFor: [],
+        blurb: "The AI brain behind JD Sourcing — writes/strengthens and parses JDs, powers AI refine, scores deep-vet. Required for the JD Sourcing tab.",
+        fields: [{ key: "ANTHROPIC_API_KEY", label: "AI API key", required: true, secret: true, placeholder: "sk-ant-…", hint: "From the Anthropic Console → API Keys." }],
+        steps: ["Go to console.anthropic.com → API Keys → Create Key.", "Copy it (starts with sk-ant-…).", "Paste below and Save."],
+        docsUrl: "https://console.anthropic.com/settings/keys", docsLabel: "Anthropic API Keys ↗", present: [] },
       { id: "unipile", label: "LinkedIn Automation", status: "green", requiredFor: ["bd", "recruiting"],
         blurb: "Sends connection invites, DMs and voice notes from your LinkedIn seats, fully managed for you, no API key to set up.",
         fields: [{ key: "UNIPILE_ACCOUNT_ID", label: "LinkedIn account id", required: false, placeholder: "auto-filled once you connect a seat", hint: "Optional, leave blank to use the seat you connect in LinkedIn Automation." }],
