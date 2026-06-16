@@ -219,7 +219,7 @@
   var wsNameEl = $("#wsName");
   if (wsNameEl) wsNameEl.textContent =
     (isLumeWorkspace() && ctx.user && ctx.user.name) ? ctx.user.name
-      : ((ctx.workspace && ctx.workspace.name) || "Workspace");
+      : wsDisplayName();
   var envPill = $("#envPill");
   if (envPill) envPill.style.display = "none"; // no demo/live badge: this is the product
   function signOut() {
@@ -330,6 +330,21 @@
     var cust = ((ws.customDomain) || "").toLowerCase();
     return wsDom === "lumesp.com" || userDom === "lumesp.com" ||
            cust === "app.lumesp.com" || cust.indexOf(".lumesp.com") >= 0;
+  }
+  // The label shown for this workspace in the chrome (breadcrumb + workspace card).
+  // A PERSONAL workspace (a free-email signup, so no company domain) is named after
+  // the person who created it, by FIRST name, so it reads "Ryan's Workspace" rather
+  // than an email/username-derived string. Corporate (company-domain) and white-label
+  // workspaces keep their stored company/brand name.
+  function firstNameOf(s) { return String(s || "").trim().split(/\s+/)[0] || ""; }
+  function wsDisplayName() {
+    var ws = ctx.workspace || {};
+    var personal = !(ws.domain && String(ws.domain).trim());
+    if (personal && !isWhiteLabelWorkspace() && ctx.user && ctx.user.name) {
+      var fn = firstNameOf(ctx.user.name);
+      if (fn) return fn + "'s Workspace";
+    }
+    return ws.name || "Workspace";
   }
   var ON_HOUSE_HOST = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.host || "");
   var IS_HOUSE = ON_HOUSE_HOST && !isWhiteLabelWorkspace();
@@ -506,7 +521,7 @@
     var r = ROUTES[key];
     syncMotionNav(); // keep motion-only visibility + Prospects/Candidates label current
     $("#pageTitle").textContent = (key === "prospects") ? prospectsLabel() : (key === "data") ? dataLabel() : r.title;
-    $("#crumb").textContent = (ctx.workspace ? ctx.workspace.name + " / " : "") + r.crumb;
+    $("#crumb").textContent = (ctx.workspace ? wsDisplayName() + " / " : "") + r.crumb;
     Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) { n.classList.toggle("active", n.dataset.route === key); });
     var pa = $("#primaryAction");
     if (r.action) { pa.style.display = ""; pa.textContent = (key === "prospects") ? ("＋ Add " + prospectNoun()) : r.action; pa.onclick = function () { primaryAction(key); }; }
@@ -4243,7 +4258,9 @@
      deduped candidate list -> save it under a NAME here (staging) -> send it to
      Candidates under that same name. Backend: /api/sourcing + lib/sourcing/*. */
   function renderJdSourcing(el) {
-    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", queue: [], runs: [], running: false, refineNote: "" };
+    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", queue: [], runs: [], running: false, refineNote: "", location: "" };
+    function jdbLoc() { var e = $("#jdbLocation"); return e ? e.value.trim() : ""; }
+    function jdWithLoc(jd) { var loc = jdbLoc(); return loc ? (jd + "\n\nBased in: " + loc) : jd; }
 
     el.innerHTML =
       '<style>' +
@@ -4290,8 +4307,9 @@
       '.jd-builder::after{content:"";position:absolute;top:-40%;right:-10%;width:240px;height:240px;background:radial-gradient(circle,rgba(124,92,255,.18),transparent 70%);pointer-events:none}' +
       '.jd-builder-h{position:relative;font-weight:800;font-size:15px;letter-spacing:.01em;margin-bottom:3px;background:linear-gradient(90deg,#7c5cff,var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
       '.jd-builder-sub{font-size:12.5px;color:var(--text-muted);margin-bottom:11px}' +
-      '.jd-builder-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:9px}' +
+      '.jd-builder-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}' +
       '@media(max-width:640px){.jd-builder-row{grid-template-columns:1fr}}' +
+      '.jd-lead{font-size:13.5px;margin-bottom:12px}.jd-lead b{color:var(--text)}' +
       '.jd-builder input{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:9px;color:var(--text);font:inherit;font-size:13.5px;padding:9px 12px}' +
       '.jd-builder input::placeholder{color:var(--text-dim)}' +
       '.jd-builder input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
@@ -4302,10 +4320,15 @@
       '.jd-or span{padding:0 12px}' +
       '.jd-buildbar{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:12px 0 2px}' +
       '.jd-buildbar .muted{font-size:12px}' +
-      '#jdName,#jdText{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 13px}' +
-      '#jdName{margin-bottom:10px;font-weight:600}#jdText{line-height:1.55;resize:vertical;min-height:170px}' +
-      '#jdName::placeholder,#jdText::placeholder{color:var(--text-dim)}' +
-      '#jdName:focus,#jdText:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
+      '#jdName,#jdText,#jdbTitle,#jdbCompany,#jdbNotes,#jdbLocation{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 14px;margin:0;transition:border-color .12s,box-shadow .12s}' +
+      '#jdText{line-height:1.55;resize:vertical;min-height:150px}' +
+      '#jdName::placeholder,#jdText::placeholder,#jdbTitle::placeholder,#jdbCompany::placeholder,#jdbNotes::placeholder,#jdbLocation::placeholder{color:var(--text-dim)}' +
+      '#jdName:focus,#jdText:focus,#jdbTitle:focus,#jdbCompany:focus,#jdbNotes:focus,#jdbLocation:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
+      '.jd-field{margin-bottom:12px}' +
+      '.jd-field>label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:700;margin-bottom:6px}' +
+      '.jd-opt{font-weight:500;text-transform:none;letter-spacing:0;opacity:.75;margin-left:7px}' +
+      '.jd-fieldgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px}.jd-fieldgrid>.jd-field{margin-bottom:0}' +
+      '@media(max-width:640px){.jd-fieldgrid{grid-template-columns:1fr;gap:0}.jd-fieldgrid>.jd-field{margin-bottom:12px}}' +
       '.jd-queries{max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:6px 12px;background:var(--bg-soft)}' +
       '.jd-q{padding:8px 0;font-size:13px;border-bottom:1px solid var(--border)}.jd-q:last-child{border-bottom:0}' +
       '.jd-q-label{display:inline-block;min-width:260px;font-weight:600}' +
@@ -4321,13 +4344,16 @@
       '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
       '<div class="card">' +
-        '<div class="jd-builder-row">' +
-          '<input id="jdbTitle" type="text" placeholder="Job title, e.g. VP of Sales" />' +
-          '<input id="jdbCompany" type="text" placeholder="Company name or URL (optional)" />' +
+        '<div class="jd-lead"><b>Start with the role.</b> <span class="muted">Fill in what you know and paste any JD; the AI refines it into a strong, wide-net search.</span></div>' +
+        '<div class="jd-fieldgrid">' +
+          '<div class="jd-field"><label>Job title</label><input id="jdbTitle" type="text" placeholder="The role you are filling, e.g. VP of Sales, Director of Nursing" /></div>' +
+          '<div class="jd-field"><label>Company</label><input id="jdbCompany" type="text" placeholder="Name or website, used to find peers worth poaching from" /></div>' +
         '</div>' +
-        '<input id="jdbNotes" type="text" placeholder="Anything specific: seniority, location, must-haves (optional)" />' +
-        '<input id="jdName" type="text" placeholder="Name this list, e.g. JAGGAER VP Sales · East" />' +
-        '<textarea id="jdText" rows="8" placeholder="Paste your job description here. The more real detail you give, the stronger the search."></textarea>' +
+        '<div class="jd-field"><label>City &amp; state</label><input id="jdbLocation" type="text" placeholder="Where the role is based, e.g. Fair Lawn, NJ (saved with the list)" /></div>' +
+        '<div class="jd-field"><label>Anything specific <span class="jd-opt muted">optional</span></label><input id="jdbNotes" type="text" placeholder="Seniority, must-have experience, who they sell to, deal-breakers" /></div>' +
+        '<div class="jd-field"><label>List name</label><input id="jdName" type="text" placeholder="Name this list, e.g. JAGGAER VP Sales · East" /></div>' +
+        '<div class="jd-field"><label>Job description <span class="jd-opt muted">optional, or let the AI write it</span></label>' +
+          '<textarea id="jdText" rows="8" placeholder="Paste the job description here. The more real detail you give, the stronger the search."></textarea></div>' +
         '<div class="jd-builder"><div class="jd-builder-h">✨ Build a refined, sourcing-ready JD</div>' +
           '<div class="jd-builder-sub">Your input is the benchmark. The AI refines it, shores up the gaps, and widens the net into a precise, sourcing-ready brief. Stronger input means a stronger search. Run this first, then Analyze.</div>' +
           '<div class="jd-buildbar" style="margin-top:2px"><button class="btn btn-primary btn-sm" id="jdbBtn">✨ Build refined JD</button>' +
@@ -4336,13 +4362,14 @@
         '<div class="jd-tips"><span class="jd-tips-h">You bring the essentials. The AI does the heavy lifting. Cover what you can below; the more it has to work with, the sharper your shortlist:</span>' +
           '<div class="jd-tipgrid">' +
             '<span><b>Title &amp; level</b>: the exact role and seniority, and whether it leads a team</span>' +
-            '<span><b>Target companies</b>: 5 to 10 competitors or peers worth poaching from</span>' +
-            '<span><b>Location</b>: the metros that matter, or just say remote</span>' +
-            '<span><b>Industry / domain</b>: where strong candidates come from</span>' +
+            '<span><b>Skills, tools &amp; licenses</b>: required certs, licenses, or systems (e.g. RN, CPA, AWS, Epic, Salesforce)</span>' +
+            '<span><b>Seniority &amp; scope</b>: years of experience, team size, or budget they have owned</span>' +
             '<span><b>Must-have experience</b>: what they have actually done, not nice-to-haves</span>' +
-            '<span><b>Who they sell to</b>: buyer personas, for sales roles</span>' +
+            '<span><b>Industry / domain</b>: where strong candidates come from</span>' +
+            '<span><b>Target companies</b>: competitors or peers worth poaching from</span>' +
+            '<span><b>Location</b>: the metros that matter, or just say remote</span>' +
+            '<span><b>Proof of impact</b>: measurable results they can show (outcomes, scale, growth, metrics)</span>' +
             '<span><b>Deal-breakers</b>: what should rule a candidate out</span>' +
-            '<span><b>Proof of impact</b>: quota, scale, team size, or metrics to match on</span>' +
           '</div>' +
         '</div>' +
         '<div class="jd-actions">' +
@@ -4428,7 +4455,8 @@
           var n = r.candidates ? r.candidates.length : 0;
           var urls = (r.candidates || []).filter(function (c) { return c.linkedinUrl; }).length;
           var vetted = (r.candidates || []).filter(function (c) { return typeof c.verifiedScore === "number"; }).length;
-          return '<div class="jd-run"><div><b>' + esc(r.name) + '</b> <span class="muted">· ' + n + ' candidates · ' + urls + ' with LinkedIn URL' +
+          return '<div class="jd-run"><div><b>' + esc(r.name) + '</b> <span class="muted">· ' +
+            (r.location ? (esc(r.location) + ' · ') : '') + n + ' candidates · ' + urls + ' with LinkedIn URL' +
             (vetted ? (' · ' + vetted + ' deep-vetted') : '') +
             (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates') : '') + '</span></div>' +
             '<div class="jd-run-actions">' +
@@ -4514,6 +4542,7 @@
       var companyEl = $("#jdbCompany"), notesEl = $("#jdbNotes"), ta = $("#jdText");
       var company = companyEl ? companyEl.value.trim() : "";
       var notes = notesEl ? notesEl.value.trim() : "";
+      var loc = jdbLoc(); if (loc) notes = [notes, "Based in " + loc].filter(Boolean).join(". ");
       var base = ta ? ta.value.trim() : "";   // strengthen whatever's already in the box
       if (!title && !base) { titleEl.focus(); msg("Add a title, or paste a rough JD below, and we'll strengthen it."); return; }
       var btn = $("#jdbBtn"); if (btn) { btn.disabled = true; btn.textContent = "Working…"; }
@@ -4650,8 +4679,9 @@
 
     $("#jdAnalyze").addEventListener("click", function () {
       var jd = $("#jdText").value.trim(); if (!jd) { msg("Paste a job description first."); return; }
+      state.location = jdbLoc();
       state.jd = jd; msg("Analyzing…");
-      send("/sourcing", "POST", { action: "plan", jd: jd }).then(function (r) {
+      send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(jd) }).then(function (r) {
         if (!r.ok) { msg("Analyze failed: " + ((r.data && r.data.error) || r.status)); return; }
         state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
         $("#jdFind").disabled = false; msg(""); renderPlan(); updateRunCost();
@@ -4665,7 +4695,7 @@
       msg("");
       $("#jdFind").disabled = true;
       showProgress("Finding candidates", findEta(cap));
-      send("/sourcing", "POST", { action: "run", jd: state.jd, cap: cap, minFit: minFit }).then(function (r) {
+      send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), cap: cap, minFit: minFit }).then(function (r) {
         $("#jdFind").disabled = false;
         if (!r.ok) { finishProgress("Search failed"); msg("Find failed: " + ((r.data && r.data.error) || r.status)); return; }
         state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
@@ -4681,7 +4711,7 @@
       var name = $("#jdName").value.trim(); if (!name) { msg("Give the list a name to save it."); $("#jdName").focus(); return; }
       if (!state.icp) { msg("Analyze a JD first."); return; }
       msg("Saving…");
-      send("/sourcing", "POST", { action: "save", name: name, jd: state.jd, icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings }).then(function (r) {
+      send("/sourcing", "POST", { action: "save", name: name, jd: state.jd, location: state.location || jdbLoc(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings }).then(function (r) {
         if (!r.ok) { msg("Save failed: " + ((r.data && r.data.error) || r.status)); return; }
         msg('Saved "' + name + '" to JD Sourcing. Review it below, then send to Candidates.'); loadRuns();
       });

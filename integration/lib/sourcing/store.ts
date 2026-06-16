@@ -29,6 +29,7 @@ export interface SaveRunInput {
   motion?: Motion;
   jd: string;
   jdUrl?: string;
+  location?: string;
   icp: CandidateICP;
   queries: SourcingQuery[];
   candidates: CandidateRow[];
@@ -42,6 +43,7 @@ export function saveSourcingRun(workspaceId: string, input: SaveRunInput): Sourc
     existing.name = input.name || existing.name;
     existing.jd = input.jd ?? existing.jd;
     existing.jdUrl = input.jdUrl ?? existing.jdUrl;
+    existing.location = input.location ?? existing.location;
     existing.icp = input.icp ?? existing.icp;
     existing.queries = input.queries ?? existing.queries;
     existing.candidates = input.candidates ?? existing.candidates;
@@ -56,6 +58,7 @@ export function saveSourcingRun(workspaceId: string, input: SaveRunInput): Sourc
     motion: input.motion ?? "recruiting",
     jd: input.jd || "",
     jdUrl: input.jdUrl,
+    location: input.location,
     icp: input.icp,
     queries: input.queries || [],
     candidates: input.candidates || [],

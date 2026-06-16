@@ -4362,13 +4362,14 @@
         '<div class="jd-tips"><span class="jd-tips-h">You bring the essentials. The AI does the heavy lifting. Cover what you can below; the more it has to work with, the sharper your shortlist:</span>' +
           '<div class="jd-tipgrid">' +
             '<span><b>Title &amp; level</b>: the exact role and seniority, and whether it leads a team</span>' +
-            '<span><b>Target companies</b>: 5 to 10 competitors or peers worth poaching from</span>' +
-            '<span><b>Location</b>: the metros that matter, or just say remote</span>' +
-            '<span><b>Industry / domain</b>: where strong candidates come from</span>' +
+            '<span><b>Skills, tools &amp; licenses</b>: required certs, licenses, or systems (e.g. RN, CPA, AWS, Epic, Salesforce)</span>' +
+            '<span><b>Seniority &amp; scope</b>: years of experience, team size, or budget they have owned</span>' +
             '<span><b>Must-have experience</b>: what they have actually done, not nice-to-haves</span>' +
-            '<span><b>Who they sell to</b>: buyer personas, for sales roles</span>' +
+            '<span><b>Industry / domain</b>: where strong candidates come from</span>' +
+            '<span><b>Target companies</b>: competitors or peers worth poaching from</span>' +
+            '<span><b>Location</b>: the metros that matter, or just say remote</span>' +
+            '<span><b>Proof of impact</b>: measurable results they can show (outcomes, scale, growth, metrics)</span>' +
             '<span><b>Deal-breakers</b>: what should rule a candidate out</span>' +
-            '<span><b>Proof of impact</b>: quota, scale, team size, or metrics to match on</span>' +
           '</div>' +
         '</div>' +
         '<div class="jd-actions">' +
@@ -4454,7 +4455,8 @@
           var n = r.candidates ? r.candidates.length : 0;
           var urls = (r.candidates || []).filter(function (c) { return c.linkedinUrl; }).length;
           var vetted = (r.candidates || []).filter(function (c) { return typeof c.verifiedScore === "number"; }).length;
-          return '<div class="jd-run"><div><b>' + esc(r.name) + '</b> <span class="muted">· ' + n + ' candidates · ' + urls + ' with LinkedIn URL' +
+          return '<div class="jd-run"><div><b>' + esc(r.name) + '</b> <span class="muted">· ' +
+            (r.location ? (esc(r.location) + ' · ') : '') + n + ' candidates · ' + urls + ' with LinkedIn URL' +
             (vetted ? (' · ' + vetted + ' deep-vetted') : '') +
             (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates') : '') + '</span></div>' +
             '<div class="jd-run-actions">' +
@@ -4709,7 +4711,7 @@
       var name = $("#jdName").value.trim(); if (!name) { msg("Give the list a name to save it."); $("#jdName").focus(); return; }
       if (!state.icp) { msg("Analyze a JD first."); return; }
       msg("Saving…");
-      send("/sourcing", "POST", { action: "save", name: name, jd: state.jd, icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings }).then(function (r) {
+      send("/sourcing", "POST", { action: "save", name: name, jd: state.jd, location: state.location || jdbLoc(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings }).then(function (r) {
         if (!r.ok) { msg("Save failed: " + ((r.data && r.data.error) || r.status)); return; }
         msg('Saved "' + name + '" to JD Sourcing. Review it below, then send to Candidates.'); loadRuns();
       });

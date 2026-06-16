@@ -40,7 +40,9 @@ Shape:
 Rules:
 - Expand vague geography into concrete metros (e.g. "East Coast" -> ["New York","Boston","Washington DC","Atlanta","Philadelphia","Charlotte","Miami"]).
 - targetCompanies must be REAL companies that employ this exact profile (competitors first, then adjacent). Never invent company names.
-- titles should include common variants (VP/RVP/Area VP/Regional Sales Director, etc.).`;
+- titles should include common variants (VP/RVP/Area VP/Regional Sales Director, etc.).
+- mustHave should capture required skills, tools, certifications, and licenses for THIS role (role-appropriate, e.g. RN license, CPA, PE, AWS, Epic/EHR, Salesforce) plus seniority/scope and measurable-impact signals — these are high-signal for any field, not just sales. Put soft/measurable extras in niceToHave.
+- sellsTo applies only to sales / GTM roles; leave it empty otherwise.`;
 
 const FALLBACK: CandidateICP = {
   label: "Sourcing profile",

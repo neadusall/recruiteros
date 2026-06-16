@@ -67,7 +67,7 @@ export async function POST(req: Request) {
     if (action === "save") {
       if (!b?.name || !b?.icp) return fail("missing_fields", 422, { detail: "name and icp required" });
       const run = saveSourcingRun(ws, {
-        id: b.id, name: b.name, jd: b.jd ?? "", jdUrl: b.jdUrl,
+        id: b.id, name: b.name, jd: b.jd ?? "", jdUrl: b.jdUrl, location: b.location,
         icp: b.icp, queries: b.queries ?? [], candidates: b.candidates ?? [],
         warnings: b.warnings ?? [],
         motion: b.motion === "bd" ? "bd" : "recruiting",

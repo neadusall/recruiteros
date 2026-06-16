@@ -25,9 +25,13 @@ Cover, naturally and tightly (a few short paragraphs or compact bullets):
 - Target locations / metros (expand vague geography to real metros), or state remote.
 - The industry / domain that strong candidates come from.
 - Must-have experience and skills — what they've actually DONE, not nice-to-haves.
-- Who they sell to / buyer personas, if it's a sales or GTM role.
+- Required skills, tools, certifications, and licenses for THIS role (role-appropriate, e.g. RN license,
+  CPA, PE, AWS, Epic/EHR, Salesforce, specific machinery or software). High-signal across any field.
+- Seniority and scope — years of relevant experience, and the size of team or budget/P&L they have owned.
+- Who they sell to / buyer personas — ONLY if it's a sales or GTM role; omit otherwise.
 - Deal-breakers — traits or backgrounds that should disqualify a candidate.
-- Proof-of-impact signals to match on (quota carried, revenue, team size, scale, growth metrics).
+- Proof-of-impact signals to match on — measurable results appropriate to the role (outcomes, scale, growth,
+  revenue, patient/customer/quality metrics, projects delivered, team or budget size). Not just sales quota.
 
 Cast a sensible WIDE net — recall matters because people rarely put everything on LinkedIn:
 - List adjacent and variant titles, not just the literal one (e.g. for "VP Sales" also CRO, RVP,

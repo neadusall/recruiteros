@@ -108,6 +108,8 @@ export interface SourcingRun {
   motion: Motion;
   jd: string;
   jdUrl?: string;
+  /** City & state of the role, as entered by the recruiter (saved with the list). */
+  location?: string;
   icp: CandidateICP;
   queries: SourcingQuery[];
   candidates: CandidateRow[];
