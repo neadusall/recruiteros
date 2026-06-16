@@ -32,7 +32,7 @@ between pages. They look like clutter but they are load-bearing. See "Don't move
 |---|---|---|
 | [`integration/`](../integration/) | **The app.** Next.js: API + portal, the production deployable. | You're changing backend logic, API routes, or app behavior. |
 | `*.html` (root) | **Portal + marketing pages** (source of truth). Synced into `integration/public/`. | You're changing any page's HTML/markup. |
-| [`assets/`](../assets/) | Shared frontend `css/` + `js/` for the root pages. Synced with the HTML. | You're changing page styles or client-side JS. |
+| [`assets/`](../assets/) | Shared frontend `css/` + `js/` for the root pages. Synced with the HTML. The two big SPAs — [`assets/js/command.js`](../assets/js/command.js) (admin/recruiter portal) and [`assets/js/owner.js`](../assets/js/owner.js) (owner console) — open with a **navigation map** comment listing every `#hash` route → `render…`/`view…` function, so search by name to jump. | You're changing page styles or client-side JS. |
 | [`bridge/`](../bridge/) | The in-backend **outreach bridge** (`outreach-bridge.cjs`) + tests. Coordinates work that runs in the Chrome extension. | You're changing how the backend talks to the extension. |
 | [`extension/`](../extension/) | **Chrome extension** (`manifest.json`, `background.js`, `content/`, `popup/`). Does the actual LinkedIn/outreach actions in the browser. | You're changing extension behavior. Build artifact lands in `dist/`. |
 | [`scraper/`](../scraper/) | **Python LinkedIn scraper sidecar** (`app.py`, `engine.py`, Playwright/Chromium). Its own Docker container; reached at `scraper:8000`. | You're changing the open-source scraper engine. |

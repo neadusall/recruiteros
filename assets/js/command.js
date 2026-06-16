@@ -1,11 +1,53 @@
 /* RecruitersOS · Command Center
  *
- * One screen that ties the whole GTM engine together: Overview, Response,
- * Prospects, Campaigns, Outreach, Content, Accounts, Connected, ATS.
+ * One screen that ties the whole GTM engine together. It calls the integration
+ * backend at /api/* when reachable, and renders from a rich local seed otherwise,
+ * so it is fully alive on the static site. Routing is hash-based (#overview,
+ * #response, ...) to mirror the reference app.
  *
- * It calls the integration backend at /api/* when reachable, and renders from a
- * rich local seed otherwise, so it is fully alive on the static site. Routing is
- * hash-based (#response, #overview, ...) to mirror the reference app.
+ * ============================================================================
+ *  HOW TO NAVIGATE THIS FILE  (it's big — use search, not scrolling)
+ * ============================================================================
+ *  Every screen is a `render<Name>(el)` function registered in the ROUTES table
+ *  (search:  var ROUTES = ). To jump to a screen, search for `function render…`
+ *  using the name below. Map is by NAME (search-stable), not line number.
+ *
+ *  ── SCREENS (nav group → #hash → function) ─────────────────────────────────
+ *  Operate  #overview      renderOverview        (detail: renderOverviewDetail)
+ *           #response      renderResponse        (the reply inbox)
+ *           #inmarket      renderInMarket        (Hire Signals; also #builder, BD)
+ *           #prospects     renderProspects
+ *  Build    #campaigns     renderCampaignsHub    (→ renderSeqHome/renderSeqEditor)
+ *           #studio        renderStudio
+ *           #jdsourcing    renderJdSourcing
+ *           #data          renderData            (Candidates; BD: renderCompanies)
+ *           #ostext        renderOstext          (→ renderOstextEngine/…Wizard)
+ *           #voicedrops    renderVoiceDrops
+ *           #vetting       renderVetting
+ *           #automation    renderAutomation
+ *           #content       renderContent         (Sequences Library)
+ *           (outreach)     renderOutreach        (#outreach), renderSending
+ *  Measure  #analytics     renderAnalytics       (detail: renderAnalyticsDetail)
+ *           #outreach-stats renderOutreachStats  (+ renderSpending)
+ *  Connect  #accounts      renderAccounts
+ *           #setup         renderSetup           (→ renderBranding/renderDomain/
+ *                                                   renderVoiceSetup/…Overview)
+ *           #connected     renderConnected
+ *           #ats           renderAts
+ *  Admin    #team          renderTeam
+ *
+ *  ── CORE / CHROME / HELPERS ────────────────────────────────────────────────
+ *  Routing      render(), currentRoute(), currentDetail(), var ROUTES
+ *  Backend      api(path), send(path,method,payload)   ← all /api/* calls
+ *  RBAC         can(cap), var CAPS
+ *  UI helpers   esc(), toast(), openModal(), head()
+ *  Workspace    wsDisplayName(), isLumeWorkspace(), isWhiteLabelWorkspace()
+ *  Branding     workspaceBrand()  (logo/accent swap; near end of file)
+ *
+ *  NOTE: this file is the SOURCE OF TRUTH at repo-root assets/js/. After editing,
+ *  run `node integration/sync-public.cjs` (or it runs on build) to mirror into
+ *  integration/public/. Never edit integration/public/ directly. See docs/STRUCTURE.md.
+ * ============================================================================
  */
 (function () {
   "use strict";
