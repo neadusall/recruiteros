@@ -38,6 +38,7 @@ const store = {
   sessions: new Map<string, Session>(),
   emailTokens: new Map<string, EmailToken>(),
   suspended: new Set<string>(),                // workspaceIds locked by the owner
+  bootstrapResetNonce: "" as string,           // last-applied OWNER_BOOTSTRAP_RESET (one-shot guard)
 };
 
 /* ---------------- durability (Postgres snapshot) ----------------
@@ -54,6 +55,7 @@ function serialize() {
     sessions: [...store.sessions.entries()],
     emailTokens: [...store.emailTokens.entries()],
     suspended: [...store.suspended],
+    bootstrapResetNonce: store.bootstrapResetNonce,
   };
 }
 function hydrate(s: any) {
@@ -66,6 +68,7 @@ function hydrate(s: any) {
   store.sessions = new Map(s.sessions || []);
   store.emailTokens = new Map(s.emailTokens || []);
   store.suspended = new Set(s.suspended || []);
+  store.bootstrapResetNonce = s.bootstrapResetNonce || "";
   backfillDomainIndex();
 }
 
@@ -121,6 +124,83 @@ export function ensureAuthReady(): Promise<void> {
 // Kick off hydration at module load so the snapshot is in memory by the time
 // the first request hits a synchronous guard (sessionContext).
 void ensureAuthReady();
+
+/**
+ * Boot-time owner-account bootstrap — the durable fix for "I can't log in".
+ *
+ * The owner login account is just data in the snapshot store; it is NOT implied
+ * by the OWNER_EMAIL allow-list (that only gates the owner console). If the
+ * store was ever wiped (the pre-2026-06-12 Postgres-wipe era) the account
+ * vanished — and with password-reset email unconfigured in prod there was no
+ * recovery path, so the owner stayed locked out across every redeploy. This
+ * guarantees the owner can always sign in, with no SSH and no working email:
+ *
+ *   - OWNER_EMAIL              comma list of owner emails (same as the console).
+ *   - OWNER_BOOTSTRAP_PASSWORD password to seed. Bootstrap is a no-op if unset.
+ *   - OWNER_BOOTSTRAP_RESET    optional nonce. When its value differs from the
+ *                              last-applied one, EXISTING owner accounts are
+ *                              force-reset to OWNER_BOOTSTRAP_PASSWORD exactly
+ *                              once (covers "account exists but password lost").
+ *
+ * Idempotent and non-destructive by default: missing owner accounts are created
+ * on every boot, but an existing account's password is NEVER clobbered unless
+ * the reset nonce changes — so once the owner signs in and sets their own
+ * password (account menu / owner console), future deploys leave it alone.
+ */
+export async function ensureOwnerAccounts(): Promise<void> {
+  await ensureAuthReady();
+  const pw = process.env.OWNER_BOOTSTRAP_PASSWORD;
+  if (!pw) return;
+  if (pw.length < 8) {
+    console.error("[auth] OWNER_BOOTSTRAP_PASSWORD is too short (min 8); skipping owner bootstrap");
+    return;
+  }
+  const emails = (process.env.OWNER_EMAIL || "")
+    .split(",").map((e) => normEmail(e)).filter(Boolean);
+  if (!emails.length) return;
+
+  const resetNonce = (process.env.OWNER_BOOTSTRAP_RESET || "").trim();
+  const applyReset = Boolean(resetNonce) && store.bootstrapResetNonce !== resetNonce;
+  let changed = false;
+
+  for (const email of emails) {
+    const existing = userByEmail(email);
+    if (!existing) {
+      const user: User = {
+        id: rid("usr"), email, name: email.split("@")[0],
+        passwordHash: hashPassword(pw), emailVerified: true, createdAt: nowIso(),
+      };
+      store.users.set(user.id, user);
+      store.usersByEmail.set(email, user.id);
+      provisionWorkspace(user);
+      promoteToOwner(user.id);
+      changed = true;
+      console.info(`[auth] owner bootstrap: created account ${email}`);
+    } else if (applyReset) {
+      existing.passwordHash = hashPassword(pw);
+      existing.emailVerified = true;
+      delete existing.twoFactor;        // a lost-password owner can't satisfy a stale 2FA either
+      promoteToOwner(existing.id);
+      for (const [tok, s] of store.sessions) if (s.userId === existing.id) store.sessions.delete(tok);
+      changed = true;
+      console.info(`[auth] owner bootstrap: reset password for ${email}`);
+    }
+  }
+
+  if (applyReset) { store.bootstrapResetNonce = resetNonce; changed = true; }
+  if (changed) persist();
+}
+
+/** Ensure a user owns their primary workspace (corporate-domain joiners land as
+ *  "member"; an owner email must be an actual owner). */
+function promoteToOwner(userId: string): void {
+  const m = store.memberships.find((x) => x.userId === userId);
+  if (m && m.role !== "owner") m.role = "owner";
+}
+
+// Run the bootstrap once the snapshot is hydrated, so it never races the load
+// and create-if-missing only fires when the account is genuinely absent.
+void ensureOwnerAccounts().catch((e) => console.error("[auth] owner bootstrap failed:", (e as Error).message));
 
 const SESSION_HOURS = 24 * 14;
 const FREE_DOMAINS = new Set(["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "proton.me"]);
