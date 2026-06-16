@@ -4467,7 +4467,7 @@
           '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>💾 Save to JD Sourcing</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">➕ Add to queue</button>' +
         '</div>' +
-        '<p class="jd-hint"><b>Min fit</b> sets how strict the match has to be, on a 0 to 100 scale. <b>Set it to 0 to see every profile the search turns up</b>, with nothing filtered out. Raise it to show only stronger matches (10 keeps the net wide, 40 and up is tight). <b>Scan up to</b> simply limits how many profiles the run looks at.</p>' +
+        '<p class="jd-hint"><b>Min fit</b> is the match-strength bar, from 0 to 100. <b>Leave it at 0 to see every profile found</b>, with nothing filtered. Raise it to keep only the strongest matches: 10 casts a wide net, 40 and up runs tight. <b>Scan up to</b> sets how many profiles each run reviews.</p>' +
         '<div id="jdMsg" class="muted" style="margin-top:8px"></div>' +
       '</div>' +
       '<div class="card jd-prog" id="jdProgress" style="display:none"></div>' +
