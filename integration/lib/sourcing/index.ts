@@ -7,7 +7,8 @@
  */
 
 export * from "./types";
-export { parseJobDescription } from "./parseJobDescription";
+export { parseJobDescription, normalizeIcpObject } from "./parseJobDescription";
+export { refineIcp, type RefineResult } from "./refineSearch";
 export { generateQueries } from "./generateQueries";
 export { scoreCandidate } from "./score";
 export { runDiscovery, rapidApiSearchConfigured, type DiscoveryResult } from "./discovery";

@@ -18,8 +18,12 @@
 import { cred } from "../providers/http";
 
 const RAPIDAPI_KEY = () => cred("RAPIDAPI_KEY");
-const PROFILE_HOST = () => process.env.RAPIDAPI_PROFILE_HOST ?? "";
-const PROFILE_PATH = () => process.env.RAPIDAPI_PROFILE_PATH ?? "/profile?url={url}"; // {url} interpolated
+const PROFILE_HOST = () => cred("RAPIDAPI_PROFILE_HOST");
+const PROFILE_PATH = () => cred("RAPIDAPI_PROFILE_PATH") || "/profile?url={url}"; // GET: {url} interpolated
+// "GET" (url in the query) or "POST" (url in a JSON body, e.g. {"link": url} for person_deep).
+const PROFILE_METHOD = () => (cred("RAPIDAPI_PROFILE_METHOD") || "GET").trim().toUpperCase();
+// Body key the POST profile endpoint expects the URL under (person_deep uses "link").
+const PROFILE_BODY_KEY = () => cred("RAPIDAPI_PROFILE_BODY_KEY") || "link";
 
 export function profileFetchConfigured(): boolean {
   return Boolean(RAPIDAPI_KEY() && PROFILE_HOST());
@@ -118,13 +122,25 @@ function unwrap(data: any): any {
  */
 export async function fetchFullProfile(linkedinUrl: string): Promise<FullProfile> {
   const host = PROFILE_HOST();
-  const path = PROFILE_PATH().replace("{url}", encodeURIComponent(linkedinUrl));
-  const url = `https://${host}${path}${path.includes("{") || path.includes("url=") ? "" : (path.includes("?") ? "&" : "?") + "url=" + encodeURIComponent(linkedinUrl)}`;
-  const res = await fetch(url, {
-    headers: { "X-RapidAPI-Key": RAPIDAPI_KEY(), "X-RapidAPI-Host": host, Accept: "application/json" },
-  });
+  const headers: Record<string, string> = {
+    "X-RapidAPI-Key": RAPIDAPI_KEY(), "X-RapidAPI-Host": host,
+    Accept: "application/json", "Content-Type": "application/json",
+  };
+
+  let res: Response;
+  if (PROFILE_METHOD() === "POST") {
+    // Body-based lookup (e.g. person_deep): the URL rides in the JSON body.
+    res = await fetch(`https://${host}${PROFILE_PATH()}`, {
+      method: "POST", headers, body: JSON.stringify({ [PROFILE_BODY_KEY()]: linkedinUrl }),
+    });
+  } else {
+    const path = PROFILE_PATH().replace("{url}", encodeURIComponent(linkedinUrl));
+    const url = `https://${host}${path}${path.includes("{") || path.includes("url=") ? "" : (path.includes("?") ? "&" : "?") + "url=" + encodeURIComponent(linkedinUrl)}`;
+    res = await fetch(url, { headers });
+  }
   if (!res.ok) throw new Error(`profile ${host} ${res.status}`);
   const raw = await res.json().catch(() => ({}));
+  if (raw && raw.success === false && raw.error) throw new Error(`profile ${host}: ${String(raw.error)}`);
   const o = unwrap(raw);
   const experiences = extractExperiences(o);
   const months = experiences.reduce((acc, e) => acc + (e.durationMonths || 0), 0);

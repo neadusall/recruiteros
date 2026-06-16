@@ -63,27 +63,32 @@ function strArr(v: unknown): string[] {
   return v.map((x) => String(x).trim()).filter(Boolean).slice(0, 40);
 }
 
+/** Coerce a parsed object into a clean CandidateICP (shared by parse + refine). */
+export function normalizeIcpObject(o: any): CandidateICP {
+  if (!o || typeof o !== "object") return FALLBACK;
+  const seniority = ["ic", "manager", "director", "vp", "exec"].includes(o.seniority) ? o.seniority : "director";
+  return {
+    label: String(o.label || FALLBACK.label).slice(0, 120),
+    seniority,
+    managesTeam: Boolean(o.managesTeam),
+    titles: strArr(o.titles),
+    geos: strArr(o.geos),
+    remoteOk: o.remoteOk === undefined ? true : Boolean(o.remoteOk),
+    industries: strArr(o.industries),
+    targetCompanies: strArr(o.targetCompanies),
+    sellsTo: strArr(o.sellsTo),
+    verticals: strArr(o.verticals),
+    mustHave: strArr(o.mustHave),
+    niceToHave: strArr(o.niceToHave),
+    disqualifiers: strArr(o.disqualifiers),
+  };
+}
+
 function normalize(raw: string): CandidateICP {
   try {
     const start = raw.indexOf("{");
     const end = raw.lastIndexOf("}");
-    const o = JSON.parse(raw.slice(start, end + 1));
-    const seniority = ["ic", "manager", "director", "vp", "exec"].includes(o.seniority) ? o.seniority : "director";
-    return {
-      label: String(o.label || FALLBACK.label).slice(0, 120),
-      seniority,
-      managesTeam: Boolean(o.managesTeam),
-      titles: strArr(o.titles),
-      geos: strArr(o.geos),
-      remoteOk: o.remoteOk === undefined ? true : Boolean(o.remoteOk),
-      industries: strArr(o.industries),
-      targetCompanies: strArr(o.targetCompanies),
-      sellsTo: strArr(o.sellsTo),
-      verticals: strArr(o.verticals),
-      mustHave: strArr(o.mustHave),
-      niceToHave: strArr(o.niceToHave),
-      disqualifiers: strArr(o.disqualifiers),
-    };
+    return normalizeIcpObject(JSON.parse(raw.slice(start, end + 1)));
   } catch {
     return FALLBACK;
   }

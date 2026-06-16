@@ -25,11 +25,13 @@ import { cred } from "../providers/http";
 /* RapidAPI people-search provider (configurable)                      */
 /* ------------------------------------------------------------------ */
 
-// Billable key resolves workspace-first at call time (host/path are house routing
-// config, identical per workspace, so they stay on env).
+// All resolve workspace-first at call time (per-workspace creds, then env), so a
+// workspace can point JD Sourcing at its own RapidAPI listing in Setup.
 const RAPIDAPI_KEY = () => cred("RAPIDAPI_KEY");
-const PS_HOST = () => process.env.RAPIDAPI_PEOPLE_SEARCH_HOST ?? "";
-const PS_PATH = () => process.env.RAPIDAPI_PEOPLE_SEARCH_PATH ?? "/search/people"; // {query},{page} interpolated
+const PS_HOST = () => cred("RAPIDAPI_PEOPLE_SEARCH_HOST");
+const PS_PATH = () => cred("RAPIDAPI_PEOPLE_SEARCH_PATH") || "/search/people"; // GET: {query},{page} interpolated
+// "GET" (query-param listings) or "POST" (JSON-body listings, e.g. {keywords,count}).
+const PS_METHOD = () => (cred("RAPIDAPI_PEOPLE_SEARCH_METHOD") || "GET").trim().toUpperCase();
 
 export function rapidApiSearchConfigured(): boolean {
   return Boolean(RAPIDAPI_KEY() && PS_HOST());
@@ -53,7 +55,7 @@ function mapRow(o: any): CandidateRow | null {
     headline: str(o.headline) || str(o.summary),
     company: str(o.company) || str(o.company_name) || str(o.companyName) || str(o.current_company),
     location: str(o.location) || str(o.geo) || str(o.city) || str(o.region),
-    linkedinUrl: str(o.linkedin_url) || str(o.linkedinUrl) || str(o.profile_url) || str(o.profileUrl) || str(o.url),
+    linkedinUrl: str(o.linkedin_url) || str(o.linkedinUrl) || str(o.profile_url) || str(o.profileUrl) || str(o.url) || str(o.link) || str(o.profileURL) || str(o.navigationUrl),
     imageUrl: str(o.image) || str(o.photo) || str(o.profile_image) || str(o.imageUrl),
     fitScore: 0,
     fitReasons: [],
@@ -71,19 +73,33 @@ function extractList(data: any): any[] {
   return [];
 }
 
-async function rapidApiPeopleSearch(query: string, page: number): Promise<CandidateRow[]> {
+/**
+ * One people-search call. Two transports, same result shape:
+ *  - GET listings: query + page go in the URL (path may template {query}/{page}).
+ *  - POST listings: a JSON body { keywords, count } (e.g. Linkedin Data Scraper API).
+ * `term` is the search string (a plain keyword for POST, the X-ray/keyword for GET).
+ */
+async function rapidApiPeopleSearch(term: string, page: number, count: number): Promise<CandidateRow[]> {
   const host = PS_HOST();
-  const path = PS_PATH()
-    .replace("{query}", encodeURIComponent(query))
-    .replace("{page}", String(page));
-  // Most listings accept the query as a param; if the path didn't interpolate it,
-  // append it as ?query=. Harmless if the listing ignores the extra param.
-  const url = `https://${host}${path}${path.includes("{") || path.includes("query=") ? "" : (path.includes("?") ? "&" : "?") + "query=" + encodeURIComponent(query) + "&page=" + page}`;
-  const res = await fetch(url, {
-    headers: { "X-RapidAPI-Key": RAPIDAPI_KEY(), "X-RapidAPI-Host": host, Accept: "application/json" },
-  });
+  const headers: Record<string, string> = {
+    "X-RapidAPI-Key": RAPIDAPI_KEY(), "X-RapidAPI-Host": host,
+    Accept: "application/json", "Content-Type": "application/json",
+  };
+
+  let res: Response;
+  if (PS_METHOD() === "POST") {
+    // Body-based listing: the path is literal (no interpolation); search rides in the body.
+    const url = `https://${host}${PS_PATH()}`;
+    res = await fetch(url, { method: "POST", headers, body: JSON.stringify({ keywords: term, count }) });
+  } else {
+    const path = PS_PATH().replace("{query}", encodeURIComponent(term)).replace("{page}", String(page));
+    const url = `https://${host}${path}${path.includes("{") || path.includes("query=") ? "" : (path.includes("?") ? "&" : "?") + "query=" + encodeURIComponent(term) + "&page=" + page}`;
+    res = await fetch(url, { headers });
+  }
   if (!res.ok) throw new Error(`rapidapi ${host} ${res.status}`);
   const data = await res.json().catch(() => ({}));
+  // Surface an explicit API-level failure (e.g. captcha) instead of silently returning [].
+  if (data && data.success === false && data.error) throw new Error(`rapidapi ${host}: ${String(data.error)}`);
   return extractList(data).map(mapRow).filter((r): r is CandidateRow => Boolean(r));
 }
 
@@ -137,13 +153,18 @@ export async function runDiscovery(
     let collected = 0;
 
     if (useRapid) {
-      for (let page = 1; page <= 10 && collected < perQuery; page++) {
+      const post = PS_METHOD() === "POST";
+      // POST listings return a batch sized by `count` in one call (no paging);
+      // GET listings page through results. Same handling of the rows either way.
+      const maxPages = post ? 1 : 10;
+      for (let page = 1; page <= maxPages && collected < perQuery; page++) {
         let rows: CandidateRow[] = [];
         try {
-          rows = await rapidApiPeopleSearch(query.xray || query.label, page);
+          const term = post ? (query.keyword || query.label) : (query.xray || query.label);
+          rows = await rapidApiPeopleSearch(term, page, Math.min(perQuery, 100));
         } catch (err) {
-          warnings.push(`rapidapi(${query.group} p${page}): ${(err as Error).message}`);
-          break; // stop paging this query on error; move on
+          warnings.push(`rapidapi(${query.group}${post ? "" : " p" + page}): ${(err as Error).message}`);
+          break; // stop this query on error; move on
         }
         if (!rows.length) break; // exhausted
         for (const r of rows) {

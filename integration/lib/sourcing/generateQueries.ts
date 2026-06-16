@@ -60,6 +60,7 @@ export function generateQueries(icp: CandidateICP, opts: { titleCap?: number; ge
       xray,
       googleUrl: googleUrl(xray),
       linkedinUrl: linkedinUrl(`${company} ${leadTitle(icp)}`),
+      keyword: `${leadTitle(icp)} ${company}`.trim(),
     });
   }
 
@@ -73,6 +74,7 @@ export function generateQueries(icp: CandidateICP, opts: { titleCap?: number; ge
       xray,
       googleUrl: googleUrl(xray),
       linkedinUrl: linkedinUrl(`${leadTitle(icp)} ${icp.industries.slice(0, 2).join(" ")}`),
+      keyword: `${leadTitle(icp)} ${icp.industries.slice(0, 2).join(" ")}`.trim(),
     });
   }
 
@@ -85,6 +87,7 @@ export function generateQueries(icp: CandidateICP, opts: { titleCap?: number; ge
       xray,
       googleUrl: googleUrl(xray),
       linkedinUrl: linkedinUrl(`${leadTitle(icp)} ${geo}`),
+      keyword: `${leadTitle(icp)} ${geo}`.trim(),
     });
   }
 

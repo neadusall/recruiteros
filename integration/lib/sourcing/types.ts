@@ -55,6 +55,8 @@ export interface SourcingQuery {
   googleUrl: string;
   /** LinkedIn People Search URL (keyword-based; feeds importFromLinkedInSearch). */
   linkedinUrl: string;
+  /** Plain keyword for keyword-based people-search APIs (POST {keywords}), e.g. "VP Sales Coupa". */
+  keyword: string;
 }
 
 /** A discovered candidate before they become a Prospect (the staged unit). */

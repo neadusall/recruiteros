@@ -2,6 +2,7 @@
  * GET  /api/sourcing                 -> this workspace's saved sourcing runs (JD Sourcing tab)
  * POST /api/sourcing
  *   { action: "plan", jd }                         -> JD → ICP + generated searches (no discovery)
+ *   { action: "refine", jd, icp, instruction }     -> LLM edits the ICP per a NL instruction → new searches
  *   { action: "run", jd, name?, cap?, minFit? }    -> plan + discovery → ranked candidates (not yet saved)
  *   { action: "save", id?, name, jd, icp, queries, candidates } -> stage a named run
  *   { action: "promote", id, minFit? }             -> push a saved run into Candidates under its name
@@ -16,7 +17,7 @@ import { requireSession, body, ok, fail } from "../../../lib/api";
 import {
   planSourcing, parseJobDescription, generateQueries, runDiscovery,
   listSourcingRuns, saveSourcingRun, deleteSourcingRun, getSourcingRun, promoteSourcingRun,
-  fetchFullProfile, profileFetchConfigured, deepVetCandidate,
+  fetchFullProfile, profileFetchConfigured, deepVetCandidate, refineIcp,
 } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { nowIso } from "../../../lib/core/ids";
@@ -38,6 +39,12 @@ export async function POST(req: Request) {
     if (action === "plan") {
       if (!b?.jd) return fail("missing_jd", 422);
       return ok(await planSourcing(b.jd));
+    }
+
+    if (action === "refine") {
+      if (!b?.icp || !b?.instruction) return fail("missing_fields", 422, { detail: "icp and instruction required" });
+      const { icp, changes } = await refineIcp(b.jd ?? "", b.icp, b.instruction);
+      return ok({ icp, queries: generateQueries(icp), changes });
     }
 
     if (action === "run") {

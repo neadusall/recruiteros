@@ -4243,7 +4243,7 @@
      deduped candidate list -> save it under a NAME here (staging) -> send it to
      Candidates under that same name. Backend: /api/sourcing + lib/sourcing/*. */
   function renderJdSourcing(el) {
-    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", queue: [], runs: [], running: false };
+    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", queue: [], runs: [], running: false, refineNote: "" };
 
     el.innerHTML =
       '<style>' +
@@ -4266,6 +4266,19 @@
       '.jd-prog-meta{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-size:12px}' +
       '.jd-prog.done .jd-prog-dot{animation:none;background:#33d69f}' +
       '.jd-prog.done .jd-prog-fill{animation:none;background:#33d69f}' +
+      '.jd-cardhead{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}' +
+      '.jd-vetctl{display:inline-flex;align-items:center;gap:9px;font-size:13px;color:var(--text-muted)}' +
+      '.jd-vetctl input{width:54px;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:13px;padding:5px 7px;text-align:center}' +
+      '.jd-ratelink{background:none;border:0;color:var(--text-dim);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0}' +
+      '.jd-ratelink:hover{color:var(--brand-2)}' +
+      '.jd-rates{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:11px 0 0;padding:10px 13px;background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;font-size:12.5px;color:var(--text-muted)}' +
+      '.jd-rates input{width:66px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px;text-align:center}' +
+      '.jd-sub{color:var(--text-muted);font-size:13px;line-height:1.55;margin:13px 0 15px}' +
+      '.jd-refine{display:flex;gap:8px;align-items:center;margin-top:15px}' +
+      '.jd-refine input{flex:1;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:13.5px;padding:10px 13px}' +
+      '.jd-refine input::placeholder{color:var(--text-dim)}' +
+      '.jd-refine input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
+      '.jd-refine-note{margin:9px 0 0;font-size:12.5px;color:var(--brand-2)}' +
       '#jdName,#jdText{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 13px}' +
       '#jdName{margin-bottom:10px;font-weight:600}#jdText{line-height:1.55;resize:vertical;min-height:170px}' +
       '#jdName::placeholder,#jdText::placeholder{color:var(--text-dim)}' +
@@ -4291,6 +4304,7 @@
           '<button class="btn btn-primary btn-sm" id="jdAnalyze">Analyze JD</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>🧲 Find candidates</button>' +
           '<span class="jd-cap muted">Max <input id="jdCap" type="number" min="100" max="5000" value="3000"> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="45"></span>' +
+          '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
           '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>💾 Save to JD Sourcing</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">➕ Add to queue</button>' +
         '</div>' +
@@ -4308,8 +4322,17 @@
       '</div>' +
       '<div id="jdPlan"></div>' +
       '<div id="jdResults"></div>' +
-      '<div class="card"><h3>Saved sourcing lists <span class="jd-cap" style="float:right;font-weight:400">🔬 Deep-vet top <input id="jdVetTop" type="number" min="1" max="200" value="25"> · profile $<input id="jdProfUsd" type="number" min="0" step="0.001" value="0.01" title="RapidAPI per-profile-lookup cost (set to your Realtime LinkedIn Data Scraper rate)"> · plan $<input id="jdPlanUsd" type="number" min="0" step="1" value="0" title="Your monthly RapidAPI plan price">/mo<span id="jdVetCost" class="jd-cost"></span></span></h3>' +
-        '<p class="muted" style="margin-top:-4px">Deep-vet reads each candidate\'s full work history against the JD and writes a verified score (0–100) + verdict — runs only on the top N by fit score that you set above. Cost = one Claude Sonnet 4.6 call + one RapidAPI profile lookup per candidate (provider: Realtime LinkedIn Data Scraper). Set the profile $/lookup and your monthly plan $ to your actual tier — I couldn\'t read the live pricing page.</p>' +
+      '<div class="card">' +
+        '<div class="jd-cardhead"><h3 style="margin:0">Saved sourcing lists</h3>' +
+          '<span class="jd-vetctl">Deep-vet top <input id="jdVetTop" type="number" min="1" max="200" value="25">' +
+            '<span id="jdVetCost" class="jd-cost"></span>' +
+            '<button type="button" id="jdRatesToggle" class="jd-ratelink">rates</button></span></div>' +
+        '<div id="jdRatesRow" class="jd-rates" style="display:none">' +
+          'Data&nbsp;$/profile <input id="jdProfUsd" type="number" min="0" step="0.001" value="0.005">' +
+          '<span style="opacity:.45">·</span> plan&nbsp;$<input id="jdPlanUsd" type="number" min="0" step="1" value="50">/mo' +
+          '<span style="opacity:.7;margin-left:6px">Set to your data plan\'s rate per profile.</span>' +
+        '</div>' +
+        '<p class="jd-sub">Reads each shortlisted candidate\'s full career history against the role and returns a verified fit score and verdict — the first-pass screen your team would do by hand, across the whole list in seconds. Run it on the top N you choose.</p>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
     function msg(t) { var m = $("#jdMsg"); if (m) m.textContent = t || ""; }
@@ -4328,6 +4351,9 @@
           '<div><b>Sells to</b><br>' + chips(i.sellsTo) + '</div>' +
           '<div><b>Disqualifiers</b><br>' + chips(i.disqualifiers) + '</div>' +
         '</div>' +
+        '<div class="jd-refine"><input id="jdRefineInput" type="text" placeholder="Dive deeper — refine with AI, e.g. only Director+ who sold into manufacturing, exclude agencies" />' +
+          '<button class="btn btn-primary btn-sm" id="jdRefineBtn">✨ Refine</button></div>' +
+        (state.refineNote ? '<p class="jd-refine-note">✨ ' + esc(state.refineNote) + '</p>' : '') +
         '<h4 style="margin-top:14px">Generated searches (' + state.queries.length + ')</h4>' +
         '<div class="jd-queries">' + state.queries.map(function (q) {
           return '<div class="jd-q"><span class="jd-q-label">' + esc(q.label) + '</span>' +
@@ -4410,19 +4436,56 @@
        Per candidate: one Claude Sonnet 4.6 call (~2.5k input + ~0.45k output, fixed)
        plus one RapidAPI profile lookup (rate you set — provider-specific). Plus a flat
        monthly RapidAPI plan cost. Sonnet rates: $3 / 1M input, $15 / 1M output. */
+    /* Cost model, priced on the live tool (Linkedin Data Scraper API, Pro $50 / 10k
+       requests ≈ $0.005 per call). One request = one call: a search call returns a
+       batch; a profile lookup is one call per candidate. Claude Sonnet 4.6 = $3/$15 per
+       1M tokens; a deep-vet call is ~2.5k in + ~0.45k out ≈ $0.0143. */
     var VET = { inTok: 2500, outTok: 450, inUsd: 3 / 1e6, outUsd: 15 / 1e6 };
-    function vetLlmPer() { return VET.inTok * VET.inUsd + VET.outTok * VET.outUsd; } // ≈ $0.0143
+    function vetLlmPer() { return VET.inTok * VET.inUsd + VET.outTok * VET.outUsd; }
     function numVal(id, dflt) { var e = $(id); var v = e ? parseFloat(e.value) : NaN; return isFinite(v) && v >= 0 ? v : dflt; }
+    function bump(el) { if (!el) return; el.classList.add("bump"); setTimeout(function () { el.classList.remove("bump"); }, 130); }
     function updateVetCost() {
       var el = $("#jdVetCost"), topEl = $("#jdVetTop"); if (!el || !topEl) return;
       var n = Math.max(0, parseInt(topEl.value, 10) || 0);
-      var prof = numVal("#jdProfUsd", 0.01), plan = numVal("#jdPlanUsd", 0);
+      var prof = numVal("#jdProfUsd", 0.005);
       if (!n) { el.textContent = ""; return; }
       var run = n * (vetLlmPer() + prof);
-      el.innerHTML = '≈ <b>$' + run.toFixed(2) + '</b> <span class="muted" style="font-weight:400">per run of ' + n +
-        ' (Sonnet $' + (n * vetLlmPer()).toFixed(2) + ' + ' + n + ' lookups $' + (n * prof).toFixed(2) + ')</span>' +
-        (plan > 0 ? ' <span class="muted">+</span> <b>$' + plan.toFixed(0) + '</b><span class="muted" style="font-weight:400">/mo plan</span>' : '');
-      el.classList.add("bump"); setTimeout(function () { el.classList.remove("bump"); }, 130);
+      el.textContent = "≈ $" + run.toFixed(2) + " / run";
+      el.title = "Top " + n + ": AI vetting $" + (n * vetLlmPer()).toFixed(2) + " + " + n + " profile lookups $" + (n * prof).toFixed(2);
+      bump(el);
+    }
+    /** Search-run cost (people-search requests + the one Haiku JD parse), shown by Find. */
+    function updateRunCost() {
+      var el = $("#jdRunCost"); if (!el) return;
+      if (!state.icp && !state.queries.length) { el.style.display = "none"; return; }
+      var perReq = numVal("#jdProfUsd", 0.005);
+      var capEl = $("#jdCap"); var cap = capEl ? (parseInt(capEl.value, 10) || 3000) : 3000;
+      // One search request per query (batched results); estimate query count before Analyze.
+      var reqs = state.queries.length || Math.max(8, Math.min(60, Math.ceil(cap / 100) + 10));
+      var cost = reqs * perReq + 0.002; // + one Haiku JD parse
+      el.style.display = "";
+      el.textContent = "≈ $" + cost.toFixed(2) + " to run";
+      el.title = "Estimated cost for one search run (" + reqs + " searches + AI parse)";
+      bump(el);
+    }
+    /** "Dive deeper" — refine the ICP with a natural-language instruction (LLM). */
+    function doRefine() {
+      var inp = $("#jdRefineInput"); if (!inp) return;
+      var instruction = inp.value.trim();
+      if (!instruction) { inp.focus(); return; }
+      if (!state.icp) { msg("Analyze a JD first."); return; }
+      var btn = $("#jdRefineBtn"); if (btn) { btn.disabled = true; btn.textContent = "Refining…"; }
+      send("/sourcing", "POST", { action: "refine", jd: state.jd, icp: state.icp, instruction: instruction }).then(function (r) {
+        if (btn) { btn.disabled = false; btn.textContent = "✨ Refine"; }
+        if (!r.ok) { msg("Refine failed: " + ((r.data && r.data.error) || r.status)); return; }
+        state.icp = r.data.icp || state.icp;
+        state.queries = r.data.queries || state.queries;
+        state.refineNote = r.data.changes || "Search refined.";
+        state.candidates = []; state.warnings = [];
+        $("#jdFind").disabled = false; $("#jdSave").disabled = true;
+        renderPlan(); renderResults(); updateRunCost();
+        msg("Search refined — review the updated profile, then Find candidates again.");
+      });
     }
 
     /* ---- Real-time progress bar with live ETA ----
@@ -4529,8 +4592,8 @@
       state.jd = jd; msg("Analyzing…");
       send("/sourcing", "POST", { action: "plan", jd: jd }).then(function (r) {
         if (!r.ok) { msg("Analyze failed: " + ((r.data && r.data.error) || r.status)); return; }
-        state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || "";
-        $("#jdFind").disabled = false; msg(""); renderPlan();
+        state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
+        $("#jdFind").disabled = false; msg(""); renderPlan(); updateRunCost();
       });
     });
 
@@ -4549,7 +4612,7 @@
         $("#jdSave").disabled = !state.candidates.length;
         finishProgress("Found " + state.candidates.length + " candidates");
         msg("Found " + state.candidates.length + " candidates (scanned " + (r.data.scanned || 0) + ").");
-        renderPlan(); renderResults();
+        renderPlan(); renderResults(); updateRunCost();
       });
     });
 
@@ -4612,6 +4675,18 @@
     ["#jdVetTop", "#jdProfUsd", "#jdPlanUsd"].forEach(function (sel) {
       var e = $(sel); if (e) e.addEventListener("input", updateVetCost);
     });
+    ["#jdCap", "#jdProfUsd"].forEach(function (sel) {
+      var e = $(sel); if (e) e.addEventListener("input", updateRunCost);
+    });
+    var ratesToggle = $("#jdRatesToggle");
+    if (ratesToggle) ratesToggle.addEventListener("click", function () {
+      var r = $("#jdRatesRow"); if (r) r.style.display = (r.style.display === "none" || !r.style.display) ? "flex" : "none";
+    });
+    var planHost = $("#jdPlan");
+    if (planHost) {
+      planHost.addEventListener("click", function (e) { if (e.target && e.target.id === "jdRefineBtn") doRefine(); });
+      planHost.addEventListener("keydown", function (e) { if (e.target && e.target.id === "jdRefineInput" && (e.key === "Enter" || e.keyCode === 13)) { e.preventDefault(); doRefine(); } });
+    }
     updateVetCost();
 
     loadRuns();
