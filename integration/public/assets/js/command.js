@@ -4462,7 +4462,7 @@
         '<div class="jd-actions">' +
           '<button class="btn btn-primary btn-sm" id="jdAnalyze">Analyze JD</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>🧲 Find candidates</button>' +
-          '<span class="jd-cap muted">Scan up to <input id="jdCap" type="number" min="100" max="5000" value="3000" title="How many matching profiles to scan in this run. Higher = broader, slower."> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10" title="0 = show every profile the search finds (nothing filtered). Higher = keep only stronger matches. 10 is a wide net; 40+ is tight."></span>' +
+          '<span class="jd-cap muted">Scan up to <input id="jdCap" type="number" min="100" max="5000" value="500" title="How many matching profiles to scan in this run. Higher = broader, slower."> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10" title="0 = show every profile the search finds (nothing filtered). Higher = keep only stronger matches. 10 is a wide net; 40+ is tight."></span>' +
           '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
           '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>💾 Save to JD Sourcing</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">➕ Add to queue</button>' +
@@ -4647,7 +4647,7 @@
       var el = $("#jdRunCost"); if (!el) return;
       if (!state.icp && !state.queries.length) { el.style.display = "none"; return; }
       var perReq = numVal("#jdProfUsd", 0.005);
-      var capEl = $("#jdCap"); var cap = capEl ? (parseInt(capEl.value, 10) || 3000) : 3000;
+      var capEl = $("#jdCap"); var cap = capEl ? (parseInt(capEl.value, 10) || 500) : 500;
       // One search request per query (batched results); estimate query count before Analyze.
       var reqs = state.queries.length || Math.max(8, Math.min(60, Math.ceil(cap / 100) + 10));
       var cost = reqs * perReq + 0.002; // + one Haiku JD parse
@@ -4743,7 +4743,7 @@
     }
     function hideProgress() { if (prog.timer) { clearInterval(prog.timer); prog.timer = null; } var h = $("#jdProgress"); if (h) { h.style.display = "none"; h.innerHTML = ""; } }
     /** ETA seconds for a discovery run, estimated from the candidate cap. */
-    function findEta(cap) { return Math.min(150, Math.max(8, Math.round((cap || 3000) * 0.02))); }
+    function findEta(cap) { return Math.min(150, Math.max(8, Math.round((cap || 500) * 0.02))); }
 
     /* ---- Queue: run JD searches back-to-back, each saved + CSV-ready ---- */
     function renderQueue() {
@@ -4769,7 +4769,7 @@
     function runQueue() {
       if (state.running) return;
       if (!state.queue.length) { msg("Queue is empty. Add a JD with the Add to queue button."); return; }
-      var cap = parseInt($("#jdCap").value, 10) || 3000;
+      var cap = parseInt($("#jdCap").value, 10) || 500;
       var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
       state.running = true;
       var runBtn = $("#jdQueueRun"); if (runBtn) runBtn.disabled = true;
@@ -4812,7 +4812,7 @@
 
     $("#jdFind").addEventListener("click", function () {
       if (!state.jd) { msg("Analyze a JD first."); return; }
-      var cap = parseInt($("#jdCap").value, 10) || 3000;
+      var cap = parseInt($("#jdCap").value, 10) || 500;
       var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
       msg("");
       $("#jdFind").disabled = true;

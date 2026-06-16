@@ -58,7 +58,7 @@ export async function POST(req: Request) {
       const icp = await parseJobDescription(b.jd);
       const queries = generateQueries(icp);
       const result = await runDiscovery(queries, icp, {
-        cap: typeof b.cap === "number" ? b.cap : 3000,
+        cap: typeof b.cap === "number" ? b.cap : 500,
         minFit: typeof b.minFit === "number" ? b.minFit : 10,
       });
       return ok({ icp, queries, ...result });
