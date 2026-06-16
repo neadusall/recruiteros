@@ -36,11 +36,17 @@ export interface SourcingPlan {
 export async function planSourcing(jd: string): Promise<SourcingPlan> {
   const icp = await parseJobDescription(jd);
   const queries = generateQueries(icp);
+  // Empty across the load-bearing fields means the profile couldn't be built from the
+  // brief (e.g. the model returned unparseable output). Say so plainly rather than
+  // silently handing back a profile of dashes that finds nobody.
+  const empty = !icp.titles.length && !icp.targetCompanies.length && !icp.geos.length;
   const narrow = icp.seniority === "vp" || icp.seniority === "exec";
   return {
     icp,
     queries,
-    note: narrow
+    note: empty
+      ? "Couldn't read the brief into a profile. Click Analyze again, or add a few concrete details to the brief — a clear job title, real example companies, and a location."
+      : narrow
       ? "Senior/narrow role: the truly-qualified pool is likely a few hundred, not thousands. Discovery returns everyone above the fit threshold, capped — the count is honest, not padded."
       : undefined,
   };

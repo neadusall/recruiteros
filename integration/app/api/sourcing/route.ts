@@ -59,7 +59,7 @@ export async function POST(req: Request) {
       const queries = generateQueries(icp);
       const result = await runDiscovery(queries, icp, {
         cap: typeof b.cap === "number" ? b.cap : 3000,
-        minFit: typeof b.minFit === "number" ? b.minFit : 45,
+        minFit: typeof b.minFit === "number" ? b.minFit : 25,
       });
       return ok({ icp, queries, ...result });
     }

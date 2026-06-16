@@ -13,7 +13,7 @@ import { anthropicClient } from "./anthropic";
 import type { CandidateICP } from "./types";
 
 // Extraction is cheap work — default to the fast tier; override via env if desired.
-const MODEL = process.env.RECRUITEROS_SOURCING_MODEL ?? process.env.RECRUITEROS_LLM_MODEL ?? "claude-haiku-4-5-20251001";
+const MODEL = process.env.RECRUITEROS_SOURCING_MODEL ?? process.env.RECRUITEROS_LLM_MODEL ?? "claude-haiku-4-5";
 
 const SYSTEM = `You turn a job description into a structured ideal-CANDIDATE profile for sourcing
 people who would be a great fit to HIRE for this role (not customers). Infer sensibly from
@@ -36,12 +36,28 @@ Shape:
   "disqualifiers": string[]              // traits that should drop a candidate
 }
 
+PRIME DIRECTIVE — CAST A WIDE NET. This profile drives a live search; an over-tight profile finds
+NOBODY. Strongly favor RECALL over precision. People rarely spell everything out on LinkedIn, so a
+qualified person will often be missing a keyword. When unsure, INCLUDE rather than exclude. It is far
+better to surface 500 plausible people the recruiter can skim than 5 "perfect" ones.
+
 Rules:
+- titles: be EXPANSIVE. Include the literal title PLUS a generous set of adjacent, variant, senior, and
+  junior-adjacent titles people actually use (e.g. for "VP Sales" also CRO, Chief Revenue Officer, SVP/RVP/
+  Area VP, Regional Sales Director, Head of Sales, Sales Director, National Sales Manager, GM). Aim for
+  10-20 title strings. More titles = more candidates found.
+- disqualifiers: LEAVE THIS EMPTY ([]) by default. A disqualifier removes a person from the results entirely,
+  so only add one if the recruiter EXPLICITLY stated a hard deal-breaker (e.g. "must not be from an agency").
+  NEVER infer disqualifiers from the role. When in doubt, no disqualifier.
+- mustHave: keep this SHORT — at most 3 truly non-negotiable items (e.g. a required license like RN/CPA, or
+  a legally required credential). Everything else — preferred skills, tools, years, seniority, impact metrics —
+  goes in niceToHave. mustHave is weighted heavily, so a long list silently filters out strong people.
+- niceToHave: this is where breadth lives — put the role's skills, tools, certifications (RN, CPA, PE, AWS,
+  Epic/EHR, Salesforce), seniority/scope, and measurable-impact signals here. These boost ranking without
+  excluding anyone.
 - Expand vague geography into concrete metros (e.g. "East Coast" -> ["New York","Boston","Washington DC","Atlanta","Philadelphia","Charlotte","Miami"]).
-- If a location is given with a search radius (e.g. "within ~50 miles of Fair Lawn, NJ"), expand geos to EVERY metro, city, and town within roughly that estimated driving distance — the realistic commute/relocation range — not just the named city. Be generous and specific (e.g. for ~50mi of Fair Lawn, NJ include Newark, Jersey City, Paterson, New York, Yonkers, White Plains, Stamford, Edison, etc.). Larger radius = more metros.
-- targetCompanies must be REAL companies that employ this exact profile (competitors first, then adjacent). Never invent company names.
-- titles should include common variants (VP/RVP/Area VP/Regional Sales Director, etc.).
-- mustHave should capture required skills, tools, certifications, and licenses for THIS role (role-appropriate, e.g. RN license, CPA, PE, AWS, Epic/EHR, Salesforce) plus seniority/scope and measurable-impact signals — these are high-signal for any field, not just sales. Put soft/measurable extras in niceToHave.
+- If a location is given with a search radius (e.g. "within ~50 miles of Fair Lawn, NJ"), expand geos to EVERY metro, city, and town within roughly that estimated driving distance — the realistic commute/relocation range — not just the named city. Be generous and specific (e.g. for ~50mi of Fair Lawn, NJ include Newark, Jersey City, Paterson, New York, Yonkers, White Plains, Stamford, Edison, etc.). Larger radius = more metros. Set remoteOk true unless the role is clearly on-site only.
+- targetCompanies must be REAL companies that employ this profile (competitors first, then a broad set of adjacent ones). Aim for 15-30. Never invent company names.
 - sellsTo applies only to sales / GTM roles; leave it empty otherwise.`;
 
 const FALLBACK: CandidateICP = {
@@ -110,7 +126,9 @@ export async function parseJobDescription(jd: string): Promise<CandidateICP> {
 
   const response = await anthropicClient().messages.create({
     model: MODEL,
-    max_tokens: 1200,
+    // Generous ceiling: the JSON carries up to ~30 target companies plus radius-
+    // expanded metros, and a truncated array makes JSON.parse fail -> empty fallback.
+    max_tokens: 2600,
     system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as any,
     messages: [
       {

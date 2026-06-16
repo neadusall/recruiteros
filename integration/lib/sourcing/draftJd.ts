@@ -30,17 +30,20 @@ Cover, naturally and tightly (a few short paragraphs or compact bullets):
   CPA, PE, AWS, Epic/EHR, Salesforce, specific machinery or software). High-signal across any field.
 - Seniority and scope — years of relevant experience, and the size of team or budget/P&L they have owned.
 - Who they sell to / buyer personas — ONLY if it's a sales or GTM role; omit otherwise.
-- Deal-breakers — traits or backgrounds that should disqualify a candidate.
+- Deal-breakers — usually NONE. Only state a deal-breaker if the recruiter explicitly gave one; otherwise omit this section entirely. Deal-breakers shrink the candidate pool, so default to having none.
 - Proof-of-impact signals to match on — measurable results appropriate to the role (outcomes, scale, growth,
   revenue, patient/customer/quality metrics, projects delivered, team or budget size). Not just sales quota.
 
-Cast a sensible WIDE net — recall matters because people rarely put everything on LinkedIn:
-- List adjacent and variant titles, not just the literal one (e.g. for "VP Sales" also CRO, RVP,
-  Area VP, Regional Sales Director, Head of Sales, Sales Director).
-- Name a broad set of real peer companies (competitors AND adjacent ones), not just the obvious 2-3.
-- Keep deal-breakers MINIMAL and only truly disqualifying — a thin profile is not a deal-breaker;
-  over-tight rules cut strong people whose LinkedIn just doesn't spell everything out.
-- Frame must-haves as the core signal, knowing some qualified people won't list every detail.
+Cast a VERY WIDE net — this brief drives a live search and an over-tight brief finds NOBODY. Recall
+beats precision because people rarely put everything on LinkedIn:
+- List MANY adjacent and variant titles (10+), not just the literal one (e.g. for "VP Sales" also CRO,
+  Chief Revenue Officer, SVP/RVP, Area VP, Regional Sales Director, Head of Sales, Sales Director,
+  National Sales Manager, GM). The more title variants, the more real candidates surface.
+- Name a BROAD set of real peer companies (15-30: competitors AND adjacent ones), not just the obvious 2-3.
+- Keep must-haves to the 2-3 things that are genuinely non-negotiable (e.g. a required license). Everything
+  else is a "nice to have / strong signal," NOT a requirement — qualified people often don't spell it out.
+- Default to NO deal-breakers. Only a deal-breaker the recruiter explicitly stated belongs here.
+- When you are unsure whether to include or exclude something, INCLUDE it. Err toward a wider pool.
 
 If the recruiter provides EXISTING MATERIAL (a rough JD, notes, or a prior brief), treat it as the
 FOUNDATION — do not start from scratch. Keep their real specifics (named companies, locations,

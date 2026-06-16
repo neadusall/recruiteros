@@ -260,7 +260,7 @@
   // personal account and doesn't surface the company / white-label structure.
   // Declared before the workspace-label chrome below reads them (else hoisted-undefined -> .indexOf crash blanks the app).
   var WHITE_LABEL_DOMAINS = ["lumesp.com"];
-  var OPERATOR_EMAILS = ["neadusall@gmail.com"];
+  var OPERATOR_EMAILS = ["neadusall@gmail.com", "ryan@recruiters.co"];
   var wsNameEl = $("#wsName");
   if (wsNameEl) wsNameEl.textContent =
     (isLumeWorkspace() && ctx.user && ctx.user.name) ? ctx.user.name
@@ -353,7 +353,7 @@
   // subject to the built-in 14-day trial gate (no banner, no paywall). This is
   // intentionally separate from WHITE_LABEL_DOMAINS so the operator still sees
   // full house branding — it only waives billing. Match is by exact email.
-  var OPERATOR_EMAILS = ["neadusall@gmail.com"];
+  var OPERATOR_EMAILS = ["neadusall@gmail.com", "ryan@recruiters.co"];
   function isWhiteLabelWorkspace() {
     var ws = ctx.workspace || {};
     var wsDom = ((ws.domain) || "").toLowerCase();
@@ -4320,6 +4320,7 @@
       '.jd-chip:hover{border-color:var(--brand);color:var(--text)}' +
       '.jd-icp{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:12px}' +
       '.jd-icp>div b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:7px;font-weight:700}' +
+      '.jd-empty{font-size:13.5px;color:var(--text);background:var(--bg-soft);border:1px solid var(--border-strong);border-left:3px solid #e0a33e;border-radius:10px;padding:12px 14px;margin:6px 0 0;line-height:1.5}' +
       '.jd-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}' +
       '.jd-cap{font-size:12.5px;color:var(--text-muted);display:inline-flex;align-items:center;gap:6px}' +
       '.jd-cap input{width:62px;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px;margin:0 2px}' +
@@ -4448,7 +4449,7 @@
         '<div class="jd-actions">' +
           '<button class="btn btn-primary btn-sm" id="jdAnalyze">Analyze JD</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>🧲 Find candidates</button>' +
-          '<span class="jd-cap muted">Max <input id="jdCap" type="number" min="100" max="5000" value="3000"> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="45"></span>' +
+          '<span class="jd-cap muted">Max <input id="jdCap" type="number" min="100" max="5000" value="3000"> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="25"></span>' +
           '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
           '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>💾 Save to JD Sourcing</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">➕ Add to queue</button>' +
@@ -4481,15 +4482,24 @@
       var host = $("#jdPlan"); if (!host) return;
       if (!state.icp) { host.innerHTML = ""; return; }
       var i = state.icp;
+      var coreEmpty = !(i.titles && i.titles.length) && !(i.targetCompanies && i.targetCompanies.length) && !(i.geos && i.geos.length);
+      if (coreEmpty) {
+        host.innerHTML = '<div class="card"><h3>Ideal candidate</h3>' +
+          '<p class="jd-empty">⚠ ' + esc(state.note || "Couldn't read the brief into a profile. Click Analyze JD again, or add a clear job title, a few real example companies, and a location to the brief.") + '</p></div>';
+        return;
+      }
+      // Role-adaptive columns: only show fields that apply (e.g. Sells to is sales-only).
+      var cells = [
+        '<div><b>Titles</b><br>' + chips(i.titles) + '</div>',
+        '<div><b>Geos</b><br>' + chips(i.geos) + '</div>',
+        '<div><b>Target companies</b><br>' + chips(i.targetCompanies) + '</div>',
+        '<div><b>Industries</b><br>' + chips(i.industries) + '</div>'
+      ];
+      if (i.mustHave && i.mustHave.length) cells.push('<div><b>Must have</b><br>' + chips(i.mustHave) + '</div>');
+      if (i.sellsTo && i.sellsTo.length) cells.push('<div><b>Sells to</b><br>' + chips(i.sellsTo) + '</div>');
+      if (i.disqualifiers && i.disqualifiers.length) cells.push('<div><b>Disqualifiers</b><br>' + chips(i.disqualifiers) + '</div>');
       host.innerHTML = '<div class="card"><h3>Ideal candidate · ' + esc(i.label || "") + '</h3>' +
-        '<div class="jd-icp">' +
-          '<div><b>Titles</b><br>' + chips(i.titles) + '</div>' +
-          '<div><b>Geos</b><br>' + chips(i.geos) + '</div>' +
-          '<div><b>Target companies</b><br>' + chips(i.targetCompanies) + '</div>' +
-          '<div><b>Industries</b><br>' + chips(i.industries) + '</div>' +
-          '<div><b>Sells to</b><br>' + chips(i.sellsTo) + '</div>' +
-          '<div><b>Disqualifiers</b><br>' + chips(i.disqualifiers) + '</div>' +
-        '</div>' +
+        '<div class="jd-icp">' + cells.join("") + '</div>' +
         '<div class="jd-refine"><input id="jdRefineInput" type="text" placeholder="Dive deeper: refine with AI, e.g. only Director+ who sold into manufacturing, exclude agencies" />' +
           '<button class="btn btn-primary btn-sm" id="jdRefineBtn">✨ Refine</button></div>' +
         (state.refineNote ? '<p class="jd-refine-note">✨ ' + esc(state.refineNote) + '</p>' : '') +
@@ -4627,7 +4637,7 @@
         if (ta && jd) { ta.value = jd; ta.focus(); }
         state.jd = jd;
         var nameEl = $("#jdName"); if (nameEl && !nameEl.value.trim() && title) nameEl.value = title + (company ? (" · " + company) : "");
-        msg(jd ? "Brief ready below. Review or tweak it, then Analyze JD." : "Couldn't build it. Add a few more details and try again.");
+        msg(jd ? "Done — your refined brief is now in the Job description box just below. Review or tweak it, then click Analyze JD." : "Couldn't build it. Add a few more details and try again.");
       });
     }
 
@@ -4721,7 +4731,7 @@
       if (state.running) return;
       if (!state.queue.length) { msg("Queue is empty. Add a JD with the Add to queue button."); return; }
       var cap = parseInt($("#jdCap").value, 10) || 3000;
-      var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 45;
+      var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 25;
       state.running = true;
       var runBtn = $("#jdQueueRun"); if (runBtn) runBtn.disabled = true;
       var progEl = $("#jdQueueProg");
@@ -4764,7 +4774,7 @@
     $("#jdFind").addEventListener("click", function () {
       if (!state.jd) { msg("Analyze a JD first."); return; }
       var cap = parseInt($("#jdCap").value, 10) || 3000;
-      var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 45;
+      var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 25;
       msg("");
       $("#jdFind").disabled = true;
       showProgress("Finding candidates", findEta(cap));

@@ -12,7 +12,7 @@ import { anthropicClient } from "./anthropic";
 import type { CandidateICP } from "./types";
 import { normalizeIcpObject } from "./parseJobDescription";
 
-const MODEL = process.env.RECRUITEROS_SOURCING_MODEL ?? process.env.RECRUITEROS_LLM_MODEL ?? "claude-haiku-4-5-20251001";
+const MODEL = process.env.RECRUITEROS_SOURCING_MODEL ?? process.env.RECRUITEROS_LLM_MODEL ?? "claude-haiku-4-5";
 
 const SYSTEM = `You refine an existing ideal-CANDIDATE profile (ICP) used for sourcing, applying the
 recruiter's instruction. Keep the EXACT same JSON field shape. Change only what the instruction
