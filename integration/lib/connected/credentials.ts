@@ -195,6 +195,55 @@ export async function statusOf(
   return { status: c.status, lastTestedAt: c.lastTestedAt, error: c.error };
 }
 
+/**
+ * Single-operator recovery for orphaned connections.
+ *
+ * Symptom this fixes: an operator connected several integrations, then a redeploy /
+ * re-login handed their session a DIFFERENT workspace id (the recurring auth churn).
+ * Their saved creds still sit on disk under the OLD id, but the Connected page reads
+ * the new id and shows everything red — "I have to reconnect everything."
+ *
+ * When isolation is OFF (HOUSE_WORKSPACE_ID unset → every workspace is the house, the
+ * existing single-operator contract) and the active workspace has NO saved
+ * integrations, adopt the most recently saved cred for each integration found under
+ * any other workspace id. This is consistent with hydrate(), which already mirrors
+ * every workspace's keys into the shared process.env on a no-HOUSE_WORKSPACE_ID box.
+ *
+ * Hard no-op when HOUSE_WORKSPACE_ID is set (real white-label) so we NEVER pull one
+ * tenant's keys into another, and a no-op the moment the workspace has its own creds.
+ * Returns the number of integrations recovered.
+ */
+export async function recoverOrphanedCreds(workspaceId: string): Promise<number> {
+  await hydrate();
+  if ((process.env.HOUSE_WORKSPACE_ID || "").trim()) return 0; // isolation on: never cross tenants
+  const mine = store[workspaceId];
+  if (mine && Object.keys(mine.integrations).length) return 0; // already has its own connections
+
+  const newest: Partial<Record<IntegrationId, IntegrationCred>> = {};
+  for (const [wid, w] of Object.entries(store)) {
+    if (wid === workspaceId) continue;
+    for (const [id, cred] of Object.entries(w.integrations)) {
+      if (!cred) continue;
+      const prev = newest[id as IntegrationId];
+      if (!prev || (cred.updatedAt || "") > (prev.updatedAt || "")) newest[id as IntegrationId] = cred;
+    }
+  }
+  const ids = Object.keys(newest) as IntegrationId[];
+  if (!ids.length) return 0;
+
+  const target = ws(workspaceId);
+  for (const id of ids) {
+    const cred = newest[id];
+    if (cred) target.integrations[id] = { ...cred, keys: { ...cred.keys }, updatedAt: nowIso() };
+  }
+  if (shouldMirror(workspaceId)) {
+    for (const c of Object.values(target.integrations)) if (c) applyEnv(c.keys);
+  }
+  save();
+  console.warn(`[creds] recovered ${ids.length} orphaned integration(s) into workspace ${workspaceId}: ${ids.join(", ")}`);
+  return ids.length;
+}
+
 /** Redacted per-integration view for the UI: which key fields are present. */
 export async function publicConfig(
   workspaceId: string,

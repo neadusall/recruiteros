@@ -20,7 +20,7 @@
 import { nowIso } from "../core/ids";
 import { getProvider, providerStatuses } from "../providers";
 import { runWithCreds } from "../providers/http";
-import { saveKeys as storeSaveKeys, markTested, clearKeys, getKeys, resolvedKeys, statusOf } from "./credentials";
+import { saveKeys as storeSaveKeys, markTested, clearKeys, getKeys, resolvedKeys, statusOf, recoverOrphanedCreds } from "./credentials";
 import { isHouseWorkspace, isGranted, listGrants } from "./access";
 import { verifyVoiceProvider } from "../voice/provider";
 import type { Motion } from "../core/types";
@@ -334,6 +334,9 @@ export async function withWorkspaceCreds<T>(
 
 /** Build the full per-integration view (metadata + live status) for a workspace. */
 export async function listIntegrations(workspaceId: string): Promise<Integration[]> {
+  // Self-heal: if this workspace lost its connections to an id drift, pull back the
+  // operator's previously-saved creds (single-operator only; no-op under white-label).
+  await recoverOrphanedCreds(workspaceId);
   const out: Integration[] = [];
   const house = isHouseWorkspace(workspaceId);
   for (const meta of CATALOG) {
