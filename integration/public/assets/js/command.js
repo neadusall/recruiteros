@@ -4385,11 +4385,15 @@
       '#jdbRadius{background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:13px;padding:0 9px;cursor:pointer;flex:0 0 auto}' +
       '#jdbRadius:focus{outline:0;border-color:var(--brand)}' +
       '.jd-tipsd{margin-top:10px;font-size:12.5px;color:var(--text-muted)}' +
-      '.jd-tipsd>summary{cursor:pointer;color:var(--text-muted);font-weight:600;list-style:none;user-select:none}' +
+      '.jd-tipsd>summary{cursor:pointer;color:var(--text);font-weight:600;font-size:13px;list-style:none;user-select:none;' +
+        'display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--border-strong);border-radius:10px;' +
+        'background:var(--bg-soft);transition:border-color .15s,background .15s}' +
+      '.jd-tipsd>summary:hover{border-color:var(--brand);background:var(--bg)}' +
       '.jd-tipsd>summary::-webkit-details-marker{display:none}' +
-      '.jd-tipsd>summary::before{content:"▸ ";color:var(--brand-2)}' +
-      '.jd-tipsd[open]>summary::before{content:"▾ "}' +
-      '.jd-tipsd[open]>summary{margin-bottom:8px}' +
+      '.jd-tipsd>summary::before{content:"▾";color:var(--brand-2);font-size:11px;transition:transform .15s;flex:0 0 auto}' +
+      '.jd-tipsd:not([open])>summary::before{transform:rotate(-90deg)}' +
+      '.jd-tipsd>summary .muted{margin-left:auto;font-weight:500;font-size:11.5px;opacity:.7}' +
+      '.jd-tipsd[open]>summary{margin-bottom:8px;border-color:var(--brand)}' +
       '.jd-fieldgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px}.jd-fieldgrid>.jd-field{margin-bottom:0}' +
       '@media(max-width:640px){.jd-fieldgrid{grid-template-columns:1fr;gap:0}.jd-fieldgrid>.jd-field{margin-bottom:8px}}' +
       '.jd-queries{max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:6px 12px;background:var(--bg-soft)}' +
@@ -4428,7 +4432,7 @@
           '<button class="btn btn-primary btn-sm" id="jdbBtn">✨ Build refined JD</button></div>' +
           '<div class="jd-builder-sub" style="margin:7px 0 0">Your input is the benchmark; the AI refines it, fills the gaps, and widens the net. Run this first, then Analyze.</div>' +
         '</div>' +
-        '<details class="jd-tipsd"><summary>What sharpens the search? <span class="muted">(optional guide)</span></summary>' +
+        '<details class="jd-tipsd"><summary>See what sharpens the search <span class="muted">Tap to expand</span></summary>' +
           '<div class="jd-tipgrid">' +
             '<span><b>Title &amp; level</b>: the exact role and seniority, and whether it leads a team</span>' +
             '<span><b>Skills, tools &amp; licenses</b>: required certs, licenses, or systems (e.g. RN, CPA, AWS, Epic, Salesforce)</span>' +
