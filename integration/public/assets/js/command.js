@@ -4449,7 +4449,7 @@
         '<div class="jd-actions">' +
           '<button class="btn btn-primary btn-sm" id="jdAnalyze">Analyze JD</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>🧲 Find candidates</button>' +
-          '<span class="jd-cap muted">Max <input id="jdCap" type="number" min="100" max="5000" value="3000"> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="25"></span>' +
+          '<span class="jd-cap muted">Max <input id="jdCap" type="number" min="100" max="5000" value="3000"> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10"></span>' +
           '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
           '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>💾 Save to JD Sourcing</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">➕ Add to queue</button>' +
@@ -4731,7 +4731,7 @@
       if (state.running) return;
       if (!state.queue.length) { msg("Queue is empty. Add a JD with the Add to queue button."); return; }
       var cap = parseInt($("#jdCap").value, 10) || 3000;
-      var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 25;
+      var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
       state.running = true;
       var runBtn = $("#jdQueueRun"); if (runBtn) runBtn.disabled = true;
       var progEl = $("#jdQueueProg");
@@ -4774,7 +4774,7 @@
     $("#jdFind").addEventListener("click", function () {
       if (!state.jd) { msg("Analyze a JD first."); return; }
       var cap = parseInt($("#jdCap").value, 10) || 3000;
-      var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 25;
+      var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
       msg("");
       $("#jdFind").disabled = true;
       showProgress("Finding candidates", findEta(cap));

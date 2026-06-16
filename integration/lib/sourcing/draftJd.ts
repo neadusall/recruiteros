@@ -39,7 +39,7 @@ beats precision because people rarely put everything on LinkedIn:
 - List MANY adjacent and variant titles (10+), not just the literal one (e.g. for "VP Sales" also CRO,
   Chief Revenue Officer, SVP/RVP, Area VP, Regional Sales Director, Head of Sales, Sales Director,
   National Sales Manager, GM). The more title variants, the more real candidates surface.
-- Name a BROAD set of real peer companies (15-30: competitors AND adjacent ones), not just the obvious 2-3.
+- Name as MANY real peer companies as genuinely apply (competitors AND adjacent ones) — there is no upper limit, dozens or more is great. Just never invent a company.
 - Keep must-haves to the 2-3 things that are genuinely non-negotiable (e.g. a required license). Everything
   else is a "nice to have / strong signal," NOT a requirement — qualified people often don't spell it out.
 - Default to NO deal-breakers. Only a deal-breaker the recruiter explicitly stated belongs here.

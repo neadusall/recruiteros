@@ -161,7 +161,8 @@ export function scoreCandidate(row: CandidateRow, icp: CandidateICP): { fitScore
   const locText = (row.location || "").toLowerCase();
   const geo = anyPhrase(locText, icp.geos);
   if (geo) { score += WEIGHTS.geo; reasons.push(`In-target geo (${geo})`); }
-  else if (icp.remoteOk && /\bremote\b/.test(fullText.toLowerCase())) { score += 8; reasons.push("Remote (geo-flexible)"); }
+  // Remote vs on-site is NOT a qualification signal — it neither adds nor subtracts.
+  // (A candidate outside the named geos simply earns no geo bonus; never penalized.)
 
   /* 5. Domain / must-have signals (15). */
   let domain = 0;

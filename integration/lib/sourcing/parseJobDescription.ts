@@ -28,7 +28,7 @@ Shape:
   "geos": string[],                      // metros/regions to source from (expand "East Coast" to metros)
   "remoteOk": boolean,
   "industries": string[],                // domains the ideal candidate comes from
-  "targetCompanies": string[],           // 10-30 REAL named competitors + adjacent companies to poach from
+  "targetCompanies": string[],           // ALL real named competitors + adjacent companies to poach from (no cap — more is better)
   "sellsTo": string[],                   // buyer personas (e.g. CFO, CPO) if a sales role
   "verticals": string[],                 // industry verticals to weight
   "mustHave": string[],                  // hard requirements / strong signals
@@ -56,8 +56,8 @@ Rules:
   Epic/EHR, Salesforce), seniority/scope, and measurable-impact signals here. These boost ranking without
   excluding anyone.
 - Expand vague geography into concrete metros (e.g. "East Coast" -> ["New York","Boston","Washington DC","Atlanta","Philadelphia","Charlotte","Miami"]).
-- If a location is given with a search radius (e.g. "within ~50 miles of Fair Lawn, NJ"), expand geos to EVERY metro, city, and town within roughly that estimated driving distance — the realistic commute/relocation range — not just the named city. Be generous and specific (e.g. for ~50mi of Fair Lawn, NJ include Newark, Jersey City, Paterson, New York, Yonkers, White Plains, Stamford, Edison, etc.). Larger radius = more metros. Set remoteOk true unless the role is clearly on-site only.
-- targetCompanies must be REAL companies that employ this profile (competitors first, then a broad set of adjacent ones). Aim for 15-30. Never invent company names.
+- If a location is given with a search radius (e.g. "within ~50 miles of Fair Lawn, NJ"), expand geos to EVERY metro, city, and town within roughly that estimated driving distance — the realistic commute/relocation range — not just the named city. Be generous and specific (e.g. for ~50mi of Fair Lawn, NJ include Newark, Jersey City, Paterson, New York, Yonkers, White Plains, Stamford, Edison, etc.). Larger radius = more metros. Remote vs on-site is not a ranking factor, so do not narrow on it.
+- targetCompanies must be REAL companies that employ this profile (competitors first, then a broad set of adjacent ones). There is NO upper limit — list ALL that genuinely apply; dozens (or more) is great, because each company becomes its own search. The only rule: they must be real. Never invent company names.
 - sellsTo applies only to sales / GTM roles; leave it empty otherwise.`;
 
 const FALLBACK: CandidateICP = {
@@ -78,7 +78,10 @@ const FALLBACK: CandidateICP = {
 
 function strArr(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
-  return v.map((x) => String(x).trim()).filter(Boolean).slice(0, 40);
+  // Generous ceiling, not a tight cap — a long company/title list is desirable here
+  // (more companies = more searches = more candidates). The bound only guards against
+  // a runaway/malformed response, it is not meant to trim a legitimately large list.
+  return v.map((x) => String(x).trim()).filter(Boolean).slice(0, 200);
 }
 
 /** Coerce a parsed object into a clean CandidateICP (shared by parse + refine). */
