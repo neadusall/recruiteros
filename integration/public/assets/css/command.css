@@ -1461,6 +1461,51 @@ html[data-theme="light"] .vd-tabs button.active, html[data-theme="light"] .vd-ta
   .pb-vs-arrow { transform: rotate(90deg); }
 }
 
+/* ---- Board canvas (Miro-style) for long, omni-channel sequences ---- */
+.pb-board-hint { font-size: 12px; color: var(--text-dim); margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+.pb-board {
+  position: relative; overflow-x: auto; overflow-y: hidden; border-radius: 18px; border: 1px solid var(--border);
+  padding: 36px 20px 26px; margin-bottom: 16px; background: var(--surface);
+  background-image: radial-gradient(var(--border) 1.1px, transparent 1.1px); background-size: 24px 24px;
+  scrollbar-width: thin;
+}
+.pb-board-track { display: flex; align-items: center; min-width: max-content; gap: 0; }
+.pb-bcard {
+  position: relative; width: 240px; flex: none; border-radius: 14px; border: 1px solid var(--border-strong);
+  background: var(--surface); overflow: hidden; cursor: pointer; box-shadow: 0 12px 28px -20px rgba(0,0,0,.55);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.pb-bcard:hover { transform: translateY(-5px); box-shadow: 0 26px 50px -24px rgba(124,92,255,.6); border-color: var(--pb-v); }
+.pb-bcard.active { border-color: var(--pb-v); box-shadow: 0 0 0 3px rgba(124,92,255,.28), 0 20px 44px -18px rgba(124,92,255,.7); }
+.pb-bcard.done::after { content: "✓"; position: absolute; top: 9px; right: 9px; width: 19px; height: 19px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 10px; font-weight: 900; color: #0a0a12; background: var(--pb-g); z-index: 2; }
+.pb-bcard-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px;
+  border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 700; }
+.pb-bcard-top .ch { display: inline-flex; align-items: center; gap: 6px; }
+.pb-bcard-top .day { font-family: 'JetBrains Mono', monospace; color: var(--text-dim); font-size: 10.5px; letter-spacing: .03em; }
+.pb-bcard[data-accent="v"] .pb-bcard-top { background: linear-gradient(90deg, rgba(124,92,255,.16), transparent); color: var(--pb-v); }
+.pb-bcard[data-accent="c"] .pb-bcard-top { background: linear-gradient(90deg, rgba(77,208,255,.16), transparent); color: var(--pb-c); }
+.pb-bcard[data-accent="p"] .pb-bcard-top { background: linear-gradient(90deg, rgba(255,122,198,.16), transparent); color: var(--pb-p); }
+.pb-bcard[data-accent="a"] .pb-bcard-top { background: linear-gradient(90deg, rgba(255,194,77,.18), transparent); color: var(--pb-a); }
+.pb-bcard[data-accent="g"] .pb-bcard-top { background: linear-gradient(90deg, rgba(56,224,166,.16), transparent); color: var(--pb-g); }
+.pb-bcard-body { padding: 13px 13px 11px; }
+.pb-bcard-body .big { font-size: 25px; margin-bottom: 8px; }
+.pb-bcard-body h5 { margin: 0 0 6px; font-size: 14px; font-weight: 700; line-height: 1.25; }
+.pb-bcard-body p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-muted);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.pb-bcard-foot { display: flex; align-items: center; gap: 6px; padding: 9px 13px; border-top: 1px dashed var(--border);
+  font-size: 11.5px; font-weight: 700; color: var(--pb-c); }
+.pb-bcard-foot .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--pb-c); box-shadow: 0 0 8px var(--pb-c); }
+.pb-bconn { position: relative; flex: none; width: 56px; height: 2px; align-self: center;
+  background: linear-gradient(90deg, var(--pb-v), var(--pb-c)); }
+.pb-bconn::after { content: "➜"; position: absolute; right: -5px; top: -10px; color: var(--pb-c); font-size: 15px; }
+.pb-bconn .wait { position: absolute; top: -27px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+  font-size: 10px; font-weight: 700; color: var(--text-dim); background: var(--surface); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 8px; }
+.pb-bconn .dot { position: absolute; top: -3px; left: 0; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--pb-c); box-shadow: 0 0 10px var(--pb-c); animation: pbTravelX 2.4s linear infinite; }
+@keyframes pbTravelX { from { left: 0; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } to { left: 48px; opacity: 0; } }
+
 /* ---- Interactive stages: clickable, with an inline "output" teaser ---- */
 .pb-runbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .pb-run {
