@@ -49,7 +49,7 @@ export async function promoteSourcingRun(
   runId: string,
   opts: PromoteOptions = {},
 ): Promise<PromoteResult> {
-  const run = getSourcingRun(workspaceId, runId);
+  const run = await getSourcingRun(workspaceId, runId);
   if (!run) throw Object.assign(new Error("run_not_found"), { status: 404 });
 
   const minFit = opts.minFit ?? 0;
@@ -118,7 +118,7 @@ export async function promoteSourcingRun(
   run.promotedCampaignId = campaignId;
   run.promotedListId = list.id;
   run.promotedCount = added;
-  saveSourcingRun(workspaceId, { ...run });
+  await saveSourcingRun(workspaceId, { ...run });
 
   return { campaignId, listId: list.id, added, deduped, name: listName };
 }

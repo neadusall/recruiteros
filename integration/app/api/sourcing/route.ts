@@ -25,7 +25,7 @@ import { nowIso } from "../../../lib/core/ids";
 export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
-  return ok({ runs: listSourcingRuns(g.ctx.workspace.id) });
+  return ok({ runs: await listSourcingRuns(g.ctx.workspace.id) });
 }
 
 export async function POST(req: Request) {
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
 
     if (action === "save") {
       if (!b?.name || !b?.icp) return fail("missing_fields", 422, { detail: "name and icp required" });
-      const run = saveSourcingRun(ws, {
+      const run = await saveSourcingRun(ws, {
         id: b.id, name: b.name, jd: b.jd ?? "", jdUrl: b.jdUrl, location: b.location,
         icp: b.icp, queries: b.queries ?? [], candidates: b.candidates ?? [],
         warnings: b.warnings ?? [],
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
 
     if (action === "enrich") {
       if (!b?.id) return fail("missing_id", 422);
-      const run = getSourcingRun(ws, b.id);
+      const run = await getSourcingRun(ws, b.id);
       if (!run) return fail("run_not_found", 404);
       const top = Math.max(1, Math.min(b.top ?? 50, run.candidates.length));
       // Include the phone rung — otherwise report.subject.phone below is always undefined.
@@ -102,13 +102,13 @@ export async function POST(req: Request) {
           if (typeof ph === "string") c.phone = ph;
         } catch { /* leave unresolved */ }
       }
-      saveSourcingRun(ws, { ...run });
+      await saveSourcingRun(ws, { ...run });
       return ok({ enriched, run });
     }
 
     if (action === "vet") {
       if (!b?.id) return fail("missing_id", 422);
-      const run = getSourcingRun(ws, b.id);
+      const run = await getSourcingRun(ws, b.id);
       if (!run) return fail("run_not_found", 404);
       const top = Math.max(1, Math.min(b.top ?? 25, 200, run.candidates.length));
       const haveProfiles = profileFetchConfigured();
@@ -136,13 +136,13 @@ export async function POST(req: Request) {
       run.candidates.sort((a, c) =>
         (c.verifiedScore ?? -1) - (a.verifiedScore ?? -1) || c.fitScore - a.fitScore);
       if (!haveProfiles) warnings.push("profile_fetch_not_configured: set RAPIDAPI_PROFILE_HOST + RAPIDAPI_PROFILE_PATH to vet against full work history (vetted on surface fields only)");
-      saveSourcingRun(ws, { ...run });
+      await saveSourcingRun(ws, { ...run });
       return ok({ vetted, deep: haveProfiles, warnings, run });
     }
 
     if (action === "delete") {
       if (!b?.id) return fail("missing_id", 422);
-      return ok({ ok: deleteSourcingRun(ws, b.id) });
+      return ok({ ok: await deleteSourcingRun(ws, b.id) });
     }
 
     return fail("unknown_action", 422);
