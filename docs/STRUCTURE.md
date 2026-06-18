@@ -105,7 +105,8 @@ docs/
 │       ├── sms-qualification.md
 │       └── linkedin-login.md
 ├── changelog/                Dated session logs — what changed, why, and where it lives
-│   └── 2026-06-16-jd-sourcing-and-connections.md
+│   ├── 2026-06-16-jd-sourcing-and-connections.md
+│   └── 2026-06-18-repo-organization.md
 ├── playbooks/                How-to / reference playbooks
 │   ├── copywriting-playbook.md
 │   └── website-map.md
@@ -133,6 +134,12 @@ docs/
 1. **Local dev:** `node server.cjs` (or `START-STUDIO.ps1`) serves the root `*.html` over
    `http://localhost:5173` with clean URLs (`/alfred` → `alfred.html`). Localhost is required so
    the portal can reach the browser extension.
+   - **Fast loop for the app (API + portal):** from `integration/`, run `npm run dev:fast`
+     (`integration/dev.cjs`). It runs `next dev` on `:3000` **and** re-syncs `assets/` + root
+     `*.html` into `public/` on every change — so edits show on refresh with no push, no deploy,
+     no server restart. **Push to `main` only after the change is confirmed locally** (every push
+     auto-deploys to production, which restarts the server). Keep one agent/session editing the
+     repo at a time — concurrent edits cause boot crashes and edit conflicts.
 2. **Production build:** Docker builds `integration/`. The prebuild runs `sync-public.cjs`
    (root HTML + assets → `public/`), then `next build`.
 3. **Serving:** Caddy ([`Caddyfile`](../Caddyfile)) terminates HTTPS and proxies
