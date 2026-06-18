@@ -155,9 +155,50 @@ async function ensureSession(context, log) {
 /* enrich + export                                                                */
 /* ----------------------------------------------------------------------------- */
 
-async function uploadAndEnrich(page, csvPath, token, log) {
+/**
+ * Look for OUR job row on /prospect by its unique token. Returns { exists, status } where
+ * status is "processing" | "completed" | "failed" | "unknown". This is the load-bearing
+ * idempotency check: before we ever upload, we ask "did a previous (possibly crashed) run
+ * already create this row?" — if so we DON'T re-upload, so a restart never duplicates the
+ * Laxis job or re-spends a credit. Uses the same smallest-element-containing-token scoping
+ * as the completion wait so a neighbouring job can't be mistaken for ours.
+ */
+async function findJobRow(page, token) {
+  return page.evaluate((tk) => {
+    const all = Array.from(document.querySelectorAll("*"));
+    let bestTxt = null;
+    let bestSize = Infinity;
+    for (const e of all) {
+      const txt = e.textContent || "";
+      if (txt.includes(tk)) {
+        const size = e.querySelectorAll("*").length;
+        if (size < bestSize) { bestSize = size; bestTxt = txt; }
+      }
+    }
+    if (bestTxt === null) return { exists: false, status: "absent" };
+    let status = "unknown";
+    if (/failed|error/i.test(bestTxt)) status = "failed";
+    else if (/completed/i.test(bestTxt)) status = "completed";
+    else if (/processing|in progress|queued|pending/i.test(bestTxt)) status = "processing";
+    return { exists: true, status };
+  }, token);
+}
+
+/**
+ * Ensure the enrichment job exists on Laxis for this token, uploading the CSV only if no
+ * row is present yet. Idempotent: safe to call on a fresh job OR on a resumed one after a
+ * worker restart — it re-uploads at most once and never if Laxis already has our row.
+ */
+async function ensureUploaded(page, csvPath, token, log, onUploaded) {
   await page.goto(CONFIG.baseUrl + CONFIG.prospectPath, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
+
+  const existing = await findJobRow(page, token);
+  if (existing.exists) {
+    log(`upload: row for ${token} already present (status=${existing.status}) — skipping upload (resume)`);
+    if (onUploaded) await onUploaded();
+    return;
+  }
 
   log("upload: opening Enrich Prospects dialog");
   await heal.resolveClick(page, "enrich_open",
@@ -176,11 +217,23 @@ async function uploadAndEnrich(page, csvPath, token, log) {
     "Start / confirm the enrichment now that the CSV file is attached",
     [CONFIG.text.enrichStart], log);
 
-  // Laxis made a job row named "CSV Enrich <date>_<token>". Wait until OUR row shows
-  // "Completed". Scope precisely: find the SMALLEST element whose text contains both our
-  // unique token AND a status word — that element is our row (it bundles name + status),
-  // so a neighbouring older "Completed" job can't trip a false positive. Then require the
-  // row to read "Completed" and NOT "Processing".
+  // Confirm Laxis actually created our row before we call the upload durable. If it didn't
+  // appear, fail loudly NOW rather than waiting out the whole enrich timeout on a no-op.
+  await page.waitForFunction(
+    (tk) => Array.from(document.querySelectorAll("*")).some((e) => (e.textContent || "").includes(tk)),
+    token,
+    { timeout: 60_000, polling: 2000 }
+  ).catch(() => { throw new Error("laxis_row_not_created: uploaded the CSV but no job row appeared (UI may have changed — run `node probe.js`)"); });
+  log("upload: job row created");
+  if (onUploaded) await onUploaded();
+}
+
+/**
+ * Wait until OUR row reads "Completed". Scope precisely: the SMALLEST element whose text
+ * contains both our unique token AND a status word is our row (it bundles name + status),
+ * so a neighbouring older "Completed" job can't trip a false positive.
+ */
+async function waitForCompletion(page, token, log) {
   log("enrich: waiting for completion (job token " + token + ")");
   await page.waitForFunction(
     (tk) => {
@@ -230,11 +283,21 @@ function launchArgs() {
   return { headless: !CONFIG.headed, args: ["--no-sandbox", "--disable-dev-shm-usage"] };
 }
 
-/** Run the full Laxis enrichment for one CSV. Returns the enriched CSV as a string. */
-async function enrichCsv(inputCsv, { log = () => {} } = {}) {
+/**
+ * Run (or RESUME) one Laxis enrichment job. The job object carries `token` (the unique
+ * rosjob-id that names the Laxis row), `csv` (the input bytes) and `phase`; `setPhase` is
+ * called at each transition so the caller can persist progress to disk. Because every step
+ * keys off the token and re-checks Laxis's own state before acting, calling this on a job
+ * that already partly ran (after a worker restart) RESUMES it — it won't re-upload an
+ * existing row and won't re-grab data Laxis already enriched. Returns the enriched CSV.
+ */
+async function runJob(job, { log = () => {}, setPhase = () => {} } = {}) {
+  const inputCsv = job.csv;
+  if (typeof inputCsv !== "string" || !inputCsv) throw new Error("laxis_no_input_csv");
+  const token = job.token;
+  if (!token) throw new Error("laxis_no_token");
+
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "laxis-"));
-  // Unique, recognizable filename → Laxis names the job after it, so we can find OUR row.
-  const token = "rosjob-" + crypto.randomBytes(5).toString("hex");
   const csvPath = path.join(workDir, token + ".csv");
   fs.writeFileSync(csvPath, inputCsv, "utf8");
 
@@ -245,14 +308,25 @@ async function enrichCsv(inputCsv, { log = () => {} } = {}) {
       haveState ? { storageState: CONFIG.statePath, acceptDownloads: true } : { acceptDownloads: true }
     );
     const page = await ensureSession(context, log);
-    await uploadAndEnrich(page, csvPath, token, log);
+    await ensureUploaded(page, csvPath, token, log, async () => { await setPhase("uploaded"); });
+    await setPhase("processing");
+    await waitForCompletion(page, token, log);
+    await setPhase("completed");
     const enriched = await exportEnriched(page, token, workDir, log);
+    await setPhase("exported");
     await context.storageState({ path: CONFIG.statePath }); // refresh rotated cookies
     return enriched;
   } finally {
     await browser.close().catch(() => {});
     fs.rmSync(workDir, { recursive: true, force: true });
   }
+}
+
+/** Convenience wrapper: run the full enrichment for a raw CSV (used by callers/tests that
+ *  don't carry a durable job object). Mints a fresh token and ignores phase tracking. */
+async function enrichCsv(inputCsv, { log = () => {} } = {}) {
+  const token = "rosjob-" + crypto.randomBytes(5).toString("hex");
+  return runJob({ token, csv: inputCsv, phase: "new" }, { log });
 }
 
 /** Log in once and persist the session, without running a job. */
@@ -315,4 +389,4 @@ async function selfTest({ log = () => {} } = {}) {
   }
 }
 
-module.exports = { enrichCsv, warmLogin, probe, selfTest, CONFIG };
+module.exports = { runJob, enrichCsv, warmLogin, probe, selfTest, CONFIG };

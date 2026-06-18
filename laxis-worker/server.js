@@ -21,13 +21,18 @@
 
 const http = require("http");
 const crypto = require("crypto");
-const { enrichCsv, selfTest, CONFIG } = require("./laxis-flow");
+const { runJob, selfTest, CONFIG } = require("./laxis-flow");
+const store = require("./store");
 
 const PORT = Number(process.env.PORT || 3000);
 const TOKEN = process.env.LAXIS_WORKER_TOKEN || "";
 const MAX_BODY = 24 * 1024 * 1024; // 24 MB — generous for a big candidate CSV
+// How long a FINISHED job (done/error) is kept on disk so the app can still collect it
+// even if it polls late or was offline. Generous so a result is never lost to a sweep.
+const DONE_RETENTION_MS = Number(process.env.LAXIS_DONE_RETENTION_HOURS || 48) * 3600_000;
+const MAX_RUN_ATTEMPTS = Number(process.env.LAXIS_MAX_ATTEMPTS || 3);
 
-/** jobId -> { status, stage, createdAt, startedAt, finishedAt, enrichedCsv, error, log[] } */
+/** jobId -> { id, token, status, stage, phase, csv?, enrichedCsv?, hash, attempts, ... } */
 const jobs = new Map();
 const queue = [];
 let running = false;
@@ -35,6 +40,12 @@ let lastCanary = null;
 
 function newId() {
   return "laxisjob_" + crypto.randomBytes(8).toString("hex");
+}
+function newToken() {
+  return "rosjob-" + crypto.randomBytes(5).toString("hex");
+}
+function hashCsv(csv) {
+  return crypto.createHash("sha256").update(csv).digest("hex");
 }
 
 function stampLog(job, line) {
@@ -46,36 +57,102 @@ function stampLog(job, line) {
 async function drain() {
   if (running) return;
   const id = queue.shift();
-  if (!id) return;
+  if (id === undefined) return;
   const job = jobs.get(id);
-  if (!job) return drain();
+  if (!job || job.status === "done" || job.status === "error") return drain();
   running = true;
   job.status = "running";
-  job.startedAt = new Date().toISOString();
+  job.attempts = (job.attempts || 0) + 1;
+  if (!job.startedAt) job.startedAt = new Date().toISOString();
+  // Make sure the input survives a crash so a resumed run can re-read it from disk.
+  if (job.csv && store.readInput(id) === null) store.writeInput(id, job.csv);
+  if (!job.csv) job.csv = store.readInput(id); // resumed job: rehydrate input from disk
+  store.save(job);
   try {
-    const enrichedCsv = await enrichCsv(job.csv, { log: (l) => stampLog(job, l) });
+    if (!job.csv) throw new Error("laxis_input_lost: no input CSV on disk to resume from");
+    const enrichedCsv = await runJob(job, {
+      log: (l) => { stampLog(job, l); store.save(job); },
+      setPhase: (p) => { job.phase = p; store.save(job); },
+    });
     job.enrichedCsv = enrichedCsv;
+    store.writeResult(id, enrichedCsv);
     job.status = "done";
+    store.dropInput(id); // done — drop the input CSV (keeps PII on disk minimal)
   } catch (err) {
-    job.error = (err && err.message) || String(err);
+    const msg = (err && err.message) || String(err);
+    stampLog(job, "error: " + msg);
+    // Transient failure (the row already exists on Laxis, so a retry RESUMES — it won't
+    // re-grab) → requeue up to MAX_RUN_ATTEMPTS before giving up. A "deep structural"
+    // unresolved-step error is not worth retrying; surface it immediately.
+    const fatal = /laxis_step_unresolved|laxis_credentials_missing|laxis_login_failed|laxis_no_input_csv|laxis_input_lost/.test(msg);
+    if (!fatal && job.attempts < MAX_RUN_ATTEMPTS) {
+      job.status = "queued";
+      job.error = undefined;
+      stampLog(job, `retry: attempt ${job.attempts}/${MAX_RUN_ATTEMPTS} failed, requeueing (will resume by token)`);
+      store.save(job);
+      running = false;
+      setTimeout(() => { queue.push(id); setImmediate(drain); }, 5000).unref();
+      return;
+    }
+    job.error = msg;
     job.status = "error";
-    stampLog(job, "error: " + job.error);
   } finally {
-    job.finishedAt = new Date().toISOString();
-    job.csv = undefined; // free the input bytes once consumed
-    running = false;
-    // Forget finished jobs after an hour so memory doesn't grow unbounded.
-    const keepUntil = Date.now() + 60 * 60 * 1000;
-    job.expiresAt = keepUntil;
-    setImmediate(drain);
+    if (job.status === "done" || job.status === "error") {
+      job.finishedAt = new Date().toISOString();
+      job.csv = undefined; // free the input bytes in memory once consumed
+      job.expiresAt = Date.now() + DONE_RETENTION_MS;
+      store.save(job);
+      running = false;
+      setImmediate(drain);
+    }
   }
 }
 
 function sweep() {
   const now = Date.now();
   for (const [id, job] of jobs) {
-    if (job.expiresAt && job.expiresAt < now) jobs.delete(id);
+    if (job.expiresAt && job.expiresAt < now) { jobs.delete(id); store.remove(id); }
   }
+}
+
+/**
+ * Boot recovery: pull every persisted job back into memory. Jobs that were mid-flight when
+ * the worker died (status running/queued, or a non-terminal phase) are re-queued — runJob
+ * re-attaches to the Laxis row by token and finishes WITHOUT re-grabbing. Finished jobs are
+ * kept (result read from disk) until their retention expires.
+ */
+function recoverJobs() {
+  const persisted = store.loadAll();
+  let resumed = 0;
+  for (const meta of persisted) {
+    const job = { ...meta, csv: undefined, enrichedCsv: undefined, log: meta.log || [] };
+    if (job.status === "done" || job.status === "error") {
+      // Keep terminal jobs around (don't reset their expiry) so a late poll still collects.
+      if (!job.expiresAt) job.expiresAt = Date.now() + DONE_RETENTION_MS;
+      jobs.set(job.id, job);
+      continue;
+    }
+    // Non-terminal → resume it. Requeue only if we still have the input to run from.
+    if (store.readInput(job.id) === null) {
+      job.status = "error";
+      job.error = "laxis_input_lost_on_restart: input CSV was not on the volume to resume from";
+      job.finishedAt = new Date().toISOString();
+      job.expiresAt = Date.now() + DONE_RETENTION_MS;
+      jobs.set(job.id, job);
+      store.save(job);
+      continue;
+    }
+    job.status = "queued";
+    job.error = undefined;
+    stampLog(job, "recovered after worker restart — will resume by token " + job.token);
+    jobs.set(job.id, job);
+    store.save(job);
+    queue.push(job.id);
+    resumed++;
+  }
+  sweep(); // drop any terminal jobs that already aged out while the worker was down
+  if (resumed) console.log(`[recover] re-queued ${resumed} in-flight job(s) to resume after restart`);
+  if (queue.length) setImmediate(drain);
 }
 
 function send(res, code, obj) {
@@ -136,11 +213,22 @@ const server = http.createServer(async (req, res) => {
       try { parsed = JSON.parse(raw); } catch { return send(res, 422, { error: "invalid_json" }); }
       const csv = parsed && parsed.csv;
       if (typeof csv !== "string" || !csv.trim()) return send(res, 422, { error: "missing_csv" });
+      // Idempotent submit: if an identical CSV is already queued/running (a retried POST
+      // after a lost response, say), hand back the SAME job instead of double-grabbing.
+      const hash = hashCsv(csv);
+      for (const j of jobs.values()) {
+        if (j.hash === hash && (j.status === "queued" || j.status === "running")) {
+          return send(res, 202, { jobId: j.id, deduped: true });
+        }
+      }
       const id = newId();
-      jobs.set(id, {
-        id, status: "queued", stage: "queued", csv,
-        createdAt: new Date().toISOString(), log: [],
-      });
+      const job = {
+        id, token: newToken(), status: "queued", stage: "queued", phase: "new",
+        csv, hash, attempts: 0, createdAt: new Date().toISOString(), log: [],
+      };
+      jobs.set(id, job);
+      store.writeInput(id, csv); // persist input up front so a crash before drain can resume
+      store.save(job);
       queue.push(id);
       setImmediate(drain);
       return send(res, 202, { jobId: id });
@@ -151,11 +239,17 @@ const server = http.createServer(async (req, res) => {
       sweep();
       const job = jobs.get(m[1]);
       if (!job) return send(res, 404, { error: "job_not_found" });
+      // Serve the enriched CSV from disk if it's not in memory (e.g. the job finished in a
+      // previous worker process and was only rehydrated as metadata at boot).
+      let enrichedCsv;
+      if (job.status === "done") enrichedCsv = job.enrichedCsv || store.readResult(job.id) || undefined;
       return send(res, 200, {
         jobId: job.id,
         status: job.status,
         stage: job.stage,
-        enrichedCsv: job.status === "done" ? job.enrichedCsv : undefined,
+        phase: job.phase,
+        attempts: job.attempts,
+        enrichedCsv,
         error: job.error,
         createdAt: job.createdAt,
         startedAt: job.startedAt,
@@ -172,6 +266,8 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`laxis-worker listening on :${PORT} (auth ${TOKEN ? "on" : "off"}, creds ${CONFIG.email ? "set" : "MISSING"})`);
+  // Recover any jobs that were in flight when a previous process died — resume them.
+  try { recoverJobs(); } catch (err) { console.log("[recover] failed:", (err && err.message) || err); }
 });
 
 // Periodic canary: every LAXIS_CANARY_HOURS (default 12h) confirm + pre-emptively heal the

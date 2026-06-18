@@ -5033,12 +5033,25 @@
         });
       } else if ((id = t.getAttribute("data-laxis"))) {
         // First-pass enrichment via the Laxis browser worker. Async (a headless browser
-        // job), so it mirrors deep-vet: submit, then poll laxisStatus until it's done.
+        // job), so it mirrors deep-vet: submit, then poll laxisStatus until done. Big lists
+        // go in 1,000-row chunks; we AUTO-CONTINUE to the next chunk (the backend resumes by
+        // offset and never re-grabs a chunk already pulled), so the whole pull is hands-off
+        // and safe to re-run if the tab is closed mid-way.
         var lid = id;
-        var lxRemaining = 0;
-        var lxSkipped = 0;
+        var lxT = { emails: 0, phones: 0, matched: 0, gap: 0, chunks: 0, skipped: 0, warns: [] };
         t.disabled = true; t.textContent = "Laxis: starting…";
         function laxisReset() { t.disabled = false; t.textContent = "🧬 Enrich via Laxis"; }
+        function finishLaxis() {
+          laxisReset();
+          alert("Laxis enriched " + lxT.emails + " email" + (lxT.emails === 1 ? "" : "s") +
+            " and " + lxT.phones + " phone" + (lxT.phones === 1 ? "" : "s") +
+            " across " + lxT.matched + " matched contact" + (lxT.matched === 1 ? "" : "s") +
+            (lxT.chunks > 1 ? (" over " + lxT.chunks + " batches") : "") + "." +
+            (lxT.gap ? (" The in-house waterfall then filled " + lxT.gap + " more.") : "") +
+            (lxT.skipped ? ("\n\n" + lxT.skipped + " row(s) were skipped — no LinkedIn URL or email for Laxis to key off.") : "") +
+            (lxT.warns.length ? ("\n\n" + lxT.warns.slice(0, 3).join("\n")) : ""));
+          loadRuns();
+        }
         function pollLaxis() {
           send("/sourcing", "POST", { action: "laxisStatus", id: lid }).then(function (s) {
             if (!s.ok) { laxisReset(); alert("Laxis status check failed: " + ((s.data && s.data.error) || s.status)); return; }
@@ -5046,36 +5059,44 @@
               t.textContent = "Laxis: " + (s.data.stage || s.data.status || "working") + "…";
               setTimeout(pollLaxis, 10000); return;
             }
-            laxisReset();
             if (s.data.status === "error") {
+              laxisReset();
               alert("Laxis enrichment failed:\n" + ((s.data.warnings || []).join("\n") || "unknown error") +
-                "\n\nIf this mentions a selector (CALIBRATE), the Laxis UI changed and the worker needs re-calibrating."); loadRuns(); return;
+                "\n\nIf this mentions a selector (CALIBRATE), the Laxis UI changed and the worker needs re-calibrating." +
+                "\n\nAlready-enriched batches are saved — click Enrich via Laxis again to resume from where it stopped."); loadRuns(); return;
             }
             var lx = s.data.laxis || {}; var gf = s.data.gapFill || {};
-            var warn = (s.data.warnings || []).length ? ("\n\n" + s.data.warnings.slice(0, 3).join("\n")) : "";
-            alert("Laxis enriched " + (lx.emails || 0) + " email" + ((lx.emails === 1) ? "" : "s") +
-              " and " + (lx.phones || 0) + " phone" + ((lx.phones === 1) ? "" : "s") +
-              " across " + (lx.matched || 0) + " matched contact" + ((lx.matched === 1) ? "" : "s") + "." +
-              (gf.enriched ? (" The in-house waterfall then filled " + gf.enriched + " more.") : "") +
-              (lxSkipped ? ("\n\n" + lxSkipped + " row(s) were skipped — no LinkedIn URL or email for Laxis to key off.") : "") +
-              (lxRemaining ? ("\n\n" + lxRemaining + " more contacts remain (Laxis caps each pass at 1,000) — click Enrich via Laxis again to do the next batch.") : "") +
-              warn);
-            loadRuns();
+            lxT.emails += lx.emails || 0; lxT.phones += lx.phones || 0; lxT.matched += lx.matched || 0; lxT.gap += gf.enriched || 0;
+            (s.data.warnings || []).forEach(function (w) { lxT.warns.push(w); });
+            // More chunks left? Auto-continue — the backend skips done offsets, never re-grabs.
+            if (s.data.nextStart != null) { startChunk(s.data.nextStart); return; }
+            finishLaxis();
           });
         }
-        send("/sourcing", "POST", { action: "laxisEnrich", id: lid }).then(function (r) {
-          if (!r.ok) {
-            laxisReset();
-            var err = (r.data && r.data.error) || r.status;
-            if (err === "laxis_worker_not_configured") {
-              alert("Laxis isn't connected yet.\n\nOn the server, set LAXIS_EMAIL and LAXIS_PASSWORD in .env.production (the laxis-worker logs into Laxis with them), confirm LAXIS_WORKER_URL is set on the app, then redeploy."); return;
+        function startChunk(startOffset) {
+          var body = { action: "laxisEnrich", id: lid };
+          if (startOffset != null) body.start = startOffset;
+          t.textContent = "Laxis: starting" + (lxT.chunks ? (" batch " + (lxT.chunks + 1)) : "") + "…";
+          send("/sourcing", "POST", body).then(function (r) {
+            if (!r.ok) {
+              laxisReset();
+              var err = (r.data && r.data.error) || r.status;
+              if (err === "laxis_worker_not_configured") {
+                alert("Laxis isn't connected yet.\n\nOn the server, set LAXIS_EMAIL and LAXIS_PASSWORD in .env.production (the laxis-worker logs into Laxis with them), confirm LAXIS_WORKER_URL is set on the app, then redeploy."); return;
+              }
+              alert("Laxis enrich failed: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
             }
-            alert("Laxis enrich failed: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
-          }
-          lxRemaining = r.data.remaining || 0;
-          t.textContent = "Laxis: uploading " + (r.data.sent || "") + "…";
-          setTimeout(pollLaxis, 8000);
-        });
+            // Chunk already enriched (resume landed on a done offset) → skip ahead or finish.
+            if (r.data.alreadyDone) {
+              if (r.data.nextStart != null) { startChunk(r.data.nextStart); } else { finishLaxis(); }
+              return;
+            }
+            lxT.chunks++; lxT.skipped += r.data.skipped || 0;
+            t.textContent = "Laxis: uploading " + (r.data.sent || "") + "…";
+            setTimeout(pollLaxis, 8000);
+          });
+        }
+        startChunk(null); // null → backend resumes from the first un-enriched chunk (or 0 fresh)
       } else if ((id = t.getAttribute("data-enrich"))) {
         var grp = t.closest(".jd-run");
         var nEl = grp ? grp.querySelector(".jd-enrichn") : null;

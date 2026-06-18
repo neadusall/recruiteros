@@ -142,8 +142,27 @@ export interface SourcingRun {
    * redeploy mid-job doesn't strand it — the tab resumes polling by jobId.
    */
   laxisJob?: LaxisJobRef;
+  /**
+   * Chunk-level progress for multi-batch Laxis enrichment (Laxis caps each import at
+   * 1,000 rows, so a big list is enriched in sequential 1,000-row chunks). Records which
+   * chunk offsets have already been enriched + merged so that re-running — after the tab
+   * was closed mid-pull, or a chunk errored — resumes from the next un-enriched chunk and
+   * never re-grabs data Laxis already pulled (no wasted credits / time).
+   */
+  laxisProgress?: LaxisProgress;
   warnings: string[];
   createdAt: string;
+  updatedAt: string;
+}
+
+/** Chunk-level progress for multi-batch Laxis enrichment, so a resumed pull skips done work. */
+export interface LaxisProgress {
+  /** Start offsets of chunks already enriched + merged (deduped, ascending). */
+  doneOffsets: number[];
+  /** Candidate count when enrichment began — basis for the nextStart calculation. */
+  total: number;
+  /** The next offset still needing enrichment, or null when every chunk is done. */
+  nextStart: number | null;
   updatedAt: string;
 }
 

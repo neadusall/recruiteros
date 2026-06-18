@@ -38,6 +38,18 @@ function candKey(c: CandidateRow): string {
   return (c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`).toLowerCase().replace(/\/+$/, "");
 }
 
+/**
+ * Chunks are laid out on a fixed grid of `step`-sized offsets (0, step, 2·step, …). Return
+ * the first grid offset below `total` that is NOT already enriched, or null if every chunk
+ * is done. Deterministic + done-aware, so resuming a multi-batch Laxis pull always advances
+ * to a fresh chunk and can never loop on one that already came back.
+ */
+function nextLaxisOffset(doneOffsets: number[], total: number, step: number): number | null {
+  if (step <= 0) return null;
+  for (let o = 0; o < total; o += step) if (!doneOffsets.includes(o)) return o;
+  return null;
+}
+
 /** Apply a parsed verdict onto a candidate row (shared by sync + batch ingest).
  *  profileFetched is stamped by the caller (it knows whether a real profile was read). */
 function applyVerdict(c: CandidateRow, v: {
@@ -198,9 +210,22 @@ export async function POST(req: Request) {
         return ok({ submitted: true, jobId: run.laxisJob.jobId, count: run.laxisJob.count, alreadyRunning: true });
       }
       // Laxis caps an import at 1,000 contacts. Send at most one 1,000-row chunk per job,
-      // starting at `start` (the UI paginates: 0, 1000, 2000…) so big lists go in batches.
-      const start = Math.max(0, Number(b.start) || 0);
+      // starting at `start`. The UI paginates (0, 1000, 2000…), but we also track which
+      // offsets are already enriched on the run itself — so a resumed pull (tab closed
+      // mid-batch, say) can ask "where do I continue?" and we never re-grab a done chunk.
+      // Chunks sit on a fixed 1,000-row grid (Laxis's per-import cap). Resolve the offset:
+      // explicit `start` if given, else the first grid offset not yet enriched (resume).
+      const step = MAX_LAXIS_UPLOAD;
       const limit = Math.min(b.top ?? MAX_LAXIS_UPLOAD, MAX_LAXIS_UPLOAD);
+      const total = run.candidates.length;
+      const progress = run.laxisProgress ?? { doneOffsets: [], total, nextStart: 0, updatedAt: nowIso() };
+      const resumeStart = nextLaxisOffset(progress.doneOffsets, total, step);
+      const start = b.start != null ? Math.max(0, Number(b.start) || 0) : (resumeStart ?? 0);
+      // Already enriched this chunk (a resume landed on a done offset, or every chunk is
+      // done)? Don't re-submit or re-grab — just report the next un-enriched offset.
+      if (resumeStart === null || progress.doneOffsets.includes(start)) {
+        return ok({ submitted: false, alreadyDone: true, start, nextStart: resumeStart, doneOffsets: progress.doneOffsets });
+      }
       const targetRows = run.candidates.slice(start, start + limit);
       if (!targetRows.length) return fail("no_candidates", 422, { detail: `no rows at offset ${start}` });
       // Laxis enriches from linkedin_url; rows with neither a LinkedIn URL nor an email are skipped.
@@ -211,8 +236,9 @@ export async function POST(req: Request) {
         jobId, submittedAt: nowIso(), count: targetRows.length, start, sent,
         targets: targetRows.map(candKey),
       };
+      run.laxisProgress = { ...progress, total, updatedAt: nowIso() };
       await saveSourcingRun(ws, { ...run });
-      const remaining = Math.max(0, run.candidates.length - (start + targetRows.length));
+      const remaining = Math.max(0, total - (start + targetRows.length));
       return ok({ submitted: true, jobId, sent, skipped, start, remaining, nextStart: remaining ? start + targetRows.length : null });
     }
 
@@ -252,8 +278,15 @@ export async function POST(req: Request) {
         try { gapFill = await gapFillContacts(ws, run.candidates.slice(start, start + count)); }
         catch (err) { warnings.push(`gap_fill_failed: ${(err as Error).message}`); }
       }
+      // Mark this chunk done and advance the resume cursor to the next un-enriched grid
+      // offset, so re-running (or auto-continue) never re-grabs a chunk already pulled.
+      const prog = run.laxisProgress ?? { doneOffsets: [], total: run.candidates.length, nextStart: 0, updatedAt: nowIso() };
+      const total = run.candidates.length;
+      const doneOffsets = Array.from(new Set([...prog.doneOffsets, start])).sort((a, b) => a - b);
+      const nextStart = nextLaxisOffset(doneOffsets, total, MAX_LAXIS_UPLOAD);
+      run.laxisProgress = { doneOffsets, total, nextStart, updatedAt: nowIso() };
       await saveSourcingRun(ws, { ...run });
-      return ok({ done: true, status: "done", laxis, gapFill, warnings, run });
+      return ok({ done: true, status: "done", laxis, gapFill, warnings, nextStart, doneOffsets, run });
     }
 
     if (action === "vet") {
