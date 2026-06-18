@@ -14,8 +14,10 @@ export { generateQueries } from "./generateQueries";
 export { scoreCandidate } from "./score";
 export {
   runDiscovery, rapidApiSearchConfigured, verifySourcingSearch,
-  googleSearchConfigured, verifyGoogleSearch, type DiscoveryResult,
+  googleSearchConfigured, verifyGoogleSearch, candidateKey, type DiscoveryResult,
 } from "./discovery";
+export { reRankCandidates, type ReRankResult } from "./rerank";
+export { getSeenKeys, addSeenKeys } from "./seen";
 export { fetchFullProfile, profileFetchConfigured, type FullProfile, type ProfileExperience } from "./profile";
 export {
   fetchFullProfileCached, getCachedProfile, putCachedProfile,

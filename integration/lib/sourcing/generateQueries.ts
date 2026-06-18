@@ -52,6 +52,10 @@ export function generateQueries(icp: CandidateICP, opts: { titleCap?: number; ge
   const out: SourcingQuery[] = [];
 
   // 1) One high-signal poaching search per named target company.
+  //    NOTE: the precise current_company filter needs a NUMERIC LinkedIn company id, which
+  //    we don't have here (only the name). Until a name→id resolver runs, the company rides
+  //    in the keyword. `titleTerm` carries the title alone so a resolver can later switch this
+  //    query to structured mode (title in `name`, resolved id in current_company).
   for (const company of icp.targetCompanies) {
     const xray = [`site:linkedin.com/in`, titleGroup, q(company), geoGroup].filter(Boolean).join(" ");
     out.push({
@@ -61,6 +65,7 @@ export function generateQueries(icp: CandidateICP, opts: { titleCap?: number; ge
       googleUrl: googleUrl(xray),
       linkedinUrl: linkedinUrl(`${company} ${leadTitle(icp)}`),
       keyword: `${leadTitle(icp)} ${company}`.trim(),
+      titleTerm: leadTitle(icp),
     });
   }
 
@@ -79,6 +84,8 @@ export function generateQueries(icp: CandidateICP, opts: { titleCap?: number; ge
   }
 
   // 3) One broad search per geo metro (titles × single metro) for geographic depth.
+  //    geocode_location needs a NUMERIC LinkedIn geo id (e.g. 103644278), not a city name,
+  //    so the metro stays in the keyword for now; a geo-id resolver can switch it later.
   for (const geo of icp.geos.slice(0, geoCap)) {
     const xray = [`site:linkedin.com/in`, titleGroup, industryGroup, q(geo)].filter(Boolean).join(" ");
     out.push({

@@ -21,6 +21,7 @@ import {
   profileFetchConfigured, deepVetCandidate, refineIcp, draftJobDescription,
   vetBatchAvailable, submitVetBatch, retrieveVetBatch, collectVetBatch,
   fetchFullProfileCached, getCachedContact, putCachedContact,
+  reRankCandidates, getSeenKeys, addSeenKeys,
 } from "../../../lib/sourcing";
 import type { CandidateRow, VetBatchItem } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
@@ -86,11 +87,27 @@ export async function POST(req: Request) {
       if (!b?.jd) return fail("missing_jd", 422);
       const icp = await parseJobDescription(b.jd);
       const queries = generateQueries(icp);
+      // Cross-run "seen" memory: fresh-only excludes anyone surfaced in prior runs.
+      const excludeKeys = b.freshOnly === true ? await getSeenKeys(ws) : undefined;
       const result = await runDiscovery(queries, icp, {
         cap: typeof b.cap === "number" ? b.cap : 500,
         minFit: typeof b.minFit === "number" ? b.minFit : 10,
+        excludeKeys,
       });
-      return ok({ icp, queries, ...result });
+      // Remember who we surfaced so a later fresh-only run skips them.
+      await addSeenKeys(ws, result.candidates.map(candKey));
+      return ok({ icp, queries, ...result, freshOnly: b.freshOnly === true });
+    }
+
+    if (action === "rerank") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      const top = Math.max(1, Math.min(b.top ?? 100, 100, run.candidates.length));
+      const { candidates, ranked, warning } = await reRankCandidates(run.candidates, run.icp, top);
+      run.candidates = candidates;
+      await saveSourcingRun(ws, { ...run });
+      return ok({ ranked, warning, run });
     }
 
     if (action === "save") {

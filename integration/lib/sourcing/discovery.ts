@@ -38,6 +38,38 @@ const PS_PATH = () => cred("RAPIDAPI_PEOPLE_SEARCH_PATH") || "/search/people"; /
 // "GET" (query-param listings) or "POST" (JSON-body listings, e.g. {keywords,count}).
 const PS_METHOD = () => (cred("RAPIDAPI_PEOPLE_SEARCH_METHOD") || "GET").trim().toUpperCase();
 
+// Profiles requested per page. Listings commonly hardcode a low limit (e.g. limit=10);
+// we force it up so one request returns far more rows — same request cost, ~5x the data
+// per call and ~5x more throughput against the plan's per-minute rate limit. Override with
+// RAPIDAPI_PEOPLE_SEARCH_LIMIT; capped at 100 (most listings reject more).
+const PAGE_LIMIT = () => {
+  const n = parseInt(cred("RAPIDAPI_PEOPLE_SEARCH_LIMIT") || "", 10);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 100) : 50;
+};
+
+/** One people-search call's inputs. Structured fields feed dedicated filter params. */
+interface SearchParams {
+  name: string;
+  page: number;
+  limit: number;
+  currentCompany?: string;
+  geoLocation?: string;
+  pastCompany?: string;
+}
+
+/** A trimmed numeric LinkedIn id, or undefined — structured filters are id-based, not names. */
+function numericId(v?: string): string | undefined {
+  return v && /^\d+$/.test(v.trim()) ? v.trim() : undefined;
+}
+
+/** Append `key=value` only when it has a value, the template didn't token it, and the path lacks it. */
+function appendParam(path: string, key: string, value: string | undefined, rawTemplate: string): string {
+  if (!value) return path;
+  if (rawTemplate.includes("{" + key + "}")) return path; // the template already placed it
+  if (new RegExp("[?&]" + key + "=").test(path)) return path; // already present literally
+  return path + (path.includes("?") ? "&" : "?") + key + "=" + encodeURIComponent(value);
+}
+
 export function rapidApiSearchConfigured(): boolean {
   return Boolean(RAPIDAPI_KEY() && PS_HOST());
 }
@@ -52,7 +84,7 @@ export async function verifySourcingSearch(): Promise<{ ok: boolean; error?: str
   if (!RAPIDAPI_KEY()) return { ok: false, error: "Add your RapidAPI key first." };
   if (!PS_HOST()) return { ok: false, error: "Add the search host first." };
   try {
-    const rows = await rapidApiPeopleSearch("recruiter", 1, 3);
+    const rows = await rapidApiPeopleSearch({ name: "recruiter", page: 1, limit: 3 });
     return { ok: true, found: rows.length };
   } catch (e: any) {
     return { ok: false, error: (e && e.message) || "search request failed" };
@@ -113,11 +145,13 @@ function extractList(data: any): any[] {
 
 /**
  * One people-search call. Two transports, same result shape:
- *  - GET listings: query + page go in the URL (path may template {query}/{page}).
- *  - POST listings: a JSON body { keywords, count } (e.g. Linkedin Data Scraper API).
- * `term` is the search string (a plain keyword for POST, the X-ray/keyword for GET).
+ *  - GET listings: name/page/limit + structured filters go in the URL. A path that
+ *    tokens {query}/{page}/{limit}/{current_company}/{geocode_location}/{past_company}
+ *    is a full template; otherwise we interpolate what we can and APPEND the rest, so
+ *    even an existing saved path (name/page only) still gets the precise filters.
+ *  - POST listings: a JSON body { keywords, count, current_company, geocode_location }.
  */
-async function rapidApiPeopleSearch(term: string, page: number, count: number): Promise<CandidateRow[]> {
+async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRow[]> {
   const host = PS_HOST();
   const headers: Record<string, string> = {
     "X-RapidAPI-Key": RAPIDAPI_KEY(), "X-RapidAPI-Host": host,
@@ -128,19 +162,33 @@ async function rapidApiPeopleSearch(term: string, page: number, count: number): 
   if (PS_METHOD() === "POST") {
     // Body-based listing: the path is literal (no interpolation); search rides in the body.
     const url = `https://${host}${PS_PATH()}`;
-    res = await fetch(url, { method: "POST", headers, body: JSON.stringify({ keywords: term, count }) });
+    const bodyObj: Record<string, unknown> = { keywords: p.name, count: p.limit };
+    if (p.currentCompany) bodyObj.current_company = p.currentCompany;
+    if (p.geoLocation) bodyObj.geocode_location = p.geoLocation;
+    if (p.pastCompany) bodyObj.past_company = p.pastCompany;
+    res = await fetch(url, { method: "POST", headers, body: JSON.stringify(bodyObj) });
   } else {
-    // GET listing. A path that carries {query}/{page} placeholders is treated as a FULL
-    // template, so any listing's own parameter names work as-is — e.g. Fresh LinkedIn
-    // Scraper's `/api/v1/search/people?name={query}&page={page}&limit=10`. Without
-    // placeholders we fall back to the conventional ?query=&page= append.
     const raw = PS_PATH();
     const templated = raw.includes("{query}") || raw.includes("{page}");
-    let path = raw.replace(/\{query\}/g, encodeURIComponent(term)).replace(/\{page\}/g, String(page));
+    let path = raw
+      .replace(/\{query\}/g, encodeURIComponent(p.name))
+      .replace(/\{page\}/g, String(p.page))
+      .replace(/\{limit\}/g, String(p.limit))
+      .replace(/\{current_company\}/g, encodeURIComponent(p.currentCompany || ""))
+      .replace(/\{geocode_location\}/g, encodeURIComponent(p.geoLocation || ""))
+      .replace(/\{past_company\}/g, encodeURIComponent(p.pastCompany || ""));
     if (!templated) {
       const sep = path.includes("?") ? "&" : "?";
-      path = `${path}${sep}query=${encodeURIComponent(term)}&page=${page}`;
+      path = `${path}${sep}query=${encodeURIComponent(p.name)}&page=${p.page}`;
     }
+    // Force the page size up (listings hardcode it low): rewrite an existing limit= or append one.
+    path = /[?&]limit=\d+/i.test(path)
+      ? path.replace(/limit=\d+/i, `limit=${p.limit}`)
+      : `${path}${path.includes("?") ? "&" : "?"}limit=${p.limit}`;
+    // Append the precise filters when the template didn't carry them itself.
+    path = appendParam(path, "current_company", p.currentCompany, raw);
+    path = appendParam(path, "geocode_location", p.geoLocation, raw);
+    path = appendParam(path, "past_company", p.pastCompany, raw);
     res = await fetch(`https://${host}${path}`, { headers });
   }
   if (!res.ok) throw new Error(`rapidapi ${host} ${res.status}`);
@@ -242,6 +290,11 @@ function keyOf(r: CandidateRow): string {
   return (r.linkedinUrl || `${r.fullName}|${r.company ?? ""}`).toLowerCase().replace(/\/+$/, "");
 }
 
+/** Public alias of the dedupe key — callers record/compare the cross-run "seen" set with this. */
+export function candidateKey(r: CandidateRow): string {
+  return keyOf(r);
+}
+
 export interface DiscoveryResult {
   candidates: CandidateRow[];
   warnings: string[];
@@ -282,6 +335,8 @@ export async function runDiscovery(
   function absorb(rows: CandidateRow[], group: string): number {
     let kept = 0;
     for (const r of rows) {
+      // Cross-run "seen" memory: skip anyone already surfaced in a prior run (fresh-only mode).
+      if (opts.excludeKeys && opts.excludeKeys.has(keyOf(r))) continue;
       scanned++;
       r.sourceGroup = r.sourceGroup || group;
       const sc = scoreCandidate(r, icp);
@@ -329,13 +384,27 @@ export async function runDiscovery(
       // POST listings return a batch sized by `count` in one call (no paging);
       // GET listings page through results. Same handling of the rows either way.
       const maxPages = post ? 1 : 10;
+      // Structured search ONLY when a filter carries a real numeric LinkedIn id (Fresh's
+      // current_company / geocode_location / past_company are id-based, NOT names). With an
+      // id the title goes in `name` and the id in its own param — far higher precision than a
+      // fuzzy "VP Sales Coupa" keyword. With only names (today's default) we keep the keyword,
+      // so there's no regression until a name→id resolver populates these fields.
+      const curId = numericId(query.currentCompany);
+      const geoId = numericId(query.geoLocation);
+      const pastId = numericId(query.pastCompany);
+      const structured = Boolean(curId || geoId || pastId);
+      const name = structured
+        ? (query.titleTerm || query.keyword || query.label || query.xray)
+        : (query.keyword || query.label || query.xray);
       for (let page = 1; page <= maxPages && collected < perQuery; page++) {
         let rows: CandidateRow[] = [];
         try {
-          // Keyword-first: modern people-search listings take a plain keyword (role + company/geo),
-          // not a Google X-ray boolean. Fall back to the X-ray only if no keyword was generated.
-          const term = query.keyword || query.label || query.xray;
-          rows = await rapidApiPeopleSearch(term, page, Math.min(perQuery, 100));
+          rows = await rapidApiPeopleSearch({
+            name, page, limit: PAGE_LIMIT(),
+            currentCompany: curId,
+            geoLocation: geoId,
+            pastCompany: pastId,
+          });
         } catch (err) {
           warnings.push(`rapidapi(${query.group}${post ? "" : " p" + page}): ${(err as Error).message}`);
           break; // stop this query on error; move on

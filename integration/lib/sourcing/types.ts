@@ -57,6 +57,17 @@ export interface SourcingQuery {
   linkedinUrl: string;
   /** Plain keyword for keyword-based people-search APIs (POST {keywords}), e.g. "VP Sales Coupa". */
   keyword: string;
+  /* --- Structured filters (Fresh /search/people: precise > fuzzy keyword) ----
+   * When set, these feed the listing's dedicated filter params instead of cramming
+   * role+company+geo into one name string — far higher precision, fewer wasted requests. */
+  /** Just the title/role for the `name` field when structured filters carry company/geo. */
+  titleTerm?: string;
+  /** Maps to current_company — people who work there NOW (the poaching filter). */
+  currentCompany?: string;
+  /** Maps to geocode_location — a single metro/region to constrain to. */
+  geoLocation?: string;
+  /** Maps to past_company — people who USED to work there (alumni sourcing). */
+  pastCompany?: string;
 }
 
 /** A discovered candidate before they become a Prospect (the staged unit). */
@@ -75,6 +86,8 @@ export interface CandidateRow {
   fitScore: number;
   /** Human-readable reasons the score landed where it did. */
   fitReasons: string[];
+  /** 0..100 LLM relevance from the optional re-rank pass (sharper than the rule score). */
+  llmScore?: number;
   /** Which query group surfaced this row. */
   sourceGroup?: string;
   /** Data source that produced the row (rapidapi / scraper / web). */
@@ -154,4 +167,6 @@ export interface DiscoveryOptions {
   minFit?: number;
   /** Which engines to use, in cheapest-first order. Defaults to whatever is configured. */
   engines?: Array<"google" | "rapidapi" | "scraper">;
+  /** Candidate keys (see candidateKey) to skip — the cross-run "seen" set for fresh-only runs. */
+  excludeKeys?: Set<string>;
 }

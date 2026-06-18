@@ -4496,6 +4496,7 @@
           '<button class="btn btn-primary btn-sm" id="jdAnalyze">Analyze JD</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>Find candidates</button>' +
           '<span class="jd-cap muted">Scan up to <input id="jdCap" type="number" min="1" max="5000" value="500" title="Ceiling on candidates gathered per run. Not a minimum — runs return however many qualified people the search finds, up to this number."> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10" title="0 = show every profile the search finds (nothing filtered). Higher = keep only stronger matches. 10 is a wide net; 40+ is tight."></span>' +
+          '<label class="jd-cap muted" title="Skip anyone this workspace already surfaced in past runs — surfaces fresh people (new market entrants) instead of repeats."><input type="checkbox" id="jdFresh" style="width:auto;margin:0 4px 0 0;vertical-align:middle"> Fresh only</label>' +
           '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
           '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>💾 Save to JD Sourcing</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">➕ Add to queue</button>' +
@@ -4623,6 +4624,7 @@
             (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates') : '') + '</span></div>' +
             '<div class="jd-run-actions">' +
               '<button class="btn btn-ghost btn-sm" data-csv="' + esc(r.id) + '">⬇ Excel (URLs)</button>' +
+              '<button class="btn btn-ghost btn-sm" data-rerank="' + esc(r.id) + '" title="AI re-ranks the top 100 by true relevance to the role before you deep-vet — sharper than the rule score.">✨ Re-rank</button>' +
               '<button class="btn btn-ghost btn-sm" data-vet="' + esc(r.id) + '">🔬 Deep-vet</button>' +
               '<button class="btn btn-primary btn-sm" data-promote="' + esc(r.id) + '">Send to Candidates →</button>' +
               '<span class="jd-enrich-grp">⚡ Enrich top <input type="number" class="jd-enrichn" min="1" max="' + Math.max(1, n) + '" value="' + Math.min(25, Math.max(1, n)) + '" title="Choose how many of the top-ranked candidates to enrich (business email + phone). You decide how many; costs apply per lookup."> ' +
@@ -4895,7 +4897,7 @@
         var idx = done + failed + 1;
         if (progEl) progEl.textContent = "Processing " + idx + "/" + total + ": " + item.name + " …";
         showProgress("Queue " + idx + "/" + total + ": " + item.name, findEta(cap));
-        send("/sourcing", "POST", { action: "run", jd: item.jd, cap: cap, minFit: minFit }).then(function (r) {
+        send("/sourcing", "POST", { action: "run", jd: item.jd, cap: cap, minFit: minFit, freshOnly: !!($("#jdFresh") && $("#jdFresh").checked) }).then(function (r) {
           if (!r.ok || !r.data) { failed++; state.queue.shift(); renderQueue(); return next(); }
           var cands = r.data.candidates || [];
           return send("/sourcing", "POST", { action: "save", name: item.name, jd: item.jd, icp: r.data.icp, queries: r.data.queries, candidates: cands, warnings: r.data.warnings }).then(function (s) {
@@ -4922,10 +4924,11 @@
       if (!state.jd) { msg("Analyze a JD first."); return; }
       var cap = parseInt($("#jdCap").value, 10) || 500;
       var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
+      var fresh = !!($("#jdFresh") && $("#jdFresh").checked);
       msg("");
       $("#jdFind").disabled = true;
       showProgress("Finding candidates", findEta(cap));
-      send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), cap: cap, minFit: minFit }).then(function (r) {
+      send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), cap: cap, minFit: minFit, freshOnly: fresh }).then(function (r) {
         $("#jdFind").disabled = false;
         if (!r.ok) { finishProgress("Search failed"); msg("Find failed: " + ((r.data && r.data.error) || r.status)); return; }
         state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
@@ -4976,6 +4979,16 @@
               });
             });
           });
+      } else if ((id = t.getAttribute("data-rerank"))) {
+        var rrid = id;
+        t.disabled = true; t.textContent = "Re-ranking…";
+        send("/sourcing", "POST", { action: "rerank", id: rrid, top: 100 }).then(function (r) {
+          t.disabled = false; t.textContent = "✨ Re-rank";
+          if (!r.ok) { alert("Re-rank failed: " + ((r.data && r.data.error) || r.status)); return; }
+          var w = r.data.warning ? ("\n\n" + r.data.warning) : "";
+          alert("Re-ranked the top " + (r.data.ranked || 0) + " by AI relevance — the list is re-sorted with the strongest matches on top." + w);
+          loadRuns();
+        });
       } else if ((id = t.getAttribute("data-vet"))) {
         var topEl = $("#jdVetTop"); var top = topEl ? (parseInt(topEl.value, 10) || 25) : 25;
         var vid = id;
