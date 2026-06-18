@@ -8809,8 +8809,22 @@
       var sWin = d.strategyReport && d.strategyReport.winner;
       var vWin = d.variantReport && d.variantReport.winner;
       var enrollments = d.enrollments || [];
+      var eligible = d.eligible || 0;
       var filter = ($("#nuFilter") && $("#nuFilter").value) || "";
       var rows = enrollments.filter(function (e) { return !filter || e.status === filter; });
+
+      // The "push it live" control: enroll every eligible BD prospect into the drip.
+      var activate =
+        '<div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">' +
+          '<div style="flex:1;min-width:230px">' +
+            '<div style="font-weight:700;font-size:13.5px">🌱 Launch the 24-month drip</div>' +
+            '<div class="muted" style="font-size:12px;margin-top:3px">' +
+              (eligible
+                ? '<b>' + eligible + '</b> eligible BD prospect' + (eligible === 1 ? "" : "s") + ' (in-market, not opted out, not already enrolled) ready to enroll. Each is split 50/50 across Authority vs Inner Circle and starts month one.'
+                : "No eligible prospects right now. Promote in-market BD leads into Prospects and they show up here to enroll.") +
+            "</div></div>" +
+            '<button class="btn btn-primary nu-activate"' + (eligible ? "" : " disabled") + '>Enroll ' + eligible + " &amp; activate</button>" +
+        "</div>";
 
       var strategyCards =
         '<div class="lr-sub" style="margin:2px 0 8px;font-weight:700">A/B Strategy — the headline test (book-rate decides)' +
@@ -8854,8 +8868,17 @@
         "</tbody></table>";
       if (!rows.length) tbl = '<div class="empty">No enrollments' + (filter ? " in this state" : "") + " yet.</div>";
 
-      body.innerHTML = strategyCards + variantCards +
+      body.innerHTML = activate + strategyCards + variantCards +
         '<div class="card" style="margin-top:6px"><div class="lr-sub" style="margin-bottom:10px">' + countChips + "</div>" + tbl + "</div>";
+
+      var ab = body.querySelector(".nu-activate");
+      if (ab) ab.addEventListener("click", function () {
+        ab.disabled = true; ab.textContent = "Enrolling…";
+        send("/analytics/nurture", "POST", { action: "enroll_eligible" }).then(function (r) {
+          if (r.ok && r.data) { toast("Enrolled " + (r.data.enrolled || 0) + " into the drip"); load(); }
+          else { toast("Enroll failed"); ab.disabled = false; ab.textContent = "Enroll " + eligible + " & activate"; }
+        }).catch(function () { toast("Enroll failed"); ab.disabled = false; ab.textContent = "Enroll " + eligible + " & activate"; });
+      });
 
       Array.prototype.forEach.call(body.querySelectorAll(".nu-act"), function (b) {
         b.addEventListener("click", function () {
