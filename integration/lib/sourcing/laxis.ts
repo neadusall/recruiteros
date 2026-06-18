@@ -219,6 +219,12 @@ export function mergeEnrichedCsv(rows: CandidateRow[], enrichedCsv: string): Lax
   const byKey = new Map<string, CandidateRow>();
   for (const c of rows) byKey.set(laxisCandKey(c), c);
 
+  // Laxis writes the literal string "null" (and sometimes "N/A"/"-") for missing fields.
+  const clean = (v: string | undefined): string => {
+    const s = (v || "").trim();
+    return /^(null|n\/?a|none|-|undefined)$/i.test(s) ? "" : s;
+  };
+
   for (const rec of records) {
     const liKey = hLinkedin ? laxisCandKey({ linkedinUrl: rec[hLinkedin] }) : "";
     const nameKey = laxisCandKey({ fullName: hName ? rec[hName] : "", company: hCompany ? rec[hCompany] : "" });
@@ -226,8 +232,8 @@ export function mergeEnrichedCsv(rows: CandidateRow[], enrichedCsv: string): Lax
     if (!c) { result.unmatched++; continue; }
     result.matched++;
 
-    const email = hEmail ? (rec[hEmail] || "").trim() : "";
-    const phone = hPhone ? (rec[hPhone] || "").trim() : "";
+    const email = hEmail ? clean(rec[hEmail]) : "";
+    const phone = hPhone ? clean(rec[hPhone]) : "";
     if (email && !c.email && /@/.test(email)) { c.email = email; result.emails++; }
     if (phone && !c.phone) { c.phone = phone; result.phones++; }
   }
