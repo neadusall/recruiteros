@@ -40,6 +40,10 @@ function systemPrompt(motion: Campaign["motion"]): string {
     "You are a senior outbound strategist. Write a multi-touch outreach sequence as REUSABLE TEMPLATES " +
     `with merge fields (only these: ${MERGE_HELP}). Natural, specific, human; no hype, no fake familiarity, ` +
     "no invented referrals or social proof, no em-dashes. Short sentences. Each touch earns the next. " +
+    "NEVER claim a hollow or vague reason for reaching out. Banned phrases and anything like them: " +
+    "'you came to mind', 'thought of you', 'reminded me of you', 'I thought you'd find interesting', " +
+    "'wanted to reach out'. Every reason must be concrete and verifiable, tied to their actual work, a real " +
+    "signal, or a genuine prior relationship. If there is no real reason to say, say nothing instead of inventing one. " +
     "Return STRICT JSON only, no prose.";
   if (motion === "recruiting") {
     return shared +
