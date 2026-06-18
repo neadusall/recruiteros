@@ -1324,6 +1324,65 @@
       "." + (t.req ? " Requires <b>" + esc(t.req) + "</b>." : "") +
       " Enrichment runs for everyone we send to, so this stays fail-proof.</span></div>";
   }
+
+  /* Response intelligence. When a prospect replies, the Response pipeline
+     classifies the sentiment and an LLM drafts a tailored answer from this
+     sequence plus the original hiring signal. Trust first, calendar second.
+     These are the patterns it follows, motion-aware (BD prospect vs candidate). */
+  function pbReplyData(motion) {
+    if (motion === "recruiting") {
+      return {
+        pos: { rl: "😊 POSITIVE", title: "They're curious", teaser: "Give the real picture, respect their time, make the call easy.",
+          reply: "Love it, {first}. Quick call so I can give you the real picture, the team, the scope, the comp, not a job-spec dump? Grab whatever works: {link}. I'll send the key details first so you can decide if it's even worth your time.",
+          strategy: "Match their interest, lead with the information that respects their time, and make the next step a low-effort yes.",
+          failsafe: "Always send the substance first, so a call is their choice, not a hoop." },
+        neu: { rl: "😐 NEUTRAL / NOT NOW", title: "Maybe later", teaser: "Honor the timing, stay useful, ask to check back.",
+          reply: "All good, {first}, no rush at all. I'll keep this one in mind and only reach out if something lands that actually fits what you said you wanted. Mind if I check in down the line?",
+          strategy: "Respect the 'not now', and earn a welcome for the next touch by promising relevance, not volume.",
+          failsafe: "Schedules a soft re-touch later; nothing in between, so you're never a pest." },
+        neg: { rl: "🙅 NEGATIVE / PASS", title: "Not looking", teaser: "Gracious exit, leave the door open, honor the no.",
+          reply: "Totally understood, {first}. I'll leave it here. If anything changes, or you ever just want an honest read on the market, I'm easy to reach. Best of luck.",
+          strategy: "A graceful no earns more long-term goodwill than any rebuttal. People remember how you exit.",
+          failsafe: "Auto-suppresses the contact and stops every channel, no further touches, ever." }
+      };
+    }
+    return {
+      pos: { rl: "😊 POSITIVE", title: "They're in", teaser: "Confirm, lead with value, offer a call AND an easy alternative.",
+        reply: "Great, thanks {first}. Quickest version: I keep a small bench of senior people warm for exactly your stack, and I'd rather earn your trust than pitch you. Fifteen minutes this week to walk through who I've got and hear what you're hiring for? And if a call's overkill, just say the word and I'll send the one-pager.",
+        strategy: "Match their energy, lead with value, and make the next step frictionless, a call or just send it, their choice.",
+        failsafe: "Never hard-sell a warm reply; always offer the low-effort path too." },
+      neu: { rl: "😐 NEUTRAL / NOT NOW", title: "Not right now", teaser: "Respect it, leave value, set a soft future trigger.",
+        reply: "Totally fair, {first}, timing is everything. I'll get out of your inbox. One thing before I go: I'll keep a quiet eye on the market for the kind of people you'd want, and only ping you if someone genuinely exceptional comes free. Sound okay to check back in a quarter?",
+        strategy: "Honor the 'not now', then give a concrete reason to welcome the next touch. Nurture, don't push.",
+        failsafe: "Auto-schedules a soft re-touch; no pressure in between." },
+      neg: { rl: "🙅 NEGATIVE / PASS", title: "Pass", teaser: "Gracious exit, one line of standing value, honor the no.",
+        reply: "Understood, {first}, and I appreciate you telling me straight. I'll stop reaching out. If it's ever useful, I'm a good person to know when a hard role lands or talent shakes loose near {company}. Either way, best of luck with the team you're building.",
+        strategy: "A graceful no builds more reputation than a pushy maybe, and the door stays open on their terms.",
+        failsafe: "Auto-suppresses the lead and stops the sequence, protecting both your sending reputation and their goodwill." }
+    };
+  }
+  function pbReplyCards(motion) {
+    var d = pbReplyData(motion);
+    var defs = [["pos", "g"], ["neu", "a"], ["neg", "r"]];
+    return '<p class="pb-section-label">When they reply · the LLM responds</p>' +
+      '<div class="pb-reply-grid">' + defs.map(function (x) {
+        var r = d[x[0]];
+        return '<div class="pb-reply" data-reply="' + x[0] + '" data-acc="' + x[1] + '">' +
+          '<div class="rl">' + r.rl + '</div><div class="rt">' + esc(r.title) + "</div>" +
+          "<p>" + esc(r.teaser) + '</p><span class="pb-go">See the reply <span class="arr">→</span></span></div>';
+      }).join("") + "</div>" +
+      '<div class="pb-note"><span class="i">🤖</span><span>Replies are auto-classified by the Response pipeline, then an LLM drafts a tailored answer from this sequence and the original hiring signal. Trust first, calendar second. A negative reply auto-suppresses the lead, that is the failsafe.</span></div>';
+  }
+  function pbReplyModal(motion, kind) {
+    var r = pbReplyData(motion)[kind];
+    var acc = kind === "pos" ? ["ok", "POSITIVE"] : kind === "neu" ? ["warn", "NEUTRAL"] : ["hot", "NEGATIVE"];
+    var icon = kind === "pos" ? "😊" : kind === "neu" ? "😐" : "🙅";
+    pbOpenModal(icon, r.title, "LLM reply · trust-first", "" +
+      pbArt("The reply it sends", acc, pbIM(r.reply)) +
+      '<div class="pb-note"><span class="i">🎯</span><span><b>Why it works.</b> ' + esc(r.strategy) + "</span></div>" +
+      '<div class="pb-note"><span class="i">🛡️</span><span><b>Trust failsafe.</b> ' + esc(r.failsafe) + "</span></div>" +
+      '<div class="pb-note"><span class="i">🤖</span><span>Drafted live by the LLM from the actual reply plus the hiring signal, then held for one-click approval. The end goal is trust; a meeting is the byproduct.</span></div>');
+  }
   // The set of copy variants for a touch. From t.v (array of {subj?, body}),
   // else back-compat from the email A/B fields, else a single version.
   function pbTouchVariants(t) {
@@ -1459,7 +1518,9 @@
         '<h2 style="margin:6px 0 2px;font-size:24px;font-weight:800;letter-spacing:-.02em">' + esc(s.name) + "</h2>" +
         '<div class="pb-mission-band" style="margin:14px 0 24px">' + esc(s.goal) + "</div>" +
         '<p class="pb-section-label">The sequence · ' + run.length + " steps across " + chs.length + " channels" + (hasBranch ? " · amber = conditional" : "") + "</p>" +
-        pbBoard(items, "Scroll to follow the whole sequence · amber cards are if/then branches · click any step to read the exact message");
+        pbBoard(items, "Scroll to follow the whole sequence · amber cards are if/then branches · click any step to read the exact message") +
+        pbReplyCards(s.motion) +
+        '<div class="pb-note" style="margin-top:6px"><span class="i">⚡</span><span><b>This is a template, not a script.</b> Point it at any hiring signal and the engine tailors every touch, the opener, the bullets, the timing, to that exact company, role and reason, then runs it. "Use this sequence on these signals" is one instruction.</span></div>';
     }
 
     function paint() {
@@ -1478,10 +1539,12 @@
       var card = e.target.closest("[data-seq]"); if (card) { location.hash = "playbooks/sequences/" + card.getAttribute("data-seq"); return; }
       var go = e.target.closest("[data-go]"); if (go) { location.hash = go.getAttribute("data-go"); return; }
       var mot = e.target.closest("[data-mot]"); if (mot) { st.motion = mot.getAttribute("data-mot"); paint(); return; }
+      var sqOpen = st.open ? SEQS.filter(function (x) { return x.id === st.open; })[0] : null;
+      var rep = e.target.closest("[data-reply]");
+      if (rep && sqOpen) { pbReplyModal(sqOpen.motion, rep.getAttribute("data-reply")); return; }
       var tch = e.target.closest(".pb-bcard");
-      if (tch && st.open) {
-        var sq = SEQS.filter(function (x) { return x.id === st.open; })[0];
-        var t = pbExpand(sq)[+tch.getAttribute("data-idx")];
+      if (tch && sqOpen) {
+        var t = pbExpand(sqOpen)[+tch.getAttribute("data-idx")];
         var m = PB_CH[t.ch];
         var sub = (t.cond ? "Branch" : "Day " + t.d) + " · " + m.label;
         pbOpenModal(m.icon, t.t, sub, pbTouchBody(t));
@@ -1846,6 +1909,8 @@
           '<p class="pb-section-label">' + esc(p.flowLabel || "The workflow") + "</p>" +
           '<div class="pb-runbar"><button class="pb-run"><span class="ic">▶</span> Watch it run</button></div>') +
         flowHtml +
+        // Sequence-shaped (board) playbooks get the live reply intelligence too.
+        (p.board ? pbReplyCards(p.motion || "bd") : "") +
         '<p class="pb-section-label">What it looks like</p>' +
         p.wire +
         '<div class="pb-outcome"><span class="em">' + p.outcome.em + "</span>" +
@@ -1857,6 +1922,8 @@
     wrap.addEventListener("click", function (e) {
       if (e.target.closest(".pb-run")) { pbRun(wrap); return; }
       var go = e.target.closest("[data-go]"); if (go) { location.hash = go.getAttribute("data-go"); return; }
+      var rep = e.target.closest("[data-reply]");
+      if (rep) { pbReplyModal(p.motion || "bd", rep.getAttribute("data-reply")); return; }
       var node = e.target.closest("[data-stage], .pb-bcard");
       if (node) {
         var idx = node.hasAttribute("data-stage") ? +node.getAttribute("data-stage") : +node.getAttribute("data-idx");
