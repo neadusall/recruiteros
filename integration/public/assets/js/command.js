@@ -828,13 +828,441 @@
         (s.auto ? '<span class="pb-auto ' + (s.auto === "you" ? "you" : "bot") + '">' + (s.auto === "you" ? "You" : "Auto") + "</span>" : "") +
         "</div>"
       : "";
-    return '<div class="pb-stage">' +
+    var hasPeek = !!s.peek;
+    var peek = hasPeek ? '<div class="pb-peek"><span class="dot"></span>' + esc(s.peek.cta || "See what's produced") + "</div>" : "";
+    var out = s.out ? '<div class="pb-out">' + s.out + "</div>" : "";
+    return '<div class="pb-stage' + (hasPeek ? " clk" : "") + '"' + (hasPeek ? ' data-stage="' + i + '"' : "") + ">" +
       '<div><div class="pb-node">' + s.icon + '<span class="num">' + (i + 1) + "</span></div></div>" +
-      '<div class="pb-body">' + when + "<h4>" + esc(s.title) + "</h4><p>" + s.body + "</p></div></div>";
+      '<div class="pb-body">' + when + "<h4>" + esc(s.title) + "</h4><p>" + s.body + "</p>" + out + peek + "</div></div>";
   }
   function pbWireChrome(title, body) {
     return '<div class="pb-wire"><div class="pb-wire-chrome"><i></i><i></i><i></i>' +
       '<span class="ttl">' + esc(title) + '</span></div><div class="pb-wire-body">' + body + "</div></div>";
+  }
+
+  /* ---- Artifact builders: the actual "under the hood" content shown in popups ---- */
+  function pbNl(s) { return esc(s).replace(/\n/g, "<br>"); }
+  function pbArt(tag, pill, body) {
+    var p = pill ? '<span class="pb-pill2 ' + pill[0] + '">' + esc(pill[1]) + "</span>" : "";
+    return '<div class="pb-art"><div class="pb-art-tag">' + esc(tag) + p + '</div><div class="pb-art-body">' + body + "</div></div>";
+  }
+  function pbKV(rows) {
+    return '<div class="pb-art"><div class="pb-art-body mono">' + rows.map(function (r) {
+      return '<div class="pb-kv"><span class="k">' + esc(r[0]) + '</span><span class="v">' + (r[2] ? "<em>" + esc(r[1]) + "</em>" : esc(r[1])) + "</span></div>";
+    }).join("") + "</div></div>";
+  }
+  function pbMail(from, subj, body) {
+    return '<div class="pb-mail"><div class="from">' + esc(from) + '</div><div class="subj">' + esc(subj) + '</div><div class="copy">' + pbNl(body) + "</div></div>";
+  }
+  function pbIM(body) { return '<div class="pb-im"><span class="av"></span><div class="msg">' + pbNl(body) + "</div></div>"; }
+  function pbTrans(lines) {
+    return '<div class="pb-trans">' + lines.map(function (l) {
+      return '<div class="ln ' + l[0] + '"><span class="who">' + esc(l[1]) + '</span><span class="said">' + esc(l[2]) + "</span></div>";
+    }).join("") + "</div>";
+  }
+
+  /* ---- The popup itself ---- */
+  function pbCloseModal() {
+    var m = document.getElementById("pbModal");
+    if (m) m.remove();
+    document.removeEventListener("keydown", pbEsc);
+  }
+  function pbEsc(e) { if (e.key === "Escape") pbCloseModal(); }
+  function pbOpenModal(icon, title, sub, bodyHtml) {
+    pbCloseModal();
+    var back = document.createElement("div");
+    back.className = "pb-modal-back";
+    back.id = "pbModal";
+    back.innerHTML =
+      '<div class="pb-modal"><div class="pb-modal-head"><span class="ic">' + icon + "</span>" +
+        "<div><h4>" + esc(title) + '</h4><div class="sub">' + esc(sub) + "</div></div>" +
+        '<span class="x" data-x>✕</span></div>' +
+      '<div class="pb-modal-body pb-stagger">' + bodyHtml + "</div></div>";
+    back.addEventListener("click", function (e) {
+      if (e.target === back || e.target.closest("[data-x]")) pbCloseModal();
+    });
+    document.body.appendChild(back);
+    document.addEventListener("keydown", pbEsc);
+  }
+
+  /* ---- Channels + the Sequence Library data (real outbound workflows) ---- */
+  var PB_CH = {
+    email:   { icon: "✉️", label: "Email" },
+    liconn:  { icon: "➕", label: "LinkedIn connect" },
+    lidm:    { icon: "💬", label: "LinkedIn message" },
+    livoice: { icon: "🎙️", label: "LinkedIn voice note" },
+    vm:      { icon: "📞", label: "Voicemail drop" },
+    sms:     { icon: "📱", label: "SMS" },
+    call:    { icon: "☎️", label: "Call task" }
+  };
+  // Body convention for email touches: subj/body = Variant A (control),
+  // aSubj/aBody = Variant B (test). Tokens like {first} auto-fill per prospect.
+  function PB_SEQS() {
+    return [
+      /* ===================== BUSINESS DEVELOPMENT ===================== */
+      { id: "just-raised", motion: "bd", accent: "c", name: "Just Raised", signal: "Funding round", persona: "VP Eng / Head of Talent",
+        goal: "Win the recruiting engagement before the post-raise hiring spike floods the market.",
+        touches: [
+          { d: 0, ch: "email", t: "Congrats + the hiring cliff", subj: "after the {round} — the eng hiring cliff",
+            body: "Hi {first}, congrats on the {round}. The part nobody warns you about: you now have to hire a dozen engineers in two quarters while every other funded team chases the same shortlist. I run a desk that keeps senior backend and infra people warm, so you start at week one, not week six. Worth fifteen minutes to map your next five hires?",
+            aSubj: "your next 5 engineering hires",
+            aBody: "Hi {first}, saw the {round} news. Most teams lose a full quarter just standing up a hiring pipeline after a raise. I can hand you a vetted shortlist for your top two roles this week. Open to a quick call?" },
+          { d: 2, ch: "liconn", t: "Connect + one-line note",
+            body: "Hi {first} — emailed you about scaling eng hiring after the raise. Connecting here too. No pitch; happy to share what's worked for teams at your stage." },
+          { d: 4, ch: "lidm", t: "Offer the shortlist",
+            body: "{first}, quick one — when you're ready to move on backend hires, I can send three profiles that fit your stack this week. Want me to?" },
+          { d: 6, ch: "vm", t: "Voicemail in your voice",
+            body: "Hi {first}, it's {you} at {firm}. I sent a note about your engineering hiring after the raise... no rush at all. I've already got a few people in mind. Give me a call back when you get a sec. Thanks, and congrats again." },
+          { d: 9, ch: "sms", t: "Light nudge",
+            body: "{first}, {you} here. Still happy to send those backend profiles whenever the timing's right. Want them?" },
+          { d: 13, ch: "email", t: "Break-up, door open", subj: "closing the loop",
+            body: "Hi {first}, I'll stop here so I'm not noise in your inbox. Standing offer: when backend or infra hiring heats up, reply and I'll have a vetted shortlist to you within a week." }
+        ] },
+
+      { id: "reposted-3x", motion: "bd", accent: "v", name: "Reposted Three Times", signal: "Job repost (3×)", persona: "Hiring Manager / Talent",
+        goal: "Win the hard-to-fill req a team has already given up on filling alone.",
+        touches: [
+          { d: 0, ch: "email", t: "The repost, named honestly", subj: "the {role} repost",
+            body: "Hi {first}, the {role} req has been back up three times since {month}. That's rarely a candidate problem, it's usually a thin top-of-funnel against a high bar. I keep a warm bench of {discipline} people who aren't applying anywhere. I can put two in front of you this week. Want a look?",
+            aSubj: "filling {role} without the repost loop",
+            aBody: "Hi {first}, noticed {role} keeps cycling back to the top of your careers page. Usually means great-on-paper folks who fade in the loop. I source for fit-then-skill, not keyword matches. Two profiles ready, want them?" },
+          { d: 2, ch: "livoice", t: "LinkedIn voice note",
+            body: "Hey {first}, it's {you}... I saw the {role} role is back open again. I won't pitch you. I've just got two people I think are a real fit, and I'd rather show you than tell you. If you're open to it, reply here and I'll send them over. Thanks." },
+          { d: 5, ch: "vm", t: "Voicemail drop",
+            body: "Hi {first}, {you} here. About the {role} search... I've got two {discipline} folks who aren't on the market. Happy to send their work. Give me a ring back. Thanks so much." },
+          { d: 8, ch: "lidm", t: "Soft close",
+            body: "{first} — still happy to share those two {role} profiles whenever you want a second pipeline running alongside yours. Just say the word." },
+          { d: 12, ch: "email", t: "Break-up", subj: "last note on {role}",
+            body: "Hi {first}, I'll leave it here. If the {role} search drags into another month, reply to this and I'll send the two profiles the same day." }
+        ] },
+
+      { id: "mpc", motion: "bd", accent: "g", name: "MPC · Lead With a Candidate", signal: "Standout candidate available", persona: "VP Eng / Founder",
+        goal: "Open doors at multiple target companies by leading with one exceptional person.",
+        touches: [
+          { d: 0, ch: "email", t: "Present the substance", subj: "a {title} who {achv} — exploring this week",
+            body: "Hi {first}, I'm working with a {title} who {achv}. They're selective and only loosely looking. Given {company}'s {signal}, they could be a strong add. Two-line anonymized profile below, happy to make a warm intro if it's a fit.\n\n• {achv}\n• {discipline}, {years} years, currently at a {peer}-stage company",
+            aSubj: "{title} · {achv}",
+            aBody: "Hi {first}, I rarely do this, but I've got a {title} worth an exception. {achv}. Passive, but would move for the right team. Worth a quick look given where {company} is headed?" },
+          { d: 2, ch: "liconn", t: "Connect",
+            body: "Hi {first} — sent you a note about a {title} I think fits {company}. Connecting so it's easy to reply." },
+          { d: 5, ch: "vm", t: "Voicemail drop",
+            body: "Hi {first}, it's {you}. I emailed about a {title} who {achv}... I think they'd be a real fit for what you're building. No pressure. Call me back if you'd like the intro. Thanks." },
+          { d: 8, ch: "email", t: "Honest urgency", subj: "re: the {title}",
+            body: "Hi {first}, quick update, the {title} I mentioned has a couple of conversations starting. Not pressure, just timing. If you'd like the intro before their calendar fills, reply and I'll set it up today." }
+        ] },
+
+      { id: "new-vp-eng", motion: "bd", accent: "c", name: "New VP of Engineering", signal: "Exec hire", persona: "Newly-hired eng leader",
+        goal: "Get on a new leader's vendor shortlist while they rebuild the team in their first 90 days.",
+        touches: [
+          { d: 0, ch: "email", t: "Congrats + the first 90 days", subj: "congrats on the {company} role",
+            body: "Hi {first}, congrats on stepping into the VP Engineering seat at {company}. The first ninety days usually means mapping the team and finding the two or three hires that unlock the rest. I help new eng leaders do exactly that, fast, with people who aren't on the open market. Worth a short intro call?",
+            aSubj: "your first 90 days at {company}",
+            aBody: "Hi {first}, congrats on the {company} move. New leaders almost always inherit a couple of critical open roles. I keep senior backend and platform people warm and can take one search off your plate this month. Open to fifteen minutes?" },
+          { d: 3, ch: "liconn", t: "Connect + note",
+            body: "Hi {first} — congrats on the new role at {company}. Reached out by email about helping with early hires. Connecting here too." },
+          { d: 6, ch: "livoice", t: "LinkedIn voice note",
+            body: "Hey {first}, it's {you}, congratulations again on the {company} role. I know the first quarter is a blur. If one of those open reqs is keeping you up at night, that's exactly what I'm good at. Reply whenever, no rush. Thanks." },
+          { d: 10, ch: "email", t: "Break-up", subj: "when you're ready",
+            body: "Hi {first}, you're heads-down, so I'll keep this short. When you're ready to move on a key hire, reply and I'll bring a shortlist to our first call." }
+        ] },
+
+      { id: "velocity-spike", motion: "bd", accent: "a", name: "Hiring Velocity Spike", signal: "Many roles opened", persona: "In-house talent lead",
+        goal: "Become the overflow partner when a team opens more roles than it can pipeline.",
+        touches: [
+          { d: 0, ch: "email", t: "Overflow offer", subj: "{n} roles open at {company} — overflow help?",
+            body: "Hi {first}, noticed {company} opened {n} roles in the last few weeks. That's a lot of pipeline for one team to build at once. I work as overflow for in-house teams: you keep your process, I just keep candidates flowing for the two roles slowing you down. Worth a quick call?",
+            aSubj: "keeping up with {n} open roles",
+            aBody: "Hi {first}, {company}'s hiring page jumped to {n} open roles. When volume spikes, the hardest reqs usually stall while the easy ones fill. I can take the two hardest off your plate. Open to fifteen minutes?" },
+          { d: 3, ch: "lidm", t: "Start with one role",
+            body: "{first} — emailed about overflow help while {company} is hiring heavily. Happy to start with just one role to prove it out. Interested?" },
+          { d: 6, ch: "vm", t: "Voicemail drop",
+            body: "Hi {first}, {you} here. Saw how much {company} is hiring right now... I help teams handle the overflow without changing your process. Give me a call back if that's useful. Thanks a lot." },
+          { d: 10, ch: "email", t: "Break-up", subj: "one role to start",
+            body: "Hi {first}, I'll stop here. If even one of those {n} roles is dragging, reply and I'll bring candidates to a first call, no retainer to find out if I'm useful." }
+        ] },
+
+      { id: "competitor-layoff", motion: "bd", accent: "v", name: "Competitor Layoff · Talent Freed", signal: "Layoff at a peer", persona: "Eng leader / Talent",
+        goal: "Move fast on suddenly-available talent and pitch the companies that are still hiring.",
+        touches: [
+          { d: 0, ch: "email", t: "A short window", subj: "talent just freed up near {company}",
+            body: "Hi {first}, there's been a round of cuts at {peer}, which means a pocket of strong {discipline} people are suddenly on the market, briefly. I've already spoken with a few. Given {company} is hiring, want me to send the two or three who map to your roles before they're gone?",
+            aSubj: "a short window on {discipline} talent",
+            aBody: "Hi {first}, the {peer} layoffs put some genuinely good {discipline} engineers in play this week. These windows close fast. Want me to send the strongest two who fit {company}?" },
+          { d: 2, ch: "livoice", t: "Voice note",
+            body: "Hey {first}, it's {you}. With what just happened at {peer}, there are a few really strong people available right now. That window won't last. If you want, I'll send the two best fits for {company} today. Reply here. Thanks." },
+          { d: 4, ch: "sms", t: "Time-sensitive nudge",
+            body: "{first}, {you} — that {discipline} talent from {peer} is moving fast. Want the top two before they're gone?" },
+          { d: 7, ch: "email", t: "Window closing", subj: "window's closing",
+            body: "Hi {first}, last note, most of the {peer} folks will be off the market within two weeks. If you want intros, reply today and I'll move." }
+        ] },
+
+      { id: "stale-req", motion: "bd", accent: "a", name: "Stale Req Rescue", signal: "Role open 60+ days", persona: "Frustrated hiring manager",
+        goal: "Win a role the company has struggled to fill by reframing the pitch, not just re-searching.",
+        touches: [
+          { d: 0, ch: "email", t: "Positioning, not sourcing", subj: "the {role} role — still open?",
+            body: "Hi {first}, I noticed {role} has been open at {company} for a couple of months. After sixty days a req usually isn't a sourcing problem, it's a positioning problem, the pitch isn't landing with the people who'd be great. I'd reframe it and bring you two strong fits this week. Want to compare notes?",
+            aSubj: "60 days on {role} — a second angle",
+            aBody: "Hi {first}, {role} looks like it's been a tough fill. I tend to win the roles other people give up on by selling the mission, not the checklist. Two profiles ready. Want a look?" },
+          { d: 3, ch: "lidm", t: "Connect",
+            body: "{first} — reached out about {role}. I've filled a few 'impossible' reqs by changing the story, not the search. Two people in mind. Want them?" },
+          { d: 6, ch: "vm", t: "Voicemail drop",
+            body: "Hi {first}, {you} here, about the {role} search. I think the role's better than its job post makes it sound. I've got two people who'd get it. Call me back. Thanks so much." },
+          { d: 10, ch: "email", t: "Break-up", subj: "last note on {role}",
+            body: "Hi {first}, I'll leave it. If {role} is still open in two weeks, reply and I'll send the two profiles and a reframed pitch, no obligation." }
+        ] },
+
+      { id: "winback-client", motion: "bd", accent: "g", name: "Win Back a Churned Client", signal: "Past client hiring again", persona: "Former client contact",
+        goal: "Re-earn a former client now hiring again, starting with a single role to rebuild trust.",
+        touches: [
+          { d: 0, ch: "email", t: "Good to see you hiring", subj: "good to see {company} hiring again",
+            body: "Hi {first}, saw {company} is hiring again, good sign. It's been a while since we worked together. I've sharpened a lot since then, especially on {discipline} roles. If you've got an opening that matters, I'd love another shot, starting with one role so the work speaks for itself. Open to it?",
+            aSubj: "another shot at a {company} role?",
+            aBody: "Hi {first}, {company}'s back in hiring mode. I know our last engagement was a while ago, and I'd value the chance to show what's changed. Happy to take just one role to start. Worth a quick catch-up?" },
+          { d: 4, ch: "lidm", t: "Warm reconnect",
+            body: "{first} — good to see {company} growing again. Would love to reconnect and earn back a search, even one role to start. You in for a quick call?" },
+          { d: 7, ch: "vm", t: "Voicemail drop",
+            body: "Hi {first}, it's {you}. Saw {company} is hiring and thought of you. I'd love another chance to help. Just one role to prove it. Give me a call back when you can. Thanks." },
+          { d: 11, ch: "email", t: "Door open", subj: "door open at {firm}",
+            body: "Hi {first}, I'll leave the ball in your court. Whenever a role comes up where you want a second pipeline, reply and I'll jump on it personally." }
+        ] },
+
+      /* ===================== RECRUITING ===================== */
+      { id: "passive-engineer", motion: "recruiting", accent: "c", name: "Passive Engineer · Signal-Led", signal: "Reorg / layoff nearby", persona: "Happily-employed senior engineer",
+        goal: "Open a conversation with someone not looking, on the strength of their actual work.",
+        touches: [
+          { d: 0, ch: "lidm", t: "Substance-led opener",
+            body: "Hi {first}, not a spray-and-pray message, I read your work on {achv}. I'm hiring for a {role} where that exact experience is the whole job, not a line item. I'm not asking you to leave anything, just worth a fifteen-minute look? If it's not for you, I'll happily send it to someone you rate." },
+          { d: 3, ch: "email", t: "The why-now, honestly", subj: "the {role} role — why I thought of you",
+            body: "Hi {first}, following up here. What makes this {role} different: {achv-context}. The team's small, the scope is real, and the comp is in the {band} range. No pressure, but if you're even passively curious, I'll walk you through it in fifteen minutes." },
+          { d: 6, ch: "livoice", t: "Voice note",
+            body: "Hey {first}, it's {you}... I know you're not looking, and that's exactly why I reached out. The {role} role is the kind of thing people leave a good job for. If you're curious, even a little, reply here and I'll keep it low-key. Thanks." },
+          { d: 10, ch: "email", t: "Soft close + referral", subj: "either way",
+            body: "Hi {first}, last note from me on this. If the timing's wrong, I completely understand, but is there someone you respect who'd be perfect for a {role}? A name is just as valuable as a yes. Thanks either way." }
+        ] },
+
+      { id: "speed-to-lead", motion: "recruiting", accent: "g", name: "Inbound Applicant · Speed to Lead", signal: "Just applied", persona: "Fresh applicant",
+        goal: "Reach an applicant within minutes, while they still remember applying.",
+        touches: [
+          { d: 0, ch: "email", t: "Fast human reply", subj: "got your application for {role}",
+            body: "Hi {first}, thanks for applying for the {role}, real person here. I've read it and I'd like to learn what you're looking for next. Grab any slot that works: {link}. If none fit, just reply with two times and I'll make it work." },
+          { d: 0, ch: "sms", t: "Same-hour text",
+            body: "Hi {first}, it's {you} at {firm} — thanks for applying to the {role}. Picked a couple of times to chat here: {link}. Talk soon!" },
+          { d: 2, ch: "email", t: "Nudge with substance", subj: "15 min on the {role}?",
+            body: "Hi {first}, still keen to connect on the {role}. Quick context: {achv-context}. If now's not great, tell me when and I'll work around you." },
+          { d: 4, ch: "email", t: "Last nudge", subj: "keeping your spot warm",
+            body: "Hi {first}, I'll keep your application warm either way. If you're still interested in the {role}, grab a time here and we'll talk: {link}." }
+        ] },
+
+      { id: "silver-medalist", motion: "recruiting", accent: "v", name: "Silver-Medalist Re-engage", signal: "Past finalist, new role", persona: "Strong past candidate",
+        goal: "Bring back a candidate who came close last time, before the role goes public.",
+        touches: [
+          { d: 0, ch: "email", t: "Pick up where you left off", subj: "a {role} that fits better than last time",
+            body: "Hi {first}, you came close on the {prev-role} last year and it stuck with me, you were a strong finalist. A {role} just opened that fits what you actually wanted: {achv-context}. Want first look before it's public?" },
+          { d: 3, ch: "lidm", t: "Warm DM",
+            body: "{first} — thought of you the moment this {role} opened. You were so close last time. Want me to send the details before I post it anywhere?" },
+          { d: 6, ch: "vm", t: "Voicemail drop",
+            body: "Hi {first}, it's {you}. A role opened that reminded me of you right away... you were a finalist last time and I never forgot it. Give me a call back and I'll tell you about it. Thanks." },
+          { d: 9, ch: "email", t: "Soft close", subj: "no rush",
+            body: "Hi {first}, no pressure at all. The {role} is yours to look at first if you want it. Reply anytime and I'll send everything over." }
+        ] },
+
+      { id: "niche-headhunt", motion: "recruiting", accent: "a", name: "Niche Specialist Headhunt", signal: "Rare skill match", persona: "Hard-to-find specialist",
+        goal: "Cold-reach a genuinely rare specialist with a role built around their exact strength.",
+        touches: [
+          { d: 0, ch: "lidm", t: "Specific and short",
+            body: "Hi {first}, you're one of maybe a few dozen people who've actually {achv}. I have a {role} built around exactly that. Worth a fifteen-minute look? Even if it's a no, I'd value your read on the market." },
+          { d: 4, ch: "email", t: "The honest pitch", subj: "built for someone who's {achv}",
+            body: "Hi {first}, this {role} isn't a generalist seat, it needs someone who's {achv}, which is rare. {achv-context}. Comp's in the {band} range. If you're curious, fifteen minutes and you'll know if it's real." },
+          { d: 7, ch: "livoice", t: "Voice note",
+            body: "Hey {first}, it's {you}... I don't reach out to many people for this kind of role, because not many people can do it. You can. If you're even a little curious, reply here. Thanks." },
+          { d: 11, ch: "email", t: "Referral fallback", subj: "or who else?",
+            body: "Hi {first}, if it's not for you, no worries. Given how niche this is, is there one person you'd trust with a {role}? I'd owe you one." }
+        ] },
+
+      { id: "counter-offer-proof", motion: "recruiting", accent: "c", name: "Counter-Offer-Proof Close", signal: "Candidate in final stages", persona: "Finalist candidate",
+        goal: "Keep a finalist anchored to their real reason for leaving, through offer and counter.",
+        touches: [
+          { d: 0, ch: "email", t: "Reconnect to the why", subj: "why this still matters",
+            body: "Hi {first}, as we get close, it's worth grounding in why you started looking: {motivation}. This role solves that directly. Anything making you hesitate? Better we talk it through now than later." },
+          { d: 2, ch: "call", t: "Manager-fit call task",
+            body: "Schedule a casual fifteen-minute call between {first} and the hiring manager, no agenda, just chemistry. Finalists who connect with their future manager rarely get pulled back by a counter." },
+          { d: 4, ch: "email", t: "Pre-empt the counter", subj: "about the counter-offer",
+            body: "Hi {first}, your current employer may counter, that's normal. Worth asking: why did it take you leaving for them to act, and does it actually fix {motivation}? You're not leaving for money, you're leaving for {motivation}. I'm here to talk it through, no spin." },
+          { d: 6, ch: "sms", t: "Day-of-offer text",
+            body: "{first}, big day. However it lands, I've got your back. Call me before you respond to anything — {you}." }
+        ] },
+
+      { id: "contractor-to-perm", motion: "recruiting", accent: "g", name: "Contractor to Perm", signal: "Contract ending", persona: "Proven contractor",
+        goal: "Convert a contractor who's already delivering into a permanent hire.",
+        touches: [
+          { d: 0, ch: "email", t: "The case for perm", subj: "a perm seat with your name on it",
+            body: "Hi {first}, you've been delivering as a contractor and a perm {role} just opened that fits you exactly. The upside: equity, ownership, and you already know the work. Want me to walk you through what perm looks like here?" },
+          { d: 3, ch: "lidm", t: "Casual nudge",
+            body: "{first} — that {role} I mentioned is the perm version of what you're already great at. Fifteen minutes to compare it to staying contract?" },
+          { d: 6, ch: "vm", t: "Voicemail drop",
+            body: "Hi {first}, {you} here. There's a permanent {role} that's basically built around what you've been doing... I think it's worth a look. Call me back when you can. Thanks a lot." },
+          { d: 9, ch: "email", t: "Soft close", subj: "no rush, just options",
+            body: "Hi {first}, whatever you decide, I want you to have the full picture. Reply when you've got fifteen minutes and I'll lay out the perm offer side by side with contracting." }
+        ] },
+
+      { id: "boomerang", motion: "recruiting", accent: "v", name: "Boomerang · Alumni", signal: "Alum of a client, now open", persona: "Former employee of the client",
+        goal: "Bring back a high-performer who left, now that what made them leave has changed.",
+        touches: [
+          { d: 0, ch: "email", t: "Come back around", subj: "{client} would take you back in a heartbeat",
+            body: "Hi {first}, your name still comes up at {client}, in the good way. They've got a {role} that's a level up from when you left, and the things that made you go have changed: {whats-changed}. Worth hearing them out?" },
+          { d: 4, ch: "lidm", t: "Warm DM",
+            body: "{first} — {client}'s in a different place than when you left, and there's a {role} with your name on it. Want the details? No pressure." },
+          { d: 7, ch: "livoice", t: "Voice note",
+            body: "Hey {first}, it's {you}. I know you left {client} for good reasons. A lot's changed there, and they'd love you back for a {role}. If you're curious how it's different now, reply here. Thanks." },
+          { d: 11, ch: "email", t: "Door open", subj: "whenever",
+            body: "Hi {first}, no rush. The {role} at {client} is there if you want to explore it. Reply anytime and I'll set up a no-pressure chat." }
+        ] },
+
+      { id: "referral-engine", motion: "recruiting", accent: "a", name: "Referral Activation", signal: "Recent happy placement", persona: "Recently placed candidate",
+        goal: "Turn a freshly-placed, happy candidate into a steady source of referrals.",
+        touches: [
+          { d: 0, ch: "email", t: "Ask while it's warm", subj: "who's as good as you?",
+            body: "Hi {first}, now that you're settled into {newco}, I have one ask: who are the two best people you've worked with? I'm hiring for {role}-type seats and I'd much rather talk to people you rate than strangers. Intros are gold, and I look after the people you send." },
+          { d: 3, ch: "sms", t: "Light text",
+            body: "{first}, hope {newco}'s going great! Quick one — anyone you'd vouch for that I should know? — {you}" },
+          { d: 6, ch: "email", t: "Make it easy", subj: "even one name",
+            body: "Hi {first}, no pressure, even one name helps. Forward me a profile or just a name and I'll take it from there. Thank you!" }
+        ] }
+    ];
+  }
+  function pbTouchTeaser(t) {
+    var s = (t.subj ? t.subj + " — " : "") + t.body;
+    s = s.replace(/\s+/g, " ").trim();
+    return s.length > 100 ? s.slice(0, 100) + "…" : s;
+  }
+  function pbTouchBody(t) {
+    var m = PB_CH[t.ch];
+    var tokenNote = '<div class="pb-note"><span class="i">▸</span><span>Tokens like {first}, {company} and {role} auto-fill per prospect from the signal and enrichment.</span></div>';
+    if (t.ch === "email") {
+      var a = pbArt(m.label + (t.aBody ? " · Variant A (control)" : ""), t.aBody ? ["ok", "A"] : null, pbMail("From you · to {first}", t.subj, t.body));
+      var b = t.aBody ? pbArt(m.label + " · Variant B (test)", ["warn", "B"], pbMail("From you · to {first}", t.aSubj || t.subj, t.aBody)) : "";
+      return a + b + tokenNote;
+    }
+    if (t.ch === "vm" || t.ch === "livoice") {
+      return pbArt(m.label + " · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl(t.body) + "</div>") +
+        '<div class="pb-note"><span class="i">🎤</span><span>Rendered in your consented voice clone, formatted for natural speech. ' +
+        (t.ch === "vm" ? "Premium AMD drops it only after the voicemail beep." : "Delivered as a LinkedIn voice note.") + "</span></div>";
+    }
+    if (t.ch === "sms") {
+      return pbArt(m.label, null, pbIM(t.body)) +
+        '<div class="pb-note"><span class="i">📱</span><span>Sent only with consent on file, inside the lead\'s local-time window.</span></div>';
+    }
+    if (t.ch === "call") {
+      return pbArt(m.label + " · task for you", null, pbNl(t.body)) +
+        '<div class="pb-note"><span class="i">☎️</span><span>A human task in your queue, not an automated send.</span></div>';
+    }
+    return pbArt(m.label, null, pbIM(t.body)) + tokenNote;
+  }
+
+  /* The Sequence Library deep view: filter by motion, browse a sequence's full
+     timeline, click any touch to read the exact copy that goes out. */
+  function pbSeqLibrary(el) {
+    var SEQS = PB_SEQS();
+    var st = { motion: "all", open: null };
+    el.innerHTML =
+      '<div class="pb-wrap">' +
+        '<span class="pb-back" data-go="playbooks"><span>←</span> All playbooks</span>' +
+        '<div class="pb-d-head"><div class="pb-ico">📚</div>' +
+          '<div><div class="pb-tag">The outbound models</div><h2>Sequence Library</h2></div></div>' +
+        '<div class="pb-mission-band">' + esc("Sixteen battle-ready outbound workflows, eight for Recruiting and eight for Business Development. Each one is a real multi-channel sequence — email, LinkedIn, voice notes, voicemail drops and SMS — with the exact copy that goes out. Open a sequence to see every touch, then click a touch to read the message.") + "</div>" +
+        '<div id="pbSeqHost"></div>' +
+      "</div>";
+    var host = el.querySelector("#pbSeqHost");
+
+    function paintGrid() {
+      var cnt = { all: SEQS.length, recruiting: 0, bd: 0 };
+      SEQS.forEach(function (s) { cnt[s.motion]++; });
+      var filters = [["all", "All (" + cnt.all + ")"], ["recruiting", "👤 Recruiting (" + cnt.recruiting + ")"], ["bd", "🏢 BD (" + cnt.bd + ")"]];
+      var bar = '<div class="pb-tabs2" style="margin-bottom:18px">' + filters.map(function (f) {
+        return '<button class="' + (st.motion === f[0] ? "active" : "") + '" data-mot="' + f[0] + '">' + esc(f[1]) + "</button>";
+      }).join("") + "</div>";
+      var list = SEQS.filter(function (s) { return st.motion === "all" || s.motion === st.motion; });
+      var cards = list.map(function (s) {
+        var chs = []; s.touches.forEach(function (t) { if (chs.indexOf(t.ch) < 0) chs.push(t.ch); });
+        var chRow = chs.map(function (c) { return '<span class="n" title="' + esc(PB_CH[c].label) + '">' + PB_CH[c].icon + "</span>"; }).join('<span class="ar">·</span>');
+        var motChip = s.motion === "bd"
+          ? '<span class="pb-chip" style="color:var(--pb-c);border-color:rgba(77,208,255,.4)">🏢 BD</span>'
+          : '<span class="pb-chip" style="color:var(--pb-g);border-color:rgba(56,224,166,.4)">👤 Recruiting</span>';
+        return '<div class="pb-card" data-accent="' + s.accent + '" data-seq="' + s.id + '">' +
+          '<div style="display:flex;align-items:center;gap:7px;margin-bottom:11px;flex-wrap:wrap">' + motChip + '<span class="pb-chip">📡 ' + esc(s.signal) + "</span></div>" +
+          "<h3>" + esc(s.name) + "</h3>" +
+          '<p class="pb-mission">' + esc(s.goal) + "</p>" +
+          '<div class="pb-mini">' + chRow + "</div>" +
+          '<span class="pb-go">' + s.touches.length + " touches · read the copy <span class=\"arr\">→</span></span></div>";
+      }).join("");
+      host.innerHTML = bar + '<div class="pb-grid">' + cards + "</div>";
+    }
+
+    function paintSeq(s) {
+      var chs = []; s.touches.forEach(function (t) { if (chs.indexOf(t.ch) < 0) chs.push(t.ch); });
+      var motChip = s.motion === "bd"
+        ? '<span class="pb-chip" style="color:var(--pb-c);border-color:rgba(77,208,255,.4)">🏢 Business Development</span>'
+        : '<span class="pb-chip" style="color:var(--pb-g);border-color:rgba(56,224,166,.4)">👤 Recruiting</span>';
+      var rows = s.touches.map(function (t, i) {
+        var m = PB_CH[t.ch];
+        return '<div class="pb-stage clk" data-touch="' + i + '">' +
+          '<div><div class="pb-node">' + m.icon + '<span class="num">' + (i + 1) + "</span></div></div>" +
+          '<div class="pb-body"><div class="pb-when">DAY ' + t.d + " · " + esc(m.label) + (t.aBody ? '<span class="pb-auto bot">A/B</span>' : "") + "</div>" +
+          "<h4>" + esc(t.t) + "</h4><p>" + esc(pbTouchTeaser(t)) + "</p>" +
+          '<div class="pb-peek"><span class="dot"></span>Read the message</div></div></div>';
+      }).join("");
+      host.innerHTML =
+        '<span class="pb-back" data-seqback="1"><span>←</span> Back to library</span>' +
+        '<div style="display:flex;align-items:center;gap:7px;margin:14px 0 6px;flex-wrap:wrap">' + motChip +
+          '<span class="pb-chip">📡 Trigger · ' + esc(s.signal) + '</span><span class="pb-chip">🎯 ' + esc(s.persona) + "</span></div>" +
+        '<h2 style="margin:6px 0 2px;font-size:24px;font-weight:800;letter-spacing:-.02em">' + esc(s.name) + "</h2>" +
+        '<div class="pb-mission-band" style="margin:14px 0 24px">' + esc(s.goal) + "</div>" +
+        '<p class="pb-section-label">The sequence · ' + s.touches.length + " touches across " + chs.length + " channels</p>" +
+        '<div class="pb-flow">' + rows + "</div>";
+    }
+
+    function paint() {
+      if (st.open) {
+        var s = SEQS.filter(function (x) { return x.id === st.open; })[0];
+        if (s) return paintSeq(s);
+      }
+      paintGrid();
+    }
+    paint();
+
+    el.querySelector(".pb-wrap").addEventListener("click", function (e) {
+      if (e.target.closest("[data-seqback]")) { st.open = null; paint(); return; }
+      var go = e.target.closest("[data-go]"); if (go) { location.hash = go.getAttribute("data-go"); return; }
+      var mot = e.target.closest("[data-mot]"); if (mot) { st.motion = mot.getAttribute("data-mot"); paint(); return; }
+      var card = e.target.closest("[data-seq]"); if (card) { st.open = card.getAttribute("data-seq"); paint(); return; }
+      var tch = e.target.closest("[data-touch]");
+      if (tch && st.open) {
+        var sq = SEQS.filter(function (x) { return x.id === st.open; })[0];
+        var t = sq.touches[+tch.getAttribute("data-touch")];
+        var m = PB_CH[t.ch];
+        pbOpenModal(m.icon, t.t, "Day " + t.d + " · " + m.label, pbTouchBody(t));
+      }
+    });
+  }
+
+  // Step through a flow's stages, lighting each node and revealing its output.
+  function pbRun(wrap) {
+    var btn = wrap.querySelector(".pb-run");
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ic">●</span> Running…'; }
+    var stages = wrap.querySelectorAll(".pb-stage");
+    var nodes = wrap.querySelectorAll(".pb-node");
+    Array.prototype.forEach.call(stages, function (s) { s.classList.remove("revealed"); });
+    Array.prototype.forEach.call(nodes, function (n) { n.classList.remove("active", "done"); });
+    var i = 0;
+    (function step() {
+      if (!document.body.contains(wrap)) return; // navigated away
+      if (i > 0) { nodes[i - 1].classList.remove("active"); nodes[i - 1].classList.add("done"); }
+      if (i >= nodes.length) { if (btn) { btn.disabled = false; btn.innerHTML = '<span class="ic">↻</span> Run again'; } return; }
+      nodes[i].classList.add("active");
+      if (stages[i]) stages[i].classList.add("revealed");
+      i++;
+      setTimeout(step, 920);
+    })();
   }
   // The five approaches, as a data table the gallery + deep views read from.
   function pbData() {
@@ -876,10 +1304,26 @@
               '<div class="vs-out">→ Replied. Right moment, real reason.</div></div>' +
           "</div>",
         stages: [
-          { icon: "📡", title: "A real signal fires", body: "Funding, a new role posted, an exec hire, a team expanding, a layoff next door. RecruitersOS watches 40+ kinds of moments that mean someone is ready to hear from you." },
-          { icon: "🧩", title: "Context is attached", body: "Who, why now, and what changed. The signal carries its own reason, so the message can be specific instead of generic." },
-          { icon: "✍️", title: "Relevance is crafted", body: "The opener speaks to the actual reason, drawn from the content library and tuned per prospect. Never fabricated social proof, only verifiable signals and real substance." },
-          { icon: "💬", title: "You arrive welcome", body: "Because the timing and reason are real, you get replies instead of blocks. Signal, then context, then relevance, then response." },
+          { icon: "📡", title: "A real signal fires", body: "Funding, a new role posted, an exec hire, a team expanding, a layoff next door. RecruitersOS watches 40+ kinds of moments that mean someone is ready to hear from you.",
+            out: "<b>SIGNAL</b> · job_repost · Northwind Robotics · 'Senior Backend (Go)' reposted three times",
+            peek: { icon: "📡", title: "The signal that fired", sub: "job_repost · high confidence", cta: "See the raw signal",
+              body: pbKV([["Signal", "job_repost", true], ["Company", "Northwind Robotics"], ["What", "'Senior Backend Engineer (Go)' reposted ×3"], ["Since", "Reposted 3 times in 6 weeks"], ["Confidence", "High"], ["Source", "Careers page + aggregator delta"]]) +
+                '<div class="pb-note"><span class="i">▸</span><span>One of 40+ signal types. A repeated repost almost always means a hard-to-fill role under time pressure, your opening.</span></div>' } },
+          { icon: "🧩", title: "Context is attached", body: "Who, why now, and what changed. The signal carries its own reason, so the message can be specific instead of generic.",
+            out: "<b>CONTEXT</b> · Dir. of Engineering · Series B four months ago · two more infra roles open",
+            peek: { icon: "🧩", title: "The context behind it", sub: "resolved automatically", cta: "See the context",
+              body: pbKV([["Decision-maker", "Director of Engineering", true], ["Why now", "3rd repost = hard fill, time pressure"], ["Team signal", "2 more infra roles open · headcount +18% / 90d"], ["Funding", "Series B, $40M (4 months ago)"], ["Angle", "Lead with candidate substance, not a pitch"]]) } },
+          { icon: "✍️", title: "Relevance is crafted", body: "The opener speaks to the actual reason, drawn from the content library and tuned per prospect. Never fabricated social proof, only verifiable signals and real substance.",
+            out: "<b>DRAFT</b> · opener references the repost and two real candidate wins",
+            peek: { icon: "✍️", title: "The crafted opener", sub: "signal → relevance · email", cta: "Read the actual opener",
+              body: pbMail("From you · to {first}", "the Go backend repost",
+                "Hi {first}, saw the Senior Backend (Go) role is back up, third time since April. Usually means the bar's high and the pipeline's thin, not that the role isn't real. I've got two Go and infra engineers who've scaled payments platforms past ten thousand requests a second, and they aren't on the open market. Worth a ten-minute look at their work?") +
+                '<div class="pb-note"><span class="i">▸</span><span>Built from the real signal (a 3× repost) and real candidate substance. No invented referrals, no "I heard you are hiring".</span></div>' } },
+          { icon: "💬", title: "You arrive welcome", body: "Because the timing and reason are real, you get replies instead of blocks. Signal, then context, then relevance, then response.",
+            out: "<b>REPLY</b> · 'send the two profiles' → auto-classified HOT → routed to you",
+            peek: { icon: "💬", title: "The reply it earns", sub: "auto-classified · routed to your inbox", cta: "See the reply",
+              body: pbArt("Reply · inbound", ["hot", "HOT"], pbIM("Ha, you're right, it's been brutal. Yes, send the two profiles and let's grab fifteen minutes Thursday.")) +
+                '<div class="pb-note"><span class="i">▸</span><span>The Response pipeline classifies it as a meeting intent and routes it straight to you, hottest first.</span></div>' } },
         ],
         wire: pbWireChrome("recruitersos · hire signals", sigRow("#38e0a6", "Funding", "3 roles") + sigRow("#4dd0ff", "Exec hire", "VP Eng") + sigRow("#ffc24d", "Team +40%", "Reposted")),
         outcome: { em: "🎯", title: "Right moment, real reason, far better replies.", text: "Every other approach below is built on this one idea, surfaced as signals, sequenced as campaigns, delivered in your voice." },
@@ -894,7 +1338,16 @@
         stages: [
           { icon: "📋", title: "Drop in a JD", auto: "you", title2: "", body: "Paste the job description or pick an open role. That text becomes the target the search and ranking are measured against." },
           { icon: "🔍", title: "Search runs", auto: "bot", body: "A people-search finds matching profiles, then a first-pass enrichment pass fills in the gaps automatically, so each result is a real, reachable person." },
-          { icon: "📊", title: "Ranked and explained", auto: "bot", body: "Every candidate is scored against the JD with a match percentage and the reasons behind it, so you can trust the order, not just the list." },
+          { icon: "📊", title: "Ranked and explained", auto: "bot", body: "Every candidate is scored against the JD with a match percentage and the reasons behind it, so you can trust the order, not just the list.",
+            out: "<b>#1 · 94%</b> Maria Alvarez · Staff Backend Engineer · hits every must-have",
+            peek: { icon: "📊", title: "Maria Alvarez · 94% match", sub: "ranked #1 of 168 · Staff Backend Engineer", cta: "Open a scored candidate",
+              body: pbArt("Why this rank", ["ok", "STRONG"],
+                '<div class="pb-sl"><span class="lab">7 yrs Go in production</span><span class="verdict pass">MUST ✓</span></div>' +
+                '<div class="pb-sl"><span class="lab">Owned payments ledger · 12k rps · five nines</span><span class="verdict pass">MUST ✓</span></div>' +
+                '<div class="pb-sl"><span class="lab">Kafka + Kubernetes</span><span class="verdict pass">NICE ✓</span></div>' +
+                '<div class="pb-sl"><span class="lab">Remote (US)</span><span class="verdict pass">✓</span></div>') +
+                pbKV([["Verified email", "m••••@•••.com", true], ["Source signal", "Open-to-work · 2 infra roles at her co"]]) +
+                '<div class="pb-note"><span class="i">▸</span><span>Every candidate is a real, reachable person, scored against your JD. Nothing fabricated.</span></div>' } },
           { icon: "🗂️", title: "Staged under a name", auto: "you", body: "Save the shortlist as a named batch you can revisit, compare, and refine, without touching your live pipeline yet." },
           { icon: "⬆️", title: "Promote the best", auto: "you", body: "Move the strongest candidates into Candidates with one click, ready for outreach, vetting, or a campaign." },
         ],
@@ -914,8 +1367,28 @@
           { icon: "🎙️", title: "Build a vetting desk", auto: "you", body: "Attach the JD and your top three or four qualifiers, with what a pass looks like for each. This is the brief the AI recruiter screens against." },
           { icon: "🔢", title: "Bind a number and your voice", auto: "you", body: "Pick a real number from your Telnyx account and your consented cloned voice. The agent speaks the whole call in your voice." },
           { icon: "📨", title: "Candidates opt in", auto: "you", body: "Candidates consent, then call your line on their own time. No chasing, no scheduling tag, day or night." },
-          { icon: "🤖", title: "The AI recruiter screens", auto: "bot", body: "It greets them by name, references their LinkedIn experience, asks your qualifiers, listens, and tells them the next step, sounding like you the whole way." },
-          { icon: "📈", title: "Recorded, transcribed, scored", auto: "bot", body: "Each call comes back recorded, transcribed, summarized, and scored 1 to 100 against your qualifiers, so you only spend time on the ones worth it." },
+          { icon: "🤖", title: "The AI recruiter screens", auto: "bot", body: "It greets them by name, references their LinkedIn experience, asks your qualifiers, listens, and tells them the next step, sounding like you the whole way.",
+            out: "<b>ON THE CALL</b> · greets by name · asks your 4 qualifiers · 6m 20s",
+            peek: { icon: "🤖", title: "On the call", sub: "AI recruiter · your cloned voice", cta: "Read the transcript",
+              body: pbArt("Transcript · excerpt", null, pbTrans([
+                ["ai", "Alex", "Hi Maria, it's Alex from Northwind, thanks for calling in. You owned the ledger service, what kind of throughput were you running?"],
+                ["cand", "Maria", "Peaked around twelve thousand requests a second, five nines of availability."],
+                ["ai", "Alex", "And Go the whole way, or polyglot?"],
+                ["cand", "Maria", "Go for the core, a little Rust on the hot path."],
+                ["ai", "Alex", "Perfect. Last one, what's your timeline if an offer came together?"],
+                ["cand", "Maria", "I could start in about four weeks."]
+              ])) } },
+          { icon: "📈", title: "Recorded, transcribed, scored", auto: "bot", body: "Each call comes back recorded, transcribed, summarized, and scored 1 to 100 against your qualifiers, so you only spend time on the ones worth it.",
+            out: "<b>92 / 100</b> · Strong, advance to onsite · flag: prefers remote-first",
+            peek: { icon: "📈", title: "Scored 92 / 100", sub: "auto-summarized · ready to book", cta: "See the score breakdown",
+              body: '<div class="pb-art"><div class="pb-art-tag">Score<span class="pb-pill2 ok">92 / 100</span></div><div class="pb-art-body">' +
+                '<div class="pb-bigscore"><span class="num">92</span><span class="of">/ 100 · Strong, advance to onsite</span></div>' +
+                '<div class="pb-sl"><span class="lab">Q1 · 5+ yrs Go in production</span><span class="verdict pass">PASS</span></div>' +
+                '<div class="pb-sl"><span class="lab">Q2 · Owned a service at scale</span><span class="verdict pass">PASS</span></div>' +
+                '<div class="pb-sl"><span class="lab">Q3 · Comp in band ($180–220k)</span><span class="verdict pass">$195k</span></div>' +
+                '<div class="pb-sl"><span class="lab">Q4 · Notice ≤ 6 weeks</span><span class="verdict pass">4 weeks</span></div>' +
+                "</div></div>" +
+                '<div style="margin-top:12px"><span class="pb-flag">⚑ Flag · prefers remote-first</span></div>' } },
         ],
         wire: pbWireChrome("recruitersos · ai vetting", '<div class="pb-wire-cols">' +
           '<div class="pb-skel"><div class="cap">Vetting desk</div><div class="bar md"></div>' +
@@ -938,7 +1411,11 @@
         mini: ["✍️", "🎤", "🛡️", "📥"],
         mission: "Leave a warm, personal voicemail in your own cloned voice on landlines and VoIP lines, at scale. Premium answering-machine detection drops it only when the voicemail picks up, and consent plus per-lead timezone windows keep every drop respectful and compliant.",
         stages: [
-          { icon: "✍️", title: "Write the script", auto: "you", body: "Drafted for natural speech: short sentences, a beat where it matters, your name and theirs. The same script, personalized per lead." },
+          { icon: "✍️", title: "Write the script", auto: "you", body: "Drafted for natural speech: short sentences, a beat where it matters, your name and theirs. The same script, personalized per lead.",
+            out: "<b>SCRIPT</b> · 0:18 · formatted for natural speech in your voice",
+            peek: { icon: "✍️", title: "The voicemail script", sub: "spoken in your cloned voice · 0:18", cta: "Read the spoken script",
+              body: pbArt("Script · as spoken", null, '<div style="font-style:italic">' + pbNl("Hi Maria, it's Alex. I saw your work on payments infrastructure... and I think you'd be a great fit for a role I'm filling. No pressure at all. If you're curious, give me a call back. Thanks, and have a good one.") + "</div>") +
+                '<div class="pb-note"><span class="i">🎤</span><span>Formatted for natural speech: short sentences, a beat on the ellipsis, your name and theirs. Premium AMD drops it only after the beep.</span></div>' } },
           { icon: "🎤", title: "Your cloned voice renders it", auto: "bot", body: "One consented voice clone speaks every drop, so a thousand voicemails still sound like you picked up the phone for each one." },
           { icon: "🛡️", title: "Guardrails check first", auto: "bot", body: "A consent gate, a per-lead timezone window, and a mobile-strip so it only lands where it should, when it should. Never an evasion, always above board." },
           { icon: "📞", title: "Premium AMD detects voicemail", auto: "bot", body: "The call connects and listens. It drops the message only once the voicemail greeting finishes, never while a person is on the line." },
@@ -962,12 +1439,23 @@
         mini: ["📡", "📊", "✍️", "🚀"],
         mission: "A campaign is a standing instruction, not a one-off blast. Every morning it pulls fresh signals, scores and dedupes them, finds the right contacts, drafts a multi-channel touch in your voice, waits for your approval, then sends, and processes replies all day. You run a desk; the loop does the legwork.",
         stages: [
-          { icon: "📡", when: "07:00", auto: "bot", title: "Pull signals", body: "Every active campaign runs its enabled signal sources for the last 24 hours, the fresh reasons to reach out today." },
-          { icon: "📊", when: "07:15", auto: "bot", title: "Score, rank, dedupe", body: "A composite score per ICP, disqualifiers suppressed, deduped against your ATS. Only the top N for the day advance." },
-          { icon: "🔎", when: "07:30", auto: "bot", title: "Enrich", body: "An enrichment waterfall resolves the right contact and channel for each prospect that made the cut." },
-          { icon: "✍️", when: "07:45", auto: "bot", title: "Draft, multi-channel", body: "Claude drafts the email, the LinkedIn message, and the voice note per prospect, with your A/B variants applied, every line tied to the real signal." },
-          { icon: "✅", when: "08:30", auto: "you", title: "You approve the batch", body: "Fifteen minutes: edit, kill, or approve the queue, and record the HOT-tier voice notes. Or flip on Autopilot and skip it entirely." },
-          { icon: "🚀", when: "09:00", auto: "bot", title: "Push to channels", body: "Emails, LinkedIn, and SMS go out on their channels, every send stamped with its campaign, variant, and touch, then replies route through Response all day." },
+          { icon: "📡", when: "07:00", auto: "bot", title: "Pull signals", body: "Every active campaign runs its enabled signal sources for the last 24 hours, the fresh reasons to reach out today.",
+            out: "<b>12 signals</b> pulled · funding, reposts, exec hires" },
+          { icon: "📊", when: "07:15", auto: "bot", title: "Score, rank, dedupe", body: "A composite score per ICP, disqualifiers suppressed, deduped against your ATS. Only the top N for the day advance.",
+            out: "<b>14 advanced</b> · top N by ICP score · 1 ATS duplicate suppressed" },
+          { icon: "🔎", when: "07:30", auto: "bot", title: "Enrich", body: "An enrichment waterfall resolves the right contact and channel for each prospect that made the cut.",
+            out: "<b>contacts resolved</b> · Director of Eng · verified email + LinkedIn" },
+          { icon: "✍️", when: "07:45", auto: "bot", title: "Draft, multi-channel", body: "Claude drafts the email, the LinkedIn message, and the voice note per prospect, with your A/B variants applied, every line tied to the real signal.",
+            out: "<b>3 drafts</b> · email + LinkedIn + voice note · variant A applied",
+            peek: { icon: "✍️", title: "One prospect, three channels", sub: "variant A · touch 1 · drafted 07:45", cta: "See all three drafts",
+              body: pbArt("Email", ["ok", "A"], pbMail("From you · to {first}", "the Go backend repost", "Hi {first}, saw the backend role is back up after the Series B. I've got two Go engineers who've scaled payments past ten thousand requests a second and aren't on the market. Worth a look this week?")) +
+                pbArt("LinkedIn message", null, pbIM("{first} — quick one. The Go role's back open; I've got two people who fit your stack and aren't applying anywhere. Want me to send them?")) +
+                pbArt("Voice note · your voice", null, '<div style="font-style:italic">' + pbNl("Hey {first}, it's Alex... saw the backend role reopened. I've got a couple of people in mind. No pressure, reply if you want the profiles. Thanks.") + "</div>") +
+                '<div class="pb-note"><span class="i">▸</span><span>Same prospect, same signal, three channels, your voice, A/B variant applied, then it waits for your approval.</span></div>' } },
+          { icon: "✅", when: "08:30", auto: "you", title: "You approve the batch", body: "Fifteen minutes: edit, kill, or approve the queue, and record the HOT-tier voice notes. Or flip on Autopilot and skip it entirely.",
+            out: "<b>approved</b> in 12 min · or auto-approved on Autopilot" },
+          { icon: "🚀", when: "09:00", auto: "bot", title: "Push to channels", body: "Emails, LinkedIn, and SMS go out on their channels, every send stamped with its campaign, variant, and touch, then replies route through Response all day.",
+            out: "<b>sent</b> · stamped campaign=go-backend-q2 · variant=A · touch=1" },
         ],
         wire: pbWireChrome("recruitersos · campaign · multi-channel sequence", '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center">' +
           [["Day 0", "✉️ Email"], ["Day 2", "in LinkedIn DM"], ["Day 3", "🎙️ Voice note"], ["Day 5", "📞 Voicemail drop"], ["Day 7", "💬 SMS"]].map(function (s, i) {
@@ -975,7 +1463,7 @@
               '<div class="pb-skel" style="text-align:center;min-width:108px"><div class="pb-when" style="margin-bottom:6px">' + esc(s[0]) + '</div><div style="font-size:13px;font-weight:600">' + esc(s[1]) + "</div></div>";
           }).join("") + "</div>"),
         outcome: { em: "🔁", title: "Set the desk once. It runs every morning.", text: "Signal-led, multi-channel, in your voice, and either approved in minutes or fully hands-off on Autopilot." },
-        cta: [["🎯 Build a campaign", "campaigns"], ["📚 Sequence Library", "content"], ["🤖 Autopilot", "autopilot"]],
+        cta: [["📚 Browse the Sequence Library", "playbooks/sequences"], ["🎯 Build a campaign", "campaigns"], ["🤖 Autopilot", "autopilot"]],
       },
     };
   }
@@ -983,6 +1471,7 @@
   function renderPlaybooks(el) {
     var DATA = pbData();
     var detail = currentDetail();
+    if (detail === "sequences") return pbSeqLibrary(el);
     if (detail && DATA[detail]) return pbDetail(el, DATA, detail);
 
     // ---- Gallery ----
@@ -999,13 +1488,22 @@
         '<div class="pb-mini">' + mini + "</div>" +
         '<span class="pb-go">See the workflow <span class="arr">→</span></span></div>';
     }).join("");
+    // Featured sixth card: the Sequence Library (16 real outbound workflows).
+    var seqCount = PB_SEQS().length;
+    cards +=
+      '<div class="pb-card" data-accent="g" data-pb="sequences">' +
+        '<div class="pb-ico">📚</div>' +
+        "<h3>Sequence Library</h3>" +
+        '<p class="pb-mission">' + esc(seqCount + " ready outbound workflows for Recruiting and BD. Every touch written out, across email, LinkedIn, voice notes, voicemail drops and SMS, real copy.") + "</p>" +
+        '<div class="pb-mini"><span class="n">✉️</span><span class="ar">→</span><span class="n">💬</span><span class="ar">→</span><span class="n">🎙️</span><span class="ar">→</span><span class="n">📞</span></div>' +
+        '<span class="pb-go">Browse the library <span class="arr">→</span></span></div>';
 
     el.innerHTML =
       '<div class="pb-wrap">' +
         '<div class="pb-hero">' +
           '<span class="pb-eyebrow"><span class="dot"></span>The vision, seen</span>' +
           "<h2>How RecruitersOS works.</h2>" +
-          "<p>Five approaches, one idea: stop interrupting strangers, start arriving at the right moment with a real reason. Pick any one to see its workflow, step by step, the way it actually runs.</p>" +
+          "<p>One idea, six ways to see it: stop interrupting strangers, start arriving at the right moment with a real reason. Open any workflow to watch it run step by step, then click a step to see the exact content it produces.</p>" +
         "</div>" +
         '<div class="pb-grid">' + cards + "</div>" +
       "</div>";
@@ -1019,6 +1517,7 @@
   function pbDetail(el, DATA, key) {
     var p = DATA[key];
     var flow = p.stages.map(pbStage).join("");
+    var hasPeeks = p.stages.some(function (s) { return !!s.peek; });
     var cta = (p.cta || []).map(function (b) {
       var route = b[1];
       // Only offer routes this user/motion can actually reach; otherwise drop it.
@@ -1034,6 +1533,8 @@
         '<div class="pb-mission-band">' + esc(p.mission) + "</div>" +
         (p.extra || "") +
         '<p class="pb-section-label">The workflow</p>' +
+        '<div class="pb-runbar"><button class="pb-run"><span class="ic">▶</span> Watch it run</button>' +
+          (hasPeeks ? '<span class="pb-run-hint">tip: click any step with a ✦ to see the real content it produces</span>' : "") + "</div>" +
         '<div class="pb-flow">' + flow + "</div>" +
         '<p class="pb-section-label">What it looks like</p>' +
         p.wire +
@@ -1042,9 +1543,15 @@
         (cta ? '<div class="pb-d-cta">' + cta + "</div>" : "") +
       "</div>";
 
-    el.querySelector(".pb-wrap").addEventListener("click", function (e) {
-      var t = e.target.closest("[data-go]");
-      if (t) { location.hash = t.getAttribute("data-go"); }
+    var wrap = el.querySelector(".pb-wrap");
+    wrap.addEventListener("click", function (e) {
+      if (e.target.closest(".pb-run")) { pbRun(wrap); return; }
+      var go = e.target.closest("[data-go]"); if (go) { location.hash = go.getAttribute("data-go"); return; }
+      var stg = e.target.closest("[data-stage]");
+      if (stg) {
+        var pk = p.stages[+stg.getAttribute("data-stage")].peek;
+        if (pk) pbOpenModal(pk.icon, pk.title, pk.sub, pk.body);
+      }
     });
   }
 
@@ -8810,8 +9317,23 @@
       var vWin = d.variantReport && d.variantReport.winner;
       var enrollments = d.enrollments || [];
       var eligible = d.eligible || 0;
+      var auto = d.automation || {};
       var filter = ($("#nuFilter") && $("#nuFilter").value) || "";
       var rows = enrollments.filter(function (e) { return !filter || e.status === filter; });
+
+      // Hands-off status: is the in-process clock running the drip (no n8n needed)?
+      var running = auto.enabled && auto.armed;
+      var banner =
+        '<div class="card" style="margin-bottom:12px;display:flex;align-items:center;gap:10px;border-left:3px solid ' +
+          (running ? "var(--accent-green)" : "#ffc24d") + '">' +
+          '<span style="font-size:16px">' + (running ? "🟢" : "🟡") + "</span>" +
+          '<div style="font-size:12.5px">' +
+            (running
+              ? "<b>Running hands-off, in-process.</b> No n8n. Due touches, signal triggers and auto-enrollment all run on the internal clock; replies pause instantly."
+              : (auto.enabled
+                  ? "<b>Clock enabled but not armed in this server yet.</b> It arms on the next deploy or restart; touches flow then."
+                  : "<b>Automation is OFF.</b> Set <code>AUTOMATION_ENABLED=on</code> and turn on a campaign's Autopilot so the drip sends and auto-enrolls with no n8n. You can still enroll below; touches send once it is on.")) +
+          "</div></div>";
 
       // The "push it live" control: enroll every eligible BD prospect into the drip.
       var activate =
@@ -8868,7 +9390,7 @@
         "</tbody></table>";
       if (!rows.length) tbl = '<div class="empty">No enrollments' + (filter ? " in this state" : "") + " yet.</div>";
 
-      body.innerHTML = activate + strategyCards + variantCards +
+      body.innerHTML = banner + activate + strategyCards + variantCards +
         '<div class="card" style="margin-top:6px"><div class="lr-sub" style="margin-bottom:10px">' + countChips + "</div>" + tbl + "</div>";
 
       var ab = body.querySelector(".nu-activate");

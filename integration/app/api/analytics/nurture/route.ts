@@ -1,65 +1,33 @@
 /**
  * GET  /api/analytics/nurture -> the 24-month nurture admin view for the signed-in
  *   workspace: the A/B STRATEGY funnel (authority vs inner_circle), the mpc/consultative
- *   VARIANT funnel, status counts, the count of prospects ELIGIBLE to enroll, and every
- *   enrollment with its stage, next-due touch, staged (pending) LinkedIn touches and
- *   queued signal triggers.
+ *   VARIANT funnel, status counts, the count of prospects ELIGIBLE to enroll, whether the
+ *   in-process automation clock is running (so the drip is hands-off, no n8n), and every
+ *   enrollment with its stage, next-due touch, staged touches and queued signal triggers.
  *
  * POST /api/analytics/nurture
  *   { action: "pause"|"resume"|"complete"|"dormant"|"requeue", prospectId } -> change one
  *   { action: "enroll_eligible" } -> LAUNCH the drip: enroll every eligible BD prospect
- *     (in-market, not opted out, not already enrolled) into the 24-month nurture, each
- *     assigned its A/B strategy + framing. This is the portal's "push it live" control.
+ *     into the 24-month nurture (the portal's "push it live" control; the auto-enroll tick
+ *     does the same on a timer when Autopilot is on, so no external conductor is needed).
  *
- * Session + capability authed (analytics:view to read, campaigns:create to act), so the
- * admin SPA can call it with the cookie. The bearer-authed /api/bd/nurture stays the
- * server-to-server (n8n / Flow D) surface.
+ * Session + capability authed (analytics:view to read, campaigns:create to act). The
+ * bearer-authed /api/bd/nurture stays the server-to-server (n8n / Flow D) surface.
  */
 
 import { requireCapability, body, ok, fail } from "../../../../lib/api";
-import { getCore } from "../../../../lib/core/repository";
-import { inferPersona } from "../../../../lib/bd/personaMessaging";
 import {
   ensureNurtureReady,
   listEnrollments,
   setStatus,
   getEnrollment,
-  enroll,
-  isEnrolled,
   planFor,
   type NurtureStatus,
-  type NurtureLead,
 } from "../../../../lib/bd/nurture";
-import { ensureStrategyReady, report as strategyReport, recordStrategyOutcome } from "../../../../lib/bd/nurtureStrategy";
-import { ensureExperimentReady, report as variantReport, assignVariant, recordOutcome } from "../../../../lib/bd/experiment";
-import type { Prospect } from "../../../../lib/core/types";
-
-/** A prospect can be enrolled into the BD drip if it is an in-market BD lead, not
- *  already enrolled, and not suppressed. Keeps recruiting prospects out of BD nurture. */
-function isEligible(p: Prospect): boolean {
-  if (isEnrolled(p.id)) return false;
-  if (p.category !== "in_market") return false;
-  if (p.status === "do_not_contact" || p.status === "closed_lost" || p.status === "won") return false;
-  return true;
-}
-
-function leadFor(p: Prospect): NurtureLead {
-  return {
-    firstName: p.firstName,
-    fullName: p.fullName,
-    title: p.title,
-    company: p.company,
-    persona: inferPersona(p.title) as string | undefined,
-    profileSummary: p.headline,
-    email: p.email,
-    landlinePhone: p.landlinePhone,
-    phone: p.phone,
-    location: p.location,
-    linkedinUrl: p.linkedinUrl,
-    providerProfileId: (p as any).providerProfileId,
-    variant: assignVariant(p.id),
-  };
-}
+import { countEligible, enrollEligible } from "../../../../lib/bd/nurtureEnroll";
+import { ensureStrategyReady, report as strategyReport } from "../../../../lib/bd/nurtureStrategy";
+import { ensureExperimentReady, report as variantReport } from "../../../../lib/bd/experiment";
+import { automationEnabled, automationArmed } from "../../../../lib/automation/scheduler";
 
 export async function GET(req: Request) {
   const g = requireCapability(req, "analytics:view");
@@ -74,12 +42,14 @@ export async function GET(req: Request) {
     acc[e.status] = (acc[e.status] ?? 0) + 1;
     return acc;
   }, {});
-  const eligible = (await getCore().listProspects(ws)).filter(isEligible).length;
 
   return ok({
     counts,
     total: enrollments.length,
-    eligible,
+    eligible: await countEligible(ws),
+    // Is the drip running hands-off in this process (no n8n)? enabled = master switch on;
+    // armed = the clock actually started in this server.
+    automation: { enabled: automationEnabled(), armed: automationArmed() },
     strategyReport: strategyReport(),
     variantReport: variantReport(),
     enrollments: enrollments.map((e) => ({
@@ -107,23 +77,14 @@ export async function POST(req: Request) {
   const g = requireCapability(req, "campaigns:create");
   if ("response" in g) return g.response;
   await ensureNurtureReady();
-  await ensureStrategyReady();
-  await ensureExperimentReady();
   const ws = g.ctx.workspace.id;
 
   const b = await body<{ action?: string; prospectId?: string }>(req);
 
   // LAUNCH: enroll every eligible BD prospect into the 24-month drip.
   if (b?.action === "enroll_eligible") {
-    const eligible = (await getCore().listProspects(ws)).filter(isEligible);
-    let enrolled = 0;
-    for (const p of eligible) {
-      enroll(ws, p.id, leadFor(p), { status: "active" });
-      recordOutcome(p.id, "enrolled");
-      recordStrategyOutcome(p.id, "enrolled");
-      enrolled++;
-    }
-    return ok({ action: "enroll_eligible", enrolled });
+    const r = await enrollEligible(ws);
+    return ok({ action: "enroll_eligible", ...r });
   }
 
   // Per-enrollment status change.

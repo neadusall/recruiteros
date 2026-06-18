@@ -90,10 +90,29 @@ async function tickSending(): Promise<void> {
   try { await runSeedMaintenance(); } catch { /* seeds are global, best-effort */ }
 }
 
-/** Advance the 6-month BD nurture drip. */
+/** Advance the 24-month BD nurture drip (due touches + triggers + dormant floor). */
 async function tickNurture(): Promise<void> {
   const { runNurtureTick } = await import("../bd/nurtureCron");
   await runNurtureTick(new Date());
+}
+
+/**
+ * Auto-enroll into the nurture drip — the in-process replacement for n8n polling
+ * /api/prospects/queue. For every workspace that has opted into hands-off (at least one
+ * active Autopilot campaign), enroll its eligible in-market BD prospects into the
+ * 24-month drip, capped per cycle so it paces in. Workspaces without Autopilot keep the
+ * manual portal "Activate" control. The nurture tick then sends the touches.
+ */
+async function tickNurtureEnroll(): Promise<void> {
+  const { enrollEligible } = await import("../bd/nurtureEnroll");
+  const all = await getCore().listAllCampaigns();
+  const optedIn = new Set(
+    all.filter((c) => c.status === "active" && c.autoRun).map((c) => c.workspaceId),
+  );
+  const cap = positiveIntEnv("RECRUITEROS_NURTURE_ENROLL_CAP", 50);
+  for (const ws of optedIn) {
+    try { await enrollEligible(ws, { limit: cap }); } catch { /* one workspace's enroll */ }
+  }
 }
 
 /**
@@ -124,7 +143,8 @@ const TICKS: TickSpec[] = [
   { key: "cadence", label: "Pull + draft + send (Autopilot)", env: "RECRUITEROS_CADENCE_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 90_000, fn: tickCadence },
   { key: "linkedin", label: "LinkedIn cadence", env: "RECRUITEROS_LINKEDIN_TICK_MS", defaultMs: 3 * 60_000, firstDelayMs: 30_000, fn: tickLinkedin },
   { key: "voice", label: "Voicemail drops", env: "RECRUITEROS_VOICE_TICK_MS", defaultMs: 15 * 60_000, firstDelayMs: 45_000, fn: tickVoice },
-  { key: "nurture", label: "6-month nurture", env: "RECRUITEROS_NURTURE_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 60_000, fn: tickNurture },
+  { key: "nurture_enroll", label: "Auto-enroll into nurture", env: "RECRUITEROS_NURTURE_ENROLL_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 50_000, fn: tickNurtureEnroll },
+  { key: "nurture", label: "24-month nurture drip", env: "RECRUITEROS_NURTURE_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 60_000, fn: tickNurture },
   { key: "sending", label: "Email warm-up + reputation", env: "RECRUITEROS_SENDING_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 75_000, fn: tickSending },
 ];
 
