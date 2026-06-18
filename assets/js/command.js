@@ -4449,7 +4449,7 @@
             '<p><b>Add to queue</b>: Line up several briefs and run them back to back instead of one at a time.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>On a saved list</h5>' +
-            '<p><b>CSV (URLs)</b>: Download the list as a spreadsheet of LinkedIn profile URLs.</p>' +
+            '<p><b>Excel (URLs)</b>: Download the list as an Excel (.xlsx) spreadsheet of LinkedIn profile URLs.</p>' +
             '<p><b>Deep-vet</b>: Reads the top candidates\' full work history against the role and gives each a verified score and a short verdict.</p>' +
             '<p><b>Enrich top N</b>: You choose how many of the top-ranked candidates to look up business email and phone for. Enrich as few or as many as you want, then push them into any campaign you like. Manual for now; you can wire it to run automatically once you have a campaign set up.</p>' +
             '<p><b>Send to Candidates</b>: Pushes the list into your Candidates pipeline under the same name, ready to drop into a campaign.</p>' +
@@ -4617,7 +4617,7 @@
             (vetted ? (' · ' + vetted + ' deep-vetted') : '') +
             (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates') : '') + '</span></div>' +
             '<div class="jd-run-actions">' +
-              '<button class="btn btn-ghost btn-sm" data-csv="' + esc(r.id) + '">⬇ CSV (URLs)</button>' +
+              '<button class="btn btn-ghost btn-sm" data-csv="' + esc(r.id) + '">⬇ Excel (URLs)</button>' +
               '<button class="btn btn-ghost btn-sm" data-vet="' + esc(r.id) + '">🔬 Deep-vet</button>' +
               '<button class="btn btn-primary btn-sm" data-promote="' + esc(r.id) + '">Send to Candidates →</button>' +
               '<span class="jd-enrich-grp">⚡ Enrich top <input type="number" class="jd-enrichn" min="1" max="' + Math.max(1, n) + '" value="' + Math.min(25, Math.max(1, n)) + '" title="Choose how many of the top-ranked candidates to enrich (business email + phone). You decide how many; costs apply per lookup."> ' +
@@ -4628,14 +4628,11 @@
       }).catch(function () { var host = $("#jdRuns"); if (host) host.innerHTML = '<p class="muted">Could not load saved lists.</p>'; });
     }
 
-    /* ---- CSV export (LinkedIn URLs only — enrichment happens in your own tool) ---- */
-    function csvCell(v) { v = v == null ? "" : (Array.isArray(v) ? v.join("; ") : String(v)); return '"' + v.replace(/"/g, '""') + '"'; }
+    /* ---- Export (LinkedIn URLs only — enrichment happens in your own tool) ---- */
     function csvSlug(s) { return ((s || "list").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase()) || "list"; }
-    function csvDownload(filename, csv) {
-      // Prepend a UTF-8 BOM so Excel/Numbers open it as a real spreadsheet, and force a
-      // true file save: anchors that aren't in the DOM (and blob: links in embedded
-      // browsers like the VS Code preview) get ignored and open inline instead of downloading.
-      var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    // Force a true file save. Anchors that aren't in the DOM (and blob: links in some
+    // embedded browsers) get ignored and open inline instead of downloading.
+    function downloadBlob(blob, filename) {
       if (window.navigator && window.navigator.msSaveOrOpenBlob) { window.navigator.msSaveOrOpenBlob(blob, filename); return; }
       var url = URL.createObjectURL(blob);
       var a = document.createElement("a");
@@ -4643,6 +4640,66 @@
       document.body.appendChild(a);
       a.click();
       setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    }
+    function csvDownload(filename, csv) {
+      // UTF-8 BOM so Excel/Numbers open it as a real spreadsheet.
+      downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" }), filename);
+    }
+
+    /* ---- Real .xlsx writer (no libraries) ----
+       We export .xlsx (not .csv) so Windows opens it in Excel by default — .csv can be
+       hijacked by another app (e.g. an editor) as its default program. An .xlsx file is a
+       ZIP of a few XML parts; we build the ZIP by hand with stored (uncompressed) entries. */
+    var _crcTable;
+    function crc32(buf) {
+      if (!_crcTable) {
+        _crcTable = [];
+        for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); _crcTable[n] = c >>> 0; }
+      }
+      var crc = 0xFFFFFFFF;
+      for (var i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ _crcTable[(crc ^ buf[i]) & 0xFF];
+      return (crc ^ 0xFFFFFFFF) >>> 0;
+    }
+    function zipStore(entries) {
+      var enc = new TextEncoder(), chunks = [], central = [], offset = 0;
+      function u16(v) { return [v & 0xff, (v >>> 8) & 0xff]; }
+      function u32(v) { return [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff]; }
+      entries.forEach(function (e) {
+        var name = enc.encode(e.name), data = e.data, crc = crc32(data);
+        var local = new Uint8Array([].concat(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0)));
+        chunks.push(local, name, data);
+        central.push({ rec: new Uint8Array([].concat(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset))), name: name });
+        offset += local.length + name.length + data.length;
+      });
+      var cStart = offset, cSize = 0;
+      central.forEach(function (c) { chunks.push(c.rec, c.name); cSize += c.rec.length + c.name.length; });
+      chunks.push(new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0), u16(central.length), u16(central.length), u32(cSize), u32(cStart), u16(0))));
+      var total = chunks.reduce(function (s, c) { return s + c.length; }, 0), out = new Uint8Array(total), p = 0;
+      chunks.forEach(function (c) { out.set(c, p); p += c.length; });
+      return out;
+    }
+    function xlsxColName(i) { var s = ""; i += 1; while (i > 0) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+    function xlsxEsc(v) { return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ""); }
+    function xlsxDownload(filename, sheetName, matrix) {
+      var enc = new TextEncoder();
+      var sheetRows = matrix.map(function (cells, r) {
+        return '<row r="' + (r + 1) + '">' + cells.map(function (v, ci) {
+          return '<c r="' + xlsxColName(ci) + (r + 1) + '" t="inlineStr"><is><t xml:space="preserve">' + xlsxEsc(v) + '</t></is></c>';
+        }).join("") + "</row>";
+      }).join("");
+      var sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + sheetRows + "</sheetData></worksheet>";
+      var contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>';
+      var rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+      var workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="' + xlsxEsc((sheetName || "Sheet1").slice(0, 31)) + '" sheetId="1" r:id="rId1"/></sheets></workbook>';
+      var wbRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>';
+      var zip = zipStore([
+        { name: "[Content_Types].xml", data: enc.encode(contentTypes) },
+        { name: "_rels/.rels", data: enc.encode(rootRels) },
+        { name: "xl/workbook.xml", data: enc.encode(workbook) },
+        { name: "xl/_rels/workbook.xml.rels", data: enc.encode(wbRels) },
+        { name: "xl/worksheets/sheet1.xml", data: enc.encode(sheet) },
+      ]);
+      downloadBlob(new Blob([zip], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), filename);
     }
     function urlRows(cands) { return (cands || []).filter(function (c) { return c.linkedinUrl; }); }
     function downloadRun(id) {
@@ -4659,10 +4716,11 @@
         cols = cols.concat(["verifiedScore", "verdict", "yearsRelevant", "vetFlags"]);
         head2 = head2.concat(["Verified", "Verdict", "Years", "Flags"]);
       }
-      var csv = head2.join(",") + "\n" + rows.map(function (c) { return cols.map(function (k) { return csvCell(c[k]); }).join(","); }).join("\n");
-      csvDownload(csvSlug(run.name) + "-linkedin-urls.csv", csv);
+      function cellVal(v) { return v == null ? "" : (Array.isArray(v) ? v.join("; ") : String(v)); }
+      var matrix = [head2].concat(rows.map(function (c) { return cols.map(function (k) { return cellVal(c[k]); }); }));
+      xlsxDownload(csvSlug(run.name) + "-linkedin-urls.xlsx", "Candidates", matrix);
       var dropped = (run.candidates || []).length - rows.length;
-      toast("Downloaded " + rows.length + " URLs" + (hasVet ? " (with deep-vet columns)" : "") + (dropped ? (" · " + dropped + " rows had no URL") : ""));
+      toast("Downloaded " + rows.length + " URLs to Excel" + (hasVet ? " (with deep-vet columns)" : "") + (dropped ? (" · " + dropped + " rows had no URL") : ""));
     }
 
     /* ---- Live deep-vet cost estimate (updates as the toggle / rates move) ----
