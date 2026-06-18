@@ -4626,6 +4626,7 @@
               '<button class="btn btn-ghost btn-sm" data-csv="' + esc(r.id) + '">⬇ Excel (URLs)</button>' +
               '<button class="btn btn-ghost btn-sm" data-rerank="' + esc(r.id) + '" title="AI re-ranks the top 100 by true relevance to the role before you deep-vet — sharper than the rule score.">✨ Re-rank</button>' +
               '<button class="btn btn-ghost btn-sm" data-vet="' + esc(r.id) + '">🔬 Deep-vet</button>' +
+              '<button class="btn btn-ghost btn-sm" data-laxis="' + esc(r.id) + '" title="First-pass enrichment through Laxis: uploads this list to app.laxis.tech, runs their enrichment, then fills any gaps with the in-house waterfall. Up to 1,000 contacts per pass.">🧬 Enrich via Laxis</button>' +
               '<button class="btn btn-primary btn-sm" data-promote="' + esc(r.id) + '">Send to Candidates →</button>' +
               '<span class="jd-enrich-grp">⚡ Enrich top <input type="number" class="jd-enrichn" min="1" max="' + Math.max(1, n) + '" value="' + Math.min(25, Math.max(1, n)) + '" title="Choose how many of the top-ranked candidates to enrich (business email + phone). You decide how many; costs apply per lookup."> ' +
                 '<button class="btn btn-ghost btn-sm" data-enrich="' + esc(r.id) + '">Enrich</button></span>' +
@@ -5029,6 +5030,51 @@
           } else {
             vetDone({ vetted: r.data.vetted, deep: r.data.deep, warnings: r.data.warnings, profileCacheHits: r.data.profileCacheHits || 0, batched: false });
           }
+        });
+      } else if ((id = t.getAttribute("data-laxis"))) {
+        // First-pass enrichment via the Laxis browser worker. Async (a headless browser
+        // job), so it mirrors deep-vet: submit, then poll laxisStatus until it's done.
+        var lid = id;
+        var lxRemaining = 0;
+        var lxSkipped = 0;
+        t.disabled = true; t.textContent = "Laxis: starting…";
+        function laxisReset() { t.disabled = false; t.textContent = "🧬 Enrich via Laxis"; }
+        function pollLaxis() {
+          send("/sourcing", "POST", { action: "laxisStatus", id: lid }).then(function (s) {
+            if (!s.ok) { laxisReset(); alert("Laxis status check failed: " + ((s.data && s.data.error) || s.status)); return; }
+            if (!s.data.done) {
+              t.textContent = "Laxis: " + (s.data.stage || s.data.status || "working") + "…";
+              setTimeout(pollLaxis, 10000); return;
+            }
+            laxisReset();
+            if (s.data.status === "error") {
+              alert("Laxis enrichment failed:\n" + ((s.data.warnings || []).join("\n") || "unknown error") +
+                "\n\nIf this mentions a selector (CALIBRATE), the Laxis UI changed and the worker needs re-calibrating."); loadRuns(); return;
+            }
+            var lx = s.data.laxis || {}; var gf = s.data.gapFill || {};
+            var warn = (s.data.warnings || []).length ? ("\n\n" + s.data.warnings.slice(0, 3).join("\n")) : "";
+            alert("Laxis enriched " + (lx.emails || 0) + " email" + ((lx.emails === 1) ? "" : "s") +
+              " and " + (lx.phones || 0) + " phone" + ((lx.phones === 1) ? "" : "s") +
+              " across " + (lx.matched || 0) + " matched contact" + ((lx.matched === 1) ? "" : "s") + "." +
+              (gf.enriched ? (" The in-house waterfall then filled " + gf.enriched + " more.") : "") +
+              (lxSkipped ? ("\n\n" + lxSkipped + " row(s) were skipped — no LinkedIn URL or email for Laxis to key off.") : "") +
+              (lxRemaining ? ("\n\n" + lxRemaining + " more contacts remain (Laxis caps each pass at 1,000) — click Enrich via Laxis again to do the next batch.") : "") +
+              warn);
+            loadRuns();
+          });
+        }
+        send("/sourcing", "POST", { action: "laxisEnrich", id: lid }).then(function (r) {
+          if (!r.ok) {
+            laxisReset();
+            var err = (r.data && r.data.error) || r.status;
+            if (err === "laxis_worker_not_configured") {
+              alert("Laxis isn't connected yet.\n\nOn the server, set LAXIS_EMAIL and LAXIS_PASSWORD in .env.production (the laxis-worker logs into Laxis with them), confirm LAXIS_WORKER_URL is set on the app, then redeploy."); return;
+            }
+            alert("Laxis enrich failed: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
+          }
+          lxRemaining = r.data.remaining || 0;
+          t.textContent = "Laxis: uploading " + (r.data.sent || "") + "…";
+          setTimeout(pollLaxis, 8000);
         });
       } else if ((id = t.getAttribute("data-enrich"))) {
         var grp = t.closest(".jd-run");

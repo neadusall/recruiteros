@@ -34,6 +34,11 @@ export {
   listSourcingRuns, getSourcingRun, saveSourcingRun, deleteSourcingRun,
   purgeWorkspaceSourcingRuns, type SaveRunInput,
 } from "./store";
+export {
+  laxisWorkerConfigured, serializeCandidatesCsv, parseCsv,
+  submitLaxisJob, getLaxisJob, mergeEnrichedCsv, laxisCandKey,
+  LAXIS_CSV_COLUMNS, MAX_LAXIS_UPLOAD, type LaxisJobStatus, type LaxisMergeResult,
+} from "./laxis";
 export { promoteSourcingRun, type PromoteResult, type PromoteOptions } from "./promote";
 
 import { parseJobDescription } from "./parseJobDescription";

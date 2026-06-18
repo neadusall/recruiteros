@@ -136,9 +136,30 @@ export interface SourcingRun {
    * doesn't strand it — the tab resumes polling by batchId.
    */
   vetBatch?: VetBatchRef;
+  /**
+   * A Laxis enrichment job currently in flight on the browser worker. Present from
+   * submit until the enriched CSV is merged back, then cleared. Parked on the run so a
+   * redeploy mid-job doesn't strand it — the tab resumes polling by jobId.
+   */
+  laxisJob?: LaxisJobRef;
   warnings: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** A Laxis enrichment job in flight, parked on the run so polling survives a redeploy. */
+export interface LaxisJobRef {
+  /** The worker's job id to poll. */
+  jobId: string;
+  submittedAt: string;
+  /** Offset of this chunk within run.candidates (Laxis caps each import at 1,000). */
+  start?: number;
+  /** Size of the candidate window this job covers (used for the gap-fill slice). */
+  count: number;
+  /** How many rows actually went to Laxis (those with a LinkedIn URL or email). */
+  sent?: number;
+  /** Stable candidate keys in the order they were serialized (diagnostics / re-attach). */
+  targets: string[];
 }
 
 /** A deep-vet batch in flight, parked on the run so polling survives a redeploy. */

@@ -67,6 +67,10 @@ services:
       # Must resolve to this server — recruitersos.co already has the A record and
       # is served by Caddy, so on-demand TLS can issue certs for the CNAMEd host.
       WHITE_LABEL_CNAME_TARGET: recruitersos.co
+      # JD Sourcing → Laxis first-pass enrichment: where the browser worker lives on the
+      # internal network. Setting this is what turns the "Enrich via Laxis" button on
+      # (the worker still needs LAXIS_EMAIL/LAXIS_PASSWORD in .env.production to log in).
+      LAXIS_WORKER_URL: http://laxis-worker:3000
     volumes:
       - app_data:/data
     expose:
@@ -124,6 +128,32 @@ services:
     labels:
       autoheal: "true"   # restart this container if it goes unhealthy
 
+  # Laxis worker: a headless-Chromium sidecar that enriches JD-Sourcing CSVs through
+  # app.laxis.tech/prospect-search (Laxis has no API). The main app POSTs a CSV to it
+  # over the internal network (http://laxis-worker:3000); Caddy never exposes it. The
+  # browser session (cookies) persists on its own named volume so it logs into Laxis
+  # ONCE and reuses it — no re-login per job, no repeated 2FA/captcha exposure.
+  #
+  # Set LAXIS_EMAIL + LAXIS_PASSWORD (your Laxis login) in .env.production to enable it.
+  # Without them the container runs but every job fails with laxis_credentials_missing.
+  laxis-worker:
+    build: ./laxis-worker
+    restart: unless-stopped
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      # Where the persisted Laxis session lives (on the named volume below).
+      LAXIS_STATE_PATH: /data/laxis-state.json
+    volumes:
+      - laxis_data:/data
+    expose:
+      - "3000"
+    # not published to the host directly; the app reaches it on the internal net
+    healthcheck: *node-health
+    labels:
+      autoheal: "true"   # restart this container if it goes unhealthy
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -169,3 +199,4 @@ volumes:
   pg_data:
   app_data:   # durable JSON snapshots (accounts/sessions/workspaces) — survives redeploys
   lume_jobs_data:  # lumesp.com job postings + applications — survives redeploys
+  laxis_data:  # persisted Laxis browser session (cookies) — survives redeploys

@@ -9,6 +9,8 @@
  *   { action: "enrich", id, top? }                 -> enrich contacts for the top N staged candidates
  *   { action: "vet", id, top? }                    -> deep-vet the top N: submits a 50%-cheaper Message Batch (sync fallback)
  *   { action: "vetStatus", id }                    -> poll the in-flight vet batch; ingests results once it ends
+ *   { action: "laxisEnrich", id, top? }            -> FIRST-pass enrich via the Laxis browser worker (submits a job)
+ *   { action: "laxisStatus", id, gapFill? }        -> poll the Laxis job; merges the enriched CSV + runs the gap-fill waterfall
  *   { action: "delete", id }                       -> remove a saved run
  *
  * Discovery-only until promote; contact lookup and deep-vet are on demand. Session-gated.
@@ -22,8 +24,10 @@ import {
   vetBatchAvailable, submitVetBatch, retrieveVetBatch, collectVetBatch,
   fetchFullProfileCached, getCachedContact, putCachedContact,
   reRankCandidates, getSeenKeys, addSeenKeys,
+  laxisWorkerConfigured, serializeCandidatesCsv, submitLaxisJob, getLaxisJob, mergeEnrichedCsv,
+  MAX_LAXIS_UPLOAD,
 } from "../../../lib/sourcing";
-import type { CandidateRow, VetBatchItem } from "../../../lib/sourcing";
+import type { CandidateRow, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { nowIso } from "../../../lib/core/ids";
 import { dbEnabled } from "../../../lib/db";
@@ -48,6 +52,44 @@ function applyVerdict(c: CandidateRow, v: {
 /** Verified-first ranking: vetted candidates by verified score, then the rest by fit. */
 function rankByVerdict(rows: CandidateRow[]): void {
   rows.sort((a, c) => (c.verifiedScore ?? -1) - (a.verifiedScore ?? -1) || c.fitScore - a.fitScore);
+}
+
+/**
+ * The cheap-first contact waterfall over the top N rows that are still missing an email.
+ * Cache-first (a contact resolved for this person in any run is reused free), then the
+ * paid waterfall. Mutates the rows in place; the CALLER persists the run. Shared by the
+ * `enrich` action and the Laxis gap-fill (Laxis runs first, this fills what it left blank).
+ */
+async function gapFillContacts(ws: string, rows: CandidateRow[]): Promise<{ enriched: number; cacheHits: number }> {
+  const plan = cheapFirstContactWaterfall({ includePhone: true });
+  let enriched = 0;
+  let contactCacheHits = 0;
+  for (const c of rows) {
+    if (c.email) continue;
+    const personKey = c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`;
+    const cached = await getCachedContact(ws, personKey);
+    if (cached && (cached.email || cached.phone)) {
+      if (cached.email) { c.email = cached.email; enriched++; }
+      if (cached.phone) c.phone = cached.phone;
+      contactCacheHits++;
+      continue;
+    }
+    const [first, ...rest] = (c.fullName || "").trim().split(/\s+/);
+    try {
+      const report = await enrich(plan, {
+        name: c.company, companyName: c.company, fullName: c.fullName,
+        firstName: first, lastName: rest.join(" "), linkedinUrl: c.linkedinUrl, title: c.title,
+      }, { now: nowIso() });
+      const e = report.subject.email; const ph = report.subject.phone;
+      if (typeof e === "string") { c.email = e; enriched++; }
+      if (typeof ph === "string") c.phone = ph;
+      await putCachedContact(ws, personKey, {
+        email: typeof e === "string" ? e : undefined,
+        phone: typeof ph === "string" ? ph : undefined,
+      });
+    } catch { /* leave unresolved */ }
+  }
+  return { enriched, cacheHits: contactCacheHits };
 }
 
 export async function GET(req: Request) {
@@ -130,41 +172,88 @@ export async function POST(req: Request) {
       if (!b?.id) return fail("missing_id", 422);
       const run = await getSourcingRun(ws, b.id);
       if (!run) return fail("run_not_found", 404);
-      const top = Math.max(1, Math.min(b.top ?? 50, run.candidates.length));
-      // Include the phone rung — otherwise report.subject.phone below is always undefined.
+      // Include the phone rung — otherwise report.subject.phone is always undefined.
       // (Mobile direct-dial stays cap-gated separately; this is the cheap business-phone find.)
-      const plan = cheapFirstContactWaterfall({ includePhone: true });
-      let enriched = 0;
-      let contactCacheHits = 0;
-      for (const c of run.candidates.slice(0, top)) {
-        if (c.email) continue;
-        const personKey = c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`;
-        // Cache-first: a contact we've already resolved for this person (any run,
-        // this workspace) is reused for free instead of re-running the paid waterfall.
-        const cached = await getCachedContact(ws, personKey);
-        if (cached && (cached.email || cached.phone)) {
-          if (cached.email) { c.email = cached.email; enriched++; }
-          if (cached.phone) c.phone = cached.phone;
-          contactCacheHits++;
-          continue;
-        }
-        const [first, ...rest] = (c.fullName || "").trim().split(/\s+/);
-        try {
-          const report = await enrich(plan, {
-            name: c.company, companyName: c.company, fullName: c.fullName,
-            firstName: first, lastName: rest.join(" "), linkedinUrl: c.linkedinUrl, title: c.title,
-          }, { now: nowIso() });
-          const e = report.subject.email; const ph = report.subject.phone;
-          if (typeof e === "string") { c.email = e; enriched++; }
-          if (typeof ph === "string") c.phone = ph;
-          await putCachedContact(ws, personKey, {
-            email: typeof e === "string" ? e : undefined,
-            phone: typeof ph === "string" ? ph : undefined,
-          });
-        } catch { /* leave unresolved */ }
+      const top = Math.max(1, Math.min(b.top ?? 50, run.candidates.length));
+      const { enriched, cacheHits } = await gapFillContacts(ws, run.candidates.slice(0, top));
+      await saveSourcingRun(ws, { ...run });
+      return ok({ enriched, cacheHits, run });
+    }
+
+    // Laxis is the FIRST enrichment pass. Serialize the staged rows to a CSV and hand it
+    // to the browser worker, which uploads it to app.laxis.tech/prospect-search, runs
+    // Laxis's enrichment, and returns the enriched CSV. Async (a browser job), so this
+    // mirrors the deep-vet batch shape: submit here, poll {action:"laxisStatus"}.
+    if (action === "laxisEnrich") {
+      if (!b?.id) return fail("missing_id", 422);
+      if (!laxisWorkerConfigured()) {
+        return fail("laxis_worker_not_configured", 409, {
+          detail: "set LAXIS_WORKER_URL on the app and LAXIS_EMAIL/LAXIS_PASSWORD on the laxis-worker",
+        });
+      }
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      // Already running? Don't double-submit — tell the UI to keep polling.
+      if (run.laxisJob) {
+        return ok({ submitted: true, jobId: run.laxisJob.jobId, count: run.laxisJob.count, alreadyRunning: true });
+      }
+      // Laxis caps an import at 1,000 contacts. Send at most one 1,000-row chunk per job,
+      // starting at `start` (the UI paginates: 0, 1000, 2000…) so big lists go in batches.
+      const start = Math.max(0, Number(b.start) || 0);
+      const limit = Math.min(b.top ?? MAX_LAXIS_UPLOAD, MAX_LAXIS_UPLOAD);
+      const targetRows = run.candidates.slice(start, start + limit);
+      if (!targetRows.length) return fail("no_candidates", 422, { detail: `no rows at offset ${start}` });
+      // Laxis enriches from linkedin_url; rows with neither a LinkedIn URL nor an email are skipped.
+      const { csv, sent, skipped } = serializeCandidatesCsv(targetRows);
+      if (!sent) return fail("no_enrichable_rows", 422, { detail: "no candidates in this batch have a LinkedIn URL or email for Laxis to key off" });
+      const jobId = await submitLaxisJob(csv);
+      run.laxisJob = {
+        jobId, submittedAt: nowIso(), count: targetRows.length, start, sent,
+        targets: targetRows.map(candKey),
+      };
+      await saveSourcingRun(ws, { ...run });
+      const remaining = Math.max(0, run.candidates.length - (start + targetRows.length));
+      return ok({ submitted: true, jobId, sent, skipped, start, remaining, nextStart: remaining ? start + targetRows.length : null });
+    }
+
+    if (action === "laxisStatus") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      if (!run.laxisJob) return ok({ done: true, status: "none", laxis: null });
+
+      const job = await getLaxisJob(run.laxisJob.jobId);
+      if (job.status === "queued" || job.status === "running") {
+        return ok({ done: false, status: job.status, stage: job.stage });
+      }
+
+      const start = run.laxisJob.start ?? 0;
+      const count = run.laxisJob.count;
+      if (job.status === "error") {
+        delete run.laxisJob;
+        await saveSourcingRun(ws, { ...run });
+        return ok({ done: true, status: "error", warnings: [`laxis_job_error: ${job.error ?? "unknown"}`], run });
+      }
+
+      // Done — merge Laxis's enriched CSV back onto the rows (by LinkedIn URL → name+company).
+      const warnings: string[] = [];
+      let laxis = { matched: 0, emails: 0, phones: 0, unmatched: 0 };
+      if (job.enrichedCsv) {
+        laxis = mergeEnrichedCsv(run.candidates, job.enrichedCsv);
+      } else {
+        warnings.push("laxis_done_but_no_csv_returned");
+      }
+      delete run.laxisJob;
+
+      // Laxis was the first pass; the cheap in-house waterfall fills whatever it left blank
+      // (unless the caller opts out). One seamless flow from the recruiter's side.
+      let gapFill = { enriched: 0, cacheHits: 0 };
+      if (b.gapFill !== false) {
+        try { gapFill = await gapFillContacts(ws, run.candidates.slice(start, start + count)); }
+        catch (err) { warnings.push(`gap_fill_failed: ${(err as Error).message}`); }
       }
       await saveSourcingRun(ws, { ...run });
-      return ok({ enriched, cacheHits: contactCacheHits, run });
+      return ok({ done: true, status: "done", laxis, gapFill, warnings, run });
     }
 
     if (action === "vet") {

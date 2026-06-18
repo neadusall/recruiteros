@@ -1,0 +1,15 @@
+{
+  "name": "laxis-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Headless-browser sidecar that enriches a CSV through app.laxis.tech (no Laxis API) and hands the enriched CSV back to RecruiterOS.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "login": "node login.js",
+    "codegen": "playwright codegen https://app.laxis.tech/prospect-search"
+  },
+  "dependencies": {
+    "playwright": "1.49.0"
+  }
+}
