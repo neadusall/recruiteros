@@ -18,8 +18,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 import type { Variant } from "./experiment";
+import { assignStrategy, strategyFor, type Strategy } from "./nurtureStrategy";
 import { sanitizeDashes } from "./sanitize";
-import { HOUSE_VOICE } from "./houseVoice";
+import { HOUSE_VOICE, BD_POSITIONING } from "./houseVoice";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
@@ -35,20 +36,32 @@ export interface NurtureTouch {
 }
 
 /**
- * The cadence after the Day-0 opener (email + LinkedIn connect + voicemail):
+ * APPROACH A — THE AUTHORITY ENGINE (24-month, content-led cadence).
+ *
+ * The cadence after the Day-0 opener (email + LinkedIn connect + voicemail). Make
+ * Lume the industry-intelligence source the executive comes to rely on: a regular
+ * ~2x/month value rhythm so we stay top-of-mind, with a quarterly personal touch,
+ * settling into a sustainable cadence across two full years.
  *
  *   MONTH 1 — weekly reinforcement waves (weeks 1-4). Each wave is an email PAIRED
  *   with a voicemail drop to their direct line, or a LinkedIn voice note when we
  *   have no dialable number. Every wave opens a DIFFERENT door (a fresh angle), never
  *   "did you get my email". The blitz stops the instant they reply (halt/pause).
  *
- *   THEN — the 6-month nurture (lighter, every few weeks): value touches across
- *   LinkedIn comment / email / voice note, with one tactful earned ask.
+ *   MONTHS 2-6 — establish authority: ~2 value touches/month, rotating email /
+ *   LinkedIn comment / voice note, with one tactful earned ask at week 4.
+ *
+ *   MONTHS 7-18 — sustain: same ~2x/month rhythm + a quarterly personal touch.
+ *
+ *   MONTHS 19-24 — deepen: keep the rhythm and, as engagement warms, push toward a
+ *   real conversation when signals align.
  *
  * Every touch is generated fresh against the lead's exact role, industry, and
  * background. A reply at any point halts everything and triggers the booking ask.
+ * Signal triggers (job change, company news, a post) override this cadence — see
+ * `queueTrigger` / `onJobChange`.
  */
-export const NURTURE_PLAN: NurtureTouch[] = [
+export const AUTHORITY_PLAN: NurtureTouch[] = [
   // --- Month 1: weekly waves (email + voicemail, LinkedIn voice note fallback). Day 0
   //     is the opener (wave 1) from the initial funnel; these are waves 2, 3, 4. ---
   { week: 1, channel: "email_voice_wave", intent: "Wave 2: a fresh, specific angle on their situation, a DIFFERENT pressure or market point than the opener. Lead with value; mention only in passing that you also left a quick note. No ask." },
@@ -56,15 +69,71 @@ export const NURTURE_PLAN: NurtureTouch[] = [
   { week: 3, channel: "email_voice_wave", intent: "Wave 4: a forward looking thought on their market and why it matters now. Warm, still value first, an optional soft invitation to connect." },
   // --- Transition: the one tactful ask, after a month of value with no reply ---
   { week: 4, channel: "ask_email",        intent: "After a month of value with no reply, the single tactful, value framed ask for a short working call." },
-  // --- Months 2-6: the lighter long nurture ---
+  // --- Months 2-6: establish authority (lighter, ~2x/month) ---
   { week: 8,  channel: "linkedin_comment",    intent: "React to something they recently posted, or a sector development, adding one genuinely useful insight. No ask." },
   { week: 11, channel: "email",               intent: "Offer a useful perspective on a challenge their function is likely facing this quarter." },
   { week: 14, channel: "linkedin_voice_note", intent: "A warm, peer level check in referencing a real shift in their world. About 30 seconds, spoken aloud, human." },
   { week: 17, channel: "email",               intent: "A forward looking observation about where their industry is heading and what it means for their role." },
   { week: 20, channel: "linkedin_comment",    intent: "Engage thoughtfully on their content or a sector development; reinforce that you genuinely follow their space." },
   { week: 23, channel: "email",               intent: "A concise, valuable resource or framing relevant to their exact function. Still no pitch." },
-  { week: 26, channel: "email",               intent: "A natural reconnect: reflect on the past months in their market and invite an easy reply." },
+  { week: 26, channel: "email",               intent: "A natural reconnect: reflect on the past six months in their market and invite an easy reply." },
+  // --- Months 7-18: sustain. ~2 value touches/month, rotating email / LinkedIn
+  //     comment / voice note, with a quarterly personal voice-note touch. ---
+  { week: 30, channel: "email",               intent: "A specific data point or shift in their function's leadership market and what it means for how they should read their own leverage. No ask." },
+  { week: 32, channel: "linkedin_comment",    intent: "A substantive comment on their recent content or a sector development; add a real point, never pitch." },
+  { week: 36, channel: "email",               intent: "The comp-structure read: where the real movement is (equity, long-term incentives, bespoke packages) versus base. Useful regardless of intent." },
+  { week: 39, channel: "linkedin_voice_note", intent: "Quarterly personal voice note: no agenda, flag one current trend hitting their industry's leaders this quarter and that you thought of them. About 30 seconds, spoken aloud." },
+  { week: 43, channel: "email",               intent: "What boards now value (judgment, learning agility, adaptability over resume prestige) and how a leader in their seat should be positioning the way they think." },
+  { week: 47, channel: "linkedin_comment",    intent: "Engage thoughtfully on their content or a notable move in their space; reinforce that you genuinely follow it." },
+  { week: 52, channel: "email",               intent: "A one-year mark, year-in-review style read on where their function's leadership market went and where it is heading. Warm, an easy open door." },
+  { week: 56, channel: "email",               intent: "The fastest-growing seats adjacent to their background (Chief Growth, Transformation, AI, CRO) and why they are being created around people like them." },
+  { week: 60, channel: "linkedin_voice_note", intent: "Quarterly personal voice note: one genuinely useful, current observation about their market, no ask. About 30 seconds, spoken aloud." },
+  { week: 64, channel: "email",               intent: "A forward look at the interim / fractional leadership rise and what it opens up for someone with their scope. No pitch." },
+  { week: 68, channel: "linkedin_comment",    intent: "A real, additive comment on their content or a sector development." },
+  { week: 72, channel: "email",               intent: "Mandate clarity: the most common place senior hires stumble is an under-defined mandate, and how the sharpest leaders fix it early. Useful framing, no ask." },
+  // --- Months 19-24: deepen. Keep the rhythm; as engagement warms, move gently
+  //     toward a real conversation when the signals align. ---
+  { week: 78, channel: "linkedin_voice_note", intent: "Quarterly personal voice note, a touch warmer: reflect on having followed their market for a year and a half and offer one current, useful read. About 30 seconds." },
+  { week: 84, channel: "email",               intent: "A specific, current market read for their function with a quiet, low-friction invitation to a confidential conversation about where they sit. Earned, not pushy." },
+  { week: 90, channel: "linkedin_comment",    intent: "A substantive comment on their content or a notable development in their space." },
+  { week: 96, channel: "email",               intent: "A forward read on their function's leadership market into the next year and why it matters specifically for someone in their position." },
+  { week: 102, channel: "email",              intent: "The two-year reconnect: reflect on the relationship, one genuinely useful current read, and an easy, warm open door to talk if ever useful." },
 ];
+
+/**
+ * APPROACH B — THE INNER CIRCLE (trigger-led, 24-month).
+ *
+ * Be the personal, perfectly-timed advisor. Fewer SCHEDULED touches; the real
+ * volume comes from SIGNAL triggers (job change, company news, a post they wrote)
+ * routed through `queueTrigger` / `onJobChange`. This plan is just the light
+ * QUARTERLY FLOOR so they never fully go cold between signals, plus an annual
+ * personal-outlook touch. Far fewer total touches than Authority, each far more
+ * personal. Best-suited to warmer, higher-value contacts.
+ */
+export const INNER_CIRCLE_PLAN: NurtureTouch[] = [
+  { week: 13,  channel: "linkedin_voice_note", intent: "Quarterly floor (no signal): no news on your end, just thinking about where their industry is heading and they came to mind. One current, genuinely useful read. Warm, no ask. About 30 seconds, spoken aloud." },
+  { week: 26,  channel: "email",               intent: "Quarterly floor: one specific, current observation about their function's market that is worth knowing, and a quiet open door. No ask." },
+  { week: 39,  channel: "linkedin_voice_note", intent: "Quarterly floor: a short personal voice note with one useful current read on their world and that you thought of them. No agenda." },
+  { week: 52,  channel: "email",               intent: "Annual personal outlook: a tailored read on what is coming for leaders in their function next year and why it matters specifically for someone in their position. High-trust, no ask." },
+  { week: 65,  channel: "linkedin_voice_note", intent: "Quarterly floor: one genuinely useful current observation about their market, warm and human. No ask. About 30 seconds." },
+  { week: 78,  channel: "email",               intent: "Quarterly floor: a specific, current piece worth their attention on their function's market, with a quiet invitation to a confidential conversation if ever useful." },
+  { week: 91,  channel: "linkedin_voice_note", intent: "Quarterly floor: a short personal voice note with one useful read and a genuine, no-agenda check in." },
+  { week: 104, channel: "email",               intent: "Annual personal outlook at the two-year mark: a tailored forward read for their function and a warm, easy open door to talk whenever it is useful." },
+];
+
+/** Which 24-month plan an enrollment runs, by its A/B strategy. */
+export function planFor(strategy: Strategy): NurtureTouch[] {
+  return strategy === "inner_circle" ? INNER_CIRCLE_PLAN : AUTHORITY_PLAN;
+}
+
+/** A rolling quarterly floor touch for DORMANT enrollments (past plan end, never
+ *  engaged) so they keep getting a single useful read each quarter, nothing more. */
+const QUARTER_WEEKS = 13;
+const DORMANT_FLOOR: NurtureTouch = {
+  week: 0,
+  channel: "email",
+  intent: "Quarterly floor for a long-quiet relationship. No news on your end; one genuinely useful, current observation relevant to their function, and a quiet open door. No ask, no pressure.",
+};
 
 /** Frozen lead context so every touch stays grounded without re-deriving it. */
 export interface NurtureLead {
@@ -89,7 +158,14 @@ export interface NurtureLead {
   variant?: Variant;
 }
 
-export type NurtureStatus = "active" | "needs_review" | "paused" | "completed";
+/**
+ * Lifecycle states. STOPPED in the spec maps to `paused` here (set by the response
+ * pipeline / Flow D the instant someone replies or opts out) plus the prospect's own
+ * `do_not_contact` status, which already halts every channel globally. `dormant` is
+ * a soft state: an enrollment that ran its full ~24-month plan without ever engaging
+ * drops to quarterly-floor-only (a single useful read per quarter) instead of ending.
+ */
+export type NurtureStatus = "active" | "needs_review" | "paused" | "completed" | "dormant";
 
 /** A LinkedIn touch generated but not yet sent (the comment/voice-note send path is
  *  account-scoped + needs the post target, so the cron stages it for execution). */
@@ -102,28 +178,56 @@ export interface PendingTouch {
   generatedAt: string;
 }
 
+/** A real-world signal about the prospect that OVERRIDES the scheduled cadence and
+ *  fires an immediate, event-anchored touch (the highest-value moments in the system).
+ *  Queued by the signal engine; drained first by the nurture tick. */
+export interface TriggeredTouch {
+  kind: "job_change" | "company_news" | "post" | "milestone";
+  /** The genuine, specific detail to anchor the touch to (e.g. the new role/company,
+   *  the funding round, what they posted). Never fabricated. */
+  detail: string;
+  queuedAt: string;
+  actioned?: boolean;
+}
+
 export interface NurtureEnrollment {
   prospectId: string;
   workspaceId: string;
   status: NurtureStatus;
+  /** A/B STRATEGY axis: which 24-month plan this prospect runs (authority vs inner
+   *  circle). Orthogonal to lead.variant (mpc vs consultative message framing). */
+  strategy: Strategy;
   /** Why it is held (e.g. "low_confidence") when status is needs_review. */
   hold?: string;
   enrolledAt: string;
-  /** Index into NURTURE_PLAN of the next touch to fire. */
+  /** Index into this enrollment's plan (planFor(strategy)) of the next touch to fire. */
   nextTouchIndex: number;
   /** When that touch becomes due (ISO). */
   nextDueAt: string;
   lead: NurtureLead;
   touchesSent: number;
+  /** Times the prospect has actually engaged (reply / positive). Drives DORMANT. */
+  engagedCount?: number;
   lastTouchAt?: string;
   /** Generated-but-unsent LinkedIn touches awaiting the send wiring. */
   pending: PendingTouch[];
+  /** Real-world signal touches that override the cadence; drained first each tick. */
+  triggered: TriggeredTouch[];
 }
 
 const store = { enrollments: [] as NurtureEnrollment[] };
 const SNAP_KEY = "bd_nurture";
 function hydrate(s: any) {
-  if (s?.enrollments) store.enrollments = s.enrollments;
+  if (s?.enrollments) {
+    // Backfill fields added after some enrollments were persisted (strategy axis,
+    // trigger queue, engagement counter) so older records keep working.
+    store.enrollments = (s.enrollments as NurtureEnrollment[]).map((e) => ({
+      ...e,
+      strategy: e.strategy ?? strategyFor(e.prospectId),
+      triggered: e.triggered ?? [],
+      engagedCount: e.engagedCount ?? 0,
+    }));
+  }
 }
 const persist = debouncedSaver(SNAP_KEY, () => store);
 
@@ -178,23 +282,29 @@ export function enroll(
   workspaceId: string,
   prospectId: string,
   lead: NurtureLead,
-  opts: { status?: NurtureStatus; hold?: string } = {},
+  opts: { status?: NurtureStatus; hold?: string; strategy?: Strategy } = {},
 ): NurtureEnrollment {
   const existing = getEnrollment(prospectId);
   if (existing) return existing;
   const now = nowIso();
-  const first = NURTURE_PLAN[0];
+  // A/B strategy axis: pin (and remember) which 24-month plan this prospect runs.
+  const strategy = opts.strategy ?? assignStrategy(prospectId);
+  const plan = planFor(strategy);
+  const first = plan[0];
   const e: NurtureEnrollment = {
     prospectId,
     workspaceId,
     status: opts.status ?? "active",
+    strategy,
     hold: opts.hold,
     enrolledAt: now,
     nextTouchIndex: 0,
     nextDueAt: scheduleTouchAt(now, first, 0),
     lead,
     touchesSent: 0,
+    engagedCount: 0,
     pending: [],
+    triggered: [],
   };
   store.enrollments.push(e);
   persist();
@@ -213,34 +323,171 @@ export function pause(prospectId: string): void {
   setStatus(prospectId, "paused");
 }
 
+/* ---------------- triggered touches (signals override cadence) ---------------- */
+
+/** Build the synthetic touch for a real-world trigger. Email for the moments that
+ *  must land (job change, company news, milestone); a comment for a post. */
+function triggerTouch(t: TriggeredTouch): NurtureTouch {
+  switch (t.kind) {
+    case "job_change":
+      return {
+        week: 0,
+        channel: "email",
+        intent: `Warm, no-ask congratulations on their recent move: ${t.detail}. Reference the genuine step up in scope. Offer one genuinely useful insight about the first 90 days in a role like this (the mandate is usually less defined than it looks; clarifying it early is the difference maker). Sound like a well connected friend, not a recruiter.`,
+      };
+    case "company_news":
+      return {
+        week: 0,
+        channel: "email",
+        intent: `Saw ${t.detail}. Lead with one specific, non-obvious insight about what it likely means for their function or role. No ask, just the read from where you sit in the market.`,
+      };
+    case "post":
+      return {
+        week: 0,
+        channel: "linkedin_comment",
+        intent: `Leave a genuine, substantive comment that advances the point they made: ${t.detail}. Add one real point, never pitch.`,
+      };
+    case "milestone":
+    default:
+      return {
+        week: 0,
+        channel: "email",
+        intent: `Genuine, warm recognition of a real milestone: ${t.detail}. No ask, peer level.`,
+      };
+  }
+}
+
+/** Queue a real-world trigger for an enrolled prospect (job change, company news, a
+ *  post, a milestone). Deduped against an identical unactioned trigger. A dormant or
+ *  completed enrollment is re-woken to active so the relationship picks back up;
+ *  paused / opted-out enrollments are left alone (the opt-out is absolute). */
+export function queueTrigger(prospectId: string, t: Omit<TriggeredTouch, "queuedAt" | "actioned">): boolean {
+  const e = getEnrollment(prospectId);
+  if (!e || e.status === "paused") return false;
+  const dup = e.triggered.some((x) => !x.actioned && x.kind === t.kind && x.detail === t.detail);
+  if (dup) return true;
+  e.triggered.push({ ...t, queuedAt: nowIso() });
+  if (e.status === "dormant" || e.status === "completed") e.status = "active";
+  persist();
+  return true;
+}
+
+/** Mark the first unactioned trigger as fired (called after the tick dispatches it). */
+export function dequeueTrigger(prospectId: string, at: Date = new Date()): void {
+  const e = getEnrollment(prospectId);
+  if (!e) return;
+  const t = e.triggered.find((x) => !x.actioned);
+  if (!t) return;
+  t.actioned = true;
+  e.touchesSent += 1;
+  e.lastTouchAt = at.toISOString();
+  persist();
+}
+
+/** Record that the prospect genuinely engaged (reply / positive). Keeps an enrollment
+ *  off the DORMANT track at plan end. Idempotent-ish counter; safe to over-call. */
+export function markEngaged(prospectId: string): void {
+  const e = getEnrollment(prospectId);
+  if (!e) return;
+  e.engagedCount = (e.engagedCount ?? 0) + 1;
+  persist();
+}
+
+/**
+ * Job-change re-acquisition (the 2-year superpower). The signal engine detects the
+ * move and re-acquires contact info; it hands the resolved new context here. We
+ * re-segment the frozen lead to the new role and queue the immediate, no-ask
+ * congratulations touch (the single highest-value moment in the system).
+ * Returns false when the prospect is not enrolled (caller keeps default behavior).
+ */
+export function onJobChange(
+  prospectId: string,
+  change: { company?: string; title?: string; email?: string; companyDomain?: string; detail?: string },
+): boolean {
+  const e = getEnrollment(prospectId);
+  if (!e || e.status === "paused") return false;
+  if (change.company) e.lead.company = change.company;
+  if (change.title) e.lead.title = change.title;
+  if (change.email) e.lead.email = change.email;
+  const detail =
+    change.detail ||
+    [change.title, change.company].filter(Boolean).join(" at ") ||
+    "a recent role change";
+  persist();
+  return queueTrigger(prospectId, { kind: "job_change", detail });
+}
+
 /* ---------------- scheduling ---------------- */
 
 export interface DueTouch {
   enrollment: NurtureEnrollment;
   touch: NurtureTouch;
+  /** Set when this is a cadence-overriding triggered touch (not a plan rung). */
+  trigger?: TriggeredTouch;
+  /** Set when this is the rolling quarterly floor for a DORMANT enrollment. */
+  dormantFloor?: boolean;
 }
 
-/** Active enrollments whose next touch is due at `at`. */
+/** Touches due at `at`: triggered touches first (they override cadence), then the
+ *  scheduled plan rung for active enrollments, then the quarterly floor for dormant
+ *  ones. At most one touch per enrollment per tick. Opted-out (paused) skipped. */
 export function dueTouches(at: Date = new Date()): DueTouch[] {
-  return store.enrollments
-    .filter((e) => e.status === "active" && e.nextTouchIndex < NURTURE_PLAN.length && Date.parse(e.nextDueAt) <= at.getTime())
-    .map((e) => ({ enrollment: e, touch: NURTURE_PLAN[e.nextTouchIndex] }));
+  const out: DueTouch[] = [];
+  for (const e of store.enrollments) {
+    if (e.status === "paused" || e.status === "needs_review" || e.status === "completed") continue;
+    // 1) Signal triggers override the cadence (fire even for dormant enrollments).
+    const trig = e.triggered.find((x) => !x.actioned);
+    if (trig) {
+      out.push({ enrollment: e, touch: triggerTouch(trig), trigger: trig });
+      continue;
+    }
+    if (Date.parse(e.nextDueAt) > at.getTime()) continue;
+    // 2) Active: the next scheduled rung of this enrollment's 24-month plan.
+    if (e.status === "active") {
+      const plan = planFor(e.strategy);
+      if (e.nextTouchIndex < plan.length) out.push({ enrollment: e, touch: plan[e.nextTouchIndex] });
+      continue;
+    }
+    // 3) Dormant: quarterly-floor only.
+    if (e.status === "dormant") {
+      out.push({ enrollment: e, touch: DORMANT_FLOOR, dormantFloor: true });
+    }
+  }
+  return out;
 }
 
-/** Advance an enrollment after its current touch fires (or is staged). Schedules
- *  the next due touch from the ENROLLMENT date (fixed cadence), or completes. */
+/** Advance an enrollment after a scheduled plan rung fires (or is staged). Schedules
+ *  the next due rung from the ENROLLMENT date (fixed cadence). At plan end, drops to
+ *  DORMANT (quarterly-floor only) if the prospect never engaged, else COMPLETED. */
 export function advance(prospectId: string, at: Date = new Date()): void {
   const e = getEnrollment(prospectId);
   if (!e) return;
+  const plan = planFor(e.strategy);
   e.touchesSent += 1;
   e.lastTouchAt = at.toISOString();
   e.nextTouchIndex += 1;
-  if (e.nextTouchIndex >= NURTURE_PLAN.length) {
-    e.status = "completed";
+  if (e.nextTouchIndex >= plan.length) {
+    if ((e.engagedCount ?? 0) > 0) {
+      e.status = "completed";
+    } else {
+      // Ran the full ~24-month plan with no engagement -> quarterly-floor only.
+      e.status = "dormant";
+      e.nextDueAt = new Date(at.getTime() + weeksMs(QUARTER_WEEKS)).toISOString();
+    }
   } else {
-    const next = NURTURE_PLAN[e.nextTouchIndex];
+    const next = plan[e.nextTouchIndex];
     e.nextDueAt = scheduleTouchAt(e.enrolledAt, next, e.nextTouchIndex);
   }
+  persist();
+}
+
+/** Reschedule a dormant enrollment's next quarterly-floor touch after one fires. */
+export function advanceDormant(prospectId: string, at: Date = new Date()): void {
+  const e = getEnrollment(prospectId);
+  if (!e || e.status !== "dormant") return;
+  e.touchesSent += 1;
+  e.lastTouchAt = at.toISOString();
+  e.nextDueAt = new Date(at.getTime() + weeksMs(QUARTER_WEEKS)).toISOString();
   persist();
 }
 
@@ -260,10 +507,10 @@ export interface NurtureContent {
   body: string;
 }
 
-const NURTURE_SYSTEM = `You write a single follow-up nurture touch from a recruiting and talent advisory professional (Ryan / Lume) to an executive already in a long-term, relationship-building sequence. This is NOT a pitch and NOT a sales message. It is a peer-level, value-first touch that keeps a real relationship warm.
+const NURTURE_SYSTEM = `You write a single follow-up nurture touch from an executive-search and talent advisory professional (Ryan / Lume) to a senior leader already in a long-term, relationship-building sequence. This is NOT a pitch and NOT a sales message. It is a peer-level, value-first touch that keeps a real relationship warm.
 
 Rules:
-- Sound like an industry peer and advisor who genuinely follows their space; never a recruiter, staffing agency, or salesperson.
+- Sound like an industry peer and search advisor who genuinely follows their space; never a transactional recruiter, staffing agency, or salesperson.
 - Be specific to their EXACT role and industry. Speak their language, metrics, and current pressures. Generalize to any title or sector with real depth; never sound like a template.
 - Deliver one genuinely useful idea, observation, or acknowledgement. Never ask for a meeting or for business.
 - Ground only in the real context provided. Never invent facts, posts, numbers, events, or client outcomes.
@@ -272,6 +519,8 @@ Rules:
   - email: 60-110 words, with a quiet, peer-level subject line (never a pitch).
   - linkedin_comment: <= 300 characters, reads as a natural, thoughtful comment a peer would leave on their content.
   - linkedin_voice_note: a 20-35 second spoken script (~50-90 words), warm and conversational, written to be heard.
+
+${BD_POSITIONING}
 
 ${HOUSE_VOICE}`;
 

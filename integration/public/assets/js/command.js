@@ -484,6 +484,7 @@
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
+    autopilot: { title: "Autopilot", crumb: "Build", action: null, render: renderAutopilot },
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New sequence", render: renderCampaignsHub },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting" },
@@ -496,6 +497,7 @@
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "＋ New sequence", render: renderContent },
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
     "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: renderOutreachStats, cap: "team:manage" },
+    nurture: { title: "Nurture", crumb: "Measure", action: null, render: renderNurture, cap: "team:manage", motionOnly: "bd" },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
     // Admin launch-setup hub. Consolidates Integrations and ATS behind one tab
     // with an ordered readiness checklist. The two sub-routes below stay
@@ -504,7 +506,12 @@
     setup: { title: "Setup", crumb: "Connect", action: null, render: renderSetup, cap: "integrations:manage" },
     connected: { title: "Connected", crumb: "Connect", action: "Test all", render: renderConnected, cap: "integrations:manage" },
     ats: { title: "ATS", crumb: "Connect", action: null, render: renderAts, cap: "ats:manage" },
-    team: { title: "Team", crumb: "Admin", action: "＋ Invite recruiter", render: renderTeam, cap: "team:manage" }
+    team: { title: "Team", crumb: "Admin", action: "＋ Invite recruiter", render: renderTeam, cap: "team:manage" },
+    // Playbooks: a visual, wireframe-driven "how it works" gallery (Flip the
+    // Script, JD Sourcing, AI Vetting, Voice Drops, Campaign Models). Motion-
+    // agnostic, no capability gate, so anyone in either portal can see the
+    // vision. Deep links like #playbooks/jd-sourcing open a single walkthrough.
+    playbooks: { title: "Playbooks", crumb: "Learn", action: null, render: renderPlaybooks }
   };
 
   function currentRoute() {
@@ -805,6 +812,240 @@
       return summary + table;
     }
     return emptyCard("Nothing to show here yet.");
+  }
+
+  /* ===========================================================================
+   * PLAYBOOKS  ·  "How it works", seen.
+   * A visual, wireframe-driven walkthrough of the core approaches so a new user
+   * (or a prospect being shown the product) instantly catches the mission of
+   * each one. Gallery of cards -> click one -> a full animated workflow with a
+   * wireframe sketch of the real UI. Lives under #playbooks (+ deep links like
+   * #playbooks/jd-sourcing). Static, read-only, no backend calls.
+   * ======================================================================== */
+  function pbStage(s, i) {
+    var when = s.when
+      ? '<div class="pb-when">' + esc(s.when) +
+        (s.auto ? '<span class="pb-auto ' + (s.auto === "you" ? "you" : "bot") + '">' + (s.auto === "you" ? "You" : "Auto") + "</span>" : "") +
+        "</div>"
+      : "";
+    return '<div class="pb-stage">' +
+      '<div><div class="pb-node">' + s.icon + '<span class="num">' + (i + 1) + "</span></div></div>" +
+      '<div class="pb-body">' + when + "<h4>" + esc(s.title) + "</h4><p>" + s.body + "</p></div></div>";
+  }
+  function pbWireChrome(title, body) {
+    return '<div class="pb-wire"><div class="pb-wire-chrome"><i></i><i></i><i></i>' +
+      '<span class="ttl">' + esc(title) + '</span></div><div class="pb-wire-body">' + body + "</div></div>";
+  }
+  // The five approaches, as a data table the gallery + deep views read from.
+  function pbData() {
+    var sigRow = function (dot, a, b) {
+      return '<div class="pb-skel" style="display:flex;align-items:center;gap:12px">' +
+        '<span style="width:9px;height:9px;border-radius:50%;flex:none;background:' + dot + ';box-shadow:0 0 10px ' + dot + '"></span>' +
+        '<div style="flex:1"><div class="bar md" style="margin:0 0 7px"></div><div class="bar sm" style="margin:0"></div></div>' +
+        '<span class="pb-chip">' + esc(a) + "</span><span class=\"pb-chip\">" + esc(b) + "</span></div>";
+    };
+    var candRow = function (pct, n) {
+      return '<div class="pb-skel"><div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">' +
+        '<span style="width:30px;height:30px;border-radius:50%;flex:none;background:linear-gradient(135deg,#7c5cff,#4dd0ff)"></span>' +
+        '<div style="flex:1"><div class="bar md" style="margin:0 0 6px"></div><div class="bar sm" style="margin:0"></div></div>' +
+        '<b style="color:var(--pb-c);font-size:13px;font-family:monospace">' + pct + '%</b></div>' +
+        '<div class="pb-meter"><span style="width:' + pct + '%"></span></div></div>';
+    };
+    var toggle = function (label, on) {
+      return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0">' +
+        '<span style="font-size:12px;color:var(--text-muted)">' + esc(label) + "</span>" +
+        '<span style="width:34px;height:19px;border-radius:99px;position:relative;background:' + (on ? "linear-gradient(135deg,#7c5cff,#4dd0ff)" : "var(--border-strong)") + '">' +
+        '<span style="position:absolute;top:2px;' + (on ? "right:2px" : "left:2px") + ';width:15px;height:15px;border-radius:50%;background:#fff"></span></span></div>';
+    };
+
+    return {
+      "flip-the-script": {
+        icon: "🔁", accent: "v", title: "Flip the Script", tag: "The core idea",
+        oneLiner: "Stop chasing. A real signal fires first, so you arrive informed, relevant, and welcome.",
+        mini: ["📡", "🧩", "✍️", "💬"],
+        mission: "Most outreach fails because it arrives at the wrong time, to the wrong person, with no real reason. Flip the Script inverts cold outreach: a genuine signal fires first, context makes it relevant, and you show up as someone worth replying to, never a stranger with a pitch.",
+        extra:
+          '<p class="pb-section-label">Cold outreach vs. flipped</p>' +
+          '<div class="pb-vs">' +
+            '<div class="vs-card bad"><div class="vs-lbl">✕ Cold</div>' +
+              '<div class="pb-bubble">"Hi, are you hiring? I place great candidates. Open to a quick call?"</div>' +
+              '<div class="vs-out">→ Ignored. No reason, no timing, no relevance.</div></div>' +
+            '<div class="pb-vs-arrow">➜</div>' +
+            '<div class="vs-card good"><div class="vs-lbl">✓ Flipped</div>' +
+              '<div class="pb-bubble">"Saw you just posted three backend roles after the Series B. That pace is brutal to fill solo, here is how I would line up the first five."</div>' +
+              '<div class="vs-out">→ Replied. Right moment, real reason.</div></div>' +
+          "</div>",
+        stages: [
+          { icon: "📡", title: "A real signal fires", body: "Funding, a new role posted, an exec hire, a team expanding, a layoff next door. RecruitersOS watches 40+ kinds of moments that mean someone is ready to hear from you." },
+          { icon: "🧩", title: "Context is attached", body: "Who, why now, and what changed. The signal carries its own reason, so the message can be specific instead of generic." },
+          { icon: "✍️", title: "Relevance is crafted", body: "The opener speaks to the actual reason, drawn from the content library and tuned per prospect. Never fabricated social proof, only verifiable signals and real substance." },
+          { icon: "💬", title: "You arrive welcome", body: "Because the timing and reason are real, you get replies instead of blocks. Signal, then context, then relevance, then response." },
+        ],
+        wire: pbWireChrome("recruitersos · hire signals", sigRow("#38e0a6", "Funding", "3 roles") + sigRow("#4dd0ff", "Exec hire", "VP Eng") + sigRow("#ffc24d", "Team +40%", "Reposted")),
+        outcome: { em: "🎯", title: "Right moment, real reason, far better replies.", text: "Every other approach below is built on this one idea, surfaced as signals, sequenced as campaigns, delivered in your voice." },
+        cta: [["📡 See Hire Signals", "inmarket"], ["🎯 Build a campaign", "campaigns"]],
+      },
+
+      "jd-sourcing": {
+        icon: "🧲", accent: "c", title: "JD Sourcing", tag: "Recruiting",
+        oneLiner: "A job description in. A ranked, real shortlist out, staged and ready to promote.",
+        mini: ["📋", "🔍", "📊", "⬆️"],
+        mission: "Paste a job description and get a ranked shortlist of real people, scored against the role with the reasons shown. No fabricated candidates, ever. Stage them under a name, then promote the best straight into your Candidates pipeline.",
+        stages: [
+          { icon: "📋", title: "Drop in a JD", auto: "you", title2: "", body: "Paste the job description or pick an open role. That text becomes the target the search and ranking are measured against." },
+          { icon: "🔍", title: "Search runs", auto: "bot", body: "A people-search finds matching profiles, then a first-pass enrichment pass fills in the gaps automatically, so each result is a real, reachable person." },
+          { icon: "📊", title: "Ranked and explained", auto: "bot", body: "Every candidate is scored against the JD with a match percentage and the reasons behind it, so you can trust the order, not just the list." },
+          { icon: "🗂️", title: "Staged under a name", auto: "you", body: "Save the shortlist as a named batch you can revisit, compare, and refine, without touching your live pipeline yet." },
+          { icon: "⬆️", title: "Promote the best", auto: "you", body: "Move the strongest candidates into Candidates with one click, ready for outreach, vetting, or a campaign." },
+        ],
+        wire: pbWireChrome("recruitersos · jd sourcing", '<div class="pb-wire-cols">' +
+          '<div class="pb-skel"><div class="cap">Job description</div><div class="bar lg"></div><div class="bar lg"></div><div class="bar md"></div><div class="bar lg"></div><div class="bar sm"></div><div style="margin-top:12px"><span class="pb-chip" style="background:linear-gradient(135deg,#7c5cff,#4dd0ff);color:#0a0a12;border:none">🔍 Find candidates</span></div></div>' +
+          '<div style="display:grid;gap:12px"><div class="cap" style="font-size:11px;font-weight:700;color:var(--text-dim);letter-spacing:.08em;text-transform:uppercase">Ranked shortlist</div>' + candRow(94, 1) + candRow(88, 2) + candRow(81, 3) + "</div></div>"),
+        outcome: { em: "⚡", title: "Hours of sourcing, compressed to minutes.", text: "A defensible, ranked shortlist of real people, every time, with the matching reasons in plain sight." },
+        cta: [["🧲 Open JD Sourcing", "jdsourcing"], ["🗄️ See Candidates", "data"]],
+      },
+
+      "ai-vetting": {
+        icon: "☎️", accent: "g", title: "AI Vetting", tag: "Recruiting",
+        oneLiner: "Your cloned voice screens every candidate, around the clock, scored 1 to 100.",
+        mini: ["🎙️", "🔢", "📨", "📈"],
+        mission: "Bind a job description to a phone number and your cloned voice. Candidates opt in, call your line, and talk to an AI recruiter that sounds like you, it greets them by name, references their experience, asks your top qualifiers, and tells them the next step. Every call is recorded, transcribed, summarized, and scored 1 to 100.",
+        stages: [
+          { icon: "🎙️", title: "Build a vetting desk", auto: "you", body: "Attach the JD and your top three or four qualifiers, with what a pass looks like for each. This is the brief the AI recruiter screens against." },
+          { icon: "🔢", title: "Bind a number and your voice", auto: "you", body: "Pick a real number from your Telnyx account and your consented cloned voice. The agent speaks the whole call in your voice." },
+          { icon: "📨", title: "Candidates opt in", auto: "you", body: "Candidates consent, then call your line on their own time. No chasing, no scheduling tag, day or night." },
+          { icon: "🤖", title: "The AI recruiter screens", auto: "bot", body: "It greets them by name, references their LinkedIn experience, asks your qualifiers, listens, and tells them the next step, sounding like you the whole way." },
+          { icon: "📈", title: "Recorded, transcribed, scored", auto: "bot", body: "Each call comes back recorded, transcribed, summarized, and scored 1 to 100 against your qualifiers, so you only spend time on the ones worth it." },
+        ],
+        wire: pbWireChrome("recruitersos · ai vetting", '<div class="pb-wire-cols">' +
+          '<div class="pb-skel"><div class="cap">Vetting desk</div><div class="bar md"></div>' +
+            '<div style="margin-top:10px;display:grid;gap:8px">' +
+            '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--pb-g)">✓</span><div class="bar md" style="flex:1;margin:0"></div><span class="pb-chip">must</span></div>' +
+            '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--pb-g)">✓</span><div class="bar lg" style="flex:1;margin:0"></div></div>' +
+            '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--pb-g)">✓</span><div class="bar sm" style="flex:1;margin:0"></div></div></div>' +
+            '<div style="margin-top:12px"><span class="pb-chip">📞 +1 (415) •••</span> <span class="pb-chip">🎤 Your voice</span></div></div>' +
+          '<div class="pb-skel"><div style="display:flex;align-items:center;justify-content:space-between"><div class="cap" style="margin:0">Call · scored</div><span class="pb-score">92</span></div>' +
+            '<div class="pb-wave" style="margin:12px 0;height:30px">' +
+              Array.apply(null, Array(18)).map(function (_, i) { var h = [8, 18, 26, 14, 22, 10, 28, 16, 6, 24, 12, 20, 9, 27, 15, 23, 11, 19][i]; return '<i style="height:' + h + 'px;animation-delay:' + (i * 0.06) + 's"></i>'; }).join("") +
+            "</div><div class=\"bar lg\"></div><div class=\"bar lg\"></div><div class=\"bar md\"></div></div></div>"),
+        outcome: { em: "🌙", title: "A screening recruiter that sounds like you, awake at 2am.", text: "Top candidates surface with a score and a transcript before you have had your coffee. The rest never eat your calendar." },
+        cta: [["☎️ Open AI Vetting", "vetting"]],
+      },
+
+      "voice-drops": {
+        icon: "📞", accent: "a", title: "Voice Drops", tag: "Recruiting + BD",
+        oneLiner: "A personal voicemail, in your own voice, at scale, with consent and timezone guardrails.",
+        mini: ["✍️", "🎤", "🛡️", "📥"],
+        mission: "Leave a warm, personal voicemail in your own cloned voice on landlines and VoIP lines, at scale. Premium answering-machine detection drops it only when the voicemail picks up, and consent plus per-lead timezone windows keep every drop respectful and compliant.",
+        stages: [
+          { icon: "✍️", title: "Write the script", auto: "you", body: "Drafted for natural speech: short sentences, a beat where it matters, your name and theirs. The same script, personalized per lead." },
+          { icon: "🎤", title: "Your cloned voice renders it", auto: "bot", body: "One consented voice clone speaks every drop, so a thousand voicemails still sound like you picked up the phone for each one." },
+          { icon: "🛡️", title: "Guardrails check first", auto: "bot", body: "A consent gate, a per-lead timezone window, and a mobile-strip so it only lands where it should, when it should. Never an evasion, always above board." },
+          { icon: "📞", title: "Premium AMD detects voicemail", auto: "bot", body: "The call connects and listens. It drops the message only once the voicemail greeting finishes, never while a person is on the line." },
+          { icon: "📥", title: "It lands as a voicemail", auto: "bot", body: "No ring, no interruption. They see a missed voicemail in your voice, on their schedule, and call back warm." },
+        ],
+        wire: pbWireChrome("recruitersos · voice drops", '<div class="pb-wire-cols">' +
+          '<div class="pb-skel"><div class="cap">Script · spoken in your voice</div><div class="bar lg"></div><div class="bar lg"></div><div class="bar md"></div>' +
+            '<div style="margin-top:14px" class="cap">Guardrails</div>' + toggle("Consent on file", true) + toggle("Timezone window 9a–6p", true) + toggle("Mobile-strip", true) + "</div>" +
+          '<div style="display:grid;place-items:center"><div class="pb-phone"><div class="notch"></div>' +
+            '<div class="pb-vm"><span class="play">▶</span><div style="flex:1"><div class="pb-wave">' +
+              Array.apply(null, Array(14)).map(function (_, i) { return '<i style="height:' + [6, 16, 22, 12, 20, 9, 18, 14, 24, 10, 19, 13, 21, 8][i] + 'px;animation-delay:' + (i * 0.07) + 's"></i>'; }).join("") +
+            '</div></div><span style="font-size:11px;color:var(--text-dim);font-family:monospace">0:18</span></div>' +
+            '<div style="text-align:center;font-size:11px;color:var(--text-dim);margin-top:10px">Voicemail · your voice</div></div></div></div>'),
+        outcome: { em: "💜", title: "The intimacy of a personal voicemail, at the scale of a campaign.", text: "People call back a voice, not a template. And every drop stays consented, timed, and respectful." },
+        cta: [["📞 Open Voice Drops", "voicedrops"]],
+      },
+
+      "campaign-models": {
+        icon: "🎯", accent: "p", title: "Campaign Models", tag: "The daily loop",
+        oneLiner: "The morning loop that runs your outreach for you, multi-channel, in your voice, on approval.",
+        mini: ["📡", "📊", "✍️", "🚀"],
+        mission: "A campaign is a standing instruction, not a one-off blast. Every morning it pulls fresh signals, scores and dedupes them, finds the right contacts, drafts a multi-channel touch in your voice, waits for your approval, then sends, and processes replies all day. You run a desk; the loop does the legwork.",
+        stages: [
+          { icon: "📡", when: "07:00", auto: "bot", title: "Pull signals", body: "Every active campaign runs its enabled signal sources for the last 24 hours, the fresh reasons to reach out today." },
+          { icon: "📊", when: "07:15", auto: "bot", title: "Score, rank, dedupe", body: "A composite score per ICP, disqualifiers suppressed, deduped against your ATS. Only the top N for the day advance." },
+          { icon: "🔎", when: "07:30", auto: "bot", title: "Enrich", body: "An enrichment waterfall resolves the right contact and channel for each prospect that made the cut." },
+          { icon: "✍️", when: "07:45", auto: "bot", title: "Draft, multi-channel", body: "Claude drafts the email, the LinkedIn message, and the voice note per prospect, with your A/B variants applied, every line tied to the real signal." },
+          { icon: "✅", when: "08:30", auto: "you", title: "You approve the batch", body: "Fifteen minutes: edit, kill, or approve the queue, and record the HOT-tier voice notes. Or flip on Autopilot and skip it entirely." },
+          { icon: "🚀", when: "09:00", auto: "bot", title: "Push to channels", body: "Emails, LinkedIn, and SMS go out on their channels, every send stamped with its campaign, variant, and touch, then replies route through Response all day." },
+        ],
+        wire: pbWireChrome("recruitersos · campaign · multi-channel sequence", '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center">' +
+          [["Day 0", "✉️ Email"], ["Day 2", "in LinkedIn DM"], ["Day 3", "🎙️ Voice note"], ["Day 5", "📞 Voicemail drop"], ["Day 7", "💬 SMS"]].map(function (s, i) {
+            return (i ? '<span style="color:var(--pb-c);font-size:16px">→</span>' : "") +
+              '<div class="pb-skel" style="text-align:center;min-width:108px"><div class="pb-when" style="margin-bottom:6px">' + esc(s[0]) + '</div><div style="font-size:13px;font-weight:600">' + esc(s[1]) + "</div></div>";
+          }).join("") + "</div>"),
+        outcome: { em: "🔁", title: "Set the desk once. It runs every morning.", text: "Signal-led, multi-channel, in your voice, and either approved in minutes or fully hands-off on Autopilot." },
+        cta: [["🎯 Build a campaign", "campaigns"], ["📚 Sequence Library", "content"], ["🤖 Autopilot", "autopilot"]],
+      },
+    };
+  }
+
+  function renderPlaybooks(el) {
+    var DATA = pbData();
+    var detail = currentDetail();
+    if (detail && DATA[detail]) return pbDetail(el, DATA, detail);
+
+    // ---- Gallery ----
+    var order = ["flip-the-script", "jd-sourcing", "ai-vetting", "voice-drops", "campaign-models"];
+    var cards = order.map(function (k) {
+      var p = DATA[k];
+      var mini = p.mini.map(function (m, i) {
+        return (i ? '<span class="ar">→</span>' : "") + '<span class="n">' + m + "</span>";
+      }).join("");
+      return '<div class="pb-card" data-accent="' + p.accent + '" data-pb="' + k + '">' +
+        '<div class="pb-ico">' + p.icon + "</div>" +
+        "<h3>" + esc(p.title) + "</h3>" +
+        '<p class="pb-mission">' + esc(p.oneLiner) + "</p>" +
+        '<div class="pb-mini">' + mini + "</div>" +
+        '<span class="pb-go">See the workflow <span class="arr">→</span></span></div>';
+    }).join("");
+
+    el.innerHTML =
+      '<div class="pb-wrap">' +
+        '<div class="pb-hero">' +
+          '<span class="pb-eyebrow"><span class="dot"></span>The vision, seen</span>' +
+          "<h2>How RecruitersOS works.</h2>" +
+          "<p>Five approaches, one idea: stop interrupting strangers, start arriving at the right moment with a real reason. Pick any one to see its workflow, step by step, the way it actually runs.</p>" +
+        "</div>" +
+        '<div class="pb-grid">' + cards + "</div>" +
+      "</div>";
+
+    el.querySelector(".pb-wrap").addEventListener("click", function (e) {
+      var c = e.target.closest("[data-pb]");
+      if (c) { location.hash = "playbooks/" + c.getAttribute("data-pb"); }
+    });
+  }
+
+  function pbDetail(el, DATA, key) {
+    var p = DATA[key];
+    var flow = p.stages.map(pbStage).join("");
+    var cta = (p.cta || []).map(function (b) {
+      var route = b[1];
+      // Only offer routes this user/motion can actually reach; otherwise drop it.
+      if (ROUTES[route] && ROUTES[route].cap && !can(ROUTES[route].cap)) return "";
+      return '<button class="btn btn-ghost btn-sm" data-go="' + esc(route) + '">' + esc(b[0]) + "</button>";
+    }).join("");
+
+    el.innerHTML =
+      '<div class="pb-wrap">' +
+        '<span class="pb-back" data-go="playbooks"><span>←</span> All playbooks</span>' +
+        '<div class="pb-d-head"><div class="pb-ico">' + p.icon + "</div>" +
+          '<div><div class="pb-tag">' + esc(p.tag) + "</div><h2>" + esc(p.title) + "</h2></div></div>" +
+        '<div class="pb-mission-band">' + esc(p.mission) + "</div>" +
+        (p.extra || "") +
+        '<p class="pb-section-label">The workflow</p>' +
+        '<div class="pb-flow">' + flow + "</div>" +
+        '<p class="pb-section-label">What it looks like</p>' +
+        p.wire +
+        '<div class="pb-outcome"><span class="em">' + p.outcome.em + "</span>" +
+          "<div><b>" + esc(p.outcome.title) + "</b><span>" + esc(p.outcome.text) + "</span></div></div>" +
+        (cta ? '<div class="pb-d-cta">' + cta + "</div>" : "") +
+      "</div>";
+
+    el.querySelector(".pb-wrap").addEventListener("click", function (e) {
+      var t = e.target.closest("[data-go]");
+      if (t) { location.hash = t.getAttribute("data-go"); }
+    });
   }
 
   function renderResponse(el) {
@@ -2638,6 +2879,303 @@
         fetch(API + "/campaigns?id=" + encodeURIComponent(id), { method: "DELETE", credentials: "include" }).catch(function () {});
       }
     };
+  }
+
+  /* ---------------- Autopilot command center ----------------
+     One screen: pull every hiring signal -> enrich -> run approved, sequenced
+     campaigns hands-off. The "set it and forget it" surface. Backed by
+     /api/autopilot. Works for BD (auto-pull hiring signals) and Recruiting
+     (sequence candidates sourced in JD Sourcing); the approve-once model gate is
+     identical for both motions. */
+  function apEvery(ms) {
+    var s = Math.round(ms / 1000);
+    if (s < 90) return s + "s";
+    var m = Math.round(s / 60); if (m < 90) return "every " + m + "m";
+    var h = Math.round(m / 60); return "every " + h + "h";
+  }
+  function apWhen(iso) {
+    if (!iso) return "";
+    var d = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (d < 60) return "just now"; if (d < 3600) return Math.floor(d / 60) + "m ago";
+    if (d < 86400) return Math.floor(d / 3600) + "h ago"; return Math.floor(d / 86400) + "d ago";
+  }
+  var AP_CH = { email: "✉️", linkedin: "💼", voice: "📞" };
+
+  function renderAutopilot(el) {
+    el.innerHTML = head("Autopilot",
+      "Pull every hiring signal, enrich it, and let approved campaigns run themselves. Draft the outreach with AI, approve it once, then set it and forget it.") +
+      '<div id="apWrap">' + loading() + "</div>";
+    load();
+
+    function load() {
+      api("/autopilot").then(function (d) {
+        if (!d) { $("#apWrap").innerHTML = '<div class="empty">Could not load Autopilot. Try refreshing.</div>'; return; }
+        paint(d);
+      });
+    }
+
+    function paint(d) {
+      var camps = d.campaigns || [];
+      var live = camps.filter(function (c) { return c.autoRun && c.outreachApproved && c.status === "active"; });
+      var sig = d.signals || null;
+
+      // ---- engine status strip ----
+      var engineOn = d.enabled && d.armed;
+      var statusCard =
+        '<div class="ap-engine ' + (engineOn ? "on" : "off") + '">' +
+          '<div class="ap-engine-main">' +
+            '<span class="ap-dot ' + (engineOn ? "on" : "off") + '"></span>' +
+            '<div><div class="ap-engine-t">Automation engine ' + (engineOn ? "is running" : "is off") + "</div>" +
+            '<div class="ap-engine-s">' + (engineOn
+              ? live.length + " campaign" + (live.length === 1 ? "" : "s") + " live on Autopilot · the portal is its own clock, no n8n"
+              : (d.enabled ? "Enabled, arming on next boot." : "Set AUTOMATION_ENABLED=on on the server, then redeploy, to arm the clock.")) +
+            "</div></div>" +
+          "</div>" +
+          '<div class="ap-ticks">' + (d.ticks || []).map(function (t) {
+            return '<span class="ap-tick" title="' + esc(t.label) + '"><b>' + esc(t.label) + "</b>" + apEvery(t.everyMs) + "</span>";
+          }).join("") + "</div>" +
+          '<button class="btn btn-primary btn-sm" id="apRunNow">▶ Run a cycle now</button>' +
+        "</div>";
+
+      // ---- pipeline visual ----
+      var poolTotal = sig ? (sig.total || 0) : 0;
+      var poolPos = sig ? (sig.openPositions || 0) : 0;
+      var queuedAll = camps.reduce(function (a, c) { return a + (c.counts.queued || 0); }, 0);
+      var inSeqAll = camps.reduce(function (a, c) { return a + (c.counts.inSequence || 0); }, 0);
+      var pipeline =
+        '<div class="ap-pipe">' +
+          apStage("📡", "Hiring signals", poolTotal.toLocaleString() + " companies", poolPos ? poolPos.toLocaleString() + " open roles" : "live pool") +
+          '<span class="ap-arrow">→</span>' +
+          apStage("✨", "Enrich + draft", "email · phone · LinkedIn", "AI personalization") +
+          '<span class="ap-arrow">→</span>' +
+          apStage("🎯", "Sequenced campaigns", live.length + " live", queuedAll + " queued · " + inSeqAll + " in sequence") +
+        "</div>";
+
+      // ---- signals pull panel (BD) ----
+      var bdCamps = camps.filter(function (c) { return c.motion === "bd"; });
+      var sigPanel =
+        '<div class="card ap-card"><div class="ap-card-h"><h3>📡 Pull from hiring signals</h3>' +
+          '<span class="muted">' + (sig ? ("Updated " + (apWhen(sig.lastAddedAt) || "recently") + " · " + (sig.addedToday || 0) + " added today · " + (sig.windowDays || 90) + "-day window") : "Pool warms in the background") + "</span></div>" +
+          (sig && sig.breakdown && sig.breakdown.length
+            ? '<div class="ap-sigchips">' + sig.breakdown.slice(0, 14).map(function (b) {
+                return '<label class="ap-sigchip"><input type="checkbox" class="apSig" value="' + esc(b.signalType) + '"> ' + esc(prettySignal(b.signalType)) + ' <b>' + b.count + "</b></label>";
+              }).join("") + "</div>"
+            : '<div class="muted" style="margin:6px 0 10px">No signals pooled yet — the background accumulator fills this within a day of deploy (needs a database).</div>') +
+          '<div class="ap-pullform">' +
+            '<label>Stage onto<select id="apTarget">' +
+              (bdCamps.length ? bdCamps.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + (c.autoRun && c.outreachApproved ? " · live" : "") + "</option>"; }).join("") : '<option value="">— create a BD campaign first —</option>') +
+            "</select></label>" +
+            '<label>How many<input type="number" id="apLimit" value="50" min="1" max="500"></label>' +
+            '<label>Contacts / company<select id="apPer"><option value="1">1 (decision-maker)</option><option value="3">3 (manager + dept)</option><option value="5">5 (full ladder)</option></select></label>' +
+            '<label class="ap-check"><input type="checkbox" id="apDial"> Find direct dials <span class="muted">(+cost)</span></label>' +
+            '<button class="btn btn-primary" id="apPull">Pull, enrich &amp; stage</button>' +
+          "</div>" +
+          '<div id="apPullMsg" class="muted" style="margin-top:8px"></div>' +
+        "</div>";
+
+      // ---- campaigns workflow table ----
+      var campRows = camps.length ? camps.map(campRow).join("") :
+        '<div class="empty">No campaigns yet. Create one to draft a model and arm Autopilot.</div>';
+      var campPanel =
+        '<div class="card ap-card"><div class="ap-card-h"><h3>🎯 Campaigns &amp; workflows</h3>' +
+          '<button class="btn btn-ghost btn-sm" id="apNew">＋ New campaign</button></div>' +
+          '<div class="ap-camps">' + campRows + "</div>" +
+          '<p class="muted" style="margin:10px 2px 0">Workflow: <b>Draft model</b> (AI writes the sequence) → <b>Review &amp; approve</b> the outreach → <b>Autopilot on</b>. Ongoing prospects then flow through the approved templates automatically.</p>' +
+        "</div>";
+
+      // ---- activity feed ----
+      var acts = d.activity || [];
+      var actPanel =
+        '<div class="card ap-card"><div class="ap-card-h"><h3>📜 Recent activity</h3></div>' +
+          (acts.length ? '<div class="ap-acts">' + acts.slice(0, 25).map(function (a) {
+            return '<div class="ap-act"><span class="ap-act-ic">' + (AP_CH[a.channel] || "•") + "</span>" +
+              '<div class="ap-act-m"><b>' + esc(a.type || "event") + "</b> " + esc(a.summary || "") + "</div>" +
+              '<span class="ap-act-t">' + apWhen(a.at) + "</span></div>";
+          }).join("") + "</div>" : '<div class="muted">No sends yet. Approve a campaign and run a cycle.</div>') +
+        "</div>";
+
+      $("#apWrap").innerHTML = statusCard + pipeline +
+        '<div class="ap-grid">' + sigPanel + campPanel + "</div>" + actPanel;
+
+      bind(d);
+    }
+
+    function campRow(c) {
+      var motionBadge = '<span class="ap-badge ' + c.motion + '">' + (c.motion === "bd" ? "BD" : "Recruiting") + "</span>";
+      var stageBtn, stageCls;
+      if (!c.hasModel) { stageBtn = '<button class="btn btn-primary btn-sm" data-ap="draft" data-id="' + c.id + '">✨ Draft model</button>'; stageCls = "todraft"; }
+      else if (!c.outreachApproved) { stageBtn = '<button class="btn btn-primary btn-sm" data-ap="review" data-id="' + c.id + '">👀 Review &amp; approve</button>'; stageCls = "toreview"; }
+      else {
+        stageCls = "approved";
+        stageBtn = '<span class="ap-approved">✓ Model approved</span>' +
+          '<label class="ap-toggle"><input type="checkbox" class="apAuto" data-id="' + c.id + '"' + (c.autoRun ? " checked" : "") + '> Autopilot</label>' +
+          '<button class="btn btn-ghost btn-sm" data-ap="review" data-id="' + c.id + '">View</button>';
+      }
+      var cc = c.counts;
+      return '<div class="ap-camp ' + stageCls + '">' +
+        '<div class="ap-camp-meta"><div class="ap-camp-n">' + esc(c.name) + " " + motionBadge +
+          (c.autoRun && c.outreachApproved && c.status === "active" ? ' <span class="ap-live">● LIVE</span>' : "") + "</div>" +
+          '<div class="ap-camp-s">' + esc(c.methodology || "") + (c.modelTouches ? " · " + c.modelTouches + " touches" : "") +
+          (c.modelEngine ? ' · <span class="muted">' + esc(c.modelEngine === "library" ? "template draft" : "AI-drafted") + "</span>" : "") + "</div></div>" +
+        '<div class="ap-camp-counts">' +
+          apCount(cc.queued, "queued") + apCount(cc.inSequence, "in seq") + apCount(cc.nurture, "nurture") + apCount(cc.replied, "replied") +
+        "</div>" +
+        '<div class="ap-camp-act">' + stageBtn + "</div>" +
+      "</div>";
+    }
+
+    function bind(d) {
+      var run = $("#apRunNow"); if (run) run.addEventListener("click", function () {
+        run.disabled = true; run.textContent = "Running…";
+        send("/autopilot", "POST", { action: "run-now" }).then(function (r) {
+          if (r.ok) toast("Ran a cycle: " + (r.data.sent || 0) + " sent across " + (r.data.campaigns || 0) + " campaign(s)");
+          else toast("Run failed: " + (r.data && r.data.error || "error"));
+          load();
+        });
+      });
+
+      var nw = $("#apNew"); if (nw) nw.addEventListener("click", apCreateCampaign);
+
+      var pull = $("#apPull"); if (pull) pull.addEventListener("click", function () {
+        var target = $("#apTarget").value;
+        if (!target) { toast("Create a BD campaign first"); return; }
+        var sigs = Array.prototype.map.call(document.querySelectorAll(".apSig:checked"), function (x) { return x.value; });
+        var payload = { action: "pull", campaignId: target, limit: parseInt($("#apLimit").value, 10) || 50,
+          contactsPerCompany: parseInt($("#apPer").value, 10) || 1, findDirectDial: $("#apDial").checked };
+        if (sigs.length) payload.signalTypes = sigs;
+        pull.disabled = true; var msg = $("#apPullMsg"); msg.textContent = "Pulling and enriching…";
+        send("/autopilot", "POST", payload).then(function (r) {
+          pull.disabled = false;
+          if (r.ok) { msg.innerHTML = "✓ Staged <b>" + r.data.promoted + "</b> prospects (" + r.data.withEmail + " with email, " + r.data.withPhone + " with phone) from " + r.data.pulled + " companies."; toast("Staged " + r.data.promoted + " prospects"); load(); }
+          else { msg.textContent = "Pull failed: " + (r.data && r.data.detail || r.data && r.data.error || "error"); }
+        });
+      });
+
+      Array.prototype.forEach.call(document.querySelectorAll(".apAuto"), function (cb) {
+        cb.addEventListener("change", function () {
+          send("/autopilot", "POST", { action: "set-autorun", campaignId: cb.getAttribute("data-id"), autoRun: cb.checked }).then(function (r) {
+            if (r.ok) toast(cb.checked ? "Autopilot on 🤖" : "Autopilot off");
+            else { toast((r.data && r.data.detail) || "Could not toggle"); cb.checked = !cb.checked; }
+            load();
+          });
+        });
+      });
+
+      Array.prototype.forEach.call(document.querySelectorAll("[data-ap]"), function (b) {
+        var act = b.getAttribute("data-ap"), id = b.getAttribute("data-id");
+        if (act === "draft") b.addEventListener("click", function () { apDraftModel(id, b); });
+        if (act === "review") b.addEventListener("click", function () { apReviewModel(id); });
+      });
+    }
+
+    function apDraftModel(id, btn) {
+      if (btn) { btn.disabled = true; btn.textContent = "Drafting…"; }
+      send("/autopilot", "POST", { action: "draft-model", campaignId: id }).then(function (r) {
+        if (r.ok) { toast("Model drafted — review it"); apShowModel(id, r.data.model); }
+        else { toast("Draft failed: " + (r.data && r.data.detail || r.data && r.data.error || "error")); load(); }
+      });
+    }
+
+    function apReviewModel(id) {
+      // Fetch the STORED model (no re-draft — that would burn an LLM call and reset
+      // approval). If none exists yet, draft one.
+      send("/autopilot", "POST", { action: "get-model", campaignId: id }).then(function (r) {
+        if (r.ok && r.data.model && r.data.model.touches && r.data.model.touches.length) apShowModel(id, r.data.model);
+        else apDraftModel(id);
+      });
+    }
+
+    function apShowModel(id, model) {
+      var touches = (model && model.touches) || [];
+      var rows = touches.map(function (t, i) {
+        return '<div class="ap-touch" data-i="' + i + '">' +
+          '<div class="ap-touch-h"><span class="ap-touch-ic">' + (AP_CH[t.channel] || "•") + "</span>" +
+            '<input class="ap-t-label" value="' + esc(t.label || "") + '">' +
+            '<span class="ap-t-day">day <input type="number" class="ap-t-dayv" value="' + (t.day || 0) + '" min="0"></span>' +
+            '<span class="ap-t-ch">' + esc(t.channel) + (t.action ? " · " + esc(t.action) : "") + "</span></div>" +
+          (t.channel === "email" ? '<input class="ap-t-subj" placeholder="Subject" value="' + esc(t.subject || "") + '">' : "") +
+          '<textarea class="ap-t-body" rows="4">' + esc(t.body || "") + "</textarea>" +
+        "</div>";
+      }).join("");
+      var bodyHtml =
+        '<div class="ap-model">' +
+          '<p class="muted">' + esc(model && model.summary || "Review the sequence. Edit any step, then approve to arm Autopilot.") +
+            (model && model.engine === "library" ? " (Template draft — set ANTHROPIC_API_KEY for AI-written copy.)" : "") + "</p>" +
+          '<div class="ap-touches">' + rows + "</div>" +
+          '<div class="ap-model-foot">' +
+            '<button class="btn btn-ghost" id="apSaveModel">Save edits</button>' +
+            '<button class="btn btn-primary" id="apApprove">✓ Approve &amp; arm Autopilot</button>' +
+          "</div>" +
+        "</div>";
+      openModal("Review the outreach model", "Approve once — then ongoing prospects run on these templates automatically.", bodyHtml, function (root, close) {
+        function collect() {
+          return Array.prototype.map.call(root.querySelectorAll(".ap-touch"), function (n) {
+            var subj = n.querySelector(".ap-t-subj");
+            return { key: touches[+n.getAttribute("data-i")] && touches[+n.getAttribute("data-i")].key,
+              label: n.querySelector(".ap-t-label").value, day: parseInt(n.querySelector(".ap-t-dayv").value, 10) || 0,
+              channel: touches[+n.getAttribute("data-i")].channel, action: touches[+n.getAttribute("data-i")].action,
+              subject: subj ? subj.value : undefined, body: n.querySelector(".ap-t-body").value };
+          });
+        }
+        root.querySelector("#apSaveModel").addEventListener("click", function () {
+          send("/autopilot", "POST", { action: "update-model", campaignId: id, touches: collect() }).then(function (r) {
+            toast(r.ok ? "Edits saved" : "Save failed");
+          });
+        });
+        root.querySelector("#apApprove").addEventListener("click", function () {
+          // Save edits first, then approve, then arm Autopilot — the one-click "deploy".
+          send("/autopilot", "POST", { action: "update-model", campaignId: id, touches: collect() }).then(function () {
+            return send("/autopilot", "POST", { action: "approve-model", campaignId: id });
+          }).then(function (r) {
+            if (!r.ok) { toast("Approve failed"); return; }
+            return send("/autopilot", "POST", { action: "set-autorun", campaignId: id, autoRun: true });
+          }).then(function (r) {
+            if (r && r.ok) toast("Approved & live on Autopilot 🤖");
+            close(); load();
+          });
+        });
+      });
+    }
+
+    function apCreateCampaign() {
+      var bodyHtml =
+        '<div class="ap-newform">' +
+          '<label>Campaign name<input id="apcName" placeholder="e.g. Q3 Fintech hiring surge"></label>' +
+          '<label>Motion<select id="apcMotion"><option value="bd">Business Development (reach hiring companies)</option><option value="recruiting">Recruiting (reach candidates)</option></select></label>' +
+          '<label>Sequence style<select id="apcMethod">' +
+            '<option value="seven_touch_drip">7-touch multi-channel drip</option>' +
+            '<option value="voice_first">Voice-first (warm, high-touch)</option>' +
+            '<option value="hiring_manager_outreach">LinkedIn-led</option>' +
+          "</select></label>" +
+          '<label>Daily cap<input type="number" id="apcCap" value="25" min="1" max="500"></label>' +
+          '<button class="btn btn-primary" id="apcCreate">Create &amp; draft model</button>' +
+        "</div>";
+      openModal("New Autopilot campaign", "Create it, then AI drafts the sequence for your review.", bodyHtml, function (root, close) {
+        root.querySelector("#apcCreate").addEventListener("click", function () {
+          var name = root.querySelector("#apcName").value.trim();
+          if (!name) { toast("Name it first"); return; }
+          var payload = { action: "create-campaign", name: name, motion: root.querySelector("#apcMotion").value,
+            methodology: root.querySelector("#apcMethod").value, dailyCap: parseInt(root.querySelector("#apcCap").value, 10) || 25 };
+          send("/autopilot", "POST", payload).then(function (r) {
+            if (!r.ok) { toast("Create failed"); return; }
+            var id = r.data.campaign.id; close();
+            toast("Created — drafting the model…");
+            apDraftModel(id);
+          });
+        });
+      });
+    }
+  }
+
+  function prettySignal(s) {
+    return String(s || "other").replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+  }
+  function apStage(ic, t, a, b) {
+    return '<div class="ap-stage"><div class="ap-stage-ic">' + ic + "</div><div><div class=\"ap-stage-t\">" + esc(t) +
+      '</div><div class="ap-stage-a">' + esc(a) + '</div><div class="ap-stage-b muted">' + esc(b) + "</div></div></div>";
+  }
+  function apCount(n, label) {
+    return '<span class="ap-c' + (n ? " has" : "") + '"><b>' + (n || 0) + "</b>" + label + "</span>";
   }
 
   function renderStudio(el) {
@@ -8188,6 +8726,159 @@
     }
 
     return '<div class="empty">Nothing to show.</div>';
+  }
+
+  // ===== Nurture (the 24-month A/B drip) =====================================
+  // Admin BD view: the two-strategy A/B (Authority Engine vs Inner Circle) head to
+  // head on book-rate, the mpc/consultative framing axis underneath it, and every
+  // enrollment with its stage, next-due touch, queued signal triggers and staged
+  // LinkedIn touches — with pause / resume / complete / requeue controls. Reads the
+  // session-authed /analytics/nurture rollup.
+  function renderNurture(el) {
+    el.innerHTML = head("Nurture",
+      "The 24-month authority drip, running two strategies head to head on one engine. Approach A (the Authority Engine) keeps a regular value cadence so we stay top of mind; Approach B (the Inner Circle) is mostly trigger-only with a quarterly floor. Job changes, company news and notable posts override the cadence with an immediate, event-anchored touch. Book-rate per strategy picks the winner.") +
+      '<div class="an-tools" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">' +
+        '<span style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600">' +
+          '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent-green);animation:anPulse 2s infinite"></span>Live</span>' +
+        '<span id="nuUpdated" class="muted" style="font-size:12px"></span>' +
+        '<span style="flex:1"></span>' +
+        '<select id="nuFilter" class="os-sel" style="background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:12.5px">' +
+          [["", "All states"], ["active", "Active"], ["needs_review", "Needs review"], ["dormant", "Dormant"], ["paused", "Paused"], ["completed", "Completed"]].map(function (o) {
+            return '<option value="' + o[0] + '">' + o[1] + "</option>";
+          }).join("") + "</select>" +
+        '<button class="btn btn-ghost btn-sm" id="nuRefresh">↻</button>' +
+      "</div>" +
+      '<style>@keyframes anPulse{0%{box-shadow:0 0 0 0 rgba(56,224,166,.55)}70%{box-shadow:0 0 0 7px rgba(56,224,166,0)}100%{box-shadow:0 0 0 0 rgba(56,224,166,0)}}' +
+      '.nu-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}@media(max-width:760px){.nu-grid{grid-template-columns:1fr}}' +
+      '.nu-fcard{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:14px 16px}' +
+      '.nu-fcard.win{border-color:var(--accent-green);box-shadow:0 0 0 1px rgba(56,224,166,.35)}' +
+      '.nu-fnums{display:flex;gap:18px;margin-top:8px}.nu-fnums .n{font-size:20px;font-weight:800}.nu-fnums .l{font-size:10.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em}' +
+      '.nu-tbl{width:100%;border-collapse:collapse;font-size:12.5px}.nu-tbl th{text-align:left;color:var(--text-dim);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--border)}' +
+      '.nu-tbl td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:top}' +
+      '.nu-strat{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.06)}' +
+      '.nu-strat.authority{color:#8ab4ff}.nu-strat.inner_circle{color:#f0a5ff}</style>' +
+      '<div id="nuBody">' + loading() + "</div>";
+
+    function statusPill(s) {
+      var m = { active: "positive", paused: "not_interested", completed: "soft_yes", dormant: "timing_objection", needs_review: "unclassified" };
+      var lbl = { active: "Active", paused: "Paused", completed: "Completed", dormant: "Dormant", needs_review: "Needs review" };
+      return '<span class="cls-pill ' + (m[s] || "unclassified") + '">' + (lbl[s] || esc(s)) + "</span>";
+    }
+    function stratPill(s) {
+      var lbl = { authority: "Authority", inner_circle: "Inner Circle" };
+      return '<span class="nu-strat ' + esc(s || "") + '">' + (lbl[s] || esc(s || "-")) + "</span>";
+    }
+    function fmtDue(iso) {
+      if (!iso) return "-";
+      var d = new Date(iso); if (isNaN(d.getTime())) return "-";
+      var days = Math.round((d.getTime() - Date.now()) / 86400000);
+      var when = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      var rel = days <= 0 ? "due now" : ("in " + days + "d");
+      return when + ' <span class="muted">(' + rel + ")</span>";
+    }
+    function fcard(name, blurb, rep, isWinner) {
+      rep = rep || { enrolled: 0, engaged: 0, booked: 0, engageRatePct: 0, bookRatePct: 0 };
+      return '<div class="nu-fcard' + (isWinner ? " win" : "") + '">' +
+        '<div style="display:flex;align-items:center;gap:8px"><b style="font-size:14px">' + esc(name) + "</b>" +
+          (isWinner ? ' <span style="font-size:10.5px;font-weight:700;color:var(--accent-green)">▲ WINNING</span>' : "") + "</div>" +
+        '<div class="muted" style="font-size:11.5px;margin-top:2px">' + esc(blurb) + "</div>" +
+        '<div class="nu-fnums">' +
+          '<div><div class="n gradient-text">' + rep.enrolled + '</div><div class="l">Enrolled</div></div>' +
+          '<div><div class="n">' + rep.engaged + '</div><div class="l">Engaged</div></div>' +
+          '<div><div class="n">' + rep.booked + '</div><div class="l">Booked</div></div>' +
+          '<div><div class="n">' + rep.bookRatePct + '%</div><div class="l">Book rate</div></div>' +
+        "</div></div>";
+    }
+
+    function actionsFor(e) {
+      var btn = function (act, label) {
+        return '<button class="btn btn-ghost btn-sm nu-act" data-act="' + act + '" data-pid="' + esc(e.prospectId) + '" style="padding:3px 8px;font-size:11px">' + label + "</button>";
+      };
+      if (e.status === "active" || e.status === "needs_review") return btn("pause", "Pause") + (e.status === "needs_review" ? btn("resume", "Approve") : "");
+      if (e.status === "paused") return btn("resume", "Resume");
+      if (e.status === "dormant") return btn("requeue", "Requeue") + btn("complete", "Complete");
+      if (e.status === "completed") return btn("requeue", "Requeue");
+      return "";
+    }
+
+    function paint(d) {
+      var body = $("#nuBody"); if (!body) return;
+      if (!d) { body.innerHTML = '<div class="empty">Could not load nurture. The drip fills in once prospects are enrolled from the BD funnel.</div>'; return; }
+      var sr = (d.strategyReport && d.strategyReport.strategies) || {};
+      var vr = (d.variantReport && d.variantReport.variants) || {};
+      var sWin = d.strategyReport && d.strategyReport.winner;
+      var vWin = d.variantReport && d.variantReport.winner;
+      var enrollments = d.enrollments || [];
+      var filter = ($("#nuFilter") && $("#nuFilter").value) || "";
+      var rows = enrollments.filter(function (e) { return !filter || e.status === filter; });
+
+      var strategyCards =
+        '<div class="lr-sub" style="margin:2px 0 8px;font-weight:700">A/B Strategy — the headline test (book-rate decides)' +
+          (sWin && sWin !== "insufficient_data" ? "" : ' <span class="muted" style="font-weight:500">· needs 30+ enrolled per arm to call</span>') + "</div>" +
+        '<div class="nu-grid">' +
+          fcard("A · Authority Engine", "Regular ~2x/month value cadence. Top-of-mind through volume of insight.", sr.authority, sWin === "authority") +
+          fcard("B · Inner Circle", "Trigger-only + quarterly floor. Precision and intimacy on higher-value contacts.", sr.inner_circle, sWin === "inner_circle") +
+        "</div>";
+
+      var variantCards =
+        '<div class="lr-sub" style="margin:2px 0 8px;font-weight:700">Message framing — the secondary axis (orthogonal)</div>' +
+        '<div class="nu-grid">' +
+          fcard("MPC", "Leads with a specific placeable candidate.", vr.mpc, vWin === "mpc") +
+          fcard("Consultative", "Earns attention with role/industry insight.", vr.consultative, vWin === "consultative") +
+        "</div>";
+
+      var counts = d.counts || {};
+      var countChips = ["active", "needs_review", "dormant", "paused", "completed"].filter(function (k) { return counts[k]; }).map(function (k) {
+        return statusPill(k) + ' <b>' + counts[k] + "</b>";
+      }).join(" &nbsp; ") || '<span class="muted">No enrollments yet.</span>';
+
+      var tbl = '<table class="nu-tbl"><thead><tr>' +
+        "<th>Prospect</th><th>State</th><th>Strategy</th><th>Framing</th><th>Stage</th><th>Next touch</th><th>Queue</th><th></th>" +
+        "</tr></thead><tbody>" +
+        rows.map(function (e) {
+          var who = esc(e.fullName || e.firstName || e.prospectId);
+          var sub = [e.title, e.company].filter(Boolean).map(esc).join(" · ");
+          var trg = (e.triggered || []).length, pend = (e.pending || []).length;
+          var queue = (trg ? '<span title="signal triggers waiting" style="color:var(--accent-green)">⚡' + trg + "</span> " : "") +
+            (pend ? '<span title="staged LinkedIn touches" class="muted">✎' + pend + "</span>" : "") || "-";
+          var stageNum = (e.status === "dormant") ? "floor" : ((e.nextTouchIndex != null ? e.nextTouchIndex : 0) + "/" + (e.planLength || "-"));
+          return "<tr><td><div class='lr-main'>" + who + "</div>" + (sub ? "<div class='lr-sub'>" + sub + "</div>" : "") + "</td>" +
+            "<td>" + statusPill(e.status) + (e.hold ? ' <span class="muted" style="font-size:10px">' + esc(e.hold) + "</span>" : "") + "</td>" +
+            "<td>" + stratPill(e.strategy) + "</td>" +
+            "<td class='muted'>" + esc(e.variant || "-") + "</td>" +
+            "<td>" + esc(String(stageNum)) + ' <span class="muted">· ' + (e.touchesSent || 0) + " sent</span></td>" +
+            "<td>" + fmtDue(e.nextDueAt) + "</td>" +
+            "<td>" + queue + "</td>" +
+            "<td style='white-space:nowrap'>" + actionsFor(e) + "</td></tr>";
+        }).join("") +
+        "</tbody></table>";
+      if (!rows.length) tbl = '<div class="empty">No enrollments' + (filter ? " in this state" : "") + " yet.</div>";
+
+      body.innerHTML = strategyCards + variantCards +
+        '<div class="card" style="margin-top:6px"><div class="lr-sub" style="margin-bottom:10px">' + countChips + "</div>" + tbl + "</div>";
+
+      Array.prototype.forEach.call(body.querySelectorAll(".nu-act"), function (b) {
+        b.addEventListener("click", function () {
+          var act = b.getAttribute("data-act"), pid = b.getAttribute("data-pid");
+          b.disabled = true;
+          send("/analytics/nurture", "POST", { action: act, prospectId: pid }).then(function (r) {
+            if (r.ok) { toast("Updated"); load(); }
+            else { toast("Update failed"); b.disabled = false; }
+          }).catch(function () { toast("Update failed"); b.disabled = false; });
+        });
+      });
+    }
+
+    function load() {
+      api("/analytics/nurture").then(function (d) {
+        paint(d);
+        var u = $("#nuUpdated"); if (u) u.textContent = "updated " + new Date().toLocaleTimeString();
+      }).catch(function () { paint(null); });
+    }
+
+    var fb = $("#nuRefresh"); if (fb) fb.addEventListener("click", load);
+    var ff = $("#nuFilter"); if (ff) ff.addEventListener("change", load);
+    load();
   }
 
   function renderAccounts(el) {

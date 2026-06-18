@@ -180,6 +180,7 @@
         '<input data-cs="name" class="cs-name" value="Untitled campaign" spellcheck="false" /></div>' +
       motionToggle +
       '<span data-cs="status" class="cs-status-pill draft">draft</span>' +
+      '<button data-cs="autopilot" class="btn btn-ghost btn-sm" title="Autopilot: run this campaign hands-off — the portal drafts, auto-approves and sends on its own clock (no n8n, no morning approval queue). Replies still pause it.">🤖 Autopilot: off</button>' +
       '<div class="cs-tool-actions">' +
         '<button class="btn btn-ghost btn-sm cs-addblock-btn" data-cs="addblock">＋ Add block</button>' +
         '<button class="btn btn-ghost btn-sm" data-cs="full" title="Toggle full screen">⛶ Full screen</button>' +
@@ -300,6 +301,7 @@
       id: null, name: "Untitled campaign", goal: "",
       motion: opts.motion === "bd" ? "bd" : "recruiting",
       status: "draft", assignee: assignees[0], account: accounts[0],
+      autoRun: false,
       dailyCap: 25, voiceThreshold: 80,
       prospectListId: "", prospectListName: "",
       nodes: [], edges: [], selected: null,
@@ -872,6 +874,7 @@
       $("assignee").value = state.assignee; $("account").value = state.account;
       $("cap").value = state.dailyCap; $("threshold").value = state.voiceThreshold;
       var sp = $("status"); sp.textContent = state.status; sp.className = "cs-status-pill " + state.status;
+      var ap = $("autopilot"); if (ap) { ap.textContent = "🤖 Autopilot: " + (state.autoRun ? "on" : "off"); ap.classList.toggle("btn-primary", !!state.autoRun); ap.classList.toggle("btn-ghost", !state.autoRun); }
       if (!opts.embedded) Array.prototype.forEach.call(root.querySelectorAll(".cs-motion .mt"), function (b) { b.classList.toggle("active", b.dataset.motion === state.motion); });
       renderStats();
     }
@@ -880,7 +883,7 @@
     function snapshot() {
       return {
         id: state.id || uid("camp"), name: state.name, goal: state.goal, motion: state.motion,
-        status: state.status, assignee: state.assignee, account: state.account,
+        status: state.status, autoRun: !!state.autoRun, assignee: state.assignee, account: state.account,
         prospectListId: state.prospectListId, prospectListName: state.prospectListName,
         dailyCap: state.dailyCap, voiceThreshold: state.voiceThreshold,
         nodes: state.nodes.map(function (n) { return { uid: n.uid, key: n.key, channel: n.channel, label: n.label, ic: n.ic, cfg: n.cfg, delay: n.delay, x: n.x, y: n.y }; }),
@@ -901,7 +904,7 @@
     }
     function loadCampaign(c) {
       state.id = c.id; state.name = c.name; state.goal = c.goal || ""; state.motion = c.motion === "bd" ? "bd" : "recruiting";
-      state.status = c.status || "draft"; state.assignee = c.assignee || assignees[0]; state.account = c.account || c.senderAccount || accounts[0];
+      state.status = c.status || "draft"; state.autoRun = !!c.autoRun; state.assignee = c.assignee || assignees[0]; state.account = c.account || c.senderAccount || accounts[0];
       state.dailyCap = c.dailyCap || 25; state.voiceThreshold = c.voiceThreshold || c.voiceNoteThreshold || 80;
       state.prospectListId = c.prospectListId || ""; state.prospectListName = c.prospectListName || "";
       if (c.nodes && c.nodes.length) {
@@ -978,7 +981,7 @@
     $("saveas").addEventListener("click", function () { state.id = null; state.name = state.name + " (copy)"; syncMeta(); save(); });
     $("new").addEventListener("click", function () {
       if (state.nodes.length && !confirm("Start a new campaign? Unsaved changes will be lost.")) return;
-      state.id = null; state.name = "Untitled campaign"; state.goal = ""; state.status = "draft"; state.nodes = []; state.edges = []; state.selected = null;
+      state.id = null; state.name = "Untitled campaign"; state.goal = ""; state.status = "draft"; state.autoRun = false; state.nodes = []; state.edges = []; state.selected = null;
       state.view = { panX: 28, panY: 24, zoom: 1 };
       syncMeta(); renderNodes(); renderInspectorNode(); renderPalette(); applyTransform();
     });
@@ -993,6 +996,16 @@
       if (!state.nodes.filter(function (n) { return n.channel !== "logic"; }).length) { toast("Add at least one outreach touch first"); return; }
       state.status = state.status === "active" ? "paused" : "active"; save(true); syncMeta();
       toast(state.status === "active" ? "Campaign activated 🚀" : "Campaign paused");
+    });
+    $("autopilot").addEventListener("click", function () {
+      // Hands-off run mode. Turning it ON also activates the campaign — an
+      // Autopilot campaign that isn't active would never be picked up by the
+      // internal cadence clock. Persists straight to the backend so the server's
+      // Automation scheduler (gated by AUTOMATION_ENABLED) starts running it.
+      state.autoRun = !state.autoRun;
+      if (state.autoRun && state.status !== "active") state.status = "active";
+      save(true); syncMeta();
+      toast(state.autoRun ? "Autopilot on — this campaign now runs hands-off 🤖" : "Autopilot off — back to manual approval");
     });
 
     function onKey(e) {
@@ -1013,7 +1026,7 @@
     function controller() {
       return {
         load: loadCampaign,
-        newCampaign: function (motion) { var s = starter(motion || state.motion); state.id = null; state.name = "Untitled campaign"; state.goal = ""; state.status = "draft"; state.nodes = s.nodes; state.edges = s.edges; state.motion = motion || state.motion; state.selected = null; syncMeta(); renderNodes(); renderInspectorNode(); renderPalette(); fit(); },
+        newCampaign: function (motion) { var s = starter(motion || state.motion); state.id = null; state.name = "Untitled campaign"; state.goal = ""; state.status = "draft"; state.autoRun = false; state.nodes = s.nodes; state.edges = s.edges; state.motion = motion || state.motion; state.selected = null; syncMeta(); renderNodes(); renderInspectorNode(); renderPalette(); fit(); },
         getState: function () { return state; },
         save: save,
       };

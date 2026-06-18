@@ -100,7 +100,57 @@ export interface Campaign {
   senderAccount?: string;
   /** Outreach-Statistics promote-winners config (continuously refreshed when on). */
   autopilot?: CampaignAutopilot;
+  /**
+   * Hands-off run mode. When true, the internal Automation scheduler runs this
+   * campaign end-to-end with NO human in the loop: it drafts on the daily
+   * cadence, AUTO-APPROVES those drafts (skipping the 8:30 approval queue), and
+   * pushes them to the channels — then the sequence/voice/nurture ticks carry
+   * every prospect forward. When false/unset, drafts still generate but wait in
+   * the approval queue for a human to approve (the current default behavior).
+   * This is the per-campaign "Autopilot" switch that replaces the external
+   * n8n conductor — the portal becomes its own clock. Gated globally by the
+   * AUTOMATION_ENABLED env so the whole engine has one master kill switch.
+   */
+  autoRun?: boolean;
+  /**
+   * The approved outreach MODEL — the LLM-drafted, merge-field sequence templates
+   * a human reviews and signs off ONCE before this campaign is allowed to run
+   * hands-off. "See the models, approve the outreach, then set it and forget it":
+   * `model` holds the drafted templates; `outreachApproved` is the gate. The
+   * Autopilot runner refuses to send for a campaign whose model isn't approved,
+   * and renders every ongoing send by merge-filling these approved templates
+   * (no per-send LLM — the copy stays exactly what was approved).
+   */
+  model?: CampaignModel;
+  outreachApproved?: boolean;
   updatedAt?: string;
+}
+
+/** One templated step in an approved campaign model. Bodies/subjects carry merge
+ *  fields ({{firstName}}, {{company}}, {{title}}, {{role}}, {{signal}}) filled
+ *  per prospect at send time. `day` is the delay from enrollment the step fires. */
+export interface CampaignModelTouch {
+  key: string;
+  day: number;
+  channel: "email" | "linkedin" | "voice";
+  /** For LinkedIn: "connect" | "message" | "voice_note". */
+  action?: string;
+  label: string;
+  subject?: string;
+  body: string;
+}
+
+/** The LLM-drafted, human-approved outreach model for a campaign. */
+export interface CampaignModel {
+  generatedAt: string;
+  approvedAt?: string;
+  /** The LLM that wrote it (audit), or "library" when the template fallback ran. */
+  engine: string;
+  motion: Motion;
+  persona?: string;
+  /** A one-line description of the strategy, for the review screen. */
+  summary?: string;
+  touches: CampaignModelTouch[];
 }
 
 /** A person we are reaching: a BD buyer or a candidate. */
@@ -150,8 +200,12 @@ export interface Prospect {
   status: ProspectStatus;
   /** The channel the most recent inbound arrived on. */
   lastChannel?: Channel;
-  /** Current drip touch (1..7), or null when paused / not yet sequenced. */
+  /** Current drip touch (1..7), or null when paused / not yet sequenced. Under
+   *  Autopilot this is the count of approved-model touches already sent. */
   dripStage: number | null;
+  /** When the Autopilot runner first enrolled this prospect into the model — the
+   *  clock the per-day model touches are paced against. */
+  sequenceStartedAt?: string;
   /** 0..100 composite warmth/intent score; >= voiceNoteThreshold unlocks voice. */
   warmth: number;
   /** Stamped when status flips to "booked". */

@@ -11,12 +11,16 @@
 
 import { NextResponse } from "next/server";
 import { requireAuth } from "../../../../lib/linkedin/auth";
-import { ensureNurtureReady, listEnrollments, setStatus, getEnrollment, type NurtureStatus } from "../../../../lib/bd/nurture";
+import { ensureNurtureReady, listEnrollments, setStatus, getEnrollment, planFor, type NurtureStatus } from "../../../../lib/bd/nurture";
+import { ensureStrategyReady, report as strategyReport } from "../../../../lib/bd/nurtureStrategy";
+import { ensureExperimentReady, report as variantReport } from "../../../../lib/bd/experiment";
 
 export async function GET(req: Request) {
   const auth = requireAuth(req);
   if (!auth.ok) return auth.response;
   await ensureNurtureReady();
+  await ensureStrategyReady();
+  await ensureExperimentReady();
 
   const ws = new URL(req.url).searchParams.get("ws") ?? undefined;
   const enrollments = listEnrollments(ws);
@@ -29,16 +33,27 @@ export async function GET(req: Request) {
     ok: true,
     counts,
     total: enrollments.length,
+    // The orthogonal A/B: nurture STRATEGY (authority vs inner_circle) is the headline
+    // test; the mpc/consultative VARIANT is message framing inside it.
+    strategyReport: strategyReport(),
+    variantReport: variantReport(),
     enrollments: enrollments.map((e) => ({
       prospectId: e.prospectId,
       status: e.status,
       hold: e.hold,
+      strategy: e.strategy,
+      variant: e.lead.variant,
+      firstName: e.lead.firstName,
+      fullName: e.lead.fullName,
       title: e.lead.title,
       company: e.lead.company,
       touchesSent: e.touchesSent,
+      engagedCount: e.engagedCount ?? 0,
       nextTouchIndex: e.nextTouchIndex,
+      planLength: planFor(e.strategy).length,
       nextDueAt: e.nextDueAt,
       pending: e.pending,
+      triggered: e.triggered.filter((t) => !t.actioned),
     })),
   });
 }
@@ -55,11 +70,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const valid: NurtureStatus[] = ["paused", "active", "completed"];
-  const map: Record<string, NurtureStatus> = { pause: "paused", resume: "active", complete: "completed" };
+  const valid: NurtureStatus[] = ["paused", "active", "completed", "dormant"];
+  // requeue re-wakes a dormant/completed enrollment back to the active cadence.
+  const map: Record<string, NurtureStatus> = { pause: "paused", resume: "active", complete: "completed", dormant: "dormant", requeue: "active" };
   const status = body.action ? map[body.action] : undefined;
   if (!body.prospectId || !status || !valid.includes(status)) {
-    return NextResponse.json({ error: "bad_request", detail: "prospectId + action (pause|resume|complete) required" }, { status: 422 });
+    return NextResponse.json({ error: "bad_request", detail: "prospectId + action (pause|resume|complete|dormant|requeue) required" }, { status: 422 });
   }
   if (!getEnrollment(body.prospectId)) {
     return NextResponse.json({ error: "not_enrolled" }, { status: 404 });

@@ -2,6 +2,8 @@
  * GET    /api/campaigns       -> list campaigns + the 7-phase deploy spec + benchmarks
  * POST   /api/campaigns       -> create a Draft campaign (phase 2)
  * PUT    /api/campaigns       -> upsert a Campaign Studio campaign (visual sequence)
+ * PATCH  /api/campaigns       -> toggle Autopilot (hands-off run) on a campaign
+ *   { id, autoRun: boolean }  -> sets campaign.autoRun (+ activates it when turning on)
  * DELETE /api/campaigns?id=   -> remove a campaign from the workspace
  */
 
@@ -52,6 +54,28 @@ export async function PUT(req: Request) {
   };
   await getCore().saveCampaign(campaign as any);
   return ok({ campaign });
+}
+
+/**
+ * Toggle Autopilot (hands-off run mode) on a single campaign. When turning it
+ * ON we also flip status to "active" — an Autopilot campaign that isn't active
+ * would never be picked up by the cadence tick, so "Autopilot on" implies "run".
+ * Turning it OFF leaves status alone (you may want it active but human-gated).
+ */
+export async function PATCH(req: Request) {
+  const g = requireSession(req);
+  if ("response" in g) return g.response;
+  const b = await body<{ id?: string; autoRun?: boolean }>(req);
+  if (!b?.id || typeof b.autoRun !== "boolean") return fail("missing_fields", 422, { detail: "id and autoRun (boolean) are required" });
+  const core = getCore();
+  const c = await core.getCampaign(b.id);
+  if (!c) return fail("not_found", 404);
+  if (c.workspaceId !== g.ctx.workspace.id) return fail("forbidden", 403);
+  c.autoRun = b.autoRun;
+  if (b.autoRun && c.status !== "active") c.status = "active";
+  c.updatedAt = new Date().toISOString();
+  await core.saveCampaign(c);
+  return ok({ campaign: c });
 }
 
 export async function DELETE(req: Request) {

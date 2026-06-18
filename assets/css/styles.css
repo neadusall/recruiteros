@@ -951,3 +951,81 @@ img { height: auto; }
   .aurora, .grid-bg, .noise, .scroll-progress, .nav, footer { display: none !important; }
   body { background: #fff; color: #000; }
 }
+
+/* ===================== Autopilot command center ===================== */
+.ap-engine { display:flex; align-items:center; gap:18px; flex-wrap:wrap; padding:16px 18px; border-radius:var(--radius,12px);
+  border:1px solid var(--border); background:var(--card); margin-bottom:14px; }
+.ap-engine.on { border-color:color-mix(in srgb, var(--accent-green) 45%, var(--border)); background:color-mix(in srgb, var(--accent-green) 7%, var(--card)); }
+.ap-engine-main { display:flex; align-items:center; gap:12px; flex:1; min-width:240px; }
+.ap-engine-t { font-weight:700; font-size:15px; }
+.ap-engine-s { color:var(--text-dim); font-size:12.5px; margin-top:2px; }
+.ap-dot { width:11px; height:11px; border-radius:50%; flex:none; }
+.ap-dot.on { background:var(--accent-green); box-shadow:0 0 0 4px color-mix(in srgb, var(--accent-green) 22%, transparent); animation:apPulse 2s infinite; }
+.ap-dot.off { background:var(--text-dim); }
+@keyframes apPulse { 0%,100%{ opacity:1 } 50%{ opacity:.45 } }
+.ap-ticks { display:flex; gap:8px; flex-wrap:wrap; }
+.ap-tick { display:flex; flex-direction:column; gap:1px; padding:6px 10px; border-radius:9px; background:var(--bg); border:1px solid var(--border); font-size:11px; color:var(--text-dim); }
+.ap-tick b { color:var(--text); font-size:11.5px; font-weight:600; }
+
+.ap-pipe { display:flex; align-items:stretch; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
+.ap-stage { flex:1; min-width:180px; display:flex; gap:12px; align-items:flex-start; padding:14px 16px; border-radius:var(--radius,12px); border:1px solid var(--border); background:var(--card); }
+.ap-stage-ic { font-size:22px; line-height:1; }
+.ap-stage-t { font-weight:700; font-size:13.5px; }
+.ap-stage-a { font-size:13px; margin-top:2px; }
+.ap-stage-b { font-size:11.5px; margin-top:1px; }
+.ap-arrow { align-self:center; color:var(--text-dim); font-size:20px; }
+
+.ap-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media (max-width:1100px){ .ap-grid { grid-template-columns:1fr; } }
+.ap-card { padding:16px 18px; }
+.ap-card-h { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+.ap-card-h h3 { margin:0; font-size:15px; }
+.ap-card-h .muted { font-size:11.5px; }
+
+.ap-sigchips { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:12px; }
+.ap-sigchip { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border-radius:20px; border:1px solid var(--border); background:var(--bg); font-size:12px; cursor:pointer; }
+.ap-sigchip input { margin:0; }
+.ap-sigchip b { color:var(--accent); }
+.ap-pullform { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
+.ap-pullform label { display:flex; flex-direction:column; gap:4px; font-size:11.5px; color:var(--text-dim); }
+.ap-pullform input[type=number], .ap-pullform select { padding:7px 9px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); }
+.ap-check { flex-direction:row !important; align-items:center; gap:6px !important; }
+
+.ap-camps { display:flex; flex-direction:column; gap:8px; }
+.ap-camp { display:flex; align-items:center; gap:12px; padding:11px 13px; border-radius:10px; border:1px solid var(--border); background:var(--bg); flex-wrap:wrap; }
+.ap-camp.approved { border-color:color-mix(in srgb, var(--accent-green) 35%, var(--border)); }
+.ap-camp-meta { flex:1; min-width:180px; }
+.ap-camp-n { font-weight:650; font-size:13.5px; display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+.ap-camp-s { font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+.ap-badge { font-size:10px; font-weight:700; padding:1px 7px; border-radius:5px; letter-spacing:.03em; }
+.ap-badge.bd { background:color-mix(in srgb,var(--accent) 16%,transparent); color:var(--accent); }
+.ap-badge.recruiting { background:color-mix(in srgb,var(--accent-amber) 18%,transparent); color:var(--accent-amber); }
+.ap-live { color:var(--accent-green); font-size:10.5px; font-weight:700; }
+.ap-camp-counts { display:flex; gap:6px; }
+.ap-c { display:flex; flex-direction:column; align-items:center; min-width:42px; padding:3px 6px; border-radius:7px; background:var(--card); font-size:10px; color:var(--text-dim); }
+.ap-c b { font-size:14px; color:var(--text-dim); }
+.ap-c.has b { color:var(--text); }
+.ap-camp-act { display:flex; align-items:center; gap:8px; }
+.ap-approved { color:var(--accent-green); font-size:12px; font-weight:600; }
+.ap-toggle { display:inline-flex; align-items:center; gap:5px; font-size:12px; cursor:pointer; }
+
+.ap-acts { display:flex; flex-direction:column; gap:2px; max-height:340px; overflow:auto; }
+.ap-act { display:flex; align-items:center; gap:10px; padding:7px 4px; border-bottom:1px solid color-mix(in srgb,var(--border) 60%,transparent); font-size:12.5px; }
+.ap-act-ic { width:20px; text-align:center; }
+.ap-act-m { flex:1; }
+.ap-act-t { color:var(--text-dim); font-size:11px; white-space:nowrap; }
+
+/* model review modal */
+.ap-touches { display:flex; flex-direction:column; gap:10px; max-height:52vh; overflow:auto; padding-right:4px; }
+.ap-touch { border:1px solid var(--border); border-radius:10px; padding:10px; background:var(--bg); }
+.ap-touch-h { display:flex; align-items:center; gap:8px; margin-bottom:7px; flex-wrap:wrap; }
+.ap-touch-ic { font-size:16px; }
+.ap-t-label { flex:1; min-width:120px; font-weight:600; border:1px solid var(--border); background:var(--card); color:var(--text); border-radius:6px; padding:5px 8px; }
+.ap-t-day { font-size:11px; color:var(--text-dim); display:inline-flex; align-items:center; gap:4px; }
+.ap-t-dayv { width:52px; padding:4px 6px; border-radius:6px; border:1px solid var(--border); background:var(--card); color:var(--text); }
+.ap-t-ch { font-size:11px; color:var(--text-dim); }
+.ap-t-subj, .ap-t-body { width:100%; border:1px solid var(--border); background:var(--card); color:var(--text); border-radius:6px; padding:7px 9px; font:inherit; margin-top:6px; }
+.ap-model-foot { display:flex; justify-content:flex-end; gap:10px; margin-top:14px; }
+.ap-newform { display:flex; flex-direction:column; gap:12px; }
+.ap-newform label { display:flex; flex-direction:column; gap:5px; font-size:12.5px; color:var(--text-dim); }
+.ap-newform input, .ap-newform select { padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); }

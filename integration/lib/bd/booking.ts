@@ -19,7 +19,7 @@ import { sendEmail, mtaPreferred } from "../providers/mta";
 import { toHtml } from "./draftContent";
 import { inferPersona } from "./personaMessaging";
 import { sanitizeDashes } from "./sanitize";
-import { HOUSE_VOICE } from "./houseVoice";
+import { HOUSE_VOICE, BD_POSITIONING } from "./houseVoice";
 import type { Variant } from "./experiment";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -78,6 +78,10 @@ Method (follow exactly):
 
 The reader should feel: "this person is genuinely offering me something useful and making it easy," never "this person is trying to get me on a sales call."
 
+The call you are inviting them to is about THEIR team and THEIR hiring (helping them build), never about finding THEM a role.
+
+${BD_POSITIONING}
+
 ${HOUSE_VOICE}`;
 
 const ASK_SYSTEM_MPC = `You write a single, confident message from a well-connected recruiter (Ryan / Lume) to an executive who has shown some interest, inviting them to a short call to walk through a specific candidate. This is the forward Most-Placeable-Candidate ask: we have a strong, ready-to-move person who fits their world, and we lead with that.
@@ -94,6 +98,8 @@ Method (follow exactly):
 - Keep it short: email 60-110 words with a quiet, specific subject; linkedin 300-500 characters.
 
 The reader should feel: "this person has someone I should actually meet," never "this is a mass sales pitch."
+
+${BD_POSITIONING}
 
 ${HOUSE_VOICE}`;
 

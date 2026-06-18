@@ -8,9 +8,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="assets/css/styles.css?v=3b77f2915a" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=ab0b438dc8" />
   <link rel="stylesheet" href="assets/css/app.css?v=6b942c909d" />
-  <link rel="stylesheet" href="assets/css/command.css?v=295aa91856" />
+  <link rel="stylesheet" href="assets/css/command.css?v=2b4d368cb7" />
   <link rel="stylesheet" href="assets/css/campaign-studio.css?v=3fc336307f" />
   <link rel="stylesheet" href="assets/css/vetting.css?v=480e45cfaa" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
@@ -67,6 +67,7 @@
         <a class="nav-item" data-route="inmarket" data-motion-only="bd"><span class="ni">📡</span> Hire Signals</a>
 
         <div class="nav-group">Build</div>
+        <a class="nav-item" data-route="autopilot"><span class="ni">🤖</span> Autopilot</a>
         <a class="nav-item" data-route="data" data-motion-only="recruiting"><span class="ni">🗄️</span> Candidates</a>
         <a class="nav-item" data-route="campaigns"><span class="ni">🎯</span> Campaigns</a>
         <a class="nav-item" data-route="voicedrops" data-motion-only="bd"><span class="ni">📞</span> Voice Drops</a>
@@ -77,7 +78,13 @@
 
         <div class="nav-group" data-cap="team:manage">Admin</div>
         <a class="nav-item" data-route="outreach-stats" data-cap="team:manage"><span class="ni">📈</span> Outreach Statistics</a>
+        <a class="nav-item" data-route="nurture" data-cap="team:manage" data-motion-only="bd"><span class="ni">🌱</span> Nurture</a>
         <a class="nav-item" data-route="team" data-cap="team:manage"><span class="ni">👥</span> Team</a>
+
+        <!-- Learn: visual "how it works" playbooks. Available in both portals
+             and both motions, no capability gate. -->
+        <div class="nav-group">Learn</div>
+        <a class="nav-item" data-route="playbooks"><span class="ni">✨</span> Playbooks</a>
       </nav>
     </aside>
 
@@ -142,6 +149,7 @@
             <a class="acct-item" data-route="setup/connected" role="menuitem"><span class="ic">🔑</span> API keys &amp; security</a>
             <a class="acct-item" id="billingLink" role="menuitem"><span class="ic">💳</span> Billing &amp; plan</a>
             <a class="acct-item" href="/developers" role="menuitem"><span class="ic">⚙️</span> Developer API</a>
+            <a class="acct-item" data-route="playbooks" role="menuitem"><span class="ic">✨</span> Playbooks · how it works</a>
             <a class="acct-item" href="/helpcenter" role="menuitem"><span class="ic">❓</span> Help Center</a>
 
             <div class="acct-sep" id="portalSwitchSep"></div>
@@ -164,10 +172,10 @@
   </div>
 
   <div class="toast" id="toast"></div>
-  <script src="assets/js/campaign-studio.js?v=f611ef9721"></script>
+  <script src="assets/js/campaign-studio.js?v=1948cbb21c"></script>
   <script src="assets/js/local-backend.js?v=b695ecd489"></script>
   <script src="assets/js/session-bridge.js?v=2727497284"></script>
   <script src="assets/js/wl-theme.js?v=0659bcc826"></script>
-  <script src="assets/js/command.js?v=819e31baff"></script>
+  <script src="assets/js/command.js?v=9a010a5ab4"></script>
 </body>
 </html>

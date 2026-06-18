@@ -151,6 +151,108 @@ export async function pushApproved(workspaceId: string): Promise<{ sent: number;
 }
 
 /**
+ * Hands-off (Autopilot) run for one workspace. This is the engine the internal
+ * Automation scheduler ticks — the in-process replacement for the n8n conductor.
+ *
+ * It is DELIBERATELY independent of the human approval queue (`queues`): an
+ * Autopilot campaign has no morning review, so we draft and SEND directly here
+ * rather than routing through `runDailyCadence` + the approval queue. That keeps
+ * a mixed workspace safe — manual campaigns keep their human-gated queue
+ * untouched, while only campaigns with `status==="active" && autoRun` flow on
+ * their own. Same enrich -> draft -> send -> advance steps as the manual path
+ * (`runDailyCadence` + `pushApproved`), just with nobody in the loop.
+ *
+ * Idempotent per prospect: a prospect is pulled only while "queued", and is
+ * flipped to "in_sequence" on first send, so the next tick won't re-send it.
+ */
+export async function runAutopilot(workspaceId: string): Promise<{ campaigns: number; sent: number; results: any[] }> {
+  const core = getCore();
+  const { renderTouch } = await import("../automation/model");
+  // Re-pin winning variants for any campaign on the promote-winners autopilot. Best-effort.
+  await refreshAutopilots(workspaceId).catch(() => {});
+
+  // The gate: a campaign runs hands-off ONLY when it is active, on Autopilot, AND
+  // its outreach model has been reviewed + approved. "Approve once, then forget."
+  const campaigns = (await core.listCampaigns(workspaceId)).filter(
+    (c) => c.status === "active" && c.autoRun && c.outreachApproved && c.model && (c.model.touches?.length ?? 0) > 0,
+  );
+  const results: any[] = [];
+  const now = new Date();
+  const DAY = 86_400_000;
+
+  for (const c of campaigns) {
+    const touches = c.model!.touches;
+    const engine = c.model!.engine;
+    let newBudget = c.dailyCap || 25; // cap only NEW enrollments per tick
+
+    // Both freshly-queued prospects (enroll + send day-0) and already-enrolled
+    // ones (send whatever model touches have since come due) are processed here —
+    // this is the set-and-forget loop, pacing the approved model across days.
+    const prospects = (await core.listProspects(workspaceId, { campaignId: c.id }))
+      .filter((p) => p.status === "queued" || p.status === "in_sequence")
+      .sort((a, b) => b.warmth - a.warmth);
+
+    for (const p of prospects) {
+      const isNew = p.status === "queued";
+      if (isNew && newBudget <= 0) continue;
+
+      // Enrich on first enrollment (real waterfall when keyed) -> merge contact/role.
+      if (isNew) {
+        try {
+          const e = await enrich(p, { motion: c.motion });
+          if (e.email && !p.email) p.email = e.email;
+          if (e.title && !p.title) p.title = e.title;
+          if (e.company && !p.company) p.company = e.company;
+          if (e.mobilePhone && !p.mobilePhone) p.mobilePhone = e.mobilePhone;
+          if (e.landlinePhone && !p.landlinePhone) p.landlinePhone = e.landlinePhone;
+          if (e.source.length) await core.saveProspect(p);
+        } catch { /* enrich is best-effort; send with what we have */ }
+      }
+
+      const startIso = p.sequenceStartedAt || (isNew ? now.toISOString() : p.createdAt);
+      const daysSince = Math.max(0, (now.getTime() - Date.parse(startIso)) / DAY);
+      let sent = p.dripStage || 0;
+      let fired = false;
+
+      // Send every model touch whose day has arrived and that we haven't sent yet,
+      // in order. Stop at the first not-yet-due touch (the rest wait for a later tick).
+      for (let i = sent; i < touches.length; i++) {
+        const t = touches[i];
+        if (t.day > daysSince + 1e-9) break;
+        // Voice is the HOT-tier touch: skip (and advance past) it for cold prospects.
+        if (t.channel === "voice" && p.warmth < (c.voiceNoteThreshold ?? 80)) { sent = i + 1; continue; }
+        const r = renderTouch(t, p);
+        const res = await sendTouch(workspaceId, {
+          channel: t.channel,
+          prospect: p,
+          text: r.body,
+          subject: r.subject,
+          campaignChannelIds: {
+            instantlyCampaignId: c.channels?.instantlyCampaignId,
+            linkedinAccountId: c.channels?.linkedinAccountId,
+          },
+          campaignId: c.id,
+          variant: engine,
+          touch: t.label,
+        });
+        results.push({ campaignId: c.id, prospectId: p.id, channel: t.channel, touch: t.label, ...res });
+        if (res.ok) { sent = i + 1; fired = true; }
+        else break; // a failed send is retried on the next tick, not skipped
+      }
+
+      if (isNew || fired) {
+        if (isNew) { p.sequenceStartedAt = now.toISOString(); p.status = "in_sequence"; newBudget--; }
+        p.dripStage = sent;
+        if (sent >= touches.length) p.status = "nurture"; // finished the approved model
+        await core.saveProspect(p);
+      }
+    }
+  }
+
+  return { campaigns: campaigns.length, sent: results.filter((r) => r.ok).length, results };
+}
+
+/**
  * 7:45 draft — pull the lead's day-0 touches from the parameterized content
  * library (industry × function × seniority × signal × motion), instead of one
  * generic line. Produces the opening email, the LinkedIn connect note, and, for

@@ -63,5 +63,15 @@ export async function register(): Promise<void> {
     } catch {
       /* never let an instrumentation hiccup block server startup */
     }
+    // The Automation clock: the in-process replacement for the external n8n
+    // conductor. Gated by AUTOMATION_ENABLED (no-op when off), it ticks the
+    // cadence / LinkedIn / voice / sending / nurture engines on intervals so
+    // campaigns with Autopilot on run end-to-end with nobody in the loop.
+    try {
+      const { ensureAutomationScheduler } = await import("./lib/automation/scheduler");
+      ensureAutomationScheduler();
+    } catch {
+      /* never let an instrumentation hiccup block server startup */
+    }
   }
 }

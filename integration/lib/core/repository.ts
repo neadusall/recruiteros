@@ -19,6 +19,10 @@ export interface CoreRepository {
   // campaigns
   getCampaign(id: string): Promise<Campaign | null>;
   listCampaigns(workspaceId: string): Promise<Campaign[]>;
+  /** Every campaign across ALL workspaces — used only by the background
+   *  Automation scheduler to find the workspaces with hands-off campaigns due
+   *  for a cadence run. Request paths stay workspace-scoped via listCampaigns. */
+  listAllCampaigns(): Promise<Campaign[]>;
   saveCampaign(c: Campaign): Promise<void>;
   deleteCampaign(id: string): Promise<void>;
 
@@ -71,6 +75,10 @@ class InMemoryCore implements CoreRepository {
   async listCampaigns(workspaceId: string) {
     await this.ready();
     return [...this.campaigns.values()].filter((c) => c.workspaceId === workspaceId);
+  }
+  async listAllCampaigns() {
+    await this.ready();
+    return [...this.campaigns.values()];
   }
   async saveCampaign(c: Campaign) {
     await this.ready();

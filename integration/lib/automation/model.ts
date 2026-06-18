@@ -1,0 +1,139 @@
+/**
+ * RecruitersOS · Autopilot · the outreach MODEL
+ *
+ * "Show me the models, let me approve the outreach, then set it and forget it."
+ *
+ * A campaign's *model* is its full multi-touch sequence written as merge-field
+ * TEMPLATES (e.g. "Hi {{firstName}}, saw {{company}} is {{signal}}…"). A human
+ * reviews and approves it ONCE; from then on the Autopilot runner sends ongoing
+ * prospects by merge-filling those approved templates — no per-send LLM call, so
+ * the copy never drifts from what was signed off, and there's no ongoing AI cost.
+ *
+ * `draftCampaignModel` writes the model with a solid LLM (Anthropic), motion-aware
+ * (BD = win the meeting with the hiring company; Recruiting = open a candidate to
+ * a role). With no ANTHROPIC_API_KEY it degrades to a strong built-in template
+ * sequence so the feature still works — just less tailored.
+ */
+
+import type { Campaign, CampaignModel, CampaignModelTouch, Prospect } from "../core/types";
+
+const MERGE_HELP = "{{firstName}}, {{company}}, {{title}}, {{role}}, {{signal}}";
+
+/** Render one model touch for a specific prospect (merge-fill, graceful fallbacks). */
+export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>): { subject?: string; body: string } {
+  const vals: Record<string, string> = {
+    firstname: p.firstName || (p.fullName ? p.fullName.split(/\s+/)[0] : "") || "there",
+    company: p.company || "your team",
+    title: p.title || "your role",
+    role: (p as any).signalReason || p.title || "the role you're hiring for",
+    signal: (p as any).signalReason || "your recent hiring activity",
+  };
+  const fill = (s?: string) =>
+    (s || "").replace(/\{\{\s*([a-zA-Z]+)\s*\}\}/g, (_m, k) => vals[String(k).toLowerCase()] ?? "");
+  return { subject: touch.subject ? fill(touch.subject) : undefined, body: fill(touch.body) };
+}
+
+/* ----------------------------- LLM drafting ----------------------------- */
+
+function systemPrompt(motion: Campaign["motion"]): string {
+  const shared =
+    "You are a senior outbound strategist. Write a multi-touch outreach sequence as REUSABLE TEMPLATES " +
+    `with merge fields (only these: ${MERGE_HELP}). Natural, specific, human; no hype, no fake familiarity, ` +
+    "no invented referrals or social proof, no em-dashes. Short sentences. Each touch earns the next. " +
+    "Return STRICT JSON only, no prose.";
+  if (motion === "recruiting") {
+    return shared +
+      " Motion: RECRUITING. You are reaching a CANDIDATE about a specific role. Lead with why this role fits " +
+      "them, respect that they may be passive, and make the ask low-friction (a quick chat, not a hard sell).";
+  }
+  return shared +
+    " Motion: BUSINESS DEVELOPMENT. You are reaching a hiring DECISION-MAKER at a company showing a hiring " +
+    "signal. Anchor the opener on the real signal ({{signal}}), offer relevant help, and ask if it's worth a short call.";
+}
+
+function userPrompt(c: Campaign): string {
+  return JSON.stringify({
+    instruction:
+      "Draft the sequence for this campaign. Choose 4-7 touches across the allowed channels, spread over days. " +
+      "Honor the methodology and voice threshold. Keep LinkedIn 'connect' notes under 300 chars. Voicemail/voice " +
+      "scripts must read aloud naturally (terminal punctuation, ~45 words). Output JSON of shape: " +
+      '{ "summary": string, "persona": string, "touches": [ { "day": number, "channel": "email"|"linkedin"|"voice", ' +
+      '"action"?: "connect"|"message"|"voice_note", "label": string, "subject"?: string, "body": string } ] }',
+    campaign: {
+      motion: c.motion,
+      name: c.name,
+      goal: c.goal,
+      methodology: c.methodology,
+      voiceNoteThreshold: c.voiceNoteThreshold,
+      icp: c.icp,
+      signals: c.signals,
+    },
+  });
+}
+
+function coerceTouches(raw: any): CampaignModelTouch[] {
+  const arr = Array.isArray(raw?.touches) ? raw.touches : [];
+  const out: CampaignModelTouch[] = [];
+  arr.forEach((t: any, i: number) => {
+    const channel = t?.channel === "linkedin" || t?.channel === "voice" ? t.channel : "email";
+    const body = String(t?.body ?? "").trim();
+    if (!body) return;
+    out.push({
+      key: "t" + i,
+      day: Number.isFinite(+t?.day) ? Math.max(0, Math.round(+t.day)) : i * 2,
+      channel,
+      action: t?.action ? String(t.action) : channel === "linkedin" ? "message" : undefined,
+      label: String(t?.label ?? `Touch ${i + 1}`).slice(0, 60),
+      subject: channel === "email" && t?.subject ? String(t.subject).slice(0, 160) : undefined,
+      body: body.slice(0, 2000),
+    });
+  });
+  return out.sort((a, b) => a.day - b.day);
+}
+
+/** Draft a campaign's outreach model with the LLM, or fall back to a template sequence. */
+export async function draftCampaignModel(c: Campaign): Promise<CampaignModel> {
+  const now = new Date().toISOString();
+  try {
+    const { anthropicClient } = await import("../sourcing/anthropic");
+    const client = anthropicClient();
+    const model = process.env.AUTOPILOT_MODEL_LLM || "claude-opus-4-8";
+    const resp = await client.messages.create({
+      model,
+      max_tokens: 2400,
+      system: systemPrompt(c.motion),
+      messages: [{ role: "user", content: userPrompt(c) }],
+    });
+    const text = resp.content.map((b: any) => (b.type === "text" ? b.text : "")).join("");
+    const json = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+    const touches = coerceTouches(json);
+    if (touches.length) {
+      return { generatedAt: now, engine: model, motion: c.motion, persona: json?.persona, summary: json?.summary, touches };
+    }
+  } catch {
+    /* fall through to the built-in template sequence */
+  }
+  return fallbackModel(c, now);
+}
+
+/* --------------------------- no-LLM fallback ---------------------------- */
+
+function fallbackModel(c: Campaign, now: string): CampaignModel {
+  const bd = c.motion !== "recruiting";
+  const touches: CampaignModelTouch[] = bd
+    ? [
+        { key: "t0", day: 0, channel: "linkedin", action: "connect", label: "Connect (signal note)", body: "Hi {{firstName}}, saw {{company}} is {{signal}}. I work with teams hiring for {{role}} and had a couple of ideas. Open to connecting?" },
+        { key: "t1", day: 0, channel: "email", label: "Signal opener", subject: "{{company}} + {{role}}", body: "Hi {{firstName}},\n\nNoticed {{company}} is {{signal}}. We help teams fill {{role}} faster without the usual agency drag.\n\nWorth a short call to see if it's a fit?\n\nBest" },
+        { key: "t2", day: 3, channel: "email", label: "Value follow-up", subject: "Re: {{company}} + {{role}}", body: "Hi {{firstName}},\n\nQuick follow-up. If filling {{role}} is a priority this quarter, I can share how similar teams cut time-to-hire.\n\nHappy to send a one-pager or grab 15 minutes." },
+        { key: "t3", day: 7, channel: "voice", action: "voice_note", label: "Voicemail (hot only)", body: "Hi {{firstName}}, it's a quick note about {{role}} at {{company}}. I sent a short email too. If hiring's on your plate, I'd love to help. No pressure. Talk soon." },
+        { key: "t4", day: 12, channel: "email", label: "Break-up", subject: "Closing the loop", body: "Hi {{firstName}},\n\nI'll stop here so I'm not a pest. If {{role}} hiring heats up, just reply and I'll jump in.\n\nAll the best" },
+      ]
+    : [
+        { key: "t0", day: 0, channel: "linkedin", action: "connect", label: "Connect (role intro)", body: "Hi {{firstName}}, I'm working on {{role}} and your background stood out. Open to connecting? No pitch, just think it could be a strong fit." },
+        { key: "t1", day: 0, channel: "email", label: "Role opener", subject: "{{role}} — thought of you", body: "Hi {{firstName}},\n\nI'm helping fill {{role}} and your experience lines up well. Even if you're not looking, worth a quick chat to compare notes?\n\nBest" },
+        { key: "t2", day: 3, channel: "email", label: "Why-you follow-up", subject: "Re: {{role}}", body: "Hi {{firstName}},\n\nWhat caught my eye: your background maps closely to what this team needs. I can share the details and comp range so you can decide if it's worth 15 minutes.\n\nInterested?" },
+        { key: "t3", day: 8, channel: "voice", action: "voice_note", label: "Voice note", body: "Hi {{firstName}}, quick voice note about a {{role}} opening I think fits you well. Sent an email too. If the timing's right, I'd love to walk you through it. Cheers." },
+        { key: "t4", day: 14, channel: "email", label: "Break-up", subject: "Closing the loop", body: "Hi {{firstName}},\n\nI'll leave it here for now. If a move makes sense down the line, reply anytime and I'll line things up.\n\nAll the best" },
+      ];
+  return { generatedAt: now, engine: "library", motion: c.motion, summary: bd ? "Signal-anchored BD sequence" : "Candidate-fit recruiting sequence", touches };
+}

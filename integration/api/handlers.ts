@@ -41,7 +41,9 @@ import {
   type SignalFilter,
   type CollectReport,
   type EnrichmentReport,
+  type Signal,
 } from "../lib/signals";
+import { routeSignalToNurture } from "../lib/bd/nurtureSignals";
 
 /* ------------------------------------------------------------------ */
 /* Dependencies injected into the handlers                             */
@@ -120,9 +122,17 @@ export async function postCollect(req: AuthedRequest, deps: HandlerDeps): Promis
       seen: stores.seen,
       triggerTopN: body.triggerTopN ?? 25,
       enrichmentPlan: body.enrich ? cheapFirstContactWaterfall() : undefined,
-      onTrigger: deps.onTrigger
-        ? (signal) => deps.onTrigger!(req.auth.workspaceId, signal)
-        : undefined,
+      // Every triggered signal is also routed to the 24-month nurture drip: a job
+      // change, company news, or a notable post about an ENROLLED prospect fires an
+      // immediate event-anchored touch (no-op for anyone not enrolled).
+      onTrigger: async (signal) => {
+        try {
+          await routeSignalToNurture(req.auth.workspaceId, signal as Signal);
+        } catch {
+          /* nurture routing is best-effort; never block campaign triggering */
+        }
+        if (deps.onTrigger) await deps.onTrigger(req.auth.workspaceId, signal);
+      },
     });
   } catch (err) {
     return apiError(502, "collector_failed", (err as Error).message);
@@ -158,6 +168,13 @@ export async function postIngest(req: AuthedRequest, deps: HandlerDeps): Promise
     return apiError(400, "invalid_signal", (err as Error).message);
   }
   if (deps.ingestSignal) await deps.ingestSignal(req.auth.workspaceId, signal);
+  // A customer-pushed signal (e.g. their CRM saw a contact change jobs) also routes
+  // into the nurture drip when it concerns an enrolled prospect.
+  try {
+    await routeSignalToNurture(req.auth.workspaceId, signal as Signal);
+  } catch {
+    /* best-effort */
+  }
   return apiOk({ accepted: true, signal }, 202);
 }
 

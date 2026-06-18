@@ -21,6 +21,7 @@ import { getCore } from "../../../../lib/core/repository";
 import { draftContent, leadFromProspect } from "../../../../lib/bd/draftContent";
 import { ensureNurtureReady, isEnrolled, enroll, type NurtureLead } from "../../../../lib/bd/nurture";
 import { ensureExperimentReady, recordOutcome } from "../../../../lib/bd/experiment";
+import { ensureStrategyReady, recordStrategyOutcome } from "../../../../lib/bd/nurtureStrategy";
 import { allocate, recordSample } from "../../../../lib/bd/methodology";
 
 function minConfidence(): number {
@@ -42,6 +43,7 @@ export async function GET(req: Request) {
 
   await ensureNurtureReady();
   await ensureExperimentReady();
+  await ensureStrategyReady();
 
   const all = await getCore().listProspects(ws);
   // Signal-sourced BD prospects not yet enrolled (enrollment = the de-dupe ledger).
@@ -89,6 +91,7 @@ export async function GET(req: Request) {
     if (draft.confidenceScore >= threshold) {
       enroll(ws, p.id, frozen, { status: "active" });
       recordOutcome(p.id, "enrolled");
+      recordStrategyOutcome(p.id, "enrolled");
       prospects.push({
         id: p.id,
         firstName: p.firstName,

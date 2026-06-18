@@ -1,5 +1,12 @@
 # RecruitersOS — Multi-Channel Outreach Router (n8n)
 
+> **n8n is now optional.** RecruitersOS runs its own outreach clock in-process —
+> see [`docs/platform/internal-automation.md`](../../platform/internal-automation.md).
+> Set `AUTOMATION_ENABLED=on` and flip a campaign's **Autopilot** toggle and the
+> portal drafts → sends → advances on its own, no external conductor. This n8n
+> workflow still works as an alternative/redundant trigger if you prefer it.
+
+
 An importable n8n workflow that takes **one person** (with an industry + job title),
 classifies them, routes them into **one of four outreach scenarios**, couples the
 right **content** and the right **multi-channel sequence** to them, and enrolls them
