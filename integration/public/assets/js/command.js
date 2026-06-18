@@ -1428,101 +1428,86 @@
 
     return {
       "flip-the-script": {
-        icon: "🔁", accent: "v", title: "Flip the Script", tag: "The core idea, worked end to end",
-        oneLiner: "Lead with two people who fit the exact opening, then earn the meeting over a real multi-channel sequence.",
-        mini: ["✉️", "➕", "🎙️", "📞"],
+        icon: "🔁", accent: "v", title: "Flip the Script", tag: "Business Development · candidate → prospect",
+        oneLiner: "Reach out to a great person as a candidate, then flip them into a client when they're not moving but they are hiring.",
+        mini: ["✉️", "🎙️", "🔀", "🎯"],
         board: true,
-        flowLabel: "The sequence · 6 touches that earn the meeting",
-        mission: "Most outreach fails because it arrives at the wrong time, to the wrong person, with no real reason. Flip the Script inverts it: a real signal fires first, you lead with two passive candidates who fit the exact opening, and you earn the meeting over a patient multi-channel sequence, never a single cold pitch. Here is the whole thing worked end to end, on one real opening. Click any step to read the exact message.",
+        mission: "Flip the Script is a BD play that starts as candidate outreach. You approach a strong, senior person about a role. The best ones usually are not moving, they are happy, or senior enough to be doing the hiring themselves. So you flip the script: turn the candidate into a prospect. They move from your Candidates pipeline into BD, and now you help them hire. Here it is worked end to end. Click any step to read the exact message.",
         extra:
-          '<p class="pb-section-label">The setup · one real opening</p>' +
-          pbArt("📡 Why this account, why now", null,
-            pbKV([
-              ["Company", "Lumen Pay, embedded payments", true],
-              ["Signal", "Series B, $40M raised · 'Senior Backend (Go)' reposted ×3"],
-              ["Decision-maker", "Priya Nair, Director of Engineering"],
-              ["Read on the room", "High bar, thin pipeline, scaling pressure right after the raise"]
-            ])) +
-          '<p class="pb-section-label">The two people you lead with</p>' +
-          '<div class="pb-wire-cols">' +
-            pbArt("Candidate A · anonymized", ["ok", "94% fit"],
-              '<div class="pb-list">' +
-                '<div class="row"><span class="b g"></span>Scaled a payments ledger to twelve thousand transactions a second at five-nines, at a Series C fintech</div>' +
-                '<div class="row"><span class="b c"></span>Lives in Go and event-sourcing; cut reconciliation latency by 80 percent</div>' +
-                '<div class="row"><span class="b a"></span>Passive, would move only for a real ownership mandate on a platform like Lumen Pay</div>' +
-              "</div>") +
-            pbArt("Candidate B · anonymized", ["ok", "91% fit"],
-              '<div class="pb-list">' +
-                '<div class="row"><span class="b g"></span>Built the fraud-scoring pipeline that saved a neobank roughly four million a year in chargebacks</div>' +
-                '<div class="row"><span class="b c"></span>Deep Go, Kafka and real-time risk; the engineer who anchors a team and lifts everyone around them</div>' +
-                '<div class="row"><span class="b a"></span>Passive, but genuinely intrigued by what embedded payments unlocks</div>' +
-              "</div>") +
-          "</div>" +
-          '<p class="pb-section-label">Why this beats a cold pitch</p>' +
+          '<p class="pb-section-label">The flip</p>' +
           '<div class="pb-vs">' +
-            '<div class="vs-card bad"><div class="vs-lbl">✕ Cold</div>' +
-              '<div class="pb-bubble">"Hi, are you hiring? I place great backend engineers. Open to a quick call?"</div>' +
-              '<div class="vs-out">→ Deleted. No reason, no timing, nothing about them.</div></div>' +
+            '<div class="vs-card bad"><div class="vs-lbl">✕ Standard BD</div>' +
+              '<div class="pb-bubble">"Hi, are you hiring? I place senior engineers. Open to a quick call?"</div>' +
+              '<div class="vs-out">→ Ignored. Just another vendor.</div></div>' +
             '<div class="pb-vs-arrow">➜</div>' +
             '<div class="vs-card good"><div class="vs-lbl">✓ Flipped</div>' +
-              '<div class="pb-bubble">"Congrats on the Series B. Instead of a pitch, here are two passive engineers who fit your Go role exactly, with the proof in three bullets each."</div>' +
-              '<div class="vs-out">→ Replied. Right moment, real people, real substance.</div></div>' +
-          "</div>",
+              '<div class="pb-bubble">Approached as a candidate about a VP role. He is not moving, but he is hiring. So: "Are you building your own team? That is exactly what I am best at."</div>' +
+              '<div class="vs-out">→ A dead candidate thread becomes a client.</div></div>' +
+          "</div>" +
+          '<p class="pb-section-label">Candidate → Prospect, where it resides</p>' +
+          pbArt("How it moves through RecruitersOS", null,
+            '<div class="pb-list">' +
+              '<div class="row"><span class="b c"></span>Starts in <b>Candidates</b>: you reach out about a role for them</div>' +
+              '<div class="row"><span class="b a"></span>They are senior and happy, but clearly hiring for their own team</div>' +
+              '<div class="row"><span class="b p"></span>The flip: promote <b>Candidate → Prospect</b>, into the BD motion</div>' +
+              '<div class="row"><span class="b g"></span>Now you sell into their team: the MPC play takes over</div>' +
+            "</div>") +
+          '<div class="pb-note"><span class="i">▸</span><span>Even though the first touch is candidate-style, this whole sequence lives in the BD model, because the goal is a client, not a placement.</span></div>',
         stages: [
-          { icon: "✉️", when: "DAY 0 · EMAIL", title: "Lead with the two candidates",
-            body: "Open on their world, the raise and the embedded-payments push, then hand them two passive engineers who fit the exact role, with the proof in bullets. No pitch, just people.",
-            out: "<b>SENT</b> · subject 'two backend engineers for the Lumen Pay platform team'",
-            peek: { icon: "✉️", title: "Touch 1 · the opening email", sub: "Day 0 · Email · to Priya Nair", cta: "Read the email",
-              body: pbMail("From you · to Priya Nair, Lumen Pay", "two backend engineers for the Lumen Pay platform team",
-                "Hi Priya,\n\nCongrats on the Series B. I saw the raise and the move deeper into embedded payments, and that is the scale where the backend either becomes the moat or the bottleneck. I also noticed the Senior Backend (Go) role has been back up a few times. Usually that means the bar is high and the right people simply are not applying.\n\nSo instead of a pitch, here are two people. Both are passive, both fit the opening, and I have spoken with each of them this week.\n\nThe first:\n• Scaled a payments ledger to twelve thousand transactions a second at five-nines, at a Series C fintech\n• Lives in Go and event-sourcing, and cut reconciliation latency by 80 percent\n• Not looking, but would move for a real ownership mandate on a platform like yours\n\nThe second:\n• Built the fraud-scoring pipeline that saved a neobank roughly four million a year in chargebacks\n• Deep Go, Kafka and real-time risk, the kind of engineer who anchors a team and lifts everyone around them\n• Passive, but genuinely intrigued by what embedded payments unlocks\n\nNeither will be on the market long. Want me to send their full profiles, or grab fifteen minutes this week and I will walk you through both?\n\nThanks,\n{you}") +
-                '<div class="pb-note"><span class="i">▸</span><span>Anonymized candidates, real substance, three bullets each, tied to the exact opening. No fabricated referrals.</span></div>' } },
-          { icon: "➕", when: "DAY 2 · LINKEDIN CONNECT", title: "Connect, referencing the email",
-            body: "A short, no-pitch connection note that ties back to the email, so you become a familiar name rather than a cold request.",
-            out: "<b>REQUEST SENT</b> · 'just emailed you about two backend engineers...'",
+          { icon: "✉️", when: "DAY 0 · EMAIL", title: "Approach as a candidate",
+            body: "Reach out about a role that would genuinely be a step up for them. Real, specific, flattering, and low-pressure.",
+            out: "<b>SENT</b> · approached as a candidate for a VP Eng role",
+            peek: { icon: "✉️", title: "Touch 1 · the candidate approach", sub: "Day 0 · Email · to Marcus Lee", cta: "Read the email",
+              body: pbMail("From you · to Marcus Lee, Vela", "a VP Engineering seat that's a real step up",
+                "Hi Marcus,\n\nI came across your work scaling the platform team at Vela, genuinely impressive. I'm working a VP Engineering role that would be a real step up in scope, and you came to mind.\n\nI'm not pushing you to leave anything. Just worth a fifteen-minute look? If it's not for you, no harm at all.\n\nThanks,\n{you}") +
+                '<div class="pb-note"><span class="i">▸</span><span>He enters as a Candidate. The opener is a real role, not a pretext.</span></div>' } },
+          { icon: "➕", when: "DAY 2 · LINKEDIN CONNECT", title: "Connect, referencing the role",
+            body: "A short connection note that ties back to the email, so you become a familiar name.",
+            out: "<b>REQUEST SENT</b> · 'emailed you about a VP Eng role'",
             peek: { icon: "➕", title: "Touch 2 · connection request", sub: "Day 2 · LinkedIn", cta: "Read the note",
-              body: pbArt("LinkedIn connection note", null, pbIM("Hi Priya, I just emailed you about two backend engineers who fit the Lumen Pay platform role almost exactly. Connecting here too so it is easy to reply. No pitch, the work speaks for itself.")) } },
+              body: pbArt("LinkedIn connection note", null, pbIM("Hi Marcus, just emailed you about a VP Eng role I thought you'd find interesting. Connecting here too, no pressure.")) } },
           { icon: "📱", when: "DAY 3 · SMS", accent: "a", title: "If the connect is still pending, a warm SMS",
             cond: "the LinkedIn connection is still pending",
-            body: "A branch, not a step. Fires only if Priya hasn't accepted the connection by day 3. Uses her previous company from deep enrichment for a warm, truthful opener, and points to a call, not a document dump.",
+            body: "A branch, not a step. Fires only if Marcus hasn't accepted by day 3. Warm, truthful, uses his previous company, and teases both angles, a role for him and help hiring.",
             out: "<b>IF</b> connect pending → warm SMS referencing {last_company}",
             peek: { icon: "📱", title: "Branch · warm SMS", sub: "fires only if the connect is still pending", cta: "Read the SMS",
               body: pbCondNote({ cond: "the LinkedIn connection is still pending", req: "last_company (from deep enrichment)" }) +
-                pbArt("SMS · warm, last-company context", null, pbIM("Hi Priya, this is {you} with {firm}. Came across your background from your time at {last_company}, figured I'd reach out directly rather than wait on LinkedIn. Worth a quick call about a couple of engineers I have for your team?")) +
+                pbArt("SMS · warm, last-company context", null, pbIM("Hi Marcus, this is {you} with {firm}. Came across your background from your time at {last_company}, figured I'd reach out directly. I've got a leadership role you might like, and either way I keep strong engineers warm. Worth a quick call?")) +
                 '<div class="pb-note"><span class="i">📱</span><span>Truthful: references a real prior employer, no invented referral. Consent and local-time window enforced.</span></div>' } },
-          { icon: "🎙️", when: "DAY 4 · LINKEDIN VOICE NOTE", title: "A short voice note that nudges toward a call",
-            body: "Your actual voice, calling back to the email, complimenting what they are building, and steering to a quick call rather than offering to send anything.",
-            out: "<b>VOICE NOTE</b> · 0:22 · pushes a quick call, not a doc",
-            peek: { icon: "🎙️", title: "Touch 4 · LinkedIn voice note", sub: "Day 4 · spoken in your cloned voice · ~0:22", cta: "Hear what it says",
-              body: pbArt("Voice note · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl("Hi Priya, it's {you}... quick one about those two engineers I emailed. No pressure, but they won't be on the market long, the first already has another conversation going. What you're building at Lumen Pay is exactly the scope they'd jump for. Worth a quick call this week to talk them through? Thanks, Priya.") + "</div>") +
-                '<div class="pb-note"><span class="i">🎤</span><span>Shorter, calls back to the email, and steers to a call instead of promising profiles. In your cloned voice.</span></div>' } },
-          { icon: "📞", when: "DAY 6 · VOICEMAIL DROP", title: "A voicemail in your voice, no ring",
-            body: "Premium AMD drops a short, warm voicemail straight to their inbox, no interruption, asking for a few minutes rather than offering to send anything.",
-            out: "<b>VOICEMAIL</b> · lands without a ring · ~0:16",
-            peek: { icon: "📞", title: "Touch 5 · voicemail drop", sub: "Day 6 · spoken in your cloned voice · ~0:16", cta: "Hear the voicemail",
-              body: pbArt("Voicemail · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl("Hi Priya, it's {you} at {firm}. Quick follow-up on those two engineers for the Lumen Pay team... both passive, and one's getting close elsewhere. I'd love five minutes to walk you through them. Give me a call back when you get a sec. Congrats again on the Series B.") + "</div>") +
-                '<div class="pb-note"><span class="i">🛡️</span><span>Consent on file, inside her local-time window, dropped only after the voicemail beep.</span></div>' } },
-          { icon: "✉️", when: "DAY 9 · EMAIL", title: "Reference their news, raise the stakes honestly",
-            body: "Pull a real, public moment from their business, a piece on their expansion, and tie it straight back: the work just got bigger, so these two just got more relevant.",
-            out: "<b>SENT</b> · 'saw the piece on Lumen Pay's expansion'",
-            peek: { icon: "✉️", title: "Touch 5 · the news-led follow-up", sub: "Day 9 · Email", cta: "Read the email",
-              body: pbMail("From you · to Priya Nair, Lumen Pay", "saw the piece on Lumen Pay's expansion",
-                "Hi Priya,\n\nI saw the writeup on Lumen Pay expanding embedded payments into new markets. Congrats, that is a real step up in volume, and honestly it makes the two engineers I mentioned even more relevant. Both have scaled systems through exactly that kind of inflection.\n\nQuick update on them: the first is now mid-process elsewhere, but the second is still open, and frankly would be a standout hire for what you are scaling. Want the profile before someone else moves?\n\nThanks,\n{you}") +
-                '<div class="pb-note"><span class="i">▸</span><span>References a verifiable public signal about their business, never invented. The follow-up earns its place.</span></div>' } },
-          { icon: "✉️", when: "DAY 13 · EMAIL", title: "Close the loop, leave the door open",
-            body: "A clean break-up that is not pushy, restates the standing offer, and lands one last genuine compliment so you are remembered warmly.",
-            out: "<b>SENT</b> · 'closing the loop on the two engineers'",
-            peek: { icon: "✉️", title: "Touch 6 · the break-up", sub: "Day 13 · Email", cta: "Read the email",
-              body: pbMail("From you · to Priya Nair, Lumen Pay", "closing the loop on the two engineers",
-                "Hi Priya,\n\nI will stop here so I am not noise in your inbox. The standing offer: reply anytime and I will send both profiles the same day, plus a couple more I am keeping warm for the Lumen Pay platform team.\n\nEither way, congrats again on the raise. It is an exciting time to be scaling that backend, and I would love to help when the timing is right.\n\nThanks,\n{you}") } },
+          { icon: "🎙️", when: "DAY 4 · LINKEDIN VOICE NOTE", accent: "p", title: "The flip: are you hiring?",
+            body: "He's not moving, that's expected. So flip it in your own voice: pivot from recruiting him to helping him hire. This is the moment the candidate becomes a prospect.",
+            out: "<b>THE FLIP</b> · he's not moving, but he's hiring → pivot to BD",
+            peek: { icon: "🔀", title: "Touch 4 · the flip", sub: "Day 4 · voice note · candidate → prospect", cta: "Hear the flip",
+              body: pbArt("Voice note · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl("Hi Marcus, it's {you}... totally understand if a move isn't on your radar. Honestly I expected that, people running teams as well as you usually aren't looking. So let me flip it. Are you hiring on your own team right now? That's actually what I'm best at. I keep a bench of senior engineers warm, and I could line up a couple who'd fit what you're building at Vela. Worth a quick call either way? Thanks Marcus.") + "</div>") +
+                '<div class="pb-note"><span class="i">🔀</span><span><b>Promotes Marcus from Candidates → Prospects (BD motion).</b> From here the sequence runs as business development.</span></div>' } },
+          { icon: "✉️", when: "DAY 6 · EMAIL", title: "Now a prospect: someone for his team",
+            body: "Having flipped, be useful the other way. Lead with one strong candidate for his team and ask what he's trying to fill.",
+            out: "<b>FLIPPED</b> · candidate → prospect (BD) · now offering a candidate for his team",
+            peek: { icon: "🎯", title: "Touch 5 · sell into his team", sub: "Day 6 · Email · now BD", cta: "Read the email",
+              body: pbMail("From you · to Marcus Lee, Vela", "switching gears — someone for your team",
+                "Hi Marcus,\n\nSince a move isn't the priority, let me be useful the other way. Here's a senior engineer worth your time as you scale the platform group:\n\n• Scaled a payments platform past ten thousand requests a second; deep in Go and event-driven systems\n• Passive, but would fit exactly what you're building\n\nYou're clearly hiring as Vela grows, and that's where I'm at my best. Worth fifteen minutes on what you're trying to fill this quarter?\n\nThanks,\n{you}") +
+                '<div class="pb-note"><span class="i">🎯</span><span>The MPC play takes over: one standout candidate, one ask, aimed at his team.</span></div>' } },
+          { icon: "📞", when: "DAY 9 · VOICEMAIL DROP", title: "BD follow-up, in your voice",
+            body: "A short voicemail that follows up on the candidate you offered and asks for a few minutes on his hiring.",
+            out: "<b>VOICEMAIL</b> · follow-up on the candidate offered",
+            peek: { icon: "📞", title: "Touch 6 · voicemail drop", sub: "Day 9 · spoken in your cloned voice · ~0:16", cta: "Hear the voicemail",
+              body: pbArt("Voicemail · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl("Hi Marcus, it's {you} at {firm}. Quick follow-up on the engineer I sent for your team... strong, and won't be around long. I'd love five minutes on who you're hiring this quarter. Call me back when you can. Thanks.") + "</div>") +
+                '<div class="pb-note"><span class="i">🛡️</span><span>Consent on file, inside his local-time window, dropped only after the voicemail beep.</span></div>' } },
+          { icon: "✉️", when: "DAY 13 · EMAIL", title: "Leave the door open, both ways",
+            body: "A clean close that keeps both doors open: the leadership role for him later, or help hiring for his team now.",
+            out: "<b>SENT</b> · door open both ways",
+            peek: { icon: "✉️", title: "Touch 7 · the close", sub: "Day 13 · Email", cta: "Read the email",
+              body: pbMail("From you · to Marcus Lee, Vela", "I'll leave it with you",
+                "Hi Marcus,\n\nI'll stop here. Whether it's the leadership role for you down the line, or help hiring for your team now, just reply and I'll jump on it.\n\nEither way, great work at Vela.\n\nThanks,\n{you}") } },
         ],
-        wire: pbWireChrome("recruitersos · flip the script · the sequence",
-          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center">' +
-          [["Day 0", "✉️ Email"], ["Day 2", "➕ Connect"], ["Day 4", "🎙️ Voice note"], ["Day 6", "📞 Voicemail"], ["Day 9", "✉️ Email"], ["Day 13", "✉️ Close"]].map(function (s, i) {
-            return (i ? '<span style="color:var(--pb-c);font-size:16px">→</span>' : "") +
-              '<div class="pb-skel" style="text-align:center;min-width:96px"><div class="pb-when" style="margin-bottom:6px">' + esc(s[0]) + '</div><div style="font-size:13px;font-weight:600">' + esc(s[1]) + "</div></div>";
-          }).join("") + "</div>"),
-        outcome: { em: "🤝", title: "Six touches, one story, the meeting earned.", text: "By the voice note she knows your name, your two candidates, and that the clock is running. That is why this gets a reply when a cold pitch gets deleted." },
-        cta: [["📚 Browse the Sequence Library", "playbooks/sequences"], ["📡 See Hire Signals", "inmarket"], ["🎯 Build a campaign", "campaigns"]],
+        wire: pbWireChrome("recruitersos · candidate → prospect",
+          '<div style="display:flex;align-items:center;gap:14px;justify-content:center;flex-wrap:wrap">' +
+            '<div class="pb-skel" style="text-align:center;min-width:160px"><div class="cap">Candidates</div><div style="font-size:13px;font-weight:600;margin-top:4px">Marcus · approached for a VP role</div></div>' +
+            '<span style="color:var(--pb-p);font-size:20px;font-weight:800">🔀 FLIP</span>' +
+            '<div class="pb-skel" style="text-align:center;min-width:160px;border-color:var(--pb-c)"><div class="cap" style="color:var(--pb-c)">Prospects · BD</div><div style="font-size:13px;font-weight:600;margin-top:4px">Now hiring for his own team</div></div>' +
+          "</div>"),
+        outcome: { em: "🔀", title: "A 'no' becomes a client.", text: "The best candidates rarely move, but they're often the ones doing the hiring. Flip the script and a dead candidate thread becomes a BD relationship." },
+        cta: [["📚 Browse the Sequence Library", "playbooks/sequences"], ["🎯 Build a campaign", "campaigns"]],
       },
 
       "jd-sourcing": {
