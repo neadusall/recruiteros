@@ -1161,9 +1161,15 @@
 
   /* The Sequence Library deep view: filter by motion, browse a sequence's full
      timeline, click any touch to read the exact copy that goes out. */
+  // The sequence id deep-linked in the hash (#playbooks/sequences/<id>), if any.
+  function pbSeqSeg() {
+    var h = (location.hash || "").replace(/^#/, "").split("/");
+    if (h[0] === "bd" || h[0] === "recruiting") h.shift();
+    return (h[0] === "playbooks" && h[1] === "sequences" && h[2]) ? h[2] : null;
+  }
   function pbSeqLibrary(el) {
     var SEQS = PB_SEQS();
-    var st = { motion: "all", open: null };
+    var st = { motion: "all", open: pbSeqSeg() };
     el.innerHTML =
       '<div class="pb-wrap">' +
         '<span class="pb-back" data-go="playbooks"><span>←</span> All playbooks</span>' +
@@ -1231,10 +1237,12 @@
     paint();
 
     el.querySelector(".pb-wrap").addEventListener("click", function (e) {
-      if (e.target.closest("[data-seqback]")) { st.open = null; paint(); return; }
+      // Open/close a sequence via the hash so every sequence has a shareable URL
+      // (#playbooks/sequences/<id>); the router re-renders us with the right state.
+      if (e.target.closest("[data-seqback]")) { location.hash = "playbooks/sequences"; return; }
+      var card = e.target.closest("[data-seq]"); if (card) { location.hash = "playbooks/sequences/" + card.getAttribute("data-seq"); return; }
       var go = e.target.closest("[data-go]"); if (go) { location.hash = go.getAttribute("data-go"); return; }
       var mot = e.target.closest("[data-mot]"); if (mot) { st.motion = mot.getAttribute("data-mot"); paint(); return; }
-      var card = e.target.closest("[data-seq]"); if (card) { st.open = card.getAttribute("data-seq"); paint(); return; }
       var tch = e.target.closest("[data-touch]");
       if (tch && st.open) {
         var sq = SEQS.filter(function (x) { return x.id === st.open; })[0];
