@@ -847,10 +847,14 @@
   // handler that opens the full message. Scrolls horizontally for long sequences.
   function pbBoard(items, hint) {
     var track = items.map(function (it, i) {
-      var conn = i ? '<div class="pb-bconn">' + (it.wait ? '<span class="wait">' + esc(it.wait) + "</span>" : "") + '<span class="dot"></span></div>' : "";
+      var cc = it.cond ? " cond" : "";
+      var connLabel = it.cond ? '<span class="wait cond">IF ' + esc(it.cond) + "</span>"
+        : (it.wait ? '<span class="wait">' + esc(it.wait) + "</span>" : "");
+      var conn = i ? '<div class="pb-bconn' + cc + '">' + connLabel + '<span class="dot"></span></div>' : "";
+      var iftag = it.cond ? '<span class="pb-iftag">IF</span>' : "";
       return conn +
-        '<div class="pb-bcard" data-idx="' + i + '" data-accent="' + (it.accent || "v") + '">' +
-          '<div class="pb-bcard-top"><span class="ch">' + it.icon + " " + esc(it.channel) + '</span><span class="day">' + esc(it.day) + "</span></div>" +
+        '<div class="pb-bcard' + cc + '" data-idx="' + i + '" data-accent="' + (it.accent || "v") + '">' +
+          '<div class="pb-bcard-top"><span class="ch">' + iftag + it.icon + " " + esc(it.channel) + '</span><span class="day">' + esc(it.day) + "</span></div>" +
           '<div class="pb-bcard-body"><div class="big">' + it.icon + "</div><h5>" + esc(it.title) + "</h5><p>" + esc(it.teaser) + "</p></div>" +
           '<div class="pb-bcard-foot"><span class="dot"></span>' + esc(it.cta || "Read the message") + "</div></div>";
     }).join("");
@@ -1207,7 +1211,58 @@
     s = s.replace(/\s+/g, " ").trim();
     return s.length > 100 ? s.slice(0, 100) + "…" : s;
   }
+  // Expand a sequence's linear touches into the actual run order, inserting the
+  // conditional branches. Today: after every LinkedIn connection request, a
+  // warm SMS that fires ONLY if the request is still pending. It leans on the
+  // lead's *previous* company (last_company) from deep enrichment for warmth.
+  // Enrichment runs for everyone we send to, so last_company is reliably present
+  // (the branch is gated on it as a failsafe). Truthful by design: it references
+  // a real prior employer, it does NOT invent a referral.
+  function pbExpand(s) {
+    var out = [];
+    s.touches.forEach(function (t) {
+      out.push(t);
+      if (t.ch === "liconn") {
+        out.push({ d: t.d + 1, ch: "sms", t: "If not connected, warm SMS",
+          cond: "the LinkedIn request is still pending",
+          req: "last_company (from deep enrichment)",
+          body: "Hi {first}, this is {you} with {firm}. I came across your background from your time at {last_company}, so I figured I'd reach out directly rather than wait on LinkedIn. Open to a few quick details?" });
+      }
+    });
+    return out;
+  }
+  function pbCondNote(t) {
+    if (!t.cond) return "";
+    return '<div class="pb-note"><span class="i">⛓</span><span><b>Conditional branch.</b> Fires only if ' + esc(t.cond) +
+      "." + (t.req ? " Requires <b>" + esc(t.req) + "</b>." : "") +
+      " Enrichment runs for everyone we send to, so this stays fail-proof.</span></div>";
+  }
   function pbTouchBody(t) {
+    var m = PB_CH[t.ch];
+    var cond = pbCondNote(t);
+    var tokenNote = '<div class="pb-note"><span class="i">▸</span><span>Tokens like {first}, {company}, {role} and {last_company} auto-fill per prospect from the signal and enrichment.</span></div>';
+    if (t.ch === "email") {
+      var a = pbArt(m.label + (t.aBody ? " · Variant A (control)" : ""), t.aBody ? ["ok", "A"] : null, pbMail("From you · to {first}", t.subj, t.body));
+      var b = t.aBody ? pbArt(m.label + " · Variant B (test)", ["warn", "B"], pbMail("From you · to {first}", t.aSubj || t.subj, t.aBody)) : "";
+      return cond + a + b + tokenNote;
+    }
+    if (t.ch === "vm" || t.ch === "livoice") {
+      return cond + pbArt(m.label + " · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl(t.body) + "</div>") +
+        '<div class="pb-note"><span class="i">🎤</span><span>Rendered in your consented voice clone, formatted for natural speech. ' +
+        (t.ch === "vm" ? "Premium AMD drops it only after the voicemail beep." : "Delivered as a LinkedIn voice note.") + "</span></div>";
+    }
+    if (t.ch === "sms") {
+      return cond + pbArt(m.label, null, pbIM(t.body)) +
+        '<div class="pb-note"><span class="i">📱</span><span>Sent only with consent on file, inside the lead\'s local-time window.</span></div>';
+    }
+    if (t.ch === "call") {
+      return cond + pbArt(m.label + " · task for you", null, pbNl(t.body)) +
+        '<div class="pb-note"><span class="i">☎️</span><span>A human task in your queue, not an automated send.</span></div>';
+    }
+    return cond + pbArt(m.label, null, pbIM(t.body)) + tokenNote;
+  }
+  /* legacy single-channel body kept for reference */
+  function pbTouchBodyOld(t) {
     var m = PB_CH[t.ch];
     var tokenNote = '<div class="pb-note"><span class="i">▸</span><span>Tokens like {first}, {company} and {role} auto-fill per prospect from the signal and enrichment.</span></div>';
     if (t.ch === "email") {
@@ -1277,26 +1332,29 @@
     }
 
     function paintSeq(s) {
-      var chs = []; s.touches.forEach(function (t) { if (chs.indexOf(t.ch) < 0) chs.push(t.ch); });
+      var run = pbExpand(s);
+      var chs = []; run.forEach(function (t) { if (chs.indexOf(t.ch) < 0) chs.push(t.ch); });
+      var hasBranch = run.some(function (t) { return !!t.cond; });
       var motChip = s.motion === "bd"
         ? '<span class="pb-chip" style="color:var(--pb-c);border-color:rgba(77,208,255,.4)">🏢 Business Development</span>'
         : '<span class="pb-chip" style="color:var(--pb-g);border-color:rgba(56,224,166,.4)">👤 Recruiting</span>';
       var prevDay = 0;
-      var items = s.touches.map(function (t, i) {
+      var items = run.map(function (t, i) {
         var m = PB_CH[t.ch];
-        var wait = i ? ("wait " + Math.max(0, t.d - prevDay) + "d") : "";
+        var wait = (i && !t.cond) ? ("wait " + Math.max(0, t.d - prevDay) + "d") : "";
         prevDay = t.d;
         return { icon: m.icon, channel: m.label, accent: PB_CH_ACC[t.ch] || "v", day: "Day " + t.d,
-          title: t.t, teaser: pbTouchTeaser(t), wait: wait, cta: t.aBody ? "Read · A/B" : "Read the message" };
+          title: t.t, teaser: pbTouchTeaser(t), wait: wait, cond: t.cond, cta: t.aBody ? "Read · A/B" : "Read the message" };
       });
       host.innerHTML =
         '<span class="pb-back" data-seqback="1"><span>←</span> Back to library</span>' +
         '<div style="display:flex;align-items:center;gap:7px;margin:14px 0 6px;flex-wrap:wrap">' + motChip +
-          '<span class="pb-chip">📡 Trigger · ' + esc(s.signal) + '</span><span class="pb-chip">🎯 ' + esc(s.persona) + "</span></div>" +
+          '<span class="pb-chip">📡 Trigger · ' + esc(s.signal) + '</span><span class="pb-chip">🎯 ' + esc(s.persona) + "</span>" +
+          (hasBranch ? '<span class="pb-chip" style="color:var(--pb-a);border-color:rgba(255,194,77,.4)">⛓ if / then</span>' : "") + "</div>" +
         '<h2 style="margin:6px 0 2px;font-size:24px;font-weight:800;letter-spacing:-.02em">' + esc(s.name) + "</h2>" +
         '<div class="pb-mission-band" style="margin:14px 0 24px">' + esc(s.goal) + "</div>" +
-        '<p class="pb-section-label">The sequence · ' + s.touches.length + " touches across " + chs.length + " channels</p>" +
-        pbBoard(items, "Scroll to follow the whole sequence · click any step to read the exact message");
+        '<p class="pb-section-label">The sequence · ' + run.length + " steps across " + chs.length + " channels" + (hasBranch ? " · amber = conditional" : "") + "</p>" +
+        pbBoard(items, "Scroll to follow the whole sequence · amber cards are if/then branches · click any step to read the exact message");
     }
 
     function paint() {
@@ -1318,9 +1376,10 @@
       var tch = e.target.closest(".pb-bcard");
       if (tch && st.open) {
         var sq = SEQS.filter(function (x) { return x.id === st.open; })[0];
-        var t = sq.touches[+tch.getAttribute("data-idx")];
+        var t = pbExpand(sq)[+tch.getAttribute("data-idx")];
         var m = PB_CH[t.ch];
-        pbOpenModal(m.icon, t.t, "Day " + t.d + " · " + m.label, pbTouchBody(t));
+        var sub = (t.cond ? "Branch" : "Day " + t.d) + " · " + m.label;
+        pbOpenModal(m.icon, t.t, sub, pbTouchBody(t));
       }
     });
   }
@@ -1422,17 +1481,25 @@
             out: "<b>REQUEST SENT</b> · 'just emailed you about two backend engineers...'",
             peek: { icon: "➕", title: "Touch 2 · connection request", sub: "Day 2 · LinkedIn", cta: "Read the note",
               body: pbArt("LinkedIn connection note", null, pbIM("Hi Priya, I just emailed you about two backend engineers who fit the Lumen Pay platform role almost exactly. Connecting here too so it is easy to reply. No pitch, the work speaks for itself.")) } },
-          { icon: "🎙️", when: "DAY 4 · LINKEDIN VOICE NOTE", title: "A 30-second voice note that compliments and nudges",
-            body: "Your actual voice, calling back to the email, complimenting what they are building, and being honest that the window is closing. People reply to a voice.",
-            out: "<b>VOICE NOTE</b> · 0:32 · 'they won't be on the market long'",
-            peek: { icon: "🎙️", title: "Touch 3 · LinkedIn voice note", sub: "Day 4 · spoken in your cloned voice · 0:32", cta: "Hear what it says",
-              body: pbArt("Voice note · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl("Hi Priya, it's {you}... just touching base about those two backend engineers I mentioned in my email a few days ago. I know you're heads-down after the raise, so no pressure at all. I just want to be honest with you, they won't be on the market long. The first one already has a second conversation starting. And what I genuinely love about what you're building at Lumen Pay, that embedded-payments bet, is that it's exactly the kind of scope these two would jump for. If you're even a little curious, just reply here and I'll send both profiles over today. Thanks, Priya.") + "</div>") +
-                '<div class="pb-note"><span class="i">🎤</span><span>Calls back to the email, names the specific bet they are making, and adds an honest deadline. Formatted for natural speech in your voice.</span></div>' } },
+          { icon: "📱", when: "DAY 3 · SMS", accent: "a", title: "If the connect is still pending, a warm SMS",
+            cond: "the LinkedIn connection is still pending",
+            body: "A branch, not a step. Fires only if Priya hasn't accepted the connection by day 3. Uses her previous company from deep enrichment for a warm, truthful opener, and points to a call, not a document dump.",
+            out: "<b>IF</b> connect pending → warm SMS referencing {last_company}",
+            peek: { icon: "📱", title: "Branch · warm SMS", sub: "fires only if the connect is still pending", cta: "Read the SMS",
+              body: pbCondNote({ cond: "the LinkedIn connection is still pending", req: "last_company (from deep enrichment)" }) +
+                pbArt("SMS · warm, last-company context", null, pbIM("Hi Priya, this is {you} with {firm}. Came across your background from your time at {last_company}, figured I'd reach out directly rather than wait on LinkedIn. Worth a quick call about a couple of engineers I have for your team?")) +
+                '<div class="pb-note"><span class="i">📱</span><span>Truthful: references a real prior employer, no invented referral. Consent and local-time window enforced.</span></div>' } },
+          { icon: "🎙️", when: "DAY 4 · LINKEDIN VOICE NOTE", title: "A short voice note that nudges toward a call",
+            body: "Your actual voice, calling back to the email, complimenting what they are building, and steering to a quick call rather than offering to send anything.",
+            out: "<b>VOICE NOTE</b> · 0:22 · pushes a quick call, not a doc",
+            peek: { icon: "🎙️", title: "Touch 4 · LinkedIn voice note", sub: "Day 4 · spoken in your cloned voice · ~0:22", cta: "Hear what it says",
+              body: pbArt("Voice note · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl("Hi Priya, it's {you}... quick one about those two engineers I emailed. No pressure, but they won't be on the market long, the first already has another conversation going. What you're building at Lumen Pay is exactly the scope they'd jump for. Worth a quick call this week to talk them through? Thanks, Priya.") + "</div>") +
+                '<div class="pb-note"><span class="i">🎤</span><span>Shorter, calls back to the email, and steers to a call instead of promising profiles. In your cloned voice.</span></div>' } },
           { icon: "📞", when: "DAY 6 · VOICEMAIL DROP", title: "A voicemail in your voice, no ring",
-            body: "Premium AMD drops a warm voicemail straight to their inbox, no interruption, reinforcing the same two people and the same closing window.",
-            out: "<b>VOICEMAIL</b> · lands without a ring · 0:21",
-            peek: { icon: "📞", title: "Touch 4 · voicemail drop", sub: "Day 6 · spoken in your cloned voice · 0:21", cta: "Hear the voicemail",
-              body: pbArt("Voicemail · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl("Hi Priya, it's {you} at {firm}. I sent you a note about two backend engineers for the Lumen Pay platform team... they're both passive, and both a real fit for the Go role. One of them's getting close with another team, so I didn't want you to miss the window. Give me a call back when you get a sec, and congrats again on the Series B. Thanks so much.") + "</div>") +
+            body: "Premium AMD drops a short, warm voicemail straight to their inbox, no interruption, asking for a few minutes rather than offering to send anything.",
+            out: "<b>VOICEMAIL</b> · lands without a ring · ~0:16",
+            peek: { icon: "📞", title: "Touch 5 · voicemail drop", sub: "Day 6 · spoken in your cloned voice · ~0:16", cta: "Hear the voicemail",
+              body: pbArt("Voicemail · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl("Hi Priya, it's {you} at {firm}. Quick follow-up on those two engineers for the Lumen Pay team... both passive, and one's getting close elsewhere. I'd love five minutes to walk you through them. Give me a call back when you get a sec. Congrats again on the Series B.") + "</div>") +
                 '<div class="pb-note"><span class="i">🛡️</span><span>Consent on file, inside her local-time window, dropped only after the voicemail beep.</span></div>' } },
           { icon: "✉️", when: "DAY 9 · EMAIL", title: "Reference their news, raise the stakes honestly",
             body: "Pull a real, public moment from their business, a piece on their expansion, and tie it straight back: the work just got bigger, so these two just got more relevant.",
@@ -1662,15 +1729,15 @@
         var day = (parts[0] || "").trim();
         var channel = (parts[1] || "").trim();
         var dnum = parseInt((day.match(/\d+/) || [0])[0], 10);
-        var wait = i ? ("wait " + Math.max(0, dnum - prevDay) + "d") : "";
+        var wait = (i && !s.cond) ? ("wait " + Math.max(0, dnum - prevDay) + "d") : "";
         prevDay = dnum;
         var chl = channel.toLowerCase();
         var acc = s.accent || (chl.indexOf("voice note") >= 0 ? "p" : chl.indexOf("voicemail") >= 0 ? "a" : chl.indexOf("sms") >= 0 ? "g" : (chl.indexOf("linkedin") >= 0 || chl.indexOf("connect") >= 0) ? "c" : "v");
         return { icon: s.icon, channel: channel, day: day, accent: acc,
-          title: s.title, teaser: pbStripTags(s.out) || s.body, wait: wait,
+          title: s.title, teaser: pbStripTags(s.out) || s.body, wait: wait, cond: s.cond,
           cta: s.peek ? (s.peek.cta || "Read the message") : "" };
       });
-      flowHtml = pbBoard(items, "Scroll to follow the whole sequence · click any step to read the exact message");
+      flowHtml = pbBoard(items, "Scroll to follow the whole sequence · amber cards are if/then branches · click any step to read the exact message");
     } else {
       flowHtml = '<div class="pb-flow">' + p.stages.map(pbStage).join("") + "</div>";
     }
@@ -1682,9 +1749,12 @@
           '<div><div class="pb-tag">' + esc(p.tag) + "</div><h2>" + esc(p.title) + "</h2></div></div>" +
         '<div class="pb-mission-band">' + esc(p.mission) + "</div>" +
         (p.extra || "") +
-        '<p class="pb-section-label">' + esc(p.flowLabel || "The workflow") + "</p>" +
-        '<div class="pb-runbar"><button class="pb-run"><span class="ic">▶</span> Watch it run</button>' +
-          (hasPeeks ? '<span class="pb-run-hint">tip: click any step to read the exact message it sends</span>' : "") + "</div>" +
+        // Board playbooks are self-explanatory (each card shows its channel, day
+        // and a "read the message" affordance), so they skip the section header
+        // and the run/tip chrome. Vertical concept flows keep a plain heading.
+        (p.board ? "" :
+          '<p class="pb-section-label">' + esc(p.flowLabel || "The workflow") + "</p>" +
+          '<div class="pb-runbar"><button class="pb-run"><span class="ic">▶</span> Watch it run</button></div>') +
         flowHtml +
         '<p class="pb-section-label">What it looks like</p>' +
         p.wire +

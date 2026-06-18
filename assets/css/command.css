@@ -1622,3 +1622,14 @@ html[data-theme="light"] .vd-tabs button.active, html[data-theme="light"] .vd-ta
 .pb-note .i { color: var(--pb-c); flex: none; }
 .pb-flag { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 8px;
   background: rgba(255,194,77,.12); color: var(--pb-a); border: 1px solid rgba(255,194,77,.3); }
+
+/* conditional (if/then) branch cards on the board */
+.pb-bcard.cond { border-style: dashed; border-color: rgba(255,194,77,.55); }
+.pb-bcard.cond:hover { border-color: var(--pb-a); }
+.pb-bcard.cond .pb-bcard-top { background: linear-gradient(90deg, rgba(255,194,77,.18), transparent); color: var(--pb-a); }
+.pb-iftag { font-size: 9px; font-weight: 900; letter-spacing: .08em; color: #0a0a12; background: var(--pb-a);
+  border-radius: 4px; padding: 1px 5px; margin-right: 5px; }
+.pb-bconn.cond { background: none; border-top: 2px dashed rgba(255,194,77,.6); }
+.pb-bconn.cond::after { color: var(--pb-a); }
+.pb-bconn.cond .dot { background: var(--pb-a); box-shadow: 0 0 10px var(--pb-a); }
+.pb-bconn .wait.cond { color: var(--pb-a); border-color: rgba(255,194,77,.4); max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
