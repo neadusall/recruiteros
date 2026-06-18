@@ -11,9 +11,18 @@
  * Defaults to Claude Sonnet — résumé judgment needs more than the extraction tier.
  * Never invents history: it reasons only over the profile fields it's given, and says
  * so when the data is thin.
+ *
+ * Two execution paths, same prompt + parsing:
+ *   - deepVetCandidate(): one synchronous call. Used for tiny slices and as the
+ *     fallback when the Batch API is unavailable.
+ *   - submitVetBatch()/retrieveVetBatch()/collectVetBatch(): the Message Batches API,
+ *     which runs the SAME requests asynchronously at HALF the token price. Deep-vet
+ *     isn't latency-critical (the recruiter picks a top-N and walks away), so the top
+ *     slice goes through a batch — the single biggest cost lever in JD Sourcing.
  */
 
 import { anthropicClient } from "./anthropic";
+import { parseVetResult } from "./vetParse";
 import type { CandidateICP, CandidateRow } from "./types";
 import type { FullProfile } from "./profile";
 
@@ -52,17 +61,6 @@ Rules:
 - If the work history is thin or missing, say so in rationale, lower confidence toward the middle, and flag "insufficient_data". Do NOT invent experience.
 - Ground every strength/gap in something actually present (or absent) in the data.`;
 
-function clampScore(n: unknown): number {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 0;
-  return Math.max(0, Math.min(100, Math.round(v)));
-}
-
-function strArr(v: unknown, cap = 8): string[] {
-  if (!Array.isArray(v)) return [];
-  return v.map((x) => String(x).trim()).filter(Boolean).slice(0, cap);
-}
-
 /** Render the candidate (full profile if we have it, else the shallow row) for the model. */
 function renderCandidate(row: CandidateRow, profile?: FullProfile): string {
   const lines: string[] = [];
@@ -100,22 +98,30 @@ function renderIcp(icp: CandidateICP): string {
   ].filter(Boolean).join("\n");
 }
 
-function normalize(raw: string): VetResult {
-  try {
-    const o = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1));
-    const verdict = ["strong", "possible", "weak", "no"].includes(o.verdict) ? o.verdict : "possible";
-    return {
-      verifiedScore: clampScore(o.verifiedScore),
-      verdict,
-      yearsRelevant: Number.isFinite(Number(o.yearsRelevant)) ? Number(o.yearsRelevant) : undefined,
-      strengths: strArr(o.strengths),
-      gaps: strArr(o.gaps),
-      flags: strArr(o.flags),
-      rationale: String(o.rationale || "").slice(0, 400),
-    };
-  } catch {
-    return { verifiedScore: 0, verdict: "no", strengths: [], gaps: [], flags: ["parse_error"], rationale: "Could not parse vetting result." };
-  }
+/** Pull the first text block out of a message response (single-call + batch share this). */
+function textOf(content: any[]): string {
+  const block = Array.isArray(content) ? content.find((b) => b && b.type === "text") : undefined;
+  return block && block.type === "text" ? block.text : "{}";
+}
+
+/**
+ * The exact Messages-API request body for vetting one candidate — shared verbatim by
+ * the synchronous call and the batch path, so a batch result parses identically to a
+ * live one. The system prompt is cached (cache_control) so a batch of N candidates
+ * pays for the long instructions once, not N times.
+ */
+function buildVetParams(row: CandidateRow, icp: CandidateICP, profile?: FullProfile) {
+  return {
+    model: MODEL,
+    max_tokens: 700,
+    system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as any,
+    messages: [
+      {
+        role: "user" as const,
+        content: `IDEAL CANDIDATE PROFILE:\n"""\n${renderIcp(icp)}\n"""\n\nCANDIDATE:\n"""\n${renderCandidate(row, profile)}\n"""\n\nReturn the vetting JSON.`,
+      },
+    ],
+  };
 }
 
 /** Deep-vet one candidate against the ICP. Throws only if the model client is unconfigured. */
@@ -123,17 +129,105 @@ export async function deepVetCandidate(row: CandidateRow, icp: CandidateICP, pro
   if (!process.env.ANTHROPIC_API_KEY) {
     throw Object.assign(new Error("anthropic_not_configured: set ANTHROPIC_API_KEY"), { status: 409 });
   }
-  const response = await anthropicClient().messages.create({
-    model: MODEL,
-    max_tokens: 700,
-    system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as any,
-    messages: [
-      {
-        role: "user",
-        content: `IDEAL CANDIDATE PROFILE:\n"""\n${renderIcp(icp)}\n"""\n\nCANDIDATE:\n"""\n${renderCandidate(row, profile)}\n"""\n\nReturn the vetting JSON.`,
-      },
-    ],
-  });
-  const block = response.content.find((b) => b.type === "text");
-  return normalize(block && block.type === "text" ? block.text : "{}");
+  const response = await anthropicClient().messages.create(buildVetParams(row, icp, profile));
+  return parseVetResult(textOf(response.content));
+}
+
+/* ------------------------------------------------------------------ */
+/* Batch path — same prompt, half the token price                      */
+/* ------------------------------------------------------------------ */
+
+export interface VetBatchItem {
+  /** Stable id echoed back on each result; must be unique within the batch. */
+  customId: string;
+  row: CandidateRow;
+  icp: CandidateICP;
+  profile?: FullProfile;
+}
+
+export type VetBatchStatus = "in_progress" | "canceling" | "ended";
+
+export interface VetBatchProgress {
+  status: VetBatchStatus;
+  /** Per-state request counts (processing / succeeded / errored / …) when available. */
+  counts?: Record<string, number>;
+}
+
+/** True when the installed SDK exposes the Message Batches API (older builds may not). */
+export function vetBatchAvailable(): boolean {
+  if (!process.env.ANTHROPIC_API_KEY) return false;
+  try {
+    const c: any = anthropicClient();
+    return Boolean(c?.messages?.batches?.create);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Submit a batch of vetting requests. Returns the batch id to poll. Each request is
+ * the same body deepVetCandidate would send, tagged with the item's customId so we can
+ * map the result back to the right candidate later.
+ */
+export async function submitVetBatch(items: VetBatchItem[]): Promise<string> {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw Object.assign(new Error("anthropic_not_configured: set ANTHROPIC_API_KEY"), { status: 409 });
+  }
+  const client: any = anthropicClient();
+  if (!client?.messages?.batches?.create) {
+    throw Object.assign(new Error("batch_api_unavailable"), { status: 501 });
+  }
+  const requests = items.map((it) => ({
+    custom_id: it.customId,
+    params: buildVetParams(it.row, it.icp, it.profile),
+  }));
+  const batch = await client.messages.batches.create({ requests });
+  return batch.id as string;
+}
+
+/** Poll a vetting batch. Status "ended" means every request has finished (or errored). */
+export async function retrieveVetBatch(batchId: string): Promise<VetBatchProgress> {
+  const client: any = anthropicClient();
+  if (!client?.messages?.batches?.retrieve) {
+    throw Object.assign(new Error("batch_api_unavailable"), { status: 501 });
+  }
+  const b = await client.messages.batches.retrieve(batchId);
+  const status: VetBatchStatus = b.processing_status === "ended" ? "ended"
+    : b.processing_status === "canceling" ? "canceling" : "in_progress";
+  return { status, counts: b.request_counts ?? undefined };
+}
+
+export interface VetBatchCollection {
+  /** customId -> parsed verdict, for every request that succeeded. */
+  results: Record<string, VetResult>;
+  /** customId-level errors (one line each) for surfacing as warnings. */
+  errors: string[];
+}
+
+/**
+ * Stream a finished batch's results and parse each succeeded message with the same
+ * normalizer the synchronous path uses. Errored/expired requests become warnings —
+ * the caller leaves those candidates un-vetted rather than fabricating a verdict.
+ */
+export async function collectVetBatch(batchId: string): Promise<VetBatchCollection> {
+  const client: any = anthropicClient();
+  if (!client?.messages?.batches?.results) {
+    throw Object.assign(new Error("batch_api_unavailable"), { status: 501 });
+  }
+  const results: Record<string, VetResult> = {};
+  const errors: string[] = [];
+  for await (const entry of await client.messages.batches.results(batchId)) {
+    const id = entry.custom_id as string;
+    const r = entry.result;
+    if (r?.type === "succeeded" && r.message) {
+      results[id] = parseVetResult(textOf(r.message.content));
+    } else if (r?.type === "errored") {
+      errors.push(`vet(${id}): ${r.error?.type || "error"}`);
+    } else if (r?.type === "expired") {
+      errors.push(`vet(${id}): expired`);
+    } else if (r?.type === "canceled") {
+      errors.push(`vet(${id}): canceled`);
+    }
+  }
+  return { results, errors };
 }

@@ -7,6 +7,11 @@
  * until it hits the cap or runs out of queries.
  *
  * Engines (cheapest-first, matching the project's cost discipline):
+ *   - google: Google Programmable Search (Custom Search JSON API) over the X-ray
+ *       Boolean we already generate. 100 queries/day FREE, so it runs first as a free
+ *       pass. Configure GOOGLE_CSE_KEY + GOOGLE_CSE_CX. Lower/variable quality than a
+ *       paid listing (and respect Google's ToS) — it's a free first pass, not a
+ *       replacement for rapidapi.
  *   - rapidapi: a marketplace LinkedIn/people-search listing (the chosen scale path).
  *       Configure RAPIDAPI_KEY + RAPIDAPI_PEOPLE_SEARCH_HOST/PATH to point at whatever
  *       listing you subscribe to. Listings differ, so the result mapping is defensive.
@@ -146,6 +151,89 @@ async function rapidApiPeopleSearch(term: string, page: number, count: number): 
 }
 
 /* ------------------------------------------------------------------ */
+/* Google Programmable Search provider (free first pass)               */
+/* ------------------------------------------------------------------ */
+
+const G_KEY = () => cred("GOOGLE_CSE_KEY");
+const G_CX = () => cred("GOOGLE_CSE_CX");
+// Soft per-RUN cap on free queries so one big run can't burn the whole daily 100.
+// (The hard daily limit is enforced by Google with a 429; we stop early on that too.)
+const G_MAX_QUERIES = () => {
+  const n = parseInt(cred("GOOGLE_CSE_MAX_QUERIES") || "", 10);
+  return Number.isFinite(n) && n > 0 ? n : 60;
+};
+
+export function googleSearchConfigured(): boolean {
+  return Boolean(G_KEY() && G_CX());
+}
+
+/** Map one Custom Search result item (a public LinkedIn profile) to a CandidateRow. */
+function mapGoogleItem(o: any): CandidateRow | null {
+  const link = str(o && o.link);
+  if (!link || !/linkedin\.com\/in\//i.test(link)) return null; // only person profiles
+  const url = link.split("?")[0];
+  const mt = o.pagemap && Array.isArray(o.pagemap.metatags) ? o.pagemap.metatags[0] : null;
+  // Title is usually "Name - Headline | LinkedIn"; strip the LinkedIn tail.
+  let title = (str(o.title) || "").replace(/\s*[|\-–—]\s*LinkedIn.*$/i, "").trim();
+  let fullName = title;
+  let headline: string | undefined;
+  const dash = title.split(/\s+[-–—]\s+/);
+  if (dash.length > 1) { fullName = dash[0].trim(); headline = dash.slice(1).join(" - ").trim(); }
+  if (mt) headline = headline || str(mt["og:description"]);
+  const snippet = str(o.snippet);
+  // Company from "... at X" in the headline/snippet (best-effort).
+  let company: string | undefined;
+  const hay = [headline, snippet].filter(Boolean).join(" ");
+  const m = hay && hay.match(/\bat\s+([A-Za-z0-9][\w&.,'’\-]*(?:\s+[A-Za-z0-9][\w&.,'’\-]*){0,4})/);
+  if (m) company = m[1].split(/[|·•–—]| - /)[0].trim() || undefined;
+  if (!fullName) return null;
+  return {
+    fullName,
+    title: headline,
+    headline: headline || snippet,
+    company,
+    location: undefined, // CSE snippets rarely carry a clean location; let the scorer skip it
+    linkedinUrl: url,
+    imageUrl: (mt && str(mt["og:image"])) || undefined,
+    fitScore: 0,
+    fitReasons: [],
+    provider: "google",
+  };
+}
+
+/**
+ * One Custom Search page (10 results). `page` is 1-based; CSE caps at 100 results
+ * (start ≤ 91), so pages beyond 10 return nothing. Each call spends one free query.
+ */
+async function googleXraySearch(xray: string, page: number): Promise<CandidateRow[]> {
+  const start = (page - 1) * 10 + 1;
+  if (start > 91) return [];
+  const url = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(G_KEY())}` +
+    `&cx=${encodeURIComponent(G_CX())}&q=${encodeURIComponent(xray)}&num=10&start=${start}`;
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    const quota = res.status === 429 || /quota|rateLimit|dailyLimit/i.test(txt);
+    throw Object.assign(new Error(`google ${res.status}${quota ? " (daily quota exhausted)" : ""}`), { quota });
+  }
+  const data = await res.json().catch(() => ({}));
+  const items = Array.isArray(data?.items) ? data.items : [];
+  return items.map(mapGoogleItem).filter((r: CandidateRow | null): r is CandidateRow => Boolean(r));
+}
+
+/** Live health check for the Connected → JD Sourcing "Test connection" on the Google engine. */
+export async function verifyGoogleSearch(): Promise<{ ok: boolean; error?: string; found?: number }> {
+  if (!G_KEY()) return { ok: false, error: "Add your Google API key first." };
+  if (!G_CX()) return { ok: false, error: "Add the Programmable Search engine ID (cx) first." };
+  try {
+    const rows = await googleXraySearch('site:linkedin.com/in recruiter', 1);
+    return { ok: true, found: rows.length };
+  } catch (e: any) {
+    return { ok: false, error: (e && e.message) || "search request failed" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Orchestrator                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -172,15 +260,16 @@ export async function runDiscovery(
 ): Promise<DiscoveryResult> {
   const cap = Math.max(1, Math.min(opts.cap ?? 3000, 5000));
   const minFit = opts.minFit ?? 45;
-  const engines = opts.engines ?? (["rapidapi", "scraper"] as const);
+  const engines = opts.engines ?? (["google", "rapidapi", "scraper"] as const);
   const warnings: string[] = [];
 
+  let useGoogle = engines.includes("google") && googleSearchConfigured();
   const useRapid = engines.includes("rapidapi") && rapidApiSearchConfigured();
   const useScraper = engines.includes("scraper") && scraperConfigured();
   if (engines.includes("rapidapi") && !useRapid) {
     warnings.push("rapidapi_not_configured: set RAPIDAPI_KEY + RAPIDAPI_PEOPLE_SEARCH_HOST to enable scale discovery");
   }
-  if (!useRapid && !useScraper) {
+  if (!useGoogle && !useRapid && !useScraper) {
     warnings.push("no_discovery_engine: nothing configured to find profiles — list will be empty");
     return { candidates: [], warnings, scanned: 0 };
   }
@@ -188,13 +277,54 @@ export async function runDiscovery(
   const byKey = new Map<string, CandidateRow>();
   let scanned = 0;
 
+  // Score, threshold, and dedupe a batch of raw rows into byKey. Returns how many
+  // cleared the fit threshold (used to gauge per-query saturation). Shared by every engine.
+  function absorb(rows: CandidateRow[], group: string): number {
+    let kept = 0;
+    for (const r of rows) {
+      scanned++;
+      r.sourceGroup = r.sourceGroup || group;
+      const sc = scoreCandidate(r, icp);
+      r.fitScore = sc.fitScore; r.fitReasons = sc.fitReasons;
+      if (r.fitScore < minFit) continue;
+      const k = keyOf(r);
+      const prev = byKey.get(k);
+      // Keep the higher-scoring row, and prefer a richer provider on a tie (rapidapi/
+      // scraper carry location etc. that the free Google pass usually lacks).
+      if (!prev || r.fitScore > prev.fitScore) byKey.set(k, r);
+      kept++;
+    }
+    return kept;
+  }
+
   // Per-query budget so one big company doesn't starve the others.
   const perQuery = Math.max(20, Math.ceil(cap / Math.max(1, queries.length)) + 20);
+  // Spread the free daily Google quota across queries: a few pages each, run-capped.
+  const googleBudget = G_MAX_QUERIES();
+  let googleUsed = 0;
 
   outer: for (const query of queries) {
     let collected = 0;
 
-    if (useRapid) {
+    // 1) FREE first pass: Google X-ray over the boolean we already built.
+    if (useGoogle && googleUsed < googleBudget) {
+      const gPages = 3; // up to 30 free results per query before paying anyone
+      for (let page = 1; page <= gPages && collected < perQuery && googleUsed < googleBudget; page++) {
+        let rows: CandidateRow[] = [];
+        try { rows = await googleXraySearch(query.xray, page); googleUsed++; }
+        catch (err: any) {
+          warnings.push(`google(${query.group} p${page}): ${err.message}`);
+          if (err && err.quota) { useGoogle = false; } // daily limit hit — stop for the run
+          break;
+        }
+        if (!rows.length) break; // exhausted this query on Google
+        collected += absorb(rows, query.group);
+        if (byKey.size >= cap) break outer;
+      }
+    }
+
+    // 2) PAID scale: RapidAPI people-search for whatever the free pass didn't fill.
+    if (useRapid && collected < perQuery) {
       const post = PS_METHOD() === "POST";
       // POST listings return a batch sized by `count` in one call (no paging);
       // GET listings page through results. Same handling of the rows either way.
@@ -211,52 +341,39 @@ export async function runDiscovery(
           break; // stop this query on error; move on
         }
         if (!rows.length) break; // exhausted
-        for (const r of rows) {
-          scanned++;
-          r.sourceGroup = query.group;
-          const sc = scoreCandidate(r, icp);
-          r.fitScore = sc.fitScore; r.fitReasons = sc.fitReasons;
-          if (r.fitScore < minFit) continue;
-          const k = keyOf(r);
-          const prev = byKey.get(k);
-          if (!prev || r.fitScore > prev.fitScore) byKey.set(k, r);
-          collected++;
-          if (byKey.size >= cap) break outer;
-        }
+        collected += absorb(rows, query.group);
+        if (byKey.size >= cap) break outer;
       }
     }
 
+    // 3) Best-effort scraper sidecar (dormant unless configured).
     if (useScraper && collected < perQuery) {
       try {
         const { profiles, warnings: w } = await scrapeSearchViaSidecar(query.linkedinUrl, Math.min(perQuery, 100));
         if (w?.length) warnings.push(...w.map((x) => `scraper(${query.group}): ${x}`));
-        for (const p of profiles) {
-          scanned++;
-          const r: CandidateRow = {
-            fullName: p.fullName,
-            title: p.title,
-            headline: p.headline,
-            company: p.company,
-            location: p.location,
-            linkedinUrl: p.publicProfileUrl,
-            imageUrl: p.imageUrl,
-            fitScore: 0,
-            fitReasons: [],
-            sourceGroup: query.group,
-            provider: "scraper",
-          };
-          const sc = scoreCandidate(r, icp);
-          r.fitScore = sc.fitScore; r.fitReasons = sc.fitReasons;
-          if (r.fitScore < minFit) continue;
-          const k = keyOf(r);
-          const prev = byKey.get(k);
-          if (!prev || r.fitScore > prev.fitScore) byKey.set(k, r);
-          if (byKey.size >= cap) break outer;
-        }
+        const rows: CandidateRow[] = profiles.map((p) => ({
+          fullName: p.fullName,
+          title: p.title,
+          headline: p.headline,
+          company: p.company,
+          location: p.location,
+          linkedinUrl: p.publicProfileUrl,
+          imageUrl: p.imageUrl,
+          fitScore: 0,
+          fitReasons: [],
+          sourceGroup: query.group,
+          provider: "scraper",
+        }));
+        collected += absorb(rows, query.group);
+        if (byKey.size >= cap) break outer;
       } catch (err) {
         warnings.push(`scraper(${query.group}): ${(err as Error).message}`);
       }
     }
+  }
+
+  if (googleUsed >= googleBudget && googleUsed > 0) {
+    warnings.push(`google_budget_reached: spent the free pass on ${googleUsed} queries this run; remaining queries used paid engines`);
   }
 
   const candidates = Array.from(byKey.values())

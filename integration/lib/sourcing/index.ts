@@ -12,9 +12,16 @@ export { refineIcp, type RefineResult } from "./refineSearch";
 export { draftJobDescription, type DraftInput } from "./draftJd";
 export { generateQueries } from "./generateQueries";
 export { scoreCandidate } from "./score";
-export { runDiscovery, rapidApiSearchConfigured, verifySourcingSearch, type DiscoveryResult } from "./discovery";
+export {
+  runDiscovery, rapidApiSearchConfigured, verifySourcingSearch,
+  googleSearchConfigured, verifyGoogleSearch, type DiscoveryResult,
+} from "./discovery";
 export { fetchFullProfile, profileFetchConfigured, type FullProfile, type ProfileExperience } from "./profile";
-export { deepVetCandidate, type VetResult } from "./deepVet";
+export {
+  deepVetCandidate, type VetResult,
+  vetBatchAvailable, submitVetBatch, retrieveVetBatch, collectVetBatch,
+  type VetBatchItem, type VetBatchProgress, type VetBatchCollection, type VetBatchStatus,
+} from "./deepVet";
 export {
   listSourcingRuns, getSourcingRun, saveSourcingRun, deleteSourcingRun,
   purgeWorkspaceSourcingRuns, type SaveRunInput,

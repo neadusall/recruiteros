@@ -4375,10 +4375,10 @@
       '.jd-tipgrid>span{display:block;position:relative;padding-left:15px}' +
       '.jd-tipgrid>span::before{content:"";position:absolute;left:0;top:6px;width:6px;height:6px;border-radius:50%;background:linear-gradient(135deg,#7c5cff,var(--brand-2))}' +
       '.jd-tipgrid b{color:var(--brand-2);font-weight:600}' +
-      '.jd-builder{position:relative;overflow:hidden;padding:13px 16px;background:linear-gradient(135deg,rgba(124,92,255,.13),rgba(80,200,255,.06));border:1px solid rgba(124,92,255,.34);border-radius:14px;margin-bottom:11px;box-shadow:0 12px 36px -14px rgba(124,92,255,.4)}' +
-      '.jd-builder::after{content:"";position:absolute;top:-40%;right:-10%;width:240px;height:240px;background:radial-gradient(circle,rgba(124,92,255,.18),transparent 70%);pointer-events:none}' +
-      '.jd-builder-h{position:relative;font-weight:800;font-size:15px;letter-spacing:.01em;margin-bottom:3px;background:linear-gradient(90deg,#7c5cff,var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
-      '.jd-builder-sub{font-size:12.5px;color:var(--text-muted);margin-bottom:8px}' +
+      '.jd-builder{position:relative;padding:11px 14px;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:12px;margin-bottom:11px}' +
+      '.jd-builder::after{content:none}' +
+      '.jd-builder-h{position:relative;font-weight:700;font-size:13.5px;letter-spacing:.01em;margin-bottom:3px;color:var(--text)}' +
+      '.jd-builder-sub{font-size:12px;color:var(--text-muted);margin-bottom:8px}' +
       '.jd-builder-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}' +
       '@media(max-width:640px){.jd-builder-row{grid-template-columns:1fr}}' +
       '.jd-lead{font-size:13.5px;margin-bottom:8px}.jd-lead b{color:var(--text)}' +
@@ -4458,7 +4458,7 @@
         '</div>' +
       '</details>' +
       '<div class="card">' +
-        '<div class="jd-lead2">✨ Start with the role</div>' +
+        '<div class="jd-lead2">Start with the role</div>' +
         '<div class="jd-lead-sub">Fill in what you know and paste any JD. The AI refines it into a strong, wide-net search.</div>' +
         '<div class="jd-fieldgrid">' +
           '<div class="jd-field"><label>Job title</label><input id="jdbTitle" type="text" placeholder="e.g. VP of Sales, Director of Nursing" /></div>' +
@@ -4475,9 +4475,9 @@
         '<div class="jd-field"><label>Anything specific <span class="jd-opt muted">optional</span></label><input id="jdbNotes" type="text" placeholder="Seniority, certs/licenses, must-have experience, deal-breakers" /></div>' +
         '<div class="jd-field"><label>Job description <span class="jd-opt muted">optional, or let the AI write it</span></label>' +
           '<textarea id="jdText" rows="4" placeholder="Paste the job description here. The more real detail, the stronger the search."></textarea></div>' +
-        '<div class="jd-builder"><div class="jd-buildbar" style="margin:0;justify-content:space-between"><b class="jd-builder-h" style="margin:0">✨ Build a refined, sourcing-ready JD</b>' +
-          '<button class="btn btn-primary btn-sm" id="jdbBtn">✨ Build refined JD</button></div>' +
-          '<div class="jd-builder-sub" style="margin:7px 0 0">Your input is the benchmark; the AI refines it, fills the gaps, and widens the net. Run this first, then Analyze.</div>' +
+        '<div class="jd-builder"><div class="jd-buildbar" style="margin:0;justify-content:space-between;gap:10px">' +
+          '<span class="jd-builder-sub" style="margin:0">The AI refines your input, fills the gaps, and widens the net. Run this first, then Analyze.</span>' +
+          '<button class="btn btn-primary btn-sm" id="jdbBtn" style="flex:0 0 auto">✨ Build refined JD</button></div>' +
         '</div>' +
         '<details class="jd-tipsd"><summary>See what sharpens the search <span class="muted">Tap to expand</span></summary>' +
           '<div class="jd-tipgrid">' +
@@ -4978,17 +4978,40 @@
           });
       } else if ((id = t.getAttribute("data-vet"))) {
         var topEl = $("#jdVetTop"); var top = topEl ? (parseInt(topEl.value, 10) || 25) : 25;
+        var vid = id;
         t.disabled = true; t.textContent = "Vetting top " + top + "…";
         showProgress("Deep-vetting top " + top, top * 3, "Reading work histories & scoring against the JD…");
-        send("/sourcing", "POST", { action: "vet", id: id, top: top }).then(function (r) {
+        // Final alert + reset, shared by the batch and synchronous paths.
+        function vetDone(d) {
           t.disabled = false; t.textContent = "🔬 Deep-vet";
-          if (!r.ok) { finishProgress("Deep-vet failed"); alert("Deep-vet failed: " + ((r.data && r.data.error) || r.status)); return; }
-          finishProgress("Deep-vetted " + (r.data.vetted || 0));
-          var warn = (r.data.warnings || []).length ? ("\n\n" + r.data.warnings.slice(0, 3).join("\n")) : "";
-          alert("Deep-vetted " + r.data.vetted + " candidate" + (r.data.vetted === 1 ? "" : "s") +
-            (r.data.deep ? " against full work history." : " on surface fields only. Add the deep-vet profile endpoint in Setup to read full work history.") +
-            " Ranked by verified score; download the CSV for the verdicts." + warn);
+          finishProgress("Deep-vetted " + (d.vetted || 0));
+          var warn = (d.warnings || []).length ? ("\n\n" + d.warnings.slice(0, 3).join("\n")) : "";
+          alert("Deep-vetted " + (d.vetted || 0) + " candidate" + ((d.vetted === 1) ? "" : "s") +
+            (d.deep ? " against full work history." : " on surface fields only. Add the deep-vet profile endpoint in Setup to read full work history.") +
+            " Ranked by verified score; download the Excel for the verdicts." +
+            (d.batched ? " (Ran as a 50%-cheaper batch.)" : "") + warn);
           loadRuns();
+        }
+        // Poll the in-flight batch every 10s until it ends, then ingest + finish.
+        function pollVet(batched) {
+          send("/sourcing", "POST", { action: "vetStatus", id: vid }).then(function (s) {
+            if (!s.ok) { t.disabled = false; t.textContent = "🔬 Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet status check failed: " + ((s.data && s.data.error) || s.status)); return; }
+            if (!s.data.done) {
+              var c = s.data.counts || {}; var got = (c.succeeded || 0) + (c.errored || 0);
+              showProgress("Deep-vetting (batch)", top * 3, got ? (got + " of " + top + " scored…") : "Batch queued — scoring in the background…");
+              setTimeout(function () { pollVet(batched); }, 10000); return;
+            }
+            vetDone({ vetted: s.data.vetted, deep: s.data.deep, warnings: s.data.warnings, batched: true });
+          });
+        }
+        send("/sourcing", "POST", { action: "vet", id: vid, top: top }).then(function (r) {
+          if (!r.ok) { t.disabled = false; t.textContent = "🔬 Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet failed: " + ((r.data && r.data.error) || r.status)); return; }
+          if (r.data.batched) {
+            showProgress("Deep-vetting (batch)", top * 3, "Batch submitted — scoring " + (r.data.submitted || top) + " in the background…");
+            setTimeout(function () { pollVet(true); }, 8000);
+          } else {
+            vetDone({ vetted: r.data.vetted, deep: r.data.deep, warnings: r.data.warnings, batched: false });
+          }
         });
       } else if ((id = t.getAttribute("data-enrich"))) {
         var grp = t.closest(".jd-run");

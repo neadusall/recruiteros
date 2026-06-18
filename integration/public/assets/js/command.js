@@ -4978,17 +4978,40 @@
           });
       } else if ((id = t.getAttribute("data-vet"))) {
         var topEl = $("#jdVetTop"); var top = topEl ? (parseInt(topEl.value, 10) || 25) : 25;
+        var vid = id;
         t.disabled = true; t.textContent = "Vetting top " + top + "…";
         showProgress("Deep-vetting top " + top, top * 3, "Reading work histories & scoring against the JD…");
-        send("/sourcing", "POST", { action: "vet", id: id, top: top }).then(function (r) {
+        // Final alert + reset, shared by the batch and synchronous paths.
+        function vetDone(d) {
           t.disabled = false; t.textContent = "🔬 Deep-vet";
-          if (!r.ok) { finishProgress("Deep-vet failed"); alert("Deep-vet failed: " + ((r.data && r.data.error) || r.status)); return; }
-          finishProgress("Deep-vetted " + (r.data.vetted || 0));
-          var warn = (r.data.warnings || []).length ? ("\n\n" + r.data.warnings.slice(0, 3).join("\n")) : "";
-          alert("Deep-vetted " + r.data.vetted + " candidate" + (r.data.vetted === 1 ? "" : "s") +
-            (r.data.deep ? " against full work history." : " on surface fields only. Add the deep-vet profile endpoint in Setup to read full work history.") +
-            " Ranked by verified score; download the CSV for the verdicts." + warn);
+          finishProgress("Deep-vetted " + (d.vetted || 0));
+          var warn = (d.warnings || []).length ? ("\n\n" + d.warnings.slice(0, 3).join("\n")) : "";
+          alert("Deep-vetted " + (d.vetted || 0) + " candidate" + ((d.vetted === 1) ? "" : "s") +
+            (d.deep ? " against full work history." : " on surface fields only. Add the deep-vet profile endpoint in Setup to read full work history.") +
+            " Ranked by verified score; download the Excel for the verdicts." +
+            (d.batched ? " (Ran as a 50%-cheaper batch.)" : "") + warn);
           loadRuns();
+        }
+        // Poll the in-flight batch every 10s until it ends, then ingest + finish.
+        function pollVet(batched) {
+          send("/sourcing", "POST", { action: "vetStatus", id: vid }).then(function (s) {
+            if (!s.ok) { t.disabled = false; t.textContent = "🔬 Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet status check failed: " + ((s.data && s.data.error) || s.status)); return; }
+            if (!s.data.done) {
+              var c = s.data.counts || {}; var got = (c.succeeded || 0) + (c.errored || 0);
+              showProgress("Deep-vetting (batch)", top * 3, got ? (got + " of " + top + " scored…") : "Batch queued — scoring in the background…");
+              setTimeout(function () { pollVet(batched); }, 10000); return;
+            }
+            vetDone({ vetted: s.data.vetted, deep: s.data.deep, warnings: s.data.warnings, batched: true });
+          });
+        }
+        send("/sourcing", "POST", { action: "vet", id: vid, top: top }).then(function (r) {
+          if (!r.ok) { t.disabled = false; t.textContent = "🔬 Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet failed: " + ((r.data && r.data.error) || r.status)); return; }
+          if (r.data.batched) {
+            showProgress("Deep-vetting (batch)", top * 3, "Batch submitted — scoring " + (r.data.submitted || top) + " in the background…");
+            setTimeout(function () { pollVet(true); }, 8000);
+          } else {
+            vetDone({ vetted: r.data.vetted, deep: r.data.deep, warnings: r.data.warnings, batched: false });
+          }
         });
       } else if ((id = t.getAttribute("data-enrich"))) {
         var grp = t.closest(".jd-run");

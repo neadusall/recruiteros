@@ -189,9 +189,11 @@
           { key: "RAPIDAPI_PROFILE_HOST", label: "Deep-vet · host", required: false, placeholder: "fresh-linkedin-scraper-api.p.rapidapi.com", hint: "Same host as Search. Enables deep-vet against full work history. Leave blank to skip deep-vet." },
           { key: "RAPIDAPI_PROFILE_PATH", label: "Deep-vet · path", required: false, placeholder: "/api/v1/user/profile?username={username}", hint: "Profile endpoint. {username} is filled with the candidate's …/in/<handle> slug automatically; use {url} instead if your listing wants the full profile URL." },
           { key: "RAPIDAPI_PROFILE_METHOD", label: "Deep-vet · method", required: false, placeholder: "GET", hint: "GET or POST. Enter GET for the Fresh listing. Leave blank = GET." },
-          { key: "RAPIDAPI_PROFILE_BODY_KEY", label: "Deep-vet · URL field", required: false, placeholder: "link", hint: "POST only — ignore for the Fresh (GET) listing. Body key the profile endpoint expects the URL under (person_deep uses 'link')." }
+          { key: "RAPIDAPI_PROFILE_BODY_KEY", label: "Deep-vet · URL field", required: false, placeholder: "link", hint: "POST only — ignore for the Fresh (GET) listing. Body key the profile endpoint expects the URL under (person_deep uses 'link')." },
+          { key: "GOOGLE_CSE_KEY", label: "Free pass · Google API key", required: false, secret: true, placeholder: "AIza…", hint: "Optional. Google Custom Search JSON API key — gives 100 FREE searches/day that run before any paid lookup. From console.cloud.google.com → APIs → Custom Search API." },
+          { key: "GOOGLE_CSE_CX", label: "Free pass · Search engine ID (cx)", required: false, placeholder: "xxxxxxxxxxxxx", hint: "Optional. Your Programmable Search Engine ID. Create one at programmablesearchengine.google.com set to search the entire web." }
         ],
-        steps: ["Subscribe to the Fresh LinkedIn Scraper API (by SaleLeads) on RapidAPI — the free plan is enough to start.", "SEARCH → host: fresh-linkedin-scraper-api.p.rapidapi.com · path: /api/v1/search/people?name={query}&page={page}&limit=10 · method: GET", "DEEP-VET (optional) → host: same · path: /api/v1/user/profile?username={username} · method: GET — {username} is filled in per candidate.", "Paste your RapidAPI key, fill the values above exactly, Save, then Test — it should go green."],
+        steps: ["Subscribe to the Fresh LinkedIn Scraper API (by SaleLeads) on RapidAPI — the free plan is enough to start.", "SEARCH → host: fresh-linkedin-scraper-api.p.rapidapi.com · path: /api/v1/search/people?name={query}&page={page}&limit=10 · method: GET", "DEEP-VET (optional) → host: same · path: /api/v1/user/profile?username={username} · method: GET — {username} is filled in per candidate.", "FREE PASS (optional) → add a Google Custom Search key + engine ID (cx) for 100 free searches/day that run before any paid lookup.", "Paste your RapidAPI key, fill the values above exactly, Save, then Test — it should go green."],
         docsUrl: "https://rapidapi.com/saleleads-saleleads-default/api/fresh-linkedin-scraper-api", docsLabel: "Fresh LinkedIn Scraper API on RapidAPI ↗", present: [] },
       { id: "tomba", label: "Email finder", status: "red", requiredFor: ["bd"],
         blurb: "Second rung of the waterfall: corporate email from a name + company domain.",
@@ -1013,6 +1015,24 @@
         for (var z = 0; z < top; z++) { var cc = re.candidates[z]; if (cc && !cc.email) { cc.email = cc.fullName.toLowerCase().replace(/\(sample\)/g, "").replace(/[^a-z]+/g, ".").replace(/^\.|\.$/g, "") + "@" + (String(cc.company || "company").toLowerCase().replace(/[^a-z0-9]/g, "") || "company") + ".com"; en++; } }
         save(d); return ok({ enriched: en, run: re });
       }
+      if (act === "vet") {
+        // Offline demo: synthesize sample verdicts on the top N (no batch, no network).
+        var rv = null; d.sourcingRuns.forEach(function (x) { if (x.id === (body && body.id)) rv = x; });
+        if (!rv) return notFound();
+        var vtop = Math.min((body && body.top) || 25, (rv.candidates || []).length), vn = 0;
+        var verdicts = ["strong", "possible", "weak"];
+        (rv.candidates || []).slice().sort(function (a, c) { return (c.fitScore || 0) - (a.fitScore || 0); }).slice(0, vtop)
+          .forEach(function (c, k) {
+            c.verifiedScore = Math.max(20, (c.fitScore || 50) - (k % 5) * 4);
+            c.verdict = verdicts[k % 3]; c.yearsRelevant = 6 + (k % 9);
+            c.vetStrengths = ["SAMPLE: relevant title history"]; c.vetGaps = ["SAMPLE: demo verdict — connect AI to vet for real"];
+            c.vetFlags = []; c.vetRationale = "SAMPLE verdict (offline demo)."; c.profileFetched = false; vn++;
+          });
+        (rv.candidates || []).sort(function (a, c) { return (c.verifiedScore == null ? -1 : c.verifiedScore) - (a.verifiedScore == null ? -1 : a.verifiedScore) || (c.fitScore || 0) - (a.fitScore || 0); });
+        rv.updatedAt = new Date().toISOString(); save(d);
+        return ok({ batched: false, vetted: vn, deep: false, warnings: ["Demo mode (offline): SAMPLE verdicts. Connect Anthropic to deep-vet real work histories."], run: rv });
+      }
+      if (act === "vetStatus") { return ok({ done: true, vetted: 0, status: "none" }); }
       if (act === "delete") { d.sourcingRuns = d.sourcingRuns.filter(function (x) { return x.id !== (body && body.id); }); save(d); return ok({ ok: true }); }
       return ok({});
     }

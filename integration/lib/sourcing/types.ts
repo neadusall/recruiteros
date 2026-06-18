@@ -117,9 +117,33 @@ export interface SourcingRun {
   promotedCampaignId?: string;
   promotedListId?: string;
   promotedCount?: number;
+  /**
+   * A deep-vet batch currently in flight (Message Batches API). Present from submit
+   * until the results are ingested, then cleared. Persisted so a redeploy mid-batch
+   * doesn't strand it — the tab resumes polling by batchId.
+   */
+  vetBatch?: VetBatchRef;
   warnings: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** A deep-vet batch in flight, parked on the run so polling survives a redeploy. */
+export interface VetBatchRef {
+  /** Anthropic Message Batches id to poll. */
+  batchId: string;
+  submittedAt: string;
+  /** How many of the top-ranked candidates were submitted. */
+  top: number;
+  /** True if full profiles were fetched before submitting (deep vs surface-only). */
+  deep: boolean;
+  /**
+   * Candidate keys in submit order; custom_id "vet_<i>" maps to targets[i]. Lets us
+   * re-attach a result to the right candidate even if the list was re-sorted since.
+   */
+  targets: string[];
+  /** Warnings captured at submit time (e.g. profile fetch failures). */
+  warnings?: string[];
 }
 
 /** Knobs for a discovery run. */
@@ -128,6 +152,6 @@ export interface DiscoveryOptions {
   cap?: number;
   /** Drop rows scoring below this fit threshold (0..100). Default 45. */
   minFit?: number;
-  /** Which engines to use. Defaults to whatever is configured. */
-  engines?: Array<"rapidapi" | "scraper">;
+  /** Which engines to use, in cheapest-first order. Defaults to whatever is configured. */
+  engines?: Array<"google" | "rapidapi" | "scraper">;
 }

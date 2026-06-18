@@ -159,11 +159,15 @@ const CATALOG: IntegrationMeta[] = [
       { key: "RAPIDAPI_PROFILE_PATH", label: "Deep-vet · path", required: false, placeholder: "/api/v1/user/profile?username={username}", hint: "Profile endpoint. {username} is filled with the candidate's …/in/<handle> slug automatically; use {url} instead if your listing wants the full profile URL." },
       { key: "RAPIDAPI_PROFILE_METHOD", label: "Deep-vet · method", required: false, placeholder: "GET", hint: "GET or POST. Enter GET for the Fresh listing. Leave blank = GET." },
       { key: "RAPIDAPI_PROFILE_BODY_KEY", label: "Deep-vet · URL field", required: false, placeholder: "link", hint: "POST only — ignore for the Fresh (GET) listing. Body key the profile endpoint expects the URL under (person_deep uses 'link')." },
+      // --- Free first pass (optional): Google Programmable Search over the X-ray boolean ---
+      { key: "GOOGLE_CSE_KEY", label: "Free pass · Google API key", required: false, secret: true, placeholder: "AIza…", hint: "Optional. Google Custom Search JSON API key — gives 100 FREE searches/day that run before any paid lookup. From console.cloud.google.com → APIs → Custom Search API." },
+      { key: "GOOGLE_CSE_CX", label: "Free pass · Search engine ID (cx)", required: false, placeholder: "xxxxxxxxxxxxx", hint: "Optional. Your Programmable Search Engine ID. Create one at programmablesearchengine.google.com set to search the entire web." },
     ],
     steps: [
       "Subscribe to the Fresh LinkedIn Scraper API (by SaleLeads) on RapidAPI — the free plan is enough to start.",
       "SEARCH → host: fresh-linkedin-scraper-api.p.rapidapi.com · path: /api/v1/search/people?name={query}&page={page}&limit=10 · method: GET",
       "DEEP-VET (optional) → host: same · path: /api/v1/user/profile?username={username} · method: GET — {username} is filled in per candidate.",
+      "FREE PASS (optional) → add a Google Custom Search key + engine ID (cx) to get 100 free searches/day that run before any paid lookup.",
       "Paste your RapidAPI key, fill the values above exactly, Save, then Test — it should go green.",
     ],
     docsUrl: "https://rapidapi.com/saleleads-saleleads-default/api/fresh-linkedin-scraper-api",
