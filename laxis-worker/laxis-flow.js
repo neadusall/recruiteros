@@ -30,6 +30,7 @@ const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const { chromium } = require("playwright");
+const heal = require("./heal");
 
 const CONFIG = {
   baseUrl: process.env.LAXIS_BASE_URL || "https://app.laxis.tech",
@@ -78,6 +79,15 @@ async function visible(page, selOrText, { byText = false, timeout = 3000 } = {})
   try { await loc.waitFor({ state: "visible", timeout }); return true; } catch { return false; }
 }
 
+/** Return the first CSS selector in `sels` that resolves to a visible element, else null. */
+async function firstVisibleLoc(page, sels, timeout = 8000) {
+  for (const s of sels) {
+    const loc = page.locator(s).first();
+    try { await loc.waitFor({ state: "visible", timeout }); return loc; } catch { /* next */ }
+  }
+  return null;
+}
+
 /** On the login screen? URL says /login, or the Google button is on screen. */
 async function onLoginPage(page) {
   if (/\/login/.test(page.url())) return true;
@@ -96,26 +106,26 @@ async function logIn(page, log) {
   await page.goto(CONFIG.baseUrl + CONFIG.loginPath, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(3000);
 
-  // Email/password is two clicks deep behind the OAuth options.
-  try { await clickText(page, CONFIG.text.otherWays, 15_000); } catch {
-    throw new Error(`laxis_login_step_missing: "${CONFIG.text.otherWays}" (CALIBRATE text.otherWays)`);
-  }
+  // Email/password is two clicks deep behind the OAuth options. Each click self-heals.
+  await heal.resolveClick(page, "login_other_ways",
+    "Reveal the email + password sign-in option, which is hidden behind the social (Google/Microsoft/Apple) login buttons",
+    [CONFIG.text.otherWays], log);
   await page.waitForTimeout(1500);
-  try { await clickText(page, CONFIG.text.continueWithEmail, 10_000); } catch {
-    throw new Error(`laxis_login_step_missing: "${CONFIG.text.continueWithEmail}" (CALIBRATE text.continueWithEmail)`);
-  }
+  await heal.resolveClick(page, "login_with_email",
+    "Choose to continue / sign in using an email address and password (not a social provider)",
+    [CONFIG.text.continueWithEmail], log);
   await page.waitForTimeout(2500);
 
-  const email = page.locator(CONFIG.selectors.loginEmail).first();
-  const password = page.locator(CONFIG.selectors.loginPassword).first();
-  if (!(await visible(page, CONFIG.selectors.loginEmail, { timeout: 10_000 }))) {
+  const email = await firstVisibleLoc(page, [CONFIG.selectors.loginEmail, 'input[type=email]', 'input[autocomplete=email]'], 10_000);
+  const password = await firstVisibleLoc(page, [CONFIG.selectors.loginPassword, 'input[type=password]', 'input[autocomplete=current-password]'], 10_000);
+  if (!email || !password) {
     throw new Error("laxis_login_form_not_found (CALIBRATE selectors.loginEmail/loginPassword)");
   }
   await email.fill(CONFIG.email);
   await password.fill(CONFIG.password);
   await Promise.all([
     page.waitForLoadState("networkidle").catch(() => {}),
-    clickText(page, CONFIG.text.signIn, 8000),
+    heal.resolveClick(page, "login_submit", "Submit / confirm the email and password login form", [CONFIG.text.signIn], log),
   ]);
   await page.waitForTimeout(5000);
   if (await onLoginPage(page)) {
@@ -150,19 +160,21 @@ async function uploadAndEnrich(page, csvPath, token, log) {
   await page.waitForTimeout(2500);
 
   log("upload: opening Enrich Prospects dialog");
-  await clickText(page, CONFIG.text.enrichOpen, 15_000);
+  await heal.resolveClick(page, "enrich_open",
+    "Open the dialog/feature that enriches prospects or contacts by uploading a CSV file",
+    [CONFIG.text.enrichOpen], log);
   await page.waitForTimeout(2000);
 
-  const fileInput = page.locator(CONFIG.selectors.fileInput).first();
-  if (!(await visible(page, CONFIG.selectors.fileInput, { timeout: 15_000 }))) {
-    throw new Error("laxis_file_input_not_found (CALIBRATE selectors.fileInput)");
-  }
+  const fileInput = await firstVisibleLoc(page, [CONFIG.selectors.fileInput, 'input[type=file][accept*=csv]', 'input[type=file]'], 15_000)
+    || page.locator(CONFIG.selectors.fileInput).first(); // file inputs are often visually hidden
   log("upload: setting file " + path.basename(csvPath));
   await fileInput.setInputFiles(csvPath);
   await page.waitForTimeout(1500);
 
   log("enrich: starting (Enrich Contacts)");
-  await clickText(page, CONFIG.text.enrichStart, 10_000);
+  await heal.resolveClick(page, "enrich_start",
+    "Start / confirm the enrichment now that the CSV file is attached",
+    [CONFIG.text.enrichStart], log);
 
   // Laxis made a job row named "CSV Enrich <date>_<token>". Wait until OUR row shows
   // "Completed". Scope precisely: find the SMALLEST element whose text contains both our
@@ -202,7 +214,7 @@ async function exportEnriched(page, token, outDir, log) {
   log("export: downloading CSV");
   const [download] = await Promise.all([
     page.waitForEvent("download", { timeout: CONFIG.navTimeoutMs }),
-    clickText(page, CONFIG.text.export, 12_000),
+    heal.resolveClick(page, "export", "Export or download the enriched contact list as a CSV/file", [CONFIG.text.export], log),
   ]);
   const dest = path.join(outDir, "laxis-enriched.csv");
   await download.saveAs(dest);
@@ -277,4 +289,30 @@ async function probe({ log = () => {} } = {}) {
   }
 }
 
-module.exports = { enrichCsv, warmLogin, probe, CONFIG };
+/**
+ * Canary self-test: log in (heals login steps if needed) and confirm the "Enrich
+ * Prospects" entry point is locatable on /prospect — pre-emptively healing it if Laxis
+ * renamed it, WITHOUT uploading anything or spending a credit. server.js runs this on a
+ * timer so UI drift is repaired before a real job ever hits it.
+ */
+async function selfTest({ log = () => {} } = {}) {
+  const browser = await chromium.launch(launchArgs());
+  try {
+    const haveState = fs.existsSync(CONFIG.statePath);
+    const ctx = await browser.newContext(
+      haveState ? { storageState: CONFIG.statePath, acceptDownloads: true } : { acceptDownloads: true }
+    );
+    const page = await ensureSession(ctx, log); // exercises (and heals) the login flow when stale
+    await ctx.storageState({ path: CONFIG.statePath });
+    await page.goto(CONFIG.baseUrl + CONFIG.prospectPath, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(4000);
+    const r = await heal.resolveLocate(page, "enrich_open",
+      "Open the dialog/feature that enriches prospects or contacts by uploading a CSV file",
+      [CONFIG.text.enrichOpen], log);
+    return { ok: r.ok, healed: r.healed, resolvedTo: r.text };
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+module.exports = { enrichCsv, warmLogin, probe, selfTest, CONFIG };

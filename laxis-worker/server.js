@@ -21,7 +21,7 @@
 
 const http = require("http");
 const crypto = require("crypto");
-const { enrichCsv, CONFIG } = require("./laxis-flow");
+const { enrichCsv, selfTest, CONFIG } = require("./laxis-flow");
 
 const PORT = Number(process.env.PORT || 3000);
 const TOKEN = process.env.LAXIS_WORKER_TOKEN || "";
@@ -31,6 +31,7 @@ const MAX_BODY = 24 * 1024 * 1024; // 24 MB — generous for a big candidate CSV
 const jobs = new Map();
 const queue = [];
 let running = false;
+let lastCanary = null;
 
 function newId() {
   return "laxisjob_" + crypto.randomBytes(8).toString("hex");
@@ -112,10 +113,22 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
 
     if (req.method === "GET" && url.pathname === "/health") {
-      return send(res, 200, { ok: true, hasCreds: Boolean(CONFIG.email && CONFIG.password), queued: queue.length, running });
+      return send(res, 200, { ok: true, hasCreds: Boolean(CONFIG.email && CONFIG.password), queued: queue.length, running, lastCanary });
     }
 
     if (!authed(req)) return send(res, 401, { error: "unauthorized" });
+
+    // On-demand canary: log in + confirm (and self-heal) the enrich entry point, no credit spent.
+    if (req.method === "GET" && url.pathname === "/selftest") {
+      try {
+        const r = await selfTest({ log: (l) => console.log("[selftest]", l) });
+        lastCanary = { ...r, at: new Date().toISOString() };
+        return send(res, r.ok ? 200 : 503, lastCanary);
+      } catch (err) {
+        lastCanary = { ok: false, error: (err && err.message) || String(err), at: new Date().toISOString() };
+        return send(res, 503, lastCanary);
+      }
+    }
 
     if (req.method === "POST" && url.pathname === "/jobs") {
       const raw = await readBody(req);
@@ -160,3 +173,23 @@ server.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`laxis-worker listening on :${PORT} (auth ${TOKEN ? "on" : "off"}, creds ${CONFIG.email ? "set" : "MISSING"})`);
 });
+
+// Periodic canary: every LAXIS_CANARY_HOURS (default 12h) confirm + pre-emptively heal the
+// login + enrich entry point so a Laxis UI change is repaired BEFORE a real job hits it.
+// Skipped while a job is running (one browser session at a time) and when creds are absent.
+const CANARY_HOURS = Number(process.env.LAXIS_CANARY_HOURS || 12);
+if (CANARY_HOURS > 0 && CONFIG.email && CONFIG.password) {
+  const tick = async () => {
+    if (running) return;
+    try {
+      const r = await selfTest({ log: (l) => console.log("[canary]", l) });
+      lastCanary = { ...r, at: new Date().toISOString() };
+      console.log("[canary]", r.ok ? (r.healed ? "ok (self-healed a UI change)" : "ok") : "FAILED to resolve enrich entry point");
+    } catch (err) {
+      lastCanary = { ok: false, error: (err && err.message) || String(err), at: new Date().toISOString() };
+      console.log("[canary] error:", lastCanary.error);
+    }
+  };
+  setTimeout(tick, 90_000).unref();                       // first run shortly after boot
+  setInterval(tick, CANARY_HOURS * 3600_000).unref();     // then on the cadence
+}

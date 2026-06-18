@@ -45,30 +45,36 @@ The app side needs `LAXIS_WORKER_URL=http://laxis-worker:3000` (already set in `
 Single concurrency on purpose: one browser session to Laxis at a time looks like one human
 and minimizes the chance of tripping bot detection. Jobs queue.
 
-## ⚠️ Calibration — required before first real use
+## Self-healing (the worker repairs itself when Laxis changes its UI)
 
-The Laxis-specific selectors in [`laxis-flow.js`](./laxis-flow.js) (everything under
-`CONFIG.selectors`, marked `// CALIBRATE`) are **educated guesses**. They must be confirmed
-against the live site once, or jobs will fail with a clear `*_not_found (CALIBRATE …)` error
-telling you which selector to fix.
+The flow is **calibrated against the live site** and wrapped in a self-healing layer
+([`heal.js`](./heal.js)), so a renamed button or moved label doesn't take the tool down:
 
-To capture the real selectors:
+1. **Fast path** — try the known label for each step (in `CONFIG.text`).
+2. **Learned path** — fixes that healed before live in `/data/laxis-overrides.json` and are
+   tried first, so a given change is repaired **once**.
+3. **Heal path** — if all known labels fail, the worker dumps the page's clickable elements
+   and asks Claude (`ANTHROPIC_API_KEY`, already in the env) which one matches the step's
+   intent, clicks it, and **persists** the winner as an override.
 
-```bash
-# locally, with creds in your env — opens a browser you click through once
-cd laxis-worker
-npm install
-npm run codegen          # Playwright records the selectors as you click upload → enrich → export
-```
-
-Paste the upload / enrich / export selectors it records into `CONFIG.selectors`, then verify
-end to end:
+A **canary** (`/selftest`, also run on a timer every `LAXIS_CANARY_HOURS`, default 12h) logs
+in and confirms the enrich entry point is reachable — pre-emptively healing UI drift *before*
+a real job ever hits it. Check it any time:
 
 ```bash
-LAXIS_HEADED=1 LAXIS_EMAIL=… LAXIS_PASSWORD=… npm run login   # confirms login + session save
+docker compose exec laxis-worker node -e "fetch('http://127.0.0.1:3000/selftest').then(r=>r.json()).then(console.log)"
 ```
 
-Also confirm two data contracts during calibration:
+Only a deep structural change (a brand-new multi-step flow) needs a human — and even then the
+job fails with a precise `laxis_step_unresolved: '<step>'` error naming exactly what broke. To
+re-learn the flow from scratch, run `node probe.js`.
+
+The calibrated flow today (in `laxis-flow.js`): login is email/password behind
+*"Other ways to sign in" → "Continue with Email"*; the CSV upload is on `/prospect` via
+*"Enrich Prospects"*; completion is the job row flipping to *"Completed"*; results come from
+the per-job *"Export"*.
+
+Two data contracts to keep in mind:
 
 1. **Import CSV format** — Laxis's importer expects exactly two snake_case columns,
    `email,linkedin_url` (confirmed from the `sample_enrich_template` Laxis hands out). The
