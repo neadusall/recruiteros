@@ -73,6 +73,10 @@ export interface EstimateOptions {
   wantPhone?: boolean;
   /** Run AI first-line personalization (default true). */
   aiPersonalize?: boolean;
+  /** JD Sourcing: candidates found via RapidAPI people-search this month (0 = feature unused). */
+  candidatesFoundPerMonth?: number;
+  /** JD Sourcing: candidates deep-vetted (full-profile read) this month (0 = none). */
+  candidatesDeepVettedPerMonth?: number;
   /** Runtime rate overrides (id -> unitCostUsd). */
   rateOverrides?: Record<string, number>;
   /** Runtime constant overrides. */
@@ -138,6 +142,13 @@ export function estimateCost(opts: EstimateOptions): CostBreakdown {
   // Sending capacity — inboxes + domains.
   add("inbox_month", "Mailboxes", "sending", inboxes, "inboxes");
   add("domain_month", "Sending domains", "sending", domains, "domains");
+
+  // JD Sourcing — RapidAPI people-search find + deep-vet. Only billed when the
+  // feature is used, so email-only accounts see no sourcing lines.
+  const found = Math.max(0, Math.round(opts.candidatesFoundPerMonth ?? 0));
+  const vetted = Math.max(0, Math.round(opts.candidatesDeepVettedPerMonth ?? 0));
+  if (found) add("jd_sourcing_find", "JD Sourcing · candidate find", "linkedin", found, "candidates");
+  if (vetted) add("jd_sourcing_deepvet", "JD Sourcing · deep-vet", "linkedin", vetted, "candidates");
 
   // Signals — free, shown for completeness ($0).
   add("signals_free", "Hiring/intent signals", "signals", prospects, "signals");

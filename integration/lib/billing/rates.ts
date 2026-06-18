@@ -214,6 +214,26 @@ export const DEFAULT_RATES: CostRate[] = [
     scales: "per_prospect",
   },
 
+  // ---- JD Sourcing (RapidAPI people-search; Fresh LinkedIn Scraper, Pro plan) ----
+  {
+    id: "jd_sourcing_find",
+    label: "JD Sourcing · candidate find",
+    category: "linkedin",
+    unitCostUsd: 0.000245,
+    unit: "per candidate found",
+    note: "Fresh LinkedIn Scraper API (SaleLeads) on RapidAPI, Pro plan: $49/mo for 20,000 requests = $0.00245/request. One search request returns 10 profiles (limit=10), so per candidate found = $0.00245 / 10 = $0.000245 (~$2.45 per 10,000 profiles). OVERAGE above 20k req/mo is $0.008/request (~$0.0008/profile, ~3.3x); past ~38,750 req/mo Ultra ($199/100k) is cheaper. Rate limit 20 req/min = ~12,000 profiles/hour is the practical ceiling, not cost.",
+    scales: "per_prospect",
+  },
+  {
+    id: "jd_sourcing_deepvet",
+    label: "JD Sourcing · deep-vet (profile read)",
+    category: "linkedin",
+    unitCostUsd: 0.00245,
+    unit: "per candidate deep-vetted",
+    note: "Same Fresh LinkedIn Scraper listing + same RapidAPI key/quota as the find step — deep-vet reads one full profile per candidate = 1 request = $0.00245 in-quota ($0.008 in overage). Drawn from the SAME 20k Pro pool as search, not a separate bill. The LLM that scores the profile vs the JD is a separate small cost (see the AI rates). Only spent when you run Deep-vet on a shortlist.",
+    scales: "per_prospect",
+  },
+
   // ---- Signals (FREE public sources by default; one cheap paid augment) ----
   {
     id: "signals_free",

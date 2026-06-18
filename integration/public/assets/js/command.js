@@ -4375,10 +4375,10 @@
       '.jd-tipgrid>span{display:block;position:relative;padding-left:15px}' +
       '.jd-tipgrid>span::before{content:"";position:absolute;left:0;top:6px;width:6px;height:6px;border-radius:50%;background:linear-gradient(135deg,#7c5cff,var(--brand-2))}' +
       '.jd-tipgrid b{color:var(--brand-2);font-weight:600}' +
-      '.jd-builder{position:relative;overflow:hidden;padding:13px 16px;background:linear-gradient(135deg,rgba(124,92,255,.13),rgba(80,200,255,.06));border:1px solid rgba(124,92,255,.34);border-radius:14px;margin-bottom:11px;box-shadow:0 12px 36px -14px rgba(124,92,255,.4)}' +
-      '.jd-builder::after{content:"";position:absolute;top:-40%;right:-10%;width:240px;height:240px;background:radial-gradient(circle,rgba(124,92,255,.18),transparent 70%);pointer-events:none}' +
-      '.jd-builder-h{position:relative;font-weight:800;font-size:15px;letter-spacing:.01em;margin-bottom:3px;background:linear-gradient(90deg,#7c5cff,var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
-      '.jd-builder-sub{font-size:12.5px;color:var(--text-muted);margin-bottom:8px}' +
+      '.jd-builder{position:relative;padding:11px 14px;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:12px;margin-bottom:11px}' +
+      '.jd-builder::after{content:none}' +
+      '.jd-builder-h{position:relative;font-weight:700;font-size:13.5px;letter-spacing:.01em;margin-bottom:3px;color:var(--text)}' +
+      '.jd-builder-sub{font-size:12px;color:var(--text-muted);margin-bottom:8px}' +
       '.jd-builder-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}' +
       '@media(max-width:640px){.jd-builder-row{grid-template-columns:1fr}}' +
       '.jd-lead{font-size:13.5px;margin-bottom:8px}.jd-lead b{color:var(--text)}' +
@@ -4458,7 +4458,7 @@
         '</div>' +
       '</details>' +
       '<div class="card">' +
-        '<div class="jd-lead2">✨ Start with the role</div>' +
+        '<div class="jd-lead2">Start with the role</div>' +
         '<div class="jd-lead-sub">Fill in what you know and paste any JD. The AI refines it into a strong, wide-net search.</div>' +
         '<div class="jd-fieldgrid">' +
           '<div class="jd-field"><label>Job title</label><input id="jdbTitle" type="text" placeholder="e.g. VP of Sales, Director of Nursing" /></div>' +
@@ -4475,9 +4475,9 @@
         '<div class="jd-field"><label>Anything specific <span class="jd-opt muted">optional</span></label><input id="jdbNotes" type="text" placeholder="Seniority, certs/licenses, must-have experience, deal-breakers" /></div>' +
         '<div class="jd-field"><label>Job description <span class="jd-opt muted">optional, or let the AI write it</span></label>' +
           '<textarea id="jdText" rows="4" placeholder="Paste the job description here. The more real detail, the stronger the search."></textarea></div>' +
-        '<div class="jd-builder"><div class="jd-buildbar" style="margin:0;justify-content:space-between"><b class="jd-builder-h" style="margin:0">✨ Build a refined, sourcing-ready JD</b>' +
-          '<button class="btn btn-primary btn-sm" id="jdbBtn">✨ Build refined JD</button></div>' +
-          '<div class="jd-builder-sub" style="margin:7px 0 0">Your input is the benchmark; the AI refines it, fills the gaps, and widens the net. Run this first, then Analyze.</div>' +
+        '<div class="jd-builder"><div class="jd-buildbar" style="margin:0;justify-content:space-between;gap:10px">' +
+          '<span class="jd-builder-sub" style="margin:0">The AI refines your input, fills the gaps, and widens the net. Run this first, then Analyze.</span>' +
+          '<button class="btn btn-primary btn-sm" id="jdbBtn" style="flex:0 0 auto">✨ Build refined JD</button></div>' +
         '</div>' +
         '<details class="jd-tipsd"><summary>See what sharpens the search <span class="muted">Tap to expand</span></summary>' +
           '<div class="jd-tipgrid">' +
@@ -4494,7 +4494,7 @@
         '</details>' +
         '<div class="jd-actions">' +
           '<button class="btn btn-primary btn-sm" id="jdAnalyze">Analyze JD</button>' +
-          '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>🧲 Find candidates</button>' +
+          '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>Find candidates</button>' +
           '<span class="jd-cap muted">Scan up to <input id="jdCap" type="number" min="1" max="5000" value="500" title="Ceiling on candidates gathered per run. Not a minimum — runs return however many qualified people the search finds, up to this number."> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10" title="0 = show every profile the search finds (nothing filtered). Higher = keep only stronger matches. 10 is a wide net; 40+ is tight."></span>' +
           '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
           '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>💾 Save to JD Sourcing</button>' +
