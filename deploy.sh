@@ -129,9 +129,13 @@ ACCESS_TOKEN=${TX_ACCESS}
 ACCESS_EMAIL=neadusall@gmail.com
 ALLOWED_EMAILS=neadusall@gmail.com
 
-# Database — the shared self-hosted Postgres (its own `taltxt` database).
-# Run ./taltxt-db-setup.sh once to create the db + push the schema.
-DATABASE_URL=postgres://recruiteros:${TX_PGPW}@db:5432/taltxt
+# Database — Neon (managed Postgres). Paste your Neon connection string so the
+# consolidated server reuses the EXISTING taltxt data with NO migration:
+#   DATABASE_URL=postgres://<user>:<pass>@<host>.neon.tech/<db>?sslmode=require
+# (Alternative: the shared local Postgres in this stack — then also run
+#  ./taltxt-db-setup.sh once to create the db + push schema:
+#   DATABASE_URL=postgres://recruiteros:${TX_PGPW}@db:5432/taltxt )
+DATABASE_URL=
 
 # Email magic-link (Gmail SMTP recommended)
 SMTP_HOST=smtp.gmail.com
@@ -184,10 +188,14 @@ fi
 say "Building and starting containers (this takes a few minutes the first time)"
 docker compose up -d --build
 
-# --- 5b. OS Text DB (create the taltxt database + push its schema) ---
-if [ -f "$DIR/taltxt-db-setup.sh" ] && [ -d money-maker-sms ]; then
-  say "Setting up OS Text database (taltxt)"
+# --- 5b. OS Text DB. Only needed for the LOCAL shared Postgres; with Neon the
+# schema + data already live in the managed DB, so there's nothing to set up. ---
+TX_DBURL="$(grep -E '^DATABASE_URL=' money-maker-sms/.env.production 2>/dev/null | head -1 | cut -d= -f2- || true)"
+if [ -f "$DIR/taltxt-db-setup.sh" ] && [ -d money-maker-sms ] && printf '%s' "${TX_DBURL:-}" | grep -q '@db:5432'; then
+  say "Setting up OS Text database (taltxt) on the shared local Postgres"
   bash "$DIR/taltxt-db-setup.sh" || say "taltxt DB setup skipped/failed — re-run ./taltxt-db-setup.sh once .env.production is filled"
+else
+  say "taltxt uses an external DB (Neon) — skipping local DB setup"
 fi
 
 # --- 6. auto-deploy watcher (idempotent; so future pushes go live on their own) ---
@@ -216,10 +224,11 @@ RecruitersOS is starting.
 
 To add API keys later:  nano $DIR/.env.production  &&  docker compose up -d
 
-OS Text (taltxt) — DB is auto-configured (shared Postgres). To SEND texts,
-fill in Telnyx / QStash / Anthropic keys:
+OS Text (taltxt) — set DATABASE_URL to your Neon connection string (reuses the
+existing data, no migration), then fill in Telnyx / QStash / Anthropic keys:
    nano $DIR/money-maker-sms/.env.production  &&  docker compose up -d --build taltxt
    It then loads in the portal under the "OS Text" route, and at
    https://taltxt.${DOMAIN}
+   (Once verified, you can safely decommission the old money-maker server.)
 ------------------------------------------------------------
 EOF

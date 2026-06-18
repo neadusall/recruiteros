@@ -1,5 +1,19 @@
 # RecruitersOS on Hetzner: app + Caddy (automatic HTTPS via Let's Encrypt).
 # Caddy terminates TLS for recruitersos.co and proxies to the Next app.
+
+# Shared liveness probe for the Node/Next services. Dependency-free (no curl/wget
+# needed in the image): asks the in-container server for "/" and treats ANY reply
+# under 500 as healthy — a login redirect or a 404 still means the process is up;
+# only a 5xx or a refused connection marks it unhealthy. The `autoheal` service
+# below then restarts anything that goes unhealthy, so a wedged container recovers
+# on its own instead of silently 502-ing behind Caddy.
+x-node-health: &node-health
+  test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))\""]
+  interval: 30s
+  timeout: 8s
+  retries: 3
+  start_period: 60s
+
 services:
   db:
     image: postgres:16-alpine
@@ -58,29 +72,35 @@ services:
     expose:
       - "3000"
     # not published to the host directly; Caddy reaches it on the internal net
+    healthcheck: *node-health
+    labels:
+      autoheal: "true"   # restart this container if it goes unhealthy
 
   # OS Text (taltxt): the standalone SMS app, embedded in the portal under the
   # "OS Text" route via an iframe. Source is the money-maker-sms git submodule;
-  # Caddy serves it on its own subdomain (taltxt.recruitersos.co). It uses Neon
-  # (DATABASE_URL in its env file) for storage — no local Postgres needed.
+  # Caddy serves it on its own subdomain (taltxt.recruitersos.co).
+  #
+  # STORAGE = Neon (managed Postgres). Set DATABASE_URL to your Neon connection
+  # string in money-maker-sms/.env.production. We keep taltxt on Neon so the
+  # consolidation onto this box is a clean cutover with NO data migration — the
+  # live data stays where it already is. Because storage is external, taltxt does
+  # NOT depend on the local `db` service (that one stays available only for
+  # opting the main app onto Postgres later).
   taltxt:
     build: ./money-maker-sms
     restart: unless-stopped
-    # Reuses the shared `db` Postgres (its own `taltxt` database) — set
-    # DATABASE_URL=postgres://recruiteros:<POSTGRES_PASSWORD>@db:5432/taltxt in
-    # the env file below. Wait for Postgres to be healthy before starting.
-    depends_on:
-      db:
-        condition: service_healthy
-    # taltxt's own secrets (Telnyx, SMTP, QStash, Anthropic, AUTH_*, DATABASE_URL).
-    # required:false so a missing/empty file never takes down the whole stack —
-    # the container just runs without those keys until you fill it in.
+    # taltxt's own secrets (Telnyx, SMTP, QStash, Anthropic, AUTH_*, and the Neon
+    # DATABASE_URL). required:false so a missing/empty file never takes down the
+    # whole stack — the container just runs without those keys until you fill it in.
     env_file:
       - path: ./money-maker-sms/.env.production
         required: false
     expose:
       - "3000"
     # not published to the host directly; Caddy reaches it on the internal net
+    healthcheck: *node-health
+    labels:
+      autoheal: "true"   # restart this container if it goes unhealthy
 
   # Lume jobs backend: powers the lumesp.com job board + the team /portal that
   # adds/deletes jobs and collects applications. Dependency-free Node service;
@@ -100,6 +120,9 @@ services:
     expose:
       - "3000"
     # not published to the host directly; Caddy reaches it on the internal net
+    healthcheck: *node-health
+    labels:
+      autoheal: "true"   # restart this container if it goes unhealthy
 
   caddy:
     image: caddy:2-alpine
@@ -117,6 +140,28 @@ services:
       - ./lumesp-web:/srv/lumesp:ro
       - caddy_data:/data
       - caddy_config:/config
+    # NOTE: depends_on above is start-ORDER only (no `condition: service_healthy`).
+    # That's deliberate — Caddy must come up and serve recruitersos.co even if
+    # taltxt or lume-jobs is unhealthy, so a broken side-service never takes the
+    # main site down. autoheal (below) recovers the sick container in the background.
+
+  # Watches for any container marked `autoheal=true` that Docker reports unhealthy
+  # and restarts it — Docker does NOT auto-restart on unhealthy by itself, only on
+  # exit. This is what makes a wedged app/taltxt/lume-jobs self-recover with no human
+  # on call. It needs the Docker socket to issue the restart (a POST), so the mount
+  # is read-write — which is root-equivalent on the host, acceptable on this
+  # single-tenant box. (If you ever want to lock it down, front it with a
+  # docker-socket-proxy that only allows container restart.)
+  autoheal:
+    image: willfarrell/autoheal:latest
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "15"        # seconds between checks
+      AUTOHEAL_START_PERIOD: "60"    # grace before the first restart can fire
+      DOCKER_SOCK: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   caddy_data:
