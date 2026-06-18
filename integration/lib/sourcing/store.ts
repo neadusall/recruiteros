@@ -10,7 +10,7 @@
  */
 
 import { rid, nowIso } from "../core/ids";
-import { loadSnapshot, debouncedSaver } from "../db";
+import { loadSnapshot, saveSnapshot } from "../db";
 import type { CandidateRow, CandidateICP, SourcingQuery, SourcingRun } from "./types";
 import type { Motion } from "../core/types";
 
@@ -20,7 +20,13 @@ let store: SourcingRun[] = [];
 let hydrated = false;
 let hydrating: Promise<void> | null = null;
 
-const save = debouncedSaver(KEY, () => store);
+// FAILSAFE: flush immediately (awaited) rather than debounced. Saving/promoting a run is an
+// explicit, infrequent, high-value action — a 250ms debounce window means a crash or deploy
+// in that window silently loses the save. An awaited snapshot guarantees the run is durable
+// before the API returns "saved". saveSnapshot no-ops cleanly when persistence is disabled.
+async function save(): Promise<void> {
+  await saveSnapshot(KEY, store);
+}
 
 async function hydrate(): Promise<void> {
   if (hydrated) return;
@@ -73,7 +79,7 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     existing.candidates = input.candidates ?? existing.candidates;
     if (input.warnings) existing.warnings = input.warnings;
     existing.updatedAt = nowIso();
-    save();
+    await save();
     return existing;
   }
   const run: SourcingRun = {
@@ -92,7 +98,7 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     updatedAt: nowIso(),
   };
   store.push(run);
-  save();
+  await save();
   return run;
 }
 
@@ -101,7 +107,7 @@ export async function deleteSourcingRun(workspaceId: string, id: string): Promis
   const i = store.findIndex((r) => r.id === id && r.workspaceId === workspaceId);
   if (i < 0) return false;
   store.splice(i, 1);
-  save();
+  await save();
   return true;
 }
 
@@ -112,6 +118,6 @@ export async function purgeWorkspaceSourcingRuns(workspaceId: string): Promise<n
   for (let i = store.length - 1; i >= 0; i--) {
     if (store[i].workspaceId === workspaceId) { store.splice(i, 1); n++; }
   }
-  if (n) save();
+  if (n) await save();
   return n;
 }

@@ -10,6 +10,8 @@
  * the account signups / keys / DNS steps that only the owner can perform.
  */
 
+import { dbEnabled } from "../db";
+
 const has = (...names: string[]) => names.every((n) => Boolean((process.env[n] || "").trim()));
 const any = (...names: string[]) => names.some((n) => Boolean((process.env[n] || "").trim()));
 const missing = (...names: string[]) => names.filter((n) => !(process.env[n] || "").trim());
@@ -49,10 +51,14 @@ export function readiness(at: string): Readiness {
   const items: ReadinessItem[] = [
     // ---- core ----
     item(
+      // Use the SAME truth as the running store (db.mode()): durable when DATABASE_URL or
+      // ROS_DATA_DIR is set, OR we're in production (the /data volume fallback). The old
+      // any("DATABASE_URL","ROS_DATA_DIR") check ignored the prod fallback, so this readiness
+      // line could read MEMORY-ONLY while the store was actually persisting (and vice-versa).
       "persistence", "Durable persistence", "core", true,
-      any("DATABASE_URL", "ROS_DATA_DIR"), missing("DATABASE_URL"),
-      "Set DATABASE_URL (Postgres) or ROS_DATA_DIR (file volume) — otherwise data is memory-only and resets on restart.",
-      any("DATABASE_URL", "ROS_DATA_DIR") ? undefined : "Currently MEMORY-ONLY — not safe for production.",
+      dbEnabled(), missing("DATABASE_URL"),
+      "Set DATABASE_URL (Postgres) or ROS_DATA_DIR (file volume), or run with NODE_ENV=production (uses the /data volume) — otherwise data is memory-only and resets on restart.",
+      dbEnabled() ? undefined : "Currently MEMORY-ONLY — not safe for production.",
     ),
     item(
       "llm", "Anthropic (drafting + classification)", "core", true,

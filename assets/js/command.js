@@ -4607,8 +4607,13 @@
         var host = $("#jdRuns"); if (!host) return;
         var runs = (d && d.runs) || [];
         state.runs = runs;
-        if (!runs.length) { host.innerHTML = '<p class="muted">No saved lists yet. Analyze a JD, find candidates, then Save. Or queue several JDs above and run them with the Run queue button.</p>'; return; }
-        host.innerHTML = runs.map(function (r) {
+        // FAILSAFE: if the backend reports non-durable storage, warn LOUDLY before the user
+        // saves work that won't survive a restart. durable===false should never happen in prod.
+        var warn = (d && d.durable === false)
+          ? '<div class="card" style="border-color:#c0392b;background:#2a1414"><b>⚠ Saved lists are NOT being stored durably.</b><br><span class="muted">The server is running in memory-only mode, so saved searches will be lost on the next restart. Don\'t rely on saving until this is fixed (check the /data volume / persistence config).</span></div>'
+          : '';
+        if (!runs.length) { host.innerHTML = warn + '<p class="muted">No saved lists yet. Analyze a JD, find candidates, then Save. Or queue several JDs above and run them with the Run queue button.</p>'; return; }
+        host.innerHTML = warn + runs.map(function (r) {
           var n = r.candidates ? r.candidates.length : 0;
           var urls = (r.candidates || []).filter(function (c) { return c.linkedinUrl; }).length;
           var vetted = (r.candidates || []).filter(function (c) { return typeof c.verifiedScore === "number"; }).length;

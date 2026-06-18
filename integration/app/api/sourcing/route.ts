@@ -21,11 +21,14 @@ import {
 } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { nowIso } from "../../../lib/core/ids";
+import { dbEnabled } from "../../../lib/db";
 
 export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
-  return ok({ runs: await listSourcingRuns(g.ctx.workspace.id) });
+  // `durable` tells the UI whether saved runs survive a restart. If it's ever false the tab
+  // should warn loudly rather than let the user save into volatile memory and lose it silently.
+  return ok({ runs: await listSourcingRuns(g.ctx.workspace.id), durable: dbEnabled() });
 }
 
 export async function POST(req: Request) {

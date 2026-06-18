@@ -28,6 +28,29 @@ export async function register(): Promise<void> {
     } catch {
       /* never let an instrumentation hiccup block server startup */
     }
+    // FAILSAFE: assert durable persistence is actually live in this container, loudly,
+    // BEFORE any traffic. The "saved data wiped on every deploy" bug is silent — the app
+    // happily runs memory-only and the loss only shows up after the next restart. A big
+    // boot-log banner makes a broken /data volume / missing config impossible to miss on
+    // the very deploy that introduces it, instead of after a user loses work.
+    try {
+      const { dbEnabled, dbPing } = await import("./lib/db");
+      const durable = dbEnabled() && (await dbPing());
+      if (!durable) {
+        console.error(
+          "\n========================================================================\n" +
+          "[PERSISTENCE] WARNING: durable storage is NOT active in this container.\n" +
+          "Saved data (JD Sourcing runs, accounts, sessions, …) will be LOST on the\n" +
+          "next restart/deploy. Expected the /data volume to be mounted+writable, or\n" +
+          "DATABASE_URL set. Check the volume mount and NODE_ENV=production.\n" +
+          "========================================================================\n",
+        );
+      } else {
+        console.log("[persistence] durable backend live — saved data survives redeploys.");
+      }
+    } catch {
+      /* never let an instrumentation hiccup block server startup */
+    }
     try {
       const { ensureAccumulator } = await import("./lib/inmarket/accumulator");
       ensureAccumulator();
