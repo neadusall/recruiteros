@@ -1633,3 +1633,7 @@ html[data-theme="light"] .vd-tabs button.active, html[data-theme="light"] .vd-ta
 .pb-bconn.cond::after { color: var(--pb-a); }
 .pb-bconn.cond .dot { background: var(--pb-a); box-shadow: 0 0 10px var(--pb-a); }
 .pb-bconn .wait.cond { color: var(--pb-a); border-color: rgba(255,194,77,.4); max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+
+/* A/B/C copy variant panes inside the popup */
+.pb-vpane { display: none; }
+.pb-vpane.active { display: block; animation: pbRise .3s both; }

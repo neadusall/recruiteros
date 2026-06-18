@@ -901,7 +901,15 @@
         '<span class="x" data-x>✕</span></div>' +
       '<div class="pb-modal-body pb-stagger">' + bodyHtml + "</div></div>";
     back.addEventListener("click", function (e) {
-      if (e.target === back || e.target.closest("[data-x]")) pbCloseModal();
+      if (e.target === back || e.target.closest("[data-x]")) { pbCloseModal(); return; }
+      // A/B/C variant tab switching inside the popup.
+      var vt = e.target.closest("[data-vtab]");
+      if (vt) {
+        var idx = vt.getAttribute("data-vtab");
+        var modal = vt.closest(".pb-modal");
+        Array.prototype.forEach.call(modal.querySelectorAll("[data-vtab]"), function (b) { b.classList.toggle("active", b === vt); });
+        Array.prototype.forEach.call(modal.querySelectorAll("[data-vpane]"), function (p) { p.classList.toggle("active", p.getAttribute("data-vpane") === idx); });
+      }
     });
     document.body.appendChild(back);
     document.addEventListener("keydown", pbEsc);
@@ -928,19 +936,29 @@
           { d: 0, ch: "email", t: "One MPC before the crush", subj: "Staff backend eng — scaled payments to 12k tx/sec",
             body: "Hi {first},\n\nSaw the {round}, congrats. The quarter after a raise is when great backend talent gets scarce, so before the crush, one person who isn't applying anywhere:\n\n• Scaled a payments ledger to twelve thousand transactions a second at five-nines (Series C fintech)\n• Go and event-sourcing; cut reconciliation latency by 80 percent\n\nPassive, but would move for real ownership on a platform like yours. Won't be around long.\n\nWant the one-pager?\n\nThanks,\n{you}",
             aSubj: "your next 5 engineering hires",
-            aBody: "Hi {first}, saw the {round}, congrats. Most teams lose a quarter standing up a pipeline after a raise. I've got a Staff backend engineer who scaled payments to 12k tx/sec and isn't on the market. Want the one-pager?" },
+            aBody: "Hi {first}, saw the {round}, congrats. Most teams lose a quarter standing up a pipeline after a raise. I've got a Staff backend engineer who scaled payments to 12k tx/sec and isn't on the market. Want the one-pager?",
+            cSubj: "before you post the Go role again",
+            cBody: "Hi {first}, congrats on the {round}. Quick one before you re-post the backend role: I've got a Staff engineer who scaled payments past 12k tx/sec, passive, would move for the right platform. Worth a five-minute call?" },
           { d: 2, ch: "liconn", t: "Connect, ref the email",
-            body: "Hi {first}, I just emailed you about a backend engineer for the team you're scaling after the raise. Connecting here too. No pitch, the work speaks for itself." },
+            body: "Hi {first}, I just emailed you about a backend engineer for the team you're scaling after the raise. Connecting here too. No pitch, the work speaks for itself.",
+            b: "Hi {first}, congrats on the {round}. Sent you a note about a Staff backend engineer who'd fit the team you're building. Connecting here too." },
           { d: 4, ch: "lidm", t: "Lower-friction offer",
-            body: "{first}, in case the email got buried: passive Staff backend engineer, scaled payments past twelve thousand a second, fits your Go role. Want the one-pager to start? Yes or no is fine." },
+            body: "{first}, in case the email got buried: passive Staff backend engineer, scaled payments past twelve thousand a second, fits your Go role. Want the one-pager to start? Yes or no is fine.",
+            b: "{first}, no chase, just a yes/no: want me to send the one-pager on that backend engineer, or not the right time?" },
           { d: 6, ch: "livoice", t: "Voice note: the window's real",
-            body: "Hi {first}, it's {you}... just touching base about that engineer I sent over after the raise. No pressure at all. I just want to be honest, they already have another conversation going, so the window's real. What you're building is exactly the kind of scope they'd move for. Reply here and I'll send the profile today. Thanks {first}." },
+            body: "Hi {first}, it's {you}... just touching base about that engineer I sent over after the raise. No pressure at all. I just want to be honest, they already have another conversation going, so the window's real. What you're building is exactly the kind of scope they'd move for. Worth a quick call this week? Thanks {first}.",
+            b: "Hi {first}, it's {you}... quick one on that backend engineer. They're getting close with another team, so the timing's real. I'd love five minutes to talk you through them rather than email it all. Reply here. Thanks." },
           { d: 9, ch: "vm", t: "Voicemail in your voice",
-            body: "Hi {first}, it's {you} at {firm}. I sent a note about a backend engineer for your team after the {round}... passive, and a real fit. They're getting close elsewhere, so I didn't want you to miss it. Give me a call back when you can. And congrats again." },
+            body: "Hi {first}, it's {you} at {firm}. I sent a note about a backend engineer for your team after the {round}... passive, and a real fit. They're getting close elsewhere, so I didn't want you to miss it. Give me a call back when you can. And congrats again.",
+            b: "Hi {first}, {you} here at {firm}. Quick follow-up on that engineer for your team... strong, and the window's closing. I'd love five minutes. Call me back when you get a sec. Congrats again on the raise." },
           { d: 12, ch: "email", t: "Second candidate + news", subj: "saw {company} is staffing up — one more for you",
-            body: "Hi {first},\n\nSaw {company}'s hiring page light up after the raise, exciting. Here's a second engineer worth your time, since the first is now mid-process elsewhere:\n\n• Led the infra team that held a fintech at five-nines through a ten-x growth year\n• Deep in Kubernetes, Go and observability; the calm one when things break at 3am\n\nOpen to a conversation, selective about where. Want the profile?\n\nThanks,\n{you}" },
+            body: "Hi {first},\n\nSaw {company}'s hiring page light up after the raise, exciting. Here's a second engineer worth your time, since the first is now mid-process elsewhere:\n\n• Led the infra team that held a fintech at five-nines through a ten-x growth year\n• Deep in Kubernetes, Go and observability; the calm one when things break at 3am\n\nOpen to a conversation, selective about where. Worth a quick call?\n\nThanks,\n{you}",
+            aSubj: "the first one's gone — here's the second",
+            aBody: "Hi {first}, the backend engineer I led with is now mid-process elsewhere, but here's a second who's just as strong: led infra for a fintech through ten-x growth, deep Go and Kubernetes. Want a quick call before they're gone too?" },
           { d: 16, ch: "email", t: "Break-up, door open", subj: "closing the loop",
-            body: "Hi {first}, I'll stop here so I'm not noise in your inbox. Standing offer: reply anytime and I'll send vetted profiles the same day for whatever's hardest to fill. Congrats again on the {round}.\n\nThanks,\n{you}" }
+            body: "Hi {first}, I'll stop here so I'm not noise in your inbox. Standing offer: reply anytime and I'll line up a quick call on whatever's hardest to fill. Congrats again on the {round}.\n\nThanks,\n{you}",
+            aSubj: "I'll leave it here",
+            aBody: "Hi {first}, last note so I'm not noise. Whenever backend or infra hiring gets loud after the raise, reply and we'll grab fifteen minutes. Congrats again." }
         ] },
 
       { id: "reposted-3x", motion: "bd", accent: "v", name: "Reposted Three Times", signal: "Job repost (3x)", persona: "Hiring Manager / Talent",
@@ -949,145 +967,214 @@
           { d: 0, ch: "email", t: "One who'd land it", subj: "the {role} repost — one person who'd actually land it",
             body: "Hi {first},\n\nThe {role} req has cycled back to the top of your careers page a few times. That's almost never the candidates' fault, it's a thin top-of-funnel against a high bar. One {discipline} person I've spoken with who'd clear it:\n\n• {achv}\n• Has shipped the exact thing your post asks for, twice; passive, not applying anywhere\n\nWant the one-pager?\n\nThanks,\n{you}",
             aSubj: "filling {role} without the repost loop",
-            aBody: "Hi {first}, noticed {role} keeps reposting. Usually means strong-on-paper folks who fade in the loop. I source for fit first, and I've got one who'd actually land it: {achv}. Want a look?" },
+            aBody: "Hi {first}, noticed {role} keeps reposting. Usually means strong-on-paper folks who fade in the loop. I source for fit first, and I've got one who'd actually land it: {achv}. Want a look?",
+            cSubj: "why {role} keeps reposting (and the fix)",
+            cBody: "Hi {first}, a role that reposts three times is a positioning problem, not a sourcing one. I've got one {discipline} person who'd clear your bar and a sharper way to pitch the role. Worth a quick call?" },
           { d: 2, ch: "liconn", t: "Connect, ref the email",
-            body: "Hi {first}, just emailed about the {role} repost and someone who'd land it. Connecting here too so it's easy to reply." },
+            body: "Hi {first}, just emailed about the {role} repost and someone who'd land it. Connecting here too so it's easy to reply.",
+            b: "Hi {first}, reached out about the {role} role and a {discipline} person who fits. Connecting here too." },
           { d: 4, ch: "livoice", t: "Voice note: show, not tell",
-            body: "Hey {first}, it's {you}... I saw the {role} role is back open again. I won't pitch you. I've just got someone I think is a real fit, and honestly I'd rather show you than tell you. If you're open to it, reply here and I'll send the profile today. Thanks." },
+            body: "Hey {first}, it's {you}... I saw the {role} role is back open again. I won't pitch you. I've just got someone I think is a real fit, and honestly I'd rather show you than tell you. Worth a quick call? I'll walk you through them. Thanks.",
+            b: "Hey {first}, it's {you}... about the {role} search. I've got one person who'd genuinely clear your bar. Rather than email a profile, can I grab five minutes to talk you through them? Reply here. Thanks." },
           { d: 7, ch: "vm", t: "Voicemail drop",
-            body: "Hi {first}, {you} here. About the {role} search... I've got a {discipline} person who isn't on the market and would clear your bar. Happy to send their work. Give me a ring back. Thanks so much." },
+            body: "Hi {first}, {you} here. About the {role} search... I've got a {discipline} person who isn't on the market and would clear your bar. I'd love a few minutes to talk them through. Give me a ring back. Thanks so much.",
+            b: "Hi {first}, {you} here, on the {role} role. I think the role's stronger than its post, and I've got someone who'd see that. Quick call back? Thanks." },
           { d: 10, ch: "email", t: "Reframe + second person", subj: "the {role} role — one more angle",
-            body: "Hi {first},\n\nHonestly, I think the {role} post undersells the role, the scope is better than the bullets make it sound. The first person I mentioned would get that immediately, and here's a second:\n\n• Quietly one of the best {discipline} people I know, ex-{peer}\n• Mentors and raises the bar around them; would anchor your team\n\nWant me to send both profiles and a reframed pitch?\n\nThanks,\n{you}" },
+            body: "Hi {first},\n\nHonestly, I think the {role} post undersells the role, the scope is better than the bullets make it sound. The first person I mentioned would get that immediately, and here's a second:\n\n• Quietly one of the best {discipline} people I know, ex-{peer}\n• Mentors and raises the bar around them; would anchor your team\n\nWant a quick call to talk through both and a reframed pitch?\n\nThanks,\n{you}",
+            aSubj: "a second {discipline} person for {role}",
+            aBody: "Hi {first}, here's a second option for {role}: ex-{peer}, one of the best {discipline} people I know, would anchor your team. Worth a quick call on both?" },
           { d: 13, ch: "lidm", t: "Soft close",
-            body: "{first}, still happy to share those two {role} profiles whenever you want a second pipeline running alongside yours. Just say the word." },
+            body: "{first}, still happy to talk you through those two {role} people whenever you want a second pipeline running alongside yours. Just say the word.",
+            b: "{first}, the offer stands on {role}: two strong people, a quick call, no obligation. Want to grab time?" },
           { d: 17, ch: "email", t: "Break-up", subj: "last note on {role}",
-            body: "Hi {first}, I'll leave it here. If the {role} search drags into another month, reply to this and I'll send both profiles the same day.\n\nThanks,\n{you}" }
+            body: "Hi {first}, I'll leave it here. If the {role} search drags into another month, reply to this and we'll grab fifteen minutes.\n\nThanks,\n{you}",
+            aSubj: "closing out {role}",
+            aBody: "Hi {first}, I'll stop here. If {role} is still open in a few weeks, reply and I'll bring two people and a reframed pitch to a quick call." }
         ] },
 
       { id: "mpc", motion: "bd", accent: "g", name: "MPC · Lead With a Candidate", signal: "Standout candidate available", persona: "VP Eng / Founder",
         goal: "Open doors at multiple target companies by leading with one exceptional person.",
         touches: [
           { d: 0, ch: "email", t: "Present the one", subj: "a {title} who {achv}",
-            body: "Hi {first},\n\nI rarely lead with one person, but this {title} is worth it:\n\n• {achv}\n• {discipline}, {years} years, currently at a {peer}-stage company, quietly open\n\nGiven {company}'s {signal}, they could be a real unlock. Want the anonymized one-pager?\n\nThanks,\n{you}",
+            body: "Hi {first},\n\nI rarely lead with one person, but this {title} is worth it:\n\n• {achv}\n• {discipline}, {years} years, currently at a {peer}-stage company, quietly open\n\nGiven {company}'s {signal}, they could be a real unlock. Worth a quick call to talk through them?\n\nThanks,\n{you}",
             aSubj: "{title} · {achv}",
-            aBody: "Hi {first}, I've got a {title} worth an exception to my usual rule. {achv}. Passive, but would move for the right team. Worth a look given where {company} is headed?" },
+            aBody: "Hi {first}, I've got a {title} worth an exception to my usual rule. {achv}. Passive, but would move for the right team. Worth a quick look given where {company} is headed?",
+            cSubj: "the kind of {title} you don't see on the market",
+            cBody: "Hi {first}, every so often someone special comes free. This {title} {achv}, and is quietly open. Given {company}'s {signal}, worth five minutes before they're spoken for?" },
           { d: 2, ch: "liconn", t: "Connect",
-            body: "Hi {first}, sent you a note about a {title} I think fits {company} well. Connecting so it's easy to reply." },
+            body: "Hi {first}, sent you a note about a {title} I think fits {company} well. Connecting so it's easy to reply.",
+            b: "Hi {first}, reached out about a standout {title} for {company}. Connecting here too." },
           { d: 4, ch: "lidm", t: "Lower-friction nudge",
-            body: "{first}, quick nudge on that {title}. I can drop the anonymized one-pager right here if it's easier than a call. Want it?" },
+            body: "{first}, quick nudge on that {title}. Happy to talk you through them on a five-minute call, easier than email. Worth it?",
+            b: "{first}, that {title} I mentioned is rare and won't stay open. Want five minutes to hear why they'd fit {company}?" },
           { d: 6, ch: "livoice", t: "Voice note: don't miss them",
-            body: "Hi {first}, it's {you}... about that {title} I emailed you. I really do think they'd be a fit for what you're building. No pressure at all. They're starting to take a couple of calls though, so I didn't want you to miss them. Reply here and I'll make the intro. Thanks." },
+            body: "Hi {first}, it's {you}... about that {title} I emailed you. I really do think they'd be a fit for what you're building. No pressure at all. They're starting to take a couple of calls though, so I didn't want you to miss them. Worth a quick chat? Thanks.",
+            b: "Hi {first}, it's {you}... that {title} is starting to take calls. I'd hate for {company} to miss them. Five minutes and I'll tell you why they stand out. Reply here. Thanks." },
           { d: 9, ch: "vm", t: "Voicemail drop",
-            body: "Hi {first}, {you} here, about the {title} I mentioned... I genuinely think they'd be great for {company}. Call me back if you'd like the intro. Thanks so much." },
+            body: "Hi {first}, {you} here, about the {title} I mentioned... I genuinely think they'd be great for {company}. I'd love a few minutes to talk you through them. Call me back. Thanks so much.",
+            b: "Hi {first}, {you} here. That {title}... still open, but not for long. Quick call back and I'll walk you through them. Thanks." },
           { d: 12, ch: "email", t: "Honest urgency", subj: "re: the {title}",
-            body: "Hi {first}, quick update, the {title} now has a couple of conversations starting. Not pressure, just timing. Want the intro before their calendar fills?\n\nThanks,\n{you}" },
+            body: "Hi {first}, quick update, the {title} now has a couple of conversations starting. Not pressure, just timing. Want fifteen minutes before their calendar fills?\n\nThanks,\n{you}",
+            aSubj: "the {title} is heating up",
+            aBody: "Hi {first}, the {title} I mentioned is getting attention now. If {company} wants a look, let's grab a quick call this week before it's moot." },
           { d: 16, ch: "email", t: "Break-up, door open", subj: "I'll close this out",
-            body: "Hi {first}, I'll stop here. If a {title} like this would help {company}, reply anytime and I'll send the one-pager the same day. I keep a few people this good warm at all times.\n\nThanks,\n{you}" }
+            body: "Hi {first}, I'll stop here. If a {title} like this would help {company}, reply anytime and we'll grab a few minutes. I keep a few people this good warm at all times.\n\nThanks,\n{you}",
+            aSubj: "the door's open",
+            aBody: "Hi {first}, I'll leave it. People this good come along a few times a year, and I'll think of {company} when the next one does. Reply anytime." }
         ] },
 
       { id: "new-vp-eng", motion: "bd", accent: "c", name: "New VP of Engineering", signal: "Exec hire", persona: "Newly-hired eng leader",
         goal: "Get on a new leader's vendor shortlist while they rebuild the team in their first 90 days.",
         touches: [
           { d: 0, ch: "email", t: "One for the first 90 days", subj: "congrats on the {company} role",
-            body: "Hi {first},\n\nCongrats on stepping into the VP Engineering seat at {company}. The first ninety days usually come down to two or three hires that unlock the rest, so here's one I've already spoken with:\n\n• {achv}\n• The kind of senior engineer who stabilizes a team fast; passive, would move for a clear mandate\n\nWant the profile, or fifteen minutes to map your first hires?\n\nThanks,\n{you}",
+            body: "Hi {first},\n\nCongrats on stepping into the VP Engineering seat at {company}. The first ninety days usually come down to two or three hires that unlock the rest, so here's one I've already spoken with:\n\n• {achv}\n• The kind of senior engineer who stabilizes a team fast; passive, would move for a clear mandate\n\nWorth a quick call to map your first hires?\n\nThanks,\n{you}",
             aSubj: "your first 90 days at {company}",
-            aBody: "Hi {first}, congrats on the {company} move. New leaders almost always inherit a couple of critical open roles. I've got a senior engineer who could take one off your plate this month. Open to fifteen minutes?" },
+            aBody: "Hi {first}, congrats on the {company} move. New leaders almost always inherit a couple of critical open roles. I've got a senior engineer who could take one off your plate this month. Open to fifteen minutes?",
+            cSubj: "the hire that makes your first quarter easier",
+            cBody: "Hi {first}, congrats on the {company} role. Every new eng leader has that one hire that unlocks the rest. I've got a senior engineer who fits that bill. Worth five minutes?" },
           { d: 3, ch: "liconn", t: "Connect + congrats",
-            body: "Hi {first}, congrats on the new role at {company}. I emailed you about an engineer for your early hires. Connecting here too." },
+            body: "Hi {first}, congrats on the new role at {company}. I emailed you about an engineer for your early hires. Connecting here too.",
+            b: "Hi {first}, congrats on the {company} move. Reached out about helping with your first hires. Connecting here too." },
           { d: 5, ch: "lidm", t: "No-rush nudge",
-            body: "{first}, no rush as you settle in. When you're ready, I can send that profile or just compare notes on your first hires. Either works." },
+            body: "{first}, no rush as you settle in. When you're ready, a quick call to compare notes on your first hires, or I can keep a couple warm for you. Either works.",
+            b: "{first}, whenever the dust settles, happy to grab fifteen minutes on your early hires. No agenda, just useful." },
           { d: 7, ch: "livoice", t: "Voice note: make it easier",
-            body: "Hey {first}, it's {you}, congratulations again on the {company} role. I know the first quarter is a blur. The engineer I mentioned would make it easier, and honestly they'd be excited about a fresh mandate under a new leader. Reply whenever, no rush. Thanks." },
+            body: "Hey {first}, it's {you}, congratulations again on the {company} role. I know the first quarter is a blur. The engineer I mentioned would make it easier, and honestly they'd be excited about a fresh mandate under a new leader. Worth a quick call? Thanks.",
+            b: "Hey {first}, it's {you}... congrats again. No pressure as you ramp, but if one early hire is keeping you up at night, that's exactly what I'm good at. Five minutes whenever. Thanks." },
           { d: 10, ch: "vm", t: "Voicemail drop",
-            body: "Hi {first}, it's {you} at {firm}. Congrats again on the {company} role. I sent over an engineer who'd be a great early hire... no pressure, just call me back when you surface for air. Thanks so much." },
+            body: "Hi {first}, it's {you} at {firm}. Congrats again on the {company} role. I sent over an engineer who'd be a great early hire... no pressure, just call me back when you surface for air. Thanks so much.",
+            b: "Hi {first}, {you} here at {firm}. Congrats on the new seat. When you're ready to move on a key hire, I've got people warm. Quick call back whenever. Thanks." },
           { d: 13, ch: "email", t: "Second candidate + news", subj: "saw the team's growing at {company}",
-            body: "Hi {first},\n\nSaw {company} is opening more engineering roles, congrats on getting moving. Since timing's right, a second person who thrives in exactly this build-out phase:\n\n• Ex-{peer}, deep in {discipline}; builds and mentors, a force-multiplier on a young team\n\nWant both profiles while you're scoping the team?\n\nThanks,\n{you}" },
+            body: "Hi {first},\n\nSaw {company} is opening more engineering roles, congrats on getting moving. Since timing's right, a second person who thrives in exactly this build-out phase:\n\n• Ex-{peer}, deep in {discipline}; builds and mentors, a force-multiplier on a young team\n\nWorth a quick call while you're scoping the team?\n\nThanks,\n{you}",
+            aSubj: "people who love a build-out phase",
+            aBody: "Hi {first}, saw {company} is opening more roles. I've got people who specifically thrive in a new-leader build-out, here's one: ex-{peer}, deep {discipline}, a force-multiplier. Quick call?" },
           { d: 17, ch: "email", t: "Break-up", subj: "when you're ready",
-            body: "Hi {first}, you're heads-down, so I'll keep this short. When you're ready to move on a key hire, reply and I'll bring a shortlist to our first call.\n\nThanks,\n{you}" }
+            body: "Hi {first}, you're heads-down, so I'll keep this short. When you're ready to move on a key hire, reply and we'll grab a quick call.\n\nThanks,\n{you}",
+            aSubj: "no rush, standing offer",
+            aBody: "Hi {first}, I'll leave it here. When a key hire becomes the priority, reply and I'll bring a shortlist to a first call. Congrats again on {company}." }
         ] },
 
       { id: "velocity-spike", motion: "bd", accent: "a", name: "Hiring Velocity Spike", signal: "Many roles opened", persona: "In-house talent lead",
         goal: "Become the overflow partner when a team opens more roles than it can pipeline.",
         touches: [
           { d: 0, ch: "email", t: "Take the hardest off your plate", subj: "{n} roles open at {company} — the two that are stuck?",
-            body: "Hi {first},\n\n{company} opened {n} roles in a few weeks, that's a lot of pipeline for one team. I work as overflow: you keep your process, I keep candidates flowing for the roles that are stuck. To prove it rather than promise it, one I've already got:\n\n• {achv}; ready to interview this week\n\nWant them, and I'll take your hardest req?\n\nThanks,\n{you}",
+            body: "Hi {first},\n\n{company} opened {n} roles in a few weeks, that's a lot of pipeline for one team. I work as overflow: you keep your process, I keep candidates flowing for the roles that are stuck. To prove it rather than promise it, one I've already got:\n\n• {achv}; ready to interview this week\n\nWant a quick call, and I'll take your hardest req?\n\nThanks,\n{you}",
             aSubj: "keeping up with {n} open roles",
-            aBody: "Hi {first}, {company}'s hiring page jumped to {n} roles. When volume spikes, the hardest reqs stall while the easy ones fill. I can take the two hardest, starting with candidates this week. Open to fifteen minutes?" },
+            aBody: "Hi {first}, {company}'s hiring page jumped to {n} roles. When volume spikes, the hardest reqs stall while the easy ones fill. I can take the two hardest, starting with candidates this week. Open to fifteen minutes?",
+            cSubj: "which 2 of your {n} roles are stuck?",
+            cBody: "Hi {first}, with {n} roles open, two are probably dragging while the rest fill. Tell me which two and I'll bring candidates for exactly those, no retainer. Quick call?" },
           { d: 2, ch: "liconn", t: "Connect, ref the email",
-            body: "Hi {first}, emailed about overflow help with {n} roles open at {company}. Connecting so it's easy to reply." },
+            body: "Hi {first}, emailed about overflow help with {n} roles open at {company}. Connecting so it's easy to reply.",
+            b: "Hi {first}, reached out about taking your two hardest reqs off your plate. Connecting here too." },
           { d: 4, ch: "lidm", t: "Start with one role",
-            body: "{first}, I've already got candidates ready. Happy to start with just one role to prove it out, the one slowing you down most. Which is it?" },
+            body: "{first}, I've already got candidates ready. Happy to start with just one role to prove it out, the one slowing you down most. Which is it?",
+            b: "{first}, no big commitment, give me your single hardest req and I'll bring candidates this week. Which one?" },
           { d: 6, ch: "livoice", t: "Voice note: not taking over",
-            body: "Hey {first}, it's {you}... I know {n} open roles is a lot to carry. I'm not trying to take over your process, just keep candidates flowing on the two that are stuck. I've already got people ready. Reply here and I'll send them. Thanks." },
+            body: "Hey {first}, it's {you}... I know {n} open roles is a lot to carry. I'm not trying to take over your process, just keep candidates flowing on the two that are stuck. I've already got people ready. Worth a quick call? Thanks.",
+            b: "Hey {first}, it's {you}... with {n} roles open, the hardest ones tend to stall. Let me take two off your plate. Five minutes and I'll show you who I've got. Reply here. Thanks." },
           { d: 9, ch: "vm", t: "Voicemail drop",
-            body: "Hi {first}, {you} here. Saw how much {company} is hiring right now... I help teams handle the overflow without changing your process, and I've already got strong people ready. Call me back if that's useful. Thanks a lot." },
+            body: "Hi {first}, {you} here. Saw how much {company} is hiring right now... I help teams handle the overflow without changing your process, and I've already got strong people ready. Quick call back if that's useful. Thanks a lot.",
+            b: "Hi {first}, {you} here. With all those open roles, happy to take the two hardest off your plate. Call me back and I'll show you who's ready. Thanks." },
           { d: 12, ch: "email", t: "Which two are stuck?", subj: "which two are stuck?",
-            body: "Hi {first}, simple question: which two of those {n} roles are dragging? Tell me and I'll send candidates for exactly those this week, no retainer to find out if I'm useful.\n\nThanks,\n{you}" },
+            body: "Hi {first}, simple question: which two of those {n} roles are dragging? Tell me and I'll bring candidates for exactly those this week, no retainer to find out if I'm useful.\n\nThanks,\n{you}",
+            aSubj: "name your hardest req",
+            aBody: "Hi {first}, just name your single hardest of the {n} open roles and I'll have candidates for it on a call this week. No retainer to see if I'm worth it." },
           { d: 16, ch: "email", t: "Break-up", subj: "one role to start",
-            body: "Hi {first}, I'll stop here. If even one of those {n} roles is dragging, reply and I'll bring candidates to a first call.\n\nThanks,\n{you}" }
+            body: "Hi {first}, I'll stop here. If even one of those {n} roles is dragging, reply and we'll grab fifteen minutes.\n\nThanks,\n{you}",
+            aSubj: "I'll leave it with you",
+            aBody: "Hi {first}, last note. When one of those roles becomes the bottleneck, reply and I'll bring candidates to a quick call." }
         ] },
 
       { id: "competitor-layoff", motion: "bd", accent: "v", name: "Competitor Layoff · Talent Freed", signal: "Layoff at a peer", persona: "Eng leader / Talent",
         goal: "Move fast on suddenly-available talent and pitch the companies that are still hiring.",
         touches: [
           { d: 0, ch: "email", t: "A short window", subj: "{discipline} talent just freed up near {company}",
-            body: "Hi {first},\n\nThere's been a round of cuts at {peer}, which means a pocket of strong {discipline} people are on the market, briefly. One I've already spoken with:\n\n• {achv}\n• A top performer at {peer}, not a casualty of performance; wants somewhere stable and growing, like {company}\n\nThese windows close fast. Want the profile before they're gone?\n\nThanks,\n{you}",
+            body: "Hi {first},\n\nThere's been a round of cuts at {peer}, which means a pocket of strong {discipline} people are on the market, briefly. One I've already spoken with:\n\n• {achv}\n• A top performer at {peer}, not a casualty of performance; wants somewhere stable and growing, like {company}\n\nThese windows close fast. Worth a quick call before they're gone?\n\nThanks,\n{you}",
             aSubj: "a short window on {discipline} talent",
-            aBody: "Hi {first}, the {peer} layoffs put some genuinely good {discipline} engineers in play this week. These windows close fast. Want the strongest one who fits {company}?" },
+            aBody: "Hi {first}, the {peer} layoffs put some genuinely good {discipline} engineers in play this week. These windows close fast. Want the strongest one who fits {company}?",
+            cSubj: "good people from {peer}, this week only",
+            cBody: "Hi {first}, the {peer} cuts freed up a few strong {discipline} engineers, top performers, not casualties. They'll be gone in two weeks. Five-minute call and I'll send the best fit for {company}?" },
           { d: 2, ch: "livoice", t: "Voice note: it won't last",
-            body: "Hey {first}, it's {you}. With what just happened at {peer}, a really strong person is available right now, and that won't last. I'd send the best fit for {company} today if you want them. Reply here. Thanks." },
+            body: "Hey {first}, it's {you}. With what just happened at {peer}, a really strong person is available right now, and that won't last. Worth a quick call and I'll tell you why they'd fit {company}. Reply here. Thanks.",
+            b: "Hey {first}, it's {you}. Those {peer} folks won't be around long. Give me five minutes and I'll walk you through the best one for {company}. Thanks." },
           { d: 3, ch: "liconn", t: "Connect, grab them fast",
-            body: "{first}, emailed about a strong {discipline} person who just came free near {company}. Connecting so it's easy to grab them before the market does." },
+            body: "{first}, emailed about a strong {discipline} person who just came free near {company}. Connecting so it's easy to grab them before the market does.",
+            b: "{first}, reached out about {peer} talent that just came available. Connecting here too, these move fast." },
           { d: 4, ch: "sms", t: "Time-sensitive nudge",
-            body: "{first}, {you}, that {discipline} talent from {peer} is moving fast. Want the profile before they're gone?" },
+            body: "{first}, {you}, that {discipline} talent from {peer} is moving fast. Want a quick call before they're gone?",
+            b: "{first}, {you} here. The {peer} folks are getting snapped up. Five minutes today and I'll send the best fit for {company}?" },
           { d: 6, ch: "vm", t: "Voicemail drop",
-            body: "Hi {first}, {you} here. That {discipline} person from {peer}... still available, but not for long, and I'd hate for you to miss them. Quick call back and I'll send their work. Thanks so much." },
+            body: "Hi {first}, {you} here. That {discipline} person from {peer}... still available, but not for long, and I'd hate for you to miss them. Quick call back and I'll talk you through them. Thanks so much.",
+            b: "Hi {first}, {you} here. Those {peer} engineers are going fast. Call me back today and I'll line up the best one for {company}. Thanks." },
           { d: 8, ch: "lidm", t: "Second person, last easy nudge",
-            body: "{first}, last easy nudge: there's a second {discipline} person from {peer} too. Want both profiles before the rest of the market gets to them? Just say yes." },
+            body: "{first}, last easy nudge: there's a second {discipline} person from {peer} too. Worth a quick call before the rest of the market gets to them? Just say yes.",
+            b: "{first}, two strong {peer} people, closing window. Five minutes this week? Yes or no is fine." },
           { d: 11, ch: "email", t: "Break-up", subj: "window's closing",
-            body: "Hi {first}, last note, most of the {peer} folks will be off the market within two weeks. If you want intros, reply today and I'll move.\n\nThanks,\n{you}" }
+            body: "Hi {first}, last note, most of the {peer} folks will be off the market within two weeks. If you want a quick call, reply today and I'll move.\n\nThanks,\n{you}",
+            aSubj: "they'll be gone soon",
+            aBody: "Hi {first}, I'll leave it. The {peer} talent won't last the month. If you want intros, reply today and we'll grab five minutes." }
         ] },
 
       { id: "stale-req", motion: "bd", accent: "a", name: "Stale Req Rescue", signal: "Role open 60+ days", persona: "Frustrated hiring manager",
         goal: "Win a role the company has struggled to fill by reframing the pitch, not just re-searching.",
         touches: [
           { d: 0, ch: "email", t: "Positioning, plus one person", subj: "the {role} role — still open?",
-            body: "Hi {first},\n\n{role} has been open at {company} for a couple of months. After sixty days it's usually positioning, not sourcing, the pitch isn't landing with the people who'd be great. One who'd land it:\n\n• {achv}\n• Wouldn't have applied to the post, but would take the call\n\nWant the profile and a reframed pitch?\n\nThanks,\n{you}",
+            body: "Hi {first},\n\n{role} has been open at {company} for a couple of months. After sixty days it's usually positioning, not sourcing, the pitch isn't landing with the people who'd be great. One who'd land it:\n\n• {achv}\n• Wouldn't have applied to the post, but would take the call\n\nWorth a quick call on the candidate and a reframed pitch?\n\nThanks,\n{you}",
             aSubj: "60 days on {role} — a second angle",
-            aBody: "Hi {first}, {role} looks like it's been a tough fill. I tend to win the roles other people give up on by selling the mission, not the checklist. One profile ready. Want a look?" },
+            aBody: "Hi {first}, {role} looks like it's been a tough fill. I tend to win the roles other people give up on by selling the mission, not the checklist. One profile ready. Worth a quick call?",
+            cSubj: "why {role} hasn't closed (it's not sourcing)",
+            cBody: "Hi {first}, a role open sixty days is rarely a sourcing problem, it's how it's being told. I've got someone who'd land it and a sharper way to pitch it. Five minutes?" },
           { d: 2, ch: "liconn", t: "Connect, ref the email",
-            body: "Hi {first}, reached out about {role} and someone who'd land it. Connecting here too so it's easy to reply." },
+            body: "Hi {first}, reached out about {role} and someone who'd land it. Connecting here too so it's easy to reply.",
+            b: "Hi {first}, emailed about a fresh angle on {role}. Connecting here too." },
           { d: 4, ch: "lidm", t: "Change the story",
-            body: "{first}, I've filled a few 'impossible' reqs by changing the story, not the search. Two people in mind for {role}. Want them?" },
+            body: "{first}, I've filled a few 'impossible' reqs by changing the story, not the search. Two people in mind for {role}. Worth a quick call?",
+            b: "{first}, the {role} pitch may just need reframing. I've got people who'd respond to it. Five minutes to compare notes?" },
           { d: 6, ch: "livoice", t: "Voice note: let me reframe it",
-            body: "Hey {first}, it's {you}... about the {role} search. Genuinely, I think the role's stronger than the post makes it sound, and I've got people who'd see that immediately. Let me reframe it for you. Reply here. Thanks." },
+            body: "Hey {first}, it's {you}... about the {role} search. Genuinely, I think the role's stronger than the post makes it sound, and I've got people who'd see that immediately. Worth a quick call so I can reframe it for you. Reply here. Thanks.",
+            b: "Hey {first}, it's {you}... I think {role} is a better role than its post suggests. Give me five minutes and I'll show you a sharper pitch plus two people who'd take it. Thanks." },
           { d: 8, ch: "vm", t: "Voicemail drop",
-            body: "Hi {first}, {you} here, about the {role} search. I think the role's better than its post makes it sound, and I've got two people who'd get it. Call me back. Thanks so much." },
+            body: "Hi {first}, {you} here, about the {role} search. I think the role's better than its post makes it sound, and I've got two people who'd get it. Quick call back and I'll talk you through it. Thanks so much.",
+            b: "Hi {first}, {you} here on {role}. I've got a reframed pitch and two people who'd respond to it. Five minutes? Call me back. Thanks." },
           { d: 11, ch: "email", t: "A reframed pitch", subj: "a reframed {role} pitch",
-            body: "Hi {first},\n\nHere's the way I'd pitch {role} to the people I mentioned, a different angle than the current post: lead with the scope and the problem, not the checklist.\n\nWant me to send their profiles alongside it?\n\nThanks,\n{you}" },
+            body: "Hi {first},\n\nHere's the way I'd pitch {role} to the people I mentioned, a different angle than the current post: lead with the scope and the problem, not the checklist.\n\nWorth a quick call to talk through it and the two candidates?\n\nThanks,\n{you}",
+            aSubj: "the {role} pitch, rewritten",
+            aBody: "Hi {first}, I rewrote how I'd pitch {role}, scope and mission first, checklist last. Two people would respond to it. Want to compare notes on a call?" },
           { d: 15, ch: "email", t: "Break-up", subj: "last note on {role}",
-            body: "Hi {first}, I'll leave it. If {role} is still open in two weeks, reply and I'll send the profiles and the reframed pitch, no obligation.\n\nThanks,\n{you}" }
+            body: "Hi {first}, I'll leave it. If {role} is still open in two weeks, reply and we'll grab fifteen minutes on the reframe and the candidates.\n\nThanks,\n{you}",
+            aSubj: "closing out {role}",
+            aBody: "Hi {first}, last note. When {role} becomes the priority again, reply and I'll bring a reframed pitch and two people to a quick call." }
         ] },
 
       { id: "winback-client", motion: "bd", accent: "g", name: "Win Back a Churned Client", signal: "Past client hiring again", persona: "Former client contact",
         goal: "Re-earn a former client now hiring again, starting with a single role to rebuild trust.",
         touches: [
           { d: 0, ch: "email", t: "Show what's changed", subj: "good to see {company} hiring again",
-            body: "Hi {first},\n\nSaw {company} is hiring again, good sign. It's been a while since we worked together, and I've sharpened a lot since then, especially on {discipline} roles. To show it rather than say it, one person I've already got:\n\n• {achv}\n\nI'd love another shot, even one role to start so the work speaks for itself. Want the profile?\n\nThanks,\n{you}",
+            body: "Hi {first},\n\nSaw {company} is hiring again, good sign. It's been a while since we worked together, and I've sharpened a lot since then, especially on {discipline} roles. To show it rather than say it, one person I've already got:\n\n• {achv}\n\nI'd love another shot, even one role to start. Worth a quick call?\n\nThanks,\n{you}",
             aSubj: "another shot at a {company} role?",
-            aBody: "Hi {first}, {company}'s back in hiring mode. I know our last engagement was a while ago, and I'd value the chance to show what's changed. Happy to take just one role to start. Worth a quick catch-up?" },
+            aBody: "Hi {first}, {company}'s back in hiring mode. I know our last engagement was a while ago, and I'd value the chance to show what's changed. Happy to take just one role to start. Worth a quick catch-up?",
+            cSubj: "I've gotten a lot better since we worked together",
+            cBody: "Hi {first}, good to see {company} hiring. I won't relitigate last time, I'll just say I've sharpened a lot on {discipline}, and I've already got someone strong. Give me one role and a quick call to prove it?" },
           { d: 2, ch: "liconn", t: "Connect, ref the email",
-            body: "Hi {first}, good to see {company} hiring. Sent you a note about earning back a search, even one role. Connecting here too." },
+            body: "Hi {first}, good to see {company} hiring. Sent you a note about earning back a search, even one role. Connecting here too.",
+            b: "Hi {first}, great to see {company} growing again. Reached out about reconnecting. Connecting here too." },
           { d: 4, ch: "lidm", t: "Warm reconnect",
-            body: "{first}, good to see {company} growing again. Would love to reconnect and earn back a search, even one role to start. You in for a quick call?" },
+            body: "{first}, good to see {company} growing again. Would love to reconnect and earn back a search, even one role to start. Worth a quick call?",
+            b: "{first}, it's been too long. Give me your one hardest role and a quick call, and I'll show you what's changed." },
           { d: 6, ch: "livoice", t: "Voice note: give me one role",
-            body: "Hey {first}, it's {you}... I know it's been a while since we worked together, and I'd genuinely value another shot. I've gotten a lot sharper, especially on {discipline}. Give me one role and I'll prove it. Reply whenever. Thanks." },
+            body: "Hey {first}, it's {you}... I know it's been a while since we worked together, and I'd genuinely value another shot. I've gotten a lot sharper, especially on {discipline}. Give me one role and a quick call and I'll prove it. Reply whenever. Thanks.",
+            b: "Hey {first}, it's {you}... no hard feelings about last time, I've just gotten better. Five minutes and one role is all I'm asking. Reply here. Thanks." },
           { d: 8, ch: "vm", t: "Voicemail drop",
-            body: "Hi {first}, it's {you}. Saw {company} is hiring and thought of you. I'd love another chance to help, just one role to prove it. Give me a call back when you can. Thanks." },
+            body: "Hi {first}, it's {you}. Saw {company} is hiring and thought of you. I'd love another chance to help, just one role to prove it. Quick call back when you can. Thanks.",
+            b: "Hi {first}, {you} here. Great to see {company} hiring. I've sharpened a lot, give me one role and five minutes. Call me back. Thanks." },
           { d: 11, ch: "email", t: "One role, no risk", subj: "one role, no risk",
-            body: "Hi {first}, simple offer: pick the one role that matters most right now and I'll work it personally, no retainer to see if I've earned it back. Want to?\n\nThanks,\n{you}" },
+            body: "Hi {first}, simple offer: pick the one role that matters most right now and I'll work it personally, no retainer to see if I've earned it back. Worth a quick call?\n\nThanks,\n{you}",
+            aSubj: "let me earn it on one role",
+            aBody: "Hi {first}, no retainer, no big ask, just your single most important role and a quick call. If I deliver, we go from there. Want to?" },
           { d: 15, ch: "email", t: "Door open", subj: "door open at {firm}",
-            body: "Hi {first}, I'll leave the ball in your court. Whenever a role comes up where you want a second pipeline, reply and I'll jump on it personally.\n\nThanks,\n{you}" }
+            body: "Hi {first}, I'll leave the ball in your court. Whenever a role comes up where you want a second pipeline, reply and we'll grab a few minutes.\n\nThanks,\n{you}",
+            aSubj: "whenever you're ready",
+            aBody: "Hi {first}, I'll stop here. The offer stands: one role, a quick call, no risk, whenever the timing's right." }
         ] },
 
       /* ===================== RECRUITING ===================== */
@@ -1237,29 +1324,45 @@
       "." + (t.req ? " Requires <b>" + esc(t.req) + "</b>." : "") +
       " Enrichment runs for everyone we send to, so this stays fail-proof.</span></div>";
   }
-  function pbTouchBody(t) {
-    var m = PB_CH[t.ch];
-    var cond = pbCondNote(t);
-    var tokenNote = '<div class="pb-note"><span class="i">▸</span><span>Tokens like {first}, {company}, {role} and {last_company} auto-fill per prospect from the signal and enrichment.</span></div>';
+  // The set of copy variants for a touch. From t.v (array of {subj?, body}),
+  // else back-compat from the email A/B fields, else a single version.
+  function pbTouchVariants(t) {
+    if (t.v && t.v.length) return t.v;
     if (t.ch === "email") {
-      var a = pbArt(m.label + (t.aBody ? " · Variant A (control)" : ""), t.aBody ? ["ok", "A"] : null, pbMail("From you · to {first}", t.subj, t.body));
-      var b = t.aBody ? pbArt(m.label + " · Variant B (test)", ["warn", "B"], pbMail("From you · to {first}", t.aSubj || t.subj, t.aBody)) : "";
-      return cond + a + b + tokenNote;
+      var arr = [{ subj: t.subj, body: t.body }];
+      if (t.aBody) arr.push({ subj: t.aSubj || t.subj, body: t.aBody });
+      if (t.cBody) arr.push({ subj: t.cSubj || t.subj, body: t.cBody });
+      return arr;
     }
-    if (t.ch === "vm" || t.ch === "livoice") {
-      return cond + pbArt(m.label + " · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl(t.body) + "</div>") +
-        '<div class="pb-note"><span class="i">🎤</span><span>Rendered in your consented voice clone, formatted for natural speech. ' +
-        (t.ch === "vm" ? "Premium AMD drops it only after the voicemail beep." : "Delivered as a LinkedIn voice note.") + "</span></div>";
-    }
-    if (t.ch === "sms") {
-      return cond + pbArt(m.label, null, pbIM(t.body)) +
-        '<div class="pb-note"><span class="i">📱</span><span>Sent only with consent on file, inside the lead\'s local-time window.</span></div>';
-    }
-    if (t.ch === "call") {
-      return cond + pbArt(m.label + " · task for you", null, pbNl(t.body)) +
-        '<div class="pb-note"><span class="i">☎️</span><span>A human task in your queue, not an automated send.</span></div>';
-    }
-    return cond + pbArt(m.label, null, pbIM(t.body)) + tokenNote;
+    if (t.b) { var o = [{ body: t.body }, { body: t.b }]; if (t.c) o.push({ body: t.c }); return o; }
+    return [{ body: t.body }];
+  }
+  function pbVariantPane(t, v, i) {
+    var m = PB_CH[t.ch];
+    var inner;
+    if (t.ch === "email") inner = pbMail("From you · to {first}", v.subj || t.subj, v.body);
+    else if (t.ch === "vm" || t.ch === "livoice") inner = '<div style="font-style:italic">' + pbNl(v.body) + "</div>";
+    else if (t.ch === "call") inner = pbNl(v.body);
+    else inner = pbIM(v.body);
+    var label = "Variant " + String.fromCharCode(65 + i) + (i ? "" : " (control)");
+    return '<div class="pb-vpane' + (i ? "" : " active") + '" data-vpane="' + i + '">' + pbArt(m.label + " · " + label, null, inner) + "</div>";
+  }
+  function pbTouchBody(t) {
+    var cond = pbCondNote(t);
+    var vs = pbTouchVariants(t);
+    var tabs = vs.length > 1
+      ? '<div class="pb-tabs2">' + vs.map(function (v, i) {
+          return '<button class="' + (i ? "" : "active") + '" data-vtab="' + i + '">' + String.fromCharCode(65 + i) + "</button>";
+        }).join("") + "</div>"
+      : "";
+    var panes = vs.map(function (v, i) { return pbVariantPane(t, v, i); }).join("");
+    var foot;
+    if (t.ch === "vm" || t.ch === "livoice") foot = '<div class="pb-note"><span class="i">🎤</span><span>Rendered in your consented voice clone, formatted for natural speech. ' + (t.ch === "vm" ? "Premium AMD drops it only after the voicemail beep." : "Delivered as a LinkedIn voice note.") + "</span></div>";
+    else if (t.ch === "sms") foot = '<div class="pb-note"><span class="i">📱</span><span>Sent only with consent on file, inside the lead\'s local-time window.</span></div>';
+    else if (t.ch === "call") foot = '<div class="pb-note"><span class="i">☎️</span><span>A human task in your queue, not an automated send.</span></div>';
+    else foot = '<div class="pb-note"><span class="i">▸</span><span>Tokens like {first}, {company}, {role} and {last_company} auto-fill per prospect.</span></div>';
+    var vnote = vs.length > 1 ? '<div class="pb-note"><span class="i">🔀</span><span><b>' + vs.length + ' variants.</b> The engine rotates and A/B-tests them, then promotes the winner automatically.</span></div>' : "";
+    return cond + tabs + panes + vnote + foot;
   }
   /* legacy single-channel body kept for reference */
   function pbTouchBodyOld(t) {
@@ -1343,8 +1446,10 @@
         var m = PB_CH[t.ch];
         var wait = (i && !t.cond) ? ("wait " + Math.max(0, t.d - prevDay) + "d") : "";
         prevDay = t.d;
+        var nv = pbTouchVariants(t).length;
         return { icon: m.icon, channel: m.label, accent: PB_CH_ACC[t.ch] || "v", day: "Day " + t.d,
-          title: t.t, teaser: pbTouchTeaser(t), wait: wait, cond: t.cond, cta: t.aBody ? "Read · A/B" : "Read the message" };
+          title: t.t, teaser: pbTouchTeaser(t), wait: wait, cond: t.cond,
+          cta: nv > 1 ? ("Read · " + nv + " variants") : "Read the message" };
       });
       host.innerHTML =
         '<span class="pb-back" data-seqback="1"><span>←</span> Back to library</span>' +
