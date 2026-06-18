@@ -164,29 +164,34 @@ async function uploadAndEnrich(page, csvPath, token, log) {
   log("enrich: starting (Enrich Contacts)");
   await clickText(page, CONFIG.text.enrichStart, 10_000);
 
-  // Laxis made a job row named "CSV Enrich <date>_<token>". Wait until THAT row's
-  // container shows "Completed" (our unique token disambiguates it from older jobs).
+  // Laxis made a job row named "CSV Enrich <date>_<token>". Wait until OUR row shows
+  // "Completed". Scope precisely: find the SMALLEST element whose text contains both our
+  // unique token AND a status word — that element is our row (it bundles name + status),
+  // so a neighbouring older "Completed" job can't trip a false positive. Then require the
+  // row to read "Completed" and NOT "Processing".
   log("enrich: waiting for completion (job token " + token + ")");
   await page.waitForFunction(
-    (args) => {
-      const [tk, doneWord] = args;
-      const re = new RegExp(doneWord, "i");
-      const els = Array.from(document.querySelectorAll("*"));
-      for (const e of els) {
-        if (e.children.length <= 6 && (e.textContent || "").includes(tk)) {
-          let n = e;
-          for (let i = 0; i < 6 && n; i++) {
-            if (re.test(n.textContent || "")) return true;
-            n = n.parentElement;
-          }
+    (tk) => {
+      const all = Array.from(document.querySelectorAll("*"));
+      let bestTxt = null;
+      let bestSize = Infinity;
+      for (const e of all) {
+        const txt = e.textContent || "";
+        if (txt.includes(tk) && /(processing|completed|failed|error|in progress)/i.test(txt)) {
+          const size = e.querySelectorAll("*").length; // smaller = tighter = our row
+          if (size < bestSize) { bestSize = size; bestTxt = txt; }
         }
       }
-      return false;
+      if (bestTxt === null) return false;               // status not rendered yet
+      if (/processing|in progress/i.test(bestTxt)) return false;
+      if (/failed|error/i.test(bestTxt)) throw new Error("laxis_enrich_failed: job reported a failure");
+      return /completed/i.test(bestTxt);
     },
-    [token, CONFIG.text.completed],
-    { timeout: CONFIG.enrichTimeoutMs, polling: 5000 }
+    token,
+    { timeout: CONFIG.enrichTimeoutMs, polling: 4000 }
   );
   log("enrich: completed");
+  await page.waitForTimeout(1500);
 }
 
 async function exportEnriched(page, token, outDir, log) {
