@@ -18,6 +18,12 @@ export {
 } from "./discovery";
 export { fetchFullProfile, profileFetchConfigured, type FullProfile, type ProfileExperience } from "./profile";
 export {
+  fetchFullProfileCached, getCachedProfile, putCachedProfile,
+  getCachedContact, putCachedContact,
+  type CachedProfile, type CachedContact,
+} from "./cache";
+export { cacheKey, scopedKey, isFresh } from "./cacheKeys";
+export {
   deepVetCandidate, type VetResult,
   vetBatchAvailable, submitVetBatch, retrieveVetBatch, collectVetBatch,
   type VetBatchItem, type VetBatchProgress, type VetBatchCollection, type VetBatchStatus,

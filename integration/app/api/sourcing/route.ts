@@ -18,8 +18,9 @@ import { requireSession, body, ok, fail } from "../../../lib/api";
 import {
   planSourcing, parseJobDescription, generateQueries, runDiscovery,
   listSourcingRuns, saveSourcingRun, deleteSourcingRun, getSourcingRun, promoteSourcingRun,
-  fetchFullProfile, profileFetchConfigured, deepVetCandidate, refineIcp, draftJobDescription,
+  profileFetchConfigured, deepVetCandidate, refineIcp, draftJobDescription,
   vetBatchAvailable, submitVetBatch, retrieveVetBatch, collectVetBatch,
+  fetchFullProfileCached, getCachedContact, putCachedContact,
 } from "../../../lib/sourcing";
 import type { CandidateRow, VetBatchItem } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
@@ -117,8 +118,19 @@ export async function POST(req: Request) {
       // (Mobile direct-dial stays cap-gated separately; this is the cheap business-phone find.)
       const plan = cheapFirstContactWaterfall({ includePhone: true });
       let enriched = 0;
+      let contactCacheHits = 0;
       for (const c of run.candidates.slice(0, top)) {
         if (c.email) continue;
+        const personKey = c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`;
+        // Cache-first: a contact we've already resolved for this person (any run,
+        // this workspace) is reused for free instead of re-running the paid waterfall.
+        const cached = await getCachedContact(ws, personKey);
+        if (cached && (cached.email || cached.phone)) {
+          if (cached.email) { c.email = cached.email; enriched++; }
+          if (cached.phone) c.phone = cached.phone;
+          contactCacheHits++;
+          continue;
+        }
         const [first, ...rest] = (c.fullName || "").trim().split(/\s+/);
         try {
           const report = await enrich(plan, {
@@ -128,10 +140,14 @@ export async function POST(req: Request) {
           const e = report.subject.email; const ph = report.subject.phone;
           if (typeof e === "string") { c.email = e; enriched++; }
           if (typeof ph === "string") c.phone = ph;
+          await putCachedContact(ws, personKey, {
+            email: typeof e === "string" ? e : undefined,
+            phone: typeof ph === "string" ? ph : undefined,
+          });
         } catch { /* leave unresolved */ }
       }
       await saveSourcingRun(ws, { ...run });
-      return ok({ enriched, run });
+      return ok({ enriched, cacheHits: contactCacheHits, run });
     }
 
     if (action === "vet") {
@@ -148,15 +164,22 @@ export async function POST(req: Request) {
       // batch and the sync fallback vet against full work history.
       const slice = [...run.candidates].sort((a, c) => c.fitScore - a.fitScore).slice(0, top);
       const items: VetBatchItem[] = [];
+      let profileCacheHits = 0;
       for (const c of slice) {
         let profile;
         if (haveProfiles && c.linkedinUrl) {
-          try { profile = await fetchFullProfile(c.linkedinUrl); }
-          catch (err) { warnings.push(`profile(${c.fullName}): ${(err as Error).message}`); }
+          // Cache-first: a fresh profile we've already fetched for this person (any
+          // run, this workspace) is reused for free instead of a paid lookup.
+          try {
+            const got = await fetchFullProfileCached(ws, c.linkedinUrl);
+            profile = got.profile;
+            if (got.cached) profileCacheHits++;
+          } catch (err) { warnings.push(`profile(${c.fullName}): ${(err as Error).message}`); }
         }
         c.profileFetched = Boolean(profile && profile.experiences.length);
         items.push({ customId: `vet_${items.length}`, row: c, icp: run.icp, profile });
       }
+      if (profileCacheHits) warnings.push(`profile_cache: ${profileCacheHits} of ${items.length} profile(s) served from cache (no paid lookup)`);
       if (!haveProfiles) warnings.push("profile_fetch_not_configured: set RAPIDAPI_PROFILE_HOST + RAPIDAPI_PROFILE_PATH to vet against full work history (vetted on surface fields only)");
 
       // Preferred path: submit one batch at half the token price, return immediately,
@@ -170,7 +193,7 @@ export async function POST(req: Request) {
             targets: items.map((it) => candKey(it.row)), warnings,
           };
           await saveSourcingRun(ws, { ...run });
-          return ok({ batched: true, batchId, submitted: items.length, deep: haveProfiles, warnings });
+          return ok({ batched: true, batchId, submitted: items.length, deep: haveProfiles, profileCacheHits, warnings });
         } catch (err) {
           warnings.push(`batch_submit_failed_falling_back: ${(err as Error).message}`);
         }
@@ -186,7 +209,7 @@ export async function POST(req: Request) {
       }
       rankByVerdict(run.candidates);
       await saveSourcingRun(ws, { ...run });
-      return ok({ batched: false, vetted, deep: haveProfiles, warnings, run });
+      return ok({ batched: false, vetted, deep: haveProfiles, profileCacheHits, warnings, run });
     }
 
     if (action === "vetStatus") {

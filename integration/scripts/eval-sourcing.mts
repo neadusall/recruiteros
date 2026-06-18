@@ -22,6 +22,7 @@
 
 import { scoreCandidate } from "../lib/sourcing/score.ts";
 import { parseVetResult } from "../lib/sourcing/vetParse.ts";
+import { cacheKey, isFresh } from "../lib/sourcing/cacheKeys.ts";
 import type { CandidateICP, CandidateRow } from "../lib/sourcing/types.ts";
 
 /* ------------------------------------------------------------------ */
@@ -167,6 +168,33 @@ const salesIcp = mkIcp();
   const v = parseVetResult(JSON.stringify({ verifiedScore: 50, verdict: "possible", strengths: many, gaps: many, flags: many }));
   check("strengths capped at 8", v.strengths.length === 8, `got ${v.strengths.length}`);
   check("flags capped at 8", v.flags.length === 8, `got ${v.flags.length}`);
+}
+
+/* ------------------------------------------------------------------ */
+/* 3. People-cache key + TTL fixtures (deterministic, $0)              */
+/* ------------------------------------------------------------------ */
+
+// (a) Two URL forms of the same profile collapse to one cache key (so we don't
+//     pay twice for the same person).
+{
+  const a = cacheKey("https://www.linkedin.com/in/JaneDoe/?trk=public");
+  const b = cacheKey("https://www.linkedin.com/in/janedoe");
+  check("cacheKey strips query/trailing-slash and lowercases", a === b, `a=${a} b=${b}`);
+}
+
+// (b) Empty input is a safe empty key (never throws).
+{
+  check("cacheKey('') === ''", cacheKey("") === "");
+}
+
+// (c) TTL freshness math (now injected for determinism).
+{
+  const now = Date.parse("2026-06-18T00:00:00Z");
+  const tenDaysAgo = "2026-06-08T00:00:00Z";
+  const hundredDaysAgo = "2026-03-10T00:00:00Z";
+  check("10 days old is fresh under a 60-day TTL", isFresh(tenDaysAgo, 60, now));
+  check("100 days old is stale under a 60-day TTL", !isFresh(hundredDaysAgo, 60, now));
+  check("unparseable timestamp is treated as stale", !isFresh("not-a-date", 60, now));
 }
 
 /* ------------------------------------------------------------------ */

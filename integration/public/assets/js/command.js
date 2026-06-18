@@ -4979,6 +4979,7 @@
       } else if ((id = t.getAttribute("data-vet"))) {
         var topEl = $("#jdVetTop"); var top = topEl ? (parseInt(topEl.value, 10) || 25) : 25;
         var vid = id;
+        var pendingCacheHits = 0; // profile lookups served from cache at submit time
         t.disabled = true; t.textContent = "Vetting top " + top + "…";
         showProgress("Deep-vetting top " + top, top * 3, "Reading work histories & scoring against the JD…");
         // Final alert + reset, shared by the batch and synchronous paths.
@@ -4986,8 +4987,10 @@
           t.disabled = false; t.textContent = "🔬 Deep-vet";
           finishProgress("Deep-vetted " + (d.vetted || 0));
           var warn = (d.warnings || []).length ? ("\n\n" + d.warnings.slice(0, 3).join("\n")) : "";
+          var cacheNote = (d.profileCacheHits ? " " + d.profileCacheHits + " profile(s) reused from cache (no charge)." : "");
           alert("Deep-vetted " + (d.vetted || 0) + " candidate" + ((d.vetted === 1) ? "" : "s") +
             (d.deep ? " against full work history." : " on surface fields only. Add the deep-vet profile endpoint in Setup to read full work history.") +
+            cacheNote +
             " Ranked by verified score; download the Excel for the verdicts." +
             (d.batched ? " (Ran as a 50%-cheaper batch.)" : "") + warn);
           loadRuns();
@@ -5001,16 +5004,17 @@
               showProgress("Deep-vetting (batch)", top * 3, got ? (got + " of " + top + " scored…") : "Batch queued — scoring in the background…");
               setTimeout(function () { pollVet(batched); }, 10000); return;
             }
-            vetDone({ vetted: s.data.vetted, deep: s.data.deep, warnings: s.data.warnings, batched: true });
+            vetDone({ vetted: s.data.vetted, deep: s.data.deep, warnings: s.data.warnings, profileCacheHits: pendingCacheHits, batched: true });
           });
         }
         send("/sourcing", "POST", { action: "vet", id: vid, top: top }).then(function (r) {
           if (!r.ok) { t.disabled = false; t.textContent = "🔬 Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet failed: " + ((r.data && r.data.error) || r.status)); return; }
           if (r.data.batched) {
+            pendingCacheHits = r.data.profileCacheHits || 0;
             showProgress("Deep-vetting (batch)", top * 3, "Batch submitted — scoring " + (r.data.submitted || top) + " in the background…");
             setTimeout(function () { pollVet(true); }, 8000);
           } else {
-            vetDone({ vetted: r.data.vetted, deep: r.data.deep, warnings: r.data.warnings, batched: false });
+            vetDone({ vetted: r.data.vetted, deep: r.data.deep, warnings: r.data.warnings, profileCacheHits: r.data.profileCacheHits || 0, batched: false });
           }
         });
       } else if ((id = t.getAttribute("data-enrich"))) {
@@ -5021,7 +5025,10 @@
         send("/sourcing", "POST", { action: "enrich", id: id, top: topN }).then(function (r) {
           t.disabled = false; t.textContent = "Enrich";
           if (!r.ok) { alert("Enrich failed: " + ((r.data && r.data.error) || r.status)); return; }
-          alert("Enriched " + r.data.enriched + " contacts. They are ready to push into a campaign whenever you want."); loadRuns();
+          var hits = r.data.cacheHits || 0;
+          alert("Enriched " + r.data.enriched + " contacts" +
+            (hits ? " (" + hits + " reused from cache — no charge)" : "") +
+            ". They are ready to push into a campaign whenever you want."); loadRuns();
         });
       } else if ((id = t.getAttribute("data-del"))) {
         if (!confirm("Delete this saved list?")) return;
