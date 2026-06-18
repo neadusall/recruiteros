@@ -34,6 +34,10 @@ export interface PromoteOptions {
   minFit?: number;
   /** Promote into an existing campaign instead of creating one. */
   campaignId?: string;
+  /** Name for the campaign + saved Candidates list. Defaults to the run's saved name. */
+  listName?: string;
+  /** Tag stamped on every promoted candidate (their category) so you can pull them by tag. Defaults to the list name. */
+  tag?: string;
 }
 
 /**
@@ -51,13 +55,18 @@ export async function promoteSourcingRun(
   const minFit = opts.minFit ?? 0;
   const core = getCore();
 
-  // 1. The campaign that holds them — named after the saved run.
+  // The recruiter can name the destination list (and a tag) at promote time; both
+  // default to the run's saved name so existing behavior is unchanged.
+  const listName = (opts.listName || "").trim() || run.name;
+  const tag = (opts.tag || "").trim() || listName;
+
+  // 1. The campaign that holds them — named after the chosen list name.
   let campaignId = opts.campaignId;
   if (!campaignId) {
     const campaign = await createCampaign({
       workspaceId,
       motion: run.motion,
-      name: run.name,
+      name: listName,
       goal: `Sourced candidates for: ${run.icp.label || run.name}`,
       icp: {
         accountProfile: run.icp.targetCompanies.slice(0, 8).join(", ") || run.icp.industries.join(", "),
@@ -92,15 +101,15 @@ export async function promoteSourcingRun(
       linkedinUrl: c.linkedinUrl,
       email: c.email,
       phone: c.phone,
-      category: run.name, // <- the saved name carries into Candidates
+      category: tag, // <- the tag (defaults to the list name) — pull these back by tag in Candidates
     });
     prospectIds.push(p.id);
     added++;
   }
 
-  // 3. A saved list under the same name capturing the exact set.
+  // 3. A saved list under the chosen name capturing the exact set.
   const list = upsertProspectList(workspaceId, {
-    name: run.name,
+    name: listName,
     prospectIds,
     motion: run.motion,
   });
@@ -111,5 +120,5 @@ export async function promoteSourcingRun(
   run.promotedCount = added;
   saveSourcingRun(workspaceId, { ...run });
 
-  return { campaignId, listId: list.id, added, deduped, name: run.name };
+  return { campaignId, listId: list.id, added, deduped, name: listName };
 }

@@ -4632,9 +4632,17 @@
     function csvCell(v) { v = v == null ? "" : (Array.isArray(v) ? v.join("; ") : String(v)); return '"' + v.replace(/"/g, '""') + '"'; }
     function csvSlug(s) { return ((s || "list").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase()) || "list"; }
     function csvDownload(filename, csv) {
-      var blob = new Blob([csv], { type: "text/csv" }), url = URL.createObjectURL(blob);
-      var a = document.createElement("a"); a.href = url; a.download = filename; a.click();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      // Prepend a UTF-8 BOM so Excel/Numbers open it as a real spreadsheet, and force a
+      // true file save: anchors that aren't in the DOM (and blob: links in embedded
+      // browsers like the VS Code preview) get ignored and open inline instead of downloading.
+      var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+      if (window.navigator && window.navigator.msSaveOrOpenBlob) { window.navigator.msSaveOrOpenBlob(blob, filename); return; }
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url; a.download = filename; a.rel = "noopener"; a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
     }
     function urlRows(cands) { return (cands || []).filter(function (c) { return c.linkedinUrl; }); }
     function downloadRun(id) {
@@ -4881,12 +4889,30 @@
       var id;
       if ((id = t.getAttribute("data-csv"))) { downloadRun(id); return; }
       if ((id = t.getAttribute("data-promote"))) {
-        if (!confirm("Send this list to Candidates under its saved name?")) return;
-        t.disabled = true; t.textContent = "Sending…";
-        send("/sourcing", "POST", { action: "promote", id: id }).then(function (r) {
-          if (!r.ok) { t.disabled = false; t.textContent = "Send to Candidates →"; alert("Promote failed: " + ((r.data && r.data.error) || r.status)); return; }
-          alert('Sent ' + r.data.added + ' to Candidates as "' + r.data.name + '"' + (r.data.deduped ? (' (' + r.data.deduped + ' already in pipeline)') : '') + '.'); loadRuns();
-        });
+        var prun = (state.runs || []).find(function (r) { return r.id === id; });
+        var defName = (prun && prun.name) || "";
+        var btn = t;
+        openModal("Send to Candidates", "Choose the list these candidates land in. Add a tag to pull them back later by tag.",
+          '<label class="fld"><span>Candidate list name</span>' +
+            '<input id="promoteList" type="text" value="' + esc(defName) + '" placeholder="e.g. VP Operations — Alegria" /></label>' +
+          '<label class="fld"><span>Tag <span class="muted">(optional, defaults to the list name)</span></span>' +
+            '<input id="promoteTag" type="text" placeholder="e.g. q3-leadership" /></label>' +
+          '<div class="modal-foot"><button class="btn btn-primary" id="promoteGo">Send to Candidates →</button></div>',
+          function (card, close) {
+            var nameEl = card.querySelector("#promoteList");
+            if (nameEl) nameEl.focus();
+            card.querySelector("#promoteGo").addEventListener("click", function () {
+              var listName = (nameEl && nameEl.value.trim()) || defName;
+              if (!listName) { nameEl.focus(); return; }
+              var tag = (card.querySelector("#promoteTag").value || "").trim();
+              close();
+              btn.disabled = true; btn.textContent = "Sending…";
+              send("/sourcing", "POST", { action: "promote", id: id, listName: listName, tag: tag }).then(function (r) {
+                if (!r.ok) { btn.disabled = false; btn.textContent = "Send to Candidates →"; alert("Promote failed: " + ((r.data && r.data.error) || r.status)); return; }
+                alert('Sent ' + r.data.added + ' to Candidates as "' + r.data.name + '"' + (tag ? (' · tag "' + tag + '"') : '') + (r.data.deduped ? (' (' + r.data.deduped + ' already in pipeline)') : '') + '.'); loadRuns();
+              });
+            });
+          });
       } else if ((id = t.getAttribute("data-vet"))) {
         var topEl = $("#jdVetTop"); var top = topEl ? (parseInt(topEl.value, 10) || 25) : 25;
         t.disabled = true; t.textContent = "Vetting top " + top + "…";

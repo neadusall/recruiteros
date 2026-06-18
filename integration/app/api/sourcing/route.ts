@@ -77,7 +77,7 @@ export async function POST(req: Request) {
 
     if (action === "promote") {
       if (!b?.id) return fail("missing_id", 422);
-      return ok(await promoteSourcingRun(ws, b.id, { minFit: b.minFit, campaignId: b.campaignId }));
+      return ok(await promoteSourcingRun(ws, b.id, { minFit: b.minFit, campaignId: b.campaignId, listName: b.listName, tag: b.tag }));
     }
 
     if (action === "enrich") {
@@ -85,7 +85,9 @@ export async function POST(req: Request) {
       const run = getSourcingRun(ws, b.id);
       if (!run) return fail("run_not_found", 404);
       const top = Math.max(1, Math.min(b.top ?? 50, run.candidates.length));
-      const plan = cheapFirstContactWaterfall();
+      // Include the phone rung — otherwise report.subject.phone below is always undefined.
+      // (Mobile direct-dial stays cap-gated separately; this is the cheap business-phone find.)
+      const plan = cheapFirstContactWaterfall({ includePhone: true });
       let enriched = 0;
       for (const c of run.candidates.slice(0, top)) {
         if (c.email) continue;
