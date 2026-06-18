@@ -8,8 +8,9 @@
  * separate RapidAPI "profile by URL" listing. Configure it the same way as search:
  *
  *   RAPIDAPI_KEY                (workspace-first, shared with search)
- *   RAPIDAPI_PROFILE_HOST       e.g. fresh-linkedin-profile-data.p.rapidapi.com
- *   RAPIDAPI_PROFILE_PATH       e.g. /get-linkedin-profile?linkedin_url={url}  ({url} interpolated)
+ *   RAPIDAPI_PROFILE_HOST       e.g. fresh-linkedin-scraper-api.p.rapidapi.com
+ *   RAPIDAPI_PROFILE_PATH       e.g. /api/v1/user/profile?username={username}
+ *                               ({username} = the …/in/<handle> slug; {url} = the full URL — either is interpolated)
  *
  * If no profile endpoint is configured, the deep-vet still runs on whatever fields
  * the search row carried (degraded depth, flagged) — it never fabricates history.
@@ -19,11 +20,19 @@ import { cred } from "../providers/http";
 
 const RAPIDAPI_KEY = () => cred("RAPIDAPI_KEY");
 const PROFILE_HOST = () => cred("RAPIDAPI_PROFILE_HOST");
-const PROFILE_PATH = () => cred("RAPIDAPI_PROFILE_PATH") || "/profile?url={url}"; // GET: {url} interpolated
-// "GET" (url in the query) or "POST" (url in a JSON body, e.g. {"link": url} for person_deep).
+// GET path template. Fresh LinkedIn Scraper takes a bare {username} handle; legacy
+// listings took the full {url}. Either token is interpolated (see fetchFullProfile).
+const PROFILE_PATH = () => cred("RAPIDAPI_PROFILE_PATH") || "/api/v1/user/profile?username={username}";
+// "GET" (handle/url in the query) or "POST" (url in a JSON body, e.g. {"link": url} for person_deep).
 const PROFILE_METHOD = () => (cred("RAPIDAPI_PROFILE_METHOD") || "GET").trim().toUpperCase();
 // Body key the POST profile endpoint expects the URL under (person_deep uses "link").
 const PROFILE_BODY_KEY = () => cred("RAPIDAPI_PROFILE_BODY_KEY") || "link";
+
+/** Bare LinkedIn handle from a profile URL (…/in/<handle>); falls back to the input. */
+function linkedinHandle(url: string): string {
+  const m = /\/in\/([^/?#]+)/i.exec(url || "");
+  return m ? decodeURIComponent(m[1]) : (url || "").trim();
+}
 
 export function profileFetchConfigured(): boolean {
   return Boolean(RAPIDAPI_KEY() && PROFILE_HOST());
@@ -197,9 +206,15 @@ export async function fetchFullProfile(linkedinUrl: string): Promise<FullProfile
       method: "POST", headers, body: JSON.stringify({ [PROFILE_BODY_KEY()]: linkedinUrl }),
     });
   } else {
-    const path = PROFILE_PATH().replace("{url}", encodeURIComponent(linkedinUrl));
-    const url = `https://${host}${path}${path.includes("{") || path.includes("url=") ? "" : (path.includes("?") ? "&" : "?") + "url=" + encodeURIComponent(linkedinUrl)}`;
-    res = await fetch(url, { headers });
+    const tmpl = PROFILE_PATH();
+    const hasToken = tmpl.includes("{username}") || tmpl.includes("{url}");
+    const path = tmpl
+      .replace("{username}", encodeURIComponent(linkedinHandle(linkedinUrl)))
+      .replace("{url}", encodeURIComponent(linkedinUrl));
+    // Tokenless legacy listings: append ?url=<url> as a last resort. Skip when a
+    // token already placed the value, or the path already carries its own url=.
+    const tail = hasToken || path.includes("url=") ? "" : (path.includes("?") ? "&" : "?") + "url=" + encodeURIComponent(linkedinUrl);
+    res = await fetch(`https://${host}${path}${tail}`, { headers });
   }
   if (!res.ok) throw new Error(`profile ${host} ${res.status}`);
   const raw = await res.json().catch(() => ({}));
