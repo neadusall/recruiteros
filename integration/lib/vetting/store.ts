@@ -19,6 +19,7 @@ import type { Motion } from "../core/types";
 import {
   type VettingDesk, type VettingDeskInput, type CandidateProfile,
   type CandidateEnrichment, type VettingCall, type QualifyingQuestion,
+  type ResumeReview,
   DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD,
 } from "./types";
 
@@ -26,6 +27,7 @@ const store = {
   desks: [] as VettingDesk[],
   candidates: [] as CandidateProfile[],
   calls: [] as VettingCall[],
+  resumeReviews: [] as ResumeReview[],
 };
 
 /* ---------------- durability ---------------- */
@@ -38,6 +40,7 @@ function hydrate(s: any) {
   store.desks = s.desks ?? [];
   store.candidates = s.candidates ?? [];
   store.calls = s.calls ?? [];
+  store.resumeReviews = s.resumeReviews ?? [];
 }
 const persist = debouncedSaver(SNAP_KEY, serialize);
 
@@ -215,6 +218,59 @@ export function setCandidateEnrichment(candidateId: string, enrichment: Candidat
   if (!c) return;
   c.enrichment = enrichment;
   c.updatedAt = nowIso();
+  persist();
+}
+
+/** Stash the latest resume text the candidate submitted (for the coaching loop). */
+export function setCandidateResume(candidateId: string, resumeText: string): void {
+  const c = store.candidates.find((x) => x.id === candidateId);
+  if (!c) return;
+  c.resumeText = resumeText;
+  c.resumeUpdatedAt = nowIso();
+  c.updatedAt = nowIso();
+  persist();
+}
+
+/* ---------------- resume coaching loop ---------------- */
+
+/** All coaching rounds for a candidate, newest first. */
+export function listResumeReviews(candidateId: string): ResumeReview[] {
+  return store.resumeReviews
+    .filter((r) => r.candidateId === candidateId)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
+/** The most recent coaching round for a candidate, if any. */
+export function latestResumeReview(candidateId: string): ResumeReview | undefined {
+  return listResumeReviews(candidateId)[0];
+}
+
+/**
+ * Record one coaching round. `round` auto-increments from the candidate's prior
+ * submissions so the loop is self-numbering.
+ */
+export function addResumeReview(
+  input: Omit<ResumeReview, "id" | "round" | "createdAt">,
+): ResumeReview {
+  const priorRounds = store.resumeReviews.filter(
+    (r) => r.candidateId === input.candidateId && r.deskId === input.deskId,
+  ).length;
+  const rec: ResumeReview = {
+    ...input,
+    id: rid("vrev"),
+    round: priorRounds + 1,
+    createdAt: nowIso(),
+  };
+  store.resumeReviews.push(rec);
+  persist();
+  return rec;
+}
+
+/** Mark a review's coaching email as actually delivered. */
+export function markReviewEmailSent(reviewId: string): void {
+  const r = store.resumeReviews.find((x) => x.id === reviewId);
+  if (!r) return;
+  r.emailSent = true;
   persist();
 }
 

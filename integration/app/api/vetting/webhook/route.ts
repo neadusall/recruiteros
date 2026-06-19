@@ -18,8 +18,10 @@ import { recordUsage } from "../../../../lib/billing/ledger";
 import { rateCost } from "../../../../lib/billing/rates";
 import {
   findCallByEngineId, getDeskById, updateCall, scoreCall, getCandidateById,
+  buildPostCallEmail,
   type TranscriptTurn,
 } from "../../../../lib/vetting";
+import { sendWorkspaceEmail } from "../../../../lib/auth";
 
 /** Map an engine speaker label onto our two-role transcript model. */
 function toRole(label: unknown): "agent" | "candidate" {
@@ -107,7 +109,10 @@ export async function POST(req: Request) {
 
   // Nothing to score (e.g. caller hung up immediately).
   if (!transcript.length) {
-    updateCall(call.id, { status: "scored", summary: "Call ended with no usable transcript.", qualified: false });
+    updateCall(call.id, {
+      status: "scored", summary: "Call ended with no usable transcript.",
+      qualified: false, scoringConfidence: "low", needsReview: true,
+    });
     return NextResponse.json({ ok: true, scored: false, reason: "empty_transcript" });
   }
 
@@ -118,17 +123,38 @@ export async function POST(req: Request) {
     updateCall(call.id, {
       status: "scored",
       scores: s.scores,
+      evidence: s.evidence,
       totalScore: s.totalScore,
       marketabilityScore: s.marketabilityScore,
       agentRealism: s.agentRealism,
       verdicts: s.verdicts,
       qualified: s.qualified,
+      scoringConfidence: s.scoringConfidence,
+      needsReview: s.needsReview,
       summary: s.summary,
       qualifyRationale: s.qualifyRationale,
       nextStepGiven: s.qualified ? desk.nextStepQualified : desk.nextStepUnqualified,
       scoredAt: new Date().toISOString(),
     });
-    return NextResponse.json({ ok: true, scored: true, total: s.totalScore, qualified: s.qualified });
+
+    // Best-effort: email the candidate the role's must-haves so they can update
+    // their resume to clearly reflect what they genuinely have. Never blocks or
+    // fails the webhook; skipped for thin calls and clear, unfixable mismatches.
+    if (candidate?.email && !s.needsReview) {
+      try {
+        const mail = await buildPostCallEmail(desk, { ...call, verdicts: s.verdicts }, candidate);
+        if (mail.worthInviting) {
+          await sendWorkspaceEmail(candidate.email, mail.subject, mail.body, call.workspaceId);
+        }
+      } catch (mailErr: any) {
+        console.error("[vetting] post-call coaching email failed:", mailErr?.message || mailErr);
+      }
+    }
+
+    return NextResponse.json({
+      ok: true, scored: true, total: s.totalScore,
+      qualified: s.qualified, confidence: s.scoringConfidence,
+    });
   } catch (e: any) {
     updateCall(call.id, { status: "failed", summary: `Scoring failed: ${e?.message || "error"}` });
     return NextResponse.json({ ok: true, scored: false, error: e?.message || "scoring_failed" });

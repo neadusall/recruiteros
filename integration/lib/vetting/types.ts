@@ -144,6 +144,10 @@ export interface CandidateProfile {
   /** Enrichment pulled from LinkedIn at opt-in (best-effort; may be empty). */
   enrichment?: CandidateEnrichment;
 
+  /** Latest resume text the candidate submitted to the coaching loop, if any. */
+  resumeText?: string;
+  resumeUpdatedAt?: string;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -198,6 +202,20 @@ export const RUBRIC_MAX: RubricScores = {
   culturalFit: 5,
 };
 
+/**
+ * One-line, transcript-grounded justification per rubric category. The scorer
+ * fills these BEFORE the numbers so each score is anchored to real evidence
+ * (not a cold guess), and the recruiter can see WHY a category landed where it did.
+ */
+export type RubricEvidence = Partial<Record<keyof RubricScores, string>>;
+
+/**
+ * How much to trust this scorecard. Driven by how much the CANDIDATE actually
+ * said: a 20-second hang-up can't support a confident "qualified", so a thin
+ * transcript is forced to "low" + needsReview regardless of the headline number.
+ */
+export type ScoringConfidence = "high" | "medium" | "low";
+
 /** Per-qualifier verdict the scorer extracts from the transcript. */
 export interface QuestionVerdict {
   questionId: string;
@@ -249,6 +267,12 @@ export interface VettingCall {
 
   /* ---- analysis (filled once scored) ---- */
   scores?: RubricScores;
+  /** One-line grounded justification per rubric category (the "why" behind each score). */
+  evidence?: RubricEvidence;
+  /** How much to trust this scorecard, given how much the candidate actually said. */
+  scoringConfidence?: ScoringConfidence;
+  /** True when the transcript was too thin to score confidently — surface for human review. */
+  needsReview?: boolean;
   /** Sum of `scores` — the headline 0-100. */
   totalScore?: number;
   /** 1-10 client-interview likelihood, independent of personal quality. */
@@ -277,6 +301,61 @@ export interface TranscriptTurn {
   text: string;
   /** Seconds into the call this turn started, when the engine provides it. */
   atSec?: number;
+}
+
+/**
+ * One job must-have measured against a candidate's resume — SEMANTICALLY, not by
+ * keyword. The whole point: a candidate may genuinely have a requirement but
+ * phrase it in different words (or not surface it at all), so we judge the
+ * substance and then coach them to make it legible — never to fabricate it.
+ */
+export interface MustHaveCoverage {
+  /** Ties back to the desk qualifier this came from (when derived from one). */
+  questionId?: string;
+  /** The requirement in plain language (e.g. "Owned an individual $5M+ quota"). */
+  requirement: string;
+  /** True if this is a hard must-have (vs. a nice-to-show qualifier). */
+  mustHave: boolean;
+  /**
+   * Does the resume SHOW this, allowing for different wording?
+   *  - "shown":   clearly evidenced (even if phrased differently)
+   *  - "partial": the substance is hinted at but a screener could miss it
+   *  - "missing": nothing in the resume speaks to it
+   */
+  status: "shown" | "partial" | "missing";
+  /** Where/how the resume evidences it (quote or paraphrase), "" when missing. */
+  evidence: string;
+  /**
+   * Tactful, concrete guidance to make the requirement legible IF the candidate
+   * genuinely has it — reframe in the role's language, add the metric, move it
+   * up. Never instructs them to claim something untrue.
+   */
+  coaching: string;
+}
+
+/** One round of the resume-coaching loop: a submitted resume, scored vs the must-haves. */
+export interface ResumeReview {
+  id: string;
+  workspaceId: string;
+  deskId: string;
+  candidateId: string;
+  /** 1 = first submission, increments each resubmission. */
+  round: number;
+  /** The resume text reviewed (verbatim, what the candidate submitted). */
+  resumeText: string;
+  /** Per-requirement semantic coverage. */
+  coverage: MustHaveCoverage[];
+  /** True when every MUST-HAVE is "shown" — the candidate has surfaced them all. */
+  allMet: boolean;
+  /** Count of must-haves still "missing" or "partial". */
+  gaps: number;
+  /** 1-2 sentence plain-English read of where the resume stands. */
+  summary: string;
+  /** The coaching email composed back to the candidate this round. */
+  emailSubject?: string;
+  emailBody?: string;
+  emailSent?: boolean;
+  createdAt: string;
 }
 
 /** Overall-score interpretation bands, from the recruiter scorecard. */
