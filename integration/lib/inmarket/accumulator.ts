@@ -63,6 +63,7 @@ const CURATE_CANDIDATES = 2500;        // pool slice we choose the not-yet-done 
 const CURATE_CONCURRENCY = 6;          // parallel researches (polite to the free sources)
 const CURATE_MIN_SCORE = 35;           // don't spend research on weak signals
 const VERIFY_BATCH = 400;              // curated emails free-verified (MX/role/disposable) per tick
+const FINDER_BATCH = 40;               // pending people SMTP-verified per tick (opt-in; bounded — slow)
 const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
 const CURATE_FIRST_DELAY_MS = 25_000;   // let the pool fill a little before the first curation tick
 // WATCHDOGS — a hard ceiling on how long a single run may take. Even with per-fetch timeouts,
@@ -350,6 +351,18 @@ async function runCurationTickInner(): Promise<void> {
       const { verifyEmailsFree } = await import("./emailVerify");
       const results = await verifyEmailsFree(pending);
       if (results.length) await applyEmailValidation(results, new Date().toISOString());
+    }
+  } catch { /* best-effort; the next tick retries */ }
+
+  // EMAIL FINDER (opt-in, SMTP) — the right way to convert guesses into VALID prospects: walk each
+  // pending person's permutations and SMTP-verify until one is accepted, then keep that real
+  // address. No-op unless INMARKET_EMAIL_FINDER/INMARKET_SMTP_VERIFY is set (needs outbound port
+  // 25). Small batch per tick so it never floods a single MTA.
+  try {
+    const { smtpEnabled } = await import("./emailVerify");
+    if (smtpEnabled()) {
+      const { findEmailsBySmtp } = await import("./curation");
+      await findEmailsBySmtp(FINDER_BATCH, new Date().toISOString());
     }
   } catch { /* best-effort; the next tick retries */ }
 }

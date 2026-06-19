@@ -26,6 +26,7 @@
 import { promises as dns } from "dns";
 import net from "net";
 import { mxStatus } from "./domain";
+import { emailPermutations, emailDomainFrom, splitFullName } from "./email";
 
 /** Role / functional mailboxes — real addresses, but not a PERSON to run 1:1 BD against. */
 const ROLE_LOCALS = new Set([
@@ -121,6 +122,64 @@ export async function verifyEmailsFree(
     // "ok" but unconfirmed → omit (stays pending for the external validator)
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Email FINDER — verify MORE prospects the right way (opt-in)          */
+/* ------------------------------------------------------------------ */
+
+/** True when SMTP verification/finding is enabled. Off by default: it needs outbound port 25
+ *  (commonly blocked on cloud hosts — on Hetzner you must request an unblock), and probing from a
+ *  shared IP carries some blocklist risk, so it's an explicit opt-in. */
+export function smtpEnabled(): boolean {
+  return process.env.INMARKET_SMTP_VERIFY === "1" || process.env.INMARKET_EMAIL_FINDER === "1";
+}
+
+export interface FoundEmail { email: string; pattern: string; verified: true }
+
+/**
+ * EMAIL FINDER — the correct way to turn more guesses into VALID prospects. Instead of enrolling a
+ * single blind guess (≈40% right → ≈60% bounce), walk the person's ranked permutations and
+ * SMTP-verify each until the mail server ACCEPTS one. That accepted address is real.
+ *
+ * Catch-all guarded: many domains accept mail for ANY local-part, so an "accept" there proves
+ * nothing. We first probe a random, certainly-nonexistent address — if THAT is accepted the domain
+ * is catch-all and we bail (return null) rather than emit a confident-but-wrong address. Bounded
+ * (a few probes), short-timeout, IP-rotated. No DATA is ever sent, so no mail is delivered.
+ *
+ * Returns the verified address (and the pattern that hit), or null when nothing verifies / SMTP is
+ * off / the domain is catch-all or unreachable.
+ */
+export async function findVerifiedEmail(
+  person: { firstName?: string; lastName?: string; fullName?: string },
+  urlOrDomain: string,
+  opts?: { max?: number },
+): Promise<FoundEmail | null> {
+  if (!smtpEnabled()) return null;
+  const domain = emailDomainFrom(urlOrDomain);
+  if (!domain) return null;
+  if ((await mxStatus(domain).catch(() => "error" as const)) !== "mx") return null; // no MX → can't probe
+
+  let first = person.firstName, last = person.lastName;
+  if ((!first || !last) && person.fullName) {
+    const s = splitFullName(person.fullName);
+    first = first || s.firstName; last = last || s.lastName;
+  }
+  const perms = emailPermutations(first, last, domain);
+  if (!perms.length) return null;
+
+  // Catch-all detection: a random local that cannot exist. If the server accepts it, it accepts
+  // everything → SMTP is uninformative here, so don't claim a find.
+  const decoy = `nx-${Date.now().toString(36)}-zzq@${domain}`;
+  if ((await smtpRcptProbe(decoy, domain).catch(() => null)) === true) return null;
+
+  const max = Math.min(opts?.max ?? 4, perms.length);
+  for (let i = 0; i < max; i++) {
+    const ok = await smtpRcptProbe(perms[i].email, domain).catch(() => null);
+    if (ok === true) return { email: perms[i].email, pattern: perms[i].pattern || "smtp_found", verified: true };
+    // ok===false → that mailbox doesn't exist, try the next permutation; null → inconclusive, continue.
+  }
+  return null;
 }
 
 /* ------------------------------------------------------------------ */

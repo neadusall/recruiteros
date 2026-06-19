@@ -463,6 +463,60 @@ export async function applyEmailValidation(
   });
 }
 
+/**
+ * EMAIL FINDER PASS (opt-in, SMTP) — turn more prospects VALID without guessing-and-bouncing.
+ * For pending rows (a real person + a domain, no verdict yet), walk the name's permutations and
+ * SMTP-verify until one is accepted; on a hit, REPLACE the guess with the verified address and
+ * mark it validated. This also promotes "named" rows that never had a deliverable email into
+ * contactable. No-op unless SMTP is enabled (needs outbound port 25). Bounded + concurrency-capped
+ * so it never hammers a single MTA. Returns how many were checked / newly verified.
+ */
+export async function findEmailsBySmtp(limit: number, nowIso: string, concurrency = 4): Promise<{ checked: number; found: number }> {
+  const { smtpEnabled, findVerifiedEmail } = await import("./emailVerify");
+  if (!smtpEnabled()) return { checked: 0, found: 0 };
+
+  const rows = await load();
+  const targets = rows
+    .filter((r) => r.managerName && r.domain && !r.emailValidated && !r.emailInvalid
+      && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed")
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(0, limit));
+  if (!targets.length) return { checked: 0, found: 0 };
+
+  const hits = new Map<string, { email: string; pattern: string }>();
+  let cursor = 0, checked = 0;
+  async function worker() {
+    while (cursor < targets.length) {
+      const r = targets[cursor++];
+      checked++;
+      try {
+        const found = await findVerifiedEmail({ fullName: r.managerName }, r.domain!);
+        if (found?.email) hits.set(r.id, { email: found.email, pattern: found.pattern });
+      } catch { /* skip */ }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(Math.max(concurrency, 1), 6) }, worker));
+
+  if (hits.size) {
+    await withCurationLock(async () => {
+      const current = await load();
+      for (const r of current) {
+        const h = hits.get(r.id);
+        if (!h) continue;
+        if (r.status === "enrolled" || r.status === "queued" || r.status === "suppressed") continue; // locked
+        r.likelyEmail = h.email;
+        r.emailPattern = h.pattern;
+        r.emailValidated = true;
+        r.emailInvalid = false;
+        r.validatedAt = nowIso;
+        if (r.status === "sourced" || r.status === "named") r.status = "contactable";
+      }
+      await save(current);
+    });
+  }
+  return { checked, found: hits.size };
+}
+
 /** The curated emails still needing validation — feed this list to the external validator. */
 export async function pendingValidationEmails(limit = 1000): Promise<string[]> {
   const rows = await load();
