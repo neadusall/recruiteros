@@ -103,7 +103,10 @@ function curationId(company: string, role: string): string {
 }
 
 function statusFor(dm: DecisionMaker): CurationStatus {
-  if (dm.email?.email) return "contactable";
+  // Contactable = a real name + a built email AND a domain that can actually receive mail. An
+  // email guessed on a domain with no MX (emailDeliverable === false) is NOT contactable — it
+  // would bounce, so it stays "named" and is held out of the send queue.
+  if (dm.email?.email && dm.emailDeliverable !== false) return "contactable";
   if (dm.fullName) return "named";
   return "sourced";
 }
@@ -146,6 +149,9 @@ interface PoolLeadLite {
   employeeCount?: number;
   roleDetails?: Array<{ title: string }>;
   roles?: string[];
+  /** The lead's source/apply URL — used to recover the company's own domain when its host is
+   *  the company site (not an ATS). One more free signal for the domain resolver. */
+  sourceUrl?: string;
 }
 
 /**
@@ -194,19 +200,21 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
       const role = topRole(lead)!;
       let dm: DecisionMaker;
       try {
-        dm = await resolveDecisionMaker(lead.company, role, { domain: lead.domain, companySize: lead.employeeCount });
+        dm = await resolveDecisionMaker(lead.company, role, { domain: lead.domain, companySize: lead.employeeCount, sourceUrl: lead.sourceUrl });
       } catch {
         continue;
       }
       researched++;
       if (dm.fullName) named++;
-      if (dm.email?.email) contactable++;
+      if (dm.email?.email && dm.emailDeliverable !== false) contactable++;
 
       const id = curationId(lead.company, role);
       fresh.set(id, {
         id,
         company: lead.company,
-        domain: lead.domain,
+        // carry the VERIFIED domain the resolver found (the lead usually had none) so the read
+        // path / re-runs build emails without re-resolving.
+        domain: dm.domain ?? lead.domain,
         industry: lead.industry,
         signalType: lead.signalType ?? "job_posting",
         signalReason: lead.reason ?? "",
@@ -219,6 +227,8 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
         managerTier: dm.tier,
         likelyEmail: dm.email?.email,
         emailPattern: dm.email?.pattern,
+        // a guess on a no-MX domain is dead on arrival — mark it invalid now so it never enrolls.
+        emailInvalid: dm.emailDeliverable === false ? true : undefined,
         status: statusFor(dm),
         curatedAt: opts.nowIso,
       });
@@ -246,9 +256,10 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
           // carry forward downstream lifecycle recorded for this slot
           enrolledAt: prev?.enrolledAt, campaignId: prev?.campaignId,
           sentAt: prev?.sentAt, openedAt: prev?.openedAt, repliedAt: prev?.repliedAt, bouncedAt: prev?.bouncedAt,
-          // keep the validation verdict only while it still describes the same address
-          emailValidated: sameEmail ? prev?.emailValidated : undefined,
-          emailInvalid: sameEmail ? prev?.emailInvalid : undefined,
+          // keep the validation verdict only while it still describes the same address; a fresh
+          // no-MX determination (row.emailInvalid) always stands.
+          emailValidated: row.emailInvalid ? false : (sameEmail ? prev?.emailValidated : undefined),
+          emailInvalid: row.emailInvalid ?? (sameEmail ? prev?.emailInvalid : undefined),
           validatedAt: sameEmail ? prev?.validatedAt : undefined,
           // a still-valid "invalid" verdict keeps the row out of the send queue
           status: sameEmail && prev?.emailInvalid ? "suppressed" : row.status,

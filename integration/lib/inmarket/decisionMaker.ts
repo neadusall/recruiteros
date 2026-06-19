@@ -38,6 +38,7 @@ import {
 import { classifyTitle } from "../signals";
 import { companyAnchor } from "../signals/hiring/normalize";
 import { guessEmail, emailDomainFrom, splitFullName, type EmailGuess } from "./email";
+import { resolveCompanyDomain, type DomainResolution } from "./domain";
 
 /* ------------------------------------------------------------------ */
 /* Shared fetch helpers (free, timed-out, polite UA)                   */
@@ -317,6 +318,11 @@ export interface DecisionMaker {
   via?: string;
   /** Best-guess work email + ranked alternates (syntax only, unverified). */
   email?: EmailGuess;
+  /** The VERIFIED company domain we resolved/used (when found) — persisted so the read path
+   *  and the email guess have it without re-resolving. Empty when none could be confirmed. */
+  domain?: string;
+  /** True when the resolved domain publishes MX records (it can actually receive mail). */
+  emailDeliverable?: boolean;
   /** Short, honest "why this person/title" line for the UI. */
   why: string;
 }
@@ -330,17 +336,29 @@ export interface DecisionMaker {
 export async function resolveDecisionMaker(
   company: string,
   roleTitle: string,
-  opts?: { domain?: string; companySize?: number },
+  opts?: { domain?: string; companySize?: number; sourceUrl?: string },
 ): Promise<DecisionMaker> {
   const target = hiringManagerTarget(roleTitle);
   const targetTitle = target.candidateTitles[0] ?? "Hiring Manager";
   const fn = classifyTitle(roleTitle).function;
 
+  // THE UNLOCK: resolve a VERIFIED company domain when the lead didn't carry one. Free job-board
+  // signals arrive with a name but no domain, which starves BOTH the company-site team-page
+  // research (the best NAME source) AND the email guess. Resolving it here is what lifts the
+  // contactable rate. Cached per company, so this is cheap across the pool. Best-effort: if it
+  // can't confirm a domain we degrade to exactly the prior behaviour.
+  let domainRes: DomainResolution | null = null;
+  let resolvedDomain = opts?.domain ? emailDomainFrom(opts.domain) : "";
+  if (!resolvedDomain) {
+    domainRes = await resolveCompanyDomain(company, { sourceUrl: opts?.sourceUrl }).catch(() => null);
+    if (domainRes?.domain) resolvedDomain = domainRes.domain;
+  }
+
   let resolution: HiringManagerResolution | null = null;
   try {
     resolution = await resolveHiringManager(company, roleTitle, {
-      graphs: [freePeopleGraph({ domain: opts?.domain })],
-      companyDomain: opts?.domain,
+      graphs: [freePeopleGraph({ domain: resolvedDomain || undefined })],
+      companyDomain: resolvedDomain || undefined,
       companySize: opts?.companySize,
       maxCandidatesPerGraph: 25,
       alternates: 2,
@@ -350,7 +368,10 @@ export async function resolveDecisionMaker(
   }
 
   const best = resolution?.best ?? null;
-  const domain = opts?.domain ? emailDomainFrom(opts.domain) : "";
+  const domain = resolvedDomain;
+  // MX is known for free for domains we resolved ourselves; an explicitly-passed domain is
+  // left undefined here and verified later by the email-validation tick.
+  const deliverable = domainRes ? domainRes.mx : undefined;
 
   if (best && best.candidate.fullName) {
     const c = best.candidate;
@@ -366,17 +387,22 @@ export async function resolveDecisionMaker(
       score: best.score,
       via: c.source,
       email: email && email.email ? email : undefined,
+      domain: domain || undefined,
+      emailDeliverable: deliverable,
       why: best.reasons[0] ?? `${target.rationale}`,
     };
   }
 
-  // No name resolved → honest title-level target (still actionable; email needs a name).
+  // No name resolved → honest title-level target (still actionable; email needs a name). We
+  // still carry the resolved domain so the read path / a later name find can build the email.
   return {
     targetTitle,
     title: targetTitle,
     function: fn,
     tier: "company_only",
     score: 0,
+    domain: domain || undefined,
+    emailDeliverable: deliverable,
     why: target.rationale,
   };
 }
