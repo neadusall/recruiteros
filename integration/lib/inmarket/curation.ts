@@ -390,15 +390,25 @@ export async function listCurated(opts?: {
   return rows.slice(0, opts?.limit ?? 500);
 }
 
-/** Mark a set of curated prospects approved (queued) in the daily review gate. Only VALIDATED
- *  emails advance — a guess that hasn't come back valid from internal validation never queues. */
+/** Whether the BD-Bulk pipeline requires a VALIDATED email. OFF by default so we build large lists
+ *  now from the syntax guesses (full name + title + company + company URL + email). Flip
+ *  INMARKET_REQUIRE_VALIDATED=1 once SMTP (port 25) or a paid validator is live to switch the whole
+ *  pipeline (approve + enroll + auto-enroll) to validated-only with no redeploy. */
+export function requireValidatedEmail(): boolean {
+  return ["1", "true", "yes", "on"].includes((process.env.INMARKET_REQUIRE_VALIDATED || "").toLowerCase());
+}
+
+/** Mark a set of curated prospects approved (queued) in the daily review gate. Requires a real
+ *  person + a non-dead email; validation is required only when INMARKET_REQUIRE_VALIDATED is set. */
 export async function approveForBulk(ids: string[]): Promise<number> {
   const set = new Set(ids);
+  const needValid = requireValidatedEmail();
   return withCurationLock(async () => {
     const rows = await load();
     let n = 0;
     for (const r of rows) {
-      if (set.has(r.id) && r.status === "contactable" && r.emailValidated === true && !r.emailInvalid) {
+      if (set.has(r.id) && r.status === "contactable" && !!r.likelyEmail && !r.emailInvalid
+        && (!needValid || r.emailValidated === true)) {
         r.status = "queued"; n++;
       }
     }
@@ -442,11 +452,15 @@ export async function enrollToBulk(
   // Do the (slow, network) addProspect calls WITHOUT holding the write lock; collect which ids
   // succeeded, then stamp their status in one short locked section against a fresh load so a
   // concurrent tick/validator can't clobber the enrollment (or be clobbered by it).
+  const needValid = requireValidatedEmail();
   for (const r of rows) {
     if (!set.has(r.id)) continue;
-    // VALIDATED-ONLY into BD Bulk: a real person + an email that came back VALID from internal
-    // validation. A bare syntax guess (emailValidated !== true) never enrolls — no guesses sent.
-    if (!r.managerName || !r.likelyEmail || r.emailInvalid || r.emailValidated !== true) { skipped++; continue; }
+    // Always need a real person + an email + a domain (likelyEmail implies a domain), and never an
+    // address free checks already proved dead (emailInvalid). VALIDATION is gated by a flag: while
+    // it's OFF (default, pre-port-25) we build large lists from the syntax guesses; once
+    // INMARKET_REQUIRE_VALIDATED=1 (SMTP/paid validator live) only validated addresses enroll.
+    if (!r.managerName || !r.likelyEmail || r.emailInvalid) { skipped++; continue; }
+    if (needValid && r.emailValidated !== true) { skipped++; continue; }
     try {
       await addProspect({
         workspaceId,

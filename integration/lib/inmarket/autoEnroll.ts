@@ -77,12 +77,13 @@ async function runTickInner(): Promise<void> {
   const remaining = c.dailyCap - ctr.enrolled;
   if (remaining <= 0) return; // daily cap reached; resets at midnight UTC
 
-  const { listCurated, approveForBulk, enrollToBulk } = await import("./curation");
-  // VALIDATED-ONLY: only enroll people whose email came back VALID from internal validation — never
-  // a bare syntax guess. (enrollToBulk enforces this too; selecting validated here avoids wasting
-  // the daily cap on rows that would be skipped.) Highest-scored first, up to today's remaining cap.
+  const { listCurated, approveForBulk, enrollToBulk, requireValidatedEmail } = await import("./curation");
+  // Build large lists now from the syntax guesses (full name + title + company + URL + email); once
+  // INMARKET_REQUIRE_VALIDATED is set (SMTP/paid validator live) this flips to validated-only.
+  // enrollToBulk enforces the same rule; matching the selection here avoids wasting the daily cap.
+  const needValid = requireValidatedEmail();
   const want = Math.min(c.batch, remaining);
-  const candidates = await listCurated({ status: "contactable", validatedOnly: true, limit: want });
+  const candidates = await listCurated({ status: "contactable", contactableOnly: true, validatedOnly: needValid, limit: want });
   if (!candidates.length) return;
 
   const ids = candidates.map((r) => r.id);
