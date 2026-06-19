@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tailor your resume to this role</title>
+  <meta name="description" content="See the role's must-haves and tune your resume so they clearly show." />
+  <!--
+    AI Vetting · Resume coaching (REFERENCE PAGE)
+
+    The candidate-facing side of the coaching loop. After a screen call, the
+    recruiter (or the automated post-call email) sends the candidate a link to
+    this page with ?desk=<id>&cid=<candidateId> attached. The page shows the
+    role's must-haves, lets them paste an updated resume, and POSTs it to
+    /api/vetting/resume. That route reviews the resume SEMANTICALLY against each
+    must-have (substance, not keywords), emails back tactful coaching, and returns
+    the coverage so the candidate sees, line by line, what now lands and what to
+    still surface — then they edit and resubmit until everything shows.
+
+    The operator may replace this page; it only needs to POST
+    { deskId, candidateId, resumeText } to /api/vetting/resume.
+    Set window.VETTING_API_BASE if the API is on another origin.
+  -->
+  <style>
+    :root { --bg:#0a0a12; --card:#14141f; --line:#262636; --txt:#eef0f6; --muted:#9aa0b4; --accent:#7c5cff; --accent2:#4dd0ff; --ok:#3ddc84; --warn:#ffcf5c; --miss:#ff8aa0; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:'Inter',system-ui,-apple-system,sans-serif; background:radial-gradient(1200px 600px at 70% -10%, #1a1340 0, transparent 60%), var(--bg); color:var(--txt); min-height:100vh; display:grid; place-items:start center; padding:24px; }
+    .wrap { width:100%; max-width:560px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:28px; box-shadow:0 30px 80px -30px rgba(0,0,0,.7); }
+    .eyebrow { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent2); font-weight:700; }
+    h1 { font-size:23px; margin:8px 0 4px; line-height:1.2; }
+    .sub { color:var(--muted); font-size:14px; margin:0 0 18px; line-height:1.5; }
+    h2 { font-size:13px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:22px 0 10px; }
+    label { display:block; font-size:12px; color:var(--muted); margin:14px 0 5px; }
+    textarea { width:100%; min-height:200px; padding:12px 13px; border-radius:10px; border:1px solid var(--line); background:#0e0e18; color:var(--txt); font-size:14px; line-height:1.5; resize:vertical; font-family:inherit; }
+    textarea:focus { outline:none; border-color:var(--accent); }
+    button { margin-top:18px; width:100%; padding:13px; border:0; border-radius:12px; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#0a0a12; font-weight:800; font-size:15px; cursor:pointer; }
+    button:disabled { opacity:.6; cursor:default; }
+    .note { font-size:11px; color:var(--muted); margin-top:14px; line-height:1.5; }
+    .err { color:#ff8aa0; font-size:13px; margin-top:10px; min-height:16px; }
+    ul.req { list-style:none; padding:0; margin:0; }
+    ul.req li { border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:#0e0e18; }
+    .req-head { display:flex; align-items:center; gap:9px; }
+    .pill { font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; padding:3px 8px; border-radius:999px; white-space:nowrap; }
+    .pill.shown { background:rgba(61,220,132,.16); color:var(--ok); }
+    .pill.partial { background:rgba(255,207,92,.16); color:var(--warn); }
+    .pill.missing { background:rgba(255,138,160,.16); color:var(--miss); }
+    .pill.todo { background:rgba(154,160,180,.16); color:var(--muted); }
+    .pill.must { background:rgba(124,92,255,.18); color:#c3b4ff; }
+    .req-title { font-weight:700; font-size:14px; flex:1; }
+    .req-body { font-size:13px; color:var(--muted); margin-top:7px; line-height:1.5; }
+    .req-body .ev { color:#bfe9c9; }
+    .req-body .coach { color:#ffe2a8; }
+    .banner { border-radius:12px; padding:13px 15px; margin:0 0 16px; font-size:14px; line-height:1.5; }
+    .banner.ok { background:rgba(61,220,132,.12); border:1px solid rgba(61,220,132,.3); color:#bff0d2; }
+    .banner.work { background:rgba(124,92,255,.1); border:1px solid rgba(124,92,255,.3); color:#d8ccff; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" id="card">
+      <div class="eyebrow" id="eyebrow">Recruiting</div>
+      <h1 id="title">Tailor your resume to this role</h1>
+      <p class="sub" id="sub">Below are the few things this role really needs to see. Make sure your resume clearly shows each one wherever it's true to your real experience, then paste it in and we'll tell you, line by line, what lands and what to surface.</p>
+
+      <div id="status"></div>
+
+      <h2>What this role needs to see</h2>
+      <ul class="req" id="reqs"><li><div class="req-body">Loading the role's must-haves…</div></li></ul>
+
+      <form id="form">
+        <label for="resume">Paste your resume</label>
+        <textarea id="resume" placeholder="Paste your full resume text here…"></textarea>
+        <button type="submit" id="submit">Check my resume against the role</button>
+        <div class="err" id="err"></div>
+        <p class="note">We only check whether your real experience is clearly shown. We never ask you to claim anything that isn't true — the goal is to make what you've genuinely done easy for a hiring screener to see.</p>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var API = (window.VETTING_API_BASE || "") + "/api/vetting/resume";
+      var params = new URLSearchParams(location.search);
+      var deskId = params.get("desk") || params.get("deskId") || "";
+      var cid = params.get("cid") || params.get("candidateId") || "";
+      var $ = function (id) { return document.getElementById(id); };
+
+      function escapeHtml(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]; }); }
+
+      var STATUS_LABEL = { shown: "Shows", partial: "Almost", missing: "Add this" };
+
+      function renderReqs(items, scored) {
+        if (!items || !items.length) { $("reqs").innerHTML = '<li><div class="req-body">No specific requirements were attached to this role — just make sure your resume reflects the conversation you had.</div></li>'; return; }
+        $("reqs").innerHTML = items.map(function (it) {
+          var st = it.status || (scored ? "missing" : "todo");
+          var pillClass = scored ? st : "todo";
+          var pillText = scored ? (STATUS_LABEL[st] || "Add this") : (it.mustHave ? "Must-have" : "Wanted");
+          var ev = it.evidence ? '<div class="req-body ev">Found: ' + escapeHtml(it.evidence) + '</div>' : '';
+          var coach = (scored && st !== "shown" && it.coaching) ? '<div class="req-body coach">Tip: ' + escapeHtml(it.coaching) + '</div>' : '';
+          var mustTag = (it.mustHave && scored) ? '<span class="pill must">Must-have</span>' : '';
+          return '<li><div class="req-head"><span class="pill ' + pillClass + '">' + escapeHtml(pillText) + '</span>' + mustTag + '<span class="req-title">' + escapeHtml(it.requirement || it.prompt || "") + '</span></div>' + ev + coach + '</li>';
+        }).join("");
+      }
+
+      function renderStatus(d) {
+        if (!d) { $("status").innerHTML = ""; return; }
+        if (d.allMet) {
+          $("status").innerHTML = '<div class="banner ok">Your resume now clearly reflects every must-have for this role. Nicely done — we\'ll take it from here.</div>';
+        } else {
+          var n = d.gaps || 0;
+          $("status").innerHTML = '<div class="banner work">' + escapeHtml(d.summary || ("You're close — " + n + " thing" + (n === 1 ? "" : "s") + " still to surface.")) + ' Tweak the items marked below and check again.</div>';
+        }
+      }
+
+      // Load the role + any prior coverage.
+      if (deskId) {
+        fetch(API + "?desk=" + encodeURIComponent(deskId) + (cid ? "&cid=" + encodeURIComponent(cid) : ""))
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d || !d.desk) { renderReqs([]); return; }
+            var k = d.desk;
+            if (k.roleTitle) {
+              $("title").textContent = "Tailor your resume for the " + k.roleTitle + " role";
+              $("eyebrow").textContent = (k.clientCompany ? k.clientCompany + " · " : "") + "Resume check";
+            }
+            if (d.candidate && d.candidate.firstName) $("sub").innerHTML = "Hi " + escapeHtml(d.candidate.firstName) + " — below are the few things this role really needs to see. Make sure your resume clearly shows each one wherever it's true to your experience, then paste it in for a line-by-line check.";
+            if (d.latest && d.latest.coverage) { renderReqs(d.latest.coverage, true); renderStatus(d.latest); }
+            else renderReqs(d.mustHaves, false);
+          })
+          .catch(function () { renderReqs([]); });
+      } else {
+        renderReqs([]);
+      }
+
+      $("form").addEventListener("submit", function (e) {
+        e.preventDefault();
+        $("err").textContent = "";
+        if (!deskId) { $("err").textContent = "This link is missing its job reference. Ask your recruiter for a fresh link."; return; }
+        var resume = $("resume").value.trim();
+        if (resume.length < 80) { $("err").textContent = "Paste your full resume text so we can review it properly."; return; }
+        var btn = $("submit"); btn.disabled = true; btn.textContent = "Reviewing against the role…";
+        fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deskId: deskId, candidateId: cid, resumeText: resume }) })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            btn.disabled = false; btn.textContent = "Check my resume again";
+            if (!res.ok) {
+              $("err").textContent = (res.d && res.d.message) ? res.d.message : "Something went wrong, please try again.";
+              return;
+            }
+            renderReqs(res.d.coverage, true);
+            renderStatus(res.d);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          })
+          .catch(function () {
+            $("err").textContent = "Network error, please try again.";
+            btn.disabled = false; btn.textContent = "Check my resume against the role";
+          });
+      });
+    })();
+  </script>
+</body>
+</html>
