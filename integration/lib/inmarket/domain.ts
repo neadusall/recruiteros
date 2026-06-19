@@ -198,6 +198,20 @@ export async function hasMx(domain: string): Promise<boolean> {
   return (await mxStatus(domain)) === "mx";
 }
 
+/**
+ * Live domain-resolution hit-rate from the cache — the diagnostic that tells us whether a low
+ * contactable rate is a domain problem (few companies get a verified domain) or a name problem.
+ *   attempts = companies we've tried to resolve, resolved = how many got a verified domain,
+ *   withMx = of those, how many can receive mail (the email-buildable subset).
+ */
+export async function domainResolverStats(): Promise<{ attempts: number; resolved: number; withMx: number; rate: number }> {
+  const c = await ensureCache();
+  let resolved = 0, withMx = 0;
+  for (const v of c.values()) { if (v.ok) { resolved++; if (v.mx) withMx++; } }
+  const attempts = c.size;
+  return { attempts, resolved, withMx, rate: attempts ? Math.round((resolved / attempts) * 100) / 100 : 0 };
+}
+
 /** Verify ONE candidate: returns confidence>0 only if it's live + on-brand. mx checked too. */
 async function verify(domain: string, tokens: string[], via: string): Promise<DomainResolution | null> {
   const onBrand = await homepageOnBrand(domain, tokens);

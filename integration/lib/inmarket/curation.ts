@@ -51,8 +51,9 @@ export interface CuratedProspect {
   managerTitle: string;             // resolved title, else the inferred owning title
   managerVia?: string;              // company_site | news | github
   managerTier: string;              // named | function_leader | company_only | …
-  likelyEmail?: string;             // free syntax guess (unverified)
+  likelyEmail?: string;             // free syntax guess (unverified) OR a deep-pulled/found address
   emailPattern?: string;
+  emailSource?: string;             // site_direct | site_pattern | guess | smtp_found | validated_external
   /* ---- lifecycle / tracking ---- */
   status: CurationStatus;
   curatedAt: string;
@@ -161,8 +162,10 @@ interface PoolLeadLite {
  */
 export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions): Promise<CurateReport> {
   const minScore = opts.minScore ?? 0;
-  const limit = Math.min(opts.limit ?? 200, 2000);
-  const concurrency = Math.min(Math.max(opts.concurrency ?? 4, 1), 8);
+  const limit = Math.min(opts.limit ?? 200, 4000);
+  // Concurrency ceiling raised to 16: egress IP rotation spreads these across source IPs, so the
+  // free sources aren't hammered from one address. Keep a ceiling so a bad opts value can't fan out unbounded.
+  const concurrency = Math.min(Math.max(opts.concurrency ?? 4, 1), 16);
 
   const store = await load();
   const byId = new Map(store.map((r) => [r.id, r]));
@@ -227,6 +230,7 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
         managerTier: dm.tier,
         likelyEmail: dm.email?.email,
         emailPattern: dm.email?.pattern,
+        emailSource: dm.emailSource,
         // a guess on a no-MX domain is dead on arrival — mark it invalid now so it never enrolls.
         emailInvalid: dm.emailDeliverable === false ? true : undefined,
         // the person's OWN published address (deep-pulled from the company site) is verified-grade —
@@ -295,6 +299,22 @@ export interface CurationFunnel {
   /** Email-validation tallies fed by the continuous validator. */
   validated: number;
   invalid: number;
+  /* ---- DIAGNOSTICS: which gate is failing? ---- */
+  /** Of all researched companies, how many got a NAME (the name-finding gate). */
+  named: number;
+  namedRate: number;
+  /** Domain coverage on curated rows + the live resolver hit-rate (the domain gate). */
+  domain: {
+    curatedWithDomain: number;          // curated rows that carry a resolved domain
+    curatedRate: number;                // …as a fraction of all curated rows
+    resolverAttempts: number;           // companies the resolver has tried (cache size)
+    resolverResolved: number;           // …that got a verified domain
+    resolverWithMx: number;             // …that can also receive mail
+    resolverRate: number;               // resolved / attempts — the true domain hit-rate
+  };
+  /** Where the curated emails came from — guess vs deep-pulled vs SMTP-found vs externally validated.
+   *  This tells us how many "contacts" are real vs blind guesses at a glance. */
+  emailBySource: Array<{ source: string; total: number; validated: number }>;
 }
 
 export async function curationFunnel(): Promise<CurationFunnel> {

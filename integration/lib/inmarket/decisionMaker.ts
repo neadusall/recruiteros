@@ -414,6 +414,10 @@ export interface DecisionMaker {
   /** True when `email` is the person's OWN published address (harvested from the company site) —
    *  a verified-grade contact, not a guess. Lets curation mark it validated immediately. */
   emailConfirmed?: boolean;
+  /** How `email` was produced: "site_direct" (published address that IS this person), "site_pattern"
+   *  (the domain's learned pattern), or "guess" (the blind syntax prior). Drives the funnel's
+   *  email-source breakdown so we can see how many contacts are verified vs guessed. */
+  emailSource?: "site_direct" | "site_pattern" | "guess";
   /** Short, honest "why this person/title" line for the UI. */
   why: string;
 }
@@ -473,6 +477,7 @@ export async function resolveDecisionMaker(
     // a colleague's published address — far stronger than the generic first.last prior.
     let email = domain ? guessEmail(c.firstName, c.lastName, domain) : undefined;
     let emailConfirmed = false;
+    let emailSource: DecisionMaker["emailSource"] = email?.email ? "guess" : undefined;
     if (domain) {
       const teamPeople = [c, ...(resolution!.alternates ?? []).map((a) => a.candidate)]
         .map((p) => ({ firstName: p.firstName, lastName: p.lastName, fullName: p.fullName }));
@@ -480,6 +485,7 @@ export async function resolveDecisionMaker(
       if (deep?.email) {
         email = { email: deep.email, pattern: deep.pattern, alternates: email?.alternates ?? [], confidence: deep.confirmed ? 0.95 : 0.7, verified: false, domain };
         emailConfirmed = deep.confirmed;
+        emailSource = deep.via; // "site_direct" | "site_pattern"
       }
     }
     return {
@@ -498,6 +504,7 @@ export async function resolveDecisionMaker(
       // domain-level MX signal.
       emailDeliverable: emailConfirmed ? true : deliverable,
       emailConfirmed: emailConfirmed || undefined,
+      emailSource,
       why: best.reasons[0] ?? `${target.rationale}`,
     };
   }

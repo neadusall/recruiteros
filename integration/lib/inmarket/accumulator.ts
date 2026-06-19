@@ -52,17 +52,22 @@ const DIRECTORY_CAP = 1200;            // leads from the directory pass (whole b
 // Each cycle resolves+verifies a rotating batch's real domains and writes them back onto the
 // pool, so the Hire Signals tab shows real people + emails and the curation contactable rate
 // climbs (target: ~10% → ~50%). Free, verified, cached per company (so it compounds over days).
-const DOMAIN_BATCH = 80;               // pool companies (missing a domain) resolved per cycle
-const DOMAIN_CONCURRENCY = 6;          // parallel resolves (each = a few bounded HTTP/DNS probes)
+// THROUGHPUT DIALS — all env-overridable so we can tune toward 5K verified/day from LIVE funnel
+// numbers WITHOUT a redeploy. The raised defaults assume egress IP rotation is active
+// (INMARKET_EGRESS_IPS) so the free sources are spread across IPs and don't rate-limit. If you
+// ever turn rotation off, dial these back down. See docs/platform/hire-signals-5k-setup.md.
+const envNum = (k: string, d: number): number => Number(process.env[k]) || d;
+const DOMAIN_BATCH = envNum("INMARKET_DOMAIN_BATCH", 200);        // pool companies (missing a domain) resolved per cycle
+const DOMAIN_CONCURRENCY = envNum("INMARKET_DOMAIN_CONCURRENCY", 10); // parallel resolves (each = a few bounded HTTP/DNS probes)
 let domainCursor = 0;
 // Decision-maker curation runs on its OWN fast tick (not the heavy hourly cycle) so the prospect
 // database stays living — refreshing every few minutes, walking the whole pool by score.
-const CURATE_CYCLE_MS = 5 * 60 * 1000; // research a fresh batch every 5 minutes
-const CURATE_BATCH = 80;               // companies researched per tick (~80 x 12/hr x 24 ≈ 23K/day)
-const CURATE_CANDIDATES = 2500;        // pool slice we choose the not-yet-done batch from
-const CURATE_CONCURRENCY = 6;          // parallel researches (polite to the free sources)
-const CURATE_MIN_SCORE = 35;           // don't spend research on weak signals
-const VERIFY_BATCH = 400;              // curated emails free-verified (MX/role/disposable) per tick
+const CURATE_CYCLE_MS = envNum("INMARKET_CURATE_INTERVAL_SEC", 300) * 1000; // research a fresh batch every N seconds (default 5 min)
+const CURATE_BATCH = envNum("INMARKET_CURATE_BATCH", 150);        // companies researched per tick (~150 x 12/hr x 24 ≈ 43K/day)
+const CURATE_CANDIDATES = envNum("INMARKET_CURATE_CANDIDATES", 4000); // pool slice we choose the not-yet-done batch from
+const CURATE_CONCURRENCY = envNum("INMARKET_CURATE_CONCURRENCY", 10); // parallel researches (rotated across egress IPs)
+const CURATE_MIN_SCORE = envNum("INMARKET_CURATE_MIN_SCORE", 35); // don't spend research on weak signals
+const VERIFY_BATCH = envNum("INMARKET_VERIFY_BATCH", 800);        // curated emails free-verified (MX/role/disposable) per tick
 const FINDER_BATCH = 40;               // pending people SMTP-verified per tick (opt-in; bounded — slow)
 const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
 const CURATE_FIRST_DELAY_MS = 25_000;   // let the pool fill a little before the first curation tick
