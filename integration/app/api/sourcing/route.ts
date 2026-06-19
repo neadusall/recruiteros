@@ -26,6 +26,8 @@ import {
   reRankCandidates, getSeenKeys, addSeenKeys,
   laxisWorkerConfigured, serializeCandidatesCsv, submitLaxisJob, getLaxisJob, mergeEnrichedCsv,
   MAX_LAXIS_UPLOAD,
+  startBulkList, stepBulkList, bulkListStatus,
+  startCompanyFirst, stepCompanyFirst, companyFirstStatus,
 } from "../../../lib/sourcing";
 import type { CandidateRow, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
@@ -151,6 +153,51 @@ export async function POST(req: Request) {
       // Remember who we surfaced so a later fresh-only run skips them.
       await addSeenKeys(ws, result.candidates.map(candKey));
       return ok({ icp, queries, ...result, freshOnly: b.freshOnly === true });
+    }
+
+    /* --- Bulk decision-maker list builder (resumable) ---------------------
+     * bulkStart: plan the segment matrix + zero progress (target/requireEmail optional)
+     * bulkStep:  do a bounded batch of search calls; call repeatedly until done
+     * bulkStatus: read progress without doing work */
+    if (action === "bulkStart") {
+      const job = await startBulkList(ws, {
+        target: typeof b.target === "number" ? b.target : undefined,
+        requireEmail: b.requireEmail !== false,
+        verify: b.verify === true, // default: keep free permutations, validate later
+        titles: Array.isArray(b.titles) ? b.titles : undefined,
+        geos: Array.isArray(b.geos) ? b.geos : undefined,
+        headcountBands: Array.isArray(b.headcountBands) ? b.headcountBands : undefined,
+      });
+      return ok({ job });
+    }
+
+    if (action === "bulkStep") {
+      const r = await stepBulkList(ws, typeof b.maxRequests === "number" ? b.maxRequests : 6);
+      return ok(r);
+    }
+
+    if (action === "bulkStatus") {
+      return ok({ job: await bulkListStatus(ws) });
+    }
+
+    /* --- Company-first builder: in-band companies → their VP/Director people --- */
+    if (action === "companyStart") {
+      const job = await startCompanyFirst(ws, {
+        target: typeof b.target === "number" ? b.target : undefined,
+        requireEmail: b.requireEmail !== false,
+        titles: Array.isArray(b.titles) ? b.titles : undefined,
+        geos: Array.isArray(b.geos) ? b.geos : undefined,
+      });
+      return ok({ job });
+    }
+
+    if (action === "companyStep") {
+      const r = await stepCompanyFirst(ws, typeof b.maxRequests === "number" ? b.maxRequests : 8);
+      return ok(r);
+    }
+
+    if (action === "companyStatus") {
+      return ok({ job: await companyFirstStatus(ws) });
     }
 
     if (action === "rerank") {

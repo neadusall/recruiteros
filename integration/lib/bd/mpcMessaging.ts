@@ -24,6 +24,7 @@ import {
 } from "./personaMessaging";
 import { sanitizeMessage } from "./sanitize";
 import { HOUSE_VOICE } from "./houseVoice";
+import { GUIDELINES_PROMPT } from "../copy/guidelines";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
@@ -62,7 +63,6 @@ ABSOLUTE TRUTH RULES (non-negotiable):
 - If an anonymized candidate profile is PROVIDED below, write only from those true details; keep it anonymized (no name).
 - If NO candidate profile is provided, speak truthfully and generally — that we are currently representing strong [function] talent in their market who may fit — WITHOUT inventing a specific person or specific achievements.
 - Anchor the executive's situation only in the real signal / role / industry / profile provided. Never invent their facts either.
-- NEVER use hollow, vague reasons for reaching out. Banned phrases and anything like them: "you came to mind", "thought of you", "reminded me of you", "I thought you'd find interesting", "wanted to reach out". The reason is always the candidate and the real signal — concrete and verifiable. If there's no real reason to state, state nothing rather than invent one.
 
 EXECUTIVE DECISION FRAMEWORK — write under the persona's pressure, toward their desired outcome. Generalize to ANY title with real depth:
 ${personaTable()}
@@ -79,7 +79,9 @@ CHANNEL RULES (lead with the candidate, end with a low-friction ask):
 - linkedin_voice_note: 20-35s spoken script (~50-90 words). Warm, confident, candidate-led.
 - voicemail: 20-25s spoken script (~50-65 words). Candidate, why-fit, the ask, then the callback number.
 
-HARD STYLE RULES: plain text only; no emojis, no hashtags; NO dashes of any kind (no em dashes, no en dashes, no hyphens) — write compounds as separate words; US dollars with $; reference only real, provided details; the reader should feel "this person has someone I should actually meet," never "this is a mass pitch."
+The reader should feel "this person has someone I should actually meet," never "this is a mass pitch."
+
+${GUIDELINES_PROMPT}
 
 ${HOUSE_VOICE}`;
 

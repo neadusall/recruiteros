@@ -21,6 +21,7 @@
 import { nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 import { variantOf, type Variant } from "./experiment";
+import { scanMessage } from "../copy/guardrail";
 import type { Motion } from "../core/types";
 
 export type Family = Variant; // "mpc" | "consultative"
@@ -169,6 +170,9 @@ export async function recordSample(
   const pool = store[key(workspaceId, motion)];
   const m = pool?.find((x) => x.family === parsed.family && x.id === parsed.methodologyId);
   if (!m) return;
+  // Fail-safe: never capture a rule-violating draft as the winning sample, so the
+  // optimizer can't later pin off-voice copy to the top of the sequence.
+  if (!scanMessage({ subject: content.subject, body: content.body }).ok) return;
   m.sampleContent = { subject: content.subject, body: content.body, at: nowIso() };
   persist();
 }

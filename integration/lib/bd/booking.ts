@@ -20,6 +20,7 @@ import { toHtml } from "./draftContent";
 import { inferPersona } from "./personaMessaging";
 import { sanitizeDashes } from "./sanitize";
 import { HOUSE_VOICE, BD_POSITIONING } from "./houseVoice";
+import { GUIDELINES_PROMPT } from "../copy/guidelines";
 import type { Variant } from "./experiment";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -80,6 +81,8 @@ The reader should feel: "this person is genuinely offering me something useful a
 
 The call you are inviting them to is about THEIR team and THEIR hiring (helping them build), never about finding THEM a role.
 
+${GUIDELINES_PROMPT}
+
 ${BD_POSITIONING}
 
 ${HOUSE_VOICE}`;
@@ -98,6 +101,8 @@ Method (follow exactly):
 - Keep it short: email 60-110 words with a quiet, specific subject; linkedin 300-500 characters.
 
 The reader should feel: "this person has someone I should actually meet," never "this is a mass sales pitch."
+
+${GUIDELINES_PROMPT}
 
 ${BD_POSITIONING}
 

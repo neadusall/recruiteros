@@ -32,6 +32,7 @@ import {
   SEED_ANGLES, type Family, type Methodology,
 } from "./methodology";
 import { listSequences, upsertSequence } from "../sequences";
+import { scanMessage } from "../copy/guardrail";
 import type { Motion } from "../core/types";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -145,7 +146,7 @@ export async function optimizeAll(workspaceId: string): Promise<OptimizeResult[]
  */
 async function promoteChampionToSequence(workspaceId: string, motion: Motion): Promise<void> {
   const champs = (await Promise.all(FAMILIES.map((f) => getChampion(workspaceId, motion, f)))).filter(
-    (m): m is Methodology => !!m && !!m.sampleContent,
+    (m): m is Methodology => !!m && !!m.sampleContent && scanMessage({ subject: m.sampleContent.subject, body: m.sampleContent.body }).ok,
   );
   if (!champs.length) return;
   const champ = champs.sort((a, b) => Date.parse(b.sampleContent!.at) - Date.parse(a.sampleContent!.at))[0];

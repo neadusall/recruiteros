@@ -125,14 +125,14 @@ export const SIGNAL_ANGLES: Record<SignalType, SignalAngle> = {
     type: "layoff",
     timing: "A workforce reduction concentrates talent in the market and, on the company side, typically opens a window where remaining leadership is receptive to conversations about building back smarter.",
     bd: "Aware that {company} has been going through a difficult restructuring — when teams are rebuilding after a reduction, the focus on doing more with less often creates a different kind of conversation.",
-    recruiting: "Know that {company} has gone through some difficult changes recently, and wanted to reach out in case it is useful to talk through what options look like from here.",
+    recruiting: "Know that {company} has gone through some difficult changes recently, in case it is useful to talk through what options look like from here.",
   },
 
   warn_notice: {
     type: "warn_notice",
     timing: "A WARN Act filing names a specific date and count, giving the market a precise window to prepare and making outreach timely rather than speculative.",
     bd: "Aware of the WARN notice filed by {company} — as leadership thinks through next steps, there are sometimes ways we can help with the transition.",
-    recruiting: "Saw the WARN notice from {company} and wanted to reach out — happy to have a conversation whenever the timing feels right for you.",
+    recruiting: "Saw the WARN notice from {company} and happy to have a conversation whenever the timing feels right for you.",
   },
 
   office_closure: {
@@ -146,14 +146,14 @@ export const SIGNAL_ANGLES: Record<SignalType, SignalAngle> = {
     type: "down_round",
     timing: "Distress financing heightens flight risk among key staff and often prompts a quiet search for opportunities, making proactive outreach unusually well-received.",
     bd: "Aware that {company} has been navigating some financing headwinds — when teams are working through that, outside perspective on priorities can sometimes be useful.",
-    recruiting: "Know that things at {company} have been uncertain lately, and wanted to reach out in case it is helpful to have a conversation about what else might be worth exploring.",
+    recruiting: "Know that things at {company} have been uncertain lately, in case it is helpful to have a conversation about what else might be worth exploring.",
   },
 
   bankruptcy: {
     type: "bankruptcy",
     timing: "A bankruptcy filing puts talent, client relationships, and operating capacity into motion simultaneously, and timing outreach to that window matters.",
     bd: "Aware that {company} is working through a restructuring process — there are sometimes ways we can help during that period, and wanted to make sure the line was open.",
-    recruiting: "Heard about the situation at {company} and wanted to reach out — if it would be useful to talk about what the landscape looks like right now, I am available whenever the timing works for you.",
+    recruiting: "Heard about the situation at {company} . If it would be useful to talk about what the landscape looks like right now, I am available whenever the timing works for you.",
   },
 
   office_expansion: {
@@ -216,7 +216,7 @@ export const SIGNAL_ANGLES: Record<SignalType, SignalAngle> = {
     type: "open_to_work",
     timing: "An explicit availability flag is the clearest possible signal that a person is actively open, making outreach immediately relevant rather than speculative.",
     bd: "Noticed {full_name} recently indicated they are open to new opportunities — worth keeping in mind if a relevant situation comes up on our side.",
-    recruiting: "Saw you recently indicated you are open to new opportunities — wanted to reach out to introduce myself and see if a conversation might be useful.",
+    recruiting: "Saw you recently indicated you are open to new opportunities, so it is a good time to connect and see if a conversation might be useful.",
   },
 
   tenure_milestone: {
@@ -237,14 +237,14 @@ export const SIGNAL_ANGLES: Record<SignalType, SignalAngle> = {
     type: "employer_distress",
     timing: "When someone's employer hits a layoff, down-round, or exit event, even people not directly affected become receptive to understanding their options.",
     bd: "Aware that things have been uncertain at {company} lately — wanted to make sure the line was open if that is ever relevant.",
-    recruiting: "Know that things at {company} have been unsettled recently, and wanted to reach out — happy to have a conversation about what is out there whenever it feels right.",
+    recruiting: "Know that things at {company} have been unsettled recently, and happy to have a conversation about what is out there whenever it feels right.",
   },
 
   layoff_affected: {
     type: "layoff_affected",
     timing: "A person who is directly impacted by a reduction is immediately in the market, but the most useful outreach reaches them early and without pressure.",
-    bd: "Aware of the recent changes at {company} and wanted to reach out to {full_name} — there may be situations where their background is relevant to what we are working on.",
-    recruiting: "Heard about the recent changes at {company} and wanted to reach out — if a conversation about what is out there would be helpful, I am available at whatever pace works for you.",
+    bd: "Aware of the recent changes at {company} and {full_name}'s background may be relevant to what we are working on.",
+    recruiting: "Heard about the recent changes at {company} . If a conversation about what is out there would be helpful, I am available at whatever pace works for you.",
   },
 
   job_change: {
@@ -258,14 +258,14 @@ export const SIGNAL_ANGLES: Record<SignalType, SignalAngle> = {
     type: "profile_update",
     timing: "A headline or skills refresh often precedes an active search by a few weeks, making it an early signal while the person is not yet being flooded with outreach.",
     bd: "Noticed {full_name} recently refreshed their profile — that kind of update often reflects a shift in direction worth paying attention to.",
-    recruiting: "Saw you recently updated your profile and wanted to reach out — happy to have a conversation if you are exploring what might be next.",
+    recruiting: "Saw you recently updated your profile and happy to have a conversation if you are exploring what might be next.",
   },
 
   activity_spike: {
     type: "activity_spike",
     timing: "A surge in posting, endorsing, or engaging on LinkedIn signals that someone is raising their visibility, which typically precedes or accompanies a search.",
     bd: "Noticed {full_name} has been quite active recently — that kind of engagement usually reflects a moment of momentum worth staying in touch around.",
-    recruiting: "Saw you have been active recently and wanted to reach out — if there is anything I can be useful for, happy to connect.",
+    recruiting: "Saw you have been active recently . If there is anything I can be useful for, happy to connect.",
   },
 
   relocation: {
@@ -279,14 +279,14 @@ export const SIGNAL_ANGLES: Record<SignalType, SignalAngle> = {
     type: "education_completion",
     timing: "Finishing a degree, bootcamp, or certification is a defined transition point where the person is actively considering their next step.",
     bd: "Noticed {full_name} recently completed {program} — people coming out of a focused program like that are often at an interesting transition point.",
-    recruiting: "Saw you recently completed {program} — wanted to reach out to congratulate you and see if a conversation about what is out there might be useful.",
+    recruiting: "Saw you recently completed {program}, congratulations. A conversation about what is out there might be useful if you are open to it.",
   },
 
   contract_ending: {
     type: "contract_ending",
     timing: "A contractor or visa term with a known end date creates a precise availability window, making outreach well-timed when it arrives before the contract closes.",
-    bd: "Noticed {full_name}'s current engagement at {company} may be wrapping up — wanted to reach out now so we have time to explore whether there is something relevant.",
-    recruiting: "Aware that your current engagement may be coming to a close and wanted to reach out early — happy to talk through what is in the market at whatever pace works.",
+    bd: "Noticed {full_name}'s current engagement at {company} may be wrapping up, so now is a good time to explore whether there is something relevant.",
+    recruiting: "Aware that your current engagement may be coming to a close . Happy to talk through what is in the market at whatever pace works.",
   },
 
 };

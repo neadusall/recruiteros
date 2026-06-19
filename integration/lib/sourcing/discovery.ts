@@ -55,6 +55,10 @@ interface SearchParams {
   currentCompany?: string;
   geoLocation?: string;
   pastCompany?: string;
+  /** Company headcount band (e.g. "201-500"), for Sales-Navigator-style listings that
+   *  filter by employee count — the cheap way to keep a bulk pull inside a size band
+   *  without an over-pull-and-discard pass. Maps to `company_headcount`. */
+  headcount?: string;
 }
 
 /** A trimmed numeric LinkedIn id, or undefined — structured filters are id-based, not names. */
@@ -151,7 +155,7 @@ function extractList(data: any): any[] {
  *    even an existing saved path (name/page only) still gets the precise filters.
  *  - POST listings: a JSON body { keywords, count, current_company, geocode_location }.
  */
-async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRow[]> {
+export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRow[]> {
   const host = PS_HOST();
   const headers: Record<string, string> = {
     "X-RapidAPI-Key": RAPIDAPI_KEY(), "X-RapidAPI-Host": host,
@@ -166,6 +170,7 @@ async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRow[]> {
     if (p.currentCompany) bodyObj.current_company = p.currentCompany;
     if (p.geoLocation) bodyObj.geocode_location = p.geoLocation;
     if (p.pastCompany) bodyObj.past_company = p.pastCompany;
+    if (p.headcount) bodyObj.company_headcount = p.headcount;
     res = await fetch(url, { method: "POST", headers, body: JSON.stringify(bodyObj) });
   } else {
     const raw = PS_PATH();
@@ -176,7 +181,8 @@ async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRow[]> {
       .replace(/\{limit\}/g, String(p.limit))
       .replace(/\{current_company\}/g, encodeURIComponent(p.currentCompany || ""))
       .replace(/\{geocode_location\}/g, encodeURIComponent(p.geoLocation || ""))
-      .replace(/\{past_company\}/g, encodeURIComponent(p.pastCompany || ""));
+      .replace(/\{past_company\}/g, encodeURIComponent(p.pastCompany || ""))
+      .replace(/\{company_headcount\}/g, encodeURIComponent(p.headcount || ""));
     if (!templated) {
       const sep = path.includes("?") ? "&" : "?";
       path = `${path}${sep}query=${encodeURIComponent(p.name)}&page=${p.page}`;
@@ -189,6 +195,7 @@ async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRow[]> {
     path = appendParam(path, "current_company", p.currentCompany, raw);
     path = appendParam(path, "geocode_location", p.geoLocation, raw);
     path = appendParam(path, "past_company", p.pastCompany, raw);
+    path = appendParam(path, "company_headcount", p.headcount, raw);
     res = await fetch(`https://${host}${path}`, { headers });
   }
   if (!res.ok) throw new Error(`rapidapi ${host} ${res.status}`);

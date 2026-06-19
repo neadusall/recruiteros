@@ -24,6 +24,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { sanitizeMessage } from "./sanitize";
 import { HOUSE_VOICE } from "./houseVoice";
+import { GUIDELINES_PROMPT } from "../copy/guidelines";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
@@ -285,10 +286,11 @@ HARD STYLE RULES (house standard):
 - NO dashes of any kind: no em dashes, no en dashes, and no hyphens. Use commas or periods, and write compounds as separate words (e.g. "revenue cycle", "multi site", "PE backed").
 - All money in US dollars with a $ sign.
 - Reference only the real, specific details provided. Do NOT invent facts, names, numbers, or events. If a detail is missing, write around it; never guess.
-- NO hollow reasons for reaching out. Banned phrases and anything like them: "you came to mind", "thought of you", "reminded me of you", "I thought you'd find interesting", "wanted to reach out". The reason is always the real market observation or signal, concrete and verifiable. If there's no real reason to state, state nothing.
 - The market_observation must be defensible from the lead context provided.
 
 The prospect should finish reading and feel: "this person understands what we are likely trying to accomplish", never "this recruiter saw our job posting." Every message reads as the continuation of a thoughtful business conversation, not the start of a sales process.
+
+${GUIDELINES_PROMPT}
 
 ${HOUSE_VOICE}`;
 

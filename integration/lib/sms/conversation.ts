@@ -10,6 +10,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { classifyReply } from "../linkedin/classify";
 import type { ClassifiedReply } from "../linkedin/types";
+import { GUIDELINES_PROMPT } from "../copy/guidelines";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
@@ -20,7 +21,9 @@ Rules:
 - No em dashes or en dashes. Use commas or periods. Money in US dollars.
 - Sound human, warm, and specific. Never robotic, never pushy.
 - Goal: move toward a booked call. Answer the question, then propose a concrete next step.
-- If the person asks to stop, do not draft a reply.`;
+- If the person asks to stop, do not draft a reply.
+
+${GUIDELINES_PROMPT}`;
 
 export interface ConversationContext {
   campaign?: string;      // e.g. "Senior React, Berlin"

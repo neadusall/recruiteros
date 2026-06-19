@@ -16,6 +16,7 @@
  */
 
 import type { Campaign, CampaignModel, CampaignModelTouch, Prospect } from "../core/types";
+import { GUIDELINES_PROMPT } from "../copy/guidelines";
 
 const MERGE_HELP = "{{firstName}}, {{company}}, {{title}}, {{role}}, {{signal}}";
 
@@ -38,13 +39,8 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>): { 
 function systemPrompt(motion: Campaign["motion"]): string {
   const shared =
     "You are a senior outbound strategist. Write a multi-touch outreach sequence as REUSABLE TEMPLATES " +
-    `with merge fields (only these: ${MERGE_HELP}). Natural, specific, human; no hype, no fake familiarity, ` +
-    "no invented referrals or social proof, no em-dashes. Short sentences. Each touch earns the next. " +
-    "NEVER claim a hollow or vague reason for reaching out. Banned phrases and anything like them: " +
-    "'you came to mind', 'thought of you', 'reminded me of you', 'I thought you'd find interesting', " +
-    "'wanted to reach out'. Every reason must be concrete and verifiable, tied to their actual work, a real " +
-    "signal, or a genuine prior relationship. If there is no real reason to say, say nothing instead of inventing one. " +
-    "Return STRICT JSON only, no prose.";
+    `with merge fields (only these: ${MERGE_HELP}). Natural, specific, human; no hype, no fake familiarity. ` +
+    "Short sentences. Each touch earns the next.\n\n" + GUIDELINES_PROMPT + "\n\nReturn STRICT JSON only, no prose.";
   if (motion === "recruiting") {
     return shared +
       " Motion: RECRUITING. You are reaching a CANDIDATE about a specific role. Lead with why this role fits " +
@@ -134,7 +130,7 @@ function fallbackModel(c: Campaign, now: string): CampaignModel {
       ]
     : [
         { key: "t0", day: 0, channel: "linkedin", action: "connect", label: "Connect (role intro)", body: "Hi {{firstName}}, I'm working on {{role}} and your background stood out. Open to connecting? No pitch, just think it could be a strong fit." },
-        { key: "t1", day: 0, channel: "email", label: "Role opener", subject: "{{role}} — thought of you", body: "Hi {{firstName}},\n\nI'm helping fill {{role}} and your experience lines up well. Even if you're not looking, worth a quick chat to compare notes?\n\nBest" },
+        { key: "t1", day: 0, channel: "email", label: "Role opener", subject: "A {{role}} that fits your background", body: "Hi {{firstName}},\n\nI'm helping fill {{role}} and your experience lines up well. Even if you're not looking, worth a quick chat to compare notes?\n\nBest" },
         { key: "t2", day: 3, channel: "email", label: "Why-you follow-up", subject: "Re: {{role}}", body: "Hi {{firstName}},\n\nWhat caught my eye: your background maps closely to what this team needs. I can share the details and comp range so you can decide if it's worth 15 minutes.\n\nInterested?" },
         { key: "t3", day: 8, channel: "voice", action: "voice_note", label: "Voice note", body: "Hi {{firstName}}, quick voice note about a {{role}} opening I think fits you well. Sent an email too. If the timing's right, I'd love to walk you through it. Cheers." },
         { key: "t4", day: 14, channel: "email", label: "Break-up", subject: "Closing the loop", body: "Hi {{firstName}},\n\nI'll leave it here for now. If a move makes sense down the line, reply anytime and I'll line things up.\n\nAll the best" },

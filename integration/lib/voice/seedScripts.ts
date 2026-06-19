@@ -43,8 +43,7 @@ export const DEFAULT_VOICE_SCRIPTS: SeedScript[] = [
     name: "Natural callback (BD)",
     template:
       "Hey {first_name}... it's {agent_name}, over at {agent_company}. " +
-      "So, I came across your {role} search. " +
-      "And I figured I'd reach out directly. " +
+      "I'm calling about the {role} search at your team. " +
       "We help teams hire faster. Plain and simple. " +
       "If that's useful, just give me a call back, right at this number. " +
       "Either way... thanks {first_name}. Talk soon.",
@@ -55,7 +54,7 @@ export const DEFAULT_VOICE_SCRIPTS: SeedScript[] = [
     name: "Quick hello (BD)",
     template:
       "Hey {first_name}, it's {agent_name} with {agent_company}. " +
-      "Saw you're hiring for a {role}. " +
+      "I'm calling about the {role} you're hiring for. " +
       "We help teams fill roles like that, fast. " +
       "If it's worth a quick chat, give me a ring back at this number. " +
       "Thanks {first_name}... talk soon.",
@@ -66,8 +65,8 @@ export const DEFAULT_VOICE_SCRIPTS: SeedScript[] = [
     name: "Natural callback (Recruiting)",
     template:
       "Hey {first_name}... it's {agent_name}, over at {agent_company}. " +
-      "So, your name came up around the {role} world. " +
-      "And I figured I'd reach out directly. No agenda here. " +
+      "I'm calling about a {role} role that lines up with your background. " +
+      "No agenda here. " +
       "Just worth a quick hello, if you're ever weighing your options. " +
       "If that's useful, give me a call back, right at this number. " +
       "Either way... thanks {first_name}. Talk soon.",
@@ -78,7 +77,7 @@ export const DEFAULT_VOICE_SCRIPTS: SeedScript[] = [
     name: "Quick hello (Recruiting)",
     template:
       "Hey {first_name}, it's {agent_name} with {agent_company}. " +
-      "A {role} opportunity came across my desk, and I thought of you. " +
+      "I'm calling about a {role} opening that fits your background. " +
       "No pressure at all. " +
       "If you're curious, give me a call back at this number. " +
       "Thanks {first_name}... talk soon.",

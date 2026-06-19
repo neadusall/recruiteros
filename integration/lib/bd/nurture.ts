@@ -21,6 +21,7 @@ import type { Variant } from "./experiment";
 import { assignStrategy, strategyFor, type Strategy } from "./nurtureStrategy";
 import { sanitizeDashes } from "./sanitize";
 import { HOUSE_VOICE, BD_POSITIONING } from "./houseVoice";
+import { GUIDELINES_PROMPT } from "../copy/guidelines";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
@@ -519,6 +520,8 @@ Rules:
   - email: 60-110 words, with a quiet, peer-level subject line (never a pitch).
   - linkedin_comment: <= 300 characters, reads as a natural, thoughtful comment a peer would leave on their content.
   - linkedin_voice_note: a 20-35 second spoken script (~50-90 words), warm and conversational, written to be heard.
+
+${GUIDELINES_PROMPT}
 
 ${BD_POSITIONING}
 

@@ -15,9 +15,33 @@
  * Then it schedules the next touch, or completes the sequence at week 26.
  */
 
-import { ensureNurtureReady, dueTouches, generateNurtureTouch, advance, advanceDormant, dequeueTrigger, addPending, type NurtureEnrollment } from "./nurture";
+import { ensureNurtureReady, dueTouches, generateNurtureTouch, advance, advanceDormant, dequeueTrigger, addPending, type NurtureEnrollment, type NurtureTouch, type NurtureContent } from "./nurture";
 import { dispatchNurture } from "./nurtureSend";
 import { generateEarnedAsk } from "./booking";
+import { reviewCopy } from "../copy/review";
+
+/** Append the prior violations to a touch's intent so the regenerate self-repairs. */
+function withHint(touch: NurtureTouch, hint?: string): NurtureTouch {
+  return hint
+    ? { ...touch, intent: `${touch.intent}\n\nThe previous draft was REJECTED by the voice check. Rewrite to fix ALL of these:\n${hint}` }
+    : touch;
+}
+
+/**
+ * Generate a nurture touch THROUGH the fail-safe: deterministic scan -> self-repair ->
+ * Haiku critic (auto-send). Returns the content plus `held` when it could not be made
+ * clean — the caller stages it for human review instead of sending.
+ */
+async function reviewedTouch(lead: NurtureEnrollment["lead"], touch: NurtureTouch): Promise<{ content: NurtureContent; held: boolean }> {
+  const r = await reviewCopy(
+    async (hint) => {
+      const c = await generateNurtureTouch(lead, withHint(touch, hint));
+      return { subject: c.subject, body: c.body };
+    },
+    { autoSend: true, channel: touch.channel },
+  );
+  return { content: { channel: touch.channel, subject: r.copy.subject, body: r.copy.body }, held: r.status === "held" };
+}
 import { ensureExperimentReady } from "./experiment";
 import { voiceOnEmailSent, voiceOnSendEnabled } from "../voice/onEmailSent";
 import { withWorkspaceCreds } from "../connected";
@@ -60,12 +84,17 @@ export async function runNurtureTick(at: Date = new Date()): Promise<NurtureTick
       // overrides the scheduled cadence. Generated fresh, dispatched on its channel,
       // then the trigger is marked fired (the plan index is NOT advanced).
       if (trigger) {
-        const content = await generateNurtureTouch(e.lead, touch);
-        const sent = await dispatchNurture(e, touch, content);
-        if (sent.staged) {
+        const { content, held } = await reviewedTouch(e.lead, touch);
+        if (held) {
           addPending(e.prospectId, { channel: touch.channel, week: 0, subject: content.subject, body: content.body, generatedAt: at.toISOString() });
+          results.push({ prospectId: e.prospectId, kind: "trigger", triggerKind: trigger.kind, held: true, channel: touch.channel });
+        } else {
+          const sent = await dispatchNurture(e, touch, content);
+          if (sent.staged) {
+            addPending(e.prospectId, { channel: touch.channel, week: 0, subject: content.subject, body: content.body, generatedAt: at.toISOString() });
+          }
+          results.push({ prospectId: e.prospectId, kind: "trigger", triggerKind: trigger.kind, ...sent });
         }
-        results.push({ prospectId: e.prospectId, kind: "trigger", triggerKind: trigger.kind, ...sent });
         dequeueTrigger(e.prospectId, at);
         return;
       }
@@ -73,12 +102,17 @@ export async function runNurtureTick(at: Date = new Date()): Promise<NurtureTick
       // DORMANT QUARTERLY FLOOR: a single useful read per quarter for a long-quiet
       // relationship. Generated + dispatched, then the next quarter is scheduled.
       if (dormantFloor) {
-        const content = await generateNurtureTouch(e.lead, touch);
-        const sent = await dispatchNurture(e, touch, content);
-        if (sent.staged) {
+        const { content, held } = await reviewedTouch(e.lead, touch);
+        if (held) {
           addPending(e.prospectId, { channel: touch.channel, week: 0, subject: content.subject, body: content.body, generatedAt: at.toISOString() });
+          results.push({ prospectId: e.prospectId, kind: "dormant_floor", held: true, channel: touch.channel });
+        } else {
+          const sent = await dispatchNurture(e, touch, content);
+          if (sent.staged) {
+            addPending(e.prospectId, { channel: touch.channel, week: 0, subject: content.subject, body: content.body, generatedAt: at.toISOString() });
+          }
+          results.push({ prospectId: e.prospectId, kind: "dormant_floor", ...sent });
         }
-        results.push({ prospectId: e.prospectId, kind: "dormant_floor", ...sent });
         advanceDormant(e.prospectId, at);
         return;
       }
@@ -86,11 +120,17 @@ export async function runNurtureTick(at: Date = new Date()): Promise<NurtureTick
       // MONTH-1 WEEKLY WAVE: a value email PAIRED with a voicemail to their direct
       // line, falling back to a LinkedIn voice note when there is no dialable number.
       if (touch.channel === "email_voice_wave") {
-        // 1) the value email (fresh angle each week)
-        const emailContent = await generateNurtureTouch(e.lead, { ...touch, channel: "email" });
-        const emailSent = await dispatchNurture(e, { ...touch, channel: "email" }, emailContent);
-        if (emailSent.staged) {
+        // 1) the value email (fresh angle each week), through the fail-safe
+        const { content: emailContent, held: emailHeld } = await reviewedTouch(e.lead, { ...touch, channel: "email" });
+        let emailSent: any;
+        if (emailHeld) {
           addPending(e.prospectId, { channel: "email", week: touch.week, subject: emailContent.subject, body: emailContent.body, generatedAt: at.toISOString() });
+          emailSent = { ok: false, channel: "email", held: true };
+        } else {
+          emailSent = await dispatchNurture(e, { ...touch, channel: "email" }, emailContent);
+          if (emailSent.staged) {
+            addPending(e.prospectId, { channel: "email", week: touch.week, subject: emailContent.subject, body: emailContent.body, generatedAt: at.toISOString() });
+          }
         }
 
         // 2) paired voicemail to their direct line, with a UNIQUE value-first script
@@ -120,25 +160,38 @@ export async function runNurtureTick(at: Date = new Date()): Promise<NurtureTick
       }
 
       // The earned-ask rung uses the conversion copy in this prospect's A/B model;
-      // every other rung is a value touch.
-      const content =
-        touch.channel === "ask_email"
-          ? { channel: touch.channel, ...(await generateEarnedAsk(e.lead, { channel: "email", variant: e.lead.variant })) }
-          : await generateNurtureTouch(e.lead, touch);
-      const sent = await dispatchNurture(e, touch, content);
-
-      // A LinkedIn touch with no account/profile context is generated but not yet
-      // sendable — stash it so the operator / LinkedIn wiring can execute it.
-      if (sent.staged) {
-        addPending(e.prospectId, {
-          channel: touch.channel,
-          week: touch.week,
-          subject: content.subject,
-          body: content.body,
-          generatedAt: at.toISOString(),
-        });
+      // every other rung is a value touch. Both go through the fail-safe.
+      let content: NurtureContent;
+      let held: boolean;
+      if (touch.channel === "ask_email") {
+        const r = await reviewCopy(
+          async (hint) => {
+            const a = await generateEarnedAsk(e.lead, { channel: "email", variant: e.lead.variant, priorContext: hint ? `Fix the voice issues in your prior draft:\n${hint}` : undefined });
+            return { subject: a.subject, body: a.body };
+          },
+          { autoSend: true, channel: "email" },
+        );
+        content = { channel: touch.channel, subject: r.copy.subject, body: r.copy.body };
+        held = r.status === "held";
+      } else {
+        const rv = await reviewedTouch(e.lead, touch);
+        content = rv.content;
+        held = rv.held;
       }
-      results.push({ prospectId: e.prospectId, week: touch.week, ...sent });
+
+      if (held) {
+        // Could not be made clean -> stage for human review, do not send.
+        addPending(e.prospectId, { channel: touch.channel, week: touch.week, subject: content.subject, body: content.body, generatedAt: at.toISOString() });
+        results.push({ prospectId: e.prospectId, week: touch.week, channel: touch.channel, held: true });
+      } else {
+        const sent = await dispatchNurture(e, touch, content);
+        // A LinkedIn touch with no account/profile context is generated but not yet
+        // sendable — stash it so the operator / LinkedIn wiring can execute it.
+        if (sent.staged) {
+          addPending(e.prospectId, { channel: touch.channel, week: touch.week, subject: content.subject, body: content.body, generatedAt: at.toISOString() });
+        }
+        results.push({ prospectId: e.prospectId, week: touch.week, ...sent });
+      }
 
       advance(e.prospectId, at);
       });

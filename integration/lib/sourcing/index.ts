@@ -16,6 +16,16 @@ export {
   runDiscovery, rapidApiSearchConfigured, verifySourcingSearch,
   googleSearchConfigured, verifyGoogleSearch, candidateKey, type DiscoveryResult,
 } from "./discovery";
+export {
+  startBulkList, stepBulkList, bulkListStatus,
+  DECISION_MAKER_TITLES, US_GEOS, HEADCOUNT_BANDS,
+  type BulkListJob, type StartBulkOptions, type StepResult,
+} from "./bulkList";
+export {
+  startCompanyFirst, stepCompanyFirst, companyFirstStatus, companyFirstConfigured,
+  companyFromTitle,
+  type CompanyFirstJob, type StartCompanyFirstOptions, type CompanyFirstStepResult,
+} from "./companyFirst";
 export { reRankCandidates, type ReRankResult } from "./rerank";
 export { getSeenKeys, addSeenKeys } from "./seen";
 export { fetchFullProfile, profileFetchConfigured, type FullProfile, type ProfileExperience } from "./profile";

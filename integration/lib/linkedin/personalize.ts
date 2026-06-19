@@ -12,6 +12,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { Prospect, SequenceStep } from "./types";
+import { GUIDELINES_PROMPT } from "../copy/guidelines";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
@@ -31,7 +32,9 @@ Rung definitions:
 - invite: ask permission to share something, not for their time. One soft, easy yes.
 - pitch: now make the concrete offer with real details and one clear next step.
 - release: gracious breakup that leaves value and keeps the door open.
-- warmup: not a message; return an empty string.`;
+- warmup: not a message; return an empty string.
+
+${GUIDELINES_PROMPT}`;
 
 export interface GeneratedMessage {
   rung: SequenceStep["rung"];
