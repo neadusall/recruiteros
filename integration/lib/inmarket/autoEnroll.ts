@@ -78,11 +78,11 @@ async function runTickInner(): Promise<void> {
   if (remaining <= 0) return; // daily cap reached; resets at midnight UTC
 
   const { listCurated, approveForBulk, enrollToBulk } = await import("./curation");
-  // Verified-deliverable, not yet in the funnel's send path: status "contactable" rows already
-  // have a real name + a mail-receiving domain + a free-verifier pass (undeliverable ones were
-  // suppressed). Take the highest-scored slice up to what's left of today's cap.
+  // VALIDATED-ONLY: only enroll people whose email came back VALID from internal validation — never
+  // a bare syntax guess. (enrollToBulk enforces this too; selecting validated here avoids wasting
+  // the daily cap on rows that would be skipped.) Highest-scored first, up to today's remaining cap.
   const want = Math.min(c.batch, remaining);
-  const candidates = await listCurated({ status: "contactable", contactableOnly: true, limit: want });
+  const candidates = await listCurated({ status: "contactable", validatedOnly: true, limit: want });
   if (!candidates.length) return;
 
   const ids = candidates.map((r) => r.id);

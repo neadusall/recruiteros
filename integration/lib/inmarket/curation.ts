@@ -322,11 +322,19 @@ export async function curationFunnel(): Promise<CurationFunnel> {
   const byStatus = { sourced: 0, named: 0, contactable: 0, queued: 0, enrolled: 0, suppressed: 0 } as Record<CurationStatus, number>;
   const sig = new Map<string, { total: number; contactable: number }>();
   const fn = new Map<string, { total: number; contactable: number }>();
-  let contactableOrBetter = 0, validated = 0, invalid = 0;
+  const src = new Map<string, { total: number; validated: number }>();
+  let contactableOrBetter = 0, validated = 0, invalid = 0, named = 0, withDomain = 0;
   for (const r of rows) {
     byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
     if (r.emailValidated) validated++;
     if (r.emailInvalid) invalid++;
+    if (r.managerName) named++;
+    if (r.domain) withDomain++;
+    if (r.likelyEmail) {
+      const key = r.emailSource || "guess";
+      const e = src.get(key) ?? { total: 0, validated: 0 };
+      e.total++; if (r.emailValidated) e.validated++; src.set(key, e);
+    }
     const isContactable = r.status === "contactable" || r.status === "queued" || r.status === "enrolled";
     if (isContactable) contactableOrBetter++;
     const s = sig.get(r.signalType) ?? { total: 0, contactable: 0 };
@@ -334,6 +342,8 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     const f = fn.get(r.function) ?? { total: 0, contactable: 0 };
     f.total++; if (isContactable) f.contactable++; fn.set(r.function, f);
   }
+  const { domainResolverStats } = await import("./domain");
+  const rs = await domainResolverStats().catch(() => ({ attempts: 0, resolved: 0, withMx: 0, rate: 0 }));
   return {
     total: rows.length,
     byStatus,
@@ -342,6 +352,17 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     contactableRate: rows.length ? Math.round((contactableOrBetter / rows.length) * 100) / 100 : 0,
     validated,
     invalid,
+    named,
+    namedRate: rows.length ? Math.round((named / rows.length) * 100) / 100 : 0,
+    domain: {
+      curatedWithDomain: withDomain,
+      curatedRate: rows.length ? Math.round((withDomain / rows.length) * 100) / 100 : 0,
+      resolverAttempts: rs.attempts,
+      resolverResolved: rs.resolved,
+      resolverWithMx: rs.withMx,
+      resolverRate: rs.rate,
+    },
+    emailBySource: [...src.entries()].map(([source, v]) => ({ source, ...v })).sort((a, b) => b.total - a.total),
   };
 }
 
@@ -355,6 +376,8 @@ export async function listCurated(opts?: {
   signalType?: string;
   function?: string;
   contactableOnly?: boolean;
+  /** Only rows whose email passed internal validation (a real, deliverable address — no guesses). */
+  validatedOnly?: boolean;
   limit?: number;
 }): Promise<CuratedProspect[]> {
   let rows = await load();
@@ -362,18 +385,22 @@ export async function listCurated(opts?: {
   if (opts?.signalType) rows = rows.filter((r) => r.signalType === opts.signalType);
   if (opts?.function) rows = rows.filter((r) => r.function === opts.function);
   if (opts?.contactableOnly) rows = rows.filter((r) => !!r.likelyEmail);
+  if (opts?.validatedOnly) rows = rows.filter((r) => r.emailValidated === true && !r.emailInvalid);
   rows.sort((a, b) => (b.curatedAt > a.curatedAt ? 1 : -1) || b.score - a.score);
   return rows.slice(0, opts?.limit ?? 500);
 }
 
-/** Mark a set of curated prospects approved (queued) in the daily review gate. */
+/** Mark a set of curated prospects approved (queued) in the daily review gate. Only VALIDATED
+ *  emails advance — a guess that hasn't come back valid from internal validation never queues. */
 export async function approveForBulk(ids: string[]): Promise<number> {
   const set = new Set(ids);
   return withCurationLock(async () => {
     const rows = await load();
     let n = 0;
     for (const r of rows) {
-      if (set.has(r.id) && r.status === "contactable") { r.status = "queued"; n++; }
+      if (set.has(r.id) && r.status === "contactable" && r.emailValidated === true && !r.emailInvalid) {
+        r.status = "queued"; n++;
+      }
     }
     if (n) await save(rows);
     return n;
@@ -417,13 +444,15 @@ export async function enrollToBulk(
   // concurrent tick/validator can't clobber the enrollment (or be clobbered by it).
   for (const r of rows) {
     if (!set.has(r.id)) continue;
-    if (!r.managerName || !r.likelyEmail || r.emailInvalid) { skipped++; continue; } // need a real person + a non-rejected email
+    // VALIDATED-ONLY into BD Bulk: a real person + an email that came back VALID from internal
+    // validation. A bare syntax guess (emailValidated !== true) never enrolls — no guesses sent.
+    if (!r.managerName || !r.likelyEmail || r.emailInvalid || r.emailValidated !== true) { skipped++; continue; }
     try {
       await addProspect({
         workspaceId,
         campaignId,
         fullName: r.managerName,
-        email: r.likelyEmail,           // best-guess; validated by the sender before send
+        email: r.likelyEmail,           // validated address (not a guess)
         company: r.company,
         companyDomain: r.domain,
         title: r.managerTitle,
@@ -474,6 +503,7 @@ export async function applyEmailValidation(
       r.emailValidated = valid;
       r.emailInvalid = !valid;
       r.validatedAt = nowIso;
+      if (valid) { if (!r.emailSource || r.emailSource === "guess") r.emailSource = "validated_external"; }
       // A validated address is a confirmed contactable; an invalid one drops out of the send queue.
       if (!valid && (r.status === "contactable" || r.status === "queued")) r.status = "suppressed";
       n++;
@@ -526,6 +556,7 @@ export async function findEmailsBySmtp(limit: number, nowIso: string, concurrenc
         if (r.status === "enrolled" || r.status === "queued" || r.status === "suppressed") continue; // locked
         r.likelyEmail = h.email;
         r.emailPattern = h.pattern;
+        r.emailSource = "smtp_found";
         r.emailValidated = true;
         r.emailInvalid = false;
         r.validatedAt = nowIso;
