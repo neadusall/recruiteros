@@ -229,6 +229,10 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
         emailPattern: dm.email?.pattern,
         // a guess on a no-MX domain is dead on arrival — mark it invalid now so it never enrolls.
         emailInvalid: dm.emailDeliverable === false ? true : undefined,
+        // the person's OWN published address (deep-pulled from the company site) is verified-grade —
+        // mark it validated so it skips the verifier and counts as a confirmed contact.
+        emailValidated: dm.emailConfirmed ? true : undefined,
+        validatedAt: dm.emailConfirmed ? opts.nowIso : undefined,
         status: statusFor(dm),
         curatedAt: opts.nowIso,
       });
@@ -257,10 +261,10 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
           enrolledAt: prev?.enrolledAt, campaignId: prev?.campaignId,
           sentAt: prev?.sentAt, openedAt: prev?.openedAt, repliedAt: prev?.repliedAt, bouncedAt: prev?.bouncedAt,
           // keep the validation verdict only while it still describes the same address; a fresh
-          // no-MX determination (row.emailInvalid) always stands.
-          emailValidated: row.emailInvalid ? false : (sameEmail ? prev?.emailValidated : undefined),
+          // confirmed-direct (row.emailValidated) or no-MX (row.emailInvalid) determination stands.
+          emailValidated: row.emailValidated ?? (row.emailInvalid ? false : (sameEmail ? prev?.emailValidated : undefined)),
           emailInvalid: row.emailInvalid ?? (sameEmail ? prev?.emailInvalid : undefined),
-          validatedAt: sameEmail ? prev?.validatedAt : undefined,
+          validatedAt: row.validatedAt ?? (sameEmail ? prev?.validatedAt : undefined),
           // a still-valid "invalid" verdict keeps the row out of the send queue
           status: sameEmail && prev?.emailInvalid ? "suppressed" : row.status,
         });

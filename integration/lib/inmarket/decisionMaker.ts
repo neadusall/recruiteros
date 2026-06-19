@@ -39,6 +39,7 @@ import { classifyTitle } from "../signals";
 import { companyAnchor } from "../signals/hiring/normalize";
 import { guessEmail, emailDomainFrom, splitFullName, type EmailGuess } from "./email";
 import { resolveCompanyDomain, type DomainResolution } from "./domain";
+import { resolvePersonEmail } from "./deepContact";
 
 /* ------------------------------------------------------------------ */
 /* Shared fetch helpers (free, timed-out, polite UA)                   */
@@ -155,22 +156,77 @@ function peopleFromJsonLd(html: string, source: string): PersonCandidate[] {
   return out;
 }
 
+/**
+ * PRECISION-SAFE HTML team extraction — the recall complement to JSON-LD. Most team/leadership
+ * pages list people in plain markup, not schema.org, so JSON-LD alone misses the majority. This
+ * recovers them WITHOUT the old free-text noise by demanding tight structure:
+ *   - microdata pairs: itemprop="name" … itemprop="jobTitle" (clean, authoritative), and
+ *   - card adjacency: a NAME-shaped text node immediately followed (within a couple of nodes) by a
+ *     short string carrying a real LEADERSHIP/seniority keyword (the team-card "Name / VP Eng" shape).
+ * Both reuse the same looksLikeName/looksLikeTitle guards, so product-name bigrams ("Vector Search
+ * — CTO") and nav boilerplate are rejected. A title keyword is REQUIRED, so an untitled string can
+ * never pose as a leader. Precision-first: pair only when the name AND a real title sit together.
+ */
+function peopleFromHtml(html: string, source: string): PersonCandidate[] {
+  const out: PersonCandidate[] = [];
+  const seen = new Set<string>();
+  const push = (name: string, title: string) => {
+    if (!looksLikeName(name) || !looksLikeTitle(title)) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const split = splitFullName(name);
+    out.push({ fullName: name, firstName: split.firstName, lastName: split.lastName, title: title.slice(0, 60), headline: title.slice(0, 60), source });
+  };
+
+  // 1) Microdata: name then jobTitle within a small window.
+  const micro = /itemprop=["']name["'][^>]*>\s*([^<]{3,50})\s*<[\s\S]{0,240}?itemprop=["']jobTitle["'][^>]*>\s*([^<]{3,60})\s*</gi;
+  let mm: RegExpExecArray | null;
+  while ((mm = micro.exec(html)) && out.length < 40) push(clean(mm[1]), clean(mm[2]));
+
+  // 2) Card adjacency: consecutive visible text nodes where a name is followed by a title.
+  const segs: string[] = [];
+  const stripped = html.replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, " ");
+  const textRe = />\s*([^<>{}]{2,60})\s*</g;
+  let tm: RegExpExecArray | null;
+  while ((tm = textRe.exec(stripped)) && segs.length < 4000) {
+    const t = clean(tm[1]);
+    if (t) segs.push(t);
+  }
+  for (let i = 0; i < segs.length && out.length < 40; i++) {
+    if (!looksLikeName(segs[i])) continue;
+    for (let j = i + 1; j <= i + 2 && j < segs.length; j++) {
+      if (looksLikeTitle(segs[j])) { push(segs[i], segs[j]); break; }
+    }
+  }
+  return out;
+}
+
+function clean(s: string): string {
+  return s.replace(/&amp;/g, "&").replace(/&#39;|&rsquo;/g, "'").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
+}
+
 async function companySiteCandidates(domain: string): Promise<PersonCandidate[]> {
   const base = `https://${domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "")}`;
   const found: PersonCandidate[] = [];
+  const seen = new Set<string>();
   let pagesWithPeople = 0;
   for (const path of TEAM_PATHS) {
     if (pagesWithPeople >= 2) break;               // enough signal; stop probing
     const html = await fetchText(base + path);
     if (!html) continue;
-    // STRUCTURED ONLY: schema.org JSON-LD `Person` blocks. The free-text heuristic was dropped
-    // on purpose — on marketing pages it grabs product-name bigrams next to title words
-    // ("Vector Search — CTO"), and a wrong name → wrong email → bounce → domain-reputation
-    // damage. For outbound, precision beats recall: only trust structured author/leadership data.
-    const ld = peopleFromJsonLd(html, "company_site");
-    // Keep only people we can place by a real title (so an untitled author can't pose as the head).
-    const titled = ld.filter((p) => looksLikeTitle(p.title));
-    if (titled.length) { found.push(...titled); pagesWithPeople++; }
+    // Structured JSON-LD `Person` blocks first (cleanest), then precision-safe HTML extraction so
+    // the common plain-markup team pages aren't missed. Both demand a real title, so a wrong name
+    // can't pose as the head — and the email step prefers the company's OWN published addresses.
+    const people = [...peopleFromJsonLd(html, "company_site"), ...peopleFromHtml(html, "company_site")]
+      .filter((p) => looksLikeTitle(p.title));
+    let any = false;
+    for (const p of people) {
+      const k = p.fullName.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k); found.push(p); any = true;
+    }
+    if (any) pagesWithPeople++;
   }
   return found;
 }
@@ -325,6 +381,9 @@ export interface DecisionMaker {
   domain?: string;
   /** True when the resolved domain publishes MX records (it can actually receive mail). */
   emailDeliverable?: boolean;
+  /** True when `email` is the person's OWN published address (harvested from the company site) —
+   *  a verified-grade contact, not a guess. Lets curation mark it validated immediately. */
+  emailConfirmed?: boolean;
   /** Short, honest "why this person/title" line for the UI. */
   why: string;
 }
@@ -379,7 +438,20 @@ export async function resolveDecisionMaker(
 
   if (best && best.candidate.fullName) {
     const c = best.candidate;
-    const email = domain ? guessEmail(c.firstName, c.lastName, domain) : undefined;
+    // Start from the syntax guess, then DEEP-PULL the company's own published addresses to upgrade
+    // it: a real address that IS this person (verified-grade), or the domain's pattern LEARNED from
+    // a colleague's published address — far stronger than the generic first.last prior.
+    let email = domain ? guessEmail(c.firstName, c.lastName, domain) : undefined;
+    let emailConfirmed = false;
+    if (domain) {
+      const teamPeople = [c, ...(resolution!.alternates ?? []).map((a) => a.candidate)]
+        .map((p) => ({ firstName: p.firstName, lastName: p.lastName, fullName: p.fullName }));
+      const deep = await resolvePersonEmail(domain, { firstName: c.firstName, lastName: c.lastName, fullName: c.fullName }, teamPeople).catch(() => null);
+      if (deep?.email) {
+        email = { email: deep.email, pattern: deep.pattern, alternates: email?.alternates ?? [], confidence: deep.confirmed ? 0.95 : 0.7, verified: false, domain };
+        emailConfirmed = deep.confirmed;
+      }
+    }
     return {
       fullName: c.fullName,
       firstName: c.firstName,
@@ -392,7 +464,10 @@ export async function resolveDecisionMaker(
       via: c.source,
       email: email && email.email ? email : undefined,
       domain: domain || undefined,
-      emailDeliverable: deliverable,
+      // a published address that IS this person is deliverable for real; otherwise fall back to the
+      // domain-level MX signal.
+      emailDeliverable: emailConfirmed ? true : deliverable,
+      emailConfirmed: emailConfirmed || undefined,
       why: best.reasons[0] ?? `${target.rationale}`,
     };
   }
