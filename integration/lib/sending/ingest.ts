@@ -47,6 +47,14 @@ export async function applyDeliveryEvent(ev: { type: DeliveryEventType; from: st
 
   // Trip the governor right away on negative signals.
   if (ev.type === "bounce" || ev.type === "complaint") await runGovernor(workspaceId);
+
+  // Close the Hire Signals tracking loop: tie this delivery event back to the curated prospect
+  // by recipient email, so the funnel shows sent → opened → replied → bounced per hiring signal.
+  try {
+    const { recordSendEvent } = await import("../inmarket/curation");
+    const mapped = ev.type === "delivered" ? "sent" : ev.type === "open" ? "open" : ev.type === "bounce" ? "bounce" : null;
+    if (mapped) await recordSendEvent(ev.to, mapped, new Date().toISOString());
+  } catch { /* tracking is best-effort */ }
 }
 
 /** Map a raw Postal webhook event name to our normalized type (or null to ignore). */

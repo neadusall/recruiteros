@@ -103,6 +103,53 @@ export async function POST(req: Request) {
     }
   }
 
+  // ---- Curation: the daily decision-maker list (the database of prospects to market to) ----
+
+  // The real numbers: funnel counts by stage, sliced by hiring signal + function.
+  if (b?.action === "curation_funnel") {
+    const { curationFunnel } = await import("../../../lib/inmarket/curation");
+    return ok({ funnel: await curationFunnel() });
+  }
+
+  // The list itself, for review (filterable; contactableOnly = has a real person + email).
+  if (b?.action === "curation_list") {
+    const { listCurated } = await import("../../../lib/inmarket/curation");
+    const list = await listCurated({
+      status: b.status, signalType: b.signalType, function: b.function,
+      contactableOnly: b.contactableOnly === true, limit: b.limit,
+    });
+    return ok({ curated: list });
+  }
+
+  // Review gate, step 1: approve a batch (contactable → queued).
+  if (b?.action === "curation_approve") {
+    const { approveForBulk } = await import("../../../lib/inmarket/curation");
+    const n = await approveForBulk(Array.isArray(b.ids) ? b.ids : []);
+    return ok({ approved: n });
+  }
+
+  // Review gate, step 2: enroll the approved batch into the BD Bulk MPC sender.
+  if (b?.action === "curation_enroll") {
+    if (!b.campaignId) return fail("missing_campaign", 422, { detail: "campaignId required" });
+    const { enrollToBulk } = await import("../../../lib/inmarket/curation");
+    const res = await enrollToBulk(ws, String(b.campaignId), Array.isArray(b.ids) ? b.ids : [], new Date().toISOString());
+    return ok(res);
+  }
+
+  // On-demand curation run (the accumulator also does this hourly): research the top companies'
+  // decision-makers now and refresh the list.
+  if (b?.action === "curate_now") {
+    const { queryPool } = await import("../../../lib/inmarket/pool");
+    const { curateFromPool } = await import("../../../lib/inmarket/curation");
+    const n = Math.min(Number(b.limit) || 60, 300);
+    const top = await queryPool({ limit: n } as any, n);
+    const report = await curateFromPool(
+      top.map((l: any) => ({ company: l.company, domain: l.domain, industry: l.industry, signalType: l.signalType, reason: l.reason, score: l.score, employeeCount: l.employeeCount, roleDetails: l.roleDetails, roles: l.roles })),
+      { limit: n, concurrency: 4, minScore: Number(b.minScore) || 0, nowIso: new Date().toISOString() },
+    );
+    return ok({ report });
+  }
+
   // Default: a market search.
   const result = await searchInMarket(
     {

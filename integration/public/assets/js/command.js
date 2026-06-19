@@ -2287,6 +2287,11 @@
         "</div>" +
         // Daily import read, populated on open so you see today's intake immediately.
         '<div id="imImportBanner" class="im-import"></div>' +
+        // Entry to the curated decision-maker list (the daily database of real hiring managers).
+        '<div class="im-curation-cta">' +
+          '<button type="button" class="btn btn-primary btn-sm" id="imCurationBtn">🎯 Decision-maker list <span style="opacity:.8;font-weight:500">— real hiring managers, curated daily</span></button>' +
+          '<span class="muted" style="font-size:12px;margin-left:8px">Reviewed by you, then pushed to BD Bulk</span>' +
+        "</div>" +
         // Industries, multi-select with Select all / Clear, in a compact scroll area.
         '<div class="im-group" id="imIndGroup">' +
           '<div class="im-group-head"><span class="im-group-title">Industries</span>' +
@@ -2312,6 +2317,8 @@
 
     renderSavedSignals();
     loadImportBanner();
+    var curBtn = $("#imCurationBtn");
+    if (curBtn) curBtn.addEventListener("click", function () { renderCuration(); });
     var form = $("#imForm"), input = $("#imQuery");
 
     function syncChips() {
@@ -2549,6 +2556,150 @@
         try { navigator.clipboard.writeText(em); } catch (x) {}
         chip.classList.add("im-email-copied");
         setTimeout(function () { chip.classList.remove("im-email-copied"); }, 1200);
+      });
+    });
+  }
+
+  /* ========================================================================
+     Decision-maker curation view — the daily database of real hiring managers
+     attached to specific open roles, with the review gate to BD Bulk.
+     ======================================================================== */
+  var curPicks = {};   // id -> true (selected curated rows for approve/enroll)
+
+  function renderCuration() {
+    var body = $("#imBody"); if (!body) return;
+    body.innerHTML = loading();
+    curPicks = {};
+    Promise.all([
+      send("/in-market", "POST", { action: "curation_funnel" }),
+      send("/in-market", "POST", { action: "curation_list", contactableOnly: true, limit: 500 }),
+    ]).then(function (rs) {
+      var funnel = (rs[0] && rs[0].data && rs[0].data.funnel) || null;
+      var list = (rs[1] && rs[1].data && rs[1].data.curated) || [];
+      body.innerHTML = curationHtml(funnel, list);
+      wireCuration(body, list);
+    }).catch(function () { body.innerHTML = '<div class="empty">Couldn\'t load the curated list yet. The accumulator builds it hourly — try again shortly, or run a search first to seed the pool.</div>'; });
+  }
+
+  function curationHtml(funnel, list) {
+    var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
+    var bs = f.byStatus || {};
+    var stages = [
+      ["sourced", "Sourced", "company + owning title"],
+      ["named", "Named", "real person found"],
+      ["contactable", "Contactable", "name + email"],
+      ["queued", "Approved", "ready to send"],
+      ["enrolled", "Enrolled", "in BD Bulk"],
+    ];
+    var funnelRow = stages.map(function (s) {
+      return '<div class="cur-stage"><div class="cur-stage-n">' + ((bs[s[0]] || 0)).toLocaleString() + "</div>" +
+        '<div class="cur-stage-l">' + esc(s[1]) + '</div><div class="cur-stage-h">' + esc(s[2]) + "</div></div>";
+    }).join('<div class="cur-arrow">→</div>');
+
+    var sigRows = (f.bySignal || []).slice(0, 8).map(function (x) {
+      return '<div class="cur-mini"><span>' + esc(imSignalLabel(x.signalType)) + '</span><b>' + x.contactable.toLocaleString() + "</b><span class=\"muted\">/ " + x.total.toLocaleString() + "</span></div>";
+    }).join("");
+
+    var head =
+      '<div class="cur-head">' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="curBack">← Back to search</button>' +
+        '<h2>Curated decision-makers <span class="muted">· ' + (f.total || 0).toLocaleString() + " researched</span></h2>" +
+        '<button type="button" class="btn btn-ghost btn-sm" id="curRefresh">↻ Research more now</button>' +
+      "</div>" +
+      '<div class="cur-funnel">' + funnelRow + "</div>" +
+      (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "");
+
+    if (!list.length) {
+      return head + '<div class="empty" style="margin-top:14px">No contactable decision-makers curated yet. The hourly accumulator researches the top companies (free: team pages, news, GitHub) and they\'ll appear here. Hit <b>Research more now</b> to kick it.</div>';
+    }
+
+    var rows = list.map(curationRow).join("");
+    var toolbar =
+      '<div class="cur-toolbar">' +
+        '<label><input type="checkbox" id="curAll"> <b>Select all</b></label>' +
+        '<span class="muted" id="curCount">0 selected</span>' +
+        '<button class="btn btn-primary btn-sm" id="curEnroll" disabled>✓ Approve &amp; push to BD Bulk</button>' +
+      "</div>";
+
+    return head + toolbar + '<div class="cur-list">' + rows + "</div>";
+  }
+
+  function curationRow(r) {
+    var via = r.managerVia ? '<span class="cur-via cur-via-' + esc(r.managerVia) + '">' + esc(r.managerVia.replace("_", " ")) + "</span>" : "";
+    var email = r.likelyEmail
+      ? '<span class="cur-email" data-email="' + esc(r.likelyEmail) + '" title="Best-guess, validated before send">✉️ ' + esc(r.likelyEmail) + ' <span class="im-email-unv">guess</span></span>'
+      : '<span class="muted">no email</span>';
+    var enrolled = r.status === "enrolled";
+    return '<div class="cur-row' + (enrolled ? " cur-enrolled" : "") + '" data-id="' + esc(r.id) + '">' +
+      '<input type="checkbox" class="cur-pick" data-id="' + esc(r.id) + '"' + (enrolled ? " disabled" : "") + ">" +
+      '<div class="cur-main">' +
+        '<div class="cur-person"><b>' + esc(r.managerName || "(title only)") + "</b> " +
+          '<span class="cur-title">' + esc(r.managerTitle) + "</span> " + via + "</div>" +
+        '<div class="cur-ctx"><span class="cur-co">' + esc(r.company) + "</span>" +
+          ' <span class="muted">owns</span> ' + esc(r.role) +
+          ' · <span class="im-fn">' + esc(r.function) + "</span>" +
+          ' · ' + esc(imSignalLabel(r.signalType)) + "</div>" +
+        '<div class="cur-contact">' + email + (enrolled ? ' <span class="cur-badge">✓ enrolled</span>' : "") + "</div>" +
+      "</div>" +
+      '<span class="cls cls-' + (r.score >= 75 ? "positive" : "soft_yes") + ' im-score">' + (r.score || 0) + "</span>" +
+      "</div>";
+  }
+
+  function wireCuration(body, list) {
+    var back = body.querySelector("#curBack");
+    if (back) back.addEventListener("click", function () {
+      if (inMarketResults.length) renderImResults();
+      else body.innerHTML = '<div class="empty">Pick one or more industries (or Select all) to see who\'s hiring, ranked by hiring intent.</div>';
+    });
+    var refresh = body.querySelector("#curRefresh");
+    if (refresh) refresh.addEventListener("click", function () {
+      refresh.disabled = true; refresh.textContent = "Researching…";
+      send("/in-market", "POST", { action: "curate_now", limit: 60 }).then(function () { renderCuration(); }).catch(function () { renderCuration(); });
+    });
+    function sync() {
+      var n = Object.keys(curPicks).length;
+      var c = body.querySelector("#curCount"); if (c) c.textContent = n + " selected";
+      var e = body.querySelector("#curEnroll"); if (e) e.disabled = !n;
+    }
+    Array.prototype.forEach.call(body.querySelectorAll(".cur-pick"), function (cb) {
+      cb.addEventListener("change", function () {
+        var id = cb.getAttribute("data-id");
+        if (cb.checked) curPicks[id] = true; else delete curPicks[id];
+        sync();
+      });
+    });
+    var all = body.querySelector("#curAll");
+    if (all) all.addEventListener("change", function () {
+      Array.prototype.forEach.call(body.querySelectorAll(".cur-pick"), function (cb) {
+        if (cb.disabled) return; cb.checked = all.checked;
+        var id = cb.getAttribute("data-id");
+        if (all.checked) curPicks[id] = true; else delete curPicks[id];
+      });
+      sync();
+    });
+    // Copy email on click.
+    Array.prototype.forEach.call(body.querySelectorAll(".cur-email"), function (chip) {
+      chip.addEventListener("click", function () {
+        var em = chip.getAttribute("data-email"); if (!em) return;
+        try { navigator.clipboard.writeText(em); } catch (x) {}
+        chip.classList.add("im-email-copied"); setTimeout(function () { chip.classList.remove("im-email-copied"); }, 1000);
+      });
+    });
+    var enroll = body.querySelector("#curEnroll");
+    if (enroll) enroll.addEventListener("click", function () {
+      var ids = Object.keys(curPicks);
+      if (!ids.length) return;
+      enroll.disabled = true; enroll.textContent = "Pushing…";
+      resolveBdCampaign(function (campaignId) {
+        if (!campaignId) { enroll.textContent = "✓ Approve & push to BD Bulk"; enroll.disabled = false; toast && toast("Couldn't resolve a BD campaign"); return; }
+        // Review gate: approve, then enroll into the BD Bulk MPC sender.
+        send("/in-market", "POST", { action: "curation_approve", ids: ids }).then(function () {
+          return send("/in-market", "POST", { action: "curation_enroll", ids: ids, campaignId: campaignId });
+        }).then(function (r) {
+          var n = (r && r.data && r.data.enrolled) || 0;
+          if (typeof toast === "function") toast("Pushed " + n + " decision-maker" + (n === 1 ? "" : "s") + " to BD Bulk");
+          renderCuration();
+        }).catch(function () { enroll.textContent = "✓ Approve & push to BD Bulk"; enroll.disabled = false; });
       });
     });
   }

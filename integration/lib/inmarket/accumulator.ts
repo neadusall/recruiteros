@@ -45,6 +45,8 @@ const EXPAND_STALE_MS = 3 * 24 * 60 * 60 * 1000; // re-pull a company's board af
 const DIRECTORY_BATCH = 80;            // curated ATS-directory slugs probed per cycle (net-new
                                        // companies straight off their own boards — see atsDirectory)
 const DIRECTORY_CAP = 1200;            // leads from the directory pass (whole boards → many roles)
+const CURATE_BATCH = 50;               // companies whose decision-maker we research per cycle
+                                       // (~50/cycle x 24 = a daily named-prospect list that compounds)
 const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
 
 let started = false;
@@ -190,6 +192,26 @@ async function runCycleInner(): Promise<void> {
   //    posting) from the roles we now hold, so the "Hiring signals" filter spreads across real
   //    categories instead of being all "New job posting". Cheap + idempotent.
   try { await reclassifyHiringIntent(); } catch { /* best-effort */ }
+
+  // 5.7) CURATE DECISION-MAKERS — research the actual hiring manager for a rotating batch of the
+  //    highest-intent companies (free: team page / news / GitHub), build their likely email, and
+  //    upsert a tracked CuratedProspect. This is what turns the raw signal pool into the daily
+  //    list of real people we can market to. Bounded per cycle so the list compounds over the day
+  //    without hammering the free sources. Behind the review gate — nothing sends automatically.
+  try {
+    const { queryPool } = await import("./pool");
+    const { curateFromPool } = await import("./curation");
+    const top = await queryPool({ limit: CURATE_BATCH } as never, CURATE_BATCH);
+    if (top.length) {
+      await curateFromPool(
+        top.map((l) => ({
+          company: l.company, domain: l.domain, industry: l.industry, signalType: l.signalType,
+          reason: l.reason, score: l.score, employeeCount: l.employeeCount, roleDetails: l.roleDetails, roles: l.roles,
+        })),
+        { limit: CURATE_BATCH, concurrency: 4, minScore: 40, nowIso: now },
+      );
+    }
+  } catch { /* curation is best-effort; never blocks the cycle */ }
 
   // 6) RECOMPUTE METRICS — after this cycle's merges, expansions and purges, refresh the live
   //    aggregates (companies + total open positions across the 90-day pool) so the Hire Signals
