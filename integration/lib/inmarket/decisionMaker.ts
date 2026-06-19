@@ -243,23 +243,40 @@ const APPOINT_RES: RegExp[] = [
   /\b([A-Z][a-zA-Z'’-]+(?:\s+[A-Z][a-zA-Z'’.-]+){1,2})\s+(?:joins|named|appointed|promoted to|takes over as|becomes)\s+(?:[A-Z][\w&]+\s+)?(?:as\s+)?([^,.|]{3,40})/,
 ];
 
+/** The company's most distinctive name word (for whole-word headline matching). */
+function distinctiveToken(company: string): string {
+  return company.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/)
+    .filter((w) => w.length >= 4).sort((a, b) => b.length - a.length)[0] || companyAnchor(company);
+}
+
 function peopleFromNews(xml: string, company: string): PersonCandidate[] {
   const out: PersonCandidate[] = [];
   const seen = new Set<string>();
   const anchor = companyAnchor(company);
+  const token = distinctiveToken(company);
+  const tokenRe = token ? new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i") : null;
   const titles = xml.match(/<title>([\s\S]*?)<\/title>/gi) || [];
   for (const t of titles) {
     const headline = t.replace(/<\/?title>/gi, "").replace(/<!\[CDATA\[|\]\]>/g, "")
       .replace(/&amp;/g, "&").replace(/&#39;/g, "'").trim();
-    // The headline must actually be ABOUT this company — the RSS query is loose, so this guards
-    // against grabbing a same-titled person at an unrelated firm (e.g. a film exec for "Ramp").
-    if (anchor && !companyAnchor(headline).includes(anchor)) continue;
+    // The headline must be ABOUT this company. Require the company name as a WHOLE WORD — substring
+    // matching wrongly accepted "Block Island" for "Block" and "trampoline" for "Ramp".
+    if (tokenRe && !tokenRe.test(headline)) continue;
     for (const re of APPOINT_RES) {
       const m = headline.match(re);
       if (!m) continue;
-      const name = m[1]?.trim();
+      let name = m[1]?.trim();
       const title = m[2]?.trim();
-      if (!name || !looksLikeName(name) || !looksLikeTitle(title)) continue;
+      if (!name) continue;
+      // POSSESSIVE attribution ("Tesla's Jon McNeill" surfaced for a Lyft query): the person
+      // belongs to that OTHER company. Drop the candidate unless the possessive IS our target,
+      // and never let the possessive leak into the name ("Tesla's" → firstName "teslas").
+      const poss = name.match(/^(.+?)['’]s\s+(.+)$/);
+      if (poss) {
+        if (companyAnchor(poss[1]) !== anchor) continue;
+        name = poss[2].trim();
+      }
+      if (!looksLikeName(name) || !looksLikeTitle(title)) continue;
       const key = name.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -271,7 +288,20 @@ function peopleFromNews(xml: string, company: string): PersonCandidate[] {
   return out;
 }
 
+/** Single-word company names that are common English words — the loose news RSS pulls in unrelated
+ *  stories for these ("Block Island", a "ramp" up, "scale" back), so we skip news for them and lean
+ *  on the structured company-site sources instead. Multi-word/distinctive names are unaffected. */
+const NEWS_AMBIGUOUS = new Set([
+  "block", "ramp", "drive", "scale", "figure", "notion", "lever", "color", "fast", "chord",
+  "harness", "sift", "loom", "gem", "density", "persona", "lattice", "opus", "faire", "gusto",
+  "attentive", "prove", "rippling", "front", "mode", "branch", "pilot", "wing", "circle", "guru",
+]);
+
 async function newsAppointmentCandidates(company: string, candidateTitles: string[]): Promise<PersonCandidate[]> {
+  // News is the lowest-precision source. Skip it for too-short or common-word company names where a
+  // whole-word match still can't tell the company from the English word.
+  const anchor = companyAnchor(company);
+  if (anchor.length < 4 || NEWS_AMBIGUOUS.has(anchor)) return [];
   const lead = candidateTitles.slice(0, 4).map((t) => `"${t}"`).join(" OR ");
   const q = `"${company}" (${lead}) (appointed OR names OR hires OR joins OR promoted)`;
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
