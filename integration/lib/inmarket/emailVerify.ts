@@ -25,7 +25,7 @@
 
 import { promises as dns } from "dns";
 import net from "net";
-import { hasMx } from "./domain";
+import { mxStatus } from "./domain";
 
 /** Role / functional mailboxes — real addresses, but not a PERSON to run 1:1 BD against. */
 const ROLE_LOCALS = new Set([
@@ -69,15 +69,18 @@ function parts(email: string): { local: string; domain: string } | null {
  */
 export async function checkEmailFree(
   email: string,
-  opts?: { smtp?: boolean; mxKnown?: boolean },
+  opts?: { smtp?: boolean; mx?: "mx" | "none" | "error" },
 ): Promise<EmailCheck> {
   const p = parts(email);
   if (!p) return { email, verdict: "undeliverable", reason: "malformed" };
   if (ROLE_LOCALS.has(p.local)) return { email, verdict: "undeliverable", reason: "role_account" };
   if (DISPOSABLE.has(p.domain)) return { email, verdict: "undeliverable", reason: "disposable" };
 
-  const mx = opts?.mxKnown ?? (await hasMx(p.domain));
-  if (!mx) return { email, verdict: "undeliverable", reason: "no_mx" };
+  // Only a DEFINITIVELY dead domain (NXDOMAIN) is undeliverable. "no MX but the domain exists"
+  // and transient DNS failures stay "ok" (pending) — we must NEVER permanently suppress a real
+  // prospect because of one DNS hiccup or an implicit-MX mail setup.
+  const mx = opts?.mx ?? (await mxStatus(p.domain));
+  if (mx === "none") return { email, verdict: "undeliverable", reason: "domain_not_found" };
 
   // Opt-in only: an SMTP RCPT probe that POSITIVELY confirms the mailbox. Off by default
   // because it's unreliable (greylisting, catch-all, server bans). When it confirms, great;
@@ -103,15 +106,15 @@ export async function verifyEmailsFree(
   opts?: { smtp?: boolean },
 ): Promise<Array<{ email: string; valid: boolean }>> {
   const uniq = [...new Set(emails.map((e) => (e || "").trim().toLowerCase()).filter(Boolean))];
-  // Resolve MX once per domain.
+  // Resolve MX status once per domain (transient failures default to "error" → never suppressed).
   const domains = [...new Set(uniq.map((e) => e.slice(e.lastIndexOf("@") + 1)).filter(Boolean))];
-  const mxByDomain = new Map<string, boolean>();
-  await Promise.all(domains.map(async (d) => { mxByDomain.set(d, await hasMx(d).catch(() => false)); }));
+  const mxByDomain = new Map<string, "mx" | "none" | "error">();
+  await Promise.all(domains.map(async (d) => { mxByDomain.set(d, await mxStatus(d).catch(() => "error" as const)); }));
 
   const out: Array<{ email: string; valid: boolean }> = [];
   for (const email of uniq) {
     const domain = email.slice(email.lastIndexOf("@") + 1);
-    const c = await checkEmailFree(email, { smtp: opts?.smtp, mxKnown: mxByDomain.get(domain) }).catch(() => null);
+    const c = await checkEmailFree(email, { smtp: opts?.smtp, mx: mxByDomain.get(domain) }).catch(() => null);
     if (!c) continue;
     if (c.verdict === "undeliverable") out.push({ email, valid: false });
     else if (c.confirmed) out.push({ email, valid: true });
@@ -135,8 +138,13 @@ async function smtpRcptProbe(email: string, domain: string): Promise<boolean | n
   const host = mx.sort((a, b) => a.priority - b.priority)[0].exchange;
   const from = process.env.INMARKET_SMTP_FROM || "verify@recruiteros.app";
 
+  // Rotate the SMTP probe's source IP across the egress pool too (when configured), so a single
+  // host's MTA doesn't see every RCPT probe from one IP.
+  let localAddress: string | undefined;
+  try { localAddress = (await import("../net/egress")).nextSourceIp(); } catch { /* no rotation */ }
+
   return new Promise<boolean | null>((resolve) => {
-    const sock = net.createConnection(25, host);
+    const sock = net.createConnection(localAddress ? { port: 25, host, localAddress } : { port: 25, host });
     let stage = 0;
     let settled = false;
     const done = (v: boolean | null) => { if (!settled) { settled = true; try { sock.write("QUIT\r\n"); sock.end(); } catch {} resolve(v); } };

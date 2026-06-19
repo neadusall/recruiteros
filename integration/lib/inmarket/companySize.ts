@@ -93,10 +93,11 @@ export async function oversizedCompanyKeys(max = MAX_EMPLOYEES): Promise<Set<str
 const SIZE_FETCH_TIMEOUT_MS = 10_000;
 async function getJson<T>(url: string): Promise<T | null> {
   try {
-    const res = await fetch(url, {
+    const { egressInit } = await import("../net/egress");
+    const res = await fetch(url, egressInit({
       headers: { "User-Agent": UA, Accept: "application/json" },
       signal: AbortSignal.timeout(SIZE_FETCH_TIMEOUT_MS),
-    });
+    }));
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch { return null; }

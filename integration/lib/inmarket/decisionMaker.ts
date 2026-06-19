@@ -49,11 +49,12 @@ const UA = "RecruitersOS/1.0 (+https://recruiteros.app; hiring-manager research)
 
 async function fetchText(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, {
+    const { egressInit } = await import("../net/egress");
+    const res = await fetch(url, egressInit({
       redirect: "follow",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,application/json,*/*" },
-    });
+    }));
     if (!res.ok) return null;
     return await res.text();
   } catch {
@@ -232,9 +233,10 @@ async function githubEngCandidates(company: string): Promise<PersonCandidate[]> 
   const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": UA };
   if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
   try {
-    const res = await fetch(`https://api.github.com/orgs/${encodeURIComponent(org)}/members?per_page=10`, {
+    const { egressInit } = await import("../net/egress");
+    const res = await fetch(`https://api.github.com/orgs/${encodeURIComponent(org)}/members?per_page=10`, egressInit({
       headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
+    }));
     if (!res.ok) return [];
     const members = (await res.json()) as Array<{ login: string }>;
     const out: PersonCandidate[] = [];
@@ -369,9 +371,11 @@ export async function resolveDecisionMaker(
 
   const best = resolution?.best ?? null;
   const domain = resolvedDomain;
-  // MX is known for free for domains we resolved ourselves; an explicitly-passed domain is
-  // left undefined here and verified later by the email-validation tick.
-  const deliverable = domainRes ? domainRes.mx : undefined;
+  // emailDeliverable is a POSITIVE-only signal: true when the resolved domain publishes MX. A
+  // resolved domain with no MX is NOT marked false — its homepage is live (so the domain exists)
+  // and many firms still receive mail via an implicit record; suppressing it would drop real
+  // prospects. The email-validation tick makes the final call (only a dead NXDOMAIN is invalid).
+  const deliverable = domainRes?.mx ? true : undefined;
 
   if (best && best.candidate.fullName) {
     const c = best.candidate;

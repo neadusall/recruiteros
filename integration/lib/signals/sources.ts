@@ -151,11 +151,12 @@ const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
 const DEFAULT_USER_AGENT = "RecruitersOS/1.0 (+https://recruiteros.app; hiring-signals bot)";
 
 export async function getJson<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(url, {
+  const { egressInit } = await import("../net/egress");
+  const res = await fetch(url, egressInit({
     ...init,
     signal: init.signal ?? AbortSignal.timeout(DEFAULT_FETCH_TIMEOUT_MS),
     headers: { Accept: "application/json", "User-Agent": DEFAULT_USER_AGENT, ...(init.headers ?? {}) },
-  });
+  }));
   if (!res.ok) {
     throw new SourceError(`${init.method ?? "GET"} ${url} failed: ${res.status}`, res.status);
   }

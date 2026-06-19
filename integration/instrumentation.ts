@@ -58,6 +58,15 @@ export async function register(): Promise<void> {
       /* never let an instrumentation hiccup block server startup */
     }
     try {
+      // Auto-enroll autopilot: populates BD Bulk with verified prospects hands-off. A complete
+      // no-op until INMARKET_AUTOENROLL (+ workspace + campaign) is configured, so arming it here
+      // never starts populating anything you didn't point it at.
+      const { ensureAutoEnroll } = await import("./lib/inmarket/autoEnroll");
+      ensureAutoEnroll();
+    } catch {
+      /* never let an instrumentation hiccup block server startup */
+    }
+    try {
       const { ensureAtsScheduler } = await import("./lib/ats");
       ensureAtsScheduler();
     } catch {

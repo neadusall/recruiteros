@@ -114,10 +114,14 @@ export async function POST(req: Request) {
     return ok({ funnel, health });
   }
 
-  // Standalone liveness probe for the lead engine (last cycle / last curation tick + errors).
+  // Standalone liveness probe for the lead engine (last cycle / last curation tick + errors),
+  // plus egress-IP rotation status and the auto-enroll autopilot's daily progress.
   if (b?.action === "engine_health") {
     const { engineHealth } = await import("../../../lib/inmarket/accumulator");
-    return ok({ health: await engineHealth() });
+    const { egressEnabled, egressIps } = await import("../../../lib/net/egress");
+    const { autoEnrollStatus } = await import("../../../lib/inmarket/autoEnroll");
+    const [health, autoEnroll] = await Promise.all([engineHealth(), autoEnrollStatus()]);
+    return ok({ health, egress: { enabled: egressEnabled(), ips: egressIps() }, autoEnroll });
   }
 
   // The list itself, for review (filterable; contactableOnly = has a real person + email).

@@ -31,7 +31,7 @@
  * exactly the prior behaviour (title-level target, no email).
  */
 
-import { loadSnapshot, saveSnapshot } from "../db";
+import { loadSnapshot, debouncedSaver } from "../db";
 import { companyAnchor, domainRoot } from "../signals/hiring/normalize";
 import { promises as dns } from "dns";
 
@@ -41,6 +41,7 @@ const NEG_TTL_MS = 7 * 24 * 60 * 60 * 1000;  // retry a not-found company weekly
 const FETCH_TIMEOUT_MS = 6_000;
 const MAX_CANDIDATES = 6;                     // bound fetches per company
 const MAX_BODY = 60_000;                      // cap homepage bytes scanned
+const MAX_CACHE = 60_000;                     // bound the persisted cache blob
 const UA = "RecruitersOS/1.0 (+https://recruiteros.app; company-domain resolver)";
 
 /** TLDs tried for name-based guesses, by real-world prevalence for US companies. */
@@ -139,13 +140,14 @@ function domainBase(host: string): string {
 const PARKED = /(domain (is )?for sale|buy this domain|parked (free|domain)|this domain( name)? is|godaddy\.com\/domainsearch|hugedomains|sedo\.com|namecheap\.com\/market|under construction|coming soon)/i;
 
 async function homepageOnBrand(domain: string, tokens: string[]): Promise<boolean> {
+  const { egressInit } = await import("../net/egress");
   for (const scheme of ["https", "http"]) {
     try {
-      const res = await fetch(`${scheme}://${domain}`, {
+      const res = await fetch(`${scheme}://${domain}`, egressInit({
         redirect: "follow",
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,*/*" },
-      });
+      }));
       if (!res.ok) continue;
       const body = (await res.text()).slice(0, MAX_BODY).toLowerCase();
       if (!body) continue;
@@ -165,14 +167,35 @@ async function homepageOnBrand(domain: string, tokens: string[]): Promise<boolea
   return false;
 }
 
-/** True when the domain publishes MX records (so it can actually receive email). */
-export async function hasMx(domain: string): Promise<boolean> {
+/**
+ * MX status for a domain, distinguishing the three cases that MATTER for not wrongly suppressing
+ * a good address:
+ *   - "mx"    → publishes MX records (can receive mail) — a positive deliverability signal.
+ *   - "none"  → the domain itself does not resolve at all (NXDOMAIN) — definitively dead mail.
+ *   - "error" → uncertain: a transient DNS failure, OR no MX but the domain exists (many firms
+ *               receive mail via an implicit A/AAAA record). We must NOT treat this as invalid,
+ *               or one DNS hiccup permanently suppresses a real prospect.
+ */
+export async function mxStatus(domain: string): Promise<"mx" | "none" | "error"> {
   try {
     const mx = await dns.resolveMx(domain);
-    return Array.isArray(mx) && mx.length > 0;
-  } catch {
-    return false;
+    if (Array.isArray(mx) && mx.length > 0) return "mx";
+    return "error"; // empty answer without throwing — treat as uncertain, never as dead
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    // No MX records (ENOTFOUND/ENODATA on the MX query) doesn't prove the domain is dead — confirm
+    // with an A/AAAA lookup. Only a true NXDOMAIN on the host itself is definitively undeliverable.
+    if (code === "ENOTFOUND" || code === "ENODATA") {
+      try { await dns.lookup(domain); return "error"; }          // domain exists, just no MX → uncertain
+      catch (e2) { return (e2 as NodeJS.ErrnoException)?.code === "ENOTFOUND" ? "none" : "error"; }
+    }
+    return "error"; // ETIMEOUT / ESERVFAIL / etc. — transient, never suppress on these
   }
+}
+
+/** True when the domain publishes MX records (so it can actually receive email). */
+export async function hasMx(domain: string): Promise<boolean> {
+  return (await mxStatus(domain)) === "mx";
 }
 
 /** Verify ONE candidate: returns confidence>0 only if it's live + on-brand. mx checked too. */
@@ -189,9 +212,37 @@ async function verify(domain: string, tokens: string[], via: string): Promise<Do
 /* Public API                                                         */
 /* ------------------------------------------------------------------ */
 
-async function loadCache(): Promise<Record<string, CacheRow>> {
-  return (await loadSnapshot<Record<string, CacheRow>>(CACHE_KEY).catch(() => null)) || {};
+/**
+ * In-memory cache, lazily loaded once and persisted with a COALESCED debounced save. This is what
+ * keeps the resolver stable at pool scale: without it every call did a full load+save of a growing
+ * blob, and the accumulator's parallel domain workers raced and clobbered each other's writes.
+ * Now reads are in-process and writes are batched into ~one save per burst.
+ */
+let mem: Map<string, CacheRow> | null = null;
+let loading: Promise<void> | null = null;
+
+async function ensureCache(): Promise<Map<string, CacheRow>> {
+  if (mem) return mem;
+  if (!loading) {
+    loading = (async () => {
+      const raw = (await loadSnapshot<Record<string, CacheRow>>(CACHE_KEY).catch(() => null)) || {};
+      mem = new Map(Object.entries(raw));
+    })().catch(() => { mem = new Map(); });
+  }
+  await loading;
+  return mem ?? (mem = new Map());
 }
+
+const scheduleSave = debouncedSaver(CACHE_KEY, () => {
+  let m = mem;
+  if (!m) return {};
+  // Bound the blob: when it grows past the cap, keep the freshest entries by last-checked time.
+  if (m.size > MAX_CACHE) {
+    m = new Map([...m.entries()].sort((a, b) => b[1].at - a[1].at).slice(0, MAX_CACHE));
+    mem = m;
+  }
+  return Object.fromEntries(m);
+}, 1500);
 
 /**
  * Resolve a company's real, verified web domain for free — or null if none can be confirmed.
@@ -206,8 +257,8 @@ export async function resolveCompanyDomain(
   const anchor = companyAnchor(company);
   if (!anchor) return null;
 
-  const cache = await loadCache();
-  const hit = cache[anchor];
+  const cache = await ensureCache();
+  const hit = cache.get(anchor);
   if (hit) {
     const fresh = Date.now() - hit.at < (hit.ok ? POS_TTL_MS : NEG_TTL_MS);
     if (fresh) return hit.ok ? { domain: hit.domain, confidence: hit.confidence, via: hit.via, mx: hit.mx } : null;
@@ -227,12 +278,14 @@ export async function resolveCompanyDomain(
     for (const r of results) if (r && (!best || r.confidence > best.confidence)) best = r;
   }
 
-  // Write the verdict back (positive or negative) so we don't re-probe constantly.
+  // Write the verdict back (positive or negative) so we don't re-probe constantly. The save is
+  // debounced + coalesced (scheduleSave), so the accumulator's parallel domain workers don't each
+  // pay a full-blob write — and they no longer clobber each other (shared in-memory map).
   try {
-    cache[anchor] = best
+    cache.set(anchor, best
       ? { ...best, ok: true, at: Date.now() }
-      : { domain: "", confidence: 0, via: "", mx: false, ok: false, at: Date.now() };
-    await saveSnapshot(CACHE_KEY, cache);
+      : { domain: "", confidence: 0, via: "", mx: false, ok: false, at: Date.now() });
+    scheduleSave();
   } catch { /* best-effort cache */ }
 
   return best;
