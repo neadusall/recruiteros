@@ -11715,69 +11715,87 @@
      owned sending pool (lib/sending). BD motion only.
      Backend: /api/bdbulk (parse | preview | launch). Engine: lib/bd/bulkMpc. */
   function renderBdBulk(el) {
-    var state = { csv: "", name: "", info: null, sending: false };
+    var state = { csv: "", name: "", info: null, sending: false, step: 1 };
 
-    el.innerHTML = head("BD Bulk",
-      "Upload a list of hiring managers. We derive the role one rung below them, a competitor your size, and a believable relocation, then send a short MPC email through your warmed sending pool. Built for top of funnel at scale.")
-      + '<style>' + BDB_STYLE + '</style>'
-      + '<div id="bdbReady" class="bdb-ready bdb-muted">Checking sending pool…</div>'
-      + '<div id="bdbBody"></div>';
+    el.innerHTML = '<style>' + BDB_STYLE + '</style>'
+      + '<div class="bdb-wrap">'
+      + '<div class="bdb-hero"><div class="bdb-hero-row">'
+      + '<div class="bdb-hero-cap">200K<small>emails / month · top of funnel</small></div>'
+      + '<div class="bdb-hero-desc">Upload hiring managers. We derive the role one rung below them, a competitor your size, and a believable relocation, then send a short MPC email through your warmed sending pool.</div>'
+      + '<div class="bdb-gauge"><span id="bdbReady" class="bdb-ready bdb-muted">Checking pool…</span></div>'
+      + '</div></div>'
+      + '<div class="bdb-stepper" id="bdbStepper"></div>'
+      + '<div id="bdbBody"></div>'
+      + '</div>';
 
     var bodyEl = $("#bdbBody", el);
-    api("/bdbulk").then(paintReady).catch(function () { $("#bdbReady", el).style.display = "none"; });
+    renderStepper();
+    api("/bdbulk").then(paintReady).catch(function () { var r = $("#bdbReady", el); if (r) r.style.display = "none"; });
     paintUpload();
 
+    function setStep(n) { state.step = n; renderStepper(); }
+    function renderStepper() {
+      var steps = ["Upload", "Map", "Preview", "Launch"], h = "";
+      for (var i = 0; i < steps.length; i++) {
+        var n = i + 1, cls = n < state.step ? "done" : (n === state.step ? "active" : "");
+        h += '<div class="bdb-snode ' + cls + '"><div class="bdb-sdot">' + (n < state.step ? "✓" : n) + '</div><div class="bdb-slabel">' + steps[i] + '</div></div>';
+        if (i < steps.length - 1) h += '<div class="bdb-sline ' + (n < state.step ? "done" : "") + '"></div>';
+      }
+      $("#bdbStepper", el).innerHTML = h;
+    }
+
     function paintReady(d) {
-      var r = $("#bdbReady", el);
-      r.classList.remove("bdb-muted");
-      if (!d.mtaPreferred) {
-        r.className = "bdb-ready bdb-warn";
-        r.innerHTML = "⚠️ Owned sending pool is off. Preview works; launch needs SENDING_EMAIL_PROVIDER=mta and warmed mailboxes.";
-        return;
-      }
-      if (!d.ready) {
-        r.className = "bdb-ready bdb-warn";
-        r.innerHTML = "⚠️ " + esc(d.setupHint || "No warmed mailboxes yet. Provision + warm sending domains first.");
-        return;
-      }
-      r.className = "bdb-ready bdb-ok";
-      r.innerHTML = "✅ Pool live · " + d.pool.sendableMailboxes + " mailbox(es) across " + d.pool.activeDomains
-        + " domain(s) · ~" + (d.pool.remainingToday || 0).toLocaleString() + " sends available today";
+      var r = $("#bdbReady", el); if (!r) return;
+      r.className = "bdb-ready";
+      if (!d.mtaPreferred) { r.classList.add("bdb-warn"); r.innerHTML = "◌ Pool off"; r.title = "Set SENDING_EMAIL_PROVIDER=mta and warm mailboxes to enable launch. Preview still works."; return; }
+      if (!d.ready) { r.classList.add("bdb-warn"); r.innerHTML = "◌ No warm mailboxes"; r.title = d.setupHint || ""; return; }
+      r.classList.add("bdb-ok");
+      r.innerHTML = '<i class="bdb-live"></i> Pool live · ~' + (d.pool.remainingToday || 0).toLocaleString() + " today";
+      r.title = d.pool.sendableMailboxes + " mailboxes across " + d.pool.activeDomains + " domains";
     }
 
     /* ---- step 1: upload ---- */
     function paintUpload() {
+      setStep(1);
       bodyEl.innerHTML =
         '<div class="bdb-card">'
-        + '<div class="bdb-step">1 · Upload your list</div>'
-        + '<p class="bdb-sub">CSV with columns for first name, title, company, and company location (or city + state). '
-        + 'Optional: an email column to send to, and candidate columns (candidate from / role / proof point) to unlock the named-competitor hook.</p>'
-        + '<label class="bdb-file"><input type="file" id="bdbFile" accept=".csv,text/csv" hidden /><span class="btn btn-primary btn-sm">Choose CSV…</span> <span id="bdbFileName" class="bdb-muted">no file chosen</span></label>'
-        + '<div class="bdb-or">or paste</div>'
-        + '<textarea id="bdbPaste" class="bdb-ta" placeholder="First Name,Title,Company,City,State,Email&#10;Ryan,CFO,Acme,Austin,TX,ryan@acme.com"></textarea>'
-        + '<div class="bdb-actions"><button class="btn btn-primary btn-sm" id="bdbParse">Analyze list →</button></div>'
+        + '<div class="bdb-h">Upload your list</div>'
+        + '<p class="bdb-sub">CSV with first name, title, company, and location (or city + state). Optional: an email column to send to, plus candidate columns (candidate from / role / proof point) to unlock the named-competitor hook.</p>'
+        + '<div class="bdb-drop" id="bdbDrop"><div class="bdb-drop-ico">📥</div><div class="bdb-drop-t">Drop your CSV here</div><div class="bdb-drop-s">or click to browse</div><input type="file" id="bdbFile" accept=".csv,text/csv" hidden /></div>'
+        + '<div id="bdbChip"></div>'
+        + '<div class="bdb-paste-toggle" id="bdbPasteToggle">▸ or paste CSV text</div>'
+        + '<textarea id="bdbPaste" class="bdb-ta" style="display:none" placeholder="First Name,Title,Company,City,State,Email&#10;Ryan,CFO,Acme,Austin,TX,ryan@acme.com"></textarea>'
+        + '<div class="bdb-actions"><div class="bdb-spacer"></div><button class="btn btn-primary" id="bdbParse">Analyze list →</button></div>'
         + '</div>';
 
-      var file = $("#bdbFile", el);
-      file.addEventListener("change", function () {
-        var f = file.files && file.files[0];
+      var drop = $("#bdbDrop", el), file = $("#bdbFile", el);
+      function readFile(f) {
         if (!f) return;
-        $("#bdbFileName", el).textContent = f.name;
         state.name = f.name;
         var rd = new FileReader();
-        rd.onload = function () { state.csv = String(rd.result || ""); $("#bdbPaste", el).value = state.csv.slice(0, 4000); };
+        rd.onload = function () { state.csv = String(rd.result || ""); $("#bdbChip", el).innerHTML = '<span class="bdb-filechip">📄 ' + esc(f.name) + ' · ready</span>'; };
         rd.readAsText(f);
+      }
+      drop.addEventListener("click", function () { file.click(); });
+      drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("drag"); });
+      drop.addEventListener("dragleave", function () { drop.classList.remove("drag"); });
+      drop.addEventListener("drop", function (e) { e.preventDefault(); drop.classList.remove("drag"); readFile(e.dataTransfer.files && e.dataTransfer.files[0]); });
+      file.addEventListener("change", function () { readFile(file.files && file.files[0]); });
+      $("#bdbPasteToggle", el).addEventListener("click", function () {
+        var ta = $("#bdbPaste", el); var open = ta.style.display !== "none";
+        ta.style.display = open ? "none" : "block"; this.innerHTML = (open ? "▸" : "▾") + " or paste CSV text";
+        if (!open) ta.focus();
       });
       $("#bdbParse", el).addEventListener("click", function () {
         var pasted = $("#bdbPaste", el).value.trim();
-        if (pasted && (!state.csv || pasted !== state.csv.slice(0, 4000))) state.csv = pasted;
+        if (pasted) state.csv = pasted;
         if (!state.csv.trim()) { toast("Add a CSV first"); return; }
         doParse();
       });
     }
 
     function doParse() {
-      bodyEl.innerHTML = loading();
+      bodyEl.innerHTML = '<div class="bdb-card">' + loading() + '</div>';
       send("/bdbulk", "POST", { action: "parse", csv: state.csv }).then(function (r) {
         if (!r.ok) { toast((r.data && r.data.error) || "Could not parse"); paintUpload(); return; }
         state.info = r.data;
@@ -11787,37 +11805,44 @@
 
     /* ---- step 2: confirm mapping ---- */
     function paintMapping() {
+      setStep(2);
       var d = state.info, m = d.mapping || {};
-      var fields = [["firstName", "First name"], ["title", "Title"], ["company", "Company"],
-        ["companyLocation", "Location"], ["city", "City"], ["state", "State"], ["email", "Email"],
-        ["candFrom", "Candidate from"], ["candRole", "Candidate role"], ["candProof", "Proof point"]];
-      var rows = fields.filter(function (f) { return m[f[0]] || ["firstName", "title", "company", "companyLocation"].indexOf(f[0]) >= 0; })
-        .map(function (f) {
-          var src = m[f[0]];
-          return '<tr><td>' + esc(f[1]) + '</td><td>' + (src ? '<code>' + esc(src) + '</code>' : '<span class="bdb-warn-t">— not found —</span>') + '</td></tr>';
-        }).join("");
+      var locMapped = !!(m.companyLocation || m.city || m.state);
+      function field(key, label, required) {
+        var src = key === "companyLocation"
+          ? (m.companyLocation || [m.city ? "city" : "", m.state ? "state" : ""].filter(Boolean).map(function (k) { return m[k]; }).join(" + "))
+          : m[key];
+        var ok = key === "companyLocation" ? locMapped : !!src;
+        var cls = ok ? "ok" : (required ? "miss" : "opt");
+        return '<div class="bdb-field ' + cls + '"><span class="fd"></span><span class="bdb-field-l">' + esc(label) + '</span>'
+          + '<span class="bdb-field-v">' + (src ? esc(src) : (required ? "missing" : "—")) + '</span></div>';
+      }
+      var required = [["firstName", "First name"], ["title", "Title"], ["company", "Company"], ["companyLocation", "Location"]];
+      var optional = [["email", "Email"], ["candFrom", "Candidate from"], ["candRole", "Candidate role"], ["candProof", "Proof point"]];
+      var cards = required.map(function (f) { return field(f[0], f[1], true); }).join("")
+        + optional.filter(function (f) { return m[f[0]]; }).map(function (f) { return field(f[0], f[1], false); }).join("");
       var miss = (d.missingRequired || []);
       var warn = miss.length
-        ? '<div class="bdb-ready bdb-warn" style="margin:10px 0">⚠️ Missing required: <b>' + esc(miss.join(", ")) + '</b>. Rename a column or include city + state.</div>'
+        ? '<div class="bdb-banner warn" style="margin:14px 0 4px">⚠ Missing required: ' + esc(miss.join(", ")) + '. Rename a column or include city + state.</div>'
         : "";
       bodyEl.innerHTML =
         '<div class="bdb-card">'
-        + '<div class="bdb-step">2 · Confirm the columns</div>'
-        + '<div class="bdb-statgrid">'
-        + stat(d.count.toLocaleString(), "rows") + stat((d.withEmail || 0).toLocaleString(), "with email") + '</div>'
+        + '<div class="bdb-h">Confirm the columns</div>'
+        + '<p class="bdb-sub">We auto-mapped your headers. Green is matched, amber needs a fix.</p>'
+        + '<div class="bdb-tiles">' + tile(d.count.toLocaleString(), "rows", "accent") + tile((d.withEmail || 0).toLocaleString(), "with email", "") + '</div>'
+        + '<div class="bdb-fields">' + cards + '</div>'
         + warn
-        + '<table class="bdb-table"><thead><tr><th>Field</th><th>Your column</th></tr></thead><tbody>' + rows + '</tbody></table>'
-        + '<div class="bdb-actions">'
-        + '<button class="btn btn-sm" id="bdbBack">← Re-upload</button> '
-        + '<button class="btn btn-primary btn-sm" id="bdbPreview"' + (miss.length ? " disabled" : "") + '>Generate preview →</button>'
-        + '</div></div>';
+        + '<div class="bdb-actions"><button class="btn" id="bdbBack">← Re-upload</button><div class="bdb-spacer"></div>'
+        + '<button class="btn btn-primary" id="bdbPreview"' + (miss.length ? " disabled" : "") + '>Generate preview →</button></div>'
+        + '</div>';
       $("#bdbBack", el).addEventListener("click", paintUpload);
       if (!miss.length) $("#bdbPreview", el).addEventListener("click", doPreview);
     }
 
     /* ---- step 3: preview emails ---- */
     function doPreview() {
-      bodyEl.innerHTML = loading() + '<p class="bdb-muted" style="text-align:center">Enriching a sample (one cheap model call per lead)…</p>';
+      setStep(3);
+      bodyEl.innerHTML = '<div class="bdb-card">' + loading() + '<p class="bdb-sub" style="text-align:center;margin-top:10px">Enriching a sample · one cheap model call per lead…</p></div>';
       send("/bdbulk", "POST", { action: "preview", csv: state.csv, sample: 8 }).then(function (r) {
         if (!r.ok) { toast((r.data && r.data.error) || "Preview failed"); paintMapping(); return; }
         paintPreview(r.data.previews || []);
@@ -11827,66 +11852,83 @@
     function paintPreview(previews) {
       var cards = previews.map(function (p) {
         var e = p.email, en = p.enrichment || {};
-        var chips = [chip("→ " + (en.subordinateRole || "?"), "role"),
+        var to = [(p.row && p.row.firstName) || "", (p.row && p.row.title) || "", (p.row && p.row.company) || ""].filter(Boolean).join(" · ");
+        var chips = [chip("↳ " + (en.subordinateRole || "?"), "role"),
           chip(en.nameCompetitor ? en.competitor : "competitor your size", en.nameCompetitor ? "named" : "soft"),
-          en.originCity ? chip(en.originCity, "geo") : "",
-          en.proofPoint ? chip("proof", "proof") : "",
-          chip(e.wordCount + "w", "len")].join("");
+          en.originCity ? chip("📍 " + en.originCity, "geo") : "",
+          en.proofPoint ? chip("✦ proof", "named") : "",
+          chip(e.wordCount + " words", "len")].join("");
         return '<div class="bdb-mail">'
-          + '<div class="bdb-mail-to">' + esc((p.row && p.row.firstName) || "") + ' · ' + esc((p.row && p.row.title) || "") + ' @ ' + esc((p.row && p.row.company) || "") + '</div>'
-          + '<div class="bdb-chips">' + chips + '</div>'
-          + '<div class="bdb-subj">' + esc(e.subject) + '</div>'
+          + '<div class="bdb-mail-bar"><i class="bdb-dot-r"></i><i class="bdb-dot-y"></i><i class="bdb-dot-g"></i><em>' + esc(to) + '</em></div>'
+          + '<div class="bdb-mail-body"><div class="bdb-mail-meta"><b>Subject:</b> ' + esc(e.subject) + '</div>'
           + '<div class="bdb-bodytxt">' + esc(e.body) + '</div>'
-          + (en.notes && en.notes.length ? '<div class="bdb-muted bdb-notes">' + esc(en.notes.join(" · ")) + '</div>' : '')
+          + '<div class="bdb-chips">' + chips + '</div></div>'
           + '</div>';
       }).join("");
       bodyEl.innerHTML =
         '<div class="bdb-card">'
-        + '<div class="bdb-step">3 · Review the copy</div>'
-        + '<p class="bdb-sub">A sample, rendered exactly as it will send. Every row varies (no two share a skeleton). Competitors are named only where a real candidate is attached; otherwise we say “a competitor your size.”</p>'
-        + '<div class="bdb-grid2"><label>Reply-to / sender<input id="bdbSender" class="bdb-in" placeholder="you@yourdomain.com" /></label>'
+        + '<div class="bdb-h">Review the copy</div>'
+        + '<p class="bdb-sub">A live sample, rendered exactly as it will send. Every row varies, no two share a skeleton. Competitors are named only where a real candidate is attached, otherwise we say a competitor your size.</p>'
+        + '<div class="bdb-inrow"><label>Reply-to / sender<input id="bdbSender" class="bdb-in" placeholder="you@yourdomain.com" /></label>'
         + '<label>From name<input id="bdbFromName" class="bdb-in" placeholder="Ryan" /></label></div>'
         + cards
-        + '<div class="bdb-actions">'
-        + '<button class="btn btn-sm" id="bdbBack2">← Columns</button> '
-        + '<button class="btn btn-primary btn-sm" id="bdbLaunch">🚀 Launch to ' + state.info.count.toLocaleString() + ' prospects</button>'
-        + '</div>'
-        + '<div id="bdbProg" class="bdb-prog"></div>'
+        + '<div class="bdb-actions"><button class="btn" id="bdbBack2">← Columns</button><div class="bdb-spacer"></div>'
+        + '<button class="btn btn-primary bdb-cta" id="bdbLaunch">🚀 Launch to ' + state.info.count.toLocaleString() + ' prospects</button></div>'
         + '</div>';
       $("#bdbBack2", el).addEventListener("click", paintMapping);
       $("#bdbLaunch", el).addEventListener("click", doLaunch);
     }
 
-    /* ---- launch: drain the list in batches through the pool ---- */
+    /* ---- step 4: launch — drain the list in batches through the pool ---- */
     function doLaunch() {
       if (state.sending) return;
-      state.sending = true;
+      var sender = ($("#bdbSender", el) || {}).value, fromName = ($("#bdbFromName", el) || {}).value;
+      state.sending = true; setStep(4);
       var total = state.info.count, offset = 0;
       var totals = { sent: 0, suppressed: 0, noCapacity: 0, errors: 0 };
-      var sender = ($("#bdbSender", el) || {}).value, fromName = ($("#bdbFromName", el) || {}).value;
-      var prog = $("#bdbProg", el);
-      var btn = $("#bdbLaunch", el); if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+      bodyEl.innerHTML =
+        '<div class="bdb-card">'
+        + '<div class="bdb-h">🚀 Launching to ' + total.toLocaleString() + ' prospects</div>'
+        + '<p class="bdb-sub">Sending through your warmed pool. It self-throttles to protect deliverability and pauses when today’s ceiling is hit.</p>'
+        + '<div class="bdb-bigbar"><span id="bdbBar" style="width:0%"></span></div>'
+        + '<div class="bdb-progline"><span id="bdbCount">0</span> / ' + total.toLocaleString() + '</div>'
+        + '<div class="bdb-ltiles">' + ltile("bdbSent", "Sent", "sent") + ltile("bdbSupp", "Suppressed", "") + ltile("bdbCap", "No capacity", "") + ltile("bdbErr", "Errors", "err") + '</div>'
+        + '<div id="bdbBanner"></div>'
+        + '</div>';
 
+      function upd() {
+        var ids = { bdbSent: totals.sent, bdbSupp: totals.suppressed, bdbCap: totals.noCapacity, bdbErr: totals.errors };
+        for (var k in ids) { var n = $("#" + k, el); if (n) n.textContent = ids[k].toLocaleString(); }
+        var pct = total ? Math.min(100, Math.round(offset / total * 100)) : 100;
+        var bar = $("#bdbBar", el); if (bar) bar.style.width = pct + "%";
+        var c = $("#bdbCount", el); if (c) c.textContent = offset.toLocaleString();
+      }
       function step() {
         send("/bdbulk", "POST", {
           action: "launch", csv: state.csv, offset: offset, limit: 200,
           sender: (sender || "").trim() || undefined, fromName: (fromName || "").trim() || undefined
         }).then(function (r) {
-          if (!r.ok) { toast((r.data && r.data.error) || "Launch failed"); state.sending = false; if (btn) { btn.disabled = false; btn.textContent = "Retry launch"; } return; }
+          if (!r.ok) {
+            state.sending = false;
+            $("#bdbBanner", el).innerHTML = '<div class="bdb-banner warn">⚠ ' + esc((r.data && r.data.error) || "Launch failed") + ' <button class="btn btn-sm" id="bdbRetry">Retry</button></div>';
+            $("#bdbRetry", el).addEventListener("click", function () { if (state.sending) return; state.sending = true; $("#bdbBanner", el).innerHTML = ""; step(); });
+            return;
+          }
           var d = r.data;
           totals.sent += d.sent; totals.suppressed += d.suppressed; totals.noCapacity += d.noCapacity; totals.errors += d.errors;
-          offset = d.processed;
-          var pct = total ? Math.min(100, Math.round(offset / total * 100)) : 100;
-          prog.innerHTML = '<div class="bdb-bar"><span style="width:' + pct + '%"></span></div>'
-            + '<div class="bdb-prog-line">Sent <b>' + totals.sent + '</b> · suppressed ' + totals.suppressed
-            + ' · no capacity ' + totals.noCapacity + ' · errors ' + totals.errors + ' &nbsp;—&nbsp; ' + offset + '/' + total + '</div>';
+          offset = d.processed; upd();
           if (d.capacityHit) {
-            prog.innerHTML += '<div class="bdb-ready bdb-warn" style="margin-top:8px">Pool hit today\'s ceiling — it ramps as your IPs and mailboxes warm. Resume tomorrow to keep draining.</div>';
-            state.sending = false; if (btn) { btn.disabled = false; btn.textContent = "Resume launch"; } return;
+            state.sending = false;
+            $("#bdbBanner", el).innerHTML = '<div class="bdb-banner warn">⏸ Pool hit today’s ceiling. It ramps as your IPs and mailboxes warm. <button class="btn btn-sm" id="bdbResume">Resume</button></div>';
+            $("#bdbResume", el).addEventListener("click", function () { if (state.sending) return; state.sending = true; $("#bdbBanner", el).innerHTML = ""; step(); });
+            return;
           }
           if (offset >= total) {
-            prog.innerHTML += '<div class="bdb-ready bdb-ok" style="margin-top:8px">✅ Complete · ' + totals.sent + ' sent</div>';
-            state.sending = false; if (btn) { btn.textContent = "Done"; } toast("Done. Sent " + totals.sent); return;
+            state.sending = false;
+            $("#bdbBanner", el).innerHTML = '<div class="bdb-banner ok">✅ Complete · ' + totals.sent.toLocaleString() + ' sent <button class="btn btn-sm" id="bdbNew">New upload</button></div>';
+            $("#bdbNew", el).addEventListener("click", function () { state.csv = ""; state.info = null; state.name = ""; paintUpload(); });
+            toast("Done. Sent " + totals.sent);
+            return;
           }
           step();
         });
@@ -11894,29 +11936,83 @@
       step();
     }
 
-    function stat(n, l) { return '<div class="bdb-stat"><b>' + n + '</b><span>' + esc(l) + '</span></div>'; }
+    function tile(n, l, k) { return '<div class="bdb-tile ' + (k || "") + '"><b>' + n + '</b><span>' + esc(l) + '</span></div>'; }
+    function ltile(id, l, k) { return '<div class="bdb-ltile ' + (k || "") + '"><b id="' + id + '">0</b><span>' + esc(l) + '</span></div>'; }
     function chip(t, k) { return '<span class="bdb-chip bdb-chip-' + k + '">' + esc(t) + '</span>'; }
   }
 
   var BDB_STYLE =
-    '.bdb-ready{padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:14px}'
-    + '.bdb-muted{color:var(--muted,#8a93a6)}.bdb-warn-t{color:#c9803a}'
-    + '.bdb-ok{background:rgba(46,160,89,.12);color:#3fae6b}.bdb-warn{background:rgba(201,128,58,.12);color:#c9803a}'
-    + '.bdb-card{background:var(--card,#161a23);border:1px solid var(--line,#252b38);border-radius:12px;padding:18px;max-width:760px}'
-    + '.bdb-step{font-weight:600;font-size:14px;margin-bottom:6px}.bdb-sub{font-size:13px;color:var(--muted,#8a93a6);margin:0 0 14px}'
-    + '.bdb-file{display:flex;align-items:center;gap:10px;margin-bottom:10px}.bdb-or{font-size:12px;color:var(--muted,#8a93a6);margin:8px 0}'
-    + '.bdb-ta{width:100%;min-height:90px;background:var(--bg,#0e1116);border:1px solid var(--line,#252b38);border-radius:8px;color:inherit;padding:10px;font-family:monospace;font-size:12px;resize:vertical}'
-    + '.bdb-in{width:100%;background:var(--bg,#0e1116);border:1px solid var(--line,#252b38);border-radius:8px;color:inherit;padding:8px 10px;font-size:13px;margin-top:4px}'
-    + '.bdb-actions{margin-top:16px;display:flex;gap:8px}.bdb-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;font-size:12px;color:var(--muted,#8a93a6)}'
-    + '.bdb-statgrid{display:flex;gap:24px;margin:6px 0 14px}.bdb-stat b{display:block;font-size:22px}.bdb-stat span{font-size:12px;color:var(--muted,#8a93a6)}'
-    + '.bdb-table{width:100%;border-collapse:collapse;font-size:13px}.bdb-table th,.bdb-table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line,#252b38)}.bdb-table code{font-size:12px}'
-    + '.bdb-mail{border:1px solid var(--line,#252b38);border-radius:10px;padding:12px;margin:10px 0;background:var(--bg,#0e1116)}'
-    + '.bdb-mail-to{font-size:12px;color:var(--muted,#8a93a6);margin-bottom:6px}.bdb-subj{font-weight:600;font-size:13px;margin:6px 0}'
-    + '.bdb-bodytxt{font-size:13px;line-height:1.5;white-space:pre-wrap}'
-    + '.bdb-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}.bdb-chip{font-size:11px;padding:2px 7px;border-radius:20px;background:#222836}'
-    + '.bdb-chip-named{background:rgba(46,160,89,.16);color:#3fae6b}.bdb-chip-soft{background:rgba(201,128,58,.14);color:#c9803a}.bdb-chip-role{background:rgba(90,130,255,.16);color:#7d9bff}'
-    + '.bdb-notes{font-size:11px;margin-top:6px}.bdb-prog{margin-top:14px}.bdb-prog-line{font-size:12px;color:var(--muted,#8a93a6);margin-top:6px}'
-    + '.bdb-bar{height:8px;background:#222836;border-radius:6px;overflow:hidden}.bdb-bar span{display:block;height:100%;background:#3fae6b;transition:width .3s}';
+    '.bdb-wrap{max-width:920px}'
+    + '.bdb-hero{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:16px;padding:22px 24px;margin-bottom:18px;background:linear-gradient(135deg,rgba(124,92,255,.16),rgba(77,208,255,.05));box-shadow:var(--shadow)}'
+    + '.bdb-hero::after{content:"";position:absolute;right:-70px;top:-70px;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle,rgba(124,92,255,.30),transparent 70%);pointer-events:none}'
+    + '.bdb-hero-row{display:flex;align-items:center;gap:24px;flex-wrap:wrap;position:relative;z-index:1}'
+    + '.bdb-hero-cap{font-size:42px;font-weight:800;line-height:.9;letter-spacing:-1.5px;background:linear-gradient(135deg,#7c5cff,#4dd0ff);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;flex:none}'
+    + '.bdb-hero-cap small{display:block;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text-dim);-webkit-text-fill-color:var(--text-dim);margin-top:7px}'
+    + '.bdb-hero-desc{flex:1;min-width:240px;font-size:13.5px;color:var(--text-muted);line-height:1.55}'
+    + '.bdb-gauge{margin-left:auto}'
+    + '.bdb-ready{display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid var(--border);white-space:nowrap}'
+    + '.bdb-muted{color:var(--text-dim)}'
+    + '.bdb-ok{color:var(--accent-green,#38e0a6);background:rgba(56,224,166,.12);border-color:rgba(56,224,166,.4)}'
+    + '.bdb-warn{color:var(--accent-amber,#ffc24d);background:rgba(255,194,77,.12);border-color:rgba(255,194,77,.4)}'
+    + '.bdb-live{width:8px;height:8px;border-radius:50%;background:var(--accent-green,#38e0a6);box-shadow:0 0 0 0 rgba(56,224,166,.6);animation:bdbPulse 1.8s infinite}'
+    + '@keyframes bdbPulse{0%{box-shadow:0 0 0 0 rgba(56,224,166,.5)}70%{box-shadow:0 0 0 7px rgba(56,224,166,0)}100%{box-shadow:0 0 0 0 rgba(56,224,166,0)}}'
+    + '.bdb-stepper{display:flex;align-items:center;margin:0 0 20px}'
+    + '.bdb-snode{display:flex;align-items:center;gap:10px;flex:0 0 auto}'
+    + '.bdb-sdot{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:700;border:2px solid var(--border);color:var(--text-dim);background:var(--surface);transition:all .25s}'
+    + '.bdb-slabel{font-size:12.5px;font-weight:600;color:var(--text-dim)}'
+    + '.bdb-sline{flex:1;height:2px;background:var(--border);margin:0 12px;border-radius:2px;transition:background .35s}'
+    + '.bdb-snode.active .bdb-sdot{border-color:var(--brand,#7c5cff);color:#fff;background:var(--brand,#7c5cff);box-shadow:0 0 0 4px rgba(124,92,255,.18)}'
+    + '.bdb-snode.active .bdb-slabel{color:var(--text)}'
+    + '.bdb-snode.done .bdb-sdot{border-color:var(--accent-green,#38e0a6);background:var(--accent-green,#38e0a6);color:#04150f}'
+    + '.bdb-snode.done .bdb-slabel{color:var(--text-muted)}'
+    + '.bdb-sline.done{background:linear-gradient(90deg,var(--accent-green,#38e0a6),var(--brand,#7c5cff))}'
+    + '.bdb-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px;box-shadow:var(--shadow)}'
+    + '.bdb-h{font-size:17px;font-weight:700;margin:0 0 4px}.bdb-sub{font-size:13px;color:var(--text-muted);margin:0 0 18px;line-height:1.55}'
+    + '.bdb-drop{border:2px dashed var(--border-strong);border-radius:14px;padding:40px 20px;text-align:center;cursor:pointer;transition:all .18s;background:var(--bg-soft)}'
+    + '.bdb-drop:hover{border-color:var(--brand,#7c5cff);background:rgba(124,92,255,.05)}'
+    + '.bdb-drop.drag{border-color:var(--brand,#7c5cff);background:rgba(124,92,255,.1);transform:scale(1.01)}'
+    + '.bdb-drop-ico{font-size:40px;line-height:1}.bdb-drop-t{font-weight:700;font-size:15px;margin-top:8px}.bdb-drop-s{font-size:12.5px;color:var(--text-dim);margin-top:3px}'
+    + '.bdb-filechip{display:inline-flex;align-items:center;gap:8px;margin-top:14px;padding:8px 14px;border-radius:10px;background:rgba(56,224,166,.12);color:var(--accent-green,#38e0a6);font-size:13px;font-weight:600;border:1px solid rgba(56,224,166,.35)}'
+    + '.bdb-paste-toggle{display:inline-block;margin-top:14px;font-size:12.5px;color:var(--text-muted);cursor:pointer;user-select:none}'
+    + '.bdb-ta{width:100%;min-height:96px;margin-top:10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:11px;font-family:var(--mono);font-size:12px;resize:vertical}'
+    + '.bdb-actions{margin-top:20px;display:flex;gap:10px;align-items:center}.bdb-spacer{flex:1}'
+    + '.bdb-cta{font-size:14px;padding:10px 18px}'
+    + '.bdb-tiles{display:flex;gap:14px;margin:2px 0 18px;flex-wrap:wrap}'
+    + '.bdb-tile{flex:1;min-width:130px;background:var(--bg-soft);border:1px solid var(--border);border-radius:12px;padding:14px 16px}'
+    + '.bdb-tile b{display:block;font-size:26px;font-weight:800;line-height:1}.bdb-tile span{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em}'
+    + '.bdb-tile.accent b{color:var(--brand,#7c5cff)}'
+    + '.bdb-fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}'
+    + '.bdb-field{display:flex;align-items:center;gap:10px;padding:11px 13px;border:1px solid var(--border);border-radius:11px;background:var(--bg-soft)}'
+    + '.bdb-field .fd{width:9px;height:9px;border-radius:50%;flex:none}'
+    + '.bdb-field.ok .fd{background:var(--accent-green,#38e0a6);box-shadow:0 0 8px var(--accent-green,#38e0a6)}'
+    + '.bdb-field.miss .fd{background:var(--accent-amber,#ffc24d);box-shadow:0 0 8px var(--accent-amber,#ffc24d)}'
+    + '.bdb-field.opt .fd{background:var(--text-dim)}'
+    + '.bdb-field-l{font-size:13px;font-weight:600}.bdb-field-v{font-size:11.5px;color:var(--text-dim);font-family:var(--mono);margin-left:auto;max-width:48%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.bdb-mail{border:1px solid var(--border);border-radius:13px;margin:12px 0;background:var(--surface);overflow:hidden;box-shadow:0 8px 24px -18px rgba(0,0,0,.5)}'
+    + '.bdb-mail-bar{display:flex;align-items:center;gap:6px;padding:9px 13px;background:var(--bg-soft);border-bottom:1px solid var(--border)}'
+    + '.bdb-mail-bar i{width:10px;height:10px;border-radius:50%;display:inline-block}.bdb-dot-r{background:#ff5f57}.bdb-dot-y{background:#febc2e}.bdb-dot-g{background:#28c840}'
+    + '.bdb-mail-bar em{margin-left:8px;font-style:normal;font-size:11.5px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.bdb-mail-body{padding:14px 16px}.bdb-mail-meta{font-size:12.5px;color:var(--text-muted);margin-bottom:10px}.bdb-mail-meta b{color:var(--text)}'
+    + '.bdb-bodytxt{font-size:13.5px;line-height:1.6;white-space:pre-wrap;color:var(--text)}'
+    + '.bdb-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}'
+    + '.bdb-chip{font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--surface-2);color:var(--text-muted);border:1px solid var(--border)}'
+    + '.bdb-chip-named{background:rgba(56,224,166,.14);color:var(--accent-green,#38e0a6);border-color:rgba(56,224,166,.3)}'
+    + '.bdb-chip-soft{background:rgba(255,194,77,.14);color:var(--accent-amber,#ffc24d);border-color:rgba(255,194,77,.3)}'
+    + '.bdb-chip-role{background:rgba(124,92,255,.14);color:var(--brand,#7c5cff);border-color:rgba(124,92,255,.3)}'
+    + '.bdb-chip-geo{background:rgba(77,208,255,.14);color:var(--brand-2,#4dd0ff);border-color:rgba(77,208,255,.3)}'
+    + '.bdb-inrow{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:4px}.bdb-inrow label{font-size:12px;color:var(--text-muted);font-weight:600;display:block}'
+    + '.bdb-in{width:100%;background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:10px 12px;font-size:13px;margin-top:5px}.bdb-in:focus{outline:none;border-color:var(--brand,#7c5cff)}'
+    + '.bdb-bigbar{height:14px;background:var(--bg-soft);border:1px solid var(--border);border-radius:999px;overflow:hidden;margin:16px 0 8px}'
+    + '.bdb-bigbar span{display:block;height:100%;width:0;background:linear-gradient(90deg,#7c5cff,#4dd0ff);background-size:200% 100%;animation:bdbShimmer 1.4s linear infinite;transition:width .4s ease;border-radius:999px}'
+    + '@keyframes bdbShimmer{0%{background-position:0 0}100%{background-position:200% 0}}'
+    + '.bdb-progline{text-align:center;font-size:12.5px;color:var(--text-muted);margin-bottom:14px}.bdb-progline span{font-weight:800;color:var(--text)}'
+    + '.bdb-ltiles{display:flex;gap:12px}.bdb-ltile{flex:1;background:var(--bg-soft);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center}'
+    + '.bdb-ltile b{display:block;font-size:24px;font-weight:800;line-height:1}.bdb-ltile span{font-size:10.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em}'
+    + '.bdb-ltile.sent b{color:var(--accent-green,#38e0a6)}.bdb-ltile.err b{color:var(--accent-red,#ff6b6b)}'
+    + '.bdb-banner{margin-top:16px;padding:11px 14px;border-radius:11px;font-size:13px;font-weight:600;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}'
+    + '.bdb-banner.ok{background:rgba(56,224,166,.12);color:var(--accent-green,#38e0a6);border:1px solid rgba(56,224,166,.35)}'
+    + '.bdb-banner.warn{background:rgba(255,194,77,.12);color:var(--accent-amber,#ffc24d);border:1px solid rgba(255,194,77,.35)}'
+    + '@media(max-width:640px){.bdb-inrow{grid-template-columns:1fr}.bdb-ltiles{flex-wrap:wrap}.bdb-slabel{display:none}}';
 
   function loading() { return '<div class="empty">Loading…</div>'; }
   function emptyCard(msg) { return '<div class="empty">' + esc(msg) + "</div>"; }
