@@ -362,6 +362,55 @@ export async function updateExpandedRolesBatch(
   if (touched) await saveSnapshot(KEY, pool);
 }
 
+/** A rotating slice of pool companies that DON'T yet have a resolved domain, highest-scored
+ *  first — the background domain-backfill works through these. A domain is the unlock for both
+ *  decision-maker research and the email guess, so backfilling it across the pool is what lets
+ *  the Hire Signals tab show real people + emails (and feeds the curation contactable rate).
+ *  Excludes unmasked-agency clients (their domain was deliberately cleared). */
+export async function poolCompaniesMissingDomain(
+  offset: number,
+  limit: number,
+): Promise<{ targets: Array<{ company: string; sourceUrl?: string }>; total: number }> {
+  const pool = (await load()).sort((a, b) => (b.lead.score ?? 0) - (a.lead.score ?? 0));
+  const targets: Array<{ company: string; sourceUrl?: string }> = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < pool.length; i++) {
+    const idx = (offset + i) % pool.length;
+    const l = pool[idx].lead;
+    if (l.domain || l.employerUnmasked) continue;        // already has one / domain cleared on purpose
+    const k = keyOf(l);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    targets.push({ company: l.company, sourceUrl: l.sourceUrl });
+    if (targets.length >= limit) break;
+  }
+  return { targets, total: pool.length };
+}
+
+/** Batched domain writer: stamp resolved domains onto MANY pool leads in ONE load + ONE save
+ *  (same single-blob discipline as updateExpandedRolesBatch). Only sets a domain where one is
+ *  missing, so it never clobbers a domain a source already provided. */
+export async function updateDomainsBatch(
+  updates: Array<{ company: string; domain: string }>,
+): Promise<number> {
+  if (!updates.length) return 0;
+  const pool = await load();
+  const byKey = new Map<string, PoolEntry>();
+  for (const e of pool) { const k = keyOf(e.lead); if (k) byKey.set(k, e); }
+  let touched = 0;
+  for (const u of updates) {
+    const key = (u.company || "").toLowerCase().trim();
+    const domain = (u.domain || "").trim().toLowerCase();
+    if (!key || !domain) continue;
+    const e = byKey.get(key);
+    if (!e || e.lead.domain) continue;                    // gone, or already has a domain
+    e.lead.domain = domain;
+    touched++;
+  }
+  if (touched) await saveSnapshot(KEY, pool);
+  return touched;
+}
+
 /** A rotating slice of company slugs from the pool, to seed the watchlist-driven sources
  *  (ATS boards, GitHub orgs) so they deepen role coverage for known companies. Highest-
  *  scored first; `offset` rotates through the whole pool over successive cycles. */

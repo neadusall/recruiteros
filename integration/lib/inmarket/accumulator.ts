@@ -13,9 +13,10 @@
  */
 
 import { collectLeads } from "./index";
-import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, poolCompaniesToExpand, updateExpandedRolesBatch, purgeOversizedFromPool, purgeStaffingFromPool, reclassifyHiringIntent, recomputePoolMetrics } from "./pool";
+import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, poolCompaniesToExpand, updateExpandedRolesBatch, purgeOversizedFromPool, purgeStaffingFromPool, reclassifyHiringIntent, recomputePoolMetrics, poolCompaniesMissingDomain, updateDomainsBatch } from "./pool";
 import { enrichSizesBatch, oversizedCompanyKeys } from "./companySize";
 import { resolveCompanyRoles } from "./companyRoles";
+import { resolveCompanyDomain } from "./domain";
 import { directoryBatch } from "./atsDirectory";
 import { loadSnapshot, saveSnapshot } from "../db";
 
@@ -46,13 +47,22 @@ const EXPAND_STALE_MS = 3 * 24 * 60 * 60 * 1000; // re-pull a company's board af
 const DIRECTORY_BATCH = 80;            // curated ATS-directory slugs probed per cycle (net-new
                                        // companies straight off their own boards — see atsDirectory)
 const DIRECTORY_CAP = 1200;            // leads from the directory pass (whole boards → many roles)
+// DOMAIN BACKFILL — the unlock for contactable volume. Free job-board signals arrive with a
+// company NAME but no domain, which starves BOTH decision-maker research and the email guess.
+// Each cycle resolves+verifies a rotating batch's real domains and writes them back onto the
+// pool, so the Hire Signals tab shows real people + emails and the curation contactable rate
+// climbs (target: ~10% → ~50%). Free, verified, cached per company (so it compounds over days).
+const DOMAIN_BATCH = 80;               // pool companies (missing a domain) resolved per cycle
+const DOMAIN_CONCURRENCY = 6;          // parallel resolves (each = a few bounded HTTP/DNS probes)
+let domainCursor = 0;
 // Decision-maker curation runs on its OWN fast tick (not the heavy hourly cycle) so the prospect
 // database stays living — refreshing every few minutes, walking the whole pool by score.
-const CURATE_CYCLE_MS = 8 * 60 * 1000; // research a fresh batch every 8 minutes
-const CURATE_BATCH = 45;               // companies researched per tick (~45 x 7.5/hr x 24 ≈ 8K/day)
-const CURATE_CANDIDATES = 2000;        // pool slice we choose the not-yet-done batch from
-const CURATE_CONCURRENCY = 5;          // parallel researches (polite to the free sources)
+const CURATE_CYCLE_MS = 5 * 60 * 1000; // research a fresh batch every 5 minutes
+const CURATE_BATCH = 80;               // companies researched per tick (~80 x 12/hr x 24 ≈ 23K/day)
+const CURATE_CANDIDATES = 2500;        // pool slice we choose the not-yet-done batch from
+const CURATE_CONCURRENCY = 6;          // parallel researches (polite to the free sources)
 const CURATE_MIN_SCORE = 35;           // don't spend research on weak signals
+const VERIFY_BATCH = 400;              // curated emails free-verified (MX/role/disposable) per tick
 const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
 const CURATE_FIRST_DELAY_MS = 25_000;   // let the pool fill a little before the first curation tick
 // WATCHDOGS — a hard ceiling on how long a single run may take. Even with per-fetch timeouts,
@@ -247,6 +257,32 @@ async function runCycleInner(): Promise<void> {
     if (updates.length) await updateExpandedRolesBatch(updates);
   } catch { /* best-effort */ }
 
+  // 4.5) DOMAIN BACKFILL — resolve+verify a real web domain for a rotating batch of pool
+  //    companies that don't have one yet, and stamp it back onto the lead. THIS is the gate that
+  //    was starving the funnel: no domain → no team-page research → no email → nothing
+  //    contactable. With a domain in place, decision-maker research and the email guess both
+  //    light up, and the read path (withLikelyEmails) shows real emails on the Hire Signals tab.
+  //    Free, verified (anti-squatter homepage check + MX), cached — so coverage compounds daily.
+  try {
+    const { targets, total } = await poolCompaniesMissingDomain(domainCursor, DOMAIN_BATCH);
+    if (targets.length) {
+      domainCursor = total ? (domainCursor + targets.length) % total : 0;
+      const found: Array<{ company: string; domain: string }> = [];
+      let i = 0;
+      const worker = async () => {
+        while (i < targets.length) {
+          const t = targets[i++];
+          try {
+            const r = await resolveCompanyDomain(t.company, { sourceUrl: t.sourceUrl });
+            if (r?.domain) found.push({ company: t.company, domain: r.domain });
+          } catch { /* skip this company this cycle */ }
+        }
+      };
+      await Promise.all(Array.from({ length: DOMAIN_CONCURRENCY }, worker));
+      if (found.length) await updateDomainsBatch(found);
+    }
+  } catch { /* best-effort */ }
+
   // 5) RESOLVE COMPANY SIZE — look up real headcounts for a rotating batch of pool companies
   //    from Wikidata (free, keyless), cached so the size filter carries authoritative sizes
   //    over time. Companies Wikidata doesn't cover fall back to a marked estimate at search.
@@ -289,16 +325,33 @@ async function runCycleInner(): Promise<void> {
 async function runCurationTickInner(): Promise<void> {
   const now = new Date().toISOString();
   const { queryPool } = await import("./pool");
-  const { curateFromPool } = await import("./curation");
+  const { curateFromPool, pendingValidationEmails, applyEmailValidation } = await import("./curation");
   const candidates = await queryPool({ limit: CURATE_CANDIDATES } as never, CURATE_CANDIDATES);
-  if (!candidates.length) return;
-  await curateFromPool(
-    candidates.map((l) => ({
-      company: l.company, domain: l.domain, industry: l.industry, signalType: l.signalType,
-      reason: l.reason, score: l.score, employeeCount: l.employeeCount, roleDetails: l.roleDetails, roles: l.roles,
-    })),
-    { limit: CURATE_BATCH, concurrency: CURATE_CONCURRENCY, minScore: CURATE_MIN_SCORE, nowIso: now },
-  );
+  if (candidates.length) {
+    await curateFromPool(
+      candidates.map((l) => ({
+        company: l.company, domain: l.domain, industry: l.industry, signalType: l.signalType,
+        reason: l.reason, score: l.score, employeeCount: l.employeeCount, roleDetails: l.roleDetails, roles: l.roles,
+        sourceUrl: l.sourceUrl,
+      })),
+      { limit: CURATE_BATCH, concurrency: CURATE_CONCURRENCY, minScore: CURATE_MIN_SCORE, nowIso: now },
+    );
+  }
+
+  // FREE EMAIL VERIFICATION — same continuous-validation seam the external paid validator uses,
+  // but run in-process at $0: pull a batch of still-unverified curated emails and apply free
+  // MX / role-account / disposable verdicts. Undeliverable ones are marked invalid (dropped from
+  // the send queue); deliverable-but-unconfirmed ones are LEFT pending (we never assert a "valid"
+  // we can't prove). This makes the funnel's invalid count real and keeps dead emails out of BD
+  // Bulk — turning "guessed" into "deliverable-likely" for free and safely.
+  try {
+    const pending = await pendingValidationEmails(VERIFY_BATCH);
+    if (pending.length) {
+      const { verifyEmailsFree } = await import("./emailVerify");
+      const results = await verifyEmailsFree(pending);
+      if (results.length) await applyEmailValidation(results, new Date().toISOString());
+    }
+  } catch { /* best-effort; the next tick retries */ }
 }
 
 async function runCurationTick(): Promise<void> {
