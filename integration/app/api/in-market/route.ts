@@ -105,10 +105,19 @@ export async function POST(req: Request) {
 
   // ---- Curation: the daily decision-maker list (the database of prospects to market to) ----
 
-  // The real numbers: funnel counts by stage, sliced by hiring signal + function.
+  // The real numbers: funnel counts by stage, sliced by hiring signal + function. Bundles the
+  // engine heartbeat so the UI can show "pool fed / curated N ago" and flag a stalled engine.
   if (b?.action === "curation_funnel") {
     const { curationFunnel } = await import("../../../lib/inmarket/curation");
-    return ok({ funnel: await curationFunnel() });
+    const { engineHealth } = await import("../../../lib/inmarket/accumulator");
+    const [funnel, health] = await Promise.all([curationFunnel(), engineHealth()]);
+    return ok({ funnel, health });
+  }
+
+  // Standalone liveness probe for the lead engine (last cycle / last curation tick + errors).
+  if (b?.action === "engine_health") {
+    const { engineHealth } = await import("../../../lib/inmarket/accumulator");
+    return ok({ health: await engineHealth() });
   }
 
   // The list itself, for review (filterable; contactableOnly = has a real person + email).

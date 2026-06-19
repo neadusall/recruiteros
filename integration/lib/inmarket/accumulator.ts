@@ -17,6 +17,7 @@ import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, 
 import { enrichSizesBatch, oversizedCompanyKeys } from "./companySize";
 import { resolveCompanyRoles } from "./companyRoles";
 import { directoryBatch } from "./atsDirectory";
+import { loadSnapshot, saveSnapshot } from "../db";
 
 // Sectors to keep warm — mirrors the UI's industry chips (non-tech first, since those
 // are the sectors free remote boards miss and Adzuna fills).
@@ -54,6 +55,13 @@ const CURATE_CONCURRENCY = 5;          // parallel researches (polite to the fre
 const CURATE_MIN_SCORE = 35;           // don't spend research on weak signals
 const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
 const CURATE_FIRST_DELAY_MS = 25_000;   // let the pool fill a little before the first curation tick
+// WATCHDOGS — a hard ceiling on how long a single run may take. Even with per-fetch timeouts,
+// an unforeseen hang (a future un-timeouted source, a stuck await) must NEVER pin the overlap
+// guard forever and silently stop the engine. If a run exceeds its watchdog we abandon it,
+// release the guard, and let the next tick retry. Each ceiling sits comfortably below its
+// interval so an abandoned run is cleared before the next one fires.
+const CYCLE_WATCHDOG_MS = 30 * 60 * 1000;   // hourly cycle: abandon after 30 min
+const CURATE_WATCHDOG_MS = 7 * 60 * 1000;   // 8-min curation tick: abandon after 7 min
 
 let started = false;
 let running = false;                    // overlap guard: never let two cycles run at once
@@ -63,15 +71,79 @@ let seedCursor = 0;
 let sizeCursor = 0;
 let directoryCursor = 0;
 
+/* ------------------------------------------------------------------ */
+/* Liveness heartbeat — so a silent death is detectable                */
+/* ------------------------------------------------------------------ */
+const HEALTH_KEY = "inmarket_engine_health_v1";
+
+export interface EngineHealth {
+  bootAt: string;
+  cycles: number;
+  curationTicks: number;
+  lastCycleAt?: string;
+  lastCycleMs?: number;
+  lastCycleOk?: boolean;
+  lastCycleError?: string;
+  lastCurationAt?: string;
+  lastCurationMs?: number;
+  lastCurationOk?: boolean;
+  lastCurationError?: string;
+}
+
+const health: EngineHealth = { bootAt: new Date().toISOString(), cycles: 0, curationTicks: 0 };
+
+/** Persist the heartbeat so the UI can show "last fed N ago" even right after a restart. */
+async function persistHealth(): Promise<void> {
+  try { await saveSnapshot(HEALTH_KEY, health); } catch { /* best-effort */ }
+}
+
+/** Current engine liveness — prefers the in-memory heartbeat, falls back to the persisted one. */
+export async function engineHealth(): Promise<EngineHealth> {
+  if (health.lastCycleAt || health.lastCurationAt) return health;
+  const saved = await loadSnapshot<EngineHealth>(HEALTH_KEY);
+  return saved ?? health;
+}
+
+/**
+ * Run `fn`, but reject if it hasn't settled within `ms`. The underlying work may keep running
+ * in the background (JS can't truly cancel it), but the caller's overlap guard is released so
+ * the engine keeps ticking instead of wedging forever on one stuck run.
+ */
+function withTimeout<T>(fn: () => Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      reject(new Error(`${label} exceeded ${Math.round(ms / 1000)}s watchdog`));
+    }, ms);
+    if (typeof timer === "object" && timer && "unref" in timer) (timer as { unref: () => void }).unref();
+    fn().then(
+      (v) => { if (!done) { done = true; clearTimeout(timer); resolve(v); } },
+      (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } },
+    );
+  });
+}
+
 async function runCycle(): Promise<void> {
   // A cycle now does materially more work (bigger expansion batch); if one ever runs long,
   // skip the next tick rather than stacking concurrent cycles that fight over the pool blob.
   if (running) return;
   running = true;
+  const startedAt = Date.now();
+  let ok = true, err: string | undefined;
   try {
-    await runCycleInner();
+    await withTimeout(runCycleInner, CYCLE_WATCHDOG_MS, "pool cycle");
+  } catch (e) {
+    ok = false; err = (e as Error)?.message ?? String(e);
   } finally {
     running = false;
+    health.cycles++;
+    health.lastCycleAt = new Date().toISOString();
+    health.lastCycleMs = Date.now() - startedAt;
+    health.lastCycleOk = ok;
+    health.lastCycleError = err;
+    void persistHealth();
   }
 }
 
@@ -214,26 +286,38 @@ async function runCycleInner(): Promise<void> {
  * oldest — so the prospect list keeps growing and stays current without re-doing the same names.
  * Free + behind the review gate; nothing sends automatically.
  */
+async function runCurationTickInner(): Promise<void> {
+  const now = new Date().toISOString();
+  const { queryPool } = await import("./pool");
+  const { curateFromPool } = await import("./curation");
+  const candidates = await queryPool({ limit: CURATE_CANDIDATES } as never, CURATE_CANDIDATES);
+  if (!candidates.length) return;
+  await curateFromPool(
+    candidates.map((l) => ({
+      company: l.company, domain: l.domain, industry: l.industry, signalType: l.signalType,
+      reason: l.reason, score: l.score, employeeCount: l.employeeCount, roleDetails: l.roleDetails, roles: l.roles,
+    })),
+    { limit: CURATE_BATCH, concurrency: CURATE_CONCURRENCY, minScore: CURATE_MIN_SCORE, nowIso: now },
+  );
+}
+
 async function runCurationTick(): Promise<void> {
   if (curating) return;
   curating = true;
+  const startedAt = Date.now();
+  let ok = true, err: string | undefined;
   try {
-    const now = new Date().toISOString();
-    const { queryPool } = await import("./pool");
-    const { curateFromPool } = await import("./curation");
-    const candidates = await queryPool({ limit: CURATE_CANDIDATES } as never, CURATE_CANDIDATES);
-    if (!candidates.length) return;
-    await curateFromPool(
-      candidates.map((l) => ({
-        company: l.company, domain: l.domain, industry: l.industry, signalType: l.signalType,
-        reason: l.reason, score: l.score, employeeCount: l.employeeCount, roleDetails: l.roleDetails, roles: l.roles,
-      })),
-      { limit: CURATE_BATCH, concurrency: CURATE_CONCURRENCY, minScore: CURATE_MIN_SCORE, nowIso: now },
-    );
-  } catch {
-    /* best-effort; the next tick tries again */
+    await withTimeout(runCurationTickInner, CURATE_WATCHDOG_MS, "curation tick");
+  } catch (e) {
+    ok = false; err = (e as Error)?.message ?? String(e);
   } finally {
     curating = false;
+    health.curationTicks++;
+    health.lastCurationAt = new Date().toISOString();
+    health.lastCurationMs = Date.now() - startedAt;
+    health.lastCurationOk = ok;
+    health.lastCurationError = err;
+    void persistHealth();
   }
 }
 

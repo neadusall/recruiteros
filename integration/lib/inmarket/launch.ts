@@ -159,6 +159,8 @@ export async function kickOutreach(input: {
         count: input.count,
         at: new Date().toISOString(),
       }),
+      // Never let a hung n8n endpoint block the enroll path indefinitely.
+      signal: AbortSignal.timeout(10_000),
     });
     return { triggered: res.ok, queued: true, detail: res.ok ? "n8n notified" : `n8n responded ${res.status}` };
   } catch (e) {

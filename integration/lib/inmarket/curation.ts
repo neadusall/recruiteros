@@ -80,6 +80,23 @@ async function save(rows: CuratedProspect[]): Promise<void> {
   await saveSnapshot(KEY, rows.slice(0, MAX_STORE));
 }
 
+/**
+ * WRITE SERIALIZATION. The curation blob has many independent writers — the every-8-min
+ * curation tick, the continuous email validator, the sending engine's event webhooks, and the
+ * review-gate actions — and each does a full load → mutate → save overwrite. Without a lock, two
+ * that interleave silently clobber each other (whoever saves last wins), so validations and
+ * send-tracking would be lost over time. Every mutator runs its read-modify-write inside this
+ * single in-process queue so the writes are serialized and none is ever dropped. (Single
+ * container, single process — an in-memory chain is sufficient and avoids any DB-lock dependency.)
+ */
+let writeChain: Promise<unknown> = Promise.resolve();
+function withCurationLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = writeChain.then(fn, fn);
+  // Keep the chain alive regardless of this op's outcome; never let a rejection break the queue.
+  writeChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 /** Stable id for a (company, role) decision-maker slot — dedupes across daily runs. */
 function curationId(company: string, role: string): string {
   return ("cp_" + company + "_" + role).toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 120);
@@ -163,9 +180,13 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
     })
     .slice(0, limit);
 
-  let researched = 0, named = 0, contactable = 0, newlyAdded = 0, updated = 0;
+  let researched = 0, named = 0, contactable = 0;
 
-  // Concurrency-capped worker pool over the targets.
+  // Concurrency-capped worker pool over the targets. Research runs OUTSIDE the write lock (it's
+  // slow, network-bound, seconds per batch); each worker produces a freshly-researched row but
+  // does NOT touch the store. The store is merged in one short, locked critical section below —
+  // so a long research window can't clobber validations / send-events that land meanwhile.
+  const fresh = new Map<string, CuratedProspect>();
   let cursor = 0;
   async function worker() {
     while (cursor < targets.length) {
@@ -182,8 +203,7 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
       if (dm.email?.email) contactable++;
 
       const id = curationId(lead.company, role);
-      const prev = byId.get(id);
-      const row: CuratedProspect = {
+      fresh.set(id, {
         id,
         company: lead.company,
         domain: lead.domain,
@@ -201,17 +221,43 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
         emailPattern: dm.email?.pattern,
         status: statusFor(dm),
         curatedAt: opts.nowIso,
-        // preserve any downstream lifecycle already recorded for this slot
-        enrolledAt: prev?.enrolledAt, campaignId: prev?.campaignId,
-        sentAt: prev?.sentAt, openedAt: prev?.openedAt, repliedAt: prev?.repliedAt, bouncedAt: prev?.bouncedAt,
-      };
-      byId.set(id, row);
-      if (prev) updated++; else newlyAdded++;
+      });
     }
   }
   await Promise.all(Array.from({ length: concurrency }, worker));
 
-  await save([...byId.values()].sort((a, b) => b.score - a.score));
+  // MERGE under the write lock against a FRESH load — never the stale snapshot taken before
+  // research. For each researched row, preserve any lifecycle the store has accrued meanwhile
+  // (enrollment, send-tracking) and any email validation verdict still matching the same address;
+  // a row that got locked (queued/enrolled) or suppressed concurrently is left untouched.
+  let newlyAdded = 0, updated = 0;
+  if (fresh.size) {
+    await withCurationLock(async () => {
+      const current = await load();
+      const map = new Map(current.map((r) => [r.id, r]));
+      for (const [id, row] of fresh) {
+        const prev = map.get(id);
+        if (prev && (prev.status === "enrolled" || prev.status === "queued" || prev.status === "suppressed")) {
+          updated++; continue; // locked/suppressed since selection — don't overwrite its lifecycle
+        }
+        const sameEmail = !!prev && (prev.likelyEmail ?? "") === (row.likelyEmail ?? "");
+        map.set(id, {
+          ...row,
+          // carry forward downstream lifecycle recorded for this slot
+          enrolledAt: prev?.enrolledAt, campaignId: prev?.campaignId,
+          sentAt: prev?.sentAt, openedAt: prev?.openedAt, repliedAt: prev?.repliedAt, bouncedAt: prev?.bouncedAt,
+          // keep the validation verdict only while it still describes the same address
+          emailValidated: sameEmail ? prev?.emailValidated : undefined,
+          emailInvalid: sameEmail ? prev?.emailInvalid : undefined,
+          validatedAt: sameEmail ? prev?.validatedAt : undefined,
+          // a still-valid "invalid" verdict keeps the row out of the send queue
+          status: sameEmail && prev?.emailInvalid ? "suppressed" : row.status,
+        });
+        if (prev) updated++; else newlyAdded++;
+      }
+      await save([...map.values()].sort((a, b) => b.score - a.score));
+    });
+  }
   return { considered: targets.length, researched, named, contactable, newlyAdded, updated };
 }
 
@@ -288,25 +334,29 @@ export async function listCurated(opts?: {
 /** Mark a set of curated prospects approved (queued) in the daily review gate. */
 export async function approveForBulk(ids: string[]): Promise<number> {
   const set = new Set(ids);
-  const rows = await load();
-  let n = 0;
-  for (const r of rows) {
-    if (set.has(r.id) && r.status === "contactable") { r.status = "queued"; n++; }
-  }
-  if (n) await save(rows);
-  return n;
+  return withCurationLock(async () => {
+    const rows = await load();
+    let n = 0;
+    for (const r of rows) {
+      if (set.has(r.id) && r.status === "contactable") { r.status = "queued"; n++; }
+    }
+    if (n) await save(rows);
+    return n;
+  });
 }
 
 /** Stamp prospects as enrolled once the enroll seam has handed them to the BD Bulk sender. */
 export async function markEnrolled(ids: string[], campaignId: string, nowIso: string): Promise<number> {
   const set = new Set(ids);
-  const rows = await load();
-  let n = 0;
-  for (const r of rows) {
-    if (set.has(r.id)) { r.status = "enrolled"; r.enrolledAt = nowIso; r.campaignId = campaignId; n++; }
-  }
-  if (n) await save(rows);
-  return n;
+  return withCurationLock(async () => {
+    const rows = await load();
+    let n = 0;
+    for (const r of rows) {
+      if (set.has(r.id)) { r.status = "enrolled"; r.enrolledAt = nowIso; r.campaignId = campaignId; n++; }
+    }
+    if (n) await save(rows);
+    return n;
+  });
 }
 
 /**
@@ -326,6 +376,10 @@ export async function enrollToBulk(
   const rows = await load();
   const { addProspect } = await import("../prospects");
   let enrolled = 0, skipped = 0;
+  const enrolledIds = new Set<string>();
+  // Do the (slow, network) addProspect calls WITHOUT holding the write lock; collect which ids
+  // succeeded, then stamp their status in one short locked section against a fresh load so a
+  // concurrent tick/validator can't clobber the enrollment (or be clobbered by it).
   for (const r of rows) {
     if (!set.has(r.id)) continue;
     if (!r.managerName || !r.likelyEmail || r.emailInvalid) { skipped++; continue; } // need a real person + a non-rejected email
@@ -344,13 +398,21 @@ export async function enrollToBulk(
         signalReason: r.signalReason,
         warmth: Math.max(50, r.score),
       });
-      r.status = "enrolled"; r.enrolledAt = nowIso; r.campaignId = campaignId;
+      enrolledIds.add(r.id);
       enrolled++;
     } catch {
       skipped++;
     }
   }
-  if (enrolled) await save(rows);
+  if (enrolledIds.size) {
+    await withCurationLock(async () => {
+      const current = await load();
+      for (const r of current) {
+        if (enrolledIds.has(r.id)) { r.status = "enrolled"; r.enrolledAt = nowIso; r.campaignId = campaignId; }
+      }
+      await save(current);
+    });
+  }
   return { enrolled, skipped };
 }
 
@@ -367,21 +429,23 @@ export async function applyEmailValidation(
   if (!results.length) return 0;
   const verdict = new Map<string, boolean>();
   for (const r of results) { const e = (r.email || "").toLowerCase().trim(); if (e) verdict.set(e, r.valid); }
-  const rows = await load();
-  let n = 0;
-  for (const r of rows) {
-    const e = (r.likelyEmail ?? "").toLowerCase();
-    if (!e || !verdict.has(e)) continue;
-    const valid = verdict.get(e)!;
-    r.emailValidated = valid;
-    r.emailInvalid = !valid;
-    r.validatedAt = nowIso;
-    // A validated address is a confirmed contactable; an invalid one drops out of the send queue.
-    if (!valid && (r.status === "contactable" || r.status === "queued")) r.status = "suppressed";
-    n++;
-  }
-  if (n) await save(rows);
-  return n;
+  return withCurationLock(async () => {
+    const rows = await load();
+    let n = 0;
+    for (const r of rows) {
+      const e = (r.likelyEmail ?? "").toLowerCase();
+      if (!e || !verdict.has(e)) continue;
+      const valid = verdict.get(e)!;
+      r.emailValidated = valid;
+      r.emailInvalid = !valid;
+      r.validatedAt = nowIso;
+      // A validated address is a confirmed contactable; an invalid one drops out of the send queue.
+      if (!valid && (r.status === "contactable" || r.status === "queued")) r.status = "suppressed";
+      n++;
+    }
+    if (n) await save(rows);
+    return n;
+  });
 }
 
 /** The curated emails still needing validation — feed this list to the external validator. */
@@ -403,17 +467,19 @@ export async function pendingValidationEmails(limit = 1000): Promise<string[]> {
 export async function recordSendEvent(email: string, event: "sent" | "open" | "reply" | "bounce", nowIso: string): Promise<boolean> {
   const e = email.toLowerCase().trim();
   if (!e) return false;
-  const rows = await load();
-  let hit = false;
-  for (const r of rows) {
-    if ((r.likelyEmail ?? "").toLowerCase() === e) {
-      if (event === "sent") r.sentAt = r.sentAt ?? nowIso;
-      else if (event === "open") r.openedAt = r.openedAt ?? nowIso;
-      else if (event === "reply") r.repliedAt = r.repliedAt ?? nowIso;
-      else if (event === "bounce") r.bouncedAt = r.bouncedAt ?? nowIso;
-      hit = true;
+  return withCurationLock(async () => {
+    const rows = await load();
+    let hit = false;
+    for (const r of rows) {
+      if ((r.likelyEmail ?? "").toLowerCase() === e) {
+        if (event === "sent") r.sentAt = r.sentAt ?? nowIso;
+        else if (event === "open") r.openedAt = r.openedAt ?? nowIso;
+        else if (event === "reply") r.repliedAt = r.repliedAt ?? nowIso;
+        else if (event === "bounce") r.bouncedAt = r.bouncedAt ?? nowIso;
+        hit = true;
+      }
     }
-  }
-  if (hit) await save(rows);
-  return hit;
+    if (hit) await save(rows);
+    return hit;
+  });
 }

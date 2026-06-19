@@ -2575,13 +2575,41 @@
       send("/in-market", "POST", { action: "curation_list", contactableOnly: true, limit: 500 }),
     ]).then(function (rs) {
       var funnel = (rs[0] && rs[0].data && rs[0].data.funnel) || null;
+      var health = (rs[0] && rs[0].data && rs[0].data.health) || null;
       var list = (rs[1] && rs[1].data && rs[1].data.curated) || [];
-      body.innerHTML = curationHtml(funnel, list);
+      body.innerHTML = curationHtml(funnel, list, health);
       wireCuration(body, list);
     }).catch(function () { body.innerHTML = '<div class="empty">Couldn\'t load the curated list yet. The accumulator builds it hourly — try again shortly, or run a search first to seed the pool.</div>'; });
   }
 
-  function curationHtml(funnel, list) {
+  // Liveness strip: shows when the pool was last fed and when curation last ran, so a silently
+  // stalled engine is visible at a glance instead of looking like a healthy-but-empty list.
+  function curEngineLine(h) {
+    if (!h) return "";
+    function ago(s) {
+      if (!s) return null;
+      var t = Date.parse(String(s).replace(" ", "T")); if (isNaN(t)) return null;
+      var m = Math.max(0, Math.round((Date.now() - t) / 60000));
+      if (m < 1) return { txt: "just now", min: m };
+      if (m < 60) return { txt: m + "m ago", min: m };
+      var hr = Math.round(m / 60); if (hr < 24) return { txt: hr + "h ago", min: m };
+      return { txt: Math.round(hr / 24) + "d ago", min: m };
+    }
+    function part(label, when, ok, staleMin) {
+      var a = ago(when);
+      var bad = !a || a.min > staleMin || ok === false;
+      var dot = bad ? "🔴" : "🟢";
+      return '<span class="cur-mini" title="' + (ok === false ? "last run errored" : "") + '">' + dot + " " +
+        esc(label) + " <b>" + (a ? esc(a.txt) : "not yet") + "</b></span>";
+    }
+    // Pool cycle runs hourly (stale > 75m); curation ticks every 8m (stale > 20m).
+    return '<div class="cur-sigs"><span class="muted">Engine:</span>' +
+      part("pool fed", h.lastCycleAt, h.lastCycleOk, 75) +
+      part("curated", h.lastCurationAt, h.lastCurationOk, 20) +
+      "</div>";
+  }
+
+  function curationHtml(funnel, list, health) {
     var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
     var bs = f.byStatus || {};
     var stages = [
@@ -2606,6 +2634,7 @@
         '<h2>Curated decision-makers <span class="muted">· ' + (f.total || 0).toLocaleString() + " researched</span></h2>" +
         '<button type="button" class="btn btn-ghost btn-sm" id="curRefresh">↻ Research more now</button>' +
       "</div>" +
+      curEngineLine(health) +
       '<div class="cur-funnel">' + funnelRow + "</div>" +
       (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
       ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "");
