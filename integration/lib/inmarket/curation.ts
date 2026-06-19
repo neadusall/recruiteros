@@ -58,6 +58,10 @@ export interface CuratedProspect {
   curatedAt: string;
   enrolledAt?: string;
   campaignId?: string;
+  /* ---- email validation (fed continuously by the external validator) ---- */
+  emailValidated?: boolean;     // true once the validator confirms the address is deliverable
+  emailInvalid?: boolean;       // true when the validator says it's undeliverable (do not send)
+  validatedAt?: string;
   /* ---- post-send tracking (filled from the sending engine by email) ---- */
   sentAt?: string;
   openedAt?: string;
@@ -98,6 +102,10 @@ export interface CurateOptions {
   concurrency?: number;
   /** Only curate companies scoring at/above this hiring-intent threshold. */
   minScore?: number;
+  /** Don't re-research a company already curated within this window — so each run ADVANCES to
+   *  not-yet-done companies and only refreshes the stale ones. This is what walks the whole pool
+   *  and keeps the list living instead of re-doing the same top companies every tick. */
+  recuratAfterMs?: number;
   nowIso: string;
 }
 
@@ -136,7 +144,12 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
   const store = await load();
   const byId = new Map(store.map((r) => [r.id, r]));
 
-  // Highest-intent first; skip companies with no role, below threshold, or already enrolled.
+  const now = Date.parse(opts.nowIso) || Date.now();
+  const recuratAfterMs = opts.recuratAfterMs ?? 24 * 60 * 60 * 1000; // refresh a company at most daily
+
+  // Highest-intent first; research the NOT-yet-done companies before refreshing stale ones, and
+  // never re-touch one that's already approved/enrolled. This is the rotation: each run advances
+  // through the pool, so over the day the whole pool gets a decision-maker.
   const targets = leads
     .filter((l) => l.company && (l.score ?? 0) >= minScore)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
@@ -144,7 +157,9 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
       const role = topRole(l);
       if (!role) return false;
       const existing = byId.get(curationId(l.company, role));
-      return !existing || (existing.status !== "enrolled" && existing.status !== "queued");
+      if (!existing) return true;                                      // never researched → do it
+      if (existing.status === "enrolled" || existing.status === "queued") return false; // locked
+      return now - (Date.parse(existing.curatedAt) || 0) >= recuratAfterMs;             // refresh only if stale
     })
     .slice(0, limit);
 
@@ -216,6 +231,9 @@ export interface CurationFunnel {
   byFunction: Array<{ function: string; total: number; contactable: number }>;
   /** Headline conversion: of companies researched, how many became a contactable named person. */
   contactableRate: number;
+  /** Email-validation tallies fed by the continuous validator. */
+  validated: number;
+  invalid: number;
 }
 
 export async function curationFunnel(): Promise<CurationFunnel> {
@@ -223,9 +241,11 @@ export async function curationFunnel(): Promise<CurationFunnel> {
   const byStatus = { sourced: 0, named: 0, contactable: 0, queued: 0, enrolled: 0, suppressed: 0 } as Record<CurationStatus, number>;
   const sig = new Map<string, { total: number; contactable: number }>();
   const fn = new Map<string, { total: number; contactable: number }>();
-  let contactableOrBetter = 0;
+  let contactableOrBetter = 0, validated = 0, invalid = 0;
   for (const r of rows) {
     byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
+    if (r.emailValidated) validated++;
+    if (r.emailInvalid) invalid++;
     const isContactable = r.status === "contactable" || r.status === "queued" || r.status === "enrolled";
     if (isContactable) contactableOrBetter++;
     const s = sig.get(r.signalType) ?? { total: 0, contactable: 0 };
@@ -239,6 +259,8 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     bySignal: [...sig.entries()].map(([signalType, v]) => ({ signalType, ...v })).sort((a, b) => b.total - a.total),
     byFunction: [...fn.entries()].map(([f, v]) => ({ function: f, ...v })).sort((a, b) => b.total - a.total),
     contactableRate: rows.length ? Math.round((contactableOrBetter / rows.length) * 100) / 100 : 0,
+    validated,
+    invalid,
   };
 }
 
@@ -306,7 +328,7 @@ export async function enrollToBulk(
   let enrolled = 0, skipped = 0;
   for (const r of rows) {
     if (!set.has(r.id)) continue;
-    if (!r.managerName || !r.likelyEmail) { skipped++; continue; } // need a real person + email
+    if (!r.managerName || !r.likelyEmail || r.emailInvalid) { skipped++; continue; } // need a real person + a non-rejected email
     try {
       await addProspect({
         workspaceId,
@@ -330,6 +352,51 @@ export async function enrollToBulk(
   }
   if (enrolled) await save(rows);
   return { enrolled, skipped };
+}
+
+/**
+ * CONTINUOUS EMAIL VALIDATION feed. The external validator calls this with verdicts; we stamp the
+ * matching curated prospect(s). A `valid:false` marks the address undeliverable so it's never
+ * enrolled; `valid:true` upgrades it to a confirmed contact. Accepts a batch so the validator can
+ * stream results. Returns how many rows were updated.
+ */
+export async function applyEmailValidation(
+  results: Array<{ email: string; valid: boolean }>,
+  nowIso: string,
+): Promise<number> {
+  if (!results.length) return 0;
+  const verdict = new Map<string, boolean>();
+  for (const r of results) { const e = (r.email || "").toLowerCase().trim(); if (e) verdict.set(e, r.valid); }
+  const rows = await load();
+  let n = 0;
+  for (const r of rows) {
+    const e = (r.likelyEmail ?? "").toLowerCase();
+    if (!e || !verdict.has(e)) continue;
+    const valid = verdict.get(e)!;
+    r.emailValidated = valid;
+    r.emailInvalid = !valid;
+    r.validatedAt = nowIso;
+    // A validated address is a confirmed contactable; an invalid one drops out of the send queue.
+    if (!valid && (r.status === "contactable" || r.status === "queued")) r.status = "suppressed";
+    n++;
+  }
+  if (n) await save(rows);
+  return n;
+}
+
+/** The curated emails still needing validation — feed this list to the external validator. */
+export async function pendingValidationEmails(limit = 1000): Promise<string[]> {
+  const rows = await load();
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const e = (r.likelyEmail ?? "").toLowerCase();
+    if (!e || seen.has(e)) continue;
+    if (r.emailValidated || r.emailInvalid) continue;   // already has a verdict
+    seen.add(e); out.push(r.likelyEmail!);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /** Tie a sending-engine delivery/engagement event back to its curated prospect by email. */

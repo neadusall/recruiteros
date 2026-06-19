@@ -136,6 +136,19 @@ export async function POST(req: Request) {
     return ok(res);
   }
 
+  // Continuous email validation — the external validator pulls the pending list, then streams
+  // verdicts back. Invalid addresses are suppressed (never enrolled); valid ones are confirmed.
+  if (b?.action === "validation_pending") {
+    const { pendingValidationEmails } = await import("../../../lib/inmarket/curation");
+    return ok({ emails: await pendingValidationEmails(Math.min(Number(b.limit) || 1000, 5000)) });
+  }
+  if (b?.action === "validation_results") {
+    const { applyEmailValidation } = await import("../../../lib/inmarket/curation");
+    const results = Array.isArray(b.results) ? b.results : [];
+    const n = await applyEmailValidation(results, new Date().toISOString());
+    return ok({ updated: n });
+  }
+
   // On-demand curation run (the accumulator also does this hourly): research the top companies'
   // decision-makers now and refresh the list.
   if (b?.action === "curate_now") {

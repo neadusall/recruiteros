@@ -45,12 +45,19 @@ const EXPAND_STALE_MS = 3 * 24 * 60 * 60 * 1000; // re-pull a company's board af
 const DIRECTORY_BATCH = 80;            // curated ATS-directory slugs probed per cycle (net-new
                                        // companies straight off their own boards — see atsDirectory)
 const DIRECTORY_CAP = 1200;            // leads from the directory pass (whole boards → many roles)
-const CURATE_BATCH = 50;               // companies whose decision-maker we research per cycle
-                                       // (~50/cycle x 24 = a daily named-prospect list that compounds)
+// Decision-maker curation runs on its OWN fast tick (not the heavy hourly cycle) so the prospect
+// database stays living — refreshing every few minutes, walking the whole pool by score.
+const CURATE_CYCLE_MS = 8 * 60 * 1000; // research a fresh batch every 8 minutes
+const CURATE_BATCH = 45;               // companies researched per tick (~45 x 7.5/hr x 24 ≈ 8K/day)
+const CURATE_CANDIDATES = 2000;        // pool slice we choose the not-yet-done batch from
+const CURATE_CONCURRENCY = 5;          // parallel researches (polite to the free sources)
+const CURATE_MIN_SCORE = 35;           // don't spend research on weak signals
 const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
+const CURATE_FIRST_DELAY_MS = 25_000;   // let the pool fill a little before the first curation tick
 
 let started = false;
 let running = false;                    // overlap guard: never let two cycles run at once
+let curating = false;                   // overlap guard for the curation tick
 let cursor = 0;
 let seedCursor = 0;
 let sizeCursor = 0;
@@ -193,30 +200,41 @@ async function runCycleInner(): Promise<void> {
   //    categories instead of being all "New job posting". Cheap + idempotent.
   try { await reclassifyHiringIntent(); } catch { /* best-effort */ }
 
-  // 5.7) CURATE DECISION-MAKERS — research the actual hiring manager for a rotating batch of the
-  //    highest-intent companies (free: team page / news / GitHub), build their likely email, and
-  //    upsert a tracked CuratedProspect. This is what turns the raw signal pool into the daily
-  //    list of real people we can market to. Bounded per cycle so the list compounds over the day
-  //    without hammering the free sources. Behind the review gate — nothing sends automatically.
-  try {
-    const { queryPool } = await import("./pool");
-    const { curateFromPool } = await import("./curation");
-    const top = await queryPool({ limit: CURATE_BATCH } as never, CURATE_BATCH);
-    if (top.length) {
-      await curateFromPool(
-        top.map((l) => ({
-          company: l.company, domain: l.domain, industry: l.industry, signalType: l.signalType,
-          reason: l.reason, score: l.score, employeeCount: l.employeeCount, roleDetails: l.roleDetails, roles: l.roles,
-        })),
-        { limit: CURATE_BATCH, concurrency: 4, minScore: 40, nowIso: now },
-      );
-    }
-  } catch { /* curation is best-effort; never blocks the cycle */ }
-
   // 6) RECOMPUTE METRICS — after this cycle's merges, expansions and purges, refresh the live
   //    aggregates (companies + total open positions across the 90-day pool) so the Hire Signals
   //    banner shows a running, daily-growing count without summing the whole pool per request.
   try { await recomputePoolMetrics(); } catch { /* best-effort */ }
+}
+
+/**
+ * CURATION TICK — the living-database engine. Every few minutes, pull a large pool slice by score
+ * and research the actual decision-maker (name + likely email) for the next batch that isn't
+ * already done/fresh, upserting tracked CuratedProspects. Because curateFromPool skips
+ * recently-curated companies, successive ticks ADVANCE through the whole pool, then refresh the
+ * oldest — so the prospect list keeps growing and stays current without re-doing the same names.
+ * Free + behind the review gate; nothing sends automatically.
+ */
+async function runCurationTick(): Promise<void> {
+  if (curating) return;
+  curating = true;
+  try {
+    const now = new Date().toISOString();
+    const { queryPool } = await import("./pool");
+    const { curateFromPool } = await import("./curation");
+    const candidates = await queryPool({ limit: CURATE_CANDIDATES } as never, CURATE_CANDIDATES);
+    if (!candidates.length) return;
+    await curateFromPool(
+      candidates.map((l) => ({
+        company: l.company, domain: l.domain, industry: l.industry, signalType: l.signalType,
+        reason: l.reason, score: l.score, employeeCount: l.employeeCount, roleDetails: l.roleDetails, roles: l.roles,
+      })),
+      { limit: CURATE_BATCH, concurrency: CURATE_CONCURRENCY, minScore: CURATE_MIN_SCORE, nowIso: now },
+    );
+  } catch {
+    /* best-effort; the next tick tries again */
+  } finally {
+    curating = false;
+  }
 }
 
 /**
@@ -227,8 +245,12 @@ async function runCycleInner(): Promise<void> {
 export function ensureAccumulator(): void {
   if (started) return;
   started = true;
+  // Heavy pool-building cycle (hourly).
   setTimeout(() => { void runCycle(); }, FIRST_DELAY_MS);
   const t = setInterval(() => { void runCycle(); }, CYCLE_MS);
-  // Don't keep the event loop alive solely for this timer.
   if (typeof t === "object" && t && "unref" in t) (t as { unref: () => void }).unref();
+  // Fast decision-maker curation tick (every few minutes) — keeps the prospect DB living.
+  setTimeout(() => { void runCurationTick(); }, CURATE_FIRST_DELAY_MS);
+  const c = setInterval(() => { void runCurationTick(); }, CURATE_CYCLE_MS);
+  if (typeof c === "object" && c && "unref" in c) (c as { unref: () => void }).unref();
 }

@@ -2607,7 +2607,8 @@
         '<button type="button" class="btn btn-ghost btn-sm" id="curRefresh">↻ Research more now</button>' +
       "</div>" +
       '<div class="cur-funnel">' + funnelRow + "</div>" +
-      (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "");
+      (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
+      ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "");
 
     if (!list.length) {
       return head + '<div class="empty" style="margin-top:14px">No contactable decision-makers curated yet. The hourly accumulator researches the top companies (free: team pages, news, GitHub) and they\'ll appear here. Hit <b>Research more now</b> to kick it.</div>';
@@ -2626,8 +2627,11 @@
 
   function curationRow(r) {
     var via = r.managerVia ? '<span class="cur-via cur-via-' + esc(r.managerVia) + '">' + esc(r.managerVia.replace("_", " ")) + "</span>" : "";
+    var emailTag = r.emailValidated ? '<span class="cur-valid">✓ valid</span>'
+      : r.emailInvalid ? '<span class="cur-invalid">✕ invalid</span>'
+      : '<span class="im-email-unv">guess</span>';
     var email = r.likelyEmail
-      ? '<span class="cur-email" data-email="' + esc(r.likelyEmail) + '" title="Best-guess, validated before send">✉️ ' + esc(r.likelyEmail) + ' <span class="im-email-unv">guess</span></span>'
+      ? '<span class="cur-email" data-email="' + esc(r.likelyEmail) + '" title="Best-guess work email — validated continuously, confirmed before send">✉️ ' + esc(r.likelyEmail) + ' ' + emailTag + "</span>"
       : '<span class="muted">no email</span>';
     var enrolled = r.status === "enrolled";
     return '<div class="cur-row' + (enrolled ? " cur-enrolled" : "") + '" data-id="' + esc(r.id) + '">' +
