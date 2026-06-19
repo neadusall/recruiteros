@@ -32,6 +32,8 @@ import { addProspect } from "../prospects";
 import { rid } from "../core/ids";
 import type { Prospect } from "../core/types";
 import { isUsSignal, isUsLead } from "./geo";
+import { resolveRealEmployer } from "./employer";
+import { guessEmail } from "./email";
 
 /** What the UI sends to search the market. Search EITHER by industry/market OR by
  *  company name — the two are mutually exclusive in the UI, but both narrow the same
@@ -77,6 +79,13 @@ export interface HiringManagerLead {
   /** A real, resolved decision-maker name when the engine found one for this function. */
   managerName?: string;
   managerLinkedin?: string;
+  /** Free best-guess work email from the manager's name + company domain (syntax only,
+   *  unverified — every send is validated first). Present only when a NAME + domain exist. */
+  likelyEmail?: string;
+  /** The pattern used for likelyEmail, e.g. "first.last". */
+  emailPattern?: string;
+  /** Always false until a verifier confirms — drives the "unverified" badge in the UI. */
+  emailVerified?: boolean;
   /** Short rationale when the owner was inferred by AI (e.g. "approves eng hires"). */
   why?: string;
   /** True when this manager was resolved by the AI inference rather than the heuristic. */
@@ -136,6 +145,16 @@ export interface InMarketLead {
    *  flagged (an "In pipeline" badge) rather than hiding it, so the list is never
    *  silently starved and the count stays honest. */
   inPipeline?: boolean;
+  /** True when the posting came from a staffing/recruiting agency and we recovered the real
+   *  end employer from the job text — `company` is now the CLIENT, not the agency. */
+  employerUnmasked?: boolean;
+  /** Free best-guess work email for the company's resolved buyer (syntax only, unverified). */
+  buyerLikelyEmail?: string;
+  /** The pattern used for buyerLikelyEmail, e.g. "first.last". */
+  buyerEmailPattern?: string;
+  /** The hiring-need functions this company is hiring for (derived from its open roles), so the
+   *  UI can filter the result set by a "what they're hiring for" category in one click. */
+  needFunctions?: JobFunction[];
   /** Carried so promote() can resolve the buyer + create the prospect. */
   raw?: { company?: Company; person?: Person };
 }
@@ -272,11 +291,16 @@ function geoText(c?: Company): string | undefined {
 
 function toLead(s: Signal): InMarketLead {
   const ev = s.evidence || {};
+  // Carry the role(s) on the lead: a multi-role evidence array if present, else the single
+  // role title a job_posting/repost carries — so even one-role leads classify into a hiring-need
+  // category (and get a hiring-manager row) before any board expansion deepens them.
   const roles = Array.isArray((ev as any).roles)
     ? (ev as any).roles
     : Array.isArray((ev as any).titles)
       ? (ev as any).titles
-      : undefined;
+      : typeof (ev as any).roleTitle === "string" && (ev as any).roleTitle
+        ? [(ev as any).roleTitle as string]
+        : undefined;
   return {
     id: s.id,
     company: s.company?.name ?? s.title,
@@ -437,6 +461,69 @@ function applySizeFilter(leads: InMarketLead[], q: InMarketQuery): InMarketLead[
  * only; returns ranked leads (highest intent first). Network failures degrade to
  * an empty list with a warning, never throw.
  */
+/**
+ * Attach the FREE best-guess work email to a lead's buyer and each named hiring manager, from
+ * the person's name + the company domain. Syntax only + unverified (every send is validated
+ * first) — so it only appears where we actually have a NAME and a domain, never fabricated.
+ * Applied at the display chokepoint so pooled, live, and merged results all carry it.
+ */
+export function withLikelyEmails(leads: InMarketLead[]): InMarketLead[] {
+  return leads.map((l) => {
+    // Tag the hiring-need functions for this lead (from its open roles) so the UI can filter the
+    // result set by a "what they're hiring for" category. Cheap + done for every lead.
+    const titlesForFns = l.roleDetails?.length ? l.roleDetails.map((d) => d.title) : (l.roles ?? []);
+    const needFunctions = titlesForFns.length
+      ? [...new Set(titlesForFns.map((t) => classifyTitle(t).function))]
+      : l.needFunctions;
+    l = needFunctions ? { ...l, needFunctions } : l;
+
+    const domain = l.domain;
+    if (!domain) return l;                       // no domain (incl. unmasked clients) → no guess
+    let buyerLikelyEmail = l.buyerLikelyEmail, buyerEmailPattern = l.buyerEmailPattern;
+    if (l.buyerName && !buyerLikelyEmail) {
+      const g = guessEmail(l.buyerName.split(/\s+/)[0], l.buyerName.split(/\s+/).slice(1).join(" "), domain);
+      if (g.email) { buyerLikelyEmail = g.email; buyerEmailPattern = g.pattern; }
+    }
+    let managers = l.hiringManagers;
+    if (managers && managers.length) {
+      managers = managers.map((m) => {
+        if (!m.managerName || m.likelyEmail) return m;
+        const g = guessEmail(m.managerName.split(/\s+/)[0], m.managerName.split(/\s+/).slice(1).join(" "), domain);
+        return g.email ? { ...m, likelyEmail: g.email, emailPattern: g.pattern, emailVerified: false } : m;
+      });
+    }
+    return { ...l, buyerLikelyEmail, buyerEmailPattern, hiringManagers: managers };
+  });
+}
+
+/**
+ * Roll a company's raw open roles up into the SPECIFIC hiring-intent signal type, so the
+ * "Hiring signals" filter spreads across real categories instead of being 99% "New job posting".
+ * Derived purely from the board we already have (no extra calls):
+ *   - many open roles right now            → hiring_velocity  (a hiring SURGE — the hottest BD target)
+ *   - a role that's been open a long time  → evergreen_role   (pipeline pain you can solve)
+ *   - otherwise                            → job_posting      (a single fresh open role)
+ * job_repost needs posting history we don't track here, so it's left to the repost detector.
+ */
+export function deriveHiringIntentType(
+  roleDetails?: Array<{ title?: string; postedAt?: string }>,
+  rolesCount?: number,
+  nowMs?: number,
+): SignalType {
+  const n = rolesCount ?? roleDetails?.length ?? 0;
+  if (n >= 5) return "hiring_velocity";          // 5+ concurrent openings = a surge
+  if (roleDetails && roleDetails.length) {
+    const now = nowMs ?? Date.now();
+    const LONG_OPEN_MS = 45 * 24 * 60 * 60 * 1000;
+    const hasLongOpen = roleDetails.some((r) => {
+      const t = r.postedAt ? Date.parse(r.postedAt) : NaN;
+      return !isNaN(t) && now - t > LONG_OPEN_MS;
+    });
+    if (hasLongOpen) return "evergreen_role";
+  }
+  return "job_posting";
+}
+
 /** Dedupe leads by company (case-insensitive), keeping the highest-scored, score-sorted. */
 export function dedupeLeads(leads: InMarketLead[]): InMarketLead[] {
   const by = new Map<string, InMarketLead>();
@@ -512,13 +599,30 @@ export async function collectLeads(q: InMarketQuery, nowIso: string, cap = 300):
   // US-ONLY: drop any signal we can't positively place in the United States (the recruiter
   // works US roles only). Applied at ingestion so nothing non-US ever enters the pool.
   ranked = ranked.filter((s) => isUsSignal(s));
-  // Stamp "added to our DB" = now for freshly collected leads. The pool overrides this with
-  // the true first-seen time for companies it has already stored (see mergeIntoPool).
-  return ranked.slice(0, cap).map((s) => {
+  // REAL-EMPLOYER GATE: never surface the staffing/recruiting agency that posted a role on a
+  // client's behalf — we want the company actually hiring. For each lead: keep real employers,
+  // rewrite to the client when an agency named it in the job text, drop when the client is
+  // anonymous. Free + deterministic, so it runs on every lead at $0 (see ./employer). Applied
+  // at ingestion so no agency ever enters the pool. Stamp "added to our DB" = now for fresh
+  // leads (the pool overrides this with the true first-seen time on merge).
+  const out: InMarketLead[] = [];
+  for (const s of ranked) {
+    if (out.length >= cap) break;
     const l = toLead(s);
+    const res = resolveRealEmployer(l.company, `${l.reason} ${s.title}`);
+    if (res.kind === "drop") continue;            // agency, anonymous client → not actionable
+    if (res.kind === "unmasked") {
+      // The named domain belonged to the AGENCY; clear it so contact enrichment re-derives the
+      // client's own domain from the recovered employer name (guessDomainProvider).
+      l.company = res.realEmployer;
+      l.domain = undefined;
+      l.employerUnmasked = true;
+      if (l.raw?.company) l.raw = { ...l.raw, company: { ...l.raw.company, name: res.realEmployer, domain: undefined } };
+    }
     l.addedAt = nowIso;
-    return l;
-  });
+    out.push(l);
+  }
+  return out;
 }
 
 /**
@@ -541,11 +645,55 @@ export function signalBreakdown(leads: InMarketLead[]): Array<{ signalType: stri
   return [...m.entries()].map(([signalType, count]) => ({ signalType, count })).sort((a, b) => b.count - a.count);
 }
 
+/** Human label per job function for the "what they're hiring for" breakdown. */
+const FUNCTION_LABEL: Record<JobFunction, string> = {
+  engineering: "💻 Engineering",
+  product: "📦 Product",
+  design: "🎨 Design",
+  data: "📊 Data / AI",
+  sales: "📈 Sales / GTM",
+  marketing: "📣 Marketing",
+  finance: "💵 Finance",
+  operations: "⚙️ Operations",
+  people_hr: "🧑‍🤝‍🧑 People / HR",
+  customer_success: "🤝 Customer Success",
+  legal: "⚖️ Legal",
+  executive: "👔 Executive / Leadership",
+  other: "🧩 Other",
+};
+
+/**
+ * "What are they hiring for?" — the specific hiring-NEED categories behind a result set, by
+ * function, with both the number of COMPANIES hiring for that function and the total open
+ * ROLES in it. This is the actionable complement to signalBreakdown ("why they're hiring"):
+ * it tells the recruiter exactly which desks to pitch. Sorted most-companies first.
+ */
+export function hiringNeedsBreakdown(
+  leads: InMarketLead[],
+): Array<{ function: JobFunction; label: string; companies: number; roles: number }> {
+  const companies = new Map<JobFunction, number>();
+  const roles = new Map<JobFunction, number>();
+  for (const l of leads) {
+    const titles = l.roleDetails?.length ? l.roleDetails.map((d) => d.title) : (l.roles ?? []);
+    if (!titles.length) continue;
+    const fns = new Set<JobFunction>();
+    for (const t of titles) {
+      const fn = classifyTitle(t).function;
+      fns.add(fn);
+      roles.set(fn, (roles.get(fn) ?? 0) + 1);
+    }
+    for (const fn of fns) companies.set(fn, (companies.get(fn) ?? 0) + 1);
+  }
+  return [...companies.entries()]
+    .map(([fn, c]) => ({ function: fn, label: FUNCTION_LABEL[fn], companies: c, roles: roles.get(fn) ?? 0 }))
+    .sort((a, b) => b.companies - a.companies);
+}
+
 export async function searchInMarket(
   q: InMarketQuery,
   nowIso: string,
   workspaceId?: string,
-): Promise<{ leads: InMarketLead[]; pulled: number; warnings: string[]; stats?: unknown; signalBreakdown?: Array<{ signalType: string; count: number }> }> {
+): Promise<{ leads: InMarketLead[]; pulled: number; warnings: string[]; stats?: unknown; signalBreakdown?: Array<{ signalType: string; count: number }>; needsBreakdown?: Array<{ function: JobFunction; label: string; companies: number; roles: number }> }> {
   const limit = Math.min(Math.max(q.limit ?? 25, 1), 1000);
 
   // Per-user suppression: hide companies the workspace has already taken into Prospects,
@@ -560,7 +708,7 @@ export async function searchInMarket(
   // real Wikidata counts, so heuristic estimates are never excluded here.
   const underCap = (l: InMarketLead) => !(typeof l.employeeCount === "number" && l.employeeCount > MAX_EMPLOYEES);
   const fresh = (arr: InMarketLead[]) =>
-    applySizeFilter(applyDateFilter(applyTaken(applyRoleView(fillSizes(arr.filter(isUsLead), sizeMap as never), q), taken), q, nowIso), q).filter(underCap);
+    withLikelyEmails(applySizeFilter(applyDateFilter(applyTaken(applyRoleView(fillSizes(arr.filter(isUsLead), sizeMap as never), q), taken), q, nowIso), q).filter(underCap));
 
   try {
     const { ensureAccumulator } = await import("./accumulator");
@@ -575,20 +723,20 @@ export async function searchInMarket(
     // the count never falls under the live-fallback threshold just from suppression).
     const pooledAll = fresh(await queryPool(q, 10000));
     if (pooledAll.length >= 24) {
-      return { leads: pooledAll.slice(0, limit), pulled: pooledAll.length, warnings: [], stats, signalBreakdown: signalBreakdown(pooledAll) };
+      return { leads: pooledAll.slice(0, limit), pulled: pooledAll.length, warnings: [], stats, signalBreakdown: signalBreakdown(pooledAll), needsBreakdown: hiringNeedsBreakdown(pooledAll) };
     }
     // Pool thin for this query → live collect, return it, and grow the pool.
     const live = await collectLeads(q, nowIso, Math.max(limit, 200));
     void mergeIntoPool(live).catch(() => {});
     const merged = fresh(dedupeLeads([...pooledAll, ...live]));
-    return { leads: merged.slice(0, limit), pulled: merged.length, warnings: [], stats, signalBreakdown: signalBreakdown(merged) };
+    return { leads: merged.slice(0, limit), pulled: merged.length, warnings: [], stats, signalBreakdown: signalBreakdown(merged), needsBreakdown: hiringNeedsBreakdown(merged) };
   } catch (err) {
     // Pool/accumulator unavailable → pure live fallback (original behavior).
     try {
       const live = fresh(await collectLeads(q, nowIso, Math.max(limit, 200)));
-      return { leads: live.slice(0, limit), pulled: live.length, warnings: ["pool_unavailable"], signalBreakdown: signalBreakdown(live) };
+      return { leads: live.slice(0, limit), pulled: live.length, warnings: ["pool_unavailable"], signalBreakdown: signalBreakdown(live), needsBreakdown: hiringNeedsBreakdown(live) };
     } catch (e) {
-      return { leads: [], pulled: 0, warnings: [`search_failed: ${(e as Error).message}`], signalBreakdown: [] };
+      return { leads: [], pulled: 0, warnings: [`search_failed: ${(e as Error).message}`], signalBreakdown: [], needsBreakdown: [] };
     }
   }
 }
@@ -629,6 +777,19 @@ export async function promoteLead(
 ): Promise<Prospect> {
   let email: string | undefined;
   let phone: string | undefined;
+
+  // HARD STAFFING GUARD (action plane): never let an agency reach Prospects. If a staffing
+  // lead somehow got this far, try to recover the real client from its signal text; if it's an
+  // anonymous client, refuse the promote rather than build outreach to a recruiting firm.
+  {
+    const resolved = resolveRealEmployer(lead.company, `${lead.reason} ${lead.roles?.join(" ") ?? ""}`);
+    if (resolved.kind === "drop") {
+      throw new Error(`Refusing to promote "${lead.company}": it's a staffing/recruiting agency, not the hiring company (${resolved.reason}).`);
+    }
+    if (resolved.kind === "unmasked") {
+      lead = { ...lead, company: resolved.realEmployer, domain: undefined, employerUnmasked: true };
+    }
+  }
 
   // Resolve who the prospect actually is: the selected hiring manager, else the buyer.
   const personName = manager?.managerName || lead.buyerName;

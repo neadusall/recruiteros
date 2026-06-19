@@ -447,6 +447,26 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .im-fn { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 99px; background: rgba(124,92,255,0.16); color: #b9a6ff; }
 .im-mgr-who { font-size: 12.5px; color: var(--text-muted); margin-left: auto; }
 .im-mgr-why { flex-basis: 100%; font-size: 11.5px; color: var(--text-dim); font-style: italic; margin-left: 26px; }
+/* Best-guess (unverified) work email chip on a manager/buyer row — copy on click. */
+.im-mgr-email { flex-basis: 100%; margin-left: 26px; font-size: 12px; font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); color: var(--brand-2); cursor: copy; display: inline-flex; align-items: center; gap: 7px; }
+.im-mgr-email:hover { color: #fff; }
+.im-email-unv { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 99px; background: rgba(255,176,32,0.16); color: #ffc24d; font-family: var(--font, inherit); }
+.im-email-copied { color: #36d399 !important; }
+
+/* "What they're hiring for" — the specific hiring-need category panel + counts */
+.im-needs { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 14px 16px; margin: 14px 0; }
+.im-needs-h { font-weight: 700; margin-bottom: 10px; }
+.im-needs-h .muted { font-weight: 500; font-size: 12px; }
+.im-need-clear { appearance: none; border: 0; background: none; color: var(--brand-2); cursor: pointer; font: inherit; font-size: 12px; text-decoration: underline; padding: 0; }
+.im-needs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px 14px; }
+.im-need-row { display: flex; align-items: center; gap: 10px; width: 100%; appearance: none; border: 1px solid transparent; background: none; cursor: pointer; font: inherit; padding: 5px 8px; border-radius: 9px; transition: background .12s, border-color .12s; text-align: left; }
+.im-need-row:hover { background: var(--surface-2); }
+.im-need-row.active { border-color: var(--brand-2); background: rgba(77,208,255,0.08); }
+.im-need-lbl { flex: 0 0 168px; font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.im-need-bar { flex: 1; height: 12px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+.im-need-bar > span { display: block; height: 100%; background: var(--grad); border-radius: 6px; }
+.im-need-num { flex: 0 0 auto; font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+.im-need-num b { color: var(--text); }
 .im-ai-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 99px; background: rgba(77,208,255,0.14); color: var(--brand-2); margin-left: 4px; }
 .im-ai-refine, .im-all-roles { appearance: none; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; margin-top: 8px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); transition: all .12s ease; }
 .im-all-roles { margin-right: 8px; }
@@ -577,6 +597,10 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .im-sigchip { appearance: none; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600; padding: 6px 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); transition: all .12s ease; }
 .im-sigchip:hover { color: var(--text); border-color: var(--border-strong); transform: translateY(-1px); }
 .im-sigchip.active { background: rgba(124,92,255,0.18); color: #b9a6ff; border-color: rgba(124,92,255,0.5); }
+/* Count-aware states: signals present in the result set stand out; zero-count ones recede. */
+.im-sigchip.im-sig-has { color: var(--text); border-color: var(--border-strong); }
+.im-sigchip.im-sig-zero { opacity: .42; }
+.im-sigchip.im-sig-zero:hover { opacity: .7; }
 
 /* ---- In-Market cleaner layout: title up, multi-select groups, less busy ---- */
 .im-hero { padding: 2px 0 12px; }

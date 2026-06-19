@@ -28,20 +28,21 @@ export type Seniority =
   | "intern" | "junior" | "mid" | "senior" | "lead" | "manager"
   | "director" | "vp" | "c_level" | "founder";
 
-/** Keyword → function map. First match wins; ordered most-specific first. */
+/** Keyword → function map. First match wins; ordered most-specific first. Broad on purpose so
+ *  real-world ATS titles classify into a specific hiring-need category instead of "Other". */
 const FUNCTION_KEYWORDS: Array<[JobFunction, RegExp]> = [
-  ["data", /\b(data scientist|data engineer|machine learning|ml |ai |analytics|data analyst)\b/i],
-  ["engineering", /\b(engineer|developer|swe|programmer|devops|sre|architect|backend|frontend|full ?stack)\b/i],
-  ["product", /\b(product manager|product owner|head of product|cpo|product lead)\b/i],
-  ["design", /\b(designer|ux|ui|product design|creative)\b/i],
-  ["sales", /\b(sales|account executive|ae\b|sdr|bdr|business development|revenue)\b/i],
-  ["marketing", /\b(marketing|growth|demand gen|content|seo|brand|comms)\b/i],
-  ["finance", /\b(finance|accounting|controller|fp&a|cfo|treasur)\b/i],
-  ["people_hr", /\b(recruit|talent|people ops|hr\b|human resources|chro)\b/i],
-  ["customer_success", /\b(customer success|csm|support|account manager)\b/i],
-  ["legal", /\b(legal|counsel|compliance|gc\b)\b/i],
-  ["operations", /\b(operations|ops\b|program manager|project manager|coo)\b/i],
-  ["executive", /\b(ceo|cto|cfo|coo|cmo|cpo|chief|founder|president)\b/i],
+  ["data", /\b(data scien|data engineer|machine learning|\bml\b|\bai\b|a\.i\.|analytics|data analyst|research scien|applied scien|business intelligence|\bbi\b|statistic|quant)\b/i],
+  ["engineering", /\b(engineer|engineering|developer|swe|programmer|devops|sre|architect|back ?end|front ?end|full ?stack|platform|infrastructure|mobile|\bios\b|android|firmware|hardware|embedded|qa\b|quality assurance|security engineer|systems|technician|reliability)\b/i],
+  ["product", /\b(product manager|product owner|head of product|\bcpo\b|product lead|product management|technical product|group product)\b/i],
+  ["design", /\b(designer|design|\bux\b|\bui\b|user experience|user research|product design|creative|brand studio|illustrat|motion)\b/i],
+  ["sales", /\b(sales|account executive|\bae\b|\bsdr\b|\bbdr\b|business development|revenue|partnerships|partner manager|gtm|go-to-market|account director|inside sales|field sales|solutions consultant|pre-?sales)\b/i],
+  ["marketing", /\b(marketing|growth|demand gen|content|\bseo\b|\bsem\b|brand|comms|communications|public relations|\bpr\b|social media|events|lifecycle|campaign)\b/i],
+  ["finance", /\b(finance|financial|accounting|accountant|controller|fp&a|\bcfo\b|treasur|payroll|audit|bookkeep|tax\b|revenue operations|\brevops\b)\b/i],
+  ["people_hr", /\b(recruit|talent|people ops|people partner|\bhr\b|hrbp|human resources|\bchro\b|benefits|compensation|workplace)\b/i],
+  ["customer_success", /\b(customer success|\bcsm\b|customer support|\bsupport\b|account manager|customer experience|onboarding|implementation|client success|technical support|customer care)\b/i],
+  ["legal", /\b(legal|counsel|compliance|\bgc\b|paralegal|regulatory|privacy|contracts)\b/i],
+  ["operations", /\b(operations|\bops\b|program manager|project manager|coo\b|supply chain|logistics|warehouse|fulfillment|procurement|facilities|biz ops|business operations|strategy|administrative|executive assistant|office manager)\b/i],
+  ["executive", /\b(\bceo\b|\bcto\b|\bcfo\b|\bcoo\b|\bcmo\b|\bcpo\b|\bcro\b|chief|founder|president|general manager)\b/i],
 ];
 
 const SENIORITY_KEYWORDS: Array<[Seniority, RegExp]> = [

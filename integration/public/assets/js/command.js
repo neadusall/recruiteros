@@ -2145,6 +2145,16 @@
   ];
   var imSelectedSignals = [];   // selected SignalType keys to filter the search by
   var imBreakdown = [];         // [{signalType,count}] over the full matched set (the "why they're hiring" counts)
+  var imNeeds = [];             // [{function,label,companies,roles}] — "what they're hiring for"
+  var imNeedFn = "";            // active "what they're hiring for" category filter (JobFunction)
+  // A copyable, clearly-unverified best-guess email chip. Empty string when there's no guess
+  // (no resolved name or no company domain yet — we never fabricate an address).
+  function imEmailChip(email, pattern) {
+    if (!email) return "";
+    var t = "Best-guess work email — syntax only, UNVERIFIED. Every address is validated before any send." + (pattern ? " (pattern: " + pattern + ")" : "");
+    return '<span class="im-mgr-email" title="' + esc(t) + '" data-email="' + esc(email) + '">✉️ ' + esc(email) +
+      ' <span class="im-email-unv">guess</span></span>';
+  }
   // SignalType -> human label (reuse the filter-chip labels), else prettify the key.
   function imSignalLabel(t) {
     for (var i = 0; i < IM_SIGNALS.length; i++) if (IM_SIGNALS[i].t === t) return IM_SIGNALS[i].l;
@@ -2169,13 +2179,40 @@
         total.toLocaleString() + " signals across " + b.length + " reason" + (b.length === 1 ? "" : "s") + "</span></div>" +
       rows + more + "</div>";
   }
-  // Annotate the signal FILTER chips with their live counts, e.g. "💰 Funding round (12)".
+  // The "What they're hiring for" panel: the SPECIFIC hiring-need categories (by function)
+  // behind this result set, each with the number of companies hiring for it AND the total open
+  // roles. This is the actionable complement to "Why they're hiring" — it tells you which desk
+  // to pitch. Clicking a category narrows the search to that function's roles.
+  function needsBreakdownHtml() {
+    var n = imNeeds || [];
+    if (!n.length) return "";
+    var maxC = n.reduce(function (m, x) { return Math.max(m, x.companies); }, 0) || 1;
+    var totC = n.reduce(function (s, x) { return s + x.companies; }, 0);
+    var totR = n.reduce(function (s, x) { return s + x.roles; }, 0);
+    var rows = n.map(function (x) {
+      var w = Math.max(Math.round((x.companies / maxC) * 100), 5);
+      var active = imNeedFn === x.function;
+      return '<button type="button" class="im-need-row' + (active ? " active" : "") + '" data-fn="' + esc(x.function) + '" title="Show only roles in ' + esc(x.label) + '">' +
+        '<span class="im-need-lbl">' + esc(x.label) + "</span>" +
+        '<span class="im-need-bar"><span style="width:' + w + '%"></span></span>' +
+        '<span class="im-need-num"><b>' + x.companies.toLocaleString() + "</b> cos · " + x.roles.toLocaleString() + " roles</span></button>";
+    }).join("");
+    return '<div class="im-needs">' +
+      '<div class="im-needs-h">What they’re hiring for <span class="muted">· ' + totR.toLocaleString() + " open roles across " + n.length + " need" + (n.length === 1 ? "" : "s") +
+        (imNeedFn ? ' · <button type="button" class="im-need-clear" data-fn="">clear filter</button>' : "") + "</span></div>" +
+      '<div class="im-needs-grid">' + rows + "</div></div>";
+  }
+  // Annotate EVERY signal FILTER chip with its live count, e.g. "💰 Funding round (12)" — and
+  // "(0)" when none, so you can read the whole distribution at a glance and know which signals
+  // to target. Chips with zero are dimmed; chips with hits are emphasized.
   function imUpdateSigChipCounts() {
     var counts = {};
     (imBreakdown || []).forEach(function (x) { counts[x.signalType] = x.count; });
     Array.prototype.forEach.call(document.querySelectorAll(".im-sigchip"), function (c) {
       var t = c.getAttribute("data-sig"); var n = counts[t] || 0;
-      c.textContent = n ? imSignalLabel(t) + " (" + n.toLocaleString() + ")" : imSignalLabel(t);
+      c.textContent = imSignalLabel(t) + " (" + n.toLocaleString() + ")";
+      c.classList.toggle("im-sig-zero", n === 0);
+      c.classList.toggle("im-sig-has", n > 0);
     });
   }
 
@@ -2205,10 +2242,17 @@
     return out;
   }
   function imFindLead(id) { return inMarketResults.find(function (x) { return x.id === id; }); }
-  function imVisibleLeads() { return inMarketResults.filter(function (l) { return Math.round(l.score || 0) >= imMinScore; }); }
+  function imVisibleLeads() {
+    return inMarketResults.filter(function (l) {
+      if (Math.round(l.score || 0) < imMinScore) return false;
+      // "What they're hiring for" filter: keep only companies hiring for the chosen function.
+      if (imNeedFn && !(l.needFunctions && l.needFunctions.indexOf(imNeedFn) >= 0)) return false;
+      return true;
+    });
+  }
 
   function renderInMarket(el) {
-    imPicks = {}; imMinScore = 0; imSelectedSignals = []; imSelectedIndustries = []; imSelectedSizes = []; imBreakdown = [];
+    imPicks = {}; imMinScore = 0; imSelectedSignals = []; imSelectedIndustries = []; imSelectedSizes = []; imBreakdown = []; imNeeds = []; imNeedFn = "";
     el.innerHTML =
       '<div class="im-hero">' +
         '<div class="im-bar">' +
@@ -2414,6 +2458,7 @@
         imTotal = (r.data && typeof r.data.pulled === "number") ? r.data.pulled : inMarketResults.length;
         imStats = (r.data && r.data.stats) || null;
         imBreakdown = (r.data && r.data.signalBreakdown) || [];
+        imNeeds = (r.data && r.data.needsBreakdown) || [];
         renderImResults();
       }).catch(function () { body.innerHTML = needsSetup(); });
     }
@@ -2445,9 +2490,10 @@
         '<button class="btn btn-ghost btn-sm" id="imSave" disabled>💾 Save as hiring signals</button>' +
         '<button class="btn btn-primary btn-sm" id="imBulk" disabled>Push selected to Prospects</button>' +
       "</div>";
-    body.innerHTML = toolbar + imBreakdownHtml() + '<div id="imList">' + leads.map(leadCard).join("") + "</div>" + imTickerHtml();
+    body.innerHTML = toolbar + needsBreakdownHtml() + imBreakdownHtml() + '<div id="imList">' + leads.map(leadCard).join("") + "</div>" + imTickerHtml();
     wireImResults(body);
     wireTicker(body);
+    wireNeeds(body);
     imUpdateSigChipCounts();
     updateImBulk();
   }
@@ -2482,6 +2528,29 @@
   function wireTicker(body) {
     var x = body.querySelector("#imTickerX");
     if (x) x.addEventListener("click", function () { var t = body.querySelector("#imTicker"); if (t) t.style.display = "none"; });
+  }
+  // "What they're hiring for" category clicks → toggle the per-function filter and re-render
+  // (client-side narrowing of the loaded result set; counts in the panel stay the full picture).
+  function wireNeeds(body) {
+    Array.prototype.forEach.call(body.querySelectorAll(".im-need-row, .im-need-clear"), function (b) {
+      b.addEventListener("click", function (e) {
+        e.preventDefault(); e.stopPropagation();
+        var fn = b.getAttribute("data-fn") || "";
+        imNeedFn = (fn && imNeedFn === fn) ? "" : fn;   // toggle off if re-clicked
+        renderImResults();
+      });
+    });
+    // Best-guess email chips: click to copy (without toggling the row's checkbox).
+    Array.prototype.forEach.call(body.querySelectorAll(".im-mgr-email"), function (chip) {
+      chip.addEventListener("click", function (e) {
+        e.preventDefault(); e.stopPropagation();
+        var em = chip.getAttribute("data-email") || "";
+        if (!em) return;
+        try { navigator.clipboard.writeText(em); } catch (x) {}
+        chip.classList.add("im-email-copied");
+        setTimeout(function () { chip.classList.remove("im-email-copied"); }, 1200);
+      });
+    });
   }
 
   // Prominent daily-import banner at the top of Hire Signals, loads on open so today's
@@ -2543,6 +2612,7 @@
           '<span class="im-mgr-title">' + esc(m.managerTitle) + "</span>" +
           '<span class="im-fn">' + esc(m.function) + "</span>" +
           '<span class="im-mgr-who">' + who + "</span>" +
+          imEmailChip(m.likelyEmail, m.emailPattern) +
           (m.why ? '<span class="im-mgr-why" title="Why this owner">' + esc(m.why) + "</span>" : "") + "</label>";
       }).join("");
     } else {
@@ -2552,7 +2622,8 @@
         '<span class="im-mgr-role">Decision-maker</span>' +
         '<span class="im-mgr-arrow">→</span>' +
         '<span class="im-mgr-title">' + esc(l.buyerTitle || "Hiring manager") + "</span>" +
-        '<span class="im-mgr-who">' + who + "</span></label>";
+        '<span class="im-mgr-who">' + who + "</span>" +
+        imEmailChip(l.buyerLikelyEmail, l.buyerEmailPattern) + "</label>";
     }
 
     var renew = l.renewed

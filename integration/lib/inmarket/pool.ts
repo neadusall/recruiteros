@@ -12,7 +12,8 @@
 
 import { loadSnapshot, saveSnapshot } from "../db";
 import type { InMarketLead, InMarketQuery } from "./index";
-import { industryTokens, dedupeLeads } from "./index";
+import { industryTokens, dedupeLeads, deriveHiringIntentType } from "./index";
+import { isStaffingFirm } from "./employer";
 
 const KEY = "inmarket_pool_v1";
 const MAX_POOL = 15000;                        // cap the stored blob
@@ -37,6 +38,10 @@ function keyOf(l: InMarketLead): string {
  *  refresh freshness, expire stale, cap size), and record how many NEW companies were
  *  added today for the activity ticker. No-op without a database. */
 export async function mergeIntoPool(leads: InMarketLead[]): Promise<void> {
+  // STAFFING GATE (write side): never STORE a staffing/recruiting agency, even if a caller
+  // hands one in. collectLeads already filters at ingestion; this is defense-in-depth so the
+  // persistent pool can never hold an agency regardless of which path wrote it.
+  leads = leads.filter((l) => !isStaffingFirm(l.company));
   if (!leads.length) return;
   const now = Date.now();
   const byKey = new Map<string, PoolEntry>();
@@ -162,7 +167,10 @@ function leadMatches(lead: InMarketLead, q: InMarketQuery): boolean {
 /** Read leads matching a query from the pool, deduped + score-sorted, up to `limit`. */
 export async function queryPool(q: InMarketQuery, limit: number): Promise<InMarketLead[]> {
   const pool = await load();
-  const leads = pool.map((e) => e.lead).filter((l) => leadMatches(l, q));
+  // STAFFING GATE (read side): filter agencies out of every result set, so even legacy pool
+  // entries stored before this gate existed never surface in Hire Signals. The purge below
+  // removes them permanently; this guarantees they're invisible in the meantime.
+  const leads = pool.map((e) => e.lead).filter((l) => !isStaffingFirm(l.company) && leadMatches(l, q));
   return dedupeLeads(leads).slice(0, limit);
 }
 
@@ -183,6 +191,43 @@ export async function purgeNonUsFromPool(): Promise<number> {
   if (removed > 0) {
     await saveSnapshot(KEY, kept);
     // Keep the activity stats' total honest after the purge.
+    const s = (await loadSnapshot<PoolStats>(STATS_KEY)) || { total: 0, lastAddedAt: null, days: {} };
+    s.total = kept.length;
+    await saveSnapshot(STATS_KEY, s);
+  }
+  return removed;
+}
+
+/** Re-derive every stored lead's hiring-intent signal type from the roles we already hold, so
+ *  the "Hiring signals" filter spreads across surge / long-open / posting instead of being all
+ *  "New job posting". Cheap, idempotent; runs each cycle so the existing pool updates without
+ *  waiting on re-expansion. Returns how many leads changed type. No-op without a DB. */
+export async function reclassifyHiringIntent(): Promise<number> {
+  const pool = await load();
+  if (!pool.length) return 0;
+  let changed = 0;
+  for (const e of pool) {
+    const details = e.lead.roleDetails?.length
+      ? e.lead.roleDetails
+      : (e.lead.roles ?? []).map((title) => ({ title }));
+    if (!details.length) continue;
+    const next = deriveHiringIntentType(details);
+    if (next !== e.lead.signalType) { e.lead.signalType = next; changed++; }
+  }
+  if (changed) await saveSnapshot(KEY, pool);
+  return changed;
+}
+
+/** One-time (cheap to re-run) cleanup: permanently drop every stored lead whose company is a
+ *  staffing/recruiting agency, so the pool only ever holds real end employers. Runs each
+ *  accumulator cycle as a guard, like purgeNonUsFromPool. Returns how many were removed. */
+export async function purgeStaffingFromPool(): Promise<number> {
+  const pool = await load();
+  if (!pool.length) return 0;
+  const kept = pool.filter((e) => !isStaffingFirm(e.lead.company));
+  const removed = pool.length - kept.length;
+  if (removed > 0) {
+    await saveSnapshot(KEY, kept);
     const s = (await loadSnapshot<PoolStats>(STATS_KEY)) || { total: 0, lastAddedAt: null, days: {} };
     s.total = kept.length;
     await saveSnapshot(STATS_KEY, s);
@@ -232,7 +277,7 @@ export async function poolCompanyNames(offset: number, limit: number): Promise<{
     const idx = (offset + i) % pool.length;
     const nm = (pool[idx].lead.company || "").trim();
     const k = nm.toLowerCase();
-    if (!nm || seen.has(k)) continue;
+    if (!nm || seen.has(k) || isStaffingFirm(nm)) continue;
     seen.add(k);
     names.push(nm);
     if (names.length >= limit) break;
@@ -249,7 +294,7 @@ export async function poolCompaniesToExpand(limit: number, staleMs: number, excl
   for (const e of pool) {
     const at = e.lead.boardExpandedAt ? Date.parse(e.lead.boardExpandedAt) : 0;
     if (at && now - at < staleMs) continue;           // recently expanded → skip
-    if (!e.lead.company) continue;
+    if (!e.lead.company || isStaffingFirm(e.lead.company)) continue; // never expand an agency board
     // SMB priority: don't spend the expensive full-board pull on companies we've confirmed
     // are over the employee cap — they're about to be purged anyway. Expansion effort goes
     // to SMB/mid-market and not-yet-sized companies first.
@@ -277,6 +322,7 @@ export async function updateExpandedRoles(
     e.lead.roleDetails = payload.roleDetails.slice(0, 150);
     e.lead.roles = e.lead.roleDetails.map((d) => d.title);
     e.lead.boardSource = payload.source;
+    e.lead.signalType = deriveHiringIntentType(e.lead.roleDetails); // surge / long-open / posting
     const newest = e.lead.roleDetails.map((d) => d.postedAt).filter(Boolean).sort().slice(-1)[0];
     if (newest) { e.lead.postedAt = newest; e.lead.signalAt = e.lead.signalAt || newest; }
   }
@@ -308,6 +354,7 @@ export async function updateExpandedRolesBatch(
       e.lead.roleDetails = u.roleDetails.slice(0, 150);
       e.lead.roles = e.lead.roleDetails.map((d) => d.title);
       e.lead.boardSource = u.source;
+      e.lead.signalType = deriveHiringIntentType(e.lead.roleDetails); // surge / long-open / posting
       const newest = e.lead.roleDetails.map((d) => d.postedAt).filter(Boolean).sort().slice(-1)[0];
       if (newest) { e.lead.postedAt = newest; e.lead.signalAt = e.lead.signalAt || newest; }
     }
@@ -324,7 +371,9 @@ export async function poolCompanySlugs(offset: number, limit: number): Promise<{
   const slugs: string[] = [];
   for (let i = 0; i < pool.length; i++) {
     const idx = (offset + i) % pool.length;
-    const s = slugifyCompany(pool[idx].lead.company || "");
+    const name = pool[idx].lead.company || "";
+    if (isStaffingFirm(name)) continue;                // never seed an agency slug
+    const s = slugifyCompany(name);
     if (s.length < 2 || seen.has(s)) continue;
     seen.add(s);
     slugs.push(s);

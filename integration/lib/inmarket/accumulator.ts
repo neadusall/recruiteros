@@ -13,9 +13,10 @@
  */
 
 import { collectLeads } from "./index";
-import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, poolCompaniesToExpand, updateExpandedRolesBatch, purgeOversizedFromPool, recomputePoolMetrics } from "./pool";
+import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, poolCompaniesToExpand, updateExpandedRolesBatch, purgeOversizedFromPool, purgeStaffingFromPool, reclassifyHiringIntent, recomputePoolMetrics } from "./pool";
 import { enrichSizesBatch, oversizedCompanyKeys } from "./companySize";
 import { resolveCompanyRoles } from "./companyRoles";
+import { directoryBatch } from "./atsDirectory";
 
 // Sectors to keep warm — mirrors the UI's industry chips (non-tech first, since those
 // are the sectors free remote boards miss and Adzuna fills).
@@ -38,8 +39,12 @@ const SEED_COMPANIES = 40;             // pool companies probed for deeper roles
 const SEED_CAP = 300;                  // leads from the seeding pass
 const SIZE_BATCH = 120;                // companies resolved for headcount (Wikidata) per cycle —
                                        // high, so the <10K cap "bites" within days, not weeks
-const EXPAND_BATCH = 60;               // companies whose FULL ATS board we pull per cycle
+const EXPAND_BATCH = 120;              // companies whose FULL ATS board we pull per cycle (the
+                                       // unlimited free lever — keyless boards, no rate limit)
 const EXPAND_STALE_MS = 3 * 24 * 60 * 60 * 1000; // re-pull a company's board after 3 days
+const DIRECTORY_BATCH = 80;            // curated ATS-directory slugs probed per cycle (net-new
+                                       // companies straight off their own boards — see atsDirectory)
+const DIRECTORY_CAP = 1200;            // leads from the directory pass (whole boards → many roles)
 const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
 
 let started = false;
@@ -47,6 +52,7 @@ let running = false;                    // overlap guard: never let two cycles r
 let cursor = 0;
 let seedCursor = 0;
 let sizeCursor = 0;
+let directoryCursor = 0;
 
 async function runCycle(): Promise<void> {
   // A cycle now does materially more work (bigger expansion batch); if one ever runs long,
@@ -66,6 +72,10 @@ async function runCycleInner(): Promise<void> {
   // US-ONLY cleanup: prune any non-US leads still stored in the pool (one-time effect once
   // it's clean; cheap to re-run each cycle as a guard).
   try { await purgeNonUsFromPool(); } catch { /* best-effort */ }
+
+  // STAFFING-ONLY cleanup: prune any staffing/recruiting agency still stored in the pool, so
+  // we only ever build outreach toward the company actually hiring — never the agency.
+  try { await purgeStaffingFromPool(); } catch { /* best-effort */ }
 
   // Companies we've already authoritatively confirmed are over the employee cap — used below
   // to keep them out of the expensive board-expansion (SMB priority). Refreshed after this
@@ -116,6 +126,23 @@ async function runCycleInner(): Promise<void> {
     /* seeding is best-effort; skip this tick on any failure */
   }
 
+  // 3.5) ATS DIRECTORY — probe a rotating batch of KNOWN real public-ATS slugs (Greenhouse/
+  //    Lever/Ashby/Workable/…) straight off their own boards. This is the unlimited free volume
+  //    lever: each slug is one keyless request returning a whole company's open roles, so a
+  //    handful of slugs/cycle becomes hundreds of net-new roles at real companies. Runs through
+  //    collectLeads so the staffing gate, US filter, scoring, and dedupe all apply. The directory
+  //    self-grows from the slugified pool, so coverage compounds toward 10–20K/day over time.
+  try {
+    const { slugs, nextOffset } = directoryBatch(directoryCursor, DIRECTORY_BATCH);
+    if (slugs.length) {
+      directoryCursor = nextOffset;
+      const leads = await collectLeads({ companyNames: slugs, limit: DIRECTORY_CAP }, now, DIRECTORY_CAP);
+      await mergeIntoPool(leads);
+    }
+  } catch {
+    /* directory pass is best-effort; the rest of the cycle still runs */
+  }
+
   // 4) AUTO-EXPAND BOARDS — for a rotating batch of pool companies, pull their OWN public ATS
   //    board and store EVERY open role (titles + per-role posting dates) onto the lead, so a
   //    company that surfaced from one listing automatically shows all of its roles — no click.
@@ -158,6 +185,11 @@ async function runCycleInner(): Promise<void> {
   } catch {
     /* size enrichment is best-effort */
   }
+
+  // 5.5) RECLASSIFY INTENT — re-derive each lead's hiring-intent type (surge / long-open /
+  //    posting) from the roles we now hold, so the "Hiring signals" filter spreads across real
+  //    categories instead of being all "New job posting". Cheap + idempotent.
+  try { await reclassifyHiringIntent(); } catch { /* best-effort */ }
 
   // 6) RECOMPUTE METRICS — after this cycle's merges, expansions and purges, refresh the live
   //    aggregates (companies + total open positions across the 90-day pool) so the Hire Signals
