@@ -166,7 +166,7 @@ export async function POST(req: Request) {
     const n = Math.min(Number(b.limit) || 60, 300);
     const top = await queryPool({ limit: n } as any, n);
     const report = await curateFromPool(
-      top.map((l: any) => ({ company: l.company, domain: l.domain, industry: l.industry, signalType: l.signalType, reason: l.reason, score: l.score, employeeCount: l.employeeCount, roleDetails: l.roleDetails, roles: l.roles })),
+      top.map((l: any) => ({ company: l.company, domain: l.domain, industry: l.industry, signalType: l.signalType, reason: l.reason, score: l.score, employeeCount: l.employeeCount, roleDetails: l.roleDetails, roles: l.roles, sourceUrl: l.sourceUrl })),
       { limit: n, concurrency: 4, minScore: Number(b.minScore) || 0, nowIso: new Date().toISOString() },
     );
     return ok({ report });
