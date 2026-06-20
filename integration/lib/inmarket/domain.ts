@@ -139,7 +139,11 @@ function domainBase(host: string): string {
 /** Markers of a parked / for-sale / placeholder page — reject these even if live. */
 const PARKED = /(domain (is )?for sale|buy this domain|parked (free|domain)|this domain( name)? is|godaddy\.com\/domainsearch|hugedomains|sedo\.com|namecheap\.com\/market|under construction|coming soon)/i;
 
-async function homepageOnBrand(domain: string, tokens: string[]): Promise<boolean> {
+/** What we could tell about a candidate domain's homepage: is it live, is it a parked/for-sale
+ *  placeholder, and did it mention a distinctive company token (the strong on-brand signal)? */
+interface HomeStatus { live: boolean; parked: boolean; onBrand: boolean }
+
+async function homepageStatus(domain: string, tokens: string[]): Promise<HomeStatus> {
   const { egressInit } = await import("../net/egress");
   for (const scheme of ["https", "http"]) {
     try {
@@ -151,20 +155,21 @@ async function homepageOnBrand(domain: string, tokens: string[]): Promise<boolea
       if (!res.ok) continue;
       const body = (await res.text()).slice(0, MAX_BODY).toLowerCase();
       if (!body) continue;
-      if (PARKED.test(body)) return false;
-      // On-brand: the homepage must mention a distinctive company token. This is what makes
-      // name-guessing safe — acme.com only counts for "Acme" if its page actually says "acme".
-      if (tokens.some((t) => body.includes(t))) return true;
-      // A redirect that landed on the same registrable root is also a positive signal even if
-      // the token check is noisy (e.g. heavy-JS homepages with little server-rendered text).
+      if (PARKED.test(body)) return { live: true, parked: true, onBrand: false };
+      // On-brand: the homepage mentions a distinctive company token. This is the strong signal —
+      // acme.com is confidently "Acme" if its page actually says "acme".
+      if (tokens.some((t) => body.includes(t))) return { live: true, parked: false, onBrand: true };
+      // A redirect that landed on the same registrable root is also strong even if the token check
+      // is noisy (heavy-JS homepages with little server-rendered text).
       const landed = hostOf(res.url);
-      if (landed && domainRoot(landed) === domainRoot(domain) && body.length > 600) return true;
-      return false;
+      if (landed && domainRoot(landed) === domainRoot(domain) && body.length > 600) return { live: true, parked: false, onBrand: true };
+      // Live, real, non-parked site but no distinctive token surfaced (common for JS-rendered homepages).
+      return { live: true, parked: false, onBrand: false };
     } catch {
       /* try http, then give up */
     }
   }
-  return false;
+  return { live: false, parked: false, onBrand: false };
 }
 
 /**
@@ -212,14 +217,30 @@ export async function domainResolverStats(): Promise<{ attempts: number; resolve
   return { attempts, resolved, withMx, rate: attempts ? Math.round((resolved / attempts) * 100) / 100 : 0 };
 }
 
-/** Verify ONE candidate: returns confidence>0 only if it's live + on-brand. mx checked too. */
+/**
+ * Verify ONE candidate. Two acceptance paths:
+ *   STRONG  — live, not parked, and ON-BRAND (a distinctive company token on the homepage, or a
+ *             same-root redirect). High confidence.
+ *   MAIL    — live, not parked, token check MISSED (typical of JS-rendered homepages), BUT the
+ *             domain publishes MX. A real, mail-receiving site at the company's own/guessed host is
+ *             very likely theirs, so we accept it at LOWER confidence to BUILD an email guess. This
+ *             is safe because nothing is ever sent on a guess: the continuous validator + port-25
+ *             SMTP confirm every address before it can enroll. This path is the unlock that turns
+ *             "named but no domain" rows into contactable ones (the email gate that was at ~6%).
+ * A dead, parked, or no-MX-without-token domain is rejected (null).
+ */
 async function verify(domain: string, tokens: string[], via: string): Promise<DomainResolution | null> {
-  const onBrand = await homepageOnBrand(domain, tokens);
-  if (!onBrand) return null;
+  const st = await homepageStatus(domain, tokens);
+  if (!st.live || st.parked) return null;
   const mx = await hasMx(domain);
-  // hint / source-url domains are inherently more trustworthy than a pure name guess.
-  const base = via === "name_guess" ? 0.8 : 0.92;
-  return { domain, confidence: mx ? base : base - 0.3, via, mx };
+  if (st.onBrand) {
+    // hint / source-url domains are inherently more trustworthy than a pure name guess.
+    const base = via === "name_guess" ? 0.8 : 0.92;
+    return { domain, confidence: mx ? base : base - 0.3, via, mx };
+  }
+  // Not provably on-brand, but a live mail-receiving site at this host — accept to build a guess.
+  if (mx) return { domain, confidence: via === "name_guess" ? 0.45 : 0.6, via, mx: true };
+  return null;
 }
 
 /* ------------------------------------------------------------------ */

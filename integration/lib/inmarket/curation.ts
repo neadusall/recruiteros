@@ -171,11 +171,17 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
   const byId = new Map(store.map((r) => [r.id, r]));
 
   const now = Date.parse(opts.nowIso) || Date.now();
-  const recuratAfterMs = opts.recuratAfterMs ?? 24 * 60 * 60 * 1000; // refresh a company at most daily
+  const recuratAfterMs = opts.recuratAfterMs ?? 24 * 60 * 60 * 1000; // refresh a NAMED company at most daily
+  // Unnamed (sourced) rows retry MUCH sooner: the free naming methods (search-engine scraping, team
+  // pages) keep improving and a row with no name has nothing to lose by being re-researched. This is
+  // what reprocesses the backlog of "sourced" companies so the NAMED count climbs instead of being
+  // frozen for 24h behind the daily-refresh window.
+  const RETRY_SOURCED_MS = 90 * 60 * 1000; // re-attempt naming on a still-unnamed company every ~90 min
 
   // Highest-intent first; research the NOT-yet-done companies before refreshing stale ones, and
   // never re-touch one that's already approved/enrolled. This is the rotation: each run advances
-  // through the pool, so over the day the whole pool gets a decision-maker.
+  // through the pool, so over the day the whole pool gets a decision-maker — and unnamed rows get
+  // repeated naming attempts until they resolve.
   const targets = leads
     .filter((l) => l.company && (l.score ?? 0) >= minScore)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
@@ -185,7 +191,10 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
       const existing = byId.get(curationId(l.company, role));
       if (!existing) return true;                                      // never researched → do it
       if (existing.status === "enrolled" || existing.status === "queued") return false; // locked
-      return now - (Date.parse(existing.curatedAt) || 0) >= recuratAfterMs;             // refresh only if stale
+      const age = now - (Date.parse(existing.curatedAt) || 0);
+      // still no name → keep retrying on the fast window; named/contactable → daily refresh only.
+      const due = existing.status === "sourced" ? Math.min(recuratAfterMs, RETRY_SOURCED_MS) : recuratAfterMs;
+      return age >= due;
     })
     .slice(0, limit);
 
@@ -434,7 +443,13 @@ export async function listCurated(opts?: {
   if (opts?.contactableOnly) rows = rows.filter((r) => !!r.likelyEmail);
   if (opts?.namedOnly) rows = rows.filter((r) => !!r.managerName);
   if (opts?.validatedOnly) rows = rows.filter((r) => r.emailValidated === true && !r.emailInvalid);
-  rows.sort((a, b) => (b.curatedAt > a.curatedAt ? 1 : -1) || b.score - a.score);
+  // ENRICHMENT-FIRST ordering so the list always LEADS with the most actionable leads (a real person
+  // + email), then named-but-email-pending, then title-only — each tier by hiring-intent score. This
+  // keeps the best prospects on top even while the full list (incl. freshly-sourced rows) populates
+  // and climbs underneath. Ties broken by most-recently-curated so new work surfaces.
+  const rank = (r: CuratedProspect): number =>
+    (r.status === "contactable" || r.status === "queued" || r.status === "enrolled") ? 0 : r.managerName ? 1 : 2;
+  rows.sort((a, b) => rank(a) - rank(b) || b.score - a.score || (b.curatedAt > a.curatedAt ? 1 : -1));
   return rows.slice(0, opts?.limit ?? 500);
 }
 

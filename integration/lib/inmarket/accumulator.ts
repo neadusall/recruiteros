@@ -71,7 +71,7 @@ const CURATE_CYCLE_MS = envNum("INMARKET_CURATE_INTERVAL_SEC", 240) * 1000; // r
 const CURATE_BATCH = envNum("INMARKET_CURATE_BATCH", 300);        // companies researched per tick
 const CURATE_CANDIDATES = envNum("INMARKET_CURATE_CANDIDATES", 6000); // pool slice we choose the not-yet-done batch from
 const CURATE_CONCURRENCY = envNum("INMARKET_CURATE_CONCURRENCY", 16); // parallel researches (rotated across egress IPs)
-const CURATE_MIN_SCORE = envNum("INMARKET_CURATE_MIN_SCORE", 25); // research a wider band (was 35) so more companies qualify
+const CURATE_MIN_SCORE = envNum("INMARKET_CURATE_MIN_SCORE", 10); // research a much wider band (was 25) so the funnel keeps climbing past the top-intent few hundred
 const VERIFY_BATCH = envNum("INMARKET_VERIFY_BATCH", 800);        // curated emails free-verified (MX/role/disposable) per tick
 const FINDER_BATCH = 40;               // pending people SMTP-verified per tick (opt-in; bounded — slow)
 // FAST INFLOW — brand-new hiring companies/postings flow in on their OWN fast tick (every few

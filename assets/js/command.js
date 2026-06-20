@@ -2617,9 +2617,10 @@
     if (curPollTimer) { clearInterval(curPollTimer); curPollTimer = null; }
     Promise.all([
       send("/in-market", "POST", { action: "curation_funnel" }),
-      // Show every NAMED decision-maker now (email arrives via the later enrichment pass); the row's
-      // badge says whether the email is valid / a guess / still pending.
-      send("/in-market", "POST", { action: "curation_list", namedOnly: true, limit: 500 }),
+      // Populate the WHOLE researched database now — enriched-first (real person + email on top, then
+      // named-email-pending, then title-only researching rows). The list fills immediately and climbs
+      // as the engine works; each row's badge shows its enrichment state (valid / guess / pending).
+      send("/in-market", "POST", { action: "curation_list", limit: 1000 }),
     ]).then(function (rs) {
       var funnel = (rs[0] && rs[0].data && rs[0].data.funnel) || null;
       var health = (rs[0] && rs[0].data && rs[0].data.health) || null;
@@ -2764,11 +2765,16 @@
     // Visible in the list either way, but only rows that already have an email are selectable for
     // push — the "email pending" ones wait for the enrichment pass before they're ready to send.
     var selectable = !enrolled && !!r.likelyEmail;
+    // Title-only (still-researching) rows show the owning title as the person line, with a soft hint,
+    // so the database reads as "populated and enriching" rather than blank.
+    var personName = r.managerName
+      ? '<b>' + esc(r.managerName) + "</b>"
+      : '<b class="muted">' + esc(r.managerTitle) + '</b> <span class="im-email-unv">🔍 finding name…</span>';
     return '<div class="cur-row' + (enrolled ? " cur-enrolled" : "") + '" data-id="' + esc(r.id) + '">' +
       '<input type="checkbox" class="cur-pick" data-id="' + esc(r.id) + '"' + (selectable ? "" : " disabled") + ">" +
       '<div class="cur-main">' +
-        '<div class="cur-person"><b>' + esc(r.managerName || "(title only)") + "</b> " +
-          '<span class="cur-title">' + esc(r.managerTitle) + "</span> " + via + "</div>" +
+        '<div class="cur-person">' + personName + " " +
+          (r.managerName ? '<span class="cur-title">' + esc(r.managerTitle) + "</span> " : "") + via + "</div>" +
         '<div class="cur-ctx"><span class="cur-co">' + esc(r.company) + "</span>" +
           ' <span class="muted">owns</span> ' + esc(r.role) +
           ' · <span class="im-fn">' + esc(r.function) + "</span>" +
