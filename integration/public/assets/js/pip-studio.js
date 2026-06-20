@@ -381,7 +381,11 @@
       if (!confirm("Attach the 2-email sequence (text intro → video follow-up) to " + n + " prospect" + (n > 1 ? "s" : "") + " at " + s.company + "?\nThe video is the SECOND touch; signed links are generated automatically.")) return;
       api("/api/in-market/attach", { method: "POST", body: JSON.stringify({
         videoKey: vk, roleTitle: s.roleTitle, company: s.company,
-      }) }).then(function (r) { toast("Sequence attached to " + (r.attached || 0) + " prospect(s) at " + s.company); })
+      }) }).then(function (r) {
+        var msg = "Sequence attached to " + (r.attached || 0) + " prospect(s) at " + s.company;
+        if (r.armed) msg += r.automationOn ? " — sending email 1 now, video follow-up in a few days" : " — armed (turn on automation to send)";
+        toast(msg);
+      })
         .catch(function (e) { toast("Attach failed: " + e.message); });
     }).catch(function (e) { toast("Lookup failed: " + e.message); });
   }

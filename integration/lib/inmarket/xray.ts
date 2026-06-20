@@ -40,6 +40,7 @@ import {
   type EmailGuess,
 } from "./email";
 import { checkEmailFree, type EmailCheck } from "./emailVerify";
+import { recordSearch, isAvailable } from "./searchHealth";
 import type { PeopleGraph, PeopleQuery, PersonCandidate } from "../signals/hiring";
 
 /* ------------------------------------------------------------------ */
@@ -416,6 +417,9 @@ export async function xraySearch(
   const queries = buildXrayQueries(company, title);
   const fetcher = opts.fetchImpl ?? searchFetch;
   const engines = opts.maxEngines ? ENGINES.slice(0, opts.maxEngines) : ENGINES;
+  // The health system (back-off + the live pill) is real-engine state; skip it for injected
+  // fetchers so tests stay deterministic and don't pollute the server's throttle accounting.
+  const useHealth = !opts.fetchImpl;
 
   const key = `${companyAnchor(company)}::${normalizeTitle(title)}`;
   const cached = cache.get(key);
@@ -426,10 +430,17 @@ export async function xraySearch(
 
   outer: for (const query of queries) {
     for (const eng of engines) {
+      // Honor the shared back-off: a recently-throttled engine is rested (the same state the
+      // free naming finder uses, so a throttle on one path rests it for both).
+      if (useHealth && !isAvailable(eng.id)) {
+        log.push({ engine: eng.id, query, status: 0, throttled: true, found: 0 });
+        continue;
+      }
       let throttled = false;
       let parsed: ParsedProfile[] = [];
-      // up to 2 attempts — a throttle rotates to a fresh egress IP on the retry.
-      for (let attempt = 0; attempt < 2; attempt++) {
+      // up to 3 attempts — each goes out a FRESH rotated egress IP, so a per-IP rate limit is
+      // dodged by moving the retry to another address before we give up on the engine.
+      for (let attempt = 0; attempt < 3; attempt++) {
         const { status, body } = await fetcher(eng.url(query));
         if (isThrottle(status, body)) { throttled = true; continue; }
         throttled = false;
@@ -448,6 +459,8 @@ export async function xraySearch(
         break;
       }
       log.push({ engine: eng.id, query, status: throttled ? 429 : 200, throttled, found: parsed.length });
+      // Feed the outcome back into the shared health/back-off accounting.
+      if (useHealth) recordSearch(eng.id, throttled ? "throttled" : parsed.length ? "ok" : "empty");
       if (throttled || !parsed.length) continue;
 
       for (const p of parsed) {

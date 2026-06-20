@@ -92,10 +92,22 @@ export async function POST(req: Request) {
     at: new Date().toISOString(),
   };
 
+  // Re-enroll only OUTREACHABLE prospects (never re-touch someone who replied/booked/won/closed/DNC).
+  const ENROLLABLE = new Set(["queued", "in_sequence", "nurture"]);
+  const arm = b?.arm !== false; // arm the sending cadence unless the caller opts out
+
   let attached = 0;
+  const campaignIds = new Set<string>();
   for (const p of targets) {
     const next: Prospect = { ...p, personalizedVideo: pv };
     if (campaignId) next.campaignId = campaignId;
+    if (arm && ENROLLABLE.has(p.status)) {
+      // Re-enroll into the 2-touch sequence from day 0 (email 1 now, video at day N).
+      next.status = "queued";
+      next.dripStage = 0;
+      next.sequenceStartedAt = undefined;
+    }
+    if (next.campaignId) campaignIds.add(next.campaignId);
     await core.saveProspect(next);
     await core.recordActivity({
       id: `act_${videoKey}_${p.id}`.slice(0, 80),
@@ -110,5 +122,24 @@ export async function POST(req: Request) {
     attached++;
   }
 
-  return ok({ attached, share, sequence: pv.sequence });
+  // ARM the campaign(s): set the approved 2-touch video model + activate autopilot so the cadence
+  // engine sends email 1 (day 0) → email 2 video follow-up (day N). Gated globally by AUTOMATION_ENABLED.
+  let armed = 0;
+  if (arm) {
+    const { videoSequenceModel } = await import("../../../../lib/inmarket/videoOpener");
+    for (const cid of campaignIds) {
+      const c = await core.getCampaign(cid);
+      if (!c) continue;
+      c.model = videoSequenceModel(draft, c.motion);
+      c.outreachApproved = true;
+      c.status = "active";
+      c.autoRun = true;
+      c.updatedAt = new Date().toISOString();
+      await core.saveCampaign(c);
+      armed++;
+    }
+  }
+
+  const automationOn = ["on", "1", "true", "yes"].includes((process.env.AUTOMATION_ENABLED ?? "").trim().toLowerCase());
+  return ok({ attached, armed, automationOn, share, sequence: pv.sequence });
 }

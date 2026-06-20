@@ -16,6 +16,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import type { CampaignModel, Motion } from "../core/types";
 
 const MODEL =
   process.env.RECRUITEROS_OPENER_MODEL ??
@@ -99,4 +100,25 @@ export function templateOpener(input: OpenerInput): OpenerDraft {
       : `Hi {{firstName}},\n\nFollowing up on {{role}} — wanted to put a face to it. Here's a 20-second walkthrough of your actual posting with a couple of ideas:\n\n{{videoembed}}\n\nIf {{role}} is still a priority, open to a quick chat?`,
   };
   return { first, second, source: "template" };
+}
+
+/**
+ * Turn a drafted sequence into a runnable, APPROVED CampaignModel the autopilot cadence sends:
+ * touch 1 (day 0) = the text intro, touch 2 (day N) = the video follow-up (its body carries
+ * {{videoembed}}, filled per prospect from personalizedVideo at send time). The video is always
+ * the SECOND touch. Auto-approved because the operator explicitly attached the sequence.
+ */
+export function videoSequenceModel(draft: OpenerDraft, motion: Motion, videoDelayDays = 3): CampaignModel {
+  const nowIso = new Date().toISOString();
+  return {
+    generatedAt: nowIso,
+    approvedAt: nowIso,
+    engine: "video_sequence",
+    motion,
+    summary: "Text intro → personalized video follow-up (video is the 2nd touch)",
+    touches: [
+      { key: "email_intro", day: 0, channel: "email", label: "Text intro", subject: draft.first.subject, body: draft.first.body },
+      { key: "email_video", day: Math.max(1, Math.round(videoDelayDays)), channel: "email", label: "Video follow-up", subject: draft.second.subject, body: draft.second.body },
+    ],
+  };
 }
