@@ -4,6 +4,10 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
+# Don't let Playwright's postinstall download its (glibc) browser — on Alpine we use the
+# musl-native system Chromium at runtime instead (see the runtime stage).
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
 # Install deps first for layer caching
 COPY integration/package.json integration/package-lock.json integration/
 RUN cd integration && npm ci
@@ -20,9 +24,13 @@ WORKDIR /app/integration
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# ffmpeg powers the picture-in-picture role-video compositor (lib/inmarket/roleVideo.ts):
-# it overlays the recorded webcam clip onto the page-scroll capture and emits the MP4 + GIF.
-RUN apk add --no-cache ffmpeg
+# Runtime deps for the hiring-signal video pipeline:
+#  - ffmpeg: the PiP compositor + MP4/GIF/teaser encoder (lib/inmarket/roleVideo + roleShot).
+#  - chromium (+ font/lib deps): the page-scroll CAPTURE (Playwright). On Alpine/musl, Playwright's
+#    own download won't run, so we install the system Chromium and point Playwright at it below.
+RUN apk add --no-cache ffmpeg chromium nss freetype harfbuzz ca-certificates ttf-freefont
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PLAYWRIGHT_CHROMIUM_PATH=/usr/bin/chromium-browser
 
 COPY --from=build /app/integration/.next ./.next
 COPY --from=build /app/integration/public ./public
