@@ -37,7 +37,9 @@ import { promises as dns } from "dns";
 
 const CACHE_KEY = "inmarket_domain_v1";
 const POS_TTL_MS = 30 * 24 * 60 * 60 * 1000; // re-verify a found domain monthly
-const NEG_TTL_MS = 7 * 24 * 60 * 60 * 1000;  // retry a not-found company weekly
+const NEG_TTL_MS = 6 * 60 * 60 * 1000;       // retry a not-found company every 6h — short so the
+                                             // looser (live + MX) acceptance reprocesses the backlog
+                                             // of domain misses quickly instead of being stuck a week
 const FETCH_TIMEOUT_MS = 6_000;
 const MAX_CANDIDATES = 6;                     // bound fetches per company
 const MAX_BODY = 60_000;                      // cap homepage bytes scanned

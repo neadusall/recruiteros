@@ -41,6 +41,7 @@ import { guessEmail, emailDomainFrom, splitFullName, type EmailGuess } from "./e
 import { resolveCompanyDomain, type DomainResolution } from "./domain";
 import { resolvePersonEmail } from "./deepContact";
 import { paidEmailEnabled, findEmailIcypeas } from "./paidEmail";
+import { paidNamingEnabled, findDecisionMakerRapid } from "./paidNaming";
 import { recordSearch, isAvailable } from "./searchHealth";
 
 /* ------------------------------------------------------------------ */
@@ -588,6 +589,27 @@ export async function resolveDecisionMaker(
     });
   } catch {
     resolution = null;
+  }
+
+  // PAID NAMING FALLBACK (RapidAPI, env-gated) — cost discipline: only when FREE research left us
+  // without a real name. We fetch decision-maker candidates from the configured people-search and
+  // run them back through the SAME scorer (so title/function fit + tier still apply), then continue
+  // into the normal email-building path below. No-op (zero spend) unless RAPID_NAMING_KEY is set.
+  if (!resolution?.best?.candidate.fullName && paidNamingEnabled()) {
+    try {
+      const rapid = await findDecisionMakerRapid(company, resolvedDomain || undefined, target.candidateTitles);
+      if (rapid.length) {
+        const paidGraph: PeopleGraph = { id: "rapid_naming", isConfigured: () => true, search: async () => rapid };
+        const r2 = await resolveHiringManager(company, roleTitle, {
+          graphs: [paidGraph],
+          companyDomain: resolvedDomain || undefined,
+          companySize: opts?.companySize,
+          maxCandidatesPerGraph: 25,
+          alternates: 2,
+        });
+        if (r2?.best?.candidate.fullName) resolution = r2;
+      }
+    } catch { /* paid rung is best-effort; fall through to title-level */ }
   }
 
   const best = resolution?.best ?? null;
