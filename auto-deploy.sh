@@ -59,6 +59,20 @@ if [ ! -f "$DIR/.edge-recreate-v2" ]; then
   fi
 fi
 
+# One-time: set up the free IPv6 /64 egress rotation so the Hire Signals scraper (DuckDuckGo/Bing
+# naming, team pages, news) can spread across dozens of source IPs and run hard WITHOUT getting
+# rate-limited. Self-detecting + idempotent (see setup-egress.sh); persists via its own systemd
+# unit. Marker-guarded so it runs exactly once. Bump the marker to re-run after changing COUNT.
+if [ ! -f "$DIR/.egress-setup-v1" ] && [ -f "$DIR/setup-egress.sh" ]; then
+  echo "$(date -u) one-time: configuring IPv6 /64 egress rotation for the scraper..." >> "$LOG"
+  if bash "$DIR/setup-egress.sh" 64 >> "$LOG" 2>&1; then
+    touch "$DIR/.egress-setup-v1"
+    echo "$(date -u) egress rotation configured" >> "$LOG"
+  else
+    echo "$(date -u) egress setup failed, will retry next cycle" >> "$LOG"
+  fi
+fi
+
 # Fetch quietly; compare local vs remote.
 git fetch origin "$BRANCH" --quiet
 LOCAL=$(git rev-parse HEAD)

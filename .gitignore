@@ -30,3 +30,6 @@ node_modules
 # durable on-disk store (in-market pool snapshots, accounts, sessions) — never commit
 .data/
 **/.data/
+
+# server-local one-time setup markers
+.egress-setup-*
