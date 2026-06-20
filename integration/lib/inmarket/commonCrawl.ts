@@ -32,6 +32,19 @@ const CACHE_MAX = 20_000;
 const POS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const NEG_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+/* Reputation governor for the hosted INDEX server (index.commoncrawl.org).
+ * The WARC data host (data.commoncrawl.org → S3) is robust and indifferent to client/IP; the index
+ * server is fragile and per-IP rate-limited — measured (June 2026): it 503s/timeouts after a handful
+ * of requests even sequentially, and fails ~100% at concurrency ≥4. So EVERY index request funnels
+ * through one paced, single-flight, adaptive governor — independent of how many researches the worker
+ * runs in parallel. We deliberately sit well below the ceiling to never red-flag this box's IP. */
+const clampInt = (v: string | undefined, def: number, lo: number, hi: number): number =>
+  Math.min(Math.max(Number.isFinite(Number(v)) && v ? Math.round(Number(v)) : def, lo), hi);
+const IDX_CONCURRENCY = clampInt(process.env.CC_INDEX_CONCURRENCY, 1, 1, 3);     // hard cap (1 = serialized)
+const IDX_MIN_INTERVAL_MS = clampInt(process.env.CC_INDEX_MIN_INTERVAL_MS, 2_000, 500, 30_000); // pacing floor
+const IDX_MAX_INTERVAL_MS = clampInt(process.env.CC_INDEX_MAX_INTERVAL_MS, 30_000, 2_000, 120_000); // adaptive ceiling
+const IDX_MAX_COOLDOWN_MS = 60_000;  // cap on a single Retry-After / throttle pause
+
 // Team-roster path prefixes, best-first (rosters before the company-story "about").
 const PATHS = ["team", "leadership", "our-team", "about-us", "about", "people", "company/team"];
 // Strict team-page matcher applied to index hits, so a prefix like "/team" can't pull "/team-parker".
@@ -46,19 +59,80 @@ const domainCache = new Map<string, { at: number; pages: string[] }>();
 
 let recentFails = 0;
 let breakerUntil = 0;
+let breakerTrips = 0;            // consecutive trips → escalating rest (a persistently angry IP rests longer)
 function note(ok: boolean): void {
-  if (ok) { recentFails = 0; return; }
-  if (++recentFails >= 8) { breakerUntil = Date.now() + 5 * 60 * 1000; recentFails = 0; } // rest 5 min
+  if (ok) { recentFails = 0; breakerTrips = Math.max(0, breakerTrips - 1); return; }
+  if (++recentFails >= 8) {
+    breakerTrips++;
+    const rest = Math.min(30 * 60 * 1000, 5 * 60 * 1000 * breakerTrips); // 5,10,15…min, capped at 30
+    breakerUntil = Date.now() + rest;
+    recentFails = 0;
+  }
 }
 function breakerOpen(): boolean { return Date.now() < breakerUntil; }
 
+/* ------------------------------------------------------------------ */
+/* Index governor: single-flight, paced, adaptive, Retry-After aware   */
+/* ------------------------------------------------------------------ */
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+let idxInterval = IDX_MIN_INTERVAL_MS; // adaptive spacing: grows on throttle, relaxes on clean success
+let idxCooldownUntil = 0;              // global pause (honors Retry-After) — nothing hits the index until then
+let lastIdxAt = 0;                     // wall time of the last index request (for spacing)
+let idxActive = 0;                     // in-flight index requests (capped at IDX_CONCURRENCY)
+let jitterSeed = 0;                    // tiny deterministic spread so retries don't lock-step
+const idxWaiters: Array<() => void> = [];
+
+/** Acquire the right to make ONE index request: wait for a slot, then respect spacing + any cooldown. */
+async function idxAcquire(): Promise<void> {
+  if (idxActive >= IDX_CONCURRENCY) await new Promise<void>((res) => idxWaiters.push(res));
+  idxActive++;
+  for (;;) {
+    const nowMs = Date.now();
+    const jitter = (jitterSeed = (jitterSeed + 137) % 400);            // 0–399ms, no Math.random
+    const wait = Math.max(0, lastIdxAt + idxInterval + jitter - nowMs, idxCooldownUntil - nowMs);
+    if (wait <= 0) break;
+    await sleep(wait);
+  }
+  lastIdxAt = Date.now();
+}
+function idxRelease(): void {
+  idxActive = Math.max(0, idxActive - 1);
+  idxWaiters.shift()?.();
+}
+/** Back off after a 503/429: widen spacing, set a global cooldown (Retry-After if given), feed the breaker. */
+function onThrottle(retryAfter: string | null): void {
+  idxInterval = Math.min(IDX_MAX_INTERVAL_MS, Math.round(idxInterval * 1.8) + 500);
+  const ra = Number(retryAfter);
+  const cd = Number.isFinite(ra) && ra > 0 ? ra * 1000 : idxInterval;
+  idxCooldownUntil = Math.max(idxCooldownUntil, Date.now() + Math.min(cd, IDX_MAX_COOLDOWN_MS));
+  note(false);
+}
+/** Record a non-throttle index outcome: relax pacing toward the floor on success; feed the breaker. */
+function onIdxResult(serverResponded: boolean): void {
+  if (serverResponded) idxInterval = Math.max(IDX_MIN_INTERVAL_MS, Math.round(idxInterval * 0.9));
+  note(serverResponded);
+}
+
 /** Liveness for the engine-health surface (so a CC outage is visible, not silent). */
-export function commonCrawlHealth(): { resting: boolean; restingForSec: number; collections: string[]; cachedDomains: number } {
+export function commonCrawlHealth(): {
+  resting: boolean; restingForSec: number; collections: string[]; cachedDomains: number;
+  /** Live governor telemetry — wire these into your monitor/thresholds (see below). */
+  index: { spacingMs: number; concurrency: number; inFlight: number; cooldownForSec: number; breakerTrips: number };
+} {
+  const nowMs = Date.now();
   return {
     resting: breakerOpen(),
-    restingForSec: breakerOpen() ? Math.round((breakerUntil - Date.now()) / 1000) : 0,
+    restingForSec: breakerOpen() ? Math.round((breakerUntil - nowMs) / 1000) : 0,
     collections: collections.ids.slice(),
     cachedDomains: domainCache.size,
+    index: {
+      spacingMs: idxInterval,                                                  // current adaptive spacing
+      concurrency: IDX_CONCURRENCY,                                            // hard in-flight cap
+      inFlight: idxActive,
+      cooldownForSec: idxCooldownUntil > nowMs ? Math.round((idxCooldownUntil - nowMs) / 1000) : 0,
+      breakerTrips,                                                            // escalation level (0 = healthy)
+    },
   };
 }
 
@@ -66,16 +140,28 @@ export function commonCrawlHealth(): { resting: boolean; restingForSec: number; 
 /* Fetch helpers (timed out, never throw)                              */
 /* ------------------------------------------------------------------ */
 
+/** The ONLY way to touch the index server: governed (paced, single-flight, adaptive, breaker-aware).
+ *  Records throttle/health centrally so callers just read the body — they no longer call note(). */
 async function idxFetch(url: string): Promise<Response | null> {
-  try { return await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(IDX_TIMEOUT_MS) }); }
-  catch { return null; }
+  if (breakerOpen()) return null;               // resting — don't pile on a hurting IP
+  await idxAcquire();
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(IDX_TIMEOUT_MS) });
+    if (res.status === 503 || res.status === 429) { onThrottle(res.headers.get("retry-after")); return res; }
+    onIdxResult(true);                           // any HTTP reply (200/404/…) means the server is up
+    return res;
+  } catch {
+    onIdxResult(false);                          // network error / timeout — counts against the breaker
+    return null;
+  } finally {
+    idxRelease();
+  }
 }
 
 async function latestCollections(): Promise<string[]> {
   if (collections.ids.length && Date.now() - collections.at < 24 * 60 * 60 * 1000) return collections.ids;
   const res = await idxFetch(`${IDX}/collinfo.json`);
-  if (!res || !res.ok) { note(!!res); return collections.ids; } // keep stale on failure
-  note(true);
+  if (!res || !res.ok) return collections.ids; // keep stale on failure (idxFetch already noted health)
   try {
     const j = (await res.json()) as Array<{ id?: string }>;
     const ids = j.map((c) => c.id).filter((x): x is string => !!x).slice(0, 2); // two most-recent crawls
@@ -92,10 +178,7 @@ async function indexLookup(col: string, domain: string): Promise<Rec[]> {
   for (const p of PATHS) {
     if (out.length >= MAX_PAGES) break;
     const res = await idxFetch(`${IDX}/${col}-index?url=${encodeURIComponent(domain + "/" + p)}&matchType=prefix&output=json&limit=6`);
-    if (!res) { note(false); continue; }
-    if (res.status === 404) { note(true); continue; }   // 404 = "no capture" (normal) → CC is up
-    if (!res.ok) { note(false); continue; }
-    note(true);
+    if (!res || !res.ok) continue;                        // miss/throttle/outage — idxFetch already noted health
     let text = ""; try { text = await res.text(); } catch { continue; }
     for (const line of text.split("\n")) {
       if (!line.trim() || out.length >= MAX_PAGES) break;

@@ -283,11 +283,27 @@ export async function mergeCuratedRows(rows: CuratedProspect[]): Promise<{ newly
   await withCurationLock(async () => {
     const current = await load();
     const map = new Map(current.map((r) => [r.id, r]));
-    for (const row of rows) {
-      const prev = map.get(row.id);
+    for (const incoming of rows) {
+      const prev = map.get(incoming.id);
       if (prev && (prev.status === "enrolled" || prev.status === "queued" || prev.status === "suppressed")) {
         updated++; continue; // locked/suppressed since selection — don't overwrite its lifecycle
       }
+      // NEVER DOWNGRADE a known decision-maker. When the free sources are degraded (search blocked,
+      // domain resolution flaky), a re-research can come back with NO name — that must not ERASE a
+      // name we already had (this is what eroded the Named count). If the new pull lost the name but
+      // we had one, keep the prior person/email and only let the fresh data fill blanks.
+      const row = (!incoming.managerName && prev?.managerName) ? {
+        ...incoming,
+        managerName: prev.managerName,
+        managerTitle: prev.managerTitle,
+        managerVia: prev.managerVia,
+        managerTier: prev.managerTier,
+        domain: incoming.domain ?? prev.domain,
+        likelyEmail: incoming.likelyEmail ?? prev.likelyEmail,
+        emailPattern: incoming.emailPattern ?? prev.emailPattern,
+        emailSource: incoming.emailSource ?? prev.emailSource,
+        status: prev.status === "contactable" ? "contactable" as const : "named" as const,
+      } : incoming;
       const sameEmail = !!prev && (prev.likelyEmail ?? "") === (row.likelyEmail ?? "");
       map.set(row.id, {
         ...row,
