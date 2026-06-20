@@ -377,11 +377,10 @@
     api("/api/in-market/attach?company=" + encodeURIComponent(s.company)).then(function (j) {
       var n = (j && j.count) || 0;
       if (!n) { toast("No prospects at " + s.company + " yet — promote them from Hire Signals first"); return; }
-      if (!confirm("Attach this video to " + n + " prospect" + (n > 1 ? "s" : "") + " at " + s.company + "?\nTheir sequence emails will show it via the {{videoembed}} merge field.")) return;
+      if (!confirm("Attach the 2-email sequence (text intro → video follow-up) to " + n + " prospect" + (n > 1 ? "s" : "") + " at " + s.company + "?\nThe video is the SECOND touch; signed links are generated automatically.")) return;
       api("/api/in-market/attach", { method: "POST", body: JSON.stringify({
-        videoKey: vk, watchUrl: watchPage(vk, s.company, s.roleTitle), gifUrl: publicGif(vk),
-        roleTitle: s.roleTitle, company: s.company,
-      }) }).then(function (r) { toast("Attached to " + (r.attached || 0) + " prospect(s) at " + s.company); })
+        videoKey: vk, roleTitle: s.roleTitle, company: s.company,
+      }) }).then(function (r) { toast("Sequence attached to " + (r.attached || 0) + " prospect(s) at " + s.company); })
         .catch(function (e) { toast("Attach failed: " + e.message); });
     }).catch(function (e) { toast("Lookup failed: " + e.message); });
   }

@@ -219,7 +219,15 @@ export interface Prospect {
     videoKey: string;
     watchUrl: string;
     gifUrl: string;
+    mp4Url?: string;
     roleTitle?: string;
+    /** The attached outreach SEQUENCE: email 1 is text-only, email 2 is the video follow-up. */
+    sequence?: {
+      firstEmail: { subject: string; body: string };
+      secondEmail: { subject: string; body: string };
+    };
+    /** Share-link expiry (epoch ms; 0 = never) so the UI can warn before links go stale. */
+    expiresAt?: number;
     at: string;
   };
   createdAt: string;

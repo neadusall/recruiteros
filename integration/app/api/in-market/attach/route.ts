@@ -56,11 +56,10 @@ export async function POST(req: Request) {
 
   const b = await body<any>(req);
   const videoKey = String(b?.videoKey ?? "").trim();
-  const watchUrl = String(b?.watchUrl ?? "").trim();
-  const gifUrl = String(b?.gifUrl ?? "").trim();
-  if (!videoKey || !watchUrl || !gifUrl) return fail("missing videoKey/watchUrl/gifUrl", 422);
+  if (!videoKey) return fail("missing videoKey", 422);
 
   const company = b?.company ? String(b.company) : "";
+  const roleTitle = b?.roleTitle ? String(b.roleTitle) : "";
   const ids: string[] = Array.isArray(b?.prospectIds) ? b.prospectIds.map(String) : [];
   const campaignId = b?.campaignId ? String(b.campaignId) : "";
 
@@ -71,9 +70,25 @@ export async function POST(req: Request) {
   else if (company) targets = all.filter((p) => companyMatch(p.company, company));
   else return fail("provide prospectIds or company", 422);
 
+  // SIGN the share URLs server-side (don't trust client URLs) — the recipient surface requires
+  // a valid signature; this also makes the attached links expire per the share TTL.
+  const { compositeShareUrls } = await import("../../../../lib/inmarket/shareSign");
+  const share = compositeShareUrls(videoKey, { company, roleTitle });
+
+  // Generate the TWO-EMAIL SEQUENCE once (text intro → video follow-up) and attach to every
+  // prospect, so outreach runs the right cadence — the video is ALWAYS the second touch.
+  const { draftVideoOpener, templateOpener } = await import("../../../../lib/inmarket/videoOpener");
+  const seqInput = { company, roleTitle, motion: "bd" as const };
+  const draft = (company && roleTitle ? await draftVideoOpener(seqInput) : null) || templateOpener(seqInput);
+
   const pv = {
-    videoKey, watchUrl, gifUrl,
-    roleTitle: b?.roleTitle ? String(b.roleTitle) : undefined,
+    videoKey,
+    watchUrl: share.watch,
+    gifUrl: share.gif,
+    mp4Url: share.mp4,
+    roleTitle: roleTitle || undefined,
+    sequence: { firstEmail: draft.first, secondEmail: draft.second },
+    expiresAt: share.exp,
     at: new Date().toISOString(),
   };
 
@@ -89,11 +104,11 @@ export async function POST(req: Request) {
       type: "video_attached",
       channel: "system",
       at: pv.at,
-      summary: `PiP video attached${pv.roleTitle ? ` (${pv.roleTitle})` : ""}: ${watchUrl}`,
+      summary: `PiP video sequence attached${pv.roleTitle ? ` (${pv.roleTitle})` : ""}: ${share.watch}`,
       campaignId: next.campaignId,
     }).catch(() => {});
     attached++;
   }
 
-  return ok({ attached });
+  return ok({ attached, share, sequence: pv.sequence });
 }
