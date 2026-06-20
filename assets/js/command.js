@@ -2602,7 +2602,7 @@
       var d = r && r.data; if (!d || !d.funnel) return;
       curLastSyncMs = Date.now();   // backend answered → link is healthy
       var node = document.getElementById("curStats"); if (!node) return;
-      node.innerHTML = curStatsInner(d.funnel, d.health || null, d.search || null, d.fleet || null);
+      node.innerHTML = curStatsInner(d.funnel, d.health || null, d.search || null, d.fleet || null, d.cc || null);
       curPaintSync();               // the re-render reset the pill text; restore it immediately
       var rc = document.getElementById("curResearched");
       if (rc) rc.textContent = (d.funnel.total || 0).toLocaleString();
@@ -2628,10 +2628,11 @@
       var health = (rs[0] && rs[0].data && rs[0].data.health) || null;
       var search = (rs[0] && rs[0].data && rs[0].data.search) || null;
       var fleet = (rs[0] && rs[0].data && rs[0].data.fleet) || null;
+      var cc = (rs[0] && rs[0].data && rs[0].data.cc) || null;
       var list = (rs[1] && rs[1].data && rs[1].data.curated) || [];
       curLastTotal = (funnel && funnel.total) || 0;
       curLastSyncMs = Date.now();   // first good answer from the backend → mark the link live
-      body.innerHTML = curationHtml(funnel, list, health, search, fleet);
+      body.innerHTML = curationHtml(funnel, list, health, search, fleet, cc);
       wireCuration(body, list);
       curPaintSync();               // paint the live pill right away (don't wait a full beat)
       curPollTimer = setInterval(curHeartbeat, CUR_BEAT_MS); // live ongoing updates + link heartbeat
@@ -2662,9 +2663,33 @@
     return '<span class="cur-mini" id="curSync" title="live connection to the lead engine">⚪ connecting…</span>';
   }
 
-  function curEngineLine(h, search) {
-    if (!h && !search) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + "</div>";
-    if (!h) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + curSearchPill(search) + "</div>";
+  // THIS (main) box's Common Crawl index-governor pill — the binding-constraint signal for the
+  // one-box proving-ground test: 🟢 CC ok / 🟡 CC paced Ns (index asking us to slow) / 🔴 CC resting
+  // or trips (this IP is being throttled). Hover for the governor internals.
+  function curCcPill(cc) {
+    if (!cc || !cc.index) return "";
+    var ix = cc.index, icon, label;
+    if (cc.resting) { icon = "🔴"; label = "CC resting " + (cc.restingForSec || 0) + "s"; }
+    else if ((ix.breakerTrips || 0) >= 2) { icon = "🔴"; label = "CC trips " + ix.breakerTrips; }
+    else if ((ix.spacingMs || 0) >= 16000) { icon = "🟡"; label = "CC paced " + Math.round(ix.spacingMs / 1000) + "s"; }
+    else if ((ix.cooldownForSec || 0) > 0) { icon = "🟡"; label = "CC wait " + ix.cooldownForSec + "s"; }
+    else { icon = "🟢"; label = "CC ok"; }
+    var tip = "Common Crawl index governor — spacing " + (ix.spacingMs || 0) + "ms · in-flight " +
+      (ix.inFlight || 0) + "/" + (ix.concurrency || 1) + " · breaker trips " + (ix.breakerTrips || 0) +
+      (cc.resting ? " · RESTING " + (cc.restingForSec || 0) + "s" : "") + " · cached " + (cc.cachedDomains || 0) + " domains";
+    return '<span class="cur-mini" title="' + esc(tip) + '">' + icon + " " + esc(label) + "</span>";
+  }
+
+  // This box's live per-IP yield: decision-makers freshly named in the last 60 min. The headline
+  // number for the one-box test — healthy here means a second IP would multiply it.
+  function curRatePill(n) {
+    return '<span class="cur-mini" title="Decision-makers this box freshly named in the last hour — its live per-IP yield. Multiply by your box count for the fleet projection.">⚡ <b>' + (Number(n) || 0).toLocaleString() + "</b>/hr named</span>";
+  }
+
+  function curEngineLine(h, search, cc, namedPerHour) {
+    var tail = curCcPill(cc) + curRatePill(namedPerHour);
+    if (!h && !search) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + tail + "</div>";
+    if (!h) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + curSearchPill(search) + tail + "</div>";
     function ago(s) {
       if (!s) return null;
       var t = Date.parse(String(s).replace(" ", "T")); if (isNaN(t)) return null;
@@ -2687,6 +2712,7 @@
       part("pool fed", h.lastCycleAt, h.lastCycleOk, 75) +
       part("curated", h.lastCurationAt, h.lastCurationOk, 20) +
       curSearchPill(search) +
+      tail +
       "</div>";
   }
 
@@ -2707,7 +2733,7 @@
 
   // The live-updating stats block (engine pills, daily target, funnel, signal slices). Rebuilt by
   // the poller every ~25s so the numbers climb on screen, WITHOUT touching the list/selection below.
-  function curStatsInner(f, health, search, fleet) {
+  function curStatsInner(f, health, search, fleet, cc) {
     var bs = f.byStatus || {};
     var stages = [
       ["sourced", "Sourced", "company + owning title"],
@@ -2723,7 +2749,7 @@
     var sigRows = (f.bySignal || []).slice(0, 8).map(function (x) {
       return '<div class="cur-mini"><span>' + esc(imSignalLabel(x.signalType)) + '</span><b>' + x.contactable.toLocaleString() + "</b><span class=\"muted\">/ " + x.total.toLocaleString() + "</span></div>";
     }).join("");
-    return curEngineLine(health, search) +
+    return curEngineLine(health, search, cc, f.namedLastHour) +
       curDailyHtml(f.daily) +
       '<div class="cur-funnel">' + funnelRow + "</div>" +
       (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
@@ -2792,7 +2818,7 @@
     return box(head + '<div style="display:flex;flex-wrap:wrap;gap:11px">' + cards + "</div>");
   }
 
-  function curationHtml(funnel, list, health, search, fleet) {
+  function curationHtml(funnel, list, health, search, fleet, cc) {
     var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
 
     var head =
@@ -2801,7 +2827,7 @@
         '<h2>Curated decision-makers <span class="muted">· <span id="curResearched">' + (f.total || 0).toLocaleString() + "</span> researched</span></h2>" +
         '<button type="button" class="btn btn-ghost btn-sm" id="curRefresh">↻ Research more now</button>' +
       "</div>" +
-      '<div id="curStats">' + curStatsInner(f, health, search, fleet) + "</div>";
+      '<div id="curStats">' + curStatsInner(f, health, search, fleet, cc) + "</div>";
 
     if (!list.length) {
       return head + '<div class="empty" style="margin-top:14px">No decision-makers curated yet. The engine researches companies continuously (free: search, team pages, news, GitHub) and new leads appear here automatically as they come in. Hit <b>Research more now</b> to kick it.</div>';
