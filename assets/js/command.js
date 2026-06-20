@@ -2567,25 +2567,47 @@
   var curPicks = {};   // id -> true (selected curated rows for approve/enroll)
 
   var curPollTimer = null;
-  var curLastTotal = 0;   // researched count last rendered — detects new leads arriving
-  // LIVE: every ~25s, refresh the stats block (funnel, daily target, engine + search health) so the
+  var curLastTotal = 0;     // researched count last rendered — detects new leads arriving
+  var curLastSyncMs = 0;    // when the backend last answered — drives the live/reconnecting label
+  var curTick = 0;          // heartbeat counter; we fetch data every Nth tick, tick the label every tick
+  var CUR_BEAT_MS = 4000;   // label ticks this often (so a frozen link is obvious within ~4s)
+  var CUR_FETCH_EVERY = 5;  // pull fresh funnel data every 5th beat (~20s)
+
+  // Repaint just the live-link pill from the client clock, every heartbeat. This is the visible proof
+  // the front end is talking to the back end: it counts up "synced Ns ago" between data pulls and
+  // flips to "reconnecting" the moment the backend stops answering — independent of the data refresh.
+  function curPaintSync() {
+    var el = document.getElementById("curSync"); if (!el) return;
+    if (!curLastSyncMs) { el.innerHTML = "⚪ connecting…"; return; }
+    var ago = Math.round((Date.now() - curLastSyncMs) / 1000);
+    if (ago > 70) { el.innerHTML = "🔴 reconnecting…"; el.title = "lost contact with the lead engine — retrying"; return; }
+    el.innerHTML = "🟢 live · synced " + (ago < CUR_BEAT_MS / 1000 ? "just now" : ago + "s ago");
+    el.title = "live connection to the lead engine — auto-refreshing";
+  }
+
+  // LIVE heartbeat: every beat we repaint the sync label; every ~20s we pull the funnel/health so the
   // numbers climb on screen as the engine works. When NEW leads have come in AND the user isn't
-  // mid-selection, also pull them into the list so the database visibly grows hour over hour. If
-  // they're selecting, we leave the list alone (never lose their picks) — the stats still climb.
-  function curPollStats() {
+  // mid-selection, we also pull them into the list so the database visibly grows. If they're selecting,
+  // we leave the list alone (never lose their picks) — the stats still climb.
+  function curHeartbeat() {
     var stats = document.getElementById("curStats");
     if (!stats) { if (curPollTimer) { clearInterval(curPollTimer); curPollTimer = null; } return; }
-    if (document.hidden) return; // don't poll a backgrounded tab
+    curPaintSync();                 // tick the live label every beat, even on a backgrounded tab
+    if (document.hidden) return;    // but don't hit the network for a tab nobody's looking at
+    curTick++;
+    if (curTick % CUR_FETCH_EVERY !== 0) return;
     send("/in-market", "POST", { action: "curation_funnel" }).then(function (r) {
       var d = r && r.data; if (!d || !d.funnel) return;
+      curLastSyncMs = Date.now();   // backend answered → link is healthy
       var node = document.getElementById("curStats"); if (!node) return;
       node.innerHTML = curStatsInner(d.funnel, d.health || null, d.search || null);
+      curPaintSync();               // the re-render reset the pill text; restore it immediately
       var rc = document.getElementById("curResearched");
       if (rc) rc.textContent = (d.funnel.total || 0).toLocaleString();
       var total = d.funnel.total || 0;
       var selecting = Object.keys(curPicks).length > 0;
       if (total !== curLastTotal && !selecting) renderCuration();   // new leads in → refresh the list
-    }).catch(function () { /* keep the last good view */ });
+    }).catch(function () { /* leave curLastSyncMs — curPaintSync flips to reconnecting if it stays stale */ });
   }
 
   function renderCuration() {
@@ -2604,10 +2626,12 @@
       var search = (rs[0] && rs[0].data && rs[0].data.search) || null;
       var list = (rs[1] && rs[1].data && rs[1].data.curated) || [];
       curLastTotal = (funnel && funnel.total) || 0;
+      curLastSyncMs = Date.now();   // first good answer from the backend → mark the link live
       body.innerHTML = curationHtml(funnel, list, health, search);
       wireCuration(body, list);
-      curPollTimer = setInterval(curPollStats, 25000); // live ongoing updates
-    }).catch(function () { body.innerHTML = '<div class="empty">Couldn\'t load the curated list yet. The engine builds it continuously — try again shortly, or run a search first to seed the pool.</div>'; });
+      curPaintSync();               // paint the live pill right away (don't wait a full beat)
+      curPollTimer = setInterval(curHeartbeat, CUR_BEAT_MS); // live ongoing updates + link heartbeat
+    }).catch(function () { body.innerHTML = '<div class="empty">⚠ Couldn\'t reach the lead engine. It builds the list continuously in the background — this is usually a brief blip right after a deploy. Retrying automatically; reopen this tab in a moment.</div>'; });
   }
 
   // Liveness strip: shows when the pool was last fed and when curation last ran, so a silently
@@ -2628,9 +2652,15 @@
     return '<span class="cur-mini" title="' + esc(tip) + '">' + icon + " " + esc(label) + "</span>";
   }
 
+  // The live link indicator. Its text is overwritten by the heartbeat every few seconds (see
+  // curHeartbeat), so a stalled/disconnected backend shows "reconnecting" instead of looking healthy.
+  function curSyncPill() {
+    return '<span class="cur-mini" id="curSync" title="live connection to the lead engine">⚪ connecting…</span>';
+  }
+
   function curEngineLine(h, search) {
-    if (!h && !search) return "";
-    if (!h) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSearchPill(search) + "</div>";
+    if (!h && !search) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + "</div>";
+    if (!h) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + curSearchPill(search) + "</div>";
     function ago(s) {
       if (!s) return null;
       var t = Date.parse(String(s).replace(" ", "T")); if (isNaN(t)) return null;
@@ -2649,6 +2679,7 @@
     }
     // Pool cycle runs hourly (stale > 75m); curation ticks every 8m (stale > 20m).
     return '<div class="cur-sigs"><span class="muted">Engine:</span>' +
+      curSyncPill() +
       part("pool fed", h.lastCycleAt, h.lastCycleOk, 75) +
       part("curated", h.lastCurationAt, h.lastCurationOk, 20) +
       curSearchPill(search) +
