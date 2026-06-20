@@ -83,6 +83,46 @@
   .copied{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#1f6f4a;color:#eafff4;
     padding:9px 16px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 8px 28px rgba(0,0,0,.5);z-index:60;opacity:0;transition:.18s;pointer-events:none}
   .copied.show{opacity:1}
+
+  /* view tabs */
+  .viewtabs{display:flex;gap:4px;background:#0a0e13;border:1px solid var(--line);border-radius:10px;padding:3px}
+  .vt{background:transparent;border:none;color:var(--mut);padding:6px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer}
+  .vt.on{background:var(--grn);color:#06231a}
+
+  /* performance dashboard */
+  .perf{max-width:1340px;margin:0 auto;padding:18px 24px;display:flex;flex-direction:column;gap:16px}
+  .perfhead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+  .perfhead h1{margin:0;font-size:22px;font-weight:700}
+  .perfhead p{margin:2px 0 0}
+  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+  .kpi{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:13px;padding:14px}
+  .kpi .v{font-size:26px;font-weight:800;letter-spacing:-.5px;line-height:1.1}
+  .kpi .l{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-top:5px}
+  .kpi .sub{font-size:11px;color:var(--grn);margin-top:3px}
+  .perfgrid{display:grid;grid-template-columns:1.7fr 1fr;gap:16px}
+  .chart{width:100%}
+  .chart svg{width:100%;height:200px;display:block;overflow:visible}
+  .feed{display:flex;flex-direction:column;gap:0;max-height:240px;overflow:auto}
+  .fe{display:flex;align-items:center;gap:9px;padding:8px 2px;border-bottom:1px solid #1a212b;font-size:12.5px}
+  .fe:last-child{border-bottom:none}
+  .fe .ic{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+  .fe .ic.play{background:#16341f;color:#7ee2b8}.fe .ic.open{background:#1b2a3a;color:#8fc7ff}
+  .fe .ic.complete{background:#2a2410;color:#ffe0a3}.fe .ic.gif_open{background:#241a2e;color:#d6b3ff}
+  .fe .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fe .ago{color:var(--mut);font-size:11px;flex:none}
+  .lb{overflow-x:auto}
+  table.lbt{width:100%;border-collapse:collapse;font-size:13px}
+  table.lbt th{text-align:right;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;padding:8px 10px;border-bottom:1px solid var(--line);font-weight:600}
+  table.lbt th.l,table.lbt td.l{text-align:left}
+  table.lbt td{padding:9px 10px;border-bottom:1px solid #1a212b;text-align:right;white-space:nowrap}
+  table.lbt tr:hover td{background:#0e141b}
+  table.lbt .co{font-weight:650}.table .ro{color:var(--mut)}
+  table.lbt .ro{color:var(--mut);font-size:11.5px}
+  .bar{height:6px;border-radius:4px;background:#1a212b;overflow:hidden;min-width:60px}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,#19c37d,#58a6ff)}
+  .pill-rate{font-size:11px;padding:2px 7px;border-radius:999px;background:#16341f;color:#7ee2b8}
+  .perf .empty{text-align:center;color:var(--mut);padding:40px}
+  @media(max-width:1100px){.kpis{grid-template-columns:repeat(3,1fr)}.perfgrid{grid-template-columns:1fr}}
   .empty{grid-column:1/-1;color:var(--mut);text-align:center;padding:40px 10px}
   .spin{display:inline-block;width:13px;height:13px;border:2px solid #ffe0a3;border-top-color:transparent;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:6px}
   @keyframes sp{to{transform:rotate(360deg)}}
@@ -95,9 +135,14 @@
 <header>
   <span class="brand">PiP Studio</span>
   <span class="sub">Record once · click a role · send a personalized video</span>
+  <span style="flex:1"></span>
+  <div class="viewtabs">
+    <button id="tabCreate" class="vt on">Create</button>
+    <button id="tabPerf" class="vt">Performance</button>
+  </div>
 </header>
 
-<div class="layout">
+<div class="layout" id="createView">
   <!-- LEFT · set once -->
   <div class="col left">
     <div class="card">
@@ -170,6 +215,32 @@
         <div class="pillrow" id="roleChips" style="margin-top:10px"></div>
       </details>
     </div>
+  </div>
+</div>
+
+<!-- PERFORMANCE DASHBOARD -->
+<div class="perf" id="perfView" style="display:none">
+  <div class="perfhead">
+    <div><h1>Video performance</h1><p class="muted" id="perfSub">Engagement across every personalized role video.</p></div>
+    <div class="row" style="flex:none">
+      <span class="muted" id="perfUpdated"></span>
+      <button id="perfRefresh" class="ghost small">↻ Refresh</button>
+    </div>
+  </div>
+  <div class="kpis" id="kpis"></div>
+  <div class="perfgrid">
+    <div class="card">
+      <h2>Plays · last 14 days</h2>
+      <div id="chart" class="chart"></div>
+    </div>
+    <div class="card">
+      <h2>Live activity</h2>
+      <div id="feed" class="feed"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Per-video performance</h2>
+    <div id="leaderboard" class="lb"></div>
   </div>
 </div>
 

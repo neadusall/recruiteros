@@ -402,6 +402,107 @@
   };
   function capStatus(html, err) { var el = $("capStatus"); el.innerHTML = html; el.style.color = err ? "#ffb4ba" : ""; }
 
+  /* ================= PERFORMANCE dashboard ================= */
+  var perfTimer = null;
+  function showView(which) {
+    var perf = which === "perf";
+    $("createView").style.display = perf ? "none" : "";
+    $("perfView").style.display = perf ? "" : "none";
+    $("tabCreate").classList.toggle("on", !perf);
+    $("tabPerf").classList.toggle("on", perf);
+    if (perf) { loadPerf(); if (!perfTimer) perfTimer = setInterval(loadPerf, 15000); }
+    else if (perfTimer) { clearInterval(perfTimer); perfTimer = null; }
+  }
+  $("tabCreate").onclick = function () { showView("create"); };
+  $("tabPerf").onclick = function () { showView("perf"); };
+  $("perfRefresh").onclick = function () { loadPerf(); };
+
+  function loadPerf() {
+    api("/api/in-market/track?days=14").then(renderPerf).catch(function (e) {
+      $("kpis").innerHTML = '<div class="empty" style="grid-column:1/-1">Could not load stats: ' + esc(e.message) + "</div>";
+    });
+  }
+  function nfmt(n) { n = n || 0; return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n); }
+  function dur(s) { s = Math.round(s || 0); return s < 60 ? s + "s" : Math.floor(s / 60) + "m " + ("0" + (s % 60)).slice(-2) + "s"; }
+  function pct(x) { return Math.round((x || 0) * 100) + "%"; }
+  function ago(iso) {
+    var d = (Date.now() - Date.parse(iso)) / 1000;
+    if (d < 60) return Math.max(1, Math.floor(d)) + "s";
+    if (d < 3600) return Math.floor(d / 60) + "m";
+    if (d < 86400) return Math.floor(d / 3600) + "h";
+    return Math.floor(d / 86400) + "d";
+  }
+
+  function renderPerf(o) {
+    var t = (o && o.totals) || {};
+    $("perfSub").textContent = (t.videos || 0) + " video" + (t.videos === 1 ? "" : "s") + " · engagement across every personalized role video.";
+    $("perfUpdated").textContent = "updated just now";
+    var kpis = [
+      { v: nfmt(t.gifOpens), l: "Email opens", sub: "teaser GIF loads" },
+      { v: nfmt(t.opens), l: "Page visits", sub: "watch-page loads" },
+      { v: nfmt(t.plays), l: "Plays", sub: pct(t.opens ? t.plays / t.opens : 0) + " of visits" },
+      { v: nfmt(t.uniqueViewers), l: "Unique viewers", sub: "" },
+      { v: dur(t.avgWatchSeconds), l: "Avg watch", sub: "" },
+      { v: pct(t.completionRate), l: "Completion", sub: nfmt(t.completes) + " finished" },
+    ];
+    $("kpis").innerHTML = kpis.map(function (k) {
+      return '<div class="kpi"><div class="v">' + k.v + '</div><div class="l">' + k.l + "</div>" + (k.sub ? '<div class="sub">' + esc(k.sub) + "</div>" : "") + "</div>";
+    }).join("");
+
+    $("chart").innerHTML = chartSvg((o && o.trend) || []);
+    renderFeed((o && o.recent) || []);
+    renderLeaderboard((o && o.videos) || []);
+  }
+
+  // Inline SVG area+line chart for the daily plays trend (no external libs).
+  function chartSvg(trend) {
+    if (!trend.length) return '<div class="empty">No data yet.</div>';
+    var W = 720, H = 200, padL = 28, padB = 22, padT = 12, padR = 8;
+    var iw = W - padL - padR, ih = H - padT - padB;
+    var max = Math.max(1, Math.max.apply(null, trend.map(function (d) { return d.plays; })));
+    var step = trend.length > 1 ? iw / (trend.length - 1) : 0;
+    var pts = trend.map(function (d, i) { return [padL + i * step, padT + ih - (d.plays / max) * ih]; });
+    var line = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ");
+    var area = line + " L" + (padL + (trend.length - 1) * step).toFixed(1) + " " + (padT + ih) + " L" + padL + " " + (padT + ih) + " Z";
+    var grid = [0, 0.5, 1].map(function (f) { var y = padT + ih - f * ih; return '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="#1a212b"/><text x="2" y="' + (y + 3) + '" fill="#5b6675" font-size="9">' + Math.round(f * max) + "</text>"; }).join("");
+    var dots = pts.map(function (p, i) { return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2.5" fill="#19c37d"><title>' + esc(trend[i].date) + ": " + trend[i].plays + " plays</title></circle>"; }).join("");
+    var labels = trend.map(function (d, i) { if (i % Math.ceil(trend.length / 7) && i !== trend.length - 1) return ""; return '<text x="' + (padL + i * step).toFixed(1) + '" y="' + (H - 6) + '" fill="#5b6675" font-size="9" text-anchor="middle">' + d.date.slice(5) + "</text>"; }).join("");
+    return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none">' +
+      '<defs><linearGradient id="ag" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#19c37d" stop-opacity=".35"/><stop offset="1" stop-color="#19c37d" stop-opacity="0"/></linearGradient></defs>' +
+      grid + '<path d="' + area + '" fill="url(#ag)"/><path d="' + line + '" fill="none" stroke="#19c37d" stroke-width="2"/>' + dots + labels + "</svg>";
+  }
+
+  function renderFeed(recent) {
+    if (!recent.length) { $("feed").innerHTML = '<div class="empty">No activity yet.</div>'; return; }
+    var label = { open: "Visited", play: "Played", complete: "Finished", gif_open: "Opened email" };
+    $("feed").innerHTML = recent.slice(0, 40).map(function (e) {
+      var who = (e.company || "Unknown") + (e.roleTitle ? " · " + e.roleTitle : "");
+      return '<div class="fe"><span class="ic ' + e.type + '">' + ({ open: "👁", play: "▶", complete: "✓", gif_open: "✉" }[e.type] || "•") +
+        '</span><span class="t"><b>' + esc(label[e.type] || e.type) + "</b> · " + esc(who) + '</span><span class="ago">' + ago(e.at) + "</span></div>";
+    }).join("");
+  }
+
+  function renderLeaderboard(videos) {
+    if (!videos.length) { $("leaderboard").innerHTML = '<div class="empty">Generate and send a video to start seeing performance here.</div>'; return; }
+    var maxPlays = Math.max.apply(null, videos.map(function (v) { return v.plays || 0; }).concat([1]));
+    var rows = videos.slice(0, 50).map(function (v) {
+      return "<tr>" +
+        '<td class="l"><div class="co">' + esc(v.company || "—") + '</div><div class="ro">' + esc(v.roleTitle || "") + "</div></td>" +
+        "<td>" + nfmt(v.gifOpens) + "</td>" +
+        "<td>" + nfmt(v.opens) + "</td>" +
+        "<td>" + nfmt(v.plays) + "</td>" +
+        "<td>" + nfmt(v.uniqueViewers) + "</td>" +
+        "<td>" + dur(v.avgWatchSeconds) + "</td>" +
+        '<td><span class="pill-rate">' + pct(v.completionRate) + "</span></td>" +
+        '<td class="l"><div class="bar"><i style="width:' + Math.round((v.plays / maxPlays) * 100) + '%"></i></div></td>' +
+        "<td>" + (v.lastAt ? ago(v.lastAt) + " ago" : "—") + "</td>" +
+        "</tr>";
+    }).join("");
+    $("leaderboard").innerHTML =
+      '<table class="lbt"><thead><tr><th class="l">Company · Role</th><th>Email</th><th>Visits</th><th>Plays</th><th>Viewers</th><th>Avg watch</th><th>Compl.</th><th class="l">Plays</th><th>Last</th></tr></thead><tbody>' +
+      rows + "</tbody></table>";
+  }
+
   /* ---------------- init ---------------- */
   applyStyleControls();
   loadGallery();

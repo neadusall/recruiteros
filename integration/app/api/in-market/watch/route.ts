@@ -28,6 +28,14 @@ export async function GET(req: Request) {
   const buf = await readCompositeAsset(key, fmt as "gif" | "mp4");
   if (!buf) return new Response("not found", { status: 404 });
 
+  // Email-teaser open: count a GIF load as an approximate email open, EXCEPT the watch-page
+  // poster (which passes notrack=1) so we don't double-count the watch view as an email open.
+  if (fmt === "gif" && !url.searchParams.get("notrack")) {
+    import("../../../../lib/inmarket/videoStats")
+      .then((m) => m.recordVideoEvent({ videoKey: key, type: "gif_open" }))
+      .catch(() => {});
+  }
+
   const total = buf.length;
   const baseHeaders: Record<string, string> = {
     "Content-Type": MIME[fmt],
