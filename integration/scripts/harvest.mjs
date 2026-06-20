@@ -258,6 +258,14 @@ async function writePoolSnapshot(signals, totalRoles) {
   const today = new Date(nowMs).toISOString().slice(0, 10);
   const stats = { total: entries.length, positions: bandedRoles, lastAddedAt: new Date(nowMs).toISOString(), days: { [today]: entries.length } };
 
+  // COMMITTED SEED — also write the leads to a bundled JSON the app imports at runtime, so a
+  // fresh boot (no DB, no env, nothing run) still shows a full Hiring Signals tab. queryPool
+  // falls back to this when the live pool is empty; the accumulator grows the real pool.
+  const seedPath = join(__dirname, "..", "lib", "inmarket", "seed-pool.json");
+  try {
+    await writeFile(seedPath, JSON.stringify({ generatedAt: new Date(nowMs).toISOString(), positions: bandedRoles, leads: entries.map((e) => e.lead) }), "utf8");
+  } catch { /* seed file is best-effort */ }
+
   try {
     await mkdir(dataDir, { recursive: true });
     await writeFile(join(dataDir, "snap_inmarket_pool_v1.json"), JSON.stringify(entries), "utf8");

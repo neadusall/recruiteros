@@ -129,6 +129,17 @@ export async function poolStats(): Promise<{
   days: Array<{ date: string; added: number }>;
 }> {
   const s = (await loadSnapshot<PoolStats>(STATS_KEY)) || { total: 0, lastAddedAt: null, days: {} };
+  // COLD-START SEED: with no accumulated stats yet, report the committed seed's totals so the
+  // banner shows real numbers on first open instead of zeros. Bypassed once the pool is live.
+  if (!s.total) {
+    const { SEED_LEADS, SEED_POSITIONS } = await import("./seedPool");
+    if (SEED_LEADS.length) {
+      return {
+        total: SEED_LEADS.length, openPositions: SEED_POSITIONS, windowDays: WINDOW_DAYS,
+        addedToday: 0, lastAddedAt: null, days: [],
+      };
+    }
+  }
   const days = Object.keys(s.days).sort().reverse().slice(0, 7).map((date) => ({ date, added: s.days[date] }));
   return {
     total: s.total, openPositions: s.positions || 0, windowDays: WINDOW_DAYS,
@@ -167,10 +178,22 @@ function leadMatches(lead: InMarketLead, q: InMarketQuery): boolean {
 /** Read leads matching a query from the pool, deduped + score-sorted, up to `limit`. */
 export async function queryPool(q: InMarketQuery, limit: number): Promise<InMarketLead[]> {
   const pool = await load();
+  // COLD-START SEED: if the accumulated pool is empty (fresh boot / no database / nothing
+  // run yet), serve the committed seed so Hiring Signals is never blank with zero setup.
+  // Also fire-and-forget a merge so it persists when a backend is available; once the real
+  // pool has entries this whole branch is skipped.
+  let source = pool.map((e) => e.lead);
+  if (!source.length) {
+    const { SEED_LEADS } = await import("./seedPool");
+    if (SEED_LEADS.length) {
+      source = SEED_LEADS;
+      void mergeIntoPool(SEED_LEADS).catch(() => { /* persistence is best-effort */ });
+    }
+  }
   // STAFFING GATE (read side): filter agencies out of every result set, so even legacy pool
   // entries stored before this gate existed never surface in Hire Signals. The purge below
   // removes them permanently; this guarantees they're invisible in the meantime.
-  const leads = pool.map((e) => e.lead).filter((l) => !isStaffingFirm(l.company) && leadMatches(l, q));
+  const leads = source.filter((l) => !isStaffingFirm(l.company) && leadMatches(l, q));
   return dedupeLeads(leads).slice(0, limit);
 }
 
