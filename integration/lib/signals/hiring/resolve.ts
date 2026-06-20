@@ -235,7 +235,7 @@ export async function resolveHiringManager(
   roleTitle: string,
   opts: ResolveOptions,
 ): Promise<HiringManagerResolution> {
-  const target = hiringManagerTarget(roleTitle);
+  const target = hiringManagerTarget(roleTitle, { companySize: opts.companySize });
   const warnings: string[] = [];
   const graphsQueried: string[] = [];
 

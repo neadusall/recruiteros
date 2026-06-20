@@ -146,14 +146,14 @@ const PARKED = /(domain (is )?for sale|buy this domain|parked (free|domain)|this
 interface HomeStatus { live: boolean; parked: boolean; onBrand: boolean }
 
 async function homepageStatus(domain: string, tokens: string[]): Promise<HomeStatus> {
-  const { egressInit } = await import("../net/egress");
+  const { egressFetch } = await import("../net/egress");
   for (const scheme of ["https", "http"]) {
     try {
-      const res = await fetch(`${scheme}://${domain}`, egressInit({
+      const res = await egressFetch(`${scheme}://${domain}`, {
         redirect: "follow",
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,*/*" },
-      }));
+      });
       if (!res.ok) continue;
       const body = (await res.text()).slice(0, MAX_BODY).toLowerCase();
       if (!body) continue;
