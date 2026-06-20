@@ -21,7 +21,7 @@
 
 import { loadSnapshot, saveSnapshot } from "../db";
 import { resolveDecisionMaker, type DecisionMaker } from "./decisionMaker";
-import type { JobFunction } from "../signals";
+import { classifyTitle, type JobFunction } from "../signals";
 
 /* ------------------------------------------------------------------ */
 /* The curated record                                                  */
@@ -178,17 +178,23 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
   // frozen for 24h behind the daily-refresh window.
   const RETRY_SOURCED_MS = 90 * 60 * 1000; // re-attempt naming on a still-unnamed company every ~90 min
 
-  // Highest-intent first; research the NOT-yet-done companies before refreshing stale ones, and
-  // never re-touch one that's already approved/enrolled. This is the rotation: each run advances
-  // through the pool, so over the day the whole pool gets a decision-maker — and unnamed rows get
-  // repeated naming attempts until they resolve.
-  const targets = leads
-    .filter((l) => l.company && (l.score ?? 0) >= minScore)
-    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-    .filter((l) => {
-      const role = topRole(l);
-      if (!role) return false;
-      const existing = byId.get(curationId(l.company, role));
+  // PER-COMPANY MULTIPLIER: a company hiring across eng + sales + marketing has a DIFFERENT boss for
+  // each function, and each is a real decision-maker. We research up to N distinct-function bosses
+  // per company instead of just the top role — the lever that turns "companies/day" into
+  // "thousands of named contacts/day" on free. Env-overridable.
+  const dmPerCompany = Math.max(1, Number(process.env.INMARKET_DM_PER_COMPANY) || 3);
+
+  // Highest-intent first; expand each company into its distinct-function roles, then research the
+  // NOT-yet-done (company, role) slots before refreshing stale ones, never re-touching a locked one.
+  // Each run advances through the pool; unnamed slots get repeated naming attempts until they resolve.
+  const expanded: Array<{ lead: PoolLeadLite; role: string }> = [];
+  for (const l of leads.filter((l) => l.company && (l.score ?? 0) >= minScore).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))) {
+    for (const role of rolesByFunction(l, dmPerCompany)) expanded.push({ lead: l, role });
+    if (expanded.length >= limit * 4) break; // bound the pre-filter expansion
+  }
+  const targets = expanded
+    .filter(({ lead, role }) => {
+      const existing = byId.get(curationId(lead.company, role));
       if (!existing) return true;                                      // never researched → do it
       if (existing.status === "enrolled" || existing.status === "queued") return false; // locked
       const age = now - (Date.parse(existing.curatedAt) || 0);
@@ -208,8 +214,7 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
   let cursor = 0;
   async function worker() {
     while (cursor < targets.length) {
-      const lead = targets[cursor++];
-      const role = topRole(lead)!;
+      const { lead, role } = targets[cursor++];
       let dm: DecisionMaker;
       try {
         dm = await resolveDecisionMaker(lead.company, role, { domain: lead.domain, companySize: lead.employeeCount, sourceUrl: lead.sourceUrl });
@@ -292,6 +297,26 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
 /** The role a company's decision-maker should be matched to: its first/most-recent open role. */
 function topRole(l: PoolLeadLite): string | undefined {
   return l.roleDetails?.[0]?.title ?? l.roles?.[0];
+}
+
+/**
+ * Up to `max` roles for a company covering DISTINCT job functions (the top role per function), so
+ * we research a different boss per function instead of N variants of the same one. The company's
+ * primary/top role is always included first; additional functions are added in posting order. This
+ * is the per-company multiplier: one company hiring eng + sales + ops yields three decision-makers.
+ */
+function rolesByFunction(l: PoolLeadLite, max: number): string[] {
+  const primary = topRole(l);
+  if (!primary) return [];
+  const roles = (l.roleDetails?.map((r) => r.title) ?? l.roles ?? []).map((t) => (t || "").trim()).filter(Boolean);
+  const byFn = new Map<string, string>();
+  byFn.set(classifyTitle(primary).function, primary); // the top role always leads
+  for (const r of roles) {
+    if (byFn.size >= max) break;
+    const fn = classifyTitle(r).function;
+    if (!byFn.has(fn)) byFn.set(fn, r);
+  }
+  return [...byFn.values()];
 }
 
 /* ------------------------------------------------------------------ */

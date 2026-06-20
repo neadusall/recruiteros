@@ -420,6 +420,55 @@ function candidatesFromTitles(titles: string[], company: string, anchor: string)
   return out;
 }
 
+/**
+ * Exec/leadership patterns for the "research the hierarchy" pass — names a findable SENIOR
+ * (founder / CEO / C-suite / function head) out of GENERAL search-result titles, not just LinkedIn
+ * ones. This is how we still name a decision-maker when the EXACT boss has no public footprint: we
+ * surface whoever in the chain of command IS public. For SMB that senior is the real decision-maker;
+ * for larger orgs it's the up-chain economic buyer.
+ */
+const APEX_PATTERNS: RegExp[] = [
+  // "Jane Smith, CEO" / "Jane Smith - Founder" / "Jane Smith | Chief Executive Officer of Acme"
+  /([A-Z][a-zA-Z'’.-]+(?:\s+[A-Z][a-zA-Z'’.-]+){1,2})\s*[,\-–|]\s*((?:co-?founder|founder|owner|ceo|cto|cfo|coo|cmo|cro|cpo|chro|chief\s+\w+\s+officer|chief\s+executive|president|vice\s+president|vp\s+of\s+\w+|head\s+of\s+\w+|director\s+of\s+\w+|general\s+manager)[^,|·]*)/i,
+  // "CEO Jane Smith" / "Founder & CEO Jane Smith" / "President Jane Smith"
+  /\b(co-?founder|founder|owner|ceo|president|chief\s+executive(?:\s+officer)?)\b[\s:&,]+([A-Z][a-zA-Z'’.-]+(?:\s+[A-Z][a-zA-Z'’.-]+){1,2})/i,
+];
+
+/** Parse leaders out of GENERAL result titles (any source), validating name + a real title and
+ *  requiring the result to be about THIS company. The recall complement to candidatesFromTitles. */
+function leadersFromTitles(titles: string[], company: string, anchor: string): PersonCandidate[] {
+  const out: PersonCandidate[] = [];
+  const seen = new Set<string>();
+  const push = (name: string, title: string) => {
+    if (!looksLikeName(name) || !looksLikeTitle(title)) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const split = splitFullName(name);
+    out.push({
+      fullName: name, firstName: split.firstName, lastName: split.lastName,
+      title: title.slice(0, 60), headline: title.slice(0, 60), source: "search", companyName: company,
+    } as PersonCandidate);
+  };
+  for (const title of titles) {
+    if (out.length >= 8) break;
+    // Prefer the clean "Name - Title - Company" shape (covers LinkedIn + many exec databases)…
+    const linked = candidatesFromTitles([title], company, anchor);
+    if (linked.length) { for (const c of linked) push(c.fullName, c.title || ""); continue; }
+    // …else require the company anchor in the title and pull a name+exec-title pair.
+    if (!title.toLowerCase().includes(anchor)) continue;
+    for (const re of APEX_PATTERNS) {
+      const m = title.match(re);
+      if (!m) continue;
+      const a = (m[1] || "").trim(), b = (m[2] || "").trim();
+      if (looksLikeName(a)) push(a, b);          // pattern 1: name, title
+      else if (looksLikeName(b)) push(b, a);     // pattern 2: title, name
+      break;
+    }
+  }
+  return out;
+}
+
 /** The free search engines we read public titles from, tried in order, each independently rested. */
 const SEARCH_ENGINES: Array<{ id: string; url: (q: string) => string; titles: (html: string) => string[] }> = [
   {
@@ -451,26 +500,47 @@ function matchAll(html: string, re: RegExp): string[] {
  * to the next engine, so one source rate-limiting never stops naming. Outcomes feed the live health
  * pill so sustainability is visible. Cached per company. Reads only public titles, never LinkedIn.
  */
-async function searchEngineCandidates(company: string, titles: string[]): Promise<PersonCandidate[]> {
-  const anchor = companyAnchor(company);
-  if (anchor.length < 3) return [];
-  const cached = searchCache.get(anchor);
-  if (cached && Date.now() - cached.at < SEARCH_TTL_MS) return cached.people;
-
-  const titleQ = titles.slice(0, 5).map((t) => `"${t}"`).join(" OR ");
-  const q = `${company} (${titleQ}) site:linkedin.com/in`;
-
-  let people: PersonCandidate[] = [];
+/** Run a query across the engine rotation (each independently rested under the health system),
+ *  parsing each engine's result titles with `parse`. Returns the first engine's non-empty result. */
+async function searchEngines(q: string, parse: (titles: string[]) => PersonCandidate[]): Promise<PersonCandidate[]> {
   for (const eng of SEARCH_ENGINES) {
     if (!isAvailable(eng.id)) continue; // engine resting in back-off — skip to the next source
     const { status, body } = await searchFetch(eng.url(q));
     if (isThrottle(status, body)) { recordSearch(eng.id, "throttled"); continue; }
     if (!body) { recordSearch(eng.id, "empty"); continue; }
-    const found = candidatesFromTitles(eng.titles(body), company, anchor);
+    const found = parse(eng.titles(body));
     recordSearch(eng.id, found.length ? "ok" : "empty");
-    if (found.length) { people = found; break; } // first engine that yields names wins
+    if (found.length) return found; // first engine that yields names wins
   }
-  searchCache.set(anchor, { at: Date.now(), people });
+  return [];
+}
+
+async function searchEngineCandidates(company: string, titles: string[]): Promise<PersonCandidate[]> {
+  const anchor = companyAnchor(company);
+  if (anchor.length < 3) return [];
+  // Cache keyed by company + the function we're targeting, so researching multiple functions at the
+  // same company doesn't collide on one cached result.
+  const cacheKey = `${anchor}::${(titles[0] || "").toLowerCase()}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < SEARCH_TTL_MS) return cached.people;
+
+  const titleQ = titles.slice(0, 5).map((t) => `"${t}"`).join(" OR ");
+  // PASS 1 — precise: the exact boss titles on LinkedIn ("Name - VP of Engineering - Acme").
+  let people = await searchEngines(
+    `${company} (${titleQ}) site:linkedin.com/in`,
+    (t) => candidatesFromTitles(t, company, anchor),
+  );
+  // PASS 2 — RESEARCH THE HIERARCHY when the exact boss has no public profile: a broad leadership
+  // query that names whoever in the chain of command IS public (founder / CEO / C-suite / function
+  // head) from ANY source. For SMB this findable senior is the real decision-maker; for larger orgs
+  // it's the up-chain economic buyer. Only runs on a miss, so it costs nothing when Pass 1 hits.
+  if (!people.length) {
+    people = await searchEngines(
+      `"${company}" (CEO OR Founder OR "Chief Executive" OR President OR "Head of" OR "Vice President")`,
+      (t) => leadersFromTitles(t, company, anchor),
+    );
+  }
+  searchCache.set(cacheKey, { at: Date.now(), people });
   return people;
 }
 
