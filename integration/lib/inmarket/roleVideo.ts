@@ -99,8 +99,11 @@ export interface ClipMeta {
 /* Tunables                                                            */
 /* ------------------------------------------------------------------ */
 
-const GIF_W = 640;             // email GIF width (downscaled from the full composite for weight)
-const GIF_FPS = 12;
+// The GIF is the EMAIL TEASER (the full video + audio lives on the watch page), so it's tuned
+// for inbox weight + deliverability: narrow, low fps, and capped to a short looping teaser.
+const GIF_W = 480;             // email GIF width (downscaled from the full composite)
+const GIF_FPS = 10;
+const EMAIL_GIF_SECONDS = 8;   // cap the teaser length; the watch-page MP4 plays the whole take
 const CLIPS_CACHE_KEY = "inmarket_clips_v1";
 const VIDEOS_CACHE_KEY = "inmarket_videos_v1";
 
@@ -489,7 +492,7 @@ async function compose(
       const gw = Math.max(2, Math.round(GIF_W / 2) * 2);
       await runFfmpeg([
         "-y", "-hide_banner", "-loglevel", "error",
-        "-i", compositePath(key, "mp4"),
+        "-t", String(EMAIL_GIF_SECONDS), "-i", compositePath(key, "mp4"),
         "-filter_complex",
         `fps=${GIF_FPS},scale=${gw}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle`,
         "-loop", "0",
