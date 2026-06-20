@@ -18,7 +18,7 @@
 import type { Campaign, CampaignModel, CampaignModelTouch, Prospect } from "../core/types";
 import { GUIDELINES_PROMPT } from "../copy/guidelines";
 
-const MERGE_HELP = "{{firstName}}, {{company}}, {{title}}, {{role}}, {{signal}}";
+const MERGE_HELP = "{{firstName}}, {{company}}, {{title}}, {{role}}, {{signal}}, {{watchlink}}, {{videoembed}}";
 
 /** Render one model touch for a specific prospect (merge-fill, graceful fallbacks). */
 export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>): { subject?: string; body: string } {
@@ -29,6 +29,13 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>): { 
     role: (p as any).signalReason || p.title || "the role you're hiring for",
     signal: (p as any).signalReason || "your recent hiring activity",
   };
+  // PiP Studio video fields (empty when no video is attached, so templates degrade cleanly).
+  const pv = p.personalizedVideo;
+  vals.watchlink = pv?.watchUrl || "";
+  vals.videogif = pv?.gifUrl || "";
+  vals.videoembed = pv?.watchUrl && pv?.gifUrl
+    ? `<a href="${pv.watchUrl}"><img src="${pv.gifUrl}" alt="A quick note about ${vals.company}" width="600" style="max-width:100%;border-radius:10px;border:1px solid #e5e7eb;display:block" /></a>`
+    : "";
   const fill = (s?: string) =>
     (s || "").replace(/\{\{\s*([a-zA-Z]+)\s*\}\}/g, (_m, k) => vals[String(k).toLowerCase()] ?? "");
   return { subject: touch.subject ? fill(touch.subject) : undefined, body: fill(touch.body) };

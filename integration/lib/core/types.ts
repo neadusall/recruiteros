@@ -212,6 +212,16 @@ export interface Prospect {
   bookedAt?: string;
   /** Mirror of the ATS person id once synced. */
   atsPersonId?: string;
+  /** A personalized picture-in-picture role video attached from the PiP Studio. Exposed to
+   *  sequence templates as the merge fields {{watchlink}}, {{videogif}}, {{videoembed}} so the
+   *  outreach email/DM can show this prospect's own clickable video of their hiring signal. */
+  personalizedVideo?: {
+    videoKey: string;
+    watchUrl: string;
+    gifUrl: string;
+    roleTitle?: string;
+    at: string;
+  };
   createdAt: string;
 }
 

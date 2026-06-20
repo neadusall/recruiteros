@@ -292,9 +292,27 @@
     act.innerHTML =
       '<a class="lk" href="' + esc(w) + '" target="_blank">▶ Watch</a>' +
       '<button class="primary small" data-email title="Copy a clickable GIF for your email">Copy email</button>' +
-      '<button class="ghost small" data-link title="Copy the watch link (LinkedIn, SMS)">Link</button>';
+      '<button class="ghost small" data-link title="Copy the watch link (LinkedIn, SMS)">Link</button>' +
+      '<button class="ghost small" data-out title="Attach this video to the hiring-manager prospects at this company">→ Outreach</button>';
     act.querySelector("[data-email]").onclick = function () { copyRich(emailSnippet(vk, s.company, s.roleTitle)).then(function () { toast("Email snippet copied — paste into your sequence"); }); };
     act.querySelector("[data-link]").onclick = function () { copyText(w).then(function () { toast("Watch link copied"); }); };
+    act.querySelector("[data-out]").onclick = function () { attachToOutreach(s, vk); };
+  }
+
+  /* Recipient bridge: stamp this video onto the company's hiring-manager prospects, so their
+     running sequence renders it via {{videoembed}} / {{watchlink}}. Prospects come from Hire
+     Signals (promote managers into a campaign first). */
+  function attachToOutreach(s, vk) {
+    api("/api/in-market/attach?company=" + encodeURIComponent(s.company)).then(function (j) {
+      var n = (j && j.count) || 0;
+      if (!n) { toast("No prospects at " + s.company + " yet — promote them from Hire Signals first"); return; }
+      if (!confirm("Attach this video to " + n + " prospect" + (n > 1 ? "s" : "") + " at " + s.company + "?\nTheir sequence emails will show it via the {{videoembed}} merge field.")) return;
+      api("/api/in-market/attach", { method: "POST", body: JSON.stringify({
+        videoKey: vk, watchUrl: watchPage(vk, s.company, s.roleTitle), gifUrl: publicGif(vk),
+        roleTitle: s.roleTitle, company: s.company,
+      }) }).then(function (r) { toast("Attached to " + (r.attached || 0) + " prospect(s) at " + s.company); })
+        .catch(function (e) { toast("Attach failed: " + e.message); });
+    }).catch(function (e) { toast("Lookup failed: " + e.message); });
   }
   function resultErr(s, msg) { var t = tileEl(s.key); if (!t) return; var a = t.querySelector("[data-act]"); if (a) a.innerHTML = '<span class="muted" style="color:#ffb4ba">' + esc(msg) + '</span>'; }
   function genReason(res) {
