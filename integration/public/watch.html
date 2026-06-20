@@ -57,7 +57,20 @@
   }
 
   var mp4 = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=mp4";
-  var gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif";
+  // notrack on the poster so the watch-page load isn't counted as an email-teaser open.
+  var gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif&notrack=1";
+
+  /* ---- engagement tracking (anonymous session; never blocks playback) ---- */
+  var sid;
+  try { sid = sessionStorage.getItem("ros_sid"); if (!sid) { sid = (Math.random().toString(36).slice(2) + Date.now().toString(36)); sessionStorage.setItem("ros_sid", sid); } } catch (e) { sid = "anon"; }
+  function track(t, secs) {
+    try {
+      var payload = JSON.stringify({ k: key, t: t, c: company, r: role, sid: sid, s: secs });
+      var url = API + "/api/in-market/track";
+      if (navigator.sendBeacon) navigator.sendBeacon(url, new Blob([payload], { type: "text/plain" }));
+      else fetch(url, { method: "POST", body: payload, keepalive: true });
+    } catch (e) {}
+  }
 
   var title = company ? ("A quick note about " + company) : "A quick message for you";
   var sub = role ? ("Re: " + role) : "Press play — it's 20 seconds.";
@@ -82,7 +95,24 @@
   });
   function start(){ vid.play(); vid.controls = true; overlay.style.display = "none"; }
   overlay.addEventListener("click", start);
-  vid.addEventListener("play", function(){ overlay.style.display = "none"; });
+
+  track("open");  // landed on the watch page
+
+  // Heartbeat watch-time while playing; one "play" + "complete" per session milestones.
+  var played = false, lastBeat = 0, beatTimer = null;
+  vid.addEventListener("play", function(){
+    overlay.style.display = "none";
+    if (!played) { played = true; track("play"); }
+    lastBeat = vid.currentTime;
+    if (!beatTimer) beatTimer = setInterval(function(){
+      if (!vid.paused && !vid.ended) { var d = vid.currentTime - lastBeat; if (d > 0) { track("heartbeat", d); lastBeat = vid.currentTime; } }
+    }, 10000);
+  });
+  function flushBeat(){ if (played) { var d = vid.currentTime - lastBeat; if (d > 0.5) { track("heartbeat", d); lastBeat = vid.currentTime; } } }
+  vid.addEventListener("pause", flushBeat);
+  vid.addEventListener("ended", function(){ flushBeat(); track("complete"); });
+  window.addEventListener("pagehide", flushBeat);
+  document.addEventListener("visibilitychange", function(){ if (document.visibilityState === "hidden") flushBeat(); });
 
   function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"})[c]; }); }
 })();
