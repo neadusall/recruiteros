@@ -25,6 +25,13 @@ export async function GET(req: Request) {
   const fmt = (url.searchParams.get("fmt") || "mp4").toLowerCase();
   if (fmt !== "gif" && fmt !== "mp4") return new Response("bad format", { status: 400 });
 
+  // SIGNED + EXPIRING: recipient links must carry a valid exp+sig (Loom-style). Forwarded or
+  // stale links stop working after the TTL.
+  const { verifyShare } = await import("../../../../lib/inmarket/shareSign");
+  if (!verifyShare(key, url.searchParams.get("exp"), url.searchParams.get("sig"))) {
+    return new Response("This link has expired or is invalid.", { status: 403 });
+  }
+
   const buf = await readCompositeAsset(key, fmt as "gif" | "mp4");
   if (!buf) return new Response("not found", { status: 404 });
 

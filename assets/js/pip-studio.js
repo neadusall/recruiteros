@@ -48,8 +48,11 @@
 
   /* ---------------- url helpers (public for email/share) ---------------- */
   function shotGif(key) { return API + "/api/in-market/shot?key=" + encodeURIComponent(key) + "&fmt=gif"; } // operator preview (auth)
-  function watchPage(vk, co, ro) { return origin() + "/watch?k=" + encodeURIComponent(vk) + "&c=" + encodeURIComponent(co || "") + "&r=" + encodeURIComponent(ro || ""); }
-  function publicGif(vk) { return origin() + "/api/in-market/watch?key=" + encodeURIComponent(vk) + "&fmt=gif"; }
+  // Prefer the SERVER-SIGNED share URLs (exp+sig) returned by /video; fall back to an unsigned
+  // shape only if we don't have them yet (re-render mints fresh signed links).
+  function shareFor(vk) { for (var k in state.results) { if (state.results[k] && state.results[k].videoKey === vk) return state.results[k].share || null; } return null; }
+  function watchPage(vk, co, ro) { var s = shareFor(vk); if (s && s.watch) return s.watch; return origin() + "/watch?k=" + encodeURIComponent(vk) + "&c=" + encodeURIComponent(co || "") + "&r=" + encodeURIComponent(ro || ""); }
+  function publicGif(vk) { var s = shareFor(vk); if (s && s.gif) return s.gif; return origin() + "/api/in-market/watch?key=" + encodeURIComponent(vk) + "&fmt=gif"; }
   function emailSnippet(vk, co, ro) {
     var w = watchPage(vk, co, ro), g = publicGif(vk);
     var alt = "A quick note about " + (co || "your team") + (ro ? " — " + ro : "");
@@ -302,7 +305,7 @@
           payload.force = false;
           if (res.status === "composing") { if (tries++ > 48) { resultErr(s, "timed out"); return resolve(false); } setTimeout(tick, 2500); return; }
           if (res.status === "ready") {
-            state.results[s.key] = { videoKey: res.key, company: s.company, roleTitle: s.roleTitle }; saveResults();
+            state.results[s.key] = { videoKey: res.key, company: s.company, roleTitle: s.roleTitle, share: res.share }; saveResults();
             renderResult(s, res.key); resolve(true);
           } else { resultErr(s, genReason(res)); resolve(false); }
         }).catch(function (e) { resultErr(s, e.message); resolve(false); });

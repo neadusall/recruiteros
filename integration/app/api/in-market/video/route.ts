@@ -69,5 +69,13 @@ export async function POST(req: Request) {
   const result = b?.wait === true
     ? await composeRoleVideo(reqShot, clipId, b?.pip, opts)
     : await getOrStartVideo(reqShot, clipId, b?.pip, opts);
-  return ok(result);
+
+  // When the composite is ready, hand the Studio SIGNED, expiring share links to send (the
+  // recipient surfaces require a valid signature — see /api/in-market/watch).
+  let share;
+  if (result.status === "ready" && result.key) {
+    const { compositeShareUrls } = await import("../../../../lib/inmarket/shareSign");
+    share = compositeShareUrls(result.key, { company, roleTitle });
+  }
+  return ok({ ...result, share });
 }

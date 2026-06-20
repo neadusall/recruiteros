@@ -61,9 +61,13 @@
     return;
   }
 
-  var mp4 = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=mp4";
+  // Signed/expiring access: carry exp+sig from the share link through to the asset requests.
+  var auth = "";
+  var exp = qs.get("exp"), sig = qs.get("sig");
+  if (exp && sig) auth = "&exp=" + encodeURIComponent(exp) + "&sig=" + encodeURIComponent(sig);
+  var mp4 = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=mp4" + auth;
   // notrack on the poster so the watch-page load isn't counted as an email-teaser open.
-  var gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif&notrack=1";
+  var gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif&notrack=1" + auth;
 
   /* ---- engagement tracking (anonymous session; never blocks playback) ---- */
   var sid;
