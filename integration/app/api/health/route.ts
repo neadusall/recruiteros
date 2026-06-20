@@ -39,7 +39,7 @@ function dataDirIsMountpoint(): boolean {
 export async function GET() {
   return ok({
     ok: true,
-    ver: "h6-mountinfo",                     // bump on deploy to confirm the container rebuilt
+    ver: "h7-datavol",                       // bump on deploy to confirm the container rebuilt
     db: dbEnabled(),
     dbConnected: await dbPing(),
     dataDirMounted: dataDirMounted(),        // device-diff heuristic

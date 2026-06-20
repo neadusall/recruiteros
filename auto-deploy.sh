@@ -43,13 +43,19 @@ fi
 # accounts kept getting wiped on deploy and custom domains never got a cert.
 # Marker-guarded (runs exactly once), same pattern as the DB step above, and
 # placed before the up-to-date early-exit so it runs even with no new commit.
-if [ ! -f "$DIR/.edge-recreate-v1" ]; then
-  echo "$(date -u) one-time: force-recreate app+caddy (load compose env + Caddyfile)..." >> "$LOG"
+#
+# v2: the v1 marker fired on an OLDER compose that predated the app_data:/data
+# volume mount, so the running container still writes /data to EPHEMERAL container
+# storage (wiped every redeploy — /api/health showed dataDirMounted:false). Bumping
+# the marker re-applies the CURRENT compose so /data becomes the durable app_data
+# volume and the Hire Signals pool (+ accounts/sessions) finally persist + compound.
+if [ ! -f "$DIR/.edge-recreate-v2" ]; then
+  echo "$(date -u) one-time(v2): force-recreate app+caddy to mount durable /data volume..." >> "$LOG"
   if docker compose up -d --force-recreate app caddy >> "$LOG" 2>&1; then
-    touch "$DIR/.edge-recreate-v1"
-    echo "$(date -u) app+caddy force-recreated" >> "$LOG"
+    touch "$DIR/.edge-recreate-v2"
+    echo "$(date -u) app+caddy recreated with app_data:/data — persistence now durable" >> "$LOG"
   else
-    echo "$(date -u) edge recreate failed, will retry next cycle" >> "$LOG"
+    echo "$(date -u) edge recreate(v2) failed, will retry next cycle" >> "$LOG"
   fi
 fi
 
