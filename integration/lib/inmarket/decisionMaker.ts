@@ -469,24 +469,68 @@ function leadersFromTitles(titles: string[], company: string, anchor: string): P
   return out;
 }
 
-/** The free search engines we read public titles from, tried in order, each independently rested. */
+/** The free search engines we read public titles from, tried in order, each independently rested.
+ *  Mixing INDEPENDENT indexes (DuckDuckGo, Bing, Mojeek) matters twice over: each surfaces names the
+ *  others miss, AND when one rate-limits the others keep naming — diversity is throttle-insurance.
+ *  An optional self-hosted/public SearXNG (INMARKET_SEARXNG_URL) is prepended as a meta-aggregator. */
 const SEARCH_ENGINES: Array<{ id: string; url: (q: string) => string; titles: (html: string) => string[] }> = [
   {
     id: "duckduckgo",
     url: (q) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`,
-    titles: (html) => matchAll(html, /<a[^>]+class="result__a"[^>]*>([\s\S]*?)<\/a>/gi),
+    titles: (html) => matchAll(html, [/<a[^>]+class="result__a"[^>]*>([\s\S]*?)<\/a>/gi]),
   },
   {
     id: "bing",
     url: (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=20`,
-    titles: (html) => matchAll(html, /<h2>\s*<a [^>]*>([\s\S]*?)<\/a>/gi),
+    titles: (html) => matchAll(html, [/<h2>\s*<a [^>]*>([\s\S]*?)<\/a>/gi]),
+  },
+  {
+    // Independent crawler/index (not Bing/Google backed) — scrape-friendly plain HTML.
+    id: "mojeek",
+    url: (q) => `https://www.mojeek.com/search?q=${encodeURIComponent(q)}`,
+    titles: (html) => matchAll(html, [
+      /<a[^>]+class="[^"]*\btitle\b[^"]*"[^>]*>([\s\S]*?)<\/a>/gi,
+      /<h2>\s*<a [^>]*>([\s\S]*?)<\/a>/gi,
+    ]),
+  },
+  {
+    // DuckDuckGo's minimal endpoint — different host/path, so it throttles independently of the
+    // main DDG HTML endpoint (extra resilience when html.duckduckgo.com is resting).
+    id: "ddg_lite",
+    url: (q) => `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`,
+    titles: (html) => matchAll(html, [/<a[^>]+class=["']result-link["'][^>]*>([\s\S]*?)<\/a>/gi]),
   },
 ];
 
-function matchAll(html: string, re: RegExp): string[] {
+// Optional meta-search aggregator (self-hosted or public SearXNG). When configured it goes FIRST —
+// one query fans out across Google/Bing/etc server-side and returns clean JSON, the single biggest
+// free naming lift if you run an instance. Env-gated so it's a no-op until you point it at one.
+if (process.env.INMARKET_SEARXNG_URL) {
+  SEARCH_ENGINES.unshift({
+    id: "searxng",
+    url: (q) => `${process.env.INMARKET_SEARXNG_URL!.replace(/\/$/, "")}/search?q=${encodeURIComponent(q)}&format=json`,
+    titles: (body) => {
+      try {
+        const j = JSON.parse(body) as { results?: Array<{ title?: string; content?: string }> };
+        return (j.results ?? []).slice(0, 15).map((r) => String(r.title ?? "")).filter(Boolean);
+      } catch { return []; }
+    },
+  });
+}
+
+/** Run one or more extraction patterns over a result page, de-duplicated, capped. Multiple patterns
+ *  let an engine whose markup varies (e.g. Mojeek) still yield titles without a brittle single regex. */
+function matchAll(html: string, res: RegExp[]): string[] {
   const out: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) && out.length < 15) out.push(cleanTitle(m[1]));
+  const seen = new Set<string>();
+  for (const re of res) {
+    const r = new RegExp(re.source, re.flags); // fresh lastIndex per call
+    let m: RegExpExecArray | null;
+    while ((m = r.exec(html)) && out.length < 15) {
+      const t = cleanTitle(m[1]);
+      if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+    }
+  }
   return out;
 }
 
