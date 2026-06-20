@@ -101,6 +101,18 @@
     for (var i = 0; i < prefs.length; i++) if (window.MediaRecorder && MediaRecorder.isTypeSupported(prefs[i])) return prefs[i];
     return "";
   }
+  var recTimer = null, recStart = 0;
+  function fmtT(ms) { var s = Math.floor(ms / 1000); return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2); }
+  function startTimer() {
+    recStart = Date.now();
+    recTimer = setInterval(function () {
+      var ms = Date.now() - recStart, t = fmtT(ms);
+      // Gentle guidance: green in the sweet spot (8–25s), amber past 45s.
+      var hint = ms < 8000 ? "keep going…" : ms <= 25000 ? "good length — wrap when ready" : ms <= 45000 ? "" : "getting long";
+      $("recHint").innerHTML = '<span style="color:#ff6b6b">●</span> Recording <b>' + t + "</b>" + (hint ? ' · <span class="muted">' + hint + "</span>" : "");
+    }, 250);
+  }
+  function stopTimer() { if (recTimer) { clearInterval(recTimer); recTimer = null; } }
   $("btnRec").onclick = function () {
     if (state.recorder && state.recorder.state === "recording") { state.recorder.stop(); return; }
     state.chunks = [];
@@ -109,12 +121,14 @@
     catch (e) { $("recHint").textContent = "Recorder error: " + e.message; return; }
     state.recorder.ondataavailable = function (ev) { if (ev.data && ev.data.size) state.chunks.push(ev.data); };
     state.recorder.onstop = function () {
+      stopTimer();
       state.recordedBlob = new Blob(state.chunks, { type: (state.recorder.mimeType || mime || "video/webm").split(";")[0] });
       preview.srcObject = null; preview.src = URL.createObjectURL(state.recordedBlob); preview.muted = false; preview.controls = true;
       $("btnSave").disabled = false; $("btnDiscard").disabled = false; $("btnRec").textContent = "● Record";
       $("recHint").textContent = "Preview it, then Save (or Discard and re-record).";
     };
     state.recorder.start();
+    startTimer();
     $("btnRec").textContent = "■ Stop"; $("btnSave").disabled = true; $("btnDiscard").disabled = true;
   };
   $("btnDiscard").onclick = function () {
@@ -268,6 +282,11 @@
   function renderResult(s, vk) {
     var t = tileEl(s.key); if (!t) return;
     t.classList.add("done");
+    // Swap the card thumbnail to the actual composite (you on the scroll), so the tile shows
+    // the personalized result, not the plain page capture. Operator is authed -> video endpoint.
+    var thumb = t.querySelector(".thumb img");
+    if (thumb) thumb.src = API + "/api/in-market/video?key=" + encodeURIComponent(vk) + "&fmt=gif";
+    var go = t.querySelector(".thumb .go"); if (go) go.textContent = "↻ Re-render";
     var act = t.querySelector("[data-act]");
     var w = watchPage(vk, s.company, s.roleTitle);
     act.innerHTML =
