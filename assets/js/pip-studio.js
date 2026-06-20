@@ -82,6 +82,12 @@
   }
   function showModal(html) { var o = $("modal"); $("modalBody").innerHTML = html; o.classList.add("show"); }
   function hideModal() { $("modal").classList.remove("show"); }
+  // Dismiss the modal on backdrop click or Escape.
+  (function () {
+    var m = $("modal");
+    if (m) m.addEventListener("click", function (e) { if (e.target === m) hideModal(); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") hideModal(); });
+  })();
 
   /* gate */
   function ready() { return !!state.clipId; }
@@ -323,11 +329,13 @@
     var act = t.querySelector("[data-act]");
     var w = watchPage(vk, s.company, s.roleTitle);
     act.innerHTML =
-      '<a class="lk" href="' + esc(w) + '" target="_blank">▶ Watch</a>' +
-      '<button class="primary small" data-email title="Copy a clickable GIF for your email">Copy email</button>' +
-      '<button class="ghost small" data-link title="Copy the watch link (LinkedIn, SMS)">Link</button>' +
-      '<button class="ghost small" data-opener title="Draft an AI email opener that wraps this video">✨ Opener</button>' +
-      '<button class="ghost small" data-out title="Attach this video to the hiring-manager prospects at this company">→ Outreach</button>';
+      '<button class="primary small cta" data-email title="Copy a clickable GIF for your email">✉ Copy email</button>' +
+      '<div class="grid">' +
+        '<button data-opener title="Draft an AI email opener (Claude) that wraps this video">✨ Opener</button>' +
+        '<a class="lk" href="' + esc(w) + '" target="_blank" title="Open the watch page">▶ Watch</a>' +
+        '<button data-link title="Copy the watch link (LinkedIn, SMS)">🔗 Link</button>' +
+        '<button class="out" data-out title="Attach to the hiring-manager prospects at this company">→ Outreach</button>' +
+      '</div>';
     act.querySelector("[data-email]").onclick = function () { copyRich(emailSnippet(vk, s.company, s.roleTitle)).then(function () { toast("Email snippet copied — paste into your sequence"); }); };
     act.querySelector("[data-link]").onclick = function () { copyText(w).then(function () { toast("Watch link copied"); }); };
     act.querySelector("[data-opener]").onclick = function () { openOpener(s, vk); };
@@ -348,11 +356,12 @@
       var e2html = d.bodyHtml || esc(d.body).replace(/\n/g, "<br>"); // email 2 carries the video
       showModal(
         '<div class="mh"><b>Email sequence</b> ' + badge + '<span class="muted" style="margin-left:8px;font-size:12px">text intro → video follow-up</span><button class="mx" data-close>✕</button></div>' +
-        '<div class="seqstep"><div class="mlbl">Email 1 · text only <span class="muted">(first touch — no video)</span></div>' +
+        '<div class="seqstep"><div class="mlbl" data-step="1">Email 1 · text intro <span class="muted">(first touch — no video)</span></div>' +
           '<div class="msub">' + esc(e1.subject) + '</div>' +
           '<div class="mbody">' + e1html + '</div>' +
           '<div class="mfoot"><button class="ghost small" data-cpy-e1>Copy email 1 (text)</button></div></div>' +
-        '<div class="seqstep"><div class="mlbl">Email 2 · video follow-up <span class="muted">(sent a few days later)</span></div>' +
+        '<div class="arrow">↓</div>' +
+        '<div class="seqstep"><div class="mlbl" data-step="2">Email 2 · video follow-up <span class="muted">(sent a few days later)</span></div>' +
           '<div class="msub">' + esc(d.subject) + '</div>' +
           '<div class="mbody">' + e2html + '</div>' +
           '<div class="mfoot">' +
