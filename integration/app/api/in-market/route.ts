@@ -140,7 +140,7 @@ export async function POST(req: Request) {
     const { listCurated } = await import("../../../lib/inmarket/curation");
     const list = await listCurated({
       status: b.status, signalType: b.signalType, function: b.function,
-      contactableOnly: b.contactableOnly === true, limit: b.limit,
+      contactableOnly: b.contactableOnly === true, namedOnly: b.namedOnly === true, limit: b.limit,
     });
     return ok({ curated: list });
   }

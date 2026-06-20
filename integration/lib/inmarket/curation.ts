@@ -420,6 +420,9 @@ export async function listCurated(opts?: {
   signalType?: string;
   function?: string;
   contactableOnly?: boolean;
+  /** Show every researched company that got a real decision-maker NAME, even before an email is
+   *  resolved — so the list populates fully now and the email becomes a later enrichment pass. */
+  namedOnly?: boolean;
   /** Only rows whose email passed internal validation (a real, deliverable address — no guesses). */
   validatedOnly?: boolean;
   limit?: number;
@@ -429,6 +432,7 @@ export async function listCurated(opts?: {
   if (opts?.signalType) rows = rows.filter((r) => r.signalType === opts.signalType);
   if (opts?.function) rows = rows.filter((r) => r.function === opts.function);
   if (opts?.contactableOnly) rows = rows.filter((r) => !!r.likelyEmail);
+  if (opts?.namedOnly) rows = rows.filter((r) => !!r.managerName);
   if (opts?.validatedOnly) rows = rows.filter((r) => r.emailValidated === true && !r.emailInvalid);
   rows.sort((a, b) => (b.curatedAt > a.curatedAt ? 1 : -1) || b.score - a.score);
   return rows.slice(0, opts?.limit ?? 500);

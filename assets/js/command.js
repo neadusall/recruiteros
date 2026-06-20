@@ -2567,9 +2567,11 @@
   var curPicks = {};   // id -> true (selected curated rows for approve/enroll)
 
   var curPollTimer = null;
-  // LIVE: every ~25s, refresh just the stats block (funnel, daily target, engine + search health)
-  // so the numbers climb on screen as the engine works — without rebuilding the list or losing the
-  // user's selections. Self-stops when they leave the screen or the tab is hidden.
+  var curLastTotal = 0;   // researched count last rendered — detects new leads arriving
+  // LIVE: every ~25s, refresh the stats block (funnel, daily target, engine + search health) so the
+  // numbers climb on screen as the engine works. When NEW leads have come in AND the user isn't
+  // mid-selection, also pull them into the list so the database visibly grows hour over hour. If
+  // they're selecting, we leave the list alone (never lose their picks) — the stats still climb.
   function curPollStats() {
     var stats = document.getElementById("curStats");
     if (!stats) { if (curPollTimer) { clearInterval(curPollTimer); curPollTimer = null; } return; }
@@ -2580,26 +2582,32 @@
       node.innerHTML = curStatsInner(d.funnel, d.health || null, d.search || null);
       var rc = document.getElementById("curResearched");
       if (rc) rc.textContent = (d.funnel.total || 0).toLocaleString();
+      var total = d.funnel.total || 0;
+      var selecting = Object.keys(curPicks).length > 0;
+      if (total !== curLastTotal && !selecting) renderCuration();   // new leads in → refresh the list
     }).catch(function () { /* keep the last good view */ });
   }
 
   function renderCuration() {
     var body = $("#imBody"); if (!body) return;
-    body.innerHTML = loading();
+    if (!document.getElementById("curStats")) body.innerHTML = loading(); // only spin on first entry
     curPicks = {};
     if (curPollTimer) { clearInterval(curPollTimer); curPollTimer = null; }
     Promise.all([
       send("/in-market", "POST", { action: "curation_funnel" }),
-      send("/in-market", "POST", { action: "curation_list", contactableOnly: true, limit: 500 }),
+      // Show every NAMED decision-maker now (email arrives via the later enrichment pass); the row's
+      // badge says whether the email is valid / a guess / still pending.
+      send("/in-market", "POST", { action: "curation_list", namedOnly: true, limit: 500 }),
     ]).then(function (rs) {
       var funnel = (rs[0] && rs[0].data && rs[0].data.funnel) || null;
       var health = (rs[0] && rs[0].data && rs[0].data.health) || null;
       var search = (rs[0] && rs[0].data && rs[0].data.search) || null;
       var list = (rs[1] && rs[1].data && rs[1].data.curated) || [];
+      curLastTotal = (funnel && funnel.total) || 0;
       body.innerHTML = curationHtml(funnel, list, health, search);
       wireCuration(body, list);
       curPollTimer = setInterval(curPollStats, 25000); // live ongoing updates
-    }).catch(function () { body.innerHTML = '<div class="empty">Couldn\'t load the curated list yet. The accumulator builds it hourly — try again shortly, or run a search first to seed the pool.</div>'; });
+    }).catch(function () { body.innerHTML = '<div class="empty">Couldn\'t load the curated list yet. The engine builds it continuously — try again shortly, or run a search first to seed the pool.</div>'; });
   }
 
   // Liveness strip: shows when the pool was last fed and when curation last ran, so a silently
@@ -2699,7 +2707,7 @@
       '<div id="curStats">' + curStatsInner(f, health, search) + "</div>";
 
     if (!list.length) {
-      return head + '<div class="empty" style="margin-top:14px">No contactable decision-makers curated yet. The hourly accumulator researches the top companies (free: team pages, news, GitHub) and they\'ll appear here. Hit <b>Research more now</b> to kick it.</div>';
+      return head + '<div class="empty" style="margin-top:14px">No decision-makers curated yet. The engine researches companies continuously (free: search, team pages, news, GitHub) and new leads appear here automatically as they come in. Hit <b>Research more now</b> to kick it.</div>';
     }
 
     var rows = list.map(curationRow).join("");
@@ -2720,10 +2728,13 @@
       : '<span class="im-email-unv">guess</span>';
     var email = r.likelyEmail
       ? '<span class="cur-email" data-email="' + esc(r.likelyEmail) + '" title="Best-guess work email — validated continuously, confirmed before send">✉️ ' + esc(r.likelyEmail) + ' ' + emailTag + "</span>"
-      : '<span class="muted">no email</span>';
+      : '<span class="im-email-unv" title="Name found — email resolves in the enrichment pass">⏳ email pending</span>';
     var enrolled = r.status === "enrolled";
+    // Visible in the list either way, but only rows that already have an email are selectable for
+    // push — the "email pending" ones wait for the enrichment pass before they're ready to send.
+    var selectable = !enrolled && !!r.likelyEmail;
     return '<div class="cur-row' + (enrolled ? " cur-enrolled" : "") + '" data-id="' + esc(r.id) + '">' +
-      '<input type="checkbox" class="cur-pick" data-id="' + esc(r.id) + '"' + (enrolled ? " disabled" : "") + ">" +
+      '<input type="checkbox" class="cur-pick" data-id="' + esc(r.id) + '"' + (selectable ? "" : " disabled") + ">" +
       '<div class="cur-main">' +
         '<div class="cur-person"><b>' + esc(r.managerName || "(title only)") + "</b> " +
           '<span class="cur-title">' + esc(r.managerTitle) + "</span> " + via + "</div>" +
