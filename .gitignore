@@ -26,3 +26,7 @@ node_modules
 # runtime marker: db persistence enabled once (versioned)
 .db-enabled
 .db-enabled-v2
+
+# durable on-disk store (in-market pool snapshots, accounts, sessions) — never commit
+.data/
+**/.data/

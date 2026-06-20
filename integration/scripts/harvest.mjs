@@ -203,11 +203,62 @@ async function main() {
   await mkdir(dirname(OUT), { recursive: true });
   await writeFile(OUT, JSON.stringify(db, null, 2), "utf8");
 
+  // Also seed the LIVE in-market pool the Command Center reads, so the harvest fills
+  // the real app (not just the standalone campaign-builder). Writes the db file-backend
+  // snapshot directly into ROS_DATA_DIR. Same store the accumulator grows from there on.
+  const poolWritten = await writePoolSnapshot(signals, totalRoles);
+
   const secs = ((Date.now() - started) / 1000).toFixed(1);
   console.log(`\n✓ ${signals.length} hiring companies, ${totalRoles} open roles, in ${secs}s`);
   console.log(`  Boards that responded: ${boards.length}/${jobs.length}`);
   console.log(`  Wrote ${OUT}`);
+  if (poolWritten) console.log(`  Seeded live in-market pool → ${poolWritten}`);
+  else console.log(`  (set ROS_DATA_DIR to also seed the live in-market pool)`);
   if (signals[0]) console.log(`  Top: ${signals.slice(0, 5).map((s) => `${s.company} (${s.rolesOpen})`).join(", ")}`);
+}
+
+/* ---------- consolidate: map harvested signals → live in-market pool ---------- */
+function slugify(name) { return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
+
+async function writePoolSnapshot(signals, totalRoles) {
+  const dataDir = process.env.ROS_DATA_DIR || join(__dirname, "..", ".data");
+  const nowMs = Date.now();
+  // Map each harvested company → InMarketLead (shape in lib/inmarket/index.ts),
+  // wrapped as a PoolEntry { lead, at, firstAt } (shape in lib/inmarket/pool.ts).
+  const entries = signals.map((s) => {
+    const roles = (s.sampleRoles || []);
+    const lead = {
+      id: `${(s.ats || "ats").toLowerCase()}_${slugify(s.company)}`,
+      company: s.company,
+      industry: s.industry,
+      location: (s.locations || []).find((l) => /,\s*(US|USA)$|, [A-Z]{2}$|United States|Remote/.test(l || "")) || (s.locations || [])[0],
+      reason: s.rolesOpen >= 4 ? `Posted ${s.rolesOpen} open roles` : `Hiring for ${roles[0]?.title || "open roles"}`,
+      signalType: s.type,
+      score: s.score,
+      scoreReasons: [`${s.rolesOpen} open roles`, s.ats].filter(Boolean),
+      roles: roles.map((r) => r.title).slice(0, 30),
+      roleDetails: roles.map((r) => ({ title: r.title, postedAt: s.eventAt, location: r.location })),
+      boardSource: s.ats,
+      boardExpandedAt: new Date(nowMs).toISOString(),
+      signalAt: s.eventAt,
+      postedAt: s.eventAt,
+      addedAt: new Date(nowMs).toISOString(),
+      sourceUrl: roles[0]?.url,
+    };
+    return { lead, at: nowMs, firstAt: nowMs };
+  });
+
+  const today = new Date(nowMs).toISOString().slice(0, 10);
+  const stats = { total: entries.length, positions: totalRoles, lastAddedAt: new Date(nowMs).toISOString(), days: { [today]: entries.length } };
+
+  try {
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(join(dataDir, "snap_inmarket_pool_v1.json"), JSON.stringify(entries), "utf8");
+    await writeFile(join(dataDir, "snap_inmarket_pool_stats_v1.json"), JSON.stringify(stats), "utf8");
+    return dataDir;
+  } catch {
+    return null;
+  }
 }
 
 main().catch((e) => { console.error("harvest failed:", e); process.exit(1); });
