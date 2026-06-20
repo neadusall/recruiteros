@@ -610,6 +610,34 @@ async function searchEngineCandidates(company: string, titles: string[]): Promis
  * their candidates, and hands them to the resolver's scorer. Stateless + injectable like every
  * other graph, so it slots straight into resolveHiringManager / the hiring pipeline.
  */
+
+/**
+ * Strategy 1b: COMMON CRAWL team pages — the same precision-safe extraction as the live company
+ * site, run over the ARCHIVED copy from Common Crawl. Free + UNBLOCKABLE (no live request), so it
+ * recovers team rosters from sites that block our live fetch (Cloudflare) and adds breadth at scale.
+ * All failsafes (timeouts, cache, circuit-breaker) live in commonCrawl.ts; this never throws.
+ */
+async function commonCrawlCandidates(domain: string): Promise<PersonCandidate[]> {
+  try {
+    const { ccTeamPages } = await import("./commonCrawl");
+    const pages = await ccTeamPages(domain);
+    if (!pages.length) return [];
+    const out: PersonCandidate[] = [];
+    const seen = new Set<string>();
+    for (const html of pages) {
+      const people = [...peopleFromJsonLd(html, "common_crawl"), ...peopleFromHtml(html, "common_crawl")]
+        .filter((p) => looksLikeTitle(p.title));
+      for (const p of people) {
+        const k = p.fullName.toLowerCase();
+        if (!seen.has(k)) { seen.add(k); out.push(p); }
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 export function freePeopleGraph(opts?: { domain?: string }): PeopleGraph {
   return {
     id: "free_research",
@@ -622,6 +650,7 @@ export function freePeopleGraph(opts?: { domain?: string }): PeopleGraph {
 
       const tasks: Array<Promise<PersonCandidate[]>> = [];
       if (domain) tasks.push(companySiteCandidates(domain));
+      if (domain) tasks.push(commonCrawlCandidates(domain));            // free + unblockable archive
       if (company) tasks.push(newsAppointmentCandidates(company, titles));
       if (company) tasks.push(searchEngineCandidates(company, titles)); // free, egress-rotated naming
       if (company && fn === "engineering") tasks.push(githubEngCandidates(company));
