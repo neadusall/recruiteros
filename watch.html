@@ -103,7 +103,7 @@
   vid.addEventListener("error", function(){
     document.getElementById("player").innerHTML = '<div class="err">This video isn\'t available right now.</div>';
   });
-  function start(){ vid.play(); vid.controls = true; overlay.style.display = "none"; }
+  function start(){ if (vid.ended) vid.currentTime = 0; vid.play(); vid.controls = true; overlay.style.display = "none"; }
   overlay.addEventListener("click", start);
 
   track("open");  // landed on the watch page
@@ -120,7 +120,7 @@
   });
   function flushBeat(){ if (played) { var d = vid.currentTime - lastBeat; if (d > 0.5) { track("heartbeat", d); lastBeat = vid.currentTime; } } }
   vid.addEventListener("pause", flushBeat);
-  vid.addEventListener("ended", function(){ flushBeat(); track("complete"); });
+  vid.addEventListener("ended", function(){ flushBeat(); track("complete"); vid.controls = false; overlay.style.display = "flex"; }); // replay affordance
   window.addEventListener("pagehide", flushBeat);
   document.addEventListener("visibilitychange", function(){ if (document.visibilityState === "hidden") flushBeat(); });
 

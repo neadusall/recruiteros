@@ -497,6 +497,7 @@ export async function xraySearch(
 export interface XrayContact {
   company: string;
   title: string;
+  queries: string[];
   person: XrayCandidate | null;
   /** Best-guess work email (syntax only, unverified) when we have a name + domain. */
   email: EmailGuess | null;
@@ -534,6 +535,7 @@ export async function findContactByTitle(
   return {
     company,
     title,
+    queries: res.queries,
     person,
     email,
     emailCheck,
