@@ -356,6 +356,68 @@ async function githubEngCandidates(company: string): Promise<PersonCandidate[]> 
 }
 
 /* ------------------------------------------------------------------ */
+/* Strategy 4: search-engine LinkedIn-title finder (free, egress-rotated) */
+/* ------------------------------------------------------------------ */
+
+const searchCache = new Map<string, { at: number; people: PersonCandidate[] }>();
+const SEARCH_TTL_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * The biggest free lift to the NAMING rate. Query a scraping-friendly search engine (DuckDuckGo
+ * HTML) for the company's people on LinkedIn and read the decision-maker name straight out of the
+ * PUBLIC result titles, e.g. "Jane Doe - VP of Engineering - Acme". This catches the many companies
+ * the team-page / news strategies miss (no public team page, no press).
+ *
+ * Sustainable + 100% free because every request is egress-IP rotated (lib/net/egress): from a free
+ * Hetzner IPv6 /64 we spread queries across dozens of source IPs, so the engine never rate-limits.
+ * Best-effort and cached per company. Reads only public search-result titles — it never logs into
+ * or scrapes LinkedIn itself. The result still goes through the same scorer + company-match guard,
+ * so a bad title can't promote a wrong person.
+ */
+async function searchEngineCandidates(company: string, titles: string[]): Promise<PersonCandidate[]> {
+  const anchor = companyAnchor(company);
+  if (anchor.length < 3) return [];
+  const cached = searchCache.get(anchor);
+  if (cached && Date.now() - cached.at < SEARCH_TTL_MS) return cached.people;
+
+  const titleQ = titles.slice(0, 5).map((t) => `"${t}"`).join(" OR ");
+  const q = `${company} (${titleQ}) site:linkedin.com/in`;
+  const html = await fetchText(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`);
+  const out: PersonCandidate[] = [];
+  if (html) {
+    const seen = new Set<string>();
+    const re = /<a[^>]+class="result__a"[^>]*>([\s\S]*?)<\/a>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) && out.length < 8) {
+      const title = m[1]
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&").replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').trim();
+      // LinkedIn result titles: "Name - Title - Company" (separators -, –, |).
+      const parts = title.split(/\s+[–\-|]\s+/);
+      if (parts.length < 2) continue;
+      const name = parts[0].trim();
+      const roleTitle = parts[1].replace(/\s*\|\s*linkedin.*$/i, "").trim();
+      const co = parts[2] ? parts[2].replace(/\s*\|\s*linkedin.*$/i, "").trim() : "";
+      if (!looksLikeName(name)) continue;
+      // Must reference our company: a matching company segment, or the company in the title text.
+      const hay = title.toLowerCase();
+      const coOk = co ? companyAnchor(co) === anchor || hay.includes(anchor) : hay.includes(anchor);
+      if (!coOk) continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const split = splitFullName(name);
+      out.push({
+        fullName: name, firstName: split.firstName, lastName: split.lastName,
+        title: roleTitle, headline: roleTitle, source: "search", companyName: company,
+      } as PersonCandidate);
+    }
+  }
+  searchCache.set(anchor, { at: Date.now(), people: out });
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
 /* The free people-graph                                               */
 /* ------------------------------------------------------------------ */
 
@@ -377,6 +439,7 @@ export function freePeopleGraph(opts?: { domain?: string }): PeopleGraph {
       const tasks: Array<Promise<PersonCandidate[]>> = [];
       if (domain) tasks.push(companySiteCandidates(domain));
       if (company) tasks.push(newsAppointmentCandidates(company, titles));
+      if (company) tasks.push(searchEngineCandidates(company, titles)); // free, egress-rotated naming
       if (company && fn === "engineering") tasks.push(githubEngCandidates(company));
 
       const results = await Promise.all(tasks.map((t) => t.catch(() => [] as PersonCandidate[])));
