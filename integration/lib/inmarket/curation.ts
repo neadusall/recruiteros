@@ -424,6 +424,13 @@ export interface CurationFunnel {
   /** Of all researched companies, how many got a NAME (the name-finding gate). */
   named: number;
   namedRate: number;
+  /** Of NAMED rows, which free source produced the name (company_site | common_crawl | news | search |
+   *  github | rapid_naming | …). The attribution that tells you WHICH source to invest in next, and lets
+   *  you measure the impact of any naming-coverage change instead of flying blind. */
+  namedByVia: Array<{ via: string; named: number }>;
+  /** Distribution of curated rows across confidence tiers (named | function_leader | recruiter |
+   *  company_only | …), with how many of each carry a name. Shows the quality mix behind `namedRate`. */
+  byTier: Array<{ tier: string; total: number; named: number }>;
   /** Decision-makers freshly NAMED in the last 60 min — the live per-IP yield of THIS box's engine
    *  (the headline number for the one-box proving-ground test). */
   namedLastHour: number;
@@ -463,6 +470,8 @@ export async function curationFunnel(): Promise<CurationFunnel> {
   const sig = new Map<string, { total: number; contactable: number }>();
   const fn = new Map<string, { total: number; contactable: number }>();
   const src = new Map<string, { total: number; validated: number }>();
+  const via = new Map<string, number>();                                  // named-row attribution by source
+  const tiers = new Map<string, { total: number; named: number }>();      // confidence-tier distribution
   let contactableOrBetter = 0, validated = 0, invalid = 0, named = 0, withDomain = 0, namedLastHour = 0;
   const hourAgoMs = Date.now() - 3_600_000;
   const byDay = new Map<string, { valid: number; contactable: number }>();
@@ -475,7 +484,15 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
     if (r.emailValidated) validated++;
     if (r.emailInvalid) invalid++;
-    if (r.managerName) { named++; if ((Date.parse(r.curatedAt) || 0) > hourAgoMs) namedLastHour++; }
+    if (r.managerName) {
+      named++;
+      if ((Date.parse(r.curatedAt) || 0) > hourAgoMs) namedLastHour++;
+      const vk = r.managerVia || "unknown";
+      via.set(vk, (via.get(vk) ?? 0) + 1);
+    }
+    const tk = r.managerTier || "company_only";
+    const tv = tiers.get(tk) ?? { total: 0, named: 0 };
+    tv.total++; if (r.managerName) tv.named++; tiers.set(tk, tv);
     if (r.domain) withDomain++;
     // Daily rollup: a VALID email is counted on the day it was validated; a contactable result on
     // the day it was curated. Drives the live "N / 5,000 today" target tracker.
@@ -515,6 +532,8 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     invalid,
     named,
     namedRate: rows.length ? Math.round((named / rows.length) * 100) / 100 : 0,
+    namedByVia: [...via.entries()].map(([v, n]) => ({ via: v, named: n })).sort((a, b) => b.named - a.named),
+    byTier: [...tiers.entries()].map(([tier, v]) => ({ tier, ...v })).sort((a, b) => b.total - a.total),
     namedLastHour,
     domain: {
       curatedWithDomain: withDomain,

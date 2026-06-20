@@ -83,6 +83,19 @@ export interface HiringManagerResolution {
 // No trailing \b: must still match the "-er"/"-ing" forms ("Recruiter", "Recruiting").
 const RECRUITER_RE = /(recruit|talent acquisition|sourcer|sourcing|ta partner|people ops)/i;
 
+/** Leadership-title signal — broader than the seniority classifier, so non-standard owner/partner titles
+ *  the classifier can't rank still count as a real leader for the provenance floor below. */
+const LEADERSHIP_RE =
+  /\b(chief|c[tefoma]o|cro|cpo|chro|cio|ciso|vp|vice president|head|director|manager|lead|president|founder|co-?founder|owner|partner|principal|proprietor|managing director|general manager|gm)\b/i;
+
+/** Per-source trust used as a score FLOOR (coverage salvage). A candidate from a high-trust free source
+ *  already cleared the leadership-title gate at extraction, so they're a real senior person AT the company.
+ *  Floored just enough to survive the `score > 0` filter and beat company_only — but well below any genuine
+ *  title/function match, so it ONLY rescues a name we'd otherwise discard, never displacing a better fit. */
+const SOURCE_FLOOR: Record<string, number> = {
+  sec_edgar: 0.2, company_site: 0.18, common_crawl: 0.16, news: 0.15, search: 0.12, rapid_naming: 0.12, github: 0.1,
+};
+
 /** Is this candidate plausibly at the target company (not a namesake elsewhere)? */
 function companyMatches(candidate: PersonCandidate, company: string): boolean {
   if (!candidate.companyName) return true; // graph didn't say; don't exclude
@@ -185,8 +198,16 @@ function scoreCandidate(
     }
   }
 
-  const score =
+  const fitScore =
     0.3 * fnScore + 0.3 * senScore + 0.25 * titleScore + 0.1 * teamScore + 0.05 * locScore;
+
+  // Coverage salvage: don't let a real leader from a high-trust source be zeroed (and dropped to
+  // company_only) just because the classifier can't map their title — the SMB long tail of "Owner",
+  // "Managing Partner", "Principal". Floor them so a found NAME survives; it stays below any genuine
+  // match, so this only rescues names we'd otherwise discard.
+  const provenanceFloor = LEADERSHIP_RE.test(titleText) ? (SOURCE_FLOOR[candidate.source ?? ""] ?? 0) : 0;
+  const score = Math.max(fitScore, provenanceFloor);
+  if (score > fitScore) reasons.push("known leader at company (weak title fit)");
 
   return { candidate, score, intel, isRecruiter, reasons };
 }

@@ -65,7 +65,12 @@ export async function POST(req: Request) {
     roleUrl: b?.roleUrl ? String(b.roleUrl) : undefined,
     domain: b?.domain ? String(b.domain) : undefined,
   };
-  const opts = { force: b?.force === true };
+  const opts = {
+    force: b?.force === true,
+    // Personalized cloned-voice "Hey {firstName}," intro (optional). voiceId defaults to env.
+    firstName: b?.firstName ? String(b.firstName) : undefined,
+    voiceId: b?.voiceId ? String(b.voiceId) : undefined,
+  };
   const result = b?.wait === true
     ? await composeRoleVideo(reqShot, clipId, b?.pip, opts)
     : await getOrStartVideo(reqShot, clipId, b?.pip, opts);

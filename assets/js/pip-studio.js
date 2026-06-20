@@ -380,8 +380,10 @@
       if (!confirm("Attach the 2-email sequence (text intro → video follow-up) to " + n + " prospect" + (n > 1 ? "s" : "") + " at " + s.company + "?\nThe video is the SECOND touch; signed links are generated automatically.")) return;
       api("/api/in-market/attach", { method: "POST", body: JSON.stringify({
         videoKey: vk, roleTitle: s.roleTitle, company: s.company,
+        clipId: state.clipId, pip: state.pip, roleUrl: s.pageUrl, // enable per-recipient "Hey {name}" intros
       }) }).then(function (r) {
         var msg = "Sequence attached to " + (r.attached || 0) + " prospect(s) at " + s.company;
+        if (r.personalizedNames) msg += " · " + r.personalizedNames + ' personalized "Hey {name}" intro' + (r.personalizedNames > 1 ? "s" : "");
         if (r.armed) msg += r.automationOn ? " — sending email 1 now, video follow-up in a few days" : " — armed (turn on automation to send)";
         toast(msg);
       })

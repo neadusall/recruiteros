@@ -81,16 +81,31 @@ export async function POST(req: Request) {
   const seqInput = { company, roleTitle, motion: "bd" as const };
   const draft = (company && roleTitle ? await draftVideoOpener(seqInput) : null) || templateOpener(seqInput);
 
-  const pv = {
-    videoKey,
-    watchUrl: share.watch,
-    gifUrl: share.gif,
-    mp4Url: share.mp4,
-    roleTitle: roleTitle || undefined,
-    sequence: { firstEmail: draft.first, secondEmail: draft.second },
-    expiresAt: share.exp,
-    at: new Date().toISOString(),
-  };
+  const sequence = { firstEmail: draft.first, secondEmail: draft.second };
+  const nowIso = new Date().toISOString();
+
+  // PER-RECIPIENT cloned-name personalization: when the caller passes the compose inputs
+  // (clipId [+pip, roleUrl]), render each distinct first name's own "Hey {name}," composite
+  // (cached by name, non-blocking) and stamp each prospect with THEIR videoKey + signed links.
+  // Without clipId we fall back to the single shared videoKey.
+  const clipId = String(b?.clipId ?? "").trim();
+  const personalize = !!clipId && b?.personalize !== false;
+  const reqShot = { company, roleTitle, roleUrl: b?.roleUrl ? String(b.roleUrl) : undefined };
+  const { cleanFirstName } = await import("../../../../lib/inmarket/nameAudio");
+  const roleVideoMod = personalize ? await import("../../../../lib/inmarket/roleVideo") : null;
+  const keyByName = new Map<string, string>(); // normalized name ("" = no-name) → videoKey
+  const personalizedNames = new Set<string>();
+  async function resolveKey(fullName?: string | null): Promise<string> {
+    if (!personalize || !roleVideoMod) return videoKey;
+    const clean = cleanFirstName(fullName);
+    const nm = (clean || "").toLowerCase();
+    if (keyByName.has(nm)) return keyByName.get(nm)!;
+    const r = await roleVideoMod.getOrStartVideo(reqShot, clipId, b?.pip, { firstName: clean || undefined });
+    keyByName.set(nm, r.key!);
+    if (clean) personalizedNames.add(nm);
+    return r.key!;
+  }
+  const shareFor = (vk: string) => (vk === videoKey ? share : compositeShareUrls(vk, { company, roleTitle }));
 
   // Re-enroll only OUTREACHABLE prospects (never re-touch someone who replied/booked/won/closed/DNC).
   const ENROLLABLE = new Set(["queued", "in_sequence", "nurture"]);
@@ -99,6 +114,12 @@ export async function POST(req: Request) {
   let attached = 0;
   const campaignIds = new Set<string>();
   for (const p of targets) {
+    const vk = await resolveKey(p.fullName);
+    const sh = shareFor(vk);
+    const pv = {
+      videoKey: vk, watchUrl: sh.watch, gifUrl: sh.gif, mp4Url: sh.mp4,
+      roleTitle: roleTitle || undefined, sequence, expiresAt: sh.exp, at: nowIso,
+    };
     const next: Prospect = { ...p, personalizedVideo: pv };
     if (campaignId) next.campaignId = campaignId;
     if (arm && ENROLLABLE.has(p.status)) {
@@ -110,13 +131,13 @@ export async function POST(req: Request) {
     if (next.campaignId) campaignIds.add(next.campaignId);
     await core.saveProspect(next);
     await core.recordActivity({
-      id: `act_${videoKey}_${p.id}`.slice(0, 80),
+      id: `act_${vk}_${p.id}`.slice(0, 80),
       workspaceId: ws,
       prospectId: p.id,
       type: "video_attached",
       channel: "system",
-      at: pv.at,
-      summary: `PiP video sequence attached${pv.roleTitle ? ` (${pv.roleTitle})` : ""}: ${share.watch}`,
+      at: nowIso,
+      summary: `PiP video sequence attached${roleTitle ? ` (${roleTitle})` : ""}: ${sh.watch}`,
       campaignId: next.campaignId,
     }).catch(() => {});
     attached++;
@@ -141,5 +162,5 @@ export async function POST(req: Request) {
   }
 
   const automationOn = ["on", "1", "true", "yes"].includes((process.env.AUTOMATION_ENABLED ?? "").trim().toLowerCase());
-  return ok({ attached, armed, automationOn, share, sequence: pv.sequence });
+  return ok({ attached, armed, automationOn, personalizedNames: personalizedNames.size, share, sequence });
 }

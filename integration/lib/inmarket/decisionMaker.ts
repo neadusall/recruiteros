@@ -650,6 +650,21 @@ async function commonCrawlCandidates(domain: string): Promise<PersonCandidate[]>
   }
 }
 
+/**
+ * Strategy 4: SEC EDGAR officers/directors — for public companies and recent filers, the law-mandated
+ * insider filings name the executive team with their exact titles. Free + authoritative + no anti-bot,
+ * and it covers the funded / IPO / M&A signals that the scraping sources often can't reach. All failsafes
+ * (timeouts, cache, circuit-breaker, name reordering) live in secEdgar.ts; this never throws.
+ */
+async function edgarOfficerCandidates(company: string): Promise<PersonCandidate[]> {
+  try {
+    const { edgarOfficers } = await import("./secEdgar");
+    return await edgarOfficers(company);
+  } catch {
+    return [];
+  }
+}
+
 export function freePeopleGraph(opts?: { domain?: string }): PeopleGraph {
   return {
     id: "free_research",
@@ -670,6 +685,7 @@ export function freePeopleGraph(opts?: { domain?: string }): PeopleGraph {
       // rotation + search-health back-off, so it's free and sustainable. Strongest when the exact
       // titleholder has a public profile — complements the hierarchy/apex pass above.
       if (company) tasks.push(xrayPeopleGraph().search({ ...query, titles }));
+      if (company) tasks.push(edgarOfficerCandidates(company));         // free + authoritative (public filers)
       if (company && fn === "engineering") tasks.push(githubEngCandidates(company));
 
       const results = await Promise.all(tasks.map((t) => t.catch(() => [] as PersonCandidate[])));

@@ -23,7 +23,7 @@
  */
 
 import { join } from "node:path";
-import { mkdir, writeFile, readFile, stat, unlink } from "node:fs/promises";
+import { mkdir, writeFile, readFile, stat, unlink, rename } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { captureRoleShot, shotKey, shotsDir, type ShotRequest } from "./roleShot";
@@ -258,10 +258,12 @@ export function normalizePip(p?: Partial<PipConfig> | null): PipConfig {
   };
 }
 
-/** Stable composite key for a (role, clip, layout) triple. */
-export function videoKey(company: string, roleTitle: string, clipId: string, pip: PipConfig): string {
+/** Stable composite key for a (role, clip, layout[, spoken first name]) tuple. Including the
+ *  normalized name means each "Hey Sarah" composite is reused for every Sarah at that role. */
+export function videoKey(company: string, roleTitle: string, clipId: string, pip: PipConfig, firstName?: string | null): string {
   const rk = shotKey(company, roleTitle);
-  const h = createHash("sha1").update(JSON.stringify({ clipId, pip })).digest("hex").slice(0, 12);
+  const nm = (firstName || "").trim().toLowerCase();
+  const h = createHash("sha1").update(JSON.stringify({ clipId, pip, nm })).digest("hex").slice(0, 12);
   return `${rk}__${h}`;
 }
 
@@ -454,7 +456,7 @@ const BG_W = 1000;
 const BG_H = 620;
 
 async function compose(
-  key: string, bgPath: string, clip: ClipMeta, pip: PipConfig,
+  key: string, bgPath: string, clip: ClipMeta, pip: PipConfig, introAudioPath?: string | null,
 ): Promise<{ files: VideoResult["files"] }> {
   await mkdir(videosDir(), { recursive: true });
   const clipFile = clipPath(clip.id, clip.ext);
@@ -480,11 +482,12 @@ async function compose(
     return a;
   };
 
+  const baseMp4 = join(videosDir(), `${key}.base.mp4`);
   const files: VideoResult["files"] = {};
   try {
-    // (1) MP4 — the composite WITH the user's voice (the source of truth + the watch-link asset).
-    //     The page-scroll background is looped (-stream_loop -1) and the webcam clip drives the
-    //     length (-shortest).
+    // (1) BASE composite WITH the user's voice. Background looped (-stream_loop -1); the webcam
+    //     clip drives the length (-shortest). Written to a temp so the GIF derives from it and the
+    //     optional name-intro can be prepended for the final MP4.
     {
       const { filter, outLabel } = buildFilter(BG_W, BG_H, pip, wantMask, wantBorder);
       await runFfmpeg([
@@ -493,18 +496,16 @@ async function compose(
         "-filter_complex", filter, "-map", `[${outLabel}]`, "-map", "1:a?",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-shortest",
-        compositePath(key, "mp4"),
+        baseMp4,
       ]);
-      files.mp4 = true;
     }
-    // (2) GIF — derived FROM the finished MP4 (muted, loops; email-embeddable). Deriving from the
-    //     finite MP4 (rather than re-compositing the infinitely-looped background) is what lets
-    //     palettegen see a clean EOF — a single-pass palette over a -stream_loop input errors out.
+    // (2) GIF — the LIVELY email teaser, derived from the base (no name-intro hold). Deriving from
+    //     the finite base (not the infinitely-looped bg) lets palettegen see a clean EOF.
     {
       const gw = Math.max(2, Math.round(GIF_W / 2) * 2);
       await runFfmpeg([
         "-y", "-hide_banner", "-loglevel", "error",
-        "-t", String(EMAIL_GIF_SECONDS), "-i", compositePath(key, "mp4"),
+        "-t", String(EMAIL_GIF_SECONDS), "-i", baseMp4,
         "-filter_complex",
         `fps=${GIF_FPS},scale=${gw}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle`,
         "-loop", "0",
@@ -512,11 +513,54 @@ async function compose(
       ]);
       files.gif = true;
     }
+    // (3) FINAL MP4 — prepend the cloned "Hey {name}," over a held first frame, else use the base.
+    const prepended = introAudioPath ? await prependNameIntro(key, baseMp4, introAudioPath) : false;
+    if (!prepended) await rename(baseMp4, compositePath(key, "mp4"));
+    files.mp4 = true;
   } finally {
     await unlink(tmpMask).catch(() => {});
     await unlink(tmpBorder).catch(() => {});
+    await unlink(baseMp4).catch(() => {});
   }
   return { files };
+}
+
+/**
+ * Prepend the cloned-voice name intro to the composite: freeze the first frame for the length of
+ * the "Hey {name}," audio (so there's no lip-sync mismatch), then play the recorded composite.
+ * Writes compositePath(key,"mp4"). Returns false (caller keeps the base) on any ffmpeg failure.
+ */
+async function prependNameIntro(key: string, baseMp4: string, audioPath: string): Promise<boolean> {
+  const ff = join(videosDir(), `${key}.ff.png`);
+  const intro = join(videosDir(), `${key}.intro.mp4`);
+  try {
+    // First frame of the composite (mouth-neutral hold during the spoken name).
+    await runFfmpeg(["-y", "-hide_banner", "-loglevel", "error", "-i", baseMp4, "-frames:v", "1", ff]);
+    // Still-frame intro lasting exactly the name audio (capped at 6s for safety).
+    await runFfmpeg([
+      "-y", "-hide_banner", "-loglevel", "error",
+      "-loop", "1", "-i", ff, "-i", audioPath, "-t", "6",
+      "-vf", `scale=${BG_W}:${BG_H},format=yuv420p,fps=30,setsar=1`,
+      "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", intro,
+    ]);
+    // Concat intro + composite, normalizing streams so the join is clean.
+    await runFfmpeg([
+      "-y", "-hide_banner", "-loglevel", "error", "-i", intro, "-i", baseMp4,
+      "-filter_complex",
+      `[0:v]fps=30,scale=${BG_W}:${BG_H},setsar=1[v0];[1:v]fps=30,scale=${BG_W}:${BG_H},setsar=1[v1];` +
+      `[0:a]aresample=44100[a0];[1:a]aresample=44100[a1];[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]`,
+      "-map", "[v]", "-map", "[a]",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23",
+      "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", compositePath(key, "mp4"),
+    ]);
+    return true;
+  } catch (e) {
+    console.error(`[roleVideo] name-intro prepend failed for ${key}:`, (e as Error).message);
+    return false;
+  } finally {
+    await unlink(ff).catch(() => {});
+    await unlink(intro).catch(() => {});
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -532,10 +576,10 @@ const inflight = new Map<string, Promise<VideoResult>>();
  * calling again.
  */
 export async function getOrStartVideo(
-  req: ShotRequest, clipId: string, pipIn?: Partial<PipConfig>, opts?: { force?: boolean },
+  req: ShotRequest, clipId: string, pipIn?: Partial<PipConfig>, opts?: { force?: boolean; firstName?: string; voiceId?: string },
 ): Promise<VideoResult> {
   const pip = normalizePip(pipIn);
-  const key = videoKey(req.company, req.roleTitle, clipId, pip);
+  const key = videoKey(req.company, req.roleTitle, clipId, pip, opts?.firstName);
 
   if (!opts?.force && (await fileExists(compositePath(key, "gif")))) {
     const cache = await ensureVideos();
@@ -556,10 +600,10 @@ export async function getOrStartVideo(
  * (e.g. a CLI/batch job).
  */
 export async function composeRoleVideo(
-  req: ShotRequest, clipId: string, pipIn?: Partial<PipConfig>, opts?: { force?: boolean },
+  req: ShotRequest, clipId: string, pipIn?: Partial<PipConfig>, opts?: { force?: boolean; firstName?: string; voiceId?: string },
 ): Promise<VideoResult> {
   const pip = normalizePip(pipIn);
-  const key = videoKey(req.company, req.roleTitle, clipId, pip);
+  const key = videoKey(req.company, req.roleTitle, clipId, pip, opts?.firstName);
   const now = () => new Date().toISOString();
 
   if (!opts?.force && (await fileExists(compositePath(key, "gif")))) {
@@ -589,7 +633,10 @@ export async function composeRoleVideo(
         }
       }
       if (haveShot) {
-        const { files } = await compose(key, bgPath, clip, pip);
+        // Optional cloned-voice "Hey {firstName}," intro (cached by voice+name; null degrades gracefully).
+        const { nameIntroAudio } = await import("./nameAudio");
+        const introAudio = await nameIntroAudio(opts?.firstName, opts?.voiceId).catch(() => null);
+        const { files } = await compose(key, bgPath, clip, pip, introAudio);
         result = { ok: true, status: "ready", key, files, pageUrl, at: now() };
       } else {
         result = result! ?? { ok: false, status: "no_shot", key, reason: "no verified page-scroll GIF for this role", at: now() };
