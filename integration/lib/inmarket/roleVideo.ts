@@ -51,6 +51,10 @@ export interface PipConfig {
   borderColor: string;
   /** Corner radius for "rounded", as a % of the PiP width (clamped 0–50). */
   radiusPct: number;
+  /** FREE position: bubble top-left as a % of the free space (0–100). When BOTH are set they
+   *  override `corner`/`marginPct` — this is the Loom-style drag-anywhere placement. */
+  xPct?: number;
+  yPct?: number;
 }
 
 export const DEFAULT_PIP: PipConfig = {
@@ -243,12 +247,14 @@ export function normalizePip(p?: Partial<PipConfig> | null): PipConfig {
   const corner = (["br", "bl", "tr", "tl"] as PipCorner[]).includes(p?.corner as PipCorner) ? (p!.corner as PipCorner) : d.corner;
   const shape = (["circle", "rounded", "rect"] as PipShape[]).includes(p?.shape as PipShape) ? (p!.shape as PipShape) : d.shape;
   const color = /^#[0-9a-f]{6}$/i.test(String(p?.borderColor)) ? String(p!.borderColor) : d.borderColor;
+  const hasFree = p?.xPct != null && p?.yPct != null && Number.isFinite(Number(p?.xPct)) && Number.isFinite(Number(p?.yPct));
   return {
     corner, shape, borderColor: color,
     sizePct: clamp(Number(p?.sizePct ?? d.sizePct), 12, 55),
     marginPct: clamp(Number(p?.marginPct ?? d.marginPct), 0, 20),
     borderPx: clamp(Math.round(Number(p?.borderPx ?? d.borderPx)), 0, 24),
     radiusPct: clamp(Number(p?.radiusPct ?? d.radiusPct), 0, 50),
+    ...(hasFree ? { xPct: clamp(Number(p!.xPct), 0, 100), yPct: clamp(Number(p!.yPct), 0, 100) } : {}),
   };
 }
 
@@ -406,11 +412,17 @@ function buildFilter(
   const pipH = pip.shape === "circle" ? pipW : even(pipW * 0.62); // circles are square; others 16:10-ish
   const margin = Math.round((pip.marginPct / 100) * bgW);
 
-  // Corner placement.
-  const left = pip.corner === "bl" || pip.corner === "tl";
-  const top = pip.corner === "tl" || pip.corner === "tr";
-  const X = left ? `${margin}` : `W-w-${margin}`;
-  const Y = top ? `${margin}` : `H-h-${margin}`;
+  // Placement: free drag (xPct/yPct of the free space) overrides corner+margin.
+  let X: string, Y: string;
+  if (pip.xPct != null && pip.yPct != null) {
+    X = `(W-w)*${(pip.xPct / 100).toFixed(4)}`;
+    Y = `(H-h)*${(pip.yPct / 100).toFixed(4)}`;
+  } else {
+    const left = pip.corner === "bl" || pip.corner === "tl";
+    const top = pip.corner === "tl" || pip.corner === "tr";
+    X = left ? `${margin}` : `W-w-${margin}`;
+    Y = top ? `${margin}` : `H-h-${margin}`;
+  }
 
   // Input order: [0]=bg gif, [1]=clip, [2]=mask?, [3]=border?
   const maskIdx = 2;

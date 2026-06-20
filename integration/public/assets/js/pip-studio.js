@@ -198,7 +198,7 @@
       };
     });
   }
-  bindPills("corners", "data-c", "corner");
+  bindPills("corners", "data-c", "corner", function () { delete state.pip.xPct; delete state.pip.yPct; });
   bindPills("shapes", "data-s", "shape", function () { $("radiusWrap").style.display = state.pip.shape === "rounded" ? "" : "none"; });
   function bindRange(id, key, label) {
     $(id).oninput = function () { state.pip[key] = Number(this.value); if (label) $(label).textContent = this.value; saveStyle(); renderPip(); };
@@ -216,20 +216,49 @@
   }
   function renderPip() {
     var stage = $("stage"), box = $("pipBox");
-    var W = stage.clientWidth, p = state.pip;
+    var W = stage.clientWidth, H = stage.clientHeight, p = state.pip;
     var pw = (p.sizePct / 100) * W, ph = p.shape === "circle" ? pw : pw * 0.62, m = (p.marginPct / 100) * W;
     box.style.width = pw + "px"; box.style.height = ph + "px";
     box.style.top = box.style.bottom = box.style.left = box.style.right = "auto";
-    if (p.corner === "tl" || p.corner === "tr") box.style.top = m + "px"; else box.style.bottom = m + "px";
-    if (p.corner === "tl" || p.corner === "bl") box.style.left = m + "px"; else box.style.right = m + "px";
+    if (p.xPct != null && p.yPct != null) {
+      // free drag: bubble top-left at % of the free space
+      box.style.left = ((p.xPct / 100) * Math.max(0, W - pw)) + "px";
+      box.style.top = ((p.yPct / 100) * Math.max(0, H - ph)) + "px";
+    } else {
+      if (p.corner === "tl" || p.corner === "tr") box.style.top = m + "px"; else box.style.bottom = m + "px";
+      if (p.corner === "tl" || p.corner === "bl") box.style.left = m + "px"; else box.style.right = m + "px";
+    }
     box.style.borderRadius = p.shape === "circle" ? "50%" : (p.shape === "rounded" ? (p.radiusPct / 100) * pw + "px" : "0");
     box.style.border = p.borderPx ? (p.borderPx + "px solid " + p.borderColor) : "none";
+    box.style.cursor = "grab"; box.title = "Drag me anywhere";
     var v = box.querySelector("video");
     if (!v) { v = document.createElement("video"); v.muted = true; v.playsInline = true; v.autoplay = true; box.appendChild(v); }
     if (state.stream && !state.recordedBlob) { if (v.srcObject !== state.stream) { v.srcObject = state.stream; v.play(); } var nc = box.querySelector(".nocam"); if (nc) nc.remove(); }
     else if (!state.stream && !box.querySelector(".nocam")) { var n = document.createElement("div"); n.className = "nocam"; n.textContent = "you"; box.appendChild(n); }
   }
   window.addEventListener("resize", renderPip);
+
+  /* Loom-style drag-anywhere: grab the bubble and drop it; persists as xPct/yPct (overrides corner). */
+  (function setupPipDrag() {
+    var box = $("pipBox"); if (!box) return;
+    var drag = null;
+    function start(e) {
+      var pt = e.touches ? e.touches[0] : e, r = box.getBoundingClientRect();
+      drag = { dx: pt.clientX - r.left, dy: pt.clientY - r.top, bw: r.width, bh: r.height };
+      box.style.cursor = "grabbing"; if (e.cancelable) e.preventDefault();
+    }
+    function move(e) {
+      if (!drag) return;
+      var pt = e.touches ? e.touches[0] : e, stage = $("stage"), sr = stage.getBoundingClientRect();
+      var freeW = Math.max(1, stage.clientWidth - drag.bw), freeH = Math.max(1, stage.clientHeight - drag.bh);
+      state.pip.xPct = Math.max(0, Math.min(100, ((pt.clientX - sr.left - drag.dx) / freeW) * 100));
+      state.pip.yPct = Math.max(0, Math.min(100, ((pt.clientY - sr.top - drag.dy) / freeH) * 100));
+      renderPip(); if (e.cancelable) e.preventDefault();
+    }
+    function end() { if (!drag) return; drag = null; box.style.cursor = "grab"; setPill("corners", "data-c", ""); saveStyle(); }
+    box.addEventListener("mousedown", start); window.addEventListener("mousemove", move); window.addEventListener("mouseup", end);
+    box.addEventListener("touchstart", start, { passive: false }); window.addEventListener("touchmove", move, { passive: false }); window.addEventListener("touchend", end);
+  })();
 
   /* ================= 3 · roles ================= */
   function loadGallery(cb) {
