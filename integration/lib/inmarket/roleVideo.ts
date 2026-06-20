@@ -442,7 +442,7 @@ const BG_W = 1000;
 const BG_H = 620;
 
 async function compose(
-  key: string, gifPath: string, clip: ClipMeta, pip: PipConfig,
+  key: string, bgPath: string, clip: ClipMeta, pip: PipConfig,
 ): Promise<{ files: VideoResult["files"] }> {
   await mkdir(videosDir(), { recursive: true });
   const clipFile = clipPath(clip.id, clip.ext);
@@ -462,7 +462,7 @@ async function compose(
   if (wantBorder) await writeFile(tmpBorder, await genBorderPng(pip.shape, pipW, pipH, radius, pip.borderPx, pip.borderColor));
 
   const inputs = (): string[] => {
-    const a = ["-stream_loop", "-1", "-i", gifPath, "-i", clipFile];
+    const a = ["-stream_loop", "-1", "-i", bgPath, "-i", clipFile];
     if (wantMask) a.push("-i", tmpMask);
     if (wantBorder) a.push("-i", tmpBorder);
     return a;
@@ -562,23 +562,22 @@ export async function composeRoleVideo(
     } else if (!(await ffmpegAvailable())) {
       result = { ok: false, status: "no_ffmpeg", key, reason: "ffmpeg not installed (set FFMPEG_PATH or apt-get install ffmpeg)", at: now() };
     } else {
-      // Reuse the already-verified page-scroll GIF when it's on disk; only run the (slow,
-      // Playwright) capture when it's missing or a re-render is forced. This keeps composition
-      // fast and resilient when the shot verdict cache was lost (e.g. a restart without a DB)
-      // but the verified GIF still sits on disk.
-      const gifPath = join(shotsDir(), `${shotKey(req.company, req.roleTitle)}.gif`);
+      // Background = the FULL natural-scroll MP4 from roleShot (the .gif is now the short email
+      // teaser with a play button, so it must NOT be used here). Reuse it when on disk; only run
+      // the slow Playwright capture when it's missing or a re-render is forced.
+      const bgPath = join(shotsDir(), `${shotKey(req.company, req.roleTitle)}.mp4`);
       let pageUrl: string | undefined;
-      let haveShot = !opts?.force && (await fileExists(gifPath));
+      let haveShot = !opts?.force && (await fileExists(bgPath));
       if (!haveShot) {
         const shot = await captureRoleShot(req, { force: opts?.force });
         pageUrl = shot.pageUrl;
-        haveShot = shot.ok && shot.status === "company_site" && (await fileExists(gifPath));
+        haveShot = shot.ok && shot.status === "company_site" && (await fileExists(bgPath));
         if (!haveShot) {
-          result = { ok: false, status: "no_shot", key, reason: shot.reason || "no verified page-scroll GIF for this role", at: now() };
+          result = { ok: false, status: "no_shot", key, reason: shot.reason || "no verified page-scroll video for this role", at: now() };
         }
       }
       if (haveShot) {
-        const { files } = await compose(key, gifPath, clip, pip);
+        const { files } = await compose(key, bgPath, clip, pip);
         result = { ok: true, status: "ready", key, files, pageUrl, at: now() };
       } else {
         result = result! ?? { ok: false, status: "no_shot", key, reason: "no verified page-scroll GIF for this role", at: now() };
