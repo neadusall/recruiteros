@@ -94,6 +94,10 @@ const NON_NAME = new Set([
   "Engineering", "Marketing", "Operations", "Finance", "Design", "Sales", "Growth", "Revenue",
   "San", "Francisco", "New", "York", "Los", "Angeles", "United", "States", "Remote", "Hybrid",
   "Chief", "Officer", "President", "Vice", "Head", "Director", "Manager", "Lead", "Senior",
+  // function words that begin marketing CTAs ("For Accountants", "Become a partner", "Your team") —
+  // never a real given/sur-name, so any of these as a token disqualifies the candidate.
+  "For", "And", "To", "With", "Your", "From", "Become", "Today", "Free", "Best", "Or", "An",
+  "Build", "Grow", "Discover", "Explore", "Trusted", "Powered", "Built", "Made", "Every",
 ]);
 
 /** Lowercase name particles ("Maria de la Cruz", "Vincent van der Berg", "Jean-Luc de la Tour") — they
@@ -104,13 +108,17 @@ const NAME_PARTICLES = new Set([
   "bin", "ibn", "al", "el", "mac", "mc", "st", "san", "santa", "ten", "ter",
 ]);
 
+// Case-insensitive view of NON_NAME — archived/scraped pages carry lowercase nav text ("dashboard",
+// "pro", "partner community"), which a case-sensitive check let through as fake names.
+const NON_NAME_LC = new Set([...NON_NAME].map((w) => w.toLowerCase()));
+
 function looksLikeName(s: string): boolean {
   const parts = s.trim().split(/\s+/);
   if (parts.length < 2 || parts.length > 5) return false;          // allow compound / particle surnames
   // Significant tokens = the real name words (particles are connective glue, not separate names).
   const sig = parts.filter((p) => !NAME_PARTICLES.has(p.toLowerCase().replace(/[.'’-].*$/, "")));
   if (sig.length < 2 || sig.length > 4) return false;
-  if (parts.some((p) => NON_NAME.has(p.replace(/[.'’-].*$/, "")))) return false;
+  if (parts.some((p) => NON_NAME_LC.has(p.toLowerCase().replace(/[.'’-].*$/, "")))) return false;
   // Reject ALL-CAPS acronyms and single-letter tokens among the significant words.
   if (sig.some((p) => p.length < 2 || p === p.toUpperCase())) return false;
   return true;

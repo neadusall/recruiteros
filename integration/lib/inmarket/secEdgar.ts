@@ -78,11 +78,13 @@ function stripParens(s: string): string {
   return String(s).replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
 }
 
-/** EDGAR "Last First Middle" → natural "First Middle Last". */
+/** EDGAR "Last First Middle" → natural "First Middle Last", normalizing ALL-CAPS filings to Title Case
+ *  (some filers enter "OBSTLER DAVID M") while leaving correct mixed-case names untouched. */
 function naturalName(secName: string): string {
   const parts = stripParens(secName).split(/\s+/).filter(Boolean);
   if (parts.length < 2) return parts.join(" ");
-  return [...parts.slice(1), parts[0]].join(" ");
+  const reordered = [...parts.slice(1), parts[0]].join(" ");
+  return reordered === reordered.toUpperCase() ? titleCase(reordered) : reordered;
 }
 
 function titleCase(s: string): string {

@@ -2602,7 +2602,7 @@
       var d = r && r.data; if (!d || !d.funnel) return;
       curLastSyncMs = Date.now();   // backend answered → link is healthy
       var node = document.getElementById("curStats"); if (!node) return;
-      node.innerHTML = curStatsInner(d.funnel, d.health || null, d.search || null);
+      node.innerHTML = curStatsInner(d.funnel, d.health || null, d.search || null, d.fleet || null, d.cc || null);
       curPaintSync();               // the re-render reset the pill text; restore it immediately
       var rc = document.getElementById("curResearched");
       if (rc) rc.textContent = (d.funnel.total || 0).toLocaleString();
@@ -2627,10 +2627,12 @@
       var funnel = (rs[0] && rs[0].data && rs[0].data.funnel) || null;
       var health = (rs[0] && rs[0].data && rs[0].data.health) || null;
       var search = (rs[0] && rs[0].data && rs[0].data.search) || null;
+      var fleet = (rs[0] && rs[0].data && rs[0].data.fleet) || null;
+      var cc = (rs[0] && rs[0].data && rs[0].data.cc) || null;
       var list = (rs[1] && rs[1].data && rs[1].data.curated) || [];
       curLastTotal = (funnel && funnel.total) || 0;
       curLastSyncMs = Date.now();   // first good answer from the backend → mark the link live
-      body.innerHTML = curationHtml(funnel, list, health, search);
+      body.innerHTML = curationHtml(funnel, list, health, search, fleet, cc);
       wireCuration(body, list);
       curPaintSync();               // paint the live pill right away (don't wait a full beat)
       curPollTimer = setInterval(curHeartbeat, CUR_BEAT_MS); // live ongoing updates + link heartbeat
@@ -2661,9 +2663,33 @@
     return '<span class="cur-mini" id="curSync" title="live connection to the lead engine">⚪ connecting…</span>';
   }
 
-  function curEngineLine(h, search) {
-    if (!h && !search) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + "</div>";
-    if (!h) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + curSearchPill(search) + "</div>";
+  // THIS (main) box's Common Crawl index-governor pill — the binding-constraint signal for the
+  // one-box proving-ground test: 🟢 CC ok / 🟡 CC paced Ns (index asking us to slow) / 🔴 CC resting
+  // or trips (this IP is being throttled). Hover for the governor internals.
+  function curCcPill(cc) {
+    if (!cc || !cc.index) return "";
+    var ix = cc.index, icon, label;
+    if (cc.resting) { icon = "🔴"; label = "CC resting " + (cc.restingForSec || 0) + "s"; }
+    else if ((ix.breakerTrips || 0) >= 2) { icon = "🔴"; label = "CC trips " + ix.breakerTrips; }
+    else if ((ix.spacingMs || 0) >= 16000) { icon = "🟡"; label = "CC paced " + Math.round(ix.spacingMs / 1000) + "s"; }
+    else if ((ix.cooldownForSec || 0) > 0) { icon = "🟡"; label = "CC wait " + ix.cooldownForSec + "s"; }
+    else { icon = "🟢"; label = "CC ok"; }
+    var tip = "Common Crawl index governor — spacing " + (ix.spacingMs || 0) + "ms · in-flight " +
+      (ix.inFlight || 0) + "/" + (ix.concurrency || 1) + " · breaker trips " + (ix.breakerTrips || 0) +
+      (cc.resting ? " · RESTING " + (cc.restingForSec || 0) + "s" : "") + " · cached " + (cc.cachedDomains || 0) + " domains";
+    return '<span class="cur-mini" title="' + esc(tip) + '">' + icon + " " + esc(label) + "</span>";
+  }
+
+  // This box's live per-IP yield: decision-makers freshly named in the last 60 min. The headline
+  // number for the one-box test — healthy here means a second IP would multiply it.
+  function curRatePill(n) {
+    return '<span class="cur-mini" title="Decision-makers this box freshly named in the last hour — its live per-IP yield. Multiply by your box count for the fleet projection.">⚡ <b>' + (Number(n) || 0).toLocaleString() + "</b>/hr named</span>";
+  }
+
+  function curEngineLine(h, search, cc, namedPerHour) {
+    var tail = curCcPill(cc) + curRatePill(namedPerHour);
+    if (!h && !search) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + tail + "</div>";
+    if (!h) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + curSearchPill(search) + tail + "</div>";
     function ago(s) {
       if (!s) return null;
       var t = Date.parse(String(s).replace(" ", "T")); if (isNaN(t)) return null;
@@ -2686,6 +2712,7 @@
       part("pool fed", h.lastCycleAt, h.lastCycleOk, 75) +
       part("curated", h.lastCurationAt, h.lastCurationOk, 20) +
       curSearchPill(search) +
+      tail +
       "</div>";
   }
 
@@ -2706,7 +2733,7 @@
 
   // The live-updating stats block (engine pills, daily target, funnel, signal slices). Rebuilt by
   // the poller every ~25s so the numbers climb on screen, WITHOUT touching the list/selection below.
-  function curStatsInner(f, health, search) {
+  function curStatsInner(f, health, search, fleet, cc) {
     var bs = f.byStatus || {};
     var stages = [
       ["sourced", "Sourced", "company + owning title"],
@@ -2722,14 +2749,76 @@
     var sigRows = (f.bySignal || []).slice(0, 8).map(function (x) {
       return '<div class="cur-mini"><span>' + esc(imSignalLabel(x.signalType)) + '</span><b>' + x.contactable.toLocaleString() + "</b><span class=\"muted\">/ " + x.total.toLocaleString() + "</span></div>";
     }).join("");
-    return curEngineLine(health, search) +
+    return curEngineLine(health, search, cc, f.namedLastHour) +
       curDailyHtml(f.daily) +
       '<div class="cur-funnel">' + funnelRow + "</div>" +
       (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
-      ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "");
+      ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "") +
+      curFleetHtml(fleet);
   }
 
-  function curationHtml(funnel, list, health, search) {
+  // The distributed worker fleet — one clean card per machine (online dot, jobs/min, names/hr, total),
+  // so you can watch output scale linearly as you add boxes. Repainted by the same 20s stats poll.
+  function curFleetHtml(fleet) {
+    if (!fleet) return "";
+    var workers = fleet.workers || [];
+    var hue = function (st) { return st === "healthy" ? "#38e0a6" : st === "degraded" ? "#f5c451" : st === "unhealthy" || st === "throttled" ? "#ff6b6b" : "#7a7a88"; };
+    var pill = function (label, color) {
+      return '<span style="font-size:10.5px;padding:2px 7px;border-radius:6px;background:' + color + '22;color:' + color + ';border:1px solid ' + color + '40;white-space:nowrap">' + esc(label) + "</span>";
+    };
+    var fhColor = fleet.health ? hue(fleet.health) : "#7a7a88";
+    var summary = '<span class="muted" style="font-size:12px">' + (fleet.online || 0) + " online · " +
+      (fleet.totalJobsPerMin || 0) + " jobs/min · <b style=\"color:#38e0a6\">" + (fleet.totalNamesPerHour || 0).toLocaleString() + "</b> names/hr</span>";
+    var head = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:' + (workers.length ? "11px" : "0") + '">' +
+      '<span style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:7px">' +
+        '<span style="width:8px;height:8px;border-radius:50%;background:' + fhColor + ';box-shadow:0 0 8px ' + fhColor + '"></span>🖥️ Worker fleet</span>' + summary + "</div>";
+    var box = function (inner) {
+      return '<div style="margin:12px 0 2px;padding:14px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:linear-gradient(180deg,rgba(124,92,255,.06),rgba(255,255,255,.015))">' + inner + "</div>";
+    };
+    if (!workers.length) {
+      return box(head + '<div class="muted" style="font-size:12.5px;line-height:1.5;margin-top:8px">No worker boxes connected yet. Spin one up with <b>setup-worker.sh</b> — each box scrapes with its own IP and pushes here, so output scales linearly as you add machines.</div>');
+    }
+    var cards = workers.map(function (w) {
+      var h = w.health || null;
+      // Dot colour reflects the box's reported HEALTH when known (CC governor + sources), else liveness.
+      var color = h ? hue(h.status) : (w.online ? "#38e0a6" : (w.lastSeenSec < 300 ? "#f5c451" : "#7a7a88"));
+      var seen = w.online ? "live" : w.lastSeenSec < 90 ? w.lastSeenSec + "s ago" :
+        w.lastSeenSec < 3600 ? Math.round(w.lastSeenSec / 60) + "m ago" : Math.round(w.lastSeenSec / 3600) + "h ago";
+      var metric = function (v, l) {
+        return '<div style="text-align:center;flex:1"><div style="font-size:18px;font-weight:700;line-height:1.05;letter-spacing:-.01em">' + v +
+          '</div><div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">' + l + "</div></div>";
+      };
+      // Per-box health row: the Common Crawl index governor state + search status (the signals that
+      // matter — the index is the binding constraint). Reasons surface on hover.
+      var healthRow = "";
+      if (h) {
+        var cc = h.cc || {};
+        var ccLabel, ccColor;
+        if (cc.resting) { ccLabel = "CC resting"; ccColor = "#ff6b6b"; }
+        else if ((cc.breakerTrips || 0) >= 2) { ccLabel = "CC trips " + cc.breakerTrips; ccColor = "#ff6b6b"; }
+        else if ((cc.spacingMs || 0) >= 16000) { ccLabel = "CC paced " + Math.round(cc.spacingMs / 1000) + "s"; ccColor = "#f5c451"; }
+        else if ((cc.cooldownSec || 0) > 0) { ccLabel = "CC wait " + cc.cooldownSec + "s"; ccColor = "#f5c451"; }
+        else { ccLabel = "CC ok"; ccColor = "#38e0a6"; }
+        var reasons = (h.reasons && h.reasons.length) ? h.reasons.join(" · ") : "all sources healthy";
+        healthRow = '<div title="' + esc(reasons) + '" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:11px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06)">' +
+          pill(ccLabel, ccColor) + pill("search " + (h.search || "idle"), hue(h.search)) + "</div>";
+      }
+      return '<div style="flex:1 1 220px;min-width:200px;padding:13px 15px;border:1px solid ' + (h ? hue(h.status) + "33" : "rgba(255,255,255,.08)") + ';border-radius:12px;background:rgba(255,255,255,.025)">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">' +
+          '<span style="width:9px;height:9px;border-radius:50%;flex:none;background:' + color + ';box-shadow:0 0 9px ' + color + '"></span>' +
+          '<b style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(w.id) + "</b>" +
+          '<span class="muted" style="margin-left:auto;font-size:11px;flex:none">' + esc(seen) + "</span>" +
+        "</div>" +
+        '<div style="display:flex;gap:8px">' +
+          metric(w.jobsPerMin, "jobs/min") +
+          metric('<span style="color:#38e0a6">' + (w.namesPerHour || 0).toLocaleString() + "</span>", "names/hr") +
+          metric((w.totalNamed || 0).toLocaleString(), "total") +
+        "</div>" + healthRow + "</div>";
+    }).join("");
+    return box(head + '<div style="display:flex;flex-wrap:wrap;gap:11px">' + cards + "</div>");
+  }
+
+  function curationHtml(funnel, list, health, search, fleet, cc) {
     var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
 
     var head =
@@ -2738,7 +2827,7 @@
         '<h2>Curated decision-makers <span class="muted">· <span id="curResearched">' + (f.total || 0).toLocaleString() + "</span> researched</span></h2>" +
         '<button type="button" class="btn btn-ghost btn-sm" id="curRefresh">↻ Research more now</button>' +
       "</div>" +
-      '<div id="curStats">' + curStatsInner(f, health, search) + "</div>";
+      '<div id="curStats">' + curStatsInner(f, health, search, fleet, cc) + "</div>";
 
     if (!list.length) {
       return head + '<div class="empty" style="margin-top:14px">No decision-makers curated yet. The engine researches companies continuously (free: search, team pages, news, GitHub) and new leads appear here automatically as they come in. Hit <b>Research more now</b> to kick it.</div>';

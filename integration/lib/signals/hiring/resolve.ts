@@ -88,12 +88,13 @@ const RECRUITER_RE = /(recruit|talent acquisition|sourcer|sourcing|ta partner|pe
 const LEADERSHIP_RE =
   /\b(chief|c[tefoma]o|cro|cpo|chro|cio|ciso|vp|vice president|head|director|manager|lead|president|founder|co-?founder|owner|partner|principal|proprietor|managing director|general manager|gm)\b/i;
 
-/** Per-source trust used as a score FLOOR (coverage salvage). A candidate from a high-trust free source
- *  already cleared the leadership-title gate at extraction, so they're a real senior person AT the company.
- *  Floored just enough to survive the `score > 0` filter and beat company_only — but well below any genuine
- *  title/function match, so it ONLY rescues a name we'd otherwise discard, never displacing a better fit. */
+/** Score FLOOR for coverage salvage — scoped to sec_edgar ONLY, on purpose. EDGAR names are STRUCTURED
+ *  and authoritative (real SEC-filed officers with isOfficer/isDirector flags), so flooring them rescues
+ *  a true exec whose exact title doesn't match the role. We deliberately do NOT floor the scraping sources
+ *  (company_site/common_crawl/search): there, a floor turns a noisy page fragment ("Gusto Pro dashboard")
+ *  into a fake name → a junk email → a bounce → sender-reputation damage. Those must earn their score. */
 const SOURCE_FLOOR: Record<string, number> = {
-  sec_edgar: 0.2, company_site: 0.18, common_crawl: 0.16, news: 0.15, search: 0.12, rapid_naming: 0.12, github: 0.1,
+  sec_edgar: 0.2,
 };
 
 /** Is this candidate plausibly at the target company (not a namesake elsewhere)? */
