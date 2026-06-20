@@ -40,6 +40,7 @@ import { companyAnchor } from "../signals/hiring/normalize";
 import { guessEmail, emailDomainFrom, splitFullName, type EmailGuess } from "./email";
 import { resolveCompanyDomain, type DomainResolution } from "./domain";
 import { resolvePersonEmail } from "./deepContact";
+import { paidEmailEnabled, findEmailIcypeas } from "./paidEmail";
 
 /* ------------------------------------------------------------------ */
 /* Shared fetch helpers (free, timed-out, polite UA)                   */
@@ -277,6 +278,16 @@ function peopleFromNews(xml: string, company: string): PersonCandidate[] {
         name = poss[2].trim();
       }
       if (!looksLikeName(name) || !looksLikeTitle(title)) continue;
+      // COMPANY-MISMATCH GUARD: a headline like "Michael Hartman, General Manager of Champlin's
+      // Marina" attributes the person to a DIFFERENT organization. Drop it when the title names a
+      // concrete OTHER org (a place/institution word) that isn't our target — this stops a marina
+      // GM getting stapled onto the company. Deliberately narrow: it only fires on org-suffix words
+      // (Marina/Hotel/Bank/University/…), never on a department like "VP of Engineering", so real
+      // managers are never dropped.
+      const otherOrg = (title || "").match(
+        /\b(?:of|at)\s+([A-Z][\w&.'’-]*(?:\s+[A-Z][\w&.'’-]*){0,3}\s+(?:Marina|Resort|Hotel|Restaurant|Inn|Casino|School|University|College|Academy|Hospital|Clinic|Bank|Church|Temple|Club|Realty|Motors|Airlines|Airport|Stadium|Theatre|Theater|Museum|Library|District|County|City|Township|Ministry|Department))\b/,
+      );
+      if (otherOrg && companyAnchor(otherOrg[1]) !== anchor) continue;
       const key = name.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -417,7 +428,7 @@ export interface DecisionMaker {
   /** How `email` was produced: "site_direct" (published address that IS this person), "site_pattern"
    *  (the domain's learned pattern), or "guess" (the blind syntax prior). Drives the funnel's
    *  email-source breakdown so we can see how many contacts are verified vs guessed. */
-  emailSource?: "site_direct" | "site_pattern" | "guess";
+  emailSource?: "site_direct" | "site_pattern" | "guess" | "validated_external";
   /** Short, honest "why this person/title" line for the UI. */
   why: string;
 }
@@ -486,6 +497,18 @@ export async function resolveDecisionMaker(
         email = { email: deep.email, pattern: deep.pattern, alternates: email?.alternates ?? [], confidence: deep.confirmed ? 0.95 : 0.7, verified: false, domain };
         emailConfirmed = deep.confirmed;
         emailSource = deep.via; // "site_direct" | "site_pattern"
+      }
+    }
+    // CHEAP-FIRST PAID FALLBACK (Icypeas, env-gated): if free resolution left us without a
+    // confirmed address — no email at all, or only an unconfirmed guess — resolve + verify one
+    // for ~$0.003. No-op (zero spend) unless ICYPEAS_API_KEY is set. This is what converts the
+    // Named-but-not-Contactable rows into real reachable people.
+    if (!emailConfirmed && paidEmailEnabled()) {
+      const paid = await findEmailIcypeas(c.firstName, c.lastName, domain || company).catch(() => null);
+      if (paid?.email) {
+        email = { email: paid.email, pattern: email?.pattern ?? "", alternates: email?.alternates ?? [], confidence: paid.verified ? 0.95 : 0.75, verified: paid.verified, domain: domain || emailDomainFrom(paid.email) };
+        emailConfirmed = paid.verified;
+        emailSource = "validated_external";
       }
     }
     return {
