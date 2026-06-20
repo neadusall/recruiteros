@@ -15,6 +15,7 @@
  */
 
 import { claimResearchBatch, mergeCuratedRows, type CuratedProspect, type CurationStatus } from "../../../../lib/inmarket/curation";
+import { recordClaim, recordSubmit } from "../../../../lib/inmarket/fleet";
 import { ok, fail, body } from "../../../../lib/api";
 
 export const dynamic = "force-dynamic";
@@ -66,11 +67,13 @@ function sanitizeRow(raw: unknown): CuratedProspect | null {
 
 export async function POST(req: Request) {
   if (!authed(req)) return fail("unauthorized", 401);
-  const b = await body<{ action?: string; limit?: number; rows?: unknown[] }>(req);
+  const b = await body<{ action?: string; limit?: number; rows?: unknown[]; worker?: string }>(req);
+  const workerId = (s(b?.worker, 60) || "").replace(/[^\w.\-]/g, "").slice(0, 60); // sanitize id for telemetry
 
   if (b?.action === "claim") {
     const limit = Math.min(Math.max(Number(b.limit) || 100, 1), 1000);
     const jobs = await claimResearchBatch(limit);
+    recordClaim(workerId, jobs.length);
     return ok({ jobs });
   }
 
@@ -78,6 +81,7 @@ export async function POST(req: Request) {
     const raw = Array.isArray(b.rows) ? b.rows.slice(0, 5000) : [];
     const rows = raw.map(sanitizeRow).filter((x): x is CuratedProspect => !!x);
     const res = await mergeCuratedRows(rows);
+    recordSubmit(workerId, rows.length, rows.filter((r) => r.managerName).length);
     return ok({ ...res, accepted: rows.length, received: raw.length });
   }
 

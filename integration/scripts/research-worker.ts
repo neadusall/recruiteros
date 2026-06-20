@@ -17,6 +17,7 @@
  * and retry forever (a worker NEVER crashes out of the loop); research errors per company are skipped.
  */
 
+import { hostname } from "os";
 import { resolveDecisionMaker } from "../lib/inmarket/decisionMaker";
 import { buildCuratedRow, type CuratedProspect } from "../lib/inmarket/curation";
 
@@ -24,6 +25,7 @@ interface Job { lead: { company: string; domain?: string; industry?: string; sig
 
 const MAIN = (process.env.WORKER_MAIN_URL || "").replace(/\/$/, "");
 const TOKEN = process.env.WORKER_TOKEN || "";
+const WORKER_ID = (process.env.WORKER_ID || hostname() || "worker").replace(/[^\w.\-]/g, "").slice(0, 60);
 const BATCH = Math.min(Math.max(Number(process.env.WORKER_BATCH) || 120, 1), 1000);
 const CONCURRENCY = Math.min(Math.max(Number(process.env.WORKER_CONCURRENCY) || 8, 1), 24);
 const IDLE_SLEEP_MS = Math.max(Number(process.env.WORKER_IDLE_SLEEP_MS) || 30_000, 5_000);
@@ -41,7 +43,7 @@ async function callMain(action: string, payload: Record<string, unknown>): Promi
   const res = await fetch(`${MAIN}/api/in-market/worker`, {
     method: "POST",
     headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ action, ...payload }),
+    body: JSON.stringify({ action, worker: WORKER_ID, ...payload }),
     signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`${action} -> HTTP ${res.status}`);
@@ -70,7 +72,7 @@ async function research(jobs: Job[]): Promise<CuratedProspect[]> {
 }
 
 async function loop(): Promise<void> {
-  console.log(`[worker] ${ts()} started → ${MAIN} (batch ${BATCH}, concurrency ${CONCURRENCY})`);
+  console.log(`[worker] ${ts()} started "${WORKER_ID}" → ${MAIN} (batch ${BATCH}, concurrency ${CONCURRENCY})`);
   let fails = 0;
   for (;;) {
     try {

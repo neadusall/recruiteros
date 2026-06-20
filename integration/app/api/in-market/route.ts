@@ -118,11 +118,12 @@ export async function POST(req: Request) {
     const { curationFunnel } = await import("../../../lib/inmarket/curation");
     const { engineHealth } = await import("../../../lib/inmarket/accumulator");
     const { searchHealth, hydrateSearchHealth } = await import("../../../lib/inmarket/searchHealth");
+    const { fleetStatus } = await import("../../../lib/inmarket/fleet");
     await hydrateSearchHealth().catch(() => undefined); // load persisted status right after a restart
     const [funnel, health] = await Promise.all([curationFunnel(), engineHealth()]);
-    // `search` = sustainability of the free name-scraping (healthy | degraded | throttled), so the
-    // UI can show a live health pill and we can see if the rotation is holding up under load.
-    return ok({ funnel, health, search: searchHealth() });
+    // `search` = sustainability of the free name-scraping; `fleet` = the distributed worker boxes
+    // (online, jobs/min, names/hr per machine) so the UI shows the fleet scaling live.
+    return ok({ funnel, health, search: searchHealth(), fleet: fleetStatus() });
   }
 
   // Standalone liveness probe for the lead engine (last cycle / last curation tick + errors),

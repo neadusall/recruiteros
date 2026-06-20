@@ -591,7 +591,9 @@
 
   window.addEventListener("hashchange", render);
   Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) {
-    n.setAttribute("href", "#" + n.dataset.route);
+    // Hash-routed items get a "#route" href; external links (e.g. PiP Studio at /pip-studio)
+    // already carry a real href and are left untouched.
+    if (n.dataset.route) n.setAttribute("href", "#" + n.dataset.route);
   });
 
   /* ---------------- views ---------------- */
@@ -2705,7 +2707,7 @@
 
   // The live-updating stats block (engine pills, daily target, funnel, signal slices). Rebuilt by
   // the poller every ~25s so the numbers climb on screen, WITHOUT touching the list/selection below.
-  function curStatsInner(f, health, search) {
+  function curStatsInner(f, health, search, fleet) {
     var bs = f.byStatus || {};
     var stages = [
       ["sourced", "Sourced", "company + owning title"],
@@ -2725,7 +2727,46 @@
       curDailyHtml(f.daily) +
       '<div class="cur-funnel">' + funnelRow + "</div>" +
       (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
-      ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "");
+      ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "") +
+      curFleetHtml(fleet);
+  }
+
+  // The distributed worker fleet — one clean card per machine (online dot, jobs/min, names/hr, total),
+  // so you can watch output scale linearly as you add boxes. Repainted by the same 20s stats poll.
+  function curFleetHtml(fleet) {
+    if (!fleet) return "";
+    var workers = fleet.workers || [];
+    var summary = '<span class="muted" style="font-size:12px">' + (fleet.online || 0) + " online · " +
+      (fleet.totalJobsPerMin || 0) + " jobs/min · <b style=\"color:#38e0a6\">" + (fleet.totalNamesPerHour || 0).toLocaleString() + "</b> names/hr</span>";
+    var head = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:' + (workers.length ? "11px" : "0") + '">' +
+      '<span style="font-weight:600;font-size:13px">🖥️ Worker fleet</span>' + summary + "</div>";
+    var box = function (inner) {
+      return '<div style="margin:12px 0 2px;padding:14px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:linear-gradient(180deg,rgba(124,92,255,.06),rgba(255,255,255,.015))">' + inner + "</div>";
+    };
+    if (!workers.length) {
+      return box(head + '<div class="muted" style="font-size:12.5px;line-height:1.5;margin-top:8px">No worker boxes connected yet. Spin one up with <b>setup-worker.sh</b> — each box scrapes with its own IP and pushes here, so output scales linearly as you add machines.</div>');
+    }
+    var cards = workers.map(function (w) {
+      var color = w.online ? "#38e0a6" : (w.lastSeenSec < 300 ? "#f5c451" : "#7a7a88");
+      var seen = w.online ? "live" : w.lastSeenSec < 90 ? w.lastSeenSec + "s ago" :
+        w.lastSeenSec < 3600 ? Math.round(w.lastSeenSec / 60) + "m ago" : Math.round(w.lastSeenSec / 3600) + "h ago";
+      var metric = function (v, l) {
+        return '<div style="text-align:center;flex:1"><div style="font-size:18px;font-weight:700;line-height:1.05;letter-spacing:-.01em">' + v +
+          '</div><div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">' + l + "</div></div>";
+      };
+      return '<div style="flex:1 1 210px;min-width:190px;padding:13px 15px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(255,255,255,.025)">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">' +
+          '<span style="width:9px;height:9px;border-radius:50%;flex:none;background:' + color + ';box-shadow:0 0 9px ' + color + '"></span>' +
+          '<b style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(w.id) + "</b>" +
+          '<span class="muted" style="margin-left:auto;font-size:11px;flex:none">' + esc(seen) + "</span>" +
+        "</div>" +
+        '<div style="display:flex;gap:8px">' +
+          metric(w.jobsPerMin, "jobs/min") +
+          metric('<span style="color:#38e0a6">' + (w.namesPerHour || 0).toLocaleString() + "</span>", "names/hr") +
+          metric((w.totalNamed || 0).toLocaleString(), "total") +
+        "</div></div>";
+    }).join("");
+    return box(head + '<div style="display:flex;flex-wrap:wrap;gap:11px">' + cards + "</div>");
   }
 
   function curationHtml(funnel, list, health, search, fleet) {
