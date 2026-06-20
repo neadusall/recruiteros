@@ -14,7 +14,7 @@
 
 import { collectLeads } from "./index";
 import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, poolCompaniesToExpand, updateExpandedRolesBatch, purgeOversizedFromPool, purgeStaffingFromPool, reclassifyHiringIntent, recomputePoolMetrics, poolCompaniesMissingDomain, updateDomainsBatch } from "./pool";
-import { enrichSizesBatch, oversizedCompanyKeys } from "./companySize";
+import { enrichSizesBatch, outOfBandCompanyKeys } from "./companySize";
 import { resolveCompanyRoles } from "./companyRoles";
 import { resolveCompanyDomain } from "./domain";
 import { directoryBatch } from "./atsDirectory";
@@ -177,8 +177,10 @@ async function runCycleInner(): Promise<void> {
   // Companies we've already authoritatively confirmed are over the employee cap — used below
   // to keep them out of the expensive board-expansion (SMB priority). Refreshed after this
   // cycle's size resolution so the purge picks up newly-confirmed megacorps too.
-  let oversized = new Set<string>();
-  try { oversized = await oversizedCompanyKeys(); } catch { /* best-effort */ }
+  // Out-of-band = authoritatively confirmed under 100 OR over 5,000 employees. Kept out of
+  // the expensive board-expansion below and purged from the pool, so it stays 100-5,000.
+  let outOfBand = new Set<string>();
+  try { outOfBand = await outOfBandCompanyKeys(); } catch { /* best-effort */ }
 
   // 1) BREADTH VACUUM — pull every free board with NO industry keyword, so every hiring
   //    company on every board enters the pool. Industry filtering still happens later at
@@ -245,7 +247,7 @@ async function runCycleInner(): Promise<void> {
   //    company that surfaced from one listing automatically shows all of its roles — no click.
   //    This is what bulks the pool from "1 role per company" to whole boards (tens of roles).
   try {
-    const targets = await poolCompaniesToExpand(EXPAND_BATCH, EXPAND_STALE_MS, oversized);
+    const targets = await poolCompaniesToExpand(EXPAND_BATCH, EXPAND_STALE_MS, outOfBand);
     // Resolve each company's board sequentially (one request per host at a time — gentle on
     // the public ATS endpoints), accumulate the results, then commit them all in a SINGLE
     // pool write. This keeps a large EXPAND_BATCH cheap on the single-blob KV store.
@@ -298,12 +300,13 @@ async function runCycleInner(): Promise<void> {
       sizeCursor = total ? (sizeCursor + names.length) % total : 0;
       await enrichSizesBatch(names, SIZE_BATCH);
     }
-    // Enforce the employee cap (companySize.MAX_EMPLOYEES): drop any pool company Wikidata has
-    // now confirmed is over it. Re-read the set so it includes companies resolved THIS cycle.
-    // Authoritative counts only — heuristic estimates are never purged.
+    // Enforce the target band [MIN_EMPLOYEES, MAX_EMPLOYEES] = 100-5,000: drop any pool
+    // company Wikidata has now confirmed is below 100 OR above 5,000. Re-read the set so it
+    // includes companies resolved THIS cycle. Authoritative counts only — heuristic
+    // estimates are never purged. (purgeOversizedFromPool just removes the given keys.)
     try {
-      oversized = await oversizedCompanyKeys();
-      if (oversized.size) await purgeOversizedFromPool(oversized);
+      outOfBand = await outOfBandCompanyKeys();
+      if (outOfBand.size) await purgeOversizedFromPool(outOfBand);
     } catch { /* best-effort */ }
   } catch {
     /* size enrichment is best-effort */

@@ -701,12 +701,13 @@ export async function searchInMarket(
   // per-workspace — the global pool is shared, but each user's taken-list is their own.
   const taken = workspaceId ? await takenCompanies(workspaceId) : new Set<string>();
   // Resolve company sizes (free: Wikidata cache + heuristic) so the size filter has data.
-  const { loadSizeMap, fillSizes, MAX_EMPLOYEES } = await import("./companySize");
+  const { loadSizeMap, fillSizes, MAX_EMPLOYEES, MIN_EMPLOYEES } = await import("./companySize");
   const sizeMap = await loadSizeMap().catch(() => ({} as Record<string, never>));
-  // Hard <10K-employee policy: never surface a company we've authoritatively confirmed is
-  // bigger than the cap (SMB/mid-market focus). employeeCount is set by fillSizes only from
-  // real Wikidata counts, so heuristic estimates are never excluded here.
-  const underCap = (l: InMarketLead) => !(typeof l.employeeCount === "number" && l.employeeCount > MAX_EMPLOYEES);
+  // Hard 100-5,000 employee policy (mid-market focus): never surface a company we've
+  // authoritatively confirmed is outside the band. employeeCount is set by fillSizes only
+  // from real Wikidata counts, so heuristic estimates are never excluded here.
+  const underCap = (l: InMarketLead) =>
+    !(typeof l.employeeCount === "number" && (l.employeeCount < MIN_EMPLOYEES || l.employeeCount > MAX_EMPLOYEES));
   const fresh = (arr: InMarketLead[]) =>
     withLikelyEmails(applySizeFilter(applyDateFilter(applyTaken(applyRoleView(fillSizes(arr.filter(isUsLead), sizeMap as never), q), taken), q, nowIso), q).filter(underCap));
 

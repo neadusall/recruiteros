@@ -30,6 +30,9 @@ const UA = "RecruitersOS/1.0 (https://recruitersos.co)";
  *  market focus). Enforced on AUTHORITATIVE counts only — a company is excluded only when we
  *  can positively confirm it's too big, never on a heuristic estimate. */
 export const MAX_EMPLOYEES = 5_000;
+/** Lower bound of the target band. The pool is curated to 100-5,000 employees (mid-market):
+ *  companies authoritatively confirmed below this are purged, same as oversized ones. */
+export const MIN_EMPLOYEES = 100;
 
 interface SizeEntry { band: Band | null; count?: number; src: "wikidata" | "none"; at: number }
 type SizeMap = Record<string, SizeEntry>;
@@ -57,9 +60,11 @@ export function heuristicBand(lead: Pick<InMarketLead, "roles" | "signalType" | 
   let band: Band;
   if (roles >= 12) band = "201-500";
   else if (roles >= 6) band = "51-200";
-  else if (roles >= 3) band = "11-50";
-  else band = "11-50";
-  if (big) band = bandFromCount(6000);
+  else band = "51-200";   // target band is 100-5,000: a company on a public ATS posting
+                          // roles is overwhelmingly >=~50, so the heuristic floor is 51-200.
+  // Heuristics never exceed the cap; only an authoritative Wikidata count can mark 5000+
+  // (and that lead is then purged). Mid signals still nudge toward the upper-mid band.
+  if (big) band = "1001-5000";
   else if (mid) band = bandFromCount(800);
   return band;
 }
@@ -83,6 +88,19 @@ export async function oversizedCompanyKeys(max = MAX_EMPLOYEES): Promise<Set<str
   for (const k of Object.keys(cache)) {
     const e = cache[k];
     if (e && e.src === "wikidata" && typeof e.count === "number" && e.count > max) out.add(k);
+  }
+  return out;
+}
+
+/** Company keys AUTHORITATIVELY confirmed OUTSIDE the target band [min, max] — too small
+ *  (<100) OR too big (>5,000). The accumulator purges these so the pool stays 100-5,000.
+ *  Heuristic estimates are never included; only real Wikidata counts. */
+export async function outOfBandCompanyKeys(min = MIN_EMPLOYEES, max = MAX_EMPLOYEES): Promise<Set<string>> {
+  const cache = await loadCache().catch(() => ({} as SizeMap));
+  const out = new Set<string>();
+  for (const k of Object.keys(cache)) {
+    const e = cache[k];
+    if (e && e.src === "wikidata" && typeof e.count === "number" && (e.count < min || e.count > max)) out.add(k);
   }
   return out;
 }

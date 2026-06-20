@@ -223,9 +223,15 @@ function slugify(name) { return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").r
 async function writePoolSnapshot(signals, totalRoles) {
   const dataDir = process.env.ROS_DATA_DIR || join(__dirname, "..", ".data");
   const nowMs = Date.now();
+  // Pool is curated to 100-5,000 employees (mid-market). We don't have exact headcounts at
+  // harvest time, but a very high open-role count is a strong proxy for an enterprise over
+  // the cap, so we pre-trim the obvious megacorps from the seed. Wikidata size resolution in
+  // the accumulator then enforces the exact 100-5,000 band over the following cycles.
+  const ENTERPRISE_ROLE_PROXY = 400;
+  const banded = signals.filter((s) => (s.rolesOpen || 0) <= ENTERPRISE_ROLE_PROXY);
   // Map each harvested company → InMarketLead (shape in lib/inmarket/index.ts),
   // wrapped as a PoolEntry { lead, at, firstAt } (shape in lib/inmarket/pool.ts).
-  const entries = signals.map((s) => {
+  const entries = banded.map((s) => {
     const roles = (s.sampleRoles || []);
     const lead = {
       id: `${(s.ats || "ats").toLowerCase()}_${slugify(s.company)}`,
@@ -248,8 +254,9 @@ async function writePoolSnapshot(signals, totalRoles) {
     return { lead, at: nowMs, firstAt: nowMs };
   });
 
+  const bandedRoles = banded.reduce((sum, s) => sum + (s.rolesOpen || 0), 0);
   const today = new Date(nowMs).toISOString().slice(0, 10);
-  const stats = { total: entries.length, positions: totalRoles, lastAddedAt: new Date(nowMs).toISOString(), days: { [today]: entries.length } };
+  const stats = { total: entries.length, positions: bandedRoles, lastAddedAt: new Date(nowMs).toISOString(), days: { [today]: entries.length } };
 
   try {
     await mkdir(dataDir, { recursive: true });
