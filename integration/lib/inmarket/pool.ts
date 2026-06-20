@@ -12,7 +12,7 @@
 
 import { loadSnapshot, saveSnapshot } from "../db";
 import type { InMarketLead, InMarketQuery } from "./index";
-import { industryTokens, dedupeLeads, deriveHiringIntentType } from "./index";
+import { industryTokens, dedupeLeads, deriveHiringIntentType, companyKey } from "./index";
 import { isStaffingFirm } from "./employer";
 
 const KEY = "inmarket_pool_v1";
@@ -31,7 +31,10 @@ async function load(): Promise<PoolEntry[]> {
 }
 
 function keyOf(l: InMarketLead): string {
-  return (l.company || l.id || "").toLowerCase().trim();
+  // Normalized so "Stripe" / "Stripe, Inc." / "Stripe Inc" collapse to one pool entry.
+  // Existing duplicates self-heal on the next merge: two old entries that now map to the
+  // same key are folded into one as the pool is reloaded.
+  return companyKey(l.company || l.id || "");
 }
 
 /** Merge freshly collected leads into the pool (dedupe by company, keep highest score,

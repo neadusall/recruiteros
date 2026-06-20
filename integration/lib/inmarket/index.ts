@@ -92,6 +92,8 @@ export interface HiringManagerLead {
   ai?: boolean;
   /** When this role was posted on the company's own board (ISO), when known. */
   postedAt?: string;
+  /** Direct URL to the exact job posting on the company's board, when known. */
+  roleUrl?: string;
 }
 
 /** One in-market lead surfaced to the recruiter. */
@@ -118,8 +120,8 @@ export interface InMarketLead {
   buyerLinkedin?: string;
   /** Roles observed open, for context. */
   roles?: string[];
-  /** The company's FULL board when auto-expanded from their own ATS (title + date + loc). */
-  roleDetails?: Array<{ title: string; postedAt?: string; location?: string }>;
+  /** The company's FULL board when auto-expanded from their own ATS (title + date + loc + url). */
+  roleDetails?: Array<{ title: string; postedAt?: string; location?: string; url?: string }>;
   /** Which ATS the full board came from, e.g. "Greenhouse"; set once expanded. */
   boardSource?: string;
   /** When we last pulled the company's full board (ISO) — drives the rotation. */
@@ -210,6 +212,7 @@ export function hiringManagersFor(
   buyer?: Person,
   roleDates?: Record<string, string>,
   cap = 8,
+  roleUrls?: Record<string, string>,
 ): HiringManagerLead[] {
   if (!roles || !roles.length) return [];
   const buyerFn = buyer?.title ? classifyTitle(buyer.title).function : undefined;
@@ -223,6 +226,7 @@ export function hiringManagersFor(
     const matchesBuyer = !!buyerFn && (fn === buyerFn || buyerFn === "executive");
     const attachIdx = Math.min(2, ladder.length - 1); // attach the resolved person at the VP rung
     const postedAt = roleDates ? roleDates[rkey] : undefined;
+    const roleUrl = roleUrls ? roleUrls[rkey] : undefined;
     ladder.forEach((managerTitle, idx) => {
       const k = rkey + "::" + managerTitle.toLowerCase();
       if (seen.has(k)) return;
@@ -235,6 +239,7 @@ export function hiringManagersFor(
         managerName: attach ? buyer?.fullName : undefined,
         managerLinkedin: attach ? buyer?.linkedinUrl : undefined,
         postedAt,
+        roleUrl,
       });
     });
   }
@@ -401,11 +406,16 @@ function expandLeadView(lead: InMarketLead, tokens: string[]): InMarketLead | nu
 
   // Build the role->postedAt map and regenerate managers across the (possibly narrowed) set.
   const roleDates: Record<string, string> = {};
-  if (kept) for (const d of kept) if (d.postedAt) roleDates[d.title.trim().toLowerCase()] = d.postedAt;
+  const roleUrls: Record<string, string> = {};
+  if (kept) for (const d of kept) {
+    const k = d.title.trim().toLowerCase();
+    if (d.postedAt) roleDates[k] = d.postedAt;
+    if (d.url) roleUrls[k] = d.url;
+  }
   const buyer = lead.buyerName || lead.buyerTitle
     ? ({ fullName: lead.buyerName, title: lead.buyerTitle, linkedinUrl: lead.buyerLinkedin } as Person)
     : undefined;
-  const managers = titles.length ? hiringManagersFor(titles, buyer, roleDates, 30) : lead.hiringManagers;
+  const managers = titles.length ? hiringManagersFor(titles, buyer, roleDates, 30, roleUrls) : lead.hiringManagers;
 
   // Freshest role date becomes the lead's postedAt so the date filter reflects live demand.
   let postedAt = lead.postedAt;
@@ -524,11 +534,30 @@ export function deriveHiringIntentType(
   return "job_posting";
 }
 
-/** Dedupe leads by company (case-insensitive), keeping the highest-scored, score-sorted. */
+/**
+ * Canonical dedup key for a company. Lowercases, strips accents/punctuation and common
+ * legal suffixes (Inc, LLC, Ltd, Corp, GmbH…), and collapses whitespace, so "Stripe",
+ * "Stripe, Inc." and "Stripe Inc" all map to ONE key. Used by BOTH the read-side
+ * (dedupeLeads) and the merge-side (pool.keyOf) so a company can never appear twice
+ * anywhere. Conservative on purpose (keeps distinguishing words like "group"/"labs") so
+ * it never merges two genuinely different companies.
+ */
+export function companyKey(name: string): string {
+  return (name || "")
+    .toLowerCase()
+    .normalize("NFKD")                                          // decompose accents (é -> e + mark)
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")                                 // drop marks + punctuation -> space
+    .replace(/\b(inc|incorporated|llc|ltd|limited|corp|corporation|gmbh|plc|ag|nv|bv|srl|sas|sa|pty|llp)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Dedupe leads by company (normalized), keeping the highest-scored, score-sorted. */
 export function dedupeLeads(leads: InMarketLead[]): InMarketLead[] {
   const by = new Map<string, InMarketLead>();
   for (const l of leads) {
-    const key = (l.company || l.id).toLowerCase().trim();
+    const key = companyKey(l.company || l.id);
     if (!key) continue;
     const cur = by.get(key);
     if (!cur || (l.score ?? 0) > (cur.score ?? 0)) by.set(key, l);
