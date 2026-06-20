@@ -97,6 +97,38 @@ export function nextDispatcher(): Dispatcher | undefined {
   return d;
 }
 
+/** Next NON-default (real bound-IP) dispatcher in the rotation, or undefined when none is
+ *  configured. Used by egressFetch so we can try a rotated IP first and fall back to the default
+ *  route on failure — a dispatcher that round-robins onto the default route would defeat that. */
+function nextRotatedDispatcher(): Dispatcher | undefined {
+  build();
+  if (!pool || pool.length <= 1) return undefined; // only the default route present
+  // pool's last member is always the default route; rotate across the real IPs (all but the last).
+  const realCount = pool.length - 1;
+  const d = pool[cursor % realCount];
+  cursor++;
+  return d;
+}
+
+/**
+ * Resilient free-source fetch: try a rotated source IP first, and on a CONNECT/NETWORK failure
+ * (timeout, unreachable IPv6, DNS) retry ONCE on the default route. This is what stops a broken or
+ * unroutable egress IP from silently killing the scraper (the "scraping idle" failure mode): the
+ * request still goes out the main interface. HTTP error statuses do NOT throw, so a 4xx/5xx is
+ * returned as-is (no wasteful double fetch). When rotation isn't configured it's a plain fetch.
+ */
+export async function egressFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const d = nextRotatedDispatcher();
+  if (d) {
+    try {
+      return await fetch(url, { ...init, dispatcher: d } as RequestInit & { dispatcher: Dispatcher });
+    } catch {
+      /* rotated IP couldn't connect — fall through to the default route */
+    }
+  }
+  return fetch(url, init);
+}
+
 let ipCursor = 0;
 /**
  * Next raw source IP for non-fetch sockets (e.g. the opt-in SMTP RCPT probe's net.createConnection

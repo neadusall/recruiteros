@@ -53,12 +53,14 @@ const UA = "RecruitersOS/1.0 (+https://recruiteros.app; hiring-manager research)
 
 async function fetchText(url: string): Promise<string | null> {
   try {
-    const { egressInit } = await import("../net/egress");
-    const res = await fetch(url, egressInit({
+    // egressFetch rotates across the free IPv6 source IPs AND falls back to the default route if a
+    // rotated IP can't connect — so a broken egress IP never silently stops the naming scraper.
+    const { egressFetch } = await import("../net/egress");
+    const res = await egressFetch(url, {
       redirect: "follow",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,application/json,*/*" },
-    }));
+    });
     if (!res.ok) return null;
     return await res.text();
   } catch {
@@ -369,12 +371,12 @@ const SEARCH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 /** Status-aware fetch so we can tell a THROTTLE (429/403/captcha) from a genuine empty result. */
 async function searchFetch(url: string): Promise<{ status: number; body: string | null }> {
   try {
-    const { egressInit } = await import("../net/egress");
-    const res = await fetch(url, egressInit({
+    const { egressFetch } = await import("../net/egress");
+    const res = await egressFetch(url, {
       redirect: "follow",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: { "User-Agent": SEARCH_UA, Accept: "text/html,application/xhtml+xml,*/*", "Accept-Language": "en-US,en;q=0.9" },
-    }));
+    });
     return { status: res.status, body: res.ok ? await res.text() : null };
   } catch {
     return { status: 0, body: null }; // network/timeout — a miss, not a throttle
@@ -562,7 +564,10 @@ export async function resolveDecisionMaker(
   roleTitle: string,
   opts?: { domain?: string; companySize?: number; sourceUrl?: string },
 ): Promise<DecisionMaker> {
-  const target = hiringManagerTarget(roleTitle);
+  // Size-aware targeting: the owner of this hire depends on the company's org depth (a line manager
+  // at an enterprise, the VP/founder at a flat 150-person shop). Passing companySize is what makes
+  // us target the RIGHT — and most findable — decision-maker, which is the biggest free naming lift.
+  const target = hiringManagerTarget(roleTitle, { companySize: opts?.companySize });
   const targetTitle = target.candidateTitles[0] ?? "Hiring Manager";
   const fn = classifyTitle(roleTitle).function;
 
