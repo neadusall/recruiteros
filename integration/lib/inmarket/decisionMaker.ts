@@ -96,12 +96,23 @@ const NON_NAME = new Set([
   "Chief", "Officer", "President", "Vice", "Head", "Director", "Manager", "Lead", "Senior",
 ]);
 
+/** Lowercase name particles ("Maria de la Cruz", "Vincent van der Berg", "Jean-Luc de la Tour") — they
+ *  glue a compound surname together but aren't separate name words, so a real 4-token name isn't rejected
+ *  as "too long". Recovers the many Hispanic / Dutch / Arabic / compound names the 2–3 token rule dropped. */
+const NAME_PARTICLES = new Set([
+  "de", "del", "della", "der", "di", "da", "das", "dos", "du", "la", "le", "van", "von",
+  "bin", "ibn", "al", "el", "mac", "mc", "st", "san", "santa", "ten", "ter",
+]);
+
 function looksLikeName(s: string): boolean {
   const parts = s.trim().split(/\s+/);
-  if (parts.length < 2 || parts.length > 3) return false;
+  if (parts.length < 2 || parts.length > 5) return false;          // allow compound / particle surnames
+  // Significant tokens = the real name words (particles are connective glue, not separate names).
+  const sig = parts.filter((p) => !NAME_PARTICLES.has(p.toLowerCase().replace(/[.'’-].*$/, "")));
+  if (sig.length < 2 || sig.length > 4) return false;
   if (parts.some((p) => NON_NAME.has(p.replace(/[.'’-].*$/, "")))) return false;
-  // Reject ALL-CAPS acronyms and single-letter tokens.
-  if (parts.some((p) => p.length < 2 || p === p.toUpperCase())) return false;
+  // Reject ALL-CAPS acronyms and single-letter tokens among the significant words.
+  if (sig.some((p) => p.length < 2 || p === p.toUpperCase())) return false;
   return true;
 }
 
