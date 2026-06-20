@@ -315,6 +315,22 @@ export interface CurationFunnel {
   /** Where the curated emails came from — guess vs deep-pulled vs SMTP-found vs externally validated.
    *  This tells us how many "contacts" are real vs blind guesses at a glance. */
   emailBySource: Array<{ source: string; total: number; validated: number }>;
+  /** Daily throughput toward the 5,000 valid-emails/day goal, so consistency is measurable. */
+  daily: {
+    target: number;                  // 5,000
+    validToday: number;              // emails VALIDATED today (deliverable) — the headline number
+    contactableToday: number;        // named + email built today (broader "results")
+    projectedValid: number;          // today's pace projected to a full 24h
+    onPace: boolean;                  // projectedValid >= target
+    byDay: Array<{ date: string; valid: number; contactable: number }>; // last 7 days, recent first
+  };
+}
+
+const DAILY_TARGET = 5000;
+function dayOf(iso?: string): string | null {
+  if (!iso) return null;
+  const t = Date.parse(String(iso).replace(" ", "T"));
+  return isNaN(t) ? null : new Date(t).toISOString().slice(0, 10);
 }
 
 export async function curationFunnel(): Promise<CurationFunnel> {
@@ -324,12 +340,22 @@ export async function curationFunnel(): Promise<CurationFunnel> {
   const fn = new Map<string, { total: number; contactable: number }>();
   const src = new Map<string, { total: number; validated: number }>();
   let contactableOrBetter = 0, validated = 0, invalid = 0, named = 0, withDomain = 0;
+  const byDay = new Map<string, { valid: number; contactable: number }>();
+  const bump = (date: string | null, k: "valid" | "contactable") => {
+    if (!date) return;
+    const d = byDay.get(date) ?? { valid: 0, contactable: 0 };
+    d[k]++; byDay.set(date, d);
+  };
   for (const r of rows) {
     byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
     if (r.emailValidated) validated++;
     if (r.emailInvalid) invalid++;
     if (r.managerName) named++;
     if (r.domain) withDomain++;
+    // Daily rollup: a VALID email is counted on the day it was validated; a contactable result on
+    // the day it was curated. Drives the live "N / 5,000 today" target tracker.
+    if (r.emailValidated) bump(dayOf(r.validatedAt), "valid");
+    if (r.status === "contactable" || r.status === "queued" || r.status === "enrolled") bump(dayOf(r.curatedAt), "contactable");
     if (r.likelyEmail) {
       const key = r.emailSource || "guess";
       const e = src.get(key) ?? { total: 0, validated: 0 };
@@ -344,6 +370,16 @@ export async function curationFunnel(): Promise<CurationFunnel> {
   }
   const { domainResolverStats } = await import("./domain");
   const rs = await domainResolverStats().catch(() => ({ attempts: 0, resolved: 0, withMx: 0, rate: 0 }));
+  // Daily target math: today's validated count, projected to 24h by how far into the day we are.
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const todayRow = byDay.get(today) ?? { valid: 0, contactable: 0 };
+  const hoursElapsed = Math.max(0.25, (now.getTime() - Date.parse(today + "T00:00:00Z")) / 3_600_000);
+  const projectedValid = Math.round((todayRow.valid / hoursElapsed) * 24);
+  const last7 = [...byDay.entries()]
+    .map(([date, v]) => ({ date, valid: v.valid, contactable: v.contactable }))
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .slice(0, 7);
   return {
     total: rows.length,
     byStatus,
@@ -363,6 +399,14 @@ export async function curationFunnel(): Promise<CurationFunnel> {
       resolverRate: rs.rate,
     },
     emailBySource: [...src.entries()].map(([source, v]) => ({ source, ...v })).sort((a, b) => b.total - a.total),
+    daily: {
+      target: DAILY_TARGET,
+      validToday: todayRow.valid,
+      contactableToday: todayRow.contactable,
+      projectedValid,
+      onPace: projectedValid >= DAILY_TARGET,
+      byDay: last7,
+    },
   };
 }
 

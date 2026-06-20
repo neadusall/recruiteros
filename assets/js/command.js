@@ -2566,10 +2566,28 @@
      ======================================================================== */
   var curPicks = {};   // id -> true (selected curated rows for approve/enroll)
 
+  var curPollTimer = null;
+  // LIVE: every ~25s, refresh just the stats block (funnel, daily target, engine + search health)
+  // so the numbers climb on screen as the engine works — without rebuilding the list or losing the
+  // user's selections. Self-stops when they leave the screen or the tab is hidden.
+  function curPollStats() {
+    var stats = document.getElementById("curStats");
+    if (!stats) { if (curPollTimer) { clearInterval(curPollTimer); curPollTimer = null; } return; }
+    if (document.hidden) return; // don't poll a backgrounded tab
+    send("/in-market", "POST", { action: "curation_funnel" }).then(function (r) {
+      var d = r && r.data; if (!d || !d.funnel) return;
+      var node = document.getElementById("curStats"); if (!node) return;
+      node.innerHTML = curStatsInner(d.funnel, d.health || null, d.search || null);
+      var rc = document.getElementById("curResearched");
+      if (rc) rc.textContent = (d.funnel.total || 0).toLocaleString();
+    }).catch(function () { /* keep the last good view */ });
+  }
+
   function renderCuration() {
     var body = $("#imBody"); if (!body) return;
     body.innerHTML = loading();
     curPicks = {};
+    if (curPollTimer) { clearInterval(curPollTimer); curPollTimer = null; }
     Promise.all([
       send("/in-market", "POST", { action: "curation_funnel" }),
       send("/in-market", "POST", { action: "curation_list", contactableOnly: true, limit: 500 }),
@@ -2580,6 +2598,7 @@
       var list = (rs[1] && rs[1].data && rs[1].data.curated) || [];
       body.innerHTML = curationHtml(funnel, list, health, search);
       wireCuration(body, list);
+      curPollTimer = setInterval(curPollStats, 25000); // live ongoing updates
     }).catch(function () { body.innerHTML = '<div class="empty">Couldn\'t load the curated list yet. The accumulator builds it hourly — try again shortly, or run a search first to seed the pool.</div>'; });
   }
 
@@ -2628,8 +2647,24 @@
       "</div>";
   }
 
-  function curationHtml(funnel, list, health, search) {
-    var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
+  // The live "N / 5,000 valid emails today" target bar — the headline consistency metric.
+  function curDailyHtml(d) {
+    if (!d) return "";
+    var target = d.target || 5000;
+    var pct = Math.min(100, Math.round(((d.validToday || 0) / target) * 100));
+    var pace = d.onPace ? "🟢 on pace" : "🟡 below pace";
+    return '<div style="margin:10px 0;padding:12px 14px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(124,92,255,.06)">' +
+      '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:13px;margin-bottom:8px">' +
+        '<span><b style="font-size:17px">' + (d.validToday || 0).toLocaleString() + "</b> / " + target.toLocaleString() + ' <span class="muted">valid emails today</span></span>' +
+        '<span class="muted">' + (d.contactableToday || 0).toLocaleString() + " contactable · projected " + (d.projectedValid || 0).toLocaleString() + "/day · " + pace + "</span>" +
+      "</div>" +
+      '<div style="height:8px;border-radius:5px;background:rgba(255,255,255,.08);overflow:hidden"><i style="display:block;height:100%;width:' + pct + '%;background:linear-gradient(90deg,#7c5cff,#38e0a6)"></i></div>' +
+    "</div>";
+  }
+
+  // The live-updating stats block (engine pills, daily target, funnel, signal slices). Rebuilt by
+  // the poller every ~25s so the numbers climb on screen, WITHOUT touching the list/selection below.
+  function curStatsInner(f, health, search) {
     var bs = f.byStatus || {};
     var stages = [
       ["sourced", "Sourced", "company + owning title"],
@@ -2642,21 +2677,26 @@
       return '<div class="cur-stage"><div class="cur-stage-n">' + ((bs[s[0]] || 0)).toLocaleString() + "</div>" +
         '<div class="cur-stage-l">' + esc(s[1]) + '</div><div class="cur-stage-h">' + esc(s[2]) + "</div></div>";
     }).join('<div class="cur-arrow">→</div>');
-
     var sigRows = (f.bySignal || []).slice(0, 8).map(function (x) {
       return '<div class="cur-mini"><span>' + esc(imSignalLabel(x.signalType)) + '</span><b>' + x.contactable.toLocaleString() + "</b><span class=\"muted\">/ " + x.total.toLocaleString() + "</span></div>";
     }).join("");
+    return curEngineLine(health, search) +
+      curDailyHtml(f.daily) +
+      '<div class="cur-funnel">' + funnelRow + "</div>" +
+      (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
+      ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "");
+  }
+
+  function curationHtml(funnel, list, health, search) {
+    var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
 
     var head =
       '<div class="cur-head">' +
         '<button type="button" class="btn btn-ghost btn-sm" id="curBack">← Back to search</button>' +
-        '<h2>Curated decision-makers <span class="muted">· ' + (f.total || 0).toLocaleString() + " researched</span></h2>" +
+        '<h2>Curated decision-makers <span class="muted">· <span id="curResearched">' + (f.total || 0).toLocaleString() + "</span> researched</span></h2>" +
         '<button type="button" class="btn btn-ghost btn-sm" id="curRefresh">↻ Research more now</button>' +
       "</div>" +
-      curEngineLine(health, search) +
-      '<div class="cur-funnel">' + funnelRow + "</div>" +
-      (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
-      ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "");
+      '<div id="curStats">' + curStatsInner(f, health, search) + "</div>";
 
     if (!list.length) {
       return head + '<div class="empty" style="margin-top:14px">No contactable decision-makers curated yet. The hourly accumulator researches the top companies (free: team pages, news, GitHub) and they\'ll appear here. Hit <b>Research more now</b> to kick it.</div>';
