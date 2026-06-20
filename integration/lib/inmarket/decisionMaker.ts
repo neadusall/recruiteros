@@ -505,10 +505,19 @@ function matchAll(html: string, re: RegExp): string[] {
 async function searchEngines(q: string, parse: (titles: string[]) => PersonCandidate[]): Promise<PersonCandidate[]> {
   for (const eng of SEARCH_ENGINES) {
     if (!isAvailable(eng.id)) continue; // engine resting in back-off — skip to the next source
-    const { status, body } = await searchFetch(eng.url(q));
-    if (isThrottle(status, body)) { recordSearch(eng.id, "throttled"); continue; }
-    if (!body) { recordSearch(eng.id, "empty"); continue; }
-    const found = parse(eng.titles(body));
+    // Each attempt goes out a FRESH rotated source IP (egressFetch round-robins the /64). On a
+    // throttle we retry on ANOTHER IP before giving up on the engine — this is what makes a larger
+    // egress pool actually pay off: a per-IP rate limit is dodged by moving the retry to a new IP.
+    let found: PersonCandidate[] = [];
+    let throttled = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { status, body } = await searchFetch(eng.url(q));
+      if (isThrottle(status, body)) { throttled = true; continue; } // this IP is rate-limited — rotate
+      throttled = false;
+      if (body) found = parse(eng.titles(body));
+      break;
+    }
+    if (throttled && !found.length) { recordSearch(eng.id, "throttled"); continue; }
     recordSearch(eng.id, found.length ? "ok" : "empty");
     if (found.length) return found; // first engine that yields names wins
   }
