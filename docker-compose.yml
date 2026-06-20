@@ -71,11 +71,17 @@ services:
       # internal network. Setting this is what turns the "Enrich via Laxis" button on
       # (the worker still needs LAXIS_EMAIL/LAXIS_PASSWORD in .env.production to log in).
       LAXIS_WORKER_URL: http://laxis-worker:3000
+      # Free X-ray search backend (see integration/SEARXNG-SETUP.md). When set, the
+      # company + job title -> person finder uses SearXNG (JSON, captures the LinkedIn
+      # profile URL) before the rotated HTML scrapers, so naming works from one IP.
+      INMARKET_SEARXNG_URL: http://searxng:8080
     volumes:
       - app_data:/data
     expose:
       - "3000"
     # not published to the host directly; Caddy reaches it on the internal net
+    depends_on:
+      - searxng
     healthcheck: *node-health
     labels:
       autoheal: "true"   # restart this container if it goes unhealthy
@@ -153,6 +159,27 @@ services:
     healthcheck: *node-health
     labels:
       autoheal: "true"   # restart this container if it goes unhealthy
+
+  # SearXNG meta-search — the FREE search backend for the X-ray people finder
+  # (company + job title -> person). One query fans out across many engines
+  # server-side and returns JSON, so naming works from a single IP without
+  # scraping Google/Bing directly. Internal only (Caddy never exposes it); the
+  # app reaches it at http://searxng:8080. The JSON API + limiter config live in
+  # ./searxng/settings.yml (the json format MUST be enabled there or the API
+  # returns HTML and the finder gets nothing). See integration/SEARXNG-SETUP.md.
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    volumes:
+      - ./searxng:/etc/searxng
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
 
   caddy:
     image: caddy:2-alpine

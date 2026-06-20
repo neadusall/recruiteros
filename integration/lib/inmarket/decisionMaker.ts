@@ -43,6 +43,7 @@ import { resolvePersonEmail } from "./deepContact";
 import { paidEmailEnabled, findEmailIcypeas } from "./paidEmail";
 import { paidNamingEnabled, findDecisionMakerRapid } from "./paidNaming";
 import { recordSearch, isAvailable } from "./searchHealth";
+import { xrayPeopleGraph } from "./xray";
 
 /* ------------------------------------------------------------------ */
 /* Shared fetch helpers (free, timed-out, polite UA)                   */
@@ -653,6 +654,11 @@ export function freePeopleGraph(opts?: { domain?: string }): PeopleGraph {
       if (domain) tasks.push(commonCrawlCandidates(domain));            // free + unblockable archive
       if (company) tasks.push(newsAppointmentCandidates(company, titles));
       if (company) tasks.push(searchEngineCandidates(company, titles)); // free, egress-rotated naming
+      // X-RAY graph: a dedicated company+title → person finder (title-variant boolean X-ray of
+      // linkedin.com/in, captures the profile URL, scores on title+company fit). Shares the egress
+      // rotation + search-health back-off, so it's free and sustainable. Strongest when the exact
+      // titleholder has a public profile — complements the hierarchy/apex pass above.
+      if (company) tasks.push(xrayPeopleGraph().search({ ...query, titles }));
       if (company && fn === "engineering") tasks.push(githubEngCandidates(company));
 
       const results = await Promise.all(tasks.map((t) => t.catch(() => [] as PersonCandidate[])));

@@ -238,14 +238,53 @@ export function parseLinkedInResult(rawTitle: string, url?: string): ParsedProfi
 interface Engine {
   id: string;
   url: (q: string) => string;
+  /** Pull (title, url) result pairs out of this engine's response body. */
+  extract: (body: string) => Array<{ title: string; url: string }>;
+  /** HTML SERPs: on an empty extract, fall back to plain result-title parsing. */
+  html?: boolean;
 }
 
-const ENGINES: Engine[] = [
-  { id: "duckduckgo", url: (q) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}` },
-  { id: "bing", url: (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=20` },
-  { id: "ddg_lite", url: (q) => `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}` },
-  { id: "mojeek", url: (q) => `https://www.mojeek.com/search?q=${encodeURIComponent(q)}` },
+/** Raw HTML search engines, scraped via the egress rotation. Each independently rested by the
+ *  health system, so one throttling never stops the find. */
+const HTML_ENGINES: Engine[] = [
+  { id: "duckduckgo", url: (q) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, extract: extractLinkedInResults, html: true },
+  { id: "bing", url: (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=20`, extract: extractLinkedInResults, html: true },
+  { id: "ddg_lite", url: (q) => `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`, extract: extractLinkedInResults, html: true },
+  { id: "mojeek", url: (q) => `https://www.mojeek.com/search?q=${encodeURIComponent(q)}`, extract: extractLinkedInResults, html: true },
 ];
+
+/**
+ * SearXNG meta-search (self-hosted or a trusted public instance) — the most reliable FREE backend.
+ * One query fans out across many engines SERVER-SIDE and comes back as clean JSON ({url,title}), so
+ * it (a) doesn't depend on us owning many egress IPs and (b) isn't blocked like raw HTML scraping.
+ * When INMARKET_SEARXNG_URL is set it's tried FIRST. The `url` field is the real result URL, so we
+ * get the canonical linkedin.com/in profile link for free.
+ */
+function searxngEngine(): Engine | null {
+  const base = process.env.INMARKET_SEARXNG_URL;
+  if (!base) return null;
+  const root = base.replace(/\/$/, "");
+  return {
+    id: "searxng",
+    url: (q) => `${root}/search?q=${encodeURIComponent(q)}&format=json`,
+    extract: (body) => {
+      try {
+        const j = JSON.parse(body) as { results?: Array<{ url?: string; title?: string }> };
+        return (j.results ?? [])
+          .map((r) => ({ title: cleanText(String(r.title ?? "")), url: String(r.url ?? "") }))
+          .filter((r) => r.title);
+      } catch {
+        return [];
+      }
+    },
+  };
+}
+
+/** The active engine list at call time: SearXNG first when configured, then the HTML scrapers. */
+function activeEngines(): Engine[] {
+  const sx = searxngEngine();
+  return sx ? [sx, ...HTML_ENGINES] : HTML_ENGINES;
+}
 
 async function searchFetch(url: string): Promise<{ status: number; body: string | null }> {
   try {
@@ -416,7 +455,8 @@ export async function xraySearch(
   const accept = opts.acceptScore ?? 0.6;
   const queries = buildXrayQueries(company, title);
   const fetcher = opts.fetchImpl ?? searchFetch;
-  const engines = opts.maxEngines ? ENGINES.slice(0, opts.maxEngines) : ENGINES;
+  const allEngines = activeEngines();
+  const engines = opts.maxEngines ? allEngines.slice(0, opts.maxEngines) : allEngines;
   // The health system (back-off + the live pill) is real-engine state; skip it for injected
   // fetchers so tests stay deterministic and don't pollute the server's throttle accounting.
   const useHealth = !opts.fetchImpl;
@@ -445,12 +485,12 @@ export async function xraySearch(
         if (isThrottle(status, body)) { throttled = true; continue; }
         throttled = false;
         if (body) {
-          const linked = extractLinkedInResults(body);
-          parsed = linked
+          parsed = eng
+            .extract(body)
             .map((r) => parseLinkedInResult(r.title, r.url))
             .filter((p): p is ParsedProfile => !!p);
-          // Fallback: parse plain result titles if no /in/ hrefs were exposed.
-          if (!parsed.length) {
+          // HTML SERPs: fall back to plain result titles if no /in/ hrefs were exposed.
+          if (!parsed.length && eng.html) {
             parsed = extractResultTitles(body)
               .map((tt) => parseLinkedInResult(tt))
               .filter((p): p is ParsedProfile => !!p);

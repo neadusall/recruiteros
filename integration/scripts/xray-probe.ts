@@ -6,6 +6,7 @@
  * Hits real search engines (DuckDuckGo/Bing/Mojeek), so results depend on live availability.
  */
 import { findContactByTitle } from "../lib/inmarket/xray";
+import { egressEnabled, egressIps } from "../lib/net/egress";
 
 type Case = { company: string; title: string; domain?: string };
 
@@ -22,6 +23,15 @@ const cases: Case[] = args.length
 function line(s = "") { process.stdout.write(s + "\n"); }
 
 (async () => {
+  // Backend self-diagnosis — tells you WHY a run throttles before you read the engine log.
+  line("BACKEND STATUS");
+  line(`   SearXNG:   ${process.env.INMARKET_SEARXNG_URL ? `ON → ${process.env.INMARKET_SEARXNG_URL}` : "OFF (set INMARKET_SEARXNG_URL)"}`);
+  line(`   egress IP rotation: ${egressEnabled() ? `ON (${egressIps().length} sources: ${egressIps().join(", ")})` : "OFF (single IP → expect throttling)"}`);
+  if (!process.env.INMARKET_SEARXNG_URL && !egressEnabled()) {
+    line("   ⚠  Neither backend active — live engines will throttle. See xray.ts header / SEARXNG-SETUP.md.");
+  }
+  line("");
+
   const t0 = Date.now();
   let named = 0;
   for (const c of cases) {

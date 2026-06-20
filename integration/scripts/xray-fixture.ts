@@ -93,4 +93,22 @@ function fixtureFor(company: string): string {
   }
   line("─".repeat(64));
   line(`MODEL RESULT: named ${named}/${cases.length} (offline fixtures)`);
+
+  // ── SearXNG JSON backend path (the production-free upgrade) ───────────
+  line("\nSEARXNG JSON BACKEND  (simulated instance)");
+  process.env.INMARKET_SEARXNG_URL = "http://localhost:8080";
+  const searxngFetch = async (_url: string) => ({
+    status: 200,
+    body: JSON.stringify({
+      results: [
+        { url: "https://www.linkedin.com/in/dsingh-cto", title: "David Singh - Chief Technology Officer - Stripe | LinkedIn" },
+        { url: "https://stripe.com/about", title: "About Stripe - Our mission" }, // non-person → filtered
+      ],
+    }),
+  });
+  const sx = await findContactByTitle("Stripe", "Chief Technology Officer", { domain: "stripe.com", fetchImpl: searxngFetch });
+  line(`  engine used: ${sx.log.map((l) => l.engine).join(", ")}`);
+  line(`  ${sx.person ? `✅ ${sx.person.fullName} (${sx.person.score}) → ${sx.email?.email} [${sx.emailCheck?.verdict}]` : "❌ no person"}`);
+  line(`  linkedin url captured from JSON: ${sx.person?.linkedinUrl ?? "-"}`);
+  delete process.env.INMARKET_SEARXNG_URL;
 })().catch((e) => { line("FATAL " + (e?.stack || e)); process.exit(1); });
