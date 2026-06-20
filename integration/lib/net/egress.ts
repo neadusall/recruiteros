@@ -123,10 +123,16 @@ export async function egressFetch(url: string, init: RequestInit = {}): Promise<
     try {
       return await fetch(url, { ...init, dispatcher: d } as RequestInit & { dispatcher: Dispatcher });
     } catch {
-      /* rotated IP couldn't connect — fall through to the default route */
+      /* rotated IP couldn't connect / timed out — fall through to the default route */
     }
   }
-  return fetch(url, init);
+  // The fallback MUST get a FRESH abort signal. The rotated attempt above usually fails by FIRING the
+  // caller's AbortSignal.timeout — reusing that already-aborted signal here would insta-abort the
+  // fallback, silently killing it. That bug collapsed domain resolution (and team-page fetches) to
+  // ~1% whenever IPv6 egress was flaky: every request timed out on the rotated IP and the "fallback"
+  // never actually ran. A fresh 8s timeout makes the default-route fallback real.
+  const { signal: _stale, ...rest } = init as RequestInit & { signal?: AbortSignal };
+  return fetch(url, { ...rest, signal: AbortSignal.timeout(8000) });
 }
 
 let ipCursor = 0;
