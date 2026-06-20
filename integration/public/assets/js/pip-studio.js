@@ -77,6 +77,8 @@
     var el = $("toast"); el.textContent = msg; el.classList.add("show");
     clearTimeout(toastT); toastT = setTimeout(function () { el.classList.remove("show"); }, 1400);
   }
+  function showModal(html) { var o = $("modal"); $("modalBody").innerHTML = html; o.classList.add("show"); }
+  function hideModal() { $("modal").classList.remove("show"); }
 
   /* gate */
   function ready() { return !!state.clipId; }
@@ -293,10 +295,40 @@
       '<a class="lk" href="' + esc(w) + '" target="_blank">▶ Watch</a>' +
       '<button class="primary small" data-email title="Copy a clickable GIF for your email">Copy email</button>' +
       '<button class="ghost small" data-link title="Copy the watch link (LinkedIn, SMS)">Link</button>' +
+      '<button class="ghost small" data-opener title="Draft an AI email opener that wraps this video">✨ Opener</button>' +
       '<button class="ghost small" data-out title="Attach this video to the hiring-manager prospects at this company">→ Outreach</button>';
     act.querySelector("[data-email]").onclick = function () { copyRich(emailSnippet(vk, s.company, s.roleTitle)).then(function () { toast("Email snippet copied — paste into your sequence"); }); };
     act.querySelector("[data-link]").onclick = function () { copyText(w).then(function () { toast("Watch link copied"); }); };
+    act.querySelector("[data-opener]").onclick = function () { openOpener(s, vk); };
     act.querySelector("[data-out]").onclick = function () { attachToOutreach(s, vk); };
+  }
+
+  /* AI opener: draft a short email (Claude) that wraps this video, shown in a modal with a
+     rendered preview + copy. Falls back to a built-in template server-side when no key. */
+  function openOpener(s, vk) {
+    showModal('<div class="muted"><span class="spin"></span> Drafting opener for ' + esc(s.company) + ' — ' + esc(s.roleTitle) + '…</div>');
+    api("/api/in-market/opener", { method: "POST", body: JSON.stringify({
+      company: s.company, roleTitle: s.roleTitle, videoKey: vk,
+      watchUrl: watchPage(vk, s.company, s.roleTitle), gifUrl: publicGif(vk),
+    }) }).then(function (d) {
+      var html = d.bodyHtml || esc(d.body).replace(/\n/g, "<br>");
+      var badge = d.source === "ai" ? '<span class="srcbadge ai">✨ Claude</span>' : '<span class="srcbadge">template</span>';
+      showModal(
+        '<div class="mh"><b>Email opener</b> ' + badge + '<button class="mx" data-close>✕</button></div>' +
+        '<label class="mlbl">Subject</label><div class="msub">' + esc(d.subject) + '</div>' +
+        '<label class="mlbl">Body (preview)</label><div class="mbody">' + html + '</div>' +
+        '<div class="mfoot">' +
+          '<button class="primary small" data-cpy-html>Copy email (with video)</button>' +
+          '<button class="ghost small" data-cpy-text>Copy text only</button>' +
+          '<span class="muted" style="flex:1"></span>' +
+          '<button class="ghost small" data-close>Close</button>' +
+        '</div>'
+      );
+      var box = $("modalBody");
+      box.querySelectorAll("[data-close]").forEach(function (b) { b.onclick = hideModal; });
+      box.querySelector("[data-cpy-html]").onclick = function () { copyRich(d.bodyHtml || esc(d.body).replace(/\n/g, "<br>")).then(function () { toast("Opener copied (with video) — paste into your email"); }); };
+      box.querySelector("[data-cpy-text]").onclick = function () { copyText(d.body).then(function () { toast("Opener text copied (keeps {{videoembed}} merge field)"); }); };
+    }).catch(function (e) { showModal('<div class="mh"><b>Opener failed</b><button class="mx" data-close>✕</button></div><p class="muted">' + esc(e.message) + "</p>"); $("modalBody").querySelector("[data-close]").onclick = hideModal; });
   }
 
   /* Recipient bridge: stamp this video onto the company's hiring-manager prospects, so their

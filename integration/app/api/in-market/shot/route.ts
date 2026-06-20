@@ -43,10 +43,37 @@ export async function GET(req: Request) {
     if (!MIME[fmt]) return fail("bad_format", 400);
     const buf = await readShotAsset(key, fmt as any);
     if (!buf) return new Response("not found", { status: 404 });
+    const ct = MIME[fmt];
+    const total = buf.length;
+
+    // HTTP Range — lets the watch-page <video> stream and SEEK instead of downloading the whole
+    // MP4 up front. Browsers send `Range: bytes=...` for media; honor it with a 206 response.
+    const range = req.headers.get("range");
+    if (range) {
+      const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+      if (m && (m[1] || m[2])) {
+        let start = m[1] ? parseInt(m[1], 10) : 0;
+        let end = m[2] ? parseInt(m[2], 10) : total - 1;
+        if (!Number.isFinite(start)) start = 0;
+        if (!Number.isFinite(end) || end >= total) end = total - 1;
+        if (start > end || start >= total) {
+          return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${total}`, "Accept-Ranges": "bytes" } });
+        }
+        const chunk = buf.subarray(start, end + 1);
+        return new Response(chunk as any, {
+          status: 206,
+          headers: {
+            "Content-Type": ct, "Content-Length": String(chunk.length),
+            "Content-Range": `bytes ${start}-${end}/${total}`, "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=86400",
+          },
+        });
+      }
+    }
     // `as any` only because BodyInit's Node Buffer typing varies across lib targets.
     return new Response(buf as any, {
       status: 200,
-      headers: { "Content-Type": MIME[fmt], "Content-Length": String(buf.length), "Cache-Control": "public, max-age=86400" },
+      headers: { "Content-Type": ct, "Content-Length": String(total), "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=86400" },
     });
   }
 
