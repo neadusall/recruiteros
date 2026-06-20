@@ -51,11 +51,13 @@ EOF
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable --now recruiteros-egress.service >/dev/null 2>&1 || true
 
-# 4) Write the env the app reads (idempotent — never duplicates lines).
+# 4) Write the env the app reads. REPLACE existing values (idempotent UPDATE, never duplicates) so
+#    re-running with a new COUNT actually re-tunes the rotation instead of being ignored.
 ENVF="$DIR/.env.production"
 touch "$ENVF"
-grep -q '^INMARKET_EGRESS_IPV6_BASE='  "$ENVF" || echo "INMARKET_EGRESS_IPV6_BASE=${BASE}"   >> "$ENVF"
-grep -q '^INMARKET_EGRESS_IPV6_COUNT=' "$ENVF" || echo "INMARKET_EGRESS_IPV6_COUNT=${COUNT}" >> "$ENVF"
+sed -i '/^INMARKET_EGRESS_IPV6_BASE=/d; /^INMARKET_EGRESS_IPV6_COUNT=/d' "$ENVF" 2>/dev/null || true
+echo "INMARKET_EGRESS_IPV6_BASE=${BASE}"   >> "$ENVF"
+echo "INMARKET_EGRESS_IPV6_COUNT=${COUNT}" >> "$ENVF"
 chmod 600 "$ENVF" 2>/dev/null || true
 
 # 5) Recreate the app so it picks up the env and starts rotating.

@@ -73,6 +73,20 @@ if [ ! -f "$DIR/.egress-setup-v1" ] && [ -f "$DIR/setup-egress.sh" ]; then
   fi
 fi
 
+# v2: WIDEN the rotation to the free max (256 source IPs from the same /64). The search-naming
+# scraper now retries throttled queries on a fresh IP (see searchEngines), so a bigger pool means
+# fewer dead-ends under the thousands-of-queries/day load. Free — same /64, all addresses already
+# bindable via the local route. Marker-guarded; bump the marker to re-tune.
+if [ ! -f "$DIR/.egress-setup-v2" ] && [ -f "$DIR/setup-egress.sh" ]; then
+  echo "$(date -u) one-time(v2): widening egress rotation to 256 IPs..." >> "$LOG"
+  if bash "$DIR/setup-egress.sh" 256 >> "$LOG" 2>&1; then
+    touch "$DIR/.egress-setup-v2"
+    echo "$(date -u) egress rotation widened to 256 source IPs" >> "$LOG"
+  else
+    echo "$(date -u) egress widen(v2) failed, will retry next cycle" >> "$LOG"
+  fi
+fi
+
 # Fetch quietly; compare local vs remote.
 git fetch origin "$BRANCH" --quiet
 LOCAL=$(git rev-parse HEAD)
