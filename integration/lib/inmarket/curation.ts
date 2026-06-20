@@ -224,74 +224,145 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
       researched++;
       if (dm.fullName) named++;
       if (dm.email?.email && dm.emailDeliverable !== false) contactable++;
-
-      const id = curationId(lead.company, role);
-      fresh.set(id, {
-        id,
-        company: lead.company,
-        // carry the VERIFIED domain the resolver found (the lead usually had none) so the read
-        // path / re-runs build emails without re-resolving.
-        domain: dm.domain ?? lead.domain,
-        industry: lead.industry,
-        signalType: lead.signalType ?? "job_posting",
-        signalReason: lead.reason ?? "",
-        role,
-        function: dm.function as JobFunction,
-        score: Math.round(lead.score ?? 0),
-        managerName: dm.fullName,
-        managerTitle: dm.title ?? dm.targetTitle,
-        managerVia: dm.via,
-        managerTier: dm.tier,
-        likelyEmail: dm.email?.email,
-        emailPattern: dm.email?.pattern,
-        emailSource: dm.emailSource,
-        // a guess on a no-MX domain is dead on arrival — mark it invalid now so it never enrolls.
-        emailInvalid: dm.emailDeliverable === false ? true : undefined,
-        // the person's OWN published address (deep-pulled from the company site) is verified-grade —
-        // mark it validated so it skips the verifier and counts as a confirmed contact.
-        emailValidated: dm.emailConfirmed ? true : undefined,
-        validatedAt: dm.emailConfirmed ? opts.nowIso : undefined,
-        status: statusFor(dm),
-        curatedAt: opts.nowIso,
-      });
+      const row = buildCuratedRow(lead, role, dm, opts.nowIso);
+      fresh.set(row.id, row);
     }
   }
   await Promise.all(Array.from({ length: concurrency }, worker));
 
-  // MERGE under the write lock against a FRESH load — never the stale snapshot taken before
-  // research. For each researched row, preserve any lifecycle the store has accrued meanwhile
-  // (enrollment, send-tracking) and any email validation verdict still matching the same address;
-  // a row that got locked (queued/enrolled) or suppressed concurrently is left untouched.
-  let newlyAdded = 0, updated = 0;
-  if (fresh.size) {
-    await withCurationLock(async () => {
-      const current = await load();
-      const map = new Map(current.map((r) => [r.id, r]));
-      for (const [id, row] of fresh) {
-        const prev = map.get(id);
-        if (prev && (prev.status === "enrolled" || prev.status === "queued" || prev.status === "suppressed")) {
-          updated++; continue; // locked/suppressed since selection — don't overwrite its lifecycle
-        }
-        const sameEmail = !!prev && (prev.likelyEmail ?? "") === (row.likelyEmail ?? "");
-        map.set(id, {
-          ...row,
-          // carry forward downstream lifecycle recorded for this slot
-          enrolledAt: prev?.enrolledAt, campaignId: prev?.campaignId,
-          sentAt: prev?.sentAt, openedAt: prev?.openedAt, repliedAt: prev?.repliedAt, bouncedAt: prev?.bouncedAt,
-          // keep the validation verdict only while it still describes the same address; a fresh
-          // confirmed-direct (row.emailValidated) or no-MX (row.emailInvalid) determination stands.
-          emailValidated: row.emailValidated ?? (row.emailInvalid ? false : (sameEmail ? prev?.emailValidated : undefined)),
-          emailInvalid: row.emailInvalid ?? (sameEmail ? prev?.emailInvalid : undefined),
-          validatedAt: row.validatedAt ?? (sameEmail ? prev?.validatedAt : undefined),
-          // a still-valid "invalid" verdict keeps the row out of the send queue
-          status: sameEmail && prev?.emailInvalid ? "suppressed" : row.status,
-        });
-        if (prev) updated++; else newlyAdded++;
-      }
-      await save([...map.values()].sort((a, b) => b.score - a.score));
-    });
-  }
+  const { newlyAdded, updated } = await mergeCuratedRows([...fresh.values()]);
   return { considered: targets.length, researched, named, contactable, newlyAdded, updated };
+}
+
+/**
+ * Build a CuratedProspect from a researched decision-maker. Shared by the local curation tick AND
+ * the distributed research workers (lib/inmarket worker script), so a row researched on a worker box
+ * is byte-for-byte identical to one researched on the main server.
+ */
+export function buildCuratedRow(lead: PoolLeadLite, role: string, dm: DecisionMaker, nowIso: string): CuratedProspect {
+  return {
+    id: curationId(lead.company, role),
+    company: lead.company,
+    // carry the VERIFIED domain the resolver found (the lead usually had none) so the read path /
+    // re-runs build emails without re-resolving.
+    domain: dm.domain ?? lead.domain,
+    industry: lead.industry,
+    signalType: lead.signalType ?? "job_posting",
+    signalReason: lead.reason ?? "",
+    role,
+    function: dm.function as JobFunction,
+    score: Math.round(lead.score ?? 0),
+    managerName: dm.fullName,
+    managerTitle: dm.title ?? dm.targetTitle,
+    managerVia: dm.via,
+    managerTier: dm.tier,
+    likelyEmail: dm.email?.email,
+    emailPattern: dm.email?.pattern,
+    emailSource: dm.emailSource,
+    // a guess on a no-MX domain is dead on arrival — mark it invalid now so it never enrolls.
+    emailInvalid: dm.emailDeliverable === false ? true : undefined,
+    // the person's OWN published address (deep-pulled from the company site) is verified-grade —
+    // mark it validated so it skips the verifier and counts as a confirmed contact.
+    emailValidated: dm.emailConfirmed ? true : undefined,
+    validatedAt: dm.emailConfirmed ? nowIso : undefined,
+    status: statusFor(dm),
+    curatedAt: nowIso,
+  };
+}
+
+/**
+ * Merge freshly-researched rows into the curation store under the write lock, against a FRESH load
+ * (never a stale pre-research snapshot). Preserves any lifecycle the store accrued meanwhile
+ * (enrollment, send-tracking) and any still-matching email-validation verdict; a row locked
+ * (queued/enrolled) or suppressed concurrently is left untouched. Shared by the local tick and the
+ * worker-submit path so distributed results merge exactly like local ones.
+ */
+export async function mergeCuratedRows(rows: CuratedProspect[]): Promise<{ newlyAdded: number; updated: number }> {
+  let newlyAdded = 0, updated = 0;
+  if (!rows.length) return { newlyAdded, updated };
+  await withCurationLock(async () => {
+    const current = await load();
+    const map = new Map(current.map((r) => [r.id, r]));
+    for (const row of rows) {
+      const prev = map.get(row.id);
+      if (prev && (prev.status === "enrolled" || prev.status === "queued" || prev.status === "suppressed")) {
+        updated++; continue; // locked/suppressed since selection — don't overwrite its lifecycle
+      }
+      const sameEmail = !!prev && (prev.likelyEmail ?? "") === (row.likelyEmail ?? "");
+      map.set(row.id, {
+        ...row,
+        enrolledAt: prev?.enrolledAt, campaignId: prev?.campaignId,
+        sentAt: prev?.sentAt, openedAt: prev?.openedAt, repliedAt: prev?.repliedAt, bouncedAt: prev?.bouncedAt,
+        emailValidated: row.emailValidated ?? (row.emailInvalid ? false : (sameEmail ? prev?.emailValidated : undefined)),
+        emailInvalid: row.emailInvalid ?? (sameEmail ? prev?.emailInvalid : undefined),
+        validatedAt: row.validatedAt ?? (sameEmail ? prev?.validatedAt : undefined),
+        status: sameEmail && prev?.emailInvalid ? "suppressed" : row.status,
+      });
+      if (prev) updated++; else newlyAdded++;
+    }
+    await save([...map.values()].sort((a, b) => b.score - a.score));
+  });
+  return { newlyAdded, updated };
+}
+
+/* ------------------------------------------------------------------ */
+/* Distributed research: hand out work to worker servers               */
+/* ------------------------------------------------------------------ */
+
+// In-memory LEASE so two worker boxes (or rapid claims) don't research the same (company, role) at
+// once. The merge is idempotent by id, so an expired-lease overlap only wastes a little work — this
+// just keeps the fleet efficient. Single main process, so an in-memory map is sufficient.
+const researchLeases = new Map<string, number>();
+const LEASE_MS = 10 * 60 * 1000;
+
+/**
+ * Select a batch of (company, role) research jobs that are DUE (not freshly curated) for a worker to
+ * pull. Mirrors curateFromPool's target selection, leases what it hands out, and skips already-leased
+ * slots so concurrent workers get DIFFERENT work. Returns plain JSON jobs the worker can research.
+ */
+export async function claimResearchBatch(limit: number, minScore = 10): Promise<Array<{ lead: PoolLeadLite; role: string }>> {
+  const cap = Math.min(Math.max(limit, 1), 1000);
+  const { queryPool } = await import("./pool");
+  const candidates = await queryPool({ limit: 6000 } as never, 6000).catch(() => [] as unknown[]);
+  const store = await load();
+  const byId = new Map(store.map((r) => [r.id, r]));
+  const now = Date.now();
+  const recuratAfterMs = 24 * 60 * 60 * 1000;
+  const RETRY_SOURCED_MS = 90 * 60 * 1000;
+  const dmPerCompany = Math.max(1, Number(process.env.INMARKET_DM_PER_COMPANY) || 3);
+
+  // prune expired leases lazily so the map can't grow unbounded
+  if (researchLeases.size > 50_000) for (const [k, exp] of researchLeases) if (exp <= now) researchLeases.delete(k);
+
+  const leads = (candidates as Array<Record<string, unknown>>).map((l) => ({
+    company: l.company as string, domain: l.domain as string | undefined, industry: l.industry as string | undefined,
+    signalType: l.signalType as string | undefined, reason: l.reason as string | undefined, score: l.score as number | undefined,
+    employeeCount: l.employeeCount as number | undefined, roleDetails: l.roleDetails as Array<{ title: string }> | undefined,
+    roles: l.roles as string[] | undefined, sourceUrl: l.sourceUrl as string | undefined,
+  })) as PoolLeadLite[];
+
+  const out: Array<{ lead: PoolLeadLite; role: string }> = [];
+  for (const l of leads.filter((x) => x.company && (x.score ?? 0) >= minScore).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))) {
+    for (const role of rolesByFunction(l, dmPerCompany)) {
+      const id = curationId(l.company, role);
+      const lease = researchLeases.get(id);
+      if (lease && lease > now) continue;                              // another worker has it
+      const existing = byId.get(id);
+      let due = true;
+      if (existing) {
+        if (existing.status === "enrolled" || existing.status === "queued") due = false;
+        else {
+          const age = now - (Date.parse(existing.curatedAt) || 0);
+          due = age >= (existing.status === "sourced" ? Math.min(recuratAfterMs, RETRY_SOURCED_MS) : recuratAfterMs);
+        }
+      }
+      if (!due) continue;
+      researchLeases.set(id, now + LEASE_MS);
+      out.push({ lead: l, role });
+      if (out.length >= cap) return out;
+    }
+  }
+  return out;
 }
 
 /** The role a company's decision-maker should be matched to: its first/most-recent open role. */
