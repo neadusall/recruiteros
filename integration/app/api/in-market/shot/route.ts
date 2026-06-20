@@ -21,37 +21,43 @@ import { requireSession, body, ok, fail } from "../../../../lib/api";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MIME: Record<string, string> = { png: "image/png", gif: "image/gif", webp: "image/webp" };
+const MIME: Record<string, string> = { png: "image/png", gif: "image/gif", webp: "image/webp", mp4: "video/mp4" };
 
 export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const key = url.searchParams.get("key") || "";
+  const watch = url.searchParams.get("watch");
+  const fmtParam = (url.searchParams.get("fmt") || "").toLowerCase();
+
+  // PUBLIC-BY-KEY: the email teaser links to the watch page and the recipient is NOT logged in,
+  // so assets + watch page are served without a session — the unguessable shot key IS the
+  // capability (Loom-style share links). Listing/capture below stay authed.
+  if (key && (watch || fmtParam)) {
+    const { readShotAsset } = await import("../../../../lib/inmarket/roleShot");
+    if (watch) {
+      const html = await readShotAsset(key, "html");
+      if (!html) return new Response("not found", { status: 404 });
+      return new Response(html as any, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" } });
+    }
+    const fmt = fmtParam || "gif";
+    if (!MIME[fmt]) return fail("bad_format", 400);
+    const buf = await readShotAsset(key, fmt as any);
+    if (!buf) return new Response("not found", { status: 404 });
+    // `as any` only because BodyInit's Node Buffer typing varies across lib targets.
+    return new Response(buf as any, {
+      status: 200,
+      headers: { "Content-Type": MIME[fmt], "Content-Length": String(buf.length), "Cache-Control": "public, max-age=86400" },
+    });
+  }
+
+  // Authed: listing the available shots (PiP Studio gallery).
   const g = requireSession(req);
   if ("response" in g) return g.response;
-
-  const url = new URL(req.url);
-
-  // ?list=1 — every verified page-scroll GIF available to personalize (PiP Studio gallery).
   if (url.searchParams.get("list")) {
     const { listShots } = await import("../../../../lib/inmarket/roleShot");
     return ok({ shots: await listShots() });
   }
-
-  const key = url.searchParams.get("key") || "";
-  const fmt = (url.searchParams.get("fmt") || "gif").toLowerCase();
-  if (fmt !== "png" && fmt !== "gif" && fmt !== "webp") return fail("bad_format", 400);
-
-  const { readShotAsset } = await import("../../../../lib/inmarket/roleShot");
-  const buf = await readShotAsset(key, fmt);
-  if (!buf) return new Response("not found", { status: 404 });
-
-  // `as any` only because BodyInit's Node Buffer typing varies across lib targets.
-  return new Response(buf as any, {
-    status: 200,
-    headers: {
-      "Content-Type": MIME[fmt],
-      "Content-Length": String(buf.length),
-      "Cache-Control": "private, max-age=86400",
-    },
-  });
+  return fail("bad_request", 400);
 }
 
 export async function POST(req: Request) {
