@@ -1,0 +1,66 @@
+name: Deploy to production
+
+# Push-to-live hook: the moment a commit lands on main, SSH into the server and
+# redeploy (pull + docker compose up -d --build). This is the INSTANT path; the
+# server-side auto-deploy.sh systemd timer remains as a 2-minute polling fallback,
+# so a missed webhook still ships within a couple minutes.
+#
+# One-time setup — add these repo secrets (Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST     server IP or hostname        (e.g. 203.0.113.10)
+#   DEPLOY_USER     ssh user                     (e.g. root)
+#   DEPLOY_SSH_KEY  private key for that user    (the full PEM contents)
+#   DEPLOY_PATH     repo path on the server      (e.g. /opt/recruiteros)
+#   DEPLOY_PORT     ssh port (optional)          (defaults to 22)
+# Until DEPLOY_HOST is set the job is a friendly no-op (green check), so this never
+# blocks a push.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}   # lets you trigger a deploy by hand from the Actions tab
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false   # never abort a deploy mid-flight
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check deploy is configured
+        id: cfg
+        run: |
+          if [ -n "${{ secrets.DEPLOY_HOST }}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DEPLOY_HOST secret not set — skipping instant deploy. The server's auto-deploy.sh poller will still ship this within ~2 min. Add the DEPLOY_* secrets to enable instant deploys."
+          fi
+
+      - name: Deploy over SSH
+        if: steps.cfg.outputs.ready == 'true'
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          command_timeout: 20m
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH }}"
+            echo "Deploying $(git rev-parse --short HEAD) -> latest on main..."
+            git fetch origin main --quiet
+            git reset --hard origin/main
+            git submodule sync --recursive || true
+            git submodule update --init --recursive || true
+            # Rebuild + restart; recreating the app container re-runs instrumentation.ts,
+            # which re-arms the Hire Signals accumulator (incl. the real-time inflow tick).
+            if docker compose up -d --build; then
+              echo "Deploy complete (full stack)."
+            else
+              echo "Full build failed — deploying core app only."
+              docker compose up -d --build --no-deps app || true
+              docker compose up -d --no-deps db caddy || true
+            fi
+            git rev-parse --short HEAD
