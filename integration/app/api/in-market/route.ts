@@ -55,7 +55,14 @@ export async function POST(req: Request) {
       const { hiringManagersFor } = await import("../../../lib/inmarket");
       const r = await resolveCompanyRoles(company, b.domain ? String(b.domain) : undefined);
       const roleTitles = r.roles.map((x) => x.title);
-      const hiringManagers = hiringManagersFor(roleTitles);
+      const roleDates: Record<string, string> = {};
+      const roleUrls: Record<string, string> = {};
+      for (const x of r.roles) {
+        const k = (x.title || "").trim().toLowerCase();
+        if (x.postedAt) roleDates[k] = x.postedAt;
+        if (x.url) roleUrls[k] = x.url;
+      }
+      const hiringManagers = hiringManagersFor(roleTitles, undefined, roleDates, 30, roleUrls);
       return ok({ roles: roleTitles, detail: r.roles, hiringManagers, source: r.source, total: roleTitles.length });
     } catch (e: any) {
       return fail(e?.message ?? "company_roles_failed", e?.status ?? 400);
@@ -110,8 +117,12 @@ export async function POST(req: Request) {
   if (b?.action === "curation_funnel") {
     const { curationFunnel } = await import("../../../lib/inmarket/curation");
     const { engineHealth } = await import("../../../lib/inmarket/accumulator");
+    const { searchHealth, hydrateSearchHealth } = await import("../../../lib/inmarket/searchHealth");
+    await hydrateSearchHealth().catch(() => undefined); // load persisted status right after a restart
     const [funnel, health] = await Promise.all([curationFunnel(), engineHealth()]);
-    return ok({ funnel, health });
+    // `search` = sustainability of the free name-scraping (healthy | degraded | throttled), so the
+    // UI can show a live health pill and we can see if the rotation is holding up under load.
+    return ok({ funnel, health, search: searchHealth() });
   }
 
   // Standalone liveness probe for the lead engine (last cycle / last curation tick + errors),

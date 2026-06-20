@@ -41,6 +41,7 @@ import { guessEmail, emailDomainFrom, splitFullName, type EmailGuess } from "./e
 import { resolveCompanyDomain, type DomainResolution } from "./domain";
 import { resolvePersonEmail } from "./deepContact";
 import { paidEmailEnabled, findEmailIcypeas } from "./paidEmail";
+import { recordSearch, isAvailable } from "./searchHealth";
 
 /* ------------------------------------------------------------------ */
 /* Shared fetch helpers (free, timed-out, polite UA)                   */
@@ -361,18 +362,91 @@ async function githubEngCandidates(company: string): Promise<PersonCandidate[]> 
 
 const searchCache = new Map<string, { at: number; people: PersonCandidate[] }>();
 const SEARCH_TTL_MS = 6 * 60 * 60 * 1000;
+// A real browser UA — search engines serve scrape-friendly HTML to it and challenge bots less.
+const SEARCH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
+/** Status-aware fetch so we can tell a THROTTLE (429/403/captcha) from a genuine empty result. */
+async function searchFetch(url: string): Promise<{ status: number; body: string | null }> {
+  try {
+    const { egressInit } = await import("../net/egress");
+    const res = await fetch(url, egressInit({
+      redirect: "follow",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      headers: { "User-Agent": SEARCH_UA, Accept: "text/html,application/xhtml+xml,*/*", "Accept-Language": "en-US,en;q=0.9" },
+    }));
+    return { status: res.status, body: res.ok ? await res.text() : null };
+  } catch {
+    return { status: 0, body: null }; // network/timeout — a miss, not a throttle
+  }
+}
+
+/** True when the response is a rate-limit / bot challenge (so we back the engine off). */
+function isThrottle(status: number, body: string | null): boolean {
+  if (status === 429 || status === 403 || status === 503) return true;
+  return !!body && /unusual traffic|captcha|are you a robot|automated queries|verify you are human|too many requests/i.test(body);
+}
+
+function cleanTitle(s: string): string {
+  return s.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').trim();
+}
+
+/** Turn a list of search-result titles ("Name - Title - Company") into validated candidates. */
+function candidatesFromTitles(titles: string[], company: string, anchor: string): PersonCandidate[] {
+  const out: PersonCandidate[] = [];
+  const seen = new Set<string>();
+  for (const title of titles) {
+    const parts = title.split(/\s+[–\-|]\s+/);
+    if (parts.length < 2) continue;
+    const name = parts[0].trim();
+    const roleTitle = parts[1].replace(/\s*\|\s*linkedin.*$/i, "").trim();
+    const co = parts[2] ? parts[2].replace(/\s*\|\s*linkedin.*$/i, "").trim() : "";
+    if (!looksLikeName(name)) continue;
+    const hay = title.toLowerCase();
+    const coOk = co ? companyAnchor(co) === anchor || hay.includes(anchor) : hay.includes(anchor);
+    if (!coOk) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const split = splitFullName(name);
+    out.push({
+      fullName: name, firstName: split.firstName, lastName: split.lastName,
+      title: roleTitle, headline: roleTitle, source: "search", companyName: company,
+    } as PersonCandidate);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+/** The free search engines we read public titles from, tried in order, each independently rested. */
+const SEARCH_ENGINES: Array<{ id: string; url: (q: string) => string; titles: (html: string) => string[] }> = [
+  {
+    id: "duckduckgo",
+    url: (q) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`,
+    titles: (html) => matchAll(html, /<a[^>]+class="result__a"[^>]*>([\s\S]*?)<\/a>/gi),
+  },
+  {
+    id: "bing",
+    url: (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=20`,
+    titles: (html) => matchAll(html, /<h2>\s*<a [^>]*>([\s\S]*?)<\/a>/gi),
+  },
+];
+
+function matchAll(html: string, re: RegExp): string[] {
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) && out.length < 15) out.push(cleanTitle(m[1]));
+  return out;
+}
 
 /**
- * The biggest free lift to the NAMING rate. Query a scraping-friendly search engine (DuckDuckGo
- * HTML) for the company's people on LinkedIn and read the decision-maker name straight out of the
- * PUBLIC result titles, e.g. "Jane Doe - VP of Engineering - Acme". This catches the many companies
- * the team-page / news strategies miss (no public team page, no press).
+ * The biggest free lift to the NAMING rate. Reads the decision-maker's name straight out of PUBLIC
+ * search-result titles, e.g. "Jane Doe - VP of Engineering - Acme" — catching the many companies the
+ * team-page / news strategies miss (no public team page, no press).
  *
- * Sustainable + 100% free because every request is egress-IP rotated (lib/net/egress): from a free
- * Hetzner IPv6 /64 we spread queries across dozens of source IPs, so the engine never rate-limits.
- * Best-effort and cached per company. Reads only public search-result titles — it never logs into
- * or scrapes LinkedIn itself. The result still goes through the same scorer + company-match guard,
- * so a bad title can't promote a wrong person.
+ * RUN-IT-HARD SAFELY: every request is egress-IP rotated (free Hetzner IPv6 /64) AND wrapped by the
+ * search-health system — a throttled engine is rested with exponential back-off and we fall through
+ * to the next engine, so one source rate-limiting never stops naming. Outcomes feed the live health
+ * pill so sustainability is visible. Cached per company. Reads only public titles, never LinkedIn.
  */
 async function searchEngineCandidates(company: string, titles: string[]): Promise<PersonCandidate[]> {
   const anchor = companyAnchor(company);
@@ -382,39 +456,19 @@ async function searchEngineCandidates(company: string, titles: string[]): Promis
 
   const titleQ = titles.slice(0, 5).map((t) => `"${t}"`).join(" OR ");
   const q = `${company} (${titleQ}) site:linkedin.com/in`;
-  const html = await fetchText(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`);
-  const out: PersonCandidate[] = [];
-  if (html) {
-    const seen = new Set<string>();
-    const re = /<a[^>]+class="result__a"[^>]*>([\s\S]*?)<\/a>/gi;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(html)) && out.length < 8) {
-      const title = m[1]
-        .replace(/<[^>]+>/g, "")
-        .replace(/&amp;/g, "&").replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').trim();
-      // LinkedIn result titles: "Name - Title - Company" (separators -, –, |).
-      const parts = title.split(/\s+[–\-|]\s+/);
-      if (parts.length < 2) continue;
-      const name = parts[0].trim();
-      const roleTitle = parts[1].replace(/\s*\|\s*linkedin.*$/i, "").trim();
-      const co = parts[2] ? parts[2].replace(/\s*\|\s*linkedin.*$/i, "").trim() : "";
-      if (!looksLikeName(name)) continue;
-      // Must reference our company: a matching company segment, or the company in the title text.
-      const hay = title.toLowerCase();
-      const coOk = co ? companyAnchor(co) === anchor || hay.includes(anchor) : hay.includes(anchor);
-      if (!coOk) continue;
-      const key = name.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const split = splitFullName(name);
-      out.push({
-        fullName: name, firstName: split.firstName, lastName: split.lastName,
-        title: roleTitle, headline: roleTitle, source: "search", companyName: company,
-      } as PersonCandidate);
-    }
+
+  let people: PersonCandidate[] = [];
+  for (const eng of SEARCH_ENGINES) {
+    if (!isAvailable(eng.id)) continue; // engine resting in back-off — skip to the next source
+    const { status, body } = await searchFetch(eng.url(q));
+    if (isThrottle(status, body)) { recordSearch(eng.id, "throttled"); continue; }
+    if (!body) { recordSearch(eng.id, "empty"); continue; }
+    const found = candidatesFromTitles(eng.titles(body), company, anchor);
+    recordSearch(eng.id, found.length ? "ok" : "empty");
+    if (found.length) { people = found; break; } // first engine that yields names wins
   }
-  searchCache.set(anchor, { at: Date.now(), people: out });
-  return out;
+  searchCache.set(anchor, { at: Date.now(), people });
+  return people;
 }
 
 /* ------------------------------------------------------------------ */

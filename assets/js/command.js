@@ -2576,16 +2576,34 @@
     ]).then(function (rs) {
       var funnel = (rs[0] && rs[0].data && rs[0].data.funnel) || null;
       var health = (rs[0] && rs[0].data && rs[0].data.health) || null;
+      var search = (rs[0] && rs[0].data && rs[0].data.search) || null;
       var list = (rs[1] && rs[1].data && rs[1].data.curated) || [];
-      body.innerHTML = curationHtml(funnel, list, health);
+      body.innerHTML = curationHtml(funnel, list, health, search);
       wireCuration(body, list);
     }).catch(function () { body.innerHTML = '<div class="empty">Couldn\'t load the curated list yet. The accumulator builds it hourly — try again shortly, or run a search first to seed the pool.</div>'; });
   }
 
   // Liveness strip: shows when the pool was last fed and when curation last ran, so a silently
   // stalled engine is visible at a glance instead of looking like a healthy-but-empty list.
-  function curEngineLine(h) {
-    if (!h) return "";
+  // Sustainability pill for the free name-scraping (DuckDuckGo/Bing). Green = healthy, amber =
+  // slowing, red = throttled (resting under back-off). Hover shows the per-engine breakdown so we
+  // can see at a glance whether the IP rotation is holding up while we run it hard.
+  function curSearchPill(s) {
+    if (!s) return "";
+    var st = s.status || "idle";
+    var icon = st === "healthy" ? "🟢" : st === "degraded" ? "🟡" : st === "throttled" ? "🔴" : "⚪";
+    var label = st === "healthy" ? "scraping healthy" : st === "degraded" ? "scraping slowing"
+      : st === "throttled" ? "scraping throttled" : "scraping idle";
+    var tip = (s.engines || []).map(function (e) {
+      return e.engine + ": " + e.status + " · " + Math.round((e.okRate || 0) * 100) + "% ok" +
+        (e.backoffSec ? " · resting " + e.backoffSec + "s" : "") + " · " + (e.requests || 0) + " reqs";
+    }).join("\n") || "no searches yet";
+    return '<span class="cur-mini" title="' + esc(tip) + '">' + icon + " " + esc(label) + "</span>";
+  }
+
+  function curEngineLine(h, search) {
+    if (!h && !search) return "";
+    if (!h) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSearchPill(search) + "</div>";
     function ago(s) {
       if (!s) return null;
       var t = Date.parse(String(s).replace(" ", "T")); if (isNaN(t)) return null;
@@ -2606,10 +2624,11 @@
     return '<div class="cur-sigs"><span class="muted">Engine:</span>' +
       part("pool fed", h.lastCycleAt, h.lastCycleOk, 75) +
       part("curated", h.lastCurationAt, h.lastCurationOk, 20) +
+      curSearchPill(search) +
       "</div>";
   }
 
-  function curationHtml(funnel, list, health) {
+  function curationHtml(funnel, list, health, search) {
     var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
     var bs = f.byStatus || {};
     var stages = [
@@ -2634,7 +2653,7 @@
         '<h2>Curated decision-makers <span class="muted">· ' + (f.total || 0).toLocaleString() + " researched</span></h2>" +
         '<button type="button" class="btn btn-ghost btn-sm" id="curRefresh">↻ Research more now</button>' +
       "</div>" +
-      curEngineLine(health) +
+      curEngineLine(health, search) +
       '<div class="cur-funnel">' + funnelRow + "</div>" +
       (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
       ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "");
@@ -2789,8 +2808,11 @@
         var who = m.managerName
           ? '<b>' + esc(m.managerName) + "</b>"
           : '<span class="muted">resolve on push</span>';
+        var roleLabel = m.roleUrl
+          ? '<a class="im-mgr-rolelink" href="' + esc(m.roleUrl) + '" target="_blank" rel="noopener" title="Open this exact job posting" onclick="event.stopPropagation()">' + esc(m.role) + ' <span class="im-mgr-ext">↗</span></a>'
+          : esc(m.role);
         return '<label class="im-mgr"><input type="checkbox" class="im-pick" data-id="' + esc(l.id) + '" data-mk="' + esc(imMgrKey(m)) + '" ' + (imPicks[imPickKey(l.id, imMgrKey(m))] ? "checked" : "") + ">" +
-          '<span class="im-mgr-role">' + esc(m.role) +
+          '<span class="im-mgr-role">' + roleLabel +
             (m.postedAt && imRelTime(m.postedAt) ? ' <span class="im-mgr-posted" title="Posted on their board ' + esc(m.postedAt) + '">📅 ' + imRelTime(m.postedAt) + "</span>" : "") + "</span>" +
           '<span class="im-mgr-arrow">→</span>' +
           '<span class="im-mgr-title">' + esc(m.managerTitle) + "</span>" +
