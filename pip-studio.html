@@ -7,138 +7,162 @@
 <title>PiP Studio · RecruitersOS</title>
 <style>
   :root{
-    --bg:#0d1117; --panel:#161b22; --line:#2a313c; --ink:#e6edf3; --mut:#8b949e;
-    --grn:#19c37d; --acc:#58a6ff; --rad:12px;
+    --bg:#0b0f14; --panel:#11161d; --panel2:#0d1218; --line:#222b36; --ink:#e9eef5; --mut:#8b97a6;
+    --grn:#19c37d; --acc:#58a6ff; --rad:14px;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
-  header{display:flex;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid var(--line)}
-  header h1{font-size:18px;margin:0;font-weight:650}
-  header .tag{font-size:12px;color:var(--mut);background:#21262d;border:1px solid var(--line);padding:3px 9px;border-radius:999px}
-  .wrap{display:grid;grid-template-columns:360px 1fr;gap:20px;padding:20px 24px;max-width:1280px;margin:0 auto}
+  body{margin:0;background:radial-gradient(1100px 520px at 18% -8%, #14202c, var(--bg));color:var(--ink);
+    font:15px/1.55 system-ui,Segoe UI,Roboto,sans-serif;min-height:100vh}
+  header{display:flex;align-items:baseline;gap:12px;padding:16px 24px;border-bottom:1px solid var(--line)}
+  .brand{font-weight:800;font-size:18px;background:linear-gradient(90deg,#19c37d,#58a6ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  header .sub{color:var(--mut);font-size:13px}
+
+  .layout{display:grid;grid-template-columns:340px 1fr;gap:18px;padding:18px 24px;max-width:1340px;margin:0 auto;align-items:start}
   .col{display:flex;flex-direction:column;gap:16px;min-width:0}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);padding:16px}
-  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 12px}
-  label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
-  input[type=text],select{width:100%;background:#0d1117;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px 10px;font:inherit}
-  input[type=range]{width:100%}
-  input[type=color]{width:44px;height:32px;border:1px solid var(--line);background:#0d1117;border-radius:8px;padding:2px}
-  .row{display:flex;gap:10px;align-items:center}
-  .row > *{flex:1}
-  button{cursor:pointer;border:1px solid var(--line);background:#21262d;color:var(--ink);border-radius:8px;padding:9px 14px;font:inherit;font-weight:600}
-  button.primary{background:var(--grn);border-color:var(--grn);color:#06231a}
-  button.danger{background:#3d1418;border-color:#5c1a22;color:#ffb4ba}
-  button:disabled{opacity:.45;cursor:not-allowed}
-  button.ghost{background:transparent}
-  .pillrow{display:flex;gap:8px;flex-wrap:wrap}
-  .pill{flex:none;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:#0d1117;cursor:pointer;font-size:13px}
-  .pill.on{background:var(--grn);border-color:var(--grn);color:#06231a;font-weight:650}
-  video{width:100%;border-radius:10px;background:#000;display:block}
-  .stage{position:relative;width:100%;aspect-ratio:1000/620;background:#0b0f14;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-  .stage .bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#11161d}
-  .stage .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:13px;text-align:center;padding:24px}
-  .pip{position:absolute;overflow:hidden;background:#000}
-  .pip video{width:100%;height:100%;object-fit:cover}
-  .muted{color:var(--mut);font-size:12px}
-  .clips{display:flex;flex-direction:column;gap:8px;max-height:220px;overflow:auto}
-  .clip{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#0d1117;font-size:13px}
-  .clip.on{border-color:var(--grn)}
-  .clip .meta{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .dot{width:8px;height:8px;border-radius:50%;background:#3fb950;flex:none}
-  .out{display:flex;flex-direction:column;gap:10px}
-  .out img{width:100%;border-radius:10px;border:1px solid var(--line)}
-  .status{font-size:13px;padding:8px 10px;border-radius:8px;background:#0d1117;border:1px solid var(--line)}
-  .status.err{border-color:#5c1a22;color:#ffb4ba}
-  .status.ok{border-color:#1f6f4a;color:#7ee2b8}
-  .linkrow{display:flex;gap:8px;align-items:center;font-size:12px}
-  .linkrow code{background:#0d1117;border:1px solid var(--line);border-radius:6px;padding:4px 8px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  a{color:var(--acc)}
-  .small{font-size:12px;padding:6px 10px}
+  .left{position:sticky;top:18px}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:var(--rad);padding:16px}
+  .card h2{font-size:13px;margin:0 0 14px;display:flex;align-items:center;gap:9px;font-weight:700}
+  .card h2 .n{display:inline-flex;width:20px;height:20px;border-radius:50%;background:var(--grn);color:#06231a;align-items:center;justify-content:center;font-size:12px;font-weight:800}
+  .card h2 .hint{margin-left:auto;font-size:11px;color:var(--mut);font-weight:500}
+  label{display:block;font-size:12px;color:var(--mut);margin:11px 0 5px}
+  input[type=text]{width:100%;background:#0a0e13;border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:9px 11px;font:inherit}
+  input[type=text]:focus{outline:none;border-color:#2f4255}
+  input[type=range]{width:100%;accent-color:var(--grn)}
+  input[type=color]{width:42px;height:32px;border:1px solid var(--line);background:#0a0e13;border-radius:8px;padding:2px}
+  .row{display:flex;gap:9px;align-items:center}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  button{cursor:pointer;border:1px solid var(--line);background:#19222d;color:var(--ink);border-radius:9px;padding:9px 14px;font:inherit;font-weight:600;transition:.12s}
+  button:hover{border-color:#324456}
+  button.primary{background:var(--grn);border-color:var(--grn);color:#06231a}
+  button.primary:hover{filter:brightness(1.06)}
+  button.ghost{background:transparent}
+  button.danger{background:#3a141a;border-color:#5c1a22;color:#ffb4ba}
+  button.small{padding:6px 10px;font-size:12.5px}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .pillrow{display:flex;gap:7px;flex-wrap:wrap}
+  .pill{flex:none;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:#0a0e13;cursor:pointer;font-size:12.5px}
+  .pill.on{background:var(--grn);border-color:var(--grn);color:#06231a;font-weight:700}
+  .muted{color:var(--mut);font-size:12px}
+  a{color:var(--acc)}
+  details{margin-top:12px}
+  summary{cursor:pointer;font-size:12px;color:var(--mut);list-style:none}
+  summary::-webkit-details-marker{display:none}
+
+  /* camera + clips */
+  video.cam{width:100%;border-radius:11px;background:#000;display:block;aspect-ratio:16/10;object-fit:cover}
+  .clips{display:flex;flex-direction:column;gap:7px;margin-top:9px;max-height:128px;overflow:auto}
+  .clip{display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:#0a0e13;font-size:12.5px;cursor:pointer}
+  .clip.on{border-color:var(--grn);box-shadow:0 0 0 1px var(--grn) inset}
+  .clip .meta{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .clip .d{width:7px;height:7px;border-radius:50%;background:#3fb950;flex:none}
+
+  /* style preview */
+  .ministage{position:relative;width:100%;aspect-ratio:1000/620;background:#070b0f;border:1px solid var(--line);border-radius:11px;overflow:hidden;margin-bottom:6px}
+  .ministage .bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top;background:#0d1218}
+  .ministage .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:12px;text-align:center;padding:18px}
+  .pip{position:absolute;overflow:hidden;background:#000;box-shadow:0 5px 18px rgba(0,0,0,.5)}
+  .pip video{width:100%;height:100%;object-fit:cover}
+  .pip .nocam{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#9fb0c0;font-size:10px;text-align:center;background:#0d1620}
+
+  /* roles */
+  .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px}
+  .toolbar input{flex:1}
+  .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+  .tile{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#0a0e13;display:flex;flex-direction:column}
+  .tile .thumb{position:relative;cursor:pointer}
+  .tile .thumb img{width:100%;height:118px;object-fit:cover;object-position:top;display:block;background:#11161d}
+  .tile .thumb .go{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(7,11,15,.55);opacity:0;transition:.12s;font-size:13px;font-weight:700;color:#fff}
+  .tile .thumb:hover .go{opacity:1}
+  .tile .lbl{padding:10px 11px}
+  .tile .co{font-size:13.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tile .ro{font-size:11.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+  .tile .act{padding:0 11px 11px;display:flex;gap:7px;align-items:center;min-height:34px}
+  .tile .act .lk{flex:1;font-size:12px;color:var(--grn);text-decoration:none;font-weight:600}
+  .empty{grid-column:1/-1;color:var(--mut);text-align:center;padding:40px 10px}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid #ffe0a3;border-top-color:transparent;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .banner{font-size:12.5px;padding:9px 12px;border-radius:9px;background:#0a0e13;border:1px solid var(--line);margin-bottom:12px}
+  .banner.warn{border-color:#5a4a1a;color:#ffe0a3}
+  @media(max-width:980px){.layout{grid-template-columns:1fr}.left{position:static}}
 </style>
 </head>
 <body>
 <header>
-  <h1>PiP Studio</h1>
-  <span class="tag">Customize hiring-signal GIFs with your webcam</span>
+  <span class="brand">PiP Studio</span>
+  <span class="sub">Record once · click a role · send a personalized video</span>
 </header>
 
-<div class="wrap">
-  <!-- LEFT: record + clip library -->
-  <div class="col">
+<div class="layout">
+  <!-- LEFT · set once -->
+  <div class="col left">
     <div class="card">
-      <h2>1 · Record yourself</h2>
-      <video id="preview" muted playsinline></video>
-      <div class="row" style="margin-top:10px">
-        <button id="btnCam" class="ghost">Enable camera</button>
-        <button id="btnRec" class="primary" disabled>● Record</button>
+      <h2><span class="n">1</span> Your clip <span class="hint">reusable</span></h2>
+      <video id="preview" class="cam" muted playsinline></video>
+      <div class="row" style="margin-top:9px">
+        <button id="btnCam" class="ghost small" style="flex:1">Enable camera</button>
+        <button id="btnRec" class="primary small" style="flex:1" disabled>● Record</button>
       </div>
-      <div class="row" style="margin-top:8px">
-        <button id="btnSave" disabled>Save clip</button>
-        <button id="btnDiscard" class="ghost" disabled>Discard</button>
+      <div class="row" style="margin-top:7px">
+        <button id="btnSave" class="small" style="flex:1" disabled>Save</button>
+        <button id="btnDiscard" class="ghost small" style="flex:1" disabled>Discard</button>
       </div>
-      <p class="muted" id="recHint">Talk to the camera for ~10–20s. The page scroll loops behind you.</p>
+      <div class="clips" id="clips"></div>
+      <p class="muted" id="recHint" style="margin:9px 0 0">Talk for ~10–20s. The page scroll loops behind you.</p>
     </div>
 
     <div class="card">
-      <h2>Your clips</h2>
-      <div class="clips" id="clips"><p class="muted">No clips yet.</p></div>
+      <h2><span class="n">2</span> Your style <span class="hint">applied to all</span></h2>
+      <div class="ministage" id="stage"><div class="ph" id="stagePh">Capture a role to preview your placement.</div><div class="pip" id="pipBox"></div></div>
+      <label>Corner</label>
+      <div class="pillrow" id="corners">
+        <span class="pill" data-c="tl">TL</span><span class="pill" data-c="tr">TR</span>
+        <span class="pill" data-c="bl">BL</span><span class="pill on" data-c="br">BR</span>
+      </div>
+      <label>Shape</label>
+      <div class="pillrow" id="shapes">
+        <span class="pill on" data-s="circle">Circle</span><span class="pill" data-s="rounded">Rounded</span><span class="pill" data-s="rect">Rectangle</span>
+      </div>
+      <label>Size (<span id="sizeV">26</span>%)</label><input type="range" id="size" min="12" max="55" value="26" />
+      <details>
+        <summary>Advanced ▾</summary>
+        <div class="grid2" style="margin-top:8px">
+          <div><label>Margin (<span id="marginV">3</span>%)</label><input type="range" id="margin" min="0" max="20" value="3" /></div>
+          <div><label>Border (<span id="borderV">4</span>px)</label><input type="range" id="border" min="0" max="24" value="4" /></div>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <span class="muted">Color</span><input type="color" id="borderColor" value="#19c37d" />
+          <span class="muted" id="radiusWrap" style="display:none">Radius <input type="range" id="radius" min="0" max="50" value="18" style="width:90px" /></span>
+        </div>
+      </details>
     </div>
   </div>
 
-  <!-- RIGHT: role + layout + generate -->
+  <!-- RIGHT · roles -->
   <div class="col">
     <div class="card">
-      <h2>2 · Role to personalize</h2>
-      <div class="grid2">
-        <div><label>Company</label><input type="text" id="company" placeholder="Airbnb" /></div>
-        <div><label>Role title</label><input type="text" id="roleTitle" placeholder="Acquisition Manager" /></div>
+      <h2><span class="n">3</span> Roles <span class="hint">click any tile to personalize</span></h2>
+      <div id="banner" class="banner warn" style="display:none"></div>
+      <div class="toolbar">
+        <input type="text" id="gsearch" placeholder="Filter roles…" />
+        <button id="btnGenAll" class="primary small">⚡ Generate all</button>
+        <button id="btnRefresh" class="ghost small">↻</button>
       </div>
-      <label>Role URL (optional — the posting on the company's own site)</label>
-      <input type="text" id="roleUrl" placeholder="https://careers.airbnb.com/positions/..." />
-      <p class="muted">The background is the verified auto-scroll capture of this role's page.</p>
-    </div>
+      <div class="gallery" id="gallery"><div class="empty">Loading roles…</div></div>
 
-    <div class="card">
-      <h2>3 · Picture-in-picture layout</h2>
-      <div class="stage" id="stage">
-        <div class="empty" id="stageEmpty">Background preview appears after first generate.<br/>Adjust your PiP below — it updates live.</div>
-        <div class="pip" id="pipBox"></div>
-      </div>
-
-      <label>Corner</label>
-      <div class="pillrow" id="corners">
-        <span class="pill" data-c="tl">Top-left</span>
-        <span class="pill" data-c="tr">Top-right</span>
-        <span class="pill" data-c="bl">Bottom-left</span>
-        <span class="pill on" data-c="br">Bottom-right</span>
-      </div>
-
-      <label>Shape</label>
-      <div class="pillrow" id="shapes">
-        <span class="pill on" data-s="circle">Circle</span>
-        <span class="pill" data-s="rounded">Rounded</span>
-        <span class="pill" data-s="rect">Rectangle</span>
-      </div>
-
-      <div class="grid2">
-        <div><label>Size (<span id="sizeV">26</span>%)</label><input type="range" id="size" min="12" max="55" value="26" /></div>
-        <div><label>Margin (<span id="marginV">3</span>%)</label><input type="range" id="margin" min="0" max="20" value="3" /></div>
-      </div>
-      <div class="grid2">
-        <div><label>Border (<span id="borderV">4</span>px)</label><input type="range" id="border" min="0" max="24" value="4" /></div>
-        <div><label>Border color</label><div class="row"><input type="color" id="borderColor" value="#19c37d" /><span class="muted" id="radiusWrap" style="display:none">Radius <input type="range" id="radius" min="0" max="50" value="18" style="width:90px" /></span></div></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>4 · Generate</h2>
-      <div class="row">
-        <button id="btnGen" class="primary" disabled>Generate PiP video</button>
-        <button id="btnForce" class="ghost small">Re-render</button>
-      </div>
-      <div id="status" class="status" style="margin-top:10px;display:none"></div>
-      <div class="out" id="out" style="margin-top:12px"></div>
+      <details>
+        <summary>＋ Capture a new role</summary>
+        <div class="grid2" style="margin-top:10px">
+          <div><label>Company</label><input type="text" id="capCompany" placeholder="Airbnb" /></div>
+          <div><label>Role title</label><input type="text" id="capRole" placeholder="Acquisition Manager" /></div>
+        </div>
+        <label>Role URL (optional)</label><input type="text" id="capUrl" placeholder="https://careers.airbnb.com/…" />
+        <div class="row" style="margin-top:10px">
+          <button class="primary small" id="btnCapture">Capture</button>
+          <button class="ghost small" id="btnFindRoles">Find this company's roles</button>
+          <span class="muted" id="capStatus"></span>
+        </div>
+        <div class="pillrow" id="roleChips" style="margin-top:10px"></div>
+      </details>
     </div>
   </div>
 </div>

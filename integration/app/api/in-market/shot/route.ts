@@ -28,6 +28,13 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response;
 
   const url = new URL(req.url);
+
+  // ?list=1 — every verified page-scroll GIF available to personalize (PiP Studio gallery).
+  if (url.searchParams.get("list")) {
+    const { listShots } = await import("../../../../lib/inmarket/roleShot");
+    return ok({ shots: await listShots() });
+  }
+
   const key = url.searchParams.get("key") || "";
   const fmt = (url.searchParams.get("fmt") || "gif").toLowerCase();
   if (fmt !== "png" && fmt !== "gif" && fmt !== "webp") return fail("bad_format", 400);
