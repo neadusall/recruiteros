@@ -302,6 +302,35 @@
     return (m[res.status] || res.status) + (res.reason ? " — " + res.reason : "");
   }
 
+  /* Bulk export: every generated role as a CSV row ready to merge into a sequence tool
+     (Instantly/ColdForge/Smartlead). Columns map cleanly to merge fields + an HTML snippet. */
+  $("btnExport").onclick = function () {
+    var rows = [];
+    Object.keys(state.results).forEach(function (roleKey) {
+      var r = state.results[roleKey]; if (!r || !r.videoKey) return;
+      rows.push({
+        company: r.company || "",
+        role: r.roleTitle || "",
+        watch_url: watchPage(r.videoKey, r.company, r.roleTitle),
+        email_gif_url: publicGif(r.videoKey),
+        mp4_url: origin() + "/api/in-market/watch?key=" + encodeURIComponent(r.videoKey) + "&fmt=mp4",
+        email_html: emailSnippet(r.videoKey, r.company, r.roleTitle),
+      });
+    });
+    if (!rows.length) { toast("Generate at least one role first"); return; }
+    var cols = ["company", "role", "watch_url", "email_gif_url", "mp4_url", "email_html"];
+    var csv = cols.join(",") + "\r\n" + rows.map(function (row) {
+      return cols.map(function (c) { return '"' + String(row[c]).replace(/"/g, '""') + '"'; }).join(",");
+    }).join("\r\n");
+    var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "pip-videos-" + rows.length + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+    toast("Exported " + rows.length + " roles to CSV");
+  };
+
   $("btnGenAll").onclick = function () {
     if (!ready()) { refreshBanner(); return; }
     var list = visibleRoles(); if (!list.length) return;
