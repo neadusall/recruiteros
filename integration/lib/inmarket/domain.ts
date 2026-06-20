@@ -309,35 +309,79 @@ const scheduleSave = debouncedSaver(CACHE_KEY, () => {
 }, 1500);
 
 /**
- * PRIMARY domain source: Clearbit's keyless company autocomplete (name → {name, domain}). It's free,
- * needs no API key, and is ONE clean JSON call — no homepage scraping, no egress dependency (the part
- * that collapsed the old resolver to ~1%). ~95% hit on real company names, and it knows the
- * non-obvious domains (getjobber.com, postscript.io, mailparser.io) that `anchor.com` guessing never
- * finds. A light brand-token sanity check guards against an ambiguous query returning a wrong company.
+ * KEYLESS company-autocomplete domain sources (name → [{name, domain}]). Free, no scraping, no egress
+ * — one clean JSON call. We run TWO independent providers so neither HubSpot (Clearbit) nor Brandfetch
+ * going away can sink domain resolution:
+ *   • PRIMARY  Clearbit  — ~95% and accurate; knows non-obvious domains (getjobber.com, postscript.io).
+ *   • BACKUP   Brandfetch — ~100% coverage but occasional wrong-company hits, so it's held to a
+ *     stricter DOMAIN-root match (a result whose NAME matches but whose domain is unrelated is rejected).
+ * Both are cached (30d) so we hit each at most once per company per month — gentle on their rate limits.
  */
-async function clearbitDomain(company: string, tokens: string[]): Promise<string | null> {
+async function suggest(url: string): Promise<Array<{ name?: string; domain?: string }>> {
   try {
-    const res = await fetch(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(company)}`, {
-      headers: { "User-Agent": UA, Accept: "application/json" },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
-    const list = (await res.json()) as Array<{ name?: string; domain?: string }>;
-    if (!Array.isArray(list) || !list.length) return null;
-    for (const cand of list.slice(0, 3)) {
-      const dom = (cand.domain || "").toLowerCase().trim();
-      if (!dom || !dom.includes(".") || !isCompanyHost(dom)) continue;
-      const root = domainRoot(dom) || dom.split(".")[0];
-      const nameHay = (cand.name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-      // accept when a distinctive company token appears in the domain root or the returned name
-      if (tokens.some((t) => t.length >= 3 && (root.includes(t) || nameHay.includes(t) || t.includes(root)))) {
-        return domainBase(dom);
-      }
-    }
-    return null;
-  } catch {
-    return null;
+    const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!res.ok) return [];
+    const j = await res.json();
+    return Array.isArray(j) ? j : [];
+  } catch { return []; }
+}
+const clearbitSuggest = (company: string) =>
+  suggest(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(company)}`);
+const brandfetchSuggest = (company: string) =>
+  suggest(`https://api.brandfetch.io/v2/search/${encodeURIComponent(company)}`);
+
+/** Pick the first brand-matched domain from an autocomplete list. `requireDomainMatch` (backup
+ *  provider) demands the DOMAIN ROOT share a company token, rejecting wrong-company hits whose only
+ *  match is the returned name (e.g. Brandfetch returning name "Vena Solutions" → exceleratesummit.com). */
+function pickDomain(list: Array<{ name?: string; domain?: string }>, tokens: string[], requireDomainMatch = false): string | null {
+  for (const cand of list.slice(0, 3)) {
+    const dom = (cand.domain || "").toLowerCase().trim();
+    if (!dom || !dom.includes(".") || !isCompanyHost(dom)) continue;
+    const root = domainRoot(dom) || dom.split(".")[0];
+    const nameHay = (cand.name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const domHit = tokens.some((t) => t.length >= 3 && (root.includes(t) || t.includes(root)));
+    const nameHit = tokens.some((t) => t.length >= 3 && nameHay.includes(t));
+    if (domHit || (!requireDomainMatch && nameHit)) return domainBase(dom);
   }
+  return null;
+}
+
+/** One autocomplete provider as a resolution: pick a brand-matched domain, then MX-check it. */
+async function acResolution(
+  company: string, tokens: string[],
+  suggester: (c: string) => Promise<Array<{ name?: string; domain?: string }>>,
+  strict: boolean, via: string, conf: number,
+): Promise<DomainResolution | null> {
+  const dom = pickDomain(await suggester(company), tokens, strict);
+  if (!dom) return null;
+  const mx = await hasMx(dom).catch(() => false);
+  return { domain: dom, confidence: conf, via, mx };
+}
+
+/** Homepage-verify candidates (lead hint / source URL / anchor.com guesses), on-brand + MX checked. */
+async function homepageResolution(company: string, tokens: string[], opts?: { sourceUrl?: string; hint?: string }): Promise<DomainResolution | null> {
+  const candidates = candidatesFor(company, opts);
+  if (!candidates.length) return null;
+  const via = (d: string): string =>
+    hostOf(opts?.hint) && domainBase(hostOf(opts!.hint!)) === d ? "hint"
+    : hostOf(opts?.sourceUrl) && domainBase(hostOf(opts!.sourceUrl!)) === d ? "source_url"
+    : "name_guess";
+  const results = await Promise.all(candidates.map((d) => verify(d, tokens, via(d)).catch(() => null)));
+  let best: DomainResolution | null = null;
+  for (const r of results) if (r && (!best || r.confidence > best.confidence)) best = r;
+  return best;
+}
+
+/** LAST RESORT: a name-guessed domain accepted only if it publishes MX (can receive mail). Pure DNS,
+ *  no homepage fetch. Low confidence; only fires when every higher source missed — good enough to build
+ *  a syntax email against (the whole point), flagged low so downstream treats it cautiously. */
+async function mxGuessResolution(company: string): Promise<DomainResolution | null> {
+  const bases = [...new Set([companyAnchor(company), orderedTokens(company)[0] || ""].filter((b) => b && b.length >= 3))];
+  const cands = [...new Set(bases.flatMap((b) => ["com", "io", "co"].map((tld) => `${b}.${tld}`)))].slice(0, 6);
+  for (const d of cands) {
+    if (await hasMx(d).catch(() => false)) return { domain: d, confidence: 0.4, via: "mx_guess", mx: true };
+  }
+  return null;
 }
 
 /**
@@ -362,28 +406,23 @@ export async function resolveCompanyDomain(
 
   const tokens = brandTokens(company);
 
+  // FAILSAFE CHAIN — independent free sources tried in order, first hit wins. No single provider is a
+  // point of failure: if Clearbit (HubSpot) ever changes, Brandfetch carries; if both miss, the
+  // homepage on-brand verify catches SMBs at anchor.com; the MX-only guess is the long-tail backstop.
+  // Each step is bounded, timed-out, and never throws — a dead source just advances to the next. Add
+  // more providers by dropping another step into this array.
   let best: DomainResolution | null = null;
-
-  // PRIMARY: Clearbit keyless autocomplete — free, ~95%, one clean call, no homepage scraping (the
-  // part that was failing on egress and pinning the resolver at ~1%). Trust its brand-matched domain
-  // and just MX-check it for deliverability marking.
   if (tokens.length) {
-    const cb = await clearbitDomain(company, tokens).catch(() => null);
-    if (cb) {
-      const mx = await hasMx(cb).catch(() => false);
-      best = { domain: cb, confidence: 0.9, via: "clearbit", mx };
+    const chain: Array<() => Promise<DomainResolution | null>> = [
+      () => acResolution(company, tokens, clearbitSuggest, false, "clearbit", 0.9),
+      () => acResolution(company, tokens, brandfetchSuggest, true, "brandfetch", 0.82),
+      () => homepageResolution(company, tokens, opts),
+      () => mxGuessResolution(company),
+    ];
+    for (const step of chain) {
+      best = await step().catch(() => null);
+      if (best) break;
     }
-  }
-
-  // FALLBACK: the on-brand homepage-verify candidate flow, only for the ~5% Clearbit misses.
-  const candidates = !best && tokens.length ? candidatesFor(company, opts) : [];
-  if (candidates.length) {
-    const via = (d: string): string =>
-      hostOf(opts?.hint) && domainBase(hostOf(opts!.hint!)) === d ? "hint"
-      : hostOf(opts?.sourceUrl) && domainBase(hostOf(opts!.sourceUrl!)) === d ? "source_url"
-      : "name_guess";
-    const results = await Promise.all(candidates.map((d) => verify(d, tokens, via(d)).catch(() => null)));
-    for (const r of results) if (r && (!best || r.confidence > best.confidence)) best = r;
   }
 
   // Write the verdict back (positive or negative) so we don't re-probe constantly. The save is
