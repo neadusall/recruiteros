@@ -591,7 +591,9 @@
 
   window.addEventListener("hashchange", render);
   Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) {
-    n.setAttribute("href", "#" + n.dataset.route);
+    // Hash-routed items get a "#route" href; external links (e.g. PiP Studio at /pip-studio)
+    // already carry a real href and are left untouched.
+    if (n.dataset.route) n.setAttribute("href", "#" + n.dataset.route);
   });
 
   /* ---------------- views ---------------- */
