@@ -69,6 +69,13 @@ const CURATE_CONCURRENCY = envNum("INMARKET_CURATE_CONCURRENCY", 10); // paralle
 const CURATE_MIN_SCORE = envNum("INMARKET_CURATE_MIN_SCORE", 35); // don't spend research on weak signals
 const VERIFY_BATCH = envNum("INMARKET_VERIFY_BATCH", 800);        // curated emails free-verified (MX/role/disposable) per tick
 const FINDER_BATCH = 40;               // pending people SMTP-verified per tick (opt-in; bounded — slow)
+// FAST INFLOW — brand-new hiring companies/postings flow in on their OWN fast tick (every few
+// minutes) so prospects appear as they're posted, not once an hour. It runs ONLY the cheap,
+// high-yield breadth vacuum (+ a couple of rotating sectors) — never the expensive board
+// expansion / size / directory work, which stays on the hourly cycle. This is what makes the
+// Hire Signals tab populate in near-real-time without hammering the public ATS endpoints.
+const INFLOW_CYCLE_MS = envNum("INMARKET_INFLOW_INTERVAL_SEC", 180) * 1000; // default every 3 min
+const INFLOW_FIRST_DELAY_MS = 12_000;   // just after boot, once persistence is up
 const FIRST_DELAY_MS = 8_000;           // let the server settle, then start pulling
 const CURATE_FIRST_DELAY_MS = 25_000;   // let the pool fill a little before the first curation tick
 // WATCHDOGS — a hard ceiling on how long a single run may take. Even with per-fetch timeouts,
@@ -78,10 +85,12 @@ const CURATE_FIRST_DELAY_MS = 25_000;   // let the pool fill a little before the
 // interval so an abandoned run is cleared before the next one fires.
 const CYCLE_WATCHDOG_MS = 30 * 60 * 1000;   // hourly cycle: abandon after 30 min
 const CURATE_WATCHDOG_MS = 7 * 60 * 1000;   // 8-min curation tick: abandon after 7 min
+const INFLOW_WATCHDOG_MS = 2 * 60 * 1000;   // 3-min inflow tick: abandon after 2 min
 
 let started = false;
 let running = false;                    // overlap guard: never let two cycles run at once
 let curating = false;                   // overlap guard for the curation tick
+let inflowing = false;                  // overlap guard for the fast inflow tick
 let cursor = 0;
 let seedCursor = 0;
 let sizeCursor = 0;
@@ -331,6 +340,43 @@ async function runCycleInner(): Promise<void> {
  * oldest — so the prospect list keeps growing and stays current without re-doing the same names.
  * Free + behind the review gate; nothing sends automatically.
  */
+/**
+ * FAST INFLOW tick — runs only the cheap, high-yield pulls that surface brand-new hiring
+ * companies, on a short interval, so the pool grows in near-real-time. Deliberately excludes
+ * the expensive board-expansion / size / directory / domain work (that stays on the hourly
+ * cycle), so running it every few minutes is safe for the public ATS endpoints.
+ */
+async function runInflowTickInner(): Promise<void> {
+  const now = new Date().toISOString();
+  // BREADTH VACUUM — the main inflow of net-new hiring companies + postings.
+  try {
+    const all = await collectLeads({ limit: VACUUM_CAP }, now, VACUUM_CAP);
+    await mergeIntoPool(all);
+  } catch { /* next tick retries */ }
+  // A couple of rotating sectors so non-tech breadth keeps arriving between heavy cycles.
+  for (let i = 0; i < 2; i++) {
+    const industry = INDUSTRIES[cursor % INDUSTRIES.length];
+    cursor++;
+    try {
+      const leads = await collectLeads({ industries: [industry], limit: COLLECT_CAP }, now, COLLECT_CAP);
+      await mergeIntoPool(leads);
+    } catch { /* skip this sector this tick */ }
+  }
+  // Refresh the live banner aggregates so the new count shows immediately.
+  try { await recomputePoolMetrics(); } catch { /* best-effort */ }
+}
+
+async function runInflowTick(): Promise<void> {
+  // Skip if a fast tick is already running, or the heavy hourly cycle is mid-run (it does its
+  // own vacuum) — never stack redundant pulls.
+  if (inflowing || running) return;
+  inflowing = true;
+  try {
+    await withTimeout(runInflowTickInner, INFLOW_WATCHDOG_MS, "inflow tick");
+  } catch { /* abandoned by the watchdog; the next tick retries */ }
+  finally { inflowing = false; }
+}
+
 async function runCurationTickInner(): Promise<void> {
   const now = new Date().toISOString();
   const { queryPool } = await import("./pool");
@@ -407,6 +453,11 @@ export function ensureAccumulator(): void {
   setTimeout(() => { void runCycle(); }, FIRST_DELAY_MS);
   const t = setInterval(() => { void runCycle(); }, CYCLE_MS);
   if (typeof t === "object" && t && "unref" in t) (t as { unref: () => void }).unref();
+  // Fast inflow tick (every few minutes) — new hiring companies arrive in near-real-time,
+  // not once an hour, so the Hire Signals tab populates as roles get posted.
+  setTimeout(() => { void runInflowTick(); }, INFLOW_FIRST_DELAY_MS);
+  const f = setInterval(() => { void runInflowTick(); }, INFLOW_CYCLE_MS);
+  if (typeof f === "object" && f && "unref" in f) (f as { unref: () => void }).unref();
   // Fast decision-maker curation tick (every few minutes) — keeps the prospect DB living.
   setTimeout(() => { void runCurationTick(); }, CURATE_FIRST_DELAY_MS);
   const c = setInterval(() => { void runCurationTick(); }, CURATE_CYCLE_MS);
