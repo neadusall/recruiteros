@@ -20,7 +20,15 @@ module.exports = {
   // background accumulator self-starts every deploy without waiting for a first request.
   // instrumentation.ts guards its node-only import behind NEXT_RUNTIME === "nodejs", so the
   // edge compile dead-code-eliminates it (no pg / node:crypto in the edge bundle).
-  experimental: { instrumentationHook: true },
+  //
+  // serverComponentsExternalPackages: keep heavy/native server-only packages OUT of the
+  // webpack bundle (required at runtime from node_modules instead). Playwright launches a real
+  // browser and sharp ships a native binary; bundling either breaks the build/route. Used by
+  // the role-screenshot pipeline (lib/inmarket/roleShot.ts → app/api/in-market/shot).
+  experimental: {
+    instrumentationHook: true,
+    serverComponentsExternalPackages: ["playwright", "playwright-core", "sharp", "pngjs", "gifenc"],
+  },
 
   // Serve clean URLs: /login renders public/login.html, address bar stays clean.
   async rewrites() {

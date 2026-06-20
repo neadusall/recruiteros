@@ -2789,8 +2789,11 @@
         var who = m.managerName
           ? '<b>' + esc(m.managerName) + "</b>"
           : '<span class="muted">resolve on push</span>';
+        var roleLabel = m.roleUrl
+          ? '<a class="im-mgr-rolelink" href="' + esc(m.roleUrl) + '" target="_blank" rel="noopener" title="Open this exact job posting" onclick="event.stopPropagation()">' + esc(m.role) + ' <span class="im-mgr-ext">↗</span></a>'
+          : esc(m.role);
         return '<label class="im-mgr"><input type="checkbox" class="im-pick" data-id="' + esc(l.id) + '" data-mk="' + esc(imMgrKey(m)) + '" ' + (imPicks[imPickKey(l.id, imMgrKey(m))] ? "checked" : "") + ">" +
-          '<span class="im-mgr-role">' + esc(m.role) +
+          '<span class="im-mgr-role">' + roleLabel +
             (m.postedAt && imRelTime(m.postedAt) ? ' <span class="im-mgr-posted" title="Posted on their board ' + esc(m.postedAt) + '">📅 ' + imRelTime(m.postedAt) + "</span>" : "") + "</span>" +
           '<span class="im-mgr-arrow">→</span>' +
           '<span class="im-mgr-title">' + esc(m.managerTitle) + "</span>" +

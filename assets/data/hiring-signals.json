@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-06-20T13:10:01.432Z",
+  "generatedAt": "2026-06-20T13:40:11.284Z",
   "source": "public ATS boards (Greenhouse, Lever, Ashby)",
   "companies": 144,
-  "totalOpenRoles": 12549,
+  "totalOpenRoles": 12548,
   "signals": [
     {
       "type": "hiring_velocity",
@@ -2449,7 +2449,7 @@
       "company": "Cloudflare",
       "industry": "Cybersecurity",
       "ats": "Greenhouse",
-      "rolesOpen": 198,
+      "rolesOpen": 197,
       "functions": [
         "sales",
         "marketing",
@@ -9915,7 +9915,7 @@
         "London, UK; Ontario, CAN; Remote-Friendly, United States; San Francisco, CA"
       ],
       "score": 96,
-      "eventAt": "2026-06-19T14:36:38-04:00",
+      "eventAt": "2026-06-20T09:36:29-04:00",
       "sampleRoles": [
         {
           "title": "Account Executive, AI Native ",
@@ -18450,7 +18450,7 @@
         "London, United Kingdom"
       ],
       "score": 96,
-      "eventAt": "2026-06-20T09:02:45-04:00",
+      "eventAt": "2026-06-20T09:32:43-04:00",
       "sampleRoles": [
         {
           "title": "Account Manager, SMB ",

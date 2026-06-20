@@ -243,7 +243,7 @@ async function writePoolSnapshot(signals, totalRoles) {
       score: s.score,
       scoreReasons: [`${s.rolesOpen} open roles`, s.ats].filter(Boolean),
       roles: roles.map((r) => r.title).slice(0, 30),
-      roleDetails: roles.map((r) => ({ title: r.title, postedAt: s.eventAt, location: r.location })),
+      roleDetails: roles.map((r) => ({ title: r.title, url: r.url, postedAt: s.eventAt, location: r.location })),
       boardSource: s.ats,
       boardExpandedAt: new Date(nowMs).toISOString(),
       signalAt: s.eventAt,
