@@ -383,10 +383,14 @@ async function searchFetch(url: string): Promise<{ status: number; body: string 
   }
 }
 
-/** True when the response is a rate-limit / bot challenge (so we back the engine off). */
+/** True when the response is a rate-limit / bot challenge (so we back the engine off AND the health
+ *  pill shows the truth). Search endpoints return real results ONLY as HTTP 200 — DuckDuckGo serves
+ *  its JS anomaly challenge as a 202 with no results, Bing a captcha page, Mojeek a 403. Treating any
+ *  non-200 (and any challenge-marker body) as a block is what stops the pill falsely reading
+ *  "healthy" while every search is actually being challenged. */
 function isThrottle(status: number, body: string | null): boolean {
-  if (status === 429 || status === 403 || status === 503) return true;
-  return !!body && /unusual traffic|captcha|are you a robot|automated queries|verify you are human|too many requests/i.test(body);
+  if (status !== 200) return true; // 202 challenge / 403 / 429 / 503 — never real results
+  return !!body && /unusual traffic|captcha|are you a robot|automated queries|verify you are human|too many requests|challenge-platform|enablejs|noscript.*enable|security of your connection/i.test(body);
 }
 
 function cleanTitle(s: string): string {
