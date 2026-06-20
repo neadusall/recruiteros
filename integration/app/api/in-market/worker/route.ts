@@ -15,7 +15,7 @@
  */
 
 import { claimResearchBatch, mergeCuratedRows, type CuratedProspect, type CurationStatus } from "../../../../lib/inmarket/curation";
-import { recordClaim, recordSubmit } from "../../../../lib/inmarket/fleet";
+import { recordClaim, recordSubmit, recordHealth } from "../../../../lib/inmarket/fleet";
 import { ok, fail, body } from "../../../../lib/api";
 
 export const dynamic = "force-dynamic";
@@ -67,8 +67,15 @@ function sanitizeRow(raw: unknown): CuratedProspect | null {
 
 export async function POST(req: Request) {
   if (!authed(req)) return fail("unauthorized", 401);
-  const b = await body<{ action?: string; limit?: number; rows?: unknown[]; worker?: string }>(req);
+  const b = await body<{ action?: string; limit?: number; rows?: unknown[]; worker?: string; health?: unknown }>(req);
   const workerId = (s(b?.worker, 60) || "").replace(/[^\w.\-]/g, "").slice(0, 60); // sanitize id for telemetry
+
+  // Every authenticated call may carry a health digest (workers piggyback it on claim/submit/heartbeat),
+  // so the fleet view always has each box's latest CC/search/loop state — no extra request needed.
+  if (b?.health && workerId) recordHealth(workerId, b.health);
+
+  // A standalone heartbeat lets an IDLE box (no work to claim) keep reporting health.
+  if (b?.action === "heartbeat") return ok({ ok: true });
 
   if (b?.action === "claim") {
     const limit = Math.min(Math.max(Number(b.limit) || 100, 1), 1000);

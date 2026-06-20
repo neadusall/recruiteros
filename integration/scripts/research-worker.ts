@@ -18,8 +18,11 @@
  */
 
 import { hostname } from "os";
+import { createServer } from "http";
 import { resolveDecisionMaker } from "../lib/inmarket/decisionMaker";
 import { buildCuratedRow, type CuratedProspect } from "../lib/inmarket/curation";
+import { commonCrawlHealth } from "../lib/inmarket/commonCrawl";
+import { searchHealth } from "../lib/inmarket/searchHealth";
 
 interface Job { lead: { company: string; domain?: string; industry?: string; signalType?: string; reason?: string; score?: number; employeeCount?: number; roleDetails?: Array<{ title: string }>; roles?: string[]; sourceUrl?: string }; role: string }
 
@@ -30,6 +33,8 @@ const BATCH = Math.min(Math.max(Number(process.env.WORKER_BATCH) || 120, 1), 100
 const CONCURRENCY = Math.min(Math.max(Number(process.env.WORKER_CONCURRENCY) || 8, 1), 24);
 const IDLE_SLEEP_MS = Math.max(Number(process.env.WORKER_IDLE_SLEEP_MS) || 30_000, 5_000);
 const HTTP_TIMEOUT_MS = 30_000;
+const HEALTH_PORT = Math.min(65535, Math.max(0, Number(process.env.WORKER_HEALTH_PORT) || 0)); // 0 = off (opt-in)
+const HEALTH_TOKEN = process.env.WORKER_HEALTH_TOKEN || ""; // optional bearer to protect the endpoint
 
 if (!MAIN || !TOKEN) {
   console.error("[worker] set WORKER_MAIN_URL and WORKER_TOKEN. Exiting.");
@@ -38,6 +43,99 @@ if (!MAIN || !TOKEN) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ts = () => new Date().toISOString();
+
+/* ------------------------------------------------------------------ */
+/* This box's live health (loop stats + Common Crawl + search sources)  */
+/* ------------------------------------------------------------------ */
+
+const startedAt = Date.now();
+const stats = {
+  cycles: 0, claimedTotal: 0, researchedTotal: 0, namedTotal: 0, submittedTotal: 0,
+  lastCycleAt: 0, lastClaimed: 0, lastResearched: 0, lastNamed: 0,
+  consecutiveFails: 0, lastError: "", lastErrorAt: 0,
+};
+
+/** Full health snapshot for the /health endpoint. Reads the in-memory source-health surfaces. */
+function buildHealth() {
+  const now = Date.now();
+  const uptimeSec = Math.round((now - startedAt) / 1000);
+  const cc = commonCrawlHealth();
+  const sh = searchHealth();
+  // Reasons this box is anything less than fully healthy — the same signals the monitor thresholds watch.
+  const reasons: string[] = [];
+  if (cc.resting) reasons.push(`common-crawl resting ${cc.restingForSec}s`);
+  if (cc.index.breakerTrips >= 2) reasons.push(`common-crawl breaker trips=${cc.index.breakerTrips}`);
+  if (cc.index.spacingMs >= 16_000) reasons.push(`common-crawl index spacing maxed (${cc.index.spacingMs}ms)`);
+  if (cc.index.cooldownForSec > 0) reasons.push(`common-crawl cooldown ${cc.index.cooldownForSec}s`);
+  if (sh.status === "throttled") reasons.push("search engines throttled");
+  if (stats.consecutiveFails >= 3) reasons.push(`main-server calls failing (${stats.consecutiveFails})`);
+  // Unhealthy = the box can't sustain its job right now; degraded = strain but still producing.
+  const unhealthy = cc.resting || stats.consecutiveFails >= 5 || (cc.index.breakerTrips >= 2 && sh.status === "throttled");
+  const status: "healthy" | "degraded" | "unhealthy" = unhealthy ? "unhealthy" : reasons.length ? "degraded" : "healthy";
+  const namedPerHour = uptimeSec > 30 ? Math.round(stats.namedTotal / (uptimeSec / 3600)) : 0;
+  return {
+    worker: WORKER_ID,
+    status,
+    reasons,
+    uptimeSec,
+    main: MAIN,
+    loop: {
+      cycles: stats.cycles,
+      claimedTotal: stats.claimedTotal,
+      researchedTotal: stats.researchedTotal,
+      namedTotal: stats.namedTotal,
+      submittedTotal: stats.submittedTotal,
+      namedPerHour,
+      lastCycleSecAgo: stats.lastCycleAt ? Math.round((now - stats.lastCycleAt) / 1000) : null,
+      lastClaimed: stats.lastClaimed,
+      lastResearched: stats.lastResearched,
+      lastNamed: stats.lastNamed,
+      consecutiveFails: stats.consecutiveFails,
+      lastError: stats.lastError || undefined,
+      lastErrorSecAgo: stats.lastErrorAt ? Math.round((now - stats.lastErrorAt) / 1000) : null,
+    },
+    commonCrawl: cc,
+    search: { status: sh.status, engines: sh.engines },
+  };
+}
+
+/** Compact digest the box piggybacks to the main on each call, so the fleet view aggregates all boxes. */
+function healthDigest() {
+  const h = buildHealth();
+  return {
+    status: h.status,
+    reasons: h.reasons,
+    cc: {
+      resting: h.commonCrawl.resting,
+      breakerTrips: h.commonCrawl.index.breakerTrips,
+      spacingMs: h.commonCrawl.index.spacingMs,
+      cooldownSec: h.commonCrawl.index.cooldownForSec,
+    },
+    search: h.search.status,
+    namedPerHour: h.loop.namedPerHour,
+  };
+}
+
+/** Opt-in local HTTP health endpoint. Returns 503 when unhealthy so a monitor can alert on the code alone. */
+function startHealthServer(): void {
+  if (!HEALTH_PORT) return;
+  try {
+    const srv = createServer((req, res) => {
+      if (HEALTH_TOKEN && (req.headers.authorization || "") !== `Bearer ${HEALTH_TOKEN}`) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end('{"error":"unauthorized"}');
+        return;
+      }
+      const h = buildHealth();
+      res.writeHead(h.status === "unhealthy" ? 503 : 200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(h, null, 2));
+    });
+    srv.on("error", (e) => console.error(`[worker] health server: ${(e as Error).message}`)); // never crash the loop
+    srv.listen(HEALTH_PORT, () => console.log(`[worker] ${ts()} health endpoint on :${HEALTH_PORT}${HEALTH_TOKEN ? " (token-protected)" : ""}`));
+  } catch (e) {
+    console.error(`[worker] health server failed to start: ${(e as Error).message}`);
+  }
+}
 
 async function callMain(action: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
   const res = await fetch(`${MAIN}/api/in-market/worker`, {
@@ -72,26 +170,36 @@ async function research(jobs: Job[]): Promise<CuratedProspect[]> {
 }
 
 async function loop(): Promise<void> {
+  startHealthServer();
   console.log(`[worker] ${ts()} started "${WORKER_ID}" → ${MAIN} (batch ${BATCH}, concurrency ${CONCURRENCY})`);
-  let fails = 0;
   for (;;) {
     try {
-      const claim = await callMain("claim", { limit: BATCH });
+      // claim carries this box's health digest, so an idle box (no jobs) still heartbeats the fleet view.
+      const claim = await callMain("claim", { limit: BATCH, health: healthDigest() });
       const jobs = (Array.isArray(claim.jobs) ? claim.jobs : []) as Job[];
       if (!jobs.length) { await sleep(IDLE_SLEEP_MS); continue; }
 
       const rows = await research(jobs);
+      const named = rows.filter((r) => r.managerName).length;
       let added: unknown = "?";
       if (rows.length) {
-        const sub = await callMain("submit", { rows });
+        const sub = await callMain("submit", { rows, health: healthDigest() });
         added = sub.newlyAdded ?? "?";
       }
-      const named = rows.filter((r) => r.managerName).length;
+      // Update live stats for the health surface.
+      stats.cycles++;
+      stats.lastCycleAt = Date.now();
+      stats.lastClaimed = jobs.length; stats.claimedTotal += jobs.length;
+      stats.lastResearched = rows.length; stats.researchedTotal += rows.length;
+      stats.lastNamed = named; stats.namedTotal += named;
+      if (typeof added === "number") stats.submittedTotal += added;
+      stats.consecutiveFails = 0;
       console.log(`[worker] ${ts()} claimed ${jobs.length} → researched ${rows.length} (named ${named}) → submitted (new ${added})`);
-      fails = 0;
     } catch (e) {
-      fails++;
-      const backoff = Math.min(60_000, 2_000 * 2 ** Math.min(fails, 5));
+      stats.consecutiveFails++;
+      stats.lastError = (e as Error).message;
+      stats.lastErrorAt = Date.now();
+      const backoff = Math.min(60_000, 2_000 * 2 ** Math.min(stats.consecutiveFails, 5));
       console.error(`[worker] ${ts()} error: ${(e as Error).message} — backoff ${Math.round(backoff / 1000)}s`);
       await sleep(backoff);
     }

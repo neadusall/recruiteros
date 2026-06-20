@@ -311,23 +311,31 @@
       company: s.company, roleTitle: s.roleTitle, videoKey: vk,
       watchUrl: watchPage(vk, s.company, s.roleTitle), gifUrl: publicGif(vk),
     }) }).then(function (d) {
-      var html = d.bodyHtml || esc(d.body).replace(/\n/g, "<br>");
       var badge = d.source === "ai" ? '<span class="srcbadge ai">✨ Claude</span>' : '<span class="srcbadge">template</span>';
+      var e1 = d.firstEmail || { subject: d.subject, body: d.body, bodyFilled: d.body };
+      var e1html = esc(e1.bodyFilled || e1.body).replace(/\n/g, "<br>");
+      var e2html = d.bodyHtml || esc(d.body).replace(/\n/g, "<br>"); // email 2 carries the video
       showModal(
-        '<div class="mh"><b>Email opener</b> ' + badge + '<button class="mx" data-close>✕</button></div>' +
-        '<label class="mlbl">Subject</label><div class="msub">' + esc(d.subject) + '</div>' +
-        '<label class="mlbl">Body (preview)</label><div class="mbody">' + html + '</div>' +
-        '<div class="mfoot">' +
-          '<button class="primary small" data-cpy-html>Copy email (with video)</button>' +
-          '<button class="ghost small" data-cpy-text>Copy text only</button>' +
-          '<span class="muted" style="flex:1"></span>' +
-          '<button class="ghost small" data-close>Close</button>' +
-        '</div>'
+        '<div class="mh"><b>Email sequence</b> ' + badge + '<span class="muted" style="margin-left:8px;font-size:12px">text intro → video follow-up</span><button class="mx" data-close>✕</button></div>' +
+        '<div class="seqstep"><div class="mlbl">Email 1 · text only <span class="muted">(first touch — no video)</span></div>' +
+          '<div class="msub">' + esc(e1.subject) + '</div>' +
+          '<div class="mbody">' + e1html + '</div>' +
+          '<div class="mfoot"><button class="ghost small" data-cpy-e1>Copy email 1 (text)</button></div></div>' +
+        '<div class="seqstep"><div class="mlbl">Email 2 · video follow-up <span class="muted">(sent a few days later)</span></div>' +
+          '<div class="msub">' + esc(d.subject) + '</div>' +
+          '<div class="mbody">' + e2html + '</div>' +
+          '<div class="mfoot">' +
+            '<button class="primary small" data-cpy-html>Copy email 2 (with video)</button>' +
+            '<button class="ghost small" data-cpy-text>Copy text only</button>' +
+            '<span class="muted" style="flex:1"></span>' +
+            '<button class="ghost small" data-close>Close</button>' +
+          '</div></div>'
       );
       var box = $("modalBody");
       box.querySelectorAll("[data-close]").forEach(function (b) { b.onclick = hideModal; });
-      box.querySelector("[data-cpy-html]").onclick = function () { copyRich(d.bodyHtml || esc(d.body).replace(/\n/g, "<br>")).then(function () { toast("Opener copied (with video) — paste into your email"); }); };
-      box.querySelector("[data-cpy-text]").onclick = function () { copyText(d.body).then(function () { toast("Opener text copied (keeps {{videoembed}} merge field)"); }); };
+      box.querySelector("[data-cpy-e1]").onclick = function () { copyText(e1.bodyFilled || e1.body).then(function () { toast("Email 1 (text) copied — send this first"); }); };
+      box.querySelector("[data-cpy-html]").onclick = function () { copyRich(e2html).then(function () { toast("Email 2 copied (with video) — send as the follow-up"); }); };
+      box.querySelector("[data-cpy-text]").onclick = function () { copyText(d.body).then(function () { toast("Email 2 text copied (keeps {{videoembed}} merge field)"); }); };
     }).catch(function (e) { showModal('<div class="mh"><b>Opener failed</b><button class="mx" data-close>✕</button></div><p class="muted">' + esc(e.message) + "</p>"); $("modalBody").querySelector("[data-close]").onclick = hideModal; });
   }
 

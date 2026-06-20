@@ -36,23 +36,37 @@ export async function POST(req: Request) {
   const { draftVideoOpener, templateOpener } = await import("../../../../lib/inmarket/videoOpener");
   const draft = (await draftVideoOpener(input)) || templateOpener(input);
 
-  // Optional: a fully-filled HTML version for immediate copy-paste (one-off sends).
+  // The sequence: email 1 is TEXT ONLY (cold intro); email 2 is the VIDEO follow-up.
+  const first = b?.firstName ? String(b.firstName) : "there";
+  const fillText = (s: string) =>
+    s.replace(/\{\{\s*([a-zA-Z]+)\s*\}\}/g, (_m, k) =>
+      ({ firstname: first, company, role: roleTitle } as Record<string, string>)[String(k).toLowerCase()] ?? "");
+  const email1 = { subject: draft.first.subject, body: draft.first.body, bodyFilled: fillText(draft.first.body) };
+
+  // Email 2 (video follow-up): a fully-filled HTML version for immediate copy-paste (one-off sends).
   let bodyHtml: string | undefined;
   const videoKey = b?.videoKey ? String(b.videoKey) : "";
   const watchUrl = b?.watchUrl ? String(b.watchUrl) : "";
   const gifUrl = b?.gifUrl ? String(b.gifUrl) : "";
   if (videoKey && watchUrl && gifUrl) {
-    const first = b?.firstName ? String(b.firstName) : "there";
     const embed =
       `<a href="${watchUrl}"><img src="${gifUrl}" alt="A quick note about ${esc(company)}" width="600" ` +
       `style="max-width:100%;border-radius:10px;border:1px solid #e5e7eb;display:block" /></a>`;
     const vals: Record<string, string> = {
       firstname: first, company, role: roleTitle, watchlink: watchUrl, videoembed: embed, videogif: gifUrl,
     };
-    bodyHtml = draft.body
+    bodyHtml = draft.second.body
       .replace(/\{\{\s*([a-zA-Z]+)\s*\}\}/g, (_m, k) => vals[String(k).toLowerCase()] ?? "")
       .replace(/\n/g, "<br>");
   }
 
-  return ok({ subject: draft.subject, body: draft.body, bodyHtml, source: draft.source });
+  // Back-compat: top-level subject/body/bodyHtml are the VIDEO (second) email — what the Studio
+  // already renders + embeds. `firstEmail` is the new text-only first touch in the sequence.
+  return ok({
+    source: draft.source,
+    firstEmail: email1,
+    subject: draft.second.subject,
+    body: draft.second.body,
+    bodyHtml,
+  });
 }
