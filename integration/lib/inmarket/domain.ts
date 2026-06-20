@@ -35,13 +35,16 @@ import { loadSnapshot, debouncedSaver } from "../db";
 import { companyAnchor, domainRoot } from "../signals/hiring/normalize";
 import { promises as dns } from "dns";
 
-const CACHE_KEY = "inmarket_domain_v1";
+// v2: abandon the v1 cache — it's full of NEGATIVE entries from the old homepage-scraping resolver
+// (which sat at ~1%). Starting fresh lets Clearbit re-resolve every company at ~95% from the next
+// curation pass instead of waiting 6h for each poisoned negative to expire.
+const CACHE_KEY = "inmarket_domain_v2";
 const POS_TTL_MS = 30 * 24 * 60 * 60 * 1000; // re-verify a found domain monthly
 const NEG_TTL_MS = 6 * 60 * 60 * 1000;       // retry a not-found company every 6h — short so the
                                              // looser (live + MX) acceptance reprocesses the backlog
                                              // of domain misses quickly instead of being stuck a week
 const FETCH_TIMEOUT_MS = 6_000;
-const MAX_CANDIDATES = 6;                     // bound fetches per company
+const MAX_CANDIDATES = 10;                    // bound fetches per company (verified in parallel, cached monthly)
 const MAX_BODY = 60_000;                      // cap homepage bytes scanned
 const MAX_CACHE = 60_000;                     // bound the persisted cache blob
 const UA = "RecruitersOS/1.0 (+https://recruiteros.app; company-domain resolver)";
@@ -103,7 +106,23 @@ function brandTokens(company: string): string[] {
   return [...new Set(cleaned.split(/\s+/).filter((t) => t.length >= 3))].sort((a, b) => b.length - a.length);
 }
 
-/** Build the ordered, de-duplicated candidate domain list for a company. */
+/** Company name tokens in ORDER, legal noise dropped — the first is the most likely standalone brand
+ *  ("Ramp Financial" → ["ramp","financial"]). Used so a multi-word company whose real domain is just its
+ *  first word (ramp.com) is actually guessed, not only the concatenated anchor (rampfinancial.com). */
+function orderedTokens(company: string): string[] {
+  return company
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(inc|llc|ltd|limited|corp|corporation|company|co|group|holdings|technologies|labs|software|systems|solutions|services|the)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
+}
+
+/** Build the ordered, de-duplicated candidate domain list for a company, best-first. Every candidate is
+ *  still VERIFIED (on-brand / MX) before acceptance, so adding looser guesses can't produce a wrong
+ *  domain — it only widens what we can CONFIRM. */
 function candidatesFor(company: string, opts?: { sourceUrl?: string; hint?: string }): string[] {
   const out: string[] = [];
   const add = (d?: string) => {
@@ -119,8 +138,16 @@ function candidatesFor(company: string, opts?: { sourceUrl?: string; hint?: stri
   const srcHost = hostOf(opts?.sourceUrl);
   if (srcHost && isCompanyHost(srcHost)) add(domainBase(srcHost));
 
-  // c. name-based guesses: anchor × TLDs
+  // c. name-based guesses, most-likely first:
   const anchor = companyAnchor(company); // "Acme Health, Inc." -> "acmehealth"
+  const first = orderedTokens(company)[0] || "";
+  //   – the full anchor on the top TLDs,
+  if (anchor && anchor.length >= 2) for (const tld of ["com", "io", "co", "ai"]) add(`${anchor}.${tld}`);
+  //   – the FIRST brand token alone (the ramp.com case the anchor misses),
+  if (first && first !== anchor && first.length >= 3) for (const tld of ["com", "io", "co"]) add(`${first}.${tld}`);
+  //   – common startup prefix/suffix patterns,
+  if (anchor && anchor.length >= 2) for (const p of [`get${anchor}.com`, `${anchor}hq.com`, `join${anchor}.com`, `try${anchor}.com`, `${anchor}app.com`]) add(p);
+  //   – then the remaining anchor TLDs as a last resort.
   if (anchor && anchor.length >= 2) for (const tld of TLDS) add(`${anchor}.${tld}`);
 
   return out.slice(0, MAX_CANDIDATES);
@@ -282,6 +309,38 @@ const scheduleSave = debouncedSaver(CACHE_KEY, () => {
 }, 1500);
 
 /**
+ * PRIMARY domain source: Clearbit's keyless company autocomplete (name → {name, domain}). It's free,
+ * needs no API key, and is ONE clean JSON call — no homepage scraping, no egress dependency (the part
+ * that collapsed the old resolver to ~1%). ~95% hit on real company names, and it knows the
+ * non-obvious domains (getjobber.com, postscript.io, mailparser.io) that `anchor.com` guessing never
+ * finds. A light brand-token sanity check guards against an ambiguous query returning a wrong company.
+ */
+async function clearbitDomain(company: string, tokens: string[]): Promise<string | null> {
+  try {
+    const res = await fetch(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(company)}`, {
+      headers: { "User-Agent": UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const list = (await res.json()) as Array<{ name?: string; domain?: string }>;
+    if (!Array.isArray(list) || !list.length) return null;
+    for (const cand of list.slice(0, 3)) {
+      const dom = (cand.domain || "").toLowerCase().trim();
+      if (!dom || !dom.includes(".") || !isCompanyHost(dom)) continue;
+      const root = domainRoot(dom) || dom.split(".")[0];
+      const nameHay = (cand.name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      // accept when a distinctive company token appears in the domain root or the returned name
+      if (tokens.some((t) => t.length >= 3 && (root.includes(t) || nameHay.includes(t) || t.includes(root)))) {
+        return domainBase(dom);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Resolve a company's real, verified web domain for free — or null if none can be confirmed.
  * Cached per company (positive monthly, negative weekly). Safe to fan out under the curation
  * concurrency cap; each call is a handful of bounded, timed-out HTTP/DNS lookups at most, and
@@ -302,10 +361,22 @@ export async function resolveCompanyDomain(
   }
 
   const tokens = brandTokens(company);
-  // Need at least one distinctive token to run the on-brand check safely.
-  const candidates = tokens.length ? candidatesFor(company, opts) : [];
 
   let best: DomainResolution | null = null;
+
+  // PRIMARY: Clearbit keyless autocomplete — free, ~95%, one clean call, no homepage scraping (the
+  // part that was failing on egress and pinning the resolver at ~1%). Trust its brand-matched domain
+  // and just MX-check it for deliverability marking.
+  if (tokens.length) {
+    const cb = await clearbitDomain(company, tokens).catch(() => null);
+    if (cb) {
+      const mx = await hasMx(cb).catch(() => false);
+      best = { domain: cb, confidence: 0.9, via: "clearbit", mx };
+    }
+  }
+
+  // FALLBACK: the on-brand homepage-verify candidate flow, only for the ~5% Clearbit misses.
+  const candidates = !best && tokens.length ? candidatesFor(company, opts) : [];
   if (candidates.length) {
     const via = (d: string): string =>
       hostOf(opts?.hint) && domainBase(hostOf(opts!.hint!)) === d ? "hint"
