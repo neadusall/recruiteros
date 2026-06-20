@@ -78,27 +78,32 @@ function breakerOpen(): boolean { return Date.now() < breakerUntil; }
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 let idxInterval = IDX_MIN_INTERVAL_MS; // adaptive spacing: grows on throttle, relaxes on clean success
 let idxCooldownUntil = 0;              // global pause (honors Retry-After) — nothing hits the index until then
-let lastIdxAt = 0;                     // wall time of the last index request (for spacing)
-let idxActive = 0;                     // in-flight index requests (capped at IDX_CONCURRENCY)
-let jitterSeed = 0;                    // tiny deterministic spread so retries don't lock-step
-const idxWaiters: Array<() => void> = [];
+let nextSlot = 0;                      // earliest epoch ms the next request may START (reserved atomically)
+let jitterSeed = 0;                    // tiny deterministic spread so requests don't lock-step
+let inFlight = 0;                      // live in-flight index requests (observability)
 
-/** Acquire the right to make ONE index request: wait for a slot, then respect spacing + any cooldown. */
-async function idxAcquire(): Promise<void> {
-  if (idxActive >= IDX_CONCURRENCY) await new Promise<void>((res) => idxWaiters.push(res));
-  idxActive++;
-  for (;;) {
-    const nowMs = Date.now();
-    const jitter = (jitterSeed = (jitterSeed + 137) % 400);            // 0–399ms, no Math.random
-    const wait = Math.max(0, lastIdxAt + idxInterval + jitter - nowMs, idxCooldownUntil - nowMs);
-    if (wait <= 0) break;
-    await sleep(wait);
-  }
-  lastIdxAt = Date.now();
+// Counting semaphore with DIRECT hand-off: release passes the permit straight to the next waiter and
+// never increments while one is queued, so the in-flight cap can't be over-subscribed (the bug the old
+// `idxActive++`-after-await had). Default IDX_CONCURRENCY = 1 → strictly one index request at a time.
+let permits = IDX_CONCURRENCY;
+const permitQueue: Array<() => void> = [];
+function acquirePermit(): Promise<void> {
+  if (permits > 0) { permits--; return Promise.resolve(); }
+  return new Promise<void>((res) => permitQueue.push(res));
 }
-function idxRelease(): void {
-  idxActive = Math.max(0, idxActive - 1);
-  idxWaiters.shift()?.();
+function releasePermit(): void {
+  const next = permitQueue.shift();
+  if (next) next(); else permits++;
+}
+
+/** Reserve the next paced start time. SYNCHRONOUS — no await, so it's atomic under JS's single thread:
+ *  concurrent callers get sequential, non-overlapping slots ≥ idxInterval apart. Honors the adaptive
+ *  interval AND the global cooldown, so spacing can never be raced past. */
+function claimSlot(): number {
+  const start = Math.max(Date.now(), nextSlot, idxCooldownUntil);
+  jitterSeed = (jitterSeed + 137) % 400;             // 0–399ms spread, no Math.random
+  nextSlot = start + idxInterval + jitterSeed;
+  return start;
 }
 /** Back off after a 503/429: widen spacing, set a global cooldown (Retry-After if given), feed the breaker. */
 function onThrottle(retryAfter: string | null): void {
@@ -129,7 +134,7 @@ export function commonCrawlHealth(): {
     index: {
       spacingMs: idxInterval,                                                  // current adaptive spacing
       concurrency: IDX_CONCURRENCY,                                            // hard in-flight cap
-      inFlight: idxActive,
+      inFlight,
       cooldownForSec: idxCooldownUntil > nowMs ? Math.round((idxCooldownUntil - nowMs) / 1000) : 0,
       breakerTrips,                                                            // escalation level (0 = healthy)
     },
@@ -144,24 +149,37 @@ export function commonCrawlHealth(): {
  *  Records throttle/health centrally so callers just read the body — they no longer call note(). */
 async function idxFetch(url: string): Promise<Response | null> {
   if (breakerOpen()) return null;               // resting — don't pile on a hurting IP
-  await idxAcquire();
+  await acquirePermit();                         // at most IDX_CONCURRENCY in flight (default 1)
   try {
-    const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(IDX_TIMEOUT_MS) });
-    if (res.status === 503 || res.status === 429) { onThrottle(res.headers.get("retry-after")); return res; }
-    onIdxResult(true);                           // any HTTP reply (200/404/…) means the server is up
-    return res;
-  } catch {
-    onIdxResult(false);                          // network error / timeout — counts against the breaker
-    return null;
+    const wait = claimSlot() - Date.now();       // race-free paced start (≥ idxInterval since the last)
+    if (wait > 0) await sleep(wait);
+    inFlight++;
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(IDX_TIMEOUT_MS) });
+      if (res.status === 503 || res.status === 429) { onThrottle(res.headers.get("retry-after")); return res; }
+      onIdxResult(true);                         // any HTTP reply (200/404/…) means the server is up
+      return res;
+    } catch {
+      onIdxResult(false);                        // network error / timeout — counts against the breaker
+      return null;
+    } finally {
+      inFlight--;
+    }
   } finally {
-    idxRelease();
+    releasePermit();
   }
 }
 
 async function latestCollections(): Promise<string[]> {
   if (collections.ids.length && Date.now() - collections.at < 24 * 60 * 60 * 1000) return collections.ids;
   const res = await idxFetch(`${IDX}/collinfo.json`);
-  if (!res || !res.ok) return collections.ids; // keep stale on failure (idxFetch already noted health)
+  if (!res || !res.ok) {
+    // Can't even list crawls → nothing downstream can work. If we have no cached collection to fall back
+    // on, rest the whole source briefly so a cold/throttled index doesn't bleed a ~10s timeout PER company
+    // until the breaker trips after 8 strikes. One probe per minute when cold (vs. eight) — snappier + politer.
+    if (!collections.ids.length) breakerUntil = Math.max(breakerUntil, Date.now() + 60_000);
+    return collections.ids; // keep stale on failure (idxFetch already noted health)
+  }
   try {
     const j = (await res.json()) as Array<{ id?: string }>;
     const ids = j.map((c) => c.id).filter((x): x is string => !!x).slice(0, 2); // two most-recent crawls

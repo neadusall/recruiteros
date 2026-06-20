@@ -30,7 +30,9 @@ import {
   shotsDir,
   readShotAsset,
   shutdownBrowser,
+  shotShareUrls,
   type ShotResult,
+  type ShotShareUrls,
 } from "../lib/inmarket/roleShot.ts";
 
 /* ---------- args ---------- */
@@ -73,6 +75,8 @@ interface ManifestEntry {
   files?: ShotResult["files"];
   reason?: string;
   at?: string;
+  /** Production-ready share URLs (watch page / email teaser / video / poster). */
+  urls?: ShotShareUrls;
 }
 
 async function loadManifest(): Promise<Record<string, ManifestEntry>> {
@@ -106,18 +110,26 @@ async function main() {
     const key = shotKey(j.company, j.roleTitle);
     const tag = `[${i + 1}/${jobs.length}] ${j.company} — ${j.roleTitle}`;
 
-    // Skip when assets already exist on disk (unless --force).
+    // Skip when assets already exist on disk (unless --force). Still backfill share URLs +
+    // the gif flag so the manifest stays complete and the watch link is always available.
     if (!force && (await readShotAsset(key, "png"))) {
       counts.skipped++;
-      console.log(`  ⏭  ${tag} (already captured)`);
+      const hasGif = !!(await readShotAsset(key, "gif"));
+      manifest[key] = {
+        ...(manifest[key] || { company: j.company, roleTitle: j.roleTitle, status: "company_site" }),
+        company: j.company, roleTitle: j.roleTitle, status: "company_site",
+        files: { ...(manifest[key]?.files || {}), png: true, gif: hasGif, mp4: !!(await readShotAsset(key, "mp4")), watch: !!(await readShotAsset(key, "html")) },
+        urls: shotShareUrls(key),
+      };
+      console.log(`  ⏭  ${tag} — watch: ${shotShareUrls(key).watch}`);
       continue;
     }
 
     process.stdout.write(`  …  ${tag} `);
     const r = await captureRoleShot({ company: j.company, roleTitle: j.roleTitle, roleUrl: j.url, domain: j.domain }, { force });
-    manifest[key] = { company: j.company, roleTitle: j.roleTitle, pageUrl: r.pageUrl, status: r.status, files: r.files, reason: r.reason, at: r.at };
+    manifest[key] = { company: j.company, roleTitle: j.roleTitle, pageUrl: r.pageUrl, status: r.status, files: r.files, reason: r.reason, at: r.at, urls: r.status === "company_site" ? shotShareUrls(key) : undefined };
 
-    if (r.status === "company_site") { counts.captured++; console.log(`✅ ${r.pageUrl}`); }
+    if (r.status === "company_site") { counts.captured++; console.log(`✅ watch: ${shotShareUrls(key).watch}`); }
     else if (r.status === "staffing_blocked") { counts.staffing++; console.log(`🚫 staffing/recruiting firm — skipped`); }
     else if (r.status === "no_company_page") { counts.no_page++; console.log(`∅ no verified company page (${r.reason || ""})`); }
     else { counts.error++; console.log(`⚠️  ${r.reason || "error"}`); }
@@ -126,6 +138,8 @@ async function main() {
     await writeFile(join(shotsDir(), "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
   }
 
+  // Always persist the manifest at the end (covers skip-only runs that backfilled URLs).
+  await writeFile(join(shotsDir(), "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
   await writeGallery(manifest);
   console.log(
     `\n✓ Done. captured ${counts.captured}, skipped ${counts.skipped}, no-page ${counts.no_page}, staffing ${counts.staffing}, errors ${counts.error}` +
@@ -140,15 +154,21 @@ async function writeGallery(manifest: Record<string, ManifestEntry>) {
   const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
   const cards = Object.entries(manifest)
     .filter(([, m]) => m.status === "company_site" && m.files?.gif)
-    .map(([key, m]) => `
+    .map(([key, m]) => {
+      // Loom preview: the email TEASER gif, clickable → opens the full video (mp4 locally, watch page in prod).
+      const target = m.files?.mp4 ? `./${esc(key)}.mp4` : (m.files?.watch ? `./${esc(key)}.html` : `./${esc(key)}.png`);
+      return `
     <figure class="card">
       <div class="chrome">
         <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
         <span class="addr">${esc(m.pageUrl || "")}</span>
       </div>
-      <img loading="lazy" src="./${esc(key)}.gif" alt="${esc(m.company)} — ${esc(m.roleTitle)}" />
-      <figcaption><b>${esc(m.company)}</b> — ${esc(m.roleTitle)} <a href="./${esc(key)}.png" target="_blank">still</a></figcaption>
-    </figure>`).join("\n");
+      <a class="teaser" href="${target}" target="_blank" title="Play full video"><img loading="lazy" src="./${esc(key)}.gif" alt="${esc(m.company)} — ${esc(m.roleTitle)}" /></a>
+      <figcaption><b>${esc(m.company)}</b> — ${esc(m.roleTitle)}
+        ${m.files?.mp4 ? `<a href="./${esc(key)}.mp4" target="_blank">▶ video</a>` : ""}
+        <a href="./${esc(key)}.png" target="_blank">still</a></figcaption>
+    </figure>`;
+    }).join("\n");
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>RecruitersOS · Hiring-signal GIFs</title>
 <style>
   body{margin:0;background:#0d1117;color:#e6edf3;font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif;padding:28px}
@@ -159,10 +179,11 @@ async function writeGallery(manifest: Record<string, ManifestEntry>) {
   .dot{width:11px;height:11px;border-radius:50%}.r{background:#ff5f56}.y{background:#ffbd2e}.g{background:#27c93f}
   .addr{margin-left:10px;flex:1;background:#0d1117;border-radius:6px;padding:4px 10px;font-size:12px;color:#8b949e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .card img{display:block;width:100%;background:#fff}
+  .teaser{display:block;cursor:pointer}
   figcaption{padding:10px 14px;font-size:13px;color:#c9d1d9}figcaption a{color:#58a6ff;margin-left:8px}
 </style></head><body>
-  <h1>Hiring-signal GIFs — captured from each company's own careers page</h1>
-  <p class="sub">${Object.values(manifest).filter((m) => m.status === "company_site" && m.files?.gif).length} clips. Each plays an auto-scroll of the live job posting on the hiring company's own site.</p>
+  <h1>Hiring-signal videos — captured from each company's own careers page</h1>
+  <p class="sub">${Object.values(manifest).filter((m) => m.status === "company_site" && m.files?.gif).length} roles. Each tile is the email TEASER (with play button) — click it to open the full natural-scroll video.</p>
   <div class="grid">${cards}</div>
 </body></html>`;
   await writeFile(join(shotsDir(), "gallery.html"), html, "utf8");

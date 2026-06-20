@@ -212,6 +212,24 @@ export interface Prospect {
   bookedAt?: string;
   /** Mirror of the ATS person id once synced. */
   atsPersonId?: string;
+  /** A personalized picture-in-picture role video attached from the PiP Studio. Exposed to
+   *  sequence templates as the merge fields {{watchlink}}, {{videogif}}, {{videoembed}} so the
+   *  outreach email/DM can show this prospect's own clickable video of their hiring signal. */
+  personalizedVideo?: {
+    videoKey: string;
+    watchUrl: string;
+    gifUrl: string;
+    mp4Url?: string;
+    roleTitle?: string;
+    /** The attached outreach SEQUENCE: email 1 is text-only, email 2 is the video follow-up. */
+    sequence?: {
+      firstEmail: { subject: string; body: string };
+      secondEmail: { subject: string; body: string };
+    };
+    /** Share-link expiry (epoch ms; 0 = never) so the UI can warn before links go stale. */
+    expiresAt?: number;
+    at: string;
+  };
   createdAt: string;
 }
 

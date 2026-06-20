@@ -43,6 +43,7 @@ import { resolvePersonEmail } from "./deepContact";
 import { paidEmailEnabled, findEmailIcypeas } from "./paidEmail";
 import { paidNamingEnabled, findDecisionMakerRapid } from "./paidNaming";
 import { recordSearch, isAvailable } from "./searchHealth";
+import { xrayPeopleGraph } from "./xray";
 
 /* ------------------------------------------------------------------ */
 /* Shared fetch helpers (free, timed-out, polite UA)                   */
@@ -93,14 +94,33 @@ const NON_NAME = new Set([
   "Engineering", "Marketing", "Operations", "Finance", "Design", "Sales", "Growth", "Revenue",
   "San", "Francisco", "New", "York", "Los", "Angeles", "United", "States", "Remote", "Hybrid",
   "Chief", "Officer", "President", "Vice", "Head", "Director", "Manager", "Lead", "Senior",
+  // function words that begin marketing CTAs ("For Accountants", "Become a partner", "Your team") —
+  // never a real given/sur-name, so any of these as a token disqualifies the candidate.
+  "For", "And", "To", "With", "Your", "From", "Become", "Today", "Free", "Best", "Or", "An",
+  "Build", "Grow", "Discover", "Explore", "Trusted", "Powered", "Built", "Made", "Every",
 ]);
+
+/** Lowercase name particles ("Maria de la Cruz", "Vincent van der Berg", "Jean-Luc de la Tour") — they
+ *  glue a compound surname together but aren't separate name words, so a real 4-token name isn't rejected
+ *  as "too long". Recovers the many Hispanic / Dutch / Arabic / compound names the 2–3 token rule dropped. */
+const NAME_PARTICLES = new Set([
+  "de", "del", "della", "der", "di", "da", "das", "dos", "du", "la", "le", "van", "von",
+  "bin", "ibn", "al", "el", "mac", "mc", "st", "san", "santa", "ten", "ter",
+]);
+
+// Case-insensitive view of NON_NAME — archived/scraped pages carry lowercase nav text ("dashboard",
+// "pro", "partner community"), which a case-sensitive check let through as fake names.
+const NON_NAME_LC = new Set([...NON_NAME].map((w) => w.toLowerCase()));
 
 function looksLikeName(s: string): boolean {
   const parts = s.trim().split(/\s+/);
-  if (parts.length < 2 || parts.length > 3) return false;
-  if (parts.some((p) => NON_NAME.has(p.replace(/[.'’-].*$/, "")))) return false;
-  // Reject ALL-CAPS acronyms and single-letter tokens.
-  if (parts.some((p) => p.length < 2 || p === p.toUpperCase())) return false;
+  if (parts.length < 2 || parts.length > 5) return false;          // allow compound / particle surnames
+  // Significant tokens = the real name words (particles are connective glue, not separate names).
+  const sig = parts.filter((p) => !NAME_PARTICLES.has(p.toLowerCase().replace(/[.'’-].*$/, "")));
+  if (sig.length < 2 || sig.length > 4) return false;
+  if (parts.some((p) => NON_NAME_LC.has(p.toLowerCase().replace(/[.'’-].*$/, "")))) return false;
+  // Reject ALL-CAPS acronyms and single-letter tokens among the significant words.
+  if (sig.some((p) => p.length < 2 || p === p.toUpperCase())) return false;
   return true;
 }
 
@@ -638,6 +658,21 @@ async function commonCrawlCandidates(domain: string): Promise<PersonCandidate[]>
   }
 }
 
+/**
+ * Strategy 4: SEC EDGAR officers/directors — for public companies and recent filers, the law-mandated
+ * insider filings name the executive team with their exact titles. Free + authoritative + no anti-bot,
+ * and it covers the funded / IPO / M&A signals that the scraping sources often can't reach. All failsafes
+ * (timeouts, cache, circuit-breaker, name reordering) live in secEdgar.ts; this never throws.
+ */
+async function edgarOfficerCandidates(company: string): Promise<PersonCandidate[]> {
+  try {
+    const { edgarOfficers } = await import("./secEdgar");
+    return await edgarOfficers(company);
+  } catch {
+    return [];
+  }
+}
+
 export function freePeopleGraph(opts?: { domain?: string }): PeopleGraph {
   return {
     id: "free_research",
@@ -653,6 +688,12 @@ export function freePeopleGraph(opts?: { domain?: string }): PeopleGraph {
       if (domain) tasks.push(commonCrawlCandidates(domain));            // free + unblockable archive
       if (company) tasks.push(newsAppointmentCandidates(company, titles));
       if (company) tasks.push(searchEngineCandidates(company, titles)); // free, egress-rotated naming
+      // X-RAY graph: a dedicated company+title → person finder (title-variant boolean X-ray of
+      // linkedin.com/in, captures the profile URL, scores on title+company fit). Shares the egress
+      // rotation + search-health back-off, so it's free and sustainable. Strongest when the exact
+      // titleholder has a public profile — complements the hierarchy/apex pass above.
+      if (company) tasks.push(xrayPeopleGraph().search({ ...query, titles }));
+      if (company) tasks.push(edgarOfficerCandidates(company));         // free + authoritative (public filers)
       if (company && fn === "engineering") tasks.push(githubEngCandidates(company));
 
       const results = await Promise.all(tasks.map((t) => t.catch(() => [] as PersonCandidate[])));

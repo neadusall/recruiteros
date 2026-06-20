@@ -54,13 +54,28 @@ const NON_NAME = new Set([
   "Engineering", "Marketing", "Operations", "Finance", "Design", "Sales", "Chief", "Officer",
   "President", "Vice", "Head", "Director", "Manager", "Lead", "Senior", "Remote", "Hybrid",
   "LinkedIn", "Profile", "Profiles",
+  // function words that begin marketing CTAs — never a real name token.
+  "For", "And", "To", "With", "Your", "From", "Become", "Today", "Free", "Best", "Or", "An",
+  "Build", "Grow", "Discover", "Explore", "Trusted", "Powered", "Built", "Made", "Every",
 ]);
+
+// Name particles glue compound surnames ("de la Cruz", "van der Berg") without counting as separate
+// name words — so a real 4-token name isn't rejected as too long. Mirrors decisionMaker.ts (kept
+// standalone to avoid an import cycle).
+const NAME_PARTICLES = new Set([
+  "de", "del", "della", "der", "di", "da", "das", "dos", "du", "la", "le", "van", "von",
+  "bin", "ibn", "al", "el", "mac", "mc", "st", "san", "santa", "ten", "ter",
+]);
+
+const NON_NAME_LC = new Set([...NON_NAME].map((w) => w.toLowerCase()));
 
 function looksLikeName(s: string): boolean {
   const parts = s.trim().split(/\s+/);
-  if (parts.length < 2 || parts.length > 3) return false;
-  if (parts.some((p) => NON_NAME.has(p.replace(/[.'’-].*$/, "")))) return false;
-  if (parts.some((p) => p.length < 2 || p === p.toUpperCase())) return false;
+  if (parts.length < 2 || parts.length > 5) return false;
+  const sig = parts.filter((p) => !NAME_PARTICLES.has(p.toLowerCase().replace(/[.'’-].*$/, "")));
+  if (sig.length < 2 || sig.length > 4) return false;
+  if (parts.some((p) => NON_NAME_LC.has(p.toLowerCase().replace(/[.'’-].*$/, "")))) return false;
+  if (sig.some((p) => p.length < 2 || p === p.toUpperCase())) return false;
   return true;
 }
 

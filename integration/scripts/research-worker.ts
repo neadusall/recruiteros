@@ -23,6 +23,7 @@ import { resolveDecisionMaker } from "../lib/inmarket/decisionMaker";
 import { buildCuratedRow, type CuratedProspect } from "../lib/inmarket/curation";
 import { commonCrawlHealth } from "../lib/inmarket/commonCrawl";
 import { searchHealth } from "../lib/inmarket/searchHealth";
+import { secEdgarHealth } from "../lib/inmarket/secEdgar";
 
 interface Job { lead: { company: string; domain?: string; industry?: string; signalType?: string; reason?: string; score?: number; employeeCount?: number; roleDetails?: Array<{ title: string }>; roles?: string[]; sourceUrl?: string }; role: string }
 
@@ -61,6 +62,7 @@ function buildHealth() {
   const uptimeSec = Math.round((now - startedAt) / 1000);
   const cc = commonCrawlHealth();
   const sh = searchHealth();
+  const se = secEdgarHealth();
   // Reasons this box is anything less than fully healthy — the same signals the monitor thresholds watch.
   const reasons: string[] = [];
   if (cc.resting) reasons.push(`common-crawl resting ${cc.restingForSec}s`);
@@ -68,6 +70,7 @@ function buildHealth() {
   if (cc.index.spacingMs >= 16_000) reasons.push(`common-crawl index spacing maxed (${cc.index.spacingMs}ms)`);
   if (cc.index.cooldownForSec > 0) reasons.push(`common-crawl cooldown ${cc.index.cooldownForSec}s`);
   if (sh.status === "throttled") reasons.push("search engines throttled");
+  if (se.resting) reasons.push(`sec-edgar resting ${se.restingForSec}s`);
   if (stats.consecutiveFails >= 3) reasons.push(`main-server calls failing (${stats.consecutiveFails})`);
   // Unhealthy = the box can't sustain its job right now; degraded = strain but still producing.
   const unhealthy = cc.resting || stats.consecutiveFails >= 5 || (cc.index.breakerTrips >= 2 && sh.status === "throttled");
@@ -96,6 +99,7 @@ function buildHealth() {
     },
     commonCrawl: cc,
     search: { status: sh.status, engines: sh.engines },
+    secEdgar: se,
   };
 }
 

@@ -18,7 +18,7 @@
 import type { Campaign, CampaignModel, CampaignModelTouch, Prospect } from "../core/types";
 import { GUIDELINES_PROMPT } from "../copy/guidelines";
 
-const MERGE_HELP = "{{firstName}}, {{company}}, {{title}}, {{role}}, {{signal}}";
+const MERGE_HELP = "{{firstName}}, {{company}}, {{title}}, {{role}}, {{signal}}, {{watchlink}}, {{videoembed}}";
 
 /** Render one model touch for a specific prospect (merge-fill, graceful fallbacks). */
 export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>): { subject?: string; body: string } {
@@ -29,6 +29,25 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>): { 
     role: (p as any).signalReason || p.title || "the role you're hiring for",
     signal: (p as any).signalReason || "your recent hiring activity",
   };
+  // PiP Studio video fields (empty when no video is attached, so templates degrade cleanly).
+  // The watch link is personalized PER PROSPECT: their first name greets them on the page and
+  // their id attributes the view in analytics.
+  const pv = p.personalizedVideo;
+  // When a role video is attached, {{role}} is the role being HIRED FOR (the video's subject),
+  // not the manager's own title — so the opener reads correctly.
+  if (pv?.roleTitle) vals.role = pv.roleTitle;
+  const watch = (() => {
+    if (!pv?.watchUrl) return "";
+    const extra =
+      (vals.firstname && vals.firstname !== "there" ? `&n=${encodeURIComponent(vals.firstname)}` : "") +
+      (p.id ? `&rcpt=${encodeURIComponent(p.id)}` : "");
+    return pv.watchUrl + extra;
+  })();
+  vals.watchlink = watch;
+  vals.videogif = pv?.gifUrl || "";
+  vals.videoembed = watch && pv?.gifUrl
+    ? `<a href="${watch}"><img src="${pv.gifUrl}" alt="A quick note about ${vals.company}" width="600" style="max-width:100%;border-radius:10px;border:1px solid #e5e7eb;display:block" /></a>`
+    : "";
   const fill = (s?: string) =>
     (s || "").replace(/\{\{\s*([a-zA-Z]+)\s*\}\}/g, (_m, k) => vals[String(k).toLowerCase()] ?? "");
   return { subject: touch.subject ? fill(touch.subject) : undefined, body: fill(touch.body) };

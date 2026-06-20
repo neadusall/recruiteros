@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>A quick message for you</title>
+<style>
+  :root{ --bg:#0b0f14; --panel:#11161d; --line:#222a35; --ink:#e6edf3; --mut:#93a1b0; --grn:#19c37d; }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%, #16202b, var(--bg));color:var(--ink);
+    font:16px/1.6 system-ui,Segoe UI,Roboto,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+  .top{display:flex;align-items:center;gap:10px;padding:18px 24px}
+  .brand{font-weight:700;letter-spacing:.2px;background:linear-gradient(90deg,#19c37d,#58a6ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  main{flex:1;display:flex;align-items:center;justify-content:center;padding:16px 20px 48px}
+  .stage{width:100%;max-width:880px}
+  .ctx{text-align:center;margin:0 0 16px}
+  .ctx h1{font-size:22px;margin:0 0 4px;font-weight:650}
+  .ctx p{margin:0;color:var(--mut);font-size:14px}
+  .player{position:relative;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#000;box-shadow:0 24px 80px rgba(0,0,0,.55);aspect-ratio:1000/620}
+  video{width:100%;height:100%;display:block;object-fit:contain;background:#000}
+  .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;cursor:pointer;background:rgba(0,0,0,.25)}
+  .play .btn{width:84px;height:84px;border-radius:50%;background:var(--grn);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 30px rgba(25,195,125,.5);transition:transform .15s}
+  .play:hover .btn{transform:scale(1.06)}
+  .play svg{width:34px;height:34px;margin-left:5px;fill:#06231a}
+  .cta{display:flex;gap:12px;justify-content:center;margin-top:22px;flex-wrap:wrap}
+  .cta a,.cta button{appearance:none;border:1px solid var(--line);background:#1a222c;color:var(--ink);
+    text-decoration:none;padding:11px 20px;border-radius:10px;font:inherit;font-weight:600;cursor:pointer}
+  .cta a.primary{background:var(--grn);border-color:var(--grn);color:#06231a}
+  .err{text-align:center;color:var(--mut);padding:60px 20px}
+  footer{text-align:center;color:#5b6675;font-size:12px;padding:18px}
+</style>
+</head>
+<body>
+<div class="top"><span class="brand">RecruitersOS</span></div>
+<main>
+  <div class="stage" id="stage">
+    <div class="err" id="loading">Loading…</div>
+  </div>
+</main>
+<footer>Sent with RecruitersOS</footer>
+
+<script src="assets/js/config.js"></script>
+<script>
+(function(){
+  var API = (window.RECRUITEROS_API_BASE || "").replace(/\/$/,"");
+  var qs = new URLSearchParams(location.search);
+  var key = qs.get("k") || qs.get("key") || "";
+  var company = qs.get("c") || "";
+  var role = qs.get("r") || "";
+  var name = (qs.get("n") || "").trim();      // recipient first name (merge field)
+  var replyTo = qs.get("e") || "";            // optional mailto for the CTA
+  var calLink = qs.get("cal") || "";          // optional book-a-call URL
+  var rcpt = qs.get("rcpt") || "";            // optional per-recipient id (attribution)
+  var stage = document.getElementById("stage");
+  // Drop an unfilled merge tag (e.g. "{{firstName}}" arrived unrendered).
+  if (/\{\{|\}\}/.test(name)) name = "";
+
+  if (!key || !/^[a-z0-9_-]{3,120}$/.test(key)) {
+    stage.innerHTML = '<div class="err">This link looks incomplete or expired.</div>';
+    return;
+  }
+
+  // Signed/expiring access: carry exp+sig from the share link through to the asset requests.
+  var auth = "";
+  var exp = qs.get("exp"), sig = qs.get("sig");
+  if (exp && sig) auth = "&exp=" + encodeURIComponent(exp) + "&sig=" + encodeURIComponent(sig);
+  var mp4 = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=mp4" + auth;
+  // notrack on the poster so the watch-page load isn't counted as an email-teaser open.
+  var gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif&notrack=1" + auth;
+
+  /* ---- engagement tracking (anonymous session; never blocks playback) ---- */
+  var sid;
+  try { sid = sessionStorage.getItem("ros_sid"); if (!sid) { sid = (Math.random().toString(36).slice(2) + Date.now().toString(36)); sessionStorage.setItem("ros_sid", sid); } } catch (e) { sid = "anon"; }
+  function track(t, secs) {
+    try {
+      var payload = JSON.stringify({ k: key, t: t, c: company, r: role, sid: sid, s: secs, rcpt: rcpt });
+      var url = API + "/api/in-market/track";
+      if (navigator.sendBeacon) navigator.sendBeacon(url, new Blob([payload], { type: "text/plain" }));
+      else fetch(url, { method: "POST", body: payload, keepalive: true });
+    } catch (e) {}
+  }
+
+  var greet = name ? (esc(name) + " — ") : "";
+  var title = greet + (company ? ("a quick note about " + company) : "a quick message for you");
+  var sub = role ? ("Re: " + role) : "Press play — it's 20 seconds.";
+
+  var cta = "";
+  if (calLink) cta += '<a class="primary" href="' + esc(calLink) + '" target="_blank" rel="noopener">Book a call</a>';
+  if (replyTo) cta += '<a href="mailto:' + encodeURIComponent(replyTo).replace(/%40/g,"@") + '?subject=' + encodeURIComponent("Re: " + (role||company||"your note")) + '">Reply</a>';
+
+  stage.innerHTML =
+    '<div class="ctx"><h1>' + esc(title) + '</h1><p>' + esc(sub) + '</p></div>' +
+    '<div class="player" id="player">' +
+      '<video id="vid" playsinline preload="metadata" poster="' + gif + '"></video>' +
+      '<div class="play" id="overlay"><div class="btn"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>' +
+    '</div>' +
+    (cta ? '<div class="cta">' + cta + '</div>' : '');
+
+  var vid = document.getElementById("vid");
+  var overlay = document.getElementById("overlay");
+  vid.src = mp4;
+  vid.addEventListener("error", function(){
+    document.getElementById("player").innerHTML = '<div class="err">This video isn\'t available right now.</div>';
+  });
+  function start(){ if (vid.ended) vid.currentTime = 0; vid.play(); vid.controls = true; overlay.style.display = "none"; }
+  overlay.addEventListener("click", start);
+
+  track("open");  // landed on the watch page
+
+  // Heartbeat watch-time while playing; one "play" + "complete" per session milestones.
+  var played = false, lastBeat = 0, beatTimer = null;
+  vid.addEventListener("play", function(){
+    overlay.style.display = "none";
+    if (!played) { played = true; track("play"); }
+    lastBeat = vid.currentTime;
+    if (!beatTimer) beatTimer = setInterval(function(){
+      if (!vid.paused && !vid.ended) { var d = vid.currentTime - lastBeat; if (d > 0) { track("heartbeat", d); lastBeat = vid.currentTime; } }
+    }, 10000);
+  });
+  function flushBeat(){ if (played) { var d = vid.currentTime - lastBeat; if (d > 0.5) { track("heartbeat", d); lastBeat = vid.currentTime; } } }
+  vid.addEventListener("pause", flushBeat);
+  vid.addEventListener("ended", function(){ flushBeat(); track("complete"); vid.controls = false; overlay.style.display = "flex"; }); // replay affordance
+  window.addEventListener("pagehide", flushBeat);
+  document.addEventListener("visibilitychange", function(){ if (document.visibilityState === "hidden") flushBeat(); });
+
+  function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"})[c]; }); }
+})();
+</script>
+</body>
+</html>

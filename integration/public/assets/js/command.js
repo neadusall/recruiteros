@@ -591,7 +591,9 @@
 
   window.addEventListener("hashchange", render);
   Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) {
-    n.setAttribute("href", "#" + n.dataset.route);
+    // Hash-routed items get a "#route" href; external links (e.g. PiP Studio at /pip-studio)
+    // already carry a real href and are left untouched.
+    if (n.dataset.route) n.setAttribute("href", "#" + n.dataset.route);
   });
 
   /* ---------------- views ---------------- */
@@ -2566,26 +2568,128 @@
      ======================================================================== */
   var curPicks = {};   // id -> true (selected curated rows for approve/enroll)
 
+  var curPollTimer = null;
+  var curLastTotal = 0;     // researched count last rendered — detects new leads arriving
+  var curLastSyncMs = 0;    // when the backend last answered — drives the live/reconnecting label
+  var curTick = 0;          // heartbeat counter; we fetch data every Nth tick, tick the label every tick
+  var CUR_BEAT_MS = 4000;   // label ticks this often (so a frozen link is obvious within ~4s)
+  var CUR_FETCH_EVERY = 5;  // pull fresh funnel data every 5th beat (~20s)
+
+  // Repaint just the live-link pill from the client clock, every heartbeat. This is the visible proof
+  // the front end is talking to the back end: it counts up "synced Ns ago" between data pulls and
+  // flips to "reconnecting" the moment the backend stops answering — independent of the data refresh.
+  function curPaintSync() {
+    var el = document.getElementById("curSync"); if (!el) return;
+    if (!curLastSyncMs) { el.innerHTML = "⚪ connecting…"; return; }
+    var ago = Math.round((Date.now() - curLastSyncMs) / 1000);
+    if (ago > 70) { el.innerHTML = "🔴 reconnecting…"; el.title = "lost contact with the lead engine — retrying"; return; }
+    el.innerHTML = "🟢 live · synced " + (ago < CUR_BEAT_MS / 1000 ? "just now" : ago + "s ago");
+    el.title = "live connection to the lead engine — auto-refreshing";
+  }
+
+  // LIVE heartbeat: every beat we repaint the sync label; every ~20s we pull the funnel/health so the
+  // numbers climb on screen as the engine works. When NEW leads have come in AND the user isn't
+  // mid-selection, we also pull them into the list so the database visibly grows. If they're selecting,
+  // we leave the list alone (never lose their picks) — the stats still climb.
+  function curHeartbeat() {
+    var stats = document.getElementById("curStats");
+    if (!stats) { if (curPollTimer) { clearInterval(curPollTimer); curPollTimer = null; } return; }
+    curPaintSync();                 // tick the live label every beat, even on a backgrounded tab
+    if (document.hidden) return;    // but don't hit the network for a tab nobody's looking at
+    curTick++;
+    if (curTick % CUR_FETCH_EVERY !== 0) return;
+    send("/in-market", "POST", { action: "curation_funnel" }).then(function (r) {
+      var d = r && r.data; if (!d || !d.funnel) return;
+      curLastSyncMs = Date.now();   // backend answered → link is healthy
+      var node = document.getElementById("curStats"); if (!node) return;
+      node.innerHTML = curStatsInner(d.funnel, d.health || null, d.search || null, d.fleet || null, d.cc || null);
+      curPaintSync();               // the re-render reset the pill text; restore it immediately
+      var rc = document.getElementById("curResearched");
+      if (rc) rc.textContent = (d.funnel.total || 0).toLocaleString();
+      var total = d.funnel.total || 0;
+      var selecting = Object.keys(curPicks).length > 0;
+      if (total !== curLastTotal && !selecting) renderCuration();   // new leads in → refresh the list
+    }).catch(function () { /* leave curLastSyncMs — curPaintSync flips to reconnecting if it stays stale */ });
+  }
+
   function renderCuration() {
     var body = $("#imBody"); if (!body) return;
-    body.innerHTML = loading();
+    if (!document.getElementById("curStats")) body.innerHTML = loading(); // only spin on first entry
     curPicks = {};
+    if (curPollTimer) { clearInterval(curPollTimer); curPollTimer = null; }
     Promise.all([
       send("/in-market", "POST", { action: "curation_funnel" }),
-      send("/in-market", "POST", { action: "curation_list", contactableOnly: true, limit: 500 }),
+      // Populate the WHOLE researched database now — enriched-first (real person + email on top, then
+      // named-email-pending, then title-only researching rows). The list fills immediately and climbs
+      // as the engine works; each row's badge shows its enrichment state (valid / guess / pending).
+      send("/in-market", "POST", { action: "curation_list", limit: 1000 }),
     ]).then(function (rs) {
       var funnel = (rs[0] && rs[0].data && rs[0].data.funnel) || null;
       var health = (rs[0] && rs[0].data && rs[0].data.health) || null;
+      var search = (rs[0] && rs[0].data && rs[0].data.search) || null;
+      var fleet = (rs[0] && rs[0].data && rs[0].data.fleet) || null;
+      var cc = (rs[0] && rs[0].data && rs[0].data.cc) || null;
       var list = (rs[1] && rs[1].data && rs[1].data.curated) || [];
-      body.innerHTML = curationHtml(funnel, list, health);
+      curLastTotal = (funnel && funnel.total) || 0;
+      curLastSyncMs = Date.now();   // first good answer from the backend → mark the link live
+      body.innerHTML = curationHtml(funnel, list, health, search, fleet, cc);
       wireCuration(body, list);
-    }).catch(function () { body.innerHTML = '<div class="empty">Couldn\'t load the curated list yet. The accumulator builds it hourly — try again shortly, or run a search first to seed the pool.</div>'; });
+      curPaintSync();               // paint the live pill right away (don't wait a full beat)
+      curPollTimer = setInterval(curHeartbeat, CUR_BEAT_MS); // live ongoing updates + link heartbeat
+    }).catch(function () { body.innerHTML = '<div class="empty">⚠ Couldn\'t reach the lead engine. It builds the list continuously in the background — this is usually a brief blip right after a deploy. Retrying automatically; reopen this tab in a moment.</div>'; });
   }
 
   // Liveness strip: shows when the pool was last fed and when curation last ran, so a silently
   // stalled engine is visible at a glance instead of looking like a healthy-but-empty list.
-  function curEngineLine(h) {
-    if (!h) return "";
+  // Sustainability pill for the free name-scraping (DuckDuckGo/Bing). Green = healthy, amber =
+  // slowing, red = throttled (resting under back-off). Hover shows the per-engine breakdown so we
+  // can see at a glance whether the IP rotation is holding up while we run it hard.
+  function curSearchPill(s) {
+    if (!s) return "";
+    var st = s.status || "idle";
+    var icon = st === "healthy" ? "🟢" : st === "degraded" ? "🟡" : st === "throttled" ? "🔴" : "⚪";
+    var label = st === "healthy" ? "scraping healthy" : st === "degraded" ? "scraping slowing"
+      : st === "throttled" ? "scraping throttled" : "scraping idle";
+    var tip = (s.engines || []).map(function (e) {
+      return e.engine + ": " + e.status + " · " + Math.round((e.okRate || 0) * 100) + "% ok" +
+        (e.backoffSec ? " · resting " + e.backoffSec + "s" : "") + " · " + (e.requests || 0) + " reqs";
+    }).join("\n") || "no searches yet";
+    return '<span class="cur-mini" title="' + esc(tip) + '">' + icon + " " + esc(label) + "</span>";
+  }
+
+  // The live link indicator. Its text is overwritten by the heartbeat every few seconds (see
+  // curHeartbeat), so a stalled/disconnected backend shows "reconnecting" instead of looking healthy.
+  function curSyncPill() {
+    return '<span class="cur-mini" id="curSync" title="live connection to the lead engine">⚪ connecting…</span>';
+  }
+
+  // THIS (main) box's Common Crawl index-governor pill — the binding-constraint signal for the
+  // one-box proving-ground test: 🟢 CC ok / 🟡 CC paced Ns (index asking us to slow) / 🔴 CC resting
+  // or trips (this IP is being throttled). Hover for the governor internals.
+  function curCcPill(cc) {
+    if (!cc || !cc.index) return "";
+    var ix = cc.index, icon, label;
+    if (cc.resting) { icon = "🔴"; label = "CC resting " + (cc.restingForSec || 0) + "s"; }
+    else if ((ix.breakerTrips || 0) >= 2) { icon = "🔴"; label = "CC trips " + ix.breakerTrips; }
+    else if ((ix.spacingMs || 0) >= 16000) { icon = "🟡"; label = "CC paced " + Math.round(ix.spacingMs / 1000) + "s"; }
+    else if ((ix.cooldownForSec || 0) > 0) { icon = "🟡"; label = "CC wait " + ix.cooldownForSec + "s"; }
+    else { icon = "🟢"; label = "CC ok"; }
+    var tip = "Common Crawl index governor — spacing " + (ix.spacingMs || 0) + "ms · in-flight " +
+      (ix.inFlight || 0) + "/" + (ix.concurrency || 1) + " · breaker trips " + (ix.breakerTrips || 0) +
+      (cc.resting ? " · RESTING " + (cc.restingForSec || 0) + "s" : "") + " · cached " + (cc.cachedDomains || 0) + " domains";
+    return '<span class="cur-mini" title="' + esc(tip) + '">' + icon + " " + esc(label) + "</span>";
+  }
+
+  // This box's live per-IP yield: decision-makers freshly named in the last 60 min. The headline
+  // number for the one-box test — healthy here means a second IP would multiply it.
+  function curRatePill(n) {
+    return '<span class="cur-mini" title="Decision-makers this box freshly named in the last hour — its live per-IP yield. Multiply by your box count for the fleet projection.">⚡ <b>' + (Number(n) || 0).toLocaleString() + "</b>/hr named</span>";
+  }
+
+  function curEngineLine(h, search, cc, namedPerHour) {
+    var tail = curCcPill(cc) + curRatePill(namedPerHour);
+    if (!h && !search) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + tail + "</div>";
+    if (!h) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + curSearchPill(search) + tail + "</div>";
     function ago(s) {
       if (!s) return null;
       var t = Date.parse(String(s).replace(" ", "T")); if (isNaN(t)) return null;
@@ -2604,13 +2708,32 @@
     }
     // Pool cycle runs hourly (stale > 75m); curation ticks every 8m (stale > 20m).
     return '<div class="cur-sigs"><span class="muted">Engine:</span>' +
+      curSyncPill() +
       part("pool fed", h.lastCycleAt, h.lastCycleOk, 75) +
       part("curated", h.lastCurationAt, h.lastCurationOk, 20) +
+      curSearchPill(search) +
+      tail +
       "</div>";
   }
 
-  function curationHtml(funnel, list, health) {
-    var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
+  // The live "N / 5,000 valid emails today" target bar — the headline consistency metric.
+  function curDailyHtml(d) {
+    if (!d) return "";
+    var target = d.target || 5000;
+    var pct = Math.min(100, Math.round(((d.validToday || 0) / target) * 100));
+    var pace = d.onPace ? "🟢 on pace" : "🟡 below pace";
+    return '<div style="margin:10px 0;padding:12px 14px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(124,92,255,.06)">' +
+      '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:13px;margin-bottom:8px">' +
+        '<span><b style="font-size:17px">' + (d.validToday || 0).toLocaleString() + "</b> / " + target.toLocaleString() + ' <span class="muted">valid emails today</span></span>' +
+        '<span class="muted">' + (d.contactableToday || 0).toLocaleString() + " contactable · projected " + (d.projectedValid || 0).toLocaleString() + "/day · " + pace + "</span>" +
+      "</div>" +
+      '<div style="height:8px;border-radius:5px;background:rgba(255,255,255,.08);overflow:hidden"><i style="display:block;height:100%;width:' + pct + '%;background:linear-gradient(90deg,#7c5cff,#38e0a6)"></i></div>' +
+    "</div>";
+  }
+
+  // The live-updating stats block (engine pills, daily target, funnel, signal slices). Rebuilt by
+  // the poller every ~25s so the numbers climb on screen, WITHOUT touching the list/selection below.
+  function curStatsInner(f, health, search, fleet, cc) {
     var bs = f.byStatus || {};
     var stages = [
       ["sourced", "Sourced", "company + owning title"],
@@ -2623,24 +2746,91 @@
       return '<div class="cur-stage"><div class="cur-stage-n">' + ((bs[s[0]] || 0)).toLocaleString() + "</div>" +
         '<div class="cur-stage-l">' + esc(s[1]) + '</div><div class="cur-stage-h">' + esc(s[2]) + "</div></div>";
     }).join('<div class="cur-arrow">→</div>');
-
     var sigRows = (f.bySignal || []).slice(0, 8).map(function (x) {
       return '<div class="cur-mini"><span>' + esc(imSignalLabel(x.signalType)) + '</span><b>' + x.contactable.toLocaleString() + "</b><span class=\"muted\">/ " + x.total.toLocaleString() + "</span></div>";
     }).join("");
+    return curEngineLine(health, search, cc, f.namedLastHour) +
+      curDailyHtml(f.daily) +
+      '<div class="cur-funnel">' + funnelRow + "</div>" +
+      (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
+      ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "") +
+      curFleetHtml(fleet);
+  }
+
+  // The distributed worker fleet — one clean card per machine (online dot, jobs/min, names/hr, total),
+  // so you can watch output scale linearly as you add boxes. Repainted by the same 20s stats poll.
+  function curFleetHtml(fleet) {
+    if (!fleet) return "";
+    var workers = fleet.workers || [];
+    var hue = function (st) { return st === "healthy" ? "#38e0a6" : st === "degraded" ? "#f5c451" : st === "unhealthy" || st === "throttled" ? "#ff6b6b" : "#7a7a88"; };
+    var pill = function (label, color) {
+      return '<span style="font-size:10.5px;padding:2px 7px;border-radius:6px;background:' + color + '22;color:' + color + ';border:1px solid ' + color + '40;white-space:nowrap">' + esc(label) + "</span>";
+    };
+    var fhColor = fleet.health ? hue(fleet.health) : "#7a7a88";
+    var summary = '<span class="muted" style="font-size:12px">' + (fleet.online || 0) + " online · " +
+      (fleet.totalJobsPerMin || 0) + " jobs/min · <b style=\"color:#38e0a6\">" + (fleet.totalNamesPerHour || 0).toLocaleString() + "</b> names/hr</span>";
+    var head = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:' + (workers.length ? "11px" : "0") + '">' +
+      '<span style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:7px">' +
+        '<span style="width:8px;height:8px;border-radius:50%;background:' + fhColor + ';box-shadow:0 0 8px ' + fhColor + '"></span>🖥️ Worker fleet</span>' + summary + "</div>";
+    var box = function (inner) {
+      return '<div style="margin:12px 0 2px;padding:14px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:linear-gradient(180deg,rgba(124,92,255,.06),rgba(255,255,255,.015))">' + inner + "</div>";
+    };
+    if (!workers.length) {
+      return box(head + '<div class="muted" style="font-size:12.5px;line-height:1.5;margin-top:8px">No worker boxes connected yet. Spin one up with <b>setup-worker.sh</b> — each box scrapes with its own IP and pushes here, so output scales linearly as you add machines.</div>');
+    }
+    var cards = workers.map(function (w) {
+      var h = w.health || null;
+      // Dot colour reflects the box's reported HEALTH when known (CC governor + sources), else liveness.
+      var color = h ? hue(h.status) : (w.online ? "#38e0a6" : (w.lastSeenSec < 300 ? "#f5c451" : "#7a7a88"));
+      var seen = w.online ? "live" : w.lastSeenSec < 90 ? w.lastSeenSec + "s ago" :
+        w.lastSeenSec < 3600 ? Math.round(w.lastSeenSec / 60) + "m ago" : Math.round(w.lastSeenSec / 3600) + "h ago";
+      var metric = function (v, l) {
+        return '<div style="text-align:center;flex:1"><div style="font-size:18px;font-weight:700;line-height:1.05;letter-spacing:-.01em">' + v +
+          '</div><div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">' + l + "</div></div>";
+      };
+      // Per-box health row: the Common Crawl index governor state + search status (the signals that
+      // matter — the index is the binding constraint). Reasons surface on hover.
+      var healthRow = "";
+      if (h) {
+        var cc = h.cc || {};
+        var ccLabel, ccColor;
+        if (cc.resting) { ccLabel = "CC resting"; ccColor = "#ff6b6b"; }
+        else if ((cc.breakerTrips || 0) >= 2) { ccLabel = "CC trips " + cc.breakerTrips; ccColor = "#ff6b6b"; }
+        else if ((cc.spacingMs || 0) >= 16000) { ccLabel = "CC paced " + Math.round(cc.spacingMs / 1000) + "s"; ccColor = "#f5c451"; }
+        else if ((cc.cooldownSec || 0) > 0) { ccLabel = "CC wait " + cc.cooldownSec + "s"; ccColor = "#f5c451"; }
+        else { ccLabel = "CC ok"; ccColor = "#38e0a6"; }
+        var reasons = (h.reasons && h.reasons.length) ? h.reasons.join(" · ") : "all sources healthy";
+        healthRow = '<div title="' + esc(reasons) + '" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:11px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06)">' +
+          pill(ccLabel, ccColor) + pill("search " + (h.search || "idle"), hue(h.search)) + "</div>";
+      }
+      return '<div style="flex:1 1 220px;min-width:200px;padding:13px 15px;border:1px solid ' + (h ? hue(h.status) + "33" : "rgba(255,255,255,.08)") + ';border-radius:12px;background:rgba(255,255,255,.025)">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">' +
+          '<span style="width:9px;height:9px;border-radius:50%;flex:none;background:' + color + ';box-shadow:0 0 9px ' + color + '"></span>' +
+          '<b style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(w.id) + "</b>" +
+          '<span class="muted" style="margin-left:auto;font-size:11px;flex:none">' + esc(seen) + "</span>" +
+        "</div>" +
+        '<div style="display:flex;gap:8px">' +
+          metric(w.jobsPerMin, "jobs/min") +
+          metric('<span style="color:#38e0a6">' + (w.namesPerHour || 0).toLocaleString() + "</span>", "names/hr") +
+          metric((w.totalNamed || 0).toLocaleString(), "total") +
+        "</div>" + healthRow + "</div>";
+    }).join("");
+    return box(head + '<div style="display:flex;flex-wrap:wrap;gap:11px">' + cards + "</div>");
+  }
+
+  function curationHtml(funnel, list, health, search, fleet, cc) {
+    var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
 
     var head =
       '<div class="cur-head">' +
         '<button type="button" class="btn btn-ghost btn-sm" id="curBack">← Back to search</button>' +
-        '<h2>Curated decision-makers <span class="muted">· ' + (f.total || 0).toLocaleString() + " researched</span></h2>" +
+        '<h2>Curated decision-makers <span class="muted">· <span id="curResearched">' + (f.total || 0).toLocaleString() + "</span> researched</span></h2>" +
         '<button type="button" class="btn btn-ghost btn-sm" id="curRefresh">↻ Research more now</button>' +
       "</div>" +
-      curEngineLine(health) +
-      '<div class="cur-funnel">' + funnelRow + "</div>" +
-      (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
-      ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "");
+      '<div id="curStats">' + curStatsInner(f, health, search, fleet, cc) + "</div>";
 
     if (!list.length) {
-      return head + '<div class="empty" style="margin-top:14px">No contactable decision-makers curated yet. The hourly accumulator researches the top companies (free: team pages, news, GitHub) and they\'ll appear here. Hit <b>Research more now</b> to kick it.</div>';
+      return head + '<div class="empty" style="margin-top:14px">No decision-makers curated yet. The engine researches companies continuously (free: search, team pages, news, GitHub) and new leads appear here automatically as they come in. Hit <b>Research more now</b> to kick it.</div>';
     }
 
     var rows = list.map(curationRow).join("");
@@ -2661,13 +2851,21 @@
       : '<span class="im-email-unv">guess</span>';
     var email = r.likelyEmail
       ? '<span class="cur-email" data-email="' + esc(r.likelyEmail) + '" title="Best-guess work email — validated continuously, confirmed before send">✉️ ' + esc(r.likelyEmail) + ' ' + emailTag + "</span>"
-      : '<span class="muted">no email</span>';
+      : '<span class="im-email-unv" title="Name found — email resolves in the enrichment pass">⏳ email pending</span>';
     var enrolled = r.status === "enrolled";
+    // Visible in the list either way, but only rows that already have an email are selectable for
+    // push — the "email pending" ones wait for the enrichment pass before they're ready to send.
+    var selectable = !enrolled && !!r.likelyEmail;
+    // Title-only (still-researching) rows show the owning title as the person line, with a soft hint,
+    // so the database reads as "populated and enriching" rather than blank.
+    var personName = r.managerName
+      ? '<b>' + esc(r.managerName) + "</b>"
+      : '<b class="muted">' + esc(r.managerTitle) + '</b> <span class="im-email-unv">🔍 finding name…</span>';
     return '<div class="cur-row' + (enrolled ? " cur-enrolled" : "") + '" data-id="' + esc(r.id) + '">' +
-      '<input type="checkbox" class="cur-pick" data-id="' + esc(r.id) + '"' + (enrolled ? " disabled" : "") + ">" +
+      '<input type="checkbox" class="cur-pick" data-id="' + esc(r.id) + '"' + (selectable ? "" : " disabled") + ">" +
       '<div class="cur-main">' +
-        '<div class="cur-person"><b>' + esc(r.managerName || "(title only)") + "</b> " +
-          '<span class="cur-title">' + esc(r.managerTitle) + "</span> " + via + "</div>" +
+        '<div class="cur-person">' + personName + " " +
+          (r.managerName ? '<span class="cur-title">' + esc(r.managerTitle) + "</span> " : "") + via + "</div>" +
         '<div class="cur-ctx"><span class="cur-co">' + esc(r.company) + "</span>" +
           ' <span class="muted">owns</span> ' + esc(r.role) +
           ' · <span class="im-fn">' + esc(r.function) + "</span>" +

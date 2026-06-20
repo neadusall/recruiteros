@@ -1,0 +1,23 @@
+# SearXNG config for RecruitersOS — the free search backend for the X-ray people
+# finder (company + job title -> person). See integration/SEARXNG-SETUP.md.
+#
+# The only non-default that MATTERS: enabling the `json` format. SearXNG disables
+# the JSON API by default; without it every request returns HTML and the finder
+# gets nothing. `limiter: false` is safe here because this instance is internal
+# (Caddy never exposes it — only the app on the docker network reaches it).
+use_default_settings: true
+
+server:
+  # Change this to any long random string before go-live.
+  secret_key: "60f2fc8249e3c4d63a4461aac8a3670c6ef048111a93b74cec20c677b6b2b218"
+  limiter: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json          # <-- enables the API the X-ray reads
+
+# Keep responses lean + fast for programmatic use.
+ui:
+  infinite_scroll: false

@@ -20,6 +20,10 @@ WORKDIR /app/integration
 ENV NODE_ENV=production
 ENV PORT=3000
 
+# ffmpeg powers the picture-in-picture role-video compositor (lib/inmarket/roleVideo.ts):
+# it overlays the recorded webcam clip onto the page-scroll capture and emits the MP4 + GIF.
+RUN apk add --no-cache ffmpeg
+
 COPY --from=build /app/integration/.next ./.next
 COPY --from=build /app/integration/public ./public
 COPY --from=build /app/integration/node_modules ./node_modules
