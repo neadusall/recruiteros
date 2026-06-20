@@ -7,8 +7,8 @@ const PAGES = [
   "about", "alfred", "analytics", "app", "business-development-os",
   "campaign-builder", "campaign-studio", "command", "conversations",
   "developers", "features", "forgot-password", "helpcenter", "index", "integrations",
-  "linkedin", "login", "outreach", "owner-console", "owner-login", "platform", "pricing",
-  "recruiting-os", "reset-password", "signals", "signup", "sourcing", "text",
+  "linkedin", "login", "outreach", "owner-console", "owner-login", "pip-studio", "platform", "pricing",
+  "recruiting-os", "reset-password", "signals", "signup", "sourcing", "text", "watch",
 ];
 
 module.exports = {

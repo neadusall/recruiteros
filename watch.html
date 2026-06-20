@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>A quick message for you</title>
+<style>
+  :root{ --bg:#0b0f14; --panel:#11161d; --line:#222a35; --ink:#e6edf3; --mut:#93a1b0; --grn:#19c37d; }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%, #16202b, var(--bg));color:var(--ink);
+    font:16px/1.6 system-ui,Segoe UI,Roboto,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+  .top{display:flex;align-items:center;gap:10px;padding:18px 24px}
+  .brand{font-weight:700;letter-spacing:.2px;background:linear-gradient(90deg,#19c37d,#58a6ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  main{flex:1;display:flex;align-items:center;justify-content:center;padding:16px 20px 48px}
+  .stage{width:100%;max-width:880px}
+  .ctx{text-align:center;margin:0 0 16px}
+  .ctx h1{font-size:22px;margin:0 0 4px;font-weight:650}
+  .ctx p{margin:0;color:var(--mut);font-size:14px}
+  .player{position:relative;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#000;box-shadow:0 24px 80px rgba(0,0,0,.55);aspect-ratio:1000/620}
+  video{width:100%;height:100%;display:block;object-fit:contain;background:#000}
+  .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;cursor:pointer;background:rgba(0,0,0,.25)}
+  .play .btn{width:84px;height:84px;border-radius:50%;background:var(--grn);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 30px rgba(25,195,125,.5);transition:transform .15s}
+  .play:hover .btn{transform:scale(1.06)}
+  .play svg{width:34px;height:34px;margin-left:5px;fill:#06231a}
+  .cta{display:flex;gap:12px;justify-content:center;margin-top:22px;flex-wrap:wrap}
+  .cta a,.cta button{appearance:none;border:1px solid var(--line);background:#1a222c;color:var(--ink);
+    text-decoration:none;padding:11px 20px;border-radius:10px;font:inherit;font-weight:600;cursor:pointer}
+  .cta a.primary{background:var(--grn);border-color:var(--grn);color:#06231a}
+  .err{text-align:center;color:var(--mut);padding:60px 20px}
+  footer{text-align:center;color:#5b6675;font-size:12px;padding:18px}
+</style>
+</head>
+<body>
+<div class="top"><span class="brand">RecruitersOS</span></div>
+<main>
+  <div class="stage" id="stage">
+    <div class="err" id="loading">Loading…</div>
+  </div>
+</main>
+<footer>Sent with RecruitersOS</footer>
+
+<script src="assets/js/config.js"></script>
+<script>
+(function(){
+  var API = (window.RECRUITEROS_API_BASE || "").replace(/\/$/,"");
+  var qs = new URLSearchParams(location.search);
+  var key = qs.get("k") || qs.get("key") || "";
+  var company = qs.get("c") || "";
+  var role = qs.get("r") || "";
+  var replyTo = qs.get("e") || ""; // optional mailto for the CTA
+  var stage = document.getElementById("stage");
+
+  if (!key || !/^[a-z0-9_-]{3,120}$/.test(key)) {
+    stage.innerHTML = '<div class="err">This link looks incomplete or expired.</div>';
+    return;
+  }
+
+  var mp4 = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=mp4";
+  var gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif";
+
+  var title = company ? ("A quick note about " + company) : "A quick message for you";
+  var sub = role ? ("Re: " + role) : "Press play — it's 20 seconds.";
+
+  var ctaPrimary = replyTo
+    ? '<a class="primary" href="mailto:' + encodeURIComponent(replyTo).replace(/%40/g,"@") + '?subject=' + encodeURIComponent("Re: " + (role||company||"your note")) + '">Reply</a>'
+    : '';
+
+  stage.innerHTML =
+    '<div class="ctx"><h1>' + esc(title) + '</h1><p>' + esc(sub) + '</p></div>' +
+    '<div class="player" id="player">' +
+      '<video id="vid" playsinline preload="metadata" poster="' + gif + '"></video>' +
+      '<div class="play" id="overlay"><div class="btn"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>' +
+    '</div>' +
+    '<div class="cta">' + ctaPrimary + '</div>';
+
+  var vid = document.getElementById("vid");
+  var overlay = document.getElementById("overlay");
+  vid.src = mp4;
+  vid.addEventListener("error", function(){
+    document.getElementById("player").innerHTML = '<div class="err">This video isn\'t available right now.</div>';
+  });
+  function start(){ vid.play(); vid.controls = true; overlay.style.display = "none"; }
+  overlay.addEventListener("click", start);
+  vid.addEventListener("play", function(){ overlay.style.display = "none"; });
+
+  function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"})[c]; }); }
+})();
+</script>
+</body>
+</html>
