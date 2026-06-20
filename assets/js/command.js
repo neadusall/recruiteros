@@ -2602,7 +2602,7 @@
       var d = r && r.data; if (!d || !d.funnel) return;
       curLastSyncMs = Date.now();   // backend answered → link is healthy
       var node = document.getElementById("curStats"); if (!node) return;
-      node.innerHTML = curStatsInner(d.funnel, d.health || null, d.search || null);
+      node.innerHTML = curStatsInner(d.funnel, d.health || null, d.search || null, d.fleet || null);
       curPaintSync();               // the re-render reset the pill text; restore it immediately
       var rc = document.getElementById("curResearched");
       if (rc) rc.textContent = (d.funnel.total || 0).toLocaleString();
@@ -2627,10 +2627,11 @@
       var funnel = (rs[0] && rs[0].data && rs[0].data.funnel) || null;
       var health = (rs[0] && rs[0].data && rs[0].data.health) || null;
       var search = (rs[0] && rs[0].data && rs[0].data.search) || null;
+      var fleet = (rs[0] && rs[0].data && rs[0].data.fleet) || null;
       var list = (rs[1] && rs[1].data && rs[1].data.curated) || [];
       curLastTotal = (funnel && funnel.total) || 0;
       curLastSyncMs = Date.now();   // first good answer from the backend → mark the link live
-      body.innerHTML = curationHtml(funnel, list, health, search);
+      body.innerHTML = curationHtml(funnel, list, health, search, fleet);
       wireCuration(body, list);
       curPaintSync();               // paint the live pill right away (don't wait a full beat)
       curPollTimer = setInterval(curHeartbeat, CUR_BEAT_MS); // live ongoing updates + link heartbeat
@@ -2768,7 +2769,7 @@
     return box(head + '<div style="display:flex;flex-wrap:wrap;gap:11px">' + cards + "</div>");
   }
 
-  function curationHtml(funnel, list, health, search) {
+  function curationHtml(funnel, list, health, search, fleet) {
     var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
 
     var head =
@@ -2777,7 +2778,7 @@
         '<h2>Curated decision-makers <span class="muted">· <span id="curResearched">' + (f.total || 0).toLocaleString() + "</span> researched</span></h2>" +
         '<button type="button" class="btn btn-ghost btn-sm" id="curRefresh">↻ Research more now</button>' +
       "</div>" +
-      '<div id="curStats">' + curStatsInner(f, health, search) + "</div>";
+      '<div id="curStats">' + curStatsInner(f, health, search, fleet) + "</div>";
 
     if (!list.length) {
       return head + '<div class="empty" style="margin-top:14px">No decision-makers curated yet. The engine researches companies continuously (free: search, team pages, news, GitHub) and new leads appear here automatically as they come in. Hit <b>Research more now</b> to kick it.</div>';
