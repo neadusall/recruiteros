@@ -408,6 +408,9 @@ export interface CurationFunnel {
   /** Of all researched companies, how many got a NAME (the name-finding gate). */
   named: number;
   namedRate: number;
+  /** Decision-makers freshly NAMED in the last 60 min — the live per-IP yield of THIS box's engine
+   *  (the headline number for the one-box proving-ground test). */
+  namedLastHour: number;
   /** Domain coverage on curated rows + the live resolver hit-rate (the domain gate). */
   domain: {
     curatedWithDomain: number;          // curated rows that carry a resolved domain
@@ -444,7 +447,8 @@ export async function curationFunnel(): Promise<CurationFunnel> {
   const sig = new Map<string, { total: number; contactable: number }>();
   const fn = new Map<string, { total: number; contactable: number }>();
   const src = new Map<string, { total: number; validated: number }>();
-  let contactableOrBetter = 0, validated = 0, invalid = 0, named = 0, withDomain = 0;
+  let contactableOrBetter = 0, validated = 0, invalid = 0, named = 0, withDomain = 0, namedLastHour = 0;
+  const hourAgoMs = Date.now() - 3_600_000;
   const byDay = new Map<string, { valid: number; contactable: number }>();
   const bump = (date: string | null, k: "valid" | "contactable") => {
     if (!date) return;
@@ -455,7 +459,7 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
     if (r.emailValidated) validated++;
     if (r.emailInvalid) invalid++;
-    if (r.managerName) named++;
+    if (r.managerName) { named++; if ((Date.parse(r.curatedAt) || 0) > hourAgoMs) namedLastHour++; }
     if (r.domain) withDomain++;
     // Daily rollup: a VALID email is counted on the day it was validated; a contactable result on
     // the day it was curated. Drives the live "N / 5,000 today" target tracker.
@@ -495,6 +499,7 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     invalid,
     named,
     namedRate: rows.length ? Math.round((named / rows.length) * 100) / 100 : 0,
+    namedLastHour,
     domain: {
       curatedWithDomain: withDomain,
       curatedRate: rows.length ? Math.round((withDomain / rows.length) * 100) / 100 : 0,
