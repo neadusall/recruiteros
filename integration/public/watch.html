@@ -52,9 +52,28 @@
   var replyTo = qs.get("e") || "";            // optional mailto for the CTA
   var calLink = qs.get("cal") || "";          // optional book-a-call URL
   var rcpt = qs.get("rcpt") || "";            // optional per-recipient id (attribution)
+  // Brand kit (baked into the share link by the studio from the workspace settings).
+  var logo = qs.get("logo") || "";
+  var accent = qs.get("ac") || "";
+  var brandName = (qs.get("bn") || "").trim();
+  var ctaText = (qs.get("cta") || "").trim();
+  var ctaUrl = qs.get("ctaurl") || "";
   var stage = document.getElementById("stage");
-  // Drop an unfilled merge tag (e.g. "{{firstName}}" arrived unrendered).
+  var isHttp = function (u) { return /^https?:\/\//i.test(u || ""); };
+  // Drop unfilled merge tags (e.g. "{{firstName}}" arrived unrendered).
   if (/\{\{|\}\}/.test(name)) name = "";
+  if (/\{\{|\}\}/.test(brandName)) brandName = "";
+  // Apply the workspace accent color to the player + CTAs.
+  if (/^#[0-9a-f]{6}$/i.test(accent)) document.documentElement.style.setProperty("--grn", accent);
+  // Branded header + footer.
+  var brandLabel = brandName || "RecruitersOS";
+  var topEl = document.querySelector(".top");
+  if (topEl) topEl.innerHTML = isHttp(logo)
+    ? '<img src="' + logo.replace(/"/g, "%22") + '" alt="" style="max-height:32px;max-width:200px;display:block" />'
+    : '<span class="brand">' + brandLabel.replace(/[<>&]/g, "") + '</span>';
+  var footEl = document.querySelector("footer");
+  if (footEl) footEl.textContent = "Sent with " + brandLabel.replace(/[<>&]/g, "");
+  document.title = company ? ("A quick note about " + company) : ("A message from " + brandLabel);
 
   if (!key || !/^[a-z0-9_-]{3,120}$/.test(key)) {
     stage.innerHTML = '<div class="err">This link looks incomplete or expired.</div>';
@@ -86,7 +105,9 @@
   var sub = role ? ("Re: " + role) : "Press play — it's 20 seconds.";
 
   var cta = "";
-  if (calLink) cta += '<a class="primary" href="' + esc(calLink) + '" target="_blank" rel="noopener">Book a call</a>';
+  var primaryUrl = isHttp(ctaUrl) ? ctaUrl : (isHttp(calLink) ? calLink : "");
+  var primaryText = ctaText || (primaryUrl ? "Book a call" : "");
+  if (primaryUrl && primaryText) cta += '<a class="primary" href="' + esc(primaryUrl) + '" target="_blank" rel="noopener">' + esc(primaryText) + '</a>';
   if (replyTo) cta += '<a href="mailto:' + encodeURIComponent(replyTo).replace(/%40/g,"@") + '?subject=' + encodeURIComponent("Re: " + (role||company||"your note")) + '">Reply</a>';
 
   stage.innerHTML =

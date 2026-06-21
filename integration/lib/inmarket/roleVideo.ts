@@ -456,7 +456,8 @@ const BG_W = 1000;
 const BG_H = 620;
 
 async function compose(
-  key: string, bgPath: string, clip: ClipMeta, pip: PipConfig, introAudioPath?: string | null,
+  key: string, bgPath: string, clip: ClipMeta, pip: PipConfig,
+  introAudioPath?: string | null, introFacePath?: string | null,
 ): Promise<{ files: VideoResult["files"] }> {
   await mkdir(videosDir(), { recursive: true });
   const clipFile = clipPath(clip.id, clip.ext);
@@ -513,8 +514,13 @@ async function compose(
       ]);
       files.gif = true;
     }
-    // (3) FINAL MP4 — prepend the cloned "Hey {name}," over a held first frame, else use the base.
-    const prepended = introAudioPath ? await prependNameIntro(key, baseMp4, introAudioPath) : false;
+    // (3) FINAL MP4 — prepend the personalized "Hey {name}," greeting. Preference order:
+    //     (a) LIP-SYNCED greeting (the cloned name AND the mouth matches it),
+    //     (b) cloned voice over a frozen first frame (no mouth motion),
+    //     (c) the bare base composite (no name) — each degrades cleanly to the next.
+    let prepended = false;
+    if (introFacePath && introAudioPath) prepended = await prependLipSyncGreeting(key, baseMp4, introFacePath, introAudioPath, pip);
+    if (!prepended && introAudioPath) prepended = await prependNameIntro(key, baseMp4, introAudioPath);
     if (!prepended) await rename(baseMp4, compositePath(key, "mp4"));
     files.mp4 = true;
   } finally {
@@ -560,6 +566,135 @@ async function prependNameIntro(key: string, baseMp4: string, audioPath: string)
   } finally {
     await unlink(ff).catch(() => {});
     await unlink(intro).catch(() => {});
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Lip-synced greeting (the cloned name AND a matching mouth)          */
+/* ------------------------------------------------------------------ */
+
+function greetingsDir(): string {
+  return join(videosDir(), "greetings");
+}
+/** Cache one lip-synced greeting per (clip, voice, name) — render the mouth for "Hey Sarah," once. */
+function greetingFaceCachePath(clipId: string, voiceId: string | undefined, name: string): string {
+  const h = createHash("sha1").update(`${clipId}|${voiceId || "default"}|${name.toLowerCase()}`).digest("hex").slice(0, 16);
+  return join(greetingsDir(), `${h}.mp4`);
+}
+
+/**
+ * Produce a SHORT video of the operator's face with the mouth re-rendered to say the cloned
+ * "Hey {name}," audio, via the pluggable lip-sync microservice (lib/inmarket/lipSync). Cached per
+ * (clip, voice, name) so a name is lip-synced ONCE and reused forever — matching the audio cache,
+ * since lip-sync is the expensive step. Returns null (caller uses the frozen-frame intro) when
+ * lip-sync isn't configured or the render fails.
+ */
+async function buildLipSyncedFace(
+  clip: ClipMeta, introAudioPath: string, firstName: string, voiceId?: string,
+): Promise<string | null> {
+  const { lipSyncConfigured, lipSyncToFile } = await import("./lipSync");
+  if (!lipSyncConfigured()) return null;
+
+  await mkdir(greetingsDir(), { recursive: true });
+  const cachePath = greetingFaceCachePath(clip.id, voiceId, firstName);
+  if (await fileExists(cachePath)) return cachePath; // already synced this name in this voice
+
+  // Face driver = first ~4s of the clip, re-encoded to a clean mp4 the model can decode. Reused
+  // across names for this clip (the model only needs a neutral talking face to drive).
+  const driver = join(greetingsDir(), `${clip.id}.driver.mp4`);
+  try {
+    if (!(await fileExists(driver))) {
+      await runFfmpeg([
+        "-y", "-hide_banner", "-loglevel", "error", "-i", clipPath(clip.id, clip.ext),
+        "-t", "4", "-an", "-vf", `scale=${BG_W}:-2,format=yuv420p`,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", driver,
+      ]);
+    }
+    const ok = await lipSyncToFile(driver, introAudioPath, cachePath);
+    return ok ? cachePath : null;
+  } catch (e) {
+    console.error("[roleVideo] lip-sync face build failed:", (e as Error).message);
+    return null;
+  }
+}
+
+/** Concatenate two composites (greeting then body), normalizing v/a so the seam is clean. */
+async function concatTwo(aMp4: string, bMp4: string, outMp4: string): Promise<void> {
+  await runFfmpeg([
+    "-y", "-hide_banner", "-loglevel", "error", "-i", aMp4, "-i", bMp4,
+    "-filter_complex",
+    `[0:v]fps=30,scale=${BG_W}:${BG_H},setsar=1[v0];[1:v]fps=30,scale=${BG_W}:${BG_H},setsar=1[v1];` +
+    `[0:a]aresample=44100[a0];[1:a]aresample=44100[a1];[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]`,
+    "-map", "[v]", "-map", "[a]",
+    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23",
+    "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", outMp4,
+  ]);
+}
+
+/**
+ * Composite the lip-synced face as the PiP bubble over a STILL hold of the body's first frame (the
+ * page + the original static bubble), so the page is steady while the mouth says the name and the
+ * lip-synced bubble sits exactly where the body bubble is. Audio = the cloned-name mp3. Returns the
+ * greeting mp4 path, or null on failure.
+ */
+async function composeGreeting(
+  key: string, framePng: string, faceVideoPath: string, audioPath: string, pip: PipConfig,
+): Promise<string | null> {
+  const greetingOut = join(videosDir(), `${key}.greet.mp4`);
+  const wantMask = pip.shape !== "rect";
+  const wantBorder = pip.borderPx > 0;
+  const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+  const pipW = even((pip.sizePct / 100) * BG_W);
+  const pipH = pip.shape === "circle" ? pipW : even(pipW * 0.62);
+  const radius = Math.round((pip.radiusPct / 100) * pipW);
+  const tmpMask = join(videosDir(), `${key}.gmask.png`);
+  const tmpBorder = join(videosDir(), `${key}.gborder.png`);
+  try {
+    if (wantMask) await writeFile(tmpMask, await genMaskPng(pip.shape, pipW, pipH, radius));
+    if (wantBorder) await writeFile(tmpBorder, await genBorderPng(pip.shape, pipW, pipH, radius, pip.borderPx, pip.borderColor));
+
+    // Inputs: [0]=held frame (looped image), [1]=lip-synced face, [2]=mask?, [3]=border?, last=audio.
+    const inputs = ["-loop", "1", "-i", framePng, "-i", faceVideoPath];
+    if (wantMask) inputs.push("-i", tmpMask);
+    if (wantBorder) inputs.push("-i", tmpBorder);
+    inputs.push("-i", audioPath);
+    const audioIdx = 2 + (wantMask ? 1 : 0) + (wantBorder ? 1 : 0);
+
+    const { filter, outLabel } = buildFilter(BG_W, BG_H, pip, wantMask, wantBorder);
+    await runFfmpeg([
+      "-y", "-hide_banner", "-loglevel", "error", ...inputs,
+      "-filter_complex", filter, "-map", `[${outLabel}]`, "-map", `${audioIdx}:a`,
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23",
+      "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-shortest", greetingOut,
+    ]);
+    return greetingOut;
+  } catch (e) {
+    console.error(`[roleVideo] greeting composite failed for ${key}:`, (e as Error).message);
+    return null;
+  } finally {
+    await unlink(tmpMask).catch(() => {});
+    await unlink(tmpBorder).catch(() => {});
+  }
+}
+
+/** Prepend the lip-synced greeting to the body composite. Returns false on any failure. */
+async function prependLipSyncGreeting(
+  key: string, baseMp4: string, faceVideoPath: string, audioPath: string, pip: PipConfig,
+): Promise<boolean> {
+  const ff = join(videosDir(), `${key}.gff.png`);
+  let greeting: string | null = null;
+  try {
+    await runFfmpeg(["-y", "-hide_banner", "-loglevel", "error", "-i", baseMp4, "-frames:v", "1", ff]);
+    greeting = await composeGreeting(key, ff, faceVideoPath, audioPath, pip);
+    if (!greeting) return false;
+    await concatTwo(greeting, baseMp4, compositePath(key, "mp4"));
+    return true;
+  } catch (e) {
+    console.error(`[roleVideo] lip-sync greeting prepend failed for ${key}:`, (e as Error).message);
+    return false;
+  } finally {
+    await unlink(ff).catch(() => {});
+    if (greeting) await unlink(greeting).catch(() => {});
   }
 }
 
@@ -634,9 +769,16 @@ export async function composeRoleVideo(
       }
       if (haveShot) {
         // Optional cloned-voice "Hey {firstName}," intro (cached by voice+name; null degrades gracefully).
-        const { nameIntroAudio } = await import("./nameAudio");
+        const { nameIntroAudio, cleanFirstName } = await import("./nameAudio");
         const introAudio = await nameIntroAudio(opts?.firstName, opts?.voiceId).catch(() => null);
-        const { files } = await compose(key, bgPath, clip, pip, introAudio);
+        // When a lip-sync service is configured, also render a mouth-matched face for the name
+        // (cached per name). Null => compose() falls back to the frozen-frame cloned-voice intro.
+        let introFace: string | null = null;
+        if (introAudio) {
+          const nm = cleanFirstName(opts?.firstName);
+          if (nm) introFace = await buildLipSyncedFace(clip, introAudio, nm, opts?.voiceId).catch(() => null);
+        }
+        const { files } = await compose(key, bgPath, clip, pip, introAudio, introFace);
         result = { ok: true, status: "ready", key, files, pageUrl, at: now() };
       } else {
         result = result! ?? { ok: false, status: "no_shot", key, reason: "no verified page-scroll GIF for this role", at: now() };

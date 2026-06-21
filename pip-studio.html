@@ -29,6 +29,9 @@
   input[type=text]:focus{outline:none;border-color:#2f4255}
   input[type=range]{width:100%;accent-color:var(--grn)}
   input[type=color]{width:42px;height:32px;border:1px solid var(--line);background:#0a0e13;border-radius:8px;padding:2px}
+  textarea{width:100%;background:#0a0e13;border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:9px 11px;font:inherit;resize:vertical}
+  textarea:focus{outline:none;border-color:#2f4255}
+  .voicetip{margin:8px 0 0;padding-left:18px;line-height:1.7;color:var(--mut);font-size:12px}
   .row{display:flex;gap:9px;align-items:center}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   button{cursor:pointer;border:1px solid var(--line);background:#19222d;color:var(--ink);border-radius:9px;padding:9px 14px;font:inherit;font-weight:600;transition:.12s}
@@ -65,8 +68,14 @@
   .pip .nocam{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#9fb0c0;font-size:10px;text-align:center;background:#0d1620}
 
   /* roles */
-  .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px}
+  .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
   .toolbar input{flex:1}
+  .galfilter{display:flex;gap:7px;margin-bottom:14px}
+  .chipf{font-size:12px;font-weight:600;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:#0a0e13;color:var(--mut);cursor:pointer;transition:.12s}
+  .chipf:hover{border-color:#33485c}
+  .chipf.on{background:#16341f;border-color:#1f6f4a;color:#7ee2b8}
+  .chipf .cnt{opacity:.7;margin-left:3px;font-weight:700}
+  .tile .thumb .eng{position:absolute;left:8px;bottom:8px;background:rgba(7,11,15,.82);border:1px solid var(--line);color:#e9eef5;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:999px;letter-spacing:.02em;backdrop-filter:blur(3px)}
   .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
   .tile{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#0a0e13;display:flex;flex-direction:column}
   .tile .thumb{position:relative;cursor:pointer}
@@ -89,6 +98,31 @@
   .copied{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#1f6f4a;color:#eafff4;
     padding:9px 16px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 8px 28px rgba(0,0,0,.5);z-index:60;opacity:0;transition:.18s;pointer-events:none}
   .copied.show{opacity:1}
+
+  /* brand kit */
+  .brandview{max-width:1340px;margin:0 auto;padding:18px 24px;display:flex;flex-direction:column;gap:16px}
+  .brandgrid{display:grid;grid-template-columns:1fr 1fr 1.1fr;gap:16px;align-items:start}
+  .brandview input[type=checkbox]{width:auto}
+  .brandprev .wpv{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:radial-gradient(600px 300px at 50% -20%, #16202b, #0b0f14)}
+  .wpv-top{padding:11px 13px;border-bottom:1px solid var(--line)}
+  .wpv-brand{font-weight:800;background:linear-gradient(90deg,#19c37d,#58a6ff);-webkit-background-clip:text;background-clip:text;color:transparent;font-size:13px}
+  .wpv-top img{max-height:24px;max-width:150px;display:block}
+  .wpv-h{text-align:center;font-size:14px;font-weight:650;padding:14px 12px 4px}
+  .wpv-player{margin:8px 14px;aspect-ratio:16/9;background:#000;border-radius:10px;position:relative}
+  .wpv-play{position:absolute;inset:0;margin:auto;width:48px;height:48px;border-radius:50%;background:var(--brandac,#19c37d);display:flex;align-items:center;justify-content:center}
+  .wpv-play svg{width:20px;height:20px;margin-left:3px;fill:#06231a}
+  .wpv-cta{display:flex;gap:8px;justify-content:center;padding:10px 12px 16px}
+  .wpv-btn{font-size:12px;font-weight:600;padding:7px 14px;border-radius:8px;background:var(--brandac,#19c37d);color:#06231a}
+  .wpv-btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+  @media(max-width:980px){.brandgrid{grid-template-columns:1fr}}
+
+  /* replies & leads */
+  .leads{display:flex;flex-direction:column;gap:10px}
+  .leaditem{border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:#0a0e13}
+  .leaditem .lhead{display:flex;align-items:center;gap:6px;font-size:13px}
+  .leaditem .lhead .ago{margin-left:auto;color:var(--mut);font-size:11px}
+  .leaditem .lmsg{margin-top:6px;font-size:13px;color:#cdd6e0;white-space:pre-wrap}
+  .leaditem .lreply{display:inline-block;margin-top:8px;font-size:12px;color:var(--grn);text-decoration:none;font-weight:600}
 
   /* view tabs */
   .viewtabs{display:flex;gap:4px;background:#0a0e13;border:1px solid var(--line);border-radius:10px;padding:3px}
@@ -164,6 +198,7 @@
   <div class="viewtabs">
     <button id="tabCreate" class="vt on">Create</button>
     <button id="tabPerf" class="vt">Performance</button>
+    <button id="tabBrand" class="vt">Brand</button>
   </div>
 </header>
 
@@ -210,6 +245,26 @@
         </div>
       </details>
     </div>
+
+    <div class="card" id="voiceCard">
+      <h2>🎙 Your voice <span class="hint">cloned name intro</span></h2>
+      <p class="muted" id="voiceStatus" style="margin:0 0 10px">Checking…</p>
+      <div class="row">
+        <button id="btnCloneVoice" class="primary small" style="flex:1">Clone my voice</button>
+        <button id="btnForgetVoice" class="ghost small" style="display:none">Forget</button>
+      </div>
+      <p class="muted" id="lipsyncStatus" style="margin:10px 0 0"></p>
+      <details>
+        <summary>Recording tips for great lip-sync</summary>
+        <ul class="voicetip">
+          <li>Start with your mouth closed and neutral, looking at the camera.</li>
+          <li>Even lighting on your face, lips in focus.</li>
+          <li>Hold still for the first second (the name is synced there).</li>
+          <li>Record at 30fps, 720p or better, face filling the frame.</li>
+          <li>Quiet room, decent mic. The same clip also clones your voice.</li>
+        </ul>
+      </details>
+    </div>
   </div>
 
   <!-- RIGHT · roles -->
@@ -221,7 +276,12 @@
         <input type="text" id="gsearch" placeholder="Filter roles…" />
         <button id="btnGenAll" class="primary small">⚡ Generate all</button>
         <button id="btnExport" class="ghost small" title="Download a CSV of all generated roles for your sequence tool">⬇ Export CSV</button>
-        <button id="btnRefresh" class="ghost small">↻</button>
+        <button id="btnRefresh" class="ghost small" title="Refresh roles + engagement">↻</button>
+      </div>
+      <div class="galfilter" id="galfilter">
+        <span class="chipf on" data-f="all">All <span class="cnt">0</span></span>
+        <span class="chipf" data-f="ready">Ready <span class="cnt">0</span></span>
+        <span class="chipf" data-f="todo">To do <span class="cnt">0</span></span>
       </div>
       <div class="gallery" id="gallery"><div class="empty">Loading roles…</div></div>
 
@@ -239,6 +299,49 @@
         </div>
         <div class="pillrow" id="roleChips" style="margin-top:10px"></div>
       </details>
+    </div>
+  </div>
+</div>
+
+<!-- BRAND KIT -->
+<div class="brandview" id="brandView" style="display:none">
+  <div class="perfhead">
+    <div><h1>Brand kit</h1><p class="muted">Branding the recipient watch page. Set once — applies to every video you share.</p></div>
+    <div class="row" style="flex:none"><span class="muted" id="brandSaved"></span></div>
+  </div>
+  <div class="brandgrid">
+    <div class="card">
+      <h2>Watch page</h2>
+      <label>Brand name <span class="muted">(header + footer)</span></label>
+      <input type="text" id="bkName" placeholder="RecruitersOS" />
+      <label>Logo URL <span class="muted">(https image)</span></label>
+      <input type="text" id="bkLogo" placeholder="https://yourdomain.com/logo.png" />
+      <label>Accent color</label>
+      <div class="row"><input type="color" id="bkAccent" value="#19c37d" /><span class="muted">play button + buttons</span></div>
+      <label>Reply-to email <span class="muted">(the "Reply" button)</span></label>
+      <input type="text" id="bkReply" placeholder="you@yourdomain.com" />
+    </div>
+    <div class="card">
+      <h2>Call to action</h2>
+      <label>Button label</label>
+      <input type="text" id="bkCtaText" placeholder="Book a call" />
+      <label>Button URL <span class="muted">(booking / calendar / landing)</span></label>
+      <input type="text" id="bkCtaUrl" placeholder="https://calendly.com/you/intro" />
+      <p class="muted" style="margin-top:14px">Track who watches in the <b>Performance</b> tab (updates live).</p>
+      <div class="row" style="margin-top:16px">
+        <button class="primary" id="bkSave">Save brand kit</button>
+        <span class="muted" id="bkStatus"></span>
+      </div>
+    </div>
+    <div class="card brandprev">
+      <h2>Live preview</h2>
+      <div class="wpv" id="bkPreview">
+        <div class="wpv-top" id="bkPvTop"><span class="wpv-brand">RecruitersOS</span></div>
+        <div class="wpv-h" id="bkPvTitle">Dana — a quick note about Airbnb</div>
+        <div class="wpv-player"><div class="wpv-play" id="bkPvPlay"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>
+        <div class="wpv-cta"><span class="wpv-btn" id="bkPvCta">Book a call</span><span class="wpv-btn ghost">Reply</span></div>
+      </div>
+      <p class="muted" style="margin-top:10px">This is what the recipient sees. The video plays in the player.</p>
     </div>
   </div>
 </div>
@@ -266,6 +369,10 @@
   <div class="card">
     <h2>Per-video performance</h2>
     <div id="leaderboard" class="lb"></div>
+  </div>
+  <div class="card">
+    <h2>Replies &amp; leads</h2>
+    <div id="leads" class="leads"></div>
   </div>
 </div>
 
