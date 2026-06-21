@@ -42,6 +42,8 @@
     shots: [],
     results: lsGet(LS.results, {}),   // { roleKey: { videoKey, company, roleTitle } }
     brand: null,                      // workspace brand kit (loaded from /settings)
+    filter: "all",                    // gallery filter: all | ready | todo
+    stats: {},                        // videoKey -> engagement row (for tile badges)
     voice: null,                      // cloned-voice + lip-sync status (loaded from /voice)
     bulkExport: null,                 // last bulk run, for CSV export
     stream: null, recorder: null, chunks: [], recordedBlob: null,
@@ -290,14 +292,41 @@
     api("/api/in-market/shot?list=1").then(function (j) { state.shots = (j && j.shots) || []; renderGallery(); cb && cb(); })
       .catch(function (e) { $("gallery").innerHTML = '<div class="empty">Could not load roles: ' + e.message + '</div>'; });
   }
-  $("btnRefresh").onclick = function () { loadGallery(); };
+  $("btnRefresh").onclick = function () { loadGallery(); loadStats(); };
   $("gsearch").oninput = renderGallery;
+  function hasVideo(s) { return !!(state.results[s.key] && state.results[s.key].videoKey); }
   function visibleRoles() {
-    var q = ($("gsearch").value || "").toLowerCase();
-    return state.shots.filter(function (s) { return !q || (s.company + " " + s.roleTitle).toLowerCase().indexOf(q) >= 0; });
+    var q = ($("gsearch").value || "").toLowerCase(), f = state.filter || "all";
+    return state.shots.filter(function (s) {
+      if (q && (s.company + " " + s.roleTitle).toLowerCase().indexOf(q) < 0) return false;
+      if (f === "ready") return hasVideo(s);
+      if (f === "todo") return !hasVideo(s);
+      return true;
+    });
+  }
+  // Gallery filter chips (All / Ready / To do) with live counts.
+  function bindFilters() {
+    var bar = $("galfilter"); if (!bar) return;
+    bar.querySelectorAll(".chipf").forEach(function (c) {
+      c.onclick = function () { state.filter = c.getAttribute("data-f"); bar.querySelectorAll(".chipf").forEach(function (x) { x.classList.toggle("on", x === c); }); renderGallery(); };
+    });
+  }
+  function updateFilterCounts() {
+    var bar = $("galfilter"); if (!bar) return;
+    var ready = state.shots.filter(hasVideo).length, total = state.shots.length;
+    var set = function (f, n) { var el = bar.querySelector('[data-f="' + f + '"] .cnt'); if (el) el.textContent = n; };
+    set("all", total); set("ready", ready); set("todo", total - ready);
+  }
+  // Live engagement stats -> tile badges + a quick pulse of the gallery.
+  function loadStats() {
+    api("/api/in-market/track?days=14").then(function (o) {
+      var map = {}; ((o && o.videos) || []).forEach(function (v) { map[v.videoKey] = v; });
+      state.stats = map; renderGallery();
+    }).catch(function () {});
   }
   function renderGallery() {
     var list = visibleRoles(), box = $("gallery");
+    updateFilterCounts();
     if (state.shots.length && !$("stage").querySelector("img.bg")) setStageBg(shotGif(state.shots[0].key));
     if (!list.length) { box.innerHTML = '<div class="empty">' + (state.shots.length ? "No matches." : "No captured roles yet — capture one below.") + "</div>"; return; }
     box.innerHTML = "";
@@ -349,6 +378,14 @@
     var thumb = t.querySelector(".thumb img");
     if (thumb) thumb.src = API + "/api/in-market/video?key=" + encodeURIComponent(vk) + "&fmt=gif";
     var go = t.querySelector(".thumb .go"); if (go) go.textContent = "↻ Re-render";
+    // Live engagement badge on the card (plays · visits) when the video has activity.
+    var st = state.stats[vk], thumbEl = t.querySelector(".thumb");
+    var old = thumbEl && thumbEl.querySelector(".eng"); if (old) old.remove();
+    if (st && thumbEl && (st.plays || st.opens)) {
+      var b = document.createElement("div"); b.className = "eng";
+      b.innerHTML = "▶ " + (st.plays || 0) + " · 👁 " + (st.opens || 0);
+      thumbEl.appendChild(b);
+    }
     var act = t.querySelector("[data-act]");
     var w = watchPage(vk, s.company, s.roleTitle);
     act.innerHTML =
@@ -802,7 +839,9 @@
 
   /* ---------------- init ---------------- */
   applyStyleControls();
+  bindFilters();
   loadGallery();
+  loadStats();          // engagement badges on the cards
   loadClips();
   loadBrand();          // load the brand kit so shared links are branded from the first generate
   loadVoice();          // cloned-voice + lip-sync readiness
