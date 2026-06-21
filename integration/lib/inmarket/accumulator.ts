@@ -18,6 +18,7 @@ import { enrichSizesBatch, outOfBandCompanyKeys } from "./companySize";
 import { resolveCompanyRoles } from "./companyRoles";
 import { resolveCompanyDomain } from "./domain";
 import { directoryBatch } from "./atsDirectory";
+import { runJobFeedSourcing, jobFeedEnabled } from "./jobFeed";
 import { loadSnapshot, saveSnapshot } from "../db";
 
 // Sectors to keep warm — mirrors the UI's industry chips (non-tech first, since those
@@ -100,6 +101,12 @@ let cursor = 0;
 let seedCursor = 0;
 let sizeCursor = 0;
 let directoryCursor = 0;
+// PAID JOB FEED (Active Jobs DB / RapidAPI) — the breadth lever past the free ceiling. Inert (no-op)
+// until RAPID_JOBS_KEY + RAPID_JOBS_HOST are set. Offset-rotated so each cycle pulls a fresh page;
+// bounded to the hourly cycle (not the 3-min inflow tick) to keep API spend predictable.
+const JOBFEED_PAGE = envNum("RAPID_JOBS_PAGE", 100);                 // job records per page (provider page size)
+const JOBFEED_PAGES_PER_CYCLE = envNum("RAPID_JOBS_PAGES_PER_CYCLE", 3);
+let jobFeedCursor = 0;
 
 /* ------------------------------------------------------------------ */
 /* Liveness heartbeat — so a silent death is detectable                */
@@ -207,6 +214,19 @@ async function runCycleInner(): Promise<void> {
     await mergeIntoPool(all);
   } catch {
     /* vacuum failed this tick; the targeted pulls below still run */
+  }
+
+  // 1.5) PAID JOB FEED — the breadth lever past the free ceiling. Pull a few offset-rotated pages of
+  //    real ATS jobs (any category, US) and merge into the pool, where the enrichment fleet turns them
+  //    into contacts. No-op (zero spend) until RAPID_JOBS_KEY + RAPID_JOBS_HOST are configured.
+  if (jobFeedEnabled()) {
+    for (let p = 0; p < JOBFEED_PAGES_PER_CYCLE; p++) {
+      let n = 0;
+      try { n = await runJobFeedSourcing({ location: "United States", limit: JOBFEED_PAGE, offset: jobFeedCursor }); }
+      catch { break; }
+      if (!n) { jobFeedCursor = 0; break; }   // ran out of data → restart paging next cycle
+      jobFeedCursor += JOBFEED_PAGE;
+    }
   }
 
   // 2) TARGETED DEPTH — rotate through sectors so the keyword-driven sources (Adzuna's
