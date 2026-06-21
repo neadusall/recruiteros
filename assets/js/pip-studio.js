@@ -42,6 +42,8 @@
     shots: [],
     results: lsGet(LS.results, {}),   // { roleKey: { videoKey, company, roleTitle } }
     brand: null,                      // workspace brand kit (loaded from /settings)
+    voice: null,                      // cloned-voice + lip-sync status (loaded from /voice)
+    bulkExport: null,                 // last bulk run, for CSV export
     stream: null, recorder: null, chunks: [], recordedBlob: null,
   };
   function saveStyle() { lsSet(LS.style, state.pip); }
@@ -308,6 +310,10 @@
         '<div class="act" data-act></div>';
       t.querySelector(".thumb").onclick = function () { setStageBg(shotGif(s.key)); generate(s); };
       box.appendChild(t);
+      // Bulk is available without single-generating first (the role is already captured).
+      var actEl = t.querySelector("[data-act]");
+      actEl.innerHTML = '<button class="ghost small cta" data-bulklist>👥 Personalize a list</button>';
+      actEl.querySelector("[data-bulklist]").onclick = function () { openBulk(s); };
       var prior = state.results[s.key];
       if (prior && prior.videoKey) renderResult(s, prior.videoKey); // restore prior generations
     });
@@ -350,11 +356,13 @@
         '<a class="lk" href="' + esc(w) + '" target="_blank" title="Open the watch page">▶ Watch</a>' +
         '<button data-link title="Copy the watch link (LinkedIn, SMS)">🔗 Link</button>' +
         '<button class="out" data-out title="Attach to the hiring-manager prospects at this company">→ Outreach</button>' +
+        '<button data-bulk title="Generate this role for a whole list of names (cloned voice + lip-synced)">👥 Bulk list</button>' +
       '</div>';
     act.querySelector("[data-email]").onclick = function () { copyRich(emailSnippet(vk, s.company, s.roleTitle)).then(function () { toast("Email snippet copied — paste into your sequence"); }); };
     act.querySelector("[data-link]").onclick = function () { copyText(w).then(function () { toast("Watch link copied"); }); };
     act.querySelector("[data-opener]").onclick = function () { openOpener(s, vk); };
     act.querySelector("[data-out]").onclick = function () { attachToOutreach(s, vk); };
+    act.querySelector("[data-bulk]").onclick = function () { openBulk(s); };
   }
 
   /* AI opener: draft a short email (Claude) that wraps this video, shown in a modal with a
@@ -645,11 +653,138 @@
     };
   })();
 
+  /* ================= voice clone + lip-sync ================= */
+  function loadVoice() {
+    api("/api/in-market/voice").then(function (j) { state.voice = j; renderVoice(); }).catch(function () {});
+  }
+  function renderVoice() {
+    var j = state.voice || {}, vs = $("voiceStatus"), ls = $("lipsyncStatus");
+    var clone = $("btnCloneVoice"), forget = $("btnForgetVoice");
+    if (!vs) return;
+    var hasVoice = !!(j.voice && j.voice.voiceId);
+    if (!j.providerConfigured) {
+      vs.innerHTML = '<span style="color:#ffe0a3">Voice not configured.</span> Set VOICE_CLONE_API_KEY (ElevenLabs) to clone your voice.';
+    } else if (hasVoice) {
+      vs.innerHTML = '<span style="color:#3fb950">✓ Your voice is cloned.</span> Every "Hey {name}," sounds like you.';
+    } else {
+      vs.innerHTML = 'Clone your voice from a saved clip so each "Hey {name}," sounds like you.';
+    }
+    if (clone) { clone.textContent = hasVoice ? "Re-clone from latest clip" : "Clone my voice"; clone.disabled = !j.providerConfigured; }
+    if (forget) forget.style.display = hasVoice ? "" : "none";
+    if (ls) {
+      if (j.lipSync && j.lipSync.configured) ls.innerHTML = '<span style="color:#3fb950">●</span> Lip-sync on (' + esc(j.lipSync.model) + '). The mouth matches the name.';
+      else ls.innerHTML = '<span style="color:#8b97a6">●</span> Lip-sync off. The name plays over a held frame. Set LIPSYNC_URL to enable.';
+    }
+  }
+  (function () {
+    var clone = $("btnCloneVoice"), forget = $("btnForgetVoice");
+    if (clone) clone.onclick = function () {
+      if (!state.clipId) { toast("Record or pick a clip first"); return; }
+      clone.disabled = true; var prev = clone.textContent; clone.textContent = "Cloning…";
+      api("/api/in-market/voice", { method: "POST", body: JSON.stringify({ action: "clone", clipId: state.clipId, force: true }) })
+        .then(function () { toast("Voice cloned. Your name intros now sound like you."); loadVoice(); })
+        .catch(function (e) { toast("Clone failed: " + e.message); clone.disabled = false; clone.textContent = prev; });
+    };
+    if (forget) forget.onclick = function () {
+      api("/api/in-market/voice", { method: "POST", body: JSON.stringify({ action: "forget" }) })
+        .then(function () { toast("Voice forgotten"); loadVoice(); }).catch(function (e) { toast(e.message); });
+    };
+  })();
+
+  /* ================= bulk personalization (thousands) ================= */
+  function bulkEmailSnippet(r) {
+    var w = withBrand(r.share.watch), g = r.share.gif;
+    var alt = "A quick note for " + (r.firstName || "you");
+    return '<a href="' + w + '" target="_blank" rel="noopener"><img src="' + g + '" alt="' + esc(alt) +
+      '" width="600" style="max-width:100%;border-radius:10px;border:1px solid #e5e7eb;display:block" /></a>';
+  }
+  function openBulk(s) {
+    if (!state.clipId) { toast("Record or pick a clip first"); return; }
+    showModal(
+      '<div class="mh"><b>Personalize for a list</b> <span class="muted" style="font-size:12px;margin-left:6px">' + esc(s.company) + ' · ' + esc(s.roleTitle) + '</span><button class="mx" data-close>✕</button></div>' +
+      '<p class="muted">One first name per line (or paste a column). Each becomes a video that opens <b>"Hey {name},"</b> in your cloned voice, lip-synced, then your recorded body.</p>' +
+      '<textarea id="bulkNames" rows="6" placeholder="Sarah&#10;Marcus&#10;Priya"></textarea>' +
+      '<div class="mfoot"><button class="primary small" id="bulkGo">Generate videos</button>' +
+        '<button class="ghost small" id="bulkCsv" style="display:none">⬇ Export CSV</button>' +
+        '<span class="muted" id="bulkProg" style="flex:1"></span><button class="ghost small" data-close>Close</button></div>' +
+      '<div id="bulkResults" style="margin-top:12px"></div>'
+    );
+    var box = $("modalBody");
+    box.querySelectorAll("[data-close]").forEach(function (b) { b.onclick = hideModal; });
+    $("bulkGo").onclick = function () { runBulk(s); };
+  }
+  function runBulk(s) {
+    var raw = ($("bulkNames").value || "").split(/[\n,;]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+    var seen = {}, names = [];
+    raw.forEach(function (n) { var k = n.toLowerCase(); if (!seen[k]) { seen[k] = 1; names.push(n); } });
+    if (!names.length) { toast("Add at least one name"); return; }
+    if (names.length > 1000) { toast("Max 1000 per batch — using the first 1000"); names = names.slice(0, 1000); }
+    var go = $("bulkGo"); go.disabled = true;
+    var payload = {
+      company: s.company, roleTitle: s.roleTitle, roleUrl: s.pageUrl,
+      clipId: state.clipId, pip: state.pip,
+      recipients: names.map(function (n) { return { firstName: n }; }),
+    };
+    var tries = 0;
+    (function poll() {
+      api("/api/in-market/bulk", { method: "POST", body: JSON.stringify(payload) }).then(function (j) {
+        var rows = j.results || [];
+        renderBulkResults(rows);
+        var ready = (j.summary && j.summary.ready) || 0;
+        $("bulkProg").textContent = ready + "/" + rows.length + " ready";
+        var composing = rows.some(function (r) { return r.status === "composing"; });
+        if (composing && tries++ < 240) { setTimeout(poll, 3000); return; }
+        go.disabled = false;
+        state.bulkExport = { s: s, rows: rows };
+        if (rows.some(function (r) { return r.status === "ready"; })) $("bulkCsv").style.display = "";
+        toast("Done. " + ready + " of " + rows.length + " ready.");
+      }).catch(function (e) { toast("Bulk failed: " + e.message); go.disabled = false; });
+    })();
+  }
+  function renderBulkResults(rows) {
+    var box = $("bulkResults"); if (!box) return;
+    if (!rows.length) { box.innerHTML = ""; return; }
+    var body = rows.map(function (r) {
+      var st = r.status === "ready" ? '<span class="pill-rate">ready</span>'
+        : r.status === "composing" ? '<span class="muted"><span class="spin"></span>working</span>'
+        : '<span style="color:#ffb4ba">' + esc(r.status) + "</span>";
+      var link = (r.status === "ready" && r.share) ? '<a href="' + esc(withBrand(r.share.watch)) + '" target="_blank">Watch</a>' : "—";
+      return '<tr><td class="l">' + esc(r.firstName) + "</td><td class=\"l\">" + st + '</td><td class="l">' + link + "</td></tr>";
+    }).join("");
+    box.innerHTML = '<div class="lb"><table class="lbt"><thead><tr><th class="l">Name</th><th class="l">Status</th><th class="l">Link</th></tr></thead><tbody>' + body + "</tbody></table></div>";
+    var csv = $("bulkCsv");
+    if (csv) csv.onclick = function () { exportBulkCsv(); };
+  }
+  function exportBulkCsv() {
+    var ex = state.bulkExport; if (!ex) return;
+    var rows = ex.rows.filter(function (r) { return r.status === "ready" && r.share; });
+    if (!rows.length) { toast("No ready videos to export yet"); return; }
+    var cols = ["first_name", "company", "role", "watch_url", "email_gif_url", "mp4_url", "email_html"];
+    var data = rows.map(function (r) {
+      return {
+        first_name: r.firstName, company: ex.s.company, role: ex.s.roleTitle,
+        watch_url: withBrand(r.share.watch), email_gif_url: r.share.gif, mp4_url: r.share.mp4,
+        email_html: bulkEmailSnippet(r),
+      };
+    });
+    var csv = cols.join(",") + "\r\n" + data.map(function (row) {
+      return cols.map(function (c) { return '"' + String(row[c]).replace(/"/g, '""') + '"'; }).join(",");
+    }).join("\r\n");
+    var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "pip-personalized-" + rows.length + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+    toast("Exported " + rows.length + " personalized videos to CSV");
+  }
+
   /* ---------------- init ---------------- */
   applyStyleControls();
   loadGallery();
   loadClips();
   loadBrand();          // load the brand kit so shared links are branded from the first generate
+  loadVoice();          // cloned-voice + lip-sync readiness
   renderPip();
   refreshBanner();
 })();

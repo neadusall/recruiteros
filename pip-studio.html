@@ -29,6 +29,9 @@
   input[type=text]:focus{outline:none;border-color:#2f4255}
   input[type=range]{width:100%;accent-color:var(--grn)}
   input[type=color]{width:42px;height:32px;border:1px solid var(--line);background:#0a0e13;border-radius:8px;padding:2px}
+  textarea{width:100%;background:#0a0e13;border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:9px 11px;font:inherit;resize:vertical}
+  textarea:focus{outline:none;border-color:#2f4255}
+  .voicetip{margin:8px 0 0;padding-left:18px;line-height:1.7;color:var(--mut);font-size:12px}
   .row{display:flex;gap:9px;align-items:center}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   button{cursor:pointer;border:1px solid var(--line);background:#19222d;color:var(--ink);border-radius:9px;padding:9px 14px;font:inherit;font-weight:600;transition:.12s}
@@ -226,6 +229,26 @@
           <span class="muted">Color</span><input type="color" id="borderColor" value="#19c37d" />
           <span class="muted" id="radiusWrap" style="display:none">Radius <input type="range" id="radius" min="0" max="50" value="18" style="width:90px" /></span>
         </div>
+      </details>
+    </div>
+
+    <div class="card" id="voiceCard">
+      <h2>🎙 Your voice <span class="hint">cloned name intro</span></h2>
+      <p class="muted" id="voiceStatus" style="margin:0 0 10px">Checking…</p>
+      <div class="row">
+        <button id="btnCloneVoice" class="primary small" style="flex:1">Clone my voice</button>
+        <button id="btnForgetVoice" class="ghost small" style="display:none">Forget</button>
+      </div>
+      <p class="muted" id="lipsyncStatus" style="margin:10px 0 0"></p>
+      <details>
+        <summary>Recording tips for great lip-sync</summary>
+        <ul class="voicetip">
+          <li>Start with your mouth closed and neutral, looking at the camera.</li>
+          <li>Even lighting on your face, lips in focus.</li>
+          <li>Hold still for the first second (the name is synced there).</li>
+          <li>Record at 30fps, 720p or better, face filling the frame.</li>
+          <li>Quiet room, decent mic. The same clip also clones your voice.</li>
+        </ul>
       </details>
     </div>
   </div>
