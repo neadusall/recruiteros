@@ -59,6 +59,9 @@ function sanitizeRow(raw: unknown): CuratedProspect | null {
     likelyEmail: email && email.includes("@") ? email : undefined,
     emailPattern: s(r.emailPattern, 40),
     emailSource: s(r.emailSource, 40),
+    emailCandidates: Array.isArray(r.emailCandidates)
+      ? r.emailCandidates.map((e) => s(e, 254)).filter((e): e is string => !!e && e.includes("@")).slice(0, 16)
+      : undefined,
     emailInvalid: r.emailInvalid === true ? true : undefined,
     emailValidated: r.emailValidated === true ? true : undefined,
     validatedAt: s(r.validatedAt, 40),

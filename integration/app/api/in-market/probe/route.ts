@@ -34,7 +34,17 @@ export async function GET(req: Request) {
   try {
     const { fleetStatus } = await import("../../../../lib/inmarket/fleet");
     const f = fleetStatus();
-    out.fleet = { online: f.online, totalNamesPerHour: f.totalNamesPerHour, health: f.health };
+    out.fleet = {
+      online: f.online,
+      totalNamesPerHour: f.totalNamesPerHour,
+      totalSourced: f.workers.reduce((s, w) => s + w.totalSourced, 0), // the BUILD half across the fleet
+      health: f.health,
+      workers: f.workers.map((w) => ({
+        id: w.id, online: w.online, namesPerHour: w.namesPerHour,
+        totalNamed: w.totalNamed, totalSourced: w.totalSourced,
+        status: w.health?.status ?? "idle",
+      })),
+    };
   } catch { /* fleet optional */ }
   try {
     const { engineHealth } = await import("../../../../lib/inmarket/accumulator");
@@ -48,6 +58,8 @@ export async function GET(req: Request) {
     out.total = fn.total;
     out.named = fn.named;
     out.namedRate = fn.namedRate;
+    out.namedByVia = fn.namedByVia; // which free source earned each name (EDGAR / team-site / CC / search …)
+    out.byTier = fn.byTier;         // confidence mix behind the rate
     out.byStatus = fn.byStatus;
     out.contactableRate = fn.contactableRate;
     out.domainRate = fn.domain?.resolverRate;

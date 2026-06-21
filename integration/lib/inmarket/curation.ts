@@ -54,6 +54,9 @@ export interface CuratedProspect {
   likelyEmail?: string;             // free syntax guess (unverified) OR a deep-pulled/found address
   emailPattern?: string;
   emailSource?: string;             // site_direct | site_pattern | guess | smtp_found | validated_external
+  /** ALL candidate addresses, ranked by real-world prevalence (best first, includes likelyEmail).
+   *  The SMTP validator walks these in order and promotes the first deliverable one to likelyEmail. */
+  emailCandidates?: string[];
   /* ---- lifecycle / tracking ---- */
   status: CurationStatus;
   curatedAt: string;
@@ -259,6 +262,9 @@ export function buildCuratedRow(lead: PoolLeadLite, role: string, dm: DecisionMa
     likelyEmail: dm.email?.email,
     emailPattern: dm.email?.pattern,
     emailSource: dm.emailSource,
+    // Keep the FULL ranked pattern set (best first), so when SMTP validation runs it tests every
+    // candidate in order and promotes the first deliverable one — not just this single top guess.
+    emailCandidates: dm.email?.email ? [dm.email.email, ...(dm.email.alternates ?? [])].filter(Boolean) : undefined,
     // a guess on a no-MX domain is dead on arrival — mark it invalid now so it never enrolls.
     emailInvalid: dm.emailDeliverable === false ? true : undefined,
     // the person's OWN published address (deep-pulled from the company site) is verified-grade —
@@ -302,6 +308,7 @@ export async function mergeCuratedRows(rows: CuratedProspect[]): Promise<{ newly
         likelyEmail: incoming.likelyEmail ?? prev.likelyEmail,
         emailPattern: incoming.emailPattern ?? prev.emailPattern,
         emailSource: incoming.emailSource ?? prev.emailSource,
+        emailCandidates: incoming.emailCandidates ?? prev.emailCandidates,
         status: prev.status === "contactable" ? "contactable" as const : "named" as const,
       } : incoming;
       const sameEmail = !!prev && (prev.likelyEmail ?? "") === (row.likelyEmail ?? "");

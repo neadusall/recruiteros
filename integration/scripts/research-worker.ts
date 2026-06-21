@@ -31,7 +31,7 @@ const MAIN = (process.env.WORKER_MAIN_URL || "").replace(/\/$/, "");
 const TOKEN = process.env.WORKER_TOKEN || "";
 const WORKER_ID = (process.env.WORKER_ID || hostname() || "worker").replace(/[^\w.\-]/g, "").slice(0, 60);
 const BATCH = Math.min(Math.max(Number(process.env.WORKER_BATCH) || 120, 1), 1000);
-const CONCURRENCY = Math.min(Math.max(Number(process.env.WORKER_CONCURRENCY) || 8, 1), 24);
+const CONCURRENCY = Math.min(Math.max(Number(process.env.WORKER_CONCURRENCY) || 6, 1), 24); // sustainable default (~85%)
 const IDLE_SLEEP_MS = Math.max(Number(process.env.WORKER_IDLE_SLEEP_MS) || 30_000, 5_000);
 const HTTP_TIMEOUT_MS = 30_000;
 const HEALTH_PORT = Math.min(65535, Math.max(0, Number(process.env.WORKER_HEALTH_PORT) || 0)); // 0 = off (opt-in)
@@ -39,8 +39,8 @@ const HEALTH_TOKEN = process.env.WORKER_HEALTH_TOKEN || ""; // optional bearer t
 // BUILD half: each box also SOURCES new companies from its OWN IP (its own job-board / API quota) and
 // ships them to the shared pool, so the fleet feeds itself instead of draining. Set WORKER_SOURCE_CAP=0
 // to make a box enrich-only.
-const SOURCE_CAP = Math.min(Math.max(Number(process.env.WORKER_SOURCE_CAP) || 250, 0), 1000);
-const SOURCE_INTERVAL_MS = Math.max(Number(process.env.WORKER_SOURCE_INTERVAL_MS) || 180_000, 60_000); // ≥1/min
+const SOURCE_CAP = Math.min(Math.max(Number(process.env.WORKER_SOURCE_CAP) || 200, 0), 1000);
+const SOURCE_INTERVAL_MS = Math.max(Number(process.env.WORKER_SOURCE_INTERVAL_MS) || 240_000, 60_000); // 4 min — sustainable
 const SOURCE_ENABLED = SOURCE_CAP > 0;
 
 if (!MAIN || !TOKEN) {
