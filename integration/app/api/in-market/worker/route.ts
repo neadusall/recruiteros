@@ -15,7 +15,8 @@
  */
 
 import { claimResearchBatch, mergeCuratedRows, type CuratedProspect, type CurationStatus } from "../../../../lib/inmarket/curation";
-import { recordClaim, recordSubmit, recordHealth } from "../../../../lib/inmarket/fleet";
+import { recordClaim, recordSubmit, recordHealth, recordSource } from "../../../../lib/inmarket/fleet";
+import type { InMarketLead } from "../../../../lib/inmarket/index";
 import { ok, fail, body } from "../../../../lib/api";
 
 export const dynamic = "force-dynamic";
@@ -67,7 +68,7 @@ function sanitizeRow(raw: unknown): CuratedProspect | null {
 
 export async function POST(req: Request) {
   if (!authed(req)) return fail("unauthorized", 401);
-  const b = await body<{ action?: string; limit?: number; rows?: unknown[]; worker?: string; health?: unknown }>(req);
+  const b = await body<{ action?: string; limit?: number; rows?: unknown[]; leads?: unknown[]; worker?: string; health?: unknown }>(req);
   const workerId = (s(b?.worker, 60) || "").replace(/[^\w.\-]/g, "").slice(0, 60); // sanitize id for telemetry
 
   // Every authenticated call may carry a health digest (workers piggyback it on claim/submit/heartbeat),
@@ -92,5 +93,21 @@ export async function POST(req: Request) {
     return ok({ ...res, accepted: rows.length, received: raw.length });
   }
 
-  return fail("bad_action", 422, { detail: "action must be claim | submit" });
+  // The "build" half of the loop: a worker discovered new companies from ITS OWN IP (its own board/API
+  // quota) and ships them to the shared pool. mergeIntoPool dedupes, caps, and drops staffing agencies,
+  // and they become claimable research jobs on the next claim — so the fleet feeds itself.
+  if (b?.action === "source") {
+    const raw = Array.isArray(b.leads) ? b.leads.slice(0, 3000) : [];
+    const leads = raw.filter(
+      (l): l is InMarketLead =>
+        !!l && typeof l === "object" && typeof (l as { company?: unknown }).company === "string" &&
+        (l as { company: string }).company.trim().length > 1,
+    );
+    const { mergeIntoPool } = await import("../../../../lib/inmarket/pool");
+    await mergeIntoPool(leads);
+    recordSource(workerId, leads.length);
+    return ok({ accepted: leads.length, received: raw.length });
+  }
+
+  return fail("bad_action", 422, { detail: "action must be claim | submit | source" });
 }

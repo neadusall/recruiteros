@@ -36,6 +36,12 @@ const IDLE_SLEEP_MS = Math.max(Number(process.env.WORKER_IDLE_SLEEP_MS) || 30_00
 const HTTP_TIMEOUT_MS = 30_000;
 const HEALTH_PORT = Math.min(65535, Math.max(0, Number(process.env.WORKER_HEALTH_PORT) || 0)); // 0 = off (opt-in)
 const HEALTH_TOKEN = process.env.WORKER_HEALTH_TOKEN || ""; // optional bearer to protect the endpoint
+// BUILD half: each box also SOURCES new companies from its OWN IP (its own job-board / API quota) and
+// ships them to the shared pool, so the fleet feeds itself instead of draining. Set WORKER_SOURCE_CAP=0
+// to make a box enrich-only.
+const SOURCE_CAP = Math.min(Math.max(Number(process.env.WORKER_SOURCE_CAP) || 250, 0), 1000);
+const SOURCE_INTERVAL_MS = Math.max(Number(process.env.WORKER_SOURCE_INTERVAL_MS) || 180_000, 60_000); // ≥1/min
+const SOURCE_ENABLED = SOURCE_CAP > 0;
 
 if (!MAIN || !TOKEN) {
   console.error("[worker] set WORKER_MAIN_URL and WORKER_TOKEN. Exiting.");
@@ -52,6 +58,7 @@ const ts = () => new Date().toISOString();
 const startedAt = Date.now();
 const stats = {
   cycles: 0, claimedTotal: 0, researchedTotal: 0, namedTotal: 0, submittedTotal: 0,
+  sourcedTotal: 0, lastSourcedAt: 0,
   lastCycleAt: 0, lastClaimed: 0, lastResearched: 0, lastNamed: 0,
   consecutiveFails: 0, lastError: "", lastErrorAt: 0,
 };
@@ -88,6 +95,8 @@ function buildHealth() {
       researchedTotal: stats.researchedTotal,
       namedTotal: stats.namedTotal,
       submittedTotal: stats.submittedTotal,
+      sourcedTotal: stats.sourcedTotal,
+      lastSourcedSecAgo: stats.lastSourcedAt ? Math.round((now - stats.lastSourcedAt) / 1000) : null,
       namedPerHour,
       lastCycleSecAgo: stats.lastCycleAt ? Math.round((now - stats.lastCycleAt) / 1000) : null,
       lastClaimed: stats.lastClaimed,
@@ -173,11 +182,33 @@ async function research(jobs: Job[]): Promise<CuratedProspect[]> {
   return rows;
 }
 
+/** BUILD half: discover new companies from THIS box's IP (its own job-board / API quota) and ship them
+ *  to the shared pool, so the fleet feeds itself. Self-gated to run at most every SOURCE_INTERVAL_MS;
+ *  never throws (a sourcing failure must not stop enrichment). */
+let lastSourceAt = 0;
+async function sourcePass(): Promise<void> {
+  if (!SOURCE_ENABLED || Date.now() - lastSourceAt < SOURCE_INTERVAL_MS) return;
+  lastSourceAt = Date.now();
+  try {
+    const { collectLeads } = await import("../lib/inmarket/index");
+    const leads = await collectLeads({}, ts(), SOURCE_CAP); // broad free-board vacuum from this box's IP
+    if (!leads.length) return;
+    const res = await callMain("source", { leads });
+    const accepted = Number(res.accepted ?? leads.length);
+    stats.sourcedTotal += accepted;
+    stats.lastSourcedAt = Date.now();
+    console.log(`[worker] ${ts()} sourced ${leads.length} companies → pool (accepted ${accepted})`);
+  } catch (e) {
+    console.error(`[worker] ${ts()} source error: ${(e as Error).message}`);
+  }
+}
+
 async function loop(): Promise<void> {
   startHealthServer();
-  console.log(`[worker] ${ts()} started "${WORKER_ID}" → ${MAIN} (batch ${BATCH}, concurrency ${CONCURRENCY})`);
+  console.log(`[worker] ${ts()} started "${WORKER_ID}" → ${MAIN} (batch ${BATCH}, concurrency ${CONCURRENCY}, sourcing ${SOURCE_ENABLED ? `${SOURCE_CAP}/${Math.round(SOURCE_INTERVAL_MS / 1000)}s` : "off"})`);
   for (;;) {
     try {
+      await sourcePass(); // build half — self-gated; keeps the pool fed so the fleet never starves
       // claim carries this box's health digest, so an idle box (no jobs) still heartbeats the fleet view.
       const claim = await callMain("claim", { limit: BATCH, health: healthDigest() });
       const jobs = (Array.isArray(claim.jobs) ? claim.jobs : []) as Job[];

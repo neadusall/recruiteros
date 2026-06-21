@@ -8,7 +8,7 @@
  */
 
 interface Ev { at: number; jobs: number; named: number }
-interface W { id: string; firstSeen: number; lastSeen: number; claims: number; totalJobs: number; totalNamed: number; ev: Ev[]; health?: WorkerHealth }
+interface W { id: string; firstSeen: number; lastSeen: number; claims: number; totalJobs: number; totalNamed: number; totalSourced: number; ev: Ev[]; health?: WorkerHealth }
 
 /** Compact per-box health digest reported by each worker on its heartbeat (claim/submit). Self-reported
  *  telemetry from a token-authenticated box — coerced defensively where it's recorded. */
@@ -34,7 +34,7 @@ function get(id: string): W {
       if (stalest) fleet.delete(stalest);
     }
     const now = Date.now();
-    w = { id, firstSeen: now, lastSeen: now, claims: 0, totalJobs: 0, totalNamed: 0, ev: [] };
+    w = { id, firstSeen: now, lastSeen: now, claims: 0, totalJobs: 0, totalNamed: 0, totalSourced: 0, ev: [] };
     fleet.set(id, w);
   }
   return w;
@@ -45,6 +45,14 @@ export function recordClaim(id: string, count: number): void {
   const w = get(id);
   w.lastSeen = Date.now();
   w.claims += Math.max(0, count);
+}
+
+/** A worker shipped freshly-SOURCED companies to the pool (the "build" half). */
+export function recordSource(id: string, count: number): void {
+  if (!id) return;
+  const w = get(id);
+  w.lastSeen = Date.now();
+  w.totalSourced += Math.max(0, count);
 }
 
 export function recordSubmit(id: string, jobs: number, named: number): void {
@@ -92,6 +100,8 @@ export interface FleetWorker {
   namesPerHour: number;
   totalJobs: number;
   totalNamed: number;
+  /** Companies this box has SOURCED into the pool (the build half). */
+  totalSourced: number;
   /** Latest self-reported health digest from the box (undefined until it heartbeats). */
   health?: WorkerHealth;
 }
@@ -120,6 +130,7 @@ export function fleetStatus(): FleetStatus {
       namesPerHour: Math.round((names60 / Math.min(60, elapsedMin)) * 60),
       totalJobs: w.totalJobs,
       totalNamed: w.totalNamed,
+      totalSourced: w.totalSourced,
       health: w.health,
     });
   }
