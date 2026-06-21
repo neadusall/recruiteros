@@ -41,6 +41,7 @@
     clipId: lsGet(LS.clip, null),
     shots: [],
     results: lsGet(LS.results, {}),   // { roleKey: { videoKey, company, roleTitle } }
+    brand: null,                      // workspace brand kit (loaded from /settings)
     stream: null, recorder: null, chunks: [], recordedBlob: null,
   };
   function saveStyle() { lsSet(LS.style, state.pip); }
@@ -51,7 +52,21 @@
   // Prefer the SERVER-SIGNED share URLs (exp+sig) returned by /video; fall back to an unsigned
   // shape only if we don't have them yet (re-render mints fresh signed links).
   function shareFor(vk) { for (var k in state.results) { if (state.results[k] && state.results[k].videoKey === vk) return state.results[k].share || null; } return null; }
-  function watchPage(vk, co, ro) { var s = shareFor(vk); if (s && s.watch) return s.watch; return origin() + "/watch?k=" + encodeURIComponent(vk) + "&c=" + encodeURIComponent(co || "") + "&r=" + encodeURIComponent(ro || ""); }
+  // Bake the workspace brand kit into a watch link so the recipient page renders branded.
+  function withBrand(url) {
+    var b = state.brand; if (!b) return url;
+    var p = [];
+    if (b.brandName) p.push("bn=" + encodeURIComponent(b.brandName));
+    if (b.logoUrl) p.push("logo=" + encodeURIComponent(b.logoUrl));
+    if (b.accent) p.push("ac=" + encodeURIComponent(b.accent));
+    if (b.ctaText) p.push("cta=" + encodeURIComponent(b.ctaText));
+    if (b.ctaUrl) p.push("ctaurl=" + encodeURIComponent(b.ctaUrl));
+    if (b.calendarUrl) p.push("cal=" + encodeURIComponent(b.calendarUrl));
+    if (b.replyEmail) p.push("e=" + encodeURIComponent(b.replyEmail));
+    if (!p.length) return url;
+    return url + (url.indexOf("?") >= 0 ? "&" : "?") + p.join("&");
+  }
+  function watchPage(vk, co, ro) { var s = shareFor(vk); if (s && s.watch) return withBrand(s.watch); return withBrand(origin() + "/watch?k=" + encodeURIComponent(vk) + "&c=" + encodeURIComponent(co || "") + "&r=" + encodeURIComponent(ro || "")); }
   function publicGif(vk) { var s = shareFor(vk); if (s && s.gif) return s.gif; return origin() + "/api/in-market/watch?key=" + encodeURIComponent(vk) + "&fmt=gif"; }
   function emailSnippet(vk, co, ro) {
     var w = watchPage(vk, co, ro), g = publicGif(vk);
@@ -490,16 +505,18 @@
   /* ================= PERFORMANCE dashboard ================= */
   var perfTimer = null;
   function showView(which) {
-    var perf = which === "perf";
-    $("createView").style.display = perf ? "none" : "";
-    $("perfView").style.display = perf ? "" : "none";
-    $("tabCreate").classList.toggle("on", !perf);
-    $("tabPerf").classList.toggle("on", perf);
-    if (perf) { loadPerf(); if (!perfTimer) perfTimer = setInterval(loadPerf, 15000); }
+    var views = { create: "createView", perf: "perfView", brand: "brandView" };
+    Object.keys(views).forEach(function (k) { var el = $(views[k]); if (el) el.style.display = (k === which ? "" : "none"); });
+    $("tabCreate").classList.toggle("on", which === "create");
+    $("tabPerf").classList.toggle("on", which === "perf");
+    var tb = $("tabBrand"); if (tb) tb.classList.toggle("on", which === "brand");
+    if (which === "perf") { loadPerf(); if (!perfTimer) perfTimer = setInterval(loadPerf, 15000); }
     else if (perfTimer) { clearInterval(perfTimer); perfTimer = null; }
+    if (which === "brand") loadBrand();
   }
   $("tabCreate").onclick = function () { showView("create"); };
   $("tabPerf").onclick = function () { showView("perf"); };
+  var tbEl = $("tabBrand"); if (tbEl) tbEl.onclick = function () { showView("brand"); };
   $("perfRefresh").onclick = function () { loadPerf(); };
 
   function loadPerf() {
@@ -588,10 +605,51 @@
       rows + "</tbody></table>";
   }
 
+  /* ================= BRAND kit ================= */
+  var brandFields = { bkName: "brandName", bkLogo: "logoUrl", bkAccent: "accent", bkReply: "replyEmail", bkCtaText: "ctaText", bkCtaUrl: "ctaUrl" };
+  function loadBrand() {
+    api("/api/in-market/settings").then(function (j) {
+      state.brand = j.settings || {};
+      fillBrandForm();
+      brandPreview();
+    }).catch(function () {});
+  }
+  function fillBrandForm() {
+    var b = state.brand || {};
+    Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) el.value = b[brandFields[id]] || (id === "bkAccent" ? "#19c37d" : ""); });
+  }
+  function readBrandForm() {
+    var out = {};
+    Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) out[brandFields[id]] = el.value.trim(); });
+    return out;
+  }
+  function brandPreview() {
+    var b = readBrandForm();
+    var ac = /^#[0-9a-f]{6}$/i.test(b.accent) ? b.accent : "#19c37d";
+    var pv = $("bkPreview"); if (!pv) return;
+    pv.style.setProperty("--brandac", ac);
+    var top = $("bkPvTop");
+    top.innerHTML = /^https?:\/\//i.test(b.logoUrl) ? '<img src="' + esc(b.logoUrl) + '" alt="" />' : '<span class="wpv-brand">' + esc(b.brandName || "RecruitersOS") + "</span>";
+    $("bkPvCta").textContent = b.ctaText || "Book a call";
+  }
+  // Live preview + persist-on-edit for the brand form.
+  (function () {
+    Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) el.addEventListener("input", brandPreview); });
+    var save = $("bkSave");
+    if (save) save.onclick = function () {
+      save.disabled = true; $("bkStatus").textContent = "Saving…";
+      api("/api/in-market/settings", { method: "PUT", body: JSON.stringify(readBrandForm()) })
+        .then(function (j) { state.brand = j.settings || {}; fillBrandForm(); brandPreview(); $("bkStatus").textContent = "Saved ✓ — applies to every video you share."; toast("Brand kit saved"); })
+        .catch(function (e) { $("bkStatus").textContent = "Save failed: " + e.message; })
+        .then(function () { save.disabled = false; });
+    };
+  })();
+
   /* ---------------- init ---------------- */
   applyStyleControls();
   loadGallery();
   loadClips();
+  loadBrand();          // load the brand kit so shared links are branded from the first generate
   renderPip();
   refreshBanner();
 })();
