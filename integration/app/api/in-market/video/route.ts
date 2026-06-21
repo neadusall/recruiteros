@@ -50,6 +50,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
+  const ws = g.ctx.workspace.id;
 
   const b = await body<any>(req);
   const company = String(b?.company ?? "").trim();
@@ -65,11 +66,14 @@ export async function POST(req: Request) {
     roleUrl: b?.roleUrl ? String(b.roleUrl) : undefined,
     domain: b?.domain ? String(b.domain) : undefined,
   };
+  // Resolve the voice that speaks the name: explicit override -> this workspace's own clone ->
+  // env default. So once the operator clones their voice, every personalized render uses it.
+  const { resolveVoiceId } = await import("../../../../lib/inmarket/voiceClone");
   const opts = {
     force: b?.force === true,
-    // Personalized cloned-voice "Hey {firstName}," intro (optional). voiceId defaults to env.
+    // Personalized cloned-voice "Hey {firstName}," intro (optional).
     firstName: b?.firstName ? String(b.firstName) : undefined,
-    voiceId: b?.voiceId ? String(b.voiceId) : undefined,
+    voiceId: await resolveVoiceId(ws, b?.voiceId ? String(b.voiceId) : undefined),
   };
   const result = b?.wait === true
     ? await composeRoleVideo(reqShot, clipId, b?.pip, opts)
