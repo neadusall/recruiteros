@@ -333,6 +333,8 @@
           if (res.status === "composing") { if (tries++ > 48) { resultErr(s, "timed out"); return resolve(false); } setTimeout(tick, 2500); return; }
           if (res.status === "ready") {
             state.results[s.key] = { videoKey: res.key, company: s.company, roleTitle: s.roleTitle, share: res.share }; saveResults();
+            // Register ownership so watch-page replies route back to this workspace + operator.
+            api("/api/in-market/own", { method: "POST", body: JSON.stringify({ videoKey: res.key, company: s.company, roleTitle: s.roleTitle }) }).catch(function () {});
             renderResult(s, res.key); resolve(true);
           } else { resultErr(s, genReason(res)); resolve(false); }
         }).catch(function (e) { resultErr(s, e.message); resolve(false); });
@@ -562,6 +564,25 @@
     $("chart").innerHTML = chartSvg((o && o.trend) || []);
     renderFeed((o && o.recent) || []);
     renderLeaderboard((o && o.videos) || []);
+    loadLeads();
+  }
+
+  // Replies & leads captured on the watch pages.
+  function loadLeads() {
+    var box = $("leads"); if (!box) return;
+    api("/api/in-market/lead").then(function (j) {
+      var leads = (j && j.leads) || [];
+      if (!leads.length) { box.innerHTML = '<div class="empty">No replies yet. They land here when a prospect responds on a watch page.</div>'; return; }
+      box.innerHTML = leads.slice(0, 50).map(function (l) {
+        var who = esc(l.name || l.email || "Anonymous");
+        var ctx = [l.company, l.roleTitle].filter(Boolean).map(esc).join(" · ");
+        return '<div class="leaditem">' +
+          '<div class="lhead"><b>' + who + "</b>" + (ctx ? ' <span class="muted">· ' + ctx + "</span>" : "") + '<span class="ago">' + ago(l.at) + "</span></div>" +
+          (l.message ? '<div class="lmsg">' + esc(l.message) + "</div>" : "") +
+          (l.email ? '<a class="lreply" href="mailto:' + esc(l.email) + '">Reply to ' + esc(l.email) + " →</a>" : "") +
+          "</div>";
+      }).join("");
+    }).catch(function () {});
   }
 
   // Inline SVG area+line chart for the daily plays trend (no external libs).

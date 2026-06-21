@@ -110,6 +110,14 @@
   .wpv-btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
   @media(max-width:980px){.brandgrid{grid-template-columns:1fr}}
 
+  /* replies & leads */
+  .leads{display:flex;flex-direction:column;gap:10px}
+  .leaditem{border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:#0a0e13}
+  .leaditem .lhead{display:flex;align-items:center;gap:6px;font-size:13px}
+  .leaditem .lhead .ago{margin-left:auto;color:var(--mut);font-size:11px}
+  .leaditem .lmsg{margin-top:6px;font-size:13px;color:#cdd6e0;white-space:pre-wrap}
+  .leaditem .lreply{display:inline-block;margin-top:8px;font-size:12px;color:var(--grn);text-decoration:none;font-weight:600}
+
   /* view tabs */
   .viewtabs{display:flex;gap:4px;background:#0a0e13;border:1px solid var(--line);border-radius:10px;padding:3px}
   .vt{background:transparent;border:none;color:var(--mut);padding:6px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer}
@@ -350,6 +358,10 @@
   <div class="card">
     <h2>Per-video performance</h2>
     <div id="leaderboard" class="lb"></div>
+  </div>
+  <div class="card">
+    <h2>Replies &amp; leads</h2>
+    <div id="leads" class="leads"></div>
   </div>
 </div>
 
