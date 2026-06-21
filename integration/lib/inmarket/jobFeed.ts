@@ -88,6 +88,7 @@ export function mapJobsToLeads(arr: RawJob[], category?: string): InMarketLead[]
       company: e.company,
       domain: e.domain,
       location: e.location,
+      sourceUrl: e.roles[0]?.url, // the posting link → feeds roleShot to find+screenshot the company-site job
       reason: n > 1 ? `Hiring ${n} roles (incl. "${e.roles[0].title}")` : `Hiring: ${e.roles[0].title}`,
       signalType: n > 1 ? "hiring_velocity" : "job_posting",
       score,
