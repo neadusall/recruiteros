@@ -55,7 +55,7 @@
   function publicGif(vk) { var s = shareFor(vk); if (s && s.gif) return s.gif; return origin() + "/api/in-market/watch?key=" + encodeURIComponent(vk) + "&fmt=gif"; }
   function emailSnippet(vk, co, ro) {
     var w = watchPage(vk, co, ro), g = publicGif(vk);
-    var alt = "A quick note about " + (co || "your team") + (ro ? " — " + ro : "");
+    var alt = "A quick note about " + (co || "your team") + (ro ? ", " + ro : "");
     return '<a href="' + w + '" target="_blank" rel="noopener">' +
       '<img src="' + g + '" alt="' + esc(alt) + '" width="600" ' +
       'style="max-width:100%;border-radius:10px;border:1px solid #e5e7eb;display:block" /></a>';
@@ -93,8 +93,36 @@
   function ready() { return !!state.clipId; }
   function refreshBanner() {
     var b = $("banner");
-    if (!ready()) { b.style.display = ""; b.textContent = "Record or pick a clip on the left, then click a role to personalize it."; }
+    if (!ready()) { b.style.display = ""; b.textContent = "Record or select an intro clip on the left, then pick a role to personalize it."; }
     else b.style.display = "none";
+    renderWorkflow();
+  }
+
+  /* Live workflow guide: reflects real state (clip → style → generated → send) and tells the
+     operator the single next action. Keeps the whole pipeline legible at a glance. */
+  function renderWorkflow() {
+    var strip = $("wfstrip"); if (!strip) return;
+    var hasClip = !!state.clipId;
+    var resCount = Object.keys(state.results || {}).length;
+    var steps = [
+      { done: hasClip, active: !hasClip },                    // 1 record
+      { done: hasClip, active: false },                       // 2 style (set once clip exists)
+      { done: resCount > 0, active: hasClip && resCount === 0 }, // 3 generate
+      { done: false, active: resCount > 0 },                  // 4 send & track
+    ];
+    var els = strip.querySelectorAll(".wfstep");
+    var seps = strip.querySelectorAll(".wfsep");
+    steps.forEach(function (st, i) {
+      var el = els[i]; if (!el) return;
+      el.classList.toggle("done", st.done); el.classList.toggle("active", st.active);
+      el.querySelector(".wn").textContent = st.done ? "✓" : String(i + 1);
+      if (seps[i]) seps[i].classList.toggle("done", st.done);
+    });
+    var next = $("wfnext");
+    if (!hasClip) next.innerHTML = "Start by recording a short intro clip on the left.";
+    else if (resCount === 0) next.innerHTML = "Pick any role to generate your first personalized video.";
+    else next.innerHTML = '<span class="ok">' + resCount + " video" + (resCount > 1 ? "s" : "") + ' ready.</span> Use <b>Add to outreach</b> on a card to attach it, or open <a href="#" id="wfPerf">Performance</a> to track engagement.';
+    var wp = $("wfPerf"); if (wp) wp.onclick = function (e) { e.preventDefault(); showView("perf"); };
   }
 
   /* ================= 1 · clip ================= */
@@ -119,7 +147,7 @@
     recTimer = setInterval(function () {
       var ms = Date.now() - recStart, t = fmtT(ms);
       // Gentle guidance: green in the sweet spot (8–25s), amber past 45s.
-      var hint = ms < 8000 ? "keep going…" : ms <= 25000 ? "good length — wrap when ready" : ms <= 45000 ? "" : "getting long";
+      var hint = ms < 8000 ? "keep going" : ms <= 25000 ? "good length, wrap when ready" : ms <= 45000 ? "" : "getting long";
       $("recHint").innerHTML = '<span style="color:#ff6b6b">●</span> Recording <b>' + t + "</b>" + (hint ? ' · <span class="muted">' + hint + "</span>" : "");
     }, 250);
   }
@@ -135,26 +163,26 @@
       stopTimer();
       state.recordedBlob = new Blob(state.chunks, { type: (state.recorder.mimeType || mime || "video/webm").split(";")[0] });
       preview.srcObject = null; preview.src = URL.createObjectURL(state.recordedBlob); preview.muted = false; preview.controls = true;
-      $("btnSave").disabled = false; $("btnDiscard").disabled = false; $("btnRec").textContent = "● Record";
-      $("recHint").textContent = "Preview it, then Save (or Discard and re-record).";
+      $("btnSave").disabled = false; $("btnDiscard").disabled = false; $("btnRec").textContent = "Record";
+      $("recHint").textContent = "Play it back, then Save clip. Not happy with it? Discard and record again.";
     };
     state.recorder.start();
     startTimer();
-    $("btnRec").textContent = "■ Stop"; $("btnSave").disabled = true; $("btnDiscard").disabled = true;
+    $("btnRec").textContent = "Stop"; $("btnSave").disabled = true; $("btnDiscard").disabled = true;
   };
   $("btnDiscard").onclick = function () {
     state.recordedBlob = null; preview.src = ""; preview.controls = false; preview.muted = true;
     if (state.stream) { preview.srcObject = state.stream; preview.play(); }
     $("btnSave").disabled = true; $("btnDiscard").disabled = true;
-    $("recHint").textContent = "Talk for ~10–20s. The page scroll loops behind you.";
+    $("recHint").textContent = "Aim for about 10 to 20 seconds. The careers page scrolls behind you.";
   };
   $("btnSave").onclick = function () {
     if (!state.recordedBlob) return;
-    $("btnSave").disabled = true; $("recHint").textContent = "Saving…";
+    $("btnSave").disabled = true; $("recHint").textContent = "Saving...";
     var reader = new FileReader();
     reader.onload = function () {
       api("/api/in-market/clip", { method: "POST", body: JSON.stringify({ dataUrl: reader.result }) })
-        .then(function (j) { state.clipId = j.clip.id; lsSet(LS.clip, state.clipId); $("recHint").textContent = "Saved ✓ — now click a role."; loadClips(); refreshBanner(); })
+        .then(function (j) { state.clipId = j.clip.id; lsSet(LS.clip, state.clipId); $("recHint").textContent = "Saved. Now pick a role on the right."; loadClips(); refreshBanner(); })
         .catch(function (e) { $("recHint").textContent = "Save failed: " + e.message; $("btnSave").disabled = false; });
     };
     reader.readAsDataURL(state.recordedBlob);
@@ -282,13 +310,13 @@
   function renderGallery() {
     var list = visibleRoles(), box = $("gallery");
     if (state.shots.length && !$("stage").querySelector("img.bg")) setStageBg(shotGif(state.shots[0].key));
-    if (!list.length) { box.innerHTML = '<div class="empty">' + (state.shots.length ? "No matches." : "No captured roles yet — capture one below.") + "</div>"; return; }
+    if (!list.length) { box.innerHTML = '<div class="empty">' + (state.shots.length ? "No matches." : "No roles yet. Use \"Add a new role\" below to capture one.") + "</div>"; return; }
     box.innerHTML = "";
     list.forEach(function (s) {
       var t = document.createElement("div");
       t.className = "tile"; t.setAttribute("data-key", s.key);
       t.innerHTML =
-        '<div class="thumb"><img loading="lazy" src="' + shotGif(s.key) + '" alt="" /><div class="go">⚡ Personalize</div></div>' +
+        '<div class="thumb"><img loading="lazy" src="' + shotGif(s.key) + '" alt="" /><div class="go">Personalize</div></div>' +
         '<div class="lbl"><div class="co">' + esc(s.company || "—") + '</div><div class="ro">' + esc(s.roleTitle || "") + '</div></div>' +
         '<div class="act" data-act></div>';
       t.querySelector(".thumb").onclick = function () { setStageBg(shotGif(s.key)); generate(s); };
@@ -302,7 +330,7 @@
   function generate(s, opts) {
     opts = opts || {};
     if (!ready()) { refreshBanner(); return Promise.resolve(false); }
-    var t = tileEl(s.key); if (t) { var a = t.querySelector("[data-act]"); if (a) a.innerHTML = '<span class="muted"><span class="spin"></span>Rendering…</span>'; }
+    var t = tileEl(s.key); if (t) { var a = t.querySelector("[data-act]"); if (a) a.innerHTML = '<span class="muted"><span class="spin"></span>Rendering...</span>'; }
     var payload = { company: s.company, roleTitle: s.roleTitle, roleUrl: s.pageUrl, clipId: state.clipId, pip: state.pip, force: !!opts.force };
     return new Promise(function (resolve) {
       var tries = 0;
@@ -325,27 +353,28 @@
     // the personalized result, not the plain page capture. Operator is authed -> video endpoint.
     var thumb = t.querySelector(".thumb img");
     if (thumb) thumb.src = API + "/api/in-market/video?key=" + encodeURIComponent(vk) + "&fmt=gif";
-    var go = t.querySelector(".thumb .go"); if (go) go.textContent = "↻ Re-render";
+    var go = t.querySelector(".thumb .go"); if (go) go.textContent = "Re-render";
     var act = t.querySelector("[data-act]");
     var w = watchPage(vk, s.company, s.roleTitle);
     act.innerHTML =
-      '<button class="primary small cta" data-email title="Copy a clickable GIF for your email">✉ Copy email</button>' +
+      '<button class="primary small cta" data-email title="Copy a clickable video for your email">Copy email</button>' +
       '<div class="grid">' +
-        '<button data-opener title="Draft an AI email opener (Claude) that wraps this video">✨ Opener</button>' +
-        '<a class="lk" href="' + esc(w) + '" target="_blank" title="Open the watch page">▶ Watch</a>' +
-        '<button data-link title="Copy the watch link (LinkedIn, SMS)">🔗 Link</button>' +
-        '<button class="out" data-out title="Attach to the hiring-manager prospects at this company">→ Outreach</button>' +
+        '<button data-opener title="Draft an email opener with Claude that wraps this video">AI opener</button>' +
+        '<a class="lk" href="' + esc(w) + '" target="_blank" title="Open the watch page">Watch</a>' +
+        '<button data-link title="Copy the watch link for LinkedIn or SMS">Copy link</button>' +
+        '<button class="out" data-out title="Attach to the hiring managers at this company">Add to outreach</button>' +
       '</div>';
-    act.querySelector("[data-email]").onclick = function () { copyRich(emailSnippet(vk, s.company, s.roleTitle)).then(function () { toast("Email snippet copied — paste into your sequence"); }); };
+    act.querySelector("[data-email]").onclick = function () { copyRich(emailSnippet(vk, s.company, s.roleTitle)).then(function () { toast("Email copied. Paste it into your sequence."); }); };
     act.querySelector("[data-link]").onclick = function () { copyText(w).then(function () { toast("Watch link copied"); }); };
     act.querySelector("[data-opener]").onclick = function () { openOpener(s, vk); };
     act.querySelector("[data-out]").onclick = function () { attachToOutreach(s, vk); };
+    renderWorkflow();
   }
 
   /* AI opener: draft a short email (Claude) that wraps this video, shown in a modal with a
      rendered preview + copy. Falls back to a built-in template server-side when no key. */
   function openOpener(s, vk) {
-    showModal('<div class="muted"><span class="spin"></span> Drafting opener for ' + esc(s.company) + ' — ' + esc(s.roleTitle) + '…</div>');
+    showModal('<div class="muted"><span class="spin"></span> Drafting opener for ' + esc(s.company) + ', ' + esc(s.roleTitle) + '...</div>');
     api("/api/in-market/opener", { method: "POST", body: JSON.stringify({
       company: s.company, roleTitle: s.roleTitle, videoKey: vk,
       watchUrl: watchPage(vk, s.company, s.roleTitle), gifUrl: publicGif(vk),
@@ -355,13 +384,13 @@
       var e1html = esc(e1.bodyFilled || e1.body).replace(/\n/g, "<br>");
       var e2html = d.bodyHtml || esc(d.body).replace(/\n/g, "<br>"); // email 2 carries the video
       showModal(
-        '<div class="mh"><b>Email sequence</b> ' + badge + '<span class="muted" style="margin-left:8px;font-size:12px">text intro → video follow-up</span><button class="mx" data-close>✕</button></div>' +
-        '<div class="seqstep"><div class="mlbl" data-step="1">Email 1 · text intro <span class="muted">(first touch — no video)</span></div>' +
+        '<div class="mh"><b>Email sequence</b> ' + badge + '<span class="muted" style="margin-left:8px;font-size:12px">text intro, then video follow up</span><button class="mx" data-close>✕</button></div>' +
+        '<div class="seqstep"><div class="mlbl" data-step="1">Email 1, text intro <span class="muted">(first touch, no video)</span></div>' +
           '<div class="msub">' + esc(e1.subject) + '</div>' +
           '<div class="mbody">' + e1html + '</div>' +
           '<div class="mfoot"><button class="ghost small" data-cpy-e1>Copy email 1 (text)</button></div></div>' +
         '<div class="arrow">↓</div>' +
-        '<div class="seqstep"><div class="mlbl" data-step="2">Email 2 · video follow-up <span class="muted">(sent a few days later)</span></div>' +
+        '<div class="seqstep"><div class="mlbl" data-step="2">Email 2, video follow up <span class="muted">(sent a few days later)</span></div>' +
           '<div class="msub">' + esc(d.subject) + '</div>' +
           '<div class="mbody">' + e2html + '</div>' +
           '<div class="mfoot">' +
@@ -373,8 +402,8 @@
       );
       var box = $("modalBody");
       box.querySelectorAll("[data-close]").forEach(function (b) { b.onclick = hideModal; });
-      box.querySelector("[data-cpy-e1]").onclick = function () { copyText(e1.bodyFilled || e1.body).then(function () { toast("Email 1 (text) copied — send this first"); }); };
-      box.querySelector("[data-cpy-html]").onclick = function () { copyRich(e2html).then(function () { toast("Email 2 copied (with video) — send as the follow-up"); }); };
+      box.querySelector("[data-cpy-e1]").onclick = function () { copyText(e1.bodyFilled || e1.body).then(function () { toast("Email 1 (text) copied. Send this first."); }); };
+      box.querySelector("[data-cpy-html]").onclick = function () { copyRich(e2html).then(function () { toast("Email 2 copied (with video). Send it as the follow up."); }); };
       box.querySelector("[data-cpy-text]").onclick = function () { copyText(d.body).then(function () { toast("Email 2 text copied (keeps {{videoembed}} merge field)"); }); };
     }).catch(function (e) { showModal('<div class="mh"><b>Opener failed</b><button class="mx" data-close>✕</button></div><p class="muted">' + esc(e.message) + "</p>"); $("modalBody").querySelector("[data-close]").onclick = hideModal; });
   }
@@ -385,24 +414,30 @@
   function attachToOutreach(s, vk) {
     api("/api/in-market/attach?company=" + encodeURIComponent(s.company)).then(function (j) {
       var n = (j && j.count) || 0;
-      if (!n) { toast("No prospects at " + s.company + " yet — promote them from Hire Signals first"); return; }
-      if (!confirm("Attach the 2-email sequence (text intro → video follow-up) to " + n + " prospect" + (n > 1 ? "s" : "") + " at " + s.company + "?\nThe video is the SECOND touch; signed links are generated automatically.")) return;
+      if (!n) { toast("No prospects at " + s.company + " yet. Promote them from Hire Signals first."); return; }
+      if (!confirm("Attach the 2 email sequence (text intro, then video follow up) to " + n + " prospect" + (n > 1 ? "s" : "") + " at " + s.company + "?\nThe video is the second touch. Secure links are generated automatically.")) return;
       api("/api/in-market/attach", { method: "POST", body: JSON.stringify({
         videoKey: vk, roleTitle: s.roleTitle, company: s.company,
         clipId: state.clipId, pip: state.pip, roleUrl: s.pageUrl, // enable per-recipient "Hey {name}" intros
       }) }).then(function (r) {
         var msg = "Sequence attached to " + (r.attached || 0) + " prospect(s) at " + s.company;
-        if (r.personalizedNames) msg += " · " + r.personalizedNames + ' personalized "Hey {name}" intro' + (r.personalizedNames > 1 ? "s" : "");
-        if (r.armed) msg += r.automationOn ? " — sending email 1 now, video follow-up in a few days" : " — armed (turn on automation to send)";
+        if (r.personalizedNames) msg += ", " + r.personalizedNames + ' personalized "Hi {name}" intro' + (r.personalizedNames > 1 ? "s" : "");
+        if (r.armed) msg += r.automationOn ? ". Sending email 1 now, video follow up in a few days." : ". Armed. Turn on automation to send.";
         toast(msg);
       })
         .catch(function (e) { toast("Attach failed: " + e.message); });
     }).catch(function (e) { toast("Lookup failed: " + e.message); });
   }
-  function resultErr(s, msg) { var t = tileEl(s.key); if (!t) return; var a = t.querySelector("[data-act]"); if (a) a.innerHTML = '<span class="muted" style="color:#ffb4ba">' + esc(msg) + '</span>'; }
+  function resultErr(s, msg) {
+    var t = tileEl(s.key); if (!t) return;
+    var a = t.querySelector("[data-act]"); if (!a) return;
+    a.innerHTML = '<div class="muted" style="color:#ffb4ba;font-size:11.5px;margin-bottom:6px">' + esc(msg) + '</div>' +
+      '<button class="ghost small cta" data-retry>Retry</button>';
+    a.querySelector("[data-retry]").onclick = function () { generate(s, { force: true }); };
+  }
   function genReason(res) {
     var m = { no_shot: "page not verified", no_clip: "clip missing", no_ffmpeg: "ffmpeg not installed", error: "render failed" };
-    return (m[res.status] || res.status) + (res.reason ? " — " + res.reason : "");
+    return (m[res.status] || res.status) + (res.reason ? ": " + res.reason : "");
   }
 
   /* Bulk export: every generated role as a CSV row ready to merge into a sequence tool
@@ -440,8 +475,8 @@
     var btn = $("btnGenAll"); btn.disabled = true;
     var i = 0;
     (function next() {
-      if (i >= list.length) { btn.disabled = false; btn.textContent = "⚡ Generate all"; toast("All " + list.length + " roles ready"); return; }
-      btn.textContent = "Generating " + (i + 1) + "/" + list.length + "…";
+      if (i >= list.length) { btn.disabled = false; btn.textContent = "Generate all"; toast("All " + list.length + " roles ready"); return; }
+      btn.textContent = "Generating " + (i + 1) + " of " + list.length + "...";
       generate(list[i++]).then(next);
     })();
   };
@@ -449,34 +484,34 @@
   /* ---- capture a new role ---- */
   $("btnCapture").onclick = function () {
     var company = $("capCompany").value.trim(), roleTitle = $("capRole").value.trim(), roleUrl = $("capUrl").value.trim();
-    if (!company || !roleTitle) { capStatus("Enter company + role.", true); return; }
+    if (!company || !roleTitle) { capStatus("Enter a company and role title.", true); return; }
     captureRole(company, roleTitle, roleUrl || undefined);
   };
   function captureRole(company, roleTitle, roleUrl) {
-    capStatus('<span class="spin"></span>Capturing…'); $("btnCapture").disabled = true;
+    capStatus('<span class="spin"></span>Capturing...'); $("btnCapture").disabled = true;
     var payload = { company: company, roleTitle: roleTitle, roleUrl: roleUrl }, tries = 0;
     (function tick() {
       api("/api/in-market/shot", { method: "POST", body: JSON.stringify(payload) }).then(function (res) {
-        if (res.status === "capturing") { if (tries++ > 48) { capStatus("Still working — hit ↻ shortly.", true); $("btnCapture").disabled = false; return; } setTimeout(tick, 2500); return; }
+        if (res.status === "capturing") { if (tries++ > 48) { capStatus("Still working. Try Refresh in a moment.", true); $("btnCapture").disabled = false; return; } setTimeout(tick, 2500); return; }
         $("btnCapture").disabled = false;
-        if (res.status === "company_site") { capStatus("Captured ✓"); loadGallery(); }
+        if (res.status === "company_site") { capStatus("Captured"); loadGallery(); }
         else capStatus(shotReason(res), true);
       }).catch(function (e) { $("btnCapture").disabled = false; capStatus(e.message, true); });
     })();
   }
   function shotReason(res) {
-    var m = { no_company_page: "couldn't verify on the company's own site", staffing_blocked: "staffing/recruiting firm — skipped", error: "capture failed" };
-    return (m[res.status] || res.status) + (res.reason ? " — " + res.reason : "");
+    var m = { no_company_page: "couldn't verify on the company's own site", staffing_blocked: "staffing or recruiting firm, skipped", error: "capture failed" };
+    return (m[res.status] || res.status) + (res.reason ? ": " + res.reason : "");
   }
   $("btnFindRoles").onclick = function () {
     var company = $("capCompany").value.trim();
     if (!company) { capStatus("Enter a company first.", true); return; }
-    capStatus('<span class="spin"></span>Finding roles…');
+    capStatus('<span class="spin"></span>Finding roles...');
     api("/api/in-market", { method: "POST", body: JSON.stringify({ action: "company_roles", company: company }) })
       .then(function (j) {
         var detail = (j && j.detail) || [], chips = $("roleChips"); chips.innerHTML = "";
         if (!detail.length) { capStatus("No public roles found.", true); return; }
-        capStatus(detail.length + " roles — click to capture.");
+        capStatus(detail.length + " roles found. Click one to capture it.");
         detail.slice(0, 24).forEach(function (r) {
           var c = document.createElement("span"); c.className = "pill"; c.style.cursor = "pointer"; c.textContent = r.title;
           c.onclick = function () { $("capRole").value = r.title; $("capUrl").value = r.url || ""; captureRole(company, r.title, r.url || undefined); };
