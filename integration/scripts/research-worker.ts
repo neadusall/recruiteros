@@ -39,7 +39,8 @@ const HEALTH_TOKEN = process.env.WORKER_HEALTH_TOKEN || ""; // optional bearer t
 // BUILD half: each box also SOURCES new companies from its OWN IP (its own job-board / API quota) and
 // ships them to the shared pool, so the fleet feeds itself instead of draining. Set WORKER_SOURCE_CAP=0
 // to make a box enrich-only.
-const SOURCE_CAP = Math.min(Math.max(Number(process.env.WORKER_SOURCE_CAP) || 200, 0), 1000);
+const SOURCE_CAP_RAW = Number(process.env.WORKER_SOURCE_CAP); // explicit 0 = enrich-only (don't fall back to default)
+const SOURCE_CAP = Math.min(Math.max(Number.isFinite(SOURCE_CAP_RAW) ? SOURCE_CAP_RAW : 200, 0), 1000);
 const SOURCE_INTERVAL_MS = Math.max(Number(process.env.WORKER_SOURCE_INTERVAL_MS) || 240_000, 60_000); // 4 min — sustainable
 const SOURCE_ENABLED = SOURCE_CAP > 0;
 
