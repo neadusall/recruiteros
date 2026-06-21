@@ -32,7 +32,7 @@
   }
 
   /* ---------------- persistence ---------------- */
-  var LS = { style: "ros_pip_style", clip: "ros_pip_clip", results: "ros_pip_results" };
+  var LS = { style: "ros_pip_style", clip: "ros_pip_clip", results: "ros_pip_results", filter: "ros_pip_filter" };
   function lsGet(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 
@@ -42,7 +42,7 @@
     shots: [],
     results: lsGet(LS.results, {}),   // { roleKey: { videoKey, company, roleTitle } }
     brand: null,                      // workspace brand kit (loaded from /settings)
-    filter: "all",                    // gallery filter: all | ready | todo
+    filter: lsGet(LS.filter, "all"),  // gallery filter: all | ready | todo (persisted)
     stats: {},                        // videoKey -> engagement row (for tile badges)
     voice: null,                      // cloned-voice + lip-sync status (loaded from /voice)
     bulkExport: null,                 // last bulk run, for CSV export
@@ -308,9 +308,20 @@
   function bindFilters() {
     var bar = $("galfilter"); if (!bar) return;
     bar.querySelectorAll(".chipf").forEach(function (c) {
-      c.onclick = function () { state.filter = c.getAttribute("data-f"); bar.querySelectorAll(".chipf").forEach(function (x) { x.classList.toggle("on", x === c); }); renderGallery(); };
+      c.classList.toggle("on", c.getAttribute("data-f") === state.filter); // restore persisted choice
+      c.onclick = function () {
+        state.filter = c.getAttribute("data-f"); lsSet(LS.filter, state.filter);
+        bar.querySelectorAll(".chipf").forEach(function (x) { x.classList.toggle("on", x === c); });
+        renderGallery();
+      };
     });
   }
+  // Power-user: press "/" to jump to the role search (when not already typing).
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "/" && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || "")) {
+      var s = $("gsearch"); if (s && $("createView").style.display !== "none") { e.preventDefault(); s.focus(); }
+    }
+  });
   function updateFilterCounts() {
     var bar = $("galfilter"); if (!bar) return;
     var ready = state.shots.filter(hasVideo).length, total = state.shots.length;
