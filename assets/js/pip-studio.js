@@ -248,7 +248,7 @@
 
   function setStageBg(url) {
     var stage = $("stage"), bg = stage.querySelector("img.bg");
-    if (!bg) { bg = document.createElement("img"); bg.className = "bg"; stage.insertBefore(bg, $("pipBox")); }
+    if (!bg) { bg = document.createElement("img"); bg.className = "bg"; bg.decoding = "async"; stage.insertBefore(bg, $("pipBox")); }
     bg.src = url; $("stagePh").style.display = "none";
   }
   function renderPip() {
@@ -272,7 +272,9 @@
     if (state.stream && !state.recordedBlob) { if (v.srcObject !== state.stream) { v.srcObject = state.stream; v.play(); } var nc = box.querySelector(".nocam"); if (nc) nc.remove(); }
     else if (!state.stream && !box.querySelector(".nocam")) { var n = document.createElement("div"); n.className = "nocam"; n.textContent = "you"; box.appendChild(n); }
   }
-  window.addEventListener("resize", renderPip);
+  // rAF-throttle resize so dragging the window doesn't fire renderPip on every pixel.
+  var resizeRaf;
+  window.addEventListener("resize", function () { if (resizeRaf) return; resizeRaf = requestAnimationFrame(function () { resizeRaf = null; renderPip(); }); });
 
   /* Loom-style drag-anywhere: grab the bubble and drop it; persists as xPct/yPct (overrides corner). */
   (function setupPipDrag() {
@@ -302,21 +304,37 @@
       .catch(function (e) { $("gallery").innerHTML = '<div class="empty">Could not load roles: ' + e.message + '</div>'; });
   }
   $("btnRefresh").onclick = function () { loadGallery(); };
-  $("gsearch").oninput = renderGallery;
+  // Debounced, DOM-cheap search: filter by toggling tile visibility instead of rebuilding the
+  // gallery (which would re-request every role GIF and flicker) on each keystroke.
+  var searchT;
+  $("gsearch").oninput = function () { clearTimeout(searchT); searchT = setTimeout(applyFilter, 150); };
   function visibleRoles() {
-    var q = ($("gsearch").value || "").toLowerCase();
+    var q = ($("gsearch").value || "").toLowerCase().trim();
     return state.shots.filter(function (s) { return !q || (s.company + " " + s.roleTitle).toLowerCase().indexOf(q) >= 0; });
   }
+  function applyFilter() {
+    var q = ($("gsearch").value || "").toLowerCase().trim(), box = $("gallery"), shown = 0;
+    box.querySelectorAll(".tile").forEach(function (t) {
+      var match = !q || (t.getAttribute("data-search") || "").indexOf(q) >= 0;
+      t.style.display = match ? "" : "none"; if (match) shown++;
+    });
+    var em = box.querySelector(".empty.nomatch");
+    if (!shown && state.shots.length) {
+      if (!em) { em = document.createElement("div"); em.className = "empty nomatch"; em.textContent = "No matches."; box.appendChild(em); }
+      em.style.display = "";
+    } else if (em) { em.style.display = "none"; }
+  }
   function renderGallery() {
-    var list = visibleRoles(), box = $("gallery");
+    var box = $("gallery");
     if (state.shots.length && !$("stage").querySelector("img.bg")) setStageBg(shotGif(state.shots[0].key));
-    if (!list.length) { box.innerHTML = '<div class="empty">' + (state.shots.length ? "No matches." : "No roles yet. Use \"Add a new role\" below to capture one.") + "</div>"; return; }
+    if (!state.shots.length) { box.innerHTML = '<div class="empty">No roles yet. Use "Add a new role" below to capture one.</div>'; return; }
     box.innerHTML = "";
-    list.forEach(function (s) {
+    state.shots.forEach(function (s) {
       var t = document.createElement("div");
       t.className = "tile"; t.setAttribute("data-key", s.key);
+      t.setAttribute("data-search", ((s.company || "") + " " + (s.roleTitle || "")).toLowerCase());
       t.innerHTML =
-        '<div class="thumb"><img loading="lazy" src="' + shotGif(s.key) + '" alt="" /><div class="go">Personalize</div></div>' +
+        '<div class="thumb"><img loading="lazy" decoding="async" src="' + shotGif(s.key) + '" alt="" /><div class="go">Personalize</div></div>' +
         '<div class="lbl"><div class="co">' + esc(s.company || "—") + '</div><div class="ro">' + esc(s.roleTitle || "") + '</div></div>' +
         '<div class="act" data-act></div>';
       t.querySelector(".thumb").onclick = function () { setStageBg(shotGif(s.key)); generate(s); };
@@ -324,6 +342,7 @@
       var prior = state.results[s.key];
       if (prior && prior.videoKey) renderResult(s, prior.videoKey); // restore prior generations
     });
+    applyFilter(); // honor any active search query after a rebuild
   }
   function tileEl(key) { return $("gallery").querySelector('.tile[data-key="' + String(key).replace(/["\\]/g, "\\$&") + '"]'); }
 
@@ -530,9 +549,12 @@
     $("perfView").style.display = perf ? "" : "none";
     $("tabCreate").classList.toggle("on", !perf);
     $("tabPerf").classList.toggle("on", perf);
-    if (perf) { loadPerf(); if (!perfTimer) perfTimer = setInterval(loadPerf, 15000); }
+    // Only poll while the dashboard is the active view; skip ticks when the tab is hidden.
+    if (perf) { loadPerf(); if (!perfTimer) perfTimer = setInterval(function () { if (!document.hidden) loadPerf(); }, 15000); }
     else if (perfTimer) { clearInterval(perfTimer); perfTimer = null; }
   }
+  // Refresh immediately when returning to a backgrounded Performance tab (the poll was paused).
+  document.addEventListener("visibilitychange", function () { if (!document.hidden && perfTimer) loadPerf(); });
   $("tabCreate").onclick = function () { showView("create"); };
   $("tabPerf").onclick = function () { showView("perf"); };
   $("perfRefresh").onclick = function () { loadPerf(); };

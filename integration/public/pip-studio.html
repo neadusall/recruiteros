@@ -121,7 +121,7 @@
   .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
   .toolbar input{flex:1;min-width:160px}
   .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(224px,1fr));gap:15px}
-  .tile{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#0a0e13;display:flex;flex-direction:column;transition:.12s}
+  .tile{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#0a0e13;display:flex;flex-direction:column;transition:.12s;content-visibility:auto;contain-intrinsic-size:auto 232px}
   .tile:hover{border-color:#34485c}
   .tile .thumb{position:relative;cursor:pointer}
   .tile .thumb img{width:100%;height:120px;object-fit:cover;object-position:top;display:block;background:#11161d}
