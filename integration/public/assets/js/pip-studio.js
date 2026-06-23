@@ -32,16 +32,18 @@
   }
 
   /* ---------------- persistence ---------------- */
-  var LS = { style: "ros_pip_style", clip: "ros_pip_clip", results: "ros_pip_results" };
+  var LS = { style: "ros_pip_style", clip: "ros_pip_clip", results: "ros_pip_results", filter: "ros_pip_filter" };
   function lsGet(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 
   var state = {
-    pip: Object.assign({ corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#19c37d", radiusPct: 18 }, lsGet(LS.style, {})),
+    pip: Object.assign({ corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#7c5cff", radiusPct: 18 }, lsGet(LS.style, {})),
     clipId: lsGet(LS.clip, null),
     shots: [],
     results: lsGet(LS.results, {}),   // { roleKey: { videoKey, company, roleTitle } }
     brand: null,                      // workspace brand kit (loaded from /settings)
+    filter: lsGet(LS.filter, "all"),  // gallery filter: all | ready | todo (persisted)
+    stats: {},                        // videoKey -> engagement row (for tile badges)
     voice: null,                      // cloned-voice + lip-sync status (loaded from /voice)
     bulkExport: null,                 // last bulk run, for CSV export
     stream: null, recorder: null, chunks: [], recordedBlob: null,
@@ -290,14 +292,52 @@
     api("/api/in-market/shot?list=1").then(function (j) { state.shots = (j && j.shots) || []; renderGallery(); cb && cb(); })
       .catch(function (e) { $("gallery").innerHTML = '<div class="empty">Could not load roles: ' + e.message + '</div>'; });
   }
-  $("btnRefresh").onclick = function () { loadGallery(); };
+  $("btnRefresh").onclick = function () { loadGallery(); loadStats(); };
   $("gsearch").oninput = renderGallery;
+  function hasVideo(s) { return !!(state.results[s.key] && state.results[s.key].videoKey); }
   function visibleRoles() {
-    var q = ($("gsearch").value || "").toLowerCase();
-    return state.shots.filter(function (s) { return !q || (s.company + " " + s.roleTitle).toLowerCase().indexOf(q) >= 0; });
+    var q = ($("gsearch").value || "").toLowerCase(), f = state.filter || "all";
+    return state.shots.filter(function (s) {
+      if (q && (s.company + " " + s.roleTitle).toLowerCase().indexOf(q) < 0) return false;
+      if (f === "ready") return hasVideo(s);
+      if (f === "todo") return !hasVideo(s);
+      return true;
+    });
+  }
+  // Gallery filter chips (All / Ready / To do) with live counts.
+  function bindFilters() {
+    var bar = $("galfilter"); if (!bar) return;
+    bar.querySelectorAll(".chipf").forEach(function (c) {
+      c.classList.toggle("on", c.getAttribute("data-f") === state.filter); // restore persisted choice
+      c.onclick = function () {
+        state.filter = c.getAttribute("data-f"); lsSet(LS.filter, state.filter);
+        bar.querySelectorAll(".chipf").forEach(function (x) { x.classList.toggle("on", x === c); });
+        renderGallery();
+      };
+    });
+  }
+  // Power-user: press "/" to jump to the role search (when not already typing).
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "/" && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || "")) {
+      var s = $("gsearch"); if (s && $("createView").style.display !== "none") { e.preventDefault(); s.focus(); }
+    }
+  });
+  function updateFilterCounts() {
+    var bar = $("galfilter"); if (!bar) return;
+    var ready = state.shots.filter(hasVideo).length, total = state.shots.length;
+    var set = function (f, n) { var el = bar.querySelector('[data-f="' + f + '"] .cnt'); if (el) el.textContent = n; };
+    set("all", total); set("ready", ready); set("todo", total - ready);
+  }
+  // Live engagement stats -> tile badges + a quick pulse of the gallery.
+  function loadStats() {
+    api("/api/in-market/track?days=14").then(function (o) {
+      var map = {}; ((o && o.videos) || []).forEach(function (v) { map[v.videoKey] = v; });
+      state.stats = map; renderGallery();
+    }).catch(function () {});
   }
   function renderGallery() {
     var list = visibleRoles(), box = $("gallery");
+    updateFilterCounts();
     if (state.shots.length && !$("stage").querySelector("img.bg")) setStageBg(shotGif(state.shots[0].key));
     if (!list.length) { box.innerHTML = '<div class="empty">' + (state.shots.length ? "No matches." : "No captured roles yet — capture one below.") + "</div>"; return; }
     box.innerHTML = "";
@@ -333,6 +373,8 @@
           if (res.status === "composing") { if (tries++ > 48) { resultErr(s, "timed out"); return resolve(false); } setTimeout(tick, 2500); return; }
           if (res.status === "ready") {
             state.results[s.key] = { videoKey: res.key, company: s.company, roleTitle: s.roleTitle, share: res.share }; saveResults();
+            // Register ownership so watch-page replies route back to this workspace + operator.
+            api("/api/in-market/own", { method: "POST", body: JSON.stringify({ videoKey: res.key, company: s.company, roleTitle: s.roleTitle }) }).catch(function () {});
             renderResult(s, res.key); resolve(true);
           } else { resultErr(s, genReason(res)); resolve(false); }
         }).catch(function (e) { resultErr(s, e.message); resolve(false); });
@@ -347,6 +389,14 @@
     var thumb = t.querySelector(".thumb img");
     if (thumb) thumb.src = API + "/api/in-market/video?key=" + encodeURIComponent(vk) + "&fmt=gif";
     var go = t.querySelector(".thumb .go"); if (go) go.textContent = "↻ Re-render";
+    // Live engagement badge on the card (plays · visits) when the video has activity.
+    var st = state.stats[vk], thumbEl = t.querySelector(".thumb");
+    var old = thumbEl && thumbEl.querySelector(".eng"); if (old) old.remove();
+    if (st && thumbEl && (st.plays || st.opens)) {
+      var b = document.createElement("div"); b.className = "eng";
+      b.innerHTML = "▶ " + (st.plays || 0) + " · 👁 " + (st.opens || 0);
+      thumbEl.appendChild(b);
+    }
     var act = t.querySelector("[data-act]");
     var w = watchPage(vk, s.company, s.roleTitle);
     act.innerHTML =
@@ -562,6 +612,25 @@
     $("chart").innerHTML = chartSvg((o && o.trend) || []);
     renderFeed((o && o.recent) || []);
     renderLeaderboard((o && o.videos) || []);
+    loadLeads();
+  }
+
+  // Replies & leads captured on the watch pages.
+  function loadLeads() {
+    var box = $("leads"); if (!box) return;
+    api("/api/in-market/lead").then(function (j) {
+      var leads = (j && j.leads) || [];
+      if (!leads.length) { box.innerHTML = '<div class="empty">No replies yet. They land here when a prospect responds on a watch page.</div>'; return; }
+      box.innerHTML = leads.slice(0, 50).map(function (l) {
+        var who = esc(l.name || l.email || "Anonymous");
+        var ctx = [l.company, l.roleTitle].filter(Boolean).map(esc).join(" · ");
+        return '<div class="leaditem">' +
+          '<div class="lhead"><b>' + who + "</b>" + (ctx ? ' <span class="muted">· ' + ctx + "</span>" : "") + '<span class="ago">' + ago(l.at) + "</span></div>" +
+          (l.message ? '<div class="lmsg">' + esc(l.message) + "</div>" : "") +
+          (l.email ? '<a class="lreply" href="mailto:' + esc(l.email) + '">Reply to ' + esc(l.email) + " →</a>" : "") +
+          "</div>";
+      }).join("");
+    }).catch(function () {});
   }
 
   // Inline SVG area+line chart for the daily plays trend (no external libs).
@@ -575,11 +644,11 @@
     var line = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ");
     var area = line + " L" + (padL + (trend.length - 1) * step).toFixed(1) + " " + (padT + ih) + " L" + padL + " " + (padT + ih) + " Z";
     var grid = [0, 0.5, 1].map(function (f) { var y = padT + ih - f * ih; return '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="#1a212b"/><text x="2" y="' + (y + 3) + '" fill="#5b6675" font-size="9">' + Math.round(f * max) + "</text>"; }).join("");
-    var dots = pts.map(function (p, i) { return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2.5" fill="#19c37d"><title>' + esc(trend[i].date) + ": " + trend[i].plays + " plays</title></circle>"; }).join("");
+    var dots = pts.map(function (p, i) { return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2.5" fill="#7c5cff"><title>' + esc(trend[i].date) + ": " + trend[i].plays + " plays</title></circle>"; }).join("");
     var labels = trend.map(function (d, i) { if (i % Math.ceil(trend.length / 7) && i !== trend.length - 1) return ""; return '<text x="' + (padL + i * step).toFixed(1) + '" y="' + (H - 6) + '" fill="#5b6675" font-size="9" text-anchor="middle">' + d.date.slice(5) + "</text>"; }).join("");
     return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none">' +
-      '<defs><linearGradient id="ag" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#19c37d" stop-opacity=".35"/><stop offset="1" stop-color="#19c37d" stop-opacity="0"/></linearGradient></defs>' +
-      grid + '<path d="' + area + '" fill="url(#ag)"/><path d="' + line + '" fill="none" stroke="#19c37d" stroke-width="2"/>' + dots + labels + "</svg>";
+      '<defs><linearGradient id="ag" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#7c5cff" stop-opacity=".35"/><stop offset="1" stop-color="#7c5cff" stop-opacity="0"/></linearGradient></defs>' +
+      grid + '<path d="' + area + '" fill="url(#ag)"/><path d="' + line + '" fill="none" stroke="#7c5cff" stroke-width="2"/>' + dots + labels + "</svg>";
   }
 
   function renderFeed(recent) {
@@ -624,7 +693,7 @@
   }
   function fillBrandForm() {
     var b = state.brand || {};
-    Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) el.value = b[brandFields[id]] || (id === "bkAccent" ? "#19c37d" : ""); });
+    Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) el.value = b[brandFields[id]] || (id === "bkAccent" ? "#7c5cff" : ""); });
   }
   function readBrandForm() {
     var out = {};
@@ -633,7 +702,7 @@
   }
   function brandPreview() {
     var b = readBrandForm();
-    var ac = /^#[0-9a-f]{6}$/i.test(b.accent) ? b.accent : "#19c37d";
+    var ac = /^#[0-9a-f]{6}$/i.test(b.accent) ? b.accent : "#7c5cff";
     var pv = $("bkPreview"); if (!pv) return;
     pv.style.setProperty("--brandac", ac);
     var top = $("bkPvTop");
@@ -781,7 +850,9 @@
 
   /* ---------------- init ---------------- */
   applyStyleControls();
+  bindFilters();
   loadGallery();
+  loadStats();          // engagement badges on the cards
   loadClips();
   loadBrand();          // load the brand kit so shared links are branded from the first generate
   loadVoice();          // cloned-voice + lip-sync readiness

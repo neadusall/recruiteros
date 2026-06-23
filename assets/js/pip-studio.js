@@ -37,7 +37,7 @@
   function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 
   var state = {
-    pip: Object.assign({ corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#19c37d", radiusPct: 18 }, lsGet(LS.style, {})),
+    pip: Object.assign({ corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#7c5cff", radiusPct: 18 }, lsGet(LS.style, {})),
     clipId: lsGet(LS.clip, null),
     shots: [],
     results: lsGet(LS.results, {}),   // { roleKey: { videoKey, company, roleTitle } }
@@ -644,11 +644,11 @@
     var line = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ");
     var area = line + " L" + (padL + (trend.length - 1) * step).toFixed(1) + " " + (padT + ih) + " L" + padL + " " + (padT + ih) + " Z";
     var grid = [0, 0.5, 1].map(function (f) { var y = padT + ih - f * ih; return '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="#1a212b"/><text x="2" y="' + (y + 3) + '" fill="#5b6675" font-size="9">' + Math.round(f * max) + "</text>"; }).join("");
-    var dots = pts.map(function (p, i) { return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2.5" fill="#19c37d"><title>' + esc(trend[i].date) + ": " + trend[i].plays + " plays</title></circle>"; }).join("");
+    var dots = pts.map(function (p, i) { return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2.5" fill="#7c5cff"><title>' + esc(trend[i].date) + ": " + trend[i].plays + " plays</title></circle>"; }).join("");
     var labels = trend.map(function (d, i) { if (i % Math.ceil(trend.length / 7) && i !== trend.length - 1) return ""; return '<text x="' + (padL + i * step).toFixed(1) + '" y="' + (H - 6) + '" fill="#5b6675" font-size="9" text-anchor="middle">' + d.date.slice(5) + "</text>"; }).join("");
     return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none">' +
-      '<defs><linearGradient id="ag" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#19c37d" stop-opacity=".35"/><stop offset="1" stop-color="#19c37d" stop-opacity="0"/></linearGradient></defs>' +
-      grid + '<path d="' + area + '" fill="url(#ag)"/><path d="' + line + '" fill="none" stroke="#19c37d" stroke-width="2"/>' + dots + labels + "</svg>";
+      '<defs><linearGradient id="ag" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#7c5cff" stop-opacity=".35"/><stop offset="1" stop-color="#7c5cff" stop-opacity="0"/></linearGradient></defs>' +
+      grid + '<path d="' + area + '" fill="url(#ag)"/><path d="' + line + '" fill="none" stroke="#7c5cff" stroke-width="2"/>' + dots + labels + "</svg>";
   }
 
   function renderFeed(recent) {
@@ -693,7 +693,7 @@
   }
   function fillBrandForm() {
     var b = state.brand || {};
-    Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) el.value = b[brandFields[id]] || (id === "bkAccent" ? "#19c37d" : ""); });
+    Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) el.value = b[brandFields[id]] || (id === "bkAccent" ? "#7c5cff" : ""); });
   }
   function readBrandForm() {
     var out = {};
@@ -702,7 +702,7 @@
   }
   function brandPreview() {
     var b = readBrandForm();
-    var ac = /^#[0-9a-f]{6}$/i.test(b.accent) ? b.accent : "#19c37d";
+    var ac = /^#[0-9a-f]{6}$/i.test(b.accent) ? b.accent : "#7c5cff";
     var pv = $("bkPreview"); if (!pv) return;
     pv.style.setProperty("--brandac", ac);
     var top = $("bkPvTop");
