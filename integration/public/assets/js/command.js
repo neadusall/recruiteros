@@ -491,7 +491,7 @@
     data: { title: "Candidates", crumb: "Build", action: null, render: renderData },
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
-    bdbulk: { title: "BD Bulk", crumb: "Build", action: null, render: renderBdBulk, motionOnly: "bd" },
+    email: { title: "Email", crumb: "Business Development", action: null, render: renderEmail, motionOnly: "bd" },
     pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio, motionOnly: "bd" },
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
@@ -524,7 +524,7 @@
     else h = parts[0];
     // Aliases. #builder stays the BD-branded entry (it forces BD via its own
     // route); Hire Signals (#inmarket) is motion-agnostic and shows in both.
-    var ALIAS = { "in-market": "inmarket", leads: "inmarket" };
+    var ALIAS = { "in-market": "inmarket", leads: "inmarket", bdbulk: "email", emailprep: "email" };
     if (ALIAS[h]) h = ALIAS[h];
     if (!ROUTES[h]) return "overview";
     // A motion-only route (e.g. the BD-only #builder) switches the workspace to
@@ -2293,7 +2293,7 @@
         // Entry to the curated decision-maker list (the daily database of real hiring managers).
         '<div class="im-curation-cta">' +
           '<button type="button" class="btn btn-primary btn-sm" id="imCurationBtn">🎯 Decision-maker list <span style="opacity:.8;font-weight:500">— real hiring managers, curated daily</span></button>' +
-          '<span class="muted" style="font-size:12px;margin-left:8px">Reviewed by you, then pushed to BD Bulk</span>' +
+          '<span class="muted" style="font-size:12px;margin-left:8px">Reviewed by you, then pushed to Email</span>' +
         "</div>" +
         // Industries, multi-select with Select all / Clear, in a compact scroll area.
         '<div class="im-group" id="imIndGroup">' +
@@ -2498,6 +2498,7 @@
           [1, 3, 5].map(function (n) { return '<button type="button" class="im-nbtn' + (imDmPerRole === n ? " active" : "") + '" data-dm="' + n + '">' + n + "</button>"; }).join("") +
         "</div>" +
         '<button class="btn btn-ghost btn-sm" id="imSave" disabled>💾 Save as hiring signals</button>' +
+        '<button class="btn btn-ghost btn-sm" id="imToEmail" disabled>✉️ Push prospects to Email</button>' +
         '<button class="btn btn-primary btn-sm" id="imBulk" disabled>Push selected to Prospects</button>' +
       "</div>";
     body.innerHTML = toolbar + needsBreakdownHtml() + imBreakdownHtml() + '<div id="imList">' + leads.map(leadCard).join("") + "</div>" + imTickerHtml();
@@ -2741,7 +2742,7 @@
       ["named", "Named", "real person found"],
       ["contactable", "Contactable", "name + email"],
       ["queued", "Approved", "ready to send"],
-      ["enrolled", "Enrolled", "in BD Bulk"],
+      ["enrolled", "Enrolled", "in Email"],
     ];
     var funnelRow = stages.map(function (s) {
       return '<div class="cur-stage"><div class="cur-stage-n">' + ((bs[s[0]] || 0)).toLocaleString() + "</div>" +
@@ -2839,7 +2840,7 @@
       '<div class="cur-toolbar">' +
         '<label><input type="checkbox" id="curAll"> <b>Select all</b></label>' +
         '<span class="muted" id="curCount">0 selected</span>' +
-        '<button class="btn btn-primary btn-sm" id="curEnroll" disabled>✓ Approve &amp; push to BD Bulk</button>' +
+        '<button class="btn btn-primary btn-sm" id="curEnroll" disabled>✓ Approve &amp; push to Email</button>' +
       "</div>";
 
     return head + toolbar + '<div class="cur-list">' + rows + "</div>";
@@ -2923,15 +2924,15 @@
       if (!ids.length) return;
       enroll.disabled = true; enroll.textContent = "Pushing…";
       resolveBdCampaign(function (campaignId) {
-        if (!campaignId) { enroll.textContent = "✓ Approve & push to BD Bulk"; enroll.disabled = false; toast && toast("Couldn't resolve a BD campaign"); return; }
+        if (!campaignId) { enroll.textContent = "✓ Approve & push to Email"; enroll.disabled = false; toast && toast("Couldn't resolve a BD campaign"); return; }
         // Review gate: approve, then enroll into the BD Bulk MPC sender.
         send("/in-market", "POST", { action: "curation_approve", ids: ids }).then(function () {
           return send("/in-market", "POST", { action: "curation_enroll", ids: ids, campaignId: campaignId });
         }).then(function (r) {
           var n = (r && r.data && r.data.enrolled) || 0;
-          if (typeof toast === "function") toast("Pushed " + n + " decision-maker" + (n === 1 ? "" : "s") + " to BD Bulk");
+          if (typeof toast === "function") toast("Pushed " + n + " decision-maker" + (n === 1 ? "" : "s") + " to Email");
           renderCuration();
-        }).catch(function () { enroll.textContent = "✓ Approve & push to BD Bulk"; enroll.disabled = false; });
+        }).catch(function () { enroll.textContent = "✓ Approve & push to Email"; enroll.disabled = false; });
       });
     });
   }
@@ -3129,6 +3130,10 @@
     // Bulk push.
     var bulk = body.querySelector("#imBulk");
     if (bulk) bulk.addEventListener("click", bulkPushToProspects);
+    // Push the selected prospects into the Email tool's prep queue (template +
+    // validation + AI approval + the personalized video email) before sending.
+    var toEmail = body.querySelector("#imToEmail");
+    if (toEmail) toEmail.addEventListener("click", pushPicksToEmail);
     // Save selected as hiring signals (a staging step before Prospects).
     var save = body.querySelector("#imSave");
     if (save) save.addEventListener("click", saveSelectedSignals);
@@ -3198,6 +3203,8 @@
     if (btn) { btn.disabled = n === 0; btn.textContent = n ? ("Push " + n + " to Prospects →") : "Push selected to Prospects"; }
     var save = document.getElementById("imSave");
     if (save) { save.disabled = n === 0; save.textContent = n ? ("💾 Save " + n + " as hiring signals") : "💾 Save as hiring signals"; }
+    var toEmail = document.getElementById("imToEmail");
+    if (toEmail) { toEmail.disabled = n === 0; toEmail.textContent = n ? ("✉️ Push " + n + " to Email") : "✉️ Push prospects to Email"; }
     var clr = document.getElementById("imClearSel");
     if (clr) clr.style.display = n ? "" : "none";
     var all = document.getElementById("imAll");
@@ -3207,6 +3214,70 @@
       all.checked = checked === picks.length;
       all.indeterminate = checked > 0 && checked < picks.length;
     }
+  }
+
+  /* ---- Hand-off to the Email tool ---------------------------------------------
+     The Email screen (#email) is the prep + QA gate before send: a queue of
+     prospects merged into a template, validated, AI-approved, attached to a
+     sequence, and launched — including the Pitchlane-style picture-in-picture
+     video email (background = the job-post capture, foreground = a talking-head
+     clip from PiP Studio). Hire Signals feeds that queue here. The queue persists
+     in localStorage so it survives the hash navigation into the Email route. */
+  function epLoadQueue() { try { return JSON.parse(localStorage.getItem("ros_email_queue") || "[]"); } catch (e) { return []; } }
+  function epStoreQueue(arr) { try { localStorage.setItem("ros_email_queue", JSON.stringify(arr || [])); } catch (e) {} }
+
+  // Flatten a Hire-Signals pick ({lead, manager}) into an Email prospect: a bag of
+  // merge fields, the raw lead/manager (so the Email tool can promote + launch),
+  // and the video inputs — the job-post URL + its screen capture, which is the
+  // BACKGROUND track that pairs with a talking-head recording for the 2nd email.
+  function epProspectFromPick(p) {
+    var l = p.lead || {}, m = p.manager || null;
+    var name = (m && m.managerName) || l.buyerName || "";
+    var first = name ? name.split(/\s+/)[0] : "";
+    var title = (m && m.managerTitle) || l.buyerTitle || "Hiring manager";
+    var role = (m && m.role) || "";
+    var email = (m && m.likelyEmail) || l.buyerLikelyEmail || "";
+    var jobUrl = (m && (m.jobPostUrl || m.sourceUrl)) || l.jobPostUrl || l.sourceUrl || "";
+    return {
+      id: imPickKey(l.id, m ? m.role : ""),
+      source: "Hire Signals",
+      lead: l, manager: m,
+      fields: {
+        first_name: first,
+        full_name: name,
+        title: title,
+        company: l.company || "",
+        location: l.location || l.companyLocation || "",
+        industry: l.industry || "",
+        role: role,
+        email: email,
+        competitor: "",
+        score: Math.round(l.score || 0),
+        // Picture-in-picture video email (the second touch). The background comes
+        // from the company-site / job-post capture keyed off this URL via the
+        // existing /api/in-market/shot pipeline; the talking head is a PiP Studio
+        // clip. pip_video resolves to the personalized watch link once rendered.
+        job_post_url: jobUrl,
+        pip_video: ""
+      }
+    };
+  }
+
+  function pushPicksToEmail() {
+    var picks = Object.keys(imPicks).map(function (k) { return imPicks[k]; });
+    if (!picks.length) return;
+    var queue = epLoadQueue();
+    var seen = {};
+    queue.forEach(function (q) { seen[q.id] = true; });
+    var added = 0;
+    picks.forEach(function (p) {
+      var rec = epProspectFromPick(p);
+      if (!seen[rec.id]) { queue.push(rec); seen[rec.id] = true; added++; }
+    });
+    epStoreQueue(queue);
+    imPicks = {}; renderImResults();
+    toast("Pushed " + added + " to Email" + (added !== picks.length ? " (" + (picks.length - added) + " already queued)" : ""));
+    location.hash = "email";
   }
 
   /* ---- Saved hiring signals: a staging shelf between search and Prospects ---- */
@@ -12185,311 +12256,843 @@
     return { name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken, prospectId: p.prospectId || (p.prospect && p.prospect.id) || null };
   }
   // shared UI states
-  /* ============================ BD Bulk ============================
-     The 200K/month top-of-funnel engine. Upload hiring-manager CSV ->
-     LLM derives (role one rung below, same-size competitor, 50-200mi
-     relocation) -> deterministic MPC email -> send through the warmed
-     owned sending pool (lib/sending). BD motion only.
-     Backend: /api/bdbulk (parse | preview | launch). Engine: lib/bd/bulkMpc. */
-  function renderBdBulk(el) {
-    var state = { csv: "", name: "", info: null, sending: false, step: 1 };
+  /* ============================ Email (Top of Funnel) ============================
+     The prep + QA gate before send. A queue of prospects (pushed from Hire Signals
+     or imported from CSV) is merged into an editable template; every row is
+     validated (recipient, placeholders, length, spam words), an AI pass approves
+     only what meets the SET REQUIREMENTS, and you batch-approve, attach a sequence,
+     and launch — or export a deploy package.
 
-    el.innerHTML = '<style>' + BDB_STYLE + '</style>'
-      + '<div class="bdb-wrap">'
-      + '<div class="bdb-hero"><div class="bdb-hero-row">'
-      + '<div class="bdb-hero-cap">200K<small>emails / month · top of funnel</small></div>'
-      + '<div class="bdb-hero-desc">Upload hiring managers. We derive the role one rung below them, a competitor your size, and a believable relocation, then send a short MPC email through your warmed sending pool.</div>'
-      + '<div class="bdb-gauge"><span id="bdbReady" class="bdb-ready bdb-muted">Checking pool…</span></div>'
-      + '</div></div>'
-      + '<div class="bdb-stepper" id="bdbStepper"></div>'
-      + '<div id="bdbBody"></div>'
-      + '</div>';
+     The second touch is the Pitchlane-style PICTURE-IN-PICTURE VIDEO EMAIL. It
+     reuses the existing video pipeline end to end (no new backend):
+       • background = the company-site / job-post capture  (POST /api/in-market/shot, keyed off job_post_url)
+       • foreground = a talking-head clip recorded in PiP Studio  (GET /api/in-market/clip)
+       • composite + signed share links                    (POST /api/in-market/video → share.gif / share.watch)
+       • attach to prospects + arm the 2-email sequence     (POST /api/in-market/attach)
+       • recipient lands on the branded watch page (video + calendar) — watch.html
+     In the email the video shows as a clickable thumbnail: background image +
+     talking-head bubble + play button, linking to the watch page (the {{video}}
+     merge field, equivalent to the backend {{videoembed}}). Replaces BD Bulk. */
 
-    var bodyEl = $("#bdbBody", el);
-    renderStepper();
-    api("/bdbulk").then(paintReady).catch(function () { var r = $("#bdbReady", el); if (r) r.style.display = "none"; });
-    paintUpload();
+  var EP_API = (window.RECRUITEROS_API_BASE || "");
+  var EP_DEFAULT_TEMPLATE = {
+    fromName: "",
+    replyTo: "",
+    subject: "{{first_name}}, a quick idea for {{company}}",
+    body: "Hi {{first_name}},\n\nNoticed {{company}} is hiring a {{role}} — based on that, I had an idea I think might be worth 30 seconds:\n\n{{video}}\n\n^ Putting a face to the name :)\n\nWorth a quick look re your plans this quarter?\n\nThanks,\n{{sender_name}}"
+  };
+  var EP_DEFAULT_CRITERIA = {
+    maxSubjectChars: 60, minWords: 25, maxWords: 130,
+    requireValidEmail: true, noUnfilled: true, requireAiPass: true, aiMinScore: 70,
+    requireVideoReady: false,
+    bannedWords: ["free", "guarantee", "click here", "act now", "limited time", "cash", "winner", "risk-free", "100%", "$$$"]
+  };
+  var EP_FIELDS = [
+    ["first_name", "First name"], ["full_name", "Full name"], ["title", "Title"],
+    ["company", "Company"], ["role", "Open role"], ["location", "Location"],
+    ["industry", "Industry"], ["competitor", "Competitor"], ["video", "▶ Video"], ["sender_name", "Your name"]
+  ];
+  var EP_COL_TYPES = [["text", "Text"], ["url", "URL / link"], ["pip_video", "PiP video (talking head × job-post capture)"]];
 
-    function setStep(n) { state.step = n; renderStepper(); }
-    function renderStepper() {
-      var steps = ["Upload", "Map", "Preview", "Launch"], h = "";
-      for (var i = 0; i < steps.length; i++) {
-        var n = i + 1, cls = n < state.step ? "done" : (n === state.step ? "active" : "");
-        h += '<div class="bdb-snode ' + cls + '"><div class="bdb-sdot">' + (n < state.step ? "✓" : n) + '</div><div class="bdb-slabel">' + steps[i] + '</div></div>';
-        if (i < steps.length - 1) h += '<div class="bdb-sline ' + (n < state.step ? "done" : "") + '"></div>';
-      }
-      $("#bdbStepper", el).innerHTML = h;
+  function epLoadTemplate() { try { return epExt(epExt({}, EP_DEFAULT_TEMPLATE), JSON.parse(localStorage.getItem("ros_email_template") || "{}")); } catch (e) { return epExt({}, EP_DEFAULT_TEMPLATE); } }
+  function epSaveTemplate(t) { try { localStorage.setItem("ros_email_template", JSON.stringify(t)); } catch (e) {} }
+  function epLoadCriteria() { try { return epExt(epExt({}, EP_DEFAULT_CRITERIA), JSON.parse(localStorage.getItem("ros_email_criteria") || "{}")); } catch (e) { return epExt({}, EP_DEFAULT_CRITERIA); } }
+  function epSaveCriteria(c) { try { localStorage.setItem("ros_email_criteria", JSON.stringify(c)); } catch (e) {} }
+  function epLoadApprovals() { try { return JSON.parse(localStorage.getItem("ros_email_approvals") || "{}"); } catch (e) { return {}; } }
+  function epSaveApprovals(a) { try { localStorage.setItem("ros_email_approvals", JSON.stringify(a || {})); } catch (e) {} }
+  function epLoadColumns() { try { return JSON.parse(localStorage.getItem("ros_email_columns") || "[]"); } catch (e) { return []; } }
+  function epStoreColumns(c) { try { localStorage.setItem("ros_email_columns", JSON.stringify(c || [])); } catch (e) {} }
+  function epExt(t, s) { if (s) for (var k in s) if (Object.prototype.hasOwnProperty.call(s, k)) t[k] = s[k]; return t; }
+  function epColKey(label) { return String(label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || ("col_" + Math.random().toString(36).slice(2, 6)); }
+  // Reuse the talking-head clip + PiP layout the operator set up in PiP Studio.
+  function epDefaultClipId() { try { return localStorage.getItem("ros_pip_clip") || ""; } catch (e) { return ""; } }
+  function epDefaultPip() { try { return JSON.parse(localStorage.getItem("ros_pip_style") || "null") || { corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#7c5cff", radiusPct: 18 }; } catch (e) { return { corner: "br", shape: "circle", sizePct: 26 }; } }
+
+  /* ---- merge-field engine ----------------------------------------------------- */
+  function epPlaceholders(str) {
+    var re = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi, m, seen = {}, out = [];
+    while ((m = re.exec(str || ""))) { var k = m[1].toLowerCase(); if (!seen[k]) { seen[k] = 1; out.push(k); } }
+    return out;
+  }
+  // Fields resolved from data (the video field is rendered separately as a block).
+  function epFieldValue(p, key, template) {
+    if (key === "sender_name") return (template && template.fromName) || "";
+    if (key === "video" || key === "videoembed") return ""; // handled by epHighlight as a block
+    var v = p && p.fields ? p.fields[key] : "";
+    return (v == null) ? "" : String(v);
+  }
+  function epMerge(str, p, template) {
+    return String(str || "").replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, function (_m, k) { return epFieldValue(p, k.toLowerCase(), template); });
+  }
+  // Escape, then render tokens: chips in Placeholders view; resolved values (or a
+  // flagged ⟨missing⟩) in Rendered view. The {{video}} token becomes the inline
+  // Pitchlane video thumbnail — background + talking-head bubble + play button.
+  function epHighlight(str, p, template, rendered) {
+    return esc(String(str || "")).replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, function (_m, k) {
+      var key = k.toLowerCase();
+      if (key === "video" || key === "videoembed") return rendered ? epVideoThumb(p) : '<span class="ep-ph">{{video}}</span>';
+      var v = epFieldValue(p, key, template);
+      if (!rendered) return '<span class="ep-ph">{{' + esc(key) + "}}</span>";
+      return v ? '<span class="ep-ph ep-ph-ok">' + esc(v) + "</span>"
+               : '<span class="ep-ph ep-ph-miss">⟨' + esc(key) + "⟩</span>";
+    });
+  }
+  // The inline video block exactly as the recipient sees it: a clickable thumbnail
+  // (background job-post capture + talking-head bubble + play overlay) → watch page.
+  function epVideoThumb(p) {
+    var f = (p && p.fields) || {};
+    var bg = f.video_bg || "";              // signed gif from the composite, once rendered
+    var watch = f.video_watch || "";        // signed watch-page link
+    var co = f.company || "your team";
+    var bgStyle = bg ? 'style="background-image:url(' + esc(bg) + ')"' : "";
+    var statusTag = f.video_watch ? '<span class="ep-video-ready">✓ personalized</span>'
+      : (f.job_post_url ? '<span class="ep-video-pending">pairs on generate</span>' : '<span class="ep-video-need">needs job-post capture</span>');
+    return '<span class="ep-video" data-watch="' + esc(watch) + '">' +
+      '<span class="ep-video-thumb' + (bg ? " has-bg" : "") + '" ' + bgStyle + '>' +
+        (bg ? "" : '<span class="ep-video-skeleton"><i></i><i></i><i></i></span>') +
+        '<span class="ep-video-bubble">🧑‍💼</span>' +
+        '<span class="ep-video-play">▶</span>' +
+      "</span>" +
+      '<span class="ep-video-cap">▶ A quick note about ' + esc(co) + " · " + statusTag + "</span>" +
+      "</span>";
+  }
+
+  /* ---- validation + the AI approval pass -------------------------------------- */
+  function epValidate(p, template, criteria) {
+    var subject = epMerge(template.subject, p, template);
+    var bodyTxt = epMerge(template.body, p, template);
+    var email = epFieldValue(p, "email", template);
+    var emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    var keys = epPlaceholders(template.subject).concat(epPlaceholders(template.body));
+    var seen = {}, missing = [];
+    keys.forEach(function (k) {
+      if (seen[k] || k === "video" || k === "videoembed") return; seen[k] = 1;
+      if (epFieldValue(p, k, template) === "") missing.push(k);
+    });
+    var words = bodyTxt.trim() ? bodyTxt.trim().split(/\s+/).length : 0;
+    var lc = (subject + " " + bodyTxt).toLowerCase();
+    var banned = (criteria.bannedWords || []).filter(function (w) { return w && lc.indexOf(String(w).toLowerCase()) >= 0; });
+    var usesVideo = /\{\{\s*(video|videoembed)\s*\}\}/i.test(template.body + " " + template.subject);
+    var videoReady = !!(p.fields && p.fields.video_watch);
+    var checks = [
+      { key: "email", label: "Valid recipient email", ok: emailValid, required: !!criteria.requireValidEmail, detail: email || "none" },
+      { key: "placeholders", label: "All placeholders filled", ok: missing.length === 0, required: !!criteria.noUnfilled, detail: missing.length ? ("missing " + missing.join(", ")) : "complete" },
+      { key: "subject", label: "Subject ≤ " + criteria.maxSubjectChars + " chars", ok: subject.length <= criteria.maxSubjectChars, required: true, detail: subject.length + " chars" },
+      { key: "words", label: "Body " + criteria.minWords + "–" + criteria.maxWords + " words", ok: words >= criteria.minWords && words <= criteria.maxWords, required: true, detail: words + " words" },
+      { key: "spam", label: "No spam-trigger words", ok: banned.length === 0, required: true, detail: banned.length ? banned.join(", ") : "clean" }
+    ];
+    if (usesVideo) checks.push({ key: "video", label: "Personalized video rendered", ok: videoReady, required: !!criteria.requireVideoReady, detail: videoReady ? "ready" : (p.fields && p.fields.job_post_url ? "not generated" : "no job-post capture") });
+    var ai = epAiReview(p, subject, bodyTxt, criteria, { emailValid: emailValid, missing: missing, words: words, banned: banned, usesVideo: usesVideo, videoReady: videoReady });
+    return { subject: subject, body: bodyTxt, email: email, emailValid: emailValid, missing: missing, words: words, banned: banned, usesVideo: usesVideo, videoReady: videoReady, checks: checks, ai: ai };
+  }
+
+  // The AI approver: a fast deterministic reviewer scoring the merged copy against
+  // the set requirements and returning ready / not-ready with readable reasons. To
+  // swap in a real model, replace this body with a call to an LLM review endpoint.
+  function epAiReview(p, subject, body, criteria, v) {
+    var f = (p && p.fields) || {}, reasons = [], flags = [], score = 100;
+    function ding(n, why) { score -= n; flags.push(why); }
+    function plus(why) { reasons.push(why); }
+    if (v.missing.length) ding(40, "Unresolved placeholders: " + v.missing.join(", ")); else plus("All merge fields resolved");
+    if (criteria.requireValidEmail && !v.emailValid) ding(35, "Recipient email missing or malformed"); else if (v.emailValid) plus("Deliverable recipient address");
+    if (v.banned.length) ding(25, "Spam-trigger language: " + v.banned.join(", ")); else plus("No spam-trigger language");
+    if (v.words < criteria.minWords) ding(15, "Body reads thin (" + v.words + " words)");
+    else if (v.words > criteria.maxWords) ding(15, "Body runs long (" + v.words + " words)");
+    else plus("Length sits in the high-reply band");
+    if (subject.length > criteria.maxSubjectChars) ding(15, "Subject truncates on mobile (" + subject.length + " chars)");
+    if (/[A-Z]{5,}/.test(subject)) ding(10, "Subject SHOUTS (all-caps run)");
+    if (v.usesVideo && !v.videoReady) ding(12, "Video not rendered yet — generate the pairing");
+    if (f.first_name && body.indexOf(f.first_name) >= 0) plus("Opens on the prospect's name");
+    if (f.company && body.indexOf(f.company) >= 0) plus("References their company");
+    if (f.role && body.indexOf(f.role) >= 0) plus("Anchored on the open role");
+    if (v.usesVideo) plus("Personalized video — face-to-face touch");
+    if (/\?/.test(body)) plus("Has a soft-ask question"); else ding(10, "No clear ask / question");
+    var links = (body.match(/https?:\/\//g) || []).length;
+    if (links > 1) ding(10, links + " links hurt deliverability");
+    score = Math.max(0, Math.min(100, score));
+    var hardBlock = (criteria.requireValidEmail && !v.emailValid) || (criteria.noUnfilled && v.missing.length > 0);
+    return { score: score, pass: !hardBlock && score >= (criteria.aiMinScore || 70), reasons: reasons, flags: flags, hardBlock: hardBlock };
+  }
+  function epGate(val, criteria) {
+    var reqFail = val.checks.some(function (c) { return c.required && !c.ok; });
+    var aiFail = !!criteria.requireAiPass && !val.ai.pass;
+    return { pass: !reqFail && !aiFail, reqFail: reqFail, aiFail: aiFail };
+  }
+
+  /* ---- client-side CSV import ------------------------------------------------- */
+  function epParseCsv(text) {
+    var rows = [], field = "", row = [], q = false, s = String(text || "").replace(/^﻿/, "");
+    for (var i = 0; i < s.length; i++) {
+      var c = s[i];
+      if (q) { if (c === '"') { if (s[i + 1] === '"') { field += '"'; i++; } else q = false; } else field += c; }
+      else if (c === '"') q = true;
+      else if (c === ",") { row.push(field); field = ""; }
+      else if (c === "\n" || c === "\r") { if (c === "\r" && s[i + 1] === "\n") i++; row.push(field); field = ""; if (row.some(function (x) { return x.trim() !== ""; })) rows.push(row); row = []; }
+      else field += c;
+    }
+    if (field !== "" || row.length) { row.push(field); if (row.some(function (x) { return x.trim() !== ""; })) rows.push(row); }
+    var headers = (rows.shift() || []).map(function (h) { return h.trim(); });
+    var objs = rows.map(function (r) { var o = {}; headers.forEach(function (h, i) { o[h] = (r[i] || "").trim(); }); return o; });
+    return { headers: headers, rows: objs };
+  }
+  function epGuessCol(headers, subs) {
+    var norm = function (x) { return x.toLowerCase().replace(/[^a-z0-9]/g, ""); };
+    return headers.filter(function (h) { return subs.indexOf(norm(h)) >= 0; })[0]
+      || headers.filter(function (h) { var n = norm(h); return subs.some(function (s) { return n.indexOf(s) >= 0; }); })[0] || "";
+  }
+  function epRowsToProspects(parsed) {
+    var h = parsed.headers;
+    var col = {
+      first_name: epGuessCol(h, ["firstname", "first", "fname", "givenname"]),
+      full_name: epGuessCol(h, ["fullname", "name", "contact"]),
+      title: epGuessCol(h, ["title", "jobtitle", "position"]),
+      company: epGuessCol(h, ["company", "employer", "account", "organization", "org"]),
+      role: epGuessCol(h, ["role", "openrole", "hiringfor", "reqtitle"]),
+      location: epGuessCol(h, ["location", "city", "metro", "citystate"]),
+      industry: epGuessCol(h, ["industry", "sector", "vertical"]),
+      email: epGuessCol(h, ["email", "emailaddress", "workemail"]),
+      job_post_url: epGuessCol(h, ["jobposturl", "companiesjobposturl", "jobpost", "postingurl", "sourceurl", "roleurl"]),
+      competitor: epGuessCol(h, ["competitor", "competitorname"])
+    };
+    var seen = {};
+    return parsed.rows.map(function (r, i) {
+      var fields = {};
+      for (var k in col) fields[k] = col[k] ? (r[col[k]] || "") : "";
+      if (!fields.first_name && fields.full_name) fields.first_name = String(fields.full_name).split(/\s+/)[0];
+      fields.pip_video = "";
+      var id = "csv_" + (fields.email || (fields.company + "_" + i));
+      if (seen[id]) id = id + "_" + i; seen[id] = 1;
+      return { id: id, source: "CSV", fields: fields };
+    });
+  }
+
+  /* ---- export helpers --------------------------------------------------------- */
+  function epCsvCell(s) { s = String(s == null ? "" : s); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+  function epDownload(name, text) {
+    try {
+      var blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+      var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    } catch (e) { toast("Could not export"); }
+  }
+
+  function renderEmail(el) {
+    var state = {
+      tab: "queue",
+      prospects: epLoadQueue(),
+      template: epLoadTemplate(),
+      criteria: epLoadCriteria(),
+      approvals: epLoadApprovals(),
+      columns: epLoadColumns(),
+      view: "rendered",
+      showCriteria: false,
+      page: 0,
+      csv: null,
+      clips: [],
+      clipId: epDefaultClipId(),
+      pip: epDefaultPip(),
+      sequences: []
+    };
+    var PER_PAGE = 30;
+
+    el.innerHTML = "<style>" + EP_STYLE + "</style>" +
+      '<div class="ep-wrap">' +
+        '<div class="ep-hero">' +
+          '<div class="ep-hero-l"><div class="ep-hero-t">✉️ Email <span class="ep-tof">Top of funnel</span></div>' +
+            '<div class="ep-hero-d">Stage every email before it sends: merge prospects into your template, validate the copy, let the AI approve only what meets your bar, generate the picture-in-picture video (job-post background × your talking head), then attach a sequence and launch. Recipients land on a branded page with the video and your calendar.</div></div>' +
+          '<div class="ep-hero-r"><span id="epReady" class="ep-ready ep-muted">Checking video studio…</span></div>' +
+        "</div>" +
+        '<div class="ep-tabs" id="epTabs">' +
+          '<button class="ep-tab active" data-tab="queue">📋 Prep queue <span id="epTabN" class="ep-tabn">' + state.prospects.length + "</span></button>" +
+          '<button class="ep-tab" data-tab="import">⇪ Import CSV</button>' +
+        "</div>" +
+        '<div id="epMain"></div>' +
+      "</div>";
+
+    Array.prototype.forEach.call(el.querySelectorAll(".ep-tab"), function (b) {
+      b.addEventListener("click", function () { switchTab(b.getAttribute("data-tab")); });
+    });
+
+    loadClips();
+    loadSequences();
+    paint();
+
+    function loadClips() {
+      api("/in-market/clip").then(function (d) {
+        state.clips = (d && d.clips) || [];
+        if (state.clips.length && !state.clipId) state.clipId = state.clips[0].id;
+        paintReady();
+        if (state.tab === "queue") { var v = $("#epVideoCard", el); if (v) paintVideoCard(); }
+      }).catch(function () { state.clips = []; paintReady(); });
+    }
+    function paintReady() {
+      var r = $("#epReady", el); if (!r) return;
+      if (state.clips.length) { r.className = "ep-ready ep-ok"; r.innerHTML = "🎬 " + state.clips.length + " talking-head clip" + (state.clips.length === 1 ? "" : "s") + " ready"; r.title = "Recorded in PiP Studio"; }
+      else { r.className = "ep-ready ep-warn"; r.innerHTML = "◌ No talking-head clip"; r.title = "Record one in PiP Studio to enable the personalized video email."; }
+    }
+    function loadSequences() {
+      try { state.sequences = (seqStore().all() || []).filter(function (s) { return s.motion === motion; }); } catch (e) { state.sequences = []; }
+      api("/sequences?motion=" + encodeURIComponent(motion)).then(function (d) {
+        var server = (d && d.sequences) || [];
+        if (server.length) { state.sequences = server; var dep = $("#epDeploy", el); if (dep && state.tab === "queue") paintDeploy(evalAll()); }
+      }).catch(function () {});
     }
 
-    function paintReady(d) {
-      var r = $("#bdbReady", el); if (!r) return;
-      r.className = "bdb-ready";
-      if (!d.mtaPreferred) { r.classList.add("bdb-warn"); r.innerHTML = "◌ Pool off"; r.title = "Set SENDING_EMAIL_PROVIDER=mta and warm mailboxes to enable launch. Preview still works."; return; }
-      if (!d.ready) { r.classList.add("bdb-warn"); r.innerHTML = "◌ No warm mailboxes"; r.title = d.setupHint || ""; return; }
-      r.classList.add("bdb-ok");
-      r.innerHTML = '<i class="bdb-live"></i> Pool live · ~' + (d.pool.remainingToday || 0).toLocaleString() + " today";
-      r.title = d.pool.sendableMailboxes + " mailboxes across " + d.pool.activeDomains + " domains";
+    function switchTab(tab) {
+      state.tab = tab;
+      Array.prototype.forEach.call(el.querySelectorAll(".ep-tab"), function (b) { b.classList.toggle("active", b.getAttribute("data-tab") === tab); });
+      paint();
+    }
+    function paint() { if (state.tab === "import") paintImport(); else paintQueue(); }
+
+    /* ===================== Prep queue ===================== */
+    function evalAll() {
+      return state.prospects.map(function (p) {
+        var val = epValidate(p, state.template, state.criteria);
+        return { p: p, val: val, gate: epGate(val, state.criteria), status: state.approvals[p.id] || "pending" };
+      });
     }
 
-    /* ---- step 1: upload ---- */
-    function paintUpload() {
-      setStep(1);
-      bodyEl.innerHTML =
-        '<div class="bdb-card">'
-        + '<div class="bdb-h">Upload your list</div>'
-        + '<p class="bdb-sub">CSV with first name, title, company, and location (or city + state). Optional: an email column to send to, plus candidate columns (candidate from / role / proof point) to unlock the named-competitor hook.</p>'
-        + '<div class="bdb-drop" id="bdbDrop"><div class="bdb-drop-ico">📥</div><div class="bdb-drop-t">Drop your CSV here</div><div class="bdb-drop-s">or click to browse</div><input type="file" id="bdbFile" accept=".csv,text/csv" hidden /></div>'
-        + '<div id="bdbChip"></div>'
-        + '<div class="bdb-paste-toggle" id="bdbPasteToggle">▸ or paste CSV text</div>'
-        + '<textarea id="bdbPaste" class="bdb-ta" style="display:none" placeholder="First Name,Title,Company,City,State,Email&#10;Ryan,CFO,Acme,Austin,TX,ryan@acme.com"></textarea>'
-        + '<div class="bdb-actions"><div class="bdb-spacer"></div><button class="btn btn-primary" id="bdbParse">Analyze list →</button></div>'
-        + '</div>';
-
-      var drop = $("#bdbDrop", el), file = $("#bdbFile", el);
-      function readFile(f) {
-        if (!f) return;
-        state.name = f.name;
-        var rd = new FileReader();
-        rd.onload = function () { state.csv = String(rd.result || ""); $("#bdbChip", el).innerHTML = '<span class="bdb-filechip">📄 ' + esc(f.name) + ' · ready</span>'; };
-        rd.readAsText(f);
+    function paintQueue() {
+      var main = $("#epMain", el);
+      var nEl = $("#epTabN", el); if (nEl) nEl.textContent = state.prospects.length;
+      if (!state.prospects.length) {
+        main.innerHTML =
+          '<div class="ep-empty"><div class="ep-empty-ic">✉️</div>' +
+          '<div class="ep-empty-t">No prospects queued yet</div>' +
+          '<div class="ep-empty-s">Push prospects from <a href="#inmarket">Hire Signals</a> with “✉️ Push prospects to Email”, or <a href="#" id="epGoImport">import a CSV</a>.</div></div>';
+        var gi = $("#epGoImport", el); if (gi) gi.addEventListener("click", function (e) { e.preventDefault(); switchTab("import"); });
+        return;
       }
+      var t = state.template;
+      main.innerHTML =
+        '<div class="ep-grid">' +
+          '<div class="ep-card ep-tpl">' +
+            '<div class="ep-card-h">Template <span class="ep-card-sub">merge fields in {{double braces}} · {{video}} embeds the PiP video</span></div>' +
+            '<div class="ep-inrow"><label>From name<input id="epFrom" class="ep-in" value="' + esc(t.fromName) + '" placeholder="Your name"></label>' +
+            '<label>Reply-to<input id="epReply" class="ep-in" value="' + esc(t.replyTo) + '" placeholder="you@yourdomain.com"></label></div>' +
+            '<label class="ep-lbl">Subject</label><input id="epSubject" class="ep-in" value="' + esc(t.subject) + '">' +
+            '<label class="ep-lbl">Body</label><textarea id="epBody" class="ep-ta ep-body">' + esc(t.body) + "</textarea>" +
+            '<div class="ep-fields" id="epFieldChips"></div>' +
+          "</div>" +
+          '<div class="ep-card ep-side">' +
+            '<div id="epVideoCard"></div>' +
+            '<div class="ep-card-h" style="margin-top:16px">Approval requirements <button class="ep-link" id="epEditCrit">edit</button></div>' +
+            '<div id="epCritView"></div>' +
+            '<div class="ep-batch">' +
+              '<button class="btn btn-primary btn-sm" id="epApproveAll">✓ Approve all passing</button>' +
+              '<button class="btn btn-ghost btn-sm" id="epRejectFail">⊘ Reject all blocked</button>' +
+              '<button class="btn btn-ghost btn-sm" id="epClearAppr">↺ Clear</button>' +
+            "</div>" +
+            '<div class="ep-viewtog" id="epViewTog"><span class="ep-vlbl">Preview</span>' +
+              '<button class="ep-vbtn' + (state.view === "rendered" ? " active" : "") + '" data-view="rendered">Rendered</button>' +
+              '<button class="ep-vbtn' + (state.view === "placeholders" ? " active" : "") + '" data-view="placeholders">Placeholders</button>' +
+            "</div>" +
+          "</div>" +
+        "</div>" +
+        '<div id="epSummary" class="ep-summary"></div>' +
+        '<div id="epCards" class="ep-cards"></div>' +
+        '<div id="epPager" class="ep-pager"></div>' +
+        '<div id="epDeploy" class="ep-deploy"></div>';
+
+      bindTpl();
+      paintFieldChips();
+      paintVideoCard();
+      $("#epEditCrit", el).addEventListener("click", function () { state.showCriteria = !state.showCriteria; paintCritView(); });
+      $("#epApproveAll", el).addEventListener("click", approveAllPassing);
+      $("#epRejectFail", el).addEventListener("click", rejectAllBlocked);
+      $("#epClearAppr", el).addEventListener("click", clearApprovals);
+      Array.prototype.forEach.call(el.querySelectorAll(".ep-vbtn"), function (b) {
+        b.addEventListener("click", function () {
+          state.view = b.getAttribute("data-view");
+          Array.prototype.forEach.call(el.querySelectorAll(".ep-vbtn"), function (x) { x.classList.toggle("active", x === b); });
+          repaintCards();
+        });
+      });
+      paintCritView();
+      repaintCards();
+    }
+
+    function paintFieldChips() {
+      var host = $("#epFieldChips", el); if (!host) return;
+      var custom = state.columns.map(function (c) { return [c.key, c.label]; });
+      host.innerHTML = EP_FIELDS.concat(custom).map(function (f) {
+        return '<button class="ep-fchip' + (f[0] === "video" ? " ep-fchip-v" : "") + '" data-f="' + f[0] + '" title="Insert {{' + f[0] + '}}">+ ' + esc(f[1]) + "</button>";
+      }).join("") + '<button class="ep-fchip ep-fchip-add" id="epAddCol">⚙ Columns</button>';
+      Array.prototype.forEach.call(host.querySelectorAll(".ep-fchip[data-f]"), function (c) {
+        c.addEventListener("click", function () { insertToken(c.getAttribute("data-f")); });
+      });
+      $("#epAddCol", el).addEventListener("click", openColumns);
+    }
+
+    var tplTimer;
+    function bindTpl() {
+      var subj = $("#epSubject", el), bodyI = $("#epBody", el), from = $("#epFrom", el), reply = $("#epReply", el);
+      function upd() {
+        state.template.subject = subj.value; state.template.body = bodyI.value;
+        state.template.fromName = from.value; state.template.replyTo = reply.value;
+        epSaveTemplate(state.template);
+        clearTimeout(tplTimer); tplTimer = setTimeout(repaintCards, 250);
+      }
+      [subj, bodyI, from, reply].forEach(function (n) { if (n) n.addEventListener("input", upd); });
+    }
+    function insertToken(field) {
+      var ta = $("#epBody", el); if (!ta) return;
+      var tok = "{{" + field + "}}", start = ta.selectionStart, end = ta.selectionEnd;
+      if (start == null) { start = end = ta.value.length; }
+      ta.value = ta.value.slice(0, start) + tok + ta.value.slice(end);
+      ta.focus(); ta.selectionStart = ta.selectionEnd = start + tok.length;
+      state.template.body = ta.value; epSaveTemplate(state.template); repaintCards();
+    }
+
+    /* ---- video pairing card (talking head × job-post background) ---- */
+    function paintVideoCard() {
+      var host = $("#epVideoCard", el); if (!host) return;
+      var withBg = state.prospects.filter(function (p) { return p.fields.job_post_url; }).length;
+      var rendered = state.prospects.filter(function (p) { return p.fields.video_watch; }).length;
+      var clipOpts = state.clips.length
+        ? '<select id="epClip" class="ep-in">' + state.clips.map(function (c) { return '<option value="' + esc(c.id) + '"' + (c.id === state.clipId ? " selected" : "") + ">" + esc(c.label || ("Clip " + (c.id || "").slice(0, 6))) + "</option>"; }).join("") + "</select>"
+        : '<div class="ep-vnote">No talking-head clip yet. <a href="/pip-studio">Record one in PiP Studio →</a></div>';
+      host.innerHTML =
+        '<div class="ep-card-h">🎬 Picture-in-picture video</div>' +
+        '<p class="ep-vsub">Pairs each prospect\'s job-post capture (background) with your talking-head clip (bubble) into one video — the second touch.</p>' +
+        '<label class="ep-lbl">Talking head</label>' + clipOpts +
+        '<div class="ep-vstat">' +
+          '<span>' + withBg + " with job-post link</span><span>" + rendered + " rendered</span>" +
+        "</div>" +
+        '<button class="btn btn-primary btn-sm" id="epGenVid"' + ((state.clipId && withBg) ? "" : " disabled") + '>▶ Generate paired videos</button>' +
+        '<div id="epGenStat" class="ep-genstat"></div>';
+      var clipSel = $("#epClip", el);
+      if (clipSel) clipSel.addEventListener("change", function () { state.clipId = clipSel.value; try { localStorage.setItem("ros_pip_clip", state.clipId); } catch (e) {} });
+      var gen = $("#epGenVid", el);
+      if (gen) gen.addEventListener("click", generateVideos);
+    }
+
+    // Generate the composite per prospect via the existing pipeline: shot (background
+    // from job_post_url) → video (PiP composite) → stamp signed gif + watch link back
+    // onto the prospect so the preview shows the real thumbnail and the email links out.
+    function generateVideos() {
+      if (!state.clipId) { toast("Pick a talking-head clip first"); return; }
+      var targets = state.prospects.filter(function (p) { return p.fields.job_post_url && !p.fields.video_watch; });
+      if (!targets.length) { toast("Nothing to generate — rows need a job-post link"); return; }
+      var gen = $("#epGenVid", el), stat = $("#epGenStat", el);
+      if (gen) gen.disabled = true;
+      var done = 0, ok = 0;
+      (function next(i) {
+        if (i >= targets.length) {
+          if (gen) gen.disabled = false;
+          if (stat) stat.innerHTML = '<span class="ep-ok">✓ ' + ok + " of " + targets.length + " rendered</span>";
+          epStoreQueue(state.prospects); paintVideoCard(); repaintCards();
+          toast("Rendered " + ok + " personalized video" + (ok === 1 ? "" : "s"));
+          return;
+        }
+        var p = targets[i];
+        var role = p.fields.role || p.fields.title;
+        if (stat) stat.innerHTML = "Capturing " + (i + 1) + "/" + targets.length + " · " + esc(p.fields.company || "") + "…";
+        // 1) capture the job-post / company-site background, 2) composite the PiP
+        // video over it (block until ready so we get the signed share links back).
+        send("/in-market/shot", "POST", { company: p.fields.company, roleTitle: role, roleUrl: p.fields.job_post_url, wait: true }).then(function () {
+          if (stat) stat.innerHTML = "Pairing " + (i + 1) + "/" + targets.length + " · " + esc(p.fields.company || "") + "…";
+          return send("/in-market/video", "POST", {
+            company: p.fields.company, roleTitle: role,
+            roleUrl: p.fields.job_post_url, clipId: state.clipId, pip: state.pip, firstName: p.fields.first_name, wait: true
+          });
+        }).then(function (r) {
+          var d = r && r.data;
+          if (d && d.share && (d.share.gif || d.share.watch)) {
+            p.fields.video_bg = d.share.gif || ""; p.fields.video_watch = d.share.watch || ""; p.fields.video_key = d.key || "";
+            p.fields.pip_video = d.share.watch || ""; ok++;
+            // keep any pip_video custom columns in sync
+            state.columns.forEach(function (c) { if (c.type === "pip_video") p.fields[c.key] = p.fields.video_watch; });
+          } else if (d && d.key) {
+            // composing server-side; record the key so a later launch can attach it
+            p.fields.video_key = d.key;
+          }
+          done++; next(i + 1);
+        }).catch(function () { done++; next(i + 1); });
+      })(0);
+    }
+
+    /* ---- custom columns ---- */
+    function openColumns() {
+      var body =
+        '<div class="ep-colmgr">' +
+          '<div class="ep-colmgr-list" id="epColList"></div>' +
+          '<div class="ep-colmgr-add">' +
+            '<input id="epNewColName" class="ep-in" placeholder="New column name (e.g. PiP_Studio_Video)">' +
+            '<select id="epNewColType" class="ep-in">' + EP_COL_TYPES.map(function (t) { return '<option value="' + t[0] + '">' + esc(t[1]) + "</option>"; }).join("") + "</select>" +
+            '<button class="btn btn-primary btn-sm" id="epNewColAdd">Add column</button>' +
+          "</div>" +
+          '<p class="ep-vsub" style="margin-top:10px">Each column becomes a <b>{{merge_field}}</b> you can drop into the template. A <b>PiP video</b> column resolves to the personalized video for that row (background = job-post capture, foreground = your talking head).</p>' +
+        "</div>";
+      var close = openModal("Columns", "Add custom merge fields and assign content", body, function (root) {
+        function paintList() {
+          var host = root.querySelector("#epColList");
+          host.innerHTML = state.columns.length
+            ? state.columns.map(function (c) {
+                return '<div class="ep-colrow"><b>{{' + esc(c.key) + "}}</b><span class=\"ep-coltype\">" + esc((EP_COL_TYPES.filter(function (t) { return t[0] === c.type; })[0] || ["", c.type])[1]) + "</span>" +
+                  '<button class="btn btn-ghost btn-sm" data-del="' + esc(c.key) + '">Remove</button></div>';
+              }).join("")
+            : '<div class="ep-vsub">No custom columns yet.</div>';
+          Array.prototype.forEach.call(host.querySelectorAll("[data-del]"), function (b) {
+            b.addEventListener("click", function () {
+              state.columns = state.columns.filter(function (c) { return c.key !== b.getAttribute("data-del"); });
+              epStoreColumns(state.columns); paintList(); paintFieldChips(); repaintCards();
+            });
+          });
+        }
+        paintList();
+        root.querySelector("#epNewColAdd").addEventListener("click", function () {
+          var name = root.querySelector("#epNewColName").value.trim();
+          if (!name) { toast("Name the column"); return; }
+          var key = epColKey(name), type = root.querySelector("#epNewColType").value;
+          if (state.columns.some(function (c) { return c.key === key; })) { toast("That column already exists"); return; }
+          state.columns.push({ key: key, label: name, type: type });
+          epStoreColumns(state.columns);
+          // For derived pip_video columns, mirror the rendered watch link per prospect.
+          if (type === "pip_video") state.prospects.forEach(function (p) { p.fields[key] = p.fields.video_watch || ""; });
+          root.querySelector("#epNewColName").value = "";
+          paintList(); paintFieldChips(); repaintCards();
+          toast("Added {{" + key + "}}");
+        });
+      });
+      return close;
+    }
+
+    function paintCritView() {
+      var c = state.criteria, host = $("#epCritView", el); if (!host) return;
+      if (!state.showCriteria) {
+        host.innerHTML = '<ul class="ep-critlist">' +
+          "<li>Subject ≤ <b>" + c.maxSubjectChars + "</b> chars</li>" +
+          "<li>Body <b>" + c.minWords + "–" + c.maxWords + "</b> words</li>" +
+          "<li>" + (c.requireValidEmail ? "✓" : "–") + " Valid recipient email</li>" +
+          "<li>" + (c.noUnfilled ? "✓" : "–") + " All placeholders filled</li>" +
+          "<li>" + (c.requireVideoReady ? "✓" : "–") + " Video rendered (if used)</li>" +
+          "<li>" + (c.requireAiPass ? "✓" : "–") + " AI score ≥ <b>" + c.aiMinScore + "</b></li>" +
+          "</ul>";
+        return;
+      }
+      function num(id, label, val) { return '<label class="ep-clbl">' + esc(label) + '<input type="number" id="' + id + '" class="ep-cnum" value="' + val + '"></label>'; }
+      function bool(id, label, val) { return '<label class="ep-cbool"><input type="checkbox" id="' + id + '"' + (val ? " checked" : "") + "> " + esc(label) + "</label>"; }
+      host.innerHTML = '<div class="ep-critedit">' +
+        num("epMaxSubj", "Max subject chars", c.maxSubjectChars) + num("epAiMin", "Min AI score", c.aiMinScore) +
+        num("epMinW", "Min body words", c.minWords) + num("epMaxW", "Max body words", c.maxWords) +
+        bool("epReqEmail", "Require valid email", c.requireValidEmail) + bool("epNoUnfilled", "No unfilled placeholders", c.noUnfilled) +
+        bool("epReqAi", "Require AI approval", c.requireAiPass) + bool("epReqVid", "Require video rendered", c.requireVideoReady) +
+        '<label class="ep-clbl ep-clbl-full">Spam-trigger words (comma-separated)<input id="epBanned" class="ep-in" value="' + esc((c.bannedWords || []).join(", ")) + '"></label>' +
+        '<div class="ep-critfoot"><button class="btn btn-sm btn-primary" id="epSaveCrit">Save requirements</button></div>' +
+        "</div>";
+      $("#epSaveCrit", el).addEventListener("click", function () {
+        c.maxSubjectChars = parseInt($("#epMaxSubj", el).value, 10) || EP_DEFAULT_CRITERIA.maxSubjectChars;
+        c.minWords = parseInt($("#epMinW", el).value, 10) || 0;
+        c.maxWords = parseInt($("#epMaxW", el).value, 10) || EP_DEFAULT_CRITERIA.maxWords;
+        c.aiMinScore = parseInt($("#epAiMin", el).value, 10) || 0;
+        c.requireValidEmail = $("#epReqEmail", el).checked; c.noUnfilled = $("#epNoUnfilled", el).checked;
+        c.requireAiPass = $("#epReqAi", el).checked; c.requireVideoReady = $("#epReqVid", el).checked;
+        c.bannedWords = $("#epBanned", el).value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+        epSaveCriteria(c); state.showCriteria = false; paintCritView(); repaintCards(); toast("Requirements saved");
+      });
+    }
+
+    function repaintCards() {
+      if (state.tab !== "queue") return;
+      var items = evalAll();
+      var ready = items.filter(function (x) { return x.gate.pass; }).length;
+      var approved = items.filter(function (x) { return x.status === "approved"; }).length;
+      var blocked = items.length - ready;
+      var sum = $("#epSummary", el);
+      if (sum) sum.innerHTML =
+        epTile(items.length, "in queue", "") + epTile(ready, "pass the bar", "ok") +
+        epTile(approved, "approved", "accent") + epTile(blocked, "need work", blocked ? "warn" : "");
+      var total = items.length, pages = Math.max(1, Math.ceil(total / PER_PAGE));
+      if (state.page >= pages) state.page = pages - 1;
+      var slice = items.slice(state.page * PER_PAGE, state.page * PER_PAGE + PER_PAGE);
+      var cards = $("#epCards", el);
+      if (cards) {
+        cards.innerHTML = slice.map(epCard).join("");
+        Array.prototype.forEach.call(cards.querySelectorAll("[data-appr]"), function (b) { b.addEventListener("click", function () { toggleStatus(b.getAttribute("data-appr"), "approved"); }); });
+        Array.prototype.forEach.call(cards.querySelectorAll("[data-rej]"), function (b) { b.addEventListener("click", function () { toggleStatus(b.getAttribute("data-rej"), "rejected"); }); });
+        Array.prototype.forEach.call(cards.querySelectorAll("[data-rm]"), function (b) { b.addEventListener("click", function () { removeProspect(b.getAttribute("data-rm")); }); });
+      }
+      var pager = $("#epPager", el);
+      if (pager) {
+        pager.innerHTML = pages > 1 ?
+          ('<button class="btn btn-sm btn-ghost" data-page="' + (state.page - 1) + '"' + (state.page <= 0 ? " disabled" : "") + ">← Prev</button>" +
+           '<span class="ep-pageinfo">Page ' + (state.page + 1) + " / " + pages + " · " + total + " total</span>" +
+           '<button class="btn btn-sm btn-ghost" data-page="' + (state.page + 1) + '"' + (state.page >= pages - 1 ? " disabled" : "") + ">Next →</button>") : "";
+        Array.prototype.forEach.call(pager.querySelectorAll("[data-page]"), function (b) { b.addEventListener("click", function () { state.page = parseInt(b.getAttribute("data-page"), 10) || 0; repaintCards(); window.scrollTo(0, 0); }); });
+      }
+      paintDeploy(items);
+    }
+
+    function epCard(item) {
+      var p = item.p, v = item.val, ai = v.ai, rendered = state.view === "rendered";
+      var who = [p.fields.full_name || p.fields.first_name || "(no name)", p.fields.title, p.fields.company].filter(Boolean).join(" · ");
+      var statusCls = item.status === "approved" ? "ep-appr" : item.status === "rejected" ? "ep-rej" : (item.gate.pass ? "ep-okstate" : "ep-block");
+      var checks = v.checks.map(function (c) {
+        return '<li class="' + (c.ok ? "ep-ok" : (c.required ? "ep-bad" : "ep-warn")) + '"><span class="ep-ck">' + (c.ok ? "✓" : "✕") + "</span>" + esc(c.label) + ' <span class="ep-ckd">' + esc(c.detail) + "</span></li>";
+      }).join("");
+      var aiCls = ai.pass ? "ep-ai-pass" : "ep-ai-fail";
+      var aiNotes = (ai.flags.length ? ai.flags : ai.reasons).slice(0, 4).map(function (r) { return '<span class="ep-aireason">' + esc(r) + "</span>"; }).join("");
+      return '<div class="ep-mail ' + statusCls + '" data-id="' + esc(p.id) + '">' +
+        '<div class="ep-mail-head">' +
+          '<span class="avatar" style="background:' + colorFor(p.fields.company) + '">' + esc(initials(p.fields.full_name || p.fields.company || "?")) + "</span>" +
+          '<div class="ep-mail-who"><b>' + esc(who) + "</b><span class=\"ep-mail-src\">via " + esc(p.source || "manual") + (p.fields.email ? " · " + esc(p.fields.email) : "") + "</span></div>" +
+          '<span class="ep-aiscore ' + aiCls + '" title="AI approval score">' + ai.score + "</span>" +
+        "</div>" +
+        '<div class="ep-mail-win">' +
+          '<div class="ep-mail-bar"><i></i><i></i><i></i></div>' +
+          '<div class="ep-mail-body">' +
+            '<div class="ep-subj"><span class="ep-subj-l">Subject</span>' + epHighlight(state.template.subject, p, state.template, rendered) + "</div>" +
+            '<div class="ep-bodytxt">' + epHighlight(state.template.body, p, state.template, rendered) + "</div>" +
+          "</div>" +
+        "</div>" +
+        '<div class="ep-mail-foot">' +
+          '<ul class="ep-checks">' + checks + "</ul>" +
+          '<div class="ep-ai ' + aiCls + '"><div class="ep-ai-h">🤖 AI review · ' + (ai.pass ? "approved" : "needs work") + "</div><div class=\"ep-aireasons\">" + aiNotes + "</div></div>" +
+          '<div class="ep-actions">' +
+            '<button class="btn btn-sm ' + (item.status === "approved" ? "btn-primary" : "btn-ghost") + '" data-appr="' + esc(p.id) + '">' + (item.status === "approved" ? "✓ Approved" : "Approve") + "</button>" +
+            '<button class="btn btn-sm btn-ghost" data-rej="' + esc(p.id) + '">' + (item.status === "rejected" ? "✕ Rejected" : "Reject") + "</button>" +
+            '<button class="btn btn-sm btn-ghost ep-rm" data-rm="' + esc(p.id) + '">Remove</button>' +
+          "</div>" +
+        "</div>" +
+      "</div>";
+    }
+
+    function toggleStatus(id, status) {
+      state.approvals[id] = (state.approvals[id] === status) ? "pending" : status;
+      if (state.approvals[id] === "pending") delete state.approvals[id];
+      epSaveApprovals(state.approvals); repaintCards();
+    }
+    function removeProspect(id) {
+      state.prospects = state.prospects.filter(function (p) { return p.id !== id; });
+      delete state.approvals[id]; epStoreQueue(state.prospects); epSaveApprovals(state.approvals);
+      var nEl = $("#epTabN", el); if (nEl) nEl.textContent = state.prospects.length;
+      if (!state.prospects.length) { paintQueue(); return; }
+      repaintCards(); paintVideoCard();
+    }
+    function approveAllPassing() {
+      var n = 0; evalAll().forEach(function (x) { if (x.gate.pass) { state.approvals[x.p.id] = "approved"; n++; } });
+      epSaveApprovals(state.approvals); repaintCards(); toast(n ? ("Approved " + n + " that pass the bar") : "Nothing passes the bar yet");
+    }
+    function rejectAllBlocked() { evalAll().forEach(function (x) { if (!x.gate.pass) state.approvals[x.p.id] = "rejected"; }); epSaveApprovals(state.approvals); repaintCards(); }
+    function clearApprovals() { state.approvals = {}; epSaveApprovals(state.approvals); repaintCards(); }
+
+    /* ===================== Deploy / launch ===================== */
+    function paintDeploy(items) {
+      var dep = $("#epDeploy", el); if (!dep) return;
+      var approved = items.filter(function (x) { return x.status === "approved"; });
+      var ready = items.filter(function (x) { return x.gate.pass; }).length;
+      var seqOpts = '<option value="">No sequence (single email)</option>' + state.sequences.map(function (s) {
+        return '<option value="' + esc(s.id) + '">' + esc(s.name || s.id) + (s.channel ? " · " + esc(s.channel) : "") + ((s.steps && s.steps.length) ? " · " + s.steps.length + " steps" : "") + "</option>";
+      }).join("");
+      dep.innerHTML =
+        '<div class="ep-deploy-l"><b>' + approved.length + "</b> approved · " + ready + " pass the bar · " + (items.length - approved.length) + " awaiting</div>" +
+        '<div class="ep-deploy-r">' +
+          '<label class="ep-seq">Sequence <select id="epSeq" class="ep-in">' + seqOpts + "</select></label>" +
+          '<a class="ep-link" href="#campaigns">+ new sequence</a>' +
+          '<button class="btn btn-ghost btn-sm" id="epExport"' + (approved.length ? "" : " disabled") + ">📤 Export</button>" +
+          '<button class="btn btn-primary btn-sm" id="epLaunch"' + (approved.length ? "" : " disabled") + ">🚀 Launch " + (approved.length || "") + " approved</button>" +
+        "</div>";
+      var ex = $("#epExport", el); if (ex) ex.addEventListener("click", function () { exportApproved(items); });
+      var lc = $("#epLaunch", el); if (lc) lc.addEventListener("click", function () { launchApproved(items); });
+    }
+
+    function exportApproved(items) {
+      var approved = items.filter(function (x) { return x.status === "approved"; });
+      if (!approved.length) return;
+      var seqId = ($("#epSeq", el) || {}).value || "";
+      var seqName = (state.sequences.filter(function (s) { return s.id === seqId; })[0] || {}).name || "";
+      var lines = [["to_email", "first_name", "company", "role", "subject", "body", "video_watch", "sequence"].join(",")];
+      approved.forEach(function (x) {
+        var f = x.p.fields;
+        lines.push([f.email || "", f.first_name || "", f.company || "", f.role || "", x.val.subject, x.val.body, f.video_watch || "", seqName].map(epCsvCell).join(","));
+      });
+      epDownload("email-deploy-" + approved.length + ".csv", lines.join("\r\n"));
+      toast("Exported " + approved.length + " approved email" + (approved.length === 1 ? "" : "s"));
+    }
+
+    // Launch: attach the rendered video + arm the 2-email sequence for prospects that
+    // came from Hire Signals (reusing /api/in-market/attach, which stamps the video and
+    // turns on the sequence with the {{videoembed}} second touch), then kick outreach.
+    function launchApproved(items) {
+      var approved = items.filter(function (x) { return x.status === "approved"; });
+      if (!approved.length) { toast("Approve at least one email first"); return; }
+      var seqId = ($("#epSeq", el) || {}).value || "";
+      var seq = state.sequences.filter(function (s) { return s.id === seqId; })[0];
+      var btn = $("#epLaunch", el); if (btn) { btn.disabled = true; btn.textContent = "Launching…"; }
+      resolveBdCampaign(function (campaignId) {
+        if (!campaignId) { toast("Create a campaign first."); if (btn) btn.disabled = false; return; }
+        if (seqId) send("/campaigns", "POST", { id: campaignId, sequenceId: seqId }).catch(function () {});
+        var promotable = approved.filter(function (x) { return x.p.lead; });
+        var csvOnly = approved.length - promotable.length;
+        var done = 0;
+        (function next(i) {
+          if (i >= promotable.length) {
+            send("/in-market", "POST", { action: "launch_outreach", campaignId: campaignId, count: done }).catch(function () {});
+            var launched = {}; promotable.forEach(function (x) { launched[x.p.id] = 1; });
+            state.prospects = state.prospects.filter(function (p) { return !launched[p.id]; });
+            promotable.forEach(function (x) { delete state.approvals[x.p.id]; });
+            epStoreQueue(state.prospects); epSaveApprovals(state.approvals);
+            toast("Launched " + done + " into " + (seq ? seq.name : "the BD campaign") + (seq ? " · sequence attached" : "") + (csvOnly ? " · " + csvOnly + " CSV row(s) need Export" : ""));
+            paintQueue();
+            return;
+          }
+          var x = promotable[i];
+          if (btn) btn.textContent = "Launching " + (i + 1) + "/" + promotable.length + "…";
+          var pl = { action: "promote", campaignId: campaignId, lead: x.p.lead };
+          if (x.p.manager) pl.manager = x.p.manager;
+          if (seqId) pl.sequenceId = seqId;
+          send("/in-market", "POST", pl).then(function () {
+            // If a video was rendered, attach it + arm the 2-email video sequence.
+            if (x.p.fields.video_key) {
+              return send("/in-market/attach", "POST", { videoKey: x.p.fields.video_key, company: x.p.fields.company, roleTitle: x.p.fields.role || x.p.fields.title, campaignId: campaignId, arm: true }).catch(function () {});
+            }
+          }).then(function () { done++; next(i + 1); }).catch(function () { next(i + 1); });
+        })(0);
+      });
+    }
+
+    /* ===================== Import ===================== */
+    function paintImport() {
+      var main = $("#epMain", el);
+      main.innerHTML =
+        '<div class="ep-card">' +
+          '<div class="ep-card-h">Import a CSV</div>' +
+          '<p class="ep-vsub">Columns we read: first/full name, title, company, open role, location, industry, email, and a job-post URL (Companies_Job_Post_URL) — the last one is the video background. Each mapped column fills the matching {{placeholder}}. Up to 2,000 rows load for visual review.</p>' +
+          '<div class="ep-drop" id="epDrop"><div class="ep-drop-ic">📥</div><div class="ep-drop-t">Drop CSV here</div><div class="ep-drop-s">or click to browse</div><input type="file" id="epFile" accept=".csv,text/csv" hidden></div>' +
+          '<div id="epChip"></div>' +
+          '<div class="ep-paste-tog" id="epPasteTog">▸ or paste CSV text</div>' +
+          '<textarea id="epPaste" class="ep-ta" style="display:none" placeholder="First Name,Title,Company,Role,Location,Email,Companies_Job_Post_URL"></textarea>' +
+          '<div id="epImportPreview"></div>' +
+          '<div class="ep-iactions"><div style="flex:1"></div><button class="btn btn-primary" id="epAddQueue" disabled>Add to prep queue →</button></div>' +
+        "</div>";
+      var drop = $("#epDrop", el), file = $("#epFile", el);
+      function ingest(text) {
+        var parsed = epParseCsv(text);
+        if (!parsed.rows.length) { toast("No data rows found"); return; }
+        state.csv = epRowsToProspects(parsed);
+        var prev = state.csv.slice(0, 6);
+        $("#epImportPreview", el).innerHTML =
+          '<div class="ep-prev-h"><b>' + state.csv.length.toLocaleString() + "</b> rows · showing " + prev.length + "</div>" +
+          '<div class="ep-prevtable"><table><thead><tr><th>Name</th><th>Company</th><th>Role</th><th>Email</th><th>Job-post URL</th></tr></thead><tbody>' +
+          prev.map(function (p) { var f = p.fields; return "<tr><td>" + esc(f.full_name || f.first_name || "—") + "</td><td>" + esc(f.company || "—") + "</td><td>" + esc(f.role || "—") + "</td><td>" + esc(f.email || "—") + "</td><td>" + (f.job_post_url ? "✓" : "—") + "</td></tr>"; }).join("") +
+          "</tbody></table></div>";
+        $("#epAddQueue", el).disabled = false;
+      }
+      function readFile(f) { if (!f) return; $("#epChip", el).innerHTML = '<span class="ep-filechip">📄 ' + esc(f.name) + "</span>"; var rd = new FileReader(); rd.onload = function () { ingest(String(rd.result || "")); }; rd.readAsText(f); }
       drop.addEventListener("click", function () { file.click(); });
       drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("drag"); });
       drop.addEventListener("dragleave", function () { drop.classList.remove("drag"); });
       drop.addEventListener("drop", function (e) { e.preventDefault(); drop.classList.remove("drag"); readFile(e.dataTransfer.files && e.dataTransfer.files[0]); });
       file.addEventListener("change", function () { readFile(file.files && file.files[0]); });
-      $("#bdbPasteToggle", el).addEventListener("click", function () {
-        var ta = $("#bdbPaste", el); var open = ta.style.display !== "none";
-        ta.style.display = open ? "none" : "block"; this.innerHTML = (open ? "▸" : "▾") + " or paste CSV text";
-        if (!open) ta.focus();
+      $("#epPasteTog", el).addEventListener("click", function () {
+        var ta = $("#epPaste", el), open = ta.style.display !== "none";
+        ta.style.display = open ? "none" : "block"; this.innerHTML = (open ? "▸" : "▾") + " or paste CSV text"; if (!open) ta.focus();
       });
-      $("#bdbParse", el).addEventListener("click", function () {
-        var pasted = $("#bdbPaste", el).value.trim();
-        if (pasted) state.csv = pasted;
-        if (!state.csv.trim()) { toast("Add a CSV first"); return; }
-        doParse();
-      });
-    }
-
-    function doParse() {
-      bodyEl.innerHTML = '<div class="bdb-card">' + loading() + '</div>';
-      send("/bdbulk", "POST", { action: "parse", csv: state.csv }).then(function (r) {
-        if (!r.ok) { toast((r.data && r.data.error) || "Could not parse"); paintUpload(); return; }
-        state.info = r.data;
-        paintMapping();
+      $("#epPaste", el).addEventListener("input", function () { var v = this.value.trim(); if (v) ingest(v); });
+      $("#epAddQueue", el).addEventListener("click", function () {
+        if (!state.csv || !state.csv.length) return;
+        var add = state.csv.slice(0, 2000);
+        var seen = {}; state.prospects.forEach(function (p) { seen[p.id] = true; });
+        var n = 0; add.forEach(function (p) { if (!seen[p.id]) { state.prospects.push(p); seen[p.id] = true; n++; } });
+        epStoreQueue(state.prospects);
+        toast("Added " + n + " to the prep queue" + (state.csv.length > 2000 ? " (capped at 2,000)" : ""));
+        state.csv = null; switchTab("queue");
       });
     }
 
-    /* ---- step 2: confirm mapping ---- */
-    function paintMapping() {
-      setStep(2);
-      var d = state.info, m = d.mapping || {};
-      var locMapped = !!(m.companyLocation || m.city || m.state);
-      function field(key, label, required) {
-        var src = key === "companyLocation"
-          ? (m.companyLocation || [m.city ? "city" : "", m.state ? "state" : ""].filter(Boolean).map(function (k) { return m[k]; }).join(" + "))
-          : m[key];
-        var ok = key === "companyLocation" ? locMapped : !!src;
-        var cls = ok ? "ok" : (required ? "miss" : "opt");
-        return '<div class="bdb-field ' + cls + '"><span class="fd"></span><span class="bdb-field-l">' + esc(label) + '</span>'
-          + '<span class="bdb-field-v">' + (src ? esc(src) : (required ? "missing" : "—")) + '</span></div>';
-      }
-      var required = [["firstName", "First name"], ["title", "Title"], ["company", "Company"], ["companyLocation", "Location"]];
-      var optional = [["email", "Email"], ["candFrom", "Candidate from"], ["candRole", "Candidate role"], ["candProof", "Proof point"]];
-      var cards = required.map(function (f) { return field(f[0], f[1], true); }).join("")
-        + optional.filter(function (f) { return m[f[0]]; }).map(function (f) { return field(f[0], f[1], false); }).join("");
-      var miss = (d.missingRequired || []);
-      var warn = miss.length
-        ? '<div class="bdb-banner warn" style="margin:14px 0 4px">⚠ Missing required: ' + esc(miss.join(", ")) + '. Rename a column or include city + state.</div>'
-        : "";
-      bodyEl.innerHTML =
-        '<div class="bdb-card">'
-        + '<div class="bdb-h">Confirm the columns</div>'
-        + '<p class="bdb-sub">We auto-mapped your headers. Green is matched, amber needs a fix.</p>'
-        + '<div class="bdb-tiles">' + tile(d.count.toLocaleString(), "rows", "accent") + tile((d.withEmail || 0).toLocaleString(), "with email", "") + '</div>'
-        + '<div class="bdb-fields">' + cards + '</div>'
-        + warn
-        + '<div class="bdb-actions"><button class="btn" id="bdbBack">← Re-upload</button><div class="bdb-spacer"></div>'
-        + '<button class="btn btn-primary" id="bdbPreview"' + (miss.length ? " disabled" : "") + '>Generate preview →</button></div>'
-        + '</div>';
-      $("#bdbBack", el).addEventListener("click", paintUpload);
-      if (!miss.length) $("#bdbPreview", el).addEventListener("click", doPreview);
-    }
-
-    /* ---- step 3: preview emails ---- */
-    function doPreview() {
-      setStep(3);
-      bodyEl.innerHTML = '<div class="bdb-card">' + loading() + '<p class="bdb-sub" style="text-align:center;margin-top:10px">Enriching a sample · one cheap model call per lead…</p></div>';
-      send("/bdbulk", "POST", { action: "preview", csv: state.csv, sample: 8 }).then(function (r) {
-        if (!r.ok) { toast((r.data && r.data.error) || "Preview failed"); paintMapping(); return; }
-        paintPreview(r.data.previews || []);
-      });
-    }
-
-    function paintPreview(previews) {
-      var cards = previews.map(function (p) {
-        var e = p.email, en = p.enrichment || {};
-        var to = [(p.row && p.row.firstName) || "", (p.row && p.row.title) || "", (p.row && p.row.company) || ""].filter(Boolean).join(" · ");
-        var chips = [chip("↳ " + (en.subordinateRole || "?"), "role"),
-          chip(en.nameCompetitor ? en.competitor : "competitor your size", en.nameCompetitor ? "named" : "soft"),
-          en.originCity ? chip("📍 " + en.originCity, "geo") : "",
-          en.proofPoint ? chip("✦ proof", "named") : "",
-          chip(e.wordCount + " words", "len")].join("");
-        return '<div class="bdb-mail">'
-          + '<div class="bdb-mail-bar"><i class="bdb-dot-r"></i><i class="bdb-dot-y"></i><i class="bdb-dot-g"></i><em>' + esc(to) + '</em></div>'
-          + '<div class="bdb-mail-body"><div class="bdb-mail-meta"><b>Subject:</b> ' + esc(e.subject) + '</div>'
-          + '<div class="bdb-bodytxt">' + esc(e.body) + '</div>'
-          + '<div class="bdb-chips">' + chips + '</div></div>'
-          + '</div>';
-      }).join("");
-      bodyEl.innerHTML =
-        '<div class="bdb-card">'
-        + '<div class="bdb-h">Review the copy</div>'
-        + '<p class="bdb-sub">A live sample, rendered exactly as it will send. Every row varies, no two share a skeleton. Competitors are named only where a real candidate is attached, otherwise we say a competitor your size.</p>'
-        + '<div class="bdb-inrow"><label>Reply-to / sender<input id="bdbSender" class="bdb-in" placeholder="you@yourdomain.com" /></label>'
-        + '<label>From name<input id="bdbFromName" class="bdb-in" placeholder="Ryan" /></label></div>'
-        + cards
-        + '<div class="bdb-actions"><button class="btn" id="bdbBack2">← Columns</button><div class="bdb-spacer"></div>'
-        + '<button class="btn btn-primary bdb-cta" id="bdbLaunch">🚀 Launch to ' + state.info.count.toLocaleString() + ' prospects</button></div>'
-        + '</div>';
-      $("#bdbBack2", el).addEventListener("click", paintMapping);
-      $("#bdbLaunch", el).addEventListener("click", doLaunch);
-    }
-
-    /* ---- step 4: launch — drain the list in batches through the pool ---- */
-    function doLaunch() {
-      if (state.sending) return;
-      var sender = ($("#bdbSender", el) || {}).value, fromName = ($("#bdbFromName", el) || {}).value;
-      state.sending = true; setStep(4);
-      var total = state.info.count, offset = 0;
-      var totals = { sent: 0, suppressed: 0, noCapacity: 0, errors: 0 };
-      bodyEl.innerHTML =
-        '<div class="bdb-card">'
-        + '<div class="bdb-h">🚀 Launching to ' + total.toLocaleString() + ' prospects</div>'
-        + '<p class="bdb-sub">Sending through your warmed pool. It self-throttles to protect deliverability and pauses when today’s ceiling is hit.</p>'
-        + '<div class="bdb-bigbar"><span id="bdbBar" style="width:0%"></span></div>'
-        + '<div class="bdb-progline"><span id="bdbCount">0</span> / ' + total.toLocaleString() + '</div>'
-        + '<div class="bdb-ltiles">' + ltile("bdbSent", "Sent", "sent") + ltile("bdbSupp", "Suppressed", "") + ltile("bdbCap", "No capacity", "") + ltile("bdbErr", "Errors", "err") + '</div>'
-        + '<div id="bdbBanner"></div>'
-        + '</div>';
-
-      function upd() {
-        var ids = { bdbSent: totals.sent, bdbSupp: totals.suppressed, bdbCap: totals.noCapacity, bdbErr: totals.errors };
-        for (var k in ids) { var n = $("#" + k, el); if (n) n.textContent = ids[k].toLocaleString(); }
-        var pct = total ? Math.min(100, Math.round(offset / total * 100)) : 100;
-        var bar = $("#bdbBar", el); if (bar) bar.style.width = pct + "%";
-        var c = $("#bdbCount", el); if (c) c.textContent = offset.toLocaleString();
-      }
-      function step() {
-        send("/bdbulk", "POST", {
-          action: "launch", csv: state.csv, offset: offset, limit: 200,
-          sender: (sender || "").trim() || undefined, fromName: (fromName || "").trim() || undefined
-        }).then(function (r) {
-          if (!r.ok) {
-            state.sending = false;
-            $("#bdbBanner", el).innerHTML = '<div class="bdb-banner warn">⚠ ' + esc((r.data && r.data.error) || "Launch failed") + ' <button class="btn btn-sm" id="bdbRetry">Retry</button></div>';
-            $("#bdbRetry", el).addEventListener("click", function () { if (state.sending) return; state.sending = true; $("#bdbBanner", el).innerHTML = ""; step(); });
-            return;
-          }
-          var d = r.data;
-          totals.sent += d.sent; totals.suppressed += d.suppressed; totals.noCapacity += d.noCapacity; totals.errors += d.errors;
-          offset = d.processed; upd();
-          if (d.capacityHit) {
-            state.sending = false;
-            $("#bdbBanner", el).innerHTML = '<div class="bdb-banner warn">⏸ Pool hit today’s ceiling. It ramps as your IPs and mailboxes warm. <button class="btn btn-sm" id="bdbResume">Resume</button></div>';
-            $("#bdbResume", el).addEventListener("click", function () { if (state.sending) return; state.sending = true; $("#bdbBanner", el).innerHTML = ""; step(); });
-            return;
-          }
-          if (offset >= total) {
-            state.sending = false;
-            $("#bdbBanner", el).innerHTML = '<div class="bdb-banner ok">✅ Complete · ' + totals.sent.toLocaleString() + ' sent <button class="btn btn-sm" id="bdbNew">New upload</button></div>';
-            $("#bdbNew", el).addEventListener("click", function () { state.csv = ""; state.info = null; state.name = ""; paintUpload(); });
-            toast("Done. Sent " + totals.sent);
-            return;
-          }
-          step();
-        });
-      }
-      step();
-    }
-
-    function tile(n, l, k) { return '<div class="bdb-tile ' + (k || "") + '"><b>' + n + '</b><span>' + esc(l) + '</span></div>'; }
-    function ltile(id, l, k) { return '<div class="bdb-ltile ' + (k || "") + '"><b id="' + id + '">0</b><span>' + esc(l) + '</span></div>'; }
-    function chip(t, k) { return '<span class="bdb-chip bdb-chip-' + k + '">' + esc(t) + '</span>'; }
+    function epTile(n, label, k) { return '<div class="ep-tile ' + (k || "") + '"><b>' + (typeof n === "number" ? n.toLocaleString() : n) + "</b><span>" + esc(label) + "</span></div>"; }
   }
 
-  var BDB_STYLE =
-    '.bdb-wrap{max-width:920px}'
-    + '.bdb-hero{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:16px;padding:22px 24px;margin-bottom:18px;background:linear-gradient(135deg,rgba(124,92,255,.16),rgba(77,208,255,.05));box-shadow:var(--shadow)}'
-    + '.bdb-hero::after{content:"";position:absolute;right:-70px;top:-70px;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle,rgba(124,92,255,.30),transparent 70%);pointer-events:none}'
-    + '.bdb-hero-row{display:flex;align-items:center;gap:24px;flex-wrap:wrap;position:relative;z-index:1}'
-    + '.bdb-hero-cap{font-size:42px;font-weight:800;line-height:.9;letter-spacing:-1.5px;background:linear-gradient(135deg,#7c5cff,#4dd0ff);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;flex:none}'
-    + '.bdb-hero-cap small{display:block;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text-dim);-webkit-text-fill-color:var(--text-dim);margin-top:7px}'
-    + '.bdb-hero-desc{flex:1;min-width:240px;font-size:13.5px;color:var(--text-muted);line-height:1.55}'
-    + '.bdb-gauge{margin-left:auto}'
-    + '.bdb-ready{display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid var(--border);white-space:nowrap}'
-    + '.bdb-muted{color:var(--text-dim)}'
-    + '.bdb-ok{color:var(--accent-green,#38e0a6);background:rgba(56,224,166,.12);border-color:rgba(56,224,166,.4)}'
-    + '.bdb-warn{color:var(--accent-amber,#ffc24d);background:rgba(255,194,77,.12);border-color:rgba(255,194,77,.4)}'
-    + '.bdb-live{width:8px;height:8px;border-radius:50%;background:var(--accent-green,#38e0a6);box-shadow:0 0 0 0 rgba(56,224,166,.6);animation:bdbPulse 1.8s infinite}'
-    + '@keyframes bdbPulse{0%{box-shadow:0 0 0 0 rgba(56,224,166,.5)}70%{box-shadow:0 0 0 7px rgba(56,224,166,0)}100%{box-shadow:0 0 0 0 rgba(56,224,166,0)}}'
-    + '.bdb-stepper{display:flex;align-items:center;margin:0 0 20px}'
-    + '.bdb-snode{display:flex;align-items:center;gap:10px;flex:0 0 auto}'
-    + '.bdb-sdot{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:700;border:2px solid var(--border);color:var(--text-dim);background:var(--surface);transition:all .25s}'
-    + '.bdb-slabel{font-size:12.5px;font-weight:600;color:var(--text-dim)}'
-    + '.bdb-sline{flex:1;height:2px;background:var(--border);margin:0 12px;border-radius:2px;transition:background .35s}'
-    + '.bdb-snode.active .bdb-sdot{border-color:var(--brand,#7c5cff);color:#fff;background:var(--brand,#7c5cff);box-shadow:0 0 0 4px rgba(124,92,255,.18)}'
-    + '.bdb-snode.active .bdb-slabel{color:var(--text)}'
-    + '.bdb-snode.done .bdb-sdot{border-color:var(--accent-green,#38e0a6);background:var(--accent-green,#38e0a6);color:#04150f}'
-    + '.bdb-snode.done .bdb-slabel{color:var(--text-muted)}'
-    + '.bdb-sline.done{background:linear-gradient(90deg,var(--accent-green,#38e0a6),var(--brand,#7c5cff))}'
-    + '.bdb-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px;box-shadow:var(--shadow)}'
-    + '.bdb-h{font-size:17px;font-weight:700;margin:0 0 4px}.bdb-sub{font-size:13px;color:var(--text-muted);margin:0 0 18px;line-height:1.55}'
-    + '.bdb-drop{border:2px dashed var(--border-strong);border-radius:14px;padding:40px 20px;text-align:center;cursor:pointer;transition:all .18s;background:var(--bg-soft)}'
-    + '.bdb-drop:hover{border-color:var(--brand,#7c5cff);background:rgba(124,92,255,.05)}'
-    + '.bdb-drop.drag{border-color:var(--brand,#7c5cff);background:rgba(124,92,255,.1);transform:scale(1.01)}'
-    + '.bdb-drop-ico{font-size:40px;line-height:1}.bdb-drop-t{font-weight:700;font-size:15px;margin-top:8px}.bdb-drop-s{font-size:12.5px;color:var(--text-dim);margin-top:3px}'
-    + '.bdb-filechip{display:inline-flex;align-items:center;gap:8px;margin-top:14px;padding:8px 14px;border-radius:10px;background:rgba(56,224,166,.12);color:var(--accent-green,#38e0a6);font-size:13px;font-weight:600;border:1px solid rgba(56,224,166,.35)}'
-    + '.bdb-paste-toggle{display:inline-block;margin-top:14px;font-size:12.5px;color:var(--text-muted);cursor:pointer;user-select:none}'
-    + '.bdb-ta{width:100%;min-height:96px;margin-top:10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:11px;font-family:var(--mono);font-size:12px;resize:vertical}'
-    + '.bdb-actions{margin-top:20px;display:flex;gap:10px;align-items:center}.bdb-spacer{flex:1}'
-    + '.bdb-cta{font-size:14px;padding:10px 18px}'
-    + '.bdb-tiles{display:flex;gap:14px;margin:2px 0 18px;flex-wrap:wrap}'
-    + '.bdb-tile{flex:1;min-width:130px;background:var(--bg-soft);border:1px solid var(--border);border-radius:12px;padding:14px 16px}'
-    + '.bdb-tile b{display:block;font-size:26px;font-weight:800;line-height:1}.bdb-tile span{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em}'
-    + '.bdb-tile.accent b{color:var(--brand,#7c5cff)}'
-    + '.bdb-fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}'
-    + '.bdb-field{display:flex;align-items:center;gap:10px;padding:11px 13px;border:1px solid var(--border);border-radius:11px;background:var(--bg-soft)}'
-    + '.bdb-field .fd{width:9px;height:9px;border-radius:50%;flex:none}'
-    + '.bdb-field.ok .fd{background:var(--accent-green,#38e0a6);box-shadow:0 0 8px var(--accent-green,#38e0a6)}'
-    + '.bdb-field.miss .fd{background:var(--accent-amber,#ffc24d);box-shadow:0 0 8px var(--accent-amber,#ffc24d)}'
-    + '.bdb-field.opt .fd{background:var(--text-dim)}'
-    + '.bdb-field-l{font-size:13px;font-weight:600}.bdb-field-v{font-size:11.5px;color:var(--text-dim);font-family:var(--mono);margin-left:auto;max-width:48%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
-    + '.bdb-mail{border:1px solid var(--border);border-radius:13px;margin:12px 0;background:var(--surface);overflow:hidden;box-shadow:0 8px 24px -18px rgba(0,0,0,.5)}'
-    + '.bdb-mail-bar{display:flex;align-items:center;gap:6px;padding:9px 13px;background:var(--bg-soft);border-bottom:1px solid var(--border)}'
-    + '.bdb-mail-bar i{width:10px;height:10px;border-radius:50%;display:inline-block}.bdb-dot-r{background:#ff5f57}.bdb-dot-y{background:#febc2e}.bdb-dot-g{background:#28c840}'
-    + '.bdb-mail-bar em{margin-left:8px;font-style:normal;font-size:11.5px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
-    + '.bdb-mail-body{padding:14px 16px}.bdb-mail-meta{font-size:12.5px;color:var(--text-muted);margin-bottom:10px}.bdb-mail-meta b{color:var(--text)}'
-    + '.bdb-bodytxt{font-size:13.5px;line-height:1.6;white-space:pre-wrap;color:var(--text)}'
-    + '.bdb-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}'
-    + '.bdb-chip{font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--surface-2);color:var(--text-muted);border:1px solid var(--border)}'
-    + '.bdb-chip-named{background:rgba(56,224,166,.14);color:var(--accent-green,#38e0a6);border-color:rgba(56,224,166,.3)}'
-    + '.bdb-chip-soft{background:rgba(255,194,77,.14);color:var(--accent-amber,#ffc24d);border-color:rgba(255,194,77,.3)}'
-    + '.bdb-chip-role{background:rgba(124,92,255,.14);color:var(--brand,#7c5cff);border-color:rgba(124,92,255,.3)}'
-    + '.bdb-chip-geo{background:rgba(77,208,255,.14);color:var(--brand-2,#4dd0ff);border-color:rgba(77,208,255,.3)}'
-    + '.bdb-inrow{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:4px}.bdb-inrow label{font-size:12px;color:var(--text-muted);font-weight:600;display:block}'
-    + '.bdb-in{width:100%;background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:10px 12px;font-size:13px;margin-top:5px}.bdb-in:focus{outline:none;border-color:var(--brand,#7c5cff)}'
-    + '.bdb-bigbar{height:14px;background:var(--bg-soft);border:1px solid var(--border);border-radius:999px;overflow:hidden;margin:16px 0 8px}'
-    + '.bdb-bigbar span{display:block;height:100%;width:0;background:linear-gradient(90deg,#7c5cff,#4dd0ff);background-size:200% 100%;animation:bdbShimmer 1.4s linear infinite;transition:width .4s ease;border-radius:999px}'
-    + '@keyframes bdbShimmer{0%{background-position:0 0}100%{background-position:200% 0}}'
-    + '.bdb-progline{text-align:center;font-size:12.5px;color:var(--text-muted);margin-bottom:14px}.bdb-progline span{font-weight:800;color:var(--text)}'
-    + '.bdb-ltiles{display:flex;gap:12px}.bdb-ltile{flex:1;background:var(--bg-soft);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center}'
-    + '.bdb-ltile b{display:block;font-size:24px;font-weight:800;line-height:1}.bdb-ltile span{font-size:10.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em}'
-    + '.bdb-ltile.sent b{color:var(--accent-green,#38e0a6)}.bdb-ltile.err b{color:var(--accent-red,#ff6b6b)}'
-    + '.bdb-banner{margin-top:16px;padding:11px 14px;border-radius:11px;font-size:13px;font-weight:600;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}'
-    + '.bdb-banner.ok{background:rgba(56,224,166,.12);color:var(--accent-green,#38e0a6);border:1px solid rgba(56,224,166,.35)}'
-    + '.bdb-banner.warn{background:rgba(255,194,77,.12);color:var(--accent-amber,#ffc24d);border:1px solid rgba(255,194,77,.35)}'
-    + '@media(max-width:640px){.bdb-inrow{grid-template-columns:1fr}.bdb-ltiles{flex-wrap:wrap}.bdb-slabel{display:none}}';
+  var EP_STYLE =
+    ".ep-wrap{max-width:1120px}" +
+    ".ep-hero{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:16px;padding:20px 22px;margin-bottom:14px;background:linear-gradient(135deg,rgba(124,92,255,.16),rgba(77,208,255,.05));box-shadow:var(--shadow);display:flex;gap:20px;align-items:center;flex-wrap:wrap}" +
+    ".ep-hero-l{flex:1;min-width:260px}.ep-hero-t{font-size:24px;font-weight:800;letter-spacing:-.5px;display:flex;align-items:center;gap:10px}" +
+    ".ep-tof{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--brand,#7c5cff);background:rgba(124,92,255,.14);border:1px solid rgba(124,92,255,.3);padding:3px 8px;border-radius:999px}" +
+    ".ep-hero-d{font-size:13px;color:var(--text-muted);line-height:1.55;margin-top:7px;max-width:820px}" +
+    ".ep-ready{display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid var(--border);white-space:nowrap}" +
+    ".ep-muted{color:var(--text-dim)}.ep-ok{color:var(--accent-green,#38e0a6)}.ep-ready.ep-ok{background:rgba(56,224,166,.12);border-color:rgba(56,224,166,.4)}" +
+    ".ep-warn{color:var(--accent-amber,#ffc24d)}.ep-ready.ep-warn{background:rgba(255,194,77,.12);border-color:rgba(255,194,77,.4)}" +
+    ".ep-tabs{display:flex;gap:8px;margin-bottom:16px}" +
+    ".ep-tab{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}" +
+    ".ep-tab:hover{border-color:var(--brand,#7c5cff)}.ep-tab.active{background:var(--brand,#7c5cff);color:#fff;border-color:var(--brand,#7c5cff)}" +
+    ".ep-tabn{font-size:11px;font-weight:700;background:rgba(255,255,255,.18);border-radius:999px;padding:1px 7px}.ep-tab:not(.active) .ep-tabn{background:var(--bg-soft);color:var(--text-dim)}" +
+    ".ep-grid{display:grid;grid-template-columns:1.55fr 1fr;gap:14px;margin-bottom:14px}" +
+    ".ep-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:var(--shadow)}" +
+    ".ep-card-h{font-size:14.5px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px}.ep-card-sub{font-size:11px;font-weight:500;color:var(--text-dim)}" +
+    ".ep-link{font-size:12px;color:var(--brand,#7c5cff);background:none;border:none;cursor:pointer;text-decoration:none;margin-left:auto}" +
+    ".ep-lbl{display:block;font-size:11.5px;font-weight:600;color:var(--text-muted);margin:10px 0 5px}" +
+    ".ep-in{width:100%;background:var(--bg-soft);border:1px solid var(--border);border-radius:9px;color:var(--text);padding:9px 11px;font-size:13px}.ep-in:focus{outline:none;border-color:var(--brand,#7c5cff)}" +
+    ".ep-inrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ep-inrow label{font-size:11.5px;font-weight:600;color:var(--text-muted);display:block}.ep-inrow .ep-in{margin-top:5px}" +
+    ".ep-ta{width:100%;min-height:170px;background:var(--bg-soft);border:1px solid var(--border);border-radius:9px;color:var(--text);padding:11px;font-size:13px;line-height:1.55;resize:vertical;font-family:inherit}.ep-ta:focus{outline:none;border-color:var(--brand,#7c5cff)}" +
+    ".ep-fields{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}" +
+    ".ep-fchip{font-size:11px;font-weight:600;padding:4px 9px;border-radius:999px;background:rgba(124,92,255,.1);color:var(--brand,#7c5cff);border:1px solid rgba(124,92,255,.28);cursor:pointer}.ep-fchip:hover{background:rgba(124,92,255,.2)}" +
+    ".ep-fchip-v{background:rgba(56,224,166,.12);color:var(--accent-green,#38e0a6);border-color:rgba(56,224,166,.3)}.ep-fchip-add{background:var(--bg-soft);color:var(--text-muted);border-color:var(--border)}" +
+    ".ep-vsub{font-size:12px;color:var(--text-muted);line-height:1.5;margin:0 0 10px}.ep-vnote{font-size:12px;color:var(--text-muted);padding:8px 0}.ep-vnote a{color:var(--brand,#7c5cff)}" +
+    ".ep-vstat{display:flex;gap:10px;margin:10px 0;font-size:11.5px;color:var(--text-dim)}.ep-vstat span{background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;padding:5px 9px}" +
+    ".ep-genstat{font-size:12px;color:var(--text-muted);margin-top:8px;min-height:16px}.ep-genstat .ep-ok{color:var(--accent-green,#38e0a6)}" +
+    ".ep-critlist{list-style:none;margin:0;padding:0;font-size:12.5px;color:var(--text-muted);line-height:1.85}.ep-critlist b{color:var(--text)}" +
+    ".ep-critedit{display:grid;grid-template-columns:1fr 1fr;gap:9px}" +
+    ".ep-clbl{font-size:11.5px;font-weight:600;color:var(--text-muted);display:flex;flex-direction:column;gap:4px}.ep-clbl-full{grid-column:1/-1}" +
+    ".ep-cnum{background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 9px;font-size:13px}" +
+    ".ep-cbool{font-size:12px;font-weight:600;color:var(--text-muted);display:flex;align-items:center;gap:7px;padding-top:18px}" +
+    ".ep-critfoot{grid-column:1/-1;margin-top:4px}" +
+    ".ep-batch{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}" +
+    ".ep-viewtog{display:flex;align-items:center;gap:6px;margin-top:14px;border-top:1px solid var(--border);padding-top:12px}.ep-vlbl{font-size:11.5px;color:var(--text-dim);font-weight:600;margin-right:2px}" +
+    ".ep-vbtn{font-size:12px;font-weight:600;padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-soft);color:var(--text-muted);cursor:pointer}.ep-vbtn.active{background:var(--brand,#7c5cff);color:#fff;border-color:var(--brand,#7c5cff)}" +
+    ".ep-summary{display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap}" +
+    ".ep-tile{flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 16px}" +
+    ".ep-tile b{display:block;font-size:24px;font-weight:800;line-height:1}.ep-tile span{font-size:10.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em}" +
+    ".ep-tile.ok b{color:var(--accent-green,#38e0a6)}.ep-tile.accent b{color:var(--brand,#7c5cff)}.ep-tile.warn b{color:var(--accent-amber,#ffc24d)}" +
+    ".ep-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px}" +
+    ".ep-mail{border:1px solid var(--border);border-radius:14px;background:var(--surface);overflow:hidden;box-shadow:0 8px 24px -18px rgba(0,0,0,.5);border-left:3px solid var(--border)}" +
+    ".ep-mail.ep-okstate{border-left-color:var(--accent-green,#38e0a6)}.ep-mail.ep-block{border-left-color:var(--accent-amber,#ffc24d)}.ep-mail.ep-appr{border-left-color:var(--brand,#7c5cff)}.ep-mail.ep-rej{border-left-color:var(--accent-red,#ff6b6b);opacity:.6}" +
+    ".ep-mail-head{display:flex;align-items:center;gap:10px;padding:12px 14px}" +
+    ".ep-mail-head .avatar{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#0a0a12;flex:none}" +
+    ".ep-mail-who{flex:1;min-width:0}.ep-mail-who b{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ep-mail-src{font-size:11px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}" +
+    ".ep-aiscore{font-size:13px;font-weight:800;padding:4px 9px;border-radius:9px;flex:none}.ep-aiscore.ep-ai-pass{background:rgba(56,224,166,.14);color:var(--accent-green,#38e0a6)}.ep-aiscore.ep-ai-fail{background:rgba(255,194,77,.14);color:var(--accent-amber,#ffc24d)}" +
+    ".ep-mail-win{margin:0 14px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg-soft)}" +
+    ".ep-mail-bar{display:flex;gap:5px;padding:7px 11px;border-bottom:1px solid var(--border);background:var(--surface-2,#16161f)}.ep-mail-bar i{width:9px;height:9px;border-radius:50%;background:var(--border-strong,#3a3a48)}" +
+    ".ep-mail-body{padding:12px 14px}" +
+    ".ep-subj{font-size:13px;font-weight:600;margin-bottom:9px;padding-bottom:9px;border-bottom:1px dashed var(--border);color:var(--text)}.ep-subj-l{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim);font-weight:700;display:block;margin-bottom:3px}" +
+    ".ep-bodytxt{font-size:13px;line-height:1.6;white-space:pre-wrap;color:var(--text)}" +
+    ".ep-ph{border-radius:4px;padding:0 3px}.ep-bodytxt .ep-ph,.ep-subj .ep-ph{background:rgba(124,92,255,.16);color:var(--brand,#7c5cff);font-weight:600}" +
+    ".ep-ph-ok{background:transparent !important;color:inherit !important;font-weight:600}.ep-ph-miss{background:rgba(255,107,107,.16) !important;color:var(--accent-red,#ff6b6b) !important;font-weight:700}" +
+    /* inline Pitchlane-style video thumbnail */
+    ".ep-video{display:block;white-space:normal;margin:10px 0;max-width:340px}" +
+    ".ep-video-thumb{position:relative;display:block;aspect-ratio:16/9;border-radius:10px;overflow:hidden;border:1px solid var(--border);background:#0d1320 center/cover no-repeat;background-image:linear-gradient(135deg,#1a1430,#0a1622)}" +
+    ".ep-video-thumb.has-bg{background-image:none}.ep-video-thumb.has-bg::after{content:'';position:absolute;inset:0;background:rgba(5,8,16,.18)}" +
+    ".ep-video-skeleton{position:absolute;inset:0;display:flex;align-items:flex-end;gap:6px;padding:18px}.ep-video-skeleton i{flex:1;background:rgba(255,255,255,.14);border-radius:3px}.ep-video-skeleton i:nth-child(1){height:38%}.ep-video-skeleton i:nth-child(2){height:62%}.ep-video-skeleton i:nth-child(3){height:48%}" +
+    ".ep-video-bubble{position:absolute;right:12px;bottom:12px;width:46px;height:46px;border-radius:50%;background:rgba(124,92,255,.9);border:2px solid #fff;display:grid;place-items:center;font-size:20px;z-index:2;box-shadow:0 4px 12px rgba(0,0,0,.4)}" +
+    ".ep-video-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:54px;height:54px;border-radius:50%;background:rgba(255,255,255,.92);color:#1a1430;display:grid;place-items:center;font-size:20px;padding-left:4px;z-index:2;box-shadow:0 4px 16px rgba(0,0,0,.35)}" +
+    ".ep-video-cap{display:block;font-size:11.5px;color:var(--text-dim);margin-top:6px}" +
+    ".ep-video-ready{color:var(--accent-green,#38e0a6);font-weight:600}.ep-video-pending{color:var(--accent-amber,#ffc24d)}.ep-video-need{color:var(--accent-red,#ff6b6b)}" +
+    ".ep-mail-foot{padding:12px 14px}" +
+    ".ep-checks{list-style:none;margin:0 0 10px;padding:0;font-size:11.5px;line-height:1.7}.ep-checks li{display:flex;align-items:center;gap:6px;color:var(--text-muted)}.ep-ck{font-weight:800;width:14px;flex:none;text-align:center}" +
+    ".ep-checks .ep-ok .ep-ck{color:var(--accent-green,#38e0a6)}.ep-checks .ep-bad .ep-ck{color:var(--accent-red,#ff6b6b)}.ep-checks .ep-warn .ep-ck{color:var(--accent-amber,#ffc24d)}" +
+    ".ep-ckd{margin-left:auto;font-size:10.5px;color:var(--text-dim);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50%}" +
+    ".ep-ai{border-radius:9px;padding:9px 11px;margin-bottom:11px;border:1px solid var(--border)}.ep-ai-pass{background:rgba(56,224,166,.07);border-color:rgba(56,224,166,.28)}.ep-ai-fail{background:rgba(255,194,77,.07);border-color:rgba(255,194,77,.28)}" +
+    ".ep-ai-h{font-size:11.5px;font-weight:700;margin-bottom:6px}.ep-ai-pass .ep-ai-h{color:var(--accent-green,#38e0a6)}.ep-ai-fail .ep-ai-h{color:var(--accent-amber,#ffc24d)}" +
+    ".ep-aireasons{display:flex;flex-wrap:wrap;gap:5px}.ep-aireason{font-size:10.5px;padding:3px 8px;border-radius:999px;background:var(--bg-soft);color:var(--text-muted);border:1px solid var(--border)}" +
+    ".ep-actions{display:flex;gap:7px}.ep-actions .btn{flex:1}.ep-actions .ep-rm{flex:0 0 auto}" +
+    ".ep-pager{display:flex;align-items:center;justify-content:center;gap:14px;margin:18px 0}.ep-pageinfo{font-size:12.5px;color:var(--text-muted)}" +
+    ".ep-deploy{position:sticky;bottom:0;display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:16px;padding:14px 16px;border:1px solid var(--border);border-radius:14px;background:var(--surface);box-shadow:0 -8px 28px -18px rgba(0,0,0,.5)}" +
+    ".ep-deploy-l{font-size:13px;color:var(--text-muted)}.ep-deploy-l b{color:var(--text);font-size:15px}" +
+    ".ep-deploy-r{display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap}" +
+    ".ep-seq{font-size:11.5px;font-weight:600;color:var(--text-muted);display:flex;align-items:center;gap:7px}.ep-seq .ep-in{width:auto;min-width:170px}" +
+    ".ep-empty{text-align:center;padding:54px 20px;border:1px dashed var(--border-strong);border-radius:16px;background:var(--bg-soft)}.ep-empty-ic{font-size:42px}.ep-empty-t{font-size:16px;font-weight:700;margin-top:10px}.ep-empty-s{font-size:13px;color:var(--text-muted);margin-top:6px}.ep-empty-s a{color:var(--brand,#7c5cff)}" +
+    ".ep-drop{border:2px dashed var(--border-strong);border-radius:14px;padding:36px 20px;text-align:center;cursor:pointer;transition:all .18s;background:var(--bg-soft)}.ep-drop:hover{border-color:var(--brand,#7c5cff)}.ep-drop.drag{border-color:var(--brand,#7c5cff);background:rgba(124,92,255,.1)}" +
+    ".ep-drop-ic{font-size:36px}.ep-drop-t{font-weight:700;font-size:15px;margin-top:8px}.ep-drop-s{font-size:12.5px;color:var(--text-dim);margin-top:3px}" +
+    ".ep-filechip{display:inline-flex;gap:8px;margin-top:12px;padding:7px 13px;border-radius:9px;background:rgba(56,224,166,.12);color:var(--accent-green,#38e0a6);font-size:12.5px;font-weight:600;border:1px solid rgba(56,224,166,.35)}" +
+    ".ep-paste-tog{display:inline-block;margin-top:12px;font-size:12.5px;color:var(--text-muted);cursor:pointer}" +
+    ".ep-prev-h{font-size:12.5px;color:var(--text-muted);margin:14px 0 8px}.ep-prev-h b{color:var(--text)}" +
+    ".ep-prevtable{overflow-x:auto;border:1px solid var(--border);border-radius:10px}.ep-prevtable table{width:100%;border-collapse:collapse;font-size:12px}.ep-prevtable th,.ep-prevtable td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--border);white-space:nowrap}.ep-prevtable th{color:var(--text-dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}.ep-prevtable tr:last-child td{border-bottom:none}" +
+    ".ep-iactions{margin-top:16px;display:flex;gap:10px;align-items:center}" +
+    ".ep-colmgr-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}.ep-colrow{display:flex;align-items:center;gap:10px;padding:8px 11px;border:1px solid var(--border);border-radius:9px;background:var(--bg-soft);font-size:12.5px}.ep-colrow b{color:var(--brand,#7c5cff);font-family:var(--mono)}.ep-coltype{color:var(--text-dim);margin-left:auto}" +
+    ".ep-colmgr-add{display:grid;grid-template-columns:1.4fr 1fr auto;gap:8px}" +
+    "@media(max-width:820px){.ep-grid{grid-template-columns:1fr}.ep-critedit{grid-template-columns:1fr}.ep-deploy-r{margin-left:0;width:100%}.ep-colmgr-add{grid-template-columns:1fr}}";
 
   function loading() { return '<div class="empty">Loading…</div>'; }
   function emptyCard(msg) { return '<div class="empty">' + esc(msg) + "</div>"; }
