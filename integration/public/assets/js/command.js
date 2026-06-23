@@ -492,6 +492,7 @@
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
     bdbulk: { title: "BD Bulk", crumb: "Build", action: null, render: renderBdBulk, motionOnly: "bd" },
+    pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio, motionOnly: "bd" },
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
@@ -7304,6 +7305,26 @@
         'We help teams hire faster<b style="color:#7c5cff">.</b> If it’s useful<b style="color:#7c5cff">,</b> give me a call back<b style="color:#7c5cff">,</b> at this number<b style="color:#7c5cff">.</b> Thanks {first_name}<b style="color:#7c5cff">.</b>' +
       "</div>" +
     "</div>";
+
+  /* PiP Studio lives as its own self-contained recorder/library/perf app at
+     /pip-studio. Rather than navigating the user OUT of the Command Center (a
+     full-page jump that drops the sidebar, topbar, and workspace context), we
+     embed it INSIDE the workspace panel so it reads as one cohesive system.
+     Same origin → it inherits this session's cookie + backend, so its roles
+     (from Hire Signals), brand kit, and performance data are the same workspace
+     you're already in. The ?embed=1 flag tells the page to drop its redundant
+     standalone header. The `allow` list is required for camera/mic/screen
+     capture to work inside the frame. */
+  function renderPipStudio(el) {
+    if (!document.getElementById("psEmbedStyle")) {
+      var st = document.createElement("style");
+      st.id = "psEmbedStyle";
+      st.textContent = ".ps-embed{width:100%;height:calc(100vh - 138px);min-height:560px;border:0;border-radius:var(--radius);background:var(--bg);display:block;box-shadow:0 1px 0 var(--border) inset}";
+      document.head.appendChild(st);
+    }
+    el.innerHTML = '<iframe class="ps-embed" src="/pip-studio?embed=1" title="PiP Studio" ' +
+      'allow="camera; microphone; display-capture; clipboard-write" allowfullscreen></iframe>';
+  }
 
   function renderVoiceDrops(el) {
     var vd = { tab: "campaigns", creating: false, scripts: [], prefill: null };

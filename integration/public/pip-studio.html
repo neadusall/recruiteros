@@ -8,6 +8,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<!-- When embedded inside the Command Center (#pipstudio route adds ?embed=1),
+     drop the redundant standalone wordmark — the portal topbar already names the
+     tool — so it reads as one app, not a page-within-a-page. -->
+<script>try{if(new URLSearchParams(location.search).has('embed'))document.documentElement.classList.add('embed');}catch(e){}</script>
 <style>
   :root{
     /* Matched to the RecruitersOS Command Center design tokens so PiP Studio
@@ -19,6 +23,13 @@
   *{box-sizing:border-box}
   body{margin:0;background:radial-gradient(1100px 520px at 18% -8%, #1a1330, var(--bg));color:var(--ink);
     font:15px/1.55 'Inter',-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh}
+  /* Embedded-in-portal mode: the Command Center frames this app, so hide the
+     duplicate brand wordmark/subtitle and tighten the header to just the view
+     tabs. The portal supplies the page title + chrome. */
+  html.embed body{min-height:0;background:transparent}
+  html.embed header{padding:12px 20px;border-bottom:1px solid var(--line)}
+  html.embed header .brand,html.embed header .sub{display:none}
+  html.embed header .viewtabs{margin-left:0}
   header{display:flex;align-items:baseline;gap:12px;padding:16px 24px;border-bottom:1px solid var(--line)}
   .brand{font-weight:800;font-size:18px;background:linear-gradient(90deg,#7c5cff,#4dd0ff);-webkit-background-clip:text;background-clip:text;color:transparent}
   header .sub{color:var(--mut);font-size:13px}
