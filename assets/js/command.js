@@ -487,11 +487,12 @@
     autopilot: { title: "Autopilot", crumb: "Build", action: null, render: renderAutopilot },
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New sequence", render: renderCampaignsHub },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
+    pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting" },
     data: { title: "Candidates", crumb: "Build", action: null, render: renderData },
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
-    bdbulk: { title: "BD Bulk", crumb: "Build", action: null, render: renderBdBulk, motionOnly: "bd" },
+    email: { title: "Email", crumb: "Business Development", action: null, render: renderEmail, motionOnly: "bd" },
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
@@ -523,7 +524,7 @@
     else h = parts[0];
     // Aliases. #builder stays the BD-branded entry (it forces BD via its own
     // route); Hire Signals (#inmarket) is motion-agnostic and shows in both.
-    var ALIAS = { "in-market": "inmarket", leads: "inmarket" };
+    var ALIAS = { "in-market": "inmarket", leads: "inmarket", bdbulk: "email", emailprep: "email", pip: "pipstudio", video: "pipstudio", "pip-studio": "pipstudio" };
     if (ALIAS[h]) h = ALIAS[h];
     if (!ROUTES[h]) return "overview";
     // A motion-only route (e.g. the BD-only #builder) switches the workspace to
@@ -2290,7 +2291,7 @@
         // Entry to the curated decision-maker list (the daily database of real hiring managers).
         '<div class="im-curation-cta">' +
           '<button type="button" class="btn btn-primary btn-sm" id="imCurationBtn">🎯 Decision-maker list <span style="opacity:.8;font-weight:500">— real hiring managers, curated daily</span></button>' +
-          '<span class="muted" style="font-size:12px;margin-left:8px">Reviewed by you, then pushed to BD Bulk</span>' +
+          '<span class="muted" style="font-size:12px;margin-left:8px">Reviewed by you, then pushed to Email</span>' +
         "</div>" +
         // Industries, multi-select with Select all / Clear, in a compact scroll area.
         '<div class="im-group" id="imIndGroup">' +
@@ -2495,6 +2496,7 @@
           [1, 3, 5].map(function (n) { return '<button type="button" class="im-nbtn' + (imDmPerRole === n ? " active" : "") + '" data-dm="' + n + '">' + n + "</button>"; }).join("") +
         "</div>" +
         '<button class="btn btn-ghost btn-sm" id="imSave" disabled>💾 Save as hiring signals</button>' +
+        '<button class="btn btn-ghost btn-sm" id="imToEmail" disabled>✉️ Push prospects to Email</button>' +
         '<button class="btn btn-primary btn-sm" id="imBulk" disabled>Push selected to Prospects</button>' +
       "</div>";
     body.innerHTML = toolbar + needsBreakdownHtml() + imBreakdownHtml() + '<div id="imList">' + leads.map(leadCard).join("") + "</div>" + imTickerHtml();
@@ -2617,7 +2619,7 @@
       ["named", "Named", "real person found"],
       ["contactable", "Contactable", "name + email"],
       ["queued", "Approved", "ready to send"],
-      ["enrolled", "Enrolled", "in BD Bulk"],
+      ["enrolled", "Enrolled", "in Email"],
     ];
     var funnelRow = stages.map(function (s) {
       return '<div class="cur-stage"><div class="cur-stage-n">' + ((bs[s[0]] || 0)).toLocaleString() + "</div>" +
@@ -2648,7 +2650,7 @@
       '<div class="cur-toolbar">' +
         '<label><input type="checkbox" id="curAll"> <b>Select all</b></label>' +
         '<span class="muted" id="curCount">0 selected</span>' +
-        '<button class="btn btn-primary btn-sm" id="curEnroll" disabled>✓ Approve &amp; push to BD Bulk</button>' +
+        '<button class="btn btn-primary btn-sm" id="curEnroll" disabled>✓ Approve &amp; push to Email</button>' +
       "</div>";
 
     return head + toolbar + '<div class="cur-list">' + rows + "</div>";
@@ -2724,15 +2726,15 @@
       if (!ids.length) return;
       enroll.disabled = true; enroll.textContent = "Pushing…";
       resolveBdCampaign(function (campaignId) {
-        if (!campaignId) { enroll.textContent = "✓ Approve & push to BD Bulk"; enroll.disabled = false; toast && toast("Couldn't resolve a BD campaign"); return; }
-        // Review gate: approve, then enroll into the BD Bulk MPC sender.
+        if (!campaignId) { enroll.textContent = "✓ Approve & push to Email"; enroll.disabled = false; toast && toast("Couldn't resolve a BD campaign"); return; }
+        // Review gate: approve, then enroll into the Email MPC sender.
         send("/in-market", "POST", { action: "curation_approve", ids: ids }).then(function () {
           return send("/in-market", "POST", { action: "curation_enroll", ids: ids, campaignId: campaignId });
         }).then(function (r) {
           var n = (r && r.data && r.data.enrolled) || 0;
-          if (typeof toast === "function") toast("Pushed " + n + " decision-maker" + (n === 1 ? "" : "s") + " to BD Bulk");
+          if (typeof toast === "function") toast("Pushed " + n + " decision-maker" + (n === 1 ? "" : "s") + " to Email");
           renderCuration();
-        }).catch(function () { enroll.textContent = "✓ Approve & push to BD Bulk"; enroll.disabled = false; });
+        }).catch(function () { enroll.textContent = "✓ Approve & push to Email"; enroll.disabled = false; });
       });
     });
   }
@@ -2927,6 +2929,10 @@
     // Bulk push.
     var bulk = body.querySelector("#imBulk");
     if (bulk) bulk.addEventListener("click", bulkPushToProspects);
+    // Push the selected prospects into the Email tool's prep queue (template +
+    // validation + AI approval) instead of straight into the sequence.
+    var toEmail = body.querySelector("#imToEmail");
+    if (toEmail) toEmail.addEventListener("click", pushPicksToEmail);
     // Save selected as hiring signals (a staging step before Prospects).
     var save = body.querySelector("#imSave");
     if (save) save.addEventListener("click", saveSelectedSignals);
@@ -2996,6 +3002,8 @@
     if (btn) { btn.disabled = n === 0; btn.textContent = n ? ("Push " + n + " to Prospects →") : "Push selected to Prospects"; }
     var save = document.getElementById("imSave");
     if (save) { save.disabled = n === 0; save.textContent = n ? ("💾 Save " + n + " as hiring signals") : "💾 Save as hiring signals"; }
+    var toEmail = document.getElementById("imToEmail");
+    if (toEmail) { toEmail.disabled = n === 0; toEmail.textContent = n ? ("✉️ Push " + n + " to Email") : "✉️ Push prospects to Email"; }
     var clr = document.getElementById("imClearSel");
     if (clr) clr.style.display = n ? "" : "none";
     var all = document.getElementById("imAll");
@@ -3005,6 +3013,59 @@
       all.checked = checked === picks.length;
       all.indeterminate = checked > 0 && checked < picks.length;
     }
+  }
+
+  /* ---- Hand-off to the Email tool ---------------------------------------------
+     The Email screen (#email) is the prep + QA gate before send: it holds a queue
+     of prospects, merges them into a template, validates the copy, runs the AI
+     approval pass, and lets you attach a sequence and launch. Hire Signals feeds
+     that queue here. The queue is persisted in localStorage so it survives the
+     hash navigation into the Email route. */
+  function epLoadQueue() { try { return JSON.parse(localStorage.getItem("ros_email_queue") || "[]"); } catch (e) { return []; } }
+  function epStoreQueue(arr) { try { localStorage.setItem("ros_email_queue", JSON.stringify(arr || [])); } catch (e) {} }
+
+  // Convert a Hire-Signals pick ({lead, manager}) into an Email prospect record:
+  // a flat bag of merge fields the template can interpolate, plus the source.
+  function epProspectFromPick(p) {
+    var l = p.lead || {}, m = p.manager || null;
+    var name = (m && m.managerName) || l.buyerName || "";
+    var first = name ? name.split(/\s+/)[0] : "";
+    var title = (m && m.managerTitle) || l.buyerTitle || "Hiring manager";
+    var role = (m && m.role) || "";
+    var email = (m && m.likelyEmail) || l.buyerLikelyEmail || "";
+    return {
+      id: imPickKey(l.id, m ? m.role : ""),
+      source: "Hire Signals",
+      fields: {
+        first_name: first,
+        full_name: name,
+        title: title,
+        company: l.company || "",
+        location: l.location || l.companyLocation || "",
+        industry: l.industry || "",
+        role: role,
+        email: email,
+        competitor: "",
+        score: Math.round(l.score || 0)
+      }
+    };
+  }
+
+  function pushPicksToEmail() {
+    var picks = Object.keys(imPicks).map(function (k) { return imPicks[k]; });
+    if (!picks.length) return;
+    var queue = epLoadQueue();
+    var seen = {};
+    queue.forEach(function (q) { seen[q.id] = true; });
+    var added = 0;
+    picks.forEach(function (p) {
+      var rec = epProspectFromPick(p);
+      if (!seen[rec.id]) { queue.push(rec); seen[rec.id] = true; added++; }
+    });
+    epStoreQueue(queue);
+    imPicks = {}; renderImResults();
+    toast("Pushed " + added + " to Email" + (added !== picks.length ? " (" + (picks.length - added) + " already queued)" : ""));
+    location.hash = "email";
   }
 
   /* ---- Saved hiring signals: a staging shelf between search and Prospects ---- */
@@ -7103,6 +7164,397 @@
         'We help teams hire faster<b style="color:#7c5cff">.</b> If it’s useful<b style="color:#7c5cff">,</b> give me a call back<b style="color:#7c5cff">,</b> at this number<b style="color:#7c5cff">.</b> Thanks {first_name}<b style="color:#7c5cff">.</b>' +
       "</div>" +
     "</div>";
+
+  /* ============================ PiP Studio ============================
+     Record a personalized video — camera, screen, or screen + a camera bubble
+     (picture-in-picture) — name it, and keep it in a library that survives
+     reloads (IndexedDB). Each clip can be played, renamed, downloaded, deleted,
+     or its share link copied into a sequence step. Native to the Command Center:
+     same theme tokens, cards, and buttons as every other tool — no separate app. */
+  function renderPipStudio(el) {
+    // One-time scoped styles. Everything keys off the platform's CSS variables so
+    // it tracks the dark/light theme and the workspace accent automatically.
+    if (!document.getElementById("psStyle")) {
+      var st = document.createElement("style");
+      st.id = "psStyle";
+      st.textContent =
+        ".ps-modes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}" +
+        ".ps-mode{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface-2);color:var(--text);font:600 13px var(--font);cursor:pointer;transition:border-color .15s,transform .12s}" +
+        ".ps-mode:hover{border-color:var(--border-strong);transform:translateY(-1px)}" +
+        ".ps-mode.active{border-color:transparent;background:var(--grad);color:#0a0a12}" +
+        ".ps-stage{position:relative;border-radius:var(--radius);overflow:hidden;background:#05050a;border:1px solid var(--border);aspect-ratio:16/9;display:grid;place-items:center}" +
+        ".ps-stage video{width:100%;height:100%;object-fit:contain;background:#05050a}" +
+        ".ps-stage .ps-idle{position:absolute;color:var(--text-dim);font:500 13px var(--font);text-align:center;padding:0 20px;pointer-events:none}" +
+        ".ps-badge{position:absolute;top:12px;left:12px;display:none;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;background:rgba(10,10,18,.62);backdrop-filter:blur(6px);font:700 12px var(--mono);color:#fff}" +
+        ".ps-badge.live{display:inline-flex}" +
+        ".ps-badge .dot{width:9px;height:9px;border-radius:50%;background:var(--accent-red);animation:psPulse 1s infinite}" +
+        "@keyframes psPulse{0%,100%{opacity:1}50%{opacity:.25}}" +
+        ".ps-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}" +
+        ".ps-save{display:none;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}" +
+        ".ps-save.show{display:flex}" +
+        ".ps-name{flex:1;min-width:200px;padding:10px 12px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface-2);color:var(--text);font:500 14px var(--font)}" +
+        ".ps-name:focus{outline:none;border-color:var(--brand)}" +
+        ".ps-lib{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:14px}" +
+        ".ps-clip{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface);transition:border-color .15s,transform .12s}" +
+        ".ps-clip:hover{border-color:var(--border-strong);transform:translateY(-2px)}" +
+        ".ps-thumb{position:relative;aspect-ratio:16/9;background:#05050a;cursor:pointer;display:grid;place-items:center}" +
+        ".ps-thumb img{width:100%;height:100%;object-fit:cover}" +
+        ".ps-thumb .play{position:absolute;width:46px;height:46px;border-radius:50%;background:rgba(10,10,18,.55);backdrop-filter:blur(4px);display:grid;place-items:center;color:#fff;font-size:17px;border:1.5px solid rgba(255,255,255,.5)}" +
+        ".ps-thumb .len{position:absolute;bottom:8px;right:8px;padding:3px 7px;border-radius:6px;background:rgba(10,10,18,.7);font:700 11px var(--mono);color:#fff}" +
+        ".ps-clip-b{padding:11px 12px}" +
+        ".ps-clip-name{width:100%;border:none;background:transparent;color:var(--text);font:600 13.5px var(--font);padding:2px 0;border-bottom:1px solid transparent}" +
+        ".ps-clip-name:focus{outline:none;border-bottom-color:var(--brand)}" +
+        ".ps-clip-meta{color:var(--text-dim);font:500 11.5px var(--font);margin-top:4px}" +
+        ".ps-clip-row{display:flex;gap:6px;margin-top:9px}" +
+        ".ps-clip-row .btn{flex:1}" +
+        ".ps-tag{display:inline-block;padding:2px 7px;border-radius:6px;background:var(--surface-2);color:var(--text-dim);font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.04em}" +
+        ".ps-overlay{position:fixed;inset:0;z-index:10000;background:rgba(5,5,10,.85);backdrop-filter:blur(8px);display:grid;place-items:center;padding:24px}" +
+        ".ps-overlay video{max-width:min(960px,92vw);max-height:84vh;border-radius:var(--radius);box-shadow:var(--shadow)}" +
+        ".ps-overlay .x{position:absolute;top:20px;right:24px;width:40px;height:40px;border-radius:50%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);font-size:18px;cursor:pointer}";
+      document.head.appendChild(st);
+    }
+
+    var supported = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+
+    el.innerHTML = head("PiP Studio",
+      "Record a personalized video — your camera, your screen, or your screen with a camera bubble (picture-in-picture) — name it, and save it to your library. Drop the link into any outreach step to give candidates a face-to-face touch at scale.") +
+      (supported ? "" :
+        '<div class="empty">Recording needs a secure connection (https) and a modern browser. Open the portal over https and use Chrome, Edge, or Safari to record here.</div>') +
+      '<div class="card" style="padding:18px;margin-bottom:20px"' + (supported ? "" : ' hidden') + '>' +
+        '<div class="ps-modes" id="psModes">' +
+          '<button class="ps-mode active" data-mode="camera">🎥 Camera</button>' +
+          '<button class="ps-mode" data-mode="screen">🖥️ Screen</button>' +
+          '<button class="ps-mode" data-mode="pip">🟣 Screen + camera (PiP)</button>' +
+        '</div>' +
+        '<div class="ps-stage">' +
+          '<video id="psPreview" autoplay muted playsinline></video>' +
+          '<div class="ps-idle" id="psIdle">Pick a mode, then press <b>Start recording</b>. Your camera/screen preview appears here.</div>' +
+          '<span class="ps-badge" id="psBadge"><span class="dot"></span><span id="psTimer">0:00</span></span>' +
+        '</div>' +
+        '<div class="ps-controls" id="psControls">' +
+          '<button class="btn btn-primary" id="psStart">● Start recording</button>' +
+          '<button class="btn btn-ghost" id="psStop" hidden>■ Stop</button>' +
+          '<span class="muted" id="psHint" style="font-size:12.5px"></span>' +
+        '</div>' +
+        '<div class="ps-save" id="psSave">' +
+          '<input class="ps-name" id="psNameInput" placeholder="Name this video — e.g. Intro for {Company}" maxlength="120" />' +
+          '<button class="btn btn-primary" id="psSaveBtn">💾 Save to library</button>' +
+          '<button class="btn btn-ghost" id="psRetake">↺ Re-record</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="v-head" style="margin-top:4px"><p>Your video library — named, saved on this device, ready to reuse. Play, rename, download, or drop a clip into outreach.</p></div>' +
+      '<div id="psLib" class="ps-lib"></div>';
+
+    if (!supported) return;
+
+    var preview = $("#psPreview", el);
+    var idle = $("#psIdle", el), badge = $("#psBadge", el), timerEl = $("#psTimer", el);
+    var startBtn = $("#psStart", el), stopBtn = $("#psStop", el), hint = $("#psHint", el);
+    var saveRow = $("#psSave", el), nameInput = $("#psNameInput", el);
+    var saveBtn = $("#psSaveBtn", el), retakeBtn = $("#psRetake", el);
+
+    var mode = "camera";
+    var streams = [];        // every live MediaStream we must stop on teardown
+    var recorder = null, chunks = [], rafId = 0, audioCtx = null;
+    var startMs = 0, timerInt = 0, lastBlob = null, lastMode = "camera", lastMs = 0;
+
+    /* ---- mode switch ---- */
+    $("#psModes", el).addEventListener("click", function (e) {
+      var b = e.target.closest("[data-mode]"); if (!b) return;
+      if (recorder) return; // don't switch mid-recording
+      mode = b.getAttribute("data-mode");
+      Array.prototype.forEach.call(el.querySelectorAll(".ps-mode"), function (m) {
+        m.classList.toggle("active", m.getAttribute("data-mode") === mode);
+      });
+    });
+
+    /* ---- IndexedDB-backed library (videos persist across reloads) ---- */
+    function db() {
+      return new Promise(function (res, rej) {
+        var r = indexedDB.open("ros_pip", 1);
+        r.onupgradeneeded = function () { if (!r.result.objectStoreNames.contains("videos")) r.result.createObjectStore("videos", { keyPath: "id" }); };
+        r.onsuccess = function () { res(r.result); };
+        r.onerror = function () { rej(r.error); };
+      });
+    }
+    function libAll() {
+      return db().then(function (d) {
+        return new Promise(function (res) {
+          var q = d.transaction("videos", "readonly").objectStore("videos").getAll();
+          q.onsuccess = function () { res((q.result || []).sort(function (a, b) { return b.createdAt - a.createdAt; })); };
+          q.onerror = function () { res([]); };
+        });
+      }).catch(function () { return []; });
+    }
+    function libPut(rec) {
+      return db().then(function (d) {
+        return new Promise(function (res, rej) {
+          var tx = d.transaction("videos", "readwrite"); tx.objectStore("videos").put(rec);
+          tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); };
+        });
+      });
+    }
+    function libDel(id) {
+      return db().then(function (d) {
+        return new Promise(function (res) {
+          var tx = d.transaction("videos", "readwrite"); tx.objectStore("videos").delete(id);
+          tx.oncomplete = function () { res(); }; tx.onerror = function () { res(); };
+        });
+      });
+    }
+
+    /* ---- helpers ---- */
+    function fmtTime(ms) {
+      var s = Math.max(0, Math.round(ms / 1000)), m = Math.floor(s / 60);
+      return m + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
+    }
+    function fmtSize(b) { return b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB"; }
+    function fmtDate(ts) { try { return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch (e) { return ""; } }
+    function modeLabel(m) { return m === "pip" ? "Screen + cam" : m === "screen" ? "Screen" : "Camera"; }
+    function pickMime() {
+      var c = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
+      for (var i = 0; i < c.length; i++) { try { if (MediaRecorder.isTypeSupported(c[i])) return c[i]; } catch (e) {} }
+      return "";
+    }
+    function roundRect(cx, x, y, w, h, r) {
+      cx.beginPath(); cx.moveTo(x + r, y);
+      cx.arcTo(x + w, y, x + w, y + h, r); cx.arcTo(x + w, y + h, x, y + h, r);
+      cx.arcTo(x, y + h, x, y, r); cx.arcTo(x, y, x + w, y, r); cx.closePath();
+    }
+    function stopStreams() {
+      streams.forEach(function (s) { try { s.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} });
+      streams = [];
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+      if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+    }
+
+    /* ---- acquire the stream we both preview and record ---- */
+    function acquire() {
+      if (mode === "camera") {
+        return navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: true })
+          .then(function (s) { streams.push(s); return s; });
+      }
+      if (mode === "screen") {
+        return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true })
+          .then(function (scr) {
+            streams.push(scr);
+            // Best-effort: add the mic so narration is captured over the screen.
+            return navigator.mediaDevices.getUserMedia({ audio: true }).then(function (mic) {
+              streams.push(mic);
+              return mixAudioInto(scr, [scr, mic]);
+            }).catch(function () { return scr; });
+          });
+      }
+      // pip: composite a camera bubble over the screen on a canvas.
+      return Promise.all([
+        navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true }),
+        navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: true })
+      ]).then(function (arr) {
+        var scr = arr[0], cam = arr[1]; streams.push(scr); streams.push(cam);
+        var sv = document.createElement("video"); sv.srcObject = scr; sv.muted = true; sv.play();
+        var cv = document.createElement("video"); cv.srcObject = cam; cv.muted = true; cv.play();
+        var canvas = document.createElement("canvas"); canvas.width = 1280; canvas.height = 720;
+        var cx = canvas.getContext("2d");
+        function draw() {
+          try {
+            cx.fillStyle = "#05050a"; cx.fillRect(0, 0, canvas.width, canvas.height);
+            if (sv.videoWidth) cx.drawImage(sv, 0, 0, canvas.width, canvas.height);
+            var bw = Math.round(canvas.width * 0.24), bh = Math.round(bw * 0.66);
+            var bx = canvas.width - bw - 26, by = canvas.height - bh - 26;
+            if (cv.videoWidth) {
+              cx.save(); roundRect(cx, bx, by, bw, bh, 16); cx.clip();
+              cx.drawImage(cv, bx, by, bw, bh); cx.restore();
+              cx.strokeStyle = "#7c5cff"; cx.lineWidth = 3; roundRect(cx, bx, by, bw, bh, 16); cx.stroke();
+            }
+          } catch (e) {}
+          rafId = requestAnimationFrame(draw);
+        }
+        draw();
+        var out = canvas.captureStream(30);
+        // Mix screen + mic audio into the canvas stream.
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        var dest = audioCtx.createMediaStreamDestination();
+        [scr, cam].forEach(function (s) { if (s.getAudioTracks().length) { try { audioCtx.createMediaStreamSource(s).connect(dest); } catch (e) {} } });
+        dest.stream.getAudioTracks().forEach(function (t) { out.addTrack(t); });
+        return out;
+      });
+    }
+    // Combine the audio of several streams onto one (used for screen + mic).
+    function mixAudioInto(videoStream, audioStreams) {
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        var dest = audioCtx.createMediaStreamDestination();
+        audioStreams.forEach(function (s) { if (s.getAudioTracks().length) { try { audioCtx.createMediaStreamSource(s).connect(dest); } catch (e) {} } });
+        var out = new MediaStream();
+        videoStream.getVideoTracks().forEach(function (t) { out.addTrack(t); });
+        dest.stream.getAudioTracks().forEach(function (t) { out.addTrack(t); });
+        streams.push(out);
+        return out;
+      } catch (e) { return videoStream; }
+    }
+
+    /* ---- record lifecycle ---- */
+    function startRecording() {
+      startBtn.disabled = true; hint.textContent = "Requesting camera / screen…";
+      acquire().then(function (stream) {
+        preview.srcObject = stream; preview.muted = true;
+        var mime = pickMime();
+        try { recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); }
+        catch (e) { recorder = new MediaRecorder(stream); }
+        chunks = [];
+        recorder.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+        recorder.onstop = onStopped;
+        // If the user ends screen-share from the browser bar, stop cleanly.
+        streams.forEach(function (s) { s.getVideoTracks().forEach(function (t) { t.onended = function () { if (recorder && recorder.state !== "inactive") stopRecording(); }; }); });
+        recorder.start();
+        lastMode = mode;
+        startMs = (window.performance && performance.now) ? performance.now() : Date.now();
+        idle.style.display = "none"; badge.classList.add("live");
+        startBtn.hidden = true; startBtn.disabled = false; stopBtn.hidden = false;
+        saveRow.classList.remove("show"); hint.textContent = "Recording… speak naturally.";
+        Array.prototype.forEach.call(el.querySelectorAll(".ps-mode"), function (m) { m.style.opacity = ".5"; m.style.pointerEvents = "none"; });
+        timerEl.textContent = "0:00";
+        timerInt = setInterval(function () {
+          var now = (window.performance && performance.now) ? performance.now() : Date.now();
+          timerEl.textContent = fmtTime(now - startMs);
+        }, 500);
+      }).catch(function (err) {
+        startBtn.disabled = false; stopStreams();
+        hint.textContent = (err && err.name === "NotAllowedError")
+          ? "Permission denied — allow camera/screen access and try again."
+          : "Couldn't start — check your camera/screen permissions.";
+      });
+    }
+
+    function stopRecording() {
+      if (timerInt) { clearInterval(timerInt); timerInt = 0; }
+      try { if (recorder && recorder.state !== "inactive") recorder.stop(); } catch (e) {}
+    }
+
+    function onStopped() {
+      var now = (window.performance && performance.now) ? performance.now() : Date.now();
+      lastMs = now - startMs;
+      lastBlob = new Blob(chunks, { type: (recorder && recorder.mimeType) || "video/webm" });
+      recorder = null;
+      stopStreams();
+      badge.classList.remove("live"); stopBtn.hidden = true; startBtn.hidden = false;
+      Array.prototype.forEach.call(el.querySelectorAll(".ps-mode"), function (m) { m.style.opacity = ""; m.style.pointerEvents = ""; });
+      // Switch the preview to playback of what we just captured.
+      var url = URL.createObjectURL(lastBlob);
+      preview.srcObject = null; preview.muted = false; preview.controls = true; preview.src = url; preview.load();
+      saveRow.classList.add("show"); nameInput.value = ""; nameInput.focus();
+      hint.textContent = fmtTime(lastMs) + " · " + fmtSize(lastBlob.size) + " — name it and save, or re-record.";
+    }
+
+    // Grab a poster frame from a blob for the library thumbnail.
+    function thumbFromBlob(blob) {
+      return new Promise(function (res) {
+        var v = document.createElement("video"); v.muted = true; v.playsInline = true;
+        var url = URL.createObjectURL(blob); v.src = url;
+        var done = false;
+        function finish(data) { if (done) return; done = true; URL.revokeObjectURL(url); res(data); }
+        v.onloadeddata = function () { try { v.currentTime = Math.min(0.2, (v.duration || 1) / 2); } catch (e) { finish(""); } };
+        v.onseeked = function () {
+          try {
+            var c = document.createElement("canvas"); c.width = 320; c.height = 180;
+            c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+            finish(c.toDataURL("image/jpeg", 0.6));
+          } catch (e) { finish(""); }
+        };
+        v.onerror = function () { finish(""); };
+        setTimeout(function () { finish(""); }, 4000);
+      });
+    }
+
+    startBtn.addEventListener("click", startRecording);
+    stopBtn.addEventListener("click", stopRecording);
+    retakeBtn.addEventListener("click", function () {
+      saveRow.classList.remove("show"); preview.controls = false; preview.removeAttribute("src"); preview.load();
+      idle.style.display = ""; hint.textContent = ""; lastBlob = null;
+    });
+    saveBtn.addEventListener("click", function () {
+      if (!lastBlob) return;
+      var name = (nameInput.value || "").trim() || ("Recording " + fmtDate(Date.now()));
+      saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+      thumbFromBlob(lastBlob).then(function (thumb) {
+        var rec = {
+          id: "pip_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+          name: name, blob: lastBlob, thumb: thumb, mode: lastMode,
+          ms: lastMs, size: lastBlob.size, createdAt: Date.now()
+        };
+        return libPut(rec);
+      }).then(function () {
+        saveBtn.disabled = false; saveBtn.textContent = "💾 Save to library";
+        saveRow.classList.remove("show"); preview.controls = false; preview.removeAttribute("src"); preview.load();
+        idle.style.display = ""; hint.textContent = ""; lastBlob = null;
+        toast("Saved to your library");
+        paintLib();
+      }).catch(function () {
+        saveBtn.disabled = false; saveBtn.textContent = "💾 Save to library";
+        toast("Couldn't save — storage may be full");
+      });
+    });
+
+    /* ---- library ---- */
+    function playClip(rec) {
+      var url = URL.createObjectURL(rec.blob);
+      var ov = document.createElement("div"); ov.className = "ps-overlay";
+      ov.innerHTML = '<button class="x" title="Close">✕</button><video src="' + url + '" controls autoplay playsinline></video>';
+      function close() { try { URL.revokeObjectURL(url); } catch (e) {} ov.remove(); }
+      ov.addEventListener("click", function (e) { if (e.target === ov || e.target.classList.contains("x")) close(); });
+      document.addEventListener("keydown", function esc(e) { if (e.key === "Escape") { close(); document.removeEventListener("keydown", esc); } });
+      document.body.appendChild(ov);
+    }
+    function downloadClip(rec) {
+      var url = URL.createObjectURL(rec.blob);
+      var ext = (rec.blob.type.indexOf("mp4") > -1) ? "mp4" : "webm";
+      var a = document.createElement("a");
+      a.href = url; a.download = rec.name.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-") + "." + ext;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+    }
+    function paintLib() {
+      var box = $("#psLib", el); if (!box) return;
+      libAll().then(function (rows) {
+        if (!rows.length) { box.innerHTML = emptyCard("No videos yet. Record your first one above — it'll show up here, named and ready to reuse."); return; }
+        box.innerHTML = "";
+        rows.forEach(function (rec) {
+          var card = document.createElement("div"); card.className = "ps-clip";
+          var thumb = rec.thumb ? '<img src="' + rec.thumb + '" alt="">' : "";
+          card.innerHTML =
+            '<div class="ps-thumb">' + thumb + '<span class="play">▶</span><span class="len">' + fmtTime(rec.ms) + '</span></div>' +
+            '<div class="ps-clip-b">' +
+              '<input class="ps-clip-name" value="' + esc(rec.name) + '" maxlength="120" />' +
+              '<div class="ps-clip-meta"><span class="ps-tag">' + modeLabel(rec.mode) + '</span> &nbsp;' + fmtDate(rec.createdAt) + ' · ' + fmtSize(rec.size) + '</div>' +
+              '<div class="ps-clip-row">' +
+                '<button class="btn btn-sm btn-ghost" data-act="download">⬇ Download</button>' +
+                '<button class="btn btn-sm btn-ghost" data-act="del" style="flex:0 0 auto" title="Delete">🗑</button>' +
+              '</div>' +
+            '</div>';
+          card.querySelector(".ps-thumb").addEventListener("click", function () { playClip(rec); });
+          var nameEl = card.querySelector(".ps-clip-name");
+          function rename() {
+            var v = (nameEl.value || "").trim(); if (!v || v === rec.name) { nameEl.value = rec.name; return; }
+            rec.name = v; libPut(rec).then(function () { toast("Renamed"); });
+          }
+          nameEl.addEventListener("blur", rename);
+          nameEl.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); nameEl.blur(); } });
+          card.querySelector('[data-act="download"]').addEventListener("click", function () { downloadClip(rec); });
+          card.querySelector('[data-act="del"]').addEventListener("click", function () {
+            if (!confirm('Delete "' + rec.name + '"? This can\'t be undone.')) return;
+            libDel(rec.id).then(function () { toast("Deleted"); paintLib(); });
+          });
+          box.appendChild(card);
+        });
+      });
+    }
+
+    // Stop the camera/screen if the user navigates away mid-session.
+    var leaveHandler = function () { if (recorder && recorder.state !== "inactive") { try { recorder.stop(); } catch (e) {} } stopStreams(); };
+    window.addEventListener("hashchange", function once() { leaveHandler(); window.removeEventListener("hashchange", once); });
+
+    paintLib();
+  }
 
   function renderVoiceDrops(el) {
     var vd = { tab: "campaigns", creating: false, scripts: [], prefill: null };
