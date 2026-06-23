@@ -12308,6 +12308,52 @@
   function epDefaultClipId() { try { return localStorage.getItem("ros_pip_clip") || ""; } catch (e) { return ""; } }
   function epDefaultPip() { try { return JSON.parse(localStorage.getItem("ros_pip_style") || "null") || { corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#7c5cff", radiusPct: 18 }; } catch (e) { return { corner: "br", shape: "circle", sizePct: 26 }; } }
 
+  /* ---- PiP Studio ↔ Email bridge ---------------------------------------------
+     PiP Studio saves every personalized video it generates to ros_pip_results,
+     keyed by role: { roleKey: { videoKey, company, roleTitle, share:{watch,gif} } }.
+     A prospect in the Email queue carries company + role. So a video you ALREADY
+     made in PiP Studio can be auto-attached to a matching prospect here — no
+     re-render — making the two tools one pipeline: record once in PiP Studio →
+     it flows into every matching email. */
+  function epPipResults() { try { var r = JSON.parse(localStorage.getItem("ros_pip_results") || "{}"); return (r && typeof r === "object") ? r : {}; } catch (e) { return {}; } }
+  function epNorm(s) { return String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+  // Resolve a PiP Studio result to {watch, gif, key}. Prefer the server-signed
+  // share links it stored; fall back to the same public /watch + gif URLs the
+  // studio itself builds, so a match still links out even if signing is absent.
+  function epPipLinks(rec) {
+    if (!rec || !rec.videoKey) return null;
+    var share = rec.share || {}, o = location.origin, vk = rec.videoKey;
+    var watch = share.watch || (o + "/watch?k=" + encodeURIComponent(vk) + "&c=" + encodeURIComponent(rec.company || "") + "&r=" + encodeURIComponent(rec.roleTitle || ""));
+    var gif = share.gif || (o + "/api/in-market/watch?key=" + encodeURIComponent(vk) + "&fmt=gif");
+    return { watch: watch, gif: gif, key: vk };
+  }
+  // Attach already-generated PiP Studio videos to matching prospects. Match on
+  // company+role first, then company alone. Only fills rows that don't already
+  // have a video. Returns how many were newly linked.
+  function epLinkPipVideos(prospects, columns) {
+    var lib = epPipResults(), byCoRole = {}, byCo = {}, any = false;
+    for (var k in lib) {
+      var e = lib[k]; if (!e || !e.videoKey) continue; any = true;
+      var co = epNorm(e.company), ro = epNorm(e.roleTitle);
+      if (co && ro && !byCoRole[co + "|" + ro]) byCoRole[co + "|" + ro] = e;
+      if (co && !byCo[co]) byCo[co] = e;
+    }
+    if (!any) return 0;
+    var n = 0;
+    (prospects || []).forEach(function (p) {
+      var f = p && p.fields; if (!f || f.video_watch) return; // skip rows already paired
+      var co = epNorm(f.company), ro = epNorm(f.role || f.title);
+      var hit = (co && ro && byCoRole[co + "|" + ro]) || (co && byCo[co]) || null;
+      var links = hit && epPipLinks(hit); if (!links) return;
+      f.video_watch = links.watch; f.video_key = links.key;
+      if (!f.video_bg) f.video_bg = links.gif;
+      f.pip_video = links.watch;
+      (columns || []).forEach(function (c) { if (c.type === "pip_video") f[c.key] = links.watch; });
+      n++;
+    });
+    return n;
+  }
+
   /* ---- merge-field engine ----------------------------------------------------- */
   function epPlaceholders(str) {
     var re = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi, m, seen = {}, out = [];
@@ -12496,6 +12542,10 @@
     };
     var PER_PAGE = 30;
 
+    // Auto-attach any videos already generated in PiP Studio to matching
+    // prospects (by company/role), so the two tools behave as one pipeline.
+    if (epLinkPipVideos(state.prospects, state.columns)) epStoreQueue(state.prospects);
+
     el.innerHTML = "<style>" + EP_STYLE + "</style>" +
       '<div class="ep-wrap">' +
         '<div class="ep-hero">' +
@@ -12528,8 +12578,10 @@
     }
     function paintReady() {
       var r = $("#epReady", el); if (!r) return;
-      if (state.clips.length) { r.className = "ep-ready ep-ok"; r.innerHTML = "🎬 " + state.clips.length + " talking-head clip" + (state.clips.length === 1 ? "" : "s") + " ready"; r.title = "Recorded in PiP Studio"; }
-      else { r.className = "ep-ready ep-warn"; r.innerHTML = "◌ No talking-head clip"; r.title = "Record one in PiP Studio to enable the personalized video email."; }
+      var matched = state.prospects.filter(function (p) { return p.fields && p.fields.video_watch; }).length;
+      var tail = matched ? ' · <span class="ep-ok">🔗 ' + matched + " matched to a PiP Studio video</span>" : "";
+      if (state.clips.length) { r.className = "ep-ready ep-ok"; r.innerHTML = "🎬 " + state.clips.length + " talking-head clip" + (state.clips.length === 1 ? "" : "s") + " ready" + tail; r.title = "Recorded in PiP Studio"; }
+      else { r.className = "ep-ready ep-warn"; r.innerHTML = "◌ No talking-head clip" + tail; r.title = "Record one in PiP Studio to enable the personalized video email."; }
     }
     function loadSequences() {
       try { state.sequences = (seqStore().all() || []).filter(function (s) { return s.motion === motion; }); } catch (e) { state.sequences = []; }
@@ -12651,6 +12703,7 @@
       var host = $("#epVideoCard", el); if (!host) return;
       var withBg = state.prospects.filter(function (p) { return p.fields.job_post_url; }).length;
       var rendered = state.prospects.filter(function (p) { return p.fields.video_watch; }).length;
+      var libCount = 0; var _lib = epPipResults(); for (var _k in _lib) { if (_lib[_k] && _lib[_k].videoKey) libCount++; }
       var clipOpts = state.clips.length
         ? '<select id="epClip" class="ep-in">' + state.clips.map(function (c) { return '<option value="' + esc(c.id) + '"' + (c.id === state.clipId ? " selected" : "") + ">" + esc(c.label || ("Clip " + (c.id || "").slice(0, 6))) + "</option>"; }).join("") + "</select>"
         : '<div class="ep-vnote">No talking-head clip yet. <a href="/pip-studio">Record one in PiP Studio →</a></div>';
@@ -12659,14 +12712,22 @@
         '<p class="ep-vsub">Pairs each prospect\'s job-post capture (background) with your talking-head clip (bubble) into one video — the second touch.</p>' +
         '<label class="ep-lbl">Talking head</label>' + clipOpts +
         '<div class="ep-vstat">' +
-          '<span>' + withBg + " with job-post link</span><span>" + rendered + " rendered</span>" +
+          '<span>' + withBg + " with job-post link</span><span>" + rendered + " ready</span>" +
+          (libCount ? '<span>🔗 ' + libCount + " in PiP Studio library</span>" : "") +
         "</div>" +
+        (libCount ? '<button class="btn btn-ghost btn-sm" id="epPullPip" title="Attach videos you already made in PiP Studio to matching prospects (by company + role)">🔗 Pull from PiP Studio library</button>' : "") +
         '<button class="btn btn-primary btn-sm" id="epGenVid"' + ((state.clipId && withBg) ? "" : " disabled") + '>▶ Generate paired videos</button>' +
         '<div id="epGenStat" class="ep-genstat"></div>';
       var clipSel = $("#epClip", el);
       if (clipSel) clipSel.addEventListener("change", function () { state.clipId = clipSel.value; try { localStorage.setItem("ros_pip_clip", state.clipId); } catch (e) {} });
       var gen = $("#epGenVid", el);
       if (gen) gen.addEventListener("click", generateVideos);
+      var pull = $("#epPullPip", el);
+      if (pull) pull.addEventListener("click", function () {
+        var n = epLinkPipVideos(state.prospects, state.columns);
+        if (n) { epStoreQueue(state.prospects); paintVideoCard(); repaintCards(); }
+        toast(n ? ("Linked " + n + " prospect" + (n === 1 ? "" : "s") + " to a PiP Studio video") : "No new matches — record/generate in PiP Studio for these companies");
+      });
     }
 
     // Generate the composite per prospect via the existing pipeline: shot (background
