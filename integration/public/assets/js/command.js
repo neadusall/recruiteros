@@ -12667,17 +12667,25 @@
           return;
         }
         var p = targets[i];
-        if (stat) stat.innerHTML = "Rendering " + (i + 1) + "/" + targets.length + " · " + esc(p.fields.company || "") + "…";
-        send("/in-market/video", "POST", {
-          company: p.fields.company, roleTitle: p.fields.role || p.fields.title,
-          roleUrl: p.fields.job_post_url, clipId: state.clipId, pip: state.pip, firstName: p.fields.first_name
+        var role = p.fields.role || p.fields.title;
+        if (stat) stat.innerHTML = "Capturing " + (i + 1) + "/" + targets.length + " · " + esc(p.fields.company || "") + "…";
+        // 1) capture the job-post / company-site background, 2) composite the PiP
+        // video over it (block until ready so we get the signed share links back).
+        send("/in-market/shot", "POST", { company: p.fields.company, roleTitle: role, roleUrl: p.fields.job_post_url, wait: true }).then(function () {
+          if (stat) stat.innerHTML = "Pairing " + (i + 1) + "/" + targets.length + " · " + esc(p.fields.company || "") + "…";
+          return send("/in-market/video", "POST", {
+            company: p.fields.company, roleTitle: role,
+            roleUrl: p.fields.job_post_url, clipId: state.clipId, pip: state.pip, firstName: p.fields.first_name, wait: true
+          });
         }).then(function (r) {
           var d = r && r.data;
           if (d && d.share && (d.share.gif || d.share.watch)) {
             p.fields.video_bg = d.share.gif || ""; p.fields.video_watch = d.share.watch || ""; p.fields.video_key = d.key || "";
             p.fields.pip_video = d.share.watch || ""; ok++;
-          } else if (d && d.key && d.status === "composing") {
-            // queued server-side; record the key so a later refresh can pick it up
+            // keep any pip_video custom columns in sync
+            state.columns.forEach(function (c) { if (c.type === "pip_video") p.fields[c.key] = p.fields.video_watch; });
+          } else if (d && d.key) {
+            // composing server-side; record the key so a later launch can attach it
             p.fields.video_key = d.key;
           }
           done++; next(i + 1);
