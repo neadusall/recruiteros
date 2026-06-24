@@ -135,6 +135,56 @@ export function smtpEnabled(): boolean {
   return process.env.INMARKET_SMTP_VERIFY === "1" || process.env.INMARKET_EMAIL_FINDER === "1";
 }
 
+/** True when the Reoon Email Verifier is configured. Reoon confirms deliverability CLOUD-SIDE
+ *  (a real mailbox check) with NO outbound port 25 — so it works on hosts like Hetzner that block
+ *  port 25. This is what actually promotes a guessed address from "guess" to "validated_external". */
+export function reoonEnabled(): boolean {
+  return !!process.env.REOON_API_KEY;
+}
+
+/**
+ * Verify a batch of emails through the Reoon Email Verifier API (power mode = real mailbox check).
+ * Maps Reoon's verdict to the binary { email, valid } the curation seam expects:
+ *   valid:true  — status "safe" / is_safe_to_send / is_deliverable     (mailbox confirmed)
+ *   valid:false — invalid / disabled / disposable / spamtrap / no-MX    (definitively dead)
+ *   omitted     — catch_all / unknown / role_account / inbox_full       (uncertain → stays pending)
+ * We never assert a "valid" Reoon couldn't confirm. Bounded concurrency; transient errors leave the
+ * address pending for the next tick. Same endpoint + mapping as the standalone email-validate tool.
+ */
+export async function verifyEmailsReoon(
+  emails: string[],
+  opts?: { concurrency?: number },
+): Promise<Array<{ email: string; valid: boolean }>> {
+  const key = process.env.REOON_API_KEY;
+  if (!key) return [];
+  const mode = process.env.REOON_VERIFY_MODE || "power";
+  const uniq = [...new Set(emails.map((e) => (e || "").trim().toLowerCase()).filter(Boolean))];
+  const out: Array<{ email: string; valid: boolean }> = [];
+  const conc = Math.max(1, Math.min(opts?.concurrency ?? 6, 12));
+  let i = 0;
+  async function worker(): Promise<void> {
+    while (i < uniq.length) {
+      const email = uniq[i++];
+      try {
+        const url = `https://emailverifier.reoon.com/api/v1/verify?email=${encodeURIComponent(email)}&key=${encodeURIComponent(key!)}&mode=${encodeURIComponent(mode)}`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+        if (!res.ok) continue; // transient → leave pending
+        const r = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+        if (!r) continue;
+        const status = String(r.status ?? "").toLowerCase();
+        // Match the standalone email-validate mapping: ONLY "safe" is a confirmed mailbox.
+        // (is_deliverable/is_safe_to_send alone over-trust free providers like Gmail, which
+        // accept mail for non-existent users — hence Reoon is reliable for business domains.)
+        if (status === "safe") out.push({ email, valid: true });
+        else if (["invalid", "disabled", "disposable", "spamtrap"].includes(status) || r.mx_accepts_mail === false) out.push({ email, valid: false });
+        // catch_all / unknown / role_account / inbox_full / anything else → omit (stays pending)
+      } catch { /* leave pending; retried next tick */ }
+    }
+  }
+  await Promise.all(Array.from({ length: conc }, () => worker()));
+  return out;
+}
+
 export interface FoundEmail { email: string; pattern: string; verified: true }
 
 /**

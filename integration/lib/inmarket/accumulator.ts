@@ -74,6 +74,7 @@ const CURATE_CANDIDATES = envNum("INMARKET_CURATE_CANDIDATES", 6000); // pool sl
 const CURATE_CONCURRENCY = envNum("INMARKET_CURATE_CONCURRENCY", 16); // parallel researches (rotated across egress IPs)
 const CURATE_MIN_SCORE = envNum("INMARKET_CURATE_MIN_SCORE", 10); // research a much wider band (was 25) so the funnel keeps climbing past the top-intent few hundred
 const VERIFY_BATCH = envNum("INMARKET_VERIFY_BATCH", 800);        // curated emails free-verified (MX/role/disposable) per tick
+const REOON_BATCH = envNum("REOON_VERIFY_BATCH", 30);            // curated emails confirmed via Reoon (real mailbox check, no port 25) per tick
 const FINDER_BATCH = 40;               // pending people SMTP-verified per tick (opt-in; bounded — slow)
 // FAST INFLOW — brand-new hiring companies/postings flow in on their OWN fast tick (every few
 // minutes) so prospects appear as they're posted, not once an hour. It runs ONLY the cheap,
@@ -434,6 +435,22 @@ async function runCurationTickInner(): Promise<void> {
       const { verifyEmailsFree } = await import("./emailVerify");
       const results = await verifyEmailsFree(pending);
       if (results.length) await applyEmailValidation(results, new Date().toISOString());
+    }
+  } catch { /* best-effort; the next tick retries */ }
+
+  // REOON CONFIRMATION — the real mailbox check that promotes a free-passed guess to VALIDATED.
+  // Reoon verifies cloud-side (no outbound port 25, so it works on Hetzner), flipping emailSource
+  // "guess" → "validated_external" for confirmed mailboxes and suppressing the dead ones. Bounded
+  // per tick (REOON_VERIFY_BATCH) to control credit spend; each address is checked once then drops
+  // out of the pending set. No-op unless REOON_API_KEY is set.
+  try {
+    const { reoonEnabled, verifyEmailsReoon } = await import("./emailVerify");
+    if (reoonEnabled()) {
+      const pendingReoon = await pendingValidationEmails(REOON_BATCH);
+      if (pendingReoon.length) {
+        const verdicts = await verifyEmailsReoon(pendingReoon);
+        if (verdicts.length) await applyEmailValidation(verdicts, new Date().toISOString());
+      }
     }
   } catch { /* best-effort; the next tick retries */ }
 
