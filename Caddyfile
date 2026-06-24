@@ -62,6 +62,19 @@ app.lumesp.com {
 	reverse_proxy app:3000
 }
 
+# RecruitersOS Mail — the ACS email infrastructure embedded in the portal
+# (#setup/email). Reverse-proxies to the recruitersos-mail stack (separate compose
+# project on the shared recruiteros_default network). Named blocks win over the
+# catch-all below; Caddy issues Let's Encrypt certs automatically once DNS points here.
+mail.recruitersos.co {
+	encode zstd gzip
+	reverse_proxy mail-web:3000
+}
+mailapi.recruitersos.co {
+	encode zstd gzip
+	reverse_proxy mail-api:4000
+}
+
 # Catch-all for white-label CUSTOM DOMAINS (e.g. app.acme.com). The explicit
 # blocks above are more specific and always win, so house traffic never reaches
 # here. Any other host gets an on-demand Let's Encrypt cert — gated by the
