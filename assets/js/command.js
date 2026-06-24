@@ -6163,6 +6163,7 @@
         tile(ov.healthScore != null ? ov.healthScore : "-", "domain health", ov.label) +
         tile(ov.warmthScore != null ? ov.warmthScore : "-", "mailbox warmth") +
         tile(ov.ipWarmthScore != null ? ov.ipWarmthScore : "-", "shared-IP warmth") +
+        tile(ov.humanOpenRatePct != null ? ov.humanOpenRatePct + "%" : "-", "human open rate", ov.openRatePct != null && ov.openRatePct !== ov.humanOpenRatePct ? ov.openRatePct + "% raw" : "MPP/bot filtered") +
         tile(ov.canSend ? "Yes" : "No", "sending now", ov.canSend ? "healthy" : "at_risk") +
         tile(num(ov.capacityToday), "sends left today") +
         tile((ov.activeMailboxes || 0) + "/" + (ov.mailboxes || 0), "mailboxes warm") +

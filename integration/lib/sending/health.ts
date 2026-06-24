@@ -254,6 +254,10 @@ export interface SendingHealthSummary {
     capacityToday: number;
     /** Average shared-IP warmth (0-100) — the long-pole constraint. */
     ipWarmthScore: number;
+    /** Workspace HUMAN open rate (machine/proxy opens filtered out), % of delivered. */
+    humanOpenRatePct: number;
+    /** Workspace RAW open rate (incl. machine opens), % of delivered — for contrast. */
+    openRatePct: number;
     label: HealthLabel;
   };
 }
@@ -294,6 +298,13 @@ export function sendingHealth(domains: SendingDomain[], mailboxes: Mailbox[], se
   const ipWarmthScore = liveServers.length === 0 ? 0
     : round(liveServers.reduce((s, x) => s + x.warmthScore, 0) / liveServers.length);
 
+  // Workspace open rates over delivered: human (machine/proxy opens removed) + raw.
+  const totalDelivered = domains.reduce((s, d) => s + (d.metrics?.delivered ?? 0), 0);
+  const totalHumanOpens = domains.reduce((s, d) => s + (d.metrics?.openedHuman ?? 0), 0);
+  const totalOpens = domains.reduce((s, d) => s + (d.metrics?.opened ?? 0), 0);
+  const humanOpenRatePct = round(pct(totalHumanOpens, totalDelivered));
+  const openRatePct = round(pct(totalOpens, totalDelivered));
+
   const label: HealthLabel =
     pausedDomains > 0 || atRiskDomains > 0 ? "at_risk"
     : healthScore >= 80 ? "healthy"
@@ -313,6 +324,8 @@ export function sendingHealth(domains: SendingDomain[], mailboxes: Mailbox[], se
       pausedDomains, atRiskDomains,
       capacityToday,
       ipWarmthScore,
+      humanOpenRatePct,
+      openRatePct,
       label,
     },
   };
