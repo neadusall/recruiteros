@@ -151,13 +151,24 @@ export function reoonEnabled(): boolean {
  * We never assert a "valid" Reoon couldn't confirm. Bounded concurrency; transient errors leave the
  * address pending for the next tick. Same endpoint + mapping as the standalone email-validate tool.
  */
+/** Single Reoon verification → the raw verdict object, or null on a transient error. */
+async function reoonVerifyOne(email: string): Promise<Record<string, unknown> | null> {
+  const key = process.env.REOON_API_KEY;
+  if (!key) return null;
+  const mode = process.env.REOON_VERIFY_MODE || "power";
+  try {
+    const url = `https://emailverifier.reoon.com/api/v1/verify?email=${encodeURIComponent(email)}&key=${encodeURIComponent(key)}&mode=${encodeURIComponent(mode)}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) return null;
+    return (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  } catch { return null; }
+}
+
 export async function verifyEmailsReoon(
   emails: string[],
   opts?: { concurrency?: number },
 ): Promise<Array<{ email: string; valid: boolean }>> {
-  const key = process.env.REOON_API_KEY;
-  if (!key) return [];
-  const mode = process.env.REOON_VERIFY_MODE || "power";
+  if (!reoonEnabled()) return [];
   const uniq = [...new Set(emails.map((e) => (e || "").trim().toLowerCase()).filter(Boolean))];
   const out: Array<{ email: string; valid: boolean }> = [];
   const conc = Math.max(1, Math.min(opts?.concurrency ?? 6, 12));
@@ -165,24 +176,68 @@ export async function verifyEmailsReoon(
   async function worker(): Promise<void> {
     while (i < uniq.length) {
       const email = uniq[i++];
-      try {
-        const url = `https://emailverifier.reoon.com/api/v1/verify?email=${encodeURIComponent(email)}&key=${encodeURIComponent(key!)}&mode=${encodeURIComponent(mode)}`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-        if (!res.ok) continue; // transient → leave pending
-        const r = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-        if (!r) continue;
-        const status = String(r.status ?? "").toLowerCase();
-        // Match the standalone email-validate mapping: ONLY "safe" is a confirmed mailbox.
-        // (is_deliverable/is_safe_to_send alone over-trust free providers like Gmail, which
-        // accept mail for non-existent users — hence Reoon is reliable for business domains.)
-        if (status === "safe") out.push({ email, valid: true });
-        else if (["invalid", "disabled", "disposable", "spamtrap"].includes(status) || r.mx_accepts_mail === false) out.push({ email, valid: false });
-        // catch_all / unknown / role_account / inbox_full / anything else → omit (stays pending)
-      } catch { /* leave pending; retried next tick */ }
+      const r = await reoonVerifyOne(email);
+      if (!r) continue; // transient → leave pending
+      const status = String(r.status ?? "").toLowerCase();
+      // Match the standalone email-validate mapping: ONLY "safe" is a confirmed mailbox.
+      // (is_deliverable/is_safe_to_send alone over-trust free providers like Gmail, which
+      // accept mail for non-existent users — hence Reoon is reliable for business domains.)
+      if (status === "safe") out.push({ email, valid: true });
+      else if (["invalid", "disabled", "disposable", "spamtrap"].includes(status) || r.mx_accepts_mail === false) out.push({ email, valid: false });
+      // catch_all / unknown / role_account / inbox_full / anything else → omit (stays pending)
     }
   }
   await Promise.all(Array.from({ length: conc }, () => worker()));
   return out;
+}
+
+/** Outcome of walking a person's email syntaxes through Reoon. */
+export interface ReoonFind { outcome: "found" | "catch_all" | "invalid" | "unknown"; email?: string; pattern?: string; domainDead?: boolean }
+
+/**
+ * EMAIL FINDER via Reoon — the right way to never leave a guess unchecked. Instead of verifying
+ * only the single guessed address, walk the person's ranked syntax permutations (first.last,
+ * flast, firstlast, first, …) and Reoon-verify each until one returns "safe" — that's the real
+ * mailbox, which we keep. Domain-level signals (no-MX, catch-all, spamtrap) are detected on the
+ * FIRST credit and short-circuit (more tries won't help). Works with NO outbound port 25.
+ *   found     — a deliverable address was confirmed (use email/pattern)
+ *   catch_all — domain accepts all mail; the best-pattern guess will deliver but can't be confirmed
+ *   invalid   — no-MX / spamtrap / every syntax dead (no reachable mailbox)
+ *   unknown   — Reoon couldn't reach the mail server (transient → retried next tick)
+ */
+export async function findVerifiedEmailReoon(
+  person: { firstName?: string; lastName?: string; fullName?: string },
+  urlOrDomain: string,
+  opts?: { max?: number },
+): Promise<ReoonFind> {
+  if (!reoonEnabled()) return { outcome: "unknown" };
+  const domain = emailDomainFrom(urlOrDomain);
+  if (!domain) return { outcome: "unknown" };
+  let firstName = person.firstName, lastName = person.lastName;
+  if ((!firstName || !lastName) && person.fullName) {
+    const s = splitFullName(person.fullName);
+    firstName = firstName || s.firstName; lastName = lastName || s.lastName;
+  }
+  const perms = emailPermutations(firstName, lastName, domain);
+  if (!perms.length) return { outcome: "unknown" };
+  const max = Math.max(1, Math.min(opts?.max ?? Number(process.env.REOON_MAX_CANDIDATES || 6), 12));
+  const candidates = perms.slice(0, max);
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
+    const r = await reoonVerifyOne(c.email);
+    if (!r) { if (i === 0) return { outcome: "unknown" }; else continue; }
+    const status = String(r.status ?? "").toLowerCase();
+    // Domain-level signals first (true on every response for this domain).
+    if (r.mx_accepts_mail === false) return { outcome: "invalid", domainDead: true };
+    if (r.is_catch_all === true || status === "catch_all") return { outcome: "catch_all", email: candidates[0].email, pattern: candidates[0].pattern };
+    if (r.is_spamtrap === true || status === "spamtrap") return { outcome: "invalid" };
+    // This specific syntax is a real mailbox → found.
+    if (status === "safe") return { outcome: "found", email: c.email, pattern: c.pattern };
+    // First probe can't even reach the mail server → more tries won't help.
+    if (i === 0 && status === "unknown" && r.can_connect_smtp === false) return { outcome: "unknown" };
+    // else: this pattern is invalid/disabled/unknown → try the next syntax.
+  }
+  return { outcome: "invalid" }; // checked every syntax, none deliverable, domain not catch-all
 }
 
 export interface FoundEmail { email: string; pattern: string; verified: true }

@@ -788,6 +788,76 @@ export async function findEmailsBySmtp(limit: number, nowIso: string, concurrenc
   return { checked, found: hits.size };
 }
 
+/**
+ * EMAIL FINDER via REOON — turn pending people into VALIDATED prospects without leaving any guess
+ * unchecked. For each pending row (a real person + a domain, no verdict yet) walk the name's email
+ * syntaxes through Reoon and keep the first deliverable one; catch-all domains keep the best-pattern
+ * guess (it will deliver), and people whose every syntax is dead are suppressed. Works with no
+ * outbound port 25 (Reoon verifies cloud-side). Per-domain no-MX is memoized so a company full of
+ * people doesn't re-pay. Bounded by `limit`; concurrency-capped. No-op unless REOON_API_KEY is set.
+ */
+export async function findEmailsByReoon(limit: number, nowIso: string, concurrency = 4): Promise<{ checked: number; found: number; catchAll: number; invalid: number }> {
+  const { reoonEnabled, findVerifiedEmailReoon } = await import("./emailVerify");
+  if (!reoonEnabled()) return { checked: 0, found: 0, catchAll: 0, invalid: 0 };
+
+  const rows = await load();
+  const targets = rows
+    .filter((r) => r.managerName && r.domain && !r.emailValidated && !r.emailInvalid
+      && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed")
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(0, limit));
+  if (!targets.length) return { checked: 0, found: 0, catchAll: 0, invalid: 0 };
+
+  type Find = { outcome: "found" | "catch_all" | "invalid" | "unknown"; email?: string; pattern?: string; domainDead?: boolean };
+  const results = new Map<string, Find>();
+  const deadDomains = new Set<string>(); // memoized no-MX domains
+  let cursor = 0, checked = 0;
+  async function worker() {
+    while (cursor < targets.length) {
+      const r = targets[cursor++];
+      checked++;
+      const d = (r.domain || "").toLowerCase();
+      if (deadDomains.has(d)) { results.set(r.id, { outcome: "invalid", domainDead: true }); continue; }
+      try {
+        const res = await findVerifiedEmailReoon({ fullName: r.managerName }, r.domain!) as Find;
+        results.set(r.id, res);
+        if (res.domainDead) deadDomains.add(d);
+      } catch { /* skip → leave pending, retried next tick */ }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(Math.max(concurrency, 1), 6) }, worker));
+
+  let found = 0, catchAll = 0, invalid = 0;
+  await withCurationLock(async () => {
+    const current = await load();
+    for (const r of current) {
+      const res = results.get(r.id);
+      if (!res) continue;
+      if (r.status === "enrolled" || r.status === "queued" || r.status === "suppressed") continue; // locked
+      if (res.outcome === "found" && res.email) {
+        r.likelyEmail = res.email; r.emailPattern = res.pattern || r.emailPattern;
+        r.emailSource = "reoon_found"; r.emailValidated = true; r.emailInvalid = false; r.validatedAt = nowIso;
+        if (r.status === "sourced" || r.status === "named") r.status = "contactable";
+        found++;
+      } else if (res.outcome === "catch_all") {
+        // Domain accepts everything → the best-pattern guess WILL deliver (no bounce). Keep it and
+        // mark deliverable so it isn't stuck as "guess", but tag the source as catch_all.
+        if (res.email) r.likelyEmail = res.email;
+        r.emailSource = "catch_all"; r.emailValidated = true; r.emailInvalid = false; r.validatedAt = nowIso;
+        if (r.status === "sourced" || r.status === "named") r.status = "contactable";
+        catchAll++;
+      } else if (res.outcome === "invalid") {
+        r.emailValidated = false; r.emailInvalid = true; r.validatedAt = nowIso;
+        if (r.status === "contactable") r.status = "suppressed"; // (queued/enrolled already skipped above)
+        invalid++;
+      }
+      // "unknown" → leave pending (transient; retried next tick)
+    }
+    await save(current);
+  });
+  return { checked, found, catchAll, invalid };
+}
+
 /** The curated emails still needing validation — feed this list to the external validator. */
 export async function pendingValidationEmails(limit = 1000): Promise<string[]> {
   const rows = await load();
