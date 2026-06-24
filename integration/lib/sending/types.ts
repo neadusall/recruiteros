@@ -121,6 +121,13 @@ export interface DeliveryMetrics {
   bounced: number;
   complained: number;
   opened: number;
+  /**
+   * Opens we believe are HUMAN — total opens minus machine opens (Apple Mail
+   * Privacy Protection, Gmail/Yahoo image proxies, link scanners, bots). This
+   * is the trustworthy engagement signal; `opened` stays as the raw total.
+   * Optional for back-compat with snapshots written before this field existed.
+   */
+  openedHuman?: number;
   /** Window start for the rolling rates (ISO). */
   since: string;
 }
