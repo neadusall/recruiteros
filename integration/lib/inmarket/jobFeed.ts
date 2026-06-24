@@ -105,7 +105,8 @@ export async function fetchJobFeedLeads(opts: { query?: string; location?: strin
   if (!jobFeedEnabled()) return [];
   const host = process.env.RAPID_JOBS_HOST!;
   const isJSearch = PROVIDER() === "jsearch";
-  const u = new URL(`https://${host}${process.env.RAPID_JOBS_PATH || (isJSearch ? "/search" : "/active-ats")}`);
+  // JSearch's search endpoint is `/search-v2` (the legacy `/search` now 404s at the RapidAPI gateway).
+  const u = new URL(`https://${host}${process.env.RAPID_JOBS_PATH || (isJSearch ? "/search-v2" : "/active-ats")}`);
 
   if (isJSearch) {
     u.searchParams.set("query", opts.query || "hiring");        // JSearch requires a query (category/role)
@@ -126,7 +127,14 @@ export async function fetchJobFeedLeads(opts: { query?: string; location?: strin
     const res = await fetch(u.toString(), { headers: { "X-RapidAPI-Key": process.env.RAPID_JOBS_KEY!, "X-RapidAPI-Host": host, Accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (!res.ok) return [];
     const data = (await res.json().catch(() => null)) as unknown;
-    arr = Array.isArray(data) ? (data as RawJob[]) : (((data as { data?: RawJob[]; jobs?: RawJob[] })?.data || (data as { jobs?: RawJob[] })?.jobs) ?? []);
+    // Normalize across shapes: flat array, JSearch v2 `{data:{jobs:[…]}}`, legacy
+    // `{data:[…]}`, and `{jobs:[…]}`. v2 nests under data.jobs, so check it first.
+    const root = data as { data?: { jobs?: RawJob[] } | RawJob[]; jobs?: RawJob[] } | RawJob[] | null;
+    arr = Array.isArray(root) ? (root as RawJob[])
+      : Array.isArray((root as { data?: { jobs?: RawJob[] } })?.data?.jobs) ? (root as { data: { jobs: RawJob[] } }).data.jobs
+      : Array.isArray((root as { data?: RawJob[] })?.data) ? (root as { data: RawJob[] }).data
+      : Array.isArray((root as { jobs?: RawJob[] })?.jobs) ? (root as { jobs: RawJob[] }).jobs
+      : [];
   } catch { return []; }
   return mapJobsToLeads(arr, opts.query);
 }
