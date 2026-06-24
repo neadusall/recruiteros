@@ -492,7 +492,7 @@
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
     email: { title: "Email", crumb: "Business Development", action: null, render: renderEmail, motionOnly: "bd" },
-    pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio, motionOnly: "bd" },
+    pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio },
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },

@@ -18,13 +18,30 @@
   function origin() { return API || (location.protocol + "//" + location.host); }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[c]; }); }
 
+  // True when this page is running embedded inside the Command Center (#pipstudio).
+  var EMBEDDED = false; try { EMBEDDED = (window.top && window.top !== window.self); } catch (e) { EMBEDDED = true; }
+
   function api(path, opts) {
     opts = opts || {};
     opts.credentials = "include";
-    opts.headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    var hdrs = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    // Share the portal's session. When the Command Center embeds this page while
+    // an admin is "viewing as" a recruiter, the parent keeps an impersonation
+    // token in sessionStorage — same-origin iframes share it — so we send it as
+    // a Bearer (exactly like command.js) and act as the SAME workspace/operator
+    // the portal is showing, instead of falling back to the admin's own cookie.
+    try { var imp = sessionStorage.getItem("ros_imp_token"); if (imp) hdrs["Authorization"] = "Bearer " + imp; } catch (e) {}
+    opts.headers = hdrs;
     return fetch(API + path, opts).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) {
-        if (r.status === 401) { location.href = "/login?next=/pip-studio"; throw new Error("unauthorized"); }
+        if (r.status === 401) {
+          // Re-auth the WHOLE portal (top window), not a login form trapped in
+          // the embed panel.
+          var dest = "/login?next=/pip-studio";
+          try { if (EMBEDDED && window.top) { window.top.location.href = dest; } else { location.href = dest; } }
+          catch (e) { location.href = dest; }
+          throw new Error("unauthorized");
+        }
         if (!r.ok) throw new Error((j && (j.error || j.reason)) || ("HTTP " + r.status));
         return j;
       });
