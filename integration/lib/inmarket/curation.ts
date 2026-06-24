@@ -63,8 +63,10 @@ export interface CuratedProspect {
   enrolledAt?: string;
   campaignId?: string;
   /* ---- email validation (fed continuously by the external validator) ---- */
-  emailValidated?: boolean;     // true once the validator confirms the address is deliverable
+  emailValidated?: boolean;     // true once the validator CONFIRMS a specific mailbox is deliverable
   emailInvalid?: boolean;       // true when the validator says it's undeliverable (do not send)
+  emailCatchAll?: boolean;      // domain accepts all mail: best-pattern guess will deliver but the
+                                // specific person is UNCONFIRMED — a tier of its own, NOT "valid"
   validatedAt?: string;
   /* ---- post-send tracking (filled from the sending engine by email) ---- */
   sentAt?: string;
@@ -427,6 +429,8 @@ export interface CurationFunnel {
   /** Email-validation tallies fed by the continuous validator. */
   validated: number;
   invalid: number;
+  /** Catch-all domains: deliverable best-guess, specific person UNCONFIRMED (its own tier, not "valid"). */
+  catchAll: number;
   /* ---- DIAGNOSTICS: which gate is failing? ---- */
   /** Of all researched companies, how many got a NAME (the name-finding gate). */
   named: number;
@@ -479,7 +483,7 @@ export async function curationFunnel(): Promise<CurationFunnel> {
   const src = new Map<string, { total: number; validated: number }>();
   const via = new Map<string, number>();                                  // named-row attribution by source
   const tiers = new Map<string, { total: number; named: number }>();      // confidence-tier distribution
-  let contactableOrBetter = 0, validated = 0, invalid = 0, named = 0, withDomain = 0, namedLastHour = 0;
+  let contactableOrBetter = 0, validated = 0, invalid = 0, catchAll = 0, named = 0, withDomain = 0, namedLastHour = 0;
   const hourAgoMs = Date.now() - 3_600_000;
   const byDay = new Map<string, { valid: number; contactable: number }>();
   const bump = (date: string | null, k: "valid" | "contactable") => {
@@ -491,6 +495,7 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
     if (r.emailValidated) validated++;
     if (r.emailInvalid) invalid++;
+    if (r.emailCatchAll) catchAll++;
     if (r.managerName) {
       named++;
       if ((Date.parse(r.curatedAt) || 0) > hourAgoMs) namedLastHour++;
@@ -537,6 +542,7 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     contactableRate: rows.length ? Math.round((contactableOrBetter / rows.length) * 100) / 100 : 0,
     validated,
     invalid,
+    catchAll,
     named,
     namedRate: rows.length ? Math.round((named / rows.length) * 100) / 100 : 0,
     namedByVia: [...via.entries()].map(([v, n]) => ({ via: v, named: n })).sort((a, b) => b.named - a.named),
@@ -802,7 +808,7 @@ export async function findEmailsByReoon(limit: number, nowIso: string, concurren
 
   const rows = await load();
   const targets = rows
-    .filter((r) => r.managerName && r.domain && !r.emailValidated && !r.emailInvalid
+    .filter((r) => r.managerName && r.domain && !r.emailValidated && !r.emailInvalid && !r.emailCatchAll
       && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed")
     .sort((a, b) => b.score - a.score)
     .slice(0, Math.max(0, limit));
@@ -831,6 +837,9 @@ export async function findEmailsByReoon(limit: number, nowIso: string, concurren
   await withCurationLock(async () => {
     const current = await load();
     for (const r of current) {
+      // Normalize legacy rows: an earlier build marked catch-all as validated. Reclassify those
+      // to the catch-all tier so they stop counting as "valid" (idempotent, runs until cleared).
+      if (r.emailSource === "catch_all" && r.emailValidated) { r.emailValidated = false; r.emailCatchAll = true; }
       const res = results.get(r.id);
       if (!res) continue;
       if (r.status === "enrolled" || r.status === "queued" || r.status === "suppressed") continue; // locked
@@ -840,11 +849,11 @@ export async function findEmailsByReoon(limit: number, nowIso: string, concurren
         if (r.status === "sourced" || r.status === "named") r.status = "contactable";
         found++;
       } else if (res.outcome === "catch_all") {
-        // Domain accepts everything → the best-pattern guess WILL deliver (no bounce). Keep it and
-        // mark deliverable so it isn't stuck as "guess", but tag the source as catch_all.
+        // Domain accepts all mail → the best-pattern guess will deliver (no bounce), but we CANNOT
+        // confirm the specific person. Its OWN tier — checked, kept, but NOT counted as "valid" and
+        // NOT auto-promoted to contactable. emailCatchAll keeps it out of re-processing.
         if (res.email) r.likelyEmail = res.email;
-        r.emailSource = "catch_all"; r.emailValidated = true; r.emailInvalid = false; r.validatedAt = nowIso;
-        if (r.status === "sourced" || r.status === "named") r.status = "contactable";
+        r.emailSource = "catch_all"; r.emailCatchAll = true; r.emailValidated = false; r.emailInvalid = false; r.validatedAt = nowIso;
         catchAll++;
       } else if (res.outcome === "invalid") {
         r.emailValidated = false; r.emailInvalid = true; r.validatedAt = nowIso;
@@ -866,7 +875,7 @@ export async function pendingValidationEmails(limit = 1000): Promise<string[]> {
   for (const r of rows) {
     const e = (r.likelyEmail ?? "").toLowerCase();
     if (!e || seen.has(e)) continue;
-    if (r.emailValidated || r.emailInvalid) continue;   // already has a verdict
+    if (r.emailValidated || r.emailInvalid || r.emailCatchAll) continue;   // already has a verdict
     seen.add(e); out.push(r.likelyEmail!);
     if (out.length >= limit) break;
   }

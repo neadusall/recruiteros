@@ -2755,7 +2755,7 @@
       curDailyHtml(f.daily) +
       '<div class="cur-funnel">' + funnelRow + "</div>" +
       (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
-      ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "") +
+      ((f.validated || f.invalid || f.catchAll) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + (f.catchAll ? '<span class="cur-mini"><span class="cur-catchall">~ ' + f.catchAll.toLocaleString() + " catch-all</span></span>" : "") + "</div>" : "") +
       curFleetHtml(fleet);
   }
 
@@ -2850,6 +2850,7 @@
     var via = r.managerVia ? '<span class="cur-via cur-via-' + esc(r.managerVia) + '">' + esc(r.managerVia.replace("_", " ")) + "</span>" : "";
     var emailTag = r.emailValidated ? '<span class="cur-valid">✓ valid</span>'
       : r.emailInvalid ? '<span class="cur-invalid">✕ invalid</span>'
+      : r.emailCatchAll ? '<span class="cur-catchall" title="Catch-all domain: this address WILL deliver, but the specific person can\'t be confirmed">~ catch-all</span>'
       : '<span class="im-email-unv">guess</span>';
     var email = r.likelyEmail
       ? '<span class="cur-email" data-email="' + esc(r.likelyEmail) + '" title="Best-guess work email — validated continuously, confirmed before send">✉️ ' + esc(r.likelyEmail) + ' ' + emailTag + "</span>"
