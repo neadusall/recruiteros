@@ -135,13 +135,23 @@
 
   /* ================= 1 · clip ================= */
   var preview = $("preview");
+  // Turn a getUserMedia failure into plain-English, actionable guidance.
+  function camErr(e) {
+    var n = (e && e.name) || "";
+    if (n === "NotAllowedError" || n === "SecurityError") return "Camera access is blocked. Click the camera icon in your browser's address bar → Allow, then press Enable camera again.";
+    if (n === "NotFoundError" || n === "OverconstrainedError") return "No camera detected. Connect or enable a webcam, then press Enable camera again.";
+    if (n === "NotReadableError" || n === "AbortError") return "Your camera is in use by another app (Zoom, Teams, etc.). Close it, then press Enable camera again.";
+    return "Couldn't start the camera: " + ((e && e.message) || n || "unknown error") + ". Press Enable camera to retry.";
+  }
   $("btnCam").onclick = function () {
+    $("btnCam").disabled = true; $("recHint").textContent = "Asking for camera + mic permission…";
     navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: true })
       .then(function (s) {
-        state.stream = s; preview.srcObject = s; preview.play();
-        $("btnRec").disabled = false; $("btnCam").textContent = "Camera on"; $("btnCam").disabled = true; renderPip();
+        state.stream = s; preview.srcObject = s; preview.muted = true; preview.play();
+        $("btnRec").disabled = false; $("btnCam").textContent = "✓ Camera on"; renderPip();
+        $("recHint").innerHTML = "Looking good. Press <b>● Record</b> (or tap the spacebar) and talk for ~10–20s.";
       })
-      .catch(function (e) { $("recHint").textContent = "Camera blocked: " + e.message; });
+      .catch(function (e) { $("btnCam").disabled = false; $("recHint").innerHTML = '<span style="color:#ff6b6b">⚠</span> ' + esc(camErr(e)); });
   };
   function pickMime() {
     var prefs = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
@@ -160,8 +170,22 @@
     }, 250);
   }
   function stopTimer() { if (recTimer) { clearInterval(recTimer); recTimer = null; } }
-  $("btnRec").onclick = function () {
-    if (state.recorder && state.recorder.state === "recording") { state.recorder.stop(); return; }
+  // Wrap the preview once so the 3-2-1 countdown can sit precisely over the video.
+  (function wrapPreview() {
+    var p = preview.parentNode; if (!p || (p.getAttribute && p.getAttribute("data-pvwrap"))) return;
+    var w = document.createElement("div"); w.setAttribute("data-pvwrap", "1");
+    w.style.cssText = "position:relative;border-radius:11px;overflow:hidden";
+    p.insertBefore(w, preview); w.appendChild(preview);
+  })();
+  // A short countdown gives the operator a beat to compose before recording.
+  function countdownThen(cb) {
+    if (state.counting) return; state.counting = true;
+    var w = preview.parentNode, ov = document.createElement("div");
+    ov.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,5,10,.5);font:800 72px 'Inter',system-ui,sans-serif;color:#fff;z-index:5;text-shadow:0 4px 22px rgba(0,0,0,.55)";
+    w.appendChild(ov); var n = 3; ov.textContent = n;
+    var iv = setInterval(function () { n--; if (n <= 0) { clearInterval(iv); ov.remove(); state.counting = false; cb(); } else ov.textContent = n; }, 650);
+  }
+  function beginRecording() {
     state.chunks = [];
     var mime = pickMime();
     try { state.recorder = new MediaRecorder(state.stream, mime ? { mimeType: mime } : undefined); }
@@ -172,12 +196,29 @@
       state.recordedBlob = new Blob(state.chunks, { type: (state.recorder.mimeType || mime || "video/webm").split(";")[0] });
       preview.srcObject = null; preview.src = URL.createObjectURL(state.recordedBlob); preview.muted = false; preview.controls = true;
       $("btnSave").disabled = false; $("btnDiscard").disabled = false; $("btnRec").textContent = "● Record";
-      $("recHint").textContent = "Preview it, then Save (or Discard and re-record).";
+      $("recHint").innerHTML = "Nice. Watch it back, then <b>Save</b> — or <b>Discard</b> to try again.";
     };
     state.recorder.start();
     startTimer();
     $("btnRec").textContent = "■ Stop"; $("btnSave").disabled = true; $("btnDiscard").disabled = true;
+  }
+  $("btnRec").onclick = function () {
+    if (state.recorder && state.recorder.state === "recording") { state.recorder.stop(); return; }
+    if (state.counting) return;
+    if (!state.stream) { $("recHint").textContent = "Press Enable camera first."; return; }
+    countdownThen(beginRecording);
   };
+  // Spacebar = start/stop recording, when the camera's ready, you're on the
+  // Create tab, and you're not typing or scrubbing a preview.
+  document.addEventListener("keydown", function (e) {
+    if (e.code !== "Space" && e.key !== " ") return;
+    var t = e.target || {}, tag = t.tagName || "";
+    if (/INPUT|TEXTAREA|SELECT/.test(tag) || t.isContentEditable) return;
+    var cv = $("createView"); if (cv && cv.style.display === "none") return;
+    if (!state.stream) return;
+    if (preview.controls && !(state.recorder && state.recorder.state === "recording")) return; // let space play the review clip
+    e.preventDefault(); $("btnRec").click();
+  });
   $("btnDiscard").onclick = function () {
     state.recordedBlob = null; preview.src = ""; preview.controls = false; preview.muted = true;
     if (state.stream) { preview.srcObject = state.stream; preview.play(); }
@@ -190,7 +231,7 @@
     var reader = new FileReader();
     reader.onload = function () {
       api("/api/in-market/clip", { method: "POST", body: JSON.stringify({ dataUrl: reader.result }) })
-        .then(function (j) { state.clipId = j.clip.id; lsSet(LS.clip, state.clipId); $("recHint").textContent = "Saved ✓ — now click a role."; loadClips(); refreshBanner(); })
+        .then(function (j) { state.clipId = j.clip.id; lsSet(LS.clip, state.clipId); $("recHint").innerHTML = "Saved ✓ — now <b>click a role</b> on the right to personalize it."; toast("Clip saved to your library"); loadClips(); refreshBanner(); })
         .catch(function (e) { $("recHint").textContent = "Save failed: " + e.message; $("btnSave").disabled = false; });
     };
     reader.readAsDataURL(state.recordedBlob);
@@ -356,7 +397,7 @@
     var list = visibleRoles(), box = $("gallery");
     updateFilterCounts();
     if (state.shots.length && !$("stage").querySelector("img.bg")) setStageBg(shotGif(state.shots[0].key));
-    if (!list.length) { box.innerHTML = '<div class="empty">' + (state.shots.length ? "No matches." : "No captured roles yet — capture one below.") + "</div>"; return; }
+    if (!list.length) { box.innerHTML = '<div class="empty">' + (state.shots.length ? "No roles match your filter." : "<b>No roles yet.</b><br>Roles flow in automatically from <b>Hire Signals</b> — or add one yourself under <b>＋ Capture a new role</b> below.") + "</div>"; return; }
     box.innerHTML = "";
     list.forEach(function (s) {
       var t = document.createElement("div");
