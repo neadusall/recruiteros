@@ -408,9 +408,14 @@
         '<div class="act" data-act></div>';
       t.querySelector(".thumb").onclick = function () { setStageBg(shotGif(s.key)); generate(s); };
       box.appendChild(t);
-      // Bulk is available without single-generating first (the role is already captured).
+      // To-do tile: an explicit primary "Personalize" button (the thumbnail is
+      // also clickable, but a hover-only cue is easy to miss). Bulk is available
+      // without single-generating first since the role is already captured.
       var actEl = t.querySelector("[data-act]");
-      actEl.innerHTML = '<button class="ghost small cta" data-bulklist>👥 Personalize a list</button>';
+      actEl.innerHTML =
+        '<button class="primary small cta" data-gen1>⚡ Personalize this role</button>' +
+        '<button class="ghost small cta" data-bulklist>👥 Personalize a whole list</button>';
+      actEl.querySelector("[data-gen1]").onclick = function () { setStageBg(shotGif(s.key)); generate(s); };
       actEl.querySelector("[data-bulklist]").onclick = function () { openBulk(s); };
       var prior = state.results[s.key];
       if (prior && prior.videoKey) renderResult(s, prior.videoKey); // restore prior generations
@@ -906,7 +911,32 @@
     toast("Exported " + rows.length + " personalized videos to CSV");
   }
 
+  // First-run welcome: a dismissible 3-step guide so a new operator knows the
+  // flow at a glance. Shows once (localStorage), then never again.
+  function maybeIntro() {
+    var KEY = "ros_pip_seen_intro";
+    try { if (localStorage.getItem(KEY)) return; } catch (e) {}
+    var cv = $("createView"); if (!cv) return;
+    var card = document.createElement("div");
+    card.className = "card";
+    card.style.cssText = "grid-column:1/-1;margin-bottom:2px;display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap";
+    card.innerHTML =
+      '<div style="flex:1;min-width:260px">' +
+        '<div style="font-weight:800;font-size:15px;margin-bottom:5px">👋 Welcome to PiP Studio</div>' +
+        '<div class="muted" style="font-size:13px;line-height:1.65">Record one talking-head clip, then drop it onto any role to make a personalized video — the job post plays behind you and each recipient gets a branded watch page.</div>' +
+        '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px">' +
+          '<div style="flex:1;min-width:150px"><div style="font-weight:700;font-size:13px">1 · Record once</div><div class="muted" style="font-size:12px">Enable camera, hit Record (or the spacebar), talk ~15s, Save.</div></div>' +
+          '<div style="flex:1;min-width:150px"><div style="font-weight:700;font-size:13px">2 · Click a role</div><div class="muted" style="font-size:12px">Pick a role tile — your clip composites over its job post.</div></div>' +
+          '<div style="flex:1;min-width:150px"><div style="font-weight:700;font-size:13px">3 · Send</div><div class="muted" style="font-size:12px">Copy the email snippet or push it into Outreach / Email.</div></div>' +
+        '</div>' +
+      '</div>' +
+      '<button class="ghost small" id="pipIntroX" style="flex:none">Got it ✓</button>';
+    cv.insertBefore(card, cv.firstChild);
+    card.querySelector("#pipIntroX").onclick = function () { try { localStorage.setItem(KEY, "1"); } catch (e) {} card.remove(); };
+  }
+
   /* ---------------- init ---------------- */
+  maybeIntro();
   applyStyleControls();
   bindFilters();
   loadGallery();
