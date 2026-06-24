@@ -65,6 +65,7 @@ export async function runGovernor(workspaceId: string): Promise<Array<{ domain: 
 
 /** Ensure a domain has a metrics object, then mutate it. */
 export function ensureMetrics(d: SendingDomain): DeliveryMetrics {
-  if (!d.metrics) d.metrics = { sent: 0, delivered: 0, bounced: 0, complained: 0, opened: 0, since: new Date(0).toISOString() };
+  if (!d.metrics) d.metrics = { sent: 0, delivered: 0, bounced: 0, complained: 0, opened: 0, openedHuman: 0, since: new Date(0).toISOString() };
+  if (d.metrics.openedHuman === undefined) d.metrics.openedHuman = 0; // back-fill older snapshots
   return d.metrics;
 }
