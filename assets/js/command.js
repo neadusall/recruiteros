@@ -6180,12 +6180,14 @@
           '<td>' + pc(d.bounceRatePct) + '</td>' +
           '<td>' + pc(d.complaintRatePct) + '</td>' +
           '<td>' + (d.deliveryRatePct ? d.deliveryRatePct + "%" : "-") + '</td>' +
+          '<td title="Human opens / delivered — Apple Mail Privacy, image proxies and bots excluded' + (d.openRatePct != null ? '. Raw open rate incl. machine opens: ' + d.openRatePct + '%' : '') + '">' +
+            (d.humanOpenRatePct != null ? '<b>' + d.humanOpenRatePct + '%</b>' + (d.openRatePct != null && d.openRatePct !== d.humanOpenRatePct ? ' <span class="muted" style="font-size:11px">(' + d.openRatePct + '% raw)</span>' : '') : "-") + '</td>' +
           '<td>' + (d.reputationTier ? esc(d.reputationTier) : "-") + '</td>' +
           '<td>' + (d.inboxRatePct != null ? d.inboxRatePct + "%" : "-") + '</td>' +
         '</tr>';
-      }).join("") || '<tr><td colspan="7" class="muted" style="font-size:12px">No sending domains yet, add them in Configuration above.</td></tr>';
+      }).join("") || '<tr><td colspan="8" class="muted" style="font-size:12px">No sending domains yet, add them in Configuration above.</td></tr>';
       var domTable = '<div class="sd-step" style="margin-top:8px">Domain health</div>' +
-        '<table class="sd-table"><thead><tr><th>Domain</th><th>Health</th><th>Bounce</th><th>Complaint</th><th>Delivered</th><th>Reputation</th><th>Inbox</th></tr></thead><tbody>' + domRows + '</tbody></table>';
+        '<table class="sd-table"><thead><tr><th>Domain</th><th>Health</th><th>Bounce</th><th>Complaint</th><th>Delivered</th><th title="Human opens / delivered — machine/proxy opens (Apple MPP, image proxies, bots) filtered out">Human opens</th><th>Reputation</th><th>Inbox</th></tr></thead><tbody>' + domRows + '</tbody></table>';
 
       // Per-mailbox warmth
       var mbRows = (h.mailboxes || []).map(function (m) {

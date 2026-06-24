@@ -100,6 +100,10 @@ export interface DomainHealthScore {
   bounceRatePct: number;
   complaintRatePct: number;
   deliveryRatePct: number;
+  /** Raw opens / delivered (includes machine/proxy opens — directional only). */
+  openRatePct?: number;
+  /** HUMAN opens / delivered (Apple MPP, image proxies, bots excluded). The trustworthy number. */
+  humanOpenRatePct?: number;
   reputationTier?: string;
   spamRatePct?: number;
   authPct?: number;
@@ -117,6 +121,10 @@ export function domainHealth(d: SendingDomain, latestSeed?: SeedTest): DomainHea
   const bounceRatePct = m ? pct(m.bounced, m.sent) : 0;
   const complaintRatePct = m ? pct(m.complained, m.sent) : 0;
   const deliveryRatePct = m ? pct(m.delivered, m.sent) : 0;
+  // Opens are measured against DELIVERED. We surface both the raw rate and the
+  // human rate (machine/proxy opens removed) so the screen shows real engagement.
+  const openRatePct = m ? pct(m.opened, m.delivered) : 0;
+  const humanOpenRatePct = m ? pct(m.openedHuman ?? 0, m.delivered) : 0;
   const inboxRatePct = latestSeed?.status === "complete" ? latestSeed.inboxRatePct : undefined;
   const warnings: string[] = [];
 
@@ -125,6 +133,8 @@ export function domainHealth(d: SendingDomain, latestSeed?: SeedTest): DomainHea
     bounceRatePct: round(bounceRatePct * 10) / 10,
     complaintRatePct: round(complaintRatePct * 100) / 100,
     deliveryRatePct: round(deliveryRatePct),
+    openRatePct: round(openRatePct),
+    humanOpenRatePct: round(humanOpenRatePct),
     reputationTier: d.reputation?.tier,
     spamRatePct: d.reputation?.spamRatePct,
     authPct: d.reputation?.authPct,
