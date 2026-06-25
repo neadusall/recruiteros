@@ -47,6 +47,23 @@ INMARKET_EGRESS_IPV6_COUNT=16
 Redeploy. Confirm via `engine_health` → `egress.enabled: true` + `egress.ips`. The default route
 stays in the pool, so requests still flow even if an IP isn't up yet.
 
+## Lever 1.5 — Email verification via Reoon (REQUIRED for validated prospects)
+
+Validated-only auto-enroll only enrols emails with `emailValidated=true`. That confirmation needs
+a real SMTP check — and Hetzner blocks our outbound port 25, so we use Reoon's API (their infra does
+the SMTP check). See lib/inmarket/reoon.ts. The free pre-pass culls obvious dead addresses first, so
+Reoon credits are only spent on plausible ones. Without this, validated-only enrolls **zero**.
+
+```
+REOON_API_KEY=<your-reoon-key>          # required — turns the verification tick on
+REOON_BULK_SIZE=800                     # emails per bulk task (default 800)
+REOON_INTERVAL_SEC=180                  # tick cadence (default 3 min)
+REOON_ACCEPT_CATCHALL=1                 # accept corporate catch-all domains (default on; 0 to exclude)
+```
+Flow: pending guesses → Reoon bulk task (server-side SMTP verify) → `applyEmailValidation` →
+valid = `emailValidated=true` (enrollable), invalid = suppressed. Confirm via `engine_health` →
+`reoon.enabled:true` and the funnel's `validated` count climbing.
+
 ## Lever 2 — Auto-enroll autopilot (populate BD Bulk hands-off; never auto-sends)
 
 See lib/inmarket/autoEnroll.ts. Every 5 min it enrolls verified-contactable prospects into a BD
