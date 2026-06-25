@@ -2089,6 +2089,7 @@
   var imDmPerRole = 3;           // decision-makers shown per role (1 / 3 / 5), defaults to 3 for multi-touch
   var imSelectedSizes = [];      // company headcount bands to narrow by (multi-select)
   var imConfirmedSizeOnly = false; // size search: only authoritative (Wikidata) headcounts
+  var imShotFilter = null;      // screenshot filter: null = all, true = only WITH a job screenshot, false = only without
   var imLabel = "";             // current result label, kept for re-renders
   var imTotal = 0;              // total companies available for this query in the pool (grows daily)
   var imStats = null;          // accumulation activity (added today, total, daily log)
@@ -2250,12 +2251,14 @@
       if (Math.round(l.score || 0) < imMinScore) return false;
       // "What they're hiring for" filter: keep only companies hiring for the chosen function.
       if (imNeedFn && !(l.needFunctions && l.needFunctions.indexOf(imNeedFn) >= 0)) return false;
+      // Screenshot filter: only companies that HAVE (or specifically DON'T have) a verified job screenshot.
+      if (imShotFilter !== null && !!l.hasShot !== imShotFilter) return false;
       return true;
     });
   }
 
   function renderInMarket(el) {
-    imPicks = {}; imMinScore = 0; imSelectedSignals = []; imSelectedIndustries = []; imSelectedSizes = []; imBreakdown = []; imNeeds = []; imNeedFn = "";
+    imPicks = {}; imMinScore = 0; imShotFilter = null; imSelectedSignals = []; imSelectedIndustries = []; imSelectedSizes = []; imBreakdown = []; imNeeds = []; imNeedFn = "";
     el.innerHTML =
       '<div class="im-hero">' +
         '<div class="im-bar">' +
@@ -2527,6 +2530,14 @@
         '<div class="im-narrow im-dm" title="Decision-makers to contact per open role">' +
           '<span class="im-dm-lbl">👤 Per role:</span>' +
           [1, 3, 5].map(function (n) { return '<button type="button" class="im-nbtn' + (imDmPerRole === n ? " active" : "") + '" data-dm="' + n + '">' + n + "</button>"; }).join("") +
+        "</div>" +
+        // Screenshot filter: search by whether the company's job posting has a verified screenshot.
+        '<div class="im-narrow im-shot" title="Filter by whether we have a verified screenshot of the company\'s job posting">' +
+          '<span class="im-dm-lbl">📸 Screenshot:</span>' +
+          [["all", "All"], ["has", "Has"], ["none", "None"]].map(function (o) {
+            var on = (o[0] === "all" && imShotFilter === null) || (o[0] === "has" && imShotFilter === true) || (o[0] === "none" && imShotFilter === false);
+            return '<button type="button" class="im-nbtn' + (on ? " active" : "") + '" data-shot="' + o[0] + '">' + o[1] + "</button>";
+          }).join("") +
         "</div>" +
         '<button class="btn btn-ghost btn-sm" id="imSave" disabled>💾 Save as hiring signals</button>' +
         '<button class="btn btn-ghost btn-sm" id="imToEmail" disabled>✉️ Push prospects to Email</button>' +
@@ -3130,6 +3141,7 @@
         '<div class="im-lead-id"><div class="im-lead-name">' + esc(l.company) +
           (l.renewed ? ' <span class="im-renew-badge">🔥 Renewed</span>' : "") +
           (l.inPipeline ? ' <span class="im-pipeline-badge" title="Already in your Prospects">✓ In pipeline</span>' : "") +
+          (l.hasShot ? ' <a class="im-shot-badge" href="' + esc(l.shotWatchUrl || "#") + '" target="_blank" rel="noopener" title="Verified screenshot + scroll-video of this job posting on the company\'s own careers page — click to watch" onclick="event.stopPropagation()">📸 Job screenshot</a>' : "") +
           (l.industry ? ' <span class="muted" style="font-weight:400">· ' + esc(l.industry) + "</span>" : "") + "</div>" +
         '<div class="im-lead-meta">' + metaBits.join(" · ") + "</div></div>" +
         '<span class="cls cls-' + scoreCls + ' im-score" title="Hiring-intent score">' + score + "</span></div>" +
@@ -3202,7 +3214,10 @@
     Array.prototype.forEach.call(body.querySelectorAll(".im-nbtn"), function (b) {
       b.addEventListener("click", function () {
         if (b.hasAttribute("data-dm")) imDmPerRole = parseInt(b.getAttribute("data-dm"), 10) || 1;
-        else imMinScore = parseInt(b.getAttribute("data-min"), 10) || 0;
+        else if (b.hasAttribute("data-shot")) {
+          var v = b.getAttribute("data-shot");
+          imShotFilter = v === "has" ? true : v === "none" ? false : null;
+        } else imMinScore = parseInt(b.getAttribute("data-min"), 10) || 0;
         renderImResults();
       });
     });

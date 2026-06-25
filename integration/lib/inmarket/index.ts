@@ -34,6 +34,7 @@ import type { Prospect } from "../core/types";
 import { isUsSignal, isUsLead } from "./geo";
 import { resolveRealEmployer } from "./employer";
 import { guessEmail } from "./email";
+import { shotKey, shotShareUrls } from "./roleShot";
 
 /** What the UI sends to search the market. Search EITHER by industry/market OR by
  *  company name — the two are mutually exclusive in the UI, but both narrow the same
@@ -64,6 +65,9 @@ export interface InMarketQuery {
   /** Size search: only leads with an AUTHORITATIVE (Wikidata) headcount — drop heuristic
    *  estimates. Lets you narrow strictly on confirmed company sizes. */
   confirmedSizeOnly?: boolean;
+  /** Screenshot search: true → only companies that HAVE a verified job-page screenshot; false → only
+   *  those that DON'T (the capture backlog); undefined → no screenshot filter. */
+  hasScreenshot?: boolean;
   limit?: number;
 }
 
@@ -159,6 +163,13 @@ export interface InMarketLead {
   needFunctions?: JobFunction[];
   /** Carried so promote() can resolve the buyer + create the prospect. */
   raw?: { company?: Company; person?: Person };
+  /** True when a VERIFIED screenshot of one of this company's open-role pages exists — captured on
+   *  the company's OWN careers site (never the ATS). Drives the 📸 badge + the "has screenshot" filter. */
+  hasShot?: boolean;
+  /** The matched shot's stable key + public asset URLs, when hasShot. */
+  shotKey?: string;
+  shotWatchUrl?: string;
+  shotPosterUrl?: string;
 }
 
 /** The title most likely to own a hire for a given function — used to attribute a
@@ -753,6 +764,30 @@ async function freshenFromJobFeed(q: InMarketQuery): Promise<number> {
   }
 }
 
+/** Stamp each lead with whether a verified job-page screenshot exists for one of its open roles
+ *  (checking the company's top few roles), plus the shot's public watch/poster URLs. Cheap: one
+ *  Set membership test per role against the preloaded captured-key set. */
+function stampShots(leads: InMarketLead[], keySet: Set<string>): InMarketLead[] {
+  if (!keySet.size) return leads.map((l) => (l.hasShot ? l : { ...l, hasShot: false }));
+  return leads.map((l) => {
+    const titles = (l.roleDetails?.length ? l.roleDetails.map((d) => d.title) : (l.roles ?? [])).slice(0, 3);
+    for (const t of titles) {
+      const k = shotKey(l.company, t);
+      if (keySet.has(k)) {
+        const urls = shotShareUrls(k);
+        return { ...l, hasShot: true, shotKey: k, shotWatchUrl: urls.watch, shotPosterUrl: urls.poster };
+      }
+    }
+    return { ...l, hasShot: false };
+  });
+}
+
+/** Narrow by screenshot presence when the UI asked for it (true = only with, false = only without). */
+function applyShotFilter(leads: InMarketLead[], q: InMarketQuery): InMarketLead[] {
+  if (q.hasScreenshot === undefined) return leads;
+  return leads.filter((l) => !!l.hasShot === q.hasScreenshot);
+}
+
 export async function searchInMarket(
   q: InMarketQuery,
   nowIso: string,
@@ -783,20 +818,25 @@ export async function searchInMarket(
     // freshest employers for the chosen industry/role are merged in and show up in this same search.
     await freshenFromJobFeed(q);
     const stats = await poolStats().catch(() => undefined);
+    // Preload the set of companies/roles that already have a verified job-page screenshot, so we can
+    // stamp the 📸 badge + honor the "has screenshot" filter on the full matched set (honest counts).
+    const { capturedKeySet } = await import("./roleShot");
+    const shotKeys = await capturedKeySet().catch(() => new Set<string>());
+    const finalize = (arr: InMarketLead[]) => applyShotFilter(stampShots(arr, shotKeys), q);
 
     // Pull the FULL matching set from the pool so `pulled` reflects the true total
     // available for this industry (which grows daily as the accumulator fills the pool),
     // even though we only display `limit`. Already-in-Prospects companies are FLAGGED, not
     // dropped, so a workspace that has worked many companies still sees the full pool (and
     // the count never falls under the live-fallback threshold just from suppression).
-    const pooledAll = fresh(await queryPool(q, 10000));
+    const pooledAll = finalize(fresh(await queryPool(q, 10000)));
     if (pooledAll.length >= 24) {
       return { leads: pooledAll.slice(0, limit), pulled: pooledAll.length, warnings: [], stats, signalBreakdown: signalBreakdown(pooledAll), needsBreakdown: hiringNeedsBreakdown(pooledAll) };
     }
     // Pool thin for this query → live collect, return it, and grow the pool.
     const live = await collectLeads(q, nowIso, Math.max(limit, 200));
     void mergeIntoPool(live).catch(() => {});
-    const merged = fresh(dedupeLeads([...pooledAll, ...live]));
+    const merged = finalize(fresh(dedupeLeads([...pooledAll, ...live])));
     return { leads: merged.slice(0, limit), pulled: merged.length, warnings: [], stats, signalBreakdown: signalBreakdown(merged), needsBreakdown: hiringNeedsBreakdown(merged) };
   } catch (err) {
     // Pool/accumulator unavailable → pure live fallback (original behavior).

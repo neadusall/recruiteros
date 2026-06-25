@@ -95,6 +95,19 @@ const CYCLE_WATCHDOG_MS = 30 * 60 * 1000;   // hourly cycle: abandon after 30 mi
 const CURATE_WATCHDOG_MS = 7 * 60 * 1000;   // 8-min curation tick: abandon after 7 min
 const INFLOW_WATCHDOG_MS = 2 * 60 * 1000;   // 3-min inflow tick: abandon after 2 min
 
+// SCREENSHOT TICK — proactively capture the job-posting page (on the company's OWN careers site) for
+// the top CONTACTABLE prospects, so every contact carries a verified screenshot you can see + filter
+// by. Self-hosted Playwright is heavy (~20s/page), so this is bounded SMALL and runs at low
+// concurrency with one shared browser; it grinds the backlog over time without pinning the box. All
+// env-tunable — dial SHOT_BATCH/CONCURRENCY up once you see headroom. Set INMARKET_SHOTS=0 to disable.
+const SHOT_ENABLED = process.env.INMARKET_SHOTS !== "0";
+const SHOT_CYCLE_MS = envNum("INMARKET_SHOT_INTERVAL_SEC", 120) * 1000; // capture a small batch every N seconds
+const SHOT_BATCH = envNum("INMARKET_SHOT_BATCH", 4);                    // captures per tick (keep small — Playwright is heavy)
+const SHOT_CONCURRENCY = envNum("INMARKET_SHOT_CONCURRENCY", 1);        // parallel renders (1 shared Chromium → keep low)
+const SHOT_FIRST_DELAY_MS = 45_000;          // let the pool + curation warm up before the first capture
+const SHOT_WATCHDOG_MS = 6 * 60 * 1000;      // abandon a wedged capture batch after 6 min
+let shotting = false;                        // overlap guard for the screenshot tick
+
 let started = false;
 let running = false;                    // overlap guard: never let two cycles run at once
 let curating = false;                   // overlap guard for the curation tick
@@ -535,6 +548,50 @@ async function runCurationTick(): Promise<void> {
  * arms the timers once per process. Errors inside cycles are swallowed so they never
  * affect a user's search.
  */
+/**
+ * SCREENSHOT TICK. Capture a verified job-page screenshot for the top CONTACTABLE prospects that
+ * don't have one yet, so the contact carries the asset and the "has screenshot" filter has data.
+ * Bounded + idempotent: captureRoleShot reuses a fresh verdict (POS_TTL) and only renders the
+ * genuinely-new ones, so re-running just advances the backlog. Never throws.
+ */
+async function runShotTick(): Promise<void> {
+  if (!SHOT_ENABLED || shotting) return;
+  shotting = true;
+  const watchdog = setTimeout(() => { shotting = false; }, SHOT_WATCHDOG_MS);
+  try {
+    const { listCurated } = await import("./curation");
+    const { capturedKeySet, captureRoleShot, shotKey } = await import("./roleShot");
+    const have = await capturedKeySet().catch(() => new Set<string>());
+    // Contactable-or-better prospects (real person + email) are the ones worth a screenshot.
+    const list = await listCurated({ contactableOnly: true, limit: 3000 }).catch(() => [] as Array<{ company?: string; role?: string; domain?: string }>);
+    const seen = new Set<string>();
+    const todo: Array<{ company: string; role: string; domain?: string }> = [];
+    for (const p of list) {
+      if (!p.company || !p.role) continue;
+      const key = shotKey(p.company, p.role);
+      if (have.has(key) || seen.has(key)) continue;        // already captured (or queued this tick)
+      seen.add(key);
+      todo.push({ company: p.company, role: p.role, domain: p.domain });
+      if (todo.length >= SHOT_BATCH) break;
+    }
+    if (!todo.length) return;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < todo.length) {
+        const t = todo[cursor++];
+        try { await captureRoleShot({ company: t.company, roleTitle: t.role, domain: t.domain }); }
+        catch { /* skip; a wedged capture must never stop the batch */ }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(SHOT_CONCURRENCY, todo.length) }, worker));
+  } catch {
+    /* listCurated/capture unavailable this tick; the next one retries */
+  } finally {
+    clearTimeout(watchdog);
+    shotting = false;
+  }
+}
+
 export function ensureAccumulator(): void {
   if (started) return;
   started = true;
@@ -551,4 +608,10 @@ export function ensureAccumulator(): void {
   setTimeout(() => { void runCurationTick(); }, CURATE_FIRST_DELAY_MS);
   const c = setInterval(() => { void runCurationTick(); }, CURATE_CYCLE_MS);
   if (typeof c === "object" && c && "unref" in c) (c as { unref: () => void }).unref();
+  // Screenshot capture tick — builds verified job-page screenshots for contactable prospects.
+  if (SHOT_ENABLED) {
+    setTimeout(() => { void runShotTick(); }, SHOT_FIRST_DELAY_MS);
+    const s = setInterval(() => { void runShotTick(); }, SHOT_CYCLE_MS);
+    if (typeof s === "object" && s && "unref" in s) (s as { unref: () => void }).unref();
+  }
 }
