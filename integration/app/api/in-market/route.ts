@@ -186,6 +186,20 @@ export async function POST(req: Request) {
     return ok({ updated: n });
   }
 
+  // INDUSTRY-TARGETED JOB SCRAPE (JSearch): pull fresh hiring companies for ONE chosen industry
+  // right now and merge them into the pool (each carries employer_website → the domain for free).
+  // This is the "pick an industry, scrape it" control — the background accumulator also rotates
+  // industries continuously, but this lets the user target one on demand.
+  if (b?.action === "jobfeed_search") {
+    const { runJobFeedSourcing, jobFeedEnabled } = await import("../../../lib/inmarket/jobFeed");
+    if (!jobFeedEnabled()) return fail("jobfeed_not_configured", 409, { detail: "Set RAPID_JOBS_HOST + RAPID_JOBS_KEY (JSearch on RapidAPI) to enable industry job scraping." });
+    const query = String(b.industry || b.query || "").trim();
+    if (!query) return fail("missing_industry", 422, { detail: "industry (or query) required" });
+    const limit = Math.min(Math.max(Number(b.limit) || 100, 10), 500);
+    const scraped = await runJobFeedSourcing({ query, location: b.location ? String(b.location) : undefined, limit });
+    return ok({ scraped, industry: query });
+  }
+
   // On-demand curation run (the accumulator also does this hourly): research the top companies'
   // decision-makers now and refresh the list.
   if (b?.action === "curate_now") {

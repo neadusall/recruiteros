@@ -2299,7 +2299,8 @@
         '<div class="im-group" id="imIndGroup">' +
           '<div class="im-group-head"><span class="im-group-title">Industries</span>' +
             '<button type="button" class="im-mini" data-all="ind">Select all</button>' +
-            '<button type="button" class="im-mini" data-clear="ind">Clear</button></div>' +
+            '<button type="button" class="im-mini" data-clear="ind">Clear</button>' +
+            '<button type="button" class="im-mini im-jobscrape" id="imJobScrape" title="Pull fresh hiring companies for the selected industries straight from the job feed (JSearch), with their websites — they flow into the pool and decision-maker research starts on them automatically.">⚡ Pull fresh jobs</button></div>' +
           '<div class="im-industries im-scroll" id="imIndustries">' +
             IM_INDUSTRIES.map(function (n) { return '<button type="button" class="im-chip" data-ind="' + esc(n) + '">' + esc(n) + "</button>"; }).join("") +
           "</div>" +
@@ -2322,6 +2323,36 @@
     loadImportBanner();
     var curBtn = $("#imCurationBtn");
     if (curBtn) curBtn.addEventListener("click", function () { renderCuration(); });
+
+    // ⚡ Pull fresh jobs: scrape the job feed (JSearch) for each SELECTED industry on demand. Each
+    // industry's hiring companies (with their websites) flow into the pool, then decision-maker
+    // research + email enrichment run on them automatically. Targeted, throttle-free intake.
+    var jobScrape = $("#imJobScrape");
+    if (jobScrape) jobScrape.addEventListener("click", function () {
+      var inds = imSelectedIndustries.slice();
+      if (!inds.length) { toast("Pick one or more industries first, then Pull fresh jobs."); return; }
+      jobScrape.disabled = true;
+      var orig = "⚡ Pull fresh jobs", total = 0, i = 0, anyConfigErr = false;
+      function step() {
+        if (i >= inds.length) {
+          jobScrape.disabled = false; jobScrape.textContent = orig;
+          if (anyConfigErr && !total) {
+            toast("Job feed isn't connected yet — add your JSearch (RapidAPI) key, then try again.");
+          } else {
+            toast("Pulled " + total.toLocaleString() + " hiring companies across " + inds.length +
+              " industr" + (inds.length === 1 ? "y" : "ies") + " — finding decision-makers now.");
+            loadImportBanner();   // refresh today's intake count
+          }
+          return;
+        }
+        var ind = inds[i++];
+        jobScrape.textContent = "Pulling " + ind + "… (" + i + "/" + inds.length + ")";
+        send("/in-market", "POST", { action: "jobfeed_search", industry: ind, limit: 200 })
+          .then(function (r) { if (r && r.data && typeof r.data.scraped === "number") total += r.data.scraped; step(); })
+          .catch(function (e) { if (e && (e.status === 409 || /jobfeed_not_configured/.test(String(e && e.error || e)))) anyConfigErr = true; step(); });
+      }
+      step();
+    });
     var form = $("#imForm"), input = $("#imQuery");
 
     function syncChips() {
@@ -2742,15 +2773,23 @@
   // the poller every ~25s so the numbers climb on screen, WITHOUT touching the list/selection below.
   function curStatsInner(f, health, search, fleet, cc) {
     var bs = f.byStatus || {};
+    // CUMULATIVE funnel: each stage shows everyone who reached AT LEAST that far, so the numbers only
+    // fall left→right like a real funnel. The old per-bucket view made "Named" look like only N people
+    // were found — but the named ones who also got an email had already moved on to Contactable, so
+    // "Named" read as 3 when ~1,388 people actually have a real name. Named = total real people found;
+    // Contactable = name + working email; Approved/Enrolled = further along.
+    var enrolled = bs.enrolled || 0, queued = bs.queued || 0;
+    var contactablePlus = (bs.contactable || 0) + queued + enrolled;
+    var namedPlus = (typeof f.named === "number") ? f.named : ((bs.named || 0) + contactablePlus);
     var stages = [
-      ["sourced", "Sourced", "company + owning title"],
-      ["named", "Named", "real person found"],
-      ["contactable", "Contactable", "name + email"],
-      ["queued", "Approved", "ready to send"],
-      ["enrolled", "Enrolled", "in Email"],
+      [f.total || 0, "Researched", "companies worked"],
+      [namedPlus, "Named", "real person found"],
+      [contactablePlus, "Contactable", "name + working email"],
+      [queued + enrolled, "Approved", "ready to send"],
+      [enrolled, "Enrolled", "in Email"],
     ];
     var funnelRow = stages.map(function (s) {
-      return '<div class="cur-stage"><div class="cur-stage-n">' + ((bs[s[0]] || 0)).toLocaleString() + "</div>" +
+      return '<div class="cur-stage"><div class="cur-stage-n">' + (s[0]).toLocaleString() + "</div>" +
         '<div class="cur-stage-l">' + esc(s[1]) + '</div><div class="cur-stage-h">' + esc(s[2]) + "</div></div>";
     }).join('<div class="cur-arrow">→</div>');
     var sigRows = (f.bySignal || []).slice(0, 8).map(function (x) {
