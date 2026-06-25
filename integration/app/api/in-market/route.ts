@@ -134,8 +134,9 @@ export async function POST(req: Request) {
     const { engineHealth } = await import("../../../lib/inmarket/accumulator");
     const { egressEnabled, egressIps } = await import("../../../lib/net/egress");
     const { autoEnrollStatus } = await import("../../../lib/inmarket/autoEnroll");
-    const [health, autoEnroll] = await Promise.all([engineHealth(), autoEnrollStatus()]);
-    return ok({ health, egress: { enabled: egressEnabled(), ips: egressIps() }, autoEnroll });
+    const { reoonStatus } = await import("../../../lib/inmarket/reoon");
+    const [health, autoEnroll, reoon] = await Promise.all([engineHealth(), autoEnrollStatus(), reoonStatus()]);
+    return ok({ health, egress: { enabled: egressEnabled(), ips: egressIps() }, autoEnroll, reoon });
   }
 
   // The list itself, for review (filterable; contactableOnly = has a real person + email).

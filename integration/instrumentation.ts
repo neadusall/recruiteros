@@ -58,6 +58,15 @@ export async function register(): Promise<void> {
       /* never let an instrumentation hiccup block server startup */
     }
     try {
+      // Reoon email verification: SMTP-confirms guessed emails from Reoon's infra (Hetzner blocks
+      // our own port 25), producing emailValidated=true for the validated-only auto-enroll. No-op
+      // until REOON_API_KEY is set.
+      const { ensureReoonValidation } = await import("./lib/inmarket/reoon");
+      ensureReoonValidation();
+    } catch {
+      /* never let an instrumentation hiccup block server startup */
+    }
+    try {
       // Auto-enroll autopilot: populates BD Bulk with verified prospects hands-off. A complete
       // no-op until INMARKET_AUTOENROLL (+ workspace + campaign) is configured, so arming it here
       // never starts populating anything you didn't point it at.
