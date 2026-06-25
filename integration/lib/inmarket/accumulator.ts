@@ -560,18 +560,30 @@ async function runShotTick(): Promise<void> {
   const watchdog = setTimeout(() => { shotting = false; }, SHOT_WATCHDOG_MS);
   try {
     const { listCurated } = await import("./curation");
+    const { queryPool } = await import("./pool");
     const { capturedKeySet, captureRoleShot, shotKey } = await import("./roleShot");
     const have = await capturedKeySet().catch(() => new Set<string>());
-    // Contactable-or-better prospects (real person + email) are the ones worth a screenshot.
-    const list = await listCurated({ contactableOnly: true, limit: 3000 }).catch(() => [] as Array<{ company?: string; role?: string; domain?: string }>);
+    // Companies we can actually email (a contactable prospect exists) — prioritize THEIR screenshots,
+    // so the asset lands on a contact you'd reach out to.
+    const contactable = await listCurated({ contactableOnly: true, limit: 5000 }).catch(() => [] as Array<{ company?: string }>);
+    const wantCo = new Set(contactable.map((p) => (p.company || "").toLowerCase().trim()).filter(Boolean));
+    if (!wantCo.size) return;
+    // Drive the capture from the POOL leads: they carry the harvested POSTING URL (the Tier-1 capture
+    // target — without it the company-site verification almost always fails) AND the exact role titles
+    // the Hire Signals cards display, so the captured key matches the on-card 📸 badge.
+    const leads = await queryPool({ limit: 8000 } as never, 8000).catch(() => [] as Array<Record<string, unknown>>);
     const seen = new Set<string>();
-    const todo: Array<{ company: string; role: string; domain?: string }> = [];
-    for (const p of list) {
-      if (!p.company || !p.role) continue;
-      const key = shotKey(p.company, p.role);
+    const todo: Array<{ company: string; role: string; url?: string; domain?: string }> = [];
+    for (const l of leads as Array<Record<string, unknown>>) {
+      const company = (l.company as string) || "";
+      if (!company || !wantCo.has(company.toLowerCase().trim())) continue;
+      const rd = (l.roleDetails as Array<{ title?: string; url?: string }> | undefined)?.[0];
+      const role = rd?.title || (l.roles as string[] | undefined)?.[0];
+      if (!role) continue;
+      const key = shotKey(company, role);
       if (have.has(key) || seen.has(key)) continue;        // already captured (or queued this tick)
       seen.add(key);
-      todo.push({ company: p.company, role: p.role, domain: p.domain });
+      todo.push({ company, role, url: rd?.url || (l.sourceUrl as string | undefined), domain: l.domain as string | undefined });
       if (todo.length >= SHOT_BATCH) break;
     }
     if (!todo.length) return;
@@ -579,7 +591,7 @@ async function runShotTick(): Promise<void> {
     const worker = async () => {
       while (cursor < todo.length) {
         const t = todo[cursor++];
-        try { await captureRoleShot({ company: t.company, roleTitle: t.role, domain: t.domain }); }
+        try { await captureRoleShot({ company: t.company, roleTitle: t.role, roleUrl: t.url, domain: t.domain }); }
         catch { /* skip; a wedged capture must never stop the batch */ }
       }
     };
