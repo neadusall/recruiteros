@@ -44,14 +44,17 @@ function authed(req: Request): boolean {
  */
 export async function GET(req: Request) {
   if (!authed(req)) return fail("unauthorized", 401);
-  const [{ commonCrawlHealth }, { engineHealth }, { reoonStatus }, { autoEnrollStatus }, { curationFunnel }] = await Promise.all([
+  const [{ commonCrawlHealth }, { engineHealth }, { reoonStatus }, { autoEnrollStatus }, { curationFunnel }, { poolStats, poolSize }] = await Promise.all([
     import("../../../../lib/inmarket/commonCrawl"),
     import("../../../../lib/inmarket/accumulator"),
     import("../../../../lib/inmarket/reoon"),
     import("../../../../lib/inmarket/autoEnroll"),
     import("../../../../lib/inmarket/curation"),
+    import("../../../../lib/inmarket/pool"),
   ]);
-  const [engine, reoon, autoEnroll, funnel] = await Promise.all([engineHealth(), reoonStatus(), autoEnrollStatus(), curationFunnel()]);
+  const [engine, reoon, autoEnroll, funnel, poolS, liveSize] = await Promise.all([
+    engineHealth(), reoonStatus(), autoEnrollStatus(), curationFunnel(), poolStats(), poolSize(),
+  ]);
   const fleet = fleetStatus();
   const cc = commonCrawlHealth();
   return ok({
@@ -61,6 +64,9 @@ export async function GET(req: Request) {
     engine,                      // main box heartbeat (last cycle / curation tick)
     reoon,                       // email validator (enabled, lastApplied)
     autoEnroll,                  // populate-BD-Bulk autopilot (enabled, today/cap)
+    pool: {                      // is there work waiting? liveCompanies (claimable pool) vs researched
+      liveCompanies: liveSize, statedTotal: poolS.total, openPositions: poolS.openPositions, addedToday: poolS.addedToday,
+    },
     funnel: {                    // headline yield + pace
       researched: funnel.total, named: funnel.named, contactable: funnel.byStatus?.contactable ?? 0,
       validated: funnel.validated, invalid: funnel.invalid,
