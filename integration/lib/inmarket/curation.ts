@@ -601,12 +601,15 @@ export async function listCurated(opts?: {
   namedOnly?: boolean;
   /** Only rows whose email passed internal validation (a real, deliverable address — no guesses). */
   validatedOnly?: boolean;
+  /** Filter to a single industry (exact match on the curated row's industry). */
+  industry?: string;
   limit?: number;
 }): Promise<CuratedProspect[]> {
   let rows = await load();
   if (opts?.status) rows = rows.filter((r) => r.status === opts.status);
   if (opts?.signalType) rows = rows.filter((r) => r.signalType === opts.signalType);
   if (opts?.function) rows = rows.filter((r) => r.function === opts.function);
+  if (opts?.industry) rows = rows.filter((r) => (r.industry ?? "") === opts.industry);
   if (opts?.contactableOnly) rows = rows.filter((r) => !!r.likelyEmail);
   if (opts?.namedOnly) rows = rows.filter((r) => !!r.managerName);
   if (opts?.validatedOnly) rows = rows.filter((r) => r.emailValidated === true && !r.emailInvalid);
@@ -618,6 +621,28 @@ export async function listCurated(opts?: {
     (r.status === "contactable" || r.status === "queued" || r.status === "enrolled") ? 0 : r.managerName ? 1 : 2;
   rows.sort((a, b) => rank(a) - rank(b) || b.score - a.score || (b.curatedAt > a.curatedAt ? 1 : -1));
   return rows.slice(0, opts?.limit ?? 500);
+}
+
+/**
+ * Industry facets for the Hire Signals curated view's "search by industry" dropdown: every distinct
+ * industry present on the curated rows, with how many are contactable (a real person + email) and
+ * how many are enriched-and-validated. Sorted by enriched volume so the richest desks lead the menu.
+ */
+export async function curatedIndustries(): Promise<Array<{ industry: string; total: number; contactable: number; validated: number }>> {
+  const rows = await load();
+  const m = new Map<string, { total: number; contactable: number; validated: number }>();
+  for (const r of rows) {
+    const ind = (r.industry ?? "").trim();
+    if (!ind) continue;
+    const e = m.get(ind) ?? { total: 0, contactable: 0, validated: 0 };
+    e.total++;
+    if (r.status === "contactable" || r.status === "queued" || r.status === "enrolled") e.contactable++;
+    if (r.emailValidated === true && !r.emailInvalid) e.validated++;
+    m.set(ind, e);
+  }
+  return [...m.entries()]
+    .map(([industry, v]) => ({ industry, ...v }))
+    .sort((a, b) => b.validated - a.validated || b.contactable - a.contactable || b.total - a.total);
 }
 
 /** Whether the BD-Bulk pipeline requires a VALIDATED email. OFF by default so we build large lists

@@ -2569,6 +2569,7 @@
      attached to specific open roles, with the review gate to BD Bulk.
      ======================================================================== */
   var curPicks = {};   // id -> true (selected curated rows for approve/enroll)
+  var curIndustry = "";  // active industry filter for the enriched list ("" = all industries)
 
   var curPollTimer = null;
   var curLastTotal = 0;     // researched count last rendered — detects new leads arriving
@@ -2624,7 +2625,10 @@
       // Populate the WHOLE researched database now — enriched-first (real person + email on top, then
       // named-email-pending, then title-only researching rows). The list fills immediately and climbs
       // as the engine works; each row's badge shows its enrichment state (valid / guess / pending).
-      send("/in-market", "POST", { action: "curation_list", limit: 1000 }),
+      // Scoped to the active industry filter so "search the enriched by industry" works.
+      send("/in-market", "POST", { action: "curation_list", limit: 1000, industry: curIndustry || undefined }),
+      // Distinct industries present on the enriched list (with counts) for the filter dropdown.
+      send("/in-market", "POST", { action: "curation_industries" }),
     ]).then(function (rs) {
       var funnel = (rs[0] && rs[0].data && rs[0].data.funnel) || null;
       var health = (rs[0] && rs[0].data && rs[0].data.health) || null;
@@ -2632,9 +2636,10 @@
       var fleet = (rs[0] && rs[0].data && rs[0].data.fleet) || null;
       var cc = (rs[0] && rs[0].data && rs[0].data.cc) || null;
       var list = (rs[1] && rs[1].data && rs[1].data.curated) || [];
+      var industries = (rs[2] && rs[2].data && rs[2].data.industries) || [];
       curLastTotal = (funnel && funnel.total) || 0;
       curLastSyncMs = Date.now();   // first good answer from the backend → mark the link live
-      body.innerHTML = curationHtml(funnel, list, health, search, fleet, cc);
+      body.innerHTML = curationHtml(funnel, list, health, search, fleet, cc, industries);
       wireCuration(body, list);
       curPaintSync();               // paint the live pill right away (don't wait a full beat)
       curPollTimer = setInterval(curHeartbeat, CUR_BEAT_MS); // live ongoing updates + link heartbeat
@@ -2820,7 +2825,7 @@
     return box(head + '<div style="display:flex;flex-wrap:wrap;gap:11px">' + cards + "</div>");
   }
 
-  function curationHtml(funnel, list, health, search, fleet, cc) {
+  function curationHtml(funnel, list, health, search, fleet, cc, industries) {
     var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
 
     var head =
@@ -2831,8 +2836,16 @@
       "</div>" +
       '<div id="curStats">' + curStatsInner(f, health, search, fleet, cc) + "</div>";
 
+    // Industry filter — search the enriched decision-makers by industry. Each option shows how many
+    // are contactable (a real person + email) in that industry, so you can see where the depth is.
+    var indFilter = curIndustryFilter(industries);
+
     if (!list.length) {
-      return head + '<div class="empty" style="margin-top:14px">No decision-makers curated yet. The engine researches companies continuously (free: search, team pages, news, GitHub) and new leads appear here automatically as they come in. Hit <b>Research more now</b> to kick it.</div>';
+      return head + indFilter + '<div class="empty" style="margin-top:14px">' +
+        (curIndustry
+          ? "No enriched decision-makers in <b>" + esc(curIndustry) + "</b> yet — they appear here as the engine researches that industry. Clear the filter to see all industries."
+          : "No decision-makers curated yet. The engine researches companies continuously (free: search, team pages, news, GitHub) and new leads appear here automatically as they come in. Hit <b>Research more now</b> to kick it.") +
+        "</div>";
     }
 
     var rows = list.map(curationRow).join("");
@@ -2843,7 +2856,22 @@
         '<button class="btn btn-primary btn-sm" id="curEnroll" disabled>✓ Approve &amp; push to Email</button>' +
       "</div>";
 
-    return head + toolbar + '<div class="cur-list">' + rows + "</div>";
+    return head + indFilter + toolbar + '<div class="cur-list">' + rows + "</div>";
+  }
+
+  // The "search enriched by industry" control. Lists every industry present on the curated list with
+  // its contactable count, richest first; selecting one filters the list to that industry.
+  function curIndustryFilter(industries) {
+    industries = industries || [];
+    var opts = '<option value="">All industries</option>';
+    for (var i = 0; i < industries.length; i++) {
+      var it = industries[i];
+      var label = it.industry + " · " + (it.contactable || 0).toLocaleString() + " enriched";
+      opts += '<option value="' + esc(it.industry) + '"' + (it.industry === curIndustry ? " selected" : "") + ">" + esc(label) + "</option>";
+    }
+    var clear = curIndustry ? ' <button type="button" class="btn btn-ghost btn-sm" id="curIndClear">✕ clear</button>' : "";
+    return '<div class="cur-indfilter"><span class="muted">Search enriched by industry:</span>' +
+      '<select id="curIndustry" class="cur-ind-select">' + opts + "</select>" + clear + "</div>";
   }
 
   function curationRow(r) {
@@ -2889,6 +2917,17 @@
     if (refresh) refresh.addEventListener("click", function () {
       refresh.disabled = true; refresh.textContent = "Researching…";
       send("/in-market", "POST", { action: "curate_now", limit: 60 }).then(function () { renderCuration(); }).catch(function () { renderCuration(); });
+    });
+    // Industry filter: pick an industry → re-render the enriched list scoped to it.
+    var indSel = body.querySelector("#curIndustry");
+    if (indSel) indSel.addEventListener("change", function () {
+      curIndustry = indSel.value || "";
+      curPicks = {};            // selections don't carry across a filter change
+      renderCuration();
+    });
+    var indClear = body.querySelector("#curIndClear");
+    if (indClear) indClear.addEventListener("click", function () {
+      curIndustry = ""; curPicks = {}; renderCuration();
     });
     function sync() {
       var n = Object.keys(curPicks).length;
