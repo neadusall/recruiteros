@@ -15,18 +15,57 @@
  */
 
 import { claimResearchBatch, mergeCuratedRows, type CuratedProspect, type CurationStatus } from "../../../../lib/inmarket/curation";
-import { recordClaim, recordSubmit, recordHealth, recordSource } from "../../../../lib/inmarket/fleet";
+import { recordClaim, recordSubmit, recordHealth, recordSource, fleetStatus } from "../../../../lib/inmarket/fleet";
 import type { InMarketLead } from "../../../../lib/inmarket/index";
 import { ok, fail, body } from "../../../../lib/api";
 
 export const dynamic = "force-dynamic";
 
+/** Authed by the shared worker token, accepted as a Bearer header (workers) OR a ?token= query
+ *  param (so a human/monitor can just open the status URL in a browser). */
 function authed(req: Request): boolean {
   const token = process.env.INMARKET_WORKER_TOKEN;
   if (!token) return false; // disabled until a token is configured
-  const provided = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  const fromHeader = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  let fromQuery = "";
+  try { fromQuery = (new URL(req.url).searchParams.get("token") || "").trim(); } catch { /* bad url */ }
+  const provided = fromHeader || fromQuery;
   // length check first so a mismatch can't be timed; both must be non-empty and equal.
   return provided.length > 0 && provided.length === token.length && provided === token;
+}
+
+/**
+ * GET /api/in-market/worker?token=<INMARKET_WORKER_TOKEN>  → fleet + engine monitoring snapshot.
+ * One definitive, login-free read (token-protected) of: every worker box (online?, names/hour,
+ * jobs/min, totals, self-reported health), the Common-Crawl throttle-governor state (the binding
+ * constraint), the main engine heartbeat, the Reoon validator, the auto-enroll autopilot, and the
+ * headline funnel (researched / named / contactable / valid). Pollable by a monitor or openable in
+ * a browser — this is how we confirm definitively what's working and at what capacity.
+ */
+export async function GET(req: Request) {
+  if (!authed(req)) return fail("unauthorized", 401);
+  const [{ commonCrawlHealth }, { engineHealth }, { reoonStatus }, { autoEnrollStatus }, { curationFunnel }] = await Promise.all([
+    import("../../../../lib/inmarket/commonCrawl"),
+    import("../../../../lib/inmarket/accumulator"),
+    import("../../../../lib/inmarket/reoon"),
+    import("../../../../lib/inmarket/autoEnroll"),
+    import("../../../../lib/inmarket/curation"),
+  ]);
+  const [engine, reoon, autoEnroll, funnel] = await Promise.all([engineHealth(), reoonStatus(), autoEnrollStatus(), curationFunnel()]);
+  const fleet = fleetStatus();
+  const cc = commonCrawlHealth();
+  return ok({
+    at: new Date().toISOString(),
+    fleet,                       // per-box: online, namesPerHour, jobsPerMin, totalNamed, health
+    cc,                          // Common-Crawl index governor (the throttle constraint)
+    engine,                      // main box heartbeat (last cycle / curation tick)
+    reoon,                       // email validator (enabled, lastApplied)
+    autoEnroll,                  // populate-BD-Bulk autopilot (enabled, today/cap)
+    funnel: {                    // headline yield + pace
+      researched: funnel.total, named: funnel.named, contactable: funnel.byStatus?.contactable ?? 0,
+      validated: funnel.validated, invalid: funnel.invalid,
+    },
+  });
 }
 
 const STATUSES = new Set<CurationStatus>(["sourced", "named", "contactable", "queued", "enrolled", "suppressed"]);
