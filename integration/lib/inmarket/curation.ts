@@ -364,7 +364,12 @@ const LEASE_MS = 10 * 60 * 1000;
  * slots so concurrent workers get DIFFERENT work. Returns plain JSON jobs the worker can research.
  */
 export async function claimResearchBatch(limit: number, minScore = 10): Promise<Array<{ lead: PoolLeadLite; role: string }>> {
-  const cap = Math.min(Math.max(limit, 1), 1000);
+  // FAIR DISPATCH (even load across the fleet): hand every box the SAME modest slice regardless of
+  // what its batch is set to, so no single box grabs a huge chunk and races ahead. Each box claims a
+  // little, researches, comes back — work spreads evenly and the boxes produce at a similar rate.
+  // Enforced server-side, so it's uniform with no per-box config. Tune with INMARKET_CLAIM_FAIR_CAP.
+  const FAIR_CAP = Math.max(5, Number(process.env.INMARKET_CLAIM_FAIR_CAP) || 40);
+  const cap = Math.min(Math.max(limit, 1), FAIR_CAP);
   const { queryPool } = await import("./pool");
   const candidates = await queryPool({ limit: 6000 } as never, 6000).catch(() => [] as unknown[]);
   const store = await load();
