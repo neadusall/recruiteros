@@ -2838,6 +2838,20 @@
 
   // The distributed worker fleet — one clean card per machine (online dot, jobs/min, names/hr, total),
   // so you can watch output scale linearly as you add boxes. Repainted by the same 20s stats poll.
+  // TRUE per-box health, re-derived from the raw governor signals the box sends (NOT its own
+  // over-strict label). A box producing with a couple breaker trips or a routine ~5-min rest is the
+  // governor doing its job → GREEN. Yellow once trips climb / spacing maxes; red only on real
+  // persistent throttling or a failing loop. Re-derived here so current boxes (older code) read right.
+  function curBoxHealth(h) {
+    if (!h) return "idle";
+    var cc = h.cc || {};
+    var trips = cc.breakerTrips || 0;
+    var bad = (h.reasons || []).some(function (r) { return /failing|resting\s+\d{4,}/.test(r); }); // loop failing or a long (1000s+) rest
+    if (bad || trips >= 12) return "unhealthy";
+    if (trips >= 5 || (cc.spacingMs || 0) >= 20000) return "degraded";
+    return "healthy";
+  }
+
   function curFleetHtml(fleet) {
     if (!fleet) return "";
     var workers = fleet.workers || [];
@@ -2845,7 +2859,12 @@
     var pill = function (label, color) {
       return '<span style="font-size:10.5px;padding:2px 7px;border-radius:6px;background:' + color + '22;color:' + color + ';border:1px solid ' + color + '40;white-space:nowrap">' + esc(label) + "</span>";
     };
-    var fhColor = fleet.health ? hue(fleet.health) : "#7a7a88";
+    // Fleet dot = worst ONLINE box by the re-derived health (so a box just resting briefly doesn't
+    // paint the whole fleet red).
+    var rank = { unhealthy: 3, degraded: 2, healthy: 1, idle: 0 };
+    var fleetSt = "idle";
+    workers.forEach(function (w) { if (w.online) { var s = curBoxHealth(w.health); if (rank[s] > rank[fleetSt]) fleetSt = s; } });
+    var fhColor = hue(fleetSt);
     var summary = '<span class="muted" style="font-size:12px">' + (fleet.online || 0) + " online · " +
       (fleet.totalJobsPerMin || 0) + " jobs/min · <b style=\"color:#38e0a6\">" + (fleet.totalNamesPerHour || 0).toLocaleString() + "</b> names/hr</span>";
     var head = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:' + (workers.length ? "11px" : "0") + '">' +
@@ -2859,8 +2878,9 @@
     }
     var cards = workers.map(function (w) {
       var h = w.health || null;
-      // Dot colour reflects the box's reported HEALTH when known (CC governor + sources), else liveness.
-      var color = h ? hue(h.status) : (w.online ? "#38e0a6" : (w.lastSeenSec < 300 ? "#f5c451" : "#7a7a88"));
+      // Dot colour = the RE-DERIVED health (sane thresholds), not the box's over-strict self-label.
+      var st = h ? curBoxHealth(h) : (w.online ? "healthy" : (w.lastSeenSec < 300 ? "degraded" : "idle"));
+      var color = hue(st);
       var seen = w.online ? "live" : w.lastSeenSec < 90 ? w.lastSeenSec + "s ago" :
         w.lastSeenSec < 3600 ? Math.round(w.lastSeenSec / 60) + "m ago" : Math.round(w.lastSeenSec / 3600) + "h ago";
       var metric = function (v, l) {
@@ -2873,16 +2893,17 @@
       if (h) {
         var cc = h.cc || {};
         var ccLabel, ccColor;
-        if (cc.resting) { ccLabel = "CC resting"; ccColor = "#ff6b6b"; }
-        else if ((cc.breakerTrips || 0) >= 2) { ccLabel = "CC trips " + cc.breakerTrips; ccColor = "#ff6b6b"; }
-        else if ((cc.spacingMs || 0) >= 16000) { ccLabel = "CC paced " + Math.round(cc.spacingMs / 1000) + "s"; ccColor = "#f5c451"; }
-        else if ((cc.cooldownSec || 0) > 0) { ccLabel = "CC wait " + cc.cooldownSec + "s"; ccColor = "#f5c451"; }
+        // Recalibrated: a couple trips / a routine rest is fine (green). Yellow as trips climb or
+        // spacing maxes; red only when the index is really hammering this IP (many trips).
+        if ((cc.breakerTrips || 0) >= 12) { ccLabel = "CC throttled " + cc.breakerTrips; ccColor = "#ff6b6b"; }
+        else if ((cc.breakerTrips || 0) >= 5 || (cc.spacingMs || 0) >= 20000) { ccLabel = "CC paced" + (cc.spacingMs ? " " + Math.round(cc.spacingMs / 1000) + "s" : ""); ccColor = "#f5c451"; }
+        else if (cc.resting) { ccLabel = "CC resting"; ccColor = "#f5c451"; }
         else { ccLabel = "CC ok"; ccColor = "#38e0a6"; }
         var reasons = (h.reasons && h.reasons.length) ? h.reasons.join(" · ") : "all sources healthy";
         healthRow = '<div title="' + esc(reasons) + '" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:11px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06)">' +
           pill(ccLabel, ccColor) + pill("search " + (h.search || "idle"), hue(h.search)) + "</div>";
       }
-      return '<div style="flex:1 1 220px;min-width:200px;padding:13px 15px;border:1px solid ' + (h ? hue(h.status) + "33" : "rgba(255,255,255,.08)") + ';border-radius:12px;background:rgba(255,255,255,.025)">' +
+      return '<div style="flex:1 1 220px;min-width:200px;padding:13px 15px;border:1px solid ' + (h ? hue(st) + "33" : "rgba(255,255,255,.08)") + ';border-radius:12px;background:rgba(255,255,255,.025)">' +
         '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">' +
           '<span style="width:9px;height:9px;border-radius:50%;flex:none;background:' + color + ';box-shadow:0 0 9px ' + color + '"></span>' +
           '<b style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(w.id) + "</b>" +

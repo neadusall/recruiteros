@@ -72,16 +72,22 @@ function buildHealth() {
   const sh = searchHealth();
   const se = secEdgarHealth();
   // Reasons this box is anything less than fully healthy — the same signals the monitor thresholds watch.
+  // Calibrated so the GOVERNOR DOING ITS JOB reads as healthy. A couple of breaker trips and the
+  // occasional routine ~5-min rest are NORMAL gentle-pacing behaviour, not a problem — they're how the
+  // box stays under the throttle. Only PERSISTENT strain (a long rest, many trips, the loop failing)
+  // is actually unhealthy. A box that's producing with minor trips is green.
+  const restingLong = cc.resting && cc.restingForSec >= 600;            // >10 min = not a routine rest
   const reasons: string[] = [];
-  if (cc.resting) reasons.push(`common-crawl resting ${cc.restingForSec}s`);
-  if (cc.index.breakerTrips >= 2) reasons.push(`common-crawl breaker trips=${cc.index.breakerTrips}`);
-  if (cc.index.spacingMs >= 16_000) reasons.push(`common-crawl index spacing maxed (${cc.index.spacingMs}ms)`);
-  if (cc.index.cooldownForSec > 0) reasons.push(`common-crawl cooldown ${cc.index.cooldownForSec}s`);
-  if (sh.status === "throttled") reasons.push("search engines throttled");
-  if (se.resting) reasons.push(`sec-edgar resting ${se.restingForSec}s`);
+  if (restingLong) reasons.push(`common-crawl resting ${cc.restingForSec}s`);
+  if (cc.index.breakerTrips >= 8) reasons.push(`common-crawl breaker trips=${cc.index.breakerTrips}`);
+  if (cc.index.spacingMs >= 20_000) reasons.push(`common-crawl index spacing maxed (${cc.index.spacingMs}ms)`);
+  if (se.resting && se.restingForSec >= 600) reasons.push(`sec-edgar resting ${se.restingForSec}s`);
   if (stats.consecutiveFails >= 3) reasons.push(`main-server calls failing (${stats.consecutiveFails})`);
-  // Unhealthy = the box can't sustain its job right now; degraded = strain but still producing.
-  const unhealthy = cc.resting || stats.consecutiveFails >= 5 || (cc.index.breakerTrips >= 2 && sh.status === "throttled");
+  // Unhealthy = genuinely can't sustain work: the loop is failing, OR the index is hammering this IP
+  // (many trips WITH a long rest). Search-engine throttling no longer drags health (we run on CC now).
+  const unhealthy = stats.consecutiveFails >= 5
+    || (cc.index.breakerTrips >= 12 && cc.resting)
+    || (restingLong && cc.index.breakerTrips >= 8);
   const status: "healthy" | "degraded" | "unhealthy" = unhealthy ? "unhealthy" : reasons.length ? "degraded" : "healthy";
   const namedPerHour = uptimeSec > 30 ? Math.round(stats.namedTotal / (uptimeSec / 3600)) : 0;
   return {
