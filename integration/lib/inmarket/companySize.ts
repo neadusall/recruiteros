@@ -30,9 +30,10 @@ const UA = "RecruitersOS/1.0 (https://recruitersos.co)";
  *  market focus). Enforced on AUTHORITATIVE counts only — a company is excluded only when we
  *  can positively confirm it's too big, never on a heuristic estimate. */
 export const MAX_EMPLOYEES = 5_000;
-/** Lower bound of the target band. The pool is curated to 100-5,000 employees (mid-market):
- *  companies authoritatively confirmed below this are purged, same as oversized ones. */
-export const MIN_EMPLOYEES = 100;
+/** Lower bound of the target band. The pool is curated to 25-5,000 employees (SMB → mid-market):
+ *  companies authoritatively confirmed below this are purged, same as oversized ones. Floor set to
+ *  25 so funded/early SMBs (where the CEO/Head of People IS the recruiting-services buyer) are in. */
+export const MIN_EMPLOYEES = 25;
 
 interface SizeEntry { band: Band | null; count?: number; src: "wikidata" | "none"; at: number }
 type SizeMap = Record<string, SizeEntry>;

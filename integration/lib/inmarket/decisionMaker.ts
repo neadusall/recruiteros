@@ -35,7 +35,7 @@ import {
   type PeopleQuery,
   type PersonCandidate,
 } from "../signals/hiring";
-import { classifyTitle } from "../signals";
+import { classifyTitle, type JobFunction } from "../signals";
 import { companyAnchor } from "../signals/hiring/normalize";
 import { guessEmail, emailDomainFrom, splitFullName, type EmailGuess } from "./email";
 import { resolveCompanyDomain, type DomainResolution } from "./domain";
@@ -748,6 +748,103 @@ export interface DecisionMaker {
   emailSource?: "site_direct" | "site_pattern" | "guess" | "validated_external";
   /** Short, honest "why this person/title" line for the UI. */
   why: string;
+  /** ADDITIONAL company-level BUYERS found in the SAME free research pass (zero extra fetches): the
+   *  Head of People / CHRO and the C-suite (CEO / Founder / COO …). For a recruiting/BD pitch these
+   *  are the real economic buyers, so we surface them alongside the role-owner. Each is a fully-built,
+   *  named, emailable contact — curation emits one contactable row per entry, company-level deduped. */
+  others?: DecisionMaker[];
+}
+
+/* ------------------------------------------------------------------ */
+/* Company-level BUYER selection (People/HR head + C-suite)            */
+/*                                                                     */
+/* The role-owner answers "who manages THIS req"; the BUYER answers    */
+/* "who signs off on bringing in a recruiting partner". For 25–5,000-  */
+/* employee companies that's the Head of People / CHRO and the C-suite */
+/* (CEO/Founder first). We pick them out of the team roster the free   */
+/* research already scraped — no extra network — and build their email.*/
+/* ------------------------------------------------------------------ */
+
+/** Title shapes for the People/Talent buyer. Explicit (NOT classifyTitle's function, which sends a
+ *  spelled-out "Chief People Officer" to `executive`). Matches title OR headline text. */
+const HR_BUYER_RE = /(chief people|people officer|chief human|human resources|\bchro\b|\bvp\b[^,]{0,12}(people|talent|hr\b|human)|head of (people|talent|hr\b|human resources|people & culture|people and culture)|people operations|people ops|talent acquisition|director[^,]{0,8}(people|talent|hr\b))/i;
+/** Title shapes for the C-suite economic buyer. */
+const EXEC_BUYER_RE = /(chief executive|\bceo\b|founder|co-?founder|president|chief operating|\bcoo\b|chief technology|\bcto\b|chief financial|\bcfo\b|chief revenue|\bcro\b|chief marketing|\bcmo\b|chief product|\bcpo\b)/i;
+/** Rank CEO/Founder/President ahead of other C-levels for the first executive pick. */
+const TOP_EXEC_RE = /(chief executive|\bceo\b|founder|co-?founder|president)/i;
+
+/** Coarse seniority rank for ordering buyer candidates (higher = more senior). */
+function seniorityRank(c: PersonCandidate): number {
+  const order: Record<string, number> = { founder: 7, c_level: 6, vp: 5, director: 4, manager: 3, lead: 2, senior: 1, mid: 0, junior: -1, intern: -2 };
+  return order[classifyTitle(c.title || c.headline || "").seniority] ?? 0;
+}
+
+/** Build a fully-formed, emailable DecisionMaker for one buyer candidate, reusing the resolved
+ *  company domain (so the email is the free syntax guess + ranked alternates the validator walks). */
+function buildBuyer(c: PersonCandidate, fn: JobFunction, domain: string, deliverable: boolean | undefined): DecisionMaker | null {
+  const first = c.firstName ?? splitFullName(c.fullName).firstName;
+  const last = c.lastName ?? splitFullName(c.fullName).lastName;
+  if (!first || !domain) return null;
+  const email = guessEmail(first, last, domain);
+  if (!email.email) return null;
+  return {
+    fullName: c.fullName,
+    firstName: first,
+    lastName: last,
+    title: c.title ?? c.headline ?? "",
+    targetTitle: c.title ?? c.headline ?? "",
+    function: fn,
+    tier: "named",
+    score: 0,
+    via: c.source,
+    email,
+    domain,
+    emailDeliverable: deliverable,
+    emailSource: "guess",
+    why: fn === "people_hr"
+      ? "Head of People / Talent — owns the recruiting-partner decision"
+      : "C-suite — economic buyer for a recruiting engagement",
+  };
+}
+
+/** Pick the People/HR head + up to N C-suite buyers from the already-scraped team roster, deduped
+ *  against the role-owner and each other. `cap` = INMARKET_BUYERS_PER_COMPANY (default 3). */
+function selectBuyers(
+  pool: PersonCandidate[],
+  primaryName: string | undefined,
+  domain: string,
+  deliverable: boolean | undefined,
+): DecisionMaker[] {
+  if (!domain) return [];                                   // no domain → can't build an email
+  const cap = Math.max(0, Number(process.env.INMARKET_BUYERS_PER_COMPANY) || 3);
+  if (!cap) return [];
+  const used = new Set<string>();
+  if (primaryName) used.add(primaryName.toLowerCase());
+  const named = pool.filter((c) => c.fullName && c.fullName.trim().includes(" "));
+  const out: DecisionMaker[] = [];
+  const take = (c: PersonCandidate, fn: JobFunction) => {
+    if (out.length >= cap) return;
+    const k = c.fullName.toLowerCase();
+    if (used.has(k)) return;
+    const b = buildBuyer(c, fn, domain, deliverable);
+    if (!b) return;
+    used.add(k);
+    out.push(b);
+  };
+  // 1) People/Talent buyer — the single most senior match.
+  const hr = named
+    .filter((c) => HR_BUYER_RE.test(c.title || c.headline || ""))
+    .sort((a, b) => seniorityRank(b) - seniorityRank(a));
+  if (hr[0]) take(hr[0], "people_hr");
+  // 2) C-suite — CEO/Founder/President first, then other C-levels, by seniority.
+  const execs = named
+    .filter((c) => EXEC_BUYER_RE.test(c.title || c.headline || ""))
+    .sort((a, b) => {
+      const top = (TOP_EXEC_RE.test(b.title || b.headline || "") ? 1 : 0) - (TOP_EXEC_RE.test(a.title || a.headline || "") ? 1 : 0);
+      return top || seniorityRank(b) - seniorityRank(a);
+    });
+  for (const e of execs) take(e, "executive");
+  return out;
 }
 
 /**
@@ -780,13 +877,36 @@ export async function resolveDecisionMaker(
     if (domainRes?.domain) resolvedDomain = domainRes.domain;
   }
 
+  // ONE free research pass for the whole company: fetch the team roster + targeted naming ONCE,
+  // then score it for the role AND mine it for the company-level buyers (Head of People + C-suite).
+  // The team-page scrape returns the FULL leadership team regardless of the role, so the buyers are
+  // already in this pool — selecting them costs no extra network. The role titles + buyer titles are
+  // both pushed to the search/news/x-ray strategies so they surface the buyers by name too.
+  const liveGraph = freePeopleGraph({ domain: resolvedDomain || undefined });
+  let buyerPool: PersonCandidate[] = [];
+  try {
+    buyerPool = await liveGraph.search({
+      companyName: company,
+      companyDomain: resolvedDomain || undefined,
+      titles: [...target.candidateTitles, "Chief People Officer", "Head of Talent", "CHRO", "VP People", "CEO", "Founder", "COO"],
+      function: target.roleFunction,
+      seniorityFloor: target.seniorityFloor,
+      limit: 40,
+    });
+  } catch {
+    buyerPool = [];
+  }
+  // A static graph that just replays the already-fetched pool — so scoring the role for the primary
+  // owner runs over the SAME candidates with NO second fetch.
+  const cachedGraph: PeopleGraph = { id: "free_research", isConfigured: () => true, search: async () => buyerPool };
+
   let resolution: HiringManagerResolution | null = null;
   try {
     resolution = await resolveHiringManager(company, roleTitle, {
-      graphs: [freePeopleGraph({ domain: resolvedDomain || undefined })],
+      graphs: [cachedGraph],
       companyDomain: resolvedDomain || undefined,
       companySize: opts?.companySize,
-      maxCandidatesPerGraph: 25,
+      maxCandidatesPerGraph: 40,
       alternates: 2,
     });
   } catch {
@@ -870,11 +990,15 @@ export async function resolveDecisionMaker(
       emailConfirmed: emailConfirmed || undefined,
       emailSource,
       why: best.reasons[0] ?? `${target.rationale}`,
+      // The company-level buyers (Head of People + C-suite) mined from the SAME research pass.
+      others: selectBuyers(buyerPool, c.fullName, domain, emailConfirmed ? true : deliverable),
     };
   }
 
-  // No name resolved → honest title-level target (still actionable; email needs a name). We
-  // still carry the resolved domain so the read path / a later name find can build the email.
+  // No name resolved for the role OWNER → honest title-level target (still actionable; email needs a
+  // name). We still carry the resolved domain AND — crucially — still surface any company-level
+  // buyers the team-page scrape named, so a company never goes to zero contacts just because the
+  // specific role's line manager wasn't found.
   return {
     targetTitle,
     title: targetTitle,
@@ -884,5 +1008,6 @@ export async function resolveDecisionMaker(
     domain: domain || undefined,
     emailDeliverable: deliverable,
     why: target.rationale,
+    others: selectBuyers(buyerPool, undefined, domain, deliverable),
   };
 }

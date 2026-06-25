@@ -20,7 +20,7 @@
 import { hostname } from "os";
 import { createServer } from "http";
 import { resolveDecisionMaker } from "../lib/inmarket/decisionMaker";
-import { buildCuratedRow, type CuratedProspect } from "../lib/inmarket/curation";
+import { buildCuratedRow, buyerCurationId, type CuratedProspect } from "../lib/inmarket/curation";
 import { commonCrawlHealth } from "../lib/inmarket/commonCrawl";
 import { searchHealth } from "../lib/inmarket/searchHealth";
 import { secEdgarHealth } from "../lib/inmarket/secEdgar";
@@ -176,6 +176,13 @@ async function research(jobs: Job[]): Promise<CuratedProspect[]> {
           domain: lead.domain, companySize: lead.employeeCount, sourceUrl: lead.sourceUrl,
         });
         rows.push(buildCuratedRow(lead, role, dm, nowIso));
+        // Same per-company buyer multiplier as the in-process tick: emit the Head of People / C-suite
+        // contacts found in this research pass, company-keyed so they dedupe across the fleet.
+        for (const buyer of dm.others ?? []) {
+          if (!buyer.fullName) continue;
+          if (buyer.fullName.trim().toLowerCase() === (dm.fullName ?? "").trim().toLowerCase()) continue;
+          rows.push(buildCuratedRow(lead, role, buyer, nowIso, buyerCurationId(lead.company, buyer.fullName)));
+        }
       } catch { /* skip this company; keep the batch going */ }
     }
   }

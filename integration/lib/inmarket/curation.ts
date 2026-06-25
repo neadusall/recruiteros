@@ -108,6 +108,13 @@ function curationId(company: string, role: string): string {
   return ("cp_" + company + "_" + role).toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 120);
 }
 
+/** Stable, ROLE-INDEPENDENT id for a company-level BUYER (Head of People / C-suite). Keyed by
+ *  company + person so the same CEO surfaces ONCE no matter which open role's research found them —
+ *  the merge then dedupes them company-wide instead of creating a copy per role. */
+export function buyerCurationId(company: string, person: string): string {
+  return ("cp_" + company + "_buyer_" + person).toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 120);
+}
+
 function statusFor(dm: DecisionMaker): CurationStatus {
   // Contactable = a real name + a built email AND a domain that can actually receive mail. An
   // email guessed on a domain with no MX (emailDeliverable === false) is NOT contactable — it
@@ -231,6 +238,17 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
       if (dm.email?.email && dm.emailDeliverable !== false) contactable++;
       const row = buildCuratedRow(lead, role, dm, opts.nowIso);
       fresh.set(row.id, row);
+      // PER-COMPANY BUYER MULTIPLIER: the same research pass also named the Head of People / CHRO and
+      // the C-suite (the economic buyers for a recruiting engagement). Emit a contactable row for each,
+      // keyed by company+person so they dedupe company-wide (one CEO row, not one per open role).
+      for (const buyer of dm.others ?? []) {
+        if (!buyer.fullName) continue;
+        if (buyer.fullName.trim().toLowerCase() === (dm.fullName ?? "").trim().toLowerCase()) continue;
+        if (buyer.fullName) named++;
+        if (buyer.email?.email && buyer.emailDeliverable !== false) contactable++;
+        const brow = buildCuratedRow(lead, role, buyer, opts.nowIso, buyerCurationId(lead.company, buyer.fullName));
+        fresh.set(brow.id, brow);
+      }
     }
   }
   await Promise.all(Array.from({ length: concurrency }, worker));
@@ -244,9 +262,9 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
  * the distributed research workers (lib/inmarket worker script), so a row researched on a worker box
  * is byte-for-byte identical to one researched on the main server.
  */
-export function buildCuratedRow(lead: PoolLeadLite, role: string, dm: DecisionMaker, nowIso: string): CuratedProspect {
+export function buildCuratedRow(lead: PoolLeadLite, role: string, dm: DecisionMaker, nowIso: string, idOverride?: string): CuratedProspect {
   return {
-    id: curationId(lead.company, role),
+    id: idOverride ?? curationId(lead.company, role),
     company: lead.company,
     // carry the VERIFIED domain the resolver found (the lead usually had none) so the read path /
     // re-runs build emails without re-resolving.
