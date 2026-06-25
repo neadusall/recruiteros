@@ -112,6 +112,36 @@ const JOBFEED_PAGES_PER_CYCLE = envNum("RAPID_JOBS_PAGES_PER_CYCLE", 4); // dist
 // Dial up RAPID_JOBS_PAGE / RAPID_JOBS_PAGES_PER_CYCLE to push toward 200K+; down for a smaller plan.
 let jobFeedCursor = 0;
 
+// QUERY DIVERSITY — the lever that turns the same monthly request budget into FAR more NET-NEW
+// companies. Querying "Healthcare in United States" every cycle re-pulls the same top employers, so
+// the pool plateaus. Instead we rotate the paid feed across (WHAT × WHERE × DEPTH): each request hits
+// a different metro/sector/page, so the budget buys breadth instead of re-buying the same names.
+//   • WHAT  = the sector terms above PLUS high-volume role families (roles ALWAYS return employers in
+//             a metro, so they keep the per-request yield high where a narrow sector would come back empty).
+//   • WHERE = the top US job metros + a nationwide pass, so we cover local employers the US-wide query buries.
+//   • DEPTH = paginate deeper over successive visits to the same (what, where), mining past page 1.
+const JOBFEED_ROLE_TERMS: string[] = [
+  "Software Engineer", "Sales Manager", "Account Executive", "Registered Nurse", "Project Manager",
+  "Marketing Manager", "Accountant", "Operations Manager", "Customer Success Manager", "Data Analyst",
+  "Product Manager", "Human Resources Manager", "Recruiter", "Financial Analyst", "Mechanical Engineer",
+  "Business Development Manager", "Controller", "General Manager", "Director of Operations", "Logistics Manager",
+  "Administrative Assistant", "Warehouse Manager", "Field Service Technician", "Office Manager", "Account Manager",
+];
+// What we search for: sectors (breadth) + roles (yield). Combined into one rotation space.
+const JOBFEED_WHAT: string[] = [...INDUSTRIES, ...JOBFEED_ROLE_TERMS];
+// Where: top US metros by hiring volume + a nationwide pass (so big national employers still flow in).
+const JOBFEED_GEOS: string[] = [
+  "United States",
+  "New York, NY", "Los Angeles, CA", "Chicago, IL", "Dallas, TX", "Houston, TX", "Washington, DC",
+  "Miami, FL", "Philadelphia, PA", "Atlanta, GA", "Boston, MA", "Phoenix, AZ", "San Francisco, CA",
+  "Seattle, WA", "Detroit, MI", "Minneapolis, MN", "San Diego, CA", "Tampa, FL", "Denver, CO",
+  "St. Louis, MO", "Charlotte, NC", "Orlando, FL", "San Antonio, TX", "Portland, OR", "Sacramento, CA",
+  "Pittsburgh, PA", "Austin, TX", "Las Vegas, NV", "Cincinnati, OH", "Kansas City, MO", "Columbus, OH",
+  "Indianapolis, IN", "Cleveland, OH", "Nashville, TN", "San Jose, CA", "Raleigh, NC", "Salt Lake City, UT",
+];
+const JOBFEED_DEPTH = envNum("RAPID_JOBS_DEPTH", 4);   // how many page-blocks deep we mine each (what, where) before moving on
+let jobFeedGeoCursor = 0;                              // advances WHERE on its own clock so combos don't lock-step with WHAT
+
 /* ------------------------------------------------------------------ */
 /* Liveness heartbeat — so a silent death is detectable                */
 /* ------------------------------------------------------------------ */
@@ -228,9 +258,17 @@ async function runCycleInner(): Promise<void> {
   //    RAPID_JOBS_PAGES_PER_CYCLE so you tune it to your plan's monthly request quota.
   if (jobFeedEnabled()) {
     for (let p = 0; p < JOBFEED_PAGES_PER_CYCLE; p++) {
-      const q = INDUSTRIES[jobFeedCursor % INDUSTRIES.length];
+      // Walk WHAT every step; advance WHERE one notch each full lap of WHAT (co-prime-ish strides so
+      // (what, where) pairs don't repeat for a long time); deepen the page-block once we've toured the
+      // whole what×where grid. Each distinct shard = a different slice of the market for the same spend.
+      const what = JOBFEED_WHAT[jobFeedCursor % JOBFEED_WHAT.length];
+      if (jobFeedCursor > 0 && jobFeedCursor % JOBFEED_WHAT.length === 0) jobFeedGeoCursor++;
+      const where = JOBFEED_GEOS[jobFeedGeoCursor % JOBFEED_GEOS.length];
+      const depth = Math.floor(jobFeedCursor / (JOBFEED_WHAT.length * JOBFEED_GEOS.length)) % JOBFEED_DEPTH;
       jobFeedCursor++;
-      try { await runJobFeedSourcing({ query: q, location: "United States", limit: JOBFEED_PAGE }); }
+      // "what in where" is JSearch's native query shape; offset paginates into deeper page-blocks.
+      const query = where === "United States" ? what : `${what} in ${where}`;
+      try { await runJobFeedSourcing({ query, location: where, limit: JOBFEED_PAGE, offset: depth * JOBFEED_PAGE }); }
       catch { break; }
     }
   }

@@ -718,6 +718,41 @@ export function hiringNeedsBreakdown(
     .sort((a, b) => b.companies - a.companies);
 }
 
+/**
+ * ON-DEMAND PAID-FEED FRESHEN. Selecting an industry/role/company should actually PULL that slice
+ * from the paid job feed (JSearch) — not just filter what the background rotation happened to have.
+ * We fire a small live pull for the exact selection and merge it into the shared pool, so the very
+ * next pool read in this same search includes those freshest employers. Throttled per query-key
+ * (10-min TTL, in-memory) so rapid clicking can never burn the monthly request budget; no-op when the
+ * feed isn't configured. The background rotation still does the heavy volume — this is the "it's
+ * pulling THIS industry right now" responsiveness on top.
+ */
+const lastLiveJobFeed = new Map<string, number>();
+const LIVE_JOBFEED_TTL_MS = 10 * 60 * 1000;
+function jobFeedQueryFor(q: InMarketQuery): string | null {
+  if (q.companyName?.trim()) return q.companyName.trim();
+  if (q.roleQuery?.trim()) return q.roleQuery.trim();
+  if (q.industries?.length) return q.industries.length === 1 ? q.industries[0] : q.industries.slice(0, 3).join(" OR ");
+  if (q.query?.trim()) return q.query.trim();
+  return null;
+}
+async function freshenFromJobFeed(q: InMarketQuery): Promise<number> {
+  const term = jobFeedQueryFor(q);
+  if (!term) return 0;
+  try {
+    const { jobFeedEnabled, runJobFeedSourcing } = await import("./jobFeed");
+    if (!jobFeedEnabled()) return 0;
+    const key = term.toLowerCase();
+    const now = Date.now();
+    if (now - (lastLiveJobFeed.get(key) ?? 0) < LIVE_JOBFEED_TTL_MS) return 0; // pulled recently → skip (budget)
+    lastLiveJobFeed.set(key, now);
+    // Small slice (≈3 requests) for snappy responsiveness; merged into the pool for this + future reads.
+    return await runJobFeedSourcing({ query: term, location: "United States", limit: 30 });
+  } catch {
+    return 0;
+  }
+}
+
 export async function searchInMarket(
   q: InMarketQuery,
   nowIso: string,
@@ -744,6 +779,9 @@ export async function searchInMarket(
     const { ensureAccumulator } = await import("./accumulator");
     const { queryPool, mergeIntoPool, poolStats } = await import("./pool");
     ensureAccumulator(); // start the background collector (no-op once running)
+    // Live paid-feed pull for THIS selection (throttled, best-effort) BEFORE we read the pool, so the
+    // freshest employers for the chosen industry/role are merged in and show up in this same search.
+    await freshenFromJobFeed(q);
     const stats = await poolStats().catch(() => undefined);
 
     // Pull the FULL matching set from the pool so `pulled` reflects the true total
