@@ -15,7 +15,7 @@ set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAIN_URL="${WORKER_MAIN_URL:-}"
 TOKEN="${WORKER_TOKEN:-}"
-BATCH="${WORKER_BATCH:-120}"
+BATCH="${WORKER_BATCH:-40}"   # smaller default: under the gentle 6s Common-Crawl pacing a 120-job batch is a ~12-min cycle (looks "stuck"); 40 = ~4-min cycles → responsive, even work spread, same throughput
 CONCURRENCY="${WORKER_CONCURRENCY:-4}"   # gentle, sustainable default — slow & steady so a box stays under the throttle instead of tripping the breaker and resting (raise on bigger boxes only if the dashboard stays green)
 HEALTH_PORT="${WORKER_HEALTH_PORT:-8787}"   # local /health endpoint ON by default so the box is observable
 HEALTH_TOKEN="${WORKER_HEALTH_TOKEN:-}"     # set one if :$HEALTH_PORT is reachable from outside the box
@@ -41,9 +41,13 @@ echo "[worker-setup] node $(node -v)"
 echo "[worker-setup] installing dependencies (integration/)..."
 ( cd "$DIR/integration" && npm install --no-audit --no-fund >/dev/null 2>&1 ) || { echo "ERROR: npm install failed in integration/"; exit 1; }
 
-# 3) Free IPv6 /64 egress rotation for THIS box (its own prefix = its own quota).
-if [ -f "$DIR/setup-egress.sh" ]; then
-  echo "[worker-setup] configuring this box's IPv6 /64 egress rotation..."
+# 3) OPTIONAL IPv6 /64 egress rotation — OFF by default. On some hosts (e.g. Ubuntu 26.04) the /64
+#    isn't actually routable, so every research fetch stalls and the worker hangs after sourcing
+#    ("sourced … " then silence). Each box already has its OWN primary IP = its own per-IP quota,
+#    which is the real win of horizontal scale — the /64 rotation was just a bonus. Opt in with
+#    WORKER_EGRESS_IPV6=1 ONLY after confirming the box's IPv6 egress actually works.
+if [ "${WORKER_EGRESS_IPV6:-0}" = "1" ] && [ -f "$DIR/setup-egress.sh" ]; then
+  echo "[worker-setup] configuring this box's IPv6 /64 egress rotation (opt-in)..."
   bash "$DIR/setup-egress.sh" 256 >/dev/null 2>&1 || echo "[worker-setup] (egress setup skipped/failed — worker still runs on the default route)"
 fi
 
