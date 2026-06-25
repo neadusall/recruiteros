@@ -41,7 +41,7 @@ const NEG_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const clampInt = (v: string | undefined, def: number, lo: number, hi: number): number =>
   Math.min(Math.max(Number.isFinite(Number(v)) && v ? Math.round(Number(v)) : def, lo), hi);
 const IDX_CONCURRENCY = clampInt(process.env.CC_INDEX_CONCURRENCY, 1, 1, 3);     // hard cap (1 = serialized)
-const IDX_MIN_INTERVAL_MS = clampInt(process.env.CC_INDEX_MIN_INTERVAL_MS, 6_000, 500, 30_000); // pacing floor — gentle by default (~1 index hit / 6s) so a box stays UNDER the throttle and doesn't trip the breaker. Slow & steady beats fast & resting. Override with CC_INDEX_MIN_INTERVAL_MS.
+const IDX_MIN_INTERVAL_MS = clampInt(process.env.CC_INDEX_MIN_INTERVAL_MS, 7_500, 500, 30_000); // pacing floor — ~1 index hit / 7.5s, deliberately ~15-20% UNDER the rate where the index starts tripping the breaker (observed ~6s). Headroom keeps the IP clean with ZERO rest-downtime. Slow & steady beats fast & resting. Override with CC_INDEX_MIN_INTERVAL_MS.
 const IDX_MAX_INTERVAL_MS = clampInt(process.env.CC_INDEX_MAX_INTERVAL_MS, 30_000, 2_000, 120_000); // adaptive ceiling
 const IDX_MAX_COOLDOWN_MS = 60_000;  // cap on a single Retry-After / throttle pause
 

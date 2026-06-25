@@ -2765,18 +2765,40 @@
       "</div>";
   }
 
-  // The live "N / 5,000 valid emails today" target bar — the headline consistency metric.
-  function curDailyHtml(d) {
-    if (!d) return "";
+  // The live "N / 5,000 valid emails today" bar + an HONEST, fleet-grounded projection. No inflation:
+  // we show (1) what's REAL today, (2) today's pace extrapolated, and (3) the running fleet's true
+  // capacity = measured names/hr × the REALIZED name→verified rate (not a hoped-for one).
+  function curDailyHtml(f, fleet) {
+    var d = f && f.daily; if (!d) return "";
     var target = d.target || 5000;
-    var pct = Math.min(100, Math.round(((d.validToday || 0) / target) * 100));
-    var pace = d.onPace ? "🟢 on pace" : "🟡 below pace";
+    var validToday = d.validToday || 0;
+    var pct = Math.min(100, Math.round((validToday / target) * 100));
+
+    // Realized conversion (conservative — based on what's ACTUALLY been verified, not a guess).
+    var validPerNamed = (f.named > 0) ? (f.validated / f.named) : 0;
+    var namesHr = (fleet && fleet.totalNamesPerHour) || 0;
+    var fleetDay = Math.round(namesHr * 24 * validPerNamed);   // what the boxes running NOW can sustain
+    var paceDay = d.projectedValid || 0;                       // today's actual pace → 24h
+
+    // True fleet status — boxes actually producing vs. just connected.
+    var workers = (fleet && fleet.workers) || [];
+    var producing = workers.filter(function (w) { return (w.namesPerHour || 0) > 0 || (w.online && (w.totalNamed || 0) > 0); }).length;
+    var boxes = workers.length;
+    var pace = fleetDay >= target ? '<span style="color:#38e0a6">🟢 on pace for ' + target.toLocaleString() + "</span>"
+      : '<span style="color:#f5c451">🟡 below ' + target.toLocaleString() + " at this rate</span>";
+
     return '<div style="margin:10px 0;padding:12px 14px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(124,92,255,.06)">' +
       '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:13px;margin-bottom:8px">' +
-        '<span><b style="font-size:17px">' + (d.validToday || 0).toLocaleString() + "</b> / " + target.toLocaleString() + ' <span class="muted">valid emails today</span></span>' +
-        '<span class="muted">' + (d.contactableToday || 0).toLocaleString() + " contactable · projected " + (d.projectedValid || 0).toLocaleString() + "/day · " + pace + "</span>" +
+        '<span><b style="font-size:17px">' + validToday.toLocaleString() + "</b> / " + target.toLocaleString() + ' <span class="muted">verified emails today</span></span>' +
+        '<span class="muted">' + producing + "/" + boxes + " boxes producing · <b style=\"color:#38e0a6\">" + namesHr.toLocaleString() + "</b> names/hr</span>" +
       "</div>" +
       '<div style="height:8px;border-radius:5px;background:rgba(255,255,255,.08);overflow:hidden"><i style="display:block;height:100%;width:' + pct + '%;background:linear-gradient(90deg,#7c5cff,#38e0a6)"></i></div>' +
+      '<div class="muted" style="font-size:11.5px;line-height:1.6;margin-top:9px">' +
+        "Today's pace → <b>~" + paceDay.toLocaleString() + "/day</b>  ·  " +
+        "Fleet capacity now → <b style=\"color:#38e0a6\">~" + fleetDay.toLocaleString() + "/day</b> " +
+        "<span style=\"opacity:.8\">(" + namesHr.toLocaleString() + " names/hr × " + Math.round(validPerNamed * 100) + "% verified) · " + pace + "</span>" +
+        '<br><span style="opacity:.7">Straight read: this is the rate of the boxes running right now — it climbs as the email-pattern cache warms and Reoon catches up, and dips when boxes rest. Not inflated; it\'s the realized conversion.</span>' +
+      "</div>" +
     "</div>";
   }
 
@@ -2807,7 +2829,7 @@
       return '<div class="cur-mini"><span>' + esc(imSignalLabel(x.signalType)) + '</span><b>' + x.contactable.toLocaleString() + "</b><span class=\"muted\">/ " + x.total.toLocaleString() + "</span></div>";
     }).join("");
     return curEngineLine(health, search, cc, f.namedLastHour) +
-      curDailyHtml(f.daily) +
+      curDailyHtml(f, fleet) +
       '<div class="cur-funnel">' + funnelRow + "</div>" +
       (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
       ((f.validated || f.invalid || f.catchAll) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + (f.catchAll ? '<span class="cur-mini"><span class="cur-catchall">~ ' + f.catchAll.toLocaleString() + " catch-all</span></span>" : "") + "</div>" : "") +
