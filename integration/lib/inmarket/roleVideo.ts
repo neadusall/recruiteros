@@ -28,6 +28,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { captureRoleShot, renderScrollVideoAtDuration, shotKey, shotsDir, type ShotRequest } from "./roleShot";
 import { loadSnapshot, debouncedSaver } from "../db";
+import { s3Enabled, s3Put, s3Get, s3Head } from "./assetStore";
 
 /* ------------------------------------------------------------------ */
 /* Public shapes                                                       */
@@ -171,6 +172,11 @@ export async function saveClip(
   const id = randomUUID();
   await mkdir(clipsDir(), { recursive: true });
   await writeFile(clipPath(id, ext), data);
+  if (s3Enabled()) {
+    // Mirror the source clip to object storage. Clips are few (recorded once, reused across many
+    // sends) so we keep the local copy too — the in-flight render consumes it without a round-trip.
+    try { await s3Put(clipS3Key(id, ext), data, mime); } catch { /* keep local-only on failure */ }
+  }
   const meta: ClipMeta = {
     id, workspaceId, ext, mime, bytes: data.length,
     label: opts.label?.slice(0, 120), at: new Date().toISOString(),
@@ -193,6 +199,11 @@ export async function readClipBytes(id: string): Promise<{ buf: Buffer; mime: st
   try {
     return { buf: await readFile(clipPath(id, meta.ext)), mime: meta.mime };
   } catch {
+    // Local copy evicted after S3 offload — pull from object storage.
+    if (s3Enabled()) {
+      const buf = await s3Get(clipS3Key(id, meta.ext));
+      if (buf) return { buf, mime: meta.mime };
+    }
     return null;
   }
 }
@@ -276,7 +287,51 @@ export async function readCompositeAsset(key: string, fmt: "gif" | "mp4"): Promi
   try {
     return await readFile(compositePath(key, fmt));
   } catch {
+    // Local copy evicted after S3 offload — serve from object storage.
+    if (s3Enabled()) return s3Get(compositeS3Key(key, fmt));
     return null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Object-storage offload (S3-compatible; inert until ROS_S3_* set)    */
+/* ------------------------------------------------------------------ */
+
+function compositeS3Key(key: string, fmt: "gif" | "mp4"): string { return `videos/${key}.${fmt}`; }
+function clipS3Key(id: string, ext: string): string { return `clips/${id}.${ext}`; }
+const MIME_BY_FMT: Record<"gif" | "mp4", string> = { gif: "image/gif", mp4: "video/mp4" };
+
+/** Dedup/exists check spanning the local render cache AND object storage. */
+async function compositeExists(key: string, fmt: "gif" | "mp4"): Promise<boolean> {
+  if (await fileExists(compositePath(key, fmt))) return true;
+  if (s3Enabled()) return s3Head(compositeS3Key(key, fmt));
+  return false;
+}
+
+/** After a successful render, push the two served artifacts to object storage and drop the local
+ *  copies — so the app disk stays flat regardless of how many recipients are rendered. On upload
+ *  failure the local copy is kept (the read path still finds it), so nothing is ever lost. */
+async function publishComposite(key: string, files: VideoResult["files"]): Promise<void> {
+  if (!s3Enabled()) return;
+  for (const fmt of ["mp4", "gif"] as const) {
+    if (!files?.[fmt]) continue;
+    const local = compositePath(key, fmt);
+    try {
+      await s3Put(compositeS3Key(key, fmt), await readFile(local), MIME_BY_FMT[fmt]);
+      await unlink(local).catch(() => {});
+    } catch { /* keep the local copy on failure */ }
+  }
+}
+
+/** Ensure the source clip is on local disk so ffmpeg (which can't read S3) can consume it. */
+async function materializeClip(clip: ClipMeta): Promise<void> {
+  const local = clipPath(clip.id, clip.ext);
+  if (await fileExists(local)) return;
+  if (!s3Enabled()) return;
+  const buf = await s3Get(clipS3Key(clip.id, clip.ext));
+  if (buf) {
+    await mkdir(clipsDir(), { recursive: true });
+    await writeFile(local, buf);
   }
 }
 
@@ -746,10 +801,10 @@ export async function getOrStartVideo(
   const pip = normalizePip(pipIn);
   const key = videoKey(req.company, req.roleTitle, clipId, pip, opts?.firstName, opts?.durationSec);
 
-  if (!opts?.force && (await fileExists(compositePath(key, "gif")))) {
+  if (!opts?.force && (await compositeExists(key, "gif"))) {
     const cache = await ensureVideos();
     const hit = cache.get(key);
-    return hit ? stripRow(hit) : { ok: true, status: "ready", key, files: { gif: true, mp4: await fileExists(compositePath(key, "mp4")) }, at: new Date().toISOString() };
+    return hit ? stripRow(hit) : { ok: true, status: "ready", key, files: { gif: true, mp4: await compositeExists(key, "mp4") }, at: new Date().toISOString() };
   }
   if (inflight.has(key)) {
     return { ok: false, status: "composing", key, reason: "composite in progress", at: new Date().toISOString() };
@@ -771,8 +826,8 @@ export async function composeRoleVideo(
   const key = videoKey(req.company, req.roleTitle, clipId, pip, opts?.firstName, opts?.durationSec);
   const now = () => new Date().toISOString();
 
-  if (!opts?.force && (await fileExists(compositePath(key, "gif")))) {
-    return { ok: true, status: "ready", key, files: { gif: true, mp4: await fileExists(compositePath(key, "mp4")) }, at: now() };
+  if (!opts?.force && (await compositeExists(key, "gif"))) {
+    return { ok: true, status: "ready", key, files: { gif: true, mp4: await compositeExists(key, "mp4") }, at: now() };
   }
 
   let result: VideoResult;
@@ -783,6 +838,7 @@ export async function composeRoleVideo(
     } else if (!(await ffmpegAvailable())) {
       result = { ok: false, status: "no_ffmpeg", key, reason: "ffmpeg not installed (set FFMPEG_PATH or apt-get install ffmpeg)", at: now() };
     } else {
+      await materializeClip(clip); // ffmpeg needs a local source clip; re-fetch from S3 if evicted
       // Background = the FULL natural-scroll MP4 from roleShot (the .gif is now the short email
       // teaser with a play button, so it must NOT be used here). Reuse it when on disk; only run
       // the slow Playwright capture when it's missing or a re-render is forced.
@@ -823,6 +879,7 @@ export async function composeRoleVideo(
           if (nm) introFace = await buildLipSyncedFace(clip, introAudio, nm, opts?.voiceId).catch(() => null);
         }
         const { files } = await compose(key, bgPath, clip, pip, introAudio, introFace);
+        await publishComposite(key, files); // offload to object storage; frees local disk
         result = { ok: true, status: "ready", key, files, pageUrl, at: now() };
       } else {
         result = result! ?? { ok: false, status: "no_shot", key, reason: "no verified page-scroll GIF for this role", at: now() };

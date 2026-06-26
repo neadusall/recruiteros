@@ -788,11 +788,20 @@ function applyShotFilter(leads: InMarketLead[], q: InMarketQuery): InMarketLead[
   return leads.filter((l) => !!l.hasShot === q.hasScreenshot);
 }
 
+/** Screenshot coverage over a matched set: how many companies carry a verified job-page screenshot,
+ *  and the % — so the UI can show "📸 32% have a screenshot" right on the filter. Computed on the
+ *  STAMPED (pre-shot-filter) set so the % reflects true coverage, not the post-filter view. */
+export function shotCoverage(leads: InMarketLead[]): { withShot: number; total: number; pct: number } {
+  const total = leads.length;
+  const withShot = leads.reduce((n, l) => n + (l.hasShot ? 1 : 0), 0);
+  return { withShot, total, pct: total ? Math.round((withShot / total) * 1000) / 10 : 0 };
+}
+
 export async function searchInMarket(
   q: InMarketQuery,
   nowIso: string,
   workspaceId?: string,
-): Promise<{ leads: InMarketLead[]; pulled: number; warnings: string[]; stats?: unknown; signalBreakdown?: Array<{ signalType: string; count: number }>; needsBreakdown?: Array<{ function: JobFunction; label: string; companies: number; roles: number }> }> {
+): Promise<{ leads: InMarketLead[]; pulled: number; warnings: string[]; stats?: unknown; signalBreakdown?: Array<{ signalType: string; count: number }>; needsBreakdown?: Array<{ function: JobFunction; label: string; companies: number; roles: number }>; shotStats?: { withShot: number; total: number; pct: number } }> {
   const limit = Math.min(Math.max(q.limit ?? 25, 1), 1000);
 
   // Per-user suppression: hide companies the workspace has already taken into Prospects,
@@ -822,22 +831,24 @@ export async function searchInMarket(
     // stamp the 📸 badge + honor the "has screenshot" filter on the full matched set (honest counts).
     const { capturedKeySet } = await import("./roleShot");
     const shotKeys = await capturedKeySet().catch(() => new Set<string>());
-    const finalize = (arr: InMarketLead[]) => applyShotFilter(stampShots(arr, shotKeys), q);
 
     // Pull the FULL matching set from the pool so `pulled` reflects the true total
     // available for this industry (which grows daily as the accumulator fills the pool),
     // even though we only display `limit`. Already-in-Prospects companies are FLAGGED, not
     // dropped, so a workspace that has worked many companies still sees the full pool (and
     // the count never falls under the live-fallback threshold just from suppression).
-    const pooledAll = finalize(fresh(await queryPool(q, 10000)));
+    // Stamp 📸 status on the FULL set (so coverage % is honest), then apply the has-screenshot filter.
+    const pooledStamped = stampShots(fresh(await queryPool(q, 10000)), shotKeys);
+    const pooledAll = applyShotFilter(pooledStamped, q);
     if (pooledAll.length >= 24) {
-      return { leads: pooledAll.slice(0, limit), pulled: pooledAll.length, warnings: [], stats, signalBreakdown: signalBreakdown(pooledAll), needsBreakdown: hiringNeedsBreakdown(pooledAll) };
+      return { leads: pooledAll.slice(0, limit), pulled: pooledAll.length, warnings: [], stats, signalBreakdown: signalBreakdown(pooledAll), needsBreakdown: hiringNeedsBreakdown(pooledAll), shotStats: shotCoverage(pooledStamped) };
     }
     // Pool thin for this query → live collect, return it, and grow the pool.
     const live = await collectLeads(q, nowIso, Math.max(limit, 200));
     void mergeIntoPool(live).catch(() => {});
-    const merged = finalize(fresh(dedupeLeads([...pooledAll, ...live])));
-    return { leads: merged.slice(0, limit), pulled: merged.length, warnings: [], stats, signalBreakdown: signalBreakdown(merged), needsBreakdown: hiringNeedsBreakdown(merged) };
+    const mergedStamped = stampShots(fresh(dedupeLeads([...pooledStamped, ...live])), shotKeys);
+    const merged = applyShotFilter(mergedStamped, q);
+    return { leads: merged.slice(0, limit), pulled: merged.length, warnings: [], stats, signalBreakdown: signalBreakdown(merged), needsBreakdown: hiringNeedsBreakdown(merged), shotStats: shotCoverage(mergedStamped) };
   } catch (err) {
     // Pool/accumulator unavailable → pure live fallback (original behavior).
     try {
