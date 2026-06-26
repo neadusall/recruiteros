@@ -31,6 +31,7 @@ const PROVIDER = (): string => (process.env.RAPID_JOBS_PROVIDER || "jsearch").to
 interface RawJob {
   // JSearch
   employer_name?: string; employer_website?: string | null; job_title?: string; job_apply_link?: string;
+  apply_options?: Array<{ publisher?: string; apply_link?: string; is_direct?: boolean }> | null;
   job_country?: string; job_city?: string; job_state?: string; job_posted_at_datetime_utc?: string; industry?: string;
   // Active Jobs DB
   organization?: string; organization_url?: string | null; title?: string; url?: string; date_posted?: string;
@@ -63,6 +64,23 @@ function companyId(company: string): string {
   return `jobfeed_${company.toLowerCase().replace(/[^a-z0-9]+/g, "")}`.slice(0, 120);
 }
 
+/** Hosts that bot-wall a headless capture — roleShot can't screenshot these, so don't feed them. */
+const AGG_RE = /(^|\.)(linkedin|indeed|glassdoor|ziprecruiter|monster|dice|simplyhired|jooble|adzuna|lensa|talent\.com)\./i;
+function hostOfUrl(u: string): string {
+  try { return new URL(u).hostname; } catch { return ""; }
+}
+/** Pick the best posting URL to hand roleShot. JSearch's primary `job_apply_link` is a
+ *  LinkedIn/aggregator URL ~half the time (those bot-wall, so they can't be captured). The
+ *  `apply_options` array usually also carries a DIRECT company/ATS link — prefer that. */
+function bestApplyUrl(j: RawJob): string | undefined {
+  const links = (Array.isArray(j.apply_options) ? j.apply_options : [])
+    .map((o) => (typeof o?.apply_link === "string" ? { url: o.apply_link.trim(), direct: !!o.is_direct } : null))
+    .filter((x): x is { url: string; direct: boolean } => !!x && /^https?:\/\//.test(x.url));
+  const nonAgg = links.filter((l) => !AGG_RE.test(hostOfUrl(l.url)));
+  const pick = nonAgg.find((l) => l.direct) ?? nonAgg[0] ?? links.find((l) => l.direct) ?? links[0];
+  return pick?.url || field(j, "job_apply_link", "url") || undefined;
+}
+
 /** PURE normalizer (no network) — US-filter + group-by-company + hiring-velocity score + domain capture. */
 export function mapJobsToLeads(arr: RawJob[], category?: string): InMarketLead[] {
   const byCompany = new Map<string, { company: string; location: string; domain?: string; roles: Array<{ title: string; postedAt?: string; location?: string; url?: string }> }>();
@@ -75,7 +93,7 @@ export function mapJobsToLeads(arr: RawJob[], category?: string): InMarketLead[]
     const e = byCompany.get(key) ?? { company, location: locationOf(j), domain: domainOf(j), roles: [] };
     if (!e.domain) e.domain = domainOf(j);
     if (e.roles.length < MAX_ROLES_PER_COMPANY) {
-      e.roles.push({ title, postedAt: field(j, "job_posted_at_datetime_utc", "date_posted") || undefined, location: locationOf(j), url: field(j, "job_apply_link", "url") || undefined });
+      e.roles.push({ title, postedAt: field(j, "job_posted_at_datetime_utc", "date_posted") || undefined, location: locationOf(j), url: bestApplyUrl(j) });
     }
     byCompany.set(key, e);
   }
