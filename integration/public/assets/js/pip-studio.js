@@ -49,13 +49,14 @@
   }
 
   /* ---------------- persistence ---------------- */
-  var LS = { style: "ros_pip_style", clip: "ros_pip_clip", results: "ros_pip_results", filter: "ros_pip_filter" };
+  var LS = { style: "ros_pip_style", clip: "ros_pip_clip", results: "ros_pip_results", filter: "ros_pip_filter", dur: "ros_pip_dur" };
   function lsGet(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 
   var state = {
     pip: Object.assign({ corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#7c5cff", radiusPct: 18 }, lsGet(LS.style, {})),
     clipId: lsGet(LS.clip, null),
+    durationSec: lsGet(LS.dur, 0),    // 0 = auto-match the recorded clip length; else force N seconds of page scroll
     shots: [],
     results: lsGet(LS.results, {}),   // { roleKey: { videoKey, company, roleTitle } }
     brand: null,                      // workspace brand kit (loaded from /settings)
@@ -294,6 +295,11 @@
   bindRange("border", "borderPx", "borderV");
   bindRange("radius", "radiusPct");
   $("borderColor").oninput = function () { state.pip.borderColor = this.value; saveStyle(); renderPip(); };
+  // Scroll length: 0 = auto-match the recorded clip; otherwise force the page scroll to exactly N seconds.
+  if ($("scrollLen")) {
+    $("scrollLen").value = String(state.durationSec || 0);
+    $("scrollLen").onchange = function () { state.durationSec = Number(this.value) || 0; lsSet(LS.dur, state.durationSec); };
+  }
 
   function setStageBg(url) {
     var stage = $("stage"), bg = stage.querySelector("img.bg");
@@ -428,6 +434,7 @@
     if (!ready()) { refreshBanner(); return Promise.resolve(false); }
     var t = tileEl(s.key); if (t) { var a = t.querySelector("[data-act]"); if (a) a.innerHTML = '<span class="muted"><span class="spin"></span>Rendering…</span>'; }
     var payload = { company: s.company, roleTitle: s.roleTitle, roleUrl: s.pageUrl, clipId: state.clipId, pip: state.pip, force: !!opts.force };
+    if (state.durationSec > 0) payload.durationSec = state.durationSec;
     return new Promise(function (resolve) {
       var tries = 0;
       (function tick() {
@@ -526,6 +533,7 @@
       api("/api/in-market/attach", { method: "POST", body: JSON.stringify({
         videoKey: vk, roleTitle: s.roleTitle, company: s.company,
         clipId: state.clipId, pip: state.pip, roleUrl: s.pageUrl, // enable per-recipient "Hey {name}" intros
+        durationSec: state.durationSec > 0 ? state.durationSec : undefined,
       }) }).then(function (r) {
         var msg = "Sequence attached to " + (r.attached || 0) + " prospect(s) at " + s.company;
         if (r.personalizedNames) msg += " · " + r.personalizedNames + ' personalized "Hey {name}" intro' + (r.personalizedNames > 1 ? "s" : "");
@@ -857,6 +865,7 @@
       clipId: state.clipId, pip: state.pip,
       recipients: names.map(function (n) { return { firstName: n }; }),
     };
+    if (state.durationSec > 0) payload.durationSec = state.durationSec;
     var tries = 0;
     (function poll() {
       api("/api/in-market/bulk", { method: "POST", body: JSON.stringify(payload) }).then(function (j) {

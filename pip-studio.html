@@ -260,6 +260,16 @@
           <span class="muted">Color</span><input type="color" id="borderColor" value="#7c5cff" />
           <span class="muted" id="radiusWrap" style="display:none">Radius <input type="range" id="radius" min="0" max="50" value="18" style="width:90px" /></span>
         </div>
+        <div class="row" style="margin-top:10px">
+          <label style="margin:0">Scroll length</label>
+          <select id="scrollLen" style="margin-left:8px">
+            <option value="0">Auto · match my recording</option>
+            <option value="20">20s</option><option value="25">25s</option><option value="30">30s</option>
+            <option value="32">32s</option><option value="35">35s</option><option value="41">41s</option>
+            <option value="45">45s</option><option value="60">60s</option><option value="90">90s</option>
+          </select>
+          <span class="hint" style="margin-left:8px">page scroll runs exactly this long (one clean pass)</span>
+        </div>
       </details>
     </div>
 
@@ -395,7 +405,7 @@
 
 <div class="copied" id="toast"></div>
 <div class="modal" id="modal"><div class="modal-card" id="modalBody"></div></div>
-<script src="assets/js/config.js"></script>
-<script src="assets/js/pip-studio.js"></script>
+<script src="assets/js/config.js?v=ad110cbee0"></script>
+<script src="assets/js/pip-studio.js?v=9157a77485"></script>
 </body>
 </html>

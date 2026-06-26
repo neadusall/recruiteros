@@ -2,7 +2,8 @@
  * In-Market · Picture-in-picture role VIDEO.
  *
  * POST /api/in-market/video
- *   { company, roleTitle, roleUrl?, domain?, clipId, pip?, wait?, force? }
+ *   { company, roleTitle, roleUrl?, domain?, clipId, pip?, wait?, force?, durationSec? }
+ *     durationSec: optional explicit page-scroll length; omitted → auto-match the webcam clip length.
  *     -> composite the recorded webcam clip (clipId) as a PiP overlay onto the company's
  *        verified page-scroll capture. Non-blocking by default: returns the cached result,
  *        or status "composing" while a background render runs (page capture + ffmpeg). Pass
@@ -69,11 +70,16 @@ export async function POST(req: Request) {
   // Resolve the voice that speaks the name: explicit override -> this workspace's own clone ->
   // env default. So once the operator clones their voice, every personalized render uses it.
   const { resolveVoiceId } = await import("../../../../lib/inmarket/voiceClone");
+  // Optional explicit scroll length (seconds). When omitted, the page scroll auto-matches the
+  // recorded clip's own length so the composite is one clean pass. Clamped to a sane 5–180s.
+  const durRaw = Number(b?.durationSec);
+  const durationSec = Number.isFinite(durRaw) && durRaw > 0 ? Math.min(180, Math.max(5, Math.round(durRaw))) : undefined;
   const opts = {
     force: b?.force === true,
     // Personalized cloned-voice "Hey {firstName}," intro (optional).
     firstName: b?.firstName ? String(b.firstName) : undefined,
     voiceId: await resolveVoiceId(ws, b?.voiceId ? String(b.voiceId) : undefined),
+    durationSec,
   };
   const result = b?.wait === true
     ? await composeRoleVideo(reqShot, clipId, b?.pip, opts)

@@ -26,7 +26,7 @@ import { join } from "node:path";
 import { mkdir, writeFile, readFile, stat, unlink, rename } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { captureRoleShot, shotKey, shotsDir, type ShotRequest } from "./roleShot";
+import { captureRoleShot, renderScrollVideoAtDuration, shotKey, shotsDir, type ShotRequest } from "./roleShot";
 import { loadSnapshot, debouncedSaver } from "../db";
 
 /* ------------------------------------------------------------------ */
@@ -260,10 +260,13 @@ export function normalizePip(p?: Partial<PipConfig> | null): PipConfig {
 
 /** Stable composite key for a (role, clip, layout[, spoken first name]) tuple. Including the
  *  normalized name means each "Hey Sarah" composite is reused for every Sarah at that role. */
-export function videoKey(company: string, roleTitle: string, clipId: string, pip: PipConfig, firstName?: string | null): string {
+export function videoKey(company: string, roleTitle: string, clipId: string, pip: PipConfig, firstName?: string | null, durationSec?: number): string {
   const rk = shotKey(company, roleTitle);
   const nm = (firstName || "").trim().toLowerCase();
-  const h = createHash("sha1").update(JSON.stringify({ clipId, pip, nm })).digest("hex").slice(0, 12);
+  // durationSec is the EXPLICIT override (0 = auto-match the clip's own length, which is already
+  // pinned down by clipId) — so an overridden length caches as its own composite.
+  const dur = durationSec && durationSec > 0 ? Math.round(durationSec) : 0;
+  const h = createHash("sha1").update(JSON.stringify({ clipId, pip, nm, dur })).digest("hex").slice(0, 12);
   return `${rk}__${h}`;
 }
 
@@ -396,6 +399,33 @@ async function ffmpegAvailable(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** ffprobe binary — derived from FFMPEG_PATH (…/ffmpeg → …/ffprobe) or FFPROBE_PATH, else "ffprobe". */
+function ffprobeBin(): string {
+  if (process.env.FFPROBE_PATH) return process.env.FFPROBE_PATH;
+  const ff = process.env.FFMPEG_PATH;
+  if (ff && /ffmpeg/i.test(ff)) return ff.replace(/ffmpeg(\.exe)?$/i, "ffprobe$1");
+  return "ffprobe";
+}
+
+/** Duration of a media file in ms (the recorded webcam clip), or null if ffprobe can't read it. */
+async function probeDurationMs(file: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    let proc: ReturnType<typeof spawn>;
+    try {
+      proc = spawn(ffprobeBin(), ["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", file], { windowsHide: true });
+    } catch {
+      return resolve(null);
+    }
+    let out = "";
+    proc.stdout?.on("data", (d) => { out += d.toString(); });
+    proc.on("error", () => resolve(null));
+    proc.on("close", () => {
+      const sec = parseFloat(out.trim());
+      resolve(Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : null);
+    });
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -711,10 +741,10 @@ const inflight = new Map<string, Promise<VideoResult>>();
  * calling again.
  */
 export async function getOrStartVideo(
-  req: ShotRequest, clipId: string, pipIn?: Partial<PipConfig>, opts?: { force?: boolean; firstName?: string; voiceId?: string },
+  req: ShotRequest, clipId: string, pipIn?: Partial<PipConfig>, opts?: { force?: boolean; firstName?: string; voiceId?: string; durationSec?: number },
 ): Promise<VideoResult> {
   const pip = normalizePip(pipIn);
-  const key = videoKey(req.company, req.roleTitle, clipId, pip, opts?.firstName);
+  const key = videoKey(req.company, req.roleTitle, clipId, pip, opts?.firstName, opts?.durationSec);
 
   if (!opts?.force && (await fileExists(compositePath(key, "gif")))) {
     const cache = await ensureVideos();
@@ -735,10 +765,10 @@ export async function getOrStartVideo(
  * (e.g. a CLI/batch job).
  */
 export async function composeRoleVideo(
-  req: ShotRequest, clipId: string, pipIn?: Partial<PipConfig>, opts?: { force?: boolean; firstName?: string; voiceId?: string },
+  req: ShotRequest, clipId: string, pipIn?: Partial<PipConfig>, opts?: { force?: boolean; firstName?: string; voiceId?: string; durationSec?: number },
 ): Promise<VideoResult> {
   const pip = normalizePip(pipIn);
-  const key = videoKey(req.company, req.roleTitle, clipId, pip, opts?.firstName);
+  const key = videoKey(req.company, req.roleTitle, clipId, pip, opts?.firstName, opts?.durationSec);
   const now = () => new Date().toISOString();
 
   if (!opts?.force && (await fileExists(compositePath(key, "gif")))) {
@@ -756,7 +786,7 @@ export async function composeRoleVideo(
       // Background = the FULL natural-scroll MP4 from roleShot (the .gif is now the short email
       // teaser with a play button, so it must NOT be used here). Reuse it when on disk; only run
       // the slow Playwright capture when it's missing or a re-render is forced.
-      const bgPath = join(shotsDir(), `${shotKey(req.company, req.roleTitle)}.mp4`);
+      let bgPath = join(shotsDir(), `${shotKey(req.company, req.roleTitle)}.mp4`);
       let pageUrl: string | undefined;
       let haveShot = !opts?.force && (await fileExists(bgPath));
       if (!haveShot) {
@@ -768,6 +798,20 @@ export async function composeRoleVideo(
         }
       }
       if (haveShot) {
+        // DURATION MATCH: render a page-scroll video that lasts EXACTLY as long as the webcam clip
+        // (or an explicit override), so the composite is ONE clean top→bottom pass instead of the page
+        // looping/restarting (clip longer than scroll) or being cut off mid-page (clip shorter). The
+        // target is the explicit durationSec when given, else the recorded clip's own length + a small
+        // buffer so `-shortest` trims to a single pass. Falls back to the default looped bg on any miss.
+        let targetMs: number | null = opts?.durationSec && opts.durationSec > 0 ? Math.round(opts.durationSec * 1000) : null;
+        if (!targetMs) {
+          const clipMs = await probeDurationMs(clipPath(clip.id, clip.ext)).catch(() => null);
+          if (clipMs) targetMs = clipMs + 800;
+        }
+        if (targetMs) {
+          const matched = await renderScrollVideoAtDuration(shotKey(req.company, req.roleTitle), targetMs).catch(() => null);
+          if (matched) bgPath = matched;
+        }
         // Optional cloned-voice "Hey {firstName}," intro (cached by voice+name; null degrades gracefully).
         const { nameIntroAudio, cleanFirstName } = await import("./nameAudio");
         const introAudio = await nameIntroAudio(opts?.firstName, opts?.voiceId).catch(() => null);
