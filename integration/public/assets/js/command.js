@@ -3595,42 +3595,66 @@
   }
 
   /* ---------------- Clients ----------------
-   * The send-ready book: every enriched lead whose email has been VERIFIED for
-   * sending. Pulls the full prospect set (both motions), keeps well-formed emails,
-   * and reflects each one's verification verdict (valid / deliverable / risky /
-   * invalid / unverified). "Verify emails" runs the deliverability check (Reoon
-   * mailbox check when REOON_API_KEY is set, else a zero-config DNS/MX check) and
-   * stamps every record. Default view = send-ready only. Searchable + CSV export. */
+   * THE Hire Signals deliverable: every decision-maker the engine produced who is
+   * (1) Reoon-VALIDATED (a real, deliverable mailbox), and (2) paired with a
+   * personalized screen-capture video of their own company's hiring page — ready
+   * to email in one click. Pulls the prospect set + the role-capture library,
+   * defaults to the Hire Signals segment and send-ready view, and gives each row a
+   * Watch + "Copy email with video" (paste-ready clickable GIF) plus one-click
+   * capture generation. "Verify emails" runs Reoon (REOON_API_KEY) and stamps every
+   * record. Searchable + CSV export (with watch/GIF links). */
   function renderClients(el) {
     el.innerHTML = head("Clients",
-      "Your send-ready book: enriched leads with a verified, deliverable email. Verify in one click, then export or sequence.") +
+      "Your Hire Signals send-ready book: Reoon-validated decision-makers paired with a personalized screen-capture video, ready to email.") +
       '<div class="btn-row" style="margin-bottom:12px">' +
-      '<button class="btn btn-primary btn-sm" id="clVerify">✅ Verify emails</button>' +
+      '<button class="btn btn-primary btn-sm" id="clVerify">✅ Verify emails (Reoon)</button>' +
+      '<button class="btn btn-ghost btn-sm" id="clGenAll">🖥 Generate missing captures</button>' +
       '<button class="btn btn-ghost btn-sm" id="clExport">⇪ Export CSV</button>' +
-      '<a class="btn btn-ghost btn-sm" href="#prospects">⚡ Enrich more in Prospects</a>' +
-      '<span id="clViewToggle" style="margin-left:auto;display:inline-flex;gap:4px"></span>' +
+      '<a class="btn btn-ghost btn-sm" href="/pip-studio" target="_blank" rel="noopener">🎬 Video Studio</a>' +
+      '<span id="clSeg" style="margin-left:auto;display:inline-flex;gap:4px"></span>' +
       '</div>' +
+      '<div id="clViewToggle" class="btn-row" style="margin-bottom:12px;gap:4px"></div>' +
       '<div class="pr-searchbar"><span class="ico">⌕</span>' +
       '<input id="clSearch" type="text" autocomplete="off" placeholder="Search by name, job title, company, or email…" /></div>' +
       '<div id="clBody">' + loading() + "</div>";
 
-    var clAll = [], clFilter = "";
+    var clAll = [], clFilter = "", clById = {};
+    var shotsByCompany = {};   // lowercased company -> { watch, teaser, video, poster }
+    // segment: "signals" = produced by Hire Signals (category in_market); "all" = every enriched lead.
+    var clSeg = localStorage.getItem("ros_clients_seg") || "signals";
     // "ready" = only verified-deliverable (send-ready); "all" = every lead with an email.
     var clView = localStorage.getItem("ros_clients_view") || "ready";
     var searchEl = $("#clSearch");
     if (searchEl) searchEl.addEventListener("input", function () { clFilter = (searchEl.value || "").toLowerCase().trim(); paint(); });
     var exp = $("#clExport"); if (exp) exp.addEventListener("click", exportClients);
     var verBtn = $("#clVerify"); if (verBtn) verBtn.addEventListener("click", function () { verifyEmails(this); });
+    var genAll = $("#clGenAll"); if (genAll) genAll.addEventListener("click", function () { generateAllCaptures(this); });
 
     function hasValidEmail(p) {
       return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((p.email || "").trim());
     }
-    function eligible() { return clAll.filter(hasValidEmail); }
+    function fromSignals(p) { return p.category === "in_market"; }
+    // The active segment, then email-eligible within it.
+    function segmented() { return clAll.filter(function (p) { return clSeg === "all" ? true : fromSignals(p); }); }
+    function eligible() { return segmented().filter(hasValidEmail); }
     // Verification verdict for a prospect ("unverified" until the check has run).
     function vStatus(p) { return (p.emailVerification && p.emailVerification.status) || "unverified"; }
     // Send-ready = the verifier confirmed the address can receive mail.
     function isSendReady(p) { var s = vStatus(p); return s === "valid" || s === "deliverable"; }
     function shown() { return clView === "ready" ? eligible().filter(isSendReady) : eligible(); }
+
+    // The personalized video / screen capture for a client: prefer the attached
+    // personalized PiP video, else a screen capture of the company's hiring page.
+    function videoFor(p) {
+      var v = p.personalizedVideo;
+      if (v && (v.gifUrl || v.watchUrl)) return { gif: v.gifUrl, watch: v.watchUrl, mp4: v.mp4Url, role: v.roleTitle, kind: "personalized" };
+      var s = p.company ? shotsByCompany[(p.company || "").toLowerCase().trim()] : null;
+      if (s && (s.teaser || s.watch)) return { gif: s.teaser, watch: s.watch, mp4: s.video, role: null, kind: "capture" };
+      return null;
+    }
+    function hasCapture(p) { return !!videoFor(p); }
+    // Fully ready to send = a deliverable email AND a capture to lead with.
+    function isFullyReady(p) { return isSendReady(p) && hasCapture(p); }
 
     // Small verification badge per row. "valid" = mailbox confirmed (Reoon/SMTP);
     // "deliverable" = syntax + real MX, mailbox not individually confirmed.
@@ -3638,6 +3662,7 @@
       var v = p.emailVerification || null;
       var s = v ? v.status : "unverified";
       var why = v && v.reason ? (" · " + v.reason) : "";
+      if (v && v.source) why += " · " + v.source;
       var map = {
         valid: ['cl-vb-ok', '✓ verified', 'Mailbox confirmed deliverable'],
         deliverable: ['cl-vb-deliv', '✓ deliverable', 'Domain accepts mail (syntax + MX). Set REOON_API_KEY to confirm the mailbox'],
@@ -3650,6 +3675,26 @@
       return '<span class="cl-vb ' + m[0] + '" title="' + esc(m[2] + why) + '">' + m[1] + "</span>";
     }
 
+    // The video / screen-capture cell: thumbnail + Watch + "Copy email with video",
+    // or a one-click Generate button when nothing has been captured yet.
+    function captureCell(p) {
+      var vid = videoFor(p);
+      if (vid) {
+        var tag = vid.kind === "personalized"
+          ? '<span class="cl-vtag" title="Personalized webcam video">🎬 video</span>'
+          : '<span class="cl-vtag cl-vtag-cap" title="Screen capture of the company hiring page">🖥 capture</span>';
+        var thumb = vid.gif
+          ? '<img class="video-thumb" loading="lazy" src="' + esc(vid.gif) + '" alt="preview" onerror="this.style.display=\'none\'" />'
+          : '<span class="video-thumb cl-vthumb-ph">▶</span>';
+        return '<div class="cl-vcell">' +
+          '<a class="cl-vthumb-wrap" href="' + esc(vid.watch || "#") + '" target="_blank" rel="noopener" title="Watch">' + thumb + "</a>" +
+          '<div class="video-actions">' + tag +
+            '<button class="video-copy" data-act="copyvid" data-pid="' + esc(p.id) + '">Copy email</button>' +
+          "</div></div>";
+      }
+      return '<button class="video-watch" data-act="gencap" data-pid="' + esc(p.id) + '" title="Capture this company\'s hiring page">🖥 Generate</button>';
+    }
+
     function clStatusLabel(p) {
       var l = (REF.lifecycle || []).filter(function (x) { return x.status === p.status; })[0];
       var m = (p.motion === "recruiting") ? "recruiting" : "bd";
@@ -3659,7 +3704,7 @@
     function matches(p) {
       if (!clFilter) return true;
       var hay = ((p.fullName || "") + " " + (p.title || "") + " " + (p.company || "") + " " +
-        (p.email || "") + " " + (p.location || "")).toLowerCase();
+        (p.email || "") + " " + (p.location || "") + " " + (p.signalReason || "")).toLowerCase();
       return clFilter.split(/\s+/).every(function (t) { return hay.indexOf(t) >= 0; });
     }
 
@@ -3668,13 +3713,15 @@
         (p.photoUrl ? '<img src="' + esc(p.photoUrl) + '" alt="" onerror="this.remove()" />' : "") + "</span>";
       var li = p.linkedinUrl ? '<a class="pr-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : '<span class="pr-na">-</span>';
       var cell = function (v) { return v ? esc(v) : '<span class="pr-na">-</span>'; };
+      var sig = p.signalReason ? '<span class="cl-sig" title="Hiring signal">⚡ ' + esc(p.signalReason) + "</span>" : "";
       return '<tr class="pr-row" data-pid="' + esc(p.id) + '">' +
         '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + esc(p.fullName || "Unknown") +
           (p.sequenceName ? '<span class="pr-seqtag" title="Assigned sequence">▸ ' + esc(p.sequenceName) + "</span>" : "") + "</span></td>" +
         "<td>" + cell(p.title) + "</td>" +
-        "<td>" + cell(p.company) + "</td>" +
+        "<td>" + cell(p.company) + sig + "</td>" +
         '<td class="pr-c-email"><a href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a></td>" +
         "<td>" + vBadge(p) + "</td>" +
+        '<td class="pr-c-video">' + captureCell(p) + "</td>" +
         '<td class="pr-c-li">' + li + "</td>" +
         "<td>" + cell(p.phone) + "</td>" +
         '<td><span class="cls cls-' + statusCls(p.status) + '">' + esc(clStatusLabel(p)) + "</span></td>" +
@@ -3683,49 +3730,147 @@
 
     function paint() {
       var body = $("#clBody"); if (!body) return;
+
+      // Segment chips (Hire Signals vs every enriched lead) with live counts.
+      var sg = $("#clSeg");
+      var signalsCount = clAll.filter(function (p) { return fromSignals(p) && hasValidEmail(p); }).length;
+      var allCount = clAll.filter(hasValidEmail).length;
+      if (sg) {
+        sg.innerHTML =
+          '<button class="btn btn-sm ' + (clSeg === "signals" ? "btn-primary" : "btn-ghost") + '" data-clseg="signals">⚡ Hire Signals · ' + signalsCount + "</button>" +
+          '<button class="btn btn-sm ' + (clSeg === "all" ? "btn-primary" : "btn-ghost") + '" data-clseg="all">All leads · ' + allCount + "</button>";
+        Array.prototype.forEach.call(sg.querySelectorAll("[data-clseg]"), function (b) {
+          b.addEventListener("click", function () { clSeg = b.getAttribute("data-clseg"); localStorage.setItem("ros_clients_seg", clSeg); paint(); });
+        });
+      }
+
       // View toggle chips with live counts.
       var elig = eligible();
       var ready = elig.filter(isSendReady);
+      var fully = elig.filter(isFullyReady);
       var tg = $("#clViewToggle");
-      if (tg) tg.innerHTML =
-        '<button class="btn btn-sm ' + (clView === "ready" ? "btn-primary" : "btn-ghost") + '" data-clview="ready">Send-ready · ' + ready.length + "</button>" +
-        '<button class="btn btn-sm ' + (clView === "all" ? "btn-primary" : "btn-ghost") + '" data-clview="all">All with email · ' + elig.length + "</button>";
-      Array.prototype.forEach.call((tg ? tg.querySelectorAll("[data-clview]") : []), function (b) {
-        b.addEventListener("click", function () { clView = b.getAttribute("data-clview"); localStorage.setItem("ros_clients_view", clView); paint(); });
-      });
+      if (tg) {
+        tg.innerHTML =
+          '<button class="btn btn-sm ' + (clView === "ready" ? "btn-primary" : "btn-ghost") + '" data-clview="ready">Send-ready · ' + ready.length + "</button>" +
+          '<button class="btn btn-sm ' + (clView === "all" ? "btn-primary" : "btn-ghost") + '" data-clview="all">All with email · ' + elig.length + "</button>" +
+          '<span class="cl-fully" title="Validated email AND a capture to lead with">🟢 ' + fully.length + " fully ready (email + video)</span>";
+        Array.prototype.forEach.call(tg.querySelectorAll("[data-clview]"), function (b) {
+          b.addEventListener("click", function () { clView = b.getAttribute("data-clview"); localStorage.setItem("ros_clients_view", clView); paint(); });
+        });
+      }
 
       var all = shown();
       var list = all.filter(matches);
       var rows = list.map(rowHtml).join("");
       var countLbl = clFilter ? (list.length + " of " + all.length) : String(all.length);
-      // Counts by verdict, so the user sees verification coverage at a glance.
+      // Counts by verdict + capture coverage, so the user sees readiness at a glance.
       var by = elig.reduce(function (m, p) { var s = vStatus(p); m[s] = (m[s] || 0) + 1; return m; }, {});
       var unchecked = (by.unverified || 0) + (by.unknown || 0);
+      var withVideo = elig.filter(hasCapture).length;
       var legend = '<div class="cl-legend">' +
         '<span class="cl-vb cl-vb-ok">✓ verified ' + (by.valid || 0) + "</span>" +
         '<span class="cl-vb cl-vb-deliv">✓ deliverable ' + (by.deliverable || 0) + "</span>" +
         '<span class="cl-vb cl-vb-risky">~ risky ' + (by.risky || 0) + "</span>" +
         '<span class="cl-vb cl-vb-bad">✕ invalid ' + (by.invalid || 0) + "</span>" +
         '<span class="cl-vb cl-vb-unk">• unchecked ' + unchecked + "</span>" +
+        '<span class="cl-vb cl-vb-vid">🎬 with video ' + withVideo + "</span>" +
         "</div>";
       var tableHead = '<thead><tr><th>Name</th><th>Job Title</th><th>Company</th><th>Email</th>' +
-        "<th>Verification</th><th>LinkedIn</th><th>Phone</th><th>Status</th></tr></thead>";
+        "<th>Verification</th><th>Video</th><th>LinkedIn</th><th>Phone</th><th>Status</th></tr></thead>";
       var table = rows
         ? '<div class="pr-table-wrap"><table class="pr-table">' + tableHead + "<tbody>" + rows + "</tbody></table></div>"
         : '<div class="empty">' + (clFilter
           ? "No clients match “" + esc(clFilter) + "”."
+          : clSeg === "signals"
+          ? "No Hire Signals contacts yet. As the engine validates decision-makers (Reoon), they land here. Switch to All leads to see every enriched contact, or turn on auto-enroll to fill this book."
           : clView === "ready"
           ? (elig.length
-            ? "None verified send-ready yet. Click ✅ Verify emails to check deliverability, or switch to All with email."
-            : "No enriched leads with an email yet. Enrich your prospects (Prospects → ⚡ Enrich all contacts) and they’ll appear here to verify.")
+            ? "None verified send-ready yet. Click ✅ Verify emails (Reoon) to confirm deliverability, or switch to All with email."
+            : "No enriched leads with an email yet. Enrich your prospects (Prospects → ⚡ Enrich all contacts) and they’ll appear here.")
           : "No enriched leads with an email yet. Enrich your prospects (Prospects → ⚡ Enrich all contacts).") + "</div>";
       body.innerHTML = '<div class="card" style="padding:0;overflow:hidden"><div class="pr-card-h">' +
         '<h3>Clients <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl +
         (clView === "ready" ? " send-ready" : " with an email") + "</span></h3>" + legend + "</div>" + table + "</div>";
+
+      // Per-row actions (Watch is a plain link; Copy/Generate go through delegation).
+      var tb = body.querySelector(".pr-table tbody");
+      if (tb) tb.addEventListener("click", function (ev) {
+        var b = ev.target.closest ? ev.target.closest("[data-act]") : null;
+        if (!b) return;
+        var p = clById[b.getAttribute("data-pid")];
+        if (!p) return;
+        var act = b.getAttribute("data-act");
+        if (act === "copyvid") copyVideoEmail(p);
+        else if (act === "gencap") genCapture(p, b);
+      });
     }
 
-    // Run deliverability verification over the leads. By default only the not-yet-checked
-    // ones (saves verifier credits); when everything is settled, re-verify them all.
+    // Build a paste-ready email (clickable GIF that opens the watch page) and write
+    // BOTH text/html (renders in Gmail) and text/plain (sequence editors) to the clipboard.
+    function copyVideoEmail(p) {
+      var vid = videoFor(p);
+      if (!vid || (!vid.gif && !vid.watch)) { toast("No video for this client yet — click Generate first."); return; }
+      var first = p.firstName || ((p.fullName || "").split(/\s+/)[0]) || "there";
+      var co = p.company || "your team";
+      var role = vid.role ? (" for " + vid.role) : "";
+      var reason = p.signalReason ? (" " + p.signalReason + ".") : "";
+      var html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#111">' +
+        "<p>Hi " + esc(first) + ",</p>" +
+        "<p>Saw " + esc(co) + " is hiring" + esc(role) + "." + esc(reason) + " I put together a quick video for you:</p>" +
+        '<p><a href="' + esc(vid.watch || "#") + '" target="_blank">' +
+          (vid.gif ? '<img src="' + esc(vid.gif) + '" alt="Watch the video" width="480" style="border-radius:10px;border:1px solid #ddd;max-width:100%;display:block" />' : "▶ Watch the video") +
+        "</a></p>" +
+        "<p>Worth a quick chat this week?</p></div>";
+      var text = "Hi " + first + ",\n\nSaw " + co + " is hiring" + role + "." + reason +
+        " I put together a quick video for you: " + (vid.watch || "") + "\n\nWorth a quick chat this week?";
+      function plain() { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text); toast("Copied (plain text)."); }
+      if (navigator.clipboard && window.ClipboardItem) {
+        try {
+          navigator.clipboard.write([new ClipboardItem({
+            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([text], { type: "text/plain" })
+          })]).then(function () { toast("Email with video copied — paste into Gmail."); }, plain);
+        } catch (e) { plain(); }
+      } else plain();
+    }
+
+    // Generate the screen capture of this company's hiring page for one client.
+    function genCapture(p, btn) {
+      if (!p.company) { toast("No company on this record to capture."); return; }
+      var role = (p.personalizedVideo && p.personalizedVideo.roleTitle) || p.title || "Open role";
+      var old = btn ? btn.textContent : "";
+      if (btn) { btn.disabled = true; btn.textContent = "Capturing…"; }
+      return send("/in-market/shot", "POST", { company: p.company, roleTitle: role, wait: true }).then(function (r) {
+        if (btn) { btn.disabled = false; btn.textContent = old; }
+        if (!r.ok) { toast("Capture failed for " + p.company + " (" + ((r.data && r.data.error) || r.status) + ")"); return false; }
+        return loadShots().then(function () { paint(); return true; });
+      }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = old; } toast("Could not reach the server."); return false; });
+    }
+
+    // Batch: capture the hiring page for every shown client that has no video yet (sequential — gentle on the box).
+    function generateAllCaptures(btn) {
+      var todo = shown().filter(function (p) { return p.company && !hasCapture(p); });
+      // de-dupe by company so we don't capture the same company twice.
+      var seen = {}, uniq = [];
+      todo.forEach(function (p) { var k = (p.company || "").toLowerCase().trim(); if (k && !seen[k]) { seen[k] = 1; uniq.push(p); } });
+      if (!uniq.length) { toast("Every shown client already has a capture."); return; }
+      var old = btn ? btn.textContent : "", i = 0, done = 0;
+      if (btn) btn.disabled = true;
+      (function next() {
+        if (i >= uniq.length) {
+          if (btn) { btn.disabled = false; btn.textContent = old; }
+          toast("Captured " + done + " of " + uniq.length + " companies.");
+          loadShots().then(paint);
+          return;
+        }
+        var p = uniq[i++];
+        if (btn) btn.textContent = "Capturing " + i + "/" + uniq.length + "…";
+        genCapture(p, null).then(function (okv) { if (okv) done++; next(); });
+      })();
+    }
+
+    // Run deliverability verification over the leads via Reoon. By default only the
+    // not-yet-checked ones (saves credits); when everything is settled, re-verify all.
     function verifyEmails(btn) {
       var elig = eligible();
       if (!elig.length) { toast("No emails to verify yet — enrich some prospects first."); return; }
@@ -3747,29 +3892,47 @@
     }
 
     function exportClients() {
-      var list = shown();
+      var list = shown().filter(matches);
       if (!list.length) { toast("Nothing to export."); return; }
       var cols = ["fullName", "title", "company", "email", "phone", "location", "linkedinUrl"];
-      var heads = ["Name", "Title", "Company", "Email", "Phone", "Location", "LinkedIn", "Email status", "Verified at"];
+      var heads = ["Name", "Title", "Company", "Email", "Phone", "Location", "LinkedIn", "Email status", "Verified at", "Signal", "Watch URL", "GIF URL"];
       var cell = function (v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; };
       var csv = heads.join(",") + "\n" + list.map(function (p) {
+        var vid = videoFor(p) || {};
         var base = cols.map(function (c) { return cell(p[c]); });
         base.push(cell(vStatus(p)));
         base.push(cell(p.emailVerification && p.emailVerification.checkedAt));
+        base.push(cell(p.signalReason));
+        base.push(cell(vid.watch));
+        base.push(cell(vid.gif));
         return base.join(",");
       }).join("\n");
       var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" }), url = URL.createObjectURL(blob);
-      var a = document.createElement("a"); a.href = url; a.download = (clView === "ready" ? "clients-send-ready.csv" : "clients.csv"); a.style.display = "none";
+      var a = document.createElement("a"); a.href = url; a.download = (clSeg === "signals" ? "hire-signals-clients.csv" : "clients.csv"); a.style.display = "none";
       document.body.appendChild(a); a.click();
       setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
       toast("Exported " + list.length + " client" + (list.length === 1 ? "" : "s"));
     }
 
+    // Load the role-capture library so each client can show / reuse their company's hiring-page capture.
+    function loadShots() {
+      return api("/in-market/shot?list=1").then(function (d) {
+        shotsByCompany = {};
+        ((d && d.shots) || []).forEach(function (s) {
+          if (s && s.company && s.urls) shotsByCompany[(s.company || "").toLowerCase().trim()] = s.urls;
+        });
+      }).catch(function () { /* captures are best-effort; the tab still works without them */ });
+    }
+
     function load() {
-      api("/prospects").then(function (d) {
-        clAll = (d && d.prospects) || [];
+      Promise.all([
+        api("/prospects").then(function (d) { clAll = (d && d.prospects) || []; }).catch(function () { clAll = null; }),
+        loadShots()
+      ]).then(function () {
+        if (clAll === null) { var b = $("#clBody"); if (b) b.innerHTML = needsSetup(); clAll = []; return; }
+        clById = {}; clAll.forEach(function (p) { clById[p.id] = p; });
         paint();
-      }).catch(function () { var b = $("#clBody"); if (b) b.innerHTML = needsSetup(); });
+      });
     }
     load();
   }
