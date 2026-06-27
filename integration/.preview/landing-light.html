@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>A quick message for you</title>
+<style>
+  :root{ --bg:#f5f7fa; --card:#ffffff; --line:#e6e9ef; --ink:#0f172a; --mut:#64748b; --accent:#16a34a; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+  .top{display:flex;align-items:center;gap:10px;padding:18px 28px;border-bottom:1px solid var(--line);background:var(--card)}
+  .brand{font-weight:800;letter-spacing:-.2px;font-size:20px;color:var(--ink)}
+  .brand .dot{color:var(--accent)}
+  main{flex:1;display:flex;align-items:flex-start;justify-content:center;padding:30px 24px 60px}
+  .stage{width:100%;max-width:1180px}
+  .ctx{margin:0 0 20px}
+  .ctx h1{font-size:24px;margin:0 0 5px;font-weight:700;letter-spacing:-.3px}
+  .ctx p{margin:0;color:var(--mut);font-size:14px}
+  .cols{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:28px;align-items:start}
+  @media (max-width:960px){ .cols{grid-template-columns:1fr} }
+  .maincol{min-width:0}
+  .player{position:relative;border:1px solid var(--line);border-radius:16px;overflow:hidden;
+    background:linear-gradient(135deg,#0b1220,#1e293b);box-shadow:0 12px 40px rgba(15,23,42,.12);aspect-ratio:1000/620;
+    display:flex;align-items:center;justify-content:center}
+  .player .label{position:absolute;bottom:14px;left:16px;color:#94a3b8;font-size:12px}
+  .play .btn{width:84px;height:84px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;box-shadow:0 10px 34px rgba(22,163,74,.5)}
+  .play svg{width:34px;height:34px;margin-left:5px;fill:#fff}
+  .cta{display:flex;gap:12px;margin-top:22px;flex-wrap:wrap}
+  .cta a{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--ink);
+    text-decoration:none;padding:12px 22px;border-radius:11px;font:inherit;font-weight:600;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  .cta a.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .reply{margin:20px 0 0;border:1px solid var(--line);border-radius:14px;padding:16px;background:var(--card);max-width:560px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  .reply .rh{font-size:13px;font-weight:700;margin-bottom:10px}
+  .reply textarea{width:100%;background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:11px;font:inherit;resize:vertical}
+  .reply .rrow{display:flex;gap:8px;margin-top:10px}
+  .reply .rrow input{flex:1;background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:11px;font:inherit}
+  .reply .rrow button{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:10px;padding:11px 20px;font:inherit;font-weight:700}
+  .side{position:sticky;top:24px}
+  .side-h{font-size:12px;font-weight:800;color:var(--mut);margin:0 0 10px;text-transform:uppercase;letter-spacing:.07em}
+  .cal{border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 12px 40px rgba(15,23,42,.1)}
+  .cal iframe{width:100%;height:640px;border:0;display:block}
+  footer{text-align:center;color:#94a3b8;font-size:12px;padding:22px}
+</style>
+</head>
+<body>
+<div class="top"><span class="brand">Lumesp<span class="dot">.</span></span></div>
+<main>
+  <div class="stage">
+    <div class="ctx"><h1>Sarah — a quick note about Acme Corp</h1><p>Re: VP of Engineering</p></div>
+    <div class="cols">
+      <div class="maincol">
+        <div class="player">
+          <div class="play"><div class="btn"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>
+          <span class="label">your 42-second video — you, over their job posting</span>
+        </div>
+        <div class="cta"><a class="primary" href="#">Book a call</a><a href="#">Reply</a></div>
+        <form class="reply" onsubmit="return false">
+          <div class="rh">Send a quick reply</div>
+          <textarea rows="3" placeholder="Type a quick reply…"></textarea>
+          <div class="rrow"><input type="email" placeholder="Your email (optional)" /><button type="submit">Send</button></div>
+        </form>
+      </div>
+      <aside class="side">
+        <div class="side-h">Book a time</div>
+        <div class="cal"><iframe src="https://tidycal.com/neadusall/new-position-discovery-call" title="Book a time" loading="eager"></iframe></div>
+      </aside>
+    </div>
+  </div>
+</main>
+<footer>Sent with Lumesp</footer>
+</body>
+</html>

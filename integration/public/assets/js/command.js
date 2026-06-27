@@ -4290,10 +4290,6 @@
       };
       var legend = '<div class="cl-legend">' +
         legChip("valid", "cl-vb-ok", "✓ verified", by.valid || 0) +
-        legChip("deliverable", "cl-vb-deliv", "✓ deliverable", by.deliverable || 0) +
-        legChip("risky", "cl-vb-risky", "~ risky", by.risky || 0) +
-        legChip("invalid", "cl-vb-bad", "✕ invalid", by.invalid || 0) +
-        legChip("unchecked", "cl-vb-unk", "• unchecked", unchecked) +
         legChip("video", "cl-vb-vid", "🎬 with video", withVideo) +
         (clVerdict ? '<button class="cl-vb cl-vb-clear" data-verdict="">✕ clear</button>' : "") +
         "</div>";
