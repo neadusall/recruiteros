@@ -484,6 +484,7 @@
     clients: { title: "Clients", crumb: "Business Development", action: null, render: renderClients, motionOnly: "bd" },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
+    sendqueue: { title: "Send Queue", crumb: "Operate", action: null, render: renderSendQueue, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     autopilot: { title: "Autopilot", crumb: "Build", action: null, render: renderAutopilot },
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New sequence", render: renderCampaignsHub },
@@ -2263,6 +2264,68 @@
       // Screenshot filter: only companies that HAVE (or specifically DON'T have) a verified job screenshot.
       if (imShotFilter !== null && !!l.hasShot !== imShotFilter) return false;
       return true;
+    });
+  }
+
+  /* ---------------- Send Queue (rolling-buffer readiness dashboard) ---------------- */
+  function sqFmt(n) { return (n || 0).toLocaleString(); }
+  function sqDayLabel(iso) { try { return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); } catch (e) { return iso; } }
+  function sqNeed(label, n, href) { return '<a class="sq-need" href="' + href + '"><span class="sq-need-n">' + (n || 0).toLocaleString() + "</span><span class=\"sq-need-l\">" + label + "</span></a>"; }
+  function sqOverviewHtml(o) {
+    var healthy = o.runwayDays >= o.bufferDays;
+    var statusPill = healthy
+      ? '<span class="sq-pill green">🟢 Buffer healthy · ' + o.runwayDays + " days staged</span>"
+      : (o.readySupply > 0
+        ? '<span class="sq-pill yellow">🟡 Buffer low · ' + o.runwayDays + " day" + (o.runwayDays === 1 ? "" : "s") + " staged</span>"
+        : '<span class="sq-pill red">🔴 Buffer empty · stage prospects now</span>');
+    var supply = '<div class="sq-cards">' +
+      '<div class="sq-card big"><div class="sq-k">Send-ready supply</div><div class="sq-v">' + sqFmt(o.readySupply) + "</div><div class=\"sq-sub\">" + statusPill + "</div></div>" +
+      '<div class="sq-card"><div class="sq-k">Daily target</div><div class="sq-v">' + sqFmt(o.targetMin) + "–" + sqFmt(o.targetMax) + "</div><div class=\"sq-sub\">first emails / day</div></div>" +
+      '<div class="sq-card"><div class="sq-k">Runway</div><div class="sq-v">' + o.runwayDays + ' <span class="sq-unit">days</span></div><div class="sq-sub">target ≥ ' + o.bufferDays + " days</div></div>" +
+      '<div class="sq-card"><div class="sq-k">Already sending</div><div class="sq-v">' + sqFmt(o.inSequence) + "</div><div class=\"sq-sub\">their video 2nd emails roll out next day</div></div>" +
+    "</div>";
+    var callout = "";
+    if (o.shortfall > 0) {
+      callout = '<div class="sq-callout"><div class="sq-callout-h">⚠️ Stage ' + sqFmt(o.shortfall) + " more send-ready prospects to fill " + o.bufferDays + " days. Follow these steps:</div>" +
+        '<div class="sq-steps">' +
+          '<a class="sq-step" href="#inmarket"><b>1 · Find</b><span>Run a Targeted JSearch search → scrape new prospects</span></a>' +
+          '<a class="sq-step" href="#clients"><b>2 · Verify emails</b><span>' + (o.needsAssets.noVerifiedEmail ? sqFmt(o.needsAssets.noVerifiedEmail) + " need a verified email" : "Confirm deliverable addresses") + "</span></a>" +
+          '<a class="sq-step" href="#pipstudio"><b>3 · Record / assign video</b><span>' + (o.needsAssets.noVideo ? sqFmt(o.needsAssets.noVideo) + " need a 2nd-email video" : "PiP Studio: clip + headshot") + "</span></a>" +
+        "</div></div>";
+    }
+    var needs = '<div class="sq-needs"><div class="sq-h">Needs assets <span class="muted">— held until complete (' + sqFmt(o.needsAssets.total) + ")</span></div>" +
+      '<div class="sq-need-grid">' +
+        sqNeed("✉️ Verified email", o.needsAssets.noVerifiedEmail, "#clients") +
+        sqNeed("🎬 2nd-email video", o.needsAssets.noVideo, "#pipstudio") +
+        sqNeed("🔗 Landing page", o.needsAssets.noWatch, "#pipstudio") +
+      "</div></div>";
+    var rows = o.days.map(function (dd, i) {
+      var dot = dd.fill === "green" ? "🟢" : dd.fill === "yellow" ? "🟡" : "🔴";
+      var label = i === 0 ? "Today" : i === 1 ? "Tomorrow" : sqDayLabel(dd.date);
+      return "<tr><td>" + dot + " <b>" + esc(label) + '</b> <span class="muted">' + esc(dd.date) + "</span></td>" +
+        '<td class="sq-num">' + sqFmt(dd.firstEmails) + "</td>" +
+        '<td class="sq-num">' + sqFmt(dd.secondEmails) + "</td>" +
+        '<td class="sq-num sq-tot">' + sqFmt(dd.total) + "</td></tr>";
+    }).join("");
+    var proj = '<div class="sq-h">Projected sends — next ' + o.bufferDays + " days</div>" +
+      '<table class="sq-table"><thead><tr><th>Day</th><th class="sq-num">1st (text)</th><th class="sq-num">2nd (video)</th><th class="sq-num">Total</th></tr></thead><tbody>' + rows + "</tbody></table>" +
+      '<div class="sq-note muted">Each day = new first emails + the previous day’s batch getting their video 2nd email. Steady state ≈ ' + sqFmt(o.targetMin * 2) + "–" + sqFmt(o.targetMax * 2) + " emails/day.</div>";
+    var camps = (o.campaigns && o.campaigns.length)
+      ? '<div class="sq-h">Campaigns in the queue</div><div class="sq-camps">' + o.campaigns.map(function (c) {
+          return '<div class="sq-camp"><div class="sq-camp-name">' + esc(c.label) + (c.status ? ' <span class="sq-cstatus">' + esc(c.status) + "</span>" : "") + "</div>" +
+            '<div class="sq-camp-nums"><span class="sq-ready">' + sqFmt(c.ready) + " ready</span>" + (c.needsAssets ? ' <span class="muted">· ' + sqFmt(c.needsAssets) + " needs assets</span>" : "") + "</div></div>";
+        }).join("") + "</div>"
+      : '<div class="sq-h">Campaigns in the queue</div><div class="empty">No queued prospects yet. <a href="#inmarket">Run a Targeted JSearch search</a> to start staging.</div>';
+    return supply + callout + needs + '<div class="sq-grid"><div class="sq-panel">' + proj + '</div><div class="sq-panel">' + camps + "</div></div>";
+  }
+  function renderSendQueue(el) {
+    el.innerHTML = '<div class="view-intro">Stage 4–6K send-ready prospects every day so the first email + next-day video email go out hands-off. Keep the buffer full so no day goes without a batch.</div><div id="sqBody">' + loading() + "</div>";
+    api("/send-queue").then(function (d) {
+      var body = document.getElementById("sqBody"); if (!body) return;
+      var o = d && d.overview;
+      body.innerHTML = o ? sqOverviewHtml(o) : '<div class="empty">Couldn’t load the send queue. Try again.</div>';
+    }).catch(function () {
+      var body = document.getElementById("sqBody"); if (body) body.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>';
     });
   }
 
