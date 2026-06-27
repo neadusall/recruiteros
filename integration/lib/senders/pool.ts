@@ -6,10 +6,11 @@
  * recruiterId to rotate across the whole portal pool.
  */
 import { listInboxes, recordSend } from "./store";
+import { coldCap } from "./limits";
 import type { SenderInbox } from "./types";
 
 function sendable(m: SenderInbox): boolean {
-  return (m.status === "active" || m.status === "warming") && m.sentToday < m.dailyCap;
+  return (m.status === "active" || m.status === "warming") && m.sentToday < coldCap(m.dailyCap);
 }
 
 export interface PickOpts { recruiterId?: string; excludeIds?: string[]; }
@@ -19,7 +20,7 @@ export async function pickSender(workspaceId: string, opts: PickOpts = {}): Prom
   const exclude = new Set(opts.excludeIds || []);
   const pool = (await listInboxes(workspaceId, { ownerId: opts.recruiterId }))
     .filter((m) => sendable(m) && !exclude.has(m.id))
-    .sort((a, b) => (b.dailyCap - b.sentToday) - (a.dailyCap - a.sentToday));
+    .sort((a, b) => (coldCap(b.dailyCap) - b.sentToday) - (coldCap(a.dailyCap) - a.sentToday));
   return pool[0] || null;
 }
 
@@ -30,7 +31,7 @@ export async function poolCapacity(
 ): Promise<{ inboxes: number; remainingToday: number; dailyCapacity: number }> {
   const pool = (await listInboxes(workspaceId, { ownerId: recruiterId })).filter(sendable);
   let rem = 0, cap = 0;
-  for (const m of pool) { rem += Math.max(0, m.dailyCap - m.sentToday); cap += m.dailyCap; }
+  for (const m of pool) { rem += Math.max(0, coldCap(m.dailyCap) - m.sentToday); cap += coldCap(m.dailyCap); }
   return { inboxes: pool.length, remainingToday: rem, dailyCapacity: cap };
 }
 

@@ -2306,6 +2306,31 @@
       if (e.target.closest && e.target.closest("[data-wlclose]")) { var box = document.getElementById("sqWorklist"); if (box) box.innerHTML = ""; }
     };
   }
+  // 📨 Sending capacity — the recruiter inbox pools (lib/senders) and the HARD per-inbox
+  // cold cap (2/day), so the queue shows headroom draining as every Email ID gets maxed.
+  function sqCapacityHtml(cap) {
+    if (!cap) return "";
+    if (!cap.inboxes) {
+      return '<div class="sq-panel" style="margin-bottom:14px"><div class="sq-h">📨 Sending capacity (Email IDs)</div>' +
+        '<div class="empty">No sender inboxes yet. <a href="#senders">Import your Email IDs</a> and assign them to recruiters — then this shows your daily cold-send ceiling, maxing every Email ID at ' + (cap.coldPerInbox || 2) + '/day.</div></div>';
+    }
+    var pct = cap.coldCapacity ? Math.round((cap.coldUsedToday / cap.coldCapacity) * 100) : 0;
+    var head = '<div class="sq-cards">' +
+      '<div class="sq-card big"><div class="sq-k">Cold capacity today</div><div class="sq-v">' + sqFmt(cap.coldRemaining) + ' <span class="sq-unit">left</span></div><div class="sq-sub">' + sqFmt(cap.coldUsedToday) + " / " + sqFmt(cap.coldCapacity) + " used today · " + pct + "%</div></div>" +
+      '<div class="sq-card"><div class="sq-k">Email IDs</div><div class="sq-v">' + sqFmt(cap.inboxes) + "</div><div class=\"sq-sub\">" + cap.domains + " domain" + (cap.domains === 1 ? "" : "s") + " · " + cap.coldPerInbox + " cold/day each (hard)</div></div>" +
+      '<div class="sq-card"><div class="sq-k">Warming / day</div><div class="sq-v">' + sqFmt(cap.warmingPerDay) + "</div><div class=\"sq-sub\">" + cap.warmingPerInbox + "/inbox · Smartlead (not us)</div></div>" +
+    "</div>";
+    var bar = '<div style="height:8px;border-radius:6px;background:var(--border);overflow:hidden;margin:2px 0 12px"><div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,#7c5cff,#4dd0ff)"></div></div>';
+    var rows = (cap.byRecruiter || []).map(function (r) {
+      return "<tr><td><b>" + esc(r.ownerName) + "</b></td>" +
+        '<td class="sq-num">' + sqFmt(r.inboxes) + "</td>" +
+        '<td class="sq-num">' + sqFmt(r.domains) + "</td>" +
+        '<td class="sq-num">' + sqFmt(r.coldUsedToday) + " / " + sqFmt(r.coldCapacity) + "</td>" +
+        '<td class="sq-num sq-tot">' + sqFmt(r.coldRemaining) + "</td></tr>";
+    }).join("");
+    var table = '<div class="sq-h">By recruiter</div><table class="sq-table"><thead><tr><th>Recruiter</th><th class="sq-num">Email IDs</th><th class="sq-num">Domains</th><th class="sq-num">Cold used</th><th class="sq-num">Left today</th></tr></thead><tbody>' + rows + "</tbody></table>";
+    return '<div class="sq-panel" style="margin-bottom:14px"><div class="sq-h">📨 Sending capacity — maxing every Email ID at ' + cap.coldPerInbox + " cold/day (+" + cap.warmingPerInbox + " warming via Smartlead)</div>" + head + bar + table + "</div>";
+  }
   function sqOverviewHtml(o) {
     var healthy = o.runwayDays >= o.bufferDays;
     var statusPill = healthy
@@ -2452,7 +2477,7 @@
     api("/send-queue").then(function (d) {
       var b = document.getElementById("sqBody"); if (!b) return;
       if (!d || !d.overview) { b.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>'; return; }
-      b.innerHTML = sqAutofillHtml(d.autofill || { settings: {} }, d.campaigns || []) + sqOverviewHtml(d.overview);
+      b.innerHTML = sqAutofillHtml(d.autofill || { settings: {} }, d.campaigns || []) + sqCapacityHtml(d.senders) + sqOverviewHtml(d.overview);
       sqWireAutofill();
       sqWireWorklist();
     }).catch(function () {
@@ -4069,7 +4094,7 @@
   function renderSenderStats() {
     var s = sndData.stats || {}, box = $("#sndStatsBox"); if (!box) return;
     function c(v, l) { return '<div class="snd-stat"><div class="snd-statv">' + esc(v) + '</div><div class="snd-statl">' + esc(l) + '</div></div>'; }
-    box.innerHTML = c(s.inboxes || 0, "Inboxes") + c(s.active || 0, "Active") + c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Daily capacity") + c(s.remainingToday || 0, "Remaining today");
+    box.innerHTML = c(s.inboxes || 0, "Inboxes") + c(s.active || 0, "Active") + c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Cold sends/day") + c(s.remainingToday || 0, "Remaining today");
   }
 
   function renderSenderPools() {
@@ -4189,8 +4214,7 @@
       '<div class="btn-row"><button class="btn btn-ghost btn-sm" id="impRecr">Choose recruiter…</button> <span id="impRecrName" class="muted">Unassigned</span></div>' +
       '<label style="margin-top:10px;display:block">Provider</label>' +
       '<select id="impProv" class="cur-ind-select"><option value="own-smtp">Own SMTP server</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select>' +
-      '<label style="margin-top:10px;display:block">Default daily cap per inbox</label>' +
-      '<input id="impCap" type="number" value="40" class="cur-ind-select">' +
+      '<div class="muted" style="margin-top:10px"><b>Sending limit (hard):</b> 2 cold emails/day per Email ID. Warming (10/day per inbox) runs in Smartlead, not here.</div>' +
       '<label style="margin-top:10px;display:block">Upload CSV</label>' +
       '<input id="impFile" type="file" accept=".csv,.tsv,.txt">' +
       '<label style="margin-top:10px;display:block">…or paste rows</label>' +
@@ -4205,7 +4229,7 @@
       root.querySelector("#impGo").addEventListener("click", function () {
         var csv = text.value.trim(); if (!csv) { toast("Paste or upload a CSV first"); return; }
         var go = root.querySelector("#impGo"); go.disabled = true; go.textContent = "Importing…";
-        send("/senders/import", "POST", { action: "import", csv: csv, provider: root.querySelector("#impProv").value, dailyCap: Number(root.querySelector("#impCap").value) || 40, ownerId: chosen.userId || undefined, ownerName: chosen.name || undefined }).then(function (r) {
+        send("/senders/import", "POST", { action: "import", csv: csv, provider: root.querySelector("#impProv").value, ownerId: chosen.userId || undefined, ownerName: chosen.name || undefined }).then(function (r) {
           if (r.ok) { var d = r.data || {}; close(); toast("Imported " + (d.imported || 0) + (d.skipped && d.skipped.length ? " (" + d.skipped.length + " skipped)" : "")); loadSenders(); }
           else { go.disabled = false; go.textContent = "Import"; toast("Import failed: " + ((r.data && r.data.error) || r.status)); }
         }).catch(function () { go.disabled = false; go.textContent = "Import"; });
@@ -4221,7 +4245,8 @@
       '<div class="snd-grid2" style="margin-top:8px"><div><label>SMTP host</label><input id="saHost" class="cur-ind-select" placeholder="smtp.sending.ac"></div><div><label>Port</label><input id="saPort" type="number" value="587" class="cur-ind-select"></div></div>' +
       '<label style="margin-top:8px;display:block">SMTP username</label><input id="saUser" class="cur-ind-select" placeholder="(defaults to the email)">' +
       '<label style="margin-top:8px;display:block">SMTP password</label><input id="saPass" type="password" class="cur-ind-select">' +
-      '<div class="snd-grid2" style="margin-top:8px"><div><label>Provider</label><select id="saProv" class="cur-ind-select"><option value="own-smtp">Own SMTP</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select></div><div><label>Daily cap</label><input id="saCap" type="number" value="40" class="cur-ind-select"></div></div>' +
+      '<label style="margin-top:8px;display:block">Provider</label><select id="saProv" class="cur-ind-select"><option value="own-smtp">Own SMTP</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select>' +
+      '<div class="muted" style="margin-top:8px"><b>Sending limit (hard):</b> 2 cold/day per Email ID · 10 warming/day via Smartlead.</div>' +
       '<label style="margin-top:8px;display:block">Recruiter (optional)</label><div class="btn-row"><button class="btn btn-ghost btn-sm" id="saRecr">Choose recruiter…</button> <span id="saRecrName" class="muted">Unassigned</span></div>' +
       '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="saCancel">Cancel</button><button class="btn btn-primary btn-sm" id="saGo">Add inbox</button></div>';
     openModal("Add a sending inbox", "Stored encrypted; warmed in Smartlead", body, function (root, close) {
@@ -4230,7 +4255,7 @@
       root.querySelector("#saGo").addEventListener("click", function () {
         var email = root.querySelector("#saEmail").value.trim(), host = root.querySelector("#saHost").value.trim(), pass = root.querySelector("#saPass").value;
         if (!email || !host || !pass) { toast("Email, SMTP host and password are required"); return; }
-        send("/senders", "POST", { action: "add", email: email, displayName: root.querySelector("#saName").value.trim() || undefined, smtpHost: host, smtpPort: Number(root.querySelector("#saPort").value) || 587, smtpUser: root.querySelector("#saUser").value.trim() || undefined, smtpPass: pass, provider: root.querySelector("#saProv").value, dailyCap: Number(root.querySelector("#saCap").value) || 40, ownerId: chosen.userId || undefined, ownerName: chosen.name || undefined }).then(function (r) {
+        send("/senders", "POST", { action: "add", email: email, displayName: root.querySelector("#saName").value.trim() || undefined, smtpHost: host, smtpPort: Number(root.querySelector("#saPort").value) || 587, smtpUser: root.querySelector("#saUser").value.trim() || undefined, smtpPass: pass, provider: root.querySelector("#saProv").value, ownerId: chosen.userId || undefined, ownerName: chosen.name || undefined }).then(function (r) {
           if (r.ok) { close(); toast("Inbox added"); loadSenders(); } else toast("Add failed: " + ((r.data && r.data.error) || r.status));
         });
       });

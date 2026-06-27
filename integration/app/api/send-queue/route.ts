@@ -12,6 +12,7 @@
 
 import { sendQueueOverview, needsAssetsList, type MissingAsset } from "../../../lib/sending/sendReady";
 import { getAutofillSettings, setAutofillSettings, autofillStatus, runAutofill, ensureAutofill } from "../../../lib/sending/autofill";
+import { sendCapacity } from "../../../lib/senders";
 import { getCore } from "../../../lib/core/repository";
 import { requireSession, body, ok, fail } from "../../../lib/api";
 
@@ -22,14 +23,15 @@ export async function GET(req: Request) {
   try {
     ensureAutofill(); // arm the buffer keeper (no-op until turned on)
     const nowIso = new Date().toISOString();
-    const [overview, autofill, campaigns] = await Promise.all([
+    const [overview, autofill, campaigns, senders] = await Promise.all([
       sendQueueOverview(ws, nowIso),
       autofillStatus(nowIso),
       getCore().listCampaigns(ws),
+      sendCapacity(ws),
     ]);
     // Slim campaign list for the picker (+ whether it's set up as the Send Queue campaign and its date).
     const camps = campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status, sendQueue: !!c.sendQueue, scheduledFor: c.scheduledFor }));
-    return ok({ overview, autofill, campaigns: camps });
+    return ok({ overview, autofill, campaigns: camps, senders });
   } catch (e: any) {
     return fail(e?.message ?? "send_queue_failed", e?.status ?? 500);
   }

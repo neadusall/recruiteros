@@ -10,6 +10,7 @@
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver } from "../db";
 import { encryptSecret } from "./crypto";
+import { COLD_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCap } from "./limits";
 import type { SenderInbox, SenderInboxPublic, SenderProvider, SenderStatus, RecruiterPool } from "./types";
 
 interface SendersState { inboxes: SenderInbox[]; }
@@ -118,7 +119,7 @@ export async function addInbox(workspaceId: string, input: NewInboxInput): Promi
     imapPort: input.imapHost ? normalizePort(input.imapPort, 993) : undefined,
     imapUser: input.imapHost ? (input.imapUser || input.email).trim() : undefined,
     imapPassEnc: input.imapHost ? encryptSecret(input.imapPass || input.smtpPass || "") : undefined,
-    dailyCap: input.dailyCap && input.dailyCap > 0 ? Math.round(input.dailyCap) : 40,
+    dailyCap: COLD_PER_INBOX,   // HARD cap: 2 cold emails/day per Email ID (limits.ts)
     sentToday: 0,
     status: input.status || "warming",
     warmExternal: input.warmExternal ?? true,
@@ -261,4 +262,86 @@ export async function resetDaily(workspaceId: string): Promise<void> {
 export async function listSenderWorkspaceIds(): Promise<string[]> {
   await hydrate();
   return [...new Set(state.inboxes.map((m) => m.workspaceId))];
+}
+
+/* ---------------- capacity (hard limits, for the Send Queue) ---------------- */
+
+function domainOf(email: string): string {
+  const i = email.indexOf("@");
+  return i >= 0 ? email.slice(i + 1).toLowerCase().trim() : "";
+}
+
+export interface RecruiterCapacity {
+  ownerId: string;
+  ownerName: string;
+  inboxes: number;
+  domains: number;
+  coldCapacity: number;     // inboxes × COLD_PER_INBOX
+  coldUsedToday: number;
+  coldRemaining: number;
+  warmingPerDay: number;    // inboxes × WARMING_PER_INBOX (Smartlead, informational)
+}
+
+export interface SendCapacity {
+  coldPerInbox: number;
+  warmingPerInbox: number;
+  inboxesPerDomain: number;
+  inboxes: number;
+  domains: number;
+  coldCapacity: number;
+  coldUsedToday: number;
+  coldRemaining: number;
+  warmingPerDay: number;
+  byRecruiter: RecruiterCapacity[];
+}
+
+/**
+ * Daily cold-send capacity for a portal, enforcing the HARD per-inbox cap (limits.ts):
+ * every Email ID counts for at most COLD_PER_INBOX cold sends/day. `coldUsedToday`
+ * ticks up as the rotation records sends, so the Send Queue can show the remaining
+ * headroom draining toward zero — i.e. every inbox getting maxed to its 2/day.
+ */
+export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
+  await hydrate();
+  const mine = state.inboxes.filter(
+    (m) => m.workspaceId === workspaceId && (m.status === "active" || m.status === "warming"),
+  );
+  const recs = new Map<string, RecruiterCapacity & { _domains: Set<string> }>();
+  const domains = new Set<string>();
+  let inboxes = 0, coldCapacity = 0, coldUsedToday = 0;
+  for (const m of mine) {
+    const cap = coldCap(m.dailyCap);
+    const used = Math.min(m.sentToday, cap);
+    const dom = domainOf(m.email);
+    inboxes++; coldCapacity += cap; coldUsedToday += used;
+    if (dom) domains.add(dom);
+    const key = m.ownerId || "_unassigned";
+    let r = recs.get(key);
+    if (!r) {
+      r = {
+        ownerId: m.ownerId || "",
+        ownerName: m.ownerName || (m.ownerId ? "(unknown)" : "Unassigned"),
+        inboxes: 0, domains: 0, coldCapacity: 0, coldUsedToday: 0, coldRemaining: 0, warmingPerDay: 0,
+        _domains: new Set<string>(),
+      };
+      recs.set(key, r);
+    }
+    r.inboxes++; r.coldCapacity += cap; r.coldUsedToday += used;
+    if (dom) r._domains.add(dom);
+  }
+  const byRecruiter: RecruiterCapacity[] = [...recs.values()]
+    .map((r) => ({
+      ownerId: r.ownerId, ownerName: r.ownerName, inboxes: r.inboxes, domains: r._domains.size,
+      coldCapacity: r.coldCapacity, coldUsedToday: r.coldUsedToday,
+      coldRemaining: Math.max(0, r.coldCapacity - r.coldUsedToday),
+      warmingPerDay: r.inboxes * WARMING_PER_INBOX,
+    }))
+    .sort((a, b) => b.inboxes - a.inboxes);
+  return {
+    coldPerInbox: COLD_PER_INBOX, warmingPerInbox: WARMING_PER_INBOX, inboxesPerDomain: INBOXES_PER_DOMAIN,
+    inboxes, domains: domains.size,
+    coldCapacity, coldUsedToday, coldRemaining: Math.max(0, coldCapacity - coldUsedToday),
+    warmingPerDay: inboxes * WARMING_PER_INBOX,
+    byRecruiter,
+  };
 }
