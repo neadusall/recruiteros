@@ -147,6 +147,76 @@ export async function POST(req: Request) {
     return ok({ videos: await autoVideoMapByCompany() });
   }
 
+  // ADMIN: complete engine read for the "Engine / Throughput" panel — funnel + every source's
+  // health + the EFFECTIVE value of every throughput dial (so the operator sees exactly what each
+  // knob is set to and what to raise) + host headroom (disk/cpu/mem). Read-only; spends nothing.
+  if (b?.action === "engine_admin") {
+    const { curationFunnel } = await import("../../../lib/inmarket/curation");
+    const { engineHealth } = await import("../../../lib/inmarket/accumulator");
+    const { searchHealth, hydrateSearchHealth } = await import("../../../lib/inmarket/searchHealth");
+    const { commonCrawlHealth } = await import("../../../lib/inmarket/commonCrawl");
+    const { reoonStatus } = await import("../../../lib/inmarket/reoon");
+    const { egressEnabled, egressIps } = await import("../../../lib/net/egress");
+    const { autoEnrollStatus } = await import("../../../lib/inmarket/autoEnroll");
+    await hydrateSearchHealth().catch(() => undefined);
+    const [funnel, health, reoon, autoEnroll] = await Promise.all([
+      curationFunnel(), engineHealth(), reoonStatus(), autoEnrollStatus(),
+    ]);
+
+    // The effective value of each dial = the env override if set, else the engine's coded default.
+    // `crit` flags the throughput-critical knobs the panel highlights; `rec` is the suggested raise.
+    const num = (k: string, d: number) => Number(process.env[k]) || d;
+    const on = (k: string, dflt = false) => {
+      const v = (process.env[k] || "").toLowerCase();
+      return v ? ["1", "true", "yes", "on"].includes(v) : dflt;
+    };
+    const dials = [
+      { group: "Sourcing", key: "INMARKET_INFLOW_INTERVAL_SEC", value: num("INMARKET_INFLOW_INTERVAL_SEC", 180), unit: "sec/tick" },
+      { group: "Sourcing", key: "RAPID_JOBS_AUTOPILOT", value: on("RAPID_JOBS_AUTOPILOT") ? "on" : "off", note: process.env.RAPID_JOBS_KEY ? "key set" : "no key — paid feed off" },
+      { group: "Domain", key: "INMARKET_DOMAIN_BATCH", value: num("INMARKET_DOMAIN_BATCH", 500), unit: "/cycle" },
+      { group: "Domain", key: "INMARKET_DOMAIN_CONCURRENCY", value: num("INMARKET_DOMAIN_CONCURRENCY", 16) },
+      { group: "Curation", key: "INMARKET_CURATE_INTERVAL_SEC", value: num("INMARKET_CURATE_INTERVAL_SEC", 240), unit: "sec/tick", crit: true, rec: "120 (2× ticks/day)" },
+      { group: "Curation", key: "INMARKET_CURATE_BATCH", value: num("INMARKET_CURATE_BATCH", 300), unit: "/tick" },
+      { group: "Curation", key: "INMARKET_CURATE_CONCURRENCY", value: num("INMARKET_CURATE_CONCURRENCY", 16) },
+      { group: "Curation", key: "INMARKET_CURATE_MIN_SCORE", value: num("INMARKET_CURATE_MIN_SCORE", 10) },
+      { group: "Verify (free)", key: "INMARKET_VERIFY_BATCH", value: num("INMARKET_VERIFY_BATCH", 800), unit: "/tick" },
+      { group: "Reoon", key: "REOON_API_KEY", value: process.env.REOON_API_KEY ? "set" : "MISSING", crit: true },
+      { group: "Reoon", key: "REOON_FIND_BATCH", value: num("REOON_FIND_BATCH", 20), unit: "people/tick", crit: true, rec: "100–300 (the main verified-growth lever)" },
+      { group: "Reoon", key: "REOON_VERIFY_BATCH", value: num("REOON_VERIFY_BATCH", 30), unit: "/tick", crit: true, rec: "200–800" },
+      { group: "Reoon", key: "REOON_MAX_CANDIDATES", value: num("REOON_MAX_CANDIDATES", 6), unit: "credits/person" },
+      { group: "Reoon", key: "REOON_ACCEPT_CATCHALL", value: on("REOON_ACCEPT_CATCHALL", true) ? "on" : "off" },
+      { group: "Egress", key: "INMARKET_EGRESS_IPS", value: egressEnabled() ? egressIps().filter((x) => x !== "default").length + " IPs rotating" : "off" },
+      { group: "Screenshots", key: "INMARKET_SHOT_BATCH", value: num("INMARKET_SHOT_BATCH", 4), unit: "/tick" },
+      { group: "Screenshots", key: "INMARKET_SHOT_CONCURRENCY", value: num("INMARKET_SHOT_CONCURRENCY", 1) },
+      { group: "Auto-enroll", key: "INMARKET_AUTOENROLL", value: autoEnroll?.enabled ? "on" : "off" },
+    ];
+
+    // Host headroom — disk (the file-snapshot store can fill the box), cpu, memory.
+    let system: Record<string, unknown> = {};
+    try {
+      const os = await import("os");
+      const fsp = await import("fs/promises");
+      let disk: Record<string, number> | undefined;
+      try {
+        const s = await (fsp as unknown as { statfs?: (p: string) => Promise<{ blocks: number; bavail: number; bsize: number }> }).statfs?.(process.env.ROS_DATA_DIR || "/");
+        if (s) {
+          const totalGB = (s.blocks * s.bsize) / 1e9;
+          const freeGB = (s.bavail * s.bsize) / 1e9;
+          disk = { totalGB: Math.round(totalGB * 10) / 10, freeGB: Math.round(freeGB * 10) / 10, usedPct: Math.round((1 - freeGB / totalGB) * 100) };
+        }
+      } catch { /* statfs unavailable */ }
+      system = {
+        cpus: os.cpus().length,
+        loadavg: os.loadavg().map((n) => Math.round(n * 100) / 100),
+        memTotalGB: Math.round((os.totalmem() / 1e9) * 10) / 10,
+        memFreeGB: Math.round((os.freemem() / 1e9) * 10) / 10,
+        disk,
+      };
+    } catch { /* os/fs unavailable */ }
+
+    return ok({ funnel, health, reoon, autoEnroll, search: searchHealth(), cc: commonCrawlHealth(), dials, system });
+  }
+
   // The list itself, for review (filterable; contactableOnly = has a real person + email).
   if (b?.action === "curation_list") {
     const { listCurated } = await import("../../../lib/inmarket/curation");
