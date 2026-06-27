@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>A quick message for you</title>
 <style>
-  :root{ --bg:#eef1f6; --card:#ffffff; --line:#e6e9ef; --ink:#0f172a; --mut:#64748b; --accent:#16a34a; }
+  :root{ --bg:#eef1f6; --card:#ffffff; --line:#e6e9ef; --ink:#0f172a; --mut:#64748b; --accent:#16a34a; --on-accent:#ffffff; }
   *{box-sizing:border-box}
   html,body{height:100%}
   body{margin:0;background:radial-gradient(1100px 700px at 72% -12%, #ffffff, var(--bg));color:var(--ink);
@@ -17,9 +17,8 @@
   main{flex:1;min-height:0;display:flex;align-items:flex-start;justify-content:center;padding:2px 26px 10px}
   .stage{width:100%;max-width:1140px;display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:24px;align-items:start}
   .maincol{min-width:0;display:flex;flex-direction:column}
-  .ctx{flex:none;margin:0 0 12px}
+  .ctx{flex:none;margin:0 0 10px}
   .ctx h1{font-size:21px;margin:0;font-weight:750;letter-spacing:-.4px;line-height:1.25}
-  .ctx .sig{display:inline-block;margin-top:7px;font-size:12px;font-weight:600;color:var(--accent);background:rgba(22,163,74,.1);padding:3px 10px;border-radius:99px}
   .player{flex:none;height:380px;min-height:280px;position:relative;border-radius:18px;overflow:hidden;
     background:linear-gradient(135deg,#0b1220,#1e293b);box-shadow:0 20px 60px rgba(15,23,42,.2);
     display:flex;align-items:center;justify-content:center}
@@ -30,15 +29,29 @@
   .play svg{width:28px;height:28px;margin-left:5px;fill:#fff}
   .cta{flex:none;display:flex;gap:10px;margin-top:14px;align-items:center}
   .cta a{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--ink);
-    text-decoration:none;padding:11px 20px;border-radius:12px;font:inherit;font-weight:650;box-shadow:0 1px 2px rgba(15,23,42,.05);transition:all .12s}
+    text-decoration:none;padding:11px 20px;border-radius:12px;font:inherit;font-weight:650;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,.05);transition:all .12s}
   .cta a:hover{box-shadow:0 4px 14px rgba(15,23,42,.1)}
-  .cta a.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .cta a.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
   .cta .hint{color:var(--mut);font-size:12px;margin-left:2px}
   .side{display:flex;flex-direction:column;min-height:0}
   .side-h{flex:none;display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:750;color:var(--ink);margin:0 0 9px}
   .side-h .ico{width:15px;height:15px;fill:var(--accent)}
-  .cal{flex:none;height:680px;min-height:480px;border:1px solid var(--line);border-radius:18px;overflow:hidden;background:#fff;box-shadow:0 20px 60px rgba(15,23,42,.16)}
+  .cal{flex:none;height:680px;min-height:480px;border:1px solid var(--line);border-radius:18px;overflow:hidden;background:#fff;box-shadow:0 20px 60px rgba(15,23,42,.16);transition:outline .15s}
   .cal iframe{width:100%;height:100%;border:0;display:block}
+  .cal.flash{outline:3px solid var(--accent);outline-offset:3px}
+  /* Reply modal */
+  .mov{position:fixed;inset:0;background:rgba(2,6,12,.5);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .mov.open{display:flex}
+  .modal{width:100%;max-width:460px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px;box-shadow:0 30px 90px rgba(0,0,0,.4)}
+  .modal h3{margin:0 0 3px;font-size:18px;font-weight:750}
+  .modal .msub{margin:0 0 15px;color:var(--mut);font-size:13px}
+  .modal textarea{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:11px;padding:12px;font:inherit;resize:vertical;min-height:104px}
+  .modal input{width:100%;margin-top:10px;background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:11px;padding:12px;font:inherit}
+  .macts{display:flex;justify-content:flex-end;gap:9px;margin-top:15px}
+  .macts button{appearance:none;font:inherit;font-weight:650;padding:11px 20px;border-radius:11px;cursor:pointer;border:1px solid var(--line)}
+  .macts .ghost{background:transparent;color:var(--ink)}
+  .macts .send{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+  .mok{text-align:center;padding:30px 12px;color:var(--accent);font-weight:650;font-size:16px}
   @media (max-width:920px){ body{height:auto;overflow:auto} .stage{grid-template-columns:1fr} .player{height:auto;aspect-ratio:16/10} .cal{height:560px} }
 </style>
 </head>
@@ -57,16 +70,69 @@
         <span class="label">you, over Acme's live job posting</span>
       </div>
       <div class="cta">
-        <a class="primary" href="#">Book a call</a>
-        <a href="#">Reply</a>
+        <a class="primary" id="bookBtn" href="#">Book a call</a>
+        <a id="replyBtn" href="#">Reply</a>
         <span class="hint">or grab a time on the right →</span>
       </div>
     </div>
     <aside class="side">
       <div class="side-h"><svg class="ico" viewBox="0 0 24 24"><path d="M7 2v2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 6v11H5V8h14z"/></svg>Book a 15-minute call</div>
-      <div class="cal"><iframe src="https://tidycal.com/neadusall/new-position-discovery-call" title="Book a time" loading="eager"></iframe></div>
+      <div class="cal" id="cal"><iframe src="https://tidycal.com/neadusall/new-position-discovery-call" title="Book a time" loading="eager"></iframe></div>
     </aside>
   </div>
 </main>
+
+<div class="mov" id="replyModal">
+  <div class="modal" id="replyCard">
+    <h3>Reply to Lumesp</h3>
+    <p class="msub">Send a quick message — it goes straight to their inbox.</p>
+    <textarea id="rMsg" placeholder="Type your reply…"></textarea>
+    <input id="rEmail" type="email" placeholder="Your email (so they can reply back)" />
+    <div class="macts">
+      <button class="ghost" id="rCancel" type="button">Cancel</button>
+      <button class="send" id="rSend" type="button">Send reply</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var API = (window.RECRUITEROS_API_BASE || "").replace(/\/$/,"");
+  function $(id){ return document.getElementById(id); }
+
+  // Book a call → jump to the calendar + a brief highlight (scrolls to it on mobile).
+  var book = $("bookBtn");
+  if (book) book.addEventListener("click", function(e){
+    e.preventDefault();
+    var side = document.querySelector(".side"), cal = $("cal");
+    if (side) side.scrollIntoView({ behavior:"smooth", block:"center" });
+    if (cal){ cal.classList.add("flash"); setTimeout(function(){ cal.classList.remove("flash"); }, 1300); }
+  });
+
+  // Reply → quick pop-up to send a message back.
+  var modal = $("replyModal");
+  function open(){ modal.classList.add("open"); var t=$("rMsg"); if(t) t.focus(); }
+  function close(){ modal.classList.remove("open"); }
+  var reply = $("replyBtn"); if (reply) reply.addEventListener("click", function(e){ e.preventDefault(); open(); });
+  var cancel = $("rCancel"); if (cancel) cancel.addEventListener("click", close);
+  if (modal) modal.addEventListener("click", function(e){ if (e.target === modal) close(); });
+  document.addEventListener("keydown", function(e){ if (e.key === "Escape") close(); });
+
+  var send = $("rSend");
+  if (send) send.addEventListener("click", function(){
+    var msg = ($("rMsg").value || "").trim(), em = ($("rEmail").value || "").trim();
+    if (!msg && !em) { $("rMsg").focus(); return; }
+    // Real reply: posts to the lead endpoint, which emails the sender. (Best-effort; never blocks the UI.)
+    try {
+      var qs = new URLSearchParams(location.search);
+      var payload = JSON.stringify({ k: qs.get("k")||qs.get("s")||"preview", type:"reply", message:msg, email:em, c:"Acme Corp", r:"VP of Engineering" });
+      if (navigator.sendBeacon) navigator.sendBeacon(API + "/api/in-market/lead", new Blob([payload], { type:"text/plain" }));
+      else fetch(API + "/api/in-market/lead", { method:"POST", body:payload, keepalive:true });
+    } catch(e){}
+    $("replyCard").innerHTML = '<div class="mok">✓ Sent — thanks! They\'ll get back to you shortly.</div>';
+    setTimeout(close, 1900);
+  });
+})();
+</script>
 </body>
 </html>
