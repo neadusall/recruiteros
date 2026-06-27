@@ -2318,15 +2318,88 @@
       : '<div class="sq-h">Campaigns in the queue</div><div class="empty">No queued prospects yet. <a href="#inmarket">Run a Targeted JSearch search</a> to start staging.</div>';
     return supply + callout + needs + '<div class="sq-grid"><div class="sq-panel">' + proj + '</div><div class="sq-panel">' + camps + "</div></div>";
   }
+  // ⚡ Auto-fill panel — the one control that makes the queue set-and-forget: a toggle, the campaign
+  // to stage into, the daily band + buffer, and a "Fill now" button. When ON, the engine keeps the
+  // buffer topped automatically (it stages verified prospects; it never sends).
+  function sqAutofillHtml(af, campaigns) {
+    var s = (af && af.settings) || {};
+    var on = !!s.enabled;
+    var opts = '<option value="">— pick a campaign —</option>' + (campaigns || []).map(function (c) {
+      return '<option value="' + esc(c.id) + '"' + (c.id === s.campaignId ? " selected" : "") + ">" + esc(c.name) + (c.status ? " (" + esc(c.status) + ")" : "") + "</option>";
+    }).join("");
+    return '<div class="sq-af' + (on ? " on" : "") + '">' +
+        '<div class="sq-af-head">' +
+          '<label class="sq-switch" title="Turn auto-fill on/off"><input type="checkbox" id="sqAfToggle"' + (on ? " checked" : "") + '><span class="sq-slider"></span></label>' +
+          '<div class="sq-af-title">⚡ Auto-fill <span class="muted">' + (on ? "ON — keeping the buffer full" : "OFF") + "</span></div>" +
+          '<div class="sq-af-status">Staged today: <b>' + ((af && af.today) || 0).toLocaleString() + "</b> / " + ((af && af.dailyTarget) || 0).toLocaleString() + " target</div>" +
+        "</div>" +
+        '<div class="sq-af-row">' +
+          '<label class="sq-af-f">Campaign<select id="sqAfCampaign">' + opts + "</select></label>" +
+          '<label class="sq-af-f">Daily min<input type="number" id="sqAfMin" value="' + (s.targetMin || 4000) + '" min="1" step="500"></label>' +
+          '<label class="sq-af-f">Daily max<input type="number" id="sqAfMax" value="' + (s.targetMax || 6000) + '" min="1" step="500"></label>' +
+          '<label class="sq-af-f">Buffer days<input type="number" id="sqAfBuffer" value="' + (s.bufferDays || 5) + '" min="1" max="14"></label>' +
+          '<button type="button" class="btn btn-ghost btn-sm" id="sqAfSave">Save</button>' +
+          '<button type="button" class="btn btn-primary btn-sm" id="sqAfFill">⬇ Fill now</button>' +
+        "</div>" +
+        '<div class="sq-af-note muted">When ON, it stages verified send-ready prospects into the chosen campaign every few minutes — keeping ~' + (s.bufferDays || 5) + " days ahead so no day runs dry. It never sends; your campaign’s own controls do.</div>" +
+      "</div>";
+  }
+  function sqFillReason(r) {
+    return r === "buffer_full" ? "Buffer already full — nothing more to stage right now."
+      : r === "daily_target_met" ? "Today’s target is already met."
+      : r === "no_ready_supply" ? "No verified, contactable prospects waiting. Run a Targeted JSearch search + verify emails first."
+      : r === "no_campaign" ? "Pick a campaign first."
+      : "Nothing to stage right now.";
+  }
+  function sqGatherAf() {
+    return {
+      enabled: document.getElementById("sqAfToggle").checked,
+      campaignId: document.getElementById("sqAfCampaign").value,
+      targetMin: parseInt(document.getElementById("sqAfMin").value, 10) || 4000,
+      targetMax: parseInt(document.getElementById("sqAfMax").value, 10) || 6000,
+      bufferDays: parseInt(document.getElementById("sqAfBuffer").value, 10) || 5
+    };
+  }
+  function sqWireAutofill() {
+    var save = document.getElementById("sqAfSave"), fill = document.getElementById("sqAfFill"), toggle = document.getElementById("sqAfToggle");
+    function persist(cb) {
+      var s = sqGatherAf();
+      if (s.enabled && !s.campaignId) { toast("Pick a campaign to auto-fill into."); if (toggle) toggle.checked = false; return; }
+      send("/send-queue", "POST", { action: "autofill_settings", settings: s }).then(function (r) {
+        if (r && r.ok) { if (cb) cb(); else { toast(s.enabled ? "Auto-fill ON." : "Auto-fill saved."); sqReload(); } }
+        else toast("Couldn’t save auto-fill.");
+      }).catch(function () { toast("Couldn’t save auto-fill."); });
+    }
+    if (save) save.addEventListener("click", function () { persist(); });
+    if (toggle) toggle.addEventListener("change", function () { persist(); });
+    if (fill) fill.addEventListener("click", function () {
+      var s = sqGatherAf();
+      if (!s.campaignId) { toast("Pick a campaign first."); return; }
+      fill.disabled = true; fill.textContent = "Filling…";
+      send("/send-queue", "POST", { action: "autofill_settings", settings: s }).then(function () {
+        return send("/send-queue", "POST", { action: "fill_now", campaignId: s.campaignId });
+      }).then(function (r) {
+        var res = r && r.data && r.data.result;
+        if (res && res.enrolled > 0) toast("Staged " + res.enrolled.toLocaleString() + " prospect" + (res.enrolled === 1 ? "" : "s") + " into the queue.");
+        else toast(sqFillReason(res ? res.reason : ""));
+        sqReload();
+      }).catch(function () { fill.disabled = false; fill.textContent = "⬇ Fill now"; toast("Fill didn’t run."); });
+    });
+  }
+  function sqReload() {
+    var body = document.getElementById("sqBody"); if (!body) return;
+    api("/send-queue").then(function (d) {
+      var b = document.getElementById("sqBody"); if (!b) return;
+      if (!d || !d.overview) { b.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>'; return; }
+      b.innerHTML = sqAutofillHtml(d.autofill || { settings: {} }, d.campaigns || []) + sqOverviewHtml(d.overview);
+      sqWireAutofill();
+    }).catch(function () {
+      var b = document.getElementById("sqBody"); if (b) b.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>';
+    });
+  }
   function renderSendQueue(el) {
     el.innerHTML = '<div class="view-intro">Stage 4–6K send-ready prospects every day so the first email + next-day video email go out hands-off. Keep the buffer full so no day goes without a batch.</div><div id="sqBody">' + loading() + "</div>";
-    api("/send-queue").then(function (d) {
-      var body = document.getElementById("sqBody"); if (!body) return;
-      var o = d && d.overview;
-      body.innerHTML = o ? sqOverviewHtml(o) : '<div class="empty">Couldn’t load the send queue. Try again.</div>';
-    }).catch(function () {
-      var body = document.getElementById("sqBody"); if (body) body.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>';
-    });
+    sqReload();
   }
 
   // Human label for a JSearch employment-type code.
@@ -4290,10 +4363,6 @@
       };
       var legend = '<div class="cl-legend">' +
         legChip("valid", "cl-vb-ok", "✓ verified", by.valid || 0) +
-        legChip("deliverable", "cl-vb-deliv", "✓ deliverable", by.deliverable || 0) +
-        legChip("risky", "cl-vb-risky", "~ risky", by.risky || 0) +
-        legChip("invalid", "cl-vb-bad", "✕ invalid", by.invalid || 0) +
-        legChip("unchecked", "cl-vb-unk", "• unchecked", unchecked) +
         legChip("video", "cl-vb-vid", "🎬 with video", withVideo) +
         (clVerdict ? '<button class="cl-vb cl-vb-clear" data-verdict="">✕ clear</button>' : "") +
         "</div>";
