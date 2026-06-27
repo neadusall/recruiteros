@@ -136,8 +136,15 @@ export async function POST(req: Request) {
     const { autoEnrollStatus } = await import("../../../lib/inmarket/autoEnroll");
     const { reoonStatus } = await import("../../../lib/inmarket/reoon");
     const { autoCaptureStatus } = await import("../../../lib/inmarket/autoCapture");
-    const [health, autoEnroll, reoon, autoCapture] = await Promise.all([engineHealth(), autoEnrollStatus(), reoonStatus(), autoCaptureStatus()]);
-    return ok({ health, egress: { enabled: egressEnabled(), ips: egressIps() }, autoEnroll, reoon, autoCapture });
+    const { autoVideoStatus } = await import("../../../lib/inmarket/autoVideo");
+    const [health, autoEnroll, reoon, autoCapture, autoVideo] = await Promise.all([engineHealth(), autoEnrollStatus(), reoonStatus(), autoCaptureStatus(), autoVideoStatus()]);
+    return ok({ health, egress: { enabled: egressEnabled(), ips: egressIps() }, autoEnroll, reoon, autoCapture, autoVideo });
+  }
+
+  // Composed-video map (company -> finished outreach video) so the Clients tab can show videos.
+  if (b?.action === "autovideo_map") {
+    const { autoVideoMapByCompany } = await import("../../../lib/inmarket/autoVideo");
+    return ok({ videos: await autoVideoMapByCompany() });
   }
 
   // The list itself, for review (filterable; contactableOnly = has a real person + email).
