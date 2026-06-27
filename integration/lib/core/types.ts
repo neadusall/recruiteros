@@ -98,6 +98,10 @@ export interface Campaign {
   assignee?: string;
   /** The sending account/handle this campaign uses (or "auto-rotate"). */
   senderAccount?: string;
+  /** The recruiter (member userId) whose sender-inbox pool this campaign sends
+   *  from. Set at deploy; the send path rotates across that recruiter's inboxes
+   *  (see lib/senders/pool.ts pickSender). */
+  recruiterId?: string;
   updatedAt?: string;
 }
 
@@ -113,6 +117,10 @@ export interface Prospect {
    *  imported it. Powers the per-recruiter Dashboard drill-down. Unset for
    *  legacy/admin-created records (counted only in the workspace-wide view). */
   ownerId?: string;
+  /** The specific sender inbox (lib/senders) this prospect was sent from, stamped
+   *  when the rotation picks one at deploy. Lets replies + analytics tie back to
+   *  the exact Email ID, and keeps a prospect on one inbox across a sequence. */
+  senderInboxId?: string;
   fullName: string;
   firstName: string;
   email?: string;
