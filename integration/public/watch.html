@@ -14,6 +14,7 @@
   .brand{font-weight:700;letter-spacing:.2px;background:linear-gradient(90deg,#19c37d,#58a6ff);-webkit-background-clip:text;background-clip:text;color:transparent}
   main{flex:1;display:flex;align-items:center;justify-content:center;padding:16px 20px 48px}
   .stage{width:100%;max-width:880px}
+  .stage.wide{max-width:1180px}
   .ctx{text-align:center;margin:0 0 16px}
   .ctx h1{font-size:22px;margin:0 0 4px;font-weight:650}
   .ctx p{margin:0;color:var(--mut);font-size:14px}
@@ -27,8 +28,14 @@
   .cta a,.cta button{appearance:none;border:1px solid var(--line);background:#1a222c;color:var(--ink);
     text-decoration:none;padding:11px 20px;border-radius:10px;font:inherit;font-weight:600;cursor:pointer}
   .cta a.primary{background:var(--grn);border-color:var(--grn);color:#06231a}
-  .cal{margin-top:20px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff}
-  .cal iframe{width:100%;height:560px;border:0;display:block}
+  .cols{display:block}
+  .cols.has-cal{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:28px;align-items:start}
+  @media (max-width:960px){ .cols.has-cal{grid-template-columns:1fr} }
+  .maincol{min-width:0}
+  .side{position:sticky;top:20px}
+  .side-h{font-size:12px;font-weight:700;color:var(--mut);margin:0 0 10px;text-transform:uppercase;letter-spacing:.06em}
+  .cal{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff;box-shadow:0 24px 80px rgba(0,0,0,.45)}
+  .cal iframe{width:100%;height:640px;border:0;display:block}
   .reply{max-width:560px;margin:20px auto 0;border:1px solid var(--line);border-radius:14px;padding:15px;background:var(--panel)}
   .reply .rh{font-size:13px;font-weight:600;margin-bottom:9px}
   .reply textarea{width:100%;background:#0a0e13;border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:10px;font:inherit;resize:vertical}
@@ -129,15 +136,23 @@
       '<div class="rrow"><input type="email" id="rEmail" placeholder="Your email (optional)" /><button type="submit">Send</button></div>' +
     '</form>';
 
-  stage.innerHTML =
+  var hasCal = isHttp(calLink);
+  if (hasCal) stage.className = "stage wide";
+  var leftCol =
     '<div class="ctx"><h1>' + esc(title) + '</h1><p>' + esc(sub) + '</p></div>' +
     '<div class="player" id="player">' +
       '<video id="vid" playsinline preload="metadata" poster="' + gif + '"></video>' +
       '<div class="play" id="overlay"><div class="btn"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>' +
     '</div>' +
     (cta ? '<div class="cta">' + cta + '</div>' : '') +
-    calEmbed +
     replyForm;
+  // Calendar lives in a sticky right column on wide screens (stacks below on mobile).
+  var rightCol = hasCal
+    ? '<aside class="side"><div class="side-h">Book a time</div>' +
+        '<div class="cal"><iframe src="' + esc(calLink) + '" title="Book a time" loading="lazy"></iframe></div></aside>'
+    : '';
+  stage.innerHTML = '<div class="cols' + (hasCal ? ' has-cal' : '') + '">' +
+    '<div class="maincol">' + leftCol + '</div>' + rightCol + '</div>';
 
   var rf = document.getElementById("replyForm");
   if (rf) rf.addEventListener("submit", function (e) {
