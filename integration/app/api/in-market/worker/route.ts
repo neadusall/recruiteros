@@ -157,5 +157,27 @@ export async function POST(req: Request) {
     return ok({ accepted: leads.length, received: raw.length });
   }
 
-  return fail("bad_action", 422, { detail: "action must be claim | submit | source" });
+  // VIDEO FLEET — a worker box claims "make a video" jobs, runs the whole pipeline locally
+  // (capture → composite → upload to shared S3), and reports the composite keys back. This is how
+  // video generation scales out toward 5K/day (each box adds its own CPU). Requires ROS_S3_* so the
+  // worker's video is servable by the main.
+  if (b?.action === "claim_video") {
+    const { claimVideoJobs } = await import("../../../../lib/inmarket/autoVideo");
+    const limit = Math.min(Math.max(Number(b.limit) || 8, 1), 100);
+    const res = await claimVideoJobs(limit);
+    recordClaim(workerId, res.jobs.length);
+    return ok(res);
+  }
+  if (b?.action === "submit_video") {
+    const { recordVideoResults } = await import("../../../../lib/inmarket/autoVideo");
+    const raw = Array.isArray(b.results) ? b.results.slice(0, 1000) : [];
+    const results = raw
+      .map((x: { company?: unknown; role?: unknown; videoKey?: unknown }) => ({ company: String(x?.company ?? ""), role: String(x?.role ?? ""), videoKey: String(x?.videoKey ?? "") }))
+      .filter((x: { company: string; role: string; videoKey: string }) => x.company && x.role && x.videoKey);
+    const recorded = await recordVideoResults(results);
+    recordSubmit(workerId, results.length, recorded);
+    return ok({ recorded, received: raw.length });
+  }
+
+  return fail("bad_action", 422, { detail: "action must be claim | submit | source | claim_video | submit_video" });
 }
