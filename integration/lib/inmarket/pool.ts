@@ -205,6 +205,16 @@ export async function poolSize(): Promise<number> {
   return (await load()).length;
 }
 
+/** The set of companyKeys currently in the pool, so a caller can flag which preview leads we've
+ *  ALREADY pulled (in the pool) vs. which are NET-NEW — without shipping the whole pool blob. Used by
+ *  the targeted-search preview to show "positions pulled vs. not pulled" and let the user scrape only
+ *  the fresh ones. */
+export async function poolCompanyKeySet(): Promise<Set<string>> {
+  const set = new Set<string>();
+  for (const e of await load()) { const k = keyOf(e.lead); if (k) set.add(k); }
+  return set;
+}
+
 /** One-time cleanup: drop every stored lead we can't positively place in the United States,
  *  so the existing pool matches the US-only policy. Returns how many were removed. No-op
  *  without a database. */

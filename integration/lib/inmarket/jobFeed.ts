@@ -66,19 +66,36 @@ function companyId(company: string): string {
 
 /** Hosts that bot-wall a headless capture — roleShot can't screenshot these, so don't feed them. */
 const AGG_RE = /(^|\.)(linkedin|indeed|glassdoor|ziprecruiter|monster|dice|simplyhired|jooble|adzuna|lensa|talent\.com)\./i;
+/** Press / marketing / investor paths — we must screenshot a JOB DESCRIPTION, never a press release,
+ *  blog, news, or "about" page. A URL whose path looks like PR/marketing is rejected as a capture
+ *  target so the screenshot is always of an actual job post (belt-and-suspenders with roleShot's own
+ *  JD verification, which is the hard gate). */
+const PR_PATH_RE = /\/(press|news|newsroom|media|investors?|press-?releases?|announcements?|blog|articles?|stories|insights|events)(\/|\?|#|$)/i;
+/** Recognizable ATS / job-posting URL shapes — a strong signal the page is an actual job description.
+ *  Prefer a candidate that matches one of these over a bare company URL. */
+const JOB_URL_RE = /(greenhouse\.io|lever\.co|ashbyhq\.com|workable\.com|smartrecruiters\.com|recruitee\.com|bamboohr\.com|jobvite\.com|icims\.com|myworkdayjobs\.com|workday|taleo|breezy\.hr|jazzhr|teamtailor)|\/(jobs?|careers?|job|posting|openings?|positions?|opportunit(?:y|ies)|vacanc(?:y|ies))(\/|\?|#|$)/i;
 function hostOfUrl(u: string): string {
   try { return new URL(u).hostname; } catch { return ""; }
 }
 /** Pick the best posting URL to hand roleShot. JSearch's primary `job_apply_link` is a
  *  LinkedIn/aggregator URL ~half the time (those bot-wall, so they can't be captured). The
- *  `apply_options` array usually also carries a DIRECT company/ATS link — prefer that. */
+ *  `apply_options` array usually also carries a DIRECT company/ATS link — prefer that. We also
+ *  refuse press-release / blog / investor URLs so the screenshot is always a real JOB DESCRIPTION,
+ *  never a PR page (per the user's requirement). */
 function bestApplyUrl(j: RawJob): string | undefined {
   const links = (Array.isArray(j.apply_options) ? j.apply_options : [])
     .map((o) => (typeof o?.apply_link === "string" ? { url: o.apply_link.trim(), direct: !!o.is_direct } : null))
     .filter((x): x is { url: string; direct: boolean } => !!x && /^https?:\/\//.test(x.url));
-  const nonAgg = links.filter((l) => !AGG_RE.test(hostOfUrl(l.url)));
-  const pick = nonAgg.find((l) => l.direct) ?? nonAgg[0] ?? links.find((l) => l.direct) ?? links[0];
-  return pick?.url || field(j, "job_apply_link", "url") || undefined;
+  const primary = field(j, "job_apply_link", "url");
+  if (/^https?:\/\//.test(primary)) links.push({ url: primary, direct: false });
+  // Drop aggregators (bot-walled, not the company's own posting) and PR/marketing pages (not a job).
+  const clean = links.filter((l) => !AGG_RE.test(hostOfUrl(l.url)) && !PR_PATH_RE.test(l.url));
+  // Prefer a URL that LOOKS like a real job posting (ATS host / careers path), direct first, then any
+  // clean URL, direct first. If nothing clean remains, return undefined — roleShot will fall back to
+  // verified careers-page discovery rather than screenshot an aggregator/PR page.
+  const jobShaped = clean.filter((l) => JOB_URL_RE.test(l.url));
+  const pick = jobShaped.find((l) => l.direct) ?? jobShaped[0] ?? clean.find((l) => l.direct) ?? clean[0];
+  return pick?.url || undefined;
 }
 
 /** PURE normalizer (no network) — US-filter + group-by-company + hiring-velocity score + domain capture. */
@@ -118,8 +135,20 @@ export function mapJobsToLeads(arr: RawJob[], category?: string): InMarketLead[]
   return out;
 }
 
+/** A targeted JSearch query. `query` (role/keywords) is required by JSearch; the rest narrow it so
+ *  the USER drives exactly what gets scraped (vs. the old random rotation). */
+export interface JobFeedOpts {
+  query?: string;
+  location?: string;                 // folded into the JSearch query as "<query> in <location>"
+  datePosted?: string;               // JSearch date_posted: all | today | 3days | week | month
+  employmentTypes?: string[];        // JSearch employment_types: FULLTIME | PARTTIME | CONTRACTOR | INTERN
+  remoteOnly?: boolean;              // JSearch remote_jobs_only
+  limit?: number;                    // jobs to pull
+  offset?: number;                   // page-block offset (in jobs) for deeper pagination
+}
+
 /** Fetch one page-set from the feed and normalize. `limit` is in JOBS; for JSearch we convert to pages. */
-export async function fetchJobFeedLeads(opts: { query?: string; location?: string; limit?: number; offset?: number }): Promise<InMarketLead[]> {
+export async function fetchJobFeedLeads(opts: JobFeedOpts): Promise<InMarketLead[]> {
   if (!jobFeedEnabled()) return [];
   const host = process.env.RAPID_JOBS_HOST!;
   const isJSearch = PROVIDER() === "jsearch";
@@ -127,9 +156,19 @@ export async function fetchJobFeedLeads(opts: { query?: string; location?: strin
   const u = new URL(`https://${host}${process.env.RAPID_JOBS_PATH || (isJSearch ? "/search-v2" : "/active-ats")}`);
 
   if (isJSearch) {
-    u.searchParams.set("query", opts.query || "hiring");        // JSearch requires a query (category/role)
+    // Build the query from role/keywords + (optional) location. JSearch's /search has no separate
+    // location param — "<role> in <place>" is its native shape — so fold location into the query
+    // unless it's a nationwide pass or the caller already embedded an "in <place>" clause.
+    let q = (opts.query || "hiring").trim();
+    const loc = (opts.location || "").trim();
+    if (loc && !/^united states$/i.test(loc) && !/\bin\s+\S/i.test(q)) q = `${q} in ${loc}`;
+    u.searchParams.set("query", q);                             // JSearch requires a query (role/keywords)
     u.searchParams.set("country", "us");
-    u.searchParams.set("date_posted", process.env.RAPID_JOBS_DATE || "week");
+    u.searchParams.set("date_posted", opts.datePosted || process.env.RAPID_JOBS_DATE || "week");
+    if (opts.remoteOnly) u.searchParams.set("remote_jobs_only", "true");
+    if (Array.isArray(opts.employmentTypes) && opts.employmentTypes.length) {
+      u.searchParams.set("employment_types", opts.employmentTypes.join(","));
+    }
     const pages = Math.min(Math.max(Math.ceil((opts.limit ?? JOBS_PER_PAGE) / JOBS_PER_PAGE), 1), 20);
     u.searchParams.set("num_pages", String(pages));
     u.searchParams.set("page", String(opts.offset ? Math.floor(opts.offset / JOBS_PER_PAGE) + 1 : 1));
@@ -157,8 +196,17 @@ export async function fetchJobFeedLeads(opts: { query?: string; location?: strin
   return mapJobsToLeads(arr, opts.query);
 }
 
+/** PREVIEW a targeted search WITHOUT touching the pool — fetch + normalize and report the companies
+ *  found (+ total open roles) so the user can pick which to actually scrape. This is the "I decide
+ *  which jobs we scrape" step: nothing merges until the user commits the selected leads. */
+export async function previewJobFeed(opts: JobFeedOpts): Promise<{ leads: InMarketLead[]; companies: number; jobs: number }> {
+  const leads = await fetchJobFeedLeads(opts);
+  const jobs = leads.reduce((s, l) => s + (l.roleDetails?.length || l.roles?.length || 1), 0);
+  return { leads, companies: leads.length, jobs };
+}
+
 /** Pull from the feed and merge into the pool. Returns company-leads shipped (0 when not configured). */
-export async function runJobFeedSourcing(opts: { query?: string; location?: string; limit?: number; offset?: number }): Promise<number> {
+export async function runJobFeedSourcing(opts: JobFeedOpts): Promise<number> {
   if (!jobFeedEnabled()) return 0;
   const leads = await fetchJobFeedLeads(opts);
   if (!leads.length) return 0;

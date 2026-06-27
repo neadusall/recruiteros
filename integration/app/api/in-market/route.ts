@@ -11,7 +11,7 @@
  * BD motion only; the engine searches company-side hiring-intent signals.
  */
 
-import { searchInMarket, promoteLead, type InMarketLead, type HiringManagerLead } from "../../../lib/inmarket";
+import { searchInMarket, promoteLead, companyKey, type InMarketLead, type HiringManagerLead } from "../../../lib/inmarket";
 import { getCore } from "../../../lib/core/repository";
 import { requireSession, body, ok, fail } from "../../../lib/api";
 
@@ -206,6 +206,87 @@ export async function POST(req: Request) {
     const limit = Math.min(Math.max(Number(b.limit) || 100, 10), 500);
     const scraped = await runJobFeedSourcing({ query, location: b.location ? String(b.location) : undefined, limit });
     return ok({ scraped, industry: query });
+  }
+
+  // ---- TARGETED JSEARCH SEARCH QUEUE: author exact searches → queue → run (preview) → pick (commit).
+  //      This is the user-controlled alternative to the random JSearch rotation (which is now off by
+  //      default). You decide EXACTLY what to scrape and which results actually enter the pool. ----
+
+  // List every saved targeted search (with its last-run status/result).
+  if (b?.action === "queue_list") {
+    const { listSearches } = await import("../../../lib/inmarket/searchQueue");
+    return ok({ searches: await listSearches() });
+  }
+  // Create or update a targeted search (pass `search.id` to update). Persisted; nothing scrapes here.
+  if (b?.action === "queue_save") {
+    const { saveSearch } = await import("../../../lib/inmarket/searchQueue");
+    try { return ok({ search: await saveSearch((b.search || {}) as Record<string, unknown>) }); }
+    catch (e: any) { return fail(e?.message ?? "save_failed", e?.status ?? 422); }
+  }
+  // Delete a targeted search.
+  if (b?.action === "queue_delete") {
+    const { deleteSearch } = await import("../../../lib/inmarket/searchQueue");
+    return ok({ deleted: await deleteSearch(String(b.id ?? "")) });
+  }
+  // RUN a targeted search = PREVIEW only: fetch via JSearch with the saved params and return the
+  // companies found WITHOUT merging. The user reviews them, then commits the ones they want. Stamps
+  // the run onto the saved search so the queue shows "ran · N companies".
+  if (b?.action === "queue_run") {
+    const { previewJobFeed, jobFeedEnabled } = await import("../../../lib/inmarket/jobFeed");
+    if (!jobFeedEnabled()) return fail("jobfeed_not_configured", 409, { detail: "Set RAPID_JOBS_HOST + RAPID_JOBS_KEY (JSearch on RapidAPI) to run targeted searches." });
+    const { getSearch, markRun, markError } = await import("../../../lib/inmarket/searchQueue");
+    // Accept either a saved id or an ad-hoc search object (run-without-saving).
+    const s = b.id ? await getSearch(String(b.id)) : (b.search as Record<string, unknown> | undefined);
+    if (!s) return fail("search_not_found", 404);
+    const opts = {
+      query: String((s as any).query ?? "").trim(),
+      location: (s as any).location ? String((s as any).location) : undefined,
+      datePosted: (s as any).datePosted ? String((s as any).datePosted) : undefined,
+      employmentTypes: Array.isArray((s as any).employmentTypes) ? (s as any).employmentTypes : undefined,
+      remoteOnly: (s as any).remoteOnly === true,
+      limit: Math.min(Math.max(Number((s as any).limit) || 100, 10), 500),
+    };
+    if (!opts.query) return fail("missing_query", 422, { detail: "query (role/keywords) required" });
+    try {
+      const { leads } = await previewJobFeed(opts);
+      // SUPPRESS ALREADY-EMAILED: drop companies/roles we've already sent >= N (default 2) emails to,
+      // BUT keep a company that comes back with a different job title (a fresh hiring signal).
+      const { filterAlreadyEmailed } = await import("../../../lib/inmarket/outreachFilter");
+      const f = await filterAlreadyEmailed(ws, leads);
+      // POOL MEMBERSHIP: flag which companies are ALREADY pulled (in the pool) vs. NET-NEW, and split
+      // the position counts, so the preview can show "X pulled / Y new" and let the user scrape only
+      // the fresh ones ("pull a fresh list").
+      const { poolCompanyKeySet } = await import("../../../lib/inmarket/pool");
+      const inPool = await poolCompanyKeySet();
+      const posOf = (l: InMarketLead) => (l.roleDetails?.length || l.roles?.length || 1);
+      const annotated = f.leads.map((l) => ({ ...l, inPool: inPool.has(companyKey(l.company || "")) }));
+      const companies = annotated.length;
+      const jobs = annotated.reduce((s, l) => s + posOf(l), 0);
+      const newCompanies = annotated.filter((l) => !l.inPool).length;
+      const newPositions = annotated.filter((l) => !l.inPool).reduce((s, l) => s + posOf(l), 0);
+      if (b.id) await markRun(String(b.id), { companies, jobs });
+      return ok({
+        leads: annotated, companies, jobs,
+        newCompanies, pulledCompanies: companies - newCompanies,
+        newPositions, pulledPositions: jobs - newPositions,
+        suppressedCompanies: f.suppressedCompanies, suppressedRoles: f.suppressedRoles, suppressThreshold: f.threshold,
+      });
+    } catch (e: any) {
+      if (b.id) await markError(String(b.id), e?.message ?? "run_failed");
+      return fail(e?.message ?? "run_failed", e?.status ?? 400);
+    }
+  }
+  // COMMIT = the "pick" step: merge ONLY the companies the user selected from a run into the pool.
+  if (b?.action === "queue_commit") {
+    const leads = Array.isArray(b.leads) ? (b.leads as InMarketLead[]) : [];
+    if (!leads.length) return fail("no_leads", 422, { detail: "select at least one company to scrape" });
+    const { mergeIntoPool } = await import("../../../lib/inmarket/pool");
+    await mergeIntoPool(leads);
+    if (b.id) {
+      const { markCommitted } = await import("../../../lib/inmarket/searchQueue");
+      await markCommitted(String(b.id), leads.length);
+    }
+    return ok({ merged: leads.length });
   }
 
   // On-demand curation run (the accumulator also does this hourly): research the top companies'
