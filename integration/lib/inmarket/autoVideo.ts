@@ -54,6 +54,63 @@ export async function autoVideoMapByCompany(): Promise<Record<string, { videoKey
   return out;
 }
 
+/* ------------------------------------------------------------------ */
+/* FLEET — hand video jobs to worker boxes so generation scales out     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Hand a batch of "make a video" jobs to a worker box: contactable rows that don't have a video yet,
+ * plus the clip to overlay and the fixed length. The worker runs the whole pipeline locally
+ * (capture → composite → upload to shared S3) and reports the key back via recordVideoResults. A
+ * random offset spreads the work so concurrent workers don't all grab the same head; composeRoleVideo
+ * is cached by videoKey, so the rare duplicate is just wasted CPU, never a bad asset.
+ *
+ * Requires shared object storage (ROS_S3_*) so a worker's video is servable by the main — otherwise
+ * the composite would live only on the worker's disk.
+ */
+export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ company: string; role: string; jobUrl?: string; domain?: string }>; clipId: string | null; durationSec: number; shared: boolean }> {
+  const dur = videoSeconds();
+  const clipId = await resolveClipId();
+  let shared = false;
+  try { shared = (await import("./assetStore")).s3Enabled(); } catch { /* no s3 module */ }
+  if (!clipId) return { jobs: [], clipId: null, durationSec: dur, shared };
+
+  const { listCurated } = await import("./curation");
+  const { shotKey } = await import("./roleShot");
+  const map = await loadMap();
+  const rows = await listCurated({ status: "contactable", contactableOnly: true, limit: 6000 });
+  const pending: Array<{ company: string; role: string; jobUrl?: string; domain?: string }> = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const company = r.company;
+    const role = r.role || r.managerTitle;
+    if (!company || !role) continue;
+    const key = shotKey(company, role);
+    if (map[key] || seen.has(key)) continue;
+    seen.add(key);
+    pending.push({ company, role, jobUrl: r.jobUrl, domain: r.domain });
+  }
+  const n = Math.max(1, Math.min(limit, 100));
+  const start = pending.length > n ? Math.floor(Math.random() * (pending.length - n)) : 0;
+  return { jobs: pending.slice(start, start + n), clipId, durationSec: dur, shared };
+}
+
+/** A worker reports the videos it composited (keyed by company+role) → record them so the Clients tab shows them. */
+export async function recordVideoResults(results: Array<{ company: string; role: string; videoKey: string }>): Promise<number> {
+  if (!results.length) return 0;
+  const { shotKey } = await import("./roleShot");
+  const map = await loadMap();
+  const nowIso = new Date().toISOString();
+  let n = 0;
+  for (const r of results) {
+    if (!r.company || !r.role || !r.videoKey) continue;
+    map[shotKey(r.company, r.role)] = { videoKey: r.videoKey, company: r.company, role: r.role, at: nowIso };
+    n++;
+  }
+  if (n) { await saveSnapshot(MAP_KEY, map); totalMade += n; }
+  return n;
+}
+
 let started = false, running = false;
 let lastRun = 0, lastMade = 0, totalMade = 0, lastError: string | undefined, activeClip: string | undefined;
 
