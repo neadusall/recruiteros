@@ -554,6 +554,36 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .cl-via { font-size: 11px; color: var(--text-dim, #9a9aa8); text-transform: capitalize; }
 .cl-size { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 6px; background: rgba(120,170,255,0.12); color: #8fb3ff; white-space: nowrap; }
 .cl-cat-tier { background: rgba(255,255,255,0.06); color: var(--text-dim, #9a9aa8); text-transform: capitalize; }
+
+/* ── Clients · CRM table (clean composite cells, sticky header, row hover) ───────── */
+.cl-sheet { width: 100%; border-collapse: separate; border-spacing: 0; }
+.cl-sheet-wrap { max-height: calc(100vh - 320px); overflow: auto; }
+.cl-sheet thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2); backdrop-filter: blur(6px); font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--text-dim, #9a9aa8); padding: 10px 14px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border-strong, var(--border)); cursor: pointer; user-select: none; }
+.cl-sheet thead th:hover { color: var(--text); }
+.cl-sheet thead th.cl-th-active { color: var(--brand); }
+.cl-sheet tbody td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; font-size: 13px; }
+.cl-sheet tbody tr.pr-row { transition: background .1s ease; }
+.cl-sheet tbody tr.pr-row:hover { background: rgba(255,255,255,0.025); }
+/* Composite identity cell: avatar + stacked primary/secondary text. */
+.crm-id { display: flex; align-items: center; gap: 10px; }
+.crm-av { flex: none; width: 30px; height: 30px; font-size: 11px; position: relative; }
+.crm-id-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.crm-name { font-weight: 600; color: var(--text); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+.crm-sub { font-size: 11.5px; color: var(--text-dim, #9a9aa8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+.crm-sub a { color: var(--text-dim, #9a9aa8); }
+.crm-sub a:hover { color: var(--brand); }
+.crm-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+.crm-c-signal .crm-id-t { max-width: 320px; }
+.crm-sig { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+.crm-c-num { text-align: center; }
+.crm-li { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px; background: #0a66c2; color: #fff !important; font-size: 9px; font-weight: 700; text-decoration: none; vertical-align: middle; }
+.crm-jobpost { color: var(--text-dim, #9a9aa8); text-decoration: none; font-weight: 700; }
+.crm-jobpost:hover { color: var(--brand); }
+/* Legend chips are now interactive verdict filters. */
+.cl-vb { appearance: none; border: 1px solid transparent; cursor: pointer; font: inherit; transition: filter .1s ease, box-shadow .1s ease; }
+.cl-vb:hover { filter: brightness(1.18); }
+.cl-vb-active { box-shadow: 0 0 0 2px currentColor inset; filter: brightness(1.12); }
+.cl-vb-clear { background: rgba(255,255,255,0.06); color: var(--text-dim, #9a9aa8); }
 .cl-capnote { padding: 8px 16px; font-size: 12px; color: var(--text-dim, #9a9aa8); border-bottom: 1px solid var(--border); }
 .im-ai-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 99px; background: rgba(77,208,255,0.14); color: var(--brand-2); margin-left: 4px; }
 .im-ai-refine, .im-all-roles { appearance: none; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; margin-top: 8px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); transition: all .12s ease; }
