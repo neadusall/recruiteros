@@ -2306,30 +2306,68 @@
       if (e.target.closest && e.target.closest("[data-wlclose]")) { var box = document.getElementById("sqWorklist"); if (box) box.innerHTML = ""; }
     };
   }
-  // 📨 Sending capacity — the recruiter inbox pools (lib/senders) and the HARD per-inbox
-  // cold cap (2/day), so the queue shows headroom draining as every Email ID gets maxed.
+  // 📨 Sending system — a legible model: Domains → Email IDs → cold sends/day, with the
+  // hard 2/day cap making the math exact and today's usage draining live. Styles injected once.
+  function syscapCss() {
+    if (document.getElementById("syscapCss")) return "";
+    return '<style id="syscapCss">' +
+      '.syscap{border:1px solid var(--border);border-radius:14px;background:var(--surface);padding:16px 18px;margin-bottom:14px}' +
+      '.syscap-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px}' +
+      '.syscap-h h3{font-size:15px;font-weight:800;margin:0}' +
+      '.syscap-h .sub{font-size:12px;color:var(--muted,#8a93a6)}' +
+      '.syscap-flow{display:flex;align-items:stretch;flex-wrap:wrap;margin:14px 0 8px}' +
+      '.syscap-step{flex:1;min-width:108px;text-align:center;padding:11px 8px;border:1px solid var(--border);border-radius:12px}' +
+      '.syscap-step .n{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1}' +
+      '.syscap-step .l{font-size:12px;font-weight:700;margin-top:4px}' +
+      '.syscap-step .s{font-size:11px;color:var(--muted,#8a93a6);margin-top:2px}' +
+      '.syscap-arrow{display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--muted,#8a93a6);font-size:16px;font-weight:700}' +
+      '.syscap-meter .track{height:10px;border-radius:6px;background:var(--border);overflow:hidden}' +
+      '.syscap-meter .fill{height:100%;background:linear-gradient(90deg,#7c5cff,#4dd0ff)}' +
+      '.syscap-meter .lbl{display:flex;justify-content:space-between;font-size:12px;margin-top:6px;color:var(--muted,#8a93a6)}' +
+      '.syscap-meter .lbl b{font-weight:800;color:var(--text)}' +
+      '.syscap-warm{font-size:12px;color:var(--muted,#8a93a6);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}' +
+      '.syscap-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}' +
+      '.syscap-tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);padding:6px 8px;border-bottom:1px solid var(--border)}' +
+      '.syscap-tbl td{padding:7px 8px;border-bottom:1px solid var(--border)}' +
+      '.syscap-tbl .num{text-align:right;font-variant-numeric:tabular-nums}' +
+      '.syscap-bar{display:inline-block;height:6px;border-radius:4px;background:var(--border);width:52px;overflow:hidden;vertical-align:middle;margin-left:8px}' +
+      '.syscap-bar>i{display:block;height:100%;background:#7c5cff}' +
+      '</style>';
+  }
   function sqCapacityHtml(cap) {
     if (!cap) return "";
+    var css = syscapCss();
     if (!cap.inboxes) {
-      return '<div class="sq-panel" style="margin-bottom:14px"><div class="sq-h">📨 Sending capacity (Email IDs)</div>' +
-        '<div class="empty">No sender inboxes yet. <a href="#senders">Import your Email IDs</a> and assign them to recruiters — then this shows your daily cold-send ceiling, maxing every Email ID at ' + (cap.coldPerInbox || 2) + '/day.</div></div>';
+      return css + '<div class="syscap"><div class="syscap-h"><h3>📨 Sending system</h3><span class="sub">your domains, Email IDs, and daily cold-send capacity</span></div>' +
+        '<div class="empty" style="margin-top:12px">No Email IDs yet. <a href="#senders">Import your inboxes</a> and assign them to recruiters — then this shows the model: <b>domains → Email IDs → ' + (cap.coldPerInbox || 2) + ' cold sends/day each</b>, draining live as you send.</div></div>';
     }
-    var pct = cap.coldCapacity ? Math.round((cap.coldUsedToday / cap.coldCapacity) * 100) : 0;
-    var head = '<div class="sq-cards">' +
-      '<div class="sq-card big"><div class="sq-k">Cold capacity today</div><div class="sq-v">' + sqFmt(cap.coldRemaining) + ' <span class="sq-unit">left</span></div><div class="sq-sub">' + sqFmt(cap.coldUsedToday) + " / " + sqFmt(cap.coldCapacity) + " used today · " + pct + "%</div></div>" +
-      '<div class="sq-card"><div class="sq-k">Email IDs</div><div class="sq-v">' + sqFmt(cap.inboxes) + "</div><div class=\"sq-sub\">" + cap.domains + " domain" + (cap.domains === 1 ? "" : "s") + " · " + cap.coldPerInbox + " cold/day each (hard)</div></div>" +
-      '<div class="sq-card"><div class="sq-k">Warming / day</div><div class="sq-v">' + sqFmt(cap.warmingPerDay) + "</div><div class=\"sq-sub\">" + cap.warmingPerInbox + "/inbox · Smartlead (not us)</div></div>" +
-    "</div>";
-    var bar = '<div style="height:8px;border-radius:6px;background:var(--border);overflow:hidden;margin:2px 0 12px"><div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,#7c5cff,#4dd0ff)"></div></div>';
+    var pct = cap.coldCapacity ? Math.min(100, Math.round((cap.coldUsedToday / cap.coldCapacity) * 100)) : 0;
+    var flow =
+      '<div class="syscap-flow">' +
+        '<div class="syscap-step"><div class="n">' + sqFmt(cap.domains) + '</div><div class="l">Domains</div><div class="s">' + cap.inboxesPerDomain + ' Email IDs each</div></div>' +
+        '<div class="syscap-arrow">→</div>' +
+        '<div class="syscap-step"><div class="n">' + sqFmt(cap.inboxes) + '</div><div class="l">Email IDs</div><div class="s">' + cap.coldPerInbox + ' cold + ' + cap.warmingPerInbox + ' warm / day</div></div>' +
+        '<div class="syscap-arrow">→</div>' +
+        '<div class="syscap-step"><div class="n">' + sqFmt(cap.coldCapacity) + '</div><div class="l">Cold sends / day</div><div class="s">hard cap · ' + sqFmt(cap.inboxes) + ' × ' + cap.coldPerInbox + '</div></div>' +
+      '</div>';
+    var meter =
+      '<div class="syscap-meter"><div class="track"><div class="fill" style="width:' + pct + '%"></div></div>' +
+        '<div class="lbl"><span><b>' + sqFmt(cap.coldUsedToday) + '</b> sent today</span><span><b>' + sqFmt(cap.coldRemaining) + '</b> left · ' + pct + '% of capacity used</span></div></div>';
+    var warm = '<div class="syscap-warm">＋ <b>' + sqFmt(cap.warmingPerDay) + '</b> warming emails/day handled by <b>Smartlead</b> (' + cap.warmingPerInbox + '/inbox) — kept separate from your cold sends.</div>';
     var rows = (cap.byRecruiter || []).map(function (r) {
-      return "<tr><td><b>" + esc(r.ownerName) + "</b></td>" +
-        '<td class="sq-num">' + sqFmt(r.inboxes) + "</td>" +
-        '<td class="sq-num">' + sqFmt(r.domains) + "</td>" +
-        '<td class="sq-num">' + sqFmt(r.coldUsedToday) + " / " + sqFmt(r.coldCapacity) + "</td>" +
-        '<td class="sq-num sq-tot">' + sqFmt(r.coldRemaining) + "</td></tr>";
+      var rp = r.coldCapacity ? Math.min(100, Math.round((r.coldUsedToday / r.coldCapacity) * 100)) : 0;
+      return '<tr><td><b>' + esc(r.ownerName) + '</b></td>' +
+        '<td class="num">' + sqFmt(r.inboxes) + '</td>' +
+        '<td class="num">' + sqFmt(r.domains) + '</td>' +
+        '<td class="num">' + sqFmt(r.coldUsedToday) + ' / ' + sqFmt(r.coldCapacity) + '<span class="syscap-bar"><i style="width:' + rp + '%"></i></span></td>' +
+        '<td class="num"><b>' + sqFmt(r.coldRemaining) + '</b></td></tr>';
     }).join("");
-    var table = '<div class="sq-h">By recruiter</div><table class="sq-table"><thead><tr><th>Recruiter</th><th class="sq-num">Email IDs</th><th class="sq-num">Domains</th><th class="sq-num">Cold used</th><th class="sq-num">Left today</th></tr></thead><tbody>' + rows + "</tbody></table>";
-    return '<div class="sq-panel" style="margin-bottom:14px"><div class="sq-h">📨 Sending capacity — maxing every Email ID at ' + cap.coldPerInbox + " cold/day (+" + cap.warmingPerInbox + " warming via Smartlead)</div>" + head + bar + table + "</div>";
+    var table = rows
+      ? '<table class="syscap-tbl"><thead><tr><th>Recruiter</th><th class="num">Email IDs</th><th class="num">Domains</th><th class="num">Cold used / cap</th><th class="num">Left today</th></tr></thead><tbody>' + rows + '</tbody></table>'
+      : '';
+    return css + '<div class="syscap">' +
+      '<div class="syscap-h"><h3>📨 Sending system</h3><span class="sub">every Email ID maxed at ' + cap.coldPerInbox + ' cold/day · draining live</span></div>' +
+      flow + meter + warm + table + '</div>';
   }
   function sqOverviewHtml(o) {
     var healthy = o.runwayDays >= o.bufferDays;
