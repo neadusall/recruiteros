@@ -4094,7 +4094,7 @@
     el.innerHTML = sndStyles() +
       '<div class="im-hero">' +
         '<div class="im-title">Senders</div>' +
-        '<div class="im-lead">Your sending inboxes (Email IDs), grouped by recruiter. Upload hundreds at once, assign them to a recruiter, and campaigns rotate sends across that recruiter pool. Warm-up runs in Smartlead; here you manage and cap.</div>' +
+        '<div class="im-lead">Your sending inboxes (<b>Email IDs</b>) — about <b>50 per domain</b>, each owned by a recruiter. Every Email ID sends <b>2 cold emails/day</b> (hard limit); Smartlead warms them at 10/day. Import in bulk, assign to a recruiter by name, and campaigns rotate sends across that recruiter’s pool. Watch live capacity on <b>Send Queue</b>.</div>' +
         '<div class="btn-row">' +
           '<button class="btn btn-primary btn-sm" id="sndImport">⬆ Import inboxes (CSV)</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndAdd">＋ Add one</button>' +
@@ -4132,7 +4132,7 @@
   function renderSenderStats() {
     var s = sndData.stats || {}, box = $("#sndStatsBox"); if (!box) return;
     function c(v, l) { return '<div class="snd-stat"><div class="snd-statv">' + esc(v) + '</div><div class="snd-statl">' + esc(l) + '</div></div>'; }
-    box.innerHTML = c(s.inboxes || 0, "Inboxes") + c(s.active || 0, "Active") + c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Cold sends/day") + c(s.remainingToday || 0, "Remaining today");
+    box.innerHTML = c(s.inboxes || 0, "Email IDs") + c(s.active || 0, "Active") + c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Cold sends/day") + c(s.remainingToday || 0, "Remaining today");
   }
 
   function renderSenderPools() {
@@ -4178,7 +4178,7 @@
       box.innerHTML = '<div class="empty">' + (inboxes.length ? "No inboxes match that filter." : "No inboxes yet. Click <b>Import inboxes</b> to bulk-load your Email IDs.") + '</div>';
       updateSndSel(); return;
     }
-    box.innerHTML = '<table class="snd-table"><thead><tr><th></th><th>Email ID</th><th>Recruiter</th><th>Provider</th><th>SMTP host</th><th>Today</th><th>Status</th><th></th></tr></thead><tbody>' + rows.map(senderRow).join("") + '</tbody></table>';
+    box.innerHTML = '<table class="snd-table"><thead><tr><th></th><th>Email ID</th><th>Recruiter</th><th>Provider</th><th>SMTP host</th><th>Cold today</th><th>Status</th><th></th></tr></thead><tbody>' + rows.map(senderRow).join("") + '</tbody></table>';
     Array.prototype.forEach.call(box.querySelectorAll(".snd-pick"), function (cb) {
       cb.addEventListener("change", function () { var id = cb.getAttribute("data-id"); if (cb.checked) sndPicks[id] = true; else delete sndPicks[id]; updateSndSel(); });
     });
