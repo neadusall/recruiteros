@@ -485,6 +485,7 @@
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     sendqueue: { title: "Send Queue", crumb: "Operate", action: null, render: renderSendQueue, motionOnly: "bd" },
+    senders: { title: "Senders", crumb: "Operate", action: null, render: renderSenders, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     autopilot: { title: "Autopilot", crumb: "Build", action: null, render: renderAutopilot },
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New sequence", render: renderCampaignsHub },
@@ -2270,7 +2271,41 @@
   /* ---------------- Send Queue (rolling-buffer readiness dashboard) ---------------- */
   function sqFmt(n) { return (n || 0).toLocaleString(); }
   function sqDayLabel(iso) { try { return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); } catch (e) { return iso; } }
-  function sqNeed(label, n, href) { return '<a class="sq-need" href="' + href + '"><span class="sq-need-n">' + (n || 0).toLocaleString() + "</span><span class=\"sq-need-l\">" + label + "</span></a>"; }
+  function sqNeed(label, n, missing) { return '<button type="button" class="sq-need" data-missing="' + missing + '"><span class="sq-need-n">' + (n || 0).toLocaleString() + '</span><span class="sq-need-l">' + label + ' <span class="sq-need-view">view ▾</span></span></button>'; }
+  function sqMissLabel(m) { return m === "verified_email" ? "✉️ email" : m === "video" ? "🎬 video" : "🔗 page"; }
+  function sqWorklistHtml(items, missing) {
+    var titleMap = { verified_email: "Need a verified email", video: "Need a 2nd-email video", watch_page: "Need a landing page" };
+    var fixMap = { verified_email: ["Verify emails in Clients", "#clients"], video: ["Record in PiP Studio", "#pipstudio"], watch_page: ["Build in PiP Studio", "#pipstudio"] };
+    var fix = fixMap[missing] || ["Fix", "#clients"];
+    if (!items.length) return '<div class="sq-wl"><div class="sq-wl-head">' + (titleMap[missing] || "Needs assets") + " — none waiting right now 🎉 <button type=\"button\" class=\"im-mini\" data-wlclose>Close</button></div></div>";
+    var rows = items.map(function (p) {
+      return '<div class="sq-wl-row">' +
+          '<div class="sq-wl-main"><b>' + esc(p.name || "(no name)") + "</b>" + (p.title ? ' <span class="muted">' + esc(p.title) + "</span>" : "") + (p.company ? " · " + esc(p.company) : "") + "</div>" +
+          '<div class="sq-wl-meta">' + (p.email ? esc(p.email) + (p.emailStatus ? ' <span class="muted">(' + esc(p.emailStatus) + ")</span>" : "") : '<span class="muted">no email</span>') + "</div>" +
+          '<div class="sq-wl-miss">' + (p.missing || []).map(function (m) { return '<span class="sq-miss">' + sqMissLabel(m) + "</span>"; }).join("") + "</div>" +
+        "</div>";
+    }).join("");
+    return '<div class="sq-wl"><div class="sq-wl-head">' + (titleMap[missing] || "Needs assets") + " · <b>" + items.length + "</b> staged" + (items.length >= 200 ? "+" : "") +
+      ' <a class="btn btn-primary btn-sm" href="' + fix[1] + '">' + fix[0] + "</a>" +
+      ' <button type="button" class="im-mini" data-wlclose>Close</button></div>' +
+      '<div class="sq-wl-list">' + rows + "</div></div>";
+  }
+  function sqLoadWorklist(missing) {
+    var box = document.getElementById("sqWorklist"); if (!box) return;
+    box.innerHTML = '<div class="sq-wl"><div class="sq-wl-head">Loading…</div></div>';
+    send("/send-queue", "POST", { action: "needs_list", missing: missing, limit: 200 }).then(function (r) {
+      box.innerHTML = sqWorklistHtml((r && r.data && r.data.items) || [], missing);
+    }).catch(function () { box.innerHTML = '<div class="sq-wl"><div class="sq-wl-head">Couldn’t load the list.</div></div>'; });
+  }
+  function sqWireWorklist() {
+    var body = document.getElementById("sqBody"); if (!body) return;
+    // onclick assignment (not addEventListener) so reloads don't stack duplicate handlers.
+    body.onclick = function (e) {
+      var card = e.target.closest && e.target.closest("[data-missing]");
+      if (card) { sqLoadWorklist(card.getAttribute("data-missing")); return; }
+      if (e.target.closest && e.target.closest("[data-wlclose]")) { var box = document.getElementById("sqWorklist"); if (box) box.innerHTML = ""; }
+    };
+  }
   function sqOverviewHtml(o) {
     var healthy = o.runwayDays >= o.bufferDays;
     var statusPill = healthy
@@ -2293,12 +2328,12 @@
           '<a class="sq-step" href="#pipstudio"><b>3 · Record / assign video</b><span>' + (o.needsAssets.noVideo ? sqFmt(o.needsAssets.noVideo) + " need a 2nd-email video" : "PiP Studio: clip + headshot") + "</span></a>" +
         "</div></div>";
     }
-    var needs = '<div class="sq-needs"><div class="sq-h">Needs assets <span class="muted">— held until complete (' + sqFmt(o.needsAssets.total) + ")</span></div>" +
+    var needs = '<div class="sq-needs"><div class="sq-h">Needs assets <span class="muted">— held until complete (' + sqFmt(o.needsAssets.total) + ") · click to see who</span></div>" +
       '<div class="sq-need-grid">' +
-        sqNeed("✉️ Verified email", o.needsAssets.noVerifiedEmail, "#clients") +
-        sqNeed("🎬 2nd-email video", o.needsAssets.noVideo, "#pipstudio") +
-        sqNeed("🔗 Landing page", o.needsAssets.noWatch, "#pipstudio") +
-      "</div></div>";
+        sqNeed("✉️ Verified email", o.needsAssets.noVerifiedEmail, "verified_email") +
+        sqNeed("🎬 2nd-email video", o.needsAssets.noVideo, "video") +
+        sqNeed("🔗 Landing page", o.needsAssets.noWatch, "watch_page") +
+      '</div><div id="sqWorklist" class="sq-worklist"></div></div>';
     var rows = o.days.map(function (dd, i) {
       var dot = dd.fill === "green" ? "🟢" : dd.fill === "yellow" ? "🟡" : "🔴";
       var label = i === 0 ? "Today" : i === 1 ? "Tomorrow" : sqDayLabel(dd.date);
@@ -2318,15 +2353,89 @@
       : '<div class="sq-h">Campaigns in the queue</div><div class="empty">No queued prospects yet. <a href="#inmarket">Run a Targeted JSearch search</a> to start staging.</div>';
     return supply + callout + needs + '<div class="sq-grid"><div class="sq-panel">' + proj + '</div><div class="sq-panel">' + camps + "</div></div>";
   }
+  // ⚡ Auto-fill panel — the one control that makes the queue set-and-forget: a toggle, the campaign
+  // to stage into, the daily band + buffer, and a "Fill now" button. When ON, the engine keeps the
+  // buffer topped automatically (it stages verified prospects; it never sends).
+  function sqAutofillHtml(af, campaigns) {
+    var s = (af && af.settings) || {};
+    var on = !!s.enabled;
+    var opts = '<option value="">— pick a campaign —</option>' + (campaigns || []).map(function (c) {
+      return '<option value="' + esc(c.id) + '"' + (c.id === s.campaignId ? " selected" : "") + ">" + esc(c.name) + (c.status ? " (" + esc(c.status) + ")" : "") + "</option>";
+    }).join("");
+    return '<div class="sq-af' + (on ? " on" : "") + '">' +
+        '<div class="sq-af-head">' +
+          '<label class="sq-switch" title="Turn auto-fill on/off"><input type="checkbox" id="sqAfToggle"' + (on ? " checked" : "") + '><span class="sq-slider"></span></label>' +
+          '<div class="sq-af-title">⚡ Auto-fill <span class="muted">' + (on ? "ON — keeping the buffer full" : "OFF") + "</span></div>" +
+          '<div class="sq-af-status">Staged today: <b>' + ((af && af.today) || 0).toLocaleString() + "</b> / " + ((af && af.dailyTarget) || 0).toLocaleString() + " target</div>" +
+        "</div>" +
+        '<div class="sq-af-row">' +
+          '<label class="sq-af-f">Campaign<select id="sqAfCampaign">' + opts + "</select></label>" +
+          '<label class="sq-af-f">Daily min<input type="number" id="sqAfMin" value="' + (s.targetMin || 4000) + '" min="1" step="500"></label>' +
+          '<label class="sq-af-f">Daily max<input type="number" id="sqAfMax" value="' + (s.targetMax || 6000) + '" min="1" step="500"></label>' +
+          '<label class="sq-af-f">Buffer days<input type="number" id="sqAfBuffer" value="' + (s.bufferDays || 5) + '" min="1" max="14"></label>' +
+          '<button type="button" class="btn btn-ghost btn-sm" id="sqAfSave">Save</button>' +
+          '<button type="button" class="btn btn-primary btn-sm" id="sqAfFill">⬇ Fill now</button>' +
+        "</div>" +
+        '<div class="sq-af-note muted">When ON, it stages verified send-ready prospects into the chosen campaign every few minutes — keeping ~' + (s.bufferDays || 5) + " days ahead so no day runs dry. It never sends; your campaign’s own controls do.</div>" +
+      "</div>";
+  }
+  function sqFillReason(r) {
+    return r === "buffer_full" ? "Buffer already full — nothing more to stage right now."
+      : r === "daily_target_met" ? "Today’s target is already met."
+      : r === "no_ready_supply" ? "No verified, contactable prospects waiting. Run a Targeted JSearch search + verify emails first."
+      : r === "no_campaign" ? "Pick a campaign first."
+      : "Nothing to stage right now.";
+  }
+  function sqGatherAf() {
+    return {
+      enabled: document.getElementById("sqAfToggle").checked,
+      campaignId: document.getElementById("sqAfCampaign").value,
+      targetMin: parseInt(document.getElementById("sqAfMin").value, 10) || 4000,
+      targetMax: parseInt(document.getElementById("sqAfMax").value, 10) || 6000,
+      bufferDays: parseInt(document.getElementById("sqAfBuffer").value, 10) || 5
+    };
+  }
+  function sqWireAutofill() {
+    var save = document.getElementById("sqAfSave"), fill = document.getElementById("sqAfFill"), toggle = document.getElementById("sqAfToggle");
+    function persist(cb) {
+      var s = sqGatherAf();
+      if (s.enabled && !s.campaignId) { toast("Pick a campaign to auto-fill into."); if (toggle) toggle.checked = false; return; }
+      send("/send-queue", "POST", { action: "autofill_settings", settings: s }).then(function (r) {
+        if (r && r.ok) { if (cb) cb(); else { toast(s.enabled ? "Auto-fill ON." : "Auto-fill saved."); sqReload(); } }
+        else toast("Couldn’t save auto-fill.");
+      }).catch(function () { toast("Couldn’t save auto-fill."); });
+    }
+    if (save) save.addEventListener("click", function () { persist(); });
+    if (toggle) toggle.addEventListener("change", function () { persist(); });
+    if (fill) fill.addEventListener("click", function () {
+      var s = sqGatherAf();
+      if (!s.campaignId) { toast("Pick a campaign first."); return; }
+      fill.disabled = true; fill.textContent = "Filling…";
+      send("/send-queue", "POST", { action: "autofill_settings", settings: s }).then(function () {
+        return send("/send-queue", "POST", { action: "fill_now", campaignId: s.campaignId });
+      }).then(function (r) {
+        var res = r && r.data && r.data.result;
+        if (res && res.enrolled > 0) toast("Staged " + res.enrolled.toLocaleString() + " prospect" + (res.enrolled === 1 ? "" : "s") + " into the queue.");
+        else toast(sqFillReason(res ? res.reason : ""));
+        sqReload();
+      }).catch(function () { fill.disabled = false; fill.textContent = "⬇ Fill now"; toast("Fill didn’t run."); });
+    });
+  }
+  function sqReload() {
+    var body = document.getElementById("sqBody"); if (!body) return;
+    api("/send-queue").then(function (d) {
+      var b = document.getElementById("sqBody"); if (!b) return;
+      if (!d || !d.overview) { b.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>'; return; }
+      b.innerHTML = sqAutofillHtml(d.autofill || { settings: {} }, d.campaigns || []) + sqOverviewHtml(d.overview);
+      sqWireAutofill();
+      sqWireWorklist();
+    }).catch(function () {
+      var b = document.getElementById("sqBody"); if (b) b.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>';
+    });
+  }
   function renderSendQueue(el) {
     el.innerHTML = '<div class="view-intro">Stage 4–6K send-ready prospects every day so the first email + next-day video email go out hands-off. Keep the buffer full so no day goes without a batch.</div><div id="sqBody">' + loading() + "</div>";
-    api("/send-queue").then(function (d) {
-      var body = document.getElementById("sqBody"); if (!body) return;
-      var o = d && d.overview;
-      body.innerHTML = o ? sqOverviewHtml(o) : '<div class="empty">Couldn’t load the send queue. Try again.</div>';
-    }).catch(function () {
-      var body = document.getElementById("sqBody"); if (body) body.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>';
-    });
+    sqReload();
   }
 
   // Human label for a JSearch employment-type code.
@@ -3867,6 +3976,241 @@
     });
   }
 
+  /* ---- Senders: recruiter-owned SMTP inbox pools (scoped to this portal) ---- */
+  var sndData = {}, sndPicks = {};
+
+  function sndStyles() {
+    if (document.getElementById("sndStyles")) return "";
+    return '<style id="sndStyles">' +
+      '.snd-stats{display:flex;gap:12px;flex-wrap:wrap;margin:4px 0 16px}' +
+      '.snd-stat{flex:1;min-width:120px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:12px 14px}' +
+      '.snd-statv{font-size:22px;font-weight:800;letter-spacing:-.02em}' +
+      '.snd-statl{font-size:12px;color:var(--muted,#8a93a6);margin-top:2px}' +
+      '.snd-poolrow{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
+      '.snd-pool{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:8px 12px;cursor:pointer}' +
+      '.snd-pool:hover{border-color:var(--brand)}' +
+      '.snd-poolname{font-weight:700;font-size:13px}' +
+      '.snd-poolmeta{font-size:11.5px;color:var(--muted,#8a93a6)}' +
+      '.snd-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 12px}' +
+      '.snd-table{width:100%;border-collapse:collapse;font-size:13px}' +
+      '.snd-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);padding:6px 8px;border-bottom:1px solid var(--border)}' +
+      '.snd-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle}' +
+      '.snd-actions{display:flex;gap:6px;justify-content:flex-end}' +
+      '.snd-grid2{display:flex;gap:10px}.snd-grid2>div{flex:1}' +
+      '</style>';
+  }
+
+  function renderSenders(el) {
+    sndPicks = {};
+    el.innerHTML = sndStyles() +
+      '<div class="im-hero">' +
+        '<div class="im-title">Senders</div>' +
+        '<div class="im-lead">Your sending inboxes (Email IDs), grouped by recruiter. Upload hundreds at once, assign them to a recruiter, and campaigns rotate sends across that recruiter pool. Warm-up runs in Smartlead; here you manage and cap.</div>' +
+        '<div class="btn-row">' +
+          '<button class="btn btn-primary btn-sm" id="sndImport">⬆ Import inboxes (CSV)</button>' +
+          '<button class="btn btn-ghost btn-sm" id="sndAdd">＋ Add one</button>' +
+          '<button class="btn btn-ghost btn-sm" id="sndRefresh">↻ Refresh</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="sndStatsBox" class="snd-stats"></div>' +
+      '<div id="sndPoolsBox"></div>' +
+      '<div class="snd-toolbar">' +
+        '<input id="sndFilter" class="cur-ind-select" placeholder="Filter by recruiter or email…" style="min-width:240px">' +
+        '<span id="sndSel" class="muted"></span>' +
+        '<button class="btn btn-ghost btn-sm" id="sndAssignSel" disabled>Assign selected to recruiter…</button>' +
+      '</div>' +
+      '<div id="sndBody"><div class="empty">Loading…</div></div>';
+    $("#sndImport").addEventListener("click", openSenderImport);
+    $("#sndAdd").addEventListener("click", openSenderAdd);
+    $("#sndRefresh").addEventListener("click", loadSenders);
+    var f = $("#sndFilter"); if (f) f.addEventListener("input", renderSenderRows);
+    $("#sndAssignSel").addEventListener("click", function () {
+      var ids = Object.keys(sndPicks); if (!ids.length) return;
+      pickRecruiter(function (m) { if (m) doAssign(ids, m); });
+    });
+    loadSenders();
+  }
+
+  function loadSenders() {
+    var box = $("#sndBody"); if (box) box.innerHTML = '<div class="empty">Loading…</div>';
+    send("/senders", "GET").then(function (r) {
+      if (!r.ok) { if (box) box.innerHTML = '<div class="empty">Could not load senders.</div>'; return; }
+      sndData = r.data || {};
+      renderSenderStats(); renderSenderPools(); renderSenderRows();
+    });
+  }
+
+  function renderSenderStats() {
+    var s = sndData.stats || {}, box = $("#sndStatsBox"); if (!box) return;
+    function c(v, l) { return '<div class="snd-stat"><div class="snd-statv">' + esc(v) + '</div><div class="snd-statl">' + esc(l) + '</div></div>'; }
+    box.innerHTML = c(s.inboxes || 0, "Inboxes") + c(s.active || 0, "Active") + c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Daily capacity") + c(s.remainingToday || 0, "Remaining today");
+  }
+
+  function renderSenderPools() {
+    var pools = sndData.pools || [], box = $("#sndPoolsBox"); if (!box) return;
+    if (!pools.length) { box.innerHTML = ""; return; }
+    box.innerHTML = '<div class="snd-poolrow">' + pools.map(function (p) {
+      return '<div class="snd-pool" data-pool="' + esc(p.ownerName) + '"><div class="snd-poolname">' + esc(p.ownerName) + '</div><div class="snd-poolmeta">' + p.inboxes + ' inbox' + (p.inboxes === 1 ? "" : "es") + ' · ' + p.remainingToday + '/' + p.dailyCapacity + ' left today</div></div>';
+    }).join("") + '</div>';
+    Array.prototype.forEach.call(box.querySelectorAll(".snd-pool"), function (node) {
+      node.addEventListener("click", function () { var f = $("#sndFilter"); if (f) { f.value = node.getAttribute("data-pool"); renderSenderRows(); } });
+    });
+  }
+
+  function senderRow(m) {
+    var badge = m.status === "active" ? '<span class="cur-valid">active</span>'
+      : m.status === "warming" ? '<span class="cur-catchall">warming</span>'
+      : m.status === "paused" ? '<span class="im-email-unv">paused</span>'
+      : '<span class="cur-invalid">error</span>';
+    var toggle = m.status === "paused"
+      ? '<button class="btn btn-ghost btn-sm" data-snd-act="activate" data-id="' + esc(m.id) + '">Resume</button>'
+      : '<button class="btn btn-ghost btn-sm" data-snd-act="pause" data-id="' + esc(m.id) + '">Pause</button>';
+    return '<tr>' +
+      '<td><input type="checkbox" class="snd-pick" data-id="' + esc(m.id) + '"></td>' +
+      '<td><b>' + esc(m.email) + '</b>' + (m.displayName ? '<div class="muted">' + esc(m.displayName) + '</div>' : '') + '</td>' +
+      '<td>' + (m.ownerName ? esc(m.ownerName) : '<span class="muted">Unassigned</span>') + '</td>' +
+      '<td>' + esc(m.provider) + '</td>' +
+      '<td class="muted">' + esc(m.smtpHost) + ':' + esc(m.smtpPort) + '</td>' +
+      '<td>' + esc(m.sentToday) + '/' + esc(m.dailyCap) + '</td>' +
+      '<td>' + badge + (m.lastError ? ' <span class="muted" title="' + esc(m.lastError) + '">⚠</span>' : '') + '</td>' +
+      '<td class="snd-actions"><button class="btn btn-ghost btn-sm" data-snd-act="test" data-id="' + esc(m.id) + '">Test</button>' + toggle + '<button class="btn btn-ghost btn-sm" data-snd-act="delete" data-id="' + esc(m.id) + '">✕</button></td>' +
+    '</tr>';
+  }
+
+  function renderSenderRows() {
+    var box = $("#sndBody"); if (!box) return;
+    var inboxes = sndData.inboxes || [];
+    var q = (($("#sndFilter") && $("#sndFilter").value) || "").toLowerCase().trim();
+    var rows = inboxes.filter(function (m) {
+      if (!q) return true;
+      return (m.email + " " + (m.ownerName || "") + " " + (m.smtpHost || "")).toLowerCase().indexOf(q) >= 0;
+    });
+    if (!rows.length) {
+      box.innerHTML = '<div class="empty">' + (inboxes.length ? "No inboxes match that filter." : "No inboxes yet. Click <b>Import inboxes</b> to bulk-load your Email IDs.") + '</div>';
+      updateSndSel(); return;
+    }
+    box.innerHTML = '<table class="snd-table"><thead><tr><th></th><th>Email ID</th><th>Recruiter</th><th>Provider</th><th>SMTP host</th><th>Today</th><th>Status</th><th></th></tr></thead><tbody>' + rows.map(senderRow).join("") + '</tbody></table>';
+    Array.prototype.forEach.call(box.querySelectorAll(".snd-pick"), function (cb) {
+      cb.addEventListener("change", function () { var id = cb.getAttribute("data-id"); if (cb.checked) sndPicks[id] = true; else delete sndPicks[id]; updateSndSel(); });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll("[data-snd-act]"), function (b) {
+      b.addEventListener("click", function () { sndAction(b.getAttribute("data-id"), b.getAttribute("data-snd-act")); });
+    });
+    updateSndSel();
+  }
+
+  function updateSndSel() {
+    var n = Object.keys(sndPicks).length;
+    var s = $("#sndSel"); if (s) s.textContent = n ? (n + " selected") : "";
+    var b = $("#sndAssignSel"); if (b) b.disabled = !n;
+  }
+
+  function sndAction(id, action) {
+    if (action === "delete") {
+      if (!window.confirm("Delete this inbox?")) return;
+      send("/senders", "POST", { action: "delete", id: id }).then(function () { delete sndPicks[id]; loadSenders(); });
+      return;
+    }
+    if (action === "test") {
+      toast("Testing login…");
+      send("/senders", "POST", { action: "test", id: id }).then(function (r) {
+        toast(r.data && r.data.ok ? "✓ Login OK" : "✕ " + ((r.data && r.data.error) || "login failed"));
+        loadSenders();
+      });
+      return;
+    }
+    if (action === "pause" || action === "activate") {
+      send("/senders", "POST", { action: "setStatus", ids: [id], status: action === "pause" ? "paused" : "active" }).then(loadSenders);
+    }
+  }
+
+  function doAssign(ids, m) {
+    send("/senders", "POST", { action: "assign", ids: ids, ownerId: m.userId, ownerName: m.name }).then(function (r) {
+      if (r.ok) { toast("Assigned " + ((r.data && r.data.assigned) || ids.length) + " to " + m.name); sndPicks = {}; loadSenders(); }
+      else toast("Assign failed");
+    });
+  }
+
+  // Search-by-name recruiter chooser (first + last). cb(member|null).
+  function pickRecruiter(cb) {
+    var body =
+      '<input id="recrQ" class="cur-ind-select" placeholder="Search recruiter by first or last name…" style="width:100%">' +
+      '<div id="recrList" style="margin-top:10px;max-height:320px;overflow:auto"></div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="recrCancel">Cancel</button></div>';
+    openModal("Choose recruiter", "Their inbox pool will be used", body, function (root, close) {
+      var q = root.querySelector("#recrQ"), list = root.querySelector("#recrList"), t;
+      function run() {
+        send("/team/search?q=" + encodeURIComponent(q.value.trim()), "GET").then(function (r) {
+          var ms = (r.data && r.data.members) || [];
+          list.innerHTML = ms.length ? ms.map(function (m) {
+            return '<div class="list-row clickable recr-row" data-uid="' + esc(m.userId) + '" data-name="' + esc(m.name) + '"><div><div class="lr-main">' + esc(m.name) + '</div><div class="lr-sub">' + esc(m.email) + ' · ' + esc(m.role) + '</div></div></div>';
+          }).join("") : '<div class="empty">No matches.</div>';
+          Array.prototype.forEach.call(list.querySelectorAll(".recr-row"), function (row) {
+            row.addEventListener("click", function () { close(); cb({ userId: row.getAttribute("data-uid"), name: row.getAttribute("data-name") }); });
+          });
+        });
+      }
+      q.addEventListener("input", function () { clearTimeout(t); t = setTimeout(run, 180); });
+      root.querySelector("#recrCancel").addEventListener("click", function () { close(); cb(null); });
+      run();
+    });
+  }
+
+  function openSenderImport() {
+    var chosen = { userId: "", name: "" };
+    var body =
+      '<label>Assign all to recruiter (optional)</label>' +
+      '<div class="btn-row"><button class="btn btn-ghost btn-sm" id="impRecr">Choose recruiter…</button> <span id="impRecrName" class="muted">Unassigned</span></div>' +
+      '<label style="margin-top:10px;display:block">Provider</label>' +
+      '<select id="impProv" class="cur-ind-select"><option value="own-smtp">Own SMTP server</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select>' +
+      '<label style="margin-top:10px;display:block">Default daily cap per inbox</label>' +
+      '<input id="impCap" type="number" value="40" class="cur-ind-select">' +
+      '<label style="margin-top:10px;display:block">Upload CSV</label>' +
+      '<input id="impFile" type="file" accept=".csv,.tsv,.txt">' +
+      '<label style="margin-top:10px;display:block">…or paste rows</label>' +
+      '<textarea id="impText" rows="6" style="width:100%" placeholder="email, smtp_host, smtp_port, smtp_user, smtp_pass, first_name, last_name"></textarea>' +
+      '<div class="muted" style="margin-top:6px">Columns auto-detected: email, smtp host/port/user/pass, imap, first/last name, daily cap.</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="impCancel">Cancel</button><button class="btn btn-primary btn-sm" id="impGo">Import</button></div>';
+    openModal("Import inboxes", "Bulk-load SMTP inboxes into this portal", body, function (root, close) {
+      root.querySelector("#impRecr").addEventListener("click", function () { pickRecruiter(function (m) { if (m) { chosen = m; root.querySelector("#impRecrName").textContent = m.name; } }); });
+      root.querySelector("#impCancel").addEventListener("click", close);
+      var file = root.querySelector("#impFile"), text = root.querySelector("#impText");
+      file.addEventListener("change", function () { var fl = file.files[0]; if (!fl) return; var rd = new FileReader(); rd.onload = function () { text.value = rd.result; }; rd.readAsText(fl); });
+      root.querySelector("#impGo").addEventListener("click", function () {
+        var csv = text.value.trim(); if (!csv) { toast("Paste or upload a CSV first"); return; }
+        var go = root.querySelector("#impGo"); go.disabled = true; go.textContent = "Importing…";
+        send("/senders/import", "POST", { action: "import", csv: csv, provider: root.querySelector("#impProv").value, dailyCap: Number(root.querySelector("#impCap").value) || 40, ownerId: chosen.userId || undefined, ownerName: chosen.name || undefined }).then(function (r) {
+          if (r.ok) { var d = r.data || {}; close(); toast("Imported " + (d.imported || 0) + (d.skipped && d.skipped.length ? " (" + d.skipped.length + " skipped)" : "")); loadSenders(); }
+          else { go.disabled = false; go.textContent = "Import"; toast("Import failed: " + ((r.data && r.data.error) || r.status)); }
+        }).catch(function () { go.disabled = false; go.textContent = "Import"; });
+      });
+    });
+  }
+
+  function openSenderAdd() {
+    var chosen = { userId: "", name: "" };
+    var body =
+      '<label>Email ID</label><input id="saEmail" class="cur-ind-select" placeholder="jane@send.recruitco.io">' +
+      '<label style="margin-top:8px;display:block">From name</label><input id="saName" class="cur-ind-select" placeholder="Jane Doe">' +
+      '<div class="snd-grid2" style="margin-top:8px"><div><label>SMTP host</label><input id="saHost" class="cur-ind-select" placeholder="smtp.sending.ac"></div><div><label>Port</label><input id="saPort" type="number" value="587" class="cur-ind-select"></div></div>' +
+      '<label style="margin-top:8px;display:block">SMTP username</label><input id="saUser" class="cur-ind-select" placeholder="(defaults to the email)">' +
+      '<label style="margin-top:8px;display:block">SMTP password</label><input id="saPass" type="password" class="cur-ind-select">' +
+      '<div class="snd-grid2" style="margin-top:8px"><div><label>Provider</label><select id="saProv" class="cur-ind-select"><option value="own-smtp">Own SMTP</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select></div><div><label>Daily cap</label><input id="saCap" type="number" value="40" class="cur-ind-select"></div></div>' +
+      '<label style="margin-top:8px;display:block">Recruiter (optional)</label><div class="btn-row"><button class="btn btn-ghost btn-sm" id="saRecr">Choose recruiter…</button> <span id="saRecrName" class="muted">Unassigned</span></div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="saCancel">Cancel</button><button class="btn btn-primary btn-sm" id="saGo">Add inbox</button></div>';
+    openModal("Add a sending inbox", "Stored encrypted; warmed in Smartlead", body, function (root, close) {
+      root.querySelector("#saRecr").addEventListener("click", function () { pickRecruiter(function (m) { if (m) { chosen = m; root.querySelector("#saRecrName").textContent = m.name; } }); });
+      root.querySelector("#saCancel").addEventListener("click", close);
+      root.querySelector("#saGo").addEventListener("click", function () {
+        var email = root.querySelector("#saEmail").value.trim(), host = root.querySelector("#saHost").value.trim(), pass = root.querySelector("#saPass").value;
+        if (!email || !host || !pass) { toast("Email, SMTP host and password are required"); return; }
+        send("/senders", "POST", { action: "add", email: email, displayName: root.querySelector("#saName").value.trim() || undefined, smtpHost: host, smtpPort: Number(root.querySelector("#saPort").value) || 587, smtpUser: root.querySelector("#saUser").value.trim() || undefined, smtpPass: pass, provider: root.querySelector("#saProv").value, dailyCap: Number(root.querySelector("#saCap").value) || 40, ownerId: chosen.userId || undefined, ownerName: chosen.name || undefined }).then(function (r) {
+          if (r.ok) { close(); toast("Inbox added"); loadSenders(); } else toast("Add failed: " + ((r.data && r.data.error) || r.status));
+        });
+      });
+    });
+  }
+
   // Resolve (or create) the BD campaign that holds promoted in-market prospects.
   function resolveBdCampaign(cb) {
     var saved = [];
@@ -4290,10 +4634,6 @@
       };
       var legend = '<div class="cl-legend">' +
         legChip("valid", "cl-vb-ok", "✓ verified", by.valid || 0) +
-        legChip("deliverable", "cl-vb-deliv", "✓ deliverable", by.deliverable || 0) +
-        legChip("risky", "cl-vb-risky", "~ risky", by.risky || 0) +
-        legChip("invalid", "cl-vb-bad", "✕ invalid", by.invalid || 0) +
-        legChip("unchecked", "cl-vb-unk", "• unchecked", unchecked) +
         legChip("video", "cl-vb-vid", "🎬 with video", withVideo) +
         (clVerdict ? '<button class="cl-vb cl-vb-clear" data-verdict="">✕ clear</button>' : "") +
         "</div>";

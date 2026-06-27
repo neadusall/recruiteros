@@ -485,6 +485,7 @@
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     sendqueue: { title: "Send Queue", crumb: "Operate", action: null, render: renderSendQueue, motionOnly: "bd" },
+    senders: { title: "Senders", crumb: "Operate", action: null, render: renderSenders, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     autopilot: { title: "Autopilot", crumb: "Build", action: null, render: renderAutopilot },
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New sequence", render: renderCampaignsHub },
@@ -3998,6 +3999,241 @@
           .then(function (r) { if (r.ok) done++; next(i + 1); })
           .catch(function () { next(i + 1); });
       })(0);
+    });
+  }
+
+  /* ---- Senders: recruiter-owned SMTP inbox pools (scoped to this portal) ---- */
+  var sndData = {}, sndPicks = {};
+
+  function sndStyles() {
+    if (document.getElementById("sndStyles")) return "";
+    return '<style id="sndStyles">' +
+      '.snd-stats{display:flex;gap:12px;flex-wrap:wrap;margin:4px 0 16px}' +
+      '.snd-stat{flex:1;min-width:120px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:12px 14px}' +
+      '.snd-statv{font-size:22px;font-weight:800;letter-spacing:-.02em}' +
+      '.snd-statl{font-size:12px;color:var(--muted,#8a93a6);margin-top:2px}' +
+      '.snd-poolrow{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
+      '.snd-pool{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:8px 12px;cursor:pointer}' +
+      '.snd-pool:hover{border-color:var(--brand)}' +
+      '.snd-poolname{font-weight:700;font-size:13px}' +
+      '.snd-poolmeta{font-size:11.5px;color:var(--muted,#8a93a6)}' +
+      '.snd-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 12px}' +
+      '.snd-table{width:100%;border-collapse:collapse;font-size:13px}' +
+      '.snd-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);padding:6px 8px;border-bottom:1px solid var(--border)}' +
+      '.snd-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle}' +
+      '.snd-actions{display:flex;gap:6px;justify-content:flex-end}' +
+      '.snd-grid2{display:flex;gap:10px}.snd-grid2>div{flex:1}' +
+      '</style>';
+  }
+
+  function renderSenders(el) {
+    sndPicks = {};
+    el.innerHTML = sndStyles() +
+      '<div class="im-hero">' +
+        '<div class="im-title">Senders</div>' +
+        '<div class="im-lead">Your sending inboxes (Email IDs), grouped by recruiter. Upload hundreds at once, assign them to a recruiter, and campaigns rotate sends across that recruiter pool. Warm-up runs in Smartlead; here you manage and cap.</div>' +
+        '<div class="btn-row">' +
+          '<button class="btn btn-primary btn-sm" id="sndImport">⬆ Import inboxes (CSV)</button>' +
+          '<button class="btn btn-ghost btn-sm" id="sndAdd">＋ Add one</button>' +
+          '<button class="btn btn-ghost btn-sm" id="sndRefresh">↻ Refresh</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="sndStatsBox" class="snd-stats"></div>' +
+      '<div id="sndPoolsBox"></div>' +
+      '<div class="snd-toolbar">' +
+        '<input id="sndFilter" class="cur-ind-select" placeholder="Filter by recruiter or email…" style="min-width:240px">' +
+        '<span id="sndSel" class="muted"></span>' +
+        '<button class="btn btn-ghost btn-sm" id="sndAssignSel" disabled>Assign selected to recruiter…</button>' +
+      '</div>' +
+      '<div id="sndBody"><div class="empty">Loading…</div></div>';
+    $("#sndImport").addEventListener("click", openSenderImport);
+    $("#sndAdd").addEventListener("click", openSenderAdd);
+    $("#sndRefresh").addEventListener("click", loadSenders);
+    var f = $("#sndFilter"); if (f) f.addEventListener("input", renderSenderRows);
+    $("#sndAssignSel").addEventListener("click", function () {
+      var ids = Object.keys(sndPicks); if (!ids.length) return;
+      pickRecruiter(function (m) { if (m) doAssign(ids, m); });
+    });
+    loadSenders();
+  }
+
+  function loadSenders() {
+    var box = $("#sndBody"); if (box) box.innerHTML = '<div class="empty">Loading…</div>';
+    send("/senders", "GET").then(function (r) {
+      if (!r.ok) { if (box) box.innerHTML = '<div class="empty">Could not load senders.</div>'; return; }
+      sndData = r.data || {};
+      renderSenderStats(); renderSenderPools(); renderSenderRows();
+    });
+  }
+
+  function renderSenderStats() {
+    var s = sndData.stats || {}, box = $("#sndStatsBox"); if (!box) return;
+    function c(v, l) { return '<div class="snd-stat"><div class="snd-statv">' + esc(v) + '</div><div class="snd-statl">' + esc(l) + '</div></div>'; }
+    box.innerHTML = c(s.inboxes || 0, "Inboxes") + c(s.active || 0, "Active") + c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Daily capacity") + c(s.remainingToday || 0, "Remaining today");
+  }
+
+  function renderSenderPools() {
+    var pools = sndData.pools || [], box = $("#sndPoolsBox"); if (!box) return;
+    if (!pools.length) { box.innerHTML = ""; return; }
+    box.innerHTML = '<div class="snd-poolrow">' + pools.map(function (p) {
+      return '<div class="snd-pool" data-pool="' + esc(p.ownerName) + '"><div class="snd-poolname">' + esc(p.ownerName) + '</div><div class="snd-poolmeta">' + p.inboxes + ' inbox' + (p.inboxes === 1 ? "" : "es") + ' · ' + p.remainingToday + '/' + p.dailyCapacity + ' left today</div></div>';
+    }).join("") + '</div>';
+    Array.prototype.forEach.call(box.querySelectorAll(".snd-pool"), function (node) {
+      node.addEventListener("click", function () { var f = $("#sndFilter"); if (f) { f.value = node.getAttribute("data-pool"); renderSenderRows(); } });
+    });
+  }
+
+  function senderRow(m) {
+    var badge = m.status === "active" ? '<span class="cur-valid">active</span>'
+      : m.status === "warming" ? '<span class="cur-catchall">warming</span>'
+      : m.status === "paused" ? '<span class="im-email-unv">paused</span>'
+      : '<span class="cur-invalid">error</span>';
+    var toggle = m.status === "paused"
+      ? '<button class="btn btn-ghost btn-sm" data-snd-act="activate" data-id="' + esc(m.id) + '">Resume</button>'
+      : '<button class="btn btn-ghost btn-sm" data-snd-act="pause" data-id="' + esc(m.id) + '">Pause</button>';
+    return '<tr>' +
+      '<td><input type="checkbox" class="snd-pick" data-id="' + esc(m.id) + '"></td>' +
+      '<td><b>' + esc(m.email) + '</b>' + (m.displayName ? '<div class="muted">' + esc(m.displayName) + '</div>' : '') + '</td>' +
+      '<td>' + (m.ownerName ? esc(m.ownerName) : '<span class="muted">Unassigned</span>') + '</td>' +
+      '<td>' + esc(m.provider) + '</td>' +
+      '<td class="muted">' + esc(m.smtpHost) + ':' + esc(m.smtpPort) + '</td>' +
+      '<td>' + esc(m.sentToday) + '/' + esc(m.dailyCap) + '</td>' +
+      '<td>' + badge + (m.lastError ? ' <span class="muted" title="' + esc(m.lastError) + '">⚠</span>' : '') + '</td>' +
+      '<td class="snd-actions"><button class="btn btn-ghost btn-sm" data-snd-act="test" data-id="' + esc(m.id) + '">Test</button>' + toggle + '<button class="btn btn-ghost btn-sm" data-snd-act="delete" data-id="' + esc(m.id) + '">✕</button></td>' +
+    '</tr>';
+  }
+
+  function renderSenderRows() {
+    var box = $("#sndBody"); if (!box) return;
+    var inboxes = sndData.inboxes || [];
+    var q = (($("#sndFilter") && $("#sndFilter").value) || "").toLowerCase().trim();
+    var rows = inboxes.filter(function (m) {
+      if (!q) return true;
+      return (m.email + " " + (m.ownerName || "") + " " + (m.smtpHost || "")).toLowerCase().indexOf(q) >= 0;
+    });
+    if (!rows.length) {
+      box.innerHTML = '<div class="empty">' + (inboxes.length ? "No inboxes match that filter." : "No inboxes yet. Click <b>Import inboxes</b> to bulk-load your Email IDs.") + '</div>';
+      updateSndSel(); return;
+    }
+    box.innerHTML = '<table class="snd-table"><thead><tr><th></th><th>Email ID</th><th>Recruiter</th><th>Provider</th><th>SMTP host</th><th>Today</th><th>Status</th><th></th></tr></thead><tbody>' + rows.map(senderRow).join("") + '</tbody></table>';
+    Array.prototype.forEach.call(box.querySelectorAll(".snd-pick"), function (cb) {
+      cb.addEventListener("change", function () { var id = cb.getAttribute("data-id"); if (cb.checked) sndPicks[id] = true; else delete sndPicks[id]; updateSndSel(); });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll("[data-snd-act]"), function (b) {
+      b.addEventListener("click", function () { sndAction(b.getAttribute("data-id"), b.getAttribute("data-snd-act")); });
+    });
+    updateSndSel();
+  }
+
+  function updateSndSel() {
+    var n = Object.keys(sndPicks).length;
+    var s = $("#sndSel"); if (s) s.textContent = n ? (n + " selected") : "";
+    var b = $("#sndAssignSel"); if (b) b.disabled = !n;
+  }
+
+  function sndAction(id, action) {
+    if (action === "delete") {
+      if (!window.confirm("Delete this inbox?")) return;
+      send("/senders", "POST", { action: "delete", id: id }).then(function () { delete sndPicks[id]; loadSenders(); });
+      return;
+    }
+    if (action === "test") {
+      toast("Testing login…");
+      send("/senders", "POST", { action: "test", id: id }).then(function (r) {
+        toast(r.data && r.data.ok ? "✓ Login OK" : "✕ " + ((r.data && r.data.error) || "login failed"));
+        loadSenders();
+      });
+      return;
+    }
+    if (action === "pause" || action === "activate") {
+      send("/senders", "POST", { action: "setStatus", ids: [id], status: action === "pause" ? "paused" : "active" }).then(loadSenders);
+    }
+  }
+
+  function doAssign(ids, m) {
+    send("/senders", "POST", { action: "assign", ids: ids, ownerId: m.userId, ownerName: m.name }).then(function (r) {
+      if (r.ok) { toast("Assigned " + ((r.data && r.data.assigned) || ids.length) + " to " + m.name); sndPicks = {}; loadSenders(); }
+      else toast("Assign failed");
+    });
+  }
+
+  // Search-by-name recruiter chooser (first + last). cb(member|null).
+  function pickRecruiter(cb) {
+    var body =
+      '<input id="recrQ" class="cur-ind-select" placeholder="Search recruiter by first or last name…" style="width:100%">' +
+      '<div id="recrList" style="margin-top:10px;max-height:320px;overflow:auto"></div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="recrCancel">Cancel</button></div>';
+    openModal("Choose recruiter", "Their inbox pool will be used", body, function (root, close) {
+      var q = root.querySelector("#recrQ"), list = root.querySelector("#recrList"), t;
+      function run() {
+        send("/team/search?q=" + encodeURIComponent(q.value.trim()), "GET").then(function (r) {
+          var ms = (r.data && r.data.members) || [];
+          list.innerHTML = ms.length ? ms.map(function (m) {
+            return '<div class="list-row clickable recr-row" data-uid="' + esc(m.userId) + '" data-name="' + esc(m.name) + '"><div><div class="lr-main">' + esc(m.name) + '</div><div class="lr-sub">' + esc(m.email) + ' · ' + esc(m.role) + '</div></div></div>';
+          }).join("") : '<div class="empty">No matches.</div>';
+          Array.prototype.forEach.call(list.querySelectorAll(".recr-row"), function (row) {
+            row.addEventListener("click", function () { close(); cb({ userId: row.getAttribute("data-uid"), name: row.getAttribute("data-name") }); });
+          });
+        });
+      }
+      q.addEventListener("input", function () { clearTimeout(t); t = setTimeout(run, 180); });
+      root.querySelector("#recrCancel").addEventListener("click", function () { close(); cb(null); });
+      run();
+    });
+  }
+
+  function openSenderImport() {
+    var chosen = { userId: "", name: "" };
+    var body =
+      '<label>Assign all to recruiter (optional)</label>' +
+      '<div class="btn-row"><button class="btn btn-ghost btn-sm" id="impRecr">Choose recruiter…</button> <span id="impRecrName" class="muted">Unassigned</span></div>' +
+      '<label style="margin-top:10px;display:block">Provider</label>' +
+      '<select id="impProv" class="cur-ind-select"><option value="own-smtp">Own SMTP server</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select>' +
+      '<label style="margin-top:10px;display:block">Default daily cap per inbox</label>' +
+      '<input id="impCap" type="number" value="40" class="cur-ind-select">' +
+      '<label style="margin-top:10px;display:block">Upload CSV</label>' +
+      '<input id="impFile" type="file" accept=".csv,.tsv,.txt">' +
+      '<label style="margin-top:10px;display:block">…or paste rows</label>' +
+      '<textarea id="impText" rows="6" style="width:100%" placeholder="email, smtp_host, smtp_port, smtp_user, smtp_pass, first_name, last_name"></textarea>' +
+      '<div class="muted" style="margin-top:6px">Columns auto-detected: email, smtp host/port/user/pass, imap, first/last name, daily cap.</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="impCancel">Cancel</button><button class="btn btn-primary btn-sm" id="impGo">Import</button></div>';
+    openModal("Import inboxes", "Bulk-load SMTP inboxes into this portal", body, function (root, close) {
+      root.querySelector("#impRecr").addEventListener("click", function () { pickRecruiter(function (m) { if (m) { chosen = m; root.querySelector("#impRecrName").textContent = m.name; } }); });
+      root.querySelector("#impCancel").addEventListener("click", close);
+      var file = root.querySelector("#impFile"), text = root.querySelector("#impText");
+      file.addEventListener("change", function () { var fl = file.files[0]; if (!fl) return; var rd = new FileReader(); rd.onload = function () { text.value = rd.result; }; rd.readAsText(fl); });
+      root.querySelector("#impGo").addEventListener("click", function () {
+        var csv = text.value.trim(); if (!csv) { toast("Paste or upload a CSV first"); return; }
+        var go = root.querySelector("#impGo"); go.disabled = true; go.textContent = "Importing…";
+        send("/senders/import", "POST", { action: "import", csv: csv, provider: root.querySelector("#impProv").value, dailyCap: Number(root.querySelector("#impCap").value) || 40, ownerId: chosen.userId || undefined, ownerName: chosen.name || undefined }).then(function (r) {
+          if (r.ok) { var d = r.data || {}; close(); toast("Imported " + (d.imported || 0) + (d.skipped && d.skipped.length ? " (" + d.skipped.length + " skipped)" : "")); loadSenders(); }
+          else { go.disabled = false; go.textContent = "Import"; toast("Import failed: " + ((r.data && r.data.error) || r.status)); }
+        }).catch(function () { go.disabled = false; go.textContent = "Import"; });
+      });
+    });
+  }
+
+  function openSenderAdd() {
+    var chosen = { userId: "", name: "" };
+    var body =
+      '<label>Email ID</label><input id="saEmail" class="cur-ind-select" placeholder="jane@send.recruitco.io">' +
+      '<label style="margin-top:8px;display:block">From name</label><input id="saName" class="cur-ind-select" placeholder="Jane Doe">' +
+      '<div class="snd-grid2" style="margin-top:8px"><div><label>SMTP host</label><input id="saHost" class="cur-ind-select" placeholder="smtp.sending.ac"></div><div><label>Port</label><input id="saPort" type="number" value="587" class="cur-ind-select"></div></div>' +
+      '<label style="margin-top:8px;display:block">SMTP username</label><input id="saUser" class="cur-ind-select" placeholder="(defaults to the email)">' +
+      '<label style="margin-top:8px;display:block">SMTP password</label><input id="saPass" type="password" class="cur-ind-select">' +
+      '<div class="snd-grid2" style="margin-top:8px"><div><label>Provider</label><select id="saProv" class="cur-ind-select"><option value="own-smtp">Own SMTP</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select></div><div><label>Daily cap</label><input id="saCap" type="number" value="40" class="cur-ind-select"></div></div>' +
+      '<label style="margin-top:8px;display:block">Recruiter (optional)</label><div class="btn-row"><button class="btn btn-ghost btn-sm" id="saRecr">Choose recruiter…</button> <span id="saRecrName" class="muted">Unassigned</span></div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="saCancel">Cancel</button><button class="btn btn-primary btn-sm" id="saGo">Add inbox</button></div>';
+    openModal("Add a sending inbox", "Stored encrypted; warmed in Smartlead", body, function (root, close) {
+      root.querySelector("#saRecr").addEventListener("click", function () { pickRecruiter(function (m) { if (m) { chosen = m; root.querySelector("#saRecrName").textContent = m.name; } }); });
+      root.querySelector("#saCancel").addEventListener("click", close);
+      root.querySelector("#saGo").addEventListener("click", function () {
+        var email = root.querySelector("#saEmail").value.trim(), host = root.querySelector("#saHost").value.trim(), pass = root.querySelector("#saPass").value;
+        if (!email || !host || !pass) { toast("Email, SMTP host and password are required"); return; }
+        send("/senders", "POST", { action: "add", email: email, displayName: root.querySelector("#saName").value.trim() || undefined, smtpHost: host, smtpPort: Number(root.querySelector("#saPort").value) || 587, smtpUser: root.querySelector("#saUser").value.trim() || undefined, smtpPass: pass, provider: root.querySelector("#saProv").value, dailyCap: Number(root.querySelector("#saCap").value) || 40, ownerId: chosen.userId || undefined, ownerName: chosen.name || undefined }).then(function (r) {
+          if (r.ok) { close(); toast("Inbox added"); loadSenders(); } else toast("Add failed: " + ((r.data && r.data.error) || r.status));
+        });
+      });
     });
   }
 
