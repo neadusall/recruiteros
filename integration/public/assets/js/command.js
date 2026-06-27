@@ -1687,12 +1687,23 @@
   }
 
   // Resolve (or create) the BD campaign that holds promoted in-market prospects.
-  function resolveBdCampaign(cb) {
+  function resolveBdCampaign(cb, recruiter) {
     var saved = [];
     try { saved = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); } catch (e) {}
     var camp = saved.filter(function (c) { return c.motion === motion; })[0] || saved[0];
-    if (camp && camp.id) { cb(camp.id); return; }
+    if (camp && camp.id) {
+      // Bind the chosen sending recruiter to the campaign so the send path rotates
+      // across that recruiter's inbox pool (lib/senders pickSender).
+      if (recruiter && recruiter.userId && camp.recruiterId !== recruiter.userId) {
+        camp.recruiterId = recruiter.userId;
+        try { localStorage.setItem("ros_campaigns", JSON.stringify(saved)); } catch (e) {}
+        send("/campaigns", "PUT", camp).then(function () { cb(camp.id); }).catch(function () { cb(camp.id); });
+        return;
+      }
+      cb(camp.id); return;
+    }
     var c = { id: "camp_" + Math.random().toString(36).slice(2), name: "In-Market Pipeline", motion: motion, goal: "Hiring managers promoted from In-Market Leads.", status: "active", dailyCap: 25, steps: [] };
+    if (recruiter && recruiter.userId) c.recruiterId = recruiter.userId;
     send("/campaigns", "PUT", c).then(function () {
       try { var l = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); l.unshift(c); localStorage.setItem("ros_campaigns", JSON.stringify(l)); } catch (e) {}
       cb(c.id);
@@ -1719,6 +1730,7 @@
         '<label class="pc-voice" title="Resolve each contact\'s OWN direct line — a landline/VoIP only (never a switchboard, never a mobile). $0.10 per number found; a no-find is free.">' +
           '<input type="checkbox" id="pcDirectDial"' + (dd ? " checked" : "") + "> Find verified direct dials " +
           '<span class="muted">(person-direct landline/VoIP · $0.10/found, no-find free)</span></label>' +
+        '<div class="pc-recr" style="margin:8px 0"><button type="button" class="btn btn-ghost btn-sm" id="pcRecr">Choose sending recruiter…</button> <span id="pcRecrName" class="muted">Auto-rotate (any inbox)</span></div>' +
         '<div id="pcLines" class="pc-lines">' + loading() + "</div>" +
         '<div class="pc-total" id="pcTotal"></div>' +
         '<div id="pcCond"></div>' +
@@ -1731,6 +1743,11 @@
     openModal("Launch outreach", "Estimated cost — approve to start", body, function (root, closeFn) {
       var approve = root.querySelector("#pcApprove");
       var ddCb = root.querySelector("#pcDirectDial");
+      var chosenRecr = null;
+      var recrBtn = root.querySelector("#pcRecr");
+      if (recrBtn) recrBtn.addEventListener("click", function () {
+        pickRecruiter(function (m) { if (m) { chosenRecr = m; root.querySelector("#pcRecrName").textContent = "Sending from " + m.name + "'s inboxes"; } });
+      });
       function fetchEst() {
         approve.disabled = true;
         root.querySelector("#pcLines").innerHTML = loading();
@@ -1754,14 +1771,14 @@
       }
       ddCb.addEventListener("change", function () { setImDirectDial(ddCb.checked); fetchEst(); });
       root.querySelector("#pcCancel").addEventListener("click", closeFn);
-      approve.addEventListener("click", function () { closeFn(); runBulkPush(picks, ddCb.checked); });
+      approve.addEventListener("click", function () { closeFn(); runBulkPush(picks, ddCb.checked, chosenRecr); });
       fetchEst();
     });
   }
 
   // Approved: promote each selected person to Prospects, then nudge the orchestrator (n8n)
   // to start the enrich → LLM-draft → email/LinkedIn/voicemail/voice-drop run immediately.
-  function runBulkPush(picks, findDirectDial) {
+  function runBulkPush(picks, findDirectDial, recruiter) {
     var btn = document.getElementById("imBulk"); if (btn) btn.disabled = true;
     resolveBdCampaign(function (campaignId) {
       if (!campaignId) { toast("Create a campaign first."); if (btn) btn.disabled = false; return; }
@@ -1783,7 +1800,7 @@
           .then(function (r) { if (r.ok) done++; next(i + 1); })
           .catch(function () { next(i + 1); });
       })(0);
-    });
+    }, recruiter);
   }
 
   function renderProspects(el) {

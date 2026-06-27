@@ -80,6 +80,14 @@ async function triggerVoiceOnEmailSent(workspaceId: string, t: SendTouch): Promi
 async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> {
   switch (t.channel) {
     case "email": {
+      // Recruiter-owned SMTP inbox pool (lib/senders): when the prospect's campaign
+      // is assigned to a recruiter who has an available inbox, send through that
+      // recruiter's pool (rotated + sticky per prospect). Falls through to the MTA /
+      // Instantly paths below when no pool/inbox applies, so a send is never dropped.
+      if (t.prospect.email) {
+        const pooled = await trySenderPool(workspaceId, t);
+        if (pooled) return pooled;
+      }
       // Owned MTA path (self-hosted infrastructure) when opted in; Instantly otherwise.
       const { mtaPreferred, sendEmail } = await import("../providers/mta");
       if (mtaPreferred() && t.prospect.email) {
@@ -127,6 +135,45 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
     }
     default:
       return { ok: false, channel: t.channel, provider: "?", error: "unknown_channel" };
+  }
+}
+
+/**
+ * Recruiter sender-pool path: route the email through the prospect's campaign
+ * recruiter's own SMTP inbox pool (lib/senders), rotated + sticky per prospect.
+ * Returns null when it doesn't apply (no campaign / no recruiterId / empty pool)
+ * so the caller falls through to the MTA / Instantly providers and never drops a send.
+ */
+async function trySenderPool(workspaceId: string, t: SendTouch): Promise<SendResult | null> {
+  try {
+    const campaignId = t.prospect.campaignId;
+    if (!campaignId || !t.prospect.email) return null;
+    const campaign = await getCore().getCampaign(campaignId);
+    const recruiterId = campaign?.recruiterId;
+    if (!recruiterId) return null;
+    const { pickSender, getInbox, sendViaInbox, recordSend } = await import("../senders");
+    let inbox: any = null;
+    // Sticky: keep a prospect on its already-chosen inbox across the sequence while
+    // it still has capacity; otherwise rotate to the freshest inbox in the pool.
+    if (t.prospect.senderInboxId) {
+      const cur = await getInbox(workspaceId, t.prospect.senderInboxId);
+      if (cur && cur.ownerId === recruiterId && cur.status !== "paused" && cur.status !== "error" && cur.sentToday < cur.dailyCap) inbox = cur;
+    }
+    if (!inbox) inbox = await pickSender(workspaceId, { recruiterId });
+    if (!inbox) return null; // pool empty / all capped -> fall through to MTA/Instantly
+    const res = await sendViaInbox(inbox, { to: t.prospect.email, subject: t.subject ?? "", html: t.text });
+    if (!res.ok) return { ok: false, channel: "email", provider: "smtp:" + inbox.provider, error: res.error };
+    await recordSend(inbox);
+    if (t.prospect.senderInboxId !== inbox.id) {
+      try {
+        const fresh = await getCore().getProspect(t.prospect.id);
+        if (fresh) { fresh.senderInboxId = inbox.id; await getCore().saveProspect(fresh); }
+      } catch { /* best-effort stamp */ }
+      t.prospect.senderInboxId = inbox.id;
+    }
+    return { ok: true, channel: "email", provider: "smtp:" + inbox.provider, providerMessageId: res.messageId };
+  } catch {
+    return null; // any error -> fall through to existing providers
   }
 }
 
