@@ -481,7 +481,7 @@
   /* ---------------- router ---------------- */
   var ROUTES = {
     overview: { title: "Dashboard", crumb: "Operate", action: null, render: renderOverview },
-    clients: { title: "Clients", crumb: "Operate", action: null, render: renderClients },
+    clients: { title: "Clients", crumb: "Business Development", action: null, render: renderClients, motionOnly: "bd" },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
