@@ -76,6 +76,10 @@ export async function register(): Promise<void> {
       // book becomes video-ready hands-off. No-op until INMARKET_AUTOCAPTURE=1 (captures are CPU-heavy).
       const { ensureAutoCapture } = await import("./lib/inmarket/autoCapture");
       ensureAutoCapture();
+      // Background VIDEO compositor: overlays your one clip on each capture into a send-ready video.
+      // No-op until INMARKET_AUTOVIDEO=1 (+ a recorded clip).
+      const { ensureAutoVideo } = await import("./lib/inmarket/autoVideo");
+      ensureAutoVideo();
     } catch {
       /* never let an instrumentation hiccup block server startup */
     }

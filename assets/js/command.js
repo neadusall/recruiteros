@@ -3625,6 +3625,7 @@
 
     var clAll = [], clFilter = "", clById = {};
     var shotsByCompany = {};   // lowercased company -> { watch, teaser, video, poster }
+    var videosByCompany = {};  // lowercased company -> { videoKey } (finished composited outreach video)
     var segCounts = { signals: null, all: null };   // headline count per segment (filled as we load)
     var clIndustry = "", clFunction = "", clVerdict = "";  // categorization + verdict (legend) filters
     var DISPLAY_CAP = 1200;                          // max rows rendered at once (filter to see more)
@@ -3726,7 +3727,16 @@
     function videoFor(p) {
       var v = p.personalizedVideo;
       if (v && (v.gifUrl || v.watchUrl)) return { gif: v.gifUrl, watch: v.watchUrl, mp4: v.mp4Url, role: v.roleTitle, kind: "personalized" };
-      var s = p.company ? shotsByCompany[(p.company || "").toLowerCase().trim()] : null;
+      var co = (p.company || "").toLowerCase().trim();
+      // A finished composited outreach video (your clip over the job capture) wins over the bare capture.
+      var av = co ? videosByCompany[co] : null;
+      if (av && av.videoKey) {
+        var vk = encodeURIComponent(av.videoKey);
+        var gif = API + "/in-market/video?key=" + vk + "&fmt=gif";
+        var mp4 = API + "/in-market/video?key=" + vk + "&fmt=mp4";
+        return { gif: gif, watch: mp4, mp4: mp4, role: null, kind: "video" };
+      }
+      var s = co ? shotsByCompany[co] : null;
       if (s && (s.teaser || s.watch)) return { gif: s.teaser, watch: s.watch, mp4: s.video, role: null, kind: "capture" };
       return null;
     }
@@ -3837,8 +3847,8 @@
     function captureCell(p) {
       var vid = videoFor(p);
       if (vid) {
-        var tag = vid.kind === "personalized"
-          ? '<span class="cl-vtag" title="Personalized webcam video">🎬 video</span>'
+        var tag = (vid.kind === "personalized" || vid.kind === "video")
+          ? '<span class="cl-vtag" title="Outreach video (your clip over the job capture)">🎬 video</span>'
           : '<span class="cl-vtag cl-vtag-cap" title="Screen capture of the company hiring page">🖥 capture</span>';
         var thumb = vid.gif
           ? '<img class="video-thumb" loading="lazy" src="' + esc(vid.gif) + '" alt="preview" onerror="this.style.display=\'none\'" />'
@@ -4109,6 +4119,13 @@
       }).catch(function () { /* captures are best-effort; the tab still works without them */ });
     }
 
+    // Load the finished composited outreach videos (company -> videoKey) so rows show the real video.
+    function loadVideos() {
+      return send("/in-market", "POST", { action: "autovideo_map" }).then(function (r) {
+        videosByCompany = (r.ok && r.data && r.data.videos) || {};
+      }).catch(function () { /* best-effort */ });
+    }
+
     function load() {
       var b = $("#clBody"); if (b) b.innerHTML = loading();
       var seg = clSeg;
@@ -4128,7 +4145,7 @@
           segCounts.signals = (bs.contactable || 0) + (bs.queued || 0) + (bs.enrolled || 0);
         }
       }).catch(function () { /* best-effort headline */ });
-      Promise.all([dataP, loadShots(), funnelP]).then(function () {
+      Promise.all([dataP, loadShots(), loadVideos(), funnelP]).then(function () {
         if (clAll === null) { var bb = $("#clBody"); if (bb) bb.innerHTML = needsSetup(); clAll = []; return; }
         if (seg === "all") segCounts.all = clAll.filter(hasValidEmail).length;
         clById = {}; clAll.forEach(function (p) { clById[p.id] = p; });
