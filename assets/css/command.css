@@ -519,7 +519,7 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .cl-fully { font-size: 11px; font-weight: 600; color: #36d399; padding: 4px 4px; margin-left: 4px; white-space: nowrap; }
 /* Clients · spreadsheet grid: dense, sortable, sticky header, both-axis scroll. */
 .cl-sheet-wrap { overflow: auto; max-height: calc(100vh - 300px); }
-.cl-sheet { min-width: 1320px; font-size: 12.5px; }
+.cl-sheet { min-width: 1760px; font-size: 12.5px; }
 .cl-sheet thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2, #16161f); cursor: pointer; white-space: nowrap; user-select: none; }
 .cl-sheet thead th:hover { color: var(--text, #f4f4f8); }
 .cl-sheet thead th.cl-th-active { color: var(--brand-2, #4dd0ff); }

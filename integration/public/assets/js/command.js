@@ -3605,7 +3605,7 @@
    * record. Searchable + CSV export (with watch/GIF links). */
   function renderClients(el) {
     el.innerHTML = head("Clients",
-      "Your Hire Signals send-ready book: Reoon-validated decision-makers paired with a personalized screen-capture video, ready to email.") +
+      "Every enriched client, saved and campaign-ready: the full personalization sheet (first name → company location), verified for sending. Sort any column, then export or deploy.") +
       '<div class="btn-row" style="margin-bottom:12px">' +
       '<button class="btn btn-primary btn-sm" id="clVerify">✅ Verify emails (Reoon)</button>' +
       '<button class="btn btn-ghost btn-sm" id="clGenAll">🖥 Generate missing captures</button>' +
@@ -3661,23 +3661,53 @@
 
     // Sort rank for the verification verdict — best (most sendable) first when ascending.
     function vRank(p) { return ({ valid: 0, deliverable: 1, risky: 2, unknown: 3, unverified: 4, invalid: 5 })[vStatus(p)]; }
-    // Spreadsheet columns: drives BOTH the sortable header and the row cells, in order.
-    var COLS = [
-      { key: "name", label: "Name", sort: function (p) { return (p.fullName || "").toLowerCase(); } },
-      { key: "title", label: "Job Title", sort: function (p) { return (p.title || "").toLowerCase(); } },
-      { key: "company", label: "Company", sort: function (p) { return (p.company || "").toLowerCase(); } },
-      { key: "domain", label: "Domain", sort: function (p) { return (p.companyDomain || "").toLowerCase(); } },
-      { key: "email", label: "Email", sort: function (p) { return (p.email || "").toLowerCase(); } },
-      { key: "verification", label: "Email status", sort: vRank },
-      { key: "phone", label: "Phone", sort: function (p) { return (p.phone || p.mobilePhone || p.landlinePhone || ""); } },
-      { key: "linkedin", label: "LinkedIn", sort: function (p) { return p.linkedinUrl ? 0 : 1; } },
-      { key: "location", label: "Location", sort: function (p) { return (p.location || "").toLowerCase(); } },
-      { key: "signal", label: "Signal", sort: function (p) { return (p.signalReason || "").toLowerCase(); } },
-      { key: "sequence", label: "Sequence", sort: function (p) { return (p.sequenceName || "").toLowerCase(); } },
-      { key: "status", label: "Status", sort: function (p) { return (p.status || ""); } },
-      { key: "video", label: "Video", sort: function (p) { return hasCapture(p) ? 0 : 1; } }
-    ];
+
+    // Personalization helpers: derive first/last from the full name when the provider
+    // didn't split them, so every email merge field is populated for campaign crafting.
+    function firstNameOf(p) { return p.firstName || (p.fullName || "").trim().split(/\s+/)[0] || ""; }
+    function lastNameOf(p) {
+      if (p.lastName) return p.lastName;
+      var parts = (p.fullName || "").trim().split(/\s+/);
+      return parts.length > 1 ? parts.slice(1).join(" ") : "";
+    }
+    function phoneOf(p) { return p.phone || p.mobilePhone || p.landlinePhone || ""; }
     function naCell(v) { return v ? esc(v) : '<span class="pr-na">-</span>'; }
+
+    // ONE column spec drives the sortable header, the row cells, the sort accessor, AND the
+    // campaign-ready CSV (snake_case keys = merge fields). Ordered first_name → company_location
+    // (the personalization block for crafting custom emails), then contact, verification,
+    // signal, sequence, status, and the video asset.
+    var COLS = [
+      { key: "first_name", label: "First name", get: firstNameOf, render: function (p) {
+          var avatar = '<span class="avatar pr-av" style="position:relative;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) +
+            (p.photoUrl ? '<img src="' + esc(p.photoUrl) + '" alt="" onerror="this.remove()" />' : "") + "</span>";
+          return '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + naCell(firstNameOf(p)) + "</span></td>";
+        } },
+      { key: "last_name", label: "Last name", get: lastNameOf, render: function (p) { return "<td>" + naCell(lastNameOf(p)) + "</td>"; } },
+      { key: "full_name", label: "Full name", get: function (p) { return p.fullName || ""; }, render: function (p) { return "<td>" + naCell(p.fullName) + "</td>"; } },
+      { key: "job_title", label: "Job title", get: function (p) { return p.title || ""; }, render: function (p) { return "<td>" + naCell(p.title) + "</td>"; } },
+      { key: "company", label: "Company", get: function (p) { return p.company || ""; }, render: function (p) { return "<td>" + naCell(p.company) + "</td>"; } },
+      { key: "company_domain", label: "Company domain", get: function (p) { return p.companyDomain || ""; },
+        render: function (p) { return '<td class="cl-c-domain">' + (p.companyDomain ? '<a href="https://' + esc(p.companyDomain) + '" target="_blank" rel="noopener">' + esc(p.companyDomain) + "</a>" : '<span class="pr-na">-</span>') + "</td>"; } },
+      { key: "company_location", label: "Company location", get: function (p) { return p.location || ""; }, render: function (p) { return "<td>" + naCell(p.location) + "</td>"; } },
+      { key: "email", label: "Email", get: function (p) { return p.email || ""; },
+        render: function (p) { return '<td class="pr-c-email">' + (p.email ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a>" : '<span class="pr-na">-</span>') + "</td>"; } },
+      { key: "email_status", label: "Email status", get: function (p) { return vStatus(p); }, sort: vRank, render: function (p) { return "<td>" + vBadge(p) + "</td>"; } },
+      { key: "phone", label: "Phone", get: phoneOf, render: function (p) { return "<td>" + naCell(phoneOf(p)) + "</td>"; } },
+      { key: "linkedin_url", label: "LinkedIn", get: function (p) { return p.linkedinUrl || ""; }, sort: function (p) { return p.linkedinUrl ? 0 : 1; },
+        render: function (p) { return '<td class="pr-c-li">' + (p.linkedinUrl ? '<a class="pr-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : '<span class="pr-na">-</span>') + "</td>"; } },
+      { key: "headline", label: "Headline", get: function (p) { return p.headline || ""; }, render: function (p) { return '<td class="cl-c-signal">' + naCell(p.headline) + "</td>"; } },
+      { key: "signal", label: "Signal", get: function (p) { return p.signalReason || ""; },
+        render: function (p) { return '<td class="cl-c-signal">' + (p.signalReason ? '<span class="cl-sig" title="Hiring signal">⚡ ' + esc(p.signalReason) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
+      { key: "sequence", label: "Sequence", get: function (p) { return p.sequenceName || ""; },
+        render: function (p) { return "<td>" + (p.sequenceName ? '<span class="pr-seqtag">▸ ' + esc(p.sequenceName) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
+      { key: "status", label: "Status", get: function (p) { return clStatusLabel(p); }, sort: function (p) { return p.status || ""; },
+        render: function (p) { return '<td><span class="cls cls-' + statusCls(p.status) + '">' + esc(clStatusLabel(p)) + "</span></td>"; } },
+      { key: "video", label: "Video", get: function (p) { return hasCapture(p) ? ((videoFor(p) || {}).watch || "yes") : ""; }, sort: function (p) { return hasCapture(p) ? 0 : 1; },
+        render: function (p) { return '<td class="pr-c-video">' + captureCell(p) + "</td>"; } }
+    ];
+    // Sort accessor: a column's own sort(), else its text value.
+    function colSort(c, p) { return c.sort ? c.sort(p) : String(c.get ? c.get(p) : "").toLowerCase(); }
 
     // Small verification badge per row. "valid" = mailbox confirmed (Reoon/SMTP);
     // "deliverable" = syntax + real MX, mailbox not individually confirmed.
@@ -3732,25 +3762,8 @@
     }
 
     function rowHtml(p) {
-      var avatar = '<span class="avatar pr-av" style="position:relative;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) +
-        (p.photoUrl ? '<img src="' + esc(p.photoUrl) + '" alt="" onerror="this.remove()" />' : "") + "</span>";
-      var li = p.linkedinUrl ? '<a class="pr-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : '<span class="pr-na">-</span>';
-      var domain = p.companyDomain ? '<a href="https://' + esc(p.companyDomain) + '" target="_blank" rel="noopener">' + esc(p.companyDomain) + "</a>" : '<span class="pr-na">-</span>';
       return '<tr class="pr-row" data-pid="' + esc(p.id) + '">' +
-        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + esc(p.fullName || "Unknown") + "</span></td>" +
-        "<td>" + naCell(p.title) + "</td>" +
-        "<td>" + naCell(p.company) + "</td>" +
-        '<td class="cl-c-domain">' + domain + "</td>" +
-        '<td class="pr-c-email">' + (p.email ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a>" : '<span class="pr-na">-</span>') + "</td>" +
-        "<td>" + vBadge(p) + "</td>" +
-        "<td>" + naCell(p.phone || p.mobilePhone || p.landlinePhone) + "</td>" +
-        '<td class="pr-c-li">' + li + "</td>" +
-        "<td>" + naCell(p.location) + "</td>" +
-        '<td class="cl-c-signal">' + (p.signalReason ? '<span class="cl-sig" title="Hiring signal">⚡ ' + esc(p.signalReason) + "</span>" : '<span class="pr-na">-</span>') + "</td>" +
-        "<td>" + (p.sequenceName ? '<span class="pr-seqtag">▸ ' + esc(p.sequenceName) + "</span>" : '<span class="pr-na">-</span>') + "</td>" +
-        '<td><span class="cls cls-' + statusCls(p.status) + '">' + esc(clStatusLabel(p)) + "</span></td>" +
-        '<td class="pr-c-video">' + captureCell(p) + "</td>" +
-        "</tr>";
+        COLS.map(function (c) { return c.render(p); }).join("") + "</tr>";
     }
 
     function paint() {
@@ -3788,7 +3801,7 @@
       var list = all.filter(matches);
       // Spreadsheet sort by the active column.
       var sortCol = COLS.filter(function (c) { return c.key === clSort.key; })[0] || COLS[0];
-      list.sort(function (a, b) { var av = sortCol.sort(a), bv = sortCol.sort(b); return av < bv ? -clSort.dir : av > bv ? clSort.dir : 0; });
+      list.sort(function (a, b) { var av = colSort(sortCol, a), bv = colSort(sortCol, b); return av < bv ? -clSort.dir : av > bv ? clSort.dir : 0; });
       var rows = list.map(rowHtml).join("");
       var countLbl = clFilter ? (list.length + " of " + all.length) : String(all.length);
       // Counts by verdict + capture coverage, so the user sees readiness at a glance.
@@ -3937,17 +3950,18 @@
     function exportClients() {
       var list = shown().filter(matches);
       if (!list.length) { toast("Nothing to export."); return; }
-      var cols = ["fullName", "title", "company", "email", "phone", "location", "linkedinUrl"];
-      var heads = ["Name", "Title", "Company", "Email", "Phone", "Location", "LinkedIn", "Email status", "Verified at", "Signal", "Watch URL", "GIF URL"];
       var cell = function (v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; };
+      // Headers are the COLS merge keys (snake_case) so the file maps straight into
+      // Instantly / Clay / the sequence editor, plus a few extra deploy fields.
+      var keys = COLS.map(function (c) { return c.key; }).filter(function (k) { return k !== "video"; });
+      var extra = ["watch_url", "video_gif_url", "verified_at"];
+      var heads = keys.concat(extra);
       var csv = heads.join(",") + "\n" + list.map(function (p) {
         var vid = videoFor(p) || {};
-        var base = cols.map(function (c) { return cell(p[c]); });
-        base.push(cell(vStatus(p)));
-        base.push(cell(p.emailVerification && p.emailVerification.checkedAt));
-        base.push(cell(p.signalReason));
+        var base = COLS.filter(function (c) { return c.key !== "video"; }).map(function (c) { return cell(c.get(p)); });
         base.push(cell(vid.watch));
         base.push(cell(vid.gif));
+        base.push(cell(p.emailVerification && p.emailVerification.checkedAt));
         return base.join(",");
       }).join("\n");
       var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" }), url = URL.createObjectURL(blob);
