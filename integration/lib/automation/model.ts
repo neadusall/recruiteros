@@ -45,7 +45,9 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
     if (!pv?.watchUrl) return "";
     const extra =
       (vals.firstname && vals.firstname !== "there" ? `&n=${encodeURIComponent(vals.firstname)}` : "") +
-      (p.id ? `&rcpt=${encodeURIComponent(p.id)}` : "");
+      (p.id ? `&rcpt=${encodeURIComponent(p.id)}` : "") +
+      // The address this email is going to — so the watch page can prefill the reply box.
+      (p.email ? `&pe=${encodeURIComponent(p.email)}` : "");
     return pv.watchUrl + extra;
   })();
   vals.watchlink = watch;

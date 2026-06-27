@@ -25,7 +25,7 @@ export function middleware(req: NextRequest) {
   if (v) {
     const url = req.nextUrl.clone();
     url.pathname = "/watch";
-    url.search = "?s=" + encodeURIComponent(v[1]);
+    url.searchParams.set("s", v[1]);   // preserve any per-recipient params (n, rcpt, pe) and add the code
     return NextResponse.rewrite(url);
   }
 
