@@ -47,6 +47,7 @@ export interface CuratedProspect {
   jobUrl?: string;                  // the actual job-posting / apply URL, so the screen capture targets the REAL job (not just the careers page)
   function: JobFunction;            // which desk
   score: number;                    // hiring-intent score of the source signal
+  employeeCount?: number;           // company headcount (collected via Wikidata) — ICP fit + personalization
   /* ---- the decision-maker (WHO to reach) ---- */
   managerName?: string;
   managerTitle: string;             // resolved title, else the inferred owning title
@@ -277,6 +278,7 @@ export function buildCuratedRow(lead: PoolLeadLite, role: string, dm: DecisionMa
     jobUrl: lead.sourceUrl,
     function: dm.function as JobFunction,
     score: Math.round(lead.score ?? 0),
+    employeeCount: lead.employeeCount,
     managerName: dm.fullName,
     managerTitle: dm.title ?? dm.targetTitle,
     managerVia: dm.via,
