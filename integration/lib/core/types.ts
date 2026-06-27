@@ -131,6 +131,10 @@ export interface Campaign {
   /** Optional launch date (YYYY-MM-DD) for this campaign's batch, so the Send Queue can show campaigns
    *  by the day they're slated to go out. */
   scheduledFor?: string;
+  /** The recruiter (member userId) whose sender-inbox pool this campaign sends
+   *  from. Set at deploy; the send path rotates across that recruiter's inboxes
+   *  (see lib/senders/pool.ts pickSender). */
+  recruiterId?: string;
   updatedAt?: string;
 }
 
@@ -173,6 +177,10 @@ export interface Prospect {
    *  imported it. Powers the per-recruiter Dashboard drill-down. Unset for
    *  legacy/admin-created records (counted only in the workspace-wide view). */
   ownerId?: string;
+  /** The specific sender inbox (lib/senders) this prospect was sent from, stamped
+   *  when the rotation picks one at deploy. Lets replies + analytics tie back to
+   *  the exact Email ID, and keeps a prospect on one inbox across a sequence. */
+  senderInboxId?: string;
   fullName: string;
   firstName: string;
   email?: string;
