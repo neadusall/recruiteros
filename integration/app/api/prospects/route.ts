@@ -9,7 +9,7 @@
  */
 
 import { getCore } from "../../../lib/core/repository";
-import { addProspect, bulkUpload, transition, enrichProspect, LIFECYCLE, type NewProspectInput } from "../../../lib/prospects";
+import { addProspect, bulkUpload, transition, enrichProspect, verifyProspectEmails, LIFECYCLE, type NewProspectInput } from "../../../lib/prospects";
 import { importFromLinkedInSearch } from "../../../lib/linkedin/searchImport";
 import { requireSession, body, ok, fail } from "../../../lib/api";
 import type { ProspectStatus } from "../../../lib/core/types";
@@ -69,6 +69,16 @@ export async function POST(req: Request) {
       return ok(await enrichProspect(ws, b.prospectId, field));
     } catch (e: any) {
       return fail(e.message ?? "enrich_failed", e.status ?? 400);
+    }
+  }
+  // Verify email deliverability (Reoon mailbox check / opt-in SMTP / DNS) and stamp each
+  // prospect with its verdict. Optional `ids` limits it to a subset (e.g. the unverified ones).
+  if (b?.action === "verify-emails") {
+    try {
+      const ids = Array.isArray(b.ids) ? b.ids : undefined;
+      return ok(await verifyProspectEmails(ws, ids));
+    } catch (e: any) {
+      return fail(e?.message ?? "verify_failed", e?.status ?? 400);
     }
   }
   // Bulk patch selected prospects: set status and/or assign a saved sequence.

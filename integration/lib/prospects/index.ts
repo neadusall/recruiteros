@@ -265,9 +265,57 @@ export async function enrichProspect(
       title: p.title,
       source: "outbound",
     });
+    // Verify the resolved email so the pipeline only ever sends to deliverable addresses —
+    // "enriched" should always mean "checked", not just "found". Best-effort: re-verify when
+    // the email changed or was never checked; a verifier hiccup leaves it for Clients → Verify.
+    if (found.email || !p.emailVerification) {
+      try {
+        const { verifyEmailDetailed } = await import("../inmarket/emailVerify");
+        const v = await verifyEmailDetailed(p.email);
+        p.emailVerification = { status: v.status, reason: v.reason, source: v.source, checkedAt: nowIso() };
+      } catch { /* leave unverified; the Clients tab can retry */ }
+    }
   }
   await core.saveProspect(p);
   return { prospect: p, found };
+}
+
+export interface VerifyEmailsResult {
+  checked: number;
+  summary: { valid: number; deliverable: number; risky: number; invalid: number; unknown: number };
+  /** Whether a mailbox-level verifier (Reoon / opt-in SMTP) is configured. When false, the
+   *  best attainable verdict is the domain-level "deliverable" — the UI surfaces a setup hint. */
+  mailboxVerifier: boolean;
+  prospects: Prospect[];
+}
+
+/**
+ * Verify the email deliverability of a workspace's prospects and STAMP each record with its
+ * verdict (persisted). With no `ids`, verifies every prospect that has an email; pass `ids` to
+ * verify a subset (e.g. only the not-yet-checked ones). Mailbox-level confirmation needs
+ * REOON_API_KEY (recommended; cloud, no port 25) or opt-in SMTP; with neither it still returns a
+ * real DNS/domain-level verdict so junk/dead addresses are dropped out of the box.
+ */
+export async function verifyProspectEmails(workspaceId: string, ids?: string[]): Promise<VerifyEmailsResult> {
+  const core = getCore();
+  const all = await core.listProspects(workspaceId);
+  const idSet = ids && ids.length ? new Set(ids) : null;
+  const targets = all.filter((p) => p.email && (!idSet || idSet.has(p.id)));
+
+  const { verifyDetailedBatch, reoonEnabled, smtpEnabled } = await import("../inmarket/emailVerify");
+  const verdicts = await verifyDetailedBatch(targets.map((p) => ({ id: p.id, email: p.email! })));
+
+  const summary = { valid: 0, deliverable: 0, risky: 0, invalid: 0, unknown: 0 };
+  const prospects: Prospect[] = [];
+  for (const p of targets) {
+    const v = verdicts.get(p.id);
+    if (!v) continue;
+    p.emailVerification = { status: v.status, reason: v.reason, source: v.source, checkedAt: nowIso() };
+    summary[v.status]++;
+    await core.saveProspect(p);
+    prospects.push(p);
+  }
+  return { checked: prospects.length, summary, mailboxVerifier: reoonEnabled() || smtpEnabled(), prospects };
 }
 
 /** Bulk CSV import with dedupe (one Person upsert per row). */

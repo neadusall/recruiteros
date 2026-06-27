@@ -481,6 +481,7 @@
   /* ---------------- router ---------------- */
   var ROUTES = {
     overview: { title: "Dashboard", crumb: "Operate", action: null, render: renderOverview },
+    clients: { title: "Clients", crumb: "Operate", action: null, render: renderClients },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
@@ -3591,6 +3592,186 @@
           .catch(function () { next(i + 1); });
       })(0);
     });
+  }
+
+  /* ---------------- Clients ----------------
+   * The send-ready book: every enriched lead whose email has been VERIFIED for
+   * sending. Pulls the full prospect set (both motions), keeps well-formed emails,
+   * and reflects each one's verification verdict (valid / deliverable / risky /
+   * invalid / unverified). "Verify emails" runs the deliverability check (Reoon
+   * mailbox check when REOON_API_KEY is set, else a zero-config DNS/MX check) and
+   * stamps every record. Default view = send-ready only. Searchable + CSV export. */
+  function renderClients(el) {
+    el.innerHTML = head("Clients",
+      "Your send-ready book: enriched leads with a verified, deliverable email. Verify in one click, then export or sequence.") +
+      '<div class="btn-row" style="margin-bottom:12px">' +
+      '<button class="btn btn-primary btn-sm" id="clVerify">✅ Verify emails</button>' +
+      '<button class="btn btn-ghost btn-sm" id="clExport">⇪ Export CSV</button>' +
+      '<a class="btn btn-ghost btn-sm" href="#prospects">⚡ Enrich more in Prospects</a>' +
+      '<span id="clViewToggle" style="margin-left:auto;display:inline-flex;gap:4px"></span>' +
+      '</div>' +
+      '<div class="pr-searchbar"><span class="ico">⌕</span>' +
+      '<input id="clSearch" type="text" autocomplete="off" placeholder="Search by name, job title, company, or email…" /></div>' +
+      '<div id="clBody">' + loading() + "</div>";
+
+    var clAll = [], clFilter = "";
+    // "ready" = only verified-deliverable (send-ready); "all" = every lead with an email.
+    var clView = localStorage.getItem("ros_clients_view") || "ready";
+    var searchEl = $("#clSearch");
+    if (searchEl) searchEl.addEventListener("input", function () { clFilter = (searchEl.value || "").toLowerCase().trim(); paint(); });
+    var exp = $("#clExport"); if (exp) exp.addEventListener("click", exportClients);
+    var verBtn = $("#clVerify"); if (verBtn) verBtn.addEventListener("click", function () { verifyEmails(this); });
+
+    function hasValidEmail(p) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((p.email || "").trim());
+    }
+    function eligible() { return clAll.filter(hasValidEmail); }
+    // Verification verdict for a prospect ("unverified" until the check has run).
+    function vStatus(p) { return (p.emailVerification && p.emailVerification.status) || "unverified"; }
+    // Send-ready = the verifier confirmed the address can receive mail.
+    function isSendReady(p) { var s = vStatus(p); return s === "valid" || s === "deliverable"; }
+    function shown() { return clView === "ready" ? eligible().filter(isSendReady) : eligible(); }
+
+    // Small verification badge per row. "valid" = mailbox confirmed (Reoon/SMTP);
+    // "deliverable" = syntax + real MX, mailbox not individually confirmed.
+    function vBadge(p) {
+      var v = p.emailVerification || null;
+      var s = v ? v.status : "unverified";
+      var why = v && v.reason ? (" · " + v.reason) : "";
+      var map = {
+        valid: ['cl-vb-ok', '✓ verified', 'Mailbox confirmed deliverable'],
+        deliverable: ['cl-vb-deliv', '✓ deliverable', 'Domain accepts mail (syntax + MX). Set REOON_API_KEY to confirm the mailbox'],
+        risky: ['cl-vb-risky', '~ risky', 'Catch-all / role / inbox-full — deliverable but unconfirmed'],
+        invalid: ['cl-vb-bad', '✕ invalid', 'Undeliverable — will bounce'],
+        unknown: ['cl-vb-unk', '? unknown', 'Could not determine — retry verification'],
+        unverified: ['cl-vb-unk', '• unverified', 'Not checked yet — click Verify emails']
+      };
+      var m = map[s] || map.unverified;
+      return '<span class="cl-vb ' + m[0] + '" title="' + esc(m[2] + why) + '">' + m[1] + "</span>";
+    }
+
+    function clStatusLabel(p) {
+      var l = (REF.lifecycle || []).filter(function (x) { return x.status === p.status; })[0];
+      var m = (p.motion === "recruiting") ? "recruiting" : "bd";
+      return l ? (l[m] || l.status) : (p.status || "");
+    }
+
+    function matches(p) {
+      if (!clFilter) return true;
+      var hay = ((p.fullName || "") + " " + (p.title || "") + " " + (p.company || "") + " " +
+        (p.email || "") + " " + (p.location || "")).toLowerCase();
+      return clFilter.split(/\s+/).every(function (t) { return hay.indexOf(t) >= 0; });
+    }
+
+    function rowHtml(p) {
+      var avatar = '<span class="avatar pr-av" style="position:relative;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) +
+        (p.photoUrl ? '<img src="' + esc(p.photoUrl) + '" alt="" onerror="this.remove()" />' : "") + "</span>";
+      var li = p.linkedinUrl ? '<a class="pr-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : '<span class="pr-na">-</span>';
+      var cell = function (v) { return v ? esc(v) : '<span class="pr-na">-</span>'; };
+      return '<tr class="pr-row" data-pid="' + esc(p.id) + '">' +
+        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + esc(p.fullName || "Unknown") +
+          (p.sequenceName ? '<span class="pr-seqtag" title="Assigned sequence">▸ ' + esc(p.sequenceName) + "</span>" : "") + "</span></td>" +
+        "<td>" + cell(p.title) + "</td>" +
+        "<td>" + cell(p.company) + "</td>" +
+        '<td class="pr-c-email"><a href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a></td>" +
+        "<td>" + vBadge(p) + "</td>" +
+        '<td class="pr-c-li">' + li + "</td>" +
+        "<td>" + cell(p.phone) + "</td>" +
+        '<td><span class="cls cls-' + statusCls(p.status) + '">' + esc(clStatusLabel(p)) + "</span></td>" +
+        "</tr>";
+    }
+
+    function paint() {
+      var body = $("#clBody"); if (!body) return;
+      // View toggle chips with live counts.
+      var elig = eligible();
+      var ready = elig.filter(isSendReady);
+      var tg = $("#clViewToggle");
+      if (tg) tg.innerHTML =
+        '<button class="btn btn-sm ' + (clView === "ready" ? "btn-primary" : "btn-ghost") + '" data-clview="ready">Send-ready · ' + ready.length + "</button>" +
+        '<button class="btn btn-sm ' + (clView === "all" ? "btn-primary" : "btn-ghost") + '" data-clview="all">All with email · ' + elig.length + "</button>";
+      Array.prototype.forEach.call((tg ? tg.querySelectorAll("[data-clview]") : []), function (b) {
+        b.addEventListener("click", function () { clView = b.getAttribute("data-clview"); localStorage.setItem("ros_clients_view", clView); paint(); });
+      });
+
+      var all = shown();
+      var list = all.filter(matches);
+      var rows = list.map(rowHtml).join("");
+      var countLbl = clFilter ? (list.length + " of " + all.length) : String(all.length);
+      // Counts by verdict, so the user sees verification coverage at a glance.
+      var by = elig.reduce(function (m, p) { var s = vStatus(p); m[s] = (m[s] || 0) + 1; return m; }, {});
+      var unchecked = (by.unverified || 0) + (by.unknown || 0);
+      var legend = '<div class="cl-legend">' +
+        '<span class="cl-vb cl-vb-ok">✓ verified ' + (by.valid || 0) + "</span>" +
+        '<span class="cl-vb cl-vb-deliv">✓ deliverable ' + (by.deliverable || 0) + "</span>" +
+        '<span class="cl-vb cl-vb-risky">~ risky ' + (by.risky || 0) + "</span>" +
+        '<span class="cl-vb cl-vb-bad">✕ invalid ' + (by.invalid || 0) + "</span>" +
+        '<span class="cl-vb cl-vb-unk">• unchecked ' + unchecked + "</span>" +
+        "</div>";
+      var tableHead = '<thead><tr><th>Name</th><th>Job Title</th><th>Company</th><th>Email</th>' +
+        "<th>Verification</th><th>LinkedIn</th><th>Phone</th><th>Status</th></tr></thead>";
+      var table = rows
+        ? '<div class="pr-table-wrap"><table class="pr-table">' + tableHead + "<tbody>" + rows + "</tbody></table></div>"
+        : '<div class="empty">' + (clFilter
+          ? "No clients match “" + esc(clFilter) + "”."
+          : clView === "ready"
+          ? (elig.length
+            ? "None verified send-ready yet. Click ✅ Verify emails to check deliverability, or switch to All with email."
+            : "No enriched leads with an email yet. Enrich your prospects (Prospects → ⚡ Enrich all contacts) and they’ll appear here to verify.")
+          : "No enriched leads with an email yet. Enrich your prospects (Prospects → ⚡ Enrich all contacts).") + "</div>";
+      body.innerHTML = '<div class="card" style="padding:0;overflow:hidden"><div class="pr-card-h">' +
+        '<h3>Clients <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl +
+        (clView === "ready" ? " send-ready" : " with an email") + "</span></h3>" + legend + "</div>" + table + "</div>";
+    }
+
+    // Run deliverability verification over the leads. By default only the not-yet-checked
+    // ones (saves verifier credits); when everything is settled, re-verify them all.
+    function verifyEmails(btn) {
+      var elig = eligible();
+      if (!elig.length) { toast("No emails to verify yet — enrich some prospects first."); return; }
+      var pending = elig.filter(function (p) { var s = vStatus(p); return s === "unverified" || s === "unknown"; });
+      var payload = pending.length ? { action: "verify-emails", ids: pending.map(function (p) { return p.id; }) } : { action: "verify-emails" };
+      var old = btn ? btn.textContent : "";
+      if (btn) { btn.disabled = true; btn.textContent = "Verifying " + (pending.length || elig.length) + "…"; }
+      send("/prospects", "POST", payload).then(function (r) {
+        if (btn) { btn.disabled = false; btn.textContent = old; }
+        if (!r.ok) { toast("Verification failed (" + ((r.data && r.data.error) || r.status) + ")"); return; }
+        var s = (r.data && r.data.summary) || {};
+        var msg = "Verified " + (r.data.checked || 0) + ": " + (s.valid || 0) + " confirmed, " +
+          (s.deliverable || 0) + " deliverable, " + (s.risky || 0) + " risky, " + (s.invalid || 0) + " invalid";
+        if (r.data && r.data.mailboxVerifier === false && (s.deliverable || 0) > 0)
+          msg += ". Set REOON_API_KEY to confirm mailboxes (deliverable → verified).";
+        toast(msg);
+        load();
+      }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = old; } toast("Could not reach the server."); });
+    }
+
+    function exportClients() {
+      var list = shown();
+      if (!list.length) { toast("Nothing to export."); return; }
+      var cols = ["fullName", "title", "company", "email", "phone", "location", "linkedinUrl"];
+      var heads = ["Name", "Title", "Company", "Email", "Phone", "Location", "LinkedIn", "Email status", "Verified at"];
+      var cell = function (v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; };
+      var csv = heads.join(",") + "\n" + list.map(function (p) {
+        var base = cols.map(function (c) { return cell(p[c]); });
+        base.push(cell(vStatus(p)));
+        base.push(cell(p.emailVerification && p.emailVerification.checkedAt));
+        return base.join(",");
+      }).join("\n");
+      var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" }), url = URL.createObjectURL(blob);
+      var a = document.createElement("a"); a.href = url; a.download = (clView === "ready" ? "clients-send-ready.csv" : "clients.csv"); a.style.display = "none";
+      document.body.appendChild(a); a.click();
+      setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+      toast("Exported " + list.length + " client" + (list.length === 1 ? "" : "s"));
+    }
+
+    function load() {
+      api("/prospects").then(function (d) {
+        clAll = (d && d.prospects) || [];
+        paint();
+      }).catch(function () { var b = $("#clBody"); if (b) b.innerHTML = needsSetup(); });
+    }
+    load();
   }
 
   function renderProspects(el) {

@@ -504,6 +504,16 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .cur-valid { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 99px; background: rgba(54,211,153,0.16); color: #36d399; }
 .cur-invalid { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 99px; background: rgba(255,90,90,0.16); color: #ff7a7a; }
 .cur-catchall { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 99px; background: rgba(255,194,77,0.16); color: #ffc24d; }
+
+/* Clients · email verification badges (per-row verdict + header legend). */
+.cl-vb { font-size: 10.5px; font-weight: 700; letter-spacing: .02em; padding: 2px 8px; border-radius: 999px; white-space: nowrap; display: inline-block; }
+.cl-vb-ok { background: rgba(54,211,153,0.16); color: #36d399; }
+.cl-vb-deliv { background: rgba(77,208,255,0.14); color: #4dd0ff; }
+.cl-vb-risky { background: rgba(255,194,77,0.16); color: #ffc24d; }
+.cl-vb-bad { background: rgba(255,90,90,0.16); color: #ff7a7a; }
+.cl-vb-unk { background: rgba(255,255,255,0.08); color: var(--text-muted, #9a9aa8); }
+.cl-legend { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px; }
+.cl-legend .cl-vb { font-size: 10px; font-weight: 600; }
 .im-ai-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 99px; background: rgba(77,208,255,0.14); color: var(--brand-2); margin-left: 4px; }
 .im-ai-refine, .im-all-roles { appearance: none; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; margin-top: 8px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); transition: all .12s ease; }
 .im-all-roles { margin-right: 8px; }

@@ -125,6 +125,97 @@ export async function verifyEmailsFree(
 }
 
 /* ------------------------------------------------------------------ */
+/* Detailed per-address verification (the Prospects/Clients verifier)   */
+/* ------------------------------------------------------------------ */
+
+export type DetailedVerdict = "valid" | "deliverable" | "risky" | "invalid" | "unknown";
+export interface DetailedCheck {
+  email: string;
+  status: DetailedVerdict;
+  reason: string;
+  source: "reoon" | "smtp" | "dns";
+}
+
+/**
+ * Verify ONE address and return a full verdict for every input — unlike the curation
+ * seam (which omits anything it can't prove), this always classifies so the Clients book
+ * can show each prospect's true state.
+ *
+ * Confidence ladder, best signal first:
+ *   1. Reoon (when REOON_API_KEY set) — a real CLOUD mailbox check, no outbound port 25.
+ *      "safe" → valid (mailbox confirmed); dead statuses → invalid; catch-all/role/full → risky.
+ *   2. Opt-in SMTP RCPT probe (INMARKET_SMTP_VERIFY=1) — upgrades deliverable → valid.
+ *   3. Zero-config DNS — syntax + MX + role/disposable. Real company domain with MX and a
+ *      personal local-part → "deliverable" (can receive mail; mailbox not individually proven).
+ * So it WORKS with no setup (DNS tier), and the moment a verifier is configured it upgrades
+ * "deliverable" → mailbox-confirmed "valid".
+ */
+export async function verifyEmailDetailed(
+  email: string,
+  opts?: { mx?: "mx" | "none" | "error" },
+): Promise<DetailedCheck> {
+  const p = parts(email);
+  if (!p) return { email, status: "invalid", reason: "malformed", source: "dns" };
+  if (DISPOSABLE.has(p.domain)) return { email, status: "invalid", reason: "disposable", source: "dns" };
+
+  // 1. Reoon mailbox-level confirmation — the real "verified for sending".
+  if (reoonEnabled()) {
+    const r = await reoonVerifyOne(email);
+    if (r) {
+      const status = String(r.status ?? "").toLowerCase();
+      if (status === "safe") return { email, status: "valid", reason: "mailbox_confirmed", source: "reoon" };
+      if (r.mx_accepts_mail === false || ["invalid", "disabled", "disposable", "spamtrap"].includes(status))
+        return { email, status: "invalid", reason: status || "undeliverable", source: "reoon" };
+      if (r.is_catch_all === true || status === "catch_all") return { email, status: "risky", reason: "catch_all", source: "reoon" };
+      if (status === "role_account" || ROLE_LOCALS.has(p.local)) return { email, status: "risky", reason: "role_account", source: "reoon" };
+      if (status === "inbox_full") return { email, status: "risky", reason: "inbox_full", source: "reoon" };
+      // Reoon "unknown" → fall through to DNS so we still return a domain-level verdict.
+    }
+  }
+
+  // 2/3. DNS tier (zero-config). A definitively dead domain is invalid; a DNS hiccup stays
+  // "unknown" (never permanently suppress a real prospect over one transient failure).
+  const mx = opts?.mx ?? (await mxStatus(p.domain).catch(() => "error" as const));
+  if (mx === "none") return { email, status: "invalid", reason: "domain_not_found", source: "dns" };
+  if (mx === "error") return { email, status: "unknown", reason: "dns_unavailable", source: "dns" };
+  if (ROLE_LOCALS.has(p.local)) return { email, status: "risky", reason: "role_account", source: "dns" };
+
+  // 2. Opt-in SMTP RCPT probe upgrades deliverable → mailbox-confirmed valid.
+  if (process.env.INMARKET_SMTP_VERIFY === "1") {
+    const c = await smtpRcptProbe(email, p.domain).catch(() => null);
+    if (c === true) return { email, status: "valid", reason: "smtp_confirmed", source: "smtp" };
+    if (c === false) return { email, status: "invalid", reason: "smtp_rejected", source: "smtp" };
+  }
+  return { email, status: "deliverable", reason: "mx_ok", source: "dns" };
+}
+
+/**
+ * Batch verifier keyed by an external id (e.g. prospect id). Resolves MX ONCE per domain,
+ * then verifies every item with bounded concurrency. Returns id → verdict.
+ */
+export async function verifyDetailedBatch(
+  items: Array<{ id: string; email: string }>,
+  opts?: { concurrency?: number },
+): Promise<Map<string, DetailedCheck>> {
+  const out = new Map<string, DetailedCheck>();
+  const domainOf = (e: string) => (e || "").trim().toLowerCase().slice((e || "").lastIndexOf("@") + 1);
+  const domains = [...new Set(items.map((i) => domainOf(i.email)).filter(Boolean))];
+  const mxByDomain = new Map<string, "mx" | "none" | "error">();
+  await Promise.all(domains.map(async (d) => { mxByDomain.set(d, await mxStatus(d).catch(() => "error" as const)); }));
+  const conc = Math.max(1, Math.min(opts?.concurrency ?? 6, 12));
+  let i = 0;
+  async function worker(): Promise<void> {
+    while (i < items.length) {
+      const it = items[i++];
+      const c = await verifyEmailDetailed(it.email, { mx: mxByDomain.get(domainOf(it.email)) }).catch(() => null);
+      if (c) out.set(it.id, c);
+    }
+  }
+  await Promise.all(Array.from({ length: conc }, () => worker()));
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
 /* Email FINDER — verify MORE prospects the right way (opt-in)          */
 /* ------------------------------------------------------------------ */
 
