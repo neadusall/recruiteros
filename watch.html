@@ -74,8 +74,32 @@
   var brandName = (qs.get("bn") || "").trim();
   var ctaText = (qs.get("cta") || "").trim();
   var ctaUrl = qs.get("ctaurl") || "";
+  var s = qs.get("s") || "";                 // short-code path: vid.<domain>/v/<code>
   var stage = document.getElementById("stage");
+  var RESOLVED = null;                        // {key, mp4, gif} when arrived via a short code
   var isHttp = function (u) { return /^https?:\/\//i.test(u || ""); };
+  function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"})[c]; }); }
+
+  // Short-code landing (vid.<domain>/v/<code>): resolve the video + brand + calendar by code, then render.
+  if (s && !key) {
+    fetch(API + "/api/in-market/resolve?s=" + encodeURIComponent(s))
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if (!d || d.error || !d.key) { stage.innerHTML = '<div class="err">This link looks incomplete or expired.</div>'; return; }
+        RESOLVED = d;
+        company = d.company || company; role = d.role || role;
+        var br = d.brand || {};
+        logo = br.logoUrl || logo; accent = br.accent || accent; brandName = (br.brandName || brandName || "").trim();
+        ctaText = (br.ctaText || ctaText || "").trim(); ctaUrl = br.ctaUrl || ctaUrl;
+        calLink = br.calendarUrl || calLink; replyTo = br.replyEmail || replyTo;
+        go();
+      })
+      .catch(function(){ stage.innerHTML = '<div class="err">This video isn\'t available right now.</div>'; });
+    return;
+  }
+  go();
+
+  function go(){
   // Drop unfilled merge tags (e.g. "{{firstName}}" arrived unrendered).
   if (/\{\{|\}\}/.test(name)) name = "";
   if (/\{\{|\}\}/.test(brandName)) brandName = "";
@@ -91,25 +115,32 @@
   if (footEl) footEl.textContent = "Sent with " + brandLabel.replace(/[<>&]/g, "");
   document.title = company ? ("A quick note about " + company) : ("A message from " + brandLabel);
 
-  if (!key || !/^[a-z0-9_-]{3,120}$/.test(key)) {
-    stage.innerHTML = '<div class="err">This link looks incomplete or expired.</div>';
-    return;
+  // Asset URLs: from the resolved short code (already signed), or built from the key + signed query.
+  var trackKey, mp4, gif;
+  if (RESOLVED) {
+    trackKey = RESOLVED.key; mp4 = RESOLVED.mp4;
+    gif = RESOLVED.gif + (RESOLVED.gif.indexOf("?") >= 0 ? "&" : "?") + "notrack=1";
+  } else {
+    if (!key || !/^[a-z0-9_-]{3,120}$/.test(key)) {
+      stage.innerHTML = '<div class="err">This link looks incomplete or expired.</div>';
+      return;
+    }
+    // Signed/expiring access: carry exp+sig from the share link through to the asset requests.
+    var auth = "";
+    var exp = qs.get("exp"), sig = qs.get("sig");
+    if (exp && sig) auth = "&exp=" + encodeURIComponent(exp) + "&sig=" + encodeURIComponent(sig);
+    trackKey = key;
+    mp4 = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=mp4" + auth;
+    // notrack on the poster so the watch-page load isn't counted as an email-teaser open.
+    gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif&notrack=1" + auth;
   }
-
-  // Signed/expiring access: carry exp+sig from the share link through to the asset requests.
-  var auth = "";
-  var exp = qs.get("exp"), sig = qs.get("sig");
-  if (exp && sig) auth = "&exp=" + encodeURIComponent(exp) + "&sig=" + encodeURIComponent(sig);
-  var mp4 = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=mp4" + auth;
-  // notrack on the poster so the watch-page load isn't counted as an email-teaser open.
-  var gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif&notrack=1" + auth;
 
   /* ---- engagement tracking (anonymous session; never blocks playback) ---- */
   var sid;
   try { sid = sessionStorage.getItem("ros_sid"); if (!sid) { sid = (Math.random().toString(36).slice(2) + Date.now().toString(36)); sessionStorage.setItem("ros_sid", sid); } } catch (e) { sid = "anon"; }
   function track(t, secs) {
     try {
-      var payload = JSON.stringify({ k: key, t: t, c: company, r: role, sid: sid, s: secs, rcpt: rcpt });
+      var payload = JSON.stringify({ k: trackKey, t: t, c: company, r: role, sid: sid, s: secs, rcpt: rcpt });
       var url = API + "/api/in-market/track";
       if (navigator.sendBeacon) navigator.sendBeacon(url, new Blob([payload], { type: "text/plain" }));
       else fetch(url, { method: "POST", body: payload, keepalive: true });
@@ -161,7 +192,7 @@
     var em = (document.getElementById("rEmail").value || "").trim();
     if (!msg && !em) return;
     try {
-      var payload = JSON.stringify({ k: key, type: "reply", message: msg, email: em, name: name, c: company, r: role, rcpt: rcpt });
+      var payload = JSON.stringify({ k: trackKey, type: "reply", message: msg, email: em, name: name, c: company, r: role, rcpt: rcpt });
       if (navigator.sendBeacon) navigator.sendBeacon(API + "/api/in-market/lead", new Blob([payload], { type: "text/plain" }));
       else fetch(API + "/api/in-market/lead", { method: "POST", body: payload, keepalive: true });
     } catch (e2) {}
@@ -195,7 +226,7 @@
   window.addEventListener("pagehide", flushBeat);
   document.addEventListener("visibilitychange", function(){ if (document.visibilityState === "hidden") flushBeat(); });
 
-  function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"})[c]; }); }
+  } // end go()
 })();
 </script>
 </body>
