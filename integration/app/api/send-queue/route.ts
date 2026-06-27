@@ -10,7 +10,7 @@
  *   { action: "fill_now" }                    -> stage one batch right now (ignores the toggle).
  */
 
-import { sendQueueOverview } from "../../../lib/sending/sendReady";
+import { sendQueueOverview, needsAssetsList, type MissingAsset } from "../../../lib/sending/sendReady";
 import { getAutofillSettings, setAutofillSettings, autofillStatus, runAutofill, ensureAutofill } from "../../../lib/sending/autofill";
 import { getCore } from "../../../lib/core/repository";
 import { requireSession, body, ok, fail } from "../../../lib/api";
@@ -76,6 +76,15 @@ export async function POST(req: Request) {
     } catch (e: any) {
       return fail(e?.message ?? "fill_failed", e?.status ?? 400);
     }
+  }
+
+  // The per-prospect worklist behind the "needs assets" cards: who's staged but not yet send-ready,
+  // and exactly what each is missing — optionally sliced to one asset (verified_email | video | watch_page).
+  if (b?.action === "needs_list") {
+    const allowed: MissingAsset[] = ["verified_email", "video", "watch_page"];
+    const missing = allowed.includes(b.missing) ? (b.missing as MissingAsset) : undefined;
+    const items = await needsAssetsList(ws, { missing, limit: Math.min(Number(b.limit) || 200, 1000) });
+    return ok({ items });
   }
 
   return fail("unknown_action", 400);

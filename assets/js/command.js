@@ -2270,7 +2270,41 @@
   /* ---------------- Send Queue (rolling-buffer readiness dashboard) ---------------- */
   function sqFmt(n) { return (n || 0).toLocaleString(); }
   function sqDayLabel(iso) { try { return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); } catch (e) { return iso; } }
-  function sqNeed(label, n, href) { return '<a class="sq-need" href="' + href + '"><span class="sq-need-n">' + (n || 0).toLocaleString() + "</span><span class=\"sq-need-l\">" + label + "</span></a>"; }
+  function sqNeed(label, n, missing) { return '<button type="button" class="sq-need" data-missing="' + missing + '"><span class="sq-need-n">' + (n || 0).toLocaleString() + '</span><span class="sq-need-l">' + label + ' <span class="sq-need-view">view ▾</span></span></button>'; }
+  function sqMissLabel(m) { return m === "verified_email" ? "✉️ email" : m === "video" ? "🎬 video" : "🔗 page"; }
+  function sqWorklistHtml(items, missing) {
+    var titleMap = { verified_email: "Need a verified email", video: "Need a 2nd-email video", watch_page: "Need a landing page" };
+    var fixMap = { verified_email: ["Verify emails in Clients", "#clients"], video: ["Record in PiP Studio", "#pipstudio"], watch_page: ["Build in PiP Studio", "#pipstudio"] };
+    var fix = fixMap[missing] || ["Fix", "#clients"];
+    if (!items.length) return '<div class="sq-wl"><div class="sq-wl-head">' + (titleMap[missing] || "Needs assets") + " — none waiting right now 🎉 <button type=\"button\" class=\"im-mini\" data-wlclose>Close</button></div></div>";
+    var rows = items.map(function (p) {
+      return '<div class="sq-wl-row">' +
+          '<div class="sq-wl-main"><b>' + esc(p.name || "(no name)") + "</b>" + (p.title ? ' <span class="muted">' + esc(p.title) + "</span>" : "") + (p.company ? " · " + esc(p.company) : "") + "</div>" +
+          '<div class="sq-wl-meta">' + (p.email ? esc(p.email) + (p.emailStatus ? ' <span class="muted">(' + esc(p.emailStatus) + ")</span>" : "") : '<span class="muted">no email</span>') + "</div>" +
+          '<div class="sq-wl-miss">' + (p.missing || []).map(function (m) { return '<span class="sq-miss">' + sqMissLabel(m) + "</span>"; }).join("") + "</div>" +
+        "</div>";
+    }).join("");
+    return '<div class="sq-wl"><div class="sq-wl-head">' + (titleMap[missing] || "Needs assets") + " · <b>" + items.length + "</b> staged" + (items.length >= 200 ? "+" : "") +
+      ' <a class="btn btn-primary btn-sm" href="' + fix[1] + '">' + fix[0] + "</a>" +
+      ' <button type="button" class="im-mini" data-wlclose>Close</button></div>' +
+      '<div class="sq-wl-list">' + rows + "</div></div>";
+  }
+  function sqLoadWorklist(missing) {
+    var box = document.getElementById("sqWorklist"); if (!box) return;
+    box.innerHTML = '<div class="sq-wl"><div class="sq-wl-head">Loading…</div></div>';
+    send("/send-queue", "POST", { action: "needs_list", missing: missing, limit: 200 }).then(function (r) {
+      box.innerHTML = sqWorklistHtml((r && r.data && r.data.items) || [], missing);
+    }).catch(function () { box.innerHTML = '<div class="sq-wl"><div class="sq-wl-head">Couldn’t load the list.</div></div>'; });
+  }
+  function sqWireWorklist() {
+    var body = document.getElementById("sqBody"); if (!body) return;
+    // onclick assignment (not addEventListener) so reloads don't stack duplicate handlers.
+    body.onclick = function (e) {
+      var card = e.target.closest && e.target.closest("[data-missing]");
+      if (card) { sqLoadWorklist(card.getAttribute("data-missing")); return; }
+      if (e.target.closest && e.target.closest("[data-wlclose]")) { var box = document.getElementById("sqWorklist"); if (box) box.innerHTML = ""; }
+    };
+  }
   function sqOverviewHtml(o) {
     var healthy = o.runwayDays >= o.bufferDays;
     var statusPill = healthy
@@ -2293,12 +2327,12 @@
           '<a class="sq-step" href="#pipstudio"><b>3 · Record / assign video</b><span>' + (o.needsAssets.noVideo ? sqFmt(o.needsAssets.noVideo) + " need a 2nd-email video" : "PiP Studio: clip + headshot") + "</span></a>" +
         "</div></div>";
     }
-    var needs = '<div class="sq-needs"><div class="sq-h">Needs assets <span class="muted">— held until complete (' + sqFmt(o.needsAssets.total) + ")</span></div>" +
+    var needs = '<div class="sq-needs"><div class="sq-h">Needs assets <span class="muted">— held until complete (' + sqFmt(o.needsAssets.total) + ") · click to see who</span></div>" +
       '<div class="sq-need-grid">' +
-        sqNeed("✉️ Verified email", o.needsAssets.noVerifiedEmail, "#clients") +
-        sqNeed("🎬 2nd-email video", o.needsAssets.noVideo, "#pipstudio") +
-        sqNeed("🔗 Landing page", o.needsAssets.noWatch, "#pipstudio") +
-      "</div></div>";
+        sqNeed("✉️ Verified email", o.needsAssets.noVerifiedEmail, "verified_email") +
+        sqNeed("🎬 2nd-email video", o.needsAssets.noVideo, "video") +
+        sqNeed("🔗 Landing page", o.needsAssets.noWatch, "watch_page") +
+      '</div><div id="sqWorklist" class="sq-worklist"></div></div>';
     var rows = o.days.map(function (dd, i) {
       var dot = dd.fill === "green" ? "🟢" : dd.fill === "yellow" ? "🟡" : "🔴";
       var label = i === 0 ? "Today" : i === 1 ? "Tomorrow" : sqDayLabel(dd.date);
@@ -2393,6 +2427,7 @@
       if (!d || !d.overview) { b.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>'; return; }
       b.innerHTML = sqAutofillHtml(d.autofill || { settings: {} }, d.campaigns || []) + sqOverviewHtml(d.overview);
       sqWireAutofill();
+      sqWireWorklist();
     }).catch(function () {
       var b = document.getElementById("sqBody"); if (b) b.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>';
     });
