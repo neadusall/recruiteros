@@ -27,8 +27,8 @@ export async function GET(req: Request) {
       autofillStatus(nowIso),
       getCore().listCampaigns(ws),
     ]);
-    // Slim campaign list for the picker (id + name + status only).
-    const camps = campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status }));
+    // Slim campaign list for the picker (+ whether it's set up as the Send Queue campaign and its date).
+    const camps = campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status, sendQueue: !!c.sendQueue, scheduledFor: c.scheduledFor }));
     return ok({ overview, autofill, campaigns: camps });
   } catch (e: any) {
     return fail(e?.message ?? "send_queue_failed", e?.status ?? 500);
@@ -75,6 +75,20 @@ export async function POST(req: Request) {
       return ok({ result });
     } catch (e: any) {
       return fail(e?.message ?? "fill_failed", e?.status ?? 400);
+    }
+  }
+
+  // One-click "set up as Send Queue campaign": mark it, retime 1st email → Day 0 / 2nd (video) → Day 1,
+  // optional launch date. Never approves/activates sending.
+  if (b?.action === "campaign_setup") {
+    const campaignId = String(b.campaignId ?? "").trim();
+    if (!campaignId) return fail("missing_campaign", 422);
+    const { setupSendQueueCampaign } = await import("../../../lib/sending/sendQueueSetup");
+    try {
+      const result = await setupSendQueueCampaign(campaignId, { scheduledFor: b.scheduledFor !== undefined ? String(b.scheduledFor) : undefined });
+      return ok({ result });
+    } catch (e: any) {
+      return fail(e?.message ?? "setup_failed", e?.status ?? 400);
     }
   }
 

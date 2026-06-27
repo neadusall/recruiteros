@@ -123,6 +123,14 @@ export interface Campaign {
    */
   model?: CampaignModel;
   outreachApproved?: boolean;
+  /** Marks this as a SEND QUEUE campaign (the auto-fill target). When set, the autopilot (a) holds a
+   *  prospect's FIRST email until it is fully send-ready (verified email + composed 2nd-email video +
+   *  watch page), so every started sequence has its next-day video ready, and (b) its model is timed
+   *  Day-0 text + Day-1 video. Opt-in + fail-safe: it only HOLDS unready prospects, never sends more. */
+  sendQueue?: boolean;
+  /** Optional launch date (YYYY-MM-DD) for this campaign's batch, so the Send Queue can show campaigns
+   *  by the day they're slated to go out. */
+  scheduledFor?: string;
   updatedAt?: string;
 }
 
