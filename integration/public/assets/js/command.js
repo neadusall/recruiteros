@@ -2095,6 +2095,14 @@
   var imTotal = 0;              // total companies available for this query in the pool (grows daily)
   var imStats = null;          // accumulation activity (added today, total, daily log)
   var imPicks = {};             // key -> { lead, manager } selected to push to Prospects
+  // TARGETED JSEARCH queue state (the user-driven scraper that replaces the random rotation).
+  var imQueue = [];             // saved targeted searches (from queue_list)
+  var imQEditId = null;         // id of the search being edited in the builder (null = creating new)
+  var imQPreview = null;        // active preview: { id, name, leads:[InMarketLead], picks:{idx:bool} }
+  var imQBusy = false;          // guard so double-clicks don't double-run a search
+  // JSearch date_posted windows + employment types (the values JSearch itself accepts).
+  var IM_QDATES = [["all", "Any time"], ["today", "Today"], ["3days", "Last 3 days"], ["week", "Last week"], ["month", "Last month"]];
+  var IM_QEMP = [["FULLTIME", "Full-time"], ["PARTTIME", "Part-time"], ["CONTRACTOR", "Contract"], ["INTERN", "Intern"]];
 
   // Industries + sub-sectors recruiters sell into. Drives the refined in-market search.
   // (Free job-board coverage is strongest for the tech-adjacent rows; traditional
@@ -2258,8 +2266,305 @@
     });
   }
 
+  // Human label for a JSearch employment-type code.
+  function imqEmpLabel(code) { for (var i = 0; i < IM_QEMP.length; i++) if (IM_QEMP[i][0] === code) return IM_QEMP[i][1]; return code; }
+
+  /**
+   * TARGETED JSEARCH panel — the headline Hire Signals control. Author an exact search
+   * (role/keywords + location + recency + employment type), save it to a queue, RUN it on demand,
+   * then PICK which companies actually merge into the pool. Nothing scrapes until you press Run, and
+   * nothing enters the pool until you commit your picks — so you target exactly who you want.
+   */
+  function renderTargetedQueue(host) {
+    if (!host) return;
+    host.innerHTML =
+      '<div class="imq">' +
+        '<div class="imq-head">' +
+          '<span class="imq-title">🎯 Targeted JSearch</span>' +
+          '<span class="imq-sub">Search exactly who you want · queue it · run it · pick which companies to scrape</span>' +
+        "</div>" +
+        '<form class="imq-builder" id="imqForm">' +
+          '<input id="imqQuery" class="imq-in imq-grow" type="text" autocomplete="off" placeholder="Job title or keywords — e.g. controller, registered nurse, backend engineer" />' +
+          '<input id="imqLoc" class="imq-in" type="text" autocomplete="off" placeholder="Location (city, state) — blank = nationwide" />' +
+          '<select id="imqDate" class="imq-in imq-sel" title="How recently the job was posted">' +
+            IM_QDATES.map(function (d) { return '<option value="' + d[0] + '"' + (d[0] === "week" ? " selected" : "") + ">" + esc(d[1]) + "</option>"; }).join("") +
+          "</select>" +
+          '<select id="imqLimit" class="imq-in imq-sel" title="Max jobs to pull per run">' +
+            [50, 100, 200, 300, 500].map(function (n) { return '<option value="' + n + '"' + (n === 100 ? " selected" : "") + ">≤ " + n + " jobs</option>"; }).join("") +
+          "</select>" +
+          '<input id="imqName" class="imq-in" type="text" autocomplete="off" placeholder="Name (optional)" />' +
+          '<button type="submit" class="btn btn-primary btn-sm" id="imqAdd">➕ Add to queue</button>' +
+        "</form>" +
+        '<div class="imq-opts">' +
+          '<span class="imq-optlbl">Type:</span>' +
+          IM_QEMP.map(function (em) { return '<label class="imq-emp"><input type="checkbox" id="imqEmp_' + em[0] + '"> ' + esc(em[1]) + "</label>"; }).join("") +
+          '<label class="imq-emp"><input type="checkbox" id="imqRemote"> 🏠 Remote only</label>' +
+          '<button type="button" class="im-mini" data-act="canceledit" id="imqCancelEdit" style="display:none">Cancel edit</button>' +
+        "</div>" +
+        '<div id="imqList" class="imq-list"></div>' +
+        '<div id="imqPreview" class="imq-preview"></div>' +
+      "</div>";
+
+    function imqGather() {
+      var emp = IM_QEMP.filter(function (em) { var cb = host.querySelector("#imqEmp_" + em[0]); return cb && cb.checked; }).map(function (em) { return em[0]; });
+      var s = {
+        name: host.querySelector("#imqName").value.trim(),
+        query: host.querySelector("#imqQuery").value.trim(),
+        location: host.querySelector("#imqLoc").value.trim(),
+        datePosted: host.querySelector("#imqDate").value,
+        limit: parseInt(host.querySelector("#imqLimit").value, 10) || 100,
+        employmentTypes: emp,
+        remoteOnly: host.querySelector("#imqRemote").checked
+      };
+      if (imQEditId) s.id = imQEditId;
+      return s;
+    }
+    function imqClearForm() {
+      imQEditId = null;
+      ["imqQuery", "imqLoc", "imqName"].forEach(function (id) { var e = host.querySelector("#" + id); if (e) e.value = ""; });
+      host.querySelector("#imqDate").value = "week";
+      host.querySelector("#imqLimit").value = "100";
+      host.querySelector("#imqRemote").checked = false;
+      IM_QEMP.forEach(function (em) { var cb = host.querySelector("#imqEmp_" + em[0]); if (cb) cb.checked = false; });
+      var add = host.querySelector("#imqAdd"); if (add) add.textContent = "➕ Add to queue";
+      var ce = host.querySelector("#imqCancelEdit"); if (ce) ce.style.display = "none";
+    }
+    function imqConfigMsg() {
+      var pv = host.querySelector("#imqPreview");
+      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Job feed isn’t connected yet — add your JSearch (RapidAPI) key to <b>RAPID_JOBS_KEY</b> + <b>RAPID_JOBS_HOST</b>, then run again.</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
+    }
+
+    function imqLoad() {
+      send("/in-market", "POST", { action: "queue_list" }).then(function (r) {
+        imQueue = (r && r.data && r.data.searches) || [];
+        imqRenderList();
+      }).catch(function () { imQueue = []; imqRenderList(); });
+    }
+    function imqRenderList() {
+      var box = host.querySelector("#imqList"); if (!box) return;
+      if (!imQueue.length) {
+        box.innerHTML = '<div class="imq-empty">No saved searches yet. Build one above and <b>Add to queue</b> — it waits here until you press <b>Run</b>.</div>';
+        return;
+      }
+      box.innerHTML = imQueue.map(function (s) {
+        var bits = [s.location ? "📍 " + esc(s.location) : "📍 Nationwide"];
+        var dl = "Last week"; for (var i = 0; i < IM_QDATES.length; i++) if (IM_QDATES[i][0] === s.datePosted) dl = IM_QDATES[i][1];
+        bits.push("📅 " + esc(dl));
+        if (s.employmentTypes && s.employmentTypes.length) bits.push(esc(s.employmentTypes.map(imqEmpLabel).join(", ")));
+        if (s.remoteOnly) bits.push("🏠 Remote");
+        bits.push("≤ " + (s.limit || 100) + " jobs");
+        var status = "";
+        if (s.status === "ran" && s.lastResult) {
+          status = '<span class="imq-stat ok">✓ ran · ' + (s.lastResult.companies || 0) + " companies" + (s.lastResult.merged != null ? " · " + s.lastResult.merged + " scraped" : "") + "</span>";
+        } else if (s.status === "error") {
+          status = '<span class="imq-stat err" title="' + esc(s.lastError || "") + '">⚠ error</span>';
+        }
+        return '<div class="imq-row" data-id="' + esc(s.id) + '">' +
+            '<div class="imq-row-main">' +
+              '<div class="imq-row-name">' + esc(s.name || s.query) + status + "</div>" +
+              '<div class="imq-row-q">“' + esc(s.query) + "”</div>" +
+              '<div class="imq-row-bits">' + bits.map(function (b) { return "<span>" + b + "</span>"; }).join("") + "</div>" +
+            "</div>" +
+            '<div class="imq-row-acts">' +
+              '<button type="button" class="btn btn-primary btn-sm" data-act="run" data-id="' + esc(s.id) + '">▶ Run</button>' +
+              '<button type="button" class="im-mini" data-act="edit" data-id="' + esc(s.id) + '">Edit</button>' +
+              '<button type="button" class="im-mini" data-act="del" data-id="' + esc(s.id) + '">Delete</button>' +
+            "</div>" +
+          "</div>";
+      }).join("");
+    }
+
+    function imqRun(id) {
+      if (imQBusy) return;
+      var s = null; for (var i = 0; i < imQueue.length; i++) if (imQueue[i].id === id) s = imQueue[i];
+      if (!s) return;
+      imQBusy = true;
+      var label = s.name || s.query;
+      var btn = host.querySelector('[data-act="run"][data-id="' + id + '"]'); var bt = btn ? btn.textContent : "";
+      if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
+      var pv = host.querySelector("#imqPreview");
+      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Running “' + esc(label) + '” on JSearch… pulling fresh postings.</div></div>';
+      function done() { imQBusy = false; if (btn) { btn.disabled = false; btn.textContent = bt; } }
+      send("/in-market", "POST", { action: "queue_run", id: id }).then(function (r) {
+        done();
+        if (!r || !r.ok) {
+          if (r && (r.status === 409 || /not_configured/.test(String((r && r.error) || "")))) { imqConfigMsg(); return; }
+          imQPreview = null; imqRenderPreview(); toast("That search didn’t run. Try again."); return;
+        }
+        var leads = (r.data && r.data.leads) || [];
+        var d = r.data || {};
+        imQPreview = {
+          id: id, name: label, leads: leads, picks: {},
+          newCompanies: d.newCompanies || 0, pulledCompanies: d.pulledCompanies || 0,
+          newPositions: d.newPositions || 0, pulledPositions: d.pulledPositions || 0,
+          suppressedCompanies: d.suppressedCompanies || 0,
+          suppressedRoles: d.suppressedRoles || 0,
+          threshold: d.suppressThreshold || 2
+        };
+        // Default selection = the FRESH list (companies not already pulled). If everything is already
+        // in the pool, default to all selected so re-scraping is still one click.
+        var anyNew = leads.some(function (l) { return !l.inPool; });
+        for (var k = 0; k < leads.length; k++) imQPreview.picks[k] = anyNew ? !leads[k].inPool : true;
+        imqRenderPreview();
+        imqLoad(); // refresh the "ran · N companies" status chip
+      }).catch(function (e) {
+        done();
+        if (e && e.status === 409) { imqConfigMsg(); return; }
+        imQPreview = null; imqRenderPreview(); toast("That search didn’t run. Try again.");
+      });
+    }
+
+    function imqUpdatePvCount() {
+      if (!imQPreview) return;
+      var leads = imQPreview.leads || [], picked = 0;
+      for (var i = 0; i < leads.length; i++) if (imQPreview.picks[i]) picked++;
+      var btn = host.querySelector('[data-act="pvcommit"]'); if (btn) btn.textContent = "⬇ Scrape selected (" + picked + ")";
+      var all = host.querySelector('[data-act="pvall"]'); if (all) all.checked = picked === leads.length && leads.length > 0;
+    }
+    function imqRenderPreview() {
+      var box = host.querySelector("#imqPreview"); if (!box) return;
+      if (!imQPreview) { box.innerHTML = ""; return; }
+      var leads = imQPreview.leads || [];
+      var supC = imQPreview.suppressedCompanies || 0, supR = imQPreview.suppressedRoles || 0, thr = imQPreview.threshold || 2;
+      // Note about already-emailed companies/roles we hid (kept ones with a NEW job title).
+      var supNote = (supC + supR) > 0
+        ? ' <span class="imq-pv-sup" title="Already emailed ' + thr + '×+ — hidden, except companies that came back with a different job title.">· hid ' +
+            (supC ? supC + " compan" + (supC === 1 ? "y" : "ies") : "") + (supC && supR ? " + " : "") +
+            (supR ? supR + " role" + (supR === 1 ? "" : "s") : "") + " already emailed " + thr + "×</span>"
+        : "";
+      if (!leads.length) {
+        var emptyMsg = (supC + supR) > 0
+          ? "Every match for “" + esc(imQPreview.name) + "” was already emailed " + thr + "×+ — nothing new to add. A different job title would still come through."
+          : "No US companies found for “" + esc(imQPreview.name) + "”. Try broader keywords, a wider date range, or a different location.";
+        box.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">' + emptyMsg + '</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
+        return;
+      }
+      var picked = 0; for (var i = 0; i < leads.length; i++) if (imQPreview.picks[i]) picked++;
+      var newC = imQPreview.newCompanies || 0, pulC = imQPreview.pulledCompanies || 0;
+      var newP = imQPreview.newPositions || 0, pulP = imQPreview.pulledPositions || 0;
+      var totP = newP + pulP;
+      var rows = leads.map(function (l, i) {
+        var roles = (l.roleDetails && l.roleDetails.length) || (l.roles && l.roles.length) || 1;
+        var badge = l.inPool
+          ? '<span class="imq-pv-badge pool" title="Already in your pool — pulled before">♻ In pool</span>'
+          : '<span class="imq-pv-badge new" title="Net-new — not pulled before">🆕 New</span>';
+        return '<label class="imq-pv-row' + (l.inPool ? " is-pool" : " is-new") + '">' +
+            '<input type="checkbox" data-act="pvtoggle" data-i="' + i + '"' + (imQPreview.picks[i] ? " checked" : "") + ">" +
+            badge +
+            '<span class="imq-pv-co">' + esc(l.company) + "</span>" +
+            (l.domain ? '<span class="imq-pv-dom">' + esc(l.domain) + "</span>" : '<span class="imq-pv-dom muted">no website</span>') +
+            '<span class="imq-pv-roles">' + roles + " position" + (roles === 1 ? "" : "s") + "</span>" +
+            (l.location ? '<span class="imq-pv-loc muted">' + esc(l.location) + "</span>" : "") +
+          "</label>";
+      }).join("");
+      box.innerHTML = '<div class="imq-pv">' +
+          '<div class="imq-pv-head">Preview · <b>' + leads.length + "</b> compan" + (leads.length === 1 ? "y" : "ies") + " · <b>" + totP + "</b> position" + (totP === 1 ? "" : "s") + " for “" + esc(imQPreview.name) + "”" + supNote + "</div>" +
+          '<div class="imq-pv-stats">' +
+            '<span class="imq-pv-stat new">🆕 <b>' + newP + "</b> position" + (newP === 1 ? "" : "s") + " not pulled <span class=\"muted\">(" + newC + " new compan" + (newC === 1 ? "y" : "ies") + ")</span></span>" +
+            '<span class="imq-pv-stat pool">♻ <b>' + pulP + "</b> already pulled <span class=\"muted\">(" + pulC + " compan" + (pulC === 1 ? "y" : "ies") + ")</span></span>" +
+            '<span class="imq-pv-quick">Select: ' +
+              '<button type="button" class="im-mini" data-act="pvselnew">New only (' + newC + ")</button>" +
+              '<button type="button" class="im-mini" data-act="pvselall">All</button>' +
+              '<button type="button" class="im-mini" data-act="pvselpool">Already pulled (' + pulC + ")</button>" +
+              '<button type="button" class="im-mini" data-act="pvselnone">None</button>' +
+            "</span>" +
+          "</div>" +
+          '<div class="imq-pv-list">' + rows + "</div>" +
+          '<div class="imq-pv-foot">' +
+            '<button type="button" class="btn btn-primary btn-sm" data-act="pvcommit">⬇ Scrape selected (' + picked + ")</button>" +
+            '<button type="button" class="im-mini" data-act="pvclose">Cancel</button>' +
+            '<span class="imq-pv-note muted">Only what you pick enters your pool. <b>New only</b> = pull a fresh list (net-new prospects). Then decision-maker research + verified job-post screenshots run on them.</span>' +
+          "</div>" +
+        "</div>";
+    }
+    // Quick-select helper for the preview: all / none / new-only (fresh) / already-pulled.
+    function imqSelect(mode) {
+      if (!imQPreview) return;
+      var leads = imQPreview.leads || [];
+      for (var i = 0; i < leads.length; i++) {
+        imQPreview.picks[i] = mode === "all" ? true : mode === "none" ? false : mode === "new" ? !leads[i].inPool : !!leads[i].inPool;
+      }
+      imqRenderPreview();
+    }
+    function imqCommit() {
+      if (!imQPreview) return;
+      var leads = (imQPreview.leads || []).filter(function (_, i) { return imQPreview.picks[i]; });
+      if (!leads.length) { toast("Select at least one company to scrape."); return; }
+      var payload = { action: "queue_commit", leads: leads };
+      if (imQPreview.id) payload.id = imQPreview.id;
+      var btn = host.querySelector('[data-act="pvcommit"]'); if (btn) { btn.disabled = true; btn.textContent = "Scraping…"; }
+      send("/in-market", "POST", payload).then(function (r) {
+        if (r && r.ok) {
+          toast("Scraped " + leads.length + " compan" + (leads.length === 1 ? "y" : "ies") + " into your pool — finding decision-makers now.");
+          imQPreview = null; imqRenderPreview(); imqLoad(); loadImportBanner();
+        } else { if (btn) { btn.disabled = false; } toast("Couldn’t scrape those right now. Try again."); }
+      }).catch(function () { if (btn) { btn.disabled = false; } toast("Couldn’t scrape those right now. Try again."); });
+    }
+
+    function imqEdit(id) {
+      var s = null; for (var i = 0; i < imQueue.length; i++) if (imQueue[i].id === id) s = imQueue[i];
+      if (!s) return;
+      imQEditId = id;
+      host.querySelector("#imqQuery").value = s.query || "";
+      host.querySelector("#imqLoc").value = s.location || "";
+      host.querySelector("#imqName").value = s.name || "";
+      host.querySelector("#imqDate").value = s.datePosted || "week";
+      host.querySelector("#imqLimit").value = String(s.limit || 100);
+      host.querySelector("#imqRemote").checked = !!s.remoteOnly;
+      IM_QEMP.forEach(function (em) { var cb = host.querySelector("#imqEmp_" + em[0]); if (cb) cb.checked = (s.employmentTypes || []).indexOf(em[0]) >= 0; });
+      var add = host.querySelector("#imqAdd"); if (add) add.textContent = "✓ Save changes";
+      var ce = host.querySelector("#imqCancelEdit"); if (ce) ce.style.display = "";
+      host.querySelector("#imqQuery").focus();
+    }
+    function imqDelete(id) {
+      send("/in-market", "POST", { action: "queue_delete", id: id }).then(function () {
+        if (imQPreview && imQPreview.id === id) { imQPreview = null; imqRenderPreview(); }
+        if (imQEditId === id) imqClearForm();
+        imqLoad();
+      }).catch(function () { toast("Couldn’t delete that search."); });
+    }
+
+    // Builder submit → save (create or update), then refresh the queue.
+    host.querySelector("#imqForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var s = imqGather();
+      if (!s.query) { toast("Enter a job title or keywords to search."); return; }
+      var wasEdit = !!s.id;
+      send("/in-market", "POST", { action: "queue_save", search: s }).then(function (r) {
+        if (r && r.ok) { imqClearForm(); imqLoad(); toast(wasEdit ? "Search updated." : "Added to your queue."); }
+        else { toast("Couldn’t save that search."); }
+      }).catch(function () { toast("Couldn’t save that search."); });
+    });
+
+    // Delegated clicks for the dynamic queue rows + preview controls.
+    host.addEventListener("click", function (e) {
+      var t = e.target.closest ? e.target.closest("[data-act]") : null; if (!t) return;
+      var act = t.getAttribute("data-act"), id = t.getAttribute("data-id");
+      if (act === "run") imqRun(id);
+      else if (act === "edit") imqEdit(id);
+      else if (act === "del") imqDelete(id);
+      else if (act === "canceledit") imqClearForm();
+      else if (act === "pvclose") { imQPreview = null; imqRenderPreview(); }
+      else if (act === "pvcommit") imqCommit();
+      else if (act === "pvselnew") imqSelect("new");
+      else if (act === "pvselall") imqSelect("all");
+      else if (act === "pvselpool") imqSelect("pool");
+      else if (act === "pvselnone") imqSelect("none");
+    });
+    // Delegated changes for the preview checkboxes (toggle one / select all).
+    host.addEventListener("change", function (e) {
+      var t = e.target; var act = t.getAttribute ? t.getAttribute("data-act") : null;
+      if (!act || !imQPreview) return;
+      if (act === "pvtoggle") { imQPreview.picks[parseInt(t.getAttribute("data-i"), 10)] = t.checked; imqUpdatePvCount(); }
+      else if (act === "pvall") { var on = t.checked, leads = imQPreview.leads || []; for (var i = 0; i < leads.length; i++) imQPreview.picks[i] = on; imqRenderPreview(); }
+    });
+
+    imqLoad();
+  }
+
   function renderInMarket(el) {
     imPicks = {}; imMinScore = 0; imShotFilter = null; imSelectedSignals = []; imSelectedIndustries = []; imSelectedSizes = []; imBreakdown = []; imNeeds = []; imNeedFn = "";
+    imQPreview = null; imQEditId = null; imQBusy = false;
     el.innerHTML =
       '<div class="im-hero">' +
         '<div class="im-bar">' +
@@ -2270,6 +2575,10 @@
             '<button type="button" class="im-mode" data-mode="title">Job title</button>' +
           "</div>" +
         "</div>" +
+        // TARGETED JSEARCH — the headline control: author exact searches, queue them, run on demand,
+        // and PICK which companies actually get scraped. This is how you target who you want (vs. the
+        // old random rotation, now off). Rendered by renderTargetedQueue() right after innerHTML.
+        '<div id="imTargeted" class="im-targeted"></div>' +
         '<form class="im-search" id="imForm">' +
           '<span class="ico">⌕</span>' +
           '<input id="imQuery" type="text" autocomplete="off" placeholder="' + esc(IM_PLACEHOLDER[imMode]) + '" />' +
@@ -2325,6 +2634,7 @@
 
     renderSavedSignals();
     loadImportBanner();
+    renderTargetedQueue($("#imTargeted"));
     var curBtn = $("#imCurationBtn");
     if (curBtn) curBtn.addEventListener("click", function () { renderCuration(); });
 

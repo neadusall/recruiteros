@@ -116,6 +116,13 @@ let cursor = 0;
 let seedCursor = 0;
 let sizeCursor = 0;
 let directoryCursor = 0;
+// PAID JOB FEED autopilot — the OLD random rotation across (industry × metro × depth). OFF BY DEFAULT
+// now: JSearch is TARGETED-ONLY — the user authors exact searches (lib/inmarket/searchQueue.ts) and
+// runs them from the Targeted Searches UI, choosing which results merge. Set RAPID_JOBS_AUTOPILOT=1 to
+// re-enable the background broad rotation alongside targeted searches. While off, NO JSearch request is
+// made here, so no random/untargeted jobs enter the pool and the JSearch quota is spent only on what
+// the user explicitly searches for.
+const JOBFEED_AUTOPILOT = process.env.RAPID_JOBS_AUTOPILOT === "1";
 // PAID JOB FEED (Active Jobs DB / RapidAPI) — the breadth lever past the free ceiling. Inert (no-op)
 // until RAPID_JOBS_KEY + RAPID_JOBS_HOST are set. Offset-rotated so each cycle pulls a fresh page;
 // bounded to the hourly cycle (not the 3-min inflow tick) to keep API spend predictable.
@@ -263,13 +270,12 @@ async function runCycleInner(): Promise<void> {
     /* vacuum failed this tick; the targeted pulls below still run */
   }
 
-  // 1.5) PAID JOB FEED — the breadth lever past the free ceiling. Each cycle pulls a few rotating
-  //    CATEGORIES (sectors) of US jobs from the paid feed (JSearch ~10 jobs/request) and merges them
-  //    into the pool, where the enrichment fleet turns them into contacts. Rotating the query across
-  //    INDUSTRIES is what gives the non-tech breadth the free pool lacks. No-op (zero spend) until
-  //    RAPID_JOBS_KEY + RAPID_JOBS_HOST are set; request volume is bounded by RAPID_JOBS_PAGE ×
-  //    RAPID_JOBS_PAGES_PER_CYCLE so you tune it to your plan's monthly request quota.
-  if (jobFeedEnabled()) {
+  // 1.5) PAID JOB FEED autopilot (OFF by default) — the OLD random rotation across CATEGORIES × metros.
+  //    Disabled now so JSearch is TARGETED-ONLY: the user authors exact searches and runs them from the
+  //    Targeted Searches UI (no random/untargeted jobs, quota spent only on chosen searches). Set
+  //    RAPID_JOBS_AUTOPILOT=1 to re-enable this background rotation. Still a no-op (zero spend) until
+  //    RAPID_JOBS_KEY + RAPID_JOBS_HOST are set; volume bounded by RAPID_JOBS_PAGE × RAPID_JOBS_PAGES_PER_CYCLE.
+  if (JOBFEED_AUTOPILOT && jobFeedEnabled()) {
     for (let p = 0; p < JOBFEED_PAGES_PER_CYCLE; p++) {
       // Walk WHAT every step; advance WHERE one notch each full lap of WHAT (co-prime-ish strides so
       // (what, where) pairs don't repeat for a long time); deepen the page-block once we've toured the
