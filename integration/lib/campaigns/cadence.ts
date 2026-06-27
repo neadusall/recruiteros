@@ -221,7 +221,10 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
         if (t.day > daysSince + 1e-9) break;
         // Voice is the HOT-tier touch: skip (and advance past) it for cold prospects.
         if (t.channel === "voice" && p.warmth < (c.voiceNoteThreshold ?? 80)) { sent = i + 1; continue; }
-        const r = renderTouch(t, p);
+        // Which EMAIL this is in the sequence (1 = first email, 2 = second, …). The video fail-safe
+        // in renderTouch only attaches the video on the 2nd email.
+        const emailStep = t.channel === "email" ? touches.slice(0, i + 1).filter((x) => x.channel === "email").length : 0;
+        const r = renderTouch(t, p, { emailStep });
         const res = await sendTouch(workspaceId, {
           channel: t.channel,
           prospect: p,
