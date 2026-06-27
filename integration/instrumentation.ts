@@ -72,6 +72,10 @@ export async function register(): Promise<void> {
       // never starts populating anything you didn't point it at.
       const { ensureAutoEnroll } = await import("./lib/inmarket/autoEnroll");
       ensureAutoEnroll();
+      // Background CAPTURE generator: auto-screen-captures each contact's job posting so the whole
+      // book becomes video-ready hands-off. No-op until INMARKET_AUTOCAPTURE=1 (captures are CPU-heavy).
+      const { ensureAutoCapture } = await import("./lib/inmarket/autoCapture");
+      ensureAutoCapture();
     } catch {
       /* never let an instrumentation hiccup block server startup */
     }
