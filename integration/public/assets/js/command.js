@@ -3605,21 +3605,19 @@
    * record. Searchable + CSV export (with watch/GIF links). */
   function renderClients(el) {
     el.innerHTML = head("Clients",
-      "The Hire Signals book: every decision-maker the engine produced, categorized by industry, desk, and email status — validated and campaign-ready. Filter, sort, then export or deploy.") +
-      '<div class="btn-row" style="margin-bottom:12px">' +
-      '<button class="btn btn-primary btn-sm" id="clVerify">✅ Verify emails (Reoon)</button>' +
-      '<button class="btn btn-ghost btn-sm" id="clRefresh">↻ Refresh</button>' +
-      '<button class="btn btn-ghost btn-sm" id="clGenAll">🖥 Generate missing captures</button>' +
-      '<button class="btn btn-ghost btn-sm" id="clExport">⇪ Export CSV</button>' +
-      '<a class="btn btn-ghost btn-sm" href="/pip-studio" target="_blank" rel="noopener">🎬 Video Studio</a>' +
-      '<span id="clSeg" style="margin-left:auto;display:inline-flex;gap:4px"></span>' +
-      '</div>' +
-      '<div id="clViewToggle" class="btn-row" style="margin-bottom:12px;gap:4px"></div>' +
-      '<div class="cl-controls">' +
+      "Every decision-maker Hire Signals produced — validated and ready to email.") +
+      '<div class="cl-toolbar">' +
         '<div class="pr-searchbar cl-search"><span class="ico">⌕</span>' +
         '<input id="clSearch" type="text" autocomplete="off" placeholder="Search name, title, company, email…" /></div>' +
-        '<select id="clIndustry" class="cl-cat-sel" title="Categorize by industry"><option value="">All industries</option></select>' +
-        '<select id="clFunction" class="cl-cat-sel" title="Categorize by desk / function"><option value="">All desks</option></select>' +
+        '<span id="clSeg" class="cl-seg"></span>' +
+        '<select id="clIndustry" class="cl-cat-sel" title="Filter by industry"><option value="">All industries</option></select>' +
+        '<select id="clFunction" class="cl-cat-sel" title="Filter by desk"><option value="">All desks</option></select>' +
+        '<span class="cl-tb-actions">' +
+          '<button class="btn btn-ghost btn-sm" id="clRefresh" title="Refresh">↻</button>' +
+          '<button class="btn btn-ghost btn-sm" id="clGenAll" title="Generate missing screen captures">🖥</button>' +
+          '<button class="btn btn-ghost btn-sm" id="clVerify" title="Verify emails via Reoon">✅ Verify</button>' +
+          '<button class="btn btn-ghost btn-sm" id="clExport" title="Export CSV">⇪ Export</button>' +
+        '</span>' +
       '</div>' +
       '<div id="clBody">' + loading() + "</div>";
 
@@ -3632,8 +3630,6 @@
     // segment: "signals" = the Hire Signals curation engine output (the thousands of validated
     // decision-makers, read from the curation store); "all" = enriched prospects in your pipeline.
     var clSeg = localStorage.getItem("ros_clients_seg") || "signals";
-    // "ready" = only verified-deliverable (send-ready); "all" = every lead with an email.
-    var clView = localStorage.getItem("ros_clients_view") || "all";
     // Spreadsheet sort: column key + direction (1 asc / -1 desc), persisted.
     var clSort = { key: localStorage.getItem("ros_clients_sortk") || "company", dir: Number(localStorage.getItem("ros_clients_sortd") || 1) };
     var searchEl = $("#clSearch");
@@ -3720,7 +3716,7 @@
       if (clVerdict === "unchecked") { var s = vStatus(p); return s === "unverified" || s === "unknown"; }
       return vStatus(p) === clVerdict;
     }
-    function shown() { return (clView === "ready" ? eligible().filter(isSendReady) : eligible()).filter(inCat).filter(inVerdict); }
+    function shown() { return eligible().filter(inCat).filter(inVerdict); }
 
     // The personalized video / screen capture for a client: prefer the attached
     // personalized PiP video, else a screen capture of the company's hiring page.
@@ -3784,8 +3780,6 @@
       { key: "open_role", label: "Hiring for", get: function (p) { return p.openRole || ""; }, render: function (p) {
           return "<td>" + (p.openRole ? '<span class="cl-cat cl-cat-role">' + esc(p.openRole) + "</span>" : '<span class="pr-na">-</span>') +
             (p.jobUrl ? ' <a class="crm-jobpost" href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener" title="Open the live job posting"' + stop + ">↗</a>" : "") + "</td>"; } },
-      { key: "industry", label: "Industry", get: function (p) { return p.industry || ""; }, render: function (p) { return "<td>" + (p.industry ? '<span class="cl-cat">' + esc(p.industry) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "function", label: "Desk", get: function (p) { return p["function"] || ""; }, render: function (p) { return "<td>" + (p["function"] ? '<span class="cl-cat cl-cat-fn">' + esc(p["function"]) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
       { key: "email", label: "Email", get: function (p) { return p.email || ""; }, sort: vRank, render: function (p) {
           return '<td class="crm-c-email"><div class="crm-id-t"><span class="crm-mono">' +
             (p.email ? '<a href="mailto:' + esc(p.email) + '"' + stop + ">" + esc(p.email) + "</a>" : '<span class="pr-na">-</span>') + "</span>" +
@@ -3797,9 +3791,7 @@
       { key: "hiring_score", label: "Intent", get: function (p) { return p.score == null ? "" : p.score; }, sort: function (p) { return -(Number(p.score) || 0); },
         render: function (p) { return '<td class="crm-c-num">' + (p.score == null ? '<span class="pr-na">-</span>' : '<span class="cl-score" title="Hiring-intent score">' + esc(String(p.score)) + "</span>") + "</td>"; } },
       { key: "video", label: "Asset", get: function (p) { return hasCapture(p) ? ((videoFor(p) || {}).watch || "yes") : ""; }, sort: function (p) { return hasCapture(p) ? 0 : 1; },
-        render: function (p) { return '<td class="pr-c-video">' + captureCell(p) + "</td>"; } },
-      { key: "status", label: "Stage", get: function (p) { return clStatusLabel(p); }, sort: function (p) { return p.status || ""; },
-        render: function (p) { return '<td><span class="cls cls-' + statusCls(p.status) + '">' + esc(clStatusLabel(p)) + "</span></td>"; } }
+        render: function (p) { return '<td class="pr-c-video">' + captureCell(p) + "</td>"; } }
     ];
     // Sort accessor: a column's own sort(), else its text value.
     function colSort(c, p) { return c.sort ? c.sort(p) : String(c.get ? c.get(p) : "").toLowerCase(); }
@@ -3903,21 +3895,7 @@
         });
       }
 
-      // View toggle chips with live counts.
       var elig = eligible();
-      var ready = elig.filter(isSendReady);
-      var fully = elig.filter(isFullyReady);
-      var tg = $("#clViewToggle");
-      if (tg) {
-        tg.innerHTML =
-          '<button class="btn btn-sm ' + (clView === "ready" ? "btn-primary" : "btn-ghost") + '" data-clview="ready">Send-ready · ' + ready.length + "</button>" +
-          '<button class="btn btn-sm ' + (clView === "all" ? "btn-primary" : "btn-ghost") + '" data-clview="all">All with email · ' + elig.length + "</button>" +
-          '<span class="cl-fully" title="Validated email AND a capture to lead with">🟢 ' + fully.length + " fully ready (email + video)</span>";
-        Array.prototype.forEach.call(tg.querySelectorAll("[data-clview]"), function (b) {
-          b.addEventListener("click", function () { clView = b.getAttribute("data-clview"); localStorage.setItem("ros_clients_view", clView); paint(); });
-        });
-      }
-
       var all = shown();
       var list = all.filter(matches);
       // Spreadsheet sort by the active column.
@@ -3956,15 +3934,11 @@
         : '<div class="empty">' + (clFilter
           ? "No clients match “" + esc(clFilter) + "”."
           : clSeg === "signals"
-          ? "No Hire Signals contacts yet. As the engine validates decision-makers (Reoon), they land here. Switch to All leads to see every enriched contact, or turn on auto-enroll to fill this book."
-          : clView === "ready"
-          ? (elig.length
-            ? "None verified send-ready yet. Click ✅ Verify emails (Reoon) to confirm deliverability, or switch to All with email."
-            : "No enriched leads with an email yet. Enrich your prospects (Prospects → ⚡ Enrich all contacts) and they’ll appear here.")
+          ? "No Hire Signals contacts yet. As the engine validates decision-makers (Reoon), they land here. Switch to All leads to see every enriched contact."
           : "No enriched leads with an email yet. Enrich your prospects (Prospects → ⚡ Enrich all contacts).") + "</div>";
       body.innerHTML = '<div class="card" style="padding:0;overflow:hidden"><div class="pr-card-h">' +
         '<h3>Clients <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl +
-        (clView === "ready" ? " send-ready" : " with an email") + "</span></h3>" + legend + "</div>" + capNote + table + "</div>";
+        " with an email</span></h3>" + legend + "</div>" + capNote + table + "</div>";
 
       // Click a header to sort by that column (toggles direction on the active one).
       var thead = body.querySelector(".cl-sheet thead");
