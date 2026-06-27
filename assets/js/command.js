@@ -3621,9 +3621,12 @@
     var clAll = [], clFilter = "", clById = {};
     var shotsByCompany = {};   // lowercased company -> { watch, teaser, video, poster }
     // segment: "signals" = produced by Hire Signals (category in_market); "all" = every enriched lead.
-    var clSeg = localStorage.getItem("ros_clients_seg") || "signals";
+    var clSeg = localStorage.getItem("ros_clients_seg") || "all";
     // "ready" = only verified-deliverable (send-ready); "all" = every lead with an email.
-    var clView = localStorage.getItem("ros_clients_view") || "ready";
+    // Default to "all" so the spreadsheet is a complete reference; toggle to send-ready when sending.
+    var clView = localStorage.getItem("ros_clients_view") || "all";
+    // Spreadsheet sort: column key + direction (1 asc / -1 desc), persisted.
+    var clSort = { key: localStorage.getItem("ros_clients_sortk") || "company", dir: Number(localStorage.getItem("ros_clients_sortd") || 1) };
     var searchEl = $("#clSearch");
     if (searchEl) searchEl.addEventListener("input", function () { clFilter = (searchEl.value || "").toLowerCase().trim(); paint(); });
     var exp = $("#clExport"); if (exp) exp.addEventListener("click", exportClients);
@@ -3655,6 +3658,26 @@
     function hasCapture(p) { return !!videoFor(p); }
     // Fully ready to send = a deliverable email AND a capture to lead with.
     function isFullyReady(p) { return isSendReady(p) && hasCapture(p); }
+
+    // Sort rank for the verification verdict — best (most sendable) first when ascending.
+    function vRank(p) { return ({ valid: 0, deliverable: 1, risky: 2, unknown: 3, unverified: 4, invalid: 5 })[vStatus(p)]; }
+    // Spreadsheet columns: drives BOTH the sortable header and the row cells, in order.
+    var COLS = [
+      { key: "name", label: "Name", sort: function (p) { return (p.fullName || "").toLowerCase(); } },
+      { key: "title", label: "Job Title", sort: function (p) { return (p.title || "").toLowerCase(); } },
+      { key: "company", label: "Company", sort: function (p) { return (p.company || "").toLowerCase(); } },
+      { key: "domain", label: "Domain", sort: function (p) { return (p.companyDomain || "").toLowerCase(); } },
+      { key: "email", label: "Email", sort: function (p) { return (p.email || "").toLowerCase(); } },
+      { key: "verification", label: "Email status", sort: vRank },
+      { key: "phone", label: "Phone", sort: function (p) { return (p.phone || p.mobilePhone || p.landlinePhone || ""); } },
+      { key: "linkedin", label: "LinkedIn", sort: function (p) { return p.linkedinUrl ? 0 : 1; } },
+      { key: "location", label: "Location", sort: function (p) { return (p.location || "").toLowerCase(); } },
+      { key: "signal", label: "Signal", sort: function (p) { return (p.signalReason || "").toLowerCase(); } },
+      { key: "sequence", label: "Sequence", sort: function (p) { return (p.sequenceName || "").toLowerCase(); } },
+      { key: "status", label: "Status", sort: function (p) { return (p.status || ""); } },
+      { key: "video", label: "Video", sort: function (p) { return hasCapture(p) ? 0 : 1; } }
+    ];
+    function naCell(v) { return v ? esc(v) : '<span class="pr-na">-</span>'; }
 
     // Small verification badge per row. "valid" = mailbox confirmed (Reoon/SMTP);
     // "deliverable" = syntax + real MX, mailbox not individually confirmed.
@@ -3712,19 +3735,21 @@
       var avatar = '<span class="avatar pr-av" style="position:relative;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) +
         (p.photoUrl ? '<img src="' + esc(p.photoUrl) + '" alt="" onerror="this.remove()" />' : "") + "</span>";
       var li = p.linkedinUrl ? '<a class="pr-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : '<span class="pr-na">-</span>';
-      var cell = function (v) { return v ? esc(v) : '<span class="pr-na">-</span>'; };
-      var sig = p.signalReason ? '<span class="cl-sig" title="Hiring signal">⚡ ' + esc(p.signalReason) + "</span>" : "";
+      var domain = p.companyDomain ? '<a href="https://' + esc(p.companyDomain) + '" target="_blank" rel="noopener">' + esc(p.companyDomain) + "</a>" : '<span class="pr-na">-</span>';
       return '<tr class="pr-row" data-pid="' + esc(p.id) + '">' +
-        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + esc(p.fullName || "Unknown") +
-          (p.sequenceName ? '<span class="pr-seqtag" title="Assigned sequence">▸ ' + esc(p.sequenceName) + "</span>" : "") + "</span></td>" +
-        "<td>" + cell(p.title) + "</td>" +
-        "<td>" + cell(p.company) + sig + "</td>" +
-        '<td class="pr-c-email"><a href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a></td>" +
+        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + esc(p.fullName || "Unknown") + "</span></td>" +
+        "<td>" + naCell(p.title) + "</td>" +
+        "<td>" + naCell(p.company) + "</td>" +
+        '<td class="cl-c-domain">' + domain + "</td>" +
+        '<td class="pr-c-email">' + (p.email ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a>" : '<span class="pr-na">-</span>') + "</td>" +
         "<td>" + vBadge(p) + "</td>" +
-        '<td class="pr-c-video">' + captureCell(p) + "</td>" +
+        "<td>" + naCell(p.phone || p.mobilePhone || p.landlinePhone) + "</td>" +
         '<td class="pr-c-li">' + li + "</td>" +
-        "<td>" + cell(p.phone) + "</td>" +
+        "<td>" + naCell(p.location) + "</td>" +
+        '<td class="cl-c-signal">' + (p.signalReason ? '<span class="cl-sig" title="Hiring signal">⚡ ' + esc(p.signalReason) + "</span>" : '<span class="pr-na">-</span>') + "</td>" +
+        "<td>" + (p.sequenceName ? '<span class="pr-seqtag">▸ ' + esc(p.sequenceName) + "</span>" : '<span class="pr-na">-</span>') + "</td>" +
         '<td><span class="cls cls-' + statusCls(p.status) + '">' + esc(clStatusLabel(p)) + "</span></td>" +
+        '<td class="pr-c-video">' + captureCell(p) + "</td>" +
         "</tr>";
     }
 
@@ -3761,6 +3786,9 @@
 
       var all = shown();
       var list = all.filter(matches);
+      // Spreadsheet sort by the active column.
+      var sortCol = COLS.filter(function (c) { return c.key === clSort.key; })[0] || COLS[0];
+      list.sort(function (a, b) { var av = sortCol.sort(a), bv = sortCol.sort(b); return av < bv ? -clSort.dir : av > bv ? clSort.dir : 0; });
       var rows = list.map(rowHtml).join("");
       var countLbl = clFilter ? (list.length + " of " + all.length) : String(all.length);
       // Counts by verdict + capture coverage, so the user sees readiness at a glance.
@@ -3775,10 +3803,13 @@
         '<span class="cl-vb cl-vb-unk">• unchecked ' + unchecked + "</span>" +
         '<span class="cl-vb cl-vb-vid">🎬 with video ' + withVideo + "</span>" +
         "</div>";
-      var tableHead = '<thead><tr><th>Name</th><th>Job Title</th><th>Company</th><th>Email</th>' +
-        "<th>Verification</th><th>Video</th><th>LinkedIn</th><th>Phone</th><th>Status</th></tr></thead>";
+      var tableHead = '<thead><tr>' + COLS.map(function (c) {
+        var active = c.key === clSort.key;
+        var arrow = active ? (clSort.dir > 0 ? " ▲" : " ▼") : "";
+        return '<th class="cl-th' + (active ? " cl-th-active" : "") + '" data-sortk="' + c.key + '" title="Sort by ' + esc(c.label) + '">' + esc(c.label) + arrow + "</th>";
+      }).join("") + "</tr></thead>";
       var table = rows
-        ? '<div class="pr-table-wrap"><table class="pr-table">' + tableHead + "<tbody>" + rows + "</tbody></table></div>"
+        ? '<div class="pr-table-wrap cl-sheet-wrap"><table class="pr-table cl-sheet">' + tableHead + "<tbody>" + rows + "</tbody></table></div>"
         : '<div class="empty">' + (clFilter
           ? "No clients match “" + esc(clFilter) + "”."
           : clSeg === "signals"
@@ -3791,6 +3822,18 @@
       body.innerHTML = '<div class="card" style="padding:0;overflow:hidden"><div class="pr-card-h">' +
         '<h3>Clients <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl +
         (clView === "ready" ? " send-ready" : " with an email") + "</span></h3>" + legend + "</div>" + table + "</div>";
+
+      // Click a header to sort by that column (toggles direction on the active one).
+      var thead = body.querySelector(".cl-sheet thead");
+      if (thead) thead.addEventListener("click", function (ev) {
+        var th = ev.target.closest ? ev.target.closest("[data-sortk]") : null;
+        if (!th) return;
+        var k = th.getAttribute("data-sortk");
+        if (clSort.key === k) clSort.dir = -clSort.dir; else { clSort.key = k; clSort.dir = 1; }
+        localStorage.setItem("ros_clients_sortk", clSort.key);
+        localStorage.setItem("ros_clients_sortd", String(clSort.dir));
+        paint();
+      });
 
       // Per-row actions (Watch is a plain link; Copy/Generate go through delegation).
       var tb = body.querySelector(".pr-table tbody");
