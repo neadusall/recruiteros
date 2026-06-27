@@ -16,6 +16,20 @@ import type { NextRequest } from "next/server";
  * disagree about what counts as a customer domain.
  */
 export function middleware(req: NextRequest) {
+  const pathname = req.nextUrl.pathname;
+
+  // Short video watch links: `vid.<yourdomain>/v/<code>` → the branded watch page. The `/v/`
+  // namespace can never collide with an app route, so this is safe on ANY host; the brand + TidyCal
+  // calendar resolve from the host inside the watch page. Works the same on the house domain.
+  const v = pathname.match(/^\/v\/([A-Za-z0-9_-]{4,40})\/?$/);
+  if (v) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/watch";
+    url.search = "?s=" + encodeURIComponent(v[1]);
+    return NextResponse.rewrite(url);
+  }
+
+  // White-label root guard (unchanged): a customer's white-label root shows their product, not our pitch.
   const host = (req.headers.get("host") || "").toLowerCase().split(":")[0];
   const isHouse = /(^|\.)recruitersos\.co$|^localhost$|^127\.0\.0\.1$|^$/.test(host);
   if (!isHouse) {
@@ -28,7 +42,7 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Only the marketing landing entry points are guarded; the rest of the app
-  // (/login, /admin, /recruiter, /signup, assets, API…) is untouched.
-  matcher: ["/", "/home", "/index.html"],
+  // The marketing landing entry points (root guard) + short video watch links (/v/<code>).
+  // The rest of the app (/login, /admin, /recruiter, /signup, assets, API…) is untouched.
+  matcher: ["/", "/home", "/index.html", "/v/:code*"],
 };

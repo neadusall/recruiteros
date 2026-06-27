@@ -107,7 +107,14 @@ export async function recordVideoResults(results: Array<{ company: string; role:
     map[shotKey(r.company, r.role)] = { videoKey: r.videoKey, company: r.company, role: r.role, at: nowIso };
     n++;
   }
-  if (n) { await saveSnapshot(MAP_KEY, map); totalMade += n; }
+  if (n) {
+    await saveSnapshot(MAP_KEY, map);
+    totalMade += n;
+    try {
+      const { makeShortLinks } = await import("./shortLinks");
+      await makeShortLinks(results.filter((r) => r.videoKey).map((r) => ({ videoKey: r.videoKey, company: r.company, role: r.role, workspaceId: workspaceId() })));
+    } catch { /* short links are best-effort */ }
+  }
   return n;
 }
 
@@ -188,6 +195,10 @@ async function runTickInner(): Promise<void> {
     const cur = await loadMap();
     for (const e of fresh) cur[shotKey(e.company, e.role)] = e;
     await saveSnapshot(MAP_KEY, cur);
+    try {
+      const { makeShortLinks } = await import("./shortLinks");
+      await makeShortLinks(fresh.map((e) => ({ videoKey: e.videoKey, company: e.company, role: e.role, workspaceId: workspaceId() })));
+    } catch { /* short links are best-effort */ }
   }
   lastMade = made;
 }
