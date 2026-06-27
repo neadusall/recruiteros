@@ -168,6 +168,18 @@ export interface Prospect {
   fullName: string;
   firstName: string;
   email?: string;
+  /** Email deliverability verdict, stamped by the verifier (Reoon mailbox check,
+   *  opt-in SMTP probe, or zero-config DNS/domain check). Drives the Clients book and
+   *  gates sending: only "valid" is a mailbox-CONFIRMED send-ready address; "deliverable"
+   *  passed syntax + real MX but the individual mailbox wasn't confirmed (no verifier
+   *  configured); "risky" = catch-all/role/inbox-full; "invalid" = dead; "unknown" =
+   *  transient/couldn't determine. Set REOON_API_KEY to upgrade deliverable → valid. */
+  emailVerification?: {
+    status: "valid" | "deliverable" | "risky" | "invalid" | "unknown";
+    reason?: string;
+    source?: "reoon" | "smtp" | "dns";
+    checkedAt: string;
+  };
   linkedinUrl?: string;
   /** Primary outreach number (SMS/voice). Defaults to mobile when known. */
   phone?: string;
