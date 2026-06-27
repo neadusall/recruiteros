@@ -40,6 +40,9 @@ export async function GET(req: Request): Promise<Response> {
       };
     } catch { /* brand is best-effort */ }
   }
+  // Default booking calendar (e.g. your TidyCal) when a workspace hasn't set its own — so every
+  // video has a calendar on the landing page out of the box.
+  if (!brand.calendarUrl && process.env.RECRUITEROS_DEFAULT_CALENDAR_URL) brand.calendarUrl = process.env.RECRUITEROS_DEFAULT_CALENDAR_URL;
 
   return Response.json(
     { key: rec.videoKey, company: rec.company, role: rec.role, mp4: share.mp4, gif: share.gif, brand },
