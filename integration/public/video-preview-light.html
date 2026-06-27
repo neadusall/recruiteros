@@ -8,50 +8,49 @@
   :root{ --bg:#eef1f6; --card:#ffffff; --line:#e6e9ef; --ink:#0f172a; --mut:#64748b; --accent:#16a34a; }
   *{box-sizing:border-box}
   html,body{height:100%}
-  body{margin:0;background:radial-gradient(1100px 700px at 70% -10%, #ffffff, var(--bg));color:var(--ink);
-    font:16px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
-  .top{flex:none;display:flex;align-items:center;justify-content:space-between;padding:16px 28px}
-  .brand{font-weight:800;letter-spacing:-.3px;font-size:20px;color:var(--ink)}
+  body{margin:0;background:radial-gradient(1100px 700px at 72% -12%, #ffffff, var(--bg));color:var(--ink);
+    font:15.5px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+  .top{flex:none;display:flex;align-items:center;justify-content:space-between;padding:9px 26px}
+  .brand{font-weight:800;letter-spacing:-.3px;font-size:19px;color:var(--ink)}
   .brand .dot{color:var(--accent)}
   .top .from{font-size:12px;color:var(--mut)}
-  main{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px 28px 20px}
-  .stage{width:100%;max-width:1160px;height:100%;max-height:680px;display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:26px;align-items:stretch}
+  main{flex:1;min-height:0;display:flex;align-items:flex-start;justify-content:center;padding:2px 26px 10px}
+  .stage{width:100%;max-width:1140px;display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:24px;align-items:start}
   .maincol{min-width:0;display:flex;flex-direction:column}
   .ctx{flex:none;margin:0 0 12px}
-  .ctx h1{font-size:23px;margin:0 0 3px;font-weight:750;letter-spacing:-.4px}
-  .ctx p{margin:0;color:var(--mut);font-size:13.5px}
-  .player{flex:1;min-height:0;position:relative;border-radius:18px;overflow:hidden;
-    background:linear-gradient(135deg,#0b1220,#1e293b);box-shadow:0 20px 60px rgba(15,23,42,.18);
+  .ctx h1{font-size:21px;margin:0;font-weight:750;letter-spacing:-.4px;line-height:1.25}
+  .ctx .sig{display:inline-block;margin-top:7px;font-size:12px;font-weight:600;color:var(--accent);background:rgba(22,163,74,.1);padding:3px 10px;border-radius:99px}
+  .player{flex:none;height:380px;min-height:280px;position:relative;border-radius:18px;overflow:hidden;
+    background:linear-gradient(135deg,#0b1220,#1e293b);box-shadow:0 20px 60px rgba(15,23,42,.2);
     display:flex;align-items:center;justify-content:center}
   .player .label{position:absolute;bottom:14px;left:18px;color:#94a3b8;font-size:12px}
   .player .dur{position:absolute;top:14px;right:16px;background:rgba(0,0,0,.45);color:#fff;font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px}
-  .play .btn{width:78px;height:78px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;box-shadow:0 12px 36px rgba(22,163,74,.55);transition:transform .15s}
+  .play .btn{width:74px;height:74px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;box-shadow:0 12px 36px rgba(22,163,74,.55);transition:transform .15s}
   .play:hover .btn{transform:scale(1.05)}
-  .play svg{width:30px;height:30px;margin-left:5px;fill:#fff}
-  .cta{flex:none;display:flex;gap:11px;margin-top:16px;align-items:center}
+  .play svg{width:28px;height:28px;margin-left:5px;fill:#fff}
+  .cta{flex:none;display:flex;gap:10px;margin-top:14px;align-items:center}
   .cta a{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--ink);
-    text-decoration:none;padding:12px 22px;border-radius:12px;font:inherit;font-weight:650;box-shadow:0 1px 2px rgba(15,23,42,.05);transition:all .12s}
+    text-decoration:none;padding:11px 20px;border-radius:12px;font:inherit;font-weight:650;box-shadow:0 1px 2px rgba(15,23,42,.05);transition:all .12s}
   .cta a:hover{box-shadow:0 4px 14px rgba(15,23,42,.1)}
   .cta a.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-  .cta .hint{color:var(--mut);font-size:12.5px;margin-left:4px}
+  .cta .hint{color:var(--mut);font-size:12px;margin-left:2px}
   .side{display:flex;flex-direction:column;min-height:0}
-  .side-h{flex:none;display:flex;align-items:center;gap:7px;font-size:13px;font-weight:750;color:var(--ink);margin:0 0 11px}
-  .side-h .ico{width:16px;height:16px;fill:var(--accent)}
-  .cal{flex:1;min-height:0;border:1px solid var(--line);border-radius:18px;overflow:hidden;background:#fff;box-shadow:0 20px 60px rgba(15,23,42,.14)}
+  .side-h{flex:none;display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:750;color:var(--ink);margin:0 0 9px}
+  .side-h .ico{width:15px;height:15px;fill:var(--accent)}
+  .cal{flex:none;height:680px;min-height:480px;border:1px solid var(--line);border-radius:18px;overflow:hidden;background:#fff;box-shadow:0 20px 60px rgba(15,23,42,.16)}
   .cal iframe{width:100%;height:100%;border:0;display:block}
-  footer{flex:none;text-align:center;color:#94a3b8;font-size:11.5px;padding:10px}
-  @media (max-width:920px){ body{height:auto;overflow:auto} .stage{grid-template-columns:1fr;height:auto;max-height:none} .player{aspect-ratio:16/10} .cal{height:560px;flex:none} }
+  @media (max-width:920px){ body{height:auto;overflow:auto} .stage{grid-template-columns:1fr} .player{height:auto;aspect-ratio:16/10} .cal{height:560px} }
 </style>
 </head>
 <body>
 <div class="top">
   <span class="brand">Lumesp<span class="dot">.</span></span>
-  <span class="from">A note for Sarah at Acme Corp</span>
+  <span class="from">A note for Sarah · Acme Corp</span>
 </div>
 <main>
   <div class="stage">
     <div class="maincol">
-      <div class="ctx"><h1>Sarah — about the VP of Engineering search</h1><p>Noticed Acme reposted the role twice this month. Recorded a quick 42-second walkthrough for you.</p></div>
+      <div class="ctx"><h1>Sarah — about your VP of Engineering search</h1><span class="sig">⚡ Reposted twice this month</span></div>
       <div class="player">
         <span class="dur">0:42</span>
         <div class="play"><div class="btn"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>
@@ -69,6 +68,5 @@
     </aside>
   </div>
 </main>
-<footer>Sent with Lumesp · powered by RecruitersOS</footer>
 </body>
 </html>
