@@ -3605,33 +3605,92 @@
    * record. Searchable + CSV export (with watch/GIF links). */
   function renderClients(el) {
     el.innerHTML = head("Clients",
-      "Every enriched client, saved and campaign-ready: the full personalization sheet (first name → company location), verified for sending. Sort any column, then export or deploy.") +
+      "The Hire Signals book: every decision-maker the engine produced, categorized by industry, desk, and email status — validated and campaign-ready. Filter, sort, then export or deploy.") +
       '<div class="btn-row" style="margin-bottom:12px">' +
       '<button class="btn btn-primary btn-sm" id="clVerify">✅ Verify emails (Reoon)</button>' +
+      '<button class="btn btn-ghost btn-sm" id="clRefresh">↻ Refresh</button>' +
       '<button class="btn btn-ghost btn-sm" id="clGenAll">🖥 Generate missing captures</button>' +
       '<button class="btn btn-ghost btn-sm" id="clExport">⇪ Export CSV</button>' +
       '<a class="btn btn-ghost btn-sm" href="/pip-studio" target="_blank" rel="noopener">🎬 Video Studio</a>' +
       '<span id="clSeg" style="margin-left:auto;display:inline-flex;gap:4px"></span>' +
       '</div>' +
       '<div id="clViewToggle" class="btn-row" style="margin-bottom:12px;gap:4px"></div>' +
-      '<div class="pr-searchbar"><span class="ico">⌕</span>' +
-      '<input id="clSearch" type="text" autocomplete="off" placeholder="Search by name, job title, company, or email…" /></div>' +
+      '<div class="cl-controls">' +
+        '<div class="pr-searchbar cl-search"><span class="ico">⌕</span>' +
+        '<input id="clSearch" type="text" autocomplete="off" placeholder="Search name, title, company, email…" /></div>' +
+        '<select id="clIndustry" class="cl-cat-sel" title="Categorize by industry"><option value="">All industries</option></select>' +
+        '<select id="clFunction" class="cl-cat-sel" title="Categorize by desk / function"><option value="">All desks</option></select>' +
+      '</div>' +
       '<div id="clBody">' + loading() + "</div>";
 
     var clAll = [], clFilter = "", clById = {};
     var shotsByCompany = {};   // lowercased company -> { watch, teaser, video, poster }
-    // segment: "signals" = produced by Hire Signals (category in_market); "all" = every enriched lead.
-    var clSeg = localStorage.getItem("ros_clients_seg") || "all";
+    var segCounts = { signals: null, all: null };   // headline count per segment (filled as we load)
+    var clIndustry = "", clFunction = "";           // categorization filters
+    var DISPLAY_CAP = 1200;                          // max rows rendered at once (filter to see more)
+    // segment: "signals" = the Hire Signals curation engine output (the thousands of validated
+    // decision-makers, read from the curation store); "all" = enriched prospects in your pipeline.
+    var clSeg = localStorage.getItem("ros_clients_seg") || "signals";
     // "ready" = only verified-deliverable (send-ready); "all" = every lead with an email.
-    // Default to "all" so the spreadsheet is a complete reference; toggle to send-ready when sending.
     var clView = localStorage.getItem("ros_clients_view") || "all";
     // Spreadsheet sort: column key + direction (1 asc / -1 desc), persisted.
     var clSort = { key: localStorage.getItem("ros_clients_sortk") || "company", dir: Number(localStorage.getItem("ros_clients_sortd") || 1) };
     var searchEl = $("#clSearch");
     if (searchEl) searchEl.addEventListener("input", function () { clFilter = (searchEl.value || "").toLowerCase().trim(); paint(); });
+    var indSel = $("#clIndustry"); if (indSel) indSel.addEventListener("change", function () { clIndustry = indSel.value; paint(); });
+    var fnSel = $("#clFunction"); if (fnSel) fnSel.addEventListener("change", function () { clFunction = fnSel.value; paint(); });
     var exp = $("#clExport"); if (exp) exp.addEventListener("click", exportClients);
     var verBtn = $("#clVerify"); if (verBtn) verBtn.addEventListener("click", function () { verifyEmails(this); });
+    var refr = $("#clRefresh"); if (refr) refr.addEventListener("click", function () { load(); });
     var genAll = $("#clGenAll"); if (genAll) genAll.addEventListener("click", function () { generateAllCaptures(this); });
+
+    // Map a Hire Signals CuratedProspect into the client-row shape the spreadsheet expects.
+    // The curated row carries the decision-maker, the company, the categorization (industry +
+    // function/desk + signal), and the Reoon verdict — so the tab finally shows the real thousands.
+    function mapCurated(r) {
+      var parts = (r.managerName || "").trim().split(/\s+/);
+      var ev = r.emailValidated ? { status: "valid", reason: "mailbox_confirmed", source: "reoon", checkedAt: r.validatedAt }
+        : r.emailInvalid ? { status: "invalid", reason: "undeliverable", source: "reoon", checkedAt: r.validatedAt }
+        : r.emailCatchAll ? { status: "risky", reason: "catch_all", source: "reoon", checkedAt: r.validatedAt }
+        : r.likelyEmail ? { status: "deliverable", reason: "syntax+mx", source: "dns" }
+        : { status: "unverified" };
+      return {
+        id: r.id,
+        fullName: r.managerName || "",
+        firstName: parts[0] || "",
+        lastName: parts.length > 1 ? parts.slice(1).join(" ") : "",
+        title: r.managerTitle || "",
+        company: r.company || "",
+        companyDomain: r.domain || "",
+        jobUrl: r.jobUrl || "",
+        location: "",
+        email: r.likelyEmail || "",
+        emailVerification: ev,
+        industry: r.industry || "",
+        "function": r["function"] || "",
+        openRole: r.role || "",            // the OPEN ROLE the company is hiring for (key personalization hook)
+        signalType: r.signalType || "",
+        signalReason: r.signalReason || "",
+        via: r.managerVia || "",           // how we found them (company_site | news | github)
+        tier: r.managerTier || "",         // confidence tier (named | function_leader | …)
+        status: r.status,
+        motion: "bd",
+        category: "in_market",
+        score: r.score,
+        __curated: true
+      };
+    }
+
+    // Repopulate the industry + desk dropdowns from the loaded data (called after each load).
+    function renderFilters() {
+      var inds = {}, fns = {};
+      clAll.forEach(function (p) { if (p.industry) inds[p.industry] = 1; if (p["function"]) fns[p["function"]] = 1; });
+      var is = $("#clIndustry"), fs = $("#clFunction");
+      if (is) is.innerHTML = '<option value="">All industries</option>' +
+        Object.keys(inds).sort().map(function (i) { return '<option value="' + esc(i) + '"' + (i === clIndustry ? " selected" : "") + ">" + esc(i) + "</option>"; }).join("");
+      if (fs) fs.innerHTML = '<option value="">All desks</option>' +
+        Object.keys(fns).sort().map(function (f) { return '<option value="' + esc(f) + '"' + (f === clFunction ? " selected" : "") + ">" + esc(f) + "</option>"; }).join("");
+    }
 
     function hasValidEmail(p) {
       return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((p.email || "").trim());
@@ -3644,7 +3703,13 @@
     function vStatus(p) { return (p.emailVerification && p.emailVerification.status) || "unverified"; }
     // Send-ready = the verifier confirmed the address can receive mail.
     function isSendReady(p) { var s = vStatus(p); return s === "valid" || s === "deliverable"; }
-    function shown() { return clView === "ready" ? eligible().filter(isSendReady) : eligible(); }
+    // Categorization filters: industry + desk (function).
+    function inCat(p) {
+      if (clIndustry && (p.industry || "") !== clIndustry) return false;
+      if (clFunction && (p["function"] || "") !== clFunction) return false;
+      return true;
+    }
+    function shown() { return (clView === "ready" ? eligible().filter(isSendReady) : eligible()).filter(inCat); }
 
     // The personalized video / screen capture for a client: prefer the attached
     // personalized PiP video, else a screen capture of the company's hiring page.
@@ -3686,10 +3751,13 @@
       { key: "last_name", label: "Last name", get: lastNameOf, render: function (p) { return "<td>" + naCell(lastNameOf(p)) + "</td>"; } },
       { key: "full_name", label: "Full name", get: function (p) { return p.fullName || ""; }, render: function (p) { return "<td>" + naCell(p.fullName) + "</td>"; } },
       { key: "job_title", label: "Job title", get: function (p) { return p.title || ""; }, render: function (p) { return "<td>" + naCell(p.title) + "</td>"; } },
+      { key: "open_role", label: "Open role (hiring for)", get: function (p) { return p.openRole || ""; }, render: function (p) { return "<td>" + (p.openRole ? '<span class="cl-cat cl-cat-role">' + esc(p.openRole) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
       { key: "company", label: "Company", get: function (p) { return p.company || ""; }, render: function (p) { return "<td>" + naCell(p.company) + "</td>"; } },
       { key: "company_domain", label: "Company domain", get: function (p) { return p.companyDomain || ""; },
         render: function (p) { return '<td class="cl-c-domain">' + (p.companyDomain ? '<a href="https://' + esc(p.companyDomain) + '" target="_blank" rel="noopener">' + esc(p.companyDomain) + "</a>" : '<span class="pr-na">-</span>') + "</td>"; } },
       { key: "company_location", label: "Company location", get: function (p) { return p.location || ""; }, render: function (p) { return "<td>" + naCell(p.location) + "</td>"; } },
+      { key: "industry", label: "Industry", get: function (p) { return p.industry || ""; }, render: function (p) { return "<td>" + (p.industry ? '<span class="cl-cat">' + esc(p.industry) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
+      { key: "function", label: "Desk", get: function (p) { return p["function"] || ""; }, render: function (p) { return "<td>" + (p["function"] ? '<span class="cl-cat cl-cat-fn">' + esc(p["function"]) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
       { key: "email", label: "Email", get: function (p) { return p.email || ""; },
         render: function (p) { return '<td class="pr-c-email">' + (p.email ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a>" : '<span class="pr-na">-</span>') + "</td>"; } },
       { key: "email_status", label: "Email status", get: function (p) { return vStatus(p); }, sort: vRank, render: function (p) { return "<td>" + vBadge(p) + "</td>"; } },
@@ -3697,8 +3765,16 @@
       { key: "linkedin_url", label: "LinkedIn", get: function (p) { return p.linkedinUrl || ""; }, sort: function (p) { return p.linkedinUrl ? 0 : 1; },
         render: function (p) { return '<td class="pr-c-li">' + (p.linkedinUrl ? '<a class="pr-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : '<span class="pr-na">-</span>') + "</td>"; } },
       { key: "headline", label: "Headline", get: function (p) { return p.headline || ""; }, render: function (p) { return '<td class="cl-c-signal">' + naCell(p.headline) + "</td>"; } },
-      { key: "signal", label: "Signal", get: function (p) { return p.signalReason || ""; },
+      { key: "signal", label: "Why hiring", get: function (p) { return p.signalReason || ""; },
         render: function (p) { return '<td class="cl-c-signal">' + (p.signalReason ? '<span class="cl-sig" title="Hiring signal">⚡ ' + esc(p.signalReason) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
+      { key: "signal_type", label: "Signal type", get: function (p) { return p.signalType || ""; },
+        render: function (p) { return "<td>" + (p.signalType ? '<span class="cl-cat cl-cat-sig">' + esc(String(p.signalType).replace(/_/g, " ")) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
+      { key: "hiring_score", label: "Intent", get: function (p) { return p.score == null ? "" : p.score; }, sort: function (p) { return -(Number(p.score) || 0); },
+        render: function (p) { return "<td>" + (p.score == null ? '<span class="pr-na">-</span>' : '<span class="cl-score" title="Hiring-intent score">' + esc(String(p.score)) + "</span>") + "</td>"; } },
+      { key: "job_post", label: "Job post", get: function (p) { return p.jobUrl || ""; }, sort: function (p) { return p.jobUrl ? 0 : 1; },
+        render: function (p) { return "<td>" + (p.jobUrl ? '<a href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener" title="Open the live job posting">↗ posting</a>' : '<span class="pr-na">-</span>') + "</td>"; } },
+      { key: "found_via", label: "Source", get: function (p) { return p.via || ""; },
+        render: function (p) { return "<td>" + (p.via ? '<span class="cl-via">' + esc(String(p.via).replace(/_/g, " ")) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
       { key: "sequence", label: "Sequence", get: function (p) { return p.sequenceName || ""; },
         render: function (p) { return "<td>" + (p.sequenceName ? '<span class="pr-seqtag">▸ ' + esc(p.sequenceName) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
       { key: "status", label: "Status", get: function (p) { return clStatusLabel(p); }, sort: function (p) { return p.status || ""; },
@@ -3757,7 +3833,8 @@
     function matches(p) {
       if (!clFilter) return true;
       var hay = ((p.fullName || "") + " " + (p.title || "") + " " + (p.company || "") + " " +
-        (p.email || "") + " " + (p.location || "") + " " + (p.signalReason || "")).toLowerCase();
+        (p.email || "") + " " + (p.location || "") + " " + (p.signalReason || "") + " " +
+        (p.openRole || "") + " " + (p.industry || "") + " " + (p["function"] || "")).toLowerCase();
       return clFilter.split(/\s+/).every(function (t) { return hay.indexOf(t) >= 0; });
     }
 
@@ -3771,14 +3848,20 @@
 
       // Segment chips (Hire Signals vs every enriched lead) with live counts.
       var sg = $("#clSeg");
-      var signalsCount = clAll.filter(function (p) { return fromSignals(p) && hasValidEmail(p); }).length;
-      var allCount = clAll.filter(hasValidEmail).length;
+      var sCount = segCounts.signals == null ? "…" : segCounts.signals;
+      var aCount = segCounts.all == null ? "…" : segCounts.all;
       if (sg) {
         sg.innerHTML =
-          '<button class="btn btn-sm ' + (clSeg === "signals" ? "btn-primary" : "btn-ghost") + '" data-clseg="signals">⚡ Hire Signals · ' + signalsCount + "</button>" +
-          '<button class="btn btn-sm ' + (clSeg === "all" ? "btn-primary" : "btn-ghost") + '" data-clseg="all">All leads · ' + allCount + "</button>";
+          '<button class="btn btn-sm ' + (clSeg === "signals" ? "btn-primary" : "btn-ghost") + '" data-clseg="signals">⚡ Hire Signals · ' + sCount + "</button>" +
+          '<button class="btn btn-sm ' + (clSeg === "all" ? "btn-primary" : "btn-ghost") + '" data-clseg="all">All leads · ' + aCount + "</button>";
         Array.prototype.forEach.call(sg.querySelectorAll("[data-clseg]"), function (b) {
-          b.addEventListener("click", function () { clSeg = b.getAttribute("data-clseg"); localStorage.setItem("ros_clients_seg", clSeg); paint(); });
+          b.addEventListener("click", function () {
+            var v = b.getAttribute("data-clseg");
+            if (v === clSeg) return;
+            clSeg = v; localStorage.setItem("ros_clients_seg", clSeg);
+            clIndustry = ""; clFunction = "";   // category options differ per segment
+            load();                              // each segment is a different data source
+          });
         });
       }
 
@@ -3802,8 +3885,12 @@
       // Spreadsheet sort by the active column.
       var sortCol = COLS.filter(function (c) { return c.key === clSort.key; })[0] || COLS[0];
       list.sort(function (a, b) { var av = colSort(sortCol, a), bv = colSort(sortCol, b); return av < bv ? -clSort.dir : av > bv ? clSort.dir : 0; });
-      var rows = list.map(rowHtml).join("");
+      var capped = list.length > DISPLAY_CAP ? list.slice(0, DISPLAY_CAP) : list;
+      var rows = capped.map(rowHtml).join("");
       var countLbl = clFilter ? (list.length + " of " + all.length) : String(all.length);
+      var capNote = list.length > DISPLAY_CAP
+        ? '<div class="cl-capnote">Showing the first ' + DISPLAY_CAP + " of " + list.length + " — filter by industry, desk, or search to narrow.</div>"
+        : "";
       // Counts by verdict + capture coverage, so the user sees readiness at a glance.
       var by = elig.reduce(function (m, p) { var s = vStatus(p); m[s] = (m[s] || 0) + 1; return m; }, {});
       var unchecked = (by.unverified || 0) + (by.unknown || 0);
@@ -3834,7 +3921,7 @@
           : "No enriched leads with an email yet. Enrich your prospects (Prospects → ⚡ Enrich all contacts).") + "</div>";
       body.innerHTML = '<div class="card" style="padding:0;overflow:hidden"><div class="pr-card-h">' +
         '<h3>Clients <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl +
-        (clView === "ready" ? " send-ready" : " with an email") + "</span></h3>" + legend + "</div>" + table + "</div>";
+        (clView === "ready" ? " send-ready" : " with an email") + "</span></h3>" + legend + "</div>" + capNote + table + "</div>";
 
       // Click a header to sort by that column (toggles direction on the active one).
       var thead = body.querySelector(".cl-sheet thead");
@@ -3868,7 +3955,8 @@
       if (!vid || (!vid.gif && !vid.watch)) { toast("No video for this client yet — click Generate first."); return; }
       var first = p.firstName || ((p.fullName || "").split(/\s+/)[0]) || "there";
       var co = p.company || "your team";
-      var role = vid.role ? (" for " + vid.role) : "";
+      var roleName = vid.role || p.openRole || "";
+      var role = roleName ? (" for " + roleName) : "";
       var reason = p.signalReason ? (" " + p.signalReason + ".") : "";
       var html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#111">' +
         "<p>Hi " + esc(first) + ",</p>" +
@@ -3896,7 +3984,7 @@
       var role = (p.personalizedVideo && p.personalizedVideo.roleTitle) || p.title || "Open role";
       var old = btn ? btn.textContent : "";
       if (btn) { btn.disabled = true; btn.textContent = "Capturing…"; }
-      return send("/in-market/shot", "POST", { company: p.company, roleTitle: role, wait: true }).then(function (r) {
+      return send("/in-market/shot", "POST", { company: p.company, roleTitle: role, roleUrl: p.jobUrl || undefined, wait: true }).then(function (r) {
         if (btn) { btn.disabled = false; btn.textContent = old; }
         if (!r.ok) { toast("Capture failed for " + p.company + " (" + ((r.data && r.data.error) || r.status) + ")"); return false; }
         return loadShots().then(function () { paint(); return true; });
@@ -3928,6 +4016,11 @@
     // Run deliverability verification over the leads via Reoon. By default only the
     // not-yet-checked ones (saves credits); when everything is settled, re-verify all.
     function verifyEmails(btn) {
+      if (clSeg === "signals") {
+        toast("Hire Signals contacts are validated automatically by the Reoon engine (server-side). Hit ↻ Refresh to pull the latest verdicts. Switch to All leads to verify enriched prospects manually.");
+        load();
+        return;
+      }
       var elig = eligible();
       if (!elig.length) { toast("No emails to verify yet — enrich some prospects first."); return; }
       var pending = elig.filter(function (p) { var s = vStatus(p); return s === "unverified" || s === "unknown"; });
@@ -3982,12 +4075,29 @@
     }
 
     function load() {
-      Promise.all([
-        api("/prospects").then(function (d) { clAll = (d && d.prospects) || []; }).catch(function () { clAll = null; }),
-        loadShots()
-      ]).then(function () {
-        if (clAll === null) { var b = $("#clBody"); if (b) b.innerHTML = needsSetup(); clAll = []; return; }
+      var b = $("#clBody"); if (b) b.innerHTML = loading();
+      var seg = clSeg;
+      var dataP;
+      if (seg === "signals") {
+        // The thousands: the Hire Signals curation engine output (named decision-makers with an
+        // email), mapped into the client-row shape. This is the real well — NOT /api/prospects.
+        dataP = send("/in-market", "POST", { action: "curation_list", contactableOnly: true, namedOnly: true, limit: 5000 })
+          .then(function (r) { clAll = (r.ok && r.data && Array.isArray(r.data.curated)) ? r.data.curated.map(mapCurated) : (r.ok ? [] : null); });
+      } else {
+        dataP = api("/prospects").then(function (d) { clAll = (d && d.prospects) || []; }).catch(function () { clAll = null; });
+      }
+      // Funnel gives the TRUE Hire Signals contactable total (the headline thousands) regardless of segment.
+      var funnelP = send("/in-market", "POST", { action: "curation_funnel" }).then(function (r) {
+        if (r.ok && r.data && r.data.funnel) {
+          var bs = (r.data.funnel.byStatus) || {};
+          segCounts.signals = (bs.contactable || 0) + (bs.queued || 0) + (bs.enrolled || 0);
+        }
+      }).catch(function () { /* best-effort headline */ });
+      Promise.all([dataP, loadShots(), funnelP]).then(function () {
+        if (clAll === null) { var bb = $("#clBody"); if (bb) bb.innerHTML = needsSetup(); clAll = []; return; }
+        if (seg === "all") segCounts.all = clAll.filter(hasValidEmail).length;
         clById = {}; clAll.forEach(function (p) { clById[p.id] = p; });
+        renderFilters();
         paint();
       });
     }
