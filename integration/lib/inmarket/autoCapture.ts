@@ -26,7 +26,11 @@ const WATCHDOG_MS = 8 * 60 * 1000;    // abandon a stuck run (e.g. a hung browse
 export function autoCaptureEnabled(): boolean {
   return ["1", "true", "yes", "on"].includes((process.env.INMARKET_AUTOCAPTURE || "").toLowerCase());
 }
-function batchSize(): number { return Math.max(1, Math.min(Number(process.env.INMARKET_AUTOCAPTURE_BATCH) || 3, 25)); }
+function batchSize(): number { return Math.max(1, Math.min(Number(process.env.INMARKET_AUTOCAPTURE_BATCH) || 6, 500)); }
+// How many captures to run AT ONCE. Each is a headless browser + ffmpeg (CPU + RAM heavy), so raise
+// this only as far as the box can take (≈ vCPU count). Concurrency is the real throughput lever —
+// the path to thousands/day is a higher concurrency here AND the same work spread across the worker fleet.
+function concurrency(): number { return Math.max(1, Math.min(Number(process.env.INMARKET_AUTOCAPTURE_CONCURRENCY) || 1, 8)); }
 function minScore(): number { return Math.max(0, Number(process.env.INMARKET_AUTOCAPTURE_MIN_SCORE) || 0); }
 
 let started = false, running = false;
@@ -61,16 +65,22 @@ async function runTickInner(): Promise<void> {
     if (todo.length >= batchSize()) break;
   }
 
-  let made = 0;
-  for (const t of todo) {
-    try {
-      // Sequential on purpose — one headless browser at a time keeps the box responsive.
-      await captureRoleShot({ company: t.company, roleTitle: t.role, roleUrl: t.jobUrl, domain: t.domain });
-      made++; totalMade++;
-    } catch (e) {
-      lastError = (e as Error)?.message;
+  // Run up to `concurrency()` captures at once via a worker pool; raise the knob to push throughput
+  // (bounded by the box's CPU). Each worker pulls the next job until the batch is drained.
+  let made = 0, cursor = 0;
+  const conc = Math.max(1, Math.min(concurrency(), todo.length));
+  async function worker() {
+    while (cursor < todo.length) {
+      const t = todo[cursor++];
+      try {
+        await captureRoleShot({ company: t.company, roleTitle: t.role, roleUrl: t.jobUrl, domain: t.domain });
+        made++; totalMade++;
+      } catch (e) {
+        lastError = (e as Error)?.message;
+      }
     }
   }
+  await Promise.all(Array.from({ length: conc }, worker));
   lastMade = made;
 }
 
