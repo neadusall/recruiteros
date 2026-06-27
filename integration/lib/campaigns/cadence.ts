@@ -168,6 +168,7 @@ export async function pushApproved(workspaceId: string): Promise<{ sent: number;
 export async function runAutopilot(workspaceId: string): Promise<{ campaigns: number; sent: number; results: any[] }> {
   const core = getCore();
   const { renderTouch } = await import("../automation/model");
+  const { prospectReadiness } = await import("../sending/sendReady");
   // Re-pin winning variants for any campaign on the promote-winners autopilot. Best-effort.
   await refreshAutopilots(workspaceId).catch(() => {});
 
@@ -195,6 +196,11 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
     for (const p of prospects) {
       const isNew = p.status === "queued";
       if (isNew && newBudget <= 0) continue;
+
+      // SEND QUEUE gate (opt-in, fail-safe): never START a sequence for a prospect that isn't fully
+      // send-ready (verified email + composed 2nd-email video + watch page), so the Day-1 video is
+      // guaranteed before the 1st email goes out. Only HOLDS unready prospects — never sends more.
+      if (c.sendQueue && isNew && !prospectReadiness(p).ready) continue;
 
       // Enrich on first enrollment (real waterfall when keyed) -> merge contact/role.
       if (isNew) {

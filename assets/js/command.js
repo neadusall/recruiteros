@@ -2359,8 +2359,17 @@
     var s = (af && af.settings) || {};
     var on = !!s.enabled;
     var opts = '<option value="">— pick a campaign —</option>' + (campaigns || []).map(function (c) {
-      return '<option value="' + esc(c.id) + '"' + (c.id === s.campaignId ? " selected" : "") + ">" + esc(c.name) + (c.status ? " (" + esc(c.status) + ")" : "") + "</option>";
+      return '<option value="' + esc(c.id) + '"' + (c.id === s.campaignId ? " selected" : "") + ">" + esc(c.name) + (c.sendQueue ? " ✓" : "") + (c.status ? " (" + esc(c.status) + ")" : "") + "</option>";
     }).join("");
+    var sel = (campaigns || []).filter(function (c) { return c.id === s.campaignId; })[0];
+    var setupNote = !sel ? "Pick a campaign, then set it up for Day-0 text + Day-1 video."
+      : sel.sendQueue ? "✓ Set up: 1st email Day 0 · video 2nd email Day 1 · send-ready gate ON" + (sel.scheduledFor ? " · launch " + esc(sel.scheduledFor) : "")
+      : "Not set up yet — click to time it Day-0 / Day-1 and gate sends on send-ready.";
+    var setupRow = '<div class="sq-af-setup">' +
+        '<label class="sq-af-f">Launch date<input type="date" id="sqAfDate" value="' + (sel && sel.scheduledFor || "") + '"></label>' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="sqAfSetup">⚙️ Set up as Send Queue campaign</button>' +
+        '<span class="sq-af-setupnote ' + (sel && sel.sendQueue ? "ok" : "muted") + '">' + setupNote + "</span>" +
+      "</div>";
     return '<div class="sq-af' + (on ? " on" : "") + '">' +
         '<div class="sq-af-head">' +
           '<label class="sq-switch" title="Turn auto-fill on/off"><input type="checkbox" id="sqAfToggle"' + (on ? " checked" : "") + '><span class="sq-slider"></span></label>' +
@@ -2375,6 +2384,7 @@
           '<button type="button" class="btn btn-ghost btn-sm" id="sqAfSave">Save</button>' +
           '<button type="button" class="btn btn-primary btn-sm" id="sqAfFill">⬇ Fill now</button>' +
         "</div>" +
+        setupRow +
         '<div class="sq-af-note muted">When ON, it stages verified send-ready prospects into the chosen campaign every few minutes — keeping ~' + (s.bufferDays || 5) + " days ahead so no day runs dry. It never sends; your campaign’s own controls do.</div>" +
       "</div>";
   }
@@ -2406,6 +2416,22 @@
     }
     if (save) save.addEventListener("click", function () { persist(); });
     if (toggle) toggle.addEventListener("change", function () { persist(); });
+    // Changing the campaign saves the choice and reloads, so the "set up" status reflects the new pick.
+    var camp = document.getElementById("sqAfCampaign");
+    if (camp) camp.addEventListener("change", function () { persist(); });
+    // One-click: time the chosen campaign Day-0 text + Day-1 video and turn on the send-ready gate.
+    var setup = document.getElementById("sqAfSetup");
+    if (setup) setup.addEventListener("click", function () {
+      var cid = document.getElementById("sqAfCampaign").value;
+      if (!cid) { toast("Pick a campaign first."); return; }
+      var date = document.getElementById("sqAfDate").value;
+      setup.disabled = true; setup.textContent = "Setting up…";
+      send("/send-queue", "POST", { action: "campaign_setup", campaignId: cid, scheduledFor: date }).then(function (r) {
+        var res = r && r.data && r.data.result;
+        toast(res ? res.message : "Couldn’t set up the campaign.");
+        sqReload();
+      }).catch(function () { setup.disabled = false; setup.textContent = "⚙️ Set up as Send Queue campaign"; toast("Couldn’t set up the campaign."); });
+    });
     if (fill) fill.addEventListener("click", function () {
       var s = sqGatherAf();
       if (!s.campaignId) { toast("Pick a campaign first."); return; }
