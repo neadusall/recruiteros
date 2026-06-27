@@ -541,6 +541,18 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .video-copy, .video-watch { appearance: none; cursor: pointer; font: inherit; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--border-strong, var(--border)); background: var(--surface-2); color: var(--text); transition: all .12s ease; white-space: nowrap; }
 .video-copy:hover, .video-watch:hover { border-color: var(--brand); color: #fff; }
 .video-copy:disabled, .video-watch:disabled { opacity: .6; cursor: default; }
+/* Clients · categorization controls (search + industry/desk dropdowns) and category chips. */
+.cl-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.cl-controls .cl-search { flex: 1 1 320px; margin-bottom: 0; }
+.cl-cat-sel { appearance: none; font: inherit; font-size: 13px; padding: 8px 12px; border-radius: 9px; border: 1px solid var(--border-strong, var(--border)); background: var(--surface-2); color: var(--text); cursor: pointer; max-width: 220px; }
+.cl-cat-sel:hover { border-color: var(--brand); }
+.cl-cat { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: rgba(120,170,255,0.14); color: #8fb3ff; white-space: nowrap; }
+.cl-cat-fn { background: rgba(56,224,166,0.14); color: #38e0a6; text-transform: capitalize; }
+.cl-cat-role { background: rgba(255,194,77,0.15); color: #ffc24d; }
+.cl-cat-sig { background: rgba(170,120,255,0.14); color: #b58cff; text-transform: capitalize; }
+.cl-score { display: inline-block; min-width: 26px; text-align: center; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; background: rgba(56,224,166,0.14); color: #38e0a6; }
+.cl-via { font-size: 11px; color: var(--text-dim, #9a9aa8); text-transform: capitalize; }
+.cl-capnote { padding: 8px 16px; font-size: 12px; color: var(--text-dim, #9a9aa8); border-bottom: 1px solid var(--border); }
 .im-ai-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 99px; background: rgba(77,208,255,0.14); color: var(--brand-2); margin-left: 4px; }
 .im-ai-refine, .im-all-roles { appearance: none; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; margin-top: 8px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); transition: all .12s ease; }
 .im-all-roles { margin-right: 8px; }

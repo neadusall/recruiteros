@@ -44,6 +44,7 @@ export interface CuratedProspect {
   signalType: string;               // hiring_velocity | job_posting | evergreen_role | …
   signalReason: string;             // human "why they're hiring"
   role: string;                     // the specific open role this prospect owns
+  jobUrl?: string;                  // the actual job-posting / apply URL, so the screen capture targets the REAL job (not just the careers page)
   function: JobFunction;            // which desk
   score: number;                    // hiring-intent score of the source signal
   /* ---- the decision-maker (WHO to reach) ---- */
@@ -273,6 +274,7 @@ export function buildCuratedRow(lead: PoolLeadLite, role: string, dm: DecisionMa
     signalType: lead.signalType ?? "job_posting",
     signalReason: lead.reason ?? "",
     role,
+    jobUrl: lead.sourceUrl,
     function: dm.function as JobFunction,
     score: Math.round(lead.score ?? 0),
     managerName: dm.fullName,
