@@ -124,3 +124,50 @@ export async function sendQueueOverview(workspaceId: string, todayIso: string): 
     readySupply: ready, inSequence, runwayDays, shortfall, needsAssets: need, days, campaigns: campaignsOut,
   };
 }
+
+export interface NeedsAssetItem {
+  id: string;
+  name: string;
+  company?: string;
+  title?: string;
+  email?: string;
+  emailStatus?: string;     // emailVerification.status, so the UI can show why an email isn't "valid"
+  campaignId: string;
+  missing: MissingAsset[];  // exactly what's not done yet for this prospect
+}
+
+/**
+ * The per-prospect "needs assets" worklist — the staged ("queued") prospects that are NOT yet
+ * send-ready, each with the precise list of what's missing, so the operator can go fix them (verify
+ * the email, record the video). Optionally filtered to a single missing asset (the dashboard's
+ * "Verified email / 2nd-email video / Landing page" cards each open their own slice). Newest first.
+ */
+export async function needsAssetsList(
+  workspaceId: string,
+  opts?: { missing?: MissingAsset; limit?: number },
+): Promise<NeedsAssetItem[]> {
+  const limit = Math.min(Math.max(opts?.limit ?? 200, 1), 1000);
+  const prospects = await getCore().listProspects(workspaceId);
+  const out: NeedsAssetItem[] = [];
+  // Newest staged first, so the freshest gaps surface at the top.
+  const queued = prospects
+    .filter((p) => p.status === "queued")
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  for (const p of queued) {
+    const r = prospectReadiness(p);
+    if (r.ready) continue;
+    if (opts?.missing && !r.missing.includes(opts.missing)) continue;
+    out.push({
+      id: p.id,
+      name: p.fullName,
+      company: p.company,
+      title: p.title,
+      email: p.email,
+      emailStatus: p.emailVerification?.status,
+      campaignId: p.campaignId,
+      missing: r.missing,
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
