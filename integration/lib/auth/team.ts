@@ -16,9 +16,19 @@ export interface TeamMember {
   userId: string;
   email: string;
   name: string;
+  /** Derived from `name` (split on first space) so the UI can search/sort by
+   *  first or last name without a schema change to the user record. */
+  firstName: string;
+  lastName: string;
   role: Role;
   emailVerified: boolean;
   isYou?: boolean;
+}
+
+/** Split a single display name into first + last (everything after the first space). */
+function splitName(name: string): { firstName: string; lastName: string } {
+  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+  return { firstName: parts[0] || "", lastName: parts.slice(1).join(" ") };
 }
 
 function err(code: string, status: number): Error & { status: number } {
@@ -34,15 +44,35 @@ export function listMembers(workspaceId: string, youUserId?: string): TeamMember
     .filter((m) => m.workspaceId === workspaceId)
     .map((m) => {
       const u = store.users.get(m.userId);
+      const name = u?.name ?? "(unknown)";
+      const { firstName, lastName } = splitName(name);
       return {
         userId: m.userId,
         email: u?.email ?? "(unknown)",
-        name: u?.name ?? "(unknown)",
+        name,
+        firstName,
+        lastName,
         role: m.role,
         emailVerified: u?.emailVerified ?? false,
         isYou: m.userId === youUserId,
       };
     });
+}
+
+/**
+ * Find members by first name, last name, or email. Empty `q` returns everyone.
+ * Multi-token queries ("jane smith") require every token to match somewhere in
+ * the member's name+email — so first+last together still resolves one person.
+ */
+export function searchMembers(workspaceId: string, q: string, youUserId?: string): TeamMember[] {
+  const all = listMembers(workspaceId, youUserId);
+  const needle = (q || "").toLowerCase().trim();
+  if (!needle) return all;
+  const tokens = needle.split(/\s+/);
+  return all.filter((m) => {
+    const hay = `${m.name} ${m.email}`.toLowerCase();
+    return tokens.every((t) => hay.includes(t));
+  });
 }
 
 /** Pending invites still outstanding for a workspace. */

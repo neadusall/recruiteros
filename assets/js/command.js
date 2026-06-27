@@ -485,6 +485,7 @@
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     sendqueue: { title: "Send Queue", crumb: "Operate", action: null, render: renderSendQueue, motionOnly: "bd" },
+    senders: { title: "Senders", crumb: "Operate", action: null, render: renderSenders, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     autopilot: { title: "Autopilot", crumb: "Build", action: null, render: renderAutopilot },
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New sequence", render: renderCampaignsHub },
@@ -2305,6 +2306,69 @@
       if (e.target.closest && e.target.closest("[data-wlclose]")) { var box = document.getElementById("sqWorklist"); if (box) box.innerHTML = ""; }
     };
   }
+  // 📨 Sending system — a legible model: Domains → Email IDs → cold sends/day, with the
+  // hard 2/day cap making the math exact and today's usage draining live. Styles injected once.
+  function syscapCss() {
+    if (document.getElementById("syscapCss")) return "";
+    return '<style id="syscapCss">' +
+      '.syscap{border:1px solid var(--border);border-radius:14px;background:var(--surface);padding:16px 18px;margin-bottom:14px}' +
+      '.syscap-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px}' +
+      '.syscap-h h3{font-size:15px;font-weight:800;margin:0}' +
+      '.syscap-h .sub{font-size:12px;color:var(--muted,#8a93a6)}' +
+      '.syscap-flow{display:flex;align-items:stretch;flex-wrap:wrap;margin:14px 0 8px}' +
+      '.syscap-step{flex:1;min-width:108px;text-align:center;padding:11px 8px;border:1px solid var(--border);border-radius:12px}' +
+      '.syscap-step .n{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1}' +
+      '.syscap-step .l{font-size:12px;font-weight:700;margin-top:4px}' +
+      '.syscap-step .s{font-size:11px;color:var(--muted,#8a93a6);margin-top:2px}' +
+      '.syscap-arrow{display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--muted,#8a93a6);font-size:16px;font-weight:700}' +
+      '.syscap-meter .track{height:10px;border-radius:6px;background:var(--border);overflow:hidden}' +
+      '.syscap-meter .fill{height:100%;background:linear-gradient(90deg,#7c5cff,#4dd0ff)}' +
+      '.syscap-meter .lbl{display:flex;justify-content:space-between;font-size:12px;margin-top:6px;color:var(--muted,#8a93a6)}' +
+      '.syscap-meter .lbl b{font-weight:800;color:var(--text)}' +
+      '.syscap-warm{font-size:12px;color:var(--muted,#8a93a6);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}' +
+      '.syscap-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}' +
+      '.syscap-tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);padding:6px 8px;border-bottom:1px solid var(--border)}' +
+      '.syscap-tbl td{padding:7px 8px;border-bottom:1px solid var(--border)}' +
+      '.syscap-tbl .num{text-align:right;font-variant-numeric:tabular-nums}' +
+      '.syscap-bar{display:inline-block;height:6px;border-radius:4px;background:var(--border);width:52px;overflow:hidden;vertical-align:middle;margin-left:8px}' +
+      '.syscap-bar>i{display:block;height:100%;background:#7c5cff}' +
+      '</style>';
+  }
+  function sqCapacityHtml(cap) {
+    if (!cap) return "";
+    var css = syscapCss();
+    if (!cap.inboxes) {
+      return css + '<div class="syscap"><div class="syscap-h"><h3>📨 Sending system</h3><span class="sub">your domains, Email IDs, and daily cold-send capacity</span></div>' +
+        '<div class="empty" style="margin-top:12px">No Email IDs yet. <a href="#senders">Import your inboxes</a> and assign them to recruiters — then this shows the model: <b>domains → Email IDs → ' + (cap.coldPerInbox || 2) + ' cold sends/day each</b>, draining live as you send.</div></div>';
+    }
+    var pct = cap.coldCapacity ? Math.min(100, Math.round((cap.coldUsedToday / cap.coldCapacity) * 100)) : 0;
+    var flow =
+      '<div class="syscap-flow">' +
+        '<div class="syscap-step"><div class="n">' + sqFmt(cap.domains) + '</div><div class="l">Domains</div><div class="s">' + cap.inboxesPerDomain + ' Email IDs each</div></div>' +
+        '<div class="syscap-arrow">→</div>' +
+        '<div class="syscap-step"><div class="n">' + sqFmt(cap.inboxes) + '</div><div class="l">Email IDs</div><div class="s">' + cap.coldPerInbox + ' cold + ' + cap.warmingPerInbox + ' warm / day</div></div>' +
+        '<div class="syscap-arrow">→</div>' +
+        '<div class="syscap-step"><div class="n">' + sqFmt(cap.coldCapacity) + '</div><div class="l">Cold sends / day</div><div class="s">hard cap · ' + sqFmt(cap.inboxes) + ' × ' + cap.coldPerInbox + '</div></div>' +
+      '</div>';
+    var meter =
+      '<div class="syscap-meter"><div class="track"><div class="fill" style="width:' + pct + '%"></div></div>' +
+        '<div class="lbl"><span><b>' + sqFmt(cap.coldUsedToday) + '</b> sent today</span><span><b>' + sqFmt(cap.coldRemaining) + '</b> left · ' + pct + '% of capacity used</span></div></div>';
+    var warm = '<div class="syscap-warm">＋ <b>' + sqFmt(cap.warmingPerDay) + '</b> warming emails/day handled by <b>Smartlead</b> (' + cap.warmingPerInbox + '/inbox) — kept separate from your cold sends.</div>';
+    var rows = (cap.byRecruiter || []).map(function (r) {
+      var rp = r.coldCapacity ? Math.min(100, Math.round((r.coldUsedToday / r.coldCapacity) * 100)) : 0;
+      return '<tr><td><b>' + esc(r.ownerName) + '</b></td>' +
+        '<td class="num">' + sqFmt(r.inboxes) + '</td>' +
+        '<td class="num">' + sqFmt(r.domains) + '</td>' +
+        '<td class="num">' + sqFmt(r.coldUsedToday) + ' / ' + sqFmt(r.coldCapacity) + '<span class="syscap-bar"><i style="width:' + rp + '%"></i></span></td>' +
+        '<td class="num"><b>' + sqFmt(r.coldRemaining) + '</b></td></tr>';
+    }).join("");
+    var table = rows
+      ? '<table class="syscap-tbl"><thead><tr><th>Recruiter</th><th class="num">Email IDs</th><th class="num">Domains</th><th class="num">Cold used / cap</th><th class="num">Left today</th></tr></thead><tbody>' + rows + '</tbody></table>'
+      : '';
+    return css + '<div class="syscap">' +
+      '<div class="syscap-h"><h3>📨 Sending system</h3><span class="sub">every Email ID maxed at ' + cap.coldPerInbox + ' cold/day · draining live</span></div>' +
+      flow + meter + warm + table + '</div>';
+  }
   function sqOverviewHtml(o) {
     var healthy = o.runwayDays >= o.bufferDays;
     var statusPill = healthy
@@ -2451,7 +2515,7 @@
     api("/send-queue").then(function (d) {
       var b = document.getElementById("sqBody"); if (!b) return;
       if (!d || !d.overview) { b.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>'; return; }
-      b.innerHTML = sqAutofillHtml(d.autofill || { settings: {} }, d.campaigns || []) + sqOverviewHtml(d.overview);
+      b.innerHTML = sqAutofillHtml(d.autofill || { settings: {} }, d.campaigns || []) + sqCapacityHtml(d.senders) + sqOverviewHtml(d.overview);
       sqWireAutofill();
       sqWireWorklist();
     }).catch(function () {
@@ -4001,13 +4065,259 @@
     });
   }
 
+  /* ---- Senders: recruiter-owned SMTP inbox pools (scoped to this portal) ---- */
+  var sndData = {}, sndPicks = {};
+
+  function sndStyles() {
+    if (document.getElementById("sndStyles")) return "";
+    return '<style id="sndStyles">' +
+      '.snd-stats{display:flex;gap:12px;flex-wrap:wrap;margin:4px 0 16px}' +
+      '.snd-stat{flex:1;min-width:120px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:12px 14px}' +
+      '.snd-statv{font-size:22px;font-weight:800;letter-spacing:-.02em}' +
+      '.snd-statl{font-size:12px;color:var(--muted,#8a93a6);margin-top:2px}' +
+      '.snd-poolrow{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
+      '.snd-pool{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:8px 12px;cursor:pointer}' +
+      '.snd-pool:hover{border-color:var(--brand)}' +
+      '.snd-poolname{font-weight:700;font-size:13px}' +
+      '.snd-poolmeta{font-size:11.5px;color:var(--muted,#8a93a6)}' +
+      '.snd-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 12px}' +
+      '.snd-table{width:100%;border-collapse:collapse;font-size:13px}' +
+      '.snd-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);padding:6px 8px;border-bottom:1px solid var(--border)}' +
+      '.snd-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle}' +
+      '.snd-actions{display:flex;gap:6px;justify-content:flex-end}' +
+      '.snd-grid2{display:flex;gap:10px}.snd-grid2>div{flex:1}' +
+      '</style>';
+  }
+
+  function renderSenders(el) {
+    sndPicks = {};
+    el.innerHTML = sndStyles() +
+      '<div class="im-hero">' +
+        '<div class="im-title">Senders</div>' +
+        '<div class="im-lead">Your sending inboxes (<b>Email IDs</b>) — about <b>50 per domain</b>, each owned by a recruiter. Every Email ID sends <b>2 cold emails/day</b> (hard limit); Smartlead warms them at 10/day. Import in bulk, assign to a recruiter by name, and campaigns rotate sends across that recruiter’s pool. Watch live capacity on <b>Send Queue</b>.</div>' +
+        '<div class="btn-row">' +
+          '<button class="btn btn-primary btn-sm" id="sndImport">⬆ Import inboxes (CSV)</button>' +
+          '<button class="btn btn-ghost btn-sm" id="sndAdd">＋ Add one</button>' +
+          '<button class="btn btn-ghost btn-sm" id="sndRefresh">↻ Refresh</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="sndStatsBox" class="snd-stats"></div>' +
+      '<div id="sndPoolsBox"></div>' +
+      '<div class="snd-toolbar">' +
+        '<input id="sndFilter" class="cur-ind-select" placeholder="Filter by recruiter or email…" style="min-width:240px">' +
+        '<span id="sndSel" class="muted"></span>' +
+        '<button class="btn btn-ghost btn-sm" id="sndAssignSel" disabled>Assign selected to recruiter…</button>' +
+      '</div>' +
+      '<div id="sndBody"><div class="empty">Loading…</div></div>';
+    $("#sndImport").addEventListener("click", openSenderImport);
+    $("#sndAdd").addEventListener("click", openSenderAdd);
+    $("#sndRefresh").addEventListener("click", loadSenders);
+    var f = $("#sndFilter"); if (f) f.addEventListener("input", renderSenderRows);
+    $("#sndAssignSel").addEventListener("click", function () {
+      var ids = Object.keys(sndPicks); if (!ids.length) return;
+      pickRecruiter(function (m) { if (m) doAssign(ids, m); });
+    });
+    loadSenders();
+  }
+
+  function loadSenders() {
+    var box = $("#sndBody"); if (box) box.innerHTML = '<div class="empty">Loading…</div>';
+    send("/senders", "GET").then(function (r) {
+      if (!r.ok) { if (box) box.innerHTML = '<div class="empty">Could not load senders.</div>'; return; }
+      sndData = r.data || {};
+      renderSenderStats(); renderSenderPools(); renderSenderRows();
+    });
+  }
+
+  function renderSenderStats() {
+    var s = sndData.stats || {}, box = $("#sndStatsBox"); if (!box) return;
+    function c(v, l) { return '<div class="snd-stat"><div class="snd-statv">' + esc(v) + '</div><div class="snd-statl">' + esc(l) + '</div></div>'; }
+    box.innerHTML = c(s.inboxes || 0, "Email IDs") + c(s.active || 0, "Active") + c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Cold sends/day") + c(s.remainingToday || 0, "Remaining today");
+  }
+
+  function renderSenderPools() {
+    var pools = sndData.pools || [], box = $("#sndPoolsBox"); if (!box) return;
+    if (!pools.length) { box.innerHTML = ""; return; }
+    box.innerHTML = '<div class="snd-poolrow">' + pools.map(function (p) {
+      return '<div class="snd-pool" data-pool="' + esc(p.ownerName) + '"><div class="snd-poolname">' + esc(p.ownerName) + '</div><div class="snd-poolmeta">' + p.inboxes + ' inbox' + (p.inboxes === 1 ? "" : "es") + ' · ' + p.remainingToday + '/' + p.dailyCapacity + ' left today</div></div>';
+    }).join("") + '</div>';
+    Array.prototype.forEach.call(box.querySelectorAll(".snd-pool"), function (node) {
+      node.addEventListener("click", function () { var f = $("#sndFilter"); if (f) { f.value = node.getAttribute("data-pool"); renderSenderRows(); } });
+    });
+  }
+
+  function senderRow(m) {
+    var badge = m.status === "active" ? '<span class="cur-valid">active</span>'
+      : m.status === "warming" ? '<span class="cur-catchall">warming</span>'
+      : m.status === "paused" ? '<span class="im-email-unv">paused</span>'
+      : '<span class="cur-invalid">error</span>';
+    var toggle = m.status === "paused"
+      ? '<button class="btn btn-ghost btn-sm" data-snd-act="activate" data-id="' + esc(m.id) + '">Resume</button>'
+      : '<button class="btn btn-ghost btn-sm" data-snd-act="pause" data-id="' + esc(m.id) + '">Pause</button>';
+    return '<tr>' +
+      '<td><input type="checkbox" class="snd-pick" data-id="' + esc(m.id) + '"></td>' +
+      '<td><b>' + esc(m.email) + '</b>' + (m.displayName ? '<div class="muted">' + esc(m.displayName) + '</div>' : '') + '</td>' +
+      '<td>' + (m.ownerName ? esc(m.ownerName) : '<span class="muted">Unassigned</span>') + '</td>' +
+      '<td>' + esc(m.provider) + '</td>' +
+      '<td class="muted">' + esc(m.smtpHost) + ':' + esc(m.smtpPort) + '</td>' +
+      '<td>' + esc(m.sentToday) + '/' + esc(m.dailyCap) + '</td>' +
+      '<td>' + badge + (m.lastError ? ' <span class="muted" title="' + esc(m.lastError) + '">⚠</span>' : '') + '</td>' +
+      '<td class="snd-actions"><button class="btn btn-ghost btn-sm" data-snd-act="test" data-id="' + esc(m.id) + '">Test</button>' + toggle + '<button class="btn btn-ghost btn-sm" data-snd-act="delete" data-id="' + esc(m.id) + '">✕</button></td>' +
+    '</tr>';
+  }
+
+  function renderSenderRows() {
+    var box = $("#sndBody"); if (!box) return;
+    var inboxes = sndData.inboxes || [];
+    var q = (($("#sndFilter") && $("#sndFilter").value) || "").toLowerCase().trim();
+    var rows = inboxes.filter(function (m) {
+      if (!q) return true;
+      return (m.email + " " + (m.ownerName || "") + " " + (m.smtpHost || "")).toLowerCase().indexOf(q) >= 0;
+    });
+    if (!rows.length) {
+      box.innerHTML = '<div class="empty">' + (inboxes.length ? "No inboxes match that filter." : "No inboxes yet. Click <b>Import inboxes</b> to bulk-load your Email IDs.") + '</div>';
+      updateSndSel(); return;
+    }
+    box.innerHTML = '<table class="snd-table"><thead><tr><th></th><th>Email ID</th><th>Recruiter</th><th>Provider</th><th>SMTP host</th><th>Cold today</th><th>Status</th><th></th></tr></thead><tbody>' + rows.map(senderRow).join("") + '</tbody></table>';
+    Array.prototype.forEach.call(box.querySelectorAll(".snd-pick"), function (cb) {
+      cb.addEventListener("change", function () { var id = cb.getAttribute("data-id"); if (cb.checked) sndPicks[id] = true; else delete sndPicks[id]; updateSndSel(); });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll("[data-snd-act]"), function (b) {
+      b.addEventListener("click", function () { sndAction(b.getAttribute("data-id"), b.getAttribute("data-snd-act")); });
+    });
+    updateSndSel();
+  }
+
+  function updateSndSel() {
+    var n = Object.keys(sndPicks).length;
+    var s = $("#sndSel"); if (s) s.textContent = n ? (n + " selected") : "";
+    var b = $("#sndAssignSel"); if (b) b.disabled = !n;
+  }
+
+  function sndAction(id, action) {
+    if (action === "delete") {
+      if (!window.confirm("Delete this inbox?")) return;
+      send("/senders", "POST", { action: "delete", id: id }).then(function () { delete sndPicks[id]; loadSenders(); });
+      return;
+    }
+    if (action === "test") {
+      toast("Testing login…");
+      send("/senders", "POST", { action: "test", id: id }).then(function (r) {
+        toast(r.data && r.data.ok ? "✓ Login OK" : "✕ " + ((r.data && r.data.error) || "login failed"));
+        loadSenders();
+      });
+      return;
+    }
+    if (action === "pause" || action === "activate") {
+      send("/senders", "POST", { action: "setStatus", ids: [id], status: action === "pause" ? "paused" : "active" }).then(loadSenders);
+    }
+  }
+
+  function doAssign(ids, m) {
+    send("/senders", "POST", { action: "assign", ids: ids, ownerId: m.userId, ownerName: m.name }).then(function (r) {
+      if (r.ok) { toast("Assigned " + ((r.data && r.data.assigned) || ids.length) + " to " + m.name); sndPicks = {}; loadSenders(); }
+      else toast("Assign failed");
+    });
+  }
+
+  // Search-by-name recruiter chooser (first + last). cb(member|null).
+  function pickRecruiter(cb) {
+    var body =
+      '<input id="recrQ" class="cur-ind-select" placeholder="Search recruiter by first or last name…" style="width:100%">' +
+      '<div id="recrList" style="margin-top:10px;max-height:320px;overflow:auto"></div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="recrCancel">Cancel</button></div>';
+    openModal("Choose recruiter", "Their inbox pool will be used", body, function (root, close) {
+      var q = root.querySelector("#recrQ"), list = root.querySelector("#recrList"), t;
+      function run() {
+        send("/team/search?q=" + encodeURIComponent(q.value.trim()), "GET").then(function (r) {
+          var ms = (r.data && r.data.members) || [];
+          list.innerHTML = ms.length ? ms.map(function (m) {
+            return '<div class="list-row clickable recr-row" data-uid="' + esc(m.userId) + '" data-name="' + esc(m.name) + '"><div><div class="lr-main">' + esc(m.name) + '</div><div class="lr-sub">' + esc(m.email) + ' · ' + esc(m.role) + '</div></div></div>';
+          }).join("") : '<div class="empty">No matches.</div>';
+          Array.prototype.forEach.call(list.querySelectorAll(".recr-row"), function (row) {
+            row.addEventListener("click", function () { close(); cb({ userId: row.getAttribute("data-uid"), name: row.getAttribute("data-name") }); });
+          });
+        });
+      }
+      q.addEventListener("input", function () { clearTimeout(t); t = setTimeout(run, 180); });
+      root.querySelector("#recrCancel").addEventListener("click", function () { close(); cb(null); });
+      run();
+    });
+  }
+
+  function openSenderImport() {
+    var chosen = { userId: "", name: "" };
+    var body =
+      '<label>Assign all to recruiter (optional)</label>' +
+      '<div class="btn-row"><button class="btn btn-ghost btn-sm" id="impRecr">Choose recruiter…</button> <span id="impRecrName" class="muted">Unassigned</span></div>' +
+      '<label style="margin-top:10px;display:block">Provider</label>' +
+      '<select id="impProv" class="cur-ind-select"><option value="own-smtp">Own SMTP server</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select>' +
+      '<div class="muted" style="margin-top:10px"><b>Sending limit (hard):</b> 2 cold emails/day per Email ID. Warming (10/day per inbox) runs in Smartlead, not here.</div>' +
+      '<label style="margin-top:10px;display:block">Upload CSV</label>' +
+      '<input id="impFile" type="file" accept=".csv,.tsv,.txt">' +
+      '<label style="margin-top:10px;display:block">…or paste rows</label>' +
+      '<textarea id="impText" rows="6" style="width:100%" placeholder="email, smtp_host, smtp_port, smtp_user, smtp_pass, first_name, last_name"></textarea>' +
+      '<div class="muted" style="margin-top:6px">Columns auto-detected: email, smtp host/port/user/pass, imap, first/last name, daily cap.</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="impCancel">Cancel</button><button class="btn btn-primary btn-sm" id="impGo">Import</button></div>';
+    openModal("Import inboxes", "Bulk-load SMTP inboxes into this portal", body, function (root, close) {
+      root.querySelector("#impRecr").addEventListener("click", function () { pickRecruiter(function (m) { if (m) { chosen = m; root.querySelector("#impRecrName").textContent = m.name; } }); });
+      root.querySelector("#impCancel").addEventListener("click", close);
+      var file = root.querySelector("#impFile"), text = root.querySelector("#impText");
+      file.addEventListener("change", function () { var fl = file.files[0]; if (!fl) return; var rd = new FileReader(); rd.onload = function () { text.value = rd.result; }; rd.readAsText(fl); });
+      root.querySelector("#impGo").addEventListener("click", function () {
+        var csv = text.value.trim(); if (!csv) { toast("Paste or upload a CSV first"); return; }
+        var go = root.querySelector("#impGo"); go.disabled = true; go.textContent = "Importing…";
+        send("/senders/import", "POST", { action: "import", csv: csv, provider: root.querySelector("#impProv").value, ownerId: chosen.userId || undefined, ownerName: chosen.name || undefined }).then(function (r) {
+          if (r.ok) { var d = r.data || {}; close(); toast("Imported " + (d.imported || 0) + (d.skipped && d.skipped.length ? " (" + d.skipped.length + " skipped)" : "")); loadSenders(); }
+          else { go.disabled = false; go.textContent = "Import"; toast("Import failed: " + ((r.data && r.data.error) || r.status)); }
+        }).catch(function () { go.disabled = false; go.textContent = "Import"; });
+      });
+    });
+  }
+
+  function openSenderAdd() {
+    var chosen = { userId: "", name: "" };
+    var body =
+      '<label>Email ID</label><input id="saEmail" class="cur-ind-select" placeholder="jane@send.recruitco.io">' +
+      '<label style="margin-top:8px;display:block">From name</label><input id="saName" class="cur-ind-select" placeholder="Jane Doe">' +
+      '<div class="snd-grid2" style="margin-top:8px"><div><label>SMTP host</label><input id="saHost" class="cur-ind-select" placeholder="smtp.sending.ac"></div><div><label>Port</label><input id="saPort" type="number" value="587" class="cur-ind-select"></div></div>' +
+      '<label style="margin-top:8px;display:block">SMTP username</label><input id="saUser" class="cur-ind-select" placeholder="(defaults to the email)">' +
+      '<label style="margin-top:8px;display:block">SMTP password</label><input id="saPass" type="password" class="cur-ind-select">' +
+      '<label style="margin-top:8px;display:block">Provider</label><select id="saProv" class="cur-ind-select"><option value="own-smtp">Own SMTP</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select>' +
+      '<div class="muted" style="margin-top:8px"><b>Sending limit (hard):</b> 2 cold/day per Email ID · 10 warming/day via Smartlead.</div>' +
+      '<label style="margin-top:8px;display:block">Recruiter (optional)</label><div class="btn-row"><button class="btn btn-ghost btn-sm" id="saRecr">Choose recruiter…</button> <span id="saRecrName" class="muted">Unassigned</span></div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="saCancel">Cancel</button><button class="btn btn-primary btn-sm" id="saGo">Add inbox</button></div>';
+    openModal("Add a sending inbox", "Stored encrypted; warmed in Smartlead", body, function (root, close) {
+      root.querySelector("#saRecr").addEventListener("click", function () { pickRecruiter(function (m) { if (m) { chosen = m; root.querySelector("#saRecrName").textContent = m.name; } }); });
+      root.querySelector("#saCancel").addEventListener("click", close);
+      root.querySelector("#saGo").addEventListener("click", function () {
+        var email = root.querySelector("#saEmail").value.trim(), host = root.querySelector("#saHost").value.trim(), pass = root.querySelector("#saPass").value;
+        if (!email || !host || !pass) { toast("Email, SMTP host and password are required"); return; }
+        send("/senders", "POST", { action: "add", email: email, displayName: root.querySelector("#saName").value.trim() || undefined, smtpHost: host, smtpPort: Number(root.querySelector("#saPort").value) || 587, smtpUser: root.querySelector("#saUser").value.trim() || undefined, smtpPass: pass, provider: root.querySelector("#saProv").value, ownerId: chosen.userId || undefined, ownerName: chosen.name || undefined }).then(function (r) {
+          if (r.ok) { close(); toast("Inbox added"); loadSenders(); } else toast("Add failed: " + ((r.data && r.data.error) || r.status));
+        });
+      });
+    });
+  }
+
   // Resolve (or create) the BD campaign that holds promoted in-market prospects.
-  function resolveBdCampaign(cb) {
+  function resolveBdCampaign(cb, recruiter) {
     var saved = [];
     try { saved = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); } catch (e) {}
     var camp = saved.filter(function (c) { return c.motion === motion; })[0] || saved[0];
-    if (camp && camp.id) { cb(camp.id); return; }
+    if (camp && camp.id) {
+      // Bind the chosen sending recruiter to the campaign so the send path rotates
+      // across that recruiter's inbox pool (lib/senders pickSender).
+      if (recruiter && recruiter.userId && camp.recruiterId !== recruiter.userId) {
+        camp.recruiterId = recruiter.userId;
+        try { localStorage.setItem("ros_campaigns", JSON.stringify(saved)); } catch (e) {}
+        send("/campaigns", "PUT", camp).then(function () { cb(camp.id); }).catch(function () { cb(camp.id); });
+        return;
+      }
+      cb(camp.id); return;
+    }
     var c = { id: "camp_" + Math.random().toString(36).slice(2), name: "In-Market Pipeline", motion: motion, goal: "Hiring managers promoted from In-Market Leads.", status: "active", dailyCap: 25, steps: [] };
+    if (recruiter && recruiter.userId) c.recruiterId = recruiter.userId;
     send("/campaigns", "PUT", c).then(function () {
       try { var l = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); l.unshift(c); localStorage.setItem("ros_campaigns", JSON.stringify(l)); } catch (e) {}
       cb(c.id);
@@ -4034,6 +4344,7 @@
         '<label class="pc-voice" title="Resolve each contact\'s OWN direct line, a landline/VoIP only (never a switchboard, never a mobile). $0.10 per number found; a no-find is free.">' +
           '<input type="checkbox" id="pcDirectDial"' + (dd ? " checked" : "") + "> Find verified direct dials " +
           '<span class="muted">(person-direct landline/VoIP · $0.10/found, no-find free)</span></label>' +
+        '<div class="pc-recr" style="margin:8px 0"><button type="button" class="btn btn-ghost btn-sm" id="pcRecr">Choose sending recruiter…</button> <span id="pcRecrName" class="muted">Auto-rotate (any inbox)</span></div>' +
         '<div id="pcLines" class="pc-lines">' + loading() + "</div>" +
         '<div class="pc-total" id="pcTotal"></div>' +
         '<div id="pcCond"></div>' +
@@ -4046,6 +4357,11 @@
     openModal("Launch outreach", "Estimated cost, approve to start", body, function (root, closeFn) {
       var approve = root.querySelector("#pcApprove");
       var ddCb = root.querySelector("#pcDirectDial");
+      var chosenRecr = null;
+      var recrBtn = root.querySelector("#pcRecr");
+      if (recrBtn) recrBtn.addEventListener("click", function () {
+        pickRecruiter(function (m) { if (m) { chosenRecr = m; root.querySelector("#pcRecrName").textContent = "Sending from " + m.name + "'s inboxes"; } });
+      });
       function fetchEst() {
         approve.disabled = true;
         root.querySelector("#pcLines").innerHTML = loading();
@@ -4069,14 +4385,14 @@
       }
       ddCb.addEventListener("change", function () { setImDirectDial(ddCb.checked); fetchEst(); });
       root.querySelector("#pcCancel").addEventListener("click", closeFn);
-      approve.addEventListener("click", function () { closeFn(); runBulkPush(picks, ddCb.checked); });
+      approve.addEventListener("click", function () { closeFn(); runBulkPush(picks, ddCb.checked, chosenRecr); });
       fetchEst();
     });
   }
 
   // Approved: promote each selected person to Prospects, then nudge the orchestrator (n8n)
   // to start the enrich → LLM-draft → email/LinkedIn/voicemail/voice-drop run immediately.
-  function runBulkPush(picks, findDirectDial) {
+  function runBulkPush(picks, findDirectDial, recruiter) {
     var btn = document.getElementById("imBulk"); if (btn) btn.disabled = true;
     resolveBdCampaign(function (campaignId) {
       if (!campaignId) { toast("Create a campaign first."); if (btn) btn.disabled = false; return; }
@@ -4098,7 +4414,7 @@
           .then(function (r) { if (r.ok) done++; next(i + 1); })
           .catch(function () { next(i + 1); });
       })(0);
-    });
+    }, recruiter);
   }
 
   /* ---------------- Clients ----------------
