@@ -3626,7 +3626,7 @@
     var clAll = [], clFilter = "", clById = {};
     var shotsByCompany = {};   // lowercased company -> { watch, teaser, video, poster }
     var segCounts = { signals: null, all: null };   // headline count per segment (filled as we load)
-    var clIndustry = "", clFunction = "";           // categorization filters
+    var clIndustry = "", clFunction = "", clVerdict = "";  // categorization + verdict (legend) filters
     var DISPLAY_CAP = 1200;                          // max rows rendered at once (filter to see more)
     // segment: "signals" = the Hire Signals curation engine output (the thousands of validated
     // decision-makers, read from the curation store); "all" = enriched prospects in your pipeline.
@@ -3711,7 +3711,15 @@
       if (clFunction && (p["function"] || "") !== clFunction) return false;
       return true;
     }
-    function shown() { return (clView === "ready" ? eligible().filter(isSendReady) : eligible()).filter(inCat); }
+    // Verdict filter — clicking a legend chip narrows to just that bucket (verified / deliverable /
+    // risky / invalid / unchecked / with-video).
+    function inVerdict(p) {
+      if (!clVerdict) return true;
+      if (clVerdict === "video") return hasCapture(p);
+      if (clVerdict === "unchecked") { var s = vStatus(p); return s === "unverified" || s === "unknown"; }
+      return vStatus(p) === clVerdict;
+    }
+    function shown() { return (clView === "ready" ? eligible().filter(isSendReady) : eligible()).filter(inCat).filter(inVerdict); }
 
     // The personalized video / screen capture for a client: prefer the attached
     // personalized PiP video, else a screen capture of the company's hiring page.
@@ -3744,54 +3752,66 @@
     // campaign-ready CSV (snake_case keys = merge fields). Ordered first_name → company_location
     // (the personalization block for crafting custom emails), then contact, verification,
     // signal, sequence, status, and the video asset.
+    var stop = ' onclick="event.stopPropagation()"';   // inner links/buttons don't open the row drawer
+    // Concise, CRM-style columns: rich COMPOSITE cells (identity, company, email each stack a
+    // primary + a muted secondary line) plus categorization chips and the asset action. Click any
+    // row for the full detail drawer; the complete flat field set is in the CSV export.
     var COLS = [
-      { key: "first_name", label: "First name", get: firstNameOf, render: function (p) {
-          var avatar = '<span class="avatar pr-av" style="position:relative;background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) +
+      { key: "contact", label: "Contact", get: function (p) { return p.fullName || ""; }, render: function (p) {
+          var avatar = '<span class="avatar crm-av" style="background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) +
             (p.photoUrl ? '<img src="' + esc(p.photoUrl) + '" alt="" onerror="this.remove()" />' : "") + "</span>";
-          return '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + naCell(firstNameOf(p)) + "</span></td>";
-        } },
-      { key: "last_name", label: "Last name", get: lastNameOf, render: function (p) { return "<td>" + naCell(lastNameOf(p)) + "</td>"; } },
-      { key: "full_name", label: "Full name", get: function (p) { return p.fullName || ""; }, render: function (p) { return "<td>" + naCell(p.fullName) + "</td>"; } },
-      { key: "job_title", label: "Job title", get: function (p) { return p.title || ""; }, render: function (p) { return "<td>" + naCell(p.title) + "</td>"; } },
-      { key: "open_role", label: "Open role (hiring for)", get: function (p) { return p.openRole || ""; }, render: function (p) { return "<td>" + (p.openRole ? '<span class="cl-cat cl-cat-role">' + esc(p.openRole) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "company", label: "Company", get: function (p) { return p.company || ""; }, render: function (p) { return "<td>" + naCell(p.company) + "</td>"; } },
-      { key: "company_domain", label: "Company domain", get: function (p) { return p.companyDomain || ""; },
-        render: function (p) { return '<td class="cl-c-domain">' + (p.companyDomain ? '<a href="https://' + esc(p.companyDomain) + '" target="_blank" rel="noopener">' + esc(p.companyDomain) + "</a>" : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "company_size", label: "Company size", get: function (p) { return p.companySize || ""; }, sort: function (p) { return -(Number(p.companySize) || 0); },
-        render: function (p) { var n = Number(p.companySize); return "<td>" + (n > 0 ? '<span class="cl-size" title="Estimated headcount">' + esc(n.toLocaleString()) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "company_location", label: "Company location", get: function (p) { return p.location || ""; }, render: function (p) { return "<td>" + naCell(p.location) + "</td>"; } },
+          var li = p.linkedinUrl ? ' <a class="crm-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="LinkedIn"' + stop + ">in</a>" : "";
+          return '<td class="crm-c-contact"><div class="crm-id">' + avatar +
+            '<div class="crm-id-t"><span class="crm-name">' + esc(p.fullName || "Unknown") + li + "</span>" +
+            '<span class="crm-sub">' + (p.title ? esc(p.title) : "&nbsp;") + "</span></div></div></td>"; } },
+      { key: "company", label: "Company", get: function (p) { return p.company || ""; }, render: function (p) {
+          var n = Number(p.companySize);
+          var size = n > 0 ? ' <span class="cl-size" title="Headcount">' + esc(n.toLocaleString()) + "</span>" : "";
+          var dom = p.companyDomain ? '<a href="https://' + esc(p.companyDomain) + '" target="_blank" rel="noopener"' + stop + ">" + esc(p.companyDomain) + "</a>" : "";
+          var sub = dom + (p.location ? (dom ? " · " : "") + esc(p.location) : "");
+          return '<td class="crm-c-company"><div class="crm-id-t"><span class="crm-name">' + (p.company ? esc(p.company) : '<span class="pr-na">-</span>') + size + "</span>" +
+            '<span class="crm-sub">' + (sub || "&nbsp;") + "</span></div></td>"; } },
+      { key: "open_role", label: "Hiring for", get: function (p) { return p.openRole || ""; }, render: function (p) {
+          return "<td>" + (p.openRole ? '<span class="cl-cat cl-cat-role">' + esc(p.openRole) + "</span>" : '<span class="pr-na">-</span>') +
+            (p.jobUrl ? ' <a class="crm-jobpost" href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener" title="Open the live job posting"' + stop + ">↗</a>" : "") + "</td>"; } },
       { key: "industry", label: "Industry", get: function (p) { return p.industry || ""; }, render: function (p) { return "<td>" + (p.industry ? '<span class="cl-cat">' + esc(p.industry) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
       { key: "function", label: "Desk", get: function (p) { return p["function"] || ""; }, render: function (p) { return "<td>" + (p["function"] ? '<span class="cl-cat cl-cat-fn">' + esc(p["function"]) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "email", label: "Email", get: function (p) { return p.email || ""; },
-        render: function (p) { return '<td class="pr-c-email">' + (p.email ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a>" : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "email_status", label: "Email status", get: function (p) { return vStatus(p); }, sort: vRank, render: function (p) { return "<td>" + vBadge(p) + "</td>"; } },
-      { key: "email_source", label: "Email source", get: function (p) { return p.emailSource || ""; },
-        render: function (p) { return "<td>" + (p.emailSource ? '<span class="cl-via">' + esc(String(p.emailSource).replace(/_/g, " ")) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "phone", label: "Phone", get: phoneOf, render: function (p) { return "<td>" + naCell(phoneOf(p)) + "</td>"; } },
-      { key: "linkedin_url", label: "LinkedIn", get: function (p) { return p.linkedinUrl || ""; }, sort: function (p) { return p.linkedinUrl ? 0 : 1; },
-        render: function (p) { return '<td class="pr-c-li">' + (p.linkedinUrl ? '<a class="pr-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "headline", label: "Headline", get: function (p) { return p.headline || ""; }, render: function (p) { return '<td class="cl-c-signal">' + naCell(p.headline) + "</td>"; } },
-      { key: "signal", label: "Why hiring", get: function (p) { return p.signalReason || ""; },
-        render: function (p) { return '<td class="cl-c-signal">' + (p.signalReason ? '<span class="cl-sig" title="Hiring signal">⚡ ' + esc(p.signalReason) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "signal_type", label: "Signal type", get: function (p) { return p.signalType || ""; },
-        render: function (p) { return "<td>" + (p.signalType ? '<span class="cl-cat cl-cat-sig">' + esc(String(p.signalType).replace(/_/g, " ")) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
+      { key: "email", label: "Email", get: function (p) { return p.email || ""; }, sort: vRank, render: function (p) {
+          return '<td class="crm-c-email"><div class="crm-id-t"><span class="crm-mono">' +
+            (p.email ? '<a href="mailto:' + esc(p.email) + '"' + stop + ">" + esc(p.email) + "</a>" : '<span class="pr-na">-</span>') + "</span>" +
+            '<span class="crm-sub">' + vBadge(p) + "</span></div></td>"; } },
+      { key: "signal", label: "Why hiring", get: function (p) { return p.signalReason || ""; }, render: function (p) {
+          return '<td class="crm-c-signal"><div class="crm-id-t">' +
+            (p.signalReason ? '<span class="crm-sig">⚡ ' + esc(p.signalReason) + "</span>" : '<span class="pr-na">-</span>') +
+            (p.signalType ? '<span class="crm-sub"><span class="cl-cat cl-cat-sig">' + esc(String(p.signalType).replace(/_/g, " ")) + "</span></span>" : "") + "</div></td>"; } },
       { key: "hiring_score", label: "Intent", get: function (p) { return p.score == null ? "" : p.score; }, sort: function (p) { return -(Number(p.score) || 0); },
-        render: function (p) { return "<td>" + (p.score == null ? '<span class="pr-na">-</span>' : '<span class="cl-score" title="Hiring-intent score">' + esc(String(p.score)) + "</span>") + "</td>"; } },
-      { key: "job_post", label: "Job post", get: function (p) { return p.jobUrl || ""; }, sort: function (p) { return p.jobUrl ? 0 : 1; },
-        render: function (p) { return "<td>" + (p.jobUrl ? '<a href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener" title="Open the live job posting">↗ posting</a>' : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "found_via", label: "Source", get: function (p) { return p.via || ""; },
-        render: function (p) { return "<td>" + (p.via ? '<span class="cl-via">' + esc(String(p.via).replace(/_/g, " ")) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "tier", label: "Confidence", get: function (p) { return p.tier || ""; },
-        render: function (p) { return "<td>" + (p.tier ? '<span class="cl-cat cl-cat-tier">' + esc(String(p.tier).replace(/_/g, " ")) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "sequence", label: "Sequence", get: function (p) { return p.sequenceName || ""; },
-        render: function (p) { return "<td>" + (p.sequenceName ? '<span class="pr-seqtag">▸ ' + esc(p.sequenceName) + "</span>" : '<span class="pr-na">-</span>') + "</td>"; } },
-      { key: "status", label: "Status", get: function (p) { return clStatusLabel(p); }, sort: function (p) { return p.status || ""; },
-        render: function (p) { return '<td><span class="cls cls-' + statusCls(p.status) + '">' + esc(clStatusLabel(p)) + "</span></td>"; } },
-      { key: "video", label: "Video", get: function (p) { return hasCapture(p) ? ((videoFor(p) || {}).watch || "yes") : ""; }, sort: function (p) { return hasCapture(p) ? 0 : 1; },
-        render: function (p) { return '<td class="pr-c-video">' + captureCell(p) + "</td>"; } }
+        render: function (p) { return '<td class="crm-c-num">' + (p.score == null ? '<span class="pr-na">-</span>' : '<span class="cl-score" title="Hiring-intent score">' + esc(String(p.score)) + "</span>") + "</td>"; } },
+      { key: "video", label: "Asset", get: function (p) { return hasCapture(p) ? ((videoFor(p) || {}).watch || "yes") : ""; }, sort: function (p) { return hasCapture(p) ? 0 : 1; },
+        render: function (p) { return '<td class="pr-c-video">' + captureCell(p) + "</td>"; } },
+      { key: "status", label: "Stage", get: function (p) { return clStatusLabel(p); }, sort: function (p) { return p.status || ""; },
+        render: function (p) { return '<td><span class="cls cls-' + statusCls(p.status) + '">' + esc(clStatusLabel(p)) + "</span></td>"; } }
     ];
     // Sort accessor: a column's own sort(), else its text value.
     function colSort(c, p) { return c.sort ? c.sort(p) : String(c.get ? c.get(p) : "").toLowerCase(); }
+
+    // The FULL flat field set for CSV export (the clean table hides the long tail; the export keeps
+    // everything). snake_case keys = ready-made merge fields for Instantly / Clay / the sequencer.
+    var EXPORT_FIELDS = [
+      ["first_name", firstNameOf], ["last_name", lastNameOf], ["full_name", function (p) { return p.fullName || ""; }],
+      ["job_title", function (p) { return p.title || ""; }], ["linkedin_url", function (p) { return p.linkedinUrl || ""; }],
+      ["headline", function (p) { return p.headline || ""; }],
+      ["open_role", function (p) { return p.openRole || ""; }], ["why_hiring", function (p) { return p.signalReason || ""; }],
+      ["signal_type", function (p) { return p.signalType || ""; }], ["intent_score", function (p) { return p.score == null ? "" : p.score; }],
+      ["job_post_url", function (p) { return p.jobUrl || ""; }],
+      ["company", function (p) { return p.company || ""; }], ["company_domain", function (p) { return p.companyDomain || ""; }],
+      ["company_size", function (p) { return p.companySize || ""; }], ["company_location", function (p) { return p.location || ""; }],
+      ["industry", function (p) { return p.industry || ""; }], ["desk", function (p) { return p["function"] || ""; }],
+      ["email", function (p) { return p.email || ""; }], ["email_status", vStatus], ["email_source", function (p) { return p.emailSource || ""; }],
+      ["phone", phoneOf], ["found_via", function (p) { return p.via || ""; }], ["confidence_tier", function (p) { return p.tier || ""; }],
+      ["stage", clStatusLabel], ["sequence", function (p) { return p.sequenceName || ""; }],
+      ["watch_url", function (p) { return (videoFor(p) || {}).watch || ""; }], ["video_gif_url", function (p) { return (videoFor(p) || {}).gif || ""; }],
+      ["verified_at", function (p) { return (p.emailVerification && p.emailVerification.checkedAt) || ""; }]
+    ];
 
     // Small verification badge per row. "valid" = mailbox confirmed (Reoon/SMTP);
     // "deliverable" = syntax + real MX, mailbox not individually confirmed.
@@ -3903,13 +3923,18 @@
       var by = elig.reduce(function (m, p) { var s = vStatus(p); m[s] = (m[s] || 0) + 1; return m; }, {});
       var unchecked = (by.unverified || 0) + (by.unknown || 0);
       var withVideo = elig.filter(hasCapture).length;
+      // Clickable verdict chips: click one to show ONLY that bucket; click again (or "clear") to reset.
+      var legChip = function (key, cls, label, n) {
+        return '<button class="cl-vb ' + cls + (clVerdict === key ? " cl-vb-active" : "") + '" data-verdict="' + key + '">' + label + " " + n + "</button>";
+      };
       var legend = '<div class="cl-legend">' +
-        '<span class="cl-vb cl-vb-ok">✓ verified ' + (by.valid || 0) + "</span>" +
-        '<span class="cl-vb cl-vb-deliv">✓ deliverable ' + (by.deliverable || 0) + "</span>" +
-        '<span class="cl-vb cl-vb-risky">~ risky ' + (by.risky || 0) + "</span>" +
-        '<span class="cl-vb cl-vb-bad">✕ invalid ' + (by.invalid || 0) + "</span>" +
-        '<span class="cl-vb cl-vb-unk">• unchecked ' + unchecked + "</span>" +
-        '<span class="cl-vb cl-vb-vid">🎬 with video ' + withVideo + "</span>" +
+        legChip("valid", "cl-vb-ok", "✓ verified", by.valid || 0) +
+        legChip("deliverable", "cl-vb-deliv", "✓ deliverable", by.deliverable || 0) +
+        legChip("risky", "cl-vb-risky", "~ risky", by.risky || 0) +
+        legChip("invalid", "cl-vb-bad", "✕ invalid", by.invalid || 0) +
+        legChip("unchecked", "cl-vb-unk", "• unchecked", unchecked) +
+        legChip("video", "cl-vb-vid", "🎬 with video", withVideo) +
+        (clVerdict ? '<button class="cl-vb cl-vb-clear" data-verdict="">✕ clear</button>' : "") +
         "</div>";
       var tableHead = '<thead><tr>' + COLS.map(function (c) {
         var active = c.key === clSort.key;
@@ -3940,6 +3965,16 @@
         if (clSort.key === k) clSort.dir = -clSort.dir; else { clSort.key = k; clSort.dir = 1; }
         localStorage.setItem("ros_clients_sortk", clSort.key);
         localStorage.setItem("ros_clients_sortd", String(clSort.dir));
+        paint();
+      });
+
+      // Click a legend chip to filter to just that verdict (toggle).
+      var leg = body.querySelector(".cl-legend");
+      if (leg) leg.addEventListener("click", function (ev) {
+        var b = ev.target.closest ? ev.target.closest("[data-verdict]") : null;
+        if (!b) return;
+        var v = b.getAttribute("data-verdict");
+        clVerdict = (v === clVerdict) ? "" : v;
         paint();
       });
 
@@ -4052,18 +4087,10 @@
       var list = shown().filter(matches);
       if (!list.length) { toast("Nothing to export."); return; }
       var cell = function (v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; };
-      // Headers are the COLS merge keys (snake_case) so the file maps straight into
-      // Instantly / Clay / the sequence editor, plus a few extra deploy fields.
-      var keys = COLS.map(function (c) { return c.key; }).filter(function (k) { return k !== "video"; });
-      var extra = ["watch_url", "video_gif_url", "verified_at"];
-      var heads = keys.concat(extra);
+      // Full flat field set (snake_case) so the file maps straight into Instantly / Clay / the sequencer.
+      var heads = EXPORT_FIELDS.map(function (f) { return f[0]; });
       var csv = heads.join(",") + "\n" + list.map(function (p) {
-        var vid = videoFor(p) || {};
-        var base = COLS.filter(function (c) { return c.key !== "video"; }).map(function (c) { return cell(c.get(p)); });
-        base.push(cell(vid.watch));
-        base.push(cell(vid.gif));
-        base.push(cell(p.emailVerification && p.emailVerification.checkedAt));
-        return base.join(",");
+        return EXPORT_FIELDS.map(function (f) { return cell(f[1](p)); }).join(",");
       }).join("\n");
       var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" }), url = URL.createObjectURL(blob);
       var a = document.createElement("a"); a.href = url; a.download = (clSeg === "signals" ? "hire-signals-clients.csv" : "clients.csv"); a.style.display = "none";
