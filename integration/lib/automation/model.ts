@@ -21,7 +21,7 @@ import { GUIDELINES_PROMPT } from "../copy/guidelines";
 const MERGE_HELP = "{{firstName}}, {{company}}, {{title}}, {{role}}, {{signal}}, {{watchlink}}, {{videoembed}}";
 
 /** Render one model touch for a specific prospect (merge-fill, graceful fallbacks). */
-export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>): { subject?: string; body: string } {
+export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opts?: { emailStep?: number }): { subject?: string; body: string } {
   const vals: Record<string, string> = {
     firstname: p.firstName || (p.fullName ? p.fullName.split(/\s+/)[0] : "") || "there",
     company: p.company || "your team",
@@ -32,7 +32,12 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>): { 
   // PiP Studio video fields (empty when no video is attached, so templates degrade cleanly).
   // The watch link is personalized PER PROSPECT: their first name greets them on the page and
   // their id attributes the view in analytics.
-  const pv = p.personalizedVideo;
+  //
+  // FAIL-SAFE: the video (thumbnail / GIF / watch link) is ONLY ever sent on the SECOND email.
+  // We gate the personalizedVideo itself by the email step, so EVERY video merge field
+  // ({{videoembed}}, {{videogif}}, {{watchlink}}) renders blank on any other touch — even if a
+  // template author drops them on the first email by mistake. Only the 2nd email touch carries it.
+  const pv = opts?.emailStep === 2 ? p.personalizedVideo : undefined;
   // When a role video is attached, {{role}} is the role being HIRED FOR (the video's subject),
   // not the manager's own title — so the opener reads correctly.
   if (pv?.roleTitle) vals.role = pv.roleTitle;
