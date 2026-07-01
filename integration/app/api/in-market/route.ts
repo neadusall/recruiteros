@@ -308,17 +308,31 @@ export async function POST(req: Request) {
     // Accept either a saved id or an ad-hoc search object (run-without-saving).
     const s = b.id ? await getSearch(String(b.id)) : (b.search as Record<string, unknown> | undefined);
     if (!s) return fail("search_not_found", 404);
+    // JSearch is keyword-based, so a job-title bar + an industry/market bar fold into one query
+    // ("controller fintech"). Either alone is fine; at least one is required.
+    const title = String((s as any).query ?? "").trim();
+    const industry = String((s as any).industry ?? "").trim();
     const opts = {
-      query: String((s as any).query ?? "").trim(),
+      query: [title, industry].filter(Boolean).join(" ").trim(),
       location: (s as any).location ? String((s as any).location) : undefined,
       datePosted: (s as any).datePosted ? String((s as any).datePosted) : undefined,
       employmentTypes: Array.isArray((s as any).employmentTypes) ? (s as any).employmentTypes : undefined,
       remoteOnly: (s as any).remoteOnly === true,
       limit: Math.min(Math.max(Number((s as any).limit) || 100, 10), 500),
     };
-    if (!opts.query) return fail("missing_query", 422, { detail: "query (role/keywords) required" });
+    if (!opts.query) return fail("missing_query", 422, { detail: "a job title or an industry is required" });
+    const bands: string[] = Array.isArray((s as any).headcountBands) ? (s as any).headcountBands : [];
+    const confirmedSizeOnly = (s as any).confirmedSizeOnly === true;
     try {
-      const { leads } = await previewJobFeed(opts);
+      let { leads } = await previewJobFeed(opts);
+      // COMPANY-SIZE narrow: resolve each company's headcount band (free: Wikidata cache +
+      // heuristic) and keep only the selected bands. `confirmedSizeOnly` drops heuristic guesses.
+      if (bands.length) {
+        const { loadSizeMap, fillSizes } = await import("../../../lib/inmarket/companySize");
+        fillSizes(leads, await loadSizeMap());
+        const want = new Set(bands);
+        leads = leads.filter((l) => l.headcountBand && want.has(l.headcountBand) && (!confirmedSizeOnly || l.sizeEstimated === false));
+      }
       // SUPPRESS ALREADY-EMAILED: drop companies/roles we've already sent >= N (default 2) emails to,
       // BUT keep a company that comes back with a different job title (a fresh hiring signal).
       const { filterAlreadyEmailed } = await import("../../../lib/inmarket/outreachFilter");

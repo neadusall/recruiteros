@@ -2194,9 +2194,7 @@
 
   /* ---------------- In-Market Leads (BD: who is hiring right now) ------------ */
   var inMarketResults = [];      // last search results (full lead objects)
-  var imMode = "industry";       // "industry" | "company"
-  var imSelectedIndustries = []; // multi-select industries
-  var imSearchTimer = null;      // debounce for chip-driven searches
+  var imSelectedIndustries = []; // legacy: kept only so the renderInMarket state-reset stays valid
   var imMinScore = 0;            // narrow-down: minimum hiring-intent score shown
   var imPostedWithin = 0;        // date search: only roles posted within the last N days (0 = any)
   var imDmPerRole = 3;           // decision-makers shown per role (1 / 3 / 5), defaults to 3 for multi-touch
@@ -2216,29 +2214,6 @@
   var IM_QDATES = [["all", "Any time"], ["today", "Today"], ["3days", "Last 3 days"], ["week", "Last week"], ["month", "Last month"]];
   var IM_QEMP = [["FULLTIME", "Full-time"], ["PARTTIME", "Part-time"], ["CONTRACTOR", "Contract"], ["INTERN", "Intern"]];
 
-  // Industries + sub-sectors recruiters sell into. Drives the refined in-market search.
-  // (Free job-board coverage is strongest for the tech-adjacent rows; traditional
-  // verticals post on Workday/Taleo/iCIMS, so those return fewer free results, a paid
-  // data feed fills them out. See the note rendered above the chips.)
-  var IM_INDUSTRIES = [
-    "Technology / SaaS", "AI / Machine Learning", "Cybersecurity", "Data / Analytics",
-    "DevOps / Cloud", "Hardware / IoT", "Semiconductors", "Robotics", "Gaming",
-    "Fintech", "Banking", "Insurance", "Investment / PE / VC", "Crypto / Web3",
-    "Healthcare", "Biotech / Pharma", "Medical Devices", "Hospitals / Health Systems",
-    "Manufacturing", "Aerospace / Defense", "Automotive", "Industrial / Automation",
-    "Energy", "Oil & Gas", "Renewables / CleanTech", "Utilities", "Mining / Metals",
-    "Construction", "Architecture / Engineering", "Real Estate", "PropTech",
-    "Logistics / Supply Chain", "Freight / Transportation", "Warehousing",
-    "Retail / eCommerce", "Consumer Goods (CPG)", "Fashion / Apparel", "Food & Beverage",
-    "Agriculture / AgTech", "Hospitality", "Travel / Tourism", "Media / Entertainment",
-    "Telecom", "Education", "EdTech", "Legal", "Accounting / Tax", "Consulting",
-    "Marketing / Agency", "HR / Staffing", "Sales / GTM", "Government / Public", "Nonprofit"
-  ];
-  var IM_PLACEHOLDER = {
-    industry: "Search an industry or market, e.g. fintech, healthcare, manufacturing",
-    company: "Search a company by name, e.g. Stripe, Verla Health, Brightwave",
-    title: "Search by job title (keywords), e.g. controller, backend engineer, account executive"
-  };
 
   // Hiring-signal types you can filter the search by (company-side). Pulled from the
   // engine's signal catalog; these are what the free/open sources can surface.
@@ -2655,8 +2630,11 @@
           '<span class="imq-sub">Search exactly who you want · queue it · run it · pick which companies to scrape</span>' +
         "</div>" +
         '<form class="imq-builder" id="imqForm">' +
-          '<input id="imqQuery" class="imq-in imq-grow" type="text" autocomplete="off" placeholder="Job title or keywords — e.g. controller, registered nurse, backend engineer" />' +
-          '<input id="imqLoc" class="imq-in" type="text" autocomplete="off" placeholder="Location (city, state) — blank = nationwide" />' +
+          // Two distinct search bars — by JOB TITLE and/or by INDUSTRY / market. Either alone works;
+          // together they narrow (JSearch folds both into one keyword query, e.g. "controller fintech").
+          '<input id="imqQuery" class="imq-in imq-grow" type="text" autocomplete="off" placeholder="🔎 Job title — e.g. controller, registered nurse, backend engineer" />' +
+          '<input id="imqIndustry" class="imq-in imq-grow" type="text" autocomplete="off" placeholder="🏭 Industry / market — e.g. fintech, healthcare (optional)" />' +
+          '<input id="imqLoc" class="imq-in" type="text" autocomplete="off" placeholder="📍 Location — blank = nationwide" />' +
           '<select id="imqDate" class="imq-in imq-sel" title="How recently the job was posted">' +
             IM_QDATES.map(function (d) { return '<option value="' + d[0] + '"' + (d[0] === "week" ? " selected" : "") + ">" + esc(d[1]) + "</option>"; }).join("") +
           "</select>" +
@@ -2672,31 +2650,52 @@
           '<label class="imq-emp"><input type="checkbox" id="imqRemote"> 🏠 Remote only</label>' +
           '<button type="button" class="im-mini" data-act="canceledit" id="imqCancelEdit" style="display:none">Cancel edit</button>' +
         "</div>" +
+        // Company-size narrow (multi-select bands). Resolved free via Wikidata + heuristic; "Confirmed
+        // only" keeps authoritative headcounts and hides estimates.
+        '<div class="imq-opts imq-sizes">' +
+          '<span class="imq-optlbl">👥 Company size:</span>' +
+          IM_SIZES.map(function (s) { return '<button type="button" class="imq-size" data-act="sizetoggle" data-size="' + esc(s.v) + '">' + esc(s.l) + "</button>"; }).join("") +
+          '<button type="button" class="im-mini" data-act="sizeclear">Clear</button>' +
+          '<label class="imq-emp" title="Only companies with a confirmed (Wikidata) headcount — hides estimates"><input type="checkbox" id="imqConfirmedSize"> Confirmed only</label>' +
+        "</div>" +
         '<div id="imqList" class="imq-list"></div>' +
         '<div id="imqPreview" class="imq-preview"></div>' +
       "</div>";
 
+    // Selected company-size bands for the builder (multi-select). Reflected on the .imq-size chips.
+    var imqSizes = [];
+    function syncImqSizes() {
+      Array.prototype.forEach.call(host.querySelectorAll(".imq-size"), function (c) {
+        c.classList.toggle("active", imqSizes.indexOf(c.getAttribute("data-size")) >= 0);
+      });
+    }
     function imqGather() {
       var emp = IM_QEMP.filter(function (em) { var cb = host.querySelector("#imqEmp_" + em[0]); return cb && cb.checked; }).map(function (em) { return em[0]; });
+      var confEl = host.querySelector("#imqConfirmedSize");
       var s = {
         name: host.querySelector("#imqName").value.trim(),
         query: host.querySelector("#imqQuery").value.trim(),
+        industry: host.querySelector("#imqIndustry").value.trim(),
         location: host.querySelector("#imqLoc").value.trim(),
         datePosted: host.querySelector("#imqDate").value,
         limit: parseInt(host.querySelector("#imqLimit").value, 10) || 100,
         employmentTypes: emp,
-        remoteOnly: host.querySelector("#imqRemote").checked
+        remoteOnly: host.querySelector("#imqRemote").checked,
+        headcountBands: imqSizes.slice(),
+        confirmedSizeOnly: !!(confEl && confEl.checked)
       };
       if (imQEditId) s.id = imQEditId;
       return s;
     }
     function imqClearForm() {
       imQEditId = null;
-      ["imqQuery", "imqLoc", "imqName"].forEach(function (id) { var e = host.querySelector("#" + id); if (e) e.value = ""; });
+      ["imqQuery", "imqIndustry", "imqLoc", "imqName"].forEach(function (id) { var e = host.querySelector("#" + id); if (e) e.value = ""; });
       host.querySelector("#imqDate").value = "week";
       host.querySelector("#imqLimit").value = "100";
       host.querySelector("#imqRemote").checked = false;
       IM_QEMP.forEach(function (em) { var cb = host.querySelector("#imqEmp_" + em[0]); if (cb) cb.checked = false; });
+      imqSizes = []; syncImqSizes();
+      var conf = host.querySelector("#imqConfirmedSize"); if (conf) conf.checked = false;
       var add = host.querySelector("#imqAdd"); if (add) add.textContent = "➕ Add to queue";
       var ce = host.querySelector("#imqCancelEdit"); if (ce) ce.style.display = "none";
     }
@@ -2719,6 +2718,8 @@
       }
       box.innerHTML = imQueue.map(function (s) {
         var bits = [s.location ? "📍 " + esc(s.location) : "📍 Nationwide"];
+        if (s.industry) bits.push("🏭 " + esc(s.industry));
+        if (s.headcountBands && s.headcountBands.length) bits.push("👥 " + esc(s.headcountBands.join(", ")) + (s.confirmedSizeOnly ? " (confirmed)" : ""));
         var dl = "Last week"; for (var i = 0; i < IM_QDATES.length; i++) if (IM_QDATES[i][0] === s.datePosted) dl = IM_QDATES[i][1];
         bits.push("📅 " + esc(dl));
         if (s.employmentTypes && s.employmentTypes.length) bits.push(esc(s.employmentTypes.map(imqEmpLabel).join(", ")));
@@ -2730,10 +2731,12 @@
         } else if (s.status === "error") {
           status = '<span class="imq-stat err" title="' + esc(s.lastError || "") + '">⚠ error</span>';
         }
+        // Title bar and/or industry bar — show whichever the search used.
+        var qLabel = [s.query, s.industry].filter(Boolean).join(" · ");
         return '<div class="imq-row" data-id="' + esc(s.id) + '">' +
             '<div class="imq-row-main">' +
-              '<div class="imq-row-name">' + esc(s.name || s.query) + status + "</div>" +
-              '<div class="imq-row-q">“' + esc(s.query) + "”</div>" +
+              '<div class="imq-row-name">' + esc(s.name || qLabel) + status + "</div>" +
+              '<div class="imq-row-q">“' + esc(qLabel) + "”</div>" +
               '<div class="imq-row-bits">' + bits.map(function (b) { return "<span>" + b + "</span>"; }).join("") + "</div>" +
             "</div>" +
             '<div class="imq-row-acts">' +
@@ -2877,12 +2880,15 @@
       if (!s) return;
       imQEditId = id;
       host.querySelector("#imqQuery").value = s.query || "";
+      host.querySelector("#imqIndustry").value = s.industry || "";
       host.querySelector("#imqLoc").value = s.location || "";
       host.querySelector("#imqName").value = s.name || "";
       host.querySelector("#imqDate").value = s.datePosted || "week";
       host.querySelector("#imqLimit").value = String(s.limit || 100);
       host.querySelector("#imqRemote").checked = !!s.remoteOnly;
       IM_QEMP.forEach(function (em) { var cb = host.querySelector("#imqEmp_" + em[0]); if (cb) cb.checked = (s.employmentTypes || []).indexOf(em[0]) >= 0; });
+      imqSizes = (s.headcountBands || []).slice(); syncImqSizes();
+      var conf = host.querySelector("#imqConfirmedSize"); if (conf) conf.checked = !!s.confirmedSizeOnly;
       var add = host.querySelector("#imqAdd"); if (add) add.textContent = "✓ Save changes";
       var ce = host.querySelector("#imqCancelEdit"); if (ce) ce.style.display = "";
       host.querySelector("#imqQuery").focus();
@@ -2899,7 +2905,7 @@
     host.querySelector("#imqForm").addEventListener("submit", function (e) {
       e.preventDefault();
       var s = imqGather();
-      if (!s.query) { toast("Enter a job title or keywords to search."); return; }
+      if (!s.query && !s.industry) { toast("Enter a job title or an industry to search."); return; }
       var wasEdit = !!s.id;
       send("/in-market", "POST", { action: "queue_save", search: s }).then(function (r) {
         if (r && r.ok) { imqClearForm(); imqLoad(); toast(wasEdit ? "Search updated." : "Added to your queue."); }
@@ -2915,6 +2921,8 @@
       else if (act === "edit") imqEdit(id);
       else if (act === "del") imqDelete(id);
       else if (act === "canceledit") imqClearForm();
+      else if (act === "sizetoggle") { var v = t.getAttribute("data-size"), k = imqSizes.indexOf(v); if (k >= 0) imqSizes.splice(k, 1); else imqSizes.push(v); syncImqSizes(); }
+      else if (act === "sizeclear") { imqSizes = []; syncImqSizes(); }
       else if (act === "pvclose") { imQPreview = null; imqRenderPreview(); }
       else if (act === "pvcommit") imqCommit();
       else if (act === "pvselnew") imqSelect("new");
@@ -2940,38 +2948,12 @@
       '<div class="im-hero">' +
         '<div class="im-bar">' +
           '<h1 class="im-title">Who\'s hiring <span class="gradient-text">right now.</span></h1>' +
-          '<div class="im-modes" id="imModes">' +
-            '<button type="button" class="im-mode active" data-mode="industry">Industry / market</button>' +
-            '<button type="button" class="im-mode" data-mode="company">Company name</button>' +
-            '<button type="button" class="im-mode" data-mode="title">Job title</button>' +
-          "</div>" +
+          '<span class="im-source-note muted">Powered by JSearch · nationwide by default</span>' +
         "</div>" +
-        // TARGETED JSEARCH — the headline control: author exact searches, queue them, run on demand,
-        // and PICK which companies actually get scraped. This is how you target who you want (vs. the
-        // old random rotation, now off). Rendered by renderTargetedQueue() right after innerHTML.
+        // TARGETED JSEARCH — the ONE control: search by job title and/or industry (separate bars),
+        // narrow by company size, run on demand, and PICK which companies get scraped. JSearch is the
+        // only job source. Rendered by renderTargetedQueue() right after innerHTML.
         '<div id="imTargeted" class="im-targeted"></div>' +
-        '<form class="im-search" id="imForm">' +
-          '<span class="ico">⌕</span>' +
-          '<input id="imQuery" type="text" autocomplete="off" placeholder="' + esc(IM_PLACEHOLDER[imMode]) + '" />' +
-          '<button type="submit" class="btn btn-primary" id="imSearchBtn">Find companies</button>' +
-        "</form>" +
-        // Date search, filter to freshly-posted roles for warmer, more targeted outreach.
-        '<div class="im-daterow">' +
-          '<span class="im-datelbl">📅 Posted within</span>' +
-          '<select id="imPosted" class="im-date">' +
-            [["0", "Any time"], ["1", "Last 24 hours"], ["3", "Last 3 days"], ["7", "Last 7 days"], ["14", "Last 14 days"], ["30", "Last 30 days"]]
-              .map(function (o) { return '<option value="' + o[0] + '"' + (String(imPostedWithin) === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") +
-          "</select>" +
-          '<button type="button" class="btn btn-primary btn-sm" id="imPostedGo">Search this range</button>' +
-          '<span class="im-datehint muted">Fresher posts = warmer outreach</span>' +
-        "</div>" +
-        // Company size, narrow by headcount band (multi-select chips). Click to refine.
-        '<div class="im-daterow im-sizerow">' +
-          '<span class="im-datelbl">👥 Company size</span>' +
-          IM_SIZES.map(function (s) { return '<button type="button" class="im-sizechip" data-size="' + esc(s.v) + '">' + esc(s.l) + "</button>"; }).join("") +
-          '<button type="button" class="im-mini" data-clear="size">Clear</button>' +
-          '<label class="im-confirmed" title="Show only companies with a confirmed (Wikidata) headcount, hide estimates"><input type="checkbox" id="imConfirmedSize"' + (imConfirmedSizeOnly ? " checked" : "") + "> Confirmed only</label>" +
-        "</div>" +
         // Daily import read, populated on open so you see today's intake immediately.
         '<div id="imImportBanner" class="im-import"></div>' +
         // Entry to the curated decision-maker list (the daily database of real hiring managers).
@@ -2979,29 +2961,9 @@
           '<button type="button" class="btn btn-primary btn-sm" id="imCurationBtn">🎯 Decision-maker list <span style="opacity:.8;font-weight:500">— real hiring managers, curated daily</span></button>' +
           '<span class="muted" style="font-size:12px;margin-left:8px">Reviewed by you, then pushed to Email</span>' +
         "</div>" +
-        // Industries, multi-select with Select all / Clear, in a compact scroll area.
-        '<div class="im-group" id="imIndGroup">' +
-          '<div class="im-group-head"><span class="im-group-title">Industries</span>' +
-            '<button type="button" class="im-mini" data-all="ind">Select all</button>' +
-            '<button type="button" class="im-mini" data-clear="ind">Clear</button>' +
-            '<button type="button" class="im-mini im-jobscrape" id="imJobScrape" title="Pull fresh hiring companies for the selected industries straight from the job feed (JSearch), with their websites — they flow into the pool and decision-maker research starts on them automatically.">⚡ Pull fresh jobs</button></div>' +
-          '<div class="im-industries im-scroll" id="imIndustries">' +
-            IM_INDUSTRIES.map(function (n) { return '<button type="button" class="im-chip" data-ind="' + esc(n) + '">' + esc(n) + "</button>"; }).join("") +
-          "</div>" +
-        "</div>" +
-        // Hiring signals, collapsed by default to de-clutter; Select all / Clear inside.
-        '<details class="im-group im-sig-details" id="imSigGroup">' +
-          '<summary class="im-group-summary">Hiring signals <span class="muted">- optional filter</span></summary>' +
-          '<div class="im-group-head im-group-head-sub">' +
-            '<button type="button" class="im-mini" data-all="sig">Select all</button>' +
-            '<button type="button" class="im-mini" data-clear="sig">Clear</button></div>' +
-          '<div class="im-signals" id="imSignals">' +
-            IM_SIGNALS.map(function (s) { return '<button type="button" class="im-sigchip" data-sig="' + esc(s.t) + '">' + esc(s.l) + "</button>"; }).join("") +
-          "</div>" +
-        "</details>" +
       "</div>" +
       '<div id="imSaved"></div>' +
-      '<div id="imBody"><div class="empty">Pick one or more industries (or Select all) to see who\'s hiring, ranked by hiring intent.</div></div>';
+      '<div id="imBody"><div class="empty">Search by <b>job title</b> or <b>industry</b> above, narrow by <b>company size</b>, then <b>Run</b> — pick the companies to scrape and they flow to your Decision-maker list.</div></div>';
 
     renderSavedSignals();
     loadImportBanner();
@@ -3009,185 +2971,6 @@
     var curBtn = $("#imCurationBtn");
     if (curBtn) curBtn.addEventListener("click", function () { renderCuration(); });
 
-    // ⚡ Pull fresh jobs: scrape the job feed (JSearch) for each SELECTED industry on demand. Each
-    // industry's hiring companies (with their websites) flow into the pool, then decision-maker
-    // research + email enrichment run on them automatically. Targeted, throttle-free intake.
-    var jobScrape = $("#imJobScrape");
-    if (jobScrape) jobScrape.addEventListener("click", function () {
-      var inds = imSelectedIndustries.slice();
-      if (!inds.length) { toast("Pick one or more industries first, then Pull fresh jobs."); return; }
-      jobScrape.disabled = true;
-      var orig = "⚡ Pull fresh jobs", total = 0, i = 0, anyConfigErr = false;
-      function step() {
-        if (i >= inds.length) {
-          jobScrape.disabled = false; jobScrape.textContent = orig;
-          if (anyConfigErr && !total) {
-            toast("Job feed isn't connected yet — add your JSearch (RapidAPI) key, then try again.");
-          } else {
-            toast("Pulled " + total.toLocaleString() + " hiring companies across " + inds.length +
-              " industr" + (inds.length === 1 ? "y" : "ies") + " — finding decision-makers now.");
-            loadImportBanner();   // refresh today's intake count
-          }
-          return;
-        }
-        var ind = inds[i++];
-        jobScrape.textContent = "Pulling " + ind + "… (" + i + "/" + inds.length + ")";
-        send("/in-market", "POST", { action: "jobfeed_search", industry: ind, limit: 200 })
-          .then(function (r) { if (r && r.data && typeof r.data.scraped === "number") total += r.data.scraped; step(); })
-          .catch(function (e) { if (e && (e.status === 409 || /jobfeed_not_configured/.test(String(e && e.error || e)))) anyConfigErr = true; step(); });
-      }
-      step();
-    });
-    var form = $("#imForm"), input = $("#imQuery");
-
-    function syncChips() {
-      Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
-        c.classList.toggle("active", imSelectedIndustries.indexOf(c.getAttribute("data-ind")) >= 0);
-      });
-    }
-    function syncSigChips() {
-      Array.prototype.forEach.call(el.querySelectorAll(".im-sigchip"), function (c) {
-        c.classList.toggle("active", imSelectedSignals.indexOf(c.getAttribute("data-sig")) >= 0);
-      });
-    }
-
-    // Build the active search from the current selections (multi-industry + signals + box).
-    function currentSearch() {
-      if (imMode === "company") {
-        var cv = input.value.trim();
-        return cv ? { criteria: { companyName: cv }, label: cv } : null;
-      }
-      if (imMode === "title") {
-        var tv = input.value.trim();
-        return tv ? { criteria: { roleQuery: tv }, label: 'hiring "' + tv + '"' } : null;
-      }
-      var crit = {}, labels = [];
-      if (imSelectedIndustries.length) {
-        crit.industries = imSelectedIndustries.slice();
-        labels.push(imSelectedIndustries.length === IM_INDUSTRIES.length ? "all industries"
-          : imSelectedIndustries.length === 1 ? imSelectedIndustries[0]
-          : imSelectedIndustries.length + " industries");
-      }
-      var q = input.value.trim();
-      if (q) { crit.query = q; labels.push(q); }
-      if (imSelectedSignals.length) labels.push(imSelectedSignals.length + " signal" + (imSelectedSignals.length === 1 ? "" : "s"));
-      if (!imSelectedIndustries.length && !q && !imSelectedSignals.length) return null;
-      return { criteria: crit, label: labels.join(" · ") };
-    }
-    function runNow() {
-      clearTimeout(imSearchTimer);
-      var s = currentSearch();
-      if (s) runSearch(s.criteria, s.label);
-      else $("#imBody").innerHTML = '<div class="empty">' + (imMode === "company"
-        ? "Type a company name above, then your date, size and confirmed-only filters apply to it too."
-        : imMode === "title"
-        ? "Type a job title (keywords) above, we'll surface every US company hiring that role, and show only the matching roles per company."
-        : "Pick one or more industries (or Select all) to see who's hiring.") + "</div>";
-    }
-    function scheduleSearch() { clearTimeout(imSearchTimer); imSearchTimer = setTimeout(runNow, 350); }
-
-    // Search mode toggle: industry/market OR company name.
-    Array.prototype.forEach.call(el.querySelectorAll(".im-mode"), function (m) {
-      m.addEventListener("click", function () {
-        imMode = m.getAttribute("data-mode");
-        Array.prototype.forEach.call(el.querySelectorAll(".im-mode"), function (x) { x.classList.toggle("active", x === m); });
-        input.value = ""; input.placeholder = IM_PLACEHOLDER[imMode];
-        $("#imIndGroup").style.display = (imMode === "industry") ? "" : "none";
-        $("#imSigGroup").style.display = (imMode === "industry") ? "" : "none";
-        $("#imBody").innerHTML = '<div class="empty">' + (imMode === "industry"
-          ? "Pick one or more industries (or Select all) to see who's hiring."
-          : imMode === "title"
-          ? "Type a job title (keywords) to find every US company hiring that role, showing only the matching roles per company."
-          : "Type a company name to check if they're hiring right now, and who owns the open roles.") + "</div>";
-        input.focus();
-      });
-    });
-
-    form.addEventListener("submit", function (e) { e.preventDefault(); runNow(); });
-
-    // Date search: pick a timeframe in the dropdown, then press the button to run the
-    // search for that range. The dropdown only stores the choice; the button triggers it,
-    // so the action is explicit and you get a clear loading state + updated count.
-    var postedSel = $("#imPosted"), postedGo = $("#imPostedGo");
-    function applyPosted() {
-      if (postedSel) imPostedWithin = parseInt(postedSel.value, 10) || 0;
-      var s = currentSearch();
-      if (s) runSearch(s.criteria, s.label);
-      else $("#imBody").innerHTML = '<div class="empty">Pick one or more industries (or Select all) first, then choose a timeframe and press <b>Search this range</b>.</div>';
-    }
-    if (postedSel) postedSel.addEventListener("change", function () { imPostedWithin = parseInt(postedSel.value, 10) || 0; });
-    if (postedGo) postedGo.addEventListener("click", applyPosted);
-
-    // Company-size chips: multi-select toggle → re-run the search narrowed to those bands.
-    function syncSizeChips() {
-      Array.prototype.forEach.call(el.querySelectorAll(".im-sizechip"), function (c) {
-        c.classList.toggle("active", imSelectedSizes.indexOf(c.getAttribute("data-size")) >= 0);
-      });
-    }
-    Array.prototype.forEach.call(el.querySelectorAll(".im-sizechip"), function (c) {
-      c.addEventListener("click", function () {
-        var v = c.getAttribute("data-size");
-        var i = imSelectedSizes.indexOf(v);
-        if (i >= 0) imSelectedSizes.splice(i, 1); else imSelectedSizes.push(v);
-        syncSizeChips(); scheduleSearch();
-      });
-    });
-    var sizeClear = el.querySelector('[data-clear="size"]');
-    if (sizeClear) sizeClear.addEventListener("click", function () { imSelectedSizes = []; syncSizeChips(); scheduleSearch(); });
-    var confSize = $("#imConfirmedSize");
-    if (confSize) confSize.addEventListener("change", function () { imConfirmedSizeOnly = confSize.checked; scheduleSearch(); });
-
-    // Industry chips: multi-select toggle → debounced search.
-    Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
-      c.addEventListener("click", function () {
-        var ind = c.getAttribute("data-ind");
-        var i = imSelectedIndustries.indexOf(ind);
-        if (i >= 0) imSelectedIndustries.splice(i, 1); else imSelectedIndustries.push(ind);
-        syncChips(); scheduleSearch();
-      });
-    });
-    // Signal chips: multi-select toggle → debounced search.
-    Array.prototype.forEach.call(el.querySelectorAll(".im-sigchip"), function (c) {
-      c.addEventListener("click", function () {
-        var t = c.getAttribute("data-sig");
-        var i = imSelectedSignals.indexOf(t);
-        if (i >= 0) imSelectedSignals.splice(i, 1); else imSelectedSignals.push(t);
-        syncSigChips(); scheduleSearch();
-      });
-    });
-    // Select all / Clear for each group.
-    Array.prototype.forEach.call(el.querySelectorAll(".im-mini"), function (b) {
-      b.addEventListener("click", function () {
-        if (b.getAttribute("data-all") === "ind") imSelectedIndustries = IM_INDUSTRIES.slice();
-        else if (b.getAttribute("data-clear") === "ind") imSelectedIndustries = [];
-        else if (b.getAttribute("data-all") === "sig") imSelectedSignals = IM_SIGNALS.map(function (s) { return s.t; });
-        else if (b.getAttribute("data-clear") === "sig") imSelectedSignals = [];
-        syncChips(); syncSigChips(); scheduleSearch();
-      });
-    });
-
-    function runSearch(criteria, label) {
-      var body = $("#imBody"); body.innerHTML = loading();
-      imPicks = {}; imMinScore = 0; imLabel = label || "";
-      var payload = { limit: 500 };
-      if (criteria.companyName) payload.companyName = criteria.companyName;
-      if (criteria.industries) payload.industries = criteria.industries;
-      if (criteria.query) payload.query = criteria.query;
-      if (criteria.roleQuery) payload.roleQuery = criteria.roleQuery;
-      if (imSelectedSignals.length) payload.signalTypes = imSelectedSignals.slice();
-      if (imPostedWithin) payload.postedWithinDays = imPostedWithin;
-      if (imSelectedSizes.length) payload.headcountBands = imSelectedSizes.slice();
-      if (imConfirmedSizeOnly) payload.confirmedSizeOnly = true;
-      send("/in-market", "POST", payload).then(function (r) {
-        if (!r.ok) { body.innerHTML = needsSetup(); return; }
-        inMarketResults = (r.data && r.data.leads) || [];
-        imTotal = (r.data && typeof r.data.pulled === "number") ? r.data.pulled : inMarketResults.length;
-        imStats = (r.data && r.data.stats) || null;
-        imBreakdown = (r.data && r.data.signalBreakdown) || [];
-        imNeeds = (r.data && r.data.needsBreakdown) || [];
-        renderImResults();
-      }).catch(function () { body.innerHTML = needsSetup(); });
-    }
   }
 
   // Render the results region: a bulk toolbar (select-all + narrow-down) over the cards.
