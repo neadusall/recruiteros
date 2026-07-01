@@ -120,12 +120,14 @@ export async function POST(req: Request) {
     const { searchHealth, hydrateSearchHealth } = await import("../../../lib/inmarket/searchHealth");
     const { fleetStatus } = await import("../../../lib/inmarket/fleet");
     const { commonCrawlHealth } = await import("../../../lib/inmarket/commonCrawl");
+    const { recentEnrichment } = await import("../../../lib/inmarket/activity");
     await hydrateSearchHealth().catch(() => undefined); // load persisted status right after a restart
     const [funnel, health] = await Promise.all([curationFunnel(), engineHealth()]);
     // `search` = sustainability of the free name-scraping; `fleet` = the distributed worker boxes;
     // `cc` = THIS (main) box's Common Crawl index-governor health — so the engine pill shows the main
     // server's own per-IP source health, turning the box you already have into the proving ground.
-    return ok({ funnel, health, search: searchHealth(), fleet: fleetStatus(), cc: commonCrawlHealth() });
+    // `activity` = the LIVE enrichment feed (companies flowing searching → named → verified right now).
+    return ok({ funnel, health, search: searchHealth(), fleet: fleetStatus(), cc: commonCrawlHealth(), activity: recentEnrichment(60) });
   }
 
   // Standalone liveness probe for the lead engine (last cycle / last curation tick + errors),
