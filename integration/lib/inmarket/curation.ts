@@ -22,6 +22,7 @@
 import { loadSnapshot, saveSnapshot } from "../db";
 import { resolveDecisionMaker, type DecisionMaker } from "./decisionMaker";
 import { classifyTitle, type JobFunction } from "../signals";
+import { recordVerified } from "./activity";
 
 /* ------------------------------------------------------------------ */
 /* The curated record                                                  */
@@ -781,7 +782,7 @@ export async function applyEmailValidation(
       r.emailValidated = valid;
       r.emailInvalid = !valid;
       r.validatedAt = nowIso;
-      if (valid) { if (!r.emailSource || r.emailSource === "guess") r.emailSource = "validated_external"; }
+      if (valid) { if (!r.emailSource || r.emailSource === "guess") r.emailSource = "validated_external"; recordVerified(r.company, r.managerName); }
       // A validated address is a confirmed contactable; an invalid one drops out of the send queue.
       if (!valid && (r.status === "contactable" || r.status === "queued")) r.status = "suppressed";
       n++;

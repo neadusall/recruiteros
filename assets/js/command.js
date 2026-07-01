@@ -3331,6 +3331,8 @@
       var node = document.getElementById("curStats"); if (!node) return;
       node.innerHTML = curStatsInner(d.funnel, d.health || null, d.search || null, d.fleet || null, d.cc || null);
       curPaintSync();               // the re-render reset the pill text; restore it immediately
+      var feedNode = document.getElementById("curFeed");   // repaint the live enrichment feed every beat
+      if (feedNode && d.activity) feedNode.innerHTML = curFeedInner(d.activity);
       var rc = document.getElementById("curResearched");
       if (rc) rc.textContent = (d.funnel.total || 0).toLocaleString();
       var total = d.funnel.total || 0;
@@ -3364,6 +3366,8 @@
       curLastTotal = (funnel && funnel.total) || 0;
       curLastSyncMs = Date.now();   // first good answer from the backend → mark the link live
       body.innerHTML = curationHtml(funnel, list, health, search, fleet, cc, industries);
+      var feedNode0 = document.getElementById("curFeed");   // seed the live enrichment feed on first paint
+      if (feedNode0) feedNode0.innerHTML = curFeedInner((rs[0] && rs[0].data && rs[0].data.activity) || []);
       wireCuration(body, list);
       curPaintSync();               // paint the live pill right away (don't wait a full beat)
       curPollTimer = setInterval(curHeartbeat, CUR_BEAT_MS); // live ongoing updates + link heartbeat
@@ -3600,6 +3604,48 @@
     return box(head + '<div style="display:flex;flex-wrap:wrap;gap:11px">' + cards + "</div>");
   }
 
+  // LIVE ENRICHMENT FEED — the companies flowing through research RIGHT NOW: claimed (searching) →
+  // named (a real decision-maker found) → verified (email confirmed) → no match. Repainted every
+  // heartbeat from curation_funnel.activity, so you watch a Targeted Search progress and complete in
+  // real time. Newest first; one row per company (its latest state wins).
+  function curFeedInner(activity) {
+    activity = activity || [];
+    var meta = {
+      searching: { icon: "🔍", label: "searching", color: "#ffc24d" },
+      named: { icon: "👤", label: "named", color: "#7c5cff" },
+      verified: { icon: "✅", label: "verified", color: "#38e0a6" },
+      missed: { icon: "⚪", label: "no match", color: "#6b7186" }
+    };
+    var counts = { searching: 0, named: 0, verified: 0, missed: 0 };
+    for (var i = 0; i < activity.length; i++) { var st = activity[i] && activity[i].state; if (counts[st] != null) counts[st]++; }
+    function ago(t) {
+      var s = Math.max(0, Math.floor((Date.now() - (t || 0)) / 1000));
+      return s < 60 ? s + "s" : s < 3600 ? Math.floor(s / 60) + "m" : Math.floor(s / 3600) + "h";
+    }
+    var box = 'background:var(--card,#15151f);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:12px 14px;margin:12px 0';
+    if (!activity.length) {
+      return '<div class="cur-feed" style="' + box + '">' +
+        '<div style="font-size:13px;color:#c8cce0;margin-bottom:4px">🔴 Live enrichment</div>' +
+        '<div class="muted" style="font-size:12px">No active searches right now. Run a Targeted Search under <b>Find</b> and companies will stream through here as the engine researches them — searching → named → verified.</div></div>';
+    }
+    var summary = ["searching", "named", "verified", "missed"].map(function (k) {
+      return '<span style="margin-right:12px;font-size:12px;color:' + meta[k].color + '">' + meta[k].icon + " <b>" + counts[k] + "</b> " + meta[k].label + "</span>";
+    }).join("");
+    var rows = activity.slice(0, 40).map(function (e) {
+      var m = meta[e.state] || meta.missed;
+      var who = e.manager ? ' <span style="color:#9aa0b4">· ' + esc(e.manager) + "</span>" : "";
+      var role = e.role ? ' <span style="color:#6b7186;font-size:11px">' + esc(String(e.role).slice(0, 40)) + "</span>" : "";
+      return '<div style="display:flex;align-items:center;gap:8px;padding:5px 2px;border-top:1px solid rgba(255,255,255,.04)">' +
+        '<span style="width:82px;flex:none;font-size:11px;color:' + m.color + '">' + m.icon + " " + m.label + "</span>" +
+        '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>' + esc(e.company || "") + "</b>" + who + role + "</span>" +
+        '<span style="flex:none;font-size:11px;color:#6b7186">' + ago(e.at) + "</span></div>";
+    }).join("");
+    return '<div class="cur-feed" style="' + box + '">' +
+      '<div style="font-size:13px;color:#c8cce0;margin-bottom:6px">🔴 Live enrichment <span style="color:#6b7186;font-weight:400">· ' + activity.length + " companies in flight</span></div>" +
+      '<div style="margin-bottom:8px">' + summary + "</div>" +
+      '<div style="max-height:300px;overflow:auto">' + rows + "</div></div>";
+  }
+
   function curationHtml(funnel, list, health, search, fleet, cc, industries) {
     var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
 
@@ -3609,7 +3655,8 @@
         '<h2>Curated decision-makers <span class="muted">· <span id="curResearched">' + (f.total || 0).toLocaleString() + "</span> researched</span></h2>" +
         '<button type="button" class="btn btn-ghost btn-sm" id="curRefresh">↻ Research more now</button>' +
       "</div>" +
-      '<div id="curStats">' + curStatsInner(f, health, search, fleet, cc) + "</div>";
+      '<div id="curStats">' + curStatsInner(f, health, search, fleet, cc) + "</div>" +
+      '<div id="curFeed"></div>';
 
     // Industry filter — search the enriched decision-makers by industry. Each option shows how many
     // are contactable (a real person + email) in that industry, so you can see where the depth is.
