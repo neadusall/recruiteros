@@ -601,26 +601,49 @@ async function runShotTick(): Promise<void> {
   }
 }
 
+// ROLE SPLIT — let a box run only part of the engine so email validation
+// (latency-bound Reoon/SMTP + heavy Playwright screenshots) can be moved OFF the
+// scraper fleet onto a dedicated worker, against the SAME shared Postgres pool.
+// This is what stops validation throttling the scrapers: they scrape flat-out
+// while a separate box drains the pool and verifies.
+//   INMARKET_ROLE=all        (default) one box does everything — unchanged behavior
+//   INMARKET_ROLE=scraper    only fills the pool (cycle + inflow ticks)
+//   INMARKET_ROLE=validator  only curates + verifies + screenshots (reads the pool)
+const ENGINE_ROLE = (process.env.INMARKET_ROLE || "all").toLowerCase();
+const RUN_SCRAPE = ENGINE_ROLE === "all" || ENGINE_ROLE === "scraper";
+const RUN_VALIDATE = ENGINE_ROLE === "all" || ENGINE_ROLE === "validator";
+
 export function ensureAccumulator(): void {
   if (started) return;
   started = true;
-  // Heavy pool-building cycle (hourly).
-  setTimeout(() => { void runCycle(); }, FIRST_DELAY_MS);
-  const t = setInterval(() => { void runCycle(); }, CYCLE_MS);
-  if (typeof t === "object" && t && "unref" in t) (t as { unref: () => void }).unref();
-  // Fast inflow tick (every few minutes) — new hiring companies arrive in near-real-time,
-  // not once an hour, so the Hire Signals tab populates as roles get posted.
-  setTimeout(() => { void runInflowTick(); }, INFLOW_FIRST_DELAY_MS);
-  const f = setInterval(() => { void runInflowTick(); }, INFLOW_CYCLE_MS);
-  if (typeof f === "object" && f && "unref" in f) (f as { unref: () => void }).unref();
-  // Fast decision-maker curation tick (every few minutes) — keeps the prospect DB living.
-  setTimeout(() => { void runCurationTick(); }, CURATE_FIRST_DELAY_MS);
-  const c = setInterval(() => { void runCurationTick(); }, CURATE_CYCLE_MS);
-  if (typeof c === "object" && c && "unref" in c) (c as { unref: () => void }).unref();
-  // Screenshot capture tick — builds verified job-page screenshots for contactable prospects.
-  if (SHOT_ENABLED) {
-    setTimeout(() => { void runShotTick(); }, SHOT_FIRST_DELAY_MS);
-    const s = setInterval(() => { void runShotTick(); }, SHOT_CYCLE_MS);
-    if (typeof s === "object" && s && "unref" in s) (s as { unref: () => void }).unref();
+  console.log(`[inmarket] engine role=${ENGINE_ROLE} (scrape=${RUN_SCRAPE}, validate=${RUN_VALIDATE})`);
+
+  // SCRAPING / POOL-BUILDING — fills the shared pool. Runs on the scraper fleet.
+  if (RUN_SCRAPE) {
+    // Heavy pool-building cycle (hourly).
+    setTimeout(() => { void runCycle(); }, FIRST_DELAY_MS);
+    const t = setInterval(() => { void runCycle(); }, CYCLE_MS);
+    if (typeof t === "object" && t && "unref" in t) (t as { unref: () => void }).unref();
+    // Fast inflow tick (every few minutes) — new hiring companies arrive in near-real-time,
+    // not once an hour, so the Hire Signals tab populates as roles get posted.
+    setTimeout(() => { void runInflowTick(); }, INFLOW_FIRST_DELAY_MS);
+    const f = setInterval(() => { void runInflowTick(); }, INFLOW_CYCLE_MS);
+    if (typeof f === "object" && f && "unref" in f) (f as { unref: () => void }).unref();
+  }
+
+  // VALIDATION / ENRICHMENT — decision-maker research + email verification +
+  // screenshots. Latency-bound and heavy, so it belongs on a dedicated worker box,
+  // NEVER co-located with scraping. Reads/writes the same shared Postgres pool.
+  if (RUN_VALIDATE) {
+    // Fast decision-maker curation tick (every few minutes) — keeps the prospect DB living.
+    setTimeout(() => { void runCurationTick(); }, CURATE_FIRST_DELAY_MS);
+    const c = setInterval(() => { void runCurationTick(); }, CURATE_CYCLE_MS);
+    if (typeof c === "object" && c && "unref" in c) (c as { unref: () => void }).unref();
+    // Screenshot capture tick — heavy Playwright; belongs with the validator, not the scrapers.
+    if (SHOT_ENABLED) {
+      setTimeout(() => { void runShotTick(); }, SHOT_FIRST_DELAY_MS);
+      const s = setInterval(() => { void runShotTick(); }, SHOT_CYCLE_MS);
+      if (typeof s === "object" && s && "unref" in s) (s as { unref: () => void }).unref();
+    }
   }
 }
