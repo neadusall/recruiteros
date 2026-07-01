@@ -41,6 +41,7 @@ import {
 } from "./email";
 import { checkEmailFree, type EmailCheck } from "./emailVerify";
 import { recordSearch, isAvailable } from "./searchHealth";
+import { webSearchEnabled, webSearchResults } from "./webSearch";
 import type { PeopleGraph, PeopleQuery, PersonCandidate } from "../signals/hiring";
 
 /* ------------------------------------------------------------------ */
@@ -242,6 +243,20 @@ interface Engine {
   extract: (body: string) => Array<{ title: string; url: string }>;
   /** HTML SERPs: on an empty extract, fall back to plain result-title parsing. */
   html?: boolean;
+  /** Paid/JSON providers (real-time web search) that return (title,url) pairs DIRECTLY, bypassing
+   *  the HTML fetch + extract path (their own auth + no egress rotation). */
+  results?: (q: string) => Promise<Array<{ title: string; url: string }>>;
+}
+
+/** Real-time web search (RapidAPI) as an X-ray engine. A Google-backed SERP API, so it honors the
+ *  `site:linkedin.com/in` boolean queries and returns clean {title,url} — no per-IP throttle. */
+function webSearchXrayEngine(): Engine {
+  return {
+    id: "web_search",
+    url: (q) => q, // unused: results() does the fetch
+    extract: () => [],
+    results: async (q) => (await webSearchResults(q)).map((r) => ({ title: r.title, url: r.url })),
+  };
 }
 
 /** Raw HTML search engines, scraped via the egress rotation. Each independently rested by the
@@ -280,8 +295,11 @@ function searxngEngine(): Engine | null {
   };
 }
 
-/** The active engine list at call time: SearXNG first when configured, then the HTML scrapers. */
+/** The active engine list at call time. When real-time web search is configured it is the SOLE
+ *  backend (JSearch + real-time-web-search only — the free scrapers are bypassed). Otherwise:
+ *  SearXNG first when configured, then the HTML scrapers. */
 function activeEngines(): Engine[] {
+  if (webSearchEnabled()) return [webSearchXrayEngine()];
   const sx = searxngEngine();
   return sx ? [sx, ...HTML_ENGINES] : HTML_ENGINES;
 }
@@ -478,25 +496,33 @@ export async function xraySearch(
       }
       let throttled = false;
       let parsed: ParsedProfile[] = [];
-      // up to 3 attempts — each goes out a FRESH rotated egress IP, so a per-IP rate limit is
-      // dodged by moving the retry to another address before we give up on the engine.
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const { status, body } = await fetcher(eng.url(query));
-        if (isThrottle(status, body)) { throttled = true; continue; }
-        throttled = false;
-        if (body) {
-          parsed = eng
-            .extract(body)
-            .map((r) => parseLinkedInResult(r.title, r.url))
-            .filter((p): p is ParsedProfile => !!p);
-          // HTML SERPs: fall back to plain result titles if no /in/ hrefs were exposed.
-          if (!parsed.length && eng.html) {
-            parsed = extractResultTitles(body)
-              .map((tt) => parseLinkedInResult(tt))
+      if (eng.results) {
+        // Paid JSON provider (real-time web search): one authenticated call, no throttle/retry.
+        const rows = await eng.results(query).catch(() => [] as Array<{ title: string; url: string }>);
+        parsed = rows
+          .map((r) => parseLinkedInResult(r.title, r.url))
+          .filter((p): p is ParsedProfile => !!p);
+      } else {
+        // up to 3 attempts — each goes out a FRESH rotated egress IP, so a per-IP rate limit is
+        // dodged by moving the retry to another address before we give up on the engine.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const { status, body } = await fetcher(eng.url(query));
+          if (isThrottle(status, body)) { throttled = true; continue; }
+          throttled = false;
+          if (body) {
+            parsed = eng
+              .extract(body)
+              .map((r) => parseLinkedInResult(r.title, r.url))
               .filter((p): p is ParsedProfile => !!p);
+            // HTML SERPs: fall back to plain result titles if no /in/ hrefs were exposed.
+            if (!parsed.length && eng.html) {
+              parsed = extractResultTitles(body)
+                .map((tt) => parseLinkedInResult(tt))
+                .filter((p): p is ParsedProfile => !!p);
+            }
           }
+          break;
         }
-        break;
       }
       log.push({ engine: eng.id, query, status: throttled ? 429 : 200, throttled, found: parsed.length });
       // Feed the outcome back into the shared health/back-off accounting.

@@ -43,6 +43,7 @@ import { resolvePersonEmail } from "./deepContact";
 import { paidEmailEnabled, findEmailIcypeas } from "./paidEmail";
 import { paidNamingEnabled, findDecisionMakerRapid } from "./paidNaming";
 import { recordSearch, isAvailable } from "./searchHealth";
+import { webSearchEnabled, webSearchTitles } from "./webSearch";
 import { xrayPeopleGraph } from "./xray";
 
 /* ------------------------------------------------------------------ */
@@ -571,6 +572,17 @@ function matchAll(html: string, res: RegExp[]): string[] {
 /** Run a query across the engine rotation (each independently rested under the health system),
  *  parsing each engine's result titles with `parse`. Returns the first engine's non-empty result. */
 async function searchEngines(q: string, parse: (titles: string[]) => PersonCandidate[]): Promise<PersonCandidate[]> {
+  // PRIMARY: real-time web search (RapidAPI). A Google-backed SERP API, so `site:linkedin.com/in`
+  // X-ray queries work and it returns clean titles — with no per-IP throttle. When it's configured
+  // it is the SOLE backend: we do NOT fall through to the free scrapers (that's the whole point of
+  // moving off them). It handles its own errors → [], so a miss just yields no names here.
+  if (webSearchEnabled()) {
+    const found = parse(await webSearchTitles(q));
+    recordSearch("web_search", found.length ? "ok" : "empty");
+    return found;
+  }
+  // FALLBACK (no RAPID_WEBSEARCH_KEY): the free engine rotation, kept so local/dev without a key
+  // still names people. Each engine is independently rested by the health system.
   for (const eng of SEARCH_ENGINES) {
     if (!isAvailable(eng.id)) continue; // engine resting in back-off — skip to the next source
     // Each attempt goes out a FRESH rotated source IP (egressFetch round-robins the /64). On a
