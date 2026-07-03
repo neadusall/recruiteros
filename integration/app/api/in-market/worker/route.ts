@@ -116,7 +116,7 @@ function sanitizeRow(raw: unknown): CuratedProspect | null {
 
 export async function POST(req: Request) {
   if (!authed(req)) return fail("unauthorized", 401);
-  const b = await body<{ action?: string; limit?: number; rows?: unknown[]; leads?: unknown[]; worker?: string; health?: unknown }>(req);
+  const b = await body<{ action?: string; limit?: number; rows?: unknown[]; leads?: unknown[]; results?: unknown[]; worker?: string; health?: unknown }>(req);
   const workerId = (s(b?.worker, 60) || "").replace(/[^\w.\-]/g, "").slice(0, 60); // sanitize id for telemetry
 
   // Every authenticated call may carry a health digest (workers piggyback it on claim/submit/heartbeat),
