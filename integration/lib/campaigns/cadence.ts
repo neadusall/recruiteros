@@ -230,7 +230,18 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
         // Which EMAIL this is in the sequence (1 = first email, 2 = second, …). The video fail-safe
         // in renderTouch only attaches the video on the 2nd email.
         const emailStep = t.channel === "email" ? touches.slice(0, i + 1).filter((x) => x.channel === "email").length : 0;
-        const r = renderTouch(t, p, { emailStep });
+        let r = renderTouch(t, p, { emailStep });
+        // AI HUMANIZER (opt-in, fail-safe): rewrite the Day-0 MPC opener into natural, human copy.
+        // Only the 1st email of an MPC lead (p.mpcContext), so the Day-1 video HTML is never touched.
+        // Returns null unless MPC_HUMANIZER is on and the rewrite passes the truth+naturalness gate;
+        // on null we send the deterministic render unchanged. It can only improve copy, never break a send.
+        if (t.channel === "email" && emailStep === 1 && p.mpcContext) {
+          try {
+            const { humanizeMpc } = await import("../bd/mpc/humanizer");
+            const h = await humanizeMpc(p, r, `${p.id || ""}:${t.key || ""}`);
+            if (h) r = h;
+          } catch { /* keep the deterministic render */ }
+        }
         const res = await sendTouch(workspaceId, {
           channel: t.channel,
           prospect: p,
