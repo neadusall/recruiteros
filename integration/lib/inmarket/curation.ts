@@ -932,8 +932,10 @@ export async function findEmailsByReoon(limit: number, nowIso: string, concurren
  * had marked invalid when the paid+Reoon path now confirms a real mailbox.
  */
 export async function findEmailsByPaid(limit: number, nowIso: string, concurrency = 3): Promise<{ checked: number; found: number; missed: number }> {
+  const { finderServiceEnabled, findManyViaService } = await import("./finderService");
   const { paidEmailEnabled, findEmailIcypeas } = await import("./paidEmail");
-  if (!paidEmailEnabled()) return { checked: 0, found: 0, missed: 0 };
+  const useService = finderServiceEnabled();          // preferred: the one finder-of-record (email-validate service)
+  if (!useService && !paidEmailEnabled()) return { checked: 0, found: 0, missed: 0 };
   const { verifyEmailsReoon } = await import("./emailVerify");
   const { splitFullName } = await import("./email");
   const { learnFromConfirmedEmail, inferPattern } = await import("./emailPattern");
@@ -947,26 +949,46 @@ export async function findEmailsByPaid(limit: number, nowIso: string, concurrenc
     .slice(0, Math.max(0, limit));
   if (!targets.length) return { checked: 0, found: 0, missed: 0 };
 
-  type Hit = { email: string; accept: boolean; pattern?: string };
+  type Hit = { email: string; accept: boolean; pattern?: string; source: string };
   const results = new Map<string, Hit>();
-  let cursor = 0, checked = 0;
-  async function worker() {
-    while (cursor < targets.length) {
-      const r = targets[cursor++];
-      checked++;
-      try {
-        const { firstName, lastName } = splitFullName(r.managerName);
-        const found = await findEmailIcypeas(firstName, lastName, r.domain || r.company);
-        if (!found) continue;
-        const rv = await verifyEmailsReoon([found.email]);
-        const verdict = rv.find((x) => x.email === found.email.toLowerCase());
-        // Reoon decides when it returns a definitive verdict; when it's inconclusive we trust Icypeas's own grade.
-        const accept = verdict ? verdict.valid : found.verified;
-        results.set(r.id, { email: found.email, accept, pattern: inferPattern(r.managerName, found.email) || undefined });
-      } catch { /* skip → leave as-is, retried a later pass */ }
+  let checked = 0;
+
+  if (useService) {
+    // ONE batched call to the finder service (Findymail provider -> Reoon fallback -> pool verify).
+    // The service returns pre-verified addresses, so a "found" is trusted without re-paying Reoon.
+    const people = targets.map((r) => {
+      const { firstName, lastName } = splitFullName(r.managerName);
+      const lk = r as { managerLinkedin?: string; linkedinUrl?: string };
+      return { first: firstName, last: lastName, name: r.managerName, domain: r.domain, linkedin: lk.managerLinkedin || lk.linkedinUrl || undefined };
+    });
+    const got = await findManyViaService(people);
+    checked = targets.length;
+    for (let i = 0; i < targets.length; i++) {
+      const f = got[i];
+      if (f && f.email && f.status === "found") {
+        results.set(targets[i].id, { email: f.email, accept: true, pattern: inferPattern(targets[i].managerName, f.email) || undefined, source: f.source || "findymail" });
+      }
     }
+  } else {
+    // Fallback: Icypeas per-row + Reoon re-verify (only when no finder service is configured).
+    let cursor = 0;
+    async function worker() {
+      while (cursor < targets.length) {
+        const r = targets[cursor++];
+        checked++;
+        try {
+          const { firstName, lastName } = splitFullName(r.managerName);
+          const found = await findEmailIcypeas(firstName, lastName, r.domain || r.company);
+          if (!found) continue;
+          const rv = await verifyEmailsReoon([found.email]);
+          const verdict = rv.find((x) => x.email === found.email.toLowerCase());
+          const accept = verdict ? verdict.valid : found.verified;
+          results.set(r.id, { email: found.email, accept, pattern: inferPattern(r.managerName, found.email) || undefined, source: "icypeas" });
+        } catch { /* skip → leave as-is, retried a later pass */ }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(Math.max(concurrency, 1), 4) }, worker));
   }
-  await Promise.all(Array.from({ length: Math.min(Math.max(concurrency, 1), 4) }, worker));
 
   let found = 0, missed = 0;
   await withCurationLock(async () => {
@@ -977,10 +999,10 @@ export async function findEmailsByPaid(limit: number, nowIso: string, concurrenc
       if (r.status === "enrolled" || r.status === "queued" || r.status === "suppressed") continue;
       if (hit.accept) {
         r.likelyEmail = hit.email; if (hit.pattern) r.emailPattern = hit.pattern;
-        r.emailSource = "icypeas"; r.emailValidated = true; r.emailInvalid = false; r.emailCatchAll = false; r.validatedAt = nowIso;
+        r.emailSource = hit.source; r.emailValidated = true; r.emailInvalid = false; r.emailCatchAll = false; r.validatedAt = nowIso;
         if (r.status === "sourced" || r.status === "named") r.status = "contactable";
         found++;
-        await learnFromConfirmedEmail(r.managerName, hit.email, "icypeas").catch(() => {});
+        await learnFromConfirmedEmail(r.managerName, hit.email, hit.source).catch(() => {});
       } else { missed++; }
     }
     await save(current);
