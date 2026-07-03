@@ -859,6 +859,9 @@ export async function findEmailsByReoon(limit: number, nowIso: string, concurren
   if (!reoonEnabled()) return { checked: 0, found: 0, catchAll: 0, invalid: 0 };
 
   const rows = await load();
+  // Seed the per-domain format cache from colleagues we've already confirmed (once per process), so
+  // a company solved for one person constructs the rest. No-op unless INMARKET_PATTERN_CACHE=1.
+  try { const { backfillFromRows } = await import("./emailPattern"); await backfillFromRows(rows); } catch { /* best-effort seed */ }
   const targets = rows
     .filter((r) => r.managerName && r.domain && !r.emailValidated && !r.emailInvalid && !r.emailCatchAll
       && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed")
@@ -916,6 +919,7 @@ export async function findEmailsByReoon(limit: number, nowIso: string, concurren
     }
     await save(current);
   });
+  try { const { flushPatternCache } = await import("./emailPattern"); await flushPatternCache(true); } catch { /* flush best-effort */ }
   return { checked, found, catchAll, invalid };
 }
 

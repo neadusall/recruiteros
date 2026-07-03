@@ -27,6 +27,7 @@ import { promises as dns } from "dns";
 import net from "net";
 import { mxStatus } from "./domain";
 import { emailPermutations, emailDomainFrom, splitFullName } from "./email";
+import { patternCacheEnabled, orderedCandidatesForDomain, learnFromConfirmedEmail } from "./emailPattern";
 
 /** Role / functional mailboxes — real addresses, but not a PERSON to run 1:1 BD against. */
 const ROLE_LOCALS = new Set([
@@ -309,10 +310,14 @@ export async function findVerifiedEmailReoon(
     const s = splitFullName(person.fullName);
     firstName = firstName || s.firstName; lastName = lastName || s.lastName;
   }
-  const perms = emailPermutations(firstName, lastName, domain);
-  if (!perms.length) return { outcome: "unknown" };
+  const fullName = person.fullName || [firstName, lastName].filter(Boolean).join(" ");
   const max = Math.max(1, Math.min(opts?.max ?? Number(process.env.REOON_MAX_CANDIDATES || 6), 12));
-  const candidates = perms.slice(0, max);
+  // When the per-domain pattern cache is on, lead with this domain's KNOWN format (always tried,
+  // even past the cap) so Reoon confirms on the first credit; otherwise the plain best-first set.
+  const candidates = patternCacheEnabled()
+    ? await orderedCandidatesForDomain(fullName, domain, max)
+    : emailPermutations(firstName, lastName, domain).slice(0, max);
+  if (!candidates.length) return { outcome: "unknown" };
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
     const r = await reoonVerifyOne(c.email);
@@ -322,8 +327,11 @@ export async function findVerifiedEmailReoon(
     if (r.mx_accepts_mail === false) return { outcome: "invalid", domainDead: true };
     if (r.is_catch_all === true || status === "catch_all") return { outcome: "catch_all", email: candidates[0].email, pattern: candidates[0].pattern };
     if (r.is_spamtrap === true || status === "spamtrap") return { outcome: "invalid" };
-    // This specific syntax is a real mailbox → found.
-    if (status === "safe") return { outcome: "found", email: c.email, pattern: c.pattern };
+    // This specific syntax is a real mailbox → found. Teach this domain's format for its colleagues.
+    if (status === "safe") {
+      if (patternCacheEnabled()) await learnFromConfirmedEmail(fullName, c.email, "reoon_found").catch(() => {});
+      return { outcome: "found", email: c.email, pattern: c.pattern };
+    }
     // First probe can't even reach the mail server → more tries won't help.
     if (i === 0 && status === "unknown" && r.can_connect_smtp === false) return { outcome: "unknown" };
     // else: this pattern is invalid/disabled/unknown → try the next syntax.
