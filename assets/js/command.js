@@ -481,28 +481,24 @@
   /* ---------------- router ---------------- */
   var ROUTES = {
     overview: { title: "Dashboard", crumb: "Operate", action: null, render: renderOverview },
-    clients: { title: "Clients", crumb: "Business Development", action: null, render: renderClients, motionOnly: "bd" },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
-    sendqueue: { title: "Send Queue", crumb: "Operate", action: null, render: renderSendQueue, motionOnly: "bd" },
-    senders: { title: "Senders", crumb: "Operate", action: null, render: renderSenders, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
     autopilot: { title: "Autopilot", crumb: "Build", action: null, render: renderAutopilot },
     campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New sequence", render: renderCampaignsHub },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
+    pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting" },
     data: { title: "Candidates", crumb: "Build", action: null, render: renderData },
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
     email: { title: "Email", crumb: "Business Development", action: null, render: renderEmail, motionOnly: "bd" },
-    pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio },
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "＋ New sequence", render: renderContent },
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
     "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: renderOutreachStats, cap: "team:manage" },
-    engine: { title: "Engine / Throughput", crumb: "Admin", action: null, render: renderEngine, cap: "team:manage" },
     nurture: { title: "Nurture", crumb: "Measure", action: null, render: renderNurture, cap: "team:manage", motionOnly: "bd" },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
     // Admin launch-setup hub. Consolidates Integrations and ATS behind one tab
@@ -520,115 +516,6 @@
     playbooks: { title: "Playbooks", crumb: "Learn", action: null, render: renderPlaybooks }
   };
 
-  /* ---------------- Engine / Throughput (admin) ----------------
-     A live, auto-refreshing read on the whole curation pipeline: the daily-target
-     gauge, the funnel, every SOURCE's health, the EFFECTIVE value of every
-     throughput dial (+ the recommended raise for the critical ones), and host
-     headroom. Read-only — it spends nothing; it just exposes what to turn. */
-  function renderEngine(view) {
-    function n(x) { return (x == null ? 0 : x).toLocaleString(); }
-    function dot(status) {
-      var s = String(status || "").toLowerCase();
-      var c = (s.indexOf("ok") >= 0 || s === "healthy" || s === "up" || s === "on" || s === "set" || s === "live")
-        ? "#38e0a6"
-        : (s.indexOf("throttl") >= 0 || s.indexOf("degrad") >= 0 || s.indexOf("down") >= 0 || s === "missing" || s === "off")
-          ? "#ff5c7a" : "#ffc24d";
-      return '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + c + ';margin-right:7px;vertical-align:middle"></span>';
-    }
-    function card(label, value, sub, accent) {
-      return '<div style="background:var(--card,#15151f);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 16px;min-width:120px;flex:1">' +
-        '<div style="font-size:22px;font-weight:700;color:' + (accent || "#e8e8f0") + '">' + value + "</div>" +
-        '<div style="font-size:12px;color:#9aa0b4;margin-top:2px">' + esc(label) + "</div>" +
-        (sub ? '<div style="font-size:11px;color:#6b7186;margin-top:3px">' + esc(sub) + "</div>" : "") + "</div>";
-    }
-    view.innerHTML = '<div class="empty">Loading engine telemetry…</div>';
-
-    function load() {
-      send("/in-market", "POST", { action: "engine_admin" }).then(function (r) {
-        if (!r.ok || !r.data) {
-          view.innerHTML = '<div class="empty">⚠ Couldn\'t reach the engine telemetry (admin only, or a brief blip right after a deploy). Retrying…</div>';
-          return;
-        }
-        var d = r.data, f = d.funnel || {}, sys = d.system || {}, sh = d.search || {}, daily = f.daily || {};
-        var withEmail = (f.validated || 0) + (f.invalid || 0) + (f.catchAll || 0);
-        var hit = withEmail ? Math.round(((f.validated || 0) / withEmail) * 100) : 0;
-
-        // 1) Daily target gauge
-        var paceColor = daily.onPace ? "#38e0a6" : "#ffc24d";
-        var html = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:stretch;margin-bottom:16px">' +
-          card("Verified TODAY", n(daily.validToday), "of " + n(daily.target || 5000) + " target", "#7c5cff") +
-          card("Projected (24h pace)", n(daily.projectedValid), daily.onPace ? "on pace ✓" : "below target", paceColor) +
-          card("Total verified (sendable)", n(f.validated), "the whole book", "#38e0a6") +
-          card("New names / last hour", n(f.namedLastHour), "sourcing+curation rate") +
-          "</div>";
-
-        // 2) Funnel
-        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Funnel</h3>' +
-          '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
-          card("Curated (people)", n(f.total), "named rate " + Math.round((f.namedRate || 0) * 100) + "%") +
-          card("With a domain", n(f.domain && f.domain.curatedWithDomain), "email gate") +
-          card("With an email", n(withEmail), "guessed + found") +
-          card("✓ Verified", n(f.validated), "emailValidated", "#38e0a6") +
-          card("✕ Invalid", n(f.invalid), "suppressed", "#ff5c7a") +
-          card("~ Catch-all", n(f.catchAll), "kept, unconfirmed", "#ffc24d") +
-          card("Email hit-rate", hit + "%", "verified ÷ emails", hit < 20 ? "#ff5c7a" : "#38e0a6") +
-          "</div>";
-
-        // 3) Source health
-        var engines = (sh.engines || []).map(function (e) {
-          return '<span style="display:inline-block;margin:3px 8px 3px 0;font-size:12px;color:#c8cce0">' +
-            dot(e.status) + esc(e.engine) + ' <span style="color:#6b7186">(' + Math.round((e.okRate || 0) * 100) + "% ok" +
-            (e.backoffSec ? ", backoff " + e.backoffSec + "s" : "") + ")</span></span>";
-        }).join("");
-        var cc = d.cc || {};
-        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Source health ' +
-          '<span style="font-weight:400;color:' + (sh.healthy ? "#38e0a6" : "#ff5c7a") + '">' + dot(sh.status) + esc(sh.status || "unknown") + "</span></h3>" +
-          '<div style="background:var(--card,#15151f);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 16px">' +
-          '<div style="margin-bottom:8px">' + (engines || '<span style="color:#6b7186">no search telemetry yet</span>') + "</div>" +
-          '<div style="font-size:12px;color:#9aa0b4">' + dot(cc.status || (cc.healthy ? "ok" : "")) + "Common Crawl: " + esc(cc.status || (cc.healthy ? "ok" : "n/a")) +
-          '  ·  ' + dot(d.reoon && d.reoon.enabled ? "on" : "off") + "Reoon: " + (d.reoon && d.reoon.enabled ? "live" + (d.reoon.activeTask ? " (task running)" : "") : "OFF") +
-          "</div></div>";
-
-        // 4) Throughput dials
-        var groups = {};
-        (d.dials || []).forEach(function (x) { (groups[x.group] = groups[x.group] || []).push(x); });
-        var rows = "";
-        Object.keys(groups).forEach(function (g) {
-          rows += '<tr><td colspan="4" style="padding:10px 8px 4px;font-size:12px;color:#7c5cff;font-weight:600">' + esc(g) + "</td></tr>";
-          groups[g].forEach(function (x) {
-            var crit = x.crit;
-            rows += '<tr style="border-top:1px solid rgba(255,255,255,.05)">' +
-              '<td style="padding:7px 8px;font-family:monospace;font-size:12px;color:' + (crit ? "#ffc24d" : "#c8cce0") + '">' + (crit ? "★ " : "") + esc(x.key) + "</td>" +
-              '<td style="padding:7px 8px;font-weight:600">' + esc(String(x.value)) + (x.unit ? ' <span style="color:#6b7186;font-weight:400">' + esc(x.unit) + "</span>" : "") + "</td>" +
-              '<td style="padding:7px 8px;font-size:12px;color:#38e0a6">' + (x.rec ? "→ " + esc(x.rec) : "") + "</td>" +
-              '<td style="padding:7px 8px;font-size:12px;color:#6b7186">' + esc(x.note || "") + "</td></tr>";
-          });
-        });
-        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Throughput dials <span style="font-weight:400;color:#6b7186">(★ = critical lever · → = recommended raise)</span></h3>' +
-          '<div style="background:var(--card,#15151f);border:1px solid rgba(255,255,255,.07);border-radius:12px;overflow:hidden">' +
-          '<table style="width:100%;border-collapse:collapse"><tbody>' + rows + "</tbody></table></div>";
-
-        // 5) Host headroom
-        var disk = sys.disk || {};
-        var diskWarn = (disk.usedPct || 0) >= 80;
-        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Host headroom</h3>' +
-          '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
-          card("Disk used", (disk.usedPct == null ? "?" : disk.usedPct + "%"), (disk.freeGB == null ? "" : disk.freeGB + " GB free of " + disk.totalGB), diskWarn ? "#ff5c7a" : "#38e0a6") +
-          card("CPU load (1m)", (sys.loadavg ? sys.loadavg[0] : "?"), (sys.cpus ? sys.cpus + " vCPU" : "")) +
-          card("Memory free", (sys.memFreeGB == null ? "?" : sys.memFreeGB + " GB"), (sys.memTotalGB ? "of " + sys.memTotalGB + " GB" : "")) +
-          "</div>" +
-          (diskWarn ? '<div style="margin-top:8px;font-size:12px;color:#ff5c7a">⚠ Disk is ' + disk.usedPct + '% full — the file-snapshot store can fill the box. Grow the disk before scaling throughput 10×.</div>' : "") +
-          '<div style="margin-top:14px;font-size:11px;color:#6b7186">Auto-refreshes every 15s. To change a dial: edit /opt/recruiteros/.env.production on the server, then <code>docker compose up -d --force-recreate app</code>.</div>';
-
-        view.innerHTML = html;
-      }).catch(function () {
-        view.innerHTML = '<div class="empty">⚠ Engine telemetry unavailable. This panel is admin-only — sign in as a team manager.</div>';
-      });
-    }
-    load();
-    viewTimers.push(setInterval(load, 15000));
-  }
-
   function currentRoute() {
     var h = (location.hash || "#overview").replace(/^#/, "");
     // support reference-style "#bd/response" -> set motion + route
@@ -637,7 +524,7 @@
     else h = parts[0];
     // Aliases. #builder stays the BD-branded entry (it forces BD via its own
     // route); Hire Signals (#inmarket) is motion-agnostic and shows in both.
-    var ALIAS = { "in-market": "inmarket", leads: "inmarket", bdbulk: "email", emailprep: "email" };
+    var ALIAS = { "in-market": "inmarket", leads: "inmarket", bdbulk: "email", emailprep: "email", pip: "pipstudio", video: "pipstudio", "pip-studio": "pipstudio" };
     if (ALIAS[h]) h = ALIAS[h];
     if (!ROUTES[h]) return "overview";
     // A motion-only route (e.g. the BD-only #builder) switches the workspace to
@@ -705,9 +592,7 @@
 
   window.addEventListener("hashchange", render);
   Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) {
-    // Hash-routed items get a "#route" href; external links (e.g. PiP Studio at /pip-studio)
-    // already carry a real href and are left untouched.
-    if (n.dataset.route) n.setAttribute("href", "#" + n.dataset.route);
+    n.setAttribute("href", "#" + n.dataset.route);
   });
 
   /* ---------------- views ---------------- */
@@ -2194,26 +2079,42 @@
 
   /* ---------------- In-Market Leads (BD: who is hiring right now) ------------ */
   var inMarketResults = [];      // last search results (full lead objects)
-  var imSelectedIndustries = []; // legacy: kept only so the renderInMarket state-reset stays valid
+  var imMode = "industry";       // "industry" | "company"
+  var imSelectedIndustries = []; // multi-select industries
+  var imSearchTimer = null;      // debounce for chip-driven searches
   var imMinScore = 0;            // narrow-down: minimum hiring-intent score shown
   var imPostedWithin = 0;        // date search: only roles posted within the last N days (0 = any)
   var imDmPerRole = 3;           // decision-makers shown per role (1 / 3 / 5), defaults to 3 for multi-touch
   var imSelectedSizes = [];      // company headcount bands to narrow by (multi-select)
   var imConfirmedSizeOnly = false; // size search: only authoritative (Wikidata) headcounts
-  var imShotFilter = null;      // screenshot filter: null = all, true = only WITH a job screenshot, false = only without
   var imLabel = "";             // current result label, kept for re-renders
   var imTotal = 0;              // total companies available for this query in the pool (grows daily)
   var imStats = null;          // accumulation activity (added today, total, daily log)
   var imPicks = {};             // key -> { lead, manager } selected to push to Prospects
-  // TARGETED JSEARCH queue state (the user-driven scraper that replaces the random rotation).
-  var imQueue = [];             // saved targeted searches (from queue_list)
-  var imQEditId = null;         // id of the search being edited in the builder (null = creating new)
-  var imQPreview = null;        // active preview: { id, name, leads:[InMarketLead], picks:{idx:bool} }
-  var imQBusy = false;          // guard so double-clicks don't double-run a search
-  // JSearch date_posted windows + employment types (the values JSearch itself accepts).
-  var IM_QDATES = [["all", "Any time"], ["today", "Today"], ["3days", "Last 3 days"], ["week", "Last week"], ["month", "Last month"]];
-  var IM_QEMP = [["FULLTIME", "Full-time"], ["PARTTIME", "Part-time"], ["CONTRACTOR", "Contract"], ["INTERN", "Intern"]];
 
+  // Industries + sub-sectors recruiters sell into. Drives the refined in-market search.
+  // (Free job-board coverage is strongest for the tech-adjacent rows; traditional
+  // verticals post on Workday/Taleo/iCIMS, so those return fewer free results, a paid
+  // data feed fills them out. See the note rendered above the chips.)
+  var IM_INDUSTRIES = [
+    "Technology / SaaS", "AI / Machine Learning", "Cybersecurity", "Data / Analytics",
+    "DevOps / Cloud", "Hardware / IoT", "Semiconductors", "Robotics", "Gaming",
+    "Fintech", "Banking", "Insurance", "Investment / PE / VC", "Crypto / Web3",
+    "Healthcare", "Biotech / Pharma", "Medical Devices", "Hospitals / Health Systems",
+    "Manufacturing", "Aerospace / Defense", "Automotive", "Industrial / Automation",
+    "Energy", "Oil & Gas", "Renewables / CleanTech", "Utilities", "Mining / Metals",
+    "Construction", "Architecture / Engineering", "Real Estate", "PropTech",
+    "Logistics / Supply Chain", "Freight / Transportation", "Warehousing",
+    "Retail / eCommerce", "Consumer Goods (CPG)", "Fashion / Apparel", "Food & Beverage",
+    "Agriculture / AgTech", "Hospitality", "Travel / Tourism", "Media / Entertainment",
+    "Telecom", "Education", "EdTech", "Legal", "Accounting / Tax", "Consulting",
+    "Marketing / Agency", "HR / Staffing", "Sales / GTM", "Government / Public", "Nonprofit"
+  ];
+  var IM_PLACEHOLDER = {
+    industry: "Search an industry or market, e.g. fintech, healthcare, manufacturing",
+    company: "Search a company by name, e.g. Stripe, Verla Health, Brightwave",
+    title: "Search by job title (keywords), e.g. controller, backend engineer, account executive"
+  };
 
   // Hiring-signal types you can filter the search by (company-side). Pulled from the
   // engine's signal catalog; these are what the free/open sources can surface.
@@ -2347,500 +2248,228 @@
       if (Math.round(l.score || 0) < imMinScore) return false;
       // "What they're hiring for" filter: keep only companies hiring for the chosen function.
       if (imNeedFn && !(l.needFunctions && l.needFunctions.indexOf(imNeedFn) >= 0)) return false;
-      // Screenshot filter: only companies that HAVE (or specifically DON'T have) a verified job screenshot.
-      if (imShotFilter !== null && !!l.hasShot !== imShotFilter) return false;
       return true;
     });
   }
 
-  /* ---------------- Send Queue (rolling-buffer readiness dashboard) ---------------- */
-  function sqFmt(n) { return (n || 0).toLocaleString(); }
-  function sqDayLabel(iso) { try { return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); } catch (e) { return iso; } }
-  function sqNeed(label, n, missing) { return '<button type="button" class="sq-need" data-missing="' + missing + '"><span class="sq-need-n">' + (n || 0).toLocaleString() + '</span><span class="sq-need-l">' + label + ' <span class="sq-need-view">view ▾</span></span></button>'; }
-  function sqMissLabel(m) { return m === "verified_email" ? "✉️ email" : m === "video" ? "🎬 video" : "🔗 page"; }
-  function sqWorklistHtml(items, missing) {
-    var titleMap = { verified_email: "Need a verified email", video: "Need a 2nd-email video", watch_page: "Need a landing page" };
-    var fixMap = { verified_email: ["Verify emails in Clients", "#clients"], video: ["Record in PiP Studio", "#pipstudio"], watch_page: ["Build in PiP Studio", "#pipstudio"] };
-    var fix = fixMap[missing] || ["Fix", "#clients"];
-    if (!items.length) return '<div class="sq-wl"><div class="sq-wl-head">' + (titleMap[missing] || "Needs assets") + " — none waiting right now 🎉 <button type=\"button\" class=\"im-mini\" data-wlclose>Close</button></div></div>";
-    var rows = items.map(function (p) {
-      return '<div class="sq-wl-row">' +
-          '<div class="sq-wl-main"><b>' + esc(p.name || "(no name)") + "</b>" + (p.title ? ' <span class="muted">' + esc(p.title) + "</span>" : "") + (p.company ? " · " + esc(p.company) : "") + "</div>" +
-          '<div class="sq-wl-meta">' + (p.email ? esc(p.email) + (p.emailStatus ? ' <span class="muted">(' + esc(p.emailStatus) + ")</span>" : "") : '<span class="muted">no email</span>') + "</div>" +
-          '<div class="sq-wl-miss">' + (p.missing || []).map(function (m) { return '<span class="sq-miss">' + sqMissLabel(m) + "</span>"; }).join("") + "</div>" +
-        "</div>";
-    }).join("");
-    return '<div class="sq-wl"><div class="sq-wl-head">' + (titleMap[missing] || "Needs assets") + " · <b>" + items.length + "</b> staged" + (items.length >= 200 ? "+" : "") +
-      ' <a class="btn btn-primary btn-sm" href="' + fix[1] + '">' + fix[0] + "</a>" +
-      ' <button type="button" class="im-mini" data-wlclose>Close</button></div>' +
-      '<div class="sq-wl-list">' + rows + "</div></div>";
-  }
-  function sqLoadWorklist(missing) {
-    var box = document.getElementById("sqWorklist"); if (!box) return;
-    box.innerHTML = '<div class="sq-wl"><div class="sq-wl-head">Loading…</div></div>';
-    send("/send-queue", "POST", { action: "needs_list", missing: missing, limit: 200 }).then(function (r) {
-      box.innerHTML = sqWorklistHtml((r && r.data && r.data.items) || [], missing);
-    }).catch(function () { box.innerHTML = '<div class="sq-wl"><div class="sq-wl-head">Couldn’t load the list.</div></div>'; });
-  }
-  function sqWireWorklist() {
-    var body = document.getElementById("sqBody"); if (!body) return;
-    // onclick assignment (not addEventListener) so reloads don't stack duplicate handlers.
-    body.onclick = function (e) {
-      var card = e.target.closest && e.target.closest("[data-missing]");
-      if (card) { sqLoadWorklist(card.getAttribute("data-missing")); return; }
-      if (e.target.closest && e.target.closest("[data-wlclose]")) { var box = document.getElementById("sqWorklist"); if (box) box.innerHTML = ""; }
-    };
-  }
-  // 📨 Sending system — a legible model: Domains → Email IDs → cold sends/day, with the
-  // hard 2/day cap making the math exact and today's usage draining live. Styles injected once.
-  function syscapCss() {
-    if (document.getElementById("syscapCss")) return "";
-    return '<style id="syscapCss">' +
-      '.syscap{border:1px solid var(--border);border-radius:14px;background:var(--surface);padding:16px 18px;margin-bottom:14px}' +
-      '.syscap-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px}' +
-      '.syscap-h h3{font-size:15px;font-weight:800;margin:0}' +
-      '.syscap-h .sub{font-size:12px;color:var(--muted,#8a93a6)}' +
-      '.syscap-flow{display:flex;align-items:stretch;flex-wrap:wrap;margin:14px 0 8px}' +
-      '.syscap-step{flex:1;min-width:108px;text-align:center;padding:11px 8px;border:1px solid var(--border);border-radius:12px}' +
-      '.syscap-step .n{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1}' +
-      '.syscap-step .l{font-size:12px;font-weight:700;margin-top:4px}' +
-      '.syscap-step .s{font-size:11px;color:var(--muted,#8a93a6);margin-top:2px}' +
-      '.syscap-arrow{display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--muted,#8a93a6);font-size:16px;font-weight:700}' +
-      '.syscap-meter .track{height:10px;border-radius:6px;background:var(--border);overflow:hidden}' +
-      '.syscap-meter .fill{height:100%;background:linear-gradient(90deg,#7c5cff,#4dd0ff)}' +
-      '.syscap-meter .lbl{display:flex;justify-content:space-between;font-size:12px;margin-top:6px;color:var(--muted,#8a93a6)}' +
-      '.syscap-meter .lbl b{font-weight:800;color:var(--text)}' +
-      '.syscap-warm{font-size:12px;color:var(--muted,#8a93a6);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}' +
-      '.syscap-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}' +
-      '.syscap-tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);padding:6px 8px;border-bottom:1px solid var(--border)}' +
-      '.syscap-tbl td{padding:7px 8px;border-bottom:1px solid var(--border)}' +
-      '.syscap-tbl .num{text-align:right;font-variant-numeric:tabular-nums}' +
-      '.syscap-bar{display:inline-block;height:6px;border-radius:4px;background:var(--border);width:52px;overflow:hidden;vertical-align:middle;margin-left:8px}' +
-      '.syscap-bar>i{display:block;height:100%;background:#7c5cff}' +
-      '</style>';
-  }
-  function sqCapacityHtml(cap) {
-    if (!cap) return "";
-    var css = syscapCss();
-    if (!cap.inboxes) {
-      return css + '<div class="syscap"><div class="syscap-h"><h3>📨 Sending system</h3><span class="sub">your domains, Email IDs, and daily cold-send capacity</span></div>' +
-        '<div class="empty" style="margin-top:12px">No Email IDs yet. <a href="#senders">Import your inboxes</a> and assign them to recruiters — then this shows the model: <b>domains → Email IDs → ' + (cap.coldPerInbox || 2) + ' cold sends/day each</b>, draining live as you send.</div></div>';
-    }
-    var pct = cap.coldCapacity ? Math.min(100, Math.round((cap.coldUsedToday / cap.coldCapacity) * 100)) : 0;
-    var flow =
-      '<div class="syscap-flow">' +
-        '<div class="syscap-step"><div class="n">' + sqFmt(cap.domains) + '</div><div class="l">Domains</div><div class="s">' + cap.inboxesPerDomain + ' Email IDs each</div></div>' +
-        '<div class="syscap-arrow">→</div>' +
-        '<div class="syscap-step"><div class="n">' + sqFmt(cap.inboxes) + '</div><div class="l">Email IDs</div><div class="s">' + cap.coldPerInbox + ' cold + ' + cap.warmingPerInbox + ' warm / day</div></div>' +
-        '<div class="syscap-arrow">→</div>' +
-        '<div class="syscap-step"><div class="n">' + sqFmt(cap.coldCapacity) + '</div><div class="l">Cold sends / day</div><div class="s">hard cap · ' + sqFmt(cap.inboxes) + ' × ' + cap.coldPerInbox + '</div></div>' +
-      '</div>';
-    var meter =
-      '<div class="syscap-meter"><div class="track"><div class="fill" style="width:' + pct + '%"></div></div>' +
-        '<div class="lbl"><span><b>' + sqFmt(cap.coldUsedToday) + '</b> sent today</span><span><b>' + sqFmt(cap.coldRemaining) + '</b> left · ' + pct + '% of capacity used</span></div></div>';
-    var warm = '<div class="syscap-warm">＋ <b>' + sqFmt(cap.warmingPerDay) + '</b> warming emails/day handled by <b>Smartlead</b> (' + cap.warmingPerInbox + '/inbox) — kept separate from your cold sends.</div>';
-    var rows = (cap.byRecruiter || []).map(function (r) {
-      var rp = r.coldCapacity ? Math.min(100, Math.round((r.coldUsedToday / r.coldCapacity) * 100)) : 0;
-      return '<tr><td><b>' + esc(r.ownerName) + '</b></td>' +
-        '<td class="num">' + sqFmt(r.inboxes) + '</td>' +
-        '<td class="num">' + sqFmt(r.domains) + '</td>' +
-        '<td class="num">' + sqFmt(r.coldUsedToday) + ' / ' + sqFmt(r.coldCapacity) + '<span class="syscap-bar"><i style="width:' + rp + '%"></i></span></td>' +
-        '<td class="num"><b>' + sqFmt(r.coldRemaining) + '</b></td></tr>';
-    }).join("");
-    var table = rows
-      ? '<table class="syscap-tbl"><thead><tr><th>Recruiter</th><th class="num">Email IDs</th><th class="num">Domains</th><th class="num">Cold used / cap</th><th class="num">Left today</th></tr></thead><tbody>' + rows + '</tbody></table>'
-      : '';
-    return css + '<div class="syscap">' +
-      '<div class="syscap-h"><h3>📨 Sending system</h3><span class="sub">every Email ID maxed at ' + cap.coldPerInbox + ' cold/day · draining live</span></div>' +
-      flow + meter + warm + table + '</div>';
-  }
-  function sqOverviewHtml(o) {
-    var healthy = o.runwayDays >= o.bufferDays;
-    var statusPill = healthy
-      ? '<span class="sq-pill green">🟢 Buffer healthy · ' + o.runwayDays + " days staged</span>"
-      : (o.readySupply > 0
-        ? '<span class="sq-pill yellow">🟡 Buffer low · ' + o.runwayDays + " day" + (o.runwayDays === 1 ? "" : "s") + " staged</span>"
-        : '<span class="sq-pill red">🔴 Buffer empty · stage prospects now</span>');
-    var supply = '<div class="sq-cards">' +
-      '<div class="sq-card big"><div class="sq-k">Send-ready supply</div><div class="sq-v">' + sqFmt(o.readySupply) + "</div><div class=\"sq-sub\">" + statusPill + "</div></div>" +
-      '<div class="sq-card"><div class="sq-k">Daily target</div><div class="sq-v">' + sqFmt(o.targetMin) + "–" + sqFmt(o.targetMax) + "</div><div class=\"sq-sub\">first emails / day</div></div>" +
-      '<div class="sq-card"><div class="sq-k">Runway</div><div class="sq-v">' + o.runwayDays + ' <span class="sq-unit">days</span></div><div class="sq-sub">target ≥ ' + o.bufferDays + " days</div></div>" +
-      '<div class="sq-card"><div class="sq-k">Already sending</div><div class="sq-v">' + sqFmt(o.inSequence) + "</div><div class=\"sq-sub\">their video 2nd emails roll out next day</div></div>" +
-    "</div>";
-    var callout = "";
-    if (o.shortfall > 0) {
-      callout = '<div class="sq-callout"><div class="sq-callout-h">⚠️ Stage ' + sqFmt(o.shortfall) + " more send-ready prospects to fill " + o.bufferDays + " days. Follow these steps:</div>" +
-        '<div class="sq-steps">' +
-          '<a class="sq-step" href="#inmarket"><b>1 · Find</b><span>Run a Targeted JSearch search → scrape new prospects</span></a>' +
-          '<a class="sq-step" href="#clients"><b>2 · Verify emails</b><span>' + (o.needsAssets.noVerifiedEmail ? sqFmt(o.needsAssets.noVerifiedEmail) + " need a verified email" : "Confirm deliverable addresses") + "</span></a>" +
-          '<a class="sq-step" href="#pipstudio"><b>3 · Record / assign video</b><span>' + (o.needsAssets.noVideo ? sqFmt(o.needsAssets.noVideo) + " need a 2nd-email video" : "PiP Studio: clip + headshot") + "</span></a>" +
-        "</div></div>";
-    }
-    var needs = '<div class="sq-needs"><div class="sq-h">Needs assets <span class="muted">— held until complete (' + sqFmt(o.needsAssets.total) + ") · click to see who</span></div>" +
-      '<div class="sq-need-grid">' +
-        sqNeed("✉️ Verified email", o.needsAssets.noVerifiedEmail, "verified_email") +
-        sqNeed("🎬 2nd-email video", o.needsAssets.noVideo, "video") +
-        sqNeed("🔗 Landing page", o.needsAssets.noWatch, "watch_page") +
-      '</div><div id="sqWorklist" class="sq-worklist"></div></div>';
-    var rows = o.days.map(function (dd, i) {
-      var dot = dd.fill === "green" ? "🟢" : dd.fill === "yellow" ? "🟡" : "🔴";
-      var label = i === 0 ? "Today" : i === 1 ? "Tomorrow" : sqDayLabel(dd.date);
-      return "<tr><td>" + dot + " <b>" + esc(label) + '</b> <span class="muted">' + esc(dd.date) + "</span></td>" +
-        '<td class="sq-num">' + sqFmt(dd.firstEmails) + "</td>" +
-        '<td class="sq-num">' + sqFmt(dd.secondEmails) + "</td>" +
-        '<td class="sq-num sq-tot">' + sqFmt(dd.total) + "</td></tr>";
-    }).join("");
-    var proj = '<div class="sq-h">Projected sends — next ' + o.bufferDays + " days</div>" +
-      '<table class="sq-table"><thead><tr><th>Day</th><th class="sq-num">1st (text)</th><th class="sq-num">2nd (video)</th><th class="sq-num">Total</th></tr></thead><tbody>' + rows + "</tbody></table>" +
-      '<div class="sq-note muted">Each day = new first emails + the previous day’s batch getting their video 2nd email. Steady state ≈ ' + sqFmt(o.targetMin * 2) + "–" + sqFmt(o.targetMax * 2) + " emails/day.</div>";
-    var camps = (o.campaigns && o.campaigns.length)
-      ? '<div class="sq-h">Campaigns in the queue</div><div class="sq-camps">' + o.campaigns.map(function (c) {
-          return '<div class="sq-camp"><div class="sq-camp-name">' + esc(c.label) + (c.status ? ' <span class="sq-cstatus">' + esc(c.status) + "</span>" : "") + "</div>" +
-            '<div class="sq-camp-nums"><span class="sq-ready">' + sqFmt(c.ready) + " ready</span>" + (c.needsAssets ? ' <span class="muted">· ' + sqFmt(c.needsAssets) + " needs assets</span>" : "") + "</div></div>";
-        }).join("") + "</div>"
-      : '<div class="sq-h">Campaigns in the queue</div><div class="empty">No queued prospects yet. <a href="#inmarket">Run a Targeted JSearch search</a> to start staging.</div>';
-    return supply + callout + needs + '<div class="sq-grid"><div class="sq-panel">' + proj + '</div><div class="sq-panel">' + camps + "</div></div>";
-  }
-  // ⚡ Auto-fill panel — the one control that makes the queue set-and-forget: a toggle, the campaign
-  // to stage into, the daily band + buffer, and a "Fill now" button. When ON, the engine keeps the
-  // buffer topped automatically (it stages verified prospects; it never sends).
-  function sqAutofillHtml(af, campaigns) {
-    var s = (af && af.settings) || {};
-    var on = !!s.enabled;
-    var opts = '<option value="">— pick a campaign —</option>' + (campaigns || []).map(function (c) {
-      return '<option value="' + esc(c.id) + '"' + (c.id === s.campaignId ? " selected" : "") + ">" + esc(c.name) + (c.sendQueue ? " ✓" : "") + (c.status ? " (" + esc(c.status) + ")" : "") + "</option>";
-    }).join("");
-    var sel = (campaigns || []).filter(function (c) { return c.id === s.campaignId; })[0];
-    var setupNote = !sel ? "Pick a campaign, then set it up for Day-0 text + Day-1 video."
-      : sel.sendQueue ? "✓ Set up: 1st email Day 0 · video 2nd email Day 1 · send-ready gate ON" + (sel.scheduledFor ? " · launch " + esc(sel.scheduledFor) : "")
-      : "Not set up yet — click to time it Day-0 / Day-1 and gate sends on send-ready.";
-    var setupRow = '<div class="sq-af-setup">' +
-        '<label class="sq-af-f">Launch date<input type="date" id="sqAfDate" value="' + (sel && sel.scheduledFor || "") + '"></label>' +
-        '<button type="button" class="btn btn-ghost btn-sm" id="sqAfSetup">⚙️ Set up as Send Queue campaign</button>' +
-        '<span class="sq-af-setupnote ' + (sel && sel.sendQueue ? "ok" : "muted") + '">' + setupNote + "</span>" +
-      "</div>";
-    return '<div class="sq-af' + (on ? " on" : "") + '">' +
-        '<div class="sq-af-head">' +
-          '<label class="sq-switch" title="Turn auto-fill on/off"><input type="checkbox" id="sqAfToggle"' + (on ? " checked" : "") + '><span class="sq-slider"></span></label>' +
-          '<div class="sq-af-title">⚡ Auto-fill <span class="muted">' + (on ? "ON — keeping the buffer full" : "OFF") + "</span></div>" +
-          '<div class="sq-af-status">Staged today: <b>' + ((af && af.today) || 0).toLocaleString() + "</b> / " + ((af && af.dailyTarget) || 0).toLocaleString() + " target</div>" +
-        "</div>" +
-        '<div class="sq-af-row">' +
-          '<label class="sq-af-f">Campaign<select id="sqAfCampaign">' + opts + "</select></label>" +
-          '<label class="sq-af-f">Daily min<input type="number" id="sqAfMin" value="' + (s.targetMin || 4000) + '" min="1" step="500"></label>' +
-          '<label class="sq-af-f">Daily max<input type="number" id="sqAfMax" value="' + (s.targetMax || 6000) + '" min="1" step="500"></label>' +
-          '<label class="sq-af-f">Buffer days<input type="number" id="sqAfBuffer" value="' + (s.bufferDays || 5) + '" min="1" max="14"></label>' +
-          '<button type="button" class="btn btn-ghost btn-sm" id="sqAfSave">Save</button>' +
-          '<button type="button" class="btn btn-primary btn-sm" id="sqAfFill">⬇ Fill now</button>' +
-        "</div>" +
-        setupRow +
-        '<div class="sq-af-note muted">When ON, it stages verified send-ready prospects into the chosen campaign every few minutes — keeping ~' + (s.bufferDays || 5) + " days ahead so no day runs dry. It never sends; your campaign’s own controls do.</div>" +
-      "</div>";
-  }
-  function sqFillReason(r) {
-    return r === "buffer_full" ? "Buffer already full — nothing more to stage right now."
-      : r === "daily_target_met" ? "Today’s target is already met."
-      : r === "no_ready_supply" ? "No verified, contactable prospects waiting. Run a Targeted JSearch search + verify emails first."
-      : r === "no_campaign" ? "Pick a campaign first."
-      : "Nothing to stage right now.";
-  }
-  function sqGatherAf() {
-    return {
-      enabled: document.getElementById("sqAfToggle").checked,
-      campaignId: document.getElementById("sqAfCampaign").value,
-      targetMin: parseInt(document.getElementById("sqAfMin").value, 10) || 4000,
-      targetMax: parseInt(document.getElementById("sqAfMax").value, 10) || 6000,
-      bufferDays: parseInt(document.getElementById("sqAfBuffer").value, 10) || 5
-    };
-  }
-  function sqWireAutofill() {
-    var save = document.getElementById("sqAfSave"), fill = document.getElementById("sqAfFill"), toggle = document.getElementById("sqAfToggle");
-    function persist(cb) {
-      var s = sqGatherAf();
-      if (s.enabled && !s.campaignId) { toast("Pick a campaign to auto-fill into."); if (toggle) toggle.checked = false; return; }
-      send("/send-queue", "POST", { action: "autofill_settings", settings: s }).then(function (r) {
-        if (r && r.ok) { if (cb) cb(); else { toast(s.enabled ? "Auto-fill ON." : "Auto-fill saved."); sqReload(); } }
-        else toast("Couldn’t save auto-fill.");
-      }).catch(function () { toast("Couldn’t save auto-fill."); });
-    }
-    if (save) save.addEventListener("click", function () { persist(); });
-    if (toggle) toggle.addEventListener("change", function () { persist(); });
-    // Changing the campaign saves the choice and reloads, so the "set up" status reflects the new pick.
-    var camp = document.getElementById("sqAfCampaign");
-    if (camp) camp.addEventListener("change", function () { persist(); });
-    // One-click: time the chosen campaign Day-0 text + Day-1 video and turn on the send-ready gate.
-    var setup = document.getElementById("sqAfSetup");
-    if (setup) setup.addEventListener("click", function () {
-      var cid = document.getElementById("sqAfCampaign").value;
-      if (!cid) { toast("Pick a campaign first."); return; }
-      var date = document.getElementById("sqAfDate").value;
-      setup.disabled = true; setup.textContent = "Setting up…";
-      send("/send-queue", "POST", { action: "campaign_setup", campaignId: cid, scheduledFor: date }).then(function (r) {
-        var res = r && r.data && r.data.result;
-        toast(res ? res.message : "Couldn’t set up the campaign.");
-        sqReload();
-      }).catch(function () { setup.disabled = false; setup.textContent = "⚙️ Set up as Send Queue campaign"; toast("Couldn’t set up the campaign."); });
-    });
-    if (fill) fill.addEventListener("click", function () {
-      var s = sqGatherAf();
-      if (!s.campaignId) { toast("Pick a campaign first."); return; }
-      fill.disabled = true; fill.textContent = "Filling…";
-      send("/send-queue", "POST", { action: "autofill_settings", settings: s }).then(function () {
-        return send("/send-queue", "POST", { action: "fill_now", campaignId: s.campaignId });
-      }).then(function (r) {
-        var res = r && r.data && r.data.result;
-        if (res && res.enrolled > 0) toast("Staged " + res.enrolled.toLocaleString() + " prospect" + (res.enrolled === 1 ? "" : "s") + " into the queue.");
-        else toast(sqFillReason(res ? res.reason : ""));
-        sqReload();
-      }).catch(function () { fill.disabled = false; fill.textContent = "⬇ Fill now"; toast("Fill didn’t run."); });
-    });
-  }
-  function sqReload() {
-    var body = document.getElementById("sqBody"); if (!body) return;
-    api("/send-queue").then(function (d) {
-      var b = document.getElementById("sqBody"); if (!b) return;
-      if (!d || !d.overview) { b.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>'; return; }
-      b.innerHTML = sqAutofillHtml(d.autofill || { settings: {} }, d.campaigns || []) + sqCapacityHtml(d.senders) + sqOverviewHtml(d.overview);
-      sqWireAutofill();
-      sqWireWorklist();
-    }).catch(function () {
-      var b = document.getElementById("sqBody"); if (b) b.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>';
-    });
-  }
-  function renderSendQueue(el) {
-    el.innerHTML = '<div class="view-intro">Stage 4–6K send-ready prospects every day so the first email + next-day video email go out hands-off. Keep the buffer full so no day goes without a batch.</div><div id="sqBody">' + loading() + "</div>";
-    sqReload();
-  }
-
-  // Human label for a JSearch employment-type code.
-  function imqEmpLabel(code) { for (var i = 0; i < IM_QEMP.length; i++) if (IM_QEMP[i][0] === code) return IM_QEMP[i][1]; return code; }
-
-  /**
-   * TARGETED JSEARCH panel — the headline Hire Signals control. Author an exact search
-   * (role/keywords + location + recency + employment type), save it to a queue, RUN it on demand,
-   * then PICK which companies actually merge into the pool. Nothing scrapes until you press Run, and
-   * nothing enters the pool until you commit your picks — so you target exactly who you want.
-   */
-  function renderTargetedQueue(host) {
-    if (!host) return;
-    host.innerHTML =
-      '<div class="imq">' +
-        '<div class="imq-head">' +
-          '<span class="imq-title">🎯 Targeted job search</span>' +
-          '<span class="imq-sub">Find companies hiring right now — by role, market, location, and size.</span>' +
-        "</div>" +
-        '<form class="imq-builder" id="imqForm">' +
-          // Search by JOB TITLE and/or INDUSTRY / market (either alone works; together they narrow),
-          // plus an optional location. JSearch folds title + industry into one keyword query.
-          '<input id="imqQuery" class="imq-in imq-grow" type="text" autocomplete="off" placeholder="🔎 Job title — e.g. controller, registered nurse, backend engineer" />' +
-          '<input id="imqIndustry" class="imq-in imq-grow" type="text" autocomplete="off" placeholder="🏭 Industry / market — e.g. fintech, healthcare (optional)" />' +
-          '<input id="imqLoc" class="imq-in" type="text" autocomplete="off" placeholder="📍 Location — blank = nationwide" />' +
-          '<button type="submit" class="btn btn-primary btn-sm" id="imqAdd">🔎 Search</button>' +
-        "</form>" +
-        // Company-size narrow (multi-select bands). Resolved free via Wikidata + heuristic.
-        '<div class="imq-opts imq-sizes">' +
-          '<span class="imq-optlbl">👥 Company size:</span>' +
-          IM_SIZES.map(function (s) { return '<button type="button" class="imq-size" data-act="sizetoggle" data-size="' + esc(s.v) + '">' + esc(s.l) + "</button>"; }).join("") +
-          '<button type="button" class="im-mini" data-act="sizeclear">Clear</button>' +
-        "</div>" +
-        '<div id="imqPreview" class="imq-preview"></div>' +
-      "</div>";
-
-    // Selected company-size bands for the builder (multi-select). Reflected on the .imq-size chips.
-    var imqSizes = [];
-    function syncImqSizes() {
-      Array.prototype.forEach.call(host.querySelectorAll(".imq-size"), function (c) {
-        c.classList.toggle("active", imqSizes.indexOf(c.getAttribute("data-size")) >= 0);
-      });
-    }
-    function imqGather() {
-      return {
-        query: host.querySelector("#imqQuery").value.trim(),
-        industry: host.querySelector("#imqIndustry").value.trim(),
-        location: host.querySelector("#imqLoc").value.trim(),
-        // Sensible fixed defaults for the params no longer exposed as knobs.
-        datePosted: "week",
-        limit: 100,
-        employmentTypes: [],
-        remoteOnly: false,
-        headcountBands: imqSizes.slice(),
-        confirmedSizeOnly: false
-      };
-    }
-    function imqConfigMsg() {
-      var pv = host.querySelector("#imqPreview");
-      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Job feed isn’t connected yet — add your JSearch (RapidAPI) key to <b>RAPID_JOBS_KEY</b> + <b>RAPID_JOBS_HOST</b>, then run again.</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
-    }
-
-    function imqRun(s) {
-      if (imQBusy || !s) return;
-      imQBusy = true;
-      var label = s.query || s.industry || "your search";
-      var btn = host.querySelector("#imqAdd"); var bt = btn ? btn.textContent : "";
-      if (btn) { btn.disabled = true; btn.textContent = "Searching…"; }
-      var pv = host.querySelector("#imqPreview");
-      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Searching “' + esc(label) + '” on JSearch… pulling fresh postings.</div></div>';
-      function done() { imQBusy = false; if (btn) { btn.disabled = false; btn.textContent = bt; } }
-      // Run WITHOUT saving — the backend accepts an ad-hoc search object.
-      send("/in-market", "POST", { action: "queue_run", search: s }).then(function (r) {
-        done();
-        if (!r || !r.ok) {
-          if (r && (r.status === 409 || /not_configured/.test(String((r && r.error) || "")))) { imqConfigMsg(); return; }
-          imQPreview = null; imqRenderPreview(); toast("That search didn’t run. Try again."); return;
-        }
-        var leads = (r.data && r.data.leads) || [];
-        var d = r.data || {};
-        imQPreview = {
-          id: null, name: label, leads: leads, picks: {},
-          newCompanies: d.newCompanies || 0, pulledCompanies: d.pulledCompanies || 0,
-          newPositions: d.newPositions || 0, pulledPositions: d.pulledPositions || 0,
-          suppressedCompanies: d.suppressedCompanies || 0,
-          suppressedRoles: d.suppressedRoles || 0,
-          threshold: d.suppressThreshold || 2
-        };
-        // Default selection = the FRESH list (companies not already pulled). If everything is
-        // already in the pool, default to all selected so re-pulling is still one click.
-        var anyNew = leads.some(function (l) { return !l.inPool; });
-        for (var k = 0; k < leads.length; k++) imQPreview.picks[k] = anyNew ? !leads[k].inPool : true;
-        imqRenderPreview();
-      }).catch(function (e) {
-        done();
-        if (e && e.status === 409) { imqConfigMsg(); return; }
-        imQPreview = null; imqRenderPreview(); toast("That search didn’t run. Try again.");
-      });
-    }
-
-    function imqUpdatePvCount() {
-      if (!imQPreview) return;
-      var leads = imQPreview.leads || [], picked = 0;
-      for (var i = 0; i < leads.length; i++) if (imQPreview.picks[i]) picked++;
-      var btn = host.querySelector('[data-act="pvcommit"]'); if (btn) btn.textContent = "⬇ Pull selected (" + picked + ")";
-      var all = host.querySelector('[data-act="pvall"]'); if (all) all.checked = picked === leads.length && leads.length > 0;
-    }
-    function imqRenderPreview() {
-      var box = host.querySelector("#imqPreview"); if (!box) return;
-      if (!imQPreview) { box.innerHTML = ""; return; }
-      var leads = imQPreview.leads || [];
-      var supC = imQPreview.suppressedCompanies || 0, supR = imQPreview.suppressedRoles || 0, thr = imQPreview.threshold || 2;
-      // Note about already-emailed companies/roles we hid (kept ones with a NEW job title).
-      var supNote = (supC + supR) > 0
-        ? ' <span class="imq-pv-sup" title="Already emailed ' + thr + '×+ — hidden, except companies that came back with a different job title.">· hid ' +
-            (supC ? supC + " compan" + (supC === 1 ? "y" : "ies") : "") + (supC && supR ? " + " : "") +
-            (supR ? supR + " role" + (supR === 1 ? "" : "s") : "") + " already emailed " + thr + "×</span>"
-        : "";
-      if (!leads.length) {
-        var emptyMsg = (supC + supR) > 0
-          ? "Every match for “" + esc(imQPreview.name) + "” was already emailed " + thr + "×+ — nothing new to add. A different job title would still come through."
-          : "No US companies found for “" + esc(imQPreview.name) + "”. Try broader keywords, a wider date range, or a different location.";
-        box.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">' + emptyMsg + '</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
-        return;
-      }
-      var picked = 0; for (var i = 0; i < leads.length; i++) if (imQPreview.picks[i]) picked++;
-      var newC = imQPreview.newCompanies || 0, pulC = imQPreview.pulledCompanies || 0;
-      var newP = imQPreview.newPositions || 0, pulP = imQPreview.pulledPositions || 0;
-      var totP = newP + pulP;
-      var rows = leads.map(function (l, i) {
-        var roles = (l.roleDetails && l.roleDetails.length) || (l.roles && l.roles.length) || 1;
-        var badge = l.inPool
-          ? '<span class="imq-pv-badge pool" title="Already in your pool — pulled before">♻ In pool</span>'
-          : '<span class="imq-pv-badge new" title="Net-new — not pulled before">🆕 New</span>';
-        return '<label class="imq-pv-row' + (l.inPool ? " is-pool" : " is-new") + '">' +
-            '<input type="checkbox" data-act="pvtoggle" data-i="' + i + '"' + (imQPreview.picks[i] ? " checked" : "") + ">" +
-            badge +
-            '<span class="imq-pv-co">' + esc(l.company) + "</span>" +
-            (l.domain ? '<span class="imq-pv-dom">' + esc(l.domain) + "</span>" : '<span class="imq-pv-dom muted">no website</span>') +
-            '<span class="imq-pv-roles">' + roles + " position" + (roles === 1 ? "" : "s") + "</span>" +
-            (l.location ? '<span class="imq-pv-loc muted">' + esc(l.location) + "</span>" : "") +
-          "</label>";
-      }).join("");
-      box.innerHTML = '<div class="imq-pv">' +
-          '<div class="imq-pv-head">Preview · <b>' + leads.length + "</b> compan" + (leads.length === 1 ? "y" : "ies") + " · <b>" + totP + "</b> position" + (totP === 1 ? "" : "s") + " for “" + esc(imQPreview.name) + "”" + supNote + "</div>" +
-          '<div class="imq-pv-stats">' +
-            '<span class="imq-pv-stat new">🆕 <b>' + newP + "</b> position" + (newP === 1 ? "" : "s") + " not pulled <span class=\"muted\">(" + newC + " new compan" + (newC === 1 ? "y" : "ies") + ")</span></span>" +
-            '<span class="imq-pv-stat pool">♻ <b>' + pulP + "</b> already pulled <span class=\"muted\">(" + pulC + " compan" + (pulC === 1 ? "y" : "ies") + ")</span></span>" +
-            '<span class="imq-pv-quick">Select: ' +
-              '<button type="button" class="im-mini" data-act="pvselnew">New only (' + newC + ")</button>" +
-              '<button type="button" class="im-mini" data-act="pvselall">All</button>' +
-              '<button type="button" class="im-mini" data-act="pvselpool">Already pulled (' + pulC + ")</button>" +
-              '<button type="button" class="im-mini" data-act="pvselnone">None</button>' +
-            "</span>" +
-          "</div>" +
-          '<div class="imq-pv-list">' + rows + "</div>" +
-          '<div class="imq-pv-foot">' +
-            '<button type="button" class="btn btn-primary btn-sm" data-act="pvcommit">⬇ Pull selected (' + picked + ")</button>" +
-            '<button type="button" class="im-mini" data-act="pvclose">Cancel</button>' +
-            '<span class="imq-pv-note muted">Only what you pick enters your pool. <b>New only</b> = pull a fresh list (net-new prospects). Then decision-maker research + verified job-post screenshots run on them.</span>' +
-          "</div>" +
-        "</div>";
-    }
-    // Quick-select helper for the preview: all / none / new-only (fresh) / already-pulled.
-    function imqSelect(mode) {
-      if (!imQPreview) return;
-      var leads = imQPreview.leads || [];
-      for (var i = 0; i < leads.length; i++) {
-        imQPreview.picks[i] = mode === "all" ? true : mode === "none" ? false : mode === "new" ? !leads[i].inPool : !!leads[i].inPool;
-      }
-      imqRenderPreview();
-    }
-    function imqCommit() {
-      if (!imQPreview) return;
-      var leads = (imQPreview.leads || []).filter(function (_, i) { return imQPreview.picks[i]; });
-      if (!leads.length) { toast("Select at least one company to pull."); return; }
-      var btn = host.querySelector('[data-act="pvcommit"]'); if (btn) { btn.disabled = true; btn.textContent = "Pulling…"; }
-      send("/in-market", "POST", { action: "queue_commit", leads: leads }).then(function (r) {
-        if (r && r.ok) {
-          toast("Pulled " + leads.length + " compan" + (leads.length === 1 ? "y" : "ies") + " — finding decision-makers, validating emails, and building screenshots now. Track them in the Clients tab.");
-          imQPreview = null; imqRenderPreview();
-        } else { if (btn) { btn.disabled = false; } toast("Couldn’t pull those right now. Try again."); }
-      }).catch(function () { if (btn) { btn.disabled = false; } toast("Couldn’t pull those right now. Try again."); });
-    }
-
-    // Submit → run the search immediately (no save step) and show the company pick-list.
-    host.querySelector("#imqForm").addEventListener("submit", function (e) {
-      e.preventDefault();
-      var s = imqGather();
-      if (!s.query && !s.industry) { toast("Enter a job title or an industry to search."); return; }
-      imqRun(s);
-    });
-
-    // Delegated clicks: company-size chips + preview (pick-list) controls.
-    host.addEventListener("click", function (e) {
-      var t = e.target.closest ? e.target.closest("[data-act]") : null; if (!t) return;
-      var act = t.getAttribute("data-act");
-      if (act === "sizetoggle") { var v = t.getAttribute("data-size"), k = imqSizes.indexOf(v); if (k >= 0) imqSizes.splice(k, 1); else imqSizes.push(v); syncImqSizes(); }
-      else if (act === "sizeclear") { imqSizes = []; syncImqSizes(); }
-      else if (act === "pvclose") { imQPreview = null; imqRenderPreview(); }
-      else if (act === "pvcommit") imqCommit();
-      else if (act === "pvselnew") imqSelect("new");
-      else if (act === "pvselall") imqSelect("all");
-      else if (act === "pvselpool") imqSelect("pool");
-      else if (act === "pvselnone") imqSelect("none");
-    });
-    // Delegated changes for the preview checkboxes (toggle one / select all).
-    host.addEventListener("change", function (e) {
-      var t = e.target; var act = t.getAttribute ? t.getAttribute("data-act") : null;
-      if (!act || !imQPreview) return;
-      if (act === "pvtoggle") { imQPreview.picks[parseInt(t.getAttribute("data-i"), 10)] = t.checked; imqUpdatePvCount(); }
-      else if (act === "pvall") { var on = t.checked, leads = imQPreview.leads || []; for (var i = 0; i < leads.length; i++) imQPreview.picks[i] = on; imqRenderPreview(); }
-    });
-  }
-
   function renderInMarket(el) {
-    imQPreview = null; imQEditId = null; imQBusy = false;
+    imPicks = {}; imMinScore = 0; imSelectedSignals = []; imSelectedIndustries = []; imSelectedSizes = []; imBreakdown = []; imNeeds = []; imNeedFn = "";
     el.innerHTML =
       '<div class="im-hero">' +
         '<div class="im-bar">' +
           '<h1 class="im-title">Who\'s hiring <span class="gradient-text">right now.</span></h1>' +
-          '<span class="im-source-note muted">Powered by JSearch · nationwide by default</span>' +
+          '<div class="im-modes" id="imModes">' +
+            '<button type="button" class="im-mode active" data-mode="industry">Industry / market</button>' +
+            '<button type="button" class="im-mode" data-mode="company">Company name</button>' +
+            '<button type="button" class="im-mode" data-mode="title">Job title</button>' +
+          "</div>" +
         "</div>" +
-        // The ONE control: search by job title and/or industry, narrow by company size + location,
-        // then PICK which companies to pull. Rendered by renderTargetedQueue() right after innerHTML.
-        '<div id="imTargeted" class="im-targeted"></div>' +
-        // What happens after you pull — everything downstream is automatic and lives in Clients.
-        '<div class="im-handoff muted" style="margin-top:14px;font-size:13px;line-height:1.5">Pull the companies you want and the rest runs on its own — decision-makers, verified emails, and screenshot videos are built automatically and appear in the <a href="#clients">Clients</a> tab.</div>' +
-      "</div>";
+        '<form class="im-search" id="imForm">' +
+          '<span class="ico">⌕</span>' +
+          '<input id="imQuery" type="text" autocomplete="off" placeholder="' + esc(IM_PLACEHOLDER[imMode]) + '" />' +
+          '<button type="submit" class="btn btn-primary" id="imSearchBtn">Find companies</button>' +
+        "</form>" +
+        // Date search, filter to freshly-posted roles for warmer, more targeted outreach.
+        '<div class="im-daterow">' +
+          '<span class="im-datelbl">📅 Posted within</span>' +
+          '<select id="imPosted" class="im-date">' +
+            [["0", "Any time"], ["1", "Last 24 hours"], ["3", "Last 3 days"], ["7", "Last 7 days"], ["14", "Last 14 days"], ["30", "Last 30 days"]]
+              .map(function (o) { return '<option value="' + o[0] + '"' + (String(imPostedWithin) === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") +
+          "</select>" +
+          '<button type="button" class="btn btn-primary btn-sm" id="imPostedGo">Search this range</button>' +
+          '<span class="im-datehint muted">Fresher posts = warmer outreach</span>' +
+        "</div>" +
+        // Company size, narrow by headcount band (multi-select chips). Click to refine.
+        '<div class="im-daterow im-sizerow">' +
+          '<span class="im-datelbl">👥 Company size</span>' +
+          IM_SIZES.map(function (s) { return '<button type="button" class="im-sizechip" data-size="' + esc(s.v) + '">' + esc(s.l) + "</button>"; }).join("") +
+          '<button type="button" class="im-mini" data-clear="size">Clear</button>' +
+          '<label class="im-confirmed" title="Show only companies with a confirmed (Wikidata) headcount, hide estimates"><input type="checkbox" id="imConfirmedSize"' + (imConfirmedSizeOnly ? " checked" : "") + "> Confirmed only</label>" +
+        "</div>" +
+        // Daily import read, populated on open so you see today's intake immediately.
+        '<div id="imImportBanner" class="im-import"></div>' +
+        // Entry to the curated decision-maker list (the daily database of real hiring managers).
+        '<div class="im-curation-cta">' +
+          '<button type="button" class="btn btn-primary btn-sm" id="imCurationBtn">🎯 Decision-maker list <span style="opacity:.8;font-weight:500">— real hiring managers, curated daily</span></button>' +
+          '<span class="muted" style="font-size:12px;margin-left:8px">Reviewed by you, then pushed to Email</span>' +
+        "</div>" +
+        // Industries, multi-select with Select all / Clear, in a compact scroll area.
+        '<div class="im-group" id="imIndGroup">' +
+          '<div class="im-group-head"><span class="im-group-title">Industries</span>' +
+            '<button type="button" class="im-mini" data-all="ind">Select all</button>' +
+            '<button type="button" class="im-mini" data-clear="ind">Clear</button></div>' +
+          '<div class="im-industries im-scroll" id="imIndustries">' +
+            IM_INDUSTRIES.map(function (n) { return '<button type="button" class="im-chip" data-ind="' + esc(n) + '">' + esc(n) + "</button>"; }).join("") +
+          "</div>" +
+        "</div>" +
+        // Hiring signals, collapsed by default to de-clutter; Select all / Clear inside.
+        '<details class="im-group im-sig-details" id="imSigGroup">' +
+          '<summary class="im-group-summary">Hiring signals <span class="muted">- optional filter</span></summary>' +
+          '<div class="im-group-head im-group-head-sub">' +
+            '<button type="button" class="im-mini" data-all="sig">Select all</button>' +
+            '<button type="button" class="im-mini" data-clear="sig">Clear</button></div>' +
+          '<div class="im-signals" id="imSignals">' +
+            IM_SIGNALS.map(function (s) { return '<button type="button" class="im-sigchip" data-sig="' + esc(s.t) + '">' + esc(s.l) + "</button>"; }).join("") +
+          "</div>" +
+        "</details>" +
+      "</div>" +
+      '<div id="imSaved"></div>' +
+      '<div id="imBody"><div class="empty">Pick one or more industries (or Select all) to see who\'s hiring, ranked by hiring intent.</div></div>';
 
-    renderTargetedQueue($("#imTargeted"));
+    renderSavedSignals();
+    loadImportBanner();
+    var curBtn = $("#imCurationBtn");
+    if (curBtn) curBtn.addEventListener("click", function () { renderCuration(); });
+    var form = $("#imForm"), input = $("#imQuery");
+
+    function syncChips() {
+      Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
+        c.classList.toggle("active", imSelectedIndustries.indexOf(c.getAttribute("data-ind")) >= 0);
+      });
+    }
+    function syncSigChips() {
+      Array.prototype.forEach.call(el.querySelectorAll(".im-sigchip"), function (c) {
+        c.classList.toggle("active", imSelectedSignals.indexOf(c.getAttribute("data-sig")) >= 0);
+      });
+    }
+
+    // Build the active search from the current selections (multi-industry + signals + box).
+    function currentSearch() {
+      if (imMode === "company") {
+        var cv = input.value.trim();
+        return cv ? { criteria: { companyName: cv }, label: cv } : null;
+      }
+      if (imMode === "title") {
+        var tv = input.value.trim();
+        return tv ? { criteria: { roleQuery: tv }, label: 'hiring "' + tv + '"' } : null;
+      }
+      var crit = {}, labels = [];
+      if (imSelectedIndustries.length) {
+        crit.industries = imSelectedIndustries.slice();
+        labels.push(imSelectedIndustries.length === IM_INDUSTRIES.length ? "all industries"
+          : imSelectedIndustries.length === 1 ? imSelectedIndustries[0]
+          : imSelectedIndustries.length + " industries");
+      }
+      var q = input.value.trim();
+      if (q) { crit.query = q; labels.push(q); }
+      if (imSelectedSignals.length) labels.push(imSelectedSignals.length + " signal" + (imSelectedSignals.length === 1 ? "" : "s"));
+      if (!imSelectedIndustries.length && !q && !imSelectedSignals.length) return null;
+      return { criteria: crit, label: labels.join(" · ") };
+    }
+    function runNow() {
+      clearTimeout(imSearchTimer);
+      var s = currentSearch();
+      if (s) runSearch(s.criteria, s.label);
+      else $("#imBody").innerHTML = '<div class="empty">' + (imMode === "company"
+        ? "Type a company name above, then your date, size and confirmed-only filters apply to it too."
+        : imMode === "title"
+        ? "Type a job title (keywords) above, we'll surface every US company hiring that role, and show only the matching roles per company."
+        : "Pick one or more industries (or Select all) to see who's hiring.") + "</div>";
+    }
+    function scheduleSearch() { clearTimeout(imSearchTimer); imSearchTimer = setTimeout(runNow, 350); }
+
+    // Search mode toggle: industry/market OR company name.
+    Array.prototype.forEach.call(el.querySelectorAll(".im-mode"), function (m) {
+      m.addEventListener("click", function () {
+        imMode = m.getAttribute("data-mode");
+        Array.prototype.forEach.call(el.querySelectorAll(".im-mode"), function (x) { x.classList.toggle("active", x === m); });
+        input.value = ""; input.placeholder = IM_PLACEHOLDER[imMode];
+        $("#imIndGroup").style.display = (imMode === "industry") ? "" : "none";
+        $("#imSigGroup").style.display = (imMode === "industry") ? "" : "none";
+        $("#imBody").innerHTML = '<div class="empty">' + (imMode === "industry"
+          ? "Pick one or more industries (or Select all) to see who's hiring."
+          : imMode === "title"
+          ? "Type a job title (keywords) to find every US company hiring that role, showing only the matching roles per company."
+          : "Type a company name to check if they're hiring right now, and who owns the open roles.") + "</div>";
+        input.focus();
+      });
+    });
+
+    form.addEventListener("submit", function (e) { e.preventDefault(); runNow(); });
+
+    // Date search: pick a timeframe in the dropdown, then press the button to run the
+    // search for that range. The dropdown only stores the choice; the button triggers it,
+    // so the action is explicit and you get a clear loading state + updated count.
+    var postedSel = $("#imPosted"), postedGo = $("#imPostedGo");
+    function applyPosted() {
+      if (postedSel) imPostedWithin = parseInt(postedSel.value, 10) || 0;
+      var s = currentSearch();
+      if (s) runSearch(s.criteria, s.label);
+      else $("#imBody").innerHTML = '<div class="empty">Pick one or more industries (or Select all) first, then choose a timeframe and press <b>Search this range</b>.</div>';
+    }
+    if (postedSel) postedSel.addEventListener("change", function () { imPostedWithin = parseInt(postedSel.value, 10) || 0; });
+    if (postedGo) postedGo.addEventListener("click", applyPosted);
+
+    // Company-size chips: multi-select toggle → re-run the search narrowed to those bands.
+    function syncSizeChips() {
+      Array.prototype.forEach.call(el.querySelectorAll(".im-sizechip"), function (c) {
+        c.classList.toggle("active", imSelectedSizes.indexOf(c.getAttribute("data-size")) >= 0);
+      });
+    }
+    Array.prototype.forEach.call(el.querySelectorAll(".im-sizechip"), function (c) {
+      c.addEventListener("click", function () {
+        var v = c.getAttribute("data-size");
+        var i = imSelectedSizes.indexOf(v);
+        if (i >= 0) imSelectedSizes.splice(i, 1); else imSelectedSizes.push(v);
+        syncSizeChips(); scheduleSearch();
+      });
+    });
+    var sizeClear = el.querySelector('[data-clear="size"]');
+    if (sizeClear) sizeClear.addEventListener("click", function () { imSelectedSizes = []; syncSizeChips(); scheduleSearch(); });
+    var confSize = $("#imConfirmedSize");
+    if (confSize) confSize.addEventListener("change", function () { imConfirmedSizeOnly = confSize.checked; scheduleSearch(); });
+
+    // Industry chips: multi-select toggle → debounced search.
+    Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
+      c.addEventListener("click", function () {
+        var ind = c.getAttribute("data-ind");
+        var i = imSelectedIndustries.indexOf(ind);
+        if (i >= 0) imSelectedIndustries.splice(i, 1); else imSelectedIndustries.push(ind);
+        syncChips(); scheduleSearch();
+      });
+    });
+    // Signal chips: multi-select toggle → debounced search.
+    Array.prototype.forEach.call(el.querySelectorAll(".im-sigchip"), function (c) {
+      c.addEventListener("click", function () {
+        var t = c.getAttribute("data-sig");
+        var i = imSelectedSignals.indexOf(t);
+        if (i >= 0) imSelectedSignals.splice(i, 1); else imSelectedSignals.push(t);
+        syncSigChips(); scheduleSearch();
+      });
+    });
+    // Select all / Clear for each group.
+    Array.prototype.forEach.call(el.querySelectorAll(".im-mini"), function (b) {
+      b.addEventListener("click", function () {
+        if (b.getAttribute("data-all") === "ind") imSelectedIndustries = IM_INDUSTRIES.slice();
+        else if (b.getAttribute("data-clear") === "ind") imSelectedIndustries = [];
+        else if (b.getAttribute("data-all") === "sig") imSelectedSignals = IM_SIGNALS.map(function (s) { return s.t; });
+        else if (b.getAttribute("data-clear") === "sig") imSelectedSignals = [];
+        syncChips(); syncSigChips(); scheduleSearch();
+      });
+    });
+
+    function runSearch(criteria, label) {
+      var body = $("#imBody"); body.innerHTML = loading();
+      imPicks = {}; imMinScore = 0; imLabel = label || "";
+      var payload = { limit: 500 };
+      if (criteria.companyName) payload.companyName = criteria.companyName;
+      if (criteria.industries) payload.industries = criteria.industries;
+      if (criteria.query) payload.query = criteria.query;
+      if (criteria.roleQuery) payload.roleQuery = criteria.roleQuery;
+      if (imSelectedSignals.length) payload.signalTypes = imSelectedSignals.slice();
+      if (imPostedWithin) payload.postedWithinDays = imPostedWithin;
+      if (imSelectedSizes.length) payload.headcountBands = imSelectedSizes.slice();
+      if (imConfirmedSizeOnly) payload.confirmedSizeOnly = true;
+      send("/in-market", "POST", payload).then(function (r) {
+        if (!r.ok) { body.innerHTML = needsSetup(); return; }
+        inMarketResults = (r.data && r.data.leads) || [];
+        imTotal = (r.data && typeof r.data.pulled === "number") ? r.data.pulled : inMarketResults.length;
+        imStats = (r.data && r.data.stats) || null;
+        imBreakdown = (r.data && r.data.signalBreakdown) || [];
+        imNeeds = (r.data && r.data.needsBreakdown) || [];
+        renderImResults();
+      }).catch(function () { body.innerHTML = needsSetup(); });
+    }
   }
 
   // Render the results region: a bulk toolbar (select-all + narrow-down) over the cards.
@@ -2865,14 +2494,6 @@
         '<div class="im-narrow im-dm" title="Decision-makers to contact per open role">' +
           '<span class="im-dm-lbl">👤 Per role:</span>' +
           [1, 3, 5].map(function (n) { return '<button type="button" class="im-nbtn' + (imDmPerRole === n ? " active" : "") + '" data-dm="' + n + '">' + n + "</button>"; }).join("") +
-        "</div>" +
-        // Screenshot filter: search by whether the company's job posting has a verified screenshot.
-        '<div class="im-narrow im-shot" title="Filter by whether we have a verified screenshot of the company\'s job posting">' +
-          '<span class="im-dm-lbl">📸 Screenshot:</span>' +
-          [["all", "All"], ["has", "Has"], ["none", "None"]].map(function (o) {
-            var on = (o[0] === "all" && imShotFilter === null) || (o[0] === "has" && imShotFilter === true) || (o[0] === "none" && imShotFilter === false);
-            return '<button type="button" class="im-nbtn' + (on ? " active" : "") + '" data-shot="' + o[0] + '">' + o[1] + "</button>";
-          }).join("") +
         "</div>" +
         '<button class="btn btn-ghost btn-sm" id="imSave" disabled>💾 Save as hiring signals</button>' +
         '<button class="btn btn-ghost btn-sm" id="imToEmail" disabled>✉️ Push prospects to Email</button>' +
@@ -2946,134 +2567,27 @@
      attached to specific open roles, with the review gate to BD Bulk.
      ======================================================================== */
   var curPicks = {};   // id -> true (selected curated rows for approve/enroll)
-  var curIndustry = "";  // active industry filter for the enriched list ("" = all industries)
-
-  var curPollTimer = null;
-  var curLastTotal = 0;     // researched count last rendered — detects new leads arriving
-  var curLastSyncMs = 0;    // when the backend last answered — drives the live/reconnecting label
-  var curTick = 0;          // heartbeat counter; we fetch data every Nth tick, tick the label every tick
-  var CUR_BEAT_MS = 4000;   // label ticks this often (so a frozen link is obvious within ~4s)
-  var CUR_FETCH_EVERY = 5;  // pull fresh funnel data every 5th beat (~20s)
-
-  // Repaint just the live-link pill from the client clock, every heartbeat. This is the visible proof
-  // the front end is talking to the back end: it counts up "synced Ns ago" between data pulls and
-  // flips to "reconnecting" the moment the backend stops answering — independent of the data refresh.
-  function curPaintSync() {
-    var el = document.getElementById("curSync"); if (!el) return;
-    if (!curLastSyncMs) { el.innerHTML = "⚪ connecting…"; return; }
-    var ago = Math.round((Date.now() - curLastSyncMs) / 1000);
-    if (ago > 70) { el.innerHTML = "🔴 reconnecting…"; el.title = "lost contact with the lead engine — retrying"; return; }
-    el.innerHTML = "🟢 live · synced " + (ago < CUR_BEAT_MS / 1000 ? "just now" : ago + "s ago");
-    el.title = "live connection to the lead engine — auto-refreshing";
-  }
-
-  // LIVE heartbeat: every beat we repaint the sync label; every ~20s we pull the funnel/health so the
-  // numbers climb on screen as the engine works. When NEW leads have come in AND the user isn't
-  // mid-selection, we also pull them into the list so the database visibly grows. If they're selecting,
-  // we leave the list alone (never lose their picks) — the stats still climb.
-  function curHeartbeat() {
-    var stats = document.getElementById("curStats");
-    if (!stats) { if (curPollTimer) { clearInterval(curPollTimer); curPollTimer = null; } return; }
-    curPaintSync();                 // tick the live label every beat, even on a backgrounded tab
-    if (document.hidden) return;    // but don't hit the network for a tab nobody's looking at
-    curTick++;
-    if (curTick % CUR_FETCH_EVERY !== 0) return;
-    send("/in-market", "POST", { action: "curation_funnel" }).then(function (r) {
-      var d = r && r.data; if (!d || !d.funnel) return;
-      curLastSyncMs = Date.now();   // backend answered → link is healthy
-      var node = document.getElementById("curStats"); if (!node) return;
-      node.innerHTML = curStatsInner(d.funnel, d.health || null, d.search || null, d.fleet || null, d.cc || null);
-      curPaintSync();               // the re-render reset the pill text; restore it immediately
-      var rc = document.getElementById("curResearched");
-      if (rc) rc.textContent = (d.funnel.total || 0).toLocaleString();
-      var total = d.funnel.total || 0;
-      var selecting = Object.keys(curPicks).length > 0;
-      if (total !== curLastTotal && !selecting) renderCuration();   // new leads in → refresh the list
-    }).catch(function () { /* leave curLastSyncMs — curPaintSync flips to reconnecting if it stays stale */ });
-  }
 
   function renderCuration() {
     var body = $("#imBody"); if (!body) return;
-    if (!document.getElementById("curStats")) body.innerHTML = loading(); // only spin on first entry
+    body.innerHTML = loading();
     curPicks = {};
-    if (curPollTimer) { clearInterval(curPollTimer); curPollTimer = null; }
     Promise.all([
       send("/in-market", "POST", { action: "curation_funnel" }),
-      // Populate the WHOLE researched database now — enriched-first (real person + email on top, then
-      // named-email-pending, then title-only researching rows). The list fills immediately and climbs
-      // as the engine works; each row's badge shows its enrichment state (valid / guess / pending).
-      // Scoped to the active industry filter so "search the enriched by industry" works.
-      send("/in-market", "POST", { action: "curation_list", limit: 1000, industry: curIndustry || undefined }),
-      // Distinct industries present on the enriched list (with counts) for the filter dropdown.
-      send("/in-market", "POST", { action: "curation_industries" }),
+      send("/in-market", "POST", { action: "curation_list", contactableOnly: true, limit: 500 }),
     ]).then(function (rs) {
       var funnel = (rs[0] && rs[0].data && rs[0].data.funnel) || null;
       var health = (rs[0] && rs[0].data && rs[0].data.health) || null;
-      var search = (rs[0] && rs[0].data && rs[0].data.search) || null;
-      var fleet = (rs[0] && rs[0].data && rs[0].data.fleet) || null;
-      var cc = (rs[0] && rs[0].data && rs[0].data.cc) || null;
       var list = (rs[1] && rs[1].data && rs[1].data.curated) || [];
-      var industries = (rs[2] && rs[2].data && rs[2].data.industries) || [];
-      curLastTotal = (funnel && funnel.total) || 0;
-      curLastSyncMs = Date.now();   // first good answer from the backend → mark the link live
-      body.innerHTML = curationHtml(funnel, list, health, search, fleet, cc, industries);
+      body.innerHTML = curationHtml(funnel, list, health);
       wireCuration(body, list);
-      curPaintSync();               // paint the live pill right away (don't wait a full beat)
-      curPollTimer = setInterval(curHeartbeat, CUR_BEAT_MS); // live ongoing updates + link heartbeat
-    }).catch(function () { body.innerHTML = '<div class="empty">⚠ Couldn\'t reach the lead engine. It builds the list continuously in the background — this is usually a brief blip right after a deploy. Retrying automatically; reopen this tab in a moment.</div>'; });
+    }).catch(function () { body.innerHTML = '<div class="empty">Couldn\'t load the curated list yet. The accumulator builds it hourly — try again shortly, or run a search first to seed the pool.</div>'; });
   }
 
   // Liveness strip: shows when the pool was last fed and when curation last ran, so a silently
   // stalled engine is visible at a glance instead of looking like a healthy-but-empty list.
-  // Sustainability pill for the free name-scraping (DuckDuckGo/Bing). Green = healthy, amber =
-  // slowing, red = throttled (resting under back-off). Hover shows the per-engine breakdown so we
-  // can see at a glance whether the IP rotation is holding up while we run it hard.
-  function curSearchPill(s) {
-    if (!s) return "";
-    var st = s.status || "idle";
-    var icon = st === "healthy" ? "🟢" : st === "degraded" ? "🟡" : st === "throttled" ? "🔴" : "⚪";
-    var label = st === "healthy" ? "scraping healthy" : st === "degraded" ? "scraping slowing"
-      : st === "throttled" ? "scraping throttled" : "scraping idle";
-    var tip = (s.engines || []).map(function (e) {
-      return e.engine + ": " + e.status + " · " + Math.round((e.okRate || 0) * 100) + "% ok" +
-        (e.backoffSec ? " · resting " + e.backoffSec + "s" : "") + " · " + (e.requests || 0) + " reqs";
-    }).join("\n") || "no searches yet";
-    return '<span class="cur-mini" title="' + esc(tip) + '">' + icon + " " + esc(label) + "</span>";
-  }
-
-  // The live link indicator. Its text is overwritten by the heartbeat every few seconds (see
-  // curHeartbeat), so a stalled/disconnected backend shows "reconnecting" instead of looking healthy.
-  function curSyncPill() {
-    return '<span class="cur-mini" id="curSync" title="live connection to the lead engine">⚪ connecting…</span>';
-  }
-
-  // THIS (main) box's Common Crawl index-governor pill — the binding-constraint signal for the
-  // one-box proving-ground test: 🟢 CC ok / 🟡 CC paced Ns (index asking us to slow) / 🔴 CC resting
-  // or trips (this IP is being throttled). Hover for the governor internals.
-  function curCcPill(cc) {
-    if (!cc || !cc.index) return "";
-    var ix = cc.index, icon, label;
-    if (cc.resting) { icon = "🔴"; label = "CC resting " + (cc.restingForSec || 0) + "s"; }
-    else if ((ix.breakerTrips || 0) >= 2) { icon = "🔴"; label = "CC trips " + ix.breakerTrips; }
-    else if ((ix.spacingMs || 0) >= 16000) { icon = "🟡"; label = "CC paced " + Math.round(ix.spacingMs / 1000) + "s"; }
-    else if ((ix.cooldownForSec || 0) > 0) { icon = "🟡"; label = "CC wait " + ix.cooldownForSec + "s"; }
-    else { icon = "🟢"; label = "CC ok"; }
-    var tip = "Common Crawl index governor — spacing " + (ix.spacingMs || 0) + "ms · in-flight " +
-      (ix.inFlight || 0) + "/" + (ix.concurrency || 1) + " · breaker trips " + (ix.breakerTrips || 0) +
-      (cc.resting ? " · RESTING " + (cc.restingForSec || 0) + "s" : "") + " · cached " + (cc.cachedDomains || 0) + " domains";
-    return '<span class="cur-mini" title="' + esc(tip) + '">' + icon + " " + esc(label) + "</span>";
-  }
-
-  // This box's live per-IP yield: decision-makers freshly named in the last 60 min. The headline
-  // number for the one-box test — healthy here means a second IP would multiply it.
-  function curRatePill(n) {
-    return '<span class="cur-mini" title="Decision-makers this box freshly named in the last hour — its live per-IP yield. Multiply by your box count for the fleet projection.">⚡ <b>' + (Number(n) || 0).toLocaleString() + "</b>/hr named</span>";
-  }
-
-  function curEngineLine(h, search, cc, namedPerHour) {
-    var tail = curCcPill(cc) + curRatePill(namedPerHour);
-    if (!h && !search) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + tail + "</div>";
-    if (!h) return '<div class="cur-sigs"><span class="muted">Engine:</span>' + curSyncPill() + curSearchPill(search) + tail + "</div>";
+  function curEngineLine(h) {
+    if (!h) return "";
     function ago(s) {
       if (!s) return null;
       var t = Date.parse(String(s).replace(" ", "T")); if (isNaN(t)) return null;
@@ -3092,188 +2606,43 @@
     }
     // Pool cycle runs hourly (stale > 75m); curation ticks every 8m (stale > 20m).
     return '<div class="cur-sigs"><span class="muted">Engine:</span>' +
-      curSyncPill() +
       part("pool fed", h.lastCycleAt, h.lastCycleOk, 75) +
       part("curated", h.lastCurationAt, h.lastCurationOk, 20) +
-      curSearchPill(search) +
-      tail +
       "</div>";
   }
 
-  // The live "N / 5,000 valid emails today" bar + an HONEST, fleet-grounded projection. No inflation:
-  // we show (1) what's REAL today, (2) today's pace extrapolated, and (3) the running fleet's true
-  // capacity = measured names/hr × the REALIZED name→verified rate (not a hoped-for one).
-  function curDailyHtml(f, fleet) {
-    var d = f && f.daily; if (!d) return "";
-    var target = d.target || 5000;
-    var validToday = d.validToday || 0;
-    var pct = Math.min(100, Math.round((validToday / target) * 100));
-
-    // Realized conversion (conservative — based on what's ACTUALLY been verified, not a guess).
-    var validPerNamed = (f.named > 0) ? (f.validated / f.named) : 0;
-    var namesHr = (fleet && fleet.totalNamesPerHour) || 0;
-    var fleetDay = Math.round(namesHr * 24 * validPerNamed);   // what the boxes running NOW can sustain
-    var paceDay = d.projectedValid || 0;                       // today's actual pace → 24h
-
-    // True fleet status — boxes actually producing vs. just connected.
-    var workers = (fleet && fleet.workers) || [];
-    var producing = workers.filter(function (w) { return (w.namesPerHour || 0) > 0 || (w.online && (w.totalNamed || 0) > 0); }).length;
-    var boxes = workers.length;
-    var pace = fleetDay >= target ? '<span style="color:#38e0a6">🟢 on pace for ' + target.toLocaleString() + "</span>"
-      : '<span style="color:#f5c451">🟡 below ' + target.toLocaleString() + " at this rate</span>";
-
-    return '<div style="margin:10px 0;padding:12px 14px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(124,92,255,.06)">' +
-      '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:13px;margin-bottom:8px">' +
-        '<span><b style="font-size:17px">' + validToday.toLocaleString() + "</b> / " + target.toLocaleString() + ' <span class="muted">verified emails today</span></span>' +
-        '<span class="muted">' + producing + "/" + boxes + " boxes producing · <b style=\"color:#38e0a6\">" + namesHr.toLocaleString() + "</b> names/hr</span>" +
-      "</div>" +
-      '<div style="height:8px;border-radius:5px;background:rgba(255,255,255,.08);overflow:hidden"><i style="display:block;height:100%;width:' + pct + '%;background:linear-gradient(90deg,#7c5cff,#38e0a6)"></i></div>' +
-      '<div class="muted" style="font-size:11.5px;line-height:1.6;margin-top:9px">' +
-        "Today's pace → <b>~" + paceDay.toLocaleString() + "/day</b>  ·  " +
-        "Fleet capacity now → <b style=\"color:#38e0a6\">~" + fleetDay.toLocaleString() + "/day</b> " +
-        "<span style=\"opacity:.8\">(" + namesHr.toLocaleString() + " names/hr × " + Math.round(validPerNamed * 100) + "% verified) · " + pace + "</span>" +
-        '<br><span style="opacity:.7">Straight read: this is the rate of the boxes running right now — it climbs as the email-pattern cache warms and Reoon catches up, and dips when boxes rest. Not inflated; it\'s the realized conversion.</span>' +
-      "</div>" +
-    "</div>";
-  }
-
-  // The live-updating stats block (engine pills, daily target, funnel, signal slices). Rebuilt by
-  // the poller every ~25s so the numbers climb on screen, WITHOUT touching the list/selection below.
-  function curStatsInner(f, health, search, fleet, cc) {
+  function curationHtml(funnel, list, health) {
+    var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
     var bs = f.byStatus || {};
-    // CUMULATIVE funnel: each stage shows everyone who reached AT LEAST that far, so the numbers only
-    // fall left→right like a real funnel. The old per-bucket view made "Named" look like only N people
-    // were found — but the named ones who also got an email had already moved on to Contactable, so
-    // "Named" read as 3 when ~1,388 people actually have a real name. Named = total real people found;
-    // Contactable = name + working email; Approved/Enrolled = further along.
-    var enrolled = bs.enrolled || 0, queued = bs.queued || 0;
-    var contactablePlus = (bs.contactable || 0) + queued + enrolled;
-    var namedPlus = (typeof f.named === "number") ? f.named : ((bs.named || 0) + contactablePlus);
     var stages = [
-      [f.total || 0, "Researched", "companies worked"],
-      [namedPlus, "Named", "real person found"],
-      [contactablePlus, "Contactable", "name + working email"],
-      [queued + enrolled, "Approved", "ready to send"],
-      [enrolled, "Enrolled", "in Email"],
+      ["sourced", "Sourced", "company + owning title"],
+      ["named", "Named", "real person found"],
+      ["contactable", "Contactable", "name + email"],
+      ["queued", "Approved", "ready to send"],
+      ["enrolled", "Enrolled", "in Email"],
     ];
     var funnelRow = stages.map(function (s) {
-      return '<div class="cur-stage"><div class="cur-stage-n">' + (s[0]).toLocaleString() + "</div>" +
+      return '<div class="cur-stage"><div class="cur-stage-n">' + ((bs[s[0]] || 0)).toLocaleString() + "</div>" +
         '<div class="cur-stage-l">' + esc(s[1]) + '</div><div class="cur-stage-h">' + esc(s[2]) + "</div></div>";
     }).join('<div class="cur-arrow">→</div>');
+
     var sigRows = (f.bySignal || []).slice(0, 8).map(function (x) {
       return '<div class="cur-mini"><span>' + esc(imSignalLabel(x.signalType)) + '</span><b>' + x.contactable.toLocaleString() + "</b><span class=\"muted\">/ " + x.total.toLocaleString() + "</span></div>";
     }).join("");
-    return curEngineLine(health, search, cc, f.namedLastHour) +
-      curDailyHtml(f, fleet) +
-      '<div class="cur-funnel">' + funnelRow + "</div>" +
-      (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
-      ((f.validated || f.invalid || f.catchAll) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + (f.catchAll ? '<span class="cur-mini"><span class="cur-catchall">~ ' + f.catchAll.toLocaleString() + " catch-all</span></span>" : "") + "</div>" : "") +
-      curFleetHtml(fleet);
-  }
-
-  // The distributed worker fleet — one clean card per machine (online dot, jobs/min, names/hr, total),
-  // so you can watch output scale linearly as you add boxes. Repainted by the same 20s stats poll.
-  // TRUE per-box health, re-derived from the raw governor signals the box sends (NOT its own
-  // over-strict label). A box producing with a couple breaker trips or a routine ~5-min rest is the
-  // governor doing its job → GREEN. Yellow once trips climb / spacing maxes; red only on real
-  // persistent throttling or a failing loop. Re-derived here so current boxes (older code) read right.
-  function curBoxHealth(h) {
-    if (!h) return "idle";
-    var cc = h.cc || {};
-    var trips = cc.breakerTrips || 0;
-    var bad = (h.reasons || []).some(function (r) { return /failing|resting\s+\d{4,}/.test(r); }); // loop failing or a long (1000s+) rest
-    if (bad || trips >= 12) return "unhealthy";
-    if (trips >= 5 || (cc.spacingMs || 0) >= 20000) return "degraded";
-    return "healthy";
-  }
-
-  function curFleetHtml(fleet) {
-    if (!fleet) return "";
-    var workers = fleet.workers || [];
-    var hue = function (st) { return st === "healthy" ? "#38e0a6" : st === "degraded" ? "#f5c451" : st === "unhealthy" || st === "throttled" ? "#ff6b6b" : "#7a7a88"; };
-    var pill = function (label, color) {
-      return '<span style="font-size:10.5px;padding:2px 7px;border-radius:6px;background:' + color + '22;color:' + color + ';border:1px solid ' + color + '40;white-space:nowrap">' + esc(label) + "</span>";
-    };
-    // Fleet dot = worst ONLINE box by the re-derived health (so a box just resting briefly doesn't
-    // paint the whole fleet red).
-    var rank = { unhealthy: 3, degraded: 2, healthy: 1, idle: 0 };
-    var fleetSt = "idle";
-    workers.forEach(function (w) { if (w.online) { var s = curBoxHealth(w.health); if (rank[s] > rank[fleetSt]) fleetSt = s; } });
-    var fhColor = hue(fleetSt);
-    var summary = '<span class="muted" style="font-size:12px">' + (fleet.online || 0) + " online · " +
-      (fleet.totalJobsPerMin || 0) + " jobs/min · <b style=\"color:#38e0a6\">" + (fleet.totalNamesPerHour || 0).toLocaleString() + "</b> names/hr</span>";
-    var head = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:' + (workers.length ? "11px" : "0") + '">' +
-      '<span style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:7px">' +
-        '<span style="width:8px;height:8px;border-radius:50%;background:' + fhColor + ';box-shadow:0 0 8px ' + fhColor + '"></span>🖥️ Worker fleet</span>' + summary + "</div>";
-    var box = function (inner) {
-      return '<div style="margin:12px 0 2px;padding:14px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:linear-gradient(180deg,rgba(124,92,255,.06),rgba(255,255,255,.015))">' + inner + "</div>";
-    };
-    if (!workers.length) {
-      return box(head + '<div class="muted" style="font-size:12.5px;line-height:1.5;margin-top:8px">No worker boxes connected yet. Spin one up with <b>setup-worker.sh</b> — each box scrapes with its own IP and pushes here, so output scales linearly as you add machines.</div>');
-    }
-    var cards = workers.map(function (w) {
-      var h = w.health || null;
-      // Dot colour = the RE-DERIVED health (sane thresholds), not the box's over-strict self-label.
-      var st = h ? curBoxHealth(h) : (w.online ? "healthy" : (w.lastSeenSec < 300 ? "degraded" : "idle"));
-      var color = hue(st);
-      var seen = w.online ? "live" : w.lastSeenSec < 90 ? w.lastSeenSec + "s ago" :
-        w.lastSeenSec < 3600 ? Math.round(w.lastSeenSec / 60) + "m ago" : Math.round(w.lastSeenSec / 3600) + "h ago";
-      var metric = function (v, l) {
-        return '<div style="text-align:center;flex:1"><div style="font-size:18px;font-weight:700;line-height:1.05;letter-spacing:-.01em">' + v +
-          '</div><div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">' + l + "</div></div>";
-      };
-      // Per-box health row: the Common Crawl index governor state + search status (the signals that
-      // matter — the index is the binding constraint). Reasons surface on hover.
-      var healthRow = "";
-      if (h) {
-        var cc = h.cc || {};
-        var ccLabel, ccColor;
-        // Recalibrated: a couple trips / a routine rest is fine (green). Yellow as trips climb or
-        // spacing maxes; red only when the index is really hammering this IP (many trips).
-        if ((cc.breakerTrips || 0) >= 12) { ccLabel = "CC throttled " + cc.breakerTrips; ccColor = "#ff6b6b"; }
-        else if ((cc.breakerTrips || 0) >= 5 || (cc.spacingMs || 0) >= 20000) { ccLabel = "CC paced" + (cc.spacingMs ? " " + Math.round(cc.spacingMs / 1000) + "s" : ""); ccColor = "#f5c451"; }
-        else if (cc.resting) { ccLabel = "CC resting"; ccColor = "#f5c451"; }
-        else { ccLabel = "CC ok"; ccColor = "#38e0a6"; }
-        var reasons = (h.reasons && h.reasons.length) ? h.reasons.join(" · ") : "all sources healthy";
-        healthRow = '<div title="' + esc(reasons) + '" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:11px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06)">' +
-          pill(ccLabel, ccColor) + pill("search " + (h.search || "idle"), hue(h.search)) + "</div>";
-      }
-      return '<div style="flex:1 1 220px;min-width:200px;padding:13px 15px;border:1px solid ' + (h ? hue(st) + "33" : "rgba(255,255,255,.08)") + ';border-radius:12px;background:rgba(255,255,255,.025)">' +
-        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">' +
-          '<span style="width:9px;height:9px;border-radius:50%;flex:none;background:' + color + ';box-shadow:0 0 9px ' + color + '"></span>' +
-          '<b style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(w.id) + "</b>" +
-          '<span class="muted" style="margin-left:auto;font-size:11px;flex:none">' + esc(seen) + "</span>" +
-        "</div>" +
-        '<div style="display:flex;gap:8px">' +
-          metric(w.jobsPerMin, "jobs/min") +
-          metric('<span style="color:#38e0a6">' + (w.namesPerHour || 0).toLocaleString() + "</span>", "names/hr") +
-          metric((w.totalNamed || 0).toLocaleString(), "total") +
-        "</div>" + healthRow + "</div>";
-    }).join("");
-    return box(head + '<div style="display:flex;flex-wrap:wrap;gap:11px">' + cards + "</div>");
-  }
-
-  function curationHtml(funnel, list, health, search, fleet, cc, industries) {
-    var f = funnel || { total: 0, byStatus: {}, bySignal: [], byFunction: [], contactableRate: 0 };
 
     var head =
       '<div class="cur-head">' +
         '<button type="button" class="btn btn-ghost btn-sm" id="curBack">← Back to search</button>' +
-        '<h2>Curated decision-makers <span class="muted">· <span id="curResearched">' + (f.total || 0).toLocaleString() + "</span> researched</span></h2>" +
+        '<h2>Curated decision-makers <span class="muted">· ' + (f.total || 0).toLocaleString() + " researched</span></h2>" +
         '<button type="button" class="btn btn-ghost btn-sm" id="curRefresh">↻ Research more now</button>' +
       "</div>" +
-      '<div id="curStats">' + curStatsInner(f, health, search, fleet, cc) + "</div>";
-
-    // Industry filter — search the enriched decision-makers by industry. Each option shows how many
-    // are contactable (a real person + email) in that industry, so you can see where the depth is.
-    var indFilter = curIndustryFilter(industries);
+      curEngineLine(health) +
+      '<div class="cur-funnel">' + funnelRow + "</div>" +
+      (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
+      ((f.validated || f.invalid) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + "</div>" : "");
 
     if (!list.length) {
-      return head + indFilter + '<div class="empty" style="margin-top:14px">' +
-        (curIndustry
-          ? "No enriched decision-makers in <b>" + esc(curIndustry) + "</b> yet — they appear here as the engine researches that industry. Clear the filter to see all industries."
-          : "No decision-makers curated yet. The engine researches companies continuously (free: search, team pages, news, GitHub) and new leads appear here automatically as they come in. Hit <b>Research more now</b> to kick it.") +
-        "</div>";
+      return head + '<div class="empty" style="margin-top:14px">No contactable decision-makers curated yet. The hourly accumulator researches the top companies (free: team pages, news, GitHub) and they\'ll appear here. Hit <b>Research more now</b> to kick it.</div>';
     }
 
     var rows = list.map(curationRow).join("");
@@ -3284,47 +2653,23 @@
         '<button class="btn btn-primary btn-sm" id="curEnroll" disabled>✓ Approve &amp; push to Email</button>' +
       "</div>";
 
-    return head + indFilter + toolbar + '<div class="cur-list">' + rows + "</div>";
-  }
-
-  // The "search enriched by industry" control. Lists every industry present on the curated list with
-  // its contactable count, richest first; selecting one filters the list to that industry.
-  function curIndustryFilter(industries) {
-    industries = industries || [];
-    var opts = '<option value="">All industries</option>';
-    for (var i = 0; i < industries.length; i++) {
-      var it = industries[i];
-      var label = it.industry + " · " + (it.contactable || 0).toLocaleString() + " enriched";
-      opts += '<option value="' + esc(it.industry) + '"' + (it.industry === curIndustry ? " selected" : "") + ">" + esc(label) + "</option>";
-    }
-    var clear = curIndustry ? ' <button type="button" class="btn btn-ghost btn-sm" id="curIndClear">✕ clear</button>' : "";
-    return '<div class="cur-indfilter"><span class="muted">Search enriched by industry:</span>' +
-      '<select id="curIndustry" class="cur-ind-select">' + opts + "</select>" + clear + "</div>";
+    return head + toolbar + '<div class="cur-list">' + rows + "</div>";
   }
 
   function curationRow(r) {
     var via = r.managerVia ? '<span class="cur-via cur-via-' + esc(r.managerVia) + '">' + esc(r.managerVia.replace("_", " ")) + "</span>" : "";
     var emailTag = r.emailValidated ? '<span class="cur-valid">✓ valid</span>'
       : r.emailInvalid ? '<span class="cur-invalid">✕ invalid</span>'
-      : r.emailCatchAll ? '<span class="cur-catchall" title="Catch-all domain: this address WILL deliver, but the specific person can\'t be confirmed">~ catch-all</span>'
       : '<span class="im-email-unv">guess</span>';
     var email = r.likelyEmail
       ? '<span class="cur-email" data-email="' + esc(r.likelyEmail) + '" title="Best-guess work email — validated continuously, confirmed before send">✉️ ' + esc(r.likelyEmail) + ' ' + emailTag + "</span>"
-      : '<span class="im-email-unv" title="Name found — email resolves in the enrichment pass">⏳ email pending</span>';
+      : '<span class="muted">no email</span>';
     var enrolled = r.status === "enrolled";
-    // Visible in the list either way, but only rows that already have an email are selectable for
-    // push — the "email pending" ones wait for the enrichment pass before they're ready to send.
-    var selectable = !enrolled && !!r.likelyEmail;
-    // Title-only (still-researching) rows show the owning title as the person line, with a soft hint,
-    // so the database reads as "populated and enriching" rather than blank.
-    var personName = r.managerName
-      ? '<b>' + esc(r.managerName) + "</b>"
-      : '<b class="muted">' + esc(r.managerTitle) + '</b> <span class="im-email-unv">🔍 finding name…</span>';
     return '<div class="cur-row' + (enrolled ? " cur-enrolled" : "") + '" data-id="' + esc(r.id) + '">' +
-      '<input type="checkbox" class="cur-pick" data-id="' + esc(r.id) + '"' + (selectable ? "" : " disabled") + ">" +
+      '<input type="checkbox" class="cur-pick" data-id="' + esc(r.id) + '"' + (enrolled ? " disabled" : "") + ">" +
       '<div class="cur-main">' +
-        '<div class="cur-person">' + personName + " " +
-          (r.managerName ? '<span class="cur-title">' + esc(r.managerTitle) + "</span> " : "") + via + "</div>" +
+        '<div class="cur-person"><b>' + esc(r.managerName || "(title only)") + "</b> " +
+          '<span class="cur-title">' + esc(r.managerTitle) + "</span> " + via + "</div>" +
         '<div class="cur-ctx"><span class="cur-co">' + esc(r.company) + "</span>" +
           ' <span class="muted">owns</span> ' + esc(r.role) +
           ' · <span class="im-fn">' + esc(r.function) + "</span>" +
@@ -3345,17 +2690,6 @@
     if (refresh) refresh.addEventListener("click", function () {
       refresh.disabled = true; refresh.textContent = "Researching…";
       send("/in-market", "POST", { action: "curate_now", limit: 60 }).then(function () { renderCuration(); }).catch(function () { renderCuration(); });
-    });
-    // Industry filter: pick an industry → re-render the enriched list scoped to it.
-    var indSel = body.querySelector("#curIndustry");
-    if (indSel) indSel.addEventListener("change", function () {
-      curIndustry = indSel.value || "";
-      curPicks = {};            // selections don't carry across a filter change
-      renderCuration();
-    });
-    var indClear = body.querySelector("#curIndClear");
-    if (indClear) indClear.addEventListener("click", function () {
-      curIndustry = ""; curPicks = {}; renderCuration();
     });
     function sync() {
       var n = Object.keys(curPicks).length;
@@ -3393,7 +2727,7 @@
       enroll.disabled = true; enroll.textContent = "Pushing…";
       resolveBdCampaign(function (campaignId) {
         if (!campaignId) { enroll.textContent = "✓ Approve & push to Email"; enroll.disabled = false; toast && toast("Couldn't resolve a BD campaign"); return; }
-        // Review gate: approve, then enroll into the BD Bulk MPC sender.
+        // Review gate: approve, then enroll into the Email MPC sender.
         send("/in-market", "POST", { action: "curation_approve", ids: ids }).then(function () {
           return send("/in-market", "POST", { action: "curation_enroll", ids: ids, campaignId: campaignId });
         }).then(function (r) {
@@ -3457,11 +2791,8 @@
         var who = m.managerName
           ? '<b>' + esc(m.managerName) + "</b>"
           : '<span class="muted">resolve on push</span>';
-        var roleLabel = m.roleUrl
-          ? '<a class="im-mgr-rolelink" href="' + esc(m.roleUrl) + '" target="_blank" rel="noopener" title="Open this exact job posting" onclick="event.stopPropagation()">' + esc(m.role) + ' <span class="im-mgr-ext">↗</span></a>'
-          : esc(m.role);
         return '<label class="im-mgr"><input type="checkbox" class="im-pick" data-id="' + esc(l.id) + '" data-mk="' + esc(imMgrKey(m)) + '" ' + (imPicks[imPickKey(l.id, imMgrKey(m))] ? "checked" : "") + ">" +
-          '<span class="im-mgr-role">' + roleLabel +
+          '<span class="im-mgr-role">' + esc(m.role) +
             (m.postedAt && imRelTime(m.postedAt) ? ' <span class="im-mgr-posted" title="Posted on their board ' + esc(m.postedAt) + '">📅 ' + imRelTime(m.postedAt) + "</span>" : "") + "</span>" +
           '<span class="im-mgr-arrow">→</span>' +
           '<span class="im-mgr-title">' + esc(m.managerTitle) + "</span>" +
@@ -3519,7 +2850,6 @@
         '<div class="im-lead-id"><div class="im-lead-name">' + esc(l.company) +
           (l.renewed ? ' <span class="im-renew-badge">🔥 Renewed</span>' : "") +
           (l.inPipeline ? ' <span class="im-pipeline-badge" title="Already in your Prospects">✓ In pipeline</span>' : "") +
-          (l.hasShot ? ' <a class="im-shot-badge" href="' + esc(l.shotWatchUrl || "#") + '" target="_blank" rel="noopener" title="Verified screenshot + scroll-video of this job posting on the company\'s own careers page — click to watch" onclick="event.stopPropagation()">📸 Job screenshot</a>' : "") +
           (l.industry ? ' <span class="muted" style="font-weight:400">· ' + esc(l.industry) + "</span>" : "") + "</div>" +
         '<div class="im-lead-meta">' + metaBits.join(" · ") + "</div></div>" +
         '<span class="cls cls-' + scoreCls + ' im-score" title="Hiring-intent score">' + score + "</span></div>" +
@@ -3592,10 +2922,7 @@
     Array.prototype.forEach.call(body.querySelectorAll(".im-nbtn"), function (b) {
       b.addEventListener("click", function () {
         if (b.hasAttribute("data-dm")) imDmPerRole = parseInt(b.getAttribute("data-dm"), 10) || 1;
-        else if (b.hasAttribute("data-shot")) {
-          var v = b.getAttribute("data-shot");
-          imShotFilter = v === "has" ? true : v === "none" ? false : null;
-        } else imMinScore = parseInt(b.getAttribute("data-min"), 10) || 0;
+        else imMinScore = parseInt(b.getAttribute("data-min"), 10) || 0;
         renderImResults();
       });
     });
@@ -3603,7 +2930,7 @@
     var bulk = body.querySelector("#imBulk");
     if (bulk) bulk.addEventListener("click", bulkPushToProspects);
     // Push the selected prospects into the Email tool's prep queue (template +
-    // validation + AI approval + the personalized video email) before sending.
+    // validation + AI approval) instead of straight into the sequence.
     var toEmail = body.querySelector("#imToEmail");
     if (toEmail) toEmail.addEventListener("click", pushPicksToEmail);
     // Save selected as hiring signals (a staging step before Prospects).
@@ -3689,19 +3016,16 @@
   }
 
   /* ---- Hand-off to the Email tool ---------------------------------------------
-     The Email screen (#email) is the prep + QA gate before send: a queue of
-     prospects merged into a template, validated, AI-approved, attached to a
-     sequence, and launched — including the Pitchlane-style picture-in-picture
-     video email (background = the job-post capture, foreground = a talking-head
-     clip from PiP Studio). Hire Signals feeds that queue here. The queue persists
-     in localStorage so it survives the hash navigation into the Email route. */
+     The Email screen (#email) is the prep + QA gate before send: it holds a queue
+     of prospects, merges them into a template, validates the copy, runs the AI
+     approval pass, and lets you attach a sequence and launch. Hire Signals feeds
+     that queue here. The queue is persisted in localStorage so it survives the
+     hash navigation into the Email route. */
   function epLoadQueue() { try { return JSON.parse(localStorage.getItem("ros_email_queue") || "[]"); } catch (e) { return []; } }
   function epStoreQueue(arr) { try { localStorage.setItem("ros_email_queue", JSON.stringify(arr || [])); } catch (e) {} }
 
-  // Flatten a Hire-Signals pick ({lead, manager}) into an Email prospect: a bag of
-  // merge fields, the raw lead/manager (so the Email tool can promote + launch),
-  // and the video inputs — the job-post URL + its screen capture, which is the
-  // BACKGROUND track that pairs with a talking-head recording for the 2nd email.
+  // Convert a Hire-Signals pick ({lead, manager}) into an Email prospect record:
+  // a flat bag of merge fields the template can interpolate, plus the source.
   function epProspectFromPick(p) {
     var l = p.lead || {}, m = p.manager || null;
     var name = (m && m.managerName) || l.buyerName || "";
@@ -3709,10 +3033,18 @@
     var title = (m && m.managerTitle) || l.buyerTitle || "Hiring manager";
     var role = (m && m.role) || "";
     var email = (m && m.likelyEmail) || l.buyerLikelyEmail || "";
+    // The job-post URL the role was sourced from, and (when the scraper produced
+    // one) the screen-capture video of that job post. The capture is the BACKGROUND
+    // track for the picture-in-picture video email — it pairs with a talking-head
+    // recording from PiP Studio. Several field names are checked so the pairing
+    // works regardless of which the in-market scraper populated.
     var jobUrl = (m && (m.jobPostUrl || m.sourceUrl)) || l.jobPostUrl || l.sourceUrl || "";
+    var capture = (m && (m.jobPostCaptureUrl || m.captureUrl || m.captureVideoUrl)) ||
+      l.jobPostCaptureUrl || l.captureUrl || l.captureVideoUrl || "";
     return {
       id: imPickKey(l.id, m ? m.role : ""),
       source: "Hire Signals",
+      // Keep the raw lead/manager so the Email tool can promote + launch a campaign.
       lead: l, manager: m,
       fields: {
         first_name: first,
@@ -3725,12 +3057,10 @@
         email: email,
         competitor: "",
         score: Math.round(l.score || 0),
-        // Picture-in-picture video email (the second touch). The background comes
-        // from the company-site / job-post capture keyed off this URL via the
-        // existing /api/in-market/shot pipeline; the talking head is a PiP Studio
-        // clip. pip_video resolves to the personalized watch link once rendered.
-        job_post_url: jobUrl,
-        pip_video: ""
+        // Pitchlane-style PiP video email inputs (the second touch):
+        job_post_url: jobUrl,            // Companies_Job_Post_URL
+        job_post_capture: capture,       // background screen-capture video of that post
+        pip_studio_video: ""             // filled once the composite is rendered/paired
       }
     };
   }
@@ -3828,259 +3158,13 @@
     });
   }
 
-  /* ---- Senders: recruiter-owned SMTP inbox pools (scoped to this portal) ---- */
-  var sndData = {}, sndPicks = {};
-
-  function sndStyles() {
-    if (document.getElementById("sndStyles")) return "";
-    return '<style id="sndStyles">' +
-      '.snd-stats{display:flex;gap:12px;flex-wrap:wrap;margin:4px 0 16px}' +
-      '.snd-stat{flex:1;min-width:120px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:12px 14px}' +
-      '.snd-statv{font-size:22px;font-weight:800;letter-spacing:-.02em}' +
-      '.snd-statl{font-size:12px;color:var(--muted,#8a93a6);margin-top:2px}' +
-      '.snd-poolrow{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
-      '.snd-pool{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:8px 12px;cursor:pointer}' +
-      '.snd-pool:hover{border-color:var(--brand)}' +
-      '.snd-poolname{font-weight:700;font-size:13px}' +
-      '.snd-poolmeta{font-size:11.5px;color:var(--muted,#8a93a6)}' +
-      '.snd-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 12px}' +
-      '.snd-table{width:100%;border-collapse:collapse;font-size:13px}' +
-      '.snd-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);padding:6px 8px;border-bottom:1px solid var(--border)}' +
-      '.snd-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle}' +
-      '.snd-actions{display:flex;gap:6px;justify-content:flex-end}' +
-      '.snd-grid2{display:flex;gap:10px}.snd-grid2>div{flex:1}' +
-      '</style>';
-  }
-
-  function renderSenders(el) {
-    sndPicks = {};
-    el.innerHTML = sndStyles() +
-      '<div class="im-hero">' +
-        '<div class="im-title">Senders</div>' +
-        '<div class="im-lead">Your sending inboxes (<b>Email IDs</b>) — about <b>50 per domain</b>, each owned by a recruiter. Every Email ID sends <b>2 cold emails/day</b> (hard limit); Smartlead warms them at 10/day. Import in bulk, assign to a recruiter by name, and campaigns rotate sends across that recruiter’s pool. Watch live capacity on <b>Send Queue</b>.</div>' +
-        '<div class="btn-row">' +
-          '<button class="btn btn-primary btn-sm" id="sndImport">⬆ Import inboxes (CSV)</button>' +
-          '<button class="btn btn-ghost btn-sm" id="sndAdd">＋ Add one</button>' +
-          '<button class="btn btn-ghost btn-sm" id="sndRefresh">↻ Refresh</button>' +
-        '</div>' +
-      '</div>' +
-      '<div id="sndStatsBox" class="snd-stats"></div>' +
-      '<div id="sndPoolsBox"></div>' +
-      '<div class="snd-toolbar">' +
-        '<input id="sndFilter" class="cur-ind-select" placeholder="Filter by recruiter or email…" style="min-width:240px">' +
-        '<span id="sndSel" class="muted"></span>' +
-        '<button class="btn btn-ghost btn-sm" id="sndAssignSel" disabled>Assign selected to recruiter…</button>' +
-      '</div>' +
-      '<div id="sndBody"><div class="empty">Loading…</div></div>';
-    $("#sndImport").addEventListener("click", openSenderImport);
-    $("#sndAdd").addEventListener("click", openSenderAdd);
-    $("#sndRefresh").addEventListener("click", loadSenders);
-    var f = $("#sndFilter"); if (f) f.addEventListener("input", renderSenderRows);
-    $("#sndAssignSel").addEventListener("click", function () {
-      var ids = Object.keys(sndPicks); if (!ids.length) return;
-      pickRecruiter(function (m) { if (m) doAssign(ids, m); });
-    });
-    loadSenders();
-  }
-
-  function loadSenders() {
-    var box = $("#sndBody"); if (box) box.innerHTML = '<div class="empty">Loading…</div>';
-    send("/senders", "GET").then(function (r) {
-      if (!r.ok) { if (box) box.innerHTML = '<div class="empty">Could not load senders.</div>'; return; }
-      sndData = r.data || {};
-      renderSenderStats(); renderSenderPools(); renderSenderRows();
-    });
-  }
-
-  function renderSenderStats() {
-    var s = sndData.stats || {}, box = $("#sndStatsBox"); if (!box) return;
-    function c(v, l) { return '<div class="snd-stat"><div class="snd-statv">' + esc(v) + '</div><div class="snd-statl">' + esc(l) + '</div></div>'; }
-    box.innerHTML = c(s.inboxes || 0, "Email IDs") + c(s.active || 0, "Active") + c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Cold sends/day") + c(s.remainingToday || 0, "Remaining today");
-  }
-
-  function renderSenderPools() {
-    var pools = sndData.pools || [], box = $("#sndPoolsBox"); if (!box) return;
-    if (!pools.length) { box.innerHTML = ""; return; }
-    box.innerHTML = '<div class="snd-poolrow">' + pools.map(function (p) {
-      return '<div class="snd-pool" data-pool="' + esc(p.ownerName) + '"><div class="snd-poolname">' + esc(p.ownerName) + '</div><div class="snd-poolmeta">' + p.inboxes + ' inbox' + (p.inboxes === 1 ? "" : "es") + ' · ' + p.remainingToday + '/' + p.dailyCapacity + ' left today</div></div>';
-    }).join("") + '</div>';
-    Array.prototype.forEach.call(box.querySelectorAll(".snd-pool"), function (node) {
-      node.addEventListener("click", function () { var f = $("#sndFilter"); if (f) { f.value = node.getAttribute("data-pool"); renderSenderRows(); } });
-    });
-  }
-
-  function senderRow(m) {
-    var badge = m.status === "active" ? '<span class="cur-valid">active</span>'
-      : m.status === "warming" ? '<span class="cur-catchall">warming</span>'
-      : m.status === "paused" ? '<span class="im-email-unv">paused</span>'
-      : '<span class="cur-invalid">error</span>';
-    var toggle = m.status === "paused"
-      ? '<button class="btn btn-ghost btn-sm" data-snd-act="activate" data-id="' + esc(m.id) + '">Resume</button>'
-      : '<button class="btn btn-ghost btn-sm" data-snd-act="pause" data-id="' + esc(m.id) + '">Pause</button>';
-    return '<tr>' +
-      '<td><input type="checkbox" class="snd-pick" data-id="' + esc(m.id) + '"></td>' +
-      '<td><b>' + esc(m.email) + '</b>' + (m.displayName ? '<div class="muted">' + esc(m.displayName) + '</div>' : '') + '</td>' +
-      '<td>' + (m.ownerName ? esc(m.ownerName) : '<span class="muted">Unassigned</span>') + '</td>' +
-      '<td>' + esc(m.provider) + '</td>' +
-      '<td class="muted">' + esc(m.smtpHost) + ':' + esc(m.smtpPort) + '</td>' +
-      '<td>' + esc(m.sentToday) + '/' + esc(m.dailyCap) + '</td>' +
-      '<td>' + badge + (m.lastError ? ' <span class="muted" title="' + esc(m.lastError) + '">⚠</span>' : '') + '</td>' +
-      '<td class="snd-actions"><button class="btn btn-ghost btn-sm" data-snd-act="test" data-id="' + esc(m.id) + '">Test</button>' + toggle + '<button class="btn btn-ghost btn-sm" data-snd-act="delete" data-id="' + esc(m.id) + '">✕</button></td>' +
-    '</tr>';
-  }
-
-  function renderSenderRows() {
-    var box = $("#sndBody"); if (!box) return;
-    var inboxes = sndData.inboxes || [];
-    var q = (($("#sndFilter") && $("#sndFilter").value) || "").toLowerCase().trim();
-    var rows = inboxes.filter(function (m) {
-      if (!q) return true;
-      return (m.email + " " + (m.ownerName || "") + " " + (m.smtpHost || "")).toLowerCase().indexOf(q) >= 0;
-    });
-    if (!rows.length) {
-      box.innerHTML = '<div class="empty">' + (inboxes.length ? "No inboxes match that filter." : "No inboxes yet. Click <b>Import inboxes</b> to bulk-load your Email IDs.") + '</div>';
-      updateSndSel(); return;
-    }
-    box.innerHTML = '<table class="snd-table"><thead><tr><th></th><th>Email ID</th><th>Recruiter</th><th>Provider</th><th>SMTP host</th><th>Cold today</th><th>Status</th><th></th></tr></thead><tbody>' + rows.map(senderRow).join("") + '</tbody></table>';
-    Array.prototype.forEach.call(box.querySelectorAll(".snd-pick"), function (cb) {
-      cb.addEventListener("change", function () { var id = cb.getAttribute("data-id"); if (cb.checked) sndPicks[id] = true; else delete sndPicks[id]; updateSndSel(); });
-    });
-    Array.prototype.forEach.call(box.querySelectorAll("[data-snd-act]"), function (b) {
-      b.addEventListener("click", function () { sndAction(b.getAttribute("data-id"), b.getAttribute("data-snd-act")); });
-    });
-    updateSndSel();
-  }
-
-  function updateSndSel() {
-    var n = Object.keys(sndPicks).length;
-    var s = $("#sndSel"); if (s) s.textContent = n ? (n + " selected") : "";
-    var b = $("#sndAssignSel"); if (b) b.disabled = !n;
-  }
-
-  function sndAction(id, action) {
-    if (action === "delete") {
-      if (!window.confirm("Delete this inbox?")) return;
-      send("/senders", "POST", { action: "delete", id: id }).then(function () { delete sndPicks[id]; loadSenders(); });
-      return;
-    }
-    if (action === "test") {
-      toast("Testing login…");
-      send("/senders", "POST", { action: "test", id: id }).then(function (r) {
-        toast(r.data && r.data.ok ? "✓ Login OK" : "✕ " + ((r.data && r.data.error) || "login failed"));
-        loadSenders();
-      });
-      return;
-    }
-    if (action === "pause" || action === "activate") {
-      send("/senders", "POST", { action: "setStatus", ids: [id], status: action === "pause" ? "paused" : "active" }).then(loadSenders);
-    }
-  }
-
-  function doAssign(ids, m) {
-    send("/senders", "POST", { action: "assign", ids: ids, ownerId: m.userId, ownerName: m.name }).then(function (r) {
-      if (r.ok) { toast("Assigned " + ((r.data && r.data.assigned) || ids.length) + " to " + m.name); sndPicks = {}; loadSenders(); }
-      else toast("Assign failed");
-    });
-  }
-
-  // Search-by-name recruiter chooser (first + last). cb(member|null).
-  function pickRecruiter(cb) {
-    var body =
-      '<input id="recrQ" class="cur-ind-select" placeholder="Search recruiter by first or last name…" style="width:100%">' +
-      '<div id="recrList" style="margin-top:10px;max-height:320px;overflow:auto"></div>' +
-      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="recrCancel">Cancel</button></div>';
-    openModal("Choose recruiter", "Their inbox pool will be used", body, function (root, close) {
-      var q = root.querySelector("#recrQ"), list = root.querySelector("#recrList"), t;
-      function run() {
-        send("/team/search?q=" + encodeURIComponent(q.value.trim()), "GET").then(function (r) {
-          var ms = (r.data && r.data.members) || [];
-          list.innerHTML = ms.length ? ms.map(function (m) {
-            return '<div class="list-row clickable recr-row" data-uid="' + esc(m.userId) + '" data-name="' + esc(m.name) + '"><div><div class="lr-main">' + esc(m.name) + '</div><div class="lr-sub">' + esc(m.email) + ' · ' + esc(m.role) + '</div></div></div>';
-          }).join("") : '<div class="empty">No matches.</div>';
-          Array.prototype.forEach.call(list.querySelectorAll(".recr-row"), function (row) {
-            row.addEventListener("click", function () { close(); cb({ userId: row.getAttribute("data-uid"), name: row.getAttribute("data-name") }); });
-          });
-        });
-      }
-      q.addEventListener("input", function () { clearTimeout(t); t = setTimeout(run, 180); });
-      root.querySelector("#recrCancel").addEventListener("click", function () { close(); cb(null); });
-      run();
-    });
-  }
-
-  function openSenderImport() {
-    var chosen = { userId: "", name: "" };
-    var body =
-      '<label>Assign all to recruiter (optional)</label>' +
-      '<div class="btn-row"><button class="btn btn-ghost btn-sm" id="impRecr">Choose recruiter…</button> <span id="impRecrName" class="muted">Unassigned</span></div>' +
-      '<label style="margin-top:10px;display:block">Provider</label>' +
-      '<select id="impProv" class="cur-ind-select"><option value="own-smtp">Own SMTP server</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select>' +
-      '<div class="muted" style="margin-top:10px"><b>Sending limit (hard):</b> 2 cold emails/day per Email ID. Warming (10/day per inbox) runs in Smartlead, not here.</div>' +
-      '<label style="margin-top:10px;display:block">Upload CSV</label>' +
-      '<input id="impFile" type="file" accept=".csv,.tsv,.txt">' +
-      '<label style="margin-top:10px;display:block">…or paste rows</label>' +
-      '<textarea id="impText" rows="6" style="width:100%" placeholder="email, smtp_host, smtp_port, smtp_user, smtp_pass, first_name, last_name"></textarea>' +
-      '<div class="muted" style="margin-top:6px">Columns auto-detected: email, smtp host/port/user/pass, imap, first/last name, daily cap.</div>' +
-      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="impCancel">Cancel</button><button class="btn btn-primary btn-sm" id="impGo">Import</button></div>';
-    openModal("Import inboxes", "Bulk-load SMTP inboxes into this portal", body, function (root, close) {
-      root.querySelector("#impRecr").addEventListener("click", function () { pickRecruiter(function (m) { if (m) { chosen = m; root.querySelector("#impRecrName").textContent = m.name; } }); });
-      root.querySelector("#impCancel").addEventListener("click", close);
-      var file = root.querySelector("#impFile"), text = root.querySelector("#impText");
-      file.addEventListener("change", function () { var fl = file.files[0]; if (!fl) return; var rd = new FileReader(); rd.onload = function () { text.value = rd.result; }; rd.readAsText(fl); });
-      root.querySelector("#impGo").addEventListener("click", function () {
-        var csv = text.value.trim(); if (!csv) { toast("Paste or upload a CSV first"); return; }
-        var go = root.querySelector("#impGo"); go.disabled = true; go.textContent = "Importing…";
-        send("/senders/import", "POST", { action: "import", csv: csv, provider: root.querySelector("#impProv").value, ownerId: chosen.userId || undefined, ownerName: chosen.name || undefined }).then(function (r) {
-          if (r.ok) { var d = r.data || {}; close(); toast("Imported " + (d.imported || 0) + (d.skipped && d.skipped.length ? " (" + d.skipped.length + " skipped)" : "")); loadSenders(); }
-          else { go.disabled = false; go.textContent = "Import"; toast("Import failed: " + ((r.data && r.data.error) || r.status)); }
-        }).catch(function () { go.disabled = false; go.textContent = "Import"; });
-      });
-    });
-  }
-
-  function openSenderAdd() {
-    var chosen = { userId: "", name: "" };
-    var body =
-      '<label>Email ID</label><input id="saEmail" class="cur-ind-select" placeholder="jane@send.recruitco.io">' +
-      '<label style="margin-top:8px;display:block">From name</label><input id="saName" class="cur-ind-select" placeholder="Jane Doe">' +
-      '<div class="snd-grid2" style="margin-top:8px"><div><label>SMTP host</label><input id="saHost" class="cur-ind-select" placeholder="smtp.sending.ac"></div><div><label>Port</label><input id="saPort" type="number" value="587" class="cur-ind-select"></div></div>' +
-      '<label style="margin-top:8px;display:block">SMTP username</label><input id="saUser" class="cur-ind-select" placeholder="(defaults to the email)">' +
-      '<label style="margin-top:8px;display:block">SMTP password</label><input id="saPass" type="password" class="cur-ind-select">' +
-      '<label style="margin-top:8px;display:block">Provider</label><select id="saProv" class="cur-ind-select"><option value="own-smtp">Own SMTP</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select>' +
-      '<div class="muted" style="margin-top:8px"><b>Sending limit (hard):</b> 2 cold/day per Email ID · 10 warming/day via Smartlead.</div>' +
-      '<label style="margin-top:8px;display:block">Recruiter (optional)</label><div class="btn-row"><button class="btn btn-ghost btn-sm" id="saRecr">Choose recruiter…</button> <span id="saRecrName" class="muted">Unassigned</span></div>' +
-      '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="saCancel">Cancel</button><button class="btn btn-primary btn-sm" id="saGo">Add inbox</button></div>';
-    openModal("Add a sending inbox", "Stored encrypted; warmed in Smartlead", body, function (root, close) {
-      root.querySelector("#saRecr").addEventListener("click", function () { pickRecruiter(function (m) { if (m) { chosen = m; root.querySelector("#saRecrName").textContent = m.name; } }); });
-      root.querySelector("#saCancel").addEventListener("click", close);
-      root.querySelector("#saGo").addEventListener("click", function () {
-        var email = root.querySelector("#saEmail").value.trim(), host = root.querySelector("#saHost").value.trim(), pass = root.querySelector("#saPass").value;
-        if (!email || !host || !pass) { toast("Email, SMTP host and password are required"); return; }
-        send("/senders", "POST", { action: "add", email: email, displayName: root.querySelector("#saName").value.trim() || undefined, smtpHost: host, smtpPort: Number(root.querySelector("#saPort").value) || 587, smtpUser: root.querySelector("#saUser").value.trim() || undefined, smtpPass: pass, provider: root.querySelector("#saProv").value, ownerId: chosen.userId || undefined, ownerName: chosen.name || undefined }).then(function (r) {
-          if (r.ok) { close(); toast("Inbox added"); loadSenders(); } else toast("Add failed: " + ((r.data && r.data.error) || r.status));
-        });
-      });
-    });
-  }
-
   // Resolve (or create) the BD campaign that holds promoted in-market prospects.
-  function resolveBdCampaign(cb, recruiter) {
+  function resolveBdCampaign(cb) {
     var saved = [];
     try { saved = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); } catch (e) {}
     var camp = saved.filter(function (c) { return c.motion === motion; })[0] || saved[0];
-    if (camp && camp.id) {
-      // Bind the chosen sending recruiter to the campaign so the send path rotates
-      // across that recruiter's inbox pool (lib/senders pickSender).
-      if (recruiter && recruiter.userId && camp.recruiterId !== recruiter.userId) {
-        camp.recruiterId = recruiter.userId;
-        try { localStorage.setItem("ros_campaigns", JSON.stringify(saved)); } catch (e) {}
-        send("/campaigns", "PUT", camp).then(function () { cb(camp.id); }).catch(function () { cb(camp.id); });
-        return;
-      }
-      cb(camp.id); return;
-    }
+    if (camp && camp.id) { cb(camp.id); return; }
     var c = { id: "camp_" + Math.random().toString(36).slice(2), name: "In-Market Pipeline", motion: motion, goal: "Hiring managers promoted from In-Market Leads.", status: "active", dailyCap: 25, steps: [] };
-    if (recruiter && recruiter.userId) c.recruiterId = recruiter.userId;
     send("/campaigns", "PUT", c).then(function () {
       try { var l = JSON.parse(localStorage.getItem("ros_campaigns") || "[]"); l.unshift(c); localStorage.setItem("ros_campaigns", JSON.stringify(l)); } catch (e) {}
       cb(c.id);
@@ -4107,7 +3191,6 @@
         '<label class="pc-voice" title="Resolve each contact\'s OWN direct line, a landline/VoIP only (never a switchboard, never a mobile). $0.10 per number found; a no-find is free.">' +
           '<input type="checkbox" id="pcDirectDial"' + (dd ? " checked" : "") + "> Find verified direct dials " +
           '<span class="muted">(person-direct landline/VoIP · $0.10/found, no-find free)</span></label>' +
-        '<div class="pc-recr" style="margin:8px 0"><button type="button" class="btn btn-ghost btn-sm" id="pcRecr">Choose sending recruiter…</button> <span id="pcRecrName" class="muted">Auto-rotate (any inbox)</span></div>' +
         '<div id="pcLines" class="pc-lines">' + loading() + "</div>" +
         '<div class="pc-total" id="pcTotal"></div>' +
         '<div id="pcCond"></div>' +
@@ -4120,11 +3203,6 @@
     openModal("Launch outreach", "Estimated cost, approve to start", body, function (root, closeFn) {
       var approve = root.querySelector("#pcApprove");
       var ddCb = root.querySelector("#pcDirectDial");
-      var chosenRecr = null;
-      var recrBtn = root.querySelector("#pcRecr");
-      if (recrBtn) recrBtn.addEventListener("click", function () {
-        pickRecruiter(function (m) { if (m) { chosenRecr = m; root.querySelector("#pcRecrName").textContent = "Sending from " + m.name + "'s inboxes"; } });
-      });
       function fetchEst() {
         approve.disabled = true;
         root.querySelector("#pcLines").innerHTML = loading();
@@ -4148,14 +3226,14 @@
       }
       ddCb.addEventListener("change", function () { setImDirectDial(ddCb.checked); fetchEst(); });
       root.querySelector("#pcCancel").addEventListener("click", closeFn);
-      approve.addEventListener("click", function () { closeFn(); runBulkPush(picks, ddCb.checked, chosenRecr); });
+      approve.addEventListener("click", function () { closeFn(); runBulkPush(picks, ddCb.checked); });
       fetchEst();
     });
   }
 
   // Approved: promote each selected person to Prospects, then nudge the orchestrator (n8n)
   // to start the enrich → LLM-draft → email/LinkedIn/voicemail/voice-drop run immediately.
-  function runBulkPush(picks, findDirectDial, recruiter) {
+  function runBulkPush(picks, findDirectDial) {
     var btn = document.getElementById("imBulk"); if (btn) btn.disabled = true;
     resolveBdCampaign(function (campaignId) {
       if (!campaignId) { toast("Create a campaign first."); if (btn) btn.disabled = false; return; }
@@ -4177,539 +3255,7 @@
           .then(function (r) { if (r.ok) done++; next(i + 1); })
           .catch(function () { next(i + 1); });
       })(0);
-    }, recruiter);
-  }
-
-  /* ---------------- Clients ----------------
-   * THE Hire Signals deliverable: every decision-maker the engine produced who is
-   * (1) Reoon-VALIDATED (a real, deliverable mailbox), and (2) paired with a
-   * personalized screen-capture video of their own company's hiring page — ready
-   * to email in one click. Pulls the prospect set + the role-capture library,
-   * defaults to the Hire Signals segment and send-ready view, and gives each row a
-   * Watch + "Copy email with video" (paste-ready clickable GIF) plus one-click
-   * capture generation. "Verify emails" runs Reoon (REOON_API_KEY) and stamps every
-   * record. Searchable + CSV export (with watch/GIF links). */
-  function renderClients(el) {
-    el.innerHTML = head("Clients",
-      "Every decision-maker Hire Signals produced — validated and ready to email.") +
-      '<div class="cl-toolbar">' +
-        '<div class="pr-searchbar cl-search"><span class="ico">⌕</span>' +
-        '<input id="clSearch" type="text" autocomplete="off" placeholder="Search name, title, company, email…" /></div>' +
-        '<span id="clSeg" class="cl-seg"></span>' +
-        '<select id="clIndustry" class="cl-cat-sel" title="Filter by industry"><option value="">All industries</option></select>' +
-        '<select id="clFunction" class="cl-cat-sel" title="Filter by desk"><option value="">All desks</option></select>' +
-        '<span class="cl-tb-actions">' +
-          '<button class="btn btn-ghost btn-sm" id="clRefresh" title="Refresh">↻</button>' +
-          '<button class="btn btn-ghost btn-sm" id="clGenAll" title="Generate missing screen captures">🖥</button>' +
-          '<button class="btn btn-ghost btn-sm" id="clVerify" title="Verify emails via Reoon">✅ Verify</button>' +
-          '<button class="btn btn-ghost btn-sm" id="clExport" title="Export CSV">⇪ Export</button>' +
-        '</span>' +
-      '</div>' +
-      '<div id="clBody">' + loading() + "</div>";
-
-    var clAll = [], clFilter = "", clById = {};
-    var shotsByCompany = {};   // lowercased company -> { watch, teaser, video, poster }
-    var videosByCompany = {};  // lowercased company -> { videoKey } (finished composited outreach video)
-    var segCounts = { signals: null, all: null };   // headline count per segment (filled as we load)
-    var clIndustry = "", clFunction = "", clVerdict = "";  // categorization + verdict (legend) filters
-    var DISPLAY_CAP = 1200;                          // max rows rendered at once (filter to see more)
-    // segment: "signals" = the Hire Signals curation engine output (the thousands of validated
-    // decision-makers, read from the curation store); "all" = enriched prospects in your pipeline.
-    var clSeg = localStorage.getItem("ros_clients_seg") || "signals";
-    // Spreadsheet sort: column key + direction (1 asc / -1 desc), persisted.
-    var clSort = { key: localStorage.getItem("ros_clients_sortk") || "company", dir: Number(localStorage.getItem("ros_clients_sortd") || 1) };
-    var searchEl = $("#clSearch");
-    if (searchEl) searchEl.addEventListener("input", function () { clFilter = (searchEl.value || "").toLowerCase().trim(); paint(); });
-    var indSel = $("#clIndustry"); if (indSel) indSel.addEventListener("change", function () { clIndustry = indSel.value; paint(); });
-    var fnSel = $("#clFunction"); if (fnSel) fnSel.addEventListener("change", function () { clFunction = fnSel.value; paint(); });
-    var exp = $("#clExport"); if (exp) exp.addEventListener("click", exportClients);
-    var verBtn = $("#clVerify"); if (verBtn) verBtn.addEventListener("click", function () { verifyEmails(this); });
-    var refr = $("#clRefresh"); if (refr) refr.addEventListener("click", function () { load(); });
-    var genAll = $("#clGenAll"); if (genAll) genAll.addEventListener("click", function () { generateAllCaptures(this); });
-
-    // Map a Hire Signals CuratedProspect into the client-row shape the spreadsheet expects.
-    // The curated row carries the decision-maker, the company, the categorization (industry +
-    // function/desk + signal), and the Reoon verdict — so the tab finally shows the real thousands.
-    function mapCurated(r) {
-      var parts = (r.managerName || "").trim().split(/\s+/);
-      var ev = r.emailValidated ? { status: "valid", reason: "mailbox_confirmed", source: "reoon", checkedAt: r.validatedAt }
-        : r.emailInvalid ? { status: "invalid", reason: "undeliverable", source: "reoon", checkedAt: r.validatedAt }
-        : r.emailCatchAll ? { status: "risky", reason: "catch_all", source: "reoon", checkedAt: r.validatedAt }
-        : r.likelyEmail ? { status: "deliverable", reason: "syntax+mx", source: "dns" }
-        : { status: "unverified" };
-      return {
-        id: r.id,
-        fullName: r.managerName || "",
-        firstName: parts[0] || "",
-        lastName: parts.length > 1 ? parts.slice(1).join(" ") : "",
-        title: r.managerTitle || "",
-        company: r.company || "",
-        companyDomain: r.domain || "",
-        companySize: r.employeeCount || "",   // company headcount (ICP fit + personalization)
-        jobUrl: r.jobUrl || "",
-        location: "",
-        email: r.likelyEmail || "",
-        emailVerification: ev,
-        emailSource: r.emailSource || "",      // how the email was obtained (guess | site_direct | reoon_validated | …)
-        industry: r.industry || "",
-        "function": r["function"] || "",
-        openRole: r.role || "",            // the OPEN ROLE the company is hiring for (key personalization hook)
-        signalType: r.signalType || "",
-        signalReason: r.signalReason || "",
-        via: r.managerVia || "",           // how we found them (company_site | news | github)
-        tier: r.managerTier || "",         // confidence tier (named | function_leader | …)
-        status: r.status,
-        motion: "bd",
-        category: "in_market",
-        score: r.score,
-        __curated: true
-      };
-    }
-
-    // Repopulate the industry + desk dropdowns from the loaded data (called after each load).
-    function renderFilters() {
-      var inds = {}, fns = {};
-      clAll.forEach(function (p) { if (p.industry) inds[p.industry] = 1; if (p["function"]) fns[p["function"]] = 1; });
-      var is = $("#clIndustry"), fs = $("#clFunction");
-      if (is) is.innerHTML = '<option value="">All industries</option>' +
-        Object.keys(inds).sort().map(function (i) { return '<option value="' + esc(i) + '"' + (i === clIndustry ? " selected" : "") + ">" + esc(i) + "</option>"; }).join("");
-      if (fs) fs.innerHTML = '<option value="">All desks</option>' +
-        Object.keys(fns).sort().map(function (f) { return '<option value="' + esc(f) + '"' + (f === clFunction ? " selected" : "") + ">" + esc(f) + "</option>"; }).join("");
-    }
-
-    function hasValidEmail(p) {
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((p.email || "").trim());
-    }
-    function fromSignals(p) { return p.category === "in_market"; }
-    // The active segment, then email-eligible within it.
-    function segmented() { return clAll.filter(function (p) { return clSeg === "all" ? true : fromSignals(p); }); }
-    function eligible() { return segmented().filter(hasValidEmail); }
-    // Verification verdict for a prospect ("unverified" until the check has run).
-    function vStatus(p) { return (p.emailVerification && p.emailVerification.status) || "unverified"; }
-    // Send-ready = the verifier confirmed the address can receive mail.
-    function isSendReady(p) { var s = vStatus(p); return s === "valid" || s === "deliverable"; }
-    // Categorization filters: industry + desk (function).
-    function inCat(p) {
-      if (clIndustry && (p.industry || "") !== clIndustry) return false;
-      if (clFunction && (p["function"] || "") !== clFunction) return false;
-      return true;
-    }
-    // Verdict filter — clicking a legend chip narrows to just that bucket (verified / deliverable /
-    // risky / invalid / unchecked / with-video).
-    function inVerdict(p) {
-      if (!clVerdict) return true;
-      if (clVerdict === "video") return hasCapture(p);
-      if (clVerdict === "unchecked") { var s = vStatus(p); return s === "unverified" || s === "unknown"; }
-      return vStatus(p) === clVerdict;
-    }
-    function shown() { return eligible().filter(inCat).filter(inVerdict); }
-
-    // The personalized video / screen capture for a client: prefer the attached
-    // personalized PiP video, else a screen capture of the company's hiring page.
-    function videoFor(p) {
-      var v = p.personalizedVideo;
-      if (v && (v.gifUrl || v.watchUrl)) return { gif: v.gifUrl, watch: v.watchUrl, mp4: v.mp4Url, role: v.roleTitle, kind: "personalized" };
-      var co = (p.company || "").toLowerCase().trim();
-      // A finished composited outreach video (your clip over the job capture) wins over the bare capture.
-      var av = co ? videosByCompany[co] : null;
-      if (av && av.videoKey) {
-        var vk = encodeURIComponent(av.videoKey);
-        var gif = API + "/in-market/video?key=" + vk + "&fmt=gif";
-        var mp4 = API + "/in-market/video?key=" + vk + "&fmt=mp4";
-        return { gif: gif, watch: mp4, mp4: mp4, role: null, kind: "video" };
-      }
-      var s = co ? shotsByCompany[co] : null;
-      if (s && (s.teaser || s.watch)) return { gif: s.teaser, watch: s.watch, mp4: s.video, role: null, kind: "capture" };
-      return null;
-    }
-    function hasCapture(p) { return !!videoFor(p); }
-    // Fully ready to send = a deliverable email AND a capture to lead with.
-    function isFullyReady(p) { return isSendReady(p) && hasCapture(p); }
-
-    // Sort rank for the verification verdict — best (most sendable) first when ascending.
-    function vRank(p) { return ({ valid: 0, deliverable: 1, risky: 2, unknown: 3, unverified: 4, invalid: 5 })[vStatus(p)]; }
-
-    // Personalization helpers: derive first/last from the full name when the provider
-    // didn't split them, so every email merge field is populated for campaign crafting.
-    function firstNameOf(p) { return p.firstName || (p.fullName || "").trim().split(/\s+/)[0] || ""; }
-    function lastNameOf(p) {
-      if (p.lastName) return p.lastName;
-      var parts = (p.fullName || "").trim().split(/\s+/);
-      return parts.length > 1 ? parts.slice(1).join(" ") : "";
-    }
-    function phoneOf(p) { return p.phone || p.mobilePhone || p.landlinePhone || ""; }
-    function naCell(v) { return v ? esc(v) : '<span class="pr-na">-</span>'; }
-
-    // ONE column spec drives the sortable header, the row cells, the sort accessor, AND the
-    // campaign-ready CSV (snake_case keys = merge fields). Ordered first_name → company_location
-    // (the personalization block for crafting custom emails), then contact, verification,
-    // signal, sequence, status, and the video asset.
-    var stop = ' onclick="event.stopPropagation()"';   // inner links/buttons don't open the row drawer
-    // Concise, CRM-style columns: rich COMPOSITE cells (identity, company, email each stack a
-    // primary + a muted secondary line) plus categorization chips and the asset action. Click any
-    // row for the full detail drawer; the complete flat field set is in the CSV export.
-    var COLS = [
-      { key: "contact", label: "Contact", get: function (p) { return p.fullName || ""; }, render: function (p) {
-          var avatar = '<span class="avatar crm-av" style="background:' + colorFor(p.fullName) + '">' + esc(initials(p.fullName)) +
-            (p.photoUrl ? '<img src="' + esc(p.photoUrl) + '" alt="" onerror="this.remove()" />' : "") + "</span>";
-          var li = p.linkedinUrl ? ' <a class="crm-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="LinkedIn"' + stop + ">in</a>" : "";
-          return '<td class="crm-c-contact"><div class="crm-id">' + avatar +
-            '<div class="crm-id-t"><span class="crm-name">' + esc(p.fullName || "Unknown") + li + "</span>" +
-            '<span class="crm-sub">' + (p.title ? esc(p.title) : "&nbsp;") + "</span></div></div></td>"; } },
-      { key: "company", label: "Company", get: function (p) { return p.company || ""; }, render: function (p) {
-          var n = Number(p.companySize);
-          var size = n > 0 ? ' <span class="cl-size" title="Headcount">' + esc(n.toLocaleString()) + "</span>" : "";
-          var dom = p.companyDomain ? '<a href="https://' + esc(p.companyDomain) + '" target="_blank" rel="noopener"' + stop + ">" + esc(p.companyDomain) + "</a>" : "";
-          var sub = dom + (p.location ? (dom ? " · " : "") + esc(p.location) : "");
-          return '<td class="crm-c-company"><div class="crm-id-t"><span class="crm-name">' + (p.company ? esc(p.company) : '<span class="pr-na">-</span>') + size + "</span>" +
-            '<span class="crm-sub">' + (sub || "&nbsp;") + "</span></div></td>"; } },
-      { key: "open_role", label: "Hiring for", get: function (p) { return p.openRole || ""; }, render: function (p) {
-          return "<td>" + (p.openRole ? '<span class="cl-cat cl-cat-role">' + esc(p.openRole) + "</span>" : '<span class="pr-na">-</span>') +
-            (p.jobUrl ? ' <a class="crm-jobpost" href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener" title="Open the live job posting"' + stop + ">↗</a>" : "") + "</td>"; } },
-      { key: "email", label: "Email", get: function (p) { return p.email || ""; }, sort: vRank, render: function (p) {
-          return '<td class="crm-c-email"><div class="crm-id-t"><span class="crm-mono">' +
-            (p.email ? '<a href="mailto:' + esc(p.email) + '"' + stop + ">" + esc(p.email) + "</a>" : '<span class="pr-na">-</span>') + "</span>" +
-            '<span class="crm-sub">' + vBadge(p) + "</span></div></td>"; } },
-      { key: "signal", label: "Why hiring", get: function (p) { return p.signalReason || ""; }, render: function (p) {
-          return '<td class="crm-c-signal"><div class="crm-id-t">' +
-            (p.signalReason ? '<span class="crm-sig">⚡ ' + esc(p.signalReason) + "</span>" : '<span class="pr-na">-</span>') +
-            (p.signalType ? '<span class="crm-sub"><span class="cl-cat cl-cat-sig">' + esc(String(p.signalType).replace(/_/g, " ")) + "</span></span>" : "") + "</div></td>"; } },
-      { key: "hiring_score", label: "Intent", get: function (p) { return p.score == null ? "" : p.score; }, sort: function (p) { return -(Number(p.score) || 0); },
-        render: function (p) { return '<td class="crm-c-num">' + (p.score == null ? '<span class="pr-na">-</span>' : '<span class="cl-score" title="Hiring-intent score">' + esc(String(p.score)) + "</span>") + "</td>"; } },
-      { key: "video", label: "Asset", get: function (p) { return hasCapture(p) ? ((videoFor(p) || {}).watch || "yes") : ""; }, sort: function (p) { return hasCapture(p) ? 0 : 1; },
-        render: function (p) { return '<td class="pr-c-video">' + captureCell(p) + "</td>"; } }
-    ];
-    // Sort accessor: a column's own sort(), else its text value.
-    function colSort(c, p) { return c.sort ? c.sort(p) : String(c.get ? c.get(p) : "").toLowerCase(); }
-
-    // The FULL flat field set for CSV export (the clean table hides the long tail; the export keeps
-    // everything). snake_case keys = ready-made merge fields for Instantly / Clay / the sequencer.
-    var EXPORT_FIELDS = [
-      ["first_name", firstNameOf], ["last_name", lastNameOf], ["full_name", function (p) { return p.fullName || ""; }],
-      ["job_title", function (p) { return p.title || ""; }], ["linkedin_url", function (p) { return p.linkedinUrl || ""; }],
-      ["headline", function (p) { return p.headline || ""; }],
-      ["open_role", function (p) { return p.openRole || ""; }], ["why_hiring", function (p) { return p.signalReason || ""; }],
-      ["signal_type", function (p) { return p.signalType || ""; }], ["intent_score", function (p) { return p.score == null ? "" : p.score; }],
-      ["job_post_url", function (p) { return p.jobUrl || ""; }],
-      ["company", function (p) { return p.company || ""; }], ["company_domain", function (p) { return p.companyDomain || ""; }],
-      ["company_size", function (p) { return p.companySize || ""; }], ["company_location", function (p) { return p.location || ""; }],
-      ["industry", function (p) { return p.industry || ""; }], ["desk", function (p) { return p["function"] || ""; }],
-      ["email", function (p) { return p.email || ""; }], ["email_status", vStatus], ["email_source", function (p) { return p.emailSource || ""; }],
-      ["phone", phoneOf], ["found_via", function (p) { return p.via || ""; }], ["confidence_tier", function (p) { return p.tier || ""; }],
-      ["stage", clStatusLabel], ["sequence", function (p) { return p.sequenceName || ""; }],
-      ["watch_url", function (p) { return (videoFor(p) || {}).watch || ""; }], ["video_gif_url", function (p) { return (videoFor(p) || {}).gif || ""; }],
-      ["verified_at", function (p) { return (p.emailVerification && p.emailVerification.checkedAt) || ""; }]
-    ];
-
-    // Small verification badge per row. "valid" = mailbox confirmed (Reoon/SMTP);
-    // "deliverable" = syntax + real MX, mailbox not individually confirmed.
-    function vBadge(p) {
-      var v = p.emailVerification || null;
-      var s = v ? v.status : "unverified";
-      var why = v && v.reason ? (" · " + v.reason) : "";
-      if (v && v.source) why += " · " + v.source;
-      var map = {
-        valid: ['cl-vb-ok', '✓ verified', 'Mailbox confirmed deliverable'],
-        deliverable: ['cl-vb-deliv', '✓ deliverable', 'Domain accepts mail (syntax + MX). Set REOON_API_KEY to confirm the mailbox'],
-        risky: ['cl-vb-risky', '~ risky', 'Catch-all / role / inbox-full — deliverable but unconfirmed'],
-        invalid: ['cl-vb-bad', '✕ invalid', 'Undeliverable — will bounce'],
-        unknown: ['cl-vb-unk', '? unknown', 'Could not determine — retry verification'],
-        unverified: ['cl-vb-unk', '• unverified', 'Not checked yet — click Verify emails']
-      };
-      var m = map[s] || map.unverified;
-      return '<span class="cl-vb ' + m[0] + '" title="' + esc(m[2] + why) + '">' + m[1] + "</span>";
-    }
-
-    // The video / screen-capture cell: thumbnail + Watch + "Copy email with video",
-    // or a one-click Generate button when nothing has been captured yet.
-    function captureCell(p) {
-      var vid = videoFor(p);
-      if (vid) {
-        var tag = (vid.kind === "personalized" || vid.kind === "video")
-          ? '<span class="cl-vtag" title="Outreach video (your clip over the job capture)">🎬 video</span>'
-          : '<span class="cl-vtag cl-vtag-cap" title="Screen capture of the company hiring page">🖥 capture</span>';
-        var thumb = vid.gif
-          ? '<img class="video-thumb" loading="lazy" src="' + esc(vid.gif) + '" alt="preview" onerror="this.style.display=\'none\'" />'
-          : '<span class="video-thumb cl-vthumb-ph">▶</span>';
-        return '<div class="cl-vcell">' +
-          '<a class="cl-vthumb-wrap" href="' + esc(vid.watch || "#") + '" target="_blank" rel="noopener" title="Watch">' + thumb + "</a>" +
-          '<div class="video-actions">' + tag +
-            '<button class="video-copy" data-act="copyvid" data-pid="' + esc(p.id) + '">Copy email</button>' +
-          "</div></div>";
-      }
-      return '<button class="video-watch" data-act="gencap" data-pid="' + esc(p.id) + '" title="Capture this company\'s hiring page">🖥 Generate</button>';
-    }
-
-    function clStatusLabel(p) {
-      var l = (REF.lifecycle || []).filter(function (x) { return x.status === p.status; })[0];
-      var m = (p.motion === "recruiting") ? "recruiting" : "bd";
-      return l ? (l[m] || l.status) : (p.status || "");
-    }
-
-    function matches(p) {
-      if (!clFilter) return true;
-      var hay = ((p.fullName || "") + " " + (p.title || "") + " " + (p.company || "") + " " +
-        (p.email || "") + " " + (p.location || "") + " " + (p.signalReason || "") + " " +
-        (p.openRole || "") + " " + (p.industry || "") + " " + (p["function"] || "")).toLowerCase();
-      return clFilter.split(/\s+/).every(function (t) { return hay.indexOf(t) >= 0; });
-    }
-
-    function rowHtml(p) {
-      return '<tr class="pr-row" data-pid="' + esc(p.id) + '">' +
-        COLS.map(function (c) { return c.render(p); }).join("") + "</tr>";
-    }
-
-    function paint() {
-      var body = $("#clBody"); if (!body) return;
-
-      // Segment chips (Hire Signals vs every enriched lead) with live counts.
-      var sg = $("#clSeg");
-      var sCount = segCounts.signals == null ? "…" : segCounts.signals;
-      var aCount = segCounts.all == null ? "…" : segCounts.all;
-      if (sg) {
-        sg.innerHTML =
-          '<button class="btn btn-sm ' + (clSeg === "signals" ? "btn-primary" : "btn-ghost") + '" data-clseg="signals">⚡ Hire Signals · ' + sCount + "</button>" +
-          '<button class="btn btn-sm ' + (clSeg === "all" ? "btn-primary" : "btn-ghost") + '" data-clseg="all">All leads · ' + aCount + "</button>";
-        Array.prototype.forEach.call(sg.querySelectorAll("[data-clseg]"), function (b) {
-          b.addEventListener("click", function () {
-            var v = b.getAttribute("data-clseg");
-            if (v === clSeg) return;
-            clSeg = v; localStorage.setItem("ros_clients_seg", clSeg);
-            clIndustry = ""; clFunction = "";   // category options differ per segment
-            load();                              // each segment is a different data source
-          });
-        });
-      }
-
-      var elig = eligible();
-      var all = shown();
-      var list = all.filter(matches);
-      // Spreadsheet sort by the active column.
-      var sortCol = COLS.filter(function (c) { return c.key === clSort.key; })[0] || COLS[0];
-      list.sort(function (a, b) { var av = colSort(sortCol, a), bv = colSort(sortCol, b); return av < bv ? -clSort.dir : av > bv ? clSort.dir : 0; });
-      var capped = list.length > DISPLAY_CAP ? list.slice(0, DISPLAY_CAP) : list;
-      var rows = capped.map(rowHtml).join("");
-      var countLbl = clFilter ? (list.length + " of " + all.length) : String(all.length);
-      var capNote = list.length > DISPLAY_CAP
-        ? '<div class="cl-capnote">Showing the first ' + DISPLAY_CAP + " of " + list.length + " — filter by industry, desk, or search to narrow.</div>"
-        : "";
-      // Counts by verdict + capture coverage, so the user sees readiness at a glance.
-      var by = elig.reduce(function (m, p) { var s = vStatus(p); m[s] = (m[s] || 0) + 1; return m; }, {});
-      var unchecked = (by.unverified || 0) + (by.unknown || 0);
-      var withVideo = elig.filter(hasCapture).length;
-      // Clickable verdict chips: click one to show ONLY that bucket; click again (or "clear") to reset.
-      var legChip = function (key, cls, label, n) {
-        return '<button class="cl-vb ' + cls + (clVerdict === key ? " cl-vb-active" : "") + '" data-verdict="' + key + '">' + label + " " + n + "</button>";
-      };
-      var legend = '<div class="cl-legend">' +
-        legChip("valid", "cl-vb-ok", "✓ verified", by.valid || 0) +
-        legChip("video", "cl-vb-vid", "🎬 with video", withVideo) +
-        (clVerdict ? '<button class="cl-vb cl-vb-clear" data-verdict="">✕ clear</button>' : "") +
-        "</div>";
-      var tableHead = '<thead><tr>' + COLS.map(function (c) {
-        var active = c.key === clSort.key;
-        var arrow = active ? (clSort.dir > 0 ? " ▲" : " ▼") : "";
-        return '<th class="cl-th' + (active ? " cl-th-active" : "") + '" data-sortk="' + c.key + '" title="Sort by ' + esc(c.label) + '">' + esc(c.label) + arrow + "</th>";
-      }).join("") + "</tr></thead>";
-      var table = rows
-        ? '<div class="pr-table-wrap cl-sheet-wrap"><table class="pr-table cl-sheet">' + tableHead + "<tbody>" + rows + "</tbody></table></div>"
-        : '<div class="empty">' + (clFilter
-          ? "No clients match “" + esc(clFilter) + "”."
-          : clSeg === "signals"
-          ? "No Hire Signals contacts yet. As the engine validates decision-makers (Reoon), they land here. Switch to All leads to see every enriched contact."
-          : "No enriched leads with an email yet. Enrich your prospects (Prospects → ⚡ Enrich all contacts).") + "</div>";
-      body.innerHTML = '<div class="card" style="padding:0;overflow:hidden"><div class="pr-card-h">' +
-        '<h3>Clients <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl +
-        " with an email</span></h3>" + legend + "</div>" + capNote + table + "</div>";
-
-      // Click a header to sort by that column (toggles direction on the active one).
-      var thead = body.querySelector(".cl-sheet thead");
-      if (thead) thead.addEventListener("click", function (ev) {
-        var th = ev.target.closest ? ev.target.closest("[data-sortk]") : null;
-        if (!th) return;
-        var k = th.getAttribute("data-sortk");
-        if (clSort.key === k) clSort.dir = -clSort.dir; else { clSort.key = k; clSort.dir = 1; }
-        localStorage.setItem("ros_clients_sortk", clSort.key);
-        localStorage.setItem("ros_clients_sortd", String(clSort.dir));
-        paint();
-      });
-
-      // Click a legend chip to filter to just that verdict (toggle).
-      var leg = body.querySelector(".cl-legend");
-      if (leg) leg.addEventListener("click", function (ev) {
-        var b = ev.target.closest ? ev.target.closest("[data-verdict]") : null;
-        if (!b) return;
-        var v = b.getAttribute("data-verdict");
-        clVerdict = (v === clVerdict) ? "" : v;
-        paint();
-      });
-
-      // Per-row actions (Watch is a plain link; Copy/Generate go through delegation).
-      var tb = body.querySelector(".pr-table tbody");
-      if (tb) tb.addEventListener("click", function (ev) {
-        var b = ev.target.closest ? ev.target.closest("[data-act]") : null;
-        if (!b) return;
-        var p = clById[b.getAttribute("data-pid")];
-        if (!p) return;
-        var act = b.getAttribute("data-act");
-        if (act === "copyvid") copyVideoEmail(p);
-        else if (act === "gencap") genCapture(p, b);
-      });
-    }
-
-    // Build a paste-ready email (clickable GIF that opens the watch page) and write
-    // BOTH text/html (renders in Gmail) and text/plain (sequence editors) to the clipboard.
-    function copyVideoEmail(p) {
-      var vid = videoFor(p);
-      if (!vid || (!vid.gif && !vid.watch)) { toast("No video for this client yet — click Generate first."); return; }
-      var first = p.firstName || ((p.fullName || "").split(/\s+/)[0]) || "there";
-      var co = p.company || "your team";
-      var roleName = vid.role || p.openRole || "";
-      var role = roleName ? (" for " + roleName) : "";
-      var reason = p.signalReason ? (" " + p.signalReason + ".") : "";
-      var html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#111">' +
-        "<p>Hi " + esc(first) + ",</p>" +
-        "<p>Saw " + esc(co) + " is hiring" + esc(role) + "." + esc(reason) + " I put together a quick video for you:</p>" +
-        '<p><a href="' + esc(vid.watch || "#") + '" target="_blank">' +
-          (vid.gif ? '<img src="' + esc(vid.gif) + '" alt="Watch the video" width="480" style="border-radius:10px;border:1px solid #ddd;max-width:100%;display:block" />' : "▶ Watch the video") +
-        "</a></p>" +
-        "<p>Worth a quick chat this week?</p></div>";
-      var text = "Hi " + first + ",\n\nSaw " + co + " is hiring" + role + "." + reason +
-        " I put together a quick video for you: " + (vid.watch || "") + "\n\nWorth a quick chat this week?";
-      function plain() { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text); toast("Copied (plain text)."); }
-      if (navigator.clipboard && window.ClipboardItem) {
-        try {
-          navigator.clipboard.write([new ClipboardItem({
-            "text/html": new Blob([html], { type: "text/html" }),
-            "text/plain": new Blob([text], { type: "text/plain" })
-          })]).then(function () { toast("Email with video copied — paste into Gmail."); }, plain);
-        } catch (e) { plain(); }
-      } else plain();
-    }
-
-    // Generate the screen capture of this company's hiring page for one client.
-    function genCapture(p, btn) {
-      if (!p.company) { toast("No company on this record to capture."); return; }
-      var role = (p.personalizedVideo && p.personalizedVideo.roleTitle) || p.title || "Open role";
-      var old = btn ? btn.textContent : "";
-      if (btn) { btn.disabled = true; btn.textContent = "Capturing…"; }
-      return send("/in-market/shot", "POST", { company: p.company, roleTitle: role, roleUrl: p.jobUrl || undefined, wait: true }).then(function (r) {
-        if (btn) { btn.disabled = false; btn.textContent = old; }
-        if (!r.ok) { toast("Capture failed for " + p.company + " (" + ((r.data && r.data.error) || r.status) + ")"); return false; }
-        return loadShots().then(function () { paint(); return true; });
-      }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = old; } toast("Could not reach the server."); return false; });
-    }
-
-    // Batch: capture the hiring page for every shown client that has no video yet (sequential — gentle on the box).
-    function generateAllCaptures(btn) {
-      var todo = shown().filter(function (p) { return p.company && !hasCapture(p); });
-      // de-dupe by company so we don't capture the same company twice.
-      var seen = {}, uniq = [];
-      todo.forEach(function (p) { var k = (p.company || "").toLowerCase().trim(); if (k && !seen[k]) { seen[k] = 1; uniq.push(p); } });
-      if (!uniq.length) { toast("Every shown client already has a capture."); return; }
-      var old = btn ? btn.textContent : "", i = 0, done = 0;
-      if (btn) btn.disabled = true;
-      (function next() {
-        if (i >= uniq.length) {
-          if (btn) { btn.disabled = false; btn.textContent = old; }
-          toast("Captured " + done + " of " + uniq.length + " companies.");
-          loadShots().then(paint);
-          return;
-        }
-        var p = uniq[i++];
-        if (btn) btn.textContent = "Capturing " + i + "/" + uniq.length + "…";
-        genCapture(p, null).then(function (okv) { if (okv) done++; next(); });
-      })();
-    }
-
-    // Run deliverability verification over the leads via Reoon. By default only the
-    // not-yet-checked ones (saves credits); when everything is settled, re-verify all.
-    function verifyEmails(btn) {
-      if (clSeg === "signals") {
-        toast("Hire Signals contacts are validated automatically by the Reoon engine (server-side). Hit ↻ Refresh to pull the latest verdicts. Switch to All leads to verify enriched prospects manually.");
-        load();
-        return;
-      }
-      var elig = eligible();
-      if (!elig.length) { toast("No emails to verify yet — enrich some prospects first."); return; }
-      var pending = elig.filter(function (p) { var s = vStatus(p); return s === "unverified" || s === "unknown"; });
-      var payload = pending.length ? { action: "verify-emails", ids: pending.map(function (p) { return p.id; }) } : { action: "verify-emails" };
-      var old = btn ? btn.textContent : "";
-      if (btn) { btn.disabled = true; btn.textContent = "Verifying " + (pending.length || elig.length) + "…"; }
-      send("/prospects", "POST", payload).then(function (r) {
-        if (btn) { btn.disabled = false; btn.textContent = old; }
-        if (!r.ok) { toast("Verification failed (" + ((r.data && r.data.error) || r.status) + ")"); return; }
-        var s = (r.data && r.data.summary) || {};
-        var msg = "Verified " + (r.data.checked || 0) + ": " + (s.valid || 0) + " confirmed, " +
-          (s.deliverable || 0) + " deliverable, " + (s.risky || 0) + " risky, " + (s.invalid || 0) + " invalid";
-        if (r.data && r.data.mailboxVerifier === false && (s.deliverable || 0) > 0)
-          msg += ". Set REOON_API_KEY to confirm mailboxes (deliverable → verified).";
-        toast(msg);
-        load();
-      }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = old; } toast("Could not reach the server."); });
-    }
-
-    function exportClients() {
-      var list = shown().filter(matches);
-      if (!list.length) { toast("Nothing to export."); return; }
-      var cell = function (v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; };
-      // Full flat field set (snake_case) so the file maps straight into Instantly / Clay / the sequencer.
-      var heads = EXPORT_FIELDS.map(function (f) { return f[0]; });
-      var csv = heads.join(",") + "\n" + list.map(function (p) {
-        return EXPORT_FIELDS.map(function (f) { return cell(f[1](p)); }).join(",");
-      }).join("\n");
-      var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" }), url = URL.createObjectURL(blob);
-      var a = document.createElement("a"); a.href = url; a.download = (clSeg === "signals" ? "hire-signals-clients.csv" : "clients.csv"); a.style.display = "none";
-      document.body.appendChild(a); a.click();
-      setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
-      toast("Exported " + list.length + " client" + (list.length === 1 ? "" : "s"));
-    }
-
-    // Load the role-capture library so each client can show / reuse their company's hiring-page capture.
-    function loadShots() {
-      return api("/in-market/shot?list=1").then(function (d) {
-        shotsByCompany = {};
-        ((d && d.shots) || []).forEach(function (s) {
-          if (s && s.company && s.urls) shotsByCompany[(s.company || "").toLowerCase().trim()] = s.urls;
-        });
-      }).catch(function () { /* captures are best-effort; the tab still works without them */ });
-    }
-
-    // Load the finished composited outreach videos (company -> videoKey) so rows show the real video.
-    function loadVideos() {
-      return send("/in-market", "POST", { action: "autovideo_map" }).then(function (r) {
-        videosByCompany = (r.ok && r.data && r.data.videos) || {};
-      }).catch(function () { /* best-effort */ });
-    }
-
-    function load() {
-      var b = $("#clBody"); if (b) b.innerHTML = loading();
-      var seg = clSeg;
-      var dataP;
-      if (seg === "signals") {
-        // The thousands: the Hire Signals curation engine output (named decision-makers with an
-        // email), mapped into the client-row shape. This is the real well — NOT /api/prospects.
-        dataP = send("/in-market", "POST", { action: "curation_list", contactableOnly: true, namedOnly: true, limit: 5000 })
-          .then(function (r) { clAll = (r.ok && r.data && Array.isArray(r.data.curated)) ? r.data.curated.map(mapCurated) : (r.ok ? [] : null); });
-      } else {
-        dataP = api("/prospects").then(function (d) { clAll = (d && d.prospects) || []; }).catch(function () { clAll = null; });
-      }
-      // Funnel gives the TRUE Hire Signals contactable total (the headline thousands) regardless of segment.
-      var funnelP = send("/in-market", "POST", { action: "curation_funnel" }).then(function (r) {
-        if (r.ok && r.data && r.data.funnel) {
-          var bs = (r.data.funnel.byStatus) || {};
-          segCounts.signals = (bs.contactable || 0) + (bs.queued || 0) + (bs.enrolled || 0);
-        }
-      }).catch(function () { /* best-effort headline */ });
-      Promise.all([dataP, loadShots(), loadVideos(), funnelP]).then(function () {
-        if (clAll === null) { var bb = $("#clBody"); if (bb) bb.innerHTML = needsSetup(); clAll = []; return; }
-        if (seg === "all") segCounts.all = clAll.filter(hasValidEmail).length;
-        clById = {}; clAll.forEach(function (p) { clById[p.id] = p; });
-        renderFilters();
-        paint();
-      });
-    }
-    load();
+    });
   }
 
   function renderProspects(el) {
@@ -7108,31 +5654,467 @@
     });
   }
 
-  /* ---------------- Email Sending (ACS infrastructure) ----------------
-     The email infrastructure now runs on the dedicated RecruitersOS Mail
-     platform (Azure Communication Services): domains, sender mailboxes, warmup,
-     deliverability health, MPP/bot-filtered open + click tracking, and the reply
-     inbox. This panel embeds that app — the same pattern OS Text uses for taltxt.
-     The mail app runs on its own host; set window.RECRUITEROS_MAIL_URL to point
-     at it (defaults to the mail subdomain). Stand it up via DEPLOY-EMAIL.md. */
-  var MAIL_BASE = (typeof window !== "undefined" && window.RECRUITEROS_MAIL_URL) || "https://mail.recruitersos.co";
-
+  /* ---------------- Sending ----------------
+     Owned cold-email infrastructure. Provision a Hetzner MTA server, then FEED IN
+     DOMAINS, each one auto-generates DKIM, creates the Hetzner DNS zone, writes the
+     full record set (SPF/DKIM/DMARC/MX/tracking/return-path), and sets PTR on the IP.
+     The only manual step is a one-time nameserver delegation at the registrar.
+     Backend: /api/sending + lib/sending/*. */
   function renderSending(el) {
-    var base = String(MAIL_BASE).replace(/\/+$/, "");
-    el.innerHTML =
-      head("Email Sending", "Your owned email infrastructure — domains, sender mailboxes, warmup, deliverability health and open/click tracking — powered by RecruitersOS Mail (Azure Communication Services).") +
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px">' +
-        '<a class="btn btn-primary btn-sm" href="' + esc(base + "/setup") + '" target="_blank" rel="noopener">⚙️ Setup &amp; domains</a>' +
-        '<a class="btn btn-ghost btn-sm" href="' + esc(base + "/health-stats") + '" target="_blank" rel="noopener">📊 Health stats</a>' +
-        '<a class="btn btn-ghost btn-sm" href="' + esc(base + "/inbox") + '" target="_blank" rel="noopener">✉️ Reply inbox</a>' +
-        '<span class="muted" style="font-size:11px">Embedded from ' + esc(base) + '</span>' +
+    el.innerHTML = head("Email Sending", "Your owned cold-email infrastructure. Provision an MTA server, feed in domains, and every DNS record (SPF, DKIM, DMARC, MX, PTR, tracking) is set automatically on Hetzner.") +
+      '<style>' +
+      '.sd-card{margin-bottom:16px}' +
+      '.sd-cfg{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin-bottom:14px}' +
+      '.sd-dot{display:inline-flex;align-items:center;gap:6px}' +
+      '.sd-step{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted,#8b93a1);margin-bottom:8px}' +
+      '.sd-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}' +
+      '.sd-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}' +
+      '.sd-table th,.sd-table td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line,#20242c);vertical-align:top}' +
+      '.sd-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8b93a1)}' +
+      '.sd-badge{font-size:11px;padding:2px 8px;border-radius:20px;white-space:nowrap}' +
+      '.sd-b-active{background:#10491f;color:#7ff0a0}.sd-b-wait{background:#4a3a10;color:#f0d27f}' +
+      '.sd-b-err{background:#4a1414;color:#f08f8f}.sd-b-prov{background:#15324a;color:#7fc4f0}.sd-b-pending{background:#262a33;color:#9aa3b2}' +
+      '.sd-chk{display:inline-flex;gap:5px;flex-wrap:wrap}' +
+      '.sd-chip{font-size:10px;padding:2px 7px;border-radius:6px;border:1px solid var(--line,#2a2f3a)}' +
+      '.sd-chip.ok{background:#10491f;color:#7ff0a0;border-color:transparent}' +
+      '.sd-chip.no{background:#20242c;color:#6b7280}' +
+      '.sd-ns{background:var(--bg,#0e0f13);border:1px dashed #f0d27f;border-radius:8px;padding:10px 12px;margin-top:8px;font-size:12px}' +
+      '.sd-ns code{background:rgba(255,255,255,.06);padding:2px 6px;border-radius:4px;font-family:monospace}' +
+      '.sd-mono{font-family:monospace;font-size:12px}' +
+      '#sdDomains{width:100%;min-height:90px;font-family:monospace;font-size:13px;padding:10px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit}' +
+      '</style>' +
+      '<div id="sdCfg" class="sd-cfg"></div>' +
+      '<div class="card sd-card" style="border:1px solid var(--accent,#7c5cff)"><div class="sd-row" style="justify-content:space-between"><div class="sd-step" style="margin:0;color:var(--accent,#7c5cff)">⚡ One-click setup</div><span class="muted" style="font-size:11px">Provisions the MTA, DNS, and warming mailboxes, then the cron finishes it hands-off.</span></div>' +
+        '<div id="sdSetup">' + loading() + '</div></div>' +
+      '<div class="card sd-card"><div class="sd-step">Step 1 · MTA server (Hetzner)</div><div id="sdServers">' + loading() + '</div></div>' +
+      '<div class="card sd-card"><div class="sd-step">Step 2 · Feed in domains</div>' +
+        '<p class="muted" style="font-size:13px;margin:0 0 8px">Paste sending domains (one per line). Each is added and fully provisioned automatically, DKIM, zone, all records, PTR.</p>' +
+        '<textarea id="sdDomains" placeholder="recruitco.io&#10;recruiters-co.com&#10;recruitersteam.com"></textarea>' +
+        '<div class="sd-row" style="margin-top:8px"><button class="btn btn-primary btn-sm" id="sdAdd">⚡ Add &amp; auto-provision</button>' +
+        '<span class="muted" style="font-size:12px">Needs an active MTA server + Hetzner tokens.</span></div>' +
       '</div>' +
-      '<div class="card" style="padding:0;overflow:hidden">' +
-        '<iframe src="' + esc(base + "/setup") + '" title="Email Infrastructure" ' +
-        'style="width:100%;height:calc(100vh - 210px);min-height:620px;border:0;border-radius:12px;background:var(--bg)" ' +
-        'allow="clipboard-read; clipboard-write"></iframe>' +
-      '</div>' +
-      '<p class="muted" style="font-size:12px;margin-top:10px">Not loading? The mail platform isn’t reachable yet at <code>' + esc(base) + '</code> — see DEPLOY-EMAIL.md to stand it up.</p>';
+      '<div class="card sd-card"><div class="sd-row" style="justify-content:space-between"><div class="sd-step" style="margin:0">Domains</div>' +
+        '<div class="sd-row"><button class="btn btn-ghost btn-sm" id="sdTick">↻ Daily tick</button><button class="btn btn-ghost btn-sm" id="sdGov">🛡 Run governor</button></div></div>' +
+        '<div id="sdList">' + loading() + '</div></div>' +
+      '<div class="card sd-card"><div class="sd-step">Deliverability</div><div id="sdDeliv">' + loading() + '</div></div>' +
+      '<div class="card sd-card"><div class="sd-step">Seed inboxes (placement testing)</div><div id="sdSeeds">' + loading() + '</div></div>';
+
+    var state = { domains: [], servers: [], mailboxes: [], providers: { dns: false, cloud: false }, suppression: [], events: [], seeds: [], seedTests: [], stats: {}, health: { domains: [], mailboxes: [], overall: {} }, engagement: {} };
+
+    function badge(s) {
+      var m = { active: ["sd-b-active", "active"], awaiting_ns: ["sd-b-wait", "awaiting NS"], verifying: ["sd-b-prov", "verifying"],
+        provisioning: ["sd-b-prov", "provisioning"], error: ["sd-b-err", "error"], pending: ["sd-b-pending", "pending"], paused: ["sd-b-err", "paused"] };
+      var x = m[s] || ["sd-b-pending", s];
+      return '<span class="sd-badge ' + x[0] + '">' + esc(x[1]) + '</span>';
+    }
+
+    function load() {
+      api("/sending").then(function (d) {
+        d = d || {};
+        state.domains = d.domains || []; state.servers = d.servers || []; state.mailboxes = d.mailboxes || [];
+        state.providers = d.providers || { dns: false, cloud: false };
+        state.suppression = d.suppression || []; state.events = d.events || [];
+        state.seeds = d.seeds || []; state.seedTests = d.seedTests || []; state.stats = d.stats || {};
+        state.health = d.health || { domains: [], mailboxes: [], overall: {} };
+        state.engagement = d.engagement || {};
+        state.setup = d.setup || null; state.seedSummary = d.seedSummary || null;
+        paintSetup(); paintCfg(); paintServers(); paintList(); paintDeliv(); paintSeeds();
+      }).catch(function () { $("#sdList", el).innerHTML = '<div class="empty">Could not load sending infrastructure.</div>'; });
+    }
+
+    function paintSetup() {
+      var body = $("#sdSetup", el); if (!body) return;
+      var s = state.setup;
+      var inp = 'padding:8px 10px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit;font-size:13px';
+      // Not started yet → show the single kickoff form.
+      if (!s || !s.enabled) {
+        body.innerHTML =
+          '<p class="muted" style="font-size:13px;margin:6px 0 10px">Paste your sending domains and pick how many warming mailboxes per domain. We provision the Hetzner box (Postal), write every DNS record, and create the mailboxes. You do two small things when prompted: point each domain\'s nameservers at Hetzner, and (if auto-bootstrap doesn\'t catch it) paste the Postal key once.</p>' +
+          '<textarea id="suDomains" placeholder="recruitco.io&#10;recruiters-co.com" style="width:100%;min-height:70px;font-family:monospace;' + inp + '"></textarea>' +
+          '<div class="sd-row" style="margin-top:8px"><label class="muted" style="font-size:12px">Mailboxes/domain</label>' +
+            '<input id="suPer" type="number" value="4" min="1" max="20" style="width:70px;' + inp + '">' +
+            '<button class="btn btn-primary btn-sm" id="suGo">⚡ Set it up</button></div>';
+        var go = $("#suGo", el); if (go) go.addEventListener("click", function () {
+          var doms = $("#suDomains", el).value.split(/\s+/).map(function (x) { return x.trim(); }).filter(Boolean);
+          if (!doms.length) { toast("Add at least one domain"); return; }
+          go.disabled = true; go.textContent = "Setting up…";
+          send("/sending", "POST", { action: "auto-setup", domains: doms, mailboxesPerDomain: parseInt($("#suPer", el).value, 10) || 4 }).then(function (r) {
+            toast(r.ok ? "Setup started, the cron will carry it to the finish" : (r.data && r.data.error) || "Setup failed"); load();
+          });
+        });
+        return;
+      }
+      // In progress / done → show the pipeline + the remaining gates.
+      var steps = [];
+      var srv = s.server;
+      steps.push(stepRow(srv && srv.ip ? "done" : (srv ? "wait" : "todo"), "MTA server", srv ? (srv.hostname + (srv.ip ? " · " + srv.ip : " · provisioning…")) : "creating…"));
+      steps.push(stepRow(srv && srv.postalReady ? "done" : (srv && srv.ip ? "wait" : "todo"), "Postal API", srv && srv.postalReady ? "connected" : "waiting for key (auto-bootstrap)"));
+      var act = s.totals.active, dn = s.totals.domains;
+      steps.push(stepRow(dn && act === dn ? "done" : (act ? "wait" : "todo"), "Domains verified", act + "/" + dn + " active"));
+      steps.push(stepRow(s.totals.mailboxes >= s.totals.mailboxTarget && s.totals.mailboxTarget > 0 ? "done" : "wait", "Warming mailboxes", s.totals.mailboxes + "/" + s.totals.mailboxTarget + " created"));
+
+      var gates = (s.gates || []).map(function (g) {
+        var ns = g.detail && g.detail.nameservers ? (g.detail.nameservers || []).map(function (n) { return '<code>' + esc(n) + '</code>'; }).join(" ") : "";
+        return '<div class="sd-ns"><b>' + esc(g.message) + '</b>' + (ns ? '<div style="margin-top:6px">Set these nameservers at your registrar: ' + ns + '</div>' : '') + '</div>';
+      }).join("");
+
+      body.innerHTML =
+        (s.done ? '<div class="sd-badge sd-b-active" style="margin-bottom:10px">✓ Setup complete, warming can run</div>' : '<div class="muted" style="font-size:12px;margin-bottom:10px">In progress, the daily cron advances this automatically; nothing else to click unless a gate below asks.</div>') +
+        '<div style="display:flex;flex-direction:column;gap:6px">' + steps.join("") + '</div>' +
+        (gates ? '<div style="margin-top:10px">' + gates + '</div>' : "") +
+        '<div class="sd-row" style="margin-top:12px"><button class="btn btn-ghost btn-sm" id="suAdvance">↻ Advance now</button>' +
+          '<button class="btn btn-ghost btn-sm" id="suPause">Pause auto-setup</button></div>';
+      var adv = $("#suAdvance", el); if (adv) adv.addEventListener("click", function () { adv.disabled = true; adv.textContent = "Advancing…"; send("/sending", "POST", { action: "advance-setup" }).then(function () { load(); }); });
+      var pz = $("#suPause", el); if (pz) pz.addEventListener("click", function () { send("/sending", "POST", { action: "pause-setup" }).then(load); });
+    }
+    function stepRow(state2, label, detail) {
+      var icon = state2 === "done" ? "✅" : state2 === "wait" ? "⏳" : "⬜";
+      return '<div style="display:flex;align-items:center;gap:10px;font-size:13px"><span>' + icon + '</span><b style="min-width:150px">' + esc(label) + '</b><span class="muted">' + esc(detail) + '</span></div>';
+    }
+
+    function paintCfg() {
+      var p = state.providers;
+      function dot(on, label) { return '<span class="sd-dot">' + (on ? "🟢" : "⚪") + ' ' + label + '</span>'; }
+      $("#sdCfg", el).innerHTML =
+        dot(p.cloud, "Hetzner Cloud") + dot(p.dns, "Hetzner DNS") +
+        dot(p.mta, "MTA send (SENDING_EMAIL_PROVIDER=mta)") + dot(p.snds, "MS SNDS") + dot(p.postmaster, "Google Postmaster");
+    }
+
+    function paintServers() {
+      var body = $("#sdServers", el);
+      var inp = 'padding:7px 10px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit';
+      var rows = state.servers.map(function (s) {
+        var act = s.status === "active";
+        var postal = s.postalReady ? '🟢 ready' : (s.postalApiKey ? '🟡 key set' : '⚪ not set');
+        return '<tr><td><b>' + esc(s.name) + '</b><div class="muted sd-mono">' + esc(s.hostname) + '</div></td>' +
+          '<td>' + (s.ip ? '<span class="sd-mono">' + esc(s.ip) + '</span>' : '<span class="muted">-</span>') + '</td>' +
+          '<td>' + (s.ptr ? '✅ ' + esc(s.ptr) : '<span class="muted">no PTR</span>') + '</td>' +
+          '<td>' + badge(s.status) + (s.lastError ? '<div class="muted" style="font-size:11px">' + esc(s.lastError) + '</div>' : '') + '</td>' +
+          '<td><span class="sd-mono" style="font-size:11px">Postal: ' + postal + '</span></td>' +
+          '<td>' + (act ? '<button class="btn btn-ghost btn-sm" data-postal="' + esc(s.id) + '">Postal creds</button>' : '<button class="btn btn-ghost btn-sm" data-prov-server="' + esc(s.id) + '">Provision</button>') + '</td></tr>' +
+          '<tr id="sdPostal-' + esc(s.id) + '" style="display:none"><td colspan="6"><div class="sd-row" style="padding:6px 0">' +
+            '<input data-phost="' + esc(s.id) + '" placeholder="https://' + esc(s.hostname) + '" value="' + esc(s.postalHost || ("https://" + s.hostname)) + '" style="flex:1;min-width:220px;' + inp + '">' +
+            '<input data-pkey="' + esc(s.id) + '" placeholder="X-Server-API-Key from Postal" style="flex:1;min-width:200px;' + inp + '">' +
+            '<button class="btn btn-sm" data-psave="' + esc(s.id) + '">Save</button>' +
+          '</div><div class="muted" style="font-size:11px">After the box boots, create an org + mail server in Postal at the host above, then paste its server API key here.</div></td></tr>';
+      }).join("");
+      body.innerHTML =
+        (state.servers.length ? '<table class="sd-table"><thead><tr><th>Server</th><th>IP</th><th>PTR / rDNS</th><th>Status</th><th>Postal</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<p class="muted" style="font-size:13px;margin:0 0 10px">No MTA server yet. Add one, it becomes the MX target + PTR host for all domains.</p>') +
+        '<div class="sd-row" style="margin-top:10px">' +
+          '<input id="sdSrvName" placeholder="server name (e.g. mta-1)" style="' + inp + '">' +
+          '<input id="sdSrvHost" placeholder="mail hostname (e.g. mail.recruitco.io)" style="flex:1;min-width:220px;' + inp + '">' +
+          '<button class="btn btn-sm" id="sdAddSrv">＋ Add server</button>' +
+        '</div>';
+      Array.prototype.forEach.call(body.querySelectorAll("[data-prov-server]"), function (b) {
+        b.addEventListener("click", function () { provisionServer(b.getAttribute("data-prov-server"), b); });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-postal]"), function (b) {
+        b.addEventListener("click", function () { var r = document.getElementById("sdPostal-" + b.getAttribute("data-postal")); if (r) r.style.display = r.style.display === "none" ? "" : "none"; });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-psave]"), function (b) {
+        b.addEventListener("click", function () {
+          var id = b.getAttribute("data-psave");
+          var host = body.querySelector('[data-phost="' + id + '"]').value.trim();
+          var key = body.querySelector('[data-pkey="' + id + '"]').value.trim();
+          if (!host || !key) { toast("Host + API key required"); return; }
+          send("/sending", "POST", { action: "set-postal", id: id, host: host, apiKey: key }).then(function (r) {
+            if (r.ok) { toast("Postal creds saved"); load(); } else toast("Save failed");
+          });
+        });
+      });
+      $("#sdAddSrv", el).addEventListener("click", function () {
+        var name = $("#sdSrvName", el).value.trim(), host = $("#sdSrvHost", el).value.trim();
+        if (!name || !host) { toast("Name + hostname required"); return; }
+        send("/sending", "POST", { action: "add-server", name: name, hostname: host }).then(function (r) {
+          if (r.ok) { toast("Server added, provision it to create the box + PTR"); load(); } else toast("Add failed (" + (r.data.error || r.status) + ")");
+        });
+      });
+    }
+
+    function provisionServer(id, btn) {
+      if (btn) { btn.disabled = true; btn.textContent = "Provisioning…"; }
+      send("/sending", "POST", { action: "provision-server", id: id }).then(function (r) {
+        if (r.ok) toast("Server provisioned, IP + PTR set"); else toast(r.data.error || "Provision failed");
+        load();
+      }).catch(function () { toast("Server error"); load(); });
+    }
+
+    function paintList() {
+      var body = $("#sdList", el);
+      if (!state.domains.length) { body.innerHTML = '<div class="empty">No domains yet. Paste some above and hit auto-provision.</div>'; return; }
+      body.innerHTML = state.domains.map(function (d) {
+        var chk = (d.checklist || []).map(function (c) {
+          return '<span class="sd-chip ' + (c.present ? "ok" : "no") + '">' + (c.present ? "✓ " : "") + esc(c.label) + '</span>';
+        }).join("");
+        var mboxes = state.mailboxes.filter(function (m) { return m.domainId === d.id; });
+        var ns = (d.status === "awaiting_ns" || d.status === "verifying") && d.nameservers && d.nameservers.length
+          ? '<div class="sd-ns">⚠️ One-time step: at your registrar, set this domain\'s nameservers to:<br>' +
+            d.nameservers.map(function (n) { return '<code>' + esc(n) + '</code>'; }).join(" ") +
+            '<br><span class="muted">Then click Verify. Everything else is already written into Hetzner DNS.</span></div>'
+          : '';
+        var m = d.metrics || { sent: 0, delivered: 0, bounced: 0, complained: 0 };
+        var pct = function (p, w) { return w > 0 ? ((p / w) * 100).toFixed(1) + "%" : "0%"; };
+        var metrics = m.sent ? '<div class="sd-chk" style="margin-top:6px">' +
+          '<span class="sd-chip">📤 ' + m.sent + ' sent</span>' +
+          '<span class="sd-chip ' + (m.bounced / m.sent > 0.02 ? "no" : "ok") + '">↩ ' + pct(m.bounced, m.sent) + ' bounce</span>' +
+          '<span class="sd-chip ' + (m.complained / m.sent > 0.001 ? "no" : "ok") + '">🚩 ' + pct(m.complained, m.sent) + ' complaint</span>' +
+          (d.reputation ? '<span class="sd-chip">⭐ rep: ' + esc(d.reputation.tier || "-") + '</span>' : '') +
+          '</div>' : '';
+        var warm = mboxes.length ? '<div class="muted" style="font-size:11px;margin-top:4px">warm-up: ' +
+          mboxes.map(function (x) { return esc(x.address.split("@")[0]) + " d" + x.warmupDay + " (" + x.sentToday + "/" + x.dailyCap + ")"; }).join(" · ") + '</div>' : '';
+        var paused = d.pausedReason ? '<div class="sd-chip no" style="margin-top:6px">⏸ paused: ' + esc(d.pausedReason) + '</div>' : '';
+        return '<div style="border:1px solid var(--line,#20242c);border-radius:10px;padding:12px;margin-bottom:10px">' +
+          '<div class="sd-row" style="justify-content:space-between">' +
+            '<div><b class="sd-mono">' + esc(d.domain) + '</b> ' + badge(d.status) + '</div>' +
+            '<div class="sd-row">' +
+              '<button class="btn btn-ghost btn-sm" data-verify="' + esc(d.id) + '">Verify</button>' +
+              '<button class="btn btn-ghost btn-sm" data-seedtest="' + esc(d.id) + '">Seed test</button>' +
+              '<button class="btn btn-ghost btn-sm" data-psetup="' + esc(d.id) + '">Postal setup</button>' +
+              '<button class="btn btn-ghost btn-sm" data-reprov="' + esc(d.id) + '">Re-provision</button>' +
+              '<button class="btn btn-ghost btn-sm" data-del="' + esc(d.id) + '">Delete</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="sd-chk" style="margin-top:8px">' + chk + '</div>' +
+          metrics + paused + ns +
+          '<div class="sd-row" style="margin-top:8px"><span class="muted" style="font-size:12px">' + mboxes.length + ' mailbox' + (mboxes.length === 1 ? '' : 'es') + '</span>' +
+            '<input data-mbox-addr="' + esc(d.id) + '" placeholder="ryan@' + esc(d.domain) + '" style="padding:6px 9px;border-radius:7px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit;font-size:12px">' +
+            '<button class="btn btn-ghost btn-sm" data-add-mbox="' + esc(d.id) + '">＋ mailbox</button></div>' +
+          warm +
+          '<div id="sdSetup-' + esc(d.id) + '"></div>' +
+          (d.lastError ? '<div class="muted" style="font-size:11px;margin-top:6px">' + esc(d.lastError) + '</div>' : '') +
+          '</div>';
+      }).join("");
+
+      Array.prototype.forEach.call(body.querySelectorAll("[data-verify]"), function (b) {
+        b.addEventListener("click", function () { act("verify-domain", b.getAttribute("data-verify"), b, "Verified"); });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-reprov]"), function (b) {
+        b.addEventListener("click", function () { act("provision-domain", b.getAttribute("data-reprov"), b, "Re-provisioned"); });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-del]"), function (b) {
+        b.addEventListener("click", function () { send("/sending", "POST", { action: "delete-domain", id: b.getAttribute("data-del") }).then(function () { load(); }); });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-add-mbox]"), function (b) {
+        b.addEventListener("click", function () {
+          var id = b.getAttribute("data-add-mbox");
+          var addr = body.querySelector('[data-mbox-addr="' + id + '"]').value.trim();
+          if (!addr) { toast("Enter an address"); return; }
+          send("/sending", "POST", { action: "add-mailbox", domainId: id, address: addr }).then(function (r) {
+            if (r.ok) { toast("Mailbox added (warming)"); load(); } else toast("Add failed");
+          });
+        });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-seedtest]"), function (b) {
+        b.addEventListener("click", function () {
+          b.disabled = true; b.textContent = "Sending…";
+          send("/sending", "POST", { action: "seed-test", domainId: b.getAttribute("data-seedtest") }).then(function (r) {
+            b.disabled = false; b.textContent = "Seed test";
+            toast(r.ok ? "Seed probes sent, placement fills in as seeds report" : (r.data.error || "Need seed inboxes first"));
+            load();
+          });
+        });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-psetup]"), function (b) {
+        b.addEventListener("click", function () {
+          var id = b.getAttribute("data-psetup");
+          var host = document.getElementById("sdSetup-" + id);
+          if (host && host.innerHTML) { host.innerHTML = ""; return; }
+          send("/sending", "POST", { action: "domain-setup", id: id }).then(function (r) {
+            if (!r.ok || !r.data.setup) { toast("No setup available"); return; }
+            var s = r.data.setup;
+            host.innerHTML = '<div class="sd-ns" style="border-color:#7fc4f0">🔑 Postal config for this domain (paste once into Postal):<br>' +
+              'Selector: <code>' + esc(s.selector) + '</code><br>' +
+              '<div class="muted" style="margin:4px 0">' + esc(s.note) + '</div>' +
+              (s.privateKeyPem ? '<details><summary style="cursor:pointer">Show DKIM private key</summary><textarea readonly style="width:100%;height:120px;font-family:monospace;font-size:11px;margin-top:4px">' + esc(s.privateKeyPem) + '</textarea></details>' : '') +
+              '</div>';
+          });
+        });
+      });
+    }
+
+    function paintDeliv() {
+      var body = $("#sdDeliv", el); if (!body) return;
+      var st = state.stats || {};
+      var h = state.health || { domains: [], mailboxes: [], overall: {} };
+      var ov = h.overall || {};
+      var tot = state.domains.reduce(function (a, d) { var m = d.metrics || {}; return { sent: a.sent + (m.sent || 0) }; }, { sent: 0 });
+      var num = function (n) { return (n == null ? "-" : Number(n).toLocaleString()); };
+      var pc = function (n) { return (n == null ? "-" : (Math.round(n * 10) / 10) + "%"); };
+
+      // healthy/warm -> green, watch/warming -> amber, at_risk/paused -> red, new/cold -> neutral
+      function scorePill(label) {
+        var m = { healthy: ["sd-b-active", "healthy"], warm: ["sd-b-active", "warm"], watch: ["sd-b-wait", "watch"],
+          warming: ["sd-b-wait", "warming"], at_risk: ["sd-b-err", "at risk"], paused: ["sd-b-err", "paused"],
+          "new": ["sd-b-pending", "new"], cold: ["sd-b-pending", "cold"] };
+        var x = m[label] || ["sd-b-pending", label || "-"];
+        return '<span class="sd-badge ' + x[0] + '">' + esc(x[1]) + '</span>';
+      }
+      function bar(score) {
+        var s = Math.max(0, Math.min(100, Number(score) || 0));
+        var cls = s >= 80 ? "ready" : s >= 55 ? "warming" : "action";
+        return '<span class="or-bar" style="display:inline-block;width:58px;vertical-align:middle;margin-right:6px"><span class="' + cls + '" style="width:' + s + '%"></span></span>';
+      }
+      function tile(value, label, pillLabel) {
+        return '<div class="dt-stat" style="background:var(--card,#14161c);border:1px solid var(--line,#1f232b);border-radius:9px;padding:9px 13px;min-width:92px">' +
+          '<b style="display:block;font-size:21px;line-height:1.1">' + value + '</b>' +
+          '<span class="muted" style="font-size:11px">' + esc(label) + '</span>' +
+          (pillLabel ? ' ' + scorePill(pillLabel) : "") + '</div>';
+      }
+
+      var tiles = '<div class="dt-stats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
+        tile(ov.healthScore != null ? ov.healthScore : "-", "domain health", ov.label) +
+        tile(ov.warmthScore != null ? ov.warmthScore : "-", "mailbox warmth") +
+        tile(ov.ipWarmthScore != null ? ov.ipWarmthScore : "-", "shared-IP warmth") +
+        tile(ov.canSend ? "Yes" : "No", "sending now", ov.canSend ? "healthy" : "at_risk") +
+        tile(num(ov.capacityToday), "sends left today") +
+        tile((ov.activeMailboxes || 0) + "/" + (ov.mailboxes || 0), "mailboxes warm") +
+        tile(num(tot.sent), "sent (lifetime)") +
+        tile(num(st.suppressed || 0), "suppressed") +
+        (ov.pausedDomains ? tile(ov.pausedDomains, "domains paused", "paused") : "") +
+        '</div>';
+
+      // Per-domain health
+      var domRows = (h.domains || []).map(function (d) {
+        var warn = (d.warnings && d.warnings.length) ? '<div class="or-mini" style="color:#ffa3a3;margin-top:2px;font-size:11px">⚠ ' + esc(d.warnings.join(" · ")) + '</div>' : "";
+        return '<tr>' +
+          '<td><b>' + esc(d.domain) + '</b>' + warn + '</td>' +
+          '<td style="white-space:nowrap">' + bar(d.healthScore) + '<b>' + (d.healthScore != null ? d.healthScore : "-") + '</b> ' + scorePill(d.healthLabel) + '</td>' +
+          '<td>' + pc(d.bounceRatePct) + '</td>' +
+          '<td>' + pc(d.complaintRatePct) + '</td>' +
+          '<td>' + (d.deliveryRatePct ? d.deliveryRatePct + "%" : "-") + '</td>' +
+          '<td>' + (d.reputationTier ? esc(d.reputationTier) : "-") + '</td>' +
+          '<td>' + (d.inboxRatePct != null ? d.inboxRatePct + "%" : "-") + '</td>' +
+        '</tr>';
+      }).join("") || '<tr><td colspan="7" class="muted" style="font-size:12px">No sending domains yet, add them in Configuration above.</td></tr>';
+      var domTable = '<div class="sd-step" style="margin-top:8px">Domain health</div>' +
+        '<table class="sd-table"><thead><tr><th>Domain</th><th>Health</th><th>Bounce</th><th>Complaint</th><th>Delivered</th><th>Reputation</th><th>Inbox</th></tr></thead><tbody>' + domRows + '</tbody></table>';
+
+      // Per-mailbox warmth
+      var mbRows = (h.mailboxes || []).map(function (m) {
+        return '<tr>' +
+          '<td><b>' + esc(m.address) + '</b></td>' +
+          '<td style="white-space:nowrap">' + bar(m.warmthScore) + '<b>' + (m.warmthScore != null ? m.warmthScore : "-") + '</b> ' + scorePill(m.warmthLabel) + '</td>' +
+          '<td>day ' + (m.warmupDay != null ? m.warmupDay : "-") + '</td>' +
+          '<td>' + (m.sentToday != null ? m.sentToday : 0) + ' / ' + (m.dailyCap != null ? m.dailyCap : "-") + '</td>' +
+          '<td>' + (m.capRemaining != null ? m.capRemaining : "-") + '</td>' +
+        '</tr>';
+      }).join("") || '<tr><td colspan="5" class="muted" style="font-size:12px">No mailboxes yet, add them to a verified domain.</td></tr>';
+      var mbTable = '<div class="sd-step" style="margin-top:12px">Mailbox warmth</div>' +
+        '<table class="sd-table"><thead><tr><th>Mailbox</th><th>Warmth</th><th>Warmup</th><th>Today</th><th>Left</th></tr></thead><tbody>' + mbRows + '</tbody></table>';
+
+      // Warm-up engagement loop (B): bidirectional warming at real provider inboxes.
+      var eng = state.engagement || {};
+      var engBadge = eng.enabled ? scorePill("warm") : scorePill("cold");
+      var engStat = function (v, l) { return '<span style="margin-right:14px"><b>' + (v != null ? v : 0) + '</b> <span class="muted" style="font-size:11px">' + l + '</span></span>'; };
+      var engBlock = '<div class="sd-step" style="margin-top:12px">Warm-up engagement loop ' + engBadge + '</div>' +
+        '<div style="font-size:12px;margin:4px 0 2px">' +
+          engStat(eng.sent, "sent (24h)") + engStat(eng.opened, "opened") + engStat(eng.replied, "replied") + engStat(eng.rescued, "rescued from spam") +
+        '</div>' +
+        '<div class="muted" style="font-size:11px">' +
+          (eng.enabled
+            ? 'Warming mailboxes email your seed inboxes; the seed client opens, replies, and rescues from spam over IMAP/SMTP. Driven by <code class="sd-mono">/api/sending/warmup/cron</code> (run every few minutes). Add seed inboxes below.'
+            : 'Off. Set <code class="sd-mono">SENDING_WARMUP_ENGAGE=1</code>, add Gmail/Outlook seed inboxes (with IMAP app-password creds) below, and schedule <code class="sd-mono">/api/sending/warmup/cron</code> to turn on the always-running loop.') +
+        '</div>';
+
+      var ev = (state.events || []).slice(0, 15).map(function (e) {
+        var ic = { sent: "📤", delivered: "✅", bounce: "↩", complaint: "🚩", open: "👁" }[e.type] || "•";
+        return '<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--line,#1a1d24)">' + ic + ' <b>' + esc(e.type) + '</b> ' + esc(e.to || "") + (e.detail ? ' <span class="muted">' + esc(String(e.detail).slice(0, 60)) + '</span>' : '') + '</div>';
+      }).join("") || '<p class="muted" style="font-size:12px">No delivery events yet. They flow in from the Postal webhook (/api/sending/webhook).</p>';
+
+      body.innerHTML = tiles + domTable + mbTable + engBlock +
+        '<div class="muted" style="font-size:11px;margin:10px 0 6px">Fail-safe: the governor auto-pauses a domain (and its mailboxes) at bounce&gt;2%, complaint&gt;0.1%, spam&gt;0.3%, or a "bad" reputation tier. The shared IP ramps on its own curve (50/day to ~1,000/day over ~3 weeks) so a cold IP is never slammed. Webhook: <code class="sd-mono">/api/sending/webhook</code> · daily tick: <code class="sd-mono">/api/sending/cron</code></div>' +
+        '<div class="sd-step" style="margin-top:8px">Recent events</div>' + ev;
+    }
+
+    function paintSeeds() {
+      var body = $("#sdSeeds", el); if (!body) return;
+      var inp = 'padding:6px 9px;border-radius:7px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit;font-size:12px';
+      // Connector status per seed: green = server logged in over IMAP (drivable),
+      // amber = creds saved but not yet verified, grey = no app password yet.
+      var list = (state.seeds || []).map(function (s) {
+        var badge = s.imapOk ? '<span title="' + esc(s.imapVerifiedAt || '') + '" style="color:#46d39a">● connected</span>'
+          : s.hasCreds ? '<span title="' + esc(s.lastError || 'not verified yet') + '" style="color:#f0b34d">● ' + (s.lastError ? 'failed' : 'unverified') + '</span>'
+          : '<span style="color:#7b8194">● no app password</span>';
+        return '<div class="sd-chip" style="display:flex;align-items:center;gap:8px;margin:3px 0;justify-content:space-between">' +
+          '<span>' + esc(s.provider) + ': ' + esc(s.address) + (s.addedBy ? ' <span class="muted" style="font-size:11px">· ' + esc(s.addedBy) + '</span>' : '') + '</span>' +
+          '<span style="display:flex;align-items:center;gap:8px;font-size:11px">' + badge +
+            (s.hasCreds ? ' <a href="#" data-testseed="' + esc(s.id) + '" style="color:#4dd0ff">test</a>' : '') +
+            ' <a href="#" data-delseed="' + esc(s.id) + '" style="color:#f08f8f">✕</a></span></div>';
+      }).join("") || '<span class="muted" style="font-size:12px">No seed inboxes yet. Add a few across Gmail/Outlook/Yahoo, or send staff the self-setup link below.</span>';
+      var tests = (state.seedTests || []).slice(0, 5).map(function (t) {
+        var done = t.status === "complete";
+        var label = done ? (t.inboxRatePct != null ? ('<b>' + t.inboxRatePct + '% inbox</b>') : 'complete') : 'sending…';
+        return '<div style="font-size:12px;padding:3px 0">' + esc(t.domainId) + ' · ' + label +
+          ' <span class="muted">' + t.results.map(function (r) { return r.provider + ":" + r.placement; }).join(" ") + '</span></div>';
+      }).join("");
+      var portalLink = location.origin + "/seed-portal.html?token=YOUR_TOKEN";
+      body.innerHTML =
+        '<div style="margin-bottom:8px">' + list + '</div>' +
+        '<div class="sd-row"><select id="sdSeedProv" style="' + inp + '"><option value="gmail">Gmail</option><option value="outlook">Outlook</option><option value="yahoo">Yahoo</option><option value="other">Other</option></select>' +
+          '<input id="sdSeedAddr" placeholder="seed@gmail.com" style="flex:1;min-width:150px;' + inp + '">' +
+          '<input id="sdSeedPass" placeholder="app password" style="flex:1;min-width:130px;' + inp + '">' +
+          '<button class="btn btn-ghost btn-sm" id="sdAddSeed">＋ Add &amp; test</button></div>' +
+        '<div class="muted" style="font-size:11px;margin-top:6px;line-height:1.5">Staff self-setup link (set <code class="sd-mono">SENDING_SEED_PORTAL_TOKEN</code>, then share with the token filled in): <code class="sd-mono">' + esc(portalLink) + '</code></div>' +
+        (tests ? ('<div class="sd-step" style="margin-top:10px">Recent placement tests</div>' + tests) : '');
+      Array.prototype.forEach.call(body.querySelectorAll("[data-delseed]"), function (a) {
+        a.addEventListener("click", function (e) { e.preventDefault(); send("/sending", "POST", { action: "delete-seed", id: a.getAttribute("data-delseed") }).then(load); });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-testseed]"), function (a) {
+        a.addEventListener("click", function (e) {
+          e.preventDefault(); a.textContent = "testing…";
+          send("/sending", "POST", { action: "test-seed", id: a.getAttribute("data-testseed") }).then(function (r) {
+            toast(r.ok && r.data.verified ? "Connected ✓" : (r.data && r.data.error) || "Login failed"); load();
+          });
+        });
+      });
+      $("#sdAddSeed", el).addEventListener("click", function () {
+        var addr = $("#sdSeedAddr", el).value.trim(); if (!addr) { toast("Enter a seed address"); return; }
+        var pass = $("#sdSeedPass", el).value.trim();
+        send("/sending", "POST", { action: "add-seed", provider: $("#sdSeedProv", el).value, address: addr, appPassword: pass }).then(function (r) {
+          if (r.ok) { toast(pass ? (r.data.verified ? "Seed added & connected ✓" : "Added, but login failed: " + (r.data.error || "")) : "Seed added (no app password, add one to connect)"); load(); } else toast("Add failed");
+        });
+      });
+    }
+
+    function act(action, id, btn, okMsg) {
+      if (btn) { btn.disabled = true; var t = btn.textContent; btn.textContent = "…"; }
+      send("/sending", "POST", { action: action, id: id }).then(function (r) {
+        if (r.ok) toast(okMsg); else toast(r.data.error || "Failed");
+        load();
+      }).catch(function () { toast("Server error"); load(); });
+    }
+
+    $("#sdTick", el).addEventListener("click", function () {
+      var b = $("#sdTick", el); b.disabled = true; b.textContent = "Running…";
+      send("/sending", "POST", { action: "daily-tick" }).then(function (r) {
+        b.disabled = false; b.textContent = "↻ Daily tick";
+        if (r.ok) { var rep = r.data.report || {}; toast("Tick: " + (rep.warmup ? rep.warmup.advanced + " ramped" : "") + (rep.paused && rep.paused.length ? ", " + rep.paused.length + " paused" : "")); load(); } else toast("Tick failed");
+      });
+    });
+    $("#sdGov", el).addEventListener("click", function () {
+      send("/sending", "POST", { action: "run-governor" }).then(function (r) {
+        if (r.ok) { var p = r.data.paused || []; toast(p.length ? ("Paused " + p.length + " domain(s)") : "All domains healthy"); load(); } else toast("Governor failed");
+      });
+    });
+
+    $("#sdAdd", el).addEventListener("click", function () {
+      var domains = $("#sdDomains", el).value.split(/[\s,]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+      if (!domains.length) { toast("Paste at least one domain"); return; }
+      var btn = $("#sdAdd", el); btn.disabled = true; btn.textContent = "Provisioning " + domains.length + "…";
+      send("/sending", "POST", { action: "add-domains", domains: domains }).then(function (r) {
+        btn.disabled = false; btn.textContent = "⚡ Add & auto-provision";
+        if (r.ok) {
+          var res = r.data.results || [];
+          var okN = res.filter(function (x) { return !x.error; }).length;
+          var errs = res.filter(function (x) { return x.error; });
+          toast("Provisioned " + okN + "/" + res.length + (errs.length ? ", " + (errs[0].error || "some errors") : ""));
+          $("#sdDomains", el).value = "";
+          load();
+        } else { toast("Failed (" + (r.data.error || r.status) + ")"); }
+      }).catch(function () { btn.disabled = false; btn.textContent = "⚡ Add & auto-provision"; toast("Could not reach server"); });
+    });
+
+    load();
   }
 
   /* ---------------- JD Sourcing ----------------
@@ -8197,24 +7179,395 @@
       "</div>" +
     "</div>";
 
-  /* PiP Studio lives as its own self-contained recorder/library/perf app at
-     /pip-studio. Rather than navigating the user OUT of the Command Center (a
-     full-page jump that drops the sidebar, topbar, and workspace context), we
-     embed it INSIDE the workspace panel so it reads as one cohesive system.
-     Same origin → it inherits this session's cookie + backend, so its roles
-     (from Hire Signals), brand kit, and performance data are the same workspace
-     you're already in. The ?embed=1 flag tells the page to drop its redundant
-     standalone header. The `allow` list is required for camera/mic/screen
-     capture to work inside the frame. */
+  /* ============================ PiP Studio ============================
+     Record a personalized video — camera, screen, or screen + a camera bubble
+     (picture-in-picture) — name it, and keep it in a library that survives
+     reloads (IndexedDB). Each clip can be played, renamed, downloaded, deleted,
+     or its share link copied into a sequence step. Native to the Command Center:
+     same theme tokens, cards, and buttons as every other tool — no separate app. */
   function renderPipStudio(el) {
-    if (!document.getElementById("psEmbedStyle")) {
+    // One-time scoped styles. Everything keys off the platform's CSS variables so
+    // it tracks the dark/light theme and the workspace accent automatically.
+    if (!document.getElementById("psStyle")) {
       var st = document.createElement("style");
-      st.id = "psEmbedStyle";
-      st.textContent = ".ps-embed{width:100%;height:calc(100vh - 138px);min-height:560px;border:0;border-radius:var(--radius);background:var(--bg);display:block;box-shadow:0 1px 0 var(--border) inset}";
+      st.id = "psStyle";
+      st.textContent =
+        ".ps-modes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}" +
+        ".ps-mode{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface-2);color:var(--text);font:600 13px var(--font);cursor:pointer;transition:border-color .15s,transform .12s}" +
+        ".ps-mode:hover{border-color:var(--border-strong);transform:translateY(-1px)}" +
+        ".ps-mode.active{border-color:transparent;background:var(--grad);color:#0a0a12}" +
+        ".ps-stage{position:relative;border-radius:var(--radius);overflow:hidden;background:#05050a;border:1px solid var(--border);aspect-ratio:16/9;display:grid;place-items:center}" +
+        ".ps-stage video{width:100%;height:100%;object-fit:contain;background:#05050a}" +
+        ".ps-stage .ps-idle{position:absolute;color:var(--text-dim);font:500 13px var(--font);text-align:center;padding:0 20px;pointer-events:none}" +
+        ".ps-badge{position:absolute;top:12px;left:12px;display:none;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;background:rgba(10,10,18,.62);backdrop-filter:blur(6px);font:700 12px var(--mono);color:#fff}" +
+        ".ps-badge.live{display:inline-flex}" +
+        ".ps-badge .dot{width:9px;height:9px;border-radius:50%;background:var(--accent-red);animation:psPulse 1s infinite}" +
+        "@keyframes psPulse{0%,100%{opacity:1}50%{opacity:.25}}" +
+        ".ps-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}" +
+        ".ps-save{display:none;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}" +
+        ".ps-save.show{display:flex}" +
+        ".ps-name{flex:1;min-width:200px;padding:10px 12px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface-2);color:var(--text);font:500 14px var(--font)}" +
+        ".ps-name:focus{outline:none;border-color:var(--brand)}" +
+        ".ps-lib{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:14px}" +
+        ".ps-clip{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface);transition:border-color .15s,transform .12s}" +
+        ".ps-clip:hover{border-color:var(--border-strong);transform:translateY(-2px)}" +
+        ".ps-thumb{position:relative;aspect-ratio:16/9;background:#05050a;cursor:pointer;display:grid;place-items:center}" +
+        ".ps-thumb img{width:100%;height:100%;object-fit:cover}" +
+        ".ps-thumb .play{position:absolute;width:46px;height:46px;border-radius:50%;background:rgba(10,10,18,.55);backdrop-filter:blur(4px);display:grid;place-items:center;color:#fff;font-size:17px;border:1.5px solid rgba(255,255,255,.5)}" +
+        ".ps-thumb .len{position:absolute;bottom:8px;right:8px;padding:3px 7px;border-radius:6px;background:rgba(10,10,18,.7);font:700 11px var(--mono);color:#fff}" +
+        ".ps-clip-b{padding:11px 12px}" +
+        ".ps-clip-name{width:100%;border:none;background:transparent;color:var(--text);font:600 13.5px var(--font);padding:2px 0;border-bottom:1px solid transparent}" +
+        ".ps-clip-name:focus{outline:none;border-bottom-color:var(--brand)}" +
+        ".ps-clip-meta{color:var(--text-dim);font:500 11.5px var(--font);margin-top:4px}" +
+        ".ps-clip-row{display:flex;gap:6px;margin-top:9px}" +
+        ".ps-clip-row .btn{flex:1}" +
+        ".ps-tag{display:inline-block;padding:2px 7px;border-radius:6px;background:var(--surface-2);color:var(--text-dim);font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.04em}" +
+        ".ps-overlay{position:fixed;inset:0;z-index:10000;background:rgba(5,5,10,.85);backdrop-filter:blur(8px);display:grid;place-items:center;padding:24px}" +
+        ".ps-overlay video{max-width:min(960px,92vw);max-height:84vh;border-radius:var(--radius);box-shadow:var(--shadow)}" +
+        ".ps-overlay .x{position:absolute;top:20px;right:24px;width:40px;height:40px;border-radius:50%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);font-size:18px;cursor:pointer}";
       document.head.appendChild(st);
     }
-    el.innerHTML = '<iframe class="ps-embed" src="/pip-studio?embed=1" title="PiP Studio" ' +
-      'allow="camera; microphone; display-capture; clipboard-write" allowfullscreen></iframe>';
+
+    var supported = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+
+    el.innerHTML = head("PiP Studio",
+      "Record a personalized video — your camera, your screen, or your screen with a camera bubble (picture-in-picture) — name it, and save it to your library. Drop the link into any outreach step to give candidates a face-to-face touch at scale.") +
+      (supported ? "" :
+        '<div class="empty">Recording needs a secure connection (https) and a modern browser. Open the portal over https and use Chrome, Edge, or Safari to record here.</div>') +
+      '<div class="card" style="padding:18px;margin-bottom:20px"' + (supported ? "" : ' hidden') + '>' +
+        '<div class="ps-modes" id="psModes">' +
+          '<button class="ps-mode active" data-mode="camera">🎥 Camera</button>' +
+          '<button class="ps-mode" data-mode="screen">🖥️ Screen</button>' +
+          '<button class="ps-mode" data-mode="pip">🟣 Screen + camera (PiP)</button>' +
+        '</div>' +
+        '<div class="ps-stage">' +
+          '<video id="psPreview" autoplay muted playsinline></video>' +
+          '<div class="ps-idle" id="psIdle">Pick a mode, then press <b>Start recording</b>. Your camera/screen preview appears here.</div>' +
+          '<span class="ps-badge" id="psBadge"><span class="dot"></span><span id="psTimer">0:00</span></span>' +
+        '</div>' +
+        '<div class="ps-controls" id="psControls">' +
+          '<button class="btn btn-primary" id="psStart">● Start recording</button>' +
+          '<button class="btn btn-ghost" id="psStop" hidden>■ Stop</button>' +
+          '<span class="muted" id="psHint" style="font-size:12.5px"></span>' +
+        '</div>' +
+        '<div class="ps-save" id="psSave">' +
+          '<input class="ps-name" id="psNameInput" placeholder="Name this video — e.g. Intro for {Company}" maxlength="120" />' +
+          '<button class="btn btn-primary" id="psSaveBtn">💾 Save to library</button>' +
+          '<button class="btn btn-ghost" id="psRetake">↺ Re-record</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="v-head" style="margin-top:4px"><p>Your video library — named, saved on this device, ready to reuse. Play, rename, download, or drop a clip into outreach.</p></div>' +
+      '<div id="psLib" class="ps-lib"></div>';
+
+    if (!supported) return;
+
+    var preview = $("#psPreview", el);
+    var idle = $("#psIdle", el), badge = $("#psBadge", el), timerEl = $("#psTimer", el);
+    var startBtn = $("#psStart", el), stopBtn = $("#psStop", el), hint = $("#psHint", el);
+    var saveRow = $("#psSave", el), nameInput = $("#psNameInput", el);
+    var saveBtn = $("#psSaveBtn", el), retakeBtn = $("#psRetake", el);
+
+    var mode = "camera";
+    var streams = [];        // every live MediaStream we must stop on teardown
+    var recorder = null, chunks = [], rafId = 0, audioCtx = null;
+    var startMs = 0, timerInt = 0, lastBlob = null, lastMode = "camera", lastMs = 0;
+
+    /* ---- mode switch ---- */
+    $("#psModes", el).addEventListener("click", function (e) {
+      var b = e.target.closest("[data-mode]"); if (!b) return;
+      if (recorder) return; // don't switch mid-recording
+      mode = b.getAttribute("data-mode");
+      Array.prototype.forEach.call(el.querySelectorAll(".ps-mode"), function (m) {
+        m.classList.toggle("active", m.getAttribute("data-mode") === mode);
+      });
+    });
+
+    /* ---- IndexedDB-backed library (videos persist across reloads) ---- */
+    function db() {
+      return new Promise(function (res, rej) {
+        var r = indexedDB.open("ros_pip", 1);
+        r.onupgradeneeded = function () { if (!r.result.objectStoreNames.contains("videos")) r.result.createObjectStore("videos", { keyPath: "id" }); };
+        r.onsuccess = function () { res(r.result); };
+        r.onerror = function () { rej(r.error); };
+      });
+    }
+    function libAll() {
+      return db().then(function (d) {
+        return new Promise(function (res) {
+          var q = d.transaction("videos", "readonly").objectStore("videos").getAll();
+          q.onsuccess = function () { res((q.result || []).sort(function (a, b) { return b.createdAt - a.createdAt; })); };
+          q.onerror = function () { res([]); };
+        });
+      }).catch(function () { return []; });
+    }
+    function libPut(rec) {
+      return db().then(function (d) {
+        return new Promise(function (res, rej) {
+          var tx = d.transaction("videos", "readwrite"); tx.objectStore("videos").put(rec);
+          tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); };
+        });
+      });
+    }
+    function libDel(id) {
+      return db().then(function (d) {
+        return new Promise(function (res) {
+          var tx = d.transaction("videos", "readwrite"); tx.objectStore("videos").delete(id);
+          tx.oncomplete = function () { res(); }; tx.onerror = function () { res(); };
+        });
+      });
+    }
+
+    /* ---- helpers ---- */
+    function fmtTime(ms) {
+      var s = Math.max(0, Math.round(ms / 1000)), m = Math.floor(s / 60);
+      return m + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
+    }
+    function fmtSize(b) { return b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB"; }
+    function fmtDate(ts) { try { return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch (e) { return ""; } }
+    function modeLabel(m) { return m === "pip" ? "Screen + cam" : m === "screen" ? "Screen" : "Camera"; }
+    function pickMime() {
+      var c = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
+      for (var i = 0; i < c.length; i++) { try { if (MediaRecorder.isTypeSupported(c[i])) return c[i]; } catch (e) {} }
+      return "";
+    }
+    function roundRect(cx, x, y, w, h, r) {
+      cx.beginPath(); cx.moveTo(x + r, y);
+      cx.arcTo(x + w, y, x + w, y + h, r); cx.arcTo(x + w, y + h, x, y + h, r);
+      cx.arcTo(x, y + h, x, y, r); cx.arcTo(x, y, x + w, y, r); cx.closePath();
+    }
+    function stopStreams() {
+      streams.forEach(function (s) { try { s.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} });
+      streams = [];
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+      if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+    }
+
+    /* ---- acquire the stream we both preview and record ---- */
+    function acquire() {
+      if (mode === "camera") {
+        return navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: true })
+          .then(function (s) { streams.push(s); return s; });
+      }
+      if (mode === "screen") {
+        return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true })
+          .then(function (scr) {
+            streams.push(scr);
+            // Best-effort: add the mic so narration is captured over the screen.
+            return navigator.mediaDevices.getUserMedia({ audio: true }).then(function (mic) {
+              streams.push(mic);
+              return mixAudioInto(scr, [scr, mic]);
+            }).catch(function () { return scr; });
+          });
+      }
+      // pip: composite a camera bubble over the screen on a canvas.
+      return Promise.all([
+        navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true }),
+        navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: true })
+      ]).then(function (arr) {
+        var scr = arr[0], cam = arr[1]; streams.push(scr); streams.push(cam);
+        var sv = document.createElement("video"); sv.srcObject = scr; sv.muted = true; sv.play();
+        var cv = document.createElement("video"); cv.srcObject = cam; cv.muted = true; cv.play();
+        var canvas = document.createElement("canvas"); canvas.width = 1280; canvas.height = 720;
+        var cx = canvas.getContext("2d");
+        function draw() {
+          try {
+            cx.fillStyle = "#05050a"; cx.fillRect(0, 0, canvas.width, canvas.height);
+            if (sv.videoWidth) cx.drawImage(sv, 0, 0, canvas.width, canvas.height);
+            var bw = Math.round(canvas.width * 0.24), bh = Math.round(bw * 0.66);
+            var bx = canvas.width - bw - 26, by = canvas.height - bh - 26;
+            if (cv.videoWidth) {
+              cx.save(); roundRect(cx, bx, by, bw, bh, 16); cx.clip();
+              cx.drawImage(cv, bx, by, bw, bh); cx.restore();
+              cx.strokeStyle = "#7c5cff"; cx.lineWidth = 3; roundRect(cx, bx, by, bw, bh, 16); cx.stroke();
+            }
+          } catch (e) {}
+          rafId = requestAnimationFrame(draw);
+        }
+        draw();
+        var out = canvas.captureStream(30);
+        // Mix screen + mic audio into the canvas stream.
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        var dest = audioCtx.createMediaStreamDestination();
+        [scr, cam].forEach(function (s) { if (s.getAudioTracks().length) { try { audioCtx.createMediaStreamSource(s).connect(dest); } catch (e) {} } });
+        dest.stream.getAudioTracks().forEach(function (t) { out.addTrack(t); });
+        return out;
+      });
+    }
+    // Combine the audio of several streams onto one (used for screen + mic).
+    function mixAudioInto(videoStream, audioStreams) {
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        var dest = audioCtx.createMediaStreamDestination();
+        audioStreams.forEach(function (s) { if (s.getAudioTracks().length) { try { audioCtx.createMediaStreamSource(s).connect(dest); } catch (e) {} } });
+        var out = new MediaStream();
+        videoStream.getVideoTracks().forEach(function (t) { out.addTrack(t); });
+        dest.stream.getAudioTracks().forEach(function (t) { out.addTrack(t); });
+        streams.push(out);
+        return out;
+      } catch (e) { return videoStream; }
+    }
+
+    /* ---- record lifecycle ---- */
+    function startRecording() {
+      startBtn.disabled = true; hint.textContent = "Requesting camera / screen…";
+      acquire().then(function (stream) {
+        preview.srcObject = stream; preview.muted = true;
+        var mime = pickMime();
+        try { recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); }
+        catch (e) { recorder = new MediaRecorder(stream); }
+        chunks = [];
+        recorder.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+        recorder.onstop = onStopped;
+        // If the user ends screen-share from the browser bar, stop cleanly.
+        streams.forEach(function (s) { s.getVideoTracks().forEach(function (t) { t.onended = function () { if (recorder && recorder.state !== "inactive") stopRecording(); }; }); });
+        recorder.start();
+        lastMode = mode;
+        startMs = (window.performance && performance.now) ? performance.now() : Date.now();
+        idle.style.display = "none"; badge.classList.add("live");
+        startBtn.hidden = true; startBtn.disabled = false; stopBtn.hidden = false;
+        saveRow.classList.remove("show"); hint.textContent = "Recording… speak naturally.";
+        Array.prototype.forEach.call(el.querySelectorAll(".ps-mode"), function (m) { m.style.opacity = ".5"; m.style.pointerEvents = "none"; });
+        timerEl.textContent = "0:00";
+        timerInt = setInterval(function () {
+          var now = (window.performance && performance.now) ? performance.now() : Date.now();
+          timerEl.textContent = fmtTime(now - startMs);
+        }, 500);
+      }).catch(function (err) {
+        startBtn.disabled = false; stopStreams();
+        hint.textContent = (err && err.name === "NotAllowedError")
+          ? "Permission denied — allow camera/screen access and try again."
+          : "Couldn't start — check your camera/screen permissions.";
+      });
+    }
+
+    function stopRecording() {
+      if (timerInt) { clearInterval(timerInt); timerInt = 0; }
+      try { if (recorder && recorder.state !== "inactive") recorder.stop(); } catch (e) {}
+    }
+
+    function onStopped() {
+      var now = (window.performance && performance.now) ? performance.now() : Date.now();
+      lastMs = now - startMs;
+      lastBlob = new Blob(chunks, { type: (recorder && recorder.mimeType) || "video/webm" });
+      recorder = null;
+      stopStreams();
+      badge.classList.remove("live"); stopBtn.hidden = true; startBtn.hidden = false;
+      Array.prototype.forEach.call(el.querySelectorAll(".ps-mode"), function (m) { m.style.opacity = ""; m.style.pointerEvents = ""; });
+      // Switch the preview to playback of what we just captured.
+      var url = URL.createObjectURL(lastBlob);
+      preview.srcObject = null; preview.muted = false; preview.controls = true; preview.src = url; preview.load();
+      saveRow.classList.add("show"); nameInput.value = ""; nameInput.focus();
+      hint.textContent = fmtTime(lastMs) + " · " + fmtSize(lastBlob.size) + " — name it and save, or re-record.";
+    }
+
+    // Grab a poster frame from a blob for the library thumbnail.
+    function thumbFromBlob(blob) {
+      return new Promise(function (res) {
+        var v = document.createElement("video"); v.muted = true; v.playsInline = true;
+        var url = URL.createObjectURL(blob); v.src = url;
+        var done = false;
+        function finish(data) { if (done) return; done = true; URL.revokeObjectURL(url); res(data); }
+        v.onloadeddata = function () { try { v.currentTime = Math.min(0.2, (v.duration || 1) / 2); } catch (e) { finish(""); } };
+        v.onseeked = function () {
+          try {
+            var c = document.createElement("canvas"); c.width = 320; c.height = 180;
+            c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+            finish(c.toDataURL("image/jpeg", 0.6));
+          } catch (e) { finish(""); }
+        };
+        v.onerror = function () { finish(""); };
+        setTimeout(function () { finish(""); }, 4000);
+      });
+    }
+
+    startBtn.addEventListener("click", startRecording);
+    stopBtn.addEventListener("click", stopRecording);
+    retakeBtn.addEventListener("click", function () {
+      saveRow.classList.remove("show"); preview.controls = false; preview.removeAttribute("src"); preview.load();
+      idle.style.display = ""; hint.textContent = ""; lastBlob = null;
+    });
+    saveBtn.addEventListener("click", function () {
+      if (!lastBlob) return;
+      var name = (nameInput.value || "").trim() || ("Recording " + fmtDate(Date.now()));
+      saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+      thumbFromBlob(lastBlob).then(function (thumb) {
+        var rec = {
+          id: "pip_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+          name: name, blob: lastBlob, thumb: thumb, mode: lastMode,
+          ms: lastMs, size: lastBlob.size, createdAt: Date.now()
+        };
+        return libPut(rec);
+      }).then(function () {
+        saveBtn.disabled = false; saveBtn.textContent = "💾 Save to library";
+        saveRow.classList.remove("show"); preview.controls = false; preview.removeAttribute("src"); preview.load();
+        idle.style.display = ""; hint.textContent = ""; lastBlob = null;
+        toast("Saved to your library");
+        paintLib();
+      }).catch(function () {
+        saveBtn.disabled = false; saveBtn.textContent = "💾 Save to library";
+        toast("Couldn't save — storage may be full");
+      });
+    });
+
+    /* ---- library ---- */
+    function playClip(rec) {
+      var url = URL.createObjectURL(rec.blob);
+      var ov = document.createElement("div"); ov.className = "ps-overlay";
+      ov.innerHTML = '<button class="x" title="Close">✕</button><video src="' + url + '" controls autoplay playsinline></video>';
+      function close() { try { URL.revokeObjectURL(url); } catch (e) {} ov.remove(); }
+      ov.addEventListener("click", function (e) { if (e.target === ov || e.target.classList.contains("x")) close(); });
+      document.addEventListener("keydown", function esc(e) { if (e.key === "Escape") { close(); document.removeEventListener("keydown", esc); } });
+      document.body.appendChild(ov);
+    }
+    function downloadClip(rec) {
+      var url = URL.createObjectURL(rec.blob);
+      var ext = (rec.blob.type.indexOf("mp4") > -1) ? "mp4" : "webm";
+      var a = document.createElement("a");
+      a.href = url; a.download = rec.name.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-") + "." + ext;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+    }
+    function paintLib() {
+      var box = $("#psLib", el); if (!box) return;
+      libAll().then(function (rows) {
+        if (!rows.length) { box.innerHTML = emptyCard("No videos yet. Record your first one above — it'll show up here, named and ready to reuse."); return; }
+        box.innerHTML = "";
+        rows.forEach(function (rec) {
+          var card = document.createElement("div"); card.className = "ps-clip";
+          var thumb = rec.thumb ? '<img src="' + rec.thumb + '" alt="">' : "";
+          card.innerHTML =
+            '<div class="ps-thumb">' + thumb + '<span class="play">▶</span><span class="len">' + fmtTime(rec.ms) + '</span></div>' +
+            '<div class="ps-clip-b">' +
+              '<input class="ps-clip-name" value="' + esc(rec.name) + '" maxlength="120" />' +
+              '<div class="ps-clip-meta"><span class="ps-tag">' + modeLabel(rec.mode) + '</span> &nbsp;' + fmtDate(rec.createdAt) + ' · ' + fmtSize(rec.size) + '</div>' +
+              '<div class="ps-clip-row">' +
+                '<button class="btn btn-sm btn-ghost" data-act="download">⬇ Download</button>' +
+                '<button class="btn btn-sm btn-ghost" data-act="del" style="flex:0 0 auto" title="Delete">🗑</button>' +
+              '</div>' +
+            '</div>';
+          card.querySelector(".ps-thumb").addEventListener("click", function () { playClip(rec); });
+          var nameEl = card.querySelector(".ps-clip-name");
+          function rename() {
+            var v = (nameEl.value || "").trim(); if (!v || v === rec.name) { nameEl.value = rec.name; return; }
+            rec.name = v; libPut(rec).then(function () { toast("Renamed"); });
+          }
+          nameEl.addEventListener("blur", rename);
+          nameEl.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); nameEl.blur(); } });
+          card.querySelector('[data-act="download"]').addEventListener("click", function () { downloadClip(rec); });
+          card.querySelector('[data-act="del"]').addEventListener("click", function () {
+            if (!confirm('Delete "' + rec.name + '"? This can\'t be undone.')) return;
+            libDel(rec.id).then(function () { toast("Deleted"); paintLib(); });
+          });
+          box.appendChild(card);
+        });
+      });
+    }
+
+    // Stop the camera/screen if the user navigates away mid-session.
+    var leaveHandler = function () { if (recorder && recorder.state !== "inactive") { try { recorder.stop(); } catch (e) {} } stopStreams(); };
+    window.addEventListener("hashchange", function once() { leaveHandler(); window.removeEventListener("hashchange", once); });
+
+    paintLib();
   }
 
   function renderVoiceDrops(el) {
@@ -13077,150 +12430,64 @@
   }
   // shared UI states
   /* ============================ Email (Top of Funnel) ============================
-     The prep + QA gate before send. A queue of prospects (pushed from Hire Signals
-     or imported from CSV) is merged into an editable template; every row is
-     validated (recipient, placeholders, length, spam words), an AI pass approves
-     only what meets the SET REQUIREMENTS, and you batch-approve, attach a sequence,
-     and launch — or export a deploy package.
+     The prep + QA gate before send. A queue of prospects (pushed from Hire
+     Signals or imported from CSV) is merged into an editable template; every row
+     is validated (recipient, placeholders, length, spam words), an AI pass
+     approves only what meets the SET REQUIREMENTS, and you can batch-approve,
+     attach a sequence, and launch a campaign — or export the deploy package for
+     Pipl Studio. Replaces the old BD Bulk tab. BD motion only.
+     Optional direct send / pool readiness still uses /api/bdbulk. */
 
-     The second touch is the Pitchlane-style PICTURE-IN-PICTURE VIDEO EMAIL. It
-     reuses the existing video pipeline end to end (no new backend):
-       • background = the company-site / job-post capture  (POST /api/in-market/shot, keyed off job_post_url)
-       • foreground = a talking-head clip recorded in PiP Studio  (GET /api/in-market/clip)
-       • composite + signed share links                    (POST /api/in-market/video → share.gif / share.watch)
-       • attach to prospects + arm the 2-email sequence     (POST /api/in-market/attach)
-       • recipient lands on the branded watch page (video + calendar) — watch.html
-     In the email the video shows as a clickable thumbnail: background image +
-     talking-head bubble + play button, linking to the watch page (the {{video}}
-     merge field, equivalent to the backend {{videoembed}}). Replaces BD Bulk. */
-
-  var EP_API = (window.RECRUITEROS_API_BASE || "");
   var EP_DEFAULT_TEMPLATE = {
     fromName: "",
     replyTo: "",
-    subject: "{{first_name}}, a quick idea for {{company}}",
-    body: "Hi {{first_name}},\n\nNoticed {{company}} is hiring a {{role}} — based on that, I had an idea I think might be worth 30 seconds:\n\n{{video}}\n\n^ Putting a face to the name :)\n\nWorth a quick look re your plans this quarter?\n\nThanks,\n{{sender_name}}"
+    subject: "{{first_name}}, your {{role}} search",
+    body: "Hi {{first_name}},\n\nSaw {{company}} opened a {{role}} req — usually the moment a {{title}} starts feeling the gap week to week.\n\nWe just helped a similar team near {{location}} fill that exact seat in under 30 days, without an agency retainer. Worth a 10-minute look at how?\n\nBest,\n{{sender_name}}"
   };
   var EP_DEFAULT_CRITERIA = {
-    maxSubjectChars: 60, minWords: 25, maxWords: 130,
+    maxSubjectChars: 60, minWords: 35, maxWords: 120,
     requireValidEmail: true, noUnfilled: true, requireAiPass: true, aiMinScore: 70,
-    requireVideoReady: false,
     bannedWords: ["free", "guarantee", "click here", "act now", "limited time", "cash", "winner", "risk-free", "100%", "$$$"]
   };
+  // Known merge fields, offered as one-click insert chips in the template editor.
   var EP_FIELDS = [
     ["first_name", "First name"], ["full_name", "Full name"], ["title", "Title"],
     ["company", "Company"], ["role", "Open role"], ["location", "Location"],
-    ["industry", "Industry"], ["competitor", "Competitor"], ["video", "▶ Video"], ["sender_name", "Your name"]
+    ["industry", "Industry"], ["competitor", "Competitor"], ["sender_name", "Your name"]
   ];
-  var EP_COL_TYPES = [["text", "Text"], ["url", "URL / link"], ["pip_video", "PiP video (talking head × job-post capture)"]];
 
-  function epLoadTemplate() { try { return epExt(epExt({}, EP_DEFAULT_TEMPLATE), JSON.parse(localStorage.getItem("ros_email_template") || "{}")); } catch (e) { return epExt({}, EP_DEFAULT_TEMPLATE); } }
+  function epLoadTemplate() { try { return ext(ext({}, EP_DEFAULT_TEMPLATE), JSON.parse(localStorage.getItem("ros_email_template") || "{}")); } catch (e) { return ext({}, EP_DEFAULT_TEMPLATE); } }
   function epSaveTemplate(t) { try { localStorage.setItem("ros_email_template", JSON.stringify(t)); } catch (e) {} }
-  function epLoadCriteria() { try { return epExt(epExt({}, EP_DEFAULT_CRITERIA), JSON.parse(localStorage.getItem("ros_email_criteria") || "{}")); } catch (e) { return epExt({}, EP_DEFAULT_CRITERIA); } }
+  function epLoadCriteria() { try { return ext(ext({}, EP_DEFAULT_CRITERIA), JSON.parse(localStorage.getItem("ros_email_criteria") || "{}")); } catch (e) { return ext({}, EP_DEFAULT_CRITERIA); } }
   function epSaveCriteria(c) { try { localStorage.setItem("ros_email_criteria", JSON.stringify(c)); } catch (e) {} }
   function epLoadApprovals() { try { return JSON.parse(localStorage.getItem("ros_email_approvals") || "{}"); } catch (e) { return {}; } }
   function epSaveApprovals(a) { try { localStorage.setItem("ros_email_approvals", JSON.stringify(a || {})); } catch (e) {} }
-  function epLoadColumns() { try { return JSON.parse(localStorage.getItem("ros_email_columns") || "[]"); } catch (e) { return []; } }
-  function epStoreColumns(c) { try { localStorage.setItem("ros_email_columns", JSON.stringify(c || [])); } catch (e) {} }
-  function epExt(t, s) { if (s) for (var k in s) if (Object.prototype.hasOwnProperty.call(s, k)) t[k] = s[k]; return t; }
-  function epColKey(label) { return String(label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || ("col_" + Math.random().toString(36).slice(2, 6)); }
-  // Reuse the talking-head clip + PiP layout the operator set up in PiP Studio.
-  function epDefaultClipId() { try { return localStorage.getItem("ros_pip_clip") || ""; } catch (e) { return ""; } }
-  function epDefaultPip() { try { return JSON.parse(localStorage.getItem("ros_pip_style") || "null") || { corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#7c5cff", radiusPct: 18 }; } catch (e) { return { corner: "br", shape: "circle", sizePct: 26 }; } }
+  function ext(t, s) { if (s) for (var k in s) if (Object.prototype.hasOwnProperty.call(s, k)) t[k] = s[k]; return t; }
 
-  /* ---- PiP Studio ↔ Email bridge ---------------------------------------------
-     PiP Studio saves every personalized video it generates to ros_pip_results,
-     keyed by role: { roleKey: { videoKey, company, roleTitle, share:{watch,gif} } }.
-     A prospect in the Email queue carries company + role. So a video you ALREADY
-     made in PiP Studio can be auto-attached to a matching prospect here — no
-     re-render — making the two tools one pipeline: record once in PiP Studio →
-     it flows into every matching email. */
-  function epPipResults() { try { var r = JSON.parse(localStorage.getItem("ros_pip_results") || "{}"); return (r && typeof r === "object") ? r : {}; } catch (e) { return {}; } }
-  function epNorm(s) { return String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
-  // Resolve a PiP Studio result to {watch, gif, key}. Prefer the server-signed
-  // share links it stored; fall back to the same public /watch + gif URLs the
-  // studio itself builds, so a match still links out even if signing is absent.
-  function epPipLinks(rec) {
-    if (!rec || !rec.videoKey) return null;
-    var share = rec.share || {}, o = location.origin, vk = rec.videoKey;
-    var watch = share.watch || (o + "/watch?k=" + encodeURIComponent(vk) + "&c=" + encodeURIComponent(rec.company || "") + "&r=" + encodeURIComponent(rec.roleTitle || ""));
-    var gif = share.gif || (o + "/api/in-market/watch?key=" + encodeURIComponent(vk) + "&fmt=gif");
-    return { watch: watch, gif: gif, key: vk };
-  }
-  // Attach already-generated PiP Studio videos to matching prospects. Match on
-  // company+role first, then company alone. Only fills rows that don't already
-  // have a video. Returns how many were newly linked.
-  function epLinkPipVideos(prospects, columns) {
-    var lib = epPipResults(), byCoRole = {}, byCo = {}, any = false;
-    for (var k in lib) {
-      var e = lib[k]; if (!e || !e.videoKey) continue; any = true;
-      var co = epNorm(e.company), ro = epNorm(e.roleTitle);
-      if (co && ro && !byCoRole[co + "|" + ro]) byCoRole[co + "|" + ro] = e;
-      if (co && !byCo[co]) byCo[co] = e;
-    }
-    if (!any) return 0;
-    var n = 0;
-    (prospects || []).forEach(function (p) {
-      var f = p && p.fields; if (!f || f.video_watch) return; // skip rows already paired
-      var co = epNorm(f.company), ro = epNorm(f.role || f.title);
-      var hit = (co && ro && byCoRole[co + "|" + ro]) || (co && byCo[co]) || null;
-      var links = hit && epPipLinks(hit); if (!links) return;
-      f.video_watch = links.watch; f.video_key = links.key;
-      if (!f.video_bg) f.video_bg = links.gif;
-      f.pip_video = links.watch;
-      (columns || []).forEach(function (c) { if (c.type === "pip_video") f[c.key] = links.watch; });
-      n++;
-    });
-    return n;
-  }
-
-  /* ---- merge-field engine ----------------------------------------------------- */
+  /* ---- merge-field engine: detect, resolve, merge, and highlight placeholders -- */
   function epPlaceholders(str) {
     var re = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi, m, seen = {}, out = [];
     while ((m = re.exec(str || ""))) { var k = m[1].toLowerCase(); if (!seen[k]) { seen[k] = 1; out.push(k); } }
     return out;
   }
-  // Fields resolved from data (the video field is rendered separately as a block).
   function epFieldValue(p, key, template) {
     if (key === "sender_name") return (template && template.fromName) || "";
-    if (key === "video" || key === "videoembed") return ""; // handled by epHighlight as a block
     var v = p && p.fields ? p.fields[key] : "";
     return (v == null) ? "" : String(v);
   }
   function epMerge(str, p, template) {
     return String(str || "").replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, function (_m, k) { return epFieldValue(p, k.toLowerCase(), template); });
   }
-  // Escape, then render tokens: chips in Placeholders view; resolved values (or a
-  // flagged ⟨missing⟩) in Rendered view. The {{video}} token becomes the inline
-  // Pitchlane video thumbnail — background + talking-head bubble + play button.
+  // Escape first, then wrap each token: a chip in Placeholders view, the resolved
+  // value (or a flagged ⟨missing⟩ marker) in Rendered view — this is the visual
+  // representation of what each recipient actually receives.
   function epHighlight(str, p, template, rendered) {
     return esc(String(str || "")).replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, function (_m, k) {
-      var key = k.toLowerCase();
-      if (key === "video" || key === "videoembed") return rendered ? epVideoThumb(p) : '<span class="ep-ph">{{video}}</span>';
-      var v = epFieldValue(p, key, template);
+      var key = k.toLowerCase(), v = epFieldValue(p, key, template);
       if (!rendered) return '<span class="ep-ph">{{' + esc(key) + "}}</span>";
       return v ? '<span class="ep-ph ep-ph-ok">' + esc(v) + "</span>"
                : '<span class="ep-ph ep-ph-miss">⟨' + esc(key) + "⟩</span>";
     });
-  }
-  // The inline video block exactly as the recipient sees it: a clickable thumbnail
-  // (background job-post capture + talking-head bubble + play overlay) → watch page.
-  function epVideoThumb(p) {
-    var f = (p && p.fields) || {};
-    var bg = f.video_bg || "";              // signed gif from the composite, once rendered
-    var watch = f.video_watch || "";        // signed watch-page link
-    var co = f.company || "your team";
-    var bgStyle = bg ? 'style="background-image:url(' + esc(bg) + ')"' : "";
-    var statusTag = f.video_watch ? '<span class="ep-video-ready">✓ personalized</span>'
-      : (f.job_post_url ? '<span class="ep-video-pending">pairs on generate</span>' : '<span class="ep-video-need">needs job-post capture</span>');
-    return '<span class="ep-video" data-watch="' + esc(watch) + '">' +
-      '<span class="ep-video-thumb' + (bg ? " has-bg" : "") + '" ' + bgStyle + '>' +
-        (bg ? "" : '<span class="ep-video-skeleton"><i></i><i></i><i></i></span>') +
-        '<span class="ep-video-bubble">🧑‍💼</span>' +
-        '<span class="ep-video-play">▶</span>' +
-      "</span>" +
-      '<span class="ep-video-cap">▶ A quick note about ' + esc(co) + " · " + statusTag + "</span>" +
-      "</span>";
   }
 
   /* ---- validation + the AI approval pass -------------------------------------- */
@@ -13231,15 +12498,10 @@
     var emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
     var keys = epPlaceholders(template.subject).concat(epPlaceholders(template.body));
     var seen = {}, missing = [];
-    keys.forEach(function (k) {
-      if (seen[k] || k === "video" || k === "videoembed") return; seen[k] = 1;
-      if (epFieldValue(p, k, template) === "") missing.push(k);
-    });
+    keys.forEach(function (k) { if (seen[k]) return; seen[k] = 1; if (epFieldValue(p, k, template) === "") missing.push(k); });
     var words = bodyTxt.trim() ? bodyTxt.trim().split(/\s+/).length : 0;
     var lc = (subject + " " + bodyTxt).toLowerCase();
     var banned = (criteria.bannedWords || []).filter(function (w) { return w && lc.indexOf(String(w).toLowerCase()) >= 0; });
-    var usesVideo = /\{\{\s*(video|videoembed)\s*\}\}/i.test(template.body + " " + template.subject);
-    var videoReady = !!(p.fields && p.fields.video_watch);
     var checks = [
       { key: "email", label: "Valid recipient email", ok: emailValid, required: !!criteria.requireValidEmail, detail: email || "none" },
       { key: "placeholders", label: "All placeholders filled", ok: missing.length === 0, required: !!criteria.noUnfilled, detail: missing.length ? ("missing " + missing.join(", ")) : "complete" },
@@ -13247,14 +12509,14 @@
       { key: "words", label: "Body " + criteria.minWords + "–" + criteria.maxWords + " words", ok: words >= criteria.minWords && words <= criteria.maxWords, required: true, detail: words + " words" },
       { key: "spam", label: "No spam-trigger words", ok: banned.length === 0, required: true, detail: banned.length ? banned.join(", ") : "clean" }
     ];
-    if (usesVideo) checks.push({ key: "video", label: "Personalized video rendered", ok: videoReady, required: !!criteria.requireVideoReady, detail: videoReady ? "ready" : (p.fields && p.fields.job_post_url ? "not generated" : "no job-post capture") });
-    var ai = epAiReview(p, subject, bodyTxt, criteria, { emailValid: emailValid, missing: missing, words: words, banned: banned, usesVideo: usesVideo, videoReady: videoReady });
-    return { subject: subject, body: bodyTxt, email: email, emailValid: emailValid, missing: missing, words: words, banned: banned, usesVideo: usesVideo, videoReady: videoReady, checks: checks, ai: ai };
+    var ai = epAiReview(p, subject, bodyTxt, criteria, { emailValid: emailValid, missing: missing, words: words, banned: banned });
+    return { subject: subject, body: bodyTxt, email: email, emailValid: emailValid, missing: missing, words: words, banned: banned, checks: checks, ai: ai };
   }
 
-  // The AI approver: a fast deterministic reviewer scoring the merged copy against
-  // the set requirements and returning ready / not-ready with readable reasons. To
-  // swap in a real model, replace this body with a call to an LLM review endpoint.
+  // The AI approver. Today it's a fast deterministic reviewer that scores the merged
+  // copy against the same requirements a human would check and returns ready / not
+  // ready with readable reasons. To swap in a real model, replace the body of this
+  // function with a POST to an /api/email review endpoint — nothing else changes.
   function epAiReview(p, subject, body, criteria, v) {
     var f = (p && p.fields) || {}, reasons = [], flags = [], score = 100;
     function ding(n, why) { score -= n; flags.push(why); }
@@ -13267,11 +12529,9 @@
     else plus("Length sits in the high-reply band");
     if (subject.length > criteria.maxSubjectChars) ding(15, "Subject truncates on mobile (" + subject.length + " chars)");
     if (/[A-Z]{5,}/.test(subject)) ding(10, "Subject SHOUTS (all-caps run)");
-    if (v.usesVideo && !v.videoReady) ding(12, "Video not rendered yet — generate the pairing");
     if (f.first_name && body.indexOf(f.first_name) >= 0) plus("Opens on the prospect's name");
     if (f.company && body.indexOf(f.company) >= 0) plus("References their company");
     if (f.role && body.indexOf(f.role) >= 0) plus("Anchored on the open role");
-    if (v.usesVideo) plus("Personalized video — face-to-face touch");
     if (/\?/.test(body)) plus("Has a soft-ask question"); else ding(10, "No clear ask / question");
     var links = (body.match(/https?:\/\//g) || []).length;
     if (links > 1) ding(10, links + " links hurt deliverability");
@@ -13279,13 +12539,15 @@
     var hardBlock = (criteria.requireValidEmail && !v.emailValid) || (criteria.noUnfilled && v.missing.length > 0);
     return { score: score, pass: !hardBlock && score >= (criteria.aiMinScore || 70), reasons: reasons, flags: flags, hardBlock: hardBlock };
   }
+
+  // Send-gate: every REQUIRED check passes AND (if required) the AI passes.
   function epGate(val, criteria) {
     var reqFail = val.checks.some(function (c) { return c.required && !c.ok; });
     var aiFail = !!criteria.requireAiPass && !val.ai.pass;
     return { pass: !reqFail && !aiFail, reqFail: reqFail, aiFail: aiFail };
   }
 
-  /* ---- client-side CSV import ------------------------------------------------- */
+  /* ---- client-side CSV import (feeds the same queue) -------------------------- */
   function epParseCsv(text) {
     var rows = [], field = "", row = [], q = false, s = String(text || "").replace(/^﻿/, "");
     for (var i = 0; i < s.length; i++) {
@@ -13317,22 +12579,20 @@
       location: epGuessCol(h, ["location", "city", "metro", "citystate"]),
       industry: epGuessCol(h, ["industry", "sector", "vertical"]),
       email: epGuessCol(h, ["email", "emailaddress", "workemail"]),
-      job_post_url: epGuessCol(h, ["jobposturl", "companiesjobposturl", "jobpost", "postingurl", "sourceurl", "roleurl"]),
       competitor: epGuessCol(h, ["competitor", "competitorname"])
     };
     var seen = {};
     return parsed.rows.map(function (r, i) {
       var fields = {};
-      for (var k in col) fields[k] = col[k] ? (r[col[k]] || "") : "";
+      for (var k in col) if (col[k]) fields[k] = r[col[k]] || ""; else fields[k] = "";
       if (!fields.first_name && fields.full_name) fields.first_name = String(fields.full_name).split(/\s+/)[0];
-      fields.pip_video = "";
       var id = "csv_" + (fields.email || (fields.company + "_" + i));
       if (seen[id]) id = id + "_" + i; seen[id] = 1;
       return { id: id, source: "CSV", fields: fields };
     });
   }
 
-  /* ---- export helpers --------------------------------------------------------- */
+  /* ---- export / download helpers ---------------------------------------------- */
   function epCsvCell(s) { s = String(s == null ? "" : s); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
   function epDownload(name, text) {
     try {
@@ -13350,28 +12610,21 @@
       template: epLoadTemplate(),
       criteria: epLoadCriteria(),
       approvals: epLoadApprovals(),
-      columns: epLoadColumns(),
       view: "rendered",
       showCriteria: false,
       page: 0,
       csv: null,
-      clips: [],
-      clipId: epDefaultClipId(),
-      pip: epDefaultPip(),
+      pool: null,
       sequences: []
     };
-    var PER_PAGE = 30;
-
-    // Auto-attach any videos already generated in PiP Studio to matching
-    // prospects (by company/role), so the two tools behave as one pipeline.
-    if (epLinkPipVideos(state.prospects, state.columns)) epStoreQueue(state.prospects);
+    var PER_PAGE = 40;
 
     el.innerHTML = "<style>" + EP_STYLE + "</style>" +
       '<div class="ep-wrap">' +
         '<div class="ep-hero">' +
           '<div class="ep-hero-l"><div class="ep-hero-t">✉️ Email <span class="ep-tof">Top of funnel</span></div>' +
-            '<div class="ep-hero-d">Stage every email before it sends: merge prospects into your template, validate the copy, let the AI approve only what meets your bar, generate the picture-in-picture video (job-post background × your talking head), then attach a sequence and launch. Recipients land on a branded page with the video and your calendar.</div></div>' +
-          '<div class="ep-hero-r"><span id="epReady" class="ep-ready ep-muted">Checking video studio…</span></div>' +
+            '<div class="ep-hero-d">Stage every email before it sends: merge prospects into your template, validate the copy, let the AI approve only what meets your bar, then attach a sequence and launch — or export the deploy package for Pipl Studio.</div></div>' +
+          '<div class="ep-hero-r"><span id="epReady" class="ep-ready ep-muted">Checking pool…</span></div>' +
         "</div>" +
         '<div class="ep-tabs" id="epTabs">' +
           '<button class="ep-tab active" data-tab="queue">📋 Prep queue <span id="epTabN" class="ep-tabn">' + state.prospects.length + "</span></button>" +
@@ -13384,30 +12637,26 @@
       b.addEventListener("click", function () { switchTab(b.getAttribute("data-tab")); });
     });
 
-    loadClips();
+    api("/bdbulk").then(function (d) { state.pool = d; paintReady(); }).catch(function () { state.pool = null; paintReady(); });
     loadSequences();
     paint();
 
-    function loadClips() {
-      api("/in-market/clip").then(function (d) {
-        state.clips = (d && d.clips) || [];
-        if (state.clips.length && !state.clipId) state.clipId = state.clips[0].id;
-        paintReady();
-        if (state.tab === "queue") { var v = $("#epVideoCard", el); if (v) paintVideoCard(); }
-      }).catch(function () { state.clips = []; paintReady(); });
-    }
     function paintReady() {
       var r = $("#epReady", el); if (!r) return;
-      var matched = state.prospects.filter(function (p) { return p.fields && p.fields.video_watch; }).length;
-      var tail = matched ? ' · <span class="ep-ok">🔗 ' + matched + " matched to a PiP Studio video</span>" : "";
-      if (state.clips.length) { r.className = "ep-ready ep-ok"; r.innerHTML = "🎬 " + state.clips.length + " talking-head clip" + (state.clips.length === 1 ? "" : "s") + " ready" + tail; r.title = "Recorded in PiP Studio"; }
-      else { r.className = "ep-ready ep-warn"; r.innerHTML = "◌ No talking-head clip" + tail; r.title = "Record one in PiP Studio to enable the personalized video email."; }
+      var d = state.pool;
+      if (!d) { r.className = "ep-ready ep-muted"; r.textContent = "Pool status unavailable"; return; }
+      r.className = "ep-ready";
+      if (!d.mtaPreferred) { r.classList.add("ep-warn"); r.textContent = "◌ Send pool off"; r.title = "Export the deploy package, or enable the warmed pool to send directly."; return; }
+      if (!d.ready) { r.classList.add("ep-warn"); r.textContent = "◌ No warm mailboxes"; r.title = d.setupHint || ""; return; }
+      r.classList.add("ep-ok");
+      r.innerHTML = '<i class="ep-live"></i> Pool live · ~' + ((d.pool && d.pool.remainingToday) || 0).toLocaleString() + " today";
     }
+
     function loadSequences() {
       try { state.sequences = (seqStore().all() || []).filter(function (s) { return s.motion === motion; }); } catch (e) { state.sequences = []; }
       api("/sequences?motion=" + encodeURIComponent(motion)).then(function (d) {
         var server = (d && d.sequences) || [];
-        if (server.length) { state.sequences = server; var dep = $("#epDeploy", el); if (dep && state.tab === "queue") paintDeploy(evalAll()); }
+        if (server.length) { state.sequences = server; if (state.tab === "queue") { var dep = $("#epDeploy", el); if (dep) paintDeploy(evalAll()); } }
       }).catch(function () {});
     }
 
@@ -13441,21 +12690,20 @@
       main.innerHTML =
         '<div class="ep-grid">' +
           '<div class="ep-card ep-tpl">' +
-            '<div class="ep-card-h">Template <span class="ep-card-sub">merge fields in {{double braces}} · {{video}} embeds the PiP video</span></div>' +
+            '<div class="ep-card-h">Template <span class="ep-card-sub">merge fields in {{double braces}}</span></div>' +
             '<div class="ep-inrow"><label>From name<input id="epFrom" class="ep-in" value="' + esc(t.fromName) + '" placeholder="Your name"></label>' +
             '<label>Reply-to<input id="epReply" class="ep-in" value="' + esc(t.replyTo) + '" placeholder="you@yourdomain.com"></label></div>' +
             '<label class="ep-lbl">Subject</label><input id="epSubject" class="ep-in" value="' + esc(t.subject) + '">' +
             '<label class="ep-lbl">Body</label><textarea id="epBody" class="ep-ta ep-body">' + esc(t.body) + "</textarea>" +
-            '<div class="ep-fields" id="epFieldChips"></div>' +
+            '<div class="ep-fields">' + EP_FIELDS.map(function (f) { return '<button class="ep-fchip" data-f="' + f[0] + '" title="Insert {{' + f[0] + '}} into body">+ ' + esc(f[1]) + "</button>"; }).join("") + "</div>" +
           "</div>" +
           '<div class="ep-card ep-side">' +
-            '<div id="epVideoCard"></div>' +
-            '<div class="ep-card-h" style="margin-top:16px">Approval requirements <button class="ep-link" id="epEditCrit">edit</button></div>' +
+            '<div class="ep-card-h">Approval requirements <button class="ep-link" id="epEditCrit">edit</button></div>' +
             '<div id="epCritView"></div>' +
             '<div class="ep-batch">' +
               '<button class="btn btn-primary btn-sm" id="epApproveAll">✓ Approve all passing</button>' +
               '<button class="btn btn-ghost btn-sm" id="epRejectFail">⊘ Reject all blocked</button>' +
-              '<button class="btn btn-ghost btn-sm" id="epClearAppr">↺ Clear</button>' +
+              '<button class="btn btn-ghost btn-sm" id="epClearAppr">↺ Clear approvals</button>' +
             "</div>" +
             '<div class="ep-viewtog" id="epViewTog"><span class="ep-vlbl">Preview</span>' +
               '<button class="ep-vbtn' + (state.view === "rendered" ? " active" : "") + '" data-view="rendered">Rendered</button>' +
@@ -13469,8 +12717,6 @@
         '<div id="epDeploy" class="ep-deploy"></div>';
 
       bindTpl();
-      paintFieldChips();
-      paintVideoCard();
       $("#epEditCrit", el).addEventListener("click", function () { state.showCriteria = !state.showCriteria; paintCritView(); });
       $("#epApproveAll", el).addEventListener("click", approveAllPassing);
       $("#epRejectFail", el).addEventListener("click", rejectAllBlocked);
@@ -13482,20 +12728,9 @@
           repaintCards();
         });
       });
+
       paintCritView();
       repaintCards();
-    }
-
-    function paintFieldChips() {
-      var host = $("#epFieldChips", el); if (!host) return;
-      var custom = state.columns.map(function (c) { return [c.key, c.label]; });
-      host.innerHTML = EP_FIELDS.concat(custom).map(function (f) {
-        return '<button class="ep-fchip' + (f[0] === "video" ? " ep-fchip-v" : "") + '" data-f="' + f[0] + '" title="Insert {{' + f[0] + '}}">+ ' + esc(f[1]) + "</button>";
-      }).join("") + '<button class="ep-fchip ep-fchip-add" id="epAddCol">⚙ Columns</button>';
-      Array.prototype.forEach.call(host.querySelectorAll(".ep-fchip[data-f]"), function (c) {
-        c.addEventListener("click", function () { insertToken(c.getAttribute("data-f")); });
-      });
-      $("#epAddCol", el).addEventListener("click", openColumns);
     }
 
     var tplTimer;
@@ -13508,137 +12743,16 @@
         clearTimeout(tplTimer); tplTimer = setTimeout(repaintCards, 250);
       }
       [subj, bodyI, from, reply].forEach(function (n) { if (n) n.addEventListener("input", upd); });
-    }
-    function insertToken(field) {
-      var ta = $("#epBody", el); if (!ta) return;
-      var tok = "{{" + field + "}}", start = ta.selectionStart, end = ta.selectionEnd;
-      if (start == null) { start = end = ta.value.length; }
-      ta.value = ta.value.slice(0, start) + tok + ta.value.slice(end);
-      ta.focus(); ta.selectionStart = ta.selectionEnd = start + tok.length;
-      state.template.body = ta.value; epSaveTemplate(state.template); repaintCards();
-    }
-
-    /* ---- video pairing card (talking head × job-post background) ---- */
-    function paintVideoCard() {
-      var host = $("#epVideoCard", el); if (!host) return;
-      var withBg = state.prospects.filter(function (p) { return p.fields.job_post_url; }).length;
-      var rendered = state.prospects.filter(function (p) { return p.fields.video_watch; }).length;
-      var libCount = 0; var _lib = epPipResults(); for (var _k in _lib) { if (_lib[_k] && _lib[_k].videoKey) libCount++; }
-      var clipOpts = state.clips.length
-        ? '<select id="epClip" class="ep-in">' + state.clips.map(function (c) { return '<option value="' + esc(c.id) + '"' + (c.id === state.clipId ? " selected" : "") + ">" + esc(c.label || ("Clip " + (c.id || "").slice(0, 6))) + "</option>"; }).join("") + "</select>"
-        : '<div class="ep-vnote">No talking-head clip yet. <a href="/pip-studio">Record one in PiP Studio →</a></div>';
-      host.innerHTML =
-        '<div class="ep-card-h">🎬 Picture-in-picture video</div>' +
-        '<p class="ep-vsub">Pairs each prospect\'s job-post capture (background) with your talking-head clip (bubble) into one video — the second touch.</p>' +
-        '<label class="ep-lbl">Talking head</label>' + clipOpts +
-        '<div class="ep-vstat">' +
-          '<span>' + withBg + " with job-post link</span><span>" + rendered + " ready</span>" +
-          (libCount ? '<span>🔗 ' + libCount + " in PiP Studio library</span>" : "") +
-        "</div>" +
-        (libCount ? '<button class="btn btn-ghost btn-sm" id="epPullPip" title="Attach videos you already made in PiP Studio to matching prospects (by company + role)">🔗 Pull from PiP Studio library</button>' : "") +
-        '<button class="btn btn-primary btn-sm" id="epGenVid"' + ((state.clipId && withBg) ? "" : " disabled") + '>▶ Generate paired videos</button>' +
-        '<div id="epGenStat" class="ep-genstat"></div>';
-      var clipSel = $("#epClip", el);
-      if (clipSel) clipSel.addEventListener("change", function () { state.clipId = clipSel.value; try { localStorage.setItem("ros_pip_clip", state.clipId); } catch (e) {} });
-      var gen = $("#epGenVid", el);
-      if (gen) gen.addEventListener("click", generateVideos);
-      var pull = $("#epPullPip", el);
-      if (pull) pull.addEventListener("click", function () {
-        var n = epLinkPipVideos(state.prospects, state.columns);
-        if (n) { epStoreQueue(state.prospects); paintVideoCard(); repaintCards(); }
-        toast(n ? ("Linked " + n + " prospect" + (n === 1 ? "" : "s") + " to a PiP Studio video") : "No new matches — record/generate in PiP Studio for these companies");
-      });
-    }
-
-    // Generate the composite per prospect via the existing pipeline: shot (background
-    // from job_post_url) → video (PiP composite) → stamp signed gif + watch link back
-    // onto the prospect so the preview shows the real thumbnail and the email links out.
-    function generateVideos() {
-      if (!state.clipId) { toast("Pick a talking-head clip first"); return; }
-      var targets = state.prospects.filter(function (p) { return p.fields.job_post_url && !p.fields.video_watch; });
-      if (!targets.length) { toast("Nothing to generate — rows need a job-post link"); return; }
-      var gen = $("#epGenVid", el), stat = $("#epGenStat", el);
-      if (gen) gen.disabled = true;
-      var done = 0, ok = 0;
-      (function next(i) {
-        if (i >= targets.length) {
-          if (gen) gen.disabled = false;
-          if (stat) stat.innerHTML = '<span class="ep-ok">✓ ' + ok + " of " + targets.length + " rendered</span>";
-          epStoreQueue(state.prospects); paintVideoCard(); repaintCards();
-          toast("Rendered " + ok + " personalized video" + (ok === 1 ? "" : "s"));
-          return;
-        }
-        var p = targets[i];
-        var role = p.fields.role || p.fields.title;
-        if (stat) stat.innerHTML = "Capturing " + (i + 1) + "/" + targets.length + " · " + esc(p.fields.company || "") + "…";
-        // 1) capture the job-post / company-site background, 2) composite the PiP
-        // video over it (block until ready so we get the signed share links back).
-        send("/in-market/shot", "POST", { company: p.fields.company, roleTitle: role, roleUrl: p.fields.job_post_url, wait: true }).then(function () {
-          if (stat) stat.innerHTML = "Pairing " + (i + 1) + "/" + targets.length + " · " + esc(p.fields.company || "") + "…";
-          return send("/in-market/video", "POST", {
-            company: p.fields.company, roleTitle: role,
-            roleUrl: p.fields.job_post_url, clipId: state.clipId, pip: state.pip, firstName: p.fields.first_name, wait: true
-          });
-        }).then(function (r) {
-          var d = r && r.data;
-          if (d && d.share && (d.share.gif || d.share.watch)) {
-            p.fields.video_bg = d.share.gif || ""; p.fields.video_watch = d.share.watch || ""; p.fields.video_key = d.key || "";
-            p.fields.pip_video = d.share.watch || ""; ok++;
-            // keep any pip_video custom columns in sync
-            state.columns.forEach(function (c) { if (c.type === "pip_video") p.fields[c.key] = p.fields.video_watch; });
-          } else if (d && d.key) {
-            // composing server-side; record the key so a later launch can attach it
-            p.fields.video_key = d.key;
-          }
-          done++; next(i + 1);
-        }).catch(function () { done++; next(i + 1); });
-      })(0);
-    }
-
-    /* ---- custom columns ---- */
-    function openColumns() {
-      var body =
-        '<div class="ep-colmgr">' +
-          '<div class="ep-colmgr-list" id="epColList"></div>' +
-          '<div class="ep-colmgr-add">' +
-            '<input id="epNewColName" class="ep-in" placeholder="New column name (e.g. PiP_Studio_Video)">' +
-            '<select id="epNewColType" class="ep-in">' + EP_COL_TYPES.map(function (t) { return '<option value="' + t[0] + '">' + esc(t[1]) + "</option>"; }).join("") + "</select>" +
-            '<button class="btn btn-primary btn-sm" id="epNewColAdd">Add column</button>' +
-          "</div>" +
-          '<p class="ep-vsub" style="margin-top:10px">Each column becomes a <b>{{merge_field}}</b> you can drop into the template. A <b>PiP video</b> column resolves to the personalized video for that row (background = job-post capture, foreground = your talking head).</p>' +
-        "</div>";
-      var close = openModal("Columns", "Add custom merge fields and assign content", body, function (root) {
-        function paintList() {
-          var host = root.querySelector("#epColList");
-          host.innerHTML = state.columns.length
-            ? state.columns.map(function (c) {
-                return '<div class="ep-colrow"><b>{{' + esc(c.key) + "}}</b><span class=\"ep-coltype\">" + esc((EP_COL_TYPES.filter(function (t) { return t[0] === c.type; })[0] || ["", c.type])[1]) + "</span>" +
-                  '<button class="btn btn-ghost btn-sm" data-del="' + esc(c.key) + '">Remove</button></div>';
-              }).join("")
-            : '<div class="ep-vsub">No custom columns yet.</div>';
-          Array.prototype.forEach.call(host.querySelectorAll("[data-del]"), function (b) {
-            b.addEventListener("click", function () {
-              state.columns = state.columns.filter(function (c) { return c.key !== b.getAttribute("data-del"); });
-              epStoreColumns(state.columns); paintList(); paintFieldChips(); repaintCards();
-            });
-          });
-        }
-        paintList();
-        root.querySelector("#epNewColAdd").addEventListener("click", function () {
-          var name = root.querySelector("#epNewColName").value.trim();
-          if (!name) { toast("Name the column"); return; }
-          var key = epColKey(name), type = root.querySelector("#epNewColType").value;
-          if (state.columns.some(function (c) { return c.key === key; })) { toast("That column already exists"); return; }
-          state.columns.push({ key: key, label: name, type: type });
-          epStoreColumns(state.columns);
-          // For derived pip_video columns, mirror the rendered watch link per prospect.
-          if (type === "pip_video") state.prospects.forEach(function (p) { p.fields[key] = p.fields.video_watch || ""; });
-          root.querySelector("#epNewColName").value = "";
-          paintList(); paintFieldChips(); repaintCards();
-          toast("Added {{" + key + "}}");
+      Array.prototype.forEach.call(el.querySelectorAll(".ep-fchip"), function (c) {
+        c.addEventListener("click", function () {
+          var tok = "{{" + c.getAttribute("data-f") + "}}";
+          var ta = bodyI, start = ta.selectionStart, end = ta.selectionEnd;
+          if (start == null) { start = end = ta.value.length; }
+          ta.value = ta.value.slice(0, start) + tok + ta.value.slice(end);
+          ta.focus(); ta.selectionStart = ta.selectionEnd = start + tok.length;
+          upd();
         });
       });
-      return close;
     }
 
     function paintCritView() {
@@ -13649,7 +12763,6 @@
           "<li>Body <b>" + c.minWords + "–" + c.maxWords + "</b> words</li>" +
           "<li>" + (c.requireValidEmail ? "✓" : "–") + " Valid recipient email</li>" +
           "<li>" + (c.noUnfilled ? "✓" : "–") + " All placeholders filled</li>" +
-          "<li>" + (c.requireVideoReady ? "✓" : "–") + " Video rendered (if used)</li>" +
           "<li>" + (c.requireAiPass ? "✓" : "–") + " AI score ≥ <b>" + c.aiMinScore + "</b></li>" +
           "</ul>";
         return;
@@ -13657,10 +12770,13 @@
       function num(id, label, val) { return '<label class="ep-clbl">' + esc(label) + '<input type="number" id="' + id + '" class="ep-cnum" value="' + val + '"></label>'; }
       function bool(id, label, val) { return '<label class="ep-cbool"><input type="checkbox" id="' + id + '"' + (val ? " checked" : "") + "> " + esc(label) + "</label>"; }
       host.innerHTML = '<div class="ep-critedit">' +
-        num("epMaxSubj", "Max subject chars", c.maxSubjectChars) + num("epAiMin", "Min AI score", c.aiMinScore) +
-        num("epMinW", "Min body words", c.minWords) + num("epMaxW", "Max body words", c.maxWords) +
-        bool("epReqEmail", "Require valid email", c.requireValidEmail) + bool("epNoUnfilled", "No unfilled placeholders", c.noUnfilled) +
-        bool("epReqAi", "Require AI approval", c.requireAiPass) + bool("epReqVid", "Require video rendered", c.requireVideoReady) +
+        num("epMaxSubj", "Max subject chars", c.maxSubjectChars) +
+        num("epMinW", "Min body words", c.minWords) +
+        num("epMaxW", "Max body words", c.maxWords) +
+        num("epAiMin", "Min AI score", c.aiMinScore) +
+        bool("epReqEmail", "Require valid email", c.requireValidEmail) +
+        bool("epNoUnfilled", "No unfilled placeholders", c.noUnfilled) +
+        bool("epReqAi", "Require AI approval", c.requireAiPass) +
         '<label class="ep-clbl ep-clbl-full">Spam-trigger words (comma-separated)<input id="epBanned" class="ep-in" value="' + esc((c.bannedWords || []).join(", ")) + '"></label>' +
         '<div class="ep-critfoot"><button class="btn btn-sm btn-primary" id="epSaveCrit">Save requirements</button></div>' +
         "</div>";
@@ -13669,10 +12785,12 @@
         c.minWords = parseInt($("#epMinW", el).value, 10) || 0;
         c.maxWords = parseInt($("#epMaxW", el).value, 10) || EP_DEFAULT_CRITERIA.maxWords;
         c.aiMinScore = parseInt($("#epAiMin", el).value, 10) || 0;
-        c.requireValidEmail = $("#epReqEmail", el).checked; c.noUnfilled = $("#epNoUnfilled", el).checked;
-        c.requireAiPass = $("#epReqAi", el).checked; c.requireVideoReady = $("#epReqVid", el).checked;
+        c.requireValidEmail = $("#epReqEmail", el).checked;
+        c.noUnfilled = $("#epNoUnfilled", el).checked;
+        c.requireAiPass = $("#epReqAi", el).checked;
         c.bannedWords = $("#epBanned", el).value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
-        epSaveCriteria(c); state.showCriteria = false; paintCritView(); repaintCards(); toast("Requirements saved");
+        epSaveCriteria(c); state.showCriteria = false; paintCritView(); repaintCards();
+        toast("Requirements saved");
       });
     }
 
@@ -13686,6 +12804,7 @@
       if (sum) sum.innerHTML =
         epTile(items.length, "in queue", "") + epTile(ready, "pass the bar", "ok") +
         epTile(approved, "approved", "accent") + epTile(blocked, "need work", blocked ? "warn" : "");
+
       var total = items.length, pages = Math.max(1, Math.ceil(total / PER_PAGE));
       if (state.page >= pages) state.page = pages - 1;
       var slice = items.slice(state.page * PER_PAGE, state.page * PER_PAGE + PER_PAGE);
@@ -13751,13 +12870,16 @@
       delete state.approvals[id]; epStoreQueue(state.prospects); epSaveApprovals(state.approvals);
       var nEl = $("#epTabN", el); if (nEl) nEl.textContent = state.prospects.length;
       if (!state.prospects.length) { paintQueue(); return; }
-      repaintCards(); paintVideoCard();
+      repaintCards();
     }
     function approveAllPassing() {
       var n = 0; evalAll().forEach(function (x) { if (x.gate.pass) { state.approvals[x.p.id] = "approved"; n++; } });
       epSaveApprovals(state.approvals); repaintCards(); toast(n ? ("Approved " + n + " that pass the bar") : "Nothing passes the bar yet");
     }
-    function rejectAllBlocked() { evalAll().forEach(function (x) { if (!x.gate.pass) state.approvals[x.p.id] = "rejected"; }); epSaveApprovals(state.approvals); repaintCards(); }
+    function rejectAllBlocked() {
+      evalAll().forEach(function (x) { if (!x.gate.pass) state.approvals[x.p.id] = "rejected"; });
+      epSaveApprovals(state.approvals); repaintCards();
+    }
     function clearApprovals() { state.approvals = {}; epSaveApprovals(state.approvals); repaintCards(); }
 
     /* ===================== Deploy / launch ===================== */
@@ -13773,7 +12895,7 @@
         '<div class="ep-deploy-r">' +
           '<label class="ep-seq">Sequence <select id="epSeq" class="ep-in">' + seqOpts + "</select></label>" +
           '<a class="ep-link" href="#campaigns">+ new sequence</a>' +
-          '<button class="btn btn-ghost btn-sm" id="epExport"' + (approved.length ? "" : " disabled") + ">📤 Export</button>" +
+          '<button class="btn btn-ghost btn-sm" id="epExport"' + (approved.length ? "" : " disabled") + ">📤 Export approved</button>" +
           '<button class="btn btn-primary btn-sm" id="epLaunch"' + (approved.length ? "" : " disabled") + ">🚀 Launch " + (approved.length || "") + " approved</button>" +
         "</div>";
       var ex = $("#epExport", el); if (ex) ex.addEventListener("click", function () { exportApproved(items); });
@@ -13785,18 +12907,19 @@
       if (!approved.length) return;
       var seqId = ($("#epSeq", el) || {}).value || "";
       var seqName = (state.sequences.filter(function (s) { return s.id === seqId; })[0] || {}).name || "";
-      var lines = [["to_email", "first_name", "company", "role", "subject", "body", "video_watch", "sequence"].join(",")];
+      var lines = [["to_email", "first_name", "company", "role", "subject", "body", "sequence"].join(",")];
       approved.forEach(function (x) {
         var f = x.p.fields;
-        lines.push([f.email || "", f.first_name || "", f.company || "", f.role || "", x.val.subject, x.val.body, f.video_watch || "", seqName].map(epCsvCell).join(","));
+        lines.push([f.email || "", f.first_name || "", f.company || "", f.role || "", x.val.subject, x.val.body, seqName].map(epCsvCell).join(","));
       });
       epDownload("email-deploy-" + approved.length + ".csv", lines.join("\r\n"));
       toast("Exported " + approved.length + " approved email" + (approved.length === 1 ? "" : "s"));
     }
 
-    // Launch: attach the rendered video + arm the 2-email sequence for prospects that
-    // came from Hire Signals (reusing /api/in-market/attach, which stamps the video and
-    // turns on the sequence with the {{videoembed}} second touch), then kick outreach.
+    // Launch: promote the approved prospects into the BD campaign, attach the
+    // chosen sequence, and kick the omnichannel orchestrator. Hire-Signals rows
+    // carry their original lead/manager so the proven /in-market promote path is
+    // reused; CSV-only rows have no lead link and are pointed at Export instead.
     function launchApproved(items) {
       var approved = items.filter(function (x) { return x.status === "approved"; });
       if (!approved.length) { toast("Approve at least one email first"); return; }
@@ -13820,17 +12943,11 @@
             paintQueue();
             return;
           }
-          var x = promotable[i];
           if (btn) btn.textContent = "Launching " + (i + 1) + "/" + promotable.length + "…";
-          var pl = { action: "promote", campaignId: campaignId, lead: x.p.lead };
-          if (x.p.manager) pl.manager = x.p.manager;
+          var pl = { action: "promote", campaignId: campaignId, lead: promotable[i].p.lead };
+          if (promotable[i].p.manager) pl.manager = promotable[i].p.manager;
           if (seqId) pl.sequenceId = seqId;
-          send("/in-market", "POST", pl).then(function () {
-            // If a video was rendered, attach it + arm the 2-email video sequence.
-            if (x.p.fields.video_key) {
-              return send("/in-market/attach", "POST", { videoKey: x.p.fields.video_key, company: x.p.fields.company, roleTitle: x.p.fields.role || x.p.fields.title, campaignId: campaignId, arm: true }).catch(function () {});
-            }
-          }).then(function () { done++; next(i + 1); }).catch(function () { next(i + 1); });
+          send("/in-market", "POST", pl).then(function (r) { if (r.ok) done++; next(i + 1); }).catch(function () { next(i + 1); });
         })(0);
       });
     }
@@ -13841,13 +12958,13 @@
       main.innerHTML =
         '<div class="ep-card">' +
           '<div class="ep-card-h">Import a CSV</div>' +
-          '<p class="ep-vsub">Columns we read: first/full name, title, company, open role, location, industry, email, and a job-post URL (Companies_Job_Post_URL) — the last one is the video background. Each mapped column fills the matching {{placeholder}}. Up to 2,000 rows load for visual review.</p>' +
+          '<p class="ep-p">Columns we read: first name, full name, title, company, open role, location, industry, email, competitor. Each mapped column fills the matching {{placeholder}}. Up to 2,000 rows are loaded for visual review.</p>' +
           '<div class="ep-drop" id="epDrop"><div class="ep-drop-ic">📥</div><div class="ep-drop-t">Drop CSV here</div><div class="ep-drop-s">or click to browse</div><input type="file" id="epFile" accept=".csv,text/csv" hidden></div>' +
           '<div id="epChip"></div>' +
           '<div class="ep-paste-tog" id="epPasteTog">▸ or paste CSV text</div>' +
-          '<textarea id="epPaste" class="ep-ta" style="display:none" placeholder="First Name,Title,Company,Role,Location,Email,Companies_Job_Post_URL"></textarea>' +
+          '<textarea id="epPaste" class="ep-ta" style="display:none" placeholder="First Name,Title,Company,Role,Location,Email"></textarea>' +
           '<div id="epImportPreview"></div>' +
-          '<div class="ep-iactions"><div style="flex:1"></div><button class="btn btn-primary" id="epAddQueue" disabled>Add to prep queue →</button></div>' +
+          '<div class="ep-actions"><div style="flex:1"></div><button class="btn btn-primary" id="epAddQueue" disabled>Add to prep queue →</button></div>' +
         "</div>";
       var drop = $("#epDrop", el), file = $("#epFile", el);
       function ingest(text) {
@@ -13857,8 +12974,8 @@
         var prev = state.csv.slice(0, 6);
         $("#epImportPreview", el).innerHTML =
           '<div class="ep-prev-h"><b>' + state.csv.length.toLocaleString() + "</b> rows · showing " + prev.length + "</div>" +
-          '<div class="ep-prevtable"><table><thead><tr><th>Name</th><th>Company</th><th>Role</th><th>Email</th><th>Job-post URL</th></tr></thead><tbody>' +
-          prev.map(function (p) { var f = p.fields; return "<tr><td>" + esc(f.full_name || f.first_name || "—") + "</td><td>" + esc(f.company || "—") + "</td><td>" + esc(f.role || "—") + "</td><td>" + esc(f.email || "—") + "</td><td>" + (f.job_post_url ? "✓" : "—") + "</td></tr>"; }).join("") +
+          '<div class="ep-prevtable"><table><thead><tr><th>Name</th><th>Title</th><th>Company</th><th>Role</th><th>Email</th></tr></thead><tbody>' +
+          prev.map(function (p) { var f = p.fields; return "<tr><td>" + esc(f.full_name || f.first_name || "—") + "</td><td>" + esc(f.title || "—") + "</td><td>" + esc(f.company || "—") + "</td><td>" + esc(f.role || "—") + "</td><td>" + esc(f.email || "—") + "</td></tr>"; }).join("") +
           "</tbody></table></div>";
         $("#epAddQueue", el).disabled = false;
       }
@@ -13888,33 +13005,32 @@
   }
 
   var EP_STYLE =
-    ".ep-wrap{max-width:1120px}" +
+    ".ep-wrap{max-width:1100px}" +
     ".ep-hero{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:16px;padding:20px 22px;margin-bottom:14px;background:linear-gradient(135deg,rgba(124,92,255,.16),rgba(77,208,255,.05));box-shadow:var(--shadow);display:flex;gap:20px;align-items:center;flex-wrap:wrap}" +
-    ".ep-hero-l{flex:1;min-width:260px}.ep-hero-t{font-size:24px;font-weight:800;letter-spacing:-.5px;display:flex;align-items:center;gap:10px}" +
+    ".ep-hero-l{flex:1;min-width:260px}" +
+    ".ep-hero-t{font-size:24px;font-weight:800;letter-spacing:-.5px;display:flex;align-items:center;gap:10px}" +
     ".ep-tof{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--brand,#7c5cff);background:rgba(124,92,255,.14);border:1px solid rgba(124,92,255,.3);padding:3px 8px;border-radius:999px}" +
-    ".ep-hero-d{font-size:13px;color:var(--text-muted);line-height:1.55;margin-top:7px;max-width:820px}" +
+    ".ep-hero-d{font-size:13px;color:var(--text-muted);line-height:1.55;margin-top:7px;max-width:760px}" +
     ".ep-ready{display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid var(--border);white-space:nowrap}" +
-    ".ep-muted{color:var(--text-dim)}.ep-ok{color:var(--accent-green,#38e0a6)}.ep-ready.ep-ok{background:rgba(56,224,166,.12);border-color:rgba(56,224,166,.4)}" +
-    ".ep-warn{color:var(--accent-amber,#ffc24d)}.ep-ready.ep-warn{background:rgba(255,194,77,.12);border-color:rgba(255,194,77,.4)}" +
+    ".ep-muted{color:var(--text-dim)}.ep-ok{color:var(--accent-green,#38e0a6);background:rgba(56,224,166,.12);border-color:rgba(56,224,166,.4)}" +
+    ".ep-warn{color:var(--accent-amber,#ffc24d);background:rgba(255,194,77,.12);border-color:rgba(255,194,77,.4)}" +
+    ".ep-live{width:8px;height:8px;border-radius:50%;background:var(--accent-green,#38e0a6);animation:bdbPulse 1.8s infinite}" +
     ".ep-tabs{display:flex;gap:8px;margin-bottom:16px}" +
     ".ep-tab{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}" +
     ".ep-tab:hover{border-color:var(--brand,#7c5cff)}.ep-tab.active{background:var(--brand,#7c5cff);color:#fff;border-color:var(--brand,#7c5cff)}" +
     ".ep-tabn{font-size:11px;font-weight:700;background:rgba(255,255,255,.18);border-radius:999px;padding:1px 7px}.ep-tab:not(.active) .ep-tabn{background:var(--bg-soft);color:var(--text-dim)}" +
     ".ep-grid{display:grid;grid-template-columns:1.55fr 1fr;gap:14px;margin-bottom:14px}" +
     ".ep-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:var(--shadow)}" +
-    ".ep-card-h{font-size:14.5px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px}.ep-card-sub{font-size:11px;font-weight:500;color:var(--text-dim)}" +
+    ".ep-card-h{font-size:14.5px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}" +
+    ".ep-card-sub{font-size:11.5px;font-weight:500;color:var(--text-dim)}" +
     ".ep-link{font-size:12px;color:var(--brand,#7c5cff);background:none;border:none;cursor:pointer;text-decoration:none;margin-left:auto}" +
     ".ep-lbl{display:block;font-size:11.5px;font-weight:600;color:var(--text-muted);margin:10px 0 5px}" +
     ".ep-in{width:100%;background:var(--bg-soft);border:1px solid var(--border);border-radius:9px;color:var(--text);padding:9px 11px;font-size:13px}.ep-in:focus{outline:none;border-color:var(--brand,#7c5cff)}" +
     ".ep-inrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ep-inrow label{font-size:11.5px;font-weight:600;color:var(--text-muted);display:block}.ep-inrow .ep-in{margin-top:5px}" +
-    ".ep-ta{width:100%;min-height:170px;background:var(--bg-soft);border:1px solid var(--border);border-radius:9px;color:var(--text);padding:11px;font-size:13px;line-height:1.55;resize:vertical;font-family:inherit}.ep-ta:focus{outline:none;border-color:var(--brand,#7c5cff)}" +
+    ".ep-ta{width:100%;min-height:150px;background:var(--bg-soft);border:1px solid var(--border);border-radius:9px;color:var(--text);padding:11px;font-size:13px;line-height:1.55;resize:vertical;font-family:inherit}.ep-ta:focus{outline:none;border-color:var(--brand,#7c5cff)}" +
     ".ep-fields{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}" +
     ".ep-fchip{font-size:11px;font-weight:600;padding:4px 9px;border-radius:999px;background:rgba(124,92,255,.1);color:var(--brand,#7c5cff);border:1px solid rgba(124,92,255,.28);cursor:pointer}.ep-fchip:hover{background:rgba(124,92,255,.2)}" +
-    ".ep-fchip-v{background:rgba(56,224,166,.12);color:var(--accent-green,#38e0a6);border-color:rgba(56,224,166,.3)}.ep-fchip-add{background:var(--bg-soft);color:var(--text-muted);border-color:var(--border)}" +
-    ".ep-vsub{font-size:12px;color:var(--text-muted);line-height:1.5;margin:0 0 10px}.ep-vnote{font-size:12px;color:var(--text-muted);padding:8px 0}.ep-vnote a{color:var(--brand,#7c5cff)}" +
-    ".ep-vstat{display:flex;gap:10px;margin:10px 0;font-size:11.5px;color:var(--text-dim)}.ep-vstat span{background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;padding:5px 9px}" +
-    ".ep-genstat{font-size:12px;color:var(--text-muted);margin-top:8px;min-height:16px}.ep-genstat .ep-ok{color:var(--accent-green,#38e0a6)}" +
-    ".ep-critlist{list-style:none;margin:0;padding:0;font-size:12.5px;color:var(--text-muted);line-height:1.85}.ep-critlist b{color:var(--text)}" +
+    ".ep-critlist{list-style:none;margin:0;padding:0;font-size:12.5px;color:var(--text-muted);line-height:1.9}.ep-critlist b{color:var(--text)}" +
     ".ep-critedit{display:grid;grid-template-columns:1fr 1fr;gap:9px}" +
     ".ep-clbl{font-size:11.5px;font-weight:600;color:var(--text-muted);display:flex;flex-direction:column;gap:4px}.ep-clbl-full{grid-column:1/-1}" +
     ".ep-cnum{background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 9px;font-size:13px}" +
@@ -13927,29 +13043,21 @@
     ".ep-tile{flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 16px}" +
     ".ep-tile b{display:block;font-size:24px;font-weight:800;line-height:1}.ep-tile span{font-size:10.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em}" +
     ".ep-tile.ok b{color:var(--accent-green,#38e0a6)}.ep-tile.accent b{color:var(--brand,#7c5cff)}.ep-tile.warn b{color:var(--accent-amber,#ffc24d)}" +
-    ".ep-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px}" +
+    ".ep-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}" +
     ".ep-mail{border:1px solid var(--border);border-radius:14px;background:var(--surface);overflow:hidden;box-shadow:0 8px 24px -18px rgba(0,0,0,.5);border-left:3px solid var(--border)}" +
     ".ep-mail.ep-okstate{border-left-color:var(--accent-green,#38e0a6)}.ep-mail.ep-block{border-left-color:var(--accent-amber,#ffc24d)}.ep-mail.ep-appr{border-left-color:var(--brand,#7c5cff)}.ep-mail.ep-rej{border-left-color:var(--accent-red,#ff6b6b);opacity:.6}" +
     ".ep-mail-head{display:flex;align-items:center;gap:10px;padding:12px 14px}" +
     ".ep-mail-head .avatar{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#0a0a12;flex:none}" +
     ".ep-mail-who{flex:1;min-width:0}.ep-mail-who b{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ep-mail-src{font-size:11px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}" +
-    ".ep-aiscore{font-size:13px;font-weight:800;padding:4px 9px;border-radius:9px;flex:none}.ep-aiscore.ep-ai-pass{background:rgba(56,224,166,.14);color:var(--accent-green,#38e0a6)}.ep-aiscore.ep-ai-fail{background:rgba(255,194,77,.14);color:var(--accent-amber,#ffc24d)}" +
+    ".ep-aiscore{font-size:13px;font-weight:800;padding:4px 9px;border-radius:9px;flex:none}.ep-ai-pass.ep-aiscore,.ep-aiscore.ep-ai-pass{background:rgba(56,224,166,.14);color:var(--accent-green,#38e0a6)}.ep-aiscore.ep-ai-fail{background:rgba(255,194,77,.14);color:var(--accent-amber,#ffc24d)}" +
     ".ep-mail-win{margin:0 14px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg-soft)}" +
     ".ep-mail-bar{display:flex;gap:5px;padding:7px 11px;border-bottom:1px solid var(--border);background:var(--surface-2,#16161f)}.ep-mail-bar i{width:9px;height:9px;border-radius:50%;background:var(--border-strong,#3a3a48)}" +
     ".ep-mail-body{padding:12px 14px}" +
     ".ep-subj{font-size:13px;font-weight:600;margin-bottom:9px;padding-bottom:9px;border-bottom:1px dashed var(--border);color:var(--text)}.ep-subj-l{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim);font-weight:700;display:block;margin-bottom:3px}" +
     ".ep-bodytxt{font-size:13px;line-height:1.6;white-space:pre-wrap;color:var(--text)}" +
     ".ep-ph{border-radius:4px;padding:0 3px}.ep-bodytxt .ep-ph,.ep-subj .ep-ph{background:rgba(124,92,255,.16);color:var(--brand,#7c5cff);font-weight:600}" +
-    ".ep-ph-ok{background:transparent !important;color:inherit !important;font-weight:600}.ep-ph-miss{background:rgba(255,107,107,.16) !important;color:var(--accent-red,#ff6b6b) !important;font-weight:700}" +
-    /* inline Pitchlane-style video thumbnail */
-    ".ep-video{display:block;white-space:normal;margin:10px 0;max-width:340px}" +
-    ".ep-video-thumb{position:relative;display:block;aspect-ratio:16/9;border-radius:10px;overflow:hidden;border:1px solid var(--border);background:#0d1320 center/cover no-repeat;background-image:linear-gradient(135deg,#1a1430,#0a1622)}" +
-    ".ep-video-thumb.has-bg{background-image:none}.ep-video-thumb.has-bg::after{content:'';position:absolute;inset:0;background:rgba(5,8,16,.18)}" +
-    ".ep-video-skeleton{position:absolute;inset:0;display:flex;align-items:flex-end;gap:6px;padding:18px}.ep-video-skeleton i{flex:1;background:rgba(255,255,255,.14);border-radius:3px}.ep-video-skeleton i:nth-child(1){height:38%}.ep-video-skeleton i:nth-child(2){height:62%}.ep-video-skeleton i:nth-child(3){height:48%}" +
-    ".ep-video-bubble{position:absolute;right:12px;bottom:12px;width:46px;height:46px;border-radius:50%;background:rgba(124,92,255,.9);border:2px solid #fff;display:grid;place-items:center;font-size:20px;z-index:2;box-shadow:0 4px 12px rgba(0,0,0,.4)}" +
-    ".ep-video-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:54px;height:54px;border-radius:50%;background:rgba(255,255,255,.92);color:#1a1430;display:grid;place-items:center;font-size:20px;padding-left:4px;z-index:2;box-shadow:0 4px 16px rgba(0,0,0,.35)}" +
-    ".ep-video-cap{display:block;font-size:11.5px;color:var(--text-dim);margin-top:6px}" +
-    ".ep-video-ready{color:var(--accent-green,#38e0a6);font-weight:600}.ep-video-pending{color:var(--accent-amber,#ffc24d)}.ep-video-need{color:var(--accent-red,#ff6b6b)}" +
+    ".ep-ph-ok{background:transparent !important;color:inherit !important;font-weight:600}" +
+    ".ep-ph-miss{background:rgba(255,107,107,.16) !important;color:var(--accent-red,#ff6b6b) !important;font-weight:700}" +
     ".ep-mail-foot{padding:12px 14px}" +
     ".ep-checks{list-style:none;margin:0 0 10px;padding:0;font-size:11.5px;line-height:1.7}.ep-checks li{display:flex;align-items:center;gap:6px;color:var(--text-muted)}.ep-ck{font-weight:800;width:14px;flex:none;text-align:center}" +
     ".ep-checks .ep-ok .ep-ck{color:var(--accent-green,#38e0a6)}.ep-checks .ep-bad .ep-ck{color:var(--accent-red,#ff6b6b)}.ep-checks .ep-warn .ep-ck{color:var(--accent-amber,#ffc24d)}" +
@@ -13962,18 +13070,17 @@
     ".ep-deploy{position:sticky;bottom:0;display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:16px;padding:14px 16px;border:1px solid var(--border);border-radius:14px;background:var(--surface);box-shadow:0 -8px 28px -18px rgba(0,0,0,.5)}" +
     ".ep-deploy-l{font-size:13px;color:var(--text-muted)}.ep-deploy-l b{color:var(--text);font-size:15px}" +
     ".ep-deploy-r{display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap}" +
-    ".ep-seq{font-size:11.5px;font-weight:600;color:var(--text-muted);display:flex;align-items:center;gap:7px}.ep-seq .ep-in{width:auto;min-width:170px}" +
+    ".ep-seq{font-size:11.5px;font-weight:600;color:var(--text-muted);display:flex;align-items:center;gap:7px}.ep-seq .ep-in{width:auto;min-width:180px}" +
     ".ep-empty{text-align:center;padding:54px 20px;border:1px dashed var(--border-strong);border-radius:16px;background:var(--bg-soft)}.ep-empty-ic{font-size:42px}.ep-empty-t{font-size:16px;font-weight:700;margin-top:10px}.ep-empty-s{font-size:13px;color:var(--text-muted);margin-top:6px}.ep-empty-s a{color:var(--brand,#7c5cff)}" +
+    ".ep-p{font-size:13px;color:var(--text-muted);line-height:1.55;margin:0 0 14px}" +
     ".ep-drop{border:2px dashed var(--border-strong);border-radius:14px;padding:36px 20px;text-align:center;cursor:pointer;transition:all .18s;background:var(--bg-soft)}.ep-drop:hover{border-color:var(--brand,#7c5cff)}.ep-drop.drag{border-color:var(--brand,#7c5cff);background:rgba(124,92,255,.1)}" +
     ".ep-drop-ic{font-size:36px}.ep-drop-t{font-weight:700;font-size:15px;margin-top:8px}.ep-drop-s{font-size:12.5px;color:var(--text-dim);margin-top:3px}" +
     ".ep-filechip{display:inline-flex;gap:8px;margin-top:12px;padding:7px 13px;border-radius:9px;background:rgba(56,224,166,.12);color:var(--accent-green,#38e0a6);font-size:12.5px;font-weight:600;border:1px solid rgba(56,224,166,.35)}" +
     ".ep-paste-tog{display:inline-block;margin-top:12px;font-size:12.5px;color:var(--text-muted);cursor:pointer}" +
     ".ep-prev-h{font-size:12.5px;color:var(--text-muted);margin:14px 0 8px}.ep-prev-h b{color:var(--text)}" +
     ".ep-prevtable{overflow-x:auto;border:1px solid var(--border);border-radius:10px}.ep-prevtable table{width:100%;border-collapse:collapse;font-size:12px}.ep-prevtable th,.ep-prevtable td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--border);white-space:nowrap}.ep-prevtable th{color:var(--text-dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}.ep-prevtable tr:last-child td{border-bottom:none}" +
-    ".ep-iactions{margin-top:16px;display:flex;gap:10px;align-items:center}" +
-    ".ep-colmgr-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}.ep-colrow{display:flex;align-items:center;gap:10px;padding:8px 11px;border:1px solid var(--border);border-radius:9px;background:var(--bg-soft);font-size:12.5px}.ep-colrow b{color:var(--brand,#7c5cff);font-family:var(--mono)}.ep-coltype{color:var(--text-dim);margin-left:auto}" +
-    ".ep-colmgr-add{display:grid;grid-template-columns:1.4fr 1fr auto;gap:8px}" +
-    "@media(max-width:820px){.ep-grid{grid-template-columns:1fr}.ep-critedit{grid-template-columns:1fr}.ep-deploy-r{margin-left:0;width:100%}.ep-colmgr-add{grid-template-columns:1fr}}";
+    ".ep-actions{margin-top:16px;display:flex;gap:10px;align-items:center}" +
+    "@media(max-width:820px){.ep-grid{grid-template-columns:1fr}.ep-critedit{grid-template-columns:1fr}.ep-deploy-r{margin-left:0;width:100%}}";
 
   function loading() { return '<div class="empty">Loading…</div>'; }
   function emptyCard(msg) { return '<div class="empty">' + esc(msg) + "</div>"; }
