@@ -65,7 +65,9 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
     const mpc = buildMpcTokens({
       firstName: p.firstName,
       company: p.company,
-      openRole: p.title,
+      // The open SEAT: explicit ctx.openRole (carried from the hiring signal) wins; fall back to the
+      // prospect's title only when it isn't set (manual adds where title IS the seat).
+      openRole: ctx.openRole || p.title,
       placedRole: ctx.placedRole,
       placementLocation: ctx.placementLocation,
       jobLocation: p.location,
@@ -84,7 +86,10 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
   // win against repetition. Merge fields ({{...}}) are left alone by the spintax pass.
   const seed = `${p.id || ""}:${touch.key || ""}`;
   const fill = (s?: string) =>
-    fixArticles(expandSpintax(s || "", seed).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, k) => vals[String(k).toLowerCase()] ?? ""));
+    fixArticles(expandSpintax(s || "", seed).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, k) => vals[String(k).toLowerCase()] ?? ""))
+      // An unfilled tail token can leave a dangling "Best, " (empty {{Your_Name}}) or trailing space;
+      // trim trailing whitespace + a hanging sign-off comma so the copy never ships half-finished.
+      .replace(/[ \t]*,?[ \t]*$/,"");
   return { subject: touch.subject ? fill(touch.subject) : undefined, body: fill(touch.body) };
 }
 

@@ -216,6 +216,8 @@ export interface Prospect {
    *  being marketed. When set, renderTouch resolves rich {{Near_City}}/{{MH1}}/{{P_subj}}/… tokens; when
    *  absent, the sequence still renders truthfully-generic native copy from the lexicon floor. */
   mpcContext?: {
+    openRole?: string;           // the SEAT they're hiring for (drives {{Open_Role}}) — distinct from
+                                 // this prospect's own `title`, which is the decision-maker's own title
     placedRole?: string;         // the role you recently placed (drives {{Job_Title}})
     placementLocation?: string;  // where you placed it (resolved to {{Near_City}} + local vernacular)
     competitor?: string;         // where you placed it (drives {{Competitor}})
