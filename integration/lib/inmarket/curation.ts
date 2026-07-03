@@ -162,7 +162,7 @@ interface PoolLeadLite {
   reason?: string;
   score?: number;
   employeeCount?: number;
-  roleDetails?: Array<{ title: string }>;
+  roleDetails?: Array<{ title: string; url?: string }>;
   roles?: string[];
   /** The lead's source/apply URL — used to recover the company's own domain when its host is
    *  the company site (not an ATS). One more free signal for the domain resolver. */
@@ -275,7 +275,10 @@ export function buildCuratedRow(lead: PoolLeadLite, role: string, dm: DecisionMa
     signalType: lead.signalType ?? "job_posting",
     signalReason: lead.reason ?? "",
     role,
-    jobUrl: lead.sourceUrl,
+    // Use THIS role's own posting URL (not the company's first-role URL), so the screen capture
+    // targets the exact job we're emailing about. roleShot then verifies the loaded page matches
+    // this role's title before it screenshots, so the JD in the video always pairs with the email.
+    jobUrl: urlForRole(lead, role),
     function: dm.function as JobFunction,
     score: Math.round(lead.score ?? 0),
     employeeCount: lead.employeeCount,
@@ -389,7 +392,7 @@ export async function claimResearchBatch(limit: number, minScore = 10): Promise<
   const leads = (candidates as Array<Record<string, unknown>>).map((l) => ({
     company: l.company as string, domain: l.domain as string | undefined, industry: l.industry as string | undefined,
     signalType: l.signalType as string | undefined, reason: l.reason as string | undefined, score: l.score as number | undefined,
-    employeeCount: l.employeeCount as number | undefined, roleDetails: l.roleDetails as Array<{ title: string }> | undefined,
+    employeeCount: l.employeeCount as number | undefined, roleDetails: l.roleDetails as Array<{ title: string; url?: string }> | undefined,
     roles: l.roles as string[] | undefined, sourceUrl: l.sourceUrl as string | undefined,
   })) as PoolLeadLite[];
 
@@ -415,6 +418,17 @@ export async function claimResearchBatch(limit: number, minScore = 10): Promise<
     }
   }
   return out;
+}
+
+/** The exact apply/posting URL for ONE role at a company. Each role from the feed carries its own
+ *  URL (roleDetails[i].url); we match by title so a multi-role company screenshots the RIGHT job per
+ *  role instead of reusing role 1's URL for everything. Returns undefined when this role has no
+ *  direct URL (aggregator-only) so roleShot falls back to careers-page discovery for THIS role,
+ *  never another role's page. Only if the role isn't in roleDetails at all do we use the lead URL. */
+function urlForRole(lead: PoolLeadLite, role: string): string | undefined {
+  const t = (role || "").trim().toLowerCase();
+  const hit = lead.roleDetails?.find((r) => (r.title || "").trim().toLowerCase() === t);
+  return hit ? hit.url : lead.sourceUrl;
 }
 
 /** The role a company's decision-maker should be matched to: its first/most-recent open role. */

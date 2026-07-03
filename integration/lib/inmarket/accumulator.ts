@@ -348,13 +348,15 @@ async function runCycleInner(): Promise<void> {
     // Resolve each company's board sequentially (one request per host at a time — gentle on
     // the public ATS endpoints), accumulate the results, then commit them all in a SINGLE
     // pool write. This keeps a large EXPAND_BATCH cheap on the single-blob KV store.
-    const updates: Array<{ company: string; roleDetails: Array<{ title: string; postedAt?: string; location?: string }>; source: string }> = [];
+    const updates: Array<{ company: string; roleDetails: Array<{ title: string; postedAt?: string; location?: string; url?: string }>; source: string }> = [];
     for (const t of targets) {
       try {
         const r = await resolveCompanyRoles(t.company, t.domain);
         updates.push({
           company: t.company,
-          roleDetails: r.roles.map((x) => ({ title: x.title, postedAt: x.postedAt, location: x.location })),
+          // Keep each role's own posting URL — it's the direct company/ATS job link, so the screen
+          // capture targets the exact role (not the company's first role). Curation reads it per role.
+          roleDetails: r.roles.map((x) => ({ title: x.title, postedAt: x.postedAt, location: x.location, url: x.url })),
           source: r.source,
         });
       } catch { /* skip this company this cycle */ }

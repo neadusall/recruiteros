@@ -346,7 +346,7 @@ export async function poolCompaniesToExpand(limit: number, staleMs: number, excl
  *  no-board company is marked so we don't keep retrying it every cycle). */
 export async function updateExpandedRoles(
   company: string,
-  payload: { roleDetails: Array<{ title: string; postedAt?: string; location?: string }>; source: string },
+  payload: { roleDetails: Array<{ title: string; postedAt?: string; location?: string; url?: string }>; source: string },
 ): Promise<void> {
   const key = (company || "").toLowerCase().trim();
   if (!key) return;
