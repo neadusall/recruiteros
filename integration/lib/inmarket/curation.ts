@@ -22,6 +22,7 @@
 import { loadSnapshot, saveSnapshot } from "../db";
 import { resolveDecisionMaker, type DecisionMaker } from "./decisionMaker";
 import { classifyTitle, type JobFunction } from "../signals";
+import { getCore } from "../core/repository";
 
 /* ------------------------------------------------------------------ */
 /* The curated record                                                  */
@@ -696,6 +697,24 @@ export async function markEnrolled(ids: string[], campaignId: string, nowIso: st
 }
 
 /**
+ * Guarantee the BD Bulk campaign is armed to SEND the MPC sequence: an approved 2-touch model
+ * (Day-0 MPC opener → Day-1 real-person PiP video) so the Autopilot runner actually renders the 50
+ * templates. Idempotent and NON-DESTRUCTIVE: does nothing if the campaign already has a model (never
+ * clobbers an operator's own), so it's safe to call on every enroll tick.
+ */
+async function ensureMpcModel(campaignId: string): Promise<void> {
+  const core = getCore();
+  const c = await core.getCampaign(campaignId);
+  if (!c || c.model) return; // already configured — leave it alone
+  const { templateOpener, videoSequenceModel } = await import("./videoOpener");
+  const draft = templateOpener({ company: "", roleTitle: "", motion: c.motion === "recruiting" ? "recruiting" : "bd" });
+  c.model = videoSequenceModel(draft, c.motion);
+  c.outreachApproved = true;
+  c.updatedAt = new Date().toISOString();
+  await core.saveCampaign(c);
+}
+
+/**
  * The review-gate ACTION: take approved (queued) curated prospects and enroll them into the BD
  * Bulk MPC sender by creating a real Prospect on the campaign (the existing addProspect path,
  * tagged BD / in_market with the signal carried through so the MPC drafter speaks to it). Only
@@ -711,6 +730,12 @@ export async function enrollToBulk(
   const set = new Set(ids);
   const rows = await load();
   const { addProspect } = await import("../prospects");
+  // The recruiter's MPC context (candidate being marketed + identity), set once per workspace in the
+  // Studio. The open SEAT and industry come PER-LEAD from the signal below; this is the constant half,
+  // so the auto-enrolled Client-side leads sign off with a real name and cite the real placement/proof
+  // instead of the generic lexicon floor. Absent settings just fall back to that floor — never breaks.
+  const { getSettings } = await import("./videoSettings");
+  const mpc = (await getSettings(workspaceId).catch(() => null))?.mpc;
   let enrolled = 0, skipped = 0;
   const enrolledIds = new Set<string>();
   // Do the (slow, network) addProspect calls WITHOUT holding the write lock; collect which ids
@@ -733,18 +758,37 @@ export async function enrollToBulk(
         email: r.likelyEmail,           // validated address (not a guess)
         company: r.company,
         companyDomain: r.domain,
-        title: r.managerTitle,
+        title: r.managerTitle,          // the DECISION-MAKER's own title (not the open seat)
         category: "in_market",
         motion: "bd",
         signalType: r.signalType,
         signalReason: r.signalReason,
         warmth: Math.max(50, r.score),
+        // MPC Day-0 context: the open SEAT + industry from THIS lead's signal, plus the recruiter's
+        // candidate/identity defaults. openRole here (not the manager's title) is what {{Open_Role}}
+        // renders, so the opener reads "found your next AE", not "found your next VP of Sales".
+        mpcContext: {
+          openRole: r.role || undefined,
+          industry: r.industry || undefined,
+          placedRole: mpc?.placedRole,
+          placementLocation: mpc?.placementLocation,
+          mustHaves: mpc?.candidateProof,
+          metric: mpc?.candidateMetric,
+          gender: mpc?.candidateGender,
+          yourName: mpc?.yourName,
+        },
       });
       enrolledIds.add(r.id);
       enrolled++;
     } catch {
       skipped++;
     }
+  }
+  // READY-TO-SEND: make sure the BD Bulk campaign actually carries the MPC sequence model, so
+  // renderTouch runs the 50 templates. Non-destructive — only sets the model when the campaign has
+  // none, so an operator's deliberately-configured model is never overwritten.
+  if (enrolled > 0) {
+    try { await ensureMpcModel(campaignId); } catch { /* arming is best-effort; enrollment still stands */ }
   }
   if (enrolledIds.size) {
     await withCurationLock(async () => {
