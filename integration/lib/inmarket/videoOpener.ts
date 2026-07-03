@@ -90,11 +90,23 @@ export async function draftVideoOpener(input: OpenerInput): Promise<OpenerDraft 
  * point of the video is to show there's an actual human here who can help fill the seat. {{videoembed}}
  * is the clickable video (renderTouch only fills it on the 2nd email). Spintax diversifies every send.
  */
-const VIDEO_FOLLOWUP: EmailDraft = {
-  subject: "re: {{Open_Role}}",
-  body:
-    "Hi {{First_Name}}, {i'd rather not be just another name in your inbox|rather than send one more email you'll skim past}, so i recorded a quick video for you. {it's 30 seconds of me|just me, about 30 seconds}, {putting a face to the name|so you can see there's a real person here}, and how i'd actually help you fill your {{Open_Role}}.\n\n{{videoembed}}\n\n{if your {{Open_Role}} is still open|if this is still a priority}, {i'd genuinely like to help|i'd love to help you get it filled}. {worth a conversation?|worth 10 minutes?}\n{Thanks|Best}, {{Your_Name}}",
-};
+const VIDEO_FOLLOWUPS: EmailDraft[] = [
+  {
+    subject: "re: {{Open_Role}}",
+    body:
+      "Hi {{First_Name}}, {i'd rather not be just another name in your inbox|rather than send one more email you'll skim past}, so i recorded a quick video for you. {it's 30 seconds of me|just me, about 30 seconds}, {putting a face to the name|so you can see there's a real person here}, and how i'd actually help you fill your {{Open_Role}}.\n\n{{videoembed}}\n\n{if your {{Open_Role}} is still open|if this is still a priority}, {i'd genuinely like to help|i'd love to help you get it filled}. {worth a conversation?|worth 10 minutes?}\n{Thanks|Best}, {{Your_Name}}",
+  },
+  {
+    subject: "a 30-second video re: {{Open_Role}}",
+    body:
+      "Hi {{First_Name}}, following up on my note about {{Open_Role}}. {instead of another wall of text|rather than pitch you on paper}, i taped a short clip in front of your actual posting so you can {see who you'd be working with|put a face to it}.\n\n{{videoembed}}\n\n{if filling {{Open_Role}} is still on your plate|if it's still a live priority}, {i think i can genuinely move it|i'd like to help you close it out}. {open to a quick look?|worth 10 minutes?}\n{Best|Thanks}, {{Your_Name}}",
+  },
+  {
+    subject: "put a face to {{Open_Role}}",
+    body:
+      "Hi {{First_Name}}, circling back on {{Open_Role}}. {i figured a quick video would land better than one more email|i'd rather show you than tell you}, so here's 30 seconds of me over your job page and how i'd approach the search.\n\n{{videoembed}}\n\n{if this is still open|if you're still hiring for it}, {i'd love to help|i think i can help}. {worth a short call?|open to comparing notes?}\n{Thanks|Best}, {{Your_Name}}",
+  },
+];
 
 /**
  * THE cold-email BD sequence. Day-0 is one of the 50 MPC templates (bd/mpc/templates), selected
@@ -102,10 +114,15 @@ const VIDEO_FOLLOWUP: EmailDraft = {
  * unless the flow supplies them). Day-1 is the real-person PiP video follow-up above. Every token is
  * resolved per prospect (bd/mpc/resolve) and spintax diversifies each send (copy/spintax) at render.
  */
-export function templateOpener(input: OpenerInput): OpenerDraft {
+export function templateOpener(input: OpenerInput, opts?: { index?: number }): OpenerDraft {
+  // `index` is the recipient's slot among the decision-makers at this company. It rotates BOTH the
+  // Day-0 template and the Day-1 video follow-up so that co-located DMs (DM #1/#2/#3) never receive
+  // the same email — structural diversity on top of the per-send spintax in lib/automation/model.
+  const idx = Math.max(0, Math.trunc(opts?.index ?? 0));
   const seed = `${input.company}|${input.roleTitle}|${input.motion || "bd"}`;
-  const t = pickTemplate(seed, { proximityOk: false, hasCompetitor: false });
-  return { first: { subject: t.subject, body: t.body }, second: VIDEO_FOLLOWUP, source: "template" };
+  const t = pickTemplate(seed, { proximityOk: false, hasCompetitor: false }, idx);
+  const followup = VIDEO_FOLLOWUPS[idx % VIDEO_FOLLOWUPS.length];
+  return { first: { subject: t.subject, body: t.body }, second: followup, source: "template" };
 }
 
 /**

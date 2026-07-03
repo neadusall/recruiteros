@@ -15,7 +15,7 @@
  * rendered (cache hit) returns "ready" instantly and never re-bills.
  */
 
-import { composeRoleVideo, normalizePip, videoKey, type PipConfig, type VideoStatus } from "./roleVideo";
+import { composeRoleVideo, normalizePip, pipVariants, videoKey, type PipConfig, type VideoStatus } from "./roleVideo";
 import { cleanFirstName } from "./nameAudio";
 import type { ShotRequest } from "./roleShot";
 
@@ -65,13 +65,25 @@ const jobs = new Map<string, JobState>();
  */
 export function startBulk(
   req: ShotRequest,
-  clipId: string,
+  clips: string | string[],
   pipIn: Partial<PipConfig> | undefined,
   voiceId: string | undefined,
   recipients: BulkRecipient[],
+  opts?: { diversify?: boolean },
 ): BulkJobResult[] {
-  const pip = normalizePip(pipIn);
-  return recipients.map((rcpt) => {
+  // DIVERSITY: spread recipients across the operator's recordings AND a set of derived PiP layouts,
+  // so co-located decision-makers never receive an identical-looking video. With 2 clips and 3
+  // recipients you get 3 distinct composites; with 1 clip the layout variants still differentiate.
+  const clipIds = (Array.isArray(clips) ? clips : [clips]).map((c) => String(c).trim()).filter(Boolean);
+  if (!clipIds.length) return recipients.map((r) => ({ firstName: r.firstName, email: r.email, spokenName: null, key: "", status: "no_clip" as VideoStatus }));
+  const basePip = normalizePip(pipIn);
+  const diversify = opts?.diversify !== false && (clipIds.length > 1 || recipients.length > 1);
+  const layouts = diversify ? pipVariants(basePip) : [basePip];
+  const K = clipIds.length, V = layouts.length;
+
+  return recipients.map((rcpt, i) => {
+    const clipId = clipIds[i % K];
+    const pip = layouts[Math.floor(i / K) % V];
     const spoken = cleanFirstName(rcpt.firstName);
     const key = videoKey(req.company, req.roleTitle, clipId, pip, spoken);
     const existing = jobs.get(key);

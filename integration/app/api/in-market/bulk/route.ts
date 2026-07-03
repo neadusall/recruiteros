@@ -2,7 +2,7 @@
  * In-Market · Bulk personalized videos (record once, render many).
  *
  * POST /api/in-market/bulk
- *   { company, roleTitle, roleUrl?, domain?, clipId, pip?,
+ *   { company, roleTitle, roleUrl?, domain?, clipId | clipIds:[string], pip?, diversify?,
  *     recipients:[{firstName, email?}]  |  names:[string],
  *     voiceId? }
  *   -> kicks off one personalized render per recipient (cloned-voice + lip-synced "Hey {name},")
@@ -28,9 +28,13 @@ export async function POST(req: Request) {
   const b = await body<any>(req);
   const company = String(b?.company ?? "").trim();
   const roleTitle = String(b?.roleTitle ?? "").trim();
-  const clipId = String(b?.clipId ?? "").trim();
+  // Accept one clip (clipId) or many (clipIds) — multiple recordings are rotated across recipients
+  // for video diversity. Fall back to the single clip for older callers.
+  const clipIds: string[] = Array.isArray(b?.clipIds) && b.clipIds.length
+    ? b.clipIds.map((x: any) => String(x).trim()).filter(Boolean)
+    : (String(b?.clipId ?? "").trim() ? [String(b.clipId).trim()] : []);
   if (!company || !roleTitle) return fail("missing company or roleTitle", 422);
-  if (!clipId) return fail("missing clipId", 422);
+  if (!clipIds.length) return fail("missing clipId", 422);
 
   // Accept either structured recipients or a bare list of first names.
   let recipients: Array<{ firstName: string; email?: string }> = [];
@@ -43,6 +47,12 @@ export async function POST(req: Request) {
   }
   if (!recipients.length) return fail("no recipients (send recipients:[{firstName}] or names:[])", 422);
   if (recipients.length > MAX_PER_REQUEST) return fail(`too many recipients (max ${MAX_PER_REQUEST} per request)`, 422);
+  // LAUNCH GATE: several people at ONE company must each get a DIFFERENT recording. Require the
+  // operator to have recorded at least MIN_LAUNCH_CLIPS distinct clips before a multi-recipient run.
+  const MIN_LAUNCH_CLIPS = 3;
+  if (recipients.length > 1 && clipIds.length < MIN_LAUNCH_CLIPS) {
+    return fail(`Record ${MIN_LAUNCH_CLIPS} clips before launching to multiple people at one company (so no two get the same video). You have ${clipIds.length}.`, 422);
+  }
 
   const { resolveVoiceId } = await import("../../../../lib/inmarket/voiceClone");
   const voiceId = await resolveVoiceId(ws, b?.voiceId ? String(b.voiceId) : undefined);
@@ -54,7 +64,7 @@ export async function POST(req: Request) {
   };
 
   const { startBulk, bulkQueueStats } = await import("../../../../lib/inmarket/bulkVideo");
-  const results = startBulk(reqShot, clipId, b?.pip, voiceId, recipients);
+  const results = startBulk(reqShot, clipIds, b?.pip, voiceId, recipients, { diversify: b?.diversify !== false });
 
   // Attach signed share links to the ones that are ready to send.
   const { compositeShareUrls } = await import("../../../../lib/inmarket/shareSign");

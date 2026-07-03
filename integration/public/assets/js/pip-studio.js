@@ -53,9 +53,14 @@
   function lsGet(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 
+  // Minimum recordings required before a diversified LAUNCH to multiple people at one company —
+  // so no two decision-makers (the "buddy down the hall") ever get the same video message.
+  var MIN_CLIPS = 3;
+
   var state = {
     pip: Object.assign({ corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#6366f1", radiusPct: 18 }, lsGet(LS.style, {})),
     clipId: lsGet(LS.clip, null),
+    clips: [],                        // full recording library (bulk/attach rotate across these)
     durationSec: lsGet(LS.dur, 0),    // 0 = auto-match the recorded clip length; else force N seconds of page scroll
     shots: [],
     results: lsGet(LS.results, {}),   // { roleKey: { videoKey, company, roleTitle } }
@@ -128,6 +133,14 @@
 
   /* gate */
   function ready() { return !!state.clipId; }
+  function clipCount() { return (state.clips || []).length; }
+  function launchReady() { return clipCount() >= MIN_CLIPS; }
+  function updateClipStatus() {
+    var el = $("clipStatus"); if (!el) return;
+    var n = clipCount();
+    if (n >= MIN_CLIPS) { el.innerHTML = '<span style="color:#19c37d">✓</span> ' + n + ' recordings — ready to launch (each buyer gets a different one).'; }
+    else { el.innerHTML = '<span style="color:#ffb454">●</span> <b>' + n + ' of ' + MIN_CLIPS + ' recordings.</b> Record ' + (MIN_CLIPS - n) + ' more before launching, so no two people at one company get the same video.'; }
+  }
   function refreshBanner() {
     var b = $("banner");
     if (!ready()) { b.style.display = ""; b.textContent = "Record or pick a clip on the left, then click a role to personalize it."; }
@@ -232,7 +245,7 @@
     var reader = new FileReader();
     reader.onload = function () {
       api("/api/in-market/clip", { method: "POST", body: JSON.stringify({ dataUrl: reader.result }) })
-        .then(function (j) { state.clipId = j.clip.id; lsSet(LS.clip, state.clipId); $("recHint").innerHTML = "Saved ✓, now <b>click a role</b> on the right to personalize it."; toast("Clip saved to your library"); loadClips(); refreshBanner(); })
+        .then(function (j) { state.clipId = j.clip.id; lsSet(LS.clip, state.clipId); $("recHint").innerHTML = "Saved ✓. Record <b>3 different takes</b> so no two buyers at one company get the same video, or <b>click a role</b> to preview this one."; toast("Clip saved to your library"); loadClips(); refreshBanner(); })
         .catch(function (e) { $("recHint").textContent = "Save failed: " + e.message; $("btnSave").disabled = false; });
     };
     reader.readAsDataURL(state.recordedBlob);
@@ -240,7 +253,8 @@
   function loadClips() {
     api("/api/in-market/clip").then(function (j) {
       var clips = (j && j.clips) || [], box = $("clips");
-      if (!clips.length) { box.innerHTML = ""; state.clipId = null; lsSet(LS.clip, null); refreshBanner(); return; }
+      state.clips = clips; // full library — bulk/attach rotate across these for video diversity
+      if (!clips.length) { box.innerHTML = ""; state.clipId = null; lsSet(LS.clip, null); updateClipStatus(); refreshBanner(); return; }
       // Keep the persisted clip if it still exists; otherwise default to most recent.
       if (!state.clipId || !clips.some(function (c) { return c.id === state.clipId; })) state.clipId = clips[0].id;
       lsSet(LS.clip, state.clipId);
@@ -261,6 +275,7 @@
             .then(function () { if (state.clipId === id) { state.clipId = null; lsSet(LS.clip, null); } loadClips(); refreshBanner(); });
         };
       });
+      updateClipStatus();
       refreshBanner();
     }).catch(function () {});
   }
@@ -529,13 +544,16 @@
     api("/api/in-market/attach?company=" + encodeURIComponent(s.company)).then(function (j) {
       var n = (j && j.count) || 0;
       if (!n) { toast("No prospects at " + s.company + " yet, promote them from Hire Signals first"); return; }
-      if (!confirm("Attach the 2-email sequence (text intro → video follow-up) to " + n + " prospect" + (n > 1 ? "s" : "") + " at " + s.company + "?\nThe video is the SECOND touch; signed links are generated automatically.")) return;
+      if (n > 1 && !launchReady()) { toast("Record " + MIN_CLIPS + " clips before launching to " + n + " people at " + s.company + " — you have " + clipCount() + ". No two should get the same video."); return; }
+      if (!confirm("Attach the 2-email sequence (text intro → video follow-up) to " + n + " prospect" + (n > 1 ? "s" : "") + " at " + s.company + "?\n" + (n > 1 ? "Each decision-maker gets a DIFFERENT video + email (rotated across your recordings). " : "") + "The video is the SECOND touch; signed links are generated automatically.")) return;
       api("/api/in-market/attach", { method: "POST", body: JSON.stringify({
         videoKey: vk, roleTitle: s.roleTitle, company: s.company,
         clipId: state.clipId, pip: state.pip, roleUrl: s.pageUrl, // enable per-recipient "Hey {name}" intros
+        clipIds: (state.clips || []).map(function (c) { return c.id; }), // rotate recordings+layouts per DM
         durationSec: state.durationSec > 0 ? state.durationSec : undefined,
       }) }).then(function (r) {
         var msg = "Sequence attached to " + (r.attached || 0) + " prospect(s) at " + s.company;
+        if (r.diversified) msg += " · each gets a different video + email";
         if (r.personalizedNames) msg += " · " + r.personalizedNames + ' personalized "Hey {name}" intro' + (r.personalizedNames > 1 ? "s" : "");
         if (r.armed) msg += r.automationOn ? ", sending email 1 now, video follow-up in a few days" : ", armed (turn on automation to send)";
         toast(msg);
@@ -839,10 +857,10 @@
       '" width="600" style="max-width:100%;border-radius:10px;border:1px solid #e5e7eb;display:block" /></a>';
   }
   function openBulk(s) {
-    if (!state.clipId) { toast("Record or pick a clip first"); return; }
+    if (!launchReady()) { toast("Record " + MIN_CLIPS + " clips first — you have " + clipCount() + ". This keeps the same message off two people at one company."); return; }
     showModal(
       '<div class="mh"><b>Personalize for a list</b> <span class="muted" style="font-size:12px;margin-left:6px">' + esc(s.company) + ' · ' + esc(s.roleTitle) + '</span><button class="mx" data-close>✕</button></div>' +
-      '<p class="muted">One first name per line (or paste a column). Each becomes a video that opens <b>"Hey {name},"</b> in your cloned voice, lip-synced, then your recorded body.</p>' +
+      '<p class="muted">One first name per line (or paste a column). Each becomes a video that opens <b>"Hey {name},"</b> in your cloned voice, lip-synced, then your recorded body. Recipients are <b>rotated across your ' + ((state.clips || []).length || 1) + ' recording' + (((state.clips || []).length || 1) > 1 ? 's' : '') + ' and framings</b>, so no two get the same video.</p>' +
       '<textarea id="bulkNames" rows="6" placeholder="Sarah&#10;Marcus&#10;Priya"></textarea>' +
       '<div class="mfoot"><button class="primary small" id="bulkGo">Generate videos</button>' +
         '<button class="ghost small" id="bulkCsv" style="display:none">⬇ Export CSV</button>' +
@@ -863,6 +881,8 @@
     var payload = {
       company: s.company, roleTitle: s.roleTitle, roleUrl: s.pageUrl,
       clipId: state.clipId, pip: state.pip,
+      // Rotate across ALL your recordings + derived layouts so no two recipients get the same video.
+      clipIds: (state.clips || []).map(function (c) { return c.id; }),
       recipients: names.map(function (n) { return { firstName: n }; }),
     };
     if (state.durationSec > 0) payload.durationSec = state.durationSec;

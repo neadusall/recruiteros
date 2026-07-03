@@ -269,6 +269,36 @@ export function normalizePip(p?: Partial<PipConfig> | null): PipConfig {
   };
 }
 
+/** Corners walked in a stable cycle so each variant lands the bubble somewhere new. */
+const CORNER_CYCLE: PipCorner[] = ["br", "bl", "tl", "tr"];
+function rotateCorner(c: PipCorner, by = 1): PipCorner {
+  const i = CORNER_CYCLE.indexOf(c);
+  return CORNER_CYCLE[((i < 0 ? 0 : i) + by) % CORNER_CYCLE.length];
+}
+const flipShape = (s: PipShape): PipShape => (s === "circle" ? "rounded" : "circle");
+
+/**
+ * Derive a set of visually-distinct PiP layouts from ONE base layout, so several recipients at the
+ * same company each get a different-looking video even when they share a recording. Variant 0 is
+ * ALWAYS the base untouched (a single recipient renders exactly what the operator set); later
+ * variants move the corner, flip the shape, and nudge the size. Because videoKey() hashes the whole
+ * pip object, every field change yields a genuinely separate composite — real diversity, not a
+ * relabel. Free (drag-anywhere) placement is dropped on variants 1+ so the corner change takes hold.
+ */
+export function pipVariants(base?: Partial<PipConfig> | null): PipConfig[] {
+  const b = normalizePip(base);
+  const anchored: PipConfig = { ...b };
+  delete (anchored as { xPct?: number }).xPct;
+  delete (anchored as { yPct?: number }).yPct;
+  const size = (n: number) => clamp(n, 12, 55);
+  return [
+    b,
+    { ...anchored, corner: rotateCorner(b.corner, 1), shape: flipShape(b.shape) },
+    { ...anchored, corner: rotateCorner(b.corner, 2), sizePct: size(b.sizePct + 5) },
+    { ...anchored, corner: rotateCorner(b.corner, 3), shape: flipShape(b.shape), sizePct: size(b.sizePct - 4) },
+  ];
+}
+
 /** Stable composite key for a (role, clip, layout[, spoken first name]) tuple. Including the
  *  normalized name means each "Hey Sarah" composite is reused for every Sarah at that role. */
 export function videoKey(company: string, roleTitle: string, clipId: string, pip: PipConfig, firstName?: string | null, durationSec?: number): string {

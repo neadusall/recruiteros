@@ -75,33 +75,50 @@ export async function POST(req: Request) {
   const { compositeShareUrls } = await import("../../../../lib/inmarket/shareSign");
   const share = compositeShareUrls(videoKey, { company, roleTitle });
 
-  // Generate the TWO-EMAIL SEQUENCE once (text intro → video follow-up) and attach to every
-  // prospect, so outreach runs the right cadence — the video is ALWAYS the second touch.
+  // Generate the two-email SEQUENCE. The Day-0 base template + Day-1 video follow-up are ROTATED
+  // per decision-maker (templateOpener index) so several DMs at ONE company each get a different
+  // email — never the same copy three times. A company-seeded base draft (index 0) arms the
+  // campaign model as the fallback for anyone we don't stamp individually below.
   const { templateOpener } = await import("../../../../lib/inmarket/videoOpener");
   const seqInput = { company, roleTitle, motion: "bd" as const };
-  const draft = templateOpener(seqInput); // Day-0 MPC (bd/mpc/templates) + Day-1 real-person video
-
-  const sequence = { firstEmail: draft.first, secondEmail: draft.second };
+  const baseDraft = templateOpener(seqInput); // Day-0 MPC (bd/mpc/templates) + Day-1 real-person video
   const nowIso = new Date().toISOString();
 
-  // PER-RECIPIENT cloned-name personalization: when the caller passes the compose inputs
-  // (clipId [+pip, roleUrl]), render each distinct first name's own "Hey {name}," composite
-  // (cached by name, non-blocking) and stamp each prospect with THEIR videoKey + signed links.
-  // Without clipId we fall back to the single shared videoKey.
-  const clipId = String(b?.clipId ?? "").trim();
-  const personalize = !!clipId && b?.personalize !== false;
+  // PER-RECIPIENT video: when the caller passes the compose inputs (clipId/clipIds [+pip, roleUrl]),
+  // render each prospect its own composite. Multiple recordings (clipIds) + derived PiP layouts are
+  // ROTATED per decision-maker so co-located DMs get visibly DIFFERENT videos (2 recordings → 3
+  // distinct videos). Cached by (name, clip, layout). Without any clip we fall back to the shared key.
+  const clipIds: string[] = Array.isArray(b?.clipIds) && b.clipIds.length
+    ? b.clipIds.map((x: any) => String(x).trim()).filter(Boolean)
+    : (String(b?.clipId ?? "").trim() ? [String(b.clipId).trim()] : []);
+  const personalize = clipIds.length > 0 && b?.personalize !== false;
+  const diversify = personalize && b?.diversify !== false;
+  // LAUNCH GATE: when attaching to more than one decision-maker at a company, require ≥3 recordings
+  // so each gets a DIFFERENT video (never the same message to two people down the hall from each other).
+  const MIN_LAUNCH_CLIPS = 3;
+  if (targets.length > 1 && clipIds.length < MIN_LAUNCH_CLIPS) {
+    return fail(`Record ${MIN_LAUNCH_CLIPS} clips before launching to ${targets.length} decision-makers at ${company || "this company"} (so no two get the same video). You have ${clipIds.length}.`, 422);
+  }
+  const durationSec = Number(b?.durationSec) > 0 ? Number(b.durationSec) : undefined;
   const reqShot = { company, roleTitle, roleUrl: b?.roleUrl ? String(b.roleUrl) : undefined };
   const { cleanFirstName } = await import("../../../../lib/inmarket/nameAudio");
   const roleVideoMod = personalize ? await import("../../../../lib/inmarket/roleVideo") : null;
-  const keyByName = new Map<string, string>(); // normalized name ("" = no-name) → videoKey
+  const basePip = roleVideoMod ? roleVideoMod.normalizePip(b?.pip) : undefined;
+  const layouts = roleVideoMod ? (diversify ? roleVideoMod.pipVariants(basePip) : [basePip!]) : [];
+  const K = Math.max(1, clipIds.length), V = Math.max(1, layouts.length);
+  const keyCache = new Map<string, string>(); // "name|clip|layoutIdx" → videoKey
   const personalizedNames = new Set<string>();
-  async function resolveKey(fullName?: string | null): Promise<string> {
+  async function resolveKey(fullName: string | null | undefined, i: number): Promise<string> {
     if (!personalize || !roleVideoMod) return videoKey;
+    const clipId = clipIds[i % K];
+    const layoutIdx = diversify ? Math.floor(i / K) % V : 0;
+    const pip = layouts[layoutIdx] || basePip;
     const clean = cleanFirstName(fullName);
     const nm = (clean || "").toLowerCase();
-    if (keyByName.has(nm)) return keyByName.get(nm)!;
-    const r = await roleVideoMod.getOrStartVideo(reqShot, clipId, b?.pip, { firstName: clean || undefined });
-    keyByName.set(nm, r.key!);
+    const cacheKey = `${nm}|${clipId}|${layoutIdx}`;
+    if (keyCache.has(cacheKey)) return keyCache.get(cacheKey)!;
+    const r = await roleVideoMod.getOrStartVideo(reqShot, clipId, pip, { firstName: clean || undefined, durationSec });
+    keyCache.set(cacheKey, r.key!);
     if (clean) personalizedNames.add(nm);
     return r.key!;
   }
@@ -112,9 +129,15 @@ export async function POST(req: Request) {
   const arm = b?.arm !== false; // arm the sending cadence unless the caller opts out
 
   let attached = 0;
+  let i = -1;
   const campaignIds = new Set<string>();
   for (const p of targets) {
-    const vk = await resolveKey(p.fullName);
+    i++;
+    // Each DM at this company gets its own rotated email copy...
+    const draft = templateOpener(seqInput, { index: i });
+    const sequence = { firstEmail: draft.first, secondEmail: draft.second };
+    // ...and its own rotated video (clip + PiP layout).
+    const vk = await resolveKey(p.fullName, i);
     const sh = shareFor(vk);
     const pv = {
       videoKey: vk, watchUrl: sh.watch, gifUrl: sh.gif, mp4Url: sh.mp4,
@@ -151,7 +174,7 @@ export async function POST(req: Request) {
     for (const cid of campaignIds) {
       const c = await core.getCampaign(cid);
       if (!c) continue;
-      c.model = videoSequenceModel(draft, c.motion);
+      c.model = videoSequenceModel(baseDraft, c.motion);
       c.outreachApproved = true;
       c.status = "active";
       c.autoRun = true;
@@ -162,5 +185,6 @@ export async function POST(req: Request) {
   }
 
   const automationOn = ["on", "1", "true", "yes"].includes((process.env.AUTOMATION_ENABLED ?? "").trim().toLowerCase());
-  return ok({ attached, armed, automationOn, personalizedNames: personalizedNames.size, share, sequence });
+  const sequence = { firstEmail: baseDraft.first, secondEmail: baseDraft.second };
+  return ok({ attached, armed, automationOn, personalizedNames: personalizedNames.size, diversified: attached > 1 && diversify, share, sequence });
 }

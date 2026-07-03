@@ -24,9 +24,38 @@ import { automationEnabled, automationArmed, automationTicks } from "../../../li
 import { draftCampaignModel } from "../../../lib/automation/model";
 import { createCampaign, runAutopilot } from "../../../lib/campaigns";
 import { poolStats, queryPool } from "../../../lib/inmarket/pool";
-import { signalBreakdown, hiringManagersFor, promoteLead, type InMarketLead } from "../../../lib/inmarket";
+import { signalBreakdown, hiringManagersFor, promoteLead, type InMarketLead, type HiringManagerLead } from "../../../lib/inmarket";
+import { resolveDecisionMaker, type DecisionMaker } from "../../../lib/inmarket/decisionMaker";
 import { estimatePushCost } from "../../../lib/inmarket/launch";
 import type { Campaign, Motion } from "../../../lib/core/types";
+
+/**
+ * Flatten a resolved decision-maker (the role-owner + the economic BUYERS found in the SAME free
+ * research pass) into named HiringManagerLead entries. This is how the pull path gets 2+ REAL,
+ * distinct people per company — the role-owner PLUS the Head of People / C-suite — instead of one
+ * person shown at several title rungs. Deduped by name; unnamed entries are dropped so we never
+ * promote a title-only ghost. Each becomes its own prospect → its own diversified video + email.
+ */
+function decisionMakerManagers(dm: DecisionMaker, role: string): HiringManagerLead[] {
+  const out: HiringManagerLead[] = [];
+  const seen = new Set<string>();
+  for (const d of [dm, ...(dm.others ?? [])]) {
+    if (!d.fullName) continue;
+    const k = d.fullName.trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push({
+      role,
+      function: d.function as HiringManagerLead["function"],
+      managerTitle: d.title || d.targetTitle,
+      managerName: d.fullName,
+      likelyEmail: d.email?.email,
+      emailVerified: !!d.emailConfirmed,
+      why: d.why,
+    });
+  }
+  return out;
+}
 
 export async function GET(req: Request) {
   const g = requireSession(req);
@@ -178,15 +207,35 @@ export async function POST(req: Request) {
         if ("err" in c) return c.err;
         if (c.motion !== "bd") return fail("bd_only", 422, { detail: "Hiring-signal pull is BD. For Recruiting, source candidates in JD Sourcing — Autopilot then sequences them." });
         const limit = Math.min(Math.max(Number(b.limit) || 25, 1), 500);
-        const perCompany = Math.min(Math.max(Number(b.contactsPerCompany) || 1, 1), 5);
+        // Default to THREE decision-makers per company (was 1): the first DM plus two more, so each
+        // gets their own diversified video + email. Hire Signals returns up to 3 real people; caller
+        // can still override (1–5).
+        const perCompany = Math.min(Math.max(Number(b.contactsPerCompany) || 3, 1), 5);
         const findDirectDial = b.findDirectDial === true;
         const leads = await queryPool(
           { signalTypes: b.signalTypes, industries: b.industries, query: b.query },
           limit,
         );
-        let promoted = 0, withEmail = 0, withPhone = 0, errors = 0;
+        let promoted = 0, withEmail = 0, withPhone = 0, errors = 0, realDmCompanies = 0;
         for (const lead of leads as InMarketLead[]) {
-          const managers = (lead.hiringManagers?.length ? lead.hiringManagers : hiringManagersFor(lead.roles, lead.raw?.person)).slice(0, perCompany);
+          let managers: Array<HiringManagerLead | undefined> = [];
+          // When more than one contact per company is requested, resolve REAL distinct people (the
+          // role-owner + the Head of People / C-suite buyers) via free research, so DM #2 and #3 are
+          // genuinely different humans — not the same person at another title rung. Any miss (no
+          // domain, research failure, only one name found) falls back to the title-ladder below.
+          if (perCompany > 1) {
+            try {
+              const role = lead.roles?.[0] || "the open role";
+              const dm = await resolveDecisionMaker(lead.company, role, {
+                domain: lead.domain, companySize: lead.employeeCount, sourceUrl: lead.sourceUrl,
+              });
+              const real = decisionMakerManagers(dm, role);
+              if (real.length > 1) { managers = real.slice(0, perCompany); realDmCompanies++; }
+            } catch { /* fall back to the title-ladder */ }
+          }
+          if (!managers.length) {
+            managers = (lead.hiringManagers?.length ? lead.hiringManagers : hiringManagersFor(lead.roles, lead.raw?.person)).slice(0, perCompany);
+          }
           const picks = managers.length ? managers : [undefined];
           for (const m of picks) {
             try {
@@ -197,7 +246,7 @@ export async function POST(req: Request) {
             } catch { errors++; }
           }
         }
-        return ok({ pulled: leads.length, promoted, withEmail, withPhone, errors });
+        return ok({ pulled: leads.length, promoted, withEmail, withPhone, errors, realDmCompanies });
       }
 
       case "run-now": {

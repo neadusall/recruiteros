@@ -168,10 +168,14 @@ export function eligibleTemplates(opts: { proximityOk: boolean; hasCompetitor: b
   });
 }
 
-/** Deterministic template pick for a prospect (stable per seed), from the eligible pool. */
-export function pickTemplate(seed: string, opts: { proximityOk: boolean; hasCompetitor: boolean }): MpcTemplate {
+/** Deterministic template pick for a prospect (stable per seed), from the eligible pool. `offset`
+ *  rotates within the pool: pass a per-recipient index so several decision-makers at ONE company
+ *  each draw a DIFFERENT base template (guaranteed distinct while offset < pool size), instead of
+ *  the same seed collapsing them onto one. */
+export function pickTemplate(seed: string, opts: { proximityOk: boolean; hasCompetitor: boolean }, offset = 0): MpcTemplate {
   const pool = eligibleTemplates(opts);
   let h = 2166136261;
   for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return pool[(h >>> 0) % pool.length] ?? MPC_TEMPLATES[0];
+  const step = Math.max(0, Math.trunc(offset));
+  return pool[((h >>> 0) + step) % pool.length] ?? MPC_TEMPLATES[0];
 }

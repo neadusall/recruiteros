@@ -43,6 +43,21 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
   // When a role video is attached, {{role}} is the role being HIRED FOR (the video's subject),
   // not the manager's own title — so the opener reads correctly.
   if (pv?.roleTitle) vals.role = pv.roleTitle;
+
+  // PER-DM EMAIL DIVERSITY: the video attach step stamps EACH prospect with its OWN two-email
+  // sequence (a different base template + follow-up per decision-maker at the same company). When
+  // present, render THIS prospect's copy in place of the campaign-shared template body, so three
+  // DMs at one company never receive identical emails. Matched by the video sequence's touch keys;
+  // any other touch (or a prospect without a stamped sequence) falls back to the campaign template.
+  // Note: this reads p.personalizedVideo.sequence directly (NOT the emailStep-gated `pv`), because
+  // the intro touch (step 1) also has its own per-DM body — only the {{videoembed}} media stays gated.
+  const seq = p.personalizedVideo?.sequence;
+  let touchSubject = touch.subject;
+  let touchBody = touch.body;
+  if (seq) {
+    if (touch.key === "email_intro" && seq.firstEmail?.body) { touchSubject = seq.firstEmail.subject; touchBody = seq.firstEmail.body; }
+    else if (touch.key === "email_video" && seq.secondEmail?.body) { touchSubject = seq.secondEmail.subject; touchBody = seq.secondEmail.body; }
+  }
   const watch = (() => {
     if (!pv?.watchUrl) return "";
     const extra =
@@ -90,7 +105,7 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
       // An unfilled tail token can leave a dangling "Best, " (empty {{Your_Name}}) or trailing space;
       // trim trailing whitespace + a hanging sign-off comma so the copy never ships half-finished.
       .replace(/[ \t]*,?[ \t]*$/,"");
-  return { subject: touch.subject ? fill(touch.subject) : undefined, body: fill(touch.body) };
+  return { subject: touchSubject ? fill(touchSubject) : undefined, body: fill(touchBody) };
 }
 
 /* ----------------------------- LLM drafting ----------------------------- */
