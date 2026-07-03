@@ -562,6 +562,11 @@
           card("New names / last hour", n(f.namedLastHour), "sourcing+curation rate") +
           "</div>";
 
+        // 1b) PiP Studio video coverage — captured postings + finished outreach videos (live).
+        //     Filled from the pip_stats action after render (reused from the standalone studio).
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">PiP Studio · video coverage</h3>' +
+          '<div id="engPipCards" style="display:flex;gap:10px;flex-wrap:wrap"><div class="empty" style="flex:1">Loading…</div></div>';
+
         // 2) Funnel
         html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Funnel</h3>' +
           '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
@@ -621,6 +626,22 @@
           '<div style="margin-top:14px;font-size:11px;color:#6b7186">Auto-refreshes every 15s. To change a dial: edit /opt/recruiteros/.env.production on the server, then <code>docker compose up -d --force-recreate app</code>.</div>';
 
         view.innerHTML = html;
+
+        // Fill the PiP coverage cards from the live pip_stats action (same numbers as the studio).
+        send("/in-market", "POST", { action: "pip_stats" }).then(function (pr) {
+          var pel = document.getElementById("engPipCards"); if (!pel) return;
+          var p = (pr && pr.ok && pr.data) || {};
+          var pc = p.autoCapture || {}, pv = p.autoVideo || {};
+          var engineOn = !!pc.enabled || !!pv.enabled;
+          pel.innerHTML =
+            card("Postings captured", n(p.capturedShots), "verified company-site captures", "#7c5cff") +
+            card("Ready to personalize", n(p.shotsReady), "have an email teaser GIF") +
+            card("Videos made", n(p.compositedVideos), "finished outreach videos", (p.compositedVideos > 0 ? "#38e0a6" : "#e8e8f0")) +
+            card("Auto-engine", engineOn ? "on" : "off", "capture " + (pc.enabled ? "on" : "off") + " · video " + (pv.enabled ? "on" : "off"), engineOn ? "#38e0a6" : "#ffc24d");
+        }).catch(function () {
+          var pel = document.getElementById("engPipCards");
+          if (pel) pel.innerHTML = '<div style="color:#6b7186;font-size:12px">PiP stats unavailable</div>';
+        });
       }).catch(function () {
         view.innerHTML = '<div class="empty">⚠ Engine telemetry unavailable. This panel is admin-only — sign in as a team manager.</div>';
       });

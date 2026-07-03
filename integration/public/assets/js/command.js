@@ -502,6 +502,7 @@
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "＋ New sequence", render: renderContent },
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
     "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: renderOutreachStats, cap: "team:manage" },
+    engine: { title: "Engine / Throughput", crumb: "Admin", action: null, render: renderEngine, cap: "team:manage" },
     nurture: { title: "Nurture", crumb: "Measure", action: null, render: renderNurture, cap: "team:manage", motionOnly: "bd" },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
     // Admin launch-setup hub. Consolidates Integrations and ATS behind one tab
@@ -518,6 +519,136 @@
     // vision. Deep links like #playbooks/jd-sourcing open a single walkthrough.
     playbooks: { title: "Playbooks", crumb: "Learn", action: null, render: renderPlaybooks }
   };
+
+  /* ---------------- Engine / Throughput (admin) ----------------
+     A live, auto-refreshing read on the whole curation pipeline: the daily-target
+     gauge, the funnel, every SOURCE's health, the EFFECTIVE value of every
+     throughput dial (+ the recommended raise for the critical ones), and host
+     headroom. Read-only — it spends nothing; it just exposes what to turn. */
+  function renderEngine(view) {
+    function n(x) { return (x == null ? 0 : x).toLocaleString(); }
+    function dot(status) {
+      var s = String(status || "").toLowerCase();
+      var c = (s.indexOf("ok") >= 0 || s === "healthy" || s === "up" || s === "on" || s === "set" || s === "live")
+        ? "#38e0a6"
+        : (s.indexOf("throttl") >= 0 || s.indexOf("degrad") >= 0 || s.indexOf("down") >= 0 || s === "missing" || s === "off")
+          ? "#ff5c7a" : "#ffc24d";
+      return '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + c + ';margin-right:7px;vertical-align:middle"></span>';
+    }
+    function card(label, value, sub, accent) {
+      return '<div style="background:var(--card,#15151f);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 16px;min-width:120px;flex:1">' +
+        '<div style="font-size:22px;font-weight:700;color:' + (accent || "#e8e8f0") + '">' + value + "</div>" +
+        '<div style="font-size:12px;color:#9aa0b4;margin-top:2px">' + esc(label) + "</div>" +
+        (sub ? '<div style="font-size:11px;color:#6b7186;margin-top:3px">' + esc(sub) + "</div>" : "") + "</div>";
+    }
+    view.innerHTML = '<div class="empty">Loading engine telemetry…</div>';
+
+    function load() {
+      send("/in-market", "POST", { action: "engine_admin" }).then(function (r) {
+        if (!r.ok || !r.data) {
+          view.innerHTML = '<div class="empty">⚠ Couldn\'t reach the engine telemetry (admin only, or a brief blip right after a deploy). Retrying…</div>';
+          return;
+        }
+        var d = r.data, f = d.funnel || {}, sys = d.system || {}, sh = d.search || {}, daily = f.daily || {};
+        var withEmail = (f.validated || 0) + (f.invalid || 0) + (f.catchAll || 0);
+        var hit = withEmail ? Math.round(((f.validated || 0) / withEmail) * 100) : 0;
+
+        // 1) Daily target gauge
+        var paceColor = daily.onPace ? "#38e0a6" : "#ffc24d";
+        var html = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:stretch;margin-bottom:16px">' +
+          card("Verified TODAY", n(daily.validToday), "of " + n(daily.target || 5000) + " target", "#7c5cff") +
+          card("Projected (24h pace)", n(daily.projectedValid), daily.onPace ? "on pace ✓" : "below target", paceColor) +
+          card("Total verified (sendable)", n(f.validated), "the whole book", "#38e0a6") +
+          card("New names / last hour", n(f.namedLastHour), "sourcing+curation rate") +
+          "</div>";
+
+        // 1b) PiP Studio video coverage — captured postings + finished outreach videos (live).
+        //     Filled from the pip_stats action after render (reused from the standalone studio).
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">PiP Studio · video coverage</h3>' +
+          '<div id="engPipCards" style="display:flex;gap:10px;flex-wrap:wrap"><div class="empty" style="flex:1">Loading…</div></div>';
+
+        // 2) Funnel
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Funnel</h3>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+          card("Curated (people)", n(f.total), "named rate " + Math.round((f.namedRate || 0) * 100) + "%") +
+          card("With a domain", n(f.domain && f.domain.curatedWithDomain), "email gate") +
+          card("With an email", n(withEmail), "guessed + found") +
+          card("✓ Verified", n(f.validated), "emailValidated", "#38e0a6") +
+          card("✕ Invalid", n(f.invalid), "suppressed", "#ff5c7a") +
+          card("~ Catch-all", n(f.catchAll), "kept, unconfirmed", "#ffc24d") +
+          card("Email hit-rate", hit + "%", "verified ÷ emails", hit < 20 ? "#ff5c7a" : "#38e0a6") +
+          "</div>";
+
+        // 3) Source health
+        var engines = (sh.engines || []).map(function (e) {
+          return '<span style="display:inline-block;margin:3px 8px 3px 0;font-size:12px;color:#c8cce0">' +
+            dot(e.status) + esc(e.engine) + ' <span style="color:#6b7186">(' + Math.round((e.okRate || 0) * 100) + "% ok" +
+            (e.backoffSec ? ", backoff " + e.backoffSec + "s" : "") + ")</span></span>";
+        }).join("");
+        var cc = d.cc || {};
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Source health ' +
+          '<span style="font-weight:400;color:' + (sh.healthy ? "#38e0a6" : "#ff5c7a") + '">' + dot(sh.status) + esc(sh.status || "unknown") + "</span></h3>" +
+          '<div style="background:var(--card,#15151f);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 16px">' +
+          '<div style="margin-bottom:8px">' + (engines || '<span style="color:#6b7186">no search telemetry yet</span>') + "</div>" +
+          '<div style="font-size:12px;color:#9aa0b4">' + dot(cc.status || (cc.healthy ? "ok" : "")) + "Common Crawl: " + esc(cc.status || (cc.healthy ? "ok" : "n/a")) +
+          '  ·  ' + dot(d.reoon && d.reoon.enabled ? "on" : "off") + "Reoon: " + (d.reoon && d.reoon.enabled ? "live" + (d.reoon.activeTask ? " (task running)" : "") : "OFF") +
+          "</div></div>";
+
+        // 4) Throughput dials
+        var groups = {};
+        (d.dials || []).forEach(function (x) { (groups[x.group] = groups[x.group] || []).push(x); });
+        var rows = "";
+        Object.keys(groups).forEach(function (g) {
+          rows += '<tr><td colspan="4" style="padding:10px 8px 4px;font-size:12px;color:#7c5cff;font-weight:600">' + esc(g) + "</td></tr>";
+          groups[g].forEach(function (x) {
+            var crit = x.crit;
+            rows += '<tr style="border-top:1px solid rgba(255,255,255,.05)">' +
+              '<td style="padding:7px 8px;font-family:monospace;font-size:12px;color:' + (crit ? "#ffc24d" : "#c8cce0") + '">' + (crit ? "★ " : "") + esc(x.key) + "</td>" +
+              '<td style="padding:7px 8px;font-weight:600">' + esc(String(x.value)) + (x.unit ? ' <span style="color:#6b7186;font-weight:400">' + esc(x.unit) + "</span>" : "") + "</td>" +
+              '<td style="padding:7px 8px;font-size:12px;color:#38e0a6">' + (x.rec ? "→ " + esc(x.rec) : "") + "</td>" +
+              '<td style="padding:7px 8px;font-size:12px;color:#6b7186">' + esc(x.note || "") + "</td></tr>";
+          });
+        });
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Throughput dials <span style="font-weight:400;color:#6b7186">(★ = critical lever · → = recommended raise)</span></h3>' +
+          '<div style="background:var(--card,#15151f);border:1px solid rgba(255,255,255,.07);border-radius:12px;overflow:hidden">' +
+          '<table style="width:100%;border-collapse:collapse"><tbody>' + rows + "</tbody></table></div>";
+
+        // 5) Host headroom
+        var disk = sys.disk || {};
+        var diskWarn = (disk.usedPct || 0) >= 80;
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Host headroom</h3>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+          card("Disk used", (disk.usedPct == null ? "?" : disk.usedPct + "%"), (disk.freeGB == null ? "" : disk.freeGB + " GB free of " + disk.totalGB), diskWarn ? "#ff5c7a" : "#38e0a6") +
+          card("CPU load (1m)", (sys.loadavg ? sys.loadavg[0] : "?"), (sys.cpus ? sys.cpus + " vCPU" : "")) +
+          card("Memory free", (sys.memFreeGB == null ? "?" : sys.memFreeGB + " GB"), (sys.memTotalGB ? "of " + sys.memTotalGB + " GB" : "")) +
+          "</div>" +
+          (diskWarn ? '<div style="margin-top:8px;font-size:12px;color:#ff5c7a">⚠ Disk is ' + disk.usedPct + '% full — the file-snapshot store can fill the box. Grow the disk before scaling throughput 10×.</div>' : "") +
+          '<div style="margin-top:14px;font-size:11px;color:#6b7186">Auto-refreshes every 15s. To change a dial: edit /opt/recruiteros/.env.production on the server, then <code>docker compose up -d --force-recreate app</code>.</div>';
+
+        view.innerHTML = html;
+
+        // Fill the PiP coverage cards from the live pip_stats action (same numbers as the studio).
+        send("/in-market", "POST", { action: "pip_stats" }).then(function (pr) {
+          var pel = document.getElementById("engPipCards"); if (!pel) return;
+          var p = (pr && pr.ok && pr.data) || {};
+          var pc = p.autoCapture || {}, pv = p.autoVideo || {};
+          var engineOn = !!pc.enabled || !!pv.enabled;
+          pel.innerHTML =
+            card("Postings captured", n(p.capturedShots), "verified company-site captures", "#7c5cff") +
+            card("Ready to personalize", n(p.shotsReady), "have an email teaser GIF") +
+            card("Videos made", n(p.compositedVideos), "finished outreach videos", (p.compositedVideos > 0 ? "#38e0a6" : "#e8e8f0")) +
+            card("Auto-engine", engineOn ? "on" : "off", "capture " + (pc.enabled ? "on" : "off") + " · video " + (pv.enabled ? "on" : "off"), engineOn ? "#38e0a6" : "#ffc24d");
+        }).catch(function () {
+          var pel = document.getElementById("engPipCards");
+          if (pel) pel.innerHTML = '<div style="color:#6b7186;font-size:12px">PiP stats unavailable</div>';
+        });
+      }).catch(function () {
+        view.innerHTML = '<div class="empty">⚠ Engine telemetry unavailable. This panel is admin-only — sign in as a team manager.</div>';
+      });
+    }
+    load();
+    viewTimers.push(setInterval(load, 15000));
+  }
 
   function currentRoute() {
     var h = (location.hash || "#overview").replace(/^#/, "");
