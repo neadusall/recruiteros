@@ -15,6 +15,7 @@ export interface SendQueueSetupResult {
   name: string;
   sendQueue: boolean;
   scheduledFor?: string;
+  recruiterId?: string;  // the recruiter whose Sending.ac inbox pool this campaign sends from
   retimed: boolean;      // did we change a touch's day to land on 0/1?
   hasModel: boolean;
   emailTouches: number;
@@ -23,7 +24,7 @@ export interface SendQueueSetupResult {
 
 export async function setupSendQueueCampaign(
   campaignId: string,
-  opts?: { scheduledFor?: string },
+  opts?: { scheduledFor?: string; recruiterId?: string },
 ): Promise<SendQueueSetupResult> {
   const core = getCore();
   const c = await core.getCampaign(campaignId);
@@ -33,6 +34,13 @@ export async function setupSendQueueCampaign(
   if (opts?.scheduledFor !== undefined) {
     const d = String(opts.scheduledFor).trim();
     c.scheduledFor = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : undefined; // clear on a blank/invalid date
+  }
+  // Tie the campaign to a recruiter's Sending.ac inbox pool. Without this the send path can't route
+  // through the recruiter's inboxes (trySenderPool needs campaign.recruiterId) and falls back to the
+  // MTA / Instantly providers. A blank value clears the assignment.
+  if (opts?.recruiterId !== undefined) {
+    const r = String(opts.recruiterId).trim();
+    c.recruiterId = r || undefined;
   }
 
   // Retime the email touches: first email → Day 0, second email → Day 1 (next-day video). Only the
@@ -59,6 +67,7 @@ export async function setupSendQueueCampaign(
     name: c.name,
     sendQueue: true,
     scheduledFor: c.scheduledFor,
+    recruiterId: c.recruiterId,
     retimed,
     hasModel,
     emailTouches: emailIdx.length,

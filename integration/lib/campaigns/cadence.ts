@@ -179,9 +179,16 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
   );
   const results: any[] = [];
   const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
   const DAY = 86_400_000;
 
   for (const c of campaigns) {
+    // LAUNCH-DATE GATE (fail-safe): a campaign whose scheduledFor is still in the future holds
+    // ENTIRELY until that day — nothing is drafted, sent, or advanced. This is what lets you fully
+    // pre-arm a campaign (inboxes imported, model approved, Autopilot on, send-ready gate on) while the
+    // inboxes are still warming, and have it start itself on the launch date with zero manual step.
+    // Only a valid YYYY-MM-DD in the future blocks; a blank/invalid/past date never holds.
+    if (c.scheduledFor && /^\d{4}-\d{2}-\d{2}$/.test(c.scheduledFor) && c.scheduledFor > todayStr) continue;
     const touches = c.model!.touches;
     const engine = c.model!.engine;
     let newBudget = c.dailyCap || 25; // cap only NEW enrollments per tick

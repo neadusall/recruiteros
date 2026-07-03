@@ -12,7 +12,9 @@
 
 import { sendQueueOverview, needsAssetsList, type MissingAsset } from "../../../lib/sending/sendReady";
 import { getAutofillSettings, setAutofillSettings, autofillStatus, runAutofill, ensureAutofill } from "../../../lib/sending/autofill";
+import { goLiveReadiness } from "../../../lib/sending/goLive";
 import { sendCapacity } from "../../../lib/senders";
+import { listMembers } from "../../../lib/auth/team";
 import { getCore } from "../../../lib/core/repository";
 import { requireSession, body, ok, fail } from "../../../lib/api";
 
@@ -29,9 +31,14 @@ export async function GET(req: Request) {
       getCore().listCampaigns(ws),
       sendCapacity(ws),
     ]);
-    // Slim campaign list for the picker (+ whether it's set up as the Send Queue campaign and its date).
-    const camps = campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status, sendQueue: !!c.sendQueue, scheduledFor: c.scheduledFor }));
-    return ok({ overview, autofill, campaigns: camps, senders });
+    // Slim campaign list for the picker (+ whether it's set up as the Send Queue campaign, its launch
+    // date, and which recruiter's inbox pool it's tied to).
+    const camps = campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status, sendQueue: !!c.sendQueue, scheduledFor: c.scheduledFor, recruiterId: c.recruiterId }));
+    // Recruiters (workspace members with role "member") — the pickable owners of the Sending.ac pool.
+    const members = listMembers(ws, g.ctx.user.id).filter((m) => m.role === "member").map((m) => ({ userId: m.userId, name: m.name }));
+    // Go-live readiness for the chosen Send Queue campaign (the auto-fill target if set).
+    const goLive = await goLiveReadiness(ws, nowIso, autofill?.settings?.campaignId);
+    return ok({ overview, autofill, campaigns: camps, senders, members, goLive });
   } catch (e: any) {
     return fail(e?.message ?? "send_queue_failed", e?.status ?? 500);
   }
@@ -87,7 +94,10 @@ export async function POST(req: Request) {
     if (!campaignId) return fail("missing_campaign", 422);
     const { setupSendQueueCampaign } = await import("../../../lib/sending/sendQueueSetup");
     try {
-      const result = await setupSendQueueCampaign(campaignId, { scheduledFor: b.scheduledFor !== undefined ? String(b.scheduledFor) : undefined });
+      const result = await setupSendQueueCampaign(campaignId, {
+        scheduledFor: b.scheduledFor !== undefined ? String(b.scheduledFor) : undefined,
+        recruiterId: b.recruiterId !== undefined ? String(b.recruiterId) : undefined,
+      });
       return ok({ result });
     } catch (e: any) {
       return fail(e?.message ?? "setup_failed", e?.status ?? 400);

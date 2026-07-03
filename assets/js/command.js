@@ -2383,7 +2383,7 @@
     var titleMap = { verified_email: "Need a verified email", video: "Need a 2nd-email video", watch_page: "Need a landing page" };
     var fixMap = { verified_email: ["Verify emails in Clients", "#clients"], video: ["Record in PiP Studio", "#pipstudio"], watch_page: ["Build in PiP Studio", "#pipstudio"] };
     var fix = fixMap[missing] || ["Fix", "#clients"];
-    if (!items.length) return '<div class="sq-wl"><div class="sq-wl-head">' + (titleMap[missing] || "Needs assets") + " — none waiting right now 🎉 <button type=\"button\" class=\"im-mini\" data-wlclose>Close</button></div></div>";
+    if (!items.length) return '<div class="sq-wl"><div class="sq-wl-head">' + (titleMap[missing] || "Needs assets") + ": none waiting right now 🎉 <button type=\"button\" class=\"im-mini\" data-wlclose>Close</button></div></div>";
     var rows = items.map(function (p) {
       return '<div class="sq-wl-row">' +
           '<div class="sq-wl-main"><b>' + esc(p.name || "(no name)") + "</b>" + (p.title ? ' <span class="muted">' + esc(p.title) + "</span>" : "") + (p.company ? " · " + esc(p.company) : "") + "</div>" +
@@ -2445,7 +2445,7 @@
     var css = syscapCss();
     if (!cap.inboxes) {
       return css + '<div class="syscap"><div class="syscap-h"><h3>📨 Sending system</h3><span class="sub">your domains, Email IDs, and daily cold-send capacity</span></div>' +
-        '<div class="empty" style="margin-top:12px">No Email IDs yet. <a href="#senders">Import your inboxes</a> and assign them to recruiters — then this shows the model: <b>domains → Email IDs → ' + (cap.coldPerInbox || 2) + ' cold sends/day each</b>, draining live as you send.</div></div>';
+        '<div class="empty" style="margin-top:12px">No Email IDs yet. <a href="#senders">Import your inboxes</a> and assign them to recruiters, then this shows the model: <b>domains → Email IDs → ' + (cap.coldPerInbox || 2) + ' cold sends/day each</b>, draining live as you send.</div></div>';
     }
     var pct = cap.coldCapacity ? Math.min(100, Math.round((cap.coldUsedToday / cap.coldCapacity) * 100)) : 0;
     var flow =
@@ -2459,7 +2459,7 @@
     var meter =
       '<div class="syscap-meter"><div class="track"><div class="fill" style="width:' + pct + '%"></div></div>' +
         '<div class="lbl"><span><b>' + sqFmt(cap.coldUsedToday) + '</b> sent today</span><span><b>' + sqFmt(cap.coldRemaining) + '</b> left · ' + pct + '% of capacity used</span></div></div>';
-    var warm = '<div class="syscap-warm">＋ <b>' + sqFmt(cap.warmingPerDay) + '</b> warming emails/day handled by <b>Smartlead</b> (' + cap.warmingPerInbox + '/inbox) — kept separate from your cold sends.</div>';
+    var warm = '<div class="syscap-warm">＋ <b>' + sqFmt(cap.warmingPerDay) + '</b> warming emails/day handled by <b>Smartlead</b> (' + cap.warmingPerInbox + '/inbox), kept separate from your cold sends.</div>';
     var rows = (cap.byRecruiter || []).map(function (r) {
       var rp = r.coldCapacity ? Math.min(100, Math.round((r.coldUsedToday / r.coldCapacity) * 100)) : 0;
       return '<tr><td><b>' + esc(r.ownerName) + '</b></td>' +
@@ -2497,12 +2497,16 @@
           '<a class="sq-step" href="#pipstudio"><b>3 · Record / assign video</b><span>' + (o.needsAssets.noVideo ? sqFmt(o.needsAssets.noVideo) + " need a 2nd-email video" : "PiP Studio: clip + headshot") + "</span></a>" +
         "</div></div>";
     }
-    var needs = '<div class="sq-needs"><div class="sq-h">Needs assets <span class="muted">— held until complete (' + sqFmt(o.needsAssets.total) + ") · click to see who</span></div>" +
+    var needs = '<div class="sq-needs"><div class="sq-h">Needs assets <span class="muted">held until complete (' + sqFmt(o.needsAssets.total) + ") · click to see who</span></div>" +
       '<div class="sq-need-grid">' +
         sqNeed("✉️ Verified email", o.needsAssets.noVerifiedEmail, "verified_email") +
         sqNeed("🎬 2nd-email video", o.needsAssets.noVideo, "video") +
         sqNeed("🔗 Landing page", o.needsAssets.noWatch, "watch_page") +
       '</div><div id="sqWorklist" class="sq-worklist"></div></div>';
+    return supply + callout + needs;
+  }
+  // Projected-sends table (secondary; folded into a <details> below the essentials).
+  function sqProjectionHtml(o) {
     var rows = o.days.map(function (dd, i) {
       var dot = dd.fill === "green" ? "🟢" : dd.fill === "yellow" ? "🟡" : "🔴";
       var label = i === 0 ? "Today" : i === 1 ? "Tomorrow" : sqDayLabel(dd.date);
@@ -2511,31 +2515,107 @@
         '<td class="sq-num">' + sqFmt(dd.secondEmails) + "</td>" +
         '<td class="sq-num sq-tot">' + sqFmt(dd.total) + "</td></tr>";
     }).join("");
-    var proj = '<div class="sq-h">Projected sends — next ' + o.bufferDays + " days</div>" +
-      '<table class="sq-table"><thead><tr><th>Day</th><th class="sq-num">1st (text)</th><th class="sq-num">2nd (video)</th><th class="sq-num">Total</th></tr></thead><tbody>' + rows + "</tbody></table>" +
+    return '<table class="sq-table"><thead><tr><th>Day</th><th class="sq-num">1st (text)</th><th class="sq-num">2nd (video)</th><th class="sq-num">Total</th></tr></thead><tbody>' + rows + "</tbody></table>" +
       '<div class="sq-note muted">Each day = new first emails + the previous day’s batch getting their video 2nd email. Steady state ≈ ' + sqFmt(o.targetMin * 2) + "–" + sqFmt(o.targetMax * 2) + " emails/day.</div>";
-    var camps = (o.campaigns && o.campaigns.length)
-      ? '<div class="sq-h">Campaigns in the queue</div><div class="sq-camps">' + o.campaigns.map(function (c) {
+  }
+  // Campaigns currently staging into the queue (secondary; folded below).
+  function sqCampsHtml(o) {
+    return (o.campaigns && o.campaigns.length)
+      ? '<div class="sq-camps">' + o.campaigns.map(function (c) {
           return '<div class="sq-camp"><div class="sq-camp-name">' + esc(c.label) + (c.status ? ' <span class="sq-cstatus">' + esc(c.status) + "</span>" : "") + "</div>" +
             '<div class="sq-camp-nums"><span class="sq-ready">' + sqFmt(c.ready) + " ready</span>" + (c.needsAssets ? ' <span class="muted">· ' + sqFmt(c.needsAssets) + " needs assets</span>" : "") + "</div></div>";
         }).join("") + "</div>"
-      : '<div class="sq-h">Campaigns in the queue</div><div class="empty">No queued prospects yet. <a href="#inmarket">Run a Targeted JSearch search</a> to start staging.</div>';
-    return supply + callout + needs + '<div class="sq-grid"><div class="sq-panel">' + proj + '</div><div class="sq-panel">' + camps + "</div></div>";
+      : '<div class="empty">No queued prospects yet. <a href="#inmarket">Run a Targeted JSearch search</a> to start staging.</div>';
+  }
+  // Collapsible "secondary" section: sending capacity, the day projection, and campaigns fold away
+  // so the page opens on the essentials (supply, runway, what's blocking, and the auto-fill control).
+  // 🚀 Go-live checklist — the pre-flight for the Sending.ac cold-send path. Reads d.goLive and shows,
+  // at a glance, whether turning Autopilot on will actually send through the recruiter's inboxes, plus
+  // the launch countdown. Green "Wired" = plumbing sound; a future launch date holds it until that day.
+  function sqGoLiveCss() {
+    if (document.getElementById("sqGoLiveCss")) return "";
+    return '<style id="sqGoLiveCss">' +
+      '.sqgl{border:1px solid var(--border);border-radius:16px;background:var(--surface);padding:14px 16px;margin:0 0 16px}' +
+      '.sqgl.ready{border-color:#34d399;background:linear-gradient(180deg,rgba(52,211,153,.07),rgba(52,211,153,.02))}' +
+      '.sqgl-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}' +
+      '.sqgl-head h3{font-size:15px;font-weight:800;margin:0}' +
+      '.sqgl-ap{font-size:11.5px;font-weight:700;color:var(--text-muted,#8a93a6)}' +
+      '.sqgl-ap.on{color:#4dd0ff}' +
+      '.sqgl-launch{margin-left:auto;font-size:12px;color:var(--text-muted,#8a93a6)}' +
+      '.sqgl-launch.ok{color:#34d399}' +
+      '.sqgl-body{display:grid;gap:2px}' +
+      '.sqgl-row{display:grid;grid-template-columns:20px 210px 1fr;align-items:baseline;gap:10px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--border)}' +
+      '.sqgl-row:last-child{border-bottom:0}' +
+      '.sqgl-l{font-weight:600}.sqgl-d{font-size:12px}' +
+      '.sqgl-foot{font-size:12px;margin-top:9px;padding-top:9px;border-top:1px solid var(--border)}' +
+      '@media (max-width:560px){.sqgl-row{grid-template-columns:20px 1fr;}.sqgl-d{grid-column:2}}' +
+      '</style>';
+  }
+  function sqGoLiveHtml(g) {
+    if (!g) return "";
+    var pill = g.ready ? '<span class="sq-pill green">🟢 Wired</span>' : '<span class="sq-pill yellow">🟡 Not wired yet</span>';
+    var ap = g.autopilotOn ? '<span class="sqgl-ap on">⚡ Autopilot ON</span>' : '<span class="sqgl-ap">⚡ Autopilot off</span>';
+    var launch = "";
+    if (g.launchDate) {
+      var dul = g.daysUntilLaunch;
+      launch = (typeof dul === "number" && dul > 0)
+        ? '<span class="sqgl-launch">🗓️ Launches ' + esc(g.launchDate) + " · <b>" + dul + " day" + (dul === 1 ? "" : "s") + "</b> to go</span>"
+        : '<span class="sqgl-launch ok">🗓️ Launch date ' + esc(g.launchDate) + " reached</span>";
+    }
+    var rows = (g.checks || []).map(function (c) {
+      var ic = c.ok ? "✅" : (c.required ? "⛔" : "◻️");
+      return '<div class="sqgl-row"><span>' + ic + '</span><span class="sqgl-l">' + esc(c.label) + (c.required ? "" : ' <span class="muted">(optional)</span>') + '</span><span class="sqgl-d muted">' + esc(c.detail) + "</span></div>";
+    }).join("");
+    var foot = g.ready
+      ? "Plumbing is sound. Set a launch date and turn Autopilot on now: with a future date it stays inert and starts itself on that day, no manual step."
+      : "Finish the ⛔ required items, then set a launch date and turn Autopilot on. It stays inert until the launch date.";
+    var head = '<div class="sqgl-head"><h3>🚀 Go-live checklist' + (g.campaignName ? ' <span class="muted">· ' + esc(g.campaignName) + "</span>" : "") + "</h3>" + pill + ap + launch + "</div>";
+    return sqGoLiveCss() + '<div class="sqgl' + (g.ready ? " ready" : "") + '">' + head + '<div class="sqgl-body">' + rows + "</div><div class=\"sqgl-foot muted\">" + foot + "</div></div>";
+  }
+  function sqMoreCss() {
+    if (document.getElementById("sqMoreCss")) return "";
+    return '<style id="sqMoreCss">' +
+      '.sq-more{border:1px solid var(--border);border-radius:14px;background:var(--surface);margin:0 0 12px;overflow:hidden}' +
+      '.sq-more>summary{list-style:none;cursor:pointer;padding:12px 16px;font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px}' +
+      '.sq-more>summary::-webkit-details-marker{display:none}' +
+      '.sq-more>summary:before{content:"▸";color:var(--text-muted,#8a93a6);font-size:11px;transition:.15s}' +
+      '.sq-more[open]>summary:before{transform:rotate(90deg)}' +
+      '.sq-more>summary .sq-more-sub{margin-left:auto;font-weight:600;color:var(--text-muted,#8a93a6);font-size:11.5px}' +
+      '.sq-more-body{padding:0 16px 14px}' +
+      '</style>';
+  }
+  function sqSecondaryHtml(o, cap) {
+    var capBody = sqCapacityHtml(cap);
+    var capSummary = cap && cap.inboxes
+      ? sqFmt(cap.coldCapacity) + " cold sends/day · " + sqFmt(cap.inboxes) + " Email IDs"
+      : "no inboxes yet";
+    var capBlock = capBody ? '<details class="sq-more"><summary>📨 Sending capacity <span class="sq-more-sub">' + capSummary + '</span></summary><div class="sq-more-body">' + capBody + '</div></details>' : "";
+    var projBlock = '<details class="sq-more"><summary>📅 Projected sends <span class="sq-more-sub">next ' + o.bufferDays + ' days</span></summary><div class="sq-more-body">' + sqProjectionHtml(o) + '</div></details>';
+    var campCount = (o.campaigns && o.campaigns.length) || 0;
+    var campBlock = '<details class="sq-more"><summary>🎯 Campaigns in the queue <span class="sq-more-sub">' + campCount + '</span></summary><div class="sq-more-body">' + sqCampsHtml(o) + '</div></details>';
+    return sqMoreCss() + capBlock + projBlock + campBlock;
   }
   // ⚡ Auto-fill panel — the one control that makes the queue set-and-forget: a toggle, the campaign
   // to stage into, the daily band + buffer, and a "Fill now" button. When ON, the engine keeps the
   // buffer topped automatically (it stages verified prospects; it never sends).
-  function sqAutofillHtml(af, campaigns) {
+  function sqAutofillHtml(af, campaigns, members) {
     var s = (af && af.settings) || {};
     var on = !!s.enabled;
-    var opts = '<option value="">— pick a campaign —</option>' + (campaigns || []).map(function (c) {
+    var opts = '<option value="">Pick a campaign…</option>' + (campaigns || []).map(function (c) {
       return '<option value="' + esc(c.id) + '"' + (c.id === s.campaignId ? " selected" : "") + ">" + esc(c.name) + (c.sendQueue ? " ✓" : "") + (c.status ? " (" + esc(c.status) + ")" : "") + "</option>";
     }).join("");
     var sel = (campaigns || []).filter(function (c) { return c.id === s.campaignId; })[0];
-    var setupNote = !sel ? "Pick a campaign, then set it up for Day-0 text + Day-1 video."
-      : sel.sendQueue ? "✓ Set up: 1st email Day 0 · video 2nd email Day 1 · send-ready gate ON" + (sel.scheduledFor ? " · launch " + esc(sel.scheduledFor) : "")
-      : "Not set up yet — click to time it Day-0 / Day-1 and gate sends on send-ready.";
+    var recName = "";
+    var recruiterOpts = '<option value="">Unassigned</option>' + (members || []).map(function (m) {
+      var isSel = sel && sel.recruiterId === m.userId;
+      if (isSel) recName = m.name;
+      return '<option value="' + esc(m.userId) + '"' + (isSel ? " selected" : "") + ">" + esc(m.name) + "</option>";
+    }).join("");
+    var setupNote = !sel ? "Pick a campaign, then set its recruiter, launch date, and Day-0 / Day-1 timing."
+      : sel.sendQueue ? "✓ Set up: 1st email Day 0 · video 2nd email Day 1 · send-ready gate ON" + (recName ? " · pool: " + esc(recName) : " · no recruiter yet") + (sel.scheduledFor ? " · launch " + esc(sel.scheduledFor) : "")
+      : "Not set up yet: click to time it Day-0 / Day-1, assign the recruiter pool, and gate sends on send-ready.";
     var setupRow = '<div class="sq-af-setup">' +
+        '<label class="sq-af-f">Recruiter (inbox pool)<select id="sqAfRecruiter">' + recruiterOpts + "</select></label>" +
         '<label class="sq-af-f">Launch date<input type="date" id="sqAfDate" value="' + (sel && sel.scheduledFor || "") + '"></label>' +
         '<button type="button" class="btn btn-ghost btn-sm" id="sqAfSetup">⚙️ Set up as Send Queue campaign</button>' +
         '<span class="sq-af-setupnote ' + (sel && sel.sendQueue ? "ok" : "muted") + '">' + setupNote + "</span>" +
@@ -2543,7 +2623,7 @@
     return '<div class="sq-af' + (on ? " on" : "") + '">' +
         '<div class="sq-af-head">' +
           '<label class="sq-switch" title="Turn auto-fill on/off"><input type="checkbox" id="sqAfToggle"' + (on ? " checked" : "") + '><span class="sq-slider"></span></label>' +
-          '<div class="sq-af-title">⚡ Auto-fill <span class="muted">' + (on ? "ON — keeping the buffer full" : "OFF") + "</span></div>" +
+          '<div class="sq-af-title">⚡ Auto-fill <span class="muted">' + (on ? "ON: keeping the buffer full" : "OFF") + "</span></div>" +
           '<div class="sq-af-status">Staged today: <b>' + ((af && af.today) || 0).toLocaleString() + "</b> / " + ((af && af.dailyTarget) || 0).toLocaleString() + " target</div>" +
         "</div>" +
         '<div class="sq-af-row">' +
@@ -2555,11 +2635,11 @@
           '<button type="button" class="btn btn-primary btn-sm" id="sqAfFill">⬇ Fill now</button>' +
         "</div>" +
         setupRow +
-        '<div class="sq-af-note muted">When ON, it stages verified send-ready prospects into the chosen campaign every few minutes — keeping ~' + (s.bufferDays || 5) + " days ahead so no day runs dry. It never sends; your campaign’s own controls do.</div>" +
+        '<div class="sq-af-note muted">When ON, it stages verified send-ready prospects into the chosen campaign every few minutes, keeping ~' + (s.bufferDays || 5) + " days ahead so no day runs dry. It never sends: your campaign’s own controls do.</div>" +
       "</div>";
   }
   function sqFillReason(r) {
-    return r === "buffer_full" ? "Buffer already full — nothing more to stage right now."
+    return r === "buffer_full" ? "Buffer already full: nothing more to stage right now."
       : r === "daily_target_met" ? "Today’s target is already met."
       : r === "no_ready_supply" ? "No verified, contactable prospects waiting. Run a Targeted JSearch search + verify emails first."
       : r === "no_campaign" ? "Pick a campaign first."
@@ -2595,8 +2675,10 @@
       var cid = document.getElementById("sqAfCampaign").value;
       if (!cid) { toast("Pick a campaign first."); return; }
       var date = document.getElementById("sqAfDate").value;
+      var recEl = document.getElementById("sqAfRecruiter");
+      var recruiterId = recEl ? recEl.value : "";
       setup.disabled = true; setup.textContent = "Setting up…";
-      send("/send-queue", "POST", { action: "campaign_setup", campaignId: cid, scheduledFor: date }).then(function (r) {
+      send("/send-queue", "POST", { action: "campaign_setup", campaignId: cid, scheduledFor: date, recruiterId: recruiterId }).then(function (r) {
         var res = r && r.data && r.data.result;
         toast(res ? res.message : "Couldn’t set up the campaign.");
         sqReload();
@@ -2621,7 +2703,7 @@
     api("/send-queue").then(function (d) {
       var b = document.getElementById("sqBody"); if (!b) return;
       if (!d || !d.overview) { b.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>'; return; }
-      b.innerHTML = sqAutofillHtml(d.autofill || { settings: {} }, d.campaigns || []) + sqCapacityHtml(d.senders) + sqOverviewHtml(d.overview);
+      b.innerHTML = sqOverviewHtml(d.overview) + sqGoLiveHtml(d.goLive) + sqAutofillHtml(d.autofill || { settings: {} }, d.campaigns || [], d.members || []) + sqSecondaryHtml(d.overview, d.senders);
       sqWireAutofill();
       sqWireWorklist();
     }).catch(function () {
