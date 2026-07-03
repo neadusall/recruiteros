@@ -1,23 +1,32 @@
 /**
- * RecruitersOS · In-Market · cheap-first paid email fallback (Icypeas)
+ * RecruitersOS · In-Market · cheap-first paid email fallback (Icypeas) — the RESIDUAL finder.
  *
- * Free resolution (team-page deep pull + first.last guess) handles most cases, but it can't form
- * a deliverable email when we have a NAME but no domain, or the only guess is on a no-MX domain.
- * This is the conversion fallback: the cheapest credible finder (Icypeas, ~$0.003/email) resolves
- * AND verifies a real address from name + domain-or-company. It is the same cheapest-first policy
- * the rest of the engine follows — free first, this only on the misses.
+ * Every free path is exhausted for our lead mix: permutation+Reoon caps ~40%, and a measured sweep
+ * of GitHub + SearXNG-dork + site-crawl over real cold-domain misses returned ~10% (most of that
+ * role mailboxes, not people). The decision-makers' real addresses simply aren't published anywhere
+ * a crawler reaches and aren't guessable — they only live in a data-backed provider's network.
+ * Icypeas is the cheapest such finder (only charged on a hit, credits roll over), so this is the
+ * ONLY-on-the-misses residual: name + domain -> the provider's real address, which we then re-verify
+ * through the Reoon credits we already own before trusting it.
  *
- * ENV-GATED: returns null (a no-op, zero spend) unless ICYPEAS_API_KEY + ICYPEAS_API_SECRET are
- * set, so it never costs anything until you opt in. Add the keys to .env.production to switch the
- * Named → Contactable conversion on.
+ * Icypeas is ASYNCHRONOUS: submit the search (get an id back), then poll the read endpoint until the
+ * search completes. Fully ENV-GATED: a no-op (zero spend) unless ICYPEAS_API_KEY + ICYPEAS_API_SECRET
+ * are set. NOTE: the exact auth header + result field names are confirmed on first live run with a
+ * real key — pick() below is defensive across the documented shapes so a small naming difference
+ * doesn't break resolution.
  */
 
-const TIMEOUT_MS = 10_000;
+const SUBMIT_URL = "https://app.icypeas.com/api/email-search";
+const READ_URL = "https://app.icypeas.com/api/bulk-single-searchs/read";
+const HTTP_TIMEOUT_MS = 12_000;
+const POLL_TRIES = 8;
+const POLL_DELAY_MS = 4_000;
 
 export interface PaidEmail {
   email: string;
   /** True when the provider graded the result as high-certainty (treat as deliverable). */
   verified: boolean;
+  certainty: string;
   via: "icypeas";
 }
 
@@ -26,6 +35,18 @@ export function paidEmailEnabled(): boolean {
   return !!(process.env.ICYPEAS_API_KEY && process.env.ICYPEAS_API_SECRET);
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function authHeaders(): Record<string, string> {
+  return {
+    Authorization: process.env.ICYPEAS_API_KEY!,
+    "X-ROCK-SECRET": process.env.ICYPEAS_API_SECRET!,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+}
+
+/** Depth-first pick of the first non-empty string under any of `keys` (searches nested containers). */
 function pick(obj: unknown, keys: string[]): string | undefined {
   if (!obj || typeof obj !== "object") return undefined;
   const flat = obj as Record<string, unknown>;
@@ -33,7 +54,7 @@ function pick(obj: unknown, keys: string[]): string | undefined {
     const v = flat[k];
     if (typeof v === "string" && v.trim()) return v.trim();
   }
-  for (const nest of ["data", "result", "results", "item", "items"]) {
+  for (const nest of ["data", "result", "results", "item", "items", "search", "searches", "output"]) {
     const n = flat[nest];
     if (n && typeof n === "object") {
       const hit = pick(Array.isArray(n) ? n[0] : n, keys);
@@ -43,10 +64,53 @@ function pick(obj: unknown, keys: string[]): string | undefined {
   return undefined;
 }
 
+/** A completed search has a terminal status; anything else means "still processing, poll again". */
+function isTerminal(status: string): boolean {
+  const s = status.toLowerCase();
+  return ["found", "debited", "complete", "completed", "done", "finished", "no_result", "not_found", "none", "failed", "error"].some((t) => s.includes(t));
+}
+
+async function submitSearch(first: string, last: string, domainOrCompany: string): Promise<string | null> {
+  try {
+    const res = await fetch(SUBMIT_URL, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ firstname: first, lastname: last, domainOrCompany }),
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const j: unknown = await res.json().catch(() => null);
+    // submit returns the search item's id (documented as `_id`, defensively also `id`)
+    return pick(j, ["_id", "id", "searchId", "requestId"]) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function readResult(id: string): Promise<{ done: boolean; email?: string; certainty?: string }> {
+  try {
+    const res = await fetch(READ_URL, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ id }),
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+    });
+    if (!res.ok) return { done: false };
+    const j: unknown = await res.json().catch(() => null);
+    const status = (pick(j, ["status", "state"]) ?? "").toLowerCase();
+    if (status && !isTerminal(status)) return { done: false };
+    const email = pick(j, ["email", "value", "work_email", "workEmail", "mail"]);
+    const certainty = pick(j, ["certainty", "level", "confidence"]) ?? status;
+    return { done: true, email, certainty };
+  } catch {
+    return { done: false };
+  }
+}
+
 /**
- * Resolve + verify a work email for a named person via Icypeas. `domainOrCompany` should be the
- * resolved domain when we have one (best precision) or the company name as a fallback. Returns null
- * on any miss/error/timeout, or when not configured.
+ * Resolve a work email for a named person via Icypeas (submit -> poll). `domainOrCompany` should be
+ * the resolved domain when we have one (best precision) or the company name as a fallback. Returns
+ * null on any miss/error/timeout, or when not configured. Only a HIT is billed by Icypeas.
  */
 export async function findEmailIcypeas(
   firstName: string | undefined,
@@ -58,30 +122,17 @@ export async function findEmailIcypeas(
   const last = (lastName || "").trim();
   if ((!first && !last) || !domainOrCompany) return null;
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch("https://app.icypeas.com/api/email-search", {
-      method: "POST",
-      signal: ctrl.signal,
-      headers: {
-        Authorization: process.env.ICYPEAS_API_KEY!,
-        "X-ROCK-SECRET": process.env.ICYPEAS_API_SECRET!,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({ firstname: first, lastname: last, domainOrCompany }),
-    });
-    if (!res.ok) return null;
-    const data: unknown = await res.json().catch(() => null);
-    const email = pick(data, ["email", "value", "work_email"]);
-    if (!email || !email.includes("@")) return null;
-    const certainty = (pick(data, ["certainty", "status", "state"]) ?? "").toLowerCase();
-    const verified = certainty.includes("ultra") || certainty.includes("sure") || certainty.includes("valid");
-    return { email, verified, via: "icypeas" };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
+  const id = await submitSearch(first, last, domainOrCompany);
+  if (!id) return null;
+
+  for (let i = 0; i < POLL_TRIES; i++) {
+    await sleep(POLL_DELAY_MS);
+    const r = await readResult(id);
+    if (!r.done) continue;
+    if (!r.email || !r.email.includes("@")) return null; // completed, no address found
+    const certainty = (r.certainty ?? "").toLowerCase();
+    const verified = ["verified", "valid", "ultra", "sure", "deliverable", "found"].some((s) => certainty.includes(s));
+    return { email: r.email.toLowerCase(), verified, certainty, via: "icypeas" };
   }
+  return null; // never reached terminal in the poll window → treat as miss (not billed on no-result)
 }

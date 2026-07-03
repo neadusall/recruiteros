@@ -923,6 +923,72 @@ export async function findEmailsByReoon(limit: number, nowIso: string, concurren
   return { checked, found, catchAll, invalid };
 }
 
+/**
+ * RESIDUAL finder (paid, only-on-the-misses). For people the free path (permutation + Reoon) could
+ * NOT resolve, resolve a real address via Icypeas, then RE-VERIFY it through the Reoon credits we
+ * already own before trusting it. Targets misses only (emailInvalid, or named-but-no-email); never
+ * re-touches found / catch-all / locked rows. Bounded by `limit` for cost control; Icypeas bills only
+ * on a hit. No-op unless ICYPEAS_API_KEY + ICYPEAS_API_SECRET are set. Reopens rows the free finder
+ * had marked invalid when the paid+Reoon path now confirms a real mailbox.
+ */
+export async function findEmailsByPaid(limit: number, nowIso: string, concurrency = 3): Promise<{ checked: number; found: number; missed: number }> {
+  const { paidEmailEnabled, findEmailIcypeas } = await import("./paidEmail");
+  if (!paidEmailEnabled()) return { checked: 0, found: 0, missed: 0 };
+  const { verifyEmailsReoon } = await import("./emailVerify");
+  const { splitFullName } = await import("./email");
+  const { learnFromConfirmedEmail, inferPattern } = await import("./emailPattern");
+
+  const rows = await load();
+  const targets = rows
+    .filter((r) => r.managerName && r.domain && !r.emailValidated && !r.emailCatchAll
+      && (r.emailInvalid || !r.likelyEmail)
+      && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed")
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(0, limit));
+  if (!targets.length) return { checked: 0, found: 0, missed: 0 };
+
+  type Hit = { email: string; accept: boolean; pattern?: string };
+  const results = new Map<string, Hit>();
+  let cursor = 0, checked = 0;
+  async function worker() {
+    while (cursor < targets.length) {
+      const r = targets[cursor++];
+      checked++;
+      try {
+        const { firstName, lastName } = splitFullName(r.managerName);
+        const found = await findEmailIcypeas(firstName, lastName, r.domain || r.company);
+        if (!found) continue;
+        const rv = await verifyEmailsReoon([found.email]);
+        const verdict = rv.find((x) => x.email === found.email.toLowerCase());
+        // Reoon decides when it returns a definitive verdict; when it's inconclusive we trust Icypeas's own grade.
+        const accept = verdict ? verdict.valid : found.verified;
+        results.set(r.id, { email: found.email, accept, pattern: inferPattern(r.managerName, found.email) || undefined });
+      } catch { /* skip → leave as-is, retried a later pass */ }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(Math.max(concurrency, 1), 4) }, worker));
+
+  let found = 0, missed = 0;
+  await withCurationLock(async () => {
+    const current = await load();
+    for (const r of current) {
+      const hit = results.get(r.id);
+      if (!hit) continue;
+      if (r.status === "enrolled" || r.status === "queued" || r.status === "suppressed") continue;
+      if (hit.accept) {
+        r.likelyEmail = hit.email; if (hit.pattern) r.emailPattern = hit.pattern;
+        r.emailSource = "icypeas"; r.emailValidated = true; r.emailInvalid = false; r.emailCatchAll = false; r.validatedAt = nowIso;
+        if (r.status === "sourced" || r.status === "named") r.status = "contactable";
+        found++;
+        await learnFromConfirmedEmail(r.managerName, hit.email, "icypeas").catch(() => {});
+      } else { missed++; }
+    }
+    await save(current);
+  });
+  try { const { flushPatternCache } = await import("./emailPattern"); await flushPatternCache(true); } catch { /* flush best-effort */ }
+  return { checked, found, missed };
+}
+
 /** The curated emails still needing validation — feed this list to the external validator. */
 export async function pendingValidationEmails(limit = 1000): Promise<string[]> {
   const rows = await load();
