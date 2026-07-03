@@ -129,6 +129,28 @@ const STYLE = [
  *  running instance (idempotent-ish). Resets on deploy; persistent caching is a deliberate follow-up. */
 const memo = new Map<string, { subject?: string; body: string }>();
 
+/**
+ * CROSS-BATCH UNIFORMITY guard. Remembers the opening fingerprint of recently humanized notes so a
+ * batch never converges on one skeleton (the deliverability risk that raw template-count can't fix).
+ * A SOFT guard: a collision costs one extra rewrite for a fresher opener, never a fallback — falling
+ * back to the deterministic copy would be MORE uniform, not less. Ring-buffered, in-process.
+ */
+const RECENT_CAP = 400;
+const recentFp: string[] = [];
+const recentSet = new Set<string>();
+function openingFingerprint(body: string): string {
+  const firstLine = (body.split("\n").find((l) => l.trim()) || body).toLowerCase().replace(/[^a-z0-9\s]/g, " ");
+  const w = firstLine.split(/\s+/).filter(Boolean);
+  const start = ["hi", "hey", "hello"].includes(w[0]) ? 2 : 0; // skip the "hi <name>," greeting
+  return w.slice(start, start + 6).join(" ");
+}
+function rememberFp(fp: string): void {
+  if (!fp || recentSet.has(fp)) return;
+  recentSet.add(fp);
+  recentFp.push(fp);
+  if (recentFp.length > RECENT_CAP) { const old = recentFp.shift(); if (old) recentSet.delete(old); }
+}
+
 export interface Rendered { subject?: string; body: string }
 
 /**
@@ -171,36 +193,51 @@ export async function humanizeMpc(p: Partial<Prospect>, rendered: Rendered, seed
 
   try {
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    // maxRetries 0: we run our own 2 attempts; a per-request timeout guarantees a stuck call can never
+    // hang the send loop (it throws, we fall back to the deterministic copy).
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0 });
     const model = process.env.MPC_HUMANIZER_MODEL ?? "claude-haiku-4-5";
+    const timeoutMs = Math.max(2000, Number(process.env.MPC_HUMANIZER_TIMEOUT_MS) || 9000);
 
     for (let attempt = 0; attempt < 2; attempt++) {
-      const resp = await client.messages.create({
-        model,
-        max_tokens: 400,
-        temperature: attempt === 0 ? 0.85 : 0.6, // second try is tighter, to land inside the gate
-        system: attempt === 0 ? STYLE : STYLE + "\nThe previous attempt was rejected. Keep EVERY fact and number identical to the reference and use no banned phrase.",
-        messages: [{ role: "user", content: `Rewrite this email. Keep the facts and the sign-off.\n\n${reference}` }],
-      });
+      const resp = await client.messages.create(
+        {
+          model,
+          max_tokens: 400,
+          temperature: 0.9, // keep it varied; the stricter nudge (not a lower temp) lands the retry in-gate
+          system: attempt === 0 ? STYLE : STYLE + "\nThe previous draft was rejected. Keep EVERY fact and number identical, use no banned phrase, and open the note differently than a template would.",
+          messages: [{ role: "user", content: `Rewrite this email. Keep the facts and the sign-off.\n\n${reference}` }],
+        },
+        { timeout: timeoutMs },
+      );
       const text = resp.content.map((c) => ("text" in c ? c.text : "")).join("");
       const s = text.indexOf("{"), e = text.lastIndexOf("}");
       if (s < 0 || e < 0) continue;
       let parsed: { subject?: string; body?: string };
       try { parsed = JSON.parse(text.slice(s, e + 1)); } catch { continue; }
-      const body = (parsed.body || "").trim();
+      // Strip a "Subject:" line the model may have echoed into the body.
+      const body = (parsed.body || "").replace(/^\s*subject:.*\n+/i, "").trim();
       const subject = (parsed.subject || rendered.subject || "").trim() || undefined;
       if (!body) continue;
+      const cand = `${subject || ""}\n${body}`;
 
-      // GATE: reject bot-tells and any fabricated/lost fact. Fail -> retry once, then fall back.
-      if (naturalnessViolations(`${subject || ""}\n${body}`).length) continue;
-      if (!truthPreserved(reference, `${subject || ""}\n${body}`, must)) continue;
-      // Length sanity: a natural rewrite stays in the same ballpark; reject runaway output.
-      if (body.length > rendered.body.length * 1.7 + 40) continue;
+      // HARD GATE (safety) — fail any -> retry once, then deterministic fallback:
+      if (naturalnessViolations(cand).length) continue;            // no bot-tell / em-dash
+      if (!truthPreserved(reference, cand, must)) continue;        // every fact kept, no invented number
+      if (/\bhttps?:\/\//i.test(cand) && !/\bhttps?:\/\//i.test(reference)) continue; // no invented link
+      const qs = (body.match(/\?/g) || []).length;
+      if (qs < 1 || qs > 2) continue;                             // the one soft CTA survives, no interrogation
+      if (body.length > rendered.body.length * 1.7 + 40) continue; // no runaway length
+
+      // SOFT GATE (variety) — a repeated opener earns ONE retry for freshness, then we accept it.
+      const fp = openingFingerprint(body);
+      if (attempt === 0 && recentSet.has(fp)) continue;
+      rememberFp(fp);
 
       const out: Rendered = { subject, body };
       memo.set(cacheKey, out);
       return out;
     }
-  } catch { /* API/parse failure -> deterministic fallback */ }
+  } catch { /* API/parse/timeout failure -> deterministic fallback */ }
   return null;
 }
