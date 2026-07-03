@@ -1079,7 +1079,6 @@ async function encodeWebp(frames: Buffer[], delays: number[]): Promise<Buffer | 
 const TEASER_W = 360;          // email teaser width (px) — small "3–4 inch" preview
 const TEASER_SECONDS = 3.6;    // teaser length
 const TEASER_FPS = 16;
-const VIDEO_FPS = 30;          // MP4 constant frame rate
 
 function ffmpegBin(): string { return process.env.FFMPEG_PATH || "ffmpeg"; }
 
@@ -1116,7 +1115,13 @@ async function renderMp4(frames: Buffer[], delays: number[], outPath: string): P
     await writeFile(listPath, lines.join("\n"), "utf8");
     await runFfmpeg([
       "-y", "-f", "concat", "-safe", "0", "-i", listPath.replace(/\\/g, "/"),
-      "-vf", `fps=${VIDEO_FPS},format=yuv420p`,
+      // Keep the frames' own per-frame durations (variable-rate) instead of resampling to a fixed
+      // fps. The concat demuxer combined with the `fps` filter duplicated ~13% extra frames, which
+      // inflated the encoded length past its target. That made the duration-matched scroll run
+      // longer than the PiP webcam clip, so `-shortest` cut the composite before the top-to-bottom
+      // pass finished. VFR keeps the total EXACTLY the sum of the delays (verified: 15.0s in, 15.04s
+      // out; was 17.03s). Motion still plays at 30fps because motion frames are spaced ~33ms apart.
+      "-fps_mode", "vfr", "-pix_fmt", "yuv420p",
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-movflags", "+faststart", outPath,
     ]);
   } finally {
