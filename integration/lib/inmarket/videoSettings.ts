@@ -34,6 +34,27 @@ export interface VideoSettings {
   notifyOnView?: boolean;
   /** Where to send view notifications (defaults to the owner's email). */
   notifyEmail?: string;
+  /**
+   * MPC campaign context: the recruiter's identity + the candidate they're currently marketing.
+   * Company / open role / industry / location come PER-LEAD from the hiring signal; this is the half
+   * that's constant across the batch and can only come from the recruiter — so the auto-enrolled
+   * Client-side leads render the real placement, real proof, real sign-off instead of the generic
+   * lexicon floor. Set once in the Studio; enrollToBulk stamps it onto every enrolled prospect.
+   */
+  mpc?: {
+    /** The role you recently placed → {{Job_Title}} (e.g. "Senior AE"). */
+    placedRole?: string;
+    /** Where you placed it → resolved to {{Near_City}} + local vernacular (e.g. "Fort Worth, TX"). */
+    placementLocation?: string;
+    /** The candidate's two strongest proof clauses → {{MH1}} / {{MH2}} (e.g. "closed six-figure ARR deals"). */
+    candidateProof?: string[];
+    /** The candidate's quantified win → {{Metric}} (e.g. "142% to quota"). */
+    candidateMetric?: string;
+    /** The candidate's gender for he/she pronouns → {{P_subj}}/{{P_obj}}/{{P_pos}} (never "they"). */
+    candidateGender?: "m" | "f";
+    /** Your name for the sign-off → {{Your_Name}}. Without it the openers sign "Best," with no name. */
+    yourName?: string;
+  };
 }
 
 /** Only these fields are safe to expose on the public watch page. */
@@ -80,6 +101,24 @@ export function sanitize(input: Partial<VideoSettings> | null | undefined): Part
   if (s.replyEmail !== undefined) out.replyEmail = isEmail(s.replyEmail) ? (s.replyEmail as string) : "";
   if (s.notifyOnView !== undefined) out.notifyOnView = !!s.notifyOnView;
   if (s.notifyEmail !== undefined) out.notifyEmail = isEmail(s.notifyEmail) ? (s.notifyEmail as string) : "";
+  if (s.mpc !== undefined) out.mpc = sanitizeMpc(s.mpc);
+  return out;
+}
+
+/** Coerce the MPC context patch: trim strings, cap the proof bank at two clauses, gate gender. Only
+ *  keys PRESENT in the patch are emitted, so a partial patch deep-merges without wiping other fields. */
+function sanitizeMpc(input: VideoSettings["mpc"] | null | undefined): NonNullable<VideoSettings["mpc"]> {
+  const m = input || {};
+  const out: NonNullable<VideoSettings["mpc"]> = {};
+  if (m.placedRole !== undefined) out.placedRole = clean(m.placedRole, 60);
+  if (m.placementLocation !== undefined) out.placementLocation = clean(m.placementLocation, 80);
+  if (m.candidateProof !== undefined)
+    out.candidateProof = Array.isArray(m.candidateProof)
+      ? m.candidateProof.map((c) => clean(c, 60)).filter((c): c is string => !!c).slice(0, 2)
+      : [];
+  if (m.candidateMetric !== undefined) out.candidateMetric = clean(m.candidateMetric, 60);
+  if (m.candidateGender !== undefined) out.candidateGender = m.candidateGender === "f" ? "f" : "m";
+  if (m.yourName !== undefined) out.yourName = clean(m.yourName, 60);
   return out;
 }
 
@@ -92,7 +131,11 @@ export async function getSettings(workspaceId: string): Promise<VideoSettings> {
 /** Merge a sanitized patch into the workspace's settings; returns the result. */
 export async function saveSettings(workspaceId: string, patch: Partial<VideoSettings>): Promise<VideoSettings> {
   const m = await ensure();
-  const next = { ...(m.get(workspaceId) || {}), ...sanitize(patch) };
+  const prev = m.get(workspaceId) || {};
+  const clean = sanitize(patch);
+  const next = { ...prev, ...clean };
+  // Deep-merge the mpc block so a partial patch (e.g. just yourName) never wipes the other sub-fields.
+  if (clean.mpc) next.mpc = { ...prev.mpc, ...clean.mpc };
   m.set(workspaceId, next);
   scheduleSave();
   return { ...DEFAULTS, ...next };
