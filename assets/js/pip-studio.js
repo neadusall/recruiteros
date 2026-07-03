@@ -944,6 +944,34 @@
     card.querySelector("#pipIntroX").onclick = function () { try { localStorage.setItem(KEY, "1"); } catch (e) {} card.remove(); };
   }
 
+  /* ---------------- live coverage stats (captured postings / videos made) ---------------- */
+  function fmtAgo(ts) {
+    if (!ts) return "never";
+    var s = Math.max(0, (Date.now() - ts) / 1000);
+    if (s < 90) return Math.round(s) + "s ago";
+    if (s < 5400) return Math.round(s / 60) + "m ago";
+    if (s < 86400) return Math.round(s / 3600) + "h ago";
+    return Math.round(s / 86400) + "d ago";
+  }
+  function loadPipStats() {
+    api("/api/in-market", { method: "POST", body: JSON.stringify({ action: "pip_stats" }) })
+      .then(function (j) {
+        if (!j) return;
+        $("psCaptured").textContent = j.capturedShots || 0;
+        $("psReady").textContent = j.shotsReady || 0;
+        var vids = j.compositedVideos || 0;
+        var ve = $("psVideos"); ve.textContent = vids; ve.classList.toggle("hot", vids > 0);
+        var cap = j.autoCapture || {}, vid = j.autoVideo || {};
+        var anyOn = !!cap.enabled || !!vid.enabled;
+        var lastRun = Math.max(cap.lastRun || 0, vid.lastRun || 0);
+        $("psLive").innerHTML =
+          '<span class="ps-dot ' + (anyOn ? "on" : "") + '"></span>' +
+          "auto-capture " + (cap.enabled ? "on" : "off") + " · auto-video " + (vid.enabled ? "on" : "off") +
+          " · last run " + esc(fmtAgo(lastRun));
+      })
+      .catch(function () { /* stats are best-effort; leave the last good values */ });
+  }
+
   /* ---------------- init ---------------- */
   maybeIntro();
   applyStyleControls();
@@ -955,4 +983,6 @@
   loadVoice();          // cloned-voice + lip-sync readiness
   renderPip();
   refreshBanner();
+  loadPipStats();       // live coverage stats bar
+  if (!window.__pipStatsTimer) window.__pipStatsTimer = setInterval(loadPipStats, 20000);
 })();

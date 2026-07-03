@@ -147,6 +147,31 @@ export async function POST(req: Request) {
     return ok({ videos: await autoVideoMapByCompany() });
   }
 
+  // PiP Studio live coverage stats — the headline numbers for records + monitoring: how many hiring
+  // postings we've captured a verified company-site screen-recording of, how many are email-ready
+  // (have the teaser GIF, so they can be personalized), and how many finished outreach videos exist.
+  // Also returns the auto-capture / auto-video tick status so the UI can show "engine on/off + last
+  // run" live. Read-only; cheap (set sizes + a manifest read). Polled by the studio every ~20s.
+  if (b?.action === "pip_stats") {
+    const { capturedKeySet, listShots } = await import("../../../lib/inmarket/roleShot");
+    const { autoVideoMapByCompany, autoVideoStatus } = await import("../../../lib/inmarket/autoVideo");
+    const { autoCaptureStatus } = await import("../../../lib/inmarket/autoCapture");
+    const [captured, shots, videos, autoCapture, autoVideo] = await Promise.all([
+      capturedKeySet().catch(() => new Set<string>()),
+      listShots().catch(() => [] as unknown[]),
+      autoVideoMapByCompany().catch(() => ({} as Record<string, unknown>)),
+      autoCaptureStatus().catch(() => null),
+      autoVideoStatus().catch(() => null),
+    ]);
+    return ok({
+      capturedShots: captured.size,                  // verified company-site postings captured
+      shotsReady: shots.length,                      // captures with an email-ready GIF (personalizable)
+      compositedVideos: Object.keys(videos).length,  // finished outreach videos (by company)
+      autoCapture, autoVideo,                        // live tick status: enabled, lastRun, totalMade
+      at: new Date().toISOString(),
+    });
+  }
+
   // ADMIN: complete engine read for the "Engine / Throughput" panel — funnel + every source's
   // health + the EFFECTIVE value of every throughput dial (so the operator sees exactly what each
   // knob is set to and what to raise) + host headroom (disk/cpu/mem). Read-only; spends nothing.

@@ -33,6 +33,16 @@
   header{display:flex;align-items:baseline;gap:12px;padding:16px 24px;border-bottom:1px solid var(--line)}
   .brand{font-weight:800;font-size:18px;background:linear-gradient(90deg,#7c5cff,#4dd0ff);-webkit-background-clip:text;background-clip:text;color:transparent}
   header .sub{color:var(--mut);font-size:13px}
+  /* Live coverage stats bar */
+  .pipstats{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:9px 24px;border-bottom:1px solid var(--line);background:#0e0e18;font-size:12.5px;color:var(--mut)}
+  .pipstats .ps-item b{color:var(--ink);font-weight:800;font-size:15px;margin-right:5px}
+  .pipstats .ps-item b.hot{color:var(--acc)}
+  .pipstats .ps-sep{flex:1}
+  .pipstats .ps-live{display:flex;align-items:center;gap:7px;font-size:11.5px;white-space:nowrap}
+  .pipstats .ps-dot{width:8px;height:8px;border-radius:50%;background:#3a3f4b;flex:none}
+  .pipstats .ps-dot.on{background:var(--grn);animation:pspulse 2.2s infinite}
+  @keyframes pspulse{0%{box-shadow:0 0 0 0 rgba(124,92,255,.45)}70%{box-shadow:0 0 0 7px rgba(124,92,255,0)}100%{box-shadow:0 0 0 0 rgba(124,92,255,0)}}
+  @media(max-width:640px){.pipstats{gap:12px;font-size:11.5px}.pipstats .ps-sep{flex-basis:100%;height:0}}
 
   .layout{display:grid;grid-template-columns:340px 1fr;gap:18px;padding:18px 24px;max-width:1340px;margin:0 auto;align-items:start}
   .col{display:flex;flex-direction:column;gap:16px;min-width:0}
@@ -218,6 +228,15 @@
     <button id="tabBrand" class="vt">Brand</button>
   </div>
 </header>
+
+<!-- Live coverage stats (polled): captured postings, personalizable, videos made -->
+<div id="pipStats" class="pipstats" aria-live="polite">
+  <span class="ps-item"><b id="psCaptured">–</b> postings captured</span>
+  <span class="ps-item"><b id="psReady">–</b> ready to personalize</span>
+  <span class="ps-item"><b id="psVideos">–</b> videos made</span>
+  <span class="ps-sep"></span>
+  <span class="ps-live" id="psLive"></span>
+</div>
 
 <div class="layout" id="createView">
   <!-- LEFT · set once -->
@@ -406,6 +425,6 @@
 <div class="copied" id="toast"></div>
 <div class="modal" id="modal"><div class="modal-card" id="modalBody"></div></div>
 <script src="assets/js/config.js?v=ad110cbee0"></script>
-<script src="assets/js/pip-studio.js?v=cb4cebcf63"></script>
+<script src="assets/js/pip-studio.js?v=726068c2bd"></script>
 </body>
 </html>
