@@ -212,6 +212,19 @@ export interface Prospect {
   photoUrl?: string;
   /** City / region as shown on the profile. */
   location?: string;
+  /** Context for the MPC Day-0 sequence (lib/bd/mpc): the recruiter's recent placement + the candidate
+   *  being marketed. When set, renderTouch resolves rich {{Near_City}}/{{MH1}}/{{P_subj}}/… tokens; when
+   *  absent, the sequence still renders truthfully-generic native copy from the lexicon floor. */
+  mpcContext?: {
+    placedRole?: string;         // the role you recently placed (drives {{Job_Title}})
+    placementLocation?: string;  // where you placed it (resolved to {{Near_City}} + local vernacular)
+    competitor?: string;         // where you placed it (drives {{Competitor}})
+    industry?: string;           // {{Industry}}
+    mustHaves?: string[];        // native JD proof clauses -> {{MH1}} / {{MH2}}
+    metric?: string;             // {{Metric}}
+    gender?: "m" | "f";          // pronouns {{P_subj}} / {{P_obj}} / {{P_pos}} (never "they")
+    yourName?: string;           // sign-off {{Your_Name}}
+  };
   /** One-line LinkedIn headline. */
   headline?: string;
   /** ICP category bucket this prospect was matched into. */

@@ -17,6 +17,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { CampaignModel, Motion } from "../core/types";
+import { pickTemplate } from "../bd/mpc/templates";
 
 const MODEL =
   process.env.RECRUITEROS_OPENER_MODEL ??
@@ -84,22 +85,27 @@ export async function draftVideoOpener(input: OpenerInput): Promise<OpenerDraft 
   }
 }
 
-/** Deterministic fallback sequence (used when the LLM key is absent or the call fails). */
+/**
+ * Day-1 PiP video email — written to read like a REAL PERSON, not a recruiter template. The whole
+ * point of the video is to show there's an actual human here who can help fill the seat. {{videoembed}}
+ * is the clickable video (renderTouch only fills it on the 2nd email). Spintax diversifies every send.
+ */
+const VIDEO_FOLLOWUP: EmailDraft = {
+  subject: "re: {{Open_Role}}",
+  body:
+    "Hi {{First_Name}}, {i'd rather not be just another name in your inbox|rather than send one more email you'll skim past}, so i recorded a quick video for you. {it's 30 seconds of me|just me, about 30 seconds}, {putting a face to the name|so you can see there's a real person here}, and how i'd actually help you fill your {{Open_Role}}.\n\n{{videoembed}}\n\n{if your {{Open_Role}} is still open|if this is still a priority}, {i'd genuinely like to help|i'd love to help you get it filled}. {worth a conversation?|worth 10 minutes?}\n{Thanks|Best}, {{Your_Name}}",
+};
+
+/**
+ * THE cold-email BD sequence. Day-0 is one of the 50 MPC templates (bd/mpc/templates), selected
+ * deterministically per campaign from the universally-safe pool (no proximity/competitor assumptions
+ * unless the flow supplies them). Day-1 is the real-person PiP video follow-up above. Every token is
+ * resolved per prospect (bd/mpc/resolve) and spintax diversifies each send (copy/spintax) at render.
+ */
 export function templateOpener(input: OpenerInput): OpenerDraft {
-  const recruiting = input.motion === "recruiting";
-  const first: EmailDraft = {
-    subject: `${input.company} + ${input.roleTitle}`,
-    body: recruiting
-      ? `Hi {{firstName}},\n\nI saw {{company}} is hiring for {{role}}. I work with people who fit that profile and could share a shortlist worth reviewing.\n\nIf filling {{role}} is a priority, open to a short call?`
-      : `Hi {{firstName}},\n\nNoticed {{company}} is hiring for {{role}}. I help teams fill roles like this faster and wanted to see if it's a priority this quarter.\n\nWorth a quick chat?`,
-  };
-  const second: EmailDraft = {
-    subject: `re: ${input.roleTitle}`,
-    body: recruiting
-      ? `Hi {{firstName}},\n\nCircling back on my note about {{role}}. Rather than another email, I recorded a quick look at your own posting and how I'd approach filling it:\n\n{{videoembed}}\n\nIf it's still open, worth a short call?`
-      : `Hi {{firstName}},\n\nFollowing up on {{role}} — wanted to put a face to it. Here's a 20-second walkthrough of your actual posting with a couple of ideas:\n\n{{videoembed}}\n\nIf {{role}} is still a priority, open to a quick chat?`,
-  };
-  return { first, second, source: "template" };
+  const seed = `${input.company}|${input.roleTitle}|${input.motion || "bd"}`;
+  const t = pickTemplate(seed, { proximityOk: false, hasCompetitor: false });
+  return { first: { subject: t.subject, body: t.body }, second: VIDEO_FOLLOWUP, source: "template" };
 }
 
 /**
@@ -108,7 +114,7 @@ export function templateOpener(input: OpenerInput): OpenerDraft {
  * {{videoembed}}, filled per prospect from personalizedVideo at send time). The video is always
  * the SECOND touch. Auto-approved because the operator explicitly attached the sequence.
  */
-export function videoSequenceModel(draft: OpenerDraft, motion: Motion, videoDelayDays = 3): CampaignModel {
+export function videoSequenceModel(draft: OpenerDraft, motion: Motion, videoDelayDays = 1): CampaignModel {
   const nowIso = new Date().toISOString();
   return {
     generatedAt: nowIso,

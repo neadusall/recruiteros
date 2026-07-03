@@ -77,9 +77,9 @@ export async function POST(req: Request) {
 
   // Generate the TWO-EMAIL SEQUENCE once (text intro → video follow-up) and attach to every
   // prospect, so outreach runs the right cadence — the video is ALWAYS the second touch.
-  const { draftVideoOpener, templateOpener } = await import("../../../../lib/inmarket/videoOpener");
+  const { templateOpener } = await import("../../../../lib/inmarket/videoOpener");
   const seqInput = { company, roleTitle, motion: "bd" as const };
-  const draft = (company && roleTitle ? await draftVideoOpener(seqInput) : null) || templateOpener(seqInput);
+  const draft = templateOpener(seqInput); // Day-0 MPC (bd/mpc/templates) + Day-1 real-person video
 
   const sequence = { firstEmail: draft.first, secondEmail: draft.second };
   const nowIso = new Date().toISOString();

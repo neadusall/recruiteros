@@ -17,6 +17,8 @@
 
 import type { Campaign, CampaignModel, CampaignModelTouch, Prospect } from "../core/types";
 import { GUIDELINES_PROMPT } from "../copy/guidelines";
+import { expandSpintax } from "../copy/spintax";
+import { buildMpcTokens, fixArticles } from "../bd/mpc/resolve";
 
 const MERGE_HELP = "{{firstName}}, {{company}}, {{title}}, {{role}}, {{signal}}, {{watchlink}}, {{videoembed}}";
 
@@ -55,8 +57,34 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
   vals.videoembed = watch && pv?.gifUrl
     ? `<a href="${watch}"><img src="${pv.gifUrl}" alt="A quick note about ${vals.company}" width="600" style="max-width:100%;border-radius:10px;border:1px solid #e5e7eb;display:block" /></a>`
     : "";
+  // MPC tokens (the recent-placement Day-0 sequence): resolved from the prospect + its mpcContext,
+  // with a native-lexicon floor so it reads right even when the context is sparse. Keyed lowercase to
+  // match fill(). Best-effort: non-MPC templates simply never reference these tokens.
+  try {
+    const ctx = p.mpcContext ?? {};
+    const mpc = buildMpcTokens({
+      firstName: p.firstName,
+      company: p.company,
+      openRole: p.title,
+      placedRole: ctx.placedRole,
+      placementLocation: ctx.placementLocation,
+      jobLocation: p.location,
+      competitor: ctx.competitor,
+      industry: ctx.industry,
+      mustHaves: ctx.mustHaves,
+      metric: ctx.metric,
+      gender: ctx.gender,
+      yourName: ctx.yourName,
+    });
+    for (const [k, v] of Object.entries(mpc)) if (typeof v === "string") vals[k.toLowerCase()] = v;
+  } catch { /* MPC token resolution is best-effort */ }
+
+  // Content DIVERSITY: expand inline spintax {a|b} per prospect+touch (deterministic seed) BEFORE the
+  // merge-fill, so one approved template sends as many distinct surface forms — the deliverability
+  // win against repetition. Merge fields ({{...}}) are left alone by the spintax pass.
+  const seed = `${p.id || ""}:${touch.key || ""}`;
   const fill = (s?: string) =>
-    (s || "").replace(/\{\{\s*([a-zA-Z]+)\s*\}\}/g, (_m, k) => vals[String(k).toLowerCase()] ?? "");
+    fixArticles(expandSpintax(s || "", seed).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, k) => vals[String(k).toLowerCase()] ?? ""));
   return { subject: touch.subject ? fill(touch.subject) : undefined, body: fill(touch.body) };
 }
 

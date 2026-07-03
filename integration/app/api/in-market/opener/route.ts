@@ -33,15 +33,25 @@ export async function POST(req: Request) {
   const motion = b?.motion === "recruiting" ? "recruiting" : "bd";
   const input = { company, roleTitle, signalReason: b?.signalReason ? String(b.signalReason) : undefined, motion } as const;
 
-  const { draftVideoOpener, templateOpener } = await import("../../../../lib/inmarket/videoOpener");
-  const draft = (await draftVideoOpener(input)) || templateOpener(input);
+  const { templateOpener } = await import("../../../../lib/inmarket/videoOpener");
+  const draft = templateOpener(input); // Day-0 MPC (bd/mpc/templates) + Day-1 real-person video
 
-  // The sequence: email 1 is TEXT ONLY (cold intro); email 2 is the VIDEO follow-up.
+  // Preview fill: resolve MPC tokens (native-lexicon floor for a keyless preview) + expand spintax so
+  // the operator sees a real rendered email, not raw tokens. The live send fills per prospect in
+  // renderTouch; this mirrors that for the Studio preview.
+  const { buildMpcTokens, fixArticles } = await import("../../../../lib/bd/mpc/resolve");
+  const { expandSpintax } = await import("../../../../lib/copy/spintax");
   const first = b?.firstName ? String(b.firstName) : "there";
-  const fillText = (s: string) =>
-    s.replace(/\{\{\s*([a-zA-Z]+)\s*\}\}/g, (_m, k) =>
-      ({ firstname: first, company, role: roleTitle } as Record<string, string>)[String(k).toLowerCase()] ?? "");
-  const email1 = { subject: draft.first.subject, body: draft.first.body, bodyFilled: fillText(draft.first.body) };
+  const tok = buildMpcTokens({
+    firstName: first, company, openRole: roleTitle,
+    jobLocation: b?.jobLocation ? String(b.jobLocation) : undefined,
+    yourName: b?.yourName ? String(b.yourName) : undefined,
+  });
+  const baseVals: Record<string, string> = { firstname: first, company, role: roleTitle };
+  for (const [k, v] of Object.entries(tok)) if (typeof v === "string") baseVals[k.toLowerCase()] = v;
+  const fillText = (s: string, seed: string, extra: Record<string, string> = {}) =>
+    fixArticles(expandSpintax(s, seed).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, k) => ({ ...baseVals, ...extra }[String(k).toLowerCase()] ?? "")));
+  const email1 = { subject: fillText(draft.first.subject, "preview1"), body: draft.first.body, bodyFilled: fillText(draft.first.body, "preview1") };
 
   // Email 2 (video follow-up): a fully-filled HTML version for immediate copy-paste (one-off sends).
   let bodyHtml: string | undefined;
@@ -52,11 +62,7 @@ export async function POST(req: Request) {
     const embed =
       `<a href="${watchUrl}"><img src="${gifUrl}" alt="A quick note about ${esc(company)}" width="600" ` +
       `style="max-width:100%;border-radius:10px;border:1px solid #e5e7eb;display:block" /></a>`;
-    const vals: Record<string, string> = {
-      firstname: first, company, role: roleTitle, watchlink: watchUrl, videoembed: embed, videogif: gifUrl,
-    };
-    bodyHtml = draft.second.body
-      .replace(/\{\{\s*([a-zA-Z]+)\s*\}\}/g, (_m, k) => vals[String(k).toLowerCase()] ?? "")
+    bodyHtml = fillText(draft.second.body, "preview2", { watchlink: watchUrl, videoembed: embed, videogif: gifUrl })
       .replace(/\n/g, "<br>");
   }
 
