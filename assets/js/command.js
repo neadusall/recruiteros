@@ -2635,11 +2635,15 @@
           "</div>" +
           '<span class="hs-badge">⚡ JSearch · live</span>' +
         "</div>" +
-        // The four inputs that matter. JSearch folds job title + industry into one keyword query;
-        // either alone works. Each field is a label so clicking anywhere focuses the input.
+        // Search MODE toggle — one box whose placeholder + behavior adapt: by job title, by
+        // industry/market, or by a specific company name. JSearch takes the term as keywords.
+        '<div class="hs-modes" id="hsModes" role="tablist">' +
+          '<button type="button" class="hs-mode active" data-mode="title">Job title</button>' +
+          '<button type="button" class="hs-mode" data-mode="industry">Industry / market</button>' +
+          '<button type="button" class="hs-mode" data-mode="company">Company name</button>' +
+        "</div>" +
         '<form class="hs-form" id="imqForm">' +
-          '<label class="hs-field hs-grow"><span class="hs-fic">🔎</span><input id="imqQuery" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Job title — e.g. controller, registered nurse, backend engineer" /></label>' +
-          '<label class="hs-field hs-grow"><span class="hs-fic">🏭</span><input id="imqIndustry" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Industry / market — optional" /></label>' +
+          '<label class="hs-field hs-grow"><span class="hs-fic" id="hsFic">🔎</span><input id="imqQuery" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Job title — e.g. controller, registered nurse, backend engineer" /></label>' +
           '<label class="hs-field hs-loc"><span class="hs-fic">📍</span><input id="imqLoc" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Location — blank = nationwide" /></label>' +
           '<button type="submit" class="btn btn-primary hs-go" id="imqAdd">Search <span class="hs-arrow">→</span></button>' +
         "</form>" +
@@ -2661,12 +2665,29 @@
         c.classList.toggle("active", imqSizes.indexOf(c.getAttribute("data-size")) >= 0);
       });
     }
+    // Active search mode + its box icon/placeholder. Default: job title.
+    var hsMode = "title";
+    var HS_MODES = {
+      title:    { ic: "🔎", ph: "Job title — e.g. controller, registered nurse, backend engineer" },
+      industry: { ic: "🏭", ph: "Industry / market — e.g. fintech, healthcare, logistics" },
+      company:  { ic: "🏢", ph: "Company name — e.g. Anthropic, Stripe, Ramp" }
+    };
+    function applyMode() {
+      var m = HS_MODES[hsMode] || HS_MODES.title;
+      var inp = host.querySelector("#imqQuery"); if (inp) inp.setAttribute("placeholder", m.ph);
+      var fic = host.querySelector("#hsFic"); if (fic) fic.textContent = m.ic;
+      Array.prototype.forEach.call(host.querySelectorAll(".hs-mode"), function (b) {
+        b.classList.toggle("active", b.getAttribute("data-mode") === hsMode);
+      });
+    }
     function imqGather() {
+      var q = host.querySelector("#imqQuery").value.trim();
       return {
-        query: host.querySelector("#imqQuery").value.trim(),
-        industry: host.querySelector("#imqIndustry").value.trim(),
+        // Industry mode routes the term to `industry`; job-title and company both go to the
+        // keyword `query` (JSearch is keyword-based). Location + size apply in every mode.
+        query: hsMode === "industry" ? "" : q,
+        industry: hsMode === "industry" ? q : "",
         location: host.querySelector("#imqLoc").value.trim(),
-        // Sensible fixed defaults for the params no longer exposed as knobs.
         datePosted: "week",
         limit: 100,
         employmentTypes: [],
@@ -2807,12 +2828,14 @@
     host.querySelector("#imqForm").addEventListener("submit", function (e) {
       e.preventDefault();
       var s = imqGather();
-      if (!s.query && !s.industry) { toast("Enter a job title or an industry to search."); return; }
+      if (!s.query && !s.industry) { toast("Type what to search for first."); return; }
       imqRun(s);
     });
 
-    // Delegated clicks: company-size chips + preview (pick-list) controls.
+    // Delegated clicks: mode toggle + company-size chips + preview (pick-list) controls.
     host.addEventListener("click", function (e) {
+      var mode = e.target.closest ? e.target.closest(".hs-mode") : null;
+      if (mode) { hsMode = mode.getAttribute("data-mode") || "title"; applyMode(); var q = host.querySelector("#imqQuery"); if (q) q.focus(); return; }
       var t = e.target.closest ? e.target.closest("[data-act]") : null; if (!t) return;
       var act = t.getAttribute("data-act");
       if (act === "sizetoggle") { var v = t.getAttribute("data-size"), k = imqSizes.indexOf(v); if (k >= 0) imqSizes.splice(k, 1); else imqSizes.push(v); syncImqSizes(); }
@@ -2831,21 +2854,92 @@
       if (act === "pvtoggle") { imQPreview.picks[parseInt(t.getAttribute("data-i"), 10)] = t.checked; imqUpdatePvCount(); }
       else if (act === "pvall") { var on = t.checked, leads = imQPreview.leads || []; for (var i = 0; i < leads.length; i++) imQPreview.picks[i] = on; imqRenderPreview(); }
     });
+    applyMode();
+  }
+
+  // Portal-grade styling for the Hire Signals search + company pick-list. Kept inline (not in
+  // command.css) so the whole view ships in one file, and built on the app's theme tokens
+  // (--brand/--surface/--border/--text…) so it tracks light + dark automatically.
+  function hsProCss() {
+    return '<style id="hsProCss">' +
+      '.im-hero{max-width:1060px}' +
+      '.im-hero .im-title{margin-bottom:6px}' +
+      // search card
+      '.hs-card{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:20px;background:linear-gradient(180deg,var(--surface-2),var(--surface));padding:22px 24px 24px;box-shadow:var(--shadow)}' +
+      '.hs-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--grad)}' +
+      '.hs-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}' +
+      '.hs-head-l{display:flex;gap:13px;align-items:center;min-width:0}' +
+      '.hs-ic{font-size:24px;line-height:1;flex:0 0 auto}' +
+      '.hs-title{font-size:18px;font-weight:800;letter-spacing:-.01em;color:var(--text)}' +
+      '.hs-sub{font-size:12.5px;color:var(--text-muted);margin-top:3px}' +
+      '.hs-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.02em;color:var(--brand-2);background:color-mix(in srgb,var(--brand-2) 12%,transparent);border:1px solid color-mix(in srgb,var(--brand-2) 35%,transparent);border-radius:999px;padding:5px 11px;white-space:nowrap;flex:0 0 auto}' +
+      // mode toggle (segmented tabs)
+      '.hs-modes{display:inline-flex;gap:2px;padding:3px;margin-bottom:12px;background:var(--surface);border:1px solid var(--border-strong);border-radius:12px}' +
+      '.hs-mode{appearance:none;border:none;background:none;cursor:pointer;font:inherit;font-size:12.5px;font-weight:600;color:var(--text-muted);padding:7px 15px;border-radius:9px;transition:all .13s;white-space:nowrap}' +
+      '.hs-mode:hover{color:var(--text)}' +
+      '.hs-mode.active{background:var(--grad);color:#0a0a12;font-weight:700;box-shadow:0 4px 12px -5px rgba(124,92,255,.6)}' +
+      // form
+      '.hs-form{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}' +
+      '.hs-field{display:flex;align-items:center;gap:9px;padding:0 13px;height:48px;border:1px solid var(--border-strong);border-radius:12px;background:var(--surface);transition:border-color .15s,box-shadow .15s;cursor:text}' +
+      '.hs-field:focus-within{border-color:var(--brand-2);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-2) 20%,transparent)}' +
+      '.hs-field.hs-grow{flex:1 1 280px}' +
+      '.hs-field.hs-loc{flex:1 1 180px}' +
+      '.hs-fic{font-size:15px;opacity:.6;flex:0 0 auto}' +
+      '.im-hero .hs-in{border:none;background:transparent;padding:0;height:100%;flex:1;min-width:0;font-size:14px;color:var(--text);box-shadow:none}' +
+      '.im-hero .hs-in:focus{outline:none;box-shadow:none;border:none}' +
+      '.hs-in::placeholder{color:var(--text-dim)}' +
+      '.hs-go{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 26px;border-radius:12px;font-size:14.5px;font-weight:700;box-shadow:0 10px 26px -10px rgba(124,92,255,.6)}' +
+      '.hs-go .hs-arrow{transition:transform .15s}.hs-go:hover .hs-arrow{transform:translateX(3px)}' +
+      '.im-hero .hs-go[disabled]{opacity:.65;cursor:default}' +
+      // company-size segmented control
+      '.hs-sizes{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}' +
+      '.hs-sizes-l{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted)}' +
+      '.hs-seg{display:inline-flex;flex-wrap:wrap;gap:6px}' +
+      '.im-hero .imq-size{padding:8px 14px;border-radius:10px;border:1px solid var(--border-strong);background:var(--surface);color:var(--text-muted);font-size:12.5px;font-weight:600;cursor:pointer;transition:all .13s}' +
+      '.im-hero .imq-size:hover{color:var(--text);border-color:var(--brand-2)}' +
+      '.im-hero .imq-size.active{background:var(--grad);color:#0a0a12;border-color:transparent;font-weight:700;box-shadow:0 6px 16px -8px rgba(124,92,255,.7)}' +
+      '.hs-clear{background:none;border:none;color:var(--text-dim);font-size:12px;cursor:pointer;padding:4px}.hs-clear:hover{color:var(--text)}' +
+      // hand-off note
+      '.im-handoff{margin-top:16px;display:flex;gap:10px;align-items:flex-start;padding:13px 16px;border:1px solid var(--border);border-radius:14px;background:var(--surface);font-size:12.5px;color:var(--text-muted);line-height:1.5}' +
+      '.im-handoff a{color:var(--brand-2);font-weight:600;text-decoration:none}.im-handoff a:hover{text-decoration:underline}' +
+      // company pick-list (results)
+      '.im-hero .imq-pv{margin-top:18px;border:1px solid var(--border);border-radius:16px;background:var(--surface);overflow:hidden}' +
+      '.im-hero .imq-pv-head{padding:14px 18px;font-size:13.5px;color:var(--text);border-bottom:1px solid var(--border);background:var(--surface-2)}' +
+      '.im-hero .imq-pv-stats{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:12px 18px;font-size:12.5px;color:var(--text-muted);border-bottom:1px solid var(--border)}' +
+      '.im-hero .imq-pv-list{max-height:440px;overflow-y:auto}' +
+      '.im-hero .imq-pv-row{display:flex;align-items:center;gap:12px;padding:11px 18px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s;font-size:13.5px}' +
+      '.im-hero .imq-pv-row:hover{background:var(--surface-2)}.im-hero .imq-pv-row:last-child{border-bottom:none}' +
+      '.im-hero .imq-pv-row input[type=checkbox]{width:17px;height:17px;accent-color:var(--brand);flex:0 0 auto;cursor:pointer}' +
+      '.im-hero .imq-pv-badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;flex:0 0 auto;white-space:nowrap}' +
+      '.im-hero .imq-pv-badge.new{background:color-mix(in srgb,var(--accent-green) 16%,transparent);color:var(--accent-green)}' +
+      '.im-hero .imq-pv-badge.pool{background:var(--surface-2);color:var(--text-dim)}' +
+      '.im-hero .imq-pv-co{font-weight:700;color:var(--text)}' +
+      '.im-hero .imq-pv-dom{color:var(--text-muted);font-size:12px}' +
+      '.im-hero .imq-pv-roles{margin-left:auto;color:var(--text-muted);font-size:12px;flex:0 0 auto}' +
+      '.im-hero .imq-pv-loc{font-size:12px;color:var(--text-dim)}' +
+      '.im-hero .imq-pv-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 18px;background:var(--surface-2);border-top:1px solid var(--border)}' +
+      '.im-hero .imq-pv-note{font-size:11.5px;color:var(--text-dim);flex:1 1 240px}' +
+      '.im-hero .imq-pv-quick{display:inline-flex;gap:5px;flex-wrap:wrap;align-items:center}' +
+      '.im-hero .im-mini{background:var(--surface);border:1px solid var(--border-strong);color:var(--text-muted);border-radius:8px;padding:5px 10px;font-size:11.5px;cursor:pointer;transition:all .12s}' +
+      '.im-hero .im-mini:hover{color:var(--text);border-color:var(--brand-2)}' +
+      '@media(max-width:560px){.hs-card{padding:18px 16px}.hs-go{flex:1 1 100%}.hs-modes{width:100%;justify-content:stretch}.hs-mode{flex:1}.im-hero .imq-pv-dom,.im-hero .imq-pv-loc{display:none}.im-hero .imq-pv-head,.im-hero .imq-pv-stats,.im-hero .imq-pv-row,.im-hero .imq-pv-foot{padding-left:14px;padding-right:14px}}' +
+      "</style>";
   }
 
   function renderInMarket(el) {
     imQPreview = null; imQEditId = null; imQBusy = false;
     el.innerHTML =
+      hsProCss() +
       '<div class="im-hero">' +
         '<div class="im-bar">' +
           '<h1 class="im-title">Who\'s hiring <span class="gradient-text">right now.</span></h1>' +
           '<span class="im-source-note muted">Powered by JSearch · nationwide by default</span>' +
         "</div>" +
-        // The ONE control: search by job title and/or industry, narrow by company size + location,
+        // The ONE control: pick a mode (title / industry / company), search, narrow by size + location,
         // then PICK which companies to pull. Rendered by renderTargetedQueue() right after innerHTML.
         '<div id="imTargeted" class="im-targeted"></div>' +
         // What happens after you pull — everything downstream is automatic and lives in Clients.
-        '<div class="im-handoff muted" style="margin-top:14px;font-size:13px;line-height:1.5">Pull the companies you want and the rest runs on its own — decision-makers, verified emails, and screenshot videos are built automatically and appear in the <a href="#clients">Clients</a> tab.</div>' +
+        '<div class="im-handoff"><span aria-hidden="true">✨</span><span>Pull the companies you want and the rest runs on its own — decision-makers, verified emails, and screenshot videos are built automatically and appear in the <a href="#clients">Clients</a> tab.</span></div>' +
       "</div>";
 
     renderTargetedQueue($("#imTargeted"));
