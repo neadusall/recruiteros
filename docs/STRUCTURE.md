@@ -10,7 +10,8 @@
 
 RecruitersOS is **one deployable: a Next.js app in [`integration/`](../integration/)** that serves
 both the API *and* the marketing/portal pages from one origin. There are a few satellite pieces
-(a browser extension, a Python LinkedIn scraper sidecar, and the OS Text app as a git submodule).
+(a browser extension, the Laxis enrichment worker, the lumesp.com job board + static site,
+a SearXNG search backend, and the OS Text app as a git submodule).
 
 The single most important rule:
 
@@ -35,8 +36,10 @@ between pages. They look like clutter but they are load-bearing. See "Don't move
 | [`assets/`](../assets/) | Shared frontend `css/` + `js/` for the root pages. Synced with the HTML. The two big SPAs — [`assets/js/command.js`](../assets/js/command.js) (admin/recruiter portal) and [`assets/js/owner.js`](../assets/js/owner.js) (owner console) — open with a **navigation map** comment listing every `#hash` route → `render…`/`view…` function, so search by name to jump. | You're changing page styles or client-side JS. |
 | [`bridge/`](../bridge/) | The in-backend **outreach bridge** (`outreach-bridge.cjs`) + tests. Coordinates work that runs in the Chrome extension. | You're changing how the backend talks to the extension. |
 | [`extension/`](../extension/) | **Chrome extension** (`manifest.json`, `background.js`, `content/`, `popup/`). Does the actual LinkedIn/outreach actions in the browser. | You're changing extension behavior. Build artifact lands in `dist/`. |
-| [`scraper/`](../scraper/) | **Python LinkedIn scraper sidecar** (`app.py`, `engine.py`, Playwright/Chromium). Its own Docker container; reached at `scraper:8000`. | You're changing the open-source scraper engine. |
-| [`linkedin_scraper/`](../linkedin_scraper/) | Vendored open-source `linkedin_scraper` Python library used by the sidecar. | Rarely — it's a third-party lib. Prefer changing `scraper/` around it. |
+| [`laxis-worker/`](../laxis-worker/) | **Laxis enrichment sidecar**: headless Chromium that runs JD-Sourcing CSVs through app.laxis.tech (no public API). Own container; the app reaches it at `laxis-worker:3000`. | You're changing Laxis enrichment behavior. |
+| [`lume-jobs/`](../lume-jobs/) | **lumesp.com job-board backend** (postings + applications + team portal). Own container; Caddy proxies `/api/*` on lumesp.com to it. | You're changing the Lume job board. |
+| [`lumesp-web/`](../lumesp-web/) | **Static white-label marketing site** for lumesp.com. Served directly by Caddy (volume mount, no build). | You're changing lumesp.com pages. |
+| [`searxng/`](../searxng/) | **SearXNG config** (`settings.yml`) for the free X-ray people-finder search backend. Mounted into the searxng container. | You're tuning the free search backend. JSON format MUST stay enabled. |
 | [`money-maker-sms/`](../money-maker-sms/) | **OS Text (taltxt)** — separate SMS app, embedded in the portal via iframe. **Git submodule** (own repo). | You're changing OS Text. `cd` in and treat as its own project. |
 | [`dist/`](../dist/) | Packaged extension zip(s). Build output. | Never by hand — produced by `extension/package.ps1`. |
 | [`docs/`](.) | **All project documentation** (this reorg). See the docs tree below. | You're writing/reading setup guides, playbooks, runbooks, designs. |
@@ -85,45 +88,38 @@ Each folder is a self-contained domain. Pick the one that matches the feature:
 
 ```
 docs/
+├── README.md                 Folder-by-folder guide to docs/
 ├── STRUCTURE.md              ← you are here (the project map)
 ├── INFRASTRUCTURE.md         Full tech-stack inventory + cost model + go-live key checklist + open decisions
-├── RECRUITEROS-BACKEND.md    Sending + voice-drop backend wiring (companion to CLAUDE.md). Email = self-hosted MTA (Instantly interim)
+├── RECRUITEROS-BACKEND.md    Sending + voice-drop backend wiring (companion to CLAUDE.md)
+├── DISTRIBUTED-WORKERS.md    Worker-box fleet: setup-worker.sh boxes that scrape with their own IPs
+├── PORTALS.md                The portals (admin / recruiter / owner / clients) and how they relate
+├── access-reference.csv      Access/credentials reference sheet
 ├── platform/                 Per-category backend reference (integration/lib domains)
 │   ├── README.md             "find your feature" index → which domain + reference
-│   ├── outreach-and-messaging.md   channels · outreach · sms · voice · sequences · campaigns · content · response
-│   ├── people-and-data.md          prospects · prospect-lists · importmotion · inmarket · signals · sourcing · linkedin · data · db
-│   └── platform-and-infra.md       accounts · auth · owner · billing · providers · connected · ats · core · overview · dev · exttoken
+│   ├── outreach-and-messaging.md   channels · outreach · sms · voice · sequences · campaigns · content
+│   ├── people-and-data.md          prospects · importmotion · inmarket · signals · sourcing · linkedin · data
+│   ├── platform-and-infra.md       accounts · auth · owner · billing · providers · connected · ats · core
+│   └── (feature deep-dives: ats-loxo-integration, hire-signals-5k-setup, internal-automation, lumesp-golive)
 ├── setup/
-│   ├── server/               Stand up + deploy the app
-│   │   ├── 1-hetzner.md
-│   │   ├── 2-deploy.md
-│   │   ├── 3-go-live-walkthrough.md
-│   │   └── integration-architecture.md
-│   └── channels/             Turn on outreach channels
-│       ├── cold-email.md
-│       ├── email-resend.md
-│       ├── sms-qualification.md
-│       └── linkedin-login.md
+│   ├── DEPLOY-CLIENTS.md     Clients portal deploy runbook
+│   ├── DEPLOY-EMAIL.md       Mail platform deploy runbook (referenced by name in portal UI copy)
+│   ├── DEPLOY-VIDEO.md       Video worker deploy runbook (pairs with setup-video-worker.sh)
+│   ├── ai-vetting.md
+│   ├── server/               Stand up + deploy the app (1-hetzner → 2-deploy → 3-go-live)
+│   └── channels/             Turn on outreach channels (cold-email, email-resend, sms, linkedin)
 ├── changelog/                Dated session logs — what changed, why, and where it lives
-│   ├── 2026-06-16-jd-sourcing-and-connections.md
-│   └── 2026-06-18-repo-organization.md
-├── playbooks/                How-to / reference playbooks
-│   ├── copywriting-playbook.md
-│   └── website-map.md
-├── runbooks/                 Operational runbooks + their data
-│   ├── jaggaer-vp-sales-east.md
-│   └── jaggaer-vp-sales-east-sourcing.csv   (used by the runbook above)
+├── playbooks/                How-to / reference playbooks (copywriting, website map, bd-outreach model)
+├── runbooks/                 Operational runbooks + their data (campaign runs, go-lives, onboarding)
+├── integrations/             External-tool integrations (n8n outreach router)
 └── design/                   Design / planning docs for in-flight work
-    ├── jd-to-1000-prospects.md
-    ├── bd-engine-next-steps.md
-    └── self-hosted-email-infrastructure.md   Build plan for the owned email sender (Postal MTA), replacing Instantly
 ```
 
 > **Developing a backend feature? Start at [`docs/platform/README.md`](platform/README.md)** —
 > it maps every feature to its `integration/lib/<domain>/` folder and a detailed reference.
 
 > Component-specific docs intentionally live **next to their code**, not here:
-> `integration/BACKEND.md`, `bridge/README.md`, `scraper/README.md`,
+> `integration/BACKEND.md`, `bridge/README.md`,
 > `extension/README.md`, `money-maker-sms/` (submodule has its own docs).
 > Only **cross-cutting / operational** docs live in `docs/`.
 
@@ -161,9 +157,27 @@ Their location is pinned by build/deploy/serve machinery. Moving them breaks the
 | `assets/` | `sync-public.cjs` copies `root/assets` → `public/assets`. |
 | `integration/`, `money-maker-sms/`, `scraper/` | `vercel.json`, `Dockerfile`, `docker-compose.yml`, `.gitmodules`. |
 | `deploy.sh` | Curl'd by URL: `raw.githubusercontent.com/.../main/deploy.sh`. |
-| `auto-deploy.sh`, `enable-db.sh`, `install-auto-deploy.sh`, `taltxt-db-setup.sh`, `set-adzuna.sh` | Hard-coded `$DIR/<name>` paths in `deploy.sh` + a **systemd unit** on the live server. |
+| `auto-deploy.sh`, `enable-db.sh`, `install-auto-deploy.sh`, `taltxt-db-setup.sh` | Hard-coded `$DIR/<name>` paths in `deploy.sh` + a **systemd unit** on the live server. |
+| All `set-*.sh` (adzuna, directdial, findwork, jobdata, rapidjobs) | Operator runbooks + docs invoke them as `bash /opt/recruiteros/set-*.sh` on the server. |
+| `setup-egress.sh`, `setup-worker.sh`, `setup-video-worker.sh` | `auto-deploy.sh` and worker boxes call them at `$DIR/<name>`; fleet docs say `bash setup-worker.sh` from a fresh clone root. |
+| `taltxt.env.example` | Referenced by `deploy.sh` comments as the taltxt env template. |
 | `Caddyfile`, `Dockerfile`, `docker-compose.yml`, `vercel.json`, `.env*` | Compose mounts / build config / URL pins. |
-| `server.cjs`, `START-STUDIO.ps1` | Local dev entry points. |
+| `lumesp-web/`, `searxng/` | Caddy + searxng containers volume-mount these paths directly (`docker-compose.yml`). |
+| `server.cjs`, `START-STUDIO.ps1`, `START-PORTAL.cmd`, `RUN.md` | Local dev entry points (RUN.md documents START-PORTAL.cmd next to it). |
+
+> Loose root docs are the one thing that DOES get moved: deployment/how-to markdown belongs in
+> `docs/` (the DEPLOY-* runbooks now live in `docs/setup/`). Before moving any root file, grep
+> for its name first; if a script or systemd unit references it, it is pinned.
+
+---
+
+## Branch conventions
+
+- **`main` = production.** Every push auto-deploys (see flow above). Confirm locally first.
+- Feature branches are short-lived: merge into `main`, then delete (local + origin).
+- **Superseded or backup work becomes an `archive/*` tag** (annotated, pushed), never a
+  parked branch: `git tag -l 'archive/*'` lists them. Long-lived branches should be only
+  `main` and `white-label-edge` plus whatever is actively in flight.
 
 > **If you ever do want the root HTML foldered:** it's a real project — you'd make
 > `sync-public.cjs` recurse, update `server.cjs`'s resolver, and fix every inter-page clean-URL
