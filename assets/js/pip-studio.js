@@ -27,7 +27,7 @@
     var hdrs = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
     // Share the portal's session. When the Command Center embeds this page while
     // an admin is "viewing as" a recruiter, the parent keeps an impersonation
-    // token in sessionStorage — same-origin iframes share it — so we send it as
+    // token in sessionStorage, same-origin iframes share it, so we send it as
     // a Bearer (exactly like command.js) and act as the SAME workspace/operator
     // the portal is showing, instead of falling back to the admin's own cookie.
     try { var imp = sessionStorage.getItem("ros_imp_token"); if (imp) hdrs["Authorization"] = "Bearer " + imp; } catch (e) {}
@@ -54,7 +54,7 @@
   function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 
   var state = {
-    pip: Object.assign({ corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#7c5cff", radiusPct: 18 }, lsGet(LS.style, {})),
+    pip: Object.assign({ corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#6366f1", radiusPct: 18 }, lsGet(LS.style, {})),
     clipId: lsGet(LS.clip, null),
     durationSec: lsGet(LS.dur, 0),    // 0 = auto-match the recorded clip length; else force N seconds of page scroll
     shots: [],
@@ -92,7 +92,7 @@
   function publicGif(vk) { var s = shareFor(vk); if (s && s.gif) return s.gif; return origin() + "/api/in-market/watch?key=" + encodeURIComponent(vk) + "&fmt=gif"; }
   function emailSnippet(vk, co, ro) {
     var w = watchPage(vk, co, ro), g = publicGif(vk);
-    var alt = "A quick note about " + (co || "your team") + (ro ? " — " + ro : "");
+    var alt = "A quick note about " + (co || "your team") + (ro ? ", " + ro : "");
     return '<a href="' + w + '" target="_blank" rel="noopener">' +
       '<img src="' + g + '" alt="' + esc(alt) + '" width="600" ' +
       'style="max-width:100%;border-radius:10px;border:1px solid #e5e7eb;display:block" /></a>';
@@ -166,7 +166,7 @@
     recTimer = setInterval(function () {
       var ms = Date.now() - recStart, t = fmtT(ms);
       // Gentle guidance: green in the sweet spot (8–25s), amber past 45s.
-      var hint = ms < 8000 ? "keep going…" : ms <= 25000 ? "good length — wrap when ready" : ms <= 45000 ? "" : "getting long";
+      var hint = ms < 8000 ? "keep going…" : ms <= 25000 ? "good length, wrap when ready" : ms <= 45000 ? "" : "getting long";
       $("recHint").innerHTML = '<span style="color:#ff6b6b">●</span> Recording <b>' + t + "</b>" + (hint ? ' · <span class="muted">' + hint + "</span>" : "");
     }, 250);
   }
@@ -197,7 +197,7 @@
       state.recordedBlob = new Blob(state.chunks, { type: (state.recorder.mimeType || mime || "video/webm").split(";")[0] });
       preview.srcObject = null; preview.src = URL.createObjectURL(state.recordedBlob); preview.muted = false; preview.controls = true;
       $("btnSave").disabled = false; $("btnDiscard").disabled = false; $("btnRec").textContent = "● Record";
-      $("recHint").innerHTML = "Nice. Watch it back, then <b>Save</b> — or <b>Discard</b> to try again.";
+      $("recHint").innerHTML = "Nice. Watch it back, then <b>Save</b>, or <b>Discard</b> to try again.";
     };
     state.recorder.start();
     startTimer();
@@ -232,7 +232,7 @@
     var reader = new FileReader();
     reader.onload = function () {
       api("/api/in-market/clip", { method: "POST", body: JSON.stringify({ dataUrl: reader.result }) })
-        .then(function (j) { state.clipId = j.clip.id; lsSet(LS.clip, state.clipId); $("recHint").innerHTML = "Saved ✓ — now <b>click a role</b> on the right to personalize it."; toast("Clip saved to your library"); loadClips(); refreshBanner(); })
+        .then(function (j) { state.clipId = j.clip.id; lsSet(LS.clip, state.clipId); $("recHint").innerHTML = "Saved ✓, now <b>click a role</b> on the right to personalize it."; toast("Clip saved to your library"); loadClips(); refreshBanner(); })
         .catch(function (e) { $("recHint").textContent = "Save failed: " + e.message; $("btnSave").disabled = false; });
     };
     reader.readAsDataURL(state.recordedBlob);
@@ -403,14 +403,14 @@
     var list = visibleRoles(), box = $("gallery");
     updateFilterCounts();
     if (state.shots.length && !$("stage").querySelector("img.bg")) setStageBg(shotGif(state.shots[0].key));
-    if (!list.length) { box.innerHTML = '<div class="empty">' + (state.shots.length ? "No roles match your filter." : "<b>No roles yet.</b><br>Roles flow in automatically from <b>Hire Signals</b> — or add one yourself under <b>＋ Capture a new role</b> below.") + "</div>"; return; }
+    if (!list.length) { box.innerHTML = '<div class="empty">' + (state.shots.length ? "No roles match your filter." : "<b>No roles yet.</b><br>Roles flow in automatically from <b>Hire Signals</b>, or add one yourself under <b>＋ Capture a new role</b> below.") + "</div>"; return; }
     box.innerHTML = "";
     list.forEach(function (s) {
       var t = document.createElement("div");
       t.className = "tile"; t.setAttribute("data-key", s.key);
       t.innerHTML =
         '<div class="thumb"><img loading="lazy" src="' + shotGif(s.key) + '" alt="" /><div class="go">⚡ Personalize</div></div>' +
-        '<div class="lbl"><div class="co">' + esc(s.company || "—") + '</div><div class="ro">' + esc(s.roleTitle || "") + '</div></div>' +
+        '<div class="lbl"><div class="co">' + esc(s.company || "·") + '</div><div class="ro">' + esc(s.roleTitle || "") + '</div></div>' +
         '<div class="act" data-act></div>';
       t.querySelector(".thumb").onclick = function () { setStageBg(shotGif(s.key)); generate(s); };
       box.appendChild(t);
@@ -478,7 +478,7 @@
         '<button class="out" data-out title="Attach to the hiring-manager prospects at this company">→ Outreach</button>' +
         '<button data-bulk title="Generate this role for a whole list of names (cloned voice + lip-synced)">👥 Bulk list</button>' +
       '</div>';
-    act.querySelector("[data-email]").onclick = function () { copyRich(emailSnippet(vk, s.company, s.roleTitle)).then(function () { toast("Email snippet copied — paste into your sequence"); }); };
+    act.querySelector("[data-email]").onclick = function () { copyRich(emailSnippet(vk, s.company, s.roleTitle)).then(function () { toast("Email snippet copied, paste into your sequence"); }); };
     act.querySelector("[data-link]").onclick = function () { copyText(w).then(function () { toast("Watch link copied"); }); };
     act.querySelector("[data-opener]").onclick = function () { openOpener(s, vk); };
     act.querySelector("[data-out]").onclick = function () { attachToOutreach(s, vk); };
@@ -488,7 +488,7 @@
   /* AI opener: draft a short email (Claude) that wraps this video, shown in a modal with a
      rendered preview + copy. Falls back to a built-in template server-side when no key. */
   function openOpener(s, vk) {
-    showModal('<div class="muted"><span class="spin"></span> Drafting opener for ' + esc(s.company) + ' — ' + esc(s.roleTitle) + '…</div>');
+    showModal('<div class="muted"><span class="spin"></span> Drafting opener for ' + esc(s.company) + ', ' + esc(s.roleTitle) + '…</div>');
     api("/api/in-market/opener", { method: "POST", body: JSON.stringify({
       company: s.company, roleTitle: s.roleTitle, videoKey: vk,
       watchUrl: watchPage(vk, s.company, s.roleTitle), gifUrl: publicGif(vk),
@@ -499,7 +499,7 @@
       var e2html = d.bodyHtml || esc(d.body).replace(/\n/g, "<br>"); // email 2 carries the video
       showModal(
         '<div class="mh"><b>Email sequence</b> ' + badge + '<span class="muted" style="margin-left:8px;font-size:12px">text intro → video follow-up</span><button class="mx" data-close>✕</button></div>' +
-        '<div class="seqstep"><div class="mlbl" data-step="1">Email 1 · text intro <span class="muted">(first touch — no video)</span></div>' +
+        '<div class="seqstep"><div class="mlbl" data-step="1">Email 1 · text intro <span class="muted">(first touch, no video)</span></div>' +
           '<div class="msub">' + esc(e1.subject) + '</div>' +
           '<div class="mbody">' + e1html + '</div>' +
           '<div class="mfoot"><button class="ghost small" data-cpy-e1>Copy email 1 (text)</button></div></div>' +
@@ -516,8 +516,8 @@
       );
       var box = $("modalBody");
       box.querySelectorAll("[data-close]").forEach(function (b) { b.onclick = hideModal; });
-      box.querySelector("[data-cpy-e1]").onclick = function () { copyText(e1.bodyFilled || e1.body).then(function () { toast("Email 1 (text) copied — send this first"); }); };
-      box.querySelector("[data-cpy-html]").onclick = function () { copyRich(e2html).then(function () { toast("Email 2 copied (with video) — send as the follow-up"); }); };
+      box.querySelector("[data-cpy-e1]").onclick = function () { copyText(e1.bodyFilled || e1.body).then(function () { toast("Email 1 (text) copied, send this first"); }); };
+      box.querySelector("[data-cpy-html]").onclick = function () { copyRich(e2html).then(function () { toast("Email 2 copied (with video), send as the follow-up"); }); };
       box.querySelector("[data-cpy-text]").onclick = function () { copyText(d.body).then(function () { toast("Email 2 text copied (keeps {{videoembed}} merge field)"); }); };
     }).catch(function (e) { showModal('<div class="mh"><b>Opener failed</b><button class="mx" data-close>✕</button></div><p class="muted">' + esc(e.message) + "</p>"); $("modalBody").querySelector("[data-close]").onclick = hideModal; });
   }
@@ -528,7 +528,7 @@
   function attachToOutreach(s, vk) {
     api("/api/in-market/attach?company=" + encodeURIComponent(s.company)).then(function (j) {
       var n = (j && j.count) || 0;
-      if (!n) { toast("No prospects at " + s.company + " yet — promote them from Hire Signals first"); return; }
+      if (!n) { toast("No prospects at " + s.company + " yet, promote them from Hire Signals first"); return; }
       if (!confirm("Attach the 2-email sequence (text intro → video follow-up) to " + n + " prospect" + (n > 1 ? "s" : "") + " at " + s.company + "?\nThe video is the SECOND touch; signed links are generated automatically.")) return;
       api("/api/in-market/attach", { method: "POST", body: JSON.stringify({
         videoKey: vk, roleTitle: s.roleTitle, company: s.company,
@@ -537,7 +537,7 @@
       }) }).then(function (r) {
         var msg = "Sequence attached to " + (r.attached || 0) + " prospect(s) at " + s.company;
         if (r.personalizedNames) msg += " · " + r.personalizedNames + ' personalized "Hey {name}" intro' + (r.personalizedNames > 1 ? "s" : "");
-        if (r.armed) msg += r.automationOn ? " — sending email 1 now, video follow-up in a few days" : " — armed (turn on automation to send)";
+        if (r.armed) msg += r.automationOn ? ", sending email 1 now, video follow-up in a few days" : ", armed (turn on automation to send)";
         toast(msg);
       })
         .catch(function (e) { toast("Attach failed: " + e.message); });
@@ -546,7 +546,7 @@
   function resultErr(s, msg) { var t = tileEl(s.key); if (!t) return; var a = t.querySelector("[data-act]"); if (a) a.innerHTML = '<span class="muted" style="color:#ffb4ba">' + esc(msg) + '</span>'; }
   function genReason(res) {
     var m = { no_shot: "page not verified", no_clip: "clip missing", no_ffmpeg: "ffmpeg not installed", error: "render failed" };
-    return (m[res.status] || res.status) + (res.reason ? " — " + res.reason : "");
+    return (m[res.status] || res.status) + (res.reason ? ", " + res.reason : "");
   }
 
   /* Bulk export: every generated role as a CSV row ready to merge into a sequence tool
@@ -601,7 +601,7 @@
     var payload = { company: company, roleTitle: roleTitle, roleUrl: roleUrl }, tries = 0;
     (function tick() {
       api("/api/in-market/shot", { method: "POST", body: JSON.stringify(payload) }).then(function (res) {
-        if (res.status === "capturing") { if (tries++ > 48) { capStatus("Still working — hit ↻ shortly.", true); $("btnCapture").disabled = false; return; } setTimeout(tick, 2500); return; }
+        if (res.status === "capturing") { if (tries++ > 48) { capStatus("Still working, hit ↻ shortly.", true); $("btnCapture").disabled = false; return; } setTimeout(tick, 2500); return; }
         $("btnCapture").disabled = false;
         if (res.status === "company_site") { capStatus("Captured ✓"); loadGallery(); }
         else capStatus(shotReason(res), true);
@@ -609,8 +609,8 @@
     })();
   }
   function shotReason(res) {
-    var m = { no_company_page: "couldn't verify on the company's own site", staffing_blocked: "staffing/recruiting firm — skipped", error: "capture failed" };
-    return (m[res.status] || res.status) + (res.reason ? " — " + res.reason : "");
+    var m = { no_company_page: "couldn't verify on the company's own site", staffing_blocked: "staffing/recruiting firm, skipped", error: "capture failed" };
+    return (m[res.status] || res.status) + (res.reason ? ", " + res.reason : "");
   }
   $("btnFindRoles").onclick = function () {
     var company = $("capCompany").value.trim();
@@ -620,7 +620,7 @@
       .then(function (j) {
         var detail = (j && j.detail) || [], chips = $("roleChips"); chips.innerHTML = "";
         if (!detail.length) { capStatus("No public roles found.", true); return; }
-        capStatus(detail.length + " roles — click to capture.");
+        capStatus(detail.length + " roles, click to capture.");
         detail.slice(0, 24).forEach(function (r) {
           var c = document.createElement("span"); c.className = "pill"; c.style.cursor = "pointer"; c.textContent = r.title;
           c.onclick = function () { $("capRole").value = r.title; $("capUrl").value = r.url || ""; captureRole(company, r.title, r.url || undefined); };
@@ -715,11 +715,11 @@
     var line = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ");
     var area = line + " L" + (padL + (trend.length - 1) * step).toFixed(1) + " " + (padT + ih) + " L" + padL + " " + (padT + ih) + " Z";
     var grid = [0, 0.5, 1].map(function (f) { var y = padT + ih - f * ih; return '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="#1a212b"/><text x="2" y="' + (y + 3) + '" fill="#5b6675" font-size="9">' + Math.round(f * max) + "</text>"; }).join("");
-    var dots = pts.map(function (p, i) { return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2.5" fill="#7c5cff"><title>' + esc(trend[i].date) + ": " + trend[i].plays + " plays</title></circle>"; }).join("");
+    var dots = pts.map(function (p, i) { return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2.5" fill="#6366f1"><title>' + esc(trend[i].date) + ": " + trend[i].plays + " plays</title></circle>"; }).join("");
     var labels = trend.map(function (d, i) { if (i % Math.ceil(trend.length / 7) && i !== trend.length - 1) return ""; return '<text x="' + (padL + i * step).toFixed(1) + '" y="' + (H - 6) + '" fill="#5b6675" font-size="9" text-anchor="middle">' + d.date.slice(5) + "</text>"; }).join("");
     return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none">' +
-      '<defs><linearGradient id="ag" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#7c5cff" stop-opacity=".35"/><stop offset="1" stop-color="#7c5cff" stop-opacity="0"/></linearGradient></defs>' +
-      grid + '<path d="' + area + '" fill="url(#ag)"/><path d="' + line + '" fill="none" stroke="#7c5cff" stroke-width="2"/>' + dots + labels + "</svg>";
+      '<defs><linearGradient id="ag" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#6366f1" stop-opacity=".35"/><stop offset="1" stop-color="#6366f1" stop-opacity="0"/></linearGradient></defs>' +
+      grid + '<path d="' + area + '" fill="url(#ag)"/><path d="' + line + '" fill="none" stroke="#6366f1" stroke-width="2"/>' + dots + labels + "</svg>";
   }
 
   function renderFeed(recent) {
@@ -737,7 +737,7 @@
     var maxPlays = Math.max.apply(null, videos.map(function (v) { return v.plays || 0; }).concat([1]));
     var rows = videos.slice(0, 50).map(function (v) {
       return "<tr>" +
-        '<td class="l"><div class="co">' + esc(v.company || "—") + '</div><div class="ro">' + esc(v.roleTitle || "") + "</div></td>" +
+        '<td class="l"><div class="co">' + esc(v.company || "·") + '</div><div class="ro">' + esc(v.roleTitle || "") + "</div></td>" +
         "<td>" + nfmt(v.gifOpens) + "</td>" +
         "<td>" + nfmt(v.opens) + "</td>" +
         "<td>" + nfmt(v.plays) + "</td>" +
@@ -745,7 +745,7 @@
         "<td>" + dur(v.avgWatchSeconds) + "</td>" +
         '<td><span class="pill-rate">' + pct(v.completionRate) + "</span></td>" +
         '<td class="l"><div class="bar"><i style="width:' + Math.round((v.plays / maxPlays) * 100) + '%"></i></div></td>' +
-        "<td>" + (v.lastAt ? ago(v.lastAt) + " ago" : "—") + "</td>" +
+        "<td>" + (v.lastAt ? ago(v.lastAt) + " ago" : "·") + "</td>" +
         "</tr>";
     }).join("");
     $("leaderboard").innerHTML =
@@ -764,7 +764,7 @@
   }
   function fillBrandForm() {
     var b = state.brand || {};
-    Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) el.value = b[brandFields[id]] || (id === "bkAccent" ? "#7c5cff" : ""); });
+    Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) el.value = b[brandFields[id]] || (id === "bkAccent" ? "#6366f1" : ""); });
   }
   function readBrandForm() {
     var out = {};
@@ -773,7 +773,7 @@
   }
   function brandPreview() {
     var b = readBrandForm();
-    var ac = /^#[0-9a-f]{6}$/i.test(b.accent) ? b.accent : "#7c5cff";
+    var ac = /^#[0-9a-f]{6}$/i.test(b.accent) ? b.accent : "#6366f1";
     var pv = $("bkPreview"); if (!pv) return;
     pv.style.setProperty("--brandac", ac);
     var top = $("bkPvTop");
@@ -787,7 +787,7 @@
     if (save) save.onclick = function () {
       save.disabled = true; $("bkStatus").textContent = "Saving…";
       api("/api/in-market/settings", { method: "PUT", body: JSON.stringify(readBrandForm()) })
-        .then(function (j) { state.brand = j.settings || {}; fillBrandForm(); brandPreview(); $("bkStatus").textContent = "Saved ✓ — applies to every video you share."; toast("Brand kit saved"); })
+        .then(function (j) { state.brand = j.settings || {}; fillBrandForm(); brandPreview(); $("bkStatus").textContent = "Saved ✓, applies to every video you share."; toast("Brand kit saved"); })
         .catch(function (e) { $("bkStatus").textContent = "Save failed: " + e.message; })
         .then(function () { save.disabled = false; });
     };
@@ -858,7 +858,7 @@
     var seen = {}, names = [];
     raw.forEach(function (n) { var k = n.toLowerCase(); if (!seen[k]) { seen[k] = 1; names.push(n); } });
     if (!names.length) { toast("Add at least one name"); return; }
-    if (names.length > 1000) { toast("Max 1000 per batch — using the first 1000"); names = names.slice(0, 1000); }
+    if (names.length > 1000) { toast("Max 1000 per batch, using the first 1000"); names = names.slice(0, 1000); }
     var go = $("bulkGo"); go.disabled = true;
     var payload = {
       company: s.company, roleTitle: s.roleTitle, roleUrl: s.pageUrl,
@@ -889,7 +889,7 @@
       var st = r.status === "ready" ? '<span class="pill-rate">ready</span>'
         : r.status === "composing" ? '<span class="muted"><span class="spin"></span>working</span>'
         : '<span style="color:#ffb4ba">' + esc(r.status) + "</span>";
-      var link = (r.status === "ready" && r.share) ? '<a href="' + esc(withBrand(r.share.watch)) + '" target="_blank">Watch</a>' : "—";
+      var link = (r.status === "ready" && r.share) ? '<a href="' + esc(withBrand(r.share.watch)) + '" target="_blank">Watch</a>' : "·";
       return '<tr><td class="l">' + esc(r.firstName) + "</td><td class=\"l\">" + st + '</td><td class="l">' + link + "</td></tr>";
     }).join("");
     box.innerHTML = '<div class="lb"><table class="lbt"><thead><tr><th class="l">Name</th><th class="l">Status</th><th class="l">Link</th></tr></thead><tbody>' + body + "</tbody></table></div>";
@@ -932,10 +932,10 @@
     card.innerHTML =
       '<div style="flex:1;min-width:260px">' +
         '<div style="font-weight:800;font-size:15px;margin-bottom:5px">👋 Welcome to PiP Studio</div>' +
-        '<div class="muted" style="font-size:13px;line-height:1.65">Record one talking-head clip, then drop it onto any role to make a personalized video — the job post plays behind you and each recipient gets a branded watch page.</div>' +
+        '<div class="muted" style="font-size:13px;line-height:1.65">Record one talking-head clip, then drop it onto any role to make a personalized video, the job post plays behind you and each recipient gets a branded watch page.</div>' +
         '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px">' +
           '<div style="flex:1;min-width:150px"><div style="font-weight:700;font-size:13px">1 · Record once</div><div class="muted" style="font-size:12px">Enable camera, hit Record (or the spacebar), talk ~15s, Save.</div></div>' +
-          '<div style="flex:1;min-width:150px"><div style="font-weight:700;font-size:13px">2 · Click a role</div><div class="muted" style="font-size:12px">Pick a role tile — your clip composites over its job post.</div></div>' +
+          '<div style="flex:1;min-width:150px"><div style="font-weight:700;font-size:13px">2 · Click a role</div><div class="muted" style="font-size:12px">Pick a role tile, your clip composites over its job post.</div></div>' +
           '<div style="flex:1;min-width:150px"><div style="font-weight:700;font-size:13px">3 · Send</div><div class="muted" style="font-size:12px">Copy the email snippet or push it into Outreach / Email.</div></div>' +
         '</div>' +
       '</div>' +
