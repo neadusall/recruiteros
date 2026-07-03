@@ -2630,12 +2630,12 @@
             '<span class="hs-ic">🎯</span>' +
             "<div>" +
               '<div class="hs-title">Targeted job search</div>' +
-              '<div class="hs-sub">Find companies hiring right now — by role, market, location, and size.</div>' +
+              '<div class="hs-sub">Find companies hiring right now, by role, market, location, and size.</div>' +
             "</div>" +
           "</div>" +
           '<span class="hs-badge">⚡ JSearch · live</span>' +
         "</div>" +
-        // Search MODE toggle — one box whose placeholder + behavior adapt: by job title, by
+        // Search MODE toggle: one box whose placeholder + behavior adapt: by job title, by
         // industry/market, or by a specific company name. JSearch takes the term as keywords.
         '<div class="hs-modes" id="hsModes" role="tablist">' +
           '<button type="button" class="hs-mode active" data-mode="title">Job title</button>' +
@@ -2643,8 +2643,8 @@
           '<button type="button" class="hs-mode" data-mode="company">Company name</button>' +
         "</div>" +
         '<form class="hs-form" id="imqForm">' +
-          '<label class="hs-field hs-grow"><span class="hs-fic" id="hsFic">🔎</span><input id="imqQuery" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Job title — e.g. controller, registered nurse, backend engineer" /></label>' +
-          '<label class="hs-field hs-loc"><span class="hs-fic">📍</span><input id="imqLoc" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Location — blank = nationwide" /></label>' +
+          '<label class="hs-field hs-grow"><span class="hs-fic" id="hsFic">🔎</span><input id="imqQuery" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Job title (e.g. controller, registered nurse, backend engineer)" /></label>' +
+          '<label class="hs-field hs-loc"><span class="hs-fic">📍</span><input id="imqLoc" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Location (blank = nationwide)" /></label>' +
           '<button type="submit" class="btn btn-primary hs-go" id="imqAdd">Search <span class="hs-arrow">→</span></button>' +
         "</form>" +
         // Company-size narrow (multi-select bands). Resolved free via Wikidata + heuristic.
@@ -2668,9 +2668,9 @@
     // Active search mode + its box icon/placeholder. Default: job title.
     var hsMode = "title";
     var HS_MODES = {
-      title:    { ic: "🔎", ph: "Job title — e.g. controller, registered nurse, backend engineer" },
-      industry: { ic: "🏭", ph: "Industry / market — e.g. fintech, healthcare, logistics" },
-      company:  { ic: "🏢", ph: "Company name — e.g. Anthropic, Stripe, Ramp" }
+      title:    { ic: "🔎", ph: "Job title (e.g. controller, registered nurse, backend engineer)" },
+      industry: { ic: "🏭", ph: "Industry / market (e.g. fintech, healthcare, logistics)" },
+      company:  { ic: "🏢", ph: "Company name (e.g. Anthropic, Stripe, Ramp)" }
     };
     function applyMode() {
       var m = HS_MODES[hsMode] || HS_MODES.title;
@@ -2698,7 +2698,7 @@
     }
     function imqConfigMsg() {
       var pv = host.querySelector("#imqPreview");
-      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Job feed isn’t connected yet — add your JSearch (RapidAPI) key to <b>RAPID_JOBS_KEY</b> + <b>RAPID_JOBS_HOST</b>, then run again.</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
+      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Job feed isn’t connected yet. Add your JSearch (RapidAPI) key to <b>RAPID_JOBS_KEY</b> + <b>RAPID_JOBS_HOST</b>, then run again.</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
     }
 
     function imqRun(s) {
@@ -2710,7 +2710,7 @@
       var pv = host.querySelector("#imqPreview");
       if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Searching “' + esc(label) + '” on JSearch… pulling fresh postings.</div></div>';
       function done() { imQBusy = false; if (btn) { btn.disabled = false; btn.textContent = bt; } }
-      // Run WITHOUT saving — the backend accepts an ad-hoc search object.
+      // Run WITHOUT saving: the backend accepts an ad-hoc search object.
       send("/in-market", "POST", { action: "queue_run", search: s }).then(function (r) {
         done();
         if (!r || !r.ok) {
@@ -2753,13 +2753,13 @@
       var supC = imQPreview.suppressedCompanies || 0, supR = imQPreview.suppressedRoles || 0, thr = imQPreview.threshold || 2;
       // Note about already-emailed companies/roles we hid (kept ones with a NEW job title).
       var supNote = (supC + supR) > 0
-        ? ' <span class="imq-pv-sup" title="Already emailed ' + thr + '×+ — hidden, except companies that came back with a different job title.">· hid ' +
+        ? ' <span class="imq-pv-sup" title="Already emailed ' + thr + '×+, hidden except companies that came back with a different job title.">· hid ' +
             (supC ? supC + " compan" + (supC === 1 ? "y" : "ies") : "") + (supC && supR ? " + " : "") +
             (supR ? supR + " role" + (supR === 1 ? "" : "s") : "") + " already emailed " + thr + "×</span>"
         : "";
       if (!leads.length) {
         var emptyMsg = (supC + supR) > 0
-          ? "Every match for “" + esc(imQPreview.name) + "” was already emailed " + thr + "×+ — nothing new to add. A different job title would still come through."
+          ? "Every match for “" + esc(imQPreview.name) + "” was already emailed " + thr + "×+. Nothing new to add. A different job title would still come through."
           : "No US companies found for “" + esc(imQPreview.name) + "”. Try broader keywords, a wider date range, or a different location.";
         box.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">' + emptyMsg + '</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
         return;
@@ -2771,8 +2771,8 @@
       var rows = leads.map(function (l, i) {
         var roles = (l.roleDetails && l.roleDetails.length) || (l.roles && l.roles.length) || 1;
         var badge = l.inPool
-          ? '<span class="imq-pv-badge pool" title="Already in your pool — pulled before">♻ In pool</span>'
-          : '<span class="imq-pv-badge new" title="Net-new — not pulled before">🆕 New</span>';
+          ? '<span class="imq-pv-badge pool" title="Already in your pool (pulled before)">♻ In pool</span>'
+          : '<span class="imq-pv-badge new" title="Net-new, not pulled before">🆕 New</span>';
         return '<label class="imq-pv-row' + (l.inPool ? " is-pool" : " is-new") + '">' +
             '<input type="checkbox" data-act="pvtoggle" data-i="' + i + '"' + (imQPreview.picks[i] ? " checked" : "") + ">" +
             badge +
@@ -2818,7 +2818,7 @@
       var btn = host.querySelector('[data-act="pvcommit"]'); if (btn) { btn.disabled = true; btn.textContent = "Pulling…"; }
       send("/in-market", "POST", { action: "queue_commit", leads: leads }).then(function (r) {
         if (r && r.ok) {
-          toast("Pulled " + leads.length + " compan" + (leads.length === 1 ? "y" : "ies") + " — finding decision-makers, validating emails, and building screenshots now. Track them in the Clients tab.");
+          toast("Pulled " + leads.length + " compan" + (leads.length === 1 ? "y" : "ies") + ". Finding decision-makers, validating emails, and building screenshots now. Track them in the Clients tab.");
           imQPreview = null; imqRenderPreview();
         } else { if (btn) { btn.disabled = false; } toast("Couldn’t pull those right now. Try again."); }
       }).catch(function () { if (btn) { btn.disabled = false; } toast("Couldn’t pull those right now. Try again."); });
@@ -2938,8 +2938,8 @@
         // The ONE control: pick a mode (title / industry / company), search, narrow by size + location,
         // then PICK which companies to pull. Rendered by renderTargetedQueue() right after innerHTML.
         '<div id="imTargeted" class="im-targeted"></div>' +
-        // What happens after you pull — everything downstream is automatic and lives in Clients.
-        '<div class="im-handoff"><span aria-hidden="true">✨</span><span>Pull the companies you want and the rest runs on its own — decision-makers, verified emails, and screenshot videos are built automatically and appear in the <a href="#clients">Clients</a> tab.</span></div>' +
+        // What happens after you pull: everything downstream is automatic and lives in Clients.
+        '<div class="im-handoff"><span aria-hidden="true">✨</span><span>Pull the companies you want and the rest runs on its own. Decision-makers, verified emails, and screenshot videos are built automatically and appear in the <a href="#clients">Clients</a> tab.</span></div>' +
       "</div>";
 
     renderTargetedQueue($("#imTargeted"));
