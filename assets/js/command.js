@@ -2624,26 +2624,34 @@
   function renderTargetedQueue(host) {
     if (!host) return;
     host.innerHTML =
-      '<div class="imq">' +
-        '<div class="imq-head">' +
-          '<span class="imq-title">🎯 Targeted job search</span>' +
-          '<span class="imq-sub">Find companies hiring right now — by role, market, location, and size.</span>' +
+      '<div class="imq hs-card">' +
+        '<div class="hs-head">' +
+          '<div class="hs-head-l">' +
+            '<span class="hs-ic">🎯</span>' +
+            "<div>" +
+              '<div class="hs-title">Targeted job search</div>' +
+              '<div class="hs-sub">Find companies hiring right now — by role, market, location, and size.</div>' +
+            "</div>" +
+          "</div>" +
+          '<span class="hs-badge">⚡ JSearch · live</span>' +
         "</div>" +
-        '<form class="imq-builder" id="imqForm">' +
-          // Search by JOB TITLE and/or INDUSTRY / market (either alone works; together they narrow),
-          // plus an optional location. JSearch folds title + industry into one keyword query.
-          '<input id="imqQuery" class="imq-in imq-grow" type="text" autocomplete="off" placeholder="🔎 Job title — e.g. controller, registered nurse, backend engineer" />' +
-          '<input id="imqIndustry" class="imq-in imq-grow" type="text" autocomplete="off" placeholder="🏭 Industry / market — e.g. fintech, healthcare (optional)" />' +
-          '<input id="imqLoc" class="imq-in" type="text" autocomplete="off" placeholder="📍 Location — blank = nationwide" />' +
-          '<button type="submit" class="btn btn-primary btn-sm" id="imqAdd">🔎 Search</button>' +
+        // The four inputs that matter. JSearch folds job title + industry into one keyword query;
+        // either alone works. Each field is a label so clicking anywhere focuses the input.
+        '<form class="hs-form" id="imqForm">' +
+          '<label class="hs-field hs-grow"><span class="hs-fic">🔎</span><input id="imqQuery" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Job title — e.g. controller, registered nurse, backend engineer" /></label>' +
+          '<label class="hs-field hs-grow"><span class="hs-fic">🏭</span><input id="imqIndustry" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Industry / market — optional" /></label>' +
+          '<label class="hs-field hs-loc"><span class="hs-fic">📍</span><input id="imqLoc" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Location — blank = nationwide" /></label>' +
+          '<button type="submit" class="btn btn-primary hs-go" id="imqAdd">Search <span class="hs-arrow">→</span></button>' +
         "</form>" +
         // Company-size narrow (multi-select bands). Resolved free via Wikidata + heuristic.
-        '<div class="imq-opts imq-sizes">' +
-          '<span class="imq-optlbl">👥 Company size:</span>' +
-          IM_SIZES.map(function (s) { return '<button type="button" class="imq-size" data-act="sizetoggle" data-size="' + esc(s.v) + '">' + esc(s.l) + "</button>"; }).join("") +
-          '<button type="button" class="im-mini" data-act="sizeclear">Clear</button>' +
+        '<div class="hs-sizes">' +
+          '<span class="hs-sizes-l">Company size</span>' +
+          '<div class="hs-seg">' +
+            IM_SIZES.map(function (s) { return '<button type="button" class="imq-size" data-act="sizetoggle" data-size="' + esc(s.v) + '">' + esc(s.l) + "</button>"; }).join("") +
+          "</div>" +
+          '<button type="button" class="hs-clear" data-act="sizeclear">Clear</button>' +
         "</div>" +
-        '<div id="imqPreview" class="imq-preview"></div>' +
+        '<div id="imqPreview" class="imq-preview hs-preview"></div>' +
       "</div>";
 
     // Selected company-size bands for the builder (multi-select). Reflected on the .imq-size chips.
