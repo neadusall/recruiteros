@@ -1,124 +1,96 @@
-# RecruitersOS — recruitersos.co
+# RecruitersOS
 
-**The operating system for modern recruiting.** A cross between Clay.com (a programmable
-data-enrichment spreadsheet) and Juicebox.ai (natural-language people search), reframed as
-a campaign-centric command center where every revenue activity lives in one place.
+**The operating system for modern recruiting + business development.** Live at
+**[recruitersos.co](https://recruitersos.co)**: one platform where signals, sourcing,
+enrichment, outreach (email / SMS / LinkedIn / video), and reporting run together.
 
-> Built as a self-contained static site, **no build step, no Node required.** Just open it.
+**One deployable:** a Next.js app in [`integration/`](integration/) serves the API,
+the recruiter/admin portal, and the marketing pages from a single origin. Everything
+else in the repo is a satellite (browser extension, sidecar services, the OS Text
+submodule) or the frontend source it builds from.
 
 ---
 
-## Run it
+## The one rule that matters
 
-Double-click **`index.html`**, or serve the folder:
+> **Frontend source of truth = the root `*.html` files + [`assets/`](assets/).**
+> On every build, `integration/sync-public.cjs` copies them into `integration/public/`.
+> Never edit `integration/public/` (generated), and never move the root HTML into
+> subfolders (the sync, the dev server, and every clean URL depend on them being at root).
 
-```powershell
-# Option A, just open the file
-start index.html
+The full map of what lives where, and why, is **[docs/STRUCTURE.md](docs/STRUCTURE.md)**.
+Read it before moving anything: a "Don't move these" table lists every root file pinned
+by build, deploy, or server machinery.
 
-# Option B, serve locally (if you have Python)
-python -m http.server 8000
-# then visit http://localhost:8000
-```
+## Repo map
 
-The hero search on the landing page passes your query straight into the live app.
-
-## What's inside
-
-```
-recruiteros/
-├─ index.html          Landing page, the full product vision
-├─ app.html            The command center (the actual product)
-├─ assets/
-│  ├─ css/styles.css   Design system + next-level FX (aurora, particles, shimmer)
-│  ├─ css/app.css      Command-center UI
-│  ├─ js/landing.js    Scroll reveals, animated counters, hero particle field
-│  └─ js/app.js        Campaigns, AI search, enrichment, signals, SMS, reporting
-└─ README.md
-```
-
-## The vision (what the product *is*)
-
-The campaign is the atomic unit of work. Inside every campaign:
-
-| Pillar | What it does |
+| Path | What it is |
 |---|---|
-| **📡 Signals** | Funding, new VPs, layoffs, hiring surges trigger every campaign, informed outreach, not cold spray |
-| **🎯 Targets & Enrich** | Natural-language people search → a Clay-style grid where every cell can call an AI agent |
-| **✉️ Outreach** | AI-drafted, multi-step sequences across email · LinkedIn · SMS |
-| **💬 Conversations** | "The Money Maker", an AI SMS layer that replies, detects interest, and routes hot leads to humans |
-| **📊 Reporting** | Live operational view: which signals book meetings, which campaigns create job orders |
+| [`integration/`](integration/) | **The app.** Next.js API + portal, the production deployable. Backend work happens in `integration/lib/<domain>/`. |
+| `*.html` + [`assets/`](assets/) | Portal + marketing pages (source of truth, synced into the app at build). |
+| [`bridge/`](bridge/) | Outreach bridge between the backend and the Chrome extension. |
+| [`extension/`](extension/) | Chrome extension that performs LinkedIn/outreach actions in the browser. Packaged zips land in `dist/`. |
+| [`laxis-worker/`](laxis-worker/) | Headless-Chromium sidecar that enriches JD-Sourcing CSVs through Laxis (no public API there). |
+| [`lume-jobs/`](lume-jobs/) | Backend for the lumesp.com job board + its team portal. |
+| [`lumesp-web/`](lumesp-web/) | Static white-label marketing site for lumesp.com, served directly by Caddy. |
+| [`searxng/`](searxng/) | SearXNG meta-search config: the free search backend for the X-ray people finder. |
+| [`money-maker-sms/`](money-maker-sms/) | OS Text (taltxt), the SMS app. **Git submodule** with its own repo. |
+| [`docs/`](docs/) | All cross-cutting documentation: structure map, setup guides, playbooks, runbooks, designs, changelog. |
 
-Two revenue engines (Recruiting + Business Development) run on one shared infrastructure.
+Root shell scripts (`deploy.sh`, `auto-deploy.sh`, `set-*.sh`, `setup-*.sh`) are server
+operations tooling. They stay at the repo root because the live server and worker boxes
+call them at hard-coded paths like `/opt/recruiteros/<name>`.
 
-## Try this in the app
+## Run it locally
 
-1. Open **`app.html`**
-2. **Signals** tab → click *"Build campaign from signal"*
-3. **Targets** tab → run a search → click **Enrich** on cells, or **＋ AI column**
-4. Select rows → **Add to sequence** → see the AI-drafted **Outreach**
-5. **Conversations** → send a message and watch the AI reply
-6. **Reporting** → live operational dashboard
+Two local loops, depending on what you are changing:
 
-## Outreach Studio — the automation engine (`alfred.html`)
-
-A MeetAlfred-style, multi-channel outreach **automation engine**, built into RecruitersOS.
-Where the rest of the app is mock data, this is a **real engine** with persistence, a
-scheduler, safety limits, and a simulation clock.
-
-Open **`alfred.html`** and:
-
-1. **Sequence** — build a multi-step drip (connect → wait → message → email…) across
-   LinkedIn / Email / X. Edit any step with a live, personalized preview.
-2. **Leads** — add/import prospects, select, **Enroll**.
-3. Use the **sim clock** (sidebar: `+1 day`, `+1 week`, `+30 days`) to watch the campaign
-   drip forward — connections get accepted, messages send only *after* acceptance, replies
-   land in the **Inbox** and auto-pause that prospect's sequence.
-4. **Analytics** — live funnel, accept/reply rates, activity by channel.
-5. **Settings** — per-account daily caps, warm-up ramp, working hours, weekend pause,
-   random delays, blacklist.
-
-### Why it's faithful to MeetAlfred
-- **Action surface:** LinkedIn view / follow / endorse / connect / message / InMail / like,
-  Email send, X follow / like / retweet / DM, plus delays — any order, unlimited steps.
-- **The core rule:** a connection-request step gates its follow-ups — messages only fire
-  **after the invite is accepted** (enforced + unit-tested).
-- **Safe-by-default limits:** ~20 connects/day, 30→50 messages, <100 views, pending-invite
-  cap, warm-up ramping 30%→100% over 14 days, working-hours/weekend/timezone gating.
-
-### Architecture (no build step, lifts to a backend later)
-```
-assets/js/alfred/
-├─ alfred-core.js     UMD engine — data model, store, limits, channel adapters,
-│                     personalization, sequence scheduler, analytics.
-│                     Runs in the browser (window.Alfred) AND under Node (require).
-├─ alfred-ui.js       Browser controller for the Studio.
-└─ alfred.test.cjs    Node test harness — 30 assertions, run it below.
-assets/css/alfred.css Studio styles (on the RecruitersOS design tokens).
-alfred.html           The Outreach Studio page.
-```
-
-- **Storage**, **channel adapters**, and the **clock** are pluggable seams. Today it runs
-  on `localStorage` + a **Simulated** adapter (zero account risk). Swap in a DB + real
-  LinkedIn/Email/X adapters server-side to make it a live SaaS — *the engine code doesn't change.*
-
-Run the engine tests (Node is the only requirement, just for tests):
 ```powershell
-node assets/js/alfred/alfred.test.cjs   # → 30 passed, 0 failed
+# Portal/marketing pages only (static, serves root *.html with clean URLs):
+node server.cjs                    # http://localhost:5173  (or START-STUDIO.ps1)
+
+# The full app (API + portal), with live re-sync of root HTML + assets:
+cd integration
+npm run dev:fast                   # http://localhost:3000
 ```
+
+For the packaged Clients portal experience, double-click `START-PORTAL.cmd` (see
+[RUN.md](RUN.md)).
 
 ## Deploy
 
-It's static, drop the folder on any host:
+**Every push to `main` deploys to production automatically.** A systemd timer on the
+Hetzner server runs `auto-deploy.sh` every couple of minutes: it pulls, rebuilds, and
+restarts the Docker Compose stack (app + taltxt + lume-jobs + laxis-worker + searxng +
+Caddy + autoheal). So: confirm changes locally first, and keep one session editing the
+repo at a time.
 
-- **Vercel:** `vercel` (or drag-and-drop the folder at vercel.com/new)
-- **Netlify:** drag the folder onto app.netlify.com/drop
-- **GitHub Pages:** push the folder and enable Pages
+Manual redeploy from the server: `cd /opt/recruiteros && git pull && docker compose up -d --build app`.
+First-time server setup and the full go-live walkthrough live in
+[docs/setup/server/](docs/setup/server/).
 
-Point **recruitersos.co** at whichever host you choose.
+## Branches
 
-## Note
+- **`main`** is production (auto-deploys on push).
+- Long-lived: `white-label-edge` (white-label build). Short-lived feature branches merge
+  into `main` and get deleted.
+- Superseded or backup work is preserved as **`archive/*` tags** instead of leftover
+  branches: `git tag -l 'archive/*'` to list, `git checkout <tag>` to inspect.
 
-This is a front-end product prototype with realistic mock data, there's no backend yet.
-The search, enrichment, signals, and SMS are simulated to demo the experience. Wiring it to
-real data providers (LinkedIn, Apollo, enrichment APIs) and an LLM is the next step.
+## Design system
+
+The entire UI (portal, marketing, auth, satellite pages) runs on **Meridian**, the
+token-driven design system introduced 2026-07-14: light-first with a supported dark
+theme, one white-label-overridable accent, SVG-only iconography, no emoji or em-dashes
+in copy. The spec is **[docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md)**; read it before
+touching any UI. The portal's keyboard/navigation layer (command palette, chords,
+wayfinding) lives in `assets/js/command-ux.js`.
+
+## Where to go next
+
+- **[docs/STRUCTURE.md](docs/STRUCTURE.md)**: the project map (start here).
+- **[docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md)**: the UI design system (Meridian).
+- **[docs/platform/README.md](docs/platform/README.md)**: which `integration/lib/` domain
+  owns each feature.
+- **[docs/setup/](docs/setup/)**: stand up the server, turn on channels, deploy guides.
+- **[docs/changelog/](docs/changelog/)**: dated session logs of what changed and why.
