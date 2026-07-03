@@ -2215,9 +2215,7 @@
 
   /* ---------------- In-Market Leads (BD: who is hiring right now) ------------ */
   var inMarketResults = [];      // last search results (full lead objects)
-  var imMode = "industry";       // "industry" | "company"
-  var imSelectedIndustries = []; // multi-select industries
-  var imSearchTimer = null;      // debounce for chip-driven searches
+  var imSelectedIndustries = []; // legacy: kept only so the renderInMarket state-reset stays valid
   var imMinScore = 0;            // narrow-down: minimum hiring-intent score shown
   var imPostedWithin = 0;        // date search: only roles posted within the last N days (0 = any)
   var imDmPerRole = 3;           // decision-makers shown per role (1 / 3 / 5), defaults to 3 for multi-touch
@@ -2237,29 +2235,6 @@
   var IM_QDATES = [["all", "Any time"], ["today", "Today"], ["3days", "Last 3 days"], ["week", "Last week"], ["month", "Last month"]];
   var IM_QEMP = [["FULLTIME", "Full-time"], ["PARTTIME", "Part-time"], ["CONTRACTOR", "Contract"], ["INTERN", "Intern"]];
 
-  // Industries + sub-sectors recruiters sell into. Drives the refined in-market search.
-  // (Free job-board coverage is strongest for the tech-adjacent rows; traditional
-  // verticals post on Workday/Taleo/iCIMS, so those return fewer free results, a paid
-  // data feed fills them out. See the note rendered above the chips.)
-  var IM_INDUSTRIES = [
-    "Technology / SaaS", "AI / Machine Learning", "Cybersecurity", "Data / Analytics",
-    "DevOps / Cloud", "Hardware / IoT", "Semiconductors", "Robotics", "Gaming",
-    "Fintech", "Banking", "Insurance", "Investment / PE / VC", "Crypto / Web3",
-    "Healthcare", "Biotech / Pharma", "Medical Devices", "Hospitals / Health Systems",
-    "Manufacturing", "Aerospace / Defense", "Automotive", "Industrial / Automation",
-    "Energy", "Oil & Gas", "Renewables / CleanTech", "Utilities", "Mining / Metals",
-    "Construction", "Architecture / Engineering", "Real Estate", "PropTech",
-    "Logistics / Supply Chain", "Freight / Transportation", "Warehousing",
-    "Retail / eCommerce", "Consumer Goods (CPG)", "Fashion / Apparel", "Food & Beverage",
-    "Agriculture / AgTech", "Hospitality", "Travel / Tourism", "Media / Entertainment",
-    "Telecom", "Education", "EdTech", "Legal", "Accounting / Tax", "Consulting",
-    "Marketing / Agency", "HR / Staffing", "Sales / GTM", "Government / Public", "Nonprofit"
-  ];
-  var IM_PLACEHOLDER = {
-    industry: "Search an industry or market, e.g. fintech, healthcare, manufacturing",
-    company: "Search a company by name, e.g. Stripe, Verla Health, Brightwave",
-    title: "Search by job title (keywords), e.g. controller, backend engineer, account executive"
-  };
 
   // Hiring-signal types you can filter the search by (company-side). Pulled from the
   // engine's signal catalog; these are what the free/open sources can surface.
@@ -2665,119 +2640,99 @@
    * TARGETED JSEARCH panel — the headline Hire Signals control. Author an exact search
    * (role/keywords + location + recency + employment type), save it to a queue, RUN it on demand,
    * then PICK which companies actually merge into the pool. Nothing scrapes until you press Run, and
-   * nothing enters the pool until you commit your picks — so you target exactly who you want.
+   * nothing enters the pool until you commit your picks, so you target exactly who you want.
    */
   function renderTargetedQueue(host) {
     if (!host) return;
     host.innerHTML =
-      '<div class="imq">' +
-        '<div class="imq-head">' +
-          '<span class="imq-title">🎯 Targeted JSearch</span>' +
-          '<span class="imq-sub">Search exactly who you want · queue it · run it · pick which companies to scrape</span>' +
+      '<div class="imq hs-card">' +
+        '<div class="hs-head">' +
+          '<div class="hs-head-l">' +
+            '<span class="hs-ic">🎯</span>' +
+            "<div>" +
+              '<div class="hs-title">Targeted job search</div>' +
+              '<div class="hs-sub">Find companies hiring right now, by role, market, location, and size.</div>' +
+            "</div>" +
+          "</div>" +
+          '<span class="hs-badge">⚡ JSearch · live</span>' +
         "</div>" +
-        '<form class="imq-builder" id="imqForm">' +
-          '<input id="imqQuery" class="imq-in imq-grow" type="text" autocomplete="off" placeholder="Job title or keywords — e.g. controller, registered nurse, backend engineer" />' +
-          '<input id="imqLoc" class="imq-in" type="text" autocomplete="off" placeholder="Location (city, state) — blank = nationwide" />' +
-          '<select id="imqDate" class="imq-in imq-sel" title="How recently the job was posted">' +
-            IM_QDATES.map(function (d) { return '<option value="' + d[0] + '"' + (d[0] === "week" ? " selected" : "") + ">" + esc(d[1]) + "</option>"; }).join("") +
-          "</select>" +
-          '<select id="imqLimit" class="imq-in imq-sel" title="Max jobs to pull per run">' +
-            [50, 100, 200, 300, 500].map(function (n) { return '<option value="' + n + '"' + (n === 100 ? " selected" : "") + ">≤ " + n + " jobs</option>"; }).join("") +
-          "</select>" +
-          '<input id="imqName" class="imq-in" type="text" autocomplete="off" placeholder="Name (optional)" />' +
-          '<button type="submit" class="btn btn-primary btn-sm" id="imqAdd">➕ Add to queue</button>' +
+        // Search MODE toggle: one box whose placeholder + behavior adapt: by job title, by
+        // industry/market, or by a specific company name. JSearch takes the term as keywords.
+        '<div class="hs-modes" id="hsModes" role="tablist">' +
+          '<button type="button" class="hs-mode active" data-mode="title">Job title</button>' +
+          '<button type="button" class="hs-mode" data-mode="industry">Industry / market</button>' +
+          '<button type="button" class="hs-mode" data-mode="company">Company name</button>' +
+        "</div>" +
+        '<form class="hs-form" id="imqForm">' +
+          '<label class="hs-field hs-grow"><span class="hs-fic" id="hsFic">🔎</span><input id="imqQuery" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Job title (e.g. controller, registered nurse, backend engineer)" /></label>' +
+          '<label class="hs-field hs-loc"><span class="hs-fic">📍</span><input id="imqLoc" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Location (blank = nationwide)" /></label>' +
+          '<button type="submit" class="btn btn-primary hs-go" id="imqAdd">Search <span class="hs-arrow">→</span></button>' +
         "</form>" +
-        '<div class="imq-opts">' +
-          '<span class="imq-optlbl">Type:</span>' +
-          IM_QEMP.map(function (em) { return '<label class="imq-emp"><input type="checkbox" id="imqEmp_' + em[0] + '"> ' + esc(em[1]) + "</label>"; }).join("") +
-          '<label class="imq-emp"><input type="checkbox" id="imqRemote"> 🏠 Remote only</label>' +
-          '<button type="button" class="im-mini" data-act="canceledit" id="imqCancelEdit" style="display:none">Cancel edit</button>' +
+        // Company-size narrow (multi-select bands). Resolved free via Wikidata + heuristic.
+        '<div class="hs-sizes">' +
+          '<span class="hs-sizes-l">Company size</span>' +
+          '<div class="hs-seg">' +
+            IM_SIZES.map(function (s) { return '<button type="button" class="imq-size" data-act="sizetoggle" data-size="' + esc(s.v) + '">' + esc(s.l) + "</button>"; }).join("") +
+          "</div>" +
+          '<button type="button" class="hs-clear" data-act="sizeclear">Clear</button>' +
         "</div>" +
-        '<div id="imqList" class="imq-list"></div>' +
-        '<div id="imqPreview" class="imq-preview"></div>' +
+        '<div id="imqPreview" class="imq-preview hs-preview"></div>' +
       "</div>";
 
-    function imqGather() {
-      var emp = IM_QEMP.filter(function (em) { var cb = host.querySelector("#imqEmp_" + em[0]); return cb && cb.checked; }).map(function (em) { return em[0]; });
-      var s = {
-        name: host.querySelector("#imqName").value.trim(),
-        query: host.querySelector("#imqQuery").value.trim(),
-        location: host.querySelector("#imqLoc").value.trim(),
-        datePosted: host.querySelector("#imqDate").value,
-        limit: parseInt(host.querySelector("#imqLimit").value, 10) || 100,
-        employmentTypes: emp,
-        remoteOnly: host.querySelector("#imqRemote").checked
-      };
-      if (imQEditId) s.id = imQEditId;
-      return s;
+    // Selected company-size bands for the builder (multi-select). Reflected on the .imq-size chips.
+    var imqSizes = [];
+    function syncImqSizes() {
+      Array.prototype.forEach.call(host.querySelectorAll(".imq-size"), function (c) {
+        c.classList.toggle("active", imqSizes.indexOf(c.getAttribute("data-size")) >= 0);
+      });
     }
-    function imqClearForm() {
-      imQEditId = null;
-      ["imqQuery", "imqLoc", "imqName"].forEach(function (id) { var e = host.querySelector("#" + id); if (e) e.value = ""; });
-      host.querySelector("#imqDate").value = "week";
-      host.querySelector("#imqLimit").value = "100";
-      host.querySelector("#imqRemote").checked = false;
-      IM_QEMP.forEach(function (em) { var cb = host.querySelector("#imqEmp_" + em[0]); if (cb) cb.checked = false; });
-      var add = host.querySelector("#imqAdd"); if (add) add.textContent = "➕ Add to queue";
-      var ce = host.querySelector("#imqCancelEdit"); if (ce) ce.style.display = "none";
+    // Active search mode + its box icon/placeholder. Default: job title.
+    var hsMode = "title";
+    var HS_MODES = {
+      title:    { ic: "🔎", ph: "Job title (e.g. controller, registered nurse, backend engineer)" },
+      industry: { ic: "🏭", ph: "Industry / market (e.g. fintech, healthcare, logistics)" },
+      company:  { ic: "🏢", ph: "Company name (e.g. Anthropic, Stripe, Ramp)" }
+    };
+    function applyMode() {
+      var m = HS_MODES[hsMode] || HS_MODES.title;
+      var inp = host.querySelector("#imqQuery"); if (inp) inp.setAttribute("placeholder", m.ph);
+      var fic = host.querySelector("#hsFic"); if (fic) fic.textContent = m.ic;
+      Array.prototype.forEach.call(host.querySelectorAll(".hs-mode"), function (b) {
+        b.classList.toggle("active", b.getAttribute("data-mode") === hsMode);
+      });
+    }
+    function imqGather() {
+      var q = host.querySelector("#imqQuery").value.trim();
+      return {
+        // Industry mode routes the term to `industry`; job-title and company both go to the
+        // keyword `query` (JSearch is keyword-based). Location + size apply in every mode.
+        query: hsMode === "industry" ? "" : q,
+        industry: hsMode === "industry" ? q : "",
+        location: host.querySelector("#imqLoc").value.trim(),
+        datePosted: "week",
+        limit: 100,
+        employmentTypes: [],
+        remoteOnly: false,
+        headcountBands: imqSizes.slice(),
+        confirmedSizeOnly: false
+      };
     }
     function imqConfigMsg() {
       var pv = host.querySelector("#imqPreview");
-      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Job feed isn’t connected yet — add your JSearch (RapidAPI) key to <b>RAPID_JOBS_KEY</b> + <b>RAPID_JOBS_HOST</b>, then run again.</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
+      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Job feed isn’t connected yet. Add your JSearch (RapidAPI) key to <b>RAPID_JOBS_KEY</b> + <b>RAPID_JOBS_HOST</b>, then run again.</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
     }
 
-    function imqLoad() {
-      send("/in-market", "POST", { action: "queue_list" }).then(function (r) {
-        imQueue = (r && r.data && r.data.searches) || [];
-        imqRenderList();
-      }).catch(function () { imQueue = []; imqRenderList(); });
-    }
-    function imqRenderList() {
-      var box = host.querySelector("#imqList"); if (!box) return;
-      if (!imQueue.length) {
-        box.innerHTML = '<div class="imq-empty">No saved searches yet. Build one above and <b>Add to queue</b> — it waits here until you press <b>Run</b>.</div>';
-        return;
-      }
-      box.innerHTML = imQueue.map(function (s) {
-        var bits = [s.location ? "📍 " + esc(s.location) : "📍 Nationwide"];
-        var dl = "Last week"; for (var i = 0; i < IM_QDATES.length; i++) if (IM_QDATES[i][0] === s.datePosted) dl = IM_QDATES[i][1];
-        bits.push("📅 " + esc(dl));
-        if (s.employmentTypes && s.employmentTypes.length) bits.push(esc(s.employmentTypes.map(imqEmpLabel).join(", ")));
-        if (s.remoteOnly) bits.push("🏠 Remote");
-        bits.push("≤ " + (s.limit || 100) + " jobs");
-        var status = "";
-        if (s.status === "ran" && s.lastResult) {
-          status = '<span class="imq-stat ok">✓ ran · ' + (s.lastResult.companies || 0) + " companies" + (s.lastResult.merged != null ? " · " + s.lastResult.merged + " scraped" : "") + "</span>";
-        } else if (s.status === "error") {
-          status = '<span class="imq-stat err" title="' + esc(s.lastError || "") + '">⚠ error</span>';
-        }
-        return '<div class="imq-row" data-id="' + esc(s.id) + '">' +
-            '<div class="imq-row-main">' +
-              '<div class="imq-row-name">' + esc(s.name || s.query) + status + "</div>" +
-              '<div class="imq-row-q">“' + esc(s.query) + "”</div>" +
-              '<div class="imq-row-bits">' + bits.map(function (b) { return "<span>" + b + "</span>"; }).join("") + "</div>" +
-            "</div>" +
-            '<div class="imq-row-acts">' +
-              '<button type="button" class="btn btn-primary btn-sm" data-act="run" data-id="' + esc(s.id) + '">▶ Run</button>' +
-              '<button type="button" class="im-mini" data-act="edit" data-id="' + esc(s.id) + '">Edit</button>' +
-              '<button type="button" class="im-mini" data-act="del" data-id="' + esc(s.id) + '">Delete</button>' +
-            "</div>" +
-          "</div>";
-      }).join("");
-    }
-
-    function imqRun(id) {
-      if (imQBusy) return;
-      var s = null; for (var i = 0; i < imQueue.length; i++) if (imQueue[i].id === id) s = imQueue[i];
-      if (!s) return;
+    function imqRun(s) {
+      if (imQBusy || !s) return;
       imQBusy = true;
-      var label = s.name || s.query;
-      var btn = host.querySelector('[data-act="run"][data-id="' + id + '"]'); var bt = btn ? btn.textContent : "";
-      if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
+      var label = s.query || s.industry || "your search";
+      var btn = host.querySelector("#imqAdd"); var bt = btn ? btn.textContent : "";
+      if (btn) { btn.disabled = true; btn.textContent = "Searching…"; }
       var pv = host.querySelector("#imqPreview");
-      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Running “' + esc(label) + '” on JSearch… pulling fresh postings.</div></div>';
+      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Searching “' + esc(label) + '” on JSearch… pulling fresh postings.</div></div>';
       function done() { imQBusy = false; if (btn) { btn.disabled = false; btn.textContent = bt; } }
-      send("/in-market", "POST", { action: "queue_run", id: id }).then(function (r) {
+      // Run WITHOUT saving: the backend accepts an ad-hoc search object.
+      send("/in-market", "POST", { action: "queue_run", search: s }).then(function (r) {
         done();
         if (!r || !r.ok) {
           if (r && (r.status === 409 || /not_configured/.test(String((r && r.error) || "")))) { imqConfigMsg(); return; }
@@ -2786,19 +2741,18 @@
         var leads = (r.data && r.data.leads) || [];
         var d = r.data || {};
         imQPreview = {
-          id: id, name: label, leads: leads, picks: {},
+          id: null, name: label, leads: leads, picks: {},
           newCompanies: d.newCompanies || 0, pulledCompanies: d.pulledCompanies || 0,
           newPositions: d.newPositions || 0, pulledPositions: d.pulledPositions || 0,
           suppressedCompanies: d.suppressedCompanies || 0,
           suppressedRoles: d.suppressedRoles || 0,
           threshold: d.suppressThreshold || 2
         };
-        // Default selection = the FRESH list (companies not already pulled). If everything is already
-        // in the pool, default to all selected so re-scraping is still one click.
+        // Default selection = the FRESH list (companies not already pulled). If everything is
+        // already in the pool, default to all selected so re-pulling is still one click.
         var anyNew = leads.some(function (l) { return !l.inPool; });
         for (var k = 0; k < leads.length; k++) imQPreview.picks[k] = anyNew ? !leads[k].inPool : true;
         imqRenderPreview();
-        imqLoad(); // refresh the "ran · N companies" status chip
       }).catch(function (e) {
         done();
         if (e && e.status === 409) { imqConfigMsg(); return; }
@@ -2810,7 +2764,7 @@
       if (!imQPreview) return;
       var leads = imQPreview.leads || [], picked = 0;
       for (var i = 0; i < leads.length; i++) if (imQPreview.picks[i]) picked++;
-      var btn = host.querySelector('[data-act="pvcommit"]'); if (btn) btn.textContent = "⬇ Scrape selected (" + picked + ")";
+      var btn = host.querySelector('[data-act="pvcommit"]'); if (btn) btn.textContent = "⬇ Pull selected (" + picked + ")";
       var all = host.querySelector('[data-act="pvall"]'); if (all) all.checked = picked === leads.length && leads.length > 0;
     }
     function imqRenderPreview() {
@@ -2820,13 +2774,13 @@
       var supC = imQPreview.suppressedCompanies || 0, supR = imQPreview.suppressedRoles || 0, thr = imQPreview.threshold || 2;
       // Note about already-emailed companies/roles we hid (kept ones with a NEW job title).
       var supNote = (supC + supR) > 0
-        ? ' <span class="imq-pv-sup" title="Already emailed ' + thr + '×+ — hidden, except companies that came back with a different job title.">· hid ' +
+        ? ' <span class="imq-pv-sup" title="Already emailed ' + thr + '×+, hidden except companies that came back with a different job title.">· hid ' +
             (supC ? supC + " compan" + (supC === 1 ? "y" : "ies") : "") + (supC && supR ? " + " : "") +
             (supR ? supR + " role" + (supR === 1 ? "" : "s") : "") + " already emailed " + thr + "×</span>"
         : "";
       if (!leads.length) {
         var emptyMsg = (supC + supR) > 0
-          ? "Every match for “" + esc(imQPreview.name) + "” was already emailed " + thr + "×+ — nothing new to add. A different job title would still come through."
+          ? "Every match for “" + esc(imQPreview.name) + "” was already emailed " + thr + "×+. Nothing new to add. A different job title would still come through."
           : "No US companies found for “" + esc(imQPreview.name) + "”. Try broader keywords, a wider date range, or a different location.";
         box.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">' + emptyMsg + '</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
         return;
@@ -2838,8 +2792,8 @@
       var rows = leads.map(function (l, i) {
         var roles = (l.roleDetails && l.roleDetails.length) || (l.roles && l.roles.length) || 1;
         var badge = l.inPool
-          ? '<span class="imq-pv-badge pool" title="Already in your pool — pulled before">♻ In pool</span>'
-          : '<span class="imq-pv-badge new" title="Net-new — not pulled before">🆕 New</span>';
+          ? '<span class="imq-pv-badge pool" title="Already in your pool (pulled before)">♻ In pool</span>'
+          : '<span class="imq-pv-badge new" title="Net-new, not pulled before">🆕 New</span>';
         return '<label class="imq-pv-row' + (l.inPool ? " is-pool" : " is-new") + '">' +
             '<input type="checkbox" data-act="pvtoggle" data-i="' + i + '"' + (imQPreview.picks[i] ? " checked" : "") + ">" +
             badge +
@@ -2863,7 +2817,7 @@
           "</div>" +
           '<div class="imq-pv-list">' + rows + "</div>" +
           '<div class="imq-pv-foot">' +
-            '<button type="button" class="btn btn-primary btn-sm" data-act="pvcommit">⬇ Scrape selected (' + picked + ")</button>" +
+            '<button type="button" class="btn btn-primary btn-sm" data-act="pvcommit">⬇ Pull selected (' + picked + ")</button>" +
             '<button type="button" class="im-mini" data-act="pvclose">Cancel</button>' +
             '<span class="imq-pv-note muted">Only what you pick enters your pool. <b>New only</b> = pull a fresh list (net-new prospects). Then decision-maker research + verified job-post screenshots run on them.</span>' +
           "</div>" +
@@ -2881,61 +2835,32 @@
     function imqCommit() {
       if (!imQPreview) return;
       var leads = (imQPreview.leads || []).filter(function (_, i) { return imQPreview.picks[i]; });
-      if (!leads.length) { toast("Select at least one company to scrape."); return; }
-      var payload = { action: "queue_commit", leads: leads };
-      if (imQPreview.id) payload.id = imQPreview.id;
-      var btn = host.querySelector('[data-act="pvcommit"]'); if (btn) { btn.disabled = true; btn.textContent = "Scraping…"; }
-      send("/in-market", "POST", payload).then(function (r) {
+      if (!leads.length) { toast("Select at least one company to pull."); return; }
+      var btn = host.querySelector('[data-act="pvcommit"]'); if (btn) { btn.disabled = true; btn.textContent = "Pulling…"; }
+      send("/in-market", "POST", { action: "queue_commit", leads: leads }).then(function (r) {
         if (r && r.ok) {
-          toast("Scraped " + leads.length + " compan" + (leads.length === 1 ? "y" : "ies") + " into your pool — finding decision-makers now.");
-          imQPreview = null; imqRenderPreview(); imqLoad(); loadImportBanner();
-        } else { if (btn) { btn.disabled = false; } toast("Couldn’t scrape those right now. Try again."); }
-      }).catch(function () { if (btn) { btn.disabled = false; } toast("Couldn’t scrape those right now. Try again."); });
+          toast("Pulled " + leads.length + " compan" + (leads.length === 1 ? "y" : "ies") + ". Finding decision-makers, validating emails, and building screenshots now. Track them in the Clients tab.");
+          imQPreview = null; imqRenderPreview();
+        } else { if (btn) { btn.disabled = false; } toast("Couldn’t pull those right now. Try again."); }
+      }).catch(function () { if (btn) { btn.disabled = false; } toast("Couldn’t pull those right now. Try again."); });
     }
 
-    function imqEdit(id) {
-      var s = null; for (var i = 0; i < imQueue.length; i++) if (imQueue[i].id === id) s = imQueue[i];
-      if (!s) return;
-      imQEditId = id;
-      host.querySelector("#imqQuery").value = s.query || "";
-      host.querySelector("#imqLoc").value = s.location || "";
-      host.querySelector("#imqName").value = s.name || "";
-      host.querySelector("#imqDate").value = s.datePosted || "week";
-      host.querySelector("#imqLimit").value = String(s.limit || 100);
-      host.querySelector("#imqRemote").checked = !!s.remoteOnly;
-      IM_QEMP.forEach(function (em) { var cb = host.querySelector("#imqEmp_" + em[0]); if (cb) cb.checked = (s.employmentTypes || []).indexOf(em[0]) >= 0; });
-      var add = host.querySelector("#imqAdd"); if (add) add.textContent = "✓ Save changes";
-      var ce = host.querySelector("#imqCancelEdit"); if (ce) ce.style.display = "";
-      host.querySelector("#imqQuery").focus();
-    }
-    function imqDelete(id) {
-      send("/in-market", "POST", { action: "queue_delete", id: id }).then(function () {
-        if (imQPreview && imQPreview.id === id) { imQPreview = null; imqRenderPreview(); }
-        if (imQEditId === id) imqClearForm();
-        imqLoad();
-      }).catch(function () { toast("Couldn’t delete that search."); });
-    }
-
-    // Builder submit → save (create or update), then refresh the queue.
+    // Submit → run the search immediately (no save step) and show the company pick-list.
     host.querySelector("#imqForm").addEventListener("submit", function (e) {
       e.preventDefault();
       var s = imqGather();
-      if (!s.query) { toast("Enter a job title or keywords to search."); return; }
-      var wasEdit = !!s.id;
-      send("/in-market", "POST", { action: "queue_save", search: s }).then(function (r) {
-        if (r && r.ok) { imqClearForm(); imqLoad(); toast(wasEdit ? "Search updated." : "Added to your queue."); }
-        else { toast("Couldn’t save that search."); }
-      }).catch(function () { toast("Couldn’t save that search."); });
+      if (!s.query && !s.industry) { toast("Type what to search for first."); return; }
+      imqRun(s);
     });
 
-    // Delegated clicks for the dynamic queue rows + preview controls.
+    // Delegated clicks: mode toggle + company-size chips + preview (pick-list) controls.
     host.addEventListener("click", function (e) {
+      var mode = e.target.closest ? e.target.closest(".hs-mode") : null;
+      if (mode) { hsMode = mode.getAttribute("data-mode") || "title"; applyMode(); var q = host.querySelector("#imqQuery"); if (q) q.focus(); return; }
       var t = e.target.closest ? e.target.closest("[data-act]") : null; if (!t) return;
-      var act = t.getAttribute("data-act"), id = t.getAttribute("data-id");
-      if (act === "run") imqRun(id);
-      else if (act === "edit") imqEdit(id);
-      else if (act === "del") imqDelete(id);
-      else if (act === "canceledit") imqClearForm();
+      var act = t.getAttribute("data-act");
+      if (act === "sizetoggle") { var v = t.getAttribute("data-size"), k = imqSizes.indexOf(v); if (k >= 0) imqSizes.splice(k, 1); else imqSizes.push(v); syncImqSizes(); }
+      else if (act === "sizeclear") { imqSizes = []; syncImqSizes(); }
       else if (act === "pvclose") { imQPreview = null; imqRenderPreview(); }
       else if (act === "pvcommit") imqCommit();
       else if (act === "pvselnew") imqSelect("new");
@@ -2950,265 +2875,95 @@
       if (act === "pvtoggle") { imQPreview.picks[parseInt(t.getAttribute("data-i"), 10)] = t.checked; imqUpdatePvCount(); }
       else if (act === "pvall") { var on = t.checked, leads = imQPreview.leads || []; for (var i = 0; i < leads.length; i++) imQPreview.picks[i] = on; imqRenderPreview(); }
     });
+    applyMode();
+  }
 
-    imqLoad();
+  // Portal-grade styling for the Hire Signals search + company pick-list. Kept inline (not in
+  // command.css) so the whole view ships in one file, and built on the app's theme tokens
+  // (--brand/--surface/--border/--text…) so it tracks light + dark automatically.
+  function hsProCss() {
+    return '<style id="hsProCss">' +
+      '.im-hero{max-width:1060px}' +
+      '.im-hero .im-title{margin-bottom:6px}' +
+      // search card
+      '.hs-card{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:20px;background:linear-gradient(180deg,var(--surface-2),var(--surface));padding:22px 24px 24px;box-shadow:var(--shadow)}' +
+      '.hs-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--grad)}' +
+      '.hs-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}' +
+      '.hs-head-l{display:flex;gap:13px;align-items:center;min-width:0}' +
+      '.hs-ic{font-size:24px;line-height:1;flex:0 0 auto}' +
+      '.hs-title{font-size:18px;font-weight:800;letter-spacing:-.01em;color:var(--text)}' +
+      '.hs-sub{font-size:12.5px;color:var(--text-muted);margin-top:3px}' +
+      '.hs-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.02em;color:var(--brand-2);background:color-mix(in srgb,var(--brand-2) 12%,transparent);border:1px solid color-mix(in srgb,var(--brand-2) 35%,transparent);border-radius:999px;padding:5px 11px;white-space:nowrap;flex:0 0 auto}' +
+      // mode toggle (segmented tabs)
+      '.hs-modes{display:inline-flex;gap:2px;padding:3px;margin-bottom:12px;background:var(--surface);border:1px solid var(--border-strong);border-radius:12px}' +
+      '.hs-mode{appearance:none;border:none;background:none;cursor:pointer;font:inherit;font-size:12.5px;font-weight:600;color:var(--text-muted);padding:7px 15px;border-radius:9px;transition:all .13s;white-space:nowrap}' +
+      '.hs-mode:hover{color:var(--text)}' +
+      '.hs-mode.active{background:var(--grad);color:#0a0a12;font-weight:700;box-shadow:0 4px 12px -5px rgba(124,92,255,.6)}' +
+      // form
+      '.hs-form{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}' +
+      '.hs-field{display:flex;align-items:center;gap:9px;padding:0 13px;height:48px;border:1px solid var(--border-strong);border-radius:12px;background:var(--surface);transition:border-color .15s,box-shadow .15s;cursor:text}' +
+      '.hs-field:focus-within{border-color:var(--brand-2);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-2) 20%,transparent)}' +
+      '.hs-field.hs-grow{flex:1 1 280px}' +
+      '.hs-field.hs-loc{flex:1 1 180px}' +
+      '.hs-fic{font-size:15px;opacity:.6;flex:0 0 auto}' +
+      '.im-hero .hs-in{border:none;background:transparent;padding:0;height:100%;flex:1;min-width:0;font-size:14px;color:var(--text);box-shadow:none}' +
+      '.im-hero .hs-in:focus{outline:none;box-shadow:none;border:none}' +
+      '.hs-in::placeholder{color:var(--text-dim)}' +
+      '.hs-go{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 26px;border-radius:12px;font-size:14.5px;font-weight:700;box-shadow:0 10px 26px -10px rgba(124,92,255,.6)}' +
+      '.hs-go .hs-arrow{transition:transform .15s}.hs-go:hover .hs-arrow{transform:translateX(3px)}' +
+      '.im-hero .hs-go[disabled]{opacity:.65;cursor:default}' +
+      // company-size segmented control
+      '.hs-sizes{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}' +
+      '.hs-sizes-l{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted)}' +
+      '.hs-seg{display:inline-flex;flex-wrap:wrap;gap:6px}' +
+      '.im-hero .imq-size{padding:8px 14px;border-radius:10px;border:1px solid var(--border-strong);background:var(--surface);color:var(--text-muted);font-size:12.5px;font-weight:600;cursor:pointer;transition:all .13s}' +
+      '.im-hero .imq-size:hover{color:var(--text);border-color:var(--brand-2)}' +
+      '.im-hero .imq-size.active{background:var(--grad);color:#0a0a12;border-color:transparent;font-weight:700;box-shadow:0 6px 16px -8px rgba(124,92,255,.7)}' +
+      '.hs-clear{background:none;border:none;color:var(--text-dim);font-size:12px;cursor:pointer;padding:4px}.hs-clear:hover{color:var(--text)}' +
+      // hand-off note
+      '.im-handoff{margin-top:16px;display:flex;gap:10px;align-items:flex-start;padding:13px 16px;border:1px solid var(--border);border-radius:14px;background:var(--surface);font-size:12.5px;color:var(--text-muted);line-height:1.5}' +
+      '.im-handoff a{color:var(--brand-2);font-weight:600;text-decoration:none}.im-handoff a:hover{text-decoration:underline}' +
+      // company pick-list (results)
+      '.im-hero .imq-pv{margin-top:18px;border:1px solid var(--border);border-radius:16px;background:var(--surface);overflow:hidden}' +
+      '.im-hero .imq-pv-head{padding:14px 18px;font-size:13.5px;color:var(--text);border-bottom:1px solid var(--border);background:var(--surface-2)}' +
+      '.im-hero .imq-pv-stats{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:12px 18px;font-size:12.5px;color:var(--text-muted);border-bottom:1px solid var(--border)}' +
+      '.im-hero .imq-pv-list{max-height:440px;overflow-y:auto}' +
+      '.im-hero .imq-pv-row{display:flex;align-items:center;gap:12px;padding:11px 18px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s;font-size:13.5px}' +
+      '.im-hero .imq-pv-row:hover{background:var(--surface-2)}.im-hero .imq-pv-row:last-child{border-bottom:none}' +
+      '.im-hero .imq-pv-row input[type=checkbox]{width:17px;height:17px;accent-color:var(--brand);flex:0 0 auto;cursor:pointer}' +
+      '.im-hero .imq-pv-badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;flex:0 0 auto;white-space:nowrap}' +
+      '.im-hero .imq-pv-badge.new{background:color-mix(in srgb,var(--accent-green) 16%,transparent);color:var(--accent-green)}' +
+      '.im-hero .imq-pv-badge.pool{background:var(--surface-2);color:var(--text-dim)}' +
+      '.im-hero .imq-pv-co{font-weight:700;color:var(--text)}' +
+      '.im-hero .imq-pv-dom{color:var(--text-muted);font-size:12px}' +
+      '.im-hero .imq-pv-roles{margin-left:auto;color:var(--text-muted);font-size:12px;flex:0 0 auto}' +
+      '.im-hero .imq-pv-loc{font-size:12px;color:var(--text-dim)}' +
+      '.im-hero .imq-pv-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 18px;background:var(--surface-2);border-top:1px solid var(--border)}' +
+      '.im-hero .imq-pv-note{font-size:11.5px;color:var(--text-dim);flex:1 1 240px}' +
+      '.im-hero .imq-pv-quick{display:inline-flex;gap:5px;flex-wrap:wrap;align-items:center}' +
+      '.im-hero .im-mini{background:var(--surface);border:1px solid var(--border-strong);color:var(--text-muted);border-radius:8px;padding:5px 10px;font-size:11.5px;cursor:pointer;transition:all .12s}' +
+      '.im-hero .im-mini:hover{color:var(--text);border-color:var(--brand-2)}' +
+      '@media(max-width:560px){.hs-card{padding:18px 16px}.hs-go{flex:1 1 100%}.hs-modes{width:100%;justify-content:stretch}.hs-mode{flex:1}.im-hero .imq-pv-dom,.im-hero .imq-pv-loc{display:none}.im-hero .imq-pv-head,.im-hero .imq-pv-stats,.im-hero .imq-pv-row,.im-hero .imq-pv-foot{padding-left:14px;padding-right:14px}}' +
+      "</style>";
   }
 
   function renderInMarket(el) {
-    imPicks = {}; imMinScore = 0; imShotFilter = null; imSelectedSignals = []; imSelectedIndustries = []; imSelectedSizes = []; imBreakdown = []; imNeeds = []; imNeedFn = "";
     imQPreview = null; imQEditId = null; imQBusy = false;
     el.innerHTML =
+      hsProCss() +
       '<div class="im-hero">' +
         '<div class="im-bar">' +
           '<h1 class="im-title">Who\'s hiring <span class="gradient-text">right now.</span></h1>' +
-          '<div class="im-modes" id="imModes">' +
-            '<button type="button" class="im-mode active" data-mode="industry">Industry / market</button>' +
-            '<button type="button" class="im-mode" data-mode="company">Company name</button>' +
-            '<button type="button" class="im-mode" data-mode="title">Job title</button>' +
-          "</div>" +
+          '<span class="im-source-note muted">Powered by JSearch · nationwide by default</span>' +
         "</div>" +
-        // TARGETED JSEARCH — the headline control: author exact searches, queue them, run on demand,
-        // and PICK which companies actually get scraped. This is how you target who you want (vs. the
-        // old random rotation, now off). Rendered by renderTargetedQueue() right after innerHTML.
+        // The ONE control: pick a mode (title / industry / company), search, narrow by size + location,
+        // then PICK which companies to pull. Rendered by renderTargetedQueue() right after innerHTML.
         '<div id="imTargeted" class="im-targeted"></div>' +
-        '<form class="im-search" id="imForm">' +
-          '<span class="ico">⌕</span>' +
-          '<input id="imQuery" type="text" autocomplete="off" placeholder="' + esc(IM_PLACEHOLDER[imMode]) + '" />' +
-          '<button type="submit" class="btn btn-primary" id="imSearchBtn">Find companies</button>' +
-        "</form>" +
-        // Date search, filter to freshly-posted roles for warmer, more targeted outreach.
-        '<div class="im-daterow">' +
-          '<span class="im-datelbl">📅 Posted within</span>' +
-          '<select id="imPosted" class="im-date">' +
-            [["0", "Any time"], ["1", "Last 24 hours"], ["3", "Last 3 days"], ["7", "Last 7 days"], ["14", "Last 14 days"], ["30", "Last 30 days"]]
-              .map(function (o) { return '<option value="' + o[0] + '"' + (String(imPostedWithin) === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") +
-          "</select>" +
-          '<button type="button" class="btn btn-primary btn-sm" id="imPostedGo">Search this range</button>' +
-          '<span class="im-datehint muted">Fresher posts = warmer outreach</span>' +
-        "</div>" +
-        // Company size, narrow by headcount band (multi-select chips). Click to refine.
-        '<div class="im-daterow im-sizerow">' +
-          '<span class="im-datelbl">👥 Company size</span>' +
-          IM_SIZES.map(function (s) { return '<button type="button" class="im-sizechip" data-size="' + esc(s.v) + '">' + esc(s.l) + "</button>"; }).join("") +
-          '<button type="button" class="im-mini" data-clear="size">Clear</button>' +
-          '<label class="im-confirmed" title="Show only companies with a confirmed (Wikidata) headcount, hide estimates"><input type="checkbox" id="imConfirmedSize"' + (imConfirmedSizeOnly ? " checked" : "") + "> Confirmed only</label>" +
-        "</div>" +
-        // Daily import read, populated on open so you see today's intake immediately.
-        '<div id="imImportBanner" class="im-import"></div>' +
-        // Entry to the curated decision-maker list (the daily database of real hiring managers).
-        '<div class="im-curation-cta">' +
-          '<button type="button" class="btn btn-primary btn-sm" id="imCurationBtn">🎯 Decision-maker list <span style="opacity:.8;font-weight:500">— real hiring managers, curated daily</span></button>' +
-          '<span class="muted" style="font-size:12px;margin-left:8px">Reviewed by you, then pushed to Email</span>' +
-        "</div>" +
-        // Industries, multi-select with Select all / Clear, in a compact scroll area.
-        '<div class="im-group" id="imIndGroup">' +
-          '<div class="im-group-head"><span class="im-group-title">Industries</span>' +
-            '<button type="button" class="im-mini" data-all="ind">Select all</button>' +
-            '<button type="button" class="im-mini" data-clear="ind">Clear</button>' +
-            '<button type="button" class="im-mini im-jobscrape" id="imJobScrape" title="Pull fresh hiring companies for the selected industries straight from the job feed (JSearch), with their websites — they flow into the pool and decision-maker research starts on them automatically.">⚡ Pull fresh jobs</button></div>' +
-          '<div class="im-industries im-scroll" id="imIndustries">' +
-            IM_INDUSTRIES.map(function (n) { return '<button type="button" class="im-chip" data-ind="' + esc(n) + '">' + esc(n) + "</button>"; }).join("") +
-          "</div>" +
-        "</div>" +
-        // Hiring signals, collapsed by default to de-clutter; Select all / Clear inside.
-        '<details class="im-group im-sig-details" id="imSigGroup">' +
-          '<summary class="im-group-summary">Hiring signals <span class="muted">- optional filter</span></summary>' +
-          '<div class="im-group-head im-group-head-sub">' +
-            '<button type="button" class="im-mini" data-all="sig">Select all</button>' +
-            '<button type="button" class="im-mini" data-clear="sig">Clear</button></div>' +
-          '<div class="im-signals" id="imSignals">' +
-            IM_SIGNALS.map(function (s) { return '<button type="button" class="im-sigchip" data-sig="' + esc(s.t) + '">' + esc(s.l) + "</button>"; }).join("") +
-          "</div>" +
-        "</details>" +
-      "</div>" +
-      '<div id="imSaved"></div>' +
-      '<div id="imBody"><div class="empty">Pick one or more industries (or Select all) to see who\'s hiring, ranked by hiring intent.</div></div>';
+        // What happens after you pull: everything downstream is automatic and lives in Clients.
+        '<div class="im-handoff"><span aria-hidden="true">✨</span><span>Pull the companies you want and the rest runs on its own. Decision-makers, verified emails, and screenshot videos are built automatically and appear in the <a href="#clients">Clients</a> tab.</span></div>' +
+      "</div>";
 
-    renderSavedSignals();
-    loadImportBanner();
     renderTargetedQueue($("#imTargeted"));
-    var curBtn = $("#imCurationBtn");
-    if (curBtn) curBtn.addEventListener("click", function () { renderCuration(); });
-
-    // ⚡ Pull fresh jobs: scrape the job feed (JSearch) for each SELECTED industry on demand. Each
-    // industry's hiring companies (with their websites) flow into the pool, then decision-maker
-    // research + email enrichment run on them automatically. Targeted, throttle-free intake.
-    var jobScrape = $("#imJobScrape");
-    if (jobScrape) jobScrape.addEventListener("click", function () {
-      var inds = imSelectedIndustries.slice();
-      if (!inds.length) { toast("Pick one or more industries first, then Pull fresh jobs."); return; }
-      jobScrape.disabled = true;
-      var orig = "⚡ Pull fresh jobs", total = 0, i = 0, anyConfigErr = false;
-      function step() {
-        if (i >= inds.length) {
-          jobScrape.disabled = false; jobScrape.textContent = orig;
-          if (anyConfigErr && !total) {
-            toast("Job feed isn't connected yet — add your JSearch (RapidAPI) key, then try again.");
-          } else {
-            toast("Pulled " + total.toLocaleString() + " hiring companies across " + inds.length +
-              " industr" + (inds.length === 1 ? "y" : "ies") + " — finding decision-makers now.");
-            loadImportBanner();   // refresh today's intake count
-          }
-          return;
-        }
-        var ind = inds[i++];
-        jobScrape.textContent = "Pulling " + ind + "… (" + i + "/" + inds.length + ")";
-        send("/in-market", "POST", { action: "jobfeed_search", industry: ind, limit: 200 })
-          .then(function (r) { if (r && r.data && typeof r.data.scraped === "number") total += r.data.scraped; step(); })
-          .catch(function (e) { if (e && (e.status === 409 || /jobfeed_not_configured/.test(String(e && e.error || e)))) anyConfigErr = true; step(); });
-      }
-      step();
-    });
-    var form = $("#imForm"), input = $("#imQuery");
-
-    function syncChips() {
-      Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
-        c.classList.toggle("active", imSelectedIndustries.indexOf(c.getAttribute("data-ind")) >= 0);
-      });
-    }
-    function syncSigChips() {
-      Array.prototype.forEach.call(el.querySelectorAll(".im-sigchip"), function (c) {
-        c.classList.toggle("active", imSelectedSignals.indexOf(c.getAttribute("data-sig")) >= 0);
-      });
-    }
-
-    // Build the active search from the current selections (multi-industry + signals + box).
-    function currentSearch() {
-      if (imMode === "company") {
-        var cv = input.value.trim();
-        return cv ? { criteria: { companyName: cv }, label: cv } : null;
-      }
-      if (imMode === "title") {
-        var tv = input.value.trim();
-        return tv ? { criteria: { roleQuery: tv }, label: 'hiring "' + tv + '"' } : null;
-      }
-      var crit = {}, labels = [];
-      if (imSelectedIndustries.length) {
-        crit.industries = imSelectedIndustries.slice();
-        labels.push(imSelectedIndustries.length === IM_INDUSTRIES.length ? "all industries"
-          : imSelectedIndustries.length === 1 ? imSelectedIndustries[0]
-          : imSelectedIndustries.length + " industries");
-      }
-      var q = input.value.trim();
-      if (q) { crit.query = q; labels.push(q); }
-      if (imSelectedSignals.length) labels.push(imSelectedSignals.length + " signal" + (imSelectedSignals.length === 1 ? "" : "s"));
-      if (!imSelectedIndustries.length && !q && !imSelectedSignals.length) return null;
-      return { criteria: crit, label: labels.join(" · ") };
-    }
-    function runNow() {
-      clearTimeout(imSearchTimer);
-      var s = currentSearch();
-      if (s) runSearch(s.criteria, s.label);
-      else $("#imBody").innerHTML = '<div class="empty">' + (imMode === "company"
-        ? "Type a company name above, then your date, size and confirmed-only filters apply to it too."
-        : imMode === "title"
-        ? "Type a job title (keywords) above, we'll surface every US company hiring that role, and show only the matching roles per company."
-        : "Pick one or more industries (or Select all) to see who's hiring.") + "</div>";
-    }
-    function scheduleSearch() { clearTimeout(imSearchTimer); imSearchTimer = setTimeout(runNow, 350); }
-
-    // Search mode toggle: industry/market OR company name.
-    Array.prototype.forEach.call(el.querySelectorAll(".im-mode"), function (m) {
-      m.addEventListener("click", function () {
-        imMode = m.getAttribute("data-mode");
-        Array.prototype.forEach.call(el.querySelectorAll(".im-mode"), function (x) { x.classList.toggle("active", x === m); });
-        input.value = ""; input.placeholder = IM_PLACEHOLDER[imMode];
-        $("#imIndGroup").style.display = (imMode === "industry") ? "" : "none";
-        $("#imSigGroup").style.display = (imMode === "industry") ? "" : "none";
-        $("#imBody").innerHTML = '<div class="empty">' + (imMode === "industry"
-          ? "Pick one or more industries (or Select all) to see who's hiring."
-          : imMode === "title"
-          ? "Type a job title (keywords) to find every US company hiring that role, showing only the matching roles per company."
-          : "Type a company name to check if they're hiring right now, and who owns the open roles.") + "</div>";
-        input.focus();
-      });
-    });
-
-    form.addEventListener("submit", function (e) { e.preventDefault(); runNow(); });
-
-    // Date search: pick a timeframe in the dropdown, then press the button to run the
-    // search for that range. The dropdown only stores the choice; the button triggers it,
-    // so the action is explicit and you get a clear loading state + updated count.
-    var postedSel = $("#imPosted"), postedGo = $("#imPostedGo");
-    function applyPosted() {
-      if (postedSel) imPostedWithin = parseInt(postedSel.value, 10) || 0;
-      var s = currentSearch();
-      if (s) runSearch(s.criteria, s.label);
-      else $("#imBody").innerHTML = '<div class="empty">Pick one or more industries (or Select all) first, then choose a timeframe and press <b>Search this range</b>.</div>';
-    }
-    if (postedSel) postedSel.addEventListener("change", function () { imPostedWithin = parseInt(postedSel.value, 10) || 0; });
-    if (postedGo) postedGo.addEventListener("click", applyPosted);
-
-    // Company-size chips: multi-select toggle → re-run the search narrowed to those bands.
-    function syncSizeChips() {
-      Array.prototype.forEach.call(el.querySelectorAll(".im-sizechip"), function (c) {
-        c.classList.toggle("active", imSelectedSizes.indexOf(c.getAttribute("data-size")) >= 0);
-      });
-    }
-    Array.prototype.forEach.call(el.querySelectorAll(".im-sizechip"), function (c) {
-      c.addEventListener("click", function () {
-        var v = c.getAttribute("data-size");
-        var i = imSelectedSizes.indexOf(v);
-        if (i >= 0) imSelectedSizes.splice(i, 1); else imSelectedSizes.push(v);
-        syncSizeChips(); scheduleSearch();
-      });
-    });
-    var sizeClear = el.querySelector('[data-clear="size"]');
-    if (sizeClear) sizeClear.addEventListener("click", function () { imSelectedSizes = []; syncSizeChips(); scheduleSearch(); });
-    var confSize = $("#imConfirmedSize");
-    if (confSize) confSize.addEventListener("change", function () { imConfirmedSizeOnly = confSize.checked; scheduleSearch(); });
-
-    // Industry chips: multi-select toggle → debounced search.
-    Array.prototype.forEach.call(el.querySelectorAll(".im-chip"), function (c) {
-      c.addEventListener("click", function () {
-        var ind = c.getAttribute("data-ind");
-        var i = imSelectedIndustries.indexOf(ind);
-        if (i >= 0) imSelectedIndustries.splice(i, 1); else imSelectedIndustries.push(ind);
-        syncChips(); scheduleSearch();
-      });
-    });
-    // Signal chips: multi-select toggle → debounced search.
-    Array.prototype.forEach.call(el.querySelectorAll(".im-sigchip"), function (c) {
-      c.addEventListener("click", function () {
-        var t = c.getAttribute("data-sig");
-        var i = imSelectedSignals.indexOf(t);
-        if (i >= 0) imSelectedSignals.splice(i, 1); else imSelectedSignals.push(t);
-        syncSigChips(); scheduleSearch();
-      });
-    });
-    // Select all / Clear for each group.
-    Array.prototype.forEach.call(el.querySelectorAll(".im-mini"), function (b) {
-      b.addEventListener("click", function () {
-        if (b.getAttribute("data-all") === "ind") imSelectedIndustries = IM_INDUSTRIES.slice();
-        else if (b.getAttribute("data-clear") === "ind") imSelectedIndustries = [];
-        else if (b.getAttribute("data-all") === "sig") imSelectedSignals = IM_SIGNALS.map(function (s) { return s.t; });
-        else if (b.getAttribute("data-clear") === "sig") imSelectedSignals = [];
-        syncChips(); syncSigChips(); scheduleSearch();
-      });
-    });
-
-    function runSearch(criteria, label) {
-      var body = $("#imBody"); body.innerHTML = loading();
-      imPicks = {}; imMinScore = 0; imLabel = label || "";
-      var payload = { limit: 500 };
-      if (criteria.companyName) payload.companyName = criteria.companyName;
-      if (criteria.industries) payload.industries = criteria.industries;
-      if (criteria.query) payload.query = criteria.query;
-      if (criteria.roleQuery) payload.roleQuery = criteria.roleQuery;
-      if (imSelectedSignals.length) payload.signalTypes = imSelectedSignals.slice();
-      if (imPostedWithin) payload.postedWithinDays = imPostedWithin;
-      if (imSelectedSizes.length) payload.headcountBands = imSelectedSizes.slice();
-      if (imConfirmedSizeOnly) payload.confirmedSizeOnly = true;
-      send("/in-market", "POST", payload).then(function (r) {
-        if (!r.ok) { body.innerHTML = needsSetup(); return; }
-        inMarketResults = (r.data && r.data.leads) || [];
-        imTotal = (r.data && typeof r.data.pulled === "number") ? r.data.pulled : inMarketResults.length;
-        imStats = (r.data && r.data.stats) || null;
-        imBreakdown = (r.data && r.data.signalBreakdown) || [];
-        imNeeds = (r.data && r.data.needsBreakdown) || [];
-        renderImResults();
-      }).catch(function () { body.innerHTML = needsSetup(); });
-    }
   }
 
   // Render the results region: a bulk toolbar (select-all + narrow-down) over the cards.

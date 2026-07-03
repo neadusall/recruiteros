@@ -487,6 +487,14 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .imq-optlbl { font-weight: 700; color: var(--text); }
 .imq-emp { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .imq-opts .im-mini { margin-left: auto; }
+/* Company-size band chips inside the builder (multi-select). Match the size-chip look elsewhere. */
+.imq-sizes { gap: 6px; }
+.imq-sizes .imq-optlbl { margin-right: 4px; }
+.imq-size { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2, #11151c); color: var(--text-muted); cursor: pointer; }
+.imq-size:hover { border-color: var(--brand-2); }
+.imq-size.active { background: var(--brand-2); border-color: var(--brand-2); color: #04121e; font-weight: 600; }
+.imq-sizes .im-mini { margin-left: 4px; }
+.im-source-note { font-size: 12px; }
 
 .imq-list { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
 .imq-empty { font-size: 12.5px; color: var(--text-muted); padding: 10px 12px; border: 1px dashed var(--border-strong); border-radius: 12px; }

@@ -21,15 +21,20 @@ const MAX_SEARCHES = 200;
 export type DatePosted = "all" | "today" | "3days" | "week" | "month";
 /** JSearch employment_types values. */
 export type EmploymentType = "FULLTIME" | "PARTTIME" | "CONTRACTOR" | "INTERN";
+/** Company headcount bands (mirrors companySize.ts Band) used to narrow a search by size. */
+export type HeadcountBand = "1-10" | "11-50" | "51-200" | "201-500" | "501-1000" | "1001-5000" | "5000+";
 
 export interface TargetedSearch {
   id: string;
   name: string;                  // a label you give it, e.g. "NYC controllers"
-  query: string;                 // role/keywords — the JSearch `query` (required)
+  query: string;                 // job title / role keywords — part of the JSearch `query`
+  industry?: string;             // industry / market keywords — folded into the JSearch `query` too
   location?: string;             // "New York, NY" / "Texas" / "United States" (default: nationwide)
   datePosted: DatePosted;        // recency window
   employmentTypes?: EmploymentType[];
   remoteOnly?: boolean;
+  headcountBands?: HeadcountBand[]; // narrow to companies in these size bands (0 = any size)
+  confirmedSizeOnly?: boolean;   // when narrowing by size, keep only authoritative (Wikidata) headcounts
   limit: number;                 // jobs to pull (10–500)
   createdAt: string;
   updatedAt: string;
@@ -65,6 +70,12 @@ function cleanEmployment(arr: unknown): EmploymentType[] | undefined {
   const out = arr.map((x) => String(x).toUpperCase()).filter((x) => ok.includes(x)) as EmploymentType[];
   return out.length ? Array.from(new Set(out)) : undefined;
 }
+function cleanBands(arr: unknown): HeadcountBand[] | undefined {
+  if (!Array.isArray(arr)) return undefined;
+  const ok = ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5000+"];
+  const out = arr.map((x) => String(x).trim()).filter((x) => ok.includes(x)) as HeadcountBand[];
+  return out.length ? Array.from(new Set(out)) : undefined;
+}
 
 /** List all saved targeted searches (newest first). */
 export async function listSearches(): Promise<TargetedSearch[]> {
@@ -80,17 +91,22 @@ export async function getSearch(id: string): Promise<TargetedSearch | undefined>
 /** Create or update a targeted search. Pass an `id` to update; omit it to create. */
 export async function saveSearch(input: Partial<TargetedSearch>): Promise<TargetedSearch> {
   const query = String(input.query ?? "").trim();
-  if (!query) { const e = new Error("query (role/keywords) is required"); (e as any).status = 422; throw e; }
+  const industry = String(input.industry ?? "").trim();
+  // A search needs at least ONE keyword source — a job title OR an industry/market.
+  if (!query && !industry) { const e = new Error("a job title or an industry is required"); (e as any).status = 422; throw e; }
   const now = new Date().toISOString();
   const rows = await load();
   const base: TargetedSearch = {
     id: String(input.id || "") || newId(),
-    name: String(input.name ?? "").trim() || query,
+    name: String(input.name ?? "").trim() || query || industry,
     query,
+    industry: industry || undefined,
     location: input.location ? String(input.location).trim() : undefined,
     datePosted: cleanDate(input.datePosted),
     employmentTypes: cleanEmployment(input.employmentTypes),
     remoteOnly: input.remoteOnly === true,
+    headcountBands: cleanBands(input.headcountBands),
+    confirmedSizeOnly: input.confirmedSizeOnly === true,
     limit: clampLimit(input.limit),
     createdAt: now,
     updatedAt: now,
