@@ -2619,7 +2619,7 @@
    * TARGETED JSEARCH panel — the headline Hire Signals control. Author an exact search
    * (role/keywords + location + recency + employment type), save it to a queue, RUN it on demand,
    * then PICK which companies actually merge into the pool. Nothing scrapes until you press Run, and
-   * nothing enters the pool until you commit your picks — so you target exactly who you want.
+   * nothing enters the pool until you commit your picks, so you target exactly who you want.
    */
   function renderTargetedQueue(host) {
     if (!host) return;
