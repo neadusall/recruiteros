@@ -3128,7 +3128,8 @@
       '.bq-sum{font-size:12px;color:#9aa0b4;font-family:ui-monospace,monospace}' +
       '.bq-add{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}' +
       '.bq-add input{background:#0f0f18;border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e8e8f0;padding:8px 11px;font-size:13px}' +
-      '.bq-add .bq-kw{min-width:230px;flex:1}.bq-add .bq-loc{width:150px}' +
+      '.bq-add .bq-kw{min-width:230px;flex:1}.bq-add .bq-loc{width:150px}.bq-add .bq-lim{width:74px}' +
+      '.bq-limwrap{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#9aa0b4}' +
       '.bq-row{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center;padding:10px 0;border-top:1px solid rgba(255,255,255,.05)}' +
       '.bq-row .bq-name{font-weight:600;font-size:13.5px;color:#e8e8f0}' +
       '.bq-row .bq-name small{color:#6b7186;font-weight:400}' +
@@ -3185,6 +3186,7 @@
           '<div class="bq-add">' +
             '<input class="bq-kw" id="bqKw" placeholder="Job title or industry (e.g. controller fintech)" />' +
             '<input class="bq-loc" id="bqLoc" placeholder="Location (optional)" />' +
+            '<label class="bq-limwrap" title="Jobs to pull for this search (10–500). Keep it low for a test — JSearch bills ~1 request per 10 jobs.">Jobs <input class="bq-lim" id="bqLimit" type="number" min="10" max="500" step="10" value="50" /></label>' +
             '<button class="btn btn-primary btn-sm" id="bqAdd">➕ Add to queue</button>' +
             (searches.length ? '<button class="btn btn-ghost btn-sm" id="bqRunAll">▶ Run all</button>' : "") +
           "</div>" +
@@ -3206,8 +3208,9 @@
       var kw = (host.querySelector("#bqKw") || {}).value; kw = (kw || "").trim();
       if (!kw) { toast("Type a job title or industry first."); return; }
       var loc = ((host.querySelector("#bqLoc") || {}).value || "").trim();
+      var lim = parseInt(((host.querySelector("#bqLimit") || {}).value), 10); lim = Math.max(10, Math.min(500, lim || 50));
       var btn = host.querySelector("#bqAdd"); if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
-      send("/in-market", "POST", { action: "queue_save", search: { name: kw + (loc ? " · " + loc : ""), query: kw, location: loc, limit: 100 } }).then(function (r) {
+      send("/in-market", "POST", { action: "queue_save", search: { name: kw + (loc ? " · " + loc : "") + " · " + lim, query: kw, location: loc, limit: lim } }).then(function (r) {
         if (!r || !r.ok || !r.data || !r.data.search) { toast("Couldn't add that search."); if (btn) { btn.disabled = false; btn.textContent = "➕ Add to queue"; } return; }
         var id = r.data.search.id;
         send("/in-market", "POST", { action: "queue_enqueue", id: id }).then(function (er) {
