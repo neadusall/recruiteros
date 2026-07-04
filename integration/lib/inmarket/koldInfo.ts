@@ -23,7 +23,6 @@
  */
 
 import { parseCsv } from "../senders/csv";
-import { splitFullName } from "./email";
 
 /** A prospect prepared for the KoldInfo upload template. */
 export interface KoldInfoExportRow {
@@ -142,7 +141,7 @@ function detectByContent(grid: string[][], pred: (v: string) => boolean, min: nu
  * Only rows carrying a usable email are returned (a no-hit row from KoldInfo is dropped).
  */
 export function parseKoldInfoCsv(text: string): KoldInfoResult[] {
-  const grid = parseCsv(text);
+  const grid = parseCsv((text || "").replace(/^﻿/, "")); // strip a UTF-8 BOM if present
   if (grid.length < 2) return [];
   const map = detect(grid[0]);
   const taken = new Set<number>(Object.values(map).filter((v): v is number => v !== undefined));
@@ -184,10 +183,78 @@ export function parseKoldInfoCsv(text: string): KoldInfoResult[] {
 
 /* ---------------------------------------------------------------- matching ---- */
 
-/** Normalized key for name+domain fallback matching when ros_id didn't survive the round-trip. */
-export function koldInfoMatchKey(fullName: string | undefined, domain: string | undefined, email?: string): string {
-  const dom = (domain || (email ? email.split("@")[1] : "") || "").toLowerCase().trim();
-  let first = "", last = "";
-  if (fullName) { const s = splitFullName(fullName); first = s.firstName || ""; last = s.lastName || ""; }
-  return (first + "|" + last + "|" + dom).toLowerCase().replace(/[^a-z0-9|.]/g, "");
+/** The minimal shape of a curated prospect the linker needs (CuratedProspect satisfies it). */
+export interface KoldLinkRow {
+  id: string;
+  company: string;
+  domain?: string;
+  managerName?: string;
+  likelyEmail?: string;
+  score: number;
+  status: string;
+  emailValidated?: boolean;
+  emailCatchAll?: boolean;
+}
+
+/** One resolved link: which prospect id gets which address (and a name, if KoldInfo found one). */
+export interface KoldLink { id: string; email: string; name?: string; }
+
+function koldCompanyKey(company?: string, domain?: string): string {
+  return ((company || "") + "|" + (domain || "")).toLowerCase().replace(/[^a-z0-9|.]/g, "");
+}
+
+/** An "open" slot is one we can still fill: has a domain, no confirmed/catch-all verdict, not locked. */
+function isOpenSlot(r: KoldLinkRow): boolean {
+  return !!r.domain && !r.emailValidated && !r.emailCatchAll
+    && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed";
+}
+
+/**
+ * PURE matching pass (no I/O, no verification — unit-testable). Links each returned contact to a
+ * prospect: by our passthrough ros_id first, else to an un-claimed open slot at the same company/
+ * domain, else any open slot on that domain (so a company lookup that returns several people fills
+ * that company's other decision-maker slots). Each address and each prospect is used at most once,
+ * and any address already confirmed on some row is skipped so we never duplicate a live contact.
+ */
+export function planKoldInfoLinks(rows: KoldLinkRow[], results: KoldInfoResult[]): { links: KoldLink[]; unmatched: number } {
+  const byId = new Map<string, KoldLinkRow>();
+  const bucket = new Map<string, KoldLinkRow[]>();
+  const usedEmail = new Set<string>();
+  for (const r of rows) {
+    byId.set(r.id, r);
+    if (r.emailValidated && r.likelyEmail) usedEmail.add(r.likelyEmail.toLowerCase()); // don't re-hand out a live address
+    if (!isOpenSlot(r)) continue;
+    const k = koldCompanyKey(r.company, r.domain);
+    const list = bucket.get(k); if (list) list.push(r); else bucket.set(k, [r]);
+  }
+  // Un-named slots first (KoldInfo is most valuable when it names cold), then highest hiring intent.
+  for (const list of bucket.values()) list.sort((a, b) => (Number(!!a.managerName) - Number(!!b.managerName)) || (b.score - a.score));
+
+  const claimed = new Set<string>();
+  const pickByDomain = (dom: string): KoldLinkRow | undefined => {
+    for (const [k, list] of bucket) {
+      if (!k.endsWith("|" + dom)) continue;
+      const s = list.find((r) => !claimed.has(r.id));
+      if (s) return s;
+    }
+    return undefined;
+  };
+
+  const links: KoldLink[] = [];
+  let unmatched = 0;
+  for (const res of results) {
+    const email = (res.email || "").toLowerCase().trim();
+    if (!email || !email.includes("@")) continue;
+    if (usedEmail.has(email)) continue;                        // one address used once per import
+    const name = res.fullName || [res.firstName, res.lastName].filter(Boolean).join(" ").trim() || undefined;
+    const dom = (res.domain || email.split("@")[1] || "").toLowerCase();
+    let row = res.rosId ? byId.get(res.rosId) : undefined;
+    if (row && (claimed.has(row.id) || !isOpenSlot(row))) row = undefined;
+    if (!row) row = bucket.get(koldCompanyKey(res.company, dom))?.find((r) => !claimed.has(r.id)) || pickByDomain(dom);
+    if (!row) { unmatched++; continue; }
+    claimed.add(row.id);
+    usedEmail.add(email);
+    links.push({ id: row.id, email, name });
+  }
+  return { links, unmatched };
 }

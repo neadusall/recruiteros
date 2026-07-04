@@ -856,19 +856,13 @@ export async function koldInfoExportRows(opts: { limit?: number; mode?: "seed" |
   });
 }
 
-/** company|domain bucket key for distributing a company's returned contacts across its open slots. */
-function koldCompanyKey(company: string | undefined, domain: string | undefined): string {
-  return ((company || "") + "|" + (domain || "")).toLowerCase().replace(/[^a-z0-9|.]/g, "");
-}
-
 /**
- * Merge a parsed KoldInfo result set back into the curated pool. For each returned contact it re-links
- * to a prospect — by our passthrough ros_id first, else to an un-claimed slot at the same company/
- * domain (so a company lookup that returns several people fills that company's other decision-maker
- * slots). It LEARNS THE NAME for an un-named slot, then RE-VERIFIES every address through the Reoon
- * credits we already own before trusting it (a vendor "verified" flag is never taken at face value),
- * and TEACHES the per-domain pattern cache from each confirmed hit so one address unlocks the whole
- * domain. Never clobbers an already-validated row; a Reoon-rejected address is counted and discarded.
+ * Merge a parsed KoldInfo result set back into the curated pool. Linking (which contact → which
+ * prospect) is delegated to the pure planKoldInfoLinks() in koldInfo.ts; here we LEARN THE NAME for an
+ * un-named slot, then RE-VERIFY every address through the Reoon credits we already own before trusting
+ * it (a vendor "verified" flag is never taken at face value), and TEACH the per-domain pattern cache
+ * from each confirmed hit so one address unlocks the whole domain. Never clobbers an already-validated
+ * row; a Reoon-rejected address is counted and discarded.
  */
 export async function applyKoldInfoResults(
   results: KoldInfoResult[],
@@ -878,75 +872,44 @@ export async function applyKoldInfoResults(
   if (!results.length) return summary;
   const { verifyDetailedBatch } = await import("./emailVerify");
   const { learnFromConfirmedEmail, inferPattern, flushPatternCache } = await import("./emailPattern");
+  const { planKoldInfoLinks } = await import("./koldInfo");
 
   return withCurationLock(async () => {
     const rows = await load();
+    const { links, unmatched } = planKoldInfoLinks(rows, results);
+    summary.unmatched = unmatched;
+    summary.matched = links.length;
+    if (!links.length) return summary;
+
     const byId = new Map(rows.map((r) => [r.id, r] as const));
-    // company/domain -> open (un-confirmed, unlocked) slots, best score first, un-named preferred.
-    const bucket = new Map<string, CuratedProspect[]>();
-    for (const r of rows) {
-      if (!r.domain || r.emailValidated || r.emailCatchAll) continue;
-      if (r.status === "enrolled" || r.status === "queued" || r.status === "suppressed") continue;
-      const k = koldCompanyKey(r.company, r.domain);
-      const list = bucket.get(k); if (list) list.push(r); else bucket.set(k, [r]);
-    }
-    for (const list of bucket.values()) list.sort((a, b) => (Number(!!a.managerName) - Number(!!b.managerName)) || (b.score - a.score));
+    // RE-VERIFY every KoldInfo address through our own Reoon credits before trusting it.
+    const verdicts = await verifyDetailedBatch(links.map((l) => ({ id: l.id, email: l.email })));
 
-    // 1) Re-link each returned contact to a prospect.
-    const linked: Array<{ row: CuratedProspect; email: string; name?: string }> = [];
-    const claimed = new Set<string>();
-    const pickSlot = (dom: string): CuratedProspect | undefined => {
-      for (const [k, list] of bucket) {
-        if (!k.endsWith("|" + dom)) continue;
-        const s = list.find((r) => !claimed.has(r.id));
-        if (s) return s;
-      }
-      return undefined;
-    };
-    for (const res of results) {
-      const email = (res.email || "").toLowerCase().trim();
-      if (!email || !email.includes("@")) continue;
-      const name = res.fullName || [res.firstName, res.lastName].filter(Boolean).join(" ").trim() || undefined;
-      const dom = (res.domain || email.split("@")[1] || "").toLowerCase();
-      let row = res.rosId ? byId.get(res.rosId) : undefined;
-      if (row && (claimed.has(row.id) || row.emailValidated)) row = undefined;
-      if (!row) row = (bucket.get(koldCompanyKey(res.company, dom))?.find((r) => !claimed.has(r.id))) || pickSlot(dom);
-      if (!row) { summary.unmatched++; continue; }
-      if (claimed.has(row.id) || row.emailValidated) continue;
-      claimed.add(row.id);
-      linked.push({ row, email, name });
-      summary.matched++;
-    }
-    if (!linked.length) return summary;
-
-    // 2) RE-VERIFY every KoldInfo address through our own Reoon credits before trusting it.
-    const verdicts = await verifyDetailedBatch(linked.map((l) => ({ id: l.row.id, email: l.email })));
-
-    // 3) Merge. Fill the name for an un-named slot, then apply the verdict; a Reoon-rejected address is
-    //    counted and discarded rather than written over the row.
-    for (const { row, email, name } of linked) {
-      const v = verdicts.get(row.id);
+    for (const link of links) {
+      const row = byId.get(link.id);
+      if (!row) continue;
+      const v = verdicts.get(link.id);
       const status = v?.status;
       if (status === "invalid" || v?.reason === "role_account") { summary.invalid++; continue; }
 
-      if (name && !row.managerName) {
-        row.managerName = name;
+      if (link.name && !row.managerName) {
+        row.managerName = link.name;
         row.managerVia = "koldinfo";
-        if (!row.managerTier || row.managerTier === "company_only") row.managerTier = "named";
+        row.managerTier = "named";
         summary.named++;
       }
-      row.likelyEmail = email;
-      const pat = inferPattern(row.managerName, email);
+      row.likelyEmail = link.email;
+      const pat = inferPattern(row.managerName, link.email);
       if (pat) row.emailPattern = pat;
       if (!row.emailCandidates) row.emailCandidates = [];
-      if (!row.emailCandidates.includes(email)) row.emailCandidates.unshift(email);
+      if (!row.emailCandidates.includes(link.email)) row.emailCandidates.unshift(link.email);
       row.emailSource = "koldinfo";
 
       if (status === "valid") {
         row.emailValidated = true; row.emailInvalid = false; row.emailCatchAll = false; row.validatedAt = nowIso;
         if (row.status === "sourced" || row.status === "named") row.status = "contactable";
         summary.found++;
-        await learnFromConfirmedEmail(row.managerName, email, "koldinfo").catch(() => {});
+        await learnFromConfirmedEmail(row.managerName, link.email, "koldinfo").catch(() => {});
       } else if (status === "risky" && v?.reason === "catch_all") {
         row.emailCatchAll = true; row.emailValidated = false; row.emailInvalid = false;
         summary.catchAll++;

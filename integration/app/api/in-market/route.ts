@@ -304,8 +304,9 @@ export async function POST(req: Request) {
   if (b?.action === "koldinfo_import") {
     const { applyKoldInfoResults } = await import("../../../lib/inmarket/curation");
     const { parseKoldInfoCsv } = await import("../../../lib/inmarket/koldInfo");
-    // Accept either a raw CSV string (csv) or already-parsed rows (results).
-    const parsed = typeof b.csv === "string" ? parseKoldInfoCsv(b.csv) : (Array.isArray(b.results) ? b.results : []);
+    if (typeof b.csv === "string" && b.csv.length > 12_000_000) return fail("csv_too_large", 413, { detail: "Result CSV over 12 MB — split it into smaller batches." });
+    // Accept either a raw CSV string (csv) or already-parsed rows (results). Cap at the contract max.
+    const parsed = (typeof b.csv === "string" ? parseKoldInfoCsv(b.csv) : (Array.isArray(b.results) ? b.results : [])).slice(0, 20000);
     if (!parsed.length) return fail("no_rows", 422, { detail: "No email-bearing rows found. Confirm the result CSV has an email column." });
     const summary = await applyKoldInfoResults(parsed, new Date().toISOString());
     return ok({ parsed: parsed.length, ...summary });
