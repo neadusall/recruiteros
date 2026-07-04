@@ -21,6 +21,7 @@
 
 import { loadSnapshot, saveSnapshot } from "../db";
 import { resolveDecisionMaker, type DecisionMaker } from "./decisionMaker";
+import type { KoldInfoExportRow, KoldInfoResult } from "./koldInfo";
 import { classifyTitle, type JobFunction } from "../signals";
 
 /* ------------------------------------------------------------------ */
@@ -805,6 +806,140 @@ export async function applyEmailValidation(
   });
 }
 
+/* ------------------------------------------------------------------ */
+/* KoldInfo enrichment — CSV round-trip, the FIRST rung                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Prepare a KoldInfo enrichment batch — the FIRST rung, run at the top of the funnel. Targets every
+ * slot with a resolved domain that has no confirmed/catch-all address yet and isn't locked, INCLUDING
+ * un-named ones: KoldInfo finds the person by company + title, so it can name AND email cold before
+ * the free research/permutation hop ever runs. Sorted by hiring intent, capped to `limit`.
+ *
+ * mode "seed" (default): ONE representative slot per domain. A single KoldInfo lookup learns that
+ *   domain's email format; the pattern cache then constructs the remaining colleagues at that domain
+ *   for ~1 Reoon credit each on the next validator tick — so we buy whole domains, not single rows.
+ * mode "all": every un-confirmed slot (use when you'd rather KoldInfo resolve each person directly).
+ */
+export async function koldInfoExportRows(opts: { limit?: number; mode?: "seed" | "all" } = {}): Promise<KoldInfoExportRow[]> {
+  const { splitFullName } = await import("./email");
+  const limit = Math.max(0, opts.limit ?? 4000);
+  const mode = opts.mode ?? "seed";
+  const rows = await load();
+  const pool = rows
+    .filter((r) => r.domain && !r.emailValidated && !r.emailCatchAll
+      && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed")
+    .sort((a, b) => b.score - a.score);
+
+  let picked: CuratedProspect[];
+  if (mode === "seed") {
+    // One seed slot per domain (the highest-score one — pool is score-sorted). Then order domains by
+    // UNLOCK LEVERAGE: a seed lookup also unlocks the domain's OTHER open slots via the pattern cache,
+    // so a domain with more open slots yields more colleagues per KoldInfo credit. Rank by score with
+    // a leverage boost (+15% per extra open slot) so a limited budget hits the highest-intent AND
+    // highest-unlock domains first — matters whenever the export is capped below the domain count.
+    const best = new Map<string, CuratedProspect>();
+    const openCount = new Map<string, number>();
+    for (const r of pool) {
+      const d = r.domain!.toLowerCase();
+      openCount.set(d, (openCount.get(d) || 0) + 1);
+      if (!best.has(d)) best.set(d, r);
+    }
+    const ranked = [...best.keys()].sort((a, b) => {
+      const ra = best.get(a)!.score * (1 + 0.15 * ((openCount.get(a) || 1) - 1));
+      const rb = best.get(b)!.score * (1 + 0.15 * ((openCount.get(b) || 1) - 1));
+      return rb - ra;
+    });
+    picked = ranked.slice(0, limit).map((d) => best.get(d)!);
+  } else {
+    picked = pool.slice(0, limit);
+  }
+
+  return picked.map((r) => {
+    const nm = r.managerName ? splitFullName(r.managerName) : {};
+    const lk = r as { managerLinkedin?: string; linkedinUrl?: string };
+    return {
+      rosId: r.id,
+      firstName: nm.firstName || "",
+      lastName: nm.lastName || "",
+      fullName: r.managerName || "",
+      company: r.company,
+      domain: r.domain!,
+      title: r.managerTitle || r.role || "",   // the target title so KoldInfo finds the right person
+      linkedin: lk.managerLinkedin || lk.linkedinUrl || undefined,
+    };
+  });
+}
+
+/**
+ * Merge a parsed KoldInfo result set back into the curated pool. Linking (which contact → which
+ * prospect) is delegated to the pure planKoldInfoLinks() in koldInfo.ts; here we LEARN THE NAME for an
+ * un-named slot, then RE-VERIFY every address through the Reoon credits we already own before trusting
+ * it (a vendor "verified" flag is never taken at face value), and TEACH the per-domain pattern cache
+ * from each confirmed hit so one address unlocks the whole domain. Never clobbers an already-validated
+ * row; a Reoon-rejected address is counted and discarded.
+ */
+export async function applyKoldInfoResults(
+  results: KoldInfoResult[],
+  nowIso: string,
+): Promise<{ matched: number; named: number; found: number; catchAll: number; invalid: number; pending: number; unmatched: number }> {
+  const summary = { matched: 0, named: 0, found: 0, catchAll: 0, invalid: 0, pending: 0, unmatched: 0 };
+  if (!results.length) return summary;
+  const { verifyDetailedBatch } = await import("./emailVerify");
+  const { learnFromConfirmedEmail, inferPattern, flushPatternCache } = await import("./emailPattern");
+  const { planKoldInfoLinks } = await import("./koldInfo");
+
+  return withCurationLock(async () => {
+    const rows = await load();
+    const { links, unmatched } = planKoldInfoLinks(rows, results);
+    summary.unmatched = unmatched;
+    summary.matched = links.length;
+    if (!links.length) return summary;
+
+    const byId = new Map(rows.map((r) => [r.id, r] as const));
+    // RE-VERIFY every KoldInfo address through our own Reoon credits before trusting it.
+    const verdicts = await verifyDetailedBatch(links.map((l) => ({ id: l.id, email: l.email })));
+
+    for (const link of links) {
+      const row = byId.get(link.id);
+      if (!row) continue;
+      const v = verdicts.get(link.id);
+      const status = v?.status;
+      if (status === "invalid" || v?.reason === "role_account") { summary.invalid++; continue; }
+
+      if (link.name && !row.managerName) {
+        row.managerName = link.name;
+        row.managerVia = "koldinfo";
+        row.managerTier = "named";
+        summary.named++;
+      }
+      row.likelyEmail = link.email;
+      const pat = inferPattern(row.managerName, link.email);
+      if (pat) row.emailPattern = pat;
+      if (!row.emailCandidates) row.emailCandidates = [];
+      if (!row.emailCandidates.includes(link.email)) row.emailCandidates.unshift(link.email);
+      row.emailSource = "koldinfo";
+
+      if (status === "valid") {
+        row.emailValidated = true; row.emailInvalid = false; row.emailCatchAll = false; row.validatedAt = nowIso;
+        if (row.status === "sourced" || row.status === "named") row.status = "contactable";
+        summary.found++;
+        await learnFromConfirmedEmail(row.managerName, link.email, "koldinfo").catch(() => {});
+      } else if (status === "risky" && v?.reason === "catch_all") {
+        row.emailCatchAll = true; row.emailValidated = false; row.emailInvalid = false;
+        summary.catchAll++;
+      } else {
+        // deliverable / unknown / no verdict (e.g. Reoon not keyed yet) — we now HAVE a real address
+        // (and often a name) where there was none; leave it pending for the validator to confirm.
+        summary.pending++;
+      }
+    }
+    await save(rows);
+    try { await flushPatternCache(true); } catch { /* best-effort */ }
+    return summary;
+  });
+}
+
 /**
  * EMAIL FINDER PASS (opt-in, SMTP) — turn more prospects VALID without guessing-and-bouncing.
  * For pending rows (a real person + a domain, no verdict yet), walk the name's permutations and
@@ -955,9 +1090,15 @@ export async function findEmailsByPaid(limit: number, nowIso: string, concurrenc
   const { learnFromConfirmedEmail, inferPattern } = await import("./emailPattern");
 
   const rows = await load();
+  // Targets: the free path's misses (invalid or no address). PLUS — when the finder-of-record is
+  // configured — catch-all domains, which its Findymail rung is built to CRACK into a specific
+  // verified mailbox (recovers the otherwise-parked catch-all tier). Icypeas-only path leaves
+  // catch-all alone (it can't reliably crack it).
+  const isMiss = (r: CuratedProspect) => (r.emailInvalid || !r.likelyEmail) && !r.emailCatchAll;
+  const isCrackableCatchAll = (r: CuratedProspect) => useService && !!r.emailCatchAll;
   const targets = rows
-    .filter((r) => r.managerName && r.domain && !r.emailValidated && !r.emailCatchAll
-      && (r.emailInvalid || !r.likelyEmail)
+    .filter((r) => r.managerName && r.domain && !r.emailValidated
+      && (isMiss(r) || isCrackableCatchAll(r))
       && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed")
     .sort((a, b) => b.score - a.score)
     .slice(0, Math.max(0, limit));

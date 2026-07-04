@@ -289,6 +289,29 @@ export async function POST(req: Request) {
     return ok({ updated: n });
   }
 
+  // KOLDINFO ENRICHMENT (first rung, CSV round-trip). Export the highest-intent named-but-unconfirmed
+  // backlog as an upload-ready CSV; the operator runs it through KoldInfo and posts the result CSV back
+  // to koldinfo_import, which re-verifies every address through Reoon and teaches the pattern cache.
+  if (b?.action === "koldinfo_export") {
+    const { koldInfoExportRows } = await import("../../../lib/inmarket/curation");
+    const { buildKoldInfoCsv } = await import("../../../lib/inmarket/koldInfo");
+    const limit = Math.min(Math.max(Number(b.limit) || 4000, 1), 20000);
+    const mode = b.mode === "all" ? "all" : "seed";
+    const rows = await koldInfoExportRows({ limit, mode });
+    const domains = new Set(rows.map((r) => r.domain.toLowerCase())).size;
+    return ok({ count: rows.length, domains, mode, filename: "koldinfo-" + mode + "-" + new Date().toISOString().slice(0, 10) + ".csv", csv: buildKoldInfoCsv(rows) });
+  }
+  if (b?.action === "koldinfo_import") {
+    const { applyKoldInfoResults } = await import("../../../lib/inmarket/curation");
+    const { parseKoldInfoCsv } = await import("../../../lib/inmarket/koldInfo");
+    if (typeof b.csv === "string" && b.csv.length > 12_000_000) return fail("csv_too_large", 413, { detail: "Result CSV over 12 MB — split it into smaller batches." });
+    // Accept either a raw CSV string (csv) or already-parsed rows (results). Cap at the contract max.
+    const parsed = (typeof b.csv === "string" ? parseKoldInfoCsv(b.csv) : (Array.isArray(b.results) ? b.results : [])).slice(0, 20000);
+    if (!parsed.length) return fail("no_rows", 422, { detail: "No email-bearing rows found. Confirm the result CSV has an email column." });
+    const summary = await applyKoldInfoResults(parsed, new Date().toISOString());
+    return ok({ parsed: parsed.length, ...summary });
+  }
+
   // INDUSTRY-TARGETED JOB SCRAPE (JSearch): pull fresh hiring companies for ONE chosen industry
   // right now and merge them into the pool (each carries employer_website → the domain for free).
   // This is the "pick an industry, scrape it" control — the background accumulator also rotates

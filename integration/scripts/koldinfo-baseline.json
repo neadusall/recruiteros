@@ -1,0 +1,20 @@
+{
+  "deployId": "dpl_4aphiCBtTzMvt2N7Mpb16P2aP3UB",
+  "chunks": [
+    "1255-b82c2e805c803d05.js",
+    "2619-3c9e02e22d10480a.js",
+    "4bd1b696-f785427dddbba9fb.js",
+    "9244-28a402851cbfc5dd.js",
+    "app/layout-b138a9d53203612d.js",
+    "app/page-dd8355da788737b7.js",
+    "main-app-5eb0d9c55a395822.js",
+    "polyfills-42372ed130431b0a.js",
+    "webpack-fde3869ab9bb9376.js"
+  ],
+  "actionIds": [
+    "7f17296fd60053748b3c2185a8757d100d7b00650c",
+    "7fdd41d8de79ddfc200f35c23abe088974b8f53f4d"
+  ],
+  "hash": "01a3f150b925a66d",
+  "capturedAt": "2026-07-04T01:43:57.756Z"
+}

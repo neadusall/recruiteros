@@ -579,6 +579,22 @@
           card("Email hit-rate", hit + "%", "verified ÷ emails", hit < 20 ? "#ff5c7a" : "#38e0a6") +
           "</div>";
 
+        // 2b) KoldInfo enrichment — first rung, operator CSV round-trip.
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">KoldInfo enrichment ' +
+          '<span style="font-weight:400;color:#6b7186">first rung · CSV round-trip</span></h3>' +
+          '<div style="background:var(--card,#15151f);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 16px">' +
+          '<div style="font-size:12px;color:#9aa0b4;margin-bottom:10px">Runs at the TOP of the funnel: export the highest-intent slots that have a domain but no confirmed email (named or not), enrich in KoldInfo, then import the result here. KoldInfo names + emails cold; every address is re-verified through Reoon and teaches the per-domain pattern so one hit unlocks the whole domain.</div>' +
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+          '<label style="font-size:12px;color:#9aa0b4">Mode <select id="kiMode" style="background:#0f0f18;border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#e8e8f0;padding:5px 7px">' +
+          '<option value="seed">Seed domains (1 / domain — cheapest)</option>' +
+          '<option value="all">All un-confirmed rows</option></select></label>' +
+          '<label style="font-size:12px;color:#9aa0b4">Rows <input id="kiLimit" type="number" value="4000" min="1" max="20000" style="width:88px;background:#0f0f18;border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#e8e8f0;padding:5px 7px"></label>' +
+          '<button class="btn btn-ghost btn-sm" id="kiExport">⬇ Export CSV for KoldInfo</button>' +
+          '<input id="kiFile" type="file" accept=".csv,text/csv" style="display:none">' +
+          '<button class="btn btn-ghost btn-sm" id="kiImportPick">⬆ Import KoldInfo results…</button>' +
+          '<span id="kiStatus" style="font-size:12px;color:#9aa0b4"></span>' +
+          "</div></div>";
+
         // 3) Source health
         var engines = (sh.engines || []).map(function (e) {
           return '<span style="display:inline-block;margin:3px 8px 3px 0;font-size:12px;color:#c8cce0">' +
@@ -626,6 +642,53 @@
           '<div style="margin-top:14px;font-size:11px;color:#6b7186">Auto-refreshes every 15s. To change a dial: edit /opt/recruiteros/.env.production on the server, then <code>docker compose up -d --force-recreate app</code>.</div>';
 
         view.innerHTML = html;
+
+        // KoldInfo enrichment — export the backlog to a CSV, import the enriched result back.
+        (function () {
+          var exp = document.getElementById("kiExport");
+          var pick = document.getElementById("kiImportPick");
+          var file = document.getElementById("kiFile");
+          var stat = document.getElementById("kiStatus");
+          if (exp) exp.onclick = function () {
+            var lim = Math.max(1, Math.min(20000, parseInt((document.getElementById("kiLimit") || {}).value, 10) || 4000));
+            var mode = (document.getElementById("kiMode") || {}).value || "seed";
+            exp.disabled = true; if (stat) stat.textContent = "Building export…";
+            send("/in-market", "POST", { action: "koldinfo_export", limit: lim, mode: mode }).then(function (r) {
+              exp.disabled = false;
+              if (!r.ok || !r.data || !r.data.csv) { if (stat) stat.textContent = "Export failed."; return; }
+              var blob = new Blob([r.data.csv], { type: "text/csv;charset=utf-8" });
+              var url = URL.createObjectURL(blob);
+              var a = document.createElement("a");
+              a.href = url; a.download = r.data.filename || "koldinfo-upload.csv";
+              document.body.appendChild(a); a.click(); document.body.removeChild(a);
+              setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+              if (stat) stat.textContent = "Exported " + (r.data.count || 0) + " rows across " + (r.data.domains || 0) + " domains → enrich in KoldInfo, then Import the result.";
+            }).catch(function () { exp.disabled = false; if (stat) stat.textContent = "Export failed."; });
+          };
+          if (pick && file) {
+            pick.onclick = function () { file.value = ""; file.click(); };
+            file.onchange = function () {
+              var f = file.files && file.files[0]; if (!f) return;
+              if (stat) stat.textContent = "Reading " + f.name + "…";
+              var rd = new FileReader();
+              rd.onload = function () {
+                if (stat) stat.textContent = "Importing + re-verifying through Reoon…";
+                send("/in-market", "POST", { action: "koldinfo_import", csv: String(rd.result || "") }).then(function (r) {
+                  if (!r.ok || !r.data) { if (stat) stat.textContent = "Import failed" + (r.data && r.data.detail ? ": " + r.data.detail : "."); return; }
+                  var d = r.data;
+                  if (stat) stat.textContent = "Imported: " + (d.found || 0) + " verified · " + (d.named || 0) + " newly named · " + (d.catchAll || 0) + " catch-all · " + (d.pending || 0) + " pending · " + (d.unmatched || 0) + " unmatched.";
+                  try {
+                    alert("KoldInfo import\n" + (d.parsed || 0) + " rows parsed · " + (d.matched || 0) + " matched to prospects\n\n" +
+                      "✓ verified email   " + (d.found || 0) + "\n＋ newly named      " + (d.named || 0) + "\n~ catch-all        " + (d.catchAll || 0) + "\n✕ invalid          " + (d.invalid || 0) + "\n" +
+                      "pending (address stored, awaiting Reoon)  " + (d.pending || 0) + "\nunmatched          " + (d.unmatched || 0));
+                  } catch (e) { /* alert blocked — status line already shows it */ }
+                  load();
+                }).catch(function () { if (stat) stat.textContent = "Import failed."; });
+              };
+              rd.readAsText(f);
+            };
+          }
+        })();
 
         // Fill the PiP coverage cards from the live pip_stats action (same numbers as the studio).
         send("/in-market", "POST", { action: "pip_stats" }).then(function (pr) {
