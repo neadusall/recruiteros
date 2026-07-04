@@ -3186,7 +3186,7 @@
           '<div class="bq-add">' +
             '<input class="bq-kw" id="bqKw" placeholder="Job title or industry (e.g. controller fintech)" />' +
             '<input class="bq-loc" id="bqLoc" placeholder="Location (optional)" />' +
-            '<label class="bq-limwrap" title="Jobs to pull for this search (10–500). Keep it low for a test — JSearch bills ~1 request per 10 jobs.">Jobs <input class="bq-lim" id="bqLimit" type="number" min="10" max="500" step="10" value="50" /></label>' +
+            '<label class="bq-limwrap" title="Jobs to pull for this search (50–5000). Keep it low for a test — JSearch bills ~1 request per 10 jobs.">Jobs <input class="bq-lim" id="bqLimit" type="number" min="50" max="5000" step="50" value="50" /></label>' +
             '<button class="btn btn-primary btn-sm" id="bqAdd">➕ Add to queue</button>' +
             (searches.length ? '<button class="btn btn-ghost btn-sm" id="bqRunAll">▶ Run all</button>' : "") +
           "</div>" +
@@ -3208,7 +3208,7 @@
       var kw = (host.querySelector("#bqKw") || {}).value; kw = (kw || "").trim();
       if (!kw) { toast("Type a job title or industry first."); return; }
       var loc = ((host.querySelector("#bqLoc") || {}).value || "").trim();
-      var lim = parseInt(((host.querySelector("#bqLimit") || {}).value), 10); lim = Math.max(10, Math.min(500, lim || 50));
+      var lim = parseInt(((host.querySelector("#bqLimit") || {}).value), 10); lim = Math.max(50, Math.min(5000, lim || 50));
       var btn = host.querySelector("#bqAdd"); if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
       send("/in-market", "POST", { action: "queue_save", search: { name: kw + (loc ? " · " + loc : "") + " · " + lim, query: kw, location: loc, limit: lim } }).then(function (r) {
         if (!r || !r.ok || !r.data || !r.data.search) { toast("Couldn't add that search."); if (btn) { btn.disabled = false; btn.textContent = "➕ Add to queue"; } return; }

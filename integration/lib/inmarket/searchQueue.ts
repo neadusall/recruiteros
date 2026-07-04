@@ -76,7 +76,7 @@ function newId(): string {
 }
 
 function clampLimit(n: unknown): number {
-  return Math.min(Math.max(Math.round(Number(n) || 100), 10), 500);
+  return Math.min(Math.max(Math.round(Number(n) || 100), 50), 5000);
 }
 function cleanDate(d: unknown): DatePosted {
   const v = String(d || "week").toLowerCase();

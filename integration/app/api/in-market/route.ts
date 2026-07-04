@@ -366,7 +366,7 @@ export async function POST(req: Request) {
       datePosted: (s as any).datePosted ? String((s as any).datePosted) : undefined,
       employmentTypes: Array.isArray((s as any).employmentTypes) ? (s as any).employmentTypes : undefined,
       remoteOnly: (s as any).remoteOnly === true,
-      limit: Math.min(Math.max(Number((s as any).limit) || 100, 10), 500),
+      limit: Math.min(Math.max(Number((s as any).limit) || 100, 50), 5000),
     };
     if (!opts.query) return fail("missing_query", 422, { detail: "a job title or an industry is required" });
     const bands: string[] = Array.isArray((s as any).headcountBands) ? (s as any).headcountBands : [];

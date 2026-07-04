@@ -12,6 +12,8 @@
  * when something is enqueued.
  */
 
+import type { InMarketLead } from "./index";
+
 let timer: ReturnType<typeof setInterval> | null = null;
 let busy = false;
 
@@ -50,19 +52,33 @@ async function processOne(s: import("./searchQueue").TargetedSearch): Promise<vo
     const industry = String(s.industry ?? "").trim();
     const query = [title, industry].filter(Boolean).join(" ").trim();
     if (!query) { await failRun(s.id, "Search has no job title or industry."); return; }
-    await updateRun(s.id, { phase: "scraping", progress: 0.25 });
-    let { leads, jobs } = await previewJobFeed({
+
+    // 1) Scrape up to `limit` jobs. JSearch returns ~200 jobs (20 pages) per request, so page through
+    //    with `offset` until we've pulled the target or the query runs dry. Dedupe companies as we go.
+    const target = Math.min(Math.max(Number(s.limit) || 100, 50), 5000);
+    const { companyKey } = await import("./index");
+    const baseOpts = {
       query,
       location: s.location || undefined,
       datePosted: s.datePosted,
       employmentTypes: s.employmentTypes,
       remoteOnly: s.remoteOnly === true,
-      limit: Math.min(Math.max(Number(s.limit) || 100, 10), 500),
-    });
+    };
+    const PAGE_JOBS = 200;
+    const byCompany = new Map<string, InMarketLead>();
+    let jobs = 0;
+    for (let off = 0; off < target; off += PAGE_JOBS) {
+      const block = await previewJobFeed({ ...baseOpts, limit: Math.min(PAGE_JOBS, target - off), offset: off });
+      jobs += block.jobs;
+      for (const l of block.leads) { const k = companyKey(l.company || ""); if (!byCompany.has(k)) byCompany.set(k, l); }
+      await updateRun(s.id, { phase: "scraping", progress: Math.min(0.5, 0.12 + 0.38 * ((off + PAGE_JOBS) / target)), found: byCompany.size, jobs });
+      if (block.jobs < PAGE_JOBS) break; // the query is exhausted — no point paging further
+    }
+    let leads: InMarketLead[] = [...byCompany.values()];
     const found = leads.length;
 
     // 2) Narrow by company-size band (free: Wikidata cache + heuristic), if the search asked for it.
-    await updateRun(s.id, { phase: "filtering", progress: 0.55, found, jobs });
+    await updateRun(s.id, { phase: "filtering", progress: 0.6, found, jobs });
     const bands = Array.isArray(s.headcountBands) ? s.headcountBands : [];
     if (bands.length) {
       const { loadSizeMap, fillSizes } = await import("./companySize");
@@ -72,9 +88,8 @@ async function processOne(s: import("./searchQueue").TargetedSearch): Promise<vo
     }
 
     // 3) Count net-new vs the pool, then MERGE (auto-commit — this is the set-and-forget part).
-    await updateRun(s.id, { phase: "merging", progress: 0.8 });
+    await updateRun(s.id, { phase: "merging", progress: 0.85 });
     const { poolCompanyKeySet, mergeIntoPool } = await import("./pool");
-    const { companyKey } = await import("./index");
     const inPool = await poolCompanyKeySet();
     const merged = leads.filter((l) => !inPool.has(companyKey(l.company || ""))).length;
     await mergeIntoPool(leads);
