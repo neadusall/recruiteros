@@ -10,20 +10,30 @@
 # And BLANKS every paid rung so none can switch on: Icypeas, the Findymail finder-of-record,
 # RapidAPI web-search / naming, and SMTP finding. Empty value => the code's gate reads OFF.
 #
-# Holds no secrets itself — pass your Reoon key as the only argument.
+# Holds no secrets itself. Pass your Reoon key as the argument — OR omit it and the
+# script reuses the REOON_API_KEY already saved in a local .env file (never printed).
 # Run ON THE SERVER (Hetzner console or SSH):
-#   bash /opt/recruiteros/set-live-lean.sh <YOUR_REOON_API_KEY>
+#   bash /opt/recruiteros/set-live-lean.sh [YOUR_REOON_API_KEY]
 #
 set -euo pipefail
 
-if [ "$#" -lt 1 ] || [ -z "$1" ]; then
-  echo "usage: bash set-live-lean.sh <REOON_API_KEY>" >&2
-  exit 1
-fi
-REOON_KEY="$1"
-
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
+
+REOON_KEY="${1:-}"
+if [ -z "$REOON_KEY" ]; then
+  # No key passed — reuse an existing one from a local env file (value never echoed).
+  for f in .env.production .env.local integration/.env.production integration/.env.local; do
+    [ -f "$f" ] || continue
+    found="$(grep -hE '^REOON_API_KEY=.+' "$f" 2>/dev/null | head -1 | cut -d= -f2- \
+      | tr -d '\r' | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//")"
+    if [ -n "$found" ]; then REOON_KEY="$found"; echo "Reusing REOON_API_KEY from $f"; break; fi
+  done
+fi
+if [ -z "$REOON_KEY" ]; then
+  echo "usage: bash set-live-lean.sh <REOON_API_KEY>   (or save it in a local .env file first)" >&2
+  exit 1
+fi
 ENV=".env.production"
 touch "$ENV"
 chmod 600 "$ENV"
