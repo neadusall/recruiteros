@@ -833,9 +833,24 @@ export async function koldInfoExportRows(opts: { limit?: number; mode?: "seed" |
 
   let picked: CuratedProspect[];
   if (mode === "seed") {
-    const perDomain = new Map<string, CuratedProspect>();
-    for (const r of pool) { const d = r.domain!.toLowerCase(); if (!perDomain.has(d)) perDomain.set(d, r); }
-    picked = [...perDomain.values()].slice(0, limit);
+    // One seed slot per domain (the highest-score one — pool is score-sorted). Then order domains by
+    // UNLOCK LEVERAGE: a seed lookup also unlocks the domain's OTHER open slots via the pattern cache,
+    // so a domain with more open slots yields more colleagues per KoldInfo credit. Rank by score with
+    // a leverage boost (+15% per extra open slot) so a limited budget hits the highest-intent AND
+    // highest-unlock domains first — matters whenever the export is capped below the domain count.
+    const best = new Map<string, CuratedProspect>();
+    const openCount = new Map<string, number>();
+    for (const r of pool) {
+      const d = r.domain!.toLowerCase();
+      openCount.set(d, (openCount.get(d) || 0) + 1);
+      if (!best.has(d)) best.set(d, r);
+    }
+    const ranked = [...best.keys()].sort((a, b) => {
+      const ra = best.get(a)!.score * (1 + 0.15 * ((openCount.get(a) || 1) - 1));
+      const rb = best.get(b)!.score * (1 + 0.15 * ((openCount.get(b) || 1) - 1));
+      return rb - ra;
+    });
+    picked = ranked.slice(0, limit).map((d) => best.get(d)!);
   } else {
     picked = pool.slice(0, limit);
   }
@@ -1075,9 +1090,15 @@ export async function findEmailsByPaid(limit: number, nowIso: string, concurrenc
   const { learnFromConfirmedEmail, inferPattern } = await import("./emailPattern");
 
   const rows = await load();
+  // Targets: the free path's misses (invalid or no address). PLUS — when the finder-of-record is
+  // configured — catch-all domains, which its Findymail rung is built to CRACK into a specific
+  // verified mailbox (recovers the otherwise-parked catch-all tier). Icypeas-only path leaves
+  // catch-all alone (it can't reliably crack it).
+  const isMiss = (r: CuratedProspect) => (r.emailInvalid || !r.likelyEmail) && !r.emailCatchAll;
+  const isCrackableCatchAll = (r: CuratedProspect) => useService && !!r.emailCatchAll;
   const targets = rows
-    .filter((r) => r.managerName && r.domain && !r.emailValidated && !r.emailCatchAll
-      && (r.emailInvalid || !r.likelyEmail)
+    .filter((r) => r.managerName && r.domain && !r.emailValidated
+      && (isMiss(r) || isCrackableCatchAll(r))
       && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed")
     .sort((a, b) => b.score - a.score)
     .slice(0, Math.max(0, limit));
