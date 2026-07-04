@@ -48,14 +48,24 @@ slots (matched by company+domain when `ros_id` isn't on the row).
 - `emailSource: "koldinfo"` makes KoldInfo's contribution visible in the Engine panel's
   `emailBySource` breakdown, so we can measure its true hit-rate.
 
-## The format is placeholder until we see the real export
+## The format problem is solved — the importer is format-agnostic
 
-`lib/inmarket/koldInfo.ts` has two blocks to confirm against a real KoldInfo run:
-- `EXPORT_HEADER` — the columns we WRITE for the upload template.
-- `IMPORT_ALIASES` — defensive header aliases for KoldInfo's RESULT export.
+KoldInfo has no API and its UI/export format lives behind auth (confirmed by a full recon: no REST
+surface, Supabase proxied at `/supabase/`, single middleware-gated `/protected` route, protected
+chunks unreachable unauthenticated). So rather than depend on knowing its exact columns, the importer
+**identifies the key columns by their CONTENT**, not just header names (`parseKoldInfoCsv` in
+`lib/inmarket/koldInfo.ts`):
+- **email** — the column whose cells look like addresses (`a@b.co`).
+- **ros_id** — the column whose cells match our `cp_…` id signature (our passthrough, if KoldInfo echoes it).
+- **domain** — the column of bare domains (used to link contacts when `ros_id` isn't echoed).
+- **status** — the column of verdict words (valid / catch-all / invalid / …).
 
-Both are tolerant, but the moment we see KoldInfo's real upload template and one real export row,
-update those two blocks to match. Nothing else changes.
+Header names are still matched first (`IMPORT_ALIASES`, extend anytime), with content detection as the
+fallback — so **whatever KoldInfo names its export columns, the round-trip works on the first run**.
+The email guard means a file with no email column anywhere is safely rejected, not mis-parsed.
+
+If KoldInfo's **upload** template needs specific header names, set `KOLDINFO_EXPORT_HEADER` (comma list,
+same 8 fields in order: id, first, last, full name, company, domain, title, linkedin) — no deploy.
 
 ## Guarding against KoldInfo UI changes (48-hour canary)
 

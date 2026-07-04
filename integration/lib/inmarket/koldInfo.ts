@@ -60,9 +60,16 @@ function csvCell(v: string | undefined): string {
   return /[",]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
+/** The header row to write. Defaults to EXPORT_HEADER; override the NAMES (same order, same count)
+ *  via KOLDINFO_EXPORT_HEADER if KoldInfo's upload template needs specific column names — no deploy. */
+function exportHeader(): string[] {
+  const env = (process.env.KOLDINFO_EXPORT_HEADER || "").split(",").map((s) => s.trim()).filter(Boolean);
+  return env.length === EXPORT_HEADER.length ? env : EXPORT_HEADER.slice();
+}
+
 /** Serialize prepared rows to an upload-ready CSV string. */
 export function buildKoldInfoCsv(rows: KoldInfoExportRow[]): string {
-  const lines = [EXPORT_HEADER.join(",")];
+  const lines = [exportHeader().join(",")];
   for (const r of rows) {
     lines.push([
       csvCell(r.rosId), csvCell(r.firstName), csvCell(r.lastName), csvCell(r.fullName),
@@ -100,15 +107,56 @@ function detect(header: string[]): Partial<Record<Field, number>> {
   return map;
 }
 
+// Content signatures — used to identify the key columns when the HEADER name is unknown/renamed.
+// This is what makes the importer format-agnostic: KoldInfo can label its export however it likes.
+const RE_EMAIL = /^[^\s@,;]+@[^\s@,;]+\.[a-z]{2,}$/i;
+const RE_DOMAIN = /^(?!.*@)([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
+const RE_ROSID = /^cp_[a-z0-9_]+$/i;
+const STATUS_WORDS = new Set([
+  "valid", "invalid", "catch-all", "catch_all", "catchall", "accept_all", "accept-all", "risky",
+  "verified", "unverified", "deliverable", "undeliverable", "unknown", "not_found", "found", "safe", "role",
+]);
+
+/** Index of the column whose non-empty cells best match `pred` (fraction ≥ min), excluding taken cols. */
+function detectByContent(grid: string[][], pred: (v: string) => boolean, min: number, taken: Set<number>): number {
+  const cols = grid[0]?.length ?? 0;
+  let best = -1, bestFrac = min;
+  for (let c = 0; c < cols; c++) {
+    if (taken.has(c)) continue;
+    let hits = 0, total = 0;
+    for (let r = 1; r < grid.length; r++) {
+      const v = (grid[r][c] ?? "").trim();
+      if (!v) continue;
+      total++;
+      if (pred(v)) hits++;
+    }
+    if (total >= 1) { const frac = hits / total; if (frac >= bestFrac) { bestFrac = frac; best = c; } }
+  }
+  return best;
+}
+
 /**
- * Parse a KoldInfo result CSV into re-linkable rows. Tolerant of header naming; only rows that
- * carry a usable email are returned (a no-hit row from KoldInfo is simply dropped — nothing to merge).
+ * Parse a KoldInfo result CSV into re-linkable rows. Header names are matched first (IMPORT_ALIASES);
+ * any key column the header didn't resolve is then identified BY CONTENT (email / ros_id / domain /
+ * status signatures) — so the round-trip works regardless of what KoldInfo names its export columns.
+ * Only rows carrying a usable email are returned (a no-hit row from KoldInfo is dropped).
  */
 export function parseKoldInfoCsv(text: string): KoldInfoResult[] {
   const grid = parseCsv(text);
   if (grid.length < 2) return [];
   const map = detect(grid[0]);
-  if (map.email === undefined) return []; // without an email column there is nothing to import
+  const taken = new Set<number>(Object.values(map).filter((v): v is number => v !== undefined));
+  const fill = (f: Field, pred: (v: string) => boolean, min: number) => {
+    if (map[f] !== undefined) return;
+    const c = detectByContent(grid, pred, min, taken);
+    if (c >= 0) { map[f] = c; taken.add(c); }
+  };
+  // Content fallback for the columns that actually drive matching + verdict.
+  fill("email", (v) => RE_EMAIL.test(v), 0.5);
+  fill("rosId", (v) => RE_ROSID.test(v), 0.5);
+  fill("domain", (v) => RE_DOMAIN.test(v), 0.6);
+  fill("vendorStatus", (v) => STATUS_WORDS.has(v.toLowerCase()), 0.6);
+  if (map.email === undefined) return []; // no email column by name OR content → nothing to import
   const at = (row: string[], f: Field): string | undefined => {
     const i = map[f];
     if (i === undefined) return undefined;
