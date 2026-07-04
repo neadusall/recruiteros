@@ -21,6 +21,7 @@
 
 import { loadSnapshot, saveSnapshot } from "../db";
 import { resolveDecisionMaker, type DecisionMaker } from "./decisionMaker";
+import type { KoldInfoExportRow, KoldInfoResult } from "./koldInfo";
 import { classifyTitle, type JobFunction } from "../signals";
 
 /* ------------------------------------------------------------------ */
@@ -802,6 +803,125 @@ export async function applyEmailValidation(
     }
     if (n) await save(rows);
     return n;
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* KoldInfo enrichment — CSV round-trip, the FIRST rung                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Prepare the highest-intent named-but-unconfirmed backlog for a KoldInfo enrichment run. Mirrors the
+ * residual-finder target set (named + domain, no confirmed/catch-all verdict yet, not locked), sorts
+ * by hiring intent, and caps to `limit` so we only ever enrich what we can realistically send. A row
+ * that still holds only a guessed address is INCLUDED — KoldInfo may return the real one, which we
+ * then confirm. See lib/inmarket/koldInfo.ts for the CSV shaping and the operator round-trip.
+ */
+export async function koldInfoExportRows(limit: number): Promise<KoldInfoExportRow[]> {
+  const { splitFullName } = await import("./email");
+  const rows = await load();
+  const targets = rows
+    .filter((r) => r.managerName && r.domain && !r.emailValidated && !r.emailCatchAll
+      && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed")
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(0, limit));
+  return targets.map((r) => {
+    const { firstName, lastName } = splitFullName(r.managerName!);
+    const lk = r as { managerLinkedin?: string; linkedinUrl?: string };
+    return {
+      rosId: r.id,
+      firstName: firstName || "",
+      lastName: lastName || "",
+      fullName: r.managerName!,
+      company: r.company,
+      domain: r.domain!,
+      title: r.managerTitle || "",
+      linkedin: lk.managerLinkedin || lk.linkedinUrl || undefined,
+    };
+  });
+}
+
+/**
+ * Merge a parsed KoldInfo result set back into the curated pool. Re-links each returned address to its
+ * prospect (by our passthrough ros_id, else by name+domain), then RE-VERIFIES every address through
+ * the Reoon credits we already own before trusting it — a vendor "verified" flag is never taken at
+ * face value (same discipline as the Icypeas residual finder). Each Reoon-confirmed hit TEACHES the
+ * per-domain pattern cache, so one KoldInfo address unlocks the whole domain's colleagues for ~1
+ * credit. Never clobbers an already-validated row, and an address Reoon rejects is left as a miss
+ * rather than overwriting a prospect's existing state.
+ */
+export async function applyKoldInfoResults(
+  results: KoldInfoResult[],
+  nowIso: string,
+): Promise<{ matched: number; found: number; catchAll: number; invalid: number; pending: number; unmatched: number }> {
+  const summary = { matched: 0, found: 0, catchAll: 0, invalid: 0, pending: 0, unmatched: 0 };
+  if (!results.length) return summary;
+  const { verifyDetailedBatch } = await import("./emailVerify");
+  const { learnFromConfirmedEmail, inferPattern, flushPatternCache } = await import("./emailPattern");
+  const { koldInfoMatchKey } = await import("./koldInfo");
+
+  return withCurationLock(async () => {
+    const rows = await load();
+    const byId = new Map(rows.map((r) => [r.id, r] as const));
+    const byKey = new Map<string, CuratedProspect>();
+    for (const r of rows) {
+      if (r.managerName && (r.domain || r.likelyEmail)) byKey.set(koldInfoMatchKey(r.managerName, r.domain, r.likelyEmail), r);
+    }
+
+    // 1) Re-link each returned address to a prospect (ros_id first, then name+domain).
+    const linked: Array<{ row: CuratedProspect; email: string }> = [];
+    const claimed = new Set<string>();
+    for (const res of results) {
+      const email = (res.email || "").toLowerCase().trim();
+      if (!email || !email.includes("@")) continue;
+      let row = res.rosId ? byId.get(res.rosId) : undefined;
+      if (!row) {
+        const fullName = res.fullName || [res.firstName, res.lastName].filter(Boolean).join(" ");
+        row = byKey.get(koldInfoMatchKey(fullName, res.domain, email));
+      }
+      if (!row) { summary.unmatched++; continue; }
+      if (claimed.has(row.id)) continue; // one address per prospect per run
+      if (row.emailValidated || row.status === "enrolled" || row.status === "queued" || row.status === "suppressed") continue;
+      claimed.add(row.id);
+      linked.push({ row, email });
+      summary.matched++;
+    }
+    if (!linked.length) return summary;
+
+    // 2) RE-VERIFY every KoldInfo address through our own Reoon credits before trusting it.
+    const verdicts = await verifyDetailedBatch(linked.map((l) => ({ id: l.row.id, email: l.email })));
+
+    // 3) Merge verdict-by-verdict. Only touch a row when the address is usable (confirmed, catch-all,
+    //    or deliverable) — a Reoon-rejected address is counted and discarded, never written over the row.
+    for (const { row, email } of linked) {
+      const v = verdicts.get(row.id);
+      const status = v?.status;
+      if (status === "invalid" || v?.reason === "role_account") { summary.invalid++; continue; }
+
+      row.likelyEmail = email;
+      const pat = inferPattern(row.managerName, email);
+      if (pat) row.emailPattern = pat;
+      if (!row.emailCandidates) row.emailCandidates = [];
+      if (!row.emailCandidates.includes(email)) row.emailCandidates.unshift(email);
+      row.emailSource = "koldinfo";
+
+      if (status === "valid") {
+        row.emailValidated = true; row.emailInvalid = false; row.emailCatchAll = false; row.validatedAt = nowIso;
+        if (row.status === "sourced" || row.status === "named") row.status = "contactable";
+        summary.found++;
+        await learnFromConfirmedEmail(row.managerName, email, "koldinfo").catch(() => {});
+      } else if (status === "risky" && v?.reason === "catch_all") {
+        row.emailCatchAll = true; row.emailValidated = false; row.emailInvalid = false;
+        summary.catchAll++;
+      } else {
+        // deliverable / unknown / no verdict (e.g. Reoon not keyed yet) — we now HAVE a real address
+        // where there was only a guess; leave it pending so the continuous validator confirms it later.
+        summary.pending++;
+      }
+    }
+    await save(rows);
+    try { await flushPatternCache(true); } catch { /* best-effort */ }
+    return summary;
   });
 }
 
