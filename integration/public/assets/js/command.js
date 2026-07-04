@@ -3106,9 +3106,138 @@
         '<div id="imTargeted" class="im-targeted"></div>' +
         // What happens after you pull: everything downstream is automatic and lives in Clients.
         '<div class="im-handoff"><span aria-hidden="true">✨</span><span>Pull the companies you want and the rest runs on its own. Decision-makers, verified emails, and screenshot videos are built automatically and appear in the <a href="#clients">Clients</a> tab.</span></div>' +
-      "</div>";
+      "</div>" +
+      // SET-AND-FORGET batch: queue many searches; each scrapes + auto-merges in the background with a
+      // live progress bar and ticks off when done. Survives restarts (resumes where it left off).
+      '<div id="imBatch" class="im-batch"></div>';
 
     renderTargetedQueue($("#imTargeted"));
+    renderBatchQueue($("#imBatch"));
+  }
+
+  // ---- Set-and-forget SEARCH QUEUE: add many searches, they auto-run in the background with a
+  //      per-search progress bar, tick off when done, and resume across restarts. ----
+  var imBatchTimer = null;
+  function imBatchCss() {
+    if (document.getElementById("imBatchCss")) return "";
+    return '<style id="imBatchCss">' +
+      '.im-batch{max-width:1080px;margin:18px auto 0;padding:0 16px}' +
+      '.bq-card{background:var(--card,#14141f);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px 18px}' +
+      '.bq-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}' +
+      '.bq-head h3{margin:0;font-size:15px;font-weight:700;color:#e8e8f0}' +
+      '.bq-sum{font-size:12px;color:#9aa0b4;font-family:ui-monospace,monospace}' +
+      '.bq-add{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}' +
+      '.bq-add input{background:#0f0f18;border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e8e8f0;padding:8px 11px;font-size:13px}' +
+      '.bq-add .bq-kw{min-width:230px;flex:1}.bq-add .bq-loc{width:150px}' +
+      '.bq-row{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center;padding:10px 0;border-top:1px solid rgba(255,255,255,.05)}' +
+      '.bq-row .bq-name{font-weight:600;font-size:13.5px;color:#e8e8f0}' +
+      '.bq-row .bq-name small{color:#6b7186;font-weight:400}' +
+      '.bq-chip{font-family:ui-monospace,monospace;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.03em}' +
+      '.bq-chip.queued{background:rgba(255,194,77,.14);color:#ffc24d}.bq-chip.running{background:rgba(124,92,255,.16);color:#9d86ff}' +
+      '.bq-chip.done{background:rgba(56,224,166,.14);color:#38e0a6}.bq-chip.error{background:rgba(255,107,107,.14);color:#ff6b6b}.bq-chip.canceled{background:rgba(155,160,180,.14);color:#9aa0b4}.bq-chip.draft{background:rgba(155,160,180,.12);color:#9aa0b4}' +
+      '.bq-bar{grid-column:1/3;height:7px;border-radius:6px;background:#0f0f18;overflow:hidden}' +
+      '.bq-fill{height:100%;background:linear-gradient(90deg,rgba(124,92,255,.6),#7c5cff);transition:width .5s ease}' +
+      '.bq-fill.done{background:linear-gradient(90deg,rgba(56,224,166,.6),#38e0a6)}.bq-fill.error{background:#ff6b6b}' +
+      '.bq-meta{grid-column:1/3;font-size:11.5px;color:#9aa0b4;font-family:ui-monospace,monospace}' +
+      '.bq-x{background:none;border:1px solid rgba(255,255,255,.12);color:#9aa0b4;border-radius:7px;padding:3px 9px;font-size:12px;cursor:pointer}' +
+      '.bq-x:hover{color:#ff6b6b;border-color:#ff6b6b}' +
+      '.bq-empty{color:#6b7186;font-size:13px;padding:8px 0}' +
+      '</style>';
+  }
+  function bqPhaseLabel(r) {
+    if (!r) return "";
+    if (r.state === "running") return (r.phase || "running") + " · " + Math.round((r.progress || 0) * 100) + "%";
+    if (r.state === "done") return "done · " + (r.merged || 0) + " new / " + (r.found || 0) + " found";
+    if (r.state === "queued") return "queued";
+    if (r.state === "error") return "error: " + (r.error || "failed");
+    if (r.state === "canceled") return "canceled";
+    return "";
+  }
+  function renderBatchQueue(host) {
+    if (!host) return;
+    function paint(d) {
+      var s = (d && d.summary) || { total: 0, queued: 0, running: 0, done: 0, error: 0, merged: 0 };
+      var searches = (d && d.searches) || [];
+      var sum = s.total ? (s.running + " running · " + s.queued + " queued · " + s.done + " done" + (s.error ? " · " + s.error + " error" : "") + " · " + (s.merged || 0) + " companies added") : "no searches yet";
+      var rows = searches.map(function (q) {
+        var r = q.run || null;
+        var st = (r && r.state) || "draft";
+        var pct = Math.round(((r && r.progress) || (st === "done" ? 1 : 0)) * 100);
+        var fillCls = st === "done" ? "done" : (st === "error" ? "error" : "");
+        var showBar = st === "queued" || st === "running" || st === "done";
+        var canCancel = st === "queued";
+        return '<div class="bq-row">' +
+            '<div class="bq-name">' + esc(q.name || q.query || q.industry || "(search)") +
+              (q.location ? ' <small>· ' + esc(q.location) + "</small>" : "") + "</div>" +
+            '<div style="display:flex;gap:8px;align-items:center;justify-content:flex-end">' +
+              '<span class="bq-chip ' + st + '">' + st + "</span>" +
+              (canCancel ? '<button type="button" class="bq-x" data-bqcancel="' + esc(q.id) + '">Cancel</button>'
+                         : '<button type="button" class="bq-x" data-bqdel="' + esc(q.id) + '">✕</button>') +
+            "</div>" +
+            (showBar ? '<div class="bq-bar"><div class="bq-fill ' + fillCls + '" style="width:' + pct + '%"></div></div>' : "") +
+            '<div class="bq-meta">' + esc(bqPhaseLabel(r)) + "</div>" +
+          "</div>";
+      }).join("");
+      host.innerHTML = imBatchCss() +
+        '<div class="bq-card">' +
+          '<div class="bq-head"><h3>🗂️ Batch search queue <span class="muted" style="font-weight:400;font-size:12px">set &amp; forget</span></h3>' +
+            '<span class="bq-sum">' + esc(sum) + "</span></div>" +
+          '<div class="bq-add">' +
+            '<input class="bq-kw" id="bqKw" placeholder="Job title or industry (e.g. controller fintech)" />' +
+            '<input class="bq-loc" id="bqLoc" placeholder="Location (optional)" />' +
+            '<button class="btn btn-primary btn-sm" id="bqAdd">➕ Add to queue</button>' +
+            (searches.length ? '<button class="btn btn-ghost btn-sm" id="bqRunAll">▶ Run all</button>' : "") +
+          "</div>" +
+          (rows || '<div class="bq-empty">Add searches above — each one scrapes companies and merges them automatically, with a live progress bar. Queue as many as you want and walk away.</div>') +
+        "</div>";
+      wire();
+      // Poll while anything is queued/running so the bars animate + tick off.
+      if (imBatchTimer) { clearTimeout(imBatchTimer); imBatchTimer = null; }
+      if (s.queued > 0 || s.running > 0) imBatchTimer = setTimeout(load, 2500);
+    }
+    function load() {
+      // Stop polling once the panel leaves the DOM (user navigated away).
+      if (host.isConnected === false) { if (imBatchTimer) { clearTimeout(imBatchTimer); imBatchTimer = null; } return; }
+      send("/in-market", "POST", { action: "queue_status" }).then(function (r) {
+        if (r && r.ok && r.data) paint(r.data); else paint(null);
+      }).catch(function () { /* leave last paint */ });
+    }
+    function addAndRun() {
+      var kw = (host.querySelector("#bqKw") || {}).value; kw = (kw || "").trim();
+      if (!kw) { toast("Type a job title or industry first."); return; }
+      var loc = ((host.querySelector("#bqLoc") || {}).value || "").trim();
+      var btn = host.querySelector("#bqAdd"); if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
+      send("/in-market", "POST", { action: "queue_save", search: { name: kw + (loc ? " · " + loc : ""), query: kw, location: loc, limit: 100 } }).then(function (r) {
+        if (!r || !r.ok || !r.data || !r.data.search) { toast("Couldn't add that search."); if (btn) { btn.disabled = false; btn.textContent = "➕ Add to queue"; } return; }
+        var id = r.data.search.id;
+        send("/in-market", "POST", { action: "queue_enqueue", id: id }).then(function (er) {
+          if (btn) { btn.disabled = false; btn.textContent = "➕ Add to queue"; }
+          if (er && er.status === 409) { toast("Connect JSearch (RAPID_JOBS_KEY) to run searches."); }
+          var box = host.querySelector("#bqKw"); if (box) box.value = "";
+          load();
+        });
+      });
+    }
+    function wire() {
+      var add = host.querySelector("#bqAdd"); if (add) add.onclick = addAndRun;
+      var kw = host.querySelector("#bqKw"); if (kw) kw.onkeydown = function (e) { if (e.key === "Enter") addAndRun(); };
+      var all = host.querySelector("#bqRunAll"); if (all) all.onclick = function () {
+        all.disabled = true;
+        send("/in-market", "POST", { action: "queue_enqueue", all: true }).then(function (r) {
+          all.disabled = false;
+          if (r && r.status === 409) { toast("Connect JSearch (RAPID_JOBS_KEY) to run searches."); return; }
+          if (r && r.ok) toast("Queued " + ((r.data && r.data.queued) || 0) + " search" + (((r.data && r.data.queued) || 0) === 1 ? "" : "es") + " — they'll run automatically.");
+          load();
+        });
+      };
+      Array.prototype.forEach.call(host.querySelectorAll("[data-bqcancel]"), function (b) {
+        b.onclick = function () { send("/in-market", "POST", { action: "queue_cancel", id: b.getAttribute("data-bqcancel") }).then(load); };
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-bqdel]"), function (b) {
+        b.onclick = function () { send("/in-market", "POST", { action: "queue_delete", id: b.getAttribute("data-bqdel") }).then(load); };
+      });
+    }
+    load();
   }
 
   // Render the results region: a bulk toolbar (select-all + narrow-down) over the cards.
