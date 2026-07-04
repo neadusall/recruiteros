@@ -295,9 +295,11 @@ export async function POST(req: Request) {
   if (b?.action === "koldinfo_export") {
     const { koldInfoExportRows } = await import("../../../lib/inmarket/curation");
     const { buildKoldInfoCsv } = await import("../../../lib/inmarket/koldInfo");
-    const limit = Math.min(Math.max(Number(b.limit) || 2000, 1), 20000);
-    const rows = await koldInfoExportRows(limit);
-    return ok({ count: rows.length, filename: "koldinfo-upload-" + new Date().toISOString().slice(0, 10) + ".csv", csv: buildKoldInfoCsv(rows) });
+    const limit = Math.min(Math.max(Number(b.limit) || 4000, 1), 20000);
+    const mode = b.mode === "all" ? "all" : "seed";
+    const rows = await koldInfoExportRows({ limit, mode });
+    const domains = new Set(rows.map((r) => r.domain.toLowerCase())).size;
+    return ok({ count: rows.length, domains, mode, filename: "koldinfo-" + mode + "-" + new Date().toISOString().slice(0, 10) + ".csv", csv: buildKoldInfoCsv(rows) });
   }
   if (b?.action === "koldinfo_import") {
     const { applyKoldInfoResults } = await import("../../../lib/inmarket/curation");

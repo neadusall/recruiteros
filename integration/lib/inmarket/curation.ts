@@ -811,79 +811,110 @@ export async function applyEmailValidation(
 /* ------------------------------------------------------------------ */
 
 /**
- * Prepare the highest-intent named-but-unconfirmed backlog for a KoldInfo enrichment run. Mirrors the
- * residual-finder target set (named + domain, no confirmed/catch-all verdict yet, not locked), sorts
- * by hiring intent, and caps to `limit` so we only ever enrich what we can realistically send. A row
- * that still holds only a guessed address is INCLUDED — KoldInfo may return the real one, which we
- * then confirm. See lib/inmarket/koldInfo.ts for the CSV shaping and the operator round-trip.
+ * Prepare a KoldInfo enrichment batch — the FIRST rung, run at the top of the funnel. Targets every
+ * slot with a resolved domain that has no confirmed/catch-all address yet and isn't locked, INCLUDING
+ * un-named ones: KoldInfo finds the person by company + title, so it can name AND email cold before
+ * the free research/permutation hop ever runs. Sorted by hiring intent, capped to `limit`.
+ *
+ * mode "seed" (default): ONE representative slot per domain. A single KoldInfo lookup learns that
+ *   domain's email format; the pattern cache then constructs the remaining colleagues at that domain
+ *   for ~1 Reoon credit each on the next validator tick — so we buy whole domains, not single rows.
+ * mode "all": every un-confirmed slot (use when you'd rather KoldInfo resolve each person directly).
  */
-export async function koldInfoExportRows(limit: number): Promise<KoldInfoExportRow[]> {
+export async function koldInfoExportRows(opts: { limit?: number; mode?: "seed" | "all" } = {}): Promise<KoldInfoExportRow[]> {
   const { splitFullName } = await import("./email");
+  const limit = Math.max(0, opts.limit ?? 4000);
+  const mode = opts.mode ?? "seed";
   const rows = await load();
-  const targets = rows
-    .filter((r) => r.managerName && r.domain && !r.emailValidated && !r.emailCatchAll
+  const pool = rows
+    .filter((r) => r.domain && !r.emailValidated && !r.emailCatchAll
       && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed")
-    .sort((a, b) => b.score - a.score)
-    .slice(0, Math.max(0, limit));
-  return targets.map((r) => {
-    const { firstName, lastName } = splitFullName(r.managerName!);
+    .sort((a, b) => b.score - a.score);
+
+  let picked: CuratedProspect[];
+  if (mode === "seed") {
+    const perDomain = new Map<string, CuratedProspect>();
+    for (const r of pool) { const d = r.domain!.toLowerCase(); if (!perDomain.has(d)) perDomain.set(d, r); }
+    picked = [...perDomain.values()].slice(0, limit);
+  } else {
+    picked = pool.slice(0, limit);
+  }
+
+  return picked.map((r) => {
+    const nm = r.managerName ? splitFullName(r.managerName) : {};
     const lk = r as { managerLinkedin?: string; linkedinUrl?: string };
     return {
       rosId: r.id,
-      firstName: firstName || "",
-      lastName: lastName || "",
-      fullName: r.managerName!,
+      firstName: nm.firstName || "",
+      lastName: nm.lastName || "",
+      fullName: r.managerName || "",
       company: r.company,
       domain: r.domain!,
-      title: r.managerTitle || "",
+      title: r.managerTitle || r.role || "",   // the target title so KoldInfo finds the right person
       linkedin: lk.managerLinkedin || lk.linkedinUrl || undefined,
     };
   });
 }
 
+/** company|domain bucket key for distributing a company's returned contacts across its open slots. */
+function koldCompanyKey(company: string | undefined, domain: string | undefined): string {
+  return ((company || "") + "|" + (domain || "")).toLowerCase().replace(/[^a-z0-9|.]/g, "");
+}
+
 /**
- * Merge a parsed KoldInfo result set back into the curated pool. Re-links each returned address to its
- * prospect (by our passthrough ros_id, else by name+domain), then RE-VERIFIES every address through
- * the Reoon credits we already own before trusting it — a vendor "verified" flag is never taken at
- * face value (same discipline as the Icypeas residual finder). Each Reoon-confirmed hit TEACHES the
- * per-domain pattern cache, so one KoldInfo address unlocks the whole domain's colleagues for ~1
- * credit. Never clobbers an already-validated row, and an address Reoon rejects is left as a miss
- * rather than overwriting a prospect's existing state.
+ * Merge a parsed KoldInfo result set back into the curated pool. For each returned contact it re-links
+ * to a prospect — by our passthrough ros_id first, else to an un-claimed slot at the same company/
+ * domain (so a company lookup that returns several people fills that company's other decision-maker
+ * slots). It LEARNS THE NAME for an un-named slot, then RE-VERIFIES every address through the Reoon
+ * credits we already own before trusting it (a vendor "verified" flag is never taken at face value),
+ * and TEACHES the per-domain pattern cache from each confirmed hit so one address unlocks the whole
+ * domain. Never clobbers an already-validated row; a Reoon-rejected address is counted and discarded.
  */
 export async function applyKoldInfoResults(
   results: KoldInfoResult[],
   nowIso: string,
-): Promise<{ matched: number; found: number; catchAll: number; invalid: number; pending: number; unmatched: number }> {
-  const summary = { matched: 0, found: 0, catchAll: 0, invalid: 0, pending: 0, unmatched: 0 };
+): Promise<{ matched: number; named: number; found: number; catchAll: number; invalid: number; pending: number; unmatched: number }> {
+  const summary = { matched: 0, named: 0, found: 0, catchAll: 0, invalid: 0, pending: 0, unmatched: 0 };
   if (!results.length) return summary;
   const { verifyDetailedBatch } = await import("./emailVerify");
   const { learnFromConfirmedEmail, inferPattern, flushPatternCache } = await import("./emailPattern");
-  const { koldInfoMatchKey } = await import("./koldInfo");
 
   return withCurationLock(async () => {
     const rows = await load();
     const byId = new Map(rows.map((r) => [r.id, r] as const));
-    const byKey = new Map<string, CuratedProspect>();
+    // company/domain -> open (un-confirmed, unlocked) slots, best score first, un-named preferred.
+    const bucket = new Map<string, CuratedProspect[]>();
     for (const r of rows) {
-      if (r.managerName && (r.domain || r.likelyEmail)) byKey.set(koldInfoMatchKey(r.managerName, r.domain, r.likelyEmail), r);
+      if (!r.domain || r.emailValidated || r.emailCatchAll) continue;
+      if (r.status === "enrolled" || r.status === "queued" || r.status === "suppressed") continue;
+      const k = koldCompanyKey(r.company, r.domain);
+      const list = bucket.get(k); if (list) list.push(r); else bucket.set(k, [r]);
     }
+    for (const list of bucket.values()) list.sort((a, b) => (Number(!!a.managerName) - Number(!!b.managerName)) || (b.score - a.score));
 
-    // 1) Re-link each returned address to a prospect (ros_id first, then name+domain).
-    const linked: Array<{ row: CuratedProspect; email: string }> = [];
+    // 1) Re-link each returned contact to a prospect.
+    const linked: Array<{ row: CuratedProspect; email: string; name?: string }> = [];
     const claimed = new Set<string>();
+    const pickSlot = (dom: string): CuratedProspect | undefined => {
+      for (const [k, list] of bucket) {
+        if (!k.endsWith("|" + dom)) continue;
+        const s = list.find((r) => !claimed.has(r.id));
+        if (s) return s;
+      }
+      return undefined;
+    };
     for (const res of results) {
       const email = (res.email || "").toLowerCase().trim();
       if (!email || !email.includes("@")) continue;
+      const name = res.fullName || [res.firstName, res.lastName].filter(Boolean).join(" ").trim() || undefined;
+      const dom = (res.domain || email.split("@")[1] || "").toLowerCase();
       let row = res.rosId ? byId.get(res.rosId) : undefined;
-      if (!row) {
-        const fullName = res.fullName || [res.firstName, res.lastName].filter(Boolean).join(" ");
-        row = byKey.get(koldInfoMatchKey(fullName, res.domain, email));
-      }
+      if (row && (claimed.has(row.id) || row.emailValidated)) row = undefined;
+      if (!row) row = (bucket.get(koldCompanyKey(res.company, dom))?.find((r) => !claimed.has(r.id))) || pickSlot(dom);
       if (!row) { summary.unmatched++; continue; }
-      if (claimed.has(row.id)) continue; // one address per prospect per run
-      if (row.emailValidated || row.status === "enrolled" || row.status === "queued" || row.status === "suppressed") continue;
+      if (claimed.has(row.id) || row.emailValidated) continue;
       claimed.add(row.id);
-      linked.push({ row, email });
+      linked.push({ row, email, name });
       summary.matched++;
     }
     if (!linked.length) return summary;
@@ -891,13 +922,19 @@ export async function applyKoldInfoResults(
     // 2) RE-VERIFY every KoldInfo address through our own Reoon credits before trusting it.
     const verdicts = await verifyDetailedBatch(linked.map((l) => ({ id: l.row.id, email: l.email })));
 
-    // 3) Merge verdict-by-verdict. Only touch a row when the address is usable (confirmed, catch-all,
-    //    or deliverable) — a Reoon-rejected address is counted and discarded, never written over the row.
-    for (const { row, email } of linked) {
+    // 3) Merge. Fill the name for an un-named slot, then apply the verdict; a Reoon-rejected address is
+    //    counted and discarded rather than written over the row.
+    for (const { row, email, name } of linked) {
       const v = verdicts.get(row.id);
       const status = v?.status;
       if (status === "invalid" || v?.reason === "role_account") { summary.invalid++; continue; }
 
+      if (name && !row.managerName) {
+        row.managerName = name;
+        row.managerVia = "koldinfo";
+        if (!row.managerTier || row.managerTier === "company_only") row.managerTier = "named";
+        summary.named++;
+      }
       row.likelyEmail = email;
       const pat = inferPattern(row.managerName, email);
       if (pat) row.emailPattern = pat;
@@ -915,7 +952,7 @@ export async function applyKoldInfoResults(
         summary.catchAll++;
       } else {
         // deliverable / unknown / no verdict (e.g. Reoon not keyed yet) — we now HAVE a real address
-        // where there was only a guess; leave it pending so the continuous validator confirms it later.
+        // (and often a name) where there was none; leave it pending for the validator to confirm.
         summary.pending++;
       }
     }

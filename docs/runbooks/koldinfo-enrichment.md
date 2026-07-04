@@ -6,15 +6,31 @@ operator drives. A KoldInfo hit can skip both the free naming research and the p
 for that slot, and because every confirmed hit teaches the per-domain pattern cache, one address
 unlocks the whole domain's colleagues for ~1 Reoon credit. This is the low-hanging-fruit lever.
 
-## The loop (once/day, ~10 minutes)
+## The loop (once/day, ~10 minutes) — Engine / Throughput panel has the buttons
 
-1. **Export.** POST `/api/in-market` `{ action: "koldinfo_export", limit: 4000 }`. Returns
-   `{ count, filename, csv }`. Cap `limit` to roughly **2× daily send need** so we never enrich what
-   we can't send (at 3,000 sends/day that's ~4,000–6,000). The CSV holds the highest hiring-intent
-   **named-but-unconfirmed** rows, each carrying a `ros_id` passthrough column.
-2. **Enrich.** Upload the CSV to KoldInfo, run its enrichment, download the result CSV.
+1. **Export.** POST `/api/in-market` `{ action: "koldinfo_export", limit: 4000, mode: "seed" }`.
+   Returns `{ count, domains, mode, filename, csv }`. The CSV holds the highest hiring-intent slots
+   that have a **domain but no confirmed email — named OR un-named** — each carrying a `ros_id`
+   passthrough plus `company`, `domain`, and the target `title` so KoldInfo can find the right person.
+   - **`mode: "seed"` (default)** — ONE slot per domain. A single lookup learns the domain's email
+     format; the pattern cache constructs the other decision-makers at that domain for ~1 Reoon credit
+     on the next validator tick. Cheapest way to cover the most people.
+   - **`mode: "all"`** — every un-confirmed slot, when you'd rather KoldInfo resolve each person.
+   - Cap `limit` to roughly your daily send need so we only enrich what we can send.
+2. **Enrich.** Upload the CSV to KoldInfo, run it, download the result CSV.
 3. **Import.** POST `/api/in-market` `{ action: "koldinfo_import", csv: "<result CSV text>" }`.
-   Returns `{ parsed, matched, found, catchAll, invalid, pending, unmatched }`.
+   Returns `{ parsed, matched, named, found, catchAll, invalid, pending, unmatched }`
+   (`named` = un-named slots KoldInfo filled with a real person).
+
+## Why this is the FIRST rung (top of funnel)
+
+Export includes **un-named** slots, so KoldInfo names *and* emails cold before the free research +
+permutation/Reoon hop ever runs — it skims the low-hanging fruit first. Whatever it confirms, the free
+pipeline then skips (it only touches rows without a verdict). And because each confirmed hit seeds the
+per-domain pattern cache, `mode: "seed"` turns one KoldInfo credit into a whole domain: the other slots
+at that domain get constructed and Reoon-confirmed automatically on the next tick. A KoldInfo company
+lookup that returns several people is absorbed too — extra contacts fill that company's other open
+slots (matched by company+domain when `ros_id` isn't on the row).
 
 ## What import does (the discipline)
 
