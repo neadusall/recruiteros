@@ -43,6 +43,24 @@ export interface TargetedSearch {
   runs: number;                  // how many times it's been run
   status: "draft" | "ran" | "error";
   lastError?: string;
+  /** Set-and-forget batch lifecycle — populated when a search is enqueued for auto-run. Separate
+   *  from `status` (the manual preview flow) so both can coexist. Persisted, so a batch resumes
+   *  across restarts: done stays done; an interrupted run re-queues on boot. */
+  run?: RunState;
+}
+
+/** Auto-run progress for one queued search. */
+export interface RunState {
+  state: "queued" | "running" | "done" | "error" | "canceled";
+  phase?: "queued" | "scraping" | "filtering" | "merging" | "done" | "error" | "canceled";
+  progress: number;              // 0..1 — drives the progress bar
+  queuedAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  found?: number;                // companies the search returned
+  merged?: number;               // net-new companies added to the pool
+  jobs?: number;                 // positions found
+  error?: string;
 }
 
 async function load(): Promise<TargetedSearch[]> {
@@ -167,4 +185,135 @@ export async function markCommitted(id: string, merged: number): Promise<void> {
   s.lastResult = { ...(s.lastResult || { companies: merged, jobs: merged }), merged };
   s.updatedAt = new Date().toISOString();
   await save(rows);
+}
+
+/* ------------------------------------------------------------------ */
+/* SET-AND-FORGET AUTO-RUN: enqueue searches, a background runner       */
+/* scrapes + auto-merges each, with per-search progress + resume.       */
+/* ------------------------------------------------------------------ */
+
+const ACTIVE = new Set(["queued", "running"]);
+
+/** Mark one search queued for auto-run (no-op if already queued/running). */
+export async function enqueueSearch(id: string): Promise<boolean> {
+  const rows = await load();
+  const s = rows.find((x) => x.id === id);
+  if (!s) return false;
+  if (s.run && ACTIVE.has(s.run.state)) return true;   // already pending
+  s.run = { state: "queued", phase: "queued", progress: 0, queuedAt: new Date().toISOString() };
+  s.updatedAt = s.run.queuedAt;
+  await save(rows);
+  return true;
+}
+
+/** Queue EVERY saved search that isn't already pending. Returns how many were newly queued. */
+export async function enqueueAll(): Promise<number> {
+  const rows = await load();
+  const now = new Date().toISOString();
+  let n = 0;
+  for (const s of rows) {
+    if (s.run && ACTIVE.has(s.run.state)) continue;
+    s.run = { state: "queued", phase: "queued", progress: 0, queuedAt: now };
+    s.updatedAt = now;
+    n++;
+  }
+  if (n) await save(rows);
+  return n;
+}
+
+/** Cancel a search that is still queued (a running one is left to finish). */
+export async function cancelSearch(id: string): Promise<boolean> {
+  const rows = await load();
+  const s = rows.find((x) => x.id === id);
+  if (!s || !s.run || s.run.state !== "queued") return false;
+  s.run = { ...s.run, state: "canceled", phase: "canceled", finishedAt: new Date().toISOString() };
+  s.updatedAt = s.run.finishedAt;
+  await save(rows);
+  return true;
+}
+
+/** Claim the oldest queued search and flip it to running (single-runner, so load→save is enough). */
+export async function claimNextQueued(): Promise<TargetedSearch | undefined> {
+  const rows = await load();
+  const queued = rows.filter((s) => s.run && s.run.state === "queued")
+    .sort((a, b) => (a.run!.queuedAt || "").localeCompare(b.run!.queuedAt || ""));
+  const s = queued[0];
+  if (!s) return undefined;
+  const now = new Date().toISOString();
+  s.run = { ...s.run!, state: "running", phase: "scraping", startedAt: now, progress: 0.1 };
+  s.updatedAt = now;
+  await save(rows);
+  return s;
+}
+
+/** Patch the run-state of a search mid-flight (progress/phase/counts). */
+export async function updateRun(id: string, patch: Partial<RunState>): Promise<void> {
+  const rows = await load();
+  const s = rows.find((x) => x.id === id);
+  if (!s || !s.run) return;
+  s.run = { ...s.run, ...patch };
+  s.updatedAt = new Date().toISOString();
+  await save(rows);
+}
+
+/** Finish a run successfully, stamping counts (and updating the manual-flow status too). */
+export async function finishRun(id: string, result: { found: number; merged: number; jobs: number }): Promise<void> {
+  const rows = await load();
+  const s = rows.find((x) => x.id === id);
+  if (!s) return;
+  const now = new Date().toISOString();
+  s.run = { ...(s.run || { state: "running", progress: 1 }), state: "done", phase: "done", progress: 1, finishedAt: now, found: result.found, merged: result.merged, jobs: result.jobs };
+  s.status = "ran";
+  s.runs = (s.runs || 0) + 1;
+  s.lastRunAt = now;
+  s.lastResult = { companies: result.found, jobs: result.jobs, merged: result.merged };
+  s.lastError = undefined;
+  s.updatedAt = now;
+  await save(rows);
+}
+
+/** Fail a run, recording the error. */
+export async function failRun(id: string, message: string): Promise<void> {
+  const rows = await load();
+  const s = rows.find((x) => x.id === id);
+  if (!s) return;
+  const now = new Date().toISOString();
+  s.run = { ...(s.run || { state: "running", progress: 0 }), state: "error", phase: "error", finishedAt: now, error: message.slice(0, 300) };
+  s.status = "error";
+  s.lastError = message.slice(0, 300);
+  s.updatedAt = now;
+  await save(rows);
+}
+
+/** On boot, re-queue any run that was interrupted mid-flight (so a restart resumes the batch). */
+export async function resumeInterruptedRuns(): Promise<number> {
+  const rows = await load();
+  let n = 0;
+  for (const s of rows) {
+    if (s.run && s.run.state === "running") {
+      s.run = { ...s.run, state: "queued", phase: "queued", progress: 0, startedAt: undefined };
+      n++;
+    }
+  }
+  if (n) await save(rows);
+  return n;
+}
+
+/** True while any search is queued or running (the runner + UI poll on this). */
+export async function hasPendingRuns(): Promise<boolean> {
+  return (await load()).some((s) => s.run && ACTIVE.has(s.run.state));
+}
+
+/** Roll-up counts for the batch header. */
+export async function queueSummary(): Promise<{ total: number; queued: number; running: number; done: number; error: number; merged: number }> {
+  const rows = await load();
+  const sum = { total: rows.length, queued: 0, running: 0, done: 0, error: 0, merged: 0 };
+  for (const s of rows) {
+    const st = s.run?.state;
+    if (st === "queued") sum.queued++;
+    else if (st === "running") sum.running++;
+    else if (st === "done") { sum.done++; sum.merged += s.run?.merged || 0; }
+    else if (st === "error") sum.error++;
+  }
+  return sum;
 }

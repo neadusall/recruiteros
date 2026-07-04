@@ -421,6 +421,26 @@ export async function POST(req: Request) {
     return ok({ merged: leads.length });
   }
 
+  // ---- SET-AND-FORGET AUTO-RUN: queue searches and let the background runner scrape + auto-merge
+  //      each, with live per-search progress. queue_list already returns each search's `run` state. ----
+  if (b?.action === "queue_enqueue") {
+    const { jobFeedEnabled } = await import("../../../lib/inmarket/jobFeed");
+    if (!jobFeedEnabled()) return fail("jobfeed_not_configured", 409, { detail: "Set RAPID_JOBS_HOST + RAPID_JOBS_KEY (JSearch on RapidAPI) to run searches." });
+    const { enqueueSearch, enqueueAll } = await import("../../../lib/inmarket/searchQueue");
+    const { ensureSearchRunner } = await import("../../../lib/inmarket/searchRunner");
+    const queued = b.all === true ? await enqueueAll() : (await enqueueSearch(String(b.id ?? "")) ? 1 : 0);
+    ensureSearchRunner();   // kick the runner immediately (also armed at boot)
+    return ok({ queued });
+  }
+  if (b?.action === "queue_cancel") {
+    const { cancelSearch } = await import("../../../lib/inmarket/searchQueue");
+    return ok({ canceled: await cancelSearch(String(b.id ?? "")) });
+  }
+  if (b?.action === "queue_status") {
+    const { queueSummary, listSearches } = await import("../../../lib/inmarket/searchQueue");
+    return ok({ summary: await queueSummary(), searches: await listSearches() });
+  }
+
   // On-demand curation run (the accumulator also does this hourly): research the top companies'
   // decision-makers now and refresh the list.
   if (b?.action === "curate_now") {

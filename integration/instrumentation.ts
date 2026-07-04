@@ -58,6 +58,18 @@ export async function register(): Promise<void> {
       /* never let an instrumentation hiccup block server startup */
     }
     try {
+      // Set-and-forget search queue: re-queue any search interrupted by the restart (so a batch
+      // picks up where it left off, not from scratch), then arm the background runner that scrapes
+      // + auto-merges each queued search with live per-search progress.
+      const { resumeInterruptedRuns } = await import("./lib/inmarket/searchQueue");
+      const requeued = await resumeInterruptedRuns();
+      if (requeued) console.log(`[inmarket] resumed ${requeued} interrupted search run(s) after restart`);
+      const { ensureSearchRunner } = await import("./lib/inmarket/searchRunner");
+      ensureSearchRunner();
+    } catch {
+      /* never let an instrumentation hiccup block server startup */
+    }
+    try {
       // Reoon email verification: SMTP-confirms guessed emails from Reoon's infra (Hetzner blocks
       // our own port 25), producing emailValidated=true for the validated-only auto-enroll. No-op
       // until REOON_API_KEY is set.
