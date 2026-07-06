@@ -16,14 +16,16 @@ import { mkdir, writeFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { videosDir } from "./roleVideo";
 import { getVoiceClient } from "../voice/provider";
+import { cred } from "../providers/http";
 
 function namesDir(): string {
   return join(videosDir(), "names");
 }
 
-/** The cloned voice to speak the name. RECRUITEROS_INTRO_VOICE_ID overrides the voicedrop default. */
+/** The cloned voice to speak the name. RECRUITEROS_INTRO_VOICE_ID overrides the voicedrop default.
+ *  Resolved through cred() so a voice id saved in the Connected portal (per-workspace) wins over env. */
 export function defaultVoiceId(): string {
-  return (process.env.RECRUITEROS_INTRO_VOICE_ID || process.env.VOICE_CLONE_VOICE_ID || "").trim();
+  return (cred("RECRUITEROS_INTRO_VOICE_ID") || cred("VOICE_CLONE_VOICE_ID")).trim();
 }
 
 /**

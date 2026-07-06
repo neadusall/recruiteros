@@ -803,14 +803,16 @@
     if (!vs) return;
     var hasVoice = !!(j.voice && j.voice.voiceId);
     if (!j.providerConfigured) {
-      vs.innerHTML = '<span style="color:#ffe0a3">Voice not configured.</span> Set VOICE_CLONE_API_KEY (ElevenLabs) to clone your voice.';
+      vs.innerHTML = '<span style="color:#ffe0a3">Voice not configured.</span> Paste your ElevenLabs API key in <b>Command → Connected → ElevenLabs</b> (or set VOICE_CLONE_API_KEY), then clone your voice.';
     } else if (hasVoice) {
-      vs.innerHTML = '<span style="color:#3fb950">✓ Your voice is cloned.</span> Every "Hey {name}," sounds like you.';
+      vs.innerHTML = '<span style="color:#3fb950">✓ Your voice is cloned.</span> Every "Hey {name}," sounds like you — tuned to match your recording so the splice is seamless.';
     } else {
       vs.innerHTML = 'Clone your voice from a saved clip so each "Hey {name}," sounds like you.';
     }
     if (clone) { clone.textContent = hasVoice ? "Re-clone from latest clip" : "Clone my voice"; clone.disabled = !j.providerConfigured; }
     if (forget) forget.style.display = hasVoice ? "" : "none";
+    var prevRow = $("voicePreviewRow");
+    if (prevRow) prevRow.style.display = j.providerConfigured ? "" : "none";
     if (ls) {
       if (j.lipSync && j.lipSync.configured) ls.innerHTML = '<span style="color:#3fb950">●</span> Lip-sync on (' + esc(j.lipSync.model) + '). The mouth matches the name.';
       else ls.innerHTML = '<span style="color:#8b97a6">●</span> Lip-sync off. The name plays over a held frame. Set LIPSYNC_URL to enable.';
@@ -828,6 +830,32 @@
     if (forget) forget.onclick = function () {
       api("/api/in-market/voice", { method: "POST", body: JSON.stringify({ action: "forget" }) })
         .then(function () { toast("Voice forgotten"); loadVoice(); }).catch(function (e) { toast(e.message); });
+    };
+    // "Hear it" — synthesize "Hey {name}," in the cloned voice, blended against the current clip's
+    // audio (the EXACT greeting a render splices), and play it back. Raw fetch: the response is audio.
+    var prevBtn = $("btnPreviewVoice");
+    if (prevBtn) prevBtn.onclick = function () {
+      var nameEl = $("voicePreviewName");
+      var name = ((nameEl && nameEl.value) || "").trim() || "Sarah";
+      prevBtn.disabled = true; prevBtn.innerHTML = '<span class="spin"></span>';
+      var hdrs = { "Content-Type": "application/json" };
+      try { var imp = sessionStorage.getItem("ros_imp_token"); if (imp) hdrs["Authorization"] = "Bearer " + imp; } catch (e) {}
+      fetch(API + "/api/in-market/voice", {
+        method: "POST", credentials: "include", headers: hdrs,
+        body: JSON.stringify({ action: "preview", name: name, clipId: state.clipId || undefined }),
+      }).then(function (r) {
+        if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { throw new Error((j && j.error) || ("HTTP " + r.status)); });
+        return r.blob();
+      }).then(function (b) {
+        var url = URL.createObjectURL(b);
+        var a = new Audio(url);
+        a.onended = function () { URL.revokeObjectURL(url); };
+        return a.play();
+      }).catch(function (e) {
+        toast("Preview failed: " + e.message);
+      }).then(function () {
+        prevBtn.disabled = false; prevBtn.textContent = "▶ Hear it";
+      });
     };
   })();
 

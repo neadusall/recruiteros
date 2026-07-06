@@ -208,6 +208,15 @@ export async function readClipBytes(id: string): Promise<{ buf: Buffer; mime: st
   }
 }
 
+/** Absolute local path of a stored clip (re-materialized from S3 if evicted) for ffmpeg consumers. */
+export async function localClipPath(id: string): Promise<string | null> {
+  const meta = await getClip(id);
+  if (!meta) return null;
+  await materializeClip(meta);
+  const p = clipPath(meta.id, meta.ext);
+  return (await fileExists(p)) ? p : null;
+}
+
 export async function listClips(workspaceId: string): Promise<ClipMeta[]> {
   const clips = await ensureClips();
   return [...clips.values()]
@@ -569,6 +578,7 @@ async function compose(
   };
 
   const baseMp4 = join(videosDir(), `${key}.base.mp4`);
+  const blendedIntro = join(videosDir(), `${key}.introx.wav`);
   const files: VideoResult["files"] = {};
   try {
     // (1) BASE composite WITH the user's voice. Background looped (-stream_loop -1); the webcam
@@ -612,6 +622,7 @@ async function compose(
     await unlink(tmpMask).catch(() => {});
     await unlink(tmpBorder).catch(() => {});
     await unlink(baseMp4).catch(() => {});
+    await unlink(blendedIntro).catch(() => {});
   }
   return { files };
 }
@@ -870,7 +881,16 @@ export async function composeRoleVideo(
         }
         // Optional cloned-voice "Hey {firstName}," intro (cached by voice+name; null degrades gracefully).
         const { nameIntroAudio, cleanFirstName } = await import("./nameAudio");
-        const introAudio = await nameIntroAudio(opts?.firstName, opts?.voiceId).catch(() => null);
+        let introAudio = await nameIntroAudio(opts?.firstName, opts?.voiceId).catch(() => null);
+        // Re-master the studio-clean TTS name into the RECORDING's own sonic space (loudness,
+        // bandwidth, breathing room) so the splice is inaudible. Must happen BEFORE lip-sync so
+        // the mouth is driven by the exact audio that ships. Null → splice the raw intro.
+        if (introAudio) {
+          const { blendIntroToBody } = await import("./audioBlend");
+          await mkdir(videosDir(), { recursive: true });
+          const blended = await blendIntroToBody(introAudio, clipPath(clip.id, clip.ext), join(videosDir(), `${key}.introx.wav`)).catch(() => null);
+          if (blended) introAudio = blended;
+        }
         // When a lip-sync service is configured, also render a mouth-matched face for the name
         // (cached per name). Null => compose() falls back to the frozen-frame cloned-voice intro.
         let introFace: string | null = null;
