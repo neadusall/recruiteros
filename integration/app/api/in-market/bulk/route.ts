@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   if (recipients.length > MAX_PER_REQUEST) return fail(`too many recipients (max ${MAX_PER_REQUEST} per request)`, 422);
 
   const { resolveVoiceId } = await import("../../../../lib/inmarket/voiceClone");
-  const voiceId = await resolveVoiceId(ws, b?.voiceId ? String(b.voiceId) : undefined);
+  const { withWorkspaceCreds } = await import("../../../../lib/connected");
 
   const reqShot = {
     company, roleTitle,
@@ -54,7 +54,12 @@ export async function POST(req: Request) {
   };
 
   const { startBulk, bulkQueueStats } = await import("../../../../lib/inmarket/bulkVideo");
-  const results = startBulk(reqShot, clipId, b?.pip, voiceId, recipients);
+  // withWorkspaceCreds: every fired render synthesizes names with the ElevenLabs key saved in the
+  // Connected portal (per-workspace) — the async context follows the background jobs it spawns.
+  const results = await withWorkspaceCreds(ws, async () => {
+    const voiceId = await resolveVoiceId(ws, b?.voiceId ? String(b.voiceId) : undefined);
+    return startBulk(reqShot, clipId, b?.pip, voiceId, recipients);
+  });
 
   // Attach signed share links to the ones that are ready to send.
   const { compositeShareUrls } = await import("../../../../lib/inmarket/shareSign");

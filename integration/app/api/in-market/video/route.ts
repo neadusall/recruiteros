@@ -61,6 +61,7 @@ export async function POST(req: Request) {
   if (!clipId) return fail("missing clipId", 422);
 
   const { getOrStartVideo, composeRoleVideo } = await import("../../../../lib/inmarket/roleVideo");
+  const { withWorkspaceCreds } = await import("../../../../lib/connected");
   const reqShot = {
     company,
     roleTitle,
@@ -74,16 +75,20 @@ export async function POST(req: Request) {
   // recorded clip's own length so the composite is one clean pass. Clamped to a sane 5–180s.
   const durRaw = Number(b?.durationSec);
   const durationSec = Number.isFinite(durRaw) && durRaw > 0 ? Math.min(180, Math.max(5, Math.round(durRaw))) : undefined;
-  const opts = {
-    force: b?.force === true,
-    // Personalized cloned-voice "Hey {firstName}," intro (optional).
-    firstName: b?.firstName ? String(b.firstName) : undefined,
-    voiceId: await resolveVoiceId(ws, b?.voiceId ? String(b.voiceId) : undefined),
-    durationSec,
-  };
-  const result = b?.wait === true
-    ? await composeRoleVideo(reqShot, clipId, b?.pip, opts)
-    : await getOrStartVideo(reqShot, clipId, b?.pip, opts);
+  // withWorkspaceCreds: the name synthesis inside the render resolves the ElevenLabs key saved in
+  // the Connected portal (per-workspace) — the async context follows the background render too.
+  const result = await withWorkspaceCreds(ws, async () => {
+    const opts = {
+      force: b?.force === true,
+      // Personalized cloned-voice "Hey {firstName}," intro (optional).
+      firstName: b?.firstName ? String(b.firstName) : undefined,
+      voiceId: await resolveVoiceId(ws, b?.voiceId ? String(b.voiceId) : undefined),
+      durationSec,
+    };
+    return b?.wait === true
+      ? composeRoleVideo(reqShot, clipId, b?.pip, opts)
+      : getOrStartVideo(reqShot, clipId, b?.pip, opts);
+  });
 
   // When the composite is ready, hand the Studio SIGNED, expiring share links to send (the
   // recipient surfaces require a valid signature — see /api/in-market/watch).

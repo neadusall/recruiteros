@@ -229,7 +229,7 @@ const CATALOG: IntegrationMeta[] = [
   {
     id: "elevenlabs",
     label: "ElevenLabs (cloned voice)",
-    blurb: "The cloned voice for Voice Drops and AI Vetting. Paste your ElevenLabs API key.",
+    blurb: "The cloned voice for Voice Drops, AI Vetting and Pip Studio's spoken \"Hey {name},\" video intros. Paste your ElevenLabs API key.",
     requiredFor: [],
     fields: [
       { key: "VOICE_CLONE_API_KEY", label: "API key", required: true, secret: true, placeholder: "sk_…" },

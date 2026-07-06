@@ -336,6 +336,11 @@
         <button id="btnCloneVoice" class="primary small" style="flex:1">Clone my voice</button>
         <button id="btnForgetVoice" class="ghost small" style="display:none">Forget</button>
       </div>
+      <div class="row" id="voicePreviewRow" style="display:none;margin-top:8px">
+        <input id="voicePreviewName" type="text" placeholder="Sarah" maxlength="20" style="flex:1;min-width:0"
+               title="Type any first name to hear its greeting exactly as it will splice into your recording" />
+        <button id="btnPreviewVoice" class="ghost small" title='Plays "Hey {name}," in your cloned voice, matched to your recording'>▶ Hear it</button>
+      </div>
       <p class="muted" id="lipsyncStatus" style="margin:10px 0 0"></p>
       <details>
         <summary>Recording tips for great lip-sync</summary>
