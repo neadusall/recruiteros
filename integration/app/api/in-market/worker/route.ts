@@ -95,6 +95,12 @@ function sanitizeRow(raw: unknown): CuratedProspect | null {
     industry: s(r.industry, 120),
     signalType: s(r.signalType, 60) ?? "job_posting",
     signalReason: s(r.signalReason, 400) ?? "",
+    // the posting itself — jobUrl targets the screen capture; location + postedAt are the
+    // personalization hooks the Clients tab / CSV / sender templates run on.
+    jobUrl: s(r.jobUrl, 600),
+    jobLocation: s(r.jobLocation, 160),
+    jobPostedAt: s(r.jobPostedAt, 40),
+    employeeCount: r.employeeCount == null ? undefined : Math.max(0, Math.round(n(r.employeeCount))) || undefined,
     function: (s(r.function, 40) ?? "other") as CuratedProspect["function"],
     score: Math.max(0, Math.min(100, Math.round(n(r.score)))),
     managerName: s(r.managerName, 120),
@@ -116,7 +122,7 @@ function sanitizeRow(raw: unknown): CuratedProspect | null {
 
 export async function POST(req: Request) {
   if (!authed(req)) return fail("unauthorized", 401);
-  const b = await body<{ action?: string; limit?: number; rows?: unknown[]; leads?: unknown[]; worker?: string; health?: unknown }>(req);
+  const b = await body<{ action?: string; limit?: number; rows?: unknown[]; leads?: unknown[]; results?: unknown[]; worker?: string; health?: unknown }>(req);
   const workerId = (s(b?.worker, 60) || "").replace(/[^\w.\-]/g, "").slice(0, 60); // sanitize id for telemetry
 
   // Every authenticated call may carry a health digest (workers piggyback it on claim/submit/heartbeat),

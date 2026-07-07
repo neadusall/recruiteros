@@ -732,7 +732,78 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .cl-vb:hover { filter: brightness(1.18); }
 .cl-vb-active { box-shadow: 0 0 0 2px currentColor inset; filter: brightness(1.12); }
 .cl-vb-clear { background: rgba(255,255,255,0.06); color: var(--text-dim, #9a9aa8); }
-.cl-capnote { padding: 8px 16px; font-size: 12px; color: var(--text-dim, #9a9aa8); border-bottom: 1px solid var(--border); }
+
+/* ── Clients · dashboard upgrade: KPI cards, selection, bulk bar, pager, drawer ──── */
+/* KPI stat cards — readiness at a glance; verified/video cards double as filters. */
+.cl-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.cl-kpi { display: flex; align-items: center; gap: 10px; text-align: left; font: inherit; appearance: none; cursor: pointer; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border-strong, var(--border)); background: var(--surface-2, #16161f); color: var(--text, #f4f4f8); transition: border-color .12s ease, box-shadow .12s ease, transform .12s ease; }
+.cl-kpi:hover { border-color: var(--brand); transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,0.22); }
+.cl-kpi-static { cursor: default; }
+.cl-kpi-static:hover { border-color: var(--border-strong, var(--border)); transform: none; box-shadow: none; }
+.cl-kpi-active { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand) inset; }
+.cl-kpi-ico { flex: none; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; border-radius: 9px; background: rgba(120,170,255,0.10); }
+.cl-kpi-body { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.cl-kpi-val { font-size: 19px; font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; }
+.cl-kpi-lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim, #9a9aa8); }
+.cl-kpi-sub { font-size: 10.5px; color: var(--text-muted, #7a7a88); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Sticky selection + contact columns: who you're looking at stays pinned while the wide sheet
+   scrolls horizontally. Offsets: col 1 renders at 34px + 12/4 padding = 50px. */
+.cl-sheet th:nth-child(1), .cl-sheet td:nth-child(1) { position: sticky; left: 0; z-index: 3; background: var(--surface, #101018); }
+.cl-sheet th:nth-child(2), .cl-sheet td:nth-child(2) { position: sticky; left: 50px; z-index: 3; background: var(--surface, #101018); }
+.cl-sheet thead th:nth-child(1), .cl-sheet thead th:nth-child(2) { z-index: 4; background: var(--surface-2, #16161f); }
+/* Row-selection checkboxes. */
+.cl-c-check, .cl-th-check { width: 34px; text-align: center; padding-left: 12px !important; padding-right: 4px !important; }
+.cl-th-check { cursor: default !important; }
+.cl-rowchk, #clPageChk { width: 15px; height: 15px; accent-color: var(--brand, #7c5cff); cursor: pointer; vertical-align: middle; }
+.cl-sheet tbody tr.pr-row { cursor: pointer; }
+/* Bulk-actions bar (appears when rows are selected). */
+.cl-bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; margin-bottom: 12px; border-radius: 12px; border: 1px solid var(--brand, #7c5cff); background: rgba(124,92,255,0.10); animation: clBulkIn .15s ease; }
+@keyframes clBulkIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.cl-bulk-n { font-size: 13px; font-weight: 700; padding: 0 6px; }
+.cl-bulk-clear { margin-left: auto; }
+/* "Select all matching" banner (Gmail-style). */
+.cl-selbanner { padding: 8px 16px; font-size: 12.5px; color: var(--text-dim, #9a9aa8); background: rgba(124,92,255,0.07); border-bottom: 1px solid var(--border); text-align: center; }
+.cl-selbanner button { appearance: none; border: none; background: none; font: inherit; font-weight: 700; color: var(--brand-2, #4dd0ff); cursor: pointer; padding: 0 4px; }
+.cl-selbanner button:hover { text-decoration: underline; }
+/* Pagination footer. */
+.cl-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text-dim, #9a9aa8); }
+.cl-pager-info b { color: var(--text, #f4f4f8); font-weight: 700; }
+.cl-pager-ctl { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; }
+.cl-pg-num { appearance: none; font: inherit; font-size: 12px; font-weight: 600; min-width: 28px; padding: 5px 8px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--text-dim, #9a9aa8); cursor: pointer; transition: all .1s ease; }
+.cl-pg-num:hover:not(:disabled) { border-color: var(--border-strong, var(--border)); color: var(--text, #f4f4f8); background: var(--surface-2, #16161f); }
+.cl-pg-num:disabled { opacity: .35; cursor: default; }
+.cl-pg-active { background: var(--brand, #7c5cff); color: #fff !important; border-color: var(--brand, #7c5cff); }
+.cl-pg-gap { padding: 0 2px; user-select: none; }
+.cl-pager-size { display: inline-flex; align-items: center; gap: 6px; }
+.cl-pager-size select { appearance: none; font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--border-strong, var(--border)); background: var(--surface-2, #16161f); color: var(--text, #f4f4f8); cursor: pointer; }
+/* Category (desk · industry) cell. */
+.crm-c-cat .cl-cat { margin-right: 4px; margin-bottom: 2px; }
+/* Intent-score tiers. */
+.cl-score-hi { background: rgba(56,224,166,0.16); color: #38e0a6; }
+.cl-score-md { background: rgba(255,194,77,0.16); color: #ffc24d; }
+.cl-score-lo { background: rgba(255,255,255,0.08); color: var(--text-dim, #9a9aa8); }
+/* Detail drawer: slide-over with every data point on the contact. */
+.cl-dr-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 80; animation: clFade .15s ease; }
+@keyframes clFade { from { opacity: 0; } to { opacity: 1; } }
+.cl-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 94vw); z-index: 81; overflow-y: auto; background: var(--surface, #101018); border-left: 1px solid var(--border-strong, var(--border)); box-shadow: -12px 0 40px rgba(0,0,0,0.45); padding: 18px 20px 28px; animation: clSlide .18s ease; }
+@keyframes clSlide { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.cl-dr-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.cl-dr-head .crm-av { width: 40px; height: 40px; font-size: 14px; }
+.cl-dr-who { min-width: 0; flex: 1; }
+.cl-dr-name { font-size: 16px; font-weight: 800; letter-spacing: -0.01em; }
+.cl-dr-title { font-size: 12.5px; color: var(--text-dim, #9a9aa8); }
+.cl-dr-x { appearance: none; border: 1px solid var(--border-strong, var(--border)); background: var(--surface-2, #16161f); color: var(--text-dim, #9a9aa8); font: inherit; font-size: 13px; width: 30px; height: 30px; border-radius: 9px; cursor: pointer; flex: none; }
+.cl-dr-x:hover { color: var(--text, #f4f4f8); border-color: var(--brand); }
+.cl-dr-media { display: block; line-height: 0; margin-bottom: 12px; border-radius: 12px; overflow: hidden; border: 1px solid var(--border-strong, var(--border)); }
+.cl-dr-media img { width: 100%; display: block; }
+.cl-dr-media-ph { display: flex; align-items: center; justify-content: center; height: 120px; font-size: 14px; color: var(--text-dim, #9a9aa8); line-height: 1.4; }
+.cl-dr-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.cl-dr-sec { margin-bottom: 14px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2, #16161f); }
+.cl-dr-sec h4 { margin: 0 0 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim, #9a9aa8); }
+.cl-dr-row { display: flex; gap: 12px; padding: 4px 0; font-size: 12.5px; align-items: baseline; }
+.cl-dr-l { flex: none; width: 96px; color: var(--text-dim, #9a9aa8); }
+.cl-dr-v { min-width: 0; word-break: break-word; }
+.cl-dr-v a { color: var(--brand-2, #4dd0ff); }
 .im-ai-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 99px; background: rgba(77,208,255,0.14); color: var(--brand-2); margin-left: 4px; }
 .im-ai-refine, .im-all-roles { appearance: none; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; margin-top: 8px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); transition: all .12s ease; }
 .im-all-roles { margin-right: 8px; }
