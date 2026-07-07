@@ -4621,8 +4621,9 @@
     // segment: "signals" = the Hire Signals curation engine output (the thousands of validated
     // decision-makers, read from the curation store); "all" = enriched prospects in your pipeline.
     var clSeg = localStorage.getItem("ros_clients_seg") || "signals";
-    // Spreadsheet sort: column key + direction (1 asc / -1 desc), persisted.
-    var clSort = { key: localStorage.getItem("ros_clients_sortk") || "company", dir: Number(localStorage.getItem("ros_clients_sortd") || 1) };
+    // Spreadsheet sort: column key + direction (1 asc / -1 desc), persisted. Default = hottest
+    // hiring intent first, so the leads most worth emailing open the page.
+    var clSort = { key: localStorage.getItem("ros_clients_sortk") || "hiring_score", dir: Number(localStorage.getItem("ros_clients_sortd") || 1) };
     var searchEl = $("#clSearch");
     if (searchEl) searchEl.addEventListener("input", function () { clFilter = (searchEl.value || "").toLowerCase().trim(); clPage = 0; paint(); });
     var indSel = $("#clIndustry"); if (indSel) indSel.addEventListener("change", function () { clIndustry = indSel.value; clPage = 0; paint(); });
@@ -4904,12 +4905,13 @@
     // Page snapshots so the selection UI can sync without a full repaint.
     var lastList = [], lastPageRows = [];
 
-    // One KPI stat card. A data-kpi value makes the card clickable (mirrors the legend filter).
-    function kpiCard(key, icon, value, label, sub) {
+    // One KPI stat card. A data-kpi value makes the card clickable (mirrors the legend filter);
+    // accent tints the icon chip so each stat reads at a glance.
+    function kpiCard(key, icon, value, label, sub, accent) {
       var active = key && clVerdict === key;
       return '<button class="cl-kpi' + (active ? " cl-kpi-active" : "") + (key ? "" : " cl-kpi-static") + '"' +
         (key ? ' data-kpi="' + key + '"' : "") + ">" +
-        '<span class="cl-kpi-ico">' + icon + "</span>" +
+        '<span class="cl-kpi-ico"' + (accent ? ' style="background:' + accent + '"' : "") + ">" + icon + "</span>" +
         '<span class="cl-kpi-body"><span class="cl-kpi-val">' + value + "</span>" +
         '<span class="cl-kpi-lbl">' + label + "</span>" +
         (sub ? '<span class="cl-kpi-sub">' + sub + "</span>" : "") + "</span></button>";
@@ -4957,11 +4959,11 @@
       var kEl = $("#clKpis");
       if (kEl) {
         kEl.innerHTML =
-          kpiCard("", "👥", elig.length.toLocaleString(), "Contacts", nCompanies ? nCompanies.toLocaleString() + " companies" : "") +
-          kpiCard("valid", "✓", (by.valid || 0).toLocaleString(), "Verified", "mailbox confirmed") +
-          kpiCard("video", "🎬", withVideo.toLocaleString(), "With video", "asset attached") +
-          kpiCard("", "🚀", sendReady.toLocaleString(), "Send-ready", "verified + video") +
-          kpiCard("", "⚡", avgScore == null ? "—" : String(avgScore), "Avg intent", unchecked ? unchecked.toLocaleString() + " unchecked" : "all checked");
+          kpiCard("", "👥", elig.length.toLocaleString(), "Contacts", nCompanies ? nCompanies.toLocaleString() + " companies" : "", "rgba(124,92,255,0.16)") +
+          kpiCard("valid", "✓", (by.valid || 0).toLocaleString(), "Verified", "mailbox confirmed", "rgba(54,211,153,0.16)") +
+          kpiCard("video", "🎬", withVideo.toLocaleString(), "With video", "asset attached", "rgba(170,120,255,0.16)") +
+          kpiCard("", "🚀", sendReady.toLocaleString(), "Send-ready", "verified + video", "rgba(77,208,255,0.16)") +
+          kpiCard("", "⚡", avgScore == null ? "—" : String(avgScore), "Avg intent", unchecked ? unchecked.toLocaleString() + " unchecked" : "all checked", "rgba(255,194,77,0.16)");
         kEl.onclick = function (ev) {   // assignment (not addEventListener): #clKpis persists across paints
           var b = ev.target.closest ? ev.target.closest("[data-kpi]") : null;
           if (!b) return;
@@ -5206,25 +5208,44 @@
       if (kind === "gencap") generateCaptures(sel, btn);
     }
 
+    // The email composer: writes the personalized outreach email from EVERY data point on the
+    // row — first name, the exact open role, the job's location, how long it's been open, the
+    // why-hiring signal, and the video when one exists. One source of truth for the clipboard
+    // copy AND the drawer's Compose (mailto) action.
+    function craftEmail(p) {
+      var vid = videoFor(p);
+      var first = firstNameOf(p) || "there";
+      var co = p.company || "your team";
+      var role = (vid && vid.role) || p.openRole || "";
+      var where = p.location ? " in " + p.location : "";
+      var dOpen = daysOpen(p);
+      var openBit = dOpen != null && dOpen >= 7 ? " — it's been open " + dOpen + " days" : "";
+      var subject = role
+        ? role + where + (dOpen != null && dOpen >= 7 ? " (open " + dOpen + " days)" : "")
+        : "Hiring at " + co;
+      var intro = "Saw " + co + " is hiring" + (role ? " a " + role : "") + where + openBit + "." +
+        (p.signalReason ? " " + p.signalReason + "." : "");
+      var cta = "I can have 2–3 vetted " + (role ? role + " " : "") + "candidates on your desk this week. Worth a quick chat?";
+      var text = "Hi " + first + ",\n\n" + intro +
+        (vid && vid.watch ? "\n\nI put together a quick video for you: " + vid.watch : "") +
+        "\n\n" + cta;
+      return { subject: subject, first: first, intro: intro, cta: cta, text: text, vid: vid };
+    }
+
     // Build a paste-ready email (clickable GIF that opens the watch page) and write
     // BOTH text/html (renders in Gmail) and text/plain (sequence editors) to the clipboard.
     function copyVideoEmail(p) {
-      var vid = videoFor(p);
+      var em = craftEmail(p);
+      var vid = em.vid;
       if (!vid || (!vid.gif && !vid.watch)) { toast("No video for this client yet — click Generate first."); return; }
-      var first = p.firstName || ((p.fullName || "").split(/\s+/)[0]) || "there";
-      var co = p.company || "your team";
-      var roleName = vid.role || p.openRole || "";
-      var role = roleName ? (" for " + roleName) : "";
-      var reason = p.signalReason ? (" " + p.signalReason + ".") : "";
       var html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#111">' +
-        "<p>Hi " + esc(first) + ",</p>" +
-        "<p>Saw " + esc(co) + " is hiring" + esc(role) + "." + esc(reason) + " I put together a quick video for you:</p>" +
+        "<p>Hi " + esc(em.first) + ",</p>" +
+        "<p>" + esc(em.intro) + " I put together a quick video for you:</p>" +
         '<p><a href="' + esc(vid.watch || "#") + '" target="_blank">' +
           (vid.gif ? '<img src="' + esc(vid.gif) + '" alt="Watch the video" width="480" style="border-radius:10px;border:1px solid #ddd;max-width:100%;display:block" />' : "▶ Watch the video") +
         "</a></p>" +
-        "<p>Worth a quick chat this week?</p></div>";
-      var text = "Hi " + first + ",\n\nSaw " + co + " is hiring" + role + "." + reason +
-        " I put together a quick video for you: " + (vid.watch || "") + "\n\nWorth a quick chat this week?";
+        "<p>" + esc(em.cta) + "</p></div>";
+      var text = em.text;
       function plain() { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text); toast("Copied (plain text)."); }
       if (navigator.clipboard && window.ClipboardItem) {
         try {
@@ -5336,8 +5357,12 @@
             (vid.gif ? '<img src="' + esc(vid.gif) + '" alt="video preview" loading="lazy" onerror="this.replaceWith(document.createTextNode(\'▶ Watch\'))" />' : '<span class="cl-dr-media-ph">▶ Watch the video</span>') +
           "</a>"
         : "";
+      var em = craftEmail(p);
+      var compose = p.email
+        ? "mailto:" + esc(p.email) + "?subject=" + encodeURIComponent(em.subject) + "&body=" + encodeURIComponent(em.text)
+        : "";
       var actions = '<div class="cl-dr-actions">' +
-        (p.email ? '<a class="btn btn-ghost btn-sm" href="mailto:' + esc(p.email) + '">✉ Email</a>' : "") +
+        (compose ? '<a class="btn btn-ghost btn-sm" href="' + compose + '" title="Open the pre-written personalized email in your mail client">✉ Compose</a>' : "") +
         (vid ? '<button class="btn btn-primary btn-sm" data-dract="copyvid">📋 Copy email with video</button>'
              : '<button class="btn btn-primary btn-sm" data-dract="gencap">🖥 Generate capture</button>') +
         (p.jobUrl ? '<a class="btn btn-ghost btn-sm" href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener">↗ Job post</a>' : "") +
