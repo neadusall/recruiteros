@@ -4624,23 +4624,35 @@
     // Spreadsheet sort: column key + direction (1 asc / -1 desc), persisted. Default = hottest
     // hiring intent first, so the leads most worth emailing open the page.
     var clSort = { key: localStorage.getItem("ros_clients_sortk") || "hiring_score", dir: Number(localStorage.getItem("ros_clients_sortd") || 1) };
-    var searchEl = $("#clSearch");
-    if (searchEl) searchEl.addEventListener("input", function () { clFilter = (searchEl.value || "").toLowerCase().trim(); clPage = 0; paint(); });
+    var searchEl = $("#clSearch"), searchT = null;
+    // Debounced: filtering + sorting thousands of rows per keystroke makes typing lag.
+    if (searchEl) searchEl.addEventListener("input", function () {
+      if (searchT) clearTimeout(searchT);
+      searchT = setTimeout(function () {
+        clFilter = (searchEl.value || "").toLowerCase().trim(); clPage = 0; paint();
+      }, 150);
+    });
     var indSel = $("#clIndustry"); if (indSel) indSel.addEventListener("change", function () { clIndustry = indSel.value; clPage = 0; paint(); });
     var fnSel = $("#clFunction"); if (fnSel) fnSel.addEventListener("change", function () { clFunction = fnSel.value; clPage = 0; paint(); });
     var exp = $("#clExport"); if (exp) exp.addEventListener("click", exportClients);
     var verBtn = $("#clVerify"); if (verBtn) verBtn.addEventListener("click", function () { verifyEmails(this); });
     var refr = $("#clRefresh"); if (refr) refr.addEventListener("click", function () { load(); });
     var genAll = $("#clGenAll"); if (genAll) genAll.addEventListener("click", function () { generateAllCaptures(this); });
-    document.addEventListener("keydown", escCloseDrawer);
 
     function selCount() { return Object.keys(clSel).length; }
     function selList() { return Object.keys(clSel).map(function (id) { return clById[id]; }).filter(Boolean); }
     function clearSel() { clSel = {}; }
-    // Self-cleaning: renderClients re-runs on every tab visit, so drop stale listeners.
-    function escCloseDrawer(ev) {
-      if (!document.body.contains(el)) { document.removeEventListener("keydown", escCloseDrawer); return; }
-      if (ev.key === "Escape") closeDrawer();
+
+    // ONE app-wide Esc listener for the drawer, attached only while it's open and kept in a single
+    // window slot so re-renders REPLACE it instead of stacking (the router reuses the same #view
+    // container, so "is my render still mounted?" can't be detected from the DOM).
+    function bindDrawerEsc() {
+      unbindDrawerEsc();
+      window.__rosClDrawerEsc = function (ev) { if (ev.key === "Escape") closeDrawer(); };
+      document.addEventListener("keydown", window.__rosClDrawerEsc);
+    }
+    function unbindDrawerEsc() {
+      if (window.__rosClDrawerEsc) { document.removeEventListener("keydown", window.__rosClDrawerEsc); window.__rosClDrawerEsc = null; }
     }
 
     // Map a Hire Signals CuratedProspect into the client-row shape the spreadsheet expects.
@@ -4663,7 +4675,8 @@
         companyDomain: r.domain || "",
         companySize: r.employeeCount || "",   // company headcount (ICP fit + personalization)
         jobUrl: r.jobUrl || "",
-        location: r.jobLocation || "",     // where the JOB is based (posting location)
+        location: "",                      // company/contact location — unknown for curated rows (jobLocation is the POSTING's)
+        jobLocation: r.jobLocation || "",  // where the JOB is based (posting location)
         jobPostedAt: r.jobPostedAt || "",  // when the role went up ("open N days" hook)
         email: r.likelyEmail || "",
         emailVerification: ev,
@@ -4719,7 +4732,29 @@
       if (clVerdict === "unchecked") { var s = vStatus(p); return s === "unverified" || s === "unknown"; }
       return vStatus(p) === clVerdict;
     }
-    function shown() { return eligible().filter(inCat).filter(inVerdict); }
+    // Pass a precomputed eligible() list when you already have one — paint() does, so the segment
+    // filter + email regex don't run twice per repaint over the full dataset.
+    function shown(base) { return (base || eligible()).filter(inCat).filter(inVerdict); }
+
+    // Segment-wide KPI/legend rollup in ONE pass, memoized: these numbers depend only on the
+    // loaded data + capture maps (not search/category/verdict/sort/page), so keystroke and
+    // pager repaints reuse the cached result. Invalidated whenever data or capture maps change.
+    var kpiMemo = null;
+    function invalidateKpiMemo() { kpiMemo = null; }
+    function kpiRollup(elig) {
+      if (kpiMemo) return kpiMemo;
+      var by = {}, withVideo = 0, sendReady = 0, companies = {}, scoreSum = 0, scoreN = 0;
+      elig.forEach(function (p) {
+        var s = vStatus(p); by[s] = (by[s] || 0) + 1;
+        if (hasCapture(p)) { withVideo++; if (isSendReady(p)) sendReady++; }
+        var k = (p.company || "").toLowerCase().trim(); if (k) companies[k] = 1;
+        // Gate on the RAW score: 0 is a real score the table shows, but Number(null|"") is also 0.
+        if (p.score != null && p.score !== "") { var n = Number(p.score); if (isFinite(n)) { scoreSum += n; scoreN++; } }
+      });
+      kpiMemo = { by: by, withVideo: withVideo, sendReady: sendReady,
+        nCompanies: Object.keys(companies).length, avgScore: scoreN ? Math.round(scoreSum / scoreN) : null };
+      return kpiMemo;
+    }
 
     // The personalized video / screen capture for a client: prefer the attached
     // personalized PiP video, else a screen capture of the company's hiring page.
@@ -4740,8 +4775,6 @@
       return null;
     }
     function hasCapture(p) { return !!videoFor(p); }
-    // Fully ready to send = a deliverable email AND a capture to lead with.
-    function isFullyReady(p) { return isSendReady(p) && hasCapture(p); }
 
     // Sort rank for the verification verdict — best (most sendable) first when ascending.
     function vRank(p) { return ({ valid: 0, deliverable: 1, risky: 2, unknown: 3, unverified: 4, invalid: 5 })[vStatus(p)]; }
@@ -4794,8 +4827,8 @@
           var role = (p.openRole ? '<span class="cl-cat cl-cat-role">' + esc(p.openRole) + "</span>" : '<span class="pr-na">-</span>') +
             (p.jobUrl ? ' <a class="crm-jobpost" href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener" title="Open the live job posting"' + stop + ">↗</a>" : "");
           var dOpen = daysOpen(p);
-          var meta = (p.location ? "📍 " + esc(p.location) : "") +
-            (dOpen != null ? (p.location ? " · " : "") + dOpen + "d open" : "");
+          var meta = (p.jobLocation ? "📍 " + esc(p.jobLocation) : "") +
+            (dOpen != null ? (p.jobLocation ? " · " : "") + dOpen + "d open" : "");
           return '<td class="crm-c-role"><div class="crm-id-t"><span>' + role + "</span>" +
             (meta ? '<span class="crm-sub">' + meta + "</span>" : "") + "</div></td>"; } },
       { key: "category", label: "Desk · Industry", get: function (p) { return (p["function"] || "") + " " + (p.industry || ""); }, render: function (p) {
@@ -4831,7 +4864,7 @@
       ["open_role", function (p) { return p.openRole || ""; }], ["why_hiring", function (p) { return p.signalReason || ""; }],
       ["signal_type", function (p) { return p.signalType || ""; }], ["intent_score", function (p) { return p.score == null ? "" : p.score; }],
       ["job_post_url", function (p) { return p.jobUrl || ""; }],
-      ["job_location", function (p) { return p.location || ""; }],
+      ["job_location", function (p) { return p.jobLocation || ""; }],
       ["job_posted_at", function (p) { return (p.jobPostedAt || "").slice(0, 10); }],
       ["job_days_open", function (p) { var d = daysOpen(p); return d == null ? "" : d; }],
       ["company", function (p) { return p.company || ""; }], ["company_domain", function (p) { return p.companyDomain || ""; }],
@@ -4892,8 +4925,9 @@
     function matches(p) {
       if (!clFilter) return true;
       var hay = ((p.fullName || "") + " " + (p.title || "") + " " + (p.company || "") + " " +
-        (p.email || "") + " " + (p.location || "") + " " + (p.signalReason || "") + " " +
-        (p.openRole || "") + " " + (p.industry || "") + " " + (p["function"] || "")).toLowerCase();
+        (p.email || "") + " " + (p.location || "") + " " + (p.jobLocation || "") + " " +
+        (p.signalReason || "") + " " + (p.openRole || "") + " " + (p.industry || "") + " " +
+        (p["function"] || "")).toLowerCase();
       return clFilter.split(/\s+/).every(function (t) { return hay.indexOf(t) >= 0; });
     }
 
@@ -4928,42 +4962,41 @@
         sg.innerHTML =
           '<button class="btn btn-sm ' + (clSeg === "signals" ? "btn-primary" : "btn-ghost") + '" data-clseg="signals">⚡ Hire Signals · ' + sCount + "</button>" +
           '<button class="btn btn-sm ' + (clSeg === "all" ? "btn-primary" : "btn-ghost") + '" data-clseg="all">All leads · ' + aCount + "</button>";
-        Array.prototype.forEach.call(sg.querySelectorAll("[data-clseg]"), function (b) {
-          b.addEventListener("click", function () {
-            var v = b.getAttribute("data-clseg");
-            if (v === clSeg) return;
-            clSeg = v; localStorage.setItem("ros_clients_seg", clSeg);
-            clIndustry = ""; clFunction = ""; clVerdict = "";   // category options differ per segment
-            clPage = 0; clearSel();
-            load();                              // each segment is a different data source
-          });
-        });
+        sg.onclick = function (ev) {   // assignment (not addEventListener): #clSeg persists across paints
+          var b = ev.target.closest ? ev.target.closest("[data-clseg]") : null;
+          if (!b) return;
+          var v = b.getAttribute("data-clseg");
+          if (v === clSeg) return;
+          clSeg = v; localStorage.setItem("ros_clients_seg", clSeg);
+          clIndustry = ""; clFunction = ""; clVerdict = "";   // category options differ per segment
+          clPage = 0; clearSel();
+          load();                              // each segment is a different data source
+        };
       }
 
       var elig = eligible();
-      var all = shown();
+      var all = shown(elig);
       var list = all.filter(matches);
-      // Spreadsheet sort by the active column.
+      // Spreadsheet sort by the active column — decorate/sort/undecorate so the accessor runs
+      // once per row instead of twice per comparison (videoFor/vRank accessors are not free).
       var sortCol = COLS.filter(function (c) { return c.key === clSort.key; })[0] || COLS[1];
-      list.sort(function (a, b) { var av = colSort(sortCol, a), bv = colSort(sortCol, b); return av < bv ? -clSort.dir : av > bv ? clSort.dir : 0; });
+      list = list
+        .map(function (p) { return [colSort(sortCol, p), p]; })
+        .sort(function (a, b) { return a[0] < b[0] ? -clSort.dir : a[0] > b[0] ? clSort.dir : 0; })
+        .map(function (d) { return d[1]; });
 
-      // Readiness rollup for the KPI cards + verdict legend.
-      var by = elig.reduce(function (m, p) { var s = vStatus(p); m[s] = (m[s] || 0) + 1; return m; }, {});
+      // Readiness rollup for the KPI cards + verdict legend (single pass, memoized per load).
+      var roll = kpiRollup(elig);
+      var by = roll.by;
       var unchecked = (by.unverified || 0) + (by.unknown || 0);
-      var withVideo = elig.filter(hasCapture).length;
-      var sendReady = elig.filter(isFullyReady).length;
-      var companies = {}; elig.forEach(function (p) { var k = (p.company || "").toLowerCase().trim(); if (k) companies[k] = 1; });
-      var nCompanies = Object.keys(companies).length;
-      var scores = elig.map(function (p) { return Number(p.score); }).filter(function (n) { return n > 0; });
-      var avgScore = scores.length ? Math.round(scores.reduce(function (a, b) { return a + b; }, 0) / scores.length) : null;
       var kEl = $("#clKpis");
       if (kEl) {
         kEl.innerHTML =
-          kpiCard("", "👥", elig.length.toLocaleString(), "Contacts", nCompanies ? nCompanies.toLocaleString() + " companies" : "", "rgba(124,92,255,0.16)") +
+          kpiCard("", "👥", elig.length.toLocaleString(), "Contacts", roll.nCompanies ? roll.nCompanies.toLocaleString() + " companies" : "", "rgba(124,92,255,0.16)") +
           kpiCard("valid", "✓", (by.valid || 0).toLocaleString(), "Verified", "mailbox confirmed", "rgba(54,211,153,0.16)") +
-          kpiCard("video", "🎬", withVideo.toLocaleString(), "With video", "asset attached", "rgba(170,120,255,0.16)") +
-          kpiCard("", "🚀", sendReady.toLocaleString(), "Send-ready", "verified + video", "rgba(77,208,255,0.16)") +
-          kpiCard("", "⚡", avgScore == null ? "—" : String(avgScore), "Avg intent", unchecked ? unchecked.toLocaleString() + " unchecked" : "all checked", "rgba(255,194,77,0.16)");
+          kpiCard("video", "🎬", roll.withVideo.toLocaleString(), "With video", "asset attached", "rgba(170,120,255,0.16)") +
+          kpiCard("", "🚀", roll.sendReady.toLocaleString(), "Send-ready", "verified + video", "rgba(77,208,255,0.16)") +
+          kpiCard("", "⚡", roll.avgScore == null ? "—" : String(roll.avgScore), "Avg intent", unchecked ? unchecked.toLocaleString() + " unchecked" : "all checked", "rgba(255,194,77,0.16)");
         kEl.onclick = function (ev) {   // assignment (not addEventListener): #clKpis persists across paints
           var b = ev.target.closest ? ev.target.closest("[data-kpi]") : null;
           if (!b) return;
@@ -4994,7 +5027,7 @@
         legChip("risky", "cl-vb-risky", "~ risky", by.risky || 0) +
         legChip("invalid", "cl-vb-bad", "✕ invalid", by.invalid || 0) +
         legChip("unchecked", "cl-vb-unk", "• unchecked", unchecked) +
-        legChip("video", "cl-vb-vid", "🎬 with video", withVideo) +
+        legChip("video", "cl-vb-vid", "🎬 with video", roll.withVideo) +
         (clVerdict ? '<button class="cl-vb cl-vb-clear" data-verdict="">✕ clear</button>' : "") +
         "</div>";
 
@@ -5217,11 +5250,16 @@
       var first = firstNameOf(p) || "there";
       var co = p.company || "your team";
       var role = (vid && vid.role) || p.openRole || "";
-      var where = p.location ? " in " + p.location : "";
+      // Only the POSTING's location may be claimed as where they're hiring (p.location is the
+      // company/contact location on "All leads" rows — a wrong-city claim reads as spam).
+      var where = p.jobLocation ? " in " + p.jobLocation : "";
+      // Mention days-open only in the credible window: <7 isn't a pain point yet, >90 is likely a
+      // stale/reposted listing and "open 400 days" would be embarrassing.
       var dOpen = daysOpen(p);
-      var openBit = dOpen != null && dOpen >= 7 ? " — it's been open " + dOpen + " days" : "";
+      var mentionOpen = dOpen != null && dOpen >= 7 && dOpen <= 90;
+      var openBit = mentionOpen ? " — it's been open " + dOpen + " days" : "";
       var subject = role
-        ? role + where + (dOpen != null && dOpen >= 7 ? " (open " + dOpen + " days)" : "")
+        ? role + where + (mentionOpen ? " (open " + dOpen + " days)" : "")
         : "Hiring at " + co;
       var intro = "Saw " + co + " is hiring" + (role ? " a " + role : "") + where + openBit + "." +
         (p.signalReason ? " " + p.signalReason + "." : "");
@@ -5258,8 +5296,9 @@
     }
 
     // Generate the screen capture of this company's hiring page for one client.
+    // Always returns a promise — the drawer chains .then() on it.
     function genCapture(p, btn) {
-      if (!p.company) { toast("No company on this record to capture."); return; }
+      if (!p.company) { toast("No company on this record to capture."); return Promise.resolve(false); }
       var role = (p.personalizedVideo && p.personalizedVideo.roleTitle) || p.title || "Open role";
       var old = btn ? btn.textContent : "";
       if (btn) { btn.disabled = true; btn.textContent = "Capturing…"; }
@@ -5337,7 +5376,7 @@
       a.style.display = "none";
       document.body.appendChild(a); a.click();
       setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
-      toast("Exported " + list.length + " client" + (list.length === 1 ? "" : "s"));
+      toast("Exported " + list.length + (sel.length ? " selected" : "") + " client" + (list.length === 1 ? "" : "s"));
     }
 
     /* ---- Row detail drawer: every data point on one contact in a slide-over panel. ---- */
@@ -5347,9 +5386,10 @@
     function dSection(title, rowsHtml) {
       return rowsHtml ? '<div class="cl-dr-sec"><h4>' + title + "</h4>" + rowsHtml + "</div>" : "";
     }
-    function closeDrawer() { var d = $("#clDrawer"); if (d) d.innerHTML = ""; }
+    function closeDrawer() { unbindDrawerEsc(); var d = $("#clDrawer"); if (d) d.innerHTML = ""; }
     function openDrawer(p) {
       var d = $("#clDrawer"); if (!d) return;
+      bindDrawerEsc();
       var vid = videoFor(p);
       var ver = p.emailVerification || {};
       var media = vid
@@ -5385,7 +5425,7 @@
             dRow("LinkedIn", p.linkedinUrl ? '<a href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener">' + esc(p.linkedinUrl) + "</a>" : "")) +
           dSection("Hiring signal",
             dRow("Open role", p.openRole ? esc(p.openRole) : "") +
-            dRow("Job location", p.location ? "📍 " + esc(p.location) : "") +
+            dRow("Job location", p.jobLocation ? "📍 " + esc(p.jobLocation) : "") +
             dRow("Posted", p.jobPostedAt ? esc(String(p.jobPostedAt).slice(0, 10)) + (daysOpen(p) != null ? " · " + daysOpen(p) + "d open" : "") : "") +
             dRow("Why hiring", p.signalReason ? "⚡ " + esc(p.signalReason) : "") +
             dRow("Signal type", p.signalType ? esc(String(p.signalType).replace(/_/g, " ")) : "") +
@@ -5428,6 +5468,7 @@
         ((d && d.shots) || []).forEach(function (s) {
           if (s && s.company && s.urls) shotsByCompany[(s.company || "").toLowerCase().trim()] = s.urls;
         });
+        invalidateKpiMemo();   // capture coverage feeds the with-video / send-ready counts
       }).catch(function () { /* captures are best-effort; the tab still works without them */ });
     }
 
@@ -5435,6 +5476,7 @@
     function loadVideos() {
       return send("/in-market", "POST", { action: "autovideo_map" }).then(function (r) {
         videosByCompany = (r.ok && r.data && r.data.videos) || {};
+        invalidateKpiMemo();
       }).catch(function () { /* best-effort */ });
     }
 
@@ -5463,6 +5505,7 @@
         clById = {}; clAll.forEach(function (p) { clById[p.id] = p; });
         Object.keys(clSel).forEach(function (id) { if (!clById[id]) delete clSel[id]; });   // prune stale selections
         closeDrawer();
+        invalidateKpiMemo();   // fresh data (and possibly a different segment)
         renderFilters();
         paint();
       });

@@ -732,7 +732,6 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .cl-vb:hover { filter: brightness(1.18); }
 .cl-vb-active { box-shadow: 0 0 0 2px currentColor inset; filter: brightness(1.12); }
 .cl-vb-clear { background: rgba(255,255,255,0.06); color: var(--text-dim, #9a9aa8); }
-.cl-capnote { padding: 8px 16px; font-size: 12px; color: var(--text-dim, #9a9aa8); border-bottom: 1px solid var(--border); }
 
 /* ── Clients · dashboard upgrade: KPI cards, selection, bulk bar, pager, drawer ──── */
 /* KPI stat cards — readiness at a glance; verified/video cards double as filters. */

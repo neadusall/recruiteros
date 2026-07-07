@@ -48,6 +48,7 @@ export interface CuratedProspect {
   jobUrl?: string;                  // the actual job-posting / apply URL, so the screen capture targets the REAL job (not just the careers page)
   jobLocation?: string;             // where the role is based (from the posting) — personalization for custom emails
   jobPostedAt?: string;             // when the role was posted — lets outreach say "open N days"
+  jobDetailsAt?: string;            // when the pool backfill last tried to fill the two fields above (convergence marker)
   function: JobFunction;            // which desk
   score: number;                    // hiring-intent score of the source signal
   employeeCount?: number;           // company headcount (collected via Wikidata) — ICP fit + personalization
@@ -268,6 +269,12 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
  * is byte-for-byte identical to one researched on the main server.
  */
 export function buildCuratedRow(lead: PoolLeadLite, role: string, dm: DecisionMaker, nowIso: string, idOverride?: string): CuratedProspect {
+  // ONE roleDetails match serves all three posting fields, so the capture URL, the location, and
+  // the posted date always describe the SAME posting. When the role isn't in roleDetails at all
+  // (aggregator-only), fall back to the lead-level URL for jobUrl; a found entry with no URL stays
+  // undefined so roleShot does careers-page discovery for THIS role. `|| undefined` stores empty
+  // scraped strings as absent, not "".
+  const d = detailForRole(lead, role);
   return {
     id: idOverride ?? curationId(lead.company, role),
     company: lead.company,
@@ -278,14 +285,9 @@ export function buildCuratedRow(lead: PoolLeadLite, role: string, dm: DecisionMa
     signalType: lead.signalType ?? "job_posting",
     signalReason: lead.reason ?? "",
     role,
-    // Use THIS role's own posting URL (not the company's first-role URL), so the screen capture
-    // targets the exact job we're emailing about. roleShot then verifies the loaded page matches
-    // this role's title before it screenshots, so the JD in the video always pairs with the email.
-    jobUrl: urlForRole(lead, role),
-    // Carry the posting's location + posted date so outreach can personalize ("your Austin office",
-    // "open 32 days") without re-touching the pool.
-    jobLocation: detailForRole(lead, role)?.location,
-    jobPostedAt: detailForRole(lead, role)?.postedAt,
+    jobUrl: d ? d.url : lead.sourceUrl,
+    jobLocation: d?.location || undefined,
+    jobPostedAt: d?.postedAt || undefined,
     function: dm.function as JobFunction,
     score: Math.round(lead.score ?? 0),
     employeeCount: lead.employeeCount,
@@ -350,6 +352,11 @@ export async function mergeCuratedRows(rows: CuratedProspect[]): Promise<{ newly
         ...row,
         enrolledAt: prev?.enrolledAt, campaignId: prev?.campaignId,
         sentAt: prev?.sentAt, openedAt: prev?.openedAt, repliedAt: prev?.repliedAt, bouncedAt: prev?.bouncedAt,
+        // Never lose posting details we already have: a resubmit from a worker running older code
+        // (or a research pass whose pool lead lost the roleDetails entry) arrives without them.
+        jobLocation: row.jobLocation ?? prev?.jobLocation,
+        jobPostedAt: row.jobPostedAt ?? prev?.jobPostedAt,
+        jobDetailsAt: row.jobDetailsAt ?? prev?.jobDetailsAt,
         emailValidated: row.emailValidated ?? (row.emailInvalid ? false : (sameEmail ? prev?.emailValidated : undefined)),
         emailInvalid: row.emailInvalid ?? (sameEmail ? prev?.emailInvalid : undefined),
         validatedAt: row.validatedAt ?? (sameEmail ? prev?.validatedAt : undefined),
@@ -427,18 +434,12 @@ export async function claimResearchBatch(limit: number, minScore = 10): Promise<
   return out;
 }
 
-/** The exact apply/posting URL for ONE role at a company. Each role from the feed carries its own
- *  URL (roleDetails[i].url); we match by title so a multi-role company screenshots the RIGHT job per
- *  role instead of reusing role 1's URL for everything. Returns undefined when this role has no
- *  direct URL (aggregator-only) so roleShot falls back to careers-page discovery for THIS role,
- *  never another role's page. Only if the role isn't in roleDetails at all do we use the lead URL. */
-function urlForRole(lead: PoolLeadLite, role: string): string | undefined {
-  const t = (role || "").trim().toLowerCase();
-  const hit = lead.roleDetails?.find((r) => (r.title || "").trim().toLowerCase() === t);
-  return hit ? hit.url : lead.sourceUrl;
-}
-
-/** The full roleDetails entry for ONE role (location, postedAt, url) — same title match as urlForRole. */
+/** The roleDetails entry for ONE role at a company — THE single title-matching rule, so the
+ *  posting URL, location, and posted date always resolve to the same entry. Each role from the
+ *  feed carries its own URL; we match by title so a multi-role company screenshots the RIGHT job
+ *  per role instead of reusing role 1's URL for everything. A found entry with no URL means
+ *  aggregator-only (roleShot falls back to careers-page discovery for THIS role, never another
+ *  role's page); only when the role isn't in roleDetails at all does jobUrl use the lead URL. */
 function detailForRole(lead: PoolLeadLite, role: string): { title: string; url?: string; location?: string; postedAt?: string } | undefined {
   const t = (role || "").trim().toLowerCase();
   return lead.roleDetails?.find((r) => (r.title || "").trim().toLowerCase() === t);
@@ -641,6 +642,7 @@ export async function listCurated(opts?: {
   industry?: string;
   limit?: number;
 }): Promise<CuratedProspect[]> {
+  await sweepJobDetails();   // one-shot persistent posting-details fill (throttled; no-op in steady state)
   let rows = await load();
   if (opts?.status) rows = rows.filter((r) => r.status === opts.status);
   if (opts?.signalType) rows = rows.filter((r) => r.signalType === opts.signalType);
@@ -656,41 +658,63 @@ export async function listCurated(opts?: {
   const rank = (r: CuratedProspect): number =>
     (r.status === "contactable" || r.status === "queued" || r.status === "enrolled") ? 0 : r.managerName ? 1 : 2;
   rows.sort((a, b) => rank(a) - rank(b) || b.score - a.score || (b.curatedAt > a.curatedAt ? 1 : -1));
-  return backfillJobDetails(rows.slice(0, opts?.limit ?? 500));
+  return rows.slice(0, opts?.limit ?? 500);
 }
 
+// The posting-details sweep runs at most once per window per process — listCurated sits on hot
+// automated ticks (autoVideo/autoCapture/autoEnroll/autofill), so the common case must be a
+// single timestamp compare.
+let jobDetailsSweepAt = 0;
+const JOB_DETAILS_SWEEP_MS = 6 * 60 * 60 * 1000;
+
 /**
- * READ-TIME decoration: rows curated before jobLocation/jobPostedAt existed (and locked
- * queued/enrolled rows the merge never rewrites) get those fields filled from the live pool by
- * (company, role-title) — so the Clients tab and the CSV export carry the full personalization
- * set immediately, without waiting for each row's next daily re-research. Returns copies; the
- * store itself is untouched (the daily re-curation persists the fields for real over time).
+ * PERSISTENT backfill for rows curated before jobLocation/jobPostedAt existed — including locked
+ * queued/enrolled rows the research merge never rewrites (filling blank posting fields doesn't
+ * touch lifecycle). Joins the live pool by companyKey + role title (companyKey, not the raw name:
+ * the pool dedupes on it and a later merge can rename the stored spelling), writes the matches
+ * through to the store under the write lock, and stamps EVERY attempted row with jobDetailsAt so
+ * unmatched rows (company aged out of the pool, title gone) stop qualifying and the sweep
+ * converges instead of re-scanning the pool forever. Because it persists, every consumer — the
+ * Clients tab, the CSV export, and enrollToBulk's raw-store read — sees the same values.
  */
-async function backfillJobDetails(rows: CuratedProspect[]): Promise<CuratedProspect[]> {
-  const missing = rows.filter((r) => !r.jobLocation || !r.jobPostedAt);
-  if (!missing.length) return rows;
-  const companies = new Set(missing.map((r) => r.company.trim().toLowerCase()));
-  let leads: Array<{ company?: string; roleDetails?: Array<{ title?: string; location?: string; postedAt?: string }> }> = [];
+async function sweepJobDetails(): Promise<void> {
+  const now = Date.now();
+  if (now - jobDetailsSweepAt < JOB_DETAILS_SWEEP_MS) return;
+  jobDetailsSweepAt = now;
   try {
+    const rows = await load();
+    if (!rows.some((r) => (!r.jobLocation || !r.jobPostedAt) && !r.jobDetailsAt)) return;
+    const { companyKey } = await import("./index");
     const { queryPool } = await import("./pool");
-    leads = await queryPool({ limit: 6000 } as never, 6000);
-  } catch { return rows; }
-  const detail = new Map<string, { location?: string; postedAt?: string }>();
-  for (const l of leads) {
-    const co = String(l.company ?? "").trim().toLowerCase();
-    if (!co || !companies.has(co)) continue;
-    for (const d of l.roleDetails ?? []) {
-      if (!d?.title || (!d.location && !d.postedAt)) continue;
-      detail.set(co + "||" + d.title.trim().toLowerCase(), { location: d.location, postedAt: d.postedAt });
+    const leads = (await queryPool({ limit: 6000 } as never, 6000)) as Array<{
+      company?: string; roleDetails?: Array<{ title?: string; url?: string; location?: string; postedAt?: string }>;
+    }>;
+    const detail = new Map<string, { location?: string; postedAt?: string }>();
+    for (const l of leads) {
+      const co = companyKey(String(l.company ?? ""));
+      if (!co) continue;
+      for (const d of l.roleDetails ?? []) {
+        if (!d?.title || (!d.location && !d.postedAt)) continue;
+        detail.set(co + "||" + d.title.trim().toLowerCase(), { location: d.location || undefined, postedAt: d.postedAt || undefined });
+      }
     }
-  }
-  if (!detail.size) return rows;
-  return rows.map((r) => {
-    if (r.jobLocation && r.jobPostedAt) return r;
-    const hit = detail.get(r.company.trim().toLowerCase() + "||" + r.role.trim().toLowerCase());
-    if (!hit) return r;
-    return { ...r, jobLocation: r.jobLocation ?? hit.location, jobPostedAt: r.jobPostedAt ?? hit.postedAt };
-  });
+    const nowIso = new Date().toISOString();
+    await withCurationLock(async () => {
+      const current = await load();
+      let changed = false;
+      for (const r of current) {
+        if ((r.jobLocation && r.jobPostedAt) || r.jobDetailsAt) continue;
+        const hit = detail.get(companyKey(String(r.company ?? "")) + "||" + String(r.role ?? "").trim().toLowerCase());
+        if (hit) {
+          if (!r.jobLocation && hit.location) r.jobLocation = hit.location;
+          if (!r.jobPostedAt && hit.postedAt) r.jobPostedAt = hit.postedAt;
+        }
+        r.jobDetailsAt = nowIso;
+        changed = true;
+      }
+      if (changed) await save(current);
+    });
+  } catch { /* best-effort enrichment; never break a read path */ }
 }
 
 /**
