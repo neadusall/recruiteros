@@ -5,10 +5,15 @@
  * STOP / unsubscribe must be honored the instant it arrives and enforced at the
  * source of truth, then mirrored to every sending platform (Instantly,
  * SalesRobot/Unipile, TalTxt) so no channel can reach the contact again.
+ *
+ * DURABLE: the list is snapshotted to the db layer (`response_suppression_v1`) and
+ * re-hydrated on boot — a server restart must never forget who said stop. The email
+ * send path (lib/channels dispatch) checks this list before every send.
  */
 
 import { normalizePhone } from "../core/repository";
 import { instantly, salesrobot, taltxt } from "../providers";
+import { loadSnapshot, debouncedSaver } from "../db";
 
 export interface SuppressionEntry {
   workspaceId: string;
@@ -17,34 +22,50 @@ export interface SuppressionEntry {
   at: string;
 }
 
+const KEY = "response_suppression_v1";
 const list: SuppressionEntry[] = [];
+let hydrating: Promise<void> | null = null;
+
+function ensureLoaded(): Promise<void> {
+  if (!hydrating) {
+    hydrating = loadSnapshot<SuppressionEntry[]>(KEY)
+      .then((snap) => { if (Array.isArray(snap)) list.push(...snap); })
+      .catch(() => { /* memory-only until the store is reachable */ });
+  }
+  return hydrating;
+}
+const persist = debouncedSaver(KEY, () => list);
 
 function key(h: string): string {
   const t = h.trim().toLowerCase();
   return /^\+?\d[\d\s().-]+$/.test(t) ? normalizePhone(t) : t;
 }
 
-/** Add a contact's handles to the DNC list and fan out to sending platforms. */
+/** Add a contact's handles to the DNC list (durably) and fan out to sending platforms. */
 export async function suppress(
   workspaceId: string,
   handles: Array<string | undefined>,
   reason: string,
   at: string,
 ): Promise<SuppressionEntry> {
+  await ensureLoaded();
   const clean = handles.filter(Boolean).map((h) => key(h as string));
   const entry: SuppressionEntry = { workspaceId, handles: clean, reason, at };
   list.push(entry);
+  persist();
   await mirrorToPlatforms(entry);
   return entry;
 }
 
-export function isSuppressed(workspaceId: string, handle?: string): boolean {
+export async function isSuppressed(workspaceId: string, handle?: string): Promise<boolean> {
   if (!handle) return false;
+  await ensureLoaded();
   const k = key(handle);
   return list.some((e) => e.workspaceId === workspaceId && e.handles.includes(k));
 }
 
-export function listSuppression(workspaceId: string): SuppressionEntry[] {
+export async function listSuppression(workspaceId: string): Promise<SuppressionEntry[]> {
+  await ensureLoaded();
   return list.filter((e) => e.workspaceId === workspaceId);
 }
 

@@ -114,6 +114,24 @@ export function emailPayload(body: string): { html: string; text: string } {
 async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> {
   switch (t.channel) {
     case "email": {
+      // SUPPRESSION GATE (both lists, before ANY provider): the DNC/opt-out list
+      // (lib/response/suppression — STOP, unsubscribe) and the bounce/complaint list
+      // (lib/sending/store). Previously only the MTA path checked, so a pooled SMTP
+      // send could reach someone who had opted out. A suppressed prospect is also
+      // flipped to do_not_contact so the cadence stops retrying them every tick.
+      if (t.prospect.email) {
+        const [dnc, store] = await Promise.all([
+          import("../response/suppression"),
+          import("../sending/store"),
+        ]);
+        if ((await dnc.isSuppressed(workspaceId, t.prospect.email)) || (await store.isSuppressed(t.prospect.email))) {
+          try {
+            const fresh = await getCore().getProspect(t.prospect.id);
+            if (fresh && fresh.status !== "do_not_contact") { fresh.status = "do_not_contact"; await getCore().saveProspect(fresh); }
+          } catch { /* best-effort status flip */ }
+          return { ok: false, channel: "email", provider: "suppressed", error: "suppressed" };
+        }
+      }
       // Recruiter-owned SMTP inbox pool (lib/senders): when the prospect's campaign
       // is assigned to a recruiter who has an available inbox, send through that
       // recruiter's pool (rotated + sticky per prospect). Falls through to the MTA /
@@ -196,7 +214,16 @@ async function trySenderPool(workspaceId: string, t: SendTouch): Promise<SendRes
     if (!inbox) inbox = await pickSender(workspaceId, { recruiterId });
     if (!inbox) return null; // pool empty / all capped -> fall through to MTA/Instantly
     const payload = emailPayload(t.text);
-    const res = await sendViaInbox(inbox, { to: t.prospect.email, subject: t.subject ?? "", html: payload.html, text: payload.text });
+    // Gmail/Yahoo bulk-sender compliance: every cold send carries a signed one-click
+    // List-Unsubscribe (lib/sending/unsubscribe) + a mailto fallback on the sending inbox.
+    const { unsubscribeHeaders } = await import("../sending/unsubscribe");
+    const res = await sendViaInbox(inbox, {
+      to: t.prospect.email,
+      subject: t.subject ?? "",
+      html: payload.html,
+      text: payload.text,
+      headers: unsubscribeHeaders(workspaceId, t.prospect.email, inbox.email),
+    });
     if (!res.ok) return { ok: false, channel: "email", provider: "smtp:" + inbox.provider, error: res.error };
     await recordSend(inbox);
     if (t.prospect.senderInboxId !== inbox.id) {

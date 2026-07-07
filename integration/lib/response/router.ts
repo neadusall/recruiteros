@@ -67,10 +67,17 @@ export async function route(
 
   for (const action of rule.actions) {
     switch (action.kind) {
-      case "push_notification":
+      case "push_notification": {
         taken.push(`notify: ${action.detail ?? "recruiter pinged"}`);
-        // TODO(prod): web-push / Slack / email to the campaign owner.
+        // Email the operator right now (RECRUITEROS_NOTIFY_EMAIL; no-op until set).
+        // Fire-and-forget: a notification failure must never affect reply processing.
+        const { notifyReply } = await import("./notify");
+        void notifyReply(
+          { workspaceId: inbound.workspaceId, detail: action.detail, channel: inbound.channel, text: inbound.text, fromHandle: inbound.fromHandle },
+          prospect ?? null,
+        ).catch(() => {});
         break;
+      }
 
       case "pause_all_sequences":
         if (prospect && pauseSequences) await pauseSequences(prospect.id);
