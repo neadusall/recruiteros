@@ -22,7 +22,7 @@ import { requireSession, body, ok, fail } from "../../../../lib/api";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MIME: Record<string, string> = { gif: "image/gif", mp4: "video/mp4" };
+const MIME: Record<string, string> = { gif: "image/gif", mp4: "video/mp4", jpg: "image/jpeg" };
 
 export async function GET(req: Request) {
   const g = requireSession(req);
@@ -31,7 +31,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const key = url.searchParams.get("key") || "";
   const fmt = (url.searchParams.get("fmt") || "gif").toLowerCase();
-  if (fmt !== "gif" && fmt !== "mp4") return fail("bad_format", 400);
+  if (fmt !== "gif" && fmt !== "mp4" && fmt !== "jpg") return fail("bad_format", 400);
 
   const { readCompositeAsset } = await import("../../../../lib/inmarket/roleVideo");
   const buf = await readCompositeAsset(key, fmt);

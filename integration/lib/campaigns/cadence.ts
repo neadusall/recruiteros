@@ -169,6 +169,7 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
   const core = getCore();
   const { renderTouch } = await import("../automation/model");
   const { prospectReadiness } = await import("../sending/sendReady");
+  const { guardRenderedTouch, describeHolds, critiqueRendered } = await import("../copy/renderGuard");
   // Re-pin winning variants for any campaign on the promote-winners autopilot. Best-effort.
   await refreshAutopilots(workspaceId).catch(() => {});
 
@@ -226,6 +227,7 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
       const daysSince = Math.max(0, (now.getTime() - Date.parse(startIso)) / DAY);
       let sent = p.dripStage || 0;
       let fired = false;
+      let held = false;
 
       // Send every model touch whose day has arrived and that we haven't sent yet,
       // in order. Stop at the first not-yet-due touch (the rest wait for a later tick).
@@ -238,6 +240,24 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
         // in renderTouch only attaches the video on the 2nd email.
         const emailStep = t.channel === "email" ? touches.slice(0, i + 1).filter((x) => x.channel === "email").length : 0;
         const r = renderTouch(t, p, { emailStep });
+
+        // RENDER GUARD (fail-safe): never send a touch whose merged copy has missing data points
+        // or reads broken. HOLD the prospect — nothing sends, nothing advances — and record why,
+        // so the Send Queue surfaces it. Re-rendered every tick; releases itself once the data is
+        // fixed. The optional Haiku critic (AUTOPILOT_CRITIC=1) is the subtler second pass.
+        const guard = guardRenderedTouch({ channel: t.channel, emailStep, subject: r.subject, body: r.body, tokens: r.tokens });
+        const criticHolds = guard.ok && t.channel === "email" ? await critiqueRendered(r.subject, r.body) : null;
+        const allHolds = guard.ok ? criticHolds ?? [] : guard.holds;
+        if (allHolds.length) {
+          const reasons = describeHolds(allHolds);
+          const changed = p.copyHold?.touch !== t.label || JSON.stringify(p.copyHold?.reasons) !== JSON.stringify(reasons);
+          p.copyHold = { at: now.toISOString(), touch: t.label, reasons };
+          if (changed) await core.saveProspect(p);
+          results.push({ campaignId: c.id, prospectId: p.id, channel: t.channel, touch: t.label, ok: false, held: true, reasons });
+          held = true;
+          break;
+        }
+
         const res = await sendTouch(workspaceId, {
           channel: t.channel,
           prospect: p,
@@ -256,10 +276,15 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
         else break; // a failed send is retried on the next tick, not skipped
       }
 
+      // A held prospect stays exactly where it is (queued prospects don't start, in-sequence
+      // prospects don't advance) — the hold was already saved above.
+      if (held) continue;
+
       if (isNew || fired) {
         if (isNew) { p.sequenceStartedAt = now.toISOString(); p.status = "in_sequence"; newBudget--; }
         p.dripStage = sent;
         if (sent >= touches.length) p.status = "nurture"; // finished the approved model
+        if (fired && p.copyHold) p.copyHold = undefined; // a clean send releases the hold record
         await core.saveProspect(p);
       }
     }

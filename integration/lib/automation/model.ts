@@ -22,8 +22,18 @@ import { buildMpcTokens, fixArticles } from "../bd/mpc/resolve";
 
 const MERGE_HELP = "{{firstName}}, {{company}}, {{title}}, {{role}}, {{signal}}, {{watchlink}}, {{videoembed}}";
 
+export interface RenderedTouch {
+  subject?: string;
+  body: string;
+  /** Every merge token the CHOSEN spintax branches actually referenced (lowercased) -> the value it
+   *  resolved to ("" when unknown/empty). This is the audit trail the render guard
+   *  (lib/copy/renderGuard) uses to hold sends whose personalization data is missing or fell back
+   *  to a generic placeholder — the fail-safe against "Hi there, saw your team is hiring" mush. */
+  tokens: Record<string, string>;
+}
+
 /** Render one model touch for a specific prospect (merge-fill, graceful fallbacks). */
-export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opts?: { emailStep?: number }): { subject?: string; body: string } {
+export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opts?: { emailStep?: number }): RenderedTouch {
   const vals: Record<string, string> = {
     firstname: p.firstName || (p.fullName ? p.fullName.split(/\s+/)[0] : "") || "there",
     company: p.company || "your team",
@@ -54,8 +64,22 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
   })();
   vals.watchlink = watch;
   vals.videogif = pv?.gifUrl || "";
-  vals.videoembed = watch && pv?.gifUrl
-    ? `<a href="${watch}"><img src="${pv.gifUrl}" alt="A quick note about ${vals.company}" width="600" style="max-width:100%;border-radius:10px;border:1px solid #e5e7eb;display:block" /></a>`
+  vals.videoposter = pv?.posterUrl || "";
+  // Loom-look embed, exactly how a Loom lands in an inbox: the ANIMATED teaser GIF of THEIR video
+  // (play button baked in by the compositor), centered like a share card, rounded, with a "Watch"
+  // line beneath for image-blocking clients. Clients that freeze animation (Outlook) show the
+  // first frame — which, with the baked button, reads as the static poster. Older videos rendered
+  // before the teaser carried the button fall back to the poster JPEG. Table markup + explicit
+  // width because email clients ignore margin:auto on divs.
+  const thumb = pv?.gifUrl || pv?.posterUrl || "";
+  vals.videoembed = watch && thumb
+    ? `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:14px auto"><tr><td align="center">` +
+      `<a href="${watch}" target="_blank" style="text-decoration:none">` +
+      `<img src="${thumb}" alt="Play the quick video I recorded about ${vals.company}" width="480" ` +
+      `style="width:480px;max-width:100%;height:auto;border-radius:12px;border:1px solid #e5e7eb;display:block" /></a>` +
+      `<p style="margin:8px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#5f6368">` +
+      `<a href="${watch}" target="_blank" style="color:#1a73e8;text-decoration:none">▶ Watch the video I made for ${vals.company}</a></p>` +
+      `</td></tr></table>`
     : "";
   // MPC tokens (the recent-placement Day-0 sequence): resolved from the prospect + its mpcContext,
   // with a native-lexicon floor so it reads right even when the context is sparse. Keyed lowercase to
@@ -83,9 +107,15 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
   // merge-fill, so one approved template sends as many distinct surface forms — the deliverability
   // win against repetition. Merge fields ({{...}}) are left alone by the spintax pass.
   const seed = `${p.id || ""}:${touch.key || ""}`;
+  const tokens: Record<string, string> = {};
   const fill = (s?: string) =>
-    fixArticles(expandSpintax(s || "", seed).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, k) => vals[String(k).toLowerCase()] ?? ""));
-  return { subject: touch.subject ? fill(touch.subject) : undefined, body: fill(touch.body) };
+    fixArticles(expandSpintax(s || "", seed).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, k) => {
+      const key = String(k).toLowerCase();
+      const v = vals[key] ?? "";
+      tokens[key] = v;
+      return v;
+    }));
+  return { subject: touch.subject ? fill(touch.subject) : undefined, body: fill(touch.body), tokens };
 }
 
 /* ----------------------------- LLM drafting ----------------------------- */

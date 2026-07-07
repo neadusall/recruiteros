@@ -28,7 +28,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { captureRoleShot, renderScrollVideoAtDuration, shotKey, shotsDir, type ShotRequest } from "./roleShot";
 import { loadSnapshot, debouncedSaver } from "../db";
-import { s3Enabled, s3Put, s3Get, s3Head } from "./assetStore";
+import { s3Enabled, s3Put, s3Get, s3Head, s3Del } from "./assetStore";
 
 /* ------------------------------------------------------------------ */
 /* Public shapes                                                       */
@@ -74,6 +74,7 @@ export type VideoStatus =
   | "no_shot"    // the page-scroll GIF couldn't be captured/verified (see roleShot reason)
   | "no_clip"    // the referenced webcam clip doesn't exist
   | "no_ffmpeg"  // ffmpeg isn't installed/resolvable
+  | "expired"    // assets aged out by the retention sweeper (lib/inmarket/retention)
   | "error";
 
 export interface VideoResult {
@@ -82,7 +83,7 @@ export interface VideoResult {
   /** Stable key the composite assets are stored/served under. */
   key?: string;
   /** Which composite assets exist, by format. Served via the video route by (key, fmt). */
-  files?: { gif?: boolean; mp4?: boolean };
+  files?: { gif?: boolean; mp4?: boolean; jpg?: boolean };
   /** The page we used as the background (the company's own careers URL). */
   pageUrl?: string;
   reason?: string;
@@ -126,7 +127,9 @@ function clipsDir(): string {
 function clipPath(id: string, ext: string): string {
   return join(clipsDir(), `${id}.${ext}`);
 }
-function compositePath(key: string, fmt: "gif" | "mp4"): string {
+/** The three served composite artifacts: watch MP4, animated email teaser, static email poster. */
+export type CompositeFmt = "gif" | "mp4" | "jpg";
+function compositePath(key: string, fmt: CompositeFmt): string {
   return join(videosDir(), `${key}.${fmt}`);
 }
 
@@ -222,6 +225,7 @@ export async function deleteClip(workspaceId: string, id: string): Promise<boole
   clips.delete(id);
   saveClips();
   await unlink(clipPath(id, meta.ext)).catch(() => {});
+  if (s3Enabled()) await s3Del(clipS3Key(id, meta.ext)); // also drop the object-storage mirror
   return true;
 }
 
@@ -282,7 +286,7 @@ export function videoKey(company: string, roleTitle: string, clipId: string, pip
 }
 
 /** Read one composite asset for the serve route. Returns null when absent. */
-export async function readCompositeAsset(key: string, fmt: "gif" | "mp4"): Promise<Buffer | null> {
+export async function readCompositeAsset(key: string, fmt: CompositeFmt): Promise<Buffer | null> {
   if (!/^[a-z0-9_-]{3,120}$/.test(key)) return null;
   try {
     return await readFile(compositePath(key, fmt));
@@ -297,12 +301,12 @@ export async function readCompositeAsset(key: string, fmt: "gif" | "mp4"): Promi
 /* Object-storage offload (S3-compatible; inert until ROS_S3_* set)    */
 /* ------------------------------------------------------------------ */
 
-function compositeS3Key(key: string, fmt: "gif" | "mp4"): string { return `videos/${key}.${fmt}`; }
+function compositeS3Key(key: string, fmt: CompositeFmt): string { return `videos/${key}.${fmt}`; }
 function clipS3Key(id: string, ext: string): string { return `clips/${id}.${ext}`; }
-const MIME_BY_FMT: Record<"gif" | "mp4", string> = { gif: "image/gif", mp4: "video/mp4" };
+const MIME_BY_FMT: Record<CompositeFmt, string> = { gif: "image/gif", mp4: "video/mp4", jpg: "image/jpeg" };
 
 /** Dedup/exists check spanning the local render cache AND object storage. */
-async function compositeExists(key: string, fmt: "gif" | "mp4"): Promise<boolean> {
+async function compositeExists(key: string, fmt: CompositeFmt): Promise<boolean> {
   if (await fileExists(compositePath(key, fmt))) return true;
   if (s3Enabled()) return s3Head(compositeS3Key(key, fmt));
   return false;
@@ -313,7 +317,7 @@ async function compositeExists(key: string, fmt: "gif" | "mp4"): Promise<boolean
  *  failure the local copy is kept (the read path still finds it), so nothing is ever lost. */
 async function publishComposite(key: string, files: VideoResult["files"]): Promise<void> {
   if (!s3Enabled()) return;
-  for (const fmt of ["mp4", "gif"] as const) {
+  for (const fmt of ["mp4", "gif", "jpg"] as const) {
     if (!files?.[fmt]) continue;
     const local = compositePath(key, fmt);
     try {
@@ -395,6 +399,41 @@ async function genMaskPng(shape: PipShape, w: number, h: number, r: number): Pro
       const i = (y * w + x) << 2;
       const v = insideShape(shape, x, y, w, h, r) ? 255 : 0;
       png.data[i] = v; png.data[i + 1] = v; png.data[i + 2] = v; png.data[i + 3] = 255;
+    }
+  }
+  return PNG.sync.write(png);
+}
+
+/**
+ * Full-frame transparent RGBA overlay with a centered Loom-style play button (translucent dark
+ * disc + white triangle). ffmpeg lays it over the poster frame at 0:0, so the static email
+ * thumbnail unmistakably reads as "a video made for you" even in clients that block animation.
+ */
+async function genPlayButtonPng(w: number, h: number): Promise<Buffer> {
+  const PNG = await getPNG();
+  const png = new PNG({ width: w, height: h });
+  const cx = w / 2, cy = h / 2, R = Math.round(Math.min(w, h) * 0.13);
+  for (let y = Math.floor(cy - R); y <= Math.ceil(cy + R); y++) {
+    if (y < 0 || y >= h) continue;
+    for (let x = Math.floor(cx - R); x <= Math.ceil(cx + R); x++) {
+      if (x < 0 || x >= w) continue;
+      const dist = Math.hypot(x - cx, y - cy);
+      if (dist > R) continue;
+      const i = (y * w + x) << 2;
+      png.data[i] = 15; png.data[i + 1] = 15; png.data[i + 2] = 15;
+      png.data[i + 3] = dist > R - 2 ? 115 : 153; // soft edge (~0.45 → 0.6 alpha)
+    }
+  }
+  const s = Math.round(R * 0.5); // right-pointing triangle
+  for (let y = Math.round(cy) - s; y <= Math.round(cy) + s; y++) {
+    if (y < 0 || y >= h) continue;
+    const frac = 1 - Math.abs(y - cy) / s;
+    const xL = Math.round(cx - s * 0.55);
+    const xR = xL + Math.round(frac * s * 1.5);
+    for (let x = xL; x <= xR; x++) {
+      if (x < 0 || x >= w) continue;
+      const i = (y * w + x) << 2;
+      png.data[i] = 245; png.data[i + 1] = 245; png.data[i + 2] = 245; png.data[i + 3] = 255;
     }
   }
   return PNG.sync.write(png);
@@ -585,19 +624,50 @@ async function compose(
         baseMp4,
       ]);
     }
-    // (2) GIF — the LIVELY email teaser, derived from the base (no name-intro hold). Deriving from
-    //     the finite base (not the infinitely-looped bg) lets palettegen see a clean EOF.
+    // Loom-style play button, rendered once and baked into BOTH email thumbnails: the animated
+    // teaser (so the moving preview itself reads "click to play" — and Outlook's frozen first
+    // frame still shows a play button) and the static poster. Best-effort: a button miss never
+    // fails the render, the assets just ship without the overlay.
+    const tmpBtn = join(videosDir(), `${key}.play.png`);
+    let btnOk = false;
+    try { await writeFile(tmpBtn, await genPlayButtonPng(BG_W, BG_H)); btnOk = true; } catch (e) {
+      console.error(`[roleVideo] play-button render failed for ${key}:`, (e as Error).message);
+    }
+    // (2) GIF — the LIVELY email teaser (Loom-look: motion + centered play button), derived from
+    //     the base (no name-intro hold). Deriving from the finite base (not the infinitely-looped
+    //     bg) lets palettegen see a clean EOF. The button overlays BEFORE the downscale so it
+    //     stays crisp; overlay's default eof_action=repeat holds the one-frame PNG for the run.
     {
       const gw = Math.max(2, Math.round(GIF_W / 2) * 2);
       await runFfmpeg([
         "-y", "-hide_banner", "-loglevel", "error",
         "-t", String(EMAIL_GIF_SECONDS), "-i", baseMp4,
+        ...(btnOk ? ["-i", tmpBtn] : []),
         "-filter_complex",
-        `fps=${GIF_FPS},scale=${gw}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle`,
+        `${btnOk ? "[0:v][1:v]overlay=0:0," : ""}fps=${GIF_FPS},scale=${gw}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle`,
         "-loop", "0",
         compositePath(key, "gif"),
       ]);
       files.gif = true;
+    }
+    // (2b) POSTER — static Loom-style thumbnail (a real frame of THIS composite + play button),
+    //      the fallback for older videos and image-blocking clients. A crisp JPEG ~10× lighter
+    //      than the teaser. Best-effort: the GIF covers the email if this pass fails.
+    {
+      try {
+        if (!btnOk) throw new Error("play-button png unavailable");
+        await runFfmpeg([
+          "-y", "-hide_banner", "-loglevel", "error",
+          "-ss", "1", "-i", baseMp4, "-i", tmpBtn,
+          "-filter_complex", `[0:v]scale=${BG_W}:${BG_H}[b];[b][1:v]overlay=0:0`,
+          "-frames:v", "1", "-q:v", "3", compositePath(key, "jpg"),
+        ]);
+        files.jpg = true;
+      } catch (e) {
+        console.error(`[roleVideo] poster render failed for ${key}:`, (e as Error).message);
+      } finally {
+        await unlink(tmpBtn).catch(() => {});
+      }
     }
     // (3) FINAL MP4 — prepend the personalized "Hey {name}," greeting. Preference order:
     //     (a) LIP-SYNCED greeting (the cloned name AND the mouth matches it),
@@ -804,7 +874,7 @@ export async function getOrStartVideo(
   if (!opts?.force && (await compositeExists(key, "gif"))) {
     const cache = await ensureVideos();
     const hit = cache.get(key);
-    return hit ? stripRow(hit) : { ok: true, status: "ready", key, files: { gif: true, mp4: await compositeExists(key, "mp4") }, at: new Date().toISOString() };
+    return hit ? stripRow(hit) : { ok: true, status: "ready", key, files: { gif: true, mp4: await compositeExists(key, "mp4"), jpg: await compositeExists(key, "jpg") }, at: new Date().toISOString() };
   }
   if (inflight.has(key)) {
     return { ok: false, status: "composing", key, reason: "composite in progress", at: new Date().toISOString() };
@@ -827,7 +897,7 @@ export async function composeRoleVideo(
   const now = () => new Date().toISOString();
 
   if (!opts?.force && (await compositeExists(key, "gif"))) {
-    return { ok: true, status: "ready", key, files: { gif: true, mp4: await compositeExists(key, "mp4") }, at: now() };
+    return { ok: true, status: "ready", key, files: { gif: true, mp4: await compositeExists(key, "mp4"), jpg: await compositeExists(key, "jpg") }, at: now() };
   }
 
   let result: VideoResult;
@@ -901,4 +971,34 @@ export async function composeRoleVideo(
 function stripRow(row: VideoRow): VideoResult {
   const { ...rest } = row;
   return rest;
+}
+
+/* ------------------------------------------------------------------ */
+/* Retention (called by lib/inmarket/retention)                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Age out composites whose render date is before `cutoffMs`: delete the served artifacts from
+ * object storage AND local disk, then mark the cached row "expired". The row (and the
+ * auto-compositor's map entry) deliberately survives — that's what stops the fleet from
+ * re-rendering every aged-out video on the next tick. Returns how many were expired.
+ */
+export async function expireCompositesBefore(cutoffMs: number, opts: { limit?: number } = {}): Promise<number> {
+  const cache = await ensureVideos();
+  const limit = Math.max(1, opts.limit ?? 2000);
+  let n = 0;
+  for (const [key, row] of cache) {
+    if (n >= limit) break;
+    if (row.status !== "ready") continue;
+    const t = Date.parse(row.at || "");
+    if (!Number.isFinite(t) || t >= cutoffMs) continue;
+    for (const fmt of ["mp4", "gif", "jpg"] as const) {
+      if (s3Enabled()) await s3Del(compositeS3Key(key, fmt));
+      await unlink(compositePath(key, fmt)).catch(() => {});
+    }
+    cache.set(key, { ...row, ok: false, status: "expired", files: {}, reason: "aged out by retention" });
+    n++;
+  }
+  if (n) saveVideos();
+  return n;
 }

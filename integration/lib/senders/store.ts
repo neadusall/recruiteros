@@ -13,7 +13,7 @@ import { encryptSecret } from "./crypto";
 import { COLD_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCap } from "./limits";
 import type { SenderInbox, SenderInboxPublic, SenderProvider, SenderStatus, RecruiterPool } from "./types";
 
-interface SendersState { inboxes: SenderInbox[]; }
+interface SendersState { inboxes: SenderInbox[]; lastResetDay?: string; }
 
 const KEY = "senders_v1";
 let state: SendersState = { inboxes: [] };
@@ -27,7 +27,7 @@ async function hydrate(): Promise<void> {
   if (!hydrating) {
     hydrating = (async () => {
       const snap = await loadSnapshot<SendersState>(KEY);
-      if (snap && Array.isArray(snap.inboxes)) state = { inboxes: snap.inboxes };
+      if (snap && Array.isArray(snap.inboxes)) state = { inboxes: snap.inboxes, lastResetDay: snap.lastResetDay };
       hydrated = true;
     })();
   }
@@ -256,6 +256,23 @@ export async function resetDaily(workspaceId: string): Promise<void> {
     if (m.workspaceId === workspaceId && m.sentToday !== 0) { m.sentToday = 0; changed = true; }
   }
   if (changed) save();
+}
+
+/**
+ * Zero EVERY inbox's daily counter when the UTC day rolls over — and only then. Safe to call on
+ * any cadence (each send, the 6-hourly tick): the persisted day stamp makes repeat calls within
+ * a day no-ops, so caps are never re-opened mid-day, and a restart can't re-zero spent capacity.
+ * This is the reset that actually runs in production (pickSender calls it) — without it every
+ * pooled inbox permanently capped out after day one and all email fell through to MTA/Instantly.
+ */
+export async function resetDailyIfNewDay(): Promise<boolean> {
+  await hydrate();
+  const today = nowIso().slice(0, 10);
+  if (state.lastResetDay === today) return false;
+  state.lastResetDay = today;
+  for (const m of state.inboxes) { if (m.sentToday !== 0) m.sentToday = 0; }
+  save();
+  return true;
 }
 
 /** Distinct portal (workspace) ids that own at least one sender inbox. */

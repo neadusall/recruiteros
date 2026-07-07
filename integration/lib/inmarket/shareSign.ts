@@ -57,6 +57,8 @@ export interface CompositeShare {
   gif: string;
   /** Signed full MP4. */
   mp4: string;
+  /** Signed static poster JPEG (frame + play button) — the email thumbnail. */
+  poster: string;
   /** Expiry (epoch ms; 0 = never). */
   exp: number;
 }
@@ -74,6 +76,7 @@ export function compositeShareUrls(
     watch: `${b}/watch?k=${k}&c=${encodeURIComponent(meta.company || "")}&r=${encodeURIComponent(meta.roleTitle || "")}&${auth}`,
     gif: `${b}/api/in-market/watch?key=${k}&fmt=gif&${auth}`,
     mp4: `${b}/api/in-market/watch?key=${k}&fmt=mp4&${auth}`,
+    poster: `${b}/api/in-market/watch?key=${k}&fmt=jpg&${auth}`,
     exp,
   };
 }

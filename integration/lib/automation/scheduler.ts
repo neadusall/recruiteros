@@ -80,6 +80,13 @@ async function tickVoice(): Promise<void> {
 
 /** Daily email-infra maintenance: warm-up, reputation, governor, seeds, setup. */
 async function tickSending(): Promise<void> {
+  // Recruiter sender pool: roll the daily caps over (date-guarded — a no-op except on the first
+  // tick of a new UTC day). pickSender also calls this lazily; here it keeps the Send Queue's
+  // remaining-capacity numbers fresh even before the day's first send.
+  try {
+    const { resetDailyIfNewDay } = await import("../senders");
+    await resetDailyIfNewDay();
+  } catch { /* pool reset is best-effort; the lazy pick-time guard still covers sends */ }
   const { listSendingWorkspaceIds, runSendingDaily, runSeedMaintenance, listAutoSetupWorkspaceIds, advanceAutoSetup } = await import("../sending");
   for (const ws of await listAutoSetupWorkspaceIds()) {
     try { await advanceAutoSetup(ws); } catch { /* one workspace's setup */ }

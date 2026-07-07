@@ -25,13 +25,27 @@ const TARGET_MAX = Math.max(TARGET_MIN, Number(process.env.SEND_QUEUE_TARGET_MAX
 const BUFFER_DAYS = Math.min(14, Math.max(1, Number(process.env.SEND_QUEUE_BUFFER_DAYS) || 5));
 const DAILY_TARGET = Math.round((TARGET_MIN + TARGET_MAX) / 2);
 
-export type MissingAsset = "verified_email" | "video" | "watch_page";
+export type MissingAsset = "verified_email" | "video" | "watch_page" | "contact_data";
 
 export interface Readiness { ready: boolean; missing: MissingAsset[] }
+
+/** The personalization DATA gate: a real first name, a real company, and a real role/signal to
+ *  anchor the email on. Without these the merge-fill degrades to "Hi there, saw your team is
+ *  hiring" — so a prospect missing them is not send-ready, same as a missing video. (The render
+ *  guard re-checks the exact tokens each template uses at send time; this is the cheap staging
+ *  approximation that keeps data-poor prospects out of the queue in the first place.) */
+export function hasContactData(p: Prospect): boolean {
+  const first = (p.firstName || "").trim();
+  const goodFirst = first.length > 1 && first.toLowerCase() !== "there";
+  const company = (p.company || "").trim();
+  const roleAnchor = ((p as { signalReason?: string }).signalReason || p.title || p.personalizedVideo?.roleTitle || "").trim();
+  return !!(goodFirst && company && roleAnchor);
+}
 
 /** The strict send-ready gate for one prospect. `missing` lists exactly what's not done yet. */
 export function prospectReadiness(p: Prospect): Readiness {
   const missing: MissingAsset[] = [];
+  if (!hasContactData(p)) missing.push("contact_data");
   if (!(p.email && p.emailVerification?.status === "valid")) missing.push("verified_email");
   const pv = p.personalizedVideo;
   if (!(pv && pv.videoKey && pv.gifUrl)) missing.push("video"); // videoKey implies clip + PiP + composite
@@ -62,7 +76,10 @@ export interface SendQueueOverview {
   inSequence: number;      // already in the sequence (context; their 2nd emails are the rollover)
   runwayDays: number;      // readySupply / dailyTarget — how many days the buffer covers
   shortfall: number;       // prospects still needed to fill bufferDays × dailyTarget
-  needsAssets: { total: number; noVerifiedEmail: number; noVideo: number; noWatch: number };
+  needsAssets: { total: number; noVerifiedEmail: number; noVideo: number; noWatch: number; noContactData: number };
+  /** Prospects the render guard HELD at send time (rendered copy had missing data / read broken).
+   *  They keep re-rendering each tick and release themselves once the data is fixed. */
+  copyHolds: number;
   days: SendQueueDay[];
   campaigns: CampaignReadiness[];
 }
@@ -80,7 +97,7 @@ export async function sendQueueOverview(workspaceId: string, todayIso: string): 
   // won/nurture/closed/do_not_contact are out; in_sequence already started (counted separately).
   const stageable = prospects.filter((p) => p.status === "queued");
   let ready = 0;
-  const need = { total: 0, noVerifiedEmail: 0, noVideo: 0, noWatch: 0 };
+  const need = { total: 0, noVerifiedEmail: 0, noVideo: 0, noWatch: 0, noContactData: 0 };
   const byCampaign = new Map<string, { ready: number; need: number }>();
   for (const p of stageable) {
     const r = prospectReadiness(p);
@@ -91,10 +108,12 @@ export async function sendQueueOverview(workspaceId: string, todayIso: string): 
       if (r.missing.includes("verified_email")) need.noVerifiedEmail++;
       if (r.missing.includes("video")) need.noVideo++;
       if (r.missing.includes("watch_page")) need.noWatch++;
+      if (r.missing.includes("contact_data")) need.noContactData++;
     }
     byCampaign.set(p.campaignId, slot);
   }
   const inSequence = prospects.filter((p) => p.status === "in_sequence").length;
+  const copyHolds = prospects.filter((p) => (p.status === "queued" || p.status === "in_sequence") && p.copyHold).length;
   const runwayDays = DAILY_TARGET > 0 ? Math.floor(ready / DAILY_TARGET) : 0;
 
   // Per-day projection across the buffer window. We spend the ready supply at DAILY_TARGET/day; the
@@ -121,7 +140,7 @@ export async function sendQueueOverview(workspaceId: string, todayIso: string): 
 
   return {
     targetMin: TARGET_MIN, targetMax: TARGET_MAX, dailyTarget: DAILY_TARGET, bufferDays: BUFFER_DAYS,
-    readySupply: ready, inSequence, runwayDays, shortfall, needsAssets: need, days, campaigns: campaignsOut,
+    readySupply: ready, inSequence, runwayDays, shortfall, needsAssets: need, copyHolds, days, campaigns: campaignsOut,
   };
 }
 
@@ -170,4 +189,38 @@ export async function needsAssetsList(
     if (out.length >= limit) break;
   }
   return out;
+}
+
+export interface CopyHoldItem {
+  id: string;
+  name: string;
+  company?: string;
+  title?: string;
+  email?: string;
+  campaignId: string;
+  touch: string;         // which touch the guard held
+  heldAt: string;
+  reasons: string[];     // the exact failed checks ("missing_data: {{near_city}} is empty", …)
+}
+
+/** The render-guard worklist: every prospect whose next touch was HELD because the rendered copy
+ *  had missing data points or read broken. Fix the listed data and the next tick releases them. */
+export async function copyHoldsList(workspaceId: string, opts?: { limit?: number }): Promise<CopyHoldItem[]> {
+  const limit = Math.min(Math.max(opts?.limit ?? 200, 1), 1000);
+  const prospects = await getCore().listProspects(workspaceId);
+  return prospects
+    .filter((p) => (p.status === "queued" || p.status === "in_sequence") && p.copyHold)
+    .sort((a, b) => (b.copyHold!.at || "").localeCompare(a.copyHold!.at || ""))
+    .slice(0, limit)
+    .map((p) => ({
+      id: p.id,
+      name: p.fullName,
+      company: p.company,
+      title: p.title,
+      email: p.email,
+      campaignId: p.campaignId,
+      touch: p.copyHold!.touch,
+      heldAt: p.copyHold!.at,
+      reasons: p.copyHold!.reasons,
+    }));
 }

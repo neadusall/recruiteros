@@ -10,7 +10,7 @@
  *   { action: "fill_now" }                    -> stage one batch right now (ignores the toggle).
  */
 
-import { sendQueueOverview, needsAssetsList, type MissingAsset } from "../../../lib/sending/sendReady";
+import { sendQueueOverview, needsAssetsList, copyHoldsList, type MissingAsset } from "../../../lib/sending/sendReady";
 import { getAutofillSettings, setAutofillSettings, autofillStatus, runAutofill, ensureAutofill } from "../../../lib/sending/autofill";
 import { goLiveReadiness } from "../../../lib/sending/goLive";
 import { sendCapacity } from "../../../lib/senders";
@@ -107,9 +107,16 @@ export async function POST(req: Request) {
   // The per-prospect worklist behind the "needs assets" cards: who's staged but not yet send-ready,
   // and exactly what each is missing — optionally sliced to one asset (verified_email | video | watch_page).
   if (b?.action === "needs_list") {
-    const allowed: MissingAsset[] = ["verified_email", "video", "watch_page"];
+    const allowed: MissingAsset[] = ["verified_email", "video", "watch_page", "contact_data"];
     const missing = allowed.includes(b.missing) ? (b.missing as MissingAsset) : undefined;
     const items = await needsAssetsList(ws, { missing, limit: Math.min(Number(b.limit) || 200, 1000) });
+    return ok({ items });
+  }
+
+  // The render-guard worklist: prospects whose next touch was HELD at send time because the merged
+  // copy had missing data points or read broken. Each row carries the exact failed checks.
+  if (b?.action === "holds_list") {
+    const items = await copyHoldsList(ws, { limit: Math.min(Number(b.limit) || 200, 1000) });
     return ok({ items });
   }
 

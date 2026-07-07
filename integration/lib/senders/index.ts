@@ -9,7 +9,7 @@ export type { SenderInbox, SenderInboxPublic, SenderProvider, SenderStatus, Recr
 export {
   ready, persist, toPublic,
   listInboxes, getInbox, findInboxByEmail, addInbox, saveInbox, deleteInbox,
-  assignOwner, setStatus, recruiterPools, stats, recordSend, resetDaily, listSenderWorkspaceIds,
+  assignOwner, setStatus, recruiterPools, stats, recordSend, resetDaily, resetDailyIfNewDay, listSenderWorkspaceIds,
   sendCapacity,
 } from "./store";
 export type { NewInboxInput, RecruiterCapacity, SendCapacity } from "./store";

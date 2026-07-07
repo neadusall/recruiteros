@@ -89,9 +89,49 @@ async function triggerVoiceOnEmailSent(workspaceId: string, t: SendTouch): Promi
   });
 }
 
+/**
+ * The rendered body is plain text with \n line breaks plus (on the video email) one inline HTML
+ * table for the Loom-style thumbnail. Email clients collapse \n in HTML, so the HTML payload
+ * converts line breaks to <br> inside a plain sans-serif container — the delivered email keeps its
+ * paragraphs and the clickable video card keeps its spacing. The text/plain alternative swaps the
+ * embed for its watch link (better spam posture than an html-only message, and image-blocking
+ * clients still get a clickable URL).
+ */
+export function emailPayload(body: string): { html: string; text: string } {
+  const html =
+    `<div style="font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#222222">` +
+    body.replace(/\r?\n/g, "<br>") +
+    `</div>`;
+  const link = (body.match(/<a href="(https?:[^"]+)"/) || [])[1] || "";
+  const text = body
+    .replace(/<table[\s\S]*?<\/table>/gi, link ? `\nWatch the video: ${link}\n` : "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  return { html, text };
+}
+
 async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> {
   switch (t.channel) {
     case "email": {
+      // SUPPRESSION GATE (both lists, before ANY provider): the DNC/opt-out list
+      // (lib/response/suppression — STOP, unsubscribe) and the bounce/complaint list
+      // (lib/sending/store). Previously only the MTA path checked, so a pooled SMTP
+      // send could reach someone who had opted out. A suppressed prospect is also
+      // flipped to do_not_contact so the cadence stops retrying them every tick.
+      if (t.prospect.email) {
+        const [dnc, store] = await Promise.all([
+          import("../response/suppression"),
+          import("../sending/store"),
+        ]);
+        if ((await dnc.isSuppressed(workspaceId, t.prospect.email)) || (await store.isSuppressed(t.prospect.email))) {
+          try {
+            const fresh = await getCore().getProspect(t.prospect.id);
+            if (fresh && fresh.status !== "do_not_contact") { fresh.status = "do_not_contact"; await getCore().saveProspect(fresh); }
+          } catch { /* best-effort status flip */ }
+          return { ok: false, channel: "email", provider: "suppressed", error: "suppressed" };
+        }
+      }
       // Recruiter-owned SMTP inbox pool (lib/senders): when the prospect's campaign
       // is assigned to a recruiter who has an available inbox, send through that
       // recruiter's pool (rotated + sticky per prospect). Falls through to the MTA /
@@ -106,7 +146,7 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
         const m = await sendEmail(workspaceId, {
           to: t.prospect.email,
           subject: t.subject ?? "",
-          htmlBody: t.text,
+          htmlBody: emailPayload(t.text).html,
           fromName: t.prospect.company ? undefined : undefined,
         });
         // A clean skip (no capacity / not ready) falls through to Instantly so a
@@ -173,7 +213,17 @@ async function trySenderPool(workspaceId: string, t: SendTouch): Promise<SendRes
     }
     if (!inbox) inbox = await pickSender(workspaceId, { recruiterId });
     if (!inbox) return null; // pool empty / all capped -> fall through to MTA/Instantly
-    const res = await sendViaInbox(inbox, { to: t.prospect.email, subject: t.subject ?? "", html: t.text });
+    const payload = emailPayload(t.text);
+    // Gmail/Yahoo bulk-sender compliance: every cold send carries a signed one-click
+    // List-Unsubscribe (lib/sending/unsubscribe) + a mailto fallback on the sending inbox.
+    const { unsubscribeHeaders } = await import("../sending/unsubscribe");
+    const res = await sendViaInbox(inbox, {
+      to: t.prospect.email,
+      subject: t.subject ?? "",
+      html: payload.html,
+      text: payload.text,
+      headers: unsubscribeHeaders(workspaceId, t.prospect.email, inbox.email),
+    });
     if (!res.ok) return { ok: false, channel: "email", provider: "smtp:" + inbox.provider, error: res.error };
     await recordSend(inbox);
     if (t.prospect.senderInboxId !== inbox.id) {

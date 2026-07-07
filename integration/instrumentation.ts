@@ -92,6 +92,10 @@ export async function register(): Promise<void> {
       // No-op until INMARKET_AUTOVIDEO=1 (+ a recorded clip).
       const { ensureAutoVideo } = await import("./lib/inmarket/autoVideo");
       ensureAutoVideo();
+      // RETENTION sweeper: ages out composites after INMARKET_RETENTION_DAYS so the video store
+      // stays a fixed size at fleet scale. No-op until INMARKET_RETENTION=1.
+      const { ensureRetention } = await import("./lib/inmarket/retention");
+      ensureRetention();
     } catch {
       /* never let an instrumentation hiccup block server startup */
     }

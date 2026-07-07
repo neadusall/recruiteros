@@ -27,6 +27,7 @@ import {
   PutObjectCommand,
   HeadObjectCommand,
   DeleteObjectCommand,
+  ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 
 const BUCKET = process.env.ROS_S3_BUCKET;
@@ -87,4 +88,36 @@ export async function s3Del(key: string): Promise<void> {
   } catch {
     /* best-effort */
   }
+}
+
+export interface S3Entry {
+  key: string;
+  size: number;
+  /** LastModified as epoch ms (0 when the store omits it). */
+  at: number;
+}
+
+/**
+ * List every object under `prefix` (paginated to completion). Used by the retention sweeper,
+ * which must see the WHOLE prefix to age objects out — a truncated listing would silently
+ * strand the tail forever. Returns [] on any error so a flaky store never crashes a tick.
+ */
+export async function s3List(prefix: string): Promise<S3Entry[]> {
+  const out: S3Entry[] = [];
+  try {
+    let token: string | undefined;
+    do {
+      const page = await client().send(new ListObjectsV2Command({
+        Bucket: BUCKET, Prefix: prefix, ContinuationToken: token, MaxKeys: 1000,
+      }));
+      for (const o of page.Contents ?? []) {
+        if (!o.Key) continue;
+        out.push({ key: o.Key, size: o.Size ?? 0, at: o.LastModified ? o.LastModified.getTime() : 0 });
+      }
+      token = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (token);
+  } catch {
+    return [];
+  }
+  return out;
 }
