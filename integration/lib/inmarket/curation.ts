@@ -46,6 +46,8 @@ export interface CuratedProspect {
   signalReason: string;             // human "why they're hiring"
   role: string;                     // the specific open role this prospect owns
   jobUrl?: string;                  // the actual job-posting / apply URL, so the screen capture targets the REAL job (not just the careers page)
+  jobLocation?: string;             // where the role is based (from the posting) — personalization for custom emails
+  jobPostedAt?: string;             // when the role was posted — lets outreach say "open N days"
   function: JobFunction;            // which desk
   score: number;                    // hiring-intent score of the source signal
   employeeCount?: number;           // company headcount (collected via Wikidata) — ICP fit + personalization
@@ -163,7 +165,7 @@ interface PoolLeadLite {
   reason?: string;
   score?: number;
   employeeCount?: number;
-  roleDetails?: Array<{ title: string; url?: string }>;
+  roleDetails?: Array<{ title: string; url?: string; location?: string; postedAt?: string }>;
   roles?: string[];
   /** The lead's source/apply URL — used to recover the company's own domain when its host is
    *  the company site (not an ATS). One more free signal for the domain resolver. */
@@ -280,6 +282,10 @@ export function buildCuratedRow(lead: PoolLeadLite, role: string, dm: DecisionMa
     // targets the exact job we're emailing about. roleShot then verifies the loaded page matches
     // this role's title before it screenshots, so the JD in the video always pairs with the email.
     jobUrl: urlForRole(lead, role),
+    // Carry the posting's location + posted date so outreach can personalize ("your Austin office",
+    // "open 32 days") without re-touching the pool.
+    jobLocation: detailForRole(lead, role)?.location,
+    jobPostedAt: detailForRole(lead, role)?.postedAt,
     function: dm.function as JobFunction,
     score: Math.round(lead.score ?? 0),
     employeeCount: lead.employeeCount,
@@ -393,7 +399,7 @@ export async function claimResearchBatch(limit: number, minScore = 10): Promise<
   const leads = (candidates as Array<Record<string, unknown>>).map((l) => ({
     company: l.company as string, domain: l.domain as string | undefined, industry: l.industry as string | undefined,
     signalType: l.signalType as string | undefined, reason: l.reason as string | undefined, score: l.score as number | undefined,
-    employeeCount: l.employeeCount as number | undefined, roleDetails: l.roleDetails as Array<{ title: string; url?: string }> | undefined,
+    employeeCount: l.employeeCount as number | undefined, roleDetails: l.roleDetails as PoolLeadLite["roleDetails"],
     roles: l.roles as string[] | undefined, sourceUrl: l.sourceUrl as string | undefined,
   })) as PoolLeadLite[];
 
@@ -430,6 +436,12 @@ function urlForRole(lead: PoolLeadLite, role: string): string | undefined {
   const t = (role || "").trim().toLowerCase();
   const hit = lead.roleDetails?.find((r) => (r.title || "").trim().toLowerCase() === t);
   return hit ? hit.url : lead.sourceUrl;
+}
+
+/** The full roleDetails entry for ONE role (location, postedAt, url) — same title match as urlForRole. */
+function detailForRole(lead: PoolLeadLite, role: string): { title: string; url?: string; location?: string; postedAt?: string } | undefined {
+  const t = (role || "").trim().toLowerCase();
+  return lead.roleDetails?.find((r) => (r.title || "").trim().toLowerCase() === t);
 }
 
 /** The role a company's decision-maker should be matched to: its first/most-recent open role. */
@@ -644,7 +656,41 @@ export async function listCurated(opts?: {
   const rank = (r: CuratedProspect): number =>
     (r.status === "contactable" || r.status === "queued" || r.status === "enrolled") ? 0 : r.managerName ? 1 : 2;
   rows.sort((a, b) => rank(a) - rank(b) || b.score - a.score || (b.curatedAt > a.curatedAt ? 1 : -1));
-  return rows.slice(0, opts?.limit ?? 500);
+  return backfillJobDetails(rows.slice(0, opts?.limit ?? 500));
+}
+
+/**
+ * READ-TIME decoration: rows curated before jobLocation/jobPostedAt existed (and locked
+ * queued/enrolled rows the merge never rewrites) get those fields filled from the live pool by
+ * (company, role-title) — so the Clients tab and the CSV export carry the full personalization
+ * set immediately, without waiting for each row's next daily re-research. Returns copies; the
+ * store itself is untouched (the daily re-curation persists the fields for real over time).
+ */
+async function backfillJobDetails(rows: CuratedProspect[]): Promise<CuratedProspect[]> {
+  const missing = rows.filter((r) => !r.jobLocation || !r.jobPostedAt);
+  if (!missing.length) return rows;
+  const companies = new Set(missing.map((r) => r.company.trim().toLowerCase()));
+  let leads: Array<{ company?: string; roleDetails?: Array<{ title?: string; location?: string; postedAt?: string }> }> = [];
+  try {
+    const { queryPool } = await import("./pool");
+    leads = await queryPool({ limit: 6000 } as never, 6000);
+  } catch { return rows; }
+  const detail = new Map<string, { location?: string; postedAt?: string }>();
+  for (const l of leads) {
+    const co = String(l.company ?? "").trim().toLowerCase();
+    if (!co || !companies.has(co)) continue;
+    for (const d of l.roleDetails ?? []) {
+      if (!d?.title || (!d.location && !d.postedAt)) continue;
+      detail.set(co + "||" + d.title.trim().toLowerCase(), { location: d.location, postedAt: d.postedAt });
+    }
+  }
+  if (!detail.size) return rows;
+  return rows.map((r) => {
+    if (r.jobLocation && r.jobPostedAt) return r;
+    const hit = detail.get(r.company.trim().toLowerCase() + "||" + r.role.trim().toLowerCase());
+    if (!hit) return r;
+    return { ...r, jobLocation: r.jobLocation ?? hit.location, jobPostedAt: r.jobPostedAt ?? hit.postedAt };
+  });
 }
 
 /**
@@ -749,6 +795,7 @@ export async function enrollToBulk(
         company: r.company,
         companyDomain: r.domain,
         title: r.managerTitle,
+        location: r.jobLocation,        // where the role is based — template personalization
         category: "in_market",
         motion: "bd",
         signalType: r.signalType,

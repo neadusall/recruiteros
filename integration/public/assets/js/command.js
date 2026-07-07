@@ -4662,7 +4662,8 @@
         companyDomain: r.domain || "",
         companySize: r.employeeCount || "",   // company headcount (ICP fit + personalization)
         jobUrl: r.jobUrl || "",
-        location: "",
+        location: r.jobLocation || "",     // where the JOB is based (posting location)
+        jobPostedAt: r.jobPostedAt || "",  // when the role went up ("open N days" hook)
         email: r.likelyEmail || "",
         emailVerification: ev,
         emailSource: r.emailSource || "",      // how the email was obtained (guess | site_direct | reoon_validated | …)
@@ -4753,6 +4754,13 @@
       return parts.length > 1 ? parts.slice(1).join(" ") : "";
     }
     function phoneOf(p) { return p.phone || p.mobilePhone || p.landlinePhone || ""; }
+    // Days the role has been open (from the posting date) — the "open N days" personalization hook.
+    function daysOpen(p) {
+      var t = Date.parse(p.jobPostedAt || "");
+      if (!t) return null;
+      var d = Math.floor((Date.now() - t) / 86400000);
+      return d >= 0 ? d : null;
+    }
     function naCell(v) { return v ? esc(v) : '<span class="pr-na">-</span>'; }
 
     // ONE column spec drives the sortable header, the row cells, the sort accessor, AND the
@@ -4782,8 +4790,13 @@
           return '<td class="crm-c-company"><div class="crm-id-t"><span class="crm-name">' + (p.company ? esc(p.company) : '<span class="pr-na">-</span>') + size + "</span>" +
             '<span class="crm-sub">' + (sub || "&nbsp;") + "</span></div></td>"; } },
       { key: "open_role", label: "Hiring for", get: function (p) { return p.openRole || ""; }, render: function (p) {
-          return "<td>" + (p.openRole ? '<span class="cl-cat cl-cat-role">' + esc(p.openRole) + "</span>" : '<span class="pr-na">-</span>') +
-            (p.jobUrl ? ' <a class="crm-jobpost" href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener" title="Open the live job posting"' + stop + ">↗</a>" : "") + "</td>"; } },
+          var role = (p.openRole ? '<span class="cl-cat cl-cat-role">' + esc(p.openRole) + "</span>" : '<span class="pr-na">-</span>') +
+            (p.jobUrl ? ' <a class="crm-jobpost" href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener" title="Open the live job posting"' + stop + ">↗</a>" : "");
+          var dOpen = daysOpen(p);
+          var meta = (p.location ? "📍 " + esc(p.location) : "") +
+            (dOpen != null ? (p.location ? " · " : "") + dOpen + "d open" : "");
+          return '<td class="crm-c-role"><div class="crm-id-t"><span>' + role + "</span>" +
+            (meta ? '<span class="crm-sub">' + meta + "</span>" : "") + "</div></td>"; } },
       { key: "category", label: "Desk · Industry", get: function (p) { return (p["function"] || "") + " " + (p.industry || ""); }, render: function (p) {
           var chips = (p["function"] ? '<span class="cl-cat cl-cat-fn">' + esc(p["function"]) + "</span>" : "") +
             (p.industry ? '<span class="cl-cat cl-cat-ind">' + esc(p.industry) + "</span>" : "");
@@ -4817,6 +4830,9 @@
       ["open_role", function (p) { return p.openRole || ""; }], ["why_hiring", function (p) { return p.signalReason || ""; }],
       ["signal_type", function (p) { return p.signalType || ""; }], ["intent_score", function (p) { return p.score == null ? "" : p.score; }],
       ["job_post_url", function (p) { return p.jobUrl || ""; }],
+      ["job_location", function (p) { return p.location || ""; }],
+      ["job_posted_at", function (p) { return (p.jobPostedAt || "").slice(0, 10); }],
+      ["job_days_open", function (p) { var d = daysOpen(p); return d == null ? "" : d; }],
       ["company", function (p) { return p.company || ""; }], ["company_domain", function (p) { return p.companyDomain || ""; }],
       ["company_size", function (p) { return p.companySize || ""; }], ["company_location", function (p) { return p.location || ""; }],
       ["industry", function (p) { return p.industry || ""; }], ["desk", function (p) { return p["function"] || ""; }],
@@ -5344,6 +5360,8 @@
             dRow("LinkedIn", p.linkedinUrl ? '<a href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener">' + esc(p.linkedinUrl) + "</a>" : "")) +
           dSection("Hiring signal",
             dRow("Open role", p.openRole ? esc(p.openRole) : "") +
+            dRow("Job location", p.location ? "📍 " + esc(p.location) : "") +
+            dRow("Posted", p.jobPostedAt ? esc(String(p.jobPostedAt).slice(0, 10)) + (daysOpen(p) != null ? " · " + daysOpen(p) + "d open" : "") : "") +
             dRow("Why hiring", p.signalReason ? "⚡ " + esc(p.signalReason) : "") +
             dRow("Signal type", p.signalType ? esc(String(p.signalType).replace(/_/g, " ")) : "") +
             dRow("Intent score", p.score == null ? "" : esc(String(p.score))) +
