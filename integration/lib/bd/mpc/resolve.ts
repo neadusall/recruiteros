@@ -161,7 +161,9 @@ export function buildMpcTokens(input: MpcLeadInput): MpcTokens {
     Job_Location: jobCity.metro || (input.jobLocation || "").trim(),
     MH1, MH2, Metric,
     P_subj: pr.subj, P_obj: pr.obj, P_pos: pr.pos,
-    Your_Name: (input.yourName || "").trim(),
+    // Sign-off: the lead's own context first, then the operator-wide default — every template
+    // signs with {{Your_Name}}, so without either the render guard holds the send.
+    Your_Name: (input.yourName || process.env.RECRUITEROS_SENDER_NAME || "").trim(),
     proximityOk,
     hasVernacular: near.hasVernacular,
   };

@@ -158,18 +158,31 @@ export const MPC_TEMPLATES: MpcTemplate[] = [
     body: "Hi {{First_Name}}, third {{Industry}} team this month that could use this {{Open_Role}}. {{P_subj}} wants {{Job_Location}} and fits you best: {{MH1}}, {{MH2}}. worth a conversation?" + SIGN },
 ];
 
-/** Templates that survive given what we know about the lead (drop proximity/competitor variants we
- *  can't honestly fill). Always leaves a healthy pool, so selection never starves. */
-export function eligibleTemplates(opts: { proximityOk: boolean; hasCompetitor: boolean }): MpcTemplate[] {
+export interface TemplateEligibility {
+  proximityOk: boolean;
+  hasCompetitor: boolean;
+  /** A real placement city is known ({{Near_City}} resolves). When false, templates that
+   *  reference {{Near_City}} are excluded — otherwise every send of that template would be
+   *  held by the render guard for an empty token. Defaults to true for back-compat. */
+  hasNearCity?: boolean;
+}
+
+const NEAR_CITY_RE = /\{\{\s*Near_City\s*\}\}/i;
+
+/** Templates that survive given what we know about the lead (drop proximity/competitor/city
+ *  variants we can't honestly fill). Always leaves a healthy pool, so selection never starves. */
+export function eligibleTemplates(opts: TemplateEligibility): MpcTemplate[] {
+  const noCity = opts.hasNearCity === false;
   return MPC_TEMPLATES.filter((t) => {
     if (t.needsProximity && !opts.proximityOk) return false;
     if (t.needsCompetitor && !opts.hasCompetitor) return false;
+    if (noCity && (NEAR_CITY_RE.test(t.subject) || NEAR_CITY_RE.test(t.body))) return false;
     return true;
   });
 }
 
 /** Deterministic template pick for a prospect (stable per seed), from the eligible pool. */
-export function pickTemplate(seed: string, opts: { proximityOk: boolean; hasCompetitor: boolean }): MpcTemplate {
+export function pickTemplate(seed: string, opts: TemplateEligibility): MpcTemplate {
   const pool = eligibleTemplates(opts);
   let h = 2166136261;
   for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }

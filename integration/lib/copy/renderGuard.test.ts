@@ -137,6 +137,29 @@ const VIDEO: Partial<Prospect> = {
   const gd = guardRenderedTouch({ channel: "email", emailStep: 1, subject: dashy.subject, body: dashy.body, tokens: dashy.tokens });
   ok(!gd.ok && gd.holds.some((h) => h.check === "guardrail"), "a dash in the template's own words still holds");
 
+  /* 5b — recruiter-side data flow: with NO placement city on the campaign, the template pick
+   *      must avoid {{Near_City}} templates entirely, and the sign-off must fall back to
+   *      RECRUITEROS_SENDER_NAME — so a minimally-configured campaign still renders complete. */
+  {
+    const { eligibleTemplates } = await import("../bd/mpc/templates");
+    const noCityPool = eligibleTemplates({ proximityOk: false, hasCompetitor: false, hasNearCity: false });
+    ok(noCityPool.length >= 10, `no-city pool stays healthy (${noCityPool.length} templates)`);
+    ok(noCityPool.every((t) => !/\{\{\s*Near_City\s*\}\}/i.test(t.subject + t.body)), "no-city pool never references {{Near_City}}");
+
+    process.env.RECRUITEROS_SENDER_NAME = "Ryan";
+    const minimal: Partial<Prospect> = {
+      id: "p_min", firstName: "Dana", fullName: "Dana Cole", company: "Acme Health",
+      title: "VP of Sales", location: "Raleigh, NC",
+    } as Partial<Prospect>;
+    const seqNoCity = templateOpener({ company: minimal.company!, roleTitle: minimal.title!, mpc: { hasNearCity: false } });
+    const rMin = renderTouch(touch({ key: "t0", subject: seqNoCity.first.subject, body: seqNoCity.first.body }), minimal, { emailStep: 1 });
+    const gMin = guardRenderedTouch({ channel: "email", emailStep: 1, subject: rMin.subject, body: rMin.body, tokens: rMin.tokens });
+    if (!gMin.ok) console.log("    minimal-campaign holds:", gMin.holds);
+    ok(gMin.ok, "minimal campaign (no placement city, env sender name) renders complete and passes");
+    ok(rMin.body.includes("Ryan"), "sign-off uses RECRUITEROS_SENDER_NAME fallback");
+    delete process.env.RECRUITEROS_SENDER_NAME;
+  }
+
   /* 6 — the staging gate approximation. */
   ok(hasContactData({ firstName: "Marcus", company: "Meridian", title: "COO" } as Prospect), "contact data gate passes a complete prospect");
   ok(!hasContactData({ firstName: "there", company: "Meridian", title: "COO" } as Prospect), "contact data gate rejects the 'there' fallback");

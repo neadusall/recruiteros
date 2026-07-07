@@ -77,8 +77,14 @@ export async function POST(req: Request) {
 
   // Generate the TWO-EMAIL SEQUENCE once (text intro → video follow-up) and attach to every
   // prospect, so outreach runs the right cadence — the video is ALWAYS the second touch.
+  // The Day-0 template pick is data-aware: only templates whose recruiter-side tokens
+  // ({{Near_City}}, {{Competitor}}) will actually resolve from the campaign's mpcContext.
   const { templateOpener } = await import("../../../../lib/inmarket/videoOpener");
-  const seqInput = { company, roleTitle, motion: "bd" as const };
+  const campMpc = campaignId ? (await core.getCampaign(campaignId))?.mpcContext : undefined;
+  const seqInput = {
+    company, roleTitle, motion: "bd" as const,
+    mpc: { hasNearCity: !!campMpc?.placementLocation, hasCompetitor: !!campMpc?.competitor },
+  };
   const draft = templateOpener(seqInput); // Day-0 MPC (bd/mpc/templates) + Day-1 real-person video
 
   const sequence = { firstEmail: draft.first, secondEmail: draft.second };

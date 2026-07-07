@@ -796,6 +796,13 @@ export async function enrollToBulk(
   const set = new Set(ids);
   const rows = await load();
   const { addProspect } = await import("../prospects");
+  // Recruiter-side MPC personalization lives on the campaign (set once); stamp it onto every
+  // enrolled prospect so {{Your_Name}}/{{Near_City}}/… render personal instead of being held.
+  let campaignMpc: import("../core/types").MpcContext | undefined;
+  try {
+    const { getCore } = await import("../core/repository");
+    campaignMpc = (await getCore().getCampaign(campaignId))?.mpcContext;
+  } catch { /* enrollment proceeds; the render guard holds anything unresolved */ }
   let enrolled = 0, skipped = 0;
   const enrolledIds = new Set<string>();
   // Do the (slow, network) addProspect calls WITHOUT holding the write lock; collect which ids
@@ -825,6 +832,7 @@ export async function enrollToBulk(
         signalType: r.signalType,
         signalReason: r.signalReason,
         warmth: Math.max(50, r.score),
+        mpcContext: campaignMpc,
       });
       enrolledIds.add(r.id);
       enrolled++;

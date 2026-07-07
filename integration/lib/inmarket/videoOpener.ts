@@ -33,6 +33,10 @@ export interface OpenerInput {
   roleTitle: string;
   signalReason?: string;       // e.g. "reposted the role twice in 30 days"
   motion?: "bd" | "recruiting";
+  /** What recruiter-side MPC data the campaign actually has, so the Day-0 template pick only
+   *  chooses templates whose tokens will resolve (an unknown placement city must never pick a
+   *  {{Near_City}} template — the render guard would hold every send of it). */
+  mpc?: { hasNearCity?: boolean; hasCompetitor?: boolean };
 }
 export interface EmailDraft { subject: string; body: string; }
 /** A two-step sequence: text intro first, video follow-up second. */
@@ -104,7 +108,13 @@ const VIDEO_FOLLOWUP: EmailDraft = {
  */
 export function templateOpener(input: OpenerInput): OpenerDraft {
   const seed = `${input.company}|${input.roleTitle}|${input.motion || "bd"}`;
-  const t = pickTemplate(seed, { proximityOk: false, hasCompetitor: false });
+  // Conservative defaults: no proximity/competitor/city claims unless the campaign's MPC
+  // context says the data exists — so the picked template always renders complete.
+  const t = pickTemplate(seed, {
+    proximityOk: false,
+    hasCompetitor: !!input.mpc?.hasCompetitor,
+    hasNearCity: input.mpc?.hasNearCity ?? false,
+  });
   return { first: { subject: t.subject, body: t.body }, second: VIDEO_FOLLOWUP, source: "template" };
 }
 

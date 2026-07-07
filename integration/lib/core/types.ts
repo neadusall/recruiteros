@@ -98,6 +98,10 @@ export interface Campaign {
   assignee?: string;
   /** The sending account/handle this campaign uses (or "auto-rotate"). */
   senderAccount?: string;
+  /** Recruiter-side MPC personalization ({{Your_Name}}, your recent placement city/role, …).
+   *  Set ONCE on the campaign; enrollment stamps it onto every prospect so the Day-0 MPC
+   *  templates render fully personal. Without it the render guard holds sends that need it. */
+  mpcContext?: MpcContext;
   /** Outreach-Statistics promote-winners config (continuously refreshed when on). */
   autopilot?: CampaignAutopilot;
   /**
@@ -166,6 +170,20 @@ export interface CampaignModel {
 }
 
 /** A person we are reaching: a BD buyer or a candidate. */
+/** Recruiter-side personalization for the MPC Day-0 sequence: YOUR recent placement + sign-off.
+ *  Lives on the Campaign (set once) and is stamped onto every prospect at enrollment so
+ *  renderTouch can resolve {{Your_Name}}/{{Near_City}}/{{Job_Title}}/… per send. */
+export interface MpcContext {
+  placedRole?: string;         // the role you recently placed (drives {{Job_Title}})
+  placementLocation?: string;  // where you placed it (resolved to {{Near_City}} + local vernacular)
+  competitor?: string;         // where you placed it (drives {{Competitor}})
+  industry?: string;           // {{Industry}}
+  mustHaves?: string[];        // native JD proof clauses -> {{MH1}} / {{MH2}}
+  metric?: string;             // {{Metric}}
+  gender?: "m" | "f";          // pronouns {{P_subj}} / {{P_obj}} / {{P_pos}} (never "they")
+  yourName?: string;           // sign-off {{Your_Name}}
+}
+
 export interface Prospect {
   id: string;
   workspaceId: string;
@@ -214,17 +232,9 @@ export interface Prospect {
   location?: string;
   /** Context for the MPC Day-0 sequence (lib/bd/mpc): the recruiter's recent placement + the candidate
    *  being marketed. When set, renderTouch resolves rich {{Near_City}}/{{MH1}}/{{P_subj}}/… tokens; when
-   *  absent, the sequence still renders truthfully-generic native copy from the lexicon floor. */
-  mpcContext?: {
-    placedRole?: string;         // the role you recently placed (drives {{Job_Title}})
-    placementLocation?: string;  // where you placed it (resolved to {{Near_City}} + local vernacular)
-    competitor?: string;         // where you placed it (drives {{Competitor}})
-    industry?: string;           // {{Industry}}
-    mustHaves?: string[];        // native JD proof clauses -> {{MH1}} / {{MH2}}
-    metric?: string;             // {{Metric}}
-    gender?: "m" | "f";          // pronouns {{P_subj}} / {{P_obj}} / {{P_pos}} (never "they")
-    yourName?: string;           // sign-off {{Your_Name}}
-  };
+   *  absent, the sequence still renders truthfully-generic native copy from the lexicon floor.
+   *  Stamped from the campaign's mpcContext at enrollment (enrollToBulk / autopilot enroll). */
+  mpcContext?: MpcContext;
   /** One-line LinkedIn headline. */
   headline?: string;
   /** ICP category bucket this prospect was matched into. */

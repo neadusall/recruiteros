@@ -210,6 +210,10 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
       // guaranteed before the 1st email goes out. Only HOLDS unready prospects — never sends more.
       if (c.sendQueue && isNew && !prospectReadiness(p).ready) continue;
 
+      // Backfill recruiter-side MPC personalization from the campaign (covers prospects enrolled
+      // before the campaign's mpcContext was set). Saved with the isNew/fired write below.
+      if (!p.mpcContext && c.mpcContext) p.mpcContext = c.mpcContext;
+
       // Enrich on first enrollment (real waterfall when keyed) -> merge contact/role.
       if (isNew) {
         try {

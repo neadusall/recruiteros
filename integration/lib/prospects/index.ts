@@ -52,6 +52,9 @@ export interface NewProspectInput {
   /** Hiring/buying signal that surfaced this prospect (carried into outreach). */
   signalType?: string;
   signalReason?: string;
+  /** Recruiter-side MPC personalization ({{Your_Name}}, placement city/role), stamped from the
+   *  campaign at enrollment so the Day-0 templates render fully personal. */
+  mpcContext?: Prospect["mpcContext"];
 }
 
 /** Manual add or bulk-upload row -> creates/updates the ATS Person too. */
@@ -88,6 +91,7 @@ export async function addProspect(input: NewProspectInput): Promise<Prospect> {
     ownerId: p.ownerId ?? input.ownerId,
     signalType: input.signalType ?? p.signalType,
     signalReason: input.signalReason ?? p.signalReason,
+    mpcContext: input.mpcContext ?? p.mpcContext,
   });
 
   // Free first pass: backfill missing email/phone from the Data warehouse (a record
