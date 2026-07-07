@@ -4729,6 +4729,7 @@
     function inVerdict(p) {
       if (!clVerdict) return true;
       if (clVerdict === "video") return hasCapture(p);
+      if (clVerdict === "ready") return isSendReady(p) && hasCapture(p);   // deliverable email + asset
       if (clVerdict === "unchecked") { var s = vStatus(p); return s === "unverified" || s === "unknown"; }
       return vStatus(p) === clVerdict;
     }
@@ -4995,7 +4996,7 @@
           kpiCard("", "👥", elig.length.toLocaleString(), "Contacts", roll.nCompanies ? roll.nCompanies.toLocaleString() + " companies" : "", "rgba(124,92,255,0.16)") +
           kpiCard("valid", "✓", (by.valid || 0).toLocaleString(), "Verified", "mailbox confirmed", "rgba(54,211,153,0.16)") +
           kpiCard("video", "🎬", roll.withVideo.toLocaleString(), "With video", "asset attached", "rgba(170,120,255,0.16)") +
-          kpiCard("", "🚀", roll.sendReady.toLocaleString(), "Send-ready", "verified + video", "rgba(77,208,255,0.16)") +
+          kpiCard("ready", "🚀", roll.sendReady.toLocaleString(), "Send-ready", "verified + video", "rgba(77,208,255,0.16)") +
           kpiCard("", "⚡", roll.avgScore == null ? "—" : String(roll.avgScore), "Avg intent", unchecked ? unchecked.toLocaleString() + " unchecked" : "all checked", "rgba(255,194,77,0.16)");
         kEl.onclick = function (ev) {   // assignment (not addEventListener): #clKpis persists across paints
           var b = ev.target.closest ? ev.target.closest("[data-kpi]") : null;

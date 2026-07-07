@@ -746,6 +746,11 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .cl-kpi-val { font-size: 19px; font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; }
 .cl-kpi-lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim, #9a9aa8); }
 .cl-kpi-sub { font-size: 10.5px; color: var(--text-muted, #7a7a88); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Sticky selection + contact columns: who you're looking at stays pinned while the wide sheet
+   scrolls horizontally. Offsets: col 1 renders at 34px + 12/4 padding = 50px. */
+.cl-sheet th:nth-child(1), .cl-sheet td:nth-child(1) { position: sticky; left: 0; z-index: 3; background: var(--surface, #101018); }
+.cl-sheet th:nth-child(2), .cl-sheet td:nth-child(2) { position: sticky; left: 50px; z-index: 3; background: var(--surface, #101018); }
+.cl-sheet thead th:nth-child(1), .cl-sheet thead th:nth-child(2) { z-index: 4; background: var(--surface-2, #16161f); }
 /* Row-selection checkboxes. */
 .cl-c-check, .cl-th-check { width: 34px; text-align: center; padding-left: 12px !important; padding-right: 4px !important; }
 .cl-th-check { cursor: default !important; }
