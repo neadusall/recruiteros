@@ -117,7 +117,7 @@ export async function POST(req: Request) {
     const vk = await resolveKey(p.fullName);
     const sh = shareFor(vk);
     const pv = {
-      videoKey: vk, watchUrl: sh.watch, gifUrl: sh.gif, mp4Url: sh.mp4,
+      videoKey: vk, watchUrl: sh.watch, gifUrl: sh.gif, mp4Url: sh.mp4, posterUrl: sh.poster,
       roleTitle: roleTitle || undefined, sequence, expiresAt: sh.exp, at: nowIso,
     };
     const next: Prospect = { ...p, personalizedVideo: pv };

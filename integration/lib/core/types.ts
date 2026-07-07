@@ -261,6 +261,8 @@ export interface Prospect {
     watchUrl: string;
     gifUrl: string;
     mp4Url?: string;
+    /** Signed static poster JPEG (frame + play button) — preferred email thumbnail. */
+    posterUrl?: string;
     roleTitle?: string;
     /** The attached outreach SEQUENCE: email 1 is text-only, email 2 is the video follow-up. */
     sequence?: {

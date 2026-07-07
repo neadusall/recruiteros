@@ -5,7 +5,7 @@
  * the recruiter's hundreds of Email IDs without burning any single one. Omit
  * recruiterId to rotate across the whole portal pool.
  */
-import { listInboxes, recordSend } from "./store";
+import { listInboxes, recordSend, resetDailyIfNewDay } from "./store";
 import { coldCap } from "./limits";
 import type { SenderInbox } from "./types";
 
@@ -17,6 +17,7 @@ export interface PickOpts { recruiterId?: string; excludeIds?: string[]; }
 
 /** Choose the best inbox to send from. Scoped to a recruiter when recruiterId is set. */
 export async function pickSender(workspaceId: string, opts: PickOpts = {}): Promise<SenderInbox | null> {
+  await resetDailyIfNewDay(); // date-guarded no-op except on the first pick of a new UTC day
   const exclude = new Set(opts.excludeIds || []);
   const pool = (await listInboxes(workspaceId, { ownerId: opts.recruiterId }))
     .filter((m) => sendable(m) && !exclude.has(m.id))

@@ -54,8 +54,17 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
   })();
   vals.watchlink = watch;
   vals.videogif = pv?.gifUrl || "";
-  vals.videoembed = watch && pv?.gifUrl
-    ? `<a href="${watch}"><img src="${pv.gifUrl}" alt="A quick note about ${vals.company}" width="600" style="max-width:100%;border-radius:10px;border:1px solid #e5e7eb;display:block" /></a>`
+  vals.videoposter = pv?.posterUrl || "";
+  // Loom-style embed: a big clickable thumbnail of THEIR video. The static poster (real frame +
+  // play button, JPEG) is preferred — Outlook/mobile clients freeze or block animated GIFs and
+  // the poster is ~10× lighter, so the first paint is instant. Older videos without a poster
+  // fall back to the animated teaser GIF. A plain text link follows for image-blocking clients.
+  const thumb = pv?.posterUrl || pv?.gifUrl || "";
+  vals.videoembed = watch && thumb
+    ? `<a href="${watch}" target="_blank" style="text-decoration:none">` +
+      `<img src="${thumb}" alt="▶ Play — a quick video I recorded about ${vals.company}" width="600" ` +
+      `style="max-width:100%;height:auto;border-radius:12px;border:1px solid #e5e7eb;display:block" /></a>` +
+      `<p style="margin:6px 0 0;font-size:13px"><a href="${watch}" target="_blank">▶ Watch the video I made for ${vals.company}</a></p>`
     : "";
   // MPC tokens (the recent-placement Day-0 sequence): resolved from the prospect + its mpcContext,
   // with a native-lexicon floor so it reads right even when the context is sparse. Keyed lowercase to

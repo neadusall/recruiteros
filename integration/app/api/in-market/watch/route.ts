@@ -17,13 +17,13 @@ import { readCompositeAsset } from "../../../../lib/inmarket/roleVideo";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MIME: Record<string, string> = { gif: "image/gif", mp4: "video/mp4" };
+const MIME: Record<string, string> = { gif: "image/gif", mp4: "video/mp4", jpg: "image/jpeg" };
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const key = url.searchParams.get("key") || "";
   const fmt = (url.searchParams.get("fmt") || "mp4").toLowerCase();
-  if (fmt !== "gif" && fmt !== "mp4") return new Response("bad format", { status: 400 });
+  if (fmt !== "gif" && fmt !== "mp4" && fmt !== "jpg") return new Response("bad format", { status: 400 });
 
   // SIGNED + EXPIRING: recipient links must carry a valid exp+sig (Loom-style). Forwarded or
   // stale links stop working after the TTL.
@@ -32,12 +32,12 @@ export async function GET(req: Request) {
     return new Response("This link has expired or is invalid.", { status: 403 });
   }
 
-  const buf = await readCompositeAsset(key, fmt as "gif" | "mp4");
+  const buf = await readCompositeAsset(key, fmt as "gif" | "mp4" | "jpg");
   if (!buf) return new Response("not found", { status: 404 });
 
-  // Email-teaser open: count a GIF load as an approximate email open, EXCEPT the watch-page
-  // poster (which passes notrack=1) so we don't double-count the watch view as an email open.
-  if (fmt === "gif" && !url.searchParams.get("notrack")) {
+  // Email-teaser open: count a GIF/poster load as an approximate email open, EXCEPT the
+  // watch-page poster (which passes notrack=1) so we don't double-count the watch view.
+  if ((fmt === "gif" || fmt === "jpg") && !url.searchParams.get("notrack")) {
     import("../../../../lib/inmarket/videoStats")
       .then((m) => m.recordVideoEvent({ videoKey: key, type: "gif_open" }))
       .catch(() => {});
