@@ -624,28 +624,38 @@ async function compose(
         baseMp4,
       ]);
     }
-    // (2) GIF — the LIVELY email teaser, derived from the base (no name-intro hold). Deriving from
-    //     the finite base (not the infinitely-looped bg) lets palettegen see a clean EOF.
+    // Loom-style play button, rendered once and baked into BOTH email thumbnails: the animated
+    // teaser (so the moving preview itself reads "click to play" — and Outlook's frozen first
+    // frame still shows a play button) and the static poster. Best-effort: a button miss never
+    // fails the render, the assets just ship without the overlay.
+    const tmpBtn = join(videosDir(), `${key}.play.png`);
+    let btnOk = false;
+    try { await writeFile(tmpBtn, await genPlayButtonPng(BG_W, BG_H)); btnOk = true; } catch (e) {
+      console.error(`[roleVideo] play-button render failed for ${key}:`, (e as Error).message);
+    }
+    // (2) GIF — the LIVELY email teaser (Loom-look: motion + centered play button), derived from
+    //     the base (no name-intro hold). Deriving from the finite base (not the infinitely-looped
+    //     bg) lets palettegen see a clean EOF. The button overlays BEFORE the downscale so it
+    //     stays crisp; overlay's default eof_action=repeat holds the one-frame PNG for the run.
     {
       const gw = Math.max(2, Math.round(GIF_W / 2) * 2);
       await runFfmpeg([
         "-y", "-hide_banner", "-loglevel", "error",
         "-t", String(EMAIL_GIF_SECONDS), "-i", baseMp4,
+        ...(btnOk ? ["-i", tmpBtn] : []),
         "-filter_complex",
-        `fps=${GIF_FPS},scale=${gw}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle`,
+        `${btnOk ? "[0:v][1:v]overlay=0:0," : ""}fps=${GIF_FPS},scale=${gw}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle`,
         "-loop", "0",
         compositePath(key, "gif"),
       ]);
       files.gif = true;
     }
     // (2b) POSTER — static Loom-style thumbnail (a real frame of THIS composite + play button),
-    //      for the email embed: many clients (Outlook, some mobile) freeze or block animated
-    //      GIFs, and a crisp JPEG is ~10× lighter than the teaser. Best-effort: the GIF still
-    //      covers the email if this pass fails, so a poster miss never fails the render.
+    //      the fallback for older videos and image-blocking clients. A crisp JPEG ~10× lighter
+    //      than the teaser. Best-effort: the GIF covers the email if this pass fails.
     {
-      const tmpBtn = join(videosDir(), `${key}.play.png`);
       try {
-        await writeFile(tmpBtn, await genPlayButtonPng(BG_W, BG_H));
+        if (!btnOk) throw new Error("play-button png unavailable");
         await runFfmpeg([
           "-y", "-hide_banner", "-loglevel", "error",
           "-ss", "1", "-i", baseMp4, "-i", tmpBtn,

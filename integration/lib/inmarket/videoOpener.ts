@@ -46,7 +46,7 @@ const SYSTEM = `You write a TWO-EMAIL cold outreach SEQUENCE for a recruiting / 
 
 EMAIL 1 — TEXT ONLY, no video. A short cold intro anchored on the REAL signal (they are hiring for {{role}}). Specific, honest, human. 40-70 words, 2-4 short sentences. End with a low-friction question. Do NOT mention a video.
 
-EMAIL 2 — the FOLLOW-UP, sent a few days after email 1 (assume no reply yet). Reference the first note lightly ("circling back", "following up on my note about {{role}}", "wanted to put a face to it"). Then introduce a short personalized video of their ACTUAL job posting. Put the literal token {{videoembed}} on its OWN line where the video goes. 40-75 words. End with a low-friction question (worth a quick look? open to a short call?).
+EMAIL 2 — the FOLLOW-UP, sent a few days after email 1 (assume no reply yet). Reference the first note lightly ("coming back to my note about {{role}}", "wanted to put a face to it" — NEVER "circling back", "following up", "checking in": those are banned template phrases). Then introduce a short personalized video of their ACTUAL job posting. Put the literal token {{videoembed}} on its OWN line where the video goes. 40-75 words. End with a low-friction question (worth a quick look? open to a short call?).
 
 Rules for BOTH: anchor on the real signal, no hype, no fake familiarity, no "I hope this finds you well", no emojis. Use ONLY these merge fields: {{firstName}}, {{company}}, {{role}}. Do not invent stats or names.
 Return STRICT JSON only, no prose: { "subject1": "...", "body1": "...", "subject2": "...", "body2": "...with {{videoembed}} on its own line..." }`;
@@ -93,7 +93,7 @@ export async function draftVideoOpener(input: OpenerInput): Promise<OpenerDraft 
 const VIDEO_FOLLOWUP: EmailDraft = {
   subject: "re: {{Open_Role}}",
   body:
-    "Hi {{First_Name}}, {i'd rather not be just another name in your inbox|rather than send one more email you'll skim past}, so i recorded a quick video for you. {it's 30 seconds of me|just me, about 30 seconds}, {putting a face to the name|so you can see there's a real person here}, and how i'd actually help you fill your {{Open_Role}}.\n\n{{videoembed}}\n\n{if your {{Open_Role}} is still open|if this is still a priority}, {i'd genuinely like to help|i'd love to help you get it filled}. {worth a conversation?|worth 10 minutes?}\n{Thanks|Best}, {{Your_Name}}",
+    "Hi {{First_Name}}, {i'd rather not be just another name in your inbox|rather than send one more email you'll skim past}, so i recorded a quick video for you. {it's 30 seconds of me|just me, about 30 seconds}, {putting a face to the name|so you can see there's a real person here}, and how i'd actually help you fill your {{Open_Role}} seat.\n\n{{videoembed}}\n\n{if your {{Open_Role}} seat is still open|if this is still a priority}, {i'd genuinely like to help|i'd love to help you get it filled}. {worth a conversation?|worth 10 minutes?}\n{Thanks|Best}, {{Your_Name}}",
 };
 
 /**

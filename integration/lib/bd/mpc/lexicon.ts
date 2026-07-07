@@ -42,9 +42,9 @@ const SALES: Lexicon = {
     [/vp of sales|vp sales|head of sales/i, "sales leader"],
   ],
   proofBank: [
-    "closed six-figure ARR deals", "full-cycle closer", "net-new logos",
+    "closed six figure ARR deals", "full cycle closer", "net new logos",
     "built the territory from zero", "consistent quota attainment", "President's Club last year",
-    "greenfield territory", "strong in mid-market", "moves up-market cleanly",
+    "greenfield territory", "strong in mid market", "moves up market cleanly",
   ],
   metricBank: ["142% to quota", "top rep on the team", "$2M+ number", "3 years over plan"],
   jdStyle: "Sales roles: pull proof as short outcome clauses in rep language (quota %, ARR/deal size, net-new logos, segment, cycle ownership). Never list tools as a must-have.",
@@ -59,10 +59,10 @@ const NURSING: Lexicon = {
     [/charge nurse/i, "charge nurse"],
   ],
   proofBank: [
-    "3 years med-surg", "ICU-trained", "charge experience", "BSN, ACLS certified",
-    "level-1 trauma background", "strong on high-acuity floors", "float-pool flexible",
+    "3 years med surg", "ICU trained", "charge experience", "BSN, ACLS certified",
+    "level 1 trauma background", "strong on high acuity floors", "float pool flexible",
   ],
-  metricBank: ["12 years bedside", "precepts new grads", "top of a 40-bed unit"],
+  metricBank: ["12 years bedside", "precepts new grads", "top of a 40 bed unit"],
   jdStyle: "Nursing roles: pull proof as unit/acuity + certs + years (e.g. 'ICU-trained, ACLS, 3 years med-surg'). Use RN/BSN/CNA/NP correctly.",
 };
 
@@ -77,7 +77,7 @@ const ENGINEERING: Lexicon = {
   ],
   proofBank: [
     "deep in distributed systems", "scaled services at high traffic", "strong systems design",
-    "on-call lead", "mentors the juniors", "ships product end to end", "polyglot, pragmatic",
+    "on call lead", "mentors the juniors", "ships product end to end", "polyglot, pragmatic",
   ],
   metricBank: ["8 years shipping", "led a platform rewrite", "cut latency in half"],
   jdStyle: "Engineering roles: pull proof as systems/scope clauses (distributed systems, scale, on-call, mentorship, product ownership), not a language checklist.",
@@ -92,8 +92,8 @@ const FINANCE: Lexicon = {
     [/financial analyst/i, "analyst"],
   ],
   proofBank: [
-    "owns the monthly close", "built the board deck", "GAAP-clean", "SaaS metrics fluent",
-    "ran a Series B raise", "3-statement modeler", "audit-ready books",
+    "owns the monthly close", "built the board deck", "GAAP clean", "SaaS metrics fluent",
+    "ran a Series B raise", "3 statement modeler", "audit ready books",
   ],
   metricBank: ["closes in 5 days", "scaled through a raise", "10 years in the seat"],
   jdStyle: "Finance roles: pull proof as ownership clauses (close, FP&A, GAAP, modeling, fundraise), not software names.",
@@ -119,7 +119,7 @@ const GENERIC: Lexicon = {
   roleAbbrev: [],
   proofBank: [
     "strong track record", "did exactly this at their last shop", "hits the ground running",
-    "well-referenced", "the kind you build around",
+    "well referenced", "the kind you build around",
   ],
   metricBank: ["top of their team", "years of the right experience", "proven in the seat"],
   jdStyle: "Pull 2 must-haves from the posting as short outcome clauses (2-5 words each), in the language of that profession. Never list tools/keywords.",
@@ -151,10 +151,14 @@ export function nativeRole(title: string | undefined, func: string | undefined):
   if (!t) return "";
   const lex = lexiconFor(func);
   for (const [re, short] of lex.roleAbbrev) {
-    if (re.test(t)) {
-      // Preserve a leading seniority word ("Senior", "Sr", "Lead") in front of the short form.
+    const m = t.match(re);
+    if (m) {
+      // Preserve a leading seniority word ("Senior", "Sr", "Lead") in front of the short form —
+      // but ONLY when the abbrev matched later in the title ("Senior [Account Executive]" ->
+      // "Senior AE"). A match at position 0 means the abbrev already absorbed the seniority
+      // ("[VP of Sales]" -> "sales leader"); prefixing again would double it ("VP sales leader").
       const sr = t.match(/^(senior|sr\.?|lead|staff|principal|head of|vp)\b/i);
-      return sr && !/^(staff|head of|vp)/i.test(short) ? `${titleWord(sr[1])} ${short}` : short;
+      return sr && (m.index ?? 0) > 0 && !/^(staff|head of|vp)/i.test(short) ? `${titleWord(sr[1])} ${short}` : short;
     }
   }
   return t;
@@ -163,5 +167,6 @@ export function nativeRole(title: string | undefined, func: string | undefined):
 function titleWord(s: string): string {
   const w = s.toLowerCase().replace(/\.$/, "");
   if (w === "sr") return "Senior";
+  if (w === "vp") return "VP";
   return w.charAt(0).toUpperCase() + w.slice(1);
 }

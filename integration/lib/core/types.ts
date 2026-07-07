@@ -261,7 +261,8 @@ export interface Prospect {
     watchUrl: string;
     gifUrl: string;
     mp4Url?: string;
-    /** Signed static poster JPEG (frame + play button) — preferred email thumbnail. */
+    /** Signed static poster JPEG (frame + play button) — fallback email thumbnail; the animated
+     *  teaser GIF (also carrying the baked play button) is the primary Loom-style embed. */
     posterUrl?: string;
     roleTitle?: string;
     /** The attached outreach SEQUENCE: email 1 is text-only, email 2 is the video follow-up. */
@@ -272,6 +273,15 @@ export interface Prospect {
     /** Share-link expiry (epoch ms; 0 = never) so the UI can warn before links go stale. */
     expiresAt?: number;
     at: string;
+  };
+  /** Set when the render guard (lib/copy/renderGuard) HELD this prospect's next touch at send
+   *  time — the rendered copy had missing data points or read broken, so nothing was sent and the
+   *  sequence did not advance. Re-evaluated every autopilot tick; cleared on the next clean send.
+   *  `reasons` lists the exact failed checks so the operator can fix the data. */
+  copyHold?: {
+    at: string;
+    touch: string;
+    reasons: string[];
   };
   createdAt: string;
 }

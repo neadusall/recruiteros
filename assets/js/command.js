@@ -2441,10 +2441,10 @@
   function sqFmt(n) { return (n || 0).toLocaleString(); }
   function sqDayLabel(iso) { try { return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); } catch (e) { return iso; } }
   function sqNeed(label, n, missing) { return '<button type="button" class="sq-need" data-missing="' + missing + '"><span class="sq-need-n">' + (n || 0).toLocaleString() + '</span><span class="sq-need-l">' + label + ' <span class="sq-need-view">view ▾</span></span></button>'; }
-  function sqMissLabel(m) { return m === "verified_email" ? "✉️ email" : m === "video" ? "🎬 video" : "🔗 page"; }
+  function sqMissLabel(m) { return m === "verified_email" ? "✉️ email" : m === "video" ? "🎬 video" : m === "watch_page" ? "🔗 page" : m === "contact_data" ? "👤 data" : esc(m); }
   function sqWorklistHtml(items, missing) {
-    var titleMap = { verified_email: "Need a verified email", video: "Need a 2nd-email video", watch_page: "Need a landing page" };
-    var fixMap = { verified_email: ["Verify emails in Clients", "#clients"], video: ["Record in PiP Studio", "#pipstudio"], watch_page: ["Build in PiP Studio", "#pipstudio"] };
+    var titleMap = { verified_email: "Need a verified email", video: "Need a 2nd-email video", watch_page: "Need a landing page", contact_data: "Need contact data (name · company · role)", copy_hold: "Held by the copy guard (bad merge data at send time)" };
+    var fixMap = { verified_email: ["Verify emails in Clients", "#clients"], video: ["Record in PiP Studio", "#pipstudio"], watch_page: ["Build in PiP Studio", "#pipstudio"], contact_data: ["Fix in Clients", "#clients"], copy_hold: ["Fix the data in Clients", "#clients"] };
     var fix = fixMap[missing] || ["Fix", "#clients"];
     if (!items.length) return '<div class="sq-wl"><div class="sq-wl-head">' + (titleMap[missing] || "Needs assets") + ": none waiting right now 🎉 <button type=\"button\" class=\"im-mini\" data-wlclose>Close</button></div></div>";
     var rows = items.map(function (p) {
@@ -2462,8 +2462,19 @@
   function sqLoadWorklist(missing) {
     var box = document.getElementById("sqWorklist"); if (!box) return;
     box.innerHTML = '<div class="sq-wl"><div class="sq-wl-head">Loading…</div></div>';
-    send("/send-queue", "POST", { action: "needs_list", missing: missing, limit: 200 }).then(function (r) {
-      box.innerHTML = sqWorklistHtml((r && r.data && r.data.items) || [], missing);
+    // The copy-guard card loads its own worklist: rows carry the exact failed checks as badges.
+    var req = missing === "copy_hold"
+      ? send("/send-queue", "POST", { action: "holds_list", limit: 200 }).then(function (r) {
+          var items = ((r && r.data && r.data.items) || []).map(function (p) {
+            return { name: p.name, title: p.title, company: p.company, email: p.email, missing: p.reasons || [] };
+          });
+          return items;
+        })
+      : send("/send-queue", "POST", { action: "needs_list", missing: missing, limit: 200 }).then(function (r) {
+          return (r && r.data && r.data.items) || [];
+        });
+    req.then(function (items) {
+      box.innerHTML = sqWorklistHtml(items, missing);
     }).catch(function () { box.innerHTML = '<div class="sq-wl"><div class="sq-wl-head">Couldn’t load the list.</div></div>'; });
   }
   function sqWireWorklist() {
@@ -2565,6 +2576,8 @@
         sqNeed("✉️ Verified email", o.needsAssets.noVerifiedEmail, "verified_email") +
         sqNeed("🎬 2nd-email video", o.needsAssets.noVideo, "video") +
         sqNeed("🔗 Landing page", o.needsAssets.noWatch, "watch_page") +
+        sqNeed("👤 Contact data", o.needsAssets.noContactData, "contact_data") +
+        (o.copyHolds ? sqNeed("✋ Copy guard held", o.copyHolds, "copy_hold") : "") +
       '</div><div id="sqWorklist" class="sq-worklist"></div></div>';
     return supply + callout + needs;
   }

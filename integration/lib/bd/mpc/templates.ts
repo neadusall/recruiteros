@@ -51,7 +51,7 @@ export const MPC_TEMPLATES: MpcTemplate[] = [
   { id: "local-2", angle: "Local market", subject: "someone in your market",
     body: "Hi {{First_Name}}, i work the {{Near_City}} market pretty hard and just met {{A_Open_Role}} worth flagging to you. {{MH1}}, {{MH2}}, wants to land in {{Job_Location}}. worth a conversation?" + SIGN },
   { id: "local-3", angle: "Local market", subject: "{{Near_City}} {{Open_Role}}",
-    body: "Hi {{First_Name}}, most of my week is {{Industry}} searches around {{Near_City}}, so your {{Open_Role}} opening stood out. i've got someone mid-process right now who fits: {{MH1}}, {{MH2}}. worth a conversation?" + SIGN },
+    body: "Hi {{First_Name}}, most of my week is {{Industry}} searches around {{Near_City}}, so your {{Open_Role}} opening stood out. i've got someone in process right now who fits: {{MH1}}, {{MH2}}. worth a conversation?" + SIGN },
   { id: "local-4", angle: "Local market", subject: "know your market, know this one",
     body: "Hi {{First_Name}}, i place a lot of these near {{Near_City}}. met one this week who reads like your {{Open_Role}} and wants {{Job_Location}}: {{MH1}}, {{MH2}}. worth a conversation?" + SIGN },
 
@@ -72,7 +72,7 @@ export const MPC_TEMPLATES: MpcTemplate[] = [
     body: "Hi {{First_Name}}, this isn't a blast. one {{Open_Role}} i met on a {{Near_City}} search whose background maps to your seat: {{MH1}}, {{MH2}}, wants {{Job_Location}}. worth a conversation?" + SIGN },
   { id: "solo-3", angle: "Not a mass email", subject: "sending you one, not a list",
     body: "Hi {{First_Name}}, i'm sending one candidate because {{P_subj}} fits your {{Open_Role}} that cleanly. {{MH1}}, {{MH2}}, set on {{Job_Location}}. worth a conversation?" + SIGN },
-  { id: "solo-4", angle: "Not a mass email", subject: "the reason i thought of you",
+  { id: "solo-4", angle: "Not a mass email", subject: "the reason i'm writing",
     body: "Hi {{First_Name}}, i thought of your team for one reason: {{A_Open_Role}} i just met who'd fit. {{MH1}}, {{MH2}}, headed to {{Job_Location}}. worth a conversation?" + SIGN },
 
   /* 5. Proximity (needs a distinct nearby metro) ------------------------------------- */
@@ -95,7 +95,7 @@ export const MPC_TEMPLATES: MpcTemplate[] = [
   { id: "comp-3", angle: "Comparable placement", needsCompetitor: true, subject: "i place exactly this",
     body: "Hi {{First_Name}}, i just closed the same profile at {{Competitor}}, so i know it fills. the {{Open_Role}} i met on it wants {{Job_Location}}: {{MH1}}, {{MH2}}. worth a conversation?" + SIGN },
   { id: "comp-4", angle: "Comparable placement", needsCompetitor: true, subject: "your competitor just did this",
-    body: "Hi {{First_Name}}, filled this exact seat at {{Competitor}} last week. the runner-up is stronger than where {{P_subj}} is now and wants {{Job_Location}}: {{MH1}}, {{MH2}}. worth a conversation?" + SIGN },
+    body: "Hi {{First_Name}}, filled this exact seat at {{Competitor}} last week. the runner up is stronger than where {{P_subj}} is now and wants {{Job_Location}}: {{MH1}}, {{MH2}}. worth a conversation?" + SIGN },
   { id: "comp-5", angle: "Comparable placement", needsCompetitor: true, subject: "same seat, {{Near_City}}",
     body: "Hi {{First_Name}}, just did {{A_Job_Title}} for a team like yours at {{Competitor}}. met a second one who fits your {{Open_Role}}: {{MH1}}, {{MH2}}, set on {{Job_Location}}. worth a conversation?" + SIGN },
 
@@ -104,7 +104,7 @@ export const MPC_TEMPLATES: MpcTemplate[] = [
     body: "Hi {{First_Name}}, met a strong {{Open_Role}} on a {{Near_City}} search who'd produce early. {{MH1}} at {{Metric}}, {{MH2}}. relocating to {{Job_Location}} this quarter. worth a conversation?" + SIGN },
   { id: "ramp-2", angle: "Ramp ready", subject: "hits the ground running",
     body: "Hi {{First_Name}}, this {{Open_Role}} has been doing exactly your seat and hitting. {{MH1}}, {{MH2}}, {{Metric}}. wants {{Job_Location}}. worth a conversation?" + SIGN },
-  { id: "ramp-3", angle: "Ramp ready", subject: "day-one contributor",
+  { id: "ramp-3", angle: "Ramp ready", subject: "day one contributor",
     body: "Hi {{First_Name}}, i've got {{A_Open_Role}} who steps in and produces, because {{P_subj}}'s carried the same load already. {{MH1}}, {{MH2}}. headed to {{Job_Location}}. worth a conversation?" + SIGN },
   { id: "ramp-4", angle: "Ramp ready", subject: "already proven in the seat",
     body: "Hi {{First_Name}}, met {{P_obj}} on {{A_Job_Title}} search: proven in exactly your {{Open_Role}}, {{MH1}}, {{MH2}}, {{Metric}}. moving to {{Job_Location}}. worth a conversation?" + SIGN },
@@ -113,7 +113,7 @@ export const MPC_TEMPLATES: MpcTemplate[] = [
   { id: "match-1", angle: "Matched to JD", subject: "matched line by line",
     body: "Hi {{First_Name}}, i read what good looks like for your {{Open_Role}} and matched {{P_obj}} line by line: {{MH1}}, {{MH2}}. {{Industry}} background, moving to {{Job_Location}}. worth a conversation?" + SIGN },
   { id: "match-2", angle: "Matched to JD", subject: "{{P_subj}} is your {{Open_Role}}",
-    body: "Hi {{First_Name}}, read your must-haves and this {{Open_Role}} is it. {{MH1}}, {{MH2}}, and set on {{Job_Location}}. worth a conversation?" + SIGN },
+    body: "Hi {{First_Name}}, read your must haves and this {{Open_Role}} is it. {{MH1}}, {{MH2}}, and set on {{Job_Location}}. worth a conversation?" + SIGN },
   { id: "match-3", angle: "Matched to JD", subject: "checks your two big boxes",
     body: "Hi {{First_Name}}, your seat needs {{MH1}} and {{MH2}}. i met someone who's both, on a recent {{Near_City}} search, wants {{Job_Location}}. worth a conversation?" + SIGN },
   { id: "match-4", angle: "Matched to JD", subject: "built for your {{Open_Role}}",
@@ -127,7 +127,7 @@ export const MPC_TEMPLATES: MpcTemplate[] = [
   { id: "help-3", angle: "Help first", subject: "one to save you the search",
     body: "Hi {{First_Name}}, might save you a search. met a strong {{Open_Role}} in {{Near_City}} who wants {{Job_Location}} and fits your seat: {{MH1}}, {{MH2}}. worth a conversation?" + SIGN },
   { id: "help-4", angle: "Help first", subject: "happy to point {{P_obj}} your way",
-    body: "Hi {{First_Name}}, i've got a good {{Open_Role}} and your team came to mind. {{MH1}}, {{MH2}}, set on {{Job_Location}}. happy to point {{P_obj}} your way. worth a conversation?" + SIGN },
+    body: "Hi {{First_Name}}, i've got a good {{Open_Role}} and your opening is the closest fit i've seen. {{MH1}}, {{MH2}}, set on {{Job_Location}}. happy to point {{P_obj}} your way. worth a conversation?" + SIGN },
 
   /* 10. Timing / window -------------------------------------------------------------- */
   { id: "time-1", angle: "Timing", subject: "before {{P_subj}} settles",
@@ -136,8 +136,8 @@ export const MPC_TEMPLATES: MpcTemplate[] = [
     body: "Hi {{First_Name}}, this {{Open_Role}} is early in {{P_pos}} look, so the window's open now. {{MH1}}, {{MH2}}, wants {{Job_Location}}. worth a conversation?" + SIGN },
   { id: "time-3", angle: "Timing", subject: "taking calls this week",
     body: "Hi {{First_Name}}, met {{A_Open_Role}} on a {{Near_City}} search who's just started taking calls. fits your seat: {{MH1}}, {{MH2}}, headed to {{Job_Location}}. worth a conversation?" + SIGN },
-  { id: "time-4", angle: "Timing", subject: "mid-process elsewhere",
-    body: "Hi {{First_Name}}, {{P_subj}}'s mid-process with another firm, but {{P_subj}} wants {{Job_Location}} and fits your {{Open_Role}} better: {{MH1}}, {{MH2}}. worth a conversation before someone moves?" + SIGN },
+  { id: "time-4", angle: "Timing", subject: "mid process elsewhere",
+    body: "Hi {{First_Name}}, {{P_subj}}'s mid process with another firm, but {{P_subj}} wants {{Job_Location}} and fits your {{Open_Role}} better: {{MH1}}, {{MH2}}. worth a conversation before someone moves?" + SIGN },
 
   /* 11. Curiosity / pattern interrupt ------------------------------------------------ */
   { id: "cur-1", angle: "Curiosity", subject: "the one that got away (to me)",
