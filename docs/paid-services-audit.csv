@@ -1,0 +1,18 @@
+Category,Service,What it's for,Status,Pricing,Est. monthly low ($),Est. monthly high ($),Notes / env keys
+Servers & storage,Hetzner — main server,"Runs the whole prod stack on one 8GB box (ubuntu-8gb-ash-1): app, Postgres, taltxt SMS, scraper, Caddy",LIVE,~$16-18/mo fixed,16,18,HCLOUD_TOKEN; auto-deploys from git main
+Servers & storage,Hetzner — object storage,S3-compatible bucket (ros-pip-assets) for outreach-video clips and composites,LIVE (video pipeline),~$6/mo base + storage,6,7,ROS_S3_* keys
+Servers & storage,Hetzner — optional scale-out boxes,"Worker boxes for scraping/video ($5-15 ea), Postal MTA boxes ($5 ea), 8 floating IPs (~$11 total) — only billed as you add them",OPTIONAL (add as needed),Per box / per IP,0,60,INMARKET_WORKER_TOKEN; SENDING_SERVER_TYPE=cx22; INMARKET_EGRESS_IPS
+Domains,Domains (GoDaddy / Cloudflare / Porkbun),recruitersos.co (~$18/yr) plus lookalike sending domains (~$10/yr each; ~12 at target volume),LIVE + scales,Annual per domain,2,12,High = 12 sending domains amortized
+Email sending,Instantly.ai,Interim cold-email sender — being replaced by the self-hosted Postal stack,LIVE (interim),Growth $37 / Hypergrowth $97,37,97,INSTANTLY_API_KEY; drops to $0 once Postal replaces it
+Email sending,Warmed mailboxes,Send capacity: ~750 safe sends per inbox per month; owner target 20-30K sends/mo = ~40 inboxes,SCALES with sends,$2.50 per inbox per month,0,100,High = the 40-inbox target fully built out
+Email verification,Reoon,Bulk SMTP mailbox verification for Hire Signals (Hetzner blocks port 25),LIVE (key set),Credits ~$0.001/email,5,30,REOON_API_KEY (in .env.local; gitignored; not leaked)
+Enrichment APIs,RapidAPI (one subscription),"All listings under one key: JSearch job feed (ULTRA $75 as configured), Real-Time Web Search, Fresh LinkedIn data, email finder, phone lookup",LIVE,Flat plans: ~$40 core + $25-75 JSearch tier,40,115,RAPIDAPI_KEY; RAPID_JOBS_KEY; low = core listings only
+Enrichment APIs,Icypeas,Primary email finder (rung 1 of the waterfall),LIVE when keyed,~$0.003 per email found,5,15,ICYPEAS_API_KEY/_SECRET; high = ~5K finds/mo
+Enrichment APIs,Apify + People Data Labs,"Direct-dial phone finder (~$0.03-0.10/found) + open-role signal actors ($1/1k)",GATED by $0.03/contact dial cap,Pay per result,0,70,APIFY_TOKEN; PDL_API_KEY; $0 while the cap stays at default
+AI,Anthropic (Claude),"JD parsing, message personalization, reply classification, SMS drafting",LIVE,~$0.004/prospect pay-as-you-go,20,40,ANTHROPIC_API_KEY; high = ~10K prospects/mo
+Voice & SMS,Telnyx,"Voice + answering-machine detection ($0.007/min), SMS ($0.004/segment), number lookup, number rental ($1-2/number)",LIVE,Pay per use + rental,15,30,TELNYX_API_KEY and related
+Voice & SMS,ElevenLabs,Cloned-voice TTS for voicemail drops and video intros (renders cached — repeat names cost $0),LIVE when keyed,Starter $5/mo + ~$0.02/segment,5,22,VOICE_CLONE_API_KEY/_VOICE_ID
+Voice & SMS,Upstash QStash,Scheduled SMS queue for OS Text,LIVE when keyed,Free 500 msgs/day then ~$1/100K,0,5,QSTASH_TOKEN
+LinkedIn,Unipile,"Hosted LinkedIn API (connect, DM, InMail, voice notes) — free internal Alfred engine is the $0 alternative",OPTIONAL per seat,~$10-55 per connected account,0,55,UNIPILE_DSN/_API_KEY; $0 if using Alfred
+Dormant ($0 today),"Prospeo, Trestle, Cartesia, Hume, ZoomInfo, TidyCal, Resend, Loxo","Premium mobile finder / reverse lookup / alt TTS vendors / data feed (key pending) / bookings / auth email (free tier) / customer-paid ATS",ALL $0 until turned on,Various,0,0,Wired in code but unkeyed or free tier
+TOTAL,—,Sum of the rows above,,,151,676,"Low = lean live config today; high = everything on at the 20-30K sends/mo target"
