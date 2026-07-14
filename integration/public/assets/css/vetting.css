@@ -59,9 +59,68 @@
 .vt-field-full { grid-column: 1 / -1; }
 
 /* qualifier rows */
-.vt-qrow { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: center; margin-top: 8px; }
-.vt-must { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); white-space: nowrap; cursor: pointer; user-select: none; }
-.vt-must input { width: 15px; height: 15px; accent-color: var(--brand); }
+/* ---- qualifiers: AI-assist panel + numbered rows ---- */
+.vt-quals { border: 1px solid var(--border); border-radius: var(--vt-r); background: var(--bg-soft); padding: 14px; }
+.vt-gen {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 14px 16px; border-radius: var(--vt-r-sm); margin-bottom: 12px;
+  background: var(--brand-soft); border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--border));
+}
+.vt-gen-ic {
+  flex: none; width: 36px; height: 36px; border-radius: var(--vt-r-sm);
+  display: grid; place-items: center; background: var(--surface); color: var(--brand);
+  border: 1px solid color-mix(in srgb, var(--brand) 25%, var(--border));
+}
+.vt-gen-ic .isvg { width: 17px; height: 17px; }
+.vt-gen-copy { flex: 1; min-width: 240px; }
+.vt-gen-copy b { display: block; font-size: 13.5px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+.vt-gen-copy span { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+.vt-gen-btn { flex: none; }
+.vt-gen-btn .isvg { width: 14px; height: 14px; }
+.vt-gen-btn .spinner { border-color: rgba(255, 255, 255, .4); border-top-color: #fff; }
+
+.vt-qhead {
+  display: grid; grid-template-columns: 26px 1fr 1fr 96px; gap: 10px; align-items: center;
+  padding: 2px 12px 6px; font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--text-dim);
+}
+.vt-qrow {
+  display: grid; grid-template-columns: 26px 1fr 1fr 96px; gap: 10px; align-items: center;
+  padding: 9px 12px; margin-top: 6px; border: 1px solid var(--border); border-radius: var(--vt-r-sm);
+  background: var(--surface); transition: border-color .12s ease, background .3s ease;
+}
+.vt-qrow:focus-within { border-color: color-mix(in srgb, var(--brand) 35%, var(--border)); }
+.vt-qrow.vt-filled { background: var(--brand-soft); border-color: color-mix(in srgb, var(--brand) 30%, var(--border)); }
+.vt-qn {
+  width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 11px; font-weight: 600; color: var(--text-dim); background: var(--bg-soft);
+  border: 1px solid var(--border); font-variant-numeric: tabular-nums;
+}
+.vt-qrow:focus-within .vt-qn { color: var(--brand); background: var(--brand-soft); border-color: transparent; }
+.vt-qrow input[type="text"], .vt-qrow input:not([type]) { border-color: transparent; background: transparent; padding: 7px 9px; }
+.vt-qrow input:not([type="checkbox"]):hover { background: var(--bg-soft); }
+.vt-qrow input:not([type="checkbox"]):focus { background: var(--surface); border-color: var(--brand); }
+
+/* must-have as a switch */
+.vt-must { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 500; color: var(--text-muted); white-space: nowrap; cursor: pointer; user-select: none; justify-self: end; }
+.vt-must input {
+  appearance: none; -webkit-appearance: none; margin: 0; cursor: pointer;
+  width: 30px; height: 18px; border-radius: 999px; background: var(--border-strong);
+  position: relative; transition: background .15s ease; flex: none;
+}
+.vt-must input::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: #fff; transition: left .15s ease; box-shadow: 0 1px 2px rgba(16, 24, 40, .25);
+}
+.vt-must input:checked { background: var(--brand); }
+.vt-must input:checked::after { left: 14px; }
+.vt-must input:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* generating: soften the rows so the state reads at a glance */
+.vt-genning .vt-qrow { opacity: .55; pointer-events: none; }
+
+/* nudge the JD field when Generate is pressed with no JD */
+.vt-nudge { border-color: var(--vt-warn) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--vt-warn) 20%, transparent) !important; }
 
 .vt-formactions { display: flex; gap: 10px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
 
@@ -174,5 +233,7 @@
 
 @media (max-width: 720px) {
   .vt-scores { grid-template-columns: 1fr; }
-  .vt-qrow { grid-template-columns: 1fr; }
+  .vt-qhead { display: none; }
+  .vt-qrow { grid-template-columns: 26px 1fr; }
+  .vt-qrow .vt-must { grid-column: 2; justify-self: start; }
 }

@@ -10165,12 +10165,25 @@
     function deskForm(d) {
       d = d || {};
       var q = d.questions || [];
+      var QP_HINT = [
+        "e.g. Years owning a $5M+ quota",
+        "e.g. Team size they have led",
+        "e.g. Experience in our vertical",
+        "e.g. Comp expectations in range"
+      ];
+      var QC_HINT = [
+        "e.g. 3+ years carrying this quota level",
+        "e.g. Has managed 5+ direct reports",
+        "e.g. 2+ years in the same industry",
+        "e.g. Names a number inside the band"
+      ];
       function qrow(i) {
         var qq = q[i] || {};
         return '<div class="vt-qrow">' +
-          '<input id="vtQp' + i + '" placeholder="Qualifier ' + (i + 1) + ' (e.g. Years owning a $5M quota)" value="' + esc(qq.prompt || "") + '" />' +
-          '<input id="vtQc' + i + '" placeholder="What a PASS looks like" value="' + esc(qq.passCriteria || "") + '" />' +
-          '<label class="vt-must"><input id="vtQm' + i + '" type="checkbox" ' + (qq.mustHave ? "checked" : "") + " /> must-have</label></div>";
+          '<span class="vt-qn">' + (i + 1) + "</span>" +
+          '<input id="vtQp' + i + '" placeholder="' + QP_HINT[i] + '" value="' + esc(qq.prompt || "") + '" aria-label="Qualifier ' + (i + 1) + '" />' +
+          '<input id="vtQc' + i + '" placeholder="' + QC_HINT[i] + '" value="' + esc(qq.passCriteria || "") + '" aria-label="Pass criteria ' + (i + 1) + '" />' +
+          '<label class="vt-must" title="Missing a must-have fails the screen regardless of the overall score"><input id="vtQm' + i + '" type="checkbox" ' + (qq.mustHave ? "checked" : "") + " /><span>Must-have</span></label></div>";
       }
       return '<div class="vt-card"><h3>' + (d.id ? "Edit desk" : "New vetting desk") + "</h3>" +
         '<div class="vt-section">The role</div>' +
@@ -10189,10 +10202,17 @@
         voiceSelect(d) +
         fld("vtfThreshold", "Pass threshold (0-100)", "70", "number") +
         "</div>" +
-        '<div class="vt-section">Top qualifiers <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- auto-pulled from the JD; you don\'t need to fill these</span></div>' +
-        '<div class="vt-hint" style="margin:-2px 2px 8px">Leave these blank and we\'ll generate the top 3-4 from your job description when you save. Or generate now to review and tweak.</div>' +
-        '<div style="margin-bottom:8px"><button type="button" class="vt-btn" id="vtGenQ">Generate from JD</button></div>' +
-        qrow(0) + qrow(1) + qrow(2) + qrow(3) +
+        '<div class="vt-section">Top qualifiers <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- what the agent screens for on the call</span></div>' +
+        '<div class="vt-quals">' +
+          '<div class="vt-gen">' +
+            '<span class="vt-gen-ic"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg></span>' +
+            '<div class="vt-gen-copy"><b>Pull qualifiers from the job description</b>' +
+            '<span>Reads the JD above and drafts the top 3-4 screening questions, each with what a pass sounds like. Review and tweak anything, or leave all four blank and they generate on save.</span></div>' +
+            '<button type="button" class="vt-btn vt-btn-primary vt-gen-btn" id="vtGenQ"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg> Generate from JD</button>' +
+          "</div>" +
+          '<div class="vt-qhead"><span></span><span>Qualifier (asked on the call)</span><span>What a pass sounds like</span><span></span></div>' +
+          qrow(0) + qrow(1) + qrow(2) + qrow(3) +
+        "</div>" +
         '<div class="vt-section">Next step <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- auto-filled; leave blank to use the friendly defaults</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">Leave blank and the agent will, in its own natural words, <b>if qualified:</b> tell them they\'re a strong fit, that you\'ll send the full JD, and ask for an updated resume tailored to what you discussed. <b>If not a fit:</b> let them down kindly and say you\'ll keep them in mind for roles that better suit their background.</div>' +
         '<div class="vt-form-grid">' +
@@ -10305,10 +10325,23 @@
       var genQ = $("#vtGenQ");
       if (genQ) genQ.addEventListener("click", function () {
         var jd = $("#vtfJd") ? $("#vtfJd").value.trim() : "";
-        if (!jd) { toast("Paste the job description first."); return; }
-        genQ.disabled = true; genQ.textContent = "Generating…";
+        if (!jd) {
+          toast("Paste the job description first.");
+          var jdEl = $("#vtfJd");
+          if (jdEl) { jdEl.focus(); jdEl.classList.add("vt-nudge"); setTimeout(function () { jdEl.classList.remove("vt-nudge"); }, 900); }
+          return;
+        }
+        var idle = genQ.innerHTML;
+        genQ.disabled = true;
+        genQ.innerHTML = '<span class="spinner"></span> Reading the JD…';
+        var qualsBox = genQ.closest(".vt-quals");
+        if (qualsBox) qualsBox.classList.add("vt-genning");
+        function done() {
+          genQ.disabled = false; genQ.innerHTML = idle;
+          if (qualsBox) qualsBox.classList.remove("vt-genning");
+        }
         send("/vetting/desks", "POST", { action: "generate-questions", jobDescription: jd, roleTitle: vget("vtfRole"), clientCompany: vget("vtfCompany") }).then(function (r) {
-          genQ.disabled = false; genQ.textContent = "Generate from JD";
+          done();
           if (!r.ok) { toast((r.data && r.data.detail) || "Couldn’t generate, add ANTHROPIC_API_KEY."); return; }
           var qs = (r.data && r.data.questions) || [];
           for (var i = 0; i < 4; i++) {
@@ -10316,9 +10349,14 @@
             if ($("#vtQp" + i)) $("#vtQp" + i).value = q.prompt || "";
             if ($("#vtQc" + i)) $("#vtQc" + i).value = q.passCriteria || "";
             if ($("#vtQm" + i)) $("#vtQm" + i).checked = !!q.mustHave;
+            var row = $("#vtQp" + i) && $("#vtQp" + i).closest(".vt-qrow");
+            if (row && qs[i]) {
+              row.classList.add("vt-filled");
+              (function (rr, delay) { setTimeout(function () { rr.classList.remove("vt-filled"); }, 1200 + delay); })(row, i * 120);
+            }
           }
           toast("Pulled " + qs.length + " qualifier" + (qs.length === 1 ? "" : "s") + " from the JD, tweak if you like.");
-        }).catch(function () { genQ.disabled = false; genQ.textContent = "Generate from JD"; toast("Couldn’t reach the server."); });
+        }).catch(function () { done(); toast("Couldn’t reach the server."); });
       });
       Array.prototype.forEach.call(body.querySelectorAll("[data-vtact]"), function (b) {
         b.addEventListener("click", function () { deskAction(b.getAttribute("data-vtact"), b.getAttribute("data-id"), b, body); });
