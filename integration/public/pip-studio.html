@@ -11,19 +11,30 @@
 <!-- When embedded inside the Command Center (#pipstudio route adds ?embed=1),
      drop the redundant standalone wordmark so it reads as one app. -->
 <script>try{if(new URLSearchParams(location.search).has('embed'))document.documentElement.classList.add('embed');}catch(e){}</script>
+<!-- Match the portal's saved theme so the embedded studio reads as one app. -->
+<script>(function(){try{var t=localStorage.getItem('ros_theme')||'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <style>
-  /* ── Editorial Dark: a restrained, premium design system.
-     One accent (indigo), matte near-black canvas, hairline borders, no
-     gradients, tight typography. Built to read as a serious tool. ── */
+  /* ── Meridian: the RecruitersOS design system (see docs/DESIGN-SYSTEM.md).
+     One accent, solid surfaces, hairline borders, no gradients, tight
+     typography. Light by default; dark via html[data-theme="dark"]. ── */
   :root{
-    --bg:#0b0c0e; --panel:#141518; --panel-2:#101113; --field:#0e0f11;
-    --line:#23262b; --line-2:#2f333a;
-    --ink:#eceef1; --mut:#8b909a; --faint:#5a5f68;
-    --accent:#6366f1; --accent-hover:#7679f6;
-    --accent-soft:rgba(99,102,241,.13); --accent-line:rgba(99,102,241,.38);
-    --ok:#41b57a; --ok-soft:rgba(65,181,122,.13); --ok-line:rgba(65,181,122,.34);
-    --warn:#e0a24a;
-    --rad:14px; --rad-sm:9px;
+    --bg:#f7f8fa; --panel:#ffffff; --panel-2:#f0f2f5; --field:#ffffff;
+    --line:#e5e8ee; --line-2:#cfd5df;
+    --ink:#14181f; --mut:#4b5364; --faint:#8a93a5;
+    --accent:#2e5bd7; --accent-hover:#2448ad;
+    --accent-soft:rgba(46,91,215,.09); --accent-line:rgba(46,91,215,.35);
+    --ok:#157347; --ok-soft:#e6f4ec; --ok-line:rgba(21,115,71,.35);
+    --warn:#b45309;
+    --rad:8px; --rad-sm:6px;
+  }
+  html[data-theme="dark"]{
+    --bg:#0f1216; --panel:#171b22; --panel-2:#13171d; --field:#171b22;
+    --line:#262c36; --line-2:#3a4250;
+    --ink:#f2f4f8; --mut:#aab2c0; --faint:#737d8d;
+    --accent:#567fe4; --accent-hover:#7d9ff0;
+    --accent-soft:rgba(86,127,228,.16); --accent-line:rgba(86,127,228,.4);
+    --ok:#3fbf7f; --ok-soft:rgba(63,191,127,.13); --ok-line:rgba(63,191,127,.35);
+    --warn:#e0a141;
   }
   *{box-sizing:border-box}
   html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
@@ -31,8 +42,8 @@
     font:14.5px/1.55 'Inter',-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh;letter-spacing:-.006em}
   ::selection{background:var(--accent-soft)}
   ::-webkit-scrollbar{width:10px;height:10px}
-  ::-webkit-scrollbar-thumb{background:#22252b;border-radius:8px;border:2px solid var(--bg)}
-  ::-webkit-scrollbar-thumb:hover{background:#2c3037}
+  ::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:8px;border:2px solid var(--bg)}
+  ::-webkit-scrollbar-thumb:hover{background:var(--faint)}
 
   /* Header */
   html.embed body{min-height:0;background:transparent}
@@ -41,8 +52,8 @@
   html.embed header .viewtabs{margin-left:0}
   header{display:flex;align-items:center;gap:13px;padding:15px 26px;border-bottom:1px solid var(--line)}
   .brand{display:flex;align-items:center;gap:10px;flex:none}
-  .brand .mark{width:24px;height:24px;border-radius:7px;background:var(--accent);color:#fff;
-    display:inline-flex;align-items:center;justify-content:center;flex:none;box-shadow:0 1px 0 rgba(255,255,255,.14) inset,0 4px 12px rgba(99,102,241,.32)}
+  .brand .mark{width:24px;height:24px;border-radius:6px;background:var(--accent);color:#fff;
+    display:inline-flex;align-items:center;justify-content:center;flex:none}
   .brand .mark svg{width:15px;height:15px;display:block}
   .brand .wm{font-weight:600;font-size:15px;letter-spacing:-.015em;color:var(--ink)}
   .divider{width:1px;height:18px;background:var(--line);flex:none}
@@ -56,22 +67,22 @@
   .pipstats .ps-item b.hot{color:var(--accent)}
   .pipstats .ps-sep{flex:1}
   .pipstats .ps-live{display:flex;align-items:center;gap:8px;font-size:11.5px;white-space:nowrap;color:var(--faint)}
-  .pipstats .ps-dot{width:7px;height:7px;border-radius:50%;background:#33373e;flex:none}
-  .pipstats .ps-dot.on{background:var(--ok);box-shadow:0 0 0 0 rgba(65,181,122,.5);animation:pspulse 2.4s infinite}
-  @keyframes pspulse{0%{box-shadow:0 0 0 0 rgba(65,181,122,.4)}70%{box-shadow:0 0 0 6px rgba(65,181,122,0)}100%{box-shadow:0 0 0 0 rgba(65,181,122,0)}}
+  .pipstats .ps-dot{width:7px;height:7px;border-radius:50%;background:var(--line-2);flex:none}
+  .pipstats .ps-dot.on{background:var(--ok);box-shadow:0 0 0 0 rgba(21,115,71,.4);animation:pspulse 2.4s infinite}
+  @keyframes pspulse{0%{box-shadow:0 0 0 0 rgba(21,115,71,.35)}70%{box-shadow:0 0 0 6px rgba(21,115,71,0)}100%{box-shadow:0 0 0 0 rgba(21,115,71,0)}}
   @media(max-width:640px){.pipstats{gap:14px;font-size:11.5px}.pipstats .ps-sep{flex-basis:100%;height:0}}
 
   /* View tabs: segmented control */
   .viewtabs{display:flex;gap:2px;background:var(--field);border:1px solid var(--line);border-radius:10px;padding:3px}
   .vt{background:transparent;border:none;color:var(--mut);padding:6px 14px;border-radius:7px;font-size:12.5px;font-weight:550;cursor:pointer;letter-spacing:-.01em;transition:color .14s,background .14s}
   .vt:hover{color:var(--ink)}
-  .vt.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.35),0 0 0 1px var(--line)}
+  .vt.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(16,24,40,.08),0 0 0 1px var(--line)}
 
   /* Layout + cards */
   .layout{display:grid;grid-template-columns:346px 1fr;gap:20px;padding:22px 26px;max-width:1360px;margin:0 auto;align-items:start}
   .col{display:flex;flex-direction:column;gap:18px;min-width:0}
   .left{position:sticky;top:22px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);padding:18px;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);padding:18px;}
   .card h2{font-size:13.5px;margin:0 0 15px;display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.01em;color:var(--ink)}
   .card h2 .n{display:inline-flex;width:22px;height:22px;border-radius:7px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent);align-items:center;justify-content:center;font-size:12px;font-weight:650;flex:none}
   .card h2 .hint{margin-left:auto;font-size:11px;color:var(--faint);font-weight:500;letter-spacing:0}
@@ -90,9 +101,9 @@
 
   /* Buttons */
   button{cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:var(--rad-sm);padding:8px 14px;font:inherit;font-size:13px;font-weight:550;letter-spacing:-.01em;transition:.14s}
-  button:hover{border-color:var(--line-2);background:#191a1f}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 2px rgba(18,18,40,.35)}
-  button.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover);box-shadow:inset 0 1px 0 rgba(255,255,255,.26),0 2px 8px rgba(99,102,241,.28)}
+  button:hover{border-color:var(--line-2);background:var(--panel-2)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
+  button.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover);box-shadow:none}
   button.ghost{background:transparent}
   button.ghost:hover{background:rgba(255,255,255,.035);border-color:var(--line-2)}
   button.danger{background:transparent;border-color:#492329;color:#f0929b}
@@ -141,7 +152,7 @@
   .chipf .cnt{opacity:.6;font-weight:600;font-variant-numeric:tabular-nums}
   .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(224px,1fr));gap:14px}
   .tile{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);display:flex;flex-direction:column;transition:border-color .16s,transform .16s,box-shadow .16s}
-  .tile:hover{border-color:var(--line-2);transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.38)}
+  .tile:hover{border-color:var(--line-2);box-shadow:0 4px 16px rgba(16,24,40,.10)}
   .tile .thumb{position:relative;cursor:pointer}
   .tile .thumb img{width:100%;height:120px;object-fit:cover;object-position:top;display:block;background:#101216}
   .tile .thumb .go{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(9,10,12,.58);opacity:0;transition:.14s;font-size:12.5px;font-weight:600;color:#fff;letter-spacing:-.01em;backdrop-filter:blur(1.5px)}
@@ -159,8 +170,8 @@
   .tile .act .grid > *:hover{border-color:var(--line-2)}
   .tile .act .grid .lk{color:var(--accent)}
   .tile .act .grid .out{color:var(--accent)}
-  .copied{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#eceef1;color:#0b0c0e;
-    padding:9px 16px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 12px 40px rgba(0,0,0,.55);z-index:60;opacity:0;transition:.18s;pointer-events:none}
+  .copied{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:var(--bg);
+    padding:9px 16px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 12px 32px rgba(16,24,40,.16);z-index:60;opacity:0;transition:.18s;pointer-events:none}
   .copied.show{opacity:1}
 
   /* brand kit */
@@ -194,7 +205,7 @@
   .perfhead h1{margin:0;font-size:21px;font-weight:650;letter-spacing:-.025em}
   .perfhead p{margin:4px 0 0}
   .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
-  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px;}
   .kpi .v{font-size:25px;font-weight:700;letter-spacing:-.035em;line-height:1.05;font-variant-numeric:tabular-nums}
   .kpi .l{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-top:6px;font-weight:600}
   .kpi .sub{font-size:11px;color:var(--ok);margin-top:4px;font-weight:500}
@@ -226,7 +237,7 @@
   /* modal (AI opener) */
   .modal{position:fixed;inset:0;background:rgba(6,7,9,.72);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:80;padding:20px}
   .modal.show{display:flex}
-  .modal-card{background:var(--panel);border:1px solid var(--line-2);border-radius:16px;max-width:620px;width:100%;max-height:88vh;overflow:auto;padding:20px;box-shadow:0 40px 100px rgba(0,0,0,.6)}
+  .modal-card{background:var(--panel);border:1px solid var(--line-2);border-radius:16px;max-width:620px;width:100%;max-height:88vh;overflow:auto;padding:20px;box-shadow:0 12px 32px rgba(16,24,40,.16)}
   .mh{display:flex;align-items:center;gap:10px;font-size:15px;margin-bottom:6px;font-weight:600;letter-spacing:-.01em}
   .mx{margin-left:auto;background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:15px}
   .mx:hover{color:var(--ink)}
@@ -313,7 +324,7 @@
           <div><label>Border (<span id="borderV">4</span>px)</label><input type="range" id="border" min="0" max="24" value="4" /></div>
         </div>
         <div class="row" style="margin-top:6px">
-          <span class="muted">Color</span><input type="color" id="borderColor" value="#6366f1" />
+          <span class="muted">Color</span><input type="color" id="borderColor" value="#2e5bd7" />
           <span class="muted" id="radiusWrap" style="display:none">Radius <input type="range" id="radius" min="0" max="50" value="18" style="width:90px" /></span>
         </div>
         <div class="row" style="margin-top:10px">
@@ -330,7 +341,7 @@
     </div>
 
     <div class="card" id="voiceCard">
-      <h2>🎙 Your voice <span class="hint">cloned name intro</span></h2>
+      <h2>Your voice <span class="hint">cloned name intro</span></h2>
       <p class="muted" id="voiceStatus" style="margin:0 0 10px">Checking…</p>
       <div class="row">
         <button id="btnCloneVoice" class="primary small" style="flex:1">Clone my voice</button>
@@ -357,8 +368,8 @@
       <div id="banner" class="banner warn" style="display:none"></div>
       <div class="toolbar">
         <input type="text" id="gsearch" placeholder="Filter roles…" />
-        <button id="btnGenAll" class="primary small">⚡ Generate all</button>
-        <button id="btnExport" class="ghost small" title="Download a CSV of all generated roles for your sequence tool">⬇ Export CSV</button>
+        <button id="btnGenAll" class="primary small">Generate all</button>
+        <button id="btnExport" class="ghost small" title="Download a CSV of all generated roles for your sequence tool">Export CSV</button>
         <button id="btnRefresh" class="ghost small" title="Refresh roles + engagement">↻</button>
       </div>
       <div class="galfilter" id="galfilter">
@@ -400,7 +411,7 @@
       <label>Logo URL <span class="muted">(https image)</span></label>
       <input type="text" id="bkLogo" placeholder="https://yourdomain.com/logo.png" />
       <label>Accent color</label>
-      <div class="row"><input type="color" id="bkAccent" value="#6366f1" /><span class="muted">play button + buttons</span></div>
+      <div class="row"><input type="color" id="bkAccent" value="#2e5bd7" /><span class="muted">play button + buttons</span></div>
       <label>Reply-to email <span class="muted">(the "Reply" button)</span></label>
       <input type="text" id="bkReply" placeholder="you@yourdomain.com" />
     </div>
@@ -462,6 +473,6 @@
 <div class="copied" id="toast"></div>
 <div class="modal" id="modal"><div class="modal-card" id="modalBody"></div></div>
 <script src="assets/js/config.js?v=ad110cbee0"></script>
-<script src="assets/js/pip-studio.js?v=a010167555"></script>
+<script src="assets/js/pip-studio.js?v=ca228a4e39"></script>
 </body>
 </html>

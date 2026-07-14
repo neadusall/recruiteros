@@ -5,25 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <title>RecruitersOS, Dev Console (Sessions)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
   :root{
-    --bg:#070b14; --bg2:#0b1120; --panel:#0f1626; --panel2:#131c30;
-    --line:#1e2a44; --line2:#283655;
-    --ink:#e8eefc; --mut:#8aa0c6; --mut2:#5f7299;
-    --cyan:#36d6e7; --indigo:#7c8cff; --violet:#b06bff;
-    --green:#27d38a; --amber:#ffb23e; --red:#ff5d6c; --slate:#7689b0;
-    --grad:linear-gradient(100deg,#36d6e7,#7c8cff 45%,#b06bff);
-    --shadow:0 18px 50px -22px rgba(0,0,0,.85);
+    --bg:#f7f8fa; --bg2:#f0f2f5; --panel:#ffffff; --panel2:#f4f5f7;
+    --line:#e5e8ee; --line2:#cfd5df;
+    --ink:#14181f; --mut:#4b5364; --mut2:#8a93a5;
+    --cyan:#2e5bd7; --indigo:#2e5bd7; --violet:#2e5bd7;
+    --green:#157347; --amber:#b45309; --red:#d92d20; --slate:#8a93a5;
+    --shadow:0 4px 16px rgba(16,24,40,.08);
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
   body{
-    background:
-      radial-gradient(1200px 600px at 12% -10%, rgba(124,140,255,.16), transparent 60%),
-      radial-gradient(1000px 560px at 100% 0%, rgba(54,214,231,.12), transparent 55%),
-      var(--bg);
+    background:var(--bg);
     color:var(--ink);
-    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial;
+    font:15px/1.55 'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased;
     min-height:100%;
   }
@@ -33,34 +32,30 @@
   /* Header */
   header.top{
     position:sticky;top:0;z-index:30;
-    backdrop-filter:blur(14px);
-    background:linear-gradient(180deg,rgba(7,11,20,.92),rgba(7,11,20,.72));
+    background:var(--panel);
     border-bottom:1px solid var(--line);
   }
   .topbar{display:flex;align-items:center;gap:16px;padding:14px 22px}
   .brand{display:flex;align-items:center;gap:12px;min-width:0}
   .logo{
-    font-weight:800;font-size:20px;letter-spacing:-.4px;
-    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
-    background-size:200% auto;animation:sh 6s linear infinite;white-space:nowrap;
+    font-weight:600;font-size:20px;letter-spacing:-.4px;
+    color:var(--ink);white-space:nowrap;
   }
-  @keyframes sh{to{background-position:200% center}}
   .sub{color:var(--mut);font-size:12.5px}
   .grow{flex:1}
   .ghost{
     display:inline-flex;align-items:center;gap:7px;text-decoration:none;cursor:pointer;
     border:1px solid var(--line2);background:transparent;color:var(--mut);
-    padding:8px 12px;border-radius:10px;font-size:12.5px;
+    padding:8px 12px;border-radius:6px;font-size:12.5px;
   }
   .ghost:hover{color:var(--ink);border-color:var(--indigo)}
   .live-pill{
     display:inline-flex;align-items:center;gap:8px;text-decoration:none;
     border:1px solid var(--line2);background:var(--panel);
-    padding:8px 13px;border-radius:999px;font-size:12.5px;color:var(--ink);white-space:nowrap;
+    padding:8px 13px;border-radius:6px;font-size:12.5px;color:var(--ink);white-space:nowrap;
   }
   .live-pill:hover{border-color:var(--cyan)}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2.2s infinite}
-  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(39,211,138,.55)}70%{box-shadow:0 0 0 9px rgba(39,211,138,0)}100%{box-shadow:0 0 0 0 rgba(39,211,138,0)}}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
 
   /* Shell: left bar + detail */
   .shell{display:grid;grid-template-columns:340px 1fr;gap:0;align-items:start}
@@ -72,28 +67,28 @@
   aside.side::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px;border:3px solid var(--bg)}
 
   .side-h{display:flex;align-items:center;gap:8px;margin:6px 4px 8px;font-size:11.5px;
-    letter-spacing:.12em;text-transform:uppercase;color:var(--mut2);font-weight:700}
+    letter-spacing:.12em;text-transform:uppercase;color:var(--mut2);font-weight:600}
   .side-h .hgrow{flex:1}
   .progress{font-size:11px;color:var(--mut2);font-variant-numeric:tabular-nums}
 
   /* Structure tree */
-  .tree{margin:0 0 18px;padding:8px;border:1px solid var(--line);border-radius:13px;
-    background:linear-gradient(180deg,var(--panel),var(--bg2))}
-  .node{display:flex;gap:9px;align-items:flex-start;padding:7px 9px;border-radius:9px;cursor:pointer;
+  .tree{margin:0 0 18px;padding:8px;border:1px solid var(--line);border-radius:8px;
+    background:var(--panel)}
+  .node{display:flex;gap:9px;align-items:flex-start;padding:7px 9px;border-radius:6px;cursor:pointer;
     border:1px solid transparent}
   .node:hover{background:var(--bg2);border-color:var(--line)}
-  .node.active{background:rgba(124,140,255,.16);border-color:transparent}
+  .node.active{background:rgba(46,91,215,.09);border-color:transparent}
   .node .nic{font-size:14px;line-height:1.4}
-  .node .nm{font-weight:650;font-size:13px}
+  .node .nm{font-weight:600;font-size:13px}
   .node .pth{display:block;font-size:11px;color:var(--cyan)}
   .node .nd{font-size:11.5px;color:var(--mut);margin-top:1px}
 
   /* Sessions list */
-  .track{margin:14px 4px 5px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut2);font-weight:700}
+  .track{margin:14px 4px 5px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut2);font-weight:600}
   .sess{display:grid;grid-template-columns:18px 1fr auto;gap:9px;align-items:center;
-    padding:9px 10px;border-radius:10px;cursor:pointer;border:1px solid transparent;margin:2px 0}
+    padding:9px 10px;border-radius:6px;cursor:pointer;border:1px solid transparent;margin:2px 0}
   .sess:hover{background:var(--bg2);border-color:var(--line)}
-  .sess.active{background:rgba(124,140,255,.16);border-color:transparent}
+  .sess.active{background:rgba(46,91,215,.09);border-color:transparent}
   .sess .sd{width:9px;height:9px;border-radius:50%;background:var(--slate);justify-self:center}
   .sess.s-todo  .sd{background:var(--red)}
   .sess.s-doing .sd{background:var(--cyan)}
@@ -107,22 +102,22 @@
   .crumbs{font-size:12px;color:var(--mut2);margin-bottom:10px}
   .crumbs b{color:var(--mut)}
   .d-title{font-size:25px;letter-spacing:-.5px;margin:0 0 8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-  .badge{cursor:pointer;user-select:none;border:1px solid transparent;padding:5px 11px;border-radius:999px;
-    font-size:11.5px;font-weight:650;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+  .badge{cursor:pointer;user-select:none;border:1px solid transparent;padding:5px 11px;border-radius:4px;
+    font-size:11.5px;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
   .badge .c{width:7px;height:7px;border-radius:50%}
-  .badge:hover{filter:brightness(1.12)}
-  .s-todo-b{background:rgba(255,93,108,.13);color:#ff9aa4;border-color:rgba(255,93,108,.32)}
+  .badge:hover{filter:brightness(1.05)}
+  .s-todo-b{background:#fdebe9;color:#d92d20}
   .s-todo-b .c{background:var(--red)}
-  .s-doing-b{background:rgba(54,214,231,.13);color:#9fe9f2;border-color:rgba(54,214,231,.32)}
+  .s-doing-b{background:rgba(46,91,215,.09);color:#2e5bd7}
   .s-doing-b .c{background:var(--cyan)}
-  .s-done-b{background:rgba(39,211,138,.14);color:#7df0bf;border-color:rgba(39,211,138,.35)}
+  .s-done-b{background:#e6f4ec;color:#157347}
   .s-done-b .c{background:var(--green)}
-  .tagpill{font-size:11px;color:var(--mut);border:1px solid var(--line2);border-radius:999px;padding:4px 10px}
+  .tagpill{font-size:11px;color:var(--mut);border:1px solid var(--line2);border-radius:4px;padding:4px 10px}
 
   .lede{color:var(--mut);font-size:15px;margin:4px 0 22px;max-width:760px}
-  .block{border:1px solid var(--line);border-radius:14px;background:var(--panel);margin:0 0 16px;overflow:hidden}
+  .block{border:1px solid var(--line);border-radius:8px;background:var(--panel);margin:0 0 16px;overflow:hidden}
   .block h3{margin:0;padding:13px 16px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);
-    border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--panel2),var(--panel))}
+    border-bottom:1px solid var(--line);background:var(--panel2)}
   .block .body{padding:14px 16px}
   .block p{margin:0 0 10px}
   .block p:last-child{margin-bottom:0}
@@ -139,8 +134,8 @@
   .outcome .oic{color:var(--green);font-size:16px;line-height:1.4}
 
   textarea.note{width:100%;resize:vertical;min-height:78px;border:1px dashed var(--line2);
-    background:rgba(11,17,32,.6);color:var(--ink);border-radius:10px;padding:10px 12px;
-    font:13.5px/1.5 ui-sans-serif,system-ui;outline:0}
+    background:#ffffff;color:var(--ink);border-radius:6px;padding:10px 12px;
+    font:13.5px/1.5 'Inter',-apple-system,system-ui,sans-serif;outline:0}
   textarea.note:focus{border-style:solid;border-color:var(--indigo)}
   textarea.note::placeholder{color:var(--mut2)}
 
@@ -174,10 +169,10 @@
 <div class="shell">
   <!-- LEFT BAR: structure summary on top, sessions beneath -->
   <aside class="side">
-    <div class="side-h"><span>📁 Project Structure</span></div>
+    <div class="side-h"><span>Project Structure</span></div>
     <div class="tree" id="tree"></div>
 
-    <div class="side-h"><span>🗂 Sessions</span><span class="hgrow"></span><span class="progress" id="prog"></span></div>
+    <div class="side-h"><span>Sessions</span><span class="hgrow"></span><span class="progress" id="prog"></span></div>
     <div id="sessList"></div>
   </aside>
 
@@ -197,23 +192,23 @@ const ghHref = p => GH.replace(/blob/, p.endsWith("/") ? "tree" : "blob") + p.re
 
 /* ---------- DATA: the four-layer shape of the repo ---------- */
 const STRUCTURE = [
-  { id:"portal", ic:"🖥️", nm:"Static portal", pth:"/ (repo root)",
+  { id:"portal", ic:"", nm:"Static portal", pth:"/ (repo root)",
     nd:"No-build HTML/CSS/JS, marketing pages + the app shell.",
     what:"The customer-facing surface and the app shell. Plain HTML5 + vanilla JS + CSS with no bundler or framework. At build time these files are synced into integration/public/ so the backend serves them from one origin.",
     paths:[["index.html","Landing page"],["command.html","Command Center (the app)"],["alfred.html","Outreach Studio"],["assets/css/","Design system + per-surface styles"],["assets/js/","Page controllers (command.js, auth.js, app.js…)"]] },
-  { id:"backend", ic:"⚙️", nm:"Backend", pth:"integration/",
+  { id:"backend", ic:"", nm:"Backend", pth:"integration/",
     nd:"Next.js 14 + TypeScript, the real product.",
     what:"Next.js 14 App Router + TypeScript. ~37 session-based /api routes, a separate /v1 public REST API, all domain logic under lib/, and a snapshot-KV persistence layer over Postgres that degrades to in-memory without DATABASE_URL.",
     paths:[["integration/app/api/","~37 route handlers"],["integration/lib/","Domain modules (auth, linkedin, signals, response, billing…)"],["integration/lib/db/index.ts","Postgres snapshot KV"],["integration/lib/core/repository.ts","Persistence boundary"],["integration/api/","Public /v1 REST API"]] },
-  { id:"exec", ic:"🔗", nm:"Execution arm", pth:"extension/ · bridge/",
+  { id:"exec", ic:"", nm:"Execution arm", pth:"extension/ · bridge/",
     nd:"Chrome MV3 extension + Node relay that run real LinkedIn actions.",
     what:"The arm that performs real outreach. A Manifest V3 Chrome extension drives LinkedIn/Sales Navigator in the user's own session (gated by a live flag, default OFF), and a small Node bridge relays queued actions between the backend cadence and the extension.",
-    paths:[["extension/","MV3 extension (content scripts, background, popup)"],["extension/lib/alfred-bridge.js","Alfred adapter → extension seam"],["bridge/outreach-bridge.cjs","Backend ↔ extension relay"]] },
-  { id:"alfred", ic:"🤖", nm:"Alfred engine", pth:"assets/js/alfred/",
+    paths:[["extension/","MV3 extension (content scripts, background, popup)"],["extension/lib/alfred-bridge.js","Alfred adapter → extension seam"],["bridge/outreach-bridge.cjs","Backend-to-extension relay"]] },
+  { id:"alfred", ic:"", nm:"Alfred engine", pth:"assets/js/alfred/",
     nd:"The real, unit-tested automation core (browser + Node).",
     what:"A MeetAlfred-style automation engine: data model, scheduler, account-safety rate limiter, warm-up ramp, and analytics. UMD, runs in the browser (window.Alfred) and under Node for tests. The Simulated adapter is fully working; live LinkedIn/Email/X adapters are stubs.",
     paths:[["assets/js/alfred/alfred-core.js","Engine (store, limits, scheduler)"],["assets/js/alfred/alfred-ui.js","Studio controller + sim clock"],["assets/js/alfred/alfred.test.cjs","47-assertion test harness"]] },
-  { id:"ops", ic:"🚀", nm:"Deploy & ops", pth:"Dockerfile · *.sh · docs",
+  { id:"ops", ic:"", nm:"Deploy & ops", pth:"Dockerfile · *.sh · docs",
     nd:"Two deploy paths (Vercel / Hetzner+Docker+Caddy) + runbooks.",
     what:"Ships either to Vercel (zero-ops, no durable DB) or self-hosted on Hetzner via Docker Compose (Postgres + app + Caddy TLS), with a systemd auto-deploy watcher that redeploys on every push to main. A stack of markdown runbooks covers go-live end to end.",
     paths:[["Dockerfile","Production image"],["docker-compose.yml","Postgres + app + Caddy"],["deploy.sh","One-shot bootstrap"],["auto-deploy.sh","Git-poll redeploy watcher"],["docs/setup/server/3-go-live-walkthrough.md","Step-by-step go-live"]] },
@@ -304,7 +299,7 @@ const SESSIONS = [
 
   /* ---- Track E ---- */
   { id:"s14", track:"E", n:14, title:"Marketing-site consistency",
-    lede:"Audit the ~27 root pages for dead links, stale copy, and root ↔ public drift.",
+    lede:"Audit the ~27 root pages for dead links, stale copy, and root-to-public drift.",
     scope:"Sweep the marketing/feature pages for broken links and outdated claims, and confirm the sync step keeps root and integration/public/ in lockstep.",
     files:[["index.html","landing"],["integration/sync-public.cjs","root → public sync"]],
     outcome:"Consistent, link-clean public pages with no drift between the two copies." },
@@ -343,7 +338,6 @@ const sessList = document.getElementById("sessList");
 function renderTree(){
   tree.innerHTML = STRUCTURE.map(s => `
     <div class="node ${sel===s.id?'active':''}" data-id="${s.id}">
-      <span class="nic">${s.ic}</span>
       <span>
         <span class="nm">${s.nm}</span>
         <span class="pth mono">${s.pth}</span>
@@ -379,7 +373,6 @@ const detail = document.getElementById("detail");
 function fileList(files){
   return `<ul class="files">` + files.map(([p, note]) => `
     <li><a href="${ghHref(p)}" target="_blank" rel="noopener">
-      <span class="arr">${p.endsWith('/')?'📂':'📄'}</span>
       <span class="fpath">${p}</span>
       ${note?`<span class="fnote">${note}</span>`:""}
     </a></li>`).join("") + `</ul>`;
@@ -428,7 +421,7 @@ function renderSession(s){
 function renderStruct(s){
   detail.innerHTML = `
     <div class="crumbs">Project Structure</div>
-    <h1 class="d-title"><span>${s.ic} ${s.nm}</span><span class="tagpill mono">${s.pth}</span></h1>
+    <h1 class="d-title"><span>${s.nm}</span><span class="tagpill mono">${s.pth}</span></h1>
     <p class="lede">${s.what}</p>
     <div class="block"><h3>Key paths</h3><div class="body">${fileList(s.paths)}</div></div>
     <p class="hint">This is one of the four cooperating layers of the repo. Pick a session in the left bar to start work.</p>`;

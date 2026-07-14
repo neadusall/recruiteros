@@ -12,10 +12,9 @@
   <link rel="stylesheet" href="assets/css/app.css" />
   <link rel="stylesheet" href="assets/css/command.css" />
   <link rel="stylesheet" href="assets/css/owner.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23ffb020'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>$</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232e5bd7'/><text x='50' y='69' font-size='58' text-anchor='middle' fill='%23ffffff' font-family='Arial' font-weight='bold'>$</text></svg>" />
 </head>
 <body class="app">
-  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
 
   <!-- Locked screen shown until an owner session is confirmed by the API -->
   <div id="gate" class="owner-gate">
@@ -29,7 +28,7 @@
 
   <div class="shell" id="shell" style="display:none">
     <aside class="sidebar cmd-side">
-      <a href="#overview" class="brand"><span class="logo" style="background:linear-gradient(135deg,#ffb020,#ff7849)">$</span><span>Owner<span class="os">OS</span></span></a>
+      <a href="#overview" class="brand"><span class="logo" style="background:var(--warn)">$</span><span>Owner<span class="os">OS</span></span></a>
 
       <div class="ws-card">
         <div class="ws-name">Owner Console</div>
@@ -45,25 +44,25 @@
 
       <nav class="cmd-nav" id="ownerNav">
         <div class="nav-group">Business</div>
-        <a class="nav-item" data-route="overview"><span class="ni">📊</span> Overview</a>
-        <a class="nav-item" data-route="pricing"><span class="ni">🏷️</span> Pricing</a>
-        <a class="nav-item" data-route="spend"><span class="ni">💸</span> Spend</a>
+        <a class="nav-item" data-route="overview">Overview</a>
+        <a class="nav-item" data-route="pricing">Pricing</a>
+        <a class="nav-item" data-route="spend">Spend</a>
 
         <div class="nav-group">People</div>
-        <a class="nav-item" data-route="people"><span class="ni">👥</span> Users &amp; roles</a>
+        <a class="nav-item" data-route="people">Users &amp; roles</a>
 
         <div class="nav-group">Operate</div>
-        <a class="nav-item" data-route="accounts"><span class="ni">🗂️</span> Accounts</a>
-        <a class="nav-item" data-route="costs"><span class="ni">⚙️</span> Cost model</a>
-        <a class="nav-item" data-route="security"><span class="ni">🔐</span> Security</a>
+        <a class="nav-item" data-route="accounts">Accounts</a>
+        <a class="nav-item" data-route="costs">Cost model</a>
+        <a class="nav-item" data-route="security">Security</a>
       </nav>
 
       <div class="side-foot">
         <div class="side-link" id="userChip">
-          <span class="avatar" style="width:26px;height:26px;font-size:11px;background:#ffb020;color:#0a0a12" id="userInitials">$</span>
+          <span class="avatar" style="width:26px;height:26px;font-size:11px;background:var(--warn);color:#fff" id="userInitials">$</span>
           <span id="userName">Owner</span>
         </div>
-        <div class="side-link" id="signOut">↩︎ Sign out</div>
+        <div class="side-link" id="signOut">Sign out</div>
       </div>
     </aside>
 

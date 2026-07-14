@@ -54,7 +54,7 @@
   function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 
   var state = {
-    pip: Object.assign({ corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#6366f1", radiusPct: 18 }, lsGet(LS.style, {})),
+    pip: Object.assign({ corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#2e5bd7", radiusPct: 18 }, lsGet(LS.style, {})),
     clipId: lsGet(LS.clip, null),
     durationSec: lsGet(LS.dur, 0),    // 0 = auto-match the recorded clip length; else force N seconds of page scroll
     shots: [],
@@ -152,7 +152,7 @@
         $("btnRec").disabled = false; $("btnCam").textContent = "✓ Camera on"; renderPip();
         $("recHint").innerHTML = "Looking good. Press <b>● Record</b> (or tap the spacebar) and talk for ~10–20s.";
       })
-      .catch(function (e) { $("btnCam").disabled = false; $("recHint").innerHTML = '<span style="color:#ff6b6b">⚠</span> ' + esc(camErr(e)); });
+      .catch(function (e) { $("btnCam").disabled = false; $("recHint").innerHTML = '<span style="color:var(--danger,#d92d20)">Camera error:</span> ' + esc(camErr(e)); });
   };
   function pickMime() {
     var prefs = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
@@ -409,7 +409,7 @@
       var t = document.createElement("div");
       t.className = "tile"; t.setAttribute("data-key", s.key);
       t.innerHTML =
-        '<div class="thumb"><img loading="lazy" src="' + shotGif(s.key) + '" alt="" /><div class="go">⚡ Personalize</div></div>' +
+        '<div class="thumb"><img loading="lazy" src="' + shotGif(s.key) + '" alt="" /><div class="go">Personalize</div></div>' +
         '<div class="lbl"><div class="co">' + esc(s.company || "·") + '</div><div class="ro">' + esc(s.roleTitle || "") + '</div></div>' +
         '<div class="act" data-act></div>';
       t.querySelector(".thumb").onclick = function () { setStageBg(shotGif(s.key)); generate(s); };
@@ -419,8 +419,8 @@
       // without single-generating first since the role is already captured.
       var actEl = t.querySelector("[data-act]");
       actEl.innerHTML =
-        '<button class="primary small cta" data-gen1>⚡ Personalize this role</button>' +
-        '<button class="ghost small cta" data-bulklist>👥 Personalize a whole list</button>';
+        '<button class="primary small cta" data-gen1>Personalize this role</button>' +
+        '<button class="ghost small cta" data-bulklist>Personalize a whole list</button>';
       actEl.querySelector("[data-gen1]").onclick = function () { setStageBg(shotGif(s.key)); generate(s); };
       actEl.querySelector("[data-bulklist]").onclick = function () { openBulk(s); };
       var prior = state.results[s.key];
@@ -464,19 +464,19 @@
     var old = thumbEl && thumbEl.querySelector(".eng"); if (old) old.remove();
     if (st && thumbEl && (st.plays || st.opens)) {
       var b = document.createElement("div"); b.className = "eng";
-      b.innerHTML = "▶ " + (st.plays || 0) + " · 👁 " + (st.opens || 0);
+      b.innerHTML = (st.plays || 0) + " plays · " + (st.opens || 0) + " opens";
       thumbEl.appendChild(b);
     }
     var act = t.querySelector("[data-act]");
     var w = watchPage(vk, s.company, s.roleTitle);
     act.innerHTML =
-      '<button class="primary small cta" data-email title="Copy a clickable GIF for your email">✉ Copy email</button>' +
+      '<button class="primary small cta" data-email title="Copy a clickable GIF for your email">Copy email</button>' +
       '<div class="grid">' +
-        '<button data-opener title="Draft an AI email opener (Claude) that wraps this video">✨ Opener</button>' +
-        '<a class="lk" href="' + esc(w) + '" target="_blank" title="Open the watch page">▶ Watch</a>' +
-        '<button data-link title="Copy the watch link (LinkedIn, SMS)">🔗 Link</button>' +
+        '<button data-opener title="Draft an AI email opener (Claude) that wraps this video">Opener</button>' +
+        '<a class="lk" href="' + esc(w) + '" target="_blank" title="Open the watch page">Watch</a>' +
+        '<button data-link title="Copy the watch link (LinkedIn, SMS)">Link</button>' +
         '<button class="out" data-out title="Attach to the hiring-manager prospects at this company">→ Outreach</button>' +
-        '<button data-bulk title="Generate this role for a whole list of names (cloned voice + lip-synced)">👥 Bulk list</button>' +
+        '<button data-bulk title="Generate this role for a whole list of names (cloned voice + lip-synced)">Bulk list</button>' +
       '</div>';
     act.querySelector("[data-email]").onclick = function () { copyRich(emailSnippet(vk, s.company, s.roleTitle)).then(function () { toast("Email snippet copied, paste into your sequence"); }); };
     act.querySelector("[data-link]").onclick = function () { copyText(w).then(function () { toast("Watch link copied"); }); };
@@ -493,7 +493,7 @@
       company: s.company, roleTitle: s.roleTitle, videoKey: vk,
       watchUrl: watchPage(vk, s.company, s.roleTitle), gifUrl: publicGif(vk),
     }) }).then(function (d) {
-      var badge = d.source === "ai" ? '<span class="srcbadge ai">✨ Claude</span>' : '<span class="srcbadge">template</span>';
+      var badge = d.source === "ai" ? '<span class="srcbadge ai">AI</span>' : '<span class="srcbadge">template</span>';
       var e1 = d.firstEmail || { subject: d.subject, body: d.body, bodyFilled: d.body };
       var e1html = esc(e1.bodyFilled || e1.body).replace(/\n/g, "<br>");
       var e2html = d.bodyHtml || esc(d.body).replace(/\n/g, "<br>"); // email 2 carries the video
@@ -584,7 +584,7 @@
     var btn = $("btnGenAll"); btn.disabled = true;
     var i = 0;
     (function next() {
-      if (i >= list.length) { btn.disabled = false; btn.textContent = "⚡ Generate all"; toast("All " + list.length + " roles ready"); return; }
+      if (i >= list.length) { btn.disabled = false; btn.textContent = "Generate all"; toast("All " + list.length + " roles ready"); return; }
       btn.textContent = "Generating " + (i + 1) + "/" + list.length + "…";
       generate(list[i++]).then(next);
     })();
@@ -715,11 +715,11 @@
     var line = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ");
     var area = line + " L" + (padL + (trend.length - 1) * step).toFixed(1) + " " + (padT + ih) + " L" + padL + " " + (padT + ih) + " Z";
     var grid = [0, 0.5, 1].map(function (f) { var y = padT + ih - f * ih; return '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="#1a212b"/><text x="2" y="' + (y + 3) + '" fill="#5b6675" font-size="9">' + Math.round(f * max) + "</text>"; }).join("");
-    var dots = pts.map(function (p, i) { return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2.5" fill="#6366f1"><title>' + esc(trend[i].date) + ": " + trend[i].plays + " plays</title></circle>"; }).join("");
+    var dots = pts.map(function (p, i) { return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2.5" fill="#2e5bd7"><title>' + esc(trend[i].date) + ": " + trend[i].plays + " plays</title></circle>"; }).join("");
     var labels = trend.map(function (d, i) { if (i % Math.ceil(trend.length / 7) && i !== trend.length - 1) return ""; return '<text x="' + (padL + i * step).toFixed(1) + '" y="' + (H - 6) + '" fill="#5b6675" font-size="9" text-anchor="middle">' + d.date.slice(5) + "</text>"; }).join("");
     return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none">' +
-      '<defs><linearGradient id="ag" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#6366f1" stop-opacity=".35"/><stop offset="1" stop-color="#6366f1" stop-opacity="0"/></linearGradient></defs>' +
-      grid + '<path d="' + area + '" fill="url(#ag)"/><path d="' + line + '" fill="none" stroke="#6366f1" stroke-width="2"/>' + dots + labels + "</svg>";
+      '<defs><linearGradient id="ag" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#2e5bd7" stop-opacity=".35"/><stop offset="1" stop-color="#2e5bd7" stop-opacity="0"/></linearGradient></defs>' +
+      grid + '<path d="' + area + '" fill="url(#ag)"/><path d="' + line + '" fill="none" stroke="#2e5bd7" stroke-width="2"/>' + dots + labels + "</svg>";
   }
 
   function renderFeed(recent) {
@@ -727,7 +727,7 @@
     var label = { open: "Visited", play: "Played", complete: "Finished", gif_open: "Opened email" };
     $("feed").innerHTML = recent.slice(0, 40).map(function (e) {
       var who = (e.company || "Unknown") + (e.roleTitle ? " · " + e.roleTitle : "");
-      return '<div class="fe"><span class="ic ' + e.type + '">' + ({ open: "👁", play: "▶", complete: "✓", gif_open: "✉" }[e.type] || "•") +
+      return '<div class="fe"><span class="ic ' + e.type + '">' + ({ open: "open", play: "play", complete: "done", gif_open: "gif" }[e.type] || "•") +
         '</span><span class="t"><b>' + esc(label[e.type] || e.type) + "</b> · " + esc(who) + '</span><span class="ago">' + ago(e.at) + "</span></div>";
     }).join("");
   }
@@ -764,7 +764,7 @@
   }
   function fillBrandForm() {
     var b = state.brand || {};
-    Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) el.value = b[brandFields[id]] || (id === "bkAccent" ? "#6366f1" : ""); });
+    Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) el.value = b[brandFields[id]] || (id === "bkAccent" ? "#2e5bd7" : ""); });
   }
   function readBrandForm() {
     var out = {};
@@ -773,7 +773,7 @@
   }
   function brandPreview() {
     var b = readBrandForm();
-    var ac = /^#[0-9a-f]{6}$/i.test(b.accent) ? b.accent : "#6366f1";
+    var ac = /^#[0-9a-f]{6}$/i.test(b.accent) ? b.accent : "#2e5bd7";
     var pv = $("bkPreview"); if (!pv) return;
     pv.style.setProperty("--brandac", ac);
     var top = $("bkPvTop");
@@ -845,7 +845,7 @@
       '<p class="muted">One first name per line (or paste a column). Each becomes a video that opens <b>"Hey {name},"</b> in your cloned voice, lip-synced, then your recorded body.</p>' +
       '<textarea id="bulkNames" rows="6" placeholder="Sarah&#10;Marcus&#10;Priya"></textarea>' +
       '<div class="mfoot"><button class="primary small" id="bulkGo">Generate videos</button>' +
-        '<button class="ghost small" id="bulkCsv" style="display:none">⬇ Export CSV</button>' +
+        '<button class="ghost small" id="bulkCsv" style="display:none">Export CSV</button>' +
         '<span class="muted" id="bulkProg" style="flex:1"></span><button class="ghost small" data-close>Close</button></div>' +
       '<div id="bulkResults" style="margin-top:12px"></div>'
     );
@@ -931,7 +931,7 @@
     card.style.cssText = "grid-column:1/-1;margin-bottom:2px;display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap";
     card.innerHTML =
       '<div style="flex:1;min-width:260px">' +
-        '<div style="font-weight:800;font-size:15px;margin-bottom:5px">👋 Welcome to PiP Studio</div>' +
+        '<div style="font-weight:800;font-size:15px;margin-bottom:5px">Welcome to PiP Studio</div>' +
         '<div class="muted" style="font-size:13px;line-height:1.65">Record one talking-head clip, then drop it onto any role to make a personalized video, the job post plays behind you and each recipient gets a branded watch page.</div>' +
         '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px">' +
           '<div style="flex:1;min-width:150px"><div style="font-weight:700;font-size:13px">1 · Record once</div><div class="muted" style="font-size:12px">Enable camera, hit Record (or the spacebar), talk ~15s, Save.</div></div>' +

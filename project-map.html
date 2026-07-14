@@ -5,25 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <title>RecruitersOS, Project &amp; Backend Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
   :root{
-    --bg:#070b14; --bg2:#0b1120; --panel:#0f1626; --panel2:#131c30;
-    --line:#1e2a44; --line2:#283655;
-    --ink:#e8eefc; --mut:#8aa0c6; --mut2:#5f7299;
-    --cyan:#36d6e7; --indigo:#7c8cff; --violet:#b06bff;
-    --green:#27d38a; --amber:#ffb23e; --red:#ff5d6c; --slate:#7689b0; --teal:#5fd0c0;
-    --grad:linear-gradient(100deg,#36d6e7,#7c8cff 45%,#b06bff);
-    --shadow:0 18px 50px -22px rgba(0,0,0,.85);
+    --bg:#f7f8fa; --bg2:#f0f2f5; --panel:#ffffff; --panel2:#f4f5f7;
+    --line:#e5e8ee; --line2:#cfd5df;
+    --ink:#14181f; --mut:#4b5364; --mut2:#8a93a5;
+    --cyan:#2e5bd7; --indigo:#2e5bd7; --violet:#2e5bd7;
+    --green:#157347; --amber:#b45309; --red:#d92d20; --slate:#8a93a5; --teal:#0b6aa2;
+    --shadow:0 4px 16px rgba(16,24,40,.08);
   }
   *{box-sizing:border-box}
   html,body{margin:0}
   body{
-    background:
-      radial-gradient(1200px 600px at 12% -10%, rgba(124,140,255,.16), transparent 60%),
-      radial-gradient(1000px 560px at 100% 0%, rgba(54,214,231,.12), transparent 55%),
-      var(--bg);
+    background:var(--bg);
     color:var(--ink);
-    font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial;
+    font:15px/1.5 'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased;
     padding:0 0 90px;
   }
@@ -33,32 +32,28 @@
   /* Header */
   header.top{
     position:sticky;top:0;z-index:30;
-    backdrop-filter:blur(14px);
-    background:linear-gradient(180deg,rgba(7,11,20,.92),rgba(7,11,20,.72));
+    background:var(--panel);
     border-bottom:1px solid var(--line);
   }
   .topbar{display:flex;align-items:center;gap:18px;padding:16px 0}
   .brand{display:flex;align-items:center;gap:12px;min-width:0}
   .logo{
-    font-weight:800;font-size:21px;letter-spacing:-.4px;
-    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
-    background-size:200% auto;animation:sh 6s linear infinite;white-space:nowrap;
+    font-weight:600;font-size:21px;letter-spacing:-.4px;
+    color:var(--ink);white-space:nowrap;
   }
-  @keyframes sh{to{background-position:200% center}}
   .sub{color:var(--mut);font-size:12.5px}
   .grow{flex:1}
   .live-pill{
     display:inline-flex;align-items:center;gap:8px;text-decoration:none;
     border:1px solid var(--line2);background:var(--panel);
-    padding:8px 13px;border-radius:999px;font-size:12.5px;color:var(--ink);white-space:nowrap;
+    padding:8px 13px;border-radius:6px;font-size:12.5px;color:var(--ink);white-space:nowrap;
   }
   .live-pill:hover{border-color:var(--cyan)}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(39,211,138,.6);animation:pulse 2.2s infinite}
-  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(39,211,138,.55)}70%{box-shadow:0 0 0 9px rgba(39,211,138,0)}100%{box-shadow:0 0 0 0 rgba(39,211,138,0)}}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
   .ghost{
     display:inline-flex;align-items:center;gap:7px;text-decoration:none;cursor:pointer;
     border:1px solid var(--line2);background:transparent;color:var(--mut);
-    padding:8px 12px;border-radius:10px;font-size:12.5px;
+    padding:8px 12px;border-radius:6px;font-size:12.5px;
   }
   .ghost:hover{color:var(--ink);border-color:var(--indigo)}
 
@@ -70,8 +65,8 @@
   /* Counters */
   .stats{display:flex;flex-wrap:wrap;gap:12px;margin:20px 0 6px}
   .stat{
-    flex:1;min-width:130px;border:1px solid var(--line);border-radius:14px;
-    background:linear-gradient(180deg,var(--panel),var(--bg2));padding:13px 15px;
+    flex:1;min-width:130px;border:1px solid var(--line);border-radius:8px;
+    background:var(--panel);padding:13px 15px;
   }
   .stat b{display:block;font-size:23px;letter-spacing:-.5px}
   .stat span{color:var(--mut);font-size:12px}
@@ -82,38 +77,38 @@
   /* Controls */
   .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:22px 0 16px;
     position:sticky;top:71px;z-index:20;padding:12px 0;
-    background:linear-gradient(180deg,rgba(7,11,20,.96),rgba(7,11,20,.0));
+    background:var(--bg);
   }
   .search{
     flex:1;min-width:220px;display:flex;align-items:center;gap:9px;
-    border:1px solid var(--line2);background:var(--panel);border-radius:11px;padding:10px 13px;
+    border:1px solid var(--line2);background:var(--panel);border-radius:6px;padding:10px 13px;
   }
   .search input{border:0;background:transparent;color:var(--ink);outline:0;width:100%;font-size:14px}
   .search svg{flex:none;opacity:.7}
   .chips{display:flex;gap:7px;flex-wrap:wrap}
   .chip{
     cursor:pointer;border:1px solid var(--line2);background:var(--panel);color:var(--mut);
-    padding:8px 12px;border-radius:999px;font-size:12.5px;display:inline-flex;align-items:center;gap:7px;user-select:none;
+    padding:8px 12px;border-radius:6px;font-size:12.5px;display:inline-flex;align-items:center;gap:7px;user-select:none;
   }
   .chip:hover{color:var(--ink)}
-  .chip.on{color:var(--ink);border-color:transparent;background:rgba(124,140,255,.18)}
+  .chip.on{color:var(--ink);border-color:transparent;background:rgba(46,91,215,.12)}
   .chip .c{width:8px;height:8px;border-radius:50%}
   .chip small{color:var(--mut2);font-variant-numeric:tabular-nums}
   .toolbtn{cursor:pointer;border:1px solid var(--line2);background:var(--panel);color:var(--mut);
-    padding:8px 11px;border-radius:999px;font-size:12px}
+    padding:8px 11px;border-radius:6px;font-size:12px}
   .toolbtn:hover{color:var(--ink);border-color:var(--indigo)}
 
   /* Section */
-  section.grp{margin:8px 0 14px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--panel)}
-  section.grp.backend{border-color:rgba(118,137,176,.4)}
+  section.grp{margin:8px 0 14px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+  section.grp.backend{border-color:var(--line2)}
   .grp h2{
     margin:0;display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none;
     padding:15px 18px;font-size:14.5px;letter-spacing:.2px;
-    background:linear-gradient(180deg,var(--panel2),var(--panel));
+    background:var(--panel2);
     border-bottom:1px solid var(--line);
   }
   .grp h2 .ic{font-size:17px}
-  .grp h2 .nm{font-weight:700}
+  .grp h2 .nm{font-weight:600}
   .grp h2 .ds{color:var(--mut);font-weight:400;font-size:12.5px}
   .grp h2 .ct{margin-left:auto;color:var(--mut2);font-size:12px}
   .grp h2 .car{transition:transform .2s;color:var(--mut)}
@@ -127,18 +122,18 @@
   .rows{padding:6px}
   .row{
     display:grid;grid-template-columns:248px 1fr 116px;gap:14px;align-items:start;
-    padding:12px 12px;border-radius:11px;border:1px solid transparent;
+    padding:12px 12px;border-radius:6px;border:1px solid transparent;
   }
   .row:hover{background:var(--bg2);border-color:var(--line)}
-  .row+.row{border-top:1px solid rgba(30,42,68,.5)}
+  .row+.row{border-top:1px solid var(--line)}
   .row:hover+.row{border-top-color:transparent}
   .kind{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut2);
-    border:1px solid var(--line2);border-radius:5px;padding:1px 6px;display:inline-block;margin-bottom:5px}
-  .kind.k-module{color:#aebdd9;border-color:rgba(118,137,176,.4)}
-  .kind.k-route{color:#9fd0ff;border-color:rgba(54,150,231,.4)}
-  .kind.k-config{color:#9ce8db;border-color:rgba(95,208,192,.42)}
-  .kind.k-infra{color:#c9b8a0;border-color:rgba(180,150,110,.4)}
-  .ttl a{font-weight:650;text-decoration:none}
+    border:1px solid var(--line2);border-radius:4px;padding:1px 6px;display:inline-block;margin-bottom:5px}
+  .kind.k-module{color:#4b5364;border-color:#cfd5df}
+  .kind.k-route{color:#2e5bd7;border-color:#c7d4f2}
+  .kind.k-config{color:#0b6aa2;border-color:#bcd8e8}
+  .kind.k-infra{color:#b45309;border-color:#ecd4b4}
+  .ttl a{font-weight:600;text-decoration:none}
   .ttl a:hover{text-decoration:underline;text-decoration-color:var(--indigo)}
   .url{display:block;margin-top:3px;font-size:11.5px;color:var(--cyan);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
   .url.muted{color:var(--mut2)}
@@ -147,48 +142,48 @@
   .tag{font-size:10.5px;color:var(--mut2);border:1px solid var(--line2);border-radius:6px;padding:2px 7px}
   /* methods + signatures */
   .methods{margin-top:7px;display:flex;flex-wrap:wrap;gap:5px}
-  .m{font-size:10px;font-weight:700;letter-spacing:.04em;border-radius:5px;padding:2px 7px;font-family:ui-monospace,monospace}
-  .m.GET{background:rgba(39,211,138,.14);color:#7df0bf}
-  .m.POST{background:rgba(124,140,255,.16);color:#bcc6ff}
-  .m.PUT{background:rgba(255,178,62,.14);color:#ffd494}
-  .m.PATCH{background:rgba(176,107,255,.16);color:#d2b4ff}
-  .m.DELETE{background:rgba(255,93,108,.14);color:#ff9aa4}
+  .m{font-size:10px;font-weight:600;letter-spacing:.04em;border-radius:4px;padding:2px 7px;font-family:ui-monospace,monospace}
+  .m.GET{background:#e6f4ec;color:#157347}
+  .m.POST{background:rgba(46,91,215,.09);color:#2e5bd7}
+  .m.PUT{background:#fbf1e2;color:#b45309}
+  .m.PATCH{background:#e7f2f9;color:#0b6aa2}
+  .m.DELETE{background:#fdebe9;color:#d92d20}
   .dele{margin-top:7px;font-size:11.5px;color:var(--mut2);font-family:ui-monospace,monospace}
   .dele .arrow{color:var(--slate)}
-  .dele .gate{color:#9ce8db}
+  .dele .gate{color:#0b6aa2}
   .sig{margin-top:8px}
   .sig .lbl{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut2);margin-right:4px}
   .sig .chiprow{display:inline-flex;flex-wrap:wrap;gap:5px;vertical-align:top}
   .fn{font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    border:1px solid rgba(124,140,255,.28);color:#bcc6ff;border-radius:6px;padding:1px 7px;background:rgba(124,140,255,.06)}
+    border:1px solid #c7d4f2;color:#2e5bd7;border-radius:4px;padding:1px 7px;background:rgba(46,91,215,.05)}
   .ty{font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    border:1px solid rgba(95,208,192,.3);color:#9ce8db;border-radius:6px;padding:1px 7px;background:rgba(95,208,192,.05)}
+    border:1px solid #bcd8e8;color:#0b6aa2;border-radius:4px;padding:1px 7px;background:rgba(11,106,162,.05)}
   .note{
     margin-top:8px;width:100%;resize:vertical;min-height:0;height:34px;
-    border:1px dashed var(--line2);background:rgba(11,17,32,.6);color:var(--ink);
-    border-radius:8px;padding:6px 9px;font:12.5px ui-sans-serif,system-ui;outline:0;
+    border:1px dashed var(--line2);background:#ffffff;color:var(--ink);
+    border-radius:6px;padding:6px 9px;font:12.5px 'Inter',-apple-system,system-ui,sans-serif;outline:0;
   }
   .note:focus{border-style:solid;border-color:var(--indigo)}
   .note::placeholder{color:var(--mut2)}
   .stwrap{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
   .badge{
     cursor:pointer;user-select:none;border:1px solid transparent;
-    padding:5px 10px;border-radius:999px;font-size:11.5px;font-weight:650;white-space:nowrap;
+    padding:5px 10px;border-radius:4px;font-size:11.5px;font-weight:500;white-space:nowrap;
     display:inline-flex;align-items:center;gap:6px;
   }
   .badge .c{width:7px;height:7px;border-radius:50%}
-  .badge:hover{filter:brightness(1.12)}
-  .b-live{background:rgba(39,211,138,.14);color:#7df0bf;border-color:rgba(39,211,138,.35)}
+  .badge:hover{filter:brightness(1.05)}
+  .b-live{background:#e6f4ec;color:#157347}
   .b-live .c{background:var(--green)}
-  .b-polish{background:rgba(255,178,62,.13);color:#ffd494;border-color:rgba(255,178,62,.33)}
+  .b-polish{background:#fbf1e2;color:#b45309}
   .b-polish .c{background:var(--amber)}
-  .b-todo{background:rgba(255,93,108,.13);color:#ff9aa4;border-color:rgba(255,93,108,.32)}
+  .b-todo{background:#fdebe9;color:#d92d20}
   .b-todo .c{background:var(--red)}
-  .b-config{background:rgba(95,208,192,.13);color:#9ce8db;border-color:rgba(95,208,192,.34)}
+  .b-config{background:#e7f2f9;color:#0b6aa2}
   .b-config .c{background:var(--teal)}
-  .b-private{background:rgba(176,107,255,.14);color:#d2b4ff;border-color:rgba(176,107,255,.35)}
+  .b-private{background:rgba(46,91,215,.09);color:#2e5bd7}
   .b-private .c{background:var(--violet)}
-  .b-backend{background:rgba(118,137,176,.13);color:#aebdd9;border-color:rgba(118,137,176,.3)}
+  .b-backend{background:#eef0f4;color:#4b5364}
   .b-backend .c{background:var(--slate)}
   .pri{font-size:10.5px;color:var(--mut2);cursor:pointer;user-select:none}
   .pri:hover{color:var(--ink)}
@@ -217,7 +212,7 @@
     <a class="live-pill" href="https://recruitersos.co/home" target="_blank" rel="noopener">
       <span class="dot"></span> recruitersos.co
     </a>
-    <a class="ghost" href="/dev-console.html" title="Build sessions & project structure">🗂 Dev Console</a>
+    <a class="ghost" href="/dev-console.html" title="Build sessions & project structure">Dev Console</a>
     <a class="ghost" href="https://github.com/neadusall/recruiteros" target="_blank" rel="noopener">GitHub repo</a>
     <button class="ghost" id="copyMd" title="Copy this map as Markdown">Copy as MD</button>
     <button class="ghost" id="reset" title="Reset your saved statuses &amp; notes">Reset</button>
@@ -227,7 +222,7 @@
 <div class="wrap">
   <div class="hero">
     <h1>The whole product, and its whole backend, on one screen.</h1>
-    <p>Every page, route, module, data type, and interface of RecruitersOS. The front end up top, then the full backend: each <code>lib/</code> module with its exported functions &amp; types, every <code>/api</code> route with its HTTP methods &amp; auth gate, and the public <code>/v1</code> API. Filter to <b style="color:#9ce8db">Config</b> to see the tunable behavior surfaces you'd edit to change interfaces. Click a status to recycle it, star what to do next, jot notes, all saved in this browser.</p>
+    <p>Every page, route, module, data type, and interface of RecruitersOS. The front end up top, then the full backend: each <code>lib/</code> module with its exported functions &amp; types, every <code>/api</code> route with its HTTP methods &amp; auth gate, and the public <code>/v1</code> API. Filter to <b style="color:#0b6aa2">Config</b> to see the tunable behavior surfaces you'd edit to change interfaces. Click a status to recycle it, star what to do next, jot notes, all saved in this browser.</p>
   </div>
 
   <div class="stats" id="stats"></div>
@@ -246,14 +241,14 @@
 
   <footer>
     <div class="legend">
-      <span><b style="color:#7df0bf">Live</b> shipped &amp; in production</span>
-      <span><b style="color:#ffd494">Polish</b> works, needs UX/copy love</span>
-      <span><b style="color:#ff9aa4">To build</b> planned / thin</span>
-      <span><b style="color:#9ce8db">Config</b> tunable rules / rates / constants</span>
-      <span><b style="color:#d2b4ff">Private</b> owner-only / gated</span>
-      <span><b style="color:#aebdd9">Backend</b> module / route, no public page</span>
+      <span><b style="color:#157347">Live</b> shipped &amp; in production</span>
+      <span><b style="color:#b45309">Polish</b> works, needs UX/copy love</span>
+      <span><b style="color:#d92d20">To build</b> planned / thin</span>
+      <span><b style="color:#0b6aa2">Config</b> tunable rules / rates / constants</span>
+      <span><b style="color:#2e5bd7">Private</b> owner-only / gated</span>
+      <span><b style="color:#8a93a5">Backend</b> module / route, no public page</span>
     </div>
-    <p style="margin-top:14px">Generated from the live codebase at <code>integration/</code> · deployed on Hetzner <code>178.156.170.244</code>. <b style="color:#bcc6ff">fn</b> chips = exported functions · <b style="color:#9ce8db">type</b> chips = exported types/interfaces. Star ★ = your "do next".</p>
+    <p style="margin-top:14px">Generated from the live codebase at <code>integration/</code> · deployed on Hetzner <code>178.156.170.244</code>. <b style="color:#2e5bd7">fn</b> chips = exported functions · <b style="color:#0b6aa2">type</b> chips = exported types/interfaces. Star ★ = your "do next".</p>
   </footer>
 </div>
 
@@ -278,7 +273,7 @@ const ORDER=["live","polish","todo","config","private","backend"];
 const GROUPS=[
   /* ============================ FRONT END ============================ */
   { band:"Front end, what customers and buyers see" },
-  { id:"marketing", ic:"🏠", name:"Marketing Site", desc:"Public top-level pages, the first thing buyers see",
+  { id:"marketing", ic:"", name:"Marketing Site", desc:"Public top-level pages, the first thing buyers see",
     items:[
       {t:"Home",          u:"/home",        s:"live",   k:"page", d:"Hero, positioning, the 'signal to placement' thesis. Top of funnel.", tags:["index.html","Bernays copy"]},
       {t:"Platform",      u:"/platform",    s:"live",   k:"page", d:"How the whole operating system fits together end to end.", tags:["platform.html"]},
@@ -288,12 +283,12 @@ const GROUPS=[
       {t:"Help",          u:"/help",        s:"polish", k:"page", d:"Support / docs hub. Thin, grow with onboarding & FAQs.", tags:["help.html"]},
       {t:"Developers",    u:"/developers",  s:"live",   k:"page", d:"API & dev console, catalog, collect, enrich, campaign build endpoints.", tags:["developers.html","OpenAPI"]},
     ]},
-  { id:"os", ic:"🧭", name:"Operating Systems", desc:"The two motions sharing one infrastructure",
+  { id:"os", ic:"", name:"Operating Systems", desc:"The two motions sharing one infrastructure",
     items:[
       {t:"Recruiting OS",            u:"/recruiting-os",            s:"live", k:"page", d:"The placements motion, candidate-side operating system.", tags:["recruiting-os.html"]},
       {t:"Business Development OS",  u:"/business-development-os",  s:"live", k:"page", d:"The job-orders motion, win clients from the same signals (1.3x pricing).", tags:["business-development-os.html"]},
     ]},
-  { id:"modules", ic:"🧩", name:"Module Pages", desc:"The feature-pillar marketing pages (GTM-OS taxonomy)",
+  { id:"modules", ic:"", name:"Module Pages", desc:"The feature-pillar marketing pages (GTM-OS taxonomy)",
     items:[
       {t:"Signals",      u:"/signals",      s:"live",   k:"page", d:"~40 hiring signals, free/public-first sourcing. The atomic trigger.", tags:["signals.html"]},
       {t:"Sourcing",     u:"/sourcing",     s:"live",   k:"page", d:"Search + enrich, led by JD-based candidate match scoring.", tags:["sourcing.html"]},
@@ -303,7 +298,7 @@ const GROUPS=[
       {t:"Analytics",    u:"/analytics",    s:"polish", k:"page", d:"Reporting surface. Tie KPIs to the real persisted command-center data.", tags:["analytics.html"]},
       {t:"Integrations", u:"/integrations", s:"live",   k:"page", d:"Loxo, Greenhouse, Instantly, Unipile, TalTxt, Telnyx.", tags:["integrations.html"]},
     ]},
-  { id:"app", ic:"⚡", name:"App / Portal", desc:"The real product the customer logs into",
+  { id:"app", ic:"", name:"App / Portal", desc:"The real product the customer logs into",
     items:[
       {t:"Command Center", u:"/command", s:"live", k:"page", d:"The working portal. Hash routes: #overview #prospects #response #builder #bd. Real /api fetches, persistent, live-only sending.", tags:["command.html","#hash routed","real data"]},
       {t:"Target Builder", u:"/campaign-builder", s:"live", k:"page", d:"Pre-launch campaign builder from free signals. Embeds via ?embed=1. Approve & Launch creates a real campaign + bulk prospects.", tags:["campaign-builder.html","?embed=1"]},
@@ -311,14 +306,14 @@ const GROUPS=[
       {t:"Alfred", u:"/alfred", s:"live", k:"page", d:"User-owned internal LinkedIn/multi-channel outreach engine + Chrome MV3 extension.", tags:["alfred.html","user-owned","extension/"]},
       {t:"App (legacy)", u:"/app", s:"polish", k:"page", d:"Earlier app shell. Decide: fold into Command Center or retire.", tags:["app.html"]},
     ]},
-  { id:"auth", ic:"🔐", name:"Auth Pages", desc:"Enterprise sign-up, login, recovery",
+  { id:"auth", ic:"", name:"Auth Pages", desc:"Enterprise sign-up, login, recovery",
     items:[
       {t:"Log in",          u:"/login",           s:"live", k:"page", d:"Session login (PBKDF2). 'Log in' CTA target.", tags:["login.html"]},
       {t:"Sign up",         u:"/signup",          s:"live", k:"page", d:"Corporate-email signup auto-provisions an enterprise workspace.", tags:["signup.html","?invite="]},
       {t:"Forgot password", u:"/forgot-password", s:"live", k:"page", d:"Triggers Resend reset email (needs DNS verify in Resend).", tags:["forgot-password.html"]},
       {t:"Reset password",  u:"/reset-password",  s:"live", k:"page", d:"Token-based reset completion; revokes existing sessions.", tags:["reset-password.html?token="]},
     ]},
-  { id:"owner-page", ic:"🛠️", name:"Owner Console (page)", desc:"Private back office, you, the platform owner",
+  { id:"owner-page", ic:"", name:"Owner Console (page)", desc:"Private back office, you, the platform owner",
     items:[
       {t:"Owner Console", u:"#", live:false, s:"private", k:"page", d:"Cost tracking, live pricing calculator, full account control (suspend/reset/delete). Served only at a private unguessable slug + owner-email gate. NOT linked anywhere.", tags:["owner-console.html","/<private-slug>","amber theme","noindex"]},
     ]},
@@ -326,7 +321,7 @@ const GROUPS=[
   /* ============================ BACKEND ============================ */
   { band:"Backend, every module, route, type & interface (integration/)" },
 
-  { id:"be-core", ic:"🧱", name:"Core domain & persistence", desc:"Shared models, the repository seam, HTTP helpers", backend:true,
+  { id:"be-core", ic:"", name:"Core domain & persistence", desc:"Shared models, the repository seam, HTTP helpers", backend:true,
     items:[
       {t:"Domain types", u:"integration/lib/core/types.ts", s:"backend", k:"module", d:"Domain model types for campaigns, prospects, activities, signals, channels.",
         types:["Motion","Channel","ProspectStatus","SignalKind","ICP","ChannelConfig","SequenceStep","Campaign","Prospect","ActivityEvent"]},
@@ -340,7 +335,7 @@ const GROUPS=[
         fns:["ok","fail","body","context","requireSession","requireCapability","requireOwner","withSessionCookie"]},
     ]},
 
-  { id:"be-auth", ic:"🔑", name:"Auth, sessions & RBAC", desc:"Sign-up/login, magic links, OAuth, roles, team",  backend:true,
+  { id:"be-auth", ic:"", name:"Auth, sessions & RBAC", desc:"Sign-up/login, magic links, OAuth, roles, team",  backend:true,
     items:[
       {t:"Auth engine", u:"integration/lib/auth/index.ts", s:"backend", k:"module", d:"Register, login, sessions, magic links, OAuth, password reset, admin account controls. sendWorkspaceEmail() is the email seam (TODO prod: Resend/SES).",
         fns:["register","login","requestMagicLink","consumeMagicLink","requestPasswordReset","peekResetToken","resetPassword","upsertOAuthUser","verifyEmail","sessionContext","logout","tokenFromRequest","issueSessionForUser","sendWorkspaceEmail","adminListAccounts","adminSetSuspended","adminDeleteWorkspace"],
@@ -361,7 +356,7 @@ const GROUPS=[
       {t:"Accept invite", u:"/api/team/accept", live:false, s:"backend", k:"route", meth:["PUT"], mod:"lib/auth/team", gate:"public", d:"Join workspace at invited role + issue session."},
     ]},
 
-  { id:"be-response", ic:"📥", name:"Response pipeline (the Money Maker)", desc:"Ingest → match → classify → route → log. The unified inbox", backend:true,
+  { id:"be-response", ic:"", name:"Response pipeline (the Money Maker)", desc:"Ingest → match → classify → route → log. The unified inbox", backend:true,
     items:[
       {t:"Pipeline orchestrator", u:"integration/lib/response/index.ts", s:"backend", k:"module", d:"processInbound() runs the whole flow, idempotent on provider message id.",
         fns:["processInbound","recentResponses"]},
@@ -384,7 +379,7 @@ const GROUPS=[
       {t:"Inbox actions", u:"/api/response/actions", live:false, s:"backend", k:"route", meth:["POST"], mod:"lib/response", gate:"session", d:"Classify, book, or suppress a prospect from the inbox."},
     ]},
 
-  { id:"be-campaigns", ic:"🚀", name:"Campaigns, cadence & sequence", desc:"Lifecycle, the daily loop, the 28-day sequence, A/B", backend:true,
+  { id:"be-campaigns", ic:"", name:"Campaigns, cadence & sequence", desc:"Lifecycle, the daily loop, the 28-day sequence, A/B", backend:true,
     items:[
       {t:"Campaign lifecycle", u:"integration/lib/campaigns/index.ts", s:"backend", k:"module", d:"Create draft + activate. Also exposes the 7-phase deploy checklist and BD funnel benchmarks.",
         fns:["createCampaign","activateCampaign","DEPLOY_PHASES","BD_BENCHMARKS"]},
@@ -398,14 +393,14 @@ const GROUPS=[
       {t:"Cadence control", u:"/api/campaigns/cadence", live:false, s:"backend", k:"route", meth:["GET","POST"], mod:"lib/campaigns", gate:"session", d:"View/run the daily loop; approve or kill queued drafts; push approved."},
     ]},
 
-  { id:"be-prospects", ic:"👥", name:"Prospects & lifecycle", desc:"Add, bulk-import, stage transitions, nurture rules", backend:true,
+  { id:"be-prospects", ic:"", name:"Prospects & lifecycle", desc:"Add, bulk-import, stage transitions, nurture rules", backend:true,
     items:[
       {t:"Prospect engine", u:"integration/lib/prospects/index.ts", s:"backend", k:"module", d:"Lifecycle, add/bulk-upload (ATS upsert), transitions, Day-28 nurture automation. LIFECYCLE holds per-motion status labels.",
         fns:["addProspect","bulkUpload","transition","applyLifecycleRules","statusLabel","LIFECYCLE"]},
       {t:"Prospects API", u:"/api/prospects", live:false, s:"backend", k:"route", meth:["GET","POST"], mod:"lib/prospects", gate:"session", d:"List pipeline; add, bulk-upload, or transition lifecycle stage."},
     ]},
 
-  { id:"be-channels", ic:"📡", name:"Channels & Providers", desc:"The send façade + every external integration client", backend:true,
+  { id:"be-channels", ic:"", name:"Channels & Providers", desc:"The send façade + every external integration client", backend:true,
     items:[
       {t:"Channel façade", u:"integration/lib/channels/index.ts", s:"backend", k:"module", d:"Routes a touch to the right provider (email→Instantly, linkedin→Unipile/SalesRobot, sms→TalTxt/Telnyx, voice→Telnyx AMD) + enrichment waterfall.",
         fns:["sendTouch","enrich"], types:["SendResult","SendTouch","Enriched"]},
@@ -435,7 +430,7 @@ const GROUPS=[
       {t:"Voice dialer", u:"/api/voice/{dial,webhook}", live:false, s:"backend", k:"route", meth:["POST"], mod:"lib/providers (telnyx)", gate:"auth · webhook", d:"Place outbound call with AMD + client_state for billing; inbound voice webhook."},
     ]},
 
-  { id:"be-signals", ic:"📶", name:"Signals engine", desc:"~40 hiring signals: pull → dedupe → score → enrich → build", backend:true,
+  { id:"be-signals", ic:"", name:"Signals engine", desc:"~40 hiring signals: pull → dedupe → score → enrich → build", backend:true,
     items:[
       {t:"Signals barrel", u:"integration/lib/signals/index.ts", s:"backend", k:"module", d:"Public gateway re-exporting the whole engine.",
         fns:["collect","pullAll","dedupe","rankSignals","enrich","draftSequence","buildCampaign","prepareCampaign"]},
@@ -467,7 +462,7 @@ const GROUPS=[
         types:["SignalType","Motion","SignalCategory","SubjectKind","SignalDefinition","SourceKind","SourceRef","Company","Person","FundingStage","Signal","SignalStatus","SignalScore","ICP","PullResult"]},
     ]},
 
-  { id:"be-linkedin", ic:"💼", name:"LinkedIn engine", desc:"Accept-triggered multi-channel sequence engine", backend:true,
+  { id:"be-linkedin", ic:"", name:"LinkedIn engine", desc:"Accept-triggered multi-channel sequence engine", backend:true,
     items:[
       {t:"Sequence engine", u:"integration/lib/linkedin/sequenceEngine.ts", s:"backend", k:"module", d:"Cadence engine: pull due enrollments, run next step, react to webhook events.",
         fns:["SequenceEngine · enroll · tick · runNextStep · handleEvent"], types:["Repository","EngineEvent"]},
@@ -493,7 +488,7 @@ const GROUPS=[
       {t:"Cron tick", u:"/api/linkedin/cron", live:false, s:"backend", k:"route", meth:["GET","POST"], mod:"lib/linkedin", gate:"cron-secret", d:"Process a batch of due enrollments and reschedule."},
     ]},
 
-  { id:"be-sms", ic:"💬", name:"SMS conversation", desc:"Two-way AI texting (user-owned)", backend:true,
+  { id:"be-sms", ic:"", name:"SMS conversation", desc:"Two-way AI texting (user-owned)", backend:true,
     items:[
       {t:"Conversation handler", u:"integration/lib/sms/conversation.ts", s:"backend", k:"module", d:"Classify inbound text, decide auto-reply vs escalate.",
         fns:["handleInbound"], types:["ConversationContext","ConversationDecision"]},
@@ -503,7 +498,7 @@ const GROUPS=[
       {t:"Webhook", u:"/api/sms/webhook", live:false, s:"backend", k:"route", meth:["POST"], mod:"lib/sms", gate:"public", d:"Inbound text from Telnyx: classify, auto-reply or escalate."},
     ]},
 
-  { id:"be-billing", ic:"💵", name:"Billing, rates & pricing", desc:"Usage ledger, the cost-rate catalog, pricing brain", backend:true,
+  { id:"be-billing", ic:"", name:"Billing, rates & pricing", desc:"Usage ledger, the cost-rate catalog, pricing brain", backend:true,
     items:[
       {t:"Billing barrel", u:"integration/lib/billing/index.ts", s:"backend", k:"module", d:"Re-exports rates + pricing + ledger.", fns:["* from rates/pricing/ledger"]},
       {t:"Usage ledger", u:"integration/lib/billing/ledger.ts", s:"backend", k:"module", d:"Append-only cost ledger per workspace by category/source/motion; rollups.",
@@ -514,7 +509,7 @@ const GROUPS=[
         fns:["estimateCost","recommendPrice","presetPricingTable","MOTION_MULTIPLIER","PRESET_VOLUMES"], types:["CostLine","CostBreakdown","PriceRecommendation","EstimateOptions"]},
     ]},
 
-  { id:"be-owner", ic:"👑", name:"Owner back-office", desc:"Private platform-owner controls & cost model", backend:true,
+  { id:"be-owner", ic:"", name:"Owner back-office", desc:"Private platform-owner controls & cost model", backend:true,
     items:[
       {t:"Owner engine", u:"integration/lib/owner/index.ts", s:"private", k:"module", d:"Owner identity, fully-joined account view (sorted by cost), composable hard reset. Fallback owner: neadusall@gmail.com.",
         fns:["ownerEmails","isOwnerEmail","listFullAccounts","fullAccountDetail","updateAccountMeta","setAccountSuspended","revokeAccountSessions","hardReset"], types:["FullAccount","HardResetOptions","HardResetResult"]},
@@ -530,7 +525,7 @@ const GROUPS=[
       {t:"Usage ingest", u:"/api/owner/usage/ingest", live:false, s:"private", k:"route", meth:["POST"], mod:"lib/billing", gate:"owner-or-service-key", d:"Record a usage/cost event from a worker or external provider."},
     ]},
 
-  { id:"be-ats", ic:"🗃️", name:"ATS (system of record)", desc:"Loxo adapter + object mapping + vendor catalog", backend:true,
+  { id:"be-ats", ic:"", name:"ATS (system of record)", desc:"Loxo adapter + object mapping + vendor catalog", backend:true,
     items:[
       {t:"ATS factory", u:"integration/lib/ats/index.ts", s:"backend", k:"module", d:"Active adapter singleton (defaults Loxo). LOXO_OBJECT_MAP + ATS_VENDORS catalog.",
         fns:["getAts","setAts","LOXO_OBJECT_MAP","ATS_VENDORS"]},
@@ -541,7 +536,7 @@ const GROUPS=[
       {t:"ATS API", u:"/api/ats", live:false, s:"backend", k:"route", meth:["GET"], mod:"lib/ats", gate:"capability:ats:manage", d:"Vendor catalog + Loxo object mapping."},
     ]},
 
-  { id:"be-workspace", ic:"🧰", name:"Workspace services", desc:"Overview, accounts, connected pre-flight, content, in-market, seed", backend:true,
+  { id:"be-workspace", ic:"", name:"Workspace services", desc:"Overview, accounts, connected pre-flight, content, in-market, seed", backend:true,
     items:[
       {t:"Overview rollup", u:"integration/lib/overview/index.ts", s:"backend", k:"module", d:"Capacity RAG, appointments, warm convos, active drips from core + accounts + responses.",
         fns:["overview"], types:["CapacityStat","OverviewSnapshot"]},
@@ -563,7 +558,7 @@ const GROUPS=[
       {t:"Seed API", u:"/api/dev/seed", live:false, s:"backend", k:"route", meth:["POST"], mod:"lib/dev/seed", gate:"session", d:"Populate the signed-in workspace with demo data."},
     ]},
 
-  { id:"be-publicapi", ic:"🔌", name:"Public API (/v1)", desc:"Framework-agnostic, API-key-authed surface for integrators", backend:true,
+  { id:"be-publicapi", ic:"", name:"Public API (/v1)", desc:"Framework-agnostic, API-key-authed surface for integrators", backend:true,
     items:[
       {t:"Shared router", u:"integration/api/router.ts", s:"backend", k:"module", d:"handle() dispatch: authenticate → 8 stable handlers → normalized response. Next.js + Express adapters.",
         fns:["handle","nextHandler","expressHandler"]},
@@ -580,7 +575,7 @@ const GROUPS=[
 
   /* ============================ INFRA ============================ */
   { band:"Infra, deploy & docs" },
-  { id:"infra", ic:"📦", name:"Infra, Deploy & Docs", desc:"How it ships and stays up",
+  { id:"infra", ic:"", name:"Infra, Deploy & Docs", desc:"How it ships and stays up",
     items:[
       {t:"Docker + Compose", u:"#", live:false, s:"infra", k:"infra", d:"Multi-stage Next build serving marketing+portal+API from one origin. app + Caddy (auto-HTTPS) + postgres:16.", tags:["Dockerfile","docker-compose.yml","Caddyfile"]},
       {t:"One-shot deploy",  u:"#", live:false, s:"live",  k:"infra", d:"curl deploy.sh | bash, generates secrets, writes .env.production. Redeploy: git pull && docker compose up -d --build.", tags:["deploy.sh","auto-deploy.sh"]},
@@ -640,7 +635,7 @@ function build(){
     const sec=document.createElement("section");
     sec.className="grp"+(g.collapsed?" collapsed":"")+(g.backend?" backend":"");
     const h=document.createElement("h2");
-    h.innerHTML=`<span class="ic">${g.ic}</span><span class="nm">${g.name}</span>
+    h.innerHTML=`<span class="nm">${g.name}</span>
       <span class="ds">${g.desc}</span><span class="ct">${visible.length}/${g.items.length}</span>
       <span class="car">▾</span>`;
     h.onclick=()=>{g.collapsed=!g.collapsed;build()};
@@ -655,12 +650,12 @@ function build(){
       const kindLbl={module:"Module",route:"Route",config:"Config",infra:"Infra"}[it.k]||"";
       const kind=kindLbl?`<span class="kind k-${it.k}">${kindLbl}</span>`:"";
       const methods=(it.meth&&it.meth.length)?`<div class="methods">`+it.meth.map(m=>`<span class="m ${m}">${m}</span>`).join("")+`</div>`:"";
-      const dele=(it.mod||it.gate)?`<div class="dele">${it.mod?`<span class="arrow">→</span> ${it.mod}`:""}${(it.mod&&it.gate)?"  ·  ":""}${it.gate?`<span class="gate">🔒 ${it.gate}</span>`:""}</div>`:"";
+      const dele=(it.mod||it.gate)?`<div class="dele">${it.mod?`<span class="arrow">→</span> ${it.mod}`:""}${(it.mod&&it.gate)?"  ·  ":""}${it.gate?`<span class="gate">${it.gate}</span>`:""}</div>`:"";
       const urlTxt=it.u==='#'?'(local / not a page)':it.u;
       row.innerHTML=`
         <div class="ttl">
           ${kind}
-          ${href?`<a href="${href}" target="_blank" rel="noopener">${it.t}</a>`:`<span style="font-weight:650">${it.t}</span>`}
+          ${href?`<a href="${href}" target="_blank" rel="noopener">${it.t}</a>`:`<span style="font-weight:600">${it.t}</span>`}
           <span class="url ${linkable?'':'muted'}">${urlTxt}</span>
           ${methods}
         </div>
@@ -719,10 +714,10 @@ function renderStats(){
 }
 function renderFilters(){
   const c=tally();
-  const defs=[["all","All",c.total,"#7c8cff"],["star","★ Next",c.star,"#ffb23e"],
-    ["live","Live",c.live,"#27d38a"],["polish","Polish",c.polish,"#ffb23e"],
-    ["todo","To build",c.todo,"#ff5d6c"],["config","Config",c.config,"#5fd0c0"],
-    ["private","Private",c.private,"#b06bff"],["backend","Backend",c.backend,"#7689b0"]];
+  const defs=[["all","All",c.total,"#2e5bd7"],["star","★ Next",c.star,"#b45309"],
+    ["live","Live",c.live,"#157347"],["polish","Polish",c.polish,"#b45309"],
+    ["todo","To build",c.todo,"#d92d20"],["config","Config",c.config,"#0b6aa2"],
+    ["private","Private",c.private,"#2e5bd7"],["backend","Backend",c.backend,"#8a93a5"]];
   document.getElementById("filters").innerHTML=defs.map(([k,l,n,col])=>
     `<span class="chip ${activeFilter===k?'on':''}" data-f="${k}">
       <span class="c" style="background:${col}"></span>${l}<small>${n}</small></span>`).join("");
@@ -744,18 +739,18 @@ document.getElementById("copyMd").onclick=()=>{
   let md="# RecruitersOS, Project & Backend Map\n\nLive: https://recruitersos.co\n\n";
   GROUPS.forEach(g=>{
     if(g.band){md+=`\n# ${g.band}\n\n`;return;}
-    md+=`## ${g.ic} ${g.name}\n_${g.desc}_\n\n`;
+    md+=`## ${g.name}\n_${g.desc}_\n\n`;
     g.items.forEach((it,ii)=>{
       const r=saved[idOf(g,ii)]||{}, st=curStatus(g,ii);
       const linkable=it.live!==false&&it.u.startsWith("/")&&!it.u.startsWith("/api")&&!it.u.startsWith("/v1");
       const link=linkable?`${BASE}${it.u}`:it.u;
-      md+=`- ${r.star?'⭐ ':''}**[${it.t}](${link})** \`${STATUS[st].label}\``;
+      md+=`- ${r.star?'':''}**[${it.t}](${link})** \`${STATUS[st].label}\``;
       if(it.meth&&it.meth.length) md+=` \`${it.meth.join(" ")}\``;
       md+=`, ${it.d}`;
       if(it.mod) md+=` _(→ ${it.mod}${it.gate?`, ${it.gate}`:""})_`;
       if(it.fns&&it.fns.length) md+=`\n  - fns: ${it.fns.join(", ")}`;
       if(it.types&&it.types.length) md+=`\n  - types: ${it.types.join(", ")}`;
-      if(r.note) md+=`\n  - 📝 ${r.note}`;
+      if(r.note) md+=`\n  - ${r.note}`;
       md+="\n";
     });
     md+="\n";

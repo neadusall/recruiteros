@@ -758,10 +758,10 @@
 
     // API access (reselling): lend house keys to this customer, with terms.
     html += '<style>' +
-      '.grant-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line,#1f232b)}' +
+      '.grant-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line,var(--surface-2))}' +
       '.grant-tog{display:flex;align-items:center;gap:7px;flex:1;min-width:150px}' +
-      '.g-fld{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted,#8b93a1)}' +
-      '.g-fld input{width:64px;padding:4px 7px;border-radius:7px;border:1px solid var(--line,#2a2f3a);background:var(--bg,#0e0f13);color:var(--text,#e6e9ef);font:inherit}' +
+      '.g-fld{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted,var(--text-dim))}' +
+      '.g-fld input{width:64px;padding:4px 7px;border-radius:7px;border:1px solid var(--line,#2a2f3a);background:var(--bg,var(--bg));color:var(--text,var(--text-muted));font:inherit}' +
       '</style>' +
       '<h3 style="font-size:13px;margin:16px 0 6px">API access · reselling</h3>' +
       '<div class="note" style="margin-bottom:8px">Lend your house API keys to this customer. When on, they use YOUR key for that tool; set the markup % and/or monthly fee your billing applies.</div>' +

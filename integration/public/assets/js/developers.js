@@ -93,7 +93,7 @@
     SCOPES.forEach((s) => {
       const chip = el("span", "scope-chip", s);
       chip.style.cursor = "pointer";
-      const on = () => chip.style.background = state.pickedScopes.has(s) ? "rgba(124,92,255,.3)" : "rgba(255,255,255,.06)";
+      const on = () => chip.style.background = state.pickedScopes.has(s) ? "color-mix(in srgb, var(--brand) 40%, transparent)" : "var(--surface-2)";
       on();
       chip.addEventListener("click", () => { state.pickedScopes.has(s) ? state.pickedScopes.delete(s) : state.pickedScopes.add(s); on(); });
       wrap.appendChild(chip);
@@ -108,7 +108,7 @@
     $("#keyLabel").value = "";
     // Show the secret once, exactly like the real issueKey() contract.
     const out = el("div", "card");
-    out.style.borderColor = "rgba(56,224,166,.4)";
+    out.style.borderColor = "color-mix(in srgb, var(--ok) 40%, transparent)";
     out.innerHTML = `<h3>Copy your secret now</h3><p class="sub">Shown once. RecruitersOS stores only a hash, you cannot retrieve it again.</p>
       <div class="codeblock">${secret}</div>`;
     $("#keyList").parentElement.insertBefore(out, $("#keyList").nextSibling);
@@ -142,7 +142,7 @@
     const wrap = $("#eventPick"); wrap.innerHTML = "";
     EVENTS.forEach((e) => {
       const chip = el("span", "scope-chip", e); chip.style.cursor = "pointer";
-      const on = () => chip.style.background = state.pickedEvents.has(e) ? "rgba(124,92,255,.3)" : "rgba(255,255,255,.06)";
+      const on = () => chip.style.background = state.pickedEvents.has(e) ? "color-mix(in srgb, var(--brand) 40%, transparent)" : "var(--surface-2)";
       on();
       chip.addEventListener("click", () => { state.pickedEvents.has(e) ? state.pickedEvents.delete(e) : state.pickedEvents.add(e); on(); });
       wrap.appendChild(chip);
@@ -165,7 +165,7 @@
     const secret = "whsec_" + Math.random().toString(36).slice(2, 14);
     state.hooks.push({ url, events: [...state.pickedEvents], secret });
     renderHooks(); $("#hookUrl").value = "";
-    const out = el("div", "card"); out.style.borderColor = "rgba(56,224,166,.4)";
+    const out = el("div", "card"); out.style.borderColor = "color-mix(in srgb, var(--ok) 40%, transparent)";
     out.innerHTML = `<h3>Signing secret</h3><p class="sub">Verify each delivery's <code>X-Signature-256</code> with this. Shown once.</p><div class="codeblock">${secret}</div>`;
     $("#hookList").parentElement.insertBefore(out, $("#hookList").nextSibling);
     toast("Webhook registered");
@@ -196,7 +196,7 @@
     selectEndpoint();
   }
   function selectEndpoint() {
-    $$("#epList .endpoint").forEach((r, i) => r.style.borderColor = ENDPOINTS[i] === activeEp ? "rgba(124,92,255,.6)" : "rgba(255,255,255,.08)");
+    $$("#epList .endpoint").forEach((r, i) => r.style.borderColor = ENDPOINTS[i] === activeEp ? "color-mix(in srgb, var(--brand) 40%, transparent)" : "var(--border)");
     $("#reqBody").value = activeEp.body ? JSON.stringify(activeEp.body, null, 2) : "";
     $("#reqBody").disabled = !activeEp.body;
   }

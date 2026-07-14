@@ -52,13 +52,26 @@
   const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const initials = (n) => (n || '?').split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase();
-  const colorFor = (s) => { const palette = ['#7c5cff', '#4dd0ff', '#ff7ac6', '#38e0a6', '#ffc24d']; let h = 0; for (const c of (s || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0; return palette[h % palette.length]; };
+  const colorFor = (s) => { const palette = ['var(--brand)', 'var(--info)', 'var(--brand-2)', 'var(--ok)', 'var(--warn)']; let h = 0; for (const c of (s || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0; return palette[h % palette.length]; };
   const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
   const relDay = (t) => { const d = Math.round((t - simNow) / DAY); return d === 0 ? 'today' : d < 0 ? -d + 'd ago' : 'in ' + d + 'd'; };
 
+  /* ---- inline stroke icons (replace emoji glyphs) ---- */
+  const icn = (p) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:1em;height:1em;vertical-align:-0.125em">' + p + '</svg>';
+  const ICON = {
+    zap: icn('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'),
+    layers: icn('<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>'),
+    clock: icn('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>'),
+    target: icn('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>'),
+    msgCircle: icn('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'),
+    briefcase: icn('<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>'),
+    link: icn('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'),
+    check: icn('<polyline points="20 6 9 17 4 12"/>'),
+  };
+
   let toastT;
   function toast(msg, kind) {
-    const t = $('#a-toast'); t.innerHTML = (kind === 'warn' ? '⚡ ' : '✓ ') + msg; t.classList.add('show');
+    const t = $('#a-toast'); t.innerHTML = (kind === 'warn' ? ICON.zap + ' ' : '✓ ') + msg; t.classList.add('show');
     clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600);
   }
 
@@ -82,15 +95,15 @@
     const c = campaign();
     const reachable = window.StudioExt && window.StudioExt.env().canReach;
     if (c && c._liveRoute && reachable) {
-      banner.style.borderColor = 'rgba(56,224,166,.35)';
-      banner.innerHTML = '🟢 <b>Live.</b> This campaign\'s LinkedIn steps run through your real account via the browser extension, with throttles and working hours enforced. The Test clock does not affect live sending.';
+      banner.style.borderColor = 'color-mix(in srgb, var(--ok) 40%, transparent)';
+      banner.innerHTML = '<span class="healthdot good"></span> <b>Live.</b> This campaign\'s LinkedIn steps run through your real account via the browser extension, with throttles and working hours enforced. The Test clock does not affect live sending.';
     } else {
       banner.style.borderColor = '';
-      banner.innerHTML = '🧪 <b>Test mode.</b> Actions are simulated so you can build and preview safely. To send for real, open the <b>LinkedIn Live</b> tab, connect the extension, link your account, then enable "Route this campaign through my real account".';
+      banner.innerHTML = '<b>Test mode.</b> Actions are simulated so you can build and preview safely. To send for real, open the <b>LinkedIn Live</b> tab, connect the extension, link your account, then enable "Route this campaign through my real account".';
     }
   }
   function renderAll() {
-    $('#simNow').textContent = '🕐 ' + fmtDate(simNow);
+    $('#simNow').textContent = fmtDate(simNow);
     renderCampaigns();
     renderHeader();
     updateMode();
@@ -140,8 +153,8 @@
     const seq = sequence();
     const canvas = $('#seqCanvas'); canvas.innerHTML = '';
     if (!seq || !seq.steps.length) {
-      canvas.innerHTML = '<div class="empty"><div class="big">🧩</div><p>No steps yet. Drag an action from the palette above, or click “Add action step”.</p></div>';
-      $('#inspector').innerHTML = '<div class="empty"><div class="big">🧩</div><p>Add your first step.</p></div>';
+      canvas.innerHTML = '<div class="empty"><div class="big">' + ICON.layers + '</div><p>No steps yet. Drag an action from the palette above, or click “Add action step”.</p></div>';
+      $('#inspector').innerHTML = '<div class="empty"><div class="big">' + ICON.layers + '</div><p>Add your first step.</p></div>';
       wireCanvasDrop(canvas, seq);
       return;
     }
@@ -151,7 +164,7 @@
       if (step.kind === 'delay') {
         node.style.padding = '9px 13px';
         node.innerHTML = `<span class="sn-grip" title="Drag to reorder">⠿</span>
-          <div class="sn-ico" style="font-size:15px;width:30px;height:30px">⏱️</div>
+          <div class="sn-ico" style="font-size:15px;width:30px;height:30px">${ICON.clock}</div>
           <div class="sn-body"><div class="sn-title" style="font-size:13px">Wait ${step.delay.amount} ${step.delay.unit}</div></div>
           <div class="sn-actions"><button class="sn-iconbtn" data-del="${i}" title="Delete">✕</button></div>`;
       } else {
@@ -247,7 +260,7 @@
     const insp = $('#inspector');
     if (!step) { insp.innerHTML = '<div class="empty"><p>Select a step.</p></div>'; return; }
     if (step.kind === 'delay') {
-      insp.innerHTML = `<h3>⏱️ Delay</h3>
+      insp.innerHTML = `<h3>Delay</h3>
         <div class="a-field"><label class="a-label">Wait</label>
           <div class="row"><input class="a-input" id="delayAmt" type="number" min="0" value="${step.delay.amount}" style="width:90px">
           <select class="a-select" id="delayUnit"><option ${step.delay.unit==='minutes'?'selected':''}>minutes</option><option ${step.delay.unit==='hours'?'selected':''}>hours</option><option ${step.delay.unit==='days'?'selected':''}>days</option></select></div></div>`;
@@ -341,7 +354,7 @@
     const body = A.render(bodySrc || ACTION_CATALOG[a.channel].actions[a.type].label, lead);
     $('#pvBody') && ($('#pvBody').textContent = (subjSrc ? A.render(subjSrc, lead) + '\n\n' : '') + body);
     const miss = A.missingFields(bodySrc || '', lead).concat(A.missingFields(subjSrc || '', lead));
-    $('#pvWarn') && ($('#pvWarn').textContent = miss.length ? '⚠ Unknown merge fields: ' + [...new Set(miss)].map(m => '{' + m + '}').join(', ') : '');
+    $('#pvWarn') && ($('#pvWarn').textContent = miss.length ? 'Unknown merge fields: ' + [...new Set(miss)].map(m => '{' + m + '}').join(', ') : '');
   }
 
   function moveStep(i, dir) {
@@ -377,10 +390,10 @@
     const enrolledLeadIds = new Set(store.where('enrollments', e => e.campaignId === activeCampaignId).map(e => e.leadId));
     const t = $('#leadsTable');
     if (!allLeads.length) {
-      t.innerHTML = `<tbody><tr><td><div class="empty"><div class="big">🎯</div><h3>No leads yet</h3>
+      t.innerHTML = `<tbody><tr><td><div class="empty"><div class="big">${ICON.target}</div><h3>No leads yet</h3>
         <p>Bring people in to start outreach. Three ways:</p>
         <div class="row" style="justify-content:center;gap:8px;margin-top:10px;flex-wrap:wrap">
-          <button class="a-btn primary sm" id="empSrc">⚡ Source from Sales Navigator</button>
+          <button class="a-btn primary sm" id="empSrc">Source from Sales Navigator</button>
           <button class="a-btn sm" id="empImp">⇪ Import a CSV</button>
           <button class="a-btn sm" id="empAdd">+ Add one manually</button>
         </div></div></td></tr></tbody>`;
@@ -468,12 +481,12 @@
   function renderInbox() {
     const threads = store.where('threads', t => t.campaignId === activeCampaignId);
     const list = $('#threadList'); list.innerHTML = '';
-    if (!threads.length) { list.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="big">💬</div><p>No conversations yet. Advance the sim clock to generate replies.</p></div>'; $('#chat').innerHTML = ''; return; }
+    if (!threads.length) { list.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="big">' + ICON.msgCircle + '</div><p>No conversations yet. Advance the sim clock to generate replies.</p></div>'; $('#chat').innerHTML = ''; return; }
     if (!activeThreadId || !threads.find(t => t.id === activeThreadId)) activeThreadId = threads[0].id;
     threads.forEach(th => {
       const last = th.messages[th.messages.length - 1];
       const row = el('div', 'thread-row' + (th.id === activeThreadId ? ' active' : ''));
-      row.innerHTML = `<div class="tn"><span class="avatar2" style="background:${colorFor(th.name)};width:24px;height:24px;font-size:10px">${initials(th.name)}</span>${esc(th.name)} ${th.hot ? '<span class="hotbadge">🔥 HOT</span>' : ''}</div>
+      row.innerHTML = `<div class="tn"><span class="avatar2" style="background:${colorFor(th.name)};width:24px;height:24px;font-size:10px">${initials(th.name)}</span>${esc(th.name)} ${th.hot ? '<span class="hotbadge">HOT</span>' : ''}</div>
         <div class="tp">${last ? (last.dir === 'out' ? 'You: ' : '') + esc(last.text) : ''}</div>`;
       row.addEventListener('click', () => { activeThreadId = th.id; renderInbox(); });
       list.appendChild(row);
@@ -483,10 +496,10 @@
   function renderChat() {
     const th = store.get('threads', activeThreadId); const chat = $('#chat'); if (!th) { chat.innerHTML = ''; return; }
     const enr = store.get('enrollments', th.enrollmentId);
-    chat.innerHTML = `<div class="chat-head"><span class="avatar2" style="background:${colorFor(th.name)};width:26px;height:26px;font-size:11px">${initials(th.name)}</span> ${esc(th.name)} ${th.hot ? '<span class="hotbadge">🔥 interest detected</span>' : ''}
+    chat.innerHTML = `<div class="chat-head"><span class="avatar2" style="background:${colorFor(th.name)};width:26px;height:26px;font-size:11px">${initials(th.name)}</span> ${esc(th.name)} ${th.hot ? '<span class="hotbadge">interest detected</span>' : ''}
         <span class="spacer" style="flex:1"></span>
         <button class="a-btn ghost sm" id="chHot" title="Toggle hot">${th.hot ? '★' : '☆'}</button>
-        ${enr && enr.status === 'replied' ? '<button class="a-btn ghost sm" id="chResume" title="Resume the automated sequence">▶ Resume</button>' : ''}
+        ${enr && enr.status === 'replied' ? '<button class="a-btn ghost sm" id="chResume" title="Resume the automated sequence">Resume</button>' : ''}
       </div>
       <div class="chat-body" id="chatBody"></div>
       <form class="chat-compose" id="chForm"><input class="a-input" id="chMsg" placeholder="Write a reply..." autocomplete="off"><button class="a-btn primary sm" type="submit">Send</button></form>`;
@@ -585,7 +598,7 @@
   function renderSettings() {
     // accounts
     $('#accList').innerHTML = store.all('channelAccounts').map(a => `<div class="acc-chip">
-      <span class="healthdot ${a.health}"></span><span style="font-size:18px">${ACTION_CATALOG[a.type] ? ACTION_CATALOG[a.type].icon : '🔌'}</span>
+      <span class="healthdot ${a.health}"></span><span style="font-size:18px">${ACTION_CATALOG[a.type] ? ACTION_CATALOG[a.type].icon : ICON.link}</span>
       <div style="flex:1"><div style="font-size:13px;font-weight:600">${esc(a.displayName)}</div><div class="dim" style="font-size:11px">${a.type} · ${a.status}</div></div></div>`).join('') || '<p class="dim">No accounts.</p>';
 
     // limits for the campaign's first account
@@ -655,10 +668,10 @@
       return `<div class="mon-row"><span class="mon-l">${label}</span><span class="mon-track"><span class="mon-fill ${cls}" style="width:${pct}%"></span></span><span class="mon-v">${used}${capped ? ' / ' + cap : ''}</span></div>`;
     };
     let html = '<div class="mon-grid">';
-    html += bar(u.total, u.totalCap, '🎯 Total today');
-    html += bar(u.hour, u.hourCap, '⏱ This hour');
-    html += bar(u.weeklyInvites, u.weeklyInviteCap, '📅 Invites this week');
-    html += bar(u.pending, u.pendingCap, '⏳ Pending invites');
+    html += bar(u.total, u.totalCap, 'Total today');
+    html += bar(u.hour, u.hourCap, 'This hour');
+    html += bar(u.weeklyInvites, u.weeklyInviteCap, 'Invites this week');
+    html += bar(u.pending, u.pendingCap, 'Pending invites');
     html += '</div>';
     const acts = Object.keys(u.actions);
     if (acts.length) html += '<div class="mon-grid" style="margin-top:6px">' + acts.map(a => bar(u.actions[a].used, u.actions[a].cap, a)).join('') + '</div>';
@@ -792,7 +805,7 @@
     if (!Ext) { $('#liveEnvBanner').style.display = 'block'; $('#liveEnvBanner').innerHTML = 'studio-bridge.js failed to load.'; return; }
     const e = Ext.env();
     const banner = $('#liveEnvBanner');
-    if (!e.canReach) { banner.style.display = 'block'; banner.innerHTML = '🧩 <b>To go live:</b> ' + esc(e.reason); }
+    if (!e.canReach) { banner.style.display = 'block'; banner.innerHTML = '<b>To go live:</b> ' + esc(e.reason); }
     else { banner.style.display = 'none'; }
     $('#extId').value = Ext.getExtId();
     // reflect persisted live-route toggle for this campaign
@@ -811,7 +824,7 @@
       box.innerHTML = `<span class="pillbar ok">extension v${esc(p.version)} connected</span>`;
       $('#liveActions').checked = !!p.live;
       acc.innerHTML = p.account
-        ? `<div class="acc-chip"><span class="healthdot good"></span><span style="font-size:18px">💼</span><div style="flex:1"><div style="font-size:13px;font-weight:600">${esc(p.account.name)}</div><div class="dim" style="font-size:11px">logged-in LinkedIn account</div></div></div>`
+        ? `<div class="acc-chip"><span class="healthdot good"></span><span style="font-size:18px">${ICON.briefcase}</span><div style="flex:1"><div style="font-size:13px;font-weight:600">${esc(p.account.name)}</div><div class="dim" style="font-size:11px">logged-in LinkedIn account</div></div></div>`
         : '<p class="dim" style="font-size:12px">Extension connected. Now link your LinkedIn account.</p>';
     } else {
       box.innerHTML = `<span class="pillbar bad">${esc((p && p.info) || 'unreachable')}</span>`;
@@ -828,8 +841,8 @@
         <div class="row" style="justify-content:space-between"><b style="font-size:13px">${esc(d.name)}</b><span class="pillbar info">${d.count} leads</span></div>
         <div class="row wrap" style="gap:6px">
           <button class="a-btn sm" data-import="${d.id}">→ Import as leads</button>
-          <button class="a-btn sm" data-push="${d.id}">🛰️ Push to backend</button>
-          <button class="a-btn ghost sm" data-csv="${d.id}">⬇ CSV</button>
+          <button class="a-btn sm" data-push="${d.id}">Push to backend</button>
+          <button class="a-btn ghost sm" data-csv="${d.id}">CSV</button>
         </div>
       </div>`).join('') : '<p class="dim" style="font-size:12px">No datasets yet. Use “Source from Sales Navigator” on the Leads tab.</p>';
     $$('[data-import]', wrap).forEach(b => b.addEventListener('click', () => importDataset(b.dataset.import)));
@@ -946,8 +959,8 @@
   /* ---- Sales Navigator sourcing (from the Leads tab) ---- */
   $('#sourceSalesNav') && $('#sourceSalesNav').addEventListener('click', () => {
     const reach = Ext && Ext.env();
-    modal(`<h2>⚡ Source from Sales Navigator</h2>
-      ${reach && !reach.canReach ? `<div class="banner" style="margin-bottom:14px">🧩 ${esc(reach.reason)}</div>` : ''}
+    modal(`<h2>Source from Sales Navigator</h2>
+      ${reach && !reach.canReach ? `<div class="banner" style="margin-bottom:14px">${esc(reach.reason)}</div>` : ''}
       <p class="dim" style="font-size:12.5px;margin-bottom:10px">Paste a Sales Navigator <b>people-search URL</b>. The extension opens it and pulls every person, page by page, into a dataset.</p>
       <div class="a-field"><label class="a-label">Sales Navigator search URL</label><input class="a-input" id="snU" placeholder="https://www.linkedin.com/sales/search/people?query=..."></div>
       <div class="row" style="gap:8px">
@@ -969,7 +982,7 @@
         const st = await Ext.getState();
         const sc = st && st.state && st.state.scrape;
         if (sc) {
-          $('#snProg').innerHTML = `${sc.status === 'running' ? '⏳' : '✅'} page ${sc.page}/${sc.maxPages} · <b>${sc.total}</b> leads`;
+          $('#snProg').innerHTML = `${sc.status === 'running' ? ICON.clock : ICON.check} page ${sc.page}/${sc.maxPages} · <b>${sc.total}</b> leads`;
           if (sc.status !== 'running') {
             clearInterval(scrapePoll); scrapePoll = null;
             $('#snProg').innerHTML += ', done. Importing...';

@@ -9,50 +9,47 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="assets/css/styles.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232e5bd7'/><text x='50' y='69' font-size='58' text-anchor='middle' fill='%23ffffff' font-family='Arial' font-weight='bold'>R</text></svg>" />
   <style>
     /* Developer console, scoped styles, building on the shared design system */
     .dev-shell{display:grid;grid-template-columns:230px 1fr;gap:24px;max-width:1200px;margin:0 auto;padding:0 24px}
     .dev-side{position:sticky;top:90px;align-self:start;display:flex;flex-direction:column;gap:4px}
     .dev-side button{all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;color:var(--text-dim);font-weight:600;font-size:14px;display:flex;align-items:center;gap:10px;transition:.15s}
-    .dev-side button:hover{background:rgba(255,255,255,.04);color:var(--text)}
-    .dev-side button.active{background:rgba(124,92,255,.14);color:#fff}
+    .dev-side button:hover{background:var(--surface-2);color:var(--text)}
+    .dev-side button.active{background:var(--brand-soft);color:var(--brand)}
     .dev-panel{display:none;animation:fade .25s}
     .dev-panel.active{display:block}
     @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-    .card{background:var(--surface,rgba(255,255,255,.03));border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:22px;margin-bottom:18px}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:22px;margin-bottom:18px}
     .card h3{margin:0 0 6px}
     .card .sub{color:var(--text-dim);font-size:14px;margin:0 0 16px}
-    .key-row,.prov-row,.hook-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid rgba(255,255,255,.08);border-radius:12px;margin-bottom:10px;font-size:14px}
-    .key-row code,.hook-row code{font-family:'JetBrains Mono',monospace;color:var(--accent,#9d86ff)}
+    .key-row,.prov-row,.hook-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;font-size:14px}
+    .key-row code,.hook-row code{font-family:'JetBrains Mono',monospace;color:var(--brand)}
     .pill{padding:3px 9px;border-radius:999px;font-size:12px;font-weight:700}
-    .pill.green{background:rgba(56,224,166,.15);color:#38e0a6}
-    .pill.amber{background:rgba(255,194,77,.15);color:#ffc24d}
-    .pill.dim{background:rgba(255,255,255,.08);color:var(--text-dim)}
+    .pill.green{background:var(--ok-bg);color:var(--ok)}
+    .pill.amber{background:var(--warn-bg);color:var(--warn)}
+    .pill.dim{background:var(--surface-2);color:var(--text-dim)}
     .scopes{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
-    .scope-chip{font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 8px;border-radius:7px;background:rgba(255,255,255,.06);color:var(--text-dim)}
-    .codeblock{background:#0c0c16;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:16px;overflow:auto;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#cdd3f0;white-space:pre}
-    .codeblock .k{color:#9d86ff}.codeblock .s{color:#38e0a6}.codeblock .c{color:#6b7299}
-    .endpoint{display:flex;gap:10px;align-items:center;padding:11px 14px;border:1px solid rgba(255,255,255,.08);border-radius:11px;margin-bottom:8px;font-family:'JetBrains Mono',monospace;font-size:13px;cursor:pointer;transition:.15s}
-    .endpoint:hover{border-color:rgba(124,92,255,.5);background:rgba(124,92,255,.05)}
+    .scope-chip{font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 8px;border-radius:6px;background:var(--surface-2);color:var(--text-muted)}
+    .codeblock{background:#14181f;border:1px solid var(--border);border-radius:8px;padding:16px;overflow:auto;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e5e8ee;white-space:pre}
+    .codeblock .k{color:#8fb0f5}.codeblock .s{color:#7fce9e}.codeblock .c{color:#8a93a5}
+    .endpoint{display:flex;gap:10px;align-items:center;padding:11px 14px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;font-family:'JetBrains Mono',monospace;font-size:13px;cursor:pointer;transition:.15s}
+    .endpoint:hover{border-color:var(--brand);background:var(--brand-soft)}
     .verb{font-weight:700;padding:2px 8px;border-radius:6px;font-size:11px}
-    .verb.get{background:rgba(77,208,255,.16);color:#4dd0ff}.verb.post{background:rgba(56,224,166,.16);color:#38e0a6}
+    .verb.get{background:var(--info-bg);color:var(--info)}.verb.post{background:var(--ok-bg);color:var(--ok)}
     .field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
     .field label{font-size:13px;color:var(--text-dim);font-weight:600}
-    .field input,.field select,.field textarea{background:#0c0c16;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;color:#fff;font-size:14px;font-family:inherit}
+    .field input,.field select,.field textarea{background:var(--surface);border:1px solid var(--border-strong);border-radius:8px;padding:10px 12px;color:var(--text);font-size:14px;font-family:inherit}
     .field textarea{font-family:'JetBrains Mono',monospace;font-size:13px;min-height:90px}
-    .catrow{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.06);font-size:13px}
+    .catrow{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px}
     .catrow:last-child{border-bottom:0}
-    .cattype{font-family:'JetBrains Mono',monospace;color:#9d86ff;font-size:12px}
-    .bar{height:6px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;width:90px}
-    .bar i{display:block;height:100%;background:linear-gradient(90deg,#7c5cff,#4dd0ff)}
+    .cattype{font-family:'JetBrains Mono',monospace;color:var(--brand);font-size:12px}
+    .bar{height:6px;border-radius:4px;background:var(--surface-2);overflow:hidden;width:90px}
+    .bar i{display:block;height:100%;background:var(--brand)}
     .resp{margin-top:12px}
   </style>
 </head>
 <body>
-  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
-  <div class="grid-bg"></div>
-  <div class="noise"></div>
 
   <header class="nav">
     <div class="container nav-inner">
@@ -61,23 +58,23 @@
         <div class="has-drop"><a href="/recruiting-os">Recruiter OS</a>
           <div class="drop os-mega recruit">
             <a class="os-feature" href="/recruiting-os">
-              <span class="os-badge">👤 Recruiter OS</span>
+              <span class="os-badge">Recruiter OS</span>
               <b>Win the placement</b>
               <span class="os-tag">Find, engage, and place talent before anyone else even sees the signal.</span>
-              <span class="os-go">Explore Recruiter OS →</span>
+              <span class="os-go">Explore Recruiter OS</span>
             </a>
             <div class="os-cols">
               <div class="mcol"><h5>Source</h5>
-                <a href="/sourcing"><span class="di">🎯</span> People-GPT Search</a>
-                <a href="/sourcing#scoring"><span class="di">🧮</span> JD Match Scoring</a>
-                <a href="/sourcing"><span class="di">⚡</span> Enrichment Grid</a>
-                <a href="/signals"><span class="di">📡</span> Candidate Signals</a>
+                <a href="/sourcing">People-GPT Search</a>
+                <a href="/sourcing#scoring">JD Match Scoring</a>
+                <a href="/sourcing">Enrichment Grid</a>
+                <a href="/signals">Candidate Signals</a>
               </div>
               <div class="mcol"><h5>Engage &amp; Close</h5>
-                <a href="/outreach"><span class="di">✉️</span> Candidate Outreach</a>
-                <a href="/linkedin"><span class="di">💼</span> LinkedIn Engine</a>
-                <a href="/conversations"><span class="di">💬</span> Texting &amp; Voice</a>
-                <a href="/analytics"><span class="di">📊</span> Placement Analytics</a>
+                <a href="/outreach">Candidate Outreach</a>
+                <a href="/linkedin">LinkedIn Engine</a>
+                <a href="/conversations">Texting &amp; Voice</a>
+                <a href="/analytics">Placement Analytics</a>
               </div>
             </div>
           </div>
@@ -85,22 +82,22 @@
         <div class="has-drop"><a href="/business-development-os">BD OS</a>
           <div class="drop os-mega bd">
             <a class="os-feature" href="/business-development-os">
-              <span class="os-badge">🏢 BD OS</span>
+              <span class="os-badge">BD OS</span>
               <b>Win the client</b>
               <span class="os-tag">Turn hiring signals into job orders, so your desk never runs dry.</span>
-              <span class="os-go">Explore BD OS →</span>
+              <span class="os-go">Explore BD OS</span>
             </a>
             <div class="os-cols">
               <div class="mcol"><h5>Find</h5>
-                <a href="/signals"><span class="di">📡</span> Account Signals</a>
-                <a href="/sourcing"><span class="di">🧭</span> Decision-maker Discovery</a>
-                <a href="/sourcing"><span class="di">⚡</span> Company Enrichment</a>
+                <a href="/signals">Account Signals</a>
+                <a href="/sourcing">Decision-maker Discovery</a>
+                <a href="/sourcing">Company Enrichment</a>
               </div>
               <div class="mcol"><h5>Win &amp; Track</h5>
-                <a href="/outreach"><span class="di">✉️</span> Client Outreach</a>
-                <a href="/conversations#amd"><span class="di">📞</span> Voice Dialer + AMD</a>
-                <a href="/integrations"><span class="di">🗂️</span> CRM Pipeline</a>
-                <a href="/analytics"><span class="di">📈</span> Job-order Analytics</a>
+                <a href="/outreach">Client Outreach</a>
+                <a href="/conversations#amd">Voice Dialer + AMD</a>
+                <a href="/integrations">CRM Pipeline</a>
+                <a href="/analytics">Job-order Analytics</a>
               </div>
             </div>
           </div>
@@ -108,7 +105,7 @@
       </nav>
       <div class="nav-cta">
         <a href="/login" class="btn btn-ghost btn-sm">Log in</a>
-        <a href="/command" class="btn btn-primary btn-sm">Open app →</a>
+        <a href="/command" class="btn btn-primary btn-sm">Open app</a>
       </div>
     </div>
   </header>
@@ -119,7 +116,7 @@
       <h1>Plug your app into <span class="gradient-text">the hiring graph.</span></h1>
       <p class="lead">One REST API for live hiring signals, cheapest-source-first contact enrichment, and webhooks. Get a key, point your application at it, and integrate in minutes. Your data providers stay yours, RecruitersOS just orchestrates them.</p>
       <div class="hero-actions">
-        <a href="#console" class="btn btn-primary btn-lg">Open the console →</a>
+        <a href="#console" class="btn btn-primary btn-lg">Open the console</a>
         <a href="#" id="openapiLink" class="btn btn-ghost btn-lg">Download OpenAPI spec</a>
       </div>
     </div>
@@ -128,12 +125,12 @@
   <section id="console">
     <div class="dev-shell">
       <aside class="dev-side">
-        <button data-tab="keys" class="active">🔑 API keys</button>
-        <button data-tab="providers">🧩 Data providers</button>
-        <button data-tab="webhooks">🪝 Webhooks</button>
-        <button data-tab="catalog">📡 Signal catalog</button>
-        <button data-tab="test">🧪 Test console</button>
-        <button data-tab="quickstart">⚡ Quickstart</button>
+        <button data-tab="keys" class="active">API keys</button>
+        <button data-tab="providers">Data providers</button>
+        <button data-tab="webhooks">Webhooks</button>
+        <button data-tab="catalog">Signal catalog</button>
+        <button data-tab="test">Test console</button>
+        <button data-tab="quickstart">Quickstart</button>
       </aside>
 
       <div class="dev-main">
@@ -190,7 +187,7 @@
             <p class="sub">Fire a request against the sandbox and see the shape of the response your app will receive.</p>
             <div id="epList"></div>
             <div class="field"><label>Request body (JSON)</label><textarea id="reqBody"></textarea></div>
-            <button class="btn btn-primary btn-sm" id="sendReq">▶ Send request</button>
+            <button class="btn btn-primary btn-sm" id="sendReq">Send request</button>
             <div class="resp" id="respOut"></div>
           </div>
         </div>
@@ -229,7 +226,7 @@ curl https://api.recruitersos.co<span class="s">/v1/enrich</span> \
     </div>
   </section>
 
-  <section class="cta-band"><div class="container"><div class="cta-inner reveal"><h2>Your application, on the hiring graph.</h2><p>Get a key and ship your first integration today.</p><a href="/command" class="btn btn-primary btn-lg">Get your API key →</a></div></div></section>
+  <section class="cta-band"><div class="container"><div class="cta-inner reveal"><h2>Your application, on the hiring graph.</h2><p>Get a key and ship your first integration today.</p><a href="/command" class="btn btn-primary btn-lg">Get your API key</a></div></div></section>
 
   <footer>
     <div class="container">

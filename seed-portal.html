@@ -18,40 +18,40 @@
     if the API is on another origin. There is NO limit on the number of rows.
   -->
   <style>
-    :root { --bg:#0a0a12; --card:#14141f; --card2:#0e0e18; --line:#262636; --txt:#eef0f6; --muted:#9aa0b4; --accent:#7c5cff; --accent2:#4dd0ff; --ok:#46d39a; --bad:#ff7a93; }
+    :root { --bg:#f7f8fa; --card:#ffffff; --card2:#f4f5f7; --line:#e5e8ee; --txt:#14181f; --muted:#4b5364; --accent:#2e5bd7; --accent2:#2e5bd7; --ok:#157347; --bad:#d92d20; }
     * { box-sizing:border-box; }
-    body { margin:0; font-family:'Inter',system-ui,-apple-system,sans-serif; background:radial-gradient(1100px 560px at 75% -12%, #1a1340 0, transparent 60%), var(--bg); color:var(--txt); min-height:100vh; padding:32px 18px; }
+    body { margin:0; font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--txt); min-height:100vh; padding:32px 18px; }
     .wrap { width:100%; max-width:760px; margin:0 auto; }
-    .eyebrow { font-size:12px; letter-spacing:.13em; text-transform:uppercase; color:var(--accent2); font-weight:700; }
-    h1 { font-size:27px; margin:8px 0 6px; line-height:1.18; }
+    .eyebrow { font-size:12px; letter-spacing:.13em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+    h1 { font-size:27px; margin:8px 0 6px; line-height:1.18; font-weight:600; }
     .sub { color:var(--muted); font-size:14.5px; margin:0 0 20px; line-height:1.55; max-width:620px; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:22px; box-shadow:0 30px 80px -30px rgba(0,0,0,.7); }
-    .why { background:var(--card2); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:18px; font-size:13px; color:var(--muted); line-height:1.6; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:22px; }
+    .why { background:var(--card2); border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin-bottom:18px; font-size:13px; color:var(--muted); line-height:1.6; }
     .why b { color:var(--txt); }
     .why ul { margin:8px 0 0; padding-left:18px; }
     .why li { margin:3px 0; }
     label { display:block; font-size:12px; color:var(--muted); margin:0 0 5px; font-weight:600; }
-    input, select { width:100%; padding:11px 12px; border-radius:10px; border:1px solid var(--line); background:var(--card2); color:var(--txt); font-size:14.5px; }
-    input:focus, select:focus { outline:none; border-color:var(--accent); }
+    input, select { width:100%; padding:11px 12px; border-radius:6px; border:1px solid #cfd5df; background:#ffffff; color:var(--txt); font-size:14.5px; }
+    input:focus, select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(46,91,215,.18); }
     .name-row { margin-bottom:14px; }
     .rows { display:flex; flex-direction:column; gap:10px; }
-    .seedrow { display:grid; grid-template-columns:120px 1fr 1fr 34px; gap:10px; align-items:end; background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:12px; }
+    .seedrow { display:grid; grid-template-columns:120px 1fr 1fr 34px; gap:10px; align-items:end; background:var(--card2); border:1px solid var(--line); border-radius:8px; padding:12px; }
     .seedrow .status { grid-column:1 / -1; font-size:12px; min-height:0; }
-    .seedrow.ok { border-color:rgba(70,211,154,.5); }
-    .seedrow.bad { border-color:rgba(255,122,147,.5); }
+    .seedrow.ok { border-color:#8fc7ab; }
+    .seedrow.bad { border-color:#eda49d; }
     .status.ok { color:var(--ok); }
     .status.bad { color:var(--bad); }
-    .del { border:1px solid var(--line); background:transparent; color:var(--muted); border-radius:9px; height:42px; cursor:pointer; font-size:16px; }
+    .del { border:1px solid var(--line); background:transparent; color:var(--muted); border-radius:6px; height:42px; cursor:pointer; font-size:16px; }
     .del:hover { color:var(--bad); border-color:var(--bad); }
-    .addbtn { margin-top:12px; width:100%; padding:11px; border:1px dashed var(--line); border-radius:11px; background:transparent; color:var(--accent2); font-weight:700; font-size:14px; cursor:pointer; }
-    .addbtn:hover { border-color:var(--accent2); }
-    .submit { margin-top:18px; width:100%; padding:14px; border:0; border-radius:12px; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#0a0a12; font-weight:800; font-size:15px; cursor:pointer; }
+    .addbtn { margin-top:12px; width:100%; padding:11px; border:1px dashed #cfd5df; border-radius:6px; background:transparent; color:var(--accent); font-weight:600; font-size:14px; cursor:pointer; }
+    .addbtn:hover { border-color:var(--accent); }
+    .submit { margin-top:18px; width:100%; padding:14px; border:0; border-radius:6px; background:var(--accent); color:#ffffff; font-weight:600; font-size:15px; cursor:pointer; }
     .submit:disabled { opacity:.55; cursor:default; }
     .help { font-size:11.5px; color:var(--muted); margin-top:8px; line-height:1.55; }
-    .help a { color:var(--accent2); }
+    .help a { color:var(--accent); }
     .err { color:var(--bad); font-size:13px; margin-top:12px; min-height:16px; }
     details { margin-top:10px; font-size:12.5px; color:var(--muted); }
-    details summary { cursor:pointer; color:var(--accent2); font-weight:600; }
+    details summary { cursor:pointer; color:var(--accent); font-weight:600; }
     details ol { padding-left:18px; line-height:1.65; }
     .gate { text-align:center; padding:40px 20px; }
     .tally { font-size:13px; color:var(--muted); margin-top:14px; }

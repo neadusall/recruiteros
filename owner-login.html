@@ -10,16 +10,14 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="assets/css/styles.css" />
   <link rel="stylesheet" href="assets/css/auth.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23ffb020'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>$</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232e5bd7'/><text x='50' y='69' font-size='58' text-anchor='middle' fill='%23ffffff' font-family='Arial' font-weight='bold'>$</text></svg>" />
   <style>
-    /* Owner accent: gold/$, distinct from the purple customer portals. */
-    .owner-brand .logo { background: linear-gradient(135deg,#ffb020,#ff7849) !important; color:#0a0a12; }
-    .owner-brand .os { background: linear-gradient(120deg,#ffd27a,#ff9a5a); -webkit-background-clip:text; background-clip:text; color:transparent; }
+    /* Owner accent: amber, distinct from the customer portals. Flat, no gradients. */
+    .owner-brand .logo { background: var(--warn) !important; color:#fff; }
+    .owner-brand .os { color: var(--warn); }
   </style>
 </head>
 <body class="auth-body">
-  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
-  <div class="grid-bg"></div>
 
   <div class="auth-split">
     <aside class="auth-aside">
@@ -27,9 +25,9 @@
       <h1>The owner<br /><span class="gradient-text">command desk.</span></h1>
       <p>Private back office for the platform operator: every account, what they spend, what they pay, and the levers to suspend, reset, or price them. This is not a customer portal.</p>
       <ul class="auth-points">
-        <li><span class="ap">📊</span> Revenue, cost and margin across all accounts</li>
-        <li><span class="ap">👥</span> Every user and role on the platform</li>
-        <li><span class="ap">🗂️</span> Suspend, reset, or delete any workspace</li>
+        <li>Revenue, cost and margin across all accounts</li>
+        <li>Every user and role on the platform</li>
+        <li>Suspend, reset, or delete any workspace</li>
       </ul>
       <div class="auth-trust">Owner-only · access is checked server-side on every request</div>
     </aside>

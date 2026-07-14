@@ -14,33 +14,46 @@
   const rnd = (a) => a[Math.floor(Math.random() * a.length)];
   const rint = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
 
+  /* ---- inline stroke icons (replace emoji glyphs) ---- */
+  const icn = (p) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:1em;height:1em;vertical-align:-0.125em">' + p + '</svg>';
+  const ICON = {
+    dollar: icn('<line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>'),
+    trendUp: icn('<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>'),
+    user: icn('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
+    globe: icn('<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a15 15 0 0 1 4 9 15 15 0 0 1-4 9 15 15 0 0 1-4-9 15 15 0 0 1 4-9z"/>'),
+    trendDown: icn('<polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/>'),
+    compass: icn('<circle cx="12" cy="12" r="9"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>'),
+    activity: icn('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'),
+    search: icn('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'),
+  };
+
   /* ---- signal types grouped by category (mirror registry.publicCategories) ---- */
   const SIGNAL_CATALOG = [
-    { category: "Capital & growth", motion: "business_dev", ic: "💰", types: [
+    { category: "Capital & growth", motion: "business_dev", ic: ICON.dollar, types: [
       { type: "funding_round", label: "Funding round", why: "New capital, new headcount, budget to fill it" },
       { type: "ipo_or_s1", label: "IPO / S-1", why: "Public-company readiness, aggressive hiring" },
       { type: "acquisition", label: "Acquisition", why: "Integration hiring + retention churn" },
       { type: "grant_or_contract", label: "Grant / contract win", why: "Must staff up to deliver" },
     ] },
-    { category: "Hiring intent", motion: "business_dev", ic: "📈", types: [
+    { category: "Hiring intent", motion: "business_dev", ic: ICON.trendUp, types: [
       { type: "hiring_velocity", label: "Hiring surge", why: "A team stretched past capacity" },
       { type: "job_repost", label: "Role reposted", why: "Struggling to fill, warm for help" },
       { type: "job_posting", label: "New job posting", why: "A role is open right now" },
     ] },
-    { category: "Leadership change", motion: "business_dev", ic: "👔", types: [
+    { category: "Leadership change", motion: "business_dev", ic: ICON.user, types: [
       { type: "exec_hire", label: "New executive", why: "Rebuilds their org within 90 days" },
       { type: "department_head_change", label: "New function lead", why: "Kicks off a team build-out" },
     ] },
-    { category: "Footprint & strategy", motion: "business_dev", ic: "🌍", types: [
+    { category: "Footprint & strategy", motion: "business_dev", ic: ICON.globe, types: [
       { type: "office_expansion", label: "Expansion", why: "Greenfield local team to build" },
       { type: "market_entry", label: "New market", why: "Needs people who know the market" },
       { type: "product_launch", label: "Product launch", why: "A team to build and sell it" },
     ] },
-    { category: "Contraction", motion: "recruiting", ic: "📉", types: [
+    { category: "Contraction", motion: "recruiting", ic: ICON.trendDown, types: [
       { type: "layoff", label: "Layoffs", why: "Great talent hits the market in batches" },
       { type: "warn_notice", label: "WARN notice", why: "Dated, named, precise releases" },
     ] },
-    { category: "Talent availability", motion: "recruiting", ic: "🧭", types: [
+    { category: "Talent availability", motion: "recruiting", ic: ICON.compass, types: [
       { type: "open_to_work", label: "Open to work", why: "The warmest candidate signal" },
       { type: "tenure_milestone", label: "Tenure milestone", why: "When people quietly start looking" },
       { type: "employer_distress", label: "Employer distress", why: "Their employer hit turbulence" },
@@ -297,7 +310,7 @@
       const grid = el("div", "src-grid");
       cat.types.forEach(t => {
         const card = el("div", "src" + (state.signalTypes.has(t.type) ? " on" : ""));
-        card.innerHTML = `<span class="ic">📡</span><div><b>${t.label}</b><span>${t.why}</span></div>`;
+        card.innerHTML = `<span class="ic">${ICON.activity}</span><div><b>${t.label}</b><span>${t.why}</span></div>`;
         card.addEventListener("click", () => {
           state.signalTypes.has(t.type) ? state.signalTypes.delete(t.type) : state.signalTypes.add(t.type);
           card.classList.toggle("on");
@@ -379,7 +392,7 @@
   function renderReview() {
     const d = state.draft; const list = $("#targetList"); list.innerHTML = "";
     if (!d.targets.length) {
-      list.innerHTML = `<div class="empty"><div class="big">🔍</div><b>No prospects yet</b><p>Search an industry or company above, then loosen the refine filters.</p></div>`;
+      list.innerHTML = `<div class="empty"><div class="big">${ICON.search}</div><b>No prospects yet</b><p>Search an industry or company above, then loosen the refine filters.</p></div>`;
       return;
     }
     if (d.targets.length > RENDER_CAP) {

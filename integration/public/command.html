@@ -8,33 +8,82 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="assets/css/styles.css?v=ab0b438dc8" />
-  <link rel="stylesheet" href="assets/css/app.css?v=6b942c909d" />
-  <link rel="stylesheet" href="assets/css/command.css?v=633285a093" />
-  <link rel="stylesheet" href="assets/css/campaign-studio.css?v=3fc336307f" />
-  <link rel="stylesheet" href="assets/css/vetting.css?v=480e45cfaa" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=d524d6e5f4" />
+  <link rel="stylesheet" href="assets/css/app.css?v=6cc27d0cdf" />
+  <link rel="stylesheet" href="assets/css/command.css?v=34f432fba6" />
+  <link rel="stylesheet" href="assets/css/campaign-studio.css?v=ee5486c59c" />
+  <link rel="stylesheet" href="assets/css/vetting.css?v=24f138619b" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232e5bd7'/><text x='50' y='69' font-size='58' text-anchor='middle' fill='%23ffffff' font-family='Arial' font-weight='bold'>R</text></svg>" />
   <!-- Apply the saved light/dark theme before paint (no flash). -->
-  <script>(function(){try{var t=localStorage.getItem('ros_theme')||'dark';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+  <script>(function(){try{var t=localStorage.getItem('ros_theme')||'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
   <!-- White-label anti-flash: on a customer domain, drop the house product name from
        the tab + the house favicon, and hide the wordmark until command.js paints the
        workspace/preset brand. Safety timeout reveals it even if branding can't load. -->
   <script>(function(){try{var h=location.host||"";if(/(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(h))return;document.title="Command Center";var f=document.querySelector('link[rel=icon]');if(f)f.removeAttribute("href");var s=document.createElement("style");s.textContent=".wl-hide .brand-word{visibility:hidden}";document.head.appendChild(s);var de=document.documentElement;de.classList.add("wl-hide");setTimeout(function(){de.classList.remove("wl-hide");},3000);}catch(e){}})();</script>
 </head>
 <body class="app">
-  <a href="/helpcenter" id="ros-help-fab" title="Help Center"><span>?</span> Help</a>
-  <style>
-    #ros-help-fab{
-      position:fixed;right:20px;bottom:20px;z-index:9999;
-      display:inline-flex;align-items:center;gap:8px;padding:11px 16px;border-radius:999px;
-      background:linear-gradient(135deg,#7c5cff,#4dd0ff);color:#0a0a12;
-      font-family:'Inter',system-ui,sans-serif;font-weight:700;font-size:14px;
-      text-decoration:none;box-shadow:0 10px 28px -8px rgba(124,92,255,.7);transition:transform .16s;
-    }
-    #ros-help-fab span{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:rgba(10,10,18,.18);font-weight:900}
-    #ros-help-fab:hover{transform:translateY(-2px)}
-  </style>
-  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+  <!-- Icon sprite: single stroke set, 1.7px, currentColor. -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M8 16v-5"/><path d="M13 16V8"/><path d="M18 16v-3"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+    <symbol id="i-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/><path d="M7.76 16.24a6 6 0 0 1 0-8.49"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></symbol>
+    <symbol id="i-briefcase" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22,6 12,13 2,6"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
+    <symbol id="i-headset" viewBox="0 0 24 24"><path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/><path d="M21 11h-3a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-5z"/><path d="M3 13v-2a9 9 0 0 1 18 0v2"/></symbol>
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-trend" viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></symbol>
+    <symbol id="i-loop" viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></symbol>
+    <symbol id="i-rotate" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></symbol>
+    <symbol id="i-building" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="18"/><line x1="15" y1="22" x2="15" y2="18"/><line x1="8" y1="6" x2="10" y2="6"/><line x1="14" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="10" y2="14"/><line x1="14" y1="14" x2="16" y2="14"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M20.59 13.41 12 22 2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></symbol>
+    <symbol id="i-card" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+    <symbol id="i-shuffle" viewBox="0 0 24 24"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="15" x2="8" y2="17"/><line x1="16" y1="15" x2="16" y2="17"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+    <symbol id="i-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></symbol>
+    <symbol id="i-meh" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="8" y1="15" x2="16" y2="15"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+    <symbol id="i-hash" viewBox="0 0 24 24"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.4 1 2.3h6c0-.9.4-1.8 1-2.3A7 7 0 0 0 12 2z"/></symbol>
+    <symbol id="i-flask" viewBox="0 0 24 24"><path d="M10 2v6L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 8V2"/><line x1="8" y1="2" x2="16" y2="2"/><line x1="7" y1="14" x2="17" y2="14"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></symbol>
+  </svg>
 
   <div class="shell">
     <!-- SIDEBAR -->
@@ -42,56 +91,58 @@
       <a href="#overview" class="brand" id="brandLink"><span class="brand-word">Recruiters<span class="os">OS</span></span></a>
 
       <!-- Portal identity: says plainly which portal you're in (Admin vs Recruiter). -->
-      <div class="portal-badge" id="portalBadge" data-portal="admin">🛡️ Admin Portal</div>
+      <div class="portal-badge" id="portalBadge" data-portal="admin">Admin Portal</div>
 
       <div class="ws-card" id="wsCard">
         <div class="ws-name" id="wsName">Workspace</div>
         <div class="ws-plan" id="wsPlan">Trial</div>
       </div>
 
-      <div class="motion-toggle" id="motionToggle">
-        <button class="mt" data-motion="bd">🏢 BD</button>
-        <button class="mt active" data-motion="recruiting">👤 Recruiting</button>
+      <div class="motion-toggle" id="motionToggle" role="group" aria-label="Workspace motion">
+        <button class="mt" data-motion="bd">Business dev</button>
+        <button class="mt active" data-motion="recruiting">Recruiting</button>
       </div>
 
       <nav class="cmd-nav" id="cmdNav">
-        <div class="nav-group">Operate</div>
-        <a class="nav-item" data-route="overview"><span class="ni">🛰️</span> Dashboard</a>
-        <a class="nav-item" data-route="analytics"><span class="ni">📊</span> Analytics</a>
-        <a class="nav-item" data-route="setup" data-cap="integrations:manage"><span class="ni">🚀</span> Setup</a>
+        <div class="nav-group">Overview</div>
+        <a class="nav-item" data-route="overview"><span class="ni"><svg><use href="#i-home"/></svg></span> Dashboard</a>
+        <a class="nav-item" data-route="analytics"><span class="ni"><svg><use href="#i-chart"/></svg></span> Analytics</a>
+        <a class="nav-item" data-route="response"><span class="ni"><svg><use href="#i-inbox"/></svg></span> Replies<span class="ni-badge" id="badgeResponse"></span></a>
 
         <!-- Business Development: shown only in BD motion (the toggle is available to
              recruiters too), so a recruiter can run BD from their own portal. Hire Signals
-             is the entry point, live who's-hiring market, promote → Prospects → Campaigns. -->
-        <div class="nav-group" data-motion-only="bd">Business Development</div>
-        <a class="nav-item" data-route="inmarket" data-motion-only="bd"><span class="ni">📡</span> Hire Signals</a>
-        <a class="nav-item" data-route="clients" data-motion-only="bd"><span class="ni">🤝</span> Clients</a>
-        <a class="nav-item" data-route="sendqueue" data-motion-only="bd"><span class="ni">📦</span> Send Queue</a>
-        <a class="nav-item" data-route="email" data-motion-only="bd"><span class="ni">✉️</span> Email</a>
-        <a class="nav-item" data-route="senders" data-motion-only="bd"><span class="ni">📨</span> Senders</a>
+             is the entry point, live who's-hiring market, promote to Prospects and Campaigns. -->
+        <div class="nav-group" data-motion-only="bd">Business development</div>
+        <a class="nav-item" data-route="inmarket" data-motion-only="bd"><span class="ni"><svg><use href="#i-radar"/></svg></span> Hire Signals</a>
+        <a class="nav-item" data-route="clients" data-motion-only="bd"><span class="ni"><svg><use href="#i-briefcase"/></svg></span> Clients</a>
+        <a class="nav-item" data-route="email" data-motion-only="bd"><span class="ni"><svg><use href="#i-mail"/></svg></span> Email</a>
+        <a class="nav-item" data-route="sendqueue" data-motion-only="bd"><span class="ni"><svg><use href="#i-layers"/></svg></span> Send Queue</a>
+        <a class="nav-item" data-route="senders" data-motion-only="bd"><span class="ni"><svg><use href="#i-send"/></svg></span> Senders</a>
 
         <div class="nav-group">Build</div>
-        <a class="nav-item" data-route="autopilot"><span class="ni">🤖</span> Autopilot</a>
-        <a class="nav-item" data-route="data" data-motion-only="recruiting"><span class="ni">🗄️</span> Candidates</a>
-        <a class="nav-item" data-route="campaigns"><span class="ni">🎯</span> Campaigns</a>
-        <a class="nav-item" data-route="pipstudio"><span class="ni">🎬</span> PiP Studio</a>
-        <a class="nav-item" data-route="voicedrops" data-motion-only="bd"><span class="ni">📞</span> Voice Drops</a>
-        <a class="nav-item" data-route="jdsourcing" data-motion-only="recruiting"><span class="ni">🧲</span> JD Sourcing</a>
-        <a class="nav-item" data-route="vetting" data-motion-only="recruiting"><span class="ni">☎️</span> AI Vetting</a>
-        <a class="nav-item" data-route="ostext" data-motion-only="recruiting"><span class="ni">💸</span> OS Text</a>
-        <a class="nav-item" data-route="voicedrops" data-motion-only="recruiting"><span class="ni">📞</span> Voice Drops</a>
+        <a class="nav-item" data-route="autopilot"><span class="ni"><svg><use href="#i-zap"/></svg></span> Autopilot</a>
+        <a class="nav-item" data-route="data" data-motion-only="recruiting"><span class="ni"><svg><use href="#i-users"/></svg></span> Candidates</a>
+        <a class="nav-item" data-route="campaigns"><span class="ni"><svg><use href="#i-target"/></svg></span> Campaigns</a>
+        <a class="nav-item" data-route="jdsourcing" data-motion-only="recruiting"><span class="ni"><svg><use href="#i-search"/></svg></span> JD Sourcing</a>
+        <a class="nav-item" data-route="vetting" data-motion-only="recruiting"><span class="ni"><svg><use href="#i-headset"/></svg></span> AI Vetting</a>
+        <a class="nav-item" data-route="ostext" data-motion-only="recruiting"><span class="ni"><svg><use href="#i-message"/></svg></span> OS Text</a>
+        <a class="nav-item" data-route="pipstudio"><span class="ni"><svg><use href="#i-video"/></svg></span> PiP Studio</a>
+        <a class="nav-item" data-route="voicedrops" data-motion-only="bd"><span class="ni"><svg><use href="#i-phone"/></svg></span> Voice Drops</a>
+        <a class="nav-item" data-route="voicedrops" data-motion-only="recruiting"><span class="ni"><svg><use href="#i-phone"/></svg></span> Voice Drops</a>
 
         <div class="nav-group" data-cap="team:manage">Admin</div>
-        <a class="nav-item" data-route="outreach-stats" data-cap="team:manage"><span class="ni">📈</span> Outreach Statistics</a>
-        <a class="nav-item" data-route="engine" data-cap="team:manage"><span class="ni">⚙️</span> Engine / Throughput</a>
-        <a class="nav-item" data-route="nurture" data-cap="team:manage" data-motion-only="bd"><span class="ni">🌱</span> Nurture</a>
-        <a class="nav-item" data-route="team" data-cap="team:manage"><span class="ni">👥</span> Team</a>
-
-        <!-- Learn: visual "how it works" playbooks. Available in both portals
-             and both motions, no capability gate. -->
-        <div class="nav-group">Learn</div>
-        <a class="nav-item" data-route="playbooks"><span class="ni">✨</span> Playbooks</a>
+        <a class="nav-item" data-route="outreach-stats" data-cap="team:manage"><span class="ni"><svg><use href="#i-trend"/></svg></span> Outreach Statistics</a>
+        <a class="nav-item" data-route="engine" data-cap="team:manage"><span class="ni"><svg><use href="#i-activity"/></svg></span> Engine / Throughput</a>
+        <a class="nav-item" data-route="nurture" data-cap="team:manage" data-motion-only="bd"><span class="ni"><svg><use href="#i-loop"/></svg></span> Nurture</a>
+        <a class="nav-item" data-route="team" data-cap="team:manage"><span class="ni"><svg><use href="#i-users"/></svg></span> Team</a>
+        <a class="nav-item" data-route="setup" data-cap="integrations:manage"><span class="ni"><svg><use href="#i-sliders"/></svg></span> Setup</a>
       </nav>
+
+      <!-- Pinned learn/help: available in both portals and motions, no gate. -->
+      <div class="side-foot">
+        <a class="nav-item" data-route="playbooks"><span class="ni"><svg><use href="#i-book"/></svg></span> Playbooks</a>
+        <a class="nav-item" href="/helpcenter"><span class="ni"><svg><use href="#i-help"/></svg></span> Help Center</a>
+      </div>
     </aside>
 
     <!-- MAIN -->
@@ -103,9 +154,9 @@
         </div>
         <div class="spacer"></div>
         <div class="env-pill" id="envPill" title="Connection mode" style="display:none"></div>
-        <a class="btn btn-primary btn-sm" id="primaryAction">＋ New campaign</a>
+        <a class="btn btn-primary btn-sm" id="primaryAction">New campaign</a>
 
-        <!-- Account menu (upper right): logo/avatar + enterprise dropdown -->
+        <!-- Account menu (upper right) -->
         <div class="acct" id="acct">
           <button class="acct-btn" id="acctBtn" aria-haspopup="true" aria-expanded="false" title="Account & settings">
             <span class="acct-avatar" id="acctAvatar">JD</span>
@@ -123,50 +174,50 @@
 
             <label class="acct-upload" id="logoUpload">
               <input type="file" id="logoFile" accept="image/*" hidden />
-              <span class="ic">🖼️</span>
+              <span class="ic"><svg><use href="#i-image"/></svg></span>
               <span>Change logo / photo</span>
             </label>
-            <button class="acct-item" id="logoRemove" role="menuitem"><span class="ic">↺</span> Reset to initials</button>
+            <button class="acct-item" id="logoRemove" role="menuitem"><span class="ic"><svg><use href="#i-rotate"/></svg></span> Reset to initials</button>
 
             <div class="acct-sep"></div>
             <div class="acct-theme">
-              <span class="acct-theme-l"><span class="ic">🎨</span> Appearance</span>
+              <span class="acct-theme-l">Appearance</span>
               <div class="theme-seg" id="themeSeg" role="group" aria-label="Theme">
-                <button type="button" class="ts" data-theme="dark">🌙 Dark</button>
-                <button type="button" class="ts" data-theme="light">☀️ Light</button>
+                <button type="button" class="ts" data-theme="light"><svg><use href="#i-sun"/></svg> Light</button>
+                <button type="button" class="ts" data-theme="dark"><svg><use href="#i-moon"/></svg> Dark</button>
               </div>
             </div>
 
             <div class="acct-sep"></div>
             <div class="acct-group">Workspace</div>
-            <a class="acct-item" data-route="accounts" role="menuitem"><span class="ic">🏢</span> Workspace &amp; branding</a>
+            <a class="acct-item" data-route="accounts" role="menuitem"><span class="ic"><svg><use href="#i-building"/></svg></span> Workspace &amp; branding</a>
             <label class="acct-upload" id="brandUpload" title="Upload a logo for the current appearance (dark or light). Toggle appearance to set the other." hidden>
               <input type="file" id="brandFile" accept="image/*" hidden />
-              <span class="ic">🏷️</span>
+              <span class="ic"><svg><use href="#i-tag"/></svg></span>
               <span id="brandUploadLabel">Change logo (this appearance)</span>
             </label>
-            <a class="acct-item" data-route="team" role="menuitem"><span class="ic">👥</span> Team &amp; roles</a>
-            <a class="acct-item" data-route="setup/connected" role="menuitem"><span class="ic">🔌</span> Integrations</a>
-            <a class="acct-item" data-route="setup/ats" role="menuitem"><span class="ic">🗂️</span> ATS &amp; data</a>
+            <a class="acct-item" data-route="team" role="menuitem"><span class="ic"><svg><use href="#i-users"/></svg></span> Team &amp; roles</a>
+            <a class="acct-item" data-route="setup/connected" role="menuitem"><span class="ic"><svg><use href="#i-plug"/></svg></span> Integrations</a>
+            <a class="acct-item" data-route="setup/ats" role="menuitem"><span class="ic"><svg><use href="#i-database"/></svg></span> ATS &amp; data</a>
 
             <div class="acct-sep"></div>
             <div class="acct-group">Enterprise</div>
-            <a class="acct-item" id="ownerLink" role="menuitem" hidden><span class="ic">🛰️</span> Owner console</a>
-            <a class="acct-item" data-route="setup/connected" role="menuitem"><span class="ic">🔑</span> API keys &amp; security</a>
-            <a class="acct-item" id="billingLink" role="menuitem"><span class="ic">💳</span> Billing &amp; plan</a>
-            <a class="acct-item" href="/developers" role="menuitem"><span class="ic">⚙️</span> Developer API</a>
-            <a class="acct-item" data-route="playbooks" role="menuitem"><span class="ic">✨</span> Playbooks · how it works</a>
-            <a class="acct-item" href="/helpcenter" role="menuitem"><span class="ic">❓</span> Help Center</a>
+            <a class="acct-item" id="ownerLink" role="menuitem" hidden><span class="ic"><svg><use href="#i-shield"/></svg></span> Owner console</a>
+            <a class="acct-item" data-route="setup/connected" role="menuitem"><span class="ic"><svg><use href="#i-key"/></svg></span> API keys &amp; security</a>
+            <a class="acct-item" id="billingLink" role="menuitem"><span class="ic"><svg><use href="#i-card"/></svg></span> Billing &amp; plan</a>
+            <a class="acct-item" href="/developers" role="menuitem"><span class="ic"><svg><use href="#i-code"/></svg></span> Developer API</a>
+            <a class="acct-item" data-route="playbooks" role="menuitem"><span class="ic"><svg><use href="#i-book"/></svg></span> Playbooks: how it works</a>
+            <a class="acct-item" href="/helpcenter" role="menuitem"><span class="ic"><svg><use href="#i-help"/></svg></span> Help Center</a>
 
             <div class="acct-sep" id="portalSwitchSep"></div>
             <div class="acct-group" id="portalSwitch" hidden>
               <div style="padding:0 4px 6px">Switch portal</div>
-              <a class="acct-item" id="openAdminPortal" role="menuitem"><span class="ic">🛡️</span> Open Admin Portal</a>
-              <a class="acct-item" id="openRecruiterPortal" role="menuitem"><span class="ic">🧑‍💼</span> Open Recruiter Portal</a>
+              <a class="acct-item" id="openAdminPortal" role="menuitem"><span class="ic"><svg><use href="#i-shield"/></svg></span> Open Admin Portal</a>
+              <a class="acct-item" id="openRecruiterPortal" role="menuitem"><span class="ic"><svg><use href="#i-user"/></svg></span> Open Recruiter Portal</a>
             </div>
 
             <div class="acct-sep"></div>
-            <button class="acct-item danger" id="acctSignOut" role="menuitem"><span class="ic">↩︎</span> Sign out</button>
+            <button class="acct-item danger" id="acctSignOut" role="menuitem"><span class="ic"><svg><use href="#i-logout"/></svg></span> Sign out</button>
           </div>
         </div>
       </div>
@@ -178,10 +229,10 @@
   </div>
 
   <div class="toast" id="toast"></div>
-  <script src="assets/js/campaign-studio.js?v=1948cbb21c"></script>
-  <script src="assets/js/local-backend.js?v=b695ecd489"></script>
+  <script src="assets/js/campaign-studio.js?v=d0ed715f14"></script>
+  <script src="assets/js/local-backend.js?v=e2bd5f759f"></script>
   <script src="assets/js/session-bridge.js?v=2727497284"></script>
-  <script src="assets/js/wl-theme.js?v=0659bcc826"></script>
-  <script src="assets/js/command.js?v=bbe7435820"></script>
+  <script src="assets/js/wl-theme.js?v=1c8caa379d"></script>
+  <script src="assets/js/command.js?v=19994c10d4"></script>
 </body>
 </html>

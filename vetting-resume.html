@@ -15,45 +15,45 @@
     /api/vetting/resume. That route reviews the resume SEMANTICALLY against each
     must-have (substance, not keywords), emails back tactful coaching, and returns
     the coverage so the candidate sees, line by line, what now lands and what to
-    still surface — then they edit and resubmit until everything shows.
+    still surface, then they edit and resubmit until everything shows.
 
     The operator may replace this page; it only needs to POST
     { deskId, candidateId, resumeText } to /api/vetting/resume.
     Set window.VETTING_API_BASE if the API is on another origin.
   -->
   <style>
-    :root { --bg:#0a0a12; --card:#14141f; --line:#262636; --txt:#eef0f6; --muted:#9aa0b4; --accent:#7c5cff; --accent2:#4dd0ff; --ok:#3ddc84; --warn:#ffcf5c; --miss:#ff8aa0; }
+    :root { --bg:#f7f8fa; --card:#ffffff; --line:#e5e8ee; --txt:#14181f; --muted:#4b5364; --accent:#2e5bd7; --accent2:#2e5bd7; --ok:#157347; --warn:#b45309; --miss:#d92d20; }
     * { box-sizing:border-box; }
-    body { margin:0; font-family:'Inter',system-ui,-apple-system,sans-serif; background:radial-gradient(1200px 600px at 70% -10%, #1a1340 0, transparent 60%), var(--bg); color:var(--txt); min-height:100vh; display:grid; place-items:start center; padding:24px; }
+    body { margin:0; font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--txt); min-height:100vh; display:grid; place-items:start center; padding:24px; }
     .wrap { width:100%; max-width:560px; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:28px; box-shadow:0 30px 80px -30px rgba(0,0,0,.7); }
-    .eyebrow { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent2); font-weight:700; }
-    h1 { font-size:23px; margin:8px 0 4px; line-height:1.2; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:28px; }
+    .eyebrow { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+    h1 { font-size:23px; margin:8px 0 4px; line-height:1.2; font-weight:600; }
     .sub { color:var(--muted); font-size:14px; margin:0 0 18px; line-height:1.5; }
     h2 { font-size:13px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:22px 0 10px; }
     label { display:block; font-size:12px; color:var(--muted); margin:14px 0 5px; }
-    textarea { width:100%; min-height:200px; padding:12px 13px; border-radius:10px; border:1px solid var(--line); background:#0e0e18; color:var(--txt); font-size:14px; line-height:1.5; resize:vertical; font-family:inherit; }
-    textarea:focus { outline:none; border-color:var(--accent); }
-    button { margin-top:18px; width:100%; padding:13px; border:0; border-radius:12px; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#0a0a12; font-weight:800; font-size:15px; cursor:pointer; }
+    textarea { width:100%; min-height:200px; padding:12px 13px; border-radius:6px; border:1px solid #cfd5df; background:#ffffff; color:var(--txt); font-size:14px; line-height:1.5; resize:vertical; font-family:inherit; }
+    textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(46,91,215,.18); }
+    button { margin-top:18px; width:100%; padding:13px; border:0; border-radius:6px; background:var(--accent); color:#ffffff; font-weight:600; font-size:15px; cursor:pointer; }
     button:disabled { opacity:.6; cursor:default; }
     .note { font-size:11px; color:var(--muted); margin-top:14px; line-height:1.5; }
-    .err { color:#ff8aa0; font-size:13px; margin-top:10px; min-height:16px; }
+    .err { color:#d92d20; font-size:13px; margin-top:10px; min-height:16px; }
     ul.req { list-style:none; padding:0; margin:0; }
-    ul.req li { border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:#0e0e18; }
+    ul.req li { border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:10px; background:#f4f5f7; }
     .req-head { display:flex; align-items:center; gap:9px; }
-    .pill { font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; padding:3px 8px; border-radius:999px; white-space:nowrap; }
-    .pill.shown { background:rgba(61,220,132,.16); color:var(--ok); }
-    .pill.partial { background:rgba(255,207,92,.16); color:var(--warn); }
-    .pill.missing { background:rgba(255,138,160,.16); color:var(--miss); }
-    .pill.todo { background:rgba(154,160,180,.16); color:var(--muted); }
-    .pill.must { background:rgba(124,92,255,.18); color:#c3b4ff; }
-    .req-title { font-weight:700; font-size:14px; flex:1; }
+    .pill { font-size:10px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; padding:3px 8px; border-radius:4px; white-space:nowrap; }
+    .pill.shown { background:#e6f4ec; color:var(--ok); }
+    .pill.partial { background:#fbf1e2; color:var(--warn); }
+    .pill.missing { background:#fdebe9; color:var(--miss); }
+    .pill.todo { background:#eef0f4; color:var(--muted); }
+    .pill.must { background:rgba(46,91,215,.09); color:var(--accent); }
+    .req-title { font-weight:600; font-size:14px; flex:1; }
     .req-body { font-size:13px; color:var(--muted); margin-top:7px; line-height:1.5; }
-    .req-body .ev { color:#bfe9c9; }
-    .req-body .coach { color:#ffe2a8; }
-    .banner { border-radius:12px; padding:13px 15px; margin:0 0 16px; font-size:14px; line-height:1.5; }
-    .banner.ok { background:rgba(61,220,132,.12); border:1px solid rgba(61,220,132,.3); color:#bff0d2; }
-    .banner.work { background:rgba(124,92,255,.1); border:1px solid rgba(124,92,255,.3); color:#d8ccff; }
+    .req-body .ev { color:var(--ok); }
+    .req-body .coach { color:var(--warn); }
+    .banner { border-radius:8px; padding:13px 15px; margin:0 0 16px; font-size:14px; line-height:1.5; }
+    .banner.ok { background:#e6f4ec; border:1px solid #c4e3d1; color:#157347; }
+    .banner.work { background:rgba(46,91,215,.09); border:1px solid #c7d4f2; color:#2e5bd7; }
   </style>
 </head>
 <body>
@@ -73,7 +73,7 @@
         <textarea id="resume" placeholder="Paste your full resume text here…"></textarea>
         <button type="submit" id="submit">Check my resume against the role</button>
         <div class="err" id="err"></div>
-        <p class="note">We only check whether your real experience is clearly shown. We never ask you to claim anything that isn't true — the goal is to make what you've genuinely done easy for a hiring screener to see.</p>
+        <p class="note">We only check whether your real experience is clearly shown. We never ask you to claim anything that isn't true, the goal is to make what you've genuinely done easy for a hiring screener to see.</p>
       </form>
     </div>
   </div>
@@ -91,7 +91,7 @@
       var STATUS_LABEL = { shown: "Shows", partial: "Almost", missing: "Add this" };
 
       function renderReqs(items, scored) {
-        if (!items || !items.length) { $("reqs").innerHTML = '<li><div class="req-body">No specific requirements were attached to this role — just make sure your resume reflects the conversation you had.</div></li>'; return; }
+        if (!items || !items.length) { $("reqs").innerHTML = '<li><div class="req-body">No specific requirements were attached to this role, just make sure your resume reflects the conversation you had.</div></li>'; return; }
         $("reqs").innerHTML = items.map(function (it) {
           var st = it.status || (scored ? "missing" : "todo");
           var pillClass = scored ? st : "todo";
@@ -106,10 +106,10 @@
       function renderStatus(d) {
         if (!d) { $("status").innerHTML = ""; return; }
         if (d.allMet) {
-          $("status").innerHTML = '<div class="banner ok">Your resume now clearly reflects every must-have for this role. Nicely done — we\'ll take it from here.</div>';
+          $("status").innerHTML = '<div class="banner ok">Your resume now clearly reflects every must-have for this role. Nicely done, we\'ll take it from here.</div>';
         } else {
           var n = d.gaps || 0;
-          $("status").innerHTML = '<div class="banner work">' + escapeHtml(d.summary || ("You're close — " + n + " thing" + (n === 1 ? "" : "s") + " still to surface.")) + ' Tweak the items marked below and check again.</div>';
+          $("status").innerHTML = '<div class="banner work">' + escapeHtml(d.summary || ("You're close, " + n + " thing" + (n === 1 ? "" : "s") + " still to surface.")) + ' Tweak the items marked below and check again.</div>';
         }
       }
 
@@ -124,7 +124,7 @@
               $("title").textContent = "Tailor your resume for the " + k.roleTitle + " role";
               $("eyebrow").textContent = (k.clientCompany ? k.clientCompany + " · " : "") + "Resume check";
             }
-            if (d.candidate && d.candidate.firstName) $("sub").innerHTML = "Hi " + escapeHtml(d.candidate.firstName) + " — below are the few things this role really needs to see. Make sure your resume clearly shows each one wherever it's true to your experience, then paste it in for a line-by-line check.";
+            if (d.candidate && d.candidate.firstName) $("sub").innerHTML = "Hi " + escapeHtml(d.candidate.firstName) + ", below are the few things this role really needs to see. Make sure your resume clearly shows each one wherever it's true to your experience, then paste it in for a line-by-line check.";
             if (d.latest && d.latest.coverage) { renderReqs(d.latest.coverage, true); renderStatus(d.latest); }
             else renderReqs(d.mustHaves, false);
           })

@@ -1,4 +1,4 @@
-/* RecruitersOS · Spending scenario planner — self-contained styles.
+/* RecruitersOS · Spending scenario planner, self-contained styles.
    Namespaced under .sc so it can drop into any page (command center, etc.)
    without colliding. Uses app-wide CSS vars + a local accent. */
 .sc { --sc-accent: #ffb020; --sc-accent2: #ff7849; }

@@ -6,7 +6,7 @@
  * #response, ...) to mirror the reference app.
  *
  * ============================================================================
- *  HOW TO NAVIGATE THIS FILE  (it's big — use search, not scrolling)
+ *  HOW TO NAVIGATE THIS FILE  (it's big, use search, not scrolling)
  * ============================================================================
  *  Every screen is a `render<Name>(el)` function registered in the ROUTES table
  *  (search:  var ROUTES = ). To jump to a screen, search for `function render…`
@@ -333,7 +333,7 @@
   // Portal identity: each portal says plainly what it is.
   (function () {
     var badge = $("#portalBadge");
-    var label = portal === "recruiter" ? "🧑‍💼 Recruiter Portal" : "🛡️ Admin Portal";
+    var label = portal === "recruiter" ? "Recruiter Portal" : "Admin Portal";
     if (badge) { badge.textContent = label; badge.setAttribute("data-portal", portal); }
     // On a white-label custom domain, never suffix the house product name; the
     // workspace/preset brand name (applied below) takes over the tab title.
@@ -352,7 +352,7 @@
   // Platform operator accounts. These run the product itself, so they are never
   // subject to the built-in 14-day trial gate (no banner, no paywall). This is
   // intentionally separate from WHITE_LABEL_DOMAINS so the operator still sees
-  // full house branding — it only waives billing. Match is by exact email.
+  // full house branding, it only waives billing. Match is by exact email.
   var OPERATOR_EMAILS = ["neadusall@gmail.com", "ryan@recruiters.co"];
   function isWhiteLabelWorkspace() {
     var ws = ctx.workspace || {};
@@ -402,7 +402,7 @@
   if (IMP_TOKEN) {
     var bn = document.createElement("div");
     bn.className = "imp-banner";
-    bn.innerHTML = '<span>👁️ Admin view-as, you are inside <b>' +
+    bn.innerHTML = '<span>Admin view-as: you are inside <b>' +
       esc((ctx.user && (ctx.user.name || ctx.user.email)) || "a recruiter") +
       "</b>'s Recruiter Portal</span><button type=\"button\" id=\"impExit\">Exit to Admin Portal</button>";
     document.body.appendChild(bn);
@@ -427,7 +427,7 @@
     if (OPERATOR_EMAILS.indexOf(userEmail) >= 0) return; // platform operator, never gated
     // White-label / Lume customers are billed by the operator (resale model), NOT by
     // the platform's trial, so they never see the banner or paywall. Use the same
-    // robust detection the rest of the chrome uses — it also covers Lume's custom
+    // robust detection the rest of the chrome uses, it also covers Lume's custom
     // domain (app.lumesp.com) and any own-branded workspace, which the old inline
     // ws.domain-only check missed, so those accounts still saw the "14 days left" bar.
     if (isWhiteLabelWorkspace() || isLumeWorkspace()) return;
@@ -465,7 +465,7 @@
     } else if (tr.onTrial) {
       var tb = document.createElement("div");
       tb.className = "trial-banner";
-      tb.innerHTML = '<span>✨ <b>' + tr.daysLeft + " day" + (tr.daysLeft === 1 ? "" : "s") +
+      tb.innerHTML = '<span><b>' + tr.daysLeft + " day" + (tr.daysLeft === 1 ? "" : "s") +
         "</b> left in your free trial, no card needed until it ends.</span>" +
         '<button type="button" id="trUpgrade">Add payment</button>';
       var mainEl = document.querySelector(".main");
@@ -486,9 +486,9 @@
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     sendqueue: { title: "Send Queue", crumb: "Operate", action: null, render: renderSendQueue, motionOnly: "bd" },
     senders: { title: "Senders", crumb: "Operate", action: null, render: renderSenders, motionOnly: "bd" },
-    prospects: { title: "Prospects", crumb: "Operate", action: "＋ Add prospect", render: renderProspects },
+    prospects: { title: "Prospects", crumb: "Operate", action: "+ Add prospect", render: renderProspects },
     autopilot: { title: "Autopilot", crumb: "Build", action: null, render: renderAutopilot },
-    campaigns: { title: "Campaigns", crumb: "Build", action: "＋ New sequence", render: renderCampaignsHub },
+    campaigns: { title: "Campaigns", crumb: "Build", action: "+ New sequence", render: renderCampaignsHub },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting" },
     data: { title: "Candidates", crumb: "Build", action: null, render: renderData },
@@ -499,7 +499,7 @@
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
-    content: { title: "Campaign Sequences Library", crumb: "Build", action: "＋ New sequence", render: renderContent },
+    content: { title: "Campaign Sequences Library", crumb: "Build", action: "+ New sequence", render: renderContent },
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
     "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: renderOutreachStats, cap: "team:manage" },
     engine: { title: "Engine / Throughput", crumb: "Admin", action: null, render: renderEngine, cap: "team:manage" },
@@ -512,7 +512,7 @@
     setup: { title: "Setup", crumb: "Connect", action: null, render: renderSetup, cap: "integrations:manage" },
     connected: { title: "Connected", crumb: "Connect", action: "Test all", render: renderConnected, cap: "integrations:manage" },
     ats: { title: "ATS", crumb: "Connect", action: null, render: renderAts, cap: "ats:manage" },
-    team: { title: "Team", crumb: "Admin", action: "＋ Invite recruiter", render: renderTeam, cap: "team:manage" },
+    team: { title: "Team", crumb: "Admin", action: "+ Invite recruiter", render: renderTeam, cap: "team:manage" },
     // Playbooks: a visual, wireframe-driven "how it works" gallery (Flip the
     // Script, JD Sourcing, AI Vetting, Voice Drops, Campaign Models). Motion-
     // agnostic, no capability gate, so anyone in either portal can see the
@@ -524,29 +524,29 @@
      A live, auto-refreshing read on the whole curation pipeline: the daily-target
      gauge, the funnel, every SOURCE's health, the EFFECTIVE value of every
      throughput dial (+ the recommended raise for the critical ones), and host
-     headroom. Read-only — it spends nothing; it just exposes what to turn. */
+     headroom. Read-only, it spends nothing; it just exposes what to turn. */
   function renderEngine(view) {
     function n(x) { return (x == null ? 0 : x).toLocaleString(); }
     function dot(status) {
       var s = String(status || "").toLowerCase();
       var c = (s.indexOf("ok") >= 0 || s === "healthy" || s === "up" || s === "on" || s === "set" || s === "live")
-        ? "#38e0a6"
+        ? "var(--ok)"
         : (s.indexOf("throttl") >= 0 || s.indexOf("degrad") >= 0 || s.indexOf("down") >= 0 || s === "missing" || s === "off")
-          ? "#ff5c7a" : "#ffc24d";
+          ? "var(--danger)" : "var(--warn)";
       return '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + c + ';margin-right:7px;vertical-align:middle"></span>';
     }
     function card(label, value, sub, accent) {
-      return '<div style="background:var(--card,#15151f);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 16px;min-width:120px;flex:1">' +
-        '<div style="font-size:22px;font-weight:700;color:' + (accent || "#e8e8f0") + '">' + value + "</div>" +
-        '<div style="font-size:12px;color:#9aa0b4;margin-top:2px">' + esc(label) + "</div>" +
-        (sub ? '<div style="font-size:11px;color:#6b7186;margin-top:3px">' + esc(sub) + "</div>" : "") + "</div>";
+      return '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;padding:14px 16px;min-width:120px;flex:1">' +
+        '<div style="font-size:22px;font-weight:700;color:' + (accent || "var(--text-muted)") + '">' + value + "</div>" +
+        '<div style="font-size:12px;color:var(--text-dim);margin-top:2px">' + esc(label) + "</div>" +
+        (sub ? '<div style="font-size:11px;color:var(--text-dim);margin-top:3px">' + esc(sub) + "</div>" : "") + "</div>";
     }
     view.innerHTML = '<div class="empty">Loading engine telemetry…</div>';
 
     function load() {
       send("/in-market", "POST", { action: "engine_admin" }).then(function (r) {
         if (!r.ok || !r.data) {
-          view.innerHTML = '<div class="empty">⚠ Couldn\'t reach the engine telemetry (admin only, or a brief blip right after a deploy). Retrying…</div>';
+          view.innerHTML = '<div class="empty">Couldn\'t reach the engine telemetry (admin only, or a brief blip right after a deploy). Retrying…</div>';
           return;
         }
         var d = r.data, f = d.funnel || {}, sys = d.system || {}, sh = d.search || {}, daily = f.daily || {};
@@ -554,59 +554,59 @@
         var hit = withEmail ? Math.round(((f.validated || 0) / withEmail) * 100) : 0;
 
         // 1) Daily target gauge
-        var paceColor = daily.onPace ? "#38e0a6" : "#ffc24d";
+        var paceColor = daily.onPace ? "var(--ok)" : "var(--warn)";
         var html = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:stretch;margin-bottom:16px">' +
-          card("Verified TODAY", n(daily.validToday), "of " + n(daily.target || 5000) + " target", "#7c5cff") +
-          card("Projected (24h pace)", n(daily.projectedValid), daily.onPace ? "on pace ✓" : "below target", paceColor) +
-          card("Total verified (sendable)", n(f.validated), "the whole book", "#38e0a6") +
+          card("Verified TODAY", n(daily.validToday), "of " + n(daily.target || 5000) + " target", "var(--brand)") +
+          card("Projected (24h pace)", n(daily.projectedValid), daily.onPace ? "on pace" : "below target", paceColor) +
+          card("Total verified (sendable)", n(f.validated), "the whole book", "var(--ok)") +
           card("New names / last hour", n(f.namedLastHour), "sourcing+curation rate") +
           "</div>";
 
-        // 1b) PiP Studio video coverage — captured postings + finished outreach videos (live).
+        // 1b) PiP Studio video coverage, captured postings + finished outreach videos (live).
         //     Filled from the pip_stats action after render (reused from the standalone studio).
-        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">PiP Studio · video coverage</h3>' +
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">PiP Studio · video coverage</h3>' +
           '<div id="engPipCards" style="display:flex;gap:10px;flex-wrap:wrap"><div class="empty" style="flex:1">Loading…</div></div>';
 
         // 2) Funnel
-        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Funnel</h3>' +
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">Funnel</h3>' +
           '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
           card("Curated (people)", n(f.total), "named rate " + Math.round((f.namedRate || 0) * 100) + "%") +
           card("With a domain", n(f.domain && f.domain.curatedWithDomain), "email gate") +
           card("With an email", n(withEmail), "guessed + found") +
-          card("✓ Verified", n(f.validated), "emailValidated", "#38e0a6") +
-          card("✕ Invalid", n(f.invalid), "suppressed", "#ff5c7a") +
-          card("~ Catch-all", n(f.catchAll), "kept, unconfirmed", "#ffc24d") +
-          card("Email hit-rate", hit + "%", "verified ÷ emails", hit < 20 ? "#ff5c7a" : "#38e0a6") +
+          card("Verified", n(f.validated), "emailValidated", "var(--ok)") +
+          card("✕ Invalid", n(f.invalid), "suppressed", "var(--danger)") +
+          card("~ Catch-all", n(f.catchAll), "kept, unconfirmed", "var(--warn)") +
+          card("Email hit-rate", hit + "%", "verified ÷ emails", hit < 20 ? "var(--danger)" : "var(--ok)") +
           "</div>";
 
-        // 2b) KoldInfo enrichment — first rung, operator CSV round-trip.
-        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">KoldInfo enrichment ' +
-          '<span style="font-weight:400;color:#6b7186">first rung · CSV round-trip</span></h3>' +
-          '<div style="background:var(--card,#15151f);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 16px">' +
-          '<div style="font-size:12px;color:#9aa0b4;margin-bottom:10px">Runs at the TOP of the funnel: export the highest-intent slots that have a domain but no confirmed email (named or not), enrich in KoldInfo, then import the result here. KoldInfo names + emails cold; every address is re-verified through Reoon and teaches the per-domain pattern so one hit unlocks the whole domain.</div>' +
+        // 2b) KoldInfo enrichment, first rung, operator CSV round-trip.
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">KoldInfo enrichment ' +
+          '<span style="font-weight:400;color:var(--text-dim)">first rung · CSV round-trip</span></h3>' +
+          '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;padding:14px 16px">' +
+          '<div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">Runs at the TOP of the funnel: export the highest-intent slots that have a domain but no confirmed email (named or not), enrich in KoldInfo, then import the result here. KoldInfo names + emails cold; every address is re-verified through Reoon and teaches the per-domain pattern so one hit unlocks the whole domain.</div>' +
           '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-          '<label style="font-size:12px;color:#9aa0b4">Mode <select id="kiMode" style="background:#0f0f18;border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#e8e8f0;padding:5px 7px">' +
-          '<option value="seed">Seed domains (1 / domain — cheapest)</option>' +
+          '<label style="font-size:12px;color:var(--text-dim)">Mode <select id="kiMode" style="background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text-muted);padding:5px 7px">' +
+          '<option value="seed">Seed domains (1 / domain, cheapest)</option>' +
           '<option value="all">All un-confirmed rows</option></select></label>' +
-          '<label style="font-size:12px;color:#9aa0b4">Rows <input id="kiLimit" type="number" value="4000" min="1" max="20000" style="width:88px;background:#0f0f18;border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#e8e8f0;padding:5px 7px"></label>' +
-          '<button class="btn btn-ghost btn-sm" id="kiExport">⬇ Export CSV for KoldInfo</button>' +
+          '<label style="font-size:12px;color:var(--text-dim)">Rows <input id="kiLimit" type="number" value="4000" min="1" max="20000" style="width:88px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text-muted);padding:5px 7px"></label>' +
+          '<button class="btn btn-ghost btn-sm" id="kiExport">Export CSV for KoldInfo</button>' +
           '<input id="kiFile" type="file" accept=".csv,text/csv" style="display:none">' +
-          '<button class="btn btn-ghost btn-sm" id="kiImportPick">⬆ Import KoldInfo results…</button>' +
-          '<span id="kiStatus" style="font-size:12px;color:#9aa0b4"></span>' +
+          '<button class="btn btn-ghost btn-sm" id="kiImportPick">Import KoldInfo results…</button>' +
+          '<span id="kiStatus" style="font-size:12px;color:var(--text-dim)"></span>' +
           "</div></div>";
 
         // 3) Source health
         var engines = (sh.engines || []).map(function (e) {
-          return '<span style="display:inline-block;margin:3px 8px 3px 0;font-size:12px;color:#c8cce0">' +
-            dot(e.status) + esc(e.engine) + ' <span style="color:#6b7186">(' + Math.round((e.okRate || 0) * 100) + "% ok" +
+          return '<span style="display:inline-block;margin:3px 8px 3px 0;font-size:12px;color:var(--text-muted)">' +
+            dot(e.status) + esc(e.engine) + ' <span style="color:var(--text-dim)">(' + Math.round((e.okRate || 0) * 100) + "% ok" +
             (e.backoffSec ? ", backoff " + e.backoffSec + "s" : "") + ")</span></span>";
         }).join("");
         var cc = d.cc || {};
-        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Source health ' +
-          '<span style="font-weight:400;color:' + (sh.healthy ? "#38e0a6" : "#ff5c7a") + '">' + dot(sh.status) + esc(sh.status || "unknown") + "</span></h3>" +
-          '<div style="background:var(--card,#15151f);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 16px">' +
-          '<div style="margin-bottom:8px">' + (engines || '<span style="color:#6b7186">no search telemetry yet</span>') + "</div>" +
-          '<div style="font-size:12px;color:#9aa0b4">' + dot(cc.status || (cc.healthy ? "ok" : "")) + "Common Crawl: " + esc(cc.status || (cc.healthy ? "ok" : "n/a")) +
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">Source health ' +
+          '<span style="font-weight:400;color:' + (sh.healthy ? "var(--ok)" : "var(--danger)") + '">' + dot(sh.status) + esc(sh.status || "unknown") + "</span></h3>" +
+          '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;padding:14px 16px">' +
+          '<div style="margin-bottom:8px">' + (engines || '<span style="color:var(--text-dim)">no search telemetry yet</span>') + "</div>" +
+          '<div style="font-size:12px;color:var(--text-dim)">' + dot(cc.status || (cc.healthy ? "ok" : "")) + "Common Crawl: " + esc(cc.status || (cc.healthy ? "ok" : "n/a")) +
           '  ·  ' + dot(d.reoon && d.reoon.enabled ? "on" : "off") + "Reoon: " + (d.reoon && d.reoon.enabled ? "live" + (d.reoon.activeTask ? " (task running)" : "") : "OFF") +
           "</div></div>";
 
@@ -615,35 +615,35 @@
         (d.dials || []).forEach(function (x) { (groups[x.group] = groups[x.group] || []).push(x); });
         var rows = "";
         Object.keys(groups).forEach(function (g) {
-          rows += '<tr><td colspan="4" style="padding:10px 8px 4px;font-size:12px;color:#7c5cff;font-weight:600">' + esc(g) + "</td></tr>";
+          rows += '<tr><td colspan="4" style="padding:10px 8px 4px;font-size:12px;color:var(--brand);font-weight:600">' + esc(g) + "</td></tr>";
           groups[g].forEach(function (x) {
             var crit = x.crit;
-            rows += '<tr style="border-top:1px solid rgba(255,255,255,.05)">' +
-              '<td style="padding:7px 8px;font-family:monospace;font-size:12px;color:' + (crit ? "#ffc24d" : "#c8cce0") + '">' + (crit ? "★ " : "") + esc(x.key) + "</td>" +
-              '<td style="padding:7px 8px;font-weight:600">' + esc(String(x.value)) + (x.unit ? ' <span style="color:#6b7186;font-weight:400">' + esc(x.unit) + "</span>" : "") + "</td>" +
-              '<td style="padding:7px 8px;font-size:12px;color:#38e0a6">' + (x.rec ? "→ " + esc(x.rec) : "") + "</td>" +
-              '<td style="padding:7px 8px;font-size:12px;color:#6b7186">' + esc(x.note || "") + "</td></tr>";
+            rows += '<tr style="border-top:1px solid var(--surface-2)">' +
+              '<td style="padding:7px 8px;font-family:monospace;font-size:12px;color:' + (crit ? "var(--warn)" : "var(--text-muted)") + '">' + (crit ? "★ " : "") + esc(x.key) + "</td>" +
+              '<td style="padding:7px 8px;font-weight:600">' + esc(String(x.value)) + (x.unit ? ' <span style="color:var(--text-dim);font-weight:400">' + esc(x.unit) + "</span>" : "") + "</td>" +
+              '<td style="padding:7px 8px;font-size:12px;color:var(--ok)">' + (x.rec ? "→ " + esc(x.rec) : "") + "</td>" +
+              '<td style="padding:7px 8px;font-size:12px;color:var(--text-dim)">' + esc(x.note || "") + "</td></tr>";
           });
         });
-        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Throughput dials <span style="font-weight:400;color:#6b7186">(★ = critical lever · → = recommended raise)</span></h3>' +
-          '<div style="background:var(--card,#15151f);border:1px solid rgba(255,255,255,.07);border-radius:12px;overflow:hidden">' +
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">Throughput dials <span style="font-weight:400;color:var(--text-dim)">(★ = critical lever · → = recommended raise)</span></h3>' +
+          '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;overflow:hidden">' +
           '<table style="width:100%;border-collapse:collapse"><tbody>' + rows + "</tbody></table></div>";
 
         // 5) Host headroom
         var disk = sys.disk || {};
         var diskWarn = (disk.usedPct || 0) >= 80;
-        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:#c8cce0">Host headroom</h3>' +
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">Host headroom</h3>' +
           '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
-          card("Disk used", (disk.usedPct == null ? "?" : disk.usedPct + "%"), (disk.freeGB == null ? "" : disk.freeGB + " GB free of " + disk.totalGB), diskWarn ? "#ff5c7a" : "#38e0a6") +
+          card("Disk used", (disk.usedPct == null ? "?" : disk.usedPct + "%"), (disk.freeGB == null ? "" : disk.freeGB + " GB free of " + disk.totalGB), diskWarn ? "var(--danger)" : "var(--ok)") +
           card("CPU load (1m)", (sys.loadavg ? sys.loadavg[0] : "?"), (sys.cpus ? sys.cpus + " vCPU" : "")) +
           card("Memory free", (sys.memFreeGB == null ? "?" : sys.memFreeGB + " GB"), (sys.memTotalGB ? "of " + sys.memTotalGB + " GB" : "")) +
           "</div>" +
-          (diskWarn ? '<div style="margin-top:8px;font-size:12px;color:#ff5c7a">⚠ Disk is ' + disk.usedPct + '% full — the file-snapshot store can fill the box. Grow the disk before scaling throughput 10×.</div>' : "") +
-          '<div style="margin-top:14px;font-size:11px;color:#6b7186">Auto-refreshes every 15s. To change a dial: edit /opt/recruiteros/.env.production on the server, then <code>docker compose up -d --force-recreate app</code>.</div>';
+          (diskWarn ? '<div style="margin-top:8px;font-size:12px;color:var(--danger)">Disk is ' + disk.usedPct + '% full, the file-snapshot store can fill the box. Grow the disk before scaling throughput 10×.</div>' : "") +
+          '<div style="margin-top:14px;font-size:11px;color:var(--text-dim)">Auto-refreshes every 15s. To change a dial: edit /opt/recruiteros/.env.production on the server, then <code>docker compose up -d --force-recreate app</code>.</div>';
 
         view.innerHTML = html;
 
-        // KoldInfo enrichment — export the backlog to a CSV, import the enriched result back.
+        // KoldInfo enrichment, export the backlog to a CSV, import the enriched result back.
         (function () {
           var exp = document.getElementById("kiExport");
           var pick = document.getElementById("kiImportPick");
@@ -679,9 +679,9 @@
                   if (stat) stat.textContent = "Imported: " + (d.found || 0) + " verified · " + (d.named || 0) + " newly named · " + (d.catchAll || 0) + " catch-all · " + (d.pending || 0) + " pending · " + (d.unmatched || 0) + " unmatched.";
                   try {
                     alert("KoldInfo import\n" + (d.parsed || 0) + " rows parsed · " + (d.matched || 0) + " matched to prospects\n\n" +
-                      "✓ verified email   " + (d.found || 0) + "\n＋ newly named      " + (d.named || 0) + "\n~ catch-all        " + (d.catchAll || 0) + "\n✕ invalid          " + (d.invalid || 0) + "\n" +
+                      "verified email     " + (d.found || 0) + "\n+ newly named      " + (d.named || 0) + "\n~ catch-all        " + (d.catchAll || 0) + "\ninvalid            " + (d.invalid || 0) + "\n" +
                       "pending (address stored, awaiting Reoon)  " + (d.pending || 0) + "\nunmatched          " + (d.unmatched || 0));
-                  } catch (e) { /* alert blocked — status line already shows it */ }
+                  } catch (e) { /* alert blocked, status line already shows it */ }
                   load();
                 }).catch(function () { if (stat) stat.textContent = "Import failed."; });
               };
@@ -697,16 +697,16 @@
           var pc = p.autoCapture || {}, pv = p.autoVideo || {};
           var engineOn = !!pc.enabled || !!pv.enabled;
           pel.innerHTML =
-            card("Postings captured", n(p.capturedShots), "verified company-site captures", "#7c5cff") +
+            card("Postings captured", n(p.capturedShots), "verified company-site captures", "var(--brand)") +
             card("Ready to personalize", n(p.shotsReady), "have an email teaser GIF") +
-            card("Videos made", n(p.compositedVideos), "finished outreach videos", (p.compositedVideos > 0 ? "#38e0a6" : "#e8e8f0")) +
-            card("Auto-engine", engineOn ? "on" : "off", "capture " + (pc.enabled ? "on" : "off") + " · video " + (pv.enabled ? "on" : "off"), engineOn ? "#38e0a6" : "#ffc24d");
+            card("Videos made", n(p.compositedVideos), "finished outreach videos", (p.compositedVideos > 0 ? "var(--ok)" : "var(--text-muted)")) +
+            card("Auto-engine", engineOn ? "on" : "off", "capture " + (pc.enabled ? "on" : "off") + " · video " + (pv.enabled ? "on" : "off"), engineOn ? "var(--ok)" : "var(--warn)");
         }).catch(function () {
           var pel = document.getElementById("engPipCards");
-          if (pel) pel.innerHTML = '<div style="color:#6b7186;font-size:12px">PiP stats unavailable</div>';
+          if (pel) pel.innerHTML = '<div style="color:var(--text-dim);font-size:12px">PiP stats unavailable</div>';
         });
       }).catch(function () {
-        view.innerHTML = '<div class="empty">⚠ Engine telemetry unavailable. This panel is admin-only — sign in as a team manager.</div>';
+        view.innerHTML = '<div class="empty">Engine telemetry unavailable. This panel is admin-only, sign in as a team manager.</div>';
       });
     }
     load();
@@ -779,7 +779,7 @@
     $("#crumb").textContent = (ctx.workspace ? wsDisplayName() + " / " : "") + r.crumb;
     Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) { n.classList.toggle("active", n.dataset.route === key); });
     var pa = $("#primaryAction");
-    if (r.action) { pa.style.display = ""; pa.textContent = (key === "prospects") ? ("＋ Add " + prospectNoun()) : r.action; pa.onclick = function () { primaryAction(key); }; }
+    if (r.action) { pa.style.display = ""; pa.textContent = (key === "prospects") ? ("+ Add " + prospectNoun()) : r.action; pa.onclick = function () { primaryAction(key); }; }
     else pa.style.display = "none";
     Array.prototype.forEach.call(document.querySelectorAll(".mt"), function (x) { x.classList.toggle("active", x.dataset.motion === motion); });
     clearViewTimers(); // stop any auto-refresh from the view we're leaving
@@ -1059,7 +1059,7 @@
           '<div class="pb-bcard-body"><div class="big">' + it.icon + "</div><h5>" + esc(it.title) + "</h5><p>" + esc(it.teaser) + "</p></div>" +
           '<div class="pb-bcard-foot"><span class="dot"></span>' + esc(it.cta || "Read the message") + "</div></div>";
     }).join("");
-    return (hint ? '<p class="pb-board-hint">↔ ' + esc(hint) + "</p>" : "") +
+    return (hint ? '<p class="pb-board-hint">' + esc(hint) + "</p>" : "") +
       '<div class="pb-board"><div class="pb-board-track">' + track + "</div></div>";
   }
 
@@ -1118,13 +1118,13 @@
 
   /* ---- Channels + the Sequence Library data (real outbound workflows) ---- */
   var PB_CH = {
-    email:   { icon: "✉️", label: "Email" },
-    liconn:  { icon: "➕", label: "LinkedIn connect" },
-    lidm:    { icon: "💬", label: "LinkedIn message" },
-    livoice: { icon: "🎙️", label: "LinkedIn voice note" },
-    vm:      { icon: "📞", label: "Voicemail drop" },
-    sms:     { icon: "📱", label: "SMS" },
-    call:    { icon: "☎️", label: "Call task" }
+    email:   { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', label: "Email" },
+    liconn:  { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-plus"/></svg>', label: "LinkedIn connect" },
+    lidm:    { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-message"/></svg>', label: "LinkedIn message" },
+    livoice: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg>', label: "LinkedIn voice note" },
+    vm:      { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>', label: "Voicemail drop" },
+    sms:     { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-message"/></svg>', label: "SMS" },
+    call:    { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>', label: "Call task" }
   };
   // Body convention for email touches: subj/body = Variant A (control),
   // aSubj/aBody = Variant B (test). Tokens like {first} auto-fill per prospect.
@@ -1134,7 +1134,7 @@
       { id: "just-raised", motion: "bd", accent: "c", name: "Just Raised", signal: "Funding round", persona: "VP Eng / Head of Talent",
         goal: "Win the recruiting engagement before the post-raise hiring spike floods the market.",
         touches: [
-          { d: 0, ch: "email", t: "One MPC before the crush", subj: "Staff backend eng — scaled payments to 12k tx/sec",
+          { d: 0, ch: "email", t: "One MPC before the crush", subj: "Staff backend eng, scaled payments to 12k tx/sec",
             body: "Hi {first},\n\nSaw the {round}, congrats. The quarter after a raise is when great backend talent gets scarce, so before the crush, one person who isn't applying anywhere:\n\n• Scaled a payments ledger to twelve thousand transactions a second at five-nines (Series C fintech)\n• Go and event-sourcing; cut reconciliation latency by 80 percent\n\nPassive, but would move for real ownership on a platform like yours. Won't be around long.\n\nWant the one-pager?\n\nThanks,\n{you}",
             aSubj: "your next 5 engineering hires",
             aBody: "Hi {first}, saw the {round}, congrats. Most teams lose a quarter standing up a pipeline after a raise. I've got a Staff backend engineer who scaled payments to 12k tx/sec and isn't on the market. Want the one-pager?",
@@ -1152,9 +1152,9 @@
           { d: 9, ch: "vm", t: "Voicemail in your voice",
             body: "Hi {first}, it's {you} at {firm}. I sent a note about a backend engineer for your team after the {round}... passive, and a real fit. They're getting close elsewhere, so I didn't want you to miss it. Give me a call back when you can. And congrats again.",
             b: "Hi {first}, {you} here at {firm}. Quick follow-up on that engineer for your team... strong, and the window's closing. I'd love five minutes. Call me back when you get a sec. Congrats again on the raise." },
-          { d: 12, ch: "email", t: "Second candidate + news", subj: "saw {company} is staffing up — one more for you",
+          { d: 12, ch: "email", t: "Second candidate + news", subj: "saw {company} is staffing up, one more for you",
             body: "Hi {first},\n\nSaw {company}'s hiring page light up after the raise, exciting. Here's a second engineer worth your time, since the first is now mid-process elsewhere:\n\n• Led the infra team that held a fintech at five-nines through a ten-x growth year\n• Deep in Kubernetes, Go and observability; the calm one when things break at 3am\n\nOpen to a conversation, selective about where. Worth a quick call?\n\nThanks,\n{you}",
-            aSubj: "the first one's gone — here's the second",
+            aSubj: "the first one's gone, here's the second",
             aBody: "Hi {first}, the backend engineer I led with is now mid-process elsewhere, but here's a second who's just as strong: led infra for a fintech through ten-x growth, deep Go and Kubernetes. Want a quick call before they're gone too?" },
           { d: 16, ch: "email", t: "Break-up, door open", subj: "closing the loop",
             body: "Hi {first}, I'll stop here so I'm not noise in your inbox. Standing offer: reply anytime and I'll line up a quick call on whatever's hardest to fill. Congrats again on the {round}.\n\nThanks,\n{you}",
@@ -1165,7 +1165,7 @@
       { id: "reposted-3x", motion: "bd", accent: "v", name: "Reposted Three Times", signal: "Job repost (3x)", persona: "Hiring Manager / Talent",
         goal: "Win the hard-to-fill req a team has already given up on filling alone.",
         touches: [
-          { d: 0, ch: "email", t: "One who'd land it", subj: "the {role} repost — one person who'd actually land it",
+          { d: 0, ch: "email", t: "One who'd land it", subj: "the {role} repost, one person who'd actually land it",
             body: "Hi {first},\n\nThe {role} req has cycled back to the top of your careers page a few times. That's almost never the candidates' fault, it's a thin top-of-funnel against a high bar. One {discipline} person I've spoken with who'd clear it:\n\n• {achv}\n• Has shipped the exact thing your post asks for, twice; passive, not applying anywhere\n\nWant the one-pager?\n\nThanks,\n{you}",
             aSubj: "filling {role} without the repost loop",
             aBody: "Hi {first}, noticed {role} keeps reposting. Usually means strong-on-paper folks who fade in the loop. I source for fit first, and I've got one who'd actually land it: {achv}. Want a look?",
@@ -1180,7 +1180,7 @@
           { d: 7, ch: "vm", t: "Voicemail drop",
             body: "Hi {first}, {you} here. About the {role} search... I've got a {discipline} person who isn't on the market and would clear your bar. I'd love a few minutes to talk them through. Give me a ring back. Thanks so much.",
             b: "Hi {first}, {you} here, on the {role} role. I think the role's stronger than its post, and I've got someone who'd see that. Quick call back? Thanks." },
-          { d: 10, ch: "email", t: "Reframe + second person", subj: "the {role} role — one more angle",
+          { d: 10, ch: "email", t: "Reframe + second person", subj: "the {role} role, one more angle",
             body: "Hi {first},\n\nHonestly, I think the {role} post undersells the role, the scope is better than the bullets make it sound. The first person I mentioned would get that immediately, and here's a second:\n\n• Quietly one of the best {discipline} people I know, ex-{peer}\n• Mentors and raises the bar around them; would anchor your team\n\nWant a quick call to talk through both and a reframed pitch?\n\nThanks,\n{you}",
             aSubj: "a second {discipline} person for {role}",
             aBody: "Hi {first}, here's a second option for {role}: ex-{peer}, one of the best {discipline} people I know, would anchor your team. Worth a quick call on both?" },
@@ -1258,7 +1258,7 @@
       { id: "velocity-spike", motion: "bd", accent: "a", name: "Hiring Velocity Spike", signal: "Many roles opened", persona: "In-house talent lead",
         goal: "Become the overflow partner when a team opens more roles than it can pipeline.",
         touches: [
-          { d: 0, ch: "email", t: "Take the hardest off your plate", subj: "{n} roles open at {company} — the two that are stuck?",
+          { d: 0, ch: "email", t: "Take the hardest off your plate", subj: "{n} roles open at {company}, the two that are stuck?",
             body: "Hi {first},\n\n{company} opened {n} roles in a few weeks, that's a lot of pipeline for one team. I work as overflow: you keep your process, I keep candidates flowing for the roles that are stuck. To prove it rather than promise it, one I've already got:\n\n• {achv}; ready to interview this week\n\nWant a quick call, and I'll take your hardest req?\n\nThanks,\n{you}",
             aSubj: "keeping up with {n} open roles",
             aBody: "Hi {first}, {company}'s hiring page jumped to {n} roles. When volume spikes, the hardest reqs stall while the easy ones fill. I can take the two hardest, starting with candidates this week. Open to fifteen minutes?",
@@ -1319,9 +1319,9 @@
       { id: "stale-req", motion: "bd", accent: "a", name: "Stale Req Rescue", signal: "Role open 60+ days", persona: "Frustrated hiring manager",
         goal: "Win a role the company has struggled to fill by reframing the pitch, not just re-searching.",
         touches: [
-          { d: 0, ch: "email", t: "Positioning, plus one person", subj: "the {role} role — still open?",
+          { d: 0, ch: "email", t: "Positioning, plus one person", subj: "the {role} role, still open?",
             body: "Hi {first},\n\n{role} has been open at {company} for a couple of months. After sixty days it's usually positioning, not sourcing, the pitch isn't landing with the people who'd be great. One who'd land it:\n\n• {achv}\n• Wouldn't have applied to the post, but would take the call\n\nWorth a quick call on the candidate and a reframed pitch?\n\nThanks,\n{you}",
-            aSubj: "60 days on {role} — a second angle",
+            aSubj: "60 days on {role}, a second angle",
             aBody: "Hi {first}, {role} looks like it's been a tough fill. I tend to win the roles other people give up on by selling the mission, not the checklist. One profile ready. Worth a quick call?",
             cSubj: "why {role} hasn't closed (it's not sourcing)",
             cBody: "Hi {first}, a role open sixty days is rarely a sourcing problem, it's how it's being told. I've got someone who'd land it and a sharper way to pitch it. Five minutes?" },
@@ -1388,7 +1388,7 @@
             c: "Hi {first}, quick one: I've got a {role} that's basically your {achv} as a full-time mandate. Worth fifteen minutes? Even a 'not now' is a fair answer." },
           { d: 3, ch: "email", t: "The why-now, and why you", subj: "the {role} role, built around what you do",
             body: "Hi {first},\n\nFollowing up here. What makes this {role} different: {achv-context}. Small team, real scope, comp in the {band} range.\n\nWhy you specifically: {achv}. That's rare, and it's the heart of this role.\n\nNo pressure, but if you're even passively curious, fifteen minutes and you'll know if it's real.\n\nThanks,\n{you}",
-            aSubj: "{achv} — as the whole job",
+            aSubj: "{achv}, as the whole job",
             aBody: "Hi {first}, the short version: a {role} where {achv} is the mandate, not a bullet. {achv-context}. Comp's in the {band} range. Worth fifteen minutes to see if it's real?",
             cSubj: "not looking? read this anyway",
             cBody: "Hi {first}, I know you're not looking, that's exactly why I reached out. This {role} is the kind of thing people leave a good job for: {achv-context}. If you're even a little curious, I'll keep it low-key." },
@@ -1410,7 +1410,7 @@
             body: "Hi {first},\n\nThanks for applying for the {role}, real person here. I've read it, and I'd love to learn what you're after next. Grab any slot that works: {link}. If none fit, just reply with two times and I'll make it work.\n\nThanks,\n{you}",
             aSubj: "real person, 30 seconds",
             aBody: "Hi {first}, real person on the other end, thanks for applying to the {role}. I read your application. Want to grab fifteen minutes so I can tell you what it's actually like? {link}",
-            cSubj: "you applied {role} — here's the fast track",
+            cSubj: "you applied {role}, here's the fast track",
             cBody: "Hi {first}, you applied for the {role} and I want to move quickly while it's fresh. Two clicks to grab time: {link}. Or reply with when's good." },
           { d: 0, ch: "sms", t: "Same-hour text",
             body: "Hi {first}, it's {you} at {firm}, thanks for applying to the {role}. Picked a couple of times to chat here: {link}. Talk soon!",
@@ -1557,7 +1557,7 @@
     ];
   }
   function pbTouchTeaser(t) {
-    var s = (t.subj ? t.subj + " — " : "") + t.body;
+    var s = (t.subj ? t.subj + ", " : "") + t.body;
     s = s.replace(/\s+/g, " ").trim();
     return s.length > 100 ? s.slice(0, 100) + "…" : s;
   }
@@ -1583,7 +1583,7 @@
   }
   function pbCondNote(t) {
     if (!t.cond) return "";
-    return '<div class="pb-note"><span class="i">⛓</span><span><b>Conditional branch.</b> Fires only if ' + esc(t.cond) +
+    return '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-shuffle"/></svg></span><span><b>Conditional branch.</b> Fires only if ' + esc(t.cond) +
       "." + (t.req ? " Requires <b>" + esc(t.req) + "</b>." : "") +
       " Enrichment runs for everyone we send to, so this stays fail-proof.</span></div>";
   }
@@ -1595,30 +1595,30 @@
   function pbReplyData(motion) {
     if (motion === "recruiting") {
       return {
-        pos: { rl: "😊 POSITIVE", title: "They're curious", teaser: "Give the real picture, respect their time, make the call easy.",
+        pos: { rl: "POSITIVE", title: "They're curious", teaser: "Give the real picture, respect their time, make the call easy.",
           reply: "Love it, {first}. Quick call so I can give you the real picture, the team, the scope, the comp, not a job-spec dump? Grab whatever works: {link}. I'll send the key details first so you can decide if it's even worth your time.",
           strategy: "Match their interest, lead with the information that respects their time, and make the next step a low-effort yes.",
           failsafe: "Always send the substance first, so a call is their choice, not a hoop." },
-        neu: { rl: "😐 NEUTRAL / NOT NOW", title: "Maybe later", teaser: "Honor the timing, stay useful, ask to check back.",
+        neu: { rl: "NEUTRAL / NOT NOW", title: "Maybe later", teaser: "Honor the timing, stay useful, ask to check back.",
           reply: "All good, {first}, no rush at all. I'll keep this one in mind and only reach out if something lands that actually fits what you said you wanted. Mind if I check in down the line?",
           strategy: "Respect the 'not now', and earn a welcome for the next touch by promising relevance, not volume.",
           failsafe: "Schedules a soft re-touch later; nothing in between, so you're never a pest." },
-        neg: { rl: "🙅 NEGATIVE / PASS", title: "Not looking", teaser: "Gracious exit, leave the door open, honor the no.",
+        neg: { rl: "NEGATIVE / PASS", title: "Not looking", teaser: "Gracious exit, leave the door open, honor the no.",
           reply: "Totally understood, {first}. I'll leave it here. If anything changes, or you ever just want an honest read on the market, I'm easy to reach. Best of luck.",
           strategy: "A graceful no earns more long-term goodwill than any rebuttal. People remember how you exit.",
           failsafe: "Auto-suppresses the contact and stops every channel, no further touches, ever." }
       };
     }
     return {
-      pos: { rl: "😊 POSITIVE", title: "They're in", teaser: "Confirm, lead with value, offer a call AND an easy alternative.",
+      pos: { rl: "POSITIVE", title: "They're in", teaser: "Confirm, lead with value, offer a call AND an easy alternative.",
         reply: "Great, thanks {first}. Quickest version: I keep a small bench of senior people warm for exactly your stack, and I'd rather earn your trust than pitch you. Fifteen minutes this week to walk through who I've got and hear what you're hiring for? And if a call's overkill, just say the word and I'll send the one-pager.",
         strategy: "Match their energy, lead with value, and make the next step frictionless, a call or just send it, their choice.",
         failsafe: "Never hard-sell a warm reply; always offer the low-effort path too." },
-      neu: { rl: "😐 NEUTRAL / NOT NOW", title: "Not right now", teaser: "Respect it, leave value, set a soft future trigger.",
+      neu: { rl: "NEUTRAL / NOT NOW", title: "Not right now", teaser: "Respect it, leave value, set a soft future trigger.",
         reply: "Totally fair, {first}, timing is everything. I'll get out of your inbox. One thing before I go: I'll keep a quiet eye on the market for the kind of people you'd want, and only ping you if someone genuinely exceptional comes free. Sound okay to check back in a quarter?",
         strategy: "Honor the 'not now', then give a concrete reason to welcome the next touch. Nurture, don't push.",
         failsafe: "Auto-schedules a soft re-touch; no pressure in between." },
-      neg: { rl: "🙅 NEGATIVE / PASS", title: "Pass", teaser: "Gracious exit, one line of standing value, honor the no.",
+      neg: { rl: "NEGATIVE / PASS", title: "Pass", teaser: "Gracious exit, one line of standing value, honor the no.",
         reply: "Understood, {first}, and I appreciate you telling me straight. I'll stop reaching out. If it's ever useful, I'm a good person to know when a hard role lands or talent shakes loose near {company}. Either way, best of luck with the team you're building.",
         strategy: "A graceful no builds more reputation than a pushy maybe, and the door stays open on their terms.",
         failsafe: "Auto-suppresses the lead and stops the sequence, protecting both your sending reputation and their goodwill." }
@@ -1634,17 +1634,17 @@
           '<div class="rl">' + r.rl + '</div><div class="rt">' + esc(r.title) + "</div>" +
           "<p>" + esc(r.teaser) + '</p><span class="pb-go">See the reply <span class="arr">→</span></span></div>';
       }).join("") + "</div>" +
-      '<div class="pb-note"><span class="i">🤖</span><span>Replies are auto-classified by the Response pipeline, then an LLM drafts a tailored answer from this sequence and the original hiring signal. Trust first, calendar second. A negative reply auto-suppresses the lead, that is the failsafe.</span></div>';
+      '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-bot"/></svg></span><span>Replies are auto-classified by the Response pipeline, then an LLM drafts a tailored answer from this sequence and the original hiring signal. Trust first, calendar second. A negative reply auto-suppresses the lead, that is the failsafe.</span></div>';
   }
   function pbReplyModal(motion, kind) {
     var r = pbReplyData(motion)[kind];
     var acc = kind === "pos" ? ["ok", "POSITIVE"] : kind === "neu" ? ["warn", "NEUTRAL"] : ["hot", "NEGATIVE"];
-    var icon = kind === "pos" ? "😊" : kind === "neu" ? "😐" : "🙅";
+    var icon = kind === "pos" ? '<svg class="isvg" aria-hidden="true"><use href="#i-smile"/></svg>' : kind === "neu" ? '<svg class="isvg" aria-hidden="true"><use href="#i-meh"/></svg>' : '<svg class="isvg" aria-hidden="true"><use href="#i-x"/></svg>';
     pbOpenModal(icon, r.title, "LLM reply · trust-first", "" +
       pbArt("The reply it sends", acc, pbIM(r.reply)) +
-      '<div class="pb-note"><span class="i">🎯</span><span><b>Why it works.</b> ' + esc(r.strategy) + "</span></div>" +
-      '<div class="pb-note"><span class="i">🛡️</span><span><b>Trust failsafe.</b> ' + esc(r.failsafe) + "</span></div>" +
-      '<div class="pb-note"><span class="i">🤖</span><span>Drafted live by the LLM from the actual reply plus the hiring signal, then held for one-click approval. The end goal is trust; a meeting is the byproduct.</span></div>');
+      '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-target"/></svg></span><span><b>Why it works.</b> ' + esc(r.strategy) + "</span></div>" +
+      '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-shield"/></svg></span><span><b>Trust failsafe.</b> ' + esc(r.failsafe) + "</span></div>" +
+      '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-bot"/></svg></span><span>Drafted live by the LLM from the actual reply plus the hiring signal, then held for one-click approval. The end goal is trust; a meeting is the byproduct.</span></div>');
   }
   // The set of copy variants for a touch. From t.v (array of {subj?, body}),
   // else back-compat from the email A/B fields, else a single version.
@@ -1679,11 +1679,11 @@
       : "";
     var panes = vs.map(function (v, i) { return pbVariantPane(t, v, i); }).join("");
     var foot;
-    if (t.ch === "vm" || t.ch === "livoice") foot = '<div class="pb-note"><span class="i">🎤</span><span>Rendered in your consented voice clone, formatted for natural speech. ' + (t.ch === "vm" ? "Premium AMD drops it only after the voicemail beep." : "Delivered as a LinkedIn voice note.") + "</span></div>";
-    else if (t.ch === "sms") foot = '<div class="pb-note"><span class="i">📱</span><span>Sent only with consent on file, inside the lead\'s local-time window.</span></div>';
-    else if (t.ch === "call") foot = '<div class="pb-note"><span class="i">☎️</span><span>A human task in your queue, not an automated send.</span></div>';
+    if (t.ch === "vm" || t.ch === "livoice") foot = '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg></span><span>Rendered in your consented voice clone, formatted for natural speech. ' + (t.ch === "vm" ? "Premium AMD drops it only after the voicemail beep." : "Delivered as a LinkedIn voice note.") + "</span></div>";
+    else if (t.ch === "sms") foot = '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-message"/></svg></span><span>Sent only with consent on file, inside the lead\'s local-time window.</span></div>';
+    else if (t.ch === "call") foot = '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg></span><span>A human task in your queue, not an automated send.</span></div>';
     else foot = '<div class="pb-note"><span class="i">▸</span><span>Tokens like {first}, {company}, {role} and {last_company} auto-fill per prospect.</span></div>';
-    var vnote = vs.length > 1 ? '<div class="pb-note"><span class="i">🔀</span><span><b>' + vs.length + ' variants.</b> The engine rotates and A/B-tests them, then promotes the winner automatically.</span></div>' : "";
+    var vnote = vs.length > 1 ? '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-shuffle"/></svg></span><span><b>' + vs.length + ' variants.</b> The engine rotates and A/B-tests them, then promotes the winner automatically.</span></div>' : "";
     return cond + tabs + panes + vnote + foot;
   }
   /* legacy single-channel body kept for reference */
@@ -1697,16 +1697,16 @@
     }
     if (t.ch === "vm" || t.ch === "livoice") {
       return pbArt(m.label + " · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl(t.body) + "</div>") +
-        '<div class="pb-note"><span class="i">🎤</span><span>Rendered in your consented voice clone, formatted for natural speech. ' +
+        '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg></span><span>Rendered in your consented voice clone, formatted for natural speech. ' +
         (t.ch === "vm" ? "Premium AMD drops it only after the voicemail beep." : "Delivered as a LinkedIn voice note.") + "</span></div>";
     }
     if (t.ch === "sms") {
       return pbArt(m.label, null, pbIM(t.body)) +
-        '<div class="pb-note"><span class="i">📱</span><span>Sent only with consent on file, inside the lead\'s local-time window.</span></div>';
+        '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-message"/></svg></span><span>Sent only with consent on file, inside the lead\'s local-time window.</span></div>';
     }
     if (t.ch === "call") {
       return pbArt(m.label + " · task for you", null, pbNl(t.body)) +
-        '<div class="pb-note"><span class="i">☎️</span><span>A human task in your queue, not an automated send.</span></div>';
+        '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg></span><span>A human task in your queue, not an automated send.</span></div>';
     }
     return pbArt(m.label, null, pbIM(t.body)) + tokenNote;
   }
@@ -1725,9 +1725,9 @@
     el.innerHTML =
       '<div class="pb-wrap">' +
         '<span class="pb-back" data-go="playbooks"><span>←</span> All playbooks</span>' +
-        '<div class="pb-d-head"><div class="pb-ico">📚</div>' +
+        '<div class="pb-d-head"><div class="pb-ico"><svg class="isvg" aria-hidden="true"><use href="#i-book"/></svg></div>' +
           '<div><div class="pb-tag">The outbound models</div><h2>Sequence Library</h2></div></div>' +
-        '<div class="pb-mission-band">' + esc("Sixteen battle-ready outbound workflows, eight for Recruiting and eight for Business Development. Each one is a real multi-channel sequence — email, LinkedIn, voice notes, voicemail drops and SMS — with the exact copy that goes out. Open a sequence to see every touch, then click a touch to read the message.") + "</div>" +
+        '<div class="pb-mission-band">' + esc("Sixteen battle-ready outbound workflows, eight for Recruiting and eight for Business Development. Each one is a real multi-channel sequence, email, LinkedIn, voice notes, voicemail drops and SMS, with the exact copy that goes out. Open a sequence to see every touch, then click a touch to read the message.") + "</div>" +
         '<div id="pbSeqHost"></div>' +
       "</div>";
     var host = el.querySelector("#pbSeqHost");
@@ -1735,7 +1735,7 @@
     function paintGrid() {
       var cnt = { all: SEQS.length, recruiting: 0, bd: 0 };
       SEQS.forEach(function (s) { cnt[s.motion]++; });
-      var filters = [["all", "All (" + cnt.all + ")"], ["recruiting", "👤 Recruiting (" + cnt.recruiting + ")"], ["bd", "🏢 BD (" + cnt.bd + ")"]];
+      var filters = [["all", "All (" + cnt.all + ")"], ["recruiting", "Recruiting (" + cnt.recruiting + ")"], ["bd", "BD (" + cnt.bd + ")"]];
       var bar = '<div class="pb-tabs2" style="margin-bottom:18px">' + filters.map(function (f) {
         return '<button class="' + (st.motion === f[0] ? "active" : "") + '" data-mot="' + f[0] + '">' + esc(f[1]) + "</button>";
       }).join("") + "</div>";
@@ -1744,10 +1744,10 @@
         var chs = []; s.touches.forEach(function (t) { if (chs.indexOf(t.ch) < 0) chs.push(t.ch); });
         var chRow = chs.map(function (c) { return '<span class="n" title="' + esc(PB_CH[c].label) + '">' + PB_CH[c].icon + "</span>"; }).join('<span class="ar">·</span>');
         var motChip = s.motion === "bd"
-          ? '<span class="pb-chip" style="color:var(--pb-c);border-color:rgba(77,208,255,.4)">🏢 BD</span>'
-          : '<span class="pb-chip" style="color:var(--pb-g);border-color:rgba(56,224,166,.4)">👤 Recruiting</span>';
+          ? '<span class="pb-chip" style="color:var(--pb-c);border-color:color-mix(in srgb, var(--info) 40%, transparent)">BD</span>'
+          : '<span class="pb-chip" style="color:var(--pb-g);border-color:color-mix(in srgb, var(--ok) 40%, transparent)">Recruiting</span>';
         return '<div class="pb-card" data-accent="' + s.accent + '" data-seq="' + s.id + '">' +
-          '<div style="display:flex;align-items:center;gap:7px;margin-bottom:11px;flex-wrap:wrap">' + motChip + '<span class="pb-chip">📡 ' + esc(s.signal) + "</span></div>" +
+          '<div style="display:flex;align-items:center;gap:7px;margin-bottom:11px;flex-wrap:wrap">' + motChip + '<span class="pb-chip">' + esc(s.signal) + "</span></div>" +
           "<h3>" + esc(s.name) + "</h3>" +
           '<p class="pb-mission">' + esc(s.goal) + "</p>" +
           '<div class="pb-mini">' + chRow + "</div>" +
@@ -1761,8 +1761,8 @@
       var chs = []; run.forEach(function (t) { if (chs.indexOf(t.ch) < 0) chs.push(t.ch); });
       var hasBranch = run.some(function (t) { return !!t.cond; });
       var motChip = s.motion === "bd"
-        ? '<span class="pb-chip" style="color:var(--pb-c);border-color:rgba(77,208,255,.4)">🏢 Business Development</span>'
-        : '<span class="pb-chip" style="color:var(--pb-g);border-color:rgba(56,224,166,.4)">👤 Recruiting</span>';
+        ? '<span class="pb-chip" style="color:var(--pb-c);border-color:color-mix(in srgb, var(--info) 40%, transparent)">Business Development</span>'
+        : '<span class="pb-chip" style="color:var(--pb-g);border-color:color-mix(in srgb, var(--ok) 40%, transparent)">Recruiting</span>';
       var prevDay = 0;
       var items = run.map(function (t, i) {
         var m = PB_CH[t.ch];
@@ -1776,14 +1776,14 @@
       host.innerHTML =
         '<span class="pb-back" data-seqback="1"><span>←</span> Back to library</span>' +
         '<div style="display:flex;align-items:center;gap:7px;margin:14px 0 6px;flex-wrap:wrap">' + motChip +
-          '<span class="pb-chip">📡 Trigger · ' + esc(s.signal) + '</span><span class="pb-chip">🎯 ' + esc(s.persona) + "</span>" +
-          (hasBranch ? '<span class="pb-chip" style="color:var(--pb-a);border-color:rgba(255,194,77,.4)">⛓ if / then</span>' : "") + "</div>" +
+          '<span class="pb-chip">Trigger · ' + esc(s.signal) + '</span><span class="pb-chip">' + esc(s.persona) + "</span>" +
+          (hasBranch ? '<span class="pb-chip" style="color:var(--pb-a);border-color:color-mix(in srgb, var(--warn) 40%, transparent)">if / then</span>' : "") + "</div>" +
         '<h2 style="margin:6px 0 2px;font-size:24px;font-weight:800;letter-spacing:-.02em">' + esc(s.name) + "</h2>" +
         '<div class="pb-mission-band" style="margin:14px 0 24px">' + esc(s.goal) + "</div>" +
         '<p class="pb-section-label">The sequence · ' + run.length + " steps across " + chs.length + " channels" + (hasBranch ? " · amber = conditional" : "") + "</p>" +
         pbBoard(items, "Scroll to follow the whole sequence · amber cards are if/then branches · click any step to read the exact message") +
         pbReplyCards(s.motion) +
-        '<div class="pb-note" style="margin-top:6px"><span class="i">⚡</span><span><b>This is a template, not a script.</b> Point it at any hiring signal and the engine tailors every touch, the opener, the bullets, the timing, to that exact company, role and reason, then runs it. "Use this sequence on these signals" is one instruction.</span></div>';
+        '<div class="pb-note" style="margin-top:6px"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg></span><span><b>This is a template, not a script.</b> Point it at any hiring signal and the engine tailors every touch, the opener, the bullets, the timing, to that exact company, role and reason, then runs it. "Use this sequence on these signals" is one instruction.</span></div>';
     }
 
     function paint() {
@@ -1845,7 +1845,7 @@
     };
     var candRow = function (pct, n) {
       return '<div class="pb-skel"><div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">' +
-        '<span style="width:30px;height:30px;border-radius:50%;flex:none;background:linear-gradient(135deg,#7c5cff,#4dd0ff)"></span>' +
+        '<span style="width:30px;height:30px;border-radius:50%;flex:none;background:linear-gradient(135deg,var(--brand),var(--info))"></span>' +
         '<div style="flex:1"><div class="bar md" style="margin:0 0 6px"></div><div class="bar sm" style="margin:0"></div></div>' +
         '<b style="color:var(--pb-c);font-size:13px;font-family:monospace">' + pct + '%</b></div>' +
         '<div class="pb-meter"><span style="width:' + pct + '%"></span></div></div>';
@@ -1853,15 +1853,15 @@
     var toggle = function (label, on) {
       return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0">' +
         '<span style="font-size:12px;color:var(--text-muted)">' + esc(label) + "</span>" +
-        '<span style="width:34px;height:19px;border-radius:99px;position:relative;background:' + (on ? "linear-gradient(135deg,#7c5cff,#4dd0ff)" : "var(--border-strong)") + '">' +
+        '<span style="width:34px;height:19px;border-radius:99px;position:relative;background:' + (on ? "linear-gradient(135deg,var(--brand),var(--info))" : "var(--border-strong)") + '">' +
         '<span style="position:absolute;top:2px;' + (on ? "right:2px" : "left:2px") + ';width:15px;height:15px;border-radius:50%;background:#fff"></span></span></div>';
     };
 
     return {
       "flip-the-script": {
-        icon: "🔁", accent: "v", title: "Flip the Script", tag: "Business Development · candidate → prospect",
+        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>', accent: "v", title: "Flip the Script", tag: "Business Development · candidate → prospect",
         oneLiner: "Reach out to a great person as a candidate, then flip them into a client when they're not moving but they are hiring.",
-        mini: ["✉️", "🎙️", "🔀", "🎯"],
+        mini: ['<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-shuffle"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-target"/></svg>'],
         board: true,
         mission: "Flip the Script is a BD play that starts as candidate outreach. You approach a strong, senior person about a role. The best ones usually are not moving, they are happy, or senior enough to be doing the hiring themselves. So you flip the script: turn the candidate into a prospect. They move from your Candidates pipeline into BD, and now you help them hire. Here it is worked end to end. Click any step to read the exact message.",
         extra:
@@ -1871,7 +1871,7 @@
               '<div class="pb-bubble">"Hi, are you hiring? I place senior engineers. Open to a quick call?"</div>' +
               '<div class="vs-out">→ Ignored. Just another vendor.</div></div>' +
             '<div class="pb-vs-arrow">➜</div>' +
-            '<div class="vs-card good"><div class="vs-lbl">✓ Flipped</div>' +
+            '<div class="vs-card good"><div class="vs-lbl">Flipped</div>' +
               '<div class="pb-bubble">Approached as a candidate about a VP role. He is not moving, but he is hiring. So: "Are you building your own team? That is exactly what I am best at."</div>' +
               '<div class="vs-out">→ A dead candidate thread becomes a client.</div></div>' +
           "</div>" +
@@ -1885,102 +1885,102 @@
             "</div>") +
           '<div class="pb-note"><span class="i">▸</span><span>Even though the first touch is candidate-style, this whole sequence lives in the BD model, because the goal is a client, not a placement.</span></div>',
         stages: [
-          { icon: "✉️", when: "DAY 0 · EMAIL", title: "Approach as a candidate",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', when: "DAY 0 · EMAIL", title: "Approach as a candidate",
             body: "Reach out about a role that would genuinely be a step up for them. Real, specific, flattering, and low-pressure.",
             out: "<b>SENT</b> · approached as a candidate for a VP Eng role",
-            peek: { icon: "✉️", title: "Touch 1 · the candidate approach", sub: "Day 0 · Email · to Marcus Lee", cta: "Read the email",
+            peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', title: "Touch 1 · the candidate approach", sub: "Day 0 · Email · to Marcus Lee", cta: "Read the email",
               body: pbMail("From you · to Marcus Lee, Vela", "a VP Engineering seat that's a real step up",
                 "Hi Marcus,\n\nI came across your work scaling the platform team at Vela, genuinely impressive. I'm working a VP Engineering role that's a real step up in scope, and that platform-scaling track record is exactly what it needs.\n\nI'm not pushing you to leave anything. Just worth a fifteen-minute look? If it's not for you, no harm at all.\n\nThanks,\n{you}") +
                 '<div class="pb-note"><span class="i">▸</span><span>He enters as a Candidate. The opener is a real role, anchored to his actual work, not a pretext.</span></div>' } },
-          { icon: "➕", when: "DAY 2 · LINKEDIN CONNECT", title: "Connect, referencing the role",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-plus"/></svg>', when: "DAY 2 · LINKEDIN CONNECT", title: "Connect, referencing the role",
             body: "A short connection note that ties back to the email, so you become a familiar name.",
             out: "<b>REQUEST SENT</b> · 'emailed you about a VP Eng role'",
-            peek: { icon: "➕", title: "Touch 2 · connection request", sub: "Day 2 · LinkedIn", cta: "Read the note",
+            peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-plus"/></svg>', title: "Touch 2 · connection request", sub: "Day 2 · LinkedIn", cta: "Read the note",
               body: pbArt("LinkedIn connection note", null, pbIM("Hi Marcus, just emailed you about a VP Eng role that lines up with your platform work at Vela. Connecting here too, no pressure.")) } },
-          { icon: "📱", when: "DAY 3 · SMS", accent: "a", title: "If the connect is still pending, a warm SMS",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-message"/></svg>', when: "DAY 3 · SMS", accent: "a", title: "If the connect is still pending, a warm SMS",
             cond: "the LinkedIn connection is still pending",
             body: "A branch, not a step. Fires only if Marcus hasn't accepted by day 3. Warm, truthful, uses his previous company, and teases both angles, a role for him and help hiring.",
             out: "<b>IF</b> connect pending → warm SMS referencing {last_company}",
-            peek: { icon: "📱", title: "Branch · warm SMS", sub: "fires only if the connect is still pending", cta: "Read the SMS",
+            peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-message"/></svg>', title: "Branch · warm SMS", sub: "fires only if the connect is still pending", cta: "Read the SMS",
               body: pbCondNote({ cond: "the LinkedIn connection is still pending", req: "last_company (from deep enrichment)" }) +
                 pbArt("SMS · warm, last-company context", null, pbIM("Hi Marcus, this is {you} with {firm}. Came across your background from your time at {last_company}, figured I'd reach out directly. I've got a leadership role you might like, and either way I keep strong engineers warm. Worth a quick call?")) +
-                '<div class="pb-note"><span class="i">📱</span><span>Truthful: references a real prior employer, no invented referral. Consent and local-time window enforced.</span></div>' } },
-          { icon: "🎙️", when: "DAY 4 · LINKEDIN VOICE NOTE", accent: "p", title: "The flip: are you hiring?",
+                '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-message"/></svg></span><span>Truthful: references a real prior employer, no invented referral. Consent and local-time window enforced.</span></div>' } },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg>', when: "DAY 4 · LINKEDIN VOICE NOTE", accent: "p", title: "The flip: are you hiring?",
             body: "He's not moving, that's expected. So flip it in your own voice: pivot from recruiting him to helping him hire. This is the moment the candidate becomes a prospect.",
             out: "<b>THE FLIP</b> · he's not moving, but he's hiring → pivot to BD",
-            peek: { icon: "🔀", title: "Touch 4 · the flip", sub: "Day 4 · voice note · candidate → prospect", cta: "Hear the flip",
+            peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-shuffle"/></svg>', title: "Touch 4 · the flip", sub: "Day 4 · voice note · candidate → prospect", cta: "Hear the flip",
               body: pbArt("Voice note · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl("Hi Marcus, it's {you}... totally understand if a move isn't on your radar. Honestly I expected that, people running teams as well as you usually aren't looking. So let me flip it. Are you hiring on your own team right now? That's actually what I'm best at. I keep a bench of senior engineers warm, and I could line up a couple who'd fit what you're building at Vela. Worth a quick call either way? Thanks Marcus.") + "</div>") +
-                '<div class="pb-note"><span class="i">🔀</span><span><b>Promotes Marcus from Candidates → Prospects (BD motion).</b> From here the sequence runs as business development.</span></div>' } },
-          { icon: "✉️", when: "DAY 6 · EMAIL", title: "Now a prospect: someone for his team",
+                '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-shuffle"/></svg></span><span><b>Promotes Marcus from Candidates → Prospects (BD motion).</b> From here the sequence runs as business development.</span></div>' } },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', when: "DAY 6 · EMAIL", title: "Now a prospect: someone for his team",
             body: "Having flipped, be useful the other way. Lead with one strong candidate for his team and ask what he's trying to fill.",
             out: "<b>FLIPPED</b> · candidate → prospect (BD) · now offering a candidate for his team",
-            peek: { icon: "🎯", title: "Touch 5 · sell into his team", sub: "Day 6 · Email · now BD", cta: "Read the email",
-              body: pbMail("From you · to Marcus Lee, Vela", "switching gears — someone for your team",
+            peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-target"/></svg>', title: "Touch 5 · sell into his team", sub: "Day 6 · Email · now BD", cta: "Read the email",
+              body: pbMail("From you · to Marcus Lee, Vela", "switching gears, someone for your team",
                 "Hi Marcus,\n\nSince a move isn't the priority, let me be useful the other way. Here's a senior engineer worth your time as you scale the platform group:\n\n• Scaled a payments platform past ten thousand requests a second; deep in Go and event-driven systems\n• Passive, but would fit exactly what you're building\n\nYou're clearly hiring as Vela grows, and that's where I'm at my best. Worth fifteen minutes on what you're trying to fill this quarter?\n\nThanks,\n{you}") +
-                '<div class="pb-note"><span class="i">🎯</span><span>The MPC play takes over: one standout candidate, one ask, aimed at his team.</span></div>' } },
-          { icon: "📞", when: "DAY 9 · VOICEMAIL DROP", title: "BD follow-up, in your voice",
+                '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-target"/></svg></span><span>The MPC play takes over: one standout candidate, one ask, aimed at his team.</span></div>' } },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>', when: "DAY 9 · VOICEMAIL DROP", title: "BD follow-up, in your voice",
             body: "A short voicemail that follows up on the candidate you offered and asks for a few minutes on his hiring.",
             out: "<b>VOICEMAIL</b> · follow-up on the candidate offered",
-            peek: { icon: "📞", title: "Touch 6 · voicemail drop", sub: "Day 9 · spoken in your cloned voice · ~0:16", cta: "Hear the voicemail",
+            peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>', title: "Touch 6 · voicemail drop", sub: "Day 9 · spoken in your cloned voice · ~0:16", cta: "Hear the voicemail",
               body: pbArt("Voicemail · spoken in your cloned voice", null, '<div style="font-style:italic">' + pbNl("Hi Marcus, it's {you} at {firm}. Quick follow-up on the engineer I sent for your team... strong, and won't be around long. I'd love five minutes on who you're hiring this quarter. Call me back when you can. Thanks.") + "</div>") +
-                '<div class="pb-note"><span class="i">🛡️</span><span>Consent on file, inside his local-time window, dropped only after the voicemail beep.</span></div>' } },
-          { icon: "✉️", when: "DAY 13 · EMAIL", title: "Leave the door open, both ways",
+                '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-shield"/></svg></span><span>Consent on file, inside his local-time window, dropped only after the voicemail beep.</span></div>' } },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', when: "DAY 13 · EMAIL", title: "Leave the door open, both ways",
             body: "A clean close that keeps both doors open: the leadership role for him later, or help hiring for his team now.",
             out: "<b>SENT</b> · door open both ways",
-            peek: { icon: "✉️", title: "Touch 7 · the close", sub: "Day 13 · Email", cta: "Read the email",
+            peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', title: "Touch 7 · the close", sub: "Day 13 · Email", cta: "Read the email",
               body: pbMail("From you · to Marcus Lee, Vela", "I'll leave it with you",
                 "Hi Marcus,\n\nI'll stop here. Whether it's the leadership role for you down the line, or help hiring for your team now, just reply and I'll jump on it.\n\nEither way, great work at Vela.\n\nThanks,\n{you}") } },
         ],
         wire: pbWireChrome("recruitersos · candidate → prospect",
           '<div style="display:flex;align-items:center;gap:14px;justify-content:center;flex-wrap:wrap">' +
             '<div class="pb-skel" style="text-align:center;min-width:160px"><div class="cap">Candidates</div><div style="font-size:13px;font-weight:600;margin-top:4px">Marcus · approached for a VP role</div></div>' +
-            '<span style="color:var(--pb-p);font-size:20px;font-weight:800">🔀 FLIP</span>' +
+            '<span style="color:var(--pb-p);font-size:20px;font-weight:800">FLIP</span>' +
             '<div class="pb-skel" style="text-align:center;min-width:160px;border-color:var(--pb-c)"><div class="cap" style="color:var(--pb-c)">Prospects · BD</div><div style="font-size:13px;font-weight:600;margin-top:4px">Now hiring for his own team</div></div>' +
           "</div>"),
-        outcome: { em: "🔀", title: "A 'no' becomes a client.", text: "The best candidates rarely move, but they're often the ones doing the hiring. Flip the script and a dead candidate thread becomes a BD relationship." },
-        cta: [["📚 Browse the Sequence Library", "playbooks/sequences"], ["🎯 Build a campaign", "campaigns"]],
+        outcome: { em: '<svg class="isvg" aria-hidden="true"><use href="#i-shuffle"/></svg>', title: "A 'no' becomes a client.", text: "The best candidates rarely move, but they're often the ones doing the hiring. Flip the script and a dead candidate thread becomes a BD relationship." },
+        cta: [["Browse the Sequence Library", "playbooks/sequences"], ["Build a campaign", "campaigns"]],
       },
 
       "jd-sourcing": {
-        icon: "🧲", accent: "c", title: "JD Sourcing", tag: "Recruiting",
+        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg>', accent: "c", title: "JD Sourcing", tag: "Recruiting",
         oneLiner: "A job description in. A ranked, real shortlist out, staged and ready to promote.",
-        mini: ["📋", "🔍", "📊", "⬆️"],
+        mini: ['<svg class="isvg" aria-hidden="true"><use href="#i-clipboard"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-chart"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-up"/></svg>'],
         mission: "Paste a job description and get a ranked shortlist of real people, scored against the role with the reasons shown. No fabricated candidates, ever. Stage them under a name, then promote the best straight into your Candidates pipeline.",
         stages: [
-          { icon: "📋", title: "Drop in a JD", auto: "you", title2: "", body: "Paste the job description or pick an open role. That text becomes the target the search and ranking are measured against." },
-          { icon: "🔍", title: "Search runs", auto: "bot", body: "A people-search finds matching profiles, then a first-pass enrichment pass fills in the gaps automatically, so each result is a real, reachable person." },
-          { icon: "📊", title: "Ranked and explained", auto: "bot", body: "Every candidate is scored against the JD with a match percentage and the reasons behind it, so you can trust the order, not just the list.",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-clipboard"/></svg>', title: "Drop in a JD", auto: "you", title2: "", body: "Paste the job description or pick an open role. That text becomes the target the search and ranking are measured against." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg>', title: "Search runs", auto: "bot", body: "A people-search finds matching profiles, then a first-pass enrichment pass fills in the gaps automatically, so each result is a real, reachable person." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-chart"/></svg>', title: "Ranked and explained", auto: "bot", body: "Every candidate is scored against the JD with a match percentage and the reasons behind it, so you can trust the order, not just the list.",
             out: "<b>#1 · 94%</b> Maria Alvarez · Staff Backend Engineer · hits every must-have",
-            peek: { icon: "📊", title: "Maria Alvarez · 94% match", sub: "ranked #1 of 168 · Staff Backend Engineer", cta: "Open a scored candidate",
+            peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-chart"/></svg>', title: "Maria Alvarez · 94% match", sub: "ranked #1 of 168 · Staff Backend Engineer", cta: "Open a scored candidate",
               body: pbArt("Why this rank", ["ok", "STRONG"],
-                '<div class="pb-sl"><span class="lab">7 yrs Go in production</span><span class="verdict pass">MUST ✓</span></div>' +
-                '<div class="pb-sl"><span class="lab">Owned payments ledger · 12k rps · five nines</span><span class="verdict pass">MUST ✓</span></div>' +
-                '<div class="pb-sl"><span class="lab">Kafka + Kubernetes</span><span class="verdict pass">NICE ✓</span></div>' +
-                '<div class="pb-sl"><span class="lab">Remote (US)</span><span class="verdict pass">✓</span></div>') +
+                '<div class="pb-sl"><span class="lab">7 yrs Go in production</span><span class="verdict pass">MUST</span></div>' +
+                '<div class="pb-sl"><span class="lab">Owned payments ledger · 12k rps · five nines</span><span class="verdict pass">MUST</span></div>' +
+                '<div class="pb-sl"><span class="lab">Kafka + Kubernetes</span><span class="verdict pass">NICE</span></div>' +
+                '<div class="pb-sl"><span class="lab">Remote (US)</span><span class="verdict pass"><svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg></span></div>') +
                 pbKV([["Verified email", "m••••@•••.com", true], ["Source signal", "Open-to-work · 2 infra roles at her co"]]) +
                 '<div class="pb-note"><span class="i">▸</span><span>Every candidate is a real, reachable person, scored against your JD. Nothing fabricated.</span></div>' } },
-          { icon: "🗂️", title: "Staged under a name", auto: "you", body: "Save the shortlist as a named batch you can revisit, compare, and refine, without touching your live pipeline yet." },
-          { icon: "⬆️", title: "Promote the best", auto: "you", body: "Move the strongest candidates into Candidates with one click, ready for outreach, vetting, or a campaign." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-database"/></svg>', title: "Staged under a name", auto: "you", body: "Save the shortlist as a named batch you can revisit, compare, and refine, without touching your live pipeline yet." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-up"/></svg>', title: "Promote the best", auto: "you", body: "Move the strongest candidates into Candidates with one click, ready for outreach, vetting, or a campaign." },
         ],
         wire: pbWireChrome("recruitersos · jd sourcing", '<div class="pb-wire-cols">' +
-          '<div class="pb-skel"><div class="cap">Job description</div><div class="bar lg"></div><div class="bar lg"></div><div class="bar md"></div><div class="bar lg"></div><div class="bar sm"></div><div style="margin-top:12px"><span class="pb-chip" style="background:linear-gradient(135deg,#7c5cff,#4dd0ff);color:#0a0a12;border:none">🔍 Find candidates</span></div></div>' +
+          '<div class="pb-skel"><div class="cap">Job description</div><div class="bar lg"></div><div class="bar lg"></div><div class="bar md"></div><div class="bar lg"></div><div class="bar sm"></div><div style="margin-top:12px"><span class="pb-chip" style="background:linear-gradient(135deg,var(--brand),var(--info));color:var(--bg);border:none">Find candidates</span></div></div>' +
           '<div style="display:grid;gap:12px"><div class="cap" style="font-size:11px;font-weight:700;color:var(--text-dim);letter-spacing:.08em;text-transform:uppercase">Ranked shortlist</div>' + candRow(94, 1) + candRow(88, 2) + candRow(81, 3) + "</div></div>"),
-        outcome: { em: "⚡", title: "Hours of sourcing, compressed to minutes.", text: "A defensible, ranked shortlist of real people, every time, with the matching reasons in plain sight." },
-        cta: [["🧲 Open JD Sourcing", "jdsourcing"], ["🗄️ See Candidates", "data"]],
+        outcome: { em: '<svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>', title: "Hours of sourcing, compressed to minutes.", text: "A defensible, ranked shortlist of real people, every time, with the matching reasons in plain sight." },
+        cta: [["Open JD Sourcing", "jdsourcing"], ["See Candidates", "data"]],
       },
 
       "ai-vetting": {
-        icon: "☎️", accent: "g", title: "AI Vetting", tag: "Recruiting",
+        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>', accent: "g", title: "AI Vetting", tag: "Recruiting",
         oneLiner: "Your cloned voice screens every candidate, around the clock, scored 1 to 100.",
-        mini: ["🎙️", "🔢", "📨", "📈"],
+        mini: ['<svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-hash"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-trend"/></svg>'],
         mission: "Bind a job description to a phone number and your cloned voice. Candidates opt in, call your line, and talk to an AI recruiter that sounds like you, it greets them by name, references their experience, asks your top qualifiers, and tells them the next step. Every call is recorded, transcribed, summarized, and scored 1 to 100.",
         stages: [
-          { icon: "🎙️", title: "Build a vetting desk", auto: "you", body: "Attach the JD and your top three or four qualifiers, with what a pass looks like for each. This is the brief the AI recruiter screens against." },
-          { icon: "🔢", title: "Bind a number and your voice", auto: "you", body: "Pick a real number from your Telnyx account and your consented cloned voice. The agent speaks the whole call in your voice." },
-          { icon: "📨", title: "Candidates opt in", auto: "you", body: "Candidates consent, then call your line on their own time. No chasing, no scheduling tag, day or night." },
-          { icon: "🤖", title: "The AI recruiter screens", auto: "bot", body: "It greets them by name, references their LinkedIn experience, asks your qualifiers, listens, and tells them the next step, sounding like you the whole way.",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg>', title: "Build a vetting desk", auto: "you", body: "Attach the JD and your top three or four qualifiers, with what a pass looks like for each. This is the brief the AI recruiter screens against." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-hash"/></svg>', title: "Bind a number and your voice", auto: "you", body: "Pick a real number from your Telnyx account and your consented cloned voice. The agent speaks the whole call in your voice." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', title: "Candidates opt in", auto: "you", body: "Candidates consent, then call your line on their own time. No chasing, no scheduling tag, day or night." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-bot"/></svg>', title: "The AI recruiter screens", auto: "bot", body: "It greets them by name, references their LinkedIn experience, asks your qualifiers, listens, and tells them the next step, sounding like you the whole way.",
             out: "<b>ON THE CALL</b> · greets by name · asks your 4 qualifiers · 6m 20s",
-            peek: { icon: "🤖", title: "On the call", sub: "AI recruiter · your cloned voice", cta: "Read the transcript",
+            peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-bot"/></svg>', title: "On the call", sub: "AI recruiter · your cloned voice", cta: "Read the transcript",
               body: pbArt("Transcript · excerpt", null, pbTrans([
                 ["ai", "Alex", "Hi Maria, it's Alex from Northwind, thanks for calling in. You owned the ledger service, what kind of throughput were you running?"],
                 ["cand", "Maria", "Peaked around twelve thousand requests a second, five nines of availability."],
@@ -1989,9 +1989,9 @@
                 ["ai", "Alex", "Perfect. Last one, what's your timeline if an offer came together?"],
                 ["cand", "Maria", "I could start in about four weeks."]
               ])) } },
-          { icon: "📈", title: "Recorded, transcribed, scored", auto: "bot", body: "Each call comes back recorded, transcribed, summarized, and scored 1 to 100 against your qualifiers, so you only spend time on the ones worth it.",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-trend"/></svg>', title: "Recorded, transcribed, scored", auto: "bot", body: "Each call comes back recorded, transcribed, summarized, and scored 1 to 100 against your qualifiers, so you only spend time on the ones worth it.",
             out: "<b>92 / 100</b> · Strong, advance to onsite · flag: prefers remote-first",
-            peek: { icon: "📈", title: "Scored 92 / 100", sub: "auto-summarized · ready to book", cta: "See the score breakdown",
+            peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-trend"/></svg>', title: "Scored 92 / 100", sub: "auto-summarized · ready to book", cta: "See the score breakdown",
               body: '<div class="pb-art"><div class="pb-art-tag">Score<span class="pb-pill2 ok">92 / 100</span></div><div class="pb-art-body">' +
                 '<div class="pb-bigscore"><span class="num">92</span><span class="of">/ 100 · Strong, advance to onsite</span></div>' +
                 '<div class="pb-sl"><span class="lab">Q1 · 5+ yrs Go in production</span><span class="verdict pass">PASS</span></div>' +
@@ -2004,77 +2004,77 @@
         wire: pbWireChrome("recruitersos · ai vetting", '<div class="pb-wire-cols">' +
           '<div class="pb-skel"><div class="cap">Vetting desk</div><div class="bar md"></div>' +
             '<div style="margin-top:10px;display:grid;gap:8px">' +
-            '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--pb-g)">✓</span><div class="bar md" style="flex:1;margin:0"></div><span class="pb-chip">must</span></div>' +
-            '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--pb-g)">✓</span><div class="bar lg" style="flex:1;margin:0"></div></div>' +
-            '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--pb-g)">✓</span><div class="bar sm" style="flex:1;margin:0"></div></div></div>' +
-            '<div style="margin-top:12px"><span class="pb-chip">📞 +1 (415) •••</span> <span class="pb-chip">🎤 Your voice</span></div></div>' +
+            '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--pb-g)"><svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg></span><div class="bar md" style="flex:1;margin:0"></div><span class="pb-chip">must</span></div>' +
+            '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--pb-g)"><svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg></span><div class="bar lg" style="flex:1;margin:0"></div></div>' +
+            '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--pb-g)"><svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg></span><div class="bar sm" style="flex:1;margin:0"></div></div></div>' +
+            '<div style="margin-top:12px"><span class="pb-chip">+1 (415) •••</span> <span class="pb-chip">Your voice</span></div></div>' +
           '<div class="pb-skel"><div style="display:flex;align-items:center;justify-content:space-between"><div class="cap" style="margin:0">Call · scored</div><span class="pb-score">92</span></div>' +
             '<div class="pb-wave" style="margin:12px 0;height:30px">' +
               Array.apply(null, Array(18)).map(function (_, i) { var h = [8, 18, 26, 14, 22, 10, 28, 16, 6, 24, 12, 20, 9, 27, 15, 23, 11, 19][i]; return '<i style="height:' + h + 'px;animation-delay:' + (i * 0.06) + 's"></i>'; }).join("") +
             "</div><div class=\"bar lg\"></div><div class=\"bar lg\"></div><div class=\"bar md\"></div></div></div>"),
-        outcome: { em: "🌙", title: "A screening recruiter that sounds like you, awake at 2am.", text: "Top candidates surface with a score and a transcript before you have had your coffee. The rest never eat your calendar." },
-        cta: [["☎️ Open AI Vetting", "vetting"]],
+        outcome: { em: '<svg class="isvg" aria-hidden="true"><use href="#i-moon"/></svg>', title: "A screening recruiter that sounds like you, awake at 2am.", text: "Top candidates surface with a score and a transcript before you have had your coffee. The rest never eat your calendar." },
+        cta: [["Open AI Vetting", "vetting"]],
       },
 
       "voice-drops": {
-        icon: "📞", accent: "a", title: "Voice Drops", tag: "Recruiting + BD",
+        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>', accent: "a", title: "Voice Drops", tag: "Recruiting + BD",
         oneLiner: "A personal voicemail, in your own voice, at scale, with consent and timezone guardrails.",
-        mini: ["✍️", "🎤", "🛡️", "📥"],
+        mini: ['<svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-shield"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-inbox"/></svg>'],
         mission: "Leave a warm, personal voicemail in your own cloned voice on landlines and VoIP lines, at scale. Premium answering-machine detection drops it only when the voicemail picks up, and consent plus per-lead timezone windows keep every drop respectful and compliant.",
         stages: [
-          { icon: "✍️", title: "Write the script", auto: "you", body: "Drafted for natural speech: short sentences, a beat where it matters, your name and theirs. The same script, personalized per lead.",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>', title: "Write the script", auto: "you", body: "Drafted for natural speech: short sentences, a beat where it matters, your name and theirs. The same script, personalized per lead.",
             out: "<b>SCRIPT</b> · 0:18 · formatted for natural speech in your voice",
-            peek: { icon: "✍️", title: "The voicemail script", sub: "spoken in your cloned voice · 0:18", cta: "Read the spoken script",
+            peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>', title: "The voicemail script", sub: "spoken in your cloned voice · 0:18", cta: "Read the spoken script",
               body: pbArt("Script · as spoken", null, '<div style="font-style:italic">' + pbNl("Hi Maria, it's Alex. I saw your work on payments infrastructure... and I think you'd be a great fit for a role I'm filling. No pressure at all. If you're curious, give me a call back. Thanks, and have a good one.") + "</div>") +
-                '<div class="pb-note"><span class="i">🎤</span><span>Formatted for natural speech: short sentences, a beat on the ellipsis, your name and theirs. Premium AMD drops it only after the beep.</span></div>' } },
-          { icon: "🎤", title: "Your cloned voice renders it", auto: "bot", body: "One consented voice clone speaks every drop, so a thousand voicemails still sound like you picked up the phone for each one." },
-          { icon: "🛡️", title: "Guardrails check first", auto: "bot", body: "A consent gate, a per-lead timezone window, and a mobile-strip so it only lands where it should, when it should. Never an evasion, always above board." },
-          { icon: "📞", title: "Premium AMD detects voicemail", auto: "bot", body: "The call connects and listens. It drops the message only once the voicemail greeting finishes, never while a person is on the line." },
-          { icon: "📥", title: "It lands as a voicemail", auto: "bot", body: "No ring, no interruption. They see a missed voicemail in your voice, on their schedule, and call back warm." },
+                '<div class="pb-note"><span class="i"><svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg></span><span>Formatted for natural speech: short sentences, a beat on the ellipsis, your name and theirs. Premium AMD drops it only after the beep.</span></div>' } },
+          { icon: "", title: "Your cloned voice renders it", auto: "bot", body: "One consented voice clone speaks every drop, so a thousand voicemails still sound like you picked up the phone for each one." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-shield"/></svg>', title: "Guardrails check first", auto: "bot", body: "A consent gate, a per-lead timezone window, and a mobile-strip so it only lands where it should, when it should. Never an evasion, always above board." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>', title: "Premium AMD detects voicemail", auto: "bot", body: "The call connects and listens. It drops the message only once the voicemail greeting finishes, never while a person is on the line." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-inbox"/></svg>', title: "It lands as a voicemail", auto: "bot", body: "No ring, no interruption. They see a missed voicemail in your voice, on their schedule, and call back warm." },
         ],
         wire: pbWireChrome("recruitersos · voice drops", '<div class="pb-wire-cols">' +
           '<div class="pb-skel"><div class="cap">Script · spoken in your voice</div><div class="bar lg"></div><div class="bar lg"></div><div class="bar md"></div>' +
             '<div style="margin-top:14px" class="cap">Guardrails</div>' + toggle("Consent on file", true) + toggle("Timezone window 9a–6p", true) + toggle("Mobile-strip", true) + "</div>" +
           '<div style="display:grid;place-items:center"><div class="pb-phone"><div class="notch"></div>' +
-            '<div class="pb-vm"><span class="play">▶</span><div style="flex:1"><div class="pb-wave">' +
+            '<div class="pb-vm"><span class="play"><svg class="isvg" aria-hidden="true"><use href="#i-play"/></svg></span><div style="flex:1"><div class="pb-wave">' +
               Array.apply(null, Array(14)).map(function (_, i) { return '<i style="height:' + [6, 16, 22, 12, 20, 9, 18, 14, 24, 10, 19, 13, 21, 8][i] + 'px;animation-delay:' + (i * 0.07) + 's"></i>'; }).join("") +
             '</div></div><span style="font-size:11px;color:var(--text-dim);font-family:monospace">0:18</span></div>' +
             '<div style="text-align:center;font-size:11px;color:var(--text-dim);margin-top:10px">Voicemail · your voice</div></div></div></div>'),
-        outcome: { em: "💜", title: "The intimacy of a personal voicemail, at the scale of a campaign.", text: "People call back a voice, not a template. And every drop stays consented, timed, and respectful." },
-        cta: [["📞 Open Voice Drops", "voicedrops"]],
+        outcome: { em: '<svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>', title: "The intimacy of a personal voicemail, at the scale of a campaign.", text: "People call back a voice, not a template. And every drop stays consented, timed, and respectful." },
+        cta: [["Open Voice Drops", "voicedrops"]],
       },
 
       "campaign-models": {
-        icon: "🎯", accent: "p", title: "Campaign Models", tag: "The daily loop",
+        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-target"/></svg>', accent: "p", title: "Campaign Models", tag: "The daily loop",
         oneLiner: "The morning loop that runs your outreach for you, multi-channel, in your voice, on approval.",
-        mini: ["📡", "📊", "✍️", "🚀"],
+        mini: ['<svg class="isvg" aria-hidden="true"><use href="#i-radar"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-chart"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-send"/></svg>'],
         mission: "A campaign is a standing instruction, not a one-off blast. Every morning it pulls fresh signals, scores and dedupes them, finds the right contacts, drafts a multi-channel touch in your voice, waits for your approval, then sends, and processes replies all day. You run a desk; the loop does the legwork.",
         stages: [
-          { icon: "📡", when: "07:00", auto: "bot", title: "Pull signals", body: "Every active campaign runs its enabled signal sources for the last 24 hours, the fresh reasons to reach out today.",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-radar"/></svg>', when: "07:00", auto: "bot", title: "Pull signals", body: "Every active campaign runs its enabled signal sources for the last 24 hours, the fresh reasons to reach out today.",
             out: "<b>12 signals</b> pulled · funding, reposts, exec hires" },
-          { icon: "📊", when: "07:15", auto: "bot", title: "Score, rank, dedupe", body: "A composite score per ICP, disqualifiers suppressed, deduped against your ATS. Only the top N for the day advance.",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-chart"/></svg>', when: "07:15", auto: "bot", title: "Score, rank, dedupe", body: "A composite score per ICP, disqualifiers suppressed, deduped against your ATS. Only the top N for the day advance.",
             out: "<b>14 advanced</b> · top N by ICP score · 1 ATS duplicate suppressed" },
-          { icon: "🔎", when: "07:30", auto: "bot", title: "Enrich", body: "An enrichment waterfall resolves the right contact and channel for each prospect that made the cut.",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg>', when: "07:30", auto: "bot", title: "Enrich", body: "An enrichment waterfall resolves the right contact and channel for each prospect that made the cut.",
             out: "<b>contacts resolved</b> · Director of Eng · verified email + LinkedIn" },
-          { icon: "✍️", when: "07:45", auto: "bot", title: "Draft, multi-channel", body: "Claude drafts the email, the LinkedIn message, and the voice note per prospect, with your A/B variants applied, every line tied to the real signal.",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>', when: "07:45", auto: "bot", title: "Draft, multi-channel", body: "Claude drafts the email, the LinkedIn message, and the voice note per prospect, with your A/B variants applied, every line tied to the real signal.",
             out: "<b>3 drafts</b> · email + LinkedIn + voice note · variant A applied",
-            peek: { icon: "✍️", title: "One prospect, three channels", sub: "variant A · touch 1 · drafted 07:45", cta: "See all three drafts",
+            peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>', title: "One prospect, three channels", sub: "variant A · touch 1 · drafted 07:45", cta: "See all three drafts",
               body: pbArt("Email", ["ok", "A"], pbMail("From you · to {first}", "the Go backend repost", "Hi {first}, saw the backend role is back up after the Series B. I've got two Go engineers who've scaled payments past ten thousand requests a second and aren't on the market. Worth a look this week?")) +
-                pbArt("LinkedIn message", null, pbIM("{first} — quick one. The Go role's back open; I've got two people who fit your stack and aren't applying anywhere. Want me to send them?")) +
+                pbArt("LinkedIn message", null, pbIM("{first}, quick one. The Go role's back open; I've got two people who fit your stack and aren't applying anywhere. Want me to send them?")) +
                 pbArt("Voice note · your voice", null, '<div style="font-style:italic">' + pbNl("Hey {first}, it's Alex... saw the backend role reopened. I've got a couple of people in mind. No pressure, reply if you want the profiles. Thanks.") + "</div>") +
                 '<div class="pb-note"><span class="i">▸</span><span>Same prospect, same signal, three channels, your voice, A/B variant applied, then it waits for your approval.</span></div>' } },
-          { icon: "✅", when: "08:30", auto: "you", title: "You approve the batch", body: "Fifteen minutes: edit, kill, or approve the queue, and record the HOT-tier voice notes. Or flip on Autopilot and skip it entirely.",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>', when: "08:30", auto: "you", title: "You approve the batch", body: "Fifteen minutes: edit, kill, or approve the queue, and record the HOT-tier voice notes. Or flip on Autopilot and skip it entirely.",
             out: "<b>approved</b> in 12 min · or auto-approved on Autopilot" },
-          { icon: "🚀", when: "09:00", auto: "bot", title: "Push to channels", body: "Emails, LinkedIn, and SMS go out on their channels, every send stamped with its campaign, variant, and touch, then replies route through Response all day.",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-send"/></svg>', when: "09:00", auto: "bot", title: "Push to channels", body: "Emails, LinkedIn, and SMS go out on their channels, every send stamped with its campaign, variant, and touch, then replies route through Response all day.",
             out: "<b>sent</b> · stamped campaign=go-backend-q2 · variant=A · touch=1" },
         ],
         wire: pbWireChrome("recruitersos · campaign · multi-channel sequence", '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center">' +
-          [["Day 0", "✉️ Email"], ["Day 2", "in LinkedIn DM"], ["Day 3", "🎙️ Voice note"], ["Day 5", "📞 Voicemail drop"], ["Day 7", "💬 SMS"]].map(function (s, i) {
+          [["Day 0", "Email"], ["Day 2", "in LinkedIn DM"], ["Day 3", "Voice note"], ["Day 5", "Voicemail drop"], ["Day 7", "SMS"]].map(function (s, i) {
             return (i ? '<span style="color:var(--pb-c);font-size:16px">→</span>' : "") +
               '<div class="pb-skel" style="text-align:center;min-width:108px"><div class="pb-when" style="margin-bottom:6px">' + esc(s[0]) + '</div><div style="font-size:13px;font-weight:600">' + esc(s[1]) + "</div></div>";
           }).join("") + "</div>"),
-        outcome: { em: "🔁", title: "Set the desk once. It runs every morning.", text: "Signal-led, multi-channel, in your voice, and either approved in minutes or fully hands-off on Autopilot." },
-        cta: [["📚 Browse the Sequence Library", "playbooks/sequences"], ["🎯 Build a campaign", "campaigns"], ["🤖 Autopilot", "autopilot"]],
+        outcome: { em: '<svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>', title: "Set the desk once. It runs every morning.", text: "Signal-led, multi-channel, in your voice, and either approved in minutes or fully hands-off on Autopilot." },
+        cta: [["Browse the Sequence Library", "playbooks/sequences"], ["Build a campaign", "campaigns"], ["Autopilot", "autopilot"]],
       },
     };
   }
@@ -2103,10 +2103,10 @@
     var seqCount = PB_SEQS().length;
     cards +=
       '<div class="pb-card" data-accent="g" data-pb="sequences">' +
-        '<div class="pb-ico">📚</div>' +
+        '<div class="pb-ico"><svg class="isvg" aria-hidden="true"><use href="#i-book"/></svg></div>' +
         "<h3>Sequence Library</h3>" +
         '<p class="pb-mission">' + esc(seqCount + " ready outbound workflows for Recruiting and BD. Every touch written out, across email, LinkedIn, voice notes, voicemail drops and SMS, real copy.") + "</p>" +
-        '<div class="pb-mini"><span class="n">✉️</span><span class="ar">→</span><span class="n">💬</span><span class="ar">→</span><span class="n">🎙️</span><span class="ar">→</span><span class="n">📞</span></div>' +
+        '<div class="pb-mini"><span class="n"><svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg></span><span class="ar">→</span><span class="n"><svg class="isvg" aria-hidden="true"><use href="#i-message"/></svg></span><span class="ar">→</span><span class="n"><svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg></span><span class="ar">→</span><span class="n"><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg></span></div>' +
         '<span class="pb-go">Browse the library <span class="arr">→</span></span></div>';
 
     el.innerHTML =
@@ -2170,7 +2170,7 @@
         // and the run/tip chrome. Vertical concept flows keep a plain heading.
         (p.board ? "" :
           '<p class="pb-section-label">' + esc(p.flowLabel || "The workflow") + "</p>" +
-          '<div class="pb-runbar"><button class="pb-run"><span class="ic">▶</span> Watch it run</button></div>') +
+          '<div class="pb-runbar"><button class="pb-run"><span class="ic"><svg class="isvg" aria-hidden="true"><use href="#i-play"/></svg></span> Watch it run</button></div>') +
         flowHtml +
         // Sequence-shaped (board) playbooks get the live reply intelligence too.
         (p.board ? pbReplyCards(p.motion || "bd") : "") +
@@ -2271,8 +2271,8 @@
       '<span class="cls cls-' + r.cls + '">' + esc(clsLabel(r.cls)) + "</span></div>" +
       '<div class="resp-text">"' + esc(r.text) + '"</div>' +
       '<div class="resp-actions">' + r.actions.map(function (a) { return '<span class="resp-act">' + esc(a) + "</span>"; }).join("") +
-      '<button class="resp-btn" data-act="book"' + pid + '>📅 Book</button>' +
-      '<button class="resp-btn ghost" data-act="suppress"' + pid + '>🚫 Suppress</button>' +
+      '<button class="resp-btn" data-act="book"' + pid + '>Book</button>' +
+      '<button class="resp-btn ghost" data-act="suppress"' + pid + '>Suppress</button>' +
       "</div></div>";
   }
 
@@ -2302,41 +2302,41 @@
   // Hiring-signal types you can filter the search by (company-side). Pulled from the
   // engine's signal catalog; these are what the free/open sources can surface.
   var IM_SIGNALS = [
-    { t: "job_posting", l: "📋 New job posting" },
-    { t: "hiring_velocity", l: "📈 Hiring surge" },
-    { t: "job_repost", l: "🔁 Role reposted" },
-    { t: "evergreen_role", l: "⏳ Long-open role" },
-    { t: "headcount_growth", l: "👥 Headcount growth" },
-    { t: "careers_page_launch", l: "🌐 Careers page launched" },
-    { t: "ats_detected", l: "🧩 ATS adopted" },
-    { t: "funding_round", l: "💰 Funding round" },
-    { t: "ipo_or_s1", l: "🏛️ IPO / S-1" },
-    { t: "acquisition", l: "🤝 Acquisition" },
-    { t: "merger", l: "🔗 Merger" },
-    { t: "revenue_milestone", l: "📊 Revenue milestone" },
-    { t: "grant_or_contract", l: "📜 Grant / contract win" },
-    { t: "exec_hire", l: "👔 New exec" },
-    { t: "department_head_change", l: "🧭 New function lead" },
-    { t: "exec_departure", l: "🚪 Exec departure" },
-    { t: "board_change", l: "🪑 Board change" },
-    { t: "office_expansion", l: "🏢 Expansion" },
-    { t: "market_entry", l: "🌍 New market" },
-    { t: "product_launch", l: "🚀 Product launch" },
-    { t: "partnership", l: "🤝 Partnership" },
-    { t: "tech_stack_change", l: "🛠️ Tech adoption" },
-    { t: "layoff", l: "📉 Layoff" },
-    { t: "warn_notice", l: "⚠️ WARN notice" }
+    { t: "job_posting", l: "New job posting" },
+    { t: "hiring_velocity", l: "Hiring surge" },
+    { t: "job_repost", l: "Role reposted" },
+    { t: "evergreen_role", l: "Long-open role" },
+    { t: "headcount_growth", l: "Headcount growth" },
+    { t: "careers_page_launch", l: "Careers page launched" },
+    { t: "ats_detected", l: "ATS adopted" },
+    { t: "funding_round", l: "Funding round" },
+    { t: "ipo_or_s1", l: "IPO / S-1" },
+    { t: "acquisition", l: "Acquisition" },
+    { t: "merger", l: "Merger" },
+    { t: "revenue_milestone", l: "Revenue milestone" },
+    { t: "grant_or_contract", l: "Grant / contract win" },
+    { t: "exec_hire", l: "New exec" },
+    { t: "department_head_change", l: "New function lead" },
+    { t: "exec_departure", l: "Exec departure" },
+    { t: "board_change", l: "Board change" },
+    { t: "office_expansion", l: "Expansion" },
+    { t: "market_entry", l: "New market" },
+    { t: "product_launch", l: "Product launch" },
+    { t: "partnership", l: "Partnership" },
+    { t: "tech_stack_change", l: "Tech adoption" },
+    { t: "layoff", l: "Layoff" },
+    { t: "warn_notice", l: "WARN notice" }
   ];
   var imSelectedSignals = [];   // selected SignalType keys to filter the search by
   var imBreakdown = [];         // [{signalType,count}] over the full matched set (the "why they're hiring" counts)
-  var imNeeds = [];             // [{function,label,companies,roles}] — "what they're hiring for"
+  var imNeeds = [];             // [{function,label,companies,roles}], "what they're hiring for"
   var imNeedFn = "";            // active "what they're hiring for" category filter (JobFunction)
   // A copyable, clearly-unverified best-guess email chip. Empty string when there's no guess
-  // (no resolved name or no company domain yet — we never fabricate an address).
+  // (no resolved name or no company domain yet, we never fabricate an address).
   function imEmailChip(email, pattern) {
     if (!email) return "";
-    var t = "Best-guess work email — syntax only, UNVERIFIED. Every address is validated before any send." + (pattern ? " (pattern: " + pattern + ")" : "");
-    return '<span class="im-mgr-email" title="' + esc(t) + '" data-email="' + esc(email) + '">✉️ ' + esc(email) +
+    var t = "Best-guess work email, syntax only, UNVERIFIED. Every address is validated before any send." + (pattern ? " (pattern: " + pattern + ")" : "");
+    return '<span class="im-mgr-email" title="' + esc(t) + '" data-email="' + esc(email) + '">' + esc(email) +
       ' <span class="im-email-unv">guess</span></span>';
   }
   // SignalType -> human label (reuse the filter-chip labels), else prettify the key.
@@ -2365,7 +2365,7 @@
   }
   // The "What they're hiring for" panel: the SPECIFIC hiring-need categories (by function)
   // behind this result set, each with the number of companies hiring for it AND the total open
-  // roles. This is the actionable complement to "Why they're hiring" — it tells you which desk
+  // roles. This is the actionable complement to "Why they're hiring", it tells you which desk
   // to pitch. Clicking a category narrows the search to that function's roles.
   function needsBreakdownHtml() {
     var n = imNeeds || [];
@@ -2386,7 +2386,7 @@
         (imNeedFn ? ' · <button type="button" class="im-need-clear" data-fn="">clear filter</button>' : "") + "</span></div>" +
       '<div class="im-needs-grid">' + rows + "</div></div>";
   }
-  // Annotate EVERY signal FILTER chip with its live count, e.g. "💰 Funding round (12)" — and
+  // Annotate EVERY signal FILTER chip with its live count, e.g. "💰 Funding round (12)", and
   // "(0)" when none, so you can read the whole distribution at a glance and know which signals
   // to target. Chips with zero are dimmed; chips with hits are emphasized.
   function imUpdateSigChipCounts() {
@@ -2441,12 +2441,12 @@
   function sqFmt(n) { return (n || 0).toLocaleString(); }
   function sqDayLabel(iso) { try { return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); } catch (e) { return iso; } }
   function sqNeed(label, n, missing) { return '<button type="button" class="sq-need" data-missing="' + missing + '"><span class="sq-need-n">' + (n || 0).toLocaleString() + '</span><span class="sq-need-l">' + label + ' <span class="sq-need-view">view ▾</span></span></button>'; }
-  function sqMissLabel(m) { return m === "verified_email" ? "✉️ email" : m === "video" ? "🎬 video" : m === "watch_page" ? "🔗 page" : m === "contact_data" ? "👤 data" : esc(m); }
+  function sqMissLabel(m) { return m === "verified_email" ? "email" : m === "video" ? "video" : m === "watch_page" ? "page" : m === "contact_data" ? "data" : esc(m); }
   function sqWorklistHtml(items, missing) {
     var titleMap = { verified_email: "Need a verified email", video: "Need a 2nd-email video", watch_page: "Need a landing page", contact_data: "Need contact data (name · company · role)", copy_hold: "Held by the copy guard (bad merge data at send time)" };
     var fixMap = { verified_email: ["Verify emails in Clients", "#clients"], video: ["Record in PiP Studio", "#pipstudio"], watch_page: ["Build in PiP Studio", "#pipstudio"], contact_data: ["Fix in Clients", "#clients"], copy_hold: ["Fix the data in Clients", "#clients"] };
     var fix = fixMap[missing] || ["Fix", "#clients"];
-    if (!items.length) return '<div class="sq-wl"><div class="sq-wl-head">' + (titleMap[missing] || "Needs assets") + ": none waiting right now 🎉 <button type=\"button\" class=\"im-mini\" data-wlclose>Close</button></div></div>";
+    if (!items.length) return '<div class="sq-wl"><div class="sq-wl-head">' + (titleMap[missing] || "Needs assets") + ": none waiting right now <button type=\"button\" class=\"im-mini\" data-wlclose>Close</button></div></div>";
     var rows = items.map(function (p) {
       return '<div class="sq-wl-row">' +
           '<div class="sq-wl-main"><b>' + esc(p.name || "(no name)") + "</b>" + (p.title ? ' <span class="muted">' + esc(p.title) + "</span>" : "") + (p.company ? " · " + esc(p.company) : "") + "</div>" +
@@ -2486,7 +2486,7 @@
       if (e.target.closest && e.target.closest("[data-wlclose]")) { var box = document.getElementById("sqWorklist"); if (box) box.innerHTML = ""; }
     };
   }
-  // 📨 Sending system — a legible model: Domains → Email IDs → cold sends/day, with the
+  // 📨 Sending system, a legible model: Domains → Email IDs → cold sends/day, with the
   // hard 2/day cap making the math exact and today's usage draining live. Styles injected once.
   function syscapCss() {
     if (document.getElementById("syscapCss")) return "";
@@ -2494,31 +2494,31 @@
       '.syscap{border:1px solid var(--border);border-radius:14px;background:var(--surface);padding:16px 18px;margin-bottom:14px}' +
       '.syscap-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px}' +
       '.syscap-h h3{font-size:15px;font-weight:800;margin:0}' +
-      '.syscap-h .sub{font-size:12px;color:var(--muted,#8a93a6)}' +
+      '.syscap-h .sub{font-size:12px;color:var(--muted,var(--text-dim))}' +
       '.syscap-flow{display:flex;align-items:stretch;flex-wrap:wrap;margin:14px 0 8px}' +
       '.syscap-step{flex:1;min-width:108px;text-align:center;padding:11px 8px;border:1px solid var(--border);border-radius:12px}' +
       '.syscap-step .n{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1}' +
       '.syscap-step .l{font-size:12px;font-weight:700;margin-top:4px}' +
-      '.syscap-step .s{font-size:11px;color:var(--muted,#8a93a6);margin-top:2px}' +
-      '.syscap-arrow{display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--muted,#8a93a6);font-size:16px;font-weight:700}' +
+      '.syscap-step .s{font-size:11px;color:var(--muted,var(--text-dim));margin-top:2px}' +
+      '.syscap-arrow{display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--muted,var(--text-dim));font-size:16px;font-weight:700}' +
       '.syscap-meter .track{height:10px;border-radius:6px;background:var(--border);overflow:hidden}' +
-      '.syscap-meter .fill{height:100%;background:linear-gradient(90deg,#7c5cff,#4dd0ff)}' +
-      '.syscap-meter .lbl{display:flex;justify-content:space-between;font-size:12px;margin-top:6px;color:var(--muted,#8a93a6)}' +
+      '.syscap-meter .fill{height:100%;background:linear-gradient(90deg,var(--brand),var(--info))}' +
+      '.syscap-meter .lbl{display:flex;justify-content:space-between;font-size:12px;margin-top:6px;color:var(--muted,var(--text-dim))}' +
       '.syscap-meter .lbl b{font-weight:800;color:var(--text)}' +
-      '.syscap-warm{font-size:12px;color:var(--muted,#8a93a6);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}' +
+      '.syscap-warm{font-size:12px;color:var(--muted,var(--text-dim));margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}' +
       '.syscap-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}' +
-      '.syscap-tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);padding:6px 8px;border-bottom:1px solid var(--border)}' +
+      '.syscap-tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,var(--text-dim));padding:6px 8px;border-bottom:1px solid var(--border)}' +
       '.syscap-tbl td{padding:7px 8px;border-bottom:1px solid var(--border)}' +
       '.syscap-tbl .num{text-align:right;font-variant-numeric:tabular-nums}' +
       '.syscap-bar{display:inline-block;height:6px;border-radius:4px;background:var(--border);width:52px;overflow:hidden;vertical-align:middle;margin-left:8px}' +
-      '.syscap-bar>i{display:block;height:100%;background:#7c5cff}' +
+      '.syscap-bar>i{display:block;height:100%;background:var(--brand)}' +
       '</style>';
   }
   function sqCapacityHtml(cap) {
     if (!cap) return "";
     var css = syscapCss();
     if (!cap.inboxes) {
-      return css + '<div class="syscap"><div class="syscap-h"><h3>📨 Sending system</h3><span class="sub">your domains, Email IDs, and daily cold-send capacity</span></div>' +
+      return css + '<div class="syscap"><div class="syscap-h"><h3>Sending system</h3><span class="sub">your domains, Email IDs, and daily cold-send capacity</span></div>' +
         '<div class="empty" style="margin-top:12px">No Email IDs yet. <a href="#senders">Import your inboxes</a> and assign them to recruiters, then this shows the model: <b>domains → Email IDs → ' + (cap.coldPerInbox || 2) + ' cold sends/day each</b>, draining live as you send.</div></div>';
     }
     var pct = cap.coldCapacity ? Math.min(100, Math.round((cap.coldUsedToday / cap.coldCapacity) * 100)) : 0;
@@ -2533,7 +2533,7 @@
     var meter =
       '<div class="syscap-meter"><div class="track"><div class="fill" style="width:' + pct + '%"></div></div>' +
         '<div class="lbl"><span><b>' + sqFmt(cap.coldUsedToday) + '</b> sent today</span><span><b>' + sqFmt(cap.coldRemaining) + '</b> left · ' + pct + '% of capacity used</span></div></div>';
-    var warm = '<div class="syscap-warm">＋ <b>' + sqFmt(cap.warmingPerDay) + '</b> warming emails/day handled by <b>Smartlead</b> (' + cap.warmingPerInbox + '/inbox), kept separate from your cold sends.</div>';
+    var warm = '<div class="syscap-warm">+ <b>' + sqFmt(cap.warmingPerDay) + '</b> warming emails/day handled by <b>Smartlead</b> (' + cap.warmingPerInbox + '/inbox), kept separate from your cold sends.</div>';
     var rows = (cap.byRecruiter || []).map(function (r) {
       var rp = r.coldCapacity ? Math.min(100, Math.round((r.coldUsedToday / r.coldCapacity) * 100)) : 0;
       return '<tr><td><b>' + esc(r.ownerName) + '</b></td>' +
@@ -2546,16 +2546,16 @@
       ? '<table class="syscap-tbl"><thead><tr><th>Recruiter</th><th class="num">Email IDs</th><th class="num">Domains</th><th class="num">Cold used / cap</th><th class="num">Left today</th></tr></thead><tbody>' + rows + '</tbody></table>'
       : '';
     return css + '<div class="syscap">' +
-      '<div class="syscap-h"><h3>📨 Sending system</h3><span class="sub">every Email ID maxed at ' + cap.coldPerInbox + ' cold/day · draining live</span></div>' +
+      '<div class="syscap-h"><h3>Sending system</h3><span class="sub">every Email ID maxed at ' + cap.coldPerInbox + ' cold/day · draining live</span></div>' +
       flow + meter + warm + table + '</div>';
   }
   function sqOverviewHtml(o) {
     var healthy = o.runwayDays >= o.bufferDays;
     var statusPill = healthy
-      ? '<span class="sq-pill green">🟢 Buffer healthy · ' + o.runwayDays + " days staged</span>"
+      ? '<span class="sq-pill green">Buffer healthy · ' + o.runwayDays + " days staged</span>"
       : (o.readySupply > 0
-        ? '<span class="sq-pill yellow">🟡 Buffer low · ' + o.runwayDays + " day" + (o.runwayDays === 1 ? "" : "s") + " staged</span>"
-        : '<span class="sq-pill red">🔴 Buffer empty · stage prospects now</span>');
+        ? '<span class="sq-pill yellow">Buffer low · ' + o.runwayDays + " day" + (o.runwayDays === 1 ? "" : "s") + " staged</span>"
+        : '<span class="sq-pill red">Buffer empty · stage prospects now</span>');
     var supply = '<div class="sq-cards">' +
       '<div class="sq-card big"><div class="sq-k">Send-ready supply</div><div class="sq-v">' + sqFmt(o.readySupply) + "</div><div class=\"sq-sub\">" + statusPill + "</div></div>" +
       '<div class="sq-card"><div class="sq-k">Daily target</div><div class="sq-v">' + sqFmt(o.targetMin) + "–" + sqFmt(o.targetMax) + "</div><div class=\"sq-sub\">first emails / day</div></div>" +
@@ -2564,7 +2564,7 @@
     "</div>";
     var callout = "";
     if (o.shortfall > 0) {
-      callout = '<div class="sq-callout"><div class="sq-callout-h">⚠️ Stage ' + sqFmt(o.shortfall) + " more send-ready prospects to fill " + o.bufferDays + " days. Follow these steps:</div>" +
+      callout = '<div class="sq-callout"><div class="sq-callout-h">Stage ' + sqFmt(o.shortfall) + " more send-ready prospects to fill " + o.bufferDays + " days. Follow these steps:</div>" +
         '<div class="sq-steps">' +
           '<a class="sq-step" href="#inmarket"><b>1 · Find</b><span>Run a Targeted JSearch search → scrape new prospects</span></a>' +
           '<a class="sq-step" href="#clients"><b>2 · Verify emails</b><span>' + (o.needsAssets.noVerifiedEmail ? sqFmt(o.needsAssets.noVerifiedEmail) + " need a verified email" : "Confirm deliverable addresses") + "</span></a>" +
@@ -2573,18 +2573,18 @@
     }
     var needs = '<div class="sq-needs"><div class="sq-h">Needs assets <span class="muted">held until complete (' + sqFmt(o.needsAssets.total) + ") · click to see who</span></div>" +
       '<div class="sq-need-grid">' +
-        sqNeed("✉️ Verified email", o.needsAssets.noVerifiedEmail, "verified_email") +
-        sqNeed("🎬 2nd-email video", o.needsAssets.noVideo, "video") +
-        sqNeed("🔗 Landing page", o.needsAssets.noWatch, "watch_page") +
-        sqNeed("👤 Contact data", o.needsAssets.noContactData, "contact_data") +
-        (o.copyHolds ? sqNeed("✋ Copy guard held", o.copyHolds, "copy_hold") : "") +
+        sqNeed("Verified email", o.needsAssets.noVerifiedEmail, "verified_email") +
+        sqNeed("2nd-email video", o.needsAssets.noVideo, "video") +
+        sqNeed("Landing page", o.needsAssets.noWatch, "watch_page") +
+        sqNeed("Contact data", o.needsAssets.noContactData, "contact_data") +
+        (o.copyHolds ? sqNeed("Copy guard held", o.copyHolds, "copy_hold") : "") +
       '</div><div id="sqWorklist" class="sq-worklist"></div></div>';
     return supply + callout + needs;
   }
   // Projected-sends table (secondary; folded into a <details> below the essentials).
   function sqProjectionHtml(o) {
     var rows = o.days.map(function (dd, i) {
-      var dot = dd.fill === "green" ? "🟢" : dd.fill === "yellow" ? "🟡" : "🔴";
+      var dot = dd.fill === "green" ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok)"></span>' : dd.fill === "yellow" ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--warn)"></span>' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--danger)"></span>';
       var label = i === 0 ? "Today" : i === 1 ? "Tomorrow" : sqDayLabel(dd.date);
       return "<tr><td>" + dot + " <b>" + esc(label) + '</b> <span class="muted">' + esc(dd.date) + "</span></td>" +
         '<td class="sq-num">' + sqFmt(dd.firstEmails) + "</td>" +
@@ -2605,20 +2605,20 @@
   }
   // Collapsible "secondary" section: sending capacity, the day projection, and campaigns fold away
   // so the page opens on the essentials (supply, runway, what's blocking, and the auto-fill control).
-  // 🚀 Go-live checklist — the pre-flight for the Sending.ac cold-send path. Reads d.goLive and shows,
+  // 🚀 Go-live checklist, the pre-flight for the Sending.ac cold-send path. Reads d.goLive and shows,
   // at a glance, whether turning Autopilot on will actually send through the recruiter's inboxes, plus
   // the launch countdown. Green "Wired" = plumbing sound; a future launch date holds it until that day.
   function sqGoLiveCss() {
     if (document.getElementById("sqGoLiveCss")) return "";
     return '<style id="sqGoLiveCss">' +
       '.sqgl{border:1px solid var(--border);border-radius:16px;background:var(--surface);padding:14px 16px;margin:0 0 16px}' +
-      '.sqgl.ready{border-color:#34d399;background:linear-gradient(180deg,rgba(52,211,153,.07),rgba(52,211,153,.02))}' +
+      '.sqgl.ready{border-color:var(--ok);background:linear-gradient(180deg,var(--ok-bg),var(--ok-bg))}' +
       '.sqgl-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}' +
       '.sqgl-head h3{font-size:15px;font-weight:800;margin:0}' +
-      '.sqgl-ap{font-size:11.5px;font-weight:700;color:var(--text-muted,#8a93a6)}' +
-      '.sqgl-ap.on{color:#4dd0ff}' +
-      '.sqgl-launch{margin-left:auto;font-size:12px;color:var(--text-muted,#8a93a6)}' +
-      '.sqgl-launch.ok{color:#34d399}' +
+      '.sqgl-ap{font-size:11.5px;font-weight:700;color:var(--text-muted,var(--text-dim))}' +
+      '.sqgl-ap.on{color:var(--info)}' +
+      '.sqgl-launch{margin-left:auto;font-size:12px;color:var(--text-muted,var(--text-dim))}' +
+      '.sqgl-launch.ok{color:var(--ok)}' +
       '.sqgl-body{display:grid;gap:2px}' +
       '.sqgl-row{display:grid;grid-template-columns:20px 210px 1fr;align-items:baseline;gap:10px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--border)}' +
       '.sqgl-row:last-child{border-bottom:0}' +
@@ -2629,23 +2629,23 @@
   }
   function sqGoLiveHtml(g) {
     if (!g) return "";
-    var pill = g.ready ? '<span class="sq-pill green">🟢 Wired</span>' : '<span class="sq-pill yellow">🟡 Not wired yet</span>';
-    var ap = g.autopilotOn ? '<span class="sqgl-ap on">⚡ Autopilot ON</span>' : '<span class="sqgl-ap">⚡ Autopilot off</span>';
+    var pill = g.ready ? '<span class="sq-pill green">Wired</span>' : '<span class="sq-pill yellow">Not wired yet</span>';
+    var ap = g.autopilotOn ? '<span class="sqgl-ap on">Autopilot ON</span>' : '<span class="sqgl-ap">Autopilot off</span>';
     var launch = "";
     if (g.launchDate) {
       var dul = g.daysUntilLaunch;
       launch = (typeof dul === "number" && dul > 0)
-        ? '<span class="sqgl-launch">🗓️ Launches ' + esc(g.launchDate) + " · <b>" + dul + " day" + (dul === 1 ? "" : "s") + "</b> to go</span>"
-        : '<span class="sqgl-launch ok">🗓️ Launch date ' + esc(g.launchDate) + " reached</span>";
+        ? '<span class="sqgl-launch">Launches ' + esc(g.launchDate) + " · <b>" + dul + " day" + (dul === 1 ? "" : "s") + "</b> to go</span>"
+        : '<span class="sqgl-launch ok">Launch date ' + esc(g.launchDate) + " reached</span>";
     }
     var rows = (g.checks || []).map(function (c) {
-      var ic = c.ok ? "✅" : (c.required ? "⛔" : "◻️");
+      var ic = c.ok ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : (c.required ? '<svg class="isvg" aria-hidden="true"><use href="#i-alert"/></svg>' : "–");
       return '<div class="sqgl-row"><span>' + ic + '</span><span class="sqgl-l">' + esc(c.label) + (c.required ? "" : ' <span class="muted">(optional)</span>') + '</span><span class="sqgl-d muted">' + esc(c.detail) + "</span></div>";
     }).join("");
     var foot = g.ready
       ? "Plumbing is sound. Set a launch date and turn Autopilot on now: with a future date it stays inert and starts itself on that day, no manual step."
-      : "Finish the ⛔ required items, then set a launch date and turn Autopilot on. It stays inert until the launch date.";
-    var head = '<div class="sqgl-head"><h3>🚀 Go-live checklist' + (g.campaignName ? ' <span class="muted">· ' + esc(g.campaignName) + "</span>" : "") + "</h3>" + pill + ap + launch + "</div>";
+      : "Finish the required items, then set a launch date and turn Autopilot on. It stays inert until the launch date.";
+    var head = '<div class="sqgl-head"><h3>Go-live checklist' + (g.campaignName ? ' <span class="muted">· ' + esc(g.campaignName) + "</span>" : "") + "</h3>" + pill + ap + launch + "</div>";
     return sqGoLiveCss() + '<div class="sqgl' + (g.ready ? " ready" : "") + '">' + head + '<div class="sqgl-body">' + rows + "</div><div class=\"sqgl-foot muted\">" + foot + "</div></div>";
   }
   function sqMoreCss() {
@@ -2654,9 +2654,9 @@
       '.sq-more{border:1px solid var(--border);border-radius:14px;background:var(--surface);margin:0 0 12px;overflow:hidden}' +
       '.sq-more>summary{list-style:none;cursor:pointer;padding:12px 16px;font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px}' +
       '.sq-more>summary::-webkit-details-marker{display:none}' +
-      '.sq-more>summary:before{content:"▸";color:var(--text-muted,#8a93a6);font-size:11px;transition:.15s}' +
+      '.sq-more>summary:before{content:"▸";color:var(--text-muted,var(--text-dim));font-size:11px;transition:.15s}' +
       '.sq-more[open]>summary:before{transform:rotate(90deg)}' +
-      '.sq-more>summary .sq-more-sub{margin-left:auto;font-weight:600;color:var(--text-muted,#8a93a6);font-size:11.5px}' +
+      '.sq-more>summary .sq-more-sub{margin-left:auto;font-weight:600;color:var(--text-muted,var(--text-dim));font-size:11.5px}' +
       '.sq-more-body{padding:0 16px 14px}' +
       '</style>';
   }
@@ -2665,20 +2665,20 @@
     var capSummary = cap && cap.inboxes
       ? sqFmt(cap.coldCapacity) + " cold sends/day · " + sqFmt(cap.inboxes) + " Email IDs"
       : "no inboxes yet";
-    var capBlock = capBody ? '<details class="sq-more"><summary>📨 Sending capacity <span class="sq-more-sub">' + capSummary + '</span></summary><div class="sq-more-body">' + capBody + '</div></details>' : "";
-    var projBlock = '<details class="sq-more"><summary>📅 Projected sends <span class="sq-more-sub">next ' + o.bufferDays + ' days</span></summary><div class="sq-more-body">' + sqProjectionHtml(o) + '</div></details>';
+    var capBlock = capBody ? '<details class="sq-more"><summary>Sending capacity <span class="sq-more-sub">' + capSummary + '</span></summary><div class="sq-more-body">' + capBody + '</div></details>' : "";
+    var projBlock = '<details class="sq-more"><summary>Projected sends <span class="sq-more-sub">next ' + o.bufferDays + ' days</span></summary><div class="sq-more-body">' + sqProjectionHtml(o) + '</div></details>';
     var campCount = (o.campaigns && o.campaigns.length) || 0;
-    var campBlock = '<details class="sq-more"><summary>🎯 Campaigns in the queue <span class="sq-more-sub">' + campCount + '</span></summary><div class="sq-more-body">' + sqCampsHtml(o) + '</div></details>';
+    var campBlock = '<details class="sq-more"><summary>Campaigns in the queue <span class="sq-more-sub">' + campCount + '</span></summary><div class="sq-more-body">' + sqCampsHtml(o) + '</div></details>';
     return sqMoreCss() + capBlock + projBlock + campBlock;
   }
-  // ⚡ Auto-fill panel — the one control that makes the queue set-and-forget: a toggle, the campaign
+  // ⚡ Auto-fill panel, the one control that makes the queue set-and-forget: a toggle, the campaign
   // to stage into, the daily band + buffer, and a "Fill now" button. When ON, the engine keeps the
   // buffer topped automatically (it stages verified prospects; it never sends).
   function sqAutofillHtml(af, campaigns, members) {
     var s = (af && af.settings) || {};
     var on = !!s.enabled;
     var opts = '<option value="">Pick a campaign…</option>' + (campaigns || []).map(function (c) {
-      return '<option value="' + esc(c.id) + '"' + (c.id === s.campaignId ? " selected" : "") + ">" + esc(c.name) + (c.sendQueue ? " ✓" : "") + (c.status ? " (" + esc(c.status) + ")" : "") + "</option>";
+      return '<option value="' + esc(c.id) + '"' + (c.id === s.campaignId ? " selected" : "") + ">" + esc(c.name) + (c.sendQueue ? "" : "") + (c.status ? " (" + esc(c.status) + ")" : "") + "</option>";
     }).join("");
     var sel = (campaigns || []).filter(function (c) { return c.id === s.campaignId; })[0];
     var recName = "";
@@ -2688,18 +2688,18 @@
       return '<option value="' + esc(m.userId) + '"' + (isSel ? " selected" : "") + ">" + esc(m.name) + "</option>";
     }).join("");
     var setupNote = !sel ? "Pick a campaign, then set its recruiter, launch date, and Day-0 / Day-1 timing."
-      : sel.sendQueue ? "✓ Set up: 1st email Day 0 · video 2nd email Day 1 · send-ready gate ON" + (recName ? " · pool: " + esc(recName) : " · no recruiter yet") + (sel.scheduledFor ? " · launch " + esc(sel.scheduledFor) : "")
+      : sel.sendQueue ? "Set up: 1st email Day 0 · video 2nd email Day 1 · send-ready gate ON" + (recName ? " · pool: " + esc(recName) : " · no recruiter yet") + (sel.scheduledFor ? " · launch " + esc(sel.scheduledFor) : "")
       : "Not set up yet: click to time it Day-0 / Day-1, assign the recruiter pool, and gate sends on send-ready.";
     var setupRow = '<div class="sq-af-setup">' +
         '<label class="sq-af-f">Recruiter (inbox pool)<select id="sqAfRecruiter">' + recruiterOpts + "</select></label>" +
         '<label class="sq-af-f">Launch date<input type="date" id="sqAfDate" value="' + (sel && sel.scheduledFor || "") + '"></label>' +
-        '<button type="button" class="btn btn-ghost btn-sm" id="sqAfSetup">⚙️ Set up as Send Queue campaign</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="sqAfSetup">Set up as Send Queue campaign</button>' +
         '<span class="sq-af-setupnote ' + (sel && sel.sendQueue ? "ok" : "muted") + '">' + setupNote + "</span>" +
       "</div>";
     return '<div class="sq-af' + (on ? " on" : "") + '">' +
         '<div class="sq-af-head">' +
           '<label class="sq-switch" title="Turn auto-fill on/off"><input type="checkbox" id="sqAfToggle"' + (on ? " checked" : "") + '><span class="sq-slider"></span></label>' +
-          '<div class="sq-af-title">⚡ Auto-fill <span class="muted">' + (on ? "ON: keeping the buffer full" : "OFF") + "</span></div>" +
+          '<div class="sq-af-title">Auto-fill <span class="muted">' + (on ? "ON: keeping the buffer full" : "OFF") + "</span></div>" +
           '<div class="sq-af-status">Staged today: <b>' + ((af && af.today) || 0).toLocaleString() + "</b> / " + ((af && af.dailyTarget) || 0).toLocaleString() + " target</div>" +
         "</div>" +
         '<div class="sq-af-row">' +
@@ -2708,7 +2708,7 @@
           '<label class="sq-af-f">Daily max<input type="number" id="sqAfMax" value="' + (s.targetMax || 6000) + '" min="1" step="500"></label>' +
           '<label class="sq-af-f">Buffer days<input type="number" id="sqAfBuffer" value="' + (s.bufferDays || 5) + '" min="1" max="14"></label>' +
           '<button type="button" class="btn btn-ghost btn-sm" id="sqAfSave">Save</button>' +
-          '<button type="button" class="btn btn-primary btn-sm" id="sqAfFill">⬇ Fill now</button>' +
+          '<button type="button" class="btn btn-primary btn-sm" id="sqAfFill">Fill now</button>' +
         "</div>" +
         setupRow +
         '<div class="sq-af-note muted">When ON, it stages verified send-ready prospects into the chosen campaign every few minutes, keeping ~' + (s.bufferDays || 5) + " days ahead so no day runs dry. It never sends: your campaign’s own controls do.</div>" +
@@ -2758,7 +2758,7 @@
         var res = r && r.data && r.data.result;
         toast(res ? res.message : "Couldn’t set up the campaign.");
         sqReload();
-      }).catch(function () { setup.disabled = false; setup.textContent = "⚙️ Set up as Send Queue campaign"; toast("Couldn’t set up the campaign."); });
+      }).catch(function () { setup.disabled = false; setup.textContent = "Set up as Send Queue campaign"; toast("Couldn’t set up the campaign."); });
     });
     if (fill) fill.addEventListener("click", function () {
       var s = sqGatherAf();
@@ -2771,7 +2771,7 @@
         if (res && res.enrolled > 0) toast("Staged " + res.enrolled.toLocaleString() + " prospect" + (res.enrolled === 1 ? "" : "s") + " into the queue.");
         else toast(sqFillReason(res ? res.reason : ""));
         sqReload();
-      }).catch(function () { fill.disabled = false; fill.textContent = "⬇ Fill now"; toast("Fill didn’t run."); });
+      }).catch(function () { fill.disabled = false; fill.textContent = "Fill now"; toast("Fill didn’t run."); });
     });
   }
   function sqReload() {
@@ -2795,7 +2795,7 @@
   function imqEmpLabel(code) { for (var i = 0; i < IM_QEMP.length; i++) if (IM_QEMP[i][0] === code) return IM_QEMP[i][1]; return code; }
 
   /**
-   * TARGETED JSEARCH panel — the headline Hire Signals control. Author an exact search
+   * TARGETED JSEARCH panel, the headline Hire Signals control. Author an exact search
    * (role/keywords + location + recency + employment type), save it to a queue, RUN it on demand,
    * then PICK which companies actually merge into the pool. Nothing scrapes until you press Run, and
    * nothing enters the pool until you commit your picks, so you target exactly who you want.
@@ -2806,13 +2806,13 @@
       '<div class="imq hs-card">' +
         '<div class="hs-head">' +
           '<div class="hs-head-l">' +
-            '<span class="hs-ic">🎯</span>' +
+            '<span class="hs-ic"><svg class="isvg" aria-hidden="true"><use href="#i-target"/></svg></span>' +
             "<div>" +
               '<div class="hs-title">Targeted job search</div>' +
               '<div class="hs-sub">Find companies hiring right now, by role, market, location, and size.</div>' +
             "</div>" +
           "</div>" +
-          '<span class="hs-badge">⚡ JSearch · live</span>' +
+          '<span class="hs-badge">JSearch · live</span>' +
         "</div>" +
         // Search MODE toggle: one box whose placeholder + behavior adapt: by job title, by
         // industry/market, or by a specific company name. JSearch takes the term as keywords.
@@ -2822,8 +2822,8 @@
           '<button type="button" class="hs-mode" data-mode="company">Company name</button>' +
         "</div>" +
         '<form class="hs-form" id="imqForm">' +
-          '<label class="hs-field hs-grow"><span class="hs-fic" id="hsFic">🔎</span><input id="imqQuery" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Job title (e.g. controller, registered nurse, backend engineer)" /></label>' +
-          '<label class="hs-field hs-loc"><span class="hs-fic">📍</span><input id="imqLoc" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Location (blank = nationwide)" /></label>' +
+          '<label class="hs-field hs-grow"><span class="hs-fic" id="hsFic"><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg></span><input id="imqQuery" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Job title (e.g. controller, registered nurse, backend engineer)" /></label>' +
+          '<label class="hs-field hs-loc"><span class="hs-fic"><svg class="isvg" aria-hidden="true"><use href="#i-pin"/></svg></span><input id="imqLoc" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Location (blank = nationwide)" /></label>' +
           '<button type="submit" class="btn btn-primary hs-go" id="imqAdd">Search <span class="hs-arrow">→</span></button>' +
         "</form>" +
         // Company-size narrow (multi-select bands). Resolved free via Wikidata + heuristic.
@@ -2847,14 +2847,14 @@
     // Active search mode + its box icon/placeholder. Default: job title.
     var hsMode = "title";
     var HS_MODES = {
-      title:    { ic: "🔎", ph: "Job title (e.g. controller, registered nurse, backend engineer)" },
-      industry: { ic: "🏭", ph: "Industry / market (e.g. fintech, healthcare, logistics)" },
-      company:  { ic: "🏢", ph: "Company name (e.g. Anthropic, Stripe, Ramp)" }
+      title:    { ic: '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg>', ph: "Job title (e.g. controller, registered nurse, backend engineer)" },
+      industry: { ic: '<svg class="isvg" aria-hidden="true"><use href="#i-building"/></svg>', ph: "Industry / market (e.g. fintech, healthcare, logistics)" },
+      company:  { ic: '<svg class="isvg" aria-hidden="true"><use href="#i-building"/></svg>', ph: "Company name (e.g. Anthropic, Stripe, Ramp)" }
     };
     function applyMode() {
       var m = HS_MODES[hsMode] || HS_MODES.title;
       var inp = host.querySelector("#imqQuery"); if (inp) inp.setAttribute("placeholder", m.ph);
-      var fic = host.querySelector("#hsFic"); if (fic) fic.textContent = m.ic;
+      var fic = host.querySelector("#hsFic"); if (fic) fic.innerHTML = m.ic;
       Array.prototype.forEach.call(host.querySelectorAll(".hs-mode"), function (b) {
         b.classList.toggle("active", b.getAttribute("data-mode") === hsMode);
       });
@@ -2922,7 +2922,7 @@
       if (!imQPreview) return;
       var leads = imQPreview.leads || [], picked = 0;
       for (var i = 0; i < leads.length; i++) if (imQPreview.picks[i]) picked++;
-      var btn = host.querySelector('[data-act="pvcommit"]'); if (btn) btn.textContent = "⬇ Pull selected (" + picked + ")";
+      var btn = host.querySelector('[data-act="pvcommit"]'); if (btn) btn.textContent = "Pull selected (" + picked + ")";
       var all = host.querySelector('[data-act="pvall"]'); if (all) all.checked = picked === leads.length && leads.length > 0;
     }
     function imqRenderPreview() {
@@ -2950,8 +2950,8 @@
       var rows = leads.map(function (l, i) {
         var roles = (l.roleDetails && l.roleDetails.length) || (l.roles && l.roles.length) || 1;
         var badge = l.inPool
-          ? '<span class="imq-pv-badge pool" title="Already in your pool (pulled before)">♻ In pool</span>'
-          : '<span class="imq-pv-badge new" title="Net-new, not pulled before">🆕 New</span>';
+          ? '<span class="imq-pv-badge pool" title="Already in your pool (pulled before)">In pool</span>'
+          : '<span class="imq-pv-badge new" title="Net-new, not pulled before">New</span>';
         return '<label class="imq-pv-row' + (l.inPool ? " is-pool" : " is-new") + '">' +
             '<input type="checkbox" data-act="pvtoggle" data-i="' + i + '"' + (imQPreview.picks[i] ? " checked" : "") + ">" +
             badge +
@@ -2964,8 +2964,8 @@
       box.innerHTML = '<div class="imq-pv">' +
           '<div class="imq-pv-head">Preview · <b>' + leads.length + "</b> compan" + (leads.length === 1 ? "y" : "ies") + " · <b>" + totP + "</b> position" + (totP === 1 ? "" : "s") + " for “" + esc(imQPreview.name) + "”" + supNote + "</div>" +
           '<div class="imq-pv-stats">' +
-            '<span class="imq-pv-stat new">🆕 <b>' + newP + "</b> position" + (newP === 1 ? "" : "s") + " not pulled <span class=\"muted\">(" + newC + " new compan" + (newC === 1 ? "y" : "ies") + ")</span></span>" +
-            '<span class="imq-pv-stat pool">♻ <b>' + pulP + "</b> already pulled <span class=\"muted\">(" + pulC + " compan" + (pulC === 1 ? "y" : "ies") + ")</span></span>" +
+            '<span class="imq-pv-stat new"><b>' + newP + "</b> position" + (newP === 1 ? "" : "s") + " not pulled <span class=\"muted\">(" + newC + " new compan" + (newC === 1 ? "y" : "ies") + ")</span></span>" +
+            '<span class="imq-pv-stat pool"><b>' + pulP + "</b> already pulled <span class=\"muted\">(" + pulC + " compan" + (pulC === 1 ? "y" : "ies") + ")</span></span>" +
             '<span class="imq-pv-quick">Select: ' +
               '<button type="button" class="im-mini" data-act="pvselnew">New only (' + newC + ")</button>" +
               '<button type="button" class="im-mini" data-act="pvselall">All</button>' +
@@ -2975,7 +2975,7 @@
           "</div>" +
           '<div class="imq-pv-list">' + rows + "</div>" +
           '<div class="imq-pv-foot">' +
-            '<button type="button" class="btn btn-primary btn-sm" data-act="pvcommit">⬇ Pull selected (' + picked + ")</button>" +
+            '<button type="button" class="btn btn-primary btn-sm" data-act="pvcommit">Pull selected (' + picked + ")</button>" +
             '<button type="button" class="im-mini" data-act="pvclose">Cancel</button>' +
             '<span class="imq-pv-note muted">Only what you pick enters your pool. <b>New only</b> = pull a fresh list (net-new prospects). Then decision-maker research + verified job-post screenshots run on them.</span>' +
           "</div>" +
@@ -3056,7 +3056,7 @@
       '.hs-modes{display:inline-flex;gap:2px;padding:3px;margin-bottom:12px;background:var(--surface);border:1px solid var(--border-strong);border-radius:12px}' +
       '.hs-mode{appearance:none;border:none;background:none;cursor:pointer;font:inherit;font-size:12.5px;font-weight:600;color:var(--text-muted);padding:7px 15px;border-radius:9px;transition:all .13s;white-space:nowrap}' +
       '.hs-mode:hover{color:var(--text)}' +
-      '.hs-mode.active{background:var(--grad);color:#0a0a12;font-weight:700;box-shadow:0 4px 12px -5px rgba(124,92,255,.6)}' +
+      '.hs-mode.active{background:var(--grad);color:var(--bg);font-weight:700;box-shadow:0 4px 12px -5px color-mix(in srgb, var(--brand) 40%, transparent)}' +
       // form
       '.hs-form{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}' +
       '.hs-field{display:flex;align-items:center;gap:9px;padding:0 13px;height:48px;border:1px solid var(--border-strong);border-radius:12px;background:var(--surface);transition:border-color .15s,box-shadow .15s;cursor:text}' +
@@ -3067,7 +3067,7 @@
       '.im-hero .hs-in{border:none;background:transparent;padding:0;height:100%;flex:1;min-width:0;font-size:14px;color:var(--text);box-shadow:none}' +
       '.im-hero .hs-in:focus{outline:none;box-shadow:none;border:none}' +
       '.hs-in::placeholder{color:var(--text-dim)}' +
-      '.hs-go{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 26px;border-radius:12px;font-size:14.5px;font-weight:700;box-shadow:0 10px 26px -10px rgba(124,92,255,.6)}' +
+      '.hs-go{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 26px;border-radius:12px;font-size:14.5px;font-weight:700;box-shadow:0 10px 26px -10px color-mix(in srgb, var(--brand) 40%, transparent)}' +
       '.hs-go .hs-arrow{transition:transform .15s}.hs-go:hover .hs-arrow{transform:translateX(3px)}' +
       '.im-hero .hs-go[disabled]{opacity:.65;cursor:default}' +
       // company-size segmented control
@@ -3076,7 +3076,7 @@
       '.hs-seg{display:inline-flex;flex-wrap:wrap;gap:6px}' +
       '.im-hero .imq-size{padding:8px 14px;border-radius:10px;border:1px solid var(--border-strong);background:var(--surface);color:var(--text-muted);font-size:12.5px;font-weight:600;cursor:pointer;transition:all .13s}' +
       '.im-hero .imq-size:hover{color:var(--text);border-color:var(--brand-2)}' +
-      '.im-hero .imq-size.active{background:var(--grad);color:#0a0a12;border-color:transparent;font-weight:700;box-shadow:0 6px 16px -8px rgba(124,92,255,.7)}' +
+      '.im-hero .imq-size.active{background:var(--grad);color:var(--bg);border-color:transparent;font-weight:700;box-shadow:0 6px 16px -8px color-mix(in srgb, var(--brand) 40%, transparent)}' +
       '.hs-clear{background:none;border:none;color:var(--text-dim);font-size:12px;cursor:pointer;padding:4px}.hs-clear:hover{color:var(--text)}' +
       // hand-off note
       '.im-handoff{margin-top:16px;display:flex;gap:10px;align-items:flex-start;padding:13px 16px;border:1px solid var(--border);border-radius:14px;background:var(--surface);font-size:12.5px;color:var(--text-muted);line-height:1.5}' +
@@ -3118,7 +3118,7 @@
         // then PICK which companies to pull. Rendered by renderTargetedQueue() right after innerHTML.
         '<div id="imTargeted" class="im-targeted"></div>' +
         // What happens after you pull: everything downstream is automatic and lives in Clients.
-        '<div class="im-handoff"><span aria-hidden="true">✨</span><span>Pull the companies you want and the rest runs on its own. Decision-makers, verified emails, and screenshot videos are built automatically and appear in the <a href="#clients">Clients</a> tab.</span></div>' +
+        '<div class="im-handoff"><span aria-hidden="true"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg></span><span>Pull the companies you want and the rest runs on its own. Decision-makers, verified emails, and screenshot videos are built automatically and appear in the <a href="#clients">Clients</a> tab.</span></div>' +
       "</div>" +
       // SET-AND-FORGET batch: queue many searches; each scrapes + auto-merges in the background with a
       // live progress bar and ticks off when done. Survives restarts (resumes where it left off).
@@ -3135,27 +3135,27 @@
     if (document.getElementById("imBatchCss")) return "";
     return '<style id="imBatchCss">' +
       '.im-batch{max-width:1080px;margin:18px auto 0;padding:0 16px}' +
-      '.bq-card{background:var(--card,#14141f);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px 18px}' +
+      '.bq-card{background:var(--card,#14141f);border:1px solid var(--border);border-radius:14px;padding:16px 18px}' +
       '.bq-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}' +
-      '.bq-head h3{margin:0;font-size:15px;font-weight:700;color:#e8e8f0}' +
-      '.bq-sum{font-size:12px;color:#9aa0b4;font-family:ui-monospace,monospace}' +
+      '.bq-head h3{margin:0;font-size:15px;font-weight:700;color:var(--text-muted)}' +
+      '.bq-sum{font-size:12px;color:var(--text-dim);font-family:ui-monospace,monospace}' +
       '.bq-add{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}' +
-      '.bq-add input{background:#0f0f18;border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e8e8f0;padding:8px 11px;font-size:13px}' +
+      '.bq-add input{background:var(--bg);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-muted);padding:8px 11px;font-size:13px}' +
       '.bq-add .bq-kw{min-width:230px;flex:1}.bq-add .bq-loc{width:150px}.bq-add .bq-lim{width:74px}' +
-      '.bq-limwrap{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#9aa0b4}' +
-      '.bq-row{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center;padding:10px 0;border-top:1px solid rgba(255,255,255,.05)}' +
-      '.bq-row .bq-name{font-weight:600;font-size:13.5px;color:#e8e8f0}' +
-      '.bq-row .bq-name small{color:#6b7186;font-weight:400}' +
+      '.bq-limwrap{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim)}' +
+      '.bq-row{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center;padding:10px 0;border-top:1px solid var(--surface-2)}' +
+      '.bq-row .bq-name{font-weight:600;font-size:13.5px;color:var(--text-muted)}' +
+      '.bq-row .bq-name small{color:var(--text-dim);font-weight:400}' +
       '.bq-chip{font-family:ui-monospace,monospace;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.03em}' +
-      '.bq-chip.queued{background:rgba(255,194,77,.14);color:#ffc24d}.bq-chip.running{background:rgba(124,92,255,.16);color:#9d86ff}' +
-      '.bq-chip.done{background:rgba(56,224,166,.14);color:#38e0a6}.bq-chip.error{background:rgba(255,107,107,.14);color:#ff6b6b}.bq-chip.canceled{background:rgba(155,160,180,.14);color:#9aa0b4}.bq-chip.draft{background:rgba(155,160,180,.12);color:#9aa0b4}' +
-      '.bq-bar{grid-column:1/3;height:7px;border-radius:6px;background:#0f0f18;overflow:hidden}' +
-      '.bq-fill{height:100%;background:linear-gradient(90deg,rgba(124,92,255,.6),#7c5cff);transition:width .5s ease}' +
-      '.bq-fill.done{background:linear-gradient(90deg,rgba(56,224,166,.6),#38e0a6)}.bq-fill.error{background:#ff6b6b}' +
-      '.bq-meta{grid-column:1/3;font-size:11.5px;color:#9aa0b4;font-family:ui-monospace,monospace}' +
-      '.bq-x{background:none;border:1px solid rgba(255,255,255,.12);color:#9aa0b4;border-radius:7px;padding:3px 9px;font-size:12px;cursor:pointer}' +
-      '.bq-x:hover{color:#ff6b6b;border-color:#ff6b6b}' +
-      '.bq-empty{color:#6b7186;font-size:13px;padding:8px 0}' +
+      '.bq-chip.queued{background:var(--warn-bg);color:var(--warn)}.bq-chip.running{background:var(--brand-soft);color:#9d86ff}' +
+      '.bq-chip.done{background:var(--ok-bg);color:var(--ok)}.bq-chip.error{background:var(--danger-bg);color:var(--danger)}.bq-chip.canceled{background:rgba(155,160,180,.14);color:var(--text-dim)}.bq-chip.draft{background:rgba(155,160,180,.12);color:var(--text-dim)}' +
+      '.bq-bar{grid-column:1/3;height:7px;border-radius:6px;background:var(--bg);overflow:hidden}' +
+      '.bq-fill{height:100%;background:linear-gradient(90deg,color-mix(in srgb, var(--brand) 40%, transparent),var(--brand));transition:width .5s ease}' +
+      '.bq-fill.done{background:linear-gradient(90deg,color-mix(in srgb, var(--ok) 40%, transparent),var(--ok))}.bq-fill.error{background:var(--danger)}' +
+      '.bq-meta{grid-column:1/3;font-size:11.5px;color:var(--text-dim);font-family:ui-monospace,monospace}' +
+      '.bq-x{background:none;border:1px solid var(--border-strong);color:var(--text-dim);border-radius:7px;padding:3px 9px;font-size:12px;cursor:pointer}' +
+      '.bq-x:hover{color:var(--danger);border-color:var(--danger)}' +
+      '.bq-empty{color:var(--text-dim);font-size:13px;padding:8px 0}' +
       '</style>';
   }
   function bqPhaseLabel(r) {
@@ -3194,16 +3194,16 @@
       }).join("");
       host.innerHTML = imBatchCss() +
         '<div class="bq-card">' +
-          '<div class="bq-head"><h3>🗂️ Batch search queue <span class="muted" style="font-weight:400;font-size:12px">set &amp; forget</span></h3>' +
+          '<div class="bq-head"><h3>Batch search queue <span class="muted" style="font-weight:400;font-size:12px">set &amp; forget</span></h3>' +
             '<span class="bq-sum">' + esc(sum) + "</span></div>" +
           '<div class="bq-add">' +
             '<input class="bq-kw" id="bqKw" placeholder="Job title or industry (e.g. controller fintech)" />' +
             '<input class="bq-loc" id="bqLoc" placeholder="Location (optional)" />' +
-            '<label class="bq-limwrap" title="Jobs to pull for this search (50–5000). Keep it low for a test — JSearch bills ~1 request per 10 jobs.">Jobs <input class="bq-lim" id="bqLimit" type="number" min="50" max="5000" step="50" value="50" /></label>' +
-            '<button class="btn btn-primary btn-sm" id="bqAdd">➕ Add to queue</button>' +
-            (searches.length ? '<button class="btn btn-ghost btn-sm" id="bqRunAll">▶ Run all</button>' : "") +
+            '<label class="bq-limwrap" title="Jobs to pull for this search (50–5000). Keep it low for a test, JSearch bills ~1 request per 10 jobs.">Jobs <input class="bq-lim" id="bqLimit" type="number" min="50" max="5000" step="50" value="50" /></label>' +
+            '<button class="btn btn-primary btn-sm" id="bqAdd">Add to queue</button>' +
+            (searches.length ? '<button class="btn btn-ghost btn-sm" id="bqRunAll">Run all</button>' : "") +
           "</div>" +
-          (rows || '<div class="bq-empty">Add searches above — each one scrapes companies and merges them automatically, with a live progress bar. Queue as many as you want and walk away.</div>') +
+          (rows || '<div class="bq-empty">Add searches above, each one scrapes companies and merges them automatically, with a live progress bar. Queue as many as you want and walk away.</div>') +
         "</div>";
       wire();
       // Poll while anything is queued/running so the bars animate + tick off.
@@ -3224,10 +3224,10 @@
       var lim = parseInt(((host.querySelector("#bqLimit") || {}).value), 10); lim = Math.max(50, Math.min(5000, lim || 50));
       var btn = host.querySelector("#bqAdd"); if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
       send("/in-market", "POST", { action: "queue_save", search: { name: kw + (loc ? " · " + loc : "") + " · " + lim, query: kw, location: loc, limit: lim } }).then(function (r) {
-        if (!r || !r.ok || !r.data || !r.data.search) { toast("Couldn't add that search."); if (btn) { btn.disabled = false; btn.textContent = "➕ Add to queue"; } return; }
+        if (!r || !r.ok || !r.data || !r.data.search) { toast("Couldn't add that search."); if (btn) { btn.disabled = false; btn.textContent = "Add to queue"; } return; }
         var id = r.data.search.id;
         send("/in-market", "POST", { action: "queue_enqueue", id: id }).then(function (er) {
-          if (btn) { btn.disabled = false; btn.textContent = "➕ Add to queue"; }
+          if (btn) { btn.disabled = false; btn.textContent = "Add to queue"; }
           if (er && er.status === 409) { toast("Connect JSearch (RAPID_JOBS_KEY) to run searches."); }
           var box = host.querySelector("#bqKw"); if (box) box.value = "";
           load();
@@ -3242,7 +3242,7 @@
         send("/in-market", "POST", { action: "queue_enqueue", all: true }).then(function (r) {
           all.disabled = false;
           if (r && r.status === 409) { toast("Connect JSearch (RAPID_JOBS_KEY) to run searches."); return; }
-          if (r && r.ok) toast("Queued " + ((r.data && r.data.queued) || 0) + " search" + (((r.data && r.data.queued) || 0) === 1 ? "" : "es") + " — they'll run automatically.");
+          if (r && r.ok) toast("Queued " + ((r.data && r.data.queued) || 0) + " search" + (((r.data && r.data.queued) || 0) === 1 ? "" : "es") + ", they'll run automatically.");
           load();
         });
       };
@@ -3271,24 +3271,24 @@
         '<label class="im-checkall"><input type="checkbox" id="imAll"> <b>Select all</b> <span class="muted">companies + managers</span></label>' +
         '<button type="button" class="btn btn-ghost btn-sm" id="imClearSel" style="display:none">Clear</button>' +
         '<span class="im-count">' + leads.length + " shown · <b>" + Math.max(imTotal, inMarketResults.length) + "</b> companies hiring" + (imLabel ? " in " + esc(imLabel) : "") +
-          (imPostedWithin ? ' <span class="im-date-active">📅 posted in last ' + imPostedWithin + " day" + (imPostedWithin === 1 ? "" : "s") + "</span>" : " <span class=\"muted\">(grows daily)</span>") + "</span>" +
+          (imPostedWithin ? ' <span class="im-date-active">posted in last ' + imPostedWithin + " day" + (imPostedWithin === 1 ? "" : "s") + "</span>" : " <span class=\"muted\">(grows daily)</span>") + "</span>" +
         '<div class="im-narrow" title="Narrow by hiring-intent score">' +
           bands.map(function (b) { return '<button type="button" class="im-nbtn' + (String(imMinScore) === b[0] ? " active" : "") + '" data-min="' + b[0] + '">' + b[1] + "</button>"; }).join("") +
         "</div>" +
         '<div class="im-narrow im-dm" title="Decision-makers to contact per open role">' +
-          '<span class="im-dm-lbl">👤 Per role:</span>' +
+          '<span class="im-dm-lbl">Per role:</span>' +
           [1, 3, 5].map(function (n) { return '<button type="button" class="im-nbtn' + (imDmPerRole === n ? " active" : "") + '" data-dm="' + n + '">' + n + "</button>"; }).join("") +
         "</div>" +
         // Screenshot filter: search by whether the company's job posting has a verified screenshot.
         '<div class="im-narrow im-shot" title="Filter by whether we have a verified screenshot of the company\'s job posting">' +
-          '<span class="im-dm-lbl">📸 Screenshot:</span>' +
+          '<span class="im-dm-lbl">Screenshot:</span>' +
           [["all", "All"], ["has", "Has"], ["none", "None"]].map(function (o) {
             var on = (o[0] === "all" && imShotFilter === null) || (o[0] === "has" && imShotFilter === true) || (o[0] === "none" && imShotFilter === false);
             return '<button type="button" class="im-nbtn' + (on ? " active" : "") + '" data-shot="' + o[0] + '">' + o[1] + "</button>";
           }).join("") +
         "</div>" +
-        '<button class="btn btn-ghost btn-sm" id="imSave" disabled>💾 Save as hiring signals</button>' +
-        '<button class="btn btn-ghost btn-sm" id="imToEmail" disabled>✉️ Push prospects to Email</button>' +
+        '<button class="btn btn-ghost btn-sm" id="imSave" disabled>Save as hiring signals</button>' +
+        '<button class="btn btn-ghost btn-sm" id="imToEmail" disabled>Push prospects to Email</button>' +
         '<button class="btn btn-primary btn-sm" id="imBulk" disabled>Push selected to Prospects</button>' +
       "</div>";
     body.innerHTML = toolbar + needsBreakdownHtml() + imBreakdownHtml() + '<div id="imList">' + leads.map(leadCard).join("") + "</div>" + imTickerHtml();
@@ -3320,7 +3320,7 @@
       : "Building your hiring pool, first companies land within ~15 min, then it grows daily.";
     return '<div class="im-ticker" id="imTicker">' +
       '<button class="im-ticker-x" id="imTickerX" title="Hide">✕</button>' +
-      '<div class="im-ticker-h">📈 Hiring-signal feed <span class="muted">· updates ~90 min</span></div>' +
+      '<div class="im-ticker-h">Hiring-signal feed <span class="muted">· updates ~90 min</span></div>' +
       '<div class="im-ticker-main">' + main + "</div>" +
       '<div class="im-ticker-sub">Last update: ' + esc(lastStr) + "</div>" +
       (log ? '<div class="im-ticker-log">' + log + "</div>" : "") +
@@ -3355,35 +3355,35 @@
   }
 
   /* ========================================================================
-     Decision-maker curation view — the daily database of real hiring managers
+     Decision-maker curation view, the daily database of real hiring managers
      attached to specific open roles, with the review gate to BD Bulk.
      ======================================================================== */
   var curPicks = {};   // id -> true (selected curated rows for approve/enroll)
   var curIndustry = "";  // active industry filter for the enriched list ("" = all industries)
 
   var curPollTimer = null;
-  var curLastTotal = 0;     // researched count last rendered — detects new leads arriving
-  var curLastSyncMs = 0;    // when the backend last answered — drives the live/reconnecting label
+  var curLastTotal = 0;     // researched count last rendered, detects new leads arriving
+  var curLastSyncMs = 0;    // when the backend last answered, drives the live/reconnecting label
   var curTick = 0;          // heartbeat counter; we fetch data every Nth tick, tick the label every tick
   var CUR_BEAT_MS = 4000;   // label ticks this often (so a frozen link is obvious within ~4s)
   var CUR_FETCH_EVERY = 5;  // pull fresh funnel data every 5th beat (~20s)
 
   // Repaint just the live-link pill from the client clock, every heartbeat. This is the visible proof
   // the front end is talking to the back end: it counts up "synced Ns ago" between data pulls and
-  // flips to "reconnecting" the moment the backend stops answering — independent of the data refresh.
+  // flips to "reconnecting" the moment the backend stops answering, independent of the data refresh.
   function curPaintSync() {
     var el = document.getElementById("curSync"); if (!el) return;
-    if (!curLastSyncMs) { el.innerHTML = "⚪ connecting…"; return; }
+    if (!curLastSyncMs) { el.innerHTML = "connecting…"; return; }
     var ago = Math.round((Date.now() - curLastSyncMs) / 1000);
-    if (ago > 70) { el.innerHTML = "🔴 reconnecting…"; el.title = "lost contact with the lead engine — retrying"; return; }
-    el.innerHTML = "🟢 live · synced " + (ago < CUR_BEAT_MS / 1000 ? "just now" : ago + "s ago");
-    el.title = "live connection to the lead engine — auto-refreshing";
+    if (ago > 70) { el.innerHTML = "reconnecting…"; el.title = "lost contact with the lead engine, retrying"; return; }
+    el.innerHTML = "live · synced " + (ago < CUR_BEAT_MS / 1000 ? "just now" : ago + "s ago");
+    el.title = "live connection to the lead engine, auto-refreshing";
   }
 
   // LIVE heartbeat: every beat we repaint the sync label; every ~20s we pull the funnel/health so the
   // numbers climb on screen as the engine works. When NEW leads have come in AND the user isn't
   // mid-selection, we also pull them into the list so the database visibly grows. If they're selecting,
-  // we leave the list alone (never lose their picks) — the stats still climb.
+  // we leave the list alone (never lose their picks), the stats still climb.
   function curHeartbeat() {
     var stats = document.getElementById("curStats");
     if (!stats) { if (curPollTimer) { clearInterval(curPollTimer); curPollTimer = null; } return; }
@@ -3402,7 +3402,7 @@
       var total = d.funnel.total || 0;
       var selecting = Object.keys(curPicks).length > 0;
       if (total !== curLastTotal && !selecting) renderCuration();   // new leads in → refresh the list
-    }).catch(function () { /* leave curLastSyncMs — curPaintSync flips to reconnecting if it stays stale */ });
+    }).catch(function () { /* leave curLastSyncMs, curPaintSync flips to reconnecting if it stays stale */ });
   }
 
   function renderCuration() {
@@ -3412,7 +3412,7 @@
     if (curPollTimer) { clearInterval(curPollTimer); curPollTimer = null; }
     Promise.all([
       send("/in-market", "POST", { action: "curation_funnel" }),
-      // Populate the WHOLE researched database now — enriched-first (real person + email on top, then
+      // Populate the WHOLE researched database now, enriched-first (real person + email on top, then
       // named-email-pending, then title-only researching rows). The list fills immediately and climbs
       // as the engine works; each row's badge shows its enrichment state (valid / guess / pending).
       // Scoped to the active industry filter so "search the enriched by industry" works.
@@ -3433,7 +3433,7 @@
       wireCuration(body, list);
       curPaintSync();               // paint the live pill right away (don't wait a full beat)
       curPollTimer = setInterval(curHeartbeat, CUR_BEAT_MS); // live ongoing updates + link heartbeat
-    }).catch(function () { body.innerHTML = '<div class="empty">⚠ Couldn\'t reach the lead engine. It builds the list continuously in the background — this is usually a brief blip right after a deploy. Retrying automatically; reopen this tab in a moment.</div>'; });
+    }).catch(function () { body.innerHTML = '<div class="empty">Couldn\'t reach the lead engine. It builds the list continuously in the background, this is usually a brief blip right after a deploy. Retrying automatically; reopen this tab in a moment.</div>'; });
   }
 
   // Liveness strip: shows when the pool was last fed and when curation last ran, so a silently
@@ -3444,7 +3444,7 @@
   function curSearchPill(s) {
     if (!s) return "";
     var st = s.status || "idle";
-    var icon = st === "healthy" ? "🟢" : st === "degraded" ? "🟡" : st === "throttled" ? "🔴" : "⚪";
+    var icon = st === "healthy" ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok)"></span>' : st === "degraded" ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--warn)"></span>' : st === "throttled" ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--danger)"></span>' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-dim)"></span>';
     var label = st === "healthy" ? "scraping healthy" : st === "degraded" ? "scraping slowing"
       : st === "throttled" ? "scraping throttled" : "scraping idle";
     var tip = (s.engines || []).map(function (e) {
@@ -3457,30 +3457,30 @@
   // The live link indicator. Its text is overwritten by the heartbeat every few seconds (see
   // curHeartbeat), so a stalled/disconnected backend shows "reconnecting" instead of looking healthy.
   function curSyncPill() {
-    return '<span class="cur-mini" id="curSync" title="live connection to the lead engine">⚪ connecting…</span>';
+    return '<span class="cur-mini" id="curSync" title="live connection to the lead engine">connecting…</span>';
   }
 
-  // THIS (main) box's Common Crawl index-governor pill — the binding-constraint signal for the
+  // THIS (main) box's Common Crawl index-governor pill, the binding-constraint signal for the
   // one-box proving-ground test: 🟢 CC ok / 🟡 CC paced Ns (index asking us to slow) / 🔴 CC resting
   // or trips (this IP is being throttled). Hover for the governor internals.
   function curCcPill(cc) {
     if (!cc || !cc.index) return "";
     var ix = cc.index, icon, label;
-    if (cc.resting) { icon = "🔴"; label = "CC resting " + (cc.restingForSec || 0) + "s"; }
-    else if ((ix.breakerTrips || 0) >= 2) { icon = "🔴"; label = "CC trips " + ix.breakerTrips; }
-    else if ((ix.spacingMs || 0) >= 16000) { icon = "🟡"; label = "CC paced " + Math.round(ix.spacingMs / 1000) + "s"; }
-    else if ((ix.cooldownForSec || 0) > 0) { icon = "🟡"; label = "CC wait " + ix.cooldownForSec + "s"; }
-    else { icon = "🟢"; label = "CC ok"; }
-    var tip = "Common Crawl index governor — spacing " + (ix.spacingMs || 0) + "ms · in-flight " +
+    if (cc.resting) { icon = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--danger)"></span>'; label = "CC resting " + (cc.restingForSec || 0) + "s"; }
+    else if ((ix.breakerTrips || 0) >= 2) { icon = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--danger)"></span>'; label = "CC trips " + ix.breakerTrips; }
+    else if ((ix.spacingMs || 0) >= 16000) { icon = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--warn)"></span>'; label = "CC paced " + Math.round(ix.spacingMs / 1000) + "s"; }
+    else if ((ix.cooldownForSec || 0) > 0) { icon = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--warn)"></span>'; label = "CC wait " + ix.cooldownForSec + "s"; }
+    else { icon = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok)"></span>'; label = "CC ok"; }
+    var tip = "Common Crawl index governor, spacing " + (ix.spacingMs || 0) + "ms · in-flight " +
       (ix.inFlight || 0) + "/" + (ix.concurrency || 1) + " · breaker trips " + (ix.breakerTrips || 0) +
       (cc.resting ? " · RESTING " + (cc.restingForSec || 0) + "s" : "") + " · cached " + (cc.cachedDomains || 0) + " domains";
     return '<span class="cur-mini" title="' + esc(tip) + '">' + icon + " " + esc(label) + "</span>";
   }
 
   // This box's live per-IP yield: decision-makers freshly named in the last 60 min. The headline
-  // number for the one-box test — healthy here means a second IP would multiply it.
+  // number for the one-box test, healthy here means a second IP would multiply it.
   function curRatePill(n) {
-    return '<span class="cur-mini" title="Decision-makers this box freshly named in the last hour — its live per-IP yield. Multiply by your box count for the fleet projection.">⚡ <b>' + (Number(n) || 0).toLocaleString() + "</b>/hr named</span>";
+    return '<span class="cur-mini" title="Decision-makers this box freshly named in the last hour, its live per-IP yield. Multiply by your box count for the fleet projection."><b>' + (Number(n) || 0).toLocaleString() + "</b>/hr named</span>";
   }
 
   function curEngineLine(h, search, cc, namedPerHour) {
@@ -3499,7 +3499,7 @@
     function part(label, when, ok, staleMin) {
       var a = ago(when);
       var bad = !a || a.min > staleMin || ok === false;
-      var dot = bad ? "🔴" : "🟢";
+      var dot = bad ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--danger)"></span>' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok)"></span>';
       return '<span class="cur-mini" title="' + (ok === false ? "last run errored" : "") + '">' + dot + " " +
         esc(label) + " <b>" + (a ? esc(a.txt) : "not yet") + "</b></span>";
     }
@@ -3522,30 +3522,30 @@
     var validToday = d.validToday || 0;
     var pct = Math.min(100, Math.round((validToday / target) * 100));
 
-    // Realized conversion (conservative — based on what's ACTUALLY been verified, not a guess).
+    // Realized conversion (conservative, based on what's ACTUALLY been verified, not a guess).
     var validPerNamed = (f.named > 0) ? (f.validated / f.named) : 0;
     var namesHr = (fleet && fleet.totalNamesPerHour) || 0;
     var fleetDay = Math.round(namesHr * 24 * validPerNamed);   // what the boxes running NOW can sustain
     var paceDay = d.projectedValid || 0;                       // today's actual pace → 24h
 
-    // True fleet status — boxes actually producing vs. just connected.
+    // True fleet status, boxes actually producing vs. just connected.
     var workers = (fleet && fleet.workers) || [];
     var producing = workers.filter(function (w) { return (w.namesPerHour || 0) > 0 || (w.online && (w.totalNamed || 0) > 0); }).length;
     var boxes = workers.length;
-    var pace = fleetDay >= target ? '<span style="color:#38e0a6">🟢 on pace for ' + target.toLocaleString() + "</span>"
-      : '<span style="color:#f5c451">🟡 below ' + target.toLocaleString() + " at this rate</span>";
+    var pace = fleetDay >= target ? '<span style="color:var(--ok)">on pace for ' + target.toLocaleString() + "</span>"
+      : '<span style="color:var(--warn)">below ' + target.toLocaleString() + " at this rate</span>";
 
-    return '<div style="margin:10px 0;padding:12px 14px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(124,92,255,.06)">' +
+    return '<div style="margin:10px 0;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--brand-soft)">' +
       '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:13px;margin-bottom:8px">' +
         '<span><b style="font-size:17px">' + validToday.toLocaleString() + "</b> / " + target.toLocaleString() + ' <span class="muted">verified emails today</span></span>' +
-        '<span class="muted">' + producing + "/" + boxes + " boxes producing · <b style=\"color:#38e0a6\">" + namesHr.toLocaleString() + "</b> names/hr</span>" +
+        '<span class="muted">' + producing + "/" + boxes + " boxes producing · <b style=\"color:var(--ok)\">" + namesHr.toLocaleString() + "</b> names/hr</span>" +
       "</div>" +
-      '<div style="height:8px;border-radius:5px;background:rgba(255,255,255,.08);overflow:hidden"><i style="display:block;height:100%;width:' + pct + '%;background:linear-gradient(90deg,#7c5cff,#38e0a6)"></i></div>' +
+      '<div style="height:8px;border-radius:5px;background:var(--border);overflow:hidden"><i style="display:block;height:100%;width:' + pct + '%;background:linear-gradient(90deg,var(--brand),var(--ok))"></i></div>' +
       '<div class="muted" style="font-size:11.5px;line-height:1.6;margin-top:9px">' +
         "Today's pace → <b>~" + paceDay.toLocaleString() + "/day</b>  ·  " +
-        "Fleet capacity now → <b style=\"color:#38e0a6\">~" + fleetDay.toLocaleString() + "/day</b> " +
+        "Fleet capacity now → <b style=\"color:var(--ok)\">~" + fleetDay.toLocaleString() + "/day</b> " +
         "<span style=\"opacity:.8\">(" + namesHr.toLocaleString() + " names/hr × " + Math.round(validPerNamed * 100) + "% verified) · " + pace + "</span>" +
-        '<br><span style="opacity:.7">Straight read: this is the rate of the boxes running right now — it climbs as the email-pattern cache warms and Reoon catches up, and dips when boxes rest. Not inflated; it\'s the realized conversion.</span>' +
+        '<br><span style="opacity:.7">Straight read: this is the rate of the boxes running right now, it climbs as the email-pattern cache warms and Reoon catches up, and dips when boxes rest. Not inflated; it\'s the realized conversion.</span>' +
       "</div>" +
     "</div>";
   }
@@ -3556,7 +3556,7 @@
     var bs = f.byStatus || {};
     // CUMULATIVE funnel: each stage shows everyone who reached AT LEAST that far, so the numbers only
     // fall left→right like a real funnel. The old per-bucket view made "Named" look like only N people
-    // were found — but the named ones who also got an email had already moved on to Contactable, so
+    // were found, but the named ones who also got an email had already moved on to Contactable, so
     // "Named" read as 3 when ~1,388 people actually have a real name. Named = total real people found;
     // Contactable = name + working email; Approved/Enrolled = further along.
     var enrolled = bs.enrolled || 0, queued = bs.queued || 0;
@@ -3580,11 +3580,11 @@
       curDailyHtml(f, fleet) +
       '<div class="cur-funnel">' + funnelRow + "</div>" +
       (sigRows ? '<div class="cur-sigs"><span class="muted">Contactable by hiring signal:</span>' + sigRows + "</div>" : "") +
-      ((f.validated || f.invalid || f.catchAll) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">✓ ' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + (f.catchAll ? '<span class="cur-mini"><span class="cur-catchall">~ ' + f.catchAll.toLocaleString() + " catch-all</span></span>" : "") + "</div>" : "") +
+      ((f.validated || f.invalid || f.catchAll) ? '<div class="cur-sigs"><span class="muted">Email validation:</span><span class="cur-mini"><span class="cur-valid">' + (f.validated || 0).toLocaleString() + " valid</span></span>" + (f.invalid ? '<span class="cur-mini"><span class="cur-invalid">✕ ' + f.invalid.toLocaleString() + " invalid</span></span>" : "") + (f.catchAll ? '<span class="cur-mini"><span class="cur-catchall">~ ' + f.catchAll.toLocaleString() + " catch-all</span></span>" : "") + "</div>" : "") +
       curFleetHtml(fleet);
   }
 
-  // The distributed worker fleet — one clean card per machine (online dot, jobs/min, names/hr, total),
+  // The distributed worker fleet, one clean card per machine (online dot, jobs/min, names/hr, total),
   // so you can watch output scale linearly as you add boxes. Repainted by the same 20s stats poll.
   // TRUE per-box health, re-derived from the raw governor signals the box sends (NOT its own
   // over-strict label). A box producing with a couple breaker trips or a routine ~5-min rest is the
@@ -3603,7 +3603,7 @@
   function curFleetHtml(fleet) {
     if (!fleet) return "";
     var workers = fleet.workers || [];
-    var hue = function (st) { return st === "healthy" ? "#38e0a6" : st === "degraded" ? "#f5c451" : st === "unhealthy" || st === "throttled" ? "#ff6b6b" : "#7a7a88"; };
+    var hue = function (st) { return st === "healthy" ? "var(--ok)" : st === "degraded" ? "var(--warn)" : st === "unhealthy" || st === "throttled" ? "var(--danger)" : "#7a7a88"; };
     var pill = function (label, color) {
       return '<span style="font-size:10.5px;padding:2px 7px;border-radius:6px;background:' + color + '22;color:' + color + ';border:1px solid ' + color + '40;white-space:nowrap">' + esc(label) + "</span>";
     };
@@ -3614,15 +3614,15 @@
     workers.forEach(function (w) { if (w.online) { var s = curBoxHealth(w.health); if (rank[s] > rank[fleetSt]) fleetSt = s; } });
     var fhColor = hue(fleetSt);
     var summary = '<span class="muted" style="font-size:12px">' + (fleet.online || 0) + " online · " +
-      (fleet.totalJobsPerMin || 0) + " jobs/min · <b style=\"color:#38e0a6\">" + (fleet.totalNamesPerHour || 0).toLocaleString() + "</b> names/hr</span>";
+      (fleet.totalJobsPerMin || 0) + " jobs/min · <b style=\"color:var(--ok)\">" + (fleet.totalNamesPerHour || 0).toLocaleString() + "</b> names/hr</span>";
     var head = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:' + (workers.length ? "11px" : "0") + '">' +
       '<span style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:7px">' +
-        '<span style="width:8px;height:8px;border-radius:50%;background:' + fhColor + ';box-shadow:0 0 8px ' + fhColor + '"></span>🖥️ Worker fleet</span>' + summary + "</div>";
+        '<span style="width:8px;height:8px;border-radius:50%;background:' + fhColor + ';box-shadow:0 0 8px ' + fhColor + '"></span>Worker fleet</span>' + summary + "</div>";
     var box = function (inner) {
-      return '<div style="margin:12px 0 2px;padding:14px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:linear-gradient(180deg,rgba(124,92,255,.06),rgba(255,255,255,.015))">' + inner + "</div>";
+      return '<div style="margin:12px 0 2px;padding:14px;border:1px solid var(--border);border-radius:14px;background:linear-gradient(180deg,var(--brand-soft),rgba(255,255,255,.015))">' + inner + "</div>";
     };
     if (!workers.length) {
-      return box(head + '<div class="muted" style="font-size:12.5px;line-height:1.5;margin-top:8px">No worker boxes connected yet. Spin one up with <b>setup-worker.sh</b> — each box scrapes with its own IP and pushes here, so output scales linearly as you add machines.</div>');
+      return box(head + '<div class="muted" style="font-size:12.5px;line-height:1.5;margin-top:8px">No worker boxes connected yet. Spin one up with <b>setup-worker.sh</b>, each box scrapes with its own IP and pushes here, so output scales linearly as you add machines.</div>');
     }
     var cards = workers.map(function (w) {
       var h = w.health || null;
@@ -3636,22 +3636,22 @@
           '</div><div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">' + l + "</div></div>";
       };
       // Per-box health row: the Common Crawl index governor state + search status (the signals that
-      // matter — the index is the binding constraint). Reasons surface on hover.
+      // matter, the index is the binding constraint). Reasons surface on hover.
       var healthRow = "";
       if (h) {
         var cc = h.cc || {};
         var ccLabel, ccColor;
         // Recalibrated: a couple trips / a routine rest is fine (green). Yellow as trips climb or
         // spacing maxes; red only when the index is really hammering this IP (many trips).
-        if ((cc.breakerTrips || 0) >= 12) { ccLabel = "CC throttled " + cc.breakerTrips; ccColor = "#ff6b6b"; }
-        else if ((cc.breakerTrips || 0) >= 5 || (cc.spacingMs || 0) >= 20000) { ccLabel = "CC paced" + (cc.spacingMs ? " " + Math.round(cc.spacingMs / 1000) + "s" : ""); ccColor = "#f5c451"; }
-        else if (cc.resting) { ccLabel = "CC resting"; ccColor = "#f5c451"; }
-        else { ccLabel = "CC ok"; ccColor = "#38e0a6"; }
+        if ((cc.breakerTrips || 0) >= 12) { ccLabel = "CC throttled " + cc.breakerTrips; ccColor = "var(--danger)"; }
+        else if ((cc.breakerTrips || 0) >= 5 || (cc.spacingMs || 0) >= 20000) { ccLabel = "CC paced" + (cc.spacingMs ? " " + Math.round(cc.spacingMs / 1000) + "s" : ""); ccColor = "var(--warn)"; }
+        else if (cc.resting) { ccLabel = "CC resting"; ccColor = "var(--warn)"; }
+        else { ccLabel = "CC ok"; ccColor = "var(--ok)"; }
         var reasons = (h.reasons && h.reasons.length) ? h.reasons.join(" · ") : "all sources healthy";
-        healthRow = '<div title="' + esc(reasons) + '" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:11px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06)">' +
+        healthRow = '<div title="' + esc(reasons) + '" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:11px;padding-top:10px;border-top:1px solid var(--surface-2)">' +
           pill(ccLabel, ccColor) + pill("search " + (h.search || "idle"), hue(h.search)) + "</div>";
       }
-      return '<div style="flex:1 1 220px;min-width:200px;padding:13px 15px;border:1px solid ' + (h ? hue(st) + "33" : "rgba(255,255,255,.08)") + ';border-radius:12px;background:rgba(255,255,255,.025)">' +
+      return '<div style="flex:1 1 220px;min-width:200px;padding:13px 15px;border:1px solid ' + (h ? hue(st) + "33" : "var(--border)") + ';border-radius:12px;background:rgba(255,255,255,.025)">' +
         '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">' +
           '<span style="width:9px;height:9px;border-radius:50%;flex:none;background:' + color + ';box-shadow:0 0 9px ' + color + '"></span>' +
           '<b style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(w.id) + "</b>" +
@@ -3659,7 +3659,7 @@
         "</div>" +
         '<div style="display:flex;gap:8px">' +
           metric(w.jobsPerMin, "jobs/min") +
-          metric('<span style="color:#38e0a6">' + (w.namesPerHour || 0).toLocaleString() + "</span>", "names/hr") +
+          metric('<span style="color:var(--ok)">' + (w.namesPerHour || 0).toLocaleString() + "</span>", "names/hr") +
           metric((w.totalNamed || 0).toLocaleString(), "total") +
         "</div>" + healthRow + "</div>";
     }).join("");
@@ -3677,14 +3677,14 @@
       "</div>" +
       '<div id="curStats">' + curStatsInner(f, health, search, fleet, cc) + "</div>";
 
-    // Industry filter — search the enriched decision-makers by industry. Each option shows how many
+    // Industry filter, search the enriched decision-makers by industry. Each option shows how many
     // are contactable (a real person + email) in that industry, so you can see where the depth is.
     var indFilter = curIndustryFilter(industries);
 
     if (!list.length) {
       return head + indFilter + '<div class="empty" style="margin-top:14px">' +
         (curIndustry
-          ? "No enriched decision-makers in <b>" + esc(curIndustry) + "</b> yet — they appear here as the engine researches that industry. Clear the filter to see all industries."
+          ? "No enriched decision-makers in <b>" + esc(curIndustry) + "</b> yet, they appear here as the engine researches that industry. Clear the filter to see all industries."
           : "No decision-makers curated yet. The engine researches companies continuously (free: search, team pages, news, GitHub) and new leads appear here automatically as they come in. Hit <b>Research more now</b> to kick it.") +
         "</div>";
     }
@@ -3694,7 +3694,7 @@
       '<div class="cur-toolbar">' +
         '<label><input type="checkbox" id="curAll"> <b>Select all</b></label>' +
         '<span class="muted" id="curCount">0 selected</span>' +
-        '<button class="btn btn-primary btn-sm" id="curEnroll" disabled>✓ Approve &amp; push to Email</button>' +
+        '<button class="btn btn-primary btn-sm" id="curEnroll" disabled>Approve &amp; push to Email</button>' +
       "</div>";
 
     return head + indFilter + toolbar + '<div class="cur-list">' + rows + "</div>";
@@ -3717,22 +3717,22 @@
 
   function curationRow(r) {
     var via = r.managerVia ? '<span class="cur-via cur-via-' + esc(r.managerVia) + '">' + esc(r.managerVia.replace("_", " ")) + "</span>" : "";
-    var emailTag = r.emailValidated ? '<span class="cur-valid">✓ valid</span>'
+    var emailTag = r.emailValidated ? '<span class="cur-valid">valid</span>'
       : r.emailInvalid ? '<span class="cur-invalid">✕ invalid</span>'
       : r.emailCatchAll ? '<span class="cur-catchall" title="Catch-all domain: this address WILL deliver, but the specific person can\'t be confirmed">~ catch-all</span>'
       : '<span class="im-email-unv">guess</span>';
     var email = r.likelyEmail
-      ? '<span class="cur-email" data-email="' + esc(r.likelyEmail) + '" title="Best-guess work email — validated continuously, confirmed before send">✉️ ' + esc(r.likelyEmail) + ' ' + emailTag + "</span>"
-      : '<span class="im-email-unv" title="Name found — email resolves in the enrichment pass">⏳ email pending</span>';
+      ? '<span class="cur-email" data-email="' + esc(r.likelyEmail) + '" title="Best-guess work email, validated continuously, confirmed before send">' + esc(r.likelyEmail) + ' ' + emailTag + "</span>"
+      : '<span class="im-email-unv" title="Name found, email resolves in the enrichment pass">email pending</span>';
     var enrolled = r.status === "enrolled";
     // Visible in the list either way, but only rows that already have an email are selectable for
-    // push — the "email pending" ones wait for the enrichment pass before they're ready to send.
+    // push, the "email pending" ones wait for the enrichment pass before they're ready to send.
     var selectable = !enrolled && !!r.likelyEmail;
     // Title-only (still-researching) rows show the owning title as the person line, with a soft hint,
     // so the database reads as "populated and enriching" rather than blank.
     var personName = r.managerName
       ? '<b>' + esc(r.managerName) + "</b>"
-      : '<b class="muted">' + esc(r.managerTitle) + '</b> <span class="im-email-unv">🔍 finding name…</span>';
+      : '<b class="muted">' + esc(r.managerTitle) + '</b> <span class="im-email-unv">finding name…</span>';
     return '<div class="cur-row' + (enrolled ? " cur-enrolled" : "") + '" data-id="' + esc(r.id) + '">' +
       '<input type="checkbox" class="cur-pick" data-id="' + esc(r.id) + '"' + (selectable ? "" : " disabled") + ">" +
       '<div class="cur-main">' +
@@ -3742,7 +3742,7 @@
           ' <span class="muted">owns</span> ' + esc(r.role) +
           ' · <span class="im-fn">' + esc(r.function) + "</span>" +
           ' · ' + esc(imSignalLabel(r.signalType)) + "</div>" +
-        '<div class="cur-contact">' + email + (enrolled ? ' <span class="cur-badge">✓ enrolled</span>' : "") + "</div>" +
+        '<div class="cur-contact">' + email + (enrolled ? ' <span class="cur-badge">enrolled</span>' : "") + "</div>" +
       "</div>" +
       '<span class="cls cls-' + (r.score >= 75 ? "positive" : "soft_yes") + ' im-score">' + (r.score || 0) + "</span>" +
       "</div>";
@@ -3805,7 +3805,7 @@
       if (!ids.length) return;
       enroll.disabled = true; enroll.textContent = "Pushing…";
       resolveBdCampaign(function (campaignId) {
-        if (!campaignId) { enroll.textContent = "✓ Approve & push to Email"; enroll.disabled = false; toast && toast("Couldn't resolve a BD campaign"); return; }
+        if (!campaignId) { enroll.textContent = "Approve & push to Email"; enroll.disabled = false; toast && toast("Couldn't resolve a BD campaign"); return; }
         // Review gate: approve, then enroll into the BD Bulk MPC sender.
         send("/in-market", "POST", { action: "curation_approve", ids: ids }).then(function () {
           return send("/in-market", "POST", { action: "curation_enroll", ids: ids, campaignId: campaignId });
@@ -3813,7 +3813,7 @@
           var n = (r && r.data && r.data.enrolled) || 0;
           if (typeof toast === "function") toast("Pushed " + n + " decision-maker" + (n === 1 ? "" : "s") + " to Email");
           renderCuration();
-        }).catch(function () { enroll.textContent = "✓ Approve & push to Email"; enroll.disabled = false; });
+        }).catch(function () { enroll.textContent = "Approve & push to Email"; enroll.disabled = false; });
       });
     });
   }
@@ -3836,10 +3836,10 @@
       return '<span class="im-import-day">' + esc(lbl) + " <b>+" + (d.added || 0) + "</b></span>";
     }).join("");
     if (total > 0) {
-      el.innerHTML = '<div class="im-import-main">📈 <b>' + positions.toLocaleString() + '</b> open positions across <b>' + total.toLocaleString() + '</b> companies in your hiring pool (last ' + win + ' days) · <b>+' + added + '</b> companies imported today' + esc(lastStr) + "</div>" +
+      el.innerHTML = '<div class="im-import-main"><b>' + positions.toLocaleString() + '</b> open positions across <b>' + total.toLocaleString() + '</b> companies in your hiring pool (last ' + win + ' days) · <b>+' + added + '</b> companies imported today' + esc(lastStr) + "</div>" +
         (log ? '<div class="im-import-log">' + log + "</div>" : "");
     } else {
-      el.innerHTML = '<div class="im-import-main">📈 Importing now from the free job APIs, first companies land within ~15 min, then this climbs every day.</div>';
+      el.innerHTML = '<div class="im-import-main">Importing now from the free job APIs, first companies land within ~15 min, then this climbs every day.</div>';
     }
   }
 
@@ -3871,11 +3871,11 @@
           ? '<b>' + esc(m.managerName) + "</b>"
           : '<span class="muted">resolve on push</span>';
         var roleLabel = m.roleUrl
-          ? '<a class="im-mgr-rolelink" href="' + esc(m.roleUrl) + '" target="_blank" rel="noopener" title="Open this exact job posting" onclick="event.stopPropagation()">' + esc(m.role) + ' <span class="im-mgr-ext">↗</span></a>'
+          ? '<a class="im-mgr-rolelink" href="' + esc(m.roleUrl) + '" target="_blank" rel="noopener" title="Open this exact job posting" onclick="event.stopPropagation()">' + esc(m.role) + ' <span class="im-mgr-ext"></span></a>'
           : esc(m.role);
         return '<label class="im-mgr"><input type="checkbox" class="im-pick" data-id="' + esc(l.id) + '" data-mk="' + esc(imMgrKey(m)) + '" ' + (imPicks[imPickKey(l.id, imMgrKey(m))] ? "checked" : "") + ">" +
           '<span class="im-mgr-role">' + roleLabel +
-            (m.postedAt && imRelTime(m.postedAt) ? ' <span class="im-mgr-posted" title="Posted on their board ' + esc(m.postedAt) + '">📅 ' + imRelTime(m.postedAt) + "</span>" : "") + "</span>" +
+            (m.postedAt && imRelTime(m.postedAt) ? ' <span class="im-mgr-posted" title="Posted on their board ' + esc(m.postedAt) + '">' + imRelTime(m.postedAt) + "</span>" : "") + "</span>" +
           '<span class="im-mgr-arrow">→</span>' +
           '<span class="im-mgr-title">' + esc(m.managerTitle) + "</span>" +
           '<span class="im-fn">' + esc(m.function) + "</span>" +
@@ -3895,7 +3895,7 @@
     }
 
     var renew = l.renewed
-      ? '<div class="im-renew"><div class="im-renew-top">🔥 <b>' + esc(l.renewedReason || "Renewed demand") + "</b> " +
+      ? '<div class="im-renew"><div class="im-renew-top"><b>' + esc(l.renewedReason || "Renewed demand") + "</b> " +
           '<span class="muted">- already taken, but hiring again. Re-engage:</span></div>' +
           '<div class="im-renew-msg">' + esc(l.renewedMessage || "") + "</div>" +
           '<button class="im-renew-copy" data-msg="' + esc(l.renewedMessage || "") + '">Copy follow-up message</button></div>'
@@ -3913,38 +3913,38 @@
     if (l.headcountBand) {
       // Authoritative employee count when resolved (Wikidata); otherwise the band, marked
       // "~ est." when it's only a heuristic guess so it's never mistaken for a confirmed size.
-      if (l.employeeCount) metaBits.push('<span class="im-size" title="Employees (Wikidata)">👥 ' + Number(l.employeeCount).toLocaleString() + " employees</span>");
-      else if (l.sizeEstimated) metaBits.push('<span class="im-size im-size-est" title="Estimated from hiring footprint, confirmed size grows as Adzuna/enrichment fill in">👥 ~' + esc(l.headcountBand) + " est.</span>");
-      else metaBits.push('<span class="im-size">👥 ' + esc(l.headcountBand) + "</span>");
+      if (l.employeeCount) metaBits.push('<span class="im-size" title="Employees (Wikidata)">' + Number(l.employeeCount).toLocaleString() + " employees</span>");
+      else if (l.sizeEstimated) metaBits.push('<span class="im-size im-size-est" title="Estimated from hiring footprint, confirmed size grows as Adzuna/enrichment fill in">~' + esc(l.headcountBand) + " est.</span>");
+      else metaBits.push('<span class="im-size">' + esc(l.headcountBand) + "</span>");
     }
     if (l.location) metaBits.push(esc(l.location));
     metaBits.push(nRoles + " open role" + (nRoles === 1 ? "" : "s"));
     // Dates: when the role was posted online, and when we first added it to the database.
     var posted = imRelTime(l.postedAt || l.signalAt);
-    if (posted) metaBits.push('<span class="im-date-tag" title="Posted online ' + esc(l.postedAt || l.signalAt || "") + '">📅 Posted ' + posted + "</span>");
+    if (posted) metaBits.push('<span class="im-date-tag" title="Posted online ' + esc(l.postedAt || l.signalAt || "") + '">Posted ' + posted + "</span>");
     var added = imRelTime(l.addedAt);
-    if (added) metaBits.push('<span class="im-date-tag im-date-added" title="Added to your database ' + esc(l.addedAt || "") + '">🆕 Added ' + added + "</span>");
+    if (added) metaBits.push('<span class="im-date-tag im-date-added" title="Added to your database ' + esc(l.addedAt || "") + '">Added ' + added + "</span>");
 
     return '<div class="im-lead' + (l.renewed ? " im-lead-renew" : "") + '" data-id="' + esc(l.id) + '">' +
       '<div class="im-lead-head">' +
         '<input type="checkbox" class="im-co-check" data-id="' + esc(l.id) + '"' + (allChecked ? " checked" : "") + ' title="Select this company" />' +
         '<span class="avatar" style="background:' + colorFor(l.company) + '">' + esc(initials(l.company)) + "</span>" +
         '<div class="im-lead-id"><div class="im-lead-name">' + esc(l.company) +
-          (l.renewed ? ' <span class="im-renew-badge">🔥 Renewed</span>' : "") +
-          (l.inPipeline ? ' <span class="im-pipeline-badge" title="Already in your Prospects">✓ In pipeline</span>' : "") +
-          (l.hasShot ? ' <a class="im-shot-badge" href="' + esc(l.shotWatchUrl || "#") + '" target="_blank" rel="noopener" title="Verified screenshot + scroll-video of this job posting on the company\'s own careers page — click to watch" onclick="event.stopPropagation()">📸 Job screenshot</a>' : "") +
+          (l.renewed ? ' <span class="im-renew-badge">Renewed</span>' : "") +
+          (l.inPipeline ? ' <span class="im-pipeline-badge" title="Already in your Prospects">In pipeline</span>' : "") +
+          (l.hasShot ? ' <a class="im-shot-badge" href="' + esc(l.shotWatchUrl || "#") + '" target="_blank" rel="noopener" title="Verified screenshot + scroll-video of this job posting on the company\'s own careers page, click to watch" onclick="event.stopPropagation()">Job screenshot</a>' : "") +
           (l.industry ? ' <span class="muted" style="font-weight:400">· ' + esc(l.industry) + "</span>" : "") + "</div>" +
         '<div class="im-lead-meta">' + metaBits.join(" · ") + "</div></div>" +
         '<span class="cls cls-' + scoreCls + ' im-score" title="Hiring-intent score">' + score + "</span></div>" +
       '<div class="im-reason">' + esc(l.reason) + src + "</div>" +
       renew +
       '<details class="im-managers-d"' + ((anyChecked || l.aiRefined) ? " open" : "") + '>' +
-        '<summary class="im-mgr-summary">👤 ' + nRoles + " hiring manager" + (nRoles === 1 ? "" : "s") + " &amp; open role" + (nRoles === 1 ? "" : "s") +
-          (l.allRoles ? ' <span class="im-ai-tag">🔎 full board' + (l.allRolesSource ? " · " + esc(l.allRolesSource) : "") + "</span>" : "") +
-          (l.aiRefined ? ' <span class="im-ai-tag">🤖 AI-matched</span>' : "") + "</summary>" +
+        '<summary class="im-mgr-summary">' + nRoles + " hiring manager" + (nRoles === 1 ? "" : "s") + " &amp; open role" + (nRoles === 1 ? "" : "s") +
+          (l.allRoles ? ' <span class="im-ai-tag">full board' + (l.allRolesSource ? " · " + esc(l.allRolesSource) : "") + "</span>" : "") +
+          (l.aiRefined ? ' <span class="im-ai-tag">AI-matched</span>' : "") + "</summary>" +
         '<div class="im-managers">' + rows +
-          '<button type="button" class="im-all-roles" data-id="' + esc(l.id) + '">' + (l.allRoles ? "🔎 Roles refreshed" : "🔎 Find all open roles") + "</button>" +
-          '<button type="button" class="im-ai-refine" data-id="' + esc(l.id) + '">' + (l.aiRefined ? "🤖 Re-run AI match" : "🤖 Refine with AI") + "</button>" +
+          '<button type="button" class="im-all-roles" data-id="' + esc(l.id) + '">' + (l.allRoles ? "Roles refreshed" : "Find all open roles") + "</button>" +
+          '<button type="button" class="im-ai-refine" data-id="' + esc(l.id) + '">' + (l.aiRefined ? "Re-run AI match" : "Refine with AI") + "</button>" +
         "</div></details>" +
       (l.scoreReasons && l.scoreReasons.length ? '<div class="im-lead-reasons">' + l.scoreReasons.slice(0, 3).map(esc).join(" · ") + "</div>" : "") +
       "</div>";
@@ -4026,7 +4026,7 @@
     Array.prototype.forEach.call(body.querySelectorAll(".im-renew-copy"), function (btn) {
       btn.addEventListener("click", function () {
         var msg = btn.getAttribute("data-msg") || "";
-        var done = function () { btn.textContent = "✓ Copied"; setTimeout(function () { btn.textContent = "Copy follow-up message"; }, 1800); };
+        var done = function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy follow-up message"; }, 1800); };
         if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(msg).then(done).catch(done); }
         else { try { var ta = document.createElement("textarea"); ta.value = msg; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); } catch (e) {} done(); }
       });
@@ -4037,7 +4037,7 @@
         e.preventDefault();
         var id = btn.getAttribute("data-id");
         var lead = imFindLead(id); if (!lead) return;
-        btn.disabled = true; btn.textContent = "🔎 Scanning their board…";
+        btn.disabled = true; btn.textContent = "Scanning their board…";
         send("/in-market", "POST", { action: "company_roles", company: lead.company, domain: lead.domain }).then(function (r) {
           if (r.ok && r.data && r.data.hiringManagers && r.data.hiringManagers.length) {
             // Merge the full board's roles + managers into the lead, de-duped by role::title.
@@ -4051,10 +4051,10 @@
             var y = window.scrollY; renderImResults(); window.scrollTo(0, y);
             toast(lead.company + ": " + (r.data.total || 0) + " open role" + ((r.data.total === 1) ? "" : "s") + (r.data.source ? " via " + r.data.source : ""));
           } else {
-            btn.disabled = false; btn.textContent = "🔎 Find all open roles";
+            btn.disabled = false; btn.textContent = "Find all open roles";
             toast("No public job board found for " + lead.company + ".");
           }
-        }).catch(function () { btn.disabled = false; btn.textContent = "🔎 Find all open roles"; toast("Could not reach the server."); });
+        }).catch(function () { btn.disabled = false; btn.textContent = "Find all open roles"; toast("Could not reach the server."); });
       });
     });
 
@@ -4064,7 +4064,7 @@
         e.preventDefault();
         var id = btn.getAttribute("data-id");
         var lead = imFindLead(id); if (!lead) return;
-        btn.disabled = true; btn.textContent = "🤖 Thinking…";
+        btn.disabled = true; btn.textContent = "Thinking…";
         var roles = (lead.roles && lead.roles.length) ? lead.roles
           : (lead.hiringManagers || []).map(function (m) { return m.role; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; });
         send("/in-market", "POST", { action: "refine_managers", lead: { company: lead.company, industry: lead.industry, headcountBand: lead.headcountBand, roles: roles } }).then(function (r) {
@@ -4074,10 +4074,10 @@
             var y = window.scrollY; renderImResults(); window.scrollTo(0, y);
             toast("AI matched the decision-makers for " + lead.company);
           } else {
-            btn.disabled = false; btn.textContent = "🤖 Refine with AI";
+            btn.disabled = false; btn.textContent = "Refine with AI";
             toast((r.data && r.data.error) === "ai_unavailable" ? "Add ANTHROPIC_API_KEY to enable AI matching." : "Couldn't refine right now.");
           }
-        }).catch(function () { btn.disabled = false; btn.textContent = "🤖 Refine with AI"; toast("Could not reach the server."); });
+        }).catch(function () { btn.disabled = false; btn.textContent = "Refine with AI"; toast("Could not reach the server."); });
       });
     });
   }
@@ -4087,9 +4087,9 @@
     var btn = document.getElementById("imBulk");
     if (btn) { btn.disabled = n === 0; btn.textContent = n ? ("Push " + n + " to Prospects →") : "Push selected to Prospects"; }
     var save = document.getElementById("imSave");
-    if (save) { save.disabled = n === 0; save.textContent = n ? ("💾 Save " + n + " as hiring signals") : "💾 Save as hiring signals"; }
+    if (save) { save.disabled = n === 0; save.textContent = n ? ("Save " + n + " as hiring signals") : "Save as hiring signals"; }
     var toEmail = document.getElementById("imToEmail");
-    if (toEmail) { toEmail.disabled = n === 0; toEmail.textContent = n ? ("✉️ Push " + n + " to Email") : "✉️ Push prospects to Email"; }
+    if (toEmail) { toEmail.disabled = n === 0; toEmail.textContent = n ? ("Push " + n + " to Email") : "Push prospects to Email"; }
     var clr = document.getElementById("imClearSel");
     if (clr) clr.style.display = n ? "" : "none";
     var all = document.getElementById("imAll");
@@ -4104,7 +4104,7 @@
   /* ---- Hand-off to the Email tool ---------------------------------------------
      The Email screen (#email) is the prep + QA gate before send: a queue of
      prospects merged into a template, validated, AI-approved, attached to a
-     sequence, and launched — including the Pitchlane-style picture-in-picture
+     sequence, and launched, including the Pitchlane-style picture-in-picture
      video email (background = the job-post capture, foreground = a talking-head
      clip from PiP Studio). Hire Signals feeds that queue here. The queue persists
      in localStorage so it survives the hash navigation into the Email route. */
@@ -4113,7 +4113,7 @@
 
   // Flatten a Hire-Signals pick ({lead, manager}) into an Email prospect: a bag of
   // merge fields, the raw lead/manager (so the Email tool can promote + launch),
-  // and the video inputs — the job-post URL + its screen capture, which is the
+  // and the video inputs, the job-post URL + its screen capture, which is the
   // BACKGROUND track that pairs with a talking-head recording for the 2nd email.
   function epProspectFromPick(p) {
     var l = p.lead || {}, m = p.manager || null;
@@ -4194,7 +4194,7 @@
     if (!saved.length) { box.innerHTML = ""; return; }
     box.innerHTML =
       '<div class="im-saved"><div class="im-saved-head">' +
-        '<b>💾 Saved hiring signals</b> <span class="muted">(' + saved.length + ")</span>" +
+        '<b>Saved hiring signals</b> <span class="muted">(' + saved.length + ")</span>" +
         '<button class="btn btn-primary btn-sm" id="imSavedPush">Push all to Prospects →</button>' +
         '<button class="btn btn-ghost btn-sm" id="imSavedClear">Clear</button>' +
       "</div><div class=\"im-saved-list\">" +
@@ -4250,15 +4250,15 @@
       '.snd-stats{display:flex;gap:12px;flex-wrap:wrap;margin:4px 0 16px}' +
       '.snd-stat{flex:1;min-width:120px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:12px 14px}' +
       '.snd-statv{font-size:22px;font-weight:800;letter-spacing:-.02em}' +
-      '.snd-statl{font-size:12px;color:var(--muted,#8a93a6);margin-top:2px}' +
+      '.snd-statl{font-size:12px;color:var(--muted,var(--text-dim));margin-top:2px}' +
       '.snd-poolrow{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
       '.snd-pool{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:8px 12px;cursor:pointer}' +
       '.snd-pool:hover{border-color:var(--brand)}' +
       '.snd-poolname{font-weight:700;font-size:13px}' +
-      '.snd-poolmeta{font-size:11.5px;color:var(--muted,#8a93a6)}' +
+      '.snd-poolmeta{font-size:11.5px;color:var(--muted,var(--text-dim))}' +
       '.snd-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 12px}' +
       '.snd-table{width:100%;border-collapse:collapse;font-size:13px}' +
-      '.snd-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);padding:6px 8px;border-bottom:1px solid var(--border)}' +
+      '.snd-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,var(--text-dim));padding:6px 8px;border-bottom:1px solid var(--border)}' +
       '.snd-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle}' +
       '.snd-actions{display:flex;gap:6px;justify-content:flex-end}' +
       '.snd-grid2{display:flex;gap:10px}.snd-grid2>div{flex:1}' +
@@ -4270,10 +4270,10 @@
     el.innerHTML = sndStyles() +
       '<div class="im-hero">' +
         '<div class="im-title">Senders</div>' +
-        '<div class="im-lead">Your sending inboxes (<b>Email IDs</b>) — about <b>50 per domain</b>, each owned by a recruiter. Every Email ID sends <b>2 cold emails/day</b> (hard limit); Smartlead warms them at 10/day. Import in bulk, assign to a recruiter by name, and campaigns rotate sends across that recruiter’s pool. Watch live capacity on <b>Send Queue</b>.</div>' +
+        '<div class="im-lead">Your sending inboxes (<b>Email IDs</b>), about <b>50 per domain</b>, each owned by a recruiter. Every Email ID sends <b>2 cold emails/day</b> (hard limit); Smartlead warms them at 10/day. Import in bulk, assign to a recruiter by name, and campaigns rotate sends across that recruiter’s pool. Watch live capacity on <b>Send Queue</b>.</div>' +
         '<div class="btn-row">' +
-          '<button class="btn btn-primary btn-sm" id="sndImport">⬆ Import inboxes (CSV)</button>' +
-          '<button class="btn btn-ghost btn-sm" id="sndAdd">＋ Add one</button>' +
+          '<button class="btn btn-primary btn-sm" id="sndImport">Import inboxes (CSV)</button>' +
+          '<button class="btn btn-ghost btn-sm" id="sndAdd">+ Add one</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndRefresh">↻ Refresh</button>' +
         '</div>' +
       '</div>' +
@@ -4337,7 +4337,7 @@
       '<td>' + esc(m.provider) + '</td>' +
       '<td class="muted">' + esc(m.smtpHost) + ':' + esc(m.smtpPort) + '</td>' +
       '<td>' + esc(m.sentToday) + '/' + esc(m.dailyCap) + '</td>' +
-      '<td>' + badge + (m.lastError ? ' <span class="muted" title="' + esc(m.lastError) + '">⚠</span>' : '') + '</td>' +
+      '<td>' + badge + (m.lastError ? ' <span class="muted" title="' + esc(m.lastError) + '"><svg class="isvg" aria-hidden="true"><use href="#i-alert"/></svg></span>' : '') + '</td>' +
       '<td class="snd-actions"><button class="btn btn-ghost btn-sm" data-snd-act="test" data-id="' + esc(m.id) + '">Test</button>' + toggle + '<button class="btn btn-ghost btn-sm" data-snd-act="delete" data-id="' + esc(m.id) + '">✕</button></td>' +
     '</tr>';
   }
@@ -4379,7 +4379,7 @@
     if (action === "test") {
       toast("Testing login…");
       send("/senders", "POST", { action: "test", id: id }).then(function (r) {
-        toast(r.data && r.data.ok ? "✓ Login OK" : "✕ " + ((r.data && r.data.error) || "login failed"));
+        toast(r.data && r.data.ok ? "Login OK" : ((r.data && r.data.error) || "login failed"));
         loadSenders();
       });
       return;
@@ -4596,7 +4596,7 @@
   /* ---------------- Clients ----------------
    * THE Hire Signals deliverable: every decision-maker the engine produced who is
    * (1) Reoon-VALIDATED (a real, deliverable mailbox), and (2) paired with a
-   * personalized screen-capture video of their own company's hiring page — ready
+   * personalized screen-capture video of their own company's hiring page, ready
    * to email in one click. Pulls the prospect set + the role-capture library,
    * defaults to the Hire Signals segment and send-ready view, and gives each row a
    * Watch + "Copy email with video" (paste-ready clickable GIF) plus one-click
@@ -4604,19 +4604,19 @@
    * record. Searchable + CSV export (with watch/GIF links). */
   function renderClients(el) {
     el.innerHTML = head("Clients",
-      "Every decision-maker Hire Signals produced — validated and ready to email.") +
+      "Every decision-maker Hire Signals produced, validated and ready to email.") +
       '<div id="clKpis" class="cl-kpis"></div>' +
       '<div class="cl-toolbar">' +
-        '<div class="pr-searchbar cl-search"><span class="ico">⌕</span>' +
+        '<div class="pr-searchbar cl-search"><span class="ico"><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg></span>' +
         '<input id="clSearch" type="text" autocomplete="off" placeholder="Search name, title, company, email, signal…" /></div>' +
         '<span id="clSeg" class="cl-seg"></span>' +
         '<select id="clIndustry" class="cl-cat-sel" title="Filter by industry"><option value="">All industries</option></select>' +
         '<select id="clFunction" class="cl-cat-sel" title="Filter by desk"><option value="">All desks</option></select>' +
         '<span class="cl-tb-actions">' +
           '<button class="btn btn-ghost btn-sm" id="clRefresh" title="Refresh">↻</button>' +
-          '<button class="btn btn-ghost btn-sm" id="clGenAll" title="Generate missing screen captures">🖥</button>' +
-          '<button class="btn btn-ghost btn-sm" id="clVerify" title="Verify emails via Reoon">✅ Verify</button>' +
-          '<button class="btn btn-ghost btn-sm" id="clExport" title="Export CSV (selected rows, or everything shown)">⇪ Export</button>' +
+          '<button class="btn btn-ghost btn-sm" id="clGenAll" title="Generate missing screen captures"><svg class="isvg" aria-hidden="true"><use href="#i-monitor"/></svg></button>' +
+          '<button class="btn btn-ghost btn-sm" id="clVerify" title="Verify emails via Reoon">Verify</button>' +
+          '<button class="btn btn-ghost btn-sm" id="clExport" title="Export CSV (selected rows, or everything shown)">Export</button>' +
         '</span>' +
       '</div>' +
       '<div id="clBulk"></div>' +
@@ -4670,7 +4670,7 @@
 
     // Map a Hire Signals CuratedProspect into the client-row shape the spreadsheet expects.
     // The curated row carries the decision-maker, the company, the categorization (industry +
-    // function/desk + signal), and the Reoon verdict — so the tab finally shows the real thousands.
+    // function/desk + signal), and the Reoon verdict, so the tab finally shows the real thousands.
     function mapCurated(r) {
       var parts = (r.managerName || "").trim().split(/\s+/);
       var ev = r.emailValidated ? { status: "valid", reason: "mailbox_confirmed", source: "reoon", checkedAt: r.validatedAt }
@@ -4688,7 +4688,7 @@
         companyDomain: r.domain || "",
         companySize: r.employeeCount || "",   // company headcount (ICP fit + personalization)
         jobUrl: r.jobUrl || "",
-        location: "",                      // company/contact location — unknown for curated rows (jobLocation is the POSTING's)
+        location: "",                      // company/contact location, unknown for curated rows (jobLocation is the POSTING's)
         jobLocation: r.jobLocation || "",  // where the JOB is based (posting location)
         jobPostedAt: r.jobPostedAt || "",  // when the role went up ("open N days" hook)
         email: r.likelyEmail || "",
@@ -4737,7 +4737,7 @@
       if (clFunction && (p["function"] || "") !== clFunction) return false;
       return true;
     }
-    // Verdict filter — clicking a legend chip narrows to just that bucket (verified / deliverable /
+    // Verdict filter, clicking a legend chip narrows to just that bucket (verified / deliverable /
     // risky / invalid / unchecked / with-video).
     function inVerdict(p) {
       if (!clVerdict) return true;
@@ -4746,7 +4746,7 @@
       if (clVerdict === "unchecked") { var s = vStatus(p); return s === "unverified" || s === "unknown"; }
       return vStatus(p) === clVerdict;
     }
-    // Pass a precomputed eligible() list when you already have one — paint() does, so the segment
+    // Pass a precomputed eligible() list when you already have one, paint() does, so the segment
     // filter + email regex don't run twice per repaint over the full dataset.
     function shown(base) { return (base || eligible()).filter(inCat).filter(inVerdict); }
 
@@ -4790,7 +4790,7 @@
     }
     function hasCapture(p) { return !!videoFor(p); }
 
-    // Sort rank for the verification verdict — best (most sendable) first when ascending.
+    // Sort rank for the verification verdict, best (most sendable) first when ascending.
     function vRank(p) { return ({ valid: 0, deliverable: 1, risky: 2, unknown: 3, unverified: 4, invalid: 5 })[vStatus(p)]; }
 
     // Personalization helpers: derive first/last from the full name when the provider
@@ -4802,7 +4802,7 @@
       return parts.length > 1 ? parts.slice(1).join(" ") : "";
     }
     function phoneOf(p) { return p.phone || p.mobilePhone || p.landlinePhone || ""; }
-    // Days the role has been open (from the posting date) — the "open N days" personalization hook.
+    // Days the role has been open (from the posting date), the "open N days" personalization hook.
     function daysOpen(p) {
       var t = Date.parse(p.jobPostedAt || "");
       if (!t) return null;
@@ -4839,9 +4839,9 @@
             '<span class="crm-sub">' + (sub || "&nbsp;") + "</span></div></td>"; } },
       { key: "open_role", label: "Hiring for", get: function (p) { return p.openRole || ""; }, render: function (p) {
           var role = (p.openRole ? '<span class="cl-cat cl-cat-role">' + esc(p.openRole) + "</span>" : '<span class="pr-na">-</span>') +
-            (p.jobUrl ? ' <a class="crm-jobpost" href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener" title="Open the live job posting"' + stop + ">↗</a>" : "");
+            (p.jobUrl ? ' <a class="crm-jobpost" href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener" title="Open the live job posting"' + stop + "></a>" : "");
           var dOpen = daysOpen(p);
-          var meta = (p.jobLocation ? "📍 " + esc(p.jobLocation) : "") +
+          var meta = (p.jobLocation ? "" + esc(p.jobLocation) : "") +
             (dOpen != null ? (p.jobLocation ? " · " : "") + dOpen + "d open" : "");
           return '<td class="crm-c-role"><div class="crm-id-t"><span>' + role + "</span>" +
             (meta ? '<span class="crm-sub">' + meta + "</span>" : "") + "</div></td>"; } },
@@ -4855,7 +4855,7 @@
             '<span class="crm-sub">' + vBadge(p) + "</span></div></td>"; } },
       { key: "signal", label: "Why hiring", get: function (p) { return p.signalReason || ""; }, render: function (p) {
           return '<td class="crm-c-signal"><div class="crm-id-t">' +
-            (p.signalReason ? '<span class="crm-sig">⚡ ' + esc(p.signalReason) + "</span>" : '<span class="pr-na">-</span>') +
+            (p.signalReason ? '<span class="crm-sig">' + esc(p.signalReason) + "</span>" : '<span class="pr-na">-</span>') +
             (p.signalType ? '<span class="crm-sub"><span class="cl-cat cl-cat-sig">' + esc(String(p.signalType).replace(/_/g, " ")) + "</span></span>" : "") + "</div></td>"; } },
       { key: "hiring_score", label: "Intent", get: function (p) { return p.score == null ? "" : p.score; }, sort: function (p) { return -(Number(p.score) || 0); },
         render: function (p) {
@@ -4899,12 +4899,12 @@
       var why = v && v.reason ? (" · " + v.reason) : "";
       if (v && v.source) why += " · " + v.source;
       var map = {
-        valid: ['cl-vb-ok', '✓ verified', 'Mailbox confirmed deliverable'],
-        deliverable: ['cl-vb-deliv', '✓ deliverable', 'Domain accepts mail (syntax + MX). Set REOON_API_KEY to confirm the mailbox'],
-        risky: ['cl-vb-risky', '~ risky', 'Catch-all / role / inbox-full — deliverable but unconfirmed'],
-        invalid: ['cl-vb-bad', '✕ invalid', 'Undeliverable — will bounce'],
-        unknown: ['cl-vb-unk', '? unknown', 'Could not determine — retry verification'],
-        unverified: ['cl-vb-unk', '• unverified', 'Not checked yet — click Verify emails']
+        valid: ['cl-vb-ok', 'verified', 'Mailbox confirmed deliverable'],
+        deliverable: ['cl-vb-deliv', 'deliverable', 'Domain accepts mail (syntax + MX). Set REOON_API_KEY to confirm the mailbox'],
+        risky: ['cl-vb-risky', '~ risky', 'Catch-all / role / inbox-full, deliverable but unconfirmed'],
+        invalid: ['cl-vb-bad', '✕ invalid', 'Undeliverable, will bounce'],
+        unknown: ['cl-vb-unk', '? unknown', 'Could not determine, retry verification'],
+        unverified: ['cl-vb-unk', '• unverified', 'Not checked yet, click Verify emails']
       };
       var m = map[s] || map.unverified;
       return '<span class="cl-vb ' + m[0] + '" title="' + esc(m[2] + why) + '">' + m[1] + "</span>";
@@ -4916,18 +4916,18 @@
       var vid = videoFor(p);
       if (vid) {
         var tag = (vid.kind === "personalized" || vid.kind === "video")
-          ? '<span class="cl-vtag" title="Outreach video (your clip over the job capture)">🎬 video</span>'
-          : '<span class="cl-vtag cl-vtag-cap" title="Screen capture of the company hiring page">🖥 capture</span>';
+          ? '<span class="cl-vtag" title="Outreach video (your clip over the job capture)">video</span>'
+          : '<span class="cl-vtag cl-vtag-cap" title="Screen capture of the company hiring page">capture</span>';
         var thumb = vid.gif
           ? '<img class="video-thumb" loading="lazy" src="' + esc(vid.gif) + '" alt="preview" onerror="this.style.display=\'none\'" />'
-          : '<span class="video-thumb cl-vthumb-ph">▶</span>';
+          : '<span class="video-thumb cl-vthumb-ph"><svg class="isvg" aria-hidden="true"><use href="#i-play"/></svg></span>';
         return '<div class="cl-vcell">' +
           '<a class="cl-vthumb-wrap" href="' + esc(vid.watch || "#") + '" target="_blank" rel="noopener" title="Watch">' + thumb + "</a>" +
           '<div class="video-actions">' + tag +
             '<button class="video-copy" data-act="copyvid" data-pid="' + esc(p.id) + '">Copy email</button>' +
           "</div></div>";
       }
-      return '<button class="video-watch" data-act="gencap" data-pid="' + esc(p.id) + '" title="Capture this company\'s hiring page">🖥 Generate</button>';
+      return '<button class="video-watch" data-act="gencap" data-pid="' + esc(p.id) + '" title="Capture this company\'s hiring page">Generate</button>';
     }
 
     function clStatusLabel(p) {
@@ -4974,7 +4974,7 @@
       var aCount = segCounts.all == null ? "…" : segCounts.all;
       if (sg) {
         sg.innerHTML =
-          '<button class="btn btn-sm ' + (clSeg === "signals" ? "btn-primary" : "btn-ghost") + '" data-clseg="signals">⚡ Hire Signals · ' + sCount + "</button>" +
+          '<button class="btn btn-sm ' + (clSeg === "signals" ? "btn-primary" : "btn-ghost") + '" data-clseg="signals">Hire Signals · ' + sCount + "</button>" +
           '<button class="btn btn-sm ' + (clSeg === "all" ? "btn-primary" : "btn-ghost") + '" data-clseg="all">All leads · ' + aCount + "</button>";
         sg.onclick = function (ev) {   // assignment (not addEventListener): #clSeg persists across paints
           var b = ev.target.closest ? ev.target.closest("[data-clseg]") : null;
@@ -4991,7 +4991,7 @@
       var elig = eligible();
       var all = shown(elig);
       var list = all.filter(matches);
-      // Spreadsheet sort by the active column — decorate/sort/undecorate so the accessor runs
+      // Spreadsheet sort by the active column, decorate/sort/undecorate so the accessor runs
       // once per row instead of twice per comparison (videoFor/vRank accessors are not free).
       var sortCol = COLS.filter(function (c) { return c.key === clSort.key; })[0] || COLS[1];
       list = list
@@ -5006,11 +5006,11 @@
       var kEl = $("#clKpis");
       if (kEl) {
         kEl.innerHTML =
-          kpiCard("", "👥", elig.length.toLocaleString(), "Contacts", roll.nCompanies ? roll.nCompanies.toLocaleString() + " companies" : "", "rgba(124,92,255,0.16)") +
-          kpiCard("valid", "✓", (by.valid || 0).toLocaleString(), "Verified", "mailbox confirmed", "rgba(54,211,153,0.16)") +
-          kpiCard("video", "🎬", roll.withVideo.toLocaleString(), "With video", "asset attached", "rgba(170,120,255,0.16)") +
-          kpiCard("ready", "🚀", roll.sendReady.toLocaleString(), "Send-ready", "verified + video", "rgba(77,208,255,0.16)") +
-          kpiCard("", "⚡", roll.avgScore == null ? "—" : String(roll.avgScore), "Avg intent", unchecked ? unchecked.toLocaleString() + " unchecked" : "all checked", "rgba(255,194,77,0.16)");
+          kpiCard("", '<svg class="isvg" aria-hidden="true"><use href="#i-users"/></svg>', elig.length.toLocaleString(), "Contacts", roll.nCompanies ? roll.nCompanies.toLocaleString() + " companies" : "", "var(--brand-soft)") +
+          kpiCard("valid", '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>', (by.valid || 0).toLocaleString(), "Verified", "mailbox confirmed", "rgba(54,211,153,0.16)") +
+          kpiCard("video", '<svg class="isvg" aria-hidden="true"><use href="#i-video"/></svg>', roll.withVideo.toLocaleString(), "With video", "asset attached", "rgba(170,120,255,0.16)") +
+          kpiCard("ready", '<svg class="isvg" aria-hidden="true"><use href="#i-send"/></svg>', roll.sendReady.toLocaleString(), "Send-ready", "verified + video", "var(--info-bg)") +
+          kpiCard("", '<svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>', roll.avgScore == null ? "-" : String(roll.avgScore), "Avg intent", unchecked ? unchecked.toLocaleString() + " unchecked" : "all checked", "var(--warn-bg)");
         kEl.onclick = function (ev) {   // assignment (not addEventListener): #clKpis persists across paints
           var b = ev.target.closest ? ev.target.closest("[data-kpi]") : null;
           if (!b) return;
@@ -5036,12 +5036,12 @@
         return '<button class="cl-vb ' + cls + (clVerdict === key ? " cl-vb-active" : "") + '" data-verdict="' + key + '">' + label + " " + n + "</button>";
       };
       var legend = '<div class="cl-legend">' +
-        legChip("valid", "cl-vb-ok", "✓ verified", by.valid || 0) +
-        legChip("deliverable", "cl-vb-deliv", "✓ deliverable", by.deliverable || 0) +
+        legChip("valid", "cl-vb-ok", "verified", by.valid || 0) +
+        legChip("deliverable", "cl-vb-deliv", "deliverable", by.deliverable || 0) +
         legChip("risky", "cl-vb-risky", "~ risky", by.risky || 0) +
         legChip("invalid", "cl-vb-bad", "✕ invalid", by.invalid || 0) +
         legChip("unchecked", "cl-vb-unk", "• unchecked", unchecked) +
-        legChip("video", "cl-vb-vid", "🎬 with video", roll.withVideo) +
+        legChip("video", "cl-vb-vid", "with video", roll.withVideo) +
         (clVerdict ? '<button class="cl-vb cl-vb-clear" data-verdict="">✕ clear</button>' : "") +
         "</div>";
 
@@ -5062,7 +5062,7 @@
           ? "No clients match “" + esc(clFilter) + "”."
           : clSeg === "signals"
           ? "No Hire Signals contacts yet. As the engine validates decision-makers (Reoon), they land here. Switch to All leads to see every enriched contact."
-          : "No enriched leads with an email yet. Enrich your prospects (Prospects → ⚡ Enrich all contacts).") + "</div>";
+          : "No enriched leads with an email yet. Enrich your prospects (Prospects → Enrich all contacts).") + "</div>";
 
       // Pager: prev / numbered window / next + rows-per-page, only when it matters.
       var pager = "";
@@ -5082,9 +5082,9 @@
           '<span class="cl-pager-info">Showing <b>' + (start + 1).toLocaleString() + "–" + (start + pageRows.length).toLocaleString() +
             "</b> of <b>" + list.length.toLocaleString() + "</b></span>" +
           '<span class="cl-pager-ctl">' +
-            '<button class="cl-pg-num" data-pg="prev"' + (clPage === 0 ? " disabled" : "") + ' title="Previous page">◀</button>' +
+            '<button class="cl-pg-num" data-pg="prev"' + (clPage === 0 ? " disabled" : "") + ' title="Previous page">&lsaquo;</button>' +
             nums +
-            '<button class="cl-pg-num" data-pg="next"' + (clPage >= pages - 1 ? " disabled" : "") + ' title="Next page">▶</button>' +
+            '<button class="cl-pg-num" data-pg="next"' + (clPage >= pages - 1 ? " disabled" : "") + ' title="Next page">&rsaquo;</button>' +
           "</span>" +
           '<label class="cl-pager-size">Rows <select id="clPageSize">' +
             [50, 100, 250].map(function (n) { return '<option value="' + n + '"' + (n === PAGE_SIZE ? " selected" : "") + ">" + n + "</option>"; }).join("") +
@@ -5111,7 +5111,7 @@
         paint();
       });
 
-      // Select / deselect every row on the current page (in place — no repaint, keeps scroll).
+      // Select / deselect every row on the current page (in place, no repaint, keeps scroll).
       var pageChk = body.querySelector("#clPageChk");
       if (pageChk) pageChk.addEventListener("change", function () {
         lastPageRows.forEach(function (p) { if (pageChk.checked) clSel[p.id] = true; else delete clSel[p.id]; });
@@ -5177,7 +5177,7 @@
     }
 
     // Keep the bulk bar, the select-page checkbox, and the "select all matching" banner in sync
-    // with the current selection — without repainting the table (so scroll position survives).
+    // with the current selection, without repainting the table (so scroll position survives).
     function syncSelUI() {
       var n = selCount();
       var bulkEl = $("#clBulk");
@@ -5185,10 +5185,10 @@
         bulkEl.innerHTML = !n ? "" :
           '<div class="cl-bulkbar">' +
             '<span class="cl-bulk-n">' + n.toLocaleString() + " selected</span>" +
-            '<button class="btn btn-ghost btn-sm" data-bulk="copy" title="Copy the selected email addresses">📋 Copy emails</button>' +
-            '<button class="btn btn-ghost btn-sm" data-bulk="export" title="Download the selected rows as CSV">⇪ Export selected</button>' +
-            (clSeg === "all" ? '<button class="btn btn-ghost btn-sm" data-bulk="verify" title="Run Reoon verification on the selected rows">✅ Verify selected</button>' : "") +
-            '<button class="btn btn-ghost btn-sm" data-bulk="gencap" title="Capture the hiring page for selected companies without a video">🖥 Generate captures</button>' +
+            '<button class="btn btn-ghost btn-sm" data-bulk="copy" title="Copy the selected email addresses">Copy emails</button>' +
+            '<button class="btn btn-ghost btn-sm" data-bulk="export" title="Download the selected rows as CSV">Export selected</button>' +
+            (clSeg === "all" ? '<button class="btn btn-ghost btn-sm" data-bulk="verify" title="Run Reoon verification on the selected rows">Verify selected</button>' : "") +
+            '<button class="btn btn-ghost btn-sm" data-bulk="gencap" title="Capture the hiring page for selected companies without a video">Generate captures</button>' +
             '<button class="btn btn-ghost btn-sm cl-bulk-clear" data-bulk="clear">✕ Clear</button>' +
           "</div>";
         var bb = bulkEl.querySelector(".cl-bulkbar");
@@ -5256,7 +5256,7 @@
     }
 
     // The email composer: writes the personalized outreach email from EVERY data point on the
-    // row — first name, the exact open role, the job's location, how long it's been open, the
+    // row, first name, the exact open role, the job's location, how long it's been open, the
     // why-hiring signal, and the video when one exists. One source of truth for the clipboard
     // copy AND the drawer's Compose (mailto) action.
     function craftEmail(p) {
@@ -5265,13 +5265,13 @@
       var co = p.company || "your team";
       var role = (vid && vid.role) || p.openRole || "";
       // Only the POSTING's location may be claimed as where they're hiring (p.location is the
-      // company/contact location on "All leads" rows — a wrong-city claim reads as spam).
+      // company/contact location on "All leads" rows, a wrong-city claim reads as spam).
       var where = p.jobLocation ? " in " + p.jobLocation : "";
       // Mention days-open only in the credible window: <7 isn't a pain point yet, >90 is likely a
       // stale/reposted listing and "open 400 days" would be embarrassing.
       var dOpen = daysOpen(p);
       var mentionOpen = dOpen != null && dOpen >= 7 && dOpen <= 90;
-      var openBit = mentionOpen ? " — it's been open " + dOpen + " days" : "";
+      var openBit = mentionOpen ? ", it's been open " + dOpen + " days" : "";
       var subject = role
         ? role + where + (mentionOpen ? " (open " + dOpen + " days)" : "")
         : "Hiring at " + co;
@@ -5289,12 +5289,12 @@
     function copyVideoEmail(p) {
       var em = craftEmail(p);
       var vid = em.vid;
-      if (!vid || (!vid.gif && !vid.watch)) { toast("No video for this client yet — click Generate first."); return; }
+      if (!vid || (!vid.gif && !vid.watch)) { toast("No video for this client yet, click Generate first."); return; }
       var html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#111">' +
         "<p>Hi " + esc(em.first) + ",</p>" +
         "<p>" + esc(em.intro) + " I put together a quick video for you:</p>" +
         '<p><a href="' + esc(vid.watch || "#") + '" target="_blank">' +
-          (vid.gif ? '<img src="' + esc(vid.gif) + '" alt="Watch the video" width="480" style="border-radius:10px;border:1px solid #ddd;max-width:100%;display:block" />' : "▶ Watch the video") +
+          (vid.gif ? '<img src="' + esc(vid.gif) + '" alt="Watch the video" width="480" style="border-radius:10px;border:1px solid #ddd;max-width:100%;display:block" />' : "Watch the video") +
         "</a></p>" +
         "<p>" + esc(em.cta) + "</p></div>";
       var text = em.text;
@@ -5304,13 +5304,13 @@
           navigator.clipboard.write([new ClipboardItem({
             "text/html": new Blob([html], { type: "text/html" }),
             "text/plain": new Blob([text], { type: "text/plain" })
-          })]).then(function () { toast("Email with video copied — paste into Gmail."); }, plain);
+          })]).then(function () { toast("Email with video copied, paste into Gmail."); }, plain);
         } catch (e) { plain(); }
       } else plain();
     }
 
     // Generate the screen capture of this company's hiring page for one client.
-    // Always returns a promise — the drawer chains .then() on it.
+    // Always returns a promise, the drawer chains .then() on it.
     function genCapture(p, btn) {
       if (!p.company) { toast("No company on this record to capture."); return Promise.resolve(false); }
       var role = (p.personalizedVideo && p.personalizedVideo.roleTitle) || p.title || "Open role";
@@ -5323,7 +5323,7 @@
       }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = old; } toast("Could not reach the server."); return false; });
     }
 
-    // Batch: capture the hiring page for every shown client that has no video yet (sequential — gentle on the box).
+    // Batch: capture the hiring page for every shown client that has no video yet (sequential, gentle on the box).
     function generateAllCaptures(btn) { generateCaptures(shown(), btn); }
     function generateCaptures(items, btn) {
       var todo = items.filter(function (p) { return p.company && !hasCapture(p); });
@@ -5355,7 +5355,7 @@
         return;
       }
       var elig = eligible();
-      if (!elig.length) { toast("No emails to verify yet — enrich some prospects first."); return; }
+      if (!elig.length) { toast("No emails to verify yet, enrich some prospects first."); return; }
       var pending = elig.filter(function (p) { var s = vStatus(p); return s === "unverified" || s === "unknown"; });
       var payload = pending.length ? { action: "verify-emails", ids: pending.map(function (p) { return p.id; }) } : { action: "verify-emails" };
       var old = btn ? btn.textContent : "";
@@ -5408,7 +5408,7 @@
       var ver = p.emailVerification || {};
       var media = vid
         ? '<a class="cl-dr-media" href="' + esc(vid.watch || "#") + '" target="_blank" rel="noopener" title="Watch">' +
-            (vid.gif ? '<img src="' + esc(vid.gif) + '" alt="video preview" loading="lazy" onerror="this.replaceWith(document.createTextNode(\'▶ Watch\'))" />' : '<span class="cl-dr-media-ph">▶ Watch the video</span>') +
+            (vid.gif ? '<img src="' + esc(vid.gif) + '" alt="video preview" loading="lazy" onerror="this.replaceWith(document.createTextNode(\'Watch\'))" />' : '<span class="cl-dr-media-ph">Watch the video</span>') +
           "</a>"
         : "";
       var em = craftEmail(p);
@@ -5416,10 +5416,10 @@
         ? "mailto:" + esc(p.email) + "?subject=" + encodeURIComponent(em.subject) + "&body=" + encodeURIComponent(em.text)
         : "";
       var actions = '<div class="cl-dr-actions">' +
-        (compose ? '<a class="btn btn-ghost btn-sm" href="' + compose + '" title="Open the pre-written personalized email in your mail client">✉ Compose</a>' : "") +
-        (vid ? '<button class="btn btn-primary btn-sm" data-dract="copyvid">📋 Copy email with video</button>'
-             : '<button class="btn btn-primary btn-sm" data-dract="gencap">🖥 Generate capture</button>') +
-        (p.jobUrl ? '<a class="btn btn-ghost btn-sm" href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener">↗ Job post</a>' : "") +
+        (compose ? '<a class="btn btn-ghost btn-sm" href="' + compose + '" title="Open the pre-written personalized email in your mail client">Compose</a>' : "") +
+        (vid ? '<button class="btn btn-primary btn-sm" data-dract="copyvid">Copy email with video</button>'
+             : '<button class="btn btn-primary btn-sm" data-dract="gencap">Generate capture</button>') +
+        (p.jobUrl ? '<a class="btn btn-ghost btn-sm" href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener">Job post</a>' : "") +
         (p.linkedinUrl ? '<a class="btn btn-ghost btn-sm" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener">in LinkedIn</a>' : "") +
         "</div>";
       var n = Number(p.companySize);
@@ -5439,9 +5439,9 @@
             dRow("LinkedIn", p.linkedinUrl ? '<a href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener">' + esc(p.linkedinUrl) + "</a>" : "")) +
           dSection("Hiring signal",
             dRow("Open role", p.openRole ? esc(p.openRole) : "") +
-            dRow("Job location", p.jobLocation ? "📍 " + esc(p.jobLocation) : "") +
+            dRow("Job location", p.jobLocation ? "" + esc(p.jobLocation) : "") +
             dRow("Posted", p.jobPostedAt ? esc(String(p.jobPostedAt).slice(0, 10)) + (daysOpen(p) != null ? " · " + daysOpen(p) + "d open" : "") : "") +
-            dRow("Why hiring", p.signalReason ? "⚡ " + esc(p.signalReason) : "") +
+            dRow("Why hiring", p.signalReason ? "" + esc(p.signalReason) : "") +
             dRow("Signal type", p.signalType ? esc(String(p.signalType).replace(/_/g, " ")) : "") +
             dRow("Intent score", p.score == null ? "" : esc(String(p.score))) +
             dRow("Job post", p.jobUrl ? '<a href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener">' + esc(p.jobUrl) + "</a>" : "")) +
@@ -5500,7 +5500,7 @@
       var dataP;
       if (seg === "signals") {
         // The thousands: the Hire Signals curation engine output (named decision-makers with an
-        // email), mapped into the client-row shape. This is the real well — NOT /api/prospects.
+        // email), mapped into the client-row shape. This is the real well, NOT /api/prospects.
         dataP = send("/in-market", "POST", { action: "curation_list", contactableOnly: true, namedOnly: true, limit: 5000 })
           .then(function (r) { clAll = (r.ok && r.data && Array.isArray(r.data.curated)) ? r.data.curated.map(mapCurated) : (r.ok ? [] : null); });
       } else {
@@ -5530,14 +5530,14 @@
   function renderProspects(el) {
     el.innerHTML = head("Prospects", "Your live pipeline, synced bidirectionally with the ATS.") +
       '<div class="btn-row" style="margin-bottom:12px">' +
-      '<button class="btn btn-primary btn-sm" id="enrichAllBtn">⚡ Enrich all contacts</button>' +
-      '<button class="btn btn-ghost btn-sm" id="importBtn">⇪ Import (CSV / paste)</button>' +
-      '<button class="btn btn-ghost btn-sm" id="liSearchBtn">🔗 Enrich LinkedIn searches</button>' +
-      '<button class="btn btn-ghost btn-sm" id="prListsBtn">📁 Saved lists</button>' +
-      '<select id="prSavedSelect" title="Open a saved search / list" style="margin-left:auto;background:var(--surface-2,#16161f);color:var(--text,#f4f4f8);border:1px solid var(--border,#2a2a36);border-radius:8px;padding:6px 11px;font-size:13px;max-width:240px"><option value="">📂 Saved searches…</option></select>' +
+      '<button class="btn btn-primary btn-sm" id="enrichAllBtn">Enrich all contacts</button>' +
+      '<button class="btn btn-ghost btn-sm" id="importBtn">Import (CSV / paste)</button>' +
+      '<button class="btn btn-ghost btn-sm" id="liSearchBtn">Enrich LinkedIn searches</button>' +
+      '<button class="btn btn-ghost btn-sm" id="prListsBtn">Saved lists</button>' +
+      '<select id="prSavedSelect" title="Open a saved search / list" style="margin-left:auto;background:var(--surface-2,var(--surface));color:var(--text,#f4f4f8);border:1px solid var(--border,#2a2a36);border-radius:8px;padding:6px 11px;font-size:13px;max-width:240px"><option value="">Saved searches…</option></select>' +
       '</div>' +
       '<div id="liProgress"></div>' +
-      '<div class="pr-searchbar"><span class="ico">⌕</span>' +
+      '<div class="pr-searchbar"><span class="ico"><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg></span>' +
       '<input id="prSearch" type="text" autocomplete="off" placeholder="Search by name, job title, company, or keyword…" /></div>' +
       '<div id="prBody">' + loading() + "</div>";
 
@@ -5562,7 +5562,7 @@
     function refreshSavedDropdown() {
       if (!savedSelect) return;
       var lists = listStore().all().filter(function (l) { return !l.motion || l.motion === motion; });
-      savedSelect.innerHTML = '<option value="">📂 Saved searches…</option>' +
+      savedSelect.innerHTML = '<option value="">Saved searches…</option>' +
         lists.map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.name) + " · " + (l.prospectIds || []).length + "</option>"; }).join("");
       savedSelect.value = prListId;
     }
@@ -5595,7 +5595,7 @@
         (p.photoUrl && !pending ? '<img src="' + esc(p.photoUrl) + '" alt="" onerror="this.remove()" />' : "") + "</span>";
       var expToggle = exp ? ' <button type="button" class="pr-exp-toggle" data-exp="' + esc(p.id) + '">Experience ▾</button>' : "";
       var li = p.linkedinUrl ? '<a class="pr-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : '<span class="pr-na">-</span>';
-      var enrichLbl = pending ? "🔎" : (p.email && p.phone) ? "↻" : "⚡";
+      var enrichLbl = pending ? '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg>' : (p.email && p.phone) ? "↻" : '<svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>';
       var enrichTitle = pending ? "Find hiring manager" : (p.email && p.phone) ? "Re-enrich contact" : "Enrich contact";
       var cell = function (v) { return v ? esc(v) : '<span class="pr-na">-</span>'; };
       var tr = '<tr class="pr-row' + (prSel[p.id] ? " pr-selected" : "") + '" data-pid="' + esc(p.id) + '">' +
@@ -5638,20 +5638,20 @@
       var bulk = selIds.length
         ? '<div class="pr-bulk"><span class="pr-selcount">' + selIds.length + " selected</span>" +
             '<span class="pr-bulk-actions">' +
-              '<span class="pr-enrich-grp">⚡ Enrich' +
+              '<span class="pr-enrich-grp">Enrich' +
                 '<label><input type="checkbox" id="prEnrEmail" checked /> Email</label>' +
                 '<label><input type="checkbox" id="prEnrPhone" checked /> Phone</label>' +
                 '<button class="btn btn-primary btn-sm" id="prEnrichSel">Run</button></span>' +
               '<select class="pr-bulk-sel" id="prBulkStatus">' + statusOpts + "</select>" +
               '<span class="pr-seq-grp"><select class="pr-bulk-sel" id="prBulkSeq">' + seqOpts + "</select>" +
                 '<button class="btn btn-ghost btn-sm" id="prSeqAssign">Assign</button></span>' +
-              '<button class="btn btn-ghost btn-sm" id="prSaveList">💾 Save as list</button>' +
-              '<button class="btn btn-ghost btn-sm" id="prDelSel">🗑 Delete</button>' +
+              '<button class="btn btn-ghost btn-sm" id="prSaveList">Save as list</button>' +
+              '<button class="btn btn-ghost btn-sm" id="prDelSel">Delete</button>' +
               '<button class="btn btn-ghost btn-sm" id="prClearSel">Clear</button></span></div>'
         : "";
       var listBanner = prListName
-        ? '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:8px 12px;border:1px solid var(--border,#2a2a36);border-radius:10px;font-size:13px;background:rgba(124,92,255,.08)">' +
-          '📂 Viewing saved search: <b>' + esc(prListName) + "</b> · " + list.length + " shown" +
+        ? '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:8px 12px;border:1px solid var(--border,#2a2a36);border-radius:10px;font-size:13px;background:var(--brand-soft)">' +
+          'Viewing saved search: <b>' + esc(prListName) + "</b> · " + list.length + " shown" +
           '<button class="btn btn-ghost btn-sm" id="prShowAll" style="margin-left:auto">Show all prospects</button></div>'
         : "";
       var tableHead = '<thead><tr>' +
@@ -5875,7 +5875,7 @@
       btn.disabled = true; var done = 0;
       (function next(i) {
         if (i >= list.length) {
-          btn.disabled = false; btn.textContent = "⚡ Enrich all contacts";
+          btn.disabled = false; btn.textContent = "Enrich all contacts";
           toast("Enriched " + done + " of " + list.length + " prospect" + (list.length === 1 ? "" : "s"));
           if (prospectsReload) prospectsReload();
           return;
@@ -5896,11 +5896,11 @@
      prospect list and deploying happens in Campaign Studio. */
 
   var CHANNELS = {
-    email: { label: "Email", icon: "✉️", blurb: "Subject + body touches with merge fields and open/click tracking.", unit: "emails" },
-    linkedin: { label: "LinkedIn", icon: "🔗", blurb: "Connection requests, messages, InMail, and voice notes.", unit: "touches" },
-    sms: { label: "SMS", icon: "💬", blurb: "Short, compliant post-engagement texts.", unit: "texts" },
-    voice: { label: "Voice", icon: "📞", blurb: "Cloned-voice voicemail drops to landline / VoIP.", unit: "drops" },
-    multi: { label: "Multi-channel", icon: "🔀", blurb: "One cadence that mixes email, LinkedIn and voicemail-drop touches.", unit: "touches" }
+    email: { label: "Email", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', blurb: "Subject + body touches with merge fields and open/click tracking.", unit: "emails" },
+    linkedin: { label: "LinkedIn", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-link"/></svg>', blurb: "Connection requests, messages, InMail, and voice notes.", unit: "touches" },
+    sms: { label: "SMS", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-message"/></svg>', blurb: "Short, compliant post-engagement texts.", unit: "texts" },
+    voice: { label: "Voice", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>', blurb: "Cloned-voice voicemail drops to landline / VoIP.", unit: "drops" },
+    multi: { label: "Multi-channel", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-shuffle"/></svg>', blurb: "One cadence that mixes email, LinkedIn and voicemail-drop touches.", unit: "touches" }
   };
   // Per-step channels selectable inside a multi-channel sequence.
   var STEP_CHANNELS = ["email", "linkedin", "voice"];
@@ -5990,9 +5990,9 @@
   // admin creates and deploys campaigns in one place. The studio/content routes
   // stay registered for deep links.
   var CAMPAIGN_SECTIONS = [
-    { key: "", label: "Library", icon: "📚" },
-    { key: "build", label: "Build", icon: "🎯" },
-    { key: "deploy", label: "Deploy", icon: "🚀" }
+    { key: "", label: "Library", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-book"/></svg>' },
+    { key: "build", label: "Build", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-target"/></svg>' },
+    { key: "deploy", label: "Deploy", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-send"/></svg>' }
   ];
   function renderCampaignsHub(el) {
     var detail = currentDetail();
@@ -6023,7 +6023,7 @@
       return '<button class="seq-new" data-new="' + ch + '"><span class="seq-new-ic">' + c.icon + "</span>" +
         '<span class="seq-new-t">' + c.label + " sequence</span>" +
         '<span class="seq-new-b">' + esc(c.blurb) + "</span>" +
-        '<span class="seq-new-f">' + (n ? n + " saved · " : "") + "＋ New " + c.label + " sequence</span></button>";
+        '<span class="seq-new-f">' + (n ? n + " saved · " : "") + "+ New " + c.label + " sequence</span></button>";
     }).join("");
 
     el.innerHTML = head("Campaigns",
@@ -6063,7 +6063,7 @@
           '<div class="seq-meta"><div class="seq-name">' + esc(s.name) + "</div>" +
           '<div class="seq-sub"><span class="seq-chip ' + s.channel + '">' + c.label + "</span> " + n + " step" + (n === 1 ? "" : "s") + " · " + seqDuration(s) + " day" + (seqDuration(s) === 1 ? "" : "s") + "</div></div>" +
           '<button class="btn btn-ghost btn-sm" data-deploy="' + esc(s.id) + '">Deploy in Studio</button>' +
-          '<button class="seq-del" data-del="' + esc(s.id) + '" title="Delete">🗑</button></div>';
+          '<button class="seq-del" data-del="' + esc(s.id) + '" title="Delete"><svg class="isvg" aria-hidden="true"><use href="#i-trash"/></svg></button></div>';
       }).join("");
       Array.prototype.forEach.call(lb.querySelectorAll(".seq-row"), function (row) {
         row.addEventListener("click", function (e) {
@@ -6118,12 +6118,12 @@
           '<div class="seq-steps-h"><b>Steps</b> <span class="muted" id="seqStepCount"></span></div>' +
           '<div class="seq-enroll">▷ Enrollment starts</div>' +
           '<div id="seqSteps"></div>' +
-          '<button class="seq-add" id="seqAdd">＋ Add step</button>' +
+          '<button class="seq-add" id="seqAdd">+ Add step</button>' +
         "</div>" +
         '<aside class="seq-rail">' +
           '<div class="rail-card"><div class="rail-h">OVERVIEW</div><div class="rail-stats" id="seqOverview"></div></div>' +
           '<div class="rail-card"><div class="rail-h">TAGS</div><div id="seqTags" class="rail-tags"></div></div>' +
-          '<div class="rail-card"><div class="rail-h">CUSTOM VARIABLES <button class="rail-add" id="seqAddVar">＋ Add</button></div>' +
+          '<div class="rail-card"><div class="rail-h">CUSTOM VARIABLES <button class="rail-add" id="seqAddVar">+ Add</button></div>' +
             '<div class="muted" style="font-size:11px;margin:2px 0 8px">Click any field to place your cursor, then click a variable to insert it.</div>' +
             '<div id="seqVars" class="rail-vars"></div></div>' +
           '<div class="rail-card"><div class="rail-h">MERGE FIELDS</div><div id="seqMerge" class="rail-vars"></div></div>' +
@@ -6215,7 +6215,7 @@
         '<span class="seq-chip ' + ch + '">' + cc.icon + " " + cc.label + "</span>" +
         (ch === "email" ? '<label class="seq-manual"><span class="muted">Manual send</span><button type="button" class="or-sw' + (st.manualSend ? " on" : "") + '" data-manual></button></label>' : "") +
         '<button class="seq-mini" data-collapse title="Collapse">▾</button>' +
-        '<button class="seq-mini" data-del-step title="Delete step">🗑</button></div>';
+        '<button class="seq-mini" data-del-step title="Delete step"><svg class="isvg" aria-hidden="true"><use href="#i-trash"/></svg></button></div>';
       var delay = '<div class="seq-delay"><label>Delay</label><input class="seq-f seq-day" type="number" min="0" data-f="day" value="' + (st.day || 0) + '" /><span class="muted">' + delayLbl + "</span></div>";
       return '<div class="seq-step" data-i="' + i + '">' + head + '<div class="seq-step-b">' + delay + channelFields(st) + "</div></div>";
     }
@@ -6293,7 +6293,7 @@
       var host = $("#seqTags"); if (!host) return;
       var tags = seq.tags || [];
       host.innerHTML = tags.map(function (t, i) { return '<span class="tag-chip">' + esc(t) + '<button data-del-tag="' + i + '">×</button></span>'; }).join("") +
-        '<button class="tag-add" id="seqAddTag">＋ Add tag</button>';
+        '<button class="tag-add" id="seqAddTag">+ Add tag</button>';
       var add = $("#seqAddTag");
       if (add) add.addEventListener("click", function () {
         if ((seq.tags || []).length >= 10) { toast("Up to 10 tags."); return; }
@@ -6446,7 +6446,7 @@
     if (d < 60) return "just now"; if (d < 3600) return Math.floor(d / 60) + "m ago";
     if (d < 86400) return Math.floor(d / 3600) + "h ago"; return Math.floor(d / 86400) + "d ago";
   }
-  var AP_CH = { email: "✉️", linkedin: "💼", voice: "📞" };
+  var AP_CH = { email: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', linkedin: '<svg class="isvg" aria-hidden="true"><use href="#i-briefcase"/></svg>', voice: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' };
 
   function renderAutopilot(el) {
     el.innerHTML = head("Autopilot",
@@ -6481,7 +6481,7 @@
           '<div class="ap-ticks">' + (d.ticks || []).map(function (t) {
             return '<span class="ap-tick" title="' + esc(t.label) + '"><b>' + esc(t.label) + "</b>" + apEvery(t.everyMs) + "</span>";
           }).join("") + "</div>" +
-          '<button class="btn btn-primary btn-sm" id="apRunNow">▶ Run a cycle now</button>' +
+          '<button class="btn btn-primary btn-sm" id="apRunNow">Run a cycle now</button>' +
         "</div>";
 
       // ---- pipeline visual ----
@@ -6491,26 +6491,26 @@
       var inSeqAll = camps.reduce(function (a, c) { return a + (c.counts.inSequence || 0); }, 0);
       var pipeline =
         '<div class="ap-pipe">' +
-          apStage("📡", "Hiring signals", poolTotal.toLocaleString() + " companies", poolPos ? poolPos.toLocaleString() + " open roles" : "live pool") +
+          apStage('<svg class="isvg" aria-hidden="true"><use href="#i-radar"/></svg>', "Hiring signals", poolTotal.toLocaleString() + " companies", poolPos ? poolPos.toLocaleString() + " open roles" : "live pool") +
           '<span class="ap-arrow">→</span>' +
-          apStage("✨", "Enrich + draft", "email · phone · LinkedIn", "AI personalization") +
+          apStage('<svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>', "Enrich + draft", "email · phone · LinkedIn", "AI personalization") +
           '<span class="ap-arrow">→</span>' +
-          apStage("🎯", "Sequenced campaigns", live.length + " live", queuedAll + " queued · " + inSeqAll + " in sequence") +
+          apStage('<svg class="isvg" aria-hidden="true"><use href="#i-target"/></svg>', "Sequenced campaigns", live.length + " live", queuedAll + " queued · " + inSeqAll + " in sequence") +
         "</div>";
 
       // ---- signals pull panel (BD) ----
       var bdCamps = camps.filter(function (c) { return c.motion === "bd"; });
       var sigPanel =
-        '<div class="card ap-card"><div class="ap-card-h"><h3>📡 Pull from hiring signals</h3>' +
+        '<div class="card ap-card"><div class="ap-card-h"><h3>Pull from hiring signals</h3>' +
           '<span class="muted">' + (sig ? ("Updated " + (apWhen(sig.lastAddedAt) || "recently") + " · " + (sig.addedToday || 0) + " added today · " + (sig.windowDays || 90) + "-day window") : "Pool warms in the background") + "</span></div>" +
           (sig && sig.breakdown && sig.breakdown.length
             ? '<div class="ap-sigchips">' + sig.breakdown.slice(0, 14).map(function (b) {
                 return '<label class="ap-sigchip"><input type="checkbox" class="apSig" value="' + esc(b.signalType) + '"> ' + esc(prettySignal(b.signalType)) + ' <b>' + b.count + "</b></label>";
               }).join("") + "</div>"
-            : '<div class="muted" style="margin:6px 0 10px">No signals pooled yet — the background accumulator fills this within a day of deploy (needs a database).</div>') +
+            : '<div class="muted" style="margin:6px 0 10px">No signals pooled yet, the background accumulator fills this within a day of deploy (needs a database).</div>') +
           '<div class="ap-pullform">' +
             '<label>Stage onto<select id="apTarget">' +
-              (bdCamps.length ? bdCamps.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + (c.autoRun && c.outreachApproved ? " · live" : "") + "</option>"; }).join("") : '<option value="">— create a BD campaign first —</option>') +
+              (bdCamps.length ? bdCamps.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + (c.autoRun && c.outreachApproved ? " · live" : "") + "</option>"; }).join("") : '<option value="">- create a BD campaign first -</option>') +
             "</select></label>" +
             '<label>How many<input type="number" id="apLimit" value="50" min="1" max="500"></label>' +
             '<label>Contacts / company<select id="apPer"><option value="1">1 (decision-maker)</option><option value="3">3 (manager + dept)</option><option value="5">5 (full ladder)</option></select></label>' +
@@ -6524,8 +6524,8 @@
       var campRows = camps.length ? camps.map(campRow).join("") :
         '<div class="empty">No campaigns yet. Create one to draft a model and arm Autopilot.</div>';
       var campPanel =
-        '<div class="card ap-card"><div class="ap-card-h"><h3>🎯 Campaigns &amp; workflows</h3>' +
-          '<button class="btn btn-ghost btn-sm" id="apNew">＋ New campaign</button></div>' +
+        '<div class="card ap-card"><div class="ap-card-h"><h3>Campaigns &amp; workflows</h3>' +
+          '<button class="btn btn-ghost btn-sm" id="apNew">+ New campaign</button></div>' +
           '<div class="ap-camps">' + campRows + "</div>" +
           '<p class="muted" style="margin:10px 2px 0">Workflow: <b>Draft model</b> (AI writes the sequence) → <b>Review &amp; approve</b> the outreach → <b>Autopilot on</b>. Ongoing prospects then flow through the approved templates automatically.</p>' +
         "</div>";
@@ -6533,7 +6533,7 @@
       // ---- activity feed ----
       var acts = d.activity || [];
       var actPanel =
-        '<div class="card ap-card"><div class="ap-card-h"><h3>📜 Recent activity</h3></div>' +
+        '<div class="card ap-card"><div class="ap-card-h"><h3>Recent activity</h3></div>' +
           (acts.length ? '<div class="ap-acts">' + acts.slice(0, 25).map(function (a) {
             return '<div class="ap-act"><span class="ap-act-ic">' + (AP_CH[a.channel] || "•") + "</span>" +
               '<div class="ap-act-m"><b>' + esc(a.type || "event") + "</b> " + esc(a.summary || "") + "</div>" +
@@ -6550,11 +6550,11 @@
     function campRow(c) {
       var motionBadge = '<span class="ap-badge ' + c.motion + '">' + (c.motion === "bd" ? "BD" : "Recruiting") + "</span>";
       var stageBtn, stageCls;
-      if (!c.hasModel) { stageBtn = '<button class="btn btn-primary btn-sm" data-ap="draft" data-id="' + c.id + '">✨ Draft model</button>'; stageCls = "todraft"; }
-      else if (!c.outreachApproved) { stageBtn = '<button class="btn btn-primary btn-sm" data-ap="review" data-id="' + c.id + '">👀 Review &amp; approve</button>'; stageCls = "toreview"; }
+      if (!c.hasModel) { stageBtn = '<button class="btn btn-primary btn-sm" data-ap="draft" data-id="' + c.id + '">Draft model</button>'; stageCls = "todraft"; }
+      else if (!c.outreachApproved) { stageBtn = '<button class="btn btn-primary btn-sm" data-ap="review" data-id="' + c.id + '">Review &amp; approve</button>'; stageCls = "toreview"; }
       else {
         stageCls = "approved";
-        stageBtn = '<span class="ap-approved">✓ Model approved</span>' +
+        stageBtn = '<span class="ap-approved">Model approved</span>' +
           '<label class="ap-toggle"><input type="checkbox" class="apAuto" data-id="' + c.id + '"' + (c.autoRun ? " checked" : "") + '> Autopilot</label>' +
           '<button class="btn btn-ghost btn-sm" data-ap="review" data-id="' + c.id + '">View</button>';
       }
@@ -6593,7 +6593,7 @@
         pull.disabled = true; var msg = $("#apPullMsg"); msg.textContent = "Pulling and enriching…";
         send("/autopilot", "POST", payload).then(function (r) {
           pull.disabled = false;
-          if (r.ok) { msg.innerHTML = "✓ Staged <b>" + r.data.promoted + "</b> prospects (" + r.data.withEmail + " with email, " + r.data.withPhone + " with phone) from " + r.data.pulled + " companies."; toast("Staged " + r.data.promoted + " prospects"); load(); }
+          if (r.ok) { msg.innerHTML = "Staged <b>" + r.data.promoted + "</b> prospects (" + r.data.withEmail + " with email, " + r.data.withPhone + " with phone) from " + r.data.pulled + " companies."; toast("Staged " + r.data.promoted + " prospects"); load(); }
           else { msg.textContent = "Pull failed: " + (r.data && r.data.detail || r.data && r.data.error || "error"); }
         });
       });
@@ -6601,7 +6601,7 @@
       Array.prototype.forEach.call(document.querySelectorAll(".apAuto"), function (cb) {
         cb.addEventListener("change", function () {
           send("/autopilot", "POST", { action: "set-autorun", campaignId: cb.getAttribute("data-id"), autoRun: cb.checked }).then(function (r) {
-            if (r.ok) toast(cb.checked ? "Autopilot on 🤖" : "Autopilot off");
+            if (r.ok) toast(cb.checked ? "Autopilot on" : "Autopilot off");
             else { toast((r.data && r.data.detail) || "Could not toggle"); cb.checked = !cb.checked; }
             load();
           });
@@ -6618,13 +6618,13 @@
     function apDraftModel(id, btn) {
       if (btn) { btn.disabled = true; btn.textContent = "Drafting…"; }
       send("/autopilot", "POST", { action: "draft-model", campaignId: id }).then(function (r) {
-        if (r.ok) { toast("Model drafted — review it"); apShowModel(id, r.data.model); }
+        if (r.ok) { toast("Model drafted, review it"); apShowModel(id, r.data.model); }
         else { toast("Draft failed: " + (r.data && r.data.detail || r.data && r.data.error || "error")); load(); }
       });
     }
 
     function apReviewModel(id) {
-      // Fetch the STORED model (no re-draft — that would burn an LLM call and reset
+      // Fetch the STORED model (no re-draft, that would burn an LLM call and reset
       // approval). If none exists yet, draft one.
       send("/autopilot", "POST", { action: "get-model", campaignId: id }).then(function (r) {
         if (r.ok && r.data.model && r.data.model.touches && r.data.model.touches.length) apShowModel(id, r.data.model);
@@ -6647,14 +6647,14 @@
       var bodyHtml =
         '<div class="ap-model">' +
           '<p class="muted">' + esc(model && model.summary || "Review the sequence. Edit any step, then approve to arm Autopilot.") +
-            (model && model.engine === "library" ? " (Template draft — set ANTHROPIC_API_KEY for AI-written copy.)" : "") + "</p>" +
+            (model && model.engine === "library" ? " (Template draft, set ANTHROPIC_API_KEY for AI-written copy.)" : "") + "</p>" +
           '<div class="ap-touches">' + rows + "</div>" +
           '<div class="ap-model-foot">' +
             '<button class="btn btn-ghost" id="apSaveModel">Save edits</button>' +
-            '<button class="btn btn-primary" id="apApprove">✓ Approve &amp; arm Autopilot</button>' +
+            '<button class="btn btn-primary" id="apApprove">Approve &amp; arm Autopilot</button>' +
           "</div>" +
         "</div>";
-      openModal("Review the outreach model", "Approve once — then ongoing prospects run on these templates automatically.", bodyHtml, function (root, close) {
+      openModal("Review the outreach model", "Approve once, then ongoing prospects run on these templates automatically.", bodyHtml, function (root, close) {
         function collect() {
           return Array.prototype.map.call(root.querySelectorAll(".ap-touch"), function (n) {
             var subj = n.querySelector(".ap-t-subj");
@@ -6670,14 +6670,14 @@
           });
         });
         root.querySelector("#apApprove").addEventListener("click", function () {
-          // Save edits first, then approve, then arm Autopilot — the one-click "deploy".
+          // Save edits first, then approve, then arm Autopilot, the one-click "deploy".
           send("/autopilot", "POST", { action: "update-model", campaignId: id, touches: collect() }).then(function () {
             return send("/autopilot", "POST", { action: "approve-model", campaignId: id });
           }).then(function (r) {
             if (!r.ok) { toast("Approve failed"); return; }
             return send("/autopilot", "POST", { action: "set-autorun", campaignId: id, autoRun: true });
           }).then(function (r) {
-            if (r && r.ok) toast("Approved & live on Autopilot 🤖");
+            if (r && r.ok) toast("Approved & live on Autopilot");
             close(); load();
           });
         });
@@ -6706,7 +6706,7 @@
           send("/autopilot", "POST", payload).then(function (r) {
             if (!r.ok) { toast("Create failed"); return; }
             var id = r.data.campaign.id; close();
-            toast("Created — drafting the model…");
+            toast("Created, drafting the model…");
             apDraftModel(id);
           });
         });
@@ -6904,11 +6904,11 @@
       { key: "type", label: "Company Type", sort: false }, { key: "status", label: "Status", sort: true },
       { key: "tags", label: "Tags", sort: false }
     ];
-    var GRAD = ["#7c5cff,#4dd0ff", "#ff7ac6,#7c5cff", "#4dd0ff,#38e0a6", "#ffc24d,#ff7ac6", "#38e0a6,#4dd0ff", "#ff6b6b,#ffc24d"];
+    var GRAD = ["var(--brand),var(--info)", "var(--brand-2),var(--brand)", "var(--info),var(--ok)", "var(--warn),var(--brand-2)", "var(--ok),var(--info)", "var(--danger),var(--warn)"];
     // Per-status accent, drives the inline picker + status pill colors.
     var STATUS_COLOR = {
-      in_progress: "#ffc24d", active_opportunity: "#4dd0ff", current_client: "#38e0a6",
-      dead_opportunity: "#ff6b6b", do_not_prospect: "#8a8aa0", uncontacted: "#7c5cff"
+      in_progress: "var(--warn)", active_opportunity: "var(--info)", current_client: "var(--ok)",
+      dead_opportunity: "var(--danger)", do_not_prospect: "#8a8aa0", uncontacted: "var(--brand)"
     };
     function statusLabel(k) { for (var i = 0; i < TABS.length; i++) if (TABS[i][0] === k) return TABS[i][1]; return ""; }
 
@@ -7029,7 +7029,7 @@
       '.co-table tbody td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--text-muted);white-space:nowrap}' +
       '.co-table tbody tr:hover{background:var(--bg-soft)}' +
       '.co-name{display:flex;align-items:center;gap:11px;min-width:0}' +
-      '.co-logo{position:relative;overflow:hidden;flex:0 0 auto;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:13px;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}' +
+      '.co-logo{position:relative;overflow:hidden;flex:0 0 auto;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:13px;color:#fff;box-shadow:inset 0 0 0 1px var(--border)}' +
       '.co-logo-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;background:#fff}' +
       '.co-nm{font-weight:600;color:var(--text);text-decoration:none}' +
       '.co-nm:hover{color:var(--brand-2)}' +
@@ -7037,11 +7037,11 @@
       '.co-ext:hover{color:var(--brand-2)}' +
       '.co-jobs{display:inline-grid;place-items:center;min-width:30px;height:24px;padding:0 8px;border-radius:7px;background:var(--surface-2);color:var(--text-muted);font-weight:700;font-size:12px}' +
       '.co-url{color:var(--text-muted);text-decoration:none}.co-url:hover{color:var(--brand-2)}' +
-      '.co-type{display:inline-block;padding:3px 10px;border-radius:7px;background:rgba(56,224,166,.14);color:var(--accent-green);font-size:12px;font-weight:600}' +
+      '.co-type{display:inline-block;padding:3px 10px;border-radius:7px;background:var(--ok-bg);color:var(--accent-green);font-size:12px;font-weight:600}' +
       '.co-miss{color:var(--text-dim)}' +
       '.co-pick{width:15px;height:15px;cursor:pointer;accent-color:var(--brand)}' +
       '.co-empty{padding:40px;text-align:center;color:var(--text-dim)}' +
-      '.co-table tbody tr.sel{background:rgba(124,92,255,.07)}' +
+      '.co-table tbody tr.sel{background:var(--brand-soft)}' +
       /* ---- tags ---- */
       '.co-tags{display:flex;align-items:center;gap:5px;flex-wrap:wrap}' +
       '.co-tag{display:inline-flex;align-items:center;gap:3px;font-size:11.5px;font-weight:600;padding:3px 5px 3px 9px;border-radius:7px;white-space:nowrap}' +
@@ -7066,24 +7066,24 @@
       '</style>' +
       '<div class="card">' +
         '<div class="co-bar">' +
-          '<div class="co-search"><span>🔍</span><input type="search" id="coQ" placeholder="Search Companies…" autocomplete="off"></div>' +
+          '<div class="co-search"><span><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg></span><input type="search" id="coQ" placeholder="Search Companies…" autocomplete="off"></div>' +
           '<button class="co-pill" id="coLists">☰ Lists</button>' +
-          '<button class="co-tool" title="Filter">⛃</button>' +
+          '<button class="co-tool" title="Filter"><svg class="isvg" aria-hidden="true"><use href="#i-filter"/></svg></button>' +
           '<button class="co-tool" title="Sort">⇅</button>' +
-          '<button class="co-tool" title="Columns">⚙</button>' +
+          '<button class="co-tool" title="Columns"><svg class="isvg" aria-hidden="true"><use href="#i-sliders"/></svg></button>' +
           (can("ats:manage") ? '<button class="co-pill" id="coSync" title="Pull companies from your connected ATS">⟳ Sync Loxo</button>' : '') +
-          '<button class="btn btn-primary btn-sm" id="coAdd">＋ Add Company</button>' +
+          '<button class="btn btn-primary btn-sm" id="coAdd">+ Add Company</button>' +
         '</div>' +
         '<div class="co-tabs" id="coTabs"></div>' +
         '<div class="co-filter" id="coFilter" style="display:none"></div>' +
         '<div class="co-bulk" id="coBulk">' +
           '<b id="coSelN">0 selected</b>' +
-          '<button class="btn btn-sm" id="coTagSel">＋ Tag</button>' +
+          '<button class="btn btn-sm" id="coTagSel">+ Tag</button>' +
           '<select id="coStatusSel"><option value="">Set status…</option>' +
             TABS.slice(1).map(function (t) { return '<option value="' + t[0] + '">' + esc(t[1]) + '</option>'; }).join("") +
           '</select>' +
           '<button class="btn btn-ghost btn-sm" id="coClearSel">Clear tags</button>' +
-          '<button class="btn btn-ghost btn-sm" id="coDelSel">🗑 Delete</button>' +
+          '<button class="btn btn-ghost btn-sm" id="coDelSel">Delete</button>' +
         '</div>' +
         '<div class="co-wrap"><table class="co-table">' +
           '<thead><tr id="coHead"></tr></thead>' +
@@ -7122,7 +7122,7 @@
         return '<span class="co-tag" style="' + tagStyle(t) + '">' + esc(t) +
           '<button class="co-tagx" data-untag="' + esc(c.name) + '" data-tagi="' + j + '" title="Remove">×</button></span>';
       }).join("");
-      return '<div class="co-tags">' + chips + '<button class="co-tagadd" data-tagadd="' + esc(c.name) + '" title="Add tag">＋</button></div>';
+      return '<div class="co-tags">' + chips + '<button class="co-tagadd" data-tagadd="' + esc(c.name) + '" title="Add tag">+</button></div>';
     }
     function statusCell(c) {
       var color = STATUS_COLOR[c.status] || "var(--text-dim)";
@@ -7135,7 +7135,7 @@
         '</select></span>';
     }
     function rowHtml(c) {
-      var ext = c.url ? ' <a class="co-ext" href="' + esc(href(c.url)) + '" target="_blank" rel="noopener" title="Open site">↗</a>' : '';
+      var ext = c.url ? ' <a class="co-ext" href="' + esc(href(c.url)) + '" target="_blank" rel="noopener" title="Open site"></a>' : '';
       var urlCell = c.url
         ? '<a class="co-url" href="' + esc(href(c.url)) + '" target="_blank" rel="noopener">' + esc(c.url) + '</a>'
         : '<span class="co-miss">-</span>';
@@ -7311,77 +7311,77 @@
     if (motion === "bd") return renderCompanies(el);
     el.innerHTML = head("Candidates", "Your people database. Filter by stage, owner, title and more on the left; email, enrich, submit, or export the people you select.") +
       '<style>' +
-      '.dt-sub{color:var(--muted,#8b93a1);font-size:12px}' +
-      '.dt-prov{font-size:12px;color:var(--muted,#8b93a1);margin-bottom:10px}' +
+      '.dt-sub{color:var(--muted,var(--text-dim));font-size:12px}' +
+      '.dt-prov{font-size:12px;color:var(--muted,var(--text-dim));margin-bottom:10px}' +
       '.cd-wrap{display:grid;grid-template-columns:232px 1fr;gap:18px;align-items:start}' +
       '@media(max-width:900px){.cd-wrap{grid-template-columns:1fr}}' +
-      '.cd-facets{position:sticky;top:8px;background:var(--panel,#16181d);border:1px solid var(--line,#262a33);border-radius:12px;padding:8px 10px;max-height:calc(100vh - 120px);overflow:auto}' +
-      '.cd-search{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--bg,#0e0f13);color:inherit;margin:4px 0 6px}' +
-      '.cd-facet{border-bottom:1px solid var(--line,#20242c)}.cd-facet:last-child{border-bottom:0}' +
+      '.cd-facets{position:sticky;top:8px;background:var(--panel,var(--surface));border:1px solid var(--line,var(--border));border-radius:12px;padding:8px 10px;max-height:calc(100vh - 120px);overflow:auto}' +
+      '.cd-search{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line,var(--border));background:var(--bg,var(--bg));color:inherit;margin:4px 0 6px}' +
+      '.cd-facet{border-bottom:1px solid var(--line,var(--surface-2))}.cd-facet:last-child{border-bottom:0}' +
       '.cd-fhead{display:flex;align-items:center;gap:6px;padding:10px 4px;cursor:pointer;font-size:13px;font-weight:600;user-select:none}' +
-      '.cd-fhead .cd-fc{font-size:11px;color:#fff;background:var(--accent,#3b82f6);border-radius:10px;padding:1px 7px}' +
-      '.cd-fcaret{margin-left:auto;color:var(--muted,#8b93a1);font-size:11px;transition:transform .15s}' +
+      '.cd-fhead .cd-fc{font-size:11px;color:#fff;background:var(--accent,var(--brand));border-radius:10px;padding:1px 7px}' +
+      '.cd-fcaret{margin-left:auto;color:var(--muted,var(--text-dim));font-size:11px;transition:transform .15s}' +
       '.cd-facet.open .cd-fcaret{transform:rotate(180deg)}' +
       '.cd-fbody{padding:0 2px 10px}' +
       '.cd-fopt{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 2px;cursor:pointer}' +
       '.cd-fopt input{margin:0;flex:0 0 auto}' +
       '.cd-fopt .cd-ol{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-      '.cd-fopt .cd-oc{color:var(--muted,#8b93a1);font-size:11px}' +
-      '.cd-more{font-size:12px;color:var(--accent,#3b82f6);cursor:pointer;padding:5px 2px}' +
+      '.cd-fopt .cd-oc{color:var(--muted,var(--text-dim));font-size:11px}' +
+      '.cd-more{font-size:12px;color:var(--accent,var(--brand));cursor:pointer;padding:5px 2px}' +
       '.cd-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px}' +
-      '.cd-tbtn{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:7px 11px;border-radius:8px;border:1px solid var(--line,#262a33);background:var(--panel,#16181d);color:inherit;cursor:pointer}' +
-      '.cd-tbtn:hover:not(:disabled){border-color:var(--accent,#3b82f6)}' +
-      '.cd-tbtn.primary{background:var(--accent,#3b82f6);border-color:transparent;color:#fff}' +
+      '.cd-tbtn{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:7px 11px;border-radius:8px;border:1px solid var(--line,var(--border));background:var(--panel,var(--surface));color:inherit;cursor:pointer}' +
+      '.cd-tbtn:hover:not(:disabled){border-color:var(--accent,var(--brand))}' +
+      '.cd-tbtn.primary{background:var(--accent,var(--brand));border-color:transparent;color:#fff}' +
       '.cd-tbtn:disabled{opacity:.4;cursor:not-allowed}' +
-      '.cd-tsep{width:1px;align-self:stretch;background:var(--line,#262a33);margin:2px 4px}' +
+      '.cd-tsep{width:1px;align-self:stretch;background:var(--line,var(--border));margin:2px 4px}' +
       '.cd-spacer{flex:1}' +
-      '.cd-tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line,#262a33);margin-bottom:12px}' +
-      '.cd-tab{display:inline-flex;align-items:center;gap:7px;padding:9px 12px;font-size:13px;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted,#8b93a1)}' +
-      '.cd-tab.active{color:inherit;border-bottom-color:var(--accent,#3b82f6);font-weight:600}' +
-      '.cd-tab .cd-tc{font-size:11px;background:var(--line,#20242c);color:var(--muted,#8b93a1);border-radius:10px;padding:1px 7px}' +
-      '.cd-tab.active .cd-tc{background:var(--accent,#3b82f6);color:#fff}' +
-      '.cd-selbar{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted,#8b93a1);margin-bottom:10px}' +
-      '.cd-link{color:var(--accent,#3b82f6);cursor:pointer}' +
+      '.cd-tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line,var(--border));margin-bottom:12px}' +
+      '.cd-tab{display:inline-flex;align-items:center;gap:7px;padding:9px 12px;font-size:13px;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted,var(--text-dim))}' +
+      '.cd-tab.active{color:inherit;border-bottom-color:var(--accent,var(--brand));font-weight:600}' +
+      '.cd-tab .cd-tc{font-size:11px;background:var(--line,var(--surface-2));color:var(--muted,var(--text-dim));border-radius:10px;padding:1px 7px}' +
+      '.cd-tab.active .cd-tc{background:var(--accent,var(--brand));color:#fff}' +
+      '.cd-selbar{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted,var(--text-dim));margin-bottom:10px}' +
+      '.cd-link{color:var(--accent,var(--brand));cursor:pointer}' +
       '.dt-list{display:flex;flex-direction:column;gap:14px}' +
-      '.dt-card{position:relative;background:var(--panel,#16181d);border:1px solid var(--line,#262a33);border-radius:16px;padding:18px 22px;transition:border-color .15s,box-shadow .15s,transform .15s}' +
+      '.dt-card{position:relative;background:var(--panel,var(--surface));border:1px solid var(--line,var(--border));border-radius:16px;padding:18px 22px;transition:border-color .15s,box-shadow .15s,transform .15s}' +
       '.dt-card:hover{border-color:var(--border-strong,#323845);box-shadow:0 14px 34px -20px rgba(0,0,0,.75);transform:translateY(-1px)}' +
-      '.dt-card.sel{border-color:var(--accent,#3b82f6);box-shadow:inset 0 0 0 1px var(--accent,#3b82f6)}' +
-      '.dt-pick{position:absolute;top:18px;right:20px;width:16px;height:16px;cursor:pointer;accent-color:var(--accent,#3b82f6)}' +
-      '.cd-act{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted,#8b93a1);margin-bottom:14px}' +
-      '.cd-act b{color:var(--text,#e7eaf0);font-weight:600}' +
+      '.dt-card.sel{border-color:var(--accent,var(--brand));box-shadow:inset 0 0 0 1px var(--accent,var(--brand))}' +
+      '.dt-pick{position:absolute;top:18px;right:20px;width:16px;height:16px;cursor:pointer;accent-color:var(--accent,var(--brand))}' +
+      '.cd-act{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted,var(--text-dim));margin-bottom:14px}' +
+      '.cd-act b{color:var(--text,var(--text-muted));font-weight:600}' +
       '.dt-head{display:flex;align-items:flex-start;gap:15px;padding-right:28px}' +
-      '.dt-avatar{position:relative;overflow:hidden;flex:0 0 auto;width:54px;height:54px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:18px;color:#fff;background:linear-gradient(135deg,#7c5cff,#4dd0ff);box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}' +
+      '.dt-avatar{position:relative;overflow:hidden;flex:0 0 auto;width:54px;height:54px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:18px;color:#fff;background:linear-gradient(135deg,var(--brand),var(--info));box-shadow:inset 0 0 0 1px var(--border-strong)}' +
       '.dt-avatar-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit}' +
       '.dt-id{flex:1;min-width:0}' +
       '.dt-name{display:flex;align-items:center;gap:7px;font-size:16.5px;font-weight:700;line-height:1.25;letter-spacing:-.01em}' +
       '.dt-name a.dt-li{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:4px;background:#0a66c2;color:#fff;font-size:11px;font-weight:800;text-decoration:none;flex:0 0 auto}' +
       '.dt-title{font-size:13px;margin-top:3px;color:var(--text,#cfd4dd)}' +
-      '.dt-loc{font-size:12px;color:var(--muted,#8b93a1);margin-top:2px;display:flex;align-items:center;gap:5px}' +
+      '.dt-loc{font-size:12px;color:var(--muted,var(--text-dim));margin-top:2px;display:flex;align-items:center;gap:5px}' +
       '.dt-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}' +
       // Clean, visible contact chips (email + phone shown in full).
       '.dt-contactlist{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}' +
-      '.dt-cn{display:inline-flex;align-items:center;gap:7px;max-width:100%;font-size:12.5px;font-weight:600;color:var(--text,#e7eaf0);text-decoration:none;padding:6px 11px;border:1px solid var(--line,#262a33);border-radius:9px;background:var(--bg-soft,rgba(255,255,255,.02));transition:border-color .15s,background .15s,color .15s}' +
-      '.dt-cn:hover{border-color:var(--accent,#3b82f6);background:rgba(124,92,255,.10)}' +
+      '.dt-cn{display:inline-flex;align-items:center;gap:7px;max-width:100%;font-size:12.5px;font-weight:600;color:var(--text,var(--text-muted));text-decoration:none;padding:6px 11px;border:1px solid var(--line,var(--border));border-radius:9px;background:var(--bg-soft,var(--surface-2));transition:border-color .15s,background .15s,color .15s}' +
+      '.dt-cn:hover{border-color:var(--accent,var(--brand));background:var(--brand-soft)}' +
       '.dt-cn-ic{flex:0 0 auto;opacity:.6;font-size:13px}' +
       '.dt-cn-v{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-      '.dt-cn-off{cursor:pointer;color:var(--muted,#8b93a1);border-style:dashed}' +
-      '.dt-cn-off:hover{color:var(--accent,#3b82f6)}' +
+      '.dt-cn-off{cursor:pointer;color:var(--muted,var(--text-dim));border-style:dashed}' +
+      '.dt-cn-off:hover{color:var(--accent,var(--brand))}' +
       '.dt-stage{font-size:11.5px;font-weight:600;padding:6px 13px;border-radius:999px;white-space:nowrap;border:1px solid transparent}' +
-      '.dt-add{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:9px;border:1px solid var(--line,#262a33);cursor:pointer;background:var(--bg-soft,rgba(255,255,255,.03));color:var(--text,#e7eaf0);transition:border-color .15s,background .15s}' +
-      '.dt-add:hover{border-color:var(--accent,#3b82f6);background:color-mix(in srgb,var(--accent,#3b82f6) 12%,transparent);color:var(--accent,#3b82f6)}' +
-      '.dt-body{display:grid;grid-template-columns:1.4fr 1fr;gap:24px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line,#20242c)}' +
+      '.dt-add{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:9px;border:1px solid var(--line,var(--border));cursor:pointer;background:var(--bg-soft,var(--surface-2));color:var(--text,var(--text-muted));transition:border-color .15s,background .15s}' +
+      '.dt-add:hover{border-color:var(--accent,var(--brand));background:color-mix(in srgb,var(--accent,var(--brand)) 12%,transparent);color:var(--accent,var(--brand))}' +
+      '.dt-body{display:grid;grid-template-columns:1.4fr 1fr;gap:24px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line,var(--surface-2))}' +
       '@media(max-width:720px){.dt-body{grid-template-columns:1fr}.dt-actions{margin-left:0}}' +
-      '.dt-seclbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted,#8b93a1);margin-bottom:9px;font-weight:600}' +
+      '.dt-seclbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted,var(--text-dim));margin-bottom:9px;font-weight:600}' +
       '.dt-exp-row{display:flex;gap:11px;align-items:flex-start}' +
-      '.dt-exp-ic{flex:0 0 auto;width:32px;height:32px;border-radius:8px;display:grid;place-items:center;background:color-mix(in srgb,var(--accent,#3b82f6) 14%,transparent);color:var(--accent,#3b82f6);font-size:14px}' +
+      '.dt-exp-ic{flex:0 0 auto;width:32px;height:32px;border-radius:8px;display:grid;place-items:center;background:color-mix(in srgb,var(--accent,var(--brand)) 14%,transparent);color:var(--accent,var(--brand));font-size:14px}' +
       '.dt-exp-t{font-weight:600;font-size:13px}' +
-      '.dt-exp-c{font-size:12px;color:var(--muted,#8b93a1);margin-top:1px}' +
+      '.dt-exp-c{font-size:12px;color:var(--muted,var(--text-dim));margin-top:1px}' +
       '.dt-side-row{display:flex;gap:10px;align-items:center;font-size:13px;margin-bottom:9px}' +
-      '.dt-side-ic{flex:0 0 auto;width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:color-mix(in srgb,var(--accent,#3b82f6) 14%,transparent);color:var(--accent,#3b82f6);font-size:12px}' +
+      '.dt-side-ic{flex:0 0 auto;width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:color-mix(in srgb,var(--accent,var(--brand)) 14%,transparent);color:var(--accent,var(--brand));font-size:12px}' +
       '.dt-skills{margin-top:16px}' +
-      '.dt-tag{display:inline-block;font-size:11.5px;font-weight:500;padding:4px 11px;border-radius:999px;background:transparent;border:1px solid var(--line,#2a2f3a);color:var(--muted,#9aa3b2);margin:0 6px 6px 0}' +
-      '.cd-showmore{text-align:center;border-top:1px solid var(--line,#20242c);margin-top:14px;padding-top:10px;font-size:12px;color:var(--accent,#3b82f6);cursor:pointer}' +
-      '.cd-bio{font-size:12.5px;color:var(--muted,#9aa3b2);line-height:1.55;white-space:pre-wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line,#20242c)}' +
+      '.dt-tag{display:inline-block;font-size:11.5px;font-weight:500;padding:4px 11px;border-radius:999px;background:transparent;border:1px solid var(--line,#2a2f3a);color:var(--muted,var(--text-dim));margin:0 6px 6px 0}' +
+      '.cd-showmore{text-align:center;border-top:1px solid var(--line,var(--surface-2));margin-top:14px;padding-top:10px;font-size:12px;color:var(--accent,var(--brand));cursor:pointer}' +
+      '.cd-bio{font-size:12.5px;color:var(--muted,var(--text-dim));line-height:1.55;white-space:pre-wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line,var(--surface-2))}' +
       '</style>' +
       '<div id="dtProv" class="dt-prov"></div>' +
       '<div class="cd-wrap">' +
@@ -7409,7 +7409,7 @@
     }
     function paintProv() {
       var prov = (state.providers || []).map(function (p) {
-        return (p.configured ? "🟢 " : "⚪ ") + esc(p.label) + (p.configured ? " · live" : " · awaiting key");
+        return (p.configured ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok)"></span> ' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-dim)"></span> ') + esc(p.label) + (p.configured ? " · live" : " · awaiting key");
       }).join(" &nbsp;·&nbsp; ");
       $("#dtProv", el).innerHTML = prov ? ("Providers: " + prov) : "";
     }
@@ -7511,18 +7511,18 @@
     function paintToolbar() {
       var n = Object.keys(state.sel).length, dis = n ? "" : " disabled";
       $("#cdToolbar", el).innerHTML =
-        '<button class="cd-tbtn primary" id="cdAdd">＋ Add people ▾</button>' +
+        '<button class="cd-tbtn primary" id="cdAdd">+ Add people ▾</button>' +
         '<span class="cd-tsep"></span>' +
-        '<button class="cd-tbtn" id="cdDelete"' + dis + '>🗑 Delete</button>' +
+        '<button class="cd-tbtn" id="cdDelete"' + dis + '>Delete</button>' +
         '<span class="cd-tsep"></span>' +
-        '<button class="cd-tbtn" id="cdEmail"' + dis + '>✉️ Email</button>' +
-        '<button class="cd-tbtn" id="cdSms"' + dis + '>📱 SMS</button>' +
-        '<button class="cd-tbtn" id="cdFind"' + dis + '>🔎 Find contact</button>' +
+        '<button class="cd-tbtn" id="cdEmail"' + dis + '>Email</button>' +
+        '<button class="cd-tbtn" id="cdSms"' + dis + '>SMS</button>' +
+        '<button class="cd-tbtn" id="cdFind"' + dis + '>Find contact</button>' +
         '<button class="cd-tbtn" id="cdSubmit"' + dis + '>➤ Submit candidates</button>' +
         '<span class="cd-spacer"></span>' +
-        '<button class="cd-tbtn" id="cdAddTo"' + dis + '>＋ Add to…</button>' +
+        '<button class="cd-tbtn" id="cdAddTo"' + dis + '>+ Add to…</button>' +
         (can("ats:manage") ? '<button class="cd-tbtn" id="cdLoxo" title="Pull people from your connected ATS into Candidates">⟳ Sync Loxo</button>' : '') +
-        '<button class="cd-tbtn" id="cdExport">⬇ Export</button>';
+        '<button class="cd-tbtn" id="cdExport">Export</button>';
       var sel = function () { return Object.keys(state.sel); };
       $("#cdAdd", el).addEventListener("click", function () { openDataImport(load); });
       $("#cdDelete", el).addEventListener("click", function () { if (n) delSel(); });
@@ -7571,10 +7571,10 @@
     }
     function sourceLabel(s) { return s === "zoominfo-api" ? "API" : s === "manual" ? "Manual" : "Imported"; }
     function stageMeta(s) {
-      var map = { applied: ["#0ea5e9", "rgba(14,165,233,.16)"], longlist: ["#94a3b8", "rgba(148,163,184,.16)"], shortlist: ["#a855f7", "rgba(168,85,247,.16)"],
-        outbound: ["#e0961f", "rgba(245,158,11,.16)"], screening: ["#3b82f6", "rgba(59,130,246,.16)"], submitted: ["#e0961f", "rgba(245,158,11,.16)"],
-        interviewing: ["#22c55e", "rgba(34,197,94,.16)"], rejected: ["#ef4444", "rgba(239,68,68,.16)"], hired: ["#16a34a", "rgba(22,163,74,.2)"], contact: ["#94a3b8", "rgba(148,163,184,.16)"] };
-      return map[String(s || "").toLowerCase()] || ["#e0961f", "rgba(245,158,11,.16)"];
+      var map = { applied: ["#0ea5e9", "rgba(14,165,233,.16)"], longlist: ["var(--text-dim)", "rgba(148,163,184,.16)"], shortlist: ["#a855f7", "rgba(168,85,247,.16)"],
+        outbound: ["var(--warn)", "var(--warn-bg)"], screening: ["var(--brand)", "rgba(59,130,246,.16)"], submitted: ["var(--warn)", "var(--warn-bg)"],
+        interviewing: ["var(--ok)", "var(--ok-bg)"], rejected: ["var(--danger)", "var(--danger-bg)"], hired: ["#16a34a", "rgba(22,163,74,.2)"], contact: ["var(--text-dim)", "rgba(148,163,184,.16)"] };
+      return map[String(s || "").toLowerCase()] || ["var(--warn)", "var(--warn-bg)"];
     }
     function relTime(s) {
       if (!s) return "";
@@ -7603,11 +7603,11 @@
       // Contact: show the actual email + phone as clean, clickable chips; fall back
       // to an enrich action only when the value is missing.
       var emailCn = r.email
-        ? '<a class="dt-cn" href="mailto:' + esc(r.email) + '" title="Email"><span class="dt-cn-ic">✉</span><span class="dt-cn-v">' + esc(r.email) + '</span></a>'
-        : '<button class="dt-cn dt-cn-off" data-enrich="email" data-id="' + esc(r.id) + '"><span class="dt-cn-ic">✉</span><span class="dt-cn-v">Find email</span></button>';
+        ? '<a class="dt-cn" href="mailto:' + esc(r.email) + '" title="Email"><span class="dt-cn-ic"><svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg></span><span class="dt-cn-v">' + esc(r.email) + '</span></a>'
+        : '<button class="dt-cn dt-cn-off" data-enrich="email" data-id="' + esc(r.id) + '"><span class="dt-cn-ic"><svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg></span><span class="dt-cn-v">Find email</span></button>';
       var phoneCn = phone
-        ? '<a class="dt-cn" href="tel:' + esc(phone) + '" title="Call"><span class="dt-cn-ic">✆</span><span class="dt-cn-v">' + esc(phone) + '</span></a>'
-        : '<button class="dt-cn dt-cn-off" data-enrich="phone" data-id="' + esc(r.id) + '"><span class="dt-cn-ic">✆</span><span class="dt-cn-v">Find phone</span></button>';
+        ? '<a class="dt-cn" href="tel:' + esc(phone) + '" title="Call"><span class="dt-cn-ic"><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg></span><span class="dt-cn-v">' + esc(phone) + '</span></a>'
+        : '<button class="dt-cn dt-cn-off" data-enrich="phone" data-id="' + esc(r.id) + '"><span class="dt-cn-ic"><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg></span><span class="dt-cn-v">Find phone</span></button>';
       var contact = '<div class="dt-contactlist">' + emailCn + phoneCn + '</div>';
 
       var sm = stageMeta(r.stage || r.recordType);
@@ -7620,20 +7620,20 @@
       if (r.stage) actBits.push('<b>' + esc(r.stage) + '</b>'); else if (r.recordType) actBits.push('<b>' + esc(r.recordType) + '</b>');
       if (rel) actBits.push(esc(rel));
       if (r.owner) actBits.push((r.recordType === "Contact" ? "owned by " : "with ") + esc(r.owner));
-      var act = actBits.length ? '<div class="cd-act">📋 ' + actBits.join(" · ") + '</div>' : '';
+      var act = actBits.length ? '<div class="cd-act">' + actBits.join(" · ") + '</div>' : '';
 
       // EXPERIENCE: only the current role, we never invent prior history.
       var exp = (r.title || r.company)
-        ? '<div class="dt-exp-row"><div class="dt-exp-ic">🏢</div><div>' +
+        ? '<div class="dt-exp-row"><div class="dt-exp-ic"><svg class="isvg" aria-hidden="true"><use href="#i-building"/></svg></div><div>' +
             (r.title ? '<div class="dt-exp-t">' + esc(r.title) + '</div>' : '') +
             (r.company ? '<div class="dt-exp-c">' + esc(r.company) + '</div>' : '') +
           '</div></div>'
         : '<div class="dt-sub">No role on file.</div>';
 
       var side = "";
-      if (r.company) side += '<div class="dt-side-row"><span class="dt-side-ic">🏢</span><span>' + esc(r.company) + (r.companyDomain ? ' · <span class="dt-sub">' + esc(r.companyDomain) + '</span>' : '') + '</span></div>';
-      if (loc) side += '<div class="dt-side-row"><span class="dt-side-ic">📍</span><span>' + esc(loc) + '</span></div>';
-      if (r.compensation) side += '<div class="dt-side-row"><span class="dt-side-ic">💰</span><span>' + esc(r.compensation) + '</span></div>';
+      if (r.company) side += '<div class="dt-side-row"><span class="dt-side-ic"><svg class="isvg" aria-hidden="true"><use href="#i-building"/></svg></span><span>' + esc(r.company) + (r.companyDomain ? ' · <span class="dt-sub">' + esc(r.companyDomain) + '</span>' : '') + '</span></div>';
+      if (loc) side += '<div class="dt-side-row"><span class="dt-side-ic"><svg class="isvg" aria-hidden="true"><use href="#i-pin"/></svg></span><span>' + esc(loc) + '</span></div>';
+      if (r.compensation) side += '<div class="dt-side-row"><span class="dt-side-ic"><svg class="isvg" aria-hidden="true"><use href="#i-card"/></svg></span><span>' + esc(r.compensation) + '</span></div>';
       if (!side) side = '<div class="dt-sub">-</div>';
 
       // Skills/tags row -> real tags from the export (fallback to industry/seniority).
@@ -7661,7 +7661,7 @@
           '</div>' +
           '<div class="dt-actions">' +
             stageBadge +
-            '<button class="dt-add" data-add="' + esc(r.id) + '">＋ Add to…</button>' +
+            '<button class="dt-add" data-add="' + esc(r.id) + '">+ Add to…</button>' +
           '</div>' +
         '</div>' +
         '<div class="dt-body">' +
@@ -7676,8 +7676,8 @@
       paintSelbar(rows);
       if (!state.all.length) {
         bodyEl.innerHTML = '<div class="empty">No people yet.<br><br>' +
-          '<button class="cd-tbtn primary" id="cdSeed">⬇ Load Lume Search Partners export</button> &nbsp; ' +
-          '<button class="cd-tbtn" id="cdImport2">⬆ Import a CSV</button></div>';
+          '<button class="cd-tbtn primary" id="cdSeed">Load Lume Search Partners export</button> &nbsp; ' +
+          '<button class="cd-tbtn" id="cdImport2">Import a CSV</button></div>';
         var seed = $("#cdSeed", el); if (seed) seed.addEventListener("click", function () { seedLume(seed); });
         var imp = $("#cdImport2", el); if (imp) imp.addEventListener("click", function () { openDataImport(load); });
         return;
@@ -7718,7 +7718,7 @@
           var i = state.all.findIndex(function (r) { return r.id === id; });
           if (i >= 0) state.all[i] = res.data.record;
           var f = res.data.found || {};
-          toast((f.email || f.phone) ? "Enriched ✓" : "Nothing new found");
+          toast((f.email || f.phone) ? "Enriched" : "Nothing new found");
           paintFeed();
         } else { toast("Enrich failed"); if (btn) { btn.disabled = false; btn.textContent = "↻"; } }
       }).catch(function () { toast("Could not reach the server."); if (btn) { btn.disabled = false; btn.textContent = "↻"; } });
@@ -7782,8 +7782,8 @@
       if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
       send("/dev/seed-data", "POST", {}).then(function (res) {
         if (res.ok) { toast("Loaded " + (res.data.added || 0) + " new, updated " + (res.data.updated || 0)); load(); }
-        else { toast("Load failed (" + (res.data.error || res.status) + ")"); if (btn) { btn.disabled = false; btn.textContent = "⬇ Load Lume Search Partners export"; } }
-      }).catch(function () { toast("Could not reach the server."); if (btn) { btn.disabled = false; btn.textContent = "⬇ Load Lume Search Partners export"; } });
+        else { toast("Load failed (" + (res.data.error || res.status) + ")"); if (btn) { btn.disabled = false; btn.textContent = "Load Lume Search Partners export"; } }
+      }).catch(function () { toast("Could not reach the server."); if (btn) { btn.disabled = false; btn.textContent = "Load Lume Search Partners export"; } });
     }
 
     // search wiring
@@ -7927,7 +7927,7 @@
      The email infrastructure now runs on the dedicated RecruitersOS Mail
      platform (Azure Communication Services): domains, sender mailboxes, warmup,
      deliverability health, MPP/bot-filtered open + click tracking, and the reply
-     inbox. This panel embeds that app — the same pattern OS Text uses for taltxt.
+     inbox. This panel embeds that app, the same pattern OS Text uses for taltxt.
      The mail app runs on its own host; set window.RECRUITEROS_MAIL_URL to point
      at it (defaults to the mail subdomain). Stand it up via DEPLOY-EMAIL.md. */
   var MAIL_BASE = (typeof window !== "undefined" && window.RECRUITEROS_MAIL_URL) || "https://mail.recruitersos.co";
@@ -7935,11 +7935,11 @@
   function renderSending(el) {
     var base = String(MAIL_BASE).replace(/\/+$/, "");
     el.innerHTML =
-      head("Email Sending", "Your owned email infrastructure — domains, sender mailboxes, warmup, deliverability health and open/click tracking — powered by RecruitersOS Mail (Azure Communication Services).") +
+      head("Email Sending", "Your owned email infrastructure, domains, sender mailboxes, warmup, deliverability health and open/click tracking, powered by RecruitersOS Mail (Azure Communication Services).") +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px">' +
-        '<a class="btn btn-primary btn-sm" href="' + esc(base + "/setup") + '" target="_blank" rel="noopener">⚙️ Setup &amp; domains</a>' +
-        '<a class="btn btn-ghost btn-sm" href="' + esc(base + "/health-stats") + '" target="_blank" rel="noopener">📊 Health stats</a>' +
-        '<a class="btn btn-ghost btn-sm" href="' + esc(base + "/inbox") + '" target="_blank" rel="noopener">✉️ Reply inbox</a>' +
+        '<a class="btn btn-primary btn-sm" href="' + esc(base + "/setup") + '" target="_blank" rel="noopener">Setup &amp; domains</a>' +
+        '<a class="btn btn-ghost btn-sm" href="' + esc(base + "/health-stats") + '" target="_blank" rel="noopener">Health stats</a>' +
+        '<a class="btn btn-ghost btn-sm" href="' + esc(base + "/inbox") + '" target="_blank" rel="noopener">Reply inbox</a>' +
         '<span class="muted" style="font-size:11px">Embedded from ' + esc(base) + '</span>' +
       '</div>' +
       '<div class="card" style="padding:0;overflow:hidden">' +
@@ -7947,7 +7947,7 @@
         'style="width:100%;height:calc(100vh - 210px);min-height:620px;border:0;border-radius:12px;background:var(--bg)" ' +
         'allow="clipboard-read; clipboard-write"></iframe>' +
       '</div>' +
-      '<p class="muted" style="font-size:12px;margin-top:10px">Not loading? The mail platform isn’t reachable yet at <code>' + esc(base) + '</code> — see DEPLOY-EMAIL.md to stand it up.</p>';
+      '<p class="muted" style="font-size:12px;margin-top:10px">Not loading? The mail platform isn’t reachable yet at <code>' + esc(base) + '</code>, see DEPLOY-EMAIL.md to stand it up.</p>';
   }
 
   /* ---------------- JD Sourcing ----------------
@@ -7992,19 +7992,19 @@
       '.jd-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}' +
       '.jd-cap{font-size:12.5px;color:var(--text-muted);display:inline-flex;align-items:center;gap:6px}' +
       '.jd-cap input{width:62px;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px;margin:0 2px}' +
-      '.jd-cost{display:inline-block;margin-left:10px;padding:4px 12px;border-radius:999px;background:linear-gradient(135deg,rgba(124,92,255,.16),rgba(80,200,255,.12));border:1px solid rgba(124,92,255,.4);color:var(--text);font-size:12.5px;font-weight:600;vertical-align:middle;transition:transform .12s ease;white-space:nowrap}' +
+      '.jd-cost{display:inline-block;margin-left:10px;padding:4px 12px;border-radius:999px;background:linear-gradient(135deg,var(--brand-soft),rgba(80,200,255,.12));border:1px solid color-mix(in srgb, var(--brand) 40%, transparent);color:var(--text);font-size:12.5px;font-weight:600;vertical-align:middle;transition:transform .12s ease;white-space:nowrap}' +
       '.jd-cost.bump{transform:scale(1.06)}' +
       '.jd-cost b{color:var(--brand-2);font-variant-numeric:tabular-nums}' +
       '.jd-prog-head{display:flex;align-items:center;gap:9px;margin-bottom:9px;font-size:14px}' +
       '.jd-prog-head .jd-prog-pct{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:700;color:var(--brand-2)}' +
       '.jd-prog-dot{width:10px;height:10px;border-radius:50%;background:var(--brand-2);animation:jdpulse 1.3s infinite}' +
-      '@keyframes jdpulse{0%{box-shadow:0 0 0 0 rgba(124,92,255,.55)}70%{box-shadow:0 0 0 9px rgba(124,92,255,0)}100%{box-shadow:0 0 0 0 rgba(124,92,255,0)}}' +
+      '@keyframes jdpulse{0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--brand) 40%, transparent)}70%{box-shadow:0 0 0 9px color-mix(in srgb, var(--brand) 40%, transparent)}100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--brand) 40%, transparent)}}' +
       '.jd-prog-track{height:11px;border-radius:999px;background:var(--bg-soft);border:1px solid var(--border);overflow:hidden}' +
       '.jd-prog-fill{height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--brand),var(--brand-2));background-size:200% 100%;animation:jdflow 1.1s linear infinite;transition:width .3s ease}' +
       '@keyframes jdflow{0%{background-position:0 0}100%{background-position:-200% 0}}' +
       '.jd-prog-meta{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-size:12px}' +
-      '.jd-prog.done .jd-prog-dot{animation:none;background:#33d69f}' +
-      '.jd-prog.done .jd-prog-fill{animation:none;background:#33d69f}' +
+      '.jd-prog.done .jd-prog-dot{animation:none;background:var(--ok)}' +
+      '.jd-prog.done .jd-prog-fill{animation:none;background:var(--ok)}' +
       '.jd-cardhead{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}' +
       '.jd-vetctl{display:inline-flex;align-items:center;gap:9px;font-size:13px;color:var(--text-muted)}' +
       '.jd-vetctl input{width:54px;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:13px;padding:5px 7px;text-align:center}' +
@@ -8016,13 +8016,13 @@
       '.jd-refine{display:flex;gap:8px;align-items:center;margin-top:15px}' +
       '.jd-refine input{flex:1;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:13.5px;padding:10px 13px}' +
       '.jd-refine input::placeholder{color:var(--text-dim)}' +
-      '.jd-refine input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
+      '.jd-refine input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
       '.jd-refine-note{margin:9px 0 0;font-size:12.5px;color:var(--brand-2)}' +
       '.jd-tips{margin-top:8px;padding:10px 14px;background:var(--bg-soft);border:1px solid var(--border);border-left:3px solid var(--brand);border-radius:11px;font-size:12.5px;color:var(--text-muted);line-height:1.5}' +
       '.jd-tips>.jd-tips-h{color:var(--text);font-weight:700}' +
       '.jd-tipgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:4px 18px;margin-top:7px}' +
       '.jd-tipgrid>span{display:block;position:relative;padding-left:15px}' +
-      '.jd-tipgrid>span::before{content:"";position:absolute;left:0;top:6px;width:6px;height:6px;border-radius:50%;background:linear-gradient(135deg,#7c5cff,var(--brand-2))}' +
+      '.jd-tipgrid>span::before{content:"";position:absolute;left:0;top:6px;width:6px;height:6px;border-radius:50%;background:linear-gradient(135deg,var(--brand),var(--brand-2))}' +
       '.jd-tipgrid b{color:var(--brand-2);font-weight:600}' +
       '.jd-builder{position:relative;padding:11px 14px;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:12px;margin-bottom:11px}' +
       '.jd-builder::after{content:none}' +
@@ -8033,7 +8033,7 @@
       '.jd-lead{font-size:13.5px;margin-bottom:8px}.jd-lead b{color:var(--text)}' +
       '.jd-builder input{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:9px;color:var(--text);font:inherit;font-size:13.5px;padding:9px 12px}' +
       '.jd-builder input::placeholder{color:var(--text-dim)}' +
-      '.jd-builder input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
+      '.jd-builder input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
       '.jd-builder-act{display:flex;align-items:center;gap:11px;margin-top:10px}' +
       '.jd-builder-act .muted{font-size:12px}' +
       '.jd-or{display:flex;align-items:center;text-align:center;color:var(--text-dim);font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin:4px 0 12px}' +
@@ -8044,11 +8044,11 @@
       '#jdName,#jdText,#jdbTitle,#jdbCompany,#jdbNotes,#jdbLocation{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 14px;margin:0;transition:border-color .12s,box-shadow .12s}' +
       '#jdText{line-height:1.55;resize:vertical;min-height:104px}' +
       '#jdName::placeholder,#jdText::placeholder,#jdbTitle::placeholder,#jdbCompany::placeholder,#jdbNotes::placeholder,#jdbLocation::placeholder{color:var(--text-dim)}' +
-      '#jdName:focus,#jdText:focus,#jdbTitle:focus,#jdbCompany:focus,#jdbNotes:focus,#jdbLocation:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
+      '#jdName:focus,#jdText:focus,#jdbTitle:focus,#jdbCompany:focus,#jdbNotes:focus,#jdbLocation:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
       '.jd-field{margin-bottom:8px}' +
       '.jd-field>label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:700;margin-bottom:6px}' +
       '.jd-opt{font-weight:500;text-transform:none;letter-spacing:0;opacity:.75;margin-left:7px}' +
-      '.jd-lead2{font-size:16px;font-weight:800;letter-spacing:.01em;margin:0 0 3px;background:linear-gradient(90deg,#7c5cff,var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
+      '.jd-lead2{font-size:16px;font-weight:800;letter-spacing:.01em;margin:0 0 3px;background:linear-gradient(90deg,var(--brand),var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
       '.jd-lead-sub{font-size:12.5px;color:var(--text-muted);margin:0 0 12px}' +
       '.jd-locrow{display:flex;gap:8px}.jd-locrow #jdbLocation{flex:1}' +
       '#jdbRadius{background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:13px;padding:0 9px;cursor:pointer;flex:0 0 auto}' +
@@ -8126,7 +8126,7 @@
           '<textarea id="jdText" rows="4" placeholder="Paste the job description here. The more real detail, the stronger the search."></textarea></div>' +
         '<div class="jd-builder"><div class="jd-buildbar" style="margin:0;justify-content:space-between;gap:10px">' +
           '<span class="jd-builder-sub" style="margin:0">The AI refines your input, fills the gaps, and widens the net. Run this first, then Analyze.</span>' +
-          '<button class="btn btn-primary btn-sm" id="jdbBtn" style="flex:0 0 auto">✨ Build refined JD</button></div>' +
+          '<button class="btn btn-primary btn-sm" id="jdbBtn" style="flex:0 0 auto">Build refined JD</button></div>' +
         '</div>' +
         '<details class="jd-tipsd"><summary>See what sharpens the search <span class="muted">Tap to expand</span></summary>' +
           '<div class="jd-tipgrid">' +
@@ -8144,11 +8144,11 @@
         '<div class="jd-actions">' +
           '<button class="btn btn-primary btn-sm" id="jdAnalyze">Analyze JD</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>Find candidates</button>' +
-          '<span class="jd-cap muted">Scan up to <input id="jdCap" type="number" min="1" max="5000" value="500" title="Ceiling on candidates gathered per run. Not a minimum — runs return however many qualified people the search finds, up to this number."> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10" title="0 = show every profile the search finds (nothing filtered). Higher = keep only stronger matches. 10 is a wide net; 40+ is tight."></span>' +
-          '<label class="jd-cap muted" title="Skip anyone this workspace already surfaced in past runs — surfaces fresh people (new market entrants) instead of repeats."><input type="checkbox" id="jdFresh" style="width:auto;margin:0 4px 0 0;vertical-align:middle"> Fresh only</label>' +
+          '<span class="jd-cap muted">Scan up to <input id="jdCap" type="number" min="1" max="5000" value="500" title="Ceiling on candidates gathered per run. Not a minimum, runs return however many qualified people the search finds, up to this number."> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10" title="0 = show every profile the search finds (nothing filtered). Higher = keep only stronger matches. 10 is a wide net; 40+ is tight."></span>' +
+          '<label class="jd-cap muted" title="Skip anyone this workspace already surfaced in past runs, surfaces fresh people (new market entrants) instead of repeats."><input type="checkbox" id="jdFresh" style="width:auto;margin:0 4px 0 0;vertical-align:middle"> Fresh only</label>' +
           '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
-          '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>💾 Save to JD Sourcing</button>' +
-          '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">➕ Add to queue</button>' +
+          '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>Save to JD Sourcing</button>' +
+          '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">Add to queue</button>' +
         '</div>' +
         '<div class="jd-hints">' +
           '<p class="jd-hint"><b>Min fit</b> &middot; the match-strength bar, from 0 to 100. Leave it at 0 to see every profile found, with nothing filtered. Raise it to keep only the strongest matches: 10 casts a wide net, 40 and up runs tight.</p>' +
@@ -8161,7 +8161,7 @@
         '<p class="muted" style="margin-top:-4px">Each queued JD runs in turn (search, rank, save) using the Max and min-fit set above. Keep this tab open while the queue runs; each finished list lands below with a downloadable CSV of LinkedIn URLs.</p>' +
         '<div id="jdQueueList"></div>' +
         '<div class="jd-actions">' +
-          '<button class="btn btn-primary btn-sm" id="jdQueueRun">▶ Run queue</button>' +
+          '<button class="btn btn-primary btn-sm" id="jdQueueRun">Run queue</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdQueueClear">Clear queue</button>' +
           '<span class="muted" id="jdQueueProg"></span>' +
         '</div>' +
@@ -8197,7 +8197,7 @@
       var cur = jdCurrentStep();
       host.innerHTML = JD_STEPS.map(function (st) {
         var cls = st.n < cur ? "done" : st.n === cur ? "active" : "";
-        return '<li class="jd-step ' + cls + '"><span class="jd-step-n">' + (st.n < cur ? "✓" : String(st.n)) + '</span>' +
+        return '<li class="jd-step ' + cls + '"><span class="jd-step-n">' + (st.n < cur ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : String(st.n)) + '</span>' +
           '<span class="jd-step-l">' + st.l + '</span><span class="jd-step-s">' + st.s + '</span></li>';
       }).join("");
     }
@@ -8209,7 +8209,7 @@
       var coreEmpty = !(i.titles && i.titles.length) && !(i.targetCompanies && i.targetCompanies.length) && !(i.geos && i.geos.length);
       if (coreEmpty) {
         host.innerHTML = '<div class="card"><h3>Ideal candidate</h3>' +
-          '<p class="jd-empty">⚠ ' + esc(state.note || "Couldn't read the brief into a profile. Click Analyze JD again, or add a clear job title, a few real example companies, and a location to the brief.") + '</p></div>';
+          '<p class="jd-empty">' + esc(state.note || "Couldn't read the brief into a profile. Click Analyze JD again, or add a clear job title, a few real example companies, and a location to the brief.") + '</p></div>';
         return;
       }
       // Role-adaptive columns: only show fields that apply (e.g. Sells to is sales-only).
@@ -8225,8 +8225,8 @@
       host.innerHTML = '<div class="card"><h3>Ideal candidate · ' + esc(i.label || "") + '</h3>' +
         '<div class="jd-icp">' + cells.join("") + '</div>' +
         '<div class="jd-refine"><input id="jdRefineInput" type="text" placeholder="Dive deeper: refine with AI, e.g. only Director+ who sold into manufacturing, exclude agencies" />' +
-          '<button class="btn btn-primary btn-sm" id="jdRefineBtn">✨ Refine</button></div>' +
-        (state.refineNote ? '<p class="jd-refine-note">✨ ' + esc(state.refineNote) + '</p>' : '') +
+          '<button class="btn btn-primary btn-sm" id="jdRefineBtn">Refine</button></div>' +
+        (state.refineNote ? '<p class="jd-refine-note">' + esc(state.refineNote) + '</p>' : '') +
         '<h4 style="margin-top:14px">Generated searches (' + state.queries.length + ')</h4>' +
         '<div class="jd-queries">' + state.queries.map(function (q) {
           return '<div class="jd-q"><span class="jd-q-label">' + esc(q.label) + '</span>' +
@@ -8246,7 +8246,7 @@
           '<td>' + (c.linkedinUrl ? '<a href="' + esc(c.linkedinUrl) + '" target="_blank" rel="noopener">view</a>' : '') + '</td></tr>';
       }).join("");
       host.innerHTML = '<div class="card"><h3>Ranked candidates · ' + state.candidates.length + '</h3>' +
-        (state.warnings.length ? '<p class="muted">⚠ ' + esc(state.warnings.join(" · ")) + '</p>' : '') +
+        (state.warnings.length ? '<p class="muted">' + esc(state.warnings.join(" · ")) + '</p>' : '') +
         '<div class="jd-tablewrap"><table class="jd-table"><thead><tr><th>Fit</th><th>Name</th><th>Title</th><th>Company</th><th>Location</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
         (state.candidates.length > 300 ? '<p class="muted">Showing top 300 of ' + state.candidates.length + '. Save to keep the full set.</p>' : '') +
       '</div>';
@@ -8260,7 +8260,7 @@
         // FAILSAFE: if the backend reports non-durable storage, warn LOUDLY before the user
         // saves work that won't survive a restart. durable===false should never happen in prod.
         var warn = (d && d.durable === false)
-          ? '<div class="card" style="border-color:#c0392b;background:#2a1414"><b>⚠ Saved lists are NOT being stored durably.</b><br><span class="muted">The server is running in memory-only mode, so saved searches will be lost on the next restart. Don\'t rely on saving until this is fixed (check the /data volume / persistence config).</span></div>'
+          ? '<div class="card" style="border-color:#c0392b;background:#2a1414"><b>Saved lists are NOT being stored durably.</b><br><span class="muted">The server is running in memory-only mode, so saved searches will be lost on the next restart. Don\'t rely on saving until this is fixed (check the /data volume / persistence config).</span></div>'
           : '';
         if (!runs.length) { host.innerHTML = warn + '<p class="muted">No saved lists yet. Analyze a JD, find candidates, then Save. Or queue several JDs above and run them with the Run queue button.</p>'; return; }
         host.innerHTML = warn + runs.map(function (r) {
@@ -8272,12 +8272,12 @@
             (vetted ? (' · ' + vetted + ' deep-vetted') : '') +
             (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates') : '') + '</span></div>' +
             '<div class="jd-run-actions">' +
-              '<button class="btn btn-ghost btn-sm" data-csv="' + esc(r.id) + '">⬇ Excel (URLs)</button>' +
-              '<button class="btn btn-ghost btn-sm" data-rerank="' + esc(r.id) + '" title="AI re-ranks the top 100 by true relevance to the role before you deep-vet — sharper than the rule score.">✨ Re-rank</button>' +
-              '<button class="btn btn-ghost btn-sm" data-vet="' + esc(r.id) + '">🔬 Deep-vet</button>' +
-              '<button class="btn btn-ghost btn-sm" data-laxis="' + esc(r.id) + '" title="First-pass enrichment through Laxis: uploads this list to app.laxis.tech, runs their enrichment, then fills any gaps with the in-house waterfall. Up to 1,000 contacts per pass.">🧬 Enrich via Laxis</button>' +
+              '<button class="btn btn-ghost btn-sm" data-csv="' + esc(r.id) + '">Excel (URLs)</button>' +
+              '<button class="btn btn-ghost btn-sm" data-rerank="' + esc(r.id) + '" title="AI re-ranks the top 100 by true relevance to the role before you deep-vet, sharper than the rule score.">Re-rank</button>' +
+              '<button class="btn btn-ghost btn-sm" data-vet="' + esc(r.id) + '">Deep-vet</button>' +
+              '<button class="btn btn-ghost btn-sm" data-laxis="' + esc(r.id) + '" title="First-pass enrichment through Laxis: uploads this list to app.laxis.tech, runs their enrichment, then fills any gaps with the in-house waterfall. Up to 1,000 contacts per pass.">Enrich via Laxis</button>' +
               '<button class="btn btn-primary btn-sm" data-promote="' + esc(r.id) + '">Send to Candidates →</button>' +
-              '<span class="jd-enrich-grp">⚡ Enrich top <input type="number" class="jd-enrichn" min="1" max="' + Math.max(1, n) + '" value="' + Math.min(25, Math.max(1, n)) + '" title="Choose how many of the top-ranked candidates to enrich (business email + phone). You decide how many; costs apply per lookup."> ' +
+              '<span class="jd-enrich-grp">Enrich top <input type="number" class="jd-enrichn" min="1" max="' + Math.max(1, n) + '" value="' + Math.min(25, Math.max(1, n)) + '" title="Choose how many of the top-ranked candidates to enrich (business email + phone). You decide how many; costs apply per lookup."> ' +
                 '<button class="btn btn-ghost btn-sm" data-enrich="' + esc(r.id) + '">Enrich</button></span>' +
               '<button class="btn btn-ghost btn-sm" data-del="' + esc(r.id) + '">Delete</button>' +
             '</div></div>';
@@ -8285,7 +8285,7 @@
       }).catch(function () { var host = $("#jdRuns"); if (host) host.innerHTML = '<p class="muted">Could not load saved lists.</p>'; });
     }
 
-    /* ---- Export (LinkedIn URLs only — enrichment happens in your own tool) ---- */
+    /* ---- Export (LinkedIn URLs only, enrichment happens in your own tool) ---- */
     function csvSlug(s) { return ((s || "list").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase()) || "list"; }
     // Force a true file save. Anchors that aren't in the DOM (and blob: links in some
     // embedded browsers) get ignored and open inline instead of downloading.
@@ -8304,7 +8304,7 @@
     }
 
     /* ---- Real .xlsx writer (no libraries) ----
-       We export .xlsx (not .csv) so Windows opens it in Excel by default — .csv can be
+       We export .xlsx (not .csv) so Windows opens it in Excel by default, .csv can be
        hijacked by another app (e.g. an editor) as its default program. An .xlsx file is a
        ZIP of a few XML parts; we build the ZIP by hand with stored (uncompressed) entries. */
     var _crcTable;
@@ -8382,7 +8382,7 @@
 
     /* ---- Live deep-vet cost estimate (updates as the toggle / rates move) ----
        Per candidate: one Claude Sonnet 4.6 call (~2.5k input + ~0.45k output, fixed)
-       plus one RapidAPI profile lookup (rate you set — provider-specific). Plus a flat
+       plus one RapidAPI profile lookup (rate you set, provider-specific). Plus a flat
        monthly RapidAPI plan cost. Sonnet rates: $3 / 1M input, $15 / 1M output. */
     /* Cost model, priced on the live tool (Linkedin Data Scraper API, Pro $50 / 10k
        requests ≈ $0.005 per call). One request = one call: a search call returns a
@@ -8429,18 +8429,18 @@
       var btn = $("#jdbBtn"); if (btn) { btn.disabled = true; btn.textContent = "Working…"; }
       msg(base ? "Strengthening what you gave us into a sourcing brief…" : "Drafting a sourcing-ready JD…");
       send("/sourcing", "POST", { action: "draft", title: title, company: company, companyUrl: company, notes: notes, base: base }).then(function (r) {
-        if (btn) { btn.disabled = false; btn.textContent = "✨ Build refined JD"; }
+        if (btn) { btn.disabled = false; btn.textContent = "Build refined JD"; }
         if (!r.ok) { msg("Build failed: " + ((r.data && r.data.error) || r.status)); return; }
         var jd = (r.data && r.data.jd) || "";
         if (ta && jd) { ta.value = jd; ta.focus(); }
         state.jd = jd;
         var nameEl = $("#jdName"); if (nameEl && !nameEl.value.trim() && title) nameEl.value = title + (company ? (" · " + company) : "");
         renderSteps();
-        msg(jd ? "Done — your refined brief is now in the Job description box just below. Review or tweak it, then click Analyze JD." : "Couldn't build it. Add a few more details and try again.");
+        msg(jd ? "Done, your refined brief is now in the Job description box just below. Review or tweak it, then click Analyze JD." : "Couldn't build it. Add a few more details and try again.");
       });
     }
 
-    /** "Dive deeper" — refine the ICP with a natural-language instruction (LLM). */
+    /** "Dive deeper", refine the ICP with a natural-language instruction (LLM). */
     function doRefine() {
       var inp = $("#jdRefineInput"); if (!inp) return;
       var instruction = inp.value.trim();
@@ -8448,7 +8448,7 @@
       if (!state.icp) { msg("Analyze a JD first."); return; }
       var btn = $("#jdRefineBtn"); if (btn) { btn.disabled = true; btn.textContent = "Refining…"; }
       send("/sourcing", "POST", { action: "refine", jd: state.jd, icp: state.icp, instruction: instruction }).then(function (r) {
-        if (btn) { btn.disabled = false; btn.textContent = "✨ Refine"; }
+        if (btn) { btn.disabled = false; btn.textContent = "Refine"; }
         if (!r.ok) { msg("Refine failed: " + ((r.data && r.data.error) || r.status)); return; }
         state.icp = r.data.icp || state.icp;
         state.queries = r.data.queries || state.queries;
@@ -8524,7 +8524,7 @@
       $("#jdName").value = ""; $("#jdText").value = "";
       state.jd = ""; state.icp = null; state.queries = []; state.candidates = []; state.warnings = [];
       $("#jdFind").disabled = true; $("#jdSave").disabled = true; renderPlan(); renderResults(); renderSteps();
-      msg("Added to queue (" + state.queue.length + "). Add more, then ▶ Run queue."); renderQueue();
+      msg("Added to queue (" + state.queue.length + "). Add more, then Run queue."); renderQueue();
     }
     function runQueue() {
       if (state.running) return;
@@ -8610,7 +8610,7 @@
         var btn = t;
         openModal("Send to Candidates", "Choose the list these candidates land in. Add a tag to pull them back later by tag.",
           '<label class="fld"><span>Candidate list name</span>' +
-            '<input id="promoteList" type="text" value="' + esc(defName) + '" placeholder="e.g. VP Operations — Alegria" /></label>' +
+            '<input id="promoteList" type="text" value="' + esc(defName) + '" placeholder="e.g. VP Operations, Alegria" /></label>' +
           '<label class="fld"><span>Tag <span class="muted">(optional, defaults to the list name)</span></span>' +
             '<input id="promoteTag" type="text" placeholder="e.g. q3-leadership" /></label>' +
           '<div class="modal-foot"><button class="btn btn-primary" id="promoteGo">Send to Candidates →</button></div>',
@@ -8633,10 +8633,10 @@
         var rrid = id;
         t.disabled = true; t.textContent = "Re-ranking…";
         send("/sourcing", "POST", { action: "rerank", id: rrid, top: 100 }).then(function (r) {
-          t.disabled = false; t.textContent = "✨ Re-rank";
+          t.disabled = false; t.textContent = "Re-rank";
           if (!r.ok) { alert("Re-rank failed: " + ((r.data && r.data.error) || r.status)); return; }
           var w = r.data.warning ? ("\n\n" + r.data.warning) : "";
-          alert("Re-ranked the top " + (r.data.ranked || 0) + " by AI relevance — the list is re-sorted with the strongest matches on top." + w);
+          alert("Re-ranked the top " + (r.data.ranked || 0) + " by AI relevance, the list is re-sorted with the strongest matches on top." + w);
           loadRuns();
         });
       } else if ((id = t.getAttribute("data-vet"))) {
@@ -8647,7 +8647,7 @@
         showProgress("Deep-vetting top " + top, top * 3, "Reading work histories & scoring against the JD…");
         // Final alert + reset, shared by the batch and synchronous paths.
         function vetDone(d) {
-          t.disabled = false; t.textContent = "🔬 Deep-vet";
+          t.disabled = false; t.textContent = "Deep-vet";
           finishProgress("Deep-vetted " + (d.vetted || 0));
           var warn = (d.warnings || []).length ? ("\n\n" + d.warnings.slice(0, 3).join("\n")) : "";
           var cacheNote = (d.profileCacheHits ? " " + d.profileCacheHits + " profile(s) reused from cache (no charge)." : "");
@@ -8661,20 +8661,20 @@
         // Poll the in-flight batch every 10s until it ends, then ingest + finish.
         function pollVet(batched) {
           send("/sourcing", "POST", { action: "vetStatus", id: vid }).then(function (s) {
-            if (!s.ok) { t.disabled = false; t.textContent = "🔬 Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet status check failed: " + ((s.data && s.data.error) || s.status)); return; }
+            if (!s.ok) { t.disabled = false; t.textContent = "Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet status check failed: " + ((s.data && s.data.error) || s.status)); return; }
             if (!s.data.done) {
               var c = s.data.counts || {}; var got = (c.succeeded || 0) + (c.errored || 0);
-              showProgress("Deep-vetting (batch)", top * 3, got ? (got + " of " + top + " scored…") : "Batch queued — scoring in the background…");
+              showProgress("Deep-vetting (batch)", top * 3, got ? (got + " of " + top + " scored…") : "Batch queued, scoring in the background…");
               setTimeout(function () { pollVet(batched); }, 10000); return;
             }
             vetDone({ vetted: s.data.vetted, deep: s.data.deep, warnings: s.data.warnings, profileCacheHits: pendingCacheHits, batched: true });
           });
         }
         send("/sourcing", "POST", { action: "vet", id: vid, top: top }).then(function (r) {
-          if (!r.ok) { t.disabled = false; t.textContent = "🔬 Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet failed: " + ((r.data && r.data.error) || r.status)); return; }
+          if (!r.ok) { t.disabled = false; t.textContent = "Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet failed: " + ((r.data && r.data.error) || r.status)); return; }
           if (r.data.batched) {
             pendingCacheHits = r.data.profileCacheHits || 0;
-            showProgress("Deep-vetting (batch)", top * 3, "Batch submitted — scoring " + (r.data.submitted || top) + " in the background…");
+            showProgress("Deep-vetting (batch)", top * 3, "Batch submitted, scoring " + (r.data.submitted || top) + " in the background…");
             setTimeout(function () { pollVet(true); }, 8000);
           } else {
             vetDone({ vetted: r.data.vetted, deep: r.data.deep, warnings: r.data.warnings, profileCacheHits: r.data.profileCacheHits || 0, batched: false });
@@ -8689,7 +8689,7 @@
         var lid = id;
         var lxT = { emails: 0, phones: 0, matched: 0, gap: 0, chunks: 0, skipped: 0, warns: [] };
         t.disabled = true; t.textContent = "Laxis: starting…";
-        function laxisReset() { t.disabled = false; t.textContent = "🧬 Enrich via Laxis"; }
+        function laxisReset() { t.disabled = false; t.textContent = "Enrich via Laxis"; }
         function finishLaxis() {
           laxisReset();
           alert("Laxis enriched " + lxT.emails + " email" + (lxT.emails === 1 ? "" : "s") +
@@ -8697,7 +8697,7 @@
             " across " + lxT.matched + " matched contact" + (lxT.matched === 1 ? "" : "s") +
             (lxT.chunks > 1 ? (" over " + lxT.chunks + " batches") : "") + "." +
             (lxT.gap ? (" The in-house waterfall then filled " + lxT.gap + " more.") : "") +
-            (lxT.skipped ? ("\n\n" + lxT.skipped + " row(s) were skipped — no LinkedIn URL or email for Laxis to key off.") : "") +
+            (lxT.skipped ? ("\n\n" + lxT.skipped + " row(s) were skipped, no LinkedIn URL or email for Laxis to key off.") : "") +
             (lxT.warns.length ? ("\n\n" + lxT.warns.slice(0, 3).join("\n")) : ""));
           loadRuns();
         }
@@ -8712,12 +8712,12 @@
               laxisReset();
               alert("Laxis enrichment failed:\n" + ((s.data.warnings || []).join("\n") || "unknown error") +
                 "\n\nIf this mentions a selector (CALIBRATE), the Laxis UI changed and the worker needs re-calibrating." +
-                "\n\nAlready-enriched batches are saved — click Enrich via Laxis again to resume from where it stopped."); loadRuns(); return;
+                "\n\nAlready-enriched batches are saved, click Enrich via Laxis again to resume from where it stopped."); loadRuns(); return;
             }
             var lx = s.data.laxis || {}; var gf = s.data.gapFill || {};
             lxT.emails += lx.emails || 0; lxT.phones += lx.phones || 0; lxT.matched += lx.matched || 0; lxT.gap += gf.enriched || 0;
             (s.data.warnings || []).forEach(function (w) { lxT.warns.push(w); });
-            // More chunks left? Auto-continue — the backend skips done offsets, never re-grabs.
+            // More chunks left? Auto-continue, the backend skips done offsets, never re-grabs.
             if (s.data.nextStart != null) { startChunk(s.data.nextStart); return; }
             finishLaxis();
           });
@@ -8756,7 +8756,7 @@
           if (!r.ok) { alert("Enrich failed: " + ((r.data && r.data.error) || r.status)); return; }
           var hits = r.data.cacheHits || 0;
           alert("Enriched " + r.data.enriched + " contacts" +
-            (hits ? " (" + hits + " reused from cache — no charge)" : "") +
+            (hits ? " (" + hits + " reused from cache, no charge)" : "") +
             ". They are ready to push into a campaign whenever you want."); loadRuns();
         });
       } else if ((id = t.getAttribute("data-del"))) {
@@ -8868,7 +8868,7 @@
       '.osx-fld>span{font-size:12.5px;color:var(--text-muted);font-weight:600}' +
       '.osx-fld input,.osx-fld textarea{width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;color:var(--text);padding:9px 11px;font:inherit;font-size:14px}' +
       '.osx-fld textarea{min-height:62px;resize:vertical;line-height:1.45}' +
-      '.osx-fld input:focus,.osx-fld textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}' +
+      '.osx-fld input:focus,.osx-fld textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
       '.osx-two{display:grid;grid-template-columns:1fr 1fr;gap:11px}' +
       '.osx-launch{margin-top:18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}' +
       '.osx-num{font-family:var(--mono,monospace);font-weight:700}' +
@@ -8878,8 +8878,8 @@
   function renderOstextEngine(host, st) {
     host.innerHTML = osxStyles() +
       '<div class="setup-banner ok" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
-        '✓ OS Text is live on <span class="osx-num">' + esc(st.number.value || "your number") + '</span>' +
-        '<button class="btn btn-ghost btn-sm" id="osxSettings" style="margin-left:auto">⚙ Settings</button></div>' +
+        'OS Text is live on <span class="osx-num">' + esc(st.number.value || "your number") + '</span>' +
+        '<button class="btn btn-ghost btn-sm" id="osxSettings" style="margin-left:auto">Settings</button></div>' +
       ostextFrame(OSTEXT_SRC);
     var sb = host.querySelector("#osxSettings");
     if (sb) sb.addEventListener("click", function () { osxSave({ launched: false }); });
@@ -8893,7 +8893,7 @@
     function pill(state) { var m = { ready: "Ready", progress: "In review", action: "To do" }; return '<span class="s-pill ' + (state === "progress" ? "progress" : state === "ready" ? "ready" : "action") + '">' + (m[state] || state) + '</span>'; }
     function card(n, key, title, desc, formHtml) {
       var state = s[key];
-      return '<div class="setup-step s-' + state + '"><div class="setup-num">' + (state === "ready" ? "✓" : n) + '</div>' +
+      return '<div class="setup-step s-' + state + '"><div class="setup-num">' + (state === "ready" ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : n) + '</div>' +
         '<div class="setup-main"><div class="setup-row"><span class="setup-title">' + esc(title) + '</span>' + pill(state) + '</div>' +
         '<div class="setup-desc">' + esc(desc) + '</div>' + formHtml + '</div></div>';
     }
@@ -8908,7 +8908,7 @@
 
     var br = st.brand, brandForm;
     if (br.status === "approved") {
-      brandForm = '<div class="osx-form"><div class="setup-metric">✓ Brand &amp; campaign approved by the carriers, you can send A2P traffic.</div></div>';
+      brandForm = '<div class="osx-form"><div class="setup-metric">Brand &amp; campaign approved by the carriers, you can send A2P traffic.</div></div>';
     } else if (br.status === "pending") {
       brandForm = '<div class="osx-form"><div class="setup-metric">Submitted, carriers typically review A2P 10DLC in 1-3 business days.</div>' +
         '<div><button class="btn btn-ghost btn-sm" data-osx="brand-approve">Mark approved (demo)</button></div></div>';
@@ -8933,14 +8933,14 @@
       '<div><button class="btn btn-primary btn-sm" data-osx="consent">Save consent rules</button></div></div>';
 
     var candForm = st.candidatesConnected
-      ? '<div class="osx-form"><div class="setup-metric">✓ OS Text is reading from your Candidates pipeline.</div></div>'
+      ? '<div class="osx-form"><div class="setup-metric">OS Text is reading from your Candidates pipeline.</div></div>'
       : '<div class="osx-form"><div class="setup-metric">Let OS Text pull names &amp; numbers from your Candidates so you can text them directly.</div>' +
         '<div><button class="btn btn-primary btn-sm" data-osx="candidates">Connect to Candidates</button></div></div>';
 
     var banner = ready
-      ? '<div class="setup-banner ok">✓ All five steps complete, switch OS Text on to start texting candidates.</div>'
+      ? '<div class="setup-banner ok">All five steps complete, switch OS Text on to start texting candidates.</div>'
       : '<div class="setup-banner warn">' + doneN + ' of 5 steps complete. Finish the steps below to turn on OS Text for your team.</div>';
-    var launch = '<div class="osx-launch"><button class="btn btn-primary" data-osx="launch"' + (ready ? "" : " disabled") + '>🚀 Turn on OS Text</button>' +
+    var launch = '<div class="osx-launch"><button class="btn btn-primary" data-osx="launch"' + (ready ? "" : " disabled") + '>Turn on OS Text</button>' +
       (ready ? '' : '<span class="muted" style="font-size:13px">Finish all five steps to enable.</span>') + '</div>';
 
     host.innerHTML = osxStyles() + setupStyles() + banner +
@@ -8995,20 +8995,20 @@
   /* Shown under the script box so anyone writing a custom script formats it for
      natural cloned-voice delivery (same pause structure as the default). */
   var VD_PAUSE_GUIDE =
-    '<div style="margin-top:10px;padding:10px 12px;border:1px solid #2a2440;border-radius:8px;background:#171327;font-size:12px;line-height:1.55">' +
-      '<div style="color:#b9a6ff;font-weight:600;margin-bottom:6px">🗣️ Format custom scripts the same way</div>' +
+    '<div style="margin-top:10px;padding:10px 12px;border:1px solid var(--brand-soft);border-radius:8px;background:#171327;font-size:12px;line-height:1.55">' +
+      '<div style="color:var(--brand);font-weight:600;margin-bottom:6px">Format custom scripts the same way</div>' +
       '<div class="muted" style="margin-bottom:8px">The voice reads your punctuation literally. Pacing comes from how you write it, so match this structure:</div>' +
       '<ul style="margin:0 0 8px 18px;padding:0">' +
-        '<li><b style="color:#e6e1f5">...</b> &nbsp;= one short beat (a held pause). Drop it after the greeting and before the ask.</li>' +
-        '<li>One thought per <b style="color:#e6e1f5">sentence</b>. End each with a period so it lands, then breathes.</li>' +
-        '<li>Use <b style="color:#e6e1f5">commas</b> for tiny breaths, including around their name (Hi {first_name}...) and before the phone-number line.</li>' +
-        '<li>Keep sentences <b style="color:#e6e1f5">short</b>. No dashes, no numerals (write "two", not "2"), keep contractions ("it\'s", "we\'ll").</li>' +
+        '<li><b style="color:var(--text-muted)">...</b> &nbsp;= one short beat (a held pause). Drop it after the greeting and before the ask.</li>' +
+        '<li>One thought per <b style="color:var(--text-muted)">sentence</b>. End each with a period so it lands, then breathes.</li>' +
+        '<li>Use <b style="color:var(--text-muted)">commas</b> for tiny breaths, including around their name (Hi {first_name}...) and before the phone-number line.</li>' +
+        '<li>Keep sentences <b style="color:var(--text-muted)">short</b>. No dashes, no numerals (write "two", not "2"), keep contractions ("it\'s", "we\'ll").</li>' +
       "</ul>" +
       '<div class="muted" style="margin-bottom:3px">Reads like this:</div>' +
       '<div style="font-style:italic;color:#cdc6e6;background:#0f0c1c;border-radius:6px;padding:7px 9px">' +
-        'Hi {first_name}<b style="color:#7c5cff">...</b> this is {agent_name}<b style="color:#7c5cff">,</b> with {agent_company}<b style="color:#7c5cff">.</b> ' +
-        'I came across your {role} search<b style="color:#7c5cff">,</b> and wanted to reach out<b style="color:#7c5cff">.</b> ' +
-        'We help teams hire faster<b style="color:#7c5cff">.</b> If it’s useful<b style="color:#7c5cff">,</b> give me a call back<b style="color:#7c5cff">,</b> at this number<b style="color:#7c5cff">.</b> Thanks {first_name}<b style="color:#7c5cff">.</b>' +
+        'Hi {first_name}<b style="color:var(--brand)">...</b> this is {agent_name}<b style="color:var(--brand)">,</b> with {agent_company}<b style="color:var(--brand)">.</b> ' +
+        'I came across your {role} search<b style="color:var(--brand)">,</b> and wanted to reach out<b style="color:var(--brand)">.</b> ' +
+        'We help teams hire faster<b style="color:var(--brand)">.</b> If it’s useful<b style="color:var(--brand)">,</b> give me a call back<b style="color:var(--brand)">,</b> at this number<b style="color:var(--brand)">.</b> Thanks {first_name}<b style="color:var(--brand)">.</b>' +
       "</div>" +
     "</div>";
 
@@ -9036,7 +9036,7 @@
     var vd = { tab: "campaigns", creating: false, scripts: [], prefill: null };
     el.innerHTML = head("Voice Drops",
       "Cloned-voice voicemail to verified business landlines. Mobiles are filtered out and never dialed; each lead is dialed only inside its own local window (default 7-9 PM).") +
-      '<div class="vd-summary" style="margin:0 0 14px;padding:12px 14px;border-radius:12px;background:rgba(255,255,255,.04);font-size:12.5px;line-height:1.55">' +
+      '<div class="vd-summary" style="margin:0 0 14px;padding:12px 14px;border-radius:12px;background:var(--surface-2);font-size:12.5px;line-height:1.55">' +
       '<b style="font-size:13px">How it works</b>' +
       '<div class="muted" style="margin-top:6px">' +
       'Your script is just an <b>example</b>. Pick your engine: <b>Placeholders</b> merge first name &amp; role into one shared script (cheapest, the voice is synthesized once, reused free), or <b>AI-customize</b> lets the LLM rewrite each lead’s drop. Either way it follows the same rules:' +
@@ -9052,7 +9052,7 @@
       '<div id="vdBody">' + loading() + "</div>";
 
     function tabBar() {
-      var tabs = [["campaigns", "📞 Campaigns"], ["scripts", "📝 Scripts"], ["voice", "🎙️ Voice"], ["test", "🧪 Test"]];
+      var tabs = [["campaigns", "Campaigns"], ["scripts", "Scripts"], ["voice", "Voice"], ["test", "Test"]];
       $(".vd-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="vd-tab' + (vd.tab === t[0] ? " active" : "") + '" data-vdtab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -9089,10 +9089,10 @@
     }
     function statRow(stats) {
       stats = stats || {};
-      var order = [["voicemail_delivered", "VM dropped", "#34d399"], ["dialing", "Dialing", "#ffc24d"],
-        ["scheduled", "Scheduled", "#8aa0c6"], ["queued", "Queued", "#8aa0c6"],
-        ["human_answered", "Human", "#b9a6ff"], ["no_answer", "No answer", "#8aa0c6"],
-        ["filtered_mobile", "Mobiles filtered", "#ff7a90"], ["suppressed", "Suppressed", "#ff7a90"]];
+      var order = [["voicemail_delivered", "VM dropped", "var(--ok)"], ["dialing", "Dialing", "var(--warn)"],
+        ["scheduled", "Scheduled", "var(--text-dim)"], ["queued", "Queued", "var(--text-dim)"],
+        ["human_answered", "Human", "var(--brand)"], ["no_answer", "No answer", "var(--text-dim)"],
+        ["filtered_mobile", "Mobiles filtered", "var(--danger)"], ["suppressed", "Suppressed", "var(--danger)"]];
       var shown = order.filter(function (o) { return (stats[o[0]] || 0) > 0; });
       if (!shown.length) return '<div class="muted" style="font-size:12px;margin-top:8px">No activity yet.</div>';
       return '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px">' + shown.map(function (o) {
@@ -9115,13 +9115,13 @@
         var urls = d.playlist;
         var secs = Math.max(1, Math.round((String(d.rendered || "").split(/\s+/).filter(Boolean).length) / 2.5));
         var label = d.clips + ' clips · ~' + secs + 's';
-        mount.innerHTML = '<button class="btn btn-sm btn-primary" id="pvPlay">▶ Play voicemail</button> ' +
-          '<button class="btn btn-sm btn-ghost" id="pvDl">⬇ Download</button> ' +
+        mount.innerHTML = '<button class="btn btn-sm btn-primary" id="pvPlay">Play voicemail</button> ' +
+          '<button class="btn btn-sm btn-ghost" id="pvDl">Download</button> ' +
           '<span class="muted" id="pvStat">' + label + '</span>';
         var btn = mount.querySelector("#pvPlay"), stat = mount.querySelector("#pvStat");
         var dl = mount.querySelector("#pvDl");
         var au = null, i = 0, playing = false;
-        function stop() { if (au) { try { au.pause(); } catch (e) {} } playing = false; if (btn) btn.textContent = "▶ Play voicemail"; if (stat) stat.textContent = label; }
+        function stop() { if (au) { try { au.pause(); } catch (e) {} } playing = false; if (btn) btn.textContent = "Play voicemail"; if (stat) stat.textContent = label; }
         function step() {
           if (!playing || i >= urls.length) { stop(); return; }
           au = new Audio(urls[i]);
@@ -9132,7 +9132,7 @@
         }
         btn.addEventListener("click", function () {
           if (playing) { stop(); return; }
-          playing = true; i = 0; btn.textContent = "■ Stop"; step();
+          playing = true; i = 0; btn.textContent = "Stop"; step();
         });
         // Save the assembled voicemail as one MP3. The clips are same-origin,
         // same-encoder segments, so concatenating the bytes yields a single
@@ -9168,7 +9168,7 @@
       var ta = $("#" + taId); if (!ta) return;
       var out = outId ? $("#" + outId) : null;
       var seed = (ta.value || "").trim();
-      if (out) out.textContent = "✨ customizing…";
+      if (out) out.textContent = "customizing…";
       send("/voice/draft", "POST", {
         channel: opts.channel || "amd",
         templated: opts.templated !== false,
@@ -9185,8 +9185,8 @@
           return;
         }
         ta.value = d.text;
-        if (out) out.innerHTML = '<span class="muted">✨ AI · ~' + d.seconds + "s" +
-          (d.withinWindow ? ", in window" : ", outside window") + (d.identifies ? "" : " · ⚠ add your name/firm") + "</span>";
+        if (out) out.innerHTML = '<span class="muted">AI · ~' + d.seconds + "s" +
+          (d.withinWindow ? ", in window" : ", outside window") + (d.identifies ? "" : " · add your name/firm") + "</span>";
         if (typeof renderEstimate === "function") renderEstimate();
       }).catch(function () { if (out) out.textContent = "Could not reach the server."; });
     }
@@ -9213,12 +9213,12 @@
       // "Learn from responses" signal: how this script actually performs once dialed.
       if (!p || !p.dialed) return '<span class="muted" style="font-size:12px">· no drops yet</span>';
       var pct = Math.round((p.connectRate || 0) * 100);
-      var col = pct >= 35 ? "#34d399" : pct >= 15 ? "#ffc24d" : "#9aa4b2";
+      var col = pct >= 35 ? "var(--ok)" : pct >= 15 ? "var(--warn)" : "#9aa4b2";
       return '<span style="font-size:12px;color:' + col + '">· ' + pct + "% connect (" +
         (p.voicemail_delivered || 0) + " VM / " + (p.human_answered || 0) + " live, " + p.dialed + " dialed)</span>";
     }
     function scriptCard(s) {
-      var dot = s.withinSweetSpot ? "#34d399" : "#ffc24d";
+      var dot = s.withinSweetSpot ? "var(--ok)" : "var(--warn)";
       var len = "~" + (s.estSeconds || 0) + "s" + (s.withinSweetSpot ? " · in the 15-25s sweet spot" : " · outside the 15-25s sweet spot");
       return '<div class="card" data-sid="' + esc(s.id) + '" style="margin-top:12px">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px">' +
@@ -9228,10 +9228,10 @@
         '<div class="muted" style="font-size:13px;margin:8px 0">“' + esc(s.preview || s.template || "") + '”</div>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
         '<button class="btn btn-sm btn-primary" data-sact="use" data-sid="' + esc(s.id) + '">Use in a campaign</button>' +
-        '<button class="btn btn-ghost btn-sm" data-sact="listen" data-sid="' + esc(s.id) + '">🔊 Listen first</button>' +
-        '<button class="btn btn-ghost btn-sm" data-sact="edit" data-sid="' + esc(s.id) + '">✎ Edit</button>' +
+        '<button class="btn btn-ghost btn-sm" data-sact="listen" data-sid="' + esc(s.id) + '">Listen first</button>' +
+        '<button class="btn btn-ghost btn-sm" data-sact="edit" data-sid="' + esc(s.id) + '">Edit</button>' +
         '<span style="flex:1"></span>' +
-        '<button class="btn btn-ghost btn-sm" data-sact="del" data-sid="' + esc(s.id) + '">🗑</button></div>' +
+        '<button class="btn btn-ghost btn-sm" data-sact="del" data-sid="' + esc(s.id) + '"><svg class="isvg" aria-hidden="true"><use href="#i-trash"/></svg></button></div>' +
         '<div class="muted" data-spv="' + esc(s.id) + '" style="font-size:12px;margin-top:8px"></div></div>';
     }
     function paintScripts(body) {
@@ -9241,7 +9241,7 @@
         var toolbar = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
           '<span class="muted" style="font-size:13px">' + rows.length + " saved script" + (rows.length === 1 ? "" : "s") +
           " · listen to any one before you deploy it, then pick it when you build a campaign</span>" +
-          '<button class="btn btn-primary btn-sm" id="vsbNew">＋ New script</button></div>';
+          '<button class="btn btn-primary btn-sm" id="vsbNew">+ New script</button></div>';
         if (!rows.length) {
           body.innerHTML = toolbar + '<div class="card"><p class="muted" style="font-size:13px">No saved scripts yet. ' +
             "Build a library of reusable cloned-voice voicemails here, first name &amp; role splice in like an email merge, " +
@@ -9282,17 +9282,17 @@
         '<textarea id="seTpl" rows="5" style="width:100%">' + esc(isEdit ? s.template : VD_DEFAULT_SCRIPT) + "</textarea>" +
         VD_PAUSE_GUIDE +
         '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-        '<button class="btn btn-sm" id="seAi">✨ AI customize</button>' +
-        '<button class="btn btn-sm" id="seListen">🔊 Listen</button><span class="muted" id="seListenOut" style="font-size:12px"></span></div>' +
+        '<button class="btn btn-sm" id="seAi">AI customize</button>' +
+        '<button class="btn btn-sm" id="seListen">Listen</button><span class="muted" id="seListenOut" style="font-size:12px"></span></div>' +
         // Place a REAL cloned-voice call to a landline/VoIP you control, straight from
         // this modal, so you can hear the drop on an actual phone before saving. Same
         // path as the Test tab (/voice/test-drop): skips the time window, every other
         // safeguard stays on, and your own number is exempt from the mobile filter.
-        '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07)">' +
-        '<label style="display:block;font-size:12px;color:#8aa0c6;margin-bottom:4px">Test it on a real phone <span style="color:#6b7a99">- landline or VoIP number you control (E.164)</span></label>' +
+        '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">' +
+        '<label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px">Test it on a real phone <span style="color:var(--text-dim)">- landline or VoIP number you control (E.164)</span></label>' +
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<input id="seTestTo" type="tel" placeholder="+13105551234" style="flex:1;min-width:180px" />' +
-        '<button class="btn btn-sm" id="seTestCall">📞 Test call</button></div>' +
+        '<button class="btn btn-sm" id="seTestCall">Test call</button></div>' +
         '<div class="muted" id="seTestOut" style="font-size:12px;margin-top:6px"></div></div>' +
         '<div class="modal-foot" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="seSave">Save script</button></div>',
         function (root, close) {
@@ -9313,13 +9313,13 @@
             var out = $("#seTestOut", root); if (out) out.innerHTML = loading();
             send("/voice/test-drop", "POST", { to: to, scriptTemplate: tpl, motion: motion }).then(function (r) {
               if (!out) return;
-              if (!r.ok) { out.innerHTML = '<span style="color:#ff7a90">Test failed: ' + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status) + "</span>"; return; }
+              if (!r.ok) { out.innerHTML = '<span style="color:var(--danger)">Test failed: ' + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status) + "</span>"; return; }
               var d = r.data || {};
-              out.innerHTML = '<b style="color:#34d399">Rendered (~' + d.estSeconds + "s" +
+              out.innerHTML = '<b style="color:var(--ok)">Rendered (~' + d.estSeconds + "s" +
                 (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside sweet spot") + "):</b> “" + esc(d.rendered || "") + "” · " +
-                (d.dialError ? '<span style="color:#ff7a90">dial failed (' + esc(d.dialError) + ")</span>" : d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
-                ((d.warnings && d.warnings.length) ? ' · <span style="color:#ffc24d">⚠ ' + d.warnings.map(esc).join(" · ") + "</span>" : "");
-            }).catch(function () { if (out) out.innerHTML = '<span style="color:#ff7a90">Could not reach the server.</span>'; });
+                (d.dialError ? '<span style="color:var(--danger)">dial failed (' + esc(d.dialError) + ")</span>" : d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
+                ((d.warnings && d.warnings.length) ? ' · <span style="color:var(--warn)">' + d.warnings.map(esc).join(" · ") + "</span>" : "");
+            }).catch(function () { if (out) out.innerHTML = '<span style="color:var(--danger)">Could not reach the server.</span>'; });
           });
           $("#seSave", root).addEventListener("click", function () {
             var name = ($("#seName", root).value || "").trim();
@@ -9349,23 +9349,23 @@
         inp("vdDailyCap", "Daily cap", "100", "number") +
         inp("vdFreq", "Min days between attempts", "30", "number") +
         "</div>" +
-        '<div class="vd-note"><span class="vd-note-ico">🌙</span><span>Drops land after hours, in each lead’s <b>own local time</b> (default 7–9 PM), so the line rolls to voicemail. Always clamped to a lawful 8 AM–9 PM envelope.</span></div>' +
+        '<div class="vd-note"><span class="vd-note-ico"><svg class="isvg" aria-hidden="true"><use href="#i-moon"/></svg></span><span>Drops land after hours, in each lead’s <b>own local time</b> (default 7–9 PM), so the line rolls to voicemail. Always clamped to a lawful 8 AM–9 PM envelope.</span></div>' +
         '<div class="vd-section-label">Delivery &amp; safeguards</div>' +
         '<div class="vd-toggles">' +
-        vdToggle("vdTestMode", "Test mode", "Ignore the calling window. Testing only — every other safeguard stays on.") +
+        vdToggle("vdTestMode", "Test mode", "Ignore the calling window. Testing only, every other safeguard stays on.") +
         vdToggle("vdAiCustomize", "AI-customize per lead", "The AI rewrites each drop from your script below, kept to 15–25s and the speech rules. More natural, but each lead synthesizes fresh (a little more spend).") +
         vdToggle("vdAutoPilot", "Always-on autopilot", "Keep this campaign running and auto-send to leads as they’re fed in (email-sent trigger or import). Turns on AI-customize so every incoming lead gets a fresh, in-window drop. Consent + all safeguards still required.") +
         "</div>" +
         '<div class="vd-section-label" style="margin-top:20px">Voicemail script</div>' +
-        '<div class="vd-field vd-script" style="margin-top:0"><label>Start from a saved script <span>— pick one from your library, or write your own below</span></label>' +
+        '<div class="vd-field vd-script" style="margin-top:0"><label>Start from a saved script <span>- pick one from your library, or write your own below</span></label>' +
         '<select id="vdScriptPick" style="width:100%">' + scriptPickerOptions() + "</select></div>" +
-        '<div class="vd-field vd-script"><label>Your script <span>— an example; the AI customizes the rest. First name &amp; role splice in like an email merge</span></label>' +
+        '<div class="vd-field vd-script"><label>Your script <span>- an example; the AI customizes the rest. First name &amp; role splice in like an email merge</span></label>' +
         '<div class="vd-chips">' + fieldChips("vdScript") + "</div>" +
         '<textarea id="vdScript" rows="4">' + esc(VD_DEFAULT_SCRIPT) + "</textarea>" +
         '<div class="vd-hint">Sweet spot is 15–25s. Human-answer sign-off: “' + esc("Sorry, wrong number. Thanks.") + '” (editable per campaign).</div></div>' +
         '<div class="vd-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary btn-sm" id="vdCreate">Create campaign</button>' +
-        '<button class="btn btn-sm" id="vdAi">✨ AI customize</button>' +
-        '<button class="btn btn-sm" id="vdListen">🔊 Listen first</button>' +
+        '<button class="btn btn-sm" id="vdAi">AI customize</button>' +
+        '<button class="btn btn-sm" id="vdListen">Listen first</button>' +
         '<span class="muted" id="vdListenOut" style="font-size:12px"></span></div>' +
         '<div id="vdEst" class="vd-est" style="margin-top:12px"></div>';
     }
@@ -9392,7 +9392,7 @@
     function hrClock(h) { var n = ((h + 11) % 12) + 1; return n + ":00 " + (h < 12 ? "AM" : "PM"); }
     /* Real per-drop spend, straight from the cost catalog (lib/billing/rates.ts):
        Telnyx voice minute incl. Premium AMD ($0.007/min), the landline/VoIP line
-       check ($0.0025/number), and — only when AI-customize is on — a fresh LLM
+       check ($0.0025/number), and, only when AI-customize is on, a fresh LLM
        script ($0.004/lead) plus fresh cloned-voice synthesis ($0.02/sentence).
        The cloned voice itself is a ONE-TIME setup (part of the TTS plan): in
        placeholder mode the whole script is synthesized once and reused free, so
@@ -9409,9 +9409,9 @@
     }
     function usd(n) { return "$" + (n < 1 ? (n === 0 ? "0.00" : n.toFixed(3).replace(/0+$/, "").replace(/\.$/, ".00")) : n.toFixed(2)); }
     /* One clean cost split, no jargon:
-        · one-time — the cloned voice is set up once. In placeholder mode the whole
+        · one-time, the cloned voice is set up once. In placeholder mode the whole
           script is synthesized once here and reused free for every lead.
-        · per drop — the Telnyx call minute + line check on every dial, plus, in
+        · per drop, the Telnyx call minute + line check on every dial, plus, in
           AI-customize mode, a fresh LLM script and fresh synthesis per lead. */
     function computeCost(cap, sentences, minutes, ai) {
       var callMin = minutes * VD_RATE.voiceMinute;
@@ -9440,7 +9440,7 @@
       }
 
       var toggle =
-        '<label style="display:inline-flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;margin-top:9px;color:#8aa0c6">' +
+        '<label style="display:inline-flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;margin-top:9px;color:var(--text-dim)">' +
         '<input type="checkbox" id="vdLandedToggle"' + (vdLandedView ? " checked" : "") + ' style="cursor:pointer"> ' +
         'Show cost per voicemail that lands <span style="opacity:.7">(~2 of 3 dials roll to voicemail)</span></label>';
 
@@ -9452,9 +9452,9 @@
         '</div>';
 
       box.innerHTML =
-        '<div style="padding:13px 15px;border-radius:12px;background:rgba(52,211,153,.07);box-shadow:inset 0 0 0 1px rgba(52,211,153,.35)">' +
+        '<div style="padding:13px 15px;border-radius:12px;background:var(--ok-bg);box-shadow:inset 0 0 0 1px var(--ok-bg)">' +
         '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">' +
-        '<span style="font-size:27px;font-weight:800;color:#34d399;line-height:1">~' + bigNum + '</span>' +
+        '<span style="font-size:27px;font-weight:800;color:var(--ok);line-height:1">~' + bigNum + '</span>' +
         '<span class="muted" style="font-size:12.5px">' + bigCap + '</span></div>' +
         toggle + lines + '</div>';
 
@@ -9465,36 +9465,36 @@
       var win = "7-9 PM"; try { win = hr(c.window.startHour) + "-" + hr(c.window.endHour); } catch (e) {}
       var ready = c.consentAttested;
       var testOn = !!c.testMode;
-      var testBadge = testOn ? ' <span style="font-size:11px;font-weight:700;color:#0b0b0b;background:#ffc24d;border-radius:4px;padding:1px 6px">⚠ TEST MODE, window ignored</span>' : "";
-      var autoBadge = c.autoPilot ? ' <span style="font-size:11px;font-weight:700;color:#0b0b0b;background:#34d399;border-radius:4px;padding:1px 6px">♾ AUTOPILOT</span>' : "";
-      var aiBadge = c.aiCustomize ? ' <span style="font-size:11px;font-weight:700;color:#cdd6ea;background:#2a2440;border-radius:4px;padding:1px 6px">✨ AI</span>' : "";
+      var testBadge = testOn ? ' <span style="font-size:11px;font-weight:700;color:#0b0b0b;background:var(--warn);border-radius:4px;padding:1px 6px">TEST MODE, window ignored</span>' : "";
+      var autoBadge = c.autoPilot ? ' <span style="font-size:11px;font-weight:700;color:#0b0b0b;background:var(--ok);border-radius:4px;padding:1px 6px">AUTOPILOT</span>' : "";
+      var aiBadge = c.aiCustomize ? ' <span style="font-size:11px;font-weight:700;color:#cdd6ea;background:var(--brand-soft);border-radius:4px;padding:1px 6px">AI</span>' : "";
       // Show the actual voicemail wording on the card, with its length vs. the
       // 15-25s sweet spot and inline Edit / Listen, so the card explains itself.
       var shape = estimateScriptShape(c.scriptTemplate || "");
       var inSweet = shape.seconds >= 15 && shape.seconds <= 25;
-      var lenDot = inSweet ? "#34d399" : "#ffc24d";
+      var lenDot = inSweet ? "var(--ok)" : "var(--warn)";
       var snip = String(c.scriptTemplate || "").replace(/\s+/g, " ").trim();
       var snipShort = snip.slice(0, 150) + (snip.length > 150 ? "…" : "");
-      return '<div class="card" data-cid="' + c.id + '" style="margin-top:12px' + (testOn ? ";box-shadow:inset 0 0 0 1px #ffc24d" : "") + '">' +
+      return '<div class="card" data-cid="' + c.id + '" style="margin-top:12px' + (testOn ? ";box-shadow:inset 0 0 0 1px var(--warn)" : "") + '">' +
         '<div style="display:flex;justify-content:space-between;align-items:center">' +
         "<h3 style='margin:0'>" + esc(c.name) + ' <span class="muted" style="font-size:12px">· ' + esc(c.status) + "</span>" + autoBadge + aiBadge + testBadge + "</h3>" +
         '<span class="muted" style="font-size:12px">caller ' + esc(c.callerId || "-") + " · window " + esc(win) + " local · " + esc(c.motion) + "</span></div>" +
         statRow(c.stats) +
         // The script, front and centre: what it says + how long + edit/listen.
-        '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-top:12px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.03)">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--surface-2)">' +
         '<div class="muted" style="font-size:12.5px;line-height:1.55;flex:1">“' + (snipShort ? esc(snipShort) : "No script yet.") + '”' +
         '<div style="font-size:11px;color:' + lenDot + ';margin-top:5px">~' + shape.seconds + "s · " + (inSweet ? "in the 15-25s sweet spot" : "outside the 15-25s sweet spot") + "</div></div>" +
         '<div style="display:flex;gap:6px;white-space:nowrap">' +
-        '<button class="btn btn-sm" data-vdact="editscript" data-cid="' + c.id + '">✎ Edit script</button>' +
-        '<button class="btn btn-ghost btn-sm" data-vdact="preview" data-cid="' + c.id + '">🔊 Listen</button></div></div>' +
+        '<button class="btn btn-sm" data-vdact="editscript" data-cid="' + c.id + '">Edit script</button>' +
+        '<button class="btn btn-ghost btn-sm" data-vdact="preview" data-cid="' + c.id + '">Listen</button></div></div>' +
         // Lifecycle actions on the left; test toggle + remove on the right.
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">' +
-        '<button class="btn btn-sm btn-primary" data-vdact="launch" data-cid="' + c.id + '">▶ Launch</button>' +
-        '<button class="btn btn-sm" data-vdact="run" data-cid="' + c.id + '">⏱ Run now</button>' +
-        '<button class="btn btn-sm" data-vdact="import" data-cid="' + c.id + '">⬆ Import</button>' +
+        '<button class="btn btn-sm btn-primary" data-vdact="launch" data-cid="' + c.id + '">Launch</button>' +
+        '<button class="btn btn-sm" data-vdact="run" data-cid="' + c.id + '">Run now</button>' +
+        '<button class="btn btn-sm" data-vdact="import" data-cid="' + c.id + '">Import</button>' +
         '<span style="flex:1"></span>' +
-        '<button class="btn btn-ghost btn-sm" data-vdact="testmode" data-cid="' + c.id + '" data-test="' + (testOn ? "1" : "0") + '">' + (testOn ? "🟡 Test: on" : "Test: off") + "</button>" +
-        '<button class="btn btn-ghost btn-sm" data-vdact="del" data-cid="' + c.id + '">🗑</button></div>' +
+        '<button class="btn btn-ghost btn-sm" data-vdact="testmode" data-cid="' + c.id + '" data-test="' + (testOn ? "1" : "0") + '">' + (testOn ? "Test: on" : "Test: off") + "</button>" +
+        '<button class="btn btn-ghost btn-sm" data-vdact="del" data-cid="' + c.id + '"><svg class="isvg" aria-hidden="true"><use href="#i-trash"/></svg></button></div>' +
         '<div class="vd-msg muted" data-msg="' + c.id + '" style="font-size:12px;margin-top:8px"></div></div>';
     }
     function hr(h) { var n = ((h + 11) % 12) + 1; return n + (h < 12 ? " AM" : " PM"); }
@@ -9509,13 +9509,13 @@
         var showForm = vd.creating || camps.length === 0;
         var toolbar = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
           '<span class="muted" style="font-size:13px">' + camps.length + " voice campaign" + (camps.length === 1 ? "" : "s") + "</span>" +
-          (showForm ? "" : '<button class="btn btn-primary btn-sm" id="vdNew">＋ New campaign</button>') + "</div>";
+          (showForm ? "" : '<button class="btn btn-primary btn-sm" id="vdNew">+ New campaign</button>') + "</div>";
         var form = showForm
           ? '<div class="card"><h3>New voice campaign</h3>' + newCampaignForm() +
             (camps.length ? '<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" id="vdCancel">Cancel</button></div>' : "") + "</div>"
           : "";
         body.innerHTML = toolbar + form + camps.map(campaignCard).join("") +
-          '<div class="muted" style="margin-top:14px;padding:10px;border-radius:8px;background:rgba(255,255,255,.03);font-size:12px">' +
+          '<div class="muted" style="margin-top:14px;padding:10px;border-radius:8px;background:var(--surface-2);font-size:12px">' +
           'Only landline/VoIP leads are dialed (mobiles stripped on import). Each lead is dialed inside its local window (default 7-9 PM). Launch requires a consent attestation and an identifying script.</div>';
         wireChips(body);
         var nb = $("#vdNew"); if (nb) nb.addEventListener("click", function () { vd.creating = true; paint(); });
@@ -9607,7 +9607,7 @@
     }
     function createCampaign() {
       // Attribute drops to the chosen library script only while the text is still
-      // that script verbatim — once edited, the campaign owns its own copy and
+      // that script verbatim, once edited, the campaign owns its own copy and
       // carries no scriptId (so per-script stats stay honest).
       var picked = vd.pickedScript;
       var scriptId = (picked && val("vdScript") === String(picked.template).trim()) ? picked.id : undefined;
@@ -9651,7 +9651,7 @@
       if (act === "launch") {
         send("/voice/campaigns", "POST", { action: "launch", campaignId: cid }).then(function (r) {
           if (r.ok) { toast("Launched"); paint(); }
-          else { var errs = (r.data && r.data.errors) || ["Not ready"]; setMsg(cid, "⚠ " + errs.map(esc).join(" · ")); }
+          else { var errs = (r.data && r.data.errors) || ["Not ready"]; setMsg(cid, "" + errs.map(esc).join(" · ")); }
         });
         return;
       }
@@ -9678,13 +9678,13 @@
         '<div style="margin:2px 0 8px">' + fieldChips("ceTpl") + "</div>" +
         '<textarea id="ceTpl" rows="5" style="width:100%">' + esc(c.scriptTemplate || VD_DEFAULT_SCRIPT) + "</textarea>" +
         '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-        '<button class="btn btn-sm" id="ceAi">✨ AI customize</button>' +
-        '<button class="btn btn-sm" id="ceListen">🔊 Listen</button><span class="muted" id="ceListenOut" style="font-size:12px"></span></div>' +
-        '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07)">' +
-        '<label style="display:block;font-size:12px;color:#8aa0c6;margin-bottom:4px">Test it on a real phone <span style="color:#6b7a99">- landline or VoIP you control (E.164), let it roll to voicemail to hear the drop</span></label>' +
+        '<button class="btn btn-sm" id="ceAi">AI customize</button>' +
+        '<button class="btn btn-sm" id="ceListen">Listen</button><span class="muted" id="ceListenOut" style="font-size:12px"></span></div>' +
+        '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">' +
+        '<label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px">Test it on a real phone <span style="color:var(--text-dim)">- landline or VoIP you control (E.164), let it roll to voicemail to hear the drop</span></label>' +
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<input id="ceTestTo" type="tel" placeholder="+13105551234" style="flex:1;min-width:180px" />' +
-        '<button class="btn btn-sm" id="ceTestCall">📞 Test call</button></div>' +
+        '<button class="btn btn-sm" id="ceTestCall">Test call</button></div>' +
         '<div class="muted" id="ceTestOut" style="font-size:12px;margin-top:6px"></div></div>' +
         '<div class="modal-foot" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="ceSave">Save script</button></div>',
         function (root, close) {
@@ -9706,13 +9706,13 @@
             var out = $("#ceTestOut", root); if (out) out.innerHTML = loading();
             send("/voice/test-drop", "POST", { to: to, scriptTemplate: tpl, motion: c.motion || motion, persona: personaOpt }).then(function (r) {
               if (!out) return;
-              if (!r.ok) { out.innerHTML = '<span style="color:#ff7a90">Test failed: ' + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status) + "</span>"; return; }
+              if (!r.ok) { out.innerHTML = '<span style="color:var(--danger)">Test failed: ' + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status) + "</span>"; return; }
               var d = r.data || {};
-              out.innerHTML = '<b style="color:#34d399">Rendered (~' + d.estSeconds + "s" +
+              out.innerHTML = '<b style="color:var(--ok)">Rendered (~' + d.estSeconds + "s" +
                 (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside sweet spot") + "):</b> “" + esc(d.rendered || "") + "” · " +
-                (d.dialError ? '<span style="color:#ff7a90">dial failed (' + esc(d.dialError) + ")</span>" : d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
-                ((d.warnings && d.warnings.length) ? ' · <span style="color:#ffc24d">⚠ ' + d.warnings.map(esc).join(" · ") + "</span>" : "");
-            }).catch(function () { if (out) out.innerHTML = '<span style="color:#ff7a90">Could not reach the server.</span>'; });
+                (d.dialError ? '<span style="color:var(--danger)">dial failed (' + esc(d.dialError) + ")</span>" : d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
+                ((d.warnings && d.warnings.length) ? ' · <span style="color:var(--warn)">' + d.warnings.map(esc).join(" · ") + "</span>" : "");
+            }).catch(function () { if (out) out.innerHTML = '<span style="color:var(--danger)">Could not reach the server.</span>'; });
           });
           $("#ceSave", root).addEventListener("click", function () {
             var tpl = ($("#ceTpl", root).value || "").trim();
@@ -9818,42 +9818,42 @@
         var engineTiles = '<div class="veng">' + PROV_IDS.map(function (pid) {
           var on = activeProvider === pid, conn = provOk[pid];
           return '<button type="button" class="veng-tile' + (on ? " on" : "") + '" data-vcprov="' + pid + '">' +
-            (on ? '<span class="veng-check">✓</span>' : "") +
+            (on ? '<span class="veng-check"><svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg></span>' : "") +
             '<span class="veng-name">' + esc(provLabel[pid]) + "</span>" +
             '<span class="veng-stat"><span class="veng-dot" style="background:' + (conn ? "var(--accent-green)" : "var(--text-dim)") + '"></span>' + (conn ? "Connected" : "Not connected") + "</span>" +
           "</button>";
         }).join("") + "</div>";
         var infoStrip = activeProvider
-          ? '<div class="veng-info"><span class="ic">' + (provOk[activeProvider] && resolvedVoice && resolvedVoice.voiceId ? "🎙️" : "⚠️") + "</span><div>" +
+          ? '<div class="veng-info"><span class="ic">' + (provOk[activeProvider] && resolvedVoice && resolvedVoice.voiceId ? '<svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg>' : '<svg class="isvg" aria-hidden="true"><use href="#i-alert"/></svg>') + "</span><div>" +
               (resolvedVoice && resolvedVoice.voiceId
                 ? "Using <b>" + esc(provLabel[activeProvider]) + "</b> · voice <b>" + esc(resolvedVoice.agentName) + '</b> <span class="muted">(' + esc(resolvedVoice.voiceId) + ")</span>"
-                : "Engine <b>" + esc(provLabel[activeProvider]) + "</b> selected, but no voice id for it yet — add one below.") +
-              (provOk[activeProvider] ? "" : '<br><span style="color:var(--accent-amber)">' + esc(provLabel[activeProvider]) + " key not connected — runs as a safe dry-run until you connect it in Setup.</span>") +
+                : "Engine <b>" + esc(provLabel[activeProvider]) + "</b> selected, but no voice id for it yet, add one below.") +
+              (provOk[activeProvider] ? "" : '<br><span style="color:var(--accent-amber)">' + esc(provLabel[activeProvider]) + " key not connected, runs as a safe dry-run until you connect it in Setup.</span>") +
             "</div></div>"
-          : '<div class="veng-info"><span class="ic">👆</span><div>No engine chosen yet — pick one above, or add a voice below and it auto-selects.</div></div>';
+          : '<div class="veng-info"><span class="ic"><svg class="isvg" aria-hidden="true"><use href="#i-up"/></svg></span><div>No engine chosen yet, pick one above, or add a voice below and it auto-selects.</div></div>';
         var voices = consent.map(function (c) {
           var pid = c.provider || "elevenlabs";
           var isActive = resolvedVoice && c.id === resolvedVoice.id;
           var control = isActive
-            ? '<span class="vrow-pill" style="margin-left:auto">✓ In use</span>'
+            ? '<span class="vrow-pill" style="margin-left:auto">In use</span>'
             : '<button class="btn btn-ghost btn-sm" data-vcact="' + esc(c.id) + '" title="Use this voice (and its engine) for tests and sends" style="margin-left:auto">Use this</button>';
-          return '<div class="vrow' + (isActive ? " on" : "") + '">🎙️ <b>' + esc(c.agentName) + "</b>" +
+          return '<div class="vrow' + (isActive ? " on" : "") + '"><b>' + esc(c.agentName) + "</b>" +
             '<span class="muted" style="font-size:12px">' + esc(provLabel[pid] || pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · (no id)") + "</span>" +
             control +
-            '<button class="btn btn-ghost btn-sm" data-vcdel="' + esc(c.id) + '" title="Delete this voice">🗑️</button></div>';
+            '<button class="btn btn-ghost btn-sm" data-vcdel="' + esc(c.id) + '" title="Delete this voice"><svg class="isvg" aria-hidden="true"><use href="#i-trash"/></svg></button></div>';
         }).join("") || '<p class="muted">No voices yet, add one above.</p>';
         body.innerHTML =
           vdEngineCss +
-          '<div class="card" style="border-color:var(--brand-2)"><h3>🎙️ Voice engine — used for tests &amp; sends</h3>' +
+          '<div class="card" style="border-color:var(--brand-2)"><h3>Voice engine, used for tests &amp; sends</h3>' +
           '<p class="muted" style="font-size:13px;margin:0 0 10px">Pick which provider every test drop, “Listen first” preview, and live campaign uses (unless a campaign sets its own). Choose once and it is defined.</p>' +
           engineTiles + infoStrip + "</div>" +
           '<div class="card" style="margin-top:14px"><h3>Your voices</h3>' +
-          '<p class="muted" style="font-size:13px">Paste a voice id from ElevenLabs, Cartesia or Hume and you are ready — no cloning or approval here. Connect each provider\'s API key in <b>Setup → Voice</b>.</p>' +
+          '<p class="muted" style="font-size:13px">Paste a voice id from ElevenLabs, Cartesia or Hume and you are ready, no cloning or approval here. Connect each provider\'s API key in <b>Setup → Voice</b>.</p>' +
           '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
           '<div class="vd-field"><label>Provider</label><select id="vcProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option><option value="hume">Hume</option></select></div>' +
           inp("vcVoiceId", "Voice ID", "paste your voice id") +
           inp("vcName", "Name (whose voice)", "Ryan") + "</div>" +
-          '<p class="muted" style="font-size:12px;margin:10px 0 0">No voice id yet? Create one and copy its id from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs ↗</a>, <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia ↗</a> or <a href="https://platform.hume.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Hume ↗</a>.</p>' +
+          '<p class="muted" style="font-size:12px;margin:10px 0 0">No voice id yet? Create one and copy its id from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs</a>, <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia</a> or <a href="https://platform.hume.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Hume</a>.</p>' +
           '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vcSave">Add voice</button></div></div>' +
           '<div class="card" style="margin-top:14px"><h3>Reused audio, no re-charge</h3>' +
           '<p class="muted" style="font-size:13px">Every word, name and role is synthesized once and saved, then reused for free, you are never charged twice for the same word in the same voice. Saved segments: <b>' + (cache.total || 0) + "</b> (" + kinds + ").</p>" +
@@ -9933,7 +9933,7 @@
         '<select id="vtSaved" style="min-width:220px;max-width:100%">' + vtTestOpts() + "</select>" +
         '<button class="btn btn-sm" id="vtLoad">Load</button>' +
         '<button class="btn btn-sm" id="vtDelete">Delete</button>' +
-        '<button class="btn btn-sm" id="vtSaveAs">💾 Save current</button></div>' +
+        '<button class="btn btn-sm" id="vtSaveAs">Save current</button></div>' +
         '<p class="muted" style="font-size:12px;margin:6px 0 0">Saved on this browser. Park a configured drop here, reload anytime, and keep re-testing the same one before you approve it. Saving under an existing name updates it.</p>' +
 
         grpLabel("1 · Where to send the test") +
@@ -9953,9 +9953,9 @@
         grpLabel("4 · Script") +
         '<div><div style="margin:4px 0">' + fieldChips("vtScript") + "</div>" +
         '<textarea id="vtScript" rows="4" style="width:100%">' + esc(VD_DEFAULT_SCRIPT) + "</textarea></div>" +
-        '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" id="vtGo">📞 Send test drop</button>' +
-        '<button class="btn btn-sm" id="vtAi">✨ AI customize</button>' +
-        '<button class="btn btn-sm" id="vtListen">🔊 Listen first</button></div>' +
+        '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" id="vtGo">Send test drop</button>' +
+        '<button class="btn btn-sm" id="vtAi">AI customize</button>' +
+        '<button class="btn btn-sm" id="vtListen">Listen first</button></div>' +
         '<div id="vtResult" style="margin-top:12px"></div></div>';
       wireChips(body);
       // Show which cloned voice this test will actually use (the active engine),
@@ -9974,8 +9974,8 @@
         el.innerHTML = prov
           ? 'Voice engine: <b style="color:var(--brand-2)">' + esc(pl[prov] || prov) + '</b>' +
             (av && av.voiceId ? ' · ' + esc(av.agentName) + ' <span class="muted">(' + esc(av.voiceId) + ')</span>' : ' <span style="color:var(--accent-amber)">· no voice id for this engine yet</span>') +
-            ' <span class="muted">— change in Voice &amp; Consent</span>'
-          : 'Voice engine: <span class="muted">none set — pick one in Voice &amp; Consent (runs as a safe dry-run until then)</span>';
+            ' <span class="muted">- change in Voice &amp; Consent</span>'
+          : 'Voice engine: <span class="muted">none set, pick one in Voice &amp; Consent (runs as a safe dry-run until then)</span>';
       }).catch(function () {});
       $("#vtSaveAs").addEventListener("click", function () {
         var def = val("vtFirst") ? (val("vtFirst") + (val("vtCompany") ? " · " + val("vtCompany") : "")) : "My test";
@@ -10034,21 +10034,21 @@
             var why = (r.data && r.data.detail) || (r.data && r.data.error) || ("HTTP " + r.status);
             $("#vtResult").innerHTML =
               '<div style="padding:10px;border-radius:8px;background:rgba(255,122,144,.08);border:1px solid rgba(255,122,144,.25)">' +
-              '<b style="color:#ff7a90">Test failed.</b> <span style="font-size:13px">' + esc(why) + "</span></div>";
+              '<b style="color:var(--danger)">Test failed.</b> <span style="font-size:13px">' + esc(why) + "</span></div>";
             return;
           }
           var d = r.data;
           var status = d.dialError
-            ? '<span style="color:#ff7a90">dial failed (' + esc(d.dialError) + ")</span>"
+            ? '<span style="color:var(--danger)">dial failed (' + esc(d.dialError) + ")</span>"
             : d.dryRun
-              ? '<span style="color:#ffc24d">dry-run — no Telnyx/clone keys set, nothing was dialed</span>'
-              : '<span style="color:#34d399">dialing now → ' + esc(d.callControlId) + "</span>";
-          $("#vtResult").innerHTML = '<div style="padding:10px;border-radius:8px;background:rgba(255,255,255,.03)">' +
+              ? '<span style="color:var(--warn)">dry-run, no Telnyx/clone keys set, nothing was dialed</span>'
+              : '<span style="color:var(--ok)">dialing now → ' + esc(d.callControlId) + "</span>";
+          $("#vtResult").innerHTML = '<div style="padding:10px;border-radius:8px;background:var(--surface-2)">' +
             "<div style='font-size:13px'><b>Rendered (~" + d.estSeconds + "s" + (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside the 15-25s sweet spot") + "):</b></div>" +
             '<div style="font-size:13px;margin:6px 0">“' + esc(d.rendered) + "”</div>" +
             '<div style="font-size:12px;margin-top:6px">' + status + "</div>" +
             '<div class="muted" style="font-size:12px;margin-top:2px">segments ' + d.playlistLength + " · synthesized " + d.synthesized + " · cached " + d.cached + "</div>" +
-            ((d.warnings && d.warnings.length) ? '<div style="font-size:12px;color:#ffc24d;margin-top:4px">⚠ ' + d.warnings.map(esc).join(" · ") + "</div>" : "") +
+            ((d.warnings && d.warnings.length) ? '<div style="font-size:12px;color:var(--warn);margin-top:4px">' + d.warnings.map(esc).join(" · ") + "</div>" : "") +
             "</div>";
         });
       });
@@ -10071,7 +10071,7 @@
       '<div class="vt-view"><div class="vt-tabs"></div><div id="vtBody">' + loading() + "</div></div>";
 
     function tabBar() {
-      var tabs = [["desks", "🎙️ Vetting Desks"], ["calls", "📋 Calls & Scores"], ["bookings", "🗓️ Bookings"]];
+      var tabs = [["desks", "Vetting Desks"], ["calls", "Calls & Scores"], ["bookings", "Bookings"]];
       $(".vt-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="vt-tab' + (vt.tab === t[0] ? " active" : "") + '" data-vttab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -10171,7 +10171,7 @@
         "</div>" +
         '<div class="vt-section">Top qualifiers <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- auto-pulled from the JD; you don\'t need to fill these</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">Leave these blank and we\'ll generate the top 3-4 from your job description when you save. Or generate now to review and tweak.</div>' +
-        '<div style="margin-bottom:8px"><button type="button" class="vt-btn" id="vtGenQ">✨ Generate from JD</button></div>' +
+        '<div style="margin-bottom:8px"><button type="button" class="vt-btn" id="vtGenQ">Generate from JD</button></div>' +
         qrow(0) + qrow(1) + qrow(2) + qrow(3) +
         '<div class="vt-section">Next step <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- auto-filled; leave blank to use the friendly defaults</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">Leave blank and the agent will, in its own natural words, <b>if qualified:</b> tell them they\'re a strong fit, that you\'ll send the full JD, and ask for an updated resume tailored to what you discussed. <b>If not a fit:</b> let them down kindly and say you\'ll keep them in mind for roles that better suit their background.</div>' +
@@ -10208,30 +10208,30 @@
     }
     function deskCard(d) {
       var optinUrl = location.origin + "/vetting-optin?desk=" + d.id;
-      var actions = '<button class="vt-btn" data-vtact="edit" data-id="' + d.id + '">✎ Edit</button>';
+      var actions = '<button class="vt-btn" data-vtact="edit" data-id="' + d.id + '">Edit</button>';
       if (d.status === "live") {
-        actions += '<button class="vt-btn" data-vtact="pause" data-id="' + d.id + '">⏸ Pause</button>';
+        actions += '<button class="vt-btn" data-vtact="pause" data-id="' + d.id + '">Pause</button>';
       } else if (d.status === "paused") {
-        actions += '<button class="vt-btn vt-btn-primary" data-vtact="resume" data-id="' + d.id + '">▶ Resume</button>';
+        actions += '<button class="vt-btn vt-btn-primary" data-vtact="resume" data-id="' + d.id + '">Resume</button>';
       } else {
-        actions += '<button class="vt-btn vt-btn-primary" data-vtact="provision" data-id="' + d.id + '">📡 Go live</button>';
+        actions += '<button class="vt-btn vt-btn-primary" data-vtact="provision" data-id="' + d.id + '">Go live</button>';
       }
-      if (d.phoneNumber) actions += '<button class="vt-btn" data-vtact="detach" data-id="' + d.id + '">⛓️‍💥 Detach #</button>';
-      actions += '<button class="vt-btn" data-vtact="copy" data-id="' + d.id + '" data-url="' + esc(optinUrl) + '">🔗 Opt-in link</button>' +
-        '<button class="vt-btn" data-vtact="viewcalls" data-id="' + d.id + '">📋 Calls (' + (d.callCount || 0) + ")</button>" +
-        '<button class="vt-btn vt-btn-danger" data-vtact="del" data-id="' + d.id + '">🗑</button>';
+      if (d.phoneNumber) actions += '<button class="vt-btn" data-vtact="detach" data-id="' + d.id + '">Detach #</button>';
+      actions += '<button class="vt-btn" data-vtact="copy" data-id="' + d.id + '" data-url="' + esc(optinUrl) + '">Opt-in link</button>' +
+        '<button class="vt-btn" data-vtact="viewcalls" data-id="' + d.id + '">Calls (' + (d.callCount || 0) + ")</button>" +
+        '<button class="vt-btn vt-btn-danger" data-vtact="del" data-id="' + d.id + '"><svg class="isvg" aria-hidden="true"><use href="#i-trash"/></svg></button>';
       var chips =
-        '<span class="vt-chip">📞 <b>' + esc(d.phoneNumber || "no number") + "</b></span>" +
+        '<span class="vt-chip"><b>' + esc(d.phoneNumber || "no number") + "</b></span>" +
         '<span class="vt-chip">' + (d.questions ? d.questions.length : 0) + " qualifiers</span>" +
         '<span class="vt-chip"><b>' + (d.candidateCount || 0) + "</b> opted in</span>" +
         '<span class="vt-chip">pass ≥ <b>' + d.passThreshold + "</b></span>" +
-        '<span class="vt-chip">🎙️ ' + esc(d.voiceId || "default voice") + "</span>";
+        '<span class="vt-chip">' + esc(d.voiceId || "default voice") + "</span>";
       return '<div class="vt-desk" data-id="' + d.id + '">' +
         '<div class="vt-desk-head">' +
         '<h3 class="vt-desk-title">' + esc(d.name) + " <span>· " + esc(d.roleTitle || "no role title") + "</span></h3>" +
         statusPill(d.status) + "</div>" +
         '<div class="vt-meta">' + chips + "</div>" +
-        (d.jobDescription ? "" : '<div class="vt-warn">⚠ Add a job description before going live.</div>') +
+        (d.jobDescription ? "" : '<div class="vt-warn">Add a job description before going live.</div>') +
         '<div class="vt-actions">' + actions + "</div>" +
         '<div class="vt-msg" data-msg="' + d.id + '"></div></div>';
     }
@@ -10260,7 +10260,7 @@
         var showForm = !!(vt.creating || editing) || list.length === 0;
         var toolbar = '<div class="vt-toolbar"><span class="vt-count">' +
           list.length + " vetting desk" + (list.length === 1 ? "" : "s") + "</span>" +
-          (showForm ? "" : '<button class="vt-btn vt-btn-primary" id="vtNew">＋ New vetting desk</button>') +
+          (showForm ? "" : '<button class="vt-btn vt-btn-primary" id="vtNew">+ New vetting desk</button>') +
           "</div>";
         body.innerHTML = toolbar +
           (showForm ? (editing ? deskForm(editing) : deskForm(null)) : "") +
@@ -10286,9 +10286,9 @@
       if (genQ) genQ.addEventListener("click", function () {
         var jd = $("#vtfJd") ? $("#vtfJd").value.trim() : "";
         if (!jd) { toast("Paste the job description first."); return; }
-        genQ.disabled = true; genQ.textContent = "✨ Generating…";
+        genQ.disabled = true; genQ.textContent = "Generating…";
         send("/vetting/desks", "POST", { action: "generate-questions", jobDescription: jd, roleTitle: vget("vtfRole"), clientCompany: vget("vtfCompany") }).then(function (r) {
-          genQ.disabled = false; genQ.textContent = "✨ Generate from JD";
+          genQ.disabled = false; genQ.textContent = "Generate from JD";
           if (!r.ok) { toast((r.data && r.data.detail) || "Couldn’t generate, add ANTHROPIC_API_KEY."); return; }
           var qs = (r.data && r.data.questions) || [];
           for (var i = 0; i < 4; i++) {
@@ -10298,7 +10298,7 @@
             if ($("#vtQm" + i)) $("#vtQm" + i).checked = !!q.mustHave;
           }
           toast("Pulled " + qs.length + " qualifier" + (qs.length === 1 ? "" : "s") + " from the JD, tweak if you like.");
-        }).catch(function () { genQ.disabled = false; genQ.textContent = "✨ Generate from JD"; toast("Couldn’t reach the server."); });
+        }).catch(function () { genQ.disabled = false; genQ.textContent = "Generate from JD"; toast("Couldn’t reach the server."); });
       });
       Array.prototype.forEach.call(body.querySelectorAll("[data-vtact]"), function (b) {
         b.addEventListener("click", function () { deskAction(b.getAttribute("data-vtact"), b.getAttribute("data-id"), b, body); });
@@ -10350,11 +10350,11 @@
       ["motivation", "Motivation", 10], ["culturalFit", "Cultural fit", 5]
     ];
     function band(total) {
-      if (total >= 90) return ["Exceptional candidate", "#34d399"];
-      if (total >= 80) return ["Strong hire", "#34d399"];
+      if (total >= 90) return ["Exceptional candidate", "var(--ok)"];
+      if (total >= 80) return ["Strong hire", "var(--ok)"];
       if (total >= 70) return ["Worth advancing", "#7fd1ff"];
-      if (total >= 60) return ["Borderline", "#ffc24d"];
-      return ["Do not advance", "#ff7a90"];
+      if (total >= 60) return ["Borderline", "var(--warn)"];
+      return ["Do not advance", "var(--danger)"];
     }
     function scoreRing(total) {
       var b = band(total || 0);
@@ -10363,7 +10363,7 @@
     function callRow(c) {
       var b = band(c.totalScore || 0);
       var name = (c.candidate ? (c.candidate.firstName + " " + c.candidate.lastName) : (c.callerName || c.callerPhone));
-      var qual = c.qualified === true ? '<span class="vt-qual-yes">✓ Qualified</span>' : c.qualified === false ? '<span class="vt-qual-no">✗ Not qualified</span>' : '<span style="color:var(--text-dim)">pending</span>';
+      var qual = c.qualified === true ? '<span class="vt-qual-yes">Qualified</span>' : c.qualified === false ? '<span class="vt-qual-no">Not qualified</span>' : '<span style="color:var(--text-dim)">pending</span>';
       var mkt = c.marketabilityScore != null ? (" · market " + c.marketabilityScore + "/10") : "";
       return '<div class="vt-call" data-call="' + c.id + '">' +
         '<div class="vt-call-top">' + scoreRing(c.totalScore) +
@@ -10427,11 +10427,11 @@
       if (c.qualifyRationale) html += '<div class="vt-rationale"><b>Why ' + (c.qualified ? "they qualify" : "they don’t qualify") + ":</b> " + esc(c.qualifyRationale) + "</div>";
       if (c.verdicts && c.verdicts.length) {
         html += '<div class="vt-verdicts"><h4>Qualifiers</h4>' + c.verdicts.map(function (v) {
-          return '<div class="vt-verdict">' + (v.pass ? "✅" : "❌") + ' <span class="vt-q-ans">' + esc(v.answer) + '</span> <span class="vt-q-rat">- ' + esc(v.rationale) + "</span></div>";
+          return '<div class="vt-verdict">' + (v.pass ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : '<svg class="isvg" aria-hidden="true"><use href="#i-x"/></svg>') + ' <span class="vt-q-ans">' + esc(v.answer) + '</span> <span class="vt-q-rat">- ' + esc(v.rationale) + "</span></div>";
         }).join("") + "</div>";
       }
       if (c.nextStepGiven) html += '<div class="vt-next"><b>Next step told to candidate:</b> ' + esc(c.nextStepGiven) + "</div>";
-      if (c.recordingUrl) html += '<div style="margin-top:12px"><a class="vt-btn" href="' + esc(c.recordingUrl) + '" target="_blank" rel="noopener">▶ Recording</a></div>';
+      if (c.recordingUrl) html += '<div style="margin-top:12px"><a class="vt-btn" href="' + esc(c.recordingUrl) + '" target="_blank" rel="noopener">Recording</a></div>';
       if (c.transcript && c.transcript.length) {
         html += '<div class="vt-transcript"><div class="vt-tr-h">Transcript</div><div class="vt-tr-body">' +
           c.transcript.map(function (t) {
@@ -10455,14 +10455,14 @@
         : ["paused", "No matching desk"];
       var deskChip = b.deskName
         ? '<span class="vt-chip">→ <b>' + esc(b.deskName) + "</b></span>"
-        : '<span class="vt-chip">⚠ no desk matches “' + esc(b.jobTitle || "-") + "”</span>";
-      var phoneChip = b.phone ? '<span class="vt-chip">📞 <b>' + esc(b.phone) + "</b></span>" : '<span class="vt-chip">📞 none on booking</span>';
-      var liChip = b.linkedinUrl ? '<span class="vt-chip">🔗 LinkedIn ✓</span>' : '<span class="vt-chip">🔗 no LinkedIn</span>';
+        : '<span class="vt-chip">no desk matches “' + esc(b.jobTitle || "-") + "”</span>";
+      var phoneChip = b.phone ? '<span class="vt-chip"><b>' + esc(b.phone) + "</b></span>" : '<span class="vt-chip">none on booking</span>';
+      var liChip = b.linkedinUrl ? '<span class="vt-chip">LinkedIn</span>' : '<span class="vt-chip">no LinkedIn</span>';
       return '<div class="vt-desk">' +
         '<div class="vt-desk-head"><h3 class="vt-desk-title">' + esc(b.name || "Unknown") + ' <span>· ' + esc(b.jobTitle || "no role title") + "</span></h3>" +
         '<span class="vt-pill ' + pill[0] + '">' + pill[1] + "</span></div>" +
         '<div class="vt-meta">' + deskChip + phoneChip + liChip +
-        (b.startsAt ? '<span class="vt-chip">🕒 ' + esc(bkWhen(b.startsAt)) + "</span>" : "") + "</div></div>";
+        (b.startsAt ? '<span class="vt-chip">' + esc(bkWhen(b.startsAt)) + "</span>" : "") + "</div></div>";
     }
     function bookingsView(r) {
       r = r || {};
@@ -10477,7 +10477,7 @@
         (r.noPhone ? " · <span style=\"color:var(--vt-warn)\">" + r.noPhone + " need phone</span>" : "") +
         (r.noLinkedin ? " · <span style=\"color:var(--vt-warn)\">" + r.noLinkedin + " need LinkedIn</span>" : "") + "</span>" +
         '<button class="vt-btn vt-btn-primary" id="vtBkSync">↻ Sync now</button></div>' +
-        (r.error ? '<div class="vt-warn" style="margin-top:10px">⚠ TidyCal said: ' + esc(r.error) + ', an MCP-scoped token may be rejected by the REST API; generate a personal access token at tidycal.com/integrations/oauth.</div>' : "") +
+        (r.error ? '<div class="vt-warn" style="margin-top:10px">TidyCal said: ' + esc(r.error) + ', an MCP-scoped token may be rejected by the REST API; generate a personal access token at tidycal.com/integrations/oauth.</div>' : "") +
         '<div class="vt-hint" style="margin-top:8px">“Sync now” pulls upcoming bookings, files each candidate under the matching desk, and researches their LinkedIn so the agent is ready when they call. Wire it to a schedule to run automatically.</div></div>';
       var list = (r.bookings || []).map(bookingCard).join("") ||
         '<div class="vt-empty">No upcoming bookings. New TidyCal bookings show up here on the next sync.</div>';
@@ -10625,13 +10625,13 @@
       var s = orSnap;
       var pf = s.preflight || { ok: false, blocking: [] };
       var gate = pf.ok
-        ? '<div class="or-gate ok">✓ All required tools are green, you can activate ' + esc(motion === "bd" ? "Business Development" : "Recruiting") + " campaigns.</div>"
-        : '<div class="or-gate warn">⚠ ' + ((pf.blocking || []).length) + " required tool(s) not ready yet. Connect the cards marked <b>Action needed</b> to activate " + esc(motion === "bd" ? "Business Development" : "Recruiting") + " campaigns.</div>";
+        ? '<div class="or-gate ok">All required tools are green, you can activate ' + esc(motion === "bd" ? "Business Development" : "Recruiting") + " campaigns.</div>"
+        : '<div class="or-gate warn">' + ((pf.blocking || []).length) + " required tool(s) not ready yet. Connect the cards marked <b>Action needed</b> to activate " + esc(motion === "bd" ? "Business Development" : "Recruiting") + " campaigns.</div>";
 
       // ATS
       var ats = s.ats || {};
       var atsCard = card({
-        icon: "🗂️", name: ats.label || "ATS", state: ats.state,
+        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-database"/></svg>', name: ats.label || "ATS", state: ats.state,
         body: '<p class="or-detail">' + esc(ats.detail || "") + "</p>",
         foot: ats.connected
           ? '<button class="btn btn-ghost btn-sm" data-go="ats">Manage ATS</button>'
@@ -10641,7 +10641,7 @@
       // SMS
       var sms = s.sms || {};
       var smsCard = card({
-        icon: "💬", name: sms.label || "SMS", state: sms.state,
+        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-message"/></svg>', name: sms.label || "SMS", state: sms.state,
         body: '<p class="or-detail">' + esc(sms.detail || "") + "</p>",
         foot: sms.connected
           ? '<button class="btn btn-ghost btn-sm" data-go="connected">Manage</button>'
@@ -10651,7 +10651,7 @@
       // Enrichment + credits
       var en = s.enrichment || {}, cr = en.credits || {};
       var enCard = card({
-        icon: "🧪", name: "Enrichment waterfall", state: en.state,
+        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-flask"/></svg>', name: "Enrichment waterfall", state: en.state,
         body: '<p class="or-detail">' + esc(en.detail || "") + "</p>" +
           '<div class="or-credits"><div class="or-credit-top"><b>' + fmt(cr.remaining) + "</b> <span class=\"muted\">/ " + fmt(cr.included) + " credits</span></div>" +
           bar(cr.pct, cr.low ? "warn" : "ok") + "</div>",
@@ -10662,7 +10662,7 @@
       // Job Search (white-labelled)
       var js = s.jobSearch || {};
       var jsCard = card({
-        icon: "🛰️", name: js.label || "Job Search", state: js.state,
+        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-radar"/></svg>', name: js.label || "Job Search", state: js.state,
         body: '<p class="or-detail">' + esc(js.detail || "") + "</p>",
         foot: '<label class="or-swrap"><span class="muted">' + (js.enabled ? "On" : "Off") + "</span>" + sw(js.enabled, "jobSearch") + "</label>"
       });
@@ -10670,25 +10670,25 @@
       // Domains
       var dm = s.domains || { list: [] };
       var dmCard = card({
-        icon: "📧", name: "Warm sending domains", state: dm.state,
+        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', name: "Warm sending domains", state: dm.state,
         body: '<p class="or-detail">' + (dm.total
           ? "<b>" + dm.total + "</b> domain" + (dm.total === 1 ? "" : "s") + " · <b>" + (dm.inboxesWarm || 0) + "</b> of " + (dm.inboxesTotal || 0) + " inboxes warm" + (dm.inboxesWarming ? ", " + dm.inboxesWarming + " warming" : "")
           : "No sending domains yet. Add one to start warming inboxes.") + "</p>",
         foot: '<div class="or-foot-row">' +
           (dm.total ? '<button class="btn btn-ghost btn-sm" data-panel="domains">' + (orPanel === "domains" ? "Hide details" : "Manage domains") + "</button>" : "") +
-          (canAcct ? '<button class="btn ' + (dm.total ? "btn-ghost" : "btn-primary") + ' btn-sm" data-go="accounts">＋ Add domain</button>' : "") + "</div>"
+          (canAcct ? '<button class="btn ' + (dm.total ? "btn-ghost" : "btn-primary") + ' btn-sm" data-go="accounts">+ Add domain</button>' : "") + "</div>"
       });
 
       // LinkedIn
       var li = s.linkedin || { list: [] };
       var liCard = card({
-        icon: "🔗", name: "Warm LinkedIn accounts", state: li.state,
+        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-link"/></svg>', name: "Warm LinkedIn accounts", state: li.state,
         body: '<p class="or-detail">' + (li.total
           ? "<b>" + li.warmed + "</b> of " + li.total + " warmed" + (li.flagged ? ' · <span style="color:var(--accent-red)">' + li.flagged + " flagged</span>" : "")
           : "No LinkedIn accounts yet. Connect one to start warming it.") + "</p>",
         foot: '<div class="or-foot-row">' +
           (li.total ? '<button class="btn btn-ghost btn-sm" data-panel="linkedin">' + (orPanel === "linkedin" ? "Hide details" : "View accounts") + "</button>" : "") +
-          (canAcct ? '<button class="btn ' + (li.total ? "btn-ghost" : "btn-primary") + ' btn-sm" data-go="accounts">＋ Add account</button>' : "") + "</div>"
+          (canAcct ? '<button class="btn ' + (li.total ? "btn-ghost" : "btn-primary") + ' btn-sm" data-go="accounts">+ Add account</button>' : "") + "</div>"
       });
 
       var panel = "";
@@ -10737,7 +10737,7 @@
       var phases = REF.phases.map(function (p) {
         return '<div class="phase"><div class="phase-h"><span class="phase-n">' + p.n + "</span><h4>" + esc(p.title) + '</h4><span class="phase-time">' + esc(p.time) + "</span></div>" +
           "<ul>" + p.items.map(function (i) { return "<li>" + esc(i) + "</li>"; }).join("") + "</ul>" +
-          '<div class="done">✓ Done when: ' + esc(p.done) + "</div></div>";
+          '<div class="done">Done when: ' + esc(p.done) + "</div></div>";
       }).join("");
       var touches = REF.touches.map(function (t) {
         return '<div class="touch"><div class="day">Day ' + t.day + '</div><div><div class="tn">' + esc(t.name) +
@@ -10763,8 +10763,8 @@
     el.innerHTML = head("LinkedIn Automation",
       "Enroll prospects into account-safe LinkedIn cadences. The engine paces every touch, connect, message, accept-triggered follow-up, inside each account's daily limits, and pauses the instant someone replies.") +
       '<div class="btn-row" style="margin-bottom:14px">' +
-        '<button class="btn btn-primary btn-sm" id="autoEnroll">＋ Enroll a prospect</button>' +
-        '<button class="btn btn-ghost btn-sm" id="autoTick">▶ Run cadence now</button>' +
+        '<button class="btn btn-primary btn-sm" id="autoEnroll">+ Enroll a prospect</button>' +
+        '<button class="btn btn-ghost btn-sm" id="autoTick">Run cadence now</button>' +
       "</div>" +
       '<div id="autoBody">' + loading() + "</div>";
 
@@ -10772,10 +10772,10 @@
     $("#autoTick").addEventListener("click", function () {
       var b = $("#autoTick"); b.disabled = true; b.textContent = "Running…";
       send("/automation", "POST", { action: "tick" }).then(function (r) {
-        b.disabled = false; b.textContent = "▶ Run cadence now";
+        b.disabled = false; b.textContent = "Run cadence now";
         if (r.ok) { toast("Cadence ran · " + (r.data.processed || 0) + " step(s) processed"); load(); }
         else toast("Could not run cadence (" + (r.data.error || r.status) + ")");
-      }).catch(function () { b.disabled = false; b.textContent = "▶ Run cadence now"; toast("Could not reach the server."); });
+      }).catch(function () { b.disabled = false; b.textContent = "Run cadence now"; toast("Could not reach the server."); });
     });
 
     // Delegated, attached once: #autoBody persists across reloads, so wiring it
@@ -10826,7 +10826,7 @@
     function enrollmentsHtml() {
       var list = autoState.enrollments || [];
       if (!list.length) {
-        return '<div class="empty">No one enrolled yet. Click ＋ Enroll a prospect to start an account-safe LinkedIn cadence.</div>';
+        return '<div class="empty">No one enrolled yet. Click + Enroll a prospect to start an account-safe LinkedIn cadence.</div>';
       }
       return list.map(function (e) {
         var step = (e.currentStepOrder || 0) + (e.totalSteps ? " / " + e.totalSteps : "");
@@ -10968,12 +10968,12 @@
 
     el.innerHTML = head("Sequences", "Every " + (motion === "bd" ? "BD" : "recruiting") + " campaign your recruiters set up lands here, one shared workspace library. Build in Campaigns, then assign + deploy in Campaign Studio.") +
       '<div class="seqlib-tools">' +
-        '<button class="sl-fbtn" id="slMine"><span>👤</span> My Sequences</button>' +
-        '<span class="sl-tagwrap"><button class="sl-fbtn" id="slOwnerBtn"><span>🧑‍💼</span> Recruiter <b id="slOwnerLbl"></b></button>' +
+        '<button class="sl-fbtn" id="slMine"><span><svg class="isvg" aria-hidden="true"><use href="#i-user"/></svg></span> My Sequences</button>' +
+        '<span class="sl-tagwrap"><button class="sl-fbtn" id="slOwnerBtn"><span><svg class="isvg" aria-hidden="true"><use href="#i-user"/></svg></span> Recruiter <b id="slOwnerLbl"></b></button>' +
           '<select id="slOwner" class="sl-tagsel"><option value="">All recruiters</option></select></span>' +
-        '<span class="sl-tagwrap"><button class="sl-fbtn" id="slTagBtn"><span>🏷</span> Tags <b id="slTagLbl"></b></button>' +
+        '<span class="sl-tagwrap"><button class="sl-fbtn" id="slTagBtn"><span><svg class="isvg" aria-hidden="true"><use href="#i-tag"/></svg></span> Tags <b id="slTagLbl"></b></button>' +
           '<select id="slTag" class="sl-tagsel"><option value="">All tags</option></select></span>' +
-        '<label class="seqlib-search"><span>⌕</span><input id="slSearch" placeholder="Search…" autocomplete="off"/></label>' +
+        '<label class="seqlib-search"><span><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg></span><input id="slSearch" placeholder="Search…" autocomplete="off"/></label>' +
         '<span class="sl-count" id="slCount"></span>' +
       "</div>" +
       '<div id="slBody">' + loading() + "</div>" +
@@ -11170,8 +11170,8 @@
   function loadVoiceScripts() {
     var host = $("#slVoice"); if (!host) return;
     host.innerHTML = '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center">' +
-      '<h3 style="margin:0">📞 Voice Drops scripts <span class="muted" style="font-size:12px">· reusable cloned-voice voicemails</span></h3>' +
-      '<button class="btn btn-sm btn-primary" id="vsNew">＋ New voice script</button></div>' +
+      '<h3 style="margin:0">Voice Drops scripts <span class="muted" style="font-size:12px">· reusable cloned-voice voicemails</span></h3>' +
+      '<button class="btn btn-sm btn-primary" id="vsNew">+ New voice script</button></div>' +
       '<div id="vsList" style="margin-top:10px">' + loading() + "</div></div>";
     $("#vsNew").addEventListener("click", function () { voiceScriptModal(null); });
     paintVoiceScripts();
@@ -11186,8 +11186,8 @@
       }
       list.innerHTML = '<table class="seqlib"><thead><tr><th>Script</th><th>Preview</th><th>Length</th><th>Actions</th></tr></thead><tbody>' +
         rows.map(function (s) {
-          var dot = s.withinSweetSpot ? "#34d399" : "#ffc24d";
-          return "<tr><td class=\"sl-name\"><span class=\"seq-chip\" style=\"background:#2a2440;color:#b9a6ff\">Voice</span> " + esc(s.name) + "</td>" +
+          var dot = s.withinSweetSpot ? "var(--ok)" : "var(--warn)";
+          return "<tr><td class=\"sl-name\"><span class=\"seq-chip\" style=\"background:var(--brand-soft);color:var(--brand)\">Voice</span> " + esc(s.name) + "</td>" +
             '<td class="muted" style="max-width:340px">' + esc((s.preview || "").slice(0, 90)) + "…</td>" +
             '<td><span style="color:' + dot + '">~' + (s.estSeconds || 0) + "s</span></td>" +
             '<td class="sl-actions"><button class="btn btn-ghost btn-sm" data-vsedit="' + esc(s.id) + '">Edit</button>' +
@@ -11219,11 +11219,11 @@
       // let it roll to voicemail, and confirm the drop actually lands. Uses the
       // same /voice/test-drop path as the Voice Drops Test tab: skips the calling
       // window for the manual test, every other safeguard stays on.
-      '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07)">' +
-      '<label style="display:block;font-size:12px;color:#8aa0c6;margin-bottom:4px">Test it on a real phone <span style="color:#6b7a99">- landline or VoIP number you control (E.164), let it roll to voicemail to check the drop</span></label>' +
+      '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">' +
+      '<label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px">Test it on a real phone <span style="color:var(--text-dim)">- landline or VoIP number you control (E.164), let it roll to voicemail to check the drop</span></label>' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
       '<input id="vsTestTo" type="tel" placeholder="+13105551234" style="flex:1;min-width:180px" />' +
-      '<button class="btn btn-sm" id="vsTestCall">📞 Test call</button></div>' +
+      '<button class="btn btn-sm" id="vsTestCall">Test call</button></div>' +
       '<div class="muted" id="vsTestOut" style="font-size:12px;margin-top:6px"></div></div>' +
       '<div class="modal-foot" style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vsSave">Save to Library</button></div>',
       function (root, close) {
@@ -11242,13 +11242,13 @@
           var out = $("#vsTestOut", root); if (out) out.innerHTML = loading();
           send("/voice/test-drop", "POST", { to: to, scriptTemplate: tpl, motion: motion }).then(function (r) {
             if (!out) return;
-            if (!r.ok) { out.innerHTML = '<span style="color:#ff7a90">Test failed: ' + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status) + "</span>"; return; }
+            if (!r.ok) { out.innerHTML = '<span style="color:var(--danger)">Test failed: ' + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status) + "</span>"; return; }
             var d = r.data || {};
-            out.innerHTML = '<b style="color:#34d399">Rendered (~' + d.estSeconds + "s" +
+            out.innerHTML = '<b style="color:var(--ok)">Rendered (~' + d.estSeconds + "s" +
               (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside sweet spot") + "):</b> “" + esc(d.rendered || "") + "” · " +
               (d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
-              ((d.warnings && d.warnings.length) ? ' · <span style="color:#ffc24d">⚠ ' + d.warnings.map(esc).join(" · ") + "</span>" : "");
-          }).catch(function () { if (out) out.innerHTML = '<span style="color:#ff7a90">Could not reach the server.</span>'; });
+              ((d.warnings && d.warnings.length) ? ' · <span style="color:var(--warn)">' + d.warnings.map(esc).join(" · ") + "</span>" : "");
+          }).catch(function () { if (out) out.innerHTML = '<span style="color:var(--danger)">Could not reach the server.</span>'; });
         });
         $("#vsSave", root).addEventListener("click", function () {
           var name = ($("#vsName", root).value || "").trim();
@@ -11300,12 +11300,12 @@
       ". KPIs, funnel, channels and appointments are computed from your live workspace; benchmark cards layer in once an analytics source is connected.") +
       '<div class="an-tools" style="display:flex;align-items:center;gap:12px;margin-bottom:14px">' +
         '<span style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600">' +
-          '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent-green);box-shadow:0 0 0 0 rgba(56,224,166,.6);animation:anPulse 2s infinite"></span>Live</span>' +
+          '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent-green);box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 40%, transparent);animation:anPulse 2s infinite"></span>Live</span>' +
         '<span id="anUpdated" class="muted" style="font-size:12px"></span>' +
         '<span style="flex:1"></span>' +
         '<button class="btn btn-ghost btn-sm" id="anRefresh">↻ Refresh</button>' +
       "</div>" +
-      '<style>@keyframes anPulse{0%{box-shadow:0 0 0 0 rgba(56,224,166,.55)}70%{box-shadow:0 0 0 7px rgba(56,224,166,0)}100%{box-shadow:0 0 0 0 rgba(56,224,166,0)}}</style>' +
+      '<style>@keyframes anPulse{0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 40%, transparent)}70%{box-shadow:0 0 0 7px color-mix(in srgb, var(--ok) 40%, transparent)}100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 40%, transparent)}}</style>' +
       '<div id="anBody">' + loading() + "</div>";
 
     // Horizontal bar chart: rows scaled so the largest value fills the track.
@@ -11495,7 +11495,7 @@
         chanSel() +
         '<button class="btn btn-ghost btn-sm" id="osRefresh">↻</button>' +
       "</div>" +
-      '<style>@keyframes anPulse{0%{box-shadow:0 0 0 0 rgba(56,224,166,.55)}70%{box-shadow:0 0 0 7px rgba(56,224,166,0)}100%{box-shadow:0 0 0 0 rgba(56,224,166,0)}}' +
+      '<style>@keyframes anPulse{0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 40%, transparent)}70%{box-shadow:0 0 0 7px color-mix(in srgb, var(--ok) 40%, transparent)}100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 40%, transparent)}}' +
       '.os-heat{display:flex;gap:3px;align-items:flex-end;height:54px}.os-heat .hb{flex:1;background:var(--surface-2);border-radius:3px 3px 0 0;position:relative}.os-heat .hb i{position:absolute;left:0;right:0;bottom:0;background:var(--grad);border-radius:3px 3px 0 0;display:block}</style>' +
       '<div id="osBody">' + loading() + "</div>";
 
@@ -11514,7 +11514,7 @@
       return (list || []).slice(0, 8).map(function (d) {
         var badge = d.confident
           ? ' <span class="cls-pill positive" title="Significant vs your average">▲ significant</span>'
-          : (d.contacted < 8 ? ' <span class="cls-pill" style="color:var(--text-dim);background:rgba(255,255,255,.05)">low volume</span>' : "");
+          : (d.contacted < 8 ? ' <span class="cls-pill" style="color:var(--text-dim);background:var(--surface-2)">low volume</span>' : "");
         var liftTxt = d.lift > 0 ? '<span style="color:var(--accent-green)">+' + d.lift + "</span>" : (d.lift < 0 ? '<span style="color:var(--accent-red)">' + d.lift + "</span>" : "0");
         return '<div class="list-row"><div><div class="lr-main">' + esc(d.label) + badge + '</div>' +
           '<div class="lr-sub">' + d.contacted + " contacted · " + d.sent + " sent · " + d.replyRate + "% reply · " + liftTxt + " pts</div></div>" +
@@ -11620,7 +11620,7 @@
         var recs = (s.recommendations || []).map(function (r) {
           var b = r.confident
             ? ' <span class="cls-pill positive">confident</span>'
-            : ' <span class="cls-pill" style="color:var(--accent-amber);background:rgba(245,158,11,.14)">needs volume</span>';
+            : ' <span class="cls-pill" style="color:var(--accent-amber);background:var(--warn-bg)">needs volume</span>';
           return '<div class="list-row"><div><div class="lr-main">' + esc(r.title) + b + '</div><div class="lr-sub">' + esc(r.detail) + "</div></div>" +
             '<div class="lr-right">' + esc(r.metric) + "</div></div>";
         }).join("") || '<div class="empty">Not enough outreach yet to recommend winners. Keep sending and check back.</div>';
@@ -11628,7 +11628,7 @@
           var on = c.autopilot && c.autopilot.enabled;
           return '<option value="' + esc(c.id) + '" data-auto="' + (on ? "1" : "0") + '">' + esc(c.name) + (on ? ", autopilot ON" : "") + "</option>";
         }).join("") || '<option value="">No campaigns yet</option>';
-        var winners = '<div class="card" style="margin-top:16px;border-color:var(--brand)"><h3>🤖 Promote winners into a campaign</h3>' +
+        var winners = '<div class="card" style="margin-top:16px;border-color:var(--brand)"><h3>Promote winners into a campaign</h3>' +
           '<p class="muted" style="margin:.2em 0 12px;font-size:12.5px">Pin the best message, segments, channel and send-time onto a campaign. Turn on Auto-pilot and the daily cadence re-applies it on every run, so the campaign keeps tracking whatever is converting. Hands off.</p>' +
           recs +
           '<div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">' +
@@ -11639,8 +11639,8 @@
           "</div></div>";
 
         var lowBanner = s.meta && s.meta.lowVolume
-          ? '<div class="empty" style="border:1px solid var(--accent-amber);background:rgba(245,158,11,.08);color:var(--text-muted);margin-bottom:14px;text-align:left">' +
-            '⚠ Low volume, fewer than ' + s.meta.minForConfidence + ' contacts in this view, so these rates are <b>directional, not yet statistically reliable</b>. “Confident” badges and auto-pilot winners only appear once a group clears that bar.</div>'
+          ? '<div class="empty" style="border:1px solid var(--accent-amber);background:var(--warn-bg);color:var(--text-muted);margin-bottom:14px;text-align:left">' +
+            'Low volume, fewer than ' + s.meta.minForConfidence + ' contacts in this view, so these rates are <b>directional, not yet statistically reliable</b>. “Confident” badges and auto-pilot winners only appear once a group clears that bar.</div>'
           : "";
         body.innerHTML =
           lowBanner +
@@ -11863,7 +11863,7 @@
   // Admin BD view: the two-strategy A/B (Authority Engine vs Inner Circle) head to
   // head on book-rate, the mpc/consultative framing axis underneath it, and every
   // enrollment with its stage, next-due touch, queued signal triggers and staged
-  // LinkedIn touches — with pause / resume / complete / requeue controls. Reads the
+  // LinkedIn touches, with pause / resume / complete / requeue controls. Reads the
   // session-authed /analytics/nurture rollup.
   function renderNurture(el) {
     el.innerHTML = head("Nurture",
@@ -11879,14 +11879,14 @@
           }).join("") + "</select>" +
         '<button class="btn btn-ghost btn-sm" id="nuRefresh">↻</button>' +
       "</div>" +
-      '<style>@keyframes anPulse{0%{box-shadow:0 0 0 0 rgba(56,224,166,.55)}70%{box-shadow:0 0 0 7px rgba(56,224,166,0)}100%{box-shadow:0 0 0 0 rgba(56,224,166,0)}}' +
+      '<style>@keyframes anPulse{0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 40%, transparent)}70%{box-shadow:0 0 0 7px color-mix(in srgb, var(--ok) 40%, transparent)}100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 40%, transparent)}}' +
       '.nu-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}@media(max-width:760px){.nu-grid{grid-template-columns:1fr}}' +
       '.nu-fcard{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:14px 16px}' +
-      '.nu-fcard.win{border-color:var(--accent-green);box-shadow:0 0 0 1px rgba(56,224,166,.35)}' +
+      '.nu-fcard.win{border-color:var(--accent-green);box-shadow:0 0 0 1px color-mix(in srgb, var(--ok) 40%, transparent)}' +
       '.nu-fnums{display:flex;gap:18px;margin-top:8px}.nu-fnums .n{font-size:20px;font-weight:800}.nu-fnums .l{font-size:10.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em}' +
       '.nu-tbl{width:100%;border-collapse:collapse;font-size:12.5px}.nu-tbl th{text-align:left;color:var(--text-dim);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--border)}' +
-      '.nu-tbl td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:top}' +
-      '.nu-strat{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.06)}' +
+      '.nu-tbl td{padding:7px 8px;border-bottom:1px solid var(--surface-2);vertical-align:top}' +
+      '.nu-strat{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;background:var(--surface-2)}' +
       '.nu-strat.authority{color:#8ab4ff}.nu-strat.inner_circle{color:#f0a5ff}</style>' +
       '<div id="nuBody">' + loading() + "</div>";
 
@@ -11949,8 +11949,8 @@
       var running = auto.enabled && auto.armed;
       var banner =
         '<div class="card" style="margin-bottom:12px;display:flex;align-items:center;gap:10px;border-left:3px solid ' +
-          (running ? "var(--accent-green)" : "#ffc24d") + '">' +
-          '<span style="font-size:16px">' + (running ? "🟢" : "🟡") + "</span>" +
+          (running ? "var(--accent-green)" : "var(--warn)") + '">' +
+          '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + (running ? "var(--accent-green)" : "var(--warn)") + '"></span>' +
           '<div style="font-size:12.5px">' +
             (running
               ? "<b>Running hands-off, in-process.</b> No n8n. Due touches, signal triggers and auto-enrollment all run on the internal clock; replies pause instantly."
@@ -11963,7 +11963,7 @@
       var activate =
         '<div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">' +
           '<div style="flex:1;min-width:230px">' +
-            '<div style="font-weight:700;font-size:13.5px">🌱 Launch the 24-month drip</div>' +
+            '<div style="font-weight:700;font-size:13.5px">Launch the 24-month drip</div>' +
             '<div class="muted" style="font-size:12px;margin-top:3px">' +
               (eligible
                 ? '<b>' + eligible + '</b> eligible BD prospect' + (eligible === 1 ? "" : "s") + ' (in-market, not opted out, not already enrolled) ready to enroll. Each is split 50/50 across Authority vs Inner Circle and starts month one.'
@@ -11973,7 +11973,7 @@
         "</div>";
 
       var strategyCards =
-        '<div class="lr-sub" style="margin:2px 0 8px;font-weight:700">A/B Strategy — the headline test (book-rate decides)' +
+        '<div class="lr-sub" style="margin:2px 0 8px;font-weight:700">A/B Strategy, the headline test (book-rate decides)' +
           (sWin && sWin !== "insufficient_data" ? "" : ' <span class="muted" style="font-weight:500">· needs 30+ enrolled per arm to call</span>') + "</div>" +
         '<div class="nu-grid">' +
           fcard("A · Authority Engine", "Regular ~2x/month value cadence. Top-of-mind through volume of insight.", sr.authority, sWin === "authority") +
@@ -11981,7 +11981,7 @@
         "</div>";
 
       var variantCards =
-        '<div class="lr-sub" style="margin:2px 0 8px;font-weight:700">Message framing — the secondary axis (orthogonal)</div>' +
+        '<div class="lr-sub" style="margin:2px 0 8px;font-weight:700">Message framing, the secondary axis (orthogonal)</div>' +
         '<div class="nu-grid">' +
           fcard("MPC", "Leads with a specific placeable candidate.", vr.mpc, vWin === "mpc") +
           fcard("Consultative", "Earns attention with role/industry insight.", vr.consultative, vWin === "consultative") +
@@ -11999,8 +11999,8 @@
           var who = esc(e.fullName || e.firstName || e.prospectId);
           var sub = [e.title, e.company].filter(Boolean).map(esc).join(" · ");
           var trg = (e.triggered || []).length, pend = (e.pending || []).length;
-          var queue = (trg ? '<span title="signal triggers waiting" style="color:var(--accent-green)">⚡' + trg + "</span> " : "") +
-            (pend ? '<span title="staged LinkedIn touches" class="muted">✎' + pend + "</span>" : "") || "-";
+          var queue = (trg ? '<span title="signal triggers waiting" style="color:var(--accent-green)">' + trg + "</span> " : "") +
+            (pend ? '<span title="staged LinkedIn touches" class="muted"><svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>' + pend + "</span>" : "") || "-";
           var stageNum = (e.status === "dormant") ? "floor" : ((e.nextTouchIndex != null ? e.nextTouchIndex : 0) + "/" + (e.planLength || "-"));
           return "<tr><td><div class='lr-main'>" + who + "</div>" + (sub ? "<div class='lr-sub'>" + sub + "</div>" : "") + "</td>" +
             "<td>" + statusPill(e.status) + (e.hold ? ' <span class="muted" style="font-size:10px">' + esc(e.hold) + "</span>" : "") + "</td>" +
@@ -12053,7 +12053,7 @@
   function renderAccounts(el) {
     el.innerHTML = head("Accounts", "API keys for your connected services. Health auto-syncs nightly.") +
       '<div class="btn-row" style="margin-bottom:14px">' +
-      '<button class="btn btn-primary btn-sm" data-add="apikey">＋ API key</button></div>' +
+      '<button class="btn btn-primary btn-sm" data-add="apikey">+ API key</button></div>' +
       '<div id="acBody">' + loading() + "</div>";
 
     function load() {
@@ -12087,47 +12087,47 @@
      checklist; each row drills into the real config screen via a sub-tab
      (#setup/<section>), which delegates to that section's existing renderer. */
   var SETUP_SECTIONS = [
-    { key: "", label: "Launch readiness", icon: "🚀" },
-    { key: "connected", label: "Integrations", icon: "🔌" },
-    { key: "email", label: "Email sending", icon: "✉️" },
-    { key: "ats", label: "ATS", icon: "🗂️" },
-    { key: "voicedrops", label: "Voice Drops", icon: "📞" },
-    { key: "vetting", label: "AI Vetting", icon: "☎️" },
-    { key: "branding", label: "Branding", icon: "🎨" },
-    { key: "domain", label: "Custom domain", icon: "🌐" }
+    { key: "", label: "Launch readiness", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-send"/></svg>' },
+    { key: "connected", label: "Integrations", icon: "" },
+    { key: "email", label: "Email sending", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>' },
+    { key: "ats", label: "ATS", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-database"/></svg>' },
+    { key: "voicedrops", label: "Voice Drops", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' },
+    { key: "vetting", label: "AI Vetting", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' },
+    { key: "branding", label: "Branding", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-image"/></svg>' },
+    { key: "domain", label: "Custom domain", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-globe"/></svg>' }
   ];
 
   function setupStyles() {
     return '<style>' +
-      '.setup-tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line,#1f232b);margin:0 0 16px}' +
-      '.setup-tab{display:inline-flex;align-items:center;gap:6px;padding:8px 13px;border-radius:8px 8px 0 0;color:var(--muted,#8b93a1);font-size:13px;font-weight:500;text-decoration:none;border:1px solid transparent;border-bottom:none;margin-bottom:-1px}' +
-      '.setup-tab:hover{color:var(--text,#e6e9ef)}' +
-      '.setup-tab.active{color:var(--text,#e6e9ef);background:var(--card,#14161c);border-color:var(--line,#1f232b)}' +
+      '.setup-tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line,var(--surface-2));margin:0 0 16px}' +
+      '.setup-tab{display:inline-flex;align-items:center;gap:6px;padding:8px 13px;border-radius:8px 8px 0 0;color:var(--muted,var(--text-dim));font-size:13px;font-weight:500;text-decoration:none;border:1px solid transparent;border-bottom:none;margin-bottom:-1px}' +
+      '.setup-tab:hover{color:var(--text,var(--text-muted))}' +
+      '.setup-tab.active{color:var(--text,var(--text-muted));background:var(--card,#14161c);border-color:var(--line,var(--surface-2))}' +
       '.setup-tab .ni{font-size:14px}' +
       '.setup-banner{border-radius:11px;padding:13px 16px;margin:0 0 16px;font-size:13.5px;font-weight:600}' +
-      '.setup-banner.ok{background:rgba(56,224,166,.1);border:1px solid rgba(56,224,166,.4);color:var(--accent-green,#38e0a6)}' +
-      '.setup-banner.warn{background:rgba(255,194,77,.08);border:1px solid rgba(255,194,77,.4);color:#f0d27f}' +
+      '.setup-banner.ok{background:color-mix(in srgb, var(--ok) 40%, transparent);border:1px solid color-mix(in srgb, var(--ok) 40%, transparent);color:var(--accent-green,var(--ok))}' +
+      '.setup-banner.warn{background:var(--warn-bg);border:1px solid color-mix(in srgb, var(--warn) 40%, transparent);color:var(--warn)}' +
       '.setup-steps{display:flex;flex-direction:column;gap:12px}' +
-      '.setup-step{display:flex;gap:14px;background:var(--card,#14161c);border:1px solid var(--line,#1f232b);border-radius:11px;padding:15px 17px}' +
-      '.setup-step.s-ready{border-color:rgba(56,224,166,.32)}' +
+      '.setup-step{display:flex;gap:14px;background:var(--card,#14161c);border:1px solid var(--line,var(--surface-2));border-radius:11px;padding:15px 17px}' +
+      '.setup-step.s-ready{border-color:color-mix(in srgb, var(--ok) 40%, transparent)}' +
       '.setup-step.s-action{border-color:rgba(240,120,120,.32)}' +
-      '.setup-num{flex:0 0 auto;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;background:var(--bg,#0e0f13);border:1px solid var(--line,#1f232b)}' +
-      '.setup-step.s-ready .setup-num{background:#10491f;color:#7ff0a0;border-color:transparent}' +
+      '.setup-num{flex:0 0 auto;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;background:var(--bg,var(--bg));border:1px solid var(--line,var(--surface-2))}' +
+      '.setup-step.s-ready .setup-num{background:#10491f;color:var(--ok);border-color:transparent}' +
       '.setup-main{flex:1;min-width:0}' +
       '.setup-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}' +
       '.setup-title{font-weight:600;font-size:15px}' +
-      '.setup-desc{color:var(--muted,#8b93a1);font-size:13px;margin:5px 0 7px;line-height:1.45}' +
-      '.setup-metric{font-size:12.5px;color:var(--text-dim,#9aa3b2)}' +
+      '.setup-desc{color:var(--muted,var(--text-dim));font-size:13px;margin:5px 0 7px;line-height:1.45}' +
+      '.setup-metric{font-size:12.5px;color:var(--text-dim,var(--text-dim))}' +
       '.setup-track{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}' +
-      '.setup-chip{font-size:11px;padding:3px 9px;border-radius:20px;background:var(--bg,#0e0f13);border:1px solid var(--line,#2a2f3a);color:var(--muted,#8b93a1)}' +
+      '.setup-chip{font-size:11px;padding:3px 9px;border-radius:20px;background:var(--bg,var(--bg));border:1px solid var(--line,#2a2f3a);color:var(--muted,var(--text-dim))}' +
       '.setup-open{margin-left:auto;white-space:nowrap}' +
       '.s-pill{font-size:11px;padding:2px 10px;border-radius:20px;font-weight:600}' +
-      '.s-pill.ready{background:#10491f;color:#7ff0a0}.s-pill.progress{background:#4a3a10;color:#f0d27f}' +
-      '.s-pill.action{background:#4a1414;color:#f08f8f}.s-pill.pending{background:#262a33;color:#9aa3b2}' +
+      '.s-pill.ready{background:#10491f;color:var(--ok)}.s-pill.progress{background:#4a3a10;color:var(--warn)}' +
+      '.s-pill.action{background:#4a1414;color:#f08f8f}.s-pill.pending{background:var(--border);color:var(--text-dim)}' +
       /* ---- Premium setup chrome (branding / domain / voice) ---- */
-      '.sx-hero{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:18px;padding:20px 22px;margin:0 0 18px;display:flex;gap:16px;align-items:flex-start;background:radial-gradient(130% 150% at 0% 0%,rgba(124,92,255,.20),transparent 52%),radial-gradient(120% 150% at 100% 0%,rgba(77,208,255,.13),transparent 52%),var(--surface)}' +
-      '.sx-hero::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,rgba(124,92,255,.5),rgba(77,208,255,.35),transparent)}' +
-      '.sx-hero .sx-ic{flex:0 0 auto;width:48px;height:48px;border-radius:14px;display:grid;place-items:center;font-size:24px;background:linear-gradient(145deg,rgba(124,92,255,.25),rgba(77,208,255,.18));border:1px solid var(--border-strong);box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}' +
+      '.sx-hero{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:18px;padding:20px 22px;margin:0 0 18px;display:flex;gap:16px;align-items:flex-start;background:radial-gradient(130% 150% at 0% 0%,var(--brand-soft),transparent 52%),radial-gradient(120% 150% at 100% 0%,var(--info-bg),transparent 52%),var(--surface)}' +
+      '.sx-hero::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,color-mix(in srgb, var(--brand) 40%, transparent),color-mix(in srgb, var(--info) 40%, transparent),transparent)}' +
+      '.sx-hero .sx-ic{flex:0 0 auto;width:48px;height:48px;border-radius:14px;display:grid;place-items:center;font-size:24px;background:linear-gradient(145deg,var(--brand-soft),var(--info-bg));border:1px solid var(--border-strong);box-shadow:inset 0 1px 0 var(--border-strong)}' +
       '.sx-hero h2{font-size:21px;letter-spacing:-.02em;margin:0;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}' +
       '.sx-hero p{color:var(--text-muted);font-size:13.5px;margin:5px 0 0;max-width:72ch;line-height:1.5}' +
       '.sx-cols{display:grid;grid-template-columns:minmax(0,1.18fr) minmax(0,.82fr);gap:16px;align-items:start}' +
@@ -12139,7 +12139,7 @@
       '.sx-eyebrow{font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--text-dim);font-weight:700;margin:0 0 11px;display:flex;align-items:center;gap:7px}' +
       '.sx-eyebrow::before{content:"";width:14px;height:2px;border-radius:2px;background:var(--grad)}' +
       '.sx-swatches{display:flex;gap:9px;flex-wrap:wrap;align-items:center}' +
-      '.sx-sw{width:28px;height:28px;border-radius:9px;cursor:pointer;border:2px solid transparent;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);transition:transform .1s ease}' +
+      '.sx-sw{width:28px;height:28px;border-radius:9px;cursor:pointer;border:2px solid transparent;box-shadow:inset 0 0 0 1px var(--border-strong);transition:transform .1s ease}' +
       '.sx-sw:hover{transform:scale(1.12)}' +
       '.sx-sw.on{border-color:#fff;box-shadow:0 0 0 2px var(--bg),0 6px 18px -6px rgba(0,0,0,.7)}' +
       '.sx-colorrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}' +
@@ -12157,25 +12157,25 @@
       /* voice-clone provider cards (Step 2) */
       '.vp-list{display:flex;flex-direction:column;gap:10px}' +
       '.vp{border:1px solid var(--border);border-radius:12px;padding:13px 15px;background:var(--bg-soft);transition:border-color .15s}' +
-      '.vp.on{border-color:var(--accent-green);box-shadow:0 0 0 1px rgba(56,224,166,.25)}' +
+      '.vp.on{border-color:var(--accent-green);box-shadow:0 0 0 1px var(--ok-bg)}' +
       '.vp-head{display:flex;align-items:center;gap:9px;flex-wrap:wrap}' +
       '.vp-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}' +
       '.vp-name{font-size:13.5px;font-weight:700;color:var(--text)}' +
       '.vp-state{font-size:12px;color:var(--text-dim)}' +
-      '.vp-chip{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:rgba(56,224,166,.16);color:var(--accent-green)}' +
+      '.vp-chip{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:var(--ok-bg);color:var(--accent-green)}' +
       '.vp-row{display:flex;gap:8px;margin-top:11px}' +
       '.vp-key{flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:9px 12px;color:var(--text);font:inherit;font-size:13px;transition:border-color .15s,box-shadow .15s}' +
       '.vp-key:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent)}' +
       '.vp-msg{font-size:11.5px;color:var(--text-dim);margin-top:7px;line-height:1.45}' +
       '.vp-msg a{color:var(--brand-2);text-decoration:none}.vp-msg a:hover{text-decoration:underline}' +
       '.vc{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--bg-soft);margin-top:8px}' +
-      '.vc.on{border-color:var(--accent-green);background:rgba(56,224,166,.06)}' +
+      '.vc.on{border-color:var(--accent-green);background:var(--ok-bg)}' +
       '.vc-name{font-size:13px;font-weight:600;color:var(--text)}' +
       '.vc-meta{font-size:11.5px;color:var(--text-dim)}' +
       /* live brand preview */
       '.sx-prev{position:sticky;top:14px;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--bg)}' +
       '.sx-prev-bar{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-dim);font-weight:700;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface)}' +
-      '.sx-prev-body{padding:16px;background:radial-gradient(120% 80% at 100% 0%,rgba(124,92,255,.10),transparent 60%)}' +
+      '.sx-prev-body{padding:16px;background:radial-gradient(120% 80% at 100% 0%,var(--brand-soft),transparent 60%)}' +
       '.sx-prev-side{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:13px;display:flex;flex-direction:column;gap:11px}' +
       '.sx-prev-logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px;letter-spacing:-.01em}' +
       '.sx-prev-logo .dot{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:14px;color:#fff;font-weight:800}' +
@@ -12202,7 +12202,7 @@
       '.sx-dns{display:flex;flex-direction:column;gap:10px;margin-top:6px}' +
       '.sx-rec{border:1px solid var(--border);border-radius:12px;padding:13px 15px;background:var(--bg-soft)}' +
       '.sx-rec-top{display:flex;align-items:center;gap:9px;margin-bottom:9px}' +
-      '.sx-rec-type{font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 9px;border-radius:6px;background:rgba(124,92,255,.16);color:#b9a6ff;letter-spacing:.06em}' +
+      '.sx-rec-type{font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 9px;border-radius:6px;background:var(--brand-soft);color:var(--brand);letter-spacing:.06em}' +
       '.sx-rec-host{font-family:var(--mono);font-size:12.5px;color:var(--text-muted)}' +
       '.sx-rec-val{display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:9px 11px}' +
       '.sx-rec-val code{font-family:var(--mono);font-size:12.5px;color:var(--text);word-break:break-all;flex:1;min-width:0}' +
@@ -12213,7 +12213,7 @@
       '.sx-checks{display:flex;flex-direction:column;gap:9px;margin-top:4px}' +
       '.sx-chk{display:flex;align-items:center;gap:11px;font-size:13px;color:var(--text-muted)}' +
       '.sx-chk .mk{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;flex:0 0 auto}' +
-      '.sx-chk.done .mk{background:rgba(56,224,166,.18);color:var(--accent-green)}' +
+      '.sx-chk.done .mk{background:var(--ok-bg);color:var(--accent-green)}' +
       '.sx-chk.todo .mk{background:var(--bg-soft);border:1px solid var(--border-strong);color:var(--text-dim)}' +
       '.sx-chk.done{color:var(--text)}' +
       '.sx-ring{position:relative;width:54px;height:54px;flex:0 0 auto}' +
@@ -12226,7 +12226,7 @@
       '.sx-step::before{left:0;right:50%;margin-right:19px}' +
       '.sx-step::after{left:50%;right:0;margin-left:19px}' +
       '.sx-step:first-child::before{display:none}.sx-step:last-child::after{display:none}' +
-      '.sx-step.active .n{background:var(--grad);border-color:transparent;color:#fff;box-shadow:0 0 0 4px rgba(124,92,255,.18)}' +
+      '.sx-step.active .n{background:var(--grad);border-color:transparent;color:#fff;box-shadow:0 0 0 4px var(--brand-soft)}' +
       '.sx-step.active .t{color:var(--text)}' +
       '.sx-step.done .n{background:rgba(46,204,113,.16);border-color:var(--accent-green);color:var(--accent-green)}' +
       '.sx-step.done .t{color:var(--text-muted)}' +
@@ -12235,7 +12235,7 @@
       '.sx-rec-purpose{font-size:11.5px;color:var(--text-dim)}' +
       '.sx-rec-field{display:flex;align-items:center;gap:11px;margin-top:8px}' +
       '.sx-rec-k{flex:0 0 44px;font-size:10.5px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em}' +
-      '.sx-tip{display:flex;gap:10px;align-items:flex-start;background:rgba(77,208,255,.06);border:1px solid var(--border);border-radius:11px;padding:11px 13px;margin-top:13px;font-size:12px;color:var(--text-muted);line-height:1.55}' +
+      '.sx-tip{display:flex;gap:10px;align-items:flex-start;background:var(--info-bg);border:1px solid var(--border);border-radius:11px;padding:11px 13px;margin-top:13px;font-size:12px;color:var(--text-muted);line-height:1.55}' +
       '.sx-tip .ti{flex:0 0 auto;font-size:14px;line-height:1.3}' +
       '.sx-tip b{color:var(--text)}.sx-tip code{font-family:var(--mono);font-size:11.5px;background:var(--bg-soft);border:1px solid var(--border);border-radius:5px;padding:1px 5px}' +
       '.sx-done{display:flex;align-items:center;gap:13px;background:linear-gradient(135deg,rgba(46,204,113,.12),rgba(46,204,113,.03));border:1px solid rgba(46,204,113,.3);border-radius:14px;padding:14px 16px;margin-bottom:14px}' +
@@ -12274,7 +12274,7 @@
      same logo overlays whatever theme is active. Calls onDone(dataUrl). */
   function openLogoAdjuster(file, opts, onDone) {
     opts = opts || {};
-    var bg = opts.bg === "light" ? "#f6f7fc" : "#181822";
+    var bg = opts.bg === "light" ? "var(--text)" : "#181822";
     var img = new Image();
     var reader = new FileReader();
     reader.onload = function () {
@@ -12301,7 +12301,7 @@
         '<h3 style="margin:0 0 4px">Adjust logo' + (opts.label ? " · " + esc(opts.label) : "") + '</h3>' +
         '<p class="muted" style="margin:0 0 12px;font-size:13px">This is exactly how it appears in the sidebar, at your logo\'s real proportions. It\'s ready as-is; drag to nudge and zoom to crop tighter if you want.</p>' +
         '<div class="logo-adj-stage" style="background:' + bg + '"><canvas class="la-cv"></canvas></div>' +
-        '<label class="la-zoom">🔍 <input type="range" id="laZoom" min="0.1" max="5" step="0.01" value="1"></label>' +
+        '<label class="la-zoom"><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg> <input type="range" id="laZoom" min="0.1" max="5" step="0.01" value="1"></label>' +
         '<div class="la-acts"><button class="btn btn-sm" id="laReset">Reset</button><span style="flex:1"></span><button class="btn btn-ghost btn-sm" id="laCancel">Cancel</button><button class="btn btn-primary btn-sm" id="laUse">Use logo</button></div>' +
         '</div>';
       document.body.appendChild(ov);
@@ -12356,22 +12356,22 @@
     if (onboarding) { try { localStorage.removeItem("ros_onboard"); } catch (e) {} }
     var welcome = onboarding
       ? '<div class="card" style="border-color:var(--brand);margin-bottom:14px">' +
-        '<h3 style="margin:0 0 4px">👋 Welcome, let\'s make this portal yours</h3>' +
+        '<h3 style="margin:0 0 4px">Welcome, let\'s make this portal yours</h3>' +
         '<p class="setup-metric" style="margin:0">Set your brand name, logo and accent color below. This is what you and your whole team see everywhere, including your sign-in page.' +
         (isLumeWorkspace() ? "" : ' When you\'re ready to run it on your own web address, head to <a href="#setup/domain">Custom domain →</a> (you can do that anytime).') + '</p></div>'
       : "";
     el.innerHTML =
-      '<div class="sx-hero"><div class="sx-ic">🎨</div><div><h2>Branding</h2>' +
+      '<div class="sx-hero"><div class="sx-ic"><svg class="isvg" aria-hidden="true"><use href="#i-image"/></svg></div><div><h2>Branding</h2>' +
       '<p>Make the portal yours, your logo, your name, your accent color. Your team and your customers see this everywhere, including your sign-in page.</p></div></div>' +
       welcome +
       '<div id="brBody">' + loading() + '</div>';
 
     // Accent presets, curated, on-brand options plus the platform default.
-    var ACCENTS = ["#7c5cff", "#4dd0ff", "#38e0a6", "#ff7ac6", "#ffc24d", "#ff6b6b", "#5b8def", "#a78bfa", "#10b981"];
+    var ACCENTS = ["var(--brand)", "var(--info)", "var(--ok)", "var(--brand-2)", "var(--warn)", "var(--danger)", "#5b8def", "#a78bfa", "var(--ok)"];
 
     function refreshChrome(b) { if (window.__rosApplyBrand) window.__rosApplyBrand(b || {}); }
     function brLogoFrame(url, bg) {
-      var bgc = bg === "light" ? "#f6f7fc" : "#13131c";
+      var bgc = bg === "light" ? "var(--text)" : "#13131c";
       if (!url) return '<div class="sx-logo-frame" style="background:' + bgc + '"><span class="sx-logo-empty">No ' + bg + ' logo' + (bg === "light" ? ", uses dark" : "") + '</span></div>';
       return '<div class="sx-logo-frame" style="background:' + bgc + '"><img src="' + esc(url) + '"></div>';
     }
@@ -12380,7 +12380,7 @@
       api("/branding").then(function (d) {
         var b = (d && d.branding) || {};
         var box = $("#brBody"); if (!box) return;
-        var accent = b.accentColor || "#7c5cff";
+        var accent = b.accentColor || "var(--brand)";
         // A workspace with ANY branding set is white-label, never surface the
         // house brand here, even if host/workspace detection was inconclusive.
         var houseBrand = IS_HOUSE && !(b.brandName || b.logoUrl || b.logoLightUrl || b.accentColor);
@@ -12403,12 +12403,12 @@
           '<div class="cn-fld"><span class="lab">Sidebar logo size</span><input id="brScale" type="range" min="0.4" max="3" step="0.02" value="' + (b.logoScale || 1) + '" style="width:100%;max-width:280px;accent-color:var(--brand)"><span class="hint">Drag for a live preview, release to save.</span></div>' +
           '<div class="cn-fld"><span class="lab">Dark appearance</span>' +
           brLogoFrame(b.logoUrl, "dark") +
-          '<div class="sx-uprow"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoUrl" data-bg="dark" type="file" accept="image/*" hidden></label>' +
+          '<div class="sx-uprow"><label class="btn btn-sm" style="cursor:pointer">Upload &amp; fit<input class="brLogoFile" data-key="logoUrl" data-bg="dark" type="file" accept="image/*" hidden></label>' +
           (b.logoUrl ? '<button class="btn btn-ghost btn-sm brLogoRemove" data-key="logoUrl">Remove</button>' : "") +
           '</div><span class="hint">A transparent or light logo that reads on the dark sidebar.</span></div>' +
           '<div class="cn-fld" style="margin-bottom:0"><span class="lab">Light appearance</span>' +
           brLogoFrame(b.logoLightUrl, "light") +
-          '<div class="sx-uprow"><label class="btn btn-sm" style="cursor:pointer">📤 Upload &amp; fit<input class="brLogoFile" data-key="logoLightUrl" data-bg="light" type="file" accept="image/*" hidden></label>' +
+          '<div class="sx-uprow"><label class="btn btn-sm" style="cursor:pointer">Upload &amp; fit<input class="brLogoFile" data-key="logoLightUrl" data-bg="light" type="file" accept="image/*" hidden></label>' +
           (b.logoLightUrl ? '<button class="btn btn-ghost btn-sm brLogoRemove" data-key="logoLightUrl">Remove</button>' : "") +
           '</div><span class="hint">A colored logo for Light appearance. Falls back to the dark logo if empty.</span></div>' +
           '</div>' +
@@ -12431,7 +12431,7 @@
         // Live preview painter, reflects the current (unsaved) name/color/logo.
         function paintPreview() {
           var nm = ($("#brName").value || "").trim() || defName;
-          var col = $("#brAccent").value || "#7c5cff";
+          var col = $("#brAccent").value || "var(--brand)";
           var logo = $("#brPrevLogo"); if (!logo) return;
           logo.innerHTML = b.logoUrl
             ? '<img src="' + esc(b.logoUrl) + '">'
@@ -12517,7 +12517,7 @@
      wired at the edge/deploy layer; this screen owns the domain record + proof. */
   function renderDomain(el) {
     el.innerHTML =
-      '<div class="sx-hero"><div class="sx-ic">🌐</div><div><h2>Custom domain</h2>' +
+      '<div class="sx-hero"><div class="sx-ic"><svg class="isvg" aria-hidden="true"><use href="#i-globe"/></svg></div><div><h2>Custom domain</h2>' +
       '<p>Run your portal on your own domain, your recruiters sign in at your URL, fully branded. Add it, drop in two DNS records, then Verify. Until then your workspace stays on ' + esc(PLATFORM_HOST) + '.</p></div></div>' +
       '<div id="domBody">' + loading() + '</div>';
 
@@ -12528,7 +12528,7 @@
       return ["active", "todo", "todo"];
     }
     function stepNode(n, t, cls) {
-      return '<div class="sx-step ' + cls + '"><div class="n">' + (cls === "done" ? "✓" : n) + '</div><div class="t">' + t + '</div></div>';
+      return '<div class="sx-step ' + cls + '"><div class="n">' + (cls === "done" ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : n) + '</div><div class="t">' + t + '</div></div>';
     }
 
     function load() {
@@ -12543,12 +12543,12 @@
 
         // Success / verified banner up top, the win is the first thing they see.
         if (status === "live") {
-          html += '<div class="sx-done"><div class="ic">🎉</div><div style="min-width:0;flex:1">' +
+          html += '<div class="sx-done"><div class="ic"><svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg></div><div style="min-width:0;flex:1">' +
             '<div style="font-weight:800;font-size:15px">You’re live on <span class="sx-mono">' + esc(domain) + '</span></div>' +
             '<div style="font-size:12px;color:var(--text-dim);margin-top:2px">Your portal is serving on your own domain over HTTPS.</div></div>' +
             '<a class="btn btn-primary btn-sm" href="https://' + esc(domain) + '" target="_blank" rel="noopener">Visit portal →</a></div>';
         } else if (status === "verified") {
-          html += '<div class="sx-done"><div class="ic">✓</div><div style="min-width:0;flex:1">' +
+          html += '<div class="sx-done"><div class="ic"><svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg></div><div style="min-width:0;flex:1">' +
             '<div style="font-weight:800;font-size:15px">Verified, finishing up</div>' +
             '<div style="font-size:12px;color:var(--text-dim);margin-top:2px">Ownership confirmed. Your HTTPS certificate is issued automatically the first time someone opens <span class="sx-mono">' + esc(domain) + '</span>, nothing to install.</div></div></div>';
         }
@@ -12586,8 +12586,8 @@
                 '<div class="sx-rec-field"><span class="sx-rec-k">Value</span><div class="sx-rec-val"><code>' + esc(r.value) + '</code><button class="sx-copy" data-copy="' + esc(r.value) + '">Copy</button></div></div>' +
                 '</div>';
             }).join("") + '</div>' +
-            '<div class="sx-tip"><span class="ti">💡</span><div>Some providers (GoDaddy, Namecheap, Cloudflare) add your domain to the <b>Name</b> automatically. If yours does, enter just <code>' + esc(shortHost) + '</code> for the TXT record instead of the full name, otherwise paste exactly what’s shown.</div></div>' +
-            (status !== "live" ? '<div class="cn-acts" style="margin-top:15px;align-items:center"><button class="btn btn-primary btn-sm" id="domVerify">Verify DNS</button><span style="font-size:11.5px;color:var(--text-dim)">🔒 HTTPS is set up automatically, no certificate to install.</span></div>' : "") +
+            '<div class="sx-tip"><span class="ti"><svg class="isvg" aria-hidden="true"><use href="#i-bulb"/></svg></span><div>Some providers (GoDaddy, Namecheap, Cloudflare) add your domain to the <b>Name</b> automatically. If yours does, enter just <code>' + esc(shortHost) + '</code> for the TXT record instead of the full name, otherwise paste exactly what’s shown.</div></div>' +
+            (status !== "live" ? '<div class="cn-acts" style="margin-top:15px;align-items:center"><button class="btn btn-primary btn-sm" id="domVerify">Verify DNS</button><span style="font-size:11.5px;color:var(--text-dim)">HTTPS is set up automatically, no certificate to install.</span></div>' : "") +
             '</div>';
         }
 
@@ -12599,7 +12599,7 @@
             try {
               if (navigator.clipboard) navigator.clipboard.writeText(v);
             } catch (e) {}
-            var was = btn.textContent; btn.textContent = "Copied ✓"; btn.style.color = "var(--accent-green)";
+            var was = btn.textContent; btn.textContent = "Copied"; btn.style.color = "var(--accent-green)";
             setTimeout(function () { btn.textContent = was; btn.style.color = ""; }, 1400);
           });
         });
@@ -12622,7 +12622,7 @@
         if (verify) verify.addEventListener("click", function () {
           verify.disabled = true; say("Checking DNS…");
           send("/branding/domain", "POST", { action: "verify" }).then(function (r) {
-            if (r && r.ok && r.data && r.data.verified) { toast("Domain verified ✓"); load(); }
+            if (r && r.ok && r.data && r.data.verified) { toast("Domain verified"); load(); }
             else { say(r && r.data && r.data.error === "txt_not_found" ? "TXT record not found yet. Add it and give DNS a few minutes." : "Couldn't verify yet. Check the records and retry.", "err"); verify.disabled = false; }
           }).catch(function () { say("Couldn't reach the server.", "err"); verify.disabled = false; });
         });
@@ -12645,10 +12645,10 @@
      readiness gate. Running campaigns / desks stays in the feature tab. */
   function renderVoiceSetup(el, which) {
     var cfg = which === "vetting"
-      ? { title: "AI Vetting setup", icon: "☎️", featureRoute: "vetting", featureLabel: "Open AI Vetting →",
+      ? { title: "AI Vetting setup", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>', featureRoute: "vetting", featureLabel: "Open AI Vetting →",
           intro: "AI Vetting answers inbound candidate calls with an AI recruiter in your cloned voice. It needs Telnyx for the phone number + call handling, and a consented cloned voice. Bind a job description to a number inside AI Vetting once both are green.",
           extra: "Each vetting desk binds one job description to one of your Telnyx numbers and this voice, set that up per-desk in AI Vetting." }
-      : { title: "Voice Drops setup", icon: "📞", featureRoute: "voicedrops", featureLabel: "Open Voice Drops →",
+      : { title: "Voice Drops setup", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>', featureRoute: "voicedrops", featureLabel: "Open Voice Drops →",
           intro: "Voice Drops leaves a personalized cloned-voice voicemail on verified business landlines/VoIP. It needs Telnyx (Premium AMD + outbound calling) and a consented cloned voice. Mobiles are filtered and never dialed.",
           extra: "Launching a drop also requires a per-campaign consent attestation and an identifying script, done inside Voice Drops." };
 
@@ -12656,10 +12656,10 @@
       '<div class="sx-hero"><div class="sx-ic">' + cfg.icon + '</div><div><h2>' + esc(cfg.title.replace(" setup", "")) + '</h2>' +
       '<p>' + esc(cfg.intro) + '</p></div></div>' +
       '<div id="vsReady" style="margin-bottom:16px"></div>' +
-      '<div class="sx-card"><div class="sx-eyebrow">Step 1 · Telephony</div><h3>📞 Telnyx</h3>' +
+      '<div class="sx-card"><div class="sx-eyebrow">Step 1 · Telephony</div><h3>Telnyx</h3>' +
       '<p class="sx-sub">The calling engine behind Voice Drops, it places the calls and uses Premium AMD to find the voicemail. Connect your Telnyx API key and a caller-ID number, then Test. New to Telnyx? Follow the <a href="/helpcenter#telephony" target="_blank" rel="noopener" style="color:var(--brand-2)">10DLC setup guide</a> to register your brand &amp; campaign so your calls connect.</p>' +
       '<div id="vsTel">' + loading() + '</div></div>' +
-      '<div class="sx-card"><div class="sx-eyebrow">Step 2 · Voice</div><h3>🎙️ Your voice</h3>' +
+      '<div class="sx-card"><div class="sx-eyebrow">Step 2 · Voice</div><h3>Your voice</h3>' +
       '<p class="sx-sub">Two quick steps: connect a voice provider (ElevenLabs, Cartesia or Hume) with its API key, then add the voice id you cloned in that provider\'s portal and mark it as the one to use.</p>' +
       '<div id="vsVoice">' + loading() + '</div></div>' +
       '<div class="sx-card"><p class="sx-sub" style="margin:0">' + esc(cfg.extra) + '</p>' +
@@ -12682,13 +12682,13 @@
       var b = $("#vsReady"); if (!b) return;
       var done = (telOk ? 1 : 0) + (voiceOk ? 1 : 0);
       function chk(ok, label) {
-        return '<div class="sx-chk ' + (ok ? "done" : "todo") + '"><span class="mk">' + (ok ? "✓" : "·") + '</span>' + esc(label) + '</div>';
+        return '<div class="sx-chk ' + (ok ? "done" : "todo") + '"><span class="mk">' + (ok ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : "·") + '</span>' + esc(label) + '</div>';
       }
-      b.innerHTML = '<div class="sx-card" style="' + (ready ? "border-color:rgba(56,224,166,.4)" : "border-color:rgba(255,194,77,.32)") + '">' +
+      b.innerHTML = '<div class="sx-card" style="' + (ready ? "border-color:color-mix(in srgb, var(--ok) 40%, transparent)" : "border-color:color-mix(in srgb, var(--warn) 40%, transparent)") + '">' +
         '<div class="sx-status"><span class="dot ' + (ready ? "ok" : "warn") + '"></span>' +
         '<div><div class="lab">' + (ready ? cfg.title.replace(" setup", "") + " is ready" : "Almost there, " + done + " of 2 done") + '</div>' +
         '<div class="sub">' + (ready ? "Telnyx connected and a voice provider in place." : "Finish both steps below to go live.") + '</div></div>' +
-        '<span class="s-pill ' + (ready ? "ready" : "progress") + '" style="margin-left:auto">' + (ready ? "Ready ✓" : done + "/2") + '</span></div>' +
+        '<span class="s-pill ' + (ready ? "ready" : "progress") + '" style="margin-left:auto">' + (ready ? "Ready" : done + "/2") + '</span></div>' +
         '<div class="sx-checks" style="margin-top:14px">' + chk(telOk, "Telnyx connected & tested") + chk(voiceOk, "Voice provider connected + voice on file") + '</div>' +
         '</div>';
     }
@@ -12719,16 +12719,16 @@
     function voiceErrText(code) {
       if (!code) return "the key was rejected";
       if (code === "elevenlabs_invalid_key")
-        return "ElevenLabs rejected this key — it's invalid or revoked. Copy it again from your ElevenLabs profile → API Keys (and check it's the right account).";
+        return "ElevenLabs rejected this key, it's invalid or revoked. Copy it again from your ElevenLabs profile → API Keys (and check it's the right account).";
       if (code === "elevenlabs_unauthorized" || code === "elevenlabs_401" || code === "elevenlabs_403")
-        return "key rejected or missing read access — in ElevenLabs, give the key permission to read User or Voices (or create a key with full access), then paste it again";
+        return "key rejected or missing read access, in ElevenLabs, give the key permission to read User or Voices (or create a key with full access), then paste it again";
       if (code === "no_api_key") return "no key saved yet";
       return code;
     }
     function loadVoice() {
       // Two reads: the saved voices + which one is active (voice module), and the
       // per-provider connection status (green=verified / yellow=saved-not-verified
-      // / red=no key) from the integrations catalog — so the dots tell the truth,
+      // / red=no key) from the integrations catalog, so the dots tell the truth,
       // not just "a key is present".
       Promise.all([api("/voice/clones"), api("/connected")]).then(function (res) {
         var d = res[0] || {}, cd = res[1] || {};
@@ -12760,9 +12760,9 @@
           var dotc = ok ? "var(--accent-green)" : saved ? "var(--accent-amber)" : "var(--text-dim)";
           var stateTxt = ok ? "connected" : saved ? "saved · not verified" : "not connected";
           var savedErr = saved ? perr(p.id) : "";
-          var msgHtml = ok ? "Key saved in your portal and verified — ready to deploy."
+          var msgHtml = ok ? "Key saved in your portal and verified, ready to deploy."
             : saved ? '<span style="color:var(--accent-amber)">' + esc(savedErr ? voiceErrText(savedErr) : "Key saved, but the live test didn't pass. Paste it again, or hit Test.") + "</span>"
-            : '<a href="' + p.docs + '" target="_blank" rel="noopener">Get your ' + p.label + ' API key ↗</a>';
+            : '<a href="' + p.docs + '" target="_blank" rel="noopener">Get your ' + p.label + ' API key</a>';
           return '<div class="vp' + (inUse ? " on" : "") + '">' +
             '<div class="vp-head">' +
               '<span class="vp-dot" data-vpdot="' + p.id + '" style="background:' + dotc + '"></span>' +
@@ -12770,7 +12770,7 @@
               '<span class="vp-state" data-vpstate="' + p.id + '">' + stateTxt + '</span>' +
               '<span style="margin-left:auto;display:flex;gap:7px;align-items:center">' +
                 (inUse
-                  ? '<span class="vp-chip">✓ in use</span>'
+                  ? '<span class="vp-chip">in use</span>'
                   : '<button class="btn btn-ghost btn-sm" data-vsprov="' + p.id + '" title="Use this engine for tests and sends" style="padding:3px 11px">Use this engine</button>') +
                 (saved ? '<button class="btn btn-ghost btn-sm" data-vptest="' + p.id + '" style="padding:3px 11px">Test</button>' : "") +
               '</span>' +
@@ -12787,11 +12787,11 @@
           var pid = c.provider || "elevenlabs", isActive = active && c.id === active.id, provOk = st.providerConfigured[pid];
           return '<div class="vc' + (isActive ? " on" : "") + '">' +
             '<span class="vp-dot" style="background:' + (provOk ? "var(--accent-green)" : "var(--accent-amber)") + '"></span>' +
-            '<div style="min-width:0"><div class="vc-name">🎙️ ' + esc(c.agentName) + '</div>' +
+            '<div style="min-width:0"><div class="vc-name">' + esc(c.agentName) + '</div>' +
             '<div class="vc-meta">' + esc(pid) + (c.voiceId ? " · " + esc(c.voiceId) : " · no voice id") + (provOk ? "" : " · connect " + esc(pid) + " above to use") + '</div></div>' +
             '<span style="margin-left:auto;display:flex;gap:7px;align-items:center;flex:0 0 auto">' +
               (isActive ? '<span class="vp-chip">in use</span>' : '<button class="btn btn-ghost btn-sm" data-vsuse="' + esc(c.id) + '" style="padding:3px 11px">Use this</button>') +
-              '<button class="btn btn-ghost btn-sm" data-vsdel="' + esc(c.id) + '" title="Remove from your list" style="padding:3px 9px">🗑️</button>' +
+              '<button class="btn btn-ghost btn-sm" data-vsdel="' + esc(c.id) + '" title="Remove from your list" style="padding:3px 9px"><svg class="isvg" aria-hidden="true"><use href="#i-trash"/></svg></button>' +
             '</span>' +
           '</div>';
         }
@@ -12803,7 +12803,7 @@
         var box = $("#vsVoice"); if (!box) return;
         box.innerHTML =
           '<div class="sx-eyebrow" style="margin:2px 0 9px">Pick &amp; connect your voice engine</div>' +
-          '<p class="muted" style="font-size:12.5px;margin:0 0 12px">You only need one. Paste that provider\'s API key and hit <b>Save &amp; test</b> (verified live so you know it will deploy), then hit <b>Use this engine</b> to make it the one every test drop and live send uses. The card marked <b>✓ in use</b> is the active engine. Cloning itself happens inside the provider\'s own portal.</p>' +
+          '<p class="muted" style="font-size:12.5px;margin:0 0 12px">You only need one. Paste that provider\'s API key and hit <b>Save &amp; test</b> (verified live so you know it will deploy), then hit <b>Use this engine</b> to make it the one every test drop and live send uses. The card marked <b>in use</b> is the active engine. Cloning itself happens inside the provider\'s own portal.</p>' +
           '<div class="vp-list">' + VOICE_PROVS.map(provCard).join("") + '</div>' +
           '<div class="sx-eyebrow" style="margin:20px 0 9px">Your voice</div>' +
           '<p class="muted" style="font-size:12.5px;margin:0 0 10px">Add a cloned voice id, then pick which one is used for drops with <b>Use this</b>. The voice in use must have its provider connected above.</p>' +
@@ -12812,7 +12812,7 @@
           '<label class="cn-fld"><span class="lab">Voice ID</span><input id="vsVoiceId" type="text" placeholder="paste your voice id"></label>' +
           '<label class="cn-fld"><span class="lab">Name (whose voice)</span><input id="vsName" type="text" placeholder="Josh"></label>' +
           '<button class="btn btn-primary btn-sm" id="vsSave">Add voice</button></div>' +
-          '<p class="muted" style="font-size:11.5px;margin:8px 0 0">No voice id yet? Copy it from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs ↗</a>, <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia ↗</a> or <a href="https://platform.hume.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Hume ↗</a>.</p>' +
+          '<p class="muted" style="font-size:11.5px;margin:8px 0 0">No voice id yet? Copy it from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs</a>, <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia</a> or <a href="https://platform.hume.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Hume</a>.</p>' +
           '<div style="margin-top:12px">' + voices + '</div>';
 
         // Per-provider Save & test: save the key as a workspace credential, then
@@ -12830,22 +12830,22 @@
             if (msg) msg.textContent = "Saving the key…";
             send("/connected", "POST", { action: "save", id: id, keys: keys }).then(function (r) {
               if (!r.ok || !(r.data && r.data.result && r.data.result.ok)) {
-                if (msg) msg.innerHTML = '<span style="color:#ff7a90">Could not save the key — try again.</span>';
+                if (msg) msg.innerHTML = '<span style="color:var(--danger)">Could not save the key, try again.</span>';
                 return null;
               }
               if (msg) msg.textContent = "Testing the key live…";
               // Test via /connected so the result is PERSISTED (markTested -> green),
-              // not just checked — otherwise the card would stay "saved · not verified".
+              // not just checked, otherwise the card would stay "saved · not verified".
               return send("/connected", "POST", { action: "test", id: id });
             }).then(function (r) {
               btn.disabled = false; btn.textContent = lbl;
               if (!r) return;
               var okk = r.ok && r.data && r.data.result && r.data.result.status === "green";
               if (input) input.value = "";
-              if (okk) { toast("✓ " + p.label + " connected & saved"); }
+              if (okk) { toast("" + p.label + " connected & saved"); }
               else { toast(p.label + " saved, but the test failed"); }
               loadVoice(); // re-render shows the persisted state + reason on the card
-            }).catch(function () { btn.disabled = false; btn.textContent = lbl; if (msg) msg.innerHTML = '<span style="color:#ff7a90">Could not reach the server.</span>'; });
+            }).catch(function () { btn.disabled = false; btn.textContent = lbl; if (msg) msg.innerHTML = '<span style="color:var(--danger)">Could not reach the server.</span>'; });
           });
         });
 
@@ -12874,13 +12874,13 @@
               var okk = r.ok && rr.status === "green";
               if (dot) dot.style.background = okk ? "var(--accent-green)" : "var(--accent-amber)";
               if (stateEl) stateEl.textContent = okk ? "connected" : "key rejected";
-              if (msg) msg.innerHTML = okk ? '<span style="color:var(--accent-green)">✓ Verified — ready to deploy.</span>' : '<span style="color:var(--accent-amber)">✗ ' + esc(voiceErrText(rr.error)) + '</span>';
+              if (msg) msg.innerHTML = okk ? '<span style="color:var(--accent-green)">Verified, ready to deploy.</span>' : '<span style="color:var(--accent-amber)">' + esc(voiceErrText(rr.error)) + '</span>';
               loadVoice();
             }).catch(function () { if (msg) msg.textContent = "Could not reach the server."; });
           });
         });
 
-        // Pick which ENGINE (provider) is used on drops — the prominent choice.
+        // Pick which ENGINE (provider) is used on drops, the prominent choice.
         Array.prototype.forEach.call(box.querySelectorAll("[data-vsprov]"), function (btn) {
           btn.addEventListener("click", function () {
             var pid = btn.getAttribute("data-vsprov");
@@ -13003,11 +13003,11 @@
         var steps = [stepConnected(res[0]), stepEmail(res[6]), stepAts(res[1]), stepTeam(res[2]), stepAudience(res[3]), stepCampaign(res[4], res[5])];
         var ready = steps.filter(function (s) { return s.state === "ready"; }).length;
         var banner = (ready === steps.length)
-          ? '<div class="setup-banner ok">✓ All systems are go, your ' + esc(motionLabel) + ' workspace is ready to launch.</div>'
+          ? '<div class="setup-banner ok">All systems are go, your ' + esc(motionLabel) + ' workspace is ready to launch.</div>'
           : '<div class="setup-banner warn">' + ready + ' of ' + steps.length + ' setup steps ready. Finish the steps marked below to launch ' + esc(motionLabel) + '.</div>';
         var rows = steps.map(function (s, i) {
           return '<div class="setup-step s-' + s.state + '">' +
-            '<div class="setup-num">' + (s.state === "ready" ? "✓" : (i + 1)) + '</div>' +
+            '<div class="setup-num">' + (s.state === "ready" ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : (i + 1)) + '</div>' +
             '<div class="setup-main">' +
               '<div class="setup-row"><span class="setup-title">' + esc(s.title) + '</span>' + sPill(s.state) +
                 '<a class="btn btn-ghost btn-sm setup-open" href="#' + s.link + '">' + (s.state === "ready" ? "Review" : "Set up") + ' →</a></div>' +
@@ -13021,8 +13021,8 @@
   }
 
   function cnStatusMeta(status) {
-    if (status === "green") return { color: "var(--accent-green)", label: "Connected", badge: "background:rgba(56,224,166,.16);color:var(--accent-green)" };
-    if (status === "yellow") return { color: "var(--accent-amber)", label: "Saved · test it", badge: "background:rgba(255,194,77,.16);color:var(--accent-amber)" };
+    if (status === "green") return { color: "var(--accent-green)", label: "Connected", badge: "background:var(--ok-bg);color:var(--accent-green)" };
+    if (status === "yellow") return { color: "var(--accent-amber)", label: "Saved · test it", badge: "background:var(--warn-bg);color:var(--accent-amber)" };
     return { color: "var(--text-dim)", label: "Not connected", badge: "background:var(--surface-2);color:var(--text-dim)" };
   }
 
@@ -13041,10 +13041,10 @@
       '.cn-steps{margin:0 0 14px;padding-left:18px;font-size:13px;color:var(--text-dim);line-height:1.6}' +
       '.cn-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}' +
       '.cn-msg{min-height:18px;font-size:13px;margin:10px 0 0}' +
-      '.req-tag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(255,194,77,.14);color:var(--accent-amber)}' +
+      '.req-tag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;background:var(--warn-bg);color:var(--accent-amber)}' +
       '.acc-tag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;margin-right:4px;white-space:nowrap}' +
-      '.acc-tag.granted{background:rgba(124,92,255,.16);color:#b9a6ff}' +
-      '.acc-tag.own{background:rgba(56,224,166,.14);color:var(--accent-green)}' +
+      '.acc-tag.granted{background:var(--brand-soft);color:var(--brand)}' +
+      '.acc-tag.own{background:var(--ok-bg);color:var(--accent-green)}' +
       '</style>' +
       '<div id="cnBody">' + loading() + "</div>";
 
@@ -13065,8 +13065,8 @@
             acc + req + '<span class="cn-badge" style="' + sm.badge + '">' + sm.label + '</span><span class="cn-go">›</span></button>';
         }).join("") || '<div class="empty">No integrations available.</div>';
         var pre = ints.filter(function (i) { return (i.requiredFor || []).indexOf(motion) >= 0 && i.status !== "green"; });
-        var gate = pre.length ? '<div class="card" style="border-color:rgba(255,194,77,0.4);margin-bottom:14px"><b class="muted">⚠ ' + pre.length + " required integration(s) not green yet. Campaign activation is blocked for " + motion + ". Click each below to set it up.</b></div>"
-          : '<div class="card" style="border-color:rgba(56,224,166,0.4);margin-bottom:14px"><b style="color:var(--accent-green)">✓ All required integrations are green. You can activate ' + motion + " campaigns.</b></div>";
+        var gate = pre.length ? '<div class="card" style="border-color:color-mix(in srgb, var(--warn) 40%, transparent);margin-bottom:14px"><b class="muted">' + pre.length + " required integration(s) not green yet. Campaign activation is blocked for " + motion + ". Click each below to set it up.</b></div>"
+          : '<div class="card" style="border-color:color-mix(in srgb, var(--ok) 40%, transparent);margin-bottom:14px"><b style="color:var(--accent-green)">All required integrations are green. You can activate ' + motion + " campaigns.</b></div>";
         var body = $("#cnBody"); if (!body) return;
         body.innerHTML = gate + '<div class="card"><div class="cn-grid">' + rows + "</div></div>";
         Array.prototype.forEach.call(body.querySelectorAll(".cn-v"), function (btn) {
@@ -13100,7 +13100,7 @@
     }).join("");
     var steps = (integ.steps || []).length
       ? '<ol class="cn-steps">' + integ.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join("") + '</ol>' : '';
-    var docs = integ.docsUrl ? '<p class="muted" style="margin:12px 0 0;font-size:12px">Where to find these: <a href="' + esc(integ.docsUrl) + '" target="_blank" rel="noopener">' + esc(integ.docsLabel || "Provider docs ↗") + '</a></p>' : '';
+    var docs = integ.docsUrl ? '<p class="muted" style="margin:12px 0 0;font-size:12px">Where to find these: <a href="' + esc(integ.docsUrl) + '" target="_blank" rel="noopener">' + esc(integ.docsLabel || "Provider docs") + '</a></p>' : '';
     var hasSaved = present.length > 0;
     var hasFields = (integ.fields || []).length > 0;
     var body = steps + fields +
@@ -13136,7 +13136,7 @@
         say("Saving + testing…");
         saveFirst().then(function () { return send("/connected", "POST", { action: "test", id: integ.id }); }).then(function (r) {
           var res = r.data && r.data.result;
-          if (r.ok && res && res.status === "green") say("Connected ✓, verified.", "ok");
+          if (r.ok && res && res.status === "green") say("Connected, verified.", "ok");
           else say(cnTestErr(res), "err");
           if (onChange) onChange();
         }).catch(function () { say("Could not reach the server.", "err"); });
@@ -13154,7 +13154,7 @@
     if (res.error === "not_configured") return "Add the required key(s) above and Save before testing.";
     if (res.error === "no_client") return "No client available for this integration.";
     if (res.error === "connect_on_ats_tab") return "Connect Loxo on the ATS tab.";
-    if (res.error === "elevenlabs_invalid_key") return "ElevenLabs rejected this key — it's invalid or revoked. Copy it again from elevenlabs.io → Profile → API Keys (make sure it's from the right account).";
+    if (res.error === "elevenlabs_invalid_key") return "ElevenLabs rejected this key, it's invalid or revoked. Copy it again from elevenlabs.io → Profile → API Keys (make sure it's from the right account).";
     if (res.error === "elevenlabs_unauthorized") return "ElevenLabs rejected this key. If the key is correct, give it read access to User or Voices (or use a key with no restrictions), then paste it again.";
     return "Connection failed" + (res.error ? ", " + res.error : "") + ". Check the key and try again.";
   }
@@ -13189,9 +13189,9 @@
         var st = c.status || (v.status === "verified" ? "red" : "red");
         var connected = st === "green";
         var badge = connected
-          ? '<span class="ats-badge" style="background:rgba(56,224,166,.16);color:var(--accent-green)">Connected</span>'
+          ? '<span class="ats-badge" style="background:var(--ok-bg);color:var(--accent-green)">Connected</span>'
           : st === "yellow"
-            ? '<span class="ats-badge" style="background:rgba(255,194,77,.16);color:var(--accent-amber)">Saved · test it</span>'
+            ? '<span class="ats-badge" style="background:var(--warn-bg);color:var(--accent-amber)">Saved · test it</span>'
             : (v.status === "verified"
                 ? '<span class="ats-badge" style="background:var(--surface-2);color:var(--text-dim)">Not connected</span>'
                 : '<span class="ats-badge" style="background:var(--surface-2);color:var(--text-dim)">Soon</span>');
@@ -13224,7 +13224,7 @@
     var refresh = function () { renderAts(host || $("#view")); };
     var label = (vendors || []).reduce(function (a, v) { return v.vendor === vendor ? v.label : a; }, vendor);
     var isLoxo = vendor === "loxo";
-    var docLink = isLoxo ? '<a href="https://loxo.readme.io/reference/loxo-api" target="_blank" rel="noopener">Loxo API reference ↗</a>' : '';
+    var docLink = isLoxo ? '<a href="https://loxo.readme.io/reference/loxo-api" target="_blank" rel="noopener">Loxo API reference</a>' : '';
     var body =
       (isLoxo ? '<div class="ats-help" style="margin:0 0 14px;padding:11px 13px;border:1px solid var(--border);border-radius:9px;background:var(--bg-soft);font-size:12.5px;line-height:1.55;color:var(--text-muted)">' +
         '<b style="color:var(--text)">Where to find these</b><br>' +
@@ -13265,7 +13265,7 @@
       if (testBtn) testBtn.onclick = function () {
         say("Saving + testing…");
         saveFirst().then(function () { return send("/ats", "POST", { action: "test", vendor: vendor }); }).then(function (r) {
-          if (r.ok && r.data && r.data.ok) { say("Connected ✓, Loxo responded.", "ok"); refresh(); }
+          if (r.ok && r.data && r.data.ok) { say("Connected, Loxo responded.", "ok"); refresh(); }
           else say((r.data && r.data.error) || "Connection failed.", "err");
         }).catch(function () { say("Could not reach the server.", "err"); });
       };
@@ -13275,7 +13275,7 @@
         saveFirst().then(function () { return send("/ats", "POST", { action: "sync", vendor: vendor }); }).then(function (r) {
           if (r.ok && r.data && r.data.report) {
             var p = r.data.report.people || {}, c = r.data.report.companies || {};
-            say("Synced ✓, Candidates +" + (p.added || 0) + "/" + (p.updated || 0) + " upd · Companies +" + (c.added || 0) + "/" + (c.updated || 0) + " upd.", "ok");
+            say("Synced, Candidates +" + (p.added || 0) + "/" + (p.updated || 0) + " upd · Companies +" + (c.added || 0) + "/" + (c.updated || 0) + " upd.", "ok");
             refresh();
           } else say((r.data && r.data.error) || "Sync failed, test the connection first.", "err");
         }).catch(function () { say("Sync failed.", "err"); });
@@ -13284,7 +13284,7 @@
       if (hookBtn) hookBtn.onclick = function () {
         say("Registering webhooks with Loxo…");
         saveFirst().then(function () { return send("/ats", "POST", { action: "register-webhooks", vendor: vendor }); }).then(function (r) {
-          if (r.ok && r.data && r.data.registered) say("Real-time on ✓, " + r.data.registered + " webhooks registered. Changes in Loxo now sync automatically.", "ok");
+          if (r.ok && r.data && r.data.registered) say("Real-time on, " + r.data.registered + " webhooks registered. Changes in Loxo now sync automatically.", "ok");
           else say((r.data && r.data.error) === "loxo_rejected_webhooks" ? "Loxo rejected the webhooks, confirm webhooks are enabled for your account." : ((r.data && r.data.error) || "Could not register webhooks."), "err");
         }).catch(function () { say("Could not reach the server.", "err"); });
       };
@@ -13314,7 +13314,7 @@
     var matrix = '<div class="card" style="margin-bottom:16px;overflow:auto"><h3>What each role can do</h3><table class="matrix"><thead><tr><th>Capability</th><th>Owner</th><th>Admin</th><th>Recruiter</th></tr></thead><tbody>' +
       caps.map(function (r) {
         return "<tr><td>" + esc(r[0]) + "</td>" + [1, 2, 3].map(function (i) {
-          return '<td>' + (r[i] ? '<span style="color:var(--accent-green)">✓</span>' : '<span class="muted">-</span>') + "</td>";
+          return '<td>' + (r[i] ? '<span style="color:var(--accent-green)"><svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg></span>' : '<span class="muted">-</span>') + "</td>";
         }).join("") + "</tr>";
       }).join("") + "</tbody></table></div>";
 
@@ -13341,7 +13341,7 @@
         btn.addEventListener("click", function () {
           var link = btn.getAttribute("data-invlink");
           try { navigator.clipboard.writeText(link); } catch (e) {}
-          var t = btn.textContent; btn.textContent = "Copied ✓";
+          var t = btn.textContent; btn.textContent = "Copied";
           setTimeout(function () { btn.textContent = t; }, 1500);
         });
       });
@@ -13418,7 +13418,7 @@
     var label = role === "admin" ? "admin" : "recruiter";
     msgEl.className = "auth-msg";
     msgEl.innerHTML = '<div style="text-align:left">' +
-      '<p style="color:var(--accent-green);font-weight:600;margin:0 0 8px">✓ Invite created for ' + esc(email) + ' (' + label + ').</p>' +
+      '<p style="color:var(--accent-green);font-weight:600;margin:0 0 8px">Invite created for ' + esc(email) + ' (' + label + ').</p>' +
       '<p class="muted" style="font-size:12px;margin:0 0 6px">Send them this link to join, it works even if email isn\'t set up yet:</p>' +
       '<div style="display:flex;gap:6px"><input id="invLinkBox" readonly value="' + esc(link) + '" style="flex:1;min-width:0;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12px"/>' +
       '<button class="btn btn-sm" id="invCopyBtn" type="button">Copy</button></div></div>';
@@ -13427,7 +13427,7 @@
     if (copyBtn) copyBtn.onclick = function () {
       if (box) box.select();
       try { navigator.clipboard.writeText(link); } catch (e) { try { document.execCommand("copy"); } catch (e2) {} }
-      copyBtn.textContent = "Copied ✓";
+      copyBtn.textContent = "Copied";
       setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500);
     };
     var sb = root.querySelector("#invSend");
@@ -13505,7 +13505,7 @@
     // Pull real campaigns from the API so this works on any device.
     api("/campaigns").then(function (d) {
       var camps = ((d && d.campaigns) || []).filter(function (c) { return c.motion === motion; });
-      if (!camps.length) { toast("Create a campaign first (＋ New campaign)."); location.hash = "campaigns"; return; }
+      if (!camps.length) { toast("Create a campaign first (+ New campaign)."); location.hash = "campaigns"; return; }
       var name = prompt("Prospect full name:"); if (!name) return;
       var email = prompt("Email (optional):") || undefined;
       var company = prompt("Company (optional):") || undefined;
@@ -13680,7 +13680,7 @@
         "</select>"
       : '<div class="imp-note" id="liCampNote">New prospects will be added to an auto-created <b>LinkedIn Imports</b> campaign.</div>';
     var extHtml =
-      '<div class="li-ext"><div class="li-ext-h">🧩 Pull real profiles with the Chrome extension <span class="li-ext-tag">recommended</span></div>' +
+      '<div class="li-ext"><div class="li-ext-h">Pull real profiles with the Chrome extension <span class="li-ext-tag">recommended</span></div>' +
         '<div id="liExtStatus" style="font-size:13px;margin:6px 0">Checking for the extension…</div>' +
         '<div id="liExtActions" class="btn-row" style="margin:8px 0"></div>' +
         '<div class="muted" style="font-size:12px;margin-top:4px">Once connected, run your Sales Navigator search and click <b>Scrape this search</b> in the extension, it pages through slowly and posts every profile (photo, title, company) straight into Prospects.</div>' +
@@ -13718,7 +13718,7 @@
       }).catch(function () {});
       function copyFrom(id, btn) {
         var node = root.querySelector(id); if (!node) return;
-        navigator.clipboard.writeText(node.textContent).then(function () { var b = root.querySelector(btn); if (b) { var o = b.textContent; b.textContent = "Copied ✓"; setTimeout(function () { b.textContent = o; }, 1200); } });
+        navigator.clipboard.writeText(node.textContent).then(function () { var b = root.querySelector(btn); if (b) { var o = b.textContent; b.textContent = "Copied"; setTimeout(function () { b.textContent = o; }, 1200); } });
       }
       var tc = root.querySelector("#liTokCopy"); if (tc) tc.addEventListener("click", function () { copyFrom("#liTok", "#liTokCopy"); });
       var bc = root.querySelector("#liBaseCopy"); if (bc) bc.addEventListener("click", function () { copyFrom("#liBase", "#liBaseCopy"); });
@@ -13728,8 +13728,8 @@
         var st = root.querySelector("#liExtStatus"), acts = root.querySelector("#liExtActions");
         if (!st || !acts || !document.body.contains(root)) return;
         if (extState.installed) {
-          st.innerHTML = '✅ Extension installed' + (extState.version ? ' <span class="muted">(v' + esc(extState.version) + ")</span>" : "");
-          acts.innerHTML = '<button class="btn btn-primary btn-sm" id="liExtConnect">🔗 Connect this workspace</button>';
+          st.innerHTML = 'Extension installed' + (extState.version ? ' <span class="muted">(v' + esc(extState.version) + ")</span>" : "");
+          acts.innerHTML = '<button class="btn btn-primary btn-sm" id="liExtConnect">Connect this workspace</button>';
           root.querySelector("#liExtConnect").addEventListener("click", function () {
             var b = this;
             var token = extTokenData && extTokenData.token;
@@ -13738,9 +13738,9 @@
             extConfigure((extTokenData && extTokenData.backendBaseUrl) || (location.origin + "/api/linkedin"), token);
           });
         } else {
-          st.innerHTML = "⬇ Extension not detected.";
+          st.innerHTML = "Extension not detected.";
           acts.innerHTML = (EXT_STORE_URL
-            ? '<a class="btn btn-primary btn-sm" href="' + esc(EXT_STORE_URL) + '" target="_blank" rel="noopener">➕ Add to Chrome</a> '
+            ? '<a class="btn btn-primary btn-sm" href="' + esc(EXT_STORE_URL) + '" target="_blank" rel="noopener">Add to Chrome</a> '
             : '<span class="muted" style="font-size:12.5px">Install it (Chrome → Extensions → Developer mode → Load unpacked → the <code>extension/</code> folder). </span>') +
             '<button class="btn btn-ghost btn-sm" id="liExtRecheck">Re-check</button>';
           var rc = root.querySelector("#liExtRecheck"); if (rc) rc.addEventListener("click", extPing);
@@ -13749,8 +13749,8 @@
       function onExtConfigured(e) {
         if (!document.body.contains(root)) return;
         var c = root.querySelector("#liExtConnect");
-        if (e.detail && e.detail.ok) { toast("Extension connected ✅, searches run here automatically now."); if (c) { c.disabled = true; c.textContent = "✅ Connected"; } }
-        else { if (c) { c.disabled = false; c.textContent = "🔗 Connect this workspace"; } toast("Could not connect the extension" + (e.detail && e.detail.error ? " (" + e.detail.error + ")" : ".")); }
+        if (e.detail && e.detail.ok) { toast("Extension connected, searches run here automatically now."); if (c) { c.disabled = true; c.textContent = "Connected"; } }
+        else { if (c) { c.disabled = false; c.textContent = "Connect this workspace"; } toast("Could not connect the extension" + (e.detail && e.detail.error ? " (" + e.detail.error + ")" : ".")); }
       }
       document.addEventListener("ros-ext-present", paintExt);
       document.addEventListener("ros-ext-configured", onExtConfigured);
@@ -13770,10 +13770,10 @@
         if (!valid()) { prev.innerHTML = "That doesn't look like a linkedin.com URL."; return; }
         if (engine() === "scraper") {
           prev.innerHTML = isProfileUrl(u)
-            ? "✓ Ready to scrape this profile (cookie engine). Pulls slowly to stay under LinkedIn's radar."
-            : "✓ Ready, best-effort: the scraper pages through this search with delays. List markup can be brittle; a profile URL is more reliable.";
+            ? "Ready to scrape this profile (cookie engine). Pulls slowly to stay under LinkedIn's radar."
+            : "Ready, best-effort: the scraper pages through this search with delays. List markup can be brittle; a profile URL is more reliable.";
         } else {
-          prev.innerHTML = "✓ Ready to pull profiles from this search.";
+          prev.innerHTML = "Ready to pull profiles from this search.";
         }
       }
       urlEl.addEventListener("input", repaintPrev);
@@ -13807,7 +13807,7 @@
     var started = Date.now();
     box.innerHTML =
       '<div class="li-prog running"><div class="li-prog-top">' +
-        '<span class="li-prog-title">🔗 ' + (slow ? "Scraping LinkedIn (cookie engine)…" : "Pulling LinkedIn profiles…") + '</span>' +
+        '<span class="li-prog-title">' + (slow ? "Scraping LinkedIn (cookie engine)…" : "Pulling LinkedIn profiles…") + '</span>' +
         '<span class="li-prog-meta" id="liProgMeta">target ' + limit + " · 0s</span></div>" +
         '<div class="li-bar"><span class="li-bar-fill indet"></span></div>' +
         '<div class="li-prog-sub">' + (slow
@@ -13844,10 +13844,10 @@
   function finishLinkedInPull(box, added, deduped, warnings) {
     var dup = deduped ? " · " + deduped + " already in pipeline" : "";
     var warn = (warnings && warnings.length)
-      ? '<div class="li-prog-sub" style="color:var(--warn,#c80)">⚠ ' + esc(warnings.join(" ")) + "</div>" : "";
+      ? '<div class="li-prog-sub" style="color:var(--warn,#c80)">' + esc(warnings.join(" ")) + "</div>" : "";
     box.innerHTML =
       '<div class="li-prog done"><div class="li-prog-top">' +
-        '<span class="li-prog-title">✓ LinkedIn pull complete</span>' +
+        '<span class="li-prog-title">LinkedIn pull complete</span>' +
         '<span class="li-prog-meta"><b id="liCount">0</b> profiles added' + dup + "</span></div>" +
         '<div class="li-bar"><span class="li-bar-fill" style="width:100%"></span></div>' +
         warn +
@@ -13862,7 +13862,7 @@
   function errorLinkedInPull(box, msg) {
     box.innerHTML =
       '<div class="li-prog error"><div class="li-prog-top">' +
-        '<span class="li-prog-title">⚠ Could not pull profiles</span>' +
+        '<span class="li-prog-title">Could not pull profiles</span>' +
         '<a href="#" id="liDismiss" class="li-prog-meta">Dismiss</a></div>' +
         '<div class="li-prog-sub">' + esc(msg) + "</div></div>";
     var dz = document.getElementById("liDismiss");
@@ -13880,7 +13880,7 @@
 
   /* ---------------- helpers ---------------- */
   function initials(n) { return (n || "?").split(/\s+/).map(function (x) { return x[0]; }).slice(0, 2).join("").toUpperCase(); }
-  function colorFor(n) { var c = ["#7c5cff", "#4dd0ff", "#ff7ac6", "#38e0a6", "#ffc24d"]; var s = 0; for (var i = 0; i < (n || "").length; i++) s += n.charCodeAt(i); return c[s % c.length]; }
+  function colorFor(n) { var c = ["var(--brand)", "var(--info)", "var(--brand-2)", "var(--ok)", "var(--warn)"]; var s = 0; for (var i = 0; i < (n || "").length; i++) s += n.charCodeAt(i); return c[s % c.length]; }
   function clsLabel(c) { var m = { positive: "Positive", soft_yes: "Soft yes", referral: "Referral", timing: "Timing", timing_objection: "Timing", fit: "Fit", fit_objection: "Fit", not_interested: "Not interested", stop: "STOP", unclassified: "Review" }; return m[c] || c; }
   function statusCls(s) { var m = { booked: "positive", won: "positive", replied: "soft_yes", in_sequence: "soft_yes", nurture: "timing_objection", queued: "unclassified", closed_lost: "not_interested", do_not_contact: "stop" }; return m[s] || "unclassified"; }
   function statusLabel(s, lifecycle) {
@@ -13896,7 +13896,7 @@
      or imported from CSV) is merged into an editable template; every row is
      validated (recipient, placeholders, length, spam words), an AI pass approves
      only what meets the SET REQUIREMENTS, and you batch-approve, attach a sequence,
-     and launch — or export a deploy package.
+     and launch, or export a deploy package.
 
      The second touch is the Pitchlane-style PICTURE-IN-PICTURE VIDEO EMAIL. It
      reuses the existing video pipeline end to end (no new backend):
@@ -13904,7 +13904,7 @@
        • foreground = a talking-head clip recorded in PiP Studio  (GET /api/in-market/clip)
        • composite + signed share links                    (POST /api/in-market/video → share.gif / share.watch)
        • attach to prospects + arm the 2-email sequence     (POST /api/in-market/attach)
-       • recipient lands on the branded watch page (video + calendar) — watch.html
+       • recipient lands on the branded watch page (video + calendar), watch.html
      In the email the video shows as a clickable thumbnail: background image +
      talking-head bubble + play button, linking to the watch page (the {{video}}
      merge field, equivalent to the backend {{videoembed}}). Replaces BD Bulk. */
@@ -13914,7 +13914,7 @@
     fromName: "",
     replyTo: "",
     subject: "{{first_name}}, a quick idea for {{company}}",
-    body: "Hi {{first_name}},\n\nNoticed {{company}} is hiring a {{role}} — based on that, I had an idea I think might be worth 30 seconds:\n\n{{video}}\n\n^ Putting a face to the name :)\n\nWorth a quick look re your plans this quarter?\n\nThanks,\n{{sender_name}}"
+    body: "Hi {{first_name}},\n\nNoticed {{company}} is hiring a {{role}}, based on that, I had an idea I think might be worth 30 seconds:\n\n{{video}}\n\n^ Putting a face to the name :)\n\nWorth a quick look re your plans this quarter?\n\nThanks,\n{{sender_name}}"
   };
   var EP_DEFAULT_CRITERIA = {
     maxSubjectChars: 60, minWords: 25, maxWords: 130,
@@ -13925,7 +13925,7 @@
   var EP_FIELDS = [
     ["first_name", "First name"], ["full_name", "Full name"], ["title", "Title"],
     ["company", "Company"], ["role", "Open role"], ["location", "Location"],
-    ["industry", "Industry"], ["competitor", "Competitor"], ["video", "▶ Video"], ["sender_name", "Your name"]
+    ["industry", "Industry"], ["competitor", "Competitor"], ["video", "Video"], ["sender_name", "Your name"]
   ];
   var EP_COL_TYPES = [["text", "Text"], ["url", "URL / link"], ["pip_video", "PiP video (talking head × job-post capture)"]];
 
@@ -13941,14 +13941,14 @@
   function epColKey(label) { return String(label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || ("col_" + Math.random().toString(36).slice(2, 6)); }
   // Reuse the talking-head clip + PiP layout the operator set up in PiP Studio.
   function epDefaultClipId() { try { return localStorage.getItem("ros_pip_clip") || ""; } catch (e) { return ""; } }
-  function epDefaultPip() { try { return JSON.parse(localStorage.getItem("ros_pip_style") || "null") || { corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "#7c5cff", radiusPct: 18 }; } catch (e) { return { corner: "br", shape: "circle", sizePct: 26 }; } }
+  function epDefaultPip() { try { return JSON.parse(localStorage.getItem("ros_pip_style") || "null") || { corner: "br", shape: "circle", sizePct: 26, marginPct: 3, borderPx: 4, borderColor: "var(--brand)", radiusPct: 18 }; } catch (e) { return { corner: "br", shape: "circle", sizePct: 26 }; } }
 
   /* ---- PiP Studio ↔ Email bridge ---------------------------------------------
      PiP Studio saves every personalized video it generates to ros_pip_results,
      keyed by role: { roleKey: { videoKey, company, roleTitle, share:{watch,gif} } }.
      A prospect in the Email queue carries company + role. So a video you ALREADY
-     made in PiP Studio can be auto-attached to a matching prospect here — no
-     re-render — making the two tools one pipeline: record once in PiP Studio →
+     made in PiP Studio can be auto-attached to a matching prospect here, no
+     re-render, making the two tools one pipeline: record once in PiP Studio →
      it flows into every matching email. */
   function epPipResults() { try { var r = JSON.parse(localStorage.getItem("ros_pip_results") || "{}"); return (r && typeof r === "object") ? r : {}; } catch (e) { return {}; } }
   function epNorm(s) { return String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
@@ -14007,7 +14007,7 @@
   }
   // Escape, then render tokens: chips in Placeholders view; resolved values (or a
   // flagged ⟨missing⟩) in Rendered view. The {{video}} token becomes the inline
-  // Pitchlane video thumbnail — background + talking-head bubble + play button.
+  // Pitchlane video thumbnail, background + talking-head bubble + play button.
   function epHighlight(str, p, template, rendered) {
     return esc(String(str || "")).replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, function (_m, k) {
       var key = k.toLowerCase();
@@ -14026,15 +14026,15 @@
     var watch = f.video_watch || "";        // signed watch-page link
     var co = f.company || "your team";
     var bgStyle = bg ? 'style="background-image:url(' + esc(bg) + ')"' : "";
-    var statusTag = f.video_watch ? '<span class="ep-video-ready">✓ personalized</span>'
+    var statusTag = f.video_watch ? '<span class="ep-video-ready">personalized</span>'
       : (f.job_post_url ? '<span class="ep-video-pending">pairs on generate</span>' : '<span class="ep-video-need">needs job-post capture</span>');
     return '<span class="ep-video" data-watch="' + esc(watch) + '">' +
       '<span class="ep-video-thumb' + (bg ? " has-bg" : "") + '" ' + bgStyle + '>' +
         (bg ? "" : '<span class="ep-video-skeleton"><i></i><i></i><i></i></span>') +
-        '<span class="ep-video-bubble">🧑‍💼</span>' +
-        '<span class="ep-video-play">▶</span>' +
+        '<span class="ep-video-bubble"><svg class="isvg" aria-hidden="true"><use href="#i-user"/></svg></span>' +
+        '<span class="ep-video-play"><svg class="isvg" aria-hidden="true"><use href="#i-play"/></svg></span>' +
       "</span>" +
-      '<span class="ep-video-cap">▶ A quick note about ' + esc(co) + " · " + statusTag + "</span>" +
+      '<span class="ep-video-cap">A quick note about ' + esc(co) + " · " + statusTag + "</span>" +
       "</span>";
   }
 
@@ -14082,11 +14082,11 @@
     else plus("Length sits in the high-reply band");
     if (subject.length > criteria.maxSubjectChars) ding(15, "Subject truncates on mobile (" + subject.length + " chars)");
     if (/[A-Z]{5,}/.test(subject)) ding(10, "Subject SHOUTS (all-caps run)");
-    if (v.usesVideo && !v.videoReady) ding(12, "Video not rendered yet — generate the pairing");
+    if (v.usesVideo && !v.videoReady) ding(12, "Video not rendered yet, generate the pairing");
     if (f.first_name && body.indexOf(f.first_name) >= 0) plus("Opens on the prospect's name");
     if (f.company && body.indexOf(f.company) >= 0) plus("References their company");
     if (f.role && body.indexOf(f.role) >= 0) plus("Anchored on the open role");
-    if (v.usesVideo) plus("Personalized video — face-to-face touch");
+    if (v.usesVideo) plus("Personalized video, face-to-face touch");
     if (/\?/.test(body)) plus("Has a soft-ask question"); else ding(10, "No clear ask / question");
     var links = (body.match(/https?:\/\//g) || []).length;
     if (links > 1) ding(10, links + " links hurt deliverability");
@@ -14184,13 +14184,13 @@
     el.innerHTML = "<style>" + EP_STYLE + "</style>" +
       '<div class="ep-wrap">' +
         '<div class="ep-hero">' +
-          '<div class="ep-hero-l"><div class="ep-hero-t">✉️ Email <span class="ep-tof">Top of funnel</span></div>' +
+          '<div class="ep-hero-l"><div class="ep-hero-t">Email <span class="ep-tof">Top of funnel</span></div>' +
             '<div class="ep-hero-d">Stage every email before it sends: merge prospects into your template, validate the copy, let the AI approve only what meets your bar, generate the picture-in-picture video (job-post background × your talking head), then attach a sequence and launch. Recipients land on a branded page with the video and your calendar.</div></div>' +
           '<div class="ep-hero-r"><span id="epReady" class="ep-ready ep-muted">Checking video studio…</span></div>' +
         "</div>" +
         '<div class="ep-tabs" id="epTabs">' +
-          '<button class="ep-tab active" data-tab="queue">📋 Prep queue <span id="epTabN" class="ep-tabn">' + state.prospects.length + "</span></button>" +
-          '<button class="ep-tab" data-tab="import">⇪ Import CSV</button>' +
+          '<button class="ep-tab active" data-tab="queue">Prep queue <span id="epTabN" class="ep-tabn">' + state.prospects.length + "</span></button>" +
+          '<button class="ep-tab" data-tab="import">Import CSV</button>' +
         "</div>" +
         '<div id="epMain"></div>' +
       "</div>";
@@ -14214,9 +14214,9 @@
     function paintReady() {
       var r = $("#epReady", el); if (!r) return;
       var matched = state.prospects.filter(function (p) { return p.fields && p.fields.video_watch; }).length;
-      var tail = matched ? ' · <span class="ep-ok">🔗 ' + matched + " matched to a PiP Studio video</span>" : "";
-      if (state.clips.length) { r.className = "ep-ready ep-ok"; r.innerHTML = "🎬 " + state.clips.length + " talking-head clip" + (state.clips.length === 1 ? "" : "s") + " ready" + tail; r.title = "Recorded in PiP Studio"; }
-      else { r.className = "ep-ready ep-warn"; r.innerHTML = "◌ No talking-head clip" + tail; r.title = "Record one in PiP Studio to enable the personalized video email."; }
+      var tail = matched ? ' · <span class="ep-ok">' + matched + " matched to a PiP Studio video</span>" : "";
+      if (state.clips.length) { r.className = "ep-ready ep-ok"; r.innerHTML = "" + state.clips.length + " talking-head clip" + (state.clips.length === 1 ? "" : "s") + " ready" + tail; r.title = "Recorded in PiP Studio"; }
+      else { r.className = "ep-ready ep-warn"; r.innerHTML = "No talking-head clip" + tail; r.title = "Record one in PiP Studio to enable the personalized video email."; }
     }
     function loadSequences() {
       try { state.sequences = (seqStore().all() || []).filter(function (s) { return s.motion === motion; }); } catch (e) { state.sequences = []; }
@@ -14246,9 +14246,9 @@
       var nEl = $("#epTabN", el); if (nEl) nEl.textContent = state.prospects.length;
       if (!state.prospects.length) {
         main.innerHTML =
-          '<div class="ep-empty"><div class="ep-empty-ic">✉️</div>' +
+          '<div class="ep-empty"><div class="ep-empty-ic"><svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg></div>' +
           '<div class="ep-empty-t">No prospects queued yet</div>' +
-          '<div class="ep-empty-s">Push prospects from <a href="#inmarket">Hire Signals</a> with “✉️ Push prospects to Email”, or <a href="#" id="epGoImport">import a CSV</a>.</div></div>';
+          '<div class="ep-empty-s">Push prospects from <a href="#inmarket">Hire Signals</a> with “Push prospects to Email”, or <a href="#" id="epGoImport">import a CSV</a>.</div></div>';
         var gi = $("#epGoImport", el); if (gi) gi.addEventListener("click", function (e) { e.preventDefault(); switchTab("import"); });
         return;
       }
@@ -14268,7 +14268,7 @@
             '<div class="ep-card-h" style="margin-top:16px">Approval requirements <button class="ep-link" id="epEditCrit">edit</button></div>' +
             '<div id="epCritView"></div>' +
             '<div class="ep-batch">' +
-              '<button class="btn btn-primary btn-sm" id="epApproveAll">✓ Approve all passing</button>' +
+              '<button class="btn btn-primary btn-sm" id="epApproveAll">Approve all passing</button>' +
               '<button class="btn btn-ghost btn-sm" id="epRejectFail">⊘ Reject all blocked</button>' +
               '<button class="btn btn-ghost btn-sm" id="epClearAppr">↺ Clear</button>' +
             "</div>" +
@@ -14306,7 +14306,7 @@
       var custom = state.columns.map(function (c) { return [c.key, c.label]; });
       host.innerHTML = EP_FIELDS.concat(custom).map(function (f) {
         return '<button class="ep-fchip' + (f[0] === "video" ? " ep-fchip-v" : "") + '" data-f="' + f[0] + '" title="Insert {{' + f[0] + '}}">+ ' + esc(f[1]) + "</button>";
-      }).join("") + '<button class="ep-fchip ep-fchip-add" id="epAddCol">⚙ Columns</button>';
+      }).join("") + '<button class="ep-fchip ep-fchip-add" id="epAddCol">Columns</button>';
       Array.prototype.forEach.call(host.querySelectorAll(".ep-fchip[data-f]"), function (c) {
         c.addEventListener("click", function () { insertToken(c.getAttribute("data-f")); });
       });
@@ -14343,15 +14343,15 @@
         ? '<select id="epClip" class="ep-in">' + state.clips.map(function (c) { return '<option value="' + esc(c.id) + '"' + (c.id === state.clipId ? " selected" : "") + ">" + esc(c.label || ("Clip " + (c.id || "").slice(0, 6))) + "</option>"; }).join("") + "</select>"
         : '<div class="ep-vnote">No talking-head clip yet. <a href="/pip-studio">Record one in PiP Studio →</a></div>';
       host.innerHTML =
-        '<div class="ep-card-h">🎬 Picture-in-picture video</div>' +
-        '<p class="ep-vsub">Pairs each prospect\'s job-post capture (background) with your talking-head clip (bubble) into one video — the second touch.</p>' +
+        '<div class="ep-card-h">Picture-in-picture video</div>' +
+        '<p class="ep-vsub">Pairs each prospect\'s job-post capture (background) with your talking-head clip (bubble) into one video, the second touch.</p>' +
         '<label class="ep-lbl">Talking head</label>' + clipOpts +
         '<div class="ep-vstat">' +
           '<span>' + withBg + " with job-post link</span><span>" + rendered + " ready</span>" +
-          (libCount ? '<span>🔗 ' + libCount + " in PiP Studio library</span>" : "") +
+          (libCount ? '<span>' + libCount + " in PiP Studio library</span>" : "") +
         "</div>" +
-        (libCount ? '<button class="btn btn-ghost btn-sm" id="epPullPip" title="Attach videos you already made in PiP Studio to matching prospects (by company + role)">🔗 Pull from PiP Studio library</button>' : "") +
-        '<button class="btn btn-primary btn-sm" id="epGenVid"' + ((state.clipId && withBg) ? "" : " disabled") + '>▶ Generate paired videos</button>' +
+        (libCount ? '<button class="btn btn-ghost btn-sm" id="epPullPip" title="Attach videos you already made in PiP Studio to matching prospects (by company + role)">Pull from PiP Studio library</button>' : "") +
+        '<button class="btn btn-primary btn-sm" id="epGenVid"' + ((state.clipId && withBg) ? "" : " disabled") + '>Generate paired videos</button>' +
         '<div id="epGenStat" class="ep-genstat"></div>';
       var clipSel = $("#epClip", el);
       if (clipSel) clipSel.addEventListener("change", function () { state.clipId = clipSel.value; try { localStorage.setItem("ros_pip_clip", state.clipId); } catch (e) {} });
@@ -14361,7 +14361,7 @@
       if (pull) pull.addEventListener("click", function () {
         var n = epLinkPipVideos(state.prospects, state.columns);
         if (n) { epStoreQueue(state.prospects); paintVideoCard(); repaintCards(); }
-        toast(n ? ("Linked " + n + " prospect" + (n === 1 ? "" : "s") + " to a PiP Studio video") : "No new matches — record/generate in PiP Studio for these companies");
+        toast(n ? ("Linked " + n + " prospect" + (n === 1 ? "" : "s") + " to a PiP Studio video") : "No new matches, record/generate in PiP Studio for these companies");
       });
     }
 
@@ -14371,14 +14371,14 @@
     function generateVideos() {
       if (!state.clipId) { toast("Pick a talking-head clip first"); return; }
       var targets = state.prospects.filter(function (p) { return p.fields.job_post_url && !p.fields.video_watch; });
-      if (!targets.length) { toast("Nothing to generate — rows need a job-post link"); return; }
+      if (!targets.length) { toast("Nothing to generate, rows need a job-post link"); return; }
       var gen = $("#epGenVid", el), stat = $("#epGenStat", el);
       if (gen) gen.disabled = true;
       var done = 0, ok = 0;
       (function next(i) {
         if (i >= targets.length) {
           if (gen) gen.disabled = false;
-          if (stat) stat.innerHTML = '<span class="ep-ok">✓ ' + ok + " of " + targets.length + " rendered</span>";
+          if (stat) stat.innerHTML = '<span class="ep-ok">' + ok + " of " + targets.length + " rendered</span>";
           epStoreQueue(state.prospects); paintVideoCard(); repaintCards();
           toast("Rendered " + ok + " personalized video" + (ok === 1 ? "" : "s"));
           return;
@@ -14462,10 +14462,10 @@
         host.innerHTML = '<ul class="ep-critlist">' +
           "<li>Subject ≤ <b>" + c.maxSubjectChars + "</b> chars</li>" +
           "<li>Body <b>" + c.minWords + "–" + c.maxWords + "</b> words</li>" +
-          "<li>" + (c.requireValidEmail ? "✓" : "–") + " Valid recipient email</li>" +
-          "<li>" + (c.noUnfilled ? "✓" : "–") + " All placeholders filled</li>" +
-          "<li>" + (c.requireVideoReady ? "✓" : "–") + " Video rendered (if used)</li>" +
-          "<li>" + (c.requireAiPass ? "✓" : "–") + " AI score ≥ <b>" + c.aiMinScore + "</b></li>" +
+          "<li>" + (c.requireValidEmail ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : "–") + " Valid recipient email</li>" +
+          "<li>" + (c.noUnfilled ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : "–") + " All placeholders filled</li>" +
+          "<li>" + (c.requireVideoReady ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : "–") + " Video rendered (if used)</li>" +
+          "<li>" + (c.requireAiPass ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : "–") + " AI score ≥ <b>" + c.aiMinScore + "</b></li>" +
           "</ul>";
         return;
       }
@@ -14527,7 +14527,7 @@
       var who = [p.fields.full_name || p.fields.first_name || "(no name)", p.fields.title, p.fields.company].filter(Boolean).join(" · ");
       var statusCls = item.status === "approved" ? "ep-appr" : item.status === "rejected" ? "ep-rej" : (item.gate.pass ? "ep-okstate" : "ep-block");
       var checks = v.checks.map(function (c) {
-        return '<li class="' + (c.ok ? "ep-ok" : (c.required ? "ep-bad" : "ep-warn")) + '"><span class="ep-ck">' + (c.ok ? "✓" : "✕") + "</span>" + esc(c.label) + ' <span class="ep-ckd">' + esc(c.detail) + "</span></li>";
+        return '<li class="' + (c.ok ? "ep-ok" : (c.required ? "ep-bad" : "ep-warn")) + '"><span class="ep-ck">' + (c.ok ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : '<svg class="isvg" aria-hidden="true"><use href="#i-x"/></svg>') + "</span>" + esc(c.label) + ' <span class="ep-ckd">' + esc(c.detail) + "</span></li>";
       }).join("");
       var aiCls = ai.pass ? "ep-ai-pass" : "ep-ai-fail";
       var aiNotes = (ai.flags.length ? ai.flags : ai.reasons).slice(0, 4).map(function (r) { return '<span class="ep-aireason">' + esc(r) + "</span>"; }).join("");
@@ -14546,9 +14546,9 @@
         "</div>" +
         '<div class="ep-mail-foot">' +
           '<ul class="ep-checks">' + checks + "</ul>" +
-          '<div class="ep-ai ' + aiCls + '"><div class="ep-ai-h">🤖 AI review · ' + (ai.pass ? "approved" : "needs work") + "</div><div class=\"ep-aireasons\">" + aiNotes + "</div></div>" +
+          '<div class="ep-ai ' + aiCls + '"><div class="ep-ai-h">AI review · ' + (ai.pass ? "approved" : "needs work") + "</div><div class=\"ep-aireasons\">" + aiNotes + "</div></div>" +
           '<div class="ep-actions">' +
-            '<button class="btn btn-sm ' + (item.status === "approved" ? "btn-primary" : "btn-ghost") + '" data-appr="' + esc(p.id) + '">' + (item.status === "approved" ? "✓ Approved" : "Approve") + "</button>" +
+            '<button class="btn btn-sm ' + (item.status === "approved" ? "btn-primary" : "btn-ghost") + '" data-appr="' + esc(p.id) + '">' + (item.status === "approved" ? "Approved" : "Approve") + "</button>" +
             '<button class="btn btn-sm btn-ghost" data-rej="' + esc(p.id) + '">' + (item.status === "rejected" ? "✕ Rejected" : "Reject") + "</button>" +
             '<button class="btn btn-sm btn-ghost ep-rm" data-rm="' + esc(p.id) + '">Remove</button>' +
           "</div>" +
@@ -14588,8 +14588,8 @@
         '<div class="ep-deploy-r">' +
           '<label class="ep-seq">Sequence <select id="epSeq" class="ep-in">' + seqOpts + "</select></label>" +
           '<a class="ep-link" href="#campaigns">+ new sequence</a>' +
-          '<button class="btn btn-ghost btn-sm" id="epExport"' + (approved.length ? "" : " disabled") + ">📤 Export</button>" +
-          '<button class="btn btn-primary btn-sm" id="epLaunch"' + (approved.length ? "" : " disabled") + ">🚀 Launch " + (approved.length || "") + " approved</button>" +
+          '<button class="btn btn-ghost btn-sm" id="epExport"' + (approved.length ? "" : " disabled") + ">Export</button>" +
+          '<button class="btn btn-primary btn-sm" id="epLaunch"' + (approved.length ? "" : " disabled") + ">Launch " + (approved.length || "") + " approved</button>" +
         "</div>";
       var ex = $("#epExport", el); if (ex) ex.addEventListener("click", function () { exportApproved(items); });
       var lc = $("#epLaunch", el); if (lc) lc.addEventListener("click", function () { launchApproved(items); });
@@ -14656,8 +14656,8 @@
       main.innerHTML =
         '<div class="ep-card">' +
           '<div class="ep-card-h">Import a CSV</div>' +
-          '<p class="ep-vsub">Columns we read: first/full name, title, company, open role, location, industry, email, and a job-post URL (Companies_Job_Post_URL) — the last one is the video background. Each mapped column fills the matching {{placeholder}}. Up to 2,000 rows load for visual review.</p>' +
-          '<div class="ep-drop" id="epDrop"><div class="ep-drop-ic">📥</div><div class="ep-drop-t">Drop CSV here</div><div class="ep-drop-s">or click to browse</div><input type="file" id="epFile" accept=".csv,text/csv" hidden></div>' +
+          '<p class="ep-vsub">Columns we read: first/full name, title, company, open role, location, industry, email, and a job-post URL (Companies_Job_Post_URL), the last one is the video background. Each mapped column fills the matching {{placeholder}}. Up to 2,000 rows load for visual review.</p>' +
+          '<div class="ep-drop" id="epDrop"><div class="ep-drop-ic"><svg class="isvg" aria-hidden="true"><use href="#i-inbox"/></svg></div><div class="ep-drop-t">Drop CSV here</div><div class="ep-drop-s">or click to browse</div><input type="file" id="epFile" accept=".csv,text/csv" hidden></div>' +
           '<div id="epChip"></div>' +
           '<div class="ep-paste-tog" id="epPasteTog">▸ or paste CSV text</div>' +
           '<textarea id="epPaste" class="ep-ta" style="display:none" placeholder="First Name,Title,Company,Role,Location,Email,Companies_Job_Post_URL"></textarea>' +
@@ -14673,11 +14673,11 @@
         $("#epImportPreview", el).innerHTML =
           '<div class="ep-prev-h"><b>' + state.csv.length.toLocaleString() + "</b> rows · showing " + prev.length + "</div>" +
           '<div class="ep-prevtable"><table><thead><tr><th>Name</th><th>Company</th><th>Role</th><th>Email</th><th>Job-post URL</th></tr></thead><tbody>' +
-          prev.map(function (p) { var f = p.fields; return "<tr><td>" + esc(f.full_name || f.first_name || "—") + "</td><td>" + esc(f.company || "—") + "</td><td>" + esc(f.role || "—") + "</td><td>" + esc(f.email || "—") + "</td><td>" + (f.job_post_url ? "✓" : "—") + "</td></tr>"; }).join("") +
+          prev.map(function (p) { var f = p.fields; return "<tr><td>" + esc(f.full_name || f.first_name || "-") + "</td><td>" + esc(f.company || "-") + "</td><td>" + esc(f.role || "-") + "</td><td>" + esc(f.email || "-") + "</td><td>" + (f.job_post_url ? "" : "-") + "</td></tr>"; }).join("") +
           "</tbody></table></div>";
         $("#epAddQueue", el).disabled = false;
       }
-      function readFile(f) { if (!f) return; $("#epChip", el).innerHTML = '<span class="ep-filechip">📄 ' + esc(f.name) + "</span>"; var rd = new FileReader(); rd.onload = function () { ingest(String(rd.result || "")); }; rd.readAsText(f); }
+      function readFile(f) { if (!f) return; $("#epChip", el).innerHTML = '<span class="ep-filechip">' + esc(f.name) + "</span>"; var rd = new FileReader(); rd.onload = function () { ingest(String(rd.result || "")); }; rd.readAsText(f); }
       drop.addEventListener("click", function () { file.click(); });
       drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("drag"); });
       drop.addEventListener("dragleave", function () { drop.classList.remove("drag"); });
@@ -14704,31 +14704,31 @@
 
   var EP_STYLE =
     ".ep-wrap{max-width:1120px}" +
-    ".ep-hero{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:16px;padding:20px 22px;margin-bottom:14px;background:linear-gradient(135deg,rgba(124,92,255,.16),rgba(77,208,255,.05));box-shadow:var(--shadow);display:flex;gap:20px;align-items:center;flex-wrap:wrap}" +
+    ".ep-hero{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:16px;padding:20px 22px;margin-bottom:14px;background:linear-gradient(135deg,var(--brand-soft),var(--info-bg));box-shadow:var(--shadow);display:flex;gap:20px;align-items:center;flex-wrap:wrap}" +
     ".ep-hero-l{flex:1;min-width:260px}.ep-hero-t{font-size:24px;font-weight:800;letter-spacing:-.5px;display:flex;align-items:center;gap:10px}" +
-    ".ep-tof{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--brand,#7c5cff);background:rgba(124,92,255,.14);border:1px solid rgba(124,92,255,.3);padding:3px 8px;border-radius:999px}" +
+    ".ep-tof{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--brand,var(--brand));background:var(--brand-soft);border:1px solid color-mix(in srgb, var(--brand) 40%, transparent);padding:3px 8px;border-radius:999px}" +
     ".ep-hero-d{font-size:13px;color:var(--text-muted);line-height:1.55;margin-top:7px;max-width:820px}" +
     ".ep-ready{display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid var(--border);white-space:nowrap}" +
-    ".ep-muted{color:var(--text-dim)}.ep-ok{color:var(--accent-green,#38e0a6)}.ep-ready.ep-ok{background:rgba(56,224,166,.12);border-color:rgba(56,224,166,.4)}" +
-    ".ep-warn{color:var(--accent-amber,#ffc24d)}.ep-ready.ep-warn{background:rgba(255,194,77,.12);border-color:rgba(255,194,77,.4)}" +
+    ".ep-muted{color:var(--text-dim)}.ep-ok{color:var(--accent-green,var(--ok))}.ep-ready.ep-ok{background:var(--ok-bg);border-color:color-mix(in srgb, var(--ok) 40%, transparent)}" +
+    ".ep-warn{color:var(--accent-amber,var(--warn))}.ep-ready.ep-warn{background:var(--warn-bg);border-color:color-mix(in srgb, var(--warn) 40%, transparent)}" +
     ".ep-tabs{display:flex;gap:8px;margin-bottom:16px}" +
     ".ep-tab{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}" +
-    ".ep-tab:hover{border-color:var(--brand,#7c5cff)}.ep-tab.active{background:var(--brand,#7c5cff);color:#fff;border-color:var(--brand,#7c5cff)}" +
-    ".ep-tabn{font-size:11px;font-weight:700;background:rgba(255,255,255,.18);border-radius:999px;padding:1px 7px}.ep-tab:not(.active) .ep-tabn{background:var(--bg-soft);color:var(--text-dim)}" +
+    ".ep-tab:hover{border-color:var(--brand,var(--brand))}.ep-tab.active{background:var(--brand,var(--brand));color:#fff;border-color:var(--brand,var(--brand))}" +
+    ".ep-tabn{font-size:11px;font-weight:700;background:var(--border-strong);border-radius:999px;padding:1px 7px}.ep-tab:not(.active) .ep-tabn{background:var(--bg-soft);color:var(--text-dim)}" +
     ".ep-grid{display:grid;grid-template-columns:1.55fr 1fr;gap:14px;margin-bottom:14px}" +
     ".ep-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:var(--shadow)}" +
     ".ep-card-h{font-size:14.5px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px}.ep-card-sub{font-size:11px;font-weight:500;color:var(--text-dim)}" +
-    ".ep-link{font-size:12px;color:var(--brand,#7c5cff);background:none;border:none;cursor:pointer;text-decoration:none;margin-left:auto}" +
+    ".ep-link{font-size:12px;color:var(--brand,var(--brand));background:none;border:none;cursor:pointer;text-decoration:none;margin-left:auto}" +
     ".ep-lbl{display:block;font-size:11.5px;font-weight:600;color:var(--text-muted);margin:10px 0 5px}" +
-    ".ep-in{width:100%;background:var(--bg-soft);border:1px solid var(--border);border-radius:9px;color:var(--text);padding:9px 11px;font-size:13px}.ep-in:focus{outline:none;border-color:var(--brand,#7c5cff)}" +
+    ".ep-in{width:100%;background:var(--bg-soft);border:1px solid var(--border);border-radius:9px;color:var(--text);padding:9px 11px;font-size:13px}.ep-in:focus{outline:none;border-color:var(--brand,var(--brand))}" +
     ".ep-inrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ep-inrow label{font-size:11.5px;font-weight:600;color:var(--text-muted);display:block}.ep-inrow .ep-in{margin-top:5px}" +
-    ".ep-ta{width:100%;min-height:170px;background:var(--bg-soft);border:1px solid var(--border);border-radius:9px;color:var(--text);padding:11px;font-size:13px;line-height:1.55;resize:vertical;font-family:inherit}.ep-ta:focus{outline:none;border-color:var(--brand,#7c5cff)}" +
+    ".ep-ta{width:100%;min-height:170px;background:var(--bg-soft);border:1px solid var(--border);border-radius:9px;color:var(--text);padding:11px;font-size:13px;line-height:1.55;resize:vertical;font-family:inherit}.ep-ta:focus{outline:none;border-color:var(--brand,var(--brand))}" +
     ".ep-fields{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}" +
-    ".ep-fchip{font-size:11px;font-weight:600;padding:4px 9px;border-radius:999px;background:rgba(124,92,255,.1);color:var(--brand,#7c5cff);border:1px solid rgba(124,92,255,.28);cursor:pointer}.ep-fchip:hover{background:rgba(124,92,255,.2)}" +
-    ".ep-fchip-v{background:rgba(56,224,166,.12);color:var(--accent-green,#38e0a6);border-color:rgba(56,224,166,.3)}.ep-fchip-add{background:var(--bg-soft);color:var(--text-muted);border-color:var(--border)}" +
-    ".ep-vsub{font-size:12px;color:var(--text-muted);line-height:1.5;margin:0 0 10px}.ep-vnote{font-size:12px;color:var(--text-muted);padding:8px 0}.ep-vnote a{color:var(--brand,#7c5cff)}" +
+    ".ep-fchip{font-size:11px;font-weight:600;padding:4px 9px;border-radius:999px;background:color-mix(in srgb, var(--brand) 40%, transparent);color:var(--brand,var(--brand));border:1px solid var(--brand-soft);cursor:pointer}.ep-fchip:hover{background:color-mix(in srgb, var(--brand) 40%, transparent)}" +
+    ".ep-fchip-v{background:var(--ok-bg);color:var(--accent-green,var(--ok));border-color:color-mix(in srgb, var(--ok) 40%, transparent)}.ep-fchip-add{background:var(--bg-soft);color:var(--text-muted);border-color:var(--border)}" +
+    ".ep-vsub{font-size:12px;color:var(--text-muted);line-height:1.5;margin:0 0 10px}.ep-vnote{font-size:12px;color:var(--text-muted);padding:8px 0}.ep-vnote a{color:var(--brand,var(--brand))}" +
     ".ep-vstat{display:flex;gap:10px;margin:10px 0;font-size:11.5px;color:var(--text-dim)}.ep-vstat span{background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;padding:5px 9px}" +
-    ".ep-genstat{font-size:12px;color:var(--text-muted);margin-top:8px;min-height:16px}.ep-genstat .ep-ok{color:var(--accent-green,#38e0a6)}" +
+    ".ep-genstat{font-size:12px;color:var(--text-muted);margin-top:8px;min-height:16px}.ep-genstat .ep-ok{color:var(--accent-green,var(--ok))}" +
     ".ep-critlist{list-style:none;margin:0;padding:0;font-size:12.5px;color:var(--text-muted);line-height:1.85}.ep-critlist b{color:var(--text)}" +
     ".ep-critedit{display:grid;grid-template-columns:1fr 1fr;gap:9px}" +
     ".ep-clbl{font-size:11.5px;font-weight:600;color:var(--text-muted);display:flex;flex-direction:column;gap:4px}.ep-clbl-full{grid-column:1/-1}" +
@@ -14737,40 +14737,40 @@
     ".ep-critfoot{grid-column:1/-1;margin-top:4px}" +
     ".ep-batch{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}" +
     ".ep-viewtog{display:flex;align-items:center;gap:6px;margin-top:14px;border-top:1px solid var(--border);padding-top:12px}.ep-vlbl{font-size:11.5px;color:var(--text-dim);font-weight:600;margin-right:2px}" +
-    ".ep-vbtn{font-size:12px;font-weight:600;padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-soft);color:var(--text-muted);cursor:pointer}.ep-vbtn.active{background:var(--brand,#7c5cff);color:#fff;border-color:var(--brand,#7c5cff)}" +
+    ".ep-vbtn{font-size:12px;font-weight:600;padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-soft);color:var(--text-muted);cursor:pointer}.ep-vbtn.active{background:var(--brand,var(--brand));color:#fff;border-color:var(--brand,var(--brand))}" +
     ".ep-summary{display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap}" +
     ".ep-tile{flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 16px}" +
     ".ep-tile b{display:block;font-size:24px;font-weight:800;line-height:1}.ep-tile span{font-size:10.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em}" +
-    ".ep-tile.ok b{color:var(--accent-green,#38e0a6)}.ep-tile.accent b{color:var(--brand,#7c5cff)}.ep-tile.warn b{color:var(--accent-amber,#ffc24d)}" +
+    ".ep-tile.ok b{color:var(--accent-green,var(--ok))}.ep-tile.accent b{color:var(--brand,var(--brand))}.ep-tile.warn b{color:var(--accent-amber,var(--warn))}" +
     ".ep-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px}" +
     ".ep-mail{border:1px solid var(--border);border-radius:14px;background:var(--surface);overflow:hidden;box-shadow:0 8px 24px -18px rgba(0,0,0,.5);border-left:3px solid var(--border)}" +
-    ".ep-mail.ep-okstate{border-left-color:var(--accent-green,#38e0a6)}.ep-mail.ep-block{border-left-color:var(--accent-amber,#ffc24d)}.ep-mail.ep-appr{border-left-color:var(--brand,#7c5cff)}.ep-mail.ep-rej{border-left-color:var(--accent-red,#ff6b6b);opacity:.6}" +
+    ".ep-mail.ep-okstate{border-left-color:var(--accent-green,var(--ok))}.ep-mail.ep-block{border-left-color:var(--accent-amber,var(--warn))}.ep-mail.ep-appr{border-left-color:var(--brand,var(--brand))}.ep-mail.ep-rej{border-left-color:var(--accent-red,var(--danger));opacity:.6}" +
     ".ep-mail-head{display:flex;align-items:center;gap:10px;padding:12px 14px}" +
-    ".ep-mail-head .avatar{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#0a0a12;flex:none}" +
+    ".ep-mail-head .avatar{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--bg);flex:none}" +
     ".ep-mail-who{flex:1;min-width:0}.ep-mail-who b{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ep-mail-src{font-size:11px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}" +
-    ".ep-aiscore{font-size:13px;font-weight:800;padding:4px 9px;border-radius:9px;flex:none}.ep-aiscore.ep-ai-pass{background:rgba(56,224,166,.14);color:var(--accent-green,#38e0a6)}.ep-aiscore.ep-ai-fail{background:rgba(255,194,77,.14);color:var(--accent-amber,#ffc24d)}" +
+    ".ep-aiscore{font-size:13px;font-weight:800;padding:4px 9px;border-radius:9px;flex:none}.ep-aiscore.ep-ai-pass{background:var(--ok-bg);color:var(--accent-green,var(--ok))}.ep-aiscore.ep-ai-fail{background:var(--warn-bg);color:var(--accent-amber,var(--warn))}" +
     ".ep-mail-win{margin:0 14px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg-soft)}" +
-    ".ep-mail-bar{display:flex;gap:5px;padding:7px 11px;border-bottom:1px solid var(--border);background:var(--surface-2,#16161f)}.ep-mail-bar i{width:9px;height:9px;border-radius:50%;background:var(--border-strong,#3a3a48)}" +
+    ".ep-mail-bar{display:flex;gap:5px;padding:7px 11px;border-bottom:1px solid var(--border);background:var(--surface-2,var(--surface))}.ep-mail-bar i{width:9px;height:9px;border-radius:50%;background:var(--border-strong,#3a3a48)}" +
     ".ep-mail-body{padding:12px 14px}" +
     ".ep-subj{font-size:13px;font-weight:600;margin-bottom:9px;padding-bottom:9px;border-bottom:1px dashed var(--border);color:var(--text)}.ep-subj-l{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim);font-weight:700;display:block;margin-bottom:3px}" +
     ".ep-bodytxt{font-size:13px;line-height:1.6;white-space:pre-wrap;color:var(--text)}" +
-    ".ep-ph{border-radius:4px;padding:0 3px}.ep-bodytxt .ep-ph,.ep-subj .ep-ph{background:rgba(124,92,255,.16);color:var(--brand,#7c5cff);font-weight:600}" +
-    ".ep-ph-ok{background:transparent !important;color:inherit !important;font-weight:600}.ep-ph-miss{background:rgba(255,107,107,.16) !important;color:var(--accent-red,#ff6b6b) !important;font-weight:700}" +
+    ".ep-ph{border-radius:4px;padding:0 3px}.ep-bodytxt .ep-ph,.ep-subj .ep-ph{background:var(--brand-soft);color:var(--brand,var(--brand));font-weight:600}" +
+    ".ep-ph-ok{background:transparent !important;color:inherit !important;font-weight:600}.ep-ph-miss{background:var(--danger-bg) !important;color:var(--accent-red,var(--danger)) !important;font-weight:700}" +
     /* inline Pitchlane-style video thumbnail */
     ".ep-video{display:block;white-space:normal;margin:10px 0;max-width:340px}" +
     ".ep-video-thumb{position:relative;display:block;aspect-ratio:16/9;border-radius:10px;overflow:hidden;border:1px solid var(--border);background:#0d1320 center/cover no-repeat;background-image:linear-gradient(135deg,#1a1430,#0a1622)}" +
     ".ep-video-thumb.has-bg{background-image:none}.ep-video-thumb.has-bg::after{content:'';position:absolute;inset:0;background:rgba(5,8,16,.18)}" +
-    ".ep-video-skeleton{position:absolute;inset:0;display:flex;align-items:flex-end;gap:6px;padding:18px}.ep-video-skeleton i{flex:1;background:rgba(255,255,255,.14);border-radius:3px}.ep-video-skeleton i:nth-child(1){height:38%}.ep-video-skeleton i:nth-child(2){height:62%}.ep-video-skeleton i:nth-child(3){height:48%}" +
-    ".ep-video-bubble{position:absolute;right:12px;bottom:12px;width:46px;height:46px;border-radius:50%;background:rgba(124,92,255,.9);border:2px solid #fff;display:grid;place-items:center;font-size:20px;z-index:2;box-shadow:0 4px 12px rgba(0,0,0,.4)}" +
+    ".ep-video-skeleton{position:absolute;inset:0;display:flex;align-items:flex-end;gap:6px;padding:18px}.ep-video-skeleton i{flex:1;background:var(--border-strong);border-radius:3px}.ep-video-skeleton i:nth-child(1){height:38%}.ep-video-skeleton i:nth-child(2){height:62%}.ep-video-skeleton i:nth-child(3){height:48%}" +
+    ".ep-video-bubble{position:absolute;right:12px;bottom:12px;width:46px;height:46px;border-radius:50%;background:color-mix(in srgb, var(--brand) 40%, transparent);border:2px solid #fff;display:grid;place-items:center;font-size:20px;z-index:2;box-shadow:0 4px 12px rgba(0,0,0,.4)}" +
     ".ep-video-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:54px;height:54px;border-radius:50%;background:rgba(255,255,255,.92);color:#1a1430;display:grid;place-items:center;font-size:20px;padding-left:4px;z-index:2;box-shadow:0 4px 16px rgba(0,0,0,.35)}" +
     ".ep-video-cap{display:block;font-size:11.5px;color:var(--text-dim);margin-top:6px}" +
-    ".ep-video-ready{color:var(--accent-green,#38e0a6);font-weight:600}.ep-video-pending{color:var(--accent-amber,#ffc24d)}.ep-video-need{color:var(--accent-red,#ff6b6b)}" +
+    ".ep-video-ready{color:var(--accent-green,var(--ok));font-weight:600}.ep-video-pending{color:var(--accent-amber,var(--warn))}.ep-video-need{color:var(--accent-red,var(--danger))}" +
     ".ep-mail-foot{padding:12px 14px}" +
     ".ep-checks{list-style:none;margin:0 0 10px;padding:0;font-size:11.5px;line-height:1.7}.ep-checks li{display:flex;align-items:center;gap:6px;color:var(--text-muted)}.ep-ck{font-weight:800;width:14px;flex:none;text-align:center}" +
-    ".ep-checks .ep-ok .ep-ck{color:var(--accent-green,#38e0a6)}.ep-checks .ep-bad .ep-ck{color:var(--accent-red,#ff6b6b)}.ep-checks .ep-warn .ep-ck{color:var(--accent-amber,#ffc24d)}" +
+    ".ep-checks .ep-ok .ep-ck{color:var(--accent-green,var(--ok))}.ep-checks .ep-bad .ep-ck{color:var(--accent-red,var(--danger))}.ep-checks .ep-warn .ep-ck{color:var(--accent-amber,var(--warn))}" +
     ".ep-ckd{margin-left:auto;font-size:10.5px;color:var(--text-dim);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50%}" +
-    ".ep-ai{border-radius:9px;padding:9px 11px;margin-bottom:11px;border:1px solid var(--border)}.ep-ai-pass{background:rgba(56,224,166,.07);border-color:rgba(56,224,166,.28)}.ep-ai-fail{background:rgba(255,194,77,.07);border-color:rgba(255,194,77,.28)}" +
-    ".ep-ai-h{font-size:11.5px;font-weight:700;margin-bottom:6px}.ep-ai-pass .ep-ai-h{color:var(--accent-green,#38e0a6)}.ep-ai-fail .ep-ai-h{color:var(--accent-amber,#ffc24d)}" +
+    ".ep-ai{border-radius:9px;padding:9px 11px;margin-bottom:11px;border:1px solid var(--border)}.ep-ai-pass{background:var(--ok-bg);border-color:var(--ok-bg)}.ep-ai-fail{background:var(--warn-bg);border-color:var(--warn-bg)}" +
+    ".ep-ai-h{font-size:11.5px;font-weight:700;margin-bottom:6px}.ep-ai-pass .ep-ai-h{color:var(--accent-green,var(--ok))}.ep-ai-fail .ep-ai-h{color:var(--accent-amber,var(--warn))}" +
     ".ep-aireasons{display:flex;flex-wrap:wrap;gap:5px}.ep-aireason{font-size:10.5px;padding:3px 8px;border-radius:999px;background:var(--bg-soft);color:var(--text-muted);border:1px solid var(--border)}" +
     ".ep-actions{display:flex;gap:7px}.ep-actions .btn{flex:1}.ep-actions .ep-rm{flex:0 0 auto}" +
     ".ep-pager{display:flex;align-items:center;justify-content:center;gap:14px;margin:18px 0}.ep-pageinfo{font-size:12.5px;color:var(--text-muted)}" +
@@ -14778,15 +14778,15 @@
     ".ep-deploy-l{font-size:13px;color:var(--text-muted)}.ep-deploy-l b{color:var(--text);font-size:15px}" +
     ".ep-deploy-r{display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap}" +
     ".ep-seq{font-size:11.5px;font-weight:600;color:var(--text-muted);display:flex;align-items:center;gap:7px}.ep-seq .ep-in{width:auto;min-width:170px}" +
-    ".ep-empty{text-align:center;padding:54px 20px;border:1px dashed var(--border-strong);border-radius:16px;background:var(--bg-soft)}.ep-empty-ic{font-size:42px}.ep-empty-t{font-size:16px;font-weight:700;margin-top:10px}.ep-empty-s{font-size:13px;color:var(--text-muted);margin-top:6px}.ep-empty-s a{color:var(--brand,#7c5cff)}" +
-    ".ep-drop{border:2px dashed var(--border-strong);border-radius:14px;padding:36px 20px;text-align:center;cursor:pointer;transition:all .18s;background:var(--bg-soft)}.ep-drop:hover{border-color:var(--brand,#7c5cff)}.ep-drop.drag{border-color:var(--brand,#7c5cff);background:rgba(124,92,255,.1)}" +
+    ".ep-empty{text-align:center;padding:54px 20px;border:1px dashed var(--border-strong);border-radius:16px;background:var(--bg-soft)}.ep-empty-ic{font-size:42px}.ep-empty-t{font-size:16px;font-weight:700;margin-top:10px}.ep-empty-s{font-size:13px;color:var(--text-muted);margin-top:6px}.ep-empty-s a{color:var(--brand,var(--brand))}" +
+    ".ep-drop{border:2px dashed var(--border-strong);border-radius:14px;padding:36px 20px;text-align:center;cursor:pointer;transition:all .18s;background:var(--bg-soft)}.ep-drop:hover{border-color:var(--brand,var(--brand))}.ep-drop.drag{border-color:var(--brand,var(--brand));background:color-mix(in srgb, var(--brand) 40%, transparent)}" +
     ".ep-drop-ic{font-size:36px}.ep-drop-t{font-weight:700;font-size:15px;margin-top:8px}.ep-drop-s{font-size:12.5px;color:var(--text-dim);margin-top:3px}" +
-    ".ep-filechip{display:inline-flex;gap:8px;margin-top:12px;padding:7px 13px;border-radius:9px;background:rgba(56,224,166,.12);color:var(--accent-green,#38e0a6);font-size:12.5px;font-weight:600;border:1px solid rgba(56,224,166,.35)}" +
+    ".ep-filechip{display:inline-flex;gap:8px;margin-top:12px;padding:7px 13px;border-radius:9px;background:var(--ok-bg);color:var(--accent-green,var(--ok));font-size:12.5px;font-weight:600;border:1px solid color-mix(in srgb, var(--ok) 40%, transparent)}" +
     ".ep-paste-tog{display:inline-block;margin-top:12px;font-size:12.5px;color:var(--text-muted);cursor:pointer}" +
     ".ep-prev-h{font-size:12.5px;color:var(--text-muted);margin:14px 0 8px}.ep-prev-h b{color:var(--text)}" +
     ".ep-prevtable{overflow-x:auto;border:1px solid var(--border);border-radius:10px}.ep-prevtable table{width:100%;border-collapse:collapse;font-size:12px}.ep-prevtable th,.ep-prevtable td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--border);white-space:nowrap}.ep-prevtable th{color:var(--text-dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}.ep-prevtable tr:last-child td{border-bottom:none}" +
     ".ep-iactions{margin-top:16px;display:flex;gap:10px;align-items:center}" +
-    ".ep-colmgr-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}.ep-colrow{display:flex;align-items:center;gap:10px;padding:8px 11px;border:1px solid var(--border);border-radius:9px;background:var(--bg-soft);font-size:12.5px}.ep-colrow b{color:var(--brand,#7c5cff);font-family:var(--mono)}.ep-coltype{color:var(--text-dim);margin-left:auto}" +
+    ".ep-colmgr-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}.ep-colrow{display:flex;align-items:center;gap:10px;padding:8px 11px;border:1px solid var(--border);border-radius:9px;background:var(--bg-soft);font-size:12.5px}.ep-colrow b{color:var(--brand,var(--brand));font-family:var(--mono)}.ep-coltype{color:var(--text-dim);margin-left:auto}" +
     ".ep-colmgr-add{display:grid;grid-template-columns:1.4fr 1fr auto;gap:8px}" +
     "@media(max-width:820px){.ep-grid{grid-template-columns:1fr}.ep-critedit{grid-template-columns:1fr}.ep-deploy-r{margin-left:0;width:100%}.ep-colmgr-add{grid-template-columns:1fr}}";
 
@@ -14823,7 +14823,7 @@
         { n: 1, title: "Infrastructure pre-flight", time: "one-time", done: "Overview capacity strip is green", items: ["≥1 warmed LinkedIn account", "≥5 warmed domains", "Job Search signal feed", "Enrichment waterfall", "ATS connected", "TalTxt + Telnyx 10DLC"] },
         { n: 2, title: "Create campaign shell", time: "5 min", done: "Draft with ICP + signals", items: ["Name + one-line goal", "ICP definition", "≥1 signal enabled"] },
         { n: 3, title: "Search & discovery", time: "5 min", done: "Preview shows the right people", items: ["Role hiring for", "Persona title", "Decision-maker target", "Live query preview"] },
-        { n: 4, title: "Connect channels", time: "3 min", done: "All channels show ✓", items: ["Instantly campaign id", "LinkedIn account", "TalTxt toggle", "Loxo list id"] },
+        { n: 4, title: "Connect channels", time: "3 min", done: "All channels show connected", items: ["Instantly campaign id", "LinkedIn account", "TalTxt toggle", "Loxo list id"] },
         { n: 5, title: "Sequence methodology", time: "3 min", done: "Methodology + assets locked", items: ["Methodology", "Voice-note threshold (80)", "LLM personalization", "Content assets"] },
         { n: 6, title: "A/B variants", time: "2 min", done: "2+ variants, weights = 100%", items: ["≥2 variants", "Traffic weights 50/50", "ONE variable differs"] },
         { n: 7, title: "Soft launch & activate", time: "5 min", done: "Status = Active, first 25 live", items: ["Daily cap = 25", "Build prospect list", "Activate campaign", "Day-1 approval review"] }
@@ -14901,7 +14901,7 @@
         { concept: "BD prospect", object: "Person + list", how: "POST /people/update_by_email" },
         { concept: "Activity (any touch)", object: "person_event", how: "POST /people/{id}/person_events" },
         { concept: "BD opportunity", object: "Deal", how: "one per pitch → Job when signed" },
-        { concept: "Candidate in mandate", object: "Person↔Job", how: "POST /jobs/{id}/apply" },
+        { concept: "Candidate in mandate", object: "Person → Job", how: "POST /jobs/{id}/apply" },
         { concept: "Mandate", object: "Job", how: "job_type_id, company_id" },
         { concept: "Placement", object: "Placement", how: "triggers billing" }
       ]

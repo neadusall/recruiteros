@@ -28,7 +28,7 @@
   const CHANNELS = {
     linkedin: {
       label: 'LinkedIn',
-      icon: '💼',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:1em;height:1em;vertical-align:-0.125em"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>',
       actions: {
         view:    { label: 'View profile',        needs: [],            counts: 'view'    },
         follow:  { label: 'Follow',              needs: [],            counts: 'follow'  },
@@ -41,7 +41,7 @@
     },
     email: {
       label: 'Email',
-      icon: '✉️',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:1em;height:1em;vertical-align:-0.125em"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
       actions: {
         email: { label: 'Send email', needs: ['subject', 'body'], counts: 'email', tracksOpen: true },
       },

@@ -1,17 +1,13 @@
-/* RecruitersOS, landing interactions + FX */
+/* RecruitersOS, landing interactions.
+   The FX era (scroll-progress bar, fxCanvas particles, aurora) is retired:
+   those elements no longer exist in the markup, so nothing here creates or
+   animates them. Every block below no-ops safely when its element is absent. */
 (function () {
-  /* ---------- Scroll progress bar ---------- */
-  const progress = document.createElement('div');
-  progress.className = 'scroll-progress';
-  document.body.appendChild(progress);
-
   /* ---------- Sticky nav shadow on scroll ---------- */
   const navEl = document.querySelector('.nav');
   function onScroll() {
     const st = window.scrollY || document.documentElement.scrollTop;
     if (navEl) navEl.classList.toggle('scrolled', st > 12);
-    const docH = document.documentElement.scrollHeight - window.innerHeight;
-    progress.style.width = (docH > 0 ? (st / docH) * 100 : 0) + '%';
   }
   window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
@@ -103,72 +99,4 @@
       window.location.href = '/command' + (q ? '?q=' + q : '');
     });
   }
-
-  /* ---------- Hero particle constellation ---------- */
-  const canvas = document.getElementById('fxCanvas');
-  if (!canvas || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const ctx = canvas.getContext('2d');
-  let w, h, dots, mouse = { x: -999, y: -999 };
-  const COLORS = ['124,92,255', '77,208,255', '255,122,198'];
-
-  function resize() {
-    const r = canvas.getBoundingClientRect();
-    w = canvas.width = r.width * devicePixelRatio;
-    h = canvas.height = r.height * devicePixelRatio;
-    const count = Math.min(90, Math.floor((r.width * r.height) / 14000));
-    dots = Array.from({ length: count }, () => ({
-      x: Math.random() * w,
-      y: Math.random() * h,
-      vx: (Math.random() - 0.5) * 0.25 * devicePixelRatio,
-      vy: (Math.random() - 0.5) * 0.25 * devicePixelRatio,
-      r: (Math.random() * 1.6 + 0.6) * devicePixelRatio,
-      c: COLORS[(Math.random() * COLORS.length) | 0],
-    }));
-  }
-
-  const section = canvas.closest('.hero');
-  section.addEventListener('mousemove', (e) => {
-    const r = canvas.getBoundingClientRect();
-    mouse.x = (e.clientX - r.left) * devicePixelRatio;
-    mouse.y = (e.clientY - r.top) * devicePixelRatio;
-  });
-  section.addEventListener('mouseleave', () => { mouse.x = mouse.y = -9999; });
-
-  function frame() {
-    ctx.clearRect(0, 0, w, h);
-    const linkDist = 130 * devicePixelRatio;
-    for (let i = 0; i < dots.length; i++) {
-      const d = dots[i];
-      d.x += d.vx; d.y += d.vy;
-      if (d.x < 0 || d.x > w) d.vx *= -1;
-      if (d.y < 0 || d.y > h) d.vy *= -1;
-
-      // gentle pull toward mouse
-      const mdx = mouse.x - d.x, mdy = mouse.y - d.y;
-      const md = Math.hypot(mdx, mdy);
-      if (md < 160 * devicePixelRatio) { d.x += mdx * 0.012; d.y += mdy * 0.012; }
-
-      ctx.beginPath();
-      ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(' + d.c + ',0.9)';
-      ctx.fill();
-
-      for (let j = i + 1; j < dots.length; j++) {
-        const o = dots[j];
-        const dist = Math.hypot(d.x - o.x, d.y - o.y);
-        if (dist < linkDist) {
-          ctx.beginPath();
-          ctx.moveTo(d.x, d.y); ctx.lineTo(o.x, o.y);
-          ctx.strokeStyle = 'rgba(' + d.c + ',' + (0.16 * (1 - dist / linkDist)) + ')';
-          ctx.lineWidth = devicePixelRatio;
-          ctx.stroke();
-        }
-      }
-    }
-    requestAnimationFrame(frame);
-  }
-
-  resize();
-  window.addEventListener('resize', resize);
-  frame();
 })();

@@ -32,6 +32,39 @@
   var NODE_W = 244, ROW_H = 132, WORLD = 6000;
   var SVGNS = "http://www.w3.org/2000/svg";
 
+  /* ---- inline stroke icons (replace emoji glyphs) ---- */
+  function icn(p) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:1em;height:1em;vertical-align:-0.125em">' + p + '</svg>'; }
+  var ICON = {
+    eye: icn('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'),
+    userPlus: icn('<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="17" y1="11" x2="23" y2="11"/>'),
+    userCheck: icn('<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/>'),
+    thumbsUp: icn('<path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>'),
+    msgCircle: icn('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'),
+    msgSquare: icn('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
+    mic: icn('<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>'),
+    send: icn('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>'),
+    mail: icn('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>'),
+    reply: icn('<polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>'),
+    smartphone: icn('<rect x="7" y="2" width="10" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>'),
+    image: icn('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>'),
+    phone: icn('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>'),
+    voicemail: icn('<circle cx="5.5" cy="11.5" r="3.5"/><circle cx="18.5" cy="11.5" r="3.5"/><line x1="5.5" y1="15" x2="18.5" y2="15"/>'),
+    clock: icn('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>'),
+    branch: icn('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>'),
+    shuffle: icn('<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/>'),
+    clipboard: icn('<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/>'),
+    users: icn('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
+    zap: icn('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'),
+    database: icn('<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>'),
+    target: icn('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>'),
+    link: icn('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'),
+    building: icn('<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M9 21v-4h6v4"/><path d="M8 7h.01M12 7h.01M16 7h.01M8 11h.01M12 11h.01M16 11h.01"/>'),
+    user: icn('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
+    book: icn('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>'),
+    layers: icn('<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>'),
+    trash: icn('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
+  };
+
   /* ---------------- block catalog --------------------------------------- */
   var FIELDS = {
     note:    { key: "body", type: "textarea", label: "Note (optional)", placeholder: "Hi {{firstName}}, saw {{company}} is hiring...", vars: true },
@@ -44,37 +77,37 @@
   // channel: linkedin | email | sms | voice | logic
   var CATALOG = [
     { group: "LinkedIn", channel: "linkedin", blocks: [
-      { key: "li_view",    label: "Profile view",        ic: "👁️", desc: "Passive warmup", cfg: [] },
-      { key: "li_follow",  label: "Follow",              ic: "➕", desc: "Low-commitment touch", cfg: [] },
-      { key: "li_connect", label: "Connection request",  ic: "🤝", desc: "Connect, with or without a note", cfg: ["withNote", "note"] },
-      { key: "li_like",    label: "Like a post",         ic: "👍", desc: "Engage their latest post", cfg: [] },
-      { key: "li_comment", label: "Comment on post",     ic: "💭", desc: "Manual, signals attention", cfg: ["message"] },
-      { key: "li_message", label: "LinkedIn message",    ic: "💬", desc: "Direct message (needs connection)", cfg: ["message"] },
-      { key: "li_voice",   label: "LinkedIn voice note", ic: "🎙️", desc: "Recorded voice DM, highest-converting", cfg: ["script"] },
-      { key: "li_inmail",  label: "InMail",              ic: "📨", desc: "Paid message, no connection needed", cfg: ["subject", "message"] },
+      { key: "li_view",    label: "Profile view",        ic: ICON.eye, desc: "Passive warmup", cfg: [] },
+      { key: "li_follow",  label: "Follow",              ic: ICON.userPlus, desc: "Low-commitment touch", cfg: [] },
+      { key: "li_connect", label: "Connection request",  ic: ICON.userCheck, desc: "Connect, with or without a note", cfg: ["withNote", "note"] },
+      { key: "li_like",    label: "Like a post",         ic: ICON.thumbsUp, desc: "Engage their latest post", cfg: [] },
+      { key: "li_comment", label: "Comment on post",     ic: ICON.msgCircle, desc: "Manual, signals attention", cfg: ["message"] },
+      { key: "li_message", label: "LinkedIn message",    ic: ICON.msgSquare, desc: "Direct message (needs connection)", cfg: ["message"] },
+      { key: "li_voice",   label: "LinkedIn voice note", ic: ICON.mic, desc: "Recorded voice DM, highest-converting", cfg: ["script"] },
+      { key: "li_inmail",  label: "InMail",              ic: ICON.send, desc: "Paid message, no connection needed", cfg: ["subject", "message"] },
     ] },
     { group: "Email", channel: "email", blocks: [
-      { key: "em_cold",     label: "Cold email",     ic: "✉️", desc: "Signal-anchored opener", cfg: ["subject", "message"] },
-      { key: "em_followup", label: "Follow-up email", ic: "↩️", desc: "Reply in the same thread", cfg: ["subject", "message"] },
+      { key: "em_cold",     label: "Cold email",     ic: ICON.mail, desc: "Signal-anchored opener", cfg: ["subject", "message"] },
+      { key: "em_followup", label: "Follow-up email", ic: ICON.reply, desc: "Reply in the same thread", cfg: ["subject", "message"] },
     ] },
     { group: "Text / SMS", channel: "sms", blocks: [
-      { key: "sms_send", label: "Send text (SMS)", ic: "📱", desc: "Individual text via TalTxt / Telnyx", cfg: ["sms"], testSend: true },
-      { key: "sms_mms",  label: "Send MMS",        ic: "🖼️", desc: "Text with an image attachment", cfg: ["sms"], testSend: true },
-      { key: "wa_send",  label: "WhatsApp message", ic: "🟢", desc: "1:1 WhatsApp message", cfg: ["message"] },
+      { key: "sms_send", label: "Send text (SMS)", ic: ICON.smartphone, desc: "Individual text via TalTxt / Telnyx", cfg: ["sms"], testSend: true },
+      { key: "sms_mms",  label: "Send MMS",        ic: ICON.image, desc: "Text with an image attachment", cfg: ["sms"], testSend: true },
+      { key: "wa_send",  label: "WhatsApp message", ic: ICON.msgCircle, desc: "1:1 WhatsApp message", cfg: ["message"] },
     ] },
     { group: "Voice", channel: "voice", blocks: [
-      { key: "vo_call",      label: "Phone call",     ic: "📞", desc: "Telnyx dialer with Premium AMD", cfg: ["script"] },
-      { key: "vo_voicemail", label: "Voice drop", ic: "📭", desc: "Cloned-voice voicemail to a landline/VoIP (Voice Drops): first name + role splice in, mobiles filtered, local-window only", cfg: ["script"] },
+      { key: "vo_call",      label: "Phone call",     ic: ICON.phone, desc: "Telnyx dialer with Premium AMD", cfg: ["script"] },
+      { key: "vo_voicemail", label: "Voice drop", ic: ICON.voicemail, desc: "Cloned-voice voicemail to a landline/VoIP (Voice Drops): first name + role splice in, mobiles filtered, local-window only", cfg: ["script"] },
     ] },
     { group: "Logic & flow", channel: "logic", blocks: [
-      { key: "lg_delay",  label: "Wait / delay",   ic: "⏱️", desc: "Pause before the next step", cfg: ["delayOnly"] },
-      { key: "lg_branch", label: "If / branch",    ic: "🔀", desc: "Split on replied, accepted, opened...", cfg: ["condition"] },
-      { key: "lg_ab",     label: "A/B split",      ic: "⚗️", desc: "Test two variants of the next touch", cfg: ["abtest"] },
-      { key: "lg_task",   label: "Manual task",    ic: "📋", desc: "A to-do for the recruiter", cfg: ["message"] },
-      { key: "lg_assign", label: "Assign to",      ic: "🧑‍💼", desc: "Route to a teammate or account", cfg: ["assignee"] },
-      { key: "lg_enrich", label: "Enrich contact", ic: "⚡", desc: "Find email / phone (waterfall)", cfg: [] },
-      { key: "lg_crm",    label: "Update ATS/CRM", ic: "🗂️", desc: "Write a stage / note to the ATS", cfg: ["message"] },
-      { key: "lg_goal",   label: "Goal reached",   ic: "🎯", desc: "Exit the sequence as a win", cfg: [] },
+      { key: "lg_delay",  label: "Wait / delay",   ic: ICON.clock, desc: "Pause before the next step", cfg: ["delayOnly"] },
+      { key: "lg_branch", label: "If / branch",    ic: ICON.branch, desc: "Split on replied, accepted, opened...", cfg: ["condition"] },
+      { key: "lg_ab",     label: "A/B split",      ic: ICON.shuffle, desc: "Test two variants of the next touch", cfg: ["abtest"] },
+      { key: "lg_task",   label: "Manual task",    ic: ICON.clipboard, desc: "A to-do for the recruiter", cfg: ["message"] },
+      { key: "lg_assign", label: "Assign to",      ic: ICON.users, desc: "Route to a teammate or account", cfg: ["assignee"] },
+      { key: "lg_enrich", label: "Enrich contact", ic: ICON.zap, desc: "Find email / phone (waterfall)", cfg: [] },
+      { key: "lg_crm",    label: "Update ATS/CRM", ic: ICON.database, desc: "Write a stage / note to the ATS", cfg: ["message"] },
+      { key: "lg_goal",   label: "Goal reached",   ic: ICON.target, desc: "Exit the sequence as a win", cfg: [] },
     ] },
   ];
 
@@ -91,10 +124,10 @@
      A sequence authored in Campaigns (one channel, named) maps each of its
      steps to the matching canvas block, so it can be dropped in as a unit. */
   var SEQ_CHANNELS = [
-    { ch: "multi", ic: "🔀", label: "Multi-channel" },
-    { ch: "email", ic: "✉️", label: "Email" },
-    { ch: "linkedin", ic: "🔗", label: "LinkedIn" },
-    { ch: "sms", ic: "📱", label: "SMS / text" },
+    { ch: "multi", ic: ICON.shuffle, label: "Multi-channel" },
+    { ch: "email", ic: ICON.mail, label: "Email" },
+    { ch: "linkedin", ic: ICON.link, label: "LinkedIn" },
+    { ch: "sms", ic: ICON.smartphone, label: "SMS / text" },
   ];
   // Resolve the channel for one step: its own (multi sequences) or the sequence's.
   function stepChannel(step, seqChannel) {
@@ -171,8 +204,8 @@
   function template(opts) {
     var motionToggle = opts.embedded ? "" :
       '<div class="cs-motion">' +
-        '<button class="mt" data-motion="bd">🏢 BD</button>' +
-        '<button class="mt active" data-motion="recruiting">👤 Recruiting</button>' +
+        '<button class="mt" data-motion="bd">BD</button>' +
+        '<button class="mt active" data-motion="recruiting">Recruiting</button>' +
       '</div>';
     return '' +
     '<div class="cs-toolbar">' +
@@ -180,15 +213,15 @@
         '<input data-cs="name" class="cs-name" value="Untitled campaign" spellcheck="false" /></div>' +
       motionToggle +
       '<span data-cs="status" class="cs-status-pill draft">draft</span>' +
-      '<button data-cs="autopilot" class="btn btn-ghost btn-sm" title="Autopilot: run this campaign hands-off — the portal drafts, auto-approves and sends on its own clock (no n8n, no morning approval queue). Replies still pause it.">🤖 Autopilot: off</button>' +
+      '<button data-cs="autopilot" class="btn btn-ghost btn-sm" title="Autopilot: run this campaign hands-off, the portal drafts, auto-approves and sends on its own clock (no n8n, no morning approval queue). Replies still pause it.">Autopilot: off</button>' +
       '<div class="cs-tool-actions">' +
-        '<button class="btn btn-ghost btn-sm cs-addblock-btn" data-cs="addblock">＋ Add block</button>' +
-        '<button class="btn btn-ghost btn-sm" data-cs="full" title="Toggle full screen">⛶ Full screen</button>' +
-        '<button class="btn btn-ghost btn-sm" data-cs="new">＋ New</button>' +
-        '<button class="btn btn-ghost btn-sm" data-cs="library">📚 Library</button>' +
+        '<button class="btn btn-ghost btn-sm cs-addblock-btn" data-cs="addblock">+ Add block</button>' +
+        '<button class="btn btn-ghost btn-sm" data-cs="full" title="Toggle full screen">Full screen</button>' +
+        '<button class="btn btn-ghost btn-sm" data-cs="new">+ New</button>' +
+        '<button class="btn btn-ghost btn-sm" data-cs="library">Library</button>' +
         '<button class="btn btn-ghost btn-sm" data-cs="saveas">Save as</button>' +
-        '<button class="btn btn-ghost btn-sm" data-cs="save">💾 Save</button>' +
-        '<button class="btn btn-primary btn-sm" data-cs="launch">🚀 Activate</button>' +
+        '<button class="btn btn-ghost btn-sm" data-cs="save">Save</button>' +
+        '<button class="btn btn-primary btn-sm" data-cs="launch">Activate</button>' +
       '</div>' +
     '</div>' +
     '<div class="cs-grid" data-cs="grid">' +
@@ -208,8 +241,8 @@
             '<div class="cs-nodes" data-cs="nodes"></div>' +
           '</div>' +
           '<div class="cs-empty-float" data-cs="emptyfloat" hidden>' +
-            '<div class="big">🧩</div><b>Drop a block anywhere on the canvas</b>' +
-            '<p>Drag from the left, or tap a block / use ＋ Add block. Move nodes around freely, then connect them by dragging the dot at the bottom of a card.</p>' +
+            '<div class="big">' + ICON.layers + '</div><b>Drop a block anywhere on the canvas</b>' +
+            '<p>Drag from the left, or tap a block / use + Add block. Move nodes around freely, then connect them by dragging the dot at the bottom of a card.</p>' +
             '<button class="btn btn-ghost btn-sm" data-cs="loadStarter">Use a starter template</button>' +
           '</div>' +
           '<div class="cs-help" data-cs="help">Drag the canvas to pan · scroll to zoom · drag a node’s ● to connect</div>' +
@@ -238,7 +271,7 @@
           '</div>' +
           '<div class="insp-node" data-cs="nodePanel" hidden>' +
             '<h4 class="cs-col-title" style="display:flex;align-items:center;gap:8px">Selected step' +
-              '<button class="s-btn del" data-cs="nodeDel" title="Delete step" style="margin-left:auto">🗑</button></h4>' +
+              '<button class="s-btn del" data-cs="nodeDel" title="Delete step" style="margin-left:auto">' + ICON.trash + '</button></h4>' +
             '<div class="insp-node-title" data-cs="nodeTitle"></div>' +
             '<div data-cs="nodeConfig"></div>' +
           '</div>' +
@@ -337,7 +370,7 @@
 
     function nodeById(u) { for (var i = 0; i < state.nodes.length; i++) if (state.nodes[i].uid === u) return state.nodes[i]; return null; }
     function nodeEl(u) { return nodesHost.querySelector('.cs-node[data-uid="' + u + '"]'); }
-    function barColor(ch) { return { linkedin: "#7c5cff", email: "#4dd0ff", sms: "#38e0a6", voice: "#ffc24d", logic: "#ff7ac6" }[ch] || "#7c5cff"; }
+    function barColor(ch) { return { linkedin: "var(--brand)", email: "var(--info)", sms: "var(--ok)", voice: "var(--warn)", logic: "var(--brand-2)" }[ch] || "var(--brand)"; }
 
     /* ---------- topological order (for touch numbering + legacy steps) ---------- */
     function orderNodes() {
@@ -412,7 +445,7 @@
             '<div class="pal-seq-h"><span class="pb-ic ch-' + c.ch + '">' + c.ic + "</span><b>" + c.label + " sequence</b>" +
               (list.length ? '<span class="pal-seq-grip" title="Drag onto the canvas">⠿</span>' : "") + "</div>" +
             '<div class="pal-seq-pick"><select data-seqsel="' + c.ch + '"' + (list.length ? "" : " disabled") + ">" + opts + "</select>" +
-              '<button class="pal-seq-add" data-seqadd="' + c.ch + '"' + (list.length ? "" : " disabled") + ">＋ Add</button></div>";
+              '<button class="pal-seq-add" data-seqadd="' + c.ch + '"' + (list.length ? "" : " disabled") + ">+ Add</button></div>";
           if (list.length) {
             row.draggable = true;
             row.addEventListener("dragstart", function (e) {
@@ -444,7 +477,7 @@
           item.innerHTML = '<span class="pb-grip" aria-hidden="true">⠿</span>' +
             '<span class="pb-ic ch-' + b.channel + '">' + b.ic + '</span>' +
             '<span class="pb-meta"><b>' + esc(b.label) + '</b><span>' + esc(b.desc) + '</span></span>' +
-            '<span class="pb-add" aria-hidden="true">＋</span>';
+            '<span class="pb-add" aria-hidden="true">+</span>';
           item.addEventListener("dragstart", function (e) { paletteDrag = b.key; item.classList.add("dragging"); e.dataTransfer.effectAllowed = "copy"; try { e.dataTransfer.setData("text/plain", b.key); } catch (x) {} });
           item.addEventListener("dragend", function () { item.classList.remove("dragging"); paletteDrag = null; });
           item.addEventListener("click", function () { addBlock(b.key); });
@@ -545,7 +578,7 @@
             '<div class="node-meta"><b>' + esc(n.label) + '</b><span class="node-sub">' + esc(summarize(n)) + '</span></div>' +
             numHtml +
           '</div>' +
-          '<div class="node-tools"><button class="s-btn dup" title="Duplicate">⧉</button><button class="s-btn del" title="Delete">🗑</button></div>' +
+          '<div class="node-tools"><button class="s-btn dup" title="Duplicate">⧉</button><button class="s-btn del" title="Delete">' + ICON.trash + '</button></div>' +
           '<span class="port port-out" title="Drag to connect"></span>';
         node.querySelector(".node-bar").style.background = barColor(n.channel);
         node.querySelector(".dup").addEventListener("pointerdown", function (e) { e.stopPropagation(); });
@@ -673,7 +706,7 @@
     $("full").addEventListener("click", toggleFull);
     function toggleFull() {
       var on = root.classList.toggle("cs-full");
-      $("full").innerHTML = on ? "⤡ Exit full screen" : "⛶ Full screen";
+      $("full").innerHTML = on ? "Exit full screen" : "Full screen";
       setTimeout(fit, 60);
     }
 
@@ -790,7 +823,7 @@
         chip.addEventListener("click", function () { insertAtCursor(input, "{{" + v + "}}"); fire(); });
         bar.appendChild(chip);
       });
-      var addBtn = el("button", "var-chip add", "＋ Field"); addBtn.type = "button"; addBtn.title = "Create a custom merge field";
+      var addBtn = el("button", "var-chip add", "+ Field"); addBtn.type = "button"; addBtn.title = "Create a custom merge field";
       addBtn.addEventListener("click", function () {
         var name = addCustomField(prompt("Custom field name (letters, numbers, _ ), e.g. teamSize:", ""));
         if (name) { insertAtCursor(input, "{{" + name + "}}"); fire(); renderInspectorNode(); toast("Field {{" + name + "}} added"); }
@@ -804,7 +837,7 @@
       sel.appendChild(new Option("Insert saved text…", ""));
       getSnippets().forEach(function (s, i) { sel.appendChild(new Option(s.name, String(i))); });
       sel.addEventListener("change", function () { if (sel.value === "") return; var s = getSnippets()[+sel.value]; if (s) { insertAtCursor(input, s.text); fire(); } sel.value = ""; });
-      var saveBtn = el("button", "var-chip", "＋ Save snippet"); saveBtn.type = "button"; saveBtn.title = "Save the selected text (or all of it) for reuse anywhere";
+      var saveBtn = el("button", "var-chip", "+ Save snippet"); saveBtn.type = "button"; saveBtn.title = "Save the selected text (or all of it) for reuse anywhere";
       saveBtn.addEventListener("click", function () {
         var sel0 = input.selectionStart, sel1 = input.selectionEnd;
         var text = (typeof sel0 === "number" && sel0 !== sel1) ? input.value.slice(sel0, sel1) : input.value;
@@ -840,7 +873,7 @@
     function hint(t) { return el("div", "cfg-hint", esc(t)); }
     function testSendPanel(step) {
       var p = el("div", "test-send");
-      p.innerHTML = '<b>📲 Send one test text</b><div class="cfg-hint" style="margin-top:3px">Individual SMS via TalTxt / Telnyx. Not a batch blast, one message to one number.</div>';
+      p.innerHTML = '<b>Send one test text</b><div class="cfg-hint" style="margin-top:3px">Individual SMS via TalTxt / Telnyx. Not a batch blast, one message to one number.</div>';
       var row = el("div", "ts-row"); var num = el("input"); num.type = "tel"; num.placeholder = "+1 555 010 0000";
       var btn = el("button", "btn btn-primary btn-sm", "Send test");
       btn.addEventListener("click", function () {
@@ -874,7 +907,7 @@
       $("assignee").value = state.assignee; $("account").value = state.account;
       $("cap").value = state.dailyCap; $("threshold").value = state.voiceThreshold;
       var sp = $("status"); sp.textContent = state.status; sp.className = "cs-status-pill " + state.status;
-      var ap = $("autopilot"); if (ap) { ap.textContent = "🤖 Autopilot: " + (state.autoRun ? "on" : "off"); ap.classList.toggle("btn-primary", !!state.autoRun); ap.classList.toggle("btn-ghost", !state.autoRun); }
+      var ap = $("autopilot"); if (ap) { ap.textContent = "Autopilot: " + (state.autoRun ? "on" : "off"); ap.classList.toggle("btn-primary", !!state.autoRun); ap.classList.toggle("btn-ghost", !state.autoRun); }
       if (!opts.embedded) Array.prototype.forEach.call(root.querySelectorAll(".cs-motion .mt"), function (b) { b.classList.toggle("active", b.dataset.motion === state.motion); });
       renderStats();
     }
@@ -908,11 +941,11 @@
       state.dailyCap = c.dailyCap || 25; state.voiceThreshold = c.voiceThreshold || c.voiceNoteThreshold || 80;
       state.prospectListId = c.prospectListId || ""; state.prospectListName = c.prospectListName || "";
       if (c.nodes && c.nodes.length) {
-        state.nodes = c.nodes.map(function (n) { return { uid: n.uid || uid(), key: n.key, channel: n.channel, label: n.label || (BLOCK[n.key] && BLOCK[n.key].label), ic: n.ic || (BLOCK[n.key] && BLOCK[n.key].ic), cfg: n.cfg || {}, delay: n.delay || 0, x: n.x || 80, y: n.y || 40 }; });
+        state.nodes = c.nodes.map(function (n) { return { uid: n.uid || uid(), key: n.key, channel: n.channel, label: n.label || (BLOCK[n.key] && BLOCK[n.key].label), ic: (BLOCK[n.key] && BLOCK[n.key].ic) || n.ic, cfg: n.cfg || {}, delay: n.delay || 0, x: n.x || 80, y: n.y || 40 }; });
         state.edges = (c.edges || []).map(function (e) { return { id: e.id || uid("e"), from: e.from, to: e.to, label: e.label }; });
       } else if (c.steps && c.steps.length) {
         // migrate an older linear sequence onto the canvas
-        state.nodes = c.steps.map(function (s, i) { return { uid: s.uid || uid(), key: s.key, channel: s.channel, label: s.label, ic: s.ic, cfg: s.cfg || {}, delay: s.delay || 0, x: 80, y: 36 + i * ROW_H }; });
+        state.nodes = c.steps.map(function (s, i) { return { uid: s.uid || uid(), key: s.key, channel: s.channel, label: s.label, ic: (BLOCK[s.key] && BLOCK[s.key].ic) || s.ic, cfg: s.cfg || {}, delay: s.delay || 0, x: 80, y: 36 + i * ROW_H }; });
         state.edges = [];
         for (var i = 1; i < state.nodes.length; i++) state.edges.push({ id: uid("e"), from: state.nodes[i - 1].uid, to: state.nodes[i].uid });
       } else { state.nodes = []; state.edges = []; }
@@ -928,15 +961,15 @@
     function relTime(iso) { if (!iso) return "just now"; var d = (Date.now() - new Date(iso).getTime()) / 1000; if (d < 60) return "just now"; if (d < 3600) return Math.floor(d / 60) + "m ago"; if (d < 86400) return Math.floor(d / 3600) + "h ago"; return Math.floor(d / 86400) + "d ago"; }
     function openLibrary() {
       var list = store.all(); var host = $("libList"); host.innerHTML = "";
-      if (!list.length) host.innerHTML = '<div class="cs-empty"><div class="big">📚</div><b>No saved campaigns yet</b><p style="font-size:13px;margin-top:6px">Build a sequence and hit Save to store it here.</p></div>';
+      if (!list.length) host.innerHTML = '<div class="cs-empty"><div class="big">' + ICON.book + '</div><b>No saved campaigns yet</b><p style="font-size:13px;margin-top:6px">Build a sequence and hit Save to store it here.</p></div>';
       list.forEach(function (c) {
         var touches = (c.nodes || c.steps || []).filter(function (s) { return s.key !== "lg_delay" && s.channel !== "logic"; }).length;
         var item = el("div", "lib-item");
         item.innerHTML =
-          '<span class="s-ic ch-' + (c.motion === "bd" ? "email" : "linkedin") + '">' + (c.motion === "bd" ? "🏢" : "👤") + '</span>' +
+          '<span class="s-ic ch-' + (c.motion === "bd" ? "email" : "linkedin") + '">' + (c.motion === "bd" ? ICON.building : ICON.user) + '</span>' +
           '<div class="li-meta"><b>' + esc(c.name) + '</b><div class="li-sub">' + touches + ' touches · ' + (c.motion === "bd" ? "BD OS" : "Recruiting OS") + ' · ' + esc(c.status) + ' · ' + relTime(c.updatedAt) + '</div></div>' +
           '<span class="lib-tag">' + esc(c.status) + '</span>' +
-          '<div class="li-actions"><button class="btn btn-ghost btn-sm" data-act="load">Open</button><button class="btn btn-ghost btn-sm" data-act="dup">Duplicate</button><button class="s-btn del" data-act="del" title="Delete">🗑</button></div>';
+          '<div class="li-actions"><button class="btn btn-ghost btn-sm" data-act="load">Open</button><button class="btn btn-ghost btn-sm" data-act="dup">Duplicate</button><button class="s-btn del" data-act="del" title="Delete">' + ICON.trash + '</button></div>';
         item.querySelector('[data-act="load"]').addEventListener("click", function () { loadCampaign(c); closeLibrary(); toast("Opened " + c.name); });
         item.querySelector('[data-act="dup"]').addEventListener("click", function () { var copy = JSON.parse(JSON.stringify(c)); copy.id = uid("camp"); copy.name = c.name + " (copy)"; copy.createdAt = nowIso(); copy.updatedAt = nowIso(); store.save(copy); openLibrary(); toast("Duplicated"); });
         item.querySelector('[data-act="del"]').addEventListener("click", function () { if (!confirm("Delete \"" + c.name + "\"?")) return; store.remove(c.id); openLibrary(); toast("Deleted"); });
@@ -956,7 +989,7 @@
         g.blocks.forEach(function (b) {
           var item = el("button", "pal-block"); item.type = "button";
           item.innerHTML = '<span class="pb-ic ch-' + b.channel + '">' + b.ic + '</span>' +
-            '<span class="pb-meta"><b>' + esc(b.label) + '</b><span>' + esc(b.desc) + '</span></span><span class="pb-add">＋</span>';
+            '<span class="pb-meta"><b>' + esc(b.label) + '</b><span>' + esc(b.desc) + '</span></span><span class="pb-add">+</span>';
           item.addEventListener("click", function () { addBlock(b.key); closeAddBlock(); });
           wrap.appendChild(item);
         });
@@ -995,17 +1028,17 @@
     $("launch").addEventListener("click", function () {
       if (!state.nodes.filter(function (n) { return n.channel !== "logic"; }).length) { toast("Add at least one outreach touch first"); return; }
       state.status = state.status === "active" ? "paused" : "active"; save(true); syncMeta();
-      toast(state.status === "active" ? "Campaign activated 🚀" : "Campaign paused");
+      toast(state.status === "active" ? "Campaign activated" : "Campaign paused");
     });
     $("autopilot").addEventListener("click", function () {
-      // Hands-off run mode. Turning it ON also activates the campaign — an
+      // Hands-off run mode. Turning it ON also activates the campaign, an
       // Autopilot campaign that isn't active would never be picked up by the
       // internal cadence clock. Persists straight to the backend so the server's
       // Automation scheduler (gated by AUTOMATION_ENABLED) starts running it.
       state.autoRun = !state.autoRun;
       if (state.autoRun && state.status !== "active") state.status = "active";
       save(true); syncMeta();
-      toast(state.autoRun ? "Autopilot on — this campaign now runs hands-off 🤖" : "Autopilot off — back to manual approval");
+      toast(state.autoRun ? "Autopilot on, this campaign now runs hands-off" : "Autopilot off, back to manual approval");
     });
 
     function onKey(e) {

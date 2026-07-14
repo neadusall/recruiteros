@@ -8,8 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="assets/css/styles.css?v=ab0b438dc8" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=d524d6e5f4" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232e5bd7'/><text x='50' y='69' font-size='58' text-anchor='middle' fill='%23ffffff' font-family='Arial' font-weight='bold'>R</text></svg>" />
   <!-- White-label anti-flash guard: on a customer host (e.g. app.lumesp.com) the
        house brand must NEVER paint. Before first paint, neutralise the title +
        favicon and hide the wordmark until the resolver below fills in the
@@ -43,7 +43,7 @@
       letter-spacing: .12em;
       color: var(--text-dim);
       margin: 18px 0 8px;
-      font-weight: 700;
+      font-weight: 600;
     }
     .toc h4:first-child { margin-top: 0; }
     .toc a {
@@ -61,16 +61,16 @@
     /* Article column */
     .docs-article { min-width: 0; }
     .docs-article h1 {
-      font-size: 42px; line-height: 1.1; margin: 0 0 14px; font-weight: 800;
+      font-size: 42px; line-height: 1.1; margin: 0 0 14px; font-weight: 600;
       letter-spacing: -0.02em;
     }
     .docs-lede { font-size: 18px; color: var(--text-muted); max-width: 68ch; margin: 0 0 8px; line-height: 1.6; }
     .docs-article section { scroll-margin-top: 88px; padding-top: 40px; }
     .docs-article h2 {
-      font-size: 26px; font-weight: 700; margin: 0 0 16px; letter-spacing: -0.01em;
+      font-size: 26px; font-weight: 600; margin: 0 0 16px; letter-spacing: -0.01em;
       padding-bottom: 10px; border-bottom: 1px solid var(--border);
     }
-    .docs-article h3 { font-size: 17px; font-weight: 700; margin: 26px 0 10px; }
+    .docs-article h3 { font-size: 17px; font-weight: 600; margin: 26px 0 10px; }
     .docs-article p { color: var(--text-muted); line-height: 1.65; margin: 0 0 14px; max-width: 72ch; }
     .docs-article ul, .docs-article ol { color: var(--text-muted); line-height: 1.65; max-width: 72ch; padding-left: 22px; }
     .docs-article li { margin: 6px 0; }
@@ -81,14 +81,14 @@
     code, .mono { font-family: var(--mono); font-size: 0.88em; }
     p code, li code, td code {
       background: var(--surface-2); border: 1px solid var(--border);
-      padding: 1px 6px; border-radius: 6px; color: #c9b8ff;
+      padding: 1px 6px; border-radius: 6px; color: var(--text);
     }
     pre {
-      background: #0d0d18; border: 1px solid var(--border);
+      background: var(--bg-soft); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 16px 18px; overflow-x: auto;
-      margin: 0 0 18px; box-shadow: var(--shadow);
+      margin: 0 0 18px;
     }
-    pre code { color: #d8dcff; font-size: 13px; line-height: 1.6; background: none; border: none; padding: 0; }
+    pre code { color: var(--text); font-size: 13px; line-height: 1.6; background: none; border: none; padding: 0; }
     .cmt { color: var(--text-dim); }
 
     /* Tables */
@@ -118,32 +118,31 @@
     }
     .scard:hover { border-color: var(--border-strong); transform: translateY(-2px); }
     .scard .sc-top { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
-    .scard .ico { font-size: 19px; }
-    .scard h4 { margin: 0; font-size: 15px; font-weight: 700; }
+    .scard h4 { margin: 0; font-size: 15px; font-weight: 600; }
     .scard p { font-size: 13.5px; margin: 0 0 8px; line-height: 1.55; }
     .scard .sc-link { font-size: 12.5px; font-family: var(--mono); }
 
     /* Pills / badges */
     .pill {
-      display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 700;
-      padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-strong);
+      display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 500;
+      padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border-strong);
       color: var(--text-muted); margin-right: 6px;
     }
-    .pill.get { color: var(--accent-green); border-color: rgba(56,224,166,.4); }
-    .pill.post { color: var(--brand-2); border-color: rgba(77,208,255,.4); }
-    .pill.layer { color: #c9b8ff; border-color: rgba(124,92,255,.4); }
+    .pill.get { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
+    .pill.post { color: var(--info); background: var(--info-bg); border-color: transparent; }
+    .pill.layer { color: var(--brand); background: var(--brand-soft); border-color: transparent; }
 
     /* Simple top bar */
     .docs-nav {
       position: fixed; top: 0; left: 0; right: 0; z-index: 50; height: 60px;
       display: flex; align-items: center; justify-content: space-between;
-      padding: 0 24px; background: rgba(10,10,18,.72); backdrop-filter: blur(14px);
+      padding: 0 24px; background: var(--surface);
       border-bottom: 1px solid var(--border);
     }
-    .docs-nav .brand { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--text); font-weight: 700; }
+    .docs-nav .brand { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--text); font-weight: 600; }
     .docs-nav .logo {
-      width: 28px; height: 28px; border-radius: 8px; background: var(--grad);
-      display: grid; place-items: center; color: #0a0a12; font-weight: 800;
+      width: 28px; height: 28px; border-radius: 8px; background: var(--brand);
+      display: grid; place-items: center; color: #ffffff; font-weight: 600;
     }
     .docs-nav .os { color: var(--brand); }
     .docs-nav .links { display: flex; gap: 6px; align-items: center; }
@@ -155,11 +154,6 @@
   </style>
 </head>
 <body>
-
-  <!-- ambient FX layers (shared design system) -->
-  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
-  <div class="grid-bg"></div>
-  <div class="noise"></div>
 
   <!-- top bar -->
   <header class="docs-nav">
@@ -228,8 +222,8 @@
           pipeline. The platform runs two work modes and you pick which one you're in at any moment:
         </p>
         <div class="card-grid">
-          <div class="scard"><div class="sc-top"><span class="ico">👤</span><h4>Recruiting</h4></div><p>Source and place candidates: build a pipeline, screen, and book interviews.</p></div>
-          <div class="scard"><div class="sc-top"><span class="ico">🏢</span><h4>Business Development</h4></div><p>Win and grow clients: find companies hiring now and book discovery calls.</p></div>
+          <div class="scard"><div class="sc-top"><h4>Recruiting</h4></div><p>Source and place candidates: build a pipeline, screen, and book interviews.</p></div>
+          <div class="scard"><div class="sc-top"><h4>Business Development</h4></div><p>Win and grow clients: find companies hiring now and book discovery calls.</p></div>
         </div>
         <p>
           Each mode has its own campaigns, audiences, and dashboards. Use the <strong>BD / Recruiting</strong>
@@ -282,8 +276,8 @@
         <h2>Admin &amp; Recruiter portals</h2>
         <p>Everyone uses the same app; what you see depends on your role.</p>
         <div class="card-grid">
-          <div class="scard"><div class="sc-top"><span class="ico">🛡️</span><h4>Admin Portal</h4></div><p>Full control: setup &amp; integrations, branding, your team, campaigns, and analytics.</p></div>
-          <div class="scard"><div class="sc-top"><span class="ico">🧑‍💼</span><h4>Recruiter Portal</h4></div><p>The day-to-day surface for recruiters: their pipeline, replies, sourcing, outreach, and dialer. No billing, integrations, or team management.</p></div>
+          <div class="scard"><div class="sc-top"><h4>Admin Portal</h4></div><p>Full control: setup &amp; integrations, branding, your team, campaigns, and analytics.</p></div>
+          <div class="scard"><div class="sc-top"><h4>Recruiter Portal</h4></div><p>The day-to-day surface for recruiters: their pipeline, replies, sourcing, outreach, and dialer. No billing, integrations, or team management.</p></div>
         </div>
         <p>As an admin you can preview the Recruiter Portal as any recruiter from the account menu, so you always see exactly what your team sees.</p>
       </section>

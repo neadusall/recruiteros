@@ -8,88 +8,85 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="assets/css/styles.css?v=ab0b438dc8" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%237c5cff'/><text x='50' y='70' font-size='62' text-anchor='middle' fill='%230a0a12' font-family='Arial' font-weight='bold'>R</text></svg>" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=d524d6e5f4" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232e5bd7'/><text x='50' y='69' font-size='58' text-anchor='middle' fill='%23ffffff' font-family='Arial' font-weight='bold'>R</text></svg>" />
   <style>
     .cb-wrap{max-width:1180px;margin:0 auto;padding:0 24px}
     .stepper{display:flex;gap:8px;margin:0 0 26px;flex-wrap:wrap}
-    .step{display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid rgba(255,255,255,.1);border-radius:999px;font-size:13px;font-weight:600;color:var(--text-dim)}
-    .step.active{background:rgba(124,92,255,.15);border-color:rgba(124,92,255,.5);color:#fff}
-    .step.done{color:#38e0a6;border-color:rgba(56,224,166,.4)}
-    .step .n{width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,.1);display:grid;place-items:center;font-size:12px}
-    .step.active .n{background:#7c5cff;color:#0a0a12}
+    .step{display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-weight:600;color:var(--text-dim);background:var(--surface)}
+    .step.active{background:var(--brand-soft);border-color:var(--brand);color:var(--text)}
+    .step.done{color:var(--ok);border-color:#c4e3d1}
+    .step .n{width:20px;height:20px;border-radius:50%;background:var(--bg-soft);display:grid;place-items:center;font-size:12px}
+    .step.active .n{background:var(--brand);color:#fff}
     .cb-grid{display:grid;grid-template-columns:1fr 320px;gap:22px;align-items:start}
     @media(max-width:880px){.cb-grid{grid-template-columns:1fr}}
-    .card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:22px;margin-bottom:18px}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:22px;margin-bottom:18px}
     .card h3{margin:0 0 4px;font-size:17px}
     .card .sub{color:var(--text-dim);font-size:13px;margin:0 0 16px}
     .src-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     @media(max-width:560px){.src-grid{grid-template-columns:1fr}}
-    .src{display:flex;gap:11px;align-items:flex-start;padding:12px 14px;border:1px solid rgba(255,255,255,.1);border-radius:12px;cursor:pointer;transition:.15s}
-    .src:hover{border-color:rgba(124,92,255,.45)}
-    .src.on{background:rgba(124,92,255,.1);border-color:rgba(124,92,255,.5)}
+    .src{display:flex;gap:11px;align-items:flex-start;padding:12px 14px;border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:.15s}
+    .src:hover{border-color:var(--border-strong)}
+    .src.on{background:var(--brand-soft);border-color:var(--brand)}
     .src .ic{font-size:18px}
     .src b{font-size:14px;display:block}
     .src span{font-size:12px;color:var(--text-dim)}
-    .src .free{font-family:'JetBrains Mono',monospace;font-size:10px;color:#38e0a6;border:1px solid rgba(56,224,166,.35);padding:1px 5px;border-radius:5px;margin-left:auto}
+    .src .free{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ok);border:1px solid #c4e3d1;padding:1px 5px;border-radius:4px;margin-left:auto}
     .chips{display:flex;flex-wrap:wrap;gap:7px}
-    .chip{padding:6px 11px;border:1px solid rgba(255,255,255,.12);border-radius:999px;font-size:13px;cursor:pointer;transition:.15s;user-select:none}
-    .chip:hover{border-color:rgba(124,92,255,.45)}
-    .chip.on{background:rgba(124,92,255,.18);border-color:rgba(124,92,255,.55);color:#fff}
+    .chip{padding:6px 11px;border:1px solid var(--border-strong);border-radius:6px;font-size:13px;cursor:pointer;transition:.15s;user-select:none;background:var(--surface)}
+    .chip:hover{border-color:var(--brand)}
+    .chip.on{background:var(--brand-soft);border-color:var(--brand);color:var(--text)}
     .field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
     .field label{font-size:13px;color:var(--text-dim);font-weight:600}
-    .field input,.field select{background:#0c0c16;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;color:#fff;font-size:14px}
-    .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid rgba(255,255,255,.06)}
-    .switch{width:42px;height:24px;border-radius:999px;background:rgba(255,255,255,.14);position:relative;cursor:pointer;transition:.15s}
-    .switch.on{background:#7c5cff}
+    .field input,.field select{background:var(--surface);border:1px solid var(--border-strong);border-radius:6px;padding:10px 12px;color:var(--text);font-size:14px}
+    .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)}
+    .switch{width:42px;height:24px;border-radius:999px;background:var(--border-strong);position:relative;cursor:pointer;transition:.15s}
+    .switch.on{background:var(--brand)}
     .switch i{position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.15s}
     .switch.on i{left:21px}
-    .target{padding:14px;border:1px solid rgba(255,255,255,.09);border-radius:13px;margin-bottom:10px}
+    .target{padding:14px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px}
     .target .top{display:flex;align-items:center;gap:10px}
-    .target .nm{font-weight:700}
-    .target .score{margin-left:auto;font-family:'JetBrains Mono',monospace;font-weight:700;padding:3px 9px;border-radius:7px}
-    .score.hi{background:rgba(56,224,166,.16);color:#38e0a6}.score.mid{background:rgba(255,194,77,.16);color:#ffc24d}.score.lo{background:rgba(255,255,255,.08);color:var(--text-dim)}
+    .target .nm{font-weight:600}
+    .target .score{margin-left:auto;font-family:'JetBrains Mono',monospace;font-weight:600;padding:3px 9px;border-radius:6px}
+    .score.hi{background:var(--ok-bg);color:var(--ok)}.score.mid{background:var(--warn-bg);color:var(--warn)}.score.lo{background:var(--bg-soft);color:var(--text-dim)}
     .target .reason{font-size:13px;color:var(--text);margin:8px 0 6px}
     .badges{display:flex;flex-wrap:wrap;gap:6px}
-    .badge{font-size:11px;font-family:'JetBrains Mono',monospace;padding:2px 7px;border-radius:6px;background:rgba(124,92,255,.14);color:#b3a1ff}
-    .badge.need{background:rgba(255,194,77,.14);color:#ffc24d}
+    .badge{font-size:11px;font-family:'JetBrains Mono',monospace;padding:2px 7px;border-radius:4px;background:var(--brand-soft);color:var(--brand)}
+    .badge.need{background:var(--warn-bg);color:var(--warn)}
     .summary{position:sticky;top:90px}
-    .stat{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:14px}
+    .stat{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border);font-size:14px}
     .stat b{font-family:'JetBrains Mono',monospace}
     .seg{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;color:var(--text-dim)}
-    .cost{background:linear-gradient(135deg,rgba(124,92,255,.14),rgba(77,208,255,.08));border:1px solid rgba(124,92,255,.3);border-radius:14px;padding:16px;margin-top:14px}
-    .cost .big{font-size:26px;font-weight:800}
-    .free-tag{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:#38e0a6;font-weight:700;margin-bottom:10px}
+    .cost{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:16px;margin-top:14px}
+    .cost .big{font-size:26px;font-weight:600}
+    .free-tag{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--ok);font-weight:600;margin-bottom:10px}
     .empty{text-align:center;padding:40px 20px;color:var(--text-dim)}
     .empty .big{font-size:34px;margin-bottom:8px}
     /* forefront search */
-    .search-hero{background:linear-gradient(135deg,rgba(124,92,255,.12),rgba(77,208,255,.06));border:1px solid rgba(124,92,255,.28);border-radius:18px;padding:20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
-    .seg{display:flex;background:rgba(0,0,0,.25);border-radius:11px;padding:3px;flex-shrink:0}
-    .seg-btn{all:unset;cursor:pointer;padding:9px 16px;border-radius:9px;font-size:13px;font-weight:600;color:var(--text-dim);transition:.15s}
-    .seg-btn.active{background:#7c5cff;color:#0a0a12}
+    .search-hero{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+    .seg{display:flex;background:var(--bg-soft);border-radius:6px;padding:3px;flex-shrink:0}
+    .seg-btn{all:unset;cursor:pointer;padding:9px 16px;border-radius:5px;font-size:13px;font-weight:600;color:var(--text-dim);transition:.15s}
+    .seg-btn.active{background:var(--surface);color:var(--text);box-shadow:0 1px 2px rgba(16,24,40,.08)}
     .combo{position:relative;flex:1;min-width:240px}
-    .combo input{width:100%;background:#0c0c16;border:1px solid rgba(255,255,255,.16);border-radius:11px;padding:13px 15px;color:#fff;font-size:15px;box-sizing:border-box}
-    .combo input:focus{outline:none;border-color:rgba(124,92,255,.6)}
-    .combo-drop{position:absolute;top:calc(100% + 6px);left:0;right:0;background:#13131f;border:1px solid rgba(255,255,255,.14);border-radius:12px;max-height:320px;overflow:auto;z-index:40;display:none;box-shadow:0 18px 50px rgba(0,0,0,.5)}
+    .combo input{width:100%;background:var(--surface);border:1px solid var(--border-strong);border-radius:6px;padding:13px 15px;color:var(--text);font-size:15px;box-sizing:border-box}
+    .combo input:focus{outline:none;border-color:var(--brand);box-shadow:var(--focus-ring)}
+    .combo-drop{position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;max-height:320px;overflow:auto;z-index:40;display:none;box-shadow:var(--shadow)}
     .combo-drop.open{display:block}
-    .combo-sec{position:sticky;top:0;background:#13131f;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);padding:10px 14px 4px;font-weight:700;display:flex;justify-content:space-between;align-items:center;z-index:1}
-    .combo-sec .sec-all{cursor:pointer;color:#9d86ff;font-weight:700;text-transform:none;letter-spacing:0}
+    .combo-sec{position:sticky;top:0;background:var(--surface);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);padding:10px 14px 4px;font-weight:600;display:flex;justify-content:space-between;align-items:center;z-index:1}
+    .combo-sec .sec-all{cursor:pointer;color:var(--brand);font-weight:600;text-transform:none;letter-spacing:0}
     .combo-sec .sec-all:hover{text-decoration:underline}
     .combo-opt{padding:9px 14px;font-size:14px;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
-    .combo-opt:hover,.combo-opt.cur{background:rgba(124,92,255,.16)}
-    .combo-opt.sel{color:#38e0a6}
+    .combo-opt:hover,.combo-opt.cur{background:var(--brand-soft)}
+    .combo-opt.sel{color:var(--ok)}
     .combo-opt .sec{font-size:11px;color:var(--text-dim)}
     .search-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
-    .schip{display:inline-flex;align-items:center;gap:7px;background:rgba(124,92,255,.16);border:1px solid rgba(124,92,255,.4);border-radius:999px;padding:6px 8px 6px 13px;font-size:13px;font-weight:600}
-    .schip b{font-weight:700}
-    .schip .x{cursor:pointer;width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,.12);display:grid;place-items:center;font-size:12px}
-    .schip .x:hover{background:rgba(255,90,90,.4)}
+    .schip{display:inline-flex;align-items:center;gap:7px;background:var(--brand-soft);border:1px solid #c7d4f2;border-radius:6px;padding:6px 8px 6px 13px;font-size:13px;font-weight:600}
+    .schip b{font-weight:600}
+    .schip .x{cursor:pointer;width:18px;height:18px;border-radius:50%;background:var(--bg-soft);display:grid;place-items:center;font-size:12px}
+    .schip .x:hover{background:var(--danger-bg)}
   </style>
 </head>
 <body>
-  <div class="aurora"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
-  <div class="grid-bg"></div>
-  <div class="noise"></div>
 
   <header class="nav">
     <div class="container nav-inner">
@@ -98,23 +95,23 @@
         <div class="has-drop"><a href="/recruiting-os">Recruiter OS</a>
           <div class="drop os-mega recruit">
             <a class="os-feature" href="/recruiting-os">
-              <span class="os-badge">👤 Recruiter OS</span>
+              <span class="os-badge">Recruiter OS</span>
               <b>Win the placement</b>
               <span class="os-tag">Find, engage, and place talent before anyone else even sees the signal.</span>
               <span class="os-go">Explore Recruiter OS →</span>
             </a>
             <div class="os-cols">
               <div class="mcol"><h5>Source</h5>
-                <a href="/sourcing"><span class="di">🎯</span> People-GPT Search</a>
-                <a href="/sourcing#scoring"><span class="di">🧮</span> JD Match Scoring</a>
-                <a href="/sourcing"><span class="di">⚡</span> Enrichment Grid</a>
-                <a href="/signals"><span class="di">📡</span> Candidate Signals</a>
+                <a href="/sourcing">People-GPT Search</a>
+                <a href="/sourcing#scoring">JD Match Scoring</a>
+                <a href="/sourcing">Enrichment Grid</a>
+                <a href="/signals">Candidate Signals</a>
               </div>
               <div class="mcol"><h5>Engage &amp; Close</h5>
-                <a href="/outreach"><span class="di">✉️</span> Candidate Outreach</a>
-                <a href="/linkedin"><span class="di">💼</span> LinkedIn Engine</a>
-                <a href="/conversations"><span class="di">💬</span> Texting &amp; Voice</a>
-                <a href="/analytics"><span class="di">📊</span> Placement Analytics</a>
+                <a href="/outreach">Candidate Outreach</a>
+                <a href="/linkedin">LinkedIn Engine</a>
+                <a href="/conversations">Texting &amp; Voice</a>
+                <a href="/analytics">Placement Analytics</a>
               </div>
             </div>
           </div>
@@ -122,22 +119,22 @@
         <div class="has-drop"><a href="/business-development-os">BD OS</a>
           <div class="drop os-mega bd">
             <a class="os-feature" href="/business-development-os">
-              <span class="os-badge">🏢 BD OS</span>
+              <span class="os-badge">BD OS</span>
               <b>Win the client</b>
               <span class="os-tag">Turn hiring signals into job orders, so your desk never runs dry.</span>
               <span class="os-go">Explore BD OS →</span>
             </a>
             <div class="os-cols">
               <div class="mcol"><h5>Find</h5>
-                <a href="/signals"><span class="di">📡</span> Account Signals</a>
-                <a href="/sourcing"><span class="di">🧭</span> Decision-maker Discovery</a>
-                <a href="/sourcing"><span class="di">⚡</span> Company Enrichment</a>
+                <a href="/signals">Account Signals</a>
+                <a href="/sourcing">Decision-maker Discovery</a>
+                <a href="/sourcing">Company Enrichment</a>
               </div>
               <div class="mcol"><h5>Win &amp; Track</h5>
-                <a href="/outreach"><span class="di">✉️</span> Client Outreach</a>
-                <a href="/conversations#amd"><span class="di">📞</span> Voice Dialer + AMD</a>
-                <a href="/integrations"><span class="di">🗂️</span> CRM Pipeline</a>
-                <a href="/analytics"><span class="di">📈</span> Job-order Analytics</a>
+                <a href="/outreach">Client Outreach</a>
+                <a href="/conversations#amd">Voice Dialer + AMD</a>
+                <a href="/integrations">CRM Pipeline</a>
+                <a href="/analytics">Job-order Analytics</a>
               </div>
             </div>
           </div>
@@ -250,7 +247,7 @@
               <div class="big gradient-text" id="costBig">$0.00</div>
               <div style="font-size:12px;color:var(--text-dim)" id="costBreak"></div>
             </div>
-            <button class="btn btn-primary btn-sm" id="launchBtn" style="width:100%;margin-top:14px;display:none">🚀 Approve &amp; launch</button>
+            <button class="btn btn-primary btn-sm" id="launchBtn" style="width:100%;margin-top:14px;display:none">Approve &amp; launch</button>
           </div>
         </aside>
       </div>
@@ -287,7 +284,7 @@
         </div>
       </div>
       <div class="footer-bottom">
-        <span>© 2026 RecruitersOS, Inc. · recruitersos.co</span>
+        <span>2026 RecruitersOS, Inc. · recruitersos.co</span>
         <span>Made for recruiters who would rather be talking to people.</span>
       </div>
     </div>
@@ -298,13 +295,13 @@
     if (new URLSearchParams(location.search).get("embed") === "1") {
       document.documentElement.classList.add("embedded");
       var s = document.createElement("style");
-      s.textContent = ".embedded .nav,.embedded footer,.embedded .aurora,.embedded .grid-bg,.embedded .noise{display:none!important}"
+      s.textContent = ".embedded .nav,.embedded footer{display:none!important}"
         + " .embedded body{background:transparent} .embedded section:first-of-type{padding-top:8px}";
       document.head.appendChild(s);
     }
   </script>
-  <script src="assets/js/landing.js?v=adebd835ba"></script>
+  <script src="assets/js/landing.js?v=8753d65354"></script>
   <script src="assets/js/industries.js?v=da55cfc4e2"></script>
-  <script src="assets/js/campaign-builder.js?v=2bd2e71fdc"></script>
+  <script src="assets/js/campaign-builder.js?v=52b3959cf0"></script>
 </body>
 </html>

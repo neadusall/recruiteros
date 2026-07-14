@@ -4,34 +4,46 @@
 (function () {
   'use strict';
 
+  /* ---- inline stroke icons (replace emoji glyphs) ---- */
+  const icn = (p) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:1em;height:1em;vertical-align:-0.125em">' + p + '</svg>';
+  const ICON = {
+    mail: icn('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>'),
+    briefcase: icn('<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>'),
+    msgSquare: icn('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
+    zap: icn('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'),
+    user: icn('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
+    building: icn('<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M9 21v-4h6v4"/><path d="M8 7h.01M12 7h.01M16 7h.01M8 11h.01M12 11h.01M16 11h.01"/>'),
+    target: icn('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>'),
+  };
+
   /* ---------------- DATA ---------------- */
 
   const CAMPAIGNS = [
-    { id: 'react', name: 'Senior React · Berlin', status: 'live', color: '#38e0a6', motion: 'Recruiting' },
-    { id: 'vp-eng', name: 'VP Eng search · Fintech', status: 'live', color: '#38e0a6', motion: 'Recruiting' },
-    { id: 'bd-saas', name: 'BD · Series B SaaS hiring', status: 'live', color: '#4dd0ff', motion: 'Business Dev' },
-    { id: 'nurses', name: 'ICU Nurses · Remote triage', status: 'draft', color: '#ffc24d', motion: 'Recruiting' },
+    { id: 'react', name: 'Senior React · Berlin', status: 'live', color: 'var(--ok)', motion: 'Recruiting' },
+    { id: 'vp-eng', name: 'VP Eng search · Fintech', status: 'live', color: 'var(--ok)', motion: 'Recruiting' },
+    { id: 'bd-saas', name: 'BD · Series B SaaS hiring', status: 'live', color: 'var(--info)', motion: 'Business Dev' },
+    { id: 'nurses', name: 'ICU Nurses · Remote triage', status: 'draft', color: 'var(--warn)', motion: 'Recruiting' },
   ];
 
   // Candidate pool used to populate the grid on search
   const CANDIDATES = [
-    { n: 'Anja Köhler', t: 'Sr. Frontend Engineer', co: 'Trade Republic', loc: 'Berlin, DE', c: '#7c5cff',
+    { n: 'Anja Köhler', t: 'Sr. Frontend Engineer', co: 'Trade Republic', loc: 'Berlin, DE', c: 'var(--brand)',
       why: 'Team reorg + 4yr tenure', email: 'anja.kohler@proton.me', score: 94 },
-    { n: 'Marco Silva', t: 'Staff Engineer', co: 'N26', loc: 'Berlin, DE', c: '#4dd0ff',
+    { n: 'Marco Silva', t: 'Staff Engineer', co: 'N26', loc: 'Berlin, DE', c: 'var(--info)',
       why: 'Posted "open to chats"', email: 'm.silva@hey.com', score: 91 },
-    { n: 'Lena Dietrich', t: 'Frontend Lead', co: 'Pitch (closed)', loc: 'Berlin, DE', c: '#ff7ac6',
+    { n: 'Lena Dietrich', t: 'Frontend Lead', co: 'Pitch (closed)', loc: 'Berlin, DE', c: 'var(--brand-2)',
       why: 'Startup wound down', email: 'lena.d@gmail.com', score: 88 },
-    { n: 'Tomas Berg', t: 'Sr. React Developer', co: 'Zalando', loc: 'Berlin, DE', c: '#38e0a6',
+    { n: 'Tomas Berg', t: 'Sr. React Developer', co: 'Zalando', loc: 'Berlin, DE', c: 'var(--ok)',
       why: 'Promo passed over', email: 'tomasberg@fastmail.com', score: 90 },
-    { n: 'Yuki Tanaka', t: 'Senior SWE, Frontend', co: 'Delivery Hero', loc: 'Berlin, DE', c: '#ffc24d',
+    { n: 'Yuki Tanaka', t: 'Senior SWE, Frontend', co: 'Delivery Hero', loc: 'Berlin, DE', c: 'var(--warn)',
       why: '5yr tenure milestone', email: 'yuki.t@outlook.com', score: 86 },
-    { n: 'Priya Nair', t: 'Frontend Engineer II', co: 'GetYourGuide', loc: 'Berlin, DE', c: '#7c5cff',
+    { n: 'Priya Nair', t: 'Frontend Engineer II', co: 'GetYourGuide', loc: 'Berlin, DE', c: 'var(--brand)',
       why: 'Visa-portable, active', email: 'priya.nair@gmail.com', score: 84 },
-    { n: 'Oskar Wendt', t: 'Sr. React Engineer', co: 'SoundCloud', loc: 'Berlin, DE', c: '#4dd0ff',
+    { n: 'Oskar Wendt', t: 'Sr. React Engineer', co: 'SoundCloud', loc: 'Berlin, DE', c: 'var(--info)',
       why: 'Recent layoff round', email: 'oskar.wendt@proton.me', score: 89 },
-    { n: 'Clara Moreau', t: 'Staff Frontend', co: 'Personio', loc: 'Munich → Berlin', c: '#ff7ac6',
+    { n: 'Clara Moreau', t: 'Staff Frontend', co: 'Personio', loc: 'Munich → Berlin', c: 'var(--brand-2)',
       why: 'Relocating to Berlin', email: 'clara.moreau@hey.com', score: 87 },
-    { n: 'Diego Rossi', t: 'Sr. Frontend Engineer', co: 'HelloFresh', loc: 'Berlin, DE', c: '#38e0a6',
+    { n: 'Diego Rossi', t: 'Sr. Frontend Engineer', co: 'HelloFresh', loc: 'Berlin, DE', c: 'var(--ok)',
       why: 'Endorsed for React 3x', email: 'diego.rossi@gmail.com', score: 83 },
   ];
 
@@ -51,37 +63,37 @@
   ];
 
   const SEQUENCE = [
-    { ch: 'Email', icon: '✉️', wait: null, sub: 'The N26 reorg + your payments work',
+    { ch: 'Email', icon: ICON.mail, wait: null, sub: 'The N26 reorg + your payments work',
       body: 'Hi Anja,\n\nSaw Trade Republic is pushing into four new markets, usually a stretch for the senior frontend team holding it together.\n\nYou\'ve spent 4 years owning complex trading UIs. I\'m working with a team building a greenfield React platform (fully remote, $120-145k) where you\'d set the architecture from day one.\n\nWorth a 15-minute call this week?\n\n, Jamie' },
-    { ch: 'LinkedIn', icon: '💼', wait: 'Wait 2 days', sub: 'Connection + soft nudge',
+    { ch: 'LinkedIn', icon: ICON.briefcase, wait: 'Wait 2 days', sub: 'Connection + soft nudge',
       body: 'Hi Anja, just sent you a note by email about a staff-level React role (remote, greenfield). Would love to connect here either way; your work on the Trade Republic order flow is genuinely impressive.' },
-    { ch: 'SMS', icon: '💬', wait: 'Wait 2 days', sub: 'Short, direct, human',
+    { ch: 'SMS', icon: ICON.msgSquare, wait: 'Wait 2 days', sub: 'Short, direct, human',
       body: 'Hi Anja, Jamie here, following up on the remote React staff role. No pressure, but happy to share details if the timing\'s right. Open to a quick chat?' },
-    { ch: 'Email', icon: '✉️', wait: 'Wait 3 days', sub: 'Breakup + value',
+    { ch: 'Email', icon: ICON.mail, wait: 'Wait 3 days', sub: 'Breakup + value',
       body: 'Hi Anja,\n\nI\'ll close the loop here. If a remote, architecture-owning React role ever becomes interesting, my door\'s open. Either way, sharing a short write-up on how the team handles design systems at scale; thought you\'d enjoy it.\n\n, Jamie' },
   ];
 
   const THREADS = [
-    { id: 'marco', name: 'Marco Silva', initials: 'MS', c: '#4dd0ff', hot: true,
+    { id: 'marco', name: 'Marco Silva', initials: 'MS', c: 'var(--info)', hot: true,
       msgs: [
         { f: 'out', t: 'Hi Marco, saw N26 just reorged the web platform team. You\'ve been there 4 years shipping the payments flow. Open to hearing about a staff role that\'s pure greenfield?' },
         { f: 'in', t: 'Maybe. Depends on the stack and whether it\'s remote.' },
         { f: 'out', t: 'Fully remote, React + TypeScript, you\'d own architecture from day one. Comp is $120-145k. Worth a 15-min call Thursday?' },
         { f: 'in', t: 'Yeah, Thursday afternoon works.' },
       ],
-      note: '🔥 Interest detected → routed to recruiter · meeting suggested' },
-    { id: 'oskar', name: 'Oskar Wendt', initials: 'OW', c: '#7c5cff', hot: false,
+      note: 'Interest detected → routed to recruiter · meeting suggested' },
+    { id: 'oskar', name: 'Oskar Wendt', initials: 'OW', c: 'var(--brand)', hot: false,
       msgs: [
         { f: 'out', t: 'Hi Oskar, tough news about the SoundCloud round. You shipped some of the best audio UI on the web. I\'ve got a remote senior React role that might be a great landing spot. Worth a look?' },
         { f: 'in', t: 'Appreciate it. Send me the details?' },
         { f: 'out', t: 'Just emailed them over. Remote, $110-130k, strong design-systems culture. Let me know what you think!' },
       ],
       note: 'AI replied automatically · awaiting candidate' },
-    { id: 'clara', name: 'Clara Moreau', initials: 'CM', c: '#ff7ac6', hot: false,
+    { id: 'clara', name: 'Clara Moreau', initials: 'CM', c: 'var(--brand-2)', hot: false,
       msgs: [
         { f: 'out', t: 'Hi Clara, congrats on the Berlin move! A team I work with is building a greenfield React platform there. Open to a quick chat?' },
         { f: 'in', t: 'Hi! I just signed somewhere else last week, but thank you.' },
-        { f: 'out', t: 'Totally understand, congrats! I\'ll check back in 6 months. Best of luck in the new role. 🎉' },
+        { f: 'out', t: 'Totally understand, congrats! I\'ll check back in 6 months. Best of luck in the new role.' },
       ],
       note: 'Politely declined · follow-up scheduled +6mo' },
   ];
@@ -120,7 +132,7 @@
   let toastTimer;
   function toast(msg, ok = true) {
     const t = $('#toast');
-    t.innerHTML = (ok ? '<span class="tok">✓</span>' : '<span style="color:var(--accent-amber)">⚡</span>') + ' ' + msg;
+    t.innerHTML = (ok ? '<span class="tok">✓</span>' : '<span style="color:var(--accent-amber)">' + ICON.zap + '</span>') + ' ' + msg;
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
@@ -134,7 +146,7 @@
       const item = el('div', 'camp-item' + (c.id === activeCampaign ? ' active' : ''));
       item.innerHTML = `<span class="cdot" style="background:${c.color}"></span>
         <span class="cname">${c.name}</span>
-        <span class="cmeta">${c.motion === 'Recruiting' ? '👤' : '🏢'}</span>`;
+        <span class="cmeta">${c.motion === 'Recruiting' ? ICON.user : ICON.building}</span>`;
       item.addEventListener('click', () => selectCampaign(c.id));
       list.appendChild(item);
     });
@@ -235,7 +247,7 @@
   function renderTargets() {
     const wrap = $('#targetsContent');
     if (!gridRows.length) {
-      wrap.innerHTML = `<div class="empty-state"><div class="big">🎯</div>
+      wrap.innerHTML = `<div class="empty-state"><div class="big">${ICON.target}</div>
         <h3>No targets yet</h3><p>Run a natural-language search above to populate your candidate grid.</p></div>`;
       return;
     }
@@ -246,15 +258,15 @@
     let html = `
       <div class="grid-toolbar">
         <span class="sel-info">${selCount ? selCount + ' selected' : gridRows.length + ' candidates'}</span>
-        <button class="btn btn-ghost btn-sm" id="enrichAll">⚡ Enrich all</button>
-        <button class="btn btn-ghost btn-sm" id="addToSeq" ${selCount ? '' : 'disabled style="opacity:.5"'}>✉️ Add ${selCount || ''} to sequence</button>
+        <button class="btn btn-ghost btn-sm" id="enrichAll">Enrich all</button>
+        <button class="btn btn-ghost btn-sm" id="addToSeq" ${selCount ? '' : 'disabled style="opacity:.5"'}>Add ${selCount || ''} to sequence</button>
       </div>
       <div class="grid-scroll"><table class="grid"><thead><tr>
         <th class="col-check"><input type="checkbox" id="checkAll"></th>
         <th>Candidate</th><th>Current role</th><th>Location</th>
-        <th class="ai-col">✦ Why now</th><th class="ai-col">✉️ Email</th>${extraHeads}
+        <th class="ai-col">✦ Why now</th><th class="ai-col">Email</th>${extraHeads}
         <th>Fit</th>
-        <th class="th-add col-add" id="addColBtn">＋ AI column</th>
+        <th class="th-add col-add" id="addColBtn">+ AI column</th>
       </tr></thead><tbody>`;
 
     gridRows.forEach((r, i) => {
@@ -392,7 +404,7 @@
       const item = el('div', 'thread' + (th.id === activeThread ? ' active' : ''));
       const last = th.msgs[th.msgs.length - 1];
       item.innerHTML = `<div class="tname">${avatar(th.initials, th.c)} ${th.name}
-        ${th.hot ? '<span class="hot">🔥 HOT</span>' : ''}</div>
+        ${th.hot ? '<span class="hot">HOT</span>' : ''}</div>
         <div class="tprev">${last.f === 'out' ? 'You: ' : ''}${last.t}</div>`;
       item.addEventListener('click', () => { activeThread = th.id; renderThreads(); renderChat(); });
       list.appendChild(item);
