@@ -221,10 +221,14 @@ export async function outreachSnapshot(workspaceId: string, motion: Motion): Pro
       : "Not connected. Connect your ATS so prospects, replies, and placements sync automatically.",
   };
 
-  // SMS via OS Text ("taltxt" is the legacy wire id for the integration row).
-  const smsIntg = intg(ints, "taltxt");
-  const smsConnected = smsIntg?.status === "green";
-  const smsYellow = smsIntg?.status === "yellow";
+  // SMS readiness. The send path (lib/channels) prefers OS Text and falls back
+  // to raw Telnyx 10DLC, so EITHER connection makes SMS sendable. Telnyx green
+  // also covers workspaces the operator granted house-Telnyx access to
+  // ("taltxt" is the legacy wire id for the OS Text integration row).
+  const osTextIntg = intg(ints, "taltxt");
+  const telnyxIntg = intg(ints, "telnyx");
+  const smsConnected = osTextIntg?.status === "green" || telnyxIntg?.status === "green";
+  const smsYellow = !smsConnected && (osTextIntg?.status === "yellow" || telnyxIntg?.status === "yellow");
   const sms = {
     connected: smsConnected,
     label: "SMS (OS Text)",
@@ -232,8 +236,8 @@ export async function outreachSnapshot(workspaceId: string, motion: Motion): Pro
     detail: smsConnected
       ? "Connected: post-engagement texts and opt-outs are live."
       : smsYellow
-      ? "Key added: run a test to verify your OS Text connection."
-      : "Not connected. Turn on OS Text to add compliant SMS to your sequences.",
+      ? "Key added: run a test on OS Text or Telnyx to verify your SMS connection."
+      : "Not connected. Turn on OS Text (or connect Telnyx) to add compliant SMS to your sequences.",
   };
 
   // Enrichment waterfall + credits. Healthy when its underlying providers verify.
