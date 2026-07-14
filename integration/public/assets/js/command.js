@@ -7949,7 +7949,7 @@
      deliverability health, MPP/bot-filtered open + click tracking, and the reply
      inbox. This panel embeds that app, the same pattern OS Text uses for taltxt.
      The mail app runs on its own host; set window.RECRUITEROS_MAIL_URL to point
-     at it (defaults to the mail subdomain). Stand it up via DEPLOY-EMAIL.md. */
+     at it (defaults to the mail subdomain). Stand it up via docs/setup/DEPLOY-EMAIL.md. */
   var MAIL_BASE = (typeof window !== "undefined" && window.RECRUITEROS_MAIL_URL) || "https://mail.recruitersos.co";
 
   function renderSending(el) {
@@ -7967,7 +7967,7 @@
         'style="width:100%;height:calc(100vh - 210px);min-height:620px;border:0;border-radius:12px;background:var(--bg)" ' +
         'allow="clipboard-read; clipboard-write"></iframe>' +
       '</div>' +
-      '<p class="muted" style="font-size:12px;margin-top:10px">Not loading? The mail platform isn’t reachable yet at <code>' + esc(base) + '</code>, see DEPLOY-EMAIL.md to stand it up.</p>';
+      '<p class="muted" style="font-size:12px;margin-top:10px">Not loading? The mail platform isn’t reachable yet at <code>' + esc(base) + '</code>, see docs/setup/DEPLOY-EMAIL.md to stand it up.</p>';
   }
 
   /* ---------------- JD Sourcing ----------------
