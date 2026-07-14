@@ -4,7 +4,7 @@
  *
  * STOP / unsubscribe must be honored the instant it arrives and enforced at the
  * source of truth, then mirrored to every sending platform (Instantly,
- * SalesRobot/Unipile, TalTxt) so no channel can reach the contact again.
+ * SalesRobot/Unipile, OS Text) so no channel can reach the contact again.
  *
  * DURABLE: the list is snapshotted to the db layer (`response_suppression_v1`) and
  * re-hydrated on boot — a server restart must never forget who said stop. The email
@@ -12,7 +12,7 @@
  */
 
 import { normalizePhone } from "../core/repository";
-import { instantly, salesrobot, taltxt } from "../providers";
+import { instantly, salesrobot, ostext } from "../providers";
 import { loadSnapshot, debouncedSaver } from "../db";
 
 export interface SuppressionEntry {
@@ -84,7 +84,7 @@ async function mirrorToPlatforms(entry: SuppressionEntry): Promise<void> {
     if (isEmail(h)) {
       tasks.push(swallow(instantly.blocklistAdd(h)));        // email channel
     } else if (isPhone(h)) {
-      tasks.push(swallow(taltxt.optOut(h)));                 // SMS channel
+      tasks.push(swallow(ostext.optOut(h)));                 // SMS channel
     } else {
       tasks.push(swallow(salesrobot.removeProspect(h)));     // LinkedIn channel (profile url)
     }

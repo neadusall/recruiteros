@@ -91,7 +91,7 @@
       { key: "em_followup", label: "Follow-up email", ic: ICON.reply, desc: "Reply in the same thread", cfg: ["subject", "message"] },
     ] },
     { group: "Text / SMS", channel: "sms", blocks: [
-      { key: "sms_send", label: "Send text (SMS)", ic: ICON.smartphone, desc: "Individual text via TalTxt / Telnyx", cfg: ["sms"], testSend: true },
+      { key: "sms_send", label: "Send text (SMS)", ic: ICON.smartphone, desc: "Individual text via OS Text / Telnyx", cfg: ["sms"], testSend: true },
       { key: "sms_mms",  label: "Send MMS",        ic: ICON.image, desc: "Text with an image attachment", cfg: ["sms"], testSend: true },
       { key: "wa_send",  label: "WhatsApp message", ic: ICON.msgCircle, desc: "1:1 WhatsApp message", cfg: ["message"] },
     ] },
@@ -873,7 +873,7 @@
     function hint(t) { return el("div", "cfg-hint", esc(t)); }
     function testSendPanel(step) {
       var p = el("div", "test-send");
-      p.innerHTML = '<b>Send one test text</b><div class="cfg-hint" style="margin-top:3px">Individual SMS via TalTxt / Telnyx. Not a batch blast, one message to one number.</div>';
+      p.innerHTML = '<b>Send one test text</b><div class="cfg-hint" style="margin-top:3px">Individual SMS via OS Text / Telnyx. Not a batch blast, one message to one number.</div>';
       var row = el("div", "ts-row"); var num = el("input"); num.type = "tel"; num.placeholder = "+1 555 010 0000";
       var btn = el("button", "btn btn-primary btn-sm", "Send test");
       btn.addEventListener("click", function () {

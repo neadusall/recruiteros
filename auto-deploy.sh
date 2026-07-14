@@ -20,7 +20,7 @@ cd "$DIR" || { echo "$(date -u) no $DIR" >> "$LOG"; exit 0; }
 # Older installs still carry a `DATABASE_URL=...@db:5432/recruiteros` line in
 # .env.production that used to force the fragile pg backend (and enable-db.sh
 # even did `docker volume rm pg_data`, wiping every account on deploy). Strip
-# that line ONCE so the app can never be flipped back onto Postgres. taltxt's own
+# that line ONCE so the app can never be flipped back onto Postgres. OS Text's own
 # DATABASE_URL lives in money-maker-sms/.env.production and is left untouched.
 if [ ! -f "$DIR/.file-persistence-v1" ]; then
   echo "$(date -u) one-time: migrating to /data file persistence (strip stale DATABASE_URL)..." >> "$LOG"
@@ -98,17 +98,17 @@ fi
 
 echo "$(date -u) new commit $REMOTE (was $LOCAL), deploying..." >> "$LOG"
 git reset --hard "origin/$BRANCH" >> "$LOG" 2>&1
-# Pull/checkout submodules (OS Text / taltxt lives in money-maker-sms). reset
+# Pull/checkout submodules (OS Text lives in money-maker-sms). reset
 # --hard does NOT touch submodule working trees. TOLERATE failure (e.g. a private
 # submodule the server can't clone) — it must NEVER block the main app deploy.
 git submodule sync --recursive >> "$LOG" 2>&1 || true
-git submodule update --init --recursive >> "$LOG" 2>&1 || echo "$(date -u) submodule update failed — taltxt may be skipped" >> "$LOG"
-# Deploy. Try the full stack; if any service (e.g. taltxt) fails to build, fall
+git submodule update --init --recursive >> "$LOG" 2>&1 || echo "$(date -u) submodule update failed — OS Text may be skipped" >> "$LOG"
+# Deploy. Try the full stack; if any service (e.g. the `taltxt` OS Text service) fails to build, fall
 # back to (re)building just the core app + db + caddy so app updates ALWAYS ship.
 if docker compose up -d --build >> "$LOG" 2>&1; then
   echo "$(date -u) deploy complete (full stack)" >> "$LOG"
 else
-  echo "$(date -u) full build failed — deploying core only (skipping taltxt)" >> "$LOG"
+  echo "$(date -u) full build failed — deploying core only (skipping the OS Text service)" >> "$LOG"
   docker compose up -d --build --no-deps app >> "$LOG" 2>&1 || true
   docker compose up -d --no-deps db caddy >> "$LOG" 2>&1 || true
   echo "$(date -u) deploy complete (core only)" >> "$LOG"

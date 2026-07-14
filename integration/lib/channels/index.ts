@@ -6,14 +6,14 @@
  *
  *   email     -> Instantly
  *   linkedin  -> Unipile (preferred) or SalesRobot
- *   sms       -> TalTxt (post-engagement) / Telnyx (raw 10DLC)
+ *   sms       -> OS Text (post-engagement) / Telnyx (raw 10DLC)
  *   voice     -> Telnyx dialer with Premium AMD
  *
  * Each send returns a normalized result and logs a person_event so the ATS sees
  * every touch, exactly as the reference does.
  */
 
-import { instantly, unipile, salesrobot, taltxt, telnyx, freshLinkedin, tomba } from "../providers";
+import { instantly, unipile, salesrobot, ostext, telnyx, freshLinkedin, tomba } from "../providers";
 import { cred } from "../providers/http";
 import { withWorkspaceCreds } from "../connected";
 import { getCore } from "../core/repository";
@@ -172,9 +172,9 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
     }
     case "sms": {
       const to = t.prospect.phone ?? "";
-      // Prefer TalTxt (campaign inbox); fall back to raw Telnyx 10DLC.
-      if (taltxt.configured()) {
-        const r: any = await taltxt.sendSms(t.campaignChannelIds?.instantlyCampaignId ?? "default", to, t.text);
+      // Prefer OS Text (campaign inbox); fall back to raw Telnyx 10DLC.
+      if (ostext.configured()) {
+        const r: any = await ostext.sendSms(t.campaignChannelIds?.instantlyCampaignId ?? "default", to, t.text);
         return { ok: true, channel: "sms", provider: "taltxt", dryRun: r?.dryRun };
       }
       const r: any = await telnyx.sendSms(to, t.text);

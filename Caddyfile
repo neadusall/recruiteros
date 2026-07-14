@@ -16,9 +16,10 @@ recruitersos.co, www.recruitersos.co {
 	reverse_proxy app:3000
 }
 
-# OS Text (taltxt) — the embedded SMS app on its own subdomain. The portal's
+# OS Text: the embedded SMS app on its own subdomain. The portal's
 # "OS Text" panel iframes this. Caddy fetches/renews its Let's Encrypt cert
 # automatically once taltxt.recruitersos.co's DNS A record points here.
+# (The taltxt host/service names are legacy wire ids; the product is OS Text.)
 taltxt.recruitersos.co {
 	encode zstd gzip
 	reverse_proxy taltxt:3000

@@ -9,7 +9,7 @@ How touches go out and how replies come back. All paths are under
 - **Purpose:** The unified send layer routing touches to provider APIs (email/LinkedIn/SMS/voice) and the enrichment waterfall for discovering contact info. Every outbound touch logs a `person_event` to the ATS.
 - **Key files:** `index.ts` (send dispatch + enrichment), providers abstraction, Telnyx/Instantly/Unipile integrations.
 - **Main exports / entry points:** `sendTouch()` (dispatch a single touch and log to ATS), `enrich()` (resolve email/phone/title via Fresh LinkedIn and Tomba).
-- **Depends on:** `core`, `ats`, `providers` (instantly, unipile, salesrobot, taltxt, telnyx, freshLinkedin, tomba), `signals/phoneClassify`.
+- **Depends on:** `core`, `ats`, `providers` (instantly, unipile, salesrobot, ostext, telnyx, freshLinkedin, tomba), `signals/phoneClassify`.
 - **Start here:** `integration/lib/channels/index.ts`
 
 ### outreach
@@ -56,7 +56,7 @@ How touches go out and how replies come back. All paths are under
 
 ### response
 - **Purpose:** End-to-end inbound reply pipeline: normalize webhook → match prospect → classify intent → route (execute rules, update prospect, suppress, log ATS event).
-- **Key files:** `index.ts` (orchestration), `ingest.ts` (webhook normalizers: Instantly/Unipile/TalTxt), `classify.ts` (fast-path heuristics + Claude classifier), `router.ts` (rule execution, prospect/ATS updates), `rules.ts` (routing rules by class), `repository.ts` (inbox/suppression store), `types.ts` (ProcessedResponse, Classification).
+- **Key files:** `index.ts` (orchestration), `ingest.ts` (webhook normalizers: Instantly/Unipile/OS Text), `classify.ts` (fast-path heuristics + Claude classifier), `router.ts` (rule execution, prospect/ATS updates), `rules.ts` (routing rules by class), `repository.ts` (inbox/suppression store), `types.ts` (ProcessedResponse, Classification).
 - **Main exports / entry points:** `processInbound()` (one webhook → processed result, idempotent on message id), `classify()`, `route()`, `suppress()` (DNC), `markBooked()`.
-- **Depends on:** `core`, `ats`, `providers` (Instantly, Unipile, TalTxt), `@anthropic-ai/sdk`.
+- **Depends on:** `core`, `ats`, `providers` (Instantly, Unipile, OS Text), `@anthropic-ai/sdk`.
 - **Start here:** `integration/lib/response/index.ts`

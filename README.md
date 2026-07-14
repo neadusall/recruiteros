@@ -34,7 +34,7 @@ by build, deploy, or server machinery.
 | [`lume-jobs/`](lume-jobs/) | Backend for the lumesp.com job board + its team portal. |
 | [`lumesp-web/`](lumesp-web/) | Static white-label marketing site for lumesp.com, served directly by Caddy. |
 | [`searxng/`](searxng/) | SearXNG meta-search config: the free search backend for the X-ray people finder. |
-| [`money-maker-sms/`](money-maker-sms/) | OS Text (taltxt), the SMS app. **Git submodule** with its own repo. |
+| [`money-maker-sms/`](money-maker-sms/) | OS Text, the SMS app. **Git submodule** with its own repo. |
 | [`docs/`](docs/) | All cross-cutting documentation: structure map, setup guides, playbooks, runbooks, designs, changelog. |
 
 Root shell scripts (`deploy.sh`, `auto-deploy.sh`, `set-*.sh`, `setup-*.sh`) are server

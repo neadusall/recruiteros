@@ -4,7 +4,7 @@
  * every provider before processing.
  *
  *  - Instantly / SalesRobot / Unipile: HMAC-SHA256 over the raw body.
- *  - TalTxt / Telnyx:                  ED25519 over `timestamp|payload`.
+ *  - OS Text / Telnyx:                 ED25519 over `timestamp|payload`.
  *
  * Each is a no-op (returns true) when its secret is unset, so dev works without
  * credentials; set the secret in production to enforce.

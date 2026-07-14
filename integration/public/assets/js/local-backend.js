@@ -200,10 +200,10 @@
         fields: [{ key: "TOMBA_API_KEY", label: "Tomba key", required: true, secret: true, placeholder: "ta_xxxx…" }, { key: "TOMBA_SECRET", label: "Tomba secret", required: true, secret: true, placeholder: "ts_xxxx…" }],
         steps: ["Create a Tomba account and open Dashboard → API.", "Copy both the Key (ta_…) and the Secret (ts_…).", "Paste both below, Save, then Test."],
         docsUrl: "https://tomba.io/dashboard/api", docsLabel: "Tomba API keys ↗", present: [] },
-      { id: "taltxt", label: "TalTxt (SMS)", status: "red", requiredFor: ["recruiting"],
+      { id: "taltxt", label: "OS Text (SMS)", status: "red", requiredFor: ["recruiting"],
         blurb: "Post-engagement SMS + opt-out mirror for the recruiting motion.",
-        fields: [{ key: "TALTXT_API_KEY", label: "API key", required: true, secret: true, placeholder: "paste your TalTxt API key" }, { key: "TALTXT_API_URL", label: "API URL", required: false, placeholder: "https://api.taltxt.io", hint: "Optional, leave blank for the default endpoint." }],
-        steps: ["Connect your TalTxt workspace and provision a 10DLC number.", "Copy the API key from TalTxt settings (and the API URL if self-hosted).", "Paste below, Save, then Test."], present: [] },
+        fields: [{ key: "TALTXT_API_KEY", label: "API key", required: true, secret: true, placeholder: "paste your OS Text API key" }, { key: "TALTXT_API_URL", label: "API URL", required: false, placeholder: "https://your-sms-endpoint", hint: "Optional, leave blank for the default endpoint." }],
+        steps: ["Turn on OS Text and provision a 10DLC number.", "Copy the API key from OS Text settings (and the API URL if self-hosted).", "Paste below, Save, then Test."], present: [] },
       { id: "telnyx", label: "Telnyx (calling engine)", status: "green", requiredFor: ["recruiting"],
         blurb: "The calling engine for Voice Drops. Add your API key and the number you call from.",
         fields: [{ key: "TELNYX_API_KEY", label: "API key", required: true, secret: true, placeholder: "KEY01…" }, { key: "TELNYX_FROM_NUMBER", label: "Caller-ID number (E.164)", required: false, placeholder: "+13105551234", hint: "The number you call from." }],
@@ -215,7 +215,7 @@
     ];
   }
 
-  // OS Text (taltxt) onboarding state, a fresh recruiting company starts with
+  // OS Text onboarding state, a fresh recruiting company starts with
   // nothing set up and walks the in-app step-by-step wizard to go live.
   function defaultOstext() {
     return { business: {}, brand: { status: "not_started" }, number: { value: "" },
@@ -1055,8 +1055,8 @@
 
     var ats = { connected: atsGreen, label: "ATS (system of record)", state: atsGreen ? "ready" : "action",
       detail: atsGreen ? "Connected, every reply and touch logs to your ATS." : "Not connected. Connect your ATS so prospects, replies, and placements sync automatically." };
-    var sms = { connected: smsGreen, label: "SMS (TalTxt)", state: smsGreen ? "ready" : smsYellow ? "warming" : "action",
-      detail: smsGreen ? "Connected, post-engagement texts and opt-outs are live." : smsYellow ? "Key added, run a test to verify your TalTxt connection." : "Not connected. Connect TalTxt to add compliant SMS to your sequences." };
+    var sms = { connected: smsGreen, label: "SMS (OS Text)", state: smsGreen ? "ready" : smsYellow ? "warming" : "action",
+      detail: smsGreen ? "Connected, post-engagement texts and opt-outs are live." : smsYellow ? "Key added, run a test to verify your OS Text connection." : "Not connected. Turn on OS Text to add compliant SMS to your sequences." };
 
     var remaining = Math.max(0, f.creditsIncluded - f.creditsUsed);
     var pct = f.creditsIncluded > 0 ? Math.round((remaining / f.creditsIncluded) * 100) : 0;

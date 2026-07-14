@@ -26,7 +26,7 @@
 | Phone / voice | **Telnyx** (voice, Premium AMD, 10DLC SMS, number lookup) | ✅ live | ~$0.007/min + numbers |
 | Direct dial | Apify `phone-number-finder` + People Data Labs | ✅ live, **gated** by $0.03 cap | ~$0.10/dial found |
 | Email sending | **Instantly.ai** (campaign, interim → self-hosted MTA) + Resend (system) | ✅ Instantly wired | inbox-based, ~$0.004/send |
-| SMS (OS Text) | **taltxt** submodule on Telnyx | ✅ live | ~$0.004–0.008/segment |
+| SMS (OS Text) | **money-maker-sms** submodule on Telnyx | ✅ live | ~$0.004–0.008/segment |
 | LinkedIn | Unipile API + Playwright scraper sidecar | ✅ live | $0–30/account/mo |
 | Orchestration | Daily cadence runner (07:00→09:00) + campaign state machine | ✅ live | n/a |
 
@@ -168,7 +168,7 @@ Programmable voice with **Premium AMD** (answering-machine detection), 10DLC SMS
 - **Cost:** `inbox_month` **$2.50/inbox** (≈750 safe sends/mo), `domain_month` **$1.00/domain** (~3 inboxes each). Instantly platform fee optional ~$37–97/mo or **$0** on own inboxes.
 - **Direction:** Instantly is the **interim** sender; the chosen path is **self-hosted** (Postal MTA + our own warm-up/deliverability engine), with the Phase-1 foundation already shipped in `lib/sending/` (see §9.1 + the design doc). `Winnr`/`Mailivery` were considered and **dropped** — never in the codebase.
 
-### 7c. SMS (OS Text / taltxt)
+### 7c. SMS (OS Text)
 `money-maker-sms` submodule (self-hosted Postgres), embedded via SSO iframe. Telnyx-backed, QStash (`QSTASH_*`) for scheduled sends.
 
 ### 7d. LinkedIn

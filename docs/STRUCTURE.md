@@ -40,7 +40,7 @@ between pages. They look like clutter but they are load-bearing. See "Don't move
 | [`lume-jobs/`](../lume-jobs/) | **lumesp.com job-board backend** (postings + applications + team portal). Own container; Caddy proxies `/api/*` on lumesp.com to it. | You're changing the Lume job board. |
 | [`lumesp-web/`](../lumesp-web/) | **Static white-label marketing site** for lumesp.com. Served directly by Caddy (volume mount, no build). | You're changing lumesp.com pages. |
 | [`searxng/`](../searxng/) | **SearXNG config** (`settings.yml`) for the free X-ray people-finder search backend. Mounted into the searxng container. | You're tuning the free search backend. JSON format MUST stay enabled. |
-| [`money-maker-sms/`](../money-maker-sms/) | **OS Text (taltxt)**, separate SMS app, embedded in the portal via iframe. **Git submodule** (own repo). | You're changing OS Text. `cd` in and treat as its own project. |
+| [`money-maker-sms/`](../money-maker-sms/) | **OS Text**, separate SMS app, embedded in the portal via iframe. **Git submodule** (own repo). | You're changing OS Text. `cd` in and treat as its own project. |
 | [`dist/`](../dist/) | Packaged extension zip(s). Build output. | Never by hand, produced by `extension/package.ps1`. |
 | [`docs/`](.) | **All project documentation** (this reorg). See the docs tree below. | You're writing/reading setup guides, playbooks, runbooks, designs. |
 
@@ -158,10 +158,10 @@ Their location is pinned by build/deploy/serve machinery. Moving them breaks the
 | `assets/` | `sync-public.cjs` copies `root/assets` → `public/assets`. |
 | `integration/`, `money-maker-sms/`, `scraper/` | `vercel.json`, `Dockerfile`, `docker-compose.yml`, `.gitmodules`. |
 | `deploy.sh` | Curl'd by URL: `raw.githubusercontent.com/.../main/deploy.sh`. |
-| `auto-deploy.sh`, `enable-db.sh`, `install-auto-deploy.sh`, `taltxt-db-setup.sh` | Hard-coded `$DIR/<name>` paths in `deploy.sh` + a **systemd unit** on the live server. |
+| `auto-deploy.sh`, `enable-db.sh`, `install-auto-deploy.sh`, `ostext-db-setup.sh` | Hard-coded `$DIR/<name>` paths in `deploy.sh` + a **systemd unit** on the live server. |
 | All `set-*.sh` (adzuna, directdial, findwork, jobdata, rapidjobs, live-lean) | Operator runbooks + docs invoke them as `bash /opt/recruiteros/set-*.sh` on the server. |
 | `setup-egress.sh`, `setup-worker.sh`, `setup-video-worker.sh`, `setup-minio.sh`, `deploy-video-backbone.sh` | `auto-deploy.sh` and worker boxes call them at `$DIR/<name>`; fleet docs say `bash setup-worker.sh` from a fresh clone root. |
-| `taltxt.env.example` | Referenced by `deploy.sh` comments as the taltxt env template. |
+| `ostext.env.example` | Referenced by `deploy.sh` comments as the OS Text env template. |
 | `Caddyfile`, `Dockerfile`, `docker-compose.yml`, `vercel.json`, `.env*` | Compose mounts / build config / URL pins. |
 | `lumesp-web/`, `searxng/` | Caddy + searxng containers volume-mount these paths directly (`docker-compose.yml`). |
 | `server.cjs`, `START-STUDIO.ps1`, `START-PORTAL.cmd`, `RUN.md` | Local dev entry points (RUN.md documents START-PORTAL.cmd next to it). |

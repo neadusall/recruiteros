@@ -8,7 +8,7 @@
  *   7:30  enrichment waterfall finds the right contacts
  *   7:45  LLM drafts email + LinkedIn + voice per prospect (A/B variants applied)
  *   8:30  human approval queue (15-20 min)
- *   9:00  push to channels (Instantly / Unipile / TalTxt); log person_events
+ *   9:00  push to channels (Instantly / Unipile / OS Text); log person_events
  *   all day  process replies via the Response pipeline
  *
  * This module orchestrates the 7:00->7:45 automated portion and surfaces the
@@ -35,7 +35,7 @@ export const CADENCE_SCHEDULE: CadenceStage[] = [
   { at: "07:30", name: "Enrich", automated: true, detail: "Waterfall (Fresh LinkedIn + Tomba) resolves the right contacts." },
   { at: "07:45", name: "LLM draft", automated: true, detail: "Claude drafts email + LinkedIn + voice per prospect; A/B variants applied." },
   { at: "08:30", name: "Approval queue", automated: false, detail: "Edit / kill / approve the batch; record HOT-tier voice notes." },
-  { at: "09:00", name: "Push to channels", automated: true, detail: "Emails -> Instantly, LinkedIn -> Unipile, SMS -> TalTxt; person_events logged." },
+  { at: "09:00", name: "Push to channels", automated: true, detail: "Emails -> Instantly, LinkedIn -> Unipile, SMS -> OS Text; person_events logged." },
 ];
 
 /** Coarse campaign SignalKind -> a representative SignalType the content library

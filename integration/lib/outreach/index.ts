@@ -2,7 +2,7 @@
  * RecruitersOS · Outreach readiness
  *
  * The Outreach tab's control surface. It composes one snapshot of everything a
- * customer must have working to send: the ATS connection, SMS (TalTxt), the
+ * customer must have working to send: the ATS connection, SMS (OS Text), the
  * enrichment waterfall (with a credit balance), Job Search (the white-labelled
  * signal scraper), warming sending domains down to the individual inbox, and
  * the warming LinkedIn accounts — plus the per-motion activation gate.
@@ -221,19 +221,19 @@ export async function outreachSnapshot(workspaceId: string, motion: Motion): Pro
       : "Not connected. Connect your ATS so prospects, replies, and placements sync automatically.",
   };
 
-  // SMS via TalTxt.
-  const taltxt = intg(ints, "taltxt");
-  const smsConnected = taltxt?.status === "green";
-  const smsYellow = taltxt?.status === "yellow";
+  // SMS via OS Text ("taltxt" is the legacy wire id for the integration row).
+  const smsIntg = intg(ints, "taltxt");
+  const smsConnected = smsIntg?.status === "green";
+  const smsYellow = smsIntg?.status === "yellow";
   const sms = {
     connected: smsConnected,
-    label: "SMS (TalTxt)",
+    label: "SMS (OS Text)",
     state: (smsConnected ? "ready" : smsYellow ? "warming" : "action") as ReadyState,
     detail: smsConnected
-      ? "Connected — post-engagement texts and opt-outs are live."
+      ? "Connected: post-engagement texts and opt-outs are live."
       : smsYellow
-      ? "Key added — run a test to verify your TalTxt connection."
-      : "Not connected. Connect TalTxt to add compliant SMS to your sequences.",
+      ? "Key added: run a test to verify your OS Text connection."
+      : "Not connected. Turn on OS Text to add compliant SMS to your sequences.",
   };
 
   // Enrichment waterfall + credits. Healthy when its underlying providers verify.

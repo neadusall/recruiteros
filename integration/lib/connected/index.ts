@@ -80,7 +80,7 @@ const CATALOG: IntegrationMeta[] = [
   {
     id: "ai",
     label: "AI engine",
-    blurb: "The AI brain behind JD Sourcing — writes/strengthens job descriptions, parses them, powers AI refine, and scores deep-vet. Required for the JD Sourcing tab.",
+    blurb: "The AI brain behind JD Sourcing: writes/strengthens job descriptions, parses them, powers AI refine, and scores deep-vet. Required for the JD Sourcing tab.",
     requiredFor: [],
     fields: [
       { key: "ANTHROPIC_API_KEY", label: "AI API key", required: true, secret: true, placeholder: "sk-ant-…", hint: "From the Anthropic Console → API Keys. Powers JD build/parse/refine and deep-vet." },
@@ -96,14 +96,14 @@ const CATALOG: IntegrationMeta[] = [
   {
     id: "unipile",
     label: "LinkedIn Automation",
-    blurb: "Sends connection invites, DMs and voice notes from your LinkedIn seats — fully managed for you, no API key to set up.",
+    blurb: "Sends connection invites, DMs and voice notes from your LinkedIn seats, fully managed for you, no API key to set up.",
     requiredFor: ["bd", "recruiting"],
     // Managed: RecruitersOS provides the underlying automation account (server-side
     // UNIPILE_API_KEY), so the admin never enters a key. They only connect their
     // own LinkedIn seat through the hosted sign-in. The optional account id lets a
     // workspace pin a specific connected seat once linked.
     fields: [
-      { key: "UNIPILE_ACCOUNT_ID", label: "LinkedIn account id", required: false, placeholder: "auto-filled once you connect a seat", hint: "Optional — leave blank to use the seat you connect in LinkedIn Automation." },
+      { key: "UNIPILE_ACCOUNT_ID", label: "LinkedIn account id", required: false, placeholder: "auto-filled once you connect a seat", hint: "Optional: leave blank to use the seat you connect in LinkedIn Automation." },
     ],
     steps: [
       "LinkedIn Automation is provided for you on a managed account, so there's no Unipile key to enter.",
@@ -146,7 +146,7 @@ const CATALOG: IntegrationMeta[] = [
   {
     id: "jd_sourcing",
     label: "JD Sourcing (RapidAPI people search)",
-    blurb: "Powers the JD Sourcing tab — people-search to find candidates from a JD, plus profile lookup for deep-vetting. Bring your own RapidAPI account. Placeholders below are prefilled for the Fresh LinkedIn Scraper API (by SaleLeads) — a fast, server-side listing that works without a CAPTCHA.",
+    blurb: "Powers the JD Sourcing tab: people-search to find candidates from a JD, plus profile lookup for deep-vetting. Bring your own RapidAPI account. Placeholders below are prefilled for the Fresh LinkedIn Scraper API (by SaleLeads), a fast, server-side listing that works without a CAPTCHA.",
     requiredFor: [],
     fields: [
       { key: "RAPIDAPI_KEY", label: "RapidAPI key", required: true, secret: true, placeholder: "paste your RapidAPI key", hint: "Your own RapidAPI account key (the x-rapidapi-key value). Billed to you." },
@@ -158,17 +158,17 @@ const CATALOG: IntegrationMeta[] = [
       { key: "RAPIDAPI_PROFILE_HOST", label: "Deep-vet · host", required: false, placeholder: "fresh-linkedin-scraper-api.p.rapidapi.com", hint: "Same host as Search. Enables deep-vet against full work history. Leave blank to skip deep-vet." },
       { key: "RAPIDAPI_PROFILE_PATH", label: "Deep-vet · path", required: false, placeholder: "/api/v1/user/profile?username={username}", hint: "Profile endpoint. {username} is filled with the candidate's …/in/<handle> slug automatically; use {url} instead if your listing wants the full profile URL." },
       { key: "RAPIDAPI_PROFILE_METHOD", label: "Deep-vet · method", required: false, placeholder: "GET", hint: "GET or POST. Enter GET for the Fresh listing. Leave blank = GET." },
-      { key: "RAPIDAPI_PROFILE_BODY_KEY", label: "Deep-vet · URL field", required: false, placeholder: "link", hint: "POST only — ignore for the Fresh (GET) listing. Body key the profile endpoint expects the URL under (person_deep uses 'link')." },
+      { key: "RAPIDAPI_PROFILE_BODY_KEY", label: "Deep-vet · URL field", required: false, placeholder: "link", hint: "POST only: ignore for the Fresh (GET) listing. Body key the profile endpoint expects the URL under (person_deep uses 'link')." },
       // --- Free first pass (optional): Google Programmable Search over the X-ray boolean ---
-      { key: "GOOGLE_CSE_KEY", label: "Free pass · Google API key", required: false, secret: true, placeholder: "AIza…", hint: "Optional. Google Custom Search JSON API key — gives 100 FREE searches/day that run before any paid lookup. From console.cloud.google.com → APIs → Custom Search API." },
+      { key: "GOOGLE_CSE_KEY", label: "Free pass · Google API key", required: false, secret: true, placeholder: "AIza…", hint: "Optional. Google Custom Search JSON API key: gives 100 FREE searches/day that run before any paid lookup. From console.cloud.google.com → APIs → Custom Search API." },
       { key: "GOOGLE_CSE_CX", label: "Free pass · Search engine ID (cx)", required: false, placeholder: "xxxxxxxxxxxxx", hint: "Optional. Your Programmable Search Engine ID. Create one at programmablesearchengine.google.com set to search the entire web." },
     ],
     steps: [
-      "Subscribe to the Fresh LinkedIn Scraper API (by SaleLeads) on RapidAPI — the free plan is enough to start.",
+      "Subscribe to the Fresh LinkedIn Scraper API (by SaleLeads) on RapidAPI. The free plan is enough to start.",
       "SEARCH → host: fresh-linkedin-scraper-api.p.rapidapi.com · path: /api/v1/search/people?name={query}&page={page}&limit=10 · method: GET",
-      "DEEP-VET (optional) → host: same · path: /api/v1/user/profile?username={username} · method: GET — {username} is filled in per candidate.",
+      "DEEP-VET (optional) → host: same · path: /api/v1/user/profile?username={username} · method: GET. {username} is filled in per candidate.",
       "FREE PASS (optional) → add a Google Custom Search key + engine ID (cx) to get 100 free searches/day that run before any paid lookup.",
-      "Paste your RapidAPI key, fill the values above exactly, Save, then Test — it should go green.",
+      "Paste your RapidAPI key, fill the values above exactly, Save, then Test. It should go green.",
     ],
     docsUrl: "https://rapidapi.com/saleleads-saleleads-default/api/fresh-linkedin-scraper-api",
     docsLabel: "Fresh LinkedIn Scraper API on RapidAPI ↗",
@@ -191,17 +191,17 @@ const CATALOG: IntegrationMeta[] = [
     docsLabel: "Tomba API keys ↗",
   },
   {
-    id: "taltxt",
-    label: "TalTxt (SMS)",
+    id: "taltxt", // legacy wire id (DB rows + webhook source); the product name is OS Text
+    label: "OS Text (SMS)",
     blurb: "Post-engagement SMS + opt-out mirror for the recruiting motion.",
     requiredFor: ["recruiting"],
     fields: [
-      { key: "TALTXT_API_KEY", label: "API key", required: true, secret: true, placeholder: "paste your TalTxt API key" },
-      { key: "TALTXT_API_URL", label: "API URL", required: false, placeholder: "https://api.taltxt.io", hint: "Optional — leave blank for the default endpoint." },
+      { key: "TALTXT_API_KEY", label: "API key", required: true, secret: true, placeholder: "paste your OS Text API key" },
+      { key: "TALTXT_API_URL", label: "API URL", required: false, placeholder: "https://your-sms-endpoint", hint: "Optional: leave blank for the default endpoint." },
     ],
     steps: [
-      "Connect your TalTxt workspace and provision a 10DLC number.",
-      "Copy the API key from TalTxt settings (and the API URL if self-hosted).",
+      "Turn on OS Text and provision a 10DLC number.",
+      "Copy the API key from OS Text settings (and the API URL if self-hosted).",
       "Paste below, Save, then Test.",
     ],
   },
@@ -213,12 +213,12 @@ const CATALOG: IntegrationMeta[] = [
     fields: [
       { key: "TELNYX_API_KEY", label: "API key", required: true, secret: true, placeholder: "KEY01…" },
       { key: "TELNYX_FROM_NUMBER", label: "Sender / caller-ID number (E.164)", required: false, placeholder: "+13105551234", hint: "The number you send SMS and place calls from. Needed for both SMS and Voice Drops." },
-      { key: "TELNYX_CONNECTION_ID", label: "Call Control connection id (voice)", required: false, placeholder: "2890…", hint: "Required for Voice Drops — the Call Control App the dialer rides on. Telnyx → Voice → Call Control Apps → your app's App ID." },
-      { key: "TELNYX_MESSAGING_PROFILE_ID", label: "Messaging profile id (SMS)", required: false, placeholder: "optional", hint: "For SMS — the 10DLC messaging profile your number is on." },
+      { key: "TELNYX_CONNECTION_ID", label: "Call Control connection id (voice)", required: false, placeholder: "2890…", hint: "Required for Voice Drops: the Call Control App the dialer rides on. Telnyx → Voice → Call Control Apps → your app's App ID." },
+      { key: "TELNYX_MESSAGING_PROFILE_ID", label: "Messaging profile id (SMS)", required: false, placeholder: "optional", hint: "For SMS: the 10DLC messaging profile your number is on." },
     ],
     steps: [
       "Create an API key in Telnyx (Auth → API Keys).",
-      "Add a 10DLC-registered number — it's both your SMS sender and your voice caller-ID.",
+      "Add a 10DLC-registered number: it's both your SMS sender and your voice caller-ID.",
       "For Voice Drops: create a Call Control App (Voice → Call Control Apps), copy its App ID into the connection-id field, and assign your number to that app.",
       "For SMS: copy your messaging profile id (Messaging → Messaging Profiles).",
       "Paste below, Save, then Test.",

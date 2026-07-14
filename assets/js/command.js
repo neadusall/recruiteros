@@ -7947,7 +7947,7 @@
      The email infrastructure now runs on the dedicated RecruitersOS Mail
      platform (Azure Communication Services): domains, sender mailboxes, warmup,
      deliverability health, MPP/bot-filtered open + click tracking, and the reply
-     inbox. This panel embeds that app, the same pattern OS Text uses for taltxt.
+     inbox. This panel embeds that app, the same pattern the OS Text embed uses.
      The mail app runs on its own host; set window.RECRUITEROS_MAIL_URL to point
      at it (defaults to the mail subdomain). Stand it up via docs/setup/DEPLOY-EMAIL.md. */
   var MAIL_BASE = (typeof window !== "undefined" && window.RECRUITEROS_MAIL_URL) || "https://mail.recruitersos.co";
@@ -8810,14 +8810,14 @@
     loadRuns();
   }
 
-  /* ---------------- OS Text (taltxt), single sign-on embed ----------------
+  /* ---------------- OS Text, single sign-on embed ----------------
      OS Text loads right inside the Command Center panel (the sidebar stays), so
      it populates in the tab like every other view. The iframe loads the portal's
      /api/ostext/enter endpoint, which (server-side, session-gated) signs you into
-     taltxt and lands you straight in the app, no second login. The same app is
+     the SMS engine and lands you straight in the app, no second login. The same app is
      also available full-screen at /text.
 
-     Local dev: set window.RECRUITEROS_OSTEXT_URL to a taltxt URL to embed it
+     Local dev: set window.RECRUITEROS_OSTEXT_URL to a local SMS-engine URL to embed it
      directly (bypassing the SSO endpoint). */
   var OSTEXT_SRC = (typeof window !== "undefined" && window.RECRUITEROS_OSTEXT_URL) || "/api/ostext/enter";
 
@@ -8831,7 +8831,7 @@
 
   // OS Text is gated behind a one-time setup so a recruiting company can stand up
   // compliant business texting (10DLC brand + number + consent) before sending.
-  // Once launched, the taltxt engine embeds as before. If the setup endpoint isn't
+  // Once launched, the SMS engine embeds as before. If the setup endpoint isn't
   // present (e.g. the real backend hasn't shipped it), we fall back to embedding
   // the engine directly so OS Text is never blocked in production.
   function renderOstext(el) {
@@ -10916,16 +10916,16 @@
 
     function howToModal(which) {
       var ats = which === "ats";
-      var title = ats ? "Connect your ATS" : "Connect SMS (TalTxt)";
+      var title = ats ? "Connect your ATS" : "Connect SMS (OS Text)";
       var sub = ats ? "Loxo is the verified, primary ATS. Every reply, touch, and placement syncs once it's connected."
         : "Add compliant post-engagement texting and opt-outs to your sequences.";
       var steps = ats
         ? ["Open the ATS tab and choose Loxo as your system of record.",
            "Under Accounts → API key, add your Loxo API key (service: Loxo).",
            "Go to Connected and press Test on Loxo until it turns green."]
-        : ["Get your TalTxt API key from your TalTxt dashboard.",
-           "Under Accounts → API key, add it (service: TalTxt).",
-           "Go to Connected and press Test on TalTxt until it turns green."];
+        : ["Get your API key from OS Text settings.",
+           "Under Accounts → API key, add it (service: OS Text).",
+           "Go to Connected and press Test on OS Text until it turns green."];
       var goRoute = ats ? "ats" : "connected";
       var goCap = ats ? canAts : canInteg;
       var foot = goCap
@@ -15165,10 +15165,10 @@
         { status: "nurture", bd: "Nurture", recruiting: "Nurture" }
       ],
       phases: [
-        { n: 1, title: "Infrastructure pre-flight", time: "one-time", done: "Overview capacity strip is green", items: ["≥1 warmed LinkedIn account", "≥5 warmed domains", "Job Search signal feed", "Enrichment waterfall", "ATS connected", "TalTxt + Telnyx 10DLC"] },
+        { n: 1, title: "Infrastructure pre-flight", time: "one-time", done: "Overview capacity strip is green", items: ["≥1 warmed LinkedIn account", "≥5 warmed domains", "Job Search signal feed", "Enrichment waterfall", "ATS connected", "OS Text + Telnyx 10DLC"] },
         { n: 2, title: "Create campaign shell", time: "5 min", done: "Draft with ICP + signals", items: ["Name + one-line goal", "ICP definition", "≥1 signal enabled"] },
         { n: 3, title: "Search & discovery", time: "5 min", done: "Preview shows the right people", items: ["Role hiring for", "Persona title", "Decision-maker target", "Live query preview"] },
-        { n: 4, title: "Connect channels", time: "3 min", done: "All channels show connected", items: ["Instantly campaign id", "LinkedIn account", "TalTxt toggle", "Loxo list id"] },
+        { n: 4, title: "Connect channels", time: "3 min", done: "All channels show connected", items: ["Instantly campaign id", "LinkedIn account", "OS Text toggle", "Loxo list id"] },
         { n: 5, title: "Sequence methodology", time: "3 min", done: "Methodology + assets locked", items: ["Methodology", "Voice-note threshold (80)", "LLM personalization", "Content assets"] },
         { n: 6, title: "A/B variants", time: "2 min", done: "2+ variants, weights = 100%", items: ["≥2 variants", "Traffic weights 50/50", "ONE variable differs"] },
         { n: 7, title: "Soft launch & activate", time: "5 min", done: "Status = Active, first 25 live", items: ["Daily cap = 25", "Build prospect list", "Activate campaign", "Day-1 approval review"] }
@@ -15203,7 +15203,7 @@
         { at: "07:30", name: "Enrich", automated: true, detail: "Enrichment waterfall finds work emails and direct dials." },
         { at: "07:45", name: "LLM draft", automated: true, detail: "Claude drafts email + LinkedIn + voice; A/B applied." },
         { at: "08:30", name: "Approval queue", automated: false, detail: "Edit / kill / approve; record HOT voice notes." },
-        { at: "09:00", name: "Push to channels", automated: true, detail: "Instantly / Unipile / TalTxt; person_events logged." }
+        { at: "09:00", name: "Push to channels", automated: true, detail: "Instantly / Unipile / OS Text; person_events logged." }
       ],
       assets: [
         { name: "Fintech placement case study", type: "case_study", campaignIds: ["c1"] },
@@ -15228,7 +15228,7 @@
         { id: "fresh_linkedin", label: "Profile enrichment", status: "green", requiredFor: ["bd", "recruiting"] },
         { id: "tomba", label: "Email finder", status: "yellow", requiredFor: ["bd"] },
         { id: "loxo", label: "Loxo (ATS)", status: "green", requiredFor: ["bd", "recruiting"] },
-        { id: "taltxt", label: "TalTxt (SMS)", status: "green", requiredFor: ["recruiting"] },
+        { id: "taltxt", label: "OS Text (SMS)", status: "green", requiredFor: ["recruiting"] },
         { id: "telnyx", label: "Telnyx 10DLC", status: "green", requiredFor: ["recruiting"] }
       ],
       atsVendors: [

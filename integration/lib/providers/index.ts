@@ -11,7 +11,7 @@
 import { InstantlyClient } from "./instantly";
 import { UnipileClient } from "./unipile";
 import { SalesRobotClient } from "./salesrobot";
-import { TalTxtClient } from "./taltxt";
+import { OsTextClient } from "./ostext";
 import { TelnyxClient } from "./telnyx";
 import { RapidApiClient } from "./rapidapi";
 import { FreshLinkedInClient } from "./freshlinkedin";
@@ -26,7 +26,7 @@ export { verifyWebhook, verifyTelnyxVoice } from "./signatures";
 export const instantly = new InstantlyClient();
 export const unipile = new UnipileClient();
 export const salesrobot = new SalesRobotClient();
-export const taltxt = new TalTxtClient();
+export const ostext = new OsTextClient();
 export const telnyx = new TelnyxClient();
 export const rapidapi = new RapidApiClient();
 export const freshLinkedin = new FreshLinkedInClient();
@@ -35,7 +35,7 @@ export const tidycal = new TidyCalClient();
 
 /** Everything that surfaces in the Connected tab (Loxo handled by the ATS adapter). */
 export const PROVIDERS: Record<string, ProviderClient> = {
-  instantly, unipile, salesrobot, taltxt, telnyx, rapidapi, fresh_linkedin: freshLinkedin, tomba, tidycal,
+  instantly, unipile, salesrobot, taltxt: ostext, telnyx, rapidapi, fresh_linkedin: freshLinkedin, tomba, tidycal,
 };
 
 export function getProvider(id: string): ProviderClient | undefined {

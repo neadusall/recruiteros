@@ -42,7 +42,7 @@ vars in `.env.example`, set `window.RECRUITEROS_API_BASE` on the pages, and
 idempotent on the provider message id:
 
 ```
-webhook (Instantly | Unipile/SalesRobot | TalTxt)
+webhook (Instantly | Unipile/SalesRobot | OS Text)
   -> normalize            lib/response/ingest.ts
   -> match prospect       by email / linkedin url / phone
   -> classify             lib/response/classify.ts (fast-path STOP, else Claude)
@@ -109,7 +109,7 @@ up the instant you add its key, no code change.
 | Instantly | `providers/instantly.ts` | Email send, pause, vitals, block-list | channels send, suppression DNC, health sweep |
 | Unipile | `providers/unipile.ts` | LinkedIn invite / DM / voice note | channels send |
 | SalesRobot | `providers/salesrobot.ts` | LinkedIn alt: add/pause/reply/tag/remove | channels send, suppression DNC |
-| TalTxt | `providers/taltxt.ts` | Post-engagement SMS, opt-out | channels send, suppression DNC |
+| OS Text | `providers/ostext.ts` | Post-engagement SMS, opt-out | channels send, suppression DNC |
 | Telnyx | `providers/telnyx.ts` | Raw 10DLC SMS, voice dialer + Premium AMD | channels send |
 | RapidAPI (JSearch) | `providers/rapidapi.ts` | Job scraper / signal pull | cadence signal step |
 | Fresh LinkedIn | `providers/freshlinkedin.ts` | Enrichment rung 1 (title/company) | channels `enrich()` |
@@ -117,7 +117,7 @@ up the instant you add its key, no code change.
 | Loxo | `ats/loxo.ts` | ATS system of record | every person_event |
 
 **Webhook signatures** ([`providers/signatures.ts`](lib/providers/signatures.ts)):
-Instantly / Unipile / SalesRobot use HMAC-SHA256; TalTxt / Telnyx use ED25519.
+Instantly / Unipile / SalesRobot use HMAC-SHA256; OS Text / Telnyx use ED25519.
 The Response webhook route verifies the signature over the raw body before
 processing (no-op until the secret is set).
 
@@ -127,7 +127,7 @@ configured-status (`configured N / total`); `POST /api/providers
 tab's "Test all" calls each provider's real `verify()`.
 
 **Send + enrich:** [`lib/channels/`](lib/channels/) routes a touch to the right
-provider (email→Instantly, linkedin→Unipile/SalesRobot, sms→TalTxt/Telnyx,
+provider (email→Instantly, linkedin→Unipile/SalesRobot, sms→OS Text/Telnyx,
 voice→Telnyx AMD) and logs a person_event per touch. The daily cadence calls
 `enrich()` at 7:30 and `pushApproved()` at 9:00 (`POST /api/campaigns/cadence
 {"action":"push"}`).

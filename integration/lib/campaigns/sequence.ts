@@ -4,7 +4,7 @@
  *
  * This is the reference "Sequence Anatomy" + "Per-Channel Touch Reference" as
  * data: email (7 touches, Instantly), LinkedIn (6 touches, Unipile/SalesRobot),
- * a Day-14 voice note for HOT-tier, and post-engagement SMS (TalTxt). The daily
+ * a Day-14 voice note for HOT-tier, and post-engagement SMS (OS Text). The daily
  * cadence and the LLM drafter read these specs to know what to generate and when.
  */
 

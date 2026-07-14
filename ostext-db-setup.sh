@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Set up OS Text (taltxt)'s database inside the shared `db` Postgres container:
+# Set up OS Text's database inside the shared `db` Postgres container:
 #   1. create the `taltxt` database if it doesn't exist
-#   2. push the taltxt Drizzle schema into it
+#   2. push the OS Text Drizzle schema into it
 #
-# Safe to re-run. Run it once after first deploy, and again any time taltxt's
+# Safe to re-run. Run it once after first deploy, and again any time OS Text's
 # schema changes (i.e. after bumping the money-maker-sms submodule). The stack
 # must be up (docker compose up -d) so the `db` container is reachable.
 set -euo pipefail
@@ -31,10 +31,10 @@ else
   echo "    created."
 fi
 
-echo "==> Pushing taltxt schema (drizzle-kit push)"
-# Use the taltxt image (it has Node) on the compose network; mount fresh source
+echo "==> Pushing OS Text schema (drizzle-kit push)"
+# Use the OS Text image (compose service `taltxt`; it has Node) on the compose network; mount fresh source
 # and install devDeps (drizzle-kit) into the mount. `db:5432` resolves on the net.
-# Run as root with a writable cache: the taltxt image's default user (nextjs)
+# Run as root with a writable cache: the image's default user (nextjs)
 # can't write node_modules into the root-owned host mount, which fails the push.
 # Force NODE_ENV=development + --include=dev: the image sets NODE_ENV=production,
 # which makes npm skip devDependencies — but drizzle-kit (the push tool) is one.
@@ -44,4 +44,4 @@ docker compose run --rm --user root --entrypoint "" \
   -e npm_config_cache=/tmp/.npm -e HOME=/tmp -e NODE_ENV=development \
   taltxt sh -lc "npm install --include=dev --no-audit --no-fund && npm run db:push"
 
-echo "==> Done. taltxt DB is ready (postgres://${DB_USER}:***@db:5432/${DB_NAME})."
+echo "==> Done. OS Text DB is ready (postgres://${DB_USER}:***@db:5432/${DB_NAME})."

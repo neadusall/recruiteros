@@ -297,4 +297,4 @@ Notes
   `.env.production.example` now document `INSTANTLY_API_KEY`,
   `INSTANTLY_WEBHOOK_SECRET`, and the email-finding/verify keys.
 - The same Response pipeline also handles LinkedIn (Unipile/SalesRobot) and SMS
-  (TalTxt) replies — see `../server/integration-architecture.md` for the LinkedIn outreach side.
+  (OS Text) replies — see `../server/integration-architecture.md` for the LinkedIn outreach side.

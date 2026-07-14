@@ -54,7 +54,7 @@ export type SignalKind =
 export interface ChannelConfig {
   instantlyCampaignId?: string;  // email (Instantly)
   linkedinAccountId?: string;    // LinkedIn (Unipile / SalesRobot)
-  smsEnabled?: boolean;          // SMS (TalTxt + Telnyx 10DLC)
+  smsEnabled?: boolean;          // SMS (OS Text + Telnyx 10DLC)
   loxoListId?: string;           // ATS list to sync into
 }
 

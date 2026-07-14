@@ -5,7 +5,7 @@
 # This script used to point the app at Postgres and `docker volume rm pg_data`
 # to re-init it with a fresh password. That was the single biggest cause of the
 # "logged out / account gone after every deploy" bug: it wiped every account
-# (and, since taltxt shares pg_data, OS Text's database too) and forced the app
+# (and, since OS Text shares pg_data, OS Text's database too) and forced the app
 # onto a fragile pg backend whose password drifted out of sync.
 #
 # The app now persists to the durable /data file volume (app_data, ROS_DATA_DIR

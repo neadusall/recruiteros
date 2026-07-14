@@ -4,7 +4,7 @@
  * `InboundResponse`, then match it to a prospect.
  *
  * Sources (from the reference): Instantly.ai (email), SalesRobot/Unipile
- * (LinkedIn DMs), TalTxt (SMS). Each is a separate webhook with its own shape.
+ * (LinkedIn DMs), OS Text (SMS). Each is a separate webhook with its own shape.
  */
 
 import { getCore } from "../core/repository";
@@ -63,7 +63,7 @@ export function fromUnipile(workspaceId: string, p: Raw): InboundResponse | null
   });
 }
 
-export function fromTalTxt(workspaceId: string, p: Raw): InboundResponse | null {
+export function fromOsText(workspaceId: string, p: Raw): InboundResponse | null {
   const evt = String(p.event ?? p.type ?? "");
   if (evt && !/message[._-]?received|inbound|reply/i.test(evt)) return null;
   return base(workspaceId, "taltxt", "sms", {
@@ -80,7 +80,7 @@ const NORMALIZERS: Record<ResponseSource, (ws: string, p: Raw) => InboundRespons
   instantly: fromInstantly,
   unipile: fromUnipile,
   salesrobot: fromUnipile,
-  taltxt: fromTalTxt,
+  taltxt: fromOsText,
 };
 
 export function normalize(source: ResponseSource, workspaceId: string, payload: Raw): InboundResponse | null {

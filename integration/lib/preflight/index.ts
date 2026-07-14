@@ -157,7 +157,7 @@ export function readiness(at: string): Readiness {
       "sms", "SMS (OS Text)", "channels", false,
       any("QSTASH_TOKEN", "TALTXT_PUBLIC_KEY"),
       missing("QSTASH_TOKEN"),
-      "Wire OS Text / taltxt (Telnyx 10DLC) and QStash for scheduled SMS.",
+      "Wire OS Text (Telnyx 10DLC) and QStash for scheduled SMS.",
     ),
 
     // ---- security (recommended in prod) ----

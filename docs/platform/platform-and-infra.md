@@ -36,7 +36,7 @@ The foundation everything else sits on. All paths are under
 ### providers
 - **Purpose:** Single registry of all external service integrations (Instantly, Unipile, Telnyx, etc.), with status checks and health verification.
 - **Key files:** `index.ts` (provider singletons + registry), `http.ts` (base client interface), individual providers (`instantly.ts`, `unipile.ts`, `telnyx.ts`, …).
-- **Main exports / entry points:** `instantly`, `unipile`, `salesrobot`, `taltxt`, `telnyx`, `rapidapi`, `freshLinkedin`, `tomba` (singletons), `getProvider()`, `providerStatuses()`, `verifyAll()`.
+- **Main exports / entry points:** `instantly`, `unipile`, `salesrobot`, `ostext`, `telnyx`, `rapidapi`, `freshLinkedin`, `tomba` (singletons), `getProvider()`, `providerStatuses()`, `verifyAll()`.
 - **Depends on:** `ats/loxo` (ATS adapter), external APIs.
 - **Start here:** `integration/lib/providers/index.ts` — the registry + what surfaces in Connected.
 
