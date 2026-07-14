@@ -34,7 +34,7 @@
         Array.prototype.forEach.call(brands, function (brand) {
           if (logo) {
             brand.innerHTML = '<img src="' + logo + '" alt="' + alt +
-              '" style="display:block;height:' + logoH + 'px;max-width:240px;object-fit:contain;object-position:left center">';
+              '" style="display:block;height:' + logoH + 'px;max-width:280px;object-fit:contain;object-position:left center">';
           } else if (b.brandName) {
             brand.textContent = b.brandName;
           }
