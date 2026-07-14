@@ -8,12 +8,32 @@
  */
 
 import { getBranding, setBranding } from "../../../lib/branding";
+import { presetForHost } from "../../../lib/branding/presets";
 import { requireSession, requireCapability, body, ok, fail } from "../../../lib/api";
 
 export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
-  return ok({ branding: await getBranding(g.ctx.workspace.id) });
+  const branding = await getBranding(g.ctx.workspace.id);
+  // Flagship white-label hosts (e.g. app.lumesp.com) are code-managed: the
+  // built-in preset's logo IS the brand identity there, so the portal chrome
+  // always matches the login screen pixel-for-pixel (same SVG lockup) instead
+  // of an older uploaded copy. Name, accent and logo size stay editable.
+  const preset = presetForHost(req.headers.get("host") || "");
+  if (preset) {
+    return ok({
+      branding: {
+        ...branding,
+        logoUrl: preset.logoUrl,
+        logoLightUrl: preset.logoLightUrl,
+        faviconUrl: preset.faviconUrl,
+        brandName: branding.brandName || preset.brandName,
+        accentColor: branding.accentColor || preset.accentColor,
+        logoScale: branding.logoScale || preset.logoScale,
+      },
+    });
+  }
+  return ok({ branding });
 }
 
 export async function POST(req: Request) {
