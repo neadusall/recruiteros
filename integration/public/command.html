@@ -10,12 +10,13 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="assets/css/styles.css?v=d524d6e5f4" />
   <link rel="stylesheet" href="assets/css/app.css?v=6cc27d0cdf" />
-  <link rel="stylesheet" href="assets/css/command.css?v=34f432fba6" />
+  <link rel="stylesheet" href="assets/css/command.css?v=b0ac4d70f5" />
   <link rel="stylesheet" href="assets/css/campaign-studio.css?v=ee5486c59c" />
   <link rel="stylesheet" href="assets/css/vetting.css?v=24f138619b" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232e5bd7'/><text x='50' y='69' font-size='58' text-anchor='middle' fill='%23ffffff' font-family='Arial' font-weight='bold'>R</text></svg>" />
-  <!-- Apply the saved light/dark theme before paint (no flash). -->
-  <script>(function(){try{var t=localStorage.getItem('ros_theme')||'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+  <!-- Apply the saved light/dark theme before paint (no flash). With no saved
+       preference, follow the operating system's appearance. -->
+  <script>(function(){try{var t=localStorage.getItem('ros_theme');if(!t)t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
   <!-- White-label anti-flash: on a customer domain, drop the house product name from
        the tab + the house favicon, and hide the wordmark until command.js paints the
        workspace/preset brand. Safety timeout reveals it even if branding can't load. -->
@@ -233,6 +234,7 @@
   <script src="assets/js/local-backend.js?v=e2bd5f759f"></script>
   <script src="assets/js/session-bridge.js?v=2727497284"></script>
   <script src="assets/js/wl-theme.js?v=1c8caa379d"></script>
-  <script src="assets/js/command.js?v=19994c10d4"></script>
+  <script src="assets/js/command.js?v=289efc28f6"></script>
+  <script src="assets/js/command-ux.js?v=ff2c1e4ee9"></script>
 </body>
 </html>

@@ -14,8 +14,9 @@
   <link rel="stylesheet" href="assets/css/campaign-studio.css" />
   <link rel="stylesheet" href="assets/css/vetting.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232e5bd7'/><text x='50' y='69' font-size='58' text-anchor='middle' fill='%23ffffff' font-family='Arial' font-weight='bold'>R</text></svg>" />
-  <!-- Apply the saved light/dark theme before paint (no flash). -->
-  <script>(function(){try{var t=localStorage.getItem('ros_theme')||'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+  <!-- Apply the saved light/dark theme before paint (no flash). With no saved
+       preference, follow the operating system's appearance. -->
+  <script>(function(){try{var t=localStorage.getItem('ros_theme');if(!t)t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
   <!-- White-label anti-flash: on a customer domain, drop the house product name from
        the tab + the house favicon, and hide the wordmark until command.js paints the
        workspace/preset brand. Safety timeout reveals it even if branding can't load. -->
@@ -234,5 +235,6 @@
   <script src="assets/js/session-bridge.js"></script>
   <script src="assets/js/wl-theme.js"></script>
   <script src="assets/js/command.js"></script>
+  <script src="assets/js/command-ux.js"></script>
 </body>
 </html>

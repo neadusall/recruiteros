@@ -1888,3 +1888,119 @@ body.app { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibili
 .pb-reply .rt { font-size: 14px; font-weight: 600; margin-bottom: 5px; }
 .pb-reply p { margin: 0 0 10px; font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
 .pb-reply .pb-go { font-size: 12px; }
+
+/* ============================================================
+   UX layer (command-ux.js): palette, rail, drawer, a11y, motion
+   ============================================================ */
+
+/* Skip link: hidden until keyboard focus */
+.skip-link {
+  position: absolute; left: 12px; top: -48px; z-index: 4000;
+  background: var(--brand); color: #fff; font-size: 13px; font-weight: 600;
+  padding: 8px 14px; border-radius: var(--radius-sm); transition: top .12s ease;
+}
+.skip-link:focus { top: 12px; }
+
+/* Route-change fade */
+#view.view-in { animation: viewIn .14s ease; }
+@keyframes viewIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* Skeleton loading */
+.skel { display: grid; gap: 12px; padding: 22px 0; max-width: 760px; }
+.skel-row { height: 14px; border-radius: 5px; background: var(--surface-2); position: relative; overflow: hidden; }
+.skel-row::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--border) 60%, transparent), transparent);
+  transform: translateX(-100%); animation: skelSweep 1.2s ease-in-out infinite;
+}
+.skel-row.w40 { width: 40%; } .skel-row.w60 { width: 60%; } .skel-row.w75 { width: 75%; }
+.skel-row.w85 { width: 85%; } .skel-row.w90 { width: 90%; }
+@keyframes skelSweep { to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .skel-row::after { animation: none; } #view.view-in { animation: none; } }
+
+/* Topbar palette trigger */
+#palOpen {
+  display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 10px;
+  background: var(--bg-soft); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-dim); font: inherit; font-size: 13px; cursor: pointer; transition: border-color .12s, color .12s;
+}
+#palOpen:hover { color: var(--text-muted); border-color: var(--border-strong); }
+#palOpen svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+#palOpen kbd {
+  font: 600 10.5px var(--mono); color: var(--text-dim); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px;
+}
+@media (max-width: 720px) { #palOpen span, #palOpen kbd { display: none; } #palOpen { padding: 0 8px; } }
+
+/* Command palette */
+.pal-bg {
+  position: fixed; inset: 0; z-index: 5000; background: rgba(16, 24, 40, .4);
+  display: flex; align-items: flex-start; justify-content: center; padding: 14vh 16px 16px;
+}
+.pal {
+  width: min(580px, 100%); background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); overflow: hidden;
+  display: flex; flex-direction: column; max-height: 60vh;
+}
+.pal-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.pal-head svg { width: 16px; height: 16px; fill: none; stroke: var(--text-dim); stroke-width: 1.7; stroke-linecap: round; flex: none; }
+.pal-head input { flex: 1; border: none; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 15px; }
+.pal-head input::placeholder { color: var(--text-dim); }
+.pal-esc { font: 600 10.5px var(--mono); color: var(--text-dim); background: var(--bg-soft); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; }
+.pal-list { overflow-y: auto; padding: 6px; }
+.pal-group { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); padding: 10px 10px 4px; }
+.pal-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 9px 10px; border: none; background: none; border-radius: var(--radius-sm);
+  color: var(--text); font: inherit; font-size: 14px; cursor: pointer;
+}
+.pal-item:hover { background: var(--surface-2); }
+.pal-item.sel { background: var(--brand-soft); color: var(--brand); }
+.pal-label { flex: 1; }
+.pal-hint { font-size: 11.5px; color: var(--text-dim); font-family: var(--mono); }
+.pal-item.sel .pal-hint { color: inherit; opacity: .75; }
+.pal-empty { padding: 26px 16px; text-align: center; color: var(--text-dim); font-size: 13.5px; }
+.pal-foot { display: flex; gap: 16px; padding: 9px 16px; border-top: 1px solid var(--border); background: var(--bg-soft); font-size: 11.5px; color: var(--text-dim); }
+.pal-foot b { font-weight: 600; color: var(--text-muted); font-family: var(--mono); font-size: 11px; }
+
+/* Sidebar rail toggle */
+#railToggle {
+  margin-top: 10px; align-self: flex-start;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: var(--radius-sm);
+  background: none; border: 1px solid transparent; color: var(--text-dim); cursor: pointer;
+}
+#railToggle:hover { background: var(--surface-2); color: var(--text); }
+#railToggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+
+/* Rail mode: icon-only sidebar */
+body.side-rail .shell { grid-template-columns: 60px 1fr; }
+body.side-rail .sidebar.cmd-side { padding: 14px 8px; }
+body.side-rail .brand, body.side-rail .portal-badge, body.side-rail .ws-card,
+body.side-rail .motion-toggle, body.side-rail .nav-group { display: none; }
+body.side-rail .nav-item { font-size: 0; gap: 0; justify-content: center; padding: 10px 0; position: relative; }
+body.side-rail .nav-item .ni { width: 18px; height: 18px; }
+body.side-rail .ni-badge { position: absolute; top: 4px; right: 6px; min-width: 8px; height: 8px; padding: 0; border-radius: 50%; font-size: 0; }
+body.side-rail .side-foot { padding-top: 8px; }
+body.side-rail #railToggle { align-self: center; margin-top: 8px; }
+
+/* Mobile drawer (below 920px the sidebar is otherwise hidden) */
+#navBurger { display: none; }
+#navScrim { display: none; }
+@media (max-width: 920px) {
+  #navBurger {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px; border-radius: var(--radius-sm);
+    background: none; border: 1px solid var(--border-strong); color: var(--text); cursor: pointer; flex: none;
+  }
+  #navBurger svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+  #navScrim { position: fixed; inset: 0; z-index: 2900; background: rgba(16, 24, 40, .45); opacity: 0; visibility: hidden; transition: opacity .2s; }
+  body.nav-open #navScrim { display: block; opacity: 1; visibility: visible; }
+  body.nav-open .sidebar.cmd-side {
+    display: flex !important;
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 3000;
+    width: min(84vw, 300px); box-shadow: var(--shadow-lg);
+  }
+  /* Rail mode is a desktop concept */
+  body.side-rail .shell { grid-template-columns: 1fr; }
+}
