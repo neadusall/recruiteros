@@ -8822,7 +8822,14 @@
   var OSTEXT_SRC = (typeof window !== "undefined" && window.RECRUITEROS_OSTEXT_URL) || "/api/ostext/enter";
 
   function ostextFrame(src) {
-    return '<div class="card" style="padding:0;overflow:hidden">' +
+    // The "open in a new tab" link is the escape hatch for browsers that block
+    // third-party iframe cookies (Safari, strict privacy modes): on a
+    // white-label portal domain the embedded sign-in is cross-site, but a
+    // top-level tab is first-party and always signs straight in.
+    return '<div style="display:flex;justify-content:flex-end;margin:0 0 8px">' +
+      '<a class="ep-link" href="' + esc(src) + '" target="_blank" rel="noopener">If texting does not load below, open OS Text in a new tab &#8599;</a>' +
+      "</div>" +
+      '<div class="card" style="padding:0;overflow:hidden">' +
       '<iframe src="' + esc(src) + '" title="OS Text" ' +
       'style="width:100%;height:calc(100vh - 160px);min-height:620px;border:0;border-radius:12px;background:var(--bg)" ' +
       'allow="clipboard-read; clipboard-write; microphone"></iframe>' +
