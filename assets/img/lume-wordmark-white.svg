@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 230 58" fill="none" role="img" aria-label="Lume Search Partners">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 62" fill="none" role="img" aria-label="Lume Search Partners">
   <defs>
-    <linearGradient id="arc" x1="70" y1="20" x2="160" y2="6" gradientUnits="userSpaceOnUse">
+    <linearGradient id="arc" x1="52" y1="19" x2="148" y2="5" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#0080A0"/>
       <stop offset="1" stop-color="#3FC4DE"/>
     </linearGradient>
   </defs>
-  <path d="M74 18 A34 34 0 0 1 156 18" stroke="url(#arc)" stroke-width="6" stroke-linecap="round" fill="none"/>
-  <text x="115" y="41" text-anchor="middle" font-family="'Helvetica Neue',Arial,sans-serif" font-weight="700" font-size="33" letter-spacing="4" fill="#ffffff">LUME</text>
-  <text x="115" y="53" text-anchor="middle" font-family="'Helvetica Neue',Arial,sans-serif" font-weight="600" font-size="8.5" letter-spacing="5.5" fill="#9fb3c8">SEARCH PARTNERS</text>
+  <path d="M52 19 A90 90 0 0 1 148 19" stroke="url(#arc)" stroke-width="5" stroke-linecap="round" fill="none"/>
+  <text x="103" y="46" text-anchor="middle" font-family="'Helvetica Neue',Arial,sans-serif" font-weight="700" font-size="30" letter-spacing="6" fill="#ffffff">LUME</text>
+  <text x="102" y="59" text-anchor="middle" font-family="'Helvetica Neue',Arial,sans-serif" font-weight="600" font-size="9.5" letter-spacing="4.6" fill="#9fb3c8">SEARCH PARTNERS</text>
 </svg>

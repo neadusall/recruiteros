@@ -21,13 +21,20 @@
       .then(function (d) {
         var b = d && d.branding;
         if (!b || (!b.logoUrl && !b.brandName && !b.accentColor)) return;
-        var theme = document.documentElement.getAttribute("data-theme") || "dark";
+        // Meridian is light-first: pages that want the dark skin set
+        // data-theme="dark" explicitly, so no attribute means light.
+        var theme = document.documentElement.getAttribute("data-theme") || "light";
         var logo = theme === "light" ? (b.logoLightUrl || b.logoUrl) : (b.logoUrl || b.logoLightUrl);
+        var scale = parseFloat(b.logoScale);
+        if (!isFinite(scale) || scale <= 0) scale = 1;
+        scale = Math.min(2.5, Math.max(0.5, scale));
+        var logoH = Math.round(52 * scale);
+        var alt = String(b.brandName || "logo").replace(/"/g, "&quot;");
         var brands = document.querySelectorAll(".brand");
         Array.prototype.forEach.call(brands, function (brand) {
           if (logo) {
-            brand.innerHTML = '<img src="' + logo + '" alt="' + (b.brandName || "logo") +
-              '" style="max-height:40px;max-width:200px;object-fit:contain">';
+            brand.innerHTML = '<img src="' + logo + '" alt="' + alt +
+              '" style="display:block;height:' + logoH + 'px;max-width:240px;object-fit:contain;object-position:left center">';
           } else if (b.brandName) {
             brand.textContent = b.brandName;
           }
