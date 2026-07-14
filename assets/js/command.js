@@ -8819,17 +8819,46 @@
 
      Local dev: set window.RECRUITEROS_OSTEXT_URL to a local SMS-engine URL to embed it
      directly (bypassing the SSO endpoint). */
-  var OSTEXT_SRC = (typeof window !== "undefined" && window.RECRUITEROS_OSTEXT_URL) || "/api/ostext/enter";
+  var OSTEXT_BASE = (typeof window !== "undefined" && window.RECRUITEROS_OSTEXT_URL) || "/api/ostext/enter";
+
+  // Build the embed URL fresh on every render, carrying the portal's current
+  // light/dark theme and white-label accent through the SSO hop so the engine
+  // paints in the same skin as the surrounding portal.
+  function osTextSrc() {
+    var theme = document.documentElement.getAttribute("data-theme") || "light";
+    var accent = "";
+    try { accent = getComputedStyle(document.documentElement).getPropertyValue("--brand").trim(); } catch (e) {}
+    var q = "theme=" + encodeURIComponent(theme) + (accent ? "&accent=" + encodeURIComponent(accent) : "");
+    return OSTEXT_BASE + (OSTEXT_BASE.indexOf("?") < 0 ? "?" : "&") + q;
+  }
+
+  // Compact Telnyx status strip above the embed: OS Text sends through the
+  // workspace's Telnyx connection, so surface its state and the one-click path
+  // to plug the API key in (Connected). Fails silent for roles without the
+  // integrations capability.
+  function osTextTelnyxStrip(host) {
+    if (!host) return;
+    api("/connected").then(function (d) {
+      var t = ((d && d.integrations) || []).filter(function (i) { return i.id === "telnyx"; })[0];
+      if (!t || !host.isConnected) return;
+      var ok = t.status === "green";
+      var color = ok ? "var(--ok)" : t.status === "yellow" ? "var(--warn)" : "var(--danger)";
+      var msg = ok
+        ? "Telnyx connected" + (t.access === "granted" ? " (provided for you)" : "") + ": texting is live."
+        : t.status === "yellow"
+        ? "Telnyx key saved. Press Test in Integrations to turn it green."
+        : "Plug in your Telnyx API key to power texting for this workspace.";
+      host.innerHTML = '<div class="card" style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin:0 0 10px">' +
+        '<span style="flex:none;width:8px;height:8px;border-radius:999px;background:' + color + '"></span>' +
+        '<span class="muted" style="flex:1;font-size:13px">' + esc(msg) + '</span>' +
+        '<a class="btn btn-ghost btn-sm" href="#connected">' + (ok ? "Manage" : "Connect Telnyx") + '</a></div>';
+    }).catch(function () {});
+  }
 
   function ostextFrame(src) {
-    // The "open in a new tab" link is the escape hatch for browsers that block
-    // third-party iframe cookies (Safari, strict privacy modes): on a
-    // white-label portal domain the embedded sign-in is cross-site, but a
-    // top-level tab is first-party and always signs straight in.
-    return '<div style="display:flex;justify-content:flex-end;margin:0 0 8px">' +
-      '<a class="ep-link" href="' + esc(src) + '" target="_blank" rel="noopener">If texting does not load below, open OS Text in a new tab &#8599;</a>' +
-      "</div>" +
-      '<div class="card" style="padding:0;overflow:hidden">' +
+    // Served same-origin under this portal's own domain, in the portal's own
+    // theme and accent: it reads as a native panel, not an embedded app.
+    return '<div class="card" style="padding:0;overflow:hidden">' +
       '<iframe src="' + esc(src) + '" title="OS Text" ' +
       'style="width:100%;height:calc(100vh - 160px);min-height:620px;border:0;border-radius:12px;background:var(--bg)" ' +
       'allow="clipboard-read; clipboard-write; microphone"></iframe>' +
@@ -8843,15 +8872,18 @@
   // the engine directly so OS Text is never blocked in production.
   function renderOstext(el) {
     el.innerHTML = head("OS Text", "Stand up compliant business texting for your recruiters, register your number, set consent rules, then send right inside your workspace.") +
+      '<div id="osxTelnyx"></div>' +
       '<div id="osxBody">' + loading() + "</div>";
     api("/ostext/setup").then(function (d) {
       var st = osxNormalize((d && d.ostext) || {});
       var host = $("#osxBody"); if (!host) return;
       if (osxReady(st)) renderOstextEngine(host, st);
       else renderOstextWizard(host, st);
+      osTextTelnyxStrip($("#osxTelnyx"));
     }).catch(function () {
       // No setup backend → don't block; embed the engine as before.
-      var host = $("#osxBody"); if (host) host.innerHTML = ostextFrame(OSTEXT_SRC);
+      var host = $("#osxBody"); if (host) host.innerHTML = ostextFrame(osTextSrc());
+      osTextTelnyxStrip($("#osxTelnyx"));
     });
   }
 
@@ -8907,7 +8939,7 @@
       '<div class="setup-banner ok" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
         'OS Text is live on <span class="osx-num">' + esc(st.number.value || "your number") + '</span>' +
         '<button class="btn btn-ghost btn-sm" id="osxSettings" style="margin-left:auto">Settings</button></div>' +
-      ostextFrame(OSTEXT_SRC);
+      ostextFrame(osTextSrc());
     var sb = host.querySelector("#osxSettings");
     if (sb) sb.addEventListener("click", function () { osxSave({ launched: false }); });
   }
@@ -10193,6 +10225,26 @@
           '<input id="vtQc' + i + '" placeholder="' + QC_HINT[i] + '" value="' + esc(qq.passCriteria || "") + '" aria-label="Pass criteria ' + (i + 1) + '" />' +
           '<label class="vt-must" title="Missing a must-have fails the screen regardless of the overall score"><input id="vtQm' + i + '" type="checkbox" ' + (qq.mustHave ? "checked" : "") + " /><span>Must-have</span></label></div>";
       }
+      // The out-of-the-box extraction schema, shown when the desk has none saved.
+      var X_DEFAULTS = [
+        { label: "Current comp", type: "text" },
+        { label: "Notice period", type: "text" },
+        { label: "Will relocate", type: "boolean" },
+        { label: "Interest level", type: "enum", enumOptions: ["low", "medium", "high"] }
+      ];
+      var x = (d.extraction && d.extraction.length) ? d.extraction : X_DEFAULTS;
+      function xrow(i) {
+        var xf = x[i] || {};
+        var types = [["text", "Text"], ["number", "Number"], ["boolean", "Yes / no"], ["enum", "Choices"]];
+        var opts = types.map(function (t) {
+          return '<option value="' + t[0] + '"' + (xf.type === t[0] ? " selected" : "") + ">" + t[1] + "</option>";
+        }).join("");
+        return '<div class="vt-xrow">' +
+          '<span class="vt-qn">' + (i + 1) + "</span>" +
+          '<input id="vtXl' + i + '" placeholder="' + (i < 4 ? "" : "e.g. Visa status") + '" value="' + esc(xf.label || "") + '" aria-label="Field ' + (i + 1) + '" />' +
+          '<select id="vtXt' + i + '" aria-label="Field type ' + (i + 1) + '">' + opts + "</select>" +
+          '<input id="vtXo' + i + '" placeholder="choices, comma separated" value="' + esc((xf.enumOptions || []).join(", ")) + '" aria-label="Field options ' + (i + 1) + '" /></div>';
+      }
       return '<div class="vt-card"><h3>' + (d.id ? "Edit desk" : "New vetting desk") + "</h3>" +
         '<div class="vt-section">The role</div>' +
         '<div class="vt-form-grid">' +
@@ -10221,6 +10273,9 @@
           '<div class="vt-qhead"><span></span><span>Qualifier (asked on the call)</span><span>What a pass sounds like</span><span></span></div>' +
           qrow(0) + qrow(1) + qrow(2) + qrow(3) +
         "</div>" +
+        '<div class="vt-section">Data captured per call <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- facts the scorer pulls from every conversation</span></div>' +
+        '<div class="vt-hint" style="margin:-2px 2px 8px">Each field is extracted from the transcript when the candidate actually says it (never guessed from their profile). Blank rows are ignored; the defaults cover comp, notice, relocation, and interest.</div>' +
+        xrow(0) + xrow(1) + xrow(2) + xrow(3) + xrow(4) + xrow(5) +
         '<div class="vt-section">Next step <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- auto-filled; leave blank to use the friendly defaults</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">Leave blank and the agent will, in its own natural words, <b>if qualified:</b> tell them they\'re a strong fit, that you\'ll send the full JD, and ask for an updated resume tailored to what you discussed. <b>If not a fit:</b> let them down kindly and say you\'ll keep them in mind for roles that better suit their background.</div>' +
         '<div class="vt-form-grid">' +
@@ -10241,12 +10296,24 @@
           qs.push({ prompt: p, passCriteria: c, mustHave: mEl && mEl.checked });
         }
       }
+      var xs = [];
+      for (var j = 0; j < 6; j++) {
+        var xl = vget("vtXl" + j);
+        if (!xl) continue;
+        var xt = ($("#vtXt" + j) || {}).value || "text";
+        var xo = vget("vtXo" + j);
+        xs.push({
+          label: xl, type: xt,
+          enumOptions: xt === "enum" ? xo.split(",").map(function (s) { return s.trim(); }).filter(Boolean) : undefined
+        });
+      }
       var payload = {
         name: vget("vtfName"), motion: motion, roleTitle: vget("vtfRole"), clientCompany: vget("vtfCompany"),
         phoneNumber: vget("vtfPhone"), jobDescription: $("#vtfJd") ? $("#vtfJd").value : "",
         voiceId: vget("vtfVoice"), passThreshold: parseInt(vget("vtfThreshold") || "70", 10),
         persona: { agentName: vget("vtfAgentName") || "Ryan", agentCompany: vget("vtfAgentCompany") || "Executive Search" },
-        questions: qs
+        questions: qs,
+        extraction: xs
       };
       var ny = $("#vtfNextYes"), nn = $("#vtfNextNo");
       if (ny && ny.value.trim()) payload.nextStepQualified = ny.value.trim();
@@ -10495,6 +10562,16 @@
           (c.agentRealism ? "<span><b>Agent realism:</b> " + c.agentRealism.score + "/100</span>" : "") + "</div>";
         if (c.agentRealism && c.agentRealism.notes) html += '<div class="vt-substat" style="margin-top:4px">' + esc(c.agentRealism.notes) + "</div>";
       }
+      // Structured facts the scorer pulled from the transcript (desk schema).
+      if (c.extracted) {
+        var xchips = Object.keys(c.extracted).map(function (k) {
+          var v = c.extracted[k];
+          if (v === null || v === undefined || v === "") return "";
+          var val = v === true ? "yes" : v === false ? "no" : String(v);
+          return '<span class="vt-chip"><b>' + esc(k.replace(/_/g, " ")) + ":</b> " + esc(val) + "</span>";
+        }).join("");
+        if (xchips) html += '<div class="vt-meta" style="margin-top:12px">' + xchips + "</div>";
+      }
       if (c.qualifyRationale) html += '<div class="vt-rationale"><b>Why ' + (c.qualified ? "they qualify" : "they don’t qualify") + ":</b> " + esc(c.qualifyRationale) + "</div>";
       if (c.verdicts && c.verdicts.length) {
         html += '<div class="vt-verdicts"><h4>Qualifiers</h4>' + c.verdicts.map(function (v) {
@@ -10584,6 +10661,18 @@
       try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
       catch (e) { return esc(s); }
     }
+    // Play base64 mp3 clips back-to-back (tuned voice previews + sim rehearsals).
+    function playClips(clips, onDone) {
+      var i = 0;
+      function next() {
+        if (i >= clips.length) { if (onDone) onDone(); return; }
+        var a = new Audio("data:" + (clips[i].contentType || "audio/mpeg") + ";base64," + clips[i].audioBase64);
+        a.onended = function () { i++; setTimeout(next, 350); };
+        a.onerror = function () { i++; next(); };
+        a.play().catch(function () { if (onDone) onDone(); });
+      }
+      next();
+    }
     function paintOptimizer(body) {
       body.innerHTML = loading();
       api("/vetting/desks?motion=" + motion).then(function (dd) {
@@ -10599,7 +10688,7 @@
         api("/vetting/optimizer?deskId=" + encodeURIComponent(vt.deskId)).then(function (o) {
           body.innerHTML =
             '<div class="vt-card"><div class="vt-select-wrap"><label>Desk</label><select id="vtOptDesk">' + opts + "</select></div></div>" +
-            optHealthCard(o) + optVoiceCard(o) + optLearnCard(o) + optRunCard() + optHistoryCard(o);
+            optHealthCard(o) + optVoiceCard(o) + optTurnCard(o) + optLearnCard(o) + optRunCard() + optHistoryCard(o);
           wireOptimizer(body, o);
         }).catch(function () { body.innerHTML = needsSetup(); });
       }).catch(function () { body.innerHTML = needsSetup(); });
@@ -10651,8 +10740,31 @@
           "0.90 to 1.10 is the natural conversation band. A touch under 1.0 reads calm and senior.") +
         "</div>" +
         '<label class="vt-must" style="margin-top:12px"><input type="checkbox" id="vtBoost"' + (v.speakerBoost ? " checked" : "") + ' /><span>Speaker boost (extra presence on phone-quality audio)</span></label>' +
-        '<div class="vt-formactions" style="margin-top:16px"><button class="vt-btn vt-btn-primary" id="vtVoiceSave">Save + push to live agent</button>' +
+        '<div class="vt-formactions" style="margin-top:16px">' +
+        '<button class="vt-btn" id="vtVoiceHear"><svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg> Hear this voice</button>' +
+        '<button class="vt-btn vt-btn-primary" id="vtVoiceSave">Save + push to live agent</button>' +
         '<span class="vt-hint" id="vtVoiceMsg"></span></div></div>';
+    }
+
+    /* ---- conversation feel (barge-in, silence, backchannels) ---- */
+    function optTurnCard(o) {
+      var t = (o && o.turnTuning) || { interruptions: true, interruptionSensitivity: 0.6, idleTimeoutSec: 8, idleReminder: "", backchannelWords: [] };
+      return '<div class="vt-card"><h3>Conversation feel</h3>' +
+        '<div class="vt-hint" style="margin-top:6px">How the agent behaves in the back-and-forth: whether callers can talk over it, how fast it takes its turn, and what it does with silence. Saved settings push to the live line; the phone engine applies what it supports and the rest is enforced through the agent\'s instructions.</div>' +
+        '<label class="vt-must" style="margin-top:14px"><input type="checkbox" id="vtTtInt"' + (t.interruptions ? " checked" : "") + ' /><span>Callers can interrupt the agent (barge-in), the strongest single realism signal</span></label>' +
+        '<div class="vt-sliders" style="margin-top:14px">' +
+        sliderRow("vtTtSens", "Responsiveness", t.interruptionSensitivity, 0, 1, 0.05,
+          "Higher = the agent takes its turn sooner after the caller pauses. Lower = it waits out longer pauses (better for slow, thoughtful callers). 0.6 matches the engine’s natural timing.") +
+        sliderRow("vtTtIdle", "Silence check-in (seconds)", t.idleTimeoutSec, 3, 30, 1,
+          "After this much caller silence, the agent gently re-engages instead of sitting in dead air.") +
+        "</div>" +
+        '<div class="vt-form-grid" style="margin-top:12px">' +
+        '<div class="vt-field"><label>Check-in line (said in its own words)</label><input id="vtTtRem" value="' + esc(t.idleReminder || "") + '" placeholder="No rush at all... take your time." />' +
+        '<div class="vt-hint">The spirit of what it says when the line goes quiet.</div></div>' +
+        '<div class="vt-field"><label>Listening sounds</label><input id="vtTtBack" value="' + esc((t.backchannelWords || []).join(", ")) + '" placeholder="mm-hm, right, okay, yeah" />' +
+        '<div class="vt-hint">Short verbal nods the agent opens replies with, comma separated.</div></div>' +
+        "</div>" +
+        '<div class="vt-formactions" style="margin-top:14px"><button class="vt-btn vt-btn-primary" id="vtTurnSave">Save + push to live agent</button></div></div>';
     }
 
     /* ---- auto-learn ---- */
@@ -10678,13 +10790,16 @@
         '<div class="vt-hint" style="margin-top:6px"><b>Optimize</b> studies recent real calls (plus the last stress test) and proposes a new coaching revision. <b>Stress test</b> plays five synthetic candidates against your exact live prompt: the skeptic who asks if it’s an AI, the rambler, the star, the confident-but-unqualified, and one built for this role; each conversation is graded for realism. <b>Check prompt</b> reviews the agent’s instructions for gaps before any calls happen.</div>' +
         '<div class="vt-actions" style="border-top:0;padding-top:0;margin-top:14px">' +
         '<button class="vt-btn vt-btn-primary" id="vtRunOpt">Optimize from calls</button>' +
+        '<button class="vt-btn" id="vtRunAuto">Generate 3 variants</button>' +
         '<button class="vt-btn" id="vtRunSim">Run stress test</button>' +
         '<button class="vt-btn" id="vtRunLint">Check prompt</button></div>' +
+        '<div class="vt-hint" style="margin-top:8px"><b>Generate 3 variants</b> is Auto mode: the same call evidence optimized through three different coaching lenses (warmth, brevity, energy mirroring). Compare them and apply the one that fits your style.</div>' +
         '<div id="vtOptResult"></div></div>';
     }
 
     function revisionCard(r, isProposal) {
       var head = "v" + r.version + " · " + (r.source === "auto_learn" ? "auto-learn" : r.source) +
+        (r.angle ? " · lens: " + r.angle : "") +
         (r.basedOnCalls ? " · from " + r.basedOnCalls + " call" + (r.basedOnCalls === 1 ? "" : "s") : "") +
         (r.avgRealismBefore != null ? " · realism before: " + r.avgRealismBefore : "");
       var html = '<div class="vt-rev' + (isProposal ? " vt-rev-proposal" : "") + '">' +
@@ -10704,20 +10819,25 @@
       if (!run || !run.results) return "";
       var head = '<div class="vt-rev-h" style="margin-top:14px"><b>Stress test · ' + fmtDate(run.at) + "</b><span>" +
         run.passed + " passed · " + run.failed + " failed" + (run.avgRealism != null ? " · avg realism " + run.avgRealism : "") + "</span></div>";
-      var rows = run.results.map(function (r) {
+      var rows = run.results.map(function (r, i) {
         var icon = r.passed ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : '<svg class="isvg" aria-hidden="true"><use href="#i-x"/></svg>';
-        var tr = (r.transcript && r.transcript.length)
+        var hasTr = r.transcript && r.transcript.length;
+        var tr = hasTr
           ? '<details class="vt-rev-notes"><summary>Transcript</summary><div class="vt-tr-body">' +
             r.transcript.map(function (t) {
               return '<div class="vt-turn ' + (t.role === "agent" ? "agent" : "candidate") + '"><b>' + (t.role === "agent" ? "Agent" : "Candidate") + ":</b> " + esc(t.text) + "</div>";
             }).join("") + "</div></details>"
           : "";
+        var hear = hasTr
+          ? '<div style="margin-top:8px"><button class="vt-btn" data-vtrehearse="' + i + '"><svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg> Hear it in your voice</button> <span class="vt-hint" data-vtrehearsemsg="' + i + '"></span></div>'
+          : "";
         return '<div class="vt-sim' + (r.passed ? "" : " vt-sim-fail") + '">' +
           '<div class="vt-sim-h">' + icon + " <b>" + esc(r.label) + "</b><span class=\"vt-sim-real\">realism " + r.realism + "/100</span></div>" +
-          '<div class="vt-hint">' + esc(r.notes) + "</div>" + tr + "</div>";
+          '<div class="vt-hint">' + esc(r.notes) + "</div>" + tr + hear + "</div>";
       }).join("");
       var next = run.failed > 0 ? '<div class="vt-hint" style="margin-top:8px">Now click <b>Optimize from calls</b>: the failures above become the evidence for the next revision.</div>' : "";
-      return head + rows + next;
+      var live = '<div class="vt-hint" style="margin-top:8px">The truest test is still a real call: dial the desk\'s number from your own phone and talk to it.</div>';
+      return head + rows + next + live;
     }
 
     function lintHtml(findings) {
@@ -10755,7 +10875,7 @@
           speakerBoost: !!($("#vtBoost") && $("#vtBoost").checked)
         };
       }
-      ["vtStab", "vtSim", "vtStyle", "vtSpeed"].forEach(function (id) {
+      ["vtStab", "vtSim", "vtStyle", "vtSpeed", "vtTtSens", "vtTtIdle"].forEach(function (id) {
         var el = $("#" + id);
         if (el) el.addEventListener("input", function () { var v = $("#" + id + "Val"); if (v) v.textContent = el.value; });
       });
@@ -10779,6 +10899,45 @@
           if (!r.ok) { toast("Save failed"); return; }
           toast(r.data && r.data.pushed ? "Saved and pushed to the live agent" : "Saved. Goes out next time the desk goes live.");
         }).catch(function () { vs.disabled = false; toast("Couldn’t reach the server."); });
+      });
+      // Hear the CURRENT sliders (saved or not) in the desk's cloned voice.
+      var vh = $("#vtVoiceHear");
+      if (vh) vh.addEventListener("click", function () {
+        var idle = vh.innerHTML, msg = $("#vtVoiceMsg");
+        vh.disabled = true; vh.innerHTML = '<span class="spinner"></span> Rendering…';
+        send("/vetting/optimizer", "POST", { action: "preview", deskId: vt.deskId, voiceTuning: readTuning() }).then(function (r) {
+          vh.disabled = false; vh.innerHTML = idle;
+          var d = r.data || {};
+          if (!r.ok) { if (msg) msg.textContent = "Preview failed."; return; }
+          if (d.dryRun) {
+            if (msg) msg.textContent = d.hint === "no_voice_id"
+              ? "Pick the desk’s cloned voice first (edit the desk)."
+              : "Add your ElevenLabs key in Setup to hear previews.";
+            return;
+          }
+          if (!d.clips || !d.clips.length) { if (msg) msg.textContent = "Synthesis failed, check the voice id and key."; return; }
+          if (msg) msg.textContent = "Playing at these exact settings…";
+          playClips(d.clips, function () { if (msg) msg.textContent = "That is how the agent will sound. Save to push it live."; });
+        }).catch(function () { vh.disabled = false; vh.innerHTML = idle; toast("Couldn’t reach the server."); });
+      });
+      // Conversation feel: save barge-in / silence / backchannel settings.
+      var ts = $("#vtTurnSave");
+      if (ts) ts.addEventListener("click", function () {
+        ts.disabled = true;
+        send("/vetting/optimizer", "POST", {
+          action: "settings", deskId: vt.deskId,
+          turnTuning: {
+            interruptions: !!($("#vtTtInt") && $("#vtTtInt").checked),
+            interruptionSensitivity: parseFloat(($("#vtTtSens") || {}).value || "0.6"),
+            idleTimeoutSec: parseInt(($("#vtTtIdle") || {}).value || "8", 10),
+            idleReminder: vget("vtTtRem"),
+            backchannelWords: vget("vtTtBack").split(",").map(function (w) { return w.trim(); }).filter(Boolean)
+          }
+        }).then(function (r) {
+          ts.disabled = false;
+          if (!r.ok) { toast("Save failed"); return; }
+          toast(r.data && r.data.pushed ? "Saved and pushed to the live agent" : "Saved. Goes out next time the desk goes live.");
+        }).catch(function () { ts.disabled = false; toast("Couldn’t reach the server."); });
       });
 
       function saveLearn() {
@@ -10812,11 +10971,18 @@
             }
             out.innerHTML = render(r.data || {});
             wireApply(out);
+            wireRehearse(out);
           }).catch(function () { btn.disabled = false; btn.innerHTML = idle; toast("Couldn’t reach the server."); });
         });
       }
       runAction("vtRunOpt", { action: "optimize", deskId: vt.deskId }, "Studying recent calls…", function (d) {
         return d.revision ? revisionCard(d.revision, true) : "";
+      });
+      runAction("vtRunAuto", { action: "optimize-auto", deskId: vt.deskId }, "Running 3 lenses…", function (d) {
+        var revs = d.revisions || [];
+        if (!revs.length) return "";
+        return '<div class="vt-rev-h" style="margin-top:14px"><b>Three competing revisions from the same evidence</b><span>apply the one that fits your style</span></div>' +
+          revs.map(function (r) { return revisionCard(r, true); }).join("");
       });
       runAction("vtRunSim", { action: "simulate", deskId: vt.deskId }, "Playing 5 candidates… about a minute", function (d) {
         return simResultsHtml(d.simulation);
@@ -10824,6 +10990,31 @@
       runAction("vtRunLint", { action: "lint", deskId: vt.deskId }, "Reviewing the prompt…", function (d) {
         return lintHtml(d.findings);
       });
+
+      // "Hear it in your voice": render a stress-test conversation's agent side
+      // through the cloned voice at the desk's current tuning and play it.
+      function wireRehearse(scope) {
+        Array.prototype.forEach.call(scope.querySelectorAll("[data-vtrehearse]"), function (btn) {
+          btn.addEventListener("click", function () {
+            var i = btn.getAttribute("data-vtrehearse");
+            var msg = scope.querySelector('[data-vtrehearsemsg="' + i + '"]');
+            var idle = btn.innerHTML;
+            btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Rendering audio…';
+            send("/vetting/optimizer", "POST", { action: "rehearse", deskId: vt.deskId, simIndex: parseInt(i, 10) }).then(function (r) {
+              btn.disabled = false; btn.innerHTML = idle;
+              var d = r.data || {};
+              if (!r.ok) { if (msg) msg.textContent = "Couldn’t render the audio."; return; }
+              if (d.dryRun) {
+                if (msg) msg.textContent = d.hint === "no_voice_id" ? "Pick the desk’s cloned voice first." : "Add your ElevenLabs key in Setup to hear this.";
+                return;
+              }
+              if (!d.clips || !d.clips.length) { if (msg) msg.textContent = "Synthesis failed."; return; }
+              if (msg) msg.textContent = "Playing the agent’s " + d.clips.length + " turns…";
+              playClips(d.clips, function () { if (msg) msg.textContent = ""; });
+            }).catch(function () { btn.disabled = false; btn.innerHTML = idle; toast("Couldn’t reach the server."); });
+          });
+        });
+      }
 
       function wireApply(scope) {
         Array.prototype.forEach.call(scope.querySelectorAll("[data-vtapply]"), function (btn) {

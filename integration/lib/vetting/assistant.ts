@@ -21,7 +21,7 @@ import { telnyx } from "../providers";
 import { cred } from "../providers/http";
 import { withWorkspaceCreds } from "../connected";
 import type { AssistantConfig } from "../providers/telnyx";
-import { clampVoiceTuning, type VettingDesk } from "./types";
+import { clampVoiceTuning, clampTurnTuning, type VettingDesk } from "./types";
 import { buildAssistantInstructions, buildGreeting } from "./prompt";
 
 function appUrl(): string {
@@ -44,19 +44,44 @@ export function buildAssistantConfig(desk: VettingDesk): AssistantConfig {
     instructions: buildAssistantInstructions(desk),
     greeting: buildGreeting(desk),
     voice: voiceSelector(desk),
-    // Human timing knobs: low-latency cloned voice, allow the caller to barge in,
-    // detect turns on natural pauses rather than fixed silence, slight variation.
-    // The delivery values are the desk's tunable VoiceTuning (Optimizer tab);
+    // Human delivery knobs from the desk's tunable VoiceTuning (Optimizer tab);
     // clampVoiceTuning defaults any unset desk to the phone-realism sweet spot.
+    // Telnyx field note (verified against their OpenAPI spec 2026-07-14): the
+    // ElevenLabs expressiveness knob is `temperature` on Telnyx — there is NO
+    // `stability` field. Temperature is the inverse (higher = livelier), so
+    // stability 0.40 maps to temperature 0.60. Everything else passes straight.
     voice_settings: (() => {
       const t = clampVoiceTuning(desk.voiceTuning);
       return {
         api_key_ref: cred("TELNYX_ELEVENLABS_KEY_REF") || undefined,
-        stability: t.stability,
+        temperature: Math.round((1 - t.stability) * 100) / 100,
         similarity_boost: t.similarityBoost,
         style: t.style,
         speed: t.speed,
         use_speaker_boost: t.speakerBoost,
+      };
+    })(),
+    // Barge-in + turn pacing from the desk's TurnTuning (Optimizer tab). Telnyx
+    // has no numeric "interruption sensitivity"; what it does have is the
+    // start-speaking plan (how long the agent waits before taking its turn), so
+    // the sensitivity slider maps onto those waits — anchored so the default
+    // slider position (0.6) lands exactly on Telnyx's documented defaults
+    // (wait 0.4s, no-punctuation endpoint 1.5s).
+    interruption_settings: (() => {
+      const tt = clampTurnTuning(desk.turnTuning);
+      const s = tt.interruptionSensitivity;
+      const r2 = (n: number) => Math.round(n * 100) / 100;
+      return {
+        enable: tt.interruptions,
+        disable_greeting_interruption: false,
+        start_speaking_plan: {
+          wait_seconds: r2(Math.max(0.2, 0.7 - 0.5 * s)),
+          transcription_endpointing_plan: {
+            on_punctuation_seconds: 0.1,
+            on_no_punctuation_seconds: r2(Math.max(0.8, 2.1 - 1.0 * s)),
+            on_number_seconds: 0.5,
+          },
+        },
       };
     })(),
     // Resolve who's calling (name + LinkedIn talking points) by caller ID.
@@ -64,11 +89,19 @@ export function buildAssistantConfig(desk: VettingDesk): AssistantConfig {
     // Record + transcribe, and post the finished call to us for scoring.
     transcription: { model: "distil-whisper/distil-large-v3" },
     insight_settings: { webhook_url: `${appUrl()}/api/vetting/webhook` },
-    telephony_settings: {
-      // Let the caller interrupt the agent (barge-in) — the single strongest
-      // human-realism signal in the spec.
-      supports_unauthenticated_web_calls: false,
-    },
+    telephony_settings: (() => {
+      const tt = clampTurnTuning(desk.turnTuning);
+      return {
+        supports_unauthenticated_web_calls: false,
+        // Clean caller audio before STT — free transcription accuracy.
+        noise_suppression: "krisp",
+        // Gentle check-in after this much caller silence (the check-in WORDING
+        // lives in the prompt — Telnyx has no custom reminder-text field).
+        user_idle_reply_secs: tt.idleTimeoutSec,
+        // Hard stop on a truly dead line so a forgotten call can't bill for hours.
+        user_idle_timeout_secs: Math.min(600, Math.max(60, tt.idleTimeoutSec * 8)),
+      };
+    })(),
   };
 }
 

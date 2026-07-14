@@ -19,10 +19,11 @@
 import { requireSession, body, ok, fail } from "../../../../lib/api";
 import {
   getDesk, deskLearning, addRevision, applyRevision, clearAppliedRevision,
-  setDeskVoiceTuning, setDeskAutoLearn, setLastSimulation,
-  runOptimizer, realismTrend, runSimulation, lintPrompt, provisionDesk,
-  clampVoiceTuning, VOICE_PRESETS, DEFAULT_VOICE_TUNING,
-  type VoiceTuning,
+  setDeskVoiceTuning, setDeskTurnTuning, setDeskAutoLearn, setLastSimulation,
+  runOptimizer, runOptimizerVariants, realismTrend, runSimulation, lintPrompt, provisionDesk,
+  synthesizeTunedSample, rehearseSimAudio,
+  clampVoiceTuning, clampTurnTuning, VOICE_PRESETS, DEFAULT_VOICE_TUNING, normalizeExtraction,
+  type VoiceTuning, type TurnTuning,
 } from "../../../../lib/vetting";
 
 /** Push the current desk config to the live assistant; never throws. */
@@ -42,6 +43,8 @@ export async function GET(req: Request) {
   return ok({
     learning: deskLearning(desk),
     voiceTuning: clampVoiceTuning(desk.voiceTuning),
+    turnTuning: clampTurnTuning(desk.turnTuning),
+    extraction: normalizeExtraction(desk.extraction),
     defaults: DEFAULT_VOICE_TUNING,
     presets: VOICE_PRESETS,
     trend: realismTrend(ws, desk.id),
@@ -55,7 +58,9 @@ export async function POST(req: Request) {
   const ws = g.ctx.workspace.id;
   const b = await body<{
     action?: string; deskId?: string; revisionId?: string;
-    voiceTuning?: Partial<VoiceTuning>; autoLearn?: boolean; minCallsBetweenRuns?: number;
+    voiceTuning?: Partial<VoiceTuning>; turnTuning?: Partial<TurnTuning>;
+    autoLearn?: boolean; minCallsBetweenRuns?: number;
+    sampleText?: string; simIndex?: number;
   }>(req);
   if (!b?.action || !b?.deskId) return fail("missing_fields", 422);
   const desk = getDesk(ws, b.deskId);
@@ -77,10 +82,42 @@ export async function POST(req: Request) {
         });
         return ok({ revision: rev, learning: deskLearning(desk) });
       }
+      case "optimize-auto": {
+        // GHL "Auto" mode: three competing revisions through different lenses.
+        const outs = await runOptimizerVariants(desk);
+        const revisions = outs.map((out) =>
+          addRevision(desk, {
+            source: "optimizer",
+            status: "proposed",
+            angle: out.angle,
+            styleNotes: out.styleNotes,
+            voiceTuning: out.voiceTuning,
+            changelog: out.changelog,
+            diagnosis: out.diagnosis,
+            basedOnCalls: out.basedOnCalls,
+            avgRealismBefore: out.avgRealismBefore,
+          }),
+        );
+        return ok({ revisions, learning: deskLearning(desk) });
+      }
       case "simulate": {
         const run = await runSimulation(desk);
         setLastSimulation(desk, run);
         return ok({ simulation: deskLearning(desk).lastSimulation });
+      }
+      case "preview": {
+        // Hear the CURRENT (possibly unsaved) sliders in the desk's cloned voice.
+        const out = await synthesizeTunedSample(desk, b.voiceTuning, b.sampleText);
+        return ok(out);
+      }
+      case "rehearse": {
+        // Hear one stress-test conversation's agent side in the cloned voice.
+        const sim = deskLearning(desk).lastSimulation;
+        const idx = Math.max(0, Math.round(Number(b.simIndex) || 0));
+        const result = sim?.results?.[idx];
+        if (!result || !result.transcript.length) return fail("no_sim_transcript", 404);
+        const out = await rehearseSimAudio(desk, result.transcript);
+        return ok(out);
       }
       case "lint": {
         const findings = await lintPrompt(desk);
@@ -100,12 +137,16 @@ export async function POST(req: Request) {
       }
       case "settings": {
         if (b.voiceTuning) setDeskVoiceTuning(ws, desk.id, b.voiceTuning);
+        if (b.turnTuning) setDeskTurnTuning(ws, desk.id, b.turnTuning);
         if (typeof b.autoLearn === "boolean" || b.minCallsBetweenRuns) {
           setDeskAutoLearn(ws, desk.id, b.autoLearn ?? deskLearning(desk).autoLearn, b.minCallsBetweenRuns);
         }
-        const push = await pushIfLive(desk);
+        // Auto-learn flips don't touch the live agent config; only real config
+        // changes (voice/turn) are worth a re-provision round-trip.
+        const push = (b.voiceTuning || b.turnTuning) ? await pushIfLive(desk) : { pushed: false };
         return ok({
           voiceTuning: clampVoiceTuning(desk.voiceTuning),
+          turnTuning: clampTurnTuning(desk.turnTuning),
           learning: deskLearning(desk),
           ...push,
         });

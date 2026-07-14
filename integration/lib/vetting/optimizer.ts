@@ -72,7 +72,23 @@ export interface OptimizerOutput {
   changelog: string[];
   basedOnCalls: number;
   avgRealismBefore?: number;
+  /** The coaching lens this output optimized through (multi-variant mode). */
+  angle?: string;
 }
+
+/**
+ * The lenses the multi-variant ("Auto") pass optimizes through. Same evidence,
+ * three genuinely different coaching philosophies, so the operator compares
+ * real alternatives instead of three rewordings of one idea.
+ */
+export const VARIANT_LENSES: Record<string, string> = {
+  warmth:
+    "LENS: WARMTH. Optimize above all for rapport and emotional attunement: reactions before questions, empathy on sensitive topics, the caller should hang up feeling genuinely liked. Accept slightly longer calls to get it.",
+  brevity:
+    "LENS: BREVITY. Optimize above all for crisp, senior-operator economy: shortest natural turns, zero filler beyond a rare acknowledgment, fast pace, get to the point the way a partner-level recruiter does. Warmth stays, wordiness goes.",
+  energy:
+    "LENS: ENERGY MIRRORING. Optimize above all for matching and steering the caller's energy: lift when they lift, settle when they hesitate, use pace and emphasis shifts as the main realism lever.",
+};
 
 /** The realism trendline the UI charts: per-call points plus rolling means. */
 export interface RealismTrend {
@@ -136,7 +152,7 @@ function simBlock(run: SimRun): string {
  * be optimized purely from sims). Throws with a clean status when unconfigured
  * or there is nothing at all to learn from.
  */
-export async function runOptimizer(desk: VettingDesk, sim?: SimRun): Promise<OptimizerOutput> {
+export async function runOptimizer(desk: VettingDesk, sim?: SimRun, angle?: string): Promise<OptimizerOutput> {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw Object.assign(new Error("anthropic_not_configured: set ANTHROPIC_API_KEY"), { status: 409 });
   }
@@ -153,6 +169,7 @@ export async function runOptimizer(desk: VettingDesk, sim?: SimRun): Promise<Opt
   const realisms = scored.map((c) => c.agentRealism?.score).filter((v): v is number => v != null);
   const avgBefore = realisms.length ? Math.round(realisms.reduce((a, b) => a + b, 0) / realisms.length) : undefined;
 
+  const lens = angle && VARIANT_LENSES[angle] ? `\n\n${VARIANT_LENSES[angle]}` : "";
   const userContent =
     `Desk: ${desk.name} · Role: ${desk.roleTitle || "(unset)"}${desk.clientCompany ? ` at ${desk.clientCompany}` : " (confidential search)"}\n` +
     `Agent persona: ${desk.persona.agentName} at ${desk.persona.agentCompany}, warmth=${desk.persona.warmth || "warm"}\n\n` +
@@ -160,20 +177,40 @@ export async function runOptimizer(desk: VettingDesk, sim?: SimRun): Promise<Opt
     `Current voice delivery settings: ${JSON.stringify(current)}\n\n` +
     (scored.length ? `Recent REAL calls (newest first):\n${callsBlock(scored).slice(0, 20000)}\n\n` : "No real scored calls yet.\n\n") +
     (simRun?.results?.length ? `${simBlock(simRun).slice(0, 12000)}\n\n` : "") +
-    `Real-call evidence outweighs simulated evidence when they disagree. Produce the revision JSON.`;
+    `Real-call evidence outweighs simulated evidence when they disagree. Produce the revision JSON.${lens}`;
 
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 1600,
-    // Coaching should be steady, not creative roulette: near-greedy sampling so
-    // the same evidence produces near-identical advice.
-    temperature: 0.2,
+    // Single-revision coaching should be steady, not creative roulette. Variant
+    // lenses get a little more room so the three proposals genuinely diverge.
+    temperature: angle ? 0.5 : 0.2,
     system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as any,
     messages: [{ role: "user", content: userContent }],
   });
 
   const block = response.content.find((b) => b.type === "text");
-  return normalize(block && block.type === "text" ? block.text : "{}", current, scored.length, avgBefore);
+  const out = normalize(block && block.type === "text" ? block.text : "{}", current, scored.length, avgBefore);
+  return angle ? { ...out, angle } : out;
+}
+
+/**
+ * GHL "Auto" mode: three competing revisions from the same evidence, each
+ * optimized through a different coaching lens, run concurrently. All are
+ * stored as PROPOSED by the route; the operator applies the one they like.
+ */
+export async function runOptimizerVariants(desk: VettingDesk): Promise<OptimizerOutput[]> {
+  const angles = Object.keys(VARIANT_LENSES);
+  const results = await Promise.allSettled(angles.map((a) => runOptimizer(desk, undefined, a)));
+  const ok = results
+    .filter((r): r is PromiseFulfilledResult<OptimizerOutput> => r.status === "fulfilled")
+    .map((r) => r.value);
+  if (!ok.length) {
+    // Every lens failed: surface the first real error (e.g. no key / no evidence).
+    const firstErr = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    throw firstErr?.reason ?? new Error("variants_failed");
+  }
+  return ok;
 }
 
 /** Bound one knob to within `step` of its current value (anti-oscillation). */

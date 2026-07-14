@@ -20,9 +20,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type {
   VettingDesk, TranscriptTurn, RubricScores, RubricEvidence, ScoringConfidence,
-  QuestionVerdict, AgentRealismScore, CandidateEnrichment,
+  QuestionVerdict, AgentRealismScore, CandidateEnrichment, ExtractionField, ExtractedData,
 } from "./types";
-import { RUBRIC_MAX } from "./types";
+import { RUBRIC_MAX, normalizeExtraction } from "./types";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // Scoring is judgment, not extraction — use the reasoning tier; override via env.
@@ -59,12 +59,14 @@ Also produce:
 - confidence ("high" | "medium" | "low"): how much YOU trust this scorecard given the above. A thin transcript can never be "high".
 - summary: 2-4 sentences recapping the conversation.
 - qualifyRationale: a short paragraph on WHY or why not they qualify for THIS role, referencing the qualifiers and rubric.
+- extracted: a value for EACH provided extraction field, keyed by its key. Pull only what the candidate actually SAID on this call (never infer from background). Respect the field's type: "text" = short verbatim-faithful phrase; "number" = a bare number; "boolean" = true/false; "enum" = exactly one of the listed options. If the topic never came up or the answer was unclear, use null.
 
 Return STRICT JSON only, no prose, no markdown fences. Produce the keys IN THIS ORDER so the evidence is written before each number:
 {
   "evidence": { "communication": string, "responseLength": string, "interpersonalPresence": string, "selfAwareness": string, "achievementOrientation": string, "problemSolving": string, "motivation": string, "culturalFit": string },
   "scores": { "communication": int, "responseLength": int, "interpersonalPresence": int, "selfAwareness": int, "achievementOrientation": int, "problemSolving": int, "motivation": int, "culturalFit": int },
   "verdicts": [ { "questionId": string, "pass": bool, "answer": string, "rationale": string } ],
+  "extracted": { "<field key>": string | number | bool | null },
   "marketability": int,
   "agentRealism": { "score": int, "notes": string },
   "transcriptSufficiency": string,
@@ -82,6 +84,8 @@ export interface CallScore {
   marketabilityScore: number;
   agentRealism: AgentRealismScore;
   verdicts: QuestionVerdict[];
+  /** Structured fields pulled from the call (desk.extraction schema). */
+  extracted: ExtractedData;
   qualified: boolean;
   /** How much to trust this scorecard, given how much the candidate said. */
   scoringConfidence: ScoringConfidence;
@@ -166,10 +170,16 @@ export async function scoreCall(
         ].filter(Boolean).join("\n")
       : "Candidate LinkedIn background: (none on file — judge on the call alone).";
 
+  const extraction = normalizeExtraction(desk.extraction).map((f) => ({
+    key: f.key, label: f.label, type: f.type,
+    ...(f.type === "enum" ? { options: f.enumOptions ?? [] } : {}),
+  }));
+
   const userContent =
     `Role: ${desk.roleTitle || "(see JD)"}${desk.clientCompany ? ` at ${desk.clientCompany}` : ""}\n\n` +
     `Pass threshold (0-100): ${desk.passThreshold}\n\n` +
     `Qualifiers to judge (their passCriteria come from the job's must-haves):\n${JSON.stringify(qualifiers, null, 2)}\n\n` +
+    `Extraction fields (return one value per key in "extracted"):\n${JSON.stringify(extraction, null, 2)}\n\n` +
     `Job description (the source of the must-have requirements):\n"""\n${(desk.jobDescription || "").slice(0, 4000)}\n"""\n\n` +
     `${background}\n\n` +
     `Call transcript:\n"""\n${transcriptText(transcript).slice(0, 16000)}\n"""\n\n` +
@@ -177,7 +187,7 @@ export async function scoreCall(
 
   const response = await client.messages.create({
     model: MODEL,
-    max_tokens: 2000,
+    max_tokens: 2400,
     // Scoring must be repeatable: the SAME transcript should score the same way
     // every time, so we pin temperature to 0 and remove sampling variance.
     temperature: 0,
@@ -248,12 +258,44 @@ function normalize(
     marketabilityScore,
     agentRealism,
     verdicts,
+    extracted: normalizeExtracted(o.extracted, normalizeExtraction(desk.extraction)),
     qualified,
     scoringConfidence,
     needsReview,
     summary: String(o.summary ?? "No summary produced.").slice(0, 1200),
     qualifyRationale: String(o.qualifyRationale ?? "Insufficient transcript to assess fit.").slice(0, 2000),
   };
+}
+
+/** Coerce each extracted value onto its field's declared type; unclear -> null. */
+function normalizeExtracted(raw: any, fields: ExtractionField[]): ExtractedData {
+  const out: ExtractedData = {};
+  const src = raw && typeof raw === "object" ? raw : {};
+  for (const f of fields) {
+    const v = src[f.key];
+    if (v === null || v === undefined || v === "") { out[f.key] = null; continue; }
+    switch (f.type) {
+      case "number": {
+        const n = Number(String(v).replace(/[^0-9.-]/g, ""));
+        out[f.key] = Number.isFinite(n) ? n : null;
+        break;
+      }
+      case "boolean":
+        out[f.key] = typeof v === "boolean" ? v
+          : /^(true|yes|y)$/i.test(String(v).trim()) ? true
+          : /^(false|no|n)$/i.test(String(v).trim()) ? false
+          : null;
+        break;
+      case "enum": {
+        const s = String(v).trim().toLowerCase();
+        out[f.key] = (f.enumOptions ?? []).find((opt) => opt.toLowerCase() === s) ?? null;
+        break;
+      }
+      default:
+        out[f.key] = String(v).trim().slice(0, 200) || null;
+    }
+  }
+  return out;
 }
 
 const RUBRIC_KEYS = Object.keys(RUBRIC_MAX) as (keyof RubricScores)[];
