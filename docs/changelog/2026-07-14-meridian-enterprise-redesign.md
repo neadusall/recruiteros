@@ -64,3 +64,30 @@ mobile widths; a specificity bug previously kept it visible), marketing home + l
 signup + helpcenter + vetting opt-in + watch at 1280/500. Repo-wide scans: zero em-dashes
 in HTML/CSS/JS, zero emoji in user-facing surfaces, zero `backdrop-filter`, zero brand
 gradients, `node --check` passes on every touched JS bundle.
+
+## Round 2 (same day): enterprise UX layer
+
+New `assets/js/command-ux.js` (DOM-driven, loads after command.js): command palette
+(Ctrl/Cmd+K + topbar Search trigger), collapsible sidebar icon rail (Ctrl+B, persisted),
+mobile navigation drawer (below 920px the sidebar previously just vanished), skip link,
+aria-current nav, dialog focus trap + aria-modal in openModal, skeleton loading rows,
+140ms view fade, OS-preference theme default. Injected-style font weights normalized
+(94 sites), Hire Signals in-app headline tamed, duplicate Senders title removed.
+pricing.html created (the /pricing route existed with no file, so it 404'd) and
+Features/Pricing links added to every marketing nav.
+
+## Round 3 (same day): navigation intelligence
+
+- Variable Inter (400..700) on all 31 pages so the 600/650 weights render true
+  (static cuts silently substituted 700 before).
+- Palette: Recent group (last-visited tabs, tracked in ros_recents) leads the empty
+  state; quick-create commands (New campaign, Add prospect/candidate, Invite recruiter)
+  navigate and press the view's primary action; recency boosts fuzzy ranking.
+- Keyboard chords: g then a letter jumps tabs (g d dashboard, g c clients, g h hire
+  signals, ...), gated by what the sidebar actually shows (RBAC + motion). ? opens a
+  keyboard-shortcuts sheet listing everything live.
+- Wayfinding: breadcrumb appends the drill-down segment (e.g. "Operate / Email
+  capacity"), the browser tab title follows the active view ("Clients · Admin Portal"),
+  route changes scroll the content pane to top and hand focus to the page title for
+  screen readers, and opening /command bare restores the last route.
+- Marketing nav highlights the current page (aria-current + brand color).

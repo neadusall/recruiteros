@@ -50,6 +50,15 @@
     window.addEventListener('resize', () => { if (window.innerWidth > 980) setOpen(false); });
   })();
 
+  /* ---------- Active page in the header nav ---------- */
+  (function activeNav() {
+    const path = location.pathname.replace(/\.html$/, '').replace(/\/$/, '') || '/';
+    document.querySelectorAll('.nav .nav-links > a, .nav .nav-links .has-drop > a').forEach((a) => {
+      const href = (a.getAttribute('href') || '').replace(/\.html$/, '').replace(/\/$/, '') || '/';
+      if (href !== '/' && href === path) a.setAttribute('aria-current', 'page');
+    });
+  })();
+
   /* ---------- Reveal-on-scroll ---------- */
   const io = new IntersectionObserver(
     (entries) => {

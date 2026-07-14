@@ -204,6 +204,7 @@ h1, h2, h3, h4 { font-weight: 600; letter-spacing: -0.015em; line-height: 1.2; }
 .nav-links { display: flex; align-items: center; gap: 28px; }
 .nav-links a { color: var(--text-muted); font-size: 14px; font-weight: 500; transition: color .12s; }
 .nav-links a:hover { color: var(--text); }
+.nav-links a[aria-current="page"] { color: var(--brand); font-weight: 600; }
 .nav-cta { display: flex; align-items: center; gap: 10px; }
 .nav.scrolled { box-shadow: 0 1px 0 var(--border); }
 
