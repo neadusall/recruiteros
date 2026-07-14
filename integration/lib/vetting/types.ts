@@ -25,6 +25,121 @@
 
 import type { Motion } from "../core/types";
 
+/**
+ * Voice delivery tuning for the desk's cloned ElevenLabs voice. These are the
+ * knobs that decide whether the SAME voice reads as a person or a screen reader.
+ * Bounds are enforced on save; the defaults are the phone-realism sweet spot
+ * (see DEFAULT_VOICE_TUNING and lib/vetting/optimizer.ts for the rationale).
+ */
+export interface VoiceTuning {
+  /** 0-1. Lower = more expressive/varied intonation; higher = flat and consistent. */
+  stability: number;
+  /** 0-1. How hard to hold to the cloned voice's timbre. */
+  similarityBoost: number;
+  /** 0-1. Style exaggeration; >0.3 costs latency and can sound performative. */
+  style: number;
+  /** 0.7-1.2. Playback speed; slightly under 1.0 reads as calm and senior. */
+  speed: number;
+  /** Boosts likeness on clones; slight latency cost, worth it on 8kHz calls. */
+  speakerBoost: boolean;
+}
+
+/** Where a prompt revision came from. */
+export type RevisionSource = "optimizer" | "auto_learn" | "manual";
+
+/**
+ * One versioned output of the prompt optimizer: a coaching addendum the agent
+ * prompt absorbs, optional voice-tuning nudges, and the changelog explaining
+ * WHAT changed and WHY (grounded in real call evidence). Revisions are kept so
+ * every change is inspectable and revertible - the learning loop is never a
+ * black box the operator can't unwind.
+ */
+export interface PromptRevision {
+  id: string;
+  /** Monotonic per desk: v1, v2, ... */
+  version: number;
+  source: RevisionSource;
+  status: "proposed" | "applied" | "reverted";
+  /**
+   * The learned style addendum injected into the agent's instructions (the
+   * "# WHAT YOU'VE LEARNED" section). Operative coaching lines, not analysis.
+   */
+  styleNotes: string;
+  /** Voice-tuning values recommended alongside the notes (already clamped). */
+  voiceTuning?: VoiceTuning;
+  /** Human-readable "changed X because Y (call evidence)" lines. */
+  changelog: string[];
+  /** One-paragraph diagnosis of how the agent is performing overall. */
+  diagnosis?: string;
+  /** How many scored calls informed this revision. */
+  basedOnCalls: number;
+  /** Mean agent-realism score across those calls, when available. */
+  avgRealismBefore?: number;
+  createdAt: string;
+  appliedAt?: string;
+}
+
+/**
+ * One synthetic candidate persona the simulator plays against the desk's real
+ * agent prompt - the same idea as GoHighLevel's Prompt Optimizer scenarios:
+ * stress the agent BEFORE (or between) real candidates do.
+ */
+export interface SimScenario {
+  id: string;
+  /** Short label, e.g. "Skeptical: asks if this is an AI". */
+  label: string;
+  /** How the simulated candidate behaves (persona + backstory + goals). */
+  persona: string;
+  /** What a passing agent performance looks like in THIS scenario. */
+  expected: string;
+  priority: "critical" | "high" | "medium" | "low";
+}
+
+/** The judged outcome of one simulated conversation. */
+export interface SimResult {
+  scenarioId: string;
+  label: string;
+  priority: SimScenario["priority"];
+  passed: boolean;
+  /** 0-100, same human-likeness bar the real-call scorer uses. */
+  realism: number;
+  /** What broke (or what carried it), grounded in the sim transcript. */
+  notes: string;
+  transcript: TranscriptTurn[];
+}
+
+/** One full simulation run over a desk (a few scenarios, judged). */
+export interface SimRun {
+  id: string;
+  at: string;
+  results: SimResult[];
+  passed: number;
+  failed: number;
+  avgRealism: number | null;
+}
+
+/**
+ * The desk's self-improvement state. When autoLearn is on, every
+ * `minCallsBetweenRuns` newly-scored calls trigger an optimizer pass whose
+ * revision is auto-applied and pushed to the live agent - the desk literally
+ * gets better at sounding human the more calls it takes.
+ */
+export interface DeskLearning {
+  autoLearn: boolean;
+  /** Scored calls to accumulate before an auto-learn pass re-runs (default 3). */
+  minCallsBetweenRuns: number;
+  /** The CURRENTLY applied style addendum (mirrors the applied revision). */
+  learnedNotes: string;
+  /** Version counter for the next revision. */
+  nextVersion: number;
+  revisions: PromptRevision[];
+  lastRunAt?: string;
+  /** Scored calls since the last optimizer pass (auto-learn trigger counter). */
+  callsSinceLastRun: number;
+  /** Most recent simulation run (kept singly; history lives in revisions). */
+  lastSimulation?: SimRun;
+}
+
 /** Lifecycle of a vetting desk (a JD bound to a callable number). */
 export type DeskStatus =
   | "draft"        // JD written, no number provisioned / assistant not synced yet
@@ -91,6 +206,10 @@ export interface VettingDesk {
   persona: DeskPersona;
   /** Cloned voice id (the recruiter's own consented voice; see Voice Drops). */
   voiceId?: string;
+  /** Delivery tuning for that voice (stability/style/speed...). Defaulted on read. */
+  voiceTuning?: VoiceTuning;
+  /** Self-improvement state: applied learnings + revision history + auto-learn. */
+  learning?: DeskLearning;
 
   /* ---- engine binding (Telnyx AI Assistant by default) ---- */
   /** E.164 inbound number this desk answers on, e.g. "+13855551234". */
@@ -374,3 +493,43 @@ export const DEFAULT_PERSONA: DeskPersona = {
 };
 
 export const DEFAULT_PASS_THRESHOLD = 70;
+
+/**
+ * Phone-realism defaults for a cloned ElevenLabs voice over 8kHz telephony,
+ * straight from ElevenLabs' own guidance: stability 0.30-0.50 is the "emotional,
+ * dynamic delivery" band (0.60+ goes monotone); similarity ~0.80 holds the
+ * clone's timbre without the over-enunciated "news anchor" artifact near 1.0;
+ * style stays 0 in real-time (exaggeration adds latency and instability);
+ * 0.9-1.1 speed is the documented natural-conversation band.
+ */
+export const DEFAULT_VOICE_TUNING: VoiceTuning = {
+  stability: 0.4,
+  similarityBoost: 0.8,
+  style: 0,
+  speed: 1.0,
+  speakerBoost: true,
+};
+
+export const DEFAULT_LEARNING: DeskLearning = {
+  autoLearn: false,
+  minCallsBetweenRuns: 3,
+  learnedNotes: "",
+  nextVersion: 1,
+  revisions: [],
+  callsSinceLastRun: 0,
+};
+
+/** Clamp arbitrary input into a safe, speakable VoiceTuning. */
+export function clampVoiceTuning(t?: Partial<VoiceTuning> | null): VoiceTuning {
+  const n = (v: unknown, lo: number, hi: number, dflt: number) => {
+    const x = Number(v);
+    return Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : dflt;
+  };
+  return {
+    stability: n(t?.stability, 0, 1, DEFAULT_VOICE_TUNING.stability),
+    similarityBoost: n(t?.similarityBoost, 0, 1, DEFAULT_VOICE_TUNING.similarityBoost),
+    style: n(t?.style, 0, 0.6, DEFAULT_VOICE_TUNING.style),
+    speed: n(t?.speed, 0.7, 1.2, DEFAULT_VOICE_TUNING.speed),
+    speakerBoost: t?.speakerBoost === undefined ? DEFAULT_VOICE_TUNING.speakerBoost : Boolean(t.speakerBoost),
+  };
+}

@@ -19,8 +19,8 @@ import type { Motion } from "../core/types";
 import {
   type VettingDesk, type VettingDeskInput, type CandidateProfile,
   type CandidateEnrichment, type VettingCall, type QualifyingQuestion,
-  type ResumeReview,
-  DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD,
+  type ResumeReview, type DeskLearning, type PromptRevision, type VoiceTuning, type SimRun,
+  DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD, DEFAULT_LEARNING, clampVoiceTuning,
 } from "./types";
 
 const store = {
@@ -163,6 +163,114 @@ export function deleteDesk(workspaceId: string, id: string): boolean {
   store.desks = store.desks.filter((d) => !(d.workspaceId === workspaceId && d.id === id));
   persist();
   return store.desks.length < before;
+}
+
+/* ---------------- learning loop (voice tuning + prompt revisions) ----------------
+   The optimizer's durable state lives ON the desk so it snapshots with everything
+   else. All mutations funnel through here so version numbers stay monotonic and
+   the applied addendum (learnedNotes) always mirrors exactly one revision. */
+
+/** The desk's learning state, defaulted in place so callers never null-check. */
+export function deskLearning(d: VettingDesk): DeskLearning {
+  if (!d.learning) d.learning = { ...DEFAULT_LEARNING, revisions: [] };
+  return d.learning;
+}
+
+/** Save voice-delivery tuning (clamped). Caller re-provisions if the desk is live. */
+export function setDeskVoiceTuning(workspaceId: string, id: string, tuning: Partial<VoiceTuning>): VettingDesk | undefined {
+  const d = getDesk(workspaceId, id);
+  if (!d) return undefined;
+  d.voiceTuning = clampVoiceTuning({ ...(d.voiceTuning ?? {}), ...tuning });
+  d.updatedAt = nowIso();
+  persist();
+  return d;
+}
+
+/** Flip auto-learn / cadence for a desk. */
+export function setDeskAutoLearn(workspaceId: string, id: string, autoLearn: boolean, minCallsBetweenRuns?: number): VettingDesk | undefined {
+  const d = getDesk(workspaceId, id);
+  if (!d) return undefined;
+  const l = deskLearning(d);
+  l.autoLearn = autoLearn;
+  if (minCallsBetweenRuns && minCallsBetweenRuns >= 1) l.minCallsBetweenRuns = Math.min(20, Math.round(minCallsBetweenRuns));
+  d.updatedAt = nowIso();
+  persist();
+  return d;
+}
+
+/** Record a new revision (proposed or already applied), stamping its version. */
+export function addRevision(
+  d: VettingDesk,
+  rev: Omit<PromptRevision, "id" | "version" | "createdAt">,
+): PromptRevision {
+  const l = deskLearning(d);
+  const rec: PromptRevision = {
+    ...rev,
+    id: rid("vrev"),
+    version: l.nextVersion,
+    createdAt: nowIso(),
+  };
+  l.nextVersion += 1;
+  l.revisions.unshift(rec);
+  // Keep the history readable: cap at 20, never dropping the applied one.
+  if (l.revisions.length > 20) {
+    const applied = l.revisions.find((r) => r.status === "applied");
+    l.revisions = l.revisions.slice(0, 20);
+    if (applied && !l.revisions.includes(applied)) l.revisions.push(applied);
+  }
+  l.lastRunAt = rec.createdAt;
+  l.callsSinceLastRun = 0;
+  d.updatedAt = nowIso();
+  persist();
+  return rec;
+}
+
+/**
+ * Make one revision the desk's applied learning: its notes become the prompt
+ * addendum, its tuning (if any) becomes the live voice tuning, and whichever
+ * revision was applied before is marked reverted.
+ */
+export function applyRevision(d: VettingDesk, revisionId: string): PromptRevision | undefined {
+  const l = deskLearning(d);
+  const rev = l.revisions.find((r) => r.id === revisionId);
+  if (!rev) return undefined;
+  for (const r of l.revisions) if (r.status === "applied" && r.id !== rev.id) r.status = "reverted";
+  rev.status = "applied";
+  rev.appliedAt = nowIso();
+  l.learnedNotes = rev.styleNotes;
+  if (rev.voiceTuning) d.voiceTuning = clampVoiceTuning(rev.voiceTuning);
+  d.updatedAt = nowIso();
+  persist();
+  return rev;
+}
+
+/** Drop back to factory behavior: no addendum, revision left in history. */
+export function clearAppliedRevision(d: VettingDesk): void {
+  const l = deskLearning(d);
+  for (const r of l.revisions) if (r.status === "applied") r.status = "reverted";
+  l.learnedNotes = "";
+  d.updatedAt = nowIso();
+  persist();
+}
+
+/** Persist the most recent simulation run on the desk. */
+export function setLastSimulation(d: VettingDesk, run: SimRun): void {
+  const l = deskLearning(d);
+  // Transcripts are quoted in results; trim each to keep the snapshot lean.
+  l.lastSimulation = {
+    ...run,
+    results: run.results.map((r) => ({ ...r, transcript: r.transcript.slice(0, 20) })),
+  };
+  d.updatedAt = nowIso();
+  persist();
+}
+
+/** Count a newly scored call toward the auto-learn trigger. */
+export function bumpLearningCounter(d: VettingDesk): number {
+  const l = deskLearning(d);
+  l.callsSinceLastRun += 1;
+  persist();
+  return l.callsSinceLastRun;
 }
 
 /* ---------------- candidate profiles (opt-in form) ---------------- */

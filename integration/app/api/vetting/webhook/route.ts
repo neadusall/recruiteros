@@ -18,7 +18,7 @@ import { recordUsage } from "../../../../lib/billing/ledger";
 import { rateCost } from "../../../../lib/billing/rates";
 import {
   findCallByEngineId, getDeskById, updateCall, scoreCall, getCandidateById,
-  buildPostCallEmail,
+  buildPostCallEmail, maybeAutoLearn,
   type TranscriptTurn,
 } from "../../../../lib/vetting";
 import { sendWorkspaceEmail } from "../../../../lib/auth";
@@ -150,6 +150,11 @@ export async function POST(req: Request) {
         console.error("[vetting] post-call coaching email failed:", mailErr?.message || mailErr);
       }
     }
+
+    // Self-improvement: count this scored call toward the desk's auto-learn
+    // trigger; when the cadence is hit, an optimizer pass runs, applies, and
+    // re-provisions the live agent. Fire-and-forget - never blocks the engine.
+    void maybeAutoLearn(desk.id);
 
     return NextResponse.json({
       ok: true, scored: true, total: s.totalScore,

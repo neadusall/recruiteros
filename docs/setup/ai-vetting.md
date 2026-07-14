@@ -85,6 +85,36 @@ regardless of the total. **Marketability (1–10)** is scored separately — how
 likely a client is to interview them (pedigree/scope), independent of personal
 quality. **Agent realism (0–100)** grades how human *your* agent sounded.
 
+## The Optimizer (self-improving agent)
+
+The **Optimizer** tab closes the loop that no off-the-shelf voice platform
+closes: it makes each desk's agent measurably more human over time, from its
+own real calls. Backend: `lib/vetting/optimizer.ts` + `lib/vetting/simulator.ts`,
+API `/api/vetting/optimizer`.
+
+- **Realism trend** — every scored call already grades the agent 0-100 on
+  human-likeness; the tab charts that over time.
+- **Voice delivery** — the ElevenLabs knobs (stability / similarity / style /
+  speed / speaker boost) per desk, with presets set to the documented
+  phone-realism sweet spot (stability ~0.40, similarity ~0.80, style 0,
+  speed 1.0). Saved settings push straight to the live Telnyx assistant.
+- **Optimize from calls** — one LLM pass studies recent transcripts + realism
+  grades and proposes a versioned revision: a coaching addendum injected into
+  the agent prompt (`# WHAT YOU'VE LEARNED...`), bounded voice-tuning nudges
+  (±0.05 max per pass, anti-oscillation), and a changelog grounded in call
+  evidence. Nothing ships until **Apply + push live** (or auto-learn applies it).
+- **Stress test** — GHL-Prompt-Optimizer-style simulation: five synthetic
+  candidates (the skeptic who asks "is this an AI?", the rambler, the star, the
+  confident-but-unqualified, one role-specific) played against the desk's
+  exact prompt in chat mode, each judged for realism + expected behavior.
+  Works on day zero, before any real call. Failures feed the next revision.
+- **Check prompt** — static lint of the live instructions (missing guardrails,
+  unspeakable content, ambiguity), like GHL's Prompt Evaluator.
+- **Self-learning** — the auto-learn switch: after every N scored calls
+  (default 3) the optimizer runs, applies, and re-provisions the live agent
+  automatically. Every change is versioned and revertible ("Reset to factory
+  behavior").
+
 ## Operator-verify seam
 
 Telnyx's AI-Assistant API surface (assistant CRUD + number↔assistant binding,

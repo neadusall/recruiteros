@@ -10091,7 +10091,7 @@
       '<div class="vt-view"><div class="vt-tabs"></div><div id="vtBody">' + loading() + "</div></div>";
 
     function tabBar() {
-      var tabs = [["desks", "Vetting Desks"], ["calls", "Calls & Scores"], ["bookings", "Bookings"]];
+      var tabs = [["desks", "Vetting Desks"], ["calls", "Calls & Scores"], ["optimizer", "Optimizer"], ["bookings", "Bookings"]];
       $(".vt-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="vt-tab' + (vt.tab === t[0] ? " active" : "") + '" data-vttab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -10105,6 +10105,7 @@
       var body = $("#vtBody"); if (!body) return;
       if (vt.tab === "desks") return paintDesks(body);
       if (vt.tab === "bookings") return paintBookings(body);
+      if (vt.tab === "optimizer") return paintOptimizer(body);
       return paintCalls(body);
     }
 
@@ -10266,6 +10267,11 @@
         '<span class="vt-chip"><b>' + (d.candidateCount || 0) + "</b> opted in</span>" +
         '<span class="vt-chip">pass ≥ <b>' + d.passThreshold + "</b></span>" +
         '<span class="vt-chip">' + esc(d.voiceId || "default voice") + "</span>";
+      if (d.learning && d.learning.learnedNotes) {
+        var appliedRev = (d.learning.revisions || []).filter(function (r) { return r.status === "applied"; })[0];
+        chips += '<span class="vt-chip vt-chip-learn">self-tuned' + (appliedRev ? " <b>v" + appliedRev.version + "</b>" : "") + "</span>";
+      }
+      if (d.learning && d.learning.autoLearn) chips += '<span class="vt-chip vt-chip-learn">auto-learn on</span>';
       return '<div class="vt-desk" data-id="' + d.id + '">' +
         '<div class="vt-desk-head">' +
         '<h3 class="vt-desk-title">' + esc(d.name) + " <span>· " + esc(d.roleTitle || "no role title") + "</span></h3>" +
@@ -10560,12 +10566,286 @@
       }).catch(function () { body.innerHTML = needsSetup(); });
     }
 
+    /* ============ Optimizer tab (self-improving agent) ============
+       The learning loop for each desk's agent: a realism trend from scored
+       calls, ElevenLabs delivery tuning with honest presets, an auto-learn
+       cadence, on-demand optimizer passes (real calls + simulated stress tests
+       + a prompt check), and a versioned, revertible revision history.
+       Talks to /api/vetting/optimizer. */
+    function fmtDate(s) {
+      if (!s) return "";
+      try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+      catch (e) { return esc(s); }
+    }
+    function paintOptimizer(body) {
+      body.innerHTML = loading();
+      api("/vetting/desks?motion=" + motion).then(function (dd) {
+        var desks = (dd && dd.desks) || [];
+        if (!desks.length) {
+          body.innerHTML = '<div class="vt-empty">Create a vetting desk first. The optimizer tunes each desk’s agent from its own calls.</div>';
+          return;
+        }
+        if (!vt.deskId || !desks.some(function (d) { return d.id === vt.deskId; })) vt.deskId = desks[0].id;
+        var opts = desks.map(function (d) {
+          return '<option value="' + d.id + '"' + (vt.deskId === d.id ? " selected" : "") + ">" + esc(d.name) + "</option>";
+        }).join("");
+        api("/vetting/optimizer?deskId=" + encodeURIComponent(vt.deskId)).then(function (o) {
+          body.innerHTML =
+            '<div class="vt-card"><div class="vt-select-wrap"><label>Desk</label><select id="vtOptDesk">' + opts + "</select></div></div>" +
+            optHealthCard(o) + optVoiceCard(o) + optLearnCard(o) + optRunCard() + optHistoryCard(o);
+          wireOptimizer(body, o);
+        }).catch(function () { body.innerHTML = needsSetup(); });
+      }).catch(function () { body.innerHTML = needsSetup(); });
+    }
+
+    /* ---- how human the agent sounds, from its scored calls ---- */
+    function optHealthCard(o) {
+      var t = (o && o.trend) || { points: [], scoredCalls: 0, avgRealism: null, avgRealismRecent: null };
+      var pts = (t.points || []).filter(function (p) { return p.realism != null; }).slice(-24);
+      var bars = pts.map(function (p) {
+        var h = Math.max(6, p.realism);
+        var col = p.realism >= 80 ? "var(--ok)" : p.realism >= 60 ? "var(--vt-accent)" : "var(--warn)";
+        return '<span class="vt-spark-bar" style="height:' + h + '%;background:' + col + '" title="' + fmtDate(p.at) + " · realism " + p.realism + '/100"></span>';
+      }).join("");
+      var kpis =
+        '<div class="vt-kpi"><b>' + (t.avgRealismRecent != null ? t.avgRealismRecent : "–") + '</b><span>realism, last 5 calls</span></div>' +
+        '<div class="vt-kpi"><b>' + (t.avgRealism != null ? t.avgRealism : "–") + '</b><span>realism, all time</span></div>' +
+        '<div class="vt-kpi"><b>' + (t.scoredCalls || 0) + '</b><span>scored calls</span></div>';
+      return '<div class="vt-card"><h3>How human does your agent sound?</h3>' +
+        '<div class="vt-hint" style="margin-top:6px">Every scored call already grades the agent’s realism 0-100 (pacing, acknowledgments, no robotic tells). This is that grade over time; the optimizer’s job is to push it up.</div>' +
+        '<div class="vt-health">' + kpis +
+        '<div class="vt-spark">' + (bars || '<span class="vt-hint">No graded calls yet. The trend appears after your first scored call, or run a stress test below.</span>') + "</div></div></div>";
+    }
+
+    /* ---- ElevenLabs delivery tuning ---- */
+    function sliderRow(id, label, val, min, max, step, hint) {
+      return '<div class="vt-slide"><div class="vt-slide-h"><label for="' + id + '">' + label + '</label><span class="vt-slide-val" id="' + id + 'Val">' + val + "</span></div>" +
+        '<input type="range" id="' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" />' +
+        '<div class="vt-hint">' + hint + "</div></div>";
+    }
+    function optVoiceCard(o) {
+      var v = (o && o.voiceTuning) || { stability: 0.4, similarityBoost: 0.8, style: 0, speed: 1, speakerBoost: true };
+      var presets = (o && o.presets) || {};
+      var chips = Object.keys(presets).map(function (k) {
+        var p = presets[k];
+        return '<button class="vt-btn vt-preset" data-vtpreset="' + esc(k) + '" title="' + esc(p.hint) + '">' + esc(p.label) + "</button>";
+      }).join("");
+      return '<div class="vt-card"><h3>Voice delivery</h3>' +
+        '<div class="vt-hint" style="margin-top:6px">How your cloned voice is rendered on the call. These are the ElevenLabs settings that decide whether the same voice reads as a person or a machine; the defaults are the documented phone-realism sweet spot.</div>' +
+        '<div class="vt-presets">' + chips + "</div>" +
+        '<div class="vt-sliders">' +
+        sliderRow("vtStab", "Expressiveness (stability)", v.stability, 0, 1, 0.01,
+          "Lower = livelier, more varied intonation. 0.30 to 0.50 is the natural band; above 0.60 goes flat and monotone.") +
+        sliderRow("vtSim", "Voice match (similarity)", v.similarityBoost, 0, 1, 0.01,
+          "How tightly it holds your cloned timbre. 0.75 to 0.85 sounds like you; near 1.0 gets over-enunciated, like a news anchor.") +
+        sliderRow("vtStyle", "Style exaggeration", v.style, 0, 0.6, 0.01,
+          "Keep at or near zero on live calls. Higher adds latency and can sound like performing.") +
+        sliderRow("vtSpeed", "Speaking speed", v.speed, 0.7, 1.2, 0.01,
+          "0.90 to 1.10 is the natural conversation band. A touch under 1.0 reads calm and senior.") +
+        "</div>" +
+        '<label class="vt-must" style="margin-top:12px"><input type="checkbox" id="vtBoost"' + (v.speakerBoost ? " checked" : "") + ' /><span>Speaker boost (extra presence on phone-quality audio)</span></label>' +
+        '<div class="vt-formactions" style="margin-top:16px"><button class="vt-btn vt-btn-primary" id="vtVoiceSave">Save + push to live agent</button>' +
+        '<span class="vt-hint" id="vtVoiceMsg"></span></div></div>';
+    }
+
+    /* ---- auto-learn ---- */
+    function optLearnCard(o) {
+      var l = (o && o.learning) || { autoLearn: false, minCallsBetweenRuns: 3, callsSinceLastRun: 0 };
+      var cad = [2, 3, 5, 10].map(function (n) {
+        return '<option value="' + n + '"' + (l.minCallsBetweenRuns === n ? " selected" : "") + ">every " + n + " scored calls</option>";
+      }).join("");
+      var status = l.lastRunAt
+        ? (l.callsSinceLastRun + " scored call" + (l.callsSinceLastRun === 1 ? "" : "s") + " since the last pass (" + fmtDate(l.lastRunAt) + ")")
+        : "No optimizer pass has run yet.";
+      return '<div class="vt-card"><h3>Self-learning</h3>' +
+        '<div class="vt-hint" style="margin-top:6px">When this is on, the agent studies its own recent transcripts after every few scored calls: what sounded robotic, what landed, how callers reacted. It rewrites its delivery coaching, nudges the voice settings, and pushes the improved version to the live line automatically. Every change is versioned below and can be rolled back.</div>' +
+        '<div class="vt-learnrow">' +
+        '<label class="vt-must"><input type="checkbox" id="vtAutoLearn"' + (l.autoLearn ? " checked" : "") + ' /><span>Learn and improve automatically</span></label>' +
+        '<select id="vtCadence">' + cad + "</select>" +
+        '<span class="vt-hint">' + esc(status) + "</span></div></div>";
+    }
+
+    /* ---- run: optimize / stress test / prompt check ---- */
+    function optRunCard() {
+      return '<div class="vt-card"><h3>Optimize now</h3>' +
+        '<div class="vt-hint" style="margin-top:6px"><b>Optimize</b> studies recent real calls (plus the last stress test) and proposes a new coaching revision. <b>Stress test</b> plays five synthetic candidates against your exact live prompt: the skeptic who asks if it’s an AI, the rambler, the star, the confident-but-unqualified, and one built for this role; each conversation is graded for realism. <b>Check prompt</b> reviews the agent’s instructions for gaps before any calls happen.</div>' +
+        '<div class="vt-actions" style="border-top:0;padding-top:0;margin-top:14px">' +
+        '<button class="vt-btn vt-btn-primary" id="vtRunOpt">Optimize from calls</button>' +
+        '<button class="vt-btn" id="vtRunSim">Run stress test</button>' +
+        '<button class="vt-btn" id="vtRunLint">Check prompt</button></div>' +
+        '<div id="vtOptResult"></div></div>';
+    }
+
+    function revisionCard(r, isProposal) {
+      var head = "v" + r.version + " · " + (r.source === "auto_learn" ? "auto-learn" : r.source) +
+        (r.basedOnCalls ? " · from " + r.basedOnCalls + " call" + (r.basedOnCalls === 1 ? "" : "s") : "") +
+        (r.avgRealismBefore != null ? " · realism before: " + r.avgRealismBefore : "");
+      var html = '<div class="vt-rev' + (isProposal ? " vt-rev-proposal" : "") + '">' +
+        '<div class="vt-rev-h"><b>' + esc(head) + "</b><span class=\"vt-pill " + (r.status === "applied" ? "live" : r.status === "proposed" ? "draft" : "paused") + '">' + esc(r.status) + "</span></div>";
+      if (r.diagnosis) html += '<div class="vt-rev-diag">' + esc(r.diagnosis) + "</div>";
+      if (r.changelog && r.changelog.length) {
+        html += '<ul class="vt-rev-log">' + r.changelog.map(function (l) { return "<li>" + esc(l) + "</li>"; }).join("") + "</ul>";
+      }
+      if (r.styleNotes) html += '<details class="vt-rev-notes"><summary>Coaching added to the agent’s prompt</summary><pre>' + esc(r.styleNotes) + "</pre></details>";
+      if (r.status !== "applied") {
+        html += '<div style="margin-top:10px"><button class="vt-btn vt-btn-primary" data-vtapply="' + r.id + '">Apply + push live</button></div>';
+      }
+      return html + "</div>";
+    }
+
+    function simResultsHtml(run) {
+      if (!run || !run.results) return "";
+      var head = '<div class="vt-rev-h" style="margin-top:14px"><b>Stress test · ' + fmtDate(run.at) + "</b><span>" +
+        run.passed + " passed · " + run.failed + " failed" + (run.avgRealism != null ? " · avg realism " + run.avgRealism : "") + "</span></div>";
+      var rows = run.results.map(function (r) {
+        var icon = r.passed ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : '<svg class="isvg" aria-hidden="true"><use href="#i-x"/></svg>';
+        var tr = (r.transcript && r.transcript.length)
+          ? '<details class="vt-rev-notes"><summary>Transcript</summary><div class="vt-tr-body">' +
+            r.transcript.map(function (t) {
+              return '<div class="vt-turn ' + (t.role === "agent" ? "agent" : "candidate") + '"><b>' + (t.role === "agent" ? "Agent" : "Candidate") + ":</b> " + esc(t.text) + "</div>";
+            }).join("") + "</div></details>"
+          : "";
+        return '<div class="vt-sim' + (r.passed ? "" : " vt-sim-fail") + '">' +
+          '<div class="vt-sim-h">' + icon + " <b>" + esc(r.label) + "</b><span class=\"vt-sim-real\">realism " + r.realism + "/100</span></div>" +
+          '<div class="vt-hint">' + esc(r.notes) + "</div>" + tr + "</div>";
+      }).join("");
+      var next = run.failed > 0 ? '<div class="vt-hint" style="margin-top:8px">Now click <b>Optimize from calls</b>: the failures above become the evidence for the next revision.</div>' : "";
+      return head + rows + next;
+    }
+
+    function lintHtml(findings) {
+      if (!findings || !findings.length) return '<div class="vt-hint" style="margin-top:12px">No issues found. The prompt looks solid.</div>';
+      return '<div class="vt-rev-h" style="margin-top:14px"><b>Prompt check</b><span>' + findings.length + " finding" + (findings.length === 1 ? "" : "s") + "</span></div>" +
+        findings.map(function (f) {
+          return '<div class="vt-sim' + (f.severity === "high" ? " vt-sim-fail" : "") + '"><div class="vt-sim-h"><span class="vt-sev vt-sev-' + esc(f.severity) + '">' + esc(f.severity) + "</span><b>" + esc(f.issue) + "</b></div>" +
+            '<div class="vt-hint">' + esc(f.recommendation) + "</div></div>";
+        }).join("");
+    }
+
+    /* ---- revision history ---- */
+    function optHistoryCard(o) {
+      var l = (o && o.learning) || {};
+      var revs = l.revisions || [];
+      var inner = revs.length
+        ? revs.map(function (r) { return revisionCard(r, false); }).join("")
+        : '<div class="vt-hint" style="margin-top:8px">No revisions yet. Run the optimizer or a stress test above, or switch on self-learning and let the calls do it.</div>';
+      var revert = (l.learnedNotes)
+        ? '<div style="margin-top:12px"><button class="vt-btn vt-btn-ghost" id="vtRevert">Reset to factory behavior (remove all applied coaching)</button></div>'
+        : "";
+      return '<div class="vt-card"><h3>Revision history</h3>' + inner + revert + "</div>";
+    }
+
+    function wireOptimizer(body, o) {
+      var sel = $("#vtOptDesk");
+      if (sel) sel.addEventListener("change", function () { vt.deskId = this.value; paintOptimizer(body); });
+
+      function readTuning() {
+        return {
+          stability: parseFloat(($("#vtStab") || {}).value || "0.4"),
+          similarityBoost: parseFloat(($("#vtSim") || {}).value || "0.8"),
+          style: parseFloat(($("#vtStyle") || {}).value || "0"),
+          speed: parseFloat(($("#vtSpeed") || {}).value || "1"),
+          speakerBoost: !!($("#vtBoost") && $("#vtBoost").checked)
+        };
+      }
+      ["vtStab", "vtSim", "vtStyle", "vtSpeed"].forEach(function (id) {
+        var el = $("#" + id);
+        if (el) el.addEventListener("input", function () { var v = $("#" + id + "Val"); if (v) v.textContent = el.value; });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-vtpreset]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var p = (o.presets || {})[btn.getAttribute("data-vtpreset")];
+          if (!p) return;
+          var map = { vtStab: p.tuning.stability, vtSim: p.tuning.similarityBoost, vtStyle: p.tuning.style, vtSpeed: p.tuning.speed };
+          Object.keys(map).forEach(function (id) {
+            var el = $("#" + id); if (el) { el.value = map[id]; var v = $("#" + id + "Val"); if (v) v.textContent = String(map[id]); }
+          });
+          if ($("#vtBoost")) $("#vtBoost").checked = !!p.tuning.speakerBoost;
+          var m = $("#vtVoiceMsg"); if (m) m.textContent = p.label + ": " + p.hint + " Click Save to push it.";
+        });
+      });
+      var vs = $("#vtVoiceSave");
+      if (vs) vs.addEventListener("click", function () {
+        vs.disabled = true;
+        send("/vetting/optimizer", "POST", { action: "settings", deskId: vt.deskId, voiceTuning: readTuning() }).then(function (r) {
+          vs.disabled = false;
+          if (!r.ok) { toast("Save failed"); return; }
+          toast(r.data && r.data.pushed ? "Saved and pushed to the live agent" : "Saved. Goes out next time the desk goes live.");
+        }).catch(function () { vs.disabled = false; toast("Couldn’t reach the server."); });
+      });
+
+      function saveLearn() {
+        send("/vetting/optimizer", "POST", {
+          action: "settings", deskId: vt.deskId,
+          autoLearn: !!($("#vtAutoLearn") && $("#vtAutoLearn").checked),
+          minCallsBetweenRuns: parseInt(($("#vtCadence") || {}).value || "3", 10)
+        }).then(function (r) {
+          if (!r.ok) { toast("Save failed"); return; }
+          toast(($("#vtAutoLearn") && $("#vtAutoLearn").checked) ? "Self-learning is on" : "Self-learning is off");
+        });
+      }
+      if ($("#vtAutoLearn")) $("#vtAutoLearn").addEventListener("change", saveLearn);
+      if ($("#vtCadence")) $("#vtCadence").addEventListener("change", saveLearn);
+
+      function runAction(btnId, payload, busyLabel, render) {
+        var btn = $("#" + btnId); if (!btn) return;
+        btn.addEventListener("click", function () {
+          var out = $("#vtOptResult"); if (!out) return;
+          var idle = btn.innerHTML;
+          btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> ' + busyLabel;
+          send("/vetting/optimizer", "POST", payload).then(function (r) {
+            btn.disabled = false; btn.innerHTML = idle;
+            if (!r.ok) {
+              var d = (r.data && r.data.detail) || "";
+              out.innerHTML = '<div class="vt-warn" style="margin-top:12px">' +
+                (d.indexOf("anthropic") >= 0 ? "Set ANTHROPIC_API_KEY on the server to use the optimizer." :
+                 d.indexOf("no_evidence") >= 0 || d.indexOf("no_scored_calls") >= 0 ? "Nothing to learn from yet. Take a scored call or run a stress test first." :
+                 "That didn’t work: " + esc(d || r.status)) + "</div>";
+              return;
+            }
+            out.innerHTML = render(r.data || {});
+            wireApply(out);
+          }).catch(function () { btn.disabled = false; btn.innerHTML = idle; toast("Couldn’t reach the server."); });
+        });
+      }
+      runAction("vtRunOpt", { action: "optimize", deskId: vt.deskId }, "Studying recent calls…", function (d) {
+        return d.revision ? revisionCard(d.revision, true) : "";
+      });
+      runAction("vtRunSim", { action: "simulate", deskId: vt.deskId }, "Playing 5 candidates… about a minute", function (d) {
+        return simResultsHtml(d.simulation);
+      });
+      runAction("vtRunLint", { action: "lint", deskId: vt.deskId }, "Reviewing the prompt…", function (d) {
+        return lintHtml(d.findings);
+      });
+
+      function wireApply(scope) {
+        Array.prototype.forEach.call(scope.querySelectorAll("[data-vtapply]"), function (btn) {
+          btn.addEventListener("click", function () {
+            btn.disabled = true;
+            send("/vetting/optimizer", "POST", { action: "apply", deskId: vt.deskId, revisionId: btn.getAttribute("data-vtapply") }).then(function (r) {
+              if (!r.ok) { btn.disabled = false; toast("Apply failed"); return; }
+              toast(r.data && r.data.pushed ? "Applied and pushed to the live agent" : "Applied. Goes out next time the desk goes live.");
+              paintOptimizer(body);
+            }).catch(function () { btn.disabled = false; toast("Couldn’t reach the server."); });
+          });
+        });
+      }
+      wireApply(body);
+      var rv = $("#vtRevert");
+      if (rv) rv.addEventListener("click", function () {
+        if (!confirm("Remove all applied coaching and go back to the factory agent behavior?")) return;
+        send("/vetting/optimizer", "POST", { action: "revert", deskId: vt.deskId }).then(function () {
+          toast("Back to factory behavior"); paintOptimizer(body);
+        });
+      });
+    }
+
     tabBar(); paint();
   }
 
   /* ---------------- Outreach (sending readiness control panel) ----------------
      The working interface for everything you need wired before you can send:
-     ATS, SMS (TalTxt), the enrichment waterfall + its credit balance, Job
+     ATS, SMS (OS Text), the enrichment waterfall + its credit balance, Job
      Search (the white-labelled signal feed), sending domains down to each
      inbox, and the LinkedIn accounts, each with live status, the switch to
      turn it on, and a path to connect what's missing. Talks to /api/outreach. */

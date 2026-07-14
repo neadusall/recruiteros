@@ -21,7 +21,7 @@ import { telnyx } from "../providers";
 import { cred } from "../providers/http";
 import { withWorkspaceCreds } from "../connected";
 import type { AssistantConfig } from "../providers/telnyx";
-import type { VettingDesk } from "./types";
+import { clampVoiceTuning, type VettingDesk } from "./types";
 import { buildAssistantInstructions, buildGreeting } from "./prompt";
 
 function appUrl(): string {
@@ -46,12 +46,19 @@ export function buildAssistantConfig(desk: VettingDesk): AssistantConfig {
     voice: voiceSelector(desk),
     // Human timing knobs: low-latency cloned voice, allow the caller to barge in,
     // detect turns on natural pauses rather than fixed silence, slight variation.
-    voice_settings: {
-      api_key_ref: cred("TELNYX_ELEVENLABS_KEY_REF") || undefined,
-      stability: 0.45,
-      similarity_boost: 0.85,
-      style: 0.2,
-    },
+    // The delivery values are the desk's tunable VoiceTuning (Optimizer tab);
+    // clampVoiceTuning defaults any unset desk to the phone-realism sweet spot.
+    voice_settings: (() => {
+      const t = clampVoiceTuning(desk.voiceTuning);
+      return {
+        api_key_ref: cred("TELNYX_ELEVENLABS_KEY_REF") || undefined,
+        stability: t.stability,
+        similarity_boost: t.similarityBoost,
+        style: t.style,
+        speed: t.speed,
+        use_speaker_boost: t.speakerBoost,
+      };
+    })(),
     // Resolve who's calling (name + LinkedIn talking points) by caller ID.
     dynamic_variables_webhook_url: `${appUrl()}/api/vetting/context`,
     // Record + transcribe, and post the finished call to us for scoring.

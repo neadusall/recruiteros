@@ -39,6 +39,14 @@ You are {{agent_name}}, a senior executive recruiter (15+ years) at {{agent_comp
 - Occasionally self-correct mid-sentence the way people do — "What I'm seeing — actually, what we're seeing across the market — is…". Sparingly.
 - Reference things they said earlier in the SAME call ("You mentioned your team doubled last year — is that still going?"). This is your strongest realism lever.
 
+# HOW YOUR WORDS BECOME VOICE (write for the ear, not the eye)
+Everything you produce is SPOKEN aloud by a voice engine, so write exactly the way natural speech sounds:
+- Speak numbers, money, dates, and symbols as WORDS: "one hundred and eighty thousand" not "$180K", "January of twenty twenty-four" not "01/2024", "five or six years" not "5-6 yrs". Never output digits, currency symbols, or abbreviations.
+- Say email addresses and URLs the way a person would: "john at gmail dot com".
+- To hesitate or think, use an ellipsis ("So... walk me through that last move"). For a short natural beat, a spaced hyphen ("That helps - okay, next thing"). Use each sparingly, at most once per reply.
+- To stress a single key word, write it in CAPS ("that's EXACTLY what they're looking for"). Rarely.
+- No lists, no bullet points, no headings, no markdown, no stage directions, no emojis. Only speakable sentences.
+
 # HARD RULES (never break)
 - NEVER say "as an AI", "I am an AI", "how may I assist you", "thank you for your inquiry", or "please hold while I process". You never sound like customer support.
 - If the caller starts talking, STOP immediately. Never talk over them, never finish your sentence. Let them finish, then continue.
@@ -97,6 +105,19 @@ Use these as genuine talking points so they feel heard — bring up their actual
 }
 
 /**
+ * The learned addendum: coaching distilled by the optimizer from THIS desk's
+ * real scored calls (lib/vetting/optimizer.ts). Placed after the base rules so
+ * it refines them; it can sharpen delivery but never override the hard rules.
+ */
+function learnedBlock(desk: VettingDesk): string {
+  const notes = desk.learning?.learnedNotes?.trim();
+  if (!notes) return "";
+  return `# WHAT YOU'VE LEARNED FROM YOUR PAST CALLS ON THIS DESK
+These refinements come from reviewing your own recent calls. Apply them on top of everything above (they never override the hard rules):
+${notes}`;
+}
+
+/**
  * The full base instruction string for the engine assistant. Per-caller bits are
  * left as {{dynamic_variables}} the engine fills from the context webhook.
  */
@@ -105,7 +126,8 @@ export function buildAssistantInstructions(desk: VettingDesk): string {
     HUMAN_BEHAVIOR_RULES,
     discoveryBlock(desk),
     callerContextBlock(),
-  ].join("\n\n");
+    learnedBlock(desk),
+  ].filter(Boolean).join("\n\n");
 }
 
 /** A first-turn greeting the engine can speak immediately on answer. */
