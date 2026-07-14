@@ -487,4 +487,71 @@
     if (spacer) topbar.insertBefore(kbtn, spacer.nextSibling); else topbar.appendChild(kbtn);
     kbtn.addEventListener("click", openPal);
   }
+
+  /* ---------------- 6. Delight, kept quiet ---------------- */
+  var reduceMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // KPI count-up: when a view (or its async data) paints a numeric stat within
+  // ~2.5s of a route change, tick it up from zero. Outside that window nothing
+  // animates, so 15s live-refresh polls never twitch.
+  var countWindowUntil = 0;
+  function animateCount(el) {
+    if (el.dataset.counted) return;
+    var raw = el.textContent.trim();
+    // plain integers (optionally grouped) up to 6 digits; skip 0, ratios, text
+    var m = /^([1-9][\d,]{0,6})$/.exec(raw);
+    if (!m) { el.dataset.counted = "1"; return; }
+    var target = parseInt(m[1].replace(/,/g, ""), 10);
+    if (!isFinite(target) || target <= 1) { el.dataset.counted = "1"; return; }
+    el.dataset.counted = "1";
+    var grouped = m[1].indexOf(",") >= 0;
+    var start = performance.now(), dur = 520;
+    (function tick(now) {
+      var p = Math.min((now - start) / dur, 1);
+      var eased = 1 - Math.pow(1 - p, 3);
+      var v = Math.round(eased * target);
+      el.textContent = grouped ? v.toLocaleString("en-US") : String(v);
+      if (p < 1) requestAnimationFrame(tick);
+    })(performance.now());
+  }
+  if (view && !reduceMotion && typeof MutationObserver !== "undefined") {
+    var KPI_SEL = ".stat .sv, .rstat .big, .cl-kpi-val, .sq-v, .snd-statv, .imq-stat b, .ep-tile b";
+    var mo = new MutationObserver(function () {
+      if (Date.now() > countWindowUntil) return;
+      $$(KPI_SEL, view).forEach(animateCount);
+    });
+    mo.observe(view, { childList: true, subtree: true });
+    window.addEventListener("hashchange", function () { countWindowUntil = Date.now() + 2500; });
+    countWindowUntil = Date.now() + 2500;
+  }
+
+  // Smooth theme switch: a brief global color cross-fade when the user flips
+  // appearance in the account menu.
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest || !e.target.closest("#themeSeg .ts")) return;
+    if (reduceMotion) return;
+    document.documentElement.classList.add("theme-anim");
+    setTimeout(function () { document.documentElement.classList.remove("theme-anim"); }, 320);
+  }, true);
+
+  // One-time discovery tip for the keyboard layer.
+  if (!lsGet("ros_tip_palette")) {
+    setTimeout(function () {
+      if (lsGet("ros_tip_palette")) return;
+      var tip = document.createElement("div");
+      tip.className = "ux-tip";
+      tip.setAttribute("role", "status");
+      tip.innerHTML = '<span>Press <kbd>Ctrl</kbd><kbd>K</kbd> to jump anywhere, or <kbd>?</kbd> for all shortcuts.</span>' +
+        '<button type="button" aria-label="Dismiss tip">Got it</button>';
+      document.body.appendChild(tip);
+      requestAnimationFrame(function () { tip.classList.add("show"); });
+      function dismiss() {
+        lsSet("ros_tip_palette", "1");
+        tip.classList.remove("show");
+        setTimeout(function () { tip.remove(); }, 250);
+      }
+      tip.querySelector("button").addEventListener("click", dismiss);
+      setTimeout(dismiss, 12000);
+    }, 1800);
+  }
 })();

@@ -91,3 +91,18 @@ Features/Pricing links added to every marketing nav.
   route changes scroll the content pane to top and hand focus to the page title for
   screen readers, and opening /command bare restores the last route.
 - Marketing nav highlights the current page (aria-current + brand color).
+
+## Round 4 (same day): quiet delight
+
+- Sanctioned brand wash (sub-10% radial brand tint) on marketing heroes, the CTA band,
+  and the auth pitch panel; documented as the one decorative exception in DESIGN-SYSTEM.md.
+  Never inside the app shell.
+- KPI count-up: numeric stats tick up once within 2.5s of a route change (MutationObserver
+  window, so 15s live-refresh polls never twitch). Theme switches cross-fade ~300ms.
+  Both honor prefers-reduced-motion.
+- Empty states are illustrated: a dim outline glyph via CSS mask on .empty::before,
+  block-centered so inline links in the copy stay intact.
+- One-time keyboard discovery tip (Ctrl+K / ?) shown once per user, dismissible,
+  auto-fades; toast gets a brand rail; clickable KPI tiles lift with a soft shadow.
+- Real-data screenshots were deliberately NOT embedded on the marketing site (they
+  contain live pipeline names); the crafted candidate-table mock stays.

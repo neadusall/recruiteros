@@ -18,7 +18,7 @@
   justify-content: center;
   gap: 20px;
   padding: 64px 72px;
-  background: var(--surface);
+  background: var(--surface) radial-gradient(85% 65% at 0% 0%, var(--brand-soft), transparent 65%);
   border-right: 1px solid var(--border);
 }
 .auth-aside .brand { margin-bottom: 16px; }

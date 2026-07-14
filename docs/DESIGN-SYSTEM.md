@@ -141,6 +141,23 @@ Emoji are banned in UI chrome (nav, buttons, badges, headings, empty states).
   hacks (the old shell used `zoom: 1.06/1.12`; deleted).
 - Help is a normal topbar/nav item, not a gradient FAB.
 
+## Sanctioned decoration and delight
+
+Two narrow exceptions to the no-decoration rule, both quiet:
+
+- **Brand wash**: a single radial brand tint (`var(--brand-soft)`, under 10%
+  strength) radiating from the top edge of marketing heroes, the CTA band, and
+  the auth pitch panel. Never inside the app shell, never stacked, never
+  animated.
+- **Functional motion only**: KPI values may count up once within 2.5s of a
+  route change (never on live refresh), theme switches cross-fade for ~300ms,
+  views fade in for 140ms, skeletons sweep while loading. Everything honors
+  `prefers-reduced-motion`. Nothing floats, drifts, shimmers, or loops.
+
+Empty states are illustrated by a single dim outline glyph (CSS mask on
+`.empty::before`), one line of copy, and at most one action. The one-time
+keyboard tip (`.ux-tip`) may appear once per user, ever.
+
 ## Voice
 
 Sentence case everywhere (buttons, nav, headings). No exclamation marks in

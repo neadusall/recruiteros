@@ -2030,3 +2030,52 @@ body.side-rail #railToggle { align-self: center; margin-top: 8px; }
   font: 600 10.5px var(--mono); color: var(--text-muted); background: var(--bg-soft);
   border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 2px 6px;
 }
+
+/* ============================================================
+   UX layer round 4: quiet delight
+   ============================================================ */
+
+/* Theme switch cross-fade (added briefly by command-ux.js) */
+html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
+  transition: background-color .28s ease, border-color .28s ease, color .28s ease, fill .28s ease, stroke .28s ease !important;
+}
+
+/* Empty states: centered, illustrated, calm */
+.empty {
+  display: block; text-align: center; padding: 52px 24px; color: var(--text-dim);
+  font-size: 13.5px; line-height: 1.55;
+}
+.empty::before {
+  content: ""; display: block; width: 40px; height: 40px; margin: 0 auto 12px; opacity: .45;
+  background: currentColor;
+  -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>') center / contain no-repeat;
+  mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>') center / contain no-repeat;
+}
+/* Skeletons are progress, not absence: no illustration on them */
+.skel::before { content: none; }
+
+/* Toast: a quiet brand rail so it reads as the product speaking */
+.toast { border-left: 3px solid var(--brand); }
+
+/* Interactive tiles lift slightly on hover */
+.stat.clickable:hover, .rstat.clickable:hover { box-shadow: var(--shadow); }
+
+/* One-time keyboard discovery tip */
+.ux-tip {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(10px);
+  display: flex; align-items: center; gap: 14px;
+  background: var(--surface); border: 1px solid var(--border-strong); border-left: 3px solid var(--brand);
+  border-radius: var(--radius); padding: 11px 14px 11px 16px; font-size: 13px; color: var(--text-muted);
+  box-shadow: var(--shadow-lg); z-index: 4500; opacity: 0; transition: opacity .22s ease, transform .22s ease;
+  max-width: min(480px, calc(100vw - 32px));
+}
+.ux-tip.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.ux-tip kbd {
+  font: 600 10.5px var(--mono); color: var(--text-muted); background: var(--bg-soft);
+  border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 2px 6px;
+}
+.ux-tip button {
+  flex: none; background: var(--brand); color: #fff; border: none; border-radius: var(--radius-sm);
+  font: 500 12.5px var(--font); padding: 6px 12px; cursor: pointer;
+}
+.ux-tip button:hover { background: color-mix(in srgb, var(--brand) 88%, #000); }
