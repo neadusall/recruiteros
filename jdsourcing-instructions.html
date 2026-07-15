@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>JD Sourcing: From Job Description to Ranked Candidate List | Lume</title>
+<title>JD Sourcing: From Job Description to Ranked Candidate List... WITH Cells | Lume</title>
 <style>
   :root {
     --accent: #2e5bd7;
@@ -168,8 +168,8 @@
 <div class="wrap">
 
   <div class="eyebrow">Internal Playbook</div>
-  <h1>JD Sourcing: From Job Description to Ranked Candidate List</h1>
-  <p class="lede">Paste a job description, or just a title and a company, and get back a ranked, scored list of real candidates you can vet, enrich, and push straight into your Candidates pipeline. This is how to use it well.</p>
+  <h1>JD Sourcing: From Job Description to Ranked Candidate List... WITH Cells</h1>
+  <p class="lede">Paste a job description, or just a title and a company, and get back a ranked, scored list of real candidates, with cell numbers on the ones you enrich, ready to vet and push straight into your Candidates pipeline. This is how to use it well.</p>
 
   <nav class="toc">
     <div class="toc-title">In this document</div>
@@ -187,14 +187,14 @@
   </nav>
 
   <h2 id="why">1. Why JD Sourcing matters</h2>
-  <p>The old way to source a role looks like this: read the JD, guess at search strings, run a dozen LinkedIn searches, open profiles one by one, eyeball each against the requirements, and keep a spreadsheet on the side. A thorough first pass on one role is an afternoon, and the quality depends entirely on how good your search strings were.</p>
-  <p>JD Sourcing collapses that afternoon into minutes. You give it the role. It reads the JD the way a researcher would, figures out who the ideal candidate actually is, runs the searches for you (including ones you would not have thought to run), scores every person it finds against the role, and hands you a ranked list. Then it does the second pass too: deep-vetting reads each shortlisted candidate's full career history against the role and returns a verified fit score with a written verdict. That is the first-pass screen your team would do by hand, across the whole list, in seconds.</p>
+  <p>The old way: read the JD, guess at search strings, run a dozen LinkedIn searches, open profiles one by one, keep a spreadsheet on the side. An afternoon per role, and the quality depends on your search strings.</p>
+  <p>JD Sourcing does it in minutes. Give it the role. It reads the JD like a researcher, builds the ideal-candidate profile, runs searches you would not have thought to run, scores everyone it finds, and hands you a ranked list. Deep-vetting then reads each shortlisted candidate's full career history and returns a verified score with a written verdict: your team's first-pass screen, across the whole list, in seconds.</p>
   <p>What that buys you:</p>
   <ul>
-    <li><strong>Speed to market.</strong> A new job order can have a ranked longlist the same hour it lands. Being first to good candidates is most of the game.</li>
-    <li><strong>Coverage you cannot match by hand.</strong> A run can scan hundreds of profiles across every peer company in the space, not just the three competitors you remembered.</li>
-    <li><strong>Consistency.</strong> Every candidate is scored against the same profile: title, seniority, company, geography, must-haves. No 4 pm fatigue bias.</li>
-    <li><strong>A repeatable asset.</strong> Every run is saved under a name. Rerun it next quarter with <span class="ui">Fresh only</span> on and you get the people who entered the market since, not the same list again.</li>
+    <li><strong>Speed.</strong> A ranked longlist the same hour the job order lands. First to good candidates wins.</li>
+    <li><strong>Coverage.</strong> Hundreds of profiles across every peer company, not the three competitors you remembered.</li>
+    <li><strong>Consistency.</strong> Everyone scored against the same profile. No 4 pm fatigue bias.</li>
+    <li><strong>A repeatable asset.</strong> Every run is saved. Rerun next quarter with <span class="ui">Fresh only</span> on and you get only the people who entered the market since.</li>
   </ul>
 
   <h2 id="how">2. What happens under the hood</h2>
@@ -320,9 +320,20 @@
     <li><strong>Deep-vet top N.</strong> Choose how many top-ranked candidates to vet (default 25) and run it. The AI reads each person's full career history against the role and returns a verified fit score plus a short written verdict. A cost pill shows the price before you run. This is the step that turns a ranked longlist into a shortlist you would defend to a client.</li>
     <li><strong>Enrich top N.</strong> You pick how many of the top candidates to look up business email and phone for. Enrich as few or as many as you want. Lookups are cached across the workspace, so a person enriched once is never paid for twice.</li>
     <li><strong>Send to Candidates.</strong> Pushes the list into your Candidates pipeline under the same name, ready to drop into a campaign (OS Text, email, or calls).</li>
-    <li><strong>Excel (URLs).</strong> Downloads the list as an .xlsx of profile URLs whenever you need to share it outside the portal or work it manually.</li>
+    <li><strong>Excel (URLs).</strong> Downloads the list as an .xlsx whenever you need to share it outside the portal or work it manually. The sheet carries every OS Text merge column (First Name, Last Name, Title, Company, Location, Email, Phone, LinkedIn URL), so if you ever do upload it by hand, every <span class="ui">{token}</span> fills in.</li>
     <li><strong>Delete.</strong> Removes the saved list. The people themselves are not deleted, and the workspace still remembers it surfaced them (which is what powers Fresh only).</li>
   </ol>
+
+  <h3>From Candidates to a texting campaign in one click</h3>
+  <p>You never move the data by hand. Once a list is in Candidates, open the <strong>Candidates</strong> tab, pull the list up under Saved searches (same name), and click <span class="ui">Push list to OS Text</span>. You can also select any rows and use <span class="ui">Push to OS Text</span>, or push straight from the Saved lists window.</p>
+  <p>Name the campaign (it defaults to the list name) and push. OS Text receives a campaign that is about 90% built:</p>
+  <ul>
+    <li>Every contact loads with the full personalization column set: <span class="ui">first_name</span>, <span class="ui">last_name</span>, <span class="ui">company</span>, <span class="ui">job_title</span>, <span class="ui">location</span>, email and LinkedIn URL, plus tag and headline as extra columns. Every merge token in your text fills in; no contact gets skipped for a missing field.</li>
+    <li>Your recruiter name and email are already on the campaign, and a safe starter message (using only <span class="ui">{first_name}</span>) is prefilled.</li>
+    <li>The usual OS Text guardrails run on arrival: mobile-line validation (leave the checkbox on), duplicates are absorbed, and opted-out numbers are never added, ever.</li>
+    <li>Pushing the same list again tops up the existing campaign instead of creating a copy, so a Fresh-only rerun flows straight into the same campaign.</li>
+  </ul>
+  <p>Only candidates with a phone number travel; the push tells you how many are missing one so you can enrich and push again. Then open <strong>OS Text</strong>, polish the message so it sounds like you, and launch. That is the whole handoff: scrape, vet, enrich, push, edit one message, send.</p>
 
   <div class="callout warn">
     <span class="tag">Spend smart</span>
@@ -376,8 +387,9 @@
   <h3>Every saved list</h3>
   <ul>
     <li>Deep-vet the top 25 (or your working number)</li>
-    <li>Enrich only the vetted top N you will actually contact</li>
-    <li><span class="ui">Send to Candidates</span> and launch the campaign</li>
+    <li>Enrich only the vetted top N you will actually contact (that is where the cells come from)</li>
+    <li><span class="ui">Send to Candidates</span>, then in Candidates: <span class="ui">Push list to OS Text</span></li>
+    <li>In OS Text: polish the prefilled message, launch</li>
   </ul>
   <h3>Refreshing a role</h3>
   <ul>
