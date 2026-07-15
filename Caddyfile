@@ -14,7 +14,9 @@
 # first-party everywhere and a white-label customer never sees a house URL.
 # Imported into each portal-serving block below.
 (ostext) {
-	handle /ostext-app/* {
+	# /ostext-app* (no trailing slash requirement): the sign-in chain 308s to
+	# the bare /ostext-app path, which /ostext-app/* alone would not match.
+	handle /ostext-app* {
 		reverse_proxy taltxt:3000
 	}
 }
