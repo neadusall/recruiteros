@@ -15,3 +15,4 @@ export * from "./tidycal";
 export * from "./assistant";
 export * from "./optimizer";
 export * from "./simulator";
+export * from "./preview";

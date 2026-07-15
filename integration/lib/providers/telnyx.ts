@@ -210,6 +210,8 @@ export interface AssistantConfig {
   /** Voice selector, e.g. "ElevenLabs.<voiceId>" for the recruiter's cloned voice. */
   voice?: string;
   voice_settings?: Record<string, unknown>;
+  /** Barge-in + start-speaking plan (see vetting/assistant.ts mapping notes). */
+  interruption_settings?: Record<string, unknown>;
   /** Called per-call to resolve {{dynamic_variables}} (caller identity/context). */
   dynamic_variables_webhook_url?: string;
   /** Where Telnyx posts the finished transcript + recording for scoring. */

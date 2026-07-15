@@ -128,6 +128,7 @@ export async function POST(req: Request) {
       marketabilityScore: s.marketabilityScore,
       agentRealism: s.agentRealism,
       verdicts: s.verdicts,
+      extracted: s.extracted,
       qualified: s.qualified,
       scoringConfidence: s.scoringConfidence,
       needsReview: s.needsReview,

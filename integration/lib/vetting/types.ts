@@ -44,6 +44,45 @@ export interface VoiceTuning {
   speakerBoost: boolean;
 }
 
+/**
+ * Conversation-feel knobs for the live call engine (interruption handling,
+ * idle behavior, backchannels). These live on the Telnyx assistant surface,
+ * which is the documented operator-verify seam: we send them shape-tolerantly
+ * (assistant.ts) and the engine applies what it supports. The backchannel word
+ * list also feeds the PROMPT so the agent uses those exact acknowledgment
+ * sounds even on engines with no native backchannel feature.
+ */
+export interface TurnTuning {
+  /** Let the caller barge in over the agent (the strongest realism signal). */
+  interruptions: boolean;
+  /**
+   * 0-1. How readily caller speech cuts the agent off. High = a syllable stops
+   * the agent (can false-trigger on "mm-hm"); low = the agent finishes clauses.
+   */
+  interruptionSensitivity: number;
+  /** Seconds of caller silence before the agent gently re-engages. */
+  idleTimeoutSec: number;
+  /** What the agent says to re-engage after that silence. */
+  idleReminder: string;
+  /** Short listening sounds the agent may use while the caller talks. */
+  backchannelWords: string[];
+}
+
+/** One structured field the scorer extracts from every call's transcript. */
+export interface ExtractionField {
+  id: string;
+  /** Machine key, e.g. "current_compensation". */
+  key: string;
+  /** Label shown in the scorecard, e.g. "Current comp". */
+  label: string;
+  type: "text" | "number" | "boolean" | "enum";
+  /** Allowed values when type is "enum". */
+  enumOptions?: string[];
+}
+
+/** Extracted values per call, keyed by ExtractionField.key; null = not mentioned. */
+export type ExtractedData = Record<string, string | number | boolean | null>;
+
 /** Where a prompt revision came from. */
 export type RevisionSource = "optimizer" | "auto_learn" | "manual";
 
@@ -59,6 +98,12 @@ export interface PromptRevision {
   /** Monotonic per desk: v1, v2, ... */
   version: number;
   source: RevisionSource;
+  /**
+   * Coaching lens this variant optimized through ("warmth", "brevity",
+   * "energy"), set when the revision came from a multi-variant Auto pass so
+   * competing proposals are tellable apart in the UI.
+   */
+  angle?: string;
   status: "proposed" | "applied" | "reverted";
   /**
    * The learned style addendum injected into the agent's instructions (the
@@ -208,6 +253,10 @@ export interface VettingDesk {
   voiceId?: string;
   /** Delivery tuning for that voice (stability/style/speed...). Defaulted on read. */
   voiceTuning?: VoiceTuning;
+  /** Conversation-feel knobs (barge-in, idle, backchannels). Defaulted on read. */
+  turnTuning?: TurnTuning;
+  /** Structured fields the scorer extracts per call. Defaulted on read. */
+  extraction?: ExtractionField[];
   /** Self-improvement state: applied learnings + revision history + auto-learn. */
   learning?: DeskLearning;
 
@@ -241,6 +290,8 @@ export interface VettingDeskInput {
   voiceId?: string;
   phoneNumber?: string;
   passThreshold?: number;
+  /** Structured fields to extract per call (normalized + capped on save). */
+  extraction?: ExtractionField[];
 }
 
 /**
@@ -399,6 +450,8 @@ export interface VettingCall {
   agentRealism?: AgentRealismScore;
   /** Per-qualifier pass/fail. */
   verdicts?: QuestionVerdict[];
+  /** Structured fields pulled from the transcript (desk.extraction schema). */
+  extracted?: ExtractedData;
   /** Did they qualify overall? Drives the next-step message. */
   qualified?: boolean;
   /** 2-4 sentence human-readable recap of the conversation. */
@@ -518,6 +571,74 @@ export const DEFAULT_LEARNING: DeskLearning = {
   revisions: [],
   callsSinceLastRun: 0,
 };
+
+/**
+ * Conversation-feel defaults: barge-in on at moderate sensitivity (a syllable
+ * of real speech interrupts, a stray "mm-hm" does not), a gentle re-engage
+ * after 8 seconds of silence, and soft professional backchannels.
+ */
+export const DEFAULT_TURN_TUNING: TurnTuning = {
+  interruptions: true,
+  interruptionSensitivity: 0.6,
+  idleTimeoutSec: 8,
+  idleReminder: "No rush at all... take your time.",
+  backchannelWords: ["mm-hm", "right", "okay", "yeah"],
+};
+
+/** Clamp arbitrary input into safe TurnTuning values. */
+export function clampTurnTuning(t?: Partial<TurnTuning> | null): TurnTuning {
+  const n = (v: unknown, lo: number, hi: number, dflt: number) => {
+    const x = Number(v);
+    return Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : dflt;
+  };
+  const words = Array.isArray(t?.backchannelWords)
+    ? t!.backchannelWords.map((w) => String(w).trim().toLowerCase().slice(0, 24)).filter(Boolean).slice(0, 8)
+    : DEFAULT_TURN_TUNING.backchannelWords;
+  return {
+    interruptions: t?.interruptions === undefined ? DEFAULT_TURN_TUNING.interruptions : Boolean(t.interruptions),
+    interruptionSensitivity: n(t?.interruptionSensitivity, 0, 1, DEFAULT_TURN_TUNING.interruptionSensitivity),
+    idleTimeoutSec: Math.round(n(t?.idleTimeoutSec, 3, 30, DEFAULT_TURN_TUNING.idleTimeoutSec)),
+    idleReminder: (typeof t?.idleReminder === "string" && t.idleReminder.trim())
+      ? t.idleReminder.trim().slice(0, 160)
+      : DEFAULT_TURN_TUNING.idleReminder,
+    backchannelWords: words,
+  };
+}
+
+/**
+ * The out-of-the-box extraction schema: the four facts a recruiter wants off
+ * every screen regardless of role. Desks can edit/extend the list (max 8).
+ */
+export const DEFAULT_EXTRACTION: ExtractionField[] = [
+  { id: "xf_comp", key: "current_compensation", label: "Current comp", type: "text" },
+  { id: "xf_notice", key: "notice_period", label: "Notice period", type: "text" },
+  { id: "xf_reloc", key: "willing_to_relocate", label: "Will relocate", type: "boolean" },
+  { id: "xf_interest", key: "interest_level", label: "Interest level", type: "enum", enumOptions: ["low", "medium", "high"] },
+];
+
+/** Normalize a desk's extraction schema (defaults when unset, capped at 8). */
+export function normalizeExtraction(fields?: ExtractionField[] | null): ExtractionField[] {
+  if (!fields || !fields.length) return DEFAULT_EXTRACTION;
+  return fields
+    .filter((f) => f && typeof f.label === "string" && f.label.trim())
+    .slice(0, 8)
+    .map((f, i) => {
+      const label = f.label.trim().slice(0, 60);
+      const key = (typeof f.key === "string" && f.key.trim())
+        ? f.key.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 40)
+        : label.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 40);
+      const type = (["text", "number", "boolean", "enum"] as const).includes(f.type as any) ? f.type : "text";
+      return {
+        id: f.id || `xf_${i}_${key}`,
+        key,
+        label,
+        type,
+        enumOptions: type === "enum"
+          ? (Array.isArray(f.enumOptions) ? f.enumOptions.map((o) => String(o).trim()).filter(Boolean).slice(0, 8) : [])
+          : undefined,
+      };
+    });
+}
 
 /** Clamp arbitrary input into a safe, speakable VoiceTuning. */
 export function clampVoiceTuning(t?: Partial<VoiceTuning> | null): VoiceTuning {

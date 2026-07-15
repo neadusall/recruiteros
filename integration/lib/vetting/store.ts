@@ -20,7 +20,9 @@ import {
   type VettingDesk, type VettingDeskInput, type CandidateProfile,
   type CandidateEnrichment, type VettingCall, type QualifyingQuestion,
   type ResumeReview, type DeskLearning, type PromptRevision, type VoiceTuning, type SimRun,
-  DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD, DEFAULT_LEARNING, clampVoiceTuning,
+  type TurnTuning, type ExtractionField,
+  DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD, DEFAULT_LEARNING, clampVoiceTuning, clampTurnTuning,
+  normalizeExtraction,
 } from "./types";
 
 const store = {
@@ -123,6 +125,7 @@ export function upsertDesk(workspaceId: string, input: VettingDeskInput): Vettin
       "I really appreciate you walking me through your background. Being straight with you, I don't think this particular role is the right fit overall — but your experience is genuinely strong, and I'd like to keep you in mind for other roles that line up better with what you've built. I'll hold onto your details and reach back out when something that fits comes across my desk.",
     persona,
     voiceId: input.voiceId ?? existing?.voiceId,
+    extraction: input.extraction ? normalizeExtraction(input.extraction) : existing?.extraction,
     phoneNumber: input.phoneNumber ?? existing?.phoneNumber,
     assistantId: existing?.assistantId,
     syncedAt: existing?.syncedAt,
@@ -181,6 +184,16 @@ export function setDeskVoiceTuning(workspaceId: string, id: string, tuning: Part
   const d = getDesk(workspaceId, id);
   if (!d) return undefined;
   d.voiceTuning = clampVoiceTuning({ ...(d.voiceTuning ?? {}), ...tuning });
+  d.updatedAt = nowIso();
+  persist();
+  return d;
+}
+
+/** Save conversation-feel tuning (clamped). Caller re-provisions if live. */
+export function setDeskTurnTuning(workspaceId: string, id: string, tuning: Partial<TurnTuning>): VettingDesk | undefined {
+  const d = getDesk(workspaceId, id);
+  if (!d) return undefined;
+  d.turnTuning = clampTurnTuning({ ...(d.turnTuning ?? {}), ...tuning });
   d.updatedAt = nowIso();
   persist();
   return d;

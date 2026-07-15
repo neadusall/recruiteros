@@ -19,6 +19,7 @@
  */
 
 import type { VettingDesk, CandidateProfile } from "./types";
+import { clampTurnTuning } from "./types";
 
 /**
  * The voice & behavior rules — engine-agnostic, candidate-agnostic. This is the
@@ -105,6 +106,21 @@ Use these as genuine talking points so they feel heard — bring up their actual
 }
 
 /**
+ * Listening behavior from the desk's TurnTuning: the exact backchannel sounds
+ * this recruiter uses, and how to re-engage after silence. Telnyx has no
+ * native backchannel or reminder-text field, so both live here in the prompt:
+ * the agent opens replies with these nods and speaks the re-engage line in its
+ * own words when the engine's idle check-in fires.
+ */
+function listeningBlock(desk: VettingDesk): string {
+  const tt = clampTurnTuning(desk.turnTuning);
+  const words = tt.backchannelWords.map((w) => `"${w}"`).join(", ");
+  return `# HOW YOU LISTEN
+- When the caller finishes a thought, it often sounds natural to open with a brief verbal nod before you respond: ${words || '"mm-hm", "right"'}. At most one, and not on every turn.
+- If the caller goes quiet mid-call and you need to re-engage, do it gently, in the spirit of: "${tt.idleReminder}" Never make silence feel like a test.`;
+}
+
+/**
  * The learned addendum: coaching distilled by the optimizer from THIS desk's
  * real scored calls (lib/vetting/optimizer.ts). Placed after the base rules so
  * it refines them; it can sharpen delivery but never override the hard rules.
@@ -124,6 +140,7 @@ ${notes}`;
 export function buildAssistantInstructions(desk: VettingDesk): string {
   return [
     HUMAN_BEHAVIOR_RULES,
+    listeningBlock(desk),
     discoveryBlock(desk),
     callerContextBlock(),
     learnedBlock(desk),
