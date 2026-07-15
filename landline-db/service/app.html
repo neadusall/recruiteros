@@ -1,0 +1,271 @@
+<title>RecruitersOS · Landline Intelligence DB</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --ground:#f5f7fb; --panel:#fff; --panel-2:#f0f4f9; --sunk:#e7ecf4;
+    --ink:#131f2c; --ink-2:#48566a; --ink-3:#7a8698;
+    --accent:#2e5bd7; --accent-deep:#1e3c96; --accent-wash:#eaf0fd;
+    --line:#e2e7ef; --line-2:#d1d9e4;
+    --good:#1f9d68; --good-wash:#e7f6ee; --warn:#b57b12; --warn-wash:#fbf1dd;
+    --teal:#0f8f9e; --teal-wash:#e2f4f6; --purple:#7c5cd6; --purple-wash:#efeafb; --rose:#c2536e; --rose-wash:#fbe9ee;
+    --mono:"SF Mono","Cascadia Code","JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --shadow:0 1px 2px rgba(19,31,44,.05),0 6px 20px rgba(19,31,44,.06);
+    --shadow-lg:-8px 0 44px rgba(19,31,44,.14);
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; }
+  body { font-family:var(--sans); background:var(--ground); color:var(--ink); -webkit-font-smoothing:antialiased; }
+  h1,h2,h3 { margin:0; letter-spacing:-.01em; }
+  button { font-family:inherit; cursor:pointer; border:0; background:none; color:inherit; }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:6px; }
+  .top { position:sticky; top:0; z-index:30; display:flex; align-items:center; gap:14px; padding:11px 22px; background:rgba(255,255,255,.92); backdrop-filter:blur(8px); border-bottom:1px solid var(--line); }
+  .brand { display:flex; align-items:center; gap:9px; font-weight:700; letter-spacing:-.02em; font-size:15px; }
+  .brand .dot { width:22px; height:22px; border-radius:6px; background:var(--accent); display:grid; place-items:center; }
+  .brand .dot svg { width:12px; height:12px; }
+  .path { font-family:var(--mono); font-size:12.5px; color:var(--ink-3); } .path b { color:var(--ink); }
+  .spacer { flex:1; }
+  .livechip { display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:600; color:var(--ink-2); background:var(--panel); border:1px solid var(--line); padding:6px 11px; border-radius:999px; }
+  .livechip .d { width:7px; height:7px; border-radius:50%; background:var(--good); box-shadow:0 0 0 3px var(--good-wash); }
+  .wrap { max-width:1320px; margin:0 auto; padding:20px 22px 50px; }
+  .tiles { display:grid; grid-template-columns:repeat(6,1fr); gap:13px; margin-bottom:16px; }
+  @media (max-width:1100px){ .tiles{ grid-template-columns:repeat(3,1fr);} }
+  @media (max-width:920px){ .tiles{ grid-template-columns:repeat(2,1fr);} }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 15px; box-shadow:var(--shadow); }
+  .tile .k { font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-3); font-weight:600; }
+  .tile .v { font-size:25px; font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+  .tile.accent .v { color:var(--accent); } .tile.good .v { color:var(--good); } .tile.teal .v { color:var(--teal); }
+  .banner { display:flex; align-items:center; gap:11px; font-size:12.5px; color:var(--ink-2); background:var(--accent-wash); border:1px solid #cfe0fb; border-radius:10px; padding:11px 15px; margin-bottom:18px; }
+  .banner svg { width:16px; height:16px; color:var(--accent); flex:none; }
+  .banner b { color:var(--accent-deep); }
+  .sources { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
+  @media (max-width:920px){ .sources{ grid-template-columns:repeat(2,1fr);} }
+  .src { background:var(--panel); border:1px solid var(--line); border-radius:11px; padding:13px 14px; box-shadow:var(--shadow); cursor:pointer; transition:border-color .12s; }
+  .src:hover { border-color:var(--accent); }
+  .src.on { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-wash); }
+  .src .nm { font-size:12.5px; font-weight:700; display:flex; align-items:center; gap:7px; }
+  .src .nm .sw { width:9px; height:9px; border-radius:3px; flex:none; }
+  .src .cnt { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; margin-top:6px; letter-spacing:-.01em; }
+  .src .avail { font-size:11px; color:var(--ink-3); margin-top:1px; }
+  .src .bar { height:5px; background:var(--sunk); border-radius:3px; margin-top:9px; overflow:hidden; }
+  .src .bar i { display:block; height:100%; border-radius:3px; }
+  .toolbar { display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-bottom:12px; }
+  .search { position:relative; flex:1; min-width:200px; }
+  .search svg { position:absolute; left:11px; top:50%; transform:translateY(-50%); width:15px; height:15px; color:var(--ink-3); }
+  .search input { width:100%; padding:9px 12px 9px 33px; border:1px solid var(--line-2); border-radius:9px; font-size:13.5px; background:var(--panel); color:var(--ink); }
+  .search input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-wash); }
+  select.f { padding:9px 11px; border:1px solid var(--line-2); border-radius:9px; font-size:13px; background:var(--panel); color:var(--ink-2); font-family:inherit; }
+  select.f:focus { outline:none; border-color:var(--accent); }
+  .chip-btn { padding:9px 11px; border:1px solid var(--line-2); border-radius:9px; font-size:13px; background:var(--panel); color:var(--ink-2); font-weight:600; }
+  .chip-btn.on { background:var(--accent-wash); color:var(--accent-deep); border-color:#cfe0fb; }
+  .export { padding:9px 13px; border:1px solid var(--line-2); border-radius:9px; font-size:13px; font-weight:600; color:var(--ink); background:var(--panel); display:inline-flex; align-items:center; gap:7px; }
+  .export svg { width:14px; height:14px; } .export:hover { background:var(--panel-2); }
+  .grid-card { background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); overflow:hidden; }
+  .tscroll { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; min-width:1120px; font-size:13px; }
+  thead th { position:sticky; top:0; background:var(--panel-2); z-index:2; text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-3); font-weight:700; padding:10px 13px; border-bottom:1px solid var(--line); white-space:nowrap; cursor:pointer; user-select:none; }
+  thead th:hover { color:var(--ink); } thead th.sorted { color:var(--accent); } thead th .a { opacity:.5; font-size:9px; margin-left:3px; }
+  tbody td { padding:10px 13px; border-bottom:1px solid var(--line); white-space:nowrap; vertical-align:middle; }
+  tbody tr { cursor:pointer; } tbody tr:hover { background:var(--accent-wash); } tbody tr:last-child td { border-bottom:0; }
+  .co { font-weight:600; max-width:230px; overflow:hidden; text-overflow:ellipsis; }
+  .pers { color:var(--ink-2); }
+  .mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .muted { color:var(--ink-3); }
+  .srcpill { font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:6px; white-space:nowrap; }
+  .cell-y { color:var(--good); font-weight:700; } .cell-n { color:var(--line-2); }
+  .empty { text-align:center; color:var(--ink-3); padding:44px; }
+  .pager { display:flex; align-items:center; justify-content:space-between; padding:11px 15px; border-top:1px solid var(--line); background:var(--panel-2); font-size:12.5px; color:var(--ink-2); }
+  .pager .btns { display:flex; gap:6px; }
+  .pager button { padding:6px 12px; border:1px solid var(--line-2); border-radius:8px; font-size:12.5px; font-weight:600; background:var(--panel); color:var(--ink); }
+  .pager button:disabled { opacity:.4; cursor:default; }
+  .pager .pg { font-variant-numeric:tabular-nums; }
+  .scrim { position:fixed; inset:0; background:rgba(19,31,44,.35); opacity:0; pointer-events:none; transition:opacity .2s; z-index:40; }
+  .scrim.open { opacity:1; pointer-events:auto; }
+  .drawer { position:fixed; top:0; right:0; height:100%; width:440px; max-width:92vw; background:var(--panel); box-shadow:var(--shadow-lg); transform:translateX(100%); transition:transform .24s cubic-bezier(.4,0,.2,1); z-index:41; overflow-y:auto; }
+  .drawer.open { transform:translateX(0); }
+  @media (prefers-reduced-motion:reduce){ .drawer,.scrim{ transition:none;} }
+  .dr-head { padding:20px; border-bottom:1px solid var(--line); display:flex; align-items:flex-start; gap:12px; position:sticky; top:0; background:var(--panel); }
+  .dr-head .av { width:44px; height:44px; border-radius:11px; background:var(--accent); color:#fff; display:grid; place-items:center; font-weight:700; font-size:16px; flex:none; }
+  .dr-head h2 { font-size:17px; } .dr-head .sub { font-size:12.5px; color:var(--ink-2); margin-top:2px; }
+  .dr-close { margin-left:auto; width:30px; height:30px; border-radius:8px; background:var(--panel-2); display:grid; place-items:center; color:var(--ink-2); flex:none; }
+  .dr-close svg { width:14px; height:14px; }
+  .dr-b { padding:6px 20px 40px; }
+  .frow { display:flex; justify-content:space-between; gap:12px; padding:11px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .frow .k { color:var(--ink-3); } .frow .v { font-weight:600; text-align:right; word-break:break-word; } .frow .v.mono { font-family:var(--mono); }
+  .prov { margin-top:16px; background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:13px; }
+  .prov h4 { font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-3); margin:0 0 8px; }
+  .prov .p { font-size:12px; color:var(--ink-2); line-height:1.5; }
+  .prov a { color:var(--accent); text-decoration:none; word-break:break-all; } .prov a:hover { text-decoration:underline; }
+  .prov .lic { display:inline-block; margin-top:8px; font-size:10.5px; font-weight:700; color:var(--good); background:var(--good-wash); padding:3px 8px; border-radius:6px; }
+  .call-cta { margin-top:16px; width:100%; display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:11px; border-radius:10px; background:var(--accent); color:#fff; font-size:13.5px; font-weight:650; }
+  .call-cta svg { width:15px; height:15px; }
+  .toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--ink); color:#fff; font-size:13px; font-weight:600; padding:11px 18px; border-radius:10px; box-shadow:var(--shadow-lg); opacity:0; pointer-events:none; transition:opacity .2s,transform .2s; z-index:60; }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+
+<header class="top">
+  <div class="brand"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span> RecruitersOS</div>
+  <span class="path">/client/<b>data</b></span>
+  <div class="spacer"></div>
+  <span class="livechip"><span class="d"></span> <span id="srcCount">0</span> live sources</span>
+</header>
+
+<div class="wrap">
+  <div class="tiles">
+    <div class="tile"><div class="k">Records</div><div class="v" id="t-recs">...</div></div>
+    <div class="tile accent"><div class="k">Landlines</div><div class="v" id="t-landline">...</div></div>
+    <div class="tile teal"><div class="k">Cell phones</div><div class="v" id="t-cell">...</div></div>
+    <div class="tile good"><div class="k">Person-linked</div><div class="v" id="t-person">...</div></div>
+    <div class="tile"><div class="k">With email</div><div class="v" id="t-email">...</div></div>
+    <div class="tile"><div class="k">Unique phones</div><div class="v" id="t-phones">...</div></div>
+  </div>
+  <div class="banner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg><span id="banner">Loading live database...</span></div>
+  <div class="sources" id="sources"></div>
+  <div class="toolbar">
+    <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="q" placeholder="Search company, contact, phone, city..." /></div>
+    <select class="f" id="f-state"><option value="">All states</option></select>
+    <select class="f" id="f-ind"><option value="">All industries</option></select>
+    <select class="f" id="f-phone"><option value="">All phone types</option><option value="cell">Cell phones</option><option value="landline">Landlines</option></select>
+    <select class="f" id="f-dial"><option value="">Any line</option><option value="owner_main">Direct / owner line</option><option value="switchboard">Main / switchboard</option></select>
+    <button class="chip-btn" id="f-person">Named contact</button>
+    <button class="export" id="export"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export CSV</button>
+  </div>
+  <div class="grid-card">
+    <div class="tscroll"><table><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table></div>
+    <div class="pager"><span id="pinfo">...</span><div class="btns"><button id="prev">Prev</button><span class="pg" id="pg">1</span><button id="next">Next</button></div></div>
+  </div>
+</div>
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer"></aside>
+<div class="toast" id="toast">Copied</div>
+
+<script>
+(function () {
+  var BASE = "__BASE__";
+  var $ = function (id) { return document.getElementById(id); };
+  var META = {
+    fmcsa:{name:"FMCSA Carriers",avail:4281067,url:"https://data.transportation.gov/d/az4n-8mr2",lic:"US DOT public data"},
+    cms_dac:{name:"CMS Clinicians",avail:3387942,url:"https://data.cms.gov/provider-data/dataset/mj5m-pzi6",lic:"CMS public domain"},
+    cms_fac:{name:"CMS Facilities",avail:48150,url:"https://data.cms.gov/provider-data/",lic:"CMS public domain"},
+    cms_pos:{name:"CMS Provider of Services",avail:78000,url:"https://data.cms.gov/provider-characteristics/hospitals-and-other-facilities",lic:"CMS public domain"},
+    nces:{name:"Public Schools",avail:102274,url:"https://nces.ed.gov/ccd/",lic:"NCES public domain"},
+    tx_tdlr:{name:"TX TDLR",avail:99720,url:"https://data.texas.gov/d/7358-krk7",lic:"Texas open data"},
+    or_ccb:{name:"OR Contractors",avail:55873,url:"https://data.oregon.gov/d/g77e-6bhs",lic:"Oregon open data"},
+    wa_lni:{name:"WA Contractors",avail:160676,url:"https://data.wa.gov/d/m8qx-ubtq",lic:"Open Data Commons PDDL"}
+  };
+  var PAL = ["#2e5bd7","#0f8f9e","#12a594","#7c5cd6","#b57b12","#d0663a","#1f9d68","#3a7bd5","#c2536e","#5a6acf","#0e7c86","#9a6b1f"];
+  var COLS = [
+    {k:"company",label:"Company",cls:"co"},{k:"person",label:"Contact",cls:"pers"},{k:"title",label:"Title"},
+    {k:"phone_e164",label:"Landline",mono:1},{k:"cell_e164",label:"Cell",cell:1},{k:"city",label:"City"},
+    {k:"state",label:"State"},{k:"industry",label:"Industry"},{k:"source",label:"Source",src:1}
+  ];
+  var SRCCOLOR = {}, SNAMES = {};
+  function nfmt(n){ return Number(n||0).toLocaleString("en-US"); }
+  function big(n){ return n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?Math.round(n/1e3)+"k":""+n; }
+  function api(p){ return fetch(BASE.replace(/\/$/,"") + p).then(function(r){ return r.json(); }); }
+
+  var f = { q:"", state:"", ind:"", dial:"", phone:"", person:false, src:"" };
+  var sortKey = "company", sortDir = "asc", page = 0, PP = 50, curRows = [];
+
+  api("/api/stats").then(function(s){
+    var T = s.totals||{}, BY = s.bySource||{}; SNAMES = s.sourceNames||{};
+    $("t-recs").textContent = nfmt(T.records); $("t-phones").textContent = nfmt(T.uniquePhones);
+    $("t-landline").textContent = nfmt(T.withLandline != null ? T.withLandline : T.records);
+    $("t-person").textContent = nfmt(T.personLinked); $("t-cell").textContent = nfmt(T.withCell); $("t-email").textContent = nfmt(T.withEmail);
+    var ids = Object.keys(BY).sort(function(a,b){return BY[b]-BY[a];});
+    ids.forEach(function(id,i){ SRCCOLOR[id] = (META[id]&&META[id].color) || PAL[i%PAL.length]; });
+    $("srcCount").textContent = ids.length;
+    var availTotal = ids.reduce(function(a,id){ return a + ((META[id]||{}).avail||0); },0);
+    $("banner").innerHTML = 'Live Postgres-backed explorer over <b>'+nfmt(T.records)+' records</b> from '+ids.length+' free sources across '+T.states+' states. Connected sources hold <b>'+big(availTotal)+'+ phone records</b> in total. Public domain or open data, normalized to E.164.';
+    var maxc = Math.max.apply(null, ids.map(function(id){return BY[id];}));
+    var TOP = 12, top = ids.slice(0,TOP);
+    $("sources").innerHTML = top.map(function(id,i){
+      var m = META[id]||{name:SNAMES[id]||id}; var col = SRCCOLOR[id];
+      var avail = m.avail>0 ? '<div class="avail">of '+big(m.avail)+' available</div>' : '<div class="avail">open data</div>';
+      return '<div class="src" data-src="'+id+'"><div class="nm"><span class="sw" style="background:'+col+'"></span>'+(m.name||SNAMES[id]||id)+'</div><div class="cnt">'+nfmt(BY[id])+'</div>'+avail+'<div class="bar"><i style="width:'+(BY[id]/maxc*100)+'%;background:'+col+'"></i></div></div>';
+    }).join("") + (ids.length>TOP ? '<div class="src" id="moreSrc"><div class="nm muted">+'+(ids.length-TOP)+' more sources</div><div class="cnt" style="font-size:15px;color:var(--ink-3)">'+nfmt(ids.slice(TOP).reduce(function(a,id){return a+BY[id];},0))+'</div><div class="avail">click to view all</div></div>' : '');
+    Array.prototype.forEach.call(document.querySelectorAll("[data-src]"), function(el){ el.addEventListener("click", function(){ f.src = f.src===el.getAttribute("data-src")?"":el.getAttribute("data-src"); syncSrc(); page=0; load(); }); });
+    var me = $("moreSrc"); if (me) me.addEventListener("click", function(){ f.src=""; syncSrc(); page=0; load(); });
+    // state filter options
+    ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC","PR"].forEach(function(s){ var o=document.createElement("option"); o.value=s; o.textContent=s; $("f-state").appendChild(o); });
+    ["Transportation","Healthcare","Construction","Skilled Trades","Education","Local / Licensed","Business","Retail","Regulated Professions"].forEach(function(s){ var o=document.createElement("option"); o.value=s; o.textContent=s; $("f-ind").appendChild(o); });
+    load();
+  });
+  function syncSrc(){ Array.prototype.forEach.call(document.querySelectorAll("[data-src]"), function(el){ el.classList.toggle("on", el.getAttribute("data-src")===f.src); }); }
+
+  var qt;
+  $("q").addEventListener("input", function(){ f.q=this.value; clearTimeout(qt); qt=setTimeout(function(){ page=0; load(); }, 280); });
+  $("f-state").addEventListener("change", function(){ f.state=this.value; page=0; load(); });
+  $("f-ind").addEventListener("change", function(){ f.ind=this.value; page=0; load(); });
+  $("f-dial").addEventListener("change", function(){ f.dial=this.value; page=0; load(); });
+  $("f-phone").addEventListener("change", function(){ f.phone=this.value; page=0; load(); });
+  $("f-person").addEventListener("click", function(){ f.person=!f.person; this.classList.toggle("on",f.person); page=0; load(); });
+  $("prev").addEventListener("click", function(){ if(page>0){page--;load();} });
+  $("next").addEventListener("click", function(){ page++; load(); });
+  $("export").addEventListener("click", function(){ window.location = BASE.replace(/\/$/,"") + "/api/export?" + qs(); });
+
+  function qs(){
+    var p = [];
+    if (f.q) p.push("q="+encodeURIComponent(f.q));
+    if (f.state) p.push("state="+f.state);
+    if (f.ind) p.push("industry="+encodeURIComponent(f.ind));
+    if (f.dial) p.push("dial="+f.dial);
+    if (f.phone) p.push("phone="+f.phone);
+    if (f.person) p.push("person=1");
+    if (f.src) p.push("src="+f.src);
+    return p.join("&");
+  }
+
+  function head(){
+    $("head").innerHTML = COLS.map(function(c){
+      return '<th class="'+(c.k===sortKey?"sorted":"")+'" data-k="'+c.k+'">'+c.label+(c.k===sortKey?'<span class="a">'+(sortDir==="asc"?"▲":"▼")+'</span>':'')+'</th>';
+    }).join("");
+    Array.prototype.forEach.call($("head").children, function(th){ th.addEventListener("click", function(){ var k=th.getAttribute("data-k"); if(k===sortKey) sortDir=sortDir==="asc"?"desc":"asc"; else{sortKey=k;sortDir="asc";} load(); }); });
+  }
+  function cell(r,c){
+    if (c.src){ var col=SRCCOLOR[r.source_id]||"#64748b"; return '<span class="srcpill" style="color:'+col+';background:'+col+'18">'+(r.source||"")+'</span>'; }
+    if (c.cell){ return r.cell_e164 ? '<span class="mono cell-y">'+r.cell_e164+'</span>' : '<span class="cell-n">-</span>'; }
+    var v = r[c.k]; if (!v) return '<span class="muted">-</span>';
+    return '<span class="'+(c.mono?"mono ":"")+(c.cls||"")+'">'+esc(v)+'</span>';
+  }
+  function esc(s){ return String(s).replace(/[<>&]/g, function(c){ return {"<":"&lt;",">":"&gt;","&":"&amp;"}[c]; }); }
+
+  function load(){
+    head();
+    $("pinfo").textContent = "Loading...";
+    api("/api/search?"+qs()+"&sort="+sortKey+"&dir="+sortDir+"&limit="+PP+"&offset="+(page*PP)).then(function(res){
+      curRows = res.rows||[];
+      var pages = Math.max(1, Math.ceil((res.total||0)/PP));
+      if (page>=pages) page=pages-1;
+      var b=$("body");
+      if (!curRows.length){ b.innerHTML='<tr><td class="empty" colspan="'+COLS.length+'">No records match these filters.</td></tr>'; }
+      else {
+        b.innerHTML = curRows.map(function(r,i){ return '<tr data-i="'+i+'">'+COLS.map(function(c){return '<td>'+cell(r,c)+'</td>';}).join("")+'</tr>'; }).join("");
+        Array.prototype.forEach.call(b.children, function(tr){ tr.addEventListener("click", function(){ openDrawer(curRows[+tr.getAttribute("data-i")]); }); });
+      }
+      $("pinfo").textContent = nfmt(res.total)+" records"+(qs()?" (filtered)":"");
+      $("pg").textContent = (page+1)+" / "+pages;
+      $("prev").disabled = page<=0; $("next").disabled = page>=pages-1;
+    }).catch(function(){ $("pinfo").textContent = "Query error"; });
+  }
+
+  function openDrawer(r){
+    var m = META[r.source_id]||{}; var init=(r.company||r.person||"?").trim().slice(0,2).toUpperCase();
+    var fields=[["Company",r.company],["Contact",r.person],["Title",r.title],["Landline",r.phone_e164,1],["Cell",r.cell_e164,1],["Email",r.email],["City",r.city],["State",r.state],["ZIP",r.zip,1],["Industry",r.industry],["Dial class",r.dial_class]].filter(function(x){return x[1];});
+    $("drawer").innerHTML =
+      '<div class="dr-head"><div class="av">'+init+'</div><div><h2>'+esc(r.company||r.person||"Record")+'</h2><div class="sub">'+esc(r.person?(r.person+(r.title?" · "+r.title:"")):(r.industry||""))+'</div></div><button class="dr-close" id="drClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>'+
+      '<div class="dr-b">'+fields.map(function(x){return '<div class="frow"><span class="k">'+x[0]+'</span><span class="v'+(x[2]?" mono":"")+'">'+esc(x[1])+'</span></div>';}).join("")+
+      '<div class="prov"><h4>Provenance</h4><div class="p">Source: <b>'+esc(r.source||m.name||"Open data")+'</b><br>'+(m.url?'<a href="'+m.url+'" target="_blank" rel="noopener">'+m.url+'</a>':(r.domain?'<a href="https://'+r.domain+'" target="_blank" rel="noopener">'+r.domain+'</a>':''))+'<br><span class="lic">'+(m.lic||"Open government data")+'</span></div></div>'+
+      '<button class="call-cta" id="copyCta"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy '+(r.phone_e164||r.cell_e164)+'</button></div>';
+    $("drawer").classList.add("open"); $("scrim").classList.add("open");
+    $("drClose").addEventListener("click", closeDrawer);
+    $("copyCta").addEventListener("click", function(){ copy(r.phone_e164||r.cell_e164); });
+  }
+  function closeDrawer(){ $("drawer").classList.remove("open"); $("scrim").classList.remove("open"); }
+  $("scrim").addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", function(e){ if(e.key==="Escape") closeDrawer(); });
+  function copy(t){ var d=function(){ toast("Copied "+t); }; if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(d,d); else d(); }
+  var tt; function toast(m){ var t=$("toast"); t.textContent=m; t.classList.add("show"); clearTimeout(tt); tt=setTimeout(function(){t.classList.remove("show");},1600); }
+})();
+</script>

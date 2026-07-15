@@ -1,0 +1,14 @@
+{
+  "name": "landlinedb-service",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Standalone Postgres-backed API + explorer for the LandlineDB phone intelligence database",
+  "scripts": {
+    "start": "node server.mjs",
+    "load": "node loader.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}

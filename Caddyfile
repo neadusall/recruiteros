@@ -26,6 +26,12 @@
 recruitersos.co, www.recruitersos.co {
 	encode zstd gzip
 	import ostext
+	# LandlineDB: the free-source B2B phone intelligence database, served by its
+	# own isolated container (landlinedb-svc) off its own Postgres database.
+	# Must precede the catch-all app handle so /client/data* routes to the service.
+	handle /client/data* {
+		reverse_proxy landlinedb-svc:8090
+	}
 	handle {
 		reverse_proxy app:3000
 	}
