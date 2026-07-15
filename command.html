@@ -108,6 +108,10 @@
       <nav class="cmd-nav" id="cmdNav">
         <div class="nav-group">Overview</div>
         <a class="nav-item" data-route="overview"><span class="ni"><svg><use href="#i-home"/></svg></span> Dashboard</a>
+        <!-- My Outbound: every user's personal performance view + the 10-15 minute
+             Daily Checklist worksheet. No capability gate: recruiters and admins
+             each see only their OWN numbers here (the API is self-scoped). -->
+        <a class="nav-item" data-route="myoutbound"><span class="ni"><svg><use href="#i-clipboard"/></svg></span> My Outbound<span class="ni-badge" id="badgeOutbound"></span></a>
         <a class="nav-item" data-route="analytics"><span class="ni"><svg><use href="#i-chart"/></svg></span> Analytics</a>
         <a class="nav-item" data-route="response"><span class="ni"><svg><use href="#i-inbox"/></svg></span> Replies<span class="ni-badge" id="badgeResponse"></span></a>
 
@@ -147,6 +151,9 @@
         <a class="nav-item" data-route="voicedrops" data-motion-only="recruiting"><span class="ni"><svg><use href="#i-phone"/></svg></span> Voice Drops</a>
 
         <div class="nav-group" data-cap="team:manage">Admin</div>
+        <!-- Outbound Performance: the utilization + accountability command center.
+             Per-user capacity, scores, heatmap, triggers, goals, reports. -->
+        <a class="nav-item" data-route="outbound" data-cap="team:manage"><span class="ni"><svg><use href="#i-monitor"/></svg></span> Outbound Performance</a>
         <a class="nav-item" data-route="outreach-stats" data-cap="team:manage"><span class="ni"><svg><use href="#i-trend"/></svg></span> Outreach Statistics</a>
         <a class="nav-item" data-route="engine" data-cap="team:manage"><span class="ni"><svg><use href="#i-activity"/></svg></span> Engine / Throughput</a>
         <a class="nav-item" data-route="nurture" data-cap="team:manage" data-motion-only="bd"><span class="ni"><svg><use href="#i-loop"/></svg></span> Nurture</a>

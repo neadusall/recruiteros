@@ -542,6 +542,12 @@
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "+ New sequence", render: renderContent },
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
     "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: renderOutreachStats, cap: "team:manage" },
+    // Outbound Performance: the admin utilization + accountability command
+    // center (capacity engine, scores, heatmap, triggers, goals, reports).
+    outbound: { title: "Outbound Performance", crumb: "Admin", action: null, render: renderOutbound, cap: "team:manage" },
+    // My Outbound: the personal performance view + the 10-15 minute Daily
+    // Checklist worksheet. Self-scoped; available in both portals.
+    myoutbound: { title: "My Outbound", crumb: "Operate", action: null, render: renderMyOutbound },
     engine: { title: "Engine / Throughput", crumb: "Admin", action: null, render: renderEngine, cap: "team:manage" },
     nurture: { title: "Nurture", crumb: "Measure", action: null, render: renderNurture, cap: "team:manage", motionOnly: "bd" },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
@@ -752,6 +758,746 @@
     load();
     viewTimers.push(setInterval(load, 15000));
   }
+
+  /* ---------------- Outbound Performance + My Outbound ----------------
+     The utilization + accountability layer. Admin route "outbound" (cap
+     team:manage) is the command center: AI insights, KPI strip, team heatmap,
+     ranked table, per-user drill-down, capacity, alerts/triggers, goals and
+     reports. Route "myoutbound" is every user's own view: score, channel
+     targets and the 10-15 minute Daily Checklist worksheet. Backed by
+     /api/outbound (self-scoped for members, team-wide for admins). */
+
+  var obState = { range: 30, sort: "score", dir: -1, filter: "" };
+
+  var OB_STATE_META = {
+    strong:             { label: "Strong",              fg: "var(--ok)",       bg: "var(--ok-bg)" },
+    attention:          { label: "Needs attention",     fg: "var(--warn)",     bg: "var(--warn-bg)" },
+    underutilized:      { label: "Underutilized",       fg: "var(--danger)",   bg: "var(--danger-bg)" },
+    supply_constrained: { label: "Supply constrained",  fg: "var(--info)",     bg: "var(--info-bg)" },
+    system_limited:     { label: "System limited",      fg: "var(--info)",     bg: "var(--info-bg)" },
+    not_enabled:        { label: "Not enabled",         fg: "var(--text-dim)", bg: "var(--surface-2)" },
+    ok:                 { label: "OK",                  fg: "var(--ok)",       bg: "var(--ok-bg)" }
+  };
+  function obMeta(state) { return OB_STATE_META[state] || OB_STATE_META.ok; }
+  function obPill(state, text) {
+    var m = obMeta(state);
+    return '<span class="ob-pill" style="color:' + m.fg + ';background:' + m.bg + '">' + esc(text || m.label) + "</span>";
+  }
+  function obBar(pct, fg) {
+    var w = Math.max(0, Math.min(100, Math.round(pct)));
+    return '<span class="ob-track"><span class="ob-fill" style="width:' + w + "%;background:" + (fg || "var(--brand)") + '"></span></span>';
+  }
+  function obSevPill(sev) {
+    var map = { critical: ["var(--danger)", "var(--danger-bg)"], warning: ["var(--warn)", "var(--warn-bg)"], opportunity: ["var(--info)", "var(--info-bg)"], achievement: ["var(--ok)", "var(--ok-bg)"], info: ["var(--text-dim)", "var(--surface-2)"] };
+    var c = map[sev] || map.info;
+    return '<span class="ob-pill" style="color:' + c[0] + ";background:" + c[1] + '">' + esc(sev) + "</span>";
+  }
+  function obSpark(series, color) {
+    var n = (series || []).length; if (!n) return "";
+    var max = Math.max.apply(null, series.concat([1]));
+    var w = 300, h = 36, step = n > 1 ? w / (n - 1) : w;
+    var pts = series.map(function (v, i) { return (i * step).toFixed(1) + "," + (h - (v / max) * (h - 5) - 2).toFixed(1); }).join(" ");
+    return '<svg width="100%" viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none" style="display:block;height:36px"><polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>';
+  }
+  function obWhen(iso) {
+    if (!iso) return "never";
+    var d = new Date(iso), diff = Date.now() - d.getTime();
+    if (diff < 90 * 60000) return Math.max(1, Math.round(diff / 60000)) + "m ago";
+    if (diff < 36 * 3600000) return Math.round(diff / 3600000) + "h ago";
+    return Math.round(diff / 86400000) + "d ago";
+  }
+  // Third hash segment: "#outbound/user/<userId>" -> the userId.
+  function obHashArg() {
+    var parts = (location.hash || "").replace(/^#/, "").split("/");
+    if (parts[0] === "bd" || parts[0] === "recruiting") parts.shift();
+    return parts[2] || "";
+  }
+  function obStat(v, l, s, color) {
+    return '<div class="stat"><div class="sv"' + (color ? ' style="color:' + color + '"' : "") + ">" + v + '</div><div class="sl">' + esc(l) + "</div>" +
+      (s ? '<div style="font-size:11px;color:var(--text-dim);margin-top:3px">' + esc(s) + "</div>" : "") + "</div>";
+  }
+  function obTabs(active) {
+    var tabs = [["", "Overview"], ["team", "Team"], ["capacity", "Channels & Capacity"], ["alerts", "Alerts & Triggers"], ["goals", "Goals"], ["reports", "Reports"]];
+    return '<div class="ob-tabs">' + tabs.map(function (t) {
+      return '<a href="#outbound' + (t[0] ? "/" + t[0] : "") + '" class="chip' + ((active || "") === t[0] ? " ob-tab-on" : "") + '">' + t[1] + "</a>";
+    }).join("") + "</div>";
+  }
+  function obPct(p) { return p < 0 ? '<span style="color:var(--text-dim)">n/a</span>' : p + "%"; }
+
+  function renderOutbound(view) {
+    var detail = currentDetail();
+    if (detail === "user") return obUserView(view, obHashArg());
+    if (detail === "team") return obTeamView(view);
+    if (detail === "capacity") return obCapacityView(view);
+    if (detail === "alerts") return obAlertsView(view);
+    if (detail === "goals") return obGoalsView(view);
+    if (detail === "reports") return obReportsView(view);
+    return obOverviewView(view);
+  }
+
+  /* ------------------------------ overview ------------------------------ */
+  function obOverviewView(view) {
+    view.innerHTML = head("Outbound Performance",
+      "Is every user maximizing RecruitersOS? Live utilization against safe capacity across email, LinkedIn, SMS, follow-ups and content, with supply and system health separated from user effort.") +
+      obTabs("") + '<div id="obBody">' + loading() + "</div>";
+    function load() {
+      Promise.all([
+        api("/outbound?view=team").catch(function () { return null; }),
+        api("/outbound?view=insights").catch(function () { return null; })
+      ]).then(function (res) {
+        var body = $("#obBody"); if (!body) return;
+        var t = res[0], ins = res[1];
+        if (!t) { body.innerHTML = '<div class="empty">Could not load the outbound overview (admin only, or a brief blip after a deploy).</div>'; return; }
+        var tt = t.totals;
+        var html = "";
+
+        // AI Admin Insights.
+        html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>AI Admin Insights</b>' +
+          '<span style="flex:1"></span><button class="btn btn-ghost btn-sm" id="obInsRefresh">Regenerate</button></div>' +
+          '<div class="ob-insights">' + (ins && ins.text ? esc(ins.text).replace(/\n/g, "<br>") : '<span class="muted">Insights are generated once per day from live numbers.</span>') + "</div>" +
+          (ins && ins.unused && ins.unused.total > 0
+            ? '<div class="ob-note">Estimated unused safe outbound actions, last 5 working days: <b>' + ins.unused.total.toLocaleString() + "</b> (email " + ins.unused.email.toLocaleString() + " · LinkedIn " + ins.unused.linkedin.toLocaleString() + " · SMS/other " + ins.unused.sms.toLocaleString() + ")</div>" : "") +
+          "</div>";
+
+        // KPI strip.
+        html += '<div class="stat-grid" style="margin:14px 0">' +
+          obStat(tt.activeToday + "/" + tt.users, "Active users today") +
+          obStat(tt.outboundToday.toLocaleString(), "Outbound actions today") +
+          obStat(tt.overallPct + "%", "Team utilization", "", tt.overallPct >= 70 ? "var(--ok)" : tt.overallPct >= 45 ? "var(--warn)" : "var(--danger)") +
+          obStat(tt.emailPct + "%", "Email utilization") +
+          obStat(tt.linkedinPct + "%", "LinkedIn utilization") +
+          obStat(tt.smsPct + "%", "SMS utilization") +
+          obStat(tt.openConversations, "Open conversations", "", tt.openConversations > 0 ? "var(--warn)" : "var(--ok)") +
+          obStat(tt.positive, "Positive responses") +
+          obStat(tt.meetings, "Meetings today") +
+          obStat(tt.contentCompliancePct + "%", "Content compliance") +
+          "</div>";
+
+        // Requires attention.
+        if (ins && ins.attention && ins.attention.length) {
+          html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>' + ins.attention.length + " require" + (ins.attention.length === 1 ? "s" : "") + " attention</b></div>" +
+            ins.attention.map(function (a) {
+              return '<div class="list-row clickable" data-ob-user="' + esc(a.userId) + '"><div><div class="lr-main">' + esc(a.name) + '</div><div class="lr-sub">' + esc(a.line) + '</div></div><div class="lr-right muted">Open →</div></div>';
+            }).join("") + "</div>";
+        }
+
+        // Heatmap.
+        html += obHeatmapHtml(t);
+        body.innerHTML = html;
+        obWireHeatmap(body, t);
+        Array.prototype.forEach.call(body.querySelectorAll("[data-ob-user]"), function (el) {
+          el.addEventListener("click", function () { location.hash = "#outbound/user/" + el.getAttribute("data-ob-user"); });
+        });
+        var rf = $("#obInsRefresh");
+        if (rf) rf.addEventListener("click", function () {
+          rf.disabled = true; rf.textContent = "Working…";
+          send("/outbound", "POST", { action: "insights_refresh" }).then(function () { load(); });
+        });
+      });
+    }
+    load();
+    viewTimers.push(setInterval(load, 60000));
+  }
+
+  var OB_HEAT_COLS = [["email", "Email"], ["linkedin", "LinkedIn"], ["sms", "SMS"], ["followUp", "Follow-up"], ["content", "Content"], ["response", "Responses"], ["meetings", "Meetings"]];
+  function obHeatmapHtml(t) {
+    var html = '<div class="panel-card ob-card"><div class="ob-card-head"><b>Team heatmap</b>' +
+      '<span class="muted" style="font-size:12px;margin-left:10px">Click a cell for the why. Green strong · amber needs attention · red underutilized · blue supply/system · gray not enabled.</span></div>' +
+      '<div style="overflow-x:auto"><table class="ob-heat"><thead><tr><th style="text-align:left">User</th>' +
+      OB_HEAT_COLS.map(function (c) { return "<th>" + c[1] + "</th>"; }).join("") + "</tr></thead><tbody>";
+    (t.rows || []).forEach(function (r, ri) {
+      html += '<tr><td class="ob-heat-user" data-ob-user="' + esc(r.userId) + '">' + esc(r.name) +
+        (r.supplyConstrained ? ' <span class="ob-pill" style="color:var(--info);background:var(--info-bg)">supply</span>' : "") +
+        (r.systemIssues ? ' <span class="ob-pill" style="color:var(--warn);background:var(--warn-bg)">' + r.systemIssues + " sys</span>" : "") + "</td>";
+      OB_HEAT_COLS.forEach(function (c) {
+        var cell = (r.heat || {})[c[0]] || { state: "not_enabled", pct: 0, detail: "" };
+        var m = obMeta(cell.state);
+        var txt = c[0] === "meetings" ? cell.pct : (cell.state === "not_enabled" ? "·" : cell.pct + "%");
+        html += '<td><button class="ob-cell" data-hm="' + ri + ":" + c[0] + '" style="color:' + m.fg + ";background:" + m.bg + '" title="' + esc(c[1]) + '">' + txt + "</button></td>";
+      });
+      html += "</tr>";
+    });
+    html += "</tbody></table></div>";
+    if (!(t.rows || []).length) html += '<div class="empty">No team members yet.</div>';
+    var un = t.unattributed || {};
+    var unSends = (un.bdEmailsSent || 0) + (un.recruitingEmailsSent || 0) + (un.liConnectionsSent || 0) + (un.liMessagesSent || 0) + (un.smsSent || 0);
+    if (unSends > 0) html += '<div class="ob-note">Plus ' + unSends + " workspace-level outbound actions today that are not attributable to a single user (shown honestly, never guessed onto someone).</div>";
+    html += "</div>";
+    return html;
+  }
+  function obWireHeatmap(root, t) {
+    Array.prototype.forEach.call(root.querySelectorAll(".ob-cell"), function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var parts = btn.getAttribute("data-hm").split(":");
+        var row = (t.rows || [])[Number(parts[0])];
+        if (!row) return;
+        var cell = (row.heat || {})[parts[1]] || {};
+        var colLabel = (OB_HEAT_COLS.filter(function (c) { return c[0] === parts[1]; })[0] || ["", parts[1]])[1];
+        openModal(row.name + " · " + colLabel, obMeta(cell.state).label,
+          '<div style="font-size:13.5px;line-height:1.6">' + esc(cell.detail || "No detail.").split(" · ").map(function (s) { return "<div>• " + esc(s) + "</div>"; }).join("") + "</div>" +
+          '<div class="modal-foot"><button class="btn btn-primary btn-sm" data-open>Open user profile</button></div>',
+          function (card, close) {
+            card.querySelector("[data-open]").addEventListener("click", function () { close(); location.hash = "#outbound/user/" + row.userId; });
+          });
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll(".ob-heat-user"), function (el) {
+      el.addEventListener("click", function () { location.hash = "#outbound/user/" + el.getAttribute("data-ob-user"); });
+    });
+  }
+
+  /* -------------------------------- team -------------------------------- */
+  var OB_TEAM_COLS = [
+    ["name", "User"], ["goalRole", "Role"], ["score", "Score"], ["overallPct", "Overall"],
+    ["emailPct", "Email"], ["linkedinPct", "LinkedIn"], ["smsPct", "SMS"],
+    ["contentPct", "Content"], ["followUpPct", "Follow-up"], ["positive", "Positive"], ["meetings", "Meetings"], ["statusLine", "Status"]
+  ];
+  function obTeamView(view) {
+    view.innerHTML = head("Team performance", "Ranked by Outbound Utilization Score. Click a column to sort, a row to drill into the user.") +
+      obTabs("team") +
+      '<div class="ob-toolbar"><input id="obFilter" class="ob-input" placeholder="Filter by name, email, role…" value="' + esc(obState.filter) + '">' +
+      '<span style="flex:1"></span><button class="btn btn-ghost btn-sm" id="obMeth">Scoring methodology</button></div>' +
+      '<div id="obBody">' + loading() + "</div>";
+    var data = null;
+    function draw() {
+      var body = $("#obBody"); if (!body || !data) return;
+      var rows = (data.rows || []).slice();
+      var f = obState.filter.toLowerCase();
+      if (f) rows = rows.filter(function (r) { return (r.name + " " + r.email + " " + r.goalRole + " " + r.statusLine).toLowerCase().indexOf(f) >= 0; });
+      rows.sort(function (a, b) {
+        var k = obState.sort, av = a[k], bv = b[k];
+        if (typeof av === "string") return obState.dir * String(av).localeCompare(String(bv));
+        return obState.dir * ((av || 0) - (bv || 0));
+      });
+      var html = '<div style="overflow-x:auto"><table class="ob-table"><thead><tr>' + OB_TEAM_COLS.map(function (c) {
+        var on = obState.sort === c[0];
+        return '<th data-sort="' + c[0] + '" class="' + (on ? "ob-sort-on" : "") + '">' + c[1] + (on ? (obState.dir < 0 ? " ↓" : " ↑") : "") + "</th>";
+      }).join("") + "</tr></thead><tbody>";
+      rows.forEach(function (r) {
+        html += '<tr class="clickable" data-ob-user="' + esc(r.userId) + '">' +
+          "<td><b>" + esc(r.name) + '</b><div class="muted" style="font-size:11px">' + esc(r.email) + " · last login " + obWhen(r.lastLogin) + "</div></td>" +
+          "<td>" + esc(String(r.goalRole || "").replace(/_/g, " ")) + "</td>" +
+          '<td><b style="font-variant-numeric:tabular-nums">' + r.score + "</b>/100</td>" +
+          "<td>" + obBar(r.overallPct) + " " + r.overallPct + "%</td>" +
+          "<td>" + obPct(r.emailPct) + "</td><td>" + obPct(r.linkedinPct) + "</td><td>" + obPct(r.smsPct) + "</td>" +
+          "<td>" + obPct(r.contentPct) + "</td><td>" + r.followUpPct + "%</td>" +
+          "<td>" + r.positive + "</td><td>" + r.meetings + "</td>" +
+          '<td style="max-width:260px"><span class="muted" style="font-size:11.5px">' + esc(r.statusLine) + "</span>" +
+          (r.supplyConstrained ? " " + obPill("supply_constrained") : "") + "</td></tr>";
+      });
+      html += "</tbody></table></div>";
+      if (!rows.length) html += '<div class="empty">No users match.</div>';
+      body.innerHTML = html;
+      Array.prototype.forEach.call(body.querySelectorAll("[data-sort]"), function (th) {
+        th.addEventListener("click", function () {
+          var k = th.getAttribute("data-sort");
+          if (obState.sort === k) obState.dir = -obState.dir; else { obState.sort = k; obState.dir = k === "name" || k === "goalRole" || k === "statusLine" ? 1 : -1; }
+          draw();
+        });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-ob-user]"), function (tr) {
+        tr.addEventListener("click", function () { location.hash = "#outbound/user/" + tr.getAttribute("data-ob-user"); });
+      });
+    }
+    api("/outbound?view=team").then(function (t) { data = t; draw(); }).catch(function () {
+      var body = $("#obBody"); if (body) body.innerHTML = '<div class="empty">Could not load the team table.</div>';
+    });
+    var filter = $("#obFilter");
+    if (filter) filter.addEventListener("input", function () { obState.filter = filter.value; draw(); });
+    var meth = $("#obMeth");
+    if (meth) meth.addEventListener("click", function () {
+      api("/outbound?view=methodology").then(function (m) {
+        openModal("Outbound Utilization Score", "How the number is built",
+          '<div style="font-size:13px;line-height:1.65">' + (m.methodology || []).map(function (s) { return "<p>• " + esc(s) + "</p>"; }).join("") + "</div>");
+      });
+    });
+  }
+
+  /* ----------------------------- user profile ---------------------------- */
+  function obUserView(view, userId) {
+    if (!userId) { location.hash = "#outbound/team"; return; }
+    view.innerHTML = head("User outbound profile", "") +
+      obTabs("team") + '<div id="obBody">' + loading() + "</div>";
+    function load() {
+      api("/outbound?view=user&user=" + encodeURIComponent(userId) + "&since=" + obState.range).then(function (r) {
+        var body = $("#obBody"); if (!body) return;
+        var p = r.profile, a = r.assessment, cap = p.capacity, sc = p.score;
+        var html = "";
+
+        // Header card.
+        html += '<div class="panel-card ob-card"><div class="ob-card-head">' +
+          "<div><b style=\"font-size:16px\">" + esc(p.name) + '</b><div class="muted" style="font-size:12px">' + esc(p.email) + " · " + esc(p.authRole) + " · goal role " + esc(String(p.goalRole).replace(/_/g, " ")) +
+          " · last login " + obWhen(p.lastLogin) + "</div></div><span style=\"flex:1\"></span>" +
+          '<div style="text-align:right"><div style="font-size:26px;font-weight:700;font-variant-numeric:tabular-nums">' + sc.total + '<span class="muted" style="font-size:13px">/100</span></div>' +
+          '<div class="muted" style="font-size:11px">' + esc(sc.statusLine) + "</div></div></div>" +
+          '<div class="ob-note">' + p.activeCampaigns.length + " active campaign" + (p.activeCampaigns.length === 1 ? "" : "s") +
+          (p.activeCampaigns.length ? ": " + p.activeCampaigns.slice(0, 4).map(function (c) { return esc(c.name) + " (" + c.motion + ")"; }).join(", ") : "") +
+          (p.baseline.deltaPct !== null ? " · outbound trend vs 30-day baseline: <b style=\"color:" + (p.baseline.deltaPct >= 0 ? "var(--ok)" : "var(--danger)") + "\">" + (p.baseline.deltaPct >= 0 ? "+" : "") + p.baseline.deltaPct + "%</b>" : "") +
+          "</div></div>";
+
+        // AI assessment.
+        html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Daily AI assessment</b><span style="flex:1"></span>' +
+          '<button class="btn btn-ghost btn-sm" id="obUsrRefresh">Regenerate</button></div>' +
+          '<div class="ob-insights">' + (a && a.text ? esc(a.text).replace(/\n/g, "<br>") : '<span class="muted">No assessment yet today.</span>') + "</div>" +
+          (a && a.actions && a.actions.length ? '<div class="ob-note"><b>Recommended actions</b><ol class="ob-ol">' + a.actions.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ol></div>" : "") +
+          "</div>";
+
+        // System factors + supply (cause before blame).
+        if ((cap.systemFactors || []).length || cap.supply.constrained) {
+          html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>System health affecting this user</b></div>' +
+            (cap.systemFactors || []).map(function (f) {
+              return '<div class="list-row"><div>' + obSevPill(f.severity === "critical" ? "critical" : f.severity === "warn" ? "warning" : "info") + " " + esc(f.reason) + "</div></div>";
+            }).join("") +
+            (cap.supply.constrained ? '<div class="list-row"><div>' + obPill("supply_constrained") + " " + esc(cap.supply.detail) + "</div></div>" : "") +
+            "</div>";
+        }
+
+        // Channel utilization cards.
+        html += '<div class="ob-chan-grid">' + [cap.email, cap.linkedin, cap.sms, cap.followUp, cap.content, cap.response].map(function (u) {
+          var m = obMeta(u.state);
+          return '<div class="panel-card ob-card"><div class="ob-card-head"><b>' + esc(u.label) + "</b><span style=\"flex:1\"></span>" + obPill(u.state) + "</div>" +
+            '<div class="ob-chan-nums">' +
+            '<div><div class="ob-num">' + u.used + '</div><div class="ob-num-l">Current</div></div>' +
+            '<div><div class="ob-num">' + u.target + '</div><div class="ob-num-l">Target</div></div>' +
+            '<div><div class="ob-num">' + u.capacity + '</div><div class="ob-num-l">Capacity</div></div>' +
+            '<div><div class="ob-num">' + u.remaining + '</div><div class="ob-num-l">Remaining</div></div></div>' +
+            obBar(u.targetPct, m.fg) +
+            '<div class="muted" style="font-size:11.5px;margin-top:6px">' + u.targetPct + "% of target · " + u.utilizationPct + "% of capacity</div>" +
+            (u.recommendedAction ? '<div class="ob-note"><b>Action:</b> ' + esc(u.recommendedAction) + "</div>" : "") +
+            '<div class="muted" style="font-size:11px;margin-top:6px">' + (u.reasons || []).map(esc).join("<br>") + "</div>" +
+            "</div>";
+        }).join("") + "</div>";
+
+        // Score breakdown + trends.
+        html += '<div class="ob-2col">';
+        html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Score breakdown</b></div>' +
+          sc.components.map(function (comp) {
+            return '<div class="bar-row"><span class="blabel" style="width:150px">' + esc(comp.label) + '</span>' +
+              '<span class="btrack"><span class="bfill" style="width:' + Math.max(4, comp.score) + '%;background:' + obMeta(comp.state).fg + '">' + comp.score + "</span></span>" +
+              '<span class="bval" title="weight">' + comp.weight + "%</span></div>";
+          }).join("") + "</div>";
+        var days = p.trend || [];
+        html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Trends · last ' + obState.range + ' days</b><span style="flex:1"></span>' +
+          [["7", "7d"], ["30", "30d"], ["90", "90d"]].map(function (x) { return '<button class="btn btn-sm ob-range ' + (Number(x[0]) === obState.range ? "btn-primary" : "btn-ghost") + '" data-r="' + x[0] + '">' + x[1] + "</button>"; }).join(" ") + "</div>" +
+          '<div class="muted" style="font-size:11.5px">Outbound actions/day</div>' + obSpark(days.map(function (d) { return d.sends; }), "var(--brand)") +
+          '<div class="muted" style="font-size:11.5px;margin-top:8px">Replies/day</div>' + obSpark(days.map(function (d) { return d.replies; }), "var(--ok)") +
+          '<div class="muted" style="font-size:11.5px;margin-top:8px">Meetings/day</div>' + obSpark(days.map(function (d) { return d.meetings; }), "var(--info)") +
+          "</div></div>";
+
+        // Today's raw numbers.
+        var c = p.today;
+        html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Today\'s activity detail</b></div><div class="stat-grid">' +
+          obStat(c.bdEmailsSent, "BD emails") + obStat(c.recruitingEmailsSent, "Recruiting emails") +
+          obStat(c.liConnectionsSent, "LI connections") + obStat(c.liConnectionsAccepted, "LI accepts") +
+          obStat(c.liMessagesSent, "LI messages") + obStat(c.liVoiceNotes, "LI voice notes") +
+          obStat(c.liProfileViews, "LI profile views") + obStat(c.liPostsPublished, "LI posts") +
+          obStat(c.smsSent, "SMS sent") + obStat(c.smsReceived, "SMS received") +
+          obStat(c.followUpsCompleted, "Follow-ups") + obStat(c.repliesReceived, "Replies") +
+          obStat(c.positiveReplies, "Positive") + obStat(c.meetingsBooked, "Meetings") +
+          "</div></div>";
+
+        // Alerts for this user.
+        if ((p.alerts || []).length) {
+          html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Recent alerts</b></div>' +
+            p.alerts.slice(0, 12).map(function (al) {
+              return '<div class="list-row"><div><div class="lr-main">' + obSevPill(al.severity) + " " + esc(al.title) + '</div><div class="lr-sub">' + esc(al.detail) + (al.recommended ? " · " + esc(al.recommended) : "") + '</div></div><div class="lr-right muted">' + esc(al.day) + "</div></div>";
+            }).join("") + "</div>";
+        }
+
+        // Admin utilities: goal role, phone, export.
+        html += '<div class="ob-toolbar">' +
+          '<button class="btn btn-ghost btn-sm" id="obUsrGoals">Edit this user\'s goals</button>' +
+          '<a class="btn btn-ghost btn-sm" href="' + API + "/outbound/export?report=user&user=" + encodeURIComponent(userId) + "&since=" + obState.range + '">Export CSV</a>' +
+          "</div>";
+
+        body.innerHTML = html;
+        Array.prototype.forEach.call(body.querySelectorAll(".ob-range"), function (b) {
+          b.addEventListener("click", function () { obState.range = Number(b.getAttribute("data-r")); load(); });
+        });
+        var rf = $("#obUsrRefresh");
+        if (rf) rf.addEventListener("click", function () {
+          rf.disabled = true; rf.textContent = "Working…";
+          send("/outbound", "POST", { action: "insights_refresh", scope: "user", userId: userId }).then(function () { load(); });
+        });
+        var eg = $("#obUsrGoals");
+        if (eg) eg.addEventListener("click", function () { obState.goalsUser = userId; location.hash = "#outbound/goals"; });
+      }).catch(function () {
+        var body = $("#obBody"); if (body) body.innerHTML = '<div class="empty">Could not load this user\'s profile.</div>';
+      });
+    }
+    load();
+  }
+
+  /* --------------------------- channels & capacity ----------------------- */
+  function obCapacityView(view) {
+    view.innerHTML = head("Channels & capacity", "Where today's safe capacity lives and who is using it. Capacity comes from real limits: mailbox cold caps, LinkedIn policy targets scaled by account health, and configured SMS bands.") +
+      obTabs("capacity") + '<div id="obBody">' + loading() + "</div>";
+    api("/outbound?view=team").then(function (t) {
+      var body = $("#obBody"); if (!body) return;
+      var tt = t.totals;
+      var html = '<div class="stat-grid" style="margin-bottom:14px">' +
+        obStat(tt.emailPct + "%", "Email utilization") + obStat(tt.linkedinPct + "%", "LinkedIn utilization") +
+        obStat(tt.smsPct + "%", "SMS utilization") + obStat(tt.followUpCompliancePct + "%", "Follow-up completion") +
+        obStat(tt.contentCompliancePct + "%", "Content compliance") + "</div>";
+      html += '<div style="overflow-x:auto"><table class="ob-table"><thead><tr><th>User</th><th>Email</th><th>LinkedIn</th><th>SMS</th><th>Follow-up</th><th>Content</th></tr></thead><tbody>';
+      (t.rows || []).forEach(function (r) {
+        function cell(key) {
+          var cellData = (r.heat || {})[key] || { state: "not_enabled", pct: 0, detail: "" };
+          var m = obMeta(cellData.state);
+          if (cellData.state === "not_enabled") return '<td><span class="muted">n/a</span></td>';
+          return "<td>" + obBar(cellData.pct, m.fg) + ' <span style="font-variant-numeric:tabular-nums">' + cellData.pct + "%</span></td>";
+        }
+        html += '<tr class="clickable" data-ob-user="' + esc(r.userId) + '"><td><b>' + esc(r.name) + "</b></td>" +
+          cell("email") + cell("linkedin") + cell("sms") + cell("followUp") + cell("content") + "</tr>";
+      });
+      html += "</tbody></table></div>";
+      body.innerHTML = html;
+      Array.prototype.forEach.call(body.querySelectorAll("[data-ob-user]"), function (tr) {
+        tr.addEventListener("click", function () { location.hash = "#outbound/user/" + tr.getAttribute("data-ob-user"); });
+      });
+    }).catch(function () {
+      var body = $("#obBody"); if (body) body.innerHTML = '<div class="empty">Could not load capacity.</div>';
+    });
+  }
+
+  /* ----------------------------- alerts & triggers ----------------------- */
+  function obAlertsView(view) {
+    view.innerHTML = head("Alerts & triggers", "Everything the trigger engine has fired: pace warnings, supply constraints, system limitations, achievements. Thresholds are configured under Goals.") +
+      obTabs("alerts") + '<div id="obBody">' + loading() + "</div>";
+    function load() {
+      api("/outbound?view=alerts").then(function (r) {
+        var body = $("#obBody"); if (!body) return;
+        var alerts = r.alerts || [];
+        if (!alerts.length) { body.innerHTML = '<div class="empty">No alerts yet. The trigger engine evaluates every few minutes once the automation clock is on (AUTOMATION_ENABLED).</div>'; return; }
+        var order = { critical: 0, warning: 1, opportunity: 2, achievement: 3, info: 4 };
+        alerts.sort(function (a, b) { return (b.day || "").localeCompare(a.day || "") || (order[a.severity] || 9) - (order[b.severity] || 9); });
+        body.innerHTML = '<div class="panel-card ob-card">' + alerts.slice(0, 80).map(function (al) {
+          return '<div class="list-row' + (al.userId ? " clickable" : "") + '"' + (al.userId ? ' data-ob-user="' + esc(al.userId) + '"' : "") + ">" +
+            '<div><div class="lr-main">' + obSevPill(al.severity) + ' <span class="ob-pill" style="color:var(--text-dim);background:var(--surface-2)">' + esc(al.audience) + "</span> " + esc(al.title) + "</div>" +
+            '<div class="lr-sub">' + esc(al.detail) + (al.recommended ? " · <b>Recommended:</b> " + esc(al.recommended) : "") + "</div></div>" +
+            '<div class="lr-right muted">' + esc(al.day) + "</div></div>";
+        }).join("") + "</div>";
+        Array.prototype.forEach.call(body.querySelectorAll("[data-ob-user]"), function (el) {
+          el.addEventListener("click", function () { location.hash = "#outbound/user/" + el.getAttribute("data-ob-user"); });
+        });
+      }).catch(function () {
+        var body = $("#obBody"); if (body) body.innerHTML = '<div class="empty">Could not load alerts.</div>';
+      });
+    }
+    load();
+    viewTimers.push(setInterval(load, 60000));
+  }
+
+  /* -------------------------------- goals -------------------------------- */
+  var OB_CHANNELS = [
+    ["bdEmails", "BD emails / day"], ["recruitingEmails", "Recruiting emails / day"],
+    ["liConnections", "LinkedIn connections / day"], ["liMessages", "LinkedIn messages / day"],
+    ["liVoiceNotes", "LinkedIn voice notes / day"], ["liProfileViews", "LinkedIn profile views / day"],
+    ["smsMessages", "SMS messages / day"], ["followUps", "Follow-ups / day"], ["liPostsPerWeek", "LinkedIn posts / week"]
+  ];
+  var OB_TRIGGERS = [
+    ["emailUtilNoonPct", "Email % floor by noon"], ["emailUtilAfternoonPct", "Email % floor by 3 PM"],
+    ["linkedinUtilPct", "LinkedIn % daily floor"], ["smsReplyWaitMinutes", "Max reply wait (minutes)"],
+    ["noPostDays", "Days without a post"], ["bounceRatePct", "Bounce rate % ceiling"],
+    ["optOutRatePct", "Opt-out rate % ceiling"], ["activityDropPct", "Activity drop % vs baseline"],
+    ["notLoggedInDays", "Days without login"], ["underutilizedDays", "Consecutive low days before manager alert"],
+    ["managerUtilFloorPct", "Manager alert utilization floor %"]
+  ];
+  var OB_CATEGORIES = ["daily_summary", "underutilization", "follow_up", "campaign", "posting", "achievement", "system"];
+  function obGoalsView(view) {
+    view.innerHTML = head("Performance goals", "Targets inherit GLOBAL then ROLE then USER; a tier only stores what it overrides (blank = inherit). Every save is audit-logged.") +
+      obTabs("goals") + '<div id="obBody">' + loading() + "</div>";
+    Promise.all([api("/outbound?view=goals"), api("/team").catch(function () { return null; })]).then(function (res) {
+      var body = $("#obBody"); if (!body) return;
+      var g = res[0], cfg = g.config, defaults = g.defaults;
+      var members = ((res[1] && res[1].members) || []);
+      var level = obState.goalsLevel || "global";
+      var role = obState.goalsRole || "recruiter";
+      var user = obState.goalsUser || (members[0] && members[0].userId) || "";
+      function patchFor() {
+        if (level === "global") return cfg.global || {};
+        if (level === "role") return (cfg.byRole || {})[role] || {};
+        return (cfg.byUser || {})[user] || {};
+      }
+      var patch = patchFor();
+
+      var html = '<div class="ob-toolbar">' +
+        '<select id="obGLevel" class="ob-input" style="max-width:150px">' +
+        [["global", "Global"], ["role", "By role"], ["user", "By user"]].map(function (o) { return '<option value="' + o[0] + '"' + (level === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") + "</select>" +
+        (level === "role" ? '<select id="obGRole" class="ob-input" style="max-width:220px">' + (g.roles || []).map(function (r) { return '<option value="' + r + '"' + (r === role ? " selected" : "") + ">" + r.replace(/_/g, " ") + "</option>"; }).join("") + "</select>" : "") +
+        (level === "user" ? '<select id="obGUser" class="ob-input" style="max-width:240px">' + members.map(function (mm) { return '<option value="' + esc(mm.userId) + '"' + (mm.userId === user ? " selected" : "") + ">" + esc(mm.name || mm.email) + "</option>"; }).join("") + "</select>" : "") +
+        '<span style="flex:1"></span><button class="btn btn-primary btn-sm" id="obGSave">Save this tier</button></div>';
+
+      // Channel bands.
+      html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Daily activity targets</b><span class="muted" style="font-size:12px;margin-left:8px">min / target / max (safe ceiling). Blank = inherit; placeholder shows the shipped default.</span></div>' +
+        '<div style="overflow-x:auto"><table class="ob-table"><thead><tr><th style="text-align:left">Channel</th><th>Minimum</th><th>Target</th><th>Maximum safe</th></tr></thead><tbody>' +
+        OB_CHANNELS.map(function (ch) {
+          var cur = ((patch.channels || {})[ch[0]]) || {};
+          var def = (defaults.channels || {})[ch[0]] || {};
+          function inp(k) { return '<input type="number" min="0" class="ob-input ob-band" data-ch="' + ch[0] + '" data-k="' + k + '" value="' + (cur[k] != null ? cur[k] : "") + '" placeholder="' + (def[k] != null ? def[k] : "") + '">'; }
+          return "<tr><td style=\"text-align:left\">" + ch[1] + "</td><td>" + inp("min") + "</td><td>" + inp("target") + "</td><td>" + inp("max") + "</td></tr>";
+        }).join("") + "</tbody></table></div></div>";
+
+      // Trigger thresholds.
+      html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Trigger thresholds</b></div><div class="ob-grid-3">' +
+        OB_TRIGGERS.map(function (tr) {
+          var cur = (patch.triggers || {})[tr[0]];
+          var def = (defaults.triggers || {})[tr[0]];
+          return '<label class="ob-field">' + tr[1] + '<input type="number" min="0" class="ob-input ob-trig" data-k="' + tr[0] + '" value="' + (cur != null ? cur : "") + '" placeholder="' + (def != null ? def : "") + '"></label>';
+        }).join("") + "</div></div>";
+
+      // Schedule & notifications (global/role/user all supported).
+      var wd = patch.workingDays || [];
+      html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Schedule & notifications</b></div><div class="ob-grid-3">' +
+        '<label class="ob-field">Timezone<input class="ob-input" id="obGTz" value="' + esc(patch.timezone || "") + '" placeholder="America/New_York"></label>' +
+        '<label class="ob-field">Work start hour<input type="number" min="0" max="23" class="ob-input" id="obGWs" value="' + (patch.workHoursStart != null ? patch.workHoursStart : "") + '" placeholder="8"></label>' +
+        '<label class="ob-field">Work end hour<input type="number" min="0" max="23" class="ob-input" id="obGWe" value="' + (patch.workHoursEnd != null ? patch.workHoursEnd : "") + '" placeholder="18"></label>' +
+        '<label class="ob-field">Morning summary hour<input type="number" min="0" max="23" class="ob-input" id="obGMh" value="' + (patch.morningHour != null ? patch.morningHour : "") + '" placeholder="8"></label>' +
+        '<label class="ob-field">Midday check hour<input type="number" min="0" max="23" class="ob-input" id="obGDh" value="' + (patch.middayHour != null ? patch.middayHour : "") + '" placeholder="12"></label>' +
+        '<label class="ob-field">End-of-day report hour<input type="number" min="0" max="23" class="ob-input" id="obGEh" value="' + (patch.eodHour != null ? patch.eodHour : "") + '" placeholder="17"></label>' +
+        "</div>" +
+        '<div style="margin-top:10px"><span class="muted" style="font-size:12px">Working days:</span> ' +
+        ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(function (d, i) {
+          var on = wd.length ? wd.indexOf(i) >= 0 : (i >= 1 && i <= 5);
+          return '<label class="ob-day"><input type="checkbox" class="ob-wd" data-d="' + i + '"' + (on ? " checked" : "") + "> " + d + "</label>";
+        }).join(" ") + "</div>" +
+        '<div style="margin-top:10px"><span class="muted" style="font-size:12px">Required notification categories (users cannot disable):</span> ' +
+        OB_CATEGORIES.map(function (cat) {
+          var req = (patch.requiredCategories || []).indexOf(cat) >= 0 || cat === "system";
+          return '<label class="ob-day"><input type="checkbox" class="ob-req" data-c="' + cat + '"' + (req ? " checked" : "") + (cat === "system" ? " disabled" : "") + "> " + cat.replace(/_/g, " ") + "</label>";
+        }).join(" ") + "</div></div>";
+
+      // Per-user goal roles + alert phones.
+      html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>User goal roles & alert phones</b><span class="muted" style="font-size:12px;margin-left:8px">Role picks the target preset; phone enables SMS alerts.</span></div>' +
+        '<div style="overflow-x:auto"><table class="ob-table"><thead><tr><th style="text-align:left">User</th><th>Goal role</th><th>Alert phone (E.164)</th></tr></thead><tbody>' +
+        members.map(function (mm) {
+          var gr = (cfg.userRoles || {})[mm.userId] || (mm.role === "member" ? "recruiter" : "administrator");
+          var ph = (cfg.userPhones || {})[mm.userId] || "";
+          return "<tr><td style=\"text-align:left\"><b>" + esc(mm.name || mm.email) + "</b></td>" +
+            '<td><select class="ob-input ob-urole" data-u="' + esc(mm.userId) + '">' + (g.roles || []).map(function (r) { return '<option value="' + r + '"' + (r === gr ? " selected" : "") + ">" + r.replace(/_/g, " ") + "</option>"; }).join("") + "</select></td>" +
+            '<td><input class="ob-input ob-uphone" data-u="' + esc(mm.userId) + '" value="' + esc(ph) + '" placeholder="+1555…"></td></tr>';
+        }).join("") + "</tbody></table></div></div>";
+
+      // Audit log.
+      html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Audit log</b></div><div id="obAudit">' + loading() + "</div></div>";
+      body.innerHTML = html;
+
+      api("/outbound?view=audit").then(function (au) {
+        var el = $("#obAudit"); if (!el) return;
+        var rows = (au.audit || []).slice(0, 40);
+        el.innerHTML = rows.length ? rows.map(function (e) {
+          return '<div class="list-row"><div><div class="lr-main">' + esc(e.change) + '</div><div class="lr-sub">' + esc(e.adminEmail) + " · " + esc((e.at || "").replace("T", " ").slice(0, 16)) + '</div></div><div class="lr-right muted" style="max-width:340px;font-size:11px;overflow:hidden;text-overflow:ellipsis">' + esc(JSON.stringify(e.next)).slice(0, 120) + "</div></div>";
+        }).join("") : '<div class="empty">No configuration changes yet.</div>';
+      }).catch(function () {});
+
+      var lv = $("#obGLevel");
+      if (lv) lv.addEventListener("change", function () { obState.goalsLevel = lv.value; obGoalsView(view); });
+      var rl = $("#obGRole");
+      if (rl) rl.addEventListener("change", function () { obState.goalsRole = rl.value; obGoalsView(view); });
+      var us = $("#obGUser");
+      if (us) us.addEventListener("change", function () { obState.goalsUser = us.value; obGoalsView(view); });
+
+      Array.prototype.forEach.call(body.querySelectorAll(".ob-urole"), function (sel) {
+        sel.addEventListener("change", function () {
+          send("/outbound", "POST", { action: "assign_role", userId: sel.getAttribute("data-u"), goalRole: sel.value })
+            .then(function (r) { toast(r.ok ? "Goal role saved" : "Save failed"); });
+        });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll(".ob-uphone"), function (inp) {
+        inp.addEventListener("change", function () {
+          send("/outbound", "POST", { action: "set_phone", userId: inp.getAttribute("data-u"), phone: inp.value.trim() })
+            .then(function (r) { toast(r.ok ? "Phone saved" : "Save failed"); });
+        });
+      });
+
+      var sv = $("#obGSave");
+      if (sv) sv.addEventListener("click", function () {
+        var out = { channels: {}, triggers: {} };
+        Array.prototype.forEach.call(body.querySelectorAll(".ob-band"), function (inp) {
+          if (inp.value === "") return;
+          var ch = inp.getAttribute("data-ch"), k = inp.getAttribute("data-k");
+          out.channels[ch] = out.channels[ch] || {};
+          out.channels[ch][k] = Number(inp.value);
+        });
+        Array.prototype.forEach.call(body.querySelectorAll(".ob-trig"), function (inp) {
+          if (inp.value !== "") out.triggers[inp.getAttribute("data-k")] = Number(inp.value);
+        });
+        var tzv = $("#obGTz").value.trim(); if (tzv) out.timezone = tzv;
+        [["obGWs", "workHoursStart"], ["obGWe", "workHoursEnd"], ["obGMh", "morningHour"], ["obGDh", "middayHour"], ["obGEh", "eodHour"]].forEach(function (f) {
+          var el = $("#" + f[0]); if (el && el.value !== "") out[f[1]] = Number(el.value);
+        });
+        var wds = [];
+        Array.prototype.forEach.call(body.querySelectorAll(".ob-wd"), function (cb) { if (cb.checked) wds.push(Number(cb.getAttribute("data-d"))); });
+        out.workingDays = wds;
+        var reqs = ["system"];
+        Array.prototype.forEach.call(body.querySelectorAll(".ob-req"), function (cb) {
+          var cat = cb.getAttribute("data-c");
+          if (cb.checked && cat !== "system") reqs.push(cat);
+        });
+        out.requiredCategories = reqs;
+        if (!Object.keys(out.channels).length) delete out.channels;
+        if (!Object.keys(out.triggers).length) delete out.triggers;
+        var payload = { action: "goals_put", level: level, patch: out };
+        if (level === "role") payload.role = role;
+        if (level === "user") payload.userId = user;
+        sv.disabled = true; sv.textContent = "Saving…";
+        send("/outbound", "POST", payload).then(function (r) {
+          sv.disabled = false; sv.textContent = "Save this tier";
+          toast(r.ok ? "Goals saved" : "Save failed");
+          if (r.ok) obGoalsView(view);
+        });
+      });
+    }).catch(function () {
+      var body = $("#obBody"); if (body) body.innerHTML = '<div class="empty">Could not load goals.</div>';
+    });
+  }
+
+  /* ------------------------------- reports ------------------------------- */
+  function obReportsView(view) {
+    view.innerHTML = head("Reports", "CSV downloads (open natively in Excel).") + obTabs("reports") +
+      '<div class="ob-chan-grid">' + [
+        ["team", "Team performance report", "Every user: score, per-channel utilization, positives, meetings, supply and system flags."],
+        ["channels", "Channel utilization report", "Team-level utilization per channel plus content and follow-up compliance."],
+        ["history", "Historical performance report", "Per user per day, every tracked counter, last 90 days."]
+      ].map(function (r) {
+        return '<div class="panel-card ob-card"><div class="ob-card-head"><b>' + r[1] + '</b></div><div class="muted" style="font-size:12.5px;margin-bottom:10px">' + r[2] + "</div>" +
+          '<a class="btn btn-primary btn-sm" href="' + API + "/outbound/export?report=" + r[0] + '">Download CSV</a></div>';
+      }).join("") + "</div>" +
+      '<div class="ob-note">Per-user exports live on each user profile (Team tab, open a user, Export CSV). PDF is not offered because the platform has no server-side PDF renderer; the CSVs open directly in Excel.</div>';
+  }
+
+  /* ------------------------- My Outbound (everyone) ----------------------- */
+  function renderMyOutbound(view) {
+    view.innerHTML = head("My Outbound",
+      "Your 10-15 minute daily routine: work the checklist top to bottom and the day is fully utilized. Targets, current numbers and next actions are computed live; nothing to analyze.") +
+      '<div id="obMe">' + loading() + "</div>";
+    function load() {
+      Promise.all([
+        api("/outbound?view=me").catch(function () { return null; }),
+        api("/outbound?view=notifications").catch(function () { return null; })
+      ]).then(function (res) {
+        var el = $("#obMe"); if (!el) return;
+        var me = res[0], notif = res[1];
+        if (!me || !me.profile) { el.innerHTML = '<div class="empty">Could not load your performance data yet. Try again in a moment.</div>'; return; }
+        var p = me.profile, cap = p.capacity, sc = p.score, cl = me.checklist, a = me.assessment;
+        var html = "";
+
+        // Score header.
+        html += '<div class="panel-card ob-card"><div class="ob-card-head">' +
+          '<div><b style="font-size:15px">Today\'s Outbound Score</b><div class="muted" style="font-size:12px">' + esc(sc.statusLine) + "</div></div>" +
+          '<span style="flex:1"></span><div style="font-size:30px;font-weight:700;font-variant-numeric:tabular-nums">' + sc.total + '<span class="muted" style="font-size:14px">/100</span></div></div>' +
+          obBar(sc.total, sc.total >= 80 ? "var(--ok)" : sc.total >= 55 ? "var(--warn)" : "var(--danger)") +
+          '<div class="muted" style="font-size:11.5px;margin-top:6px">Overall capacity used: ' + cap.overallPct + "%</div></div>";
+
+        // Channel strip: Target / Current / Remaining.
+        html += '<div class="ob-chan-grid">' + [cap.email, cap.linkedin, cap.sms, cap.followUp, cap.content].map(function (u) {
+          if (u.state === "not_enabled") return "";
+          var m = obMeta(u.state);
+          return '<div class="panel-card ob-card ob-mini"><div class="ob-card-head"><b>' + esc(u.label) + "</b><span style=\"flex:1\"></span>" + obPill(u.state) + "</div>" +
+            '<div class="ob-chan-nums"><div><div class="ob-num">' + u.target + '</div><div class="ob-num-l">Target</div></div>' +
+            '<div><div class="ob-num">' + u.used + '</div><div class="ob-num-l">Current</div></div>' +
+            '<div><div class="ob-num">' + Math.max(0, u.target - u.used) + '</div><div class="ob-num-l">Remaining</div></div></div>' +
+            obBar(u.targetPct, m.fg) + "</div>";
+        }).join("") + "</div>";
+
+        // Daily checklist.
+        var doneN = cl ? cl.completedSteps : 0, totN = cl ? cl.totalSteps : 0;
+        html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Daily Checklist</b>' +
+          '<span class="muted" style="font-size:12px;margin-left:10px">~' + (cl ? cl.estimatedMinutes : 15) + " minutes · " + doneN + " of " + totN + " complete</span>" +
+          '<span style="flex:1"></span></div>' + obBar(totN ? (doneN / totN) * 100 : 0, "var(--ok)") +
+          '<div class="ob-steps">' + (cl ? cl.steps : []).map(function (s) {
+            return '<div class="ob-step' + (s.done ? " ob-step-done" : "") + '">' +
+              '<button class="ob-check' + (s.done ? " on" : "") + '" data-step="' + esc(s.id) + '" aria-label="Toggle step">' + (s.done ? "✓" : "") + "</button>" +
+              '<div class="ob-step-main"><div class="ob-step-title">' + s.order + ". " + esc(s.title) +
+              (s.state !== "ok" ? " " + obPill(s.state) : "") + "</div>" +
+              '<div class="ob-step-nums"><span><b>Target</b> ' + esc(s.target) + "</span><span><b>Current</b> " + esc(s.current) + "</span><span><b>Remaining</b> " + esc(s.remaining) + "</span></div>" +
+              '<div class="ob-step-action">' + esc(s.action) + "</div></div>" +
+              (s.link ? '<a class="btn btn-ghost btn-sm" href="' + esc(s.link) + '">Open</a>' : "") +
+              "</div>";
+          }).join("") + "</div></div>";
+
+        // What should I do next?
+        if (a && (a.actions || []).length) {
+          html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>What should I do next?</b></div>' +
+            '<ol class="ob-ol">' + a.actions.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ol>" +
+            (a.text ? '<div class="ob-note">' + esc(a.text).replace(/\n/g, "<br>") + "</div>" : "") + "</div>";
+        }
+
+        // Supply / system notices (never silent).
+        if (cap.supply.constrained || (cap.systemFactors || []).length) {
+          html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Heads-up</b></div>' +
+            (cap.supply.constrained ? '<div class="list-row"><div>' + obPill("supply_constrained") + " " + esc(cap.supply.detail) + " · Your admin has been alerted.</div></div>" : "") +
+            (cap.systemFactors || []).map(function (f) { return '<div class="list-row"><div>' + obSevPill(f.severity === "critical" ? "critical" : f.severity === "warn" ? "warning" : "info") + " " + esc(f.reason) + "</div></div>"; }).join("") +
+            "</div>";
+        }
+
+        // Notifications + prefs.
+        var notes = (notif && notif.notifications) || [];
+        var prefs = (notif && notif.prefs) || { inApp: true, email: true, sms: false, disabled: [] };
+        var unread = notes.filter(function (n) { return !n.read; });
+        html += '<div class="ob-2col"><div class="panel-card ob-card"><div class="ob-card-head"><b>Notifications</b>' +
+          (unread.length ? ' <span class="ob-pill" style="color:var(--brand);background:var(--brand-soft)">' + unread.length + " new</span>" : "") + "</div>" +
+          (notes.length ? notes.slice(0, 12).map(function (n) {
+            return '<div class="list-row' + (n.read ? "" : " ob-unread") + '"><div><div class="lr-main">' + obSevPill(n.severity) + " " + esc(n.title) + '</div><div class="lr-sub" style="white-space:pre-line">' + esc(n.body) + "</div></div>" +
+              '<div class="lr-right">' + (n.read ? '<span class="muted" style="font-size:11px">' + obWhen(n.at) + "</span>" : '<button class="btn btn-ghost btn-sm" data-nread="' + esc(n.id) + '">Mark read</button>') + "</div></div>";
+          }).join("") : '<div class="empty">No notifications yet. Morning, midday and end-of-day summaries arrive automatically.</div>') + "</div>";
+
+        html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Notification preferences</b></div>' +
+          [["inApp", "In-app"], ["email", "Email"], ["sms", "SMS (admin must set your phone)"]].map(function (f) {
+            return '<label class="ob-day" style="display:block;margin:6px 0"><input type="checkbox" class="ob-pref" data-k="' + f[0] + '"' + (prefs[f[0]] ? " checked" : "") + "> " + f[1] + "</label>";
+          }).join("") +
+          '<div class="muted" style="font-size:11.5px;margin-top:8px">Mute categories (required categories stay on):</div>' +
+          OB_CATEGORIES.map(function (cat) {
+            var off = (prefs.disabled || []).indexOf(cat) >= 0;
+            return '<label class="ob-day"><input type="checkbox" class="ob-mute" data-c="' + cat + '"' + (off ? " checked" : "") + "> " + cat.replace(/_/g, " ") + "</label>";
+          }).join(" ") + "</div></div>";
+
+        el.innerHTML = html;
+        var badge = $("#badgeOutbound");
+        if (badge) {
+          var open = (cl ? cl.totalSteps - cl.completedSteps : 0) + unread.length;
+          badge.textContent = open > 0 ? String(open) : "";
+          badge.classList.toggle("show", open > 0);
+        }
+
+        Array.prototype.forEach.call(el.querySelectorAll(".ob-check"), function (btn) {
+          btn.addEventListener("click", function () {
+            var on = !btn.classList.contains("on");
+            send("/outbound", "POST", { action: "check", stepId: btn.getAttribute("data-step"), done: on }).then(function () { load(); });
+          });
+        });
+        Array.prototype.forEach.call(el.querySelectorAll("[data-nread]"), function (btn) {
+          btn.addEventListener("click", function () {
+            send("/outbound", "POST", { action: "mark_read", id: btn.getAttribute("data-nread") }).then(function () { load(); });
+          });
+        });
+        function savePrefs() {
+          var out = { disabled: [] };
+          Array.prototype.forEach.call(el.querySelectorAll(".ob-pref"), function (cb) { out[cb.getAttribute("data-k")] = cb.checked; });
+          Array.prototype.forEach.call(el.querySelectorAll(".ob-mute"), function (cb) { if (cb.checked) out.disabled.push(cb.getAttribute("data-c")); });
+          send("/outbound", "POST", { action: "notify_prefs", prefs: out }).then(function (r) { toast(r.ok ? "Preferences saved" : "Save failed"); });
+        }
+        Array.prototype.forEach.call(el.querySelectorAll(".ob-pref, .ob-mute"), function (cb) { cb.addEventListener("change", savePrefs); });
+      });
+    }
+    load();
+    viewTimers.push(setInterval(load, 60000));
+  }
+
+  // My Outbound badge: unread notifications + open checklist steps, refreshed
+  // in the background like the Replies badge.
+  function obRefreshBadge() {
+    var badge = $("#badgeOutbound");
+    if (!badge) return;
+    api("/outbound?view=notifications").then(function (r) {
+      var unread = ((r && r.notifications) || []).filter(function (n) { return !n.read; }).length;
+      badge.textContent = unread > 0 ? String(unread) : "";
+      badge.classList.toggle("show", unread > 0);
+    }).catch(function () {});
+  }
+  obRefreshBadge();
+  setInterval(obRefreshBadge, 180000);
 
   // Aliases. #builder stays the BD-branded entry (it forces BD via its own
   // route); Hire Signals (#inmarket) is motion-agnostic and shows in both.

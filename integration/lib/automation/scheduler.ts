@@ -122,6 +122,16 @@ async function tickNurture(): Promise<void> {
 }
 
 /**
+ * Outbound Performance tick: refresh the per-user rollups, evaluate the
+ * accountability trigger engine, and deliver the scheduled morning / midday /
+ * end-of-day performance notifications in each user's configured window.
+ */
+async function tickOutbound(): Promise<void> {
+  const { runOutboundTick } = await import("../outbound/worker");
+  await runOutboundTick(new Date());
+}
+
+/**
  * Auto-enroll into the nurture drip — the in-process replacement for n8n polling
  * /api/prospects/queue. For every workspace that has opted into hands-off (at least one
  * active BD Autopilot campaign), enroll its eligible in-market BD prospects into the
@@ -174,6 +184,7 @@ const TICKS: TickSpec[] = [
   { key: "nurture_enroll", label: "Auto-enroll into nurture", env: "RECRUITEROS_NURTURE_ENROLL_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 50_000, fn: tickNurtureEnroll },
   { key: "nurture", label: "24-month nurture drip", env: "RECRUITEROS_NURTURE_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 60_000, fn: tickNurture },
   { key: "sending", label: "Email warm-up + reputation", env: "RECRUITEROS_SENDING_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 75_000, fn: tickSending },
+  { key: "outbound", label: "Outbound performance + accountability", env: "RECRUITEROS_OUTBOUND_TICK_MS", defaultMs: 10 * 60_000, firstDelayMs: 100_000, fn: tickOutbound },
 ];
 
 /** The configured ticks (key, label, effective interval ms) — for the Autopilot

@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="assets/css/styles.css?v=cded6c8cf8" />
   <link rel="stylesheet" href="assets/css/app.css?v=8433338cde" />
-  <link rel="stylesheet" href="assets/css/command.css?v=efd30f1aed" />
+  <link rel="stylesheet" href="assets/css/command.css?v=21a9099c9c" />
   <link rel="stylesheet" href="assets/css/campaign-studio.css?v=ee5486c59c" />
   <link rel="stylesheet" href="assets/css/vetting.css?v=515705c58e" />
   <link rel="stylesheet" href="assets/css/linkedin-os.css?v=5474960975" />
@@ -108,6 +108,10 @@
       <nav class="cmd-nav" id="cmdNav">
         <div class="nav-group">Overview</div>
         <a class="nav-item" data-route="overview"><span class="ni"><svg><use href="#i-home"/></svg></span> Dashboard</a>
+        <!-- My Outbound: every user's personal performance view + the 10-15 minute
+             Daily Checklist worksheet. No capability gate: recruiters and admins
+             each see only their OWN numbers here (the API is self-scoped). -->
+        <a class="nav-item" data-route="myoutbound"><span class="ni"><svg><use href="#i-clipboard"/></svg></span> My Outbound<span class="ni-badge" id="badgeOutbound"></span></a>
         <a class="nav-item" data-route="analytics"><span class="ni"><svg><use href="#i-chart"/></svg></span> Analytics</a>
         <a class="nav-item" data-route="response"><span class="ni"><svg><use href="#i-inbox"/></svg></span> Replies<span class="ni-badge" id="badgeResponse"></span></a>
 
@@ -147,6 +151,9 @@
         <a class="nav-item" data-route="voicedrops" data-motion-only="recruiting"><span class="ni"><svg><use href="#i-phone"/></svg></span> Voice Drops</a>
 
         <div class="nav-group" data-cap="team:manage">Admin</div>
+        <!-- Outbound Performance: the utilization + accountability command center.
+             Per-user capacity, scores, heatmap, triggers, goals, reports. -->
+        <a class="nav-item" data-route="outbound" data-cap="team:manage"><span class="ni"><svg><use href="#i-monitor"/></svg></span> Outbound Performance</a>
         <a class="nav-item" data-route="outreach-stats" data-cap="team:manage"><span class="ni"><svg><use href="#i-trend"/></svg></span> Outreach Statistics</a>
         <a class="nav-item" data-route="engine" data-cap="team:manage"><span class="ni"><svg><use href="#i-activity"/></svg></span> Engine / Throughput</a>
         <a class="nav-item" data-route="nurture" data-cap="team:manage" data-motion-only="bd"><span class="ni"><svg><use href="#i-loop"/></svg></span> Nurture</a>
@@ -249,7 +256,7 @@
   <script src="assets/js/local-backend.js?v=176eb0afad"></script>
   <script src="assets/js/session-bridge.js?v=2727497284"></script>
   <script src="assets/js/wl-theme.js?v=1c8caa379d"></script>
-  <script src="assets/js/command.js?v=de47312255"></script>
+  <script src="assets/js/command.js?v=6ac485e17c"></script>
   <script src="assets/js/command-ux.js?v=c352fca6c3"></script>
   <script src="assets/js/bd-phone.js?v=875b6ad5e4"></script>
   <script src="assets/js/linkedin-os.js?v=434f28c7f4"></script>

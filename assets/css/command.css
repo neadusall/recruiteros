@@ -2378,3 +2378,75 @@ html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *
   .bdp-digit .d { transition: none; }
 }
 @media (hover: none) { .bdp-row-call { opacity: 1; } }
+
+/* ============================================================
+   Outbound Performance + My Outbound (ob-)
+   The utilization/accountability command center and the personal
+   daily worksheet. Meridian system: flat surfaces, fg/bg status
+   pairs, tabular numerals, dense-but-readable tables.
+   ============================================================ */
+.ob-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 2px 0 16px; }
+.ob-tabs .chip { text-decoration: none; }
+.ob-tabs .ob-tab-on { color: var(--brand); border-color: var(--brand); background: var(--brand-soft); font-weight: 600; }
+
+.panel-card.ob-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px; box-shadow: var(--shadow-xs); }
+.ob-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 14px; }
+.ob-insights { font-size: 13.5px; line-height: 1.65; white-space: normal; }
+.ob-note { margin-top: 10px; padding: 9px 12px; background: var(--surface-2); border-radius: 8px; font-size: 12.5px; color: var(--text-muted); line-height: 1.55; }
+
+.ob-pill { display: inline-block; padding: 2px 8px; border-radius: 5px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; vertical-align: middle; white-space: nowrap; }
+.ob-track { display: inline-block; width: 100%; height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; vertical-align: middle; }
+.ob-fill { display: block; height: 100%; border-radius: 4px; }
+
+.ob-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.ob-input { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 12.5px; min-width: 0; }
+.ob-input:focus { outline: none; border-color: var(--brand); box-shadow: var(--focus-ring, 0 0 0 3px var(--brand-soft)); }
+#obFilter { min-width: 260px; }
+
+/* tables */
+.ob-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ob-table th { text-align: right; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap; }
+.ob-table th:first-child, .ob-table td:first-child { text-align: left; }
+.ob-table th.ob-sort-on { color: var(--brand); }
+.ob-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); text-align: right; font-variant-numeric: tabular-nums; vertical-align: middle; }
+.ob-table tr.clickable:hover td { background: var(--surface-2); }
+.ob-table .ob-track { width: 70px; margin-right: 6px; }
+
+/* heatmap */
+.ob-heat { width: 100%; border-collapse: separate; border-spacing: 4px; font-size: 12.5px; }
+.ob-heat th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: 4px 6px; text-align: center; }
+.ob-heat td { text-align: center; }
+.ob-heat-user { text-align: left !important; font-weight: 600; cursor: pointer; white-space: nowrap; padding-right: 10px; }
+.ob-heat-user:hover { color: var(--brand); }
+.ob-cell { display: block; width: 100%; min-width: 64px; border: none; border-radius: 7px; padding: 9px 6px; font: inherit; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; transition: filter .12s ease; }
+.ob-cell:hover { filter: brightness(0.94); }
+
+/* grids */
+.ob-chan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.ob-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ob-grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 14px; }
+@media (max-width: 920px) { .ob-2col { grid-template-columns: 1fr; } }
+
+.ob-chan-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 8px 0 10px; }
+.ob-mini .ob-chan-nums { grid-template-columns: repeat(3, 1fr); }
+.ob-num { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.ob-num-l { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+
+.ob-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.ob-day { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; margin-right: 8px; cursor: pointer; }
+.ob-ol { margin: 6px 0 0 18px; font-size: 13.5px; line-height: 1.7; }
+
+/* checklist */
+.ob-steps { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.ob-step { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.ob-step-done { background: var(--surface-2); }
+.ob-step-done .ob-step-title { color: var(--text-muted); }
+.ob-check { width: 24px; height: 24px; flex: none; margin-top: 1px; border-radius: 7px; border: 1.5px solid var(--border-strong, var(--border)); background: var(--surface); color: #fff; font-size: 14px; font-weight: 700; line-height: 1; cursor: pointer; display: grid; place-items: center; transition: background .12s ease, border-color .12s ease; }
+.ob-check:hover { border-color: var(--brand); }
+.ob-check.on { background: var(--ok); border-color: var(--ok); }
+.ob-step-main { flex: 1; min-width: 0; }
+.ob-step-title { font-size: 13.5px; font-weight: 600; }
+.ob-step-nums { display: flex; gap: 16px; flex-wrap: wrap; margin: 5px 0 3px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ob-step-nums b { color: var(--text-dim); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; margin-right: 3px; }
+.ob-step-action { font-size: 12.5px; line-height: 1.5; color: var(--text); }
+.ob-unread .lr-main { color: var(--brand); }
