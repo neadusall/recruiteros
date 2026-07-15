@@ -100,6 +100,32 @@ if [ ! -f "$DIR/.caddy-restart-v1" ]; then
   fi
 fi
 
+# One-time: wire the OS Text single sign-on token into the portal env.
+# deploy.sh section 4c does this, but this watcher never runs deploy.sh, so a
+# box deployed before the token wiring never got RECRUITEROS_OSTEXT_TOKEN and
+# the OS Text panel showed the engine's own email login instead of signing the
+# user straight in. Copies the engine's ACCESS_TOKEN and recreates the app so
+# the env change takes effect. Marker-guarded.
+if [ ! -f "$DIR/.ostext-token-sync-v1" ] && [ -f "$DIR/money-maker-sms/.env.production" ]; then
+  TX_TOKEN="$(grep -E '^ACCESS_TOKEN=' "$DIR/money-maker-sms/.env.production" | head -1 | cut -d= -f2- || true)"
+  if [ -n "${TX_TOKEN:-}" ]; then
+    echo "$(date -u) one-time: syncing OS Text SSO token into .env.production..." >> "$LOG"
+    if grep -q '^RECRUITEROS_OSTEXT_TOKEN=' "$DIR/.env.production"; then
+      sed -i "s|^RECRUITEROS_OSTEXT_TOKEN=.*|RECRUITEROS_OSTEXT_TOKEN=${TX_TOKEN}|" "$DIR/.env.production"
+    else
+      echo "RECRUITEROS_OSTEXT_TOKEN=${TX_TOKEN}" >> "$DIR/.env.production"
+    fi
+    if docker compose up -d --force-recreate app >> "$LOG" 2>&1; then
+      touch "$DIR/.ostext-token-sync-v1"
+      echo "$(date -u) OS Text SSO token synced; app recreated" >> "$LOG"
+    else
+      echo "$(date -u) app recreate failed after token sync, will retry next cycle" >> "$LOG"
+    fi
+  else
+    echo "$(date -u) token sync waiting: engine ACCESS_TOKEN not found yet" >> "$LOG"
+  fi
+fi
+
 # Fetch quietly; compare local vs remote.
 git fetch origin "$BRANCH" --quiet
 LOCAL=$(git rev-parse HEAD)
