@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap" rel="stylesheet" />
 <style>
-  :root{ --bg:#f7f8fa; --card:#ffffff; --line:#e5e8ee; --ink:#14181f; --mut:#4b5364; --brand:#2e5bd7; --accent:#2e5bd7; --book:#157347; --on-accent:#ffffff; }
+  :root{ --bg:#f7f8fa; --card:#ffffff; --line:#e5e8ee; --ink:#10151d; --mut:#414b5e; --brand:#2e5bd7; --accent:#2e5bd7; --book:#157347; --on-accent:#ffffff; }
   *{box-sizing:border-box}
   html,body{height:100%}
   body{margin:0;background:var(--bg);color:var(--ink);
@@ -67,14 +67,14 @@
 <body>
 <div class="top"><span class="brand">RecruitersOS</span><span class="from" id="fromLine"></span></div>
 <main>
-  <div class="stage" id="stage"><div class="err" id="loading">Loading…</div></div>
+  <div class="stage" id="stage"><div class="err" id="loading">Loadingâ€¦</div></div>
 </main>
 
 <div class="mov" id="replyModal">
   <div class="modal" id="replyCard">
     <h3 id="replyTitle">Reply</h3>
     <p class="msub">Send a quick message, it goes straight to their inbox.</p>
-    <textarea id="rMsg" placeholder="Type your reply…"></textarea>
+    <textarea id="rMsg" placeholder="Type your replyâ€¦"></textarea>
     <input id="rEmail" type="email" placeholder="Your email (so they can reply back)" />
     <div class="macts">
       <button class="ghost" id="rCancel" type="button">Cancel</button>
@@ -134,7 +134,7 @@
   var topEl = document.querySelector(".top .brand");
   if (topEl) { if (isHttp(logo)) topEl.outerHTML = '<img src="' + logo.replace(/"/g, "%22") + '" alt="" style="max-height:30px;max-width:200px;display:block" />'; else topEl.textContent = brandLabel.replace(/[<>&]/g, ""); }
   var fromEl = $("fromLine");
-  if (fromEl) fromEl.textContent = (name ? "A note for " + name : "A quick note") + (company ? " · " + company : "");
+  if (fromEl) fromEl.textContent = (name ? "A note for " + name : "A quick note") + (company ? " Â· " + company : "");
   var rt = $("replyTitle"); if (rt) rt.textContent = "Reply to " + brandLabel.replace(/[<>&]/g, "");
   document.title = company ? ("A quick note about " + company) : ("A message from " + brandLabel);
 
@@ -174,7 +174,7 @@
   if (hasCal) cta += '<a class="primary" id="bookBtn" href="#">' + esc(bookLabel) + '</a>';
   else if (bookUrl) cta += '<a class="primary" href="' + esc(bookUrl) + '" target="_blank" rel="noopener">' + esc(bookLabel) + '</a>';
   cta += '<a id="replyBtn" href="#">Reply</a>';
-  if (hasCal) cta += '<span class="hint">or grab a time on the right →</span>';
+  if (hasCal) cta += '<span class="hint">or grab a time on the right â†’</span>';
 
   var leftCol =
     '<div class="ctx"><h1>' + title + '</h1></div>' +
@@ -192,7 +192,7 @@
   if (hasCal) stage.className = "stage wide";
   stage.innerHTML = '<div class="cols' + (hasCal ? ' has-cal' : '') + '"><div class="maincol">' + leftCol + '</div>' + rightCol + '</div>';
 
-  // Book a call → scroll to + highlight the embedded calendar.
+  // Book a call â†’ scroll to + highlight the embedded calendar.
   var book = $("bookBtn");
   if (book) book.addEventListener("click", function(e){
     e.preventDefault();
@@ -201,7 +201,7 @@
     if (cal){ cal.classList.add("flash"); setTimeout(function(){ cal.classList.remove("flash"); }, 1300); }
   });
 
-  // Reply → pop-up that posts to the lead endpoint (emails the sender).
+  // Reply â†’ pop-up that posts to the lead endpoint (emails the sender).
   var modal = $("replyModal");
   function openM(){ modal.classList.add("open"); var t=$("rMsg"); if(t) t.focus(); }
   function closeM(){ modal.classList.remove("open"); }
@@ -221,7 +221,7 @@
       if (navigator.sendBeacon) navigator.sendBeacon(API + "/api/in-market/lead", new Blob([payload], { type: "text/plain" }));
       else fetch(API + "/api/in-market/lead", { method: "POST", body: payload, keepalive: true });
     } catch (e2) {}
-    $("replyCard").innerHTML = '<div class="mok">✓ Sent' + (name ? ", " + esc(name) : "") + ", thanks! They'll get back to you shortly.</div>";
+    $("replyCard").innerHTML = '<div class="mok">âœ“ Sent' + (name ? ", " + esc(name) : "") + ", thanks! They'll get back to you shortly.</div>";
     setTimeout(closeM, 1900);
   });
 

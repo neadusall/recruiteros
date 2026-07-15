@@ -36,13 +36,18 @@ Neutral scale (light):
 | `--surface-2` | `#f5f6f8` | Nested surfaces, hovers |
 | `--border` | `#e4e7ec` | Hairlines |
 | `--border-strong` | `#cfd4dd` | Inputs, emphasized dividers |
-| `--text` | `#111827` | Primary text |
-| `--text-muted` | `#4b5563` | Secondary text |
-| `--text-dim` | `#8a94a6` | Tertiary, labels, meta |
+| `--text` | `#10151d` | Primary text |
+| `--text-muted` | `#414b5e` | Secondary text |
+| `--text-dim` | `#69748a` | Tertiary, labels, meta (still >= 4.5:1 on white) |
 
 Dark equivalents are true neutrals (no purple cast): canvas `#0e1116`, surface
-`#161a21`, surface-2 `#1d222b`, borders `#262c37` / `#39414f`, text `#f2f4f8` /
-`#aab2c0` / `#78818f`.
+`#161a21`, surface-2 `#1d222b`, borders `#262c37` / `#39414f`, text `#f4f6fa` /
+`#b3bbc9` / `#8791a3`.
+
+Contrast pass (2026-07-14): secondary/tertiary text was darkened one step so
+small labels stay legible; cards carry `--shadow-xs` (a 1px hairline lift),
+headings sit at weight 650, stat values at 700. Elevation stays borders-first;
+`--shadow-xs` is the only shadow allowed on in-flow cards.
 
 Accent (white-label overridable; keep these names, wl-theme.js writes them):
 

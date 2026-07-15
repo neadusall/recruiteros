@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -6,7 +6,7 @@
   <title>Speak with a recruiter</title>
   <meta name="description" content="Opt in to talk through this opportunity with our recruiting team." />
   <!--
-    AI Vetting · Candidate opt-in (REFERENCE PAGE)
+    AI Vetting Â· Candidate opt-in (REFERENCE PAGE)
 
     A self-contained, brandable opt-in form. The recruiter shares this page's
     link (the RecruitersOS desk card's "Opt-in link" button copies it with the
@@ -19,7 +19,7 @@
     /api/vetting/optin. Set window.OPTIN_API_BASE if the API is on another origin.
   -->
   <style>
-    :root { --bg:#f7f8fa; --card:#ffffff; --line:#e5e8ee; --txt:#14181f; --muted:#4b5364; --accent:#2e5bd7; --accent2:#2e5bd7; }
+    :root { --bg:#f7f8fa; --card:#ffffff; --line:#e5e8ee; --txt:#10151d; --muted:#414b5e; --accent:#2e5bd7; --accent2:#2e5bd7; }
     * { box-sizing:border-box; }
     body { margin:0; font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--txt); min-height:100vh; display:grid; place-items:center; padding:24px; }
     .wrap { width:100%; max-width:460px; }
@@ -80,7 +80,7 @@
           var k = d.desk;
           if (k.roleTitle) {
             $("title").textContent = "Interested in the " + k.roleTitle + " role?";
-            $("eyebrow").textContent = (k.clientCompany ? k.clientCompany + " · " : "") + "Now hiring";
+            $("eyebrow").textContent = (k.clientCompany ? k.clientCompany + " Â· " : "") + "Now hiring";
           }
           if (k.agentName) $("sub").textContent = "Drop your details and we'll give you a number to call. You'll speak directly with " + k.agentName + (k.agentCompany ? " at " + k.agentCompany : "") + ".";
         }).catch(function () {});
@@ -90,7 +90,7 @@
         e.preventDefault();
         $("err").textContent = "";
         if (!deskId) { $("err").textContent = "This link is missing its job reference. Ask your recruiter for a fresh link."; return; }
-        var btn = $("submit"); btn.disabled = true; btn.textContent = "Submitting…";
+        var btn = $("submit"); btn.disabled = true; btn.textContent = "Submittingâ€¦";
         var payload = {
           deskId: deskId,
           firstName: $("firstName").value.trim(),

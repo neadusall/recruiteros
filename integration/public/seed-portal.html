@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -18,7 +18,7 @@
     if the API is on another origin. There is NO limit on the number of rows.
   -->
   <style>
-    :root { --bg:#f7f8fa; --card:#ffffff; --card2:#f4f5f7; --line:#e5e8ee; --txt:#14181f; --muted:#4b5364; --accent:#2e5bd7; --accent2:#2e5bd7; --ok:#157347; --bad:#d92d20; }
+    :root { --bg:#f7f8fa; --card:#ffffff; --card2:#f4f5f7; --line:#e5e8ee; --txt:#10151d; --muted:#414b5e; --accent:#2e5bd7; --accent2:#2e5bd7; --ok:#157347; --bad:#d92d20; }
     * { box-sizing:border-box; }
     body { margin:0; font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--txt); min-height:100vh; padding:32px 18px; }
     .wrap { width:100%; max-width:760px; margin:0 auto; }
@@ -63,7 +63,7 @@
   <div class="wrap" id="wrap">
     <div class="eyebrow" id="eyebrow">Warm-up network</div>
     <h1 id="title">Set up your warm-up inboxes</h1>
-    <p class="sub" id="sub">Loading…</p>
+    <p class="sub" id="sub">Loadingâ€¦</p>
     <div id="app" style="display:none">
       <div class="card">
         <div class="why">
@@ -81,18 +81,18 @@
         </div>
 
         <div class="rows" id="rows"></div>
-        <button class="addbtn" id="addRow">＋ Add another inbox</button>
+        <button class="addbtn" id="addRow">ï¼‹ Add another inbox</button>
 
         <button class="submit" id="submit">Connect my inboxes</button>
         <div class="err" id="err"></div>
         <div class="tally" id="tally"></div>
 
         <details>
-          <summary>How to generate an app password (Gmail · Outlook · Yahoo)</summary>
+          <summary>How to generate an app password (Gmail Â· Outlook Â· Yahoo)</summary>
           <ol>
-            <li><b>Gmail:</b> Account → Security → turn on 2-Step Verification → search "App passwords" → generate one → also enable IMAP in Gmail Settings → "Forwarding and POP/IMAP".</li>
-            <li><b>Outlook / Hotmail:</b> account.microsoft.com → Security → Advanced security options → turn on two-step verification → "Create a new app password".</li>
-            <li><b>Yahoo:</b> Account Security → turn on two-step verification → "Generate app password" → pick "Other app".</li>
+            <li><b>Gmail:</b> Account â†’ Security â†’ turn on 2-Step Verification â†’ search "App passwords" â†’ generate one â†’ also enable IMAP in Gmail Settings â†’ "Forwarding and POP/IMAP".</li>
+            <li><b>Outlook / Hotmail:</b> account.microsoft.com â†’ Security â†’ Advanced security options â†’ turn on two-step verification â†’ "Create a new app password".</li>
+            <li><b>Yahoo:</b> Account Security â†’ turn on two-step verification â†’ "Generate app password" â†’ pick "Other app".</li>
           </ol>
           Paste the app password exactly as shown (spaces are fine, we strip them).
         </details>
@@ -138,7 +138,7 @@
           '</select></div>' +
           '<div><label>Email address</label><input class="f-addr" type="email" placeholder="name@gmail.com" autocomplete="off" /></div>' +
           '<div><label>App password</label><input class="f-pass" type="text" placeholder="xxxx xxxx xxxx xxxx" autocomplete="off" /></div>' +
-          '<button class="del" title="Remove">✕</button>' +
+          '<button class="del" title="Remove">âœ•</button>' +
           '<div class="status"></div>';
         row.querySelector(".f-prov").value = provider || "gmail";
         row.querySelector(".del").addEventListener("click", function(){ row.remove(); });
@@ -159,7 +159,7 @@
         });
         if (!accounts.length) { $("err").textContent = "Fill in at least one inbox (address + app password)."; return; }
 
-        var btn = $("submit"); btn.disabled = true; btn.textContent = "Connecting…";
+        var btn = $("submit"); btn.disabled = true; btn.textContent = "Connectingâ€¦";
         fetch(API, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({
           token: token, staffName: staffName, accounts: accounts.map(function(a){ return { provider:a.provider, address:a.address, appPassword:a.appPassword }; })
         }) })
@@ -173,8 +173,8 @@
             var r = byAddr[a.address.toLowerCase()]; if (!r) return;
             var st = a.row.querySelector(".status");
             a.row.classList.remove("ok","bad"); st.classList.remove("ok","bad");
-            if (r.ok) { a.row.classList.add("ok"); st.classList.add("ok"); st.textContent = "✓ Connected, you're done with this one, no need to open it again."; }
-            else { a.row.classList.add("bad"); st.classList.add("bad"); st.textContent = "✕ " + esc(r.error || "Couldn't connect, check the app password."); }
+            if (r.ok) { a.row.classList.add("ok"); st.classList.add("ok"); st.textContent = "âœ“ Connected, you're done with this one, no need to open it again."; }
+            else { a.row.classList.add("bad"); st.classList.add("bad"); st.textContent = "âœ• " + esc(r.error || "Couldn't connect, check the app password."); }
           });
           var v = res.d.verified || 0, n = res.d.registered || 0;
           $("tally").innerHTML = "<b>" + v + "</b> of " + n + " inboxes connected. " + (v < n ? "Fix the red ones (usually a fresh app password) and submit again, connected ones stay connected." : "All set, thank you! You can close this page.");

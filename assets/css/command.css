@@ -121,19 +121,19 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .env-pill.live { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, var(--border)); }
 
 /* generic section heads + cards */
-.v-head { margin-bottom: 18px; }
-.v-head h2 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
-.v-head p { color: var(--text-muted); font-size: 13.5px; margin-top: 4px; max-width: 76ch; }
+.v-head { margin-bottom: 20px; }
+.v-head h2 { font-size: 20px; font-weight: 650; letter-spacing: -0.015em; }
+.v-head p { color: var(--text-muted); font-size: 14px; margin-top: 5px; max-width: 76ch; line-height: 1.55; }
 
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: none; }
-.card h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-xs); }
+.card h3 { font-size: 15px; font-weight: 650; margin-bottom: 12px; letter-spacing: -0.01em; }
 .cards { display: grid; gap: 14px; }
 
 /* stat grid (Overview) */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; }
-.stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; position: relative; overflow: hidden; box-shadow: none; }
-.stat .sv { font-size: 24px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.stat .sl { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; position: relative; overflow: hidden; box-shadow: var(--shadow-xs); }
+.stat .sv { font-size: 27px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.stat .sl { color: var(--text-muted); font-size: 12.5px; margin-top: 4px; font-weight: 500; }
 .stat .rag { position: absolute; top: 14px; right: 14px; width: 9px; height: 9px; border-radius: 50%; }
 .stat.clickable, .list-row.clickable { cursor: pointer; transition: border-color .12s ease, background .12s ease; }
 .stat.clickable:hover { transform: none; border-color: var(--border-strong); background: var(--surface-2); }
@@ -158,7 +158,7 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .chan-filter .cf { cursor: pointer; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font-size: 12.5px; font-weight: 500; transition: border-color .12s ease, color .12s ease, background .12s ease; }
 .chan-filter .cf.active { background: var(--brand-soft); color: var(--brand); border-color: color-mix(in srgb, var(--brand) 35%, var(--border)); font-weight: 600; }
 
-.resp-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; }
+.resp-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--shadow-xs); }
 .resp-top { display: flex; align-items: center; gap: 10px; }
 .resp-top .avatar { width: 30px; height: 30px; font-size: 12px; }
 .resp-name { font-weight: 600; font-size: 14px; }
@@ -257,8 +257,8 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 
 /* pipeline (Prospects) */
 .pipe { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr)); gap: 10px; margin-bottom: 16px; }
-.pipe .stage { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; text-align: center; }
-.pipe .stage b { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.pipe .stage { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; text-align: center; box-shadow: var(--shadow-xs); }
+.pipe .stage b { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .pipe .stage span { display: block; color: var(--text-muted); font-size: 11.5px; margin-top: 3px; }
 
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
@@ -999,13 +999,13 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
    stat is fully visible without scrolling (tighter header + cards)
    ============================================================ */
 .app .panel-wrap { padding-top: 16px; }
-#view .v-head { margin-bottom: 12px; }
-#view .v-head h2 { font-size: 18px; }
-#view .v-head p { font-size: 13px; margin-top: 2px; }
+#view .v-head { margin-bottom: 14px; }
+#view .v-head h2 { font-size: 20px; }
+#view .v-head p { font-size: 13.5px; margin-top: 3px; }
 .stat-grid { gap: 12px; }
 .stat { padding: 14px 16px; }
-.stat .sv { font-size: 24px; }
-.stat .sl { font-size: 12px; }
+.stat .sv { font-size: 26px; }
+.stat .sl { font-size: 12.5px; }
 
 /* ---------------- Outreach · sending-readiness control panel ---------------- */
 .or-gate { border-radius: var(--radius); padding: 12px 15px; font-size: 13px; margin-bottom: 16px; border: 1px solid var(--border); }
@@ -1347,8 +1347,8 @@ table.seqlib tbody tr:hover td { background: var(--surface-2); }
 /* Workspace card */
 .ws-card { border-radius: var(--radius-sm); background: var(--bg-soft); }
 
-/* Cards: hairline border only, no shadow, token radius */
-.card { border-radius: var(--radius); box-shadow: none; }
+/* Cards: hairline border + hairline lift, token radius */
+.card { border-radius: var(--radius); box-shadow: var(--shadow-xs); }
 
 /* Stat cards: flat, bordered */
 .stat { border-radius: var(--radius); }
@@ -1381,15 +1381,15 @@ table.seqlib tbody tr:hover td { background: var(--surface-2); }
 /* ---- Topbar: quiet crumb, confident title ---- */
 .topbar { gap: 14px; align-items: center; }
 .topbar .crumb { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); margin-bottom: 3px; }
-.topbar h1, #pageTitle { font-size: 18px; font-weight: 600; line-height: 1.1; }
+.topbar h1, #pageTitle { font-size: 18px; font-weight: 650; line-height: 1.1; }
 
 /* ---- Main content: consistent vertical rhythm ---- */
 .v-head { margin-bottom: 20px; }
-.v-head p { color: var(--text-muted); font-size: 13.5px; line-height: 1.5; max-width: 76ch; }
+.v-head p { color: var(--text-muted); font-size: 14px; line-height: 1.55; max-width: 76ch; }
 
 /* ---- Cards + sections: one consistent system ---- */
 .card { padding: 20px; }
-.card h3 { font-size: 14px; font-weight: 600; letter-spacing: -.01em; margin-bottom: 14px; }
+.card h3 { font-size: 15px; font-weight: 650; letter-spacing: -.01em; margin-bottom: 14px; }
 .cards, .two-col, .stat-grid { gap: 16px; }
 
 /* ---- Controls: uniform radius/sizing so nothing looks ad-hoc ---- */
@@ -1421,8 +1421,8 @@ body.app { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibili
 
 /* Stat tiles: confident number, quiet label */
 .stat { padding: 16px 18px; }
-.stat .sv { font-size: 24px; font-weight: 650; letter-spacing: -.02em; line-height: 1.05; }
-.stat .sl { font-size: 12px; color: var(--text-muted); margin-top: 6px; font-weight: 500; }
+.stat .sv { font-size: 26px; font-weight: 700; letter-spacing: -.02em; line-height: 1.05; }
+.stat .sl { font-size: 12.5px; color: var(--text-muted); margin-top: 6px; font-weight: 500; }
 .stat .rag { width: 8px; height: 8px; top: 16px; right: 16px; }
 
 /* Cards: hairline that sharpens on hover (subtle, professional) */
@@ -1432,8 +1432,8 @@ body.app { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibili
 /* Pipeline stage chips: even, legible */
 .pipe { gap: 12px; }
 .pipe .stage { border-radius: var(--radius); }
-.pipe .stage b { font-size: 22px; font-weight: 650; letter-spacing: -.02em; }
-.pipe .stage span { font-size: 11.5px; color: var(--text-muted); }
+.pipe .stage b { font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
+.pipe .stage span { font-size: 12px; color: var(--text-muted); }
 
 /* Badges/pills: one consistent weight + tracking */
 .cls, .status-pill, .or-pill, .sl-status, .seq-chip { font-weight: 600; letter-spacing: .02em; }
