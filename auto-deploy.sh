@@ -87,6 +87,19 @@ if [ ! -f "$DIR/.egress-setup-v2" ] && [ -f "$DIR/setup-egress.sh" ]; then
   fi
 fi
 
+# One-time: hard-restart Caddy so the current Caddyfile definitely loads (the
+# graceful `caddy reload` path proved unreliable on this box; a restart is
+# ~1s and deterministic). Marker-guarded; runs even with no new commit.
+if [ ! -f "$DIR/.caddy-restart-v1" ]; then
+  echo "$(date -u) one-time: hard caddy restart to load current Caddyfile..." >> "$LOG"
+  if docker compose restart caddy >> "$LOG" 2>&1; then
+    touch "$DIR/.caddy-restart-v1"
+    echo "$(date -u) caddy restarted with current config" >> "$LOG"
+  else
+    echo "$(date -u) caddy restart failed, will retry next cycle" >> "$LOG"
+  fi
+fi
+
 # Fetch quietly; compare local vs remote.
 git fetch origin "$BRANCH" --quiet
 LOCAL=$(git rev-parse HEAD)
