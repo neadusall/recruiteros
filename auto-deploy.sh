@@ -92,8 +92,11 @@ git fetch origin "$BRANCH" --quiet
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse "origin/$BRANCH")
 
-if [ "$LOCAL" = "$REMOTE" ]; then
-  exit 0   # already up to date, nothing to do
+# Up to date AND the one-time OS Text cutover (below) already ran -> nothing to
+# do. With the cutover marker missing we fall through even on no new commit, so
+# the cutover can run on a box whose checkout is already current.
+if [ "$LOCAL" = "$REMOTE" ] && [ -f "$DIR/.ostext-cutover-v1" ]; then
+  exit 0
 fi
 
 echo "$(date -u) new commit $REMOTE (was $LOCAL), deploying..." >> "$LOG"
@@ -112,4 +115,30 @@ else
   docker compose up -d --build --no-deps app >> "$LOG" 2>&1 || true
   docker compose up -d --no-deps db caddy >> "$LOG" 2>&1 || true
   echo "$(date -u) deploy complete (core only)" >> "$LOG"
+fi
+
+# Reload Caddy's bind-mounted config after every deploy: `up -d` never restarts
+# caddy when only the Caddyfile's CONTENT changed (the bind-mount path is the
+# same), so routing changes silently never applied. Graceful reload first
+# (zero downtime), hard restart as fallback, never fatal.
+docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile >> "$LOG" 2>&1 \
+  || docker compose restart caddy >> "$LOG" 2>&1 || true
+
+# One-time: OS Text cutover (same-origin /ostext-app + portal-matched skin).
+# The engine container had been running a stale build on this box, so force a
+# from-scratch rebuild ONCE, then reload Caddy again for the /ostext-app routes.
+# Marker-guarded; bump the marker name to force another engine rebuild later.
+if [ ! -f "$DIR/.ostext-cutover-v1" ]; then
+  echo "$(date -u) one-time: OS Text cutover (forced engine rebuild)..." >> "$LOG"
+  git submodule sync --recursive >> "$LOG" 2>&1 || true
+  if git submodule update --init --force money-maker-sms >> "$LOG" 2>&1 \
+     && docker compose build --no-cache taltxt >> "$LOG" 2>&1 \
+     && docker compose up -d taltxt >> "$LOG" 2>&1; then
+    docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile >> "$LOG" 2>&1 \
+      || docker compose restart caddy >> "$LOG" 2>&1 || true
+    touch "$DIR/.ostext-cutover-v1"
+    echo "$(date -u) OS Text cutover complete (engine $(git -C money-maker-sms rev-parse --short HEAD 2>/dev/null || echo unknown))" >> "$LOG"
+  else
+    echo "$(date -u) OS Text cutover failed, will retry next cycle" >> "$LOG"
+  fi
 fi
