@@ -2314,3 +2314,6 @@ html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *
 .bdp-action-row .due { font: 500 11.5px var(--mono); color: var(--text-dim); margin-left: auto; white-space: nowrap; }
 .bdp-action-row.done .txt { text-decoration: line-through; color: var(--text-dim); }
 .bdp-audio { width: 100%; margin-top: 6px; }
+
+/* [hidden] must always win over the display rules the phone classes set. */
+.bdp-root [hidden] { display: none !important; }

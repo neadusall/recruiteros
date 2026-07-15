@@ -519,6 +519,7 @@
     pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio },
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
     calls: { title: "Calls", crumb: "Build", action: null, render: renderCalls, motionOnly: "recruiting" },
+    bdphone: { title: "BD Phone", crumb: "Business Development", action: null, render: renderBdPhone, motionOnly: "bd" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "+ New sequence", render: renderContent },
@@ -10117,6 +10118,359 @@
     tabBar(); paint();
   }
 
+  /* ---------------- Calls (candidate outbound softphone) ----------------------
+     A recruiter's outbound-calling console: a browser softphone (Telnyx WebRTC,
+     which loads when telephony is configured), a lawful-consent gate before any
+     recording, a history of past calls with their processing status, and an
+     AI-drafted hiring-manager submittal on each completed recruiting call.
+     Talks to /api/phone/* (token, dial, calls, calls/:id, settings). */
+  function renderCalls(el) {
+    var cs = { consentAck: false, prospect: null };
+
+    el.innerHTML = head("Calls",
+      "Call candidates from the browser. Every call can be recorded, transcribed, and turned into a hiring-manager submittal. Recording only happens after your workspace attests it has lawful consent (Recording settings, below) and you confirm you will disclose it on the call.") +
+      '<div class="vt-view">' +
+        '<div id="clSoft"></div>' +
+        '<div id="clDialer"></div>' +
+        '<div id="clSettings"></div>' +
+        '<h3 style="margin:20px 0 8px;font-size:14px;color:var(--text-muted)">Call history</h3>' +
+        '<div id="clHistory">' + loading() + "</div>" +
+      "</div>";
+
+    /* ---- small helpers ---- */
+    function prospectName(p) {
+      if (!p) return "";
+      return p.fullName || ((p.firstName || "") + " " + (p.lastName || "")).trim() || p.name || "";
+    }
+    function fmtWhen(s) {
+      if (!s) return "";
+      try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+      catch (e) { return esc(String(s)); }
+    }
+    function fmtDur(sec) {
+      sec = parseInt(sec, 10) || 0;
+      var m = Math.floor(sec / 60), s = sec % 60;
+      return m + "m " + (s < 10 ? "0" : "") + s + "s";
+    }
+    function statusBadge(status) {
+      var v = String(status || "").toLowerCase();
+      var map = {
+        recording: ["Recording", "var(--info,#3b82f6)"],
+        transcribing: ["Transcribing", "var(--warn)"],
+        analyzing: ["Analyzing", "var(--warn)"],
+        complete: ["Complete", "var(--ok)"],
+        completed: ["Complete", "var(--ok)"],
+        scored: ["Complete", "var(--ok)"],
+        failed: ["Failed", "var(--danger)"]
+      };
+      var m = map[v] || [(status ? (String(status).charAt(0).toUpperCase() + String(status).slice(1)) : "Pending"), "var(--text-dim)"];
+      return '<span style="display:inline-flex;align-items:center;gap:6px;flex:none;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:4px;color:' + m[1] + ';border:1px solid ' + m[1] + '">' +
+        '<span style="width:7px;height:7px;border-radius:50%;background:currentColor"></span>' + esc(m[0]) + "</span>";
+    }
+    function fitBadge(fit) {
+      var f = String(fit).toLowerCase();
+      var color = (f.indexOf("strong") >= 0 || f.indexOf("high") >= 0) ? "var(--ok)"
+        : (f.indexOf("weak") >= 0 || f.indexOf("low") >= 0 || f.indexOf("no ") >= 0) ? "var(--danger)"
+          : "var(--warn)";
+      return '<span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:4px;color:' + color + ';border:1px solid ' + color + '">Fit: ' + esc(String(fit)) + "</span>";
+    }
+
+    /* ---- softphone status (POST /phone/token) ---- */
+    function loadToken() {
+      var host = $("#clSoft"); if (!host) return;
+      host.innerHTML = '<div class="vt-card" style="display:flex;align-items:center;gap:12px">' +
+        '<span id="clSoftDot" style="width:10px;height:10px;border-radius:50%;background:var(--text-dim);flex:none"></span>' +
+        '<div><div id="clSoftTitle" style="font-weight:600;font-size:14px">Connecting softphone...</div>' +
+        '<div id="clSoftSub" style="font-size:12.5px;color:var(--text-muted);margin-top:2px"></div></div></div>';
+      send("/phone/token", "POST").then(function (r) {
+        var dot = $("#clSoftDot"), title = $("#clSoftTitle"), sub = $("#clSoftSub");
+        if (!dot) return;
+        if (r.ok && r.data && r.data.token) {
+          dot.style.background = "var(--ok)";
+          title.textContent = "Softphone ready";
+          sub.textContent = "Connected. In-browser audio uses the Telnyx WebRTC client, which loads automatically once calling is fully configured.";
+        } else if (r.status === 404 || r.status === 409) {
+          dot.style.background = "var(--warn)";
+          title.textContent = "Calling not configured yet";
+          sub.innerHTML = 'Connect telephony to place calls from the browser. <a href="#setup" style="color:var(--brand)">Open Setup</a>.';
+        } else {
+          dot.style.background = "var(--warn)";
+          title.textContent = "Softphone unavailable";
+          sub.textContent = "Could not obtain a softphone token right now. Try again shortly.";
+        }
+      }).catch(function () {
+        var dot = $("#clSoftDot"), title = $("#clSoftTitle"), sub = $("#clSoftSub");
+        if (dot) { dot.style.background = "var(--warn)"; title.textContent = "Softphone unavailable"; if (sub) sub.textContent = "Could not reach the server."; }
+      });
+    }
+
+    /* ---- dialer + recording-consent gate ---- */
+    function recordingEnabled() {
+      if (cs.consentAck) return true;
+      var chk = $("#clConsentChk");
+      return !!(chk && chk.checked);
+    }
+    function updateRecState() {
+      var s = $("#clRecState"); if (!s) return;
+      s.textContent = recordingEnabled()
+        ? "Recording will be requested for this call (subject to workspace attestation)."
+        : "Recording off: this call will not be recorded.";
+    }
+    function paintDialer() {
+      var host = $("#clDialer"); if (!host) return;
+      var p = cs.prospect;
+      var nameLine = "";
+      if (p) {
+        nameLine = '<div style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-soft)">' +
+          '<div style="font-weight:600;font-size:14px">' + esc(prospectName(p) || "Candidate") + "</div>" +
+          (p.company ? '<div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">' + esc(p.company) + "</div>" : "") +
+          "</div>";
+      }
+      var prefill = p ? (p.phone || p.phoneNumber || "") : "";
+      host.innerHTML = '<div class="vt-card"><h3>Dialer</h3>' + nameLine +
+        (cs.consentAck ? "" :
+          '<div id="clConsent" style="border:1px solid var(--warn);background:var(--warn-bg);border-radius:10px;padding:12px 14px;margin:12px 0">' +
+            '<div style="display:flex;gap:8px;align-items:flex-start">' +
+            '<svg class="isvg" aria-hidden="true" style="flex:none;margin-top:1px;color:var(--warn)"><use href="#i-alert"/></svg>' +
+            '<div style="font-size:12.5px;color:var(--text-muted);line-height:1.55">Calls may be recorded. Recording only starts after your workspace has attested lawful consent (Recording settings, below) and you confirm, on this call, that you will disclose recording and have the required consent.</div></div>' +
+            '<label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:13px;color:var(--text);cursor:pointer">' +
+            '<input type="checkbox" id="clConsentChk" /> I will disclose recording and have consent for this call</label>' +
+          "</div>") +
+        '<div class="vt-form-grid" style="align-items:end">' +
+          '<div class="vt-field"><label>Candidate phone (E.164, e.g. +14155550123)</label>' +
+          '<input id="clPhone" type="tel" placeholder="+14155550123" value="' + esc(prefill) + '" /></div>' +
+        "</div>" +
+        '<div id="clDialMsg" style="font-size:12.5px;margin:10px 0"></div>' +
+        '<div style="display:flex;gap:12px;align-items:center;margin-top:6px">' +
+          '<button class="vt-btn vt-btn-primary" id="clCall" type="button" style="font-size:15px;padding:12px 22px"><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg> Call</button>' +
+          '<span id="clRecState" style="font-size:12px;color:var(--text-dim)"></span>' +
+        "</div></div>";
+      var chk = $("#clConsentChk");
+      if (chk) chk.addEventListener("change", updateRecState);
+      $("#clCall").addEventListener("click", placeCall);
+      updateRecState();
+    }
+    function placeCall() {
+      var msg = $("#clDialMsg"), btn = $("#clCall");
+      var to = (($("#clPhone") || {}).value || "").trim();
+      if (!/^\+?[0-9][0-9\s().-]{6,}$/.test(to)) {
+        msg.style.color = "var(--danger)";
+        msg.textContent = "Enter a valid phone number in E.164 format (for example, +14155550123).";
+        return;
+      }
+      var consent = recordingEnabled();
+      var orig = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = "Calling...";
+      msg.style.color = "var(--text-dim)"; msg.textContent = "";
+      var payload = { toNumber: to, consentAcknowledged: consent };
+      if (cs.prospect) payload.prospectId = cs.prospect.id;
+      send("/phone/dial", "POST", payload).then(function (r) {
+        btn.disabled = false; btn.innerHTML = orig;
+        if (r.status === 409) {
+          msg.style.color = "var(--warn)";
+          msg.textContent = (r.data && r.data.message) || "Calling is not fully configured, or recording consent has not been attested for this workspace. Open Recording settings below to attest consent, or connect telephony under Setup.";
+          return;
+        }
+        if (!r.ok) {
+          msg.style.color = "var(--danger)";
+          msg.textContent = (r.data && (r.data.error || r.data.message)) || "Could not place the call. Please try again.";
+          return;
+        }
+        if (consent) cs.consentAck = true; // banner collapses for the rest of the session once consent is given
+        msg.style.color = "var(--ok)";
+        msg.textContent = "Call started" + (consent ? " (recording requested)." : ".");
+        paintDialer();
+        loadHistory();
+      }).catch(function () {
+        btn.disabled = false; btn.innerHTML = orig;
+        msg.style.color = "var(--danger)"; msg.textContent = "Could not reach the server. Please try again.";
+      });
+    }
+
+    /* ---- recording settings (GET/POST /phone/settings) ---- */
+    function loadSettings() {
+      var host = $("#clSettings"); if (!host) return;
+      host.innerHTML = '<div class="vt-card"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px">' +
+        '<h3 style="margin:0;font-size:14px">Recording settings</h3>' +
+        '<button class="vt-btn vt-btn-ghost" id="clSetToggle" type="button">Show</button></div>' +
+        '<div id="clSetBody" style="display:none;margin-top:12px"></div></div>';
+      var toggle = $("#clSetToggle");
+      toggle.addEventListener("click", function () {
+        var body = $("#clSetBody");
+        if (body.style.display === "none") { body.style.display = "block"; body.innerHTML = loading(); toggle.textContent = "Hide"; fetchSettings(); }
+        else { body.style.display = "none"; toggle.textContent = "Show"; }
+      });
+    }
+    function fetchSettings() {
+      var body = $("#clSetBody"); if (!body) return;
+      send("/phone/settings", "GET").then(function (r) {
+        var d = (r.ok && r.data) ? (r.data.settings || r.data) : {};
+        paintSettings(body, d, r.ok);
+      }).catch(function () { paintSettings(body, {}, false); });
+    }
+    function paintSettings(body, d, ok) {
+      var attested = !!d.recordingConsentAttested;
+      var mode = d.recordingMode || "manual";
+      var modes = [
+        ["manual", "Manual (record only when the recruiter confirms consent on the call)"],
+        ["always", "Always (record every call, only where lawful and disclosed)"],
+        ["never", "Never (do not record any call)"]
+      ];
+      var opts = modes.map(function (m) { return '<option value="' + m[0] + '"' + (mode === m[0] ? " selected" : "") + ">" + esc(m[1]) + "</option>"; }).join("");
+      body.innerHTML =
+        (ok ? "" : '<div class="vt-warn" style="margin-top:0">Could not load recording settings from the server. Changes may not save until calling is configured.</div>') +
+        '<div class="vt-hint" style="margin:0 0 10px">Admins attest that the workspace has a lawful basis to record calls (for example, one-party or all-party consent as required in your jurisdiction). Recording is blocked for the whole workspace until this is attested.</div>' +
+        '<label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text);cursor:pointer;margin-bottom:12px">' +
+          '<input type="checkbox" id="clSetAttest"' + (attested ? " checked" : "") + " /> Our workspace has attested lawful consent to record calls</label>" +
+        '<div class="vt-field" style="max-width:520px"><label>Recording mode</label><select id="clSetMode">' + opts + "</select></div>" +
+        '<div style="display:flex;gap:12px;align-items:center;margin-top:12px">' +
+          '<button class="vt-btn vt-btn-primary" id="clSetSave" type="button">Save recording settings</button>' +
+          '<span id="clSetMsg" style="font-size:12.5px;color:var(--text-dim)"></span>' +
+        "</div>";
+      $("#clSetSave").addEventListener("click", function () {
+        var msg = $("#clSetMsg"), self = this;
+        var payload = { recordingConsentAttested: $("#clSetAttest").checked, recordingMode: $("#clSetMode").value };
+        self.disabled = true;
+        send("/phone/settings", "POST", payload).then(function (r) {
+          self.disabled = false;
+          if (r.ok) { msg.style.color = "var(--ok)"; msg.textContent = "Saved."; }
+          else if (r.status === 404 || r.status === 409) { msg.style.color = "var(--warn)"; msg.textContent = "Calling is not configured yet, so this could not be saved."; }
+          else { msg.style.color = "var(--danger)"; msg.textContent = "Could not save. Please try again."; }
+        }).catch(function () { self.disabled = false; msg.style.color = "var(--danger)"; msg.textContent = "Could not reach the server."; });
+      });
+    }
+
+    /* ---- call history + detail (GET /phone/calls, GET /phone/calls/:id) ---- */
+    function callRow(c) {
+      var nm = c.candidateName || c.prospectName || (c.prospect && prospectName(c.prospect)) || c.toNumber || c.number || "Candidate";
+      var num = c.toNumber || c.number || (c.prospect && c.prospect.phone) || "";
+      var when = fmtWhen(c.createdAt || c.startedAt || c.date);
+      var dur = (c.durationSec != null) ? fmtDur(c.durationSec) : (c.duration || "");
+      return '<div class="vt-call" data-call="' + esc(String(c.id)) + '">' +
+        '<div class="vt-call-top">' +
+          '<svg class="isvg" aria-hidden="true" style="color:var(--brand);flex:none"><use href="#i-phone"/></svg>' +
+          '<div style="flex:1;min-width:0">' +
+            '<div class="vt-call-name">' + esc(nm) + (num ? ' <span>&middot; ' + esc(num) + "</span>" : "") + "</div>" +
+            '<div class="vt-call-sub" style="color:var(--text-muted)">' + esc(when) + (dur ? (" &middot; " + esc(dur)) : "") + "</div>" +
+          "</div>" +
+          statusBadge(c.status) +
+        "</div>" +
+        '<div class="vt-call-detail vt-detail" data-detail="' + esc(String(c.id)) + '" style="display:none;margin-top:12px"></div></div>';
+    }
+    function loadHistory() {
+      var host = $("#clHistory"); if (!host) return;
+      send("/phone/calls?motion=" + motion, "GET").then(function (r) {
+        if (r.status === 404 || r.status === 409) {
+          host.innerHTML = '<div class="vt-empty">Calling is not configured yet. Once telephony is connected, your calls appear here. <a href="#setup" style="color:var(--brand)">Open Setup</a>.</div>';
+          return;
+        }
+        if (!r.ok) { host.innerHTML = needsSetup(); return; }
+        var calls = (r.data && r.data.calls) || [];
+        if (!calls.length) { host.innerHTML = '<div class="vt-empty">No calls yet. Dial a candidate above to place your first call.</div>'; return; }
+        host.innerHTML = calls.map(callRow).join("");
+        Array.prototype.forEach.call(host.querySelectorAll(".vt-call"), function (row) {
+          row.addEventListener("click", function (e) {
+            if (e.target.closest(".vt-call-detail")) return;
+            toggleCall(row.getAttribute("data-call"));
+          });
+        });
+      }).catch(function () { host.innerHTML = needsSetup(); });
+    }
+    function findDetail(id) {
+      var nodes = document.querySelectorAll(".vt-detail[data-detail]");
+      for (var i = 0; i < nodes.length; i++) { if (nodes[i].getAttribute("data-detail") === String(id)) return nodes[i]; }
+      return null;
+    }
+    function toggleCall(id) {
+      var det = findDetail(id); if (!det) return;
+      if (det.style.display !== "none") { det.style.display = "none"; det.innerHTML = ""; return; }
+      det.style.display = "block"; det.innerHTML = loading();
+      send("/phone/calls/" + encodeURIComponent(id), "GET").then(function (r) {
+        if (!r.ok || !r.data) { det.innerHTML = '<p style="color:var(--text-muted)">Could not load this call.</p>'; return; }
+        var c = r.data.call || r.data;
+        det.innerHTML = callDetail(c);
+        wireDetail(det, c);
+      }).catch(function () { det.innerHTML = '<p style="color:var(--text-muted)">Could not load this call.</p>'; });
+    }
+    function lists(label, arr) {
+      if (!arr || !arr.length) return "";
+      return '<div style="margin-top:10px"><div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px">' + esc(label) + "</div>" +
+        '<ul style="margin:0;padding-left:18px;font-size:13px;color:var(--text-muted);line-height:1.6">' +
+        arr.map(function (x) { return "<li>" + esc(String(x)) + "</li>"; }).join("") + "</ul></div>";
+    }
+    function callDetail(c) {
+      var a = c.analysis || {};
+      var html = "";
+      if (a.headline) html += '<div style="font-size:15px;font-weight:600;margin-bottom:10px">' + esc(a.headline) + "</div>";
+      if (a.kind === "recruiting") {
+        var fields = [
+          ["Current role", a.currentRole],
+          ["Compensation", a.comp],
+          ["Availability", a.availability],
+          ["Location", a.location]
+        ];
+        var chips = fields.filter(function (f) { return f[1]; }).map(function (f) {
+          return '<span class="vt-chip"><b>' + esc(f[0]) + ":</b> " + esc(String(f[1])) + "</span>";
+        }).join("");
+        var fitB = a.fit ? fitBadge(a.fit) : "";
+        if (chips || fitB) html += '<div class="vt-meta" style="margin-top:0;margin-bottom:12px">' + chips + fitB + "</div>";
+        html += lists("Motivations", a.motivations);
+        html += lists("Strengths", a.strengths);
+        html += lists("Concerns", a.concerns);
+        if (a.submittal) {
+          html += '<div class="vt-card" style="margin-top:14px;background:var(--bg-soft)">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">' +
+              '<h3 style="font-size:14px;margin:0">Hiring-manager submittal</h3>' +
+              '<button class="vt-btn" data-copy-submittal type="button"><svg class="isvg" aria-hidden="true"><use href="#i-clipboard"/></svg> Copy submittal</button>' +
+            "</div>" +
+            '<div style="white-space:pre-wrap;font-size:13.5px;line-height:1.6;color:var(--text)">' + esc(a.submittal) + "</div>" +
+          "</div>";
+        }
+      }
+      if (c.notes) html += '<div style="margin-top:14px"><div class="vt-section" style="margin-top:0">Recruiter notes</div>' +
+        '<div style="font-size:13px;color:var(--text-muted);white-space:pre-wrap;line-height:1.6">' + esc(c.notes) + "</div></div>";
+      var tr = c.transcript;
+      if (typeof tr === "string" && tr) {
+        html += '<div class="vt-transcript"><div class="vt-tr-h" style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Transcript</div>' +
+          '<div class="vt-tr-body" style="white-space:pre-wrap">' + esc(tr) + "</div></div>";
+      } else if (tr && tr.length) {
+        html += '<div class="vt-transcript"><div class="vt-tr-h" style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Transcript</div><div class="vt-tr-body">' +
+          tr.map(function (t) {
+            var role = String(t.role || t.speaker || "").toLowerCase();
+            var isRec = role.indexOf("recruit") >= 0 || role === "agent" || role === "you";
+            var who = isRec ? "Recruiter" : "Candidate";
+            return '<div class="vt-turn ' + (isRec ? "agent" : "candidate") + '"><b>' + who + ":</b> " + esc(t.text || t.content || "") + "</div>";
+          }).join("") + "</div></div>";
+      }
+      if (c.recordingUrl) html += '<div style="margin-top:12px"><a class="vt-btn" href="' + esc(c.recordingUrl) + '" target="_blank" rel="noopener">Recording</a></div>';
+      return html || '<p style="color:var(--text-muted)">This call has been placed. Transcript and analysis appear here once processing is complete.</p>';
+    }
+    function wireDetail(det, c) {
+      var cp = det.querySelector("[data-copy-submittal]");
+      if (cp) cp.addEventListener("click", function () {
+        var text = (c.analysis && c.analysis.submittal) || "";
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () { toast("Submittal copied"); }).catch(function () { toast("Copy failed"); });
+        } else { toast("Copy not supported on this browser."); }
+      });
+    }
+
+    /* ---- boot ---- */
+    // A candidate can be passed via the hash detail segment: #calls/<prospectId>.
+    var pid = currentDetail();
+    if (pid) {
+      send("/prospects", "GET").then(function (r) {
+        var list = (r.data && r.data.prospects) || [];
+        cs.prospect = list.filter(function (p) { return String(p.id) === String(pid); })[0] || null;
+        paintDialer();
+      }).catch(function () {});
+    }
+    loadToken();
+    paintDialer();
+    loadSettings();
+    loadHistory();
+  }
+
   /* ---------------- AI Vetting (inbound conversational screening) --------------
      A "vetting desk" binds one Job Description to one phone number and the
      recruiter's cloned voice. Candidates opt in (a short form), then CALL the
@@ -15408,6 +15762,1040 @@
   function emptyCard(msg) { return '<div class="empty">' + esc(msg) + "</div>"; }
   function needsSetup() {
     return '<div class="empty">Couldn\'t load this yet. If you just created your workspace, connect your tools under <a href="#connected">Connected</a> to get started.</div>';
+  }
+
+  /* ================================================================== *
+   *  BD PHONE (route: bdphone)
+   *
+   *  The Business Development cloud phone. The live call itself is owned
+   *  by the persistent engine in assets/js/bd-phone.js (window.__bdPhone),
+   *  which survives navigation; these views are thin controllers over it:
+   *    #bdphone            dialer + live call panel + recents
+   *    #bdphone/history    filterable call history
+   *    #bdphone/numbers    Telnyx numbers, lines, user assignment (admin)
+   *    #bdphone/settings   recording policy + consent attestation
+   *    #bdphone/<callId>   detailed call record (AI notes, transcript, audio)
+   * ================================================================== */
+
+  function bdpEngine() { return window.__bdPhone || null; }
+
+  function bdpFmtWhen(s) {
+    if (!s) return "";
+    try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+    catch (e) { return String(s); }
+  }
+  function bdpFmtDur(sec) {
+    sec = parseInt(sec, 10) || 0;
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return m + ":" + (s < 10 ? "0" : "") + s;
+  }
+  function bdpFmtNum(n) {
+    var d = String(n || "").replace(/\D/g, "");
+    if (d.length === 11 && d.charAt(0) === "1") d = d.slice(1);
+    if (d.length === 10) return "(" + d.slice(0, 3) + ") " + d.slice(3, 6) + "-" + d.slice(6);
+    return n || "";
+  }
+  var BDP_OPP_LABEL = { hot: "Hot", warm: "Warm", nurture: "Nurture", cold: "Cold", disqualified: "Disqualified" };
+  var BDP_SENT_LABEL = { very_positive: "Very positive", positive: "Positive", neutral: "Neutral", resistant: "Resistant", negative: "Negative" };
+  function bdpOppPill(opp) {
+    if (!opp) return "";
+    return '<span class="bdp-opp ' + esc(opp) + '">' + esc(BDP_OPP_LABEL[opp] || opp) + "</span>";
+  }
+  function bdpDirIcon(c) {
+    var missed = c.status === "missed" || c.status === "declined";
+    var cls = missed ? "miss" : (c.direction === "inbound" ? "in" : "out");
+    var title = missed ? "Missed" : (c.direction === "inbound" ? "Inbound" : "Outbound");
+    var arrow = c.direction === "inbound"
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="17" y1="7" x2="7" y2="17"/><polyline points="7 8 7 17 16 17"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="8 7 17 7 17 16"/></svg>';
+    return '<span class="bdp-dir ' + cls + '" title="' + title + '">' + arrow + "</span>";
+  }
+  function bdpPipeBadge(c) {
+    var p = c.pipeline;
+    if (!p || p === "idle") return "";
+    if (p === "complete") return '<span class="bdp-pipe" style="color:var(--ok)">AI notes ready</span>';
+    if (p === "failed") return '<span class="bdp-pipe" style="color:var(--danger)">Processing failed</span>';
+    var label = p === "recording" ? "Saving recording" : p === "transcribing" ? "Transcribing" : "Generating notes";
+    return '<span class="bdp-pipe"><span class="spin"></span>' + label + "</span>";
+  }
+  /** Effective analysis field: the user's override wins over the AI value. */
+  function bdpEff(call, field) {
+    var o = call.analysisOverrides && call.analysisOverrides[field];
+    if (o) return { value: o.value, edited: true };
+    return { value: call.analysis ? call.analysis[field] : undefined, edited: false };
+  }
+
+  function renderBdPhone(el) {
+    var detail = currentDetail();
+    if (detail === "history") return bdpHistoryView(el);
+    if (detail === "numbers") return bdpNumbersView(el);
+    if (detail === "settings") return bdpSettingsView(el);
+    if (detail) return bdpCallDetailView(el, detail);
+    bdpMainView(el);
+  }
+
+  function bdpTabs(active) {
+    var isAdmin = can("telnyx:manage");
+    var t = [["", "Phone"], ["history", "History"]];
+    if (isAdmin) { t.push(["numbers", "Numbers"]); t.push(["settings", "Recording"]); }
+    return '<div class="vd-tabs" style="margin-bottom:16px">' + t.map(function (x) {
+      return '<a class="vd-tab' + (active === x[0] ? " active" : "") + '" href="#bdphone' + (x[0] ? "/" + x[0] : "") + '">' + x[1] + "</a>";
+    }).join("") + "</div>";
+  }
+
+  /* ---------------- main: dialer + live call + recents ---------------- */
+  function bdpMainView(el) {
+    el.innerHTML = head("BD Phone",
+      "Your business development line. Call prospects from the browser, take live notes, and let the AI turn every conversation into structured BD intelligence.") +
+      bdpTabs("") +
+      '<div id="bdpBanner"></div>' +
+      '<div class="bdp-wrap">' +
+        '<div class="card bdp-dialer" id="bdpMainCard">' + loading() + "</div>" +
+        '<div><div class="card" style="padding:16px" id="bdpRecents"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Recent calls</h4>' + loading() + "</div>" +
+        '<div class="card" style="padding:16px;margin-top:16px" id="bdpFollowups"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Open follow-ups</h4>' + loading() + "</div></div>" +
+      "</div>";
+
+    var P = bdpEngine();
+    var dialed = "";       // the number being typed
+    var matchInfo = null;  // contact match for the typed number
+    var matchTimer = null;
+
+    if (!P) {
+      // bd-phone.js loads after command.js; on a cold load straight into
+      // #bdphone the engine may not exist yet. Wait for it briefly.
+      var tries = 0;
+      var waiter = setInterval(function () {
+        if (!document.body.contains(el)) { clearInterval(waiter); return; }
+        if (bdpEngine()) { clearInterval(waiter); bdpMainView(el); }
+        else if (++tries > 40) {
+          clearInterval(waiter);
+          var mc = $("#bdpMainCard");
+          if (mc) mc.innerHTML = '<div class="empty">The phone engine did not load. Refresh the page to retry.</div>';
+        }
+      }, 150);
+      return;
+    }
+    P.requestNotifications();
+
+    function banner(st) {
+      var b = $("#bdpBanner"); if (!b) return;
+      var html = "";
+      if (st.phase === "leaderelse") {
+        html = '<div class="bdp-banner warn">The phone is active in another browser tab.' +
+          '<button class="btn btn-sm btn-primary" id="bdpTakeover">Use the phone here</button></div>';
+      } else if (st.phase === "nolines") {
+        html = can("telnyx:manage")
+          ? '<div class="bdp-banner warn">No phone numbers are connected yet.<a class="btn btn-sm btn-primary" href="#bdphone/numbers" style="margin-left:auto">Connect a number</a></div>'
+          : '<div class="bdp-banner warn">No phone line is assigned to you yet. Ask an admin to assign you a number.</div>';
+      } else if (st.phase === "error-mic") {
+        html = '<div class="bdp-banner err">' + esc(st.error) + '<button class="btn btn-sm" id="bdpRetryConn">Retry</button></div>';
+      } else if (st.phase === "error-conn") {
+        html = '<div class="bdp-banner err">' + esc(st.error || "Phone connection error.") + '<button class="btn btn-sm" id="bdpRetryConn">Retry</button></div>';
+      } else if (st.phase === "reconnecting") {
+        html = '<div class="bdp-banner warn"><span class="bdp-pipe"><span class="spin"></span></span>Reconnecting to the phone network.</div>';
+      } else if (st.phase === "connecting" || st.phase === "boot") {
+        html = '<div class="bdp-banner"><span class="bdp-pipe"><span class="spin"></span></span>Connecting your line.</div>';
+      } else if (st.summary && st.summary.settings && !st.summary.settings.recordingConsentAttested && can("telnyx:manage")) {
+        html = '<div class="bdp-banner">Recording is off until you attest lawful consent.<a class="btn btn-sm" href="#bdphone/settings" style="margin-left:auto">Recording settings</a></div>';
+      }
+      b.innerHTML = html;
+      var tk = $("#bdpTakeover"); if (tk) tk.addEventListener("click", function () { P.takeLeader(); });
+      var rc = $("#bdpRetryConn"); if (rc) rc.addEventListener("click", function () { P.reconnect(); });
+    }
+
+    function paintDialer(st) {
+      var cardEl = $("#bdpMainCard"); if (!cardEl) return;
+      var live = st.phase === "dialing" || st.phase === "incoming" || st.phase === "active" || st.phase === "held";
+      if (live) { paintLive(st, cardEl); return; }
+
+      var sum = st.summary || {};
+      var lines = sum.lines || [];
+      var lineOpts = lines.map(function (l) {
+        return '<option value="' + esc(l.id) + '"' + (l.id === sum.activeLineId ? " selected" : "") + '>' +
+          esc(l.label !== l.e164 ? l.label + " · " + bdpFmtNum(l.e164) : bdpFmtNum(l.e164)) + "</option>";
+      }).join("");
+      var ready = st.phase === "ready" || st.phase === "ended";
+
+      cardEl.innerHTML =
+        '<div class="bdp-line-row"><span>Calling from</span>' +
+          (lines.length ? '<select id="bdpLineSel">' + lineOpts + "</select>" : '<span style="color:var(--text-dim)">no line</span>') +
+        "</div>" +
+        '<input class="bdp-num-input" id="bdpNumIn" type="tel" inputmode="tel" placeholder="Enter a number" autocomplete="off" value="' + esc(dialed) + '">' +
+        '<div class="bdp-match" id="bdpMatch"></div>' +
+        '<div class="bdp-grid">' +
+          [["1", ""], ["2", "ABC"], ["3", "DEF"], ["4", "GHI"], ["5", "JKL"], ["6", "MNO"], ["7", "PQRS"], ["8", "TUV"], ["9", "WXYZ"], ["*", ""], ["0", "+"], ["#", ""]].map(function (k) {
+            return '<button class="bdp-digit" data-d="' + k[0] + '"><span class="d">' + k[0] + '</span><span class="l">' + k[1] + "</span></button>";
+          }).join("") +
+        "</div>" +
+        '<button class="bdp-call-btn" id="bdpCallBtn"' + (ready && lines.length ? "" : " disabled") + '>' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call' +
+        "</button>" +
+        '<div class="bdp-device-row">' +
+          '<div><label>Microphone</label><select id="bdpMicSel">' + deviceOpts(st.devices.mics, st.devices.micId) + "</select></div>" +
+          '<div><label>Speaker</label><select id="bdpSpkSel">' + deviceOpts(st.devices.speakers, st.devices.speakerId) + "</select></div>" +
+        "</div>";
+
+      var numIn = $("#bdpNumIn");
+      numIn.addEventListener("input", function () { dialed = numIn.value; scheduleMatch(); });
+      numIn.addEventListener("keydown", function (e) { if (e.key === "Enter") doCall(); });
+      Array.prototype.forEach.call(cardEl.querySelectorAll(".bdp-digit"), function (b) {
+        b.addEventListener("click", function () {
+          dialed = (numIn.value || "") + b.getAttribute("data-d");
+          numIn.value = dialed;
+          numIn.focus();
+          scheduleMatch();
+        });
+      });
+      $("#bdpCallBtn").addEventListener("click", doCall);
+      var lineSel = $("#bdpLineSel");
+      if (lineSel) lineSel.addEventListener("change", function () {
+        send("/phone/numbers", "POST", { action: "set-active", lineId: lineSel.value }).then(function () { P.refreshSummary(); });
+      });
+      var micSel = $("#bdpMicSel"), spkSel = $("#bdpSpkSel");
+      if (micSel) micSel.addEventListener("change", function () { P.setMic(micSel.value); });
+      if (spkSel) spkSel.addEventListener("change", function () { P.setSpeaker(spkSel.value); });
+      paintMatch();
+    }
+
+    function deviceOpts(list, sel) {
+      if (!list || !list.length) return '<option value="">Default</option>';
+      return '<option value="">Default</option>' + list.map(function (d) {
+        return '<option value="' + esc(d.id) + '"' + (d.id === sel ? " selected" : "") + ">" + esc(d.label) + "</option>";
+      }).join("");
+    }
+
+    function scheduleMatch() {
+      if (matchTimer) clearTimeout(matchTimer);
+      matchInfo = null;
+      matchTimer = setTimeout(function () {
+        var digits = String(dialed || "").replace(/\D/g, "");
+        if (digits.length < 10) { paintMatch(); return; }
+        api("/phone/lookup?number=" + encodeURIComponent(dialed)).then(function (d) {
+          matchInfo = (d.matches && d.matches[0]) || false;
+          paintMatch();
+        }).catch(function () {});
+      }, 350);
+    }
+    function paintMatch() {
+      var m = $("#bdpMatch"); if (!m) return;
+      var digits = String(dialed || "").replace(/\D/g, "");
+      if (digits.length < 10) { m.innerHTML = ""; return; }
+      if (matchInfo === null) { m.textContent = ""; return; }
+      if (!matchInfo) { m.textContent = "Unknown contact"; return; }
+      m.innerHTML = "<b>" + esc(matchInfo.name) + "</b>" +
+        (matchInfo.title ? " · " + esc(matchInfo.title) : "") +
+        (matchInfo.company ? " · " + esc(matchInfo.company) : "");
+    }
+
+    function doCall() {
+      var num = ($("#bdpNumIn") || {}).value || dialed;
+      if (!String(num).replace(/\D/g, "")) return;
+      var btn = $("#bdpCallBtn");
+      if (btn) { btn.disabled = true; btn.textContent = "Calling"; }
+      P.dial(num).then(function () { dialed = ""; }).catch(function (e) {
+        toast(String((e && e.message) || "Could not start the call"));
+        paintDialer(P.getState());
+      });
+    }
+
+    function paintLive(st, cardEl) {
+      var c = st.call || {};
+      var status =
+        st.phase === "incoming" ? "Incoming call" :
+        st.phase === "dialing" ? "Calling" :
+        st.phase === "held" ? "On hold" : "Connected";
+      var settings = (st.summary && st.summary.settings) || {};
+      var recOn = c.recording && c.recording.enabled;
+      var canToggleRec = settings.manualRecordingToggle && settings.recordingConsentAttested && (st.phase === "active" || st.phase === "held");
+
+      cardEl.innerHTML =
+        '<div class="bdp-live">' +
+          '<div class="bdp-live-status">' + esc(status) + (recOn ? ' · <span style="color:var(--danger)">recording</span>' : "") + "</div>" +
+          '<div class="bdp-live-name">' + esc(c.contactName || bdpFmtNum(c.externalNumber) || "Unknown") + "</div>" +
+          '<div class="bdp-live-meta">' +
+            esc([c.contactName ? bdpFmtNum(c.externalNumber) : "", c.contactTitle, c.companyName].filter(Boolean).join(" · ")) +
+            (c.lineNumber ? (c.contactTitle || c.companyName || c.contactName ? " · " : "") + "via " + esc(bdpFmtNum(c.lineNumber)) : "") +
+          "</div>" +
+          '<div class="bdp-live-timer">' + (st.phase === "active" || st.phase === "held" ? P.fmtDur(st.elapsed) : "&nbsp;") + "</div>" +
+          '<div class="bdp-live-ctls" id="bdpLiveCtls"></div>' +
+          '<div class="bdp-live-notes"><h4 style="margin:0 0 6px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Live notes</h4>' +
+          '<textarea id="bdpLiveNotes" placeholder="Type notes while you talk. They save automatically and feed the AI summary.">' + esc(st.notesDraft != null ? st.notesDraft : (c.userNotes || "")) + "</textarea></div>" +
+        "</div>";
+
+      var ctls = $("#bdpLiveCtls");
+      function ctl(id, title, svg, cls) {
+        return '<button class="bdp-ctl ' + (cls || "") + '" id="' + id + '" title="' + title + '">' + svg + "</button>";
+      }
+      var micSvg = st.muted
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="2" x2="22" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" y1="19" x2="12" y2="22"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>';
+      var holdSvg = st.held
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
+      var endSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="22" y1="2" x2="2" y2="22"/></svg>';
+      var recSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/></svg>';
+
+      if (st.phase === "incoming") {
+        ctls.innerHTML =
+          '<button class="btn bdp-answer" id="bdpVAnswer" style="height:44px;padding:0 24px;display:inline-flex;align-items:center;gap:8px;border-radius:8px;cursor:pointer">Answer</button>' +
+          '<button class="btn bdp-decline" id="bdpVDecline" style="height:44px;padding:0 24px;display:inline-flex;align-items:center;gap:8px;border-radius:8px;cursor:pointer">Decline</button>';
+        $("#bdpVAnswer").addEventListener("click", P.answer);
+        $("#bdpVDecline").addEventListener("click", P.decline);
+      } else {
+        ctls.innerHTML =
+          ctl("bdpVMute", st.muted ? "Unmute" : "Mute", micSvg, st.muted ? "on" : "") +
+          ctl("bdpVHold", st.held ? "Resume" : "Hold", holdSvg, st.held ? "on" : "") +
+          (canToggleRec ? ctl("bdpVRec", recOn ? "Stop recording" : "Start recording", recSvg, recOn ? "on" : "") : "") +
+          ctl("bdpVEnd", "End call", endSvg, "bdp-end");
+        $("#bdpVMute").addEventListener("click", P.toggleMute);
+        $("#bdpVHold").addEventListener("click", P.toggleHold);
+        $("#bdpVEnd").addEventListener("click", P.hangup);
+        var recBtn = $("#bdpVRec");
+        if (recBtn) recBtn.addEventListener("click", function () { P.setRecordingOn(!recOn).catch(function () { toast("Recording change failed"); }); });
+      }
+      var notesArea = $("#bdpLiveNotes");
+      notesArea.addEventListener("input", function () { P.setNotes(notesArea.value); });
+    }
+
+    function paintRecents(st) {
+      var host = $("#bdpRecents"); if (!host) return;
+      var sum = st.summary || {};
+      var rows = (sum.recent || []).map(function (c) {
+        return '<div class="list-row clickable" data-call="' + esc(c.id) + '" style="display:flex;align-items:center;gap:10px;padding:9px 4px">' +
+          bdpDirIcon(c) +
+          '<div style="min-width:0;flex:1"><div style="font:500 13px var(--font);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+            esc(c.contactName || bdpFmtNum(c.externalNumber)) + "</div>" +
+            '<div style="font:400 11.5px var(--font);color:var(--text-dim)">' + esc([c.companyName, bdpFmtWhen(c.startedAt)].filter(Boolean).join(" · ")) + "</div></div>" +
+          '<div style="text-align:right;flex:none">' +
+            (c.durationSec ? '<div style="font:500 12px var(--mono);color:var(--text-muted)">' + bdpFmtDur(c.durationSec) + "</div>" : "") +
+            bdpOppPill(bdpEff(c, "opportunity").value) +
+          "</div></div>";
+      }).join("");
+      host.innerHTML = '<h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Recent calls</h4>' +
+        (rows || '<div class="empty" style="padding:14px 4px">No calls yet. Dial your first number to get started.</div>') +
+        (rows ? '<a href="#bdphone/history" style="display:inline-block;margin-top:10px;font:500 12.5px var(--font);color:var(--brand)">Full history</a>' : "");
+      Array.prototype.forEach.call(host.querySelectorAll("[data-call]"), function (r) {
+        r.addEventListener("click", function () { location.hash = "#bdphone/" + r.getAttribute("data-call"); });
+      });
+    }
+
+    function paintFollowups(st) {
+      var host = $("#bdpFollowups"); if (!host) return;
+      var f = (st.summary && st.summary.openFollowUps) || [];
+      var rows = f.slice(0, 6).map(function (x) {
+        return '<div class="bdp-action-row"><input type="checkbox" data-fup="' + esc(x.id) + '" data-callid="' + esc(x.callId) + '">' +
+          '<span class="txt" style="min-width:0;flex:1">' + esc(x.title) +
+          (x.contactName ? ' <span style="color:var(--text-dim)">· ' + esc(x.contactName) + "</span>" : "") + "</span>" +
+          (x.dueDate ? '<span class="due">' + esc(x.dueDate) + "</span>" : "") + "</div>";
+      }).join("");
+      host.innerHTML = '<h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Open follow-ups</h4>' +
+        (rows || '<div class="empty" style="padding:14px 4px">Nothing open. Follow-ups you create from calls land here.</div>');
+      Array.prototype.forEach.call(host.querySelectorAll("[data-fup]"), function (cb) {
+        cb.addEventListener("change", function () {
+          send("/phone/calls/" + cb.getAttribute("data-callid"), "POST", { action: "followup-status", followUpId: cb.getAttribute("data-fup"), status: cb.checked ? "done" : "open" })
+            .then(function () { P.refreshSummary(); });
+        });
+      });
+    }
+
+    var lastPhase = null;
+    var unsub = P.subscribe(function (st) {
+      if (!document.body.contains(el)) { unsub(); return; }
+      banner(st);
+      // Full repaint of the dialer only when the phase changes (typing must not
+      // be clobbered); live-call panel repaints on every tick for the timer.
+      var live = st.phase === "dialing" || st.phase === "incoming" || st.phase === "active" || st.phase === "held";
+      if (st.phase !== lastPhase || live) { paintDialer(st); lastPhase = st.phase; }
+      paintRecents(st);
+      paintFollowups(st);
+    });
+
+    var st0 = P.getState();
+    banner(st0); paintDialer(st0); paintRecents(st0); paintFollowups(st0);
+    P.refreshSummary().catch(function () {});
+    P.refreshDevices();
+    viewTimers.push(setInterval(function () { P.refreshSummary().catch(function () {}); }, 20000));
+  }
+
+  /* ---------------- history ---------------- */
+  function bdpHistoryView(el) {
+    var F = { q: "", direction: "", userId: "", lineId: "", opportunity: "", from: "", to: "", offset: 0 };
+    var PAGE = 50;
+
+    el.innerHTML = head("BD Phone",
+      "Every business development call: who, when, how it went, and what the AI heard.") +
+      bdpTabs("history") +
+      '<div class="card" style="padding:16px">' +
+        '<div class="bdp-hist-filters" id="bdpHf">' +
+          '<input type="search" id="bdpHq" placeholder="Search name, company, number, notes">' +
+          '<select id="bdpHdir"><option value="">All calls</option><option value="inbound">Inbound</option><option value="outbound">Outbound</option><option value="missed">Missed</option></select>' +
+          '<select id="bdpHopp"><option value="">Any opportunity</option><option value="hot">Hot</option><option value="warm">Warm</option><option value="nurture">Nurture</option><option value="cold">Cold</option><option value="disqualified">Disqualified</option></select>' +
+          '<select id="bdpHuser"><option value="">Everyone</option></select>' +
+          '<select id="bdpHline"><option value="">All numbers</option></select>' +
+          '<input type="date" id="bdpHfrom" title="From date">' +
+          '<input type="date" id="bdpHto" title="To date">' +
+        "</div>" +
+        '<div id="bdpHistRows">' + loading() + "</div>" +
+        '<div id="bdpHistFoot" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font:400 12.5px var(--font);color:var(--text-dim)"></div>' +
+      "</div>";
+
+    api("/phone/numbers?motion=bd").then(function (d) {
+      var lineSel = $("#bdpHline");
+      if (lineSel) (d.lines || []).forEach(function (l) {
+        var o = document.createElement("option"); o.value = l.id; o.textContent = bdpFmtNum(l.e164); lineSel.appendChild(o);
+      });
+      var userSel = $("#bdpHuser");
+      if (userSel && d.team) d.team.forEach(function (m) {
+        var o = document.createElement("option"); o.value = m.userId; o.textContent = m.name || m.email; userSel.appendChild(o);
+      });
+    }).catch(function () {});
+
+    var total = 0;
+    function load(append) {
+      var qs = "motion=bd&limit=" + PAGE + "&offset=" + F.offset;
+      if (F.q) qs += "&q=" + encodeURIComponent(F.q);
+      if (F.direction) qs += "&direction=" + F.direction;
+      if (F.opportunity) qs += "&opportunity=" + F.opportunity;
+      if (F.userId) qs += "&userId=" + encodeURIComponent(F.userId);
+      if (F.lineId) qs += "&lineId=" + encodeURIComponent(F.lineId);
+      if (F.from) qs += "&from=" + F.from + "T00:00:00Z";
+      if (F.to) qs += "&to=" + F.to + "T23:59:59Z";
+      api("/phone/calls?" + qs).then(function (d) {
+        total = d.total || 0;
+        var rows = (d.calls || []).map(bdpHistRow).join("");
+        var host = $("#bdpHistRows"); if (!host) return;
+        if (append) host.insertAdjacentHTML("beforeend", rows);
+        else host.innerHTML = rows || '<div class="empty">No calls match these filters.</div>';
+        wireRows(host);
+        var foot = $("#bdpHistFoot");
+        var shown = host.querySelectorAll("[data-call]").length;
+        foot.innerHTML = "<span>" + shown + " of " + total + " calls</span>" +
+          (shown < total ? '<button class="btn btn-sm" id="bdpHistMore">Load more</button>' : "");
+        var more = $("#bdpHistMore");
+        if (more) more.addEventListener("click", function () { F.offset += PAGE; load(true); });
+      }).catch(function () {
+        var host = $("#bdpHistRows"); if (host) host.innerHTML = needsSetup();
+      });
+    }
+    function bdpHistRow(c) {
+      var opp = bdpEff(c, "opportunity").value;
+      var missed = c.status === "missed" || c.status === "declined";
+      var statusTxt = missed ? (c.status === "declined" ? "Declined" : "Missed") :
+        c.status === "failed" ? "Failed" : c.status === "canceled" ? "Canceled" :
+        c.durationSec ? bdpFmtDur(c.durationSec) : "";
+      return '<div class="list-row clickable" data-call="' + esc(c.id) + '" style="display:flex;align-items:center;gap:12px;padding:10px 4px">' +
+        bdpDirIcon(c) +
+        '<div style="min-width:0;flex:2"><div style="font:500 13px var(--font);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+          esc(c.contactName || "Unknown contact") + "</div>" +
+          '<div style="font:400 11.5px var(--font);color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+          esc([bdpFmtNum(c.externalNumber), c.companyName].filter(Boolean).join(" · ")) + "</div></div>" +
+        '<div style="flex:1;font:400 12px var(--font);color:var(--text-muted);white-space:nowrap">' + esc(c.userName || "") + "</div>" +
+        '<div style="flex:none;width:130px;font:400 12px var(--font);color:var(--text-muted)">' + bdpFmtWhen(c.startedAt) + "</div>" +
+        '<div style="flex:none;width:70px;font:500 12px var(--mono);color:' + (missed || c.status === "failed" ? "var(--danger)" : "var(--text-muted)") + ';text-align:right">' + esc(statusTxt) + "</div>" +
+        '<div style="flex:none;width:96px;text-align:right">' + (bdpOppPill(opp) || bdpPipeBadge(c) || "") + "</div>" +
+      "</div>";
+    }
+    function wireRows(host) {
+      Array.prototype.forEach.call(host.querySelectorAll("[data-call]"), function (r) {
+        if (r._wired) return; r._wired = true;
+        r.addEventListener("click", function () { location.hash = "#bdphone/" + r.getAttribute("data-call"); });
+      });
+    }
+
+    var deb = null;
+    function refilter() { F.offset = 0; load(false); }
+    $("#bdpHq").addEventListener("input", function () {
+      F.q = this.value; if (deb) clearTimeout(deb); deb = setTimeout(refilter, 350);
+    });
+    [["bdpHdir", "direction"], ["bdpHopp", "opportunity"], ["bdpHuser", "userId"], ["bdpHline", "lineId"], ["bdpHfrom", "from"], ["bdpHto", "to"]].forEach(function (x) {
+      $("#" + x[0]).addEventListener("change", function () { F[x[1]] = this.value; refilter(); });
+    });
+
+    load(false);
+    viewTimers.push(setInterval(function () { if (F.offset === 0) load(false); }, 15000));
+  }
+
+  /* ---------------- call record detail ---------------- */
+  function bdpCallDetailView(el, callId) {
+    el.innerHTML = head("BD Phone", "") +
+      '<a href="#bdphone/history" style="display:inline-block;margin-bottom:12px;font:500 12.5px var(--font);color:var(--brand)">&larr; Call history</a>' +
+      '<div id="bdpDetail">' + loading() + "</div>";
+
+    var call = null, followUps = [];
+    function load() {
+      api("/phone/calls/" + encodeURIComponent(callId)).then(function (d) {
+        call = d.call; followUps = d.followUps || [];
+        paint();
+        // Keep polling while the pipeline is still working.
+        if (["recording", "transcribing", "analyzing"].indexOf(call.pipeline) >= 0) {
+          setTimeout(function () { if (document.body.contains(el) && currentDetail() === callId) load(); }, 5000);
+        }
+      }).catch(function () {
+        $("#bdpDetail").innerHTML = emptyCard("This call could not be loaded.");
+      });
+    }
+
+    function act(payload, cb) {
+      send("/phone/calls/" + encodeURIComponent(callId), "POST", payload).then(function (r) {
+        if (!r.ok) { toast((r.data && r.data.error) || "Action failed"); return; }
+        if (r.data.call) call = r.data.call;
+        if (cb) cb(r.data);
+        paint();
+      });
+    }
+
+    function editField(field, label, kind, options) {
+      var cur = bdpEff(call, field).value;
+      var body;
+      if (kind === "list") {
+        body = '<p class="sub" style="margin:0 0 8px">One item per line.</p>' +
+          '<textarea id="bdpEfld" style="width:100%;height:140px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px">' +
+          esc((cur || []).join("\n")) + "</textarea>";
+      } else if (kind === "enum") {
+        body = '<select id="bdpEfld" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px">' +
+          options.map(function (o) { return '<option value="' + o[0] + '"' + (cur === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") + "</select>";
+      } else {
+        body = '<textarea id="bdpEfld" style="width:100%;height:110px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px">' + esc(cur || "") + "</textarea>";
+      }
+      body += '<div class="modal-foot"><button class="btn" id="bdpEcancel">Cancel</button>' +
+        (bdpEff(call, field).edited ? '<button class="btn" id="bdpErevert">Revert to AI value</button>' : "") +
+        '<button class="btn btn-primary" id="bdpEsave">Save</button></div>';
+      openModal("Edit " + label, "Your edit is kept separate from the AI value and survives regeneration.", body, function (root, close) {
+        root.querySelector("#bdpEcancel").addEventListener("click", close);
+        var rev = root.querySelector("#bdpErevert");
+        if (rev) rev.addEventListener("click", function () { act({ action: "clear-override", field: field }); close(); });
+        root.querySelector("#bdpEsave").addEventListener("click", function () {
+          var elIn = root.querySelector("#bdpEfld");
+          var value = kind === "list" ? elIn.value.split("\n").map(function (s) { return s.trim(); }).filter(Boolean) : elIn.value;
+          act({ action: "edit-analysis", field: field, value: value });
+          close();
+        });
+      });
+    }
+
+    var PENCIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+    function editBtn(field, label, kind, options) {
+      return '<button class="bdp-edit-btn" data-edit="' + field + '" data-label="' + esc(label) + '" data-kind="' + kind + '"' +
+        (options ? " data-opts='" + JSON.stringify(options).replace(/'/g, "&#39;") + "'" : "") + ' title="Edit">' + PENCIL + "</button>";
+    }
+    function editedMark(field) {
+      return bdpEff(call, field).edited ? '<span class="bdp-edited" title="Edited by you; the AI value is preserved">edited</span>' : "";
+    }
+    function textSec(title, field, kind, options) {
+      var v = bdpEff(call, field).value;
+      var has = kind === "list" ? (v && v.length) : v;
+      return '<div class="bdp-sec"><h4>' + title + editBtn(field, title, kind, options) + editedMark(field) + "</h4>" +
+        (has
+          ? (kind === "list"
+              ? '<div class="bdp-chips">' + v.map(function (x) { return '<span class="bdp-chip">' + esc(x) + "</span>"; }).join("") + "</div>"
+              : '<div style="font:400 13px var(--font);color:var(--text);line-height:1.55">' + esc(v) + "</div>")
+          : '<div style="font:400 12.5px var(--font);color:var(--text-dim)">Not discussed</div>') +
+        "</div>";
+    }
+
+    var transcriptQuery = "";
+    function paint() {
+      var host = $("#bdpDetail"); if (!host || !call) return;
+      var a = call.analysis && call.analysis.kind !== "recruiting" ? call.analysis : null;
+      var opp = bdpEff(call, "opportunity").value;
+      var sent = bdpEff(call, "sentiment").value;
+      var missed = call.status === "missed" || call.status === "declined";
+
+      /* ---- left column: AI intelligence ---- */
+      var left = "";
+
+      // Pipeline / AI summary card. The summary and next steps lead; the
+      // transcript is below, never the first thing you have to wade through.
+      var pipeHtml = "";
+      if (call.pipeline === "failed") {
+        pipeHtml = '<div class="bdp-banner err" style="margin:0 0 12px">' + esc(call.pipelineError || "Processing failed.") +
+          '<button class="btn btn-sm" id="bdpRetryPipe">Retry</button></div>';
+      } else if (["recording", "transcribing", "analyzing"].indexOf(call.pipeline) >= 0) {
+        pipeHtml = '<div class="bdp-banner" style="margin:0 0 12px">' + bdpPipeBadge(call) + "</div>";
+      }
+
+      left += '<div class="card" style="padding:20px">' + pipeHtml;
+      if (a) {
+        left +=
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
+            bdpOppPill(opp) +
+            (sent ? '<span class="bdp-chip">' + esc(BDP_SENT_LABEL[sent] || sent) + editedMark("sentiment") + "</span>" : "") +
+            '<span style="font:400 11px var(--font);color:var(--text-dim);margin-left:auto">AI v' + (a.version || 1) + " · " + bdpFmtWhen(a.generatedAt) + "</span>" +
+            '<button class="btn btn-sm" id="bdpRegen" title="Re-run the AI analysis. Your edits and notes are preserved.">Regenerate</button>' +
+          "</div>" +
+          '<div class="bdp-sec"><h4>Summary' + editBtn("summary", "Summary", "text") + editedMark("summary") + "</h4>" +
+            '<div style="font:400 13.5px var(--font);color:var(--text);line-height:1.6">' + esc(bdpEff(call, "summary").value || "") + "</div></div>";
+        var oppEdited = editedMark("opportunity");
+        left += '<div class="bdp-sec"><h4>Why ' + esc(BDP_OPP_LABEL[opp] || opp || "") +
+          editBtn("opportunity", "Opportunity", "enum", [["hot", "Hot"], ["warm", "Warm"], ["nurture", "Nurture"], ["cold", "Cold"], ["disqualified", "Disqualified"]]) + oppEdited + "</h4>" +
+          '<div style="font:400 13px var(--font);color:var(--text-muted);line-height:1.55">' + esc(a.opportunityRationale || "") + "</div></div>";
+        left += textSec("Next steps", "nextSteps", "list");
+        var fup = bdpEff(call, "followUpDate").value;
+        left += '<div class="bdp-sec"><h4>Follow-up' + editBtn("followUpDate", "Follow-up date", "text") + editedMark("followUpDate") + "</h4>" +
+          (fup ? '<div style="font:400 13px var(--font);color:var(--text)">' + esc(fup) + "</div>"
+               : '<div style="font:400 12.5px var(--font);color:var(--text-dim)">None agreed</div>') + "</div>";
+      } else if (!pipeHtml) {
+        left += '<div class="empty">' + (missed
+          ? "No conversation to analyze: the call was never answered."
+          : call.recording && call.recording.enabled === false
+            ? "This call was not recorded, so there is no transcript or AI analysis. Recording settings control this."
+            : "No AI analysis for this call.") + "</div>";
+      } else {
+        left += '<div class="empty">The AI notes will appear here when processing finishes.</div>';
+      }
+      left += "</div>";
+
+      if (a) {
+        left += '<div class="card" style="padding:20px;margin-top:16px"><h3 style="margin:0 0 14px;font:600 14px var(--font);color:var(--text)">BD analysis</h3>' +
+          textSec("Reason for the call", "callReason", "text") +
+          textSec("Business need", "businessNeed", "text") +
+          textSec("Current situation", "currentSituation", "text") +
+          (a.currentApproach && a.currentApproach.length
+            ? '<div class="bdp-sec"><h4>Current approach</h4><div class="bdp-chips">' + a.currentApproach.map(function (x) {
+                var L = { internal_recruiting: "Internal recruiting", contingent_search: "Contingent search", retained_search: "Retained search", staffing_agency: "Staffing agency", other_search_firm: "Other search firm", none: "No outside recruiting", unknown: "Unclear" };
+                return '<span class="bdp-chip">' + esc(L[x] || x) + "</span>";
+              }).join("") + "</div></div>" : "") +
+          bdpHiringSec(a) +
+          textSec("Pain points", "painPoints", "list") +
+          textSec("Current vendors", "vendors", "list") +
+          bdpPeopleSec(a) +
+          textSec("Objections", "objections", "list") +
+          textSec("Buying signals", "buyingSignals", "list") +
+          "</div>";
+      }
+
+      // Transcript with search.
+      if (call.transcript && call.transcript.length) {
+        left += '<div class="card" style="padding:20px;margin-top:16px">' +
+          '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><h3 style="margin:0;font:600 14px var(--font);color:var(--text)">Transcript</h3>' +
+          '<input type="search" id="bdpTq" placeholder="Search transcript" value="' + esc(transcriptQuery) + '" style="margin-left:auto;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 12.5px var(--font);color:var(--text);padding:6px 9px;min-width:180px"></div>' +
+          '<div class="bdp-transcript" id="bdpTurns">' + bdpTurnsHtml(call.transcript, transcriptQuery) + "</div></div>";
+      }
+
+      /* ---- right column: call meta, recording, notes, actions ---- */
+      var right = "";
+      right += '<div class="card" style="padding:16px"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Call</h4>' +
+        '<div style="font:600 15px var(--font);color:var(--text)">' + esc(call.contactName || "Unknown contact") + "</div>" +
+        '<div style="font:400 12.5px var(--font);color:var(--text-muted);margin-top:2px">' +
+          esc([call.contactTitle, call.companyName].filter(Boolean).join(" · ")) + "</div>" +
+        '<dl class="bdp-kv" style="margin:12px 0 0">' +
+          "<dt>Number</dt><dd>" + esc(bdpFmtNum(call.externalNumber)) + "</dd>" +
+          "<dt>Direction</dt><dd>" + (call.direction === "inbound" ? "Inbound" : "Outbound") + "</dd>" +
+          "<dt>Status</dt><dd>" + esc(call.status) + (call.hangupCause && call.status === "failed" ? " (" + esc(call.hangupCause) + ")" : "") + "</dd>" +
+          "<dt>When</dt><dd>" + bdpFmtWhen(call.startedAt) + "</dd>" +
+          (call.durationSec ? "<dt>Duration</dt><dd>" + bdpFmtDur(call.durationSec) + "</dd>" : "") +
+          (call.lineNumber ? "<dt>Line</dt><dd>" + esc(bdpFmtNum(call.lineNumber)) + "</dd>" : "") +
+          (call.userName ? "<dt>Handled by</dt><dd>" + esc(call.userName) + "</dd>" : "") +
+        "</dl>" +
+        (!call.prospectId
+          ? '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-sm" id="bdpNewContact">Create contact</button><button class="btn btn-sm" id="bdpLinkContact">Link existing</button></div>'
+          : "") +
+        "</div>";
+
+      if (call.recording && (call.recording.recordingId || call.recording.url)) {
+        right += '<div class="card" style="padding:16px;margin-top:16px"><h4 style="margin:0 0 8px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Recording</h4>' +
+          '<audio class="bdp-audio" controls preload="none" src="' + API + "/phone/calls/" + esc(call.id) + '/recording"></audio></div>';
+      }
+
+      right += '<div class="card" style="padding:16px;margin-top:16px"><h4 style="margin:0 0 8px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Your notes</h4>' +
+        '<textarea id="bdpDetailNotes" style="width:100%;height:110px;resize:vertical;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px" placeholder="Your own notes. The AI reads them but never changes them.">' + esc(call.userNotes || "") + "</textarea>" +
+        '<div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn btn-sm" id="bdpSaveNotes">Save notes</button></div></div>';
+
+      if (a && a.actionItems && a.actionItems.length) {
+        right += '<div class="card" style="padding:16px;margin-top:16px"><h4 style="margin:0 0 8px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Action items</h4>' +
+          a.actionItems.map(function (it) {
+            var hasFup = followUps.some(function (f) { return f.actionItemId === it.id; });
+            return '<div class="bdp-action-row' + (it.done ? " done" : "") + '">' +
+              '<input type="checkbox" data-ai="' + esc(it.id) + '"' + (it.done ? " checked" : "") + '>' +
+              '<span class="txt" style="min-width:0;flex:1">' + esc(it.text) + "</span>" +
+              (it.dueDate ? '<span class="due">' + esc(it.dueDate) + "</span>" : "") +
+              (hasFup ? '<span style="font:500 10.5px var(--font);color:var(--ok);flex:none">task created</span>'
+                      : '<button class="btn btn-sm" data-mkfup="' + esc(it.id) + '" style="flex:none">Create task</button>') +
+            "</div>";
+          }).join("") + "</div>";
+      }
+
+      right += '<div class="card" style="padding:16px;margin-top:16px"><h4 style="margin:0 0 8px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Follow-ups</h4>' +
+        (followUps.length ? followUps.map(function (f) {
+          return '<div class="bdp-action-row' + (f.status === "done" ? " done" : "") + '">' +
+            '<input type="checkbox" data-fups="' + esc(f.id) + '"' + (f.status === "done" ? " checked" : "") + '>' +
+            '<span class="txt" style="min-width:0;flex:1">' + esc(f.title) + "</span>" +
+            (f.dueDate ? '<span class="due">' + esc(f.dueDate) + "</span>" : "") + "</div>";
+        }).join("") : '<div style="font:400 12.5px var(--font);color:var(--text-dim)">None yet.</div>') +
+        '<div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn btn-sm" id="bdpAddFup">Add follow-up</button></div></div>';
+
+      host.innerHTML = '<div class="bdp-detail"><div>' + left + "</div><div>" + right + "</div></div>";
+
+      /* ---- wire ---- */
+      Array.prototype.forEach.call(host.querySelectorAll("[data-edit]"), function (b) {
+        b.addEventListener("click", function () {
+          var opts = b.getAttribute("data-opts");
+          editField(b.getAttribute("data-edit"), b.getAttribute("data-label"), b.getAttribute("data-kind"), opts ? JSON.parse(opts) : null);
+        });
+      });
+      var regen = $("#bdpRegen");
+      if (regen) regen.addEventListener("click", function () {
+        act({ action: "regenerate" }, function () { toast("Regenerating AI notes"); setTimeout(load, 4000); });
+      });
+      var retry = $("#bdpRetryPipe");
+      if (retry) retry.addEventListener("click", function () { act({ action: "retry" }, function () { setTimeout(load, 2500); }); });
+      var tq = $("#bdpTq");
+      if (tq) tq.addEventListener("input", function () {
+        transcriptQuery = tq.value;
+        var turns = $("#bdpTurns");
+        if (turns) turns.innerHTML = bdpTurnsHtml(call.transcript, transcriptQuery);
+      });
+      var sn = $("#bdpSaveNotes");
+      if (sn) sn.addEventListener("click", function () {
+        act({ action: "notes", notes: $("#bdpDetailNotes").value }, function () { toast("Notes saved"); });
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-ai]"), function (cb) {
+        cb.addEventListener("change", function () {
+          act({ action: "toggle-action-item", actionItemId: cb.getAttribute("data-ai"), done: cb.checked });
+        });
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-mkfup]"), function (b) {
+        b.addEventListener("click", function () {
+          act({ action: "create-followup", actionItemId: b.getAttribute("data-mkfup") }, function () {
+            toast("Follow-up task created"); load();
+          });
+        });
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-fups]"), function (cb) {
+        cb.addEventListener("change", function () {
+          act({ action: "followup-status", followUpId: cb.getAttribute("data-fups"), status: cb.checked ? "done" : "open" }, function () { load(); });
+        });
+      });
+      var addFup = $("#bdpAddFup");
+      if (addFup) addFup.addEventListener("click", function () {
+        var body = '<div class="field"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">What needs to happen</label>' +
+          '<input id="bdpFupTitle" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px" placeholder="Call back Friday afternoon"></div>' +
+          '<div class="field" style="margin-top:10px"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Due date (optional)</label>' +
+          '<input id="bdpFupDue" type="date" style="margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px"></div>' +
+          '<div class="modal-foot"><button class="btn" id="bdpFupCancel">Cancel</button><button class="btn btn-primary" id="bdpFupSave">Create</button></div>';
+        openModal("New follow-up", "Linked to this call record.", body, function (root, close) {
+          root.querySelector("#bdpFupCancel").addEventListener("click", close);
+          root.querySelector("#bdpFupSave").addEventListener("click", function () {
+            var t = root.querySelector("#bdpFupTitle").value.trim();
+            if (!t) return;
+            act({ action: "create-followup", title: t, dueDate: root.querySelector("#bdpFupDue").value || undefined }, function () { load(); });
+            close();
+          });
+        });
+      });
+      var nc = $("#bdpNewContact");
+      if (nc) nc.addEventListener("click", function () {
+        var body = '<div class="field"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Name</label>' +
+          '<input id="bdpNcName" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px"></div>' +
+          '<div class="field" style="margin-top:10px"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Company (optional)</label>' +
+          '<input id="bdpNcCo" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px"></div>' +
+          '<div class="field" style="margin-top:10px"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Title (optional)</label>' +
+          '<input id="bdpNcTitle" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px"></div>' +
+          '<div class="modal-foot"><button class="btn" id="bdpNcCancel">Cancel</button><button class="btn btn-primary" id="bdpNcSave">Create contact</button></div>';
+        openModal("Create contact", "From " + bdpFmtNum(call.externalNumber), body, function (root, close) {
+          root.querySelector("#bdpNcCancel").addEventListener("click", close);
+          root.querySelector("#bdpNcSave").addEventListener("click", function () {
+            var name = root.querySelector("#bdpNcName").value.trim();
+            if (!name) return;
+            act({ action: "create-contact", name: name, company: root.querySelector("#bdpNcCo").value, title: root.querySelector("#bdpNcTitle").value },
+              function () { toast("Contact created"); });
+            close();
+          });
+        });
+      });
+      var lc = $("#bdpLinkContact");
+      if (lc) lc.addEventListener("click", function () {
+        var body = '<input id="bdpLcQ" placeholder="Search contacts by name or company" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px">' +
+          '<div id="bdpLcRes" style="margin-top:10px;max-height:260px;overflow:auto"></div>' +
+          '<div class="modal-foot"><button class="btn" id="bdpLcCancel">Cancel</button></div>';
+        openModal("Link to a contact", "Associate this call with an existing contact.", body, function (root, close) {
+          root.querySelector("#bdpLcCancel").addEventListener("click", close);
+          var q = root.querySelector("#bdpLcQ"), res = root.querySelector("#bdpLcRes"), t = null;
+          q.addEventListener("input", function () {
+            if (t) clearTimeout(t);
+            t = setTimeout(function () {
+              if (!q.value.trim()) { res.innerHTML = ""; return; }
+              api("/phone/lookup?q=" + encodeURIComponent(q.value)).then(function (d) {
+                res.innerHTML = (d.matches || []).map(function (m) {
+                  return '<div class="list-row clickable" data-pid="' + esc(m.prospectId) + '" style="padding:8px 6px;font:400 13px var(--font)"><b>' + esc(m.name) + "</b>" +
+                    (m.company ? ' <span style="color:var(--text-dim)">· ' + esc(m.company) + "</span>" : "") + "</div>";
+                }).join("") || '<div class="empty" style="padding:12px">No matches.</div>';
+                Array.prototype.forEach.call(res.querySelectorAll("[data-pid]"), function (r) {
+                  r.addEventListener("click", function () {
+                    act({ action: "associate-contact", prospectId: r.getAttribute("data-pid") }, function () { toast("Contact linked"); });
+                    close();
+                  });
+                });
+              });
+            }, 300);
+          });
+        });
+      });
+    }
+
+    function bdpHiringSec(a) {
+      var rolesHtml = (a.roles || []).map(function (r) {
+        var bits = [r.openings ? r.openings + " opening" + (r.openings > 1 ? "s" : "") : "", r.department, r.location, r.workModel, r.seniority].filter(Boolean).join(" · ");
+        return '<div style="padding:7px 0;border-bottom:1px solid var(--border);font:400 13px var(--font)"><b style="font-weight:600">' + esc(r.title) + "</b>" +
+          (bits ? ' <span style="color:var(--text-muted)">· ' + esc(bits) + "</span>" : "") + "</div>";
+      }).join("");
+      var extra = [];
+      if (bdpEff(call, "hiringUrgency").value) extra.push("<dt>Urgency" + editBtn("hiringUrgency", "Hiring urgency", "text") + "</dt><dd>" + esc(bdpEff(call, "hiringUrgency").value) + editedMark("hiringUrgency") + "</dd>");
+      if (bdpEff(call, "hiringTimeline").value) extra.push("<dt>Timeline" + editBtn("hiringTimeline", "Hiring timeline", "text") + "</dt><dd>" + esc(bdpEff(call, "hiringTimeline").value) + editedMark("hiringTimeline") + "</dd>");
+      if (!a.hiringActive && !rolesHtml && !extra.length) {
+        return '<div class="bdp-sec"><h4>Hiring</h4><div style="font:400 12.5px var(--font);color:var(--text-dim)">No active hiring discussed</div></div>';
+      }
+      return '<div class="bdp-sec"><h4>Hiring</h4>' +
+        (a.hiringActive ? '<div style="font:500 12px var(--font);color:var(--ok);margin-bottom:6px">Actively hiring</div>' : "") +
+        (rolesHtml || "") +
+        (extra.length ? '<dl class="bdp-kv" style="margin-top:8px">' + extra.join("") + "</dl>" : "") +
+        "</div>";
+    }
+    function bdpPeopleSec(a) {
+      if (!a.people || !a.people.length) return '<div class="bdp-sec"><h4>Decision makers</h4><div style="font:400 12.5px var(--font);color:var(--text-dim)">Not discussed</div></div>';
+      var L = { decision_maker: "Decision maker", influencer: "Influencer", referral: "Referral" };
+      return '<div class="bdp-sec"><h4>Decision makers</h4>' + a.people.map(function (p) {
+        return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font:400 13px var(--font)"><b style="font-weight:600">' + esc(p.name) + "</b>" +
+          (p.title ? ' <span style="color:var(--text-muted)">· ' + esc(p.title) + "</span>" : "") +
+          ' <span class="bdp-chip" style="margin-left:6px;font-size:10.5px;padding:1px 6px">' + esc(L[p.role] || p.role) + "</span>" +
+          (p.note ? '<div style="font:400 12px var(--font);color:var(--text-dim);margin-top:2px">' + esc(p.note) + "</div>" : "") + "</div>";
+      }).join("") + "</div>";
+    }
+    function bdpTurnsHtml(turns, q) {
+      var needle = (q || "").trim().toLowerCase();
+      var out = turns.map(function (t) {
+        if (needle && t.text.toLowerCase().indexOf(needle) < 0) return "";
+        var who = t.role === "user" ? "You" : t.role === "contact" ? "Contact" : "Speaker";
+        var text = esc(t.text);
+        if (needle) {
+          var rx = new RegExp("(" + needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "ig");
+          text = text.replace(rx, "<mark>$1</mark>");
+        }
+        return '<div class="bdp-turn ' + t.role + '"><span class="who">' + who + "</span><div>" + text + "</div></div>";
+      }).join("");
+      return out || '<div class="empty" style="padding:12px">No transcript lines match.</div>';
+    }
+
+    load();
+  }
+
+  /* ---------------- numbers (admin) ---------------- */
+  function bdpNumbersView(el) {
+    if (!can("telnyx:manage")) { el.innerHTML = head("BD Phone", "") + bdpTabs("") + emptyCard("Managing phone numbers needs an admin."); return; }
+    el.innerHTML = head("BD Phone",
+      "Connect Telnyx numbers as BD lines, assign them to your team, and control which number each person dials out from.") +
+      bdpTabs("numbers") +
+      '<div id="bdpNumBody">' + loading() + "</div>";
+
+    var data = null;
+    function load() {
+      api("/phone/numbers?motion=bd").then(function (d) { data = d; paint(); })
+        .catch(function () { $("#bdpNumBody").innerHTML = needsSetup(); });
+    }
+
+    function paint() {
+      var host = $("#bdpNumBody"); if (!host || !data) return;
+      var d = data;
+      var html = "";
+
+      // Setup status.
+      if (!d.telnyxConfigured) {
+        html += '<div class="bdp-banner err">Telnyx is not connected. Add your Telnyx API key under <a href="#setup" style="color:var(--brand);margin-left:4px">Setup</a> first.</div>';
+      } else if (!d.infra || !d.infra.provisioned) {
+        html += '<div class="bdp-banner warn">Telnyx is connected but the phone system is not provisioned yet.' +
+          (d.infra && d.infra.lastError ? ' <span style="color:var(--danger)">' + esc(d.infra.lastError) + "</span>" : "") +
+          '<button class="btn btn-sm btn-primary" id="bdpProvision">Set up calling</button></div>';
+      } else {
+        html += '<div class="bdp-banner okay">Calling infrastructure is ready. Webhooks: <code style="font:500 11.5px var(--mono)">' + esc(d.infra.webhookUrl || "") + "</code></div>";
+      }
+
+      // Connected lines.
+      html += '<div class="card" style="padding:16px;margin-bottom:16px"><div style="display:flex;align-items:center;margin-bottom:10px"><h3 style="margin:0;font:600 14px var(--font);color:var(--text)">BD lines</h3>' +
+        '<button class="btn btn-sm btn-primary" id="bdpAddLine" style="margin-left:auto">Connect a number</button></div>';
+      if (d.lines && d.lines.length) {
+        html += d.lines.map(function (l) {
+          var assigned = (l.assignedUserIds || []).map(function (uid) {
+            var m = (d.team || []).filter(function (t) { return t.userId === uid; })[0];
+            return m ? (m.name || m.email) : null;
+          }).filter(Boolean);
+          return '<div class="list-row" style="display:flex;align-items:center;gap:12px;padding:10px 4px">' +
+            '<div style="min-width:0;flex:1"><div style="font:500 13.5px var(--mono);color:var(--text)">' + esc(bdpFmtNum(l.e164)) + "</div>" +
+            '<div style="font:400 12px var(--font);color:var(--text-dim)">' + esc(l.label !== l.e164 ? l.label : "") +
+            (assigned.length ? (l.label !== l.e164 ? " · " : "") + "assigned to " + esc(assigned.join(", ")) : (l.label !== l.e164 ? " · " : "") + "unassigned") + "</div></div>" +
+            (l.id === d.activeLineId ? '<span class="pill green" style="flex:none">Your outbound line</span>' : (d.myLines || []).some(function (m) { return m.id === l.id; }) ? '<button class="btn btn-sm" data-makeactive="' + esc(l.id) + '" style="flex:none">Use for outbound</button>' : "") +
+            '<span class="pill ' + (l.inboundEnabled ? "green" : "amber") + '" style="flex:none">' + (l.inboundEnabled ? "Inbound on" : "Outbound only") + "</span>" +
+            '<button class="btn btn-sm" data-editline="' + esc(l.id) + '" style="flex:none">Manage</button>' +
+          "</div>";
+        }).join("");
+      } else {
+        html += '<div class="empty">No numbers connected yet. Connect one of your Telnyx numbers to start calling.</div>';
+      }
+      html += "</div>";
+      host.innerHTML = html;
+
+      var prov = $("#bdpProvision");
+      if (prov) prov.addEventListener("click", function () {
+        prov.disabled = true; prov.textContent = "Setting up";
+        send("/phone/numbers", "POST", { action: "provision" }).then(function (r) {
+          if (!r.ok) toast((r.data && r.data.error) || "Provisioning failed");
+          else toast("Calling is set up");
+          load();
+        });
+      });
+      var add = $("#bdpAddLine");
+      if (add) add.addEventListener("click", openConnectModal);
+      Array.prototype.forEach.call(host.querySelectorAll("[data-makeactive]"), function (b) {
+        b.addEventListener("click", function () {
+          send("/phone/numbers", "POST", { action: "set-active", lineId: b.getAttribute("data-makeactive") }).then(function () {
+            toast("Outbound line updated");
+            var P = bdpEngine(); if (P) P.refreshSummary();
+            load();
+          });
+        });
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-editline]"), function (b) {
+        b.addEventListener("click", function () { openManageModal(b.getAttribute("data-editline")); });
+      });
+    }
+
+    function openConnectModal() {
+      var owned = (data.telnyxNumbers || []);
+      var connectedKeys = {};
+      (data.lines || []).forEach(function (l) { connectedKeys[String(l.e164).replace(/\D/g, "").slice(-10)] = 1; });
+      var avail = owned.filter(function (n) { return !connectedKeys[String(n.e164).replace(/\D/g, "").slice(-10)]; });
+      var body = (avail.length
+        ? '<div class="field"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Telnyx number</label>' +
+          '<select id="bdpCnNum" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px">' +
+          avail.map(function (n) { return '<option value="' + esc(n.e164) + '" data-id="' + esc(n.id) + '">' + esc(bdpFmtNum(n.e164)) + "</option>"; }).join("") + "</select></div>"
+        : '<p class="sub" style="margin:0 0 8px">No unconnected numbers found on your Telnyx account. Enter a number manually or buy one in the Telnyx portal first.</p>' +
+          '<div class="field"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Number (E.164)</label>' +
+          '<input id="bdpCnManual" placeholder="+13105551234" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px"></div>') +
+        '<div class="field" style="margin-top:10px"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Label</label>' +
+        '<input id="bdpCnLabel" placeholder="BD main line" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px"></div>' +
+        '<p class="sub" style="margin:10px 0 0">Connecting points the number\'s inbound voice at RecruitersOS and makes it available as an outbound caller ID.</p>' +
+        '<div class="modal-foot"><button class="btn" id="bdpCnCancel">Cancel</button><button class="btn btn-primary" id="bdpCnGo">Connect</button></div>';
+      openModal("Connect a number", "Add a Telnyx number as a BD line.", body, function (root, close) {
+        root.querySelector("#bdpCnCancel").addEventListener("click", close);
+        root.querySelector("#bdpCnGo").addEventListener("click", function () {
+          var sel = root.querySelector("#bdpCnNum");
+          var e164 = sel ? sel.value : (root.querySelector("#bdpCnManual") || {}).value;
+          if (!e164) return;
+          var tid = sel ? sel.options[sel.selectedIndex].getAttribute("data-id") : "";
+          send("/phone/numbers", "POST", { action: "connect", e164: e164, telnyxNumberId: tid || undefined, label: (root.querySelector("#bdpCnLabel") || {}).value, motion: "bd" })
+            .then(function (r) {
+              if (!r.ok) toast((r.data && r.data.error) || "Could not connect the number");
+              else { toast(r.data.warning || "Number connected"); }
+              var P = bdpEngine(); if (P) P.refreshSummary();
+              load();
+            });
+          close();
+        });
+      });
+    }
+
+    function openManageModal(lineId) {
+      var line = (data.lines || []).filter(function (l) { return l.id === lineId; })[0];
+      if (!line) return;
+      var team = data.team || [];
+      var body = '<div class="field"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Label</label>' +
+        '<input id="bdpMlLabel" value="' + esc(line.label) + '" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px"></div>' +
+        '<div class="field" style="margin-top:12px"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Assigned users (can call from and receive on this line)</label>' +
+        '<div style="margin-top:6px;max-height:180px;overflow:auto">' +
+        team.map(function (m) {
+          var on = (line.assignedUserIds || []).indexOf(m.userId) >= 0;
+          return '<label style="display:flex;gap:8px;align-items:center;padding:5px 0;font:400 13px var(--font);cursor:pointer"><input type="checkbox" data-uid="' + esc(m.userId) + '"' + (on ? " checked" : "") + "> " + esc(m.name || m.email) + (m.isYou ? ' <span style="color:var(--text-dim)">(you)</span>' : "") + "</label>";
+        }).join("") + "</div></div>" +
+        '<label style="display:flex;gap:8px;align-items:center;margin-top:12px;font:400 13px var(--font);cursor:pointer"><input type="checkbox" id="bdpMlInbound"' + (line.inboundEnabled ? " checked" : "") + "> Receive inbound calls on this number</label>" +
+        '<div class="modal-foot"><button class="btn btn-danger" id="bdpMlDisc" style="margin-right:auto">Disconnect</button><button class="btn" id="bdpMlCancel">Cancel</button><button class="btn btn-primary" id="bdpMlSave">Save</button></div>';
+      openModal("Manage " + bdpFmtNum(line.e164), "Assignment and routing for this line.", body, function (root, close) {
+        root.querySelector("#bdpMlCancel").addEventListener("click", close);
+        root.querySelector("#bdpMlSave").addEventListener("click", function () {
+          var uids = [];
+          Array.prototype.forEach.call(root.querySelectorAll("[data-uid]"), function (cb) { if (cb.checked) uids.push(cb.getAttribute("data-uid")); });
+          send("/phone/numbers", "POST", {
+            action: "update", lineId: line.id,
+            label: root.querySelector("#bdpMlLabel").value,
+            assignedUserIds: uids,
+            inboundEnabled: root.querySelector("#bdpMlInbound").checked,
+          }).then(function (r) {
+            if (!r.ok) toast((r.data && r.data.error) || "Update failed");
+            var P = bdpEngine(); if (P) P.refreshSummary();
+            load();
+          });
+          close();
+        });
+        root.querySelector("#bdpMlDisc").addEventListener("click", function () {
+          if (!confirm("Disconnect " + bdpFmtNum(line.e164) + " from RecruitersOS? The number stays on your Telnyx account.")) return;
+          send("/phone/numbers", "POST", { action: "disconnect", lineId: line.id }).then(function () {
+            var P = bdpEngine(); if (P) P.refreshSummary();
+            load();
+          });
+          close();
+        });
+      });
+    }
+
+    load();
+  }
+
+  /* ---------------- recording settings (admin) ---------------- */
+  function bdpSettingsView(el) {
+    if (!can("telnyx:manage")) { el.innerHTML = head("BD Phone", "") + bdpTabs("") + emptyCard("Recording settings need an admin."); return; }
+    el.innerHTML = head("BD Phone",
+      "Recording policy for BD calls. Recorded calls are transcribed and analyzed automatically; nothing records until you attest lawful consent.") +
+      bdpTabs("settings") +
+      '<div id="bdpSetBody" style="max-width:640px">' + loading() + "</div>";
+
+    function load() {
+      api("/phone/settings?motion=bd").then(function (d) { paint(d.settings); })
+        .catch(function () { $("#bdpSetBody").innerHTML = needsSetup(); });
+    }
+
+    function paint(s) {
+      var host = $("#bdpSetBody"); if (!host) return;
+      host.innerHTML =
+        '<div class="card" style="padding:20px;margin-bottom:16px"><h3 style="margin:0 0 4px;font:600 14px var(--font);color:var(--text)">Consent attestation</h3>' +
+        '<p style="margin:0 0 12px;font:400 12.5px var(--font);color:var(--text-muted);line-height:1.55">Call recording law varies by state; several states require every party\'s consent. Recording stays off until you attest that your team obtains the consent your jurisdictions require. Confirm with your own counsel; this switch does not decide the law for you.</p>' +
+        (s.recordingConsentAttested
+          ? '<div class="bdp-banner okay" style="margin:0">Attested by ' + esc(s.recordingConsentAttestedBy || "an admin") + " on " + bdpFmtWhen(s.recordingConsentAttestedAt) +
+            '<button class="btn btn-sm" id="bdpRevoke" style="margin-left:auto">Revoke</button></div>'
+          : '<label style="display:flex;gap:8px;align-items:flex-start;font:400 13px var(--font);cursor:pointer"><input type="checkbox" id="bdpAttest" style="margin-top:2px"> I attest that our team obtains lawful consent to record calls in every jurisdiction we call.</label>' +
+            '<div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn btn-primary btn-sm" id="bdpAttestGo" disabled>Enable recording</button></div>') +
+        "</div>" +
+        '<div class="card" style="padding:20px"><h3 style="margin:0 0 12px;font:600 14px var(--font);color:var(--text)">Recording policy</h3>' +
+        '<div class="field"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Automatic recording</label>' +
+        '<select id="bdpRecMode" style="display:block;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px;min-width:260px"' + (s.recordingConsentAttested ? "" : " disabled") + '>' +
+          [["all", "Record all calls"], ["outbound", "Outbound calls only"], ["inbound", "Inbound calls only"], ["off", "Do not record automatically"]].map(function (o) {
+            return '<option value="' + o[0] + '"' + (s.recordingMode === o[0] ? " selected" : "") + ">" + o[1] + "</option>";
+          }).join("") + "</select></div>" +
+        '<label style="display:flex;gap:8px;align-items:center;margin-top:14px;font:400 13px var(--font);cursor:pointer"><input type="checkbox" id="bdpManualTog"' + (s.manualRecordingToggle ? " checked" : "") + (s.recordingConsentAttested ? "" : " disabled") + "> Let users start and stop recording during a call</label>" +
+        '<label style="display:flex;gap:8px;align-items:center;margin-top:10px;font:400 13px var(--font);cursor:pointer"><input type="checkbox" id="bdpTransTog"' + (s.transcriptionEnabled ? " checked" : "") + "> Transcribe recorded calls and generate AI notes</label>" +
+        "</div>";
+
+      var att = $("#bdpAttest"), go = $("#bdpAttestGo");
+      if (att) att.addEventListener("change", function () { go.disabled = !att.checked; });
+      if (go) go.addEventListener("click", function () {
+        send("/phone/settings", "POST", { motion: "bd", recordingConsentAttested: true }).then(function () { toast("Recording enabled"); load(); });
+      });
+      var rev = $("#bdpRevoke");
+      if (rev) rev.addEventListener("click", function () {
+        send("/phone/settings", "POST", { motion: "bd", recordingConsentAttested: false }).then(function () { toast("Attestation revoked; recording is off"); load(); });
+      });
+      var rm = $("#bdpRecMode");
+      if (rm) rm.addEventListener("change", function () {
+        send("/phone/settings", "POST", { motion: "bd", recordingMode: rm.value }).then(function () { toast("Saved"); });
+      });
+      var mt = $("#bdpManualTog");
+      if (mt) mt.addEventListener("change", function () {
+        send("/phone/settings", "POST", { motion: "bd", manualRecordingToggle: mt.checked }).then(function () { toast("Saved"); });
+      });
+      var tt = $("#bdpTransTog");
+      if (tt) tt.addEventListener("change", function () {
+        send("/phone/settings", "POST", { motion: "bd", transcriptionEnabled: tt.checked }).then(function () { toast("Saved"); });
+      });
+    }
+
+    load();
   }
 
   render();

@@ -2079,3 +2079,241 @@ html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *
   font: 500 12.5px var(--font); padding: 6px 12px; cursor: pointer;
 }
 .ux-tip button:hover { background: color-mix(in srgb, var(--brand) 88%, #000); }
+
+/* ================= BD Phone (engine overlay + tab views) ================= */
+/* Overlay pieces are mounted on <body> by bd-phone.js and live across every
+   route. Tab views (.bdp-*) render inside #view via renderBdPhone. */
+
+.bdp-root audio { display: none; }
+
+/* -- incoming call card: top-right, above everything, impossible to miss -- */
+.bdp-incoming {
+  position: fixed; top: 68px; right: 20px; z-index: 260;
+  width: 320px; background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--brand); border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(16, 24, 40, .16); padding: 14px 16px;
+}
+.bdp-inc-label {
+  font: 500 11px var(--font); text-transform: uppercase; letter-spacing: .05em;
+  color: var(--brand); margin-bottom: 6px;
+}
+.bdp-inc-name { font: 600 15px var(--font); color: var(--text); }
+.bdp-inc-meta { font: 400 12.5px var(--font); color: var(--text-muted); margin-top: 2px; }
+.bdp-inc-actions { display: flex; gap: 8px; margin-top: 12px; }
+.bdp-inc-actions .btn {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 34px; font: 500 13px var(--font); border-radius: var(--radius-sm); cursor: pointer;
+}
+.bdp-inc-actions svg { width: 15px; height: 15px; }
+.btn.bdp-answer { background: var(--ok); color: #fff; border: 1px solid var(--ok); }
+.btn.bdp-answer:hover { filter: brightness(.94); }
+.btn.bdp-decline { background: var(--surface); color: var(--danger); border: 1px solid var(--border-strong); }
+.btn.bdp-decline:hover { background: var(--danger-bg); border-color: var(--danger); }
+
+/* -- floating active-call bar: bottom-right, survives navigation -- */
+.bdp-bar {
+  position: fixed; right: 20px; bottom: 20px; z-index: 250;
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: 0 12px 32px rgba(16, 24, 40, .16);
+  padding: 10px 12px; min-width: 300px; max-width: 420px;
+}
+.bdp-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--text-dim); flex: none; }
+.bdp-dot.green { background: var(--ok); }
+.bdp-dot.amber { background: var(--warn); }
+.bdp-dot.gray { background: var(--text-dim); }
+.bdp-bar-info { min-width: 0; flex: 1; }
+.bdp-bar-name {
+  font: 600 13px var(--font); color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bdp-bar-sub { font: 500 12px var(--mono); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.bdp-rec {
+  font: 600 9.5px var(--font); letter-spacing: .08em; color: var(--danger);
+  background: var(--danger-bg); border-radius: 4px; padding: 2px 5px; flex: none;
+}
+.bdp-bar-btns { display: flex; gap: 4px; flex: none; }
+.bdp-ctl {
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-muted); cursor: pointer; transition: background .12s ease;
+}
+.bdp-ctl:hover { background: var(--surface-2); color: var(--text); }
+.bdp-ctl.on { background: var(--brand-soft); color: var(--brand); border-color: var(--brand); }
+.bdp-ctl.bdp-end { background: var(--danger); border-color: var(--danger); color: #fff; }
+.bdp-ctl.bdp-end:hover { filter: brightness(.92); }
+.bdp-ctl svg { width: 15px; height: 15px; }
+.bdp-bar-link { font: 500 12.5px var(--font); color: var(--brand); cursor: pointer; white-space: nowrap; }
+.bdp-bar-link:hover { text-decoration: underline; }
+
+/* -- popovers anchored above the bar (notes, keypad) -- */
+.bdp-pop {
+  position: fixed; right: 20px; bottom: 78px; z-index: 251;
+  width: 320px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: 0 4px 16px rgba(16, 24, 40, .10); padding: 12px;
+}
+.bdp-pop-title {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font: 500 11px var(--font); text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-dim); margin-bottom: 8px;
+}
+.bdp-pop-hint { font: 400 11px var(--font); color: var(--text-dim); text-transform: none; letter-spacing: 0; }
+.bdp-pop textarea {
+  width: 100%; height: 120px; resize: vertical; background: var(--bg);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  font: 400 13px var(--font); color: var(--text); padding: 8px 10px;
+}
+.bdp-pop textarea:focus { outline: none; box-shadow: 0 0 0 3px var(--brand-soft); border-color: var(--brand); }
+.bdp-pop.bdp-keypad { width: 200px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.bdp-pop.bdp-keypad[hidden] { display: none; }
+.bdp-key {
+  height: 40px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font: 500 15px var(--mono); color: var(--text); cursor: pointer;
+}
+.bdp-key:hover { background: var(--surface-2); }
+
+/* ================= BD Phone tab (inside #view) ================= */
+
+.bdp-wrap { display: grid; grid-template-columns: 360px 1fr; gap: 16px; align-items: start; }
+@media (max-width: 980px) { .bdp-wrap { grid-template-columns: 1fr; } }
+
+/* -- dialer card -- */
+.bdp-dialer { padding: 20px; }
+.bdp-line-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font: 400 12.5px var(--font); color: var(--text-muted); margin-bottom: 14px;
+}
+.bdp-line-row select {
+  background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  font: 500 12.5px var(--font); color: var(--text); padding: 5px 8px; max-width: 190px;
+}
+.bdp-num-input {
+  width: 100%; height: 46px; background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); text-align: center;
+  font: 500 20px var(--mono); letter-spacing: .04em; color: var(--text);
+}
+.bdp-num-input:focus { outline: none; box-shadow: 0 0 0 3px var(--brand-soft); border-color: var(--brand); }
+.bdp-match {
+  min-height: 20px; text-align: center; font: 400 12.5px var(--font);
+  color: var(--text-muted); margin-top: 8px;
+}
+.bdp-match b { color: var(--text); font-weight: 600; }
+.bdp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0; }
+.bdp-digit {
+  height: 52px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); cursor: pointer; transition: background .12s ease;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.bdp-digit:hover { background: var(--surface-2); }
+.bdp-digit:active { background: var(--brand-soft); }
+.bdp-digit .d { font: 500 18px var(--mono); color: var(--text); line-height: 1.1; }
+.bdp-digit .l { font: 500 8.5px var(--font); letter-spacing: .14em; color: var(--text-dim); }
+.bdp-call-btn {
+  width: 100%; height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--ok); color: #fff; border: none; border-radius: var(--radius-sm);
+  font: 500 14px var(--font); cursor: pointer;
+}
+.bdp-call-btn:hover { filter: brightness(.94); }
+.bdp-call-btn:disabled { background: var(--bg-soft); color: var(--text-dim); cursor: default; filter: none; }
+.bdp-call-btn svg { width: 16px; height: 16px; }
+.bdp-device-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.bdp-device-row label { display: block; font: 500 10.5px var(--font); text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); margin-bottom: 4px; }
+.bdp-device-row select {
+  width: 100%; background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); font: 400 12px var(--font); color: var(--text); padding: 5px 6px;
+}
+
+/* -- in-view active call panel -- */
+.bdp-live { padding: 24px 20px; text-align: center; }
+.bdp-live-status { font: 500 11px var(--font); text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); }
+.bdp-live-name { font: 600 20px var(--font); color: var(--text); margin-top: 8px; }
+.bdp-live-meta { font: 400 13px var(--font); color: var(--text-muted); margin-top: 3px; }
+.bdp-live-timer { font: 500 26px var(--mono); font-variant-numeric: tabular-nums; color: var(--text); margin: 14px 0 4px; }
+.bdp-live-ctls { display: flex; justify-content: center; gap: 10px; margin-top: 16px; }
+.bdp-live-ctls .bdp-ctl { width: 44px; height: 44px; border-radius: 8px; }
+.bdp-live-ctls .bdp-ctl svg { width: 18px; height: 18px; }
+.bdp-live-notes { margin-top: 18px; text-align: left; }
+.bdp-live-notes textarea {
+  width: 100%; height: 110px; resize: vertical; background: var(--bg);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  font: 400 13px var(--font); color: var(--text); padding: 8px 10px;
+}
+.bdp-live-notes textarea:focus { outline: none; box-shadow: 0 0 0 3px var(--brand-soft); border-color: var(--brand); }
+
+/* -- state banner (connection / mic / other tab / not configured) -- */
+.bdp-banner {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); font: 400 13px var(--font); color: var(--text-muted); margin-bottom: 14px;
+}
+.bdp-banner.warn { border-left: 3px solid var(--warn); }
+.bdp-banner.err { border-left: 3px solid var(--danger); }
+.bdp-banner.okay { border-left: 3px solid var(--ok); }
+.bdp-banner .btn { margin-left: auto; flex: none; }
+
+/* -- history rows -- */
+.bdp-hist-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+.bdp-hist-filters input[type="search"], .bdp-hist-filters input[type="date"], .bdp-hist-filters select {
+  background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  font: 400 12.5px var(--font); color: var(--text); padding: 6px 9px;
+}
+.bdp-hist-filters input[type="search"] { min-width: 200px; }
+.bdp-dir {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 999px; flex: none;
+}
+.bdp-dir svg { width: 12px; height: 12px; }
+.bdp-dir.in { background: var(--ok-bg); color: var(--ok); }
+.bdp-dir.out { background: var(--brand-soft); color: var(--brand); }
+.bdp-dir.miss { background: var(--danger-bg); color: var(--danger); }
+.bdp-opp { font: 500 11px var(--font); border-radius: 4px; padding: 2px 7px; }
+.bdp-opp.hot { background: var(--danger-bg); color: var(--danger); }
+.bdp-opp.warm { background: var(--warn-bg); color: var(--warn); }
+.bdp-opp.nurture { background: var(--brand-soft); color: var(--brand); }
+.bdp-opp.cold { background: var(--bg-soft); color: var(--text-muted); }
+.bdp-opp.disqualified { background: var(--bg-soft); color: var(--text-dim); text-decoration: line-through; }
+.bdp-pipe { font: 500 11px var(--font); color: var(--text-dim); display: inline-flex; align-items: center; gap: 5px; }
+.bdp-pipe .spin {
+  width: 10px; height: 10px; border: 2px solid var(--border-strong); border-top-color: var(--brand);
+  border-radius: 999px; animation: bdpspin .9s linear infinite; display: inline-block;
+}
+@keyframes bdpspin { to { transform: rotate(360deg); } }
+
+/* -- call record detail -- */
+.bdp-detail { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+@media (max-width: 1080px) { .bdp-detail { grid-template-columns: 1fr; } }
+.bdp-sec { margin-bottom: 16px; }
+.bdp-sec h4 {
+  font: 500 11px var(--font); text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-dim); margin: 0 0 8px;
+}
+.bdp-kv { display: grid; grid-template-columns: 130px 1fr; gap: 4px 12px; font: 400 13px var(--font); }
+.bdp-kv dt { color: var(--text-dim); }
+.bdp-kv dd { margin: 0; color: var(--text); }
+.bdp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bdp-chip {
+  font: 400 12px var(--font); color: var(--text); background: var(--bg-soft);
+  border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px;
+}
+.bdp-edit-btn {
+  background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px;
+  vertical-align: middle; margin-left: 6px;
+}
+.bdp-edit-btn:hover { color: var(--brand); }
+.bdp-edit-btn svg { width: 12px; height: 12px; }
+.bdp-edited { font: 400 10.5px var(--font); color: var(--warn); margin-left: 6px; }
+.bdp-transcript { max-height: 420px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; background: var(--bg); }
+.bdp-turn { margin-bottom: 10px; font: 400 13px var(--font); }
+.bdp-turn .who { font: 600 11px var(--font); text-transform: uppercase; letter-spacing: .05em; }
+.bdp-turn.user .who { color: var(--brand); }
+.bdp-turn.contact .who { color: var(--ok); }
+.bdp-turn.unknown .who { color: var(--text-dim); }
+.bdp-turn mark { background: var(--warn-bg); color: inherit; border-radius: 2px; }
+.bdp-action-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font: 400 13px var(--font); }
+.bdp-action-row:last-child { border-bottom: none; }
+.bdp-action-row .due { font: 500 11.5px var(--mono); color: var(--text-dim); margin-left: auto; white-space: nowrap; }
+.bdp-action-row.done .txt { text-decoration: line-through; color: var(--text-dim); }
+.bdp-audio { width: 100%; margin-top: 6px; }
+
+/* [hidden] must always win over the display rules the phone classes set. */
+.bdp-root [hidden] { display: none !important; }
