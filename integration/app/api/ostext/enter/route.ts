@@ -44,6 +44,12 @@ export async function GET(req: Request) {
     : new URL(token ? "/ostext-app/api/enter" : "/ostext-app/", req.url);
 
   if (token) dest.searchParams.set("token", token);
+  // Forward the signed-in recruiter's identity so the engine signs each person
+  // in as themselves (per-user identity) rather than one shared account. Only
+  // meaningful with the token; the engine validates it before trusting these.
+  const who = g.ctx.user;
+  if (token && who?.email) dest.searchParams.set("email", who.email);
+  if (token && who?.name) dest.searchParams.set("name", who.name);
   const theme = url.searchParams.get("theme");
   const accent = url.searchParams.get("accent");
   if (theme === "dark" || theme === "light") dest.searchParams.set("theme", theme);
