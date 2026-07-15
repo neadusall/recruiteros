@@ -6477,13 +6477,15 @@
               '<span class="pr-seq-grp"><select class="pr-bulk-sel" id="prBulkSeq">' + seqOpts + "</select>" +
                 '<button class="btn btn-ghost btn-sm" id="prSeqAssign">Assign</button></span>' +
               '<button class="btn btn-ghost btn-sm" id="prSaveList">Save as list</button>' +
+              '<button class="btn btn-ghost btn-sm" id="prPushSel" title="Send the selected candidates straight into an OS Text campaign, no CSV, no drag and drop.">Push to OS Text</button>' +
               '<button class="btn btn-ghost btn-sm" id="prDelSel">Delete</button>' +
               '<button class="btn btn-ghost btn-sm" id="prClearSel">Clear</button></span></div>'
         : "";
       var listBanner = prListName
         ? '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:8px 12px;border:1px solid var(--border,#2a2a36);border-radius:10px;font-size:13px;background:var(--brand-soft)">' +
           'Viewing saved search: <b>' + esc(prListName) + "</b> · " + list.length + " shown" +
-          '<button class="btn btn-ghost btn-sm" id="prShowAll" style="margin-left:auto">Show all prospects</button></div>'
+          '<button class="btn btn-primary btn-sm" id="prPushList" style="margin-left:auto" title="Send this whole list into an OS Text campaign under the same name.">Push list to OS Text</button>' +
+          '<button class="btn btn-ghost btn-sm" id="prShowAll">Show all prospects</button></div>'
         : "";
       var tableHead = '<thead><tr>' +
         '<th class="pr-c-check"><input type="checkbox" id="prSelAll"' + (allOn ? " checked" : "") + ' title="Select all' + (prFilter ? " (filtered)" : "") + '" /></th>' +
@@ -6514,6 +6516,8 @@
         });
       });
       var saveBtn = $("#prSaveList"); if (saveBtn) saveBtn.addEventListener("click", function () { saveSelectedAsList(selIds); });
+      var pushSelBtn = $("#prPushSel"); if (pushSelBtn) pushSelBtn.addEventListener("click", function () { pushToOsText(selIds, prListName); });
+      var pushListBtn = $("#prPushList"); if (pushListBtn) pushListBtn.addEventListener("click", function () { pushToOsText(list.map(function (p) { return p.id; }), prListName); });
       var enrSelBtn = $("#prEnrichSel"); if (enrSelBtn) enrSelBtn.addEventListener("click", function () { enrichSelected(selIds, enrSelBtn); });
       var stSel = $("#prBulkStatus"); if (stSel) stSel.addEventListener("change", function () { if (stSel.value) bulkSetStatus(selIds, stSel.value); });
       var seqAssignBtn = $("#prSeqAssign"); if (seqAssignBtn) seqAssignBtn.addEventListener("click", function () {
@@ -6612,6 +6616,55 @@
       refreshSavedDropdown();   // surface it in the Saved searches dropdown immediately
       toast('Saved "' + list.name + '" · ' + ids.length + " prospect" + (ids.length === 1 ? "" : "s"));
     }
+    /* ---- one-click push into OS Text (SMS campaigns) ----
+       Sends the chosen prospects server-side into an OS Text campaign under the
+       given name: no CSV download, no drag and drop. Every contact goes over
+       with the full token column set (first_name, last_name, company, job_title,
+       location, email, linkedin_url plus tag and headline extras) and the
+       campaign arrives ~90% built: name, recruiter identity, and a safe starter
+       message the recruiter polishes inside OS Text before launch. */
+    function pushToOsText(ids, defName) {
+      if (!ids || !ids.length) { toast("Select candidates first."); return; }
+      var byId = {}; prAll.forEach(function (p) { byId[p.id] = p; });
+      var withPhone = ids.filter(function (id) { var p = byId[id]; return p && (p.mobilePhone || p.phone); }).length;
+      openModal("Push to OS Text", "Creates (or tops up) an OS Text campaign under this name, message prefilled. You review and launch inside OS Text.",
+        '<label class="fld"><span>Campaign name</span>' +
+          '<input id="osxPushName" type="text" value="' + esc((defName || "").trim()) + '" placeholder="e.g. VP Operations, Alegria" /></label>' +
+        '<div class="muted" style="font-size:12.5px;margin:6px 0 2px">' +
+          withPhone + " of " + ids.length + " selected have a phone number; only those are pushed" +
+          (withPhone < ids.length ? " (enrich phones first to include the rest)" : "") + ". " +
+          "Every contact carries first_name, last_name, company, job_title, location, email and linkedin_url, plus tag and headline as extra columns, so every {token} in your text fills in.</div>" +
+        '<label style="display:flex;gap:8px;align-items:center;justify-content:flex-start;text-align:left;font-size:13px;margin-top:8px"><input type="checkbox" id="osxPushValidate" checked style="flex:0 0 auto;width:auto;margin:0" /><span>Validate mobile lines on arrival (recommended)</span></label>' +
+        '<div class="modal-foot"><button class="btn btn-primary" id="osxPushGo">Push to OS Text →</button></div>',
+        function (card, close) {
+          var nameEl = card.querySelector("#osxPushName"); if (nameEl) nameEl.focus();
+          card.querySelector("#osxPushGo").addEventListener("click", function () {
+            var nm = (nameEl && nameEl.value.trim()) || "";
+            if (!nm) { if (nameEl) nameEl.focus(); return; }
+            var goBtn = card.querySelector("#osxPushGo");
+            goBtn.disabled = true; goBtn.textContent = "Pushing…";
+            var vEl = card.querySelector("#osxPushValidate");
+            send("/ostext/push", "POST", { name: nm, prospectIds: ids, validate: !!(vEl && vEl.checked) }).then(function (r) {
+              if (!r.ok) {
+                goBtn.disabled = false; goBtn.textContent = "Push to OS Text →";
+                alert("Push failed: " + ((r.data && (r.data.detail || r.data.error)) || r.status)); return;
+              }
+              close();
+              var d = r.data || {};
+              alert('OS Text campaign "' + (d.campaignName || nm) + '" is ready (' + (d.created ? "created new" : "topped up") + ").\n\n" +
+                "Added: " + (d.added || 0) +
+                (d.deduped ? "\nAlready in campaign: " + d.deduped : "") +
+                (d.noPhone ? "\nNo phone yet: " + d.noPhone : "") +
+                (d.invalidPhone ? "\nInvalid phone: " + d.invalidPhone : "") +
+                (d.optedOut ? "\nOpted out (never texted): " + d.optedOut : "") +
+                "\n\nOpen the OS Text tab to review the prefilled message and launch.");
+            }).catch(function () {
+              goBtn.disabled = false; goBtn.textContent = "Push to OS Text →";
+              alert("Could not reach the server.");
+            });
+          });
+        });
+    }
     function deleteSelected(ids) {
       if (!ids.length) return;
       if (!confirm("Delete " + ids.length + " prospect" + (ids.length === 1 ? "" : "s") + " from your pipeline? This can't be undone.")) return;
@@ -6673,8 +6726,17 @@
             if (!lists.length) { host.innerHTML = '<div class="empty">No saved lists yet. Select prospects and click “Save as list”.</div>'; return; }
             host.innerHTML = lists.map(function (l) {
               return '<div class="integ"><span class="dot3" style="background:var(--brand-2)"></span><div class="meta"><b>' + esc(l.name) + "</b><small>" + (l.prospectIds || []).length + " prospects · " + esc(l.motion || "recruiting") + "</small></div>" +
+                '<button class="btn btn-ghost btn-sm" data-push-list="' + esc(l.id) + '" title="Create an OS Text campaign named after this list and load these prospects into it.">Push to OS Text</button>' +
                 '<button class="btn btn-ghost btn-sm" data-del-list="' + esc(l.id) + '">Delete</button></div>';
             }).join("");
+            Array.prototype.forEach.call(host.querySelectorAll("[data-push-list]"), function (b) {
+              b.addEventListener("click", function () {
+                var l = listStore().all().filter(function (x) { return x.id === b.getAttribute("data-push-list"); })[0];
+                if (!l) return;
+                close();
+                pushToOsText((l.prospectIds || []).slice(), l.name);
+              });
+            });
             Array.prototype.forEach.call(host.querySelectorAll("[data-del-list]"), function (b) {
               b.addEventListener("click", function () { if (!confirm("Delete this list? (The prospects themselves are not deleted.)")) return; listStore().remove(b.getAttribute("data-del-list")); loadLists(); });
             });
@@ -9193,8 +9255,15 @@
     function downloadRun(id) {
       var run = state.runs.find(function (r) { return r.id === id; }); if (!run) { toast("List not loaded yet."); return; }
       var rows = urlRows(run.candidates); if (!rows.length) { toast("No LinkedIn URLs in this list."); return; }
-      var cols = ["linkedinUrl", "fullName", "title", "company", "location", "fitScore", "sourceGroup"];
-      var head2 = ["LinkedIn URL", "Name", "Title", "Company", "Location", "Fit", "Source"];
+      // Split first/last name and include every OS Text merge column (First Name,
+      // Last Name, Title, Company, Location, Email, Phone, LinkedIn URL), so the
+      // sheet drops straight into OS Text with all {tokens} fillable, no editing.
+      rows = rows.map(function (c) {
+        var parts = String(c.fullName || "").trim().split(/\s+/);
+        return Object.assign({}, c, { firstName: parts[0] || "", lastName: parts.slice(1).join(" ") });
+      });
+      var cols = ["linkedinUrl", "firstName", "lastName", "title", "company", "location", "email", "phone", "fitScore", "sourceGroup"];
+      var head2 = ["LinkedIn URL", "First Name", "Last Name", "Title", "Company", "Location", "Email", "Phone", "Fit", "Source"];
       var hasVet = rows.some(function (c) { return typeof c.verifiedScore === "number"; });
       if (hasVet) {
         // Lead with the deep-vetted, highest verified score first.
