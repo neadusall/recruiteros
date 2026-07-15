@@ -50,6 +50,13 @@ module.exports = {
         pageRewrites.push({ source: `/${t}/${i}`, destination: "/ostext-instructions.html" });
       }
     }
+    // JD Sourcing recruiter playbook. The shared/typed link is /jdSourcing/Instructions;
+    // accept the common casings since the path travels by word of mouth.
+    for (const t of ["jdSourcing", "jdsourcing", "JDSourcing", "JdSourcing"]) {
+      for (const i of ["Instructions", "instructions"]) {
+        pageRewrites.push({ source: `/${t}/${i}`, destination: "/jdsourcing-instructions.html" });
+      }
+    }
     return pageRewrites;
   },
 

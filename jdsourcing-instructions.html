@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>JD Sourcing: From Job Description to Ranked Candidate List | Lume</title>
+<style>
+  :root {
+    --accent: #2e5bd7;
+    --accent-ink: #ffffff;
+    --ink: #1b2231;
+    --ink-soft: #4b5568;
+    --ink-faint: #7b8497;
+    --ground: #ffffff;
+    --ground-raised: #f6f7fa;
+    --line: #e3e6ee;
+    --good: #1a7f4e;
+    --warn: #b3520e;
+    --bad: #b3261e;
+    --good-bg: #e9f6ef;
+    --warn-bg: #fdf1e5;
+    --bad-bg: #fdecea;
+    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --accent: #6d8ef2;
+      --accent-ink: #0d1220;
+      --ink: #e7eaf2;
+      --ink-soft: #b4bccb;
+      --ink-faint: #828b9d;
+      --ground: #12151d;
+      --ground-raised: #1a1e29;
+      --line: #2a3040;
+      --good: #5fce97;
+      --warn: #e8a266;
+      --bad: #ef8b84;
+      --good-bg: #17281f;
+      --warn-bg: #2c2118;
+      --bad-bg: #2c1a19;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  .eyebrow {
+    font-size: 12px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 12px;
+  }
+  h1 {
+    font-size: 34px; line-height: 1.15; font-weight: 700; letter-spacing: -0.015em;
+    text-wrap: balance; margin: 0 0 12px;
+  }
+  .lede { font-size: 17px; color: var(--ink-soft); max-width: 60ch; margin: 0 0 8px; }
+  .meta { font-size: 13px; color: var(--ink-faint); }
+
+  h2 {
+    font-size: 22px; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance;
+    margin: 56px 0 8px; padding-top: 24px; border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 16.5px; font-weight: 650; margin: 28px 0 6px; }
+  p { margin: 10px 0; max-width: 68ch; }
+  p, li { color: var(--ink); }
+  .soft { color: var(--ink-soft); }
+  ul, ol { padding-left: 22px; margin: 10px 0; }
+  li { margin: 5px 0; max-width: 64ch; }
+  strong { font-weight: 650; }
+
+  .toc {
+    background: var(--ground-raised); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 22px; margin: 28px 0 0;
+  }
+  .toc-title { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px; }
+  .toc ol { margin: 0; padding-left: 20px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); text-decoration: underline; }
+
+  a { color: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  code, .path {
+    font-family: var(--mono); font-size: 0.86em;
+    background: var(--ground-raised); border: 1px solid var(--line);
+    border-radius: 5px; padding: 1px 6px; white-space: nowrap;
+  }
+
+  .ui {
+    display: inline-block; font-size: 0.86em; font-weight: 600;
+    background: var(--ground-raised); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 8px; white-space: nowrap;
+  }
+
+  .steps { list-style: none; padding: 0; margin: 18px 0; display: flex; flex-direction: column; gap: 14px; }
+  .step {
+    display: grid; grid-template-columns: 40px 1fr; gap: 14px;
+    background: var(--ground-raised); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; max-width: none;
+  }
+  .step-num {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--accent); color: var(--accent-ink);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px; margin-top: 2px;
+  }
+  .step h4 { margin: 2px 0 4px; font-size: 15.5px; font-weight: 650; }
+  .step p { margin: 4px 0; font-size: 14.5px; color: var(--ink-soft); }
+  .step .fields { font-size: 13.5px; color: var(--ink-faint); }
+
+  .dd { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
+  @media (max-width: 620px) { .dd { grid-template-columns: 1fr; } }
+  .dd-col { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--ground-raised); }
+  .dd-col h4 { margin: 0 0 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  .dd-col.do h4 { color: var(--good); }
+  .dd-col.dont h4 { color: var(--bad); }
+  .dd-col ul { margin: 0; padding-left: 18px; }
+  .dd-col li { font-size: 14.5px; margin: 6px 0; }
+
+  .callout { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 14.5px; border: 1px solid transparent; }
+  .callout p { margin: 4px 0; font-size: inherit; }
+  .callout.good { background: var(--good-bg); border-color: color-mix(in srgb, var(--good) 30%, transparent); }
+  .callout.warn { background: var(--warn-bg); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+  .callout .tag { font-weight: 700; font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; display: block; margin-bottom: 2px; }
+  .callout.good .tag { color: var(--good); }
+  .callout.warn .tag { color: var(--warn); }
+
+  .tbl-wrap { overflow-x: auto; margin: 14px 0; border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); background: var(--ground-raised); }
+  tr:last-child td { border-bottom: none; }
+  td code { white-space: nowrap; }
+
+  .pipeline { list-style: none; counter-reset: stage; padding: 0; margin: 18px 0; }
+  .pipeline li {
+    counter-increment: stage; position: relative;
+    padding: 0 0 18px 46px; max-width: none;
+  }
+  .pipeline li::before {
+    content: counter(stage);
+    position: absolute; left: 0; top: 0;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--ground-raised); border: 2px solid var(--accent); color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+  }
+  .pipeline li::after {
+    content: ""; position: absolute; left: 13px; top: 32px; bottom: 2px;
+    width: 2px; background: var(--line);
+  }
+  .pipeline li:last-child::after { display: none; }
+  .pipeline h4 { margin: 3px 0 3px; font-size: 15.5px; font-weight: 650; }
+  .pipeline p { margin: 2px 0; font-size: 14.5px; color: var(--ink-soft); }
+
+  .footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-faint); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">Internal Playbook</div>
+  <h1>JD Sourcing: From Job Description to Ranked Candidate List</h1>
+  <p class="lede">Paste a job description, or just a title and a company, and get back a ranked, scored list of real candidates you can vet, enrich, and push straight into your Candidates pipeline. This is how to use it well.</p>
+
+  <nav class="toc">
+    <div class="toc-title">In this document</div>
+    <ol>
+      <li><a href="#why">Why JD Sourcing matters</a></li>
+      <li><a href="#how">What happens under the hood</a></li>
+      <li><a href="#where">Where to find it</a></li>
+      <li><a href="#run">Running a search: the four steps</a></li>
+      <li><a href="#settings">The settings that shape a run</a></li>
+      <li><a href="#refine">Dive deeper and the queue</a></li>
+      <li><a href="#lists">Working a saved list</a></li>
+      <li><a href="#sharpen">What makes a search stronger</a></li>
+      <li><a href="#checklist">Quick-reference checklist</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="why">1. Why JD Sourcing matters</h2>
+  <p>The old way to source a role looks like this: read the JD, guess at search strings, run a dozen LinkedIn searches, open profiles one by one, eyeball each against the requirements, and keep a spreadsheet on the side. A thorough first pass on one role is an afternoon, and the quality depends entirely on how good your search strings were.</p>
+  <p>JD Sourcing collapses that afternoon into minutes. You give it the role. It reads the JD the way a researcher would, figures out who the ideal candidate actually is, runs the searches for you (including ones you would not have thought to run), scores every person it finds against the role, and hands you a ranked list. Then it does the second pass too: deep-vetting reads each shortlisted candidate's full career history against the role and returns a verified fit score with a written verdict. That is the first-pass screen your team would do by hand, across the whole list, in seconds.</p>
+  <p>What that buys you:</p>
+  <ul>
+    <li><strong>Speed to market.</strong> A new job order can have a ranked longlist the same hour it lands. Being first to good candidates is most of the game.</li>
+    <li><strong>Coverage you cannot match by hand.</strong> A run can scan hundreds of profiles across every peer company in the space, not just the three competitors you remembered.</li>
+    <li><strong>Consistency.</strong> Every candidate is scored against the same profile: title, seniority, company, geography, must-haves. No 4 pm fatigue bias.</li>
+    <li><strong>A repeatable asset.</strong> Every run is saved under a name. Rerun it next quarter with <span class="ui">Fresh only</span> on and you get the people who entered the market since, not the same list again.</li>
+  </ul>
+
+  <h2 id="how">2. What happens under the hood</h2>
+  <p>You do not need to know this to use the tool, but knowing it makes you better at feeding it. A run moves through five stages:</p>
+
+  <ol class="pipeline">
+    <li>
+      <h4>Build the brief</h4>
+      <p>The AI takes whatever you gave it (a full JD, or just a title, company, and a few notes) and refines it into a strong, wide-net hiring brief: it fills gaps, standardizes the language, and widens the target so the search does not miss adjacent talent.</p>
+    </li>
+    <li>
+      <h4>Read the JD into an ideal-candidate profile</h4>
+      <p>The brief becomes a structured profile: the titles that qualify, the seniority band, the target companies worth poaching from (it lists real peer and adjacent companies, not just the ones you named), the geographies, and up to a handful of true must-haves. This profile, not your raw JD text, is what drives the search.</p>
+    </li>
+    <li>
+      <h4>Generate and run the searches</h4>
+      <p>The profile is turned into a batch of live people-searches: one per target company, plus broader geography and industry sweeps. These run against real, current profile data, so you are seeing where people work now, not a stale database.</p>
+    </li>
+    <li>
+      <h4>Score and rank everyone found</h4>
+      <p>Every person gets a fit score against the profile: does the title match, is the seniority right, are they at a target company, are they in the geography, do they show the must-haves. The list comes back ranked best-first, and anyone your workspace already surfaced in a past run can be skipped automatically.</p>
+    </li>
+    <li>
+      <h4>Vet, enrich, and hand off</h4>
+      <p>On a saved list you can deep-vet the top candidates (the AI reads each full work history and writes a verified score and verdict), enrich your chosen top N with business email and phone, and push the whole list into the Candidates pipeline under the same name, ready for a campaign.</p>
+    </li>
+  </ol>
+
+  <div class="callout good">
+    <span class="tag">The design philosophy</span>
+    <p>JD Sourcing casts a <strong>wide net on purpose</strong>. It would rather show you a 500-person ranked list where the gold is at the top than a "perfect" 12-person list that silently missed 40 great people. Your judgment is applied where it is cheap: scanning a ranked list top-down, not hand-building it.</p>
+  </div>
+
+  <h2 id="where">3. Where to find it</h2>
+  <ol>
+    <li>Log in to the portal and make sure you are in the <strong>Recruiting</strong> workspace (JD Sourcing does not appear in the BD view).</li>
+    <li>In the left sidebar, under the <strong>Build</strong> group, click <span class="ui">JD Sourcing</span>.</li>
+  </ol>
+  <p class="soft">A four-step tracker across the top of the page (Build the brief, Analyze, Find candidates, Save the list) lights up as you go, so you always know where you are. There is also a "How this works" dropdown on the page itself that defines every button.</p>
+
+  <h2 id="run">4. Running a search: the four steps</h2>
+
+  <ol class="steps">
+    <li class="step">
+      <div class="step-num">1</div>
+      <div>
+        <h4>Build the brief</h4>
+        <p>Fill in what you know under "Start with the role", then click <span class="ui">Build refined JD</span>. The AI turns your input into a sourcing-ready brief and drops it into the Job description box for you to review.</p>
+        <p class="fields"><strong>Job title</strong> (e.g. VP of Sales, Director of Nursing) · <strong>Company</strong> (name or website; used to find peer companies to poach from) · <strong>City &amp; state</strong> plus a radius (Exact, +25, +50, +100, or +250 miles) · <strong>List name</strong> (name it after the role and client) · <strong>Anything specific</strong> (seniority, certs, must-have experience, deal-breakers) · <strong>Job description</strong> (paste the real JD if you have it; the more real detail, the stronger the search).</p>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-num">2</div>
+      <div>
+        <h4>Analyze JD</h4>
+        <p>Click <span class="ui">Analyze JD</span>. The brief becomes the ideal-candidate profile: titles, target companies, locations, and must-haves, all shown on screen as chips.</p>
+        <p class="fields">Read the profile before you search. If it targets the wrong titles or misses an obvious competitor, fix it now with a refine instruction (section 6) rather than after a run.</p>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-num">3</div>
+      <div>
+        <h4>Find candidates</h4>
+        <p>Click <span class="ui">Find candidates</span>. The searches run, a progress bar tracks the scan, and the results land as a ranked table with each person's title, location, profile link, and fit score.</p>
+        <p class="fields">A cost pill next to the button shows the estimated spend for the run before you commit to it.</p>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-num">4</div>
+      <div>
+        <h4>Save the list</h4>
+        <p>Click <span class="ui">Save to JD Sourcing</span>. The run is stored under its list name in "Your saved candidate lists" at the bottom of the page, which is where vetting, enrichment, and the push to Candidates happen.</p>
+        <p class="fields">Unsaved results are just a preview. Saving is what makes the list a durable asset you and the team can come back to.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 id="settings">5. The settings that shape a run</h2>
+  <div class="tbl-wrap">
+    <table>
+      <tr><th>Setting</th><th>What it does</th><th>How to set it</th></tr>
+      <tr>
+        <td><strong>Min fit</strong></td>
+        <td>The match-strength bar, 0 to 100. Candidates scoring below it are filtered out.</td>
+        <td>Default 10 is a deliberately wide net. Set 0 to see every profile found. 40 and up runs tight; use that only when a wide run already proved the market is deep.</td>
+      </tr>
+      <tr>
+        <td><strong>Scan up to</strong></td>
+        <td>The ceiling on how many candidates a run gathers. It is a ceiling, not a minimum: you get however many qualified people the search finds, up to this number.</td>
+        <td>Default 500. Leave it there for a normal role; raise it for high-volume roles in deep markets.</td>
+      </tr>
+      <tr>
+        <td><strong>Fresh only</strong></td>
+        <td>Skips anyone this workspace already surfaced in past runs, so you see new market entrants instead of repeats.</td>
+        <td>Off for the first run on a role. On for reruns and refreshes.</td>
+      </tr>
+      <tr>
+        <td><strong>Radius</strong></td>
+        <td>Expands the location beyond the exact metro by estimated drive distance, pulling in all surrounding cities within it.</td>
+        <td>Most on-site roles deserve at least +25. Exact-metro-only searches quietly starve the list.</td>
+      </tr>
+    </table>
+  </div>
+
+  <h2 id="refine">6. Dive deeper and the queue</h2>
+
+  <h3>Refining the profile in plain English</h3>
+  <p>After Analyze, the "dive deeper" box takes a natural-language instruction and edits the profile accordingly. Type it the way you would say it to a researcher:</p>
+  <ul>
+    <li>"Only Director and up, medical devices, exclude agencies"</li>
+    <li>"Add Stryker and Medtronic as target companies"</li>
+    <li>"Widen to anyone with plant maintenance leadership, drop the PLC requirement"</li>
+  </ul>
+  <p>Then run <span class="ui">Find candidates</span> again. Refine-then-rerun is cheap; hand-reviewing a mistargeted 500-person list is not.</p>
+
+  <h3>Running several roles back to back</h3>
+  <p><span class="ui">Add to queue</span> lines up multiple briefs so you can batch a whole desk's worth of roles. Click <span class="ui">Run queue</span> and each JD runs in turn (search, rank, save) with the settings you set above. Keep the tab open while it runs; each finished list lands in your saved lists with a downloadable spreadsheet of profile URLs.</p>
+  <p class="soft">A strong habit: queue every new job order for the day in the morning, work replies and calls while it runs, then spend the afternoon on the ranked lists.</p>
+
+  <h2 id="lists">7. Working a saved list</h2>
+  <p>Every saved list in "Your saved candidate lists" carries five actions. Use them in this order:</p>
+  <ol>
+    <li><strong>Deep-vet top N.</strong> Choose how many top-ranked candidates to vet (default 25) and run it. The AI reads each person's full career history against the role and returns a verified fit score plus a short written verdict. A cost pill shows the price before you run. This is the step that turns a ranked longlist into a shortlist you would defend to a client.</li>
+    <li><strong>Enrich top N.</strong> You pick how many of the top candidates to look up business email and phone for. Enrich as few or as many as you want. Lookups are cached across the workspace, so a person enriched once is never paid for twice.</li>
+    <li><strong>Send to Candidates.</strong> Pushes the list into your Candidates pipeline under the same name, ready to drop into a campaign (OS Text, email, or calls).</li>
+    <li><strong>Excel (URLs).</strong> Downloads the list as an .xlsx of profile URLs whenever you need to share it outside the portal or work it manually.</li>
+    <li><strong>Delete.</strong> Removes the saved list. The people themselves are not deleted, and the workspace still remembers it surfaced them (which is what powers Fresh only).</li>
+  </ol>
+
+  <div class="callout warn">
+    <span class="tag">Spend smart</span>
+    <p>Discovery and scoring are cheap; vetting and enrichment are the paid steps. Do not enrich a list you have not deep-vetted, and do not deep-vet more people than you would realistically work. Top 25 vetted and top 10 enriched beats 200 enriched blind, on both cost and outcomes.</p>
+  </div>
+
+  <h2 id="sharpen">8. What makes a search stronger</h2>
+  <p>The engine can only target what the brief contains. These are the inputs that sharpen it most, straight from the tool's own guidance:</p>
+  <ul>
+    <li><strong>Title and level</strong>: the exact role and seniority, and whether it leads a team.</li>
+    <li><strong>Skills, tools, and licenses</strong>: required certs or systems (RN, CPA, AWS, Epic, Salesforce).</li>
+    <li><strong>Seniority and scope</strong>: years of experience, team size, or budget owned.</li>
+    <li><strong>Must-have experience</strong>: what they have actually done, not nice-to-haves.</li>
+    <li><strong>Industry and target companies</strong>: where strong candidates come from, and competitors worth poaching from.</li>
+    <li><strong>Location and radius</strong>: the metros that matter, widened by the mileage you set.</li>
+    <li><strong>Deal-breakers</strong>: what should rule a candidate out. Use these sparingly; every deal-breaker hard-eliminates people.</li>
+  </ul>
+
+  <div class="dd">
+    <div class="dd-col do">
+      <h4>Do</h4>
+      <ul>
+        <li>Paste the real JD when you have it. Real detail beats a summary every time.</li>
+        <li>Name the client company even on confidential searches; it is only used to find peer companies, it never appears to candidates.</li>
+        <li>Read the ideal-candidate profile before searching, and refine it if it is off.</li>
+        <li>Start wide (min fit 10), then tighten. You can always filter a big list; you cannot see people a narrow run never found.</li>
+        <li>Name lists consistently: role, client, market. Future you will search for them.</li>
+      </ul>
+    </div>
+    <div class="dd-col dont">
+      <h4>Don't</h4>
+      <ul>
+        <li>Stack must-haves. Three real ones beat eight aspirational ones; every extra one shrinks the pool.</li>
+        <li>Add deal-breakers by default. They zero people out entirely.</li>
+        <li>Judge a run by its bottom half. It is a ranked list; the bottom is supposed to be weaker.</li>
+        <li>Skip the save. An unsaved run cannot be vetted, enriched, or pushed to Candidates.</li>
+        <li>Rerun a role without <span class="ui">Fresh only</span> and wonder why you know everyone on the list.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="checklist">9. Quick-reference checklist</h2>
+  <h3>Every new job order</h3>
+  <ul>
+    <li>Recruiting workspace &gt; Build &gt; <span class="ui">JD Sourcing</span></li>
+    <li>Fill the role fields, paste the real JD, set location plus a realistic radius</li>
+    <li><span class="ui">Build refined JD</span>, then <span class="ui">Analyze JD</span>, then read the profile</li>
+    <li>Refine in plain English if the profile is off, then <span class="ui">Find candidates</span></li>
+    <li><span class="ui">Save to JD Sourcing</span> under a consistent list name</li>
+  </ul>
+  <h3>Every saved list</h3>
+  <ul>
+    <li>Deep-vet the top 25 (or your working number)</li>
+    <li>Enrich only the vetted top N you will actually contact</li>
+    <li><span class="ui">Send to Candidates</span> and launch the campaign</li>
+  </ul>
+  <h3>Refreshing a role</h3>
+  <ul>
+    <li>Reopen the brief, turn on <span class="ui">Fresh only</span>, rerun</li>
+    <li>New entrants to the market rank in; everyone already surfaced stays out</li>
+  </ul>
+
+  <div class="footer">
+    Lume Search internal enablement · Questions or suggestions: post them in the recruiting channel so this document keeps improving.
+  </div>
+
+</div>
+</body>
+</html>
