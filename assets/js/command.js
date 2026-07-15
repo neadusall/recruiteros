@@ -518,6 +518,7 @@
     email: { title: "Email", crumb: "Business Development", action: null, render: renderEmail, motionOnly: "bd" },
     pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio },
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
+    calls: { title: "Calls", crumb: "Build", action: null, render: renderCalls, motionOnly: "recruiting" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "+ New sequence", render: renderContent },
@@ -10116,6 +10117,359 @@
     tabBar(); paint();
   }
 
+  /* ---------------- Calls (candidate outbound softphone) ----------------------
+     A recruiter's outbound-calling console: a browser softphone (Telnyx WebRTC,
+     which loads when telephony is configured), a lawful-consent gate before any
+     recording, a history of past calls with their processing status, and an
+     AI-drafted hiring-manager submittal on each completed recruiting call.
+     Talks to /api/phone/* (token, dial, calls, calls/:id, settings). */
+  function renderCalls(el) {
+    var cs = { consentAck: false, prospect: null };
+
+    el.innerHTML = head("Calls",
+      "Call candidates from the browser. Every call can be recorded, transcribed, and turned into a hiring-manager submittal. Recording only happens after your workspace attests it has lawful consent (Recording settings, below) and you confirm you will disclose it on the call.") +
+      '<div class="vt-view">' +
+        '<div id="clSoft"></div>' +
+        '<div id="clDialer"></div>' +
+        '<div id="clSettings"></div>' +
+        '<h3 style="margin:20px 0 8px;font-size:14px;color:var(--text-muted)">Call history</h3>' +
+        '<div id="clHistory">' + loading() + "</div>" +
+      "</div>";
+
+    /* ---- small helpers ---- */
+    function prospectName(p) {
+      if (!p) return "";
+      return p.fullName || ((p.firstName || "") + " " + (p.lastName || "")).trim() || p.name || "";
+    }
+    function fmtWhen(s) {
+      if (!s) return "";
+      try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+      catch (e) { return esc(String(s)); }
+    }
+    function fmtDur(sec) {
+      sec = parseInt(sec, 10) || 0;
+      var m = Math.floor(sec / 60), s = sec % 60;
+      return m + "m " + (s < 10 ? "0" : "") + s + "s";
+    }
+    function statusBadge(status) {
+      var v = String(status || "").toLowerCase();
+      var map = {
+        recording: ["Recording", "var(--info,#3b82f6)"],
+        transcribing: ["Transcribing", "var(--warn)"],
+        analyzing: ["Analyzing", "var(--warn)"],
+        complete: ["Complete", "var(--ok)"],
+        completed: ["Complete", "var(--ok)"],
+        scored: ["Complete", "var(--ok)"],
+        failed: ["Failed", "var(--danger)"]
+      };
+      var m = map[v] || [(status ? (String(status).charAt(0).toUpperCase() + String(status).slice(1)) : "Pending"), "var(--text-dim)"];
+      return '<span style="display:inline-flex;align-items:center;gap:6px;flex:none;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:4px;color:' + m[1] + ';border:1px solid ' + m[1] + '">' +
+        '<span style="width:7px;height:7px;border-radius:50%;background:currentColor"></span>' + esc(m[0]) + "</span>";
+    }
+    function fitBadge(fit) {
+      var f = String(fit).toLowerCase();
+      var color = (f.indexOf("strong") >= 0 || f.indexOf("high") >= 0) ? "var(--ok)"
+        : (f.indexOf("weak") >= 0 || f.indexOf("low") >= 0 || f.indexOf("no ") >= 0) ? "var(--danger)"
+          : "var(--warn)";
+      return '<span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:4px;color:' + color + ';border:1px solid ' + color + '">Fit: ' + esc(String(fit)) + "</span>";
+    }
+
+    /* ---- softphone status (POST /phone/token) ---- */
+    function loadToken() {
+      var host = $("#clSoft"); if (!host) return;
+      host.innerHTML = '<div class="vt-card" style="display:flex;align-items:center;gap:12px">' +
+        '<span id="clSoftDot" style="width:10px;height:10px;border-radius:50%;background:var(--text-dim);flex:none"></span>' +
+        '<div><div id="clSoftTitle" style="font-weight:600;font-size:14px">Connecting softphone...</div>' +
+        '<div id="clSoftSub" style="font-size:12.5px;color:var(--text-muted);margin-top:2px"></div></div></div>';
+      send("/phone/token", "POST").then(function (r) {
+        var dot = $("#clSoftDot"), title = $("#clSoftTitle"), sub = $("#clSoftSub");
+        if (!dot) return;
+        if (r.ok && r.data && r.data.token) {
+          dot.style.background = "var(--ok)";
+          title.textContent = "Softphone ready";
+          sub.textContent = "Connected. In-browser audio uses the Telnyx WebRTC client, which loads automatically once calling is fully configured.";
+        } else if (r.status === 404 || r.status === 409) {
+          dot.style.background = "var(--warn)";
+          title.textContent = "Calling not configured yet";
+          sub.innerHTML = 'Connect telephony to place calls from the browser. <a href="#setup" style="color:var(--brand)">Open Setup</a>.';
+        } else {
+          dot.style.background = "var(--warn)";
+          title.textContent = "Softphone unavailable";
+          sub.textContent = "Could not obtain a softphone token right now. Try again shortly.";
+        }
+      }).catch(function () {
+        var dot = $("#clSoftDot"), title = $("#clSoftTitle"), sub = $("#clSoftSub");
+        if (dot) { dot.style.background = "var(--warn)"; title.textContent = "Softphone unavailable"; if (sub) sub.textContent = "Could not reach the server."; }
+      });
+    }
+
+    /* ---- dialer + recording-consent gate ---- */
+    function recordingEnabled() {
+      if (cs.consentAck) return true;
+      var chk = $("#clConsentChk");
+      return !!(chk && chk.checked);
+    }
+    function updateRecState() {
+      var s = $("#clRecState"); if (!s) return;
+      s.textContent = recordingEnabled()
+        ? "Recording will be requested for this call (subject to workspace attestation)."
+        : "Recording off: this call will not be recorded.";
+    }
+    function paintDialer() {
+      var host = $("#clDialer"); if (!host) return;
+      var p = cs.prospect;
+      var nameLine = "";
+      if (p) {
+        nameLine = '<div style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-soft)">' +
+          '<div style="font-weight:600;font-size:14px">' + esc(prospectName(p) || "Candidate") + "</div>" +
+          (p.company ? '<div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">' + esc(p.company) + "</div>" : "") +
+          "</div>";
+      }
+      var prefill = p ? (p.phone || p.phoneNumber || "") : "";
+      host.innerHTML = '<div class="vt-card"><h3>Dialer</h3>' + nameLine +
+        (cs.consentAck ? "" :
+          '<div id="clConsent" style="border:1px solid var(--warn);background:var(--warn-bg);border-radius:10px;padding:12px 14px;margin:12px 0">' +
+            '<div style="display:flex;gap:8px;align-items:flex-start">' +
+            '<svg class="isvg" aria-hidden="true" style="flex:none;margin-top:1px;color:var(--warn)"><use href="#i-alert"/></svg>' +
+            '<div style="font-size:12.5px;color:var(--text-muted);line-height:1.55">Calls may be recorded. Recording only starts after your workspace has attested lawful consent (Recording settings, below) and you confirm, on this call, that you will disclose recording and have the required consent.</div></div>' +
+            '<label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:13px;color:var(--text);cursor:pointer">' +
+            '<input type="checkbox" id="clConsentChk" /> I will disclose recording and have consent for this call</label>' +
+          "</div>") +
+        '<div class="vt-form-grid" style="align-items:end">' +
+          '<div class="vt-field"><label>Candidate phone (E.164, e.g. +14155550123)</label>' +
+          '<input id="clPhone" type="tel" placeholder="+14155550123" value="' + esc(prefill) + '" /></div>' +
+        "</div>" +
+        '<div id="clDialMsg" style="font-size:12.5px;margin:10px 0"></div>' +
+        '<div style="display:flex;gap:12px;align-items:center;margin-top:6px">' +
+          '<button class="vt-btn vt-btn-primary" id="clCall" type="button" style="font-size:15px;padding:12px 22px"><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg> Call</button>' +
+          '<span id="clRecState" style="font-size:12px;color:var(--text-dim)"></span>' +
+        "</div></div>";
+      var chk = $("#clConsentChk");
+      if (chk) chk.addEventListener("change", updateRecState);
+      $("#clCall").addEventListener("click", placeCall);
+      updateRecState();
+    }
+    function placeCall() {
+      var msg = $("#clDialMsg"), btn = $("#clCall");
+      var to = (($("#clPhone") || {}).value || "").trim();
+      if (!/^\+?[0-9][0-9\s().-]{6,}$/.test(to)) {
+        msg.style.color = "var(--danger)";
+        msg.textContent = "Enter a valid phone number in E.164 format (for example, +14155550123).";
+        return;
+      }
+      var consent = recordingEnabled();
+      var orig = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = "Calling...";
+      msg.style.color = "var(--text-dim)"; msg.textContent = "";
+      var payload = { toNumber: to, consentAcknowledged: consent };
+      if (cs.prospect) payload.prospectId = cs.prospect.id;
+      send("/phone/dial", "POST", payload).then(function (r) {
+        btn.disabled = false; btn.innerHTML = orig;
+        if (r.status === 409) {
+          msg.style.color = "var(--warn)";
+          msg.textContent = (r.data && r.data.message) || "Calling is not fully configured, or recording consent has not been attested for this workspace. Open Recording settings below to attest consent, or connect telephony under Setup.";
+          return;
+        }
+        if (!r.ok) {
+          msg.style.color = "var(--danger)";
+          msg.textContent = (r.data && (r.data.error || r.data.message)) || "Could not place the call. Please try again.";
+          return;
+        }
+        if (consent) cs.consentAck = true; // banner collapses for the rest of the session once consent is given
+        msg.style.color = "var(--ok)";
+        msg.textContent = "Call started" + (consent ? " (recording requested)." : ".");
+        paintDialer();
+        loadHistory();
+      }).catch(function () {
+        btn.disabled = false; btn.innerHTML = orig;
+        msg.style.color = "var(--danger)"; msg.textContent = "Could not reach the server. Please try again.";
+      });
+    }
+
+    /* ---- recording settings (GET/POST /phone/settings) ---- */
+    function loadSettings() {
+      var host = $("#clSettings"); if (!host) return;
+      host.innerHTML = '<div class="vt-card"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px">' +
+        '<h3 style="margin:0;font-size:14px">Recording settings</h3>' +
+        '<button class="vt-btn vt-btn-ghost" id="clSetToggle" type="button">Show</button></div>' +
+        '<div id="clSetBody" style="display:none;margin-top:12px"></div></div>';
+      var toggle = $("#clSetToggle");
+      toggle.addEventListener("click", function () {
+        var body = $("#clSetBody");
+        if (body.style.display === "none") { body.style.display = "block"; body.innerHTML = loading(); toggle.textContent = "Hide"; fetchSettings(); }
+        else { body.style.display = "none"; toggle.textContent = "Show"; }
+      });
+    }
+    function fetchSettings() {
+      var body = $("#clSetBody"); if (!body) return;
+      send("/phone/settings", "GET").then(function (r) {
+        var d = (r.ok && r.data) ? (r.data.settings || r.data) : {};
+        paintSettings(body, d, r.ok);
+      }).catch(function () { paintSettings(body, {}, false); });
+    }
+    function paintSettings(body, d, ok) {
+      var attested = !!d.recordingConsentAttested;
+      var mode = d.recordingMode || "manual";
+      var modes = [
+        ["manual", "Manual (record only when the recruiter confirms consent on the call)"],
+        ["always", "Always (record every call, only where lawful and disclosed)"],
+        ["never", "Never (do not record any call)"]
+      ];
+      var opts = modes.map(function (m) { return '<option value="' + m[0] + '"' + (mode === m[0] ? " selected" : "") + ">" + esc(m[1]) + "</option>"; }).join("");
+      body.innerHTML =
+        (ok ? "" : '<div class="vt-warn" style="margin-top:0">Could not load recording settings from the server. Changes may not save until calling is configured.</div>') +
+        '<div class="vt-hint" style="margin:0 0 10px">Admins attest that the workspace has a lawful basis to record calls (for example, one-party or all-party consent as required in your jurisdiction). Recording is blocked for the whole workspace until this is attested.</div>' +
+        '<label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text);cursor:pointer;margin-bottom:12px">' +
+          '<input type="checkbox" id="clSetAttest"' + (attested ? " checked" : "") + " /> Our workspace has attested lawful consent to record calls</label>" +
+        '<div class="vt-field" style="max-width:520px"><label>Recording mode</label><select id="clSetMode">' + opts + "</select></div>" +
+        '<div style="display:flex;gap:12px;align-items:center;margin-top:12px">' +
+          '<button class="vt-btn vt-btn-primary" id="clSetSave" type="button">Save recording settings</button>' +
+          '<span id="clSetMsg" style="font-size:12.5px;color:var(--text-dim)"></span>' +
+        "</div>";
+      $("#clSetSave").addEventListener("click", function () {
+        var msg = $("#clSetMsg"), self = this;
+        var payload = { recordingConsentAttested: $("#clSetAttest").checked, recordingMode: $("#clSetMode").value };
+        self.disabled = true;
+        send("/phone/settings", "POST", payload).then(function (r) {
+          self.disabled = false;
+          if (r.ok) { msg.style.color = "var(--ok)"; msg.textContent = "Saved."; }
+          else if (r.status === 404 || r.status === 409) { msg.style.color = "var(--warn)"; msg.textContent = "Calling is not configured yet, so this could not be saved."; }
+          else { msg.style.color = "var(--danger)"; msg.textContent = "Could not save. Please try again."; }
+        }).catch(function () { self.disabled = false; msg.style.color = "var(--danger)"; msg.textContent = "Could not reach the server."; });
+      });
+    }
+
+    /* ---- call history + detail (GET /phone/calls, GET /phone/calls/:id) ---- */
+    function callRow(c) {
+      var nm = c.candidateName || c.prospectName || (c.prospect && prospectName(c.prospect)) || c.toNumber || c.number || "Candidate";
+      var num = c.toNumber || c.number || (c.prospect && c.prospect.phone) || "";
+      var when = fmtWhen(c.createdAt || c.startedAt || c.date);
+      var dur = (c.durationSec != null) ? fmtDur(c.durationSec) : (c.duration || "");
+      return '<div class="vt-call" data-call="' + esc(String(c.id)) + '">' +
+        '<div class="vt-call-top">' +
+          '<svg class="isvg" aria-hidden="true" style="color:var(--brand);flex:none"><use href="#i-phone"/></svg>' +
+          '<div style="flex:1;min-width:0">' +
+            '<div class="vt-call-name">' + esc(nm) + (num ? ' <span>&middot; ' + esc(num) + "</span>" : "") + "</div>" +
+            '<div class="vt-call-sub" style="color:var(--text-muted)">' + esc(when) + (dur ? (" &middot; " + esc(dur)) : "") + "</div>" +
+          "</div>" +
+          statusBadge(c.status) +
+        "</div>" +
+        '<div class="vt-call-detail vt-detail" data-detail="' + esc(String(c.id)) + '" style="display:none;margin-top:12px"></div></div>';
+    }
+    function loadHistory() {
+      var host = $("#clHistory"); if (!host) return;
+      send("/phone/calls?motion=" + motion, "GET").then(function (r) {
+        if (r.status === 404 || r.status === 409) {
+          host.innerHTML = '<div class="vt-empty">Calling is not configured yet. Once telephony is connected, your calls appear here. <a href="#setup" style="color:var(--brand)">Open Setup</a>.</div>';
+          return;
+        }
+        if (!r.ok) { host.innerHTML = needsSetup(); return; }
+        var calls = (r.data && r.data.calls) || [];
+        if (!calls.length) { host.innerHTML = '<div class="vt-empty">No calls yet. Dial a candidate above to place your first call.</div>'; return; }
+        host.innerHTML = calls.map(callRow).join("");
+        Array.prototype.forEach.call(host.querySelectorAll(".vt-call"), function (row) {
+          row.addEventListener("click", function (e) {
+            if (e.target.closest(".vt-call-detail")) return;
+            toggleCall(row.getAttribute("data-call"));
+          });
+        });
+      }).catch(function () { host.innerHTML = needsSetup(); });
+    }
+    function findDetail(id) {
+      var nodes = document.querySelectorAll(".vt-detail[data-detail]");
+      for (var i = 0; i < nodes.length; i++) { if (nodes[i].getAttribute("data-detail") === String(id)) return nodes[i]; }
+      return null;
+    }
+    function toggleCall(id) {
+      var det = findDetail(id); if (!det) return;
+      if (det.style.display !== "none") { det.style.display = "none"; det.innerHTML = ""; return; }
+      det.style.display = "block"; det.innerHTML = loading();
+      send("/phone/calls/" + encodeURIComponent(id), "GET").then(function (r) {
+        if (!r.ok || !r.data) { det.innerHTML = '<p style="color:var(--text-muted)">Could not load this call.</p>'; return; }
+        var c = r.data.call || r.data;
+        det.innerHTML = callDetail(c);
+        wireDetail(det, c);
+      }).catch(function () { det.innerHTML = '<p style="color:var(--text-muted)">Could not load this call.</p>'; });
+    }
+    function lists(label, arr) {
+      if (!arr || !arr.length) return "";
+      return '<div style="margin-top:10px"><div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px">' + esc(label) + "</div>" +
+        '<ul style="margin:0;padding-left:18px;font-size:13px;color:var(--text-muted);line-height:1.6">' +
+        arr.map(function (x) { return "<li>" + esc(String(x)) + "</li>"; }).join("") + "</ul></div>";
+    }
+    function callDetail(c) {
+      var a = c.analysis || {};
+      var html = "";
+      if (a.headline) html += '<div style="font-size:15px;font-weight:600;margin-bottom:10px">' + esc(a.headline) + "</div>";
+      if (a.kind === "recruiting") {
+        var fields = [
+          ["Current role", a.currentRole],
+          ["Compensation", a.comp],
+          ["Availability", a.availability],
+          ["Location", a.location]
+        ];
+        var chips = fields.filter(function (f) { return f[1]; }).map(function (f) {
+          return '<span class="vt-chip"><b>' + esc(f[0]) + ":</b> " + esc(String(f[1])) + "</span>";
+        }).join("");
+        var fitB = a.fit ? fitBadge(a.fit) : "";
+        if (chips || fitB) html += '<div class="vt-meta" style="margin-top:0;margin-bottom:12px">' + chips + fitB + "</div>";
+        html += lists("Motivations", a.motivations);
+        html += lists("Strengths", a.strengths);
+        html += lists("Concerns", a.concerns);
+        if (a.submittal) {
+          html += '<div class="vt-card" style="margin-top:14px;background:var(--bg-soft)">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">' +
+              '<h3 style="font-size:14px;margin:0">Hiring-manager submittal</h3>' +
+              '<button class="vt-btn" data-copy-submittal type="button"><svg class="isvg" aria-hidden="true"><use href="#i-clipboard"/></svg> Copy submittal</button>' +
+            "</div>" +
+            '<div style="white-space:pre-wrap;font-size:13.5px;line-height:1.6;color:var(--text)">' + esc(a.submittal) + "</div>" +
+          "</div>";
+        }
+      }
+      if (c.notes) html += '<div style="margin-top:14px"><div class="vt-section" style="margin-top:0">Recruiter notes</div>' +
+        '<div style="font-size:13px;color:var(--text-muted);white-space:pre-wrap;line-height:1.6">' + esc(c.notes) + "</div></div>";
+      var tr = c.transcript;
+      if (typeof tr === "string" && tr) {
+        html += '<div class="vt-transcript"><div class="vt-tr-h" style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Transcript</div>' +
+          '<div class="vt-tr-body" style="white-space:pre-wrap">' + esc(tr) + "</div></div>";
+      } else if (tr && tr.length) {
+        html += '<div class="vt-transcript"><div class="vt-tr-h" style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Transcript</div><div class="vt-tr-body">' +
+          tr.map(function (t) {
+            var role = String(t.role || t.speaker || "").toLowerCase();
+            var isRec = role.indexOf("recruit") >= 0 || role === "agent" || role === "you";
+            var who = isRec ? "Recruiter" : "Candidate";
+            return '<div class="vt-turn ' + (isRec ? "agent" : "candidate") + '"><b>' + who + ":</b> " + esc(t.text || t.content || "") + "</div>";
+          }).join("") + "</div></div>";
+      }
+      if (c.recordingUrl) html += '<div style="margin-top:12px"><a class="vt-btn" href="' + esc(c.recordingUrl) + '" target="_blank" rel="noopener">Recording</a></div>';
+      return html || '<p style="color:var(--text-muted)">This call has been placed. Transcript and analysis appear here once processing is complete.</p>';
+    }
+    function wireDetail(det, c) {
+      var cp = det.querySelector("[data-copy-submittal]");
+      if (cp) cp.addEventListener("click", function () {
+        var text = (c.analysis && c.analysis.submittal) || "";
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () { toast("Submittal copied"); }).catch(function () { toast("Copy failed"); });
+        } else { toast("Copy not supported on this browser."); }
+      });
+    }
+
+    /* ---- boot ---- */
+    // A candidate can be passed via the hash detail segment: #calls/<prospectId>.
+    var pid = currentDetail();
+    if (pid) {
+      send("/prospects", "GET").then(function (r) {
+        var list = (r.data && r.data.prospects) || [];
+        cs.prospect = list.filter(function (p) { return String(p.id) === String(pid); })[0] || null;
+        paintDialer();
+      }).catch(function () {});
+    }
+    loadToken();
+    paintDialer();
+    loadSettings();
+    loadHistory();
+  }
+
   /* ---------------- AI Vetting (inbound conversational screening) --------------
      A "vetting desk" binds one Job Description to one phone number and the
      recruiter's cloned voice. Candidates opt in (a short form), then CALL the
@@ -10334,6 +10688,7 @@
       if (d.phoneNumber) actions += '<button class="vt-btn" data-vtact="detach" data-id="' + d.id + '">Detach #</button>';
       actions += '<button class="vt-btn" data-vtact="copy" data-id="' + d.id + '" data-url="' + esc(optinUrl) + '">Opt-in link</button>' +
         '<button class="vt-btn" data-vtact="viewcalls" data-id="' + d.id + '">Calls (' + (d.callCount || 0) + ")</button>" +
+        '<button class="vt-btn" data-vtact="optimize" data-id="' + d.id + '"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg> Optimizer</button>' +
         '<button class="vt-btn vt-btn-danger" data-vtact="del" data-id="' + d.id + '"><svg class="isvg" aria-hidden="true"><use href="#i-trash"/></svg></button>';
       var chips =
         '<span class="vt-chip"><b>' + esc(d.phoneNumber || "no number") + "</b></span>" +
@@ -10455,6 +10810,7 @@
         return;
       }
       if (act === "viewcalls") { vt.tab = "calls"; vt.deskId = id; tabBar(); paint(); return; }
+      if (act === "optimize") { vt.tab = "optimizer"; vt.deskId = id; tabBar(); paint(); return; }
       if (act === "detach") {
         if (!confirm("Unbind this number from the desk? The number stops answering for this JD and frees up to assign elsewhere.")) return;
         deskMsg(id, "Detaching number…");
@@ -10686,12 +11042,45 @@
           return '<option value="' + d.id + '"' + (vt.deskId === d.id ? " selected" : "") + ">" + esc(d.name) + "</option>";
         }).join("");
         api("/vetting/optimizer?deskId=" + encodeURIComponent(vt.deskId)).then(function (o) {
+          var desk = desks.filter(function (d) { return d.id === vt.deskId; })[0] || {};
           body.innerHTML =
-            '<div class="vt-card"><div class="vt-select-wrap"><label>Desk</label><select id="vtOptDesk">' + opts + "</select></div></div>" +
-            optHealthCard(o) + optVoiceCard(o) + optTurnCard(o) + optLearnCard(o) + optRunCard() + optHistoryCard(o);
+            optHeaderCard(o, opts, desk) +
+            optHealthCard(o) + optVoiceCard(o) + optTurnCard(o) + optRunCard(o) + optHistoryCard(o);
           wireOptimizer(body, o);
         }).catch(function () { body.innerHTML = needsSetup(); });
       }).catch(function () { body.innerHTML = needsSetup(); });
+    }
+
+    /* ---- header strip: desk + readiness + the one next step ---- */
+    function optHeaderCard(o, opts, desk) {
+      var r = (o && o.readiness) || {};
+      function chip(ok, okLabel, fixLabel, fixTitle) {
+        return '<span class="vt-ready' + (ok ? " ok" : "") + '" title="' + esc(ok ? "" : (fixTitle || "")) + '">' +
+          (ok ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : '<svg class="isvg" aria-hidden="true"><use href="#i-alert"/></svg>') +
+          esc(ok ? okLabel : fixLabel) + "</span>";
+      }
+      var chips =
+        chip(r.llm, "AI brain", "AI brain: add server key", "Set ANTHROPIC_API_KEY on the server. Powers scoring, optimizing, stress tests, and prompt checks.") +
+        chip(r.voiceId, "Cloned voice", "Pick a cloned voice", "Edit the desk and choose your cloned voice. The agent speaks every call in it.") +
+        chip(r.voiceKey, "Voice previews", "Voice previews: add key", "Set VOICE_CLONE_API_KEY (your ElevenLabs key) to hear tuning previews and rehearsals.") +
+        chip(r.live && r.phone, "Taking calls", desk.status === "live" ? "Bind a number" : "Desk not live", "Go live on the Vetting Desks tab so candidates can call in.");
+      // The single most useful next action, given the state. One banner, one CTA.
+      var t = (o && o.trend) || {}; var l = (o && o.learning) || {};
+      var hasEvidence = (t.scoredCalls || 0) > 0 || (l.lastSimulation && l.lastSimulation.results && l.lastSimulation.results.length);
+      var hasProposal = (l.revisions || []).some(function (x) { return x.status === "proposed"; });
+      var banner = null; // [text, ctaLabel, ctaAction]
+      if (!r.llm) banner = ["The optimizer’s brain is off: everything on this page needs the server’s Anthropic key.", null, null];
+      else if (!hasEvidence) banner = ["Nothing to learn from yet. Run a stress test: five synthetic candidates call your agent right now, no phone needed.", "Run first stress test", "sim"];
+      else if (hasProposal) banner = ["A proposed revision is waiting below. Read the changelog and apply it to push the improved agent live.", "Review proposals", "history"];
+      else if (!l.autoLearn) banner = ["Turn on self-learning and the agent keeps improving from every few scored calls, hands off.", "Turn it on", "learn"];
+      var bannerHtml = banner
+        ? '<div class="vt-next-up"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg><span>' + banner[0] + "</span>" +
+          (banner[1] ? '<button class="vt-btn vt-btn-primary" data-vtnext="' + banner[2] + '">' + banner[1] + "</button>" : "") + "</div>"
+        : "";
+      return '<div class="vt-card"><div class="vt-opt-head">' +
+        '<div class="vt-select-wrap"><label>Desk</label><select id="vtOptDesk">' + opts + "</select>" +
+        (desk.status ? statusPill(desk.status) : "") + "</div>" +
+        '<div class="vt-readies">' + chips + "</div></div>" + bannerHtml + "</div>";
     }
 
     /* ---- how human the agent sounds, from its scored calls ---- */
@@ -10714,9 +11103,10 @@
     }
 
     /* ---- ElevenLabs delivery tuning ---- */
-    function sliderRow(id, label, val, min, max, step, hint) {
+    function sliderRow(id, label, val, min, max, step, hint, ends) {
       return '<div class="vt-slide"><div class="vt-slide-h"><label for="' + id + '">' + label + '</label><span class="vt-slide-val" id="' + id + 'Val">' + val + "</span></div>" +
         '<input type="range" id="' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" />' +
+        (ends ? '<div class="vt-slide-ends"><span>' + ends[0] + "</span><span>" + ends[1] + "</span></div>" : "") +
         '<div class="vt-hint">' + hint + "</div></div>";
     }
     function optVoiceCard(o) {
@@ -10731,13 +11121,13 @@
         '<div class="vt-presets">' + chips + "</div>" +
         '<div class="vt-sliders">' +
         sliderRow("vtStab", "Expressiveness (stability)", v.stability, 0, 1, 0.01,
-          "Lower = livelier, more varied intonation. 0.30 to 0.50 is the natural band; above 0.60 goes flat and monotone.") +
+          "0.30 to 0.50 is the natural band; above 0.60 goes flat and monotone.", ["livelier", "steadier"]) +
         sliderRow("vtSim", "Voice match (similarity)", v.similarityBoost, 0, 1, 0.01,
-          "How tightly it holds your cloned timbre. 0.75 to 0.85 sounds like you; near 1.0 gets over-enunciated, like a news anchor.") +
+          "0.75 to 0.85 sounds like you; near 1.0 gets over-enunciated, like a news anchor.", ["looser", "exact match"]) +
         sliderRow("vtStyle", "Style exaggeration", v.style, 0, 0.6, 0.01,
-          "Keep at or near zero on live calls. Higher adds latency and can sound like performing.") +
+          "Keep at or near zero on live calls. Higher adds latency and can sound like performing.", ["natural", "performing"]) +
         sliderRow("vtSpeed", "Speaking speed", v.speed, 0.7, 1.2, 0.01,
-          "0.90 to 1.10 is the natural conversation band. A touch under 1.0 reads calm and senior.") +
+          "0.90 to 1.10 is the natural band. A touch under 1.0 reads calm and senior.", ["slower", "faster"]) +
         "</div>" +
         '<label class="vt-must" style="margin-top:12px"><input type="checkbox" id="vtBoost"' + (v.speakerBoost ? " checked" : "") + ' /><span>Speaker boost (extra presence on phone-quality audio)</span></label>' +
         '<div class="vt-formactions" style="margin-top:16px">' +
@@ -10754,9 +11144,9 @@
         '<label class="vt-must" style="margin-top:14px"><input type="checkbox" id="vtTtInt"' + (t.interruptions ? " checked" : "") + ' /><span>Callers can interrupt the agent (barge-in), the strongest single realism signal</span></label>' +
         '<div class="vt-sliders" style="margin-top:14px">' +
         sliderRow("vtTtSens", "Responsiveness", t.interruptionSensitivity, 0, 1, 0.05,
-          "Higher = the agent takes its turn sooner after the caller pauses. Lower = it waits out longer pauses (better for slow, thoughtful callers). 0.6 matches the engine’s natural timing.") +
+          "Higher = it takes its turn sooner after a pause; lower = it waits out slow, thoughtful callers. 0.6 matches the engine’s natural timing.", ["patient", "quick"]) +
         sliderRow("vtTtIdle", "Silence check-in (seconds)", t.idleTimeoutSec, 3, 30, 1,
-          "After this much caller silence, the agent gently re-engages instead of sitting in dead air.") +
+          "After this much caller silence, the agent gently re-engages instead of sitting in dead air.", ["3s", "30s"]) +
         "</div>" +
         '<div class="vt-form-grid" style="margin-top:12px">' +
         '<div class="vt-field"><label>Check-in line (said in its own words)</label><input id="vtTtRem" value="' + esc(t.idleReminder || "") + '" placeholder="No rush at all... take your time." />' +
@@ -10767,34 +11157,32 @@
         '<div class="vt-formactions" style="margin-top:14px"><button class="vt-btn vt-btn-primary" id="vtTurnSave">Save + push to live agent</button></div></div>';
     }
 
-    /* ---- auto-learn ---- */
-    function optLearnCard(o) {
+    /* ---- improve: optimize / stress test / prompt check + self-learning ---- */
+    function optRunCard(o) {
       var l = (o && o.learning) || { autoLearn: false, minCallsBetweenRuns: 3, callsSinceLastRun: 0 };
+      var t = (o && o.trend) || {};
       var cad = [2, 3, 5, 10].map(function (n) {
         return '<option value="' + n + '"' + (l.minCallsBetweenRuns === n ? " selected" : "") + ">every " + n + " scored calls</option>";
       }).join("");
       var status = l.lastRunAt
         ? (l.callsSinceLastRun + " scored call" + (l.callsSinceLastRun === 1 ? "" : "s") + " since the last pass (" + fmtDate(l.lastRunAt) + ")")
         : "No optimizer pass has run yet.";
-      return '<div class="vt-card"><h3>Self-learning</h3>' +
-        '<div class="vt-hint" style="margin-top:6px">When this is on, the agent studies its own recent transcripts after every few scored calls: what sounded robotic, what landed, how callers reacted. It rewrites its delivery coaching, nudges the voice settings, and pushes the improved version to the live line automatically. Every change is versioned below and can be rolled back.</div>' +
-        '<div class="vt-learnrow">' +
+      // Until there are real scored calls, the stress test IS the main move:
+      // lead with it and let the call-driven buttons follow.
+      var noCalls = !(t.scoredCalls > 0);
+      var btnOpt = '<button class="vt-btn' + (noCalls ? "" : " vt-btn-primary") + '" id="vtRunOpt">Optimize from calls</button>';
+      var btnSim = '<button class="vt-btn' + (noCalls ? " vt-btn-primary" : "") + '" id="vtRunSim">Run stress test</button>';
+      return '<div class="vt-card"><h3>Improve the agent</h3>' +
+        '<div class="vt-hint" style="margin-top:6px"><b>Stress test</b> plays five synthetic candidates against your exact live prompt (the skeptic who asks if it’s an AI, the rambler, the star, the confident-but-unqualified, one built for this role) and grades each for realism. <b>Optimize</b> studies recent real calls plus the last stress test and proposes a coaching revision. <b>3 variants</b> optimizes through three lenses (warmth, brevity, energy) so you pick the one that sounds like you. <b>Check prompt</b> reviews the instructions for gaps.</div>' +
+        '<div class="vt-actions" style="border-top:0;padding-top:0;margin-top:14px">' +
+        (noCalls ? btnSim + btnOpt : btnOpt + btnSim) +
+        '<button class="vt-btn" id="vtRunAuto">Generate 3 variants</button>' +
+        '<button class="vt-btn" id="vtRunLint">Check prompt</button></div>' +
+        '<div id="vtOptResult"></div>' +
+        '<div class="vt-learnrow" style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px">' +
         '<label class="vt-must"><input type="checkbox" id="vtAutoLearn"' + (l.autoLearn ? " checked" : "") + ' /><span>Learn and improve automatically</span></label>' +
         '<select id="vtCadence">' + cad + "</select>" +
-        '<span class="vt-hint">' + esc(status) + "</span></div></div>";
-    }
-
-    /* ---- run: optimize / stress test / prompt check ---- */
-    function optRunCard() {
-      return '<div class="vt-card"><h3>Optimize now</h3>' +
-        '<div class="vt-hint" style="margin-top:6px"><b>Optimize</b> studies recent real calls (plus the last stress test) and proposes a new coaching revision. <b>Stress test</b> plays five synthetic candidates against your exact live prompt: the skeptic who asks if it’s an AI, the rambler, the star, the confident-but-unqualified, and one built for this role; each conversation is graded for realism. <b>Check prompt</b> reviews the agent’s instructions for gaps before any calls happen.</div>' +
-        '<div class="vt-actions" style="border-top:0;padding-top:0;margin-top:14px">' +
-        '<button class="vt-btn vt-btn-primary" id="vtRunOpt">Optimize from calls</button>' +
-        '<button class="vt-btn" id="vtRunAuto">Generate 3 variants</button>' +
-        '<button class="vt-btn" id="vtRunSim">Run stress test</button>' +
-        '<button class="vt-btn" id="vtRunLint">Check prompt</button></div>' +
-        '<div class="vt-hint" style="margin-top:8px"><b>Generate 3 variants</b> is Auto mode: the same call evidence optimized through three different coaching lenses (warmth, brevity, energy mirroring). Compare them and apply the one that fits your style.</div>' +
-        '<div id="vtOptResult"></div></div>';
+        '<span class="vt-hint">' + esc(status) + " With this on, every cadence of scored calls triggers an optimizer pass that applies itself and updates the live agent, all versioned and reversible below.</span></div></div>";
     }
 
     function revisionCard(r, isProposal) {
@@ -10875,9 +11263,42 @@
           speakerBoost: !!($("#vtBoost") && $("#vtBoost").checked)
         };
       }
-      ["vtStab", "vtSim", "vtStyle", "vtSpeed", "vtTtSens", "vtTtIdle"].forEach(function (id) {
-        var el = $("#" + id);
-        if (el) el.addEventListener("input", function () { var v = $("#" + id + "Val"); if (v) v.textContent = el.value; });
+      // Live value labels + honest unsaved-state: the moment anything changes,
+      // that card's save button lights up and says so.
+      function markDirty(saveId) {
+        var b = $("#" + saveId);
+        if (b && !b.classList.contains("vt-attn")) {
+          b.classList.add("vt-attn");
+          b.textContent = "Save unsaved changes + push live";
+        }
+      }
+      [["vtStab", "vtVoiceSave"], ["vtSim", "vtVoiceSave"], ["vtStyle", "vtVoiceSave"], ["vtSpeed", "vtVoiceSave"],
+       ["vtTtSens", "vtTurnSave"], ["vtTtIdle", "vtTurnSave"]].forEach(function (pair) {
+        var el = $("#" + pair[0]);
+        if (el) el.addEventListener("input", function () {
+          var v = $("#" + pair[0] + "Val"); if (v) v.textContent = el.value;
+          markDirty(pair[1]);
+        });
+      });
+      [["vtBoost", "vtVoiceSave"], ["vtTtInt", "vtTurnSave"], ["vtTtRem", "vtTurnSave"], ["vtTtBack", "vtTurnSave"]].forEach(function (pair) {
+        var el = $("#" + pair[0]);
+        if (el) el.addEventListener(el.type === "checkbox" ? "change" : "input", function () { markDirty(pair[1]); });
+      });
+      // Next-step banner CTA: route to the right control for the current state.
+      Array.prototype.forEach.call(body.querySelectorAll("[data-vtnext]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var next = btn.getAttribute("data-vtnext");
+          if (next === "sim") { var b = $("#vtRunSim"); if (b) { b.scrollIntoView({ behavior: "smooth", block: "center" }); b.click(); } return; }
+          if (next === "history") {
+            var h = body.querySelector(".vt-rev-proposal") || body.querySelector(".vt-rev");
+            if (h) h.scrollIntoView({ behavior: "smooth", block: "center" });
+            return;
+          }
+          if (next === "learn") {
+            var al = $("#vtAutoLearn");
+            if (al) { al.scrollIntoView({ behavior: "smooth", block: "center" }); if (!al.checked) { al.checked = true; al.dispatchEvent(new Event("change")); } }
+          }
+        });
       });
       Array.prototype.forEach.call(body.querySelectorAll("[data-vtpreset]"), function (btn) {
         btn.addEventListener("click", function () {
@@ -10897,6 +11318,7 @@
         send("/vetting/optimizer", "POST", { action: "settings", deskId: vt.deskId, voiceTuning: readTuning() }).then(function (r) {
           vs.disabled = false;
           if (!r.ok) { toast("Save failed"); return; }
+          vs.classList.remove("vt-attn"); vs.textContent = "Save + push to live agent";
           toast(r.data && r.data.pushed ? "Saved and pushed to the live agent" : "Saved. Goes out next time the desk goes live.");
         }).catch(function () { vs.disabled = false; toast("Couldn’t reach the server."); });
       });
@@ -10936,6 +11358,7 @@
         }).then(function (r) {
           ts.disabled = false;
           if (!r.ok) { toast("Save failed"); return; }
+          ts.classList.remove("vt-attn"); ts.textContent = "Save + push to live agent";
           toast(r.data && r.data.pushed ? "Saved and pushed to the live agent" : "Saved. Goes out next time the desk goes live.");
         }).catch(function () { ts.disabled = false; toast("Couldn’t reach the server."); });
       });
@@ -10972,6 +11395,7 @@
             out.innerHTML = render(r.data || {});
             wireApply(out);
             wireRehearse(out);
+            out.scrollIntoView({ behavior: "smooth", block: "nearest" });
           }).catch(function () { btn.disabled = false; btn.innerHTML = idle; toast("Couldn’t reach the server."); });
         });
       }
