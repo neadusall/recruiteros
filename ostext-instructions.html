@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>OS Text: Setup &amp; Texting Playbook | Lume</title>
+<style>
+  :root {
+    --accent: #2e5bd7;
+    --accent-ink: #ffffff;
+    --ink: #1b2231;
+    --ink-soft: #4b5568;
+    --ink-faint: #7b8497;
+    --ground: #ffffff;
+    --ground-raised: #f6f7fa;
+    --line: #e3e6ee;
+    --bubble-in: #eef0f5;
+    --bubble-in-ink: #1b2231;
+    --good: #1a7f4e;
+    --warn: #b3520e;
+    --bad: #b3261e;
+    --good-bg: #e9f6ef;
+    --warn-bg: #fdf1e5;
+    --bad-bg: #fdecea;
+    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --accent: #6d8ef2;
+      --accent-ink: #0d1220;
+      --ink: #e7eaf2;
+      --ink-soft: #b4bccb;
+      --ink-faint: #828b9d;
+      --ground: #12151d;
+      --ground-raised: #1a1e29;
+      --line: #2a3040;
+      --bubble-in: #232937;
+      --bubble-in-ink: #e7eaf2;
+      --good: #5fce97;
+      --warn: #e8a266;
+      --bad: #ef8b84;
+      --good-bg: #17281f;
+      --warn-bg: #2c2118;
+      --bad-bg: #2c1a19;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  .eyebrow {
+    font-size: 12px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 12px;
+  }
+  h1 {
+    font-size: 34px; line-height: 1.15; font-weight: 700; letter-spacing: -0.015em;
+    text-wrap: balance; margin: 0 0 12px;
+  }
+  .lede { font-size: 17px; color: var(--ink-soft); max-width: 60ch; margin: 0 0 8px; }
+  .meta { font-size: 13px; color: var(--ink-faint); }
+
+  h2 {
+    font-size: 22px; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance;
+    margin: 56px 0 8px; padding-top: 24px; border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 16.5px; font-weight: 650; margin: 28px 0 6px; }
+  p { margin: 10px 0; max-width: 68ch; }
+  p, li { color: var(--ink); }
+  .soft { color: var(--ink-soft); }
+  ul, ol { padding-left: 22px; margin: 10px 0; }
+  li { margin: 5px 0; max-width: 64ch; }
+  strong { font-weight: 650; }
+
+  .toc {
+    background: var(--ground-raised); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 22px; margin: 28px 0 0;
+  }
+  .toc-title { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px; }
+  .toc ol { margin: 0; padding-left: 20px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); text-decoration: underline; }
+
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  code, .path {
+    font-family: var(--mono); font-size: 0.86em;
+    background: var(--ground-raised); border: 1px solid var(--line);
+    border-radius: 5px; padding: 1px 6px; white-space: nowrap;
+  }
+
+  .ui {
+    display: inline-block; font-size: 0.86em; font-weight: 600;
+    background: var(--ground-raised); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 8px; white-space: nowrap;
+  }
+
+  .steps { list-style: none; padding: 0; margin: 18px 0; display: flex; flex-direction: column; gap: 14px; }
+  .step {
+    display: grid; grid-template-columns: 40px 1fr; gap: 14px;
+    background: var(--ground-raised); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; max-width: none;
+  }
+  .step-num {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--accent); color: var(--accent-ink);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px; margin-top: 2px;
+  }
+  .step h4 { margin: 2px 0 4px; font-size: 15.5px; font-weight: 650; }
+  .step p { margin: 4px 0; font-size: 14.5px; color: var(--ink-soft); }
+  .step .fields { font-size: 13.5px; color: var(--ink-faint); }
+
+  .thread {
+    background: var(--ground-raised); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 18px 14px; margin: 14px 0 22px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .thread-label {
+    font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-faint); margin-bottom: 4px;
+  }
+  .msg { max-width: 82%; padding: 10px 14px; font-size: 15px; line-height: 1.45; border-radius: 16px; }
+  .msg.in { align-self: flex-start; background: var(--bubble-in); color: var(--bubble-in-ink); border-bottom-left-radius: 5px; }
+  .msg.out { align-self: flex-end; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 5px; }
+  .msg-note { font-size: 12.5px; color: var(--ink-faint); align-self: flex-end; margin-top: -2px; }
+  .msg-note.left { align-self: flex-start; }
+
+  .dd { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
+  @media (max-width: 620px) { .dd { grid-template-columns: 1fr; } }
+  .dd-col { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--ground-raised); }
+  .dd-col h4 { margin: 0 0 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  .dd-col.do h4 { color: var(--good); }
+  .dd-col.dont h4 { color: var(--bad); }
+  .dd-col ul { margin: 0; padding-left: 18px; }
+  .dd-col li { font-size: 14.5px; margin: 6px 0; }
+
+  .callout { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 14.5px; border: 1px solid transparent; }
+  .callout p { margin: 4px 0; font-size: inherit; }
+  .callout.good { background: var(--good-bg); border-color: color-mix(in srgb, var(--good) 30%, transparent); }
+  .callout.warn { background: var(--warn-bg); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+  .callout .tag { font-weight: 700; font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; display: block; margin-bottom: 2px; }
+  .callout.good .tag { color: var(--good); }
+  .callout.warn .tag { color: var(--warn); }
+
+  .tbl-wrap { overflow-x: auto; margin: 14px 0; border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); background: var(--ground-raised); }
+  tr:last-child td { border-bottom: none; }
+  td code { white-space: nowrap; }
+
+  .footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-faint); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">Lume Search Portal · Internal Playbook</div>
+  <h1>OS Text: Setup Walkthrough and Candidate Texting Playbook</h1>
+  <p class="lede">Everything a recruiter needs to turn on OS Text inside the portal, launch a compliant texting campaign, and handle the replies that actually come back, including the "where did you get my number?" question.</p>
+
+  <nav class="toc">
+    <div class="toc-title">In this document</div>
+    <ol>
+      <li><a href="#what">What OS Text is and where to find it</a></li>
+      <li><a href="#setup">One-time setup: the five-step wizard</a></li>
+      <li><a href="#campaign">Launching your first campaign</a></li>
+      <li><a href="#replies">Working the inbox</a></li>
+      <li><a href="#writing">Writing texts that get responses</a></li>
+      <li><a href="#objections">Reply scripts: the questions candidates actually ask</a></li>
+      <li><a href="#compliance">Compliance: what the system handles for you</a></li>
+      <li><a href="#checklist">Quick-reference checklist</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="what">1. What OS Text is and where to find it</h2>
+  <p>OS Text is the portal's built-in business texting tool. It sends SMS from a carrier-registered business number, tracks every conversation in a shared inbox, drafts replies with AI, and enforces opt-out and quiet-hours rules automatically so you can focus on the conversation.</p>
+  <p>To open it:</p>
+  <ol>
+    <li>Log in to the portal and make sure you are in the <strong>Recruiting</strong> workspace (OS Text does not appear in the BD view).</li>
+    <li>In the left sidebar, under the <strong>Build</strong> group, click <span class="ui">OS Text</span>.</li>
+    <li>Prefer a full-screen view? Go to <code>/text</code> directly. There is a "Back to portal" link in the corner.</li>
+  </ol>
+  <p class="soft">You will not see a second login. The portal signs you into the texting engine automatically.</p>
+
+  <h2 id="setup">2. One-time setup: the five-step wizard</h2>
+  <p>The first time your workspace opens OS Text, you will see a setup wizard instead of the app. A banner tracks progress ("X of 5 steps complete") and each step shows a status pill: <strong>To do</strong>, <strong>In review</strong>, or <strong>Ready</strong>. Texting stays off until all five are Ready and an admin turns it on.</p>
+  <p>This exists because US carriers require every business that texts to register first (a process called A2P 10DLC). Skipping registration is not an option: unregistered traffic gets silently filtered by carriers, which means your texts simply never arrive.</p>
+
+  <ol class="steps">
+    <li class="step">
+      <div class="step-num">1</div>
+      <div>
+        <h4>Your business profile</h4>
+        <p>Carriers require your business details before they will register you.</p>
+        <p class="fields">Fields: Legal business name, EIN / Tax ID, Website, Business address, Support email. Click <span class="ui">Save business profile</span>. Legal name and EIN are required.</p>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-num">2</div>
+      <div>
+        <h4>Register your texting brand (A2P 10DLC)</h4>
+        <p>Submit your brand and use case so carriers approve recruiting texts from your number.</p>
+        <p class="fields">Review the pre-filled use case and sample message, then click <span class="ui">Submit for carrier registration</span>. Carriers typically review in 1 to 3 business days; the step sits at "In review" until approved.</p>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-num">3</div>
+      <div>
+        <h4>Get a texting number</h4>
+        <p>Provision a registered number to send and receive texts.</p>
+        <p class="fields">Enter a preferred area code and click <span class="ui">Provision a 10DLC number</span>. Pick an area code local to your market when you can: local numbers get answered more.</p>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-num">4</div>
+      <div>
+        <h4>Consent &amp; compliance</h4>
+        <p>Set the opt-in language, opt-out keyword, and quiet hours every text must honor.</p>
+        <p class="fields">Defaults are sensible (opt-out keyword STOP, quiet hours 8:00 pm to 8:00 am blocked). Click <span class="ui">Save consent rules</span>.</p>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-num">5</div>
+      <div>
+        <h4>Connect your candidates</h4>
+        <p>Point OS Text at your Candidates pipeline so you can text them in a click.</p>
+        <p class="fields">Click <span class="ui">Connect to Candidates</span>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <p>When all five pills read Ready, the <span class="ui">Turn on OS Text</span> button unlocks. After launch you will see a green banner ("OS Text is live on your number") and the texting app loads in place of the wizard. A <span class="ui">Settings</span> button reopens the wizard any time.</p>
+
+  <div class="callout warn">
+    <span class="tag">Admin note</span>
+    <p>Above the panel there is a Telnyx connection strip. Texting sends through the workspace's Telnyx connection, managed under <strong>Integrations</strong>. If the strip is red ("Plug in your Telnyx API key"), an admin needs to click <span class="ui">Connect Telnyx</span> and add the key, then press Test in Integrations until the strip turns green. Recruiters cannot send until this is green.</p>
+  </div>
+
+  <h2 id="campaign">3. Launching your first campaign</h2>
+  <p>OS Text organizes outreach into campaigns: one role, one list, one message template. Inside the app you will see four tabs: <strong>Campaigns</strong>, <strong>To-dos</strong>, <strong>Spend</strong>, and <strong>Create campaign</strong>.</p>
+
+  <h3>Create the campaign</h3>
+  <p>Click <span class="ui">Create campaign</span> and fill in:</p>
+  <ul>
+    <li><strong>Campaign name</strong>: name it after the role and client, for example "Sr. Maintenance Tech, Confidential Mfg, Dallas".</li>
+    <li><strong>SMS template</strong>: your first-touch message (section 5 covers what to write).</li>
+    <li><strong>Send window</strong>: the daily hours texts are allowed to go out. Default is 9:00 am to 7:00 pm. Sends pause outside the window and resume automatically.</li>
+    <li><strong>Schedule send</strong> (optional): a future start time. Otherwise use <span class="ui">Launch</span> to start now.</li>
+    <li><strong>Position summary / job description</strong>: paste the real JD. The AI uses this to score candidate fit and to draft replies, so the more real detail here, the better the drafts.</li>
+    <li><strong>Recruiter name, email, and calendar link</strong>: these feed your merge fields and reply drafts.</li>
+    <li><strong>LLM mode</strong>: keep <span class="ui">Draft only (recommended)</span>. The AI drafts every reply but you approve each one before it sends. Semi-auto (AI sends clear positive replies on its own) is for high-volume campaigns after you trust the drafts.</li>
+  </ul>
+
+  <h3>Upload your contacts</h3>
+  <p>Upload a CSV of contacts. Leave both checkboxes on:</p>
+  <ul>
+    <li><strong>Validate numbers and keep only mobile</strong>: drops landlines and toll-free numbers before you waste a send on them.</li>
+    <li><strong>Skip people I've already texted</strong>: suppresses anyone contacted in a previous campaign, so nobody gets the same cold text twice from your workspace.</li>
+  </ul>
+
+  <h3>Personalization tokens</h3>
+  <p>Your template can include merge fields in curly braces. Every CSV column is available as a token, plus these standard ones:</p>
+  <div class="tbl-wrap">
+    <table>
+      <tr><th>Token</th><th>Fills in</th><th>Watch out for</th></tr>
+      <tr><td><code>{first_name}</code></td><td>Candidate's first name</td><td>Your single highest-response token. Always use it.</td></tr>
+      <tr><td><code>{company}</code></td><td>Candidate's current employer</td><td>Only if your list data is fresh; a wrong employer kills credibility.</td></tr>
+      <tr><td><code>{job_title}</code></td><td>Candidate's <em>current</em> title</td><td>This is their title, not your open role. Type the role you are hiring for directly into the message.</td></tr>
+      <tr><td><code>{location}</code></td><td>Candidate's city</td><td>Useful for "roles near {location}" phrasing.</td></tr>
+      <tr><td><code>{your_column}</code></td><td>Any extra CSV column</td><td>Great for a per-candidate hook, like a certification.</td></tr>
+    </table>
+  </div>
+  <div class="callout warn">
+    <span class="tag">Guardrail</span>
+    <p>If a contact is missing a field your template uses, that contact is skipped rather than sent a broken message. So only use a token if every row in your CSV has that field filled in.</p>
+  </div>
+
+  <h3>Send</h3>
+  <p>Click <span class="ui">Send batch</span> to send the next batch of pending contacts (batches of 10, automatically paced). Statuses move from queued to sent to delivered; failures show the carrier error next to the contact with a retry link. <span class="ui">Pause</span> stops sending at any time.</p>
+
+  <h2 id="replies">4. Working the inbox</h2>
+  <p>Every reply lands in the campaign's inbox as a threaded conversation. The system reads each inbound and labels its sentiment (positive, curious, not interested, wrong person, asked about pay, asked for email, and so on), so you can work the hottest threads first. It also scores candidate fit against your job description.</p>
+  <p>To respond: open the thread, click <span class="ui">Generate draft with Claude</span>, edit the draft so it sounds like you, and hit <span class="ui">Send</span>. Never send a draft you have not read. The AI is fast; you are the judgment.</p>
+  <p class="soft">Work replies within minutes when you can. SMS is a live channel: a reply answered inside 5 minutes converts dramatically better than one answered the next morning.</p>
+
+  <h2 id="writing">5. Writing texts that get responses</h2>
+  <p>A cold text is not a small email. It lands in the most personal inbox a candidate has, sandwiched between their family group chat and their dentist reminder. The bar for earning a reply is: <strong>identify yourself, prove you are relevant to them specifically, and ask one small question</strong>. Everything else is cut.</p>
+
+  <h3>The anatomy of a first touch</h3>
+  <p>Four parts, in order, in under 320 characters:</p>
+  <ol>
+    <li><strong>Their name.</strong> Signals this is not a blast.</li>
+    <li><strong>Who you are.</strong> First name plus recruiter plus firm. Unidentified texts read as scams and get reported.</li>
+    <li><strong>Why them.</strong> One specific reason: their trade, their market, their background.</li>
+    <li><strong>One low-commitment question.</strong> Ask if they are open, not if they will interview. "Worth a quick chat?" outperforms "Are you available Tuesday at 2?"</li>
+  </ol>
+
+  <div class="thread">
+    <div class="thread-label">Example first touch</div>
+    <div class="msg out">Hi {first_name}, this is Sarah with Lume Search. I'm hiring a Senior Maintenance Tech for a manufacturer here in Dallas: nights are done, pay tops your market, and they promote from within. Your background looks like a real fit. Open to a quick chat this week?</div>
+    <div class="msg-note">The system automatically appends "Reply STOP to opt out." You never type it.</div>
+  </div>
+
+  <div class="dd">
+    <div class="dd-col do">
+      <h4>Do</h4>
+      <ul>
+        <li>Keep it under two message segments (roughly 300 characters).</li>
+        <li>Lead with the one detail candidates in this trade care about most (shift, pay band, location).</li>
+        <li>Write like you talk. Contractions are fine. This is a text.</li>
+        <li>Send during business hours in their market.</li>
+        <li>End with exactly one question.</li>
+      </ul>
+    </div>
+    <div class="dd-col dont">
+      <h4>Don't</h4>
+      <ul>
+        <li>Put a link in the first message. Links plus unknown numbers equal spam filters and distrust.</li>
+        <li>Open with "I hope this message finds you well" or any email throat-clearing.</li>
+        <li>Name the client in a confidential search.</li>
+        <li>Ask two questions. They will answer neither.</li>
+        <li>Use ALL CAPS, exclamation stacks, or "URGENT."</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>The follow-up</h3>
+  <p>Most replies come from the second touch, not the first. Wait two to three business days, then send one short bump. One follow-up. If two messages get silence, the answer is no; move on and keep the number clean for a future role.</p>
+  <div class="thread">
+    <div class="thread-label">Example follow-up (2 to 3 days later)</div>
+    <div class="msg out">Hi {first_name}, Sarah at Lume again. No pressure at all: if the timing's wrong, a simple "not now" works and I'll leave you be. But if better pay or a day shift would move the needle, I'd love 5 minutes.</div>
+  </div>
+
+  <h2 id="objections">6. Reply scripts: the questions candidates actually ask</h2>
+  <p>These are the replies you will see most, with proven phrasing. Adapt the words to your voice, but keep the structure: acknowledge, answer honestly, return to the opportunity.</p>
+
+  <h3>"Where did you get my number?"</h3>
+  <p>This is the most common challenge you will get, and it is a fair one. The standard answer, when the lead genuinely traces back to a referral or a confidential search network: it came through a colleague, and the search is confidential, so you cannot name them. This is true, it is professional, and it flips the question into a compliment.</p>
+
+  <div class="thread">
+    <div class="thread-label">The standard script</div>
+    <div class="msg in">Who is this? Where did you get my number?</div>
+    <div class="msg-note left">Candidate</div>
+    <div class="msg out">Totally fair question. Your name came from a colleague of yours: I'm running an exclusive, confidential search and they pointed me your way. I can't share who, since that would break the confidentiality I owe them, but they clearly think highly of your work. Happy to tell you everything about the role itself. Open to 5 minutes?</div>
+    <div class="msg-note">You</div>
+  </div>
+
+  <p>Why this works:</p>
+  <ul>
+    <li><strong>It validates the question first.</strong> "Totally fair question" defuses the defensiveness before you answer.</li>
+    <li><strong>Confidentiality reads as professionalism, not evasion.</strong> Serious candidates know exclusive searches exist and that discretion protects everyone, including them.</li>
+    <li><strong>It embeds a compliment.</strong> "They think highly of your work" turns a suspicious moment into a flattering one.</li>
+    <li><strong>It pivots immediately.</strong> You offer full transparency about the role, which is what actually matters to them, and re-ask for the call.</li>
+  </ul>
+
+  <div class="callout good">
+    <span class="tag">Keep it true</span>
+    <p>Only use the colleague line when the lead genuinely came through a referral, a network contact, or a confidential search source. If the number came from a sourced list instead, use the variation below. Candidates can smell a canned lie, and a caught lie ends the relationship and risks a spam report.</p>
+  </div>
+
+  <div class="thread">
+    <div class="thread-label">Variation: sourced or researched lead</div>
+    <div class="msg in">Seriously, how did you get this number?</div>
+    <div class="msg-note left">Candidate</div>
+    <div class="msg out">Fair to ask. I recruit in your trade full time, and your background came up in my research for this specific search. That's genuinely a compliment: I only reach out when someone actually fits. If it's not welcome, say the word and I'm gone. But the role is worth 2 minutes of your time.</div>
+    <div class="msg-note">You</div>
+  </div>
+
+  <h3>"Is this a scam?" / "Prove you're real"</h3>
+  <div class="thread">
+    <div class="msg in">This feels like a scam. Recruiters don't text.</div>
+    <div class="msg-note left">Candidate</div>
+    <div class="msg out">Smart to check, honestly. I'm Sarah Chen, recruiter at Lume Search. You can look me up on LinkedIn before replying to anything, and I'll never ask for personal info by text. When you're comfortable, I'd love to tell you about the role.</div>
+    <div class="msg-note">You</div>
+  </div>
+  <p class="soft">Inviting them to verify you independently is the single most disarming move available. Scammers never suggest it.</p>
+
+  <h3>"What's the pay?"</h3>
+  <div class="thread">
+    <div class="msg in">What does it pay?</div>
+    <div class="msg-note left">Candidate</div>
+    <div class="msg out">Straight answer: the range is $38 to $44/hr depending on experience, plus OT and a shift differential. If that's in the zone, I can walk you through the rest in 5 minutes. What's your number look like today?</div>
+    <div class="msg-note">You</div>
+  </div>
+  <p class="soft">Answer with a real range. Dodging the pay question is the fastest way to lose a candidate who was interested enough to ask. If the client has not authorized a range, get one before launching the campaign.</p>
+
+  <h3>"I'm happy where I am"</h3>
+  <div class="thread">
+    <div class="msg in">Thanks but I'm good where I'm at.</div>
+    <div class="msg-note left">Candidate</div>
+    <div class="msg out">That's genuinely good to hear, and I won't push. Two things before I go: if anything changes, I'm a useful contact to have in your trade. And if someone in your circle is looking, I pay attention to referrals. Either way, good luck out there, {first_name}.</div>
+    <div class="msg-note">You</div>
+  </div>
+  <p class="soft">A graceful exit converts later. A meaningful share of placements come from "not interested" replies six months down the road, and from the referrals this message explicitly invites.</p>
+
+  <h3>"Wrong person" / "I'm not in that field"</h3>
+  <div class="thread">
+    <div class="msg in">You've got the wrong guy, I'm not a maintenance tech.</div>
+    <div class="msg-note left">Candidate</div>
+    <div class="msg out">My mistake, and thanks for the heads-up rather than just ignoring me. I'll correct my records so you don't hear from me again. Have a good one.</div>
+    <div class="msg-note">You</div>
+  </div>
+  <p class="soft">Then actually mark the contact wrong-person in the thread so the suppression list learns.</p>
+
+  <h3>"Can you email me instead?"</h3>
+  <div class="thread">
+    <div class="msg in">Can you send the details to my email?</div>
+    <div class="msg-note left">Candidate</div>
+    <div class="msg out">Absolutely. What's the best address? I'll send the full rundown today, and I'll include a couple times for a quick call in case it looks like a fit.</div>
+    <div class="msg-note">You</div>
+  </div>
+
+  <h3>"STOP"</h3>
+  <p>Do not reply. The system handles it: the contact is opted out instantly, the conversation closes, and every future outbound to that number is blocked automatically. Any manual reply after a STOP is a compliance violation. Let it go.</p>
+
+  <h2 id="compliance">7. Compliance: what the system handles for you</h2>
+  <p>OS Text was built so that the compliant path is the default path. Here is what is enforced automatically, and the short list that stays on you.</p>
+  <div class="tbl-wrap">
+    <table>
+      <tr><th>Handled automatically</th><th>How</th></tr>
+      <tr><td>Opt-out footer</td><td>"Reply STOP to opt out." is appended to every outbound message. You never type it, and it is never doubled.</td></tr>
+      <tr><td>STOP processing</td><td>STOP, UNSUBSCRIBE, CANCEL, END, QUIT, REMOVE, OPT OUT all trigger an instant, permanent block on that number.</td></tr>
+      <tr><td>Quiet hours</td><td>Campaigns only send inside the send window; they pause and resume on their own.</td></tr>
+      <tr><td>Number hygiene</td><td>CSV uploads are validated so only real mobile numbers get texted, and previously texted people are suppressed.</td></tr>
+      <tr><td>Carrier registration</td><td>The setup wizard walks the workspace through A2P 10DLC so messages are not carrier-filtered.</td></tr>
+    </table>
+  </div>
+  <p>What stays on you:</p>
+  <ul>
+    <li><strong>Text only about the recruiting opportunity.</strong> The carrier registration covers recruiting outreach; do not repurpose the channel for marketing blasts.</li>
+    <li><strong>Honor a verbal opt-out.</strong> If someone writes "please don't text me" without the STOP keyword, treat it as a STOP and opt them out in the thread manually.</li>
+    <li><strong>Mind the candidate's timezone.</strong> The send window runs on your workspace clock, not the contact's. If your list spans coasts, tighten the window (10:00 am to 6:00 pm covers the continental US safely).</li>
+    <li><strong>Be truthful about sourcing and the role.</strong> Every script in section 6 assumes you are telling the truth. That is both the law and the brand.</li>
+  </ul>
+
+  <h2 id="checklist">8. Quick-reference checklist</h2>
+  <h3>Before your first campaign (one time)</h3>
+  <ul>
+    <li>Recruiting workspace &gt; Build &gt; <span class="ui">OS Text</span></li>
+    <li>Complete all 5 wizard steps; wait out carrier review (1 to 3 business days)</li>
+    <li>Confirm the Telnyx strip is green (admin)</li>
+    <li>Click <span class="ui">Turn on OS Text</span></li>
+  </ul>
+  <h3>Every campaign</h3>
+  <ul>
+    <li>Real JD pasted in, pay range authorized by the client</li>
+    <li>CSV clean; every merge-field column filled for every row; both validation checkboxes on</li>
+    <li>First touch: name, who you are, why them, one question, under 300 characters, no links</li>
+    <li>LLM mode: Draft only</li>
+    <li>Send window matched to the candidates' timezone</li>
+  </ul>
+  <h3>Every day the campaign runs</h3>
+  <ul>
+    <li>Answer replies fast; hottest sentiment first</li>
+    <li>Read and edit every AI draft before sending</li>
+    <li>One follow-up after 2 to 3 days of silence, then stop</li>
+    <li>Mark wrong-person replies; never reply after a STOP</li>
+  </ul>
+
+  <div class="footer">
+    Lume Search internal enablement · Questions or script suggestions: post them in the recruiting channel so this document keeps improving.
+  </div>
+
+</div>
+</body>
+</html>

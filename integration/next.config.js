@@ -43,6 +43,13 @@ module.exports = {
     // clean URLs serve the one file.
     pageRewrites.push({ source: "/admin", destination: "/command.html" });
     pageRewrites.push({ source: "/recruiter", destination: "/command.html" });
+    // OS Text recruiter playbook. The shared/typed link is /textOS/Instructions;
+    // accept the common casings since the path travels by word of mouth.
+    for (const t of ["textOS", "textos", "TextOS"]) {
+      for (const i of ["Instructions", "instructions"]) {
+        pageRewrites.push({ source: `/${t}/${i}`, destination: "/ostext-instructions.html" });
+      }
+    }
     return pageRewrites;
   },
 
