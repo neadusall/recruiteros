@@ -226,14 +226,19 @@
       <div>
         <div class="card" style="margin-bottom:16px">
           <h3>Publishing connection</h3>
-          <p class="hint">Posts publish through Ayrshare, an official LinkedIn API partner. Your account links by LinkedIn OAuth: no cookies, no session automation, no ban risk.</p>
+          <p class="hint">Posts publish through your own RecruitersOS LinkedIn engine: the same connection the LinkedIn tool uses. Connect your LinkedIn account there once and the Poster rides it. Posting keeps a light footprint (a post or two a day), well inside the engine's safety pacing.</p>
+          <div id="engineInfo"></div>
+          <div class="btnrow"><button class="btn" id="btnAyrRefresh">Refresh status</button></div>
+        </div>
+        <div class="card" style="margin-bottom:16px">
+          <h3>Ayrshare (optional alternative)</h3>
+          <p class="hint">Official LinkedIn API partner, used only if you set AYRSHARE_API_KEY. Not required: the internal engine above is the default path.</p>
           <div id="ayrInfo"></div>
           <label>Ayrshare profile key (Business plan, one per workspace)</label>
           <input type="text" id="setProfileKey" placeholder="Blank uses the primary Ayrshare account" />
           <div class="btnrow">
             <button class="btn" id="btnAyrProfile">Create linked profile</button>
             <button class="btn" id="btnAyrLink">Get LinkedIn connect link</button>
-            <button class="btn" id="btnAyrRefresh">Refresh status</button>
           </div>
         </div>
         <div class="card">
@@ -301,9 +306,17 @@
     document.getElementById("nDrafts").textContent = drafts;
     document.getElementById("nQueue").textContent = queued;
     var conn = document.getElementById("conn"), txt = document.getElementById("connTxt");
-    if (!S.ayrshare.configured) { conn.className = "conn off"; txt.textContent = "Ayrshare key not set"; }
-    else if (S.ayrshare.linkedinConnected) { conn.className = "conn on"; txt.textContent = "LinkedIn connected"; }
-    else { conn.className = "conn off"; txt.textContent = "LinkedIn not linked"; }
+    var eng = S.engine || {};
+    if (S.publishVia === "engine") {
+      conn.className = "conn on";
+      txt.textContent = "LinkedIn engine ready" + (eng.account && eng.account.displayName ? " (" + eng.account.displayName + ")" : "");
+    } else if (S.publishVia === "ayrshare") {
+      conn.className = "conn on"; txt.textContent = "Ayrshare connected";
+    } else if (eng.configured && !eng.account) {
+      conn.className = "conn off"; txt.textContent = "Link LinkedIn in the LinkedIn tool";
+    } else {
+      conn.className = "conn off"; txt.textContent = "Publishing not connected";
+    }
   }
 
   function renderInbox() {
@@ -413,12 +426,18 @@
     document.getElementById("setVoice").value = st.voiceProfile || "";
     document.getElementById("setStories").value = st.storyBank || "";
     document.getElementById("setProfileKey").value = st.ayrshareProfileKey || "";
+    var eng = S.engine || {};
+    var erows = "";
+    erows += '<div class="kv"><b>Engine (Unipile)</b>' + (eng.configured ? "configured" : "not set (UNIPILE_API_KEY)") + "</div>";
+    erows += '<div class="kv"><b>LinkedIn account</b>' + (eng.account ? "linked" + (eng.account.displayName ? " (" + esc(eng.account.displayName) + ")" : "") : "not linked: connect it in the LinkedIn tool") + "</div>";
+    erows += '<div class="kv"><b>Active publish path</b>' + (S.publishVia === "engine" ? "internal engine" : S.publishVia === "ayrshare" ? "Ayrshare" : "none yet") + "</div>";
+    document.getElementById("engineInfo").innerHTML = erows;
     var a = S.ayrshare || {};
     var rows = "";
     rows += '<div class="kv"><b>Ayrshare API key</b>' + (a.configured ? "configured" : "not set (AYRSHARE_API_KEY)") + "</div>";
     rows += '<div class="kv"><b>LinkedIn account</b>' + (a.linkedinConnected ? "linked" + ((a.displayNames && a.displayNames[0] && a.displayNames[0].displayName) ? " (" + esc(a.displayNames[0].displayName) + ")" : "") : "not linked") + "</div>";
     if (a.activeSocialAccounts && a.activeSocialAccounts.length) rows += '<div class="kv"><b>Linked platforms</b>' + esc(a.activeSocialAccounts.join(", ")) + "</div>";
-    if (a.error) rows += '<div class="errbox">' + esc(a.error) + "</div>";
+    if (a.error && a.configured) rows += '<div class="errbox">' + esc(a.error) + "</div>";
     document.getElementById("ayrInfo").innerHTML = rows;
     document.getElementById("btnAyrLink").disabled = !(a.linkingConfigured && (st.ayrshareProfileKey || "").length);
     document.getElementById("btnAyrProfile").disabled = !a.configured;

@@ -62,6 +62,52 @@ export class UnipileClient extends ProviderClient {
     });
   }
 
+  /**
+   * Publish a feed post as the linked account (the LinkedIn Poster publish hop).
+   * Text-only goes as JSON; with images we send multipart form-data, which is
+   * how Unipile accepts post attachments. Returns the provider's post reference
+   * when it gives one.
+   */
+  async createPost(
+    accountId: string,
+    text: string,
+    attachments?: Array<{ bytes: Buffer; mime: string; name: string }>,
+  ): Promise<{ id?: string; dryRun?: boolean }> {
+    if (!attachments?.length) {
+      const r = await this.request<{ post_id?: string; id?: string }>({
+        method: "POST",
+        path: "/api/v1/posts",
+        body: { account_id: accountId, text },
+      });
+      return { id: r.post_id ?? r.id, dryRun: r.dryRun };
+    }
+    // Multipart path: ProviderClient.request is JSON-only, so build the form here.
+    if (!this.configured()) {
+      console.info(`[${this.id}:dry] POST /api/v1/posts (multipart, ${attachments.length} attachment(s))`);
+      return { dryRun: true };
+    }
+    const form = new FormData();
+    form.append("account_id", accountId);
+    form.append("text", text);
+    for (const a of attachments) {
+      form.append("attachments", new Blob([new Uint8Array(a.bytes)], { type: a.mime }), a.name);
+    }
+    const base = (this.baseUrl || "").replace(/\/$/, "");
+    const res = await fetch(`${base}/api/v1/posts`, {
+      method: "POST",
+      headers: this.authHeaders(), // no Content-Type: fetch sets the multipart boundary
+      body: form,
+    });
+    const textBody = await res.text();
+    let data: any = {};
+    try { data = JSON.parse(textBody); } catch { data = { raw: textBody }; }
+    if (!res.ok) {
+      const detail = data?.detail?.message || data?.detail || data?.message || data?.error || "";
+      throw Object.assign(new Error(detail ? `unipile_${res.status}: ${detail}` : `unipile_${res.status}`), { status: res.status });
+    }
+    return { id: data.post_id ?? data.id };
+  }
+
   /** Recent posts authored by a member — used to pick a target for a nurture comment.
    *  NOTE: confirm the exact path/shape against the current Unipile API; mirrors the
    *  client's /api/v1/users/{identifier}/... convention. */

@@ -29,6 +29,7 @@ import {
   getState, addInspiration, deleteInspiration, rewriteToDraft, regenerateDraft,
   updateDraft, discardDraft, approveDraft, cancelSchedule, retryDraft,
   uploadImage, deleteImage, generateQuoteCard, saveSettings, getSettings,
+  enginePublishStatus,
 } from "../../../../lib/linkedin/poster";
 import {
   ayrshareConfigured, ayrshareLinkingConfigured, getAccountStatus, createProfile, generateLinkUrl,
@@ -44,9 +45,14 @@ export async function GET(req: Request) {
   const ws = g.ctx.workspace.id;
 
   const state = await getState(ws);
+  const engine = await enginePublishStatus(ws);
+  // Ayrshare's status probe is a live HTTP call; skip it entirely when no key is set.
   const ayrshare = await getAccountStatus(state.settings.ayrshareProfileKey || undefined);
+  const publishVia = engine.ready ? "engine" : ayrshare.configured && ayrshare.linkedinConnected ? "ayrshare" : "none";
   return ok({
     ...state,
+    engine,
+    publishVia,
     ayrshare: { ...ayrshare, linkingConfigured: ayrshareLinkingConfigured() },
     automation: { enabled: automationEnabled(), armed: automationArmed() },
     anthropicConfigured: !!process.env.ANTHROPIC_API_KEY,

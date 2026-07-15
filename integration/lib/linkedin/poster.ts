@@ -9,8 +9,10 @@
  *                   quote card server-side (SVG -> sharp -> PNG).
  *   4. APPROVAL   — nothing ever publishes without an explicit approve. Approve
  *                   posts now or schedules; the automation tick publishes when due.
- *   5. PUBLISH    — via Ayrshare (official LinkedIn API partner; OAuth-linked
- *                   accounts, zero cookie/session automation, zero ban risk).
+ *   5. PUBLISH    — through our own LinkedIn engine first (LinkedIn OS's
+ *                   Unipile connection, the tool of record for every LinkedIn
+ *                   action in RecruitersOS), with Ayrshare (official LinkedIn
+ *                   API partner) as an optional alternative when its key is set.
  *
  * Storage follows the house snapshot pattern (lib/db): fast in-memory maps,
  * debounced JSON snapshot, workspace-scoped. Image BYTES live as files in the
@@ -24,7 +26,7 @@ import * as os from "os";
 import { randomBytes } from "crypto";
 import { loadSnapshot, debouncedSaver } from "../db";
 import { anthropicClient } from "../sourcing/anthropic";
-import { publishLinkedInPost } from "../providers/ayrshare";
+import { publishLinkedInPost, ayrshareConfigured } from "../providers/ayrshare";
 import { publicBaseUrl } from "../inmarket/roleShot";
 
 /* ------------------------------- types ---------------------------------- */
@@ -51,6 +53,9 @@ export interface PosterDraft {
   scheduledAt?: string;
   postedAt?: string;
   postUrl?: string;
+  /** Which path published it: our LinkedIn engine (Unipile) or Ayrshare. */
+  provider?: "engine" | "ayrshare";
+  providerPostId?: string;
   ayrsharePostId?: string;
   error?: string;
   createdAt: string;
@@ -375,18 +380,71 @@ export async function cancelSchedule(ws: string, draftId: string): Promise<Poste
   return d;
 }
 
+/**
+ * Can the workspace publish through our own LinkedIn engine (LinkedIn OS ->
+ * Unipile)? Ready = the Unipile key is set AND the workspace has a linked
+ * LinkedIn account in the engine. This is the PRIMARY publish path; Ayrshare
+ * stays as an optional official-API alternative.
+ */
+export interface EnginePublishStatus {
+  configured: boolean;
+  account: { accountId: string; displayName?: string } | null;
+  ready: boolean;
+}
+
+export async function enginePublishStatus(ws: string): Promise<EnginePublishStatus> {
+  try {
+    const { unipile } = await import("../providers");
+    const { listAccounts } = await import("./os/health");
+    const configured = unipile.configured();
+    const acct = (await listAccounts(ws)).find((a) => a.providerAccountId) ?? null;
+    return {
+      configured,
+      account: acct ? { accountId: acct.accountId, displayName: acct.displayName } : null,
+      ready: configured && !!acct,
+    };
+  } catch {
+    return { configured: false, account: null, ready: false };
+  }
+}
+
 async function publishDraft(ws: string, d: PosterDraft): Promise<PosterDraft> {
   const s = wsState(ws);
   try {
-    const r = await publishLinkedInPost({
-      text: d.text,
-      mediaUrls: d.imageId ? [mediaUrl(d.imageId)] : undefined,
-      profileKey: s.settings.ayrshareProfileKey || undefined,
-    });
+    const engine = await enginePublishStatus(ws);
+    if (engine.ready) {
+      // Our own pipe: the LinkedIn OS Unipile connection (tool of record).
+      const { unipile } = await import("../providers");
+      const { listAccounts } = await import("./os/health");
+      const acct = (await listAccounts(ws)).find((a) => a.providerAccountId)!;
+      let attachments: Array<{ bytes: Buffer; mime: string; name: string }> | undefined;
+      if (d.imageId) {
+        const media = await readMediaById(d.imageId);
+        if (media) {
+          const ext = media.mime === "image/png" ? ".png" : media.mime === "image/webp" ? ".webp" : ".jpg";
+          attachments = [{ bytes: media.bytes, mime: media.mime, name: "post" + ext }];
+        }
+      }
+      const r = await unipile.createPost(acct.providerAccountId as string, d.text, attachments);
+      if (r.dryRun) throw new Error("engine_not_configured: set UNIPILE_API_KEY");
+      d.provider = "engine";
+      d.providerPostId = r.id;
+      d.postUrl = undefined; // the engine path doesn't return a share URL
+    } else if (ayrshareConfigured()) {
+      const r = await publishLinkedInPost({
+        text: d.text,
+        mediaUrls: d.imageId ? [mediaUrl(d.imageId)] : undefined,
+        profileKey: s.settings.ayrshareProfileKey || undefined,
+      });
+      d.provider = "ayrshare";
+      d.providerPostId = r.id || undefined;
+      d.ayrsharePostId = r.id || undefined;
+      d.postUrl = r.postUrl;
+    } else {
+      throw new Error("no_publisher: connect your LinkedIn account in the LinkedIn tool (our engine), or set AYRSHARE_API_KEY as an alternative");
+    }
     d.status = "posted";
     d.postedAt = nowIso();
-    d.ayrsharePostId = r.id || undefined;
-    d.postUrl = r.postUrl;
     d.error = undefined;
   } catch (e) {
     d.status = "failed";
