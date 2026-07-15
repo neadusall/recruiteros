@@ -1,0 +1,9 @@
+{
+  "name": "landline-db",
+  "private": true,
+  "type": "module",
+  "description": "LandlineDB ingestion workers: free public bulk sources into the phone intelligence store",
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}

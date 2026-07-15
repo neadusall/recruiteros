@@ -110,11 +110,21 @@ export class TelnyxClient extends ProviderClient {
    * `to`; `from` is the caller ID the recruiter sees (defaults to our number).
    *   POST /calls/{call_control_id}/actions/transfer
    */
-  transferCall(callControlId: string, to: string, from?: string) {
+  transferCall(
+    callControlId: string,
+    to: string,
+    from?: string,
+    opts?: { clientState?: Record<string, unknown>; timeoutSecs?: number },
+  ) {
     return this.request({
       method: "POST",
       path: `/calls/${encodeURIComponent(callControlId)}/actions/transfer`,
-      body: { to, from: from || this.env("TELNYX_FROM_NUMBER") },
+      body: {
+        to,
+        from: from || this.env("TELNYX_FROM_NUMBER"),
+        timeout_secs: opts?.timeoutSecs,
+        client_state: opts?.clientState ? encodeClientState(opts.clientState) : undefined,
+      },
     });
   }
 
@@ -152,6 +162,209 @@ export class TelnyxClient extends ProviderClient {
       method: "POST",
       path: `/calls/${encodeURIComponent(callControlId)}/actions/speak`,
       body: { payload: text, voice: opts?.voice ?? "female", language: opts?.language ?? "en-US" },
+    });
+  }
+
+  /* ===================================================================== *
+   *  Browser phone (BD Phone / Recruiting Phone)
+   *
+   *  The portal's WebRTC phone rides two Telnyx resources per workspace:
+   *   - a CALL CONTROL APPLICATION: every PSTN-facing leg lives on it so the
+   *     server can answer/bridge/record/transcribe and receives webhooks.
+   *   - a CREDENTIAL CONNECTION: per-user telephony credentials register the
+   *     browser (@telnyx/webrtc); browser legs are dialed to their SIP URIs.
+   *  Plain credential connections cannot take call-control commands, which is
+   *  why the PSTN side always runs through the app (verified against the 2026
+   *  Telnyx docs).
+   * ===================================================================== */
+
+  /** Create a Call Control application (webhooks -> our /api/phone/webhook). */
+  createCallControlApp(name: string, webhookUrl: string) {
+    return this.request({
+      method: "POST",
+      path: "/call_control_applications",
+      body: {
+        application_name: name,
+        webhook_event_url: webhookUrl,
+        webhook_api_version: "2",
+      },
+    });
+  }
+
+  listCallControlApps(pageSize = 100) {
+    return this.request({ path: "/call_control_applications", query: { "page[size]": pageSize } });
+  }
+
+  updateCallControlApp(appId: string, body: Record<string, unknown>) {
+    return this.request({
+      method: "PATCH",
+      path: `/call_control_applications/${encodeURIComponent(appId)}`,
+      body,
+    });
+  }
+
+  /** Create the Credential Connection the browser clients register against. */
+  createCredentialConnection(name: string, userName: string, password: string) {
+    return this.request({
+      method: "POST",
+      path: "/credential_connections",
+      body: {
+        connection_name: name,
+        user_name: userName,
+        password,
+        webhook_api_version: "2",
+      },
+    });
+  }
+
+  listCredentialConnections(pageSize = 100) {
+    return this.request({ path: "/credential_connections", query: { "page[size]": pageSize } });
+  }
+
+  /** Mint a per-user telephony credential on the credential connection. */
+  createTelephonyCredential(connectionId: string, name: string) {
+    return this.request({
+      method: "POST",
+      path: "/telephony_credentials",
+      body: { connection_id: connectionId, name },
+    });
+  }
+
+  getTelephonyCredential(credentialId: string) {
+    return this.request({ path: `/telephony_credentials/${encodeURIComponent(credentialId)}` });
+  }
+
+  deleteTelephonyCredential(credentialId: string) {
+    return this.request({
+      method: "DELETE",
+      path: `/telephony_credentials/${encodeURIComponent(credentialId)}`,
+    });
+  }
+
+  /**
+   * Mint a WebRTC login token (JWT) for a telephony credential. Telnyx returns
+   * the raw token as text/plain, which the JSON parser surfaces as { raw }.
+   */
+  async credentialToken(credentialId: string): Promise<string> {
+    const res = await this.request<any>({
+      method: "POST",
+      path: `/telephony_credentials/${encodeURIComponent(credentialId)}/token`,
+    });
+    if (res?.dryRun) return "";
+    if (typeof res === "string") return res;
+    if (typeof res?.raw === "string") return res.raw.trim();
+    if (typeof res?.data === "string") return res.data.trim();
+    return "";
+  }
+
+  /** Point a phone number's voice traffic at a connection (inbound routing). */
+  updateNumberConnection(numberId: string, connectionId: string) {
+    return this.request({
+      method: "PATCH",
+      path: `/phone_numbers/${encodeURIComponent(numberId)}`,
+      body: { connection_id: connectionId },
+    });
+  }
+
+  /** List outbound voice profiles (the app needs one to dial PSTN). */
+  listOutboundVoiceProfiles(pageSize = 50) {
+    return this.request({ path: "/outbound_voice_profiles", query: { "page[size]": pageSize } });
+  }
+
+  createOutboundVoiceProfile(name: string) {
+    return this.request({
+      method: "POST",
+      path: "/outbound_voice_profiles",
+      body: { name, traffic_type: "conversational", service_plan: "global" },
+    });
+  }
+
+  /**
+   * Place a call-control leg. `to` may be a PSTN E.164 or a SIP URI
+   * (browser legs: "sip:<sip_username>@sip.telnyx.com").
+   */
+  dialLeg(opts: {
+    to: string;
+    from: string;
+    connectionId: string;
+    clientState?: Record<string, unknown>;
+    fromDisplayName?: string;
+    timeoutSecs?: number;
+  }) {
+    return this.request({
+      method: "POST",
+      path: "/calls",
+      body: {
+        to: opts.to,
+        from: opts.from,
+        from_display_name: opts.fromDisplayName || undefined,
+        connection_id: opts.connectionId,
+        timeout_secs: opts.timeoutSecs ?? 30,
+        client_state: opts.clientState ? encodeClientState(opts.clientState) : undefined,
+      },
+    });
+  }
+
+  /** Answer an inbound call-control leg. */
+  answerCall(callControlId: string, clientState?: Record<string, unknown>) {
+    return this.request({
+      method: "POST",
+      path: `/calls/${encodeURIComponent(callControlId)}/actions/answer`,
+      body: {
+        client_state: clientState ? encodeClientState(clientState) : undefined,
+      },
+    });
+  }
+
+  /** Bridge two answered call-control legs together. */
+  bridgeCalls(callControlId: string, otherCallControlId: string) {
+    return this.request({
+      method: "POST",
+      path: `/calls/${encodeURIComponent(callControlId)}/actions/bridge`,
+      body: { call_control_id: otherCallControlId },
+    });
+  }
+
+  /**
+   * Start recording a leg. Dual channel keeps each side on its own track
+   * (speaker separation); the transcription flags produce a post-call
+   * `call.recording.transcription.saved` webhook so nothing polls.
+   */
+  recordStart(callControlId: string, opts?: { transcription?: boolean; transcriptionEngine?: string }) {
+    return this.request({
+      method: "POST",
+      path: `/calls/${encodeURIComponent(callControlId)}/actions/record_start`,
+      body: {
+        format: "mp3",
+        channels: "dual",
+        recording_track: "both",
+        ...(opts?.transcription
+          ? {
+              transcription: true,
+              transcription_engine: opts.transcriptionEngine || "B",
+            }
+          : {}),
+      },
+    });
+  }
+
+  recordStop(callControlId: string) {
+    return this.request({
+      method: "POST",
+      path: `/calls/${encodeURIComponent(callControlId)}/actions/record_stop`,
+      body: {},
+    });
+  }
+
+  /** Fetch one saved recording (fresh short-lived download_urls). */
+  getRecording(recordingId: string) {
+    return this.request({ path: `/recordings/${encodeURIComponent(recordingId)}` });
+  }
+
+  /** Fetch a stored post-call transcription by id. */
+  getRecordingTranscription(transcriptionId: string) {
+    return this.request({
+      path: `/recording_transcriptions/${encodeURIComponent(transcriptionId)}`,
     });
   }
 
