@@ -106,7 +106,7 @@ async function tickNurture(): Promise<void> {
 /**
  * Auto-enroll into the nurture drip — the in-process replacement for n8n polling
  * /api/prospects/queue. For every workspace that has opted into hands-off (at least one
- * active Autopilot campaign), enroll its eligible in-market BD prospects into the
+ * active BD Autopilot campaign), enroll its eligible in-market BD prospects into the
  * 24-month drip, capped per cycle so it paces in. Workspaces without Autopilot keep the
  * manual portal "Activate" control. The nurture tick then sends the touches.
  */
@@ -114,7 +114,7 @@ async function tickNurtureEnroll(): Promise<void> {
   const { enrollEligible } = await import("../bd/nurtureEnroll");
   const all = await getCore().listAllCampaigns();
   const optedIn = new Set(
-    all.filter((c) => c.status === "active" && c.autoRun).map((c) => c.workspaceId),
+    all.filter((c) => c.motion === "bd" && c.status === "active" && c.autoRun).map((c) => c.workspaceId),
   );
   const cap = positiveIntEnv("RECRUITEROS_NURTURE_ENROLL_CAP", 50);
   for (const ws of optedIn) {
@@ -123,16 +123,17 @@ async function tickNurtureEnroll(): Promise<void> {
 }
 
 /**
- * The Autopilot tick. For every workspace that owns at least one ACTIVE campaign
+ * The Autopilot tick. For every workspace that owns at least one ACTIVE BD campaign
  * with `autoRun` on, run that workspace's hands-off campaigns end-to-end
  * (enrich -> draft -> send -> advance), bypassing the human approval queue.
- * Manual campaigns are untouched — their morning approval queue keeps working.
+ * Autopilot is BD-only; recruiting campaigns and manual campaigns are untouched —
+ * their morning approval queue keeps working.
  */
 async function tickCadence(): Promise<void> {
   const { runAutopilot } = await import("../campaigns");
   const all = await getCore().listAllCampaigns();
   const autopilotWorkspaces = new Set(
-    all.filter((c) => c.status === "active" && c.autoRun).map((c) => c.workspaceId),
+    all.filter((c) => c.motion === "bd" && c.status === "active" && c.autoRun).map((c) => c.workspaceId),
   );
   for (const ws of autopilotWorkspaces) {
     try { await runAutopilot(ws); } catch { /* one workspace's autopilot */ }

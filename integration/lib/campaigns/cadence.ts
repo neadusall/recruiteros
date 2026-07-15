@@ -173,10 +173,12 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
   // Re-pin winning variants for any campaign on the promote-winners autopilot. Best-effort.
   await refreshAutopilots(workspaceId).catch(() => {});
 
-  // The gate: a campaign runs hands-off ONLY when it is active, on Autopilot, AND
-  // its outreach model has been reviewed + approved. "Approve once, then forget."
+  // The gate: a campaign runs hands-off ONLY when it is a BD campaign, active, on
+  // Autopilot, AND its outreach model has been reviewed + approved. "Approve once,
+  // then forget." Recruiting campaigns never run here; they keep the human-gated
+  // morning approval queue (runDailyCadence + pushApproved).
   const campaigns = (await core.listCampaigns(workspaceId)).filter(
-    (c) => c.status === "active" && c.autoRun && c.outreachApproved && c.model && (c.model.touches?.length ?? 0) > 0,
+    (c) => c.motion === "bd" && c.status === "active" && c.autoRun && c.outreachApproved && c.model && (c.model.touches?.length ?? 0) > 0,
   );
   const results: any[] = [];
   const now = new Date();

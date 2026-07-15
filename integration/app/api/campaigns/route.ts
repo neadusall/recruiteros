@@ -52,6 +52,8 @@ export async function PUT(req: Request) {
     status: b.status ?? "draft",
     createdAt: b.createdAt ?? new Date().toISOString(),
   };
+  // Autopilot (hands-off run) is BD-only; a recruiting campaign can never arm it.
+  if (campaign.motion !== "bd") (campaign as any).autoRun = false;
   await getCore().saveCampaign(campaign as any);
   return ok({ campaign });
 }
@@ -71,6 +73,7 @@ export async function PATCH(req: Request) {
   const c = await core.getCampaign(b.id);
   if (!c) return fail("not_found", 404);
   if (c.workspaceId !== g.ctx.workspace.id) return fail("forbidden", 403);
+  if (b.autoRun && c.motion !== "bd") return fail("bd_only", 422, { detail: "Autopilot runs BD campaigns only." });
   c.autoRun = b.autoRun;
   if (b.autoRun && c.status !== "active") c.status = "active";
   c.updatedAt = new Date().toISOString();

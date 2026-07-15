@@ -1,5 +1,7 @@
 /**
- * Autopilot command center API.
+ * Autopilot command center API. BD-only: Autopilot pulls hiring signals and runs
+ * BD campaigns hands-off. Recruiting campaigns keep the morning approval queue
+ * and never appear or arm here.
  *
  * GET  /api/autopilot  -> everything the Autopilot dashboard renders:
  *   engine on/off + armed, the configured ticks, every campaign with its model
@@ -8,7 +10,7 @@
  *
  * POST /api/autopilot { action, ... }:
  *   estimate        { count, directDial? }                    -> push cost estimate
- *   create-campaign { name, motion, goal?, icp?, methodology?, dailyCap?, voiceNoteThreshold? }
+ *   create-campaign { name, goal?, icp?, methodology?, dailyCap?, voiceNoteThreshold? }  (always BD)
  *   draft-model     { campaignId }                            -> LLM-draft the outreach model (resets approval)
  *   update-model    { campaignId, touches, summary? }         -> save edits to the model
  *   approve-model   { campaignId }                            -> approve the model (the one-time gate)
@@ -34,7 +36,7 @@ export async function GET(req: Request) {
   const ws = g.ctx.workspace.id;
   const core = getCore();
 
-  const campaignsRaw = await core.listCampaigns(ws);
+  const campaignsRaw = (await core.listCampaigns(ws)).filter((c) => c.motion === "bd");
   const campaigns = await Promise.all(
     campaignsRaw.map(async (c) => {
       const ps = await core.listProspects(ws, { campaignId: c.id });
@@ -93,12 +95,12 @@ export async function POST(req: Request) {
 
       case "create-campaign": {
         if (!b?.name) return fail("missing_fields", 422, { detail: "name is required" });
-        const motion: Motion = b.motion === "recruiting" ? "recruiting" : "bd";
+        const motion: Motion = "bd"; // Autopilot is a BD surface; recruiting campaigns are created in Campaigns / Studio
         const c = await createCampaign({
           workspaceId: ws,
           motion,
           name: String(b.name),
-          goal: String(b.goal || (motion === "bd" ? "Win meetings with companies that are actively hiring." : "Open strong candidates to an active role.")),
+          goal: String(b.goal || "Win meetings with companies that are actively hiring."),
           icp: b.icp || { accountProfile: "", persona: "", disqualifiers: [] },
           signals: Array.isArray(b.signals) ? b.signals : [],
           methodology: b.methodology,
@@ -165,6 +167,7 @@ export async function POST(req: Request) {
         const c = await owned(String(b.campaignId || ""));
         if ("err" in c) return c.err;
         const on = b.autoRun === true;
+        if (on && c.motion !== "bd") return fail("bd_only", 422, { detail: "Autopilot runs BD campaigns only. Recruiting campaigns use the morning approval queue." });
         if (on && !c.outreachApproved) return fail("not_approved", 409, { detail: "approve the outreach model before turning Autopilot on" });
         c.autoRun = on;
         if (on && c.status !== "active") c.status = "active";
@@ -176,7 +179,7 @@ export async function POST(req: Request) {
       case "pull": {
         const c = await owned(String(b.campaignId || ""));
         if ("err" in c) return c.err;
-        if (c.motion !== "bd") return fail("bd_only", 422, { detail: "Hiring-signal pull is BD. For Recruiting, source candidates in JD Sourcing — Autopilot then sequences them." });
+        if (c.motion !== "bd") return fail("bd_only", 422, { detail: "Hiring-signal pull works on BD campaigns only." });
         const limit = Math.min(Math.max(Number(b.limit) || 25, 1), 500);
         const perCompany = Math.min(Math.max(Number(b.contactsPerCompany) || 1, 1), 5);
         const findDirectDial = b.findDirectDial === true;

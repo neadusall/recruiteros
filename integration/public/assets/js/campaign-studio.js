@@ -907,7 +907,8 @@
       $("assignee").value = state.assignee; $("account").value = state.account;
       $("cap").value = state.dailyCap; $("threshold").value = state.voiceThreshold;
       var sp = $("status"); sp.textContent = state.status; sp.className = "cs-status-pill " + state.status;
-      var ap = $("autopilot"); if (ap) { ap.textContent = "Autopilot: " + (state.autoRun ? "on" : "off"); ap.classList.toggle("btn-primary", !!state.autoRun); ap.classList.toggle("btn-ghost", !state.autoRun); }
+      // Autopilot is BD-only: recruiting campaigns keep the human approval queue, so hide the toggle.
+      var ap = $("autopilot"); if (ap) { ap.style.display = state.motion === "bd" ? "" : "none"; ap.textContent = "Autopilot: " + (state.autoRun ? "on" : "off"); ap.classList.toggle("btn-primary", !!state.autoRun); ap.classList.toggle("btn-ghost", !state.autoRun); }
       if (!opts.embedded) Array.prototype.forEach.call(root.querySelectorAll(".cs-motion .mt"), function (b) { b.classList.toggle("active", b.dataset.motion === state.motion); });
       renderStats();
     }
@@ -1008,7 +1009,7 @@
     $("threshold").addEventListener("input", function (e) { state.voiceThreshold = parseInt(e.target.value, 10) || 80; });
     $("palSearch").addEventListener("input", renderPalette);
     if (!opts.embedded) Array.prototype.forEach.call(root.querySelectorAll(".cs-motion .mt"), function (b) {
-      b.addEventListener("click", function () { state.motion = b.dataset.motion; if (opts.onMotionChange) opts.onMotionChange(state.motion); syncMeta(); renderPalette(); });
+      b.addEventListener("click", function () { state.motion = b.dataset.motion; if (state.motion !== "bd") state.autoRun = false; if (opts.onMotionChange) opts.onMotionChange(state.motion); syncMeta(); renderPalette(); });
     });
     $("save").addEventListener("click", function () { save(); });
     $("saveas").addEventListener("click", function () { state.id = null; state.name = state.name + " (copy)"; syncMeta(); save(); });
@@ -1031,10 +1032,11 @@
       toast(state.status === "active" ? "Campaign activated" : "Campaign paused");
     });
     $("autopilot").addEventListener("click", function () {
-      // Hands-off run mode. Turning it ON also activates the campaign, an
-      // Autopilot campaign that isn't active would never be picked up by the
-      // internal cadence clock. Persists straight to the backend so the server's
-      // Automation scheduler (gated by AUTOMATION_ENABLED) starts running it.
+      // Hands-off run mode, BD campaigns only. Turning it ON also activates the
+      // campaign, an Autopilot campaign that isn't active would never be picked
+      // up by the internal cadence clock. Persists straight to the backend so the
+      // server's Automation scheduler (gated by AUTOMATION_ENABLED) starts running it.
+      if (state.motion !== "bd") { toast("Autopilot runs BD campaigns only"); return; }
       state.autoRun = !state.autoRun;
       if (state.autoRun && state.status !== "active") state.status = "active";
       save(true); syncMeta();

@@ -519,7 +519,7 @@
     sendqueue: { title: "Send Queue", crumb: "Operate", action: null, render: renderSendQueue, motionOnly: "bd" },
     senders: { title: "Senders", crumb: "Operate", action: null, render: renderSenders, motionOnly: "bd" },
     prospects: { title: "Prospects", crumb: "Operate", action: "+ Add prospect", render: renderProspects },
-    autopilot: { title: "Autopilot", crumb: "Build", action: null, render: renderAutopilot },
+    autopilot: { title: "Autopilot", crumb: "Business Development", action: null, render: renderAutopilot, motionOnly: "bd" },
     campaigns: { title: "Campaigns", crumb: "Build", action: "+ New sequence", render: renderCampaignsHub },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting" },
@@ -6477,9 +6477,8 @@
   /* ---------------- Autopilot command center ----------------
      One screen: pull every hiring signal -> enrich -> run approved, sequenced
      campaigns hands-off. The "set it and forget it" surface. Backed by
-     /api/autopilot. Works for BD (auto-pull hiring signals) and Recruiting
-     (sequence candidates sourced in JD Sourcing); the approve-once model gate is
-     identical for both motions. */
+     /api/autopilot. BD-only: it auto-pulls hiring signals and runs BD campaigns.
+     Recruiting campaigns stay on the human-gated morning approval queue. */
   function apEvery(ms) {
     var s = Math.round(ms / 1000);
     if (s < 90) return s + "s";
@@ -6734,7 +6733,6 @@
       var bodyHtml =
         '<div class="ap-newform">' +
           '<label>Campaign name<input id="apcName" placeholder="e.g. Q3 Fintech hiring surge"></label>' +
-          '<label>Motion<select id="apcMotion"><option value="bd">Business Development (reach hiring companies)</option><option value="recruiting">Recruiting (reach candidates)</option></select></label>' +
           '<label>Sequence style<select id="apcMethod">' +
             '<option value="seven_touch_drip">7-touch multi-channel drip</option>' +
             '<option value="voice_first">Voice-first (warm, high-touch)</option>' +
@@ -6747,7 +6745,7 @@
         root.querySelector("#apcCreate").addEventListener("click", function () {
           var name = root.querySelector("#apcName").value.trim();
           if (!name) { toast("Name it first"); return; }
-          var payload = { action: "create-campaign", name: name, motion: root.querySelector("#apcMotion").value,
+          var payload = { action: "create-campaign", name: name, motion: "bd",
             methodology: root.querySelector("#apcMethod").value, dailyCap: parseInt(root.querySelector("#apcCap").value, 10) || 25 };
           send("/autopilot", "POST", payload).then(function (r) {
             if (!r.ok) { toast("Create failed"); return; }
@@ -11054,8 +11052,14 @@
       }
       next();
     }
+    // Skeleton while the tab loads: calm placeholder blocks in the final layout,
+    // not a spinner, so the page never visibly "pops" into shape.
+    function vtSkeleton() {
+      function card(h) { return '<div class="vt-card vt-skel-card"><div class="vt-skel" style="width:34%"></div><div class="vt-skel" style="width:88%"></div><div class="vt-skel" style="height:' + h + 'px"></div></div>'; }
+      return card(72) + card(120) + card(90);
+    }
     function paintOptimizer(body) {
-      body.innerHTML = loading();
+      body.innerHTML = vtSkeleton();
       api("/vetting/desks?motion=" + motion).then(function (dd) {
         var desks = (dd && dd.desks) || [];
         if (!desks.length) {
@@ -11070,7 +11074,7 @@
           var desk = desks.filter(function (d) { return d.id === vt.deskId; })[0] || {};
           body.innerHTML =
             optHeaderCard(o, opts, desk) +
-            optHealthCard(o) + optVoiceCard(o) + optTurnCard(o) + optRunCard(o) + optHistoryCard(o);
+            optVoiceCard(o) + optTurnCard(o) + optRunCard(o) + optHistoryCard(o);
           wireOptimizer(body, o);
         }).catch(function () { body.innerHTML = needsSetup(); });
       }).catch(function () { body.innerHTML = needsSetup(); });
@@ -11102,46 +11106,79 @@
         ? '<div class="vt-next-up"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg><span>' + banner[0] + "</span>" +
           (banner[1] ? '<button class="vt-btn vt-btn-primary" data-vtnext="' + banner[2] + '">' + banner[1] + "</button>" : "") + "</div>"
         : "";
-      return '<div class="vt-card"><div class="vt-opt-head">' +
+      return '<div class="vt-card vt-masthead"><div class="vt-opt-head">' +
         '<div class="vt-select-wrap"><label>Desk</label><select id="vtOptDesk">' + opts + "</select>" +
         (desk.status ? statusPill(desk.status) : "") + "</div>" +
-        '<div class="vt-readies">' + chips + "</div></div>" + bannerHtml + "</div>";
+        '<div class="vt-readies">' + chips + "</div></div>" + bannerHtml +
+        '<div class="vt-mast-divide"></div>' + healthSection(o) + "</div>";
     }
 
-    /* ---- how human the agent sounds, from its scored calls ---- */
-    function optHealthCard(o) {
+    /* ---- how human the agent sounds (lives inside the masthead) ---- */
+    function healthSection(o) {
       var t = (o && o.trend) || { points: [], scoredCalls: 0, avgRealism: null, avgRealismRecent: null };
       var pts = (t.points || []).filter(function (p) { return p.realism != null; }).slice(-24);
       var bars = pts.map(function (p) {
         var h = Math.max(6, p.realism);
-        var col = p.realism >= 80 ? "var(--ok)" : p.realism >= 60 ? "var(--vt-accent)" : "var(--warn)";
-        return '<span class="vt-spark-bar" style="height:' + h + '%;background:' + col + '" title="' + fmtDate(p.at) + " · realism " + p.realism + '/100"></span>';
+        var cls = p.realism >= 80 ? " good" : p.realism >= 60 ? "" : " low";
+        return '<span class="vt-bar-col' + cls + '" style="height:' + h + '%" title="' + fmtDate(p.at) + " · realism " + p.realism + '/100"></span>';
       }).join("");
+      // The chart carries its own reading aids: quiet gridlines at 50 and 80,
+      // and the 80 line labeled as the bar where callers stop suspecting.
+      var chart = bars
+        ? '<div class="vt-chart">' +
+          '<div class="vt-chart-line" style="bottom:50%"><i></i><span>50</span></div>' +
+          '<div class="vt-chart-line target" style="bottom:80%"><i></i><span>80 · sounds human</span></div>' +
+          '<div class="vt-chart-bars">' + bars + "</div></div>"
+        : '<div class="vt-chart vt-chart-empty"><svg class="isvg" aria-hidden="true"><use href="#i-activity"/></svg><span>The realism trend draws here after your first scored call or stress test.</span></div>';
+      // Momentum: recent five vs all time, said plainly.
+      var delta = "";
+      if (t.avgRealismRecent != null && t.avgRealism != null && t.avgRealismRecent !== t.avgRealism) {
+        var up = t.avgRealismRecent > t.avgRealism;
+        delta = '<span class="vt-delta' + (up ? " up" : " down") + '"><svg class="isvg" aria-hidden="true"><use href="#i-' + (up ? "up" : "down") + '"/></svg>' +
+          Math.abs(t.avgRealismRecent - t.avgRealism) + " vs all time</span>";
+      }
       var kpis =
-        '<div class="vt-kpi"><b>' + (t.avgRealismRecent != null ? t.avgRealismRecent : "–") + '</b><span>realism, last 5 calls</span></div>' +
+        '<div class="vt-kpi"><b>' + (t.avgRealismRecent != null ? t.avgRealismRecent : "–") + "</b><span>realism, last 5 calls</span>" + delta + "</div>" +
         '<div class="vt-kpi"><b>' + (t.avgRealism != null ? t.avgRealism : "–") + '</b><span>realism, all time</span></div>' +
         '<div class="vt-kpi"><b>' + (t.scoredCalls || 0) + '</b><span>scored calls</span></div>';
-      return '<div class="vt-card"><h3>How human does your agent sound?</h3>' +
-        '<div class="vt-hint" style="margin-top:6px">Every scored call already grades the agent’s realism 0-100 (pacing, acknowledgments, no robotic tells). This is that grade over time; the optimizer’s job is to push it up.</div>' +
-        '<div class="vt-health">' + kpis +
-        '<div class="vt-spark">' + (bars || '<span class="vt-hint">No graded calls yet. The trend appears after your first scored call, or run a stress test below.</span>') + "</div></div></div>";
+      return '<div class="vt-h-row"><span class="vt-h-ic"><svg class="isvg" aria-hidden="true"><use href="#i-activity"/></svg></span>' +
+        '<div><h3 style="margin:0">How human does your agent sound?</h3>' +
+        '<div class="vt-hint">Every scored call grades the agent 0-100 on pacing, acknowledgments, and robotic tells. The optimizer’s whole job is pushing this line up.</div></div></div>' +
+        '<div class="vt-health">' + kpis + chart + "</div>";
     }
 
     /* ---- ElevenLabs delivery tuning ---- */
+    function fillPct(val, min, max) { return Math.round(((val - min) / (max - min)) * 100); }
     function sliderRow(id, label, val, min, max, step, hint, ends) {
       return '<div class="vt-slide"><div class="vt-slide-h"><label for="' + id + '">' + label + '</label><span class="vt-slide-val" id="' + id + 'Val">' + val + "</span></div>" +
-        '<input type="range" id="' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" />' +
+        '<input type="range" id="' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" style="--fill:' + fillPct(val, min, max) + '%" />' +
         (ends ? '<div class="vt-slide-ends"><span>' + ends[0] + "</span><span>" + ends[1] + "</span></div>" : "") +
         '<div class="vt-hint">' + hint + "</div></div>";
+    }
+    function cardHead(icon, title, hint) {
+      return '<div class="vt-h-row"><span class="vt-h-ic"><svg class="isvg" aria-hidden="true"><use href="#i-' + icon + '"/></svg></span>' +
+        "<div><h3 style=\"margin:0\">" + title + "</h3>" +
+        (hint ? '<div class="vt-hint">' + hint + "</div>" : "") + "</div></div>";
     }
     function optVoiceCard(o) {
       var v = (o && o.voiceTuning) || { stability: 0.4, similarityBoost: 0.8, style: 0, speed: 1, speakerBoost: true };
       var presets = (o && o.presets) || {};
+      // A preset chip lights up when the desk's saved tuning IS that preset, so
+      // the current sound has a name at a glance.
+      function isActive(p) {
+        return Math.abs(p.tuning.stability - v.stability) < 0.011 &&
+          Math.abs(p.tuning.similarityBoost - v.similarityBoost) < 0.011 &&
+          Math.abs(p.tuning.style - v.style) < 0.011 &&
+          Math.abs(p.tuning.speed - v.speed) < 0.011 &&
+          Boolean(p.tuning.speakerBoost) === Boolean(v.speakerBoost);
+      }
       var chips = Object.keys(presets).map(function (k) {
         var p = presets[k];
-        return '<button class="vt-btn vt-preset" data-vtpreset="' + esc(k) + '" title="' + esc(p.hint) + '">' + esc(p.label) + "</button>";
+        var act = isActive(p);
+        return '<button class="vt-btn vt-preset' + (act ? " active" : "") + '" data-vtpreset="' + esc(k) + '" title="' + esc(p.hint) + '">' +
+          (act ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : "") + esc(p.label) + "</button>";
       }).join("");
-      return '<div class="vt-card"><h3>Voice delivery</h3>' +
+      return '<div class="vt-card">' + cardHead("mic", "Voice delivery") +
         '<div class="vt-hint" style="margin-top:6px">How your cloned voice is rendered on the call. These are the ElevenLabs settings that decide whether the same voice reads as a person or a machine; the defaults are the documented phone-realism sweet spot.</div>' +
         '<div class="vt-presets">' + chips + "</div>" +
         '<div class="vt-sliders">' +
@@ -11164,7 +11201,7 @@
     /* ---- conversation feel (barge-in, silence, backchannels) ---- */
     function optTurnCard(o) {
       var t = (o && o.turnTuning) || { interruptions: true, interruptionSensitivity: 0.6, idleTimeoutSec: 8, idleReminder: "", backchannelWords: [] };
-      return '<div class="vt-card"><h3>Conversation feel</h3>' +
+      return '<div class="vt-card">' + cardHead("message", "Conversation feel") +
         '<div class="vt-hint" style="margin-top:6px">How the agent behaves in the back-and-forth: whether callers can talk over it, how fast it takes its turn, and what it does with silence. Saved settings push to the live line; the phone engine applies what it supports and the rest is enforced through the agent\'s instructions.</div>' +
         '<label class="vt-must" style="margin-top:14px"><input type="checkbox" id="vtTtInt"' + (t.interruptions ? " checked" : "") + ' /><span>Callers can interrupt the agent (barge-in), the strongest single realism signal</span></label>' +
         '<div class="vt-sliders" style="margin-top:14px">' +
@@ -11195,14 +11232,14 @@
       // Until there are real scored calls, the stress test IS the main move:
       // lead with it and let the call-driven buttons follow.
       var noCalls = !(t.scoredCalls > 0);
-      var btnOpt = '<button class="vt-btn' + (noCalls ? "" : " vt-btn-primary") + '" id="vtRunOpt">Optimize from calls</button>';
-      var btnSim = '<button class="vt-btn' + (noCalls ? " vt-btn-primary" : "") + '" id="vtRunSim">Run stress test</button>';
-      return '<div class="vt-card"><h3>Improve the agent</h3>' +
+      var btnOpt = '<button class="vt-btn' + (noCalls ? "" : " vt-btn-primary") + '" id="vtRunOpt"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg> Optimize from calls</button>';
+      var btnSim = '<button class="vt-btn' + (noCalls ? " vt-btn-primary" : "") + '" id="vtRunSim"><svg class="isvg" aria-hidden="true"><use href="#i-flask"/></svg> Run stress test</button>';
+      return '<div class="vt-card">' + cardHead("zap", "Improve the agent") +
         '<div class="vt-hint" style="margin-top:6px"><b>Stress test</b> plays five synthetic candidates against your exact live prompt (the skeptic who asks if it’s an AI, the rambler, the star, the confident-but-unqualified, one built for this role) and grades each for realism. <b>Optimize</b> studies recent real calls plus the last stress test and proposes a coaching revision. <b>3 variants</b> optimizes through three lenses (warmth, brevity, energy) so you pick the one that sounds like you. <b>Check prompt</b> reviews the instructions for gaps.</div>' +
         '<div class="vt-actions" style="border-top:0;padding-top:0;margin-top:14px">' +
         (noCalls ? btnSim + btnOpt : btnOpt + btnSim) +
-        '<button class="vt-btn" id="vtRunAuto">Generate 3 variants</button>' +
-        '<button class="vt-btn" id="vtRunLint">Check prompt</button></div>' +
+        '<button class="vt-btn" id="vtRunAuto"><svg class="isvg" aria-hidden="true"><use href="#i-shuffle"/></svg> Generate 3 variants</button>' +
+        '<button class="vt-btn" id="vtRunLint"><svg class="isvg" aria-hidden="true"><use href="#i-shield"/></svg> Check prompt</button></div>' +
         '<div id="vtOptResult"></div>' +
         '<div class="vt-learnrow" style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px">' +
         '<label class="vt-must"><input type="checkbox" id="vtAutoLearn"' + (l.autoLearn ? " checked" : "") + ' /><span>Learn and improve automatically</span></label>' +
@@ -11244,8 +11281,10 @@
         var hear = hasTr
           ? '<div style="margin-top:8px"><button class="vt-btn" data-vtrehearse="' + i + '"><svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg> Hear it in your voice</button> <span class="vt-hint" data-vtrehearsemsg="' + i + '"></span></div>'
           : "";
+        var meter = '<span class="vt-meter" title="realism ' + r.realism + '/100"><i class="' + (r.realism >= 80 ? "good" : r.realism >= 60 ? "" : "low") + '" style="width:' + Math.max(4, r.realism) + '%"></i></span>';
         return '<div class="vt-sim' + (r.passed ? "" : " vt-sim-fail") + '">' +
-          '<div class="vt-sim-h">' + icon + " <b>" + esc(r.label) + "</b><span class=\"vt-sim-real\">realism " + r.realism + "/100</span></div>" +
+          '<div class="vt-sim-h">' + icon + " <b>" + esc(r.label) + "</b>" +
+          '<span class="vt-sim-real">' + meter + "realism " + r.realism + "/100</span></div>" +
           '<div class="vt-hint">' + esc(r.notes) + "</div>" + tr + hear + "</div>";
       }).join("");
       var next = run.failed > 0 ? '<div class="vt-hint" style="margin-top:8px">Now click <b>Optimize from calls</b>: the failures above become the evidence for the next revision.</div>' : "";
@@ -11267,12 +11306,14 @@
       var l = (o && o.learning) || {};
       var revs = l.revisions || [];
       var inner = revs.length
-        ? revs.map(function (r) { return revisionCard(r, false); }).join("")
+        ? '<div class="vt-tl">' + revs.map(function (r) {
+            return '<div class="vt-tl-item' + (r.status === "applied" ? " applied" : "") + '"><span class="vt-tl-node"></span>' + revisionCard(r, false) + "</div>";
+          }).join("") + "</div>"
         : '<div class="vt-hint" style="margin-top:8px">No revisions yet. Run the optimizer or a stress test above, or switch on self-learning and let the calls do it.</div>';
       var revert = (l.learnedNotes)
         ? '<div style="margin-top:12px"><button class="vt-btn vt-btn-ghost" id="vtRevert">Reset to factory behavior (remove all applied coaching)</button></div>'
         : "";
-      return '<div class="vt-card"><h3>Revision history</h3>' + inner + revert + "</div>";
+      return '<div class="vt-card">' + cardHead("layers", "Revision history", "Every change the optimizer has made to this agent, newest first. Apply any proposal; roll back anything.") + inner + revert + "</div>";
     }
 
     function wireOptimizer(body, o) {
@@ -11302,6 +11343,7 @@
         var el = $("#" + pair[0]);
         if (el) el.addEventListener("input", function () {
           var v = $("#" + pair[0] + "Val"); if (v) v.textContent = el.value;
+          el.style.setProperty("--fill", fillPct(parseFloat(el.value), parseFloat(el.min), parseFloat(el.max)) + "%");
           markDirty(pair[1]);
         });
       });
@@ -11331,9 +11373,15 @@
           if (!p) return;
           var map = { vtStab: p.tuning.stability, vtSim: p.tuning.similarityBoost, vtStyle: p.tuning.style, vtSpeed: p.tuning.speed };
           Object.keys(map).forEach(function (id) {
-            var el = $("#" + id); if (el) { el.value = map[id]; var v = $("#" + id + "Val"); if (v) v.textContent = String(map[id]); }
+            var el = $("#" + id);
+            if (el) {
+              el.value = map[id];
+              el.style.setProperty("--fill", fillPct(parseFloat(el.value), parseFloat(el.min), parseFloat(el.max)) + "%");
+              var v = $("#" + id + "Val"); if (v) v.textContent = String(map[id]);
+            }
           });
           if ($("#vtBoost")) $("#vtBoost").checked = !!p.tuning.speakerBoost;
+          markDirty("vtVoiceSave");
           var m = $("#vtVoiceMsg"); if (m) m.textContent = p.label + ": " + p.hint + " Click Save to push it.";
         });
       });
