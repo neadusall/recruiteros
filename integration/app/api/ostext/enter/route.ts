@@ -55,5 +55,12 @@ export async function GET(req: Request) {
   if (theme === "dark" || theme === "light") dest.searchParams.set("theme", theme);
   if (accent && /^#[0-9a-fA-F]{3,8}$/.test(accent)) dest.searchParams.set("accent", accent);
 
-  return NextResponse.redirect(dest, 302);
+  // RELATIVE redirect, never absolute. Behind the TLS-terminating proxy,
+  // req.url is plain http://, so an absolute Location built from it points the
+  // browser at http:// INSIDE an https:// page — mixed content, which Chrome
+  // silently blocks and renders as a dead iframe. A relative Location keeps
+  // the browser on the current https origin. (The dev override stays absolute
+  // by definition; it points at a different local server.)
+  const location = override ? dest.toString() : dest.pathname + dest.search;
+  return new Response(null, { status: 302, headers: { Location: location } });
 }
