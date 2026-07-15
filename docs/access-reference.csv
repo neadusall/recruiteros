@@ -6,4 +6,4 @@ White-label Signup (new customers),https://recruitersos.co/signup,Their own (cor
 LUME - Admin,https://app.lumesp.com/admin,A @lumesp.com admin (fill in),Pending DNS + Caddy reload,Login + admin role on the LUME workspace,"Same app with LUME branding; live once CNAME app.lumesp.com -> recruitersos.co + TXT verify + one-time Caddy reload"
 LUME - Signup,https://app.lumesp.com/signup,Their own,Pending DNS + Caddy reload,Public,New LUME-side customer signup
 LUME - Recruiter,https://app.lumesp.com/recruiter,A @lumesp.com recruiter,Pending DNS + Caddy reload,Login + member role,LUME's recruiters
-OS Text (SMS engine),https://taltxt.recruitersos.co,Logged-in recruiting workspace,Live,Workspace session,Embedded inside the portal's OS Text tab
+OS Text (SMS engine),portal domain /ostext-app (same-origin embed),Logged-in recruiting workspace,Live,Workspace session,Embedded inside the portal's OS Text tab

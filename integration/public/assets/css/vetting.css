@@ -231,6 +231,20 @@
 .vt-turn.agent b { color: var(--brand); }
 .vt-turn.candidate b { color: var(--info); }
 
+/* ---- extraction fields (data captured per call) ---- */
+.vt-xrow {
+  display: grid; grid-template-columns: 26px 1.4fr 130px 1fr; gap: 10px; align-items: center;
+  padding: 9px 12px; margin-top: 6px; border: 1px solid var(--border); border-radius: var(--vt-r-sm);
+  background: var(--surface);
+}
+.vt-xrow input, .vt-xrow select {
+  border: 1px solid transparent; background: transparent; padding: 7px 9px; font: inherit; font-size: 13.5px;
+  color: var(--text); border-radius: var(--vt-r-sm); min-width: 0;
+}
+.vt-xrow select { cursor: pointer; background: var(--bg-soft); border-color: var(--border); }
+.vt-xrow input:hover { background: var(--bg-soft); }
+.vt-xrow input:focus, .vt-xrow select:focus { outline: none; background: var(--surface); border-color: var(--brand); }
+
 /* ---- optimizer tab ---- */
 .vt-chip-learn { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 30%, var(--border)); background: var(--brand-soft); }
 .vt-chip-learn b { color: var(--brand); }
@@ -284,4 +298,6 @@
   .vt-qrow .vt-must { grid-column: 2; justify-self: start; }
   .vt-health { gap: 16px; }
   .vt-sliders { grid-template-columns: 1fr; }
+  .vt-xrow { grid-template-columns: 26px 1fr; }
+  .vt-xrow select, .vt-xrow input[id^="vtXo"] { grid-column: 2; }
 }

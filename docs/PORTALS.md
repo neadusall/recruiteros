@@ -40,7 +40,7 @@ edit `integration/public/` directly.
 | **LUME – Admin** | `app.lumesp.com/admin` | a @lumesp.com admin _(fill in)_ | Pending DNS + Caddy reload |
 | **LUME – Signup** | `app.lumesp.com/signup` | their own | Pending DNS + Caddy reload |
 | **LUME – Recruiter** | `app.lumesp.com/recruiter` | per LUME recruiter | Pending DNS + Caddy reload |
-| OS Text (SMS engine) | `taltxt.recruitersos.co` | logged-in recruiting workspace | Live (embedded in the OS Text tab) |
+| OS Text (SMS engine) | `/ostext-app` on every portal domain (same-origin embed; legacy `taltxt.recruitersos.co` kept for webhooks) | logged-in recruiting workspace | Live (embedded in the OS Text tab) |
 
 Notes:
 - **Owner Console** is gated by `OWNER_EMAIL` (non-owners get a 404). Sign in at

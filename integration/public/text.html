@@ -36,8 +36,13 @@
     <a href="/command" class="back">← Back to portal</a>
   </div>
   <!-- Single sign-on: /api/ostext/enter signs you into OS Text and lands you in
-       the app. No second login. -->
-  <iframe src="/api/ostext/enter" title="OS Text" allow="clipboard-read; clipboard-write; microphone"></iframe>
+       the app (served same-origin under /ostext-app). No second login. The saved
+       theme is forwarded so the engine paints in the matching skin. -->
+  <iframe id="osx" title="OS Text" allow="clipboard-read; clipboard-write; microphone"></iframe>
+  <script>(function(){try{
+    var t=document.documentElement.getAttribute('data-theme')||'dark';
+    document.getElementById('osx').src='/api/ostext/enter?theme='+encodeURIComponent(t);
+  }catch(e){document.getElementById('osx').src='/api/ostext/enter';}})();</script>
 
   <script>
     // OS Text needs a RecruitersOS session. If you hit this page signed out, the

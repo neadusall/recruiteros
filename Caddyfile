@@ -9,19 +9,36 @@
 	}
 }
 
+# OS Text (the embedded SMS engine) rides EVERY portal domain under
+# /ostext-app/*, same-origin with the portal: the iframe session cookie is
+# first-party everywhere and a white-label customer never sees a house URL.
+# Imported into each portal-serving block below.
+(ostext) {
+	handle /ostext-app/* {
+		reverse_proxy taltxt:3000
+	}
+}
+
 # Automatic HTTPS for both apex and www. Caddy fetches and renews the
 # Let's Encrypt certificate on its own once DNS points here.
 recruitersos.co, www.recruitersos.co {
 	encode zstd gzip
-	reverse_proxy app:3000
+	import ostext
+	handle {
+		reverse_proxy app:3000
+	}
 }
 
-# OS Text: the embedded SMS app on its own subdomain. The portal's
-# "OS Text" panel iframes this. Caddy fetches/renews its Let's Encrypt cert
-# automatically once taltxt.recruitersos.co's DNS A record points here.
-# (The taltxt host/service names are legacy wire ids; the product is OS Text.)
+# LEGACY machine host for the OS Text engine. Users no longer land here (the
+# app is served same-origin on every portal domain under /ostext-app), but
+# previously-configured Telnyx/QStash webhooks and old env URLs still point at
+# this subdomain, so keep it alive: unprefixed legacy paths are rewritten onto
+# the app's /ostext-app base path. (The taltxt host/service names are legacy
+# wire ids; the product is OS Text.)
 taltxt.recruitersos.co {
 	encode zstd gzip
+	@unprefixed not path /ostext-app/*
+	rewrite @unprefixed /ostext-app{uri}
 	reverse_proxy taltxt:3000
 }
 
@@ -60,7 +77,10 @@ www.lumesp.com {
 # app.lumesp.com already points at this box.
 app.lumesp.com {
 	encode zstd gzip
-	reverse_proxy app:3000
+	import ostext
+	handle {
+		reverse_proxy app:3000
+	}
 }
 
 # RecruitersOS Mail — the ACS email infrastructure embedded in the portal
@@ -86,5 +106,8 @@ https:// {
 		on_demand
 	}
 	encode zstd gzip
-	reverse_proxy app:3000
+	import ostext
+	handle {
+		reverse_proxy app:3000
+	}
 }
