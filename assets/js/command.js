@@ -531,6 +531,7 @@
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
     calls: { title: "Calls", crumb: "Build", action: null, render: renderCalls, motionOnly: "recruiting" },
     bdphone: { title: "BD Phone", crumb: "Tools", action: null, render: renderBdPhone, motionOnly: "bd" },
+    linkedinposter: { title: "LinkedIn Poster", crumb: "Tools", action: null, render: renderLinkedInPoster, motionOnly: "bd" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "+ New sequence", render: renderContent },
@@ -9113,6 +9114,20 @@
     }
     el.innerHTML = '<iframe class="ps-embed" src="/pip-studio?embed=1" title="PiP Studio" ' +
       'allow="camera; microphone; display-capture; clipboard-write" allowfullscreen></iframe>';
+  }
+
+  /* LinkedIn Poster (Tools > BD): same embed pattern as PiP Studio. The tool is
+     a standalone Meridian page (linkedin-poster.html) framed inside the panel;
+     same origin, so it inherits this session's cookie and workspace. */
+  function renderLinkedInPoster(el) {
+    if (!document.getElementById("lpEmbedStyle")) {
+      var st = document.createElement("style");
+      st.id = "lpEmbedStyle";
+      st.textContent = ".lp-embed{width:100%;height:calc(100vh - 138px);min-height:560px;border:0;border-radius:var(--radius);background:var(--bg);display:block;box-shadow:0 1px 0 var(--border) inset}";
+      document.head.appendChild(st);
+    }
+    el.innerHTML = '<iframe class="lp-embed" src="/linkedin-poster?embed=1" title="LinkedIn Poster" ' +
+      'allow="clipboard-write" allowfullscreen></iframe>';
   }
 
   function renderVoiceDrops(el) {

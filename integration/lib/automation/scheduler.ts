@@ -97,6 +97,12 @@ async function tickSending(): Promise<void> {
   try { await runSeedMaintenance(); } catch { /* seeds are global, best-effort */ }
 }
 
+/** Publish LinkedIn Poster posts that were approved for a scheduled time. */
+async function tickLinkedinPosts(): Promise<void> {
+  const { tickDuePosts } = await import("../linkedin/poster");
+  await tickDuePosts(new Date());
+}
+
 /** Advance the 24-month BD nurture drip (due touches + triggers + dormant floor). */
 async function tickNurture(): Promise<void> {
   const { runNurtureTick } = await import("../bd/nurtureCron");
@@ -150,6 +156,7 @@ interface TickSpec { key: string; label: string; env: string; defaultMs: number;
 const TICKS: TickSpec[] = [
   { key: "cadence", label: "Pull + draft + send (Autopilot)", env: "RECRUITEROS_CADENCE_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 90_000, fn: tickCadence },
   { key: "linkedin", label: "LinkedIn cadence", env: "RECRUITEROS_LINKEDIN_TICK_MS", defaultMs: 3 * 60_000, firstDelayMs: 30_000, fn: tickLinkedin },
+  { key: "linkedin_posts", label: "LinkedIn Poster scheduled posts", env: "RECRUITEROS_LINKEDIN_POSTS_TICK_MS", defaultMs: 60_000, firstDelayMs: 35_000, fn: tickLinkedinPosts },
   { key: "voice", label: "Voicemail drops", env: "RECRUITEROS_VOICE_TICK_MS", defaultMs: 15 * 60_000, firstDelayMs: 45_000, fn: tickVoice },
   { key: "nurture_enroll", label: "Auto-enroll into nurture", env: "RECRUITEROS_NURTURE_ENROLL_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 50_000, fn: tickNurtureEnroll },
   { key: "nurture", label: "24-month nurture drip", env: "RECRUITEROS_NURTURE_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 60_000, fn: tickNurture },

@@ -7,7 +7,7 @@ const PAGES = [
   "about", "alfred", "analytics", "app", "business-development-os",
   "campaign-builder", "campaign-studio", "command", "conversations",
   "developers", "features", "forgot-password", "helpcenter", "index", "integrations",
-  "linkedin", "login", "outreach", "owner-console", "owner-login", "pip-studio", "platform", "pricing",
+  "linkedin", "linkedin-poster", "login", "outreach", "owner-console", "owner-login", "pip-studio", "platform", "pricing",
   "recruiting-os", "reset-password", "signals", "signup", "sourcing", "text", "watch",
 ];
 
