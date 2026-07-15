@@ -314,9 +314,20 @@
       Array.prototype.forEach.call(document.querySelectorAll(".mt"), function (x) { x.classList.toggle("active", x === b); });
       // If the current view belongs only to the other motion (e.g. Hire Signals is
       // BD-only), leave it for Overview instead of bouncing the motion back.
-      var cur = (location.hash || "#overview").replace(/^#/, "").split("/").pop();
-      if (ROUTES[cur] && ROUTES[cur].motionOnly && ROUTES[cur].motionOnly !== motion && cur !== "overview") {
+      // routeFromHash() (not raw hash parsing): drill-down hashes like
+      // "#bdphone/<callId>" must resolve to their route, else currentRoute()
+      // re-asserts the route's motion and the toggle snaps straight back.
+      var cur = routeFromHash();
+      if (ROUTES[cur] && ROUTES[cur].motionOnly && ROUTES[cur].motionOnly !== motion) {
         location.hash = "overview";
+      } else {
+        // Drop any "#bd/..." / "#recruiting/..." reference prefix from the URL;
+        // left in place, currentRoute() reads the OLD motion from it and undoes
+        // the toggle.
+        var parts = (location.hash || "").replace(/^#/, "").split("/");
+        if (parts[0] === "bd" || parts[0] === "recruiting") {
+          location.hash = parts.slice(1).join("/") || "overview";
+        }
       }
       syncMotionNav();
       render();
@@ -736,16 +747,29 @@
     viewTimers.push(setInterval(load, 15000));
   }
 
+  // Aliases. #builder stays the BD-branded entry (it forces BD via its own
+  // route); Hire Signals (#inmarket) is motion-agnostic and shows in both.
+  var HASH_ALIAS = { "in-market": "inmarket", leads: "inmarket", bdbulk: "email", emailprep: "email" };
+
+  // The route segment of the current hash (motion prefix stripped, aliases
+  // applied) WITHOUT currentRoute()'s motion side effects. Needed anywhere the
+  // route must be inspected before deciding what to do with the motion, e.g.
+  // the motion toggle: hashes carry drill-down details ("#bdphone/<callId>"),
+  // so naive last-segment parsing misidentifies the route.
+  function routeFromHash() {
+    var parts = (location.hash || "#overview").replace(/^#/, "").split("/");
+    if (parts[0] === "bd" || parts[0] === "recruiting") parts.shift();
+    var h = parts[0] || "overview";
+    return HASH_ALIAS[h] || h;
+  }
+
   function currentRoute() {
     var h = (location.hash || "#overview").replace(/^#/, "");
     // support reference-style "#bd/response" -> set motion + route
     var parts = h.split("/");
     if (parts[0] === "bd" || parts[0] === "recruiting") { motion = parts[0]; localStorage.setItem("ros_motion", motion); h = parts[1] || "overview"; }
     else h = parts[0];
-    // Aliases. #builder stays the BD-branded entry (it forces BD via its own
-    // route); Hire Signals (#inmarket) is motion-agnostic and shows in both.
-    var ALIAS = { "in-market": "inmarket", leads: "inmarket", bdbulk: "email", emailprep: "email" };
-    if (ALIAS[h]) h = ALIAS[h];
+    if (HASH_ALIAS[h]) h = HASH_ALIAS[h];
     if (!ROUTES[h]) return "overview";
     // A motion-only route (e.g. the BD-only #builder) switches the workspace to
     // its motion rather than bouncing the user to Overview.
