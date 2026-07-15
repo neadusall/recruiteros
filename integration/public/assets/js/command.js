@@ -2884,8 +2884,8 @@
         stages: [
           { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-radar"/></svg>', when: "07:00", auto: "bot", title: "Pull signals", body: "Every active campaign runs its enabled signal sources for the last 24 hours, the fresh reasons to reach out today.",
             out: "<b>12 signals</b> pulled · funding, reposts, exec hires" },
-          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-chart"/></svg>', when: "07:15", auto: "bot", title: "Score, rank, dedupe", body: "A composite score per ICP, disqualifiers suppressed, deduped against your ATS. Only the top N for the day advance.",
-            out: "<b>14 advanced</b> · top N by ICP score · 1 ATS duplicate suppressed" },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-chart"/></svg>', when: "07:15", auto: "bot", title: "Score, rank, dedupe", body: "A composite score per ICP, disqualifiers suppressed, deduped against your ATS. Only a set number of top scorers advance each day.",
+            out: "<b>14 advanced</b> · ranked by ICP score · 1 ATS duplicate suppressed" },
           { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg>', when: "07:30", auto: "bot", title: "Enrich", body: "An enrichment waterfall resolves the right contact and channel for each prospect that made the cut.",
             out: "<b>contacts resolved</b> · Director of Eng · verified email + LinkedIn" },
           { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>', when: "07:45", auto: "bot", title: "Draft, multi-channel", body: "Claude drafts the email, the LinkedIn message, and the voice note per prospect, with your A/B variants applied, every line tied to the real signal.",
@@ -8991,7 +8991,7 @@
           '<div class="jd-helpsec"><h5>On a saved list</h5>' +
             '<p><b>Excel (URLs)</b>: Download the list as an Excel (.xlsx) spreadsheet of LinkedIn profile URLs.</p>' +
             '<p><b>Deep-vet</b>: Reads the top candidates\' full work history against the role and gives each a verified score and a short verdict.</p>' +
-            '<p><b>Enrich top N</b>: You choose how many of the top-ranked candidates to look up business email and phone for. Enrich as few or as many as you want, then push them into any campaign you like. Manual for now; you can wire it to run automatically once you have a campaign set up.</p>' +
+            '<p><b>Enrich top (number)</b>: Type a number and the tool looks up business email and phone for that many of the top-ranked candidates. Enrich as few or as many as you want, then push them into any campaign you like. Manual for now; you can wire it to run automatically once you have a campaign set up.</p>' +
             '<p><b>Send to Candidates</b>: Pushes the list into your Candidates pipeline under the same name, ready to drop into a campaign.</p>' +
             '<p><b>Delete</b>: Removes the saved list. The people themselves are not deleted.</p>' +
           '</div>' +
@@ -9063,7 +9063,7 @@
         '<div class="jd-cardhead"><h3 style="margin:0">Your saved candidate lists</h3>' +
           '<span class="jd-vetctl">Deep-vet top <input id="jdVetTop" type="number" min="1" max="200" value="25">' +
             '<span id="jdVetCost" class="jd-cost"></span></span></div>' +
-        '<p class="jd-sub">Reads each shortlisted candidate\'s full career history against the role and returns a verified fit score and verdict. It is the first-pass screen your team would do by hand, across the whole list in seconds. Run it on the top N you choose.</p>' +
+        '<p class="jd-sub">Reads each shortlisted candidate\'s full career history against the role and returns a verified fit score and verdict. It is the first-pass screen your team would do by hand, across the whole list in seconds. Type a number next to Deep-vet top and it runs on that many candidates from the top of the list.</p>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
     function msg(t) { var m = $("#jdMsg"); if (m) m.textContent = t || ""; }
@@ -17971,7 +17971,7 @@
       ],
       cadence: [
         { at: "07:00", name: "Pull signals", automated: true, detail: "Run enabled signal sources (last 24h)." },
-        { at: "07:15", name: "Score & dedupe", automated: true, detail: "Composite score per ICP; dedupe vs ATS; top N advance." },
+        { at: "07:15", name: "Score & dedupe", automated: true, detail: "Composite score per ICP; dedupe vs ATS; the day's top scorers advance." },
         { at: "07:30", name: "Enrich", automated: true, detail: "Enrichment waterfall finds work emails and direct dials." },
         { at: "07:45", name: "LLM draft", automated: true, detail: "Claude drafts email + LinkedIn + voice; A/B applied." },
         { at: "08:30", name: "Approval queue", automated: false, detail: "Edit / kill / approve; record HOT voice notes." },
