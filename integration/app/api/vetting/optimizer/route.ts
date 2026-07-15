@@ -17,6 +17,8 @@
  */
 
 import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { cred } from "../../../../lib/providers/http";
+import { withWorkspaceCreds } from "../../../../lib/connected";
 import {
   getDesk, deskLearning, addRevision, applyRevision, clearAppliedRevision,
   setDeskVoiceTuning, setDeskTurnTuning, setDeskAutoLearn, setLastSimulation,
@@ -40,7 +42,17 @@ export async function GET(req: Request) {
   const deskId = new URL(req.url).searchParams.get("deskId") || "";
   const desk = getDesk(ws, deskId);
   if (!desk) return fail("not_found", 404);
+  // What's actually wired, so the UI can show a truthful readiness strip and a
+  // "do this next" banner INSTEAD of letting buttons fail on click.
+  const readiness = await withWorkspaceCreds(ws, async () => ({
+    llm: Boolean(process.env.ANTHROPIC_API_KEY),
+    voiceKey: Boolean(cred("VOICE_CLONE_API_KEY").trim()),
+    voiceId: Boolean((desk.voiceId || cred("VOICE_CLONE_VOICE_ID")).trim()),
+    live: desk.status === "live",
+    phone: Boolean(desk.phoneNumber),
+  }));
   return ok({
+    readiness,
     learning: deskLearning(desk),
     voiceTuning: clampVoiceTuning(desk.voiceTuning),
     turnTuning: clampTurnTuning(desk.turnTuning),
