@@ -8,7 +8,7 @@
 import { requireCapability, ok } from "../../../../lib/api";
 import {
   linesForUser, getUserState, getPhoneSettings, queryCalls, findLiveCall,
-  listFollowUps, ensurePhoneReady,
+  listFollowUps, phoneDayStats, callQueue, ensurePhoneReady,
 } from "../../../../lib/phone/store";
 import { sweepPipelines } from "../../../../lib/phone/calls";
 import type { Motion } from "../../../../lib/core/types";
@@ -43,6 +43,8 @@ export async function GET(req: Request) {
     totalCalls: recent.total,
     missedCount: missed.total,
     openFollowUps: listFollowUps(ws, motion, { status: "open" }).slice(0, 20),
+    stats: phoneDayStats(ws, motion),
+    queue: callQueue(ws, motion),
     isAdmin,
     userId: g.ctx.user.id,
   });

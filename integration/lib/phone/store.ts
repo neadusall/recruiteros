@@ -303,6 +303,90 @@ export function callsInPipeline(stages: CallRecord["pipeline"][]): CallRecord[] 
   return store.calls.filter((c) => stages.includes(c.pipeline));
 }
 
+/** Live tiles for the phone tab: today's activity plus the week's pipeline. */
+export interface PhoneDayStats {
+  /** Calls today (any direction/outcome). */
+  callsToday: number;
+  /** Answered conversations today. */
+  connectedToday: number;
+  /** Talk seconds today (answered call durations). */
+  talkSecToday: number;
+  /** Calls in the last 7 days classified hot or warm (override-aware). */
+  hotWarmWeek: number;
+}
+
+export function phoneDayStats(workspaceId: string, motion: Motion): PhoneDayStats {
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const day = dayStart.getTime();
+  const week = Date.now() - 7 * 86_400_000;
+  const out: PhoneDayStats = { callsToday: 0, connectedToday: 0, talkSecToday: 0, hotWarmWeek: 0 };
+  for (const c of store.calls) {
+    if (c.workspaceId !== workspaceId || c.motion !== motion) continue;
+    const t = Date.parse(c.startedAt);
+    if (!Number.isFinite(t)) continue;
+    if (t >= day) {
+      out.callsToday++;
+      if (c.answeredAt) {
+        out.connectedToday++;
+        out.talkSecToday += c.durationSec ?? 0;
+      }
+    }
+    if (t >= week) {
+      const opp = c.analysisOverrides?.opportunity?.value ?? asBdAnalysis(c.analysis)?.opportunity;
+      if (opp === "hot" || opp === "warm") out.hotWarmWeek++;
+    }
+  }
+  return out;
+}
+
+/** One dialable entry in the "call queue": an open follow-up joined to its
+ *  call so the UI can place the call in one click. Overdue first. */
+export interface CallQueueItem {
+  followUpId: string;
+  callId: string;
+  title: string;
+  dueDate?: string;
+  overdue: boolean;
+  contactName?: string;
+  companyName?: string;
+  number?: string;
+  /** Override-aware opportunity of the source call, for the row's pill. */
+  opportunity?: string;
+}
+
+export function callQueue(workspaceId: string, motion: Motion, limit = 8): CallQueueItem[] {
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = store.followUps
+    .filter((f) => f.workspaceId === workspaceId && f.motion === motion && f.status === "open")
+    .map((f): CallQueueItem => {
+      const call = store.calls.find((c) => c.id === f.callId);
+      const opp = call
+        ? call.analysisOverrides?.opportunity?.value ?? asBdAnalysis(call.analysis)?.opportunity
+        : undefined;
+      return {
+        followUpId: f.id,
+        callId: f.callId,
+        title: f.title,
+        dueDate: f.dueDate,
+        overdue: Boolean(f.dueDate && f.dueDate < today),
+        contactName: f.contactName ?? call?.contactName,
+        companyName: f.companyName ?? call?.companyName,
+        number: call?.externalNumber,
+        opportunity: opp,
+      };
+    });
+  // Overdue first, then dated soonest-first, then undated by recency.
+  rows.sort((a, b) => {
+    if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+    if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+    if (a.dueDate) return -1;
+    if (b.dueDate) return 1;
+    return 0;
+  });
+  return rows.slice(0, limit);
+}
+
 function trimCalls(workspaceId: string): void {
   const mine = store.calls.filter((c) => c.workspaceId === workspaceId);
   if (mine.length <= MAX_CALLS_PER_WORKSPACE) return;

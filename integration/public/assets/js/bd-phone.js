@@ -72,6 +72,7 @@
     notesDraft: null,      // unsent live-notes text
     devices: { mics: [], speakers: [], micId: "", speakerId: "" },
     endedInfo: null,       // {callId, status} shown briefly after hangup
+    micLevel: 0,           // live input level 0..1 while a call is active
   };
   var subs = [];
   function emit() {
@@ -273,6 +274,7 @@
         pollLiveCall();
       } else {
         startTimer();
+        startMicMeter();
         setPhase("active");
         pollLiveCall();
       }
@@ -304,6 +306,7 @@
   function onSdkEnded() {
     stopRingtone();
     stopTimer();
+    stopMicMeter();
     var ended = S.call;
     S.sdkCall = null;
     pendingOutbound = null;
@@ -335,6 +338,7 @@
         if (was !== "active" && d.call.status === "active" && pendingOutbound) {
           pendingOutbound = null;
           startTimer();
+          startMicMeter();
           setPhase("active");
         }
         if (!isLive(d.call) && (S.phase === "dialing" || S.phase === "active" || S.phase === "held" || S.phase === "incoming")) {
@@ -357,6 +361,39 @@
   function stopTimer() {
     if (callTimer) { clearInterval(callTimer); callTimer = null; }
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  /* ---------------- mic level meter (real input level, no fake motion) --- */
+  var meterTimer = null, meterAnalyser = null, meterSrc = null;
+  function startMicMeter() {
+    stopMicMeter();
+    try {
+      var stream = S.sdkCall && (S.sdkCall.localStream || (S.sdkCall.options && S.sdkCall.options.localStream));
+      if (!stream || !stream.getAudioTracks || !stream.getAudioTracks().length) return;
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      meterSrc = audioCtx.createMediaStreamSource(stream);
+      meterAnalyser = audioCtx.createAnalyser();
+      meterAnalyser.fftSize = 512;
+      meterSrc.connect(meterAnalyser);
+      var buf = new Uint8Array(meterAnalyser.frequencyBinCount);
+      meterTimer = setInterval(function () {
+        if (!meterAnalyser) return;
+        meterAnalyser.getByteTimeDomainData(buf);
+        var peak = 0;
+        for (var i = 0; i < buf.length; i += 4) {
+          var v = Math.abs(buf[i] - 128) / 128;
+          if (v > peak) peak = v;
+        }
+        // Muted mic reads as silence; show that truthfully.
+        S.micLevel = S.muted ? 0 : Math.min(1, peak * 1.6);
+      }, 120);
+    } catch (e) {}
+  }
+  function stopMicMeter() {
+    if (meterTimer) { clearInterval(meterTimer); meterTimer = null; }
+    try { if (meterSrc) meterSrc.disconnect(); } catch (e) {}
+    meterSrc = null; meterAnalyser = null;
+    S.micLevel = 0;
   }
 
   /* ---------------- ringtone (WebAudio, no assets) ---------------- */

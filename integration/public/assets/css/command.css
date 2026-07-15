@@ -2317,3 +2317,64 @@ html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *
 
 /* [hidden] must always win over the display rules the phone classes set. */
 .bdp-root [hidden] { display: none !important; }
+
+/* -- BD Phone dynamic layer: KPI strip, call queue, redial, mic meter -- */
+.bdp-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+@media (max-width: 1180px) { .bdp-kpis { grid-template-columns: repeat(2, 1fr); } }
+.bdp-kpi {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 14px;
+}
+.bdp-kpi .k {
+  font: 500 10.5px var(--font); text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bdp-kpi .v {
+  font: 600 22px var(--font); color: var(--text); margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bdp-queue-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 4px;
+  border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.bdp-queue-row:last-child { border-bottom: none; }
+.bdp-queue-row:hover { background: var(--surface-2); }
+.bdp-queue-row .t {
+  font: 500 13px var(--font); color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bdp-queue-row .m { font: 400 11.5px var(--font); color: var(--text-dim); }
+.bdp-queue-row .ovd { color: var(--danger); font-weight: 500; }
+.bdp-queue-row.overdue { border-left: 2px solid var(--danger); padding-left: 8px; }
+.bdp-queue-row input[type="checkbox"] { flex: none; }
+
+.bdp-row-call {
+  width: 28px; height: 28px; flex: none; display: inline-flex;
+  align-items: center; justify-content: center;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--ok); cursor: pointer;
+  opacity: 0; transition: opacity .12s ease, background .12s ease;
+}
+.bdp-row-call svg { width: 13px; height: 13px; }
+.bdp-row-call:hover { background: var(--ok-bg); border-color: var(--ok); }
+.bdp-queue-row:hover .bdp-row-call, .bdp-recent:hover .bdp-row-call,
+.bdp-row-call:focus-visible { opacity: 1; }
+
+.bdp-meter {
+  width: 180px; height: 4px; margin: 2px auto 0;
+  background: var(--bg-soft); border-radius: 999px; overflow: hidden;
+}
+.bdp-meter-fill {
+  display: block; height: 100%; width: 0;
+  background: var(--ok); border-radius: 999px;
+  transition: width 90ms linear;
+}
+
+.bdp-digit:active .d { transform: scale(.9); }
+.bdp-digit .d { transition: transform 90ms ease; display: inline-block; }
+@media (prefers-reduced-motion: reduce) {
+  .bdp-meter-fill { transition: none; }
+  .bdp-digit .d { transition: none; }
+}
+@media (hover: none) { .bdp-row-call { opacity: 1; } }

@@ -15795,6 +15795,21 @@
     if (d.length === 10) return "(" + d.slice(0, 3) + ") " + d.slice(3, 6) + "-" + d.slice(6);
     return n || "";
   }
+  /** Format a dialed number as it is typed. US numbers render as
+   *  (312) 555-0142 while international input (leading +) stays literal. */
+  function bdpFmtAsYouType(raw) {
+    raw = String(raw || "");
+    if (raw.trim().charAt(0) === "+" && raw.replace(/\D/g, "").charAt(0) !== "1") {
+      return "+" + raw.replace(/[^\d]/g, "");
+    }
+    var d = raw.replace(/\D/g, "");
+    if (d.length === 11 && d.charAt(0) === "1") d = d.slice(1);
+    if (d.length > 11) return raw.trim(); // keep long international strings as typed
+    if (!d.length) return "";
+    if (d.length < 4) return "(" + d;
+    if (d.length < 7) return "(" + d.slice(0, 3) + ") " + d.slice(3);
+    return "(" + d.slice(0, 3) + ") " + d.slice(3, 6) + "-" + d.slice(6, 10);
+  }
   var BDP_OPP_LABEL = { hot: "Hot", warm: "Warm", nurture: "Nurture", cold: "Cold", disqualified: "Disqualified" };
   var BDP_SENT_LABEL = { very_positive: "Very positive", positive: "Positive", neutral: "Neutral", resistant: "Resistant", negative: "Negative" };
   function bdpOppPill(opp) {
@@ -15851,8 +15866,11 @@
       '<div id="bdpBanner"></div>' +
       '<div class="bdp-wrap">' +
         '<div class="card bdp-dialer" id="bdpMainCard">' + loading() + "</div>" +
-        '<div><div class="card" style="padding:16px" id="bdpRecents"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Recent calls</h4>' + loading() + "</div>" +
-        '<div class="card" style="padding:16px;margin-top:16px" id="bdpFollowups"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Open follow-ups</h4>' + loading() + "</div></div>" +
+        '<div>' +
+          '<div class="bdp-kpis" id="bdpKpis"></div>' +
+          '<div class="card" style="padding:16px;margin-top:16px" id="bdpQueue"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Call queue</h4>' + loading() + "</div>" +
+          '<div class="card" style="padding:16px;margin-top:16px" id="bdpRecents"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Recent calls</h4>' + loading() + "</div>" +
+        "</div>" +
       "</div>";
 
     var P = bdpEngine();
@@ -15936,11 +15954,15 @@
         "</div>";
 
       var numIn = $("#bdpNumIn");
-      numIn.addEventListener("input", function () { dialed = numIn.value; scheduleMatch(); });
+      numIn.addEventListener("input", function () {
+        dialed = bdpFmtAsYouType(numIn.value);
+        if (numIn.value !== dialed) numIn.value = dialed;
+        scheduleMatch();
+      });
       numIn.addEventListener("keydown", function (e) { if (e.key === "Enter") doCall(); });
       Array.prototype.forEach.call(cardEl.querySelectorAll(".bdp-digit"), function (b) {
         b.addEventListener("click", function () {
-          dialed = (numIn.value || "") + b.getAttribute("data-d");
+          dialed = bdpFmtAsYouType((numIn.value || "") + b.getAttribute("data-d"));
           numIn.value = dialed;
           numIn.focus();
           scheduleMatch();
@@ -16017,6 +16039,9 @@
             (c.lineNumber ? (c.contactTitle || c.companyName || c.contactName ? " · " : "") + "via " + esc(bdpFmtNum(c.lineNumber)) : "") +
           "</div>" +
           '<div class="bdp-live-timer">' + (st.phase === "active" || st.phase === "held" ? P.fmtDur(st.elapsed) : "&nbsp;") + "</div>" +
+          (st.phase === "active"
+            ? '<div class="bdp-meter" title="Your microphone level"><span class="bdp-meter-fill" id="bdpMeterFill"></span></div>'
+            : "") +
           '<div class="bdp-live-ctls" id="bdpLiveCtls"></div>' +
           '<div class="bdp-live-notes"><h4 style="margin:0 0 6px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Live notes</h4>' +
           '<textarea id="bdpLiveNotes" placeholder="Type notes while you talk. They save automatically and feed the AI summary.">' + esc(st.notesDraft != null ? st.notesDraft : (c.userNotes || "")) + "</textarea></div>" +
@@ -16055,46 +16080,105 @@
       }
       var notesArea = $("#bdpLiveNotes");
       notesArea.addEventListener("input", function () { P.setNotes(notesArea.value); });
+
+      // Live mic meter: real input level from the engine, stops with the call.
+      var fill = $("#bdpMeterFill");
+      if (fill) {
+        (function meterTick() {
+          if (!document.body.contains(fill)) return;
+          var lvl = (P.getState().micLevel || 0) * 100;
+          fill.style.width = Math.round(lvl) + "%";
+          requestAnimationFrame(meterTick);
+        })();
+      }
+    }
+
+    var PHONE_SVG_SM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
+
+    // Redial from a row: prefill the dialer and place the call immediately.
+    function quickDial(number) {
+      if (!number) return;
+      P.dial(number).catch(function (e) { toast(String((e && e.message) || "Could not start the call")); });
+    }
+
+    function paintKpis(st) {
+      var host = $("#bdpKpis"); if (!host) return;
+      var s = (st.summary && st.summary.stats) || null;
+      if (!s) { host.innerHTML = ""; return; }
+      var talkMin = Math.round((s.talkSecToday || 0) / 60);
+      var tiles = [
+        ["Calls today", s.callsToday || 0],
+        ["Connected", s.connectedToday || 0],
+        ["Talk time", talkMin + "m"],
+        ["Hot + warm, 7d", s.hotWarmWeek || 0],
+      ];
+      host.innerHTML = tiles.map(function (t) {
+        return '<div class="bdp-kpi"><div class="k">' + t[0] + '</div><div class="v">' + t[1] + "</div></div>";
+      }).join("");
+    }
+
+    function paintQueue(st) {
+      var host = $("#bdpQueue"); if (!host) return;
+      var q = (st.summary && st.summary.queue) || [];
+      var rows = q.map(function (x) {
+        return '<div class="bdp-queue-row' + (x.overdue ? " overdue" : "") + '" data-qcall="' + esc(x.callId) + '">' +
+          '<div style="min-width:0;flex:1"><div class="t">' + esc(x.title) + "</div>" +
+          '<div class="m">' + esc([x.contactName, x.companyName].filter(Boolean).join(" · ")) +
+          (x.dueDate ? (x.contactName || x.companyName ? " · " : "") + (x.overdue ? '<span class="ovd">overdue ' + esc(x.dueDate) + "</span>" : "due " + esc(x.dueDate)) : "") + "</div></div>" +
+          bdpOppPill(x.opportunity) +
+          (x.number
+            ? '<button class="bdp-row-call" data-qdial="' + esc(x.number) + '" title="Call ' + esc(bdpFmtNum(x.number)) + '">' + PHONE_SVG_SM + "</button>"
+            : "") +
+          '<input type="checkbox" data-qdone="' + esc(x.followUpId) + '" data-qcallid="' + esc(x.callId) + '" title="Mark done">' +
+        "</div>";
+      }).join("");
+      host.innerHTML = '<h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Call queue</h4>' +
+        (rows || '<div class="empty" style="padding:14px 4px">Nothing due. Follow-ups you create from calls queue here, overdue first.</div>');
+      Array.prototype.forEach.call(host.querySelectorAll("[data-qdial]"), function (b) {
+        b.addEventListener("click", function (e) { e.stopPropagation(); quickDial(b.getAttribute("data-qdial")); });
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-qdone]"), function (cb) {
+        cb.addEventListener("change", function () {
+          send("/phone/calls/" + cb.getAttribute("data-qcallid"), "POST", { action: "followup-status", followUpId: cb.getAttribute("data-qdone"), status: cb.checked ? "done" : "open" })
+            .then(function () { P.refreshSummary(); });
+        });
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-qcall]"), function (r) {
+        r.addEventListener("click", function (e) {
+          if (e.target.closest("[data-qdial],[data-qdone]")) return;
+          location.hash = "#bdphone/" + r.getAttribute("data-qcall");
+        });
+      });
     }
 
     function paintRecents(st) {
       var host = $("#bdpRecents"); if (!host) return;
       var sum = st.summary || {};
       var rows = (sum.recent || []).map(function (c) {
-        return '<div class="list-row clickable" data-call="' + esc(c.id) + '" style="display:flex;align-items:center;gap:10px;padding:9px 4px">' +
+        var opp = bdpEff(c, "opportunity").value;
+        var processing = ["recording", "transcribing", "analyzing"].indexOf(c.pipeline) >= 0;
+        return '<div class="list-row clickable bdp-recent" data-call="' + esc(c.id) + '" style="display:flex;align-items:center;gap:10px;padding:9px 4px">' +
           bdpDirIcon(c) +
           '<div style="min-width:0;flex:1"><div style="font:500 13px var(--font);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
             esc(c.contactName || bdpFmtNum(c.externalNumber)) + "</div>" +
             '<div style="font:400 11.5px var(--font);color:var(--text-dim)">' + esc([c.companyName, bdpFmtWhen(c.startedAt)].filter(Boolean).join(" · ")) + "</div></div>" +
-          '<div style="text-align:right;flex:none">' +
+          '<button class="bdp-row-call" data-redial="' + esc(c.externalNumber) + '" title="Call ' + esc(bdpFmtNum(c.externalNumber)) + '">' + PHONE_SVG_SM + "</button>" +
+          '<div style="text-align:right;flex:none;min-width:64px">' +
             (c.durationSec ? '<div style="font:500 12px var(--mono);color:var(--text-muted)">' + bdpFmtDur(c.durationSec) + "</div>" : "") +
-            bdpOppPill(bdpEff(c, "opportunity").value) +
+            (processing ? bdpPipeBadge(c) : bdpOppPill(opp)) +
           "</div></div>";
       }).join("");
       host.innerHTML = '<h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Recent calls</h4>' +
         (rows || '<div class="empty" style="padding:14px 4px">No calls yet. Dial your first number to get started.</div>') +
         (rows ? '<a href="#bdphone/history" style="display:inline-block;margin-top:10px;font:500 12.5px var(--font);color:var(--brand)">Full history</a>' : "");
       Array.prototype.forEach.call(host.querySelectorAll("[data-call]"), function (r) {
-        r.addEventListener("click", function () { location.hash = "#bdphone/" + r.getAttribute("data-call"); });
-      });
-    }
-
-    function paintFollowups(st) {
-      var host = $("#bdpFollowups"); if (!host) return;
-      var f = (st.summary && st.summary.openFollowUps) || [];
-      var rows = f.slice(0, 6).map(function (x) {
-        return '<div class="bdp-action-row"><input type="checkbox" data-fup="' + esc(x.id) + '" data-callid="' + esc(x.callId) + '">' +
-          '<span class="txt" style="min-width:0;flex:1">' + esc(x.title) +
-          (x.contactName ? ' <span style="color:var(--text-dim)">· ' + esc(x.contactName) + "</span>" : "") + "</span>" +
-          (x.dueDate ? '<span class="due">' + esc(x.dueDate) + "</span>" : "") + "</div>";
-      }).join("");
-      host.innerHTML = '<h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Open follow-ups</h4>' +
-        (rows || '<div class="empty" style="padding:14px 4px">Nothing open. Follow-ups you create from calls land here.</div>');
-      Array.prototype.forEach.call(host.querySelectorAll("[data-fup]"), function (cb) {
-        cb.addEventListener("change", function () {
-          send("/phone/calls/" + cb.getAttribute("data-callid"), "POST", { action: "followup-status", followUpId: cb.getAttribute("data-fup"), status: cb.checked ? "done" : "open" })
-            .then(function () { P.refreshSummary(); });
+        r.addEventListener("click", function (e) {
+          if (e.target.closest("[data-redial]")) return;
+          location.hash = "#bdphone/" + r.getAttribute("data-call");
         });
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-redial]"), function (b) {
+        b.addEventListener("click", function (e) { e.stopPropagation(); quickDial(b.getAttribute("data-redial")); });
       });
     }
 
@@ -16106,15 +16190,30 @@
       // be clobbered); live-call panel repaints on every tick for the timer.
       var live = st.phase === "dialing" || st.phase === "incoming" || st.phase === "active" || st.phase === "held";
       if (st.phase !== lastPhase || live) { paintDialer(st); lastPhase = st.phase; }
+      paintKpis(st);
+      paintQueue(st);
       paintRecents(st);
-      paintFollowups(st);
     });
 
     var st0 = P.getState();
-    banner(st0); paintDialer(st0); paintRecents(st0); paintFollowups(st0);
+    banner(st0); paintDialer(st0); paintKpis(st0); paintQueue(st0); paintRecents(st0);
     P.refreshSummary().catch(function () {});
     P.refreshDevices();
-    viewTimers.push(setInterval(function () { P.refreshSummary().catch(function () {}); }, 20000));
+    // Adaptive refresh: tighten to 6s while any recent call is still moving
+    // through recording/transcription/AI notes, relax to 20s when settled.
+    var lastPoll = 0;
+    viewTimers.push(setInterval(function () {
+      var sum = P.getState().summary || {};
+      var busy = (sum.recent || []).some(function (c) {
+        return ["recording", "transcribing", "analyzing"].indexOf(c.pipeline) >= 0;
+      });
+      var every = busy ? 6000 : 20000;
+      var now = Date.now();
+      if (now - lastPoll >= every) {
+        lastPoll = now;
+        P.refreshSummary().catch(function () {});
+      }
+    }, 2000));
   }
 
   /* ---------------- history ---------------- */
