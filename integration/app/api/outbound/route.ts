@@ -89,8 +89,16 @@ export async function GET(req: Request): Promise<Response> {
       case "insights":
         return ok(await adminInsights(ws));
       case "goals": {
+        const { notifyBrand } = await import("../../../lib/outbound/brand");
         const cfg = await getGoalsConfig(ws);
-        return ok({ config: cfg, defaults: { channels: DEFAULT_CHANNELS, triggers: DEFAULT_TRIGGERS }, roles: GOAL_ROLES });
+        return ok({
+          config: cfg,
+          defaults: { channels: DEFAULT_CHANNELS, triggers: DEFAULT_TRIGGERS },
+          roles: GOAL_ROLES,
+          // The company identity automated updates go out under (house brand,
+          // or this workspace's white-label brand + domain).
+          brand: await notifyBrand(ws),
+        });
       }
       case "alerts": {
         const day = url.searchParams.get("day") || undefined;

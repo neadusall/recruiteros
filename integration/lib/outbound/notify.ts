@@ -90,8 +90,10 @@ export async function markNotificationRead(workspaceId: string, userId: string, 
 
 async function deliverEmail(workspaceId: string, to: string, subject: string, text: string): Promise<boolean> {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const app = process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
-  const html = `<div style="font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;white-space:pre-line">${esc(text)}\n\n<a href="${app}/recruiter#myoutbound">Open My Outbound</a></div>`;
+  // Brand-true: a white-label workspace's updates link to ITS domain, never the house.
+  const { notifyBrand } = await import("./brand");
+  const brand = await notifyBrand(workspaceId);
+  const html = `<div style="font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;white-space:pre-line">${esc(text)}\n\n<a href="${brand.appUrl}/recruiter#myoutbound">Open My Outbound</a></div>`;
   try {
     const { mtaPreferred, sendEmail } = await import("../providers/mta");
     if (mtaPreferred()) {
@@ -149,13 +151,15 @@ export async function pushNotification(workspaceId: string, n: PushInput): Promi
   }
 
   if (!muted) {
+    const { notifyBrand } = await import("./brand");
+    const brand = await notifyBrand(workspaceId);
     const member = listMembers(workspaceId).find((m) => m.userId === n.userId);
     if (prefs.email && member?.email && !member.email.includes("(unknown)")) {
-      rec.deliveredEmail = await deliverEmail(workspaceId, member.email, `RecruitersOS: ${n.title}`, n.body);
+      rec.deliveredEmail = await deliverEmail(workspaceId, member.email, `${brand.name}: ${n.title}`, n.body);
     }
     const phone = cfg.userPhones[n.userId];
     if (prefs.sms && phone) {
-      rec.deliveredSms = await deliverSms(workspaceId, phone, `${n.title}\n${n.body}`);
+      rec.deliveredSms = await deliverSms(workspaceId, phone, `${brand.name}: ${n.title}\n${n.body}`);
     }
     save();
   }
@@ -243,8 +247,10 @@ export async function buildEod(workspaceId: string, userId: string): Promise<{ t
   const c = t.counts;
   const score = computeScore(cap, { positiveReplies: c.positiveReplies, meetingsBooked: c.meetingsBooked });
   const weakest = [...score.components].filter((x) => x.weight > 0).sort((a, b) => a.score - b.score)[0];
+  const { notifyBrand } = await import("./brand");
+  const brand = await notifyBrand(workspaceId);
   const lines = [
-    "Today's RecruitersOS Outbound Report",
+    `Today's ${brand.name} Outbound Report`,
     "",
     `Overall utilization: ${cap.overallPct}% · Outbound score: ${score.total}/100`,
     `Email ${cap.email.targetPct}% · LinkedIn ${cap.linkedin.targetPct}%` +

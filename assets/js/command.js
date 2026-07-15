@@ -1247,6 +1247,18 @@
           return '<label class="ob-field">' + tr[1] + '<input type="number" min="0" class="ob-input ob-trig" data-k="' + tr[0] + '" value="' + (cur != null ? cur : "") + '" placeholder="' + (def != null ? def : "") + '"></label>';
         }).join("") + "</div></div>";
 
+      // Automated update identity: WHICH COMPANY the team's email/SMS updates
+      // speak as. White-label workspaces (e.g. Lume on app.lumesp.com) send as
+      // their own brand + domain; the house workspace sends as RecruitersOS.
+      var brand = g.brand || { name: "RecruitersOS", appUrl: "https://recruitersos.co", whiteLabel: false };
+      html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Automated update identity</b>' +
+        '<span style="flex:1"></span>' + obPill(brand.whiteLabel ? "supply_constrained" : "ok", brand.whiteLabel ? "White-label brand" : "House brand") + "</div>" +
+        '<div class="ob-chan-nums" style="grid-template-columns:repeat(2,1fr)">' +
+        '<div><div class="ob-num" style="font-size:16px">' + esc(brand.name) + '</div><div class="ob-num-l">Updates sent as</div></div>' +
+        '<div><div class="ob-num" style="font-size:16px">' + esc(String(brand.appUrl).replace(/^https?:\/\//, "")) + '</div><div class="ob-num-l">Links point to</div></div></div>' +
+        '<div class="ob-note">Morning, midday and end-of-day team updates (email + SMS) use this company name in the subject and body, link back to this domain, and send through this workspace\'s own mailboxes/MTA. Set the brand and custom domain under Setup, Branding; once the domain is verified, updates switch to it automatically.</div>' +
+        "</div>";
+
       // Schedule & notifications (global/role/user all supported).
       var wd = patch.workingDays || [];
       html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Schedule & notifications</b></div><div class="ob-grid-3">' +

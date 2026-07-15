@@ -30,6 +30,8 @@ export {
 export { userAssessment, adminInsights } from "./insights";
 export { buildChecklist, setStepTick } from "./checklist";
 export { appendAudit, listAudit } from "./audit";
+export { notifyBrand } from "./brand";
+export type { NotifyBrand } from "./brand";
 
 /* ------------------------------ profile ---------------------------------- */
 
