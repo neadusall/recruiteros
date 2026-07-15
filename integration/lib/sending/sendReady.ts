@@ -15,6 +15,8 @@
  * glance — whether the next few days are filled and what to fix when they aren't.
  *
  * Tunables (env): SEND_QUEUE_TARGET_MIN (4000), SEND_QUEUE_TARGET_MAX (6000), SEND_QUEUE_BUFFER_DAYS (5).
+ * Per-workspace override: the daily email pool (Outbound Performance → Goals) replaces the env band
+ * when set — see targetBand().
  */
 
 import { getCore } from "../core/repository";
@@ -84,10 +86,24 @@ export interface SendQueueOverview {
   campaigns: CampaignReadiness[];
 }
 
+/** The workspace's daily first-email band. Defaults to the env 4–6K band; when
+ *  the workspace's daily email pool is set (Outbound Performance → Goals, e.g.
+ *  Lume's 3,000/day), the pool IS the band — min = max = pool — so every
+ *  dashboard number matches what the recruiters were told. */
+export async function targetBand(workspaceId: string): Promise<{ min: number; max: number; daily: number }> {
+  try {
+    const { emailPoolSplit } = await import("../outbound/goals");
+    const pool = await emailPoolSplit(workspaceId);
+    if (pool) return { min: pool.total, max: pool.total, daily: pool.total };
+  } catch { /* outbound module unavailable — env band applies */ }
+  return { min: TARGET_MIN, max: TARGET_MAX, daily: DAILY_TARGET };
+}
+
 /** Compute the full Send Queue overview for a workspace. `todayIso` anchors the day projection. */
 export async function sendQueueOverview(workspaceId: string, todayIso: string): Promise<SendQueueOverview> {
   const core = getCore();
-  const [prospects, campaigns] = await Promise.all([
+  const [band, prospects, campaigns] = await Promise.all([
+    targetBand(workspaceId),
     core.listProspects(workspaceId),
     core.listCampaigns(workspaceId),
   ]);
@@ -114,7 +130,7 @@ export async function sendQueueOverview(workspaceId: string, todayIso: string): 
   }
   const inSequence = prospects.filter((p) => p.status === "in_sequence").length;
   const copyHolds = prospects.filter((p) => (p.status === "queued" || p.status === "in_sequence") && p.copyHold).length;
-  const runwayDays = DAILY_TARGET > 0 ? Math.floor(ready / DAILY_TARGET) : 0;
+  const runwayDays = band.daily > 0 ? Math.floor(ready / band.daily) : 0;
 
   // Per-day projection across the buffer window. We spend the ready supply at DAILY_TARGET/day; the
   // video 2nd emails on a day are the previous day's first emails (next-day cadence). Day-0's
@@ -122,24 +138,24 @@ export async function sendQueueOverview(workspaceId: string, todayIso: string): 
   const base = new Date(todayIso);
   const days: SendQueueDay[] = [];
   let remaining = ready;
-  let prevFirst = Math.min(inSequence, DAILY_TARGET); // day-0 rollover ≈ yesterday's firsts
+  let prevFirst = Math.min(inSequence, band.daily); // day-0 rollover ≈ yesterday's firsts
   for (let d = 0; d < BUFFER_DAYS; d++) {
-    const firstEmails = Math.min(remaining, DAILY_TARGET);
+    const firstEmails = Math.min(remaining, band.daily);
     remaining -= firstEmails;
     const secondEmails = prevFirst;
     const dt = new Date(base.getTime() + d * 86_400_000).toISOString().slice(0, 10);
-    const fill: SendQueueDay["fill"] = firstEmails >= TARGET_MIN ? "green" : firstEmails > 0 ? "yellow" : "red";
+    const fill: SendQueueDay["fill"] = firstEmails >= band.min ? "green" : firstEmails > 0 ? "yellow" : "red";
     days.push({ date: dt, dayOffset: d, firstEmails, secondEmails, total: firstEmails + secondEmails, fill });
     prevFirst = firstEmails;
   }
 
-  const shortfall = Math.max(0, BUFFER_DAYS * DAILY_TARGET - ready);
+  const shortfall = Math.max(0, BUFFER_DAYS * band.daily - ready);
   const campaignsOut: CampaignReadiness[] = [...byCampaign.entries()]
     .map(([id, v]) => ({ campaignId: id, label: labelOf.get(id)?.label || id, status: labelOf.get(id)?.status, ready: v.ready, needsAssets: v.need }))
     .sort((a, b) => b.ready - a.ready || b.needsAssets - a.needsAssets);
 
   return {
-    targetMin: TARGET_MIN, targetMax: TARGET_MAX, dailyTarget: DAILY_TARGET, bufferDays: BUFFER_DAYS,
+    targetMin: band.min, targetMax: band.max, dailyTarget: band.daily, bufferDays: BUFFER_DAYS,
     readySupply: ready, inSequence, runwayDays, shortfall, needsAssets: need, copyHolds, days, campaigns: campaignsOut,
   };
 }

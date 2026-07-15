@@ -68,6 +68,21 @@ function dailyTargetOf(s: AutofillSettings): number {
   return Math.round((s.targetMin + s.targetMax) / 2);
 }
 
+/** The effective per-day target: the workspace's daily email pool when set
+ *  (e.g. Lume's 3,000/day), otherwise the configured band midpoint — so the
+ *  buffer keeper never stages faster than the number the team was given. */
+async function resolveDailyTarget(s: AutofillSettings, fallbackWorkspaceId?: string): Promise<number> {
+  const ws = s.workspaceId || fallbackWorkspaceId || "";
+  if (ws) {
+    try {
+      const { emailPoolSplit } = await import("../outbound/goals");
+      const pool = await emailPoolSplit(ws);
+      if (pool) return pool.total;
+    } catch { /* outbound module unavailable — band midpoint applies */ }
+  }
+  return dailyTargetOf(s);
+}
+
 interface DayCounter { day: string; enrolled: number }
 function dayKey(nowIso: string): string { return nowIso.slice(0, 10); }
 async function readCounter(nowIso: string): Promise<DayCounter> {
@@ -92,7 +107,7 @@ export interface AutofillResult {
  */
 export async function runAutofill(nowIso: string, opts?: { force?: boolean }): Promise<AutofillResult> {
   const s = await getAutofillSettings();
-  const dailyTarget = dailyTargetOf(s);
+  const dailyTarget = await resolveDailyTarget(s);
   const ctr = await readCounter(nowIso);
   const base = { today: ctr.enrolled, dailyTarget };
   if (!opts?.force && !s.enabled) return { enrolled: 0, skipped: 0, reason: "disabled", ...base };
@@ -124,11 +139,13 @@ export async function runAutofill(nowIso: string, opts?: { force?: boolean }): P
   return { enrolled: res.enrolled, skipped: res.skipped, reason: "ok", today: ctr.enrolled + res.enrolled, dailyTarget };
 }
 
-/** Status for the Send Queue UI: the settings + today's staged count + the resolved daily target. */
-export async function autofillStatus(nowIso: string): Promise<{ settings: AutofillSettings; today: number; dailyTarget: number }> {
+/** Status for the Send Queue UI: the settings + today's staged count + the resolved daily target.
+ *  `workspaceId` = the viewer's workspace, used to resolve its email pool before
+ *  auto-fill has ever been saved (the stored settings start with no workspace). */
+export async function autofillStatus(nowIso: string, workspaceId?: string): Promise<{ settings: AutofillSettings; today: number; dailyTarget: number }> {
   const s = await getAutofillSettings();
   const ctr = await readCounter(nowIso);
-  return { settings: s, today: ctr.enrolled, dailyTarget: dailyTargetOf(s) };
+  return { settings: s, today: ctr.enrolled, dailyTarget: await resolveDailyTarget(s, workspaceId) };
 }
 
 let started = false;

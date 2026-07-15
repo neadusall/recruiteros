@@ -208,6 +208,11 @@ export async function userCapacity(workspaceId: string, userId: string, authRole
     }
   } catch { /* senders module unavailable */ }
   const emailTarget = (goals.channels.bdEmails.target || 0) + (goals.channels.recruitingEmails.target || 0);
+  if (goals.emailPool?.applied) {
+    emailReasons.unshift(
+      `Team pool: ${goals.emailPool.total.toLocaleString()} first emails/day split across ${goals.emailPool.recruiterCount} recruiter${goals.emailPool.recruiterCount === 1 ? "" : "s"} = ${goals.emailPool.perRecruiter.toLocaleString()} each (recomputed as the roster changes)`,
+    );
+  }
   if (!emailCapacity) {
     emailCapacity = (goals.channels.bdEmails.max || 0) + (goals.channels.recruitingEmails.max || 0);
     if (poolInboxes === 0) emailReasons.push("no personal mailbox pool; capacity shown from role goals (sends route via the shared pool/MTA)");

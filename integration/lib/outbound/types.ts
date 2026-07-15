@@ -119,6 +119,12 @@ export interface TriggerThresholds {
 export type GoalsPatch = {
   channels?: Partial<Record<keyof ChannelGoals, Partial<Band>>>;
   triggers?: Partial<TriggerThresholds>;
+  /** Workspace-wide daily FIRST-email pool (e.g. 3000). Honored on the GLOBAL
+   *  tier only. When > 0, each active recruiter's daily email target becomes
+   *  pool ÷ recruiter count — recomputed live as recruiters join or leave, so
+   *  the numbers every user sees always sum back to the pool. 0/unset = off
+   *  (the per-channel bands below apply as usual). */
+  dailyEmailPool?: number;
   workingDays?: number[];          // 0=Sun..6=Sat
   workHoursStart?: number;         // local hour 0-23
   workHoursEnd?: number;
@@ -148,10 +154,21 @@ export interface OutboundGoalsConfig {
   updatedAt: string;
 }
 
+/** The team email pool resolved against the live roster. */
+export interface EmailPoolSplit {
+  total: number;         // the workspace-wide daily first-email pool
+  recruiterCount: number;// active recruiters the pool divides across
+  perRecruiter: number;  // floor(total / recruiterCount)
+}
+
 /** Fully-resolved goals for one user (inheritance applied). */
 export interface ResolvedGoals {
   role: GoalRole;
   channels: ChannelGoals;
+  /** Present when the workspace daily email pool is on; `applied` is true when
+   *  THIS user is one of the recruiters the pool divides across (their email
+   *  bands are pinned to their share). */
+  emailPool?: EmailPoolSplit & { applied: boolean };
   triggers: TriggerThresholds;
   workingDays: number[];
   workHoursStart: number;

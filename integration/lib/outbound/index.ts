@@ -17,7 +17,7 @@ import { listAlerts } from "./triggers";
 import type { ChannelState, DayCounts, OutboundAlert, OutboundScore, UserCapacity, UserDayRollup } from "./types";
 
 export * from "./types";
-export { resolveGoals, getGoalsConfig, putGoalsConfig, GOAL_ROLES, DEFAULT_CHANNELS, DEFAULT_TRIGGERS, localDay } from "./goals";
+export { resolveGoals, getGoalsConfig, putGoalsConfig, emailPoolSplit, GOAL_ROLES, DEFAULT_CHANNELS, DEFAULT_TRIGGERS, localDay } from "./goals";
 export { collectOutboundEvents } from "./events";
 export { listRollups, getDay, refreshRollups, sumCounts, workspaceTz } from "./rollup";
 export { userCapacity, campaignSupply, followUpsDue, responseBacklog } from "./capacity";

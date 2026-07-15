@@ -27,7 +27,7 @@ export async function GET(req: Request) {
     const nowIso = new Date().toISOString();
     const [overview, autofill, campaigns, senders] = await Promise.all([
       sendQueueOverview(ws, nowIso),
-      autofillStatus(nowIso),
+      autofillStatus(nowIso, ws),
       getCore().listCampaigns(ws),
       sendCapacity(ws),
     ]);

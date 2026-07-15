@@ -11,7 +11,7 @@
 import { loadSnapshot, debouncedSaver } from "../db";
 import { nowIso } from "../core/ids";
 import type {
-  Band, ChannelGoals, GoalRole, GoalsPatch, NotifyCategory,
+  Band, ChannelGoals, EmailPoolSplit, GoalRole, GoalsPatch, NotifyCategory,
   OutboundGoalsConfig, ResolvedGoals, TriggerThresholds,
 } from "./types";
 
@@ -146,6 +146,43 @@ export function defaultGoalRole(authRole: string): GoalRole {
   return "recruiter";
 }
 
+/* --------------------------- daily email pool ---------------------------- */
+
+/**
+ * Resolve the workspace daily first-email pool against the LIVE roster.
+ * "Recruiters" = workspace members with auth role "member" (the same
+ * definition the Send Queue uses for the Sending.ac pool owners); when a
+ * workspace has no member-role users yet (owner-only shop), everyone counts so
+ * the pool still lands somewhere. Returns null when the pool is off.
+ */
+export async function emailPoolSplit(workspaceId: string): Promise<(EmailPoolSplit & { recruiterIds: string[] }) | null> {
+  const cfg = await getGoalsConfig(workspaceId);
+  const total = Math.round(Number(cfg.global?.dailyEmailPool) || 0);
+  if (total <= 0) return null;
+  let recruiterIds: string[] = [];
+  try {
+    const { listMembers } = await import("../auth/team");
+    const members = listMembers(workspaceId);
+    const recruiters = members.filter((m) => m.role === "member");
+    recruiterIds = (recruiters.length ? recruiters : members).map((m) => m.userId);
+  } catch { /* auth store unavailable (tests) — fall through to count 1 */ }
+  const recruiterCount = Math.max(1, recruiterIds.length);
+  return { total, recruiterCount, perRecruiter: Math.floor(total / recruiterCount), recruiterIds };
+}
+
+/** Pin the user's email bands to their pool share, split across BD vs
+ *  recruiting in the same proportion their resolved targets already carry
+ *  (a dedicated recruiter's share stays all-recruiting, a BD rep's all-BD). */
+function applyEmailPool(resolved: ResolvedGoals, share: number): void {
+  const bd = resolved.channels.bdEmails.target;
+  const rec = resolved.channels.recruitingEmails.target;
+  const sum = bd + rec;
+  const bdShare = sum > 0 ? Math.round((share * bd) / sum) : 0;
+  const recShare = share - bdShare;
+  resolved.channels.bdEmails = { min: bdShare, target: bdShare, max: bdShare };
+  resolved.channels.recruitingEmails = { min: recShare, target: recShare, max: recShare };
+}
+
 /** Fully-resolved goals for one user: defaults -> global -> role -> user. */
 export async function resolveGoals(workspaceId: string, userId: string, authRole = "member"): Promise<ResolvedGoals> {
   const cfg = await getGoalsConfig(workspaceId);
@@ -176,6 +213,17 @@ export async function resolveGoals(workspaceId: string, userId: string, authRole
   resolved = applyPatch(resolved, cfg.global);
   resolved = applyPatch(resolved, cfg.byRole[role]);
   resolved = applyPatch(resolved, cfg.byUser[userId]);
+
+  // Workspace daily email pool: when on, it is AUTHORITATIVE for email volume.
+  // Each active recruiter's email target is pinned to pool ÷ recruiter count,
+  // recomputed live from the roster — so five recruiters on a 3,000 pool each
+  // see 600, and the split self-adjusts as users are added or removed.
+  const pool = await emailPoolSplit(workspaceId);
+  if (pool) {
+    const applied = pool.recruiterIds.length === 0 || pool.recruiterIds.includes(userId);
+    if (applied) applyEmailPool(resolved, pool.perRecruiter);
+    resolved.emailPool = { total: pool.total, recruiterCount: pool.recruiterCount, perRecruiter: pool.perRecruiter, applied };
+  }
   return resolved;
 }
 

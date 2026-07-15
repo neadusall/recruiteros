@@ -1229,6 +1229,23 @@
         (level === "user" ? '<select id="obGUser" class="ob-input" style="max-width:240px">' + members.map(function (mm) { return '<option value="' + esc(mm.userId) + '"' + (mm.userId === user ? " selected" : "") + ">" + esc(mm.name || mm.email) + "</option>"; }).join("") + "</select>" : "") +
         '<span style="flex:1"></span><button class="btn btn-primary btn-sm" id="obGSave">Save this tier</button></div>';
 
+      // Team daily email pool (global tier only): one number for the whole
+      // workspace, divided live across active recruiters. When on, it PINS
+      // each recruiter's daily email target to their share.
+      if (level === "global") {
+        var pool = g.pool;
+        var poolVal = (cfg.global && cfg.global.dailyEmailPool) ? cfg.global.dailyEmailPool : "";
+        html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Team daily email pool</b>' +
+          '<span class="muted" style="font-size:12px;margin-left:8px">Total first emails per day for the whole team. Each recruiter\'s daily target becomes their equal share, recalculated automatically as recruiters are added or removed. Blank = off (per-channel targets below apply).</span></div>' +
+          '<div class="ob-grid-3">' +
+          '<label class="ob-field">Total first emails / day<input type="number" min="0" step="50" class="ob-input" id="obGPool" value="' + poolVal + '" placeholder="e.g. 3000"></label>' +
+          '<div class="ob-field"><span>Active recruiters</span><div class="ob-num" style="font-size:16px;padding:6px 0">' + (pool ? pool.recruiterCount : "–") + "</div></div>" +
+          '<div class="ob-field"><span>Per recruiter / day</span><div class="ob-num" style="font-size:16px;padding:6px 0">' + (pool ? pool.perRecruiter.toLocaleString() : "–") + "</div></div>" +
+          "</div>" +
+          (pool ? '<div class="ob-note">Currently: ' + pool.total.toLocaleString() + " first emails/day divided across " + pool.recruiterCount + " recruiter" + (pool.recruiterCount === 1 ? "" : "s") + " = " + pool.perRecruiter.toLocaleString() + " each. The Send Queue daily band follows this number too.</div>" : '<div class="ob-note">Off: recruiters use the per-channel email targets below.</div>') +
+          "</div>";
+      }
+
       // Channel bands.
       html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Daily activity targets</b><span class="muted" style="font-size:12px;margin-left:8px">min / target / max (safe ceiling). Blank = inherit; placeholder shows the shipped default.</span></div>' +
         '<div style="overflow-x:auto"><table class="ob-table"><thead><tr><th style="text-align:left">Channel</th><th>Minimum</th><th>Target</th><th>Maximum safe</th></tr></thead><tbody>' +
@@ -1350,6 +1367,10 @@
         out.requiredCategories = reqs;
         if (!Object.keys(out.channels).length) delete out.channels;
         if (!Object.keys(out.triggers).length) delete out.triggers;
+        // Team email pool (global tier only): always sent so clearing the
+        // field turns the pool off (0 = off).
+        var pl = $("#obGPool");
+        if (level === "global" && pl) out.dailyEmailPool = pl.value === "" ? 0 : Number(pl.value);
         var payload = { action: "goals_put", level: level, patch: out };
         if (level === "role") payload.role = role;
         if (level === "user") payload.userId = user;
@@ -3369,7 +3390,7 @@
         : '<span class="sq-pill red">Buffer empty · stage prospects now</span>');
     var supply = '<div class="sq-cards">' +
       '<div class="sq-card big"><div class="sq-k">Send-ready supply</div><div class="sq-v">' + sqFmt(o.readySupply) + "</div><div class=\"sq-sub\">" + statusPill + "</div></div>" +
-      '<div class="sq-card"><div class="sq-k">Daily target</div><div class="sq-v">' + sqFmt(o.targetMin) + "–" + sqFmt(o.targetMax) + "</div><div class=\"sq-sub\">first emails / day</div></div>" +
+      '<div class="sq-card"><div class="sq-k">Daily target</div><div class="sq-v">' + (o.targetMin === o.targetMax ? sqFmt(o.targetMax) : sqFmt(o.targetMin) + "–" + sqFmt(o.targetMax)) + "</div><div class=\"sq-sub\">first emails / day</div></div>" +
       '<div class="sq-card"><div class="sq-k">Runway</div><div class="sq-v">' + o.runwayDays + ' <span class="sq-unit">days</span></div><div class="sq-sub">target ≥ ' + o.bufferDays + " days</div></div>" +
       '<div class="sq-card"><div class="sq-k">Already sending</div><div class="sq-v">' + sqFmt(o.inSequence) + "</div><div class=\"sq-sub\">their video 2nd emails roll out next day</div></div>" +
     "</div>";
@@ -3403,7 +3424,7 @@
         '<td class="sq-num sq-tot">' + sqFmt(dd.total) + "</td></tr>";
     }).join("");
     return '<table class="sq-table"><thead><tr><th>Day</th><th class="sq-num">1st (text)</th><th class="sq-num">2nd (video)</th><th class="sq-num">Total</th></tr></thead><tbody>' + rows + "</tbody></table>" +
-      '<div class="sq-note muted">Each day = new first emails + the previous day’s batch getting their video 2nd email. Steady state ≈ ' + sqFmt(o.targetMin * 2) + "–" + sqFmt(o.targetMax * 2) + " emails/day.</div>";
+      '<div class="sq-note muted">Each day = new first emails + the previous day’s batch getting their video 2nd email. Steady state ≈ ' + (o.targetMin === o.targetMax ? sqFmt(o.targetMax * 2) : sqFmt(o.targetMin * 2) + "–" + sqFmt(o.targetMax * 2)) + " emails/day.</div>";
   }
   // Campaigns currently staging into the queue (secondary; folded below).
   function sqCampsHtml(o) {
@@ -3598,7 +3619,7 @@
     });
   }
   function renderSendQueue(el) {
-    el.innerHTML = '<div class="view-intro">Stage 4–6K send-ready prospects every day so the first email + next-day video email go out hands-off. Keep the buffer full so no day goes without a batch.</div><div id="sqBody">' + loading() + "</div>";
+    el.innerHTML = '<div class="view-intro">Stage your daily target of send-ready prospects every day so the first email + next-day video email go out hands-off. Keep the buffer full so no day goes without a batch.</div><div id="sqBody">' + loading() + "</div>";
     sqReload();
   }
 

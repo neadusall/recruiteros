@@ -19,7 +19,7 @@
 import { ok, fail, body, requireSession, requireCapability } from "../../../lib/api";
 import {
   teamOverview, userProfile, adminInsights, userAssessment,
-  getGoalsConfig, putGoalsConfig, listAlerts, markAlertRead, listAudit, appendAudit,
+  getGoalsConfig, putGoalsConfig, emailPoolSplit, listAlerts, markAlertRead, listAudit, appendAudit,
   buildChecklist, setStepTick, listNotifications, markNotificationRead,
   getPrefs, setPrefs, SCORE_METHODOLOGY, SCORE_WEIGHTS,
   DEFAULT_CHANNELS, DEFAULT_TRIGGERS, GOAL_ROLES, localDay, workspaceTz,
@@ -95,6 +95,9 @@ export async function GET(req: Request): Promise<Response> {
           config: cfg,
           defaults: { channels: DEFAULT_CHANNELS, triggers: DEFAULT_TRIGGERS },
           roles: GOAL_ROLES,
+          // The daily email pool resolved against the live roster (null = off),
+          // so the UI can show "3,000 ÷ 5 recruiters = 600 each".
+          pool: await emailPoolSplit(ws),
           // The company identity automated updates go out under (house brand,
           // or this workspace's white-label brand + domain).
           brand: await notifyBrand(ws),
