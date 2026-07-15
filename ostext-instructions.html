@@ -173,7 +173,7 @@
     <div class="toc-title">In this document</div>
     <ol>
       <li><a href="#what">What OS Text is and where to find it</a></li>
-      <li><a href="#setup">One-time setup: the five-step wizard</a></li>
+      <li><a href="#setup">One-time setup</a></li>
       <li><a href="#campaign">Launching your first campaign</a></li>
       <li><a href="#replies">Working the inbox</a></li>
       <li><a href="#writing">Writing texts that get responses</a></li>
@@ -193,29 +193,12 @@
   </ol>
   <p class="soft">You will not see a second login. The portal signs you into the texting engine automatically.</p>
 
-  <h2 id="setup">2. One-time setup: the five-step wizard</h2>
-  <p>The first time your workspace opens OS Text, you will see a setup wizard instead of the app. A banner tracks progress ("X of 5 steps complete") and each step shows a status pill: <strong>To do</strong>, <strong>In review</strong>, or <strong>Ready</strong>. Texting stays off until all five are Ready and an admin turns it on.</p>
-  <p>This exists because US carriers require every business that texts to register first (a process called A2P 10DLC). Skipping registration is not an option: unregistered traffic gets silently filtered by carriers, which means your texts simply never arrive.</p>
+  <h2 id="setup">2. One-time setup</h2>
+  <p>The first time your workspace opens OS Text, you will see a setup wizard instead of the app. Each step shows a status pill: <strong>To do</strong>, <strong>In review</strong>, or <strong>Ready</strong>. Texting stays off until every step is Ready.</p>
 
   <ol class="steps">
     <li class="step">
       <div class="step-num">1</div>
-      <div>
-        <h4>Your business profile</h4>
-        <p>Carriers require your business details before they will register you.</p>
-        <p class="fields">Fields: Legal business name, EIN / Tax ID, Website, Business address, Support email. Click <span class="ui">Save business profile</span>. Legal name and EIN are required.</p>
-      </div>
-    </li>
-    <li class="step">
-      <div class="step-num">2</div>
-      <div>
-        <h4>Register your texting brand (A2P 10DLC)</h4>
-        <p>Submit your brand and use case so carriers approve recruiting texts from your number.</p>
-        <p class="fields">Review the pre-filled use case and sample message, then click <span class="ui">Submit for carrier registration</span>. Carriers typically review in 1 to 3 business days; the step sits at "In review" until approved.</p>
-      </div>
-    </li>
-    <li class="step">
-      <div class="step-num">3</div>
       <div>
         <h4>Get a texting number</h4>
         <p>Provision a registered number to send and receive texts.</p>
@@ -223,15 +206,15 @@
       </div>
     </li>
     <li class="step">
-      <div class="step-num">4</div>
+      <div class="step-num">2</div>
       <div>
-        <h4>Consent &amp; compliance</h4>
-        <p>Set the opt-in language, opt-out keyword, and quiet hours every text must honor.</p>
-        <p class="fields">Defaults are sensible (opt-out keyword STOP, quiet hours 8:00 pm to 8:00 am blocked). Click <span class="ui">Save consent rules</span>.</p>
+        <h4>Set your texting rules</h4>
+        <p>Choose your opt-out keyword and the hours texts are allowed to go out.</p>
+        <p class="fields">Defaults are sensible (opt-out keyword STOP, no texts between 8:00 pm and 8:00 am). Click <span class="ui">Save consent rules</span>.</p>
       </div>
     </li>
     <li class="step">
-      <div class="step-num">5</div>
+      <div class="step-num">3</div>
       <div>
         <h4>Connect your candidates</h4>
         <p>Point OS Text at your Candidates pipeline so you can text them in a click.</p>
@@ -240,7 +223,7 @@
     </li>
   </ol>
 
-  <p>When all five pills read Ready, the <span class="ui">Turn on OS Text</span> button unlocks. After launch you will see a green banner ("OS Text is live on your number") and the texting app loads in place of the wizard. A <span class="ui">Settings</span> button reopens the wizard any time.</p>
+  <p>When every step reads Ready, the <span class="ui">Turn on OS Text</span> button unlocks. After launch you will see a green banner ("OS Text is live on your number") and the texting app loads in place of the wizard. A <span class="ui">Settings</span> button reopens the wizard any time.</p>
 
   <div class="callout warn">
     <span class="tag">Admin note</span>
@@ -433,7 +416,7 @@
       <tr><td>STOP processing</td><td>STOP, UNSUBSCRIBE, CANCEL, END, QUIT, REMOVE, OPT OUT all trigger an instant, permanent block on that number.</td></tr>
       <tr><td>Quiet hours</td><td>Campaigns only send inside the send window; they pause and resume on their own.</td></tr>
       <tr><td>Number hygiene</td><td>CSV uploads are validated so only real mobile numbers get texted, and previously texted people are suppressed.</td></tr>
-      <tr><td>Carrier registration</td><td>The setup wizard walks the workspace through A2P 10DLC so messages are not carrier-filtered.</td></tr>
+      <tr><td>Carrier registration</td><td>Your texting number is registered with US carriers for you, so messages are not filtered as spam.</td></tr>
     </table>
   </div>
   <p>What stays on you:</p>
@@ -448,7 +431,7 @@
   <h3>Before your first campaign (one time)</h3>
   <ul>
     <li>Recruiting workspace &gt; Build &gt; <span class="ui">OS Text</span></li>
-    <li>Complete all 5 wizard steps; wait out carrier review (1 to 3 business days)</li>
+    <li>Complete the setup wizard steps</li>
     <li>Confirm the Telnyx strip is green (admin)</li>
     <li>Click <span class="ui">Turn on OS Text</span></li>
   </ul>
