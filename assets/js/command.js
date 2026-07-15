@@ -513,7 +513,7 @@
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting" },
     data: { title: "Candidates", crumb: "Build", action: null, render: renderData },
-    ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext },
+    ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext, motionOnly: "recruiting" },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
     email: { title: "Email", crumb: "Business Development", action: null, render: renderEmail, motionOnly: "bd" },
     pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio },
