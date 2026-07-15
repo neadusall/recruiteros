@@ -97,18 +97,22 @@ export function parseCsv(text: string): { headers: string[]; rows: Record<string
  * email) are dropped — Laxis has nothing to key off them. Returns the CSV plus how many
  * rows were sent vs skipped, so the caller can tell the recruiter.
  */
-export function serializeCandidatesCsv(rows: CandidateRow[]): { csv: string; sent: number; skipped: number } {
+export function serializeCandidatesCsv(rows: CandidateRow[]): { csv: string; sent: number; skipped: number; complete: number } {
   const lines = [LAXIS_CSV_COLUMNS.join(",")];
   let sent = 0;
   let skipped = 0;
+  let complete = 0;
   for (const c of rows) {
     const li = (c.linkedinUrl || "").trim();
     const email = (c.email || "").trim();
+    // Already has both an email and a phone (KoldInfo first rung, a prior pass, or the
+    // waterfall) — nothing left for Laxis to add, so don't spend a credit on the row.
+    if (email && (c.phone || "").trim()) { complete++; continue; }
     if (!li && !email) { skipped++; continue; } // nothing for Laxis to identify
     lines.push([csvCell(email), csvCell(li)].join(","));
     sent++;
   }
-  return { csv: lines.join("\r\n") + "\r\n", sent, skipped };
+  return { csv: lines.join("\r\n") + "\r\n", sent, skipped, complete };
 }
 
 /* ----------------------------------------------------------------------------- */

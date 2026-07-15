@@ -110,7 +110,7 @@ function detect(header: string[]): Partial<Record<Field, number>> {
 // This is what makes the importer format-agnostic: KoldInfo can label its export however it likes.
 const RE_EMAIL = /^[^\s@,;]+@[^\s@,;]+\.[a-z]{2,}$/i;
 const RE_DOMAIN = /^(?!.*@)([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
-const RE_ROSID = /^cp_[a-z0-9_]+$/i;
+const RE_ROSID = /^(?:cp|sc)_[a-z0-9_]+$/i; // cp_ = in-market prospects, sc_ = JD Sourcing candidates
 const STATUS_WORDS = new Set([
   "valid", "invalid", "catch-all", "catch_all", "catchall", "accept_all", "accept-all", "risky",
   "verified", "unverified", "deliverable", "undeliverable", "unknown", "not_found", "found", "safe", "role",

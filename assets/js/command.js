@@ -9104,7 +9104,9 @@
               '<button class="btn btn-ghost btn-sm" data-csv="' + esc(r.id) + '">Excel (URLs)</button>' +
               '<button class="btn btn-ghost btn-sm" data-rerank="' + esc(r.id) + '" title="AI re-ranks the top 100 by true relevance to the role before you deep-vet, sharper than the rule score.">Re-rank</button>' +
               '<button class="btn btn-ghost btn-sm" data-vet="' + esc(r.id) + '">Deep-vet</button>' +
-              '<button class="btn btn-ghost btn-sm" data-laxis="' + esc(r.id) + '" title="First-pass enrichment through Laxis: uploads this list to app.laxis.tech, runs their enrichment, then fills any gaps with the in-house waterfall. Up to 1,000 contacts per pass.">Enrich via Laxis</button>' +
+              '<button class="btn btn-ghost btn-sm" data-kiexp="' + esc(r.id) + '" title="FIRST rung (free): downloads a CSV of the candidates still missing an email, shaped for KoldInfo\'s upload. Enrich it in KoldInfo, then click Import KoldInfo — so Laxis credits are only spent on what KoldInfo could not fill.">KoldInfo CSV</button>' +
+              '<button class="btn btn-ghost btn-sm" data-kiimp="' + esc(r.id) + '" title="Import KoldInfo\'s result CSV back onto this list. Fills emails on the matching candidates (blanks only, never overwrites).">Import KoldInfo…</button>' +
+              '<button class="btn btn-ghost btn-sm" data-laxis="' + esc(r.id) + '" title="SECOND pass, after the free KoldInfo rung: uploads this list to app.laxis.tech for emails + cellphones, then fills any gaps with the in-house waterfall. Rows that already have an email and phone are skipped, so no credits go to rows KoldInfo already covered. Up to 1,000 contacts per pass.">Enrich via Laxis</button>' +
               '<button class="btn btn-primary btn-sm" data-promote="' + esc(r.id) + '">Send to Candidates →</button>' +
               '<span class="jd-enrich-grp">Enrich top <input type="number" class="jd-enrichn" min="1" max="' + Math.max(1, n) + '" value="' + Math.min(25, Math.max(1, n)) + '" title="Choose how many of the top-ranked candidates to enrich (business email + phone). You decide how many; costs apply per lookup."> ' +
                 '<button class="btn btn-ghost btn-sm" data-enrich="' + esc(r.id) + '">Enrich</button></span>' +
@@ -9509,14 +9511,63 @@
             vetDone({ vetted: r.data.vetted, deep: r.data.deep, warnings: r.data.warnings, profileCacheHits: r.data.profileCacheHits || 0, batched: false });
           }
         });
+      } else if ((id = t.getAttribute("data-kiexp"))) {
+        // KoldInfo FIRST rung: download the missing-email candidates as an upload-ready CSV.
+        // The operator enriches it in KoldInfo, then Import KoldInfo merges the result back,
+        // so the Laxis pass afterwards only spends credits on what KoldInfo couldn't fill.
+        t.disabled = true;
+        send("/sourcing", "POST", { action: "koldinfoExport", id: id }).then(function (r) {
+          t.disabled = false;
+          if (!r.ok || !r.data || !r.data.csv) {
+            alert("KoldInfo export failed" + ((r.data && (r.data.detail || r.data.error)) ? (": " + (r.data.detail || r.data.error)) : ".")); return;
+          }
+          csvDownload(r.data.filename || "koldinfo-upload.csv", r.data.csv);
+          alert("Exported " + r.data.count + " candidate" + (r.data.count === 1 ? "" : "s") + " still missing an email" +
+            (r.data.skipped ? (" (" + r.data.skipped + " already covered)") : "") + ".\n\n" +
+            "Enrich the file in KoldInfo, then click Import KoldInfo… on this list. " +
+            "Run Enrich via Laxis after that for the cellphones — it skips whatever KoldInfo already filled.");
+        }).catch(function () { t.disabled = false; alert("KoldInfo export failed."); });
+      } else if ((id = t.getAttribute("data-kiimp"))) {
+        // Merge KoldInfo's result CSV back onto this run (fills blank emails only).
+        var kiBtn = t, kiId = id;
+        var kiFile = document.createElement("input");
+        kiFile.type = "file"; kiFile.accept = ".csv,text/csv"; kiFile.style.display = "none";
+        document.body.appendChild(kiFile);
+        kiFile.onchange = function () {
+          var f = kiFile.files && kiFile.files[0];
+          document.body.removeChild(kiFile);
+          if (!f) return;
+          kiBtn.disabled = true; kiBtn.textContent = "Importing…";
+          function kiReset() { kiBtn.disabled = false; kiBtn.textContent = "Import KoldInfo…"; }
+          var rd = new FileReader();
+          rd.onload = function () {
+            send("/sourcing", "POST", { action: "koldinfoImport", id: kiId, csv: String(rd.result || "") }).then(function (r) {
+              kiReset();
+              if (!r.ok || !r.data) {
+                alert("KoldInfo import failed" + ((r.data && (r.data.detail || r.data.error)) ? (": " + (r.data.detail || r.data.error)) : ".")); return;
+              }
+              var d = r.data;
+              alert("KoldInfo import\n" + (d.parsed || 0) + " rows parsed · " + (d.matched || 0) + " matched to candidates\n\n" +
+                "emails filled      " + (d.emails || 0) + "\n" +
+                "vendor-invalid     " + (d.invalid || 0) + "\n" +
+                "unmatched          " + (d.unmatched || 0) + "\n\n" +
+                "Next: Enrich via Laxis for cellphones — rows KoldInfo completed are skipped automatically once they also have a phone.");
+              loadRuns();
+            }).catch(function () { kiReset(); alert("KoldInfo import failed."); });
+          };
+          rd.readAsText(f);
+        };
+        kiFile.click();
       } else if ((id = t.getAttribute("data-laxis"))) {
-        // First-pass enrichment via the Laxis browser worker. Async (a headless browser
+        // Second-pass enrichment via the Laxis browser worker (KoldInfo CSV round-trip is
+        // the free first rung; the serializer skips rows that already have email + phone,
+        // so Laxis credits only go to the gaps). Async (a headless browser
         // job), so it mirrors deep-vet: submit, then poll laxisStatus until done. Big lists
         // go in 1,000-row chunks; we AUTO-CONTINUE to the next chunk (the backend resumes by
         // offset and never re-grabs a chunk already pulled), so the whole pull is hands-off
         // and safe to re-run if the tab is closed mid-way.
         var lid = id;
-        var lxT = { emails: 0, phones: 0, matched: 0, gap: 0, chunks: 0, skipped: 0, warns: [] };
+        var lxT = { emails: 0, phones: 0, matched: 0, gap: 0, chunks: 0, skipped: 0, complete: 0, warns: [] };
         t.disabled = true; t.textContent = "Laxis: starting…";
         function laxisReset() { t.disabled = false; t.textContent = "Enrich via Laxis"; }
         function finishLaxis() {
@@ -9526,6 +9577,7 @@
             " across " + lxT.matched + " matched contact" + (lxT.matched === 1 ? "" : "s") +
             (lxT.chunks > 1 ? (" over " + lxT.chunks + " batches") : "") + "." +
             (lxT.gap ? (" The in-house waterfall then filled " + lxT.gap + " more.") : "") +
+            (lxT.complete ? ("\n\n" + lxT.complete + " row(s) already had an email + phone and were not sent, no Laxis credits spent on them.") : "") +
             (lxT.skipped ? ("\n\n" + lxT.skipped + " row(s) were skipped, no LinkedIn URL or email for Laxis to key off.") : "") +
             (lxT.warns.length ? ("\n\n" + lxT.warns.slice(0, 3).join("\n")) : ""));
           loadRuns();
@@ -9569,7 +9621,7 @@
               if (r.data.nextStart != null) { startChunk(r.data.nextStart); } else { finishLaxis(); }
               return;
             }
-            lxT.chunks++; lxT.skipped += r.data.skipped || 0;
+            lxT.chunks++; lxT.skipped += r.data.skipped || 0; lxT.complete += r.data.complete || 0;
             t.textContent = "Laxis: uploading " + (r.data.sent || "") + "…";
             setTimeout(pollLaxis, 8000);
           });

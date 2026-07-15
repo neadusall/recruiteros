@@ -9,7 +9,9 @@
  *   { action: "enrich", id, top? }                 -> enrich contacts for the top N staged candidates
  *   { action: "vet", id, top? }                    -> deep-vet the top N: submits a 50%-cheaper Message Batch (sync fallback)
  *   { action: "vetStatus", id }                    -> poll the in-flight vet batch; ingests results once it ends
- *   { action: "laxisEnrich", id, top? }            -> FIRST-pass enrich via the Laxis browser worker (submits a job)
+ *   { action: "koldinfoExport", id, top? }         -> FIRST rung (free): CSV of candidates still missing an email, for KoldInfo
+ *   { action: "koldinfoImport", id, csv }          -> merge KoldInfo's result CSV back onto the run (fills blank emails)
+ *   { action: "laxisEnrich", id, top? }            -> SECOND pass: enrich via the Laxis browser worker (submits a job)
  *   { action: "laxisStatus", id, gapFill? }        -> poll the Laxis job; merges the enriched CSV + runs the gap-fill waterfall
  *   { action: "delete", id }                       -> remove a saved run
  *
@@ -26,6 +28,7 @@ import {
   reRankCandidates, getSeenKeys, addSeenKeys,
   laxisWorkerConfigured, serializeCandidatesCsv, submitLaxisJob, getLaxisJob, mergeEnrichedCsv,
   MAX_LAXIS_UPLOAD,
+  buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv,
   startBulkList, stepBulkList, bulkListStatus,
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
 } from "../../../lib/sourcing";
@@ -239,10 +242,37 @@ export async function POST(req: Request) {
       return ok({ enriched, cacheHits, run });
     }
 
-    // Laxis is the FIRST enrichment pass. Serialize the staged rows to a CSV and hand it
-    // to the browser worker, which uploads it to app.laxis.tech/prospect-search, runs
-    // Laxis's enrichment, and returns the enriched CSV. Async (a browser job), so this
-    // mirrors the deep-vet batch shape: submit here, poll {action:"laxisStatus"}.
+    // KoldInfo is the FIRST enrichment rung (free CSV round-trip the operator drives):
+    // export the candidates still missing an email, enrich in KoldInfo, import the result.
+    // It runs BEFORE Laxis so Laxis credits only go to rows KoldInfo couldn't fill.
+    if (action === "koldinfoExport") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      const top = Math.max(1, Math.min(b.top ?? run.candidates.length, run.candidates.length));
+      const { csv, count, skipped } = buildSourcingKoldInfoCsv(run.candidates.slice(0, top));
+      if (!count) return fail("no_rows_to_export", 422, { detail: "every candidate in range already has an email — nothing for KoldInfo to fill" });
+      const slug = (run.name || "run").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "run";
+      return ok({ csv, count, skipped, filename: `koldinfo-${slug}.csv` });
+    }
+
+    if (action === "koldinfoImport") {
+      if (!b?.id) return fail("missing_id", 422);
+      if (!b?.csv || typeof b.csv !== "string") return fail("missing_csv", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      const merged = mergeSourcingKoldInfoCsv(run.candidates, b.csv);
+      if (!merged.parsed) return fail("no_emails_in_csv", 422, { detail: "no email column (by name or content) found in that file — is it KoldInfo's result export?" });
+      await saveSourcingRun(ws, { ...run });
+      return ok({ ...merged, run });
+    }
+
+    // Laxis is the SECOND enrichment pass (after the free KoldInfo rung). Serialize the
+    // staged rows to a CSV and hand it to the browser worker, which uploads it to
+    // app.laxis.tech/prospect-search, runs Laxis's enrichment, and returns the enriched
+    // CSV. Rows that already have an email AND phone are not sent (no credit spent).
+    // Async (a browser job), so this mirrors the deep-vet batch shape: submit here,
+    // poll {action:"laxisStatus"}.
     if (action === "laxisEnrich") {
       if (!b?.id) return fail("missing_id", 422);
       if (!laxisWorkerConfigured()) {
@@ -275,9 +305,16 @@ export async function POST(req: Request) {
       }
       const targetRows = run.candidates.slice(start, start + limit);
       if (!targetRows.length) return fail("no_candidates", 422, { detail: `no rows at offset ${start}` });
-      // Laxis enriches from linkedin_url; rows with neither a LinkedIn URL nor an email are skipped.
-      const { csv, sent, skipped } = serializeCandidatesCsv(targetRows);
-      if (!sent) return fail("no_enrichable_rows", 422, { detail: "no candidates in this batch have a LinkedIn URL or email for Laxis to key off" });
+      // Laxis enriches from linkedin_url; rows with neither a LinkedIn URL nor an email are
+      // skipped, and rows already holding both an email and a phone are excluded (complete).
+      const { csv, sent, skipped, complete } = serializeCandidatesCsv(targetRows);
+      if (!sent) {
+        return fail("no_enrichable_rows", 422, {
+          detail: complete === targetRows.length
+            ? "every candidate in this batch already has an email and phone — nothing for Laxis to add"
+            : "no candidates in this batch have a LinkedIn URL or email for Laxis to key off",
+        });
+      }
       const jobId = await submitLaxisJob(csv);
       run.laxisJob = {
         jobId, submittedAt: nowIso(), count: targetRows.length, start, sent,
@@ -286,7 +323,7 @@ export async function POST(req: Request) {
       run.laxisProgress = { ...progress, total, updatedAt: nowIso() };
       await saveSourcingRun(ws, { ...run });
       const remaining = Math.max(0, total - (start + targetRows.length));
-      return ok({ submitted: true, jobId, sent, skipped, start, remaining, nextStart: remaining ? start + targetRows.length : null });
+      return ok({ submitted: true, jobId, sent, skipped, complete, start, remaining, nextStart: remaining ? start + targetRows.length : null });
     }
 
     if (action === "laxisStatus") {
