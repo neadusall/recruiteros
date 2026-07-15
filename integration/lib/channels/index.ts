@@ -13,7 +13,7 @@
  * every touch, exactly as the reference does.
  */
 
-import { instantly, unipile, salesrobot, ostext, telnyx, freshLinkedin, tomba } from "../providers";
+import { instantly, salesrobot, ostext, telnyx, freshLinkedin, tomba } from "../providers";
 import { cred } from "../providers/http";
 import { withWorkspaceCreds } from "../connected";
 import { getCore } from "../core/repository";
@@ -159,16 +159,49 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
       return { ok: true, channel: "email", provider: "instantly", dryRun: r?.dryRun, providerMessageId: r?.id };
     }
     case "linkedin": {
-      const accountId = t.campaignChannelIds?.linkedinAccountId ?? "";
       const pid = t.prospect.linkedinUrl ?? "";
       if (t.linkedinProvider === "salesrobot") {
         const r: any = await salesrobot.replyToProspect(pid, t.text);
         return { ok: true, channel: "linkedin", provider: "salesrobot", dryRun: r?.dryRun };
       }
-      const r: any = t.audioUrl
-        ? await unipile.sendVoiceNote(accountId, pid, t.audioUrl)
-        : await unipile.sendMessage(accountId, pid, t.text);
-      return { ok: true, channel: "linkedin", provider: "unipile", dryRun: r?.dryRun, providerMessageId: r?.id };
+      // SHARED LINKEDIN ENGINE: a multichannel touch is an ACTION REQUEST, not
+      // a direct provider call. The LinkedIn OS engine owns policy, global
+      // utilization, capacity reservation and execution; this path may never
+      // talk to Unipile itself, or two engines would each assume the same
+      // account headroom. An accepted request is a scheduled send; a waiting
+      // request holds until capacity frees (the engine executes it later).
+      const { requestLinkedInAction } = await import("../linkedin/os/engine");
+      const accountId = t.campaignChannelIds?.linkedinAccountId || "default";
+      const res = await requestLinkedInAction({
+        workspaceId,
+        accountId,
+        person: {
+          prospectId: t.prospect.id,
+          email: t.prospect.email,
+          linkedinUrl: t.prospect.linkedinUrl,
+          phone: t.prospect.phone,
+          fullName: t.prospect.fullName,
+          company: t.prospect.company,
+          title: t.prospect.title,
+        },
+        actionType: t.audioUrl ? "voice_note" : "message",
+        payload: { text: t.text, audioUrl: t.audioUrl, linkedinUrl: t.prospect.linkedinUrl },
+        businessUnit: t.prospect.motion === "recruiting" ? "recruiting" : "bd",
+        sourceType: "multichannel_workflow",
+        campaignId: t.campaignId ?? t.prospect.campaignId,
+        workflowId: t.campaignId ?? t.prospect.campaignId,
+        idempotencyKey: `mc|${accountId}|${t.prospect.id}|${t.campaignId ?? ""}|${t.touch ?? t.variant ?? ""}`,
+      });
+      if (!res.accepted && ["suppressed", "paused"].includes(res.record.status)) {
+        return { ok: false, channel: "linkedin", provider: "linkedin_engine", error: res.reason ?? res.record.status };
+      }
+      return {
+        ok: true,
+        channel: "linkedin",
+        provider: "linkedin_engine",
+        providerMessageId: res.record.id,
+        dryRun: false,
+      };
     }
     case "sms": {
       const to = t.prospect.phone ?? "";

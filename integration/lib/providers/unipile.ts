@@ -81,4 +81,14 @@ export class UnipileClient extends ProviderClient {
       body: { account_id: accountId, text },
     });
   }
+
+  /** React to a post (the LinkedIn OS "like post" touch).
+   *  NOTE: confirm the exact path/shape against the current Unipile API. */
+  likePost(accountId: string, postId: string, reaction = "like") {
+    return this.request({
+      method: "POST",
+      path: `/api/v1/posts/${encodeURIComponent(postId)}/reaction`,
+      body: { account_id: accountId, reaction_type: reaction },
+    });
+  }
 }

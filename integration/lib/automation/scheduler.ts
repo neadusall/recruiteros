@@ -67,6 +67,18 @@ async function tickLinkedin(): Promise<void> {
   await new SequenceEngine(getRepository()).tick(new Date(), 100);
 }
 
+/**
+ * The LinkedIn OS shared engine tick: promote waiting actions into freed
+ * capacity, execute due scheduled actions via the provider, advance LinkedIn
+ * campaign enrollments and the slow-drip activation queue. EVERY LinkedIn
+ * action (LinkedIn campaigns, multichannel workflows, hire signals, manual
+ * sends) executes here and nowhere else.
+ */
+async function tickLinkedinOs(): Promise<void> {
+  const { tickLinkedInOs } = await import("../linkedin/os/executor");
+  await tickLinkedInOs();
+}
+
 /** Drain the AMD voicemail queue for every RUNNING voice campaign, in-window. */
 async function tickVoice(): Promise<void> {
   const { ensureVoiceReady, listRunningCampaigns } = await import("../voice/store");
@@ -156,6 +168,7 @@ interface TickSpec { key: string; label: string; env: string; defaultMs: number;
 const TICKS: TickSpec[] = [
   { key: "cadence", label: "Pull + draft + send (Autopilot)", env: "RECRUITEROS_CADENCE_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 90_000, fn: tickCadence },
   { key: "linkedin", label: "LinkedIn cadence", env: "RECRUITEROS_LINKEDIN_TICK_MS", defaultMs: 3 * 60_000, firstDelayMs: 30_000, fn: tickLinkedin },
+  { key: "linkedin_os", label: "LinkedIn OS shared engine", env: "RECRUITEROS_LINKEDIN_OS_TICK_MS", defaultMs: 2 * 60_000, firstDelayMs: 40_000, fn: tickLinkedinOs },
   { key: "linkedin_posts", label: "LinkedIn Poster scheduled posts", env: "RECRUITEROS_LINKEDIN_POSTS_TICK_MS", defaultMs: 60_000, firstDelayMs: 35_000, fn: tickLinkedinPosts },
   { key: "voice", label: "Voicemail drops", env: "RECRUITEROS_VOICE_TICK_MS", defaultMs: 15 * 60_000, firstDelayMs: 45_000, fn: tickVoice },
   { key: "nurture_enroll", label: "Auto-enroll into nurture", env: "RECRUITEROS_NURTURE_ENROLL_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 50_000, fn: tickNurtureEnroll },

@@ -34,8 +34,28 @@ export async function POST(req: Request, { params }: { params: { source: string 
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const processed = await processInbound(source, workspaceId, payload);
+  // The GLOBAL reply stop: a reply on ANY channel pauses the person's
+  // automation everywhere. This wires the router's pause_all_sequences action
+  // (previously a no-op through this path) to the LinkedIn OS engine, which
+  // cancels pending LinkedIn actions, releases reserved capacity, pauses
+  // enrollments and flips the core prospect off the cadence engines.
+  const channelBySource: Record<ResponseSource, string> = {
+    instantly: "email", unipile: "linkedin", salesrobot: "linkedin", taltxt: "sms",
+  };
+  const pauseSequences = async (prospectId: string) => {
+    const { replyStopByProspectId } = await import("../../../../../lib/linkedin/os/outreachState");
+    await replyStopByProspectId(workspaceId, prospectId, channelBySource[source] ?? "email");
+  };
+
+  const processed = await processInbound(source, workspaceId, payload, pauseSequences);
   if (!processed) return NextResponse.json({ ok: true, ignored: true });
+
+  // Belt and braces: whatever the reply classified as, an inbound from a known
+  // person always pauses their automated outreach (the rules matrix only
+  // attaches pause_all_sequences to some classes; the spec wants ANY reply).
+  if (processed.inbound.prospectId) {
+    try { await pauseSequences(processed.inbound.prospectId); } catch { /* stop is idempotent + best-effort */ }
+  }
 
   return NextResponse.json({
     ok: true,

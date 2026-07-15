@@ -1,15 +1,19 @@
 /**
  * POST /api/linkedin/webhook
- * Provider webhook ingest (Unipile). Normalizes raw events and feeds them to
- * the sequence engine for accept-triggered follow-ups and pause-on-reply.
- *
- * Configure this URL in the Unipile dashboard for messaging + relations events.
+ * Provider webhook ingest (Unipile). Two consumers:
+ *   1. The LinkedIn OS shared engine (lib/linkedin/os/events): raw event
+ *      stored, normalized to domain events, then reply stop, inbox, accept
+ *      gates and account health all run. Requires a workspace: configure the
+ *      Unipile webhook URL as .../api/linkedin/webhook?ws=<workspaceId>.
+ *   2. The legacy in-memory sequence engine (accept-triggered follow-ups for
+ *      the old nav-less automation view), kept for back-compat.
  */
 
 import { NextResponse } from "next/server";
 import { SequenceEngine } from "../../../../lib/linkedin/sequenceEngine";
 import { getRepository } from "../../../../lib/linkedin/repository";
 import { verifyProviderSignature } from "../../../../lib/linkedin/auth";
+import { ingestProviderWebhook, storeRawEvent } from "../../../../lib/linkedin/os/events";
 import type { LinkedInWebhookEvent } from "../../../../lib/linkedin/types";
 
 export async function POST(req: Request) {
@@ -25,12 +29,25 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
+  // LinkedIn OS ingestion (workspace-scoped). Without ws we still keep the
+  // raw event for debugging, but domain consumers need the workspace.
+  const url = new URL(req.url);
+  const workspaceId = url.searchParams.get("ws") ?? req.headers.get("x-workspace-id") ?? "";
+  let osEvents = 0;
+  try {
+    if (workspaceId) {
+      osEvents = (await ingestProviderWebhook(workspaceId, payload)).events;
+    } else {
+      await storeRawEvent("unipile", payload);
+    }
+  } catch { /* OS ingestion must never break the legacy path */ }
+
   const event = normalizeUnipileEvent(payload);
-  if (!event) return NextResponse.json({ ok: true, ignored: true });
+  if (!event) return NextResponse.json({ ok: true, osEvents, ignored: true });
 
   const engine = new SequenceEngine(getRepository());
   await engine.handleEvent(event);
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, osEvents });
 }
 
 /** Map a raw Unipile webhook into our normalized event shape. */

@@ -277,6 +277,50 @@ export async function POST(req: Request) {
     return ok(res);
   }
 
+  // Review gate, slow-drip variant: enroll the approved batch but hold every
+  // contact in the LinkedIn OS activation queue instead of releasing them all
+  // at once. The activation tick then feeds them to the campaign at the
+  // fastest pace channel capacity (email pool + LinkedIn utilization +
+  // contact pressure) responsibly allows. Body: { campaignId, ids, dailyTarget?,
+  // signalLabel?, priority? }.
+  if (b?.action === "curation_slowdrip") {
+    if (!b.campaignId) return fail("missing_campaign", 422, { detail: "campaignId required" });
+    const { enrollToBulk } = await import("../../../lib/inmarket/curation");
+    const { addActivationBatch } = await import("../../../lib/linkedin/os/activation");
+    const startedAt = new Date().toISOString();
+    const res = await enrollToBulk(ws, String(b.campaignId), Array.isArray(b.ids) ? b.ids : [], startedAt);
+    // Hold the just-created prospects out of the cadence until activation.
+    const core = getCore();
+    const fresh = (await core.listProspects(ws, { campaignId: String(b.campaignId), status: "queued" }))
+      .filter((p) => p.category === "in_market" && p.createdAt >= startedAt);
+    for (const p of fresh) {
+      p.status = "nurture"; // inert until the activation tick flips it back to queued
+      await core.saveProspect(p);
+    }
+    if (fresh.length) {
+      await addActivationBatch({
+        workspaceId: ws,
+        name: String(b.signalLabel ?? "Hire signal batch"),
+        signalLabel: b.signalLabel ? String(b.signalLabel) : undefined,
+        mode: "dynamic_slow_drip",
+        dailyTarget: Math.min(500, Math.max(1, Number(b.dailyTarget) || 25)),
+        businessUnit: "bd",
+        priority: (["critical", "high", "normal", "low"].includes(String(b.priority)) ? String(b.priority) : "high") as "critical" | "high" | "normal" | "low",
+        approvedBy: g.ctx.user.name || g.ctx.user.email,
+        target: { kind: "core_campaign", id: String(b.campaignId) },
+        contacts: fresh.map((p) => ({
+          prospectId: p.id,
+          fullName: p.fullName,
+          email: p.email,
+          linkedinUrl: p.linkedinUrl,
+          company: p.company,
+          title: p.title,
+        })),
+      });
+    }
+    return ok({ ...res, queuedForActivation: fresh.length });
+  }
+
   // Continuous email validation — the external validator pulls the pending list, then streams
   // verdicts back. Invalid addresses are suppressed (never enrolled); valid ones are confirmed.
   if (b?.action === "validation_pending") {

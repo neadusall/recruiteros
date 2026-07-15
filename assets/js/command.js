@@ -531,6 +531,11 @@
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
     calls: { title: "Calls", crumb: "Build", action: null, render: renderCalls, motionOnly: "recruiting" },
     bdphone: { title: "BD Phone", crumb: "Tools", action: null, render: renderBdPhone, motionOnly: "bd" },
+    // LinkedIn OS: ONE unified LinkedIn tool (shared engine, accounts, ledger,
+    // utilization) with two contextual nav entrances. BD > Tools and
+    // Recruiting > Build both open this same route; the active motion sets the
+    // default context. Not motionOnly: it belongs to both business units.
+    linkedin: { title: "LinkedIn", crumb: "Tools", action: null, render: renderLinkedInOs },
     linkedinposter: { title: "LinkedIn Poster", crumb: "Tools", action: null, render: renderLinkedInPoster, motionOnly: "bd" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
@@ -15934,6 +15939,30 @@
     if (detail === "settings") return bdpSettingsView(el);
     if (detail) return bdpCallDetailView(el, detail);
     bdpMainView(el);
+  }
+
+  /* ---------------- LinkedIn OS (thin controller) ----------------
+     The tool lives in assets/js/linkedin-os.js (window.__LinkedInOS), loaded
+     after command.js like the BD Phone engine. This controller just hands it
+     the view element plus the active motion so BD defaults to prospects and
+     Recruiting defaults to candidates, over the SAME shared engine. */
+  function renderLinkedInOs(el) {
+    var crumbEl = $("#crumb");
+    if (crumbEl) crumbEl.textContent = (ctx.workspace ? wsDisplayName() + " / " : "") + (motion === "recruiting" ? "Build" : "Tools");
+    var tries = 0;
+    (function mount() {
+      if (window.__LinkedInOS && window.__LinkedInOS.render) {
+        window.__LinkedInOS.render(el, { motion: motion });
+        return;
+      }
+      // Cold deep link: linkedin-os.js loads after command.js; wait briefly.
+      tries++;
+      if (tries > 40) {
+        el.innerHTML = '<div class="empty">The LinkedIn tool failed to load. Refresh the page.</div>';
+        return;
+      }
+      setTimeout(mount, 125);
+    })();
   }
 
   function bdpTabs(active) {
