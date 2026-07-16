@@ -8987,17 +8987,15 @@
       '<ol class="jd-steps" id="jdSteps"></ol>' +
       '<details class="jd-tipsd jd-help"><summary>How this works <span class="muted">what each step, setting, and button does</span></summary>' +
         '<div class="jd-helpbody">' +
-          '<div class="jd-helpsec"><h5>The flow</h5>' +
-            '<p><b>1 &middot; Build the brief</b>: Enter the role and anything you know. The AI refines your input into a strong, wide-net hiring brief and drops it in the Job description box.</p>' +
-            '<p><b>2 &middot; Analyze JD</b>: Turns that brief into an ideal-candidate profile, the titles, companies, locations, and must-haves the search will use.</p>' +
-            '<p><b>3 &middot; Find candidates</b>: Searches for real people matching the profile, scores each on fit, and returns a ranked list.</p>' +
-            '<p><b>4 &middot; Save to JD Sourcing</b>: Stores the list here under its name so you can return to it and act on it.</p>' +
+          '<div class="jd-helpsec"><h5>The flow: two clicks, start to saved list</h5>' +
+            '<p><b>1 &middot; Fill in the role</b>: Job title plus anything you know. Pasting a JD is optional; the AI writes a strong brief from the fields alone.</p>' +
+            '<p><b>2 &middot; Press Find candidates</b>: That one button runs everything: writes the brief (if the JD box is empty), builds the ideal-candidate profile, searches, ranks the strongest matches to the top, and saves the finished list below. There is nothing else to press.</p>' +
+            '<p>When it says Done, scroll to <b>Your saved candidate lists</b> and act on it: enrich, deep-vet, download, or send to Candidates.</p>' +
           '</div>' +
-          '<div class="jd-helpsec"><h5>Search settings</h5>' +
+          '<div class="jd-helpsec"><h5>Fine-tune (optional, under Advanced)</h5>' +
             '<p><b>Min fit</b>: The match-strength bar, 0 to 100. Set 0 to see every profile found; raise it to keep only stronger matches (10 is wide, 40 and up is tight).</p>' +
             '<p><b>Scan up to</b>: The ceiling on how many candidates a run gathers. Not a minimum, you get however many qualified people the search finds, up to this number.</p>' +
-            '<p><b>Dive deeper / Refine</b>: After Analyze, type a plain instruction (e.g. "only Director and up in medical devices, exclude agencies") to tighten or widen the profile, then search again.</p>' +
-            '<p><b>Add to queue</b>: Line up several briefs and run them back to back instead of one at a time.</p>' +
+            '<p><b>Dive deeper / Refine</b>: After a run, type a plain instruction (e.g. "only Director and up in medical devices, exclude agencies") to tighten or widen the profile, then search again.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>On a saved list</h5>' +
             '<p><b>Excel (URLs)</b>: Download the list as an Excel (.xlsx) spreadsheet of LinkedIn profile URLs.</p>' +
@@ -9045,37 +9043,25 @@
         '</details>' +
         '<div class="jd-actions">' +
           '<button class="btn btn-primary" id="jdGo" style="font-size:14.5px;padding:11px 26px">Find candidates</button>' +
-          '<span class="muted" style="font-size:12.5px;max-width:520px">One click does the whole run: writes the brief if the JD box is empty, analyzes it, searches, saves the list below, and AI-ranks the strongest matches to the top.</span>' +
+          '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
+          '<span class="muted" style="font-size:12.5px;max-width:520px">The only button you need. It writes the brief, analyzes it, finds the candidates, ranks the best to the top, and saves the list below, all in one click.</span>' +
         '</div>' +
-        '<details class="jd-tipsd" style="margin-top:12px"><summary>Advanced controls <span class="muted">step-by-step buttons, scan cap, fit bar, fresh-only, queue</span></summary>' +
+        '<details class="jd-tipsd" style="margin-top:12px"><summary>Advanced <span class="muted">optional: tune the search or run one step at a time</span></summary>' +
         '<div class="jd-actions" style="margin-top:6px">' +
-          '<button class="btn btn-ghost btn-sm" id="jdAnalyze">Analyze JD</button>' +
-          '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>Find candidates</button>' +
           '<span class="jd-cap muted">Scan up to <input id="jdCap" type="number" min="1" max="5000" value="500" title="Ceiling on candidates gathered per run. Not a minimum, runs return however many qualified people the search finds, up to this number."> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10" title="0 = show every profile the search finds (nothing filtered). Higher = keep only stronger matches. 10 is a wide net; 40+ is tight."></span>' +
           '<label class="jd-cap muted" title="Skip anyone this workspace already surfaced in past runs, surfaces fresh people (new market entrants) instead of repeats. Leave OFF for the full market; ON can return zero on a re-run because everyone was already seen."><input type="checkbox" id="jdFresh" style="width:auto;margin:0 4px 0 0;vertical-align:middle"> Fresh only</label>' +
           '<label class="jd-cap muted" title="By default, when you set a City &amp; state the search DROPS anyone whose profile states a different location (people with no visible location are kept). Check this to keep out-of-area candidates too, e.g. for remote roles."><input type="checkbox" id="jdAnywhere" style="width:auto;margin:0 4px 0 0;vertical-align:middle"> Include out-of-area</label>' +
-          '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
-          '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>Save to JD Sourcing</button>' +
-          '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">Add to queue</button>' +
         '</div>' +
-        '<div class="jd-hints">' +
-          '<p class="jd-hint"><b>Min fit</b> &middot; the match-strength bar, from 0 to 100. Leave it at 0 to see every profile found, with nothing filtered. Raise it to keep only the strongest matches: 10 casts a wide net, 40 and up runs tight.</p>' +
-          '<p class="jd-hint"><b>Scan up to</b> &middot; the ceiling on how many candidates a run gathers. Not a minimum: you get however many qualified people the search finds, up to this number.</p>' +
-          '<p class="jd-hint"><b>Fresh only</b> &middot; skips everyone surfaced in ANY previous run. That is why a re-run with it checked can come back near-empty; leave it off unless you specifically want only never-seen people.</p>' +
+        '<div class="jd-actions" style="margin-top:6px">' +
+          '<span class="jd-cap muted" title="These run the same steps as the big Find candidates button, one at a time, so you can review or refine the profile between steps.">Step by step:</span>' +
+          '<button class="btn btn-ghost btn-sm" id="jdAnalyze">1 · Analyze JD</button>' +
+          '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>2 · Find candidates</button>' +
+          '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>3 · Save the list</button>' +
         '</div>' +
         '</details>' +
         '<div id="jdMsg" class="muted" style="margin-top:8px"></div>' +
       '</div>' +
       '<div class="card jd-prog" id="jdProgress" style="display:none"></div>' +
-      '<div class="card" id="jdQueueCard" style="display:none"><h3>Queue <span class="muted" id="jdQueueCount"></span></h3>' +
-        '<p class="muted" style="margin-top:-4px">Each queued JD runs in turn (search, rank, save) using the Max and min-fit set above. Keep this tab open while the queue runs; each finished list lands below with a downloadable CSV of LinkedIn URLs.</p>' +
-        '<div id="jdQueueList"></div>' +
-        '<div class="jd-actions">' +
-          '<button class="btn btn-primary btn-sm" id="jdQueueRun">Run queue</button>' +
-          '<button class="btn btn-ghost btn-sm" id="jdQueueClear">Clear queue</button>' +
-          '<span class="muted" id="jdQueueProg"></span>' +
-        '</div>' +
-      '</div>' +
       '<div id="jdPlan"></div>' +
       '<div id="jdResults"></div>' +
       '<div class="card">' +
@@ -9137,12 +9123,6 @@
         '<div class="jd-refine"><input id="jdRefineInput" type="text" placeholder="Dive deeper: refine with AI, e.g. only Director+ who sold into manufacturing, exclude agencies" />' +
           '<button class="btn btn-primary btn-sm" id="jdRefineBtn">Refine</button></div>' +
         (state.refineNote ? '<p class="jd-refine-note">' + esc(state.refineNote) + '</p>' : '') +
-        '<details style="margin-top:14px"><summary class="muted" style="cursor:pointer">Generated searches (' + state.queries.length + ')</summary>' +
-        '<div class="jd-queries">' + state.queries.map(function (q) {
-          return '<div class="jd-q"><span class="jd-q-label">' + esc(q.label) + '</span>' +
-            '<a href="' + esc(q.googleUrl) + '" target="_blank" rel="noopener">Google X-ray</a> · ' +
-            '<a href="' + esc(q.linkedinUrl) + '" target="_blank" rel="noopener">LinkedIn</a></div>';
-        }).join("") + '</div></details>' +
         (state.note ? '<p class="muted" style="margin-top:10px">' + esc(state.note) + '</p>' : '') +
       '</div>';
     }
@@ -9629,60 +9609,6 @@
     function hideProgress() { if (prog.timer) { clearInterval(prog.timer); prog.timer = null; } var h = $("#jdProgress"); if (h) { h.style.display = "none"; h.innerHTML = ""; } }
     /** ETA seconds for a discovery run, estimated from the candidate cap. */
     function findEta(cap) { return Math.min(150, Math.max(8, Math.round((cap || 500) * 0.02))); }
-
-    /* ---- Queue: run JD searches back-to-back, each saved + CSV-ready ---- */
-    function renderQueue() {
-      var card = $("#jdQueueCard"); if (!card) return;
-      card.style.display = state.queue.length ? "" : "none";
-      var cnt = $("#jdQueueCount"); if (cnt) cnt.textContent = state.queue.length ? ("· " + state.queue.length + " pending") : "";
-      var list = $("#jdQueueList"); if (!list) return;
-      list.innerHTML = state.queue.map(function (item, idx) {
-        return '<div class="jd-run"><div><b>' + esc(item.name) + '</b> <span class="muted">· ' + esc(item.jd.slice(0, 90).replace(/\s+/g, " ")) + '…</span></div>' +
-          '<div class="jd-run-actions"><button class="btn btn-ghost btn-sm" data-qrm="' + idx + '">Remove</button></div></div>';
-      }).join("");
-    }
-    function addToQueue() {
-      var name = $("#jdName").value.trim(), jd = $("#jdText").value.trim();
-      if (!jd) { msg("Paste a job description to queue it."); return; }
-      if (!name) name = "Sourcing list " + (state.queue.length + 1);
-      state.queue.push({ name: name, jd: jd, location: jdLocLabel() });
-      $("#jdName").value = ""; $("#jdText").value = "";
-      state.jd = ""; state.icp = null; state.queries = []; state.candidates = []; state.warnings = [];
-      $("#jdFind").disabled = true; $("#jdSave").disabled = true; renderPlan(); renderResults(); renderSteps();
-      msg("Added to queue (" + state.queue.length + "). Add more, then Run queue."); renderQueue();
-    }
-    function runQueue() {
-      if (state.running) return;
-      if (!state.queue.length) { msg("Queue is empty. Add a JD with the Add to queue button."); return; }
-      var cap = parseInt($("#jdCap").value, 10) || 500;
-      var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
-      state.running = true;
-      var runBtn = $("#jdQueueRun"); if (runBtn) runBtn.disabled = true;
-      var progEl = $("#jdQueueProg");
-      var total = state.queue.length, done = 0, failed = 0;
-      function finish() {
-        state.running = false; if (runBtn) runBtn.disabled = false;
-        if (progEl) progEl.textContent = "Done. Saved " + done + (failed ? (", " + failed + " failed") : "") + ". Download CSVs below.";
-        finishProgress("Queue complete. Saved " + done + (failed ? (", " + failed + " failed") : ""));
-        renderQueue(); loadRuns();
-      }
-      function next() {
-        if (!state.queue.length) return finish();
-        var item = state.queue[0];
-        var idx = done + failed + 1;
-        if (progEl) progEl.textContent = "Processing " + idx + "/" + total + ": " + item.name + " …";
-        showProgress("Queue " + idx + "/" + total + ": " + item.name, findEta(cap));
-        send("/sourcing", "POST", { action: "run", jd: item.jd, cap: cap, minFit: minFit, freshOnly: !!($("#jdFresh") && $("#jdFresh").checked), location: item.location || "", strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked) }).then(function (r) {
-          if (!r.ok || !r.data) { failed++; state.queue.shift(); renderQueue(); return next(); }
-          var cands = r.data.candidates || [];
-          return send("/sourcing", "POST", { action: "save", name: item.name, jd: item.jd, location: item.location || "", icp: r.data.icp, queries: r.data.queries, candidates: cands, warnings: r.data.warnings }).then(function (s) {
-            if (s.ok) done++; else failed++;
-            state.queue.shift(); renderQueue(); next();
-          });
-        }).catch(function () { failed++; state.queue.shift(); renderQueue(); next(); });
-      }
-      next();
-    }
 
     $("#jdGo").addEventListener("click", runOneClick);
     $("#jdAnalyze").addEventListener("click", function () {

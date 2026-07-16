@@ -9123,12 +9123,6 @@
         '<div class="jd-refine"><input id="jdRefineInput" type="text" placeholder="Dive deeper: refine with AI, e.g. only Director+ who sold into manufacturing, exclude agencies" />' +
           '<button class="btn btn-primary btn-sm" id="jdRefineBtn">Refine</button></div>' +
         (state.refineNote ? '<p class="jd-refine-note">' + esc(state.refineNote) + '</p>' : '') +
-        '<details style="margin-top:14px"><summary class="muted" style="cursor:pointer">Generated searches (' + state.queries.length + ')</summary>' +
-        '<div class="jd-queries">' + state.queries.map(function (q) {
-          return '<div class="jd-q"><span class="jd-q-label">' + esc(q.label) + '</span>' +
-            '<a href="' + esc(q.googleUrl) + '" target="_blank" rel="noopener">Google X-ray</a> · ' +
-            '<a href="' + esc(q.linkedinUrl) + '" target="_blank" rel="noopener">LinkedIn</a></div>';
-        }).join("") + '</div></details>' +
         (state.note ? '<p class="muted" style="margin-top:10px">' + esc(state.note) + '</p>' : '') +
       '</div>';
     }
