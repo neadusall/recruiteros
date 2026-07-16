@@ -93,9 +93,10 @@ export interface CandidateRow {
   /** Data source that produced the row (rapidapi / scraper / web). */
   provider?: string;
   /**
-   * True when the row was kept by the strict-location RESCUE: the person states a
-   * location outside the target geos, but dropping them would have left the run
-   * empty, so they're kept and marked instead of silently discarded.
+   * True when the person states a location OUTSIDE the target geos on a
+   * location-pinned search. Out-of-area rows live in their own block after the
+   * in-area list (never interleaved) so a geo'd search stays within its geo while
+   * nothing found is silently discarded.
    */
   outOfArea?: boolean;
 
@@ -154,6 +155,13 @@ export interface SourcingRun {
    * Parked on the run so a redeploy mid-job doesn't strand it.
    */
   koldJob?: KoldJobRef;
+  /**
+   * A KoldInfo DATABASE-lookup job (name + city/state search over People DB +
+   * Business Email DB) in flight on the browser worker. This is the rung that needs NO
+   * LinkedIn URL, so it reaches candidates the LinkedIn-URL enrichment (koldJob) cannot.
+   * Runs right after koldJob and before Laxis. Cleared once its results are merged.
+   */
+  koldDbJob?: KoldJobRef;
   /**
    * Chunk-level progress for multi-batch Laxis enrichment (Laxis caps each import at
    * 1,000 rows, so a big list is enriched in sequential 1,000-row chunks). Records which

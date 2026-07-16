@@ -53,6 +53,7 @@ export {
 export { promoteSourcingRun, type PromoteResult, type PromoteOptions } from "./promote";
 export {
   buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, sourcingKoldId,
+  buildKoldInfoDbCsv, splitLocation,
   type SourcingKoldMerge,
 } from "./koldinfo";
 

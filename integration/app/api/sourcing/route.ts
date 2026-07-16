@@ -16,6 +16,7 @@
  *   { action: "laxisEnrich", id, top? }            -> SECOND pass: enrich via the Laxis browser worker (submits a job)
  *   { action: "laxisStatus", id, gapFill? }        -> poll the Laxis job; merges the enriched CSV + runs the gap-fill waterfall
  *   { action: "ostext", id, name?, validate? }     -> push the run's phone-holding candidates into an OS Text SMS campaign
+ *   { action: "merge", ids, name?, deleteSources? } -> combine 2+ saved runs into one deduped list (fills blanks, keeps best row)
  *   { action: "delete", id }                       -> remove a saved run
  *
  * Discovery-only until promote; contact lookup and deep-vet are on demand. Session-gated.
@@ -31,7 +32,7 @@ import {
   reRankCandidates, getSeenKeys, addSeenKeys,
   laxisWorkerConfigured, koldinfoWorkerReady, serializeCandidatesCsv, submitLaxisJob, getLaxisJob, mergeEnrichedCsv,
   MAX_LAXIS_UPLOAD,
-  buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv,
+  buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, buildKoldInfoDbCsv,
   startBulkList, stepBulkList, bulkListStatus,
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
 } from "../../../lib/sourcing";
@@ -327,6 +328,55 @@ export async function POST(req: Request) {
       return ok({ done: true, status: "done", merged, warnings, run });
     }
 
+    // AUTOMATED KoldInfo DB-lookup rung (name + city/state over People DB + Business
+    // Email DB). Runs AFTER koldinfoEnrich: it needs no LinkedIn URL, so it reaches the
+    // candidates the LinkedIn-URL enrichment could not touch. Same free-first economics
+    // (reading the DB grid spends no export credit). Submit here, poll koldinfoDbStatus.
+    if (action === "koldinfoDbEnrich") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      if (run.koldDbJob) {
+        return ok({ submitted: true, jobId: run.koldDbJob.jobId, count: run.koldDbJob.count, alreadyRunning: true });
+      }
+      if (!laxisWorkerConfigured() || !(await koldinfoWorkerReady())) {
+        return fail("koldinfo_worker_not_configured", 409, {
+          detail: "set KOLDINFO_EMAIL and KOLDINFO_PASSWORD in .env.production, then redeploy the laxis-worker",
+        });
+      }
+      const { csv, count, skipped } = buildKoldInfoDbCsv(run.candidates, run.location);
+      if (!count) return ok({ submitted: false, nothingMissing: true, skipped });
+      const jobId = await submitLaxisJob(csv, "koldinfo-db");
+      run.koldDbJob = { jobId, submittedAt: nowIso(), count };
+      await saveSourcingRun(ws, { ...run });
+      return ok({ submitted: true, jobId, count, skipped });
+    }
+
+    if (action === "koldinfoDbStatus") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      if (!run.koldDbJob) return ok({ done: true, status: "none" });
+      const job = await getLaxisJob(run.koldDbJob.jobId);
+      if (job.status === "queued" || job.status === "running") {
+        return ok({ done: false, status: job.status, stage: job.stage });
+      }
+      if (job.status === "error") {
+        delete run.koldDbJob;
+        await saveSourcingRun(ws, { ...run });
+        return ok({ done: true, status: "error", warnings: [`koldinfo_db_job_error: ${job.error ?? "unknown"}`], run });
+      }
+      // The DB-lookup result CSV uses the same person_email / person_sanitized_phone /
+      // ros_id / status columns, so the format-agnostic merge re-links it unchanged.
+      const warnings: string[] = [];
+      let merged = { parsed: 0, matched: 0, emails: 0, phones: 0, invalid: 0, unmatched: 0 };
+      if (job.enrichedCsv) merged = mergeSourcingKoldInfoCsv(run.candidates, job.enrichedCsv);
+      else warnings.push("koldinfo_db_done_but_no_csv_returned");
+      delete run.koldDbJob;
+      await saveSourcingRun(ws, { ...run });
+      return ok({ done: true, status: "done", merged, warnings, run });
+    }
+
     // Laxis is the SECOND enrichment pass (after the free KoldInfo rung). Serialize the
     // staged rows to a CSV and hand it to the browser worker, which uploads it to
     // app.laxis.tech/prospect-search, runs Laxis's enrichment, and returns the enriched
@@ -580,6 +630,73 @@ export async function POST(req: Request) {
         return fail(code, code === "ostext_not_connected" ? 503 : 502, { detail: err.message });
       }
       return ok({ ...data, pushed: contacts.length, noPhone });
+    }
+
+    // Combine several saved runs (near-identical searches for the same role) into ONE
+    // deduped master list, so the recruiter enriches once and pushes once instead of
+    // juggling overlapping lists. Dedupe key is the same stable candKey used everywhere
+    // (LinkedIn URL, else name+company). When the same person appears on two lists the
+    // stronger row wins (verified score, then fit) and its blanks are filled from the
+    // other row — an email found on list A and a phone found on list B both survive.
+    if (action === "merge") {
+      const ids: string[] = Array.isArray(b?.ids) ? b.ids.filter((x: unknown) => typeof x === "string") : [];
+      if (ids.length < 2) return fail("need_two_lists", 422, { detail: "pick at least two saved lists to combine" });
+      const runs: SourcingRun[] = [];
+      for (const id of ids) {
+        const r = await getSourcingRun(ws, id);
+        if (!r) return fail("run_not_found", 404, { detail: id });
+        runs.push(r);
+      }
+      // The largest source anchors the profile/JD the combined list carries forward.
+      const anchor = runs.reduce((a, r) => (r.candidates.length > a.candidates.length ? r : a), runs[0]);
+      const strength = (row: CandidateRow) => (row.verifiedScore ?? -1) * 1000 + row.fitScore;
+      const byKey = new Map<string, CandidateRow>();
+      let overlap = 0;
+      for (const r of runs) {
+        for (const c of r.candidates) {
+          const k = candKey(c);
+          const prev = byKey.get(k);
+          if (!prev) { byKey.set(k, { ...c }); continue; }
+          overlap++;
+          const keep = strength(c) > strength(prev) ? { ...c } : prev;
+          const other = keep === prev ? c : prev;
+          // Fill-blanks field merge: contact + identity data found on either list survives.
+          for (const f of ["email", "phone", "linkedinUrl", "title", "headline", "company", "location", "imageUrl", "provider", "sourceGroup"] as const) {
+            if (!keep[f] && other[f]) keep[f] = other[f];
+          }
+          if (keep.llmScore == null && other.llmScore != null) keep.llmScore = other.llmScore;
+          // A deep-vet verdict earned on either list carries over whole (not field-mixed).
+          if (keep.verifiedScore == null && other.verifiedScore != null) {
+            keep.verifiedScore = other.verifiedScore; keep.verdict = other.verdict;
+            keep.yearsRelevant = other.yearsRelevant; keep.vetStrengths = other.vetStrengths;
+            keep.vetGaps = other.vetGaps; keep.vetFlags = other.vetFlags;
+            keep.vetRationale = other.vetRationale; keep.profileFetched = other.profileFetched;
+          }
+          byKey.set(k, keep);
+        }
+      }
+      const candidates = Array.from(byKey.values());
+      rankByVerdict(candidates);
+      const name = ((b.name as string) || "").trim() || `${anchor.name} (combined)`;
+      const mergedRun = await saveSourcingRun(ws, {
+        name, jd: anchor.jd, jdUrl: anchor.jdUrl, location: anchor.location,
+        icp: anchor.icp,
+        queries: runs.flatMap((r) => r.queries),
+        candidates,
+        warnings: [],
+        motion: anchor.motion,
+      });
+      // Optionally retire the sources — safe, the combined list holds every candidate.
+      // A source with an enrich/vet job still in flight is kept so the job isn't stranded.
+      let deleted = 0;
+      const keptBusy: string[] = [];
+      if (b.deleteSources === true) {
+        for (const r of runs) {
+          if (r.vetBatch || r.laxisJob || r.koldJob) { keptBusy.push(r.name); continue; }
+          if (await deleteSourcingRun(ws, r.id)) deleted++;
+        }
+      }
+      return ok({ run: mergedRun, total: candidates.length, overlap, sources: runs.length, deleted, keptBusy });
     }
 
     if (action === "delete") {

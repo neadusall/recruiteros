@@ -66,6 +66,52 @@ export function buildSourcingKoldInfoCsv(rows: CandidateRow[]): { csv: string; c
   return { csv: buildKoldInfoCsv(out), count: out.length, skipped };
 }
 
+/** Split a freeform location ("Dallas, Texas, United States", "Dallas, TX",
+ *  "Greater Dallas Area") into a best-effort {city, state} for the DB filter query. */
+export function splitLocation(loc: string | undefined): { city: string; state: string } {
+  const raw = (loc || "").trim();
+  if (!raw) return { city: "", state: "" };
+  const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  const clean = (s: string) => s.replace(/\b(greater|metropolitan|metro|area|region|the|and|surrounding)\b/gi, "").replace(/[-/].*$/, "").replace(/\s+/g, " ").trim();
+  let city = clean(parts[0] || "");
+  let state = "";
+  for (let i = 1; i < parts.length; i++) {
+    const p = parts[i];
+    if (/united states|usa|u\.s\.|america|canada|uk|united kingdom/i.test(p)) continue;
+    state = p; break;
+  }
+  return { city, state };
+}
+
+/**
+ * Build the KoldInfo DATABASE-lookup CSV (People DB + Business Email DB, name + city/state) —
+ * the door that needs NO LinkedIn URL, so it reaches candidates the LinkedIn-URL enrichment
+ * cannot. Only rows still missing an email OR a phone, and only rows we can identify by name.
+ * Carries city/state (parsed from the candidate's location, else the run's) so the DB filter
+ * can disambiguate the right person. Rows already holding an email AND a phone are `skipped`.
+ */
+export function buildKoldInfoDbCsv(
+  rows: CandidateRow[],
+  runLocation?: string,
+): { csv: string; count: number; skipped: number } {
+  const header = ["ros_id", "full_name", "company", "title", "city", "state"];
+  const csvCell = (v: string) => { const s = (v ?? "").replace(/\r?\n/g, " ").trim(); return /[",]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const lines = [header.join(",")];
+  let count = 0, skipped = 0;
+  const runLoc = splitLocation(runLocation);
+  for (const c of rows) {
+    if ((c.email || "").trim() && (c.phone || "").trim()) { skipped++; continue; }
+    const fullName = (c.fullName || "").trim();
+    if (!fullName) { skipped++; continue; }
+    const loc = splitLocation(c.location);
+    const city = loc.city || runLoc.city;
+    const state = loc.state || runLoc.state;
+    lines.push([sourcingKoldId(c), fullName, (c.company || "").trim(), (c.title || "").trim(), city, state].map(csvCell).join(","));
+    count++;
+  }
+  return { csv: lines.join("\n") + "\n", count, skipped };
+}
+
 export interface SourcingKoldMerge {
   /** Result rows parseKoldInfoCsv could read (rows with an email or a phone). */
   parsed: number;

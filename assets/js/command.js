@@ -9132,6 +9132,8 @@
       '.jd-table a{color:var(--brand-2);text-decoration:none}.jd-table a:hover{text-decoration:underline}' +
       '.jd-run{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}.jd-run:last-child{border-bottom:0}' +
       '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}' +
+      '.jd-run-main{display:flex;align-items:center;gap:10px;min-width:0}' +
+      '.jd-pick{flex:0 0 auto;width:15px;height:15px;margin:0;accent-color:var(--accent,#2e5bd7);cursor:pointer}' +
       '@media (max-width:760px){.jd-run{flex-direction:column;align-items:stretch}.jd-run-actions{justify-content:flex-start}}' +
       '.jd-depth{border:1px solid var(--border-strong);border-radius:12px;background:var(--bg-soft);padding:14px 16px;margin-top:14px}' +
       '.jd-depth-h{font-weight:600;font-size:13.5px;color:var(--text)}' +
@@ -9233,7 +9235,9 @@
       '<div id="jdPlan"></div>' +
       '<div id="jdResults"></div>' +
       '<div class="card">' +
-        '<div class="jd-cardhead"><h3 style="margin:0">Your saved candidate lists</h3></div>' +
+        '<div class="jd-cardhead"><h3 style="margin:0">Your saved candidate lists</h3>' +
+          '<button class="btn btn-ghost btn-sm" id="jdCombine" disabled title="Ran the same role a few times? Tick two or more lists below and combine them into one master list. Duplicates merge automatically and contact info found on any list is kept, so nobody slips through the cracks.">Combine lists</button>' +
+        '</div>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
     function msg(t) { var m = $("#jdMsg"); if (m) m.textContent = t || ""; }
@@ -9271,17 +9275,32 @@
     function renderResults() {
       var host = $("#jdResults"); if (!host) return;
       if (!state.candidates.length) { host.innerHTML = ""; return; }
-      var rows = state.candidates.slice(0, 300).map(function (c) {
-        return '<tr><td>' + c.fitScore + '</td><td>' + esc(c.fullName) + '</td><td>' + esc(c.title || c.headline || "") +
-          '</td><td>' + esc(c.company || "") + '</td><td>' + esc(c.location || "") +
-          (c.outOfArea ? ' <span class="muted">(out of area)</span>' : '') + '</td>' +
-          '<td>' + (c.linkedinUrl ? '<a href="' + esc(c.linkedinUrl) + '" target="_blank" rel="noopener">view</a>' : '') + '</td></tr>';
-      }).join("");
-      host.innerHTML = '<div class="card"><h3>Ranked candidates · ' + state.candidates.length + '</h3>' +
+      function candTable(list, limit) {
+        var rows = list.slice(0, limit).map(function (c) {
+          return '<tr><td>' + c.fitScore + '</td><td>' + esc(c.fullName) + '</td><td>' + esc(c.title || c.headline || "") +
+            '</td><td>' + esc(c.company || "") + '</td><td>' + esc(c.location || "") + '</td>' +
+            '<td>' + (c.linkedinUrl ? '<a href="' + esc(c.linkedinUrl) + '" target="_blank" rel="noopener">view</a>' : '') + '</td></tr>';
+        }).join("");
+        return '<div class="jd-tablewrap"><table class="jd-table"><thead><tr><th>Fit</th><th>Name</th><th>Title</th><th>Company</th><th>Location</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+          (list.length > limit ? '<p class="muted">Showing top ' + limit + ' of ' + list.length + '. Save to keep the full set.</p>' : '');
+      }
+      // TWO SEPARATE LISTS on a location-pinned search: the in-area list is the real
+      // result; anyone stating a different location sits in its own clearly labeled
+      // block underneath, never mixed in.
+      var inArea = state.candidates.filter(function (c) { return !c.outOfArea; });
+      var outArea = state.candidates.filter(function (c) { return c.outOfArea; });
+      var html = '<div class="card">' +
+        '<h3>' + (outArea.length ? 'Within target area · ' + inArea.length : 'Ranked candidates · ' + state.candidates.length) + '</h3>' +
         (state.warnings.length ? '<p class="muted">' + esc(state.warnings.join(" · ")) + '</p>' : '') +
-        '<div class="jd-tablewrap"><table class="jd-table"><thead><tr><th>Fit</th><th>Name</th><th>Title</th><th>Company</th><th>Location</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-        (state.candidates.length > 300 ? '<p class="muted">Showing top 300 of ' + state.candidates.length + '. Save to keep the full set.</p>' : '') +
+        (inArea.length ? candTable(inArea, 300) : '<p class="muted">No candidates inside the target area cleared the bar this run. Widen the location or run again.</p>') +
       '</div>';
+      if (outArea.length) {
+        html += '<div class="card"><h3>Outside target area · ' + outArea.length + '</h3>' +
+          '<p class="muted">These people match the role but state a location outside the target area. They are kept separate and never mixed into the in-area list.</p>' +
+          candTable(outArea, 100) +
+        '</div>';
+      }
+      host.innerHTML = html;
     }
 
     function loadRuns() {
@@ -9297,12 +9316,16 @@
         if (!runs.length) { host.innerHTML = warn + '<p class="muted">No saved lists yet. Fill in the role above and press Initiate Search; the finished list lands here automatically.</p>'; return; }
         host.innerHTML = warn + runs.map(function (r) {
           var n = r.candidates ? r.candidates.length : 0;
+          var outN = (r.candidates || []).filter(function (c) { return c.outOfArea; }).length;
           var urls = (r.candidates || []).filter(function (c) { return c.linkedinUrl; }).length;
           var vetted = (r.candidates || []).filter(function (c) { return typeof c.verifiedScore === "number"; }).length;
-          return '<div class="jd-run"><div><b>' + esc(r.name) + '</b> <span class="muted">· ' +
-            (r.location ? (esc(r.location) + ' · ') : '') + n + ' candidates · ' + urls + ' with LinkedIn URL' +
+          return '<div class="jd-run"><div class="jd-run-main">' +
+            '<input type="checkbox" class="jd-pick" data-pick="' + esc(r.id) + '" title="Tick lists to combine them into one" />' +
+            '<div><b>' + esc(r.name) + '</b> <span class="muted">· ' +
+            (r.location ? (esc(r.location) + ' · ') : '') +
+            (outN ? ((n - outN) + ' in area + ' + outN + ' out of area') : (n + ' candidates')) + ' · ' + urls + ' with LinkedIn URL' +
             (vetted ? (' · ' + vetted + ' deep-vetted') : '') +
-            (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates · <a href="#prospects" data-openlist="' + esc(r.promotedListId || "") + '">Open in Candidates →</a>') : '') + '</span></div>' +
+            (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates · <a href="#prospects" data-openlist="' + esc(r.promotedListId || "") + '">Open in Candidates →</a>') : '') + '</span></div></div>' +
             '<div class="jd-run-actions">' +
               '<span class="jd-vetctl" title="Deep-vet reads each candidate\'s full career history against the role and returns a verified fit score and verdict. The number picks how many from the top of this list.">Deep-vet top ' +
                 '<input type="number" class="jd-vettop" min="1" max="200" value="' + Math.min(25, Math.max(1, n)) + '">' +
@@ -9316,6 +9339,8 @@
         }).join("");
         // Live per-list cost estimate next to each Deep-vet control.
         Array.prototype.forEach.call(host.querySelectorAll(".jd-vettop"), updateVetCostFor);
+        // Re-render clears the combine ticks; reset the button to match.
+        syncCombine();
       }).catch(function () { var host = $("#jdRuns"); if (host) host.innerHTML = '<p class="muted">Could not load saved lists.</p>'; });
     }
 
@@ -9392,24 +9417,43 @@
       showProgress('Enriching "' + ((arun && arun.name) || "the list") + '"', 60 + aRows * 2, "Working…");
       var kold = { emails: 0, phones: 0 };
       function stageLaxis() { runLaxisChain(aid, aBtn, "Enrich", kold); }
+      // Rung 2 of the free KoldInfo pass: the name + city/state DB lookup. It needs no
+      // LinkedIn URL, so it fills the candidates the LinkedIn-URL enrichment could not.
+      // Its hits ADD to the LinkedIn rung's before the chain hands off to Laxis. Any
+      // failure or "nothing to do" just falls through to Laxis (free-first preserved).
+      function pollKoldDb() {
+        send("/sourcing", "POST", { action: "koldinfoDbStatus", id: aid }).then(function (s) {
+          if (!s.ok) { stageLaxis(); return; }
+          if (!s.data.done) { setTimeout(pollKoldDb, 10000); return; }
+          var m = (s.data.status === "error") ? {} : (s.data.merged || {});
+          kold.emails += m.emails || 0; kold.phones += m.phones || 0;
+          stageLaxis();
+        }).catch(function () { stageLaxis(); });
+      }
+      function stageKoldDb() {
+        send("/sourcing", "POST", { action: "koldinfoDbEnrich", id: aid }).then(function (r) {
+          if (!r.ok || !r.data || r.data.nothingMissing || r.data.submitted === false) { stageLaxis(); return; }
+          setTimeout(pollKoldDb, 8000);
+        }).catch(function () { stageLaxis(); });
+      }
       function pollKold() {
         send("/sourcing", "POST", { action: "koldinfoStatus", id: aid }).then(function (s) {
-          if (!s.ok) { stageLaxis(); return; }
+          if (!s.ok) { stageKoldDb(); return; }
           if (!s.data.done) { setTimeout(pollKold, 10000); return; }
           var m = (s.data.status === "error") ? {} : (s.data.merged || {});
           kold.emails = m.emails || 0; kold.phones = m.phones || 0;
-          stageLaxis();
-        }).catch(function () { stageLaxis(); });
+          stageKoldDb();
+        }).catch(function () { stageKoldDb(); });
       }
       send("/sourcing", "POST", { action: "koldinfoEnrich", id: aid }).then(function (r) {
         if (!r.ok) {
           var err = (r.data && r.data.error) || r.status;
-          if (err === "koldinfo_worker_not_configured") { stageLaxis(); return; }
+          if (err === "koldinfo_worker_not_configured") { stageKoldDb(); return; }
           aBtn.disabled = false; aBtn.textContent = "Enrich";
           finishProgress("Enrich could not start");
           alert("Enrich failed to start: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
         }
-        if (r.data.nothingMissing) { stageLaxis(); return; }
+        if (r.data.nothingMissing) { stageKoldDb(); return; }
         setTimeout(pollKold, 8000);
       }).catch(function () {
         aBtn.disabled = false; aBtn.textContent = "Enrich";
@@ -9776,6 +9820,73 @@
     // Per-list deep-vet cost pills live inside #jdRuns (rows re-render), so delegate.
     $("#jdRuns").addEventListener("input", function (e) {
       if (e.target && e.target.classList && e.target.classList.contains("jd-vettop")) updateVetCostFor(e.target);
+    });
+
+    /* ---- Combine lists: tick 2+ saved lists, merge into ONE deduped master list ----
+       For the "I ran the same role three slightly different ways" case: duplicates
+       merge by the same person key the server uses everywhere (LinkedIn URL, else
+       name+company), the strongest row wins, and contact info found on ANY of the
+       lists is kept. Enrich once, send once, nobody slips through the cracks. */
+    function pickedIds() {
+      var host = $("#jdRuns"); if (!host) return [];
+      return Array.prototype.map.call(host.querySelectorAll(".jd-pick:checked"), function (el) { return el.getAttribute("data-pick"); });
+    }
+    function syncCombine() {
+      var btn = $("#jdCombine"); if (!btn) return;
+      var n = pickedIds().length;
+      btn.disabled = n < 2;
+      btn.textContent = n >= 2 ? ("Combine " + n + " lists") : "Combine lists";
+    }
+    $("#jdRuns").addEventListener("change", function (e) {
+      if (e.target && e.target.classList && e.target.classList.contains("jd-pick")) syncCombine();
+    });
+    var combineBtn = $("#jdCombine");
+    if (combineBtn) combineBtn.addEventListener("click", function () {
+      var ids = pickedIds(); if (ids.length < 2) return;
+      var chosen = (state.runs || []).filter(function (r) { return ids.indexOf(r.id) >= 0; });
+      if (chosen.length < 2) return;
+      // Preview with the same dedupe key the server uses, so the numbers match.
+      var seen = {}; var total = 0;
+      chosen.forEach(function (r) { (r.candidates || []).forEach(function (c) {
+        total++;
+        var k = (c.linkedinUrl || ((c.fullName || "") + "|" + (c.company || ""))).toLowerCase().replace(/\/+$/, "");
+        seen[k] = 1;
+      }); });
+      var unique = Object.keys(seen).length;
+      var biggest = chosen.reduce(function (a, r) { return ((r.candidates || []).length > ((a.candidates || []).length) ? r : a); }, chosen[0]);
+      var defName = ((biggest && biggest.name) || "Candidate search") + " (combined)";
+      openModal("Combine " + chosen.length + " lists",
+        "Merges the ticked lists into one master list. The same person on two lists becomes one row (best score wins), and an email or phone found on any list is kept.",
+        '<label class="fld"><span>Combined list name</span>' +
+          '<input id="combineName" type="text" value="' + esc(defName) + '" /></label>' +
+        '<div class="muted" style="font-size:12.5px;margin:6px 0 2px">' +
+          chosen.length + ' lists · ' + total + ' rows · about ' + unique + ' unique candidates after merging.</div>' +
+        '<label style="display:flex;gap:8px;align-items:center;justify-content:flex-start;text-align:left;font-size:13px;margin-top:8px"><input type="checkbox" id="combineDelete" checked style="flex:0 0 auto;width:auto;margin:0" /><span>Delete the original lists after combining (everything is kept in the combined list)</span></label>' +
+        '<div class="modal-foot"><button class="btn btn-primary" id="combineGo">Combine →</button></div>',
+        function (card, close) {
+          var nameEl = card.querySelector("#combineName"); if (nameEl) nameEl.focus();
+          card.querySelector("#combineGo").addEventListener("click", function () {
+            var nm = (nameEl && nameEl.value.trim()) || defName;
+            var delEl = card.querySelector("#combineDelete");
+            var goBtn = card.querySelector("#combineGo");
+            goBtn.disabled = true; goBtn.textContent = "Combining…";
+            send("/sourcing", "POST", { action: "merge", ids: ids, name: nm, deleteSources: !!(delEl && delEl.checked) }).then(function (r) {
+              if (!r.ok) {
+                goBtn.disabled = false; goBtn.textContent = "Combine →";
+                alert("Combine failed: " + ((r.data && (r.data.detail || r.data.error)) || r.status)); return;
+              }
+              close();
+              var d = r.data || {};
+              toast('Combined ' + (d.sources || chosen.length) + ' lists into "' + nm + '": ' + (d.total || 0) + ' unique candidates' +
+                (d.overlap ? (', ' + d.overlap + ' duplicates merged') : '') +
+                ((d.keptBusy && d.keptBusy.length) ? ('. Kept "' + d.keptBusy.join('", "') + '" (enrichment still running there)') : '') + '.');
+              loadRuns(); syncCombine();
+            }).catch(function () {
+              goBtn.disabled = false; goBtn.textContent = "Combine →";
+              alert("Could not reach the server.");
+            });
+          });
+        });
     });
     var capEl2 = $("#jdCap"); if (capEl2) capEl2.addEventListener("input", updateRunCost);
     var planHost = $("#jdPlan");

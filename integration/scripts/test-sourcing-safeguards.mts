@@ -65,5 +65,16 @@ const dup = row("Ida Q", "VP Sales", "Austin, Texas");
 const r5 = rescueEmptyRun([dup, { ...dup }], [], icp, 10, 500);
 ok(!!r5 && r5.candidates.length === 1, "duplicate profiles dedupe in rescue", r5?.candidates.length);
 
+// 2f) fit-bar rescue preserves the out-of-area mark, so the UI's location split
+// ("Within target area" vs "Outside target area") survives even a rescued run.
+const markedBuf = [
+  Object.assign(row("Jon Wu", "Sales Manager", "Seattle, Washington"), { fitScore: 30, fitReasons: ["x"], outOfArea: true }),
+  Object.assign(row("Kay Orr", "Sales Manager", "New York, NY"), { fitScore: 28, fitReasons: ["x"] }),
+];
+const r6 = rescueEmptyRun([], markedBuf, icp, 90, 500);
+ok(!!r6 && r6.candidates.find((c) => c.fullName === "Jon Wu")?.outOfArea === true
+       && !r6.candidates.find((c) => c.fullName === "Kay Orr")?.outOfArea,
+   "rescued rows keep their in/out-of-area marks for the split lists");
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -102,5 +102,10 @@ export async function reRankCandidates(candidates: CandidateRow[], icp: Candidat
   }
   // Re-sort the slice by LLM score (fall back to the rule score when one is missing).
   slice.sort((a, b) => (b.llmScore ?? b.fitScore) - (a.llmScore ?? a.fitScore));
-  return { candidates: [...slice, ...rest], ranked: scores.length };
+  // Keep the location split intact: on a geo-pinned search the in-area block always
+  // precedes the out-of-area block, so the re-rank can't hoist an out-of-area person
+  // above the locals (order within each block is the LLM order).
+  const inArea = slice.filter((c) => !c.outOfArea);
+  const outArea = slice.filter((c) => c.outOfArea);
+  return { candidates: [...inArea, ...outArea, ...rest], ranked: scores.length };
 }

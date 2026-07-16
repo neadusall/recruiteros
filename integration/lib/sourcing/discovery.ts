@@ -26,10 +26,15 @@
  * If no engine is configured the run returns an empty list plus an explicit warning —
  * it never fabricates candidates.
  *
- * NEVER-EMPTY SAFEGUARD: when engines DO find people but the strict-location drop or
- * the fit bar would discard every one of them, rescueEmptyRun() brings the best of
- * them back, marked (`outOfArea`) and explained in a warning, instead of returning a
- * zero-row result for a run that actually found profiles.
+ * LOCATION SPLIT: when the recruiter pinned a hiring area (strictGeo), the result is
+ * TWO blocks — the in-area list first (people inside the target geos or with no stated
+ * location), then a bounded "outside target area" appendix (each row marked
+ * `outOfArea`), never interleaved. Nothing found is silently dropped.
+ *
+ * NEVER-EMPTY SAFEGUARD: when engines DO find people but the fit bar would discard
+ * every one of them, rescueEmptyRun() brings the strongest back, explained in a
+ * warning, instead of returning a zero-row result for a run that actually found
+ * profiles.
  */
 
 import type { CandidateICP, CandidateRow, DiscoveryOptions, SourcingQuery } from "./types";
@@ -494,34 +499,36 @@ export async function runDiscovery(
   }
 
   const byKey = new Map<string, CandidateRow>();
+  // TWO SEPARATE LISTS when the recruiter pinned a hiring area: byKey holds people
+  // inside the target geos (or with no stated location), outByKey holds people who
+  // state a DIFFERENT location. The out-of-area group is returned as its own marked
+  // block AFTER the in-area block, never mixed into it, and never silently dropped.
+  const outByKey = new Map<string, CandidateRow>();
+  const OUT_CAP = Math.min(300, cap); // the out-of-area block is a bounded appendix, not the list
   let scanned = 0;
-  let geoDropped = 0;
-  // SAFEGUARD buffers: nothing an engine found is thrown away irrecoverably. If the
-  // run would otherwise end EMPTY, rescueEmptyRun() brings the best of these back
-  // (marked), so a paid search can never return zero while profiles were found.
-  const geoBuffer: CandidateRow[] = []; // strict-location drops, un-scored
+  // SAFEGUARD buffer: sub-fit-bar rows are kept so a run that found people can never
+  // end empty (rescueEmptyRun brings the strongest back, explained in a warning).
   const fitBuffer: CandidateRow[] = []; // scored below the fit bar (top slice kept)
 
-  // Score, threshold, and dedupe a batch of raw rows into byKey. Returns how many
-  // cleared the fit threshold (used to gauge per-query saturation). Shared by every engine.
+  // Score, threshold, and dedupe a batch of raw rows into byKey/outByKey. Returns how
+  // many IN-AREA rows cleared the fit threshold (per-query saturation gauge) — out-of-
+  // area rows don't count, so the engines keep digging for locals. Shared by every engine.
   function absorb(rows: CandidateRow[], group: string): number {
     let kept = 0;
     for (const r of rows) {
       // Cross-run "seen" memory: skip anyone already surfaced in a prior run (fresh-only mode).
       if (opts.excludeKeys && opts.excludeKeys.has(keyOf(r))) continue;
       scanned++;
-      // Strict location: the recruiter pinned a hiring area, so a row that states a
-      // DIFFERENT location is dropped outright (unknown locations are kept — the
-      // scorer stays neutral on those and enrichment can resolve them later).
-      if (opts.strictGeo && icp.geos && icp.geos.length && inTargetGeo(r.location, icp.geos) === false) {
-        geoDropped++;
-        r.sourceGroup = r.sourceGroup || group;
-        if (geoBuffer.length < 2000) geoBuffer.push(r);
-        continue;
-      }
       r.sourceGroup = r.sourceGroup || group;
       const sc = scoreCandidate(r, icp);
       r.fitScore = sc.fitScore; r.fitReasons = sc.fitReasons;
+      // Strict location: a row that states a DIFFERENT location is marked for the
+      // separate out-of-area list (unknown locations stay in the main list — the
+      // scorer is neutral on those and enrichment can resolve them later).
+      const outside = Boolean(
+        opts.strictGeo && icp.geos && icp.geos.length && inTargetGeo(r.location, icp.geos) === false,
+      );
+      if (outside) r.outOfArea = true; // marked BEFORE buffering so rescued rows stay labeled
       if (r.fitScore < minFit) {
         // Keep the strongest sub-threshold rows for the empty-run rescue (0 = disqualified, never kept).
         if (r.fitScore > 0) {
@@ -529,6 +536,14 @@ export async function runDiscovery(
           if (fitBuffer.length > 400) {
             fitBuffer.sort((a, b) => b.fitScore - a.fitScore).length = 200;
           }
+        }
+        continue;
+      }
+      if (outside) {
+        if (outByKey.size < OUT_CAP * 2) {
+          const k = keyOf(r);
+          const prev = outByKey.get(k);
+          if (!prev || r.fitScore > prev.fitScore) outByKey.set(k, r);
         }
         continue;
       }
@@ -655,24 +670,36 @@ export async function runDiscovery(
     warnings.push(`google_budget_reached: spent the free pass on ${googleUsed} queries this run; remaining queries used paid engines`);
   }
 
-  let candidates = Array.from(byKey.values())
+  // TWO-BLOCK RESULT: the in-area list is THE list; the out-of-area list is a bounded,
+  // clearly labeled appendix after it. They are never interleaved, so "top N" actions
+  // (deep-vet, promote order) always spend on the in-area people first.
+  let inList = Array.from(byKey.values())
     .sort((a, b) => b.fitScore - a.fitScore)
     .slice(0, cap);
+  let outList = Array.from(outByKey.values())
+    .sort((a, b) => b.fitScore - a.fitScore)
+    .slice(0, OUT_CAP);
 
-  // NEVER-EMPTY SAFEGUARD: engines found people but every one was filtered out by us.
-  // Rescue the best of them (marked) instead of returning a bug-shaped zero.
-  let geoRescued = false;
-  if (!candidates.length && (geoBuffer.length || fitBuffer.length)) {
-    const rescue = rescueEmptyRun(geoBuffer, fitBuffer, icp, minFit, cap);
+  // NEVER-EMPTY SAFEGUARD: engines found people but every one scored under the fit
+  // bar. Rescue the strongest (they keep their in/out-of-area marks) instead of
+  // returning a bug-shaped zero.
+  if (!inList.length && !outList.length && fitBuffer.length) {
+    const rescue = rescueEmptyRun([], fitBuffer, icp, minFit, cap);
     if (rescue) {
-      candidates = rescue.candidates;
-      geoRescued = candidates.some((r) => r.outOfArea);
+      inList = rescue.candidates.filter((r) => !r.outOfArea);
+      outList = rescue.candidates.filter((r) => r.outOfArea);
       warnings.push(rescue.note);
     }
   }
 
-  if (geoDropped && !geoRescued) {
-    warnings.push(`strict_location: dropped ${geoDropped} candidate(s) located outside the target geos (turn on "Include out-of-area" in Advanced controls to keep them)`);
+  const candidates = inList.concat(outList);
+
+  if (outList.length) {
+    warnings.push(
+      inList.length
+        ? `${outList.length} matches outside the target area are listed separately below the in-area results`
+        : `Nobody found stated a location inside the target area, so all ${outList.length} matches are in the "Outside target area" list. Widen the location (or check "Include out-of-area" in Advanced controls) to search without the location split.`,
+    );
   }
 
   // ZERO-RESULT DIAGNOSIS: when a run STILL comes back empty after the rescue, say WHY

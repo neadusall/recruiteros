@@ -9271,17 +9271,32 @@
     function renderResults() {
       var host = $("#jdResults"); if (!host) return;
       if (!state.candidates.length) { host.innerHTML = ""; return; }
-      var rows = state.candidates.slice(0, 300).map(function (c) {
-        return '<tr><td>' + c.fitScore + '</td><td>' + esc(c.fullName) + '</td><td>' + esc(c.title || c.headline || "") +
-          '</td><td>' + esc(c.company || "") + '</td><td>' + esc(c.location || "") +
-          (c.outOfArea ? ' <span class="muted">(out of area)</span>' : '') + '</td>' +
-          '<td>' + (c.linkedinUrl ? '<a href="' + esc(c.linkedinUrl) + '" target="_blank" rel="noopener">view</a>' : '') + '</td></tr>';
-      }).join("");
-      host.innerHTML = '<div class="card"><h3>Ranked candidates · ' + state.candidates.length + '</h3>' +
+      function candTable(list, limit) {
+        var rows = list.slice(0, limit).map(function (c) {
+          return '<tr><td>' + c.fitScore + '</td><td>' + esc(c.fullName) + '</td><td>' + esc(c.title || c.headline || "") +
+            '</td><td>' + esc(c.company || "") + '</td><td>' + esc(c.location || "") + '</td>' +
+            '<td>' + (c.linkedinUrl ? '<a href="' + esc(c.linkedinUrl) + '" target="_blank" rel="noopener">view</a>' : '') + '</td></tr>';
+        }).join("");
+        return '<div class="jd-tablewrap"><table class="jd-table"><thead><tr><th>Fit</th><th>Name</th><th>Title</th><th>Company</th><th>Location</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+          (list.length > limit ? '<p class="muted">Showing top ' + limit + ' of ' + list.length + '. Save to keep the full set.</p>' : '');
+      }
+      // TWO SEPARATE LISTS on a location-pinned search: the in-area list is the real
+      // result; anyone stating a different location sits in its own clearly labeled
+      // block underneath, never mixed in.
+      var inArea = state.candidates.filter(function (c) { return !c.outOfArea; });
+      var outArea = state.candidates.filter(function (c) { return c.outOfArea; });
+      var html = '<div class="card">' +
+        '<h3>' + (outArea.length ? 'Within target area · ' + inArea.length : 'Ranked candidates · ' + state.candidates.length) + '</h3>' +
         (state.warnings.length ? '<p class="muted">' + esc(state.warnings.join(" · ")) + '</p>' : '') +
-        '<div class="jd-tablewrap"><table class="jd-table"><thead><tr><th>Fit</th><th>Name</th><th>Title</th><th>Company</th><th>Location</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-        (state.candidates.length > 300 ? '<p class="muted">Showing top 300 of ' + state.candidates.length + '. Save to keep the full set.</p>' : '') +
+        (inArea.length ? candTable(inArea, 300) : '<p class="muted">No candidates inside the target area cleared the bar this run. Widen the location or run again.</p>') +
       '</div>';
+      if (outArea.length) {
+        html += '<div class="card"><h3>Outside target area · ' + outArea.length + '</h3>' +
+          '<p class="muted">These people match the role but state a location outside the target area. They are kept separate and never mixed into the in-area list.</p>' +
+          candTable(outArea, 100) +
+        '</div>';
+      }
+      host.innerHTML = html;
     }
 
     function loadRuns() {
@@ -9297,10 +9312,12 @@
         if (!runs.length) { host.innerHTML = warn + '<p class="muted">No saved lists yet. Fill in the role above and press Initiate Search; the finished list lands here automatically.</p>'; return; }
         host.innerHTML = warn + runs.map(function (r) {
           var n = r.candidates ? r.candidates.length : 0;
+          var outN = (r.candidates || []).filter(function (c) { return c.outOfArea; }).length;
           var urls = (r.candidates || []).filter(function (c) { return c.linkedinUrl; }).length;
           var vetted = (r.candidates || []).filter(function (c) { return typeof c.verifiedScore === "number"; }).length;
           return '<div class="jd-run"><div><b>' + esc(r.name) + '</b> <span class="muted">· ' +
-            (r.location ? (esc(r.location) + ' · ') : '') + n + ' candidates · ' + urls + ' with LinkedIn URL' +
+            (r.location ? (esc(r.location) + ' · ') : '') +
+            (outN ? ((n - outN) + ' in area + ' + outN + ' out of area') : (n + ' candidates')) + ' · ' + urls + ' with LinkedIn URL' +
             (vetted ? (' · ' + vetted + ' deep-vetted') : '') +
             (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates · <a href="#prospects" data-openlist="' + esc(r.promotedListId || "") + '">Open in Candidates →</a>') : '') + '</span></div>' +
             '<div class="jd-run-actions">' +

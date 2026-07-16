@@ -23,13 +23,16 @@ const http = require("http");
 const crypto = require("crypto");
 const { runJob, selfTest, CONFIG } = require("./laxis-flow");
 const koldinfo = require("./koldinfo-flow");
+const koldinfoDb = require("./koldinfo-db-flow");
 const store = require("./store");
 
 // Which browser flow runs a job. "laxis" is the default so every pre-`kind` caller
 // (and every job persisted before this field existed) behaves exactly as before.
+// "koldinfo" = LinkedIn-URL enrichment; "koldinfo-db" = name + city/state DB lookup.
 const FLOWS = {
   laxis: { runJob, selfTest },
   koldinfo: { runJob: koldinfo.runJob, selfTest: koldinfo.selfTest },
+  "koldinfo-db": { runJob: koldinfoDb.runJob, selfTest: koldinfoDb.selfTest },
 };
 
 const PORT = Number(process.env.PORT || 3000);
@@ -229,7 +232,7 @@ const server = http.createServer(async (req, res) => {
       try { parsed = JSON.parse(raw); } catch { return send(res, 422, { error: "invalid_json" }); }
       const csv = parsed && parsed.csv;
       if (typeof csv !== "string" || !csv.trim()) return send(res, 422, { error: "missing_csv" });
-      const kind = parsed.kind === "koldinfo" ? "koldinfo" : "laxis";
+      const kind = FLOWS[parsed.kind] ? parsed.kind : "laxis";
       // Idempotent submit: if an identical CSV is already queued/running (a retried POST
       // after a lost response, say), hand back the SAME job instead of double-grabbing.
       // The kind is part of the identity — the same CSV may legitimately go to both vendors.
