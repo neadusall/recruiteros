@@ -224,4 +224,10 @@ export interface DiscoveryOptions {
   engines?: Array<"google" | "searx" | "rapidapi" | "scraper">;
   /** Candidate keys (see candidateKey) to skip — the cross-run "seen" set for fresh-only runs. */
   excludeKeys?: Set<string>;
+  /**
+   * Drop candidates whose stated location is OUTSIDE the ICP geos (rows with no
+   * location are kept — snippets often omit it). On by default when the recruiter
+   * pinned an explicit hiring location.
+   */
+  strictGeo?: boolean;
 }

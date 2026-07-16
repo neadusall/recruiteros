@@ -40,6 +40,39 @@ function anyPhrase(text: string, needles: string[]): string | null {
   return null;
 }
 
+/** "City, ST" state abbreviations expanded to full names so "Brooklyn, NY" matches a
+ *  target geo of "New York". Only expands after a comma (the standard location shape),
+ *  so prose words like "or"/"in"/"me" are never touched. */
+const US_STATE_FULL: Record<string, string> = {
+  al: "alabama", ak: "alaska", az: "arizona", ar: "arkansas", ca: "california", co: "colorado",
+  ct: "connecticut", de: "delaware", fl: "florida", ga: "georgia", hi: "hawaii", id: "idaho",
+  il: "illinois", in: "indiana", ia: "iowa", ks: "kansas", ky: "kentucky", la: "louisiana",
+  me: "maine", md: "maryland", ma: "massachusetts", mi: "michigan", mn: "minnesota",
+  ms: "mississippi", mo: "missouri", mt: "montana", ne: "nebraska", nv: "nevada",
+  nh: "new hampshire", nj: "new jersey", nm: "new mexico", ny: "new york",
+  nc: "north carolina", nd: "north dakota", oh: "ohio", ok: "oklahoma", or: "oregon",
+  pa: "pennsylvania", ri: "rhode island", sc: "south carolina", sd: "south dakota",
+  tn: "tennessee", tx: "texas", ut: "utah", vt: "vermont", va: "virginia", wa: "washington",
+  wv: "west virginia", wi: "wisconsin", wy: "wyoming",
+};
+function expandUsStateAbbrevs(text: string): string {
+  return text.replace(/,\s*([a-z]{2})\b/g, (m, ab: string) => (US_STATE_FULL[ab] ? ", " + US_STATE_FULL[ab] + " " + ab : m));
+}
+
+/**
+ * Is this candidate's stated location inside the target geos?
+ *  true  = matches a target geo · false = states a DIFFERENT place · undefined = no
+ *  location on the row (unknowable, treat as neutral). Shared by the scorer's geo
+ *  component and discovery's strict-location drop so both agree on what "local" means.
+ */
+export function inTargetGeo(location: string | undefined, geos: string[]): boolean | undefined {
+  const locText = expandUsStateAbbrevs((location || "").toLowerCase().trim());
+  if (!locText) return undefined;
+  if (!geos || !geos.length) return true;
+  const expandedGeos = geos.map((g) => expandUsStateAbbrevs(g.toLowerCase()));
+  return Boolean(anyPhrase(locText, expandedGeos));
+}
+
 /* ------------------------------------------------------------------ */
 /* Seniority bands                                                     */
 /* ------------------------------------------------------------------ */
@@ -157,12 +190,19 @@ export function scoreCandidate(row: CandidateRow, icp: CandidateICP): { fitScore
     if (ind) { score += 8; reasons.push(`Adjacent — in-industry (${ind})`); }
   }
 
-  /* 4. Geography (15). */
-  const locText = (row.location || "").toLowerCase();
-  const geo = anyPhrase(locText, icp.geos);
+  /* 4. Geography (15 bonus, and a REAL penalty for a known out-of-area location). */
+  const locText = expandUsStateAbbrevs((row.location || "").toLowerCase());
+  const geo = anyPhrase(locText, icp.geos.map((g) => expandUsStateAbbrevs(g.toLowerCase())));
   if (geo) { score += WEIGHTS.geo; reasons.push(`In-target geo (${geo})`); }
-  // Remote vs on-site is NOT a qualification signal — it neither adds nor subtracts.
-  // (A candidate outside the named geos simply earns no geo bonus; never penalized.)
+  else if (locText && icp.geos.length) {
+    // The candidate TELLS us where they are and it is not a target geo. For a
+    // location-pinned search that is disqualifying-adjacent, not neutral; without
+    // this, a strong title match anywhere in the country outranks a local.
+    score = Math.max(0, score - 18);
+    reasons.push(`Outside target geos (${row.location})`);
+  }
+  // A row with NO location stays neutral: snippets often omit it, and the person
+  // may still be local. Remote vs on-site is not a qualification signal either.
 
   /* 5. Domain / must-have signals (15). */
   let domain = 0;

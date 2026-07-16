@@ -22,7 +22,7 @@
 
 import { requireSession, body, ok, fail } from "../../../lib/api";
 import {
-  planSourcing, parseJobDescription, generateQueries, runDiscovery,
+  planSourcing, pinIcpLocation, parseJobDescription, generateQueries, runDiscovery,
   listSourcingRuns, saveSourcingRun, deleteSourcingRun, getSourcingRun, promoteSourcingRun,
   profileFetchConfigured, deepVetCandidate, refineIcp, draftJobDescription,
   vetBatchAvailable, submitVetBatch, retrieveVetBatch, collectVetBatch,
@@ -129,7 +129,7 @@ export async function POST(req: Request) {
   try {
     if (action === "plan") {
       if (!b?.jd) return fail("missing_jd", 422);
-      return ok(await planSourcing(b.jd));
+      return ok(await planSourcing(b.jd, b.location));
     }
 
     if (action === "draft") {
@@ -146,7 +146,9 @@ export async function POST(req: Request) {
 
     if (action === "run") {
       if (!b?.jd) return fail("missing_jd", 422);
-      const icp = await parseJobDescription(b.jd);
+      // A typed hiring location is ground truth: it pins the ICP's geos (the LLM parse
+      // otherwise drifts to a national metro list) and turns on the strict-location drop.
+      const icp = pinIcpLocation(await parseJobDescription(b.jd), b.location);
       const queries = generateQueries(icp);
       // Cross-run "seen" memory: fresh-only excludes anyone surfaced in prior runs.
       const excludeKeys = b.freshOnly === true ? await getSeenKeys(ws) : undefined;
@@ -154,6 +156,7 @@ export async function POST(req: Request) {
         cap: typeof b.cap === "number" ? b.cap : 500,
         minFit: typeof b.minFit === "number" ? b.minFit : 10,
         excludeKeys,
+        strictGeo: b.strictGeo !== false && Boolean(((b.location as string) || "").trim()),
       });
       // Remember who we surfaced so a later fresh-only run skips them.
       await addSeenKeys(ws, result.candidates.map(candKey));

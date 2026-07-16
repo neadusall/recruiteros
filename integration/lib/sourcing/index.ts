@@ -67,9 +67,12 @@ export interface SourcingPlan {
   note?: string;
 }
 
+export { pinIcpLocation } from "./pinLocation";
+import { pinIcpLocation } from "./pinLocation";
+
 /** Parse a JD and generate its search set in one call (no discovery yet). */
-export async function planSourcing(jd: string): Promise<SourcingPlan> {
-  const icp = await parseJobDescription(jd);
+export async function planSourcing(jd: string, location?: string): Promise<SourcingPlan> {
+  const icp = pinIcpLocation(await parseJobDescription(jd), location);
   const queries = generateQueries(icp);
   // Empty across the load-bearing fields means the profile couldn't be built from the
   // brief (e.g. the model returned unparseable output). Say so plainly rather than

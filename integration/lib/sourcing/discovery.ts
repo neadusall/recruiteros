@@ -28,7 +28,7 @@
  */
 
 import type { CandidateICP, CandidateRow, DiscoveryOptions, SourcingQuery } from "./types";
-import { scoreCandidate } from "./score";
+import { scoreCandidate, inTargetGeo } from "./score";
 import { scraperConfigured, scrapeSearchViaSidecar } from "../linkedin/scraperProvider";
 import { cred } from "../providers/http";
 
@@ -435,6 +435,7 @@ export async function runDiscovery(
 
   const byKey = new Map<string, CandidateRow>();
   let scanned = 0;
+  let geoDropped = 0;
 
   // Score, threshold, and dedupe a batch of raw rows into byKey. Returns how many
   // cleared the fit threshold (used to gauge per-query saturation). Shared by every engine.
@@ -444,6 +445,13 @@ export async function runDiscovery(
       // Cross-run "seen" memory: skip anyone already surfaced in a prior run (fresh-only mode).
       if (opts.excludeKeys && opts.excludeKeys.has(keyOf(r))) continue;
       scanned++;
+      // Strict location: the recruiter pinned a hiring area, so a row that states a
+      // DIFFERENT location is dropped outright (unknown locations are kept — the
+      // scorer stays neutral on those and enrichment can resolve them later).
+      if (opts.strictGeo && icp.geos && icp.geos.length && inTargetGeo(r.location, icp.geos) === false) {
+        geoDropped++;
+        continue;
+      }
       r.sourceGroup = r.sourceGroup || group;
       const sc = scoreCandidate(r, icp);
       r.fitScore = sc.fitScore; r.fitReasons = sc.fitReasons;
@@ -575,6 +583,10 @@ export async function runDiscovery(
     .sort((a, b) => b.fitScore - a.fitScore)
     .slice(0, cap);
 
+  if (geoDropped) {
+    warnings.push(`strict_location: dropped ${geoDropped} candidate(s) located outside the target geos (turn on "Include out-of-area" in Advanced controls to keep them)`);
+  }
+
   // ZERO-RESULT DIAGNOSIS: when a run comes back empty, say WHY in plain English at
   // the top of the warnings, so the recruiter sees the cause instead of a silent zero.
   if (!candidates.length) {
@@ -584,7 +596,8 @@ export async function runDiscovery(
     if (!useGoogle && engines.includes("google")) reasons.push("Google CSE is not configured (free 100/day pass is off)");
     if (!useSearx && engines.includes("searx")) reasons.push("the free SearXNG engine was unreachable");
     if (opts.excludeKeys?.size && scanned === 0) reasons.push(`Fresh only is ON and ${opts.excludeKeys.size} previously-surfaced people are being excluded (uncheck it to see the full list again)`);
-    if (scanned > 0) reasons.push(`${scanned} profiles were scanned but none scored above the fit threshold (${minFit})`);
+    if (geoDropped) reasons.push(`${geoDropped} found profiles were dropped for being outside the target geos (strict location)`);
+    if (scanned > geoDropped) reasons.push(`${scanned - geoDropped} profiles were scanned but none scored above the fit threshold (${minFit})`);
     warnings.unshift("empty_run: " + (reasons.length ? reasons.join("; ") : "no engine returned results"));
   }
 

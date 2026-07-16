@@ -9053,6 +9053,7 @@
           '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>Find candidates</button>' +
           '<span class="jd-cap muted">Scan up to <input id="jdCap" type="number" min="1" max="5000" value="500" title="Ceiling on candidates gathered per run. Not a minimum, runs return however many qualified people the search finds, up to this number."> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10" title="0 = show every profile the search finds (nothing filtered). Higher = keep only stronger matches. 10 is a wide net; 40+ is tight."></span>' +
           '<label class="jd-cap muted" title="Skip anyone this workspace already surfaced in past runs, surfaces fresh people (new market entrants) instead of repeats. Leave OFF for the full market; ON can return zero on a re-run because everyone was already seen."><input type="checkbox" id="jdFresh" style="width:auto;margin:0 4px 0 0;vertical-align:middle"> Fresh only</label>' +
+          '<label class="jd-cap muted" title="By default, when you set a City &amp; state the search DROPS anyone whose profile states a different location (people with no visible location are kept). Check this to keep out-of-area candidates too, e.g. for remote roles."><input type="checkbox" id="jdAnywhere" style="width:auto;margin:0 4px 0 0;vertical-align:middle"> Include out-of-area</label>' +
           '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
           '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>Save to JD Sourcing</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">Add to queue</button>' +
@@ -9510,7 +9511,7 @@
         state.location = jdLocLabel();
         goBtn.textContent = "Analyzing…";
         msg("Analyzing the brief into an ideal-candidate profile…");
-        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd) }).then(function (r) {
+        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location }).then(function (r) {
           if (!r.ok) throw { stage: "Analyze", r: r };
           state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
           $("#jdFind").disabled = false;
@@ -9524,7 +9525,7 @@
         goBtn.textContent = "Searching…";
         msg("");
         showProgress("Finding candidates", findEta(cap));
-        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), cap: cap, minFit: minFit, freshOnly: fresh }).then(function (r) {
+        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), cap: cap, minFit: minFit, freshOnly: fresh, location: state.location, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked) }).then(function (r) {
           if (!r.ok) { finishProgress("Search failed"); throw { stage: "Search", r: r }; }
           state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
           state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
@@ -9644,7 +9645,7 @@
       var name = $("#jdName").value.trim(), jd = $("#jdText").value.trim();
       if (!jd) { msg("Paste a job description to queue it."); return; }
       if (!name) name = "Sourcing list " + (state.queue.length + 1);
-      state.queue.push({ name: name, jd: jd });
+      state.queue.push({ name: name, jd: jd, location: jdLocLabel() });
       $("#jdName").value = ""; $("#jdText").value = "";
       state.jd = ""; state.icp = null; state.queries = []; state.candidates = []; state.warnings = [];
       $("#jdFind").disabled = true; $("#jdSave").disabled = true; renderPlan(); renderResults(); renderSteps();
@@ -9671,10 +9672,10 @@
         var idx = done + failed + 1;
         if (progEl) progEl.textContent = "Processing " + idx + "/" + total + ": " + item.name + " …";
         showProgress("Queue " + idx + "/" + total + ": " + item.name, findEta(cap));
-        send("/sourcing", "POST", { action: "run", jd: item.jd, cap: cap, minFit: minFit, freshOnly: !!($("#jdFresh") && $("#jdFresh").checked) }).then(function (r) {
+        send("/sourcing", "POST", { action: "run", jd: item.jd, cap: cap, minFit: minFit, freshOnly: !!($("#jdFresh") && $("#jdFresh").checked), location: item.location || "", strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked) }).then(function (r) {
           if (!r.ok || !r.data) { failed++; state.queue.shift(); renderQueue(); return next(); }
           var cands = r.data.candidates || [];
-          return send("/sourcing", "POST", { action: "save", name: item.name, jd: item.jd, icp: r.data.icp, queries: r.data.queries, candidates: cands, warnings: r.data.warnings }).then(function (s) {
+          return send("/sourcing", "POST", { action: "save", name: item.name, jd: item.jd, location: item.location || "", icp: r.data.icp, queries: r.data.queries, candidates: cands, warnings: r.data.warnings }).then(function (s) {
             if (s.ok) done++; else failed++;
             state.queue.shift(); renderQueue(); next();
           });
@@ -9688,7 +9689,7 @@
       var jd = $("#jdText").value.trim(); if (!jd) { msg("Paste a job description first."); return; }
       state.location = jdLocLabel();
       state.jd = jd; msg("Analyzing…");
-      send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(jd) }).then(function (r) {
+      send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(jd), location: state.location }).then(function (r) {
         if (!r.ok) { msg("Analyze failed: " + ((r.data && (r.data.detail || r.data.error)) || r.status)); return; }
         state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
         $("#jdFind").disabled = false; msg(""); renderPlan(); renderSteps(); updateRunCost();
@@ -9703,7 +9704,7 @@
       msg("");
       $("#jdFind").disabled = true;
       showProgress("Finding candidates", findEta(cap));
-      send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), cap: cap, minFit: minFit, freshOnly: fresh }).then(function (r) {
+      send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), cap: cap, minFit: minFit, freshOnly: fresh, location: state.location || jdLocLabel(), strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked) }).then(function (r) {
         $("#jdFind").disabled = false;
         if (!r.ok) { finishProgress("Search failed"); msg("Find failed: " + ((r.data && (r.data.detail || r.data.error)) || r.status)); return; }
         state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;

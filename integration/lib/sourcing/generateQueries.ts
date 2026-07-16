@@ -56,6 +56,10 @@ export function generateQueries(icp: CandidateICP, opts: { titleCap?: number; ge
   //    we don't have here (only the name). Until a name→id resolver runs, the company rides
   //    in the keyword. `titleTerm` carries the title alone so a resolver can later switch this
   //    query to structured mode (title in `name`, resolved id in current_company).
+  // The primary geo rides in the KEYWORD too: paid keyword listings have no separate
+  // geo filter until a numeric geo-id resolver exists, so without this every company
+  // query searched title + company NATIONWIDE (the "locations across the board" bug).
+  const geoHint = icp.geos[0] ? ` ${icp.geos[0]}` : "";
   for (const company of icp.targetCompanies) {
     const xray = [`site:linkedin.com/in`, titleGroup, q(company), geoGroup].filter(Boolean).join(" ");
     out.push({
@@ -63,8 +67,8 @@ export function generateQueries(icp: CandidateICP, opts: { titleCap?: number; ge
       label: `${leadTitle(icp)} @ ${company}`,
       xray,
       googleUrl: googleUrl(xray),
-      linkedinUrl: linkedinUrl(`${company} ${leadTitle(icp)}`),
-      keyword: `${leadTitle(icp)} ${company}`.trim(),
+      linkedinUrl: linkedinUrl(`${company} ${leadTitle(icp)}${geoHint}`),
+      keyword: `${leadTitle(icp)} ${company}${geoHint}`.trim(),
       titleTerm: leadTitle(icp),
     });
   }
@@ -78,8 +82,8 @@ export function generateQueries(icp: CandidateICP, opts: { titleCap?: number; ge
       label: `${leadTitle(icp)} across target industries`,
       xray,
       googleUrl: googleUrl(xray),
-      linkedinUrl: linkedinUrl(`${leadTitle(icp)} ${icp.industries.slice(0, 2).join(" ")}`),
-      keyword: `${leadTitle(icp)} ${icp.industries.slice(0, 2).join(" ")}`.trim(),
+      linkedinUrl: linkedinUrl(`${leadTitle(icp)} ${icp.industries.slice(0, 2).join(" ")}${geoHint}`),
+      keyword: `${leadTitle(icp)} ${icp.industries.slice(0, 2).join(" ")}${geoHint}`.trim(),
     });
   }
 
