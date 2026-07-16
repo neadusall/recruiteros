@@ -75,14 +75,13 @@ export async function planSourcing(jd: string): Promise<SourcingPlan> {
   // brief (e.g. the model returned unparseable output). Say so plainly rather than
   // silently handing back a profile of dashes that finds nobody.
   const empty = !icp.titles.length && !icp.targetCompanies.length && !icp.geos.length;
-  const narrow = icp.seniority === "vp" || icp.seniority === "exec";
   return {
     icp,
     queries,
+    // Only the parse-failure note survives here; the old "senior/narrow role" caveat
+    // read as clutter under the plan card and was cut on user request (2026-07-16).
     note: empty
-      ? "Couldn't read the brief into a profile. Click Analyze again, or add a few concrete details to the brief — a clear job title, real example companies, and a location."
-      : narrow
-      ? "Senior/narrow role: the truly-qualified pool is likely a few hundred, not thousands. Discovery returns everyone above the fit threshold, capped — the count is honest, not padded."
+      ? "Couldn't read the brief into a profile. Click Analyze again, or add a few concrete details to the brief: a clear job title, real example companies, and a location."
       : undefined,
   };
 }

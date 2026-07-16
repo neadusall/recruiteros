@@ -429,7 +429,7 @@ export async function runDiscovery(
     warnings.push("rapidapi_not_configured: set RAPIDAPI_KEY + RAPIDAPI_PEOPLE_SEARCH_HOST to enable scale discovery");
   }
   if (!useGoogle && !useSearx && !useRapid && !useScraper) {
-    warnings.push("no_discovery_engine: nothing configured to find profiles — list will be empty");
+    warnings.push("no_discovery_engine: nothing configured to find profiles, so the list will be empty");
     return { candidates: [], warnings, scanned: 0 };
   }
 
@@ -583,9 +583,27 @@ export async function runDiscovery(
     if (rapid404) reasons.push(`the paid people-search API rejected ${rapid404} request(s) with 404 (its host/path in Setup points at a missing endpoint)`);
     if (!useGoogle && engines.includes("google")) reasons.push("Google CSE is not configured (free 100/day pass is off)");
     if (!useSearx && engines.includes("searx")) reasons.push("the free SearXNG engine was unreachable");
-    if (opts.excludeKeys?.size && scanned === 0) reasons.push(`Fresh only is ON and ${opts.excludeKeys.size} previously-surfaced people are being excluded — uncheck it to see the full list again`);
+    if (opts.excludeKeys?.size && scanned === 0) reasons.push(`Fresh only is ON and ${opts.excludeKeys.size} previously-surfaced people are being excluded (uncheck it to see the full list again)`);
     if (scanned > 0) reasons.push(`${scanned} profiles were scanned but none scored above the fit threshold (${minFit})`);
     warnings.unshift("empty_run: " + (reasons.length ? reasons.join("; ") : "no engine returned results"));
+  }
+
+  // SUCCESSFUL-RUN CLEANUP: per-query engine failures emit one line per company/page,
+  // which turns into a wall of "rapidapi(...) 429" noise under the results table. Once
+  // candidates came back, collapse them into a single short note; the raw per-query
+  // list only matters on an empty run, where the diagnosis above consumes it.
+  if (candidates.length) {
+    const perQuery = /^(rapidapi|scraper|google|searx)\(/;
+    const noisy = warnings.filter((w) => perQuery.test(w));
+    if (noisy.length) {
+      const kept = warnings.filter((w) => !perQuery.test(w));
+      const rateLimited = noisy.filter((w) => /\b429\b/.test(w)).length;
+      const note =
+        rateLimited === noisy.length
+          ? `search coverage may be partial: the people-search API rate-limited ${rateLimited} of the queries (429)`
+          : `search coverage may be partial: ${noisy.length} queries failed (${rateLimited} rate-limited)`;
+      warnings.splice(0, warnings.length, note, ...kept);
+    }
   }
 
   return { candidates, warnings, scanned };
