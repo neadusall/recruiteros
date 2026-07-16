@@ -9308,7 +9308,7 @@
                 '<input type="number" class="jd-vettop" min="1" max="200" value="' + Math.min(25, Math.max(1, n)) + '">' +
                 '<button class="btn btn-ghost btn-sm" data-vet="' + esc(r.id) + '">Deep-vet</button>' +
                 '<span class="jd-cost jd-vetcost"></span></span>' +
-              '<button class="btn btn-primary btn-sm" data-autoenrich="' + esc(r.id) + '" title="One click, fully automated, every source: an in-house pass first finds emails for rows with no LinkedIn URL (so the vendors can match them), then the free KoldInfo pass fills emails and phones, then Laxis adds what is still missing, then the in-house waterfall sweeps the leftovers for both emails and phones. No CSV downloads, no drag and drop.">Enrich</button>' +
+              '<button class="btn btn-primary btn-sm" data-autoenrich="' + esc(r.id) + '" title="One click, fully automated: the free KoldInfo pass fills emails first, then Laxis adds the remaining emails + cellphones, then the in-house waterfall fills any gaps. No CSV downloads, no drag and drop.">Enrich</button>' +
               '<button class="btn btn-primary btn-sm" data-promote="' + esc(r.id) + '">Send to Candidates →</button>' +
               '<button class="btn btn-ghost btn-sm" data-ostext="' + esc(r.id) + '" title="Builds an OS Text SMS campaign from everyone on this list who has a phone number: contacts land formatted (first name, last name, company, title, location) with a starter message prefilled, ready to review and launch.">Send to OS Text</button>' +
               '<button class="btn btn-ghost btn-sm" data-del="' + esc(r.id) + '">Delete</button>' +
@@ -9324,7 +9324,7 @@
        in-house gap-fill waterfall), auto-continue to the next chunk. `t` is the button
        driving the run; `resetLabel` is what it reads when the chain ends. */
     function runLaxisChain(lid, t, resetLabel, base) {
-      var lxT = { emails: (base && base.emails) || 0, phones: (base && base.phones) || 0, chunks: 0 };
+      var lxT = { emails: (base && base.emails) || 0, phones: (base && base.phones) || 0, gap: 0, chunks: 0 };
       t.disabled = true; t.textContent = "Enriching…";
       function laxisReset() { t.disabled = false; t.textContent = resetLabel; }
       // No play-by-play and no completion popup: the progress bar carries the run,
@@ -9332,7 +9332,8 @@
       function finishLaxis() {
         laxisReset();
         finishProgress("Done · " + lxT.emails + " email" + (lxT.emails === 1 ? "" : "s") +
-          " + " + lxT.phones + " phone" + (lxT.phones === 1 ? "" : "s") + " added");
+          " + " + lxT.phones + " phone" + (lxT.phones === 1 ? "" : "s") +
+          (lxT.gap ? (" + " + lxT.gap + " gap-filled") : "") + " added");
         loadRuns();
       }
       function pollLaxis() {
@@ -9346,10 +9347,7 @@
               "\n\nAlready-enriched batches are saved, press Enrich again to resume from where it stopped."); loadRuns(); return;
           }
           var lx = s.data.laxis || {}; var gf = s.data.gapFill || {};
-          // Vendor fills + in-house gap fills roll into one total each; the recruiter
-          // cares how many contacts landed, not which rung landed them.
-          lxT.emails += (lx.emails || 0) + (gf.enriched || 0);
-          lxT.phones += (lx.phones || 0) + (gf.phones || 0);
+          lxT.emails += lx.emails || 0; lxT.phones += lx.phones || 0; lxT.gap += gf.enriched || 0;
           // More chunks left? Auto-continue, the backend skips done offsets, never re-grabs.
           if (s.data.nextStart != null) { startChunk(s.data.nextStart); return; }
           finishLaxis();
@@ -9379,16 +9377,12 @@
       startChunk(null); // null → backend resumes from the first un-enriched chunk (or 0 fresh)
     }
 
-    /* ---- fully automated enrichment chain: pre-key → KoldInfo (free) → Laxis → waterfall ----
-       Stage 0 gives rows holding neither a LinkedIn URL nor an email a cheap in-house
-       email find first, so the vendor rungs can key them (Laxis is blind to such rows
-       otherwise; every other row is left for the free KoldInfo rung, keeping
-       cheapest-first intact). Stage 1 sends the missing-contact rows to the browser
-       worker's KoldInfo flow and polls until the found emails + phones are merged back
-       (blanks only). Stage 2 hands off to the same Laxis chunk chain, which ends with
-       the in-house gap-fill waterfall (emails AND phones: rows that already hold an
-       email get a phone-only pass). Any unavailable rung is skipped, so the chain
-       always runs everything it can. */
+    /* ---- fully automated enrichment chain: KoldInfo (free) → Laxis → waterfall ----
+       Stage 1 sends the missing-email rows to the browser worker's KoldInfo flow and
+       polls until the found emails are merged back (blanks only). Stage 2 hands off to
+       the same Laxis chunk chain as the manual button, which ends with the in-house
+       gap-fill waterfall. If the KoldInfo rung is unavailable or has nothing to do, the
+       chain skips straight to Laxis, so the free-first order is enforced either way. */
     function runAutoEnrich(aid, aBtn) {
       aBtn.disabled = true; aBtn.textContent = "Enriching…";
       // One progress bar for the whole chain; the stages run silently and the
@@ -9403,33 +9397,25 @@
           if (!s.ok) { stageLaxis(); return; }
           if (!s.data.done) { setTimeout(pollKold, 10000); return; }
           var m = (s.data.status === "error") ? {} : (s.data.merged || {});
-          kold.emails += m.emails || 0; kold.phones += m.phones || 0;
+          kold.emails = m.emails || 0; kold.phones = m.phones || 0;
           stageLaxis();
         }).catch(function () { stageLaxis(); });
       }
-      function stageKold() {
-        send("/sourcing", "POST", { action: "koldinfoEnrich", id: aid }).then(function (r) {
-          if (!r.ok) {
-            var err = (r.data && r.data.error) || r.status;
-            if (err === "koldinfo_worker_not_configured") { stageLaxis(); return; }
-            aBtn.disabled = false; aBtn.textContent = "Enrich";
-            finishProgress("Enrich could not start");
-            alert("Enrich failed to start: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
-          }
-          if (r.data.nothingMissing) { stageLaxis(); return; }
-          setTimeout(pollKold, 8000);
-        }).catch(function () {
+      send("/sourcing", "POST", { action: "koldinfoEnrich", id: aid }).then(function (r) {
+        if (!r.ok) {
+          var err = (r.data && r.data.error) || r.status;
+          if (err === "koldinfo_worker_not_configured") { stageLaxis(); return; }
           aBtn.disabled = false; aBtn.textContent = "Enrich";
-          finishProgress("Enrich stopped");
-          alert("Could not reach the server.");
-        });
-      }
-      // Stage 0: pre-key the rows no vendor could pair. A failure here never blocks
-      // the chain; those rows just stay vendor-invisible like they were before.
-      send("/sourcing", "POST", { action: "prekey", id: aid }).then(function (p) {
-        if (p.ok && p.data) { kold.emails += p.data.enriched || 0; kold.phones += p.data.phones || 0; }
-        stageKold();
-      }).catch(stageKold);
+          finishProgress("Enrich could not start");
+          alert("Enrich failed to start: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
+        }
+        if (r.data.nothingMissing) { stageLaxis(); return; }
+        setTimeout(pollKold, 8000);
+      }).catch(function () {
+        aBtn.disabled = false; aBtn.textContent = "Enrich";
+        finishProgress("Enrich stopped");
+        alert("Could not reach the server.");
+      });
     }
 
     /* ---- Live deep-vet cost estimate (updates as the toggle / rates move) ----
