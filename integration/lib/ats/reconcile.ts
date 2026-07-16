@@ -34,6 +34,12 @@ const RECONCILE_LOOKBACK_DAYS = envInt("LOXO_RECONCILE_LOOKBACK_DAYS", 35);
 const RESEND_WINDOW_DAYS = envInt("LOXO_RECONCILE_RESEND_DAYS", 7);
 /** Cadence: a workspace reconciles when its last run is older than this. */
 export const RECONCILE_EVERY_MS = envInt("LOXO_RECONCILE_EVERY_HOURS", 24) * 3600_000;
+/**
+ * Deep-scan page budget. Bigger than the 15-min tick's cap on purpose: the
+ * audit must be able to exhaust the whole lookback window (a busy agency can
+ * log >10k activities in 35 days), and once a day we can afford the requests.
+ */
+const RECONCILE_MAX_PAGES = envInt("LOXO_RECONCILE_MAX_PAGES", 400);
 
 export interface ReconcileReport {
   at: string;
@@ -118,7 +124,7 @@ export async function dailyLoxoReconcile(workspaceId: string): Promise<Reconcile
   const lookbackIso = new Date(Date.now() - RECONCILE_LOOKBACK_DAYS * 24 * 3600_000).toISOString();
 
   // 1) Deep rescan: Loxo -> warehouse, cursor ignored, catches backdated activity.
-  const scan = await syncLoxoActivity(workspaceId, client, cfg, { sinceOverride: lookbackIso });
+  const scan = await syncLoxoActivity(workspaceId, client, cfg, { sinceOverride: lookbackIso, maxPages: RECONCILE_MAX_PAGES });
   report.deepScanned = scan.scanned;
   report.deepTouches = scan.touches;
   report.peopleUpdated = scan.peopleUpdated;

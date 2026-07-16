@@ -73,8 +73,9 @@ export async function syncLoxoActivity(
   workspaceId: string,
   client: LoxoClient,
   cfg: AtsVendorConfig | null,
-  opts: { sinceOverride?: string } = {},
+  opts: { sinceOverride?: string; maxPages?: number } = {},
 ): Promise<ActivityReport> {
+  const maxPages = opts.maxPages ?? MAX_ACTIVITY_PAGES;
   const report: ActivityReport = { ok: true, scanned: 0, touches: 0, peopleUpdated: 0 };
   const since =
     opts.sinceOverride || cfg?.activityCursor || new Date(Date.now() - LOOKBACK_DAYS * 24 * 3600_000).toISOString();
@@ -112,6 +113,7 @@ export async function syncLoxoActivity(
         if (!channel) return; // notes / pipeline moves / unknown types are not touches
         note(ev?.person_id ?? ev?.person?.id, ev?.created_at ?? ev?.updated_at, channel);
       },
+      maxPages,
     );
 
     // 2) Emails sent through Loxo (campaign / tracked email).
@@ -121,6 +123,7 @@ export async function syncLoxoActivity(
         report.scanned++;
         note(em?.person_id ?? em?.person?.id ?? firstId(em?.person_ids), em?.created_at ?? em?.sent_at, "email");
       },
+      maxPages,
     );
 
     // 3) Texts through Loxo.
@@ -130,6 +133,7 @@ export async function syncLoxoActivity(
         report.scanned++;
         note(m?.person_id ?? m?.person?.id, m?.created_at ?? m?.sent_at, "sms");
       },
+      maxPages,
     );
 
     report.peopleUpdated = await applyContactActivity(
@@ -151,9 +155,10 @@ export async function syncLoxoActivity(
 async function scroll(
   fetchPage: (scrollId?: string) => Promise<{ items: any[]; scrollId?: string }>,
   each: (item: any) => void,
+  maxPages: number = MAX_ACTIVITY_PAGES,
 ): Promise<void> {
   let scrollId: string | undefined;
-  for (let page = 0; page < MAX_ACTIVITY_PAGES; page++) {
+  for (let page = 0; page < maxPages; page++) {
     const res = await fetchPage(scrollId);
     if (!res.items.length) break;
     for (const item of res.items) each(item);

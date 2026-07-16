@@ -107,6 +107,31 @@ export class LoxoClient {
   }
 
   /**
+   * The activity resources document `per_page` (unlike people/companies, which
+   * 422 on it). We still fall back per-resource on a 422 so one account's
+   * stricter API can never break the pull — just makes it page smaller.
+   */
+  private perPageOk: Record<string, boolean> = {};
+
+  private async getActivityPage(resource: string, p: URLSearchParams, envelopeKey: string): Promise<LoxoPage<any>> {
+    if (this.perPageOk[resource] !== false) {
+      const withSize = new URLSearchParams(p);
+      withSize.set("per_page", "100");
+      try {
+        const json = await this.get(`/${resource}?${withSize.toString()}`);
+        this.perPageOk[resource] = true;
+        return readPage(json, envelopeKey);
+      } catch (e: any) {
+        if (e?.status !== 422) throw e;
+        this.perPageOk[resource] = false; // this account rejects per_page here; page small
+      }
+    }
+    const s = p.toString();
+    const json = await this.get(`/${resource}${s ? `?${s}` : ""}`);
+    return readPage(json, envelopeKey);
+  }
+
+  /**
    * One page of the unified activity log (GET /person_events). Supports the
    * documented incremental window (`created_at_start`) and scroll cursor, so a
    * poll after the first full pass only reads what's new.
@@ -116,9 +141,7 @@ export class LoxoClient {
     if (opts.scrollId) p.set("scroll_id", opts.scrollId);
     if (opts.createdAtStart) p.set("created_at_start", opts.createdAtStart);
     if (opts.personId != null) p.set("person_id", String(opts.personId));
-    const s = p.toString();
-    const json = await this.get(`/person_events${s ? `?${s}` : ""}`);
-    return readPage(json, "person_events");
+    return this.getActivityPage("person_events", p, "person_events");
   }
 
   /** One page of tracked emails sent through Loxo (GET /email_tracking). */
@@ -126,9 +149,7 @@ export class LoxoClient {
     const p = new URLSearchParams();
     if (opts.scrollId) p.set("scroll_id", opts.scrollId);
     if (opts.createdAtStart) p.set("created_at_start", opts.createdAtStart);
-    const s = p.toString();
-    const json = await this.get(`/email_tracking${s ? `?${s}` : ""}`);
-    return readPage(json, "email_tracking");
+    return this.getActivityPage("email_tracking", p, "email_tracking");
   }
 
   /** One page of SMS sent/received through Loxo (GET /sms). */
@@ -136,9 +157,7 @@ export class LoxoClient {
     const p = new URLSearchParams();
     if (opts.scrollId) p.set("scroll_id", opts.scrollId);
     if (opts.createdAtStart) p.set("created_at_start", opts.createdAtStart);
-    const s = p.toString();
-    const json = await this.get(`/sms${s ? `?${s}` : ""}`);
-    return readPage(json, "sms");
+    return this.getActivityPage("sms", p, "sms");
   }
 
   /**
