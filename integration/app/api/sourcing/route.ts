@@ -7,6 +7,8 @@
  *   { action: "save", id?, name, jd, icp, queries, candidates } -> stage a named run
  *   { action: "promote", id, minFit? }             -> push a saved run into Candidates under its name
  *   { action: "enrich", id, top? }                 -> enrich contacts for the top N staged candidates
+ *   { action: "prekey", id }                       -> STAGE 0 of the auto chain: in-house waterfall on rows with
+ *                                                     no LinkedIn URL and no email, so the vendor rungs can key them
  *   { action: "vet", id, top? }                    -> deep-vet the top N: submits a 50%-cheaper Message Batch (sync fallback)
  *   { action: "vetStatus", id }                    -> poll the in-flight vet batch; ingests results once it ends
  *   { action: "koldinfoExport", id, top? }         -> FIRST rung (free): CSV of candidates still missing an email, for KoldInfo
@@ -76,41 +78,52 @@ function rankByVerdict(rows: CandidateRow[]): void {
 }
 
 /**
- * The cheap-first contact waterfall over the top N rows that are still missing an email.
+ * The cheap-first contact waterfall over rows still missing an email OR a phone.
  * Cache-first (a contact resolved for this person in any run is reused free), then the
- * paid waterfall. Mutates the rows in place; the CALLER persists the run. Shared by the
- * `enrich` action and the Laxis gap-fill (Laxis runs first, this fills what it left blank).
+ * paid waterfall. A row with no email runs the full plan; a row that already holds an
+ * email runs a phone-only plan (the email steps are dropped, so no finder credit is
+ * ever re-spent on a solved field). Mutates the rows in place; the CALLER persists the
+ * run. Shared by the `enrich`/`prekey` actions and the Laxis gap-fill.
  */
-async function gapFillContacts(ws: string, rows: CandidateRow[]): Promise<{ enriched: number; cacheHits: number }> {
+async function gapFillContacts(ws: string, rows: CandidateRow[]): Promise<{ enriched: number; phones: number; cacheHits: number }> {
   const plan = cheapFirstContactWaterfall({ includePhone: true });
+  const phonePlan = { ...plan, steps: plan.steps.filter((s) => s.field !== "email") };
   let enriched = 0;
+  let phones = 0;
   let contactCacheHits = 0;
   for (const c of rows) {
-    if (c.email) continue;
+    const hasEmail = Boolean((c.email || "").trim());
+    const hasPhone = Boolean((c.phone || "").trim());
+    if (hasEmail && hasPhone) continue;
     const personKey = c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`;
     const cached = await getCachedContact(ws, personKey);
     if (cached && (cached.email || cached.phone)) {
-      if (cached.email) { c.email = cached.email; enriched++; }
-      if (cached.phone) c.phone = cached.phone;
+      // A cache entry is this person's settled answer (found values only): apply the
+      // blanks and move on rather than re-buying a lookup that already ran.
+      if (cached.email && !hasEmail) { c.email = cached.email; enriched++; }
+      if (cached.phone && !hasPhone) { c.phone = cached.phone; phones++; }
       contactCacheHits++;
       continue;
     }
     const [first, ...rest] = (c.fullName || "").trim().split(/\s+/);
     try {
-      const report = await enrich(plan, {
+      const report = await enrich(hasEmail ? phonePlan : plan, {
         name: c.company, companyName: c.company, fullName: c.fullName,
         firstName: first, lastName: rest.join(" "), linkedinUrl: c.linkedinUrl, title: c.title,
+        // A known email is a lookup key for the phone rung (and the plan already
+        // skips the email steps when it is set, so it is never re-found).
+        email: (c.email || "").trim() || undefined,
       }, { now: nowIso() });
       const e = report.subject.email; const ph = report.subject.phone;
-      if (typeof e === "string") { c.email = e; enriched++; }
-      if (typeof ph === "string") c.phone = ph;
+      if (typeof e === "string" && !hasEmail) { c.email = e; enriched++; }
+      if (typeof ph === "string" && !hasPhone) { c.phone = ph; phones++; }
       await putCachedContact(ws, personKey, {
-        email: typeof e === "string" ? e : undefined,
-        phone: typeof ph === "string" ? ph : undefined,
+        email: (c.email || "").trim() || undefined,
+        phone: (c.phone || "").trim() || undefined,
       });
     } catch { /* leave unresolved */ }
   }
-  return { enriched, cacheHits: contactCacheHits };
+  return { enriched, phones, cacheHits: contactCacheHits };
 }
 
 export async function GET(req: Request) {
@@ -247,9 +260,27 @@ export async function POST(req: Request) {
       // Include the phone rung — otherwise report.subject.phone is always undefined.
       // (Mobile direct-dial stays cap-gated separately; this is the cheap business-phone find.)
       const top = Math.max(1, Math.min(b.top ?? 50, run.candidates.length));
-      const { enriched, cacheHits } = await gapFillContacts(ws, run.candidates.slice(0, top));
+      const { enriched, phones, cacheHits } = await gapFillContacts(ws, run.candidates.slice(0, top));
       await saveSourcingRun(ws, { ...run });
-      return ok({ enriched, cacheHits, run });
+      return ok({ enriched, phones, cacheHits, run });
+    }
+
+    // STAGE 0 of the auto-enrich chain. Laxis can only key a row off a LinkedIn URL or
+    // an email; rows holding neither are invisible to it (and stay invisible no matter
+    // how many vendor passes run). Give exactly those rows a cheap in-house email find
+    // FIRST, so the vendor rungs can pair them. Targeted on purpose: rows that already
+    // have a key are left for the free KoldInfo rung, which keeps cheapest-first intact.
+    if (action === "prekey") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      const targets = run.candidates.filter(
+        (c) => !(c.linkedinUrl || "").trim() && !(c.email || "").trim(),
+      );
+      if (!targets.length) return ok({ targeted: 0, enriched: 0, phones: 0, cacheHits: 0 });
+      const { enriched, phones, cacheHits } = await gapFillContacts(ws, targets);
+      await saveSourcingRun(ws, { ...run });
+      return ok({ targeted: targets.length, enriched, phones, cacheHits, run });
     }
 
     // KoldInfo is the FIRST enrichment rung (free CSV round-trip the operator drives):
@@ -415,9 +446,9 @@ export async function POST(req: Request) {
       }
       delete run.laxisJob;
 
-      // Laxis was the first pass; the cheap in-house waterfall fills whatever it left blank
-      // (unless the caller opts out). One seamless flow from the recruiter's side.
-      let gapFill = { enriched: 0, cacheHits: 0 };
+      // Laxis was the last vendor pass; the cheap in-house waterfall fills whatever it
+      // left blank, emails AND phones (unless the caller opts out). One seamless flow.
+      let gapFill = { enriched: 0, phones: 0, cacheHits: 0 };
       if (b.gapFill !== false) {
         try { gapFill = await gapFillContacts(ws, run.candidates.slice(start, start + count)); }
         catch (err) { warnings.push(`gap_fill_failed: ${(err as Error).message}`); }
