@@ -15,6 +15,7 @@
  *   { action: "koldinfoStatus", id }               -> poll the KoldInfo job; auto-merges found emails + phones when done
  *   { action: "laxisEnrich", id, top? }            -> SECOND pass: enrich via the Laxis browser worker (submits a job)
  *   { action: "laxisStatus", id, gapFill? }        -> poll the Laxis job; merges the enriched CSV + runs the gap-fill waterfall
+ *   { action: "ostext", id, name?, validate? }     -> push the run's phone-holding candidates into an OS Text SMS campaign
  *   { action: "delete", id }                       -> remove a saved run
  *
  * Discovery-only until promote; contact lookup and deep-vet are on demand. Session-gated.
@@ -38,6 +39,7 @@ import type { CandidateRow, VetBatchItem, SourcingRun } from "../../../lib/sourc
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { nowIso } from "../../../lib/core/ids";
 import { dbEnabled } from "../../../lib/db";
+import { ostextImport, ostextStarterTemplate, type OsTextContact } from "../../../lib/ostextImport";
 
 /** Stable per-candidate key: LinkedIn URL when present, else name+company. Used to
  *  re-attach a batch result to the right candidate even after the list is re-sorted. */
@@ -518,6 +520,63 @@ export async function POST(req: Request) {
       delete run.vetBatch;
       await saveSourcingRun(ws, { ...run });
       return ok({ done: true, vetted, deep, warnings, run });
+    }
+
+    // Push the run's candidates straight into an OS Text SMS campaign (creates or
+    // tops up a campaign under the given name). Only rows that already hold a phone
+    // go over; each is sent with the full merge-column set (first/last name, company,
+    // job title, location, email, LinkedIn URL) so every OS Text {token} can fill in.
+    if (action === "ostext") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      const name = ((b.name as string) || run.name || "").trim();
+      if (!name) return fail("missing_name", 422);
+      let noPhone = 0;
+      const contacts: OsTextContact[] = [];
+      for (const c of run.candidates) {
+        if (!c.phone) { noPhone++; continue; }
+        const parts = (c.fullName || "").trim().split(/\s+/);
+        const custom: Record<string, string> = {};
+        if (c.headline) custom.headline = c.headline;
+        if (typeof c.verifiedScore === "number") custom.tag = `vetted-${c.verdict ?? "scored"}`;
+        contacts.push({
+          firstName: parts[0] || "",
+          lastName: parts.slice(1).join(" "),
+          company: c.company || "",
+          jobTitle: c.title || c.headline || "",
+          phone: c.phone,
+          email: c.email || "",
+          linkedinUrl: c.linkedinUrl || "",
+          location: c.location || "",
+          customFields: custom,
+        });
+      }
+      if (!contacts.length) {
+        return fail("no_contacts_with_phone", 422, {
+          detail: "No candidate on this list has a phone number yet. Press Enrich first (it fills emails and phones), then send again.",
+          noPhone,
+        });
+      }
+      const recruiter = g.ctx.user.name || "";
+      const template = ((b.template as string) || "").trim() || ostextStarterTemplate(recruiter, run.name || name);
+      let data: Record<string, unknown>;
+      try {
+        data = await ostextImport({
+          name,
+          template,
+          positionSummary: `Pushed from JD Sourcing list "${run.name}" (${contacts.length} contacts).`,
+          recruiterName: recruiter,
+          recruiterEmail: g.ctx.user.email || "",
+          contacts,
+          validate: b.validate === true,
+        });
+      } catch (e) {
+        const err = e as Error & { code?: string };
+        const code = err.code || "ostext_import_failed";
+        return fail(code, code === "ostext_not_connected" ? 503 : 502, { detail: err.message });
+      }
+      return ok({ ...data, pushed: contacts.length, noPhone });
     }
 
     if (action === "delete") {
