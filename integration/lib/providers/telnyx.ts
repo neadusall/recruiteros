@@ -52,13 +52,13 @@ export class TelnyxClient extends ProviderClient {
     });
   }
 
-  /** Send an SMS from the configured 10DLC number. */
-  sendSms(to: string, text: string) {
+  /** Send an SMS from the configured 10DLC number (or an explicit from-number). */
+  sendSms(to: string, text: string, from?: string) {
     return this.request({
       method: "POST",
       path: "/messages",
       body: {
-        from: this.env("TELNYX_FROM_NUMBER"),
+        from: from || this.env("TELNYX_FROM_NUMBER"),
         to,
         text,
         messaging_profile_id: this.env("TELNYX_MESSAGING_PROFILE_ID") || undefined,
@@ -427,6 +427,8 @@ export interface AssistantConfig {
   interruption_settings?: Record<string, unknown>;
   /** Called per-call to resolve {{dynamic_variables}} (caller identity/context). */
   dynamic_variables_webhook_url?: string;
+  /** Mid-call tools (Telnyx-native: webhook tools, transfer; hangup is built in). */
+  tools?: unknown[];
   /** Where Telnyx posts the finished transcript + recording for scoring. */
   insight_settings?: Record<string, unknown>;
   transcription?: Record<string, unknown>;

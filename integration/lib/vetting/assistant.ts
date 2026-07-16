@@ -36,6 +36,54 @@ function voiceSelector(desk: VettingDesk): string {
   return vid ? `ElevenLabs.${vid}` : "Telnyx.KokoroTTS.af_heart";
 }
 
+/**
+ * The desk's mid-call tools, all Telnyx-native so the single-stack contract
+ * holds (no third vendor in the call path):
+ *   - send_scheduling_text: a Telnyx webhook tool that hits our /api/vetting/tools
+ *     route, which sends the caller the desk's scheduling link over Telnyx SMS.
+ *   - transfer: Telnyx's built-in transfer tool, pointed at the desk recruiter.
+ * Hangup needs no entry — every Telnyx assistant can end the call by default.
+ * The transfer shape follows Telnyx's documented Targets model; like the rest
+ * of the assistant surface it's sent shape-tolerantly (the engine applies what
+ * it supports), and is part of the operator-verify seam before go-live.
+ */
+function buildTools(desk: VettingDesk): unknown[] {
+  const tools: unknown[] = [];
+  if (desk.bookingUrl?.trim()) {
+    tools.push({
+      type: "webhook",
+      webhook: {
+        name: "send_scheduling_text",
+        description:
+          "Text the caller the scheduling link for the next step, right now, during the call. Use only for a strong, engaged candidate who agreed to receive it.",
+        url: `${appUrl()}/api/vetting/tools?desk=${encodeURIComponent(desk.id)}&tool=send_scheduling_text`,
+        method: "POST",
+        headers: [{ name: "Content-Type", value: "application/json" }],
+        body_parameters: {
+          type: "object",
+          properties: {
+            reason: {
+              type: "string",
+              description: "One short line on why this candidate earned the link (for the recruiter's log).",
+            },
+          },
+          required: [],
+        },
+      },
+    });
+  }
+  if (desk.transferNumber?.trim()) {
+    tools.push({
+      type: "transfer",
+      transfer: {
+        targets: [{ name: "the recruiter", to: desk.transferNumber.trim() }],
+        from: desk.phoneNumber || undefined,
+      },
+    });
+  }
+  return tools;
+}
+
 /** Build the full assistant config from a desk. */
 export function buildAssistantConfig(desk: VettingDesk): AssistantConfig {
   return {
@@ -66,16 +114,19 @@ export function buildAssistantConfig(desk: VettingDesk): AssistantConfig {
     // start-speaking plan (how long the agent waits before taking its turn), so
     // the sensitivity slider maps onto those waits — anchored so the default
     // slider position (0.6) lands exactly on Telnyx's documented defaults
-    // (wait 0.4s, no-punctuation endpoint 1.5s).
+    // (wait 0.4s, no-punctuation endpoint 1.5s). The desk's "thinking pause"
+    // (pauseBeforeSpeakingMs) stacks on top of the base wait: a small extra
+    // beat before the agent takes its turn, capped so it can't feel like lag.
     interruption_settings: (() => {
       const tt = clampTurnTuning(desk.turnTuning);
       const s = tt.interruptionSensitivity;
+      const pause = tt.pauseBeforeSpeakingMs / 1000;
       const r2 = (n: number) => Math.round(n * 100) / 100;
       return {
         enable: tt.interruptions,
         disable_greeting_interruption: false,
         start_speaking_plan: {
-          wait_seconds: r2(Math.max(0.2, 0.7 - 0.5 * s)),
+          wait_seconds: r2(Math.min(2, Math.max(0.2, 0.7 - 0.5 * s) + pause)),
           transcription_endpointing_plan: {
             on_punctuation_seconds: 0.1,
             on_no_punctuation_seconds: r2(Math.max(0.8, 2.1 - 1.0 * s)),
@@ -84,6 +135,10 @@ export function buildAssistantConfig(desk: VettingDesk): AssistantConfig {
         },
       };
     })(),
+    // Mid-call abilities (the "hands"): all Telnyx-native, provisioned only
+    // when the desk has them configured. Tool names must match toolsBlock()
+    // in prompt.ts so the instructions describe exactly what exists.
+    tools: buildTools(desk),
     // Resolve who's calling (name + LinkedIn talking points) by caller ID.
     dynamic_variables_webhook_url: `${appUrl()}/api/vetting/context`,
     // Record + transcribe, and post the finished call to us for scoring.

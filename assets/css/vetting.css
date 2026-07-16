@@ -437,6 +437,8 @@
   .vt-qhead { display: none; }
   .vt-qrow { grid-template-columns: 26px 1fr; }
   .vt-qrow .vt-must { grid-column: 2; justify-self: start; }
+  .vt-krow input { grid-column: 2; }
+  .vt-krow span:last-child { display: none; }
   .vt-health { gap: 16px; }
   .vt-sliders { grid-template-columns: 1fr; }
   .vt-xrow { grid-template-columns: 26px 1fr; }

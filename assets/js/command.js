@@ -9998,6 +9998,11 @@
       '.jd-reach .jr-em{color:var(--ok);background:color-mix(in srgb, var(--ok) 10%, transparent);border:1px solid color-mix(in srgb, var(--ok) 38%, transparent)}' +
       '.jd-reach .jr-ph{color:var(--brand-2);background:var(--brand-soft);border:1px solid color-mix(in srgb, var(--brand) 38%, transparent)}' +
       '.jd-reach .jr-zero{color:var(--text-dim);background:var(--bg-soft);border:1px solid var(--border-strong)}' +
+      '.jd-reach .jr-api{color:#8a5a00;background:color-mix(in srgb, #d97706 10%, transparent);border:1px solid color-mix(in srgb, #d97706 38%, transparent)}' +
+      '.jd-quota{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}' +
+      '.jd-quota .jd-qchip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;color:#8a5a00;background:color-mix(in srgb, #d97706 8%, transparent);border:1px solid color-mix(in srgb, #d97706 34%, transparent);cursor:help}' +
+      '.jd-quota .jd-qchip .isvg{width:12px;height:12px}' +
+      '.jd-quota .jd-qmuted{color:var(--text-dim);background:var(--bg-soft);border-color:var(--border-strong)}' +
       '.jd-pick{flex:0 0 auto;width:15px;height:15px;margin:0;accent-color:var(--accent,#2e5bd7);cursor:pointer}' +
       '@media (max-width:760px){.jd-run{flex-direction:column;align-items:stretch}.jd-run-actions{justify-content:flex-start}}' +
       '.jd-depth{border:1px solid var(--border-strong);border-radius:12px;background:var(--bg-soft);padding:14px 16px;margin-top:14px}' +
@@ -10117,6 +10122,7 @@
       '<div id="jdResults"></div>' +
       '<div class="card">' +
         '<div class="jd-cardhead"><h3 style="margin:0">Your saved candidate lists</h3>' +
+          '<span id="jdQuota" class="jd-quota"></span>' +
           '<button class="btn btn-ghost btn-sm" id="jdCombine" disabled title="Ran the same role a few times? Tick two or more lists below and combine them into one master list. Duplicates merge automatically and contact info found on any list is kept, so nobody slips through the cracks.">Combine lists</button>' +
         '</div>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
@@ -10184,11 +10190,31 @@
       host.innerHTML = html;
     }
 
+    // The saved-lists credit meter: the paid subscriptions' live balances, read from
+    // their own response headers server-side. Empty until the first search runs after
+    // this shipped; the hint chip says so instead of showing nothing.
+    function renderQuota(quotas) {
+      var el = $("#jdQuota"); if (!el) return;
+      if (!quotas.length) {
+        el.innerHTML = '<span class="jd-qchip jd-qmuted" title="The live credit balance for your paid people-search subscription shows here, read straight from its own responses. It fills in automatically the next time a search, deep-vet, or Test connection runs.">API credits: shown after your next search</span>';
+        return;
+      }
+      el.innerHTML = quotas.map(function (q) {
+        var name = String(q.host || "").replace(/\.p\.rapidapi\.com$/i, "");
+        var bits = "Live balance for the " + (q.host || "") + " subscription (RapidAPI), read from its most recent response" +
+          (q.updatedAt ? " on " + new Date(q.updatedAt).toLocaleString() : "") + "." +
+          (q.resetAt ? " The allowance resets " + new Date(q.resetAt).toLocaleDateString() + "." : "");
+        return '<span class="jd-qchip" title="' + esc(bits) + '"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>' +
+          esc(name) + ': ' + (q.used || 0).toLocaleString() + ' used · ' + (q.remaining || 0).toLocaleString() + ' left</span>';
+      }).join("");
+    }
+
     function loadRuns() {
       return api("/sourcing").then(function (d) {
         var host = $("#jdRuns"); if (!host) return;
         var runs = (d && d.runs) || [];
         state.runs = runs;
+        renderQuota((d && d.apiQuota) || []);
         // FAILSAFE: if the backend reports non-durable storage, warn LOUDLY before the user
         // saves work that won't survive a restart. durable===false should never happen in prod.
         var warn = (d && d.durable === false)
@@ -10204,7 +10230,17 @@
           var phs = (r.candidates || []).filter(function (c) { return c.phone; }).length;
           var reach = '<span class="jd-reach">' +
             '<span class="' + (ems ? "jr-em" : "jr-zero") + '" title="Candidates on this list with a validated email: how many you can message by email right now."><svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>' + ems + ' email' + (ems === 1 ? "" : "s") + '</span>' +
-            '<span class="' + (phs ? "jr-ph" : "jr-zero") + '" title="Candidates on this list with a phone number: how many you can text or call right now."><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' + phs + ' phone' + (phs === 1 ? "" : "s") + '</span></span>';
+            '<span class="' + (phs ? "jr-ph" : "jr-zero") + '" title="Candidates on this list with a phone number: how many you can text or call right now."><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' + phs + ' phone' + (phs === 1 ? "" : "s") + '</span>' +
+            // Credit stamp: what the search itself cost in paid people-search requests
+            // (recorded from this run on; older lists saved before then have no stamp).
+            (r.apiUsage ? (function (au) {
+              var cr = au.rapidapi || 0;
+              var t = "Search-API credits spent building this list: " + cr + " people-search request" + (cr === 1 ? "" : "s") + " from your monthly plan" +
+                (au.serper ? ", plus " + au.serper + " wide-web search" + (au.serper === 1 ? "" : "es") + " billed in fractions of a cent" : "") +
+                ". The free engines did the rest, and enrichment is metered separately.";
+              return '<span class="' + (cr ? "jr-api" : "jr-zero") + '" title="' + esc(t) + '"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>' + cr + ' credit' + (cr === 1 ? "" : "s") + '</span>';
+            })(r.apiUsage) : '') +
+            '</span>';
           return '<div class="jd-run"><div class="jd-run-main">' +
             '<input type="checkbox" class="jd-pick" data-pick="' + esc(r.id) + '" title="Tick lists to combine them into one" />' +
             '<div><b>' + esc(r.name) + '</b> ' + reach + '<span class="muted">· ' +
@@ -10483,6 +10519,7 @@
           if (!r.ok) { finishProgress("Search failed"); throw { stage: "Search", r: r }; }
           state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
           state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
+          state.usage = r.data.usage || null; // the run's search-API spend, saved onto the list
           renderPlan(); renderResults();
           if (!state.candidates.length) {
             finishProgress("No candidates found");
@@ -10495,7 +10532,7 @@
         var nameEl = $("#jdName");
         runName = (nameEl && nameEl.value.trim()) || (state.icp && state.icp.label) || title || "Candidate search";
         if (state.location && runName.indexOf(state.location) < 0) runName += " · " + state.location;
-        return send("/sourcing", "POST", { action: "save", name: runName, jd: state.jd, location: state.location || jdLocLabel(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings }).then(function (r) {
+        return send("/sourcing", "POST", { action: "save", name: runName, jd: state.jd, location: state.location || jdLocLabel(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings, apiUsage: state.usage || undefined }).then(function (r) {
           if (!r.ok) throw { stage: "Save", r: r };
           savedId = r.data && r.data.run && r.data.run.id;
         });
@@ -12526,9 +12563,9 @@
     }
 
     /* ---- small field helpers ---- */
-    function fld(id, label, ph, type) {
+    function fld(id, label, ph, type, val) {
       return '<div class="vt-field"><label>' + esc(label) + "</label>" +
-        '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph || "") + '" /></div>';
+        '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph || "") + '" value="' + esc(val == null ? "" : String(val)) + '" /></div>';
     }
     function vget(id) { var e = $("#" + id); return e ? e.value.trim() : ""; }
     function statusPill(s) { return '<span class="vt-pill ' + esc(s) + '">' + esc(s) + "</span>"; }
@@ -12610,6 +12647,19 @@
         { label: "Interest level", type: "enum", enumOptions: ["low", "medium", "high"] }
       ];
       var x = (d.extraction && d.extraction.length) ? d.extraction : X_DEFAULTS;
+      // Role FAQ rows: the facts the agent may answer candidate questions from
+      // (pay, remote, benefits, process). Grounded: it only ever answers from
+      // what's written here; anything else it defers to the recruiter.
+      var kn = d.knowledge || [];
+      var K_HINT_Q = ["e.g. Is the role remote?", "e.g. What does it pay?", "e.g. What are the benefits?", "e.g. What's the interview process?", "e.g. When would this start?", "e.g. Who is the company?"];
+      function krow(i) {
+        var kk = kn[i] || {};
+        return '<div class="vt-qrow vt-krow">' +
+          '<span class="vt-qn">' + (i + 1) + "</span>" +
+          '<input id="vtKq' + i + '" placeholder="' + K_HINT_Q[i] + '" value="' + esc(kk.question || "") + '" aria-label="FAQ question ' + (i + 1) + '" />' +
+          '<input id="vtKa' + i + '" placeholder="The answer, the way you\'d say it on the phone" value="' + esc(kk.answer || "") + '" aria-label="FAQ answer ' + (i + 1) + '" />' +
+          "<span></span></div>";
+      }
       function xrow(i) {
         var xf = x[i] || {};
         var types = [["text", "Text"], ["number", "Number"], ["boolean", "Yes / no"], ["enum", "Choices"]];
@@ -12625,19 +12675,19 @@
       return '<div class="vt-card"><h3>' + (d.id ? "Edit desk" : "New vetting desk") + "</h3>" +
         '<div class="vt-section">The role</div>' +
         '<div class="vt-form-grid">' +
-        fld("vtfName", "Desk name (internal)", "VP Sales, East") +
-        fld("vtfRole", "Role title (spoken on the call)", "VP of Sales") +
-        fld("vtfCompany", "Hiring company (blank = confidential search)", "Acme Corp, or leave blank to keep it confidential") +
+        fld("vtfName", "Desk name (internal)", "VP Sales, East", "text", d.name) +
+        fld("vtfRole", "Role title (spoken on the call)", "VP of Sales", "text", d.roleTitle) +
+        fld("vtfCompany", "Hiring company (blank = confidential search)", "Acme Corp, or leave blank to keep it confidential", "text", d.clientCompany) +
         numberSelect(d) +
         "</div>" +
         '<div class="vt-field vt-field-full" style="margin-top:14px"><label>Job description</label>' +
         '<textarea id="vtfJd" rows="6" placeholder="Paste the full job description here. The agent uses this as its source of truth, it won\'t read it aloud.">' + esc(d.jobDescription || "") + "</textarea></div>" +
         '<div class="vt-section">Your voice on the call</div>' +
         '<div class="vt-form-grid">' +
-        fld("vtfAgentName", "Your name (the agent introduces itself as)", "Ryan") +
-        fld("vtfAgentCompany", "Your firm", "Executive Search") +
+        fld("vtfAgentName", "Your name (the agent introduces itself as)", "Ryan", "text", d.persona && d.persona.agentName) +
+        fld("vtfAgentCompany", "Your firm", "Executive Search", "text", d.persona && d.persona.agentCompany) +
         voiceSelect(d) +
-        fld("vtfThreshold", "Pass threshold (0-100)", "70", "number") +
+        fld("vtfThreshold", "Pass threshold (0-100)", "70", "number", d.passThreshold) +
         "</div>" +
         '<div class="vt-section">Top qualifiers <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- what the agent screens for on the call</span></div>' +
         '<div class="vt-quals">' +
@@ -12653,6 +12703,23 @@
         '<div class="vt-section">Data captured per call <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- facts the scorer pulls from every conversation</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">Each field is extracted from the transcript when the candidate actually says it (never guessed from their profile). Blank rows are ignored; the defaults cover comp, notice, relocation, and interest.</div>' +
         xrow(0) + xrow(1) + xrow(2) + xrow(3) + xrow(4) + xrow(5) +
+        '<div class="vt-section">Role FAQ <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- questions the agent is allowed to answer</span></div>' +
+        '<div class="vt-quals">' +
+          '<div class="vt-gen">' +
+            '<span class="vt-gen-ic"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg></span>' +
+            '<div class="vt-gen-copy"><b>Let the agent answer the questions candidates actually ask</b>' +
+            '<span>Pay, remote policy, benefits, process. The agent answers ONLY from what\'s here, in its own words; anything not covered gets a warm "great question for the recruiter". Draft it from the JD, then edit.</span></div>' +
+            '<button type="button" class="vt-btn vt-btn-primary vt-gen-btn" id="vtGenK"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg> Draft from JD</button>' +
+          "</div>" +
+          '<div class="vt-qhead"><span></span><span>If they ask</span><span>The agent may answer</span><span></span></div>' +
+          krow(0) + krow(1) + krow(2) + krow(3) + krow(4) + krow(5) +
+        "</div>" +
+        '<div class="vt-section">Mid-call abilities <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- real actions the agent can take, both optional</span></div>' +
+        '<div class="vt-hint" style="margin:-2px 2px 8px">With a scheduling link set, the agent can text it to a strong candidate DURING the call and lock the next step on the spot. With a transfer number set, it can hand an exceptional candidate (or anyone who asks for a human) straight to you, live.</div>' +
+        '<div class="vt-form-grid">' +
+        '<div class="vt-field"><label>Scheduling link (texted mid-call)</label><input id="vtfBooking" placeholder="https://tidycal.com/you/next-step" value="' + esc(d.bookingUrl || "") + '" /></div>' +
+        '<div class="vt-field"><label>Live transfer number</label><input id="vtfTransfer" placeholder="+13105551234" value="' + esc(d.transferNumber || "") + '" /></div>' +
+        "</div>" +
         '<div class="vt-section">Next step <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- auto-filled; leave blank to use the friendly defaults</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">Leave blank and the agent will, in its own natural words, <b>if qualified:</b> tell them they\'re a strong fit, that you\'ll send the full JD, and ask for an updated resume tailored to what you discussed. <b>If not a fit:</b> let them down kindly and say you\'ll keep them in mind for roles that better suit their background.</div>' +
         '<div class="vt-form-grid">' +
@@ -12684,13 +12751,21 @@
           enumOptions: xt === "enum" ? xo.split(",").map(function (s) { return s.trim(); }).filter(Boolean) : undefined
         });
       }
+      var ks = [];
+      for (var k = 0; k < 6; k++) {
+        var kq = vget("vtKq" + k), ka = vget("vtKa" + k);
+        if (kq && ka) ks.push({ question: kq, answer: ka });
+      }
       var payload = {
         name: vget("vtfName"), motion: motion, roleTitle: vget("vtfRole"), clientCompany: vget("vtfCompany"),
         phoneNumber: vget("vtfPhone"), jobDescription: $("#vtfJd") ? $("#vtfJd").value : "",
         voiceId: vget("vtfVoice"), passThreshold: parseInt(vget("vtfThreshold") || "70", 10),
         persona: { agentName: vget("vtfAgentName") || "Ryan", agentCompany: vget("vtfAgentCompany") || "Executive Search" },
         questions: qs,
-        extraction: xs
+        extraction: xs,
+        knowledge: ks,
+        bookingUrl: vget("vtfBooking"),
+        transferNumber: vget("vtfTransfer")
       };
       var ny = $("#vtfNextYes"), nn = $("#vtfNextNo");
       if (ny && ny.value.trim()) payload.nextStepQualified = ny.value.trim();
@@ -12724,6 +12799,16 @@
         chips += '<span class="vt-chip vt-chip-learn">self-tuned' + (appliedRev ? " <b>v" + appliedRev.version + "</b>" : "") + "</span>";
       }
       if (d.learning && d.learning.autoLearn) chips += '<span class="vt-chip vt-chip-learn">auto-learn on</span>';
+      // Engine health, outcomes only: talk time, spend, and how human it reads.
+      if (d.health && d.health.minutes > 0) {
+        chips += '<span class="vt-chip">' + d.health.minutes + " min" +
+          (d.health.costUsd ? " · $" + d.health.costUsd.toFixed(2) : "") + "</span>";
+      }
+      if (d.health && d.health.avgRealism != null) {
+        chips += '<span class="vt-chip" title="How human the agent sounded across scored calls, 0-100">sounds human <b>' + d.health.avgRealism + "</b></span>";
+      }
+      if (d.bookingUrl) chips += '<span class="vt-chip" title="Can text the scheduling link mid-call">texts calendar</span>';
+      if (d.transferNumber) chips += '<span class="vt-chip" title="Can hand the call to you live">live transfer</span>';
       return '<div class="vt-desk" data-id="' + d.id + '">' +
         '<div class="vt-desk-head">' +
         '<h3 class="vt-desk-title">' + esc(d.name) + " <span>· " + esc(d.roleTitle || "no role title") + "</span></h3>" +
@@ -12815,6 +12900,41 @@
           }
           toast("Pulled " + qs.length + " qualifier" + (qs.length === 1 ? "" : "s") + " from the JD, tweak if you like.");
         }).catch(function () { done(); toast("Couldn’t reach the server."); });
+      });
+      var genK = $("#vtGenK");
+      if (genK) genK.addEventListener("click", function () {
+        var jd = $("#vtfJd") ? $("#vtfJd").value.trim() : "";
+        if (!jd) {
+          toast("Paste the job description first.");
+          var jdEl2 = $("#vtfJd");
+          if (jdEl2) { jdEl2.focus(); jdEl2.classList.add("vt-nudge"); setTimeout(function () { jdEl2.classList.remove("vt-nudge"); }, 900); }
+          return;
+        }
+        var idleK = genK.innerHTML;
+        genK.disabled = true;
+        genK.innerHTML = '<span class="spinner"></span> Reading the JD…';
+        var kBox = genK.closest(".vt-quals");
+        if (kBox) kBox.classList.add("vt-genning");
+        function doneK() {
+          genK.disabled = false; genK.innerHTML = idleK;
+          if (kBox) kBox.classList.remove("vt-genning");
+        }
+        send("/vetting/desks", "POST", { action: "generate-knowledge", jobDescription: jd, roleTitle: vget("vtfRole"), clientCompany: vget("vtfCompany") }).then(function (r) {
+          doneK();
+          if (!r.ok) { toast((r.data && r.data.detail) || "Couldn’t draft the FAQ."); return; }
+          var ks = (r.data && r.data.knowledge) || [];
+          for (var i = 0; i < 6; i++) {
+            var kk = ks[i] || { question: "", answer: "" };
+            if ($("#vtKq" + i)) $("#vtKq" + i).value = kk.question || "";
+            if ($("#vtKa" + i)) $("#vtKa" + i).value = kk.answer || "";
+            var krEl = $("#vtKq" + i) && $("#vtKq" + i).closest(".vt-qrow");
+            if (krEl && ks[i]) {
+              krEl.classList.add("vt-filled");
+              (function (rr, delay) { setTimeout(function () { rr.classList.remove("vt-filled"); }, 1200 + delay); })(krEl, i * 120);
+            }
+          }
+          toast("Drafted " + ks.length + " answer" + (ks.length === 1 ? "" : "s") + " from the JD. Only what's written here gets said on calls.");
+        }).catch(function () { doneK(); toast("Couldn’t reach the server."); });
       });
       Array.prototype.forEach.call(body.querySelectorAll("[data-vtact]"), function (b) {
         b.addEventListener("click", function () { deskAction(b.getAttribute("data-vtact"), b.getAttribute("data-id"), b, body); });
@@ -13200,13 +13320,15 @@
 
     /* ---- conversation feel (barge-in, silence, backchannels) ---- */
     function optTurnCard(o) {
-      var t = (o && o.turnTuning) || { interruptions: true, interruptionSensitivity: 0.6, idleTimeoutSec: 8, idleReminder: "", backchannelWords: [] };
+      var t = (o && o.turnTuning) || { interruptions: true, interruptionSensitivity: 0.6, pauseBeforeSpeakingMs: 0, idleTimeoutSec: 8, idleReminder: "", backchannelWords: [] };
       return '<div class="vt-card">' + cardHead("message", "Conversation feel") +
         '<div class="vt-hint" style="margin-top:6px">How the agent behaves in the back-and-forth: whether callers can talk over it, how fast it takes its turn, and what it does with silence. Saved settings push to the live line; the phone engine applies what it supports and the rest is enforced through the agent\'s instructions.</div>' +
         '<label class="vt-must" style="margin-top:14px"><input type="checkbox" id="vtTtInt"' + (t.interruptions ? " checked" : "") + ' /><span>Callers can interrupt the agent (barge-in), the strongest single realism signal</span></label>' +
         '<div class="vt-sliders" style="margin-top:14px">' +
         sliderRow("vtTtSens", "Responsiveness", t.interruptionSensitivity, 0, 1, 0.05,
           "Higher = it takes its turn sooner after a pause; lower = it waits out slow, thoughtful callers. 0.6 matches the engine’s natural timing.", ["patient", "quick"]) +
+        sliderRow("vtTtPause", "Thinking pause (milliseconds)", t.pauseBeforeSpeakingMs || 0, 0, 800, 50,
+          "A small extra beat before the agent starts talking. 150 to 400 reads as a person thinking; 0 is the fastest turn-taking.", ["instant", "considered"]) +
         sliderRow("vtTtIdle", "Silence check-in (seconds)", t.idleTimeoutSec, 3, 30, 1,
           "After this much caller silence, the agent gently re-engages instead of sitting in dead air.", ["3s", "30s"]) +
         "</div>" +
@@ -13424,6 +13546,7 @@
           turnTuning: {
             interruptions: !!($("#vtTtInt") && $("#vtTtInt").checked),
             interruptionSensitivity: parseFloat(($("#vtTtSens") || {}).value || "0.6"),
+            pauseBeforeSpeakingMs: parseInt(($("#vtTtPause") || {}).value || "0", 10),
             idleTimeoutSec: parseInt(($("#vtTtIdle") || {}).value || "8", 10),
             idleReminder: vget("vtTtRem"),
             backchannelWords: vget("vtTtBack").split(",").map(function (w) { return w.trim(); }).filter(Boolean)

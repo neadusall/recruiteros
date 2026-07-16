@@ -60,12 +60,32 @@ export interface TurnTuning {
    * the agent (can false-trigger on "mm-hm"); low = the agent finishes clauses.
    */
   interruptionSensitivity: number;
+  /**
+   * 0-800. Extra milliseconds the agent holds AFTER the caller finishes before
+   * it starts speaking. A small beat (150-400ms) reads as "thinking" and is one
+   * of the cheapest human tells; 0 keeps the engine's fastest turn-taking.
+   */
+  pauseBeforeSpeakingMs: number;
   /** Seconds of caller silence before the agent gently re-engages. */
   idleTimeoutSec: number;
   /** What the agent says to re-engage after that silence. */
   idleReminder: string;
   /** Short listening sounds the agent may use while the caller talks. */
   backchannelWords: string[];
+}
+
+/**
+ * One thing the agent is allowed to KNOW and answer about the role/company:
+ * comp band, remote policy, benefits, interview process, who the client is.
+ * Deflecting these questions is the #1 "this is a bot" tell, so desks carry a
+ * small FAQ the agent answers from — and ONLY from (never invented).
+ */
+export interface KnowledgeItem {
+  id: string;
+  /** The candidate question this answers, e.g. "Is the role remote?". */
+  question: string;
+  /** The answer the agent may give, in speakable plain language. */
+  answer: string;
 }
 
 /** One structured field the scorer extracts from every call's transcript. */
@@ -247,6 +267,12 @@ export interface VettingDesk {
   nextStepQualified: string;
   /** What an UNQUALIFIED candidate is told (kind, honest, no false promises). */
   nextStepUnqualified: string;
+  /** Role/company FAQ the agent may answer candidate questions from. */
+  knowledge?: KnowledgeItem[];
+  /** Scheduling link (e.g. TidyCal) the agent can text a strong candidate mid-call. */
+  bookingUrl?: string;
+  /** E.164 number of the desk's recruiter for a live mid-call transfer, if wanted. */
+  transferNumber?: string;
 
   persona: DeskPersona;
   /** Cloned voice id (the recruiter's own consented voice; see Voice Drops). */
@@ -292,6 +318,10 @@ export interface VettingDeskInput {
   passThreshold?: number;
   /** Structured fields to extract per call (normalized + capped on save). */
   extraction?: ExtractionField[];
+  /** Role/company FAQ items (normalized + capped on save). */
+  knowledge?: KnowledgeItem[];
+  bookingUrl?: string;
+  transferNumber?: string;
 }
 
 /**
@@ -434,6 +464,8 @@ export interface VettingCall {
   /** Full transcript as ordered turns. */
   transcript: TranscriptTurn[];
   durationSec?: number;
+  /** Estimated engine cost of this call (metered minutes x rate), for the health strip. */
+  costUsd?: number;
 
   /* ---- analysis (filled once scored) ---- */
   scores?: RubricScores;
@@ -580,6 +612,7 @@ export const DEFAULT_LEARNING: DeskLearning = {
 export const DEFAULT_TURN_TUNING: TurnTuning = {
   interruptions: true,
   interruptionSensitivity: 0.6,
+  pauseBeforeSpeakingMs: 0,
   idleTimeoutSec: 8,
   idleReminder: "No rush at all... take your time.",
   backchannelWords: ["mm-hm", "right", "okay", "yeah"],
@@ -597,6 +630,7 @@ export function clampTurnTuning(t?: Partial<TurnTuning> | null): TurnTuning {
   return {
     interruptions: t?.interruptions === undefined ? DEFAULT_TURN_TUNING.interruptions : Boolean(t.interruptions),
     interruptionSensitivity: n(t?.interruptionSensitivity, 0, 1, DEFAULT_TURN_TUNING.interruptionSensitivity),
+    pauseBeforeSpeakingMs: Math.round(n(t?.pauseBeforeSpeakingMs, 0, 800, DEFAULT_TURN_TUNING.pauseBeforeSpeakingMs)),
     idleTimeoutSec: Math.round(n(t?.idleTimeoutSec, 3, 30, DEFAULT_TURN_TUNING.idleTimeoutSec)),
     idleReminder: (typeof t?.idleReminder === "string" && t.idleReminder.trim())
       ? t.idleReminder.trim().slice(0, 160)
@@ -638,6 +672,22 @@ export function normalizeExtraction(fields?: ExtractionField[] | null): Extracti
           : undefined,
       };
     });
+}
+
+/**
+ * Normalize a desk's role/company FAQ: trimmed, capped at 12 items, answers
+ * kept short enough to stay speakable (and to keep the prompt lean).
+ */
+export function normalizeKnowledge(items?: KnowledgeItem[] | null): KnowledgeItem[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .filter((k) => k && typeof k.question === "string" && k.question.trim() && typeof k.answer === "string" && k.answer.trim())
+    .slice(0, 12)
+    .map((k, i) => ({
+      id: k.id || `kn_${i}`,
+      question: k.question.trim().slice(0, 160),
+      answer: k.answer.trim().slice(0, 400),
+    }));
 }
 
 /** Clamp arbitrary input into a safe, speakable VoiceTuning. */

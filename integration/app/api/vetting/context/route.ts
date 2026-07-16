@@ -51,7 +51,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       dynamic_variables: {
         agent_name: "the recruiter", agent_company: "our firm",
-        first_name: "there", current_title: "", current_company: "", experience: "",
+        first_name: "there", current_title: "", current_company: "", experience: "", resume: "",
       },
     });
   }

@@ -6468,6 +6468,30 @@
       if (r.origin) return r.origin;
       return r.source === "loxo" ? "Loxo" : r.source === "zoominfo-api" ? "API" : r.source === "manual" ? "Manual" : "Imported";
     }
+    function agoShort(iso) {
+      var t = Date.parse(iso || ""); if (!isFinite(t)) return "";
+      var d = Math.floor((Date.now() - t) / 86400000);
+      if (d < 0) return "";
+      if (d === 0) return "today";
+      if (d < 14) return d + "d ago";
+      if (d < 60) return Math.floor(d / 7) + "w ago";
+      if (d < 365) return Math.floor(d / 30) + "mo ago";
+      return Math.floor(d / 365) + "y ago";
+    }
+    function commBucket(r) {
+      // Communication state, synced from the ATS activity log + our own sends.
+      if (r.dnc) return "Do not contact";
+      if (r.lastContactedAt) {
+        var d = (Date.now() - Date.parse(r.lastContactedAt)) / 86400000;
+        if (isFinite(d)) {
+          if (d <= 14) return "Contacted: last 14 days";
+          if (d <= 90) return "Contacted: last 90 days";
+          return "Contacted: older";
+        }
+      }
+      if (r.kind === "prospect" && r.statusVal && r.statusVal !== "queued") return "Contacted: in pipeline";
+      return "Never contacted";
+    }
     function buildRows(prospects, records) {
       var out = [], seen = {};
       prospects.forEach(function (p) {
@@ -6480,7 +6504,8 @@
           source: p.category || "Pipeline", owner: "", tags: [],
           statusVal: p.status, statusLabel: statusLabel(p.status, lifecycle),
           photoUrl: p.photoUrl || "", exp: p.experienceSummary || p.experience || p.summary || "",
-          seqName: p.sequenceName || ""
+          seqName: p.sequenceName || "",
+          dnc: p.status === "do_not_contact", lastContactedAt: "", lastContactChannel: ""
         };
         seen[dedupKey(row.fullName, row.company, row.email, row.linkedinUrl)] = row;
         out.push(row);
@@ -6495,6 +6520,12 @@
           if (!dup.phone && phone) dup.phone = phone;
           if (!dup.linkedinUrl && r.linkedinUrl) dup.linkedinUrl = r.linkedinUrl;
           if (!dup.location && loc) dup.location = loc;
+          // Communication state rides along so the pipeline copy shows ATS history.
+          if (r.doNotContact) dup.dnc = true;
+          if (r.lastContactedAt && (!dup.lastContactedAt || r.lastContactedAt > dup.lastContactedAt)) {
+            dup.lastContactedAt = r.lastContactedAt;
+            dup.lastContactChannel = r.lastContactChannel || dup.lastContactChannel;
+          }
           dup.altDataId = r.id;
           return;
         }
@@ -6505,7 +6536,8 @@
           linkedinUrl: r.linkedinUrl || "", location: loc,
           source: dataSourceLabel(r), owner: r.owner || "", tags: Array.isArray(r.tags) ? r.tags : [],
           statusVal: r.stage || "", statusLabel: r.stage || "No stage",
-          photoUrl: personPhoto(r) || "", exp: r.bio || "", seqName: ""
+          photoUrl: personPhoto(r) || "", exp: r.bio || "", seqName: "",
+          dnc: !!r.doNotContact, lastContactedAt: r.lastContactedAt || "", lastContactChannel: r.lastContactChannel || ""
         });
       });
       return out;
@@ -6515,6 +6547,7 @@
     var CN_FACETS = [
       ["source", "Source", function (r) { return [r.source || "Other"]; }],
       ["status", "Status / Stage", function (r) { return [r.statusLabel || "No stage"]; }],
+      ["comm", "Communication", function (r) { return [commBucket(r)]; }],
       ["contact", "Contact info", function (r) {
         return [r.email ? "Has email" : "Missing email", r.phone ? "Has phone" : "Missing phone", r.linkedinUrl ? "Has LinkedIn" : "Missing LinkedIn"];
       }],
@@ -6630,9 +6663,16 @@
       }
       var enrichLbl = pending ? '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg>' : (r.email && r.phone) ? "↻" : '<svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>';
       var enrichTitle = pending ? "Find hiring manager" : (r.email && r.phone) ? "Re-enrich contact" : "Enrich contact";
+      var commChip = "";
+      if (r.dnc) {
+        commChip = '<span class="cn-comm" style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;background:#fdecec;color:#b3261e;border:1px solid #f2c4c0" title="Protected: outreach from this app is blocked for this person.">Do not contact</span>';
+      } else if (r.lastContactedAt) {
+        var agoTxt = agoShort(r.lastContactedAt);
+        if (agoTxt) commChip = '<span class="cn-comm" style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;background:#eef2fd;color:#2e5bd7;border:1px solid #d7e0f8" title="Last communication on record (ATS activity plus sends from this app). New first touches wait out the cooldown automatically.">Contacted ' + esc(agoTxt) + (r.lastContactChannel ? " · " + esc(r.lastContactChannel) : "") + '</span>';
+      }
       var tr = '<tr class="pr-row' + (state.sel[r.id] ? " pr-selected" : "") + '" data-rid="' + esc(r.id) + '">' +
         '<td class="pr-c-check"><input type="checkbox" class="pr-check" data-rid="' + esc(r.id) + '"' + (state.sel[r.id] ? " checked" : "") + ' /></td>' +
-        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + name + li + expToggle +
+        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + name + li + expToggle + commChip +
           (r.seqName ? '<span class="pr-seqtag" title="Assigned sequence">▸ ' + esc(r.seqName) + "</span>" : "") +
           '<span class="cn-sub">' + (r.title && !pending ? esc(r.title) + " · " : "") +
             '<span class="cn-src' + (r.kind === "data" ? " ats" : "") + '" title="' + (r.kind === "data" ? "From the ATS people database" : "Pipeline") + ': ' + esc(r.source) + '">' + esc(r.source) + "</span></span></span></td>" +
@@ -6656,8 +6696,12 @@
       var pRows = list.filter(function (r) { return r.kind === "prospect"; });
       var dCount = list.length - pRows.length;
       var counts = pRows.reduce(function (m, r) { m[r.statusVal] = (m[r.statusVal] || 0) + 1; return m; }, {});
+      // ATS-synced people marked do-not-contact count into the same card as
+      // pipeline DNC, so the number means "everyone this app will refuse to touch".
+      var dncData = list.filter(function (r) { return r.kind === "data" && r.dnc; }).length;
       var stages = lifecycle.map(function (l) {
-        return '<div class="stage"><b>' + (counts[l.status] || 0) + "</b><span>" + esc(l.recruiting || l.status) + "</span></div>";
+        var n = (counts[l.status] || 0) + (l.status === "do_not_contact" ? dncData : 0);
+        return '<div class="stage"><b>' + n + "</b><span>" + esc(l.recruiting || l.status) + "</span></div>";
       }).join("") + '<div class="stage"><b>' + dCount + '</b><span>People database</span></div>';
       var selIds = list.filter(function (r) { return state.sel[r.id]; }).map(function (r) { return r.id; });
       var allOn = list.length > 0 && selIds.length === list.length;
@@ -6931,7 +6975,10 @@
               close();
               var d = res.data || {}, msg = "Sent " + (d.sent || 0);
               if (d.dryRun) msg += " (" + d.dryRun + " simulated: connect a sending provider in Setup)";
-              if (d.failed) msg += ", " + d.failed + " failed";
+              var prot = d.errors ? ((d.errors.do_not_contact || 0) + (d.errors.recently_contacted || 0)) : 0;
+              var hardFail = Math.max(0, (d.failed || 0) - prot);
+              if (hardFail) msg += ", " + hardFail + " failed";
+              if (prot) msg += ", " + prot + " protected (already in an ATS conversation)";
               if (d.skipped) msg += ", " + d.skipped + " skipped (no email)";
               toast(msg);
             }).catch(function () { go.disabled = false; go.textContent = "Send to " + recips.length; toast("Could not reach the server."); });
@@ -6970,6 +7017,8 @@
                 "Added: " + (d.added || 0) +
                 (d.deduped ? "\nAlready in campaign: " + d.deduped : "") +
                 (d.noPhone ? "\nNo phone yet: " + d.noPhone : "") +
+                (d.protectedDnc ? "\nProtected (do not contact): " + d.protectedDnc : "") +
+                (d.protectedRecent ? "\nProtected (contacted recently): " + d.protectedRecent : "") +
                 (d.invalidPhone ? "\nInvalid phone: " + d.invalidPhone : "") +
                 (d.optedOut ? "\nOpted out (never texted): " + d.optedOut : "") +
                 (d.validation === "blocked_no_qstash" ? "\n\nWARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? "\n\nTelnyx is confirming cell lines now; anything that is not a cell is removed automatically." : "")) +
@@ -7485,6 +7534,8 @@
                 "Added: " + (d.added || 0) +
                 (d.deduped ? "\nAlready in campaign: " + d.deduped : "") +
                 (d.noPhone ? "\nNo phone yet: " + d.noPhone : "") +
+                (d.protectedDnc ? "\nProtected (do not contact): " + d.protectedDnc : "") +
+                (d.protectedRecent ? "\nProtected (contacted recently): " + d.protectedRecent : "") +
                 (d.invalidPhone ? "\nInvalid phone: " + d.invalidPhone : "") +
                 (d.optedOut ? "\nOpted out (never texted): " + d.optedOut : "") +
                 (d.validation === "blocked_no_qstash" ? "\n\nWARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? "\n\nTelnyx is confirming cell lines now; anything that is not a cell is removed automatically." : "")) +
@@ -9577,7 +9628,10 @@
               close();
               var d = res.data || {}, msg = "Sent " + (d.sent || 0);
               if (d.dryRun) msg += " (" + d.dryRun + " simulated: connect a sending provider in Setup)";
-              if (d.failed) msg += ", " + d.failed + " failed";
+              var prot = d.errors ? ((d.errors.do_not_contact || 0) + (d.errors.recently_contacted || 0)) : 0;
+              var hardFail = Math.max(0, (d.failed || 0) - prot);
+              if (hardFail) msg += ", " + hardFail + " failed";
+              if (prot) msg += ", " + prot + " protected (already in an ATS conversation)";
               if (d.skipped) msg += ", " + d.skipped + " skipped (no email)";
               toast(msg);
             }).catch(function () { go.disabled = false; go.textContent = "Send to " + recips.length; toast("Could not reach the server."); });
@@ -9832,6 +9886,7 @@
     function jdLocLabel() { var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " +" + r + "mi") : loc; }
     function jdLocPhrase() { var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " (within ~" + r + " miles, include ALL surrounding metros and cities within that drive, not just " + loc + ")") : loc; }
     function jdWithLoc(jd) { var p = jdLocPhrase(); return p ? (jd + "\n\nBased in: " + p) : jd; }
+    function jdBreadth() { var s = $("#jdBreadth"); return (s && s.value) || "balanced"; }
 
     el.innerHTML =
       '<style>' +
@@ -9943,6 +9998,11 @@
       '.jd-reach .jr-em{color:var(--ok);background:color-mix(in srgb, var(--ok) 10%, transparent);border:1px solid color-mix(in srgb, var(--ok) 38%, transparent)}' +
       '.jd-reach .jr-ph{color:var(--brand-2);background:var(--brand-soft);border:1px solid color-mix(in srgb, var(--brand) 38%, transparent)}' +
       '.jd-reach .jr-zero{color:var(--text-dim);background:var(--bg-soft);border:1px solid var(--border-strong)}' +
+      '.jd-reach .jr-api{color:#8a5a00;background:color-mix(in srgb, #d97706 10%, transparent);border:1px solid color-mix(in srgb, #d97706 38%, transparent)}' +
+      '.jd-quota{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}' +
+      '.jd-quota .jd-qchip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;color:#8a5a00;background:color-mix(in srgb, #d97706 8%, transparent);border:1px solid color-mix(in srgb, #d97706 34%, transparent);cursor:help}' +
+      '.jd-quota .jd-qchip .isvg{width:12px;height:12px}' +
+      '.jd-quota .jd-qmuted{color:var(--text-dim);background:var(--bg-soft);border-color:var(--border-strong)}' +
       '.jd-pick{flex:0 0 auto;width:15px;height:15px;margin:0;accent-color:var(--accent,#2e5bd7);cursor:pointer}' +
       '@media (max-width:760px){.jd-run{flex-direction:column;align-items:stretch}.jd-run-actions{justify-content:flex-start}}' +
       '.jd-depth{border:1px solid var(--border-strong);border-radius:12px;background:var(--bg-soft);padding:14px 16px;margin-top:14px}' +
@@ -9953,7 +10013,13 @@
       '.jd-opt2-top{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--text);cursor:pointer}' +
       '.jd-opt2-top input[type=number]{width:66px;background:var(--bg);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px}' +
       '.jd-opt2-top input[type=checkbox]{width:auto;margin:0}' +
-      '.jd-opt2-top input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
+      '.jd-opt2-top select{background:var(--bg);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px;cursor:pointer}' +
+      '.jd-opt2-top input:focus,.jd-opt2-top select:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
+      '.jd-englist{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px}' +
+      '.jd-eng{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:2px 10px;border-radius:999px;border:1px solid var(--border-strong);color:var(--text-dim);background:var(--bg);cursor:help}' +
+      '.jd-eng .jd-eng-dot{width:7px;height:7px;border-radius:50%;background:var(--text-dim);flex:0 0 auto}' +
+      '.jd-eng.on{color:var(--ok);border-color:color-mix(in srgb, var(--ok) 38%, transparent);background:color-mix(in srgb, var(--ok) 8%, transparent)}' +
+      '.jd-eng.on .jd-eng-dot{background:var(--ok)}' +
       '.jd-opt2-def{font-size:12px;color:var(--text-muted);line-height:1.5;margin-top:4px}' +
                         '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
@@ -9965,7 +10031,7 @@
             '<p>When it says Done, scroll to <b>Your saved candidate lists</b> and act on it: deep-vet, enrich, then send to Candidates or straight to OS Text.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>Set the depth of the search</h5>' +
-            '<p>The four options above the button shape how wide a run goes; each is explained right where it sits. The defaults (scan 500, min fit 10, both boxes off) are right for most roles.</p>' +
+            '<p>The options above the button shape how wide a run goes; each is explained right where it sits. The defaults (Balanced breadth, scan 500, min fit 10, both boxes off) are right for most roles. Pick <b>Wide net</b> when you want the biggest possible pool: it runs every title variation, digs deeper on every search, and catches people whose profiles word the location differently, while the same location rules and ranking keep the list honest.</p>' +
             '<p><b>Dive deeper / Refine</b>: After a run, type a plain instruction (e.g. "only Director and up in medical devices, exclude agencies") to tighten or widen the profile, then press Initiate Search again; the refined profile drives the next run.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>On a saved list</h5>' +
@@ -10014,8 +10080,14 @@
         '</details>' +
         '<div class="jd-depth">' +
           '<div class="jd-depth-h">Set the depth of the search</div>' +
-          '<div class="jd-depth-sub">Four choices shape how wide this run goes. The defaults are right for most roles.</div>' +
+          '<div class="jd-depth-sub">These choices shape how wide this run goes. The defaults are right for most roles.</div>' +
+          '<div id="jdEngines" class="jd-englist" style="display:none"></div>' +
           '<div class="jd-depth-grid">' +
+            '<div class="jd-opt2">' +
+              '<label class="jd-opt2-top" for="jdBreadth">Search breadth ' +
+                '<select id="jdBreadth"><option value="focused">Focused</option><option value="balanced" selected>Balanced</option><option value="wide">Wide net</option></select></label>' +
+              '<div class="jd-opt2-def">How wide the net is cast. Focused sticks to the closest title matches. Balanced (the default) also runs every title variation of the role. Wide net digs deepest and adds passes that catch people whose profiles word the location differently: the biggest pool when you want volume. Location and ranking rules stay the same on every setting, so a wider net never means weaker matches at the top.</div>' +
+            '</div>' +
             '<div class="jd-opt2">' +
               '<label class="jd-opt2-top" for="jdCap"><input id="jdCap" type="number" min="1" max="5000" value="500"> Scan up to</label>' +
               '<div class="jd-opt2-def">The ceiling on how many candidates this run gathers. It is not a minimum: you get every qualified person the search finds, up to this number. 500 covers most roles.</div>' +
@@ -10050,6 +10122,7 @@
       '<div id="jdResults"></div>' +
       '<div class="card">' +
         '<div class="jd-cardhead"><h3 style="margin:0">Your saved candidate lists</h3>' +
+          '<span id="jdQuota" class="jd-quota"></span>' +
           '<button class="btn btn-ghost btn-sm" id="jdCombine" disabled title="Ran the same role a few times? Tick two or more lists below and combine them into one master list. Duplicates merge automatically and contact info found on any list is kept, so nobody slips through the cracks.">Combine lists</button>' +
         '</div>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
@@ -10117,11 +10190,31 @@
       host.innerHTML = html;
     }
 
+    // The saved-lists credit meter: the paid subscriptions' live balances, read from
+    // their own response headers server-side. Empty until the first search runs after
+    // this shipped; the hint chip says so instead of showing nothing.
+    function renderQuota(quotas) {
+      var el = $("#jdQuota"); if (!el) return;
+      if (!quotas.length) {
+        el.innerHTML = '<span class="jd-qchip jd-qmuted" title="The live credit balance for your paid people-search subscription shows here, read straight from its own responses. It fills in automatically the next time a search, deep-vet, or Test connection runs.">API credits: shown after your next search</span>';
+        return;
+      }
+      el.innerHTML = quotas.map(function (q) {
+        var name = String(q.host || "").replace(/\.p\.rapidapi\.com$/i, "");
+        var bits = "Live balance for the " + (q.host || "") + " subscription (RapidAPI), read from its most recent response" +
+          (q.updatedAt ? " on " + new Date(q.updatedAt).toLocaleString() : "") + "." +
+          (q.resetAt ? " The allowance resets " + new Date(q.resetAt).toLocaleDateString() + "." : "");
+        return '<span class="jd-qchip" title="' + esc(bits) + '"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>' +
+          esc(name) + ': ' + (q.used || 0).toLocaleString() + ' used · ' + (q.remaining || 0).toLocaleString() + ' left</span>';
+      }).join("");
+    }
+
     function loadRuns() {
       return api("/sourcing").then(function (d) {
         var host = $("#jdRuns"); if (!host) return;
         var runs = (d && d.runs) || [];
         state.runs = runs;
+        renderQuota((d && d.apiQuota) || []);
         // FAILSAFE: if the backend reports non-durable storage, warn LOUDLY before the user
         // saves work that won't survive a restart. durable===false should never happen in prod.
         var warn = (d && d.durable === false)
@@ -10137,7 +10230,17 @@
           var phs = (r.candidates || []).filter(function (c) { return c.phone; }).length;
           var reach = '<span class="jd-reach">' +
             '<span class="' + (ems ? "jr-em" : "jr-zero") + '" title="Candidates on this list with a validated email: how many you can message by email right now."><svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>' + ems + ' email' + (ems === 1 ? "" : "s") + '</span>' +
-            '<span class="' + (phs ? "jr-ph" : "jr-zero") + '" title="Candidates on this list with a phone number: how many you can text or call right now."><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' + phs + ' phone' + (phs === 1 ? "" : "s") + '</span></span>';
+            '<span class="' + (phs ? "jr-ph" : "jr-zero") + '" title="Candidates on this list with a phone number: how many you can text or call right now."><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' + phs + ' phone' + (phs === 1 ? "" : "s") + '</span>' +
+            // Credit stamp: what the search itself cost in paid people-search requests
+            // (recorded from this run on; older lists saved before then have no stamp).
+            (r.apiUsage ? (function (au) {
+              var cr = au.rapidapi || 0;
+              var t = "Search-API credits spent building this list: " + cr + " people-search request" + (cr === 1 ? "" : "s") + " from your monthly plan" +
+                (au.serper ? ", plus " + au.serper + " wide-web search" + (au.serper === 1 ? "" : "es") + " billed in fractions of a cent" : "") +
+                ". The free engines did the rest, and enrichment is metered separately.";
+              return '<span class="' + (cr ? "jr-api" : "jr-zero") + '" title="' + esc(t) + '"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>' + cr + ' credit' + (cr === 1 ? "" : "s") + '</span>';
+            })(r.apiUsage) : '') +
+            '</span>';
           return '<div class="jd-run"><div class="jd-run-main">' +
             '<input type="checkbox" class="jd-pick" data-pick="' + esc(r.id) + '" title="Tick lists to combine them into one" />' +
             '<div><b>' + esc(r.name) + '</b> ' + reach + '<span class="muted">· ' +
@@ -10399,7 +10502,7 @@
           return;
         }
         state.jd = jdNow;
-        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location }).then(function (r) {
+        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location, breadth: jdBreadth() }).then(function (r) {
           if (!r.ok) throw { stage: "Analyze", r: r };
           state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
           renderPlan(); updateRunCost();
@@ -10412,10 +10515,11 @@
         // A refined profile is sent along so the search actually honors the
         // Dive-deeper instruction instead of re-deriving the profile from the JD.
         var refinedIcp = (state.refineNote && state.icp) ? state.icp : undefined;
-        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, freshOnly: fresh, location: state.location, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).then(function (r) {
+        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).then(function (r) {
           if (!r.ok) { finishProgress("Search failed"); throw { stage: "Search", r: r }; }
           state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
           state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
+          state.usage = r.data.usage || null; // the run's search-API spend, saved onto the list
           renderPlan(); renderResults();
           if (!state.candidates.length) {
             finishProgress("No candidates found");
@@ -10428,7 +10532,7 @@
         var nameEl = $("#jdName");
         runName = (nameEl && nameEl.value.trim()) || (state.icp && state.icp.label) || title || "Candidate search";
         if (state.location && runName.indexOf(state.location) < 0) runName += " · " + state.location;
-        return send("/sourcing", "POST", { action: "save", name: runName, jd: state.jd, location: state.location || jdLocLabel(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings }).then(function (r) {
+        return send("/sourcing", "POST", { action: "save", name: runName, jd: state.jd, location: state.location || jdLocLabel(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings, apiUsage: state.usage || undefined }).then(function (r) {
           if (!r.ok) throw { stage: "Save", r: r };
           savedId = r.data && r.data.run && r.data.run.id;
         });
@@ -10514,7 +10618,11 @@
     }
     function hideProgress() { if (prog.timer) { clearInterval(prog.timer); prog.timer = null; } var h = $("#jdProgress"); if (h) { h.style.display = "none"; h.innerHTML = ""; } }
     /** ETA seconds for a discovery run, estimated from the candidate cap. */
-    function findEta(cap) { return Math.min(150, Math.max(8, Math.round((cap || 500) * 0.02))); }
+    // Wider breadth runs more searches, so the honest ETA scales with the dial.
+    function findEta(cap) {
+      var mult = jdBreadth() === "wide" ? 2 : jdBreadth() === "focused" ? 0.7 : 1;
+      return Math.min(240, Math.max(8, Math.round((cap || 500) * 0.02 * mult)));
+    }
 
     $("#jdGo").addEventListener("click", runOneClick);
 
@@ -10631,6 +10739,7 @@
                 var d = r.data || {};
                 toast('OS Text campaign "' + (d.campaignName || nm) + '" is ready: ' + (d.added || d.pushed || 0) + ' added' +
                   (d.noPhone ? (", " + d.noPhone + " skipped (no phone)") : "") +
+                  ((d.protectedDnc || d.protectedRecent) ? (", " + ((d.protectedDnc || 0) + (d.protectedRecent || 0)) + " protected (already in an ATS conversation)") : "") +
                   ". Review and launch in the OS Text tab." + (d.validation === "blocked_no_qstash" ? " WARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? " Telnyx is confirming cell lines now; anything that is not a cell is removed automatically." : "")));
               }).catch(function () {
                 goBtn.disabled = false; goBtn.textContent = "Send to OS Text →";
@@ -10725,6 +10834,26 @@
     ["#jdbTitle", "#jdbCompany", "#jdbNotes"].forEach(function (sel) {
       var e = $(sel); if (e) e.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.keyCode === 13) { ev.preventDefault(); doBuildJd(); } });
     });
+
+    /* "Search power" readout: which sources the next run will actually use, so a
+       missing key is visible up front instead of discovered from a thin result. */
+    function loadEngines() {
+      send("/sourcing", "POST", { action: "engines" }).then(function (r) {
+        var host = $("#jdEngines"); if (!host || !r.ok) return;
+        var e = (r.data && r.data.engines) || {};
+        function pill(on, label, offHint) {
+          return '<span class="jd-eng ' + (on ? "on" : "off") + '" title="' + esc(on ? label + " is active and will run on every search." : offHint) + '">' +
+            '<span class="jd-eng-dot"></span>' + esc(label) + (on ? "" : " · off") + '</span>';
+        }
+        host.style.display = "";
+        host.innerHTML = '<span class="muted" style="font-size:11.5px;margin-right:2px">Search power:</span>' +
+          pill(e.database, "Contact database", "Off: the enrichment worker is not reachable, so the free 57M-person database sweep is skipped this run.") +
+          pill(e.wideWeb, "Wide web search", "Off: paste your Serper key in Setup under JD Sourcing to turn on the deep web pass (about a nickel per full run).") +
+          pill(e.freeWeb, "Built-in web search", "Off: the built-in free pass is not responding right now. It comes back on its own; nothing to configure.") +
+          pill(e.peopleApi, "People search engine", "Off: connect a people-search subscription in Setup under JD Sourcing. This is the highest-volume source when active.");
+      }).catch(function () {});
+    }
+    loadEngines();
     loadRuns();
   }
 
@@ -12434,9 +12563,9 @@
     }
 
     /* ---- small field helpers ---- */
-    function fld(id, label, ph, type) {
+    function fld(id, label, ph, type, val) {
       return '<div class="vt-field"><label>' + esc(label) + "</label>" +
-        '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph || "") + '" /></div>';
+        '<input id="' + id + '" type="' + (type || "text") + '" placeholder="' + esc(ph || "") + '" value="' + esc(val == null ? "" : String(val)) + '" /></div>';
     }
     function vget(id) { var e = $("#" + id); return e ? e.value.trim() : ""; }
     function statusPill(s) { return '<span class="vt-pill ' + esc(s) + '">' + esc(s) + "</span>"; }
@@ -12518,6 +12647,19 @@
         { label: "Interest level", type: "enum", enumOptions: ["low", "medium", "high"] }
       ];
       var x = (d.extraction && d.extraction.length) ? d.extraction : X_DEFAULTS;
+      // Role FAQ rows: the facts the agent may answer candidate questions from
+      // (pay, remote, benefits, process). Grounded: it only ever answers from
+      // what's written here; anything else it defers to the recruiter.
+      var kn = d.knowledge || [];
+      var K_HINT_Q = ["e.g. Is the role remote?", "e.g. What does it pay?", "e.g. What are the benefits?", "e.g. What's the interview process?", "e.g. When would this start?", "e.g. Who is the company?"];
+      function krow(i) {
+        var kk = kn[i] || {};
+        return '<div class="vt-qrow vt-krow">' +
+          '<span class="vt-qn">' + (i + 1) + "</span>" +
+          '<input id="vtKq' + i + '" placeholder="' + K_HINT_Q[i] + '" value="' + esc(kk.question || "") + '" aria-label="FAQ question ' + (i + 1) + '" />' +
+          '<input id="vtKa' + i + '" placeholder="The answer, the way you\'d say it on the phone" value="' + esc(kk.answer || "") + '" aria-label="FAQ answer ' + (i + 1) + '" />' +
+          "<span></span></div>";
+      }
       function xrow(i) {
         var xf = x[i] || {};
         var types = [["text", "Text"], ["number", "Number"], ["boolean", "Yes / no"], ["enum", "Choices"]];
@@ -12533,19 +12675,19 @@
       return '<div class="vt-card"><h3>' + (d.id ? "Edit desk" : "New vetting desk") + "</h3>" +
         '<div class="vt-section">The role</div>' +
         '<div class="vt-form-grid">' +
-        fld("vtfName", "Desk name (internal)", "VP Sales, East") +
-        fld("vtfRole", "Role title (spoken on the call)", "VP of Sales") +
-        fld("vtfCompany", "Hiring company (blank = confidential search)", "Acme Corp, or leave blank to keep it confidential") +
+        fld("vtfName", "Desk name (internal)", "VP Sales, East", "text", d.name) +
+        fld("vtfRole", "Role title (spoken on the call)", "VP of Sales", "text", d.roleTitle) +
+        fld("vtfCompany", "Hiring company (blank = confidential search)", "Acme Corp, or leave blank to keep it confidential", "text", d.clientCompany) +
         numberSelect(d) +
         "</div>" +
         '<div class="vt-field vt-field-full" style="margin-top:14px"><label>Job description</label>' +
         '<textarea id="vtfJd" rows="6" placeholder="Paste the full job description here. The agent uses this as its source of truth, it won\'t read it aloud.">' + esc(d.jobDescription || "") + "</textarea></div>" +
         '<div class="vt-section">Your voice on the call</div>' +
         '<div class="vt-form-grid">' +
-        fld("vtfAgentName", "Your name (the agent introduces itself as)", "Ryan") +
-        fld("vtfAgentCompany", "Your firm", "Executive Search") +
+        fld("vtfAgentName", "Your name (the agent introduces itself as)", "Ryan", "text", d.persona && d.persona.agentName) +
+        fld("vtfAgentCompany", "Your firm", "Executive Search", "text", d.persona && d.persona.agentCompany) +
         voiceSelect(d) +
-        fld("vtfThreshold", "Pass threshold (0-100)", "70", "number") +
+        fld("vtfThreshold", "Pass threshold (0-100)", "70", "number", d.passThreshold) +
         "</div>" +
         '<div class="vt-section">Top qualifiers <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- what the agent screens for on the call</span></div>' +
         '<div class="vt-quals">' +
@@ -12561,6 +12703,23 @@
         '<div class="vt-section">Data captured per call <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- facts the scorer pulls from every conversation</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">Each field is extracted from the transcript when the candidate actually says it (never guessed from their profile). Blank rows are ignored; the defaults cover comp, notice, relocation, and interest.</div>' +
         xrow(0) + xrow(1) + xrow(2) + xrow(3) + xrow(4) + xrow(5) +
+        '<div class="vt-section">Role FAQ <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- questions the agent is allowed to answer</span></div>' +
+        '<div class="vt-quals">' +
+          '<div class="vt-gen">' +
+            '<span class="vt-gen-ic"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg></span>' +
+            '<div class="vt-gen-copy"><b>Let the agent answer the questions candidates actually ask</b>' +
+            '<span>Pay, remote policy, benefits, process. The agent answers ONLY from what\'s here, in its own words; anything not covered gets a warm "great question for the recruiter". Draft it from the JD, then edit.</span></div>' +
+            '<button type="button" class="vt-btn vt-btn-primary vt-gen-btn" id="vtGenK"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg> Draft from JD</button>' +
+          "</div>" +
+          '<div class="vt-qhead"><span></span><span>If they ask</span><span>The agent may answer</span><span></span></div>' +
+          krow(0) + krow(1) + krow(2) + krow(3) + krow(4) + krow(5) +
+        "</div>" +
+        '<div class="vt-section">Mid-call abilities <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- real actions the agent can take, both optional</span></div>' +
+        '<div class="vt-hint" style="margin:-2px 2px 8px">With a scheduling link set, the agent can text it to a strong candidate DURING the call and lock the next step on the spot. With a transfer number set, it can hand an exceptional candidate (or anyone who asks for a human) straight to you, live.</div>' +
+        '<div class="vt-form-grid">' +
+        '<div class="vt-field"><label>Scheduling link (texted mid-call)</label><input id="vtfBooking" placeholder="https://tidycal.com/you/next-step" value="' + esc(d.bookingUrl || "") + '" /></div>' +
+        '<div class="vt-field"><label>Live transfer number</label><input id="vtfTransfer" placeholder="+13105551234" value="' + esc(d.transferNumber || "") + '" /></div>' +
+        "</div>" +
         '<div class="vt-section">Next step <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- auto-filled; leave blank to use the friendly defaults</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">Leave blank and the agent will, in its own natural words, <b>if qualified:</b> tell them they\'re a strong fit, that you\'ll send the full JD, and ask for an updated resume tailored to what you discussed. <b>If not a fit:</b> let them down kindly and say you\'ll keep them in mind for roles that better suit their background.</div>' +
         '<div class="vt-form-grid">' +
@@ -12592,13 +12751,21 @@
           enumOptions: xt === "enum" ? xo.split(",").map(function (s) { return s.trim(); }).filter(Boolean) : undefined
         });
       }
+      var ks = [];
+      for (var k = 0; k < 6; k++) {
+        var kq = vget("vtKq" + k), ka = vget("vtKa" + k);
+        if (kq && ka) ks.push({ question: kq, answer: ka });
+      }
       var payload = {
         name: vget("vtfName"), motion: motion, roleTitle: vget("vtfRole"), clientCompany: vget("vtfCompany"),
         phoneNumber: vget("vtfPhone"), jobDescription: $("#vtfJd") ? $("#vtfJd").value : "",
         voiceId: vget("vtfVoice"), passThreshold: parseInt(vget("vtfThreshold") || "70", 10),
         persona: { agentName: vget("vtfAgentName") || "Ryan", agentCompany: vget("vtfAgentCompany") || "Executive Search" },
         questions: qs,
-        extraction: xs
+        extraction: xs,
+        knowledge: ks,
+        bookingUrl: vget("vtfBooking"),
+        transferNumber: vget("vtfTransfer")
       };
       var ny = $("#vtfNextYes"), nn = $("#vtfNextNo");
       if (ny && ny.value.trim()) payload.nextStepQualified = ny.value.trim();
@@ -12632,6 +12799,16 @@
         chips += '<span class="vt-chip vt-chip-learn">self-tuned' + (appliedRev ? " <b>v" + appliedRev.version + "</b>" : "") + "</span>";
       }
       if (d.learning && d.learning.autoLearn) chips += '<span class="vt-chip vt-chip-learn">auto-learn on</span>';
+      // Engine health, outcomes only: talk time, spend, and how human it reads.
+      if (d.health && d.health.minutes > 0) {
+        chips += '<span class="vt-chip">' + d.health.minutes + " min" +
+          (d.health.costUsd ? " · $" + d.health.costUsd.toFixed(2) : "") + "</span>";
+      }
+      if (d.health && d.health.avgRealism != null) {
+        chips += '<span class="vt-chip" title="How human the agent sounded across scored calls, 0-100">sounds human <b>' + d.health.avgRealism + "</b></span>";
+      }
+      if (d.bookingUrl) chips += '<span class="vt-chip" title="Can text the scheduling link mid-call">texts calendar</span>';
+      if (d.transferNumber) chips += '<span class="vt-chip" title="Can hand the call to you live">live transfer</span>';
       return '<div class="vt-desk" data-id="' + d.id + '">' +
         '<div class="vt-desk-head">' +
         '<h3 class="vt-desk-title">' + esc(d.name) + " <span>· " + esc(d.roleTitle || "no role title") + "</span></h3>" +
@@ -12723,6 +12900,41 @@
           }
           toast("Pulled " + qs.length + " qualifier" + (qs.length === 1 ? "" : "s") + " from the JD, tweak if you like.");
         }).catch(function () { done(); toast("Couldn’t reach the server."); });
+      });
+      var genK = $("#vtGenK");
+      if (genK) genK.addEventListener("click", function () {
+        var jd = $("#vtfJd") ? $("#vtfJd").value.trim() : "";
+        if (!jd) {
+          toast("Paste the job description first.");
+          var jdEl2 = $("#vtfJd");
+          if (jdEl2) { jdEl2.focus(); jdEl2.classList.add("vt-nudge"); setTimeout(function () { jdEl2.classList.remove("vt-nudge"); }, 900); }
+          return;
+        }
+        var idleK = genK.innerHTML;
+        genK.disabled = true;
+        genK.innerHTML = '<span class="spinner"></span> Reading the JD…';
+        var kBox = genK.closest(".vt-quals");
+        if (kBox) kBox.classList.add("vt-genning");
+        function doneK() {
+          genK.disabled = false; genK.innerHTML = idleK;
+          if (kBox) kBox.classList.remove("vt-genning");
+        }
+        send("/vetting/desks", "POST", { action: "generate-knowledge", jobDescription: jd, roleTitle: vget("vtfRole"), clientCompany: vget("vtfCompany") }).then(function (r) {
+          doneK();
+          if (!r.ok) { toast((r.data && r.data.detail) || "Couldn’t draft the FAQ."); return; }
+          var ks = (r.data && r.data.knowledge) || [];
+          for (var i = 0; i < 6; i++) {
+            var kk = ks[i] || { question: "", answer: "" };
+            if ($("#vtKq" + i)) $("#vtKq" + i).value = kk.question || "";
+            if ($("#vtKa" + i)) $("#vtKa" + i).value = kk.answer || "";
+            var krEl = $("#vtKq" + i) && $("#vtKq" + i).closest(".vt-qrow");
+            if (krEl && ks[i]) {
+              krEl.classList.add("vt-filled");
+              (function (rr, delay) { setTimeout(function () { rr.classList.remove("vt-filled"); }, 1200 + delay); })(krEl, i * 120);
+            }
+          }
+          toast("Drafted " + ks.length + " answer" + (ks.length === 1 ? "" : "s") + " from the JD. Only what's written here gets said on calls.");
+        }).catch(function () { doneK(); toast("Couldn’t reach the server."); });
       });
       Array.prototype.forEach.call(body.querySelectorAll("[data-vtact]"), function (b) {
         b.addEventListener("click", function () { deskAction(b.getAttribute("data-vtact"), b.getAttribute("data-id"), b, body); });
@@ -13108,13 +13320,15 @@
 
     /* ---- conversation feel (barge-in, silence, backchannels) ---- */
     function optTurnCard(o) {
-      var t = (o && o.turnTuning) || { interruptions: true, interruptionSensitivity: 0.6, idleTimeoutSec: 8, idleReminder: "", backchannelWords: [] };
+      var t = (o && o.turnTuning) || { interruptions: true, interruptionSensitivity: 0.6, pauseBeforeSpeakingMs: 0, idleTimeoutSec: 8, idleReminder: "", backchannelWords: [] };
       return '<div class="vt-card">' + cardHead("message", "Conversation feel") +
         '<div class="vt-hint" style="margin-top:6px">How the agent behaves in the back-and-forth: whether callers can talk over it, how fast it takes its turn, and what it does with silence. Saved settings push to the live line; the phone engine applies what it supports and the rest is enforced through the agent\'s instructions.</div>' +
         '<label class="vt-must" style="margin-top:14px"><input type="checkbox" id="vtTtInt"' + (t.interruptions ? " checked" : "") + ' /><span>Callers can interrupt the agent (barge-in), the strongest single realism signal</span></label>' +
         '<div class="vt-sliders" style="margin-top:14px">' +
         sliderRow("vtTtSens", "Responsiveness", t.interruptionSensitivity, 0, 1, 0.05,
           "Higher = it takes its turn sooner after a pause; lower = it waits out slow, thoughtful callers. 0.6 matches the engine’s natural timing.", ["patient", "quick"]) +
+        sliderRow("vtTtPause", "Thinking pause (milliseconds)", t.pauseBeforeSpeakingMs || 0, 0, 800, 50,
+          "A small extra beat before the agent starts talking. 150 to 400 reads as a person thinking; 0 is the fastest turn-taking.", ["instant", "considered"]) +
         sliderRow("vtTtIdle", "Silence check-in (seconds)", t.idleTimeoutSec, 3, 30, 1,
           "After this much caller silence, the agent gently re-engages instead of sitting in dead air.", ["3s", "30s"]) +
         "</div>" +
@@ -13332,6 +13546,7 @@
           turnTuning: {
             interruptions: !!($("#vtTtInt") && $("#vtTtInt").checked),
             interruptionSensitivity: parseFloat(($("#vtTtSens") || {}).value || "0.6"),
+            pauseBeforeSpeakingMs: parseInt(($("#vtTtPause") || {}).value || "0", 10),
             idleTimeoutSec: parseInt(($("#vtTtIdle") || {}).value || "8", 10),
             idleReminder: vget("vtTtRem"),
             backchannelWords: vget("vtTtBack").split(",").map(function (w) { return w.trim(); }).filter(Boolean)
@@ -16148,8 +16363,42 @@
         return '<div class="list-row"><div><div class="lr-main">' + esc(m.concept) + '</div><div class="lr-sub">' + esc(m.how) + '</div></div><div class="lr-right">' + esc(m.object) + "</div></div>";
       }).join("");
       var body = $("#atBody"); if (!body) return;
+      // Daily crossover audit: the once-a-day deep check that neither side
+      // double-contacts anyone (deep activity rescan + our sends re-mirrored
+      // into Loxo + our opt-outs logged into Loxo).
+      var audit = "";
+      if ((cfgByVendor.loxo || {}).status === "green") {
+        var rc = d.reconcile || {}, rp = rc.report || null;
+        var line;
+        if (!rc.at) line = '<span style="color:var(--text-dim)">Not run yet. It runs automatically every 24h; run it now to baseline.</span>';
+        else if (rp && rp.ok) line = '<span style="color:var(--accent-green)">Healthy</span> · last ran ' + esc(atsAgo(rc.at)) +
+          ' · rechecked ' + (rp.deepScanned || 0) + ' Loxo activities, updated ' + (rp.peopleUpdated || 0) + ' people' +
+          ((rp.touchesResent || 0) ? ', re-logged ' + rp.touchesResent + ' of our touches into Loxo' : '') +
+          ((rp.dncMirrored || 0) ? ', mirrored ' + rp.dncMirrored + ' opt-outs into Loxo' : '') +
+          ((rp.dncPending || 0) ? ' · ' + rp.dncPending + ' opt-out' + (rp.dncPending === 1 ? '' : 's') + ' still unmatched in Loxo' : '');
+        else line = '<span style="color:var(--accent-red)">Attention</span> · last ran ' + esc(atsAgo(rc.at)) + ' · ' + esc(((rp && rp.errors) || []).join("; ") || "failed");
+        audit = '<div class="card" style="margin-top:14px"><h3>Daily crossover audit</h3>' +
+          '<p class="muted" style="margin:0 0 10px;font-size:13px">Once a day this re-checks the last 35 days of Loxo activity (so backdated calls and emails still count), re-logs any of our sends that failed to reach Loxo, and writes our opt-outs into Loxo. It is how both sides stay agreed on who has been contacted.</p>' +
+          '<div style="font-size:13px;margin-bottom:10px" id="atsAuditLine">' + line + '</div>' +
+          '<button class="btn btn-sm" id="atsAuditRun">Run audit now</button></div>';
+      }
       body.innerHTML = '<div class="two-col"><div class="card"><h3>Choose your ATS</h3><p class="muted" style="margin:0 0 12px;font-size:13px">Click a provider to enter its credentials. Candidates flow into the Candidates database; companies into the BD Companies tab.</p><div class="ats-grid">' + vendors + "</div></div>" +
-        '<div class="card"><h3>Loxo object mapping</h3>' + map + "</div></div>";
+        '<div class="card"><h3>Loxo object mapping</h3>' + map + "</div></div>" + audit;
+      var auditBtn = body.querySelector("#atsAuditRun");
+      if (auditBtn) auditBtn.addEventListener("click", function () {
+        auditBtn.disabled = true; auditBtn.textContent = "Auditing… this can take a minute";
+        send("/ats", "POST", { action: "reconcile", vendor: "loxo" }).then(function (r) {
+          var rp2 = (r.data && (r.data.report || (r.data.data && r.data.data.report))) || null;
+          if (r.ok && rp2) {
+            toast("Crossover audit done: " + (rp2.deepScanned || 0) + " activities rechecked, " + (rp2.peopleUpdated || 0) + " people updated" +
+              ((rp2.touchesResent || 0) ? ", " + rp2.touchesResent + " touches re-logged in Loxo" : "") +
+              ((rp2.dncMirrored || 0) ? ", " + rp2.dncMirrored + " opt-outs mirrored" : ""));
+          } else {
+            toast("Audit had trouble (" + ((r.data && r.data.error) || r.status) + "). It will retry automatically.");
+          }
+          renderAts(el);
+        }).catch(function () { auditBtn.disabled = false; auditBtn.textContent = "Run audit now"; toast("Could not reach the server."); });
+      });
       Array.prototype.forEach.call(body.querySelectorAll(".ats-v"), function (btn) {
         btn.addEventListener("click", function () {
           openAtsSetup(btn.getAttribute("data-vendor"), cfgByVendor[btn.getAttribute("data-vendor")] || {}, btn.getAttribute("data-status"), d.vendors, el);

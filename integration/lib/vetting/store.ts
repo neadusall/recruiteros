@@ -22,7 +22,7 @@ import {
   type ResumeReview, type DeskLearning, type PromptRevision, type VoiceTuning, type SimRun,
   type TurnTuning, type ExtractionField,
   DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD, DEFAULT_LEARNING, clampVoiceTuning, clampTurnTuning,
-  normalizeExtraction,
+  normalizeExtraction, normalizeKnowledge,
 } from "./types";
 
 const store = {
@@ -126,6 +126,9 @@ export function upsertDesk(workspaceId: string, input: VettingDeskInput): Vettin
     persona,
     voiceId: input.voiceId ?? existing?.voiceId,
     extraction: input.extraction ? normalizeExtraction(input.extraction) : existing?.extraction,
+    knowledge: input.knowledge ? normalizeKnowledge(input.knowledge) : existing?.knowledge,
+    bookingUrl: input.bookingUrl !== undefined ? input.bookingUrl.trim() : existing?.bookingUrl,
+    transferNumber: input.transferNumber !== undefined ? input.transferNumber.trim() : existing?.transferNumber,
     phoneNumber: input.phoneNumber ?? existing?.phoneNumber,
     assistantId: existing?.assistantId,
     syncedAt: existing?.syncedAt,

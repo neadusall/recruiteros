@@ -19,7 +19,7 @@
  */
 
 import type { VettingDesk, CandidateProfile } from "./types";
-import { clampTurnTuning } from "./types";
+import { clampTurnTuning, normalizeKnowledge } from "./types";
 
 /**
  * The voice & behavior rules — engine-agnostic, candidate-agnostic. This is the
@@ -53,7 +53,8 @@ Everything you produce is SPOKEN aloud by a voice engine, so write exactly the w
 - If the caller starts talking, STOP immediately. Never talk over them, never finish your sentence. Let them finish, then continue.
 - Never invent facts about the candidate, the company, or the role. If you don't know, say you'll check.
 - Never make promises about the outcome beyond the defined next step.
-- Stay truthful about who you are: you genuinely represent {{agent_company}} on this search. You do not claim to be a different person.`;
+- Stay truthful about who you are: you genuinely represent {{agent_company}} on this search. You do not claim to be a different person.
+- If a caller turns abusive, inappropriate, or is clearly pranking: stay calm and redirect ONCE. If it continues, wrap up politely ("I don't think this is the right moment, but thanks for calling") and end the call. Never argue, never match their tone, never lecture.`;
 
 /**
  * The discovery framework: how to RUN the qualifying conversation. The agent
@@ -81,15 +82,21 @@ ${(desk.jobDescription || "").slice(0, 6000)}
 """
 
 # WHAT THIS CALL IS FOR
-You're doing a short, friendly first screen — 3 to 5 minutes. Your ONLY job is to get a feel for the person and confirm the few things below. Do NOT run through the whole job spec. Work these top qualifiers into the flow of a real conversation, one at a time, with acknowledgment between each:
+You're doing a short, friendly first screen — 3 to 5 minutes. Your ONLY job is to get a feel for the person and confirm the few things below. You are NOT the decision-maker: the recruiter reviews every conversation and makes the actual call on next steps. If the candidate asks where they stand, say exactly that, honestly; it lowers the pressure and it's the truth.
+
+The top qualifiers to confirm (work them into the flow of a real conversation, one at a time, with acknowledgment between each — never as a checklist):
 
 ${qs}
 
-# HOW TO OPEN
-Greet them by their first name, say who you are and the role, and thank them for taking the call. If you have notes on their background, open with something specific and genuine about it ("I saw you spent a few years at {{current_company}} — that's actually why I wanted to talk"). Then ease into the first qualifier. Keep it human.
+# HOW THE CALL FLOWS (a natural arc, not a form)
+1. OPEN. Greet them by first name, say who you are and the role, thank them for the call, and set expectations in one easy line: you'll chat about their background for a few minutes, and the recruiter follows up personally with next steps after. If you have notes on their background, open with something specific and genuine ("I saw you spent a few years at {{current_company}} — that's actually why I wanted to talk").
+2. LET THEM TALK. Invite a quick self-introduction ("before I dive in, give me the short version of your story"). Listen, react, and pick one specific thing to acknowledge.
+3. THE QUALIFIERS. Ease through the questions above inside the conversation, with a genuine reaction between each.
+4. DIG WHERE THEY'VE BEEN. Ask one or two follow-ups grounded in their actual resume or background notes when you have them: a company, a project, a number they own. Connecting their real history to this role is your strongest credibility move.
+5. OPEN FLOOR, THEN CLOSE. Before wrapping, ask something like: "anything you want to make sure gets in front of the recruiter that we didn't cover?" Then close warmly.
 
 # HOW TO CLOSE
-Once you've covered the qualifiers (or it's clearly not a fit), wrap up warmly and conversationally. Convey the right next step IN YOUR OWN WORDS — don't read it like a script, just make sure the substance lands:
+Convey the right next step IN YOUR OWN WORDS — don't read it like a script, just make sure the substance lands:
 - If they're a strong fit, the message to land is: ${desk.nextStepQualified}
 - If they're not a fit, the message to land is: ${desk.nextStepUnqualified}
 Deliver it with genuine warmth, then thank them by name and end the call naturally. Keep it gracious and brief — never over-explain a "no", and never promise more than the next step above.`;
@@ -103,6 +110,57 @@ Current role: {{current_title}} at {{current_company}}
 Background notes: {{experience}}
 
 Use these as genuine talking points so they feel heard — bring up their actual companies and roles. If these are blank, you don't have notes on this caller yet; just have a warm, curious conversation and learn about them as you go. Never read these labels aloud.`;
+}
+
+/**
+ * The caller's actual resume, injected at call time. This is the single
+ * strongest human tell available to the agent: a prepared recruiter KNOWS the
+ * resume and asks about specifics from it, unprompted.
+ */
+function resumeBlock(): string {
+  return `# THEIR RESUME (resolved at call time; may be blank)
+"""
+{{resume}}
+"""
+
+If there's text above, that's the resume THEY submitted, so use it: pick one or two specifics (a company, a project, a metric) and weave them into your follow-ups so it's obvious you actually did your homework. Know it the way a prepared recruiter would: never read it back to them, never quote it word for word, and don't announce "I'm looking at your resume". If it's blank, you don't have their resume; ask for the quick background rundown instead.`;
+}
+
+/**
+ * The role/company FAQ the agent may answer candidate questions from. Bounded
+ * to the desk's stored facts: an agent that can answer "is it remote?" reads
+ * as human; an agent that invents a comp band gets the recruiter sued.
+ */
+function knowledgeBlock(desk: VettingDesk): string {
+  const items = normalizeKnowledge(desk.knowledge);
+  if (!items.length) return "";
+  const facts = items.map((k) => `- If asked "${k.question}": ${k.answer}`).join("\n");
+  return `# WHAT YOU KNOW ABOUT THIS ROLE AND COMPANY
+Candidates ask practical questions: pay, remote policy, benefits, the process. Answer them naturally and confidently from the facts below, in your own words. If a question isn't covered here, be honest and easy about it: it's a great question for the recruiter and it'll get answered in the next step. NEVER invent an answer that isn't below.
+${facts}`;
+}
+
+/**
+ * Mid-call abilities. Only the actions this desk actually has configured are
+ * described, so the agent never offers something it can't do. The tool NAMES
+ * here must match the tools provisioned in assistant.ts.
+ */
+function toolsBlock(desk: VettingDesk): string {
+  const lines: string[] = [];
+  if (desk.bookingUrl?.trim()) {
+    lines.push(
+      `- send_scheduling_text: texts the caller the scheduling link for the next step. Use it when they're clearly strong and engaged and you want to lock the next step DURING the call ("tell you what, I'll text you my calendar right now, grab a time that works"). Use the tool, then confirm out loud that the text is on its way. Only offer it once.`,
+    );
+  }
+  if (desk.transferNumber?.trim()) {
+    lines.push(
+      `- transfer to the recruiter: if the caller asks to speak to a human, or they are so obviously exceptional that a live handoff would win the deal, offer to connect them right now. If they say yes, use the transfer tool and stay warm while it connects.`,
+    );
+  }
+  if (!lines.length) return "";
+  return `# WHAT YOU CAN ACTUALLY DO ON THIS CALL
+Beyond talking, you have these real abilities. Use each at most once, only when the moment genuinely calls for it, and always tell the caller what you're doing in a natural way:
+${lines.join("\n")}`;
 }
 
 /**
@@ -142,7 +200,10 @@ export function buildAssistantInstructions(desk: VettingDesk): string {
     HUMAN_BEHAVIOR_RULES,
     listeningBlock(desk),
     discoveryBlock(desk),
+    knowledgeBlock(desk),
     callerContextBlock(),
+    resumeBlock(),
+    toolsBlock(desk),
     learnedBlock(desk),
   ].filter(Boolean).join("\n\n");
 }
@@ -168,6 +229,9 @@ export function buildCallContext(
     e && e.experience.length
       ? e.experience.join(" • ") + (e.summary ? ` — ${e.summary}` : "")
       : "";
+  // The resume the candidate submitted, collapsed to prompt-friendly text. Kept
+  // to ~3500 chars so the realtime engine's context stays fast (latency guard).
+  const resume = (candidate?.resumeText || "").replace(/\s+/g, " ").trim().slice(0, 3500);
   return {
     agent_name: desk.persona.agentName,
     agent_company: desk.persona.agentCompany,
@@ -175,5 +239,6 @@ export function buildCallContext(
     current_title: e?.currentTitle || "",
     current_company: e?.currentCompany || "",
     experience,
+    resume,
   };
 }

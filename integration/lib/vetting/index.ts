@@ -9,6 +9,7 @@ export * from "./store";
 export * from "./prompt";
 export * from "./enrich";
 export * from "./qualifiers";
+export * from "./knowledge";
 export * from "./scoring";
 export * from "./resumeCoach";
 export * from "./tidycal";

@@ -94,6 +94,9 @@ export async function POST(req: Request) {
 
   updateCall(call.id, {
     status: "completed", transcript, recordingUrl, durationSec: dur,
+    // Same math as the billing meter below, kept on the call so the desk's
+    // health strip can show real spend without a ledger join.
+    costUsd: dur && dur > 0 ? Math.round(Math.ceil(dur / 60) * rateCost("ai_vetting_minute") * 100) / 100 : undefined,
     endedAt: new Date().toISOString(),
   });
 

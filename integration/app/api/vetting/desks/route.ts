@@ -20,8 +20,22 @@ import type { Motion } from "../../../../lib/core/types";
 import {
   listDesks, getDesk, upsertDesk, deleteDesk, markDeskSynced, setDeskStatus,
   listCandidates, listCalls, provisionDesk, deprovisionDesk, generateQualifiers,
-  type VettingDeskInput,
+  generateKnowledge,
+  type VettingDeskInput, type VettingCall,
 } from "../../../../lib/vetting";
+
+/**
+ * Desk-level engine health, rolled up from its calls: how much it's talking,
+ * what that costs, and how human it's reading (mean agent-realism). Outcome
+ * numbers only — the UI never shows engine internals.
+ */
+function deskHealth(calls: VettingCall[]) {
+  const minutes = calls.reduce((m, c) => m + (c.durationSec ? Math.ceil(c.durationSec / 60) : 0), 0);
+  const costUsd = Math.round(calls.reduce((s, c) => s + (c.costUsd ?? 0), 0) * 100) / 100;
+  const realism = calls.map((c) => c.agentRealism?.score).filter((s): s is number => typeof s === "number");
+  const avgRealism = realism.length ? Math.round(realism.reduce((a, b) => a + b, 0) / realism.length) : null;
+  return { minutes, costUsd, avgRealism };
+}
 
 function asMotion(v: unknown): Motion | undefined {
   return v === "bd" ? "bd" : v === "recruiting" ? "recruiting" : undefined;
@@ -32,11 +46,15 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const motion = asMotion(new URL(req.url).searchParams.get("motion"));
-  const desks = listDesks(ws, motion).map((d) => ({
-    ...d,
-    candidateCount: listCandidates(ws, d.id).length,
-    callCount: listCalls(ws, d.id).length,
-  }));
+  const desks = listDesks(ws, motion).map((d) => {
+    const calls = listCalls(ws, d.id);
+    return {
+      ...d,
+      candidateCount: listCandidates(ws, d.id).length,
+      callCount: calls.length,
+      health: deskHealth(calls),
+    };
+  });
   return ok({ desks });
 }
 
@@ -91,6 +109,16 @@ export async function POST(req: Request) {
     const questions = await generateQualifiers(jd, b.roleTitle, b.clientCompany);
     if (!questions.length) return fail("generation_unavailable", 409, { detail: "Set ANTHROPIC_API_KEY to auto-generate qualifiers." });
     return ok({ questions });
+  }
+
+  // Draft the role FAQ from the JD — the facts the agent may answer candidate
+  // questions from (grounded in the JD only). Preview-only, like the above.
+  if (b.action === "generate-knowledge") {
+    const jd = (b.jobDescription ?? (b.deskId ? getDesk(ws, b.deskId)?.jobDescription : "") ?? "").trim();
+    if (!jd) return fail("no_job_description", 422);
+    const knowledge = await generateKnowledge(jd, b.roleTitle, b.clientCompany);
+    if (!knowledge.length) return fail("generation_unavailable", 409, { detail: "Set ANTHROPIC_API_KEY to draft the role FAQ." });
+    return ok({ knowledge });
   }
 
   if (!b.deskId) return fail("missing_fields", 422);
