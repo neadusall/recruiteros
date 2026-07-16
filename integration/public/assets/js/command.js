@@ -12686,7 +12686,16 @@
         numberSelect(d) +
         "</div>" +
         '<div class="vt-field vt-field-full" style="margin-top:14px"><label>Job description</label>' +
-        '<textarea id="vtfJd" rows="6" placeholder="Paste the full job description here. The agent uses this as its source of truth, it won\'t read it aloud.">' + esc(d.jobDescription || "") + "</textarea></div>" +
+        '<div class="vt-gen" style="margin-bottom:10px">' +
+          '<span class="vt-gen-ic"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg></span>' +
+          '<div class="vt-gen-copy"><b>Start here: one JD fills the whole desk</b>' +
+          '<span>Upload the job description (PDF, Word, or plain text) or paste it below, then Auto-fill drafts every blank field it can: role title, hiring company, desk name, qualifiers, captured data, and the role FAQ. Anything you already typed stays untouched.</span></div>' +
+          '<input type="file" id="vtJdFile" accept=".pdf,.docx,.doc,.txt,.md" style="display:none" aria-label="Upload job description file" />' +
+          '<button type="button" class="vt-btn vt-gen-btn" id="vtJdUpload">Upload JD</button>' +
+          '<button type="button" class="vt-btn vt-btn-primary vt-gen-btn" id="vtAutoFill"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg> Auto-fill from JD</button>' +
+        "</div>" +
+        '<textarea id="vtfJd" rows="6" placeholder="Paste the full job description here. The agent uses this as its source of truth, it won\'t read it aloud.">' + esc(d.jobDescription || "") + "</textarea>" +
+        '<div class="vt-hint" id="vtAutoMsg"></div></div>' +
         '<div class="vt-section">Your voice on the call</div>' +
         '<div class="vt-form-grid">' +
         fld("vtfAgentName", "Your name (the agent introduces itself as)", "Ryan", "text", d.persona && d.persona.agentName) +
@@ -13006,6 +13015,121 @@
           toast("Drafted " + ks.length + " answer" + (ks.length === 1 ? "" : "s") + " from the JD. Only what's written here gets said on calls.");
         }).catch(function () { doneK(); toast("Couldn’t reach the server."); });
       });
+      /* ---- one-click desk auto-fill: upload or paste a JD, fill every blank field ---- */
+      var afBtn = $("#vtAutoFill"), afFile = $("#vtJdFile"), afPick = $("#vtJdUpload");
+      function afMsg(html, warn) {
+        var m = $("#vtAutoMsg");
+        if (m) { m.innerHTML = html; m.style.color = warn ? "var(--vt-bad)" : ""; }
+      }
+      function afFlash(el) {
+        var row = el.closest(".vt-qrow") || el.closest(".vt-xrow") || el.closest(".vt-field");
+        if (!row) return;
+        row.classList.add("vt-filled");
+        setTimeout(function () { row.classList.remove("vt-filled"); }, 1400);
+      }
+      // Fill a single input ONLY when it's blank; the operator's own text always wins.
+      function afSet(id, val) {
+        var e = $("#" + id);
+        if (!e || !val || e.value.trim()) return 0;
+        e.value = val; afFlash(e); return 1;
+      }
+      if (afBtn) afBtn.addEventListener("click", function () {
+        var jd = $("#vtfJd") ? $("#vtfJd").value.trim() : "";
+        if (!jd) {
+          toast("Upload or paste the job description first.");
+          var jdEl3 = $("#vtfJd");
+          if (jdEl3) { jdEl3.focus(); jdEl3.classList.add("vt-nudge"); setTimeout(function () { jdEl3.classList.remove("vt-nudge"); }, 900); }
+          return;
+        }
+        var idleA = afBtn.innerHTML;
+        afBtn.disabled = true;
+        afBtn.innerHTML = '<span class="spinner"></span> Reading the JD…';
+        afMsg("Reading the JD and drafting the desk…");
+        function doneA() { afBtn.disabled = false; afBtn.innerHTML = idleA; }
+        send("/vetting/desks", "POST", { action: "autofill", jobDescription: jd, roleTitle: vget("vtfRole"), clientCompany: vget("vtfCompany") }).then(function (r) {
+          doneA();
+          if (!r.ok) { afMsg((r.data && r.data.detail) || "Couldn’t auto-fill from the JD, try again.", true); return; }
+          var d = r.data || {}, p = d.profile || {}, filled = [];
+          if (afSet("vtfRole", p.roleTitle)) filled.push("role title");
+          if (afSet("vtfCompany", p.clientCompany)) filled.push("hiring company");
+          if (afSet("vtfName", p.deskName || p.roleTitle)) filled.push("desk name");
+          if (afSet("vtfThreshold", "70")) filled.push("pass threshold (70)");
+          // Qualifiers land in BLANK rows only, in order.
+          var qs = d.questions || [], qi = 0, qn = 0;
+          for (var i = 0; i < 4 && qi < qs.length; i++) {
+            var pEl = $("#vtQp" + i), cEl = $("#vtQc" + i);
+            if (!pEl || pEl.value.trim() || (cEl && cEl.value.trim())) continue;
+            var q = qs[qi++];
+            pEl.value = q.prompt || "";
+            if (cEl) cEl.value = q.passCriteria || "";
+            var mEl2 = $("#vtQm" + i);
+            if (mEl2) mEl2.checked = !!q.mustHave;
+            afFlash(pEl); qn++;
+          }
+          if (qn) filled.push(qn + " qualifier" + (qn === 1 ? "" : "s"));
+          // Role FAQ, same blank-rows-only rule.
+          var ks = d.knowledge || [], ki = 0, kfn = 0;
+          for (var j = 0; j < 6 && ki < ks.length; j++) {
+            var kqEl = $("#vtKq" + j), kaEl = $("#vtKa" + j);
+            if (!kqEl || kqEl.value.trim() || (kaEl && kaEl.value.trim())) continue;
+            var kk2 = ks[ki++];
+            kqEl.value = kk2.question || "";
+            if (kaEl) kaEl.value = kk2.answer || "";
+            afFlash(kqEl); kfn++;
+          }
+          if (kfn) filled.push(kfn + " FAQ answer" + (kfn === 1 ? "" : "s"));
+          // Role-specific capture fields go into blank extraction rows (the four
+          // standard ones, comp/notice/relocation/interest, are already there).
+          var xs2 = p.extraction || [], xi = 0, xn = 0;
+          for (var t = 0; t < 6 && xi < xs2.length; t++) {
+            var xlEl = $("#vtXl" + t);
+            if (!xlEl || xlEl.value.trim()) continue;
+            var xf2 = xs2[xi++];
+            xlEl.value = xf2.label || "";
+            var xtEl = $("#vtXt" + t);
+            if (xtEl) xtEl.value = xf2.type || "text";
+            var xoEl = $("#vtXo" + t);
+            if (xoEl) xoEl.value = (xf2.enumOptions || []).join(", ");
+            afFlash(xlEl); xn++;
+          }
+          if (xn) filled.push(xn + " capture field" + (xn === 1 ? "" : "s"));
+          // Say plainly what a JD can never fill, so the operator finishes the rest.
+          var manual = [];
+          if (!vget("vtfPhone")) manual.push("inbound number");
+          if (!vget("vtfVoice")) manual.push("your cloned voice");
+          if (!vget("vtfAgentName")) manual.push("your name");
+          if (!vget("vtfBooking")) manual.push("scheduling link (optional)");
+          if (!vget("vtfTransfer")) manual.push("live transfer number (optional)");
+          var rest = manual.length ? " <b>Still yours to set:</b> " + manual.join(", ") + "." : " Everything else is set.";
+          afMsg(filled.length
+            ? "<b>Filled from the JD:</b> " + filled.join(", ") + "." + rest
+            : "Nothing was blank, all fields already have values." + rest);
+          toast(filled.length ? "Desk drafted from the JD. Review, then save." : "Nothing blank to fill.");
+        }).catch(function () { doneA(); afMsg("Couldn’t reach the server.", true); });
+      });
+      if (afPick && afFile) {
+        afPick.addEventListener("click", function () { afFile.click(); });
+        afFile.addEventListener("change", function () {
+          var f = afFile.files && afFile.files[0];
+          if (!f) return;
+          if (f.size > 10 * 1024 * 1024) { afMsg("That file is over 10 MB. Use a smaller file or paste the text.", true); afFile.value = ""; return; }
+          afMsg("Reading “" + esc(f.name) + "”…");
+          var rd = new FileReader();
+          rd.onerror = function () { afFile.value = ""; afMsg("Couldn’t read that file. Paste the JD instead.", true); };
+          rd.onload = function () {
+            var b64 = String(rd.result || "").split(",")[1] || "";
+            send("/vetting/desks", "POST", { action: "extract-jd", filename: f.name, contentType: f.type, dataBase64: b64 }).then(function (r) {
+              afFile.value = "";
+              if (!r.ok) { afMsg((r.data && r.data.detail) || "Couldn’t read that file. Paste the JD instead.", true); return; }
+              var jdEl4 = $("#vtfJd");
+              if (jdEl4) { jdEl4.value = (r.data && r.data.text) || ""; afFlash(jdEl4); }
+              afMsg("Loaded “" + esc(f.name) + "”. Filling the desk…");
+              if (afBtn) afBtn.click();
+            }).catch(function () { afFile.value = ""; afMsg("Couldn’t reach the server.", true); });
+          };
+          rd.readAsDataURL(f);
+        });
+      }
       Array.prototype.forEach.call(body.querySelectorAll("[data-vtact]"), function (b) {
         b.addEventListener("click", function () { deskAction(b.getAttribute("data-vtact"), b.getAttribute("data-id"), b, body); });
       });

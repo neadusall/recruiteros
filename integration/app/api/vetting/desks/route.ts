@@ -3,7 +3,8 @@
  *   GET    /api/vetting/desks?motion=   -> this workspace's vetting desks (+candidate/call counts)
  *   PUT    /api/vetting/desks           -> create/update a desk (JD, questions, voice, number)
  *   DELETE /api/vetting/desks?id=       -> remove a desk (and deprovision its assistant)
- *   POST   /api/vetting/desks           -> { action: provision | pause | resume | detach | generate-questions, deskId }
+ *   POST   /api/vetting/desks           -> { action: provision | pause | resume | detach | generate-questions
+ *                                           | generate-knowledge | autofill | extract-jd, deskId }
  *
  * Session-gated. `provision` pushes the desk's config to the voice engine and
  * binds its number; with no Telnyx key this runs as a safe dry-run and the desk
@@ -20,7 +21,7 @@ import type { Motion } from "../../../../lib/core/types";
 import {
   listDesks, getDesk, upsertDesk, deleteDesk, markDeskSynced, setDeskStatus,
   listCandidates, listCalls, provisionDesk, deprovisionDesk, generateQualifiers,
-  generateKnowledge,
+  generateKnowledge, generateDeskProfile, extractResumeText,
   type VettingDeskInput, type VettingCall,
 } from "../../../../lib/vetting";
 
@@ -101,8 +102,44 @@ export async function POST(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
-  const b = await body<{ action?: string; deskId?: string; jobDescription?: string; roleTitle?: string; clientCompany?: string }>(req);
+  const b = await body<{
+    action?: string; deskId?: string; jobDescription?: string; roleTitle?: string; clientCompany?: string;
+    filename?: string; contentType?: string; dataBase64?: string;
+  }>(req);
   if (!b?.action) return fail("missing_fields", 422);
+
+  // Read the text out of an uploaded JD file (PDF, Word, or plain text) so the
+  // operator can drop in the doc instead of pasting. Same extractor the resume
+  // inbox uses; nothing is stored, the text just lands in the form's JD box.
+  if (b.action === "extract-jd") {
+    if (!b.dataBase64) return fail("missing_fields", 422);
+    let buf: Buffer;
+    try { buf = Buffer.from(String(b.dataBase64), "base64"); } catch { return fail("bad_file", 422); }
+    if (!buf.length) return fail("bad_file", 422);
+    if (buf.length > 10 * 1024 * 1024) return fail("file_too_large", 422, { detail: "Keep the JD file under 10 MB." });
+    const text = await extractResumeText({ filename: b.filename || "", contentType: b.contentType || "", content: buf } as any);
+    if (!text || text.trim().length < 40) {
+      return fail("unreadable_file", 422, { detail: "Couldn't read text from that file. Use a PDF, Word (.docx), or plain-text file, or paste the JD instead." });
+    }
+    return ok({ text: text.trim().slice(0, 20000) });
+  }
+
+  // One-click desk auto-fill: role profile + qualifiers + role FAQ from the JD
+  // in parallel. Preview-only (nothing saves); the form fills its BLANK fields
+  // from this and leaves anything the operator already typed alone.
+  if (b.action === "autofill") {
+    const jd = (b.jobDescription ?? "").trim();
+    if (!jd) return fail("no_job_description", 422);
+    const [profile, questions, knowledge] = await Promise.all([
+      generateDeskProfile(jd),
+      generateQualifiers(jd, b.roleTitle, b.clientCompany),
+      generateKnowledge(jd, b.roleTitle, b.clientCompany),
+    ]);
+    if (!profile && !questions.length && !knowledge.length) {
+      return fail("generation_unavailable", 409, { detail: "Set ANTHROPIC_API_KEY to auto-fill the desk from a JD." });
+    }
+    return ok({ profile, questions, knowledge });
+  }
 
   // Preview-only qualifier generation — no deskId needed (used by the form's
   // "Generate from JD" button before the desk is even saved).
