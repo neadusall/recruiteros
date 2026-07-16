@@ -15,6 +15,7 @@ export { scoreCandidate } from "./score";
 export {
   runDiscovery, rapidApiSearchConfigured, verifySourcingSearch,
   googleSearchConfigured, verifyGoogleSearch, searxSearchConfigured,
+  serperSearchConfigured, verifySerperSearch,
   candidateKey, type DiscoveryResult,
 } from "./discovery";
 export {

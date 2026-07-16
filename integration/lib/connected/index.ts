@@ -160,14 +160,18 @@ const CATALOG: IntegrationMeta[] = [
       { key: "RAPIDAPI_PROFILE_METHOD", label: "Deep-vet · method", required: false, placeholder: "GET", hint: "GET or POST. Enter GET for the Fresh listing. Leave blank = GET." },
       { key: "RAPIDAPI_PROFILE_BODY_KEY", label: "Deep-vet · URL field", required: false, placeholder: "link", hint: "POST only: ignore for the Fresh (GET) listing. Body key the profile endpoint expects the URL under (person_deep uses 'link')." },
       // --- Free first pass (optional): Google Programmable Search over the X-ray boolean ---
-      { key: "GOOGLE_CSE_KEY", label: "Free pass · Google API key", required: false, secret: true, placeholder: "AIza…", hint: "Optional. Google Custom Search JSON API key: gives 100 FREE searches/day that run before any paid lookup. From console.cloud.google.com → APIs → Custom Search API." },
+      { key: "GOOGLE_CSE_KEY", label: "Free pass · Google API key", required: false, secret: true, placeholder: "AIza…", hint: "Optional. Google Custom Search JSON API key: gives 100 FREE searches/day that run before any paid lookup. Heads up: Google closed this API to new signups and retires it Jan 1, 2027; if you can't create a key, use the Serper wide pass below instead." },
       { key: "GOOGLE_CSE_CX", label: "Free pass · Search engine ID (cx)", required: false, placeholder: "xxxxxxxxxxxxx", hint: "Optional. Your Programmable Search Engine ID. Create one at programmablesearchengine.google.com set to search the entire web." },
+      // --- Cheap wide pass (optional): Serper.dev Google results over the same X-ray ---
+      { key: "SERPER_API_KEY", label: "Wide pass · Serper API key", required: false, secret: true, placeholder: "paste your serper.dev key", hint: "Optional but recommended. Serper.dev serves real Google results at roughly $0.30-$1 per 1,000 searches (2,500 free credits to start), no daily cap. Runs after the free passes and before the paid people search, so it widens every run for pennies. Get a key at serper.dev → API Key." },
+      { key: "SERPER_MAX_QUERIES", label: "Wide pass · max searches per run", required: false, placeholder: "100", hint: "Optional spend guard. Each JD Sourcing run stops its Serper pass after this many searches (default 100, about 5-10 cents). Raise it for bigger runs." },
     ],
     steps: [
       "Subscribe to the Fresh LinkedIn Scraper API (by SaleLeads) on RapidAPI. The free plan is enough to start.",
       "SEARCH → host: fresh-linkedin-scraper-api.p.rapidapi.com · path: /api/v1/search/people?name={query}&page={page}&limit=10 · method: GET",
       "DEEP-VET (optional) → host: same · path: /api/v1/user/profile?username={username} · method: GET. {username} is filled in per candidate.",
-      "FREE PASS (optional) → add a Google Custom Search key + engine ID (cx) to get 100 free searches/day that run before any paid lookup.",
+      "FREE PASS (optional) → add a Google Custom Search key + engine ID (cx) to get 100 free searches/day that run before any paid lookup. Google retires this API Jan 1, 2027 and no longer accepts new signups.",
+      "WIDE PASS (recommended) → add a serper.dev API key: real Google results at roughly $0.30-$1 per 1,000 searches, no daily cap, runs before the paid people search. New accounts start with 2,500 free credits.",
       "Paste your RapidAPI key, fill the values above exactly, Save, then Test. It should go green.",
     ],
     docsUrl: "https://rapidapi.com/saleleads-saleleads-default/api/fresh-linkedin-scraper-api",

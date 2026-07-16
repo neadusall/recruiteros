@@ -16,6 +16,11 @@
  *       engine uses) running the X-ray Boolean. FREE and always-on when the container is
  *       up (SOURCING_SEARXNG_URL or INMARKET_SEARXNG_URL), so JD Sourcing always has a
  *       working engine even with zero paid keys configured.
+ *   - serper: Serper.dev serving real Google results over the same X-ray Boolean.
+ *       CHEAP paid (roughly $0.30-$1.00 per 1,000 searches vs CSE's $5/1,000), no
+ *       daily cap, and it outlives the CSE JSON API (Google retires it Jan 1, 2027).
+ *       Configure SERPER_API_KEY; runs after the free passes, before rapidapi, so the
+ *       cheap key absorbs volume the expensive listing would otherwise carry.
  *   - rapidapi: a marketplace LinkedIn/people-search listing (the chosen scale path).
  *       Configure RAPIDAPI_KEY + RAPIDAPI_PEOPLE_SEARCH_HOST/PATH to point at whatever
  *       listing you subscribe to. Listings differ, so the result mapping is defensive,
@@ -346,6 +351,67 @@ export async function verifyGoogleSearch(): Promise<{ ok: boolean; error?: strin
 }
 
 /* ------------------------------------------------------------------ */
+/* Serper.dev x-ray provider (cheap paid Google results)               */
+/* ------------------------------------------------------------------ */
+
+// Serper.dev serves real Google results for roughly $0.30-$1.00 per 1,000 searches
+// (vs the retiring Custom Search JSON API's $5/1,000 over a 100/day free cap). Same
+// X-ray boolean, same result shape, no daily ceiling.
+const SERPER_KEY = () => cred("SERPER_API_KEY");
+// Soft per-RUN cap so one big run can't silently burn a pile of credits. At Serper's
+// pricing 100 searches is a few cents; raise SERPER_MAX_QUERIES in Setup for more.
+const SERPER_MAX_QUERIES = () => {
+  const n = parseInt(cred("SERPER_MAX_QUERIES") || "", 10);
+  return Number.isFinite(n) && n > 0 ? n : 100;
+};
+
+export function serperSearchConfigured(): boolean {
+  return Boolean(SERPER_KEY());
+}
+
+/**
+ * One Serper page (10 organic results; `page` is 1-based). Organic items carry the
+ * same title/link/snippet shape as a CSE item, so the Google mapper does the parsing;
+ * only the provider tag differs.
+ */
+async function serperXraySearch(xray: string, page: number): Promise<CandidateRow[]> {
+  const res = await fetch("https://google.serper.dev/search", {
+    method: "POST",
+    headers: { "X-API-KEY": SERPER_KEY(), "Content-Type": "application/json" },
+    body: JSON.stringify({ q: xray, num: 10, page }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    const out = res.status === 429 || /credit|quota/i.test(txt);
+    const bad = res.status === 401 || res.status === 403;
+    // `quota` tells the orchestrator to stop the Serper pass for the rest of the run
+    // (out of credits / bad key never self-heals mid-run).
+    throw Object.assign(
+      new Error(`serper ${res.status}${out ? " (out of credits or rate-limited)" : bad ? " (key rejected)" : ""}`),
+      { quota: out || bad },
+    );
+  }
+  const data = await res.json().catch(() => ({}));
+  const items = Array.isArray((data as any)?.organic) ? (data as any).organic : [];
+  return items
+    .map(mapGoogleItem)
+    .filter((r: CandidateRow | null): r is CandidateRow => Boolean(r))
+    .map((r: CandidateRow) => ({ ...r, provider: "serper" }));
+}
+
+/** Live health check for the Connected → JD Sourcing "Test connection" on the Serper engine. */
+export async function verifySerperSearch(): Promise<{ ok: boolean; error?: string; found?: number }> {
+  if (!SERPER_KEY()) return { ok: false, error: "Add your Serper API key first." };
+  try {
+    const rows = await serperXraySearch('site:linkedin.com/in recruiter', 1);
+    return { ok: true, found: rows.length };
+  } catch (e: any) {
+    return { ok: false, error: (e && e.message) || "search request failed" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* SearXNG x-ray provider (free, self-hosted, always-on)               */
 /* ------------------------------------------------------------------ */
 
@@ -484,17 +550,18 @@ export async function runDiscovery(
 ): Promise<DiscoveryResult> {
   const cap = Math.max(1, Math.min(opts.cap ?? 3000, 5000));
   const minFit = opts.minFit ?? 45;
-  const engines = opts.engines ?? (["google", "searx", "rapidapi", "scraper"] as const);
+  const engines = opts.engines ?? (["google", "searx", "serper", "rapidapi", "scraper"] as const);
   const warnings: string[] = [];
 
   let useGoogle = engines.includes("google") && googleSearchConfigured();
   let useSearx = engines.includes("searx") && searxSearchConfigured();
+  let useSerper = engines.includes("serper") && serperSearchConfigured();
   const useRapid = engines.includes("rapidapi") && rapidApiSearchConfigured();
   const useScraper = engines.includes("scraper") && scraperConfigured();
   if (engines.includes("rapidapi") && !useRapid) {
     warnings.push("rapidapi_not_configured: set RAPIDAPI_KEY + RAPIDAPI_PEOPLE_SEARCH_HOST to enable scale discovery");
   }
-  if (!useGoogle && !useSearx && !useRapid && !useScraper) {
+  if (!useGoogle && !useSearx && !useSerper && !useRapid && !useScraper) {
     warnings.push("no_discovery_engine: nothing configured to find profiles, so the list will be empty");
     return { candidates: [], warnings, scanned: 0 };
   }
@@ -575,6 +642,9 @@ export async function runDiscovery(
   // Spread the free daily Google quota across queries: a few pages each, run-capped.
   const googleBudget = G_MAX_QUERIES();
   let googleUsed = 0;
+  // Serper is cheap but not free: a per-run soft cap keeps one big run's spend bounded.
+  const serperBudget = SERPER_MAX_QUERIES();
+  let serperUsed = 0;
 
   outer: for (const query of queries) {
     let collected = 0;
@@ -616,7 +686,27 @@ export async function runDiscovery(
       }
     }
 
-    // 3) PAID scale: RapidAPI people-search for whatever the free passes didn't fill.
+    // 3) CHEAP paid: Serper.dev Google results over the same X-ray. Runs before the
+    // expensive people-search listing so the pennies key absorbs volume first, and it
+    // keeps digging when the CSE free pass ran dry (or was never / can no longer be
+    // configured: Google closed the CSE API to new signups, retiring it Jan 1, 2027).
+    if (useSerper && collected < perQuery && serperUsed < serperBudget) {
+      const pPages = 3; // up to 30 cheap results per query before the expensive listing
+      for (let page = 1; page <= pPages && collected < perQuery && serperUsed < serperBudget; page++) {
+        let rows: CandidateRow[] = [];
+        try { rows = await serperXraySearch(query.xray, page); serperUsed++; }
+        catch (err: any) {
+          warnings.push(`serper(${query.group} p${page}): ${err.message}`);
+          if (err && err.quota) { useSerper = false; } // credits gone / key bad, stop for the run
+          break;
+        }
+        if (!rows.length) break; // exhausted this query on Serper
+        collected += absorb(rows, query.group);
+        if (byKey.size >= cap) break outer;
+      }
+    }
+
+    // 4) PAID scale: RapidAPI people-search for whatever the free passes didn't fill.
     if (useRapid && collected < perQuery) {
       const post = PS_METHOD() === "POST";
       // POST listings return a batch sized by `count` in one call (no paging);
@@ -653,7 +743,7 @@ export async function runDiscovery(
       }
     }
 
-    // 4) Best-effort scraper sidecar (dormant unless configured).
+    // 5) Best-effort scraper sidecar (dormant unless configured).
     if (useScraper && collected < perQuery) {
       try {
         const { profiles, warnings: w } = await scrapeSearchViaSidecar(query.linkedinUrl, Math.min(perQuery, 100));
@@ -681,6 +771,9 @@ export async function runDiscovery(
 
   if (googleUsed >= googleBudget && googleUsed > 0) {
     warnings.push(`google_budget_reached: spent the free pass on ${googleUsed} queries this run; remaining queries used paid engines`);
+  }
+  if (serperUsed >= serperBudget && serperUsed > 0) {
+    warnings.push(`serper_budget_reached: the Serper pass stopped after ${serperUsed} searches this run to keep spend bounded (raise SERPER_MAX_QUERIES in Setup to allow more)`);
   }
 
   // TWO-BLOCK RESULT: the in-area list is THE list; the out-of-area list is a bounded,
@@ -729,6 +822,7 @@ export async function runDiscovery(
     const reasons: string[] = [];
     if (rapid404) reasons.push(`the paid people search rejected ${rapid404} request(s) (its host/path in Setup points at a missing endpoint)`);
     if (!useGoogle && engines.includes("google")) reasons.push("the free Google pass is off (add the Google search key in Setup to turn it on)");
+    if (!useSerper && engines.includes("serper") && serperSearchConfigured()) reasons.push("the Serper search pass stopped early (key rejected or out of credits; check your serper.dev balance)");
     if (!useSearx && engines.includes("searx")) reasons.push("the built-in free search engine did not respond");
     if (opts.excludeKeys?.size && scanned === 0) reasons.push(`Fresh only is ON and ${opts.excludeKeys.size} previously-surfaced people are being excluded (uncheck it to see the full list again)`);
     if (scanned > 0) reasons.push(`${scanned} profiles were found but every one was ruled out by the search profile's hard disqualifiers or scored 0 fit; loosen the disqualifiers or the job location and run again`);
@@ -740,7 +834,7 @@ export async function runDiscovery(
   // candidates came back, collapse them into a single short note; the raw per-query
   // list only matters on an empty run, where the diagnosis above consumes it.
   if (candidates.length) {
-    const perQuery = /^(rapidapi|scraper|google|searx)\(/;
+    const perQuery = /^(rapidapi|scraper|google|searx|serper)\(/;
     const noisy = warnings.filter((w) => perQuery.test(w));
     if (noisy.length) {
       const kept = warnings.filter((w) => !perQuery.test(w));
