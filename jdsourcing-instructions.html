@@ -161,6 +161,21 @@
   .pipeline h4 { margin: 3px 0 3px; font-size: 15.5px; font-weight: 650; }
   .pipeline p { margin: 2px 0; font-size: 14.5px; color: var(--ink-soft); }
 
+  /* Worked example: a faithful recreation of the "Start with the role" form,
+     filled in, so recruiters see exactly what good input looks like. */
+  .ex-form { background: var(--ground-raised); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin: 16px 0; }
+  .ex-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  @media (max-width: 620px) { .ex-grid { grid-template-columns: 1fr; } }
+  .ex-field { margin: 0 0 16px; }
+  .ex-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px; }
+  .ex-input { background: var(--ground); border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px; font-size: 14.5px; }
+  .ex-input .hintv { color: var(--ink-faint); font-style: italic; }
+  .ex-area { background: var(--ground); border: 1px solid var(--line); border-radius: 9px; padding: 12px 14px; font-size: 13.5px; line-height: 1.55; max-height: 320px; overflow: auto; white-space: pre-wrap; }
+  .ex-why { font-size: 12.5px; color: var(--ink-soft); margin-top: 7px; padding-left: 10px; border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+  .ex-settings { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 13.5px; padding: 10px 12px; background: var(--ground); border: 1px solid var(--line); border-radius: 9px; }
+  .ex-settings b { font-variant-numeric: tabular-nums; }
+  .chip { display: inline-block; border: 1px solid var(--line); background: var(--ground); border-radius: 999px; padding: 2px 11px; font-size: 12.5px; margin: 2px 5px 2px 0; }
+
   .footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-faint); }
 </style>
 </head>
@@ -182,6 +197,7 @@
       <li><a href="#refine">Dive deeper and the queue</a></li>
       <li><a href="#lists">Working a saved list</a></li>
       <li><a href="#sharpen">What makes a search stronger</a></li>
+      <li><a href="#example">A worked example: one real JD, field by field</a></li>
       <li><a href="#checklist">Quick-reference checklist</a></li>
     </ol>
   </nav>
@@ -375,7 +391,96 @@
     </div>
   </div>
 
-  <h2 id="checklist">9. Quick-reference checklist</h2>
+  <h2 id="example">9. A worked example: one real JD, field by field</h2>
+  <p>Here is a real search, filled in the way it should be entered: a VP of Finance role with a $250,000 base, building the accounting and finance department for a company scaling past $80M in revenue. The panel below mirrors the "Start with the role" form on the JD Sourcing page. Copy this pattern for every role you run.</p>
+
+  <div class="ex-form">
+    <div class="ex-grid">
+      <div class="ex-field">
+        <span class="ex-label">Job title</span>
+        <div class="ex-input">VP of Finance</div>
+        <p class="ex-why">One exact title at the right level. Do not type five titles here; Analyze expands it to the neighbors (Corporate Controller, Director of Finance, Head of Finance) on its own.</p>
+      </div>
+      <div class="ex-field">
+        <span class="ex-label">Company</span>
+        <div class="ex-input"><span class="hintv">Your client's name or website</span></div>
+        <p class="ex-why">Type it even on a confidential search. It is only used to find peer companies worth poaching from; candidates never see it.</p>
+      </div>
+    </div>
+    <div class="ex-grid">
+      <div class="ex-field">
+        <span class="ex-label">City &amp; state + radius</span>
+        <div class="ex-input">Dallas, TX &nbsp;·&nbsp; +25mi</div>
+        <p class="ex-why">The client's real HQ metro (Dallas here is the example). A leadership seat that sits on-site deserves at least +25 miles; exact-metro-only quietly starves the list.</p>
+      </div>
+      <div class="ex-field">
+        <span class="ex-label">List name</span>
+        <div class="ex-input">VP Finance · [Client] · Dallas</div>
+        <p class="ex-why">Role, client, market. This exact name follows the list into Candidates and becomes the OS Text campaign name, so make it one you can find in three months.</p>
+      </div>
+    </div>
+    <div class="ex-field">
+      <span class="ex-label">Anything specific</span>
+      <div class="ex-input">CPA strongly preferred. Must have scaled finance ops to $80M+ revenue, led AP/AR or billing teams of 10+ (this seat manages ~40 incl. contractors), and done a QuickBooks to NetSuite (or similar ERP) migration. Base $250k.</div>
+      <p class="ex-why">The three or four facts that define the hire, plus the comp. The base salary is a strong seniority signal for the AI: $250k tells it VP-caliber operators, not senior accountants.</p>
+    </div>
+    <div class="ex-field">
+      <span class="ex-label">Job description (paste all of it)</span>
+      <div class="ex-area">Base salary: $250,000
+
+Build &amp; Scale Finance Operations: Lead the development of accounting and finance departments from the ground up. Design and implement standardized SOPs, KPIs, controls, and scalable processes to support high-volume billing operations.
+
+Team Leadership: Directly manage and develop an AP/AR team of approximately 40 (mix of in-house and contractors). Provide hands-on oversight, mentoring, performance management, and capacity planning to ensure accuracy, efficiency, and compliance.
+
+Systems &amp; Process Transformation: Lead the migration from QuickBooks to NetSuite (or equivalent ERP). Optimize workflows, implement automation where possible, and establish robust month-end close, reporting, and reconciliation processes.
+
+Hands-On Accounting Leadership: Be comfortable rolling up sleeves across Controller-level functions including general ledger, financial reporting, and FP&amp;A. Support budgeting, forecasting, variance analysis, and strategic decision-making.
+
+Growth Partnership: Partner closely with the COO and Founder to facilitate company scaling. Bring prior experience scaling finance teams in high-growth environments to $80M+ revenue with 10+ headcount in accounting/finance.
+
+AP/AR Expertise: Oversee end-to-end accounts payable and receivable operations in a high-volume billing environment, including credit &amp; collections, vendor management, cash flow optimization, and billing accuracy.
+
+Compliance &amp; Controls: Ensure strong internal controls, GAAP compliance, and audit readiness while building a culture of accuracy and continuous improvement.
+
+Qualifications &amp; Experience
+- Proven track record building accounting/finance departments from the ground up, including creating and implementing SOPs and KPIs.
+- Demonstrated success joining companies in growth phase and scaling finance operations to support $80M+ revenue with accounting/finance teams of 10+ headcount.
+- Direct experience working in or overseeing AP/AR departments in high-volume environments.
+- Hands-on experience with Controller and FP&amp;A functions; comfortable being tactical while also contributing strategically.
+- Experience with system migrations, preferably QuickBooks to NetSuite (or similar ERP implementations).
+- Strong leadership skills with experience managing large teams (including contractors).
+- Excellent analytical, organizational, and communication skills.
+- Bachelor's degree in Accounting, Finance, or related field required; CPA strongly preferred.</div>
+      <p class="ex-why">Paste the whole thing, including the pay. The AI reads all of it when it builds the profile, and later when it deep-vets and drafts replies. Add the base salary at the top if the JD does not state it.</p>
+    </div>
+    <div class="ex-field" style="margin-bottom:0">
+      <span class="ex-label">Search settings for this run</span>
+      <div class="ex-settings"><span>Scan up to <b>500</b></span><span>·</span><span>Min fit <b>10</b></span><span>·</span><span>Fresh only <b>off</b> (first run)</span><span>·</span><span>Then: <span class="ui">Build refined JD</span> &gt; <span class="ui">Analyze JD</span> &gt; <span class="ui">Find candidates</span> &gt; <span class="ui">Save to JD Sourcing</span></span></div>
+      <p class="ex-why">Defaults are right for this role. Wide first run; tighten later if Dallas turns out to be deep in finance leaders.</p>
+    </div>
+  </div>
+
+  <h3>What Analyze should hand back</h3>
+  <p>After <span class="ui">Analyze JD</span>, sanity-check the profile chips before searching. For this role, good looks like:</p>
+  <ul>
+    <li><strong>Titles:</strong> <span class="chip">VP of Finance</span> <span class="chip">Corporate Controller</span> <span class="chip">Director of Finance</span> <span class="chip">Head of Finance</span></li>
+    <li><strong>Must-haves (three, not twelve):</strong> <span class="chip">High-volume AP/AR leadership</span> <span class="chip">ERP migration (QuickBooks to NetSuite)</span> <span class="chip">Scaled finance through $80M+ revenue</span></li>
+    <li><strong>Target companies:</strong> peers and adjacents of your client in high-volume billing industries (logistics, healthcare billing, staffing, telecom).</li>
+    <li><strong>Deal-breakers:</strong> empty. Leave it that way.</li>
+  </ul>
+  <p>If the profile came back with the wrong altitude (senior accountants, or CFOs only), fix it in the dive-deeper box and re-run. Plain-English instructions that work well on this role:</p>
+  <ul>
+    <li>"Only candidates who have led AP/AR or billing teams of 10 or more"</li>
+    <li>"Exclude pure public-accounting and audit backgrounds with no operating-company experience"</li>
+    <li>"Add candidates from logistics and healthcare billing companies"</li>
+  </ul>
+
+  <div class="callout warn">
+    <span class="tag">The one mistake to avoid on this JD</span>
+    <p>The JD lists a dozen qualifications. The search must not. The whole JD goes in the Job description box (the AI reads every line), but the typed must-haves stay at the three that would make you reject someone: AP/AR scale, the ERP migration, the $80M growth story. CPA, "excellent communication," and the bachelor's degree are scoring signal, not filters; promote them to must-haves and you filter out great operators over a resume word.</p>
+  </div>
+
+  <h2 id="checklist">10. Quick-reference checklist</h2>
   <h3>Every new job order</h3>
   <ul>
     <li>Recruiting workspace &gt; Build &gt; <span class="ui">JD Sourcing</span></li>
