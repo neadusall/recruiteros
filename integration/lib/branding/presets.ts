@@ -14,6 +14,8 @@
 
 export interface BrandPreset {
   brandName: string;
+  /** The portal host this brand's links should point at (e.g. app.lumesp.com). */
+  appHost: string;
   /** Logo for the DARK appearance (white text) — used on the dark login screens. */
   logoUrl: string;
   /** Logo for the LIGHT appearance (navy text) — used in the light-theme portal. */
@@ -27,6 +29,7 @@ export interface BrandPreset {
 /** Lume Search Partners — app.lumesp.com white-label. */
 const LUME: BrandPreset = {
   brandName: "Lume Search Partners",
+  appHost: "app.lumesp.com",
   logoUrl: "/assets/img/lume-wordmark-white.svg",
   logoLightUrl: "/assets/img/lume-wordmark-navy.svg",
   faviconUrl: "/assets/img/lume-favicon.svg",

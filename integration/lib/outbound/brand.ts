@@ -38,12 +38,25 @@ export async function notifyBrand(workspaceId: string): Promise<NotifyBrand> {
     const domainLive = !!(b.customDomain && (b.domainStatus === "verified" || b.domainStatus === "live"));
     const preset = b.customDomain ? presetForHost(b.customDomain) : null;
     const name = (b.brandName || preset?.brandName || "").trim();
-    if (!name && !domainLive) return house();
-    return {
-      name: name || house().name,
-      appUrl: domainLive ? `https://${b.customDomain}` : house().appUrl,
-      whiteLabel: true,
-    };
+    if (name || domainLive) {
+      return {
+        name: name || house().name,
+        appUrl: domainLive ? `https://${b.customDomain}` : house().appUrl,
+        whiteLabel: true,
+      };
+    }
+    // Branding record never filled in: a flagship white-label workspace (its
+    // company domain matches a built-in preset, e.g. lumesp.com -> Lume) must
+    // still never speak as the house brand. Resolve the preset off the
+    // workspace's own domain so automated updates stay brand-true even before
+    // Setup -> Branding is touched.
+    const { devAuthStore } = await import("../auth");
+    const wsDomain = devAuthStore().workspaces.get(workspaceId)?.domain || "";
+    const wsPreset = wsDomain ? presetForHost(wsDomain) : null;
+    if (wsPreset) {
+      return { name: wsPreset.brandName, appUrl: `https://${wsPreset.appHost}`, whiteLabel: true };
+    }
+    return house();
   } catch {
     return house();
   }
