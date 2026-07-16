@@ -10925,12 +10925,19 @@
           return '<span class="jd-eng ' + (on ? "on" : "off") + '" title="' + esc(on ? label + " is active and will run on every search." : offHint) + '">' +
             '<span class="jd-eng-dot"></span>' + esc(label) + (on ? "" : " · off") + '</span>';
         }
+        var p = (r.data && r.data.phoneSources) || {};
         host.style.display = "";
         host.innerHTML = '<span class="muted" style="font-size:11.5px;margin-right:2px">Search power:</span>' +
           pill(e.database, "Contact database", "Off: the enrichment worker is not reachable, so the free 57M-person database sweep is skipped this run.") +
           pill(e.wideWeb, "Wide web search", "Off: paste your Serper key in Setup under JD Sourcing to turn on the deep web pass (about a nickel per full run).") +
           pill(e.freeWeb, "Built-in web search", "Off: the built-in free pass is not responding right now. It comes back on its own; nothing to configure.") +
-          pill(e.peopleApi, "People search engine", "Off: connect a people-search subscription in Setup under JD Sourcing. This is the highest-volume source when active.");
+          pill(e.peopleApi, "People search engine", "Off: connect a people-search subscription in Setup under JD Sourcing. This is the highest-volume source when active.") +
+          // Phone rungs get their own pills: phones are the scarcest field, so a dead
+          // source should be visible HERE, not discovered from a list with few phones.
+          '<span class="muted" style="font-size:11.5px;margin:0 2px 0 8px">Phone sources:</span>' +
+          pill(p.vendorEnrich, "Contact enrichment", "Off: the enrichment worker is not reachable, so the two vendor passes that fill emails and phones are skipped.") +
+          pill(p.inHouseDb, "In-house phone database", "Off: the in-house phone database (about 2.5 million named people with numbers) is not reachable right now.") +
+          pill(p.paidFinder, "Paid phone finder", "Off: optional top-up. Add a phone-lookup listing (host + path) in Setup under JD Sourcing and it will run only on candidates the free phone sources could not fill.");
       }).catch(function () {});
     }
     loadEngines();

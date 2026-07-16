@@ -39,10 +39,12 @@ import {
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
   mergeSourcingRuns, getRapidQuota,
   gapFillContacts, listNightItems, addNightItem, removeNightItem,
+  landlineDbReady,
 } from "../../../lib/sourcing";
 import type { CandidateRow, SearchBreadth, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { withWorkspaceCreds } from "../../../lib/connected";
+import { cred } from "../../../lib/providers/http";
 import { nowIso } from "../../../lib/core/ids";
 import { dbEnabled } from "../../../lib/db";
 import { ostextImport, ostextStarterTemplate, type OsTextContact } from "../../../lib/ostextImport";
@@ -135,6 +137,14 @@ export async function POST(req: Request) {
           wideWeb: serperSearchConfigured(),
           freeWeb: googleSearchConfigured() || searxSearchConfigured(),
           peopleApi: rapidApiSearchConfigured(),
+        },
+        // Phone-source readout: which of the phone rungs can actually fire right now.
+        // Same honesty rule as the search pills: a recruiter should see a dead phone
+        // source here, not discover it from a list with 0 phones.
+        phoneSources: {
+          vendorEnrich: laxisWorkerConfigured(), // KoldInfo + Laxis ride the same worker
+          inHouseDb: await landlineDbReady(),
+          paidFinder: Boolean(cred("RAPIDAPI_KEY") && cred("RAPIDAPI_PHONE_HOST") && cred("RAPIDAPI_PHONE_PATH")),
         },
       })));
     }

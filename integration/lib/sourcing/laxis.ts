@@ -241,7 +241,14 @@ export function mergeEnrichedCsv(rows: CandidateRow[], enrichedCsv: string): Lax
   const hName = pickHeader(headers, /full\s*name|^name$/i) || pickHeader(headers, /name/i);
   const hCompany = pickHeader(headers, /company|organi[sz]ation|employer/i);
   const hEmail = pickHeader(headers, /e-?mail/i, /work|business|verified|primary/i);
-  const hPhone = pickHeader(headers, /phone|mobile|tel|direct/i, /mobile|direct|work/i);
+  // ALL phone-ish columns, ordered CELL-FIRST (OS Text texts cells; Laxis's own column
+  // is literally named "Cellphone"). Reading a single column loses every number that
+  // happens to sit in a different column on that row - that bug cost real phones.
+  const phoneRank = (h: string): number =>
+    /cell|mobile/i.test(h) ? 0 : /direct/i.test(h) ? 1 : /work|office|company/i.test(h) ? 3 : 2;
+  const hPhones = headers
+    .filter((h) => /phone|mobile|cell|tel|direct/i.test(h))
+    .sort((a, b) => phoneRank(a) - phoneRank(b));
 
   const byKey = new Map<string, CandidateRow>();
   for (const c of rows) byKey.set(laxisCandKey(c), c);
@@ -260,7 +267,14 @@ export function mergeEnrichedCsv(rows: CandidateRow[], enrichedCsv: string): Lax
     result.matched++;
 
     const email = hEmail ? clean(rec[hEmail]) : "";
-    const phone = hPhone ? clean(rec[hPhone]) : "";
+    // First value that actually looks like a number across every phone column, best
+    // line type first (guards against status-ish columns like "Phone Status").
+    let phone = "";
+    for (const h of hPhones) {
+      const v = clean(rec[h]);
+      const digits = v.replace(/\D/g, "");
+      if (v && /^[+\d\s().\-ext]+$/i.test(v) && digits.length >= 7 && digits.length <= 15) { phone = v; break; }
+    }
     if (email && !c.email && /@/.test(email)) { c.email = email; result.emails++; }
     if (phone && !c.phone) { c.phone = phone; result.phones++; }
   }

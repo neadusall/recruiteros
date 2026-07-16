@@ -14,6 +14,8 @@
 import type { CandidateRow } from "./types";
 import { getCachedContact, putCachedContact } from "./cache";
 import { enrich, cheapFirstContactWaterfall } from "../signals";
+import { fillPhonesFromLandlineDb } from "./landlinePhones";
+import { withWorkspaceCreds } from "../connected";
 import { nowIso } from "../core/ids";
 
 export interface GapFillResult {
@@ -26,11 +28,21 @@ export interface GapFillResult {
 }
 
 export async function gapFillContacts(ws: string, rows: CandidateRow[]): Promise<GapFillResult> {
+  // Workspace-cred context for the WHOLE gap-fill: the waterfall providers read
+  // their keys via cred(), which only sees Setup-pasted keys inside this wrapper.
+  // Without it, a phone-finder key saved in Setup never reached this code path.
+  return withWorkspaceCreds(ws, () => gapFillInner(ws, rows));
+}
+
+async function gapFillInner(ws: string, rows: CandidateRow[]): Promise<GapFillResult> {
   const plan = cheapFirstContactWaterfall({ includePhone: true });
   const phonePlan = { ...plan, steps: plan.steps.filter((s) => s.field !== "email") };
   let enrichedCount = 0;
   let phones = 0;
   let contactCacheHits = 0;
+  // FREE rung first: our own LandlineDB (~2.5M named-person phone rows, ~960k explicit
+  // cells) fills what it can before any cached-or-paid lookup runs. Blanks only.
+  try { phones += await fillPhonesFromLandlineDb(rows); } catch { /* rung is optional */ }
   for (const c of rows) {
     const hasEmail = Boolean((c.email || "").trim());
     const hasPhone = Boolean((c.phone || "").trim());

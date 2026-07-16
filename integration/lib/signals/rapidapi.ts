@@ -110,8 +110,8 @@ export const rapidEmailFinder: EnrichmentProvider<string> = makeProvider<string>
   typicalConfidence: 0.6,
   envKeys: ["RAPIDAPI_KEY", "RAPIDAPI_EMAIL_HOST", "RAPIDAPI_EMAIL_PATH"],
   fn: async ({ subject, resolved }: EnrichmentInput): Promise<ProviderOutcome<string>> => {
-    const host = process.env.RAPIDAPI_EMAIL_HOST!;
-    const tpl = process.env.RAPIDAPI_EMAIL_PATH!;
+    const host = cred("RAPIDAPI_EMAIL_HOST");
+    const tpl = cred("RAPIDAPI_EMAIL_PATH");
     const first = String(subject.firstName ?? "").trim();
     const last =
       String(subject.lastName ?? "").trim() ||
@@ -163,8 +163,8 @@ export const rapidPersonEnrich: EnrichmentProvider<PersonEnrichment> =
     typicalConfidence: 0.65,
     envKeys: ["RAPIDAPI_KEY", "RAPIDAPI_PERSON_HOST", "RAPIDAPI_PERSON_PATH"],
     fn: async ({ subject }: EnrichmentInput): Promise<ProviderOutcome<PersonEnrichment>> => {
-      const host = process.env.RAPIDAPI_PERSON_HOST!;
-      const tpl = process.env.RAPIDAPI_PERSON_PATH!;
+      const host = cred("RAPIDAPI_PERSON_HOST");
+      const tpl = cred("RAPIDAPI_PERSON_PATH");
       const linkedin = String(subject.linkedinUrl ?? "");
       const company = String(subject.companyName ?? "");
       const title = String(subject.targetTitle ?? subject.title ?? "");
@@ -212,8 +212,8 @@ export const rapidPhoneFinder: EnrichmentProvider<PhoneResult> = makeProvider<Ph
   typicalConfidence: 0.45,
   envKeys: ["RAPIDAPI_KEY", "RAPIDAPI_PHONE_HOST", "RAPIDAPI_PHONE_PATH"],
   fn: async ({ subject, resolved }: EnrichmentInput): Promise<ProviderOutcome<PhoneResult>> => {
-    const host = process.env.RAPIDAPI_PHONE_HOST!;
-    const tpl = process.env.RAPIDAPI_PHONE_PATH!;
+    const host = cred("RAPIDAPI_PHONE_HOST");
+    const tpl = cred("RAPIDAPI_PHONE_PATH");
     const name = String(subject.fullName ?? "");
     const company = String(subject.companyName ?? "");
     const domain =
@@ -271,8 +271,8 @@ function makeLineFinder(
     typicalConfidence: 0.45,
     envKeys: ["RAPIDAPI_KEY", hostKey, pathKey],
     fn: async ({ subject, resolved }: EnrichmentInput): Promise<ProviderOutcome<string>> => {
-      const host = process.env[hostKey]!;
-      const tpl = process.env[pathKey]!;
+      const host = cred(hostKey);
+      const tpl = cred(pathKey);
       const name = String(subject.fullName ?? "");
       const company = String(subject.companyName ?? "");
       const linkedin = String(subject.linkedinUrl ?? "");
@@ -341,8 +341,8 @@ export const icypeasEmailFinder: EnrichmentProvider<string> = makeProvider<strin
     const res = await fetch("https://app.icypeas.com/api/email-search", {
       method: "POST",
       headers: {
-        Authorization: process.env.ICYPEAS_API_KEY!,
-        "X-ROCK-SECRET": process.env.ICYPEAS_API_SECRET!,
+        Authorization: cred("ICYPEAS_API_KEY"),
+        "X-ROCK-SECRET": cred("ICYPEAS_API_SECRET"),
         "Content-Type": "application/json",
         Accept: "application/json",
       },
@@ -390,8 +390,8 @@ export const emailVerifier: EnrichmentProvider<string> = makeProvider<string>({
     const email =
       (resolved.email?.value as string | undefined) ?? String(subject.email ?? "");
     if (!email) return { status: "miss" };
-    const host = process.env.EMAIL_VERIFY_HOST!;
-    const path = process.env.EMAIL_VERIFY_PATH!.replace("{email}", encodeURIComponent(email));
+    const host = cred("EMAIL_VERIFY_HOST");
+    const path = cred("EMAIL_VERIFY_PATH").replace("{email}", encodeURIComponent(email));
     const data = await rapidGet<unknown>(host, path);
     const result = (pick(data, ["result", "status", "deliverability", "state"]) ?? "").toLowerCase();
     const good = ["ok", "valid", "deliverable", "good"].some((s) => result.includes(s));

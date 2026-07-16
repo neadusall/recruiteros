@@ -112,6 +112,19 @@ function detect(header: string[]): Partial<Record<Field, number>> {
   return map;
 }
 
+/** EVERY phone-alias column, in alias (preference) order: person_sanitized_phone can be
+ *  blank on a row whose raw person_phone is filled (E.164 conversion fails on odd
+ *  formats), so reading a single column silently loses those numbers. */
+function detectPhoneColumns(header: string[]): number[] {
+  const norm = (header || []).map((h) => h.toLowerCase().trim().replace(/^﻿/, ""));
+  const cols: number[] = [];
+  for (const alias of IMPORT_ALIASES.phone) {
+    const idx = norm.indexOf(alias);
+    if (idx >= 0 && !cols.includes(idx)) cols.push(idx);
+  }
+  return cols;
+}
+
 // Content signatures — used to identify the key columns when the HEADER name is unknown/renamed.
 // This is what makes the importer format-agnostic: KoldInfo can label its export however it likes.
 const RE_EMAIL = /^[^\s@,;]+@[^\s@,;]+\.[a-z]{2,}$/i;
@@ -150,7 +163,9 @@ export function parseKoldInfoCsv(text: string): KoldInfoResult[] {
   const grid = parseCsv((text || "").replace(/^﻿/, "")); // strip a UTF-8 BOM if present
   if (grid.length < 2) return [];
   const map = detect(grid[0]);
+  const phoneCols = detectPhoneColumns(grid[0]);
   const taken = new Set<number>(Object.values(map).filter((v): v is number => v !== undefined));
+  for (const c of phoneCols) taken.add(c);
   const fill = (f: Field, pred: (v: string) => boolean, min: number) => {
     if (map[f] !== undefined) return;
     const c = detectByContent(grid, pred, min, taken);
@@ -161,12 +176,17 @@ export function parseKoldInfoCsv(text: string): KoldInfoResult[] {
   fill("rosId", (v) => RE_ROSID.test(v), 0.5);
   fill("domain", (v) => RE_DOMAIN.test(v), 0.6);
   fill("vendorStatus", (v) => STATUS_WORDS.has(v.toLowerCase()), 0.6);
-  fill("phone", (v) => {
-    if (!/^[+\d\s().-]+$/.test(v)) return false;
+  const looksPhone = (v: string): boolean => {
+    if (!/^[+\d\s().\-ext]+$/i.test(v)) return false; // allow "ext"/"x" extensions
     const digits = v.replace(/\D/g, "");
-    return digits.length >= 7 && digits.length <= 15;
-  }, 0.5);
-  if (map.email === undefined && map.phone === undefined) return []; // neither an email nor a phone column → nothing to import
+    return digits.length >= 7 && digits.length <= 18;
+  };
+  if (!phoneCols.length) {
+    const c = detectByContent(grid, looksPhone, 0.5, taken);
+    if (c >= 0) { phoneCols.push(c); taken.add(c); }
+  }
+  if (map.phone === undefined && phoneCols.length) map.phone = phoneCols[0];
+  if (map.email === undefined && !phoneCols.length) return []; // neither an email nor a phone column → nothing to import
   const at = (row: string[], f: Field): string | undefined => {
     const i = map[f];
     if (i === undefined) return undefined;
@@ -178,7 +198,12 @@ export function parseKoldInfoCsv(text: string): KoldInfoResult[] {
     const row = grid[r];
     const rawEmail = (at(row, "email") || "").toLowerCase();
     const email = rawEmail.includes("@") ? rawEmail : undefined;
-    const phone = at(row, "phone");
+    // First plausible number across every phone column (sanitized E.164 first).
+    let phone: string | undefined;
+    for (const c of phoneCols) {
+      const v = (row[c] ?? "").trim();
+      if (v && looksPhone(v)) { phone = v; break; }
+    }
     if (!email && !phone) continue;
     out.push({
       rosId: at(row, "rosId"),

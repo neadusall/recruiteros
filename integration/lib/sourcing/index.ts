@@ -64,6 +64,7 @@ export {
 } from "./koldinfoDiscovery";
 export { getRapidQuota, noteRapidQuota, type RapidQuotaSnapshot } from "./rapidQuota";
 export { gapFillContacts, type GapFillResult } from "./gapfill";
+export { landlineDbReady, fillPhonesFromLandlineDb } from "./landlinePhones";
 export {
   listNightItems, addNightItem, removeNightItem, tickNightQueue,
   type NightItem, type NightStage, type NightAddInput,

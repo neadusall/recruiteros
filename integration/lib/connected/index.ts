@@ -159,6 +159,11 @@ const CATALOG: IntegrationMeta[] = [
       { key: "RAPIDAPI_PROFILE_PATH", label: "Deep-vet · path", required: false, placeholder: "/api/v1/user/profile?username={username}", hint: "Profile endpoint. {username} is filled with the candidate's …/in/<handle> slug automatically; use {url} instead if your listing wants the full profile URL." },
       { key: "RAPIDAPI_PROFILE_METHOD", label: "Deep-vet · method", required: false, placeholder: "GET", hint: "GET or POST. Enter GET for the Fresh listing. Leave blank = GET." },
       { key: "RAPIDAPI_PROFILE_BODY_KEY", label: "Deep-vet · URL field", required: false, placeholder: "link", hint: "POST only: ignore for the Fresh (GET) listing. Body key the profile endpoint expects the URL under (person_deep uses 'link')." },
+      // --- Paid phone finder (optional): the last rung of the phone waterfall ---
+      // The free sources (KoldInfo, Laxis, the in-house phone database) always run
+      // first; this listing is only called for candidates they could not fill.
+      { key: "RAPIDAPI_PHONE_HOST", label: "Phone finder · host", required: false, placeholder: "your-phone-listing.p.rapidapi.com", hint: "Optional. A RapidAPI phone/direct-dial listing's x-rapidapi-host. Fills phone numbers the free sources (KoldInfo, Laxis, in-house database) missed. Leave blank to skip the paid phone rung." },
+      { key: "RAPIDAPI_PHONE_PATH", label: "Phone finder · path", required: false, placeholder: "/lookup?name={name}&company={company}&domain={domain}", hint: "Path template; {name} {company} {domain} are filled per candidate. Uses the same RapidAPI key above." },
       // --- Free first pass (optional): Google Programmable Search over the X-ray boolean ---
       { key: "GOOGLE_CSE_KEY", label: "Free pass · Google API key", required: false, secret: true, placeholder: "AIza…", hint: "Optional. Google Custom Search JSON API key: gives 100 FREE searches/day that run before any paid lookup. Heads up: Google closed this API to new signups and retires it Jan 1, 2027; if you can't create a key, use the Serper wide pass below instead." },
       { key: "GOOGLE_CSE_CX", label: "Free pass · Search engine ID (cx)", required: false, placeholder: "xxxxxxxxxxxxx", hint: "Optional. Your Programmable Search Engine ID. Create one at programmablesearchengine.google.com set to search the entire web." },
@@ -172,6 +177,7 @@ const CATALOG: IntegrationMeta[] = [
       "DEEP-VET (optional) → host: same · path: /api/v1/user/profile?username={username} · method: GET. {username} is filled in per candidate.",
       "FREE PASS (optional) → add a Google Custom Search key + engine ID (cx) to get 100 free searches/day that run before any paid lookup. Google retires this API Jan 1, 2027 and no longer accepts new signups.",
       "WIDE PASS (recommended) → add a serper.dev API key: real Google results at roughly $0.30-$1 per 1,000 searches, no daily cap, runs before the paid people search. New accounts start with 2,500 free credits.",
+      "PHONE FINDER (optional) → subscribe to any RapidAPI phone/direct-dial lookup listing and fill its host + path. It only runs on candidates the free phone sources (KoldInfo, Laxis, the in-house database) could not fill, so it is pure top-up spend.",
       "Paste your RapidAPI key, fill the values above exactly, Save, then Test. It should go green.",
     ],
     docsUrl: "https://rapidapi.com/saleleads-saleleads-default/api/fresh-linkedin-scraper-api",

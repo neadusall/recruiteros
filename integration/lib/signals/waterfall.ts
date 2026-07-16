@@ -20,6 +20,8 @@
  *     callers pass `now` and a cache so reruns are cheap and idempotent.
  */
 
+import { cred } from "../providers/http";
+
 /* ------------------------------------------------------------------ */
 /* Core value + provenance types                                       */
 /* ------------------------------------------------------------------ */
@@ -383,8 +385,12 @@ export function makeProvider<T>(config: {
     label: config.label,
     cost: config.cost,
     typicalConfidence: config.typicalConfidence,
+    // cred(): workspace-store keys (Setup) first, then process.env — a provider
+    // configured only through the Setup UI must still count as configured, or the
+    // waterfall skips it even though its lookup would work. Reading process.env
+    // here silently disabled every Setup-keyed provider (the phone rung especially).
     isConfigured: () =>
-      (config.envKeys ?? []).every((k) => Boolean(process.env[k])),
+      (config.envKeys ?? []).every((k) => Boolean(cred(k))),
     lookup: config.fn,
   };
 }
