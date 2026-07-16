@@ -2,22 +2,32 @@
  * RecruiterOS · enrichment worker, the KoldInfo browser flow.
  *
  * KoldInfo (app.koldinfo.com) has no API, so this drives its real UI with a headless
- * Chromium, exactly like laxis-flow.js drives app.laxis.tech: log in once (cookies
- * persist on the volume), upload the missing-email CSV to the bulk email finder, wait
- * for the job to finish, download the result CSV, and hand the bytes back. RecruiterOS
- * merges the emails onto its candidate rows (blanks only, never overwrites).
+ * Chromium, exactly like laxis-flow.js drives app.laxis.tech. KoldInfo is the FREE
+ * first rung: this flow runs BEFORE the Laxis job in the auto-enrich chain, so Laxis
+ * credits are only spent on what KoldInfo could not fill.
  *
- * KoldInfo is the FREE first rung, so this flow runs BEFORE the Laxis job in the
- * auto-enrich chain: Laxis credits are then only spent on what KoldInfo could not fill.
+ * ── VERIFIED FLOW (calibrated against the live site 2026-07-15, creds on the box) ──
+ * LOGIN: /sign-in, plain email + password form; submit via Enter (a "Sign In"
+ *   HEADING also exists, so text-clicking is unreliable, Enter is not).
+ * ENRICH: /protected/enrichment ("Upload LinkedIn URLs to Enrich"):
+ *   attach the CSV on the hidden input[type=file] → "Loaded N rows." appears →
+ *   pick which column has the LinkedIn URLs (ours: linkedin_url) in the FIRST
+ *   <select> (options = our CSV headers; second select = source table, default
+ *   "All tables") → "Enrich Preview" → a confirmation reads
+ *   "Found X matching rows. It will cost X tokens. Proceed?" with Cancel/Confirm.
+ *   1 token per matched row. 0 matches → Cancel, nothing spent.
+ * RESULT: lands in /protected/exports ("My Exports", newest first) named
+ *   "Enrichment_all_<date>.csv"; the row's Download button hands back OUR columns
+ *   (ros_id passthrough included) + person_* columns: person_email,
+ *   person_email_status_cd (Verified/…), person_phone, person_sanitized_phone
+ *   (E.164), person_location_*, person_title. So KoldInfo returns EMAILS AND
+ *   PHONES (line type unknown; OS Text's Telnyx validation filters non-mobiles).
  *
- * UNCALIBRATED ON PURPOSE: unlike laxis-flow (calibrated against the live site), this
- * flow has not been walked against KoldInfo's real UI yet. Every step is intent-based
- * with generous label candidates and self-heals through heal.js (an LLM picks the right
- * control when no known label matches, and the winner is persisted). Run
- * `GET /selftest?kind=koldinfo` (or wait for the canary) after setting credentials to
- * calibrate the login + bulk-upload entry points without spending anything. If a step
- * still can't resolve, the error names it (koldinfo_step_unresolved via heal) so the
- * fix is one label string here.
+ * The Exports list holds older files too and its ordering is not trusted: the
+ * download step verifies each candidate file by content (it must echo one of OUR
+ * ros_ids) before accepting it. On a resume after Confirm (phase uploaded/
+ * processing/completed) we skip straight to the download, never re-uploading,
+ * so tokens are not double-spent.
  */
 
 "use strict";
@@ -25,18 +35,14 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const crypto = require("crypto");
 const { chromium } = require("playwright");
 const heal = require("./heal");
 
 const CONFIG = {
   baseUrl: process.env.KOLDINFO_BASE_URL || "https://app.koldinfo.com",
-  // KoldInfo's sign-in lives at /sign-in (its sign-up is /sign-up); /login is tried as
-  // a fallback when the primary path shows no email field.
   loginPath: process.env.KOLDINFO_LOGIN_PATH || "/sign-in",
-  // Optional direct path to the bulk finder page. When empty the flow heal-clicks its
-  // way there from the post-login landing page.
-  bulkPath: process.env.KOLDINFO_BULK_PATH || "",
+  bulkPath: process.env.KOLDINFO_BULK_PATH || "/protected/enrichment",
+  exportsPath: process.env.KOLDINFO_EXPORTS_PATH || "/protected/exports",
 
   statePath: process.env.KOLDINFO_STATE_PATH || "/data/koldinfo-state.json",
   email: process.env.KOLDINFO_EMAIL || "",
@@ -46,22 +52,13 @@ const CONFIG = {
   navTimeoutMs: Number(process.env.KOLDINFO_NAV_TIMEOUT_MS || 60_000),
   enrichTimeoutMs: Number(process.env.KOLDINFO_ENRICH_TIMEOUT_MS || 30 * 60_000),
 
-  // Label candidates per step (visible text). heal.js tries these first, then a learned
-  // override, then asks the LLM, so a rename on KoldInfo's side repairs itself.
-  text: {
-    bulkEntry: ["Bulk Email Finder", "Bulk Finder", "Email Finder", "Bulk", "Bulk Upload", "Find Emails"],
-    uploadOpen: ["Upload CSV", "Upload File", "Upload", "Import CSV", "Import", "Choose File"],
-    start: ["Start", "Find Emails", "Upload", "Submit", "Run", "Continue", "Process"],
-    signIn: ["Sign In", "Sign in", "Log In", "Log in", "Login", "Continue"],
-    export: ["Download", "Export", "Download CSV", "Download Results", "Export CSV", "Results"],
-  },
-  selectors: {
-    fileInput: "input[type=file]",
-  },
+  // The CSV column the app should read LinkedIn URLs from (ours, from
+  // buildSourcingKoldInfoCsv). Any option containing "linkedin" is the fallback.
+  linkedinColumn: process.env.KOLDINFO_LINKEDIN_COLUMN || "linkedin_url",
 };
 
 /* ----------------------------------------------------------------------------- */
-/* small helpers (same shapes as laxis-flow)                                      */
+/* small helpers                                                                  */
 /* ----------------------------------------------------------------------------- */
 
 async function firstVisibleLoc(page, sels, timeout = 8000) {
@@ -81,6 +78,20 @@ async function onLoginPage(page) {
   } catch { return false; }
 }
 
+/** Wait until the page has left the login state: no visible password field AND the URL
+ *  no longer says sign-in/login. Polls, so SPA redirects and XHR logins both count. */
+async function waitForLeaveLogin(page, ms) {
+  try {
+    await page.waitForFunction(() => {
+      const pw = document.querySelector("input[type=password]");
+      const pwVisible = pw && pw.offsetParent !== null;
+      const onAuthUrl = /sign-?in|log-?in/i.test(location.pathname);
+      return !pwVisible && !onAuthUrl;
+    }, { timeout: ms, polling: 500 });
+    return true;
+  } catch { return false; }
+}
+
 /* ----------------------------------------------------------------------------- */
 /* login + session                                                                */
 /* ----------------------------------------------------------------------------- */
@@ -95,18 +106,9 @@ async function logIn(page, log) {
 
   let email = await firstVisibleLoc(page, ["input[type=email]", "input[autocomplete=email]", "input[name=email]", "#email"], 8000);
   if (!email) {
-    // Primary path showed no form (path moved, or fields are behind an "email" choice).
     log("login: no email field on " + CONFIG.loginPath + ", trying /login");
     await page.goto(CONFIG.baseUrl + "/login", { waitUntil: "domcontentloaded" }).catch(() => {});
     await page.waitForTimeout(2500);
-    email = await firstVisibleLoc(page, ["input[type=email]", "input[autocomplete=email]", "input[name=email]", "#email"], 8000);
-  }
-  if (!email) {
-    // Last resort: an email/password option hidden behind social buttons (Laxis-style).
-    await heal.resolveClick(page, "koldinfo_login_with_email",
-      "Choose to sign in / continue using an email address and password (not a social provider like Google)",
-      ["Continue with Email", "Sign in with email", "Use email"], log).catch(() => {});
-    await page.waitForTimeout(2000);
     email = await firstVisibleLoc(page, ["input[type=email]", "input[autocomplete=email]", "input[name=email]", "#email"], 8000);
   }
   const password = await firstVisibleLoc(page, ["input[type=password]", "input[autocomplete=current-password]", "input[name=password]", "#password"], 8000);
@@ -115,13 +117,22 @@ async function logIn(page, log) {
   }
   await email.fill(CONFIG.email);
   await password.fill(CONFIG.password);
-  await Promise.all([
-    page.waitForLoadState("networkidle").catch(() => {}),
-    heal.resolveClick(page, "koldinfo_login_submit", "Submit / confirm the email and password login form", CONFIG.text.signIn, log),
-  ]);
-  await page.waitForTimeout(4000);
-  if (await onLoginPage(page)) {
-    throw new Error("koldinfo_login_failed: still on the sign-in screen after submit, check credentials, or a 2FA/captcha challenge");
+
+  // Submit, most-reliable mechanism first. Plain text-click is LAST on purpose: the
+  // sign-in page also has a "Sign In" HEADING, and clicking that no-ops.
+  await password.press("Enter").catch(() => {});
+  if (!(await waitForLeaveLogin(page, 12_000))) {
+    const btn = page.locator("button[type=submit]").first();
+    if (await btn.count()) { log("login: Enter did not submit, clicking button[type=submit]"); await btn.click().catch(() => {}); }
+    if (!(await waitForLeaveLogin(page, 12_000))) {
+      const roleBtn = page.getByRole("button", { name: /sign ?in|log ?in|continue|submit/i }).first();
+      if (await roleBtn.count()) { log("login: clicking the sign-in button by role"); await roleBtn.click().catch(() => {}); }
+      if (!(await waitForLeaveLogin(page, 12_000))) {
+        await page.screenshot({ path: "/data/koldinfo-login-fail.png", fullPage: true }).catch(() => {});
+        log("login: FAILED at " + page.url() + " (screenshot: /data/koldinfo-login-fail.png)");
+        throw new Error("koldinfo_login_failed: still on the sign-in screen after submit, check credentials, or a 2FA/captcha challenge (see /data/koldinfo-login-fail.png)");
+      }
+    }
   }
   log("login: success");
 }
@@ -130,7 +141,7 @@ async function ensureSession(context, log) {
   const page = await context.newPage();
   page.setDefaultTimeout(CONFIG.navTimeoutMs);
   log("session: opening app");
-  await page.goto(CONFIG.baseUrl + (CONFIG.bulkPath || "/"), { waitUntil: "domcontentloaded" });
+  await page.goto(CONFIG.baseUrl + CONFIG.bulkPath, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
   if (await onLoginPage(page)) {
     log("session: not authenticated, logging in");
@@ -143,143 +154,101 @@ async function ensureSession(context, log) {
   return page;
 }
 
-/** Land on the bulk finder surface (direct path when configured, else heal-click there). */
-async function gotoBulk(page, log) {
-  if (CONFIG.bulkPath) {
-    await page.goto(CONFIG.baseUrl + CONFIG.bulkPath, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(2500);
-    return;
+/* ----------------------------------------------------------------------------- */
+/* enrich + export (calibrated against the live UI)                               */
+/* ----------------------------------------------------------------------------- */
+
+/**
+ * Drive /protected/enrichment: attach the CSV, pick the LinkedIn column, preview,
+ * confirm. Returns the matched-row count, or 0 when KoldInfo found nothing (in which
+ * case Cancel was clicked and no tokens were spent).
+ */
+async function runEnrichment(page, csvPath, log) {
+  await page.goto(CONFIG.baseUrl + CONFIG.bulkPath, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(3000);
+
+  const fileInput = page.locator("input[type=file]").first();
+  if (!(await fileInput.count())) {
+    throw new Error("koldinfo_file_input_not_found (CALIBRATE: " + CONFIG.bulkPath + " no longer has a file input)");
   }
-  await page.goto(CONFIG.baseUrl + "/", { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(2500);
-  await heal.resolveClick(page, "koldinfo_bulk_entry",
-    "Open the bulk email finder, the feature that finds email addresses for a whole uploaded CSV/list of people at once",
-    CONFIG.text.bulkEntry, log);
-  await page.waitForTimeout(2500);
+  log("upload: attaching " + path.basename(csvPath));
+  await fileInput.setInputFiles(csvPath);
+  await page.getByText(/Loaded \d+ rows/i).first().waitFor({ state: "visible", timeout: 30_000 })
+    .catch(() => { throw new Error("koldinfo_upload_not_loaded: no 'Loaded N rows' appeared after attaching the CSV"); });
+  log("upload: CSV loaded");
+
+  // "Which column has the LinkedIn URLs?" — the first select lists OUR CSV headers.
+  const colSel = page.locator("select").first();
+  try {
+    await colSel.selectOption({ label: CONFIG.linkedinColumn });
+  } catch {
+    const labels = await colSel.locator("option").allTextContents();
+    const match = labels.find((l) => /linkedin/i.test(l));
+    if (!match) throw new Error("koldinfo_column_select_failed: no linkedin option among [" + labels.join(", ") + "]");
+    await colSel.selectOption({ label: match });
+  }
+  log("upload: LinkedIn column selected");
+  // Second select = source table; its default ("All tables") gives the widest match.
+
+  await page.getByRole("button", { name: /enrich preview/i }).first().click();
+  const proceed = page.getByText(/it will cost\s+\S+\s+tokens?/i).first();
+  await proceed.waitFor({ state: "visible", timeout: 60_000 })
+    .catch(() => { throw new Error("koldinfo_preview_not_shown: no cost confirmation appeared after Enrich Preview"); });
+  const costText = ((await proceed.textContent()) || "").trim();
+  log("preview: " + costText);
+  const found = parseInt((costText.match(/found\s+(\d+)/i) || [])[1] || "0", 10);
+  if (!found) {
+    log("preview: 0 matching rows, cancelling (no tokens spent)");
+    await page.getByRole("button", { name: /^cancel$/i }).first().click().catch(() => {});
+    return 0;
+  }
+  await page.getByRole("button", { name: /^confirm$/i }).first().click();
+  log("enrich: confirmed, " + found + " matched row(s), " + found + " token(s)");
+  return found;
 }
 
-/* ----------------------------------------------------------------------------- */
-/* upload + wait + export                                                         */
-/* ----------------------------------------------------------------------------- */
-
-/** Smallest element containing our token, same idempotency scan as the Laxis flow. */
-async function findJobRow(page, token) {
-  return page.evaluate((tk) => {
-    const all = Array.from(document.querySelectorAll("*"));
-    let bestTxt = null;
-    let bestSize = Infinity;
-    for (const e of all) {
-      const txt = e.textContent || "";
-      if (txt.includes(tk)) {
-        const size = e.querySelectorAll("*").length;
-        if (size < bestSize) { bestSize = size; bestTxt = txt; }
+/**
+ * Poll /protected/exports until a Download hands back OUR result. The list can hold
+ * older exports and its ordering is not guaranteed, so "newest row" is NOT trusted:
+ * every candidate file is verified by content — it must contain one of the ros_ids
+ * from OUR input CSV (KoldInfo echoes input columns back into the export). NOTE: the
+ * page also shows an "Export Next Batch" control; very large runs may paginate — if a
+ * result ever comes back truncated, extend this to click through remaining batches.
+ */
+async function downloadOurExport(page, outDir, log, inputCsv) {
+  const wantIds = new Set(
+    inputCsv.split(/\r?\n/).slice(1).map((l) => (l.split(",")[0] || "").trim()).filter(Boolean)
+  );
+  const isOurs = (text) => {
+    for (const id of wantIds) if (id && text.includes(id)) return true;
+    return false;
+  };
+  const deadline = Date.now() + CONFIG.enrichTimeoutMs;
+  let attempt = 0;
+  while (Date.now() < deadline) {
+    attempt++;
+    await page.goto(CONFIG.baseUrl + CONFIG.exportsPath, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(3000);
+    const buttons = page.getByRole("button", { name: /download/i });
+    const n = Math.min(await buttons.count(), 10);
+    for (let i = 0; i < n; i++) {
+      const waiter = page.waitForEvent("download", { timeout: 30_000 }).catch(() => null);
+      await buttons.nth(i).click().catch(() => {});
+      const download = await waiter;
+      if (!download) continue;
+      const dest = path.join(outDir, "koldinfo-result-" + i + ".csv");
+      await download.saveAs(dest).catch(() => {});
+      let text = "";
+      try { text = fs.readFileSync(dest, "utf8"); } catch { continue; }
+      if (isOurs(text)) {
+        log("export: matched our rows in " + download.suggestedFilename());
+        return text;
       }
     }
-    if (bestTxt === null) return { exists: false, status: "absent" };
-    let status = "unknown";
-    if (/failed|error/i.test(bestTxt)) status = "failed";
-    else if (/completed|complete|done|finished|ready|processed/i.test(bestTxt)) status = "completed";
-    else if (/processing|in progress|queued|pending|running/i.test(bestTxt)) status = "processing";
-    return { exists: true, status };
-  }, token);
-}
-
-/** Upload the CSV once (idempotent by token, so a resumed run never double-spends). */
-async function ensureUploaded(page, csvPath, token, log, onUploaded) {
-  await gotoBulk(page, log);
-
-  const existing = await findJobRow(page, token);
-  if (existing.exists) {
-    log(`upload: row for ${token} already present (status=${existing.status}), skipping upload (resume)`);
-    if (onUploaded) await onUploaded();
-    return;
+    if (attempt === 1 || attempt % 6 === 0) log("export: our result not in the list yet, waiting (" + n + " other export(s) checked)");
+    await page.waitForTimeout(8000);
   }
-
-  // File inputs are usually visually hidden; try to attach directly, and only click an
-  // "upload" opener when no input exists on the page at all.
-  let fileInput = page.locator(CONFIG.selectors.fileInput).first();
-  if ((await fileInput.count()) === 0) {
-    log("upload: no file input on page, opening the upload dialog");
-    await heal.resolveClick(page, "koldinfo_upload_open",
-      "Open the control/dialog for uploading a CSV file of contacts to find emails for",
-      CONFIG.text.uploadOpen, log);
-    await page.waitForTimeout(2000);
-    fileInput = page.locator(CONFIG.selectors.fileInput).first();
-  }
-  if ((await fileInput.count()) === 0) {
-    throw new Error("koldinfo_file_input_not_found (CALIBRATE: no input[type=file] after opening the upload dialog)");
-  }
-  log("upload: setting file " + path.basename(csvPath));
-  await fileInput.setInputFiles(csvPath);
-  await page.waitForTimeout(1500);
-
-  log("upload: starting the bulk find");
-  await heal.resolveClick(page, "koldinfo_start",
-    "Start / confirm the bulk email finding now that the CSV file is attached",
-    CONFIG.text.start, log).catch(() => {
-      // Some uploaders auto-start on file selection; the row check below is the arbiter.
-      log("upload: no start button resolved, assuming the upload auto-started");
-    });
-
-  await page.waitForFunction(
-    (tk) => Array.from(document.querySelectorAll("*")).some((e) => (e.textContent || "").includes(tk)),
-    token,
-    { timeout: 90_000, polling: 2000 }
-  ).catch(() => {
-    throw new Error("koldinfo_row_not_created: uploaded the CSV but no job row appeared (UI may have changed, run /selftest?kind=koldinfo)");
-  });
-  log("upload: job row created");
-  if (onUploaded) await onUploaded();
-}
-
-async function waitForCompletion(page, token, log) {
-  log("find: waiting for completion (job token " + token + ")");
-  await page.waitForFunction(
-    (tk) => {
-      const all = Array.from(document.querySelectorAll("*"));
-      let bestTxt = null;
-      let bestSize = Infinity;
-      for (const e of all) {
-        const txt = e.textContent || "";
-        if (txt.includes(tk) && /(processing|in progress|queued|pending|running|completed|complete|done|finished|ready|processed|failed|error)/i.test(txt)) {
-          const size = e.querySelectorAll("*").length;
-          if (size < bestSize) { bestSize = size; bestTxt = txt; }
-        }
-      }
-      if (bestTxt === null) return false;
-      if (/processing|in progress|queued|pending|running/i.test(bestTxt)) return false;
-      if (/failed|error/i.test(bestTxt)) throw new Error("koldinfo_find_failed: job reported a failure");
-      return /completed|complete|done|finished|ready|processed/i.test(bestTxt);
-    },
-    token,
-    { timeout: CONFIG.enrichTimeoutMs, polling: 5000 }
-  );
-  log("find: completed");
-  await page.waitForTimeout(1500);
-}
-
-async function exportResult(page, token, outDir, log) {
-  // Some UIs need the row opened first, others put a download control right on the row.
-  // Opening the row is best-effort; the download click below is the load-bearing step.
-  try {
-    await page.getByText(token, { exact: false }).first().click({ timeout: 8000 });
-    await page.waitForTimeout(2500);
-    log("export: opened the job row");
-  } catch {
-    log("export: row not clickable, downloading from the list view");
-  }
-
-  log("export: downloading result CSV");
-  const [download] = await Promise.all([
-    page.waitForEvent("download", { timeout: CONFIG.navTimeoutMs }),
-    heal.resolveClick(page, "koldinfo_export",
-      "Download / export the finished bulk email results as a CSV file",
-      CONFIG.text.export, log),
-  ]);
-  const dest = path.join(outDir, "koldinfo-result.csv");
-  await download.saveAs(dest);
-  log("export: saved " + dest);
-  return fs.readFileSync(dest, "utf8");
+  throw new Error("koldinfo_export_timeout: our export never appeared within the time limit");
 }
 
 /* ----------------------------------------------------------------------------- */
@@ -290,15 +259,18 @@ function launchArgs() {
   return { headless: !CONFIG.headed, args: ["--no-sandbox", "--disable-dev-shm-usage"] };
 }
 
-/** Run (or RESUME) one KoldInfo bulk-find job. Same job contract as the Laxis runJob. */
+/**
+ * Run (or RESUME) one KoldInfo bulk-find job. Same job contract as the Laxis runJob.
+ * Phases: new → uploaded → processing → exported. A resume that already confirmed
+ * (phase processing/completed) skips straight to the download, so tokens are never
+ * double-spent by a worker restart.
+ */
 async function runJob(job, { log = () => {}, setPhase = () => {} } = {}) {
   const inputCsv = job.csv;
   if (typeof inputCsv !== "string" || !inputCsv) throw new Error("koldinfo_no_input_csv");
-  const token = job.token;
-  if (!token) throw new Error("koldinfo_no_token");
 
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "koldinfo-"));
-  const csvPath = path.join(workDir, token + ".csv");
+  const csvPath = path.join(workDir, (job.token || "rosjob") + ".csv");
   fs.writeFileSync(csvPath, inputCsv, "utf8");
 
   const haveState = fs.existsSync(CONFIG.statePath);
@@ -308,11 +280,22 @@ async function runJob(job, { log = () => {}, setPhase = () => {} } = {}) {
       haveState ? { storageState: CONFIG.statePath, acceptDownloads: true } : { acceptDownloads: true }
     );
     const page = await ensureSession(context, log);
-    await ensureUploaded(page, csvPath, token, log, async () => { await setPhase("uploaded"); });
-    await setPhase("processing");
-    await waitForCompletion(page, token, log);
-    await setPhase("completed");
-    const result = await exportResult(page, token, workDir, log);
+
+    // Any phase at or past confirm means tokens were spent: never re-upload on resume.
+    const resuming = job.phase === "uploaded" || job.phase === "processing" || job.phase === "completed";
+    if (resuming) {
+      log("resume: enrichment was already confirmed, going straight to the export");
+    } else {
+      const found = await runEnrichment(page, csvPath, log);
+      if (!found) {
+        // Nothing matched: hand back a header-only CSV so the merge counts 0 cleanly.
+        await context.storageState({ path: CONFIG.statePath });
+        return "person_email\n";
+      }
+      await setPhase("processing");
+    }
+
+    const result = await downloadOurExport(page, workDir, log, inputCsv);
     await setPhase("exported");
     await context.storageState({ path: CONFIG.statePath }); // refresh rotated cookies
     return result;
@@ -322,8 +305,8 @@ async function runJob(job, { log = () => {}, setPhase = () => {} } = {}) {
   }
 }
 
-/** Canary: log in (healing the steps if needed) and confirm the bulk entry is locatable,
- *  without uploading anything. server.js exposes this as /selftest?kind=koldinfo. */
+/** Canary: log in (healing if needed) and confirm the enrichment page + file input are
+ *  reachable, without uploading anything. server.js exposes this as /selftest?kind=koldinfo. */
 async function selfTest({ log = () => {} } = {}) {
   const browser = await chromium.launch(launchArgs());
   try {
@@ -333,21 +316,17 @@ async function selfTest({ log = () => {} } = {}) {
     );
     const page = await ensureSession(ctx, log);
     await ctx.storageState({ path: CONFIG.statePath });
-    if (CONFIG.bulkPath) {
-      await page.goto(CONFIG.baseUrl + CONFIG.bulkPath, { waitUntil: "domcontentloaded" });
-      await page.waitForTimeout(3000);
-      const hasInput = (await page.locator(CONFIG.selectors.fileInput).count()) > 0;
-      return { ok: true, healed: false, resolvedTo: hasInput ? "file input on KOLDINFO_BULK_PATH" : "bulk path reachable" };
-    }
-    await page.goto(CONFIG.baseUrl + "/", { waitUntil: "domcontentloaded" });
+    await page.goto(CONFIG.baseUrl + CONFIG.bulkPath, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(3000);
-    const r = await heal.resolveLocate(page, "koldinfo_bulk_entry",
-      "Open the bulk email finder, the feature that finds email addresses for a whole uploaded CSV/list of people at once",
-      CONFIG.text.bulkEntry, log);
-    return { ok: r.ok, healed: r.healed, resolvedTo: r.text };
+    const hasInput = (await page.locator("input[type=file]").count()) > 0;
+    if (!hasInput) return { ok: false, healed: false, resolvedTo: null };
+    return { ok: true, healed: false, resolvedTo: CONFIG.bulkPath + " file input" };
   } finally {
     await browser.close().catch(() => {});
   }
 }
+
+// heal is kept as a dependency for future drift repair on this flow.
+void heal;
 
 module.exports = { runJob, selfTest, CONFIG };

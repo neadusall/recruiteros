@@ -40,6 +40,9 @@ export interface KoldInfoExportRow {
 export interface KoldInfoResult {
   rosId?: string;            // our passthrough id when KoldInfo preserved the column
   email?: string;
+  /** KoldInfo's enrichment export ships phones too (person_sanitized_phone is E.164).
+   *  Line type is unknown; downstream mobile validation (Telnyx) is the filter. */
+  phone?: string;
   firstName?: string;
   lastName?: string;
   fullName?: string;
@@ -83,13 +86,16 @@ export function buildKoldInfoCsv(rows: KoldInfoExportRow[]): string {
 /** Defensive header aliases for KoldInfo's RESULT export — extend when we see the real columns. */
 const IMPORT_ALIASES = {
   rosId: ["ros_id", "rosid", "id", "external_id", "reference", "ref"],
-  email: ["email", "work_email", "work email", "business_email", "business email", "email_address", "email address", "professional_email"],
+  // person_email is what KoldInfo's enrichment export actually uses (verified 2026-07-15).
+  email: ["person_email", "email", "work_email", "work email", "business_email", "business email", "email_address", "email address", "professional_email"],
+  // person_sanitized_phone first: it is the E.164 form of person_phone.
+  phone: ["person_sanitized_phone", "person_phone", "phone", "mobile", "cell", "cellphone", "phone_number", "phone number"],
   firstName: ["first_name", "first name", "firstname", "first"],
   lastName: ["last_name", "last name", "lastname", "last"],
   fullName: ["full_name", "full name", "fullname", "name", "contact", "person"],
   company: ["company", "company_name", "company name", "organization", "employer"],
   domain: ["domain", "company_domain", "website", "company_website"],
-  vendorStatus: ["status", "email_status", "verification", "verification_status", "result", "deliverability", "state", "confidence"],
+  vendorStatus: ["person_email_status_cd", "status", "email_status", "verification", "verification_status", "result", "deliverability", "state", "confidence"],
 } as const;
 
 type Field = keyof typeof IMPORT_ALIASES;
@@ -136,9 +142,9 @@ function detectByContent(grid: string[][], pred: (v: string) => boolean, min: nu
 
 /**
  * Parse a KoldInfo result CSV into re-linkable rows. Header names are matched first (IMPORT_ALIASES);
- * any key column the header didn't resolve is then identified BY CONTENT (email / ros_id / domain /
- * status signatures) — so the round-trip works regardless of what KoldInfo names its export columns.
- * Only rows carrying a usable email are returned (a no-hit row from KoldInfo is dropped).
+ * any key column the header didn't resolve is then identified BY CONTENT (email / phone / ros_id /
+ * domain / status signatures) — so the round-trip works regardless of what KoldInfo names its export
+ * columns. Rows carrying neither a usable email nor a phone are dropped (a no-hit row).
  */
 export function parseKoldInfoCsv(text: string): KoldInfoResult[] {
   const grid = parseCsv((text || "").replace(/^﻿/, "")); // strip a UTF-8 BOM if present
@@ -155,7 +161,12 @@ export function parseKoldInfoCsv(text: string): KoldInfoResult[] {
   fill("rosId", (v) => RE_ROSID.test(v), 0.5);
   fill("domain", (v) => RE_DOMAIN.test(v), 0.6);
   fill("vendorStatus", (v) => STATUS_WORDS.has(v.toLowerCase()), 0.6);
-  if (map.email === undefined) return []; // no email column by name OR content → nothing to import
+  fill("phone", (v) => {
+    if (!/^[+\d\s().-]+$/.test(v)) return false;
+    const digits = v.replace(/\D/g, "");
+    return digits.length >= 7 && digits.length <= 15;
+  }, 0.5);
+  if (map.email === undefined && map.phone === undefined) return []; // neither an email nor a phone column → nothing to import
   const at = (row: string[], f: Field): string | undefined => {
     const i = map[f];
     if (i === undefined) return undefined;
@@ -165,11 +176,14 @@ export function parseKoldInfoCsv(text: string): KoldInfoResult[] {
   const out: KoldInfoResult[] = [];
   for (let r = 1; r < grid.length; r++) {
     const row = grid[r];
-    const email = (at(row, "email") || "").toLowerCase();
-    if (!email || !email.includes("@")) continue;
+    const rawEmail = (at(row, "email") || "").toLowerCase();
+    const email = rawEmail.includes("@") ? rawEmail : undefined;
+    const phone = at(row, "phone");
+    if (!email && !phone) continue;
     out.push({
       rosId: at(row, "rosId"),
       email,
+      phone,
       firstName: at(row, "firstName"),
       lastName: at(row, "lastName"),
       fullName: at(row, "fullName"),

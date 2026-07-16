@@ -11,6 +11,8 @@
  *   { action: "vetStatus", id }                    -> poll the in-flight vet batch; ingests results once it ends
  *   { action: "koldinfoExport", id, top? }         -> FIRST rung (free): CSV of candidates still missing an email, for KoldInfo
  *   { action: "koldinfoImport", id, csv }          -> merge KoldInfo's result CSV back onto the run (fills blank emails)
+ *   { action: "koldinfoEnrich", id }               -> AUTOMATED first rung: browser worker runs KoldInfo itself (submits a job)
+ *   { action: "koldinfoStatus", id }               -> poll the KoldInfo job; auto-merges found emails + phones when done
  *   { action: "laxisEnrich", id, top? }            -> SECOND pass: enrich via the Laxis browser worker (submits a job)
  *   { action: "laxisStatus", id, gapFill? }        -> poll the Laxis job; merges the enriched CSV + runs the gap-fill waterfall
  *   { action: "delete", id }                       -> remove a saved run

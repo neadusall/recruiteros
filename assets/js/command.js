@@ -9383,7 +9383,7 @@
             return;
           }
           var m = s.data.merged || {};
-          stageLaxis("KoldInfo (free) filled " + (m.emails || 0) + " email" + ((m.emails || 0) === 1 ? "" : "s") + ". Now Laxis for the rest + cellphones…");
+          stageLaxis("KoldInfo filled " + (m.emails || 0) + " email" + ((m.emails || 0) === 1 ? "" : "s") + " and " + (m.phones || 0) + " phone" + ((m.phones || 0) === 1 ? "" : "s") + ". Now Laxis for what's left…");
         }).catch(function () { stageLaxis("KoldInfo status check failed, continuing with Laxis."); });
       }
       send("/sourcing", "POST", { action: "koldinfoEnrich", id: aid }).then(function (r) {
@@ -9743,6 +9743,7 @@
               var d = r.data;
               alert("KoldInfo import\n" + (d.parsed || 0) + " rows parsed · " + (d.matched || 0) + " matched to candidates\n\n" +
                 "emails filled      " + (d.emails || 0) + "\n" +
+                "phones filled      " + (d.phones || 0) + "\n" +
                 "vendor-invalid     " + (d.invalid || 0) + "\n" +
                 "unmatched          " + (d.unmatched || 0) + "\n\n" +
                 "Next: Enrich via Laxis for cellphones; rows KoldInfo completed are skipped automatically once they also have a phone.");

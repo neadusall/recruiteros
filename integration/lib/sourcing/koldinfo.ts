@@ -2,11 +2,12 @@
  * RecruitersOS · JD Sourcing · KoldInfo enrichment (CSV round-trip, the FIRST rung).
  *
  * Same operator-driven loop as the In-Market side (KoldInfo has no API): export the
- * candidates still missing an email as an upload-ready CSV, enrich in KoldInfo, import
- * the result back onto the SAME sourcing run. It runs BEFORE Laxis on purpose: KoldInfo
- * is the free first check, so Laxis credits (and the paid waterfall) are only spent on
- * what KoldInfo could not fill. KoldInfo returns emails only; cellphones still come from
- * the Laxis pass afterwards.
+ * candidates still missing an email or a phone as an upload-ready CSV, enrich in
+ * KoldInfo, import the result back onto the SAME sourcing run. It runs BEFORE Laxis on
+ * purpose: KoldInfo is the cheap first check, so Laxis credits (and the paid waterfall)
+ * are only spent on what KoldInfo could not fill. KoldInfo's enrichment export ships
+ * BOTH person_email and person_phone/person_sanitized_phone (verified 2026-07-15);
+ * line type is unknown, so OS Text's Telnyx validation remains the mobile filter.
  *
  * The CSV format + parser are shared with lib/inmarket/koldInfo.ts (header aliases plus
  * content detection), so whatever KoldInfo names its export columns, the round-trip works.
@@ -39,14 +40,15 @@ const BAD_STATUS = new Set(["invalid", "undeliverable", "not_found", "role"]);
 
 /**
  * Build the KoldInfo upload CSV for a sourcing run: only rows still missing an email
- * (that is the whole point of the first rung), and only rows KoldInfo can identify
- * (a name or a LinkedIn URL). Rows already holding an email are counted as `skipped`.
+ * OR a phone (KoldInfo fills both, and only matched rows cost tokens), and only rows
+ * KoldInfo can identify (a name or a LinkedIn URL; its enrichment keys on the URL).
+ * Rows already holding an email AND a phone are counted as `skipped`.
  */
 export function buildSourcingKoldInfoCsv(rows: CandidateRow[]): { csv: string; count: number; skipped: number } {
   const out: KoldInfoExportRow[] = [];
   let skipped = 0;
   for (const c of rows) {
-    if ((c.email || "").trim()) { skipped++; continue; }
+    if ((c.email || "").trim() && (c.phone || "").trim()) { skipped++; continue; }
     const fullName = (c.fullName || "").trim();
     if (!fullName && !c.linkedinUrl) { skipped++; continue; }
     const [firstName, ...rest] = fullName.split(/\s+/);
@@ -65,13 +67,15 @@ export function buildSourcingKoldInfoCsv(rows: CandidateRow[]): { csv: string; c
 }
 
 export interface SourcingKoldMerge {
-  /** Result rows parseKoldInfoCsv could read (rows with an email). */
+  /** Result rows parseKoldInfoCsv could read (rows with an email or a phone). */
   parsed: number;
   /** Rows re-linked to a candidate on this run. */
   matched: number;
   /** Candidates that gained an email they didn't have. */
   emails: number;
-  /** Rows dropped because KoldInfo's own verdict was invalid/undeliverable/role. */
+  /** Candidates that gained a phone they didn't have (KoldInfo ships person_phone too). */
+  phones: number;
+  /** Emails dropped because KoldInfo's own verdict was invalid/undeliverable/role. */
   invalid: number;
   /** Rows we could not re-link to any candidate. */
   unmatched: number;
@@ -85,7 +89,7 @@ export interface SourcingKoldMerge {
  */
 export function mergeSourcingKoldInfoCsv(rows: CandidateRow[], csvText: string): SourcingKoldMerge {
   const results = parseKoldInfoCsv(csvText);
-  const r: SourcingKoldMerge = { parsed: results.length, matched: 0, emails: 0, invalid: 0, unmatched: 0 };
+  const r: SourcingKoldMerge = { parsed: results.length, matched: 0, emails: 0, phones: 0, invalid: 0, unmatched: 0 };
   if (!results.length) return r;
 
   const byId = new Map<string, CandidateRow>();
@@ -102,14 +106,18 @@ export function mergeSourcingKoldInfoCsv(rows: CandidateRow[], csvText: string):
   const usedEmail = new Set(rows.map((c) => (c.email || "").toLowerCase()).filter(Boolean));
   for (const res of results) {
     const email = (res.email || "").toLowerCase().trim();
-    if (!email) continue;
-    if (BAD_STATUS.has((res.vendorStatus || "").toLowerCase().replace(/[\s-]+/g, "_"))) { r.invalid++; continue; }
+    const phone = (res.phone || "").trim();
+    if (!email && !phone) continue;
+    // A vendor-invalid verdict poisons the EMAIL only; a phone on the same row is still usable.
+    const badEmail = BAD_STATUS.has((res.vendorStatus || "").toLowerCase().replace(/[\s-]+/g, "_"));
     const name = norm(res.fullName || [res.firstName, res.lastName].filter(Boolean).join(" "));
     let c = res.rosId ? byId.get(res.rosId) : undefined;
     if (!c && name) c = byNameCompany.get(name + "|" + norm(res.company)) || byName.get(name) || undefined;
     if (!c) { r.unmatched++; continue; }
     r.matched++;
-    if (!c.email && !usedEmail.has(email)) { c.email = email; usedEmail.add(email); r.emails++; }
+    if (email && badEmail) r.invalid++;
+    if (email && !badEmail && !c.email && !usedEmail.has(email)) { c.email = email; usedEmail.add(email); r.emails++; }
+    if (phone && !c.phone) { c.phone = phone; r.phones++; }
   }
   return r;
 }
