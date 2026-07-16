@@ -62,7 +62,7 @@ export async function listRecords(workspaceId: string, q: DataQuery = {}): Promi
 
   if (term) {
     rows = rows.filter((r) =>
-      (r.fullName + " " + (r.title || "") + " " + (r.company || "") + " " + (r.email || "")).toLowerCase().includes(term),
+      (r.fullName + " " + (r.title || "") + " " + (r.company || "") + " " + (r.email || "") + " " + (r.tags || []).join(" ")).toLowerCase().includes(term),
     );
   }
   if (company) rows = rows.filter((r) => (r.company || "").toLowerCase().includes(company));

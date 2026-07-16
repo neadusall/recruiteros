@@ -8211,7 +8211,7 @@
   // it is the people database below.
   function renderData(el) {
     if (motion === "bd") return renderCompanies(el);
-    el.innerHTML = head("Candidates", "Your people database. Filter by stage, owner, title and more on the left; email, enrich, submit, or export the people you select.") +
+    el.innerHTML = head("Candidates", "Your people database. Filter by stage, owner, title, tags and more on the left; email, enrich, submit, or export the people you select.") +
       '<style>' +
       '.dt-sub{color:var(--muted,var(--text-dim));font-size:12px}' +
       '.dt-prov{font-size:12px;color:var(--muted,var(--text-dim));margin-bottom:10px}' +
@@ -8287,7 +8287,7 @@
       '</style>' +
       '<div id="dtProv" class="dt-prov"></div>' +
       '<div class="cd-wrap">' +
-        '<aside class="cd-facets"><input type="search" class="cd-search" id="cdSearch" placeholder="Search name, title, company…" autocomplete="off"><div id="cdFacets"></div></aside>' +
+        '<aside class="cd-facets"><input type="search" class="cd-search" id="cdSearch" placeholder="Search name, title, tag…" autocomplete="off"><div id="cdFacets"></div></aside>' +
         '<div class="cd-main">' +
           '<div class="cd-toolbar" id="cdToolbar"></div>' +
           '<div class="cd-tabs" id="cdTabs"></div>' +
@@ -8297,7 +8297,7 @@
       '</div>';
 
     // all = everything loaded; sel = picked ids; stage = active tab; facets = {field:[vals]}
-    var state = { all: [], q: "", stage: "", facets: {}, sel: {}, open: {}, showAll: {}, bios: {}, providers: [] };
+    var state = { all: [], q: "", stage: "", facets: {}, fq: {}, sel: {}, open: {}, showAll: {}, bios: {}, providers: [] };
     var bodyEl = $("#dtBody", el), searchTimer = null;
 
     function load() {
@@ -8355,14 +8355,21 @@
         if (!opts.length) return "";
         var sel = state.facets[field] || [];
         var open = !!state.open[field];
-        var limit = state.showAll[field] ? opts.length : 8;
-        var body = opts.slice(0, limit).map(function (v) {
+        // Type-to-search inside big facets (Tags especially): filter the option
+        // list, but keep already-checked values visible so they can be unchecked.
+        var fq = String(state.fq[field] || "").toLowerCase().trim();
+        var shown = fq ? opts.filter(function (v) { return v.toLowerCase().indexOf(fq) >= 0 || sel.indexOf(v) >= 0; }) : opts;
+        var limit = (fq || state.showAll[field]) ? shown.length : 8;
+        var body = "";
+        if (opts.length > 8) body += '<input type="search" class="cd-search cd-fsearch" data-fsearch="' + esc(field) + '" placeholder="Search ' + esc(String(label).toLowerCase()) + '…" value="' + esc(state.fq[field] || "") + '" autocomplete="off">';
+        body += shown.slice(0, limit).map(function (v) {
           var on = sel.indexOf(v) >= 0;
           return '<label class="cd-fopt"><input type="checkbox" data-facet="' + esc(field) + '" data-val="' + esc(v) + '"' + (on ? " checked" : "") + '>' +
             '<span class="cd-ol" title="' + esc(v) + '">' + esc(v) + '</span><span class="cd-oc">' + counts[v] + '</span></label>';
         }).join("");
-        if (opts.length > limit) body += '<div class="cd-more" data-more="' + esc(field) + '">Show ' + (opts.length - limit) + ' more</div>';
-        else if (state.showAll[field] && opts.length > 8) body += '<div class="cd-more" data-more="' + esc(field) + '">Show less</div>';
+        if (fq && !shown.length) body += '<div class="dt-sub" style="padding:4px 2px">No matching options.</div>';
+        if (shown.length > limit) body += '<div class="cd-more" data-more="' + esc(field) + '">Show ' + (shown.length - limit) + ' more</div>';
+        else if (state.showAll[field] && opts.length > 8 && !fq) body += '<div class="cd-more" data-more="' + esc(field) + '">Show less</div>';
         return '<div class="cd-facet' + (open ? " open" : "") + '">' +
           '<div class="cd-fhead" data-fhead="' + esc(field) + '">' + esc(label) +
             (sel.length ? '<span class="cd-fc">' + sel.length + '</span>' : '') +
@@ -8386,6 +8393,16 @@
       });
       Array.prototype.forEach.call(host.querySelectorAll("[data-more]"), function (m) {
         m.addEventListener("click", function () { var f = m.getAttribute("data-more"); state.showAll[f] = !state.showAll[f]; paintFacets(); });
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-fsearch]"), function (inp) {
+        inp.addEventListener("input", function () {
+          var f = inp.getAttribute("data-fsearch");
+          state.fq[f] = inp.value;
+          paintFacets();
+          // paintFacets rebuilds the DOM; put the caret back where the user was typing.
+          var again = host.querySelector('[data-fsearch="' + f + '"]');
+          if (again) { again.focus(); var end = again.value.length; try { again.setSelectionRange(end, end); } catch (e) {} }
+        });
       });
     }
 
