@@ -12,9 +12,15 @@
  *       pass. Configure GOOGLE_CSE_KEY + GOOGLE_CSE_CX. Lower/variable quality than a
  *       paid listing (and respect Google's ToS) — it's a free first pass, not a
  *       replacement for rapidapi.
+ *   - searx: the self-hosted SearXNG meta-search container (the same one the In-Market
+ *       engine uses) running the X-ray Boolean. FREE and always-on when the container is
+ *       up (SOURCING_SEARXNG_URL or INMARKET_SEARXNG_URL), so JD Sourcing always has a
+ *       working engine even with zero paid keys configured.
  *   - rapidapi: a marketplace LinkedIn/people-search listing (the chosen scale path).
  *       Configure RAPIDAPI_KEY + RAPIDAPI_PEOPLE_SEARCH_HOST/PATH to point at whatever
- *       listing you subscribe to. Listings differ, so the result mapping is defensive.
+ *       listing you subscribe to. Listings differ, so the result mapping is defensive,
+ *       and a 404 on the configured path self-heals by probing the listing's common
+ *       people-search path variants once per process.
  *   - scraper: the Playwright sidecar (li_at cookie), best-effort people-search.
  *
  * If no engine is configured the run returns an empty list plus an explicit warning —
@@ -155,6 +161,21 @@ function extractList(data: any): any[] {
  *    even an existing saved path (name/page only) still gets the precise filters.
  *  - POST listings: a JSON body { keywords, count, current_company, geocode_location }.
  */
+// Common people-search path shapes across marketplace listings. When the configured
+// path 404s (listings rename endpoints; a saved Setup value goes stale), we probe these
+// ONCE against the SAME configured host and remember the first that answers, so the
+// search self-heals instead of silently returning nothing forever.
+const PS_PATH_VARIANTS = [
+  "/api/v1/search/people", "/search/people", "/people/search", "/search-people", "/api/search/people",
+];
+let healedPath: { host: string; path: string } | null = null;
+
+/** The effective GET path: the healed one for this host when a 404 was repaired. */
+function effectivePsPath(host: string): string {
+  if (healedPath && healedPath.host === host) return healedPath.path;
+  return PS_PATH();
+}
+
 export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRow[]> {
   const host = PS_HOST();
   const headers: Record<string, string> = {
@@ -173,30 +194,55 @@ export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRo
     if (p.headcount) bodyObj.company_headcount = p.headcount;
     res = await fetch(url, { method: "POST", headers, body: JSON.stringify(bodyObj) });
   } else {
-    const raw = PS_PATH();
-    const templated = raw.includes("{query}") || raw.includes("{page}");
-    let path = raw
-      .replace(/\{query\}/g, encodeURIComponent(p.name))
-      .replace(/\{page\}/g, String(p.page))
-      .replace(/\{limit\}/g, String(p.limit))
-      .replace(/\{current_company\}/g, encodeURIComponent(p.currentCompany || ""))
-      .replace(/\{geocode_location\}/g, encodeURIComponent(p.geoLocation || ""))
-      .replace(/\{past_company\}/g, encodeURIComponent(p.pastCompany || ""))
-      .replace(/\{company_headcount\}/g, encodeURIComponent(p.headcount || ""));
-    if (!templated) {
-      const sep = path.includes("?") ? "&" : "?";
-      path = `${path}${sep}query=${encodeURIComponent(p.name)}&page=${p.page}`;
+    const buildPath = (rawBase: string): string => {
+      const templated = rawBase.includes("{query}") || rawBase.includes("{page}");
+      let path = rawBase
+        .replace(/\{query\}/g, encodeURIComponent(p.name))
+        .replace(/\{page\}/g, String(p.page))
+        .replace(/\{limit\}/g, String(p.limit))
+        .replace(/\{current_company\}/g, encodeURIComponent(p.currentCompany || ""))
+        .replace(/\{geocode_location\}/g, encodeURIComponent(p.geoLocation || ""))
+        .replace(/\{past_company\}/g, encodeURIComponent(p.pastCompany || ""))
+        .replace(/\{company_headcount\}/g, encodeURIComponent(p.headcount || ""));
+      if (!templated) {
+        const sep = path.includes("?") ? "&" : "?";
+        path = `${path}${sep}query=${encodeURIComponent(p.name)}&page=${p.page}`;
+      }
+      // Force the page size up (listings hardcode it low): rewrite an existing limit= or append one.
+      path = /[?&]limit=\d+/i.test(path)
+        ? path.replace(/limit=\d+/i, `limit=${p.limit}`)
+        : `${path}${path.includes("?") ? "&" : "?"}limit=${p.limit}`;
+      // Append the precise filters when the template didn't carry them itself.
+      path = appendParam(path, "current_company", p.currentCompany, rawBase);
+      path = appendParam(path, "geocode_location", p.geoLocation, rawBase);
+      path = appendParam(path, "past_company", p.pastCompany, rawBase);
+      path = appendParam(path, "company_headcount", p.headcount, rawBase);
+      return path;
+    };
+
+    const raw = effectivePsPath(host);
+    res = await fetch(`https://${host}${buildPath(raw)}`, { headers });
+
+    // SELF-HEAL: a 404 on the configured path usually means the listing renamed its
+    // endpoint (or Setup carries a stale path). Probe the common variants ONCE on the
+    // same host; remember the first that answers so every later call goes straight there.
+    if (res.status === 404 && !(healedPath && healedPath.host === host)) {
+      for (const variant of PS_PATH_VARIANTS) {
+        if (variant === raw.split("?")[0]) continue;
+        const tryRes = await fetch(`https://${host}${buildPath(variant)}`, { headers }).catch(() => null);
+        if (tryRes && tryRes.status !== 404) {
+          healedPath = { host, path: variant };
+          res = tryRes;
+          break;
+        }
+      }
+      if (!(healedPath && healedPath.host === host)) {
+        throw new Error(
+          `rapidapi ${host} 404 (no people-search endpoint answered on this listing; tried the configured path and ${PS_PATH_VARIANTS.join(", ")}. ` +
+          `Fix RAPIDAPI_PEOPLE_SEARCH_HOST/PATH in Setup, or subscribe to a listing with a people search)`
+        );
+      }
     }
-    // Force the page size up (listings hardcode it low): rewrite an existing limit= or append one.
-    path = /[?&]limit=\d+/i.test(path)
-      ? path.replace(/limit=\d+/i, `limit=${p.limit}`)
-      : `${path}${path.includes("?") ? "&" : "?"}limit=${p.limit}`;
-    // Append the precise filters when the template didn't carry them itself.
-    path = appendParam(path, "current_company", p.currentCompany, raw);
-    path = appendParam(path, "geocode_location", p.geoLocation, raw);
-    path = appendParam(path, "past_company", p.pastCompany, raw);
-    path = appendParam(path, "company_headcount", p.headcount, raw);
-    res = await fetch(`https://${host}${path}`, { headers });
   }
   if (!res.ok) throw new Error(`rapidapi ${host} ${res.status}`);
   const data = await res.json().catch(() => ({}));
@@ -289,6 +335,58 @@ export async function verifyGoogleSearch(): Promise<{ ok: boolean; error?: strin
 }
 
 /* ------------------------------------------------------------------ */
+/* SearXNG x-ray provider (free, self-hosted, always-on)               */
+/* ------------------------------------------------------------------ */
+
+// The SearXNG container the In-Market engine already runs. Sourcing reuses it so the
+// tool ALWAYS has a working engine, even with zero paid keys configured.
+const SEARX_URL = () =>
+  (process.env.SOURCING_SEARXNG_URL || process.env.INMARKET_SEARXNG_URL || "").replace(/\/$/, "");
+
+export function searxSearchConfigured(): boolean {
+  return Boolean(SEARX_URL());
+}
+
+/** Map one SearXNG result (title/url/content) like a Google CSE item. */
+function mapSearxItem(o: { url?: string; title?: string; content?: string }): CandidateRow | null {
+  const link = str(o.url);
+  if (!link || !/linkedin\.com\/in\//i.test(link)) return null; // only person profiles
+  const url = link.split("?")[0];
+  let title = (str(o.title) || "").replace(/\s*[|\-–—]\s*LinkedIn.*$/i, "").trim();
+  let fullName = title;
+  let headline: string | undefined;
+  const dash = title.split(/\s+[-–—]\s+/);
+  if (dash.length > 1) { fullName = dash[0].trim(); headline = dash.slice(1).join(" - ").trim(); }
+  const snippet = str(o.content);
+  let company: string | undefined;
+  const hay = [headline, snippet].filter(Boolean).join(" ");
+  const m = hay && hay.match(/\bat\s+([A-Za-z0-9][\w&.,'’\-]*(?:\s+[A-Za-z0-9][\w&.,'’\-]*){0,4})/);
+  if (m) company = m[1].split(/[|·•–—]| - /)[0].trim() || undefined;
+  if (!fullName) return null;
+  return {
+    fullName,
+    title: headline,
+    headline: headline || snippet,
+    company,
+    location: undefined, // snippets rarely carry a clean location; the scorer skips it
+    linkedinUrl: url,
+    fitScore: 0,
+    fitReasons: [],
+    provider: "searx",
+  };
+}
+
+/** One SearXNG page for the X-ray boolean. Meta-search fans out server-side. */
+async function searxXraySearch(xray: string, page: number): Promise<CandidateRow[]> {
+  const url = `${SEARX_URL()}/search?q=${encodeURIComponent(xray)}&format=json&pageno=${page}`;
+  const res = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`searx ${res.status}`);
+  const data = await res.json().catch(() => ({}));
+  const items = Array.isArray((data as any)?.results) ? (data as any).results : [];
+  return items.map(mapSearxItem).filter((r: CandidateRow | null): r is CandidateRow => Boolean(r));
+}
+
+/* ------------------------------------------------------------------ */
 /* Orchestrator                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -320,16 +418,17 @@ export async function runDiscovery(
 ): Promise<DiscoveryResult> {
   const cap = Math.max(1, Math.min(opts.cap ?? 3000, 5000));
   const minFit = opts.minFit ?? 45;
-  const engines = opts.engines ?? (["google", "rapidapi", "scraper"] as const);
+  const engines = opts.engines ?? (["google", "searx", "rapidapi", "scraper"] as const);
   const warnings: string[] = [];
 
   let useGoogle = engines.includes("google") && googleSearchConfigured();
+  let useSearx = engines.includes("searx") && searxSearchConfigured();
   const useRapid = engines.includes("rapidapi") && rapidApiSearchConfigured();
   const useScraper = engines.includes("scraper") && scraperConfigured();
   if (engines.includes("rapidapi") && !useRapid) {
     warnings.push("rapidapi_not_configured: set RAPIDAPI_KEY + RAPIDAPI_PEOPLE_SEARCH_HOST to enable scale discovery");
   }
-  if (!useGoogle && !useRapid && !useScraper) {
+  if (!useGoogle && !useSearx && !useRapid && !useScraper) {
     warnings.push("no_discovery_engine: nothing configured to find profiles — list will be empty");
     return { candidates: [], warnings, scanned: 0 };
   }
@@ -385,7 +484,27 @@ export async function runDiscovery(
       }
     }
 
-    // 2) PAID scale: RapidAPI people-search for whatever the free pass didn't fill.
+    // 2) FREE always-on: the self-hosted SearXNG meta-search over the same X-ray.
+    // No quota, no key — this is what guarantees a JD Sourcing run is never empty
+    // just because a paid listing broke or was never configured.
+    if (useSearx && collected < perQuery) {
+      const sPages = 4;
+      let searxErrors = 0;
+      for (let page = 1; page <= sPages && collected < perQuery; page++) {
+        let rows: CandidateRow[] = [];
+        try { rows = await searxXraySearch(query.xray, page); }
+        catch (err: any) {
+          warnings.push(`searx(${query.group} p${page}): ${err.message}`);
+          if (++searxErrors >= 2) { useSearx = false; } // container down — stop trying this run
+          break;
+        }
+        if (!rows.length) break; // exhausted this query
+        collected += absorb(rows, query.group);
+        if (byKey.size >= cap) break outer;
+      }
+    }
+
+    // 3) PAID scale: RapidAPI people-search for whatever the free passes didn't fill.
     if (useRapid && collected < perQuery) {
       const post = PS_METHOD() === "POST";
       // POST listings return a batch sized by `count` in one call (no paging);
@@ -422,7 +541,7 @@ export async function runDiscovery(
       }
     }
 
-    // 3) Best-effort scraper sidecar (dormant unless configured).
+    // 4) Best-effort scraper sidecar (dormant unless configured).
     if (useScraper && collected < perQuery) {
       try {
         const { profiles, warnings: w } = await scrapeSearchViaSidecar(query.linkedinUrl, Math.min(perQuery, 100));
@@ -455,6 +574,19 @@ export async function runDiscovery(
   const candidates = Array.from(byKey.values())
     .sort((a, b) => b.fitScore - a.fitScore)
     .slice(0, cap);
+
+  // ZERO-RESULT DIAGNOSIS: when a run comes back empty, say WHY in plain English at
+  // the top of the warnings, so the recruiter sees the cause instead of a silent zero.
+  if (!candidates.length) {
+    const rapid404 = warnings.filter((w) => w.startsWith("rapidapi(") && / 404/.test(w)).length;
+    const reasons: string[] = [];
+    if (rapid404) reasons.push(`the paid people-search API rejected ${rapid404} request(s) with 404 (its host/path in Setup points at a missing endpoint)`);
+    if (!useGoogle && engines.includes("google")) reasons.push("Google CSE is not configured (free 100/day pass is off)");
+    if (!useSearx && engines.includes("searx")) reasons.push("the free SearXNG engine was unreachable");
+    if (opts.excludeKeys?.size && scanned === 0) reasons.push(`Fresh only is ON and ${opts.excludeKeys.size} previously-surfaced people are being excluded — uncheck it to see the full list again`);
+    if (scanned > 0) reasons.push(`${scanned} profiles were scanned but none scored above the fit threshold (${minFit})`);
+    warnings.unshift("empty_run: " + (reasons.length ? reasons.join("; ") : "no engine returned results"));
+  }
 
   return { candidates, warnings, scanned };
 }

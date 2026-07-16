@@ -9027,7 +9027,7 @@
         '<div class="jd-field"><label>Job description <span class="jd-opt muted">optional, or let the AI write it</span></label>' +
           '<textarea id="jdText" rows="4" placeholder="Paste the job description here. The more real detail, the stronger the search."></textarea></div>' +
         '<div class="jd-builder"><div class="jd-buildbar" style="margin:0;justify-content:space-between;gap:10px">' +
-          '<span class="jd-builder-sub" style="margin:0">The AI refines your input, fills the gaps, and widens the net. Run this first, then Analyze.</span>' +
+          '<span class="jd-builder-sub" style="margin:0">Optional: the one-click Find candidates below runs this automatically when the JD box is empty. Use this button only to preview or tweak the brief first.</span>' +
           '<button class="btn btn-primary btn-sm" id="jdbBtn" style="flex:0 0 auto">Build refined JD</button></div>' +
         '</div>' +
         '<details class="jd-tipsd"><summary>See what sharpens the search <span class="muted">Tap to expand</span></summary>' +
@@ -9044,10 +9044,15 @@
           '</div>' +
         '</details>' +
         '<div class="jd-actions">' +
-          '<button class="btn btn-primary btn-sm" id="jdAnalyze">Analyze JD</button>' +
+          '<button class="btn btn-primary" id="jdGo" style="font-size:14.5px;padding:11px 26px">Find candidates</button>' +
+          '<span class="muted" style="font-size:12.5px;max-width:520px">One click does the whole run: writes the brief if the JD box is empty, analyzes it, searches, saves the list below, and AI-ranks the strongest matches to the top.</span>' +
+        '</div>' +
+        '<details class="jd-tipsd" style="margin-top:12px"><summary>Advanced controls <span class="muted">step-by-step buttons, scan cap, fit bar, fresh-only, queue</span></summary>' +
+        '<div class="jd-actions" style="margin-top:6px">' +
+          '<button class="btn btn-ghost btn-sm" id="jdAnalyze">Analyze JD</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>Find candidates</button>' +
           '<span class="jd-cap muted">Scan up to <input id="jdCap" type="number" min="1" max="5000" value="500" title="Ceiling on candidates gathered per run. Not a minimum, runs return however many qualified people the search finds, up to this number."> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10" title="0 = show every profile the search finds (nothing filtered). Higher = keep only stronger matches. 10 is a wide net; 40+ is tight."></span>' +
-          '<label class="jd-cap muted" title="Skip anyone this workspace already surfaced in past runs, surfaces fresh people (new market entrants) instead of repeats."><input type="checkbox" id="jdFresh" style="width:auto;margin:0 4px 0 0;vertical-align:middle"> Fresh only</label>' +
+          '<label class="jd-cap muted" title="Skip anyone this workspace already surfaced in past runs, surfaces fresh people (new market entrants) instead of repeats. Leave OFF for the full market; ON can return zero on a re-run because everyone was already seen."><input type="checkbox" id="jdFresh" style="width:auto;margin:0 4px 0 0;vertical-align:middle"> Fresh only</label>' +
           '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
           '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>Save to JD Sourcing</button>' +
           '<button class="btn btn-ghost btn-sm" id="jdQueueAdd">Add to queue</button>' +
@@ -9055,7 +9060,9 @@
         '<div class="jd-hints">' +
           '<p class="jd-hint"><b>Min fit</b> &middot; the match-strength bar, from 0 to 100. Leave it at 0 to see every profile found, with nothing filtered. Raise it to keep only the strongest matches: 10 casts a wide net, 40 and up runs tight.</p>' +
           '<p class="jd-hint"><b>Scan up to</b> &middot; the ceiling on how many candidates a run gathers. Not a minimum: you get however many qualified people the search finds, up to this number.</p>' +
+          '<p class="jd-hint"><b>Fresh only</b> &middot; skips everyone surfaced in ANY previous run. That is why a re-run with it checked can come back near-empty; leave it off unless you specifically want only never-seen people.</p>' +
         '</div>' +
+        '</details>' +
         '<div id="jdMsg" class="muted" style="margin-top:8px"></div>' +
       '</div>' +
       '<div class="card jd-prog" id="jdProgress" style="display:none"></div>' +
@@ -9465,6 +9472,98 @@
       });
     }
 
+    /* ---- ONE-CLICK RUN: the whole pipeline behind a single button ----
+       brief (only if the JD box is empty) → analyze → search → save (auto-named)
+       → AI re-rank of the top 100. Every stage narrates on the button; a failure
+       stops with the stage name and the server's plain-English reason. A search
+       that comes back EMPTY surfaces the empty_run diagnosis (broken engine,
+       Fresh-only exclusions, or over-tight fit bar) instead of a silent zero. */
+    function runOneClick() {
+      var goBtn = $("#jdGo"); if (!goBtn || goBtn.disabled) return;
+      var ta = $("#jdText");
+      var title = $("#jdbTitle") ? $("#jdbTitle").value.trim() : "";
+      if (!(ta && ta.value.trim()) && !title) {
+        msg("Give it a job title (or paste a JD), then click Find candidates.");
+        if ($("#jdbTitle")) $("#jdbTitle").focus();
+        return;
+      }
+      goBtn.disabled = true;
+      function reset() { goBtn.disabled = false; goBtn.textContent = "Find candidates"; }
+      var runName = "";
+      var savedId = null;
+      Promise.resolve().then(function () {
+        // 1) Brief: only when the JD box is empty (same draft the builder button uses).
+        if (ta && ta.value.trim()) return null;
+        goBtn.textContent = "Writing the brief…";
+        msg("Writing a sourcing-ready brief from what you entered…");
+        var company = $("#jdbCompany") ? $("#jdbCompany").value.trim() : "";
+        var notes = $("#jdbNotes") ? $("#jdbNotes").value.trim() : "";
+        var loc = jdLocPhrase(); if (loc) notes = [notes, "Based in " + loc].filter(Boolean).join(". ");
+        return send("/sourcing", "POST", { action: "draft", title: title, company: company, companyUrl: company, notes: notes, base: "" }).then(function (r) {
+          if (!r.ok) throw { stage: "Writing the brief", r: r };
+          if (ta) ta.value = (r.data && r.data.jd) || "";
+          renderSteps();
+        });
+      }).then(function () {
+        // 2) Analyze into the ideal-candidate profile.
+        state.jd = ta ? ta.value.trim() : "";
+        state.location = jdLocLabel();
+        goBtn.textContent = "Analyzing…";
+        msg("Analyzing the brief into an ideal-candidate profile…");
+        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd) }).then(function (r) {
+          if (!r.ok) throw { stage: "Analyze", r: r };
+          state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
+          $("#jdFind").disabled = false;
+          renderPlan(); renderSteps(); updateRunCost();
+        });
+      }).then(function () {
+        // 3) Search.
+        var cap = parseInt($("#jdCap") && $("#jdCap").value, 10) || 500;
+        var minFit = parseInt($("#jdMinFit") && $("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
+        var fresh = !!($("#jdFresh") && $("#jdFresh").checked);
+        goBtn.textContent = "Searching…";
+        msg("");
+        showProgress("Finding candidates", findEta(cap));
+        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), cap: cap, minFit: minFit, freshOnly: fresh }).then(function (r) {
+          if (!r.ok) { finishProgress("Search failed"); throw { stage: "Search", r: r }; }
+          state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
+          state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
+          renderPlan(); renderResults(); renderSteps();
+          if (!state.candidates.length) {
+            finishProgress("No candidates found");
+            var why = (state.warnings || []).filter(function (w) { return w.indexOf("empty_run:") === 0; })[0];
+            throw { plain: (why ? why.replace("empty_run: ", "The search came back empty: ") : "The search came back empty.") };
+          }
+          finishProgress("Found " + state.candidates.length + " candidates");
+          $("#jdSave").disabled = false;
+        });
+      }).then(function () {
+        // 4) Save under an auto name (List name field wins when filled).
+        var nameEl = $("#jdName");
+        runName = (nameEl && nameEl.value.trim()) || (state.icp && state.icp.label) || title || "Candidate search";
+        if (state.location && runName.indexOf(state.location) < 0) runName += " · " + state.location;
+        goBtn.textContent = "Saving…";
+        return send("/sourcing", "POST", { action: "save", name: runName, jd: state.jd, location: state.location || jdLocLabel(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings }).then(function (r) {
+          if (!r.ok) throw { stage: "Save", r: r };
+          savedId = r.data && r.data.run && r.data.run.id;
+        });
+      }).then(function () {
+        // 5) AI re-rank the top 100 (best effort — the list is already saved).
+        if (!savedId) return null;
+        goBtn.textContent = "AI-ranking the top 100…";
+        return send("/sourcing", "POST", { action: "rerank", id: savedId, top: 100 }).catch(function () { return null; });
+      }).then(function () {
+        reset();
+        msg('Done. "' + runName + '" is saved below with ' + state.candidates.length + " candidates, strongest first. Next: Auto-enrich it, then Send to Candidates.");
+        loadRuns();
+      }).catch(function (e) {
+        reset();
+        if (e && e.plain) { msg(e.plain); return; }
+        var detail = (e && e.r && e.r.data && (e.r.data.detail || e.r.data.error)) || (e && e.r && e.r.status) || (e && e.message) || "error";
+        msg(((e && e.stage) || "Run") + " failed: " + detail);
+      });
+    }
+
     /** "Dive deeper", refine the ICP with a natural-language instruction (LLM). */
     function doRefine() {
       var inp = $("#jdRefineInput"); if (!inp) return;
@@ -9584,6 +9683,7 @@
       next();
     }
 
+    $("#jdGo").addEventListener("click", runOneClick);
     $("#jdAnalyze").addEventListener("click", function () {
       var jd = $("#jdText").value.trim(); if (!jd) { msg("Paste a job description first."); return; }
       state.location = jdLocLabel();

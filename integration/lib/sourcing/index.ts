@@ -14,7 +14,8 @@ export { generateQueries } from "./generateQueries";
 export { scoreCandidate } from "./score";
 export {
   runDiscovery, rapidApiSearchConfigured, verifySourcingSearch,
-  googleSearchConfigured, verifyGoogleSearch, candidateKey, type DiscoveryResult,
+  googleSearchConfigured, verifyGoogleSearch, searxSearchConfigured,
+  candidateKey, type DiscoveryResult,
 } from "./discovery";
 export {
   startBulkList, stepBulkList, bulkListStatus,

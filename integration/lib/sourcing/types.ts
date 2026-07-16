@@ -221,7 +221,7 @@ export interface DiscoveryOptions {
   /** Drop rows scoring below this fit threshold (0..100). Default 45. */
   minFit?: number;
   /** Which engines to use, in cheapest-first order. Defaults to whatever is configured. */
-  engines?: Array<"google" | "rapidapi" | "scraper">;
+  engines?: Array<"google" | "searx" | "rapidapi" | "scraper">;
   /** Candidate keys (see candidateKey) to skip — the cross-run "seen" set for fresh-only runs. */
   excludeKeys?: Set<string>;
 }
