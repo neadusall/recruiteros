@@ -109,7 +109,7 @@ export class LoxoClient {
   /**
    * The activity resources document `per_page` (unlike people/companies, which
    * 422 on it). We still fall back per-resource on a 422 so one account's
-   * stricter API can never break the pull — just makes it page smaller.
+   * stricter API can never break the pull; it just pages smaller.
    */
   private perPageOk: Record<string, boolean> = {};
 
