@@ -16214,8 +16214,42 @@
         return '<div class="list-row"><div><div class="lr-main">' + esc(m.concept) + '</div><div class="lr-sub">' + esc(m.how) + '</div></div><div class="lr-right">' + esc(m.object) + "</div></div>";
       }).join("");
       var body = $("#atBody"); if (!body) return;
+      // Daily crossover audit: the once-a-day deep check that neither side
+      // double-contacts anyone (deep activity rescan + our sends re-mirrored
+      // into Loxo + our opt-outs logged into Loxo).
+      var audit = "";
+      if ((cfgByVendor.loxo || {}).status === "green") {
+        var rc = d.reconcile || {}, rp = rc.report || null;
+        var line;
+        if (!rc.at) line = '<span style="color:var(--text-dim)">Not run yet. It runs automatically every 24h; run it now to baseline.</span>';
+        else if (rp && rp.ok) line = '<span style="color:var(--accent-green)">Healthy</span> · last ran ' + esc(atsAgo(rc.at)) +
+          ' · rechecked ' + (rp.deepScanned || 0) + ' Loxo activities, updated ' + (rp.peopleUpdated || 0) + ' people' +
+          ((rp.touchesResent || 0) ? ', re-logged ' + rp.touchesResent + ' of our touches into Loxo' : '') +
+          ((rp.dncMirrored || 0) ? ', mirrored ' + rp.dncMirrored + ' opt-outs into Loxo' : '') +
+          ((rp.dncPending || 0) ? ' · ' + rp.dncPending + ' opt-out' + (rp.dncPending === 1 ? '' : 's') + ' still unmatched in Loxo' : '');
+        else line = '<span style="color:var(--accent-red)">Attention</span> · last ran ' + esc(atsAgo(rc.at)) + ' · ' + esc(((rp && rp.errors) || []).join("; ") || "failed");
+        audit = '<div class="card" style="margin-top:14px"><h3>Daily crossover audit</h3>' +
+          '<p class="muted" style="margin:0 0 10px;font-size:13px">Once a day this re-checks the last 35 days of Loxo activity (so backdated calls and emails still count), re-logs any of our sends that failed to reach Loxo, and writes our opt-outs into Loxo. It is how both sides stay agreed on who has been contacted.</p>' +
+          '<div style="font-size:13px;margin-bottom:10px" id="atsAuditLine">' + line + '</div>' +
+          '<button class="btn btn-sm" id="atsAuditRun">Run audit now</button></div>';
+      }
       body.innerHTML = '<div class="two-col"><div class="card"><h3>Choose your ATS</h3><p class="muted" style="margin:0 0 12px;font-size:13px">Click a provider to enter its credentials. Candidates flow into the Candidates database; companies into the BD Companies tab.</p><div class="ats-grid">' + vendors + "</div></div>" +
-        '<div class="card"><h3>Loxo object mapping</h3>' + map + "</div></div>";
+        '<div class="card"><h3>Loxo object mapping</h3>' + map + "</div></div>" + audit;
+      var auditBtn = body.querySelector("#atsAuditRun");
+      if (auditBtn) auditBtn.addEventListener("click", function () {
+        auditBtn.disabled = true; auditBtn.textContent = "Auditing… this can take a minute";
+        send("/ats", "POST", { action: "reconcile", vendor: "loxo" }).then(function (r) {
+          var rp2 = (r.data && (r.data.report || (r.data.data && r.data.data.report))) || null;
+          if (r.ok && rp2) {
+            toast("Crossover audit done: " + (rp2.deepScanned || 0) + " activities rechecked, " + (rp2.peopleUpdated || 0) + " people updated" +
+              ((rp2.touchesResent || 0) ? ", " + rp2.touchesResent + " touches re-logged in Loxo" : "") +
+              ((rp2.dncMirrored || 0) ? ", " + rp2.dncMirrored + " opt-outs mirrored" : ""));
+          } else {
+            toast("Audit had trouble (" + ((r.data && r.data.error) || r.status) + "). It will retry automatically.");
+          }
+          renderAts(el);
+        }).catch(function () { auditBtn.disabled = false; auditBtn.textContent = "Run audit now"; toast("Could not reach the server."); });
+      });
       Array.prototype.forEach.call(body.querySelectorAll(".ats-v"), function (btn) {
         btn.addEventListener("click", function () {
           openAtsSetup(btn.getAttribute("data-vendor"), cfgByVendor[btn.getAttribute("data-vendor")] || {}, btn.getAttribute("data-status"), d.vendors, el);

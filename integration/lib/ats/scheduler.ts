@@ -22,6 +22,7 @@
 
 import { listSyncableWorkspaces } from "./credentials";
 import { testLoxo, syncLoxo } from "./sync";
+import { reconcileDue, dailyLoxoReconcile } from "./reconcile";
 
 // 15 min by default. Webhooks (when the account supports them) give real-time;
 // this polling tick is the reliable, set-and-forget baseline. Override with
@@ -48,6 +49,13 @@ async function runCycle(): Promise<void> {
           if (!t.ok) continue;
         }
         await syncLoxo(workspaceId);
+        // DAILY CROSSOVER AUDIT: once per ~24h per workspace, on top of the
+        // 15-min incremental tick. Deep-rescans recent Loxo activity (catches
+        // backdated entries), re-mirrors any of our sends whose Loxo write-back
+        // failed, and logs our opt-outs into Loxo. Idempotent, ledger-deduped.
+        if (await reconcileDue(workspaceId)) {
+          await dailyLoxoReconcile(workspaceId);
+        }
       } catch {
         /* one workspace's failure must not stop the others */
       }

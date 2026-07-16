@@ -23,6 +23,8 @@ import {
   testLoxo,
   syncLoxo,
   registerLoxoWebhooks,
+  dailyLoxoReconcile,
+  lastReconcile,
   type AtsVendor,
 } from "../../../lib/ats";
 import { requireCapability, body, ok, fail } from "../../../lib/api";
@@ -36,6 +38,8 @@ export async function GET(req: Request) {
     objectMap: LOXO_OBJECT_MAP,
     active: cfg.active,
     config: cfg.vendors,
+    // Daily crossover audit status ("is the no-double-contact check running?").
+    reconcile: await lastReconcile(g.ctx.workspace.id),
   });
 }
 
@@ -82,6 +86,14 @@ export async function POST(req: Request) {
       const report = await syncLoxo(ws, { full: Boolean(b?.full) });
       if (!report.ok) return fail(report.error || "sync_failed", 502, { report });
       return ok({ report, config: (await publicConfig(ws)).vendors });
+    }
+
+    case "reconcile": {
+      // Run the daily crossover audit NOW (deep rescan + touch re-mirror +
+      // DNC mirror). Idempotent: the ledger dedupes, so clicking twice is safe.
+      if (vendor !== "loxo") return fail("vendor_not_implemented", 501, { vendor });
+      const report = await dailyLoxoReconcile(ws);
+      return report.ok ? ok({ report }) : fail(report.errors[0] || "reconcile_failed", 502, { report });
     }
 
     case "register-webhooks": {

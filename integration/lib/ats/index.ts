@@ -32,6 +32,9 @@ export { dataRecordToLoxoPerson, companyToLoxoCompany, detectLoxoDnc } from "./m
 // already talked to?) and the touch write-back (log our sends into Loxo).
 export { syncLoxoActivity, logTouchToAts, classifyActivityName, type ActivityReport, type TouchLog } from "./activity";
 
+// Daily crossover audit: deep rescan + touch re-mirror + DNC mirror.
+export { dailyLoxoReconcile, reconcileDue, lastReconcile, type ReconcileReport } from "./reconcile";
+
 // In-process background sync: armed at server boot from instrumentation.ts so
 // connected workspaces stay fresh without an external scheduler.
 export { ensureAtsScheduler } from "./scheduler";

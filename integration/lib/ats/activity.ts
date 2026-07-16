@@ -63,14 +63,21 @@ export function classifyActivityName(name?: string): string | undefined {
  * repeatedly: timestamps only move forward and the window advances only after
  * a clean pass. Call with the same client the record sync used so the shared
  * rate gate stays adaptive across the whole run.
+ *
+ * `opts.sinceOverride` (ISO) forces a wider window regardless of the cursor:
+ * the daily reconcile uses it to re-scan the recent past and catch BACKDATED
+ * activity (a recruiter logging "called them last week") that a cursor-only
+ * incremental poll would never see.
  */
 export async function syncLoxoActivity(
   workspaceId: string,
   client: LoxoClient,
   cfg: AtsVendorConfig | null,
+  opts: { sinceOverride?: string } = {},
 ): Promise<ActivityReport> {
   const report: ActivityReport = { ok: true, scanned: 0, touches: 0, peopleUpdated: 0 };
-  const since = cfg?.activityCursor || new Date(Date.now() - LOOKBACK_DAYS * 24 * 3600_000).toISOString();
+  const since =
+    opts.sinceOverride || cfg?.activityCursor || new Date(Date.now() - LOOKBACK_DAYS * 24 * 3600_000).toISOString();
   // Advance the next window to "now minus a day" of overlap so clock skew or a
   // partially-indexed page can never permanently drop an event.
   const nextCursor = new Date(Date.now() - 24 * 3600_000).toISOString();
