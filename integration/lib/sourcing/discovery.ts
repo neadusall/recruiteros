@@ -25,6 +25,11 @@
  *
  * If no engine is configured the run returns an empty list plus an explicit warning —
  * it never fabricates candidates.
+ *
+ * NEVER-EMPTY SAFEGUARD: when engines DO find people but the strict-location drop or
+ * the fit bar would discard every one of them, rescueEmptyRun() brings the best of
+ * them back, marked (`outOfArea`) and explained in a warning, instead of returning a
+ * zero-row result for a run that actually found profiles.
  */
 
 import type { CandidateICP, CandidateRow, DiscoveryOptions, SourcingQuery } from "./types";
@@ -408,6 +413,61 @@ export interface DiscoveryResult {
 }
 
 /**
+ * NEVER-EMPTY SAFEGUARD: when the engines DID find people but our own filters
+ * (strict location, fit bar) discarded every one of them, returning zero wastes the
+ * spend and reads as a broken product. Degrade gracefully in two steps instead:
+ *   1) Strict-location relax: score the geo-dropped rows and keep the ones that
+ *      clear the fit bar, each marked `outOfArea` so the recruiter sees why.
+ *   2) Fit-bar relax: if still empty, keep the strongest rows found anyway (capped
+ *      at 25), so the recruiter always sees the best of what came back.
+ * Hard-disqualified rows (score 0) are never rescued. Returns null only when there
+ * is genuinely nothing worth showing. Exported for tests.
+ */
+export function rescueEmptyRun(
+  geoBuffer: CandidateRow[],
+  fitBuffer: CandidateRow[],
+  icp: CandidateICP,
+  minFit: number,
+  cap: number,
+): { candidates: CandidateRow[]; note: string } | null {
+  const byK = new Map<string, CandidateRow>();
+  for (const r of geoBuffer) {
+    const sc = scoreCandidate(r, icp);
+    r.fitScore = sc.fitScore;
+    r.fitReasons = sc.fitReasons;
+    r.outOfArea = true;
+    const k = keyOf(r);
+    const prev = byK.get(k);
+    if (!prev || r.fitScore > prev.fitScore) byK.set(k, r);
+  }
+  const geoKept = [...byK.values()]
+    .filter((r) => r.fitScore >= minFit && r.fitScore > 0)
+    .sort((a, b) => b.fitScore - a.fitScore)
+    .slice(0, cap);
+  if (geoKept.length) {
+    return {
+      candidates: geoKept,
+      note: `Nobody found stated a location inside the target area, so the ${geoKept.length} strongest matches are shown marked "out of area". To search without the location filter, check "Include out-of-area" in Advanced controls or widen the location.`,
+    };
+  }
+  // Step 2: nothing clears the fit bar anywhere. Show the strongest of what WAS found.
+  for (const r of fitBuffer) {
+    const k = keyOf(r);
+    const prev = byK.get(k);
+    if (!prev || r.fitScore > prev.fitScore) byK.set(k, r);
+  }
+  const best = [...byK.values()]
+    .filter((r) => r.fitScore > 0)
+    .sort((a, b) => b.fitScore - a.fitScore)
+    .slice(0, Math.min(25, cap));
+  if (!best.length) return null;
+  return {
+    candidates: best,
+    note: `Nothing scored above the fit bar (${minFit}), so the ${best.length} strongest people found are shown anyway. Lower Min fit in Advanced controls, or loosen the must-haves, to see more.`,
+  };
+}
+
+/**
  * Run discovery across the queries and return a ranked, deduped, threshold-filtered
  * candidate list (highest fit first), capped at opts.cap (default 3000).
  */
@@ -436,6 +496,11 @@ export async function runDiscovery(
   const byKey = new Map<string, CandidateRow>();
   let scanned = 0;
   let geoDropped = 0;
+  // SAFEGUARD buffers: nothing an engine found is thrown away irrecoverably. If the
+  // run would otherwise end EMPTY, rescueEmptyRun() brings the best of these back
+  // (marked), so a paid search can never return zero while profiles were found.
+  const geoBuffer: CandidateRow[] = []; // strict-location drops, un-scored
+  const fitBuffer: CandidateRow[] = []; // scored below the fit bar (top slice kept)
 
   // Score, threshold, and dedupe a batch of raw rows into byKey. Returns how many
   // cleared the fit threshold (used to gauge per-query saturation). Shared by every engine.
@@ -450,12 +515,23 @@ export async function runDiscovery(
       // scorer stays neutral on those and enrichment can resolve them later).
       if (opts.strictGeo && icp.geos && icp.geos.length && inTargetGeo(r.location, icp.geos) === false) {
         geoDropped++;
+        r.sourceGroup = r.sourceGroup || group;
+        if (geoBuffer.length < 2000) geoBuffer.push(r);
         continue;
       }
       r.sourceGroup = r.sourceGroup || group;
       const sc = scoreCandidate(r, icp);
       r.fitScore = sc.fitScore; r.fitReasons = sc.fitReasons;
-      if (r.fitScore < minFit) continue;
+      if (r.fitScore < minFit) {
+        // Keep the strongest sub-threshold rows for the empty-run rescue (0 = disqualified, never kept).
+        if (r.fitScore > 0) {
+          fitBuffer.push(r);
+          if (fitBuffer.length > 400) {
+            fitBuffer.sort((a, b) => b.fitScore - a.fitScore).length = 200;
+          }
+        }
+        continue;
+      }
       const k = keyOf(r);
       const prev = byKey.get(k);
       // Keep the higher-scoring row, and prefer a richer provider on a tie (rapidapi/
@@ -579,25 +655,37 @@ export async function runDiscovery(
     warnings.push(`google_budget_reached: spent the free pass on ${googleUsed} queries this run; remaining queries used paid engines`);
   }
 
-  const candidates = Array.from(byKey.values())
+  let candidates = Array.from(byKey.values())
     .sort((a, b) => b.fitScore - a.fitScore)
     .slice(0, cap);
 
-  if (geoDropped) {
+  // NEVER-EMPTY SAFEGUARD: engines found people but every one was filtered out by us.
+  // Rescue the best of them (marked) instead of returning a bug-shaped zero.
+  let geoRescued = false;
+  if (!candidates.length && (geoBuffer.length || fitBuffer.length)) {
+    const rescue = rescueEmptyRun(geoBuffer, fitBuffer, icp, minFit, cap);
+    if (rescue) {
+      candidates = rescue.candidates;
+      geoRescued = candidates.some((r) => r.outOfArea);
+      warnings.push(rescue.note);
+    }
+  }
+
+  if (geoDropped && !geoRescued) {
     warnings.push(`strict_location: dropped ${geoDropped} candidate(s) located outside the target geos (turn on "Include out-of-area" in Advanced controls to keep them)`);
   }
 
-  // ZERO-RESULT DIAGNOSIS: when a run comes back empty, say WHY in plain English at
-  // the top of the warnings, so the recruiter sees the cause instead of a silent zero.
+  // ZERO-RESULT DIAGNOSIS: when a run STILL comes back empty after the rescue, say WHY
+  // in plain English at the top of the warnings, so the recruiter sees the cause
+  // instead of a silent zero. Outcome-first wording; setup detail stays parenthetical.
   if (!candidates.length) {
     const rapid404 = warnings.filter((w) => w.startsWith("rapidapi(") && / 404/.test(w)).length;
     const reasons: string[] = [];
-    if (rapid404) reasons.push(`the paid people-search API rejected ${rapid404} request(s) with 404 (its host/path in Setup points at a missing endpoint)`);
-    if (!useGoogle && engines.includes("google")) reasons.push("Google CSE is not configured (free 100/day pass is off)");
-    if (!useSearx && engines.includes("searx")) reasons.push("the free SearXNG engine was unreachable");
+    if (rapid404) reasons.push(`the paid people search rejected ${rapid404} request(s) (its host/path in Setup points at a missing endpoint)`);
+    if (!useGoogle && engines.includes("google")) reasons.push("the free Google pass is off (add the Google search key in Setup to turn it on)");
+    if (!useSearx && engines.includes("searx")) reasons.push("the built-in free search engine did not respond");
     if (opts.excludeKeys?.size && scanned === 0) reasons.push(`Fresh only is ON and ${opts.excludeKeys.size} previously-surfaced people are being excluded (uncheck it to see the full list again)`);
-    if (geoDropped) reasons.push(`${geoDropped} found profiles were dropped for being outside the target geos (strict location)`);
-    if (scanned > geoDropped) reasons.push(`${scanned - geoDropped} profiles were scanned but none scored above the fit threshold (${minFit})`);
+    if (scanned > 0) reasons.push(`${scanned} profiles were found but every one was ruled out by the search profile's hard disqualifiers or scored 0 fit; loosen the disqualifiers or the job location and run again`);
     warnings.unshift("empty_run: " + (reasons.length ? reasons.join("; ") : "no engine returned results"));
   }
 

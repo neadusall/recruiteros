@@ -64,13 +64,27 @@ function expandUsStateAbbrevs(text: string): string {
  *  true  = matches a target geo · false = states a DIFFERENT place · undefined = no
  *  location on the row (unknowable, treat as neutral). Shared by the scorer's geo
  *  component and discovery's strict-location drop so both agree on what "local" means.
+ *
+ * This test gates a HARD DROP in strict-location mode, so it is deliberately
+ * format-tolerant: "Dallas, TX" must count as inside "Dallas-Fort Worth Metroplex"
+ * even though neither full string contains the other. Beyond the whole-phrase match
+ * it compares the CITY part of each side against the other's full text, both
+ * directions. Ambiguity errs toward keeping the person (the scorer still ranks a
+ * non-matching location down); only a clearly different place returns false.
  */
 export function inTargetGeo(location: string | undefined, geos: string[]): boolean | undefined {
   const locText = expandUsStateAbbrevs((location || "").toLowerCase().trim());
   if (!locText) return undefined;
   if (!geos || !geos.length) return true;
   const expandedGeos = geos.map((g) => expandUsStateAbbrevs(g.toLowerCase()));
-  return Boolean(anyPhrase(locText, expandedGeos));
+  if (anyPhrase(locText, expandedGeos)) return true;
+  const locCity = tokens(locText.split(",")[0]).join(" ");
+  for (const g of expandedGeos) {
+    const gCity = tokens(g.split(",")[0]).join(" ");
+    if (gCity && phraseHit(locText, gCity)) return true;
+    if (locCity && phraseHit(g, locCity)) return true;
+  }
+  return false;
 }
 
 /* ------------------------------------------------------------------ */

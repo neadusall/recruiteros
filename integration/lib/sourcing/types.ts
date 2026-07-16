@@ -92,6 +92,12 @@ export interface CandidateRow {
   sourceGroup?: string;
   /** Data source that produced the row (rapidapi / scraper / web). */
   provider?: string;
+  /**
+   * True when the row was kept by the strict-location RESCUE: the person states a
+   * location outside the target geos, but dropping them would have left the run
+   * empty, so they're kept and marked instead of silently discarded.
+   */
+  outOfArea?: boolean;
 
   /* --- Stage-2 deep-vet (LLM reads the full profile vs the JD) ------------- */
   /** 0..100 verified fit after reading the candidate's full work history. */

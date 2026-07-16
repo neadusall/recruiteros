@@ -9135,7 +9135,8 @@
       if (!state.candidates.length) { host.innerHTML = ""; return; }
       var rows = state.candidates.slice(0, 300).map(function (c) {
         return '<tr><td>' + c.fitScore + '</td><td>' + esc(c.fullName) + '</td><td>' + esc(c.title || c.headline || "") +
-          '</td><td>' + esc(c.company || "") + '</td><td>' + esc(c.location || "") + '</td>' +
+          '</td><td>' + esc(c.company || "") + '</td><td>' + esc(c.location || "") +
+          (c.outOfArea ? ' <span class="muted">(out of area)</span>' : '') + '</td>' +
           '<td>' + (c.linkedinUrl ? '<a href="' + esc(c.linkedinUrl) + '" target="_blank" rel="noopener">view</a>' : '') + '</td></tr>';
       }).join("");
       host.innerHTML = '<div class="card"><h3>Ranked candidates · ' + state.candidates.length + '</h3>' +
