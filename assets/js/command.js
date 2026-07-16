@@ -10265,6 +10265,42 @@
       }).catch(function () { var host = $("#jdRuns"); if (host) host.innerHTML = '<p class="muted">Could not load saved lists.</p>'; });
     }
 
+    /* ---- deploy-proof send for the enrich chain ----
+       The auto-deploy watcher restarts the app container on every push to main; while
+       the container swaps, the edge answers 502/503/504 with an HTML body (no JSON
+       error field). Those are transient (the box is updating, not broken) but one of
+       them killed a whole enrich run mid-chain once, so every step of the chain sends
+       through this: bare gateway statuses and dropped connections retry with backoff
+       for up to ~4 minutes while the progress bar says why it is waiting. Real app
+       errors (a JSON error field) pass straight through untouched. */
+    function sendPatient(path, method, payload) {
+      var waits = [4000, 8000, 15000, 25000, 30000, 30000, 30000, 30000, 30000, 30000];
+      var i = 0;
+      function transient(r) {
+        return (r.status === 502 || r.status === 503 || r.status === 504) && !(r.data && r.data.error);
+      }
+      function attempt() {
+        return send(path, method, payload).then(function (r) {
+          if (!transient(r) || i >= waits.length) return r;
+          setProgPhase("Server is updating, waiting for it to come back…");
+          return delay(waits[i++]).then(attempt);
+        }, function (e) {
+          if (i >= waits.length) throw e;
+          setProgPhase("Connection lost, retrying…");
+          return delay(waits[i++]).then(attempt);
+        });
+      }
+      return attempt();
+    }
+    /** A bare gateway status that outlived every retry means the edge answered for a
+        dead app (mid-deploy or briefly down) — and the run is resumable. Say that
+        instead of a naked number. Real error strings pass through unchanged. */
+    function gatewayMsg(err) {
+      return (err === 502 || err === 503 || err === 504)
+        ? err + " (the server was updating or briefly unreachable).\n\nNothing is lost: wait a minute and press Enrich again; it resumes exactly where it stopped."
+        : err;
+    }
+
     /* ---- Laxis chunk chain (the second rung inside the one-click Enrich) ----
        Submit a 1,000-row chunk, poll laxisStatus until merged (which also runs the
        in-house gap-fill waterfall), auto-continue to the next chunk. `t` is the button
@@ -10291,13 +10327,25 @@
             " by email and " + ph + " by phone (" + added + ")");
         });
       }
+      var lostJobRetries = 0;
       function pollLaxis() {
-        send("/sourcing", "POST", { action: "laxisStatus", id: lid }).then(function (s) {
-          if (!s.ok) { laxisReset(); finishProgress("Enrichment stopped"); alert("Enrichment status check failed: " + ((s.data && s.data.error) || s.status)); return; }
+        sendPatient("/sourcing", "POST", { action: "laxisStatus", id: lid }).then(function (s) {
+          if (!s.ok) { laxisReset(); finishProgress("Enrichment stopped"); alert("Enrichment status check failed: " + ((s.data && s.data.error) || gatewayMsg(s.status))); return; }
           if (!s.data.done) { setTimeout(pollLaxis, 10000); return; }
           if (s.data.status === "error") {
+            var why = (s.data.warnings || []).join("\n");
+            // The worker restarted mid-job (the deploy watcher swaps it together with
+            // the app on every push to main) and forgot the job. The chunk was never
+            // marked done, so re-submit and the backend resumes at the first
+            // un-enriched offset. Bounded: a worker that keeps dying still surfaces.
+            if (/job_not_found/i.test(why) && lostJobRetries < 2) {
+              lostJobRetries++;
+              setProgPhase("The enrichment worker restarted, resuming this batch…");
+              setTimeout(function () { startChunk(null); }, 5000);
+              return;
+            }
             laxisReset(); finishProgress("Enrichment stopped");
-            alert("Enrichment failed:\n" + ((s.data.warnings || []).join("\n") || "unknown error") +
+            alert("Enrichment failed:\n" + (why || "unknown error") +
               "\n\nIf this mentions a selector (CALIBRATE), the Laxis UI changed and the worker needs re-calibrating." +
               "\n\nAlready-enriched batches are saved, press Enrich again to resume from where it stopped."); loadRuns(); return;
           }
@@ -10311,14 +10359,14 @@
       function startChunk(startOffset) {
         var body = { action: "laxisEnrich", id: lid };
         if (startOffset != null) body.start = startOffset;
-        send("/sourcing", "POST", body).then(function (r) {
+        sendPatient("/sourcing", "POST", body).then(function (r) {
           if (!r.ok) {
             laxisReset(); finishProgress("Enrichment stopped");
             var err = (r.data && r.data.error) || r.status;
             if (err === "laxis_worker_not_configured") {
               alert("Laxis isn't connected yet.\n\nOn the server, set LAXIS_EMAIL and LAXIS_PASSWORD in .env.production (the laxis-worker logs into Laxis with them), confirm LAXIS_WORKER_URL is set on the app, then redeploy."); return;
             }
-            alert("Enrich failed: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
+            alert("Enrich failed: " + gatewayMsg(err) + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
           }
           // Chunk already enriched (resume landed on a done offset) → skip ahead or finish.
           if (r.data.alreadyDone) {
@@ -10346,42 +10394,58 @@
       var aRows = (arun && arun.candidates && arun.candidates.length) || 50;
       showProgress('Enriching "' + ((arun && arun.name) || "the list") + '"', 60 + aRows * 2, "Working…");
       var kold = { emails: 0, phones: 0 };
+      var koldRetried = false, koldDbRetried = false;
       function stageLaxis() { runLaxisChain(aid, aBtn, "Enrich", kold); }
       // Rung 2 of the free KoldInfo pass: the name + city/state DB lookup. It needs no
       // LinkedIn URL, so it fills the candidates the LinkedIn-URL enrichment could not.
       // Its hits ADD to the LinkedIn rung's before the chain hands off to Laxis. Any
       // failure or "nothing to do" just falls through to Laxis (free-first preserved).
+      // A worker restart mid-job (the deploy watcher swaps it on every push) reports
+      // job_not_found: re-submit that rung once so a deploy doesn't cost the free pass.
       function pollKoldDb() {
-        send("/sourcing", "POST", { action: "koldinfoDbStatus", id: aid }).then(function (s) {
+        sendPatient("/sourcing", "POST", { action: "koldinfoDbStatus", id: aid }).then(function (s) {
           if (!s.ok) { stageLaxis(); return; }
           if (!s.data.done) { setTimeout(pollKoldDb, 10000); return; }
+          if (s.data.status === "error" && /job_not_found/i.test((s.data.warnings || []).join(" ")) && !koldDbRetried) {
+            koldDbRetried = true;
+            setProgPhase("The enrichment worker restarted, restarting the free lookup…");
+            stageKoldDb(); return;
+          }
           var m = (s.data.status === "error") ? {} : (s.data.merged || {});
           kold.emails += m.emails || 0; kold.phones += m.phones || 0;
           stageLaxis();
         }).catch(function () { stageLaxis(); });
       }
       function stageKoldDb() {
-        send("/sourcing", "POST", { action: "koldinfoDbEnrich", id: aid }).then(function (r) {
+        sendPatient("/sourcing", "POST", { action: "koldinfoDbEnrich", id: aid }).then(function (r) {
           if (!r.ok || !r.data || r.data.nothingMissing || r.data.submitted === false) { stageLaxis(); return; }
           setTimeout(pollKoldDb, 8000);
         }).catch(function () { stageLaxis(); });
       }
       function pollKold() {
-        send("/sourcing", "POST", { action: "koldinfoStatus", id: aid }).then(function (s) {
+        sendPatient("/sourcing", "POST", { action: "koldinfoStatus", id: aid }).then(function (s) {
           if (!s.ok) { stageKoldDb(); return; }
           if (!s.data.done) { setTimeout(pollKold, 10000); return; }
+          if (s.data.status === "error" && /job_not_found/i.test((s.data.warnings || []).join(" ")) && !koldRetried) {
+            koldRetried = true;
+            setProgPhase("The enrichment worker restarted, restarting the free pass…");
+            send("/sourcing", "POST", { action: "koldinfoEnrich", id: aid }).then(function (r) {
+              if (r.ok && r.data && !r.data.nothingMissing) { setTimeout(pollKold, 8000); } else { stageKoldDb(); }
+            }).catch(function () { stageKoldDb(); });
+            return;
+          }
           var m = (s.data.status === "error") ? {} : (s.data.merged || {});
           kold.emails = m.emails || 0; kold.phones = m.phones || 0;
           stageKoldDb();
         }).catch(function () { stageKoldDb(); });
       }
-      send("/sourcing", "POST", { action: "koldinfoEnrich", id: aid }).then(function (r) {
+      sendPatient("/sourcing", "POST", { action: "koldinfoEnrich", id: aid }).then(function (r) {
         if (!r.ok) {
           var err = (r.data && r.data.error) || r.status;
           if (err === "koldinfo_worker_not_configured") { stageKoldDb(); return; }
           aBtn.disabled = false; aBtn.textContent = "Enrich";
           finishProgress("Enrich could not start");
-          alert("Enrich failed to start: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
+          alert("Enrich failed to start: " + gatewayMsg(err) + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
         }
         if (r.data.nothingMissing) { stageKoldDb(); return; }
         setTimeout(pollKold, 8000);

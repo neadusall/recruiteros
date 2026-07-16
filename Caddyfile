@@ -9,6 +9,18 @@
 	}
 }
 
+# Deploy-proof proxying. The auto-deploy watcher swaps the app containers on
+# every push to main; during the swap the upstream refuses connections for
+# ~10-40s. Without this, every request in that window instantly got a raw 502
+# and killed whatever tool run was in flight (a JD Sourcing Enrich died this
+# way mid-chain on 2026-07-16). With it, Caddy holds the request and keeps
+# re-dialing the upstream for up to 90s, so a deploy is invisible to an open
+# tab. Dial failures are retried safely for any method: nothing was sent yet.
+(resilient) {
+	lb_try_duration 90s
+	lb_try_interval 2s
+}
+
 # OS Text (the embedded SMS engine) rides EVERY portal domain under
 # /ostext-app/*, same-origin with the portal: the iframe session cookie is
 # first-party everywhere and a white-label customer never sees a house URL.
@@ -17,7 +29,9 @@
 	# /ostext-app* (no trailing slash requirement): the sign-in chain 308s to
 	# the bare /ostext-app path, which /ostext-app/* alone would not match.
 	handle /ostext-app* {
-		reverse_proxy taltxt:3000
+		reverse_proxy taltxt:3000 {
+			import resilient
+		}
 	}
 }
 
@@ -33,7 +47,9 @@ recruitersos.co, www.recruitersos.co {
 		reverse_proxy landlinedb-svc:8090
 	}
 	handle {
-		reverse_proxy app:3000
+		reverse_proxy app:3000 {
+			import resilient
+		}
 	}
 }
 
@@ -47,7 +63,9 @@ taltxt.recruitersos.co {
 	encode zstd gzip
 	@unprefixed not path /ostext-app/*
 	rewrite @unprefixed /ostext-app{uri}
-	reverse_proxy taltxt:3000
+	reverse_proxy taltxt:3000 {
+		import resilient
+	}
 }
 
 # Lume Search Partners — static white-label MARKETING site, served from this same
@@ -64,7 +82,9 @@ lumesp.com {
 	# so API traffic is proxied and all other paths fall through to file_server.
 	@api path /api/*
 	handle @api {
-		reverse_proxy lume-jobs:3000
+		reverse_proxy lume-jobs:3000 {
+			import resilient
+		}
 	}
 	handle {
 		root * /srv/lumesp
@@ -87,7 +107,9 @@ app.lumesp.com {
 	encode zstd gzip
 	import ostext
 	handle {
-		reverse_proxy app:3000
+		reverse_proxy app:3000 {
+			import resilient
+		}
 	}
 }
 
@@ -116,6 +138,8 @@ https:// {
 	encode zstd gzip
 	import ostext
 	handle {
-		reverse_proxy app:3000
+		reverse_proxy app:3000 {
+			import resilient
+		}
 	}
 }
