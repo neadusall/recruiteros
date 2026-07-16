@@ -148,6 +148,17 @@ async function openAndResetFilters(page, n, log) {
   }
 }
 
+/**
+ * Close any open autocomplete popover by clicking the modal's own "Filter" title (a
+ * neutral spot INSIDE the dialog — same trick applyFilters uses). The search box's
+ * suggestion list stays open after Enter and its overlay intercepts clicks on the
+ * NEXT rule's inputs, which is exactly how the multi-rule discovery sweep got stuck.
+ */
+async function dismissOverlays(page) {
+  await page.getByText(/^Filter$/).first().click({ timeout: 1500 }).catch(() => {});
+  await page.waitForTimeout(200);
+}
+
 /** Set rule #i (0-based) to `column <condition> value`, joined by `joiner` (rules > 0). */
 async function setRule(page, i, column, condition, value, joiner) {
   if (i > 0 && joiner) {
@@ -169,6 +180,7 @@ async function setRule(page, i, column, condition, value, joiner) {
   await search.type(value, { delay: 30 });
   await search.press("Enter");
   await page.waitForTimeout(300);
+  await dismissOverlays(page); // suggestion list must not block the next rule's inputs
 }
 
 async function applyFilters(page, log) {
@@ -218,6 +230,7 @@ async function setRuleChips(page, i, column, condition, values, joiner) {
     await search.press("Enter");
     await page.waitForTimeout(250);
   }
+  await dismissOverlays(page); // suggestion list must not block the next rule's inputs
 }
 
 /**
