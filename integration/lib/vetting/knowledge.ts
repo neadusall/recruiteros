@@ -26,7 +26,8 @@ const SYSTEM = `You are an executive recruiter prepping a phone-screen agent. Fr
 
 Rules:
 - ONLY use facts stated in the job description. If the JD doesn't state it, DO NOT include that question at all. Never estimate, never generalize from the industry.
-- Write answers the way a recruiter would SAY them on the phone: short, plain, first person, speakable. No lists, no markdown, no em-dash characters.
+- Write answers the way a recruiter would SAY them on the phone: short, plain, first person, speakable, leading with the direct answer in the first clause. No lists, no markdown, no em-dash characters.
+- Keep the JD's exact specifics (ranges, days in office, shift times, stage counts) in the answer; specificity is what makes the answer believable.
 - 4 to 8 items. Fewer good items beat padded ones.
 
 Return STRICT JSON only, an array, no prose, no markdown fences:

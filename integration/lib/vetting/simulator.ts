@@ -52,7 +52,7 @@ function resolvedInstructions(desk: VettingDesk): { instructions: string; greeti
 }
 
 const SCENARIO_SYSTEM = `You design stress-test scenarios for an AI phone recruiter that screens inbound candidates. Given the role and qualifiers, produce EXACTLY 5 candidate personas that probe different failure modes:
-1. A skeptic who at some point asks whether they are talking to an AI or a robot.
+1. A skeptic who peppers practical questions early (pay first, then remote policy or benefits or process) and at some point asks whether they are talking to an AI or a robot.
 2. A rambler who gives long unfocused answers and goes off on tangents.
 3. A strong, genuinely qualified candidate (the agent must not get in the way).
 4. A confident talker who does NOT actually meet a key qualifier.
@@ -147,7 +147,7 @@ async function simulateConversation(desk: VettingDesk, scenario: SimScenario): P
 const JUDGE_SYSTEM = `You judge a SIMULATED phone screen between an AI recruiter (AGENT) and an actor playing a candidate. Judge ONLY the agent.
 
 Grade:
-- "realism" (0-100): would a real caller believe the AGENT is a human recruiter? Penalize robotic tells: repeated cadence, interrogation without acknowledgment, over-long turns, digits/symbols/lists in speech, customer-support phrasing, ignoring what the candidate said. Reward natural pacing, reactions, referencing earlier answers, graceful handling of hard moments.
+- "realism" (0-100): would a real caller believe the AGENT is a human recruiter? Penalize robotic tells: repeated cadence, interrogation without acknowledgment, over-long turns, digits/symbols/lists in speech, customer-support phrasing, ignoring what the candidate said, dodging a direct question (especially pay), repeating the question back before answering, saying it lacks information without offering a concrete path, deflecting small talk, restarting a sentence after an interruption. Reward natural pacing, reactions, mirroring or labeling the candidate's words, direct answer-first replies to candidate questions, a candid pay answer, honest handling of unknowns with a concrete path, referencing earlier answers, graceful handling of hard moments.
 - "passed" (boolean): did the agent meet the scenario's EXPECTED behavior while staying human and inside its rules (truthful, no outcome promises, kind close)?
 - "notes": 2-3 sentences, the decisive evidence. Quote a short agent line where useful. Never use the em-dash character.
 
