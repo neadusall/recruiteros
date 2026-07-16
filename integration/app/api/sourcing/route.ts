@@ -38,6 +38,7 @@ import {
   startBulkList, stepBulkList, bulkListStatus,
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
   mergeSourcingRuns, getRapidQuota,
+  gapFillContacts, listNightItems, addNightItem, removeNightItem,
 } from "../../../lib/sourcing";
 import type { CandidateRow, SearchBreadth, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
@@ -91,45 +92,7 @@ function rankByVerdict(rows: CandidateRow[]): void {
  * paid waterfall. Mutates the rows in place; the CALLER persists the run. Shared by the
  * `enrich` action and the Laxis gap-fill (Laxis runs first, this fills what it left blank).
  */
-async function gapFillContacts(ws: string, rows: CandidateRow[]): Promise<{ enriched: number; phones: number; cacheHits: number }> {
-  const plan = cheapFirstContactWaterfall({ includePhone: true });
-  // Rows that already hold an email still deserve a phone hunt: run a phone-only plan
-  // on them (the known email doubles as a lookup key) instead of skipping the row.
-  const phonePlan = { ...plan, steps: plan.steps.filter((s) => s.field !== "email") };
-  let enriched = 0;
-  let phones = 0;
-  let contactCacheHits = 0;
-  for (const c of rows) {
-    const hasEmail = Boolean((c.email || "").trim());
-    const hasPhone = Boolean((c.phone || "").trim());
-    if (hasEmail && hasPhone) continue;
-    const personKey = c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`;
-    const cached = await getCachedContact(ws, personKey);
-    if (cached && (cached.email || cached.phone)) {
-      if (cached.email && !hasEmail) { c.email = cached.email; enriched++; }
-      if (cached.phone && !hasPhone) { c.phone = cached.phone; phones++; }
-      contactCacheHits++;
-      continue;
-    }
-    const [first, ...rest] = (c.fullName || "").trim().split(/\s+/);
-    try {
-      const report = await enrich(hasEmail ? phonePlan : plan, {
-        name: c.company, companyName: c.company, fullName: c.fullName,
-        firstName: first, lastName: rest.join(" "), linkedinUrl: c.linkedinUrl, title: c.title,
-        email: (c.email || "").trim() || undefined,
-      }, { now: nowIso() });
-      const e = report.subject.email; const ph = report.subject.phone;
-      if (typeof e === "string" && !hasEmail) { c.email = e; enriched++; }
-      if (typeof ph === "string" && !hasPhone) { c.phone = ph; phones++; }
-      // Cache the row's settled answer (email + phone together), not just this lookup's.
-      await putCachedContact(ws, personKey, {
-        email: (c.email || "").trim() || undefined,
-        phone: (c.phone || "").trim() || undefined,
-      });
-    } catch { /* leave unresolved */ }
-  }
-  return { enriched, phones, cacheHits: contactCacheHits };
-}
+// The waterfall itself lives in lib/sourcing/gapfill.ts (shared with the overnight queue).
 
 export async function GET(req: Request) {
   const g = requireSession(req);
@@ -138,7 +101,13 @@ export async function GET(req: Request) {
   // should warn loudly rather than let the user save into volatile memory and lose it silently.
   // apiQuota: the paid people-search/profile subscriptions' latest credit readings
   // (captured from RapidAPI's response headers; fills in after the first search).
-  return ok({ runs: await listSourcingRuns(g.ctx.workspace.id), durable: dbEnabled(), apiQuota: await getRapidQuota() });
+  return ok({
+    runs: await listSourcingRuns(g.ctx.workspace.id),
+    durable: dbEnabled(),
+    apiQuota: await getRapidQuota(),
+    // The overnight queue (newest last), so the tab can show what is cooking.
+    nightQueue: await listNightItems(g.ctx.workspace.id),
+  });
 }
 
 export async function POST(req: Request) {
@@ -259,6 +228,36 @@ export async function POST(req: Request) {
 
     if (action === "companyStatus") {
       return ok({ job: await companyFirstStatus(ws) });
+    }
+
+    /* --- Overnight queue: search (or enrich an existing list) unattended ------
+     * queueAdd:    {kind:"search", jd, location?, name?, breadth?, outsideGeo?}
+     *              {kind:"enrich", id}   -> enrich an existing saved list
+     * queueRemove: {id}                  -> drop a queued/finished item
+     * The server-side processor (lib/sourcing/nightQueue) advances items on a cron
+     * tick, so queued work finishes with no browser tab open. Nothing is promoted
+     * or sent automatically; finished lists just appear enriched. */
+    if (action === "queueAdd") {
+      if (b?.kind === "enrich") {
+        if (!b?.id) return fail("missing_id", 422);
+        const run = await getSourcingRun(ws, b.id);
+        if (!run) return fail("run_not_found", 404);
+        const item = await addNightItem(ws, { kind: "enrich", name: run.name, runId: run.id });
+        return ok({ item });
+      }
+      if (!b?.jd) return fail("missing_jd", 422);
+      const name = (typeof b.name === "string" && b.name.trim()) ||
+        `Overnight search · ${new Date().toLocaleDateString()}`;
+      const item = await addNightItem(ws, {
+        kind: "search", name, jd: b.jd, location: b.location,
+        breadth: parseBreadth(b.breadth), outsideGeo: b.outsideGeo === true,
+      });
+      return ok({ item });
+    }
+
+    if (action === "queueRemove") {
+      if (!b?.id) return fail("missing_id", 422);
+      return ok({ removed: await removeNightItem(ws, b.id) });
     }
 
     if (action === "rerank") {

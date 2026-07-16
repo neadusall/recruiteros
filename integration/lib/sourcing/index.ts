@@ -63,6 +63,11 @@ export {
   submitDbDiscovery, collectDbDiscovery,
 } from "./koldinfoDiscovery";
 export { getRapidQuota, noteRapidQuota, type RapidQuotaSnapshot } from "./rapidQuota";
+export { gapFillContacts, type GapFillResult } from "./gapfill";
+export {
+  listNightItems, addNightItem, removeNightItem, tickNightQueue,
+  type NightItem, type NightStage, type NightAddInput,
+} from "./nightQueue";
 
 import { parseJobDescription } from "./parseJobDescription";
 import { generateQueries } from "./generateQueries";

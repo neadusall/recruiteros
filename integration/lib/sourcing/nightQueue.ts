@@ -1,0 +1,359 @@
+/**
+ * RecruitersOS · JD Sourcing · Overnight queue.
+ *
+ * Queue searches (or enrichment of an existing saved list) and walk away: a cron tick
+ * advances the queue entirely SERVER-SIDE, so runs finish overnight with no browser
+ * tab open, and the recruiter wakes up to enriched lists. One item at a time, FIFO
+ * (the enrichment worker is single-concurrency anyway).
+ *
+ * Each item is a small state machine over the SAME rungs the hands-free UI chain uses,
+ * and it parks job refs on the run itself (koldJob / koldDbJob / laxisJob /
+ * laxisProgress), so the saved-list enrichment chip stays truthful for queue-driven
+ * runs and a queue item can even resume a chain the UI started (and vice versa).
+ *
+ *   queued -> search (kind:"search" only) -> kold -> koldDb -> laxis(+gap-fill) -> done
+ *
+ * Deliberately NOT automated: promote / Send to OS Text. Outbound stays a human
+ * decision; the queue's job is data, not sending.
+ *
+ * Durability: the queue snapshots to the same store as saved runs; worker jobs persist
+ * on the worker's own volume. A redeploy mid-item just means the next tick re-polls.
+ */
+
+import { rid, nowIso } from "../core/ids";
+import { loadSnapshot, saveSnapshot } from "../db";
+import type { CandidateRow, SearchBreadth, SourcingRun } from "./types";
+import { getSourcingRun, saveSourcingRun } from "./store";
+import { parseJobDescription } from "./parseJobDescription";
+import { pinIcpLocation } from "./pinLocation";
+import { generateQueries } from "./generateQueries";
+import { runDiscovery } from "./discovery";
+import { getSeenKeys, addSeenKeys } from "./seen";
+import {
+  laxisWorkerConfigured, koldinfoWorkerReady, serializeCandidatesCsv,
+  submitLaxisJob, getLaxisJob, mergeEnrichedCsv, MAX_LAXIS_UPLOAD,
+} from "./laxis";
+import { buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, buildKoldInfoDbCsv } from "./koldinfo";
+import { gapFillContacts } from "./gapfill";
+import { withWorkspaceCreds } from "../connected";
+
+const KEY = "sourcing_night_queue_v1";
+
+export type NightStage = "queued" | "search" | "kold" | "koldDb" | "laxis" | "done" | "error";
+
+export interface NightItem {
+  id: string;
+  workspaceId: string;
+  kind: "search" | "enrich";
+  /** List name (becomes the saved run's name for kind:"search"). */
+  name: string;
+  jd?: string;
+  location?: string;
+  breadth?: SearchBreadth;
+  outsideGeo?: boolean;
+  /** The saved run being enriched (given for kind:"enrich", set after the search saves). */
+  runId?: string;
+  stage: NightStage;
+  /** Plain-English progress line for the queue card. */
+  note?: string;
+  error?: string;
+  /** Contacts gained across the whole chain (for the morning readout). */
+  added: { emails: number; phones: number };
+  createdAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+}
+
+let store: NightItem[] = [];
+let hydrated = false;
+let hydrating: Promise<void> | null = null;
+
+async function hydrate(): Promise<void> {
+  if (hydrated) return;
+  if (!hydrating) {
+    hydrating = (async () => {
+      const snap = await loadSnapshot<NightItem[]>(KEY);
+      if (Array.isArray(snap)) store = snap;
+      hydrated = true;
+    })();
+  }
+  return hydrating;
+}
+async function save(): Promise<void> {
+  await saveSnapshot(KEY, store);
+}
+
+export async function listNightItems(workspaceId: string): Promise<NightItem[]> {
+  await hydrate();
+  return store.filter((i) => i.workspaceId === workspaceId);
+}
+
+export interface NightAddInput {
+  kind: "search" | "enrich";
+  name: string;
+  jd?: string;
+  location?: string;
+  breadth?: SearchBreadth;
+  outsideGeo?: boolean;
+  runId?: string;
+}
+
+export async function addNightItem(workspaceId: string, input: NightAddInput): Promise<NightItem> {
+  await hydrate();
+  const item: NightItem = {
+    id: rid("nq"),
+    workspaceId,
+    kind: input.kind,
+    name: input.name,
+    jd: input.jd,
+    location: input.location,
+    breadth: input.breadth,
+    outsideGeo: input.outsideGeo,
+    runId: input.runId,
+    stage: "queued",
+    added: { emails: 0, phones: 0 },
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  store.push(item);
+  await save();
+  // Start work right away (fire-and-forget): the queue is "overnight" because items
+  // FINISH unattended, not because they wait for a clock.
+  void tickNightQueue().catch(() => {});
+  return item;
+}
+
+export async function removeNightItem(workspaceId: string, id: string): Promise<boolean> {
+  await hydrate();
+  const i = store.findIndex((x) => x.id === id && x.workspaceId === workspaceId);
+  if (i < 0) return false;
+  store.splice(i, 1);
+  await save();
+  return true;
+}
+
+/* ------------------------------------------------------------------------- */
+/* processor                                                                  */
+/* ------------------------------------------------------------------------- */
+
+function touch(item: NightItem, note?: string): void {
+  item.updatedAt = nowIso();
+  if (note !== undefined) item.note = note;
+}
+function finish(item: NightItem, stage: "done" | "error", error?: string): void {
+  item.stage = stage;
+  item.error = error;
+  item.finishedAt = nowIso();
+  touch(item, stage === "done"
+    ? `finished: ${item.added.emails} email(s) + ${item.added.phones} phone(s) added`
+    : undefined);
+}
+
+/** First grid offset below `total` not yet enriched (mirrors the route's resume rule). */
+function nextOffset(doneOffsets: number[], total: number, step: number): number | null {
+  if (step <= 0) return null;
+  for (let o = 0; o < total; o += step) if (!doneOffsets.includes(o)) return o;
+  return null;
+}
+
+let ticking = false;
+
+/**
+ * Advance the queue: process the FIRST active item one bounded step (submit a job,
+ * poll a job, or run the search). Cheap to call often; a mutex makes overlapping
+ * timer hits harmless. Long work (the search itself) runs inside the tick, so the
+ * caller should fire-and-forget rather than await.
+ */
+export async function tickNightQueue(): Promise<{ active: number }> {
+  await hydrate();
+  const active = store.filter((i) => i.stage !== "done" && i.stage !== "error");
+  if (ticking || !active.length) return { active: active.length };
+  ticking = true;
+  const item = active[0];
+  try {
+    await step(item);
+  } catch (e) {
+    // A step that throws is retried next tick; only a missing run is terminal (handled
+    // inside step). Note the error so the queue card shows what is happening.
+    touch(item, `retrying: ${(e as Error).message?.slice(0, 140) ?? "step failed"}`);
+  }
+  await save();
+  ticking = false;
+  return { active: store.filter((i) => i.stage !== "done" && i.stage !== "error").length };
+}
+
+async function step(item: NightItem): Promise<void> {
+  const ws = item.workspaceId;
+
+  if (item.stage === "queued") {
+    item.stage = item.kind === "search" ? "search" : "kold";
+    touch(item, item.kind === "search" ? "searching…" : "starting enrichment…");
+    if (item.kind === "enrich") return; // enrichment starts next tick (cheap steps)
+  }
+
+  if (item.stage === "search") {
+    if (!item.jd) { finish(item, "error", "no job description on the queued search"); return; }
+    const icp = pinIcpLocation(await parseJobDescription(item.jd), item.location);
+    const breadth: SearchBreadth = item.breadth === "focused" || item.breadth === "wide" ? item.breadth : "balanced";
+    const queries = generateQueries(icp, { breadth });
+    const excludeKeys = await getSeenKeys(ws); // overnight runs are additive: skip people already surfaced
+    const result = await withWorkspaceCreds(ws, () => runDiscovery(queries, icp, {
+      cap: 500,
+      minFit: 10,
+      breadth,
+      excludeKeys: excludeKeys.size ? excludeKeys : undefined,
+      strictGeo: Boolean((item.location || "").trim()),
+      keepOutOfArea: item.outsideGeo === true,
+    }));
+    await addSeenKeys(ws, result.candidates.map((c) =>
+      (c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`).toLowerCase().replace(/\/+$/, "")));
+    const run = await saveSourcingRun(ws, {
+      name: item.name,
+      jd: item.jd,
+      location: item.location,
+      icp,
+      queries,
+      candidates: result.candidates,
+      warnings: result.warnings,
+      apiUsage: result.usage ? {
+        rapidapi: Number(result.usage.rapidapi) || 0,
+        serper: Number(result.usage.serper) || 0,
+        google: Number(result.usage.google) || 0,
+      } : undefined,
+    });
+    item.runId = run.id;
+    item.stage = "kold";
+    touch(item, `found ${result.candidates.length} candidate(s), enriching…`);
+    return;
+  }
+
+  const run = item.runId ? await getSourcingRun(ws, item.runId) : undefined;
+  if (!run) { finish(item, "error", "the saved list is gone"); return; }
+  const workerUp = laxisWorkerConfigured() && (await koldinfoWorkerReady());
+
+  if (item.stage === "kold") {
+    if (!workerUp) { item.stage = "laxis"; touch(item); return; }
+    if (!run.koldJob) {
+      const { csv, count } = buildSourcingKoldInfoCsv(run.candidates);
+      if (!count) { item.stage = "koldDb"; touch(item); return; }
+      const jobId = await submitLaxisJob(csv, "koldinfo");
+      run.koldJob = { jobId, submittedAt: nowIso(), count };
+      await saveSourcingRun(ws, { ...run });
+      touch(item, `free pass 1: looking up ${count} candidate(s)…`);
+      return;
+    }
+    const job = await getLaxisJob(run.koldJob.jobId).catch(() => ({ status: "error", error: "job_not_found" } as any));
+    if (job.status === "queued" || job.status === "running") { touch(item); return; }
+    if (job.status === "done" && job.enrichedCsv) {
+      const m = mergeSourcingKoldInfoCsv(run.candidates, job.enrichedCsv);
+      item.added.emails += m.emails; item.added.phones += m.phones;
+    }
+    // job_not_found (retention expired / volume wiped): clearing the ref makes the next
+    // tick resubmit this rung once; any other error just moves the chain along.
+    delete run.koldJob;
+    await saveSourcingRun(ws, { ...run });
+    if (job.status !== "error" || !/job_not_found/i.test(String(job.error || ""))) {
+      item.stage = "koldDb";
+    }
+    touch(item);
+    return;
+  }
+
+  if (item.stage === "koldDb") {
+    if (!workerUp) { item.stage = "laxis"; touch(item); return; }
+    if (!run.koldDbJob) {
+      const { csv, count } = buildKoldInfoDbCsv(run.candidates, run.location);
+      if (!count) { item.stage = "laxis"; touch(item); return; }
+      const jobId = await submitLaxisJob(csv, "koldinfo-db");
+      run.koldDbJob = { jobId, submittedAt: nowIso(), count };
+      await saveSourcingRun(ws, { ...run });
+      touch(item, `free pass 2: database lookup for ${count} candidate(s)…`);
+      return;
+    }
+    const job = await getLaxisJob(run.koldDbJob.jobId).catch(() => ({ status: "error", error: "job_not_found" } as any));
+    if (job.status === "queued" || job.status === "running") { touch(item, run.koldDbJob ? `free pass 2: ${job.stage || "working…"}` : undefined); return; }
+    if (job.status === "done" && job.enrichedCsv) {
+      const m = mergeSourcingKoldInfoCsv(run.candidates, job.enrichedCsv);
+      item.added.emails += m.emails; item.added.phones += m.phones;
+    }
+    delete run.koldDbJob;
+    await saveSourcingRun(ws, { ...run });
+    if (job.status !== "error" || !/job_not_found/i.test(String(job.error || ""))) {
+      item.stage = "laxis";
+    }
+    touch(item);
+    return;
+  }
+
+  if (item.stage === "laxis") {
+    const total = run.candidates.length;
+    if (!laxisWorkerConfigured()) {
+      // No worker: the in-house waterfall is still worth a pass, then we're done.
+      const gf = await gapFillContacts(ws, run.candidates);
+      item.added.emails += gf.enriched; item.added.phones += gf.phones;
+      await saveSourcingRun(ws, { ...run });
+      finish(item, "done");
+      return;
+    }
+    const progress = run.laxisProgress ?? { doneOffsets: [], total, nextStart: 0, updatedAt: nowIso() };
+    if (!run.laxisJob) {
+      const start = nextOffset(progress.doneOffsets, total, MAX_LAXIS_UPLOAD);
+      if (start === null) { finish(item, "done"); return; }
+      const targetRows = run.candidates.slice(start, start + MAX_LAXIS_UPLOAD);
+      const { csv, sent } = serializeCandidatesCsv(targetRows);
+      if (!sent) {
+        // Nothing enrichable in this chunk: run the gap-fill over it and mark it done.
+        const gf = await gapFillContacts(ws, targetRows);
+        item.added.emails += gf.enriched; item.added.phones += gf.phones;
+        run.laxisProgress = markOffsetDone(progress, start, total);
+        await saveSourcingRun(ws, { ...run });
+        touch(item, laxisNote(run, total));
+        return;
+      }
+      const jobId = await submitLaxisJob(csv);
+      run.laxisJob = {
+        jobId, submittedAt: nowIso(), count: targetRows.length, start, sent,
+        targets: targetRows.map((c) => (c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`).toLowerCase().replace(/\/+$/, "")),
+      };
+      run.laxisProgress = { ...progress, total, updatedAt: nowIso() };
+      await saveSourcingRun(ws, { ...run });
+      touch(item, laxisNote(run, total));
+      return;
+    }
+    const job = await getLaxisJob(run.laxisJob.jobId).catch(() => ({ status: "error", error: "job_not_found" } as any));
+    if (job.status === "queued" || job.status === "running") { touch(item); return; }
+    const start = run.laxisJob.start ?? 0;
+    const count = run.laxisJob.count;
+    if (job.status === "done" && job.enrichedCsv) {
+      const m = mergeEnrichedCsv(run.candidates, job.enrichedCsv);
+      item.added.emails += m.emails; item.added.phones += m.phones;
+    }
+    if (job.status === "error" && /job_not_found/i.test(String(job.error || ""))) {
+      // Lost job: clear the ref so the next tick resubmits this chunk (offsets not done).
+      delete run.laxisJob;
+      await saveSourcingRun(ws, { ...run });
+      touch(item);
+      return;
+    }
+    // Merged (or the worker gave up after its own retries): gap-fill the chunk and mark
+    // its offset done either way, so one bad chunk can't wedge the whole night.
+    const gf = await gapFillContacts(ws, run.candidates.slice(start, start + count));
+    item.added.emails += gf.enriched; item.added.phones += gf.phones;
+    delete run.laxisJob;
+    run.laxisProgress = markOffsetDone(run.laxisProgress ?? progress, start, total);
+    await saveSourcingRun(ws, { ...run });
+    if (run.laxisProgress.nextStart === null) { finish(item, "done"); return; }
+    touch(item, laxisNote(run, total));
+    return;
+  }
+}
+
+function markOffsetDone(progress: NonNullable<SourcingRun["laxisProgress"]>, start: number, total: number): NonNullable<SourcingRun["laxisProgress"]> {
+  const doneOffsets = Array.from(new Set([...progress.doneOffsets, start])).sort((a, b) => a - b);
+  return { doneOffsets, total, nextStart: nextOffset(doneOffsets, total, MAX_LAXIS_UPLOAD), updatedAt: nowIso() };
+}
+
+function laxisNote(run: SourcingRun, total: number): string {
+  const done = Math.min((run.laxisProgress?.doneOffsets.length ?? 0) * MAX_LAXIS_UPLOAD, total);
+  return `final pass: ${done}/${total} rows through`;
+}

@@ -10111,12 +10111,14 @@
         '</div>' +
         '<div class="jd-actions">' +
           '<button class="btn btn-primary" id="jdGo" style="font-size:14.5px;padding:11px 26px">Initiate Search</button>' +
+          '<button class="btn btn-ghost" id="jdQueue" title="Adds this search to the overnight queue. The server runs the search and the full contact enrichment on its own (no tab needed); the finished list is waiting under Your saved candidate lists.">Queue for overnight</button>' +
           '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
           '<span class="muted" style="font-size:12.5px;max-width:520px">One press runs everything on its own: it analyzes the JD (writing one first if the box is empty), finds and ranks the candidates, and saves the finished list to Your saved candidate lists below.</span>' +
         '</div>' +
         '<div id="jdMsg" class="muted" style="margin-top:8px"></div>' +
       '</div>' +
       '<div class="card jd-prog" id="jdProgress" style="display:none"></div>' +
+      '<div id="jdNight"></div>' +
       '<div id="jdPlan"></div>' +
       '<div id="jdResults"></div>' +
       '<div class="card">' +
@@ -10207,12 +10209,84 @@
       }).join("");
     }
 
+    /* ---- Overnight queue card: what is cooking server-side. Kept deliberately
+       small: name, a plain-English stage line, and Remove. Finished items show what
+       they added; the list itself appears under saved lists like any other run. ---- */
+    var nightTimer = null;
+    function renderNight(items) {
+      var host = $("#jdNight"); if (!host) return;
+      if (!items.length) { host.innerHTML = ""; return; }
+      var STAGE_WORDS = {
+        queued: "waiting in line",
+        search: "searching…",
+        kold: "free enrichment pass 1…",
+        koldDb: "free enrichment pass 2…",
+        laxis: "final enrichment pass…",
+        done: "finished",
+        error: "stopped",
+      };
+      host.innerHTML = '<div class="card"><div class="jd-cardhead"><h3 style="margin:0">Overnight queue</h3>' +
+        '<span class="muted" style="font-size:12.5px">runs on the server, no tab needed; finished lists land under Your saved candidate lists</span></div>' +
+        items.map(function (i) {
+          var line = i.stage === "done"
+            ? (i.added ? (i.added.emails + " email" + (i.added.emails === 1 ? "" : "s") + " + " + i.added.phones + " phone" + (i.added.phones === 1 ? "" : "s") + " added") : "finished")
+            : (i.note || STAGE_WORDS[i.stage] || i.stage);
+          if (i.stage === "error") line = "stopped: " + (i.error || "unknown");
+          return '<div class="jd-night-row" style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line, #e5e8ef)">' +
+            '<b style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(i.name) + '</b>' +
+            '<span class="muted" style="flex:1;font-size:12.5px">' + esc(line) + '</span>' +
+            '<button class="btn btn-ghost btn-sm" data-nq-remove="' + esc(i.id) + '">Remove</button>' +
+          '</div>';
+        }).join("") + '</div>';
+      host.querySelectorAll("[data-nq-remove]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          b.disabled = true;
+          send("/sourcing", "POST", { action: "queueRemove", id: b.getAttribute("data-nq-remove") }).then(loadRuns);
+        });
+      });
+      // While anything is active, quietly refresh so the card (and the finished
+      // list's reach pills) update on their own.
+      var active = items.some(function (i) { return i.stage !== "done" && i.stage !== "error"; });
+      if (nightTimer) { clearTimeout(nightTimer); nightTimer = null; }
+      if (active) nightTimer = setTimeout(function () { loadRuns(); }, 30000);
+    }
+
+    function queueOvernight() {
+      var qBtn = $("#jdQueue"); if (!qBtn || qBtn.disabled) return;
+      var ta = $("#jdText");
+      var title = $("#jdbTitle") ? $("#jdbTitle").value.trim() : "";
+      var jdNow = ta ? ta.value.trim() : "";
+      if (!jdNow && !title) {
+        msg("Give it a job title (or paste a JD), then press Queue for overnight.");
+        if ($("#jdbTitle")) $("#jdbTitle").focus();
+        return;
+      }
+      qBtn.disabled = true;
+      var nameEl = $("#jdName");
+      var loc = jdLocLabel();
+      var name = (nameEl && nameEl.value.trim()) || title || "Overnight search";
+      if (loc && name.indexOf(loc) < 0) name += " · " + loc;
+      // No JD pasted? Queue the title line as the brief; the server search parses it
+      // the same way Initiate Search would after drafting.
+      var jd = jdNow || ("Job title: " + title + (loc ? ("\nLocation: " + loc) : ""));
+      send("/sourcing", "POST", {
+        action: "queueAdd", kind: "search", jd: jdWithLoc(jd), location: loc, name: name,
+        breadth: jdBreadth(), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked),
+      }).then(function (r) {
+        qBtn.disabled = false;
+        if (!r.ok) { msg("Could not queue the search: " + ((r.data && r.data.error) || r.status)); return; }
+        msg('Queued. It runs on the server (you can close this tab); the finished list lands under "Your saved candidate lists".');
+        loadRuns();
+      }).catch(function () { qBtn.disabled = false; msg("Could not reach the server."); });
+    }
+
     function loadRuns() {
       return api("/sourcing").then(function (d) {
         var host = $("#jdRuns"); if (!host) return;
         var runs = (d && d.runs) || [];
         state.runs = runs;
         renderQuota((d && d.apiQuota) || []);
+        renderNight((d && d.nightQueue) || []);
         // FAILSAFE: if the backend reports non-durable storage, warn LOUDLY before the user
         // saves work that won't survive a restart. durable===false should never happen in prod.
         var warn = (d && d.durable === false)
@@ -10739,6 +10813,7 @@
     }
 
     $("#jdGo").addEventListener("click", runOneClick);
+    if ($("#jdQueue")) $("#jdQueue").addEventListener("click", queueOvernight);
 
     $("#jdRuns").addEventListener("click", function (e) {
       var t = e.target;
