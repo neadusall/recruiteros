@@ -9821,7 +9821,7 @@
       '<style>' +
       '.jd-chip{display:inline-block;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:3px 11px;margin:2px 5px 2px 0;font-size:12px;color:var(--text-muted);transition:border-color .12s,color .12s}' +
       '.jd-chip:hover{border-color:var(--brand);color:var(--text)}' +
-      '.jd-icp{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:12px}' +
+      '.jd-icp{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:12px;max-height:230px;overflow-y:auto;overscroll-behavior:contain;padding-right:6px}' +
       '.jd-icp>div b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:7px;font-weight:600}' +
       '.jd-empty{font-size:13.5px;color:var(--text);background:var(--bg-soft);border:1px solid var(--border-strong);border-left:3px solid #e0a33e;border-radius:10px;padding:12px 14px;margin:6px 0 0;line-height:1.5}' +
       '.jd-hints{margin:10px 0 0;display:flex;flex-direction:column;gap:8px;max-width:760px}' +
