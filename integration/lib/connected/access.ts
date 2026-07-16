@@ -22,13 +22,22 @@
 
 import { nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
+import { workspaceHasOwnerMember } from "../auth";
 import type { IntegrationId } from "./index";
 
 /** Is this the operator's own (house) workspace, which legitimately uses env keys? */
 export function isHouseWorkspace(workspaceId: string): boolean {
   const explicit = (process.env.HOUSE_WORKSPACE_ID || "").trim();
   if (!explicit) return true; // isolation off until the operator names their house
-  return workspaceId === explicit;
+  if (workspaceId === explicit) return true;
+  // Workspace ids drift across auth churn (the 2026-07-16 incident: the operator's
+  // saves landed in a NEW workspace id while the engine stayed pinned to the stale
+  // one, silently splitting their keys from the engine). The operator's email
+  // doesn't drift: a workspace where an OWNER_EMAIL account holds the owner ROLE
+  // is also the house. Customers can never self-grant this (their emails aren't
+  // on the allow-list, and an owner merely invited as a member doesn't count).
+  // [User-approved change to the isolation rule, 2026-07-16.]
+  return workspaceHasOwnerMember(workspaceId);
 }
 
 /* ---------------- grant store (operator lends a house key to a customer) ---- */

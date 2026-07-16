@@ -22,6 +22,7 @@
 
 import { nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver } from "../db";
+import { ensureAuthReady, workspaceHasOwnerMember } from "../auth";
 import type { IntegrationId, ConnStatus } from "./index";
 
 const KEY = "integration_credentials_v1";
@@ -55,14 +56,27 @@ async function hydrate(): Promise<void> {
       const snap = await loadSnapshot<Record<string, WorkspaceCreds>>(KEY);
       if (snap && typeof snap === "object") {
         store = snap;
-        // Mirror every saved key into the running process so the engine's
-        // provider singletons pick them up on boot (single-operator runtime).
+        // shouldMirror()'s owner-member check reads the auth store — load it first.
+        await ensureAuthReady();
+        // Mirror every house key into the running process so the engine's provider
+        // singletons pick them up on boot (single-operator runtime). NEWEST save
+        // wins per env key: workspace-id churn can leave the same key saved under
+        // several house workspaces, and boot order must never resurrect a stale
+        // credential over the one the operator saved last.
+        const newest = new Map<string, { value: string; at: string }>();
         for (const w of Object.values(store)) {
           if (!shouldMirror(w.workspaceId)) continue; // never pollute env with a customer's keys
           for (const c of Object.values(w.integrations)) {
-            if (c) applyEnv(c.keys);
+            if (!c) continue;
+            for (const [k, v] of Object.entries(c.keys)) {
+              if (!v) continue;
+              const at = c.updatedAt || "";
+              const prev = newest.get(k);
+              if (!prev || at > prev.at) newest.set(k, { value: v, at });
+            }
           }
         }
+        for (const [k, { value }] of newest) process.env[k] = value;
         // Loud guard: with HOUSE_WORKSPACE_ID unset, shouldMirror() is true for ALL
         // workspaces, so every workspace's saved keys land in the shared process.env
         // (last-writer-wins) and a customer can ride the operator's env. Fine for a
@@ -112,7 +126,11 @@ function ws(workspaceId: string): WorkspaceCreds {
  */
 function shouldMirror(workspaceId: string): boolean {
   const houseId = (process.env.HOUSE_WORKSPACE_ID || "").trim();
-  return houseId ? workspaceId === houseId : true;
+  if (!houseId) return true;
+  // Same drift-proof house rule as isHouseWorkspace (connected/access.ts): the
+  // pinned id, OR any workspace where an OWNER_EMAIL account holds the owner
+  // role — so the operator's saves keep reaching the engine after id churn.
+  return workspaceId === houseId || workspaceHasOwnerMember(workspaceId);
 }
 
 /** Mirror non-empty keys into process.env for the running instance. */

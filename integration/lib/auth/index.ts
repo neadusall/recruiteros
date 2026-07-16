@@ -14,6 +14,7 @@
  */
 
 import { rid, nowIso, isoPlusHours } from "../core/ids";
+import { isOwnerEmail } from "../owner/emails";
 import { hashPassword, verifyPassword, randomToken } from "./crypto";
 import { capabilitiesFor } from "./permissions";
 import type { AuthResult, EmailToken, Membership, Role, Session, User, Workspace } from "./types";
@@ -484,6 +485,25 @@ export function verifyEmail(token: string): boolean {
   const u = userByEmail(t.email);
   if (u) u.emailVerified = true;
   return Boolean(u);
+}
+
+/**
+ * True when an OWNER_EMAIL account is a member of this workspace WITH the owner
+ * role — i.e. it is the operator's own workspace regardless of which id their
+ * session carries. Workspace ids drift across auth churn; the operator's email
+ * doesn't. Lets house-identity checks (credential mirroring, isolation) survive
+ * the drift instead of demoting the operator to an isolated customer. The
+ * owner-ROLE requirement means merely being invited into a customer's workspace
+ * as a member never makes that workspace the house.
+ * [User-approved change to house/credential-isolation logic, 2026-07-16.]
+ */
+export function workspaceHasOwnerMember(workspaceId: string): boolean {
+  for (const m of store.memberships) {
+    if (m.workspaceId !== workspaceId || m.role !== "owner") continue;
+    const u = store.users.get(m.userId);
+    if (u && isOwnerEmail(u.email)) return true;
+  }
+  return false;
 }
 
 /** Validate a session token -> the authed context, or null. */
