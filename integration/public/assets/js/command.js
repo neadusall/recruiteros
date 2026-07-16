@@ -9082,7 +9082,6 @@
       '<div id="jdResults"></div>' +
       '<div class="card">' +
         '<div class="jd-cardhead"><h3 style="margin:0">Your saved candidate lists</h3></div>' +
-        '<p class="jd-sub">Each list has four moves. <b>Deep-vet</b> reads the top candidates\' full career history against the role and returns a verified fit score and verdict (the number next to it picks how many, per list). <b>Enrich</b> fills email and phone for the whole list automatically. <b>Send to Candidates</b> drops the list into your pipeline, and <b>Send to OS Text</b> builds a ready-to-launch SMS campaign from everyone with a phone number.</p>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
     function msg(t) { var m = $("#jdMsg"); if (m) m.textContent = t || ""; }
@@ -9195,38 +9194,31 @@
        Submit a 1,000-row chunk, poll laxisStatus until merged (which also runs the
        in-house gap-fill waterfall), auto-continue to the next chunk. `t` is the button
        driving the run; `resetLabel` is what it reads when the chain ends. */
-    function runLaxisChain(lid, t, resetLabel) {
-      var lxT = { emails: 0, phones: 0, matched: 0, gap: 0, chunks: 0, skipped: 0, complete: 0, warns: [] };
-      t.disabled = true; t.textContent = "Laxis: starting…";
+    function runLaxisChain(lid, t, resetLabel, base) {
+      var lxT = { emails: (base && base.emails) || 0, phones: (base && base.phones) || 0, gap: 0, chunks: 0 };
+      t.disabled = true; t.textContent = "Enriching…";
       function laxisReset() { t.disabled = false; t.textContent = resetLabel; }
+      // No play-by-play and no completion popup: the progress bar carries the run,
+      // its finish label carries the totals, and the refreshed list IS the result.
       function finishLaxis() {
         laxisReset();
-        alert("Laxis enriched " + lxT.emails + " email" + (lxT.emails === 1 ? "" : "s") +
-          " and " + lxT.phones + " phone" + (lxT.phones === 1 ? "" : "s") +
-          " across " + lxT.matched + " matched contact" + (lxT.matched === 1 ? "" : "s") +
-          (lxT.chunks > 1 ? (" over " + lxT.chunks + " batches") : "") + "." +
-          (lxT.gap ? (" The in-house waterfall then filled " + lxT.gap + " more.") : "") +
-          (lxT.complete ? ("\n\n" + lxT.complete + " row(s) already had an email + phone and were not sent, no Laxis credits spent on them.") : "") +
-          (lxT.skipped ? ("\n\n" + lxT.skipped + " row(s) were skipped, no LinkedIn URL or email for Laxis to key off.") : "") +
-          (lxT.warns.length ? ("\n\n" + lxT.warns.slice(0, 3).join("\n")) : ""));
+        finishProgress("Done · " + lxT.emails + " email" + (lxT.emails === 1 ? "" : "s") +
+          " + " + lxT.phones + " phone" + (lxT.phones === 1 ? "" : "s") +
+          (lxT.gap ? (" + " + lxT.gap + " gap-filled") : "") + " added");
         loadRuns();
       }
       function pollLaxis() {
         send("/sourcing", "POST", { action: "laxisStatus", id: lid }).then(function (s) {
-          if (!s.ok) { laxisReset(); alert("Laxis status check failed: " + ((s.data && s.data.error) || s.status)); return; }
-          if (!s.data.done) {
-            t.textContent = "Laxis: " + (s.data.stage || s.data.status || "working") + "…";
-            setTimeout(pollLaxis, 10000); return;
-          }
+          if (!s.ok) { laxisReset(); finishProgress("Enrichment stopped"); alert("Enrichment status check failed: " + ((s.data && s.data.error) || s.status)); return; }
+          if (!s.data.done) { setTimeout(pollLaxis, 10000); return; }
           if (s.data.status === "error") {
-            laxisReset();
-            alert("Laxis enrichment failed:\n" + ((s.data.warnings || []).join("\n") || "unknown error") +
+            laxisReset(); finishProgress("Enrichment stopped");
+            alert("Enrichment failed:\n" + ((s.data.warnings || []).join("\n") || "unknown error") +
               "\n\nIf this mentions a selector (CALIBRATE), the Laxis UI changed and the worker needs re-calibrating." +
               "\n\nAlready-enriched batches are saved, press Enrich again to resume from where it stopped."); loadRuns(); return;
           }
           var lx = s.data.laxis || {}; var gf = s.data.gapFill || {};
-          lxT.emails += lx.emails || 0; lxT.phones += lx.phones || 0; lxT.matched += lx.matched || 0; lxT.gap += gf.enriched || 0;
-          (s.data.warnings || []).forEach(function (w) { lxT.warns.push(w); });
+          lxT.emails += lx.emails || 0; lxT.phones += lx.phones || 0; lxT.gap += gf.enriched || 0;
           // More chunks left? Auto-continue, the backend skips done offsets, never re-grabs.
           if (s.data.nextStart != null) { startChunk(s.data.nextStart); return; }
           finishLaxis();
@@ -9235,23 +9227,21 @@
       function startChunk(startOffset) {
         var body = { action: "laxisEnrich", id: lid };
         if (startOffset != null) body.start = startOffset;
-        t.textContent = "Laxis: starting" + (lxT.chunks ? (" batch " + (lxT.chunks + 1)) : "") + "…";
         send("/sourcing", "POST", body).then(function (r) {
           if (!r.ok) {
-            laxisReset();
+            laxisReset(); finishProgress("Enrichment stopped");
             var err = (r.data && r.data.error) || r.status;
             if (err === "laxis_worker_not_configured") {
               alert("Laxis isn't connected yet.\n\nOn the server, set LAXIS_EMAIL and LAXIS_PASSWORD in .env.production (the laxis-worker logs into Laxis with them), confirm LAXIS_WORKER_URL is set on the app, then redeploy."); return;
             }
-            alert("Laxis enrich failed: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
+            alert("Enrich failed: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
           }
           // Chunk already enriched (resume landed on a done offset) → skip ahead or finish.
           if (r.data.alreadyDone) {
             if (r.data.nextStart != null) { startChunk(r.data.nextStart); } else { finishLaxis(); }
             return;
           }
-          lxT.chunks++; lxT.skipped += r.data.skipped || 0; lxT.complete += r.data.complete || 0;
-          t.textContent = "Laxis: uploading " + (r.data.sent || "") + "…";
+          lxT.chunks++;
           setTimeout(pollLaxis, 8000);
         });
       }
@@ -9265,41 +9255,36 @@
        gap-fill waterfall. If the KoldInfo rung is unavailable or has nothing to do, the
        chain skips straight to Laxis, so the free-first order is enforced either way. */
     function runAutoEnrich(aid, aBtn) {
-      aBtn.disabled = true; aBtn.textContent = "KoldInfo: submitting…";
-      function stageLaxis(note) {
-        if (note) toast(note);
-        runLaxisChain(aid, aBtn, "Enrich");
-      }
+      aBtn.disabled = true; aBtn.textContent = "Enriching…";
+      // One progress bar for the whole chain; the stages run silently and the
+      // finished list is the announcement. ETA is rough: worker time scales with rows.
+      var arun = (state.runs || []).find(function (r) { return r.id === aid; });
+      var aRows = (arun && arun.candidates && arun.candidates.length) || 50;
+      showProgress('Enriching "' + ((arun && arun.name) || "the list") + '"', 60 + aRows * 2, "Working…");
+      var kold = { emails: 0, phones: 0 };
+      function stageLaxis() { runLaxisChain(aid, aBtn, "Enrich", kold); }
       function pollKold() {
         send("/sourcing", "POST", { action: "koldinfoStatus", id: aid }).then(function (s) {
-          if (!s.ok) { stageLaxis("KoldInfo status check failed, continuing with Laxis."); return; }
-          if (!s.data.done) {
-            aBtn.textContent = "KoldInfo: " + (s.data.stage || s.data.status || "working") + "…";
-            setTimeout(pollKold, 10000); return;
-          }
-          if (s.data.status === "error") {
-            stageLaxis("KoldInfo pass failed (" + ((s.data.warnings || [])[0] || "unknown") + "). Continuing with Laxis so nothing blocks.");
-            return;
-          }
-          var m = s.data.merged || {};
-          stageLaxis("KoldInfo filled " + (m.emails || 0) + " email" + ((m.emails || 0) === 1 ? "" : "s") + " and " + (m.phones || 0) + " phone" + ((m.phones || 0) === 1 ? "" : "s") + ". Now Laxis for what's left…");
-        }).catch(function () { stageLaxis("KoldInfo status check failed, continuing with Laxis."); });
+          if (!s.ok) { stageLaxis(); return; }
+          if (!s.data.done) { setTimeout(pollKold, 10000); return; }
+          var m = (s.data.status === "error") ? {} : (s.data.merged || {});
+          kold.emails = m.emails || 0; kold.phones = m.phones || 0;
+          stageLaxis();
+        }).catch(function () { stageLaxis(); });
       }
       send("/sourcing", "POST", { action: "koldinfoEnrich", id: aid }).then(function (r) {
         if (!r.ok) {
           var err = (r.data && r.data.error) || r.status;
-          if (err === "koldinfo_worker_not_configured") {
-            stageLaxis("KoldInfo isn't connected yet (set KOLDINFO_EMAIL + KOLDINFO_PASSWORD on the server for the free rung). Running Laxis directly.");
-            return;
-          }
+          if (err === "koldinfo_worker_not_configured") { stageLaxis(); return; }
           aBtn.disabled = false; aBtn.textContent = "Enrich";
+          finishProgress("Enrich could not start");
           alert("Enrich failed to start: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
         }
-        if (r.data.nothingMissing) { stageLaxis("Every candidate already has an email. Straight to Laxis for cellphones…"); return; }
-        aBtn.textContent = "KoldInfo: finding " + (r.data.count || "") + " emails free…";
+        if (r.data.nothingMissing) { stageLaxis(); return; }
         setTimeout(pollKold, 8000);
       }).catch(function () {
         aBtn.disabled = false; aBtn.textContent = "Enrich";
+        finishProgress("Enrich stopped");
         alert("Could not reach the server.");
       });
     }
@@ -9383,14 +9368,19 @@
         return;
       }
       goBtn.disabled = true;
+      goBtn.textContent = "Searching…";
       function reset() { goBtn.disabled = false; goBtn.textContent = "Initiate Search"; }
       var runName = "";
       var savedId = null;
+      // ONE progress bar covers the whole run (brief -> analyze -> search -> save ->
+      // rank); no stage-by-stage narration, just the bar, the % and the time left.
+      var etaCap = parseInt($("#jdCap") && $("#jdCap").value, 10) || 500;
+      var needBrief = !(ta && ta.value.trim());
+      showProgress("Finding candidates", (needBrief ? 12 : 0) + 28 + findEta(etaCap), "Working…");
+      msg("");
       Promise.resolve().then(function () {
         // 1) Brief: only when the JD box is empty (same draft the builder button uses).
         if (ta && ta.value.trim()) return null;
-        goBtn.textContent = "Writing the brief…";
-        msg("Writing a sourcing-ready brief from what you entered…");
         var company = $("#jdbCompany") ? $("#jdbCompany").value.trim() : "";
         var notes = $("#jdbNotes") ? $("#jdbNotes").value.trim() : "";
         var loc = jdLocPhrase(); if (loc) notes = [notes, "Based in " + loc].filter(Boolean).join(". ");
@@ -9410,8 +9400,6 @@
           return;
         }
         state.jd = jdNow;
-        goBtn.textContent = "Analyzing…";
-        msg("Analyzing the brief into an ideal-candidate profile…");
         return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location }).then(function (r) {
           if (!r.ok) throw { stage: "Analyze", r: r };
           state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
@@ -9422,9 +9410,6 @@
         var cap = parseInt($("#jdCap") && $("#jdCap").value, 10) || 500;
         var minFit = parseInt($("#jdMinFit") && $("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
         var fresh = !!($("#jdFresh") && $("#jdFresh").checked);
-        goBtn.textContent = "Searching…";
-        msg("");
-        showProgress("Finding candidates", findEta(cap));
         // A refined profile is sent along so the search actually honors the
         // Dive-deeper instruction instead of re-deriving the profile from the JD.
         var refinedIcp = (state.refineNote && state.icp) ? state.icp : undefined;
@@ -9438,14 +9423,12 @@
             var why = (state.warnings || []).filter(function (w) { return w.indexOf("empty_run:") === 0; })[0];
             throw { plain: (why ? why.replace("empty_run: ", "The search came back empty: ") : "The search came back empty.") };
           }
-          finishProgress("Found " + state.candidates.length + " candidates");
         });
       }).then(function () {
         // 4) Save under an auto name (List name field wins when filled).
         var nameEl = $("#jdName");
         runName = (nameEl && nameEl.value.trim()) || (state.icp && state.icp.label) || title || "Candidate search";
         if (state.location && runName.indexOf(state.location) < 0) runName += " · " + state.location;
-        goBtn.textContent = "Saving…";
         return send("/sourcing", "POST", { action: "save", name: runName, jd: state.jd, location: state.location || jdLocLabel(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings }).then(function (r) {
           if (!r.ok) throw { stage: "Save", r: r };
           savedId = r.data && r.data.run && r.data.run.id;
@@ -9453,14 +9436,15 @@
       }).then(function () {
         // 5) AI re-rank the top 100 (best effort — the list is already saved).
         if (!savedId) return null;
-        goBtn.textContent = "AI-ranking the top 100…";
         return send("/sourcing", "POST", { action: "rerank", id: savedId, top: 100 }).catch(function () { return null; });
       }).then(function () {
         reset();
-        msg('Done. "' + runName + '" is saved below with ' + state.candidates.length + " candidates, strongest first. Next: Enrich it, then send to Candidates or OS Text.");
+        finishProgress('Done · "' + runName + '" saved with ' + state.candidates.length + " candidates");
+        msg('"' + runName + '" is saved below with ' + state.candidates.length + " candidates, strongest first.");
         loadRuns();
       }).catch(function (e) {
         reset();
+        if (prog.timer) finishProgress(((e && e.stage) || "Run") + " stopped");
         if (e && e.plain) { msg(e.plain); return; }
         var detail = (e && e.r && e.r.data && (e.r.data.detail || e.r.data.error)) || (e && e.r && e.r.status) || (e && e.message) || "error";
         msg(((e && e.stage) || "Run") + " failed: " + detail);
@@ -9517,6 +9501,8 @@
       prog.timer = setInterval(progTick, 200); progTick();
     }
     function setProgTitle(t) { var el = $("#jdProgTitle"); if (el) el.textContent = t; }
+    /** Update the phase line without resetting the bar (for long polls). */
+    function setProgPhase(t) { var el = $("#jdProgPhase"); if (el) el.textContent = t; }
     function finishProgress(label) {
       if (prog.timer) { clearInterval(prog.timer); prog.timer = null; }
       var host = $("#jdProgress"); if (!host) return;
@@ -9557,7 +9543,7 @@
               btn.disabled = true; btn.textContent = "Sending…";
               send("/sourcing", "POST", { action: "promote", id: id, listName: listName, tag: tag }).then(function (r) {
                 if (!r.ok) { btn.disabled = false; btn.textContent = "Send to Candidates →"; alert("Promote failed: " + ((r.data && r.data.error) || r.status)); return; }
-                alert('Sent ' + r.data.added + ' to Candidates as "' + r.data.name + '"' + (tag ? (' · tag "' + tag + '"') : '') + (r.data.deduped ? (' (' + r.data.deduped + ' already in pipeline)') : '') + '.'); loadRuns();
+                toast('Sent ' + r.data.added + ' to Candidates as "' + r.data.name + '"' + (r.data.deduped ? (' (' + r.data.deduped + ' already in pipeline)') : '') + '.'); loadRuns();
               });
             });
           });
@@ -9568,19 +9554,14 @@
         var top = topEl ? Math.max(1, Math.min(200, parseInt(topEl.value, 10) || 25)) : 25;
         var vid = id;
         var pendingCacheHits = 0; // profile lookups served from cache at submit time
-        t.disabled = true; t.textContent = "Vetting top " + top + "…";
-        showProgress("Deep-vetting top " + top, top * 3, "Reading work histories & scoring against the JD…");
-        // Final alert + reset, shared by the batch and synchronous paths.
+        t.disabled = true; t.textContent = "Vetting…";
+        showProgress("Deep-vetting top " + top, top * 3, "Working…");
+        // Quiet finish shared by the batch and synchronous paths: the bar's final
+        // label carries the count and the re-sorted list is the result. No popup.
         function vetDone(d) {
           t.disabled = false; t.textContent = "Deep-vet";
-          finishProgress("Deep-vetted " + (d.vetted || 0));
-          var warn = (d.warnings || []).length ? ("\n\n" + d.warnings.slice(0, 3).join("\n")) : "";
-          var cacheNote = (d.profileCacheHits ? " " + d.profileCacheHits + " profile(s) reused from cache (no charge)." : "");
-          alert("Deep-vetted " + (d.vetted || 0) + " candidate" + ((d.vetted === 1) ? "" : "s") +
-            (d.deep ? " against full work history." : " on surface fields only. Add the deep-vet profile endpoint in Setup to read full work history.") +
-            cacheNote +
-            " The list re-sorted with the strongest verified matches on top." +
-            (d.batched ? " (Ran as a 50%-cheaper batch.)" : "") + warn);
+          finishProgress("Done · deep-vetted " + (d.vetted || 0) + ", strongest on top");
+          if (!d.deep) toast("Vetted on surface fields only. Add the deep-vet profile endpoint in Setup to read full work history.");
           loadRuns();
         }
         // Poll the in-flight batch every 10s until it ends, then ingest + finish.
@@ -9589,7 +9570,7 @@
             if (!s.ok) { t.disabled = false; t.textContent = "Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet status check failed: " + ((s.data && s.data.error) || s.status)); return; }
             if (!s.data.done) {
               var c = s.data.counts || {}; var got = (c.succeeded || 0) + (c.errored || 0);
-              showProgress("Deep-vetting (batch)", top * 3, got ? (got + " of " + top + " scored…") : "Batch queued, scoring in the background…");
+              if (got) setProgPhase(got + " of " + top + " scored");
               setTimeout(function () { pollVet(batched); }, 10000); return;
             }
             vetDone({ vetted: s.data.vetted, deep: s.data.deep, warnings: s.data.warnings, profileCacheHits: pendingCacheHits, batched: true });
@@ -9599,7 +9580,6 @@
           if (!r.ok) { t.disabled = false; t.textContent = "Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet failed: " + ((r.data && r.data.error) || r.status)); return; }
           if (r.data.batched) {
             pendingCacheHits = r.data.profileCacheHits || 0;
-            showProgress("Deep-vetting (batch)", top * 3, "Batch submitted, scoring " + (r.data.submitted || top) + " in the background…");
             setTimeout(function () { pollVet(true); }, 8000);
           } else {
             vetDone({ vetted: r.data.vetted, deep: r.data.deep, warnings: r.data.warnings, profileCacheHits: r.data.profileCacheHits || 0, batched: false });
@@ -9642,13 +9622,9 @@
                 }
                 close();
                 var d = r.data || {};
-                alert('OS Text campaign "' + (d.campaignName || nm) + '" is ready (' + (d.created ? "created new" : "topped up") + ").\n\n" +
-                  "Added: " + (d.added || d.pushed || 0) +
-                  (d.deduped ? "\nAlready in campaign: " + d.deduped : "") +
-                  (d.noPhone ? "\nNo phone yet: " + d.noPhone : "") +
-                  (d.invalidPhone ? "\nInvalid phone: " + d.invalidPhone : "") +
-                  (d.optedOut ? "\nOpted out (never texted): " + d.optedOut : "") +
-                  "\n\nOpen the OS Text tab to review the prefilled message and launch.");
+                toast('OS Text campaign "' + (d.campaignName || nm) + '" is ready: ' + (d.added || d.pushed || 0) + ' added' +
+                  (d.noPhone ? (", " + d.noPhone + " skipped (no phone)") : "") +
+                  ". Review and launch in the OS Text tab.");
               }).catch(function () {
                 goBtn.disabled = false; goBtn.textContent = "Send to OS Text →";
                 alert("Could not reach the server.");
