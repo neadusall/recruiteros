@@ -16,6 +16,8 @@ export interface ProspectList {
   workspaceId: string;
   name: string;
   prospectIds: string[];
+  /** Candidates data-warehouse record ids: the unified Candidates tab saves mixed lists. */
+  dataIds?: string[];
   motion?: Motion;
   createdAt: string;
   updatedAt: string;
@@ -37,15 +39,19 @@ export interface ProspectListInput {
   id?: string;
   name: string;
   prospectIds: string[];
+  dataIds?: string[];
   motion?: Motion;
 }
 
 export function upsertProspectList(workspaceId: string, input: ProspectListInput): ProspectList {
   const ids = Array.from(new Set((input.prospectIds || []).filter(Boolean)));
+  const dataIds = Array.from(new Set((input.dataIds || []).filter(Boolean)));
   const existing = input.id ? getProspectList(workspaceId, input.id) : undefined;
   if (existing) {
     existing.name = input.name || existing.name;
     existing.prospectIds = ids;
+    // Only replace dataIds when the caller sent them (older clients omit the field).
+    if (input.dataIds) existing.dataIds = dataIds;
     if (input.motion) existing.motion = input.motion;
     existing.updatedAt = nowIso();
     return existing;
@@ -55,6 +61,7 @@ export function upsertProspectList(workspaceId: string, input: ProspectListInput
     workspaceId,
     name: input.name || "Untitled list",
     prospectIds: ids,
+    dataIds: dataIds.length ? dataIds : undefined,
     motion: input.motion,
     createdAt: nowIso(),
     updatedAt: nowIso(),

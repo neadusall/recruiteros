@@ -129,11 +129,11 @@ export async function POST(req: Request) {
   // (sender pool / MTA / Instantly with suppression, caps and warm-up all
   // enforced — sendTouch is the same path campaign sends use). Tokens
   // {first_name} {full_name} {company} {title} fill in per person.
-  if (b?.action === "email" && Array.isArray(b.ids)) {
+  if (b?.action === "email" && (Array.isArray(b.ids) || Array.isArray(b.prospectIds))) {
     const subject = String(b.subject || "").trim();
     const bodyText = String(b.body || "").trim();
     if (!subject || !bodyText) return fail("missing_fields", 422, { detail: "subject and body required" });
-    const ids: string[] = b.ids.filter(Boolean).slice(0, 500);
+    const ids: string[] = (Array.isArray(b.ids) ? b.ids : []).filter(Boolean).slice(0, 500);
     const { sendTouch } = await import("../../../lib/channels");
     const fill = (tpl: string, r: DataRecord) => {
       const first = (r.fullName || "").trim().split(/\s+/)[0] || "";
@@ -174,7 +174,33 @@ export async function POST(req: Request) {
       if (res.ok) { sent++; if (res.dryRun) dryRun++; }
       else { failed++; if (res.error) errors[res.error] = (errors[res.error] || 0) + 1; }
     }
-    return ok({ sent, failed, skipped, dryRun, errors, requested: b.ids.length });
+    // Pipeline prospects: the unified Candidates tab sends both id namespaces in
+    // one call ({ ids } = warehouse records, { prospectIds } = pipeline).
+    const pids: string[] = (Array.isArray(b.prospectIds) ? b.prospectIds : []).filter(Boolean).slice(0, 500);
+    if (pids.length) {
+      const { getCore } = await import("../../../lib/core/repository");
+      const wanted = new Set(pids);
+      const prospects = (await getCore().listProspects(ws)).filter((p) => wanted.has(p.id));
+      for (const p of prospects) {
+        if (!p.email) { skipped++; continue; }
+        const first = p.firstName || (p.fullName || "").trim().split(/\s+/)[0] || "";
+        const fillP = (tpl: string) => tpl
+          .replace(/\{first_name\}/gi, first)
+          .replace(/\{full_name\}/gi, p.fullName || "")
+          .replace(/\{company\}/gi, p.company || "")
+          .replace(/\{title\}/gi, p.title || "");
+        const res = await sendTouch(ws, {
+          channel: "email",
+          prospect: p,
+          subject: fillP(subject),
+          text: fillP(bodyText),
+        });
+        if (res.ok) { sent++; if (res.dryRun) dryRun++; }
+        else { failed++; if (res.error) errors[res.error] = (errors[res.error] || 0) + 1; }
+      }
+      skipped += pids.length - prospects.length;
+    }
+    return ok({ sent, failed, skipped, dryRun, errors, requested: ids.length + pids.length });
   }
 
   return fail("unknown_action", 400);
