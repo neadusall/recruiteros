@@ -8858,7 +8858,7 @@
      deduped candidate list -> save it under a NAME here (staging) -> send it to
      Candidates under that same name. Backend: /api/sourcing + lib/sourcing/*. */
   function renderJdSourcing(el) {
-    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", queue: [], runs: [], running: false, refineNote: "", location: "" };
+    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", runs: [], refineNote: "", location: "" };
     function jdbLoc() { var e = $("#jdbLocation"); return e ? e.value.trim() : ""; }
     function jdbRadius() { var e = $("#jdbRadius"); return e ? (parseInt(e.value, 10) || 0) : 0; }
     function jdLocLabel() { var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " +" + r + "mi") : loc; }
@@ -9152,7 +9152,7 @@
         var warn = (d && d.durable === false)
           ? '<div class="card" style="border-color:#c0392b;background:#2a1414"><b>Saved lists are NOT being stored durably.</b><br><span class="muted">The server is running in memory-only mode, so saved searches will be lost on the next restart. Don\'t rely on saving until this is fixed (check the /data volume / persistence config).</span></div>'
           : '';
-        if (!runs.length) { host.innerHTML = warn + '<p class="muted">No saved lists yet. Analyze a JD, find candidates, then Save. Or queue several JDs above and run them with the Run queue button.</p>'; return; }
+        if (!runs.length) { host.innerHTML = warn + '<p class="muted">No saved lists yet. Fill in the role above and press Find candidates; the finished list lands here automatically.</p>'; return; }
         host.innerHTML = warn + runs.map(function (r) {
           var n = r.candidates ? r.candidates.length : 0;
           var urls = (r.candidates || []).filter(function (c) { return c.linkedinUrl; }).length;
@@ -9813,14 +9813,6 @@
       }
     });
 
-    $("#jdQueueAdd").addEventListener("click", addToQueue);
-    $("#jdQueueRun").addEventListener("click", runQueue);
-    $("#jdQueueClear").addEventListener("click", function () { if (state.running) { msg("Queue is running. Let it finish."); return; } state.queue = []; renderQueue(); });
-    $("#jdQueueList").addEventListener("click", function (e) {
-      var t = e.target; if (t.tagName !== "BUTTON") return;
-      var i = t.getAttribute("data-qrm");
-      if (i != null) { state.queue.splice(parseInt(i, 10), 1); renderQueue(); }
-    });
     var vetTopEl = $("#jdVetTop"); if (vetTopEl) vetTopEl.addEventListener("input", updateVetCost);
     var capEl2 = $("#jdCap"); if (capEl2) capEl2.addEventListener("input", updateRunCost);
     var planHost = $("#jdPlan");
