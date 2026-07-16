@@ -6419,6 +6419,15 @@
       '.cn-table thead th{padding:9px 8px}' +
       '.cn-table .pr-c-name{min-width:180px}' +
       '.cn-table td.cn-co{white-space:normal;min-width:120px}' +
+      // Reach pills: how many of the people in view you can actually message right
+      // now, by email and by phone. Painted next to the Candidates count and inside
+      // the saved-list banner so the answer is on screen the moment a list opens.
+      '.cn-reach{display:inline-flex;gap:6px;margin-left:10px;vertical-align:middle}' +
+      '.cn-reach span{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums}' +
+      '.cn-reach .isvg{width:12px;height:12px}' +
+      '.cn-reach .cr-em{color:var(--ok);background:color-mix(in srgb, var(--ok) 10%, transparent);border:1px solid color-mix(in srgb, var(--ok) 38%, transparent)}' +
+      '.cn-reach .cr-ph{color:var(--brand-2);background:var(--brand-soft);border:1px solid color-mix(in srgb, var(--brand) 38%, transparent)}' +
+      '.cn-reach .cr-zero{color:var(--muted,var(--text-dim));background:var(--bg-soft,var(--surface-2));border:1px solid var(--border-strong,var(--border))}' +
       '</style>' +
       '<div class="cd-wrap">' +
         '<aside class="cd-facets"><input type="search" class="cd-search" id="cnSearch" placeholder="Search name, title, company, email…" autocomplete="off"><div id="cnFacets"></div></aside>' +
@@ -6677,9 +6686,16 @@
               '<button class="btn btn-ghost btn-sm" id="cnDelSel">Delete</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnClearSel">Clear</button></span></div>'
         : "";
+      // Reach readout for whatever is in view (saved list, filters, or everyone):
+      // people with a validated email = messageable by email; with a phone = by text/call.
+      var reachEm = list.filter(function (r) { return r.email; }).length;
+      var reachPh = list.filter(function (r) { return r.phone; }).length;
+      var reachPills = '<span class="cn-reach">' +
+        '<span class="' + (reachEm ? "cr-em" : "cr-zero") + '" title="People in view with an email: how many you can message by email right now."><svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>' + reachEm + ' by email</span>' +
+        '<span class="' + (reachPh ? "cr-ph" : "cr-zero") + '" title="People in view with a phone number: how many you can text or call right now."><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' + reachPh + ' by phone</span></span>';
       var listBanner = listName
-        ? '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:8px 12px;border:1px solid var(--border,#2a2a36);border-radius:10px;font-size:13px;background:var(--brand-soft)">' +
-          'Viewing saved list: <b>' + esc(listName) + "</b> · " + list.length + " shown" +
+        ? '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;padding:8px 12px;border:1px solid var(--border,#2a2a36);border-radius:10px;font-size:13px;background:var(--brand-soft)">' +
+          'Viewing saved list: <b>' + esc(listName) + "</b> · " + list.length + " shown" + reachPills +
           '<button class="btn btn-primary btn-sm" id="cnPushList" style="margin-left:auto" title="Send this whole list into an OS Text campaign under the same name.">Push list to OS Text</button>' +
           '<button class="btn btn-ghost btn-sm" id="cnEmailList" title="Email everyone on this list.">Email list</button>' +
           '<button class="btn btn-ghost btn-sm" id="cnShowAll">Show all</button></div>'
@@ -6695,7 +6711,7 @@
           (list.length > shownRows.length ? '<div class="cd-more" id="cnMore" style="text-align:center;padding:12px 0">Show 150 more (' + (list.length - shownRows.length) + " remaining)</div>" : "")
         : '<div class="empty">' + (listName ? "This saved list has no matching candidates." : "No candidates match these filters.") + "</div>";
       body.innerHTML = '<div class="pipe">' + stages + "</div>" +
-        '<div class="card" style="padding:0;overflow:hidden"><div class="pr-card-h"><h3>Candidates <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl + "</span></h3>" +
+        '<div class="card" style="padding:0;overflow:hidden"><div class="pr-card-h"><h3>Candidates <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl + "</span>" + (listName ? "" : reachPills) + "</h3>" +
         listBanner + bulk + "</div>" + table + "</div>";
 
       var more = $("#cnMore", el); if (more) more.addEventListener("click", function () { state.limit += 150; paint(); });
@@ -9921,6 +9937,12 @@
       '.jd-run{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}.jd-run:last-child{border-bottom:0}' +
       '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}' +
       '.jd-run-main{display:flex;align-items:center;gap:10px;min-width:0}' +
+      '.jd-reach{display:inline-flex;gap:6px;margin:0 4px 0 2px;vertical-align:middle}' +
+      '.jd-reach span{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums}' +
+      '.jd-reach .isvg{width:12px;height:12px}' +
+      '.jd-reach .jr-em{color:var(--ok);background:color-mix(in srgb, var(--ok) 10%, transparent);border:1px solid color-mix(in srgb, var(--ok) 38%, transparent)}' +
+      '.jd-reach .jr-ph{color:var(--brand-2);background:var(--brand-soft);border:1px solid color-mix(in srgb, var(--brand) 38%, transparent)}' +
+      '.jd-reach .jr-zero{color:var(--text-dim);background:var(--bg-soft);border:1px solid var(--border-strong)}' +
       '.jd-pick{flex:0 0 auto;width:15px;height:15px;margin:0;accent-color:var(--accent,#2e5bd7);cursor:pointer}' +
       '@media (max-width:760px){.jd-run{flex-direction:column;align-items:stretch}.jd-run-actions{justify-content:flex-start}}' +
       '.jd-depth{border:1px solid var(--border-strong);border-radius:12px;background:var(--bg-soft);padding:14px 16px;margin-top:14px}' +
@@ -10096,7 +10118,7 @@
     }
 
     function loadRuns() {
-      api("/sourcing").then(function (d) {
+      return api("/sourcing").then(function (d) {
         var host = $("#jdRuns"); if (!host) return;
         var runs = (d && d.runs) || [];
         state.runs = runs;
@@ -10111,9 +10133,14 @@
           var outN = (r.candidates || []).filter(function (c) { return c.outOfArea; }).length;
           var urls = (r.candidates || []).filter(function (c) { return c.linkedinUrl; }).length;
           var vetted = (r.candidates || []).filter(function (c) { return typeof c.verifiedScore === "number"; }).length;
+          var ems = (r.candidates || []).filter(function (c) { return c.email; }).length;
+          var phs = (r.candidates || []).filter(function (c) { return c.phone; }).length;
+          var reach = '<span class="jd-reach">' +
+            '<span class="' + (ems ? "jr-em" : "jr-zero") + '" title="Candidates on this list with a validated email: how many you can message by email right now."><svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>' + ems + ' email' + (ems === 1 ? "" : "s") + '</span>' +
+            '<span class="' + (phs ? "jr-ph" : "jr-zero") + '" title="Candidates on this list with a phone number: how many you can text or call right now."><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' + phs + ' phone' + (phs === 1 ? "" : "s") + '</span></span>';
           return '<div class="jd-run"><div class="jd-run-main">' +
             '<input type="checkbox" class="jd-pick" data-pick="' + esc(r.id) + '" title="Tick lists to combine them into one" />' +
-            '<div><b>' + esc(r.name) + '</b> <span class="muted">· ' +
+            '<div><b>' + esc(r.name) + '</b> ' + reach + '<span class="muted">· ' +
             (r.location ? (esc(r.location) + ' · ') : '') +
             (outN ? ((n - outN) + ' in area + ' + outN + ' out of area') : (n + ' candidates')) + ' · ' + urls + ' with LinkedIn URL' +
             (vetted ? (' · ' + vetted + ' deep-vetted') : '') +
@@ -10145,13 +10172,22 @@
       t.disabled = true; t.textContent = "Enriching…";
       function laxisReset() { t.disabled = false; t.textContent = resetLabel; }
       // No play-by-play and no completion popup: the progress bar carries the run,
-      // its finish label carries the totals, and the refreshed list IS the result.
+      // its finish label reads out what the list can DO now (valid emails + phones =
+      // who is messageable), and the refreshed row pills carry the same numbers durably.
       function finishLaxis() {
         laxisReset();
-        finishProgress("Done · " + lxT.emails + " email" + (lxT.emails === 1 ? "" : "s") +
+        var added = lxT.emails + " email" + (lxT.emails === 1 ? "" : "s") +
           " + " + lxT.phones + " phone" + (lxT.phones === 1 ? "" : "s") +
-          (lxT.gap ? (" + " + lxT.gap + " gap-filled") : "") + " added");
-        loadRuns();
+          (lxT.gap ? (" + " + lxT.gap + " gap-filled") : "") + " added";
+        Promise.resolve(loadRuns()).then(function () {
+          var run = (state.runs || []).find(function (r) { return r.id === lid; });
+          var cs = (run && run.candidates) || [];
+          if (!cs.length) { finishProgress("Done · " + added); return; }
+          var em = cs.filter(function (c) { return c.email; }).length;
+          var ph = cs.filter(function (c) { return c.phone; }).length;
+          finishProgress("Done · you can now message " + em + " of " + cs.length +
+            " by email and " + ph + " by phone (" + added + ")");
+        });
       }
       function pollLaxis() {
         send("/sourcing", "POST", { action: "laxisStatus", id: lid }).then(function (s) {
