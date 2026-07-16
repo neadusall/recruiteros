@@ -105,6 +105,15 @@ export async function register(): Promise<void> {
     } catch {
       /* never let an instrumentation hiccup block server startup */
     }
+    // AI Vetting resume inbox: file emailed resumes onto candidate profiles
+    // every 5 minutes. Independent of AUTOMATION_ENABLED (it reads a mailbox,
+    // it doesn't send campaigns); inert until RESUME_INBOX creds are set.
+    try {
+      const { ensureResumeInboxTicker } = await import("./lib/vetting/inbox");
+      ensureResumeInboxTicker();
+    } catch {
+      /* never let an instrumentation hiccup block server startup */
+    }
     // The Automation clock: the in-process replacement for the external n8n
     // conductor. Gated by AUTOMATION_ENABLED (no-op when off), it ticks the
     // cadence / LinkedIn / voice / sending / nurture engines on intervals so

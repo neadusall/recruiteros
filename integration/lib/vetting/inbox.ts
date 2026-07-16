@@ -359,6 +359,28 @@ export async function sweepAllResumeInboxes(): Promise<void> {
   }
 }
 
+/**
+ * Self-arming 5-minute ticker, INDEPENDENT of the AUTOMATION_ENABLED campaign
+ * clock: resume intake is passive inbox reading, not outbound automation, so
+ * it must not wait on the master switch that gates hands-off sending. Armed
+ * once from instrumentation.ts (same pattern as the in-market tickers); a
+ * workspace with no RESUME_INBOX creds makes each pass a no-op, and the
+ * per-workspace coalescing above keeps this safe alongside the scheduler tick
+ * and manual "Check now" sweeps. Interval override: RECRUITEROS_RESUME_INBOX_TICK_MS.
+ */
+let tickerStarted = false;
+export function ensureResumeInboxTicker(): void {
+  if (tickerStarted) return;
+  tickerStarted = true;
+  const n = Number(process.env.RECRUITEROS_RESUME_INBOX_TICK_MS);
+  const ms = Number.isFinite(n) && n > 0 ? n : 5 * 60_000;
+  const run = () => { void sweepAllResumeInboxes().catch(() => {}); };
+  setTimeout(run, 20_000);
+  const t = setInterval(run, ms);
+  if (typeof t === "object" && t && "unref" in t) (t as { unref: () => void }).unref();
+  console.log(`[vetting] resume-inbox ticker armed (every ${Math.round(ms / 1000)}s; no-op until RESUME_INBOX_USER/PASS are set).`);
+}
+
 /** Status for the UI card: config presence + sweep state, no secrets. */
 export async function resumeInboxStatus(workspaceId: string) {
   await ensureVettingReady();
