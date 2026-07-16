@@ -9990,13 +9990,15 @@
       '.jd-run{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}.jd-run:last-child{border-bottom:0}' +
       '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}' +
       '.jd-run-main{display:flex;align-items:center;gap:10px;min-width:0}' +
-      '.jd-reach{display:inline-flex;gap:6px;margin:0 4px 0 2px;vertical-align:middle}' +
+      '.jd-reach{display:inline-flex;flex-wrap:wrap;row-gap:4px;gap:6px;margin:0 4px 0 2px;vertical-align:middle;max-width:100%}' +
       '.jd-reach span{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums}' +
       '.jd-reach .isvg{width:12px;height:12px}' +
       '.jd-reach .jr-em{color:var(--ok);background:color-mix(in srgb, var(--ok) 10%, transparent);border:1px solid color-mix(in srgb, var(--ok) 38%, transparent)}' +
       '.jd-reach .jr-ph{color:var(--brand-2);background:var(--brand-soft);border:1px solid color-mix(in srgb, var(--brand) 38%, transparent)}' +
       '.jd-reach .jr-zero{color:var(--text-dim);background:var(--bg-soft);border:1px solid var(--border-strong)}' +
       '.jd-reach .jr-api{color:#8a5a00;background:color-mix(in srgb, #d97706 10%, transparent);border:1px solid color-mix(in srgb, #d97706 38%, transparent)}' +
+      '.jd-reach .jr-done{color:var(--ok);background:color-mix(in srgb, var(--ok) 10%, transparent);border:1px solid color-mix(in srgb, var(--ok) 38%, transparent)}' +
+      '.jd-reach .jr-part{color:#8a5a00;background:color-mix(in srgb, #d97706 10%, transparent);border:1px solid color-mix(in srgb, #d97706 38%, transparent)}' +
       '.jd-quota{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}' +
       '.jd-quota .jd-qchip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;color:#8a5a00;background:color-mix(in srgb, #d97706 8%, transparent);border:1px solid color-mix(in srgb, #d97706 34%, transparent);cursor:help}' +
       '.jd-quota .jd-qchip .isvg{width:12px;height:12px}' +
@@ -10034,7 +10036,9 @@
           '</div>' +
           '<div class="jd-helpsec"><h5>On a saved list</h5>' +
             '<p>Everything after the search is automatic. Enrichment fills business emails and phones cheapest-first (the free KoldInfo pass, then Laxis, then the in-house waterfall), the whole list is pushed into the <b>Candidates</b> tab (sidebar, under Build) under the same name, and an <b>OS Text</b> campaign is created from everyone with a phone number: contacts arrive formatted (first name, last name, company, title, location, email, LinkedIn URL) so every {token} fills in, with a starter message prefilled. Telnyx confirms every number on arrival; only real cell lines are kept for texting, and anyone already in an ATS conversation is protected from double-contact.</p>' +
-            '<p><b>Delete</b>: The only list button. Removes the saved list; the people themselves are not deleted.</p>' +
+            '<p><b>The enrichment chip on each list tells you if it finished.</b> Green "fully enriched" = every batch went through the whole chain; anyone still missing contact info is someone the sources genuinely had nothing for. Amber "enrichment unfinished" (with roughly how far it got) or "not enriched yet" = the run stopped early, so press Enrich until the chip turns green.</p>' +
+            '<p><b>Enrich</b>: The resume switch; you normally never need it. If a run stops early (server update, closed tab), pressing it continues from the first unfinished batch (finished batches are never bought twice) and re-sends the refreshed contacts to Candidates and OS Text. Safe to press repeatedly.</p>' +
+            '<p><b>Delete</b>: Removes the saved list; the people themselves are not deleted.</p>' +
           '</div>' +
         '</div>' +
       '</details>' +
@@ -10222,9 +10226,25 @@
           var vetted = (r.candidates || []).filter(function (c) { return typeof c.verifiedScore === "number"; }).length;
           var ems = (r.candidates || []).filter(function (c) { return c.email; }).length;
           var phs = (r.candidates || []).filter(function (c) { return c.phone; }).length;
+          // Truthful enrichment readout, so an interrupted run is VISIBLE: the durable
+          // chunk ledger (laxisProgress) records which batches actually finished, and a
+          // lingering job ref means a chain is (or was) mid-flight. Outcome words only.
+          var ep = r.laxisProgress;
+          var epDone = ep ? Math.min(n, ep.nextStart == null ? n : (ep.nextStart || 0)) : 0;
+          var enrichChip;
+          if (!n) enrichChip = "";
+          else if (r.koldJob || r.koldDbJob || r.laxisJob) enrichChip =
+            '<span class="jr-part" title="An enrichment run is in progress, or was interrupted mid-batch. If no progress bar is moving, press Enrich to pick it back up; finished batches are never bought twice."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>enriching…</span>';
+          else if (ep && ep.nextStart == null) enrichChip =
+            '<span class="jr-done" title="Every batch of this list has been through the full enrichment chain. Anyone still missing an email or phone is someone the sources had no contact info for."><svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>fully enriched</span>';
+          else if (ep) enrichChip =
+            '<span class="jr-part" title="Enrichment stopped partway: about ' + epDone + ' of ' + (ep.total || n) + ' rows are done. Press Enrich to finish; it resumes exactly where it stopped and finished batches are never bought twice."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>enrichment unfinished · ~' + epDone + '/' + (ep.total || n) + '</span>';
+          else enrichChip =
+            '<span class="jr-part" title="This list has not been through the full enrichment chain yet. Press Enrich to run it; when it finishes the refreshed contacts are re-sent to Candidates and OS Text."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>not enriched yet</span>';
           var reach = '<span class="jd-reach">' +
             '<span class="' + (ems ? "jr-em" : "jr-zero") + '" title="Candidates on this list with a validated email: how many you can message by email right now."><svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>' + ems + ' email' + (ems === 1 ? "" : "s") + '</span>' +
             '<span class="' + (phs ? "jr-ph" : "jr-zero") + '" title="Candidates on this list with a phone number: how many you can text or call right now."><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' + phs + ' phone' + (phs === 1 ? "" : "s") + '</span>' +
+            enrichChip +
             // Credit stamp: what the search itself cost in paid people-search requests
             // (recorded from this run on; older lists saved before then have no stamp).
             (r.apiUsage ? (function (au) {
@@ -10243,8 +10263,11 @@
             (vetted ? (' · ' + vetted + ' deep-vetted') : '') +
             (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates · <a href="#prospects" data-openlist="' + esc(r.promotedListId || "") + '">Open in Candidates →</a>') : '') + '</span></div></div>' +
             // HANDS-FREE (user mandate): enrich + Send to Candidates + Send to OS Text all
-            // run automatically when a search finishes, so Delete is the ONLY list action.
+            // run automatically when a search finishes. Enrich stays as a manual RESUME
+            // for a chain that stopped early (deploy, worker crash); it re-sends the
+            // refreshed contacts onward when it finishes. Delete is the only other action.
             '<div class="jd-run-actions">' +
+              '<button class="btn btn-ghost btn-sm" data-autoenrich="' + esc(r.id) + '" title="Enrichment runs automatically after every search. Press this only if a run stopped early: it resumes exactly where it left off (already-enriched batches are never re-bought) and re-sends the refreshed contacts to Candidates and OS Text when done.">Enrich</button>' +
               '<button class="btn btn-ghost btn-sm" data-del="' + esc(r.id) + '">Delete</button>' +
             '</div></div>';
         }).join("");
@@ -10285,7 +10308,7 @@
         instead of a naked number. Real error strings pass through unchanged. */
     function gatewayMsg(err) {
       return (err === 502 || err === 503 || err === 504)
-        ? err + " (the server was updating or briefly unreachable).\n\nNothing is lost: everything enriched so far is saved on the list."
+        ? err + " (the server was updating or briefly unreachable).\n\nNothing is lost: everything enriched so far is saved. Press Enrich on the list to resume exactly where it stopped."
         : err;
     }
 
@@ -10340,10 +10363,10 @@
             laxisReset(); finishProgress("Enrichment stopped");
             alert("Enrichment failed:\n" + (why || "unknown error") +
               "\n\nIf this mentions a selector (CALIBRATE), the Laxis UI changed and the worker needs re-calibrating." +
-              "\n\nAlready-enriched batches are saved; the list is sent on to Candidates and OS Text with what it has."); loadRuns(); laxisBail(); return;
+              "\n\nAlready-enriched batches are saved; the list is sent on to Candidates and OS Text with what it has. Press Enrich on the list to finish the rest."); loadRuns(); laxisBail(); return;
           }
           var lx = s.data.laxis || {}; var gf = s.data.gapFill || {};
-          lxT.emails += lx.emails || 0; lxT.phones += lx.phones || 0; lxT.gap += gf.enriched || 0;
+          lxT.emails += lx.emails || 0; lxT.phones += (lx.phones || 0) + (gf.phones || 0); lxT.gap += gf.enriched || 0;
           // More chunks left? Auto-continue, the backend skips done offsets, never re-grabs.
           if (s.data.nextStart != null) { startChunk(s.data.nextStart); return; }
           finishLaxis();
@@ -10379,10 +10402,12 @@
        the same Laxis chunk chain as the manual button, which ends with the in-house
        gap-fill waterfall. If the KoldInfo rung is unavailable or has nothing to do, the
        chain skips straight to Laxis, so the free-first order is enforced either way. */
-    function runAutoEnrich(aid, onDone) {
-      // No button drives this anymore (the whole chain runs automatically after a
-      // search); the chain still writes its state into this stand-in object.
-      var aBtn = { disabled: false, textContent: "" };
+    function runAutoEnrich(aid, onDone, btn) {
+      // Runs automatically after a search (no button), or from the row's Enrich
+      // button as a manual resume; without a real button the chain writes its
+      // state into a stand-in object.
+      var aBtn = btn || { disabled: false, textContent: "" };
+      aBtn.disabled = true; aBtn.textContent = "Enriching…";
       // One progress bar for the whole chain; the stages run silently and the
       // finished list is the announcement. ETA is rough: worker time scales with rows.
       var arun = (state.runs || []).find(function (r) { return r.id === aid; });
@@ -10438,6 +10463,7 @@
         if (!r.ok) {
           var err = (r.data && r.data.error) || r.status;
           if (err === "koldinfo_worker_not_configured") { stageKoldDb(); return; }
+          aBtn.disabled = false; aBtn.textContent = "Enrich";
           finishProgress("Enrich could not start");
           alert("Enrich failed to start: " + gatewayMsg(err) + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : ""));
           if (onDone) onDone(false, ""); return;
@@ -10445,6 +10471,7 @@
         if (r.data.nothingMissing) { stageKoldDb(); return; }
         setTimeout(pollKold, 8000);
       }).catch(function () {
+        aBtn.disabled = false; aBtn.textContent = "Enrich";
         finishProgress("Enrich stopped");
         alert("Could not reach the server.");
         if (onDone) onDone(false, "");
@@ -10456,10 +10483,10 @@
        Send to OS Text, no buttons, no modals, no questions. The list name is the
        Candidates list name, the tag, and the OS Text campaign name. If enrichment
        hits a hard stop the list is still sent on with whatever contact info it has. */
-    function runAutoPipeline(id, name) {
+    function runAutoPipeline(id, name, btn) {
       runAutoEnrich(id, function (enrichOk, added) {
         autoSendList(id, name, enrichOk ? added : "");
-      });
+      }, btn);
     }
     function autoSendList(id, name, added) {
       showProgress('Sending "' + name + '" on', 30, "Sending to Candidates…");
@@ -10723,9 +10750,14 @@
       }
       if (t.tagName !== "BUTTON") return;
       var id;
-      // Enrich + Send to Candidates + Send to OS Text run automatically when a search
-      // finishes (runAutoPipeline), so Delete is the only per-list button left.
-      if ((id = t.getAttribute("data-del"))) {
+      // Send to Candidates + Send to OS Text run automatically when a search finishes
+      // (runAutoPipeline). Enrich here is the manual RESUME for a chain that stopped
+      // early: it continues from the first unfinished batch and re-sends the refreshed
+      // contacts onward, so pressing it repeatedly is always safe.
+      if ((id = t.getAttribute("data-autoenrich"))) {
+        var erun = (state.runs || []).find(function (r) { return r.id === id; });
+        runAutoPipeline(id, (erun && erun.name) || "Candidate list", t);
+      } else if ((id = t.getAttribute("data-del"))) {
         if (!confirm("Delete this saved list?")) return;
         send("/sourcing", "POST", { action: "delete", id: id }).then(loadRuns);
       }
