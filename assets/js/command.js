@@ -8214,7 +8214,6 @@
     el.innerHTML = head("Candidates", "Your people database. Filter by stage, owner, title, tags and more on the left; email, enrich, submit, or export the people you select.") +
       '<style>' +
       '.dt-sub{color:var(--muted,var(--text-dim));font-size:12px}' +
-      '.dt-prov{font-size:12px;color:var(--muted,var(--text-dim));margin-bottom:10px}' +
       '.cd-wrap{display:grid;grid-template-columns:232px 1fr;gap:18px;align-items:start}' +
       '@media(max-width:900px){.cd-wrap{grid-template-columns:1fr}}' +
       '.cd-facets{position:sticky;top:8px;background:var(--panel,var(--surface));border:1px solid var(--line,var(--border));border-radius:12px;padding:8px 10px;max-height:calc(100vh - 120px);overflow:auto}' +
@@ -8285,7 +8284,6 @@
       '.cd-showmore{text-align:center;border-top:1px solid var(--line,var(--surface-2));margin-top:14px;padding-top:10px;font-size:12px;color:var(--accent,var(--brand));cursor:pointer}' +
       '.cd-bio{font-size:12.5px;color:var(--muted,var(--text-dim));line-height:1.55;white-space:pre-wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line,var(--surface-2))}' +
       '</style>' +
-      '<div id="dtProv" class="dt-prov"></div>' +
       '<div class="cd-wrap">' +
         '<aside class="cd-facets"><input type="search" class="cd-search" id="cdSearch" placeholder="Search name, title, tag…" autocomplete="off"><div id="cdFacets"></div></aside>' +
         '<div class="cd-main">' +
@@ -8297,23 +8295,15 @@
       '</div>';
 
     // all = everything loaded; sel = picked ids; stage = active tab; facets = {field:[vals]}
-    var state = { all: [], q: "", stage: "", facets: {}, fq: {}, sel: {}, open: {}, showAll: {}, bios: {}, providers: [] };
+    var state = { all: [], q: "", stage: "", facets: {}, fq: {}, sel: {}, open: {}, showAll: {}, bios: {} };
     var bodyEl = $("#dtBody", el), searchTimer = null;
 
     function load() {
       api("/data?limit=1000").then(function (d) {
         d = d || {};
         state.all = d.records || [];
-        state.providers = d.providers || [];
-        paintProv();
         renderAll();
       }).catch(function () { bodyEl.innerHTML = '<div class="empty">Could not load the database.</div>'; });
-    }
-    function paintProv() {
-      var prov = (state.providers || []).map(function (p) {
-        return (p.configured ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok)"></span> ' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-dim)"></span> ') + esc(p.label) + (p.configured ? " · live" : " · awaiting key");
-      }).join(" &nbsp;·&nbsp; ");
-      $("#dtProv", el).innerHTML = prov ? ("Providers: " + prov) : "";
     }
 
     /* ---- filtering ---- */
