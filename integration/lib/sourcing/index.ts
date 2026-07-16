@@ -52,6 +52,7 @@ export {
   LAXIS_CSV_COLUMNS, MAX_LAXIS_UPLOAD, type LaxisJobStatus, type LaxisMergeResult,
 } from "./laxis";
 export { promoteSourcingRun, type PromoteResult, type PromoteOptions } from "./promote";
+export { mergeSourcingRuns, type MergedRuns } from "./mergeRuns";
 export {
   buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, sourcingKoldId,
   buildKoldInfoDbCsv, splitLocation,

@@ -18,7 +18,7 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response;
   const m = new URL(req.url).searchParams.get("motion");
   const motion = m === "bd" ? "bd" : m === "recruiting" ? "recruiting" : undefined;
-  return ok({ lists: listProspectLists(g.ctx.workspace.id, motion as Motion | undefined) });
+  return ok({ lists: await listProspectLists(g.ctx.workspace.id, motion as Motion | undefined) });
 }
 
 export async function PUT(req: Request) {
@@ -26,7 +26,7 @@ export async function PUT(req: Request) {
   if ("response" in g) return g.response;
   const b = await body<ProspectListInput>(req);
   if (!b?.name || !Array.isArray(b.prospectIds)) return fail("missing_fields", 422);
-  return ok({ list: upsertProspectList(g.ctx.workspace.id, b) });
+  return ok({ list: await upsertProspectList(g.ctx.workspace.id, b) });
 }
 
 export async function DELETE(req: Request) {
@@ -34,5 +34,5 @@ export async function DELETE(req: Request) {
   if ("response" in g) return g.response;
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return fail("missing_id", 422);
-  return ok({ ok: deleteProspectList(g.ctx.workspace.id, id) });
+  return ok({ ok: await deleteProspectList(g.ctx.workspace.id, id) });
 }

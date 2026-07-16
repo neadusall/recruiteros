@@ -35,6 +35,7 @@ import {
   buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, buildKoldInfoDbCsv,
   startBulkList, stepBulkList, bulkListStatus,
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
+  mergeSourcingRuns,
 } from "../../../lib/sourcing";
 import type { CandidateRow, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
@@ -653,36 +654,10 @@ export async function POST(req: Request) {
         if (!r) return fail("run_not_found", 404, { detail: id });
         runs.push(r);
       }
-      // The largest source anchors the profile/JD the combined list carries forward.
-      const anchor = runs.reduce((a, r) => (r.candidates.length > a.candidates.length ? r : a), runs[0]);
-      const strength = (row: CandidateRow) => (row.verifiedScore ?? -1) * 1000 + row.fitScore;
-      const byKey = new Map<string, CandidateRow>();
-      let overlap = 0;
-      for (const r of runs) {
-        for (const c of r.candidates) {
-          const k = candKey(c);
-          const prev = byKey.get(k);
-          if (!prev) { byKey.set(k, { ...c }); continue; }
-          overlap++;
-          const keep = strength(c) > strength(prev) ? { ...c } : prev;
-          const other = keep === prev ? c : prev;
-          // Fill-blanks field merge: contact + identity data found on either list survives.
-          for (const f of ["email", "phone", "linkedinUrl", "title", "headline", "company", "location", "imageUrl", "provider", "sourceGroup"] as const) {
-            if (!keep[f] && other[f]) keep[f] = other[f];
-          }
-          if (keep.llmScore == null && other.llmScore != null) keep.llmScore = other.llmScore;
-          // A deep-vet verdict earned on either list carries over whole (not field-mixed).
-          if (keep.verifiedScore == null && other.verifiedScore != null) {
-            keep.verifiedScore = other.verifiedScore; keep.verdict = other.verdict;
-            keep.yearsRelevant = other.yearsRelevant; keep.vetStrengths = other.vetStrengths;
-            keep.vetGaps = other.vetGaps; keep.vetFlags = other.vetFlags;
-            keep.vetRationale = other.vetRationale; keep.profileFetched = other.profileFetched;
-          }
-          byKey.set(k, keep);
-        }
-      }
-      const candidates = Array.from(byKey.values());
-      rankByVerdict(candidates);
+      // Pure, regression-tested merge (lib/sourcing/mergeRuns.ts): dedupe by the
+      // stable person key, stronger row wins, blanks filled from the loser, deep-vet
+      // verdicts carried over whole, verified-first re-rank.
+      const { candidates, overlap, anchor } = mergeSourcingRuns(runs);
       const name = ((b.name as string) || "").trim() || `${anchor.name} (combined)`;
       const mergedRun = await saveSourcingRun(ws, {
         name, jd: anchor.jd, jdUrl: anchor.jdUrl, location: anchor.location,

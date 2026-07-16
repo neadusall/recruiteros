@@ -108,7 +108,7 @@ export async function promoteSourcingRun(
   }
 
   // 3. A saved list under the chosen name capturing the exact set.
-  const list = upsertProspectList(workspaceId, {
+  const list = await upsertProspectList(workspaceId, {
     name: listName,
     prospectIds,
     motion: run.motion,
