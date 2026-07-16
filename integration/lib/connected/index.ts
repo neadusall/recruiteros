@@ -431,12 +431,36 @@ export async function testConnection(
     }, { isolated });
   }
 
-  // AI engine: just confirm the key is present (saved here, or house env when not isolated).
+  // AI engine: REALLY verify the key against Anthropic. A key can be present but
+  // revoked; the old presence-only check left the card green while every AI tool
+  // (JD Sourcing first) got 401s from Anthropic. GET /v1/models is authenticated
+  // and free (no tokens), so it's a true validity probe.
   if (id === "ai") {
-    const ok = Boolean(keys.ANTHROPIC_API_KEY) || (!isolated && Boolean(process.env.ANTHROPIC_API_KEY));
+    const key = keys.ANTHROPIC_API_KEY || (!isolated ? process.env.ANTHROPIC_API_KEY : "") || "";
     await ensureRow();
-    await markTested(workspaceId, id, ok, ok ? undefined : "add_anthropic_key");
-    return { status: ok ? "green" : "red", error: ok ? undefined : "Add your AI API key" };
+    if (!key) {
+      await markTested(workspaceId, id, false, "add_anthropic_key");
+      return { status: "red", error: "Add your AI API key" };
+    }
+    let ok = false;
+    let error: string | undefined;
+    try {
+      const r = await fetch("https://api.anthropic.com/v1/models", {
+        headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
+      });
+      // Only 401/403 mean the key itself is bad; any other answer proves it authenticated.
+      ok = r.status !== 401 && r.status !== 403;
+      if (!ok) {
+        const detail = await r.text().catch(() => "");
+        const msg = /"message"\s*:\s*"([^"]+)"/.exec(detail)?.[1] ?? `HTTP ${r.status}`;
+        error = `Anthropic rejected this key (${msg}). Paste a current API key from console.anthropic.com (API Keys, starts with sk-ant-api...).`;
+      }
+    } catch (e) {
+      ok = false;
+      error = `could not reach Anthropic to verify: ${(e as Error).message}`;
+    }
+    await markTested(workspaceId, id, ok, error);
+    return { status: ok ? "green" : "yellow", error };
   }
 
   // JD Sourcing has no provider client — verify with a live one-shot search so the
