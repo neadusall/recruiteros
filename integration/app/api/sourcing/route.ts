@@ -37,7 +37,7 @@ import {
   buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, buildKoldInfoDbCsv,
   startBulkList, stepBulkList, bulkListStatus,
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
-  mergeSourcingRuns,
+  mergeSourcingRuns, getRapidQuota,
 } from "../../../lib/sourcing";
 import type { CandidateRow, SearchBreadth, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
@@ -128,7 +128,9 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response;
   // `durable` tells the UI whether saved runs survive a restart. If it's ever false the tab
   // should warn loudly rather than let the user save into volatile memory and lose it silently.
-  return ok({ runs: await listSourcingRuns(g.ctx.workspace.id), durable: dbEnabled() });
+  // apiQuota: the paid people-search/profile subscriptions' latest credit readings
+  // (captured from RapidAPI's response headers; fills in after the first search).
+  return ok({ runs: await listSourcingRuns(g.ctx.workspace.id), durable: dbEnabled(), apiQuota: await getRapidQuota() });
 }
 
 export async function POST(req: Request) {
@@ -269,6 +271,12 @@ export async function POST(req: Request) {
         icp: b.icp, queries: b.queries ?? [], candidates: b.candidates ?? [],
         warnings: b.warnings ?? [],
         motion: b.motion === "bd" ? "bd" : "recruiting",
+        // The run's search-API spend, stamped onto the list (sanitized: counts only).
+        apiUsage: b.apiUsage && typeof b.apiUsage === "object" ? {
+          rapidapi: Number(b.apiUsage.rapidapi) || 0,
+          serper: Number(b.apiUsage.serper) || 0,
+          google: Number(b.apiUsage.google) || 0,
+        } : undefined,
       });
       return ok({ run });
     }

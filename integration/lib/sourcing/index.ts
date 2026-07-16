@@ -62,6 +62,7 @@ export {
   buildDbDiscoverySpecCsv, parseDbDiscoveryCsv, geoChips,
   submitDbDiscovery, collectDbDiscovery,
 } from "./koldinfoDiscovery";
+export { getRapidQuota, noteRapidQuota, type RapidQuotaSnapshot } from "./rapidQuota";
 
 import { parseJobDescription } from "./parseJobDescription";
 import { generateQueries } from "./generateQueries";

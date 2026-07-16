@@ -17,6 +17,7 @@
  */
 
 import { cred } from "../providers/http";
+import { noteRapidQuota } from "./rapidQuota";
 
 const RAPIDAPI_KEY = () => cred("RAPIDAPI_KEY");
 const PROFILE_HOST = () => cred("RAPIDAPI_PROFILE_HOST");
@@ -216,6 +217,8 @@ export async function fetchFullProfile(linkedinUrl: string): Promise<FullProfile
     const tail = hasToken || path.includes("url=") ? "" : (path.includes("?") ? "&" : "?") + "url=" + encodeURIComponent(linkedinUrl);
     res = await fetch(`https://${host}${path}${tail}`, { headers });
   }
+  // Credit meter: remember the profile listing's quota headers (errors carry them too).
+  noteRapidQuota(host, res.headers);
   if (!res.ok) throw new Error(`profile ${host} ${res.status}`);
   const raw = await res.json().catch(() => ({}));
   if (raw && raw.success === false && raw.error) throw new Error(`profile ${host}: ${String(raw.error)}`);

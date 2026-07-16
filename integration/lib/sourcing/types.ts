@@ -142,6 +142,9 @@ export interface SourcingRun {
   icp: CandidateICP;
   queries: SourcingQuery[];
   candidates: CandidateRow[];
+  /** Quota'd search-API requests the discovery run spent building this list, by
+   *  engine (rapidapi = the paid people-search listing's monthly credits). */
+  apiUsage?: { rapidapi?: number; serper?: number; google?: number };
   /** Set once promoted into Candidates, with the created campaign + list ids. */
   promotedCampaignId?: string;
   promotedListId?: string;

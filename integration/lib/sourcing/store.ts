@@ -63,6 +63,7 @@ export interface SaveRunInput {
   queries: SourcingQuery[];
   candidates: CandidateRow[];
   warnings?: string[];
+  apiUsage?: SourcingRun["apiUsage"];
 }
 
 /** Create or update a named run. Re-saving by id replaces its candidate set. */
@@ -78,6 +79,7 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     existing.queries = input.queries ?? existing.queries;
     existing.candidates = input.candidates ?? existing.candidates;
     if (input.warnings) existing.warnings = input.warnings;
+    if (input.apiUsage) existing.apiUsage = input.apiUsage;
     existing.updatedAt = nowIso();
     await save();
     return existing;
@@ -94,6 +96,7 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     queries: input.queries || [],
     candidates: input.candidates || [],
     warnings: input.warnings || [],
+    apiUsage: input.apiUsage,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };

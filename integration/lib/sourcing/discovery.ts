@@ -49,6 +49,7 @@ import { scraperConfigured, scrapeSearchViaSidecar } from "../linkedin/scraperPr
 import { cred } from "../providers/http";
 import { koldinfoWorkerReady } from "./laxis";
 import { submitDbDiscovery, collectDbDiscovery } from "./koldinfoDiscovery";
+import { noteRapidQuota } from "./rapidQuota";
 
 /* ------------------------------------------------------------------ */
 /* RapidAPI people-search provider (configurable)                      */
@@ -262,6 +263,9 @@ export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRo
       }
     }
   }
+  // Credit meter: every response (errors included, a 429 still reports the pool)
+  // carries the subscription's quota headers; remember the latest reading.
+  noteRapidQuota(host, res.headers);
   if (!res.ok) throw new Error(`rapidapi ${host} ${res.status}`);
   const data = await res.json().catch(() => ({}));
   // Surface an explicit API-level failure (e.g. captcha) instead of silently returning [].
@@ -534,6 +538,9 @@ export interface DiscoveryResult {
   warnings: string[];
   /** Rows seen before threshold/cap filtering (for the UI's "scanned N" line). */
   scanned: number;
+  /** Quota'd search-API requests this run spent, by engine: the saved list's credit
+   *  stamp (rapidapi = the paid people-search listing's monthly credits). */
+  usage: { rapidapi: number; serper: number; google: number };
 }
 
 /**
@@ -623,7 +630,7 @@ export async function runDiscovery(
   }
   if (!useGoogle && !useSearx && !useSerper && !useRapid && !useScraper && !useKold) {
     warnings.push("no_discovery_engine: nothing configured to find profiles, so the list will be empty");
-    return { candidates: [], warnings, scanned: 0 };
+    return { candidates: [], warnings, scanned: 0, usage: { rapidapi: 0, serper: 0, google: 0 } };
   }
 
   // Submit the database sweep FIRST so the worker browses KoldInfo while the web
@@ -720,6 +727,9 @@ export async function runDiscovery(
   // around a nickel a run); an explicit SERPER_MAX_QUERIES in Setup always wins.
   const serperBudget = SERPER_MAX_QUERIES(breadth === "wide" ? 300 : 100);
   let serperUsed = 0;
+  // People-search listing requests attempted this run (its monthly credits are the
+  // scarce paid resource, so the count is stamped onto the saved list).
+  let rapidUsed = 0;
 
   outer: for (const query of queries) {
     let collected = 0;
@@ -799,6 +809,7 @@ export async function runDiscovery(
         : (query.keyword || query.label || query.xray);
       for (let page = 1; page <= maxPages && collected < perQuery; page++) {
         let rows: CandidateRow[] = [];
+        rapidUsed++; // counted on attempt: an errored call may still bill
         try {
           rows = await rapidApiPeopleSearch({
             name, page, limit: PAGE_LIMIT(),
@@ -936,5 +947,5 @@ export async function runDiscovery(
     }
   }
 
-  return { candidates, warnings, scanned };
+  return { candidates, warnings, scanned, usage: { rapidapi: rapidUsed, serper: serperUsed, google: googleUsed } };
 }
