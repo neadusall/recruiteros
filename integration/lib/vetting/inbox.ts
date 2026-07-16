@@ -140,9 +140,11 @@ function matchCandidate(workspaceId: string, fromEmail: string): CandidateProfil
  * The resume is in: tell the candidate the screening call is the next step.
  * SMS from the desk's own inbound number (Telnyx, same stack) so replying or
  * calling back lands on the agent. Best-effort: an invite failure never undoes
- * the filed resume.
+ * the filed resume. Sent ONCE per candidate — an updated resume refreshes the
+ * profile without re-texting them.
  */
 async function sendScreenInvite(desk: VettingDesk, candidate: CandidateProfile): Promise<boolean> {
+  if (candidate.screenInviteSentAt) return false;
   if (!desk.phoneNumber || desk.status !== "live") return false;
   if (!candidate.phone) return false;
   const first = candidate.firstName || "";
@@ -174,6 +176,15 @@ export interface SweepResult {
 }
 
 /**
+ * Messages we already looked at, couldn't act on, and left in the mailbox
+ * (unknown sender, no attachment, unreadable file). Keyed by mailbox identity
+ * (uidValidity) + uid so each is LOGGED once per process instead of spamming
+ * the activity log every 5 minutes — they're still re-tried every sweep, so a
+ * candidate who opts in AFTER emailing gets picked up on the next pass.
+ */
+const alreadyLogged = new Set<string>();
+
+/**
  * One sweep of one workspace's resume inbox. Must run inside that workspace's
  * credential context (sweepResumeInbox handles that). Never throws.
  */
@@ -189,15 +200,29 @@ async function sweepMailbox(workspaceId: string, cfg: InboxConfig): Promise<Swee
 
   try {
     await client.connect();
+
+    // Find the real Trash by IMAP special-use (same idiom as the warm-up seed
+    // client). This matters on Gmail: a plain \Deleted+expunge "delete" leaves
+    // the message archived in All Mail — moving to Trash actually removes it.
+    let trashPath: string | undefined;
+    try {
+      for (const box of await client.list()) {
+        if (((box as any).specialUse || "") === "\\Trash") { trashPath = box.path; break; }
+      }
+    } catch { /* no special-use support; fall back to plain delete */ }
+
     const lock = await client.getMailboxLock("INBOX");
     try {
-      // Sweep everything still sitting in INBOX (processed mail gets deleted,
-      // so the box IS the queue). Cap per sweep to stay polite.
-      const uids = await client.search({ all: true }, { uid: true });
+      const uidValidity = String((client.mailbox as any)?.uidValidity ?? "");
+      const seenKey = (uid: number) => `${workspaceId}:${uidValidity}:${uid}`;
+      // A processed message is removed, so the INBOX is the queue. Everything
+      // not yet deleted is fair game; cap per sweep to stay polite.
+      const uids = await client.search({ deleted: false }, { uid: true });
       const batch = (uids || []).slice(0, 25);
       for (const uid of batch) {
         checked += 1;
         let entry: InboxLogEntry | null = null;
+        let removed = false;
         try {
           const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
           const source = (msg as any)?.source as Buffer | undefined;
@@ -247,7 +272,9 @@ async function sweepMailbox(workspaceId: string, cfg: InboxConfig): Promise<Swee
                   } catch { /* no LLM key: resume still filed */ }
                 }
 
-                // The gate opens: invite them to the screening call.
+                // The gate opens: invite them to the screening call (once per
+                // candidate — a resume UPDATE refreshes the file quietly).
+                const alreadyInvited = Boolean(candidate.screenInviteSentAt);
                 const invited = desk ? await sendScreenInvite(desk, candidate) : false;
 
                 entry = {
@@ -255,18 +282,34 @@ async function sweepMailbox(workspaceId: string, cfg: InboxConfig): Promise<Swee
                   outcome: "saved", candidateId: candidate.id, deskId: candidate.deskId,
                   note: `Filed to ${candidate.firstName} ${candidate.lastName}`.trim() +
                     (desk ? ` on ${desk.name}` : "") +
-                    (invited ? "; screening invite texted." : "; ready to screen."),
+                    (invited ? "; screening invite texted." : alreadyInvited ? "; resume updated (already invited)." : "; ready to screen."),
                 };
 
-                // Saved -> the portal owns it now; remove it from the mailbox.
-                await client.messageDelete(String(uid), { uid: true });
+                // Saved -> the portal owns it now; remove it from the mailbox
+                // (real Trash when the provider exposes one, else delete+expunge).
+                if (trashPath) {
+                  await client.messageMove(String(uid), trashPath, { uid: true });
+                } else {
+                  await client.messageDelete(String(uid), { uid: true });
+                }
+                removed = true;
               }
             }
           }
         } catch (e: any) {
           entry = { at: new Date().toISOString(), from: "", file: "", outcome: "error", note: e?.message || "message failed" };
         }
-        if (entry) entries.push(entry);
+        if (entry) {
+          // Messages LEFT in the mailbox would re-log identically every sweep;
+          // log each once per process. Saved/removed mail always logs.
+          if (removed || entry.outcome === "saved") {
+            entries.push(entry);
+          } else if (!alreadyLogged.has(seenKey(uid))) {
+            if (alreadyLogged.size > 5000) alreadyLogged.clear();
+            alreadyLogged.add(seenKey(uid));
+            entries.push(entry);
+          }
+        }
       }
     } finally {
       lock.release();
@@ -280,16 +323,30 @@ async function sweepMailbox(workspaceId: string, cfg: InboxConfig): Promise<Swee
   return { configured: true, checked, saved: entries.filter((x) => x.outcome === "saved").length, entries };
 }
 
+/**
+ * In-flight sweeps by workspace. The 5-minute tick, the GET self-heal, and the
+ * UI's "Check now" can all fire around the same moment; coalescing onto one
+ * promise guarantees a message can never be parsed (or a candidate invited)
+ * twice by overlapping sweeps.
+ */
+const inFlight = new Map<string, Promise<SweepResult>>();
+
 /** Sweep one workspace's resume inbox (its creds, its candidates). Never throws. */
-export async function sweepResumeInbox(workspaceId: string): Promise<SweepResult> {
-  await ensureVettingReady();
-  return withWorkspaceCreds(workspaceId, async () => {
-    const cfg = inboxConfig();
-    if (!cfg) return { configured: false, checked: 0, saved: 0, entries: [] };
-    const res = await sweepMailbox(workspaceId, cfg);
-    recordInboxSweep(workspaceId, res.entries, res.error);
-    return res;
-  });
+export function sweepResumeInbox(workspaceId: string): Promise<SweepResult> {
+  const running = inFlight.get(workspaceId);
+  if (running) return running;
+  const p = (async (): Promise<SweepResult> => {
+    await ensureVettingReady();
+    return withWorkspaceCreds(workspaceId, async () => {
+      const cfg = inboxConfig();
+      if (!cfg) return { configured: false, checked: 0, saved: 0, entries: [] };
+      const res = await sweepMailbox(workspaceId, cfg);
+      recordInboxSweep(workspaceId, res.entries, res.error);
+      return res;
+    });
+  })().finally(() => { inFlight.delete(workspaceId); });
+  inFlight.set(workspaceId, p);
+  return p;
 }
 
 /** The scheduler tick: sweep every workspace that runs vetting desks. */
