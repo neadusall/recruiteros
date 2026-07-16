@@ -38,14 +38,32 @@ export async function POST(req: Request) {
   // BD policy: SMS is disabled for the business-development motion. Block if the
   // caller flags BD, or if the referenced prospect is a BD prospect.
   let motion = body.motion;
-  if (!motion && body.ref?.prospectId) {
-    motion = (await getCore().getProspect(body.ref.prospectId))?.motion;
+  let prospect;
+  if (body.ref?.prospectId) {
+    prospect = await getCore().getProspect(body.ref.prospectId);
+    if (!motion) motion = prospect?.motion;
   }
   if (motion === "bd") {
     return NextResponse.json(
       { error: "sms_disabled_for_bd", detail: "SMS is not used in the BD motion (use LinkedIn voice notes or voicemail drops)." },
       { status: 422 },
     );
+  }
+
+  // NO-DOUBLE-CONTACT GUARD: honor STOP/DNC and the ATS communication state for
+  // the destination number (this path previously had no suppression check).
+  // Scoped to the prospect's workspace when the send references one.
+  if (prospect?.workspaceId) {
+    const { checkContactable } = await import("../../../../lib/outreach/contactGuard");
+    const guard = await checkContactable(prospect.workspaceId, {
+      phone: body.to, email: prospect.email, fullName: prospect.fullName, company: prospect.company,
+    }, { checkRecency: !prospect.status || prospect.status === "queued" });
+    if (!guard.ok) {
+      return NextResponse.json(
+        { error: guard.reason, detail: guard.detail ?? "This person is protected from outreach right now." },
+        { status: 422 },
+      );
+    }
   }
 
   const result = await getSmsProvider().send({

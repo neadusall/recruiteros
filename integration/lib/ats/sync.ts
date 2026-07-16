@@ -21,12 +21,38 @@ import {
   type AtsVendorConfig,
 } from "./credentials";
 import { LoxoClient } from "./loxoClient";
+import { syncLoxoActivity } from "./activity";
 import {
   loxoPersonToDataRecord,
   loxoCompanyToRecord,
   dataRecordToLoxoPerson,
   companyToLoxoCompany,
 } from "./map";
+import type { DataRecord } from "../data";
+
+/**
+ * Mirror Loxo-flagged DNC people into the durable suppression list. Idempotent:
+ * a person already suppressed by any handle is skipped, so daily syncs don't
+ * grow duplicate entries.
+ */
+async function suppressDncRecords(workspaceId: string, records: DataRecord[]): Promise<number> {
+  const flagged = records.filter((r) => r.doNotContact && (r.email || r.phone || r.linkedinUrl));
+  if (!flagged.length) return 0;
+  const { isSuppressed, suppress } = await import("../response/suppression");
+  let n = 0;
+  for (const r of flagged) {
+    const primary = r.email || r.phone || r.linkedinUrl;
+    if (await isSuppressed(workspaceId, primary)) continue;
+    await suppress(
+      workspaceId,
+      [r.email, r.email2, r.phone, r.directPhone, r.linkedinUrl],
+      r.dncReason || "loxo_dnc",
+      new Date().toISOString(),
+    );
+    n++;
+  }
+  return n;
+}
 
 const MAX_PAGES = 50; // 50 * 100 = up to 5,000 records per object per run
 const PER_PAGE = 100;
@@ -35,6 +61,10 @@ export interface SyncReport {
   ok: boolean;
   people: { added: number; updated: number; scanned: number };
   companies: { added: number; updated: number; scanned: number };
+  /** Communication-history pull (person_events + email_tracking + sms). */
+  activity?: { scanned: number; touches: number; peopleUpdated: number; error?: string };
+  /** People whose Loxo DNC signal was mirrored into the suppression list. */
+  dncSuppressed?: number;
   error?: string;
 }
 
@@ -91,6 +121,10 @@ export async function syncLoxo(workspaceId: string, opts: { full?: boolean } = {
       const r = await upsertRecords(workspaceId, inputs);
       report.people.added += r.added;
       report.people.updated += r.updated;
+      // Anyone Loxo marks do-not-contact goes onto the durable suppression list
+      // (the same list the email + LinkedIn gates already check), so a Loxo DNC
+      // blocks every channel here, not just the warehouse row.
+      report.dncSuppressed = (report.dncSuppressed || 0) + (await suppressDncRecords(workspaceId, r.records));
       scrollId = res.scrollId;
       if (!scrollId && res.items.length < PER_PAGE) break;
       if (!scrollId) break; // no cursor and a full page: avoid re-fetching page 1 forever
@@ -115,6 +149,14 @@ export async function syncLoxo(workspaceId: string, opts: { full?: boolean } = {
     }
 
     await markSynced(workspaceId, "loxo", new Date().toISOString());
+
+    // Communication history (person_events + email_tracking + sms) -> the
+    // warehouse `lastContactedAt` stamps the no-double-contact guard reads.
+    // Same client, so the adaptive rate gate carries over. A failure here is
+    // reported but never fails the record sync that already landed.
+    const act = await syncLoxoActivity(workspaceId, client, cfg);
+    report.activity = { scanned: act.scanned, touches: act.touches, peopleUpdated: act.peopleUpdated, error: act.error };
+
     return report;
   } catch (e: any) {
     // Surface Loxo's own explanation (the response body) alongside the status code,
@@ -229,6 +271,10 @@ export async function registerLoxoWebhooks(workspaceId: string, baseUrl: string)
       wanted.push({ item_type, action });
     }
   }
+  // New activity logged in Loxo -> near-real-time lastContactedAt update here,
+  // so a recruiter's call in Loxo blocks our sequences within minutes, not at
+  // the next nightly sync.
+  wanted.push({ item_type: "person_event", action: "create" });
 
   const ids: string[] = [];
   let firstError = "";

@@ -15,6 +15,7 @@ export {
   deleteRecords,
   deleteByProviderId,
   findRecordForPerson,
+  applyContactActivity,
   stats,
   purgeWorkspaceData,
 } from "./store";

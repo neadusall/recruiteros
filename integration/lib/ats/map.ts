@@ -136,6 +136,8 @@ export function loxoPersonToDataRecord(p: Loxo): DataRecordInput {
     str(p.workflow_stage_name) ||
     str(p.stage);
 
+  const dnc = detectLoxoDnc(p, stage, tags);
+
   return {
     fullName,
     firstName: first,
@@ -161,10 +163,30 @@ export function loxoPersonToDataRecord(p: Loxo): DataRecordInput {
     recordType: "Candidate",
     origin: "Loxo",
     lastActivityAt: str(p.updated_at) || str(p.last_activity_at),
+    ...(dnc ? { doNotContact: true, dncReason: dnc } : {}),
     source: "loxo",
     providerId: str(p.id),
     raw: flatten(p),
   } as DataRecordInput;
+}
+
+const DNC_RX = /\b(do[\s_-]*not[\s_-]*(contact|call|email|text|prospect)|dnc|opt(ed)?[\s_-]*out|unsubscribed|blocked|blacklist)\b/i;
+
+/**
+ * Loxo has no single documented DNC boolean, so we read the signals agencies
+ * actually use: the global status name, tags, and any *_dnc / do_not_* style
+ * field on the record. Conservative on purpose: only explicit DNC language
+ * flags a person, so a sync can't mass-suppress a database.
+ */
+export function detectLoxoDnc(p: Loxo, stage?: string, tags?: string[]): string | undefined {
+  if (stage && DNC_RX.test(stage)) return "loxo_status";
+  for (const t of tags || []) if (DNC_RX.test(t)) return "loxo_tag";
+  for (const [k, v] of Object.entries(p)) {
+    if (/(do_not|dnc|opt_out|unsubscrib)/i.test(k) && (v === true || String(v).toLowerCase() === "true")) {
+      return "loxo_flag";
+    }
+  }
+  return undefined;
 }
 
 /** Loxo Company → BD company record. */

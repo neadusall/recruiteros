@@ -38,6 +38,8 @@ export interface AtsVendorConfig {
   lastSyncAt?: string;
   /** Updated-since cursor (ISO) for incremental polling. */
   cursor?: string;
+  /** created_at_start cursor (ISO) for the incremental activity/communication pull. */
+  activityCursor?: string;
   /** Loxo webhook ids we registered, so we can clean them up on disconnect. */
   webhookIds?: string[];
   error?: string;
@@ -164,6 +166,16 @@ export async function markSynced(workspaceId: string, vendor: AtsVendor, cursor:
   if (!cfg) return;
   cfg.cursor = cursor;
   cfg.lastSyncAt = nowIso();
+  cfg.updatedAt = nowIso();
+  save();
+}
+
+/** Advance the incremental cursor for the activity/communication pull. */
+export async function markActivitySynced(workspaceId: string, vendor: AtsVendor, cursor: string): Promise<void> {
+  await hydrate();
+  const cfg = store[workspaceId]?.vendors[vendor];
+  if (!cfg) return;
+  cfg.activityCursor = cursor;
   cfg.updatedAt = nowIso();
   save();
 }

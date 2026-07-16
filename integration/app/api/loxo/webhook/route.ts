@@ -15,12 +15,36 @@
  */
 
 import { NextResponse } from "next/server";
-import { getVendorConfig, syncOnePerson, syncOneCompany } from "../../../../lib/ats";
+import { getVendorConfig, syncOnePerson, syncOneCompany, syncLoxoActivity, LoxoClient } from "../../../../lib/ats";
 import { deleteByProviderId as deletePerson } from "../../../../lib/data";
 import { deleteByProviderId as deleteCompany } from "../../../../lib/companies";
 
-const PERSON_TYPES = new Set(["person", "candidate", "person_job_profile", "person_education_profile", "person_event"]);
+const PERSON_TYPES = new Set(["person", "candidate", "person_job_profile", "person_education_profile"]);
 const COMPANY_TYPES = new Set(["company"]);
+
+/**
+ * person_event webhooks burst (one per activity a recruiter logs), and the
+ * payload's id is the EVENT id, not the person; so instead of a per-event
+ * fetch we coalesce into one incremental activity pull ~20s after the last
+ * event in a burst. That pull stamps lastContactedAt for everyone touched.
+ */
+const activityKick = new Map<string, ReturnType<typeof setTimeout>>();
+function scheduleActivityPull(ws: string): void {
+  const prev = activityKick.get(ws);
+  if (prev) clearTimeout(prev);
+  activityKick.set(
+    ws,
+    setTimeout(async () => {
+      activityKick.delete(ws);
+      try {
+        const cfg = await getVendorConfig(ws, "loxo");
+        if (!cfg || !cfg.domain || !cfg.slug || !cfg.apiKey) return;
+        const client = new LoxoClient({ domain: cfg.domain, slug: cfg.slug, apiKey: cfg.apiKey });
+        await syncLoxoActivity(ws, client, cfg);
+      } catch { /* next poll cycle covers it */ }
+    }, 20_000),
+  );
+}
 
 export async function POST(req: Request) {
   const url = new URL(req.url);
@@ -51,6 +75,11 @@ export async function POST(req: Request) {
   if (!itemType || !itemId) return NextResponse.json({ ok: true, ignored: "no_item" });
 
   try {
+    if (itemType === "person_event" || itemType === "person_event_document") {
+      scheduleActivityPull(ws);
+      return NextResponse.json({ ok: true, type: "person_event", action, scheduled: true });
+    }
+
     if (PERSON_TYPES.has(itemType)) {
       if (action === "destroy") {
         const removed = await deletePerson(ws, itemId);

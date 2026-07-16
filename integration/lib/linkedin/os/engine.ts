@@ -158,6 +158,23 @@ export async function requestLinkedInAction(req: ActionRequest): Promise<ActionR
       return { record, accepted: false, reason: record.statusReason };
     }
   }
+  // ATS communication state: someone the ATS marks do-not-contact never gets a
+  // LinkedIn action, even if their handles aren't on the suppression list yet
+  // (the Loxo sync mirrors DNC there, but this catches the gap between syncs).
+  try {
+    const { findRecordForPerson } = await import("../../data");
+    const rec = await findRecordForPerson(workspaceId, {
+      email: identity.emails[0],
+      linkedinUrl: identity.linkedinUrls[0],
+      phone: identity.phones[0],
+    });
+    if (rec?.doNotContact) {
+      record.status = "suppressed";
+      record.statusReason = "Person is marked do-not-contact in the ATS";
+      await pushRecord(record);
+      return { record, accepted: false, reason: record.statusReason };
+    }
+  } catch { /* guard is best-effort; the suppression list above already ran */ }
   const state = await getOutreachState(workspaceId, identity.id);
   if (sourceType !== "manual" && state?.automationPaused) {
     record.status = "suppressed";

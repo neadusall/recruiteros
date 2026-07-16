@@ -53,6 +53,13 @@ export interface OsTextImportArgs {
   recruiterEmail: string;
   contacts: OsTextContact[];
   validate: boolean;
+  /**
+   * When set, every contact passes the no-double-contact guard (ATS DNC +
+   * recent-communication cooldown) before it reaches the SMS engine. Both push
+   * paths should pass this; the skipped tallies come back as protectedDnc /
+   * protectedRecent on the result.
+   */
+  workspaceId?: string;
 }
 
 /** Call the engine's /api/import. Returns the engine's response body on success;
@@ -63,6 +70,34 @@ export async function ostextImport(args: OsTextImportArgs): Promise<Record<strin
     const e = new Error("RECRUITEROS_OSTEXT_TOKEN is not set on this server, run enable-ostext-sso.sh to wire OS Text first.");
     (e as Error & { code?: string }).code = "ostext_not_connected";
     throw e;
+  }
+
+  // NO-DOUBLE-CONTACT GUARD: last line of defense for every OS Text entry point.
+  let protectedDnc = 0;
+  let protectedRecent = 0;
+  if (args.workspaceId) {
+    const { checkContactable } = await import("./outreach/contactGuard");
+    const kept: OsTextContact[] = [];
+    for (const c of args.contacts) {
+      const guard = await checkContactable(args.workspaceId, {
+        email: c.email || undefined,
+        phone: c.phone || undefined,
+        linkedinUrl: c.linkedinUrl || undefined,
+        fullName: [c.firstName, c.lastName].filter(Boolean).join(" ") || undefined,
+        company: c.company || undefined,
+      });
+      if (guard.ok) kept.push(c);
+      else if (guard.reason === "do_not_contact") protectedDnc++;
+      else protectedRecent++;
+    }
+    args = { ...args, contacts: kept };
+    if (!kept.length) {
+      const e = new Error(
+        `Nothing to push: all selected people are protected (${protectedDnc} do-not-contact, ${protectedRecent} contacted recently).`,
+      );
+      (e as Error & { code?: string }).code = "all_contacts_protected";
+      throw e;
+    }
   }
   let res: Response;
   try {
@@ -93,6 +128,10 @@ export async function ostextImport(args: OsTextImportArgs): Promise<Record<strin
     const e = new Error((data as { error?: string }).error || `engine returned ${res.status}`);
     (e as Error & { code?: string }).code = "ostext_import_failed";
     throw e;
+  }
+  if (protectedDnc || protectedRecent) {
+    data.protectedDnc = ((data.protectedDnc as number) || 0) + protectedDnc;
+    data.protectedRecent = ((data.protectedRecent as number) || 0) + protectedRecent;
   }
   return data;
 }

@@ -1,6 +1,7 @@
 import { requireSession, body, ok, fail } from "../../../../lib/api";
 import { getCore } from "../../../../lib/core/repository";
 import { getRecord } from "../../../../lib/data";
+import { checkContactable } from "../../../../lib/outreach/contactGuard";
 import { ostextImport, ostextStarterTemplate, type OsTextContact } from "../../../../lib/ostextImport";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +55,11 @@ export async function POST(req: Request) {
   const picked = all.filter((p) => wanted.has(p.id));
 
   let noPhone = 0;
+  // NO-DOUBLE-CONTACT GUARD: people the ATS marks do-not-contact, or the agency
+  // communicated with inside the cooldown window (Loxo activity sync), never
+  // reach the SMS queue. This path previously had no gate at all.
+  let protectedDnc = 0;
+  let protectedRecent = 0;
   const contacts: OsTextContact[] = [];
 
   // Candidates data-warehouse records (workspace-guarded by getRecord).
@@ -64,6 +70,10 @@ export async function POST(req: Request) {
     dataMatched++;
     const phone = r.phone || r.directPhone || "";
     if (!phone) { noPhone++; continue; }
+    const guard = await checkContactable(ws, {
+      email: r.email, phone, linkedinUrl: r.linkedinUrl, fullName: r.fullName, company: r.company,
+    });
+    if (!guard.ok) { guard.reason === "do_not_contact" ? protectedDnc++ : protectedRecent++; continue; }
     const parts = (r.fullName || "").trim().split(/\s+/);
     const custom: Record<string, string> = {};
     if (Array.isArray(r.tags) && r.tags.length) custom.tag = r.tags[0];
@@ -84,6 +94,12 @@ export async function POST(req: Request) {
     // SMS wants the mobile line first; fall back to the general phone field.
     const phone = p.mobilePhone || p.phone || "";
     if (!phone) { noPhone++; continue; }
+    // Same guard as the warehouse rows. Prospects already replied/DNC are also
+    // caught here via the suppression list + warehouse state.
+    const guard = await checkContactable(ws, {
+      email: p.email, phone, linkedinUrl: p.linkedinUrl, fullName: p.fullName, company: p.company,
+    });
+    if (!guard.ok) { guard.reason === "do_not_contact" ? protectedDnc++ : protectedRecent++; continue; }
     const parts = (p.fullName || "").trim().split(/\s+/);
     const custom: Record<string, string> = {};
     if (p.category) custom.tag = p.category;
@@ -101,6 +117,12 @@ export async function POST(req: Request) {
     });
   }
   if (!contacts.length) {
+    if (protectedDnc + protectedRecent > 0) {
+      return fail("all_contacts_protected", 422, {
+        detail: `Nothing to push: ${protectedDnc + protectedRecent} of the selected people are protected (${protectedDnc} do-not-contact, ${protectedRecent} contacted recently).`,
+        noPhone, protectedDnc, protectedRecent,
+      });
+    }
     return fail("no_contacts_with_phone", 422, {
       detail: "None of the selected candidates has a phone number yet. Enrich phones in Candidates first, then push again.",
       noPhone,
@@ -123,6 +145,10 @@ export async function POST(req: Request) {
       // confirmation on arrival; only confirmed mobiles survive to be texted.
       // Not client-controllable — the checkbox opt-out is gone on purpose.
       validate: true,
+      // Second layer of the no-double-contact guard (idempotent with the
+      // per-row checks above; catches nothing new here but keeps the shared
+      // importer's contract uniform across callers).
+      workspaceId: ws,
     });
   } catch (e) {
     const err = e as Error & { code?: string };
@@ -130,5 +156,12 @@ export async function POST(req: Request) {
     return fail(code, code === "ostext_not_connected" ? 503 : 502, { detail: err.message });
   }
 
-  return ok({ ...data, requested: ids.length + dataIds.length, matched: picked.length + dataMatched, noPhone });
+  return ok({
+    ...data,
+    requested: ids.length + dataIds.length,
+    matched: picked.length + dataMatched,
+    noPhone,
+    protectedDnc,
+    protectedRecent,
+  });
 }

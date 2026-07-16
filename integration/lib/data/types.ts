@@ -64,6 +64,13 @@ export interface DataRecord {
   origin?: string;           // where the export sourced it (LinkedIn, Loxo Source, …)
   lastActivityAt?: string;   // most recent activity timestamp from the export
 
+  // Communication state (from the ATS activity log + our own sends). This is what
+  // keeps the app from double-contacting someone the agency is already talking to.
+  lastContactedAt?: string;      // most recent REAL communication (email/call/text/linkedin/meeting)
+  lastContactChannel?: string;   // email | call | sms | linkedin | meeting
+  doNotContact?: boolean;        // ATS-level DNC status/tag, or a local opt-out
+  dncReason?: string;            // e.g. "loxo_status", "loxo_tag", "stop_reply"
+
   // Provenance
   source: DataSource;
   providerId?: string;       // provider's own record id, for re-sync / de-dupe

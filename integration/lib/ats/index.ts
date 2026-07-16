@@ -26,7 +26,11 @@ export {
   type SyncReport,
   type PushResult,
 } from "./sync";
-export { dataRecordToLoxoPerson, companyToLoxoCompany } from "./map";
+export { dataRecordToLoxoPerson, companyToLoxoCompany, detectLoxoDnc } from "./map";
+
+// Communication-history layer: the Loxo activity pull (who has the agency
+// already talked to?) and the touch write-back (log our sends into Loxo).
+export { syncLoxoActivity, logTouchToAts, classifyActivityName, type ActivityReport, type TouchLog } from "./activity";
 
 // In-process background sync: armed at server boot from instrumentation.ts so
 // connected workspaces stay fresh without an external scheduler.

@@ -94,6 +94,80 @@ export class LoxoClient {
     return this.get(`/companies/${id}`).catch(() => null);
   }
 
+  /* ---------------- activity / communication history ---------------- */
+
+  /**
+   * The agency's activity vocabulary (GET /activity_types). Names are
+   * per-agency and customizable, so callers map by NAME, never hardcode ids.
+   */
+  async listActivityTypes(): Promise<any[]> {
+    const json = await this.get(`/activity_types`).catch(() => null);
+    if (!json) return [];
+    return (json.activity_types || json.results || json.data || (Array.isArray(json) ? json : [])) as any[];
+  }
+
+  /**
+   * One page of the unified activity log (GET /person_events). Supports the
+   * documented incremental window (`created_at_start`) and scroll cursor, so a
+   * poll after the first full pass only reads what's new.
+   */
+  async listPersonEvents(opts: { scrollId?: string; createdAtStart?: string; personId?: string | number } = {}): Promise<LoxoPage<any>> {
+    const p = new URLSearchParams();
+    if (opts.scrollId) p.set("scroll_id", opts.scrollId);
+    if (opts.createdAtStart) p.set("created_at_start", opts.createdAtStart);
+    if (opts.personId != null) p.set("person_id", String(opts.personId));
+    const s = p.toString();
+    const json = await this.get(`/person_events${s ? `?${s}` : ""}`);
+    return readPage(json, "person_events");
+  }
+
+  /** One page of tracked emails sent through Loxo (GET /email_tracking). */
+  async listEmailTracking(opts: { scrollId?: string; createdAtStart?: string } = {}): Promise<LoxoPage<any>> {
+    const p = new URLSearchParams();
+    if (opts.scrollId) p.set("scroll_id", opts.scrollId);
+    if (opts.createdAtStart) p.set("created_at_start", opts.createdAtStart);
+    const s = p.toString();
+    const json = await this.get(`/email_tracking${s ? `?${s}` : ""}`);
+    return readPage(json, "email_tracking");
+  }
+
+  /** One page of SMS sent/received through Loxo (GET /sms). */
+  async listSms(opts: { scrollId?: string; createdAtStart?: string } = {}): Promise<LoxoPage<any>> {
+    const p = new URLSearchParams();
+    if (opts.scrollId) p.set("scroll_id", opts.scrollId);
+    if (opts.createdAtStart) p.set("created_at_start", opts.createdAtStart);
+    const s = p.toString();
+    const json = await this.get(`/sms${s ? `?${s}` : ""}`);
+    return readPage(json, "sms");
+  }
+
+  /**
+   * Log an activity on a person (POST /person_events). Loxo's write endpoints
+   * take FORM-ENCODED bodies with bracket notation (person_event[field]), not
+   * JSON (confirmed by Loxo's own reference and real integrations).
+   */
+  async createPersonEvent(fields: {
+    personId: string | number;
+    activityTypeId?: string | number;
+    notes?: string;
+    createdAt?: string;
+  }): Promise<{ ok: boolean; id?: string; status: number; error?: string }> {
+    const form = new URLSearchParams();
+    form.set("person_event[person_id]", String(fields.personId));
+    if (fields.activityTypeId != null) form.set("person_event[activity_type_id]", String(fields.activityTypeId));
+    if (fields.notes) form.set("person_event[notes]", fields.notes);
+    if (fields.createdAt) form.set("person_event[created_at]", fields.createdAt);
+    try {
+      const res = await this.rawForm("POST", `/person_events`, form);
+      if (!res.ok) return { ok: false, status: res.status, error: await errText(res) };
+      const json = await res.json().catch(() => ({} as any));
+      const id = json?.id ?? json?.person_event?.id;
+      return { ok: true, status: res.status, id: id != null ? String(id) : undefined };
+    } catch (e: any) {
+      return { ok: false, status: 0, error: e?.message ?? "network_error" };
+    }
+  }
+
   /* ---------------- webhooks ---------------- */
 
   async listWebhooks(): Promise<any[]> {
@@ -176,13 +250,22 @@ export class LoxoClient {
    * errors on writes are surfaced rather than retried, to avoid double-creates.
    */
   private async raw(method: string, path: string, body?: unknown): Promise<Response> {
+    const payload = body !== undefined ? JSON.stringify(body) : undefined;
+    return this.send(method, path, payload, body !== undefined ? "application/json" : undefined);
+  }
+
+  /** Form-encoded write (Loxo's person_events endpoint takes form bodies). */
+  private async rawForm(method: string, path: string, form: URLSearchParams): Promise<Response> {
+    return this.send(method, path, form.toString(), "application/x-www-form-urlencoded");
+  }
+
+  private async send(method: string, path: string, payload?: string, contentType?: string): Promise<Response> {
     const url = `${this.base}${path}`;
     const headers: Record<string, string> = {
       accept: "application/json",
       authorization: `Bearer ${this.key}`,
     };
-    if (body !== undefined) headers["content-type"] = "application/json";
-    const payload = body !== undefined ? JSON.stringify(body) : undefined;
+    if (contentType) headers["content-type"] = contentType;
     const isGet = method.toUpperCase() === "GET";
 
     let attempt = 0;
@@ -239,11 +322,12 @@ function pageQuery(opts: { perPage?: number; scrollId?: string; updatedAfter?: s
 /** Normalize Loxo's varied list envelopes into { items, scrollId, total }. */
 function readPage(json: any, key: string): LoxoPage<any> {
   if (Array.isArray(json)) return { items: json };
-  const items = (json?.[key] || json?.results || json?.data || []) as any[];
+  const items = (json?.[key] || json?.results || json?.events || json?.data || []) as any[];
   return {
     items: Array.isArray(items) ? items : [],
     scrollId: json?.scroll_id || json?.scrollId || undefined,
-    total: typeof json?.total === "number" ? json.total : undefined,
+    total:
+      typeof json?.total === "number" ? json.total : typeof json?.total_count === "number" ? json.total_count : undefined,
   };
 }
 

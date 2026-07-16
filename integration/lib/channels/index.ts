@@ -132,6 +132,14 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
           return { ok: false, channel: "email", provider: "suppressed", error: "suppressed" };
         }
       }
+      // NO-DOUBLE-CONTACT GUARD: the ATS communication state (Loxo activity
+      // sync). Blocks anyone marked DNC in the ATS, and holds a FIRST touch
+      // (prospect still "queued") when the agency talked to the person within
+      // the cooldown window. Follow-ups inside a live sequence pass through.
+      {
+        const guarded = await guardTouch(workspaceId, t);
+        if (guarded) return guarded;
+      }
       // Recruiter-owned SMTP inbox pool (lib/senders): when the prospect's campaign
       // is assigned to a recruiter who has an available inbox, send through that
       // recruiter's pool (rotated + sticky per prospect). Falls through to the MTA /
@@ -205,6 +213,16 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
     }
     case "sms": {
       const to = t.prospect.phone ?? "";
+      // SUPPRESSION + NO-DOUBLE-CONTACT: SMS previously had no gate at all, so
+      // a STOP'd or ATS-DNC'd person could still be texted. Same guard as email.
+      {
+        const dnc = await import("../response/suppression");
+        if (to && (await dnc.isSuppressed(workspaceId, to))) {
+          return { ok: false, channel: "sms", provider: "suppressed", error: "suppressed" };
+        }
+        const guarded = await guardTouch(workspaceId, t);
+        if (guarded) return guarded;
+      }
       // Prefer OS Text (campaign inbox); fall back to raw Telnyx 10DLC.
       if (ostext.configured()) {
         const r: any = await ostext.sendSms(t.campaignChannelIds?.instantlyCampaignId ?? "default", to, t.text);
@@ -215,6 +233,15 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
     }
     case "voice": {
       const to = t.prospect.phone ?? "";
+      // Same guard as SMS: no call to a DNC'd or freshly-contacted person.
+      {
+        const dnc = await import("../response/suppression");
+        if (to && (await dnc.isSuppressed(workspaceId, to))) {
+          return { ok: false, channel: "voice", provider: "suppressed", error: "suppressed" };
+        }
+        const guarded = await guardTouch(workspaceId, t);
+        if (guarded) return guarded;
+      }
       const r: any = await telnyx.dialWithAmd(to, cred("TELNYX_CONNECTION_ID"), `${appUrl()}/api/voice/webhook`);
       return { ok: true, channel: "voice", provider: "telnyx", dryRun: r?.dryRun, providerMessageId: r?.data?.call_control_id };
     }
@@ -272,16 +299,75 @@ async function trySenderPool(workspaceId: string, t: SendTouch): Promise<SendRes
   }
 }
 
+/**
+ * ATS communication-state gate (see lib/outreach/contactGuard). Returns a
+ * blocked SendResult, or null to proceed. Recency applies to FIRST touches
+ * only (prospect still "queued" / statusless one-offs); a person mid-sequence
+ * is spaced by the sequence itself. A DNC hit also flips the prospect so the
+ * cadence stops retrying them every tick. Fails open: a guard error must not
+ * freeze sending (the durable suppression lists are checked separately).
+ */
+async function guardTouch(workspaceId: string, t: SendTouch): Promise<SendResult | null> {
+  try {
+    const { checkContactable } = await import("../outreach/contactGuard");
+    const check = await checkContactable(
+      workspaceId,
+      {
+        email: t.prospect.email,
+        phone: t.prospect.phone,
+        linkedinUrl: t.prospect.linkedinUrl,
+        fullName: t.prospect.fullName,
+        company: t.prospect.company,
+      },
+      { checkRecency: !t.prospect.status || t.prospect.status === "queued" },
+    );
+    if (check.ok) return null;
+    if (check.reason === "do_not_contact") {
+      try {
+        const fresh = await getCore().getProspect(t.prospect.id);
+        if (fresh && fresh.status !== "do_not_contact") { fresh.status = "do_not_contact"; await getCore().saveProspect(fresh); }
+      } catch { /* best-effort status flip */ }
+    }
+    // Stable reason code (not the per-person detail) so callers can tally
+    // "recently_contacted: 12" instead of one bucket per day-count string.
+    return { ok: false, channel: t.channel, provider: "contact_guard", error: check.reason };
+  } catch {
+    return null;
+  }
+}
+
 async function logTouch(workspaceId: string, t: SendTouch, r: SendResult): Promise<void> {
   const core = getCore();
   const ref = t.prospect.atsPersonId ?? t.prospect.email ?? t.prospect.id;
-  const eventId = await getAts().pushPersonEvent({
-    personRef: ref,
-    activityType: `${cap(t.channel)} ${t.subject ? "(" + t.subject + ")" : "sent"}`,
-    channel: t.channel,
-    note: r.dryRun ? `[dry-run via ${r.provider}] ${t.text.slice(0, 120)}` : t.text.slice(0, 140),
-    at: nowIso(),
-  });
+  let eventId: string | undefined;
+  if (r.ok && !r.dryRun) {
+    // Workspace-aware write-back: stamp the warehouse record (the guard sees the
+    // touch immediately) and log a real person_event in the connected Loxo, so
+    // recruiters inside the ATS see the touch too. Best-effort by contract.
+    const { logTouchToAts } = await import("../ats/activity");
+    eventId = await logTouchToAts(workspaceId, {
+      personRef: t.prospect.atsPersonId,
+      email: t.prospect.email,
+      phone: t.prospect.phone,
+      linkedinUrl: t.prospect.linkedinUrl,
+      fullName: t.prospect.fullName,
+      company: t.prospect.company,
+      channel: t.channel,
+      note: t.subject ? `${t.subject}: ${t.text.slice(0, 120)}` : t.text.slice(0, 140),
+      at: nowIso(),
+    });
+  }
+  if (!eventId) {
+    // Legacy env-keyed adapter path (kept for house/demo setups without a
+    // per-workspace Loxo connection; dry-logs when no LOXO_API_KEY).
+    eventId = await getAts().pushPersonEvent({
+      personRef: ref,
+      activityType: `${cap(t.channel)} ${t.subject ? "(" + t.subject + ")" : "sent"}`,
+      channel: t.channel,
+      note: r.dryRun ? `[dry-run via ${r.provider}] ${t.text.slice(0, 120)}` : t.text.slice(0, 140),
+      at: nowIso(),
+    });
+  }
   await core.recordActivity({
     id: rid("act"), workspaceId, prospectId: t.prospect.id,
     channel: t.channel, type: `${t.channel}_sent`,

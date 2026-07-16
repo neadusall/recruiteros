@@ -129,23 +129,65 @@ export async function saveRecord(rec: DataRecord): Promise<void> {
 
 /**
  * Best-effort match for backfilling a lead: find a stored record for this person
- * by linkedin → email → name+company. Read-only; used by campaign enrichment to
- * fill contact gaps from the warehouse before spending on a paid lookup.
+ * by linkedin → email → phone → name+company. Read-only; used by campaign
+ * enrichment and the contact guard before spending on a paid lookup / a send.
  */
 export async function findRecordForPerson(
   workspaceId: string,
-  who: { linkedinUrl?: string; email?: string; fullName?: string; company?: string },
+  who: { linkedinUrl?: string; email?: string; phone?: string; fullName?: string; company?: string },
 ): Promise<DataRecord | undefined> {
   await hydrate();
   const rows = store.filter((r) => r.workspaceId === workspaceId);
   const li = who.linkedinUrl?.toLowerCase().replace(/\/+$/, "").trim();
   if (li) { const m = rows.find((r) => r.linkedinUrl?.toLowerCase().replace(/\/+$/, "").trim() === li); if (m) return m; }
   const em = who.email?.toLowerCase().trim();
-  if (em) { const m = rows.find((r) => r.email?.toLowerCase().trim() === em); if (m) return m; }
+  if (em) { const m = rows.find((r) => (r.email?.toLowerCase().trim() === em) || (r.email2?.toLowerCase().trim() === em)); if (m) return m; }
+  const ph = phoneKey(who.phone);
+  if (ph) { const m = rows.find((r) => phoneKey(r.phone) === ph || phoneKey(r.directPhone) === ph); if (m) return m; }
   const name = who.fullName?.toLowerCase().trim();
   const co = who.company?.toLowerCase().trim();
   if (name) return rows.find((r) => r.fullName.toLowerCase().trim() === name && (!co || (r.company || "").toLowerCase().trim() === co));
   return undefined;
+}
+
+/** Digits-only phone key (last 10) so formatting differences still match. */
+function phoneKey(v?: string): string {
+  const d = (v || "").replace(/\D/g, "");
+  return d.length >= 10 ? d.slice(-10) : d;
+}
+
+/**
+ * Stamp communication state (from the ATS activity sync or our own sends) onto
+ * records, keyed by the provider's person id. Only ever moves `lastContactedAt`
+ * FORWARD, so replaying an activity window can't erase a newer touch.
+ * Returns how many records changed; one debounced save covers the batch.
+ */
+export async function applyContactActivity(
+  workspaceId: string,
+  updates: Map<string, { at: string; channel?: string; doNotContact?: boolean; dncReason?: string }>,
+): Promise<number> {
+  if (!updates.size) return 0;
+  await hydrate();
+  let n = 0;
+  for (const r of store) {
+    if (r.workspaceId !== workspaceId || !r.providerId) continue;
+    const u = updates.get(String(r.providerId));
+    if (!u) continue;
+    let changed = false;
+    if (u.at && (!r.lastContactedAt || u.at > r.lastContactedAt)) {
+      r.lastContactedAt = u.at;
+      if (u.channel) r.lastContactChannel = u.channel;
+      changed = true;
+    }
+    if (u.doNotContact && !r.doNotContact) {
+      r.doNotContact = true;
+      r.dncReason = u.dncReason || "ats";
+      changed = true;
+    }
+    if (changed) { r.updatedAt = nowIso(); n++; }
+  }
+  if (n) save();
+  return n;
 }
 
 export async function deleteRecords(workspaceId: string, ids: string[]): Promise<number> {

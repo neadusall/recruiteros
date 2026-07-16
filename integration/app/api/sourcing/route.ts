@@ -630,13 +630,18 @@ export async function POST(req: Request) {
           // confirmation on arrival; only confirmed mobiles survive to be texted.
           // Not client-controllable — the checkbox opt-out is gone on purpose.
           validate: true,
+          // NO-DOUBLE-CONTACT GUARD: sourced people who are already in the ATS
+          // conversation (DNC or contacted within the cooldown) are filtered by
+          // the shared importer; tallies come back as protectedDnc/protectedRecent.
+          workspaceId: g.ctx.workspace.id,
         });
       } catch (e) {
         const err = e as Error & { code?: string };
         const code = err.code || "ostext_import_failed";
         return fail(code, code === "ostext_not_connected" ? 503 : 502, { detail: err.message });
       }
-      return ok({ ...data, pushed: contacts.length, noPhone });
+      const guarded = (Number(data.protectedDnc) || 0) + (Number(data.protectedRecent) || 0);
+      return ok({ ...data, pushed: Math.max(0, contacts.length - guarded), noPhone });
     }
 
     // Combine several saved runs (near-identical searches for the same role) into ONE

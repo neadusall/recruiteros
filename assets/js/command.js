@@ -6468,6 +6468,30 @@
       if (r.origin) return r.origin;
       return r.source === "loxo" ? "Loxo" : r.source === "zoominfo-api" ? "API" : r.source === "manual" ? "Manual" : "Imported";
     }
+    function agoShort(iso) {
+      var t = Date.parse(iso || ""); if (!isFinite(t)) return "";
+      var d = Math.floor((Date.now() - t) / 86400000);
+      if (d < 0) return "";
+      if (d === 0) return "today";
+      if (d < 14) return d + "d ago";
+      if (d < 60) return Math.floor(d / 7) + "w ago";
+      if (d < 365) return Math.floor(d / 30) + "mo ago";
+      return Math.floor(d / 365) + "y ago";
+    }
+    function commBucket(r) {
+      // Communication state, synced from the ATS activity log + our own sends.
+      if (r.dnc) return "Do not contact";
+      if (r.lastContactedAt) {
+        var d = (Date.now() - Date.parse(r.lastContactedAt)) / 86400000;
+        if (isFinite(d)) {
+          if (d <= 14) return "Contacted: last 14 days";
+          if (d <= 90) return "Contacted: last 90 days";
+          return "Contacted: older";
+        }
+      }
+      if (r.kind === "prospect" && r.statusVal && r.statusVal !== "queued") return "Contacted: in pipeline";
+      return "Never contacted";
+    }
     function buildRows(prospects, records) {
       var out = [], seen = {};
       prospects.forEach(function (p) {
@@ -6480,7 +6504,8 @@
           source: p.category || "Pipeline", owner: "", tags: [],
           statusVal: p.status, statusLabel: statusLabel(p.status, lifecycle),
           photoUrl: p.photoUrl || "", exp: p.experienceSummary || p.experience || p.summary || "",
-          seqName: p.sequenceName || ""
+          seqName: p.sequenceName || "",
+          dnc: p.status === "do_not_contact", lastContactedAt: "", lastContactChannel: ""
         };
         seen[dedupKey(row.fullName, row.company, row.email, row.linkedinUrl)] = row;
         out.push(row);
@@ -6495,6 +6520,12 @@
           if (!dup.phone && phone) dup.phone = phone;
           if (!dup.linkedinUrl && r.linkedinUrl) dup.linkedinUrl = r.linkedinUrl;
           if (!dup.location && loc) dup.location = loc;
+          // Communication state rides along so the pipeline copy shows ATS history.
+          if (r.doNotContact) dup.dnc = true;
+          if (r.lastContactedAt && (!dup.lastContactedAt || r.lastContactedAt > dup.lastContactedAt)) {
+            dup.lastContactedAt = r.lastContactedAt;
+            dup.lastContactChannel = r.lastContactChannel || dup.lastContactChannel;
+          }
           dup.altDataId = r.id;
           return;
         }
@@ -6505,7 +6536,8 @@
           linkedinUrl: r.linkedinUrl || "", location: loc,
           source: dataSourceLabel(r), owner: r.owner || "", tags: Array.isArray(r.tags) ? r.tags : [],
           statusVal: r.stage || "", statusLabel: r.stage || "No stage",
-          photoUrl: personPhoto(r) || "", exp: r.bio || "", seqName: ""
+          photoUrl: personPhoto(r) || "", exp: r.bio || "", seqName: "",
+          dnc: !!r.doNotContact, lastContactedAt: r.lastContactedAt || "", lastContactChannel: r.lastContactChannel || ""
         });
       });
       return out;
@@ -6515,6 +6547,7 @@
     var CN_FACETS = [
       ["source", "Source", function (r) { return [r.source || "Other"]; }],
       ["status", "Status / Stage", function (r) { return [r.statusLabel || "No stage"]; }],
+      ["comm", "Communication", function (r) { return [commBucket(r)]; }],
       ["contact", "Contact info", function (r) {
         return [r.email ? "Has email" : "Missing email", r.phone ? "Has phone" : "Missing phone", r.linkedinUrl ? "Has LinkedIn" : "Missing LinkedIn"];
       }],
@@ -6630,9 +6663,16 @@
       }
       var enrichLbl = pending ? '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg>' : (r.email && r.phone) ? "↻" : '<svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>';
       var enrichTitle = pending ? "Find hiring manager" : (r.email && r.phone) ? "Re-enrich contact" : "Enrich contact";
+      var commChip = "";
+      if (r.dnc) {
+        commChip = '<span class="cn-comm" style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;background:#fdecec;color:#b3261e;border:1px solid #f2c4c0" title="Protected: outreach from this app is blocked for this person.">Do not contact</span>';
+      } else if (r.lastContactedAt) {
+        var agoTxt = agoShort(r.lastContactedAt);
+        if (agoTxt) commChip = '<span class="cn-comm" style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;background:#eef2fd;color:#2e5bd7;border:1px solid #d7e0f8" title="Last communication on record (ATS activity plus sends from this app). New first touches wait out the cooldown automatically.">Contacted ' + esc(agoTxt) + (r.lastContactChannel ? " · " + esc(r.lastContactChannel) : "") + '</span>';
+      }
       var tr = '<tr class="pr-row' + (state.sel[r.id] ? " pr-selected" : "") + '" data-rid="' + esc(r.id) + '">' +
         '<td class="pr-c-check"><input type="checkbox" class="pr-check" data-rid="' + esc(r.id) + '"' + (state.sel[r.id] ? " checked" : "") + ' /></td>' +
-        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + name + li + expToggle +
+        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + name + li + expToggle + commChip +
           (r.seqName ? '<span class="pr-seqtag" title="Assigned sequence">▸ ' + esc(r.seqName) + "</span>" : "") +
           '<span class="cn-sub">' + (r.title && !pending ? esc(r.title) + " · " : "") +
             '<span class="cn-src' + (r.kind === "data" ? " ats" : "") + '" title="' + (r.kind === "data" ? "From the ATS people database" : "Pipeline") + ': ' + esc(r.source) + '">' + esc(r.source) + "</span></span></span></td>" +
@@ -6656,8 +6696,12 @@
       var pRows = list.filter(function (r) { return r.kind === "prospect"; });
       var dCount = list.length - pRows.length;
       var counts = pRows.reduce(function (m, r) { m[r.statusVal] = (m[r.statusVal] || 0) + 1; return m; }, {});
+      // ATS-synced people marked do-not-contact count into the same card as
+      // pipeline DNC, so the number means "everyone this app will refuse to touch".
+      var dncData = list.filter(function (r) { return r.kind === "data" && r.dnc; }).length;
       var stages = lifecycle.map(function (l) {
-        return '<div class="stage"><b>' + (counts[l.status] || 0) + "</b><span>" + esc(l.recruiting || l.status) + "</span></div>";
+        var n = (counts[l.status] || 0) + (l.status === "do_not_contact" ? dncData : 0);
+        return '<div class="stage"><b>' + n + "</b><span>" + esc(l.recruiting || l.status) + "</span></div>";
       }).join("") + '<div class="stage"><b>' + dCount + '</b><span>People database</span></div>';
       var selIds = list.filter(function (r) { return state.sel[r.id]; }).map(function (r) { return r.id; });
       var allOn = list.length > 0 && selIds.length === list.length;
@@ -6931,7 +6975,10 @@
               close();
               var d = res.data || {}, msg = "Sent " + (d.sent || 0);
               if (d.dryRun) msg += " (" + d.dryRun + " simulated: connect a sending provider in Setup)";
-              if (d.failed) msg += ", " + d.failed + " failed";
+              var prot = d.errors ? ((d.errors.do_not_contact || 0) + (d.errors.recently_contacted || 0)) : 0;
+              var hardFail = Math.max(0, (d.failed || 0) - prot);
+              if (hardFail) msg += ", " + hardFail + " failed";
+              if (prot) msg += ", " + prot + " protected (already in an ATS conversation)";
               if (d.skipped) msg += ", " + d.skipped + " skipped (no email)";
               toast(msg);
             }).catch(function () { go.disabled = false; go.textContent = "Send to " + recips.length; toast("Could not reach the server."); });
@@ -6970,6 +7017,8 @@
                 "Added: " + (d.added || 0) +
                 (d.deduped ? "\nAlready in campaign: " + d.deduped : "") +
                 (d.noPhone ? "\nNo phone yet: " + d.noPhone : "") +
+                (d.protectedDnc ? "\nProtected (do not contact): " + d.protectedDnc : "") +
+                (d.protectedRecent ? "\nProtected (contacted recently): " + d.protectedRecent : "") +
                 (d.invalidPhone ? "\nInvalid phone: " + d.invalidPhone : "") +
                 (d.optedOut ? "\nOpted out (never texted): " + d.optedOut : "") +
                 (d.validation === "blocked_no_qstash" ? "\n\nWARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? "\n\nTelnyx is confirming cell lines now; anything that is not a cell is removed automatically." : "")) +
@@ -7485,6 +7534,8 @@
                 "Added: " + (d.added || 0) +
                 (d.deduped ? "\nAlready in campaign: " + d.deduped : "") +
                 (d.noPhone ? "\nNo phone yet: " + d.noPhone : "") +
+                (d.protectedDnc ? "\nProtected (do not contact): " + d.protectedDnc : "") +
+                (d.protectedRecent ? "\nProtected (contacted recently): " + d.protectedRecent : "") +
                 (d.invalidPhone ? "\nInvalid phone: " + d.invalidPhone : "") +
                 (d.optedOut ? "\nOpted out (never texted): " + d.optedOut : "") +
                 (d.validation === "blocked_no_qstash" ? "\n\nWARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? "\n\nTelnyx is confirming cell lines now; anything that is not a cell is removed automatically." : "")) +
@@ -9577,7 +9628,10 @@
               close();
               var d = res.data || {}, msg = "Sent " + (d.sent || 0);
               if (d.dryRun) msg += " (" + d.dryRun + " simulated: connect a sending provider in Setup)";
-              if (d.failed) msg += ", " + d.failed + " failed";
+              var prot = d.errors ? ((d.errors.do_not_contact || 0) + (d.errors.recently_contacted || 0)) : 0;
+              var hardFail = Math.max(0, (d.failed || 0) - prot);
+              if (hardFail) msg += ", " + hardFail + " failed";
+              if (prot) msg += ", " + prot + " protected (already in an ATS conversation)";
               if (d.skipped) msg += ", " + d.skipped + " skipped (no email)";
               toast(msg);
             }).catch(function () { go.disabled = false; go.textContent = "Send to " + recips.length; toast("Could not reach the server."); });
@@ -9832,6 +9886,7 @@
     function jdLocLabel() { var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " +" + r + "mi") : loc; }
     function jdLocPhrase() { var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " (within ~" + r + " miles, include ALL surrounding metros and cities within that drive, not just " + loc + ")") : loc; }
     function jdWithLoc(jd) { var p = jdLocPhrase(); return p ? (jd + "\n\nBased in: " + p) : jd; }
+    function jdBreadth() { var s = $("#jdBreadth"); return (s && s.value) || "balanced"; }
 
     el.innerHTML =
       '<style>' +
@@ -9953,7 +10008,8 @@
       '.jd-opt2-top{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--text);cursor:pointer}' +
       '.jd-opt2-top input[type=number]{width:66px;background:var(--bg);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px}' +
       '.jd-opt2-top input[type=checkbox]{width:auto;margin:0}' +
-      '.jd-opt2-top input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
+      '.jd-opt2-top select{background:var(--bg);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px;cursor:pointer}' +
+      '.jd-opt2-top input:focus,.jd-opt2-top select:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
       '.jd-opt2-def{font-size:12px;color:var(--text-muted);line-height:1.5;margin-top:4px}' +
                         '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
@@ -9965,7 +10021,7 @@
             '<p>When it says Done, scroll to <b>Your saved candidate lists</b> and act on it: deep-vet, enrich, then send to Candidates or straight to OS Text.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>Set the depth of the search</h5>' +
-            '<p>The four options above the button shape how wide a run goes; each is explained right where it sits. The defaults (scan 500, min fit 10, both boxes off) are right for most roles.</p>' +
+            '<p>The options above the button shape how wide a run goes; each is explained right where it sits. The defaults (Balanced breadth, scan 500, min fit 10, both boxes off) are right for most roles. Pick <b>Wide net</b> when you want the biggest possible pool: it runs every title variation, digs deeper on every search, and catches people whose profiles word the location differently, while the same location rules and ranking keep the list honest.</p>' +
             '<p><b>Dive deeper / Refine</b>: After a run, type a plain instruction (e.g. "only Director and up in medical devices, exclude agencies") to tighten or widen the profile, then press Initiate Search again; the refined profile drives the next run.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>On a saved list</h5>' +
@@ -10014,8 +10070,13 @@
         '</details>' +
         '<div class="jd-depth">' +
           '<div class="jd-depth-h">Set the depth of the search</div>' +
-          '<div class="jd-depth-sub">Four choices shape how wide this run goes. The defaults are right for most roles.</div>' +
+          '<div class="jd-depth-sub">These choices shape how wide this run goes. The defaults are right for most roles.</div>' +
           '<div class="jd-depth-grid">' +
+            '<div class="jd-opt2">' +
+              '<label class="jd-opt2-top" for="jdBreadth">Search breadth ' +
+                '<select id="jdBreadth"><option value="focused">Focused</option><option value="balanced" selected>Balanced</option><option value="wide">Wide net</option></select></label>' +
+              '<div class="jd-opt2-def">How wide the net is cast. Focused sticks to the closest title matches. Balanced (the default) also runs every title variation of the role. Wide net digs deepest and adds passes that catch people whose profiles word the location differently: the biggest pool when you want volume. Location and ranking rules stay the same on every setting, so a wider net never means weaker matches at the top.</div>' +
+            '</div>' +
             '<div class="jd-opt2">' +
               '<label class="jd-opt2-top" for="jdCap"><input id="jdCap" type="number" min="1" max="5000" value="500"> Scan up to</label>' +
               '<div class="jd-opt2-def">The ceiling on how many candidates this run gathers. It is not a minimum: you get every qualified person the search finds, up to this number. 500 covers most roles.</div>' +
@@ -10399,7 +10460,7 @@
           return;
         }
         state.jd = jdNow;
-        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location }).then(function (r) {
+        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location, breadth: jdBreadth() }).then(function (r) {
           if (!r.ok) throw { stage: "Analyze", r: r };
           state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
           renderPlan(); updateRunCost();
@@ -10412,7 +10473,7 @@
         // A refined profile is sent along so the search actually honors the
         // Dive-deeper instruction instead of re-deriving the profile from the JD.
         var refinedIcp = (state.refineNote && state.icp) ? state.icp : undefined;
-        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, freshOnly: fresh, location: state.location, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).then(function (r) {
+        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).then(function (r) {
           if (!r.ok) { finishProgress("Search failed"); throw { stage: "Search", r: r }; }
           state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
           state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
@@ -10514,7 +10575,11 @@
     }
     function hideProgress() { if (prog.timer) { clearInterval(prog.timer); prog.timer = null; } var h = $("#jdProgress"); if (h) { h.style.display = "none"; h.innerHTML = ""; } }
     /** ETA seconds for a discovery run, estimated from the candidate cap. */
-    function findEta(cap) { return Math.min(150, Math.max(8, Math.round((cap || 500) * 0.02))); }
+    // Wider breadth runs more searches, so the honest ETA scales with the dial.
+    function findEta(cap) {
+      var mult = jdBreadth() === "wide" ? 2 : jdBreadth() === "focused" ? 0.7 : 1;
+      return Math.min(240, Math.max(8, Math.round((cap || 500) * 0.02 * mult)));
+    }
 
     $("#jdGo").addEventListener("click", runOneClick);
 
@@ -10631,6 +10696,7 @@
                 var d = r.data || {};
                 toast('OS Text campaign "' + (d.campaignName || nm) + '" is ready: ' + (d.added || d.pushed || 0) + ' added' +
                   (d.noPhone ? (", " + d.noPhone + " skipped (no phone)") : "") +
+                  ((d.protectedDnc || d.protectedRecent) ? (", " + ((d.protectedDnc || 0) + (d.protectedRecent || 0)) + " protected (already in an ATS conversation)") : "") +
                   ". Review and launch in the OS Text tab." + (d.validation === "blocked_no_qstash" ? " WARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? " Telnyx is confirming cell lines now; anything that is not a cell is removed automatically." : "")));
               }).catch(function () {
                 goBtn.disabled = false; goBtn.textContent = "Send to OS Text →";
