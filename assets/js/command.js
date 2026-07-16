@@ -247,14 +247,23 @@
     if (IMP_TOKEN) h["Authorization"] = "Bearer " + IMP_TOKEN;
     return h;
   }
+  // Only the auth guard's own 401 body ({error:"unauthorized"}) means the session is
+  // dead. A route can also echo an UPSTREAM provider's 401 (e.g. Anthropic rejecting
+  // the saved AI key inside a JD Sourcing run) — signing out on those bounced users
+  // to /login mid-task instead of showing them the real, fixable error.
+  function sessionDead(status, data) {
+    return status === 401 && data && data.error === "unauthorized";
+  }
   function api(path, _retried) {
     return fetch(API + path, { credentials: "include", headers: authHeaders() }).then(function (r) {
-      if (r.status === 401) {
-        if (!_retried) return delay(1200).then(function () { return api(path, true); });
-        signOut(); throw 0;
-      }
-      if (!r.ok) throw 0;
-      return r.json();
+      return r.json().catch(function () { return null; }).then(function (d) {
+        if (sessionDead(r.status, d)) {
+          if (!_retried) return delay(1200).then(function () { return api(path, true); });
+          signOut(); throw 0;
+        }
+        if (!r.ok || d === null) throw 0;
+        return d;
+      });
     });
   }
   // Mutating call (POST/PUT/DELETE) -> { ok, status, data }. Same 401-retry guard.
@@ -264,11 +273,13 @@
       headers: authHeaders(payload ? { "Content-Type": "application/json" } : {}),
       body: payload ? JSON.stringify(payload) : undefined
     }).then(function (r) {
-      if (r.status === 401) {
-        if (!_retried) return delay(1200).then(function () { return send(path, method, payload, true); });
-        signOut(); throw 0;
-      }
-      return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, status: r.status, data: d }; });
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (sessionDead(r.status, d)) {
+          if (!_retried) return delay(1200).then(function () { return send(path, method, payload, true); });
+          signOut(); throw 0;
+        }
+        return { ok: r.ok, status: r.status, data: d };
+      });
     });
   }
 
@@ -9578,7 +9589,7 @@
       state.location = jdLocLabel();
       state.jd = jd; msg("Analyzing…");
       send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(jd) }).then(function (r) {
-        if (!r.ok) { msg("Analyze failed: " + ((r.data && r.data.error) || r.status)); return; }
+        if (!r.ok) { msg("Analyze failed: " + ((r.data && (r.data.detail || r.data.error)) || r.status)); return; }
         state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
         $("#jdFind").disabled = false; msg(""); renderPlan(); renderSteps(); updateRunCost();
       });
@@ -9594,7 +9605,7 @@
       showProgress("Finding candidates", findEta(cap));
       send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), cap: cap, minFit: minFit, freshOnly: fresh }).then(function (r) {
         $("#jdFind").disabled = false;
-        if (!r.ok) { finishProgress("Search failed"); msg("Find failed: " + ((r.data && r.data.error) || r.status)); return; }
+        if (!r.ok) { finishProgress("Search failed"); msg("Find failed: " + ((r.data && (r.data.detail || r.data.error)) || r.status)); return; }
         state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
         state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
         $("#jdSave").disabled = !state.candidates.length;

@@ -522,6 +522,16 @@ export async function POST(req: Request) {
 
     return fail("unknown_action", 422);
   } catch (e: any) {
-    return fail(e?.message ?? "sourcing_failed", e?.status ?? 400);
+    const status = typeof e?.status === "number" ? e.status : 400;
+    // An upstream provider rejecting ITS credentials (Anthropic/RapidAPI → 401/403)
+    // must not reach the browser as a 401: the app shell reads that as a dead session
+    // and signs the user out mid-task. Surface it as a 502 with the cause intact so
+    // the tool shows "update the AI key in Setup", not a bounce to /login.
+    if (status === 401 || status === 403) {
+      return fail("provider_auth_failed", 502, {
+        detail: `an external provider rejected its API key (${e?.message ?? "auth error"}): update it under Setup / Connected`,
+      });
+    }
+    return fail(e?.message ?? "sourcing_failed", status);
   }
 }
