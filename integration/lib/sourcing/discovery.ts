@@ -821,7 +821,11 @@ export async function runDiscovery(
     const rapid404 = warnings.filter((w) => w.startsWith("rapidapi(") && / 404/.test(w)).length;
     const reasons: string[] = [];
     if (rapid404) reasons.push(`the paid people search rejected ${rapid404} request(s) (its host/path in Setup points at a missing endpoint)`);
-    if (!useGoogle && engines.includes("google")) reasons.push("the free Google pass is off (add the Google search key in Setup to turn it on)");
+    // The actionable fix for a run with no wide web search is the Serper key: Google
+    // closed the CSE API to new signups (gone Jan 1, 2027), so don't send anyone there.
+    if (!useGoogle && !useSerper && engines.includes("serper") && !serperSearchConfigured()) {
+      reasons.push("the wide web-search pass is off (paste your Serper key in Setup under JD Sourcing, in the Wide pass field, then run again)");
+    }
     if (!useSerper && engines.includes("serper") && serperSearchConfigured()) reasons.push("the Serper search pass stopped early (key rejected or out of credits; check your serper.dev balance)");
     if (!useSearx && engines.includes("searx")) reasons.push("the built-in free search engine did not respond");
     if (opts.excludeKeys?.size && scanned === 0) reasons.push(`Fresh only is ON and ${opts.excludeKeys.size} previously-surfaced people are being excluded (uncheck it to see the full list again)`);
