@@ -18,7 +18,8 @@ export const runtime = "nodejs";
  * Engine call + contact column set live in lib/ostextImport.ts (shared with
  * the JD Sourcing "ostext" action).
  *
- * Body: { name, prospectIds?: string[], dataIds?: string[], template?, validate? }
+ * Body: { name, prospectIds?: string[], dataIds?: string[], template? }
+ * Telnyx cell-line validation always runs on arrival (safeguard, not optional).
  *   - prospectIds: campaign prospects (core.listProspects)
  *   - dataIds: Candidates data-warehouse records (lib/data) — the admin
  *     Candidates tab's SMS button sends these.
@@ -31,8 +32,6 @@ interface PushBody {
   dataIds?: string[];
   /** Optional SMS template override; defaults to a safe {first_name}-only starter. */
   template?: string;
-  /** Run OS Text's Telnyx mobile-line validation on the pushed contacts. */
-  validate?: boolean;
 }
 
 export async function POST(req: Request) {
@@ -120,7 +119,10 @@ export async function POST(req: Request) {
       recruiterName: recruiter,
       recruiterEmail: g.ctx.user.email || "",
       contacts,
-      validate: b?.validate === true,
+      // SAFEGUARD (user mandate): every pushed number gets Telnyx cell-line
+      // confirmation on arrival; only confirmed mobiles survive to be texted.
+      // Not client-controllable — the checkbox opt-out is gone on purpose.
+      validate: true,
     });
   } catch (e) {
     const err = e as Error & { code?: string };
