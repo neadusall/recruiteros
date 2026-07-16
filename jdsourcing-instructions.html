@@ -265,14 +265,14 @@
     <li class="step">
       <div class="step-num">2</div>
       <div>
-        <h4>Press Find candidates</h4>
+        <h4>Press Initiate Search</h4>
         <p>That one button runs the whole process: it writes the brief (if the JD box is empty), analyzes it into the ideal-candidate profile, searches, ranks the strongest matches to the top, and saves the finished list into "Your saved candidate lists" at the bottom of the page. The button narrates each stage as it works, and a progress bar tracks the scan.</p>
         <p class="fields">A cost pill next to the button shows the estimated spend for the run. When it says Done, the list is already saved: go straight to vetting, enrichment, or the push to Candidates.</p>
       </div>
     </li>
   </ol>
 
-  <p class="soft">Prefer to check the AI's work between stages? Open <span class="ui">Advanced</span> under the button. It has the same run broken into numbered steps (<span class="ui">1 · Analyze JD</span>, <span class="ui">2 · Find candidates</span>, <span class="ui">3 · Save the list</span>), so you can read the profile chips and refine them (section 6) before spending on a search.</p>
+  <p class="soft">Right above the button sits <strong>Set the depth of the search</strong>: the four choices that shape how wide the run goes (Scan up to, Min fit, Fresh only, Include out-of-area), each explained in place. The defaults are right for most roles; section 5 covers when to move them.</p>
 
   <h2 id="settings">5. The settings that shape a run</h2>
   <div class="tbl-wrap">
@@ -294,6 +294,11 @@
         <td>Off for the first run on a role. On for reruns and refreshes.</td>
       </tr>
       <tr>
+        <td><strong>Include out-of-area</strong></td>
+        <td>Keeps candidates whose profile shows a location outside the city and radius you set. By default they are dropped; people with no visible location are always kept.</td>
+        <td>On for remote roles or when relocation is on the table; off otherwise.</td>
+      </tr>
+      <tr>
         <td><strong>Radius</strong></td>
         <td>Expands the location beyond the exact metro by estimated drive distance, pulling in all surrounding cities within it.</td>
         <td>Most on-site roles deserve at least +25. Exact-metro-only searches quietly starve the list.</td>
@@ -310,10 +315,10 @@
     <li>"Add Stryker and Medtronic as target companies"</li>
     <li>"Widen to anyone with plant maintenance leadership, drop the PLC requirement"</li>
   </ul>
-  <p>Then run <span class="ui">Find candidates</span> again. Refine-then-rerun is cheap; hand-reviewing a mistargeted 500-person list is not.</p>
+  <p>Then press <span class="ui">Initiate Search</span> again; the refined profile drives the next run. Refine-then-rerun is cheap; hand-reviewing a mistargeted 500-person list is not.</p>
 
   <h3>Running several roles back to back</h3>
-  <p>Each run saves its list automatically, so batching a desk's worth of roles is just: fill in the role, press <span class="ui">Find candidates</span>, and while it runs start typing the next one. Every finished list lands in your saved lists with a downloadable spreadsheet of profile URLs, and from there it can push straight into OS Text as a ready-to-edit campaign (section 7).</p>
+  <p>Each run saves its list automatically, so batching a desk's worth of roles is just: fill in the role, press <span class="ui">Initiate Search</span>, and while it runs start typing the next one. Every finished list lands in your saved lists with a downloadable spreadsheet of profile URLs, and from there it can push straight into OS Text as a ready-to-edit campaign (section 7).</p>
   <p class="soft">A strong habit: run every new job order for the day in the morning, work replies and calls while they finish, then spend the afternoon on the ranked lists: vet, enrich, push to OS Text, and the texts go out the same day.</p>
 
   <h2 id="lists">7. Working a saved list</h2>
@@ -371,7 +376,7 @@
         <li>Stack must-haves. Three real ones beat eight aspirational ones; every extra one shrinks the pool.</li>
         <li>Add deal-breakers by default. They zero people out entirely.</li>
         <li>Judge a run by its bottom half. It is a ranked list; the bottom is supposed to be weaker.</li>
-        <li>Walk away from a step-by-step run without saving. The one-click button saves for you; the Advanced steps only save when you press <span class="ui">3 · Save the list</span>, and an unsaved run cannot be vetted, enriched, or pushed to Candidates.</li>
+        <li>Close the tab mid-run. The run needs the tab open; the button narrates each stage, so let it reach Done before moving on.</li>
         <li>Rerun a role without <span class="ui">Fresh only</span> and wonder why you know everyone on the list.</li>
       </ul>
     </div>
@@ -441,13 +446,13 @@ Qualifications &amp; Experience
     </div>
     <div class="ex-field" style="margin-bottom:0">
       <span class="ex-label">Search settings for this run</span>
-      <div class="ex-settings"><span>Scan up to <b>500</b></span><span>·</span><span>Min fit <b>10</b></span><span>·</span><span>Fresh only <b>off</b> (first run)</span><span>·</span><span>Then: press <span class="ui">Find candidates</span> and let it run</span></div>
+      <div class="ex-settings"><span>Scan up to <b>500</b></span><span>·</span><span>Min fit <b>10</b></span><span>·</span><span>Fresh only <b>off</b> (first run)</span><span>·</span><span>Then: press <span class="ui">Initiate Search</span> and let it run</span></div>
       <p class="ex-why">Defaults are right for this role. Wide first run; tighten later if Dallas turns out to be deep in finance leaders.</p>
     </div>
   </div>
 
   <h3>What Analyze should hand back</h3>
-  <p>The run shows the ideal-candidate profile as chips as soon as the analyze stage finishes (or run <span class="ui">1 · Analyze JD</span> under Advanced to check it before searching). For this role, good looks like:</p>
+  <p>The run shows the ideal-candidate profile as chips as soon as the analyze stage finishes. For this role, good looks like:</p>
   <ul>
     <li><strong>Titles:</strong> <span class="chip">VP of Finance</span> <span class="chip">Corporate Controller</span> <span class="chip">Director of Finance</span> <span class="chip">Head of Finance</span></li>
     <li><strong>Must-haves (three, not twelve):</strong> <span class="chip">High-volume AP/AR leadership</span> <span class="chip">ERP migration (QuickBooks to NetSuite)</span> <span class="chip">Scaled finance through $80M+ revenue</span></li>
@@ -471,7 +476,7 @@ Qualifications &amp; Experience
   <ul>
     <li>Recruiting workspace &gt; Build &gt; <span class="ui">JD Sourcing</span></li>
     <li>Fill the role fields, paste the real JD, set location plus a realistic radius, give it a consistent list name</li>
-    <li>Press <span class="ui">Find candidates</span>: it writes the brief, analyzes, searches, ranks, and saves the list in one run</li>
+    <li>Press <span class="ui">Initiate Search</span>: it writes the brief, analyzes, searches, ranks, and saves the list in one run</li>
     <li>Read the profile chips it showed along the way; if they are off, refine in plain English and rerun</li>
   </ul>
   <h3>Every saved list</h3>
