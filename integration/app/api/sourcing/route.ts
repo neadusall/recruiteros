@@ -41,6 +41,7 @@ import {
 } from "../../../lib/sourcing";
 import type { CandidateRow, SearchBreadth, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
+import { withWorkspaceCreds } from "../../../lib/connected";
 import { nowIso } from "../../../lib/core/ids";
 import { dbEnabled } from "../../../lib/db";
 import { ostextImport, ostextStarterTemplate, type OsTextContact } from "../../../lib/ostextImport";
@@ -145,16 +146,18 @@ export async function POST(req: Request) {
 
     /* Which discovery sources will actually run right now — the UI's "Search power"
      * readout, so a recruiter can SEE a missing key instead of finding out from a
-     * thin run. Keys pasted in Setup count (cred() is workspace-first). */
+     * thin run. MUST run inside withWorkspaceCreds: keys pasted in Setup live in the
+     * workspace store, and cred() only sees that store inside this wrapper — without
+     * it the readout (and the run below) silently ignored every Setup-pasted key. */
     if (action === "engines") {
-      return ok({
+      return ok(await withWorkspaceCreds(ws, async () => ({
         engines: {
           database: await koldinfoWorkerReady(),
           wideWeb: serperSearchConfigured(),
           freeWeb: googleSearchConfigured() || searxSearchConfigured(),
           peopleApi: rapidApiSearchConfigured(),
         },
-      });
+      })));
     }
 
     if (action === "draft") {
@@ -183,7 +186,10 @@ export async function POST(req: Request) {
       const queries = generateQueries(icp, { breadth });
       // Cross-run "seen" memory: fresh-only excludes anyone surfaced in prior runs.
       const excludeKeys = b.freshOnly === true ? await getSeenKeys(ws) : undefined;
-      const result = await runDiscovery(queries, icp, {
+      // withWorkspaceCreds: the engines read their keys via cred(), which only sees
+      // Setup-pasted (workspace-store) keys inside this wrapper. Without it a Serper/
+      // RapidAPI key saved in Setup was invisible to the actual search (env-only).
+      const result = await withWorkspaceCreds(ws, () => runDiscovery(queries, icp, {
         cap: typeof b.cap === "number" ? b.cap : 500,
         minFit: typeof b.minFit === "number" ? b.minFit : 10,
         breadth,
@@ -192,7 +198,7 @@ export async function POST(req: Request) {
         // OPT-IN: the separate out-of-area list only when the recruiter asked for it,
         // so a geo'd run stays geo-only (and credit-safe) by default.
         keepOutOfArea: b.outsideGeo === true,
-      });
+      }));
       // Remember who we surfaced so a later fresh-only run skips them.
       await addSeenKeys(ws, result.candidates.map(candKey));
       return ok({ icp, queries, ...result, freshOnly: b.freshOnly === true });
@@ -215,7 +221,9 @@ export async function POST(req: Request) {
     }
 
     if (action === "bulkStep") {
-      const r = await stepBulkList(ws, typeof b.maxRequests === "number" ? b.maxRequests : 6);
+      // Same withWorkspaceCreds rule as "run": the step's people-search calls read
+      // their keys via cred(), which misses Setup-pasted keys outside this wrapper.
+      const r = await withWorkspaceCreds(ws, () => stepBulkList(ws, typeof b.maxRequests === "number" ? b.maxRequests : 6));
       return ok(r);
     }
 
@@ -235,7 +243,7 @@ export async function POST(req: Request) {
     }
 
     if (action === "companyStep") {
-      const r = await stepCompanyFirst(ws, typeof b.maxRequests === "number" ? b.maxRequests : 8);
+      const r = await withWorkspaceCreds(ws, () => stepCompanyFirst(ws, typeof b.maxRequests === "number" ? b.maxRequests : 8));
       return ok(r);
     }
 
