@@ -244,4 +244,12 @@ export interface DiscoveryOptions {
    * pinned an explicit hiring location.
    */
   strictGeo?: boolean;
+  /**
+   * OPT-IN: also return the out-of-area people as a separate marked block after the
+   * in-area list. OFF by default so a geo'd run stays geo-only and downstream paid
+   * steps (deep-vet, enrichment credits) are never spent on non-locals unless the
+   * recruiter explicitly asked to see them. When off, out-of-area rows are dropped
+   * (still buffered for the never-empty rescue).
+   */
+  keepOutOfArea?: boolean;
 }

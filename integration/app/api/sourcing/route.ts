@@ -163,6 +163,9 @@ export async function POST(req: Request) {
         minFit: typeof b.minFit === "number" ? b.minFit : 10,
         excludeKeys,
         strictGeo: b.strictGeo !== false && Boolean(((b.location as string) || "").trim()),
+        // OPT-IN: the separate out-of-area list only when the recruiter asked for it,
+        // so a geo'd run stays geo-only (and credit-safe) by default.
+        keepOutOfArea: b.outsideGeo === true,
       });
       // Remember who we surfaced so a later fresh-only run skips them.
       await addSeenKeys(ws, result.candidates.map(candKey));
