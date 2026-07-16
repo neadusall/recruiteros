@@ -216,9 +216,11 @@ async function sweepMailbox(workspaceId: string, cfg: InboxConfig): Promise<Swee
       const uidValidity = String((client.mailbox as any)?.uidValidity ?? "");
       const seenKey = (uid: number) => `${workspaceId}:${uidValidity}:${uid}`;
       // A processed message is removed, so the INBOX is the queue. Everything
-      // not yet deleted is fair game; cap per sweep to stay polite.
+      // not yet deleted is fair game; cap per sweep to stay polite. NEWEST
+      // first: on a busy personal mailbox the fresh resumes must always make
+      // the window, even if old unrelated mail never leaves the inbox.
       const uids = await client.search({ deleted: false }, { uid: true });
-      const batch = (uids || []).slice(0, 25);
+      const batch = (uids || []).slice(-25).reverse();
       for (const uid of batch) {
         checked += 1;
         let entry: InboxLogEntry | null = null;
