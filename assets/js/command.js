@@ -10200,12 +10200,11 @@
         return;
       }
       el.innerHTML = quotas.map(function (q) {
-        var name = String(q.host || "").replace(/\.p\.rapidapi\.com$/i, "");
-        var bits = "Live balance for the " + (q.host || "") + " subscription (RapidAPI), read from its most recent response" +
+        var bits = "Live credit balance for your people-search subscription, read from its most recent response" +
           (q.updatedAt ? " on " + new Date(q.updatedAt).toLocaleString() : "") + "." +
           (q.resetAt ? " The allowance resets " + new Date(q.resetAt).toLocaleDateString() + "." : "");
         return '<span class="jd-qchip" title="' + esc(bits) + '"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>' +
-          esc(name) + ': ' + (q.used || 0).toLocaleString() + ' used · ' + (q.remaining || 0).toLocaleString() + ' left</span>';
+          'Credits used: ' + (q.used || 0).toLocaleString() + ' · Credits left: ' + (q.remaining || 0).toLocaleString() + '</span>';
       }).join("");
     }
 
