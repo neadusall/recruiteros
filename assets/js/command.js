@@ -9920,8 +9920,6 @@
       '.jd-prog.done .jd-prog-dot{animation:none;background:var(--ok)}' +
       '.jd-prog.done .jd-prog-fill{animation:none;background:var(--ok)}' +
       '.jd-cardhead{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}' +
-      '.jd-vetctl{display:inline-flex;align-items:center;gap:9px;font-size:13px;color:var(--text-muted)}' +
-      '.jd-vetctl input{width:54px;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:13px;padding:5px 7px;text-align:center}' +
       '.jd-ratelink{background:none;border:0;color:var(--text-dim);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0}' +
       '.jd-ratelink:hover{color:var(--brand-2)}' +
       '.jd-rates{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:11px 0 0;padding:10px 13px;background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;font-size:12.5px;color:var(--text-muted)}' +
@@ -10022,24 +10020,21 @@
       '.jd-eng.on .jd-eng-dot{background:var(--ok)}' +
       '.jd-opt2-def{font-size:12px;color:var(--text-muted);line-height:1.5;margin-top:4px}' +
                         '</style>' +
-      head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
+      head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → the finished list enriches itself and lands in Candidates and OS Text automatically.") +
       '<details class="jd-tipsd jd-help"><summary>How this works <span class="muted">what each step, setting, and button does</span></summary>' +
         '<div class="jd-helpbody">' +
           '<div class="jd-helpsec"><h5>The flow: two clicks, start to saved list</h5>' +
             '<p><b>1 &middot; Fill in the role</b>: Job title plus anything you know. Pasting a JD is optional; the AI writes a strong brief from the fields alone.</p>' +
             '<p><b>2 &middot; Press Initiate Search</b>: That one button runs everything: writes the brief (if the JD box is empty), builds the ideal-candidate profile, searches, ranks the strongest matches to the top, and saves the finished list below. There is nothing else to press.</p>' +
-            '<p>When it says Done, scroll to <b>Your saved candidate lists</b> and act on it: deep-vet, enrich, then send to Candidates or straight to OS Text.</p>' +
+            '<p>Then the list keeps working on its own: contact info is enriched (emails and phones, cheapest source first), everyone lands in the <b>Candidates</b> tab under the same list name, and an <b>OS Text</b> SMS campaign is built from everyone with a phone number, ready to review and launch. No buttons, no extra steps.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>Set the depth of the search</h5>' +
             '<p>The options above the button shape how wide a run goes; each is explained right where it sits. The defaults (Balanced breadth, scan 500, min fit 10, both boxes off) are right for most roles. Pick <b>Wide net</b> when you want the biggest possible pool: it runs every title variation, digs deeper on every search, and catches people whose profiles word the location differently, while the same location rules and ranking keep the list honest.</p>' +
             '<p><b>Dive deeper / Refine</b>: After a run, type a plain instruction (e.g. "only Director and up in medical devices, exclude agencies") to tighten or widen the profile, then press Initiate Search again; the refined profile drives the next run.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>On a saved list</h5>' +
-            '<p><b>Deep-vet top (number)</b>: Reads that many top candidates\' full work history against the role and gives each a verified score and a short verdict. Each list has its own number, so you can vet 10 on one list and 50 on another; the price pill next to it updates as you type.</p>' +
-            '<p><b>Enrich</b>: One click fills business email and phone for the whole list. Behind the scenes it always runs cheapest-first: the free KoldInfo pass grabs every email it can, then Laxis adds the remaining emails and cellphones, then the in-house waterfall fills any gaps. Nothing to download or import.</p>' +
-            '<p><b>Send to Candidates</b>: Pushes the list into the Candidates tab (sidebar, under Build) under the same name, ready to drop into a campaign.</p>' +
-            '<p><b>Send to OS Text</b>: Builds an SMS campaign in OS Text from everyone on the list with a phone number. Contacts arrive formatted (first name, last name, company, title, location, email, LinkedIn URL) so every {token} fills in, with a starter message prefilled; you polish and launch inside OS Text.</p>' +
-            '<p><b>Delete</b>: Removes the saved list. The people themselves are not deleted.</p>' +
+            '<p>Everything after the search is automatic. Enrichment fills business emails and phones cheapest-first (the free KoldInfo pass, then Laxis, then the in-house waterfall), the whole list is pushed into the <b>Candidates</b> tab (sidebar, under Build) under the same name, and an <b>OS Text</b> campaign is created from everyone with a phone number: contacts arrive formatted (first name, last name, company, title, location, email, LinkedIn URL) so every {token} fills in, with a starter message prefilled. Telnyx confirms every number on arrival; only real cell lines are kept for texting, and anyone already in an ATS conversation is protected from double-contact.</p>' +
+            '<p><b>Delete</b>: The only list button. Removes the saved list; the people themselves are not deleted.</p>' +
           '</div>' +
         '</div>' +
       '</details>' +
@@ -10219,7 +10214,7 @@
         var warn = (d && d.durable === false)
           ? '<div class="card" style="border-color:#c0392b;background:#2a1414"><b>Saved lists are NOT being stored durably.</b><br><span class="muted">The server is running in memory-only mode, so saved searches will be lost on the next restart. Don\'t rely on saving until this is fixed (check the /data volume / persistence config).</span></div>'
           : '';
-        if (!runs.length) { host.innerHTML = warn + '<p class="muted">No saved lists yet. Fill in the role above and press Initiate Search; the finished list lands here automatically.</p>'; return; }
+        if (!runs.length) { host.innerHTML = warn + '<p class="muted">No saved lists yet. Fill in the role above and press Initiate Search; the finished list lands here automatically, gets its contact info enriched, and is sent to Candidates and OS Text on its own.</p>'; return; }
         host.innerHTML = warn + runs.map(function (r) {
           var n = r.candidates ? r.candidates.length : 0;
           var outN = (r.candidates || []).filter(function (c) { return c.outOfArea; }).length;
@@ -10247,19 +10242,12 @@
             (outN ? ((n - outN) + ' in area + ' + outN + ' out of area') : (n + ' candidates')) + ' · ' + urls + ' with LinkedIn URL' +
             (vetted ? (' · ' + vetted + ' deep-vetted') : '') +
             (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates · <a href="#prospects" data-openlist="' + esc(r.promotedListId || "") + '">Open in Candidates →</a>') : '') + '</span></div></div>' +
+            // HANDS-FREE (user mandate): enrich + Send to Candidates + Send to OS Text all
+            // run automatically when a search finishes, so Delete is the ONLY list action.
             '<div class="jd-run-actions">' +
-              '<span class="jd-vetctl" title="Deep-vet reads each candidate\'s full career history against the role and returns a verified fit score and verdict. The number picks how many from the top of this list.">Deep-vet top ' +
-                '<input type="number" class="jd-vettop" min="1" max="200" value="' + Math.min(25, Math.max(1, n)) + '">' +
-                '<button class="btn btn-ghost btn-sm" data-vet="' + esc(r.id) + '">Deep-vet</button>' +
-                '<span class="jd-cost jd-vetcost"></span></span>' +
-              '<button class="btn btn-primary btn-sm" data-autoenrich="' + esc(r.id) + '" title="One click, fully automated: the free KoldInfo pass fills emails first, then Laxis adds the remaining emails + cellphones, then the in-house waterfall fills any gaps. No CSV downloads, no drag and drop.">Enrich</button>' +
-              '<button class="btn btn-primary btn-sm" data-promote="' + esc(r.id) + '">Send to Candidates →</button>' +
-              '<button class="btn btn-ghost btn-sm" data-ostext="' + esc(r.id) + '" title="Builds an OS Text SMS campaign from everyone on this list who has a phone number: contacts land formatted (first name, last name, company, title, location) with a starter message prefilled, ready to review and launch.">Send to OS Text</button>' +
               '<button class="btn btn-ghost btn-sm" data-del="' + esc(r.id) + '">Delete</button>' +
             '</div></div>';
         }).join("");
-        // Live per-list cost estimate next to each Deep-vet control.
-        Array.prototype.forEach.call(host.querySelectorAll(".jd-vettop"), updateVetCostFor);
         // Re-render clears the combine ticks; reset the button to match.
         syncCombine();
       }).catch(function () { var host = $("#jdRuns"); if (host) host.innerHTML = '<p class="muted">Could not load saved lists.</p>'; });
@@ -10297,7 +10285,7 @@
         instead of a naked number. Real error strings pass through unchanged. */
     function gatewayMsg(err) {
       return (err === 502 || err === 503 || err === 504)
-        ? err + " (the server was updating or briefly unreachable).\n\nNothing is lost: wait a minute and press Enrich again; it resumes exactly where it stopped."
+        ? err + " (the server was updating or briefly unreachable).\n\nNothing is lost: everything enriched so far is saved on the list."
         : err;
     }
 
@@ -10305,7 +10293,7 @@
        Submit a 1,000-row chunk, poll laxisStatus until merged (which also runs the
        in-house gap-fill waterfall), auto-continue to the next chunk. `t` is the button
        driving the run; `resetLabel` is what it reads when the chain ends. */
-    function runLaxisChain(lid, t, resetLabel, base) {
+    function runLaxisChain(lid, t, resetLabel, base, onDone) {
       var lxT = { emails: (base && base.emails) || 0, phones: (base && base.phones) || 0, gap: 0, chunks: 0 };
       t.disabled = true; t.textContent = "Enriching…";
       function laxisReset() { t.disabled = false; t.textContent = resetLabel; }
@@ -10317,6 +10305,8 @@
         var added = lxT.emails + " email" + (lxT.emails === 1 ? "" : "s") +
           " + " + lxT.phones + " phone" + (lxT.phones === 1 ? "" : "s") +
           (lxT.gap ? (" + " + lxT.gap + " gap-filled") : "") + " added";
+        // Pipeline mode: hand straight off to the auto-send stage, it owns the bar now.
+        if (onDone) { onDone(true, added); return; }
         Promise.resolve(loadRuns()).then(function () {
           var run = (state.runs || []).find(function (r) { return r.id === lid; });
           var cs = (run && run.candidates) || [];
@@ -10328,9 +10318,12 @@
         });
       }
       var lostJobRetries = 0;
+      // Any hard stop in pipeline mode still hands off (onDone(false)): the list is
+      // sent to Candidates + OS Text with whatever contact info it has so far.
+      function laxisBail() { if (onDone) onDone(false, ""); }
       function pollLaxis() {
         sendPatient("/sourcing", "POST", { action: "laxisStatus", id: lid }).then(function (s) {
-          if (!s.ok) { laxisReset(); finishProgress("Enrichment stopped"); alert("Enrichment status check failed: " + ((s.data && s.data.error) || gatewayMsg(s.status))); return; }
+          if (!s.ok) { laxisReset(); finishProgress("Enrichment stopped"); alert("Enrichment status check failed: " + ((s.data && s.data.error) || gatewayMsg(s.status))); laxisBail(); return; }
           if (!s.data.done) { setTimeout(pollLaxis, 10000); return; }
           if (s.data.status === "error") {
             var why = (s.data.warnings || []).join("\n");
@@ -10347,7 +10340,7 @@
             laxisReset(); finishProgress("Enrichment stopped");
             alert("Enrichment failed:\n" + (why || "unknown error") +
               "\n\nIf this mentions a selector (CALIBRATE), the Laxis UI changed and the worker needs re-calibrating." +
-              "\n\nAlready-enriched batches are saved, press Enrich again to resume from where it stopped."); loadRuns(); return;
+              "\n\nAlready-enriched batches are saved; the list is sent on to Candidates and OS Text with what it has."); loadRuns(); laxisBail(); return;
           }
           var lx = s.data.laxis || {}; var gf = s.data.gapFill || {};
           lxT.emails += lx.emails || 0; lxT.phones += lx.phones || 0; lxT.gap += gf.enriched || 0;
@@ -10364,9 +10357,9 @@
             laxisReset(); finishProgress("Enrichment stopped");
             var err = (r.data && r.data.error) || r.status;
             if (err === "laxis_worker_not_configured") {
-              alert("Laxis isn't connected yet.\n\nOn the server, set LAXIS_EMAIL and LAXIS_PASSWORD in .env.production (the laxis-worker logs into Laxis with them), confirm LAXIS_WORKER_URL is set on the app, then redeploy."); return;
+              alert("Laxis isn't connected yet.\n\nOn the server, set LAXIS_EMAIL and LAXIS_PASSWORD in .env.production (the laxis-worker logs into Laxis with them), confirm LAXIS_WORKER_URL is set on the app, then redeploy."); laxisBail(); return;
             }
-            alert("Enrich failed: " + gatewayMsg(err) + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
+            alert("Enrich failed: " + gatewayMsg(err) + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); laxisBail(); return;
           }
           // Chunk already enriched (resume landed on a done offset) → skip ahead or finish.
           if (r.data.alreadyDone) {
@@ -10386,8 +10379,10 @@
        the same Laxis chunk chain as the manual button, which ends with the in-house
        gap-fill waterfall. If the KoldInfo rung is unavailable or has nothing to do, the
        chain skips straight to Laxis, so the free-first order is enforced either way. */
-    function runAutoEnrich(aid, aBtn) {
-      aBtn.disabled = true; aBtn.textContent = "Enriching…";
+    function runAutoEnrich(aid, onDone) {
+      // No button drives this anymore (the whole chain runs automatically after a
+      // search); the chain still writes its state into this stand-in object.
+      var aBtn = { disabled: false, textContent: "" };
       // One progress bar for the whole chain; the stages run silently and the
       // finished list is the announcement. ETA is rough: worker time scales with rows.
       var arun = (state.runs || []).find(function (r) { return r.id === aid; });
@@ -10395,7 +10390,7 @@
       showProgress('Enriching "' + ((arun && arun.name) || "the list") + '"', 60 + aRows * 2, "Working…");
       var kold = { emails: 0, phones: 0 };
       var koldRetried = false, koldDbRetried = false;
-      function stageLaxis() { runLaxisChain(aid, aBtn, "Enrich", kold); }
+      function stageLaxis() { runLaxisChain(aid, aBtn, "Enrich", kold, onDone); }
       // Rung 2 of the free KoldInfo pass: the name + city/state DB lookup. It needs no
       // LinkedIn URL, so it fills the candidates the LinkedIn-URL enrichment could not.
       // Its hits ADD to the LinkedIn rung's before the chain hands off to Laxis. Any
@@ -10443,44 +10438,66 @@
         if (!r.ok) {
           var err = (r.data && r.data.error) || r.status;
           if (err === "koldinfo_worker_not_configured") { stageKoldDb(); return; }
-          aBtn.disabled = false; aBtn.textContent = "Enrich";
           finishProgress("Enrich could not start");
-          alert("Enrich failed to start: " + gatewayMsg(err) + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
+          alert("Enrich failed to start: " + gatewayMsg(err) + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : ""));
+          if (onDone) onDone(false, ""); return;
         }
         if (r.data.nothingMissing) { stageKoldDb(); return; }
         setTimeout(pollKold, 8000);
       }).catch(function () {
-        aBtn.disabled = false; aBtn.textContent = "Enrich";
         finishProgress("Enrich stopped");
         alert("Could not reach the server.");
+        if (onDone) onDone(false, "");
       });
     }
 
-    /* ---- Live deep-vet cost estimate (updates as the toggle / rates move) ----
-       Per candidate: one Claude Sonnet 4.6 call (~2.5k input + ~0.45k output, fixed)
-       plus one RapidAPI profile lookup (rate you set, provider-specific). Plus a flat
-       monthly RapidAPI plan cost. Sonnet rates: $3 / 1M input, $15 / 1M output. */
-    /* Cost model, priced on the live tool (Linkedin Data Scraper API, Pro $50 / 10k
-       requests ≈ $0.005 per call). One request = one call: a search call returns a
-       batch; a profile lookup is one call per candidate. Claude Sonnet 4.6 = $3/$15 per
-       1M tokens; a deep-vet call is ~2.5k in + ~0.45k out ≈ $0.0143. */
-    var VET = { inTok: 2500, outTok: 450, inUsd: 3 / 1e6, outUsd: 15 / 1e6 };
-    function vetLlmPer() { return VET.inTok * VET.inUsd + VET.outTok * VET.outUsd; }
+    /* ---- HANDS-FREE PIPELINE (user mandate): a finished search flows on by itself ----
+       enrich (KoldInfo free pass → Laxis → in-house waterfall) → Send to Candidates →
+       Send to OS Text, no buttons, no modals, no questions. The list name is the
+       Candidates list name, the tag, and the OS Text campaign name. If enrichment
+       hits a hard stop the list is still sent on with whatever contact info it has. */
+    function runAutoPipeline(id, name) {
+      runAutoEnrich(id, function (enrichOk, added) {
+        autoSendList(id, name, enrichOk ? added : "");
+      });
+    }
+    function autoSendList(id, name, added) {
+      showProgress('Sending "' + name + '" on', 30, "Sending to Candidates…");
+      var bits = added ? [added] : [];
+      sendPatient("/sourcing", "POST", { action: "promote", id: id, listName: name, tag: "" }).then(function (p) {
+        if (p.ok) {
+          // Remember the new list so the Candidates tab opens straight onto it.
+          try { if (p.data.listId) sessionStorage.setItem("ros_open_list", p.data.listId); } catch (err) {}
+          bits.push("sent " + (p.data.added || 0) + " to Candidates" + (p.data.deduped ? (" (" + p.data.deduped + " already in pipeline)") : ""));
+        } else {
+          bits.push("Candidates push failed: " + ((p.data && (p.data.detail || p.data.error)) || p.status));
+        }
+        setProgPhase("Building the OS Text campaign…");
+        return sendPatient("/sourcing", "POST", { action: "ostext", id: id, name: name });
+      }).then(function (o) {
+        var d = (o && o.data) || {};
+        if (o && o.ok) {
+          bits.push('OS Text campaign "' + (d.campaignName || name) + '" ready with ' + (d.added || d.pushed || 0) +
+            (d.noPhone ? (", " + d.noPhone + " skipped (no phone)") : "") +
+            ((d.protectedDnc || d.protectedRecent) ? (", " + ((d.protectedDnc || 0) + (d.protectedRecent || 0)) + " protected (already in an ATS conversation)") : ""));
+          if (d.validation === "blocked_no_qstash") bits.push("WARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed");
+        } else if (d.error === "no_contacts_with_phone") {
+          bits.push("OS Text skipped: nobody on this list has a phone number yet");
+        } else {
+          bits.push("OS Text push failed: " + ((d.detail || d.error) || (o && o.status)));
+        }
+        finishProgress('Done · "' + name + '" sent to Candidates and OS Text');
+        toast(bits.join(" · ") + ". Review and launch the texts in the OS Text tab.");
+        loadRuns();
+      }).catch(function () {
+        finishProgress("Sending stopped");
+        toast('"' + name + '" is saved below, but sending it on failed (could not reach the server).');
+        loadRuns();
+      });
+    }
+
     function numVal(id, dflt) { var e = $(id); var v = e ? parseFloat(e.value) : NaN; return isFinite(v) && v >= 0 ? v : dflt; }
     function bump(el) { if (!el) return; el.classList.add("bump"); setTimeout(function () { el.classList.remove("bump"); }, 130); }
-    /** Per-list deep-vet cost pill: reads the row's own "Deep-vet top" input. */
-    function updateVetCostFor(topEl) {
-      if (!topEl) return;
-      var grp = topEl.closest(".jd-vetctl");
-      var el = grp ? grp.querySelector(".jd-vetcost") : null; if (!el) return;
-      var n = Math.max(0, parseInt(topEl.value, 10) || 0);
-      var prof = numVal("#jdProfUsd", 0.005);
-      if (!n) { el.textContent = ""; return; }
-      var run = n * (vetLlmPer() + prof);
-      el.textContent = "≈ $" + run.toFixed(2) + " / run";
-      el.title = "Top " + n + ": AI vetting $" + (n * vetLlmPer()).toFixed(2) + " + " + n + " profile lookups $" + (n * prof).toFixed(2);
-      bump(el);
-    }
     /** Search-run cost (people-search requests + the one Haiku JD parse), shown by Find. */
     function updateRunCost() {
       var el = $("#jdRunCost"); if (!el) return;
@@ -10605,6 +10622,13 @@
         return send("/sourcing", "POST", { action: "rerank", id: savedId, top: 100 }).catch(function () { return null; });
       }).then(function () {
         reset();
+        // 6) Hands-free: the saved list enriches itself and lands in Candidates and
+        // OS Text on its own; the progress bar rolls straight into those stages.
+        if (savedId) {
+          msg('"' + runName + '" is saved below with ' + state.candidates.length + " candidates, strongest first. Enriching contact info and sending everyone to Candidates and OS Text automatically…");
+          Promise.resolve(loadRuns()).then(function () { runAutoPipeline(savedId, runName); });
+          return;
+        }
         finishProgress('Done · "' + runName + '" saved with ' + state.candidates.length + " candidates");
         msg('"' + runName + '" is saved below with ' + state.candidates.length + " candidates, strongest first.");
         loadRuns();
@@ -10699,126 +10723,12 @@
       }
       if (t.tagName !== "BUTTON") return;
       var id;
-      if ((id = t.getAttribute("data-promote"))) {
-        var prun = (state.runs || []).find(function (r) { return r.id === id; });
-        var defName = (prun && prun.name) || "";
-        var btn = t;
-        openModal("Send to Candidates", "They land in the Candidates tab (sidebar, under Build) as a saved list with this name. The tag is optional; it defaults to the list name.",
-          '<label class="fld"><span>Candidate list name</span>' +
-            '<input id="promoteList" type="text" value="' + esc(defName) + '" placeholder="e.g. VP Operations, Alegria" /></label>' +
-          '<label class="fld"><span>Tag <span class="muted">(optional, defaults to the list name)</span></span>' +
-            '<input id="promoteTag" type="text" placeholder="e.g. q3-leadership" /></label>' +
-          '<div class="modal-foot"><button class="btn btn-primary" id="promoteGo">Send to Candidates →</button></div>',
-          function (card, close) {
-            var nameEl = card.querySelector("#promoteList");
-            if (nameEl) nameEl.focus();
-            card.querySelector("#promoteGo").addEventListener("click", function () {
-              var listName = (nameEl && nameEl.value.trim()) || defName;
-              if (!listName) { nameEl.focus(); return; }
-              var tag = (card.querySelector("#promoteTag").value || "").trim();
-              close();
-              btn.disabled = true; btn.textContent = "Sending…";
-              send("/sourcing", "POST", { action: "promote", id: id, listName: listName, tag: tag }).then(function (r) {
-                if (!r.ok) { btn.disabled = false; btn.textContent = "Send to Candidates →"; alert("Promote failed: " + ((r.data && r.data.error) || r.status)); return; }
-                // Remember the new list so the Candidates tab opens straight onto it.
-                try { if (r.data.listId) sessionStorage.setItem("ros_open_list", r.data.listId); } catch (err) {}
-                toast('Sent ' + r.data.added + ' to Candidates as "' + r.data.name + '"' + (r.data.deduped ? (' (' + r.data.deduped + ' already in pipeline)') : '') + '. Open the Candidates tab to see them.'); loadRuns();
-              });
-            });
-          });
-      } else if ((id = t.getAttribute("data-vet"))) {
-        // Per-list control: the number input sits in the same row as this button.
-        var vrow = t.closest(".jd-run");
-        var topEl = vrow ? vrow.querySelector(".jd-vettop") : null;
-        var top = topEl ? Math.max(1, Math.min(200, parseInt(topEl.value, 10) || 25)) : 25;
-        var vid = id;
-        var pendingCacheHits = 0; // profile lookups served from cache at submit time
-        t.disabled = true; t.textContent = "Vetting…";
-        showProgress("Deep-vetting top " + top, top * 3, "Working…");
-        // Quiet finish shared by the batch and synchronous paths: the bar's final
-        // label carries the count and the re-sorted list is the result. No popup.
-        function vetDone(d) {
-          t.disabled = false; t.textContent = "Deep-vet";
-          finishProgress("Done · deep-vetted " + (d.vetted || 0) + ", strongest on top");
-          if (!d.deep) toast("Vetted on surface fields only. Add the deep-vet profile endpoint in Setup to read full work history.");
-          loadRuns();
-        }
-        // Poll the in-flight batch every 10s until it ends, then ingest + finish.
-        function pollVet(batched) {
-          send("/sourcing", "POST", { action: "vetStatus", id: vid }).then(function (s) {
-            if (!s.ok) { t.disabled = false; t.textContent = "Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet status check failed: " + ((s.data && s.data.error) || s.status)); return; }
-            if (!s.data.done) {
-              var c = s.data.counts || {}; var got = (c.succeeded || 0) + (c.errored || 0);
-              if (got) setProgPhase(got + " of " + top + " scored");
-              setTimeout(function () { pollVet(batched); }, 10000); return;
-            }
-            vetDone({ vetted: s.data.vetted, deep: s.data.deep, warnings: s.data.warnings, profileCacheHits: pendingCacheHits, batched: true });
-          });
-        }
-        send("/sourcing", "POST", { action: "vet", id: vid, top: top }).then(function (r) {
-          if (!r.ok) { t.disabled = false; t.textContent = "Deep-vet"; finishProgress("Deep-vet failed"); alert("Deep-vet failed: " + ((r.data && r.data.error) || r.status)); return; }
-          if (r.data.batched) {
-            pendingCacheHits = r.data.profileCacheHits || 0;
-            setTimeout(function () { pollVet(true); }, 8000);
-          } else {
-            vetDone({ vetted: r.data.vetted, deep: r.data.deep, warnings: r.data.warnings, profileCacheHits: r.data.profileCacheHits || 0, batched: false });
-          }
-        });
-      } else if ((id = t.getAttribute("data-autoenrich"))) {
-        // The one Enrich button: fully automated chain, the FREE KoldInfo email pass
-        // first (browser worker), then the Laxis pass (emails + cellphones), then the
-        // in-house gap-fill waterfall. One click, no CSV round-trips, and the
-        // cheap-first order is enforced by the chain itself.
-        runAutoEnrich(id, t);
-      } else if ((id = t.getAttribute("data-ostext"))) {
-        // Push this list straight into an OS Text SMS campaign: only candidates with a
-        // phone go over, each fully formatted (first/last name, company, title,
-        // location, email, LinkedIn URL) so every {token} in the text fills in.
-        var orun = (state.runs || []).find(function (r) { return r.id === id; });
-        var oAll = (orun && orun.candidates) ? orun.candidates.length : 0;
-        var oPhones = orun ? (orun.candidates || []).filter(function (c) { return c.phone; }).length : 0;
-        var oBtn = t, oId = id;
-        openModal("Send to OS Text", "Creates (or tops up) an OS Text SMS campaign from this list, message prefilled and every merge field formatted. You review and launch inside OS Text.",
-          '<label class="fld"><span>Campaign name</span>' +
-            '<input id="osxRunName" type="text" value="' + esc((orun && orun.name) || "") + '" placeholder="e.g. CFO, Wastes Solutions" /></label>' +
-          '<div class="muted" style="font-size:12.5px;margin:6px 0 2px">' +
-            oPhones + " of " + oAll + " candidates on this list have a phone number; only those are sent" +
-            (oPhones < oAll ? " (press Enrich first to fill in more)" : "") + ".</div>" +
-          '<div class="muted" style="font-size:12.5px;margin:8px 0 2px">Safeguard: Telnyx checks every number on arrival. Only numbers confirmed as cell lines are kept for texting; landlines and unverifiable numbers are removed automatically.</div>' +
-          '<div class="modal-foot"><button class="btn btn-primary" id="osxRunGo">Send to OS Text →</button></div>',
-          function (card, close) {
-            var nameEl = card.querySelector("#osxRunName"); if (nameEl) nameEl.focus();
-            card.querySelector("#osxRunGo").addEventListener("click", function () {
-              var nm = (nameEl && nameEl.value.trim()) || "";
-              if (!nm) { if (nameEl) nameEl.focus(); return; }
-              var goBtn = card.querySelector("#osxRunGo");
-              goBtn.disabled = true; goBtn.textContent = "Sending…";
-              send("/sourcing", "POST", { action: "ostext", id: oId, name: nm }).then(function (r) {
-                if (!r.ok) {
-                  goBtn.disabled = false; goBtn.textContent = "Send to OS Text →";
-                  alert("Send to OS Text failed: " + ((r.data && (r.data.detail || r.data.error)) || r.status)); return;
-                }
-                close();
-                var d = r.data || {};
-                toast('OS Text campaign "' + (d.campaignName || nm) + '" is ready: ' + (d.added || d.pushed || 0) + ' added' +
-                  (d.noPhone ? (", " + d.noPhone + " skipped (no phone)") : "") +
-                  ((d.protectedDnc || d.protectedRecent) ? (", " + ((d.protectedDnc || 0) + (d.protectedRecent || 0)) + " protected (already in an ATS conversation)") : "") +
-                  ". Review and launch in the OS Text tab." + (d.validation === "blocked_no_qstash" ? " WARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? " Telnyx is confirming cell lines now; anything that is not a cell is removed automatically." : "")));
-              }).catch(function () {
-                goBtn.disabled = false; goBtn.textContent = "Send to OS Text →";
-                alert("Could not reach the server.");
-              });
-            });
-          });
-      } else if ((id = t.getAttribute("data-del"))) {
+      // Enrich + Send to Candidates + Send to OS Text run automatically when a search
+      // finishes (runAutoPipeline), so Delete is the only per-list button left.
+      if ((id = t.getAttribute("data-del"))) {
         if (!confirm("Delete this saved list?")) return;
         send("/sourcing", "POST", { action: "delete", id: id }).then(loadRuns);
       }
-    });
-
-    // Per-list deep-vet cost pills live inside #jdRuns (rows re-render), so delegate.
-    $("#jdRuns").addEventListener("input", function (e) {
-      if (e.target && e.target.classList && e.target.classList.contains("jd-vettop")) updateVetCostFor(e.target);
     });
 
     /* ---- Combine lists: tick 2+ saved lists, merge into ONE deduped master list ----
