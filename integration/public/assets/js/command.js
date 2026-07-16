@@ -8897,17 +8897,6 @@
       '.jd-helpsec h5{margin:0 0 7px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:600}' +
       '.jd-helpsec p{margin:0 0 8px;font-size:12.5px;color:var(--text-muted);line-height:1.5}' +
       '.jd-helpsec p b{color:var(--text)}' +
-      '.jd-steps{display:flex;gap:0;margin:0 0 14px;padding:0;list-style:none}' +
-      '.jd-step{flex:1;position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;padding:0 6px}' +
-      '.jd-step:not(:last-child)::after{content:"";position:absolute;top:15px;left:calc(50% + 19px);right:calc(-50% + 19px);height:2px;background:var(--border-strong);transition:background .2s}' +
-      '.jd-step.done::after{background:var(--brand)}' +
-      '.jd-step-n{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;background:var(--bg-soft);border:2px solid var(--border-strong);color:var(--text-muted);position:relative;z-index:1;transition:all .2s}' +
-      '.jd-step.active .jd-step-n{border-color:var(--brand);color:var(--brand-2);box-shadow:0 0 0 4px color-mix(in srgb,var(--brand) 16%,transparent)}' +
-      '.jd-step.done .jd-step-n{background:var(--brand);border-color:var(--brand);color:#fff}' +
-      '.jd-step-l{font-size:12px;font-weight:600;margin-top:7px;color:var(--text-muted)}' +
-      '.jd-step.active .jd-step-l,.jd-step.done .jd-step-l{color:var(--text)}' +
-      '.jd-step-s{font-size:11px;color:var(--text-dim);margin-top:2px;line-height:1.3}' +
-      '@media(max-width:680px){.jd-step-s{display:none}.jd-step-l{font-size:11px}}' +
       '.jd-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}' +
       '.jd-cap{font-size:12.5px;color:var(--text-muted);display:inline-flex;align-items:center;gap:6px}' +
       '.jd-cap input{width:62px;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px;margin:0 2px}' +
@@ -9009,7 +8998,6 @@
       '.jd-opt2-def{font-size:12px;color:var(--text-muted);line-height:1.5;margin-top:4px}' +
                         '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
-      '<ol class="jd-steps" id="jdSteps"></ol>' +
       '<details class="jd-tipsd jd-help"><summary>How this works <span class="muted">what each step, setting, and button does</span></summary>' +
         '<div class="jd-helpbody">' +
           '<div class="jd-helpsec"><h5>The flow: two clicks, start to saved list</h5>' +
@@ -9103,30 +9091,6 @@
 
     function msg(t) { var m = $("#jdMsg"); if (m) m.textContent = t || ""; }
     function chips(arr) { return (arr || []).map(function (x) { return '<span class="jd-chip">' + esc(x) + '</span>'; }).join("") || '<span class="muted">-</span>'; }
-
-    // Visual progress: which of the four steps the user is on, derived from state.
-    var JD_STEPS = [
-      { n: 1, l: "Build the brief", s: "Refine the role" },
-      { n: 2, l: "Analyze", s: "Build the profile" },
-      { n: 3, l: "Find candidates", s: "Run the search" },
-      { n: 4, l: "Save the list", s: "Send to Candidates" }
-    ];
-    function jdCurrentStep() {
-      if (state.candidates && state.candidates.length) return 4;
-      if (state.icp) return 3;
-      var t = $("#jdText");
-      if ((state.jd && state.jd.trim()) || (t && t.value.trim())) return 2;
-      return 1;
-    }
-    function renderSteps() {
-      var host = $("#jdSteps"); if (!host) return;
-      var cur = jdCurrentStep();
-      host.innerHTML = JD_STEPS.map(function (st) {
-        var cls = st.n < cur ? "done" : st.n === cur ? "active" : "";
-        return '<li class="jd-step ' + cls + '"><span class="jd-step-n">' + (st.n < cur ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : String(st.n)) + '</span>' +
-          '<span class="jd-step-l">' + st.l + '</span><span class="jd-step-s">' + st.s + '</span></li>';
-      }).join("");
-    }
 
     function renderPlan() {
       var host = $("#jdPlan"); if (!host) return;
@@ -9364,7 +9328,6 @@
         if (ta && jd) { ta.value = jd; ta.focus(); }
         state.jd = jd;
         var nameEl = $("#jdName"); if (nameEl && !nameEl.value.trim() && title) nameEl.value = title + (company ? (" · " + company) : "");
-        renderSteps();
         msg(jd ? "Done, your refined brief is now in the Job description box just below. Review or tweak it, then click Analyze JD." : "Couldn't build it. Add a few more details and try again.");
       });
     }
@@ -9404,7 +9367,6 @@
         return send("/sourcing", "POST", { action: "draft", title: title, company: company, companyUrl: company, notes: notes, base: "" }).then(function (r) {
           if (!r.ok) throw { stage: "Writing the brief", r: r };
           if (ta) ta.value = (r.data && r.data.jd) || "";
-          renderSteps();
         });
       }).then(function () {
         // 2) Analyze into the ideal-candidate profile. A Dive-deeper refinement
@@ -9413,14 +9375,14 @@
         var jdNow = ta ? ta.value.trim() : "";
         state.location = jdLocLabel();
         if (state.refineNote && state.icp && state.jd === jdNow) {
-          renderPlan(); renderSteps(); updateRunCost();
+          renderPlan(); updateRunCost();
           return;
         }
         state.jd = jdNow;
         return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location }).then(function (r) {
           if (!r.ok) throw { stage: "Analyze", r: r };
           state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
-          renderPlan(); renderSteps(); updateRunCost();
+          renderPlan(); updateRunCost();
         });
       }).then(function () {
         // 3) Search.
@@ -9434,7 +9396,7 @@
           if (!r.ok) { finishProgress("Search failed"); throw { stage: "Search", r: r }; }
           state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
           state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
-          renderPlan(); renderResults(); renderSteps();
+          renderPlan(); renderResults();
           if (!state.candidates.length) {
             finishProgress("No candidates found");
             var why = (state.warnings || []).filter(function (w) { return w.indexOf("empty_run:") === 0; })[0];
@@ -9482,7 +9444,7 @@
         state.queries = r.data.queries || state.queries;
         state.refineNote = r.data.changes || "Search refined.";
         state.candidates = []; state.warnings = [];
-        renderPlan(); renderResults(); renderSteps(); updateRunCost();
+        renderPlan(); renderResults(); updateRunCost();
         msg("Search refined. Review the updated profile, then press Initiate Search; the refined profile drives the next run.");
       });
     }
@@ -9668,8 +9630,6 @@
     ["#jdbTitle", "#jdbCompany", "#jdbNotes"].forEach(function (sel) {
       var e = $(sel); if (e) e.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.keyCode === 13) { ev.preventDefault(); doBuildJd(); } });
     });
-    var jdTextEl = $("#jdText"); if (jdTextEl) jdTextEl.addEventListener("input", renderSteps);
-    renderSteps();
     loadRuns();
   }
 
