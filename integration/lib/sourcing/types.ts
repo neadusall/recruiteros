@@ -182,6 +182,20 @@ export interface SourcingRun {
    * never re-grabs data Laxis already pulled (no wasted credits / time).
    */
   laxisProgress?: LaxisProgress;
+  /**
+   * Server-side auto-send bookkeeping (lib/sourcing/autoflow): stamped once the
+   * sweeper (or a retry of it) pushed this list on to Candidates + OS Text, so a
+   * finished list is never pushed twice — and a later enrichment that finds MORE
+   * phones than phonesAtSend triggers exactly one top-up re-send.
+   */
+  autoflow?: {
+    sentAt?: string;
+    /** Candidates holding a phone at the last send — the top-up trigger. */
+    phonesAtSend: number;
+    attempts: number;
+    /** Last failure (kept for ops visibility); cleared on a clean send. */
+    error?: string;
+  };
   warnings: string[];
   createdAt: string;
   updatedAt: string;

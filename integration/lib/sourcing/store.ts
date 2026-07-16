@@ -47,6 +47,13 @@ export async function listSourcingRuns(workspaceId: string): Promise<SourcingRun
     .sort((a, b) => (b.updatedAt < a.updatedAt ? -1 : 1));
 }
 
+/** Every saved run across ALL workspaces — used only by the background auto-send
+ *  sweeper (lib/sourcing/autoflow). Request paths stay workspace-scoped above. */
+export async function listAllSourcingRuns(): Promise<SourcingRun[]> {
+  await hydrate();
+  return store;
+}
+
 export async function getSourcingRun(workspaceId: string, id: string): Promise<SourcingRun | undefined> {
   await hydrate();
   return store.find((r) => r.id === id && r.workspaceId === workspaceId);

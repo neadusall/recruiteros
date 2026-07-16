@@ -114,6 +114,16 @@ export async function register(): Promise<void> {
     } catch {
       /* never let an instrumentation hiccup block server startup */
     }
+    // JD Sourcing auto-send: the server-side guarantee that a finished (or stalled)
+    // saved list flows on to Candidates + OS Text with no browser tab open. The
+    // tab's hands-free chain pushes live; this sweeper catches everything it misses
+    // (closed tab mid-enrichment, dropped request, deploy mid-chain).
+    try {
+      const { ensureSourcingAutoflow } = await import("./lib/sourcing/autoflow");
+      ensureSourcingAutoflow();
+    } catch {
+      /* never let an instrumentation hiccup block server startup */
+    }
     // The Automation clock: the in-process replacement for the external n8n
     // conductor. Gated by AUTOMATION_ENABLED (no-op when off), it ticks the
     // cadence / LinkedIn / voice / sending / nurture engines on intervals so

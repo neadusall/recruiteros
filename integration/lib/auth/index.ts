@@ -506,6 +506,18 @@ export function workspaceHasOwnerMember(workspaceId: string): boolean {
   return false;
 }
 
+/** A workspace's owner (name + email), for background jobs acting on its behalf —
+ *  e.g. the JD Sourcing auto-send stamping the OS Text campaign's recruiter fields. */
+export async function workspaceOwner(workspaceId: string): Promise<{ name: string; email: string } | null> {
+  await ensureAuthReady();
+  for (const m of store.memberships) {
+    if (m.workspaceId !== workspaceId || m.role !== "owner") continue;
+    const u = store.users.get(m.userId);
+    if (u) return { name: u.name || "", email: u.email };
+  }
+  return null;
+}
+
 /** Validate a session token -> the authed context, or null. */
 export function sessionContext(token?: string | null): AuthResult | null {
   if (!token) return null;
