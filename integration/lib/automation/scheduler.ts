@@ -132,6 +132,17 @@ async function tickOutbound(): Promise<void> {
 }
 
 /**
+ * Resume inbox sweep: pull emailed PDF/Word resumes off the vetting mailbox
+ * (e.g. ryan@lumesp.com), file them onto the matching opted-in candidates,
+ * text the screening invite, and delete the processed mail. The email->call
+ * gate of AI Vetting.
+ */
+async function tickResumeInbox(): Promise<void> {
+  const { sweepAllResumeInboxes } = await import("../vetting/inbox");
+  await sweepAllResumeInboxes();
+}
+
+/**
  * Auto-enroll into the nurture drip — the in-process replacement for n8n polling
  * /api/prospects/queue. For every workspace that has opted into hands-off (at least one
  * active BD Autopilot campaign), enroll its eligible in-market BD prospects into the
@@ -185,6 +196,7 @@ const TICKS: TickSpec[] = [
   { key: "nurture", label: "24-month nurture drip", env: "RECRUITEROS_NURTURE_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 60_000, fn: tickNurture },
   { key: "sending", label: "Email warm-up + reputation", env: "RECRUITEROS_SENDING_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 75_000, fn: tickSending },
   { key: "outbound", label: "Outbound performance + accountability", env: "RECRUITEROS_OUTBOUND_TICK_MS", defaultMs: 10 * 60_000, firstDelayMs: 100_000, fn: tickOutbound },
+  { key: "resume_inbox", label: "Resume inbox (emailed resumes -> candidate profiles)", env: "RECRUITEROS_RESUME_INBOX_TICK_MS", defaultMs: 5 * 60_000, firstDelayMs: 70_000, fn: tickResumeInbox },
 ];
 
 /** The configured ticks (key, label, effective interval ms) — for the Autopilot

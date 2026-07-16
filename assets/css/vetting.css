@@ -79,6 +79,10 @@
 .vt-gen-btn .isvg { width: 14px; height: 14px; }
 .vt-gen-btn .spinner { border-color: rgba(255, 255, 255, .4); border-top-color: #fff; }
 
+/* Resume inbox card (emailed resumes -> candidate profiles) */
+.vt-inbox-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.vt-inbox-head b { font-size: 13.5px; }
+
 .vt-qhead {
   display: grid; grid-template-columns: 26px 1fr 1fr 96px; gap: 10px; align-items: center;
   padding: 2px 12px 6px; font-size: 10.5px; font-weight: 600; text-transform: uppercase;

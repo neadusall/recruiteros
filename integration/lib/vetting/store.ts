@@ -20,7 +20,7 @@ import {
   type VettingDesk, type VettingDeskInput, type CandidateProfile,
   type CandidateEnrichment, type VettingCall, type QualifyingQuestion,
   type ResumeReview, type DeskLearning, type PromptRevision, type VoiceTuning, type SimRun,
-  type TurnTuning, type ExtractionField,
+  type TurnTuning, type ExtractionField, type InboxState, type InboxLogEntry,
   DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD, DEFAULT_LEARNING, clampVoiceTuning, clampTurnTuning,
   normalizeExtraction, normalizeKnowledge,
 } from "./types";
@@ -30,6 +30,8 @@ const store = {
   candidates: [] as CandidateProfile[],
   calls: [] as VettingCall[],
   resumeReviews: [] as ResumeReview[],
+  /** Resume-inbox sweep state, keyed by workspace id. */
+  inbox: {} as Record<string, InboxState>,
 };
 
 /* ---------------- durability ---------------- */
@@ -43,6 +45,7 @@ function hydrate(s: any) {
   store.candidates = s.candidates ?? [];
   store.calls = s.calls ?? [];
   store.resumeReviews = s.resumeReviews ?? [];
+  store.inbox = s.inbox ?? {};
 }
 const persist = debouncedSaver(SNAP_KEY, serialize);
 
@@ -102,6 +105,11 @@ export function findDeskByNumber(e164: string): VettingDesk | undefined {
 
 export function getDeskById(id: string): VettingDesk | undefined {
   return store.desks.find((d) => d.id === id);
+}
+
+/** Every workspace that has at least one vetting desk (the inbox tick's fan-out). */
+export function listVettingWorkspaceIds(): string[] {
+  return Array.from(new Set(store.desks.map((d) => d.workspaceId)));
 }
 
 export function upsertDesk(workspaceId: string, input: VettingDeskInput): VettingDesk {
@@ -346,13 +354,49 @@ export function setCandidateEnrichment(candidateId: string, enrichment: Candidat
 }
 
 /** Stash the latest resume text the candidate submitted (for the coaching loop). */
-export function setCandidateResume(candidateId: string, resumeText: string): void {
+export function setCandidateResume(
+  candidateId: string,
+  resumeText: string,
+  meta?: { source?: CandidateProfile["resumeSource"]; fileName?: string },
+): void {
   const c = store.candidates.find((x) => x.id === candidateId);
   if (!c) return;
   c.resumeText = resumeText;
   c.resumeUpdatedAt = nowIso();
+  if (meta?.source) c.resumeSource = meta.source;
+  if (meta?.fileName !== undefined) c.resumeFileName = meta.fileName;
   c.updatedAt = nowIso();
   persist();
+}
+
+/** Stamp that the post-resume screening invite went out to this candidate. */
+export function markScreenInviteSent(candidateId: string): void {
+  const c = store.candidates.find((x) => x.id === candidateId);
+  if (!c) return;
+  c.screenInviteSentAt = nowIso();
+  c.updatedAt = nowIso();
+  persist();
+}
+
+/* ---------------- resume inbox (email intake) ---------------- */
+
+/** The workspace's resume-inbox sweep state, defaulted in place. */
+export function inboxState(workspaceId: string): InboxState {
+  if (!store.inbox[workspaceId]) store.inbox[workspaceId] = { savedTotal: 0, log: [] };
+  return store.inbox[workspaceId];
+}
+
+/** Record one sweep's outcomes (newest first, log capped at 50). */
+export function recordInboxSweep(workspaceId: string, entries: InboxLogEntry[], error?: string): InboxState {
+  const s = inboxState(workspaceId);
+  s.lastSweepAt = nowIso();
+  s.lastError = error;
+  if (entries.length) {
+    s.savedTotal += entries.filter((e) => e.outcome === "saved").length;
+    s.log = [...entries, ...s.log].slice(0, 50);
+  }
+  persist();
+  return s;
 }
 
 /* ---------------- resume coaching loop ---------------- */

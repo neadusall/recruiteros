@@ -48,9 +48,12 @@ export async function GET(req: Request) {
   const motion = asMotion(new URL(req.url).searchParams.get("motion"));
   const desks = listDesks(ws, motion).map((d) => {
     const calls = listCalls(ws, d.id);
+    const candidates = listCandidates(ws, d.id);
     return {
       ...d,
-      candidateCount: listCandidates(ws, d.id).length,
+      candidateCount: candidates.length,
+      // The email->call gate: how many of them have a resume on file already.
+      resumeCount: candidates.filter((c) => (c.resumeText || "").length >= 80).length,
       callCount: calls.length,
       health: deskHealth(calls),
     };

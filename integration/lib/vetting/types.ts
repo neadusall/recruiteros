@@ -347,9 +347,40 @@ export interface CandidateProfile {
   /** Latest resume text the candidate submitted to the coaching loop, if any. */
   resumeText?: string;
   resumeUpdatedAt?: string;
+  /** Where the latest resume came from: the coaching page or the resume inbox. */
+  resumeSource?: "page" | "email";
+  /** Original attachment filename when the resume arrived by email. */
+  resumeFileName?: string;
+  /** When the "your resume is in, here's the screening call" invite went out. */
+  screenInviteSentAt?: string;
 
   createdAt: string;
   updatedAt: string;
+}
+
+/** One processed (or skipped) message from the resume inbox sweep. */
+export interface InboxLogEntry {
+  at: string;
+  /** Sender address the message came from. */
+  from: string;
+  /** Attachment filename we acted on (or ""). */
+  file: string;
+  /** What happened to it. */
+  outcome: "saved" | "unmatched" | "no_attachment" | "unsupported" | "error";
+  candidateId?: string;
+  deskId?: string;
+  /** Short human note ("filed to Jane Doe on VP Sales", "no opted-in candidate"). */
+  note: string;
+}
+
+/** Per-workspace resume-inbox sweep state (shown on the Vetting Desks tab). */
+export interface InboxState {
+  lastSweepAt?: string;
+  lastError?: string;
+  /** Lifetime count of resumes filed from this inbox. */
+  savedTotal: number;
+  /** Most recent sweep outcomes, newest first (capped). */
+  log: InboxLogEntry[];
 }
 
 /**

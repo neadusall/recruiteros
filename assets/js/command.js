@@ -12792,6 +12792,7 @@
         '<span class="vt-chip"><b>' + esc(d.phoneNumber || "no number") + "</b></span>" +
         '<span class="vt-chip">' + (d.questions ? d.questions.length : 0) + " qualifiers</span>" +
         '<span class="vt-chip"><b>' + (d.candidateCount || 0) + "</b> opted in</span>" +
+        '<span class="vt-chip" title="Candidates with an updated resume on file, the gate before the screening call"><b>' + (d.resumeCount || 0) + "</b> resumes in</span>" +
         '<span class="vt-chip">pass ≥ <b>' + d.passThreshold + "</b></span>" +
         '<span class="vt-chip">' + esc(d.voiceId || "default voice") + "</span>";
       if (d.learning && d.learning.learnedNotes) {
@@ -12828,13 +12829,15 @@
       Promise.all([
         safe(api("/vetting/numbers")),
         safe(api("/voice/clones")),
-        safe(api("/vetting/desks?motion=" + motion))
+        safe(api("/vetting/desks?motion=" + motion)),
+        safe(api("/vetting/inbox"))
       ]).then(function (res) {
         var nd = res[0] || {}, vd = res[1] || {}, data = res[2] || {};
         vt.numbers = nd.numbers || [];
         vt.numbersDry = !!nd.dryRun;
         vt.numbersErr = nd.error || (res[0] ? null : "unreachable");
         vt.voices = ((vd.consent) || []).filter(function (c) { return c.voiceId; });
+        vt.inbox = res[3] || null;
 
         var list = data.desks || [];
         var editing = vt.editing ? list.filter(function (x) { return x.id === vt.editing; })[0] : null;
@@ -12846,14 +12849,76 @@
           (showForm ? "" : '<button class="vt-btn vt-btn-primary" id="vtNew">+ New vetting desk</button>') +
           "</div>";
         body.innerHTML = toolbar +
+          inboxCard(vt.inbox) +
           (showForm ? (editing ? deskForm(editing) : deskForm(null)) : "") +
           (list.length ? list.map(deskCard).join("") : "");
         wireDesks(body);
       });
     }
+    /* ---- resume inbox (emailed resumes -> candidate profiles) ---- */
+    function agoLabel(iso) {
+      var ms = Date.now() - Date.parse(iso);
+      if (!isFinite(ms) || ms < 0) return "just now";
+      var m = Math.round(ms / 60000);
+      if (m < 1) return "just now";
+      if (m < 60) return m + "m ago";
+      var h = Math.round(m / 60);
+      if (h < 24) return h + "h ago";
+      return Math.round(h / 24) + "d ago";
+    }
+    function inboxCard(ib) {
+      // The email->call gate. Candidates email their updated resume to the
+      // vetting mailbox; the sweep files it to their profile, texts the
+      // screening invite, and deletes the processed email.
+      var head = '<div class="vt-inbox-head"><b>Resume inbox</b>';
+      var bodyHtml = "";
+      if (!ib) {
+        return "";
+      } else if (!ib.configured) {
+        head += '<span class="vt-pill draft">not connected</span></div>';
+        bodyHtml = '<div class="vt-hint">Have candidates email their updated resume to one address (e.g. ryan@lumesp.com); it gets filed to their profile automatically and they get the screening-call invite by text. To connect: add RESUME_INBOX_USER and RESUME_INBOX_PASS (an app password) in Setup, plus RESUME_INBOX_HOST if the mailbox is not on Gmail or Outlook.</div>';
+      } else {
+        var last = ib.lastSweepAt ? agoLabel(ib.lastSweepAt) : "not yet";
+        head += '<span class="vt-pill live" style="text-transform:none">' + esc(ib.address) + "</span></div>";
+        bodyHtml =
+          '<div class="vt-meta" style="margin-top:8px">' +
+          '<span class="vt-chip">checked every 5 min · last: <b>' + esc(last) + "</b></span>" +
+          '<span class="vt-chip"><b>' + (ib.resumesOnFile || 0) + "</b> resumes on file</span>" +
+          '<span class="vt-chip"><b>' + (ib.savedTotal || 0) + "</b> filed from email</span>" +
+          (ib.lastError ? '<span class="vt-chip" style="color:var(--vt-bad)">last check failed, will retry</span>' : "") +
+          "</div>" +
+          ((ib.log && ib.log.length)
+            ? '<div class="vt-hint" style="margin-top:6px">' + ib.log.slice(0, 3).map(function (l) {
+                return esc((l.file ? l.file + ": " : "") + l.note);
+              }).join("<br/>") + "</div>"
+            : '<div class="vt-hint" style="margin-top:6px">Waiting for the first emailed resume. Once one is filed, the candidate is automatically invited to the screening call.</div>');
+      }
+      return '<div class="vt-card vt-inbox" style="margin-bottom:14px">' + head + bodyHtml +
+        '<div class="vt-formactions" style="margin-top:10px">' +
+        '<button class="vt-btn" id="vtInboxSweep">Check now</button>' +
+        '<span class="vt-hint" id="vtInboxMsg"></span></div></div>';
+    }
     function wireDesks(body) {
       var newBtn = $("#vtNew");
       if (newBtn) newBtn.addEventListener("click", function () { vt.creating = true; vt.editing = null; paintDesks(body); });
+      var sweep = $("#vtInboxSweep");
+      if (sweep) sweep.addEventListener("click", function () {
+        var msg = $("#vtInboxMsg");
+        sweep.disabled = true;
+        if (msg) msg.textContent = "Checking the mailbox…";
+        send("/vetting/inbox", "POST", { action: "sweep" }).then(function (r) {
+          sweep.disabled = false;
+          if (!r.ok) {
+            if (msg) msg.textContent = (r.data && r.data.detail) || "Couldn't check the mailbox.";
+            return;
+          }
+          var d = r.data || {};
+          if (msg) msg.textContent = d.error
+            ? "Mailbox check failed, will retry on the next pass."
+            : ("Checked " + (d.checked || 0) + " email" + (d.checked === 1 ? "" : "s") + ", filed " + (d.saved || 0) + " resume" + (d.saved === 1 ? "" : "s") + ".");
+          if (d.saved > 0) paintDesks(body);
+        }).catch(function () { sweep.disabled = false; if (msg) msg.textContent = "Couldn't reach the server."; });
+      });
       var saveBtn = $("#vtSave");
       if (saveBtn) saveBtn.addEventListener("click", function () {
         var p = collectDesk();
