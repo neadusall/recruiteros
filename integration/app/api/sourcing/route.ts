@@ -1,9 +1,9 @@
 /**
  * GET  /api/sourcing                 -> this workspace's saved sourcing runs (JD Sourcing tab)
  * POST /api/sourcing
- *   { action: "plan", jd }                         -> JD → ICP + generated searches (no discovery)
+ *   { action: "plan", jd, breadth? }               -> JD → ICP + generated searches (no discovery)
  *   { action: "refine", jd, icp, instruction }     -> LLM edits the ICP per a NL instruction → new searches
- *   { action: "run", jd, name?, cap?, minFit? }    -> plan + discovery → ranked candidates (not yet saved)
+ *   { action: "run", jd, name?, cap?, minFit?, breadth? } -> plan + discovery → ranked candidates (not yet saved)
  *   { action: "save", id?, name, jd, icp, queries, candidates } -> stage a named run
  *   { action: "promote", id, minFit? }             -> push a saved run into Candidates under its name
  *   { action: "enrich", id, top? }                 -> enrich contacts for the top N staged candidates
@@ -37,7 +37,7 @@ import {
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
   mergeSourcingRuns,
 } from "../../../lib/sourcing";
-import type { CandidateRow, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
+import type { CandidateRow, SearchBreadth, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { nowIso } from "../../../lib/core/ids";
 import { dbEnabled } from "../../../lib/db";
@@ -47,6 +47,11 @@ import { ostextImport, ostextStarterTemplate, type OsTextContact } from "../../.
  *  re-attach a batch result to the right candidate even after the list is re-sorted. */
 function candKey(c: CandidateRow): string {
   return (c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`).toLowerCase().replace(/\/+$/, "");
+}
+
+/** The UI's search-breadth dial, defaulting to balanced on anything unexpected. */
+function parseBreadth(v: unknown): SearchBreadth {
+  return v === "focused" || v === "wide" ? v : "balanced";
 }
 
 /**
@@ -133,7 +138,7 @@ export async function POST(req: Request) {
   try {
     if (action === "plan") {
       if (!b?.jd) return fail("missing_jd", 422);
-      return ok(await planSourcing(b.jd, b.location));
+      return ok(await planSourcing(b.jd, b.location, parseBreadth(b.breadth)));
     }
 
     if (action === "draft") {
@@ -145,7 +150,7 @@ export async function POST(req: Request) {
     if (action === "refine") {
       if (!b?.icp || !b?.instruction) return fail("missing_fields", 422, { detail: "icp and instruction required" });
       const { icp, changes } = await refineIcp(b.jd ?? "", b.icp, b.instruction);
-      return ok({ icp, queries: generateQueries(icp), changes });
+      return ok({ icp, queries: generateQueries(icp, { breadth: parseBreadth(b.breadth) }), changes });
     }
 
     if (action === "run") {
@@ -156,12 +161,16 @@ export async function POST(req: Request) {
       // so refined searches actually run on the refined profile.
       const clientIcp = b.icp && typeof b.icp === "object" && Array.isArray(b.icp.titles) ? b.icp : undefined;
       const icp = pinIcpLocation(clientIcp ?? (await parseJobDescription(b.jd)), b.location);
-      const queries = generateQueries(icp);
+      // Breadth drives the query FAN-OUT here (how many title-chunk × geo searches
+      // run) and the per-query paging depth inside runDiscovery.
+      const breadth = parseBreadth(b.breadth);
+      const queries = generateQueries(icp, { breadth });
       // Cross-run "seen" memory: fresh-only excludes anyone surfaced in prior runs.
       const excludeKeys = b.freshOnly === true ? await getSeenKeys(ws) : undefined;
       const result = await runDiscovery(queries, icp, {
         cap: typeof b.cap === "number" ? b.cap : 500,
         minFit: typeof b.minFit === "number" ? b.minFit : 10,
+        breadth,
         excludeKeys,
         strictGeo: b.strictGeo !== false && Boolean(((b.location as string) || "").trim()),
         // OPT-IN: the separate out-of-area list only when the recruiter asked for it,

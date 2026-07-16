@@ -43,8 +43,8 @@
  * profiles.
  */
 
-import type { CandidateICP, CandidateRow, DiscoveryOptions, SourcingQuery } from "./types";
-import { scoreCandidate, inTargetGeo } from "./score";
+import type { CandidateICP, CandidateRow, DiscoveryOptions, SearchBreadth, SourcingQuery } from "./types";
+import { scoreCandidate, inTargetGeo, US_STATE_FULL } from "./score";
 import { scraperConfigured, scrapeSearchViaSidecar } from "../linkedin/scraperProvider";
 import { cred } from "../providers/http";
 
@@ -284,6 +284,53 @@ export function googleSearchConfigured(): boolean {
   return Boolean(G_KEY() && G_CX());
 }
 
+/* ------------------------------------------------------------------ */
+/* Snippet location parsing (shared by the web/X-ray mappers)          */
+/* ------------------------------------------------------------------ */
+
+// Words that can start a "Word, State" fragment without being a place ("Vice
+// President, Georgia Market" must NOT become a location of "President, Georgia").
+const NOT_A_CITY = /\b(president|director|manager|officer|chief|head|lead|vp|svp|evp|avp|rvp|sales|marketing|engineer|engineering|consultant|recruiter|recruiting|partner|principal|executive|analyst|specialist|coordinator|university|college|institute|llc|inc|corp|company|division|region|market|team)\b/i;
+
+const STATE_FULL_SET = new Set(Object.values(US_STATE_FULL));
+
+/**
+ * Best-effort location from a Google/Serper/SearXNG snippet. LinkedIn profile
+ * snippets usually DO state the person's location — either an explicit
+ * "Location: Dallas, Texas" field or a "Dallas, Texas, United States ·" fragment —
+ * the old mappers just never read it (every web row shipped location: undefined).
+ * Parsing it makes the geo scoring and the strict-location filter work on web
+ * results, which is what keeps the wide/geo-free searches honest.
+ *
+ * Deliberately conservative: only an explicit Location: field, a "City, <US state>"
+ * shape, or a "Greater <City> Area" wording is taken; anything ambiguous returns
+ * undefined, which the scorer and filters already treat as neutral (row kept).
+ */
+export function locationFromSnippet(hay: string | undefined): string | undefined {
+  if (!hay) return undefined;
+  const clean = (s: string): string => s.replace(/,?\s*United States\.?\s*$/i, "").replace(/\s+/g, " ").trim();
+  // 1) The explicit field LinkedIn puts in og:description: "Location: Dallas, Texas".
+  const m1 = hay.match(/\bLocation:\s*([^·•|;]{2,60}?)(?=\s*[·•|;]|\s*$)/i);
+  if (m1) {
+    const v = clean(m1[1]);
+    if (v && v.length <= 60 && !NOT_A_CITY.test(v)) return v;
+  }
+  // 2) "City, ST" / "City, State" with a REAL US state (list-checked, so "Paris,
+  //    Texas" passes and "President, Georgia Market"-style title text is rejected).
+  //    Scans every fragment: one invalid hit must not mask a real location later on.
+  const cityState = /([A-Z][A-Za-z.'’-]+(?:[ -][A-Z&][A-Za-z.'’-]*){0,3}),\s+([A-Z]{2}\b|[A-Z][a-z]+(?: [A-Z][a-z]+)?)/g;
+  for (let m2 = cityState.exec(hay); m2; m2 = cityState.exec(hay)) {
+    const city = m2[1].trim();
+    const st = m2[2].trim();
+    const known = st.length === 2 ? Boolean(US_STATE_FULL[st.toLowerCase()]) : STATE_FULL_SET.has(st.toLowerCase());
+    if (known && !NOT_A_CITY.test(city)) return `${city}, ${st}`;
+  }
+  // 3) The metro wording profiles favor: "Greater Chicago Area", "Greater Boston".
+  const m3 = hay.match(/\b(Greater [A-Z][A-Za-z.'’-]+(?: [A-Z][A-Za-z.'’-]+)?(?: Area)?)\b/);
+  if (m3 && !NOT_A_CITY.test(m3[1])) return m3[1];
+  return undefined;
+}
+
 /** Map one Custom Search result item (a public LinkedIn profile) to a CandidateRow. */
 function mapGoogleItem(o: any): CandidateRow | null {
   const link = str(o && o.link);
@@ -309,7 +356,8 @@ function mapGoogleItem(o: any): CandidateRow | null {
     title: headline,
     headline: headline || snippet,
     company,
-    location: undefined, // CSE snippets rarely carry a clean location; let the scorer skip it
+    // Parsed from the snippet/meta when clearly stated; undefined stays neutral.
+    location: locationFromSnippet([mt && str(mt["og:description"]), snippet, headline].filter(Boolean).join(" · ")),
     linkedinUrl: url,
     imageUrl: (mt && str(mt["og:image"])) || undefined,
     fitScore: 0,
@@ -359,10 +407,11 @@ export async function verifyGoogleSearch(): Promise<{ ok: boolean; error?: strin
 // X-ray boolean, same result shape, no daily ceiling.
 const SERPER_KEY = () => cred("SERPER_API_KEY");
 // Soft per-RUN cap so one big run can't silently burn a pile of credits. At Serper's
-// pricing 100 searches is a few cents; raise SERPER_MAX_QUERIES in Setup for more.
-const SERPER_MAX_QUERIES = () => {
+// pricing even the wide-mode 300 is well under a dime; SERPER_MAX_QUERIES in Setup
+// overrides the breadth-based default either way.
+const SERPER_MAX_QUERIES = (fallback = 100) => {
   const n = parseInt(cred("SERPER_MAX_QUERIES") || "", 10);
-  return Number.isFinite(n) && n > 0 ? n : 100;
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 };
 
 export function serperSearchConfigured(): boolean {
@@ -445,7 +494,8 @@ function mapSearxItem(o: { url?: string; title?: string; content?: string }): Ca
     title: headline,
     headline: headline || snippet,
     company,
-    location: undefined, // snippets rarely carry a clean location; the scorer skips it
+    // Parsed from the snippet when clearly stated; undefined stays neutral.
+    location: locationFromSnippet(hay || undefined),
     linkedinUrl: url,
     fitScore: 0,
     fitReasons: [],
@@ -551,6 +601,11 @@ export async function runDiscovery(
   const cap = Math.max(1, Math.min(opts.cap ?? 3000, 5000));
   const minFit = opts.minFit ?? 45;
   const engines = opts.engines ?? (["google", "searx", "serper", "rapidapi", "scraper"] as const);
+  // Breadth deepens per-query paging (query fan-out already happened in generateQueries):
+  // wide digs further into each search before giving up on it.
+  const breadth: SearchBreadth = opts.breadth ?? "balanced";
+  const sPages = breadth === "wide" ? 6 : 4; // SearXNG pages/query (free)
+  const pPages = breadth === "wide" ? 8 : breadth === "balanced" ? 4 : 3; // Serper pages/query (pennies)
   const warnings: string[] = [];
 
   let useGoogle = engines.includes("google") && googleSearchConfigured();
@@ -643,7 +698,9 @@ export async function runDiscovery(
   const googleBudget = G_MAX_QUERIES();
   let googleUsed = 0;
   // Serper is cheap but not free: a per-run soft cap keeps one big run's spend bounded.
-  const serperBudget = SERPER_MAX_QUERIES();
+  // Wide mode raises the default ceiling (more queries × deeper pages still lands
+  // around a nickel a run); an explicit SERPER_MAX_QUERIES in Setup always wins.
+  const serperBudget = SERPER_MAX_QUERIES(breadth === "wide" ? 300 : 100);
   let serperUsed = 0;
 
   outer: for (const query of queries) {
@@ -670,7 +727,6 @@ export async function runDiscovery(
     // No quota, no key — this is what guarantees a JD Sourcing run is never empty
     // just because a paid listing broke or was never configured.
     if (useSearx && collected < perQuery) {
-      const sPages = 4;
       let searxErrors = 0;
       for (let page = 1; page <= sPages && collected < perQuery; page++) {
         let rows: CandidateRow[] = [];
@@ -691,7 +747,6 @@ export async function runDiscovery(
     // keeps digging when the CSE free pass ran dry (or was never / can no longer be
     // configured: Google closed the CSE API to new signups, retiring it Jan 1, 2027).
     if (useSerper && collected < perQuery && serperUsed < serperBudget) {
-      const pPages = 3; // up to 30 cheap results per query before the expensive listing
       for (let page = 1; page <= pPages && collected < perQuery && serperUsed < serperBudget; page++) {
         let rows: CandidateRow[] = [];
         try { rows = await serperXraySearch(query.xray, page); serperUsed++; }

@@ -14,6 +14,15 @@
 
 import type { Motion } from "../core/types";
 
+/**
+ * How wide a discovery run casts its net (the Sales-Navigator-style breadth dial).
+ *  - focused: the closest title matches only (the pre-2026-07-16 behavior).
+ *  - balanced: every title variation of the role rides in the searches (default).
+ *  - wide: all title variations + deeper paging + searches beyond the exact
+ *    location wording; post-search location filtering keeps the list honest.
+ */
+export type SearchBreadth = "focused" | "balanced" | "wide";
+
 /** Structured ideal-candidate profile parsed from a job description. */
 export interface CandidateICP {
   /** Short human label, e.g. "VP Sales — Source-to-Pay (East Coast)". */
@@ -252,4 +261,9 @@ export interface DiscoveryOptions {
    * (still buffered for the never-empty rescue).
    */
   keepOutOfArea?: boolean;
+  /**
+   * Search breadth: controls how deep each engine pages per query (query FAN-OUT is
+   * decided earlier, in generateQueries). Default "balanced".
+   */
+  breadth?: SearchBreadth;
 }

@@ -10,13 +10,13 @@ export * from "./types";
 export { parseJobDescription, normalizeIcpObject } from "./parseJobDescription";
 export { refineIcp, type RefineResult } from "./refineSearch";
 export { draftJobDescription, type DraftInput } from "./draftJd";
-export { generateQueries } from "./generateQueries";
+export { generateQueries, geoVariants } from "./generateQueries";
 export { scoreCandidate } from "./score";
 export {
   runDiscovery, rapidApiSearchConfigured, verifySourcingSearch,
   googleSearchConfigured, verifyGoogleSearch, searxSearchConfigured,
   serperSearchConfigured, verifySerperSearch,
-  candidateKey, type DiscoveryResult,
+  candidateKey, locationFromSnippet, type DiscoveryResult,
 } from "./discovery";
 export {
   startBulkList, stepBulkList, bulkListStatus,
@@ -61,7 +61,7 @@ export {
 
 import { parseJobDescription } from "./parseJobDescription";
 import { generateQueries } from "./generateQueries";
-import type { CandidateICP, SourcingQuery } from "./types";
+import type { CandidateICP, SearchBreadth, SourcingQuery } from "./types";
 
 export interface SourcingPlan {
   icp: CandidateICP;
@@ -74,9 +74,9 @@ export { pinIcpLocation } from "./pinLocation";
 import { pinIcpLocation } from "./pinLocation";
 
 /** Parse a JD and generate its search set in one call (no discovery yet). */
-export async function planSourcing(jd: string, location?: string): Promise<SourcingPlan> {
+export async function planSourcing(jd: string, location?: string, breadth?: SearchBreadth): Promise<SourcingPlan> {
   const icp = pinIcpLocation(await parseJobDescription(jd), location);
-  const queries = generateQueries(icp);
+  const queries = generateQueries(icp, { breadth });
   // Empty across the load-bearing fields means the profile couldn't be built from the
   // brief (e.g. the model returned unparseable output). Say so plainly rather than
   // silently handing back a profile of dashes that finds nobody.

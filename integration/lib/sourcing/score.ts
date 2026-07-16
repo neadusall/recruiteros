@@ -42,8 +42,9 @@ function anyPhrase(text: string, needles: string[]): string | null {
 
 /** "City, ST" state abbreviations expanded to full names so "Brooklyn, NY" matches a
  *  target geo of "New York". Only expands after a comma (the standard location shape),
- *  so prose words like "or"/"in"/"me" are never touched. */
-const US_STATE_FULL: Record<string, string> = {
+ *  so prose words like "or"/"in"/"me" are never touched. Exported for discovery's
+ *  snippet-location parser (both sides must agree on what a US state looks like). */
+export const US_STATE_FULL: Record<string, string> = {
   al: "alabama", ak: "alaska", az: "arizona", ar: "arkansas", ca: "california", co: "colorado",
   ct: "connecticut", de: "delaware", fl: "florida", ga: "georgia", hi: "hawaii", id: "idaho",
   il: "illinois", in: "indiana", ia: "iowa", ks: "kansas", ky: "kentucky", la: "louisiana",
