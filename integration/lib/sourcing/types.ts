@@ -243,8 +243,10 @@ export interface DiscoveryOptions {
   cap?: number;
   /** Drop rows scoring below this fit threshold (0..100). Default 45. */
   minFit?: number;
-  /** Which engines to use, in cheapest-first order. Defaults to whatever is configured. */
-  engines?: Array<"google" | "searx" | "serper" | "rapidapi" | "scraper">;
+  /** Which engines to use, in cheapest-first order. Defaults to whatever is configured.
+   *  "koldinfo" is the free contact-database sweep (title + geo over the Business Email
+   *  DB via the browser worker) — a candidate SOURCE that arrives with emails/phones. */
+  engines?: Array<"koldinfo" | "google" | "searx" | "serper" | "rapidapi" | "scraper">;
   /** Candidate keys (see candidateKey) to skip — the cross-run "seen" set for fresh-only runs. */
   excludeKeys?: Set<string>;
   /**

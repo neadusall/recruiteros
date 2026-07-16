@@ -28,11 +28,14 @@ const store = require("./store");
 
 // Which browser flow runs a job. "laxis" is the default so every pre-`kind` caller
 // (and every job persisted before this field existed) behaves exactly as before.
-// "koldinfo" = LinkedIn-URL enrichment; "koldinfo-db" = name + city/state DB lookup.
+// "koldinfo" = LinkedIn-URL enrichment; "koldinfo-db" = name + city/state DB lookup;
+// "koldinfo-db-search" = title + geo DISCOVERY sweep of the Business Email DB (the
+// Sales-Navigator-style candidate SOURCE — grid reads, zero credits).
 const FLOWS = {
   laxis: { runJob, selfTest },
   koldinfo: { runJob: koldinfo.runJob, selfTest: koldinfo.selfTest },
   "koldinfo-db": { runJob: koldinfoDb.runJob, selfTest: koldinfoDb.selfTest },
+  "koldinfo-db-search": { runJob: koldinfoDb.runDiscoveryJob, selfTest: koldinfoDb.selfTest },
 };
 
 const PORT = Number(process.env.PORT || 3000);

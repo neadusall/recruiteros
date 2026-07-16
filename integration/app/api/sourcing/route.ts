@@ -2,6 +2,7 @@
  * GET  /api/sourcing                 -> this workspace's saved sourcing runs (JD Sourcing tab)
  * POST /api/sourcing
  *   { action: "plan", jd, breadth? }               -> JD → ICP + generated searches (no discovery)
+ *   { action: "engines" }                          -> which discovery sources are active (UI "Search power" readout)
  *   { action: "refine", jd, icp, instruction }     -> LLM edits the ICP per a NL instruction → new searches
  *   { action: "run", jd, name?, cap?, minFit?, breadth? } -> plan + discovery → ranked candidates (not yet saved)
  *   { action: "save", id?, name, jd, icp, queries, candidates } -> stage a named run
@@ -25,6 +26,7 @@
 import { requireSession, body, ok, fail } from "../../../lib/api";
 import {
   planSourcing, pinIcpLocation, parseJobDescription, generateQueries, runDiscovery,
+  googleSearchConfigured, searxSearchConfigured, serperSearchConfigured, rapidApiSearchConfigured,
   listSourcingRuns, saveSourcingRun, deleteSourcingRun, getSourcingRun, promoteSourcingRun,
   profileFetchConfigured, deepVetCandidate, refineIcp, draftJobDescription,
   vetBatchAvailable, submitVetBatch, retrieveVetBatch, collectVetBatch,
@@ -139,6 +141,20 @@ export async function POST(req: Request) {
     if (action === "plan") {
       if (!b?.jd) return fail("missing_jd", 422);
       return ok(await planSourcing(b.jd, b.location, parseBreadth(b.breadth)));
+    }
+
+    /* Which discovery sources will actually run right now — the UI's "Search power"
+     * readout, so a recruiter can SEE a missing key instead of finding out from a
+     * thin run. Keys pasted in Setup count (cred() is workspace-first). */
+    if (action === "engines") {
+      return ok({
+        engines: {
+          database: await koldinfoWorkerReady(),
+          wideWeb: serperSearchConfigured(),
+          freeWeb: googleSearchConfigured() || searxSearchConfigured(),
+          peopleApi: rapidApiSearchConfigured(),
+        },
+      });
     }
 
     if (action === "draft") {

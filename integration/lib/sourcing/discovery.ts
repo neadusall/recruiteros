@@ -47,6 +47,8 @@ import type { CandidateICP, CandidateRow, DiscoveryOptions, SearchBreadth, Sourc
 import { scoreCandidate, inTargetGeo, US_STATE_FULL } from "./score";
 import { scraperConfigured, scrapeSearchViaSidecar } from "../linkedin/scraperProvider";
 import { cred } from "../providers/http";
+import { koldinfoWorkerReady } from "./laxis";
+import { submitDbDiscovery, collectDbDiscovery } from "./koldinfoDiscovery";
 
 /* ------------------------------------------------------------------ */
 /* RapidAPI people-search provider (configurable)                      */
@@ -600,7 +602,7 @@ export async function runDiscovery(
 ): Promise<DiscoveryResult> {
   const cap = Math.max(1, Math.min(opts.cap ?? 3000, 5000));
   const minFit = opts.minFit ?? 45;
-  const engines = opts.engines ?? (["google", "searx", "serper", "rapidapi", "scraper"] as const);
+  const engines = opts.engines ?? (["koldinfo", "google", "searx", "serper", "rapidapi", "scraper"] as const);
   // Breadth deepens per-query paging (query fan-out already happened in generateQueries):
   // wide digs further into each search before giving up on it.
   const breadth: SearchBreadth = opts.breadth ?? "balanced";
@@ -613,12 +615,28 @@ export async function runDiscovery(
   let useSerper = engines.includes("serper") && serperSearchConfigured();
   const useRapid = engines.includes("rapidapi") && rapidApiSearchConfigured();
   const useScraper = engines.includes("scraper") && scraperConfigured();
+  // The free contact-database sweep (title + geo over the Business Email DB). Needs
+  // the browser worker up AND holding KoldInfo creds; the probe is cheap and local.
+  const useKold = engines.includes("koldinfo") ? await koldinfoWorkerReady() : false;
   if (engines.includes("rapidapi") && !useRapid) {
     warnings.push("rapidapi_not_configured: set RAPIDAPI_KEY + RAPIDAPI_PEOPLE_SEARCH_HOST to enable scale discovery");
   }
-  if (!useGoogle && !useSearx && !useSerper && !useRapid && !useScraper) {
+  if (!useGoogle && !useSearx && !useSerper && !useRapid && !useScraper && !useKold) {
     warnings.push("no_discovery_engine: nothing configured to find profiles, so the list will be empty");
     return { candidates: [], warnings, scanned: 0 };
+  }
+
+  // Submit the database sweep FIRST so the worker browses KoldInfo while the web
+  // X-ray pass below runs — the two overlap and the run collects both at the end.
+  let koldJobId: string | null = null;
+  let koldSubmittedAt = 0;
+  if (useKold) {
+    try {
+      koldJobId = await submitDbDiscovery(icp, Math.min(cap, 500));
+      koldSubmittedAt = Date.now();
+    } catch (e) {
+      warnings.push(`kolddb(submit): ${(e as Error).message}`);
+    }
   }
 
   const byKey = new Map<string, CandidateRow>();
@@ -824,6 +842,17 @@ export async function runDiscovery(
     }
   }
 
+  // Collect the database sweep that was submitted before the web pass. Patience is
+  // measured from SUBMIT (the web pass above already burned most of it), floored so
+  // a fast web pass still gives the worker a fair window.
+  if (koldJobId) {
+    const patience = breadth === "wide" ? 240_000 : breadth === "focused" ? 90_000 : 150_000;
+    const remaining = Math.max(20_000, patience - (Date.now() - koldSubmittedAt));
+    const { rows, error } = await collectDbDiscovery(koldJobId, remaining);
+    if (error) warnings.push(`kolddb(read): ${error}`);
+    if (rows.length) absorb(rows, "contact database");
+  }
+
   if (googleUsed >= googleBudget && googleUsed > 0) {
     warnings.push(`google_budget_reached: spent the free pass on ${googleUsed} queries this run; remaining queries used paid engines`);
   }
@@ -883,6 +912,7 @@ export async function runDiscovery(
     }
     if (!useSerper && engines.includes("serper") && serperSearchConfigured()) reasons.push("the Serper search pass stopped early (key rejected or out of credits; check your serper.dev balance)");
     if (!useSearx && engines.includes("searx")) reasons.push("the built-in free search engine did not respond");
+    if (engines.includes("koldinfo") && !useKold) reasons.push("the free contact-database sweep is offline (the enrichment worker is unreachable or missing its login)");
     if (opts.excludeKeys?.size && scanned === 0) reasons.push(`Fresh only is ON and ${opts.excludeKeys.size} previously-surfaced people are being excluded (uncheck it to see the full list again)`);
     if (scanned > 0) reasons.push(`${scanned} profiles were found but every one was ruled out by the search profile's hard disqualifiers or scored 0 fit; loosen the disqualifiers or the job location and run again`);
     warnings.unshift("empty_run: " + (reasons.length ? reasons.join("; ") : "no engine returned results"));
@@ -893,7 +923,7 @@ export async function runDiscovery(
   // candidates came back, collapse them into a single short note; the raw per-query
   // list only matters on an empty run, where the diagnosis above consumes it.
   if (candidates.length) {
-    const perQuery = /^(rapidapi|scraper|google|searx|serper)\(/;
+    const perQuery = /^(rapidapi|scraper|google|searx|serper|kolddb)\(/;
     const noisy = warnings.filter((w) => perQuery.test(w));
     if (noisy.length) {
       const kept = warnings.filter((w) => !perQuery.test(w));

@@ -192,8 +192,9 @@ async function applyFilters(page, log) {
 }
 
 /** Scrape the visible grid as {heads, rows[]} using the header cells as keys. */
-async function readGrid(page) {
-  return page.evaluate(() => {
+async function readGrid(page, maxRows) {
+  const cap = Number(maxRows) || 25;
+  return page.evaluate((limit) => {
     const tbl = document.querySelector("table");
     if (!tbl) return { heads: [], rows: [] };
     const heads = Array.from(tbl.querySelectorAll("thead th, tr:first-child th, tr:first-child td")).map((h) => (h.textContent || "").trim());
@@ -203,8 +204,45 @@ async function readGrid(page) {
       if (!cells.length) return;
       const o = {}; cells.forEach((c, i) => { o[heads[i] || ("c" + i)] = c; }); rows.push(o);
     });
-    return { heads, rows: rows.slice(0, 25) };
-  });
+    return { heads, rows: rows.slice(0, limit) };
+  }, cap);
+}
+
+/** Like setRule, but adds SEVERAL value chips to one rule (chips OR within the rule). */
+async function setRuleChips(page, i, column, condition, values, joiner) {
+  await setRule(page, i, column, condition, values[0], joiner);
+  const search = page.locator("input[placeholder='Search (Enter to add new)']").nth(i);
+  for (let v = 1; v < values.length; v++) {
+    await search.click();
+    await search.type(values[v], { delay: 30 });
+    await search.press("Enter");
+    await page.waitForTimeout(250);
+  }
+}
+
+/**
+ * Advance the grid one page. Pagination controls vary, so this probes the common
+ * shapes (a "Next" button, an aria-labeled next-page chevron) and reports whether it
+ * actually moved. Defensive: any miss returns false and the caller just stops paging.
+ */
+async function nextGridPage(page) {
+  const candidates = [
+    page.getByRole("button", { name: /^next$/i }),
+    page.getByRole("button", { name: /next page/i }),
+    page.locator("button[aria-label*='next' i]"),
+    page.locator("a[aria-label*='next' i]"),
+  ];
+  for (const c of candidates) {
+    const btn = c.first();
+    if (!(await btn.count().catch(() => 0))) continue;
+    const disabled = await btn.isDisabled().catch(() => false);
+    const aria = await btn.getAttribute("aria-disabled").catch(() => null);
+    if (disabled || aria === "true") return false;
+    await btn.click().catch(() => {});
+    await page.waitForTimeout(1800);
+    return true;
+  }
+  return false;
 }
 
 /* ----------------------------------------------------------------------------- */
@@ -396,6 +434,98 @@ async function runJob(job, { log = () => {}, setPhase = () => {} } = {}) {
   return outLines.join("\n") + "\n";
 }
 
+/* ----------------------------------------------------------------------------- */
+/* DISCOVERY: one filtered sweep of the Business Email DB → many people ($0)       */
+/* ----------------------------------------------------------------------------- */
+
+/**
+ * The lookup flows above answer "find THIS person's contact info". Discovery answers
+ * the Sales-Navigator question instead: "who ARE the <titles> in <cities/states>?" —
+ * one filter query over the 57M-row Business Email DB, grid read page by page. Rows
+ * arrive WITH emails/phones (the grid shows them unmasked), and reading the grid is
+ * free, so this is a zero-credit candidate SOURCE, not an enrichment.
+ *
+ * Input CSV (one data row; multi-values pipe-joined):
+ *   titles,cities,states,limit
+ *   Director of Nursing|Nursing Director,Fair Lawn|Paramus,NJ|New Jersey,300
+ * Output CSV:
+ *   full_name,title,company,email,email_status,phone,seniority,city,state,linkedin_url
+ */
+function parseSpecCsv(text) {
+  const lines = (text || "").split(/\r?\n/).filter((l) => l.length);
+  if (lines.length < 2) return null;
+  const header = splitCsvLine(lines[0]).map((h) => h.toLowerCase().trim());
+  const c = splitCsvLine(lines[1]);
+  const get = (name) => { const i = header.indexOf(name); return i >= 0 ? (c[i] || "").trim() : ""; };
+  const list = (s) => s.split("|").map((x) => x.trim()).filter(Boolean);
+  return {
+    titles: list(get("titles")).slice(0, 8),
+    cities: list(get("cities")).slice(0, 8),
+    states: list(get("states")).slice(0, 6),
+    limit: Math.max(1, Math.min(parseInt(get("limit"), 10) || 200, 1000)),
+  };
+}
+
+const DISCOVERY_HEADER = ["full_name", "title", "company", "email", "email_status", "phone", "seniority", "city", "state", "linkedin_url"];
+
+async function runDiscoveryJob(job, { log = () => {}, setPhase = () => {} } = {}) {
+  const spec = parseSpecCsv(job.csv);
+  if (!spec || !spec.titles.length) throw new Error("koldinfo_no_search_spec: discovery needs at least one title");
+  log(`db-discovery: ${spec.titles.length} title(s) × ${spec.cities.length} city / ${spec.states.length} state chip(s), limit ${spec.limit}`);
+
+  const browser = await chromium.launch(launchArgs());
+  const outLines = [DISCOVERY_HEADER.join(",")];
+  try {
+    const haveState = fs.existsSync(CONFIG.statePath);
+    const context = await browser.newContext(haveState ? { storageState: CONFIG.statePath } : {});
+    const page = await ensureSession(context, log);
+    await setPhase("processing");
+
+    await page.goto(CONFIG.baseUrl + CONFIG.bizEmailPath, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1500);
+    const rules = [{ column: "person_title", condition: "Contains", values: spec.titles }];
+    if (spec.states.length) rules.push({ column: "person_location_state", condition: "Contains", values: spec.states, joiner: "AND" });
+    if (spec.cities.length) rules.push({ column: "person_location_city", condition: "Contains", values: spec.cities, joiner: "AND" });
+    await openAndResetFilters(page, rules.length, log);
+    for (let i = 0; i < rules.length; i++) await setRuleChips(page, i, rules[i].column, rules[i].condition, rules[i].values, rules[i].joiner);
+    await applyFilters(page, log);
+
+    const seen = new Set();
+    let lastSig = "";
+    for (let guard = 0; guard < 40 && seen.size < spec.limit; guard++) {
+      const { rows } = await readGrid(page, 200);
+      if (!rows.length) break;
+      const sig = JSON.stringify(rows[0]);
+      if (guard > 0 && sig === lastSig) break; // pager didn't actually advance
+      lastSig = sig;
+      for (const r of rows) {
+        const name = (r.person_name || "").trim();
+        if (!name) continue;
+        const key = ((r.person_linkedin_url || "").trim() || name + "|" + (r["Company Name"] || "")).toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const email = RE_EMAIL.test((r.person_email || "").trim()) ? r.person_email.trim().toLowerCase() : "";
+        outLines.push([
+          name, r.person_title || "", r["Company Name"] || "", email, r.person_email_status_cd || "",
+          firstPhone(r.person_sanitized_phone || r.person_phone), r.person_seniority || "",
+          r.person_location_city || "", r.person_location_state || "", (r.person_linkedin_url || "").trim(),
+        ].map(csvCell).join(","));
+        if (seen.size >= spec.limit) break;
+      }
+      log(`db-discovery: page ${guard + 1} read — ${seen.size} unique so far`);
+      setPhase("processing:" + seen.size);
+      if (seen.size >= spec.limit) break;
+      if (!(await nextGridPage(page))) break;
+    }
+    await context.storageState({ path: CONFIG.statePath }).catch(() => {});
+    await setPhase("exported");
+    log(`db-discovery DONE: ${outLines.length - 1} people found (grid reads only, zero credits spent)`);
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  return outLines.join("\n") + "\n";
+}
+
 /** Canary: log in and confirm both DB pages + their Filters button are reachable. */
 async function selfTest({ log = () => {} } = {}) {
   const browser = await chromium.launch(launchArgs());
@@ -415,4 +545,4 @@ async function selfTest({ log = () => {} } = {}) {
   } finally { await browser.close().catch(() => {}); }
 }
 
-module.exports = { runJob, selfTest, CONFIG, _internals: { parseInputCsv, lookupPeopleDb, lookupBizEmailDb, firstEmail, firstPhone } };
+module.exports = { runJob, runDiscoveryJob, selfTest, CONFIG, _internals: { parseInputCsv, parseSpecCsv, lookupPeopleDb, lookupBizEmailDb, firstEmail, firstPhone } };

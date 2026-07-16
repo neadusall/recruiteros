@@ -10010,6 +10010,11 @@
       '.jd-opt2-top input[type=checkbox]{width:auto;margin:0}' +
       '.jd-opt2-top select{background:var(--bg);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px;cursor:pointer}' +
       '.jd-opt2-top input:focus,.jd-opt2-top select:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
+      '.jd-englist{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px}' +
+      '.jd-eng{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:2px 10px;border-radius:999px;border:1px solid var(--border-strong);color:var(--text-dim);background:var(--bg);cursor:help}' +
+      '.jd-eng .jd-eng-dot{width:7px;height:7px;border-radius:50%;background:var(--text-dim);flex:0 0 auto}' +
+      '.jd-eng.on{color:var(--ok);border-color:color-mix(in srgb, var(--ok) 38%, transparent);background:color-mix(in srgb, var(--ok) 8%, transparent)}' +
+      '.jd-eng.on .jd-eng-dot{background:var(--ok)}' +
       '.jd-opt2-def{font-size:12px;color:var(--text-muted);line-height:1.5;margin-top:4px}' +
                         '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
@@ -10071,6 +10076,7 @@
         '<div class="jd-depth">' +
           '<div class="jd-depth-h">Set the depth of the search</div>' +
           '<div class="jd-depth-sub">These choices shape how wide this run goes. The defaults are right for most roles.</div>' +
+          '<div id="jdEngines" class="jd-englist" style="display:none"></div>' +
           '<div class="jd-depth-grid">' +
             '<div class="jd-opt2">' +
               '<label class="jd-opt2-top" for="jdBreadth">Search breadth ' +
@@ -10791,6 +10797,26 @@
     ["#jdbTitle", "#jdbCompany", "#jdbNotes"].forEach(function (sel) {
       var e = $(sel); if (e) e.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.keyCode === 13) { ev.preventDefault(); doBuildJd(); } });
     });
+
+    /* "Search power" readout: which sources the next run will actually use, so a
+       missing key is visible up front instead of discovered from a thin result. */
+    function loadEngines() {
+      send("/sourcing", "POST", { action: "engines" }).then(function (r) {
+        var host = $("#jdEngines"); if (!host || !r.ok) return;
+        var e = (r.data && r.data.engines) || {};
+        function pill(on, label, offHint) {
+          return '<span class="jd-eng ' + (on ? "on" : "off") + '" title="' + esc(on ? label + " is active and will run on every search." : offHint) + '">' +
+            '<span class="jd-eng-dot"></span>' + esc(label) + (on ? "" : " · off") + '</span>';
+        }
+        host.style.display = "";
+        host.innerHTML = '<span class="muted" style="font-size:11.5px;margin-right:2px">Search power:</span>' +
+          pill(e.database, "Contact database", "Off: the enrichment worker is not reachable, so the free 57M-person database sweep is skipped this run.") +
+          pill(e.wideWeb, "Wide web search", "Off: paste your Serper key in Setup under JD Sourcing to turn on the deep web pass (about a nickel per full run).") +
+          pill(e.freeWeb, "Built-in web search", "Off: the built-in free pass is not responding right now. It comes back on its own; nothing to configure.") +
+          pill(e.peopleApi, "People search engine", "Off: connect a people-search subscription in Setup under JD Sourcing. This is the highest-volume source when active.");
+      }).catch(function () {});
+    }
+    loadEngines();
     loadRuns();
   }
 

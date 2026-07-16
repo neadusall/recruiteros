@@ -58,6 +58,10 @@ export {
   buildKoldInfoDbCsv, splitLocation,
   type SourcingKoldMerge,
 } from "./koldinfo";
+export {
+  buildDbDiscoverySpecCsv, parseDbDiscoveryCsv, geoChips,
+  submitDbDiscovery, collectDbDiscovery,
+} from "./koldinfoDiscovery";
 
 import { parseJobDescription } from "./parseJobDescription";
 import { generateQueries } from "./generateQueries";

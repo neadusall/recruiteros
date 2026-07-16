@@ -136,7 +136,7 @@ export interface LaxisJobStatus {
  * drives more than one vendor UI; `kind` picks the flow ("laxis" default, "koldinfo"
  * for the free first-rung bulk email finder).
  */
-export async function submitLaxisJob(csv: string, kind: "laxis" | "koldinfo" | "koldinfo-db" = "laxis"): Promise<string> {
+export async function submitLaxisJob(csv: string, kind: "laxis" | "koldinfo" | "koldinfo-db" | "koldinfo-db-search" = "laxis"): Promise<string> {
   const res = await fetch(`${WORKER_URL}/jobs`, {
     method: "POST",
     headers: { "content-type": "application/json", ...authHeaders() },
