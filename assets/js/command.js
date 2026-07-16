@@ -1589,9 +1589,10 @@
   // Recruiting calls them Candidates; BD calls them Prospects.
   function prospectsLabel() { return motion === "recruiting" ? "Candidates" : "Prospects"; }
   function prospectNoun() { return motion === "recruiting" ? "candidate" : "prospect"; }
-  // The "data" route is the people warehouse (Candidates) in recruiting, and the
-  // book-of-business company list (Companies) in BD.
-  function dataLabel() { return motion === "recruiting" ? "Candidates" : "Companies"; }
+  // The "data" route is the people warehouse (People Database) in recruiting, and
+  // the book-of-business company list (Companies) in BD. The recruiting "Candidates"
+  // nav item is the prospects pipeline, where JD Sourcing's Send to Candidates lands.
+  function dataLabel() { return motion === "recruiting" ? "People Database" : "Companies"; }
 
   // Show/hide motion-specific nav items (Hire Signals is BD-only) and relabel the
   // Prospects/Candidates nav item for the active motion.
@@ -1619,7 +1620,9 @@
     var r = ROUTES[key];
     syncMotionNav(); // keep motion-only visibility + Prospects/Candidates label current
     $("#pageTitle").textContent = (key === "prospects") ? prospectsLabel() : (key === "data") ? dataLabel() : r.title;
-    $("#crumb").textContent = (ctx.workspace ? wsDisplayName() + " / " : "") + r.crumb;
+    // In recruiting the Candidates pipeline lives under the Build nav group.
+    var crumbLabel = (key === "prospects" && motion === "recruiting") ? "Build" : r.crumb;
+    $("#crumb").textContent = (ctx.workspace ? wsDisplayName() + " / " : "") + crumbLabel;
     Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) { n.classList.toggle("active", n.dataset.route === key); });
     var pa = $("#primaryAction");
     if (r.action) { pa.style.display = ""; pa.textContent = (key === "prospects") ? ("+ Add " + prospectNoun()) : r.action; pa.onclick = function () { primaryAction(key); }; }
@@ -6376,7 +6379,7 @@
       '<button class="btn btn-ghost btn-sm" id="importBtn">Import (CSV / paste)</button>' +
       '<button class="btn btn-ghost btn-sm" id="liSearchBtn">Enrich LinkedIn searches</button>' +
       '<button class="btn btn-ghost btn-sm" id="prListsBtn">Saved lists</button>' +
-      '<select id="prSavedSelect" title="Open a saved search / list" style="margin-left:auto;background:var(--surface-2,var(--surface));color:var(--text,#f4f4f8);border:1px solid var(--border,#2a2a36);border-radius:8px;padding:6px 11px;font-size:13px;max-width:240px"><option value="">Saved searches…</option></select>' +
+      '<select id="prSavedSelect" title="Open a saved list (JD Sourcing lists appear here)" style="margin-left:auto;background:var(--surface-2,var(--surface));color:var(--text,#f4f4f8);border:1px solid var(--border,#2a2a36);border-radius:8px;padding:6px 11px;font-size:13px;max-width:240px"><option value="">Saved lists…</option></select>' +
       '</div>' +
       '<div id="liProgress"></div>' +
       '<div class="pr-searchbar"><span class="ico"><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg></span>' +
@@ -6404,7 +6407,7 @@
     function refreshSavedDropdown() {
       if (!savedSelect) return;
       var lists = listStore().all().filter(function (l) { return !l.motion || l.motion === motion; });
-      savedSelect.innerHTML = '<option value="">Saved searches…</option>' +
+      savedSelect.innerHTML = '<option value="">Saved lists…</option>' +
         lists.map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.name) + " · " + (l.prospectIds || []).length + "</option>"; }).join("");
       savedSelect.value = prListId;
     }
@@ -6592,14 +6595,30 @@
         prLifecycle = (d && d.lifecycle) || REF.lifecycle;
         paint();
       }).catch(function () { var b = $("#prBody"); if (b) b.innerHTML = needsSetup(); });
-      // Populate the Saved searches dropdown (local cache first, then merge server).
+      // Populate the Saved lists dropdown (local cache first, then merge server).
       refreshSavedDropdown();
+      openPendingList();
       api("/prospect-lists?motion=" + encodeURIComponent(motion)).then(function (d) {
         var server = (d && d.lists) || [];
-        if (!server.length) return;
-        try { localStorage.setItem("ros_prospect_lists", JSON.stringify(server.concat(listStore().all().filter(function (l) { return !server.some(function (s) { return s.id === l.id; }); })))); } catch (e) {}
-        refreshSavedDropdown();
+        if (server.length) {
+          try { localStorage.setItem("ros_prospect_lists", JSON.stringify(server.concat(listStore().all().filter(function (l) { return !server.some(function (s) { return s.id === l.id; }); })))); } catch (e) {}
+          refreshSavedDropdown();
+        }
+        openPendingList();
+        try { sessionStorage.removeItem("ros_open_list"); } catch (e) {}
       }).catch(function () {});
+    }
+
+    // JD Sourcing's Send to Candidates stamps the new list id in sessionStorage;
+    // the next visit here opens straight onto that list so it's never "lost".
+    function openPendingList() {
+      var id = null;
+      try { id = sessionStorage.getItem("ros_open_list"); } catch (e) {}
+      if (!id) return;
+      var hit = listStore().all().some(function (l) { return l.id === id; });
+      if (!hit) return;
+      selectSavedList(id);
+      try { sessionStorage.removeItem("ros_open_list"); } catch (e) {}
     }
 
     /* ---- saved prospect lists (named audiences) ---- */
@@ -9002,7 +9021,7 @@
           '<div class="jd-helpsec"><h5>On a saved list</h5>' +
             '<p><b>Deep-vet top (number)</b>: Reads that many top candidates\' full work history against the role and gives each a verified score and a short verdict. Each list has its own number, so you can vet 10 on one list and 50 on another; the price pill next to it updates as you type.</p>' +
             '<p><b>Enrich</b>: One click fills business email and phone for the whole list. Behind the scenes it always runs cheapest-first: the free KoldInfo pass grabs every email it can, then Laxis adds the remaining emails and cellphones, then the in-house waterfall fills any gaps. Nothing to download or import.</p>' +
-            '<p><b>Send to Candidates</b>: Pushes the list into your Candidates pipeline under the same name, ready to drop into a campaign.</p>' +
+            '<p><b>Send to Candidates</b>: Pushes the list into the Candidates tab (sidebar, under Build) under the same name, ready to drop into a campaign.</p>' +
             '<p><b>Send to OS Text</b>: Builds an SMS campaign in OS Text from everyone on the list with a phone number. Contacts arrive formatted (first name, last name, company, title, location, email, LinkedIn URL) so every {token} fills in, with a starter message prefilled; you polish and launch inside OS Text.</p>' +
             '<p><b>Delete</b>: Removes the saved list. The people themselves are not deleted.</p>' +
           '</div>' +
@@ -9144,7 +9163,7 @@
           return '<div class="jd-run"><div><b>' + esc(r.name) + '</b> <span class="muted">· ' +
             (r.location ? (esc(r.location) + ' · ') : '') + n + ' candidates · ' + urls + ' with LinkedIn URL' +
             (vetted ? (' · ' + vetted + ' deep-vetted') : '') +
-            (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates') : '') + '</span></div>' +
+            (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates · <a href="#prospects" data-openlist="' + esc(r.promotedListId || "") + '">Open in Candidates →</a>') : '') + '</span></div>' +
             '<div class="jd-run-actions">' +
               '<span class="jd-vetctl" title="Deep-vet reads each candidate\'s full career history against the role and returns a verified fit score and verdict. The number picks how many from the top of this list.">Deep-vet top ' +
                 '<input type="number" class="jd-vettop" min="1" max="200" value="' + Math.min(25, Math.max(1, n)) + '">' +
@@ -9503,13 +9522,20 @@
     $("#jdGo").addEventListener("click", runOneClick);
 
     $("#jdRuns").addEventListener("click", function (e) {
-      var t = e.target; if (t.tagName !== "BUTTON") return;
+      var t = e.target;
+      // "Open in Candidates" on a sent list: remember which list to open, then
+      // let the #prospects navigation happen naturally.
+      if (t.tagName === "A" && t.hasAttribute("data-openlist")) {
+        try { sessionStorage.setItem("ros_open_list", t.getAttribute("data-openlist") || ""); } catch (err) {}
+        return;
+      }
+      if (t.tagName !== "BUTTON") return;
       var id;
       if ((id = t.getAttribute("data-promote"))) {
         var prun = (state.runs || []).find(function (r) { return r.id === id; });
         var defName = (prun && prun.name) || "";
         var btn = t;
-        openModal("Send to Candidates", "Choose the list these candidates land in. Add a tag to pull them back later by tag.",
+        openModal("Send to Candidates", "They land in the Candidates tab (sidebar, under Build) as a saved list with this name. The tag is optional; it defaults to the list name.",
           '<label class="fld"><span>Candidate list name</span>' +
             '<input id="promoteList" type="text" value="' + esc(defName) + '" placeholder="e.g. VP Operations, Alegria" /></label>' +
           '<label class="fld"><span>Tag <span class="muted">(optional, defaults to the list name)</span></span>' +
@@ -9526,7 +9552,9 @@
               btn.disabled = true; btn.textContent = "Sending…";
               send("/sourcing", "POST", { action: "promote", id: id, listName: listName, tag: tag }).then(function (r) {
                 if (!r.ok) { btn.disabled = false; btn.textContent = "Send to Candidates →"; alert("Promote failed: " + ((r.data && r.data.error) || r.status)); return; }
-                toast('Sent ' + r.data.added + ' to Candidates as "' + r.data.name + '"' + (r.data.deduped ? (' (' + r.data.deduped + ' already in pipeline)') : '') + '.'); loadRuns();
+                // Remember the new list so the Candidates tab opens straight onto it.
+                try { if (r.data.listId) sessionStorage.setItem("ros_open_list", r.data.listId); } catch (err) {}
+                toast('Sent ' + r.data.added + ' to Candidates as "' + r.data.name + '"' + (r.data.deduped ? (' (' + r.data.deduped + ' already in pipeline)') : '') + '. Open the Candidates tab to see them.'); loadRuns();
               });
             });
           });
