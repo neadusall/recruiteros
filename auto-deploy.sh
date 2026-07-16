@@ -156,12 +156,22 @@ else
   echo "$(date -u) deploy complete (core only)" >> "$LOG"
 fi
 
-# Reload Caddy's bind-mounted config after every deploy: `up -d` never restarts
-# caddy when only the Caddyfile's CONTENT changed (the bind-mount path is the
-# same), so routing changes silently never applied. Graceful reload first
-# (zero downtime), hard restart as fallback, never fatal.
-docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile >> "$LOG" 2>&1 \
-  || docker compose restart caddy >> "$LOG" 2>&1 || true
+# Apply Caddy's bind-mounted config after every deploy. TRAP (bit us 2026-07-16,
+# the deploy-resilience Caddyfile change silently never loaded): the Caddyfile is
+# a SINGLE-FILE bind mount, and `git reset --hard` replaces the file with a NEW
+# inode, so the running container keeps reading the OLD blob forever — a graceful
+# `caddy reload` inside the container just re-reads the stale mount and reports
+# success. So compare the container's view of the file with the repo's: if they
+# differ the mount is stale and only a force-recreate re-binds it (~1s of edge
+# downtime); if they match, a zero-downtime graceful reload is enough. Never fatal.
+if docker compose exec -T caddy cat /etc/caddy/Caddyfile 2>/dev/null | cmp -s - "$DIR/Caddyfile"; then
+  docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile >> "$LOG" 2>&1 \
+    || docker compose restart caddy >> "$LOG" 2>&1 || true
+else
+  echo "$(date -u) Caddyfile mount is stale (single-file bind-mount inode trap), force-recreating caddy..." >> "$LOG"
+  docker compose up -d --force-recreate caddy >> "$LOG" 2>&1 \
+    || docker compose restart caddy >> "$LOG" 2>&1 || true
+fi
 
 # One-time: OS Text cutover (same-origin /ostext-app + portal-matched skin).
 # The engine container had been running a stale build on this box, so force a
