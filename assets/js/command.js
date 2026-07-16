@@ -8980,6 +8980,16 @@
       '.jd-run{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}.jd-run:last-child{border-bottom:0}' +
       '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}' +
       '@media (max-width:760px){.jd-run{flex-direction:column;align-items:stretch}.jd-run-actions{justify-content:flex-start}}' +
+      '.jd-depth{border:1px solid var(--border-strong);border-radius:12px;background:var(--bg-soft);padding:14px 16px;margin-top:14px}' +
+      '.jd-depth-h{font-weight:600;font-size:13.5px;color:var(--text)}' +
+      '.jd-depth-sub{font-size:12px;color:var(--text-muted);margin:2px 0 12px}' +
+      '.jd-depth-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 22px}' +
+      '@media(max-width:640px){.jd-depth-grid{grid-template-columns:1fr}}' +
+      '.jd-opt2-top{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--text);cursor:pointer}' +
+      '.jd-opt2-top input[type=number]{width:66px;background:var(--bg);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px}' +
+      '.jd-opt2-top input[type=checkbox]{width:auto;margin:0}' +
+      '.jd-opt2-top input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
+      '.jd-opt2-def{font-size:12px;color:var(--text-muted);line-height:1.5;margin-top:4px}' +
                         '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → save the list, then send it to Candidates under the same name.") +
       '<ol class="jd-steps" id="jdSteps"></ol>' +
@@ -8987,13 +8997,12 @@
         '<div class="jd-helpbody">' +
           '<div class="jd-helpsec"><h5>The flow: two clicks, start to saved list</h5>' +
             '<p><b>1 &middot; Fill in the role</b>: Job title plus anything you know. Pasting a JD is optional; the AI writes a strong brief from the fields alone.</p>' +
-            '<p><b>2 &middot; Press Find candidates</b>: That one button runs everything: writes the brief (if the JD box is empty), builds the ideal-candidate profile, searches, ranks the strongest matches to the top, and saves the finished list below. There is nothing else to press.</p>' +
+            '<p><b>2 &middot; Press Initiate Search</b>: That one button runs everything: writes the brief (if the JD box is empty), builds the ideal-candidate profile, searches, ranks the strongest matches to the top, and saves the finished list below. There is nothing else to press.</p>' +
             '<p>When it says Done, scroll to <b>Your saved candidate lists</b> and act on it: deep-vet, enrich, then send to Candidates or straight to OS Text.</p>' +
           '</div>' +
-          '<div class="jd-helpsec"><h5>Fine-tune (optional, under Advanced)</h5>' +
-            '<p><b>Min fit</b>: The match-strength bar, 0 to 100. Set 0 to see every profile found; raise it to keep only stronger matches (10 is wide, 40 and up is tight).</p>' +
-            '<p><b>Scan up to</b>: The ceiling on how many candidates a run gathers. Not a minimum, you get however many qualified people the search finds, up to this number.</p>' +
-            '<p><b>Dive deeper / Refine</b>: After a run, type a plain instruction (e.g. "only Director and up in medical devices, exclude agencies") to tighten or widen the profile, then search again.</p>' +
+          '<div class="jd-helpsec"><h5>Set the depth of the search</h5>' +
+            '<p>The four options above the button shape how wide a run goes; each is explained right where it sits. The defaults (scan 500, min fit 10, both boxes off) are right for most roles.</p>' +
+            '<p><b>Dive deeper / Refine</b>: After a run, type a plain instruction (e.g. "only Director and up in medical devices, exclude agencies") to tighten or widen the profile, then press Initiate Search again; the refined profile drives the next run.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>On a saved list</h5>' +
             '<p><b>Deep-vet top (number)</b>: Reads that many top candidates\' full work history against the role and gives each a verified score and a short verdict. Each list has its own number, so you can vet 10 on one list and 50 on another; the price pill next to it updates as you type.</p>' +
@@ -9023,7 +9032,7 @@
         '<div class="jd-field"><label>Job description <span class="jd-opt muted">optional, or let the AI write it</span></label>' +
           '<textarea id="jdText" rows="4" placeholder="Paste the job description here. The more real detail, the stronger the search."></textarea></div>' +
         '<div class="jd-builder"><div class="jd-buildbar" style="margin:0;justify-content:space-between;gap:10px">' +
-          '<span class="jd-builder-sub" style="margin:0">Optional: the one-click Find candidates below runs this automatically when the JD box is empty. Use this button only to preview or tweak the brief first.</span>' +
+          '<span class="jd-builder-sub" style="margin:0">Optional: Initiate Search below runs this automatically when the JD box is empty. Use this button only to preview or tweak the brief first.</span>' +
           '<button class="btn btn-primary btn-sm" id="jdbBtn" style="flex:0 0 auto">Build refined JD</button></div>' +
         '</div>' +
         '<details class="jd-tipsd"><summary>See what sharpens the search <span class="muted">Tap to expand</span></summary>' +
@@ -9039,24 +9048,33 @@
             '<span><b>Deal-breakers</b>: what should rule a candidate out</span>' +
           '</div>' +
         '</details>' +
+        '<div class="jd-depth">' +
+          '<div class="jd-depth-h">Set the depth of the search</div>' +
+          '<div class="jd-depth-sub">Four choices shape how wide this run goes. The defaults are right for most roles.</div>' +
+          '<div class="jd-depth-grid">' +
+            '<div class="jd-opt2">' +
+              '<label class="jd-opt2-top" for="jdCap"><input id="jdCap" type="number" min="1" max="5000" value="500"> Scan up to</label>' +
+              '<div class="jd-opt2-def">The ceiling on how many candidates this run gathers. It is not a minimum: you get every qualified person the search finds, up to this number. 500 covers most roles.</div>' +
+            '</div>' +
+            '<div class="jd-opt2">' +
+              '<label class="jd-opt2-top" for="jdMinFit"><input id="jdMinFit" type="number" min="0" max="100" value="10"> Min fit</label>' +
+              '<div class="jd-opt2-def">The match-strength bar, 0 to 100. 0 shows everyone found, 10 casts a wide net, 40 and up keeps only the tightest matches. Start wide: the list comes back ranked, so the gold is at the top either way.</div>' +
+            '</div>' +
+            '<div class="jd-opt2">' +
+              '<label class="jd-opt2-top" for="jdFresh"><input type="checkbox" id="jdFresh"> Fresh only</label>' +
+              '<div class="jd-opt2-def">Shows only people never surfaced in any earlier run on this workspace. Leave it off for the full market; turn it on when re-running a role so you see only new entrants.</div>' +
+            '</div>' +
+            '<div class="jd-opt2">' +
+              '<label class="jd-opt2-top" for="jdAnywhere"><input type="checkbox" id="jdAnywhere"> Include out-of-area</label>' +
+              '<div class="jd-opt2-def">Keeps candidates whose profile shows a location outside the city and radius you set. Turn it on for remote roles or when you would relocate the right person.</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
         '<div class="jd-actions">' +
-          '<button class="btn btn-primary" id="jdGo" style="font-size:14.5px;padding:11px 26px">Find candidates</button>' +
+          '<button class="btn btn-primary" id="jdGo" style="font-size:14.5px;padding:11px 26px">Initiate Search</button>' +
           '<span id="jdRunCost" class="jd-cost" style="display:none"></span>' +
-          '<span class="muted" style="font-size:12.5px;max-width:520px">The only button you need. It writes the brief, analyzes it, finds the candidates, ranks the best to the top, and saves the list below, all in one click.</span>' +
+          '<span class="muted" style="font-size:12.5px;max-width:520px">One press runs everything on its own: it analyzes the JD (writing one first if the box is empty), finds and ranks the candidates, and saves the finished list to Your saved candidate lists below.</span>' +
         '</div>' +
-        '<details class="jd-tipsd" style="margin-top:12px"><summary>Advanced <span class="muted">optional: tune the search or run one step at a time</span></summary>' +
-        '<div class="jd-actions" style="margin-top:6px">' +
-          '<span class="jd-cap muted">Scan up to <input id="jdCap" type="number" min="1" max="5000" value="500" title="Ceiling on candidates gathered per run. Not a minimum, runs return however many qualified people the search finds, up to this number."> · min fit <input id="jdMinFit" type="number" min="0" max="100" value="10" title="0 = show every profile the search finds (nothing filtered). Higher = keep only stronger matches. 10 is a wide net; 40+ is tight."></span>' +
-          '<label class="jd-cap muted" title="Skip anyone this workspace already surfaced in past runs, surfaces fresh people (new market entrants) instead of repeats. Leave OFF for the full market; ON can return zero on a re-run because everyone was already seen."><input type="checkbox" id="jdFresh" style="width:auto;margin:0 4px 0 0;vertical-align:middle"> Fresh only</label>' +
-          '<label class="jd-cap muted" title="By default, when you set a City &amp; state the search DROPS anyone whose profile states a different location (people with no visible location are kept). Check this to keep out-of-area candidates too, e.g. for remote roles."><input type="checkbox" id="jdAnywhere" style="width:auto;margin:0 4px 0 0;vertical-align:middle"> Include out-of-area</label>' +
-        '</div>' +
-        '<div class="jd-actions" style="margin-top:6px">' +
-          '<span class="jd-cap muted" title="These run the same steps as the big Find candidates button, one at a time, so you can review or refine the profile between steps.">Step by step:</span>' +
-          '<button class="btn btn-ghost btn-sm" id="jdAnalyze">1 · Analyze JD</button>' +
-          '<button class="btn btn-ghost btn-sm" id="jdFind" disabled>2 · Find candidates</button>' +
-          '<button class="btn btn-ghost btn-sm" id="jdSave" disabled>3 · Save the list</button>' +
-        '</div>' +
-        '</details>' +
         '<div id="jdMsg" class="muted" style="margin-top:8px"></div>' +
       '</div>' +
       '<div class="card jd-prog" id="jdProgress" style="display:none"></div>' +
@@ -9148,7 +9166,7 @@
         var warn = (d && d.durable === false)
           ? '<div class="card" style="border-color:#c0392b;background:#2a1414"><b>Saved lists are NOT being stored durably.</b><br><span class="muted">The server is running in memory-only mode, so saved searches will be lost on the next restart. Don\'t rely on saving until this is fixed (check the /data volume / persistence config).</span></div>'
           : '';
-        if (!runs.length) { host.innerHTML = warn + '<p class="muted">No saved lists yet. Fill in the role above and press Find candidates; the finished list lands here automatically.</p>'; return; }
+        if (!runs.length) { host.innerHTML = warn + '<p class="muted">No saved lists yet. Fill in the role above and press Initiate Search; the finished list lands here automatically.</p>'; return; }
         host.innerHTML = warn + runs.map(function (r) {
           var n = r.candidates ? r.candidates.length : 0;
           var urls = (r.candidates || []).filter(function (c) { return c.linkedinUrl; }).length;
@@ -9360,12 +9378,12 @@
       var ta = $("#jdText");
       var title = $("#jdbTitle") ? $("#jdbTitle").value.trim() : "";
       if (!(ta && ta.value.trim()) && !title) {
-        msg("Give it a job title (or paste a JD), then click Find candidates.");
+        msg("Give it a job title (or paste a JD), then press Initiate Search.");
         if ($("#jdbTitle")) $("#jdbTitle").focus();
         return;
       }
       goBtn.disabled = true;
-      function reset() { goBtn.disabled = false; goBtn.textContent = "Find candidates"; }
+      function reset() { goBtn.disabled = false; goBtn.textContent = "Initiate Search"; }
       var runName = "";
       var savedId = null;
       Promise.resolve().then(function () {
@@ -9382,15 +9400,21 @@
           renderSteps();
         });
       }).then(function () {
-        // 2) Analyze into the ideal-candidate profile.
-        state.jd = ta ? ta.value.trim() : "";
+        // 2) Analyze into the ideal-candidate profile. A Dive-deeper refinement
+        // on the SAME JD text survives this step: re-planning would silently
+        // overwrite the refined profile, so skip straight to the search instead.
+        var jdNow = ta ? ta.value.trim() : "";
         state.location = jdLocLabel();
+        if (state.refineNote && state.icp && state.jd === jdNow) {
+          renderPlan(); renderSteps(); updateRunCost();
+          return;
+        }
+        state.jd = jdNow;
         goBtn.textContent = "Analyzing…";
         msg("Analyzing the brief into an ideal-candidate profile…");
         return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location }).then(function (r) {
           if (!r.ok) throw { stage: "Analyze", r: r };
           state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
-          $("#jdFind").disabled = false;
           renderPlan(); renderSteps(); updateRunCost();
         });
       }).then(function () {
@@ -9401,7 +9425,10 @@
         goBtn.textContent = "Searching…";
         msg("");
         showProgress("Finding candidates", findEta(cap));
-        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), cap: cap, minFit: minFit, freshOnly: fresh, location: state.location, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked) }).then(function (r) {
+        // A refined profile is sent along so the search actually honors the
+        // Dive-deeper instruction instead of re-deriving the profile from the JD.
+        var refinedIcp = (state.refineNote && state.icp) ? state.icp : undefined;
+        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, freshOnly: fresh, location: state.location, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked) }).then(function (r) {
           if (!r.ok) { finishProgress("Search failed"); throw { stage: "Search", r: r }; }
           state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
           state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
@@ -9412,7 +9439,6 @@
             throw { plain: (why ? why.replace("empty_run: ", "The search came back empty: ") : "The search came back empty.") };
           }
           finishProgress("Found " + state.candidates.length + " candidates");
-          $("#jdSave").disabled = false;
         });
       }).then(function () {
         // 4) Save under an auto name (List name field wins when filled).
@@ -9455,9 +9481,8 @@
         state.queries = r.data.queries || state.queries;
         state.refineNote = r.data.changes || "Search refined.";
         state.candidates = []; state.warnings = [];
-        $("#jdFind").disabled = false; $("#jdSave").disabled = true;
         renderPlan(); renderResults(); renderSteps(); updateRunCost();
-        msg("Search refined. Review the updated profile, then Find candidates again.");
+        msg("Search refined. Review the updated profile, then press Initiate Search; the refined profile drives the next run.");
       });
     }
 
@@ -9507,46 +9532,6 @@
     function findEta(cap) { return Math.min(150, Math.max(8, Math.round((cap || 500) * 0.02))); }
 
     $("#jdGo").addEventListener("click", runOneClick);
-    $("#jdAnalyze").addEventListener("click", function () {
-      var jd = $("#jdText").value.trim(); if (!jd) { msg("Paste a job description first."); return; }
-      state.location = jdLocLabel();
-      state.jd = jd; msg("Analyzing…");
-      send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(jd), location: state.location }).then(function (r) {
-        if (!r.ok) { msg("Analyze failed: " + ((r.data && (r.data.detail || r.data.error)) || r.status)); return; }
-        state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
-        $("#jdFind").disabled = false; msg(""); renderPlan(); renderSteps(); updateRunCost();
-      });
-    });
-
-    $("#jdFind").addEventListener("click", function () {
-      if (!state.jd) { msg("Analyze a JD first."); return; }
-      var cap = parseInt($("#jdCap").value, 10) || 500;
-      var minFit = parseInt($("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
-      var fresh = !!($("#jdFresh") && $("#jdFresh").checked);
-      msg("");
-      $("#jdFind").disabled = true;
-      showProgress("Finding candidates", findEta(cap));
-      send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), cap: cap, minFit: minFit, freshOnly: fresh, location: state.location || jdLocLabel(), strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked) }).then(function (r) {
-        $("#jdFind").disabled = false;
-        if (!r.ok) { finishProgress("Search failed"); msg("Find failed: " + ((r.data && (r.data.detail || r.data.error)) || r.status)); return; }
-        state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
-        state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
-        $("#jdSave").disabled = !state.candidates.length;
-        finishProgress("Found " + state.candidates.length + " candidates");
-        msg("Found " + state.candidates.length + " candidates (scanned " + (r.data.scanned || 0) + ").");
-        renderPlan(); renderResults(); renderSteps(); updateRunCost();
-      });
-    });
-
-    $("#jdSave").addEventListener("click", function () {
-      var name = $("#jdName").value.trim(); if (!name) { msg("Give the list a name to save it."); $("#jdName").focus(); return; }
-      if (!state.icp) { msg("Analyze a JD first."); return; }
-      msg("Saving…");
-      send("/sourcing", "POST", { action: "save", name: name, jd: state.jd, location: state.location || jdLocLabel(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings }).then(function (r) {
-        if (!r.ok) { msg("Save failed: " + ((r.data && r.data.error) || r.status)); return; }
-        msg('Saved "' + name + '" to JD Sourcing. Review it below, then send to Candidates.'); loadRuns();
-      });
-    });
 
     $("#jdRuns").addEventListener("click", function (e) {
       var t = e.target; if (t.tagName !== "BUTTON") return;

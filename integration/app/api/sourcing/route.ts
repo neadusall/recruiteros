@@ -150,7 +150,10 @@ export async function POST(req: Request) {
       if (!b?.jd) return fail("missing_jd", 422);
       // A typed hiring location is ground truth: it pins the ICP's geos (the LLM parse
       // otherwise drifts to a national metro list) and turns on the strict-location drop.
-      const icp = pinIcpLocation(await parseJobDescription(b.jd), b.location);
+      // A client-supplied ICP (a Dive-deeper refinement) wins over re-parsing the JD,
+      // so refined searches actually run on the refined profile.
+      const clientIcp = b.icp && typeof b.icp === "object" && Array.isArray(b.icp.titles) ? b.icp : undefined;
+      const icp = pinIcpLocation(clientIcp ?? (await parseJobDescription(b.jd)), b.location);
       const queries = generateQueries(icp);
       // Cross-run "seen" memory: fresh-only excludes anyone surfaced in prior runs.
       const excludeKeys = b.freshOnly === true ? await getSeenKeys(ws) : undefined;
