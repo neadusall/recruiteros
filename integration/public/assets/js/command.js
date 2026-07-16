@@ -8268,6 +8268,9 @@
       '.dt-cn-off{cursor:pointer;color:var(--muted,var(--text-dim));border-style:dashed}' +
       '.dt-cn-off:hover{color:var(--accent,var(--brand))}' +
       '.dt-stage{font-size:11.5px;font-weight:600;padding:6px 13px;border-radius:999px;white-space:nowrap;border:1px solid transparent}' +
+      '.dt-stage-sel{appearance:none;-webkit-appearance:none;cursor:pointer;font-family:inherit}' +
+      '.dt-stage-sel:hover{border-color:currentColor}' +
+      '.dt-stage-sel option{color:var(--text,#222);background:var(--panel,#fff)}' +
       '.dt-add{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:9px;border:1px solid var(--line,var(--border));cursor:pointer;background:var(--bg-soft,var(--surface-2));color:var(--text,var(--text-muted));transition:border-color .15s,background .15s}' +
       '.dt-add:hover{border-color:var(--accent,var(--brand));background:color-mix(in srgb,var(--accent,var(--brand)) 12%,transparent);color:var(--accent,var(--brand))}' +
       '.dt-body{display:grid;grid-template-columns:1.4fr 1fr;gap:24px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line,var(--surface-2))}' +
@@ -8295,15 +8298,23 @@
       '</div>';
 
     // all = everything loaded; sel = picked ids; stage = active tab; facets = {field:[vals]}
-    var state = { all: [], q: "", stage: "", facets: {}, fq: {}, sel: {}, open: {}, showAll: {}, bios: {} };
+    var state = { all: [], q: "", stage: "", facets: {}, fq: {}, sel: {}, open: {}, showAll: {}, bios: {}, feedLimit: 150 };
     var bodyEl = $("#dtBody", el), searchTimer = null;
 
     function load() {
-      api("/data?limit=1000").then(function (d) {
-        d = d || {};
-        state.all = d.records || [];
-        renderAll();
-      }).catch(function () { bodyEl.innerHTML = '<div class="empty">Could not load the database.</div>'; });
+      // Page through the warehouse so databases beyond the first 1000 records
+      // load completely (the API caps a single request at 1000).
+      var PAGE = 1000, MAX = 20000, acc = [];
+      (function pageLoad(off) {
+        api("/data?limit=" + PAGE + "&offset=" + off).then(function (d) {
+          d = d || {};
+          var got = d.records || [];
+          acc = acc.concat(got);
+          if (got.length === PAGE && acc.length < (d.total || 0) && acc.length < MAX) { pageLoad(off + PAGE); return; }
+          state.all = acc;
+          renderAll();
+        }).catch(function () { bodyEl.innerHTML = '<div class="empty">Could not load the database.</div>'; });
+      })(0);
     }
 
     /* ---- filtering ---- */
@@ -8427,19 +8438,23 @@
         '<button class="cd-tbtn" id="cdEmail"' + dis + '>Email</button>' +
         '<button class="cd-tbtn" id="cdSms"' + dis + '>SMS</button>' +
         '<button class="cd-tbtn" id="cdFind"' + dis + '>Find contact</button>' +
+        '<button class="cd-tbtn" id="cdStage"' + dis + ' title="Set the pipeline stage on everyone selected">Set stage</button>' +
         '<button class="cd-tbtn" id="cdSubmit"' + dis + '>➤ Submit candidates</button>' +
         '<span class="cd-spacer"></span>' +
-        '<button class="cd-tbtn" id="cdAddTo"' + dis + '>+ Add to…</button>' +
+        '<button class="cd-tbtn" id="cdAddTo"' + dis + ' title="Add the selected people to a campaign you pick">+ Add to…</button>' +
         (can("ats:manage") ? '<button class="cd-tbtn" id="cdLoxo" title="Pull people from your connected ATS into Candidates">⟳ Sync Loxo</button>' : '') +
         '<button class="cd-tbtn" id="cdExport">Export</button>';
       var sel = function () { return Object.keys(state.sel); };
       $("#cdAdd", el).addEventListener("click", function () { openDataImport(load); });
-      $("#cdDelete", el).addEventListener("click", function () { if (n) delSel(); });
+      $("#cdDelete", el).addEventListener("click", function () {
+        if (n && confirm("Delete " + n + " record" + (n === 1 ? "" : "s") + " from the database? This cannot be undone.")) delSel();
+      });
       $("#cdEmail", el).addEventListener("click", function () { if (n) bulkEmail(); });
       $("#cdSms", el).addEventListener("click", function () { if (n) bulkSms(); });
       $("#cdFind", el).addEventListener("click", function () { if (n) enrichSel($("#cdFind", el)); });
+      $("#cdStage", el).addEventListener("click", function () { if (n) pickStage(function (s) { updateStage(sel(), s); }); });
       $("#cdSubmit", el).addEventListener("click", function () { if (n) promote(sel()); });
-      $("#cdAddTo", el).addEventListener("click", function () { if (n) promote(sel()); });
+      $("#cdAddTo", el).addEventListener("click", function () { if (n) pickCampaign(function (cid) { if (cid) promote(sel(), cid); }); });
       $("#cdExport", el).addEventListener("click", function () { exportCsv(); });
       var loxoBtn = $("#cdLoxo", el);
       if (loxoBtn) loxoBtn.addEventListener("click", function () {
@@ -8521,7 +8536,14 @@
 
       var sm = stageMeta(r.stage || r.recordType);
       var stageLabel = r.stage || r.recordType || sourceLabel(r.source);
-      var stageBadge = '<span class="dt-stage" style="color:' + sm[0] + ';background:' + sm[1] + '">' + esc(stageLabel) + '</span>';
+      // The badge is a live <select>: pick a stage right on the card and the
+      // pipeline tabs above the feed re-count immediately.
+      var stageOpts = DT_STAGE_ORDER.slice();
+      if (r.stage && stageOpts.indexOf(r.stage) < 0) stageOpts.push(r.stage);
+      var stageBadge = '<select class="dt-stage dt-stage-sel" data-stagesel="' + esc(r.id) + '" title="Set this candidate\'s stage" style="color:' + sm[0] + ';background:' + sm[1] + '">' +
+        '<option value=""' + (!r.stage ? " selected" : "") + '>' + esc(r.stage ? "No stage" : stageLabel) + '</option>' +
+        stageOpts.map(function (s) { return '<option value="' + esc(s) + '"' + (r.stage === s ? " selected" : "") + '>' + esc(s) + '</option>'; }).join("") +
+        '</select>';
 
       // Activity meta line (real owner + real last-activity time; never fabricated).
       var rel = relTime(r.lastActivityAt);
@@ -8592,7 +8614,13 @@
         return;
       }
       if (!rows.length) { bodyEl.innerHTML = '<div class="empty">No people match these filters.</div>'; return; }
-      bodyEl.innerHTML = '<div class="dt-list">' + rows.map(card).join("") + '</div>';
+      // Render the feed in pages: selection/counts cover ALL matching rows, but
+      // cards paint 150 at a time so a 5,000-person database stays responsive.
+      var shownRows = rows.slice(0, state.feedLimit);
+      bodyEl.innerHTML = '<div class="dt-list">' + shownRows.map(card).join("") + '</div>' +
+        (rows.length > shownRows.length ? '<div class="cd-showmore" id="cdFeedMore" style="padding:14px 0">Show 150 more (' + (rows.length - shownRows.length) + ' remaining)</div>' : '');
+      var fm = bodyEl.querySelector("#cdFeedMore");
+      if (fm) fm.addEventListener("click", function () { state.feedLimit += 150; paintFeed(); });
 
       Array.prototype.forEach.call(bodyEl.querySelectorAll("[data-pick]"), function (cb) {
         cb.addEventListener("change", function () {
@@ -8616,6 +8644,9 @@
       });
       Array.prototype.forEach.call(bodyEl.querySelectorAll("[data-bio]"), function (b) {
         b.addEventListener("click", function () { var id = b.getAttribute("data-bio"); state.bios[id] = !state.bios[id]; paintFeed(); });
+      });
+      Array.prototype.forEach.call(bodyEl.querySelectorAll("[data-stagesel]"), function (s) {
+        s.addEventListener("change", function () { updateStage([s.getAttribute("data-stagesel")], s.value); });
       });
     }
 
@@ -8651,28 +8682,135 @@
         if (res.ok) { toast("Deleted " + (res.data.deleted || ids.length)); state.sel = {}; load(); } else toast("Delete failed");
       });
     }
-    function promote(ids) {
+    function promote(ids, campaignId) {
       if (!ids || !ids.length) return;
-      resolveBdCampaign(function (campaignId) {
-        if (!campaignId) { toast("Create a campaign first."); return; }
-        send("/data", "POST", { action: "promote", ids: ids, campaignId: campaignId, motion: motion }).then(function (res) {
+      var go = function (cid) {
+        if (!cid) { toast("Create a campaign first."); return; }
+        send("/data", "POST", { action: "promote", ids: ids, campaignId: cid, motion: motion }).then(function (res) {
           if (res.ok) {
             toast("Submitted " + (res.data.added || ids.length) + " to " + prospectsLabel());
             ids.forEach(function (id) { delete state.sel[id]; });
             renderAll();
           } else toast("Submit failed");
         });
-      });
+      };
+      if (campaignId) go(campaignId); else resolveBdCampaign(go);
+    }
+    // "+ Add to…" — pick which campaign gets the selected people (or create one),
+    // instead of silently reusing the first saved campaign like Submit does.
+    function pickCampaign(cb) {
+      api("/campaigns").then(function (d) {
+        var list = ((d && d.campaigns) || []).filter(function (c) { return !c.motion || c.motion === motion; });
+        var rows = list.map(function (c) {
+          return '<button class="cd-tbtn" data-camp="' + esc(c.id) + '" style="display:flex;width:100%;margin-bottom:6px;text-align:left">' + esc(c.name || c.id) + (c.status ? ' <span class="cd-oc" style="margin-left:auto">' + esc(c.status) + '</span>' : '') + '</button>';
+        }).join("");
+        var bodyHtml =
+          (rows || '<div class="muted" style="font-size:12.5px;margin-bottom:8px">No campaigns yet. Name one below to create it.</div>') +
+          '<label class="fld" style="margin-top:8px"><span>New campaign</span><input id="pcName" type="text" placeholder="e.g. Java engineers, July" /></label>' +
+          '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="pcCancel2">Cancel</button><button class="btn btn-primary btn-sm" id="pcCreate">Create &amp; add</button></div>';
+        openModal("Add to campaign", "Pick the campaign the selected people join.", bodyHtml, function (card, close) {
+          Array.prototype.forEach.call(card.querySelectorAll("[data-camp]"), function (btn) {
+            btn.addEventListener("click", function () { close(); cb(btn.getAttribute("data-camp")); });
+          });
+          card.querySelector("#pcCancel2").addEventListener("click", function () { close(); });
+          card.querySelector("#pcCreate").addEventListener("click", function () {
+            var nm = card.querySelector("#pcName").value.trim();
+            if (!nm) { card.querySelector("#pcName").focus(); return; }
+            var c = { id: "camp_" + Math.random().toString(36).slice(2), name: nm, motion: motion, status: "active", dailyCap: 25, steps: [] };
+            send("/campaigns", "PUT", c).then(function (r) {
+              if (r.ok) { close(); cb(c.id); } else toast("Could not create the campaign.");
+            }).catch(function () { toast("Could not reach the server."); });
+          });
+        });
+      }).catch(function () { toast("Could not load campaigns."); });
     }
     function bulkEmail() {
-      var emails = Object.keys(state.sel).map(function (id) { var r = state.all.find(function (x) { return x.id === id; }); return r && r.email; }).filter(Boolean);
-      if (!emails.length) { toast("None of the selected have an email yet."); return; }
-      location.href = "mailto:?bcc=" + encodeURIComponent(emails.join(","));
+      var ids = Object.keys(state.sel);
+      var recips = ids.map(function (id) { return state.all.find(function (x) { return x.id === id; }); }).filter(function (r) { return r && r.email; });
+      if (!recips.length) { toast("None of the selected have an email yet. Run Find contact first."); return; }
+      var noEmail = ids.length - recips.length;
+      openModal("Email " + recips.length + " candidate" + (recips.length === 1 ? "" : "s"),
+        "One email per person through your connected sending path; opt-outs and daily caps are honored.",
+        '<label class="fld"><span>Subject</span><input id="beSubj" type="text" placeholder="e.g. Quick question, {first_name}" /></label>' +
+        '<label class="fld"><span>Message</span><textarea id="beBody" rows="8" placeholder="Hi {first_name}, …"></textarea></label>' +
+        '<div class="muted" style="font-size:12px;margin:6px 0 2px">Personalize with {first_name} {full_name} {company} {title}' + (noEmail ? " · " + noEmail + " of the selected have no email and are skipped" : "") + '</div>' +
+        '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="beCancel">Cancel</button><button class="btn btn-primary" id="beGo">Send to ' + recips.length + '</button></div>',
+        function (card, close) {
+          var subjEl = card.querySelector("#beSubj"); if (subjEl) subjEl.focus();
+          card.querySelector("#beCancel").addEventListener("click", function () { close(); });
+          var go = card.querySelector("#beGo");
+          go.addEventListener("click", function () {
+            var subj = subjEl.value.trim(), bodyTxt = card.querySelector("#beBody").value.trim();
+            if (!subj) { subjEl.focus(); return; }
+            if (!bodyTxt) { card.querySelector("#beBody").focus(); return; }
+            go.disabled = true; go.textContent = "Sending…";
+            send("/data", "POST", { action: "email", ids: recips.map(function (r) { return r.id; }), subject: subj, body: bodyTxt }).then(function (res) {
+              if (!res.ok) {
+                go.disabled = false; go.textContent = "Send to " + recips.length;
+                toast("Send failed (" + ((res.data && (res.data.detail || res.data.error)) || res.status) + ")");
+                return;
+              }
+              close();
+              var d = res.data || {}, msg = "Sent " + (d.sent || 0);
+              if (d.dryRun) msg += " (" + d.dryRun + " simulated: connect a sending provider in Setup)";
+              if (d.failed) msg += ", " + d.failed + " failed";
+              if (d.skipped) msg += ", " + d.skipped + " skipped (no email)";
+              toast(msg);
+            }).catch(function () { go.disabled = false; go.textContent = "Send to " + recips.length; toast("Could not reach the server."); });
+          });
+        });
     }
+    // SMS goes through OS Text (the texting engine): build/top up a campaign
+    // there from everyone selected who has a phone, then launch inside OS Text.
     function bulkSms() {
-      var phones = Object.keys(state.sel).map(function (id) { var r = state.all.find(function (x) { return x.id === id; }); return r && (r.phone || r.directPhone); }).filter(Boolean);
-      if (!phones.length) { toast("None of the selected have a phone yet."); return; }
-      location.href = "sms:" + phones[0];
+      var ids = Object.keys(state.sel);
+      var withPhone = ids.filter(function (id) { var r = state.all.find(function (x) { return x.id === id; }); return r && (r.phone || r.directPhone); });
+      if (!withPhone.length) { toast("None of the selected have a phone yet. Run Find contact first."); return; }
+      openModal("Send to OS Text",
+        "Creates (or tops up) an OS Text SMS campaign from the selected candidates. You review the message and launch inside OS Text.",
+        '<label class="fld"><span>Campaign name</span><input id="bsName" type="text" placeholder="e.g. Java engineers, July" /></label>' +
+        '<div class="muted" style="font-size:12.5px;margin:6px 0 2px">' + withPhone.length + " of " + ids.length + " selected have a phone number; only those are sent" + (withPhone.length < ids.length ? " (run Find contact to fill in more)" : "") + '.</div>' +
+        '<label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-top:8px"><input type="checkbox" id="bsValidate" checked style="flex:0 0 auto;width:auto;margin:0" /><span>Validate mobile lines on arrival (recommended)</span></label>' +
+        '<div class="modal-foot"><button class="btn btn-primary" id="bsGo">Send to OS Text →</button></div>',
+        function (card, close) {
+          var nameEl = card.querySelector("#bsName"); if (nameEl) nameEl.focus();
+          card.querySelector("#bsGo").addEventListener("click", function () {
+            var nm = nameEl.value.trim(); if (!nm) { nameEl.focus(); return; }
+            var goBtn = card.querySelector("#bsGo"); goBtn.disabled = true; goBtn.textContent = "Sending…";
+            var vEl = card.querySelector("#bsValidate");
+            send("/ostext/push", "POST", { name: nm, dataIds: withPhone, validate: !!(vEl && vEl.checked) }).then(function (r) {
+              if (!r.ok) {
+                goBtn.disabled = false; goBtn.textContent = "Send to OS Text →";
+                toast("OS Text push failed: " + ((r.data && (r.data.detail || r.data.error)) || r.status));
+                return;
+              }
+              close();
+              var d = r.data || {};
+              toast('OS Text campaign "' + (d.campaignName || nm) + '" is ready: ' + (d.added || d.pushed || 0) + " added" + (d.noPhone ? ", " + d.noPhone + " skipped (no phone)" : "") + ". Review and launch in the OS Text tab.");
+            }).catch(function () { goBtn.disabled = false; goBtn.textContent = "Send to OS Text →"; toast("Could not reach the server."); });
+          });
+        });
+    }
+    // Stage setter — the pipeline tabs above the feed are driven by this field.
+    function pickStage(cb) {
+      var opts = DT_STAGE_ORDER.map(function (s) {
+        return '<button class="cd-tbtn" data-st="' + esc(s) + '" style="margin:0 6px 6px 0">' + esc(s) + '</button>';
+      }).join("") + '<button class="cd-tbtn" data-st="" style="margin:0 6px 6px 0">No stage</button>';
+      openModal("Set stage", "Applies to everyone selected.", '<div>' + opts + '</div>', function (card, close) {
+        Array.prototype.forEach.call(card.querySelectorAll("[data-st]"), function (b) {
+          b.addEventListener("click", function () { close(); cb(b.getAttribute("data-st")); });
+        });
+      });
+    }
+    function updateStage(ids, stage) {
+      if (!ids || !ids.length) return;
+      send("/data", "POST", { action: "update", ids: ids, stage: stage }).then(function (res) {
+        if (res.ok) {
+          ids.forEach(function (id) { var r = state.all.find(function (x) { return x.id === id; }); if (r) r.stage = stage || undefined; });
+          toast((stage ? 'Stage set to "' + stage + '"' : "Stage cleared") + " for " + ((res.data && res.data.updated) || ids.length));
+          renderAll();
+        } else toast("Stage update failed");
+      }).catch(function () { toast("Could not reach the server."); });
     }
     function exportCsv() {
       var rows = view(); if (!rows.length) { toast("Nothing to export."); return; }

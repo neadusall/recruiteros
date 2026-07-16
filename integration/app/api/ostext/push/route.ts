@@ -1,5 +1,6 @@
 import { requireSession, body, ok, fail } from "../../../../lib/api";
 import { getCore } from "../../../../lib/core/repository";
+import { getRecord } from "../../../../lib/data";
 import { ostextImport, ostextStarterTemplate, type OsTextContact } from "../../../../lib/ostextImport";
 
 export const dynamic = "force-dynamic";
@@ -17,12 +18,17 @@ export const runtime = "nodejs";
  * Engine call + contact column set live in lib/ostextImport.ts (shared with
  * the JD Sourcing "ostext" action).
  *
- * Body: { name, prospectIds: string[], template?, validate? }
+ * Body: { name, prospectIds?: string[], dataIds?: string[], template?, validate? }
+ *   - prospectIds: campaign prospects (core.listProspects)
+ *   - dataIds: Candidates data-warehouse records (lib/data) — the admin
+ *     Candidates tab's SMS button sends these.
  */
 
 interface PushBody {
   name?: string;
   prospectIds?: string[];
+  /** Candidates data-warehouse record ids (the admin Candidates tab). */
+  dataIds?: string[];
   /** Optional SMS template override; defaults to a safe {first_name}-only starter. */
   template?: string;
   /** Run OS Text's Telnyx mobile-line validation on the pushed contacts. */
@@ -37,18 +43,44 @@ export async function POST(req: Request) {
   const b = await body<PushBody>(req);
   const name = (b?.name || "").trim();
   const ids = Array.isArray(b?.prospectIds) ? b!.prospectIds!.filter(Boolean) : [];
+  const dataIds = Array.isArray(b?.dataIds) ? b!.dataIds!.filter(Boolean) : [];
   if (!name) return fail("missing_name", 422);
-  if (!ids.length) return fail("missing_prospect_ids", 422);
+  if (!ids.length && !dataIds.length) return fail("missing_prospect_ids", 422);
 
   // Load the workspace's prospects once and pick the requested set (also the
   // workspace guard: an id from another workspace simply never matches).
   const core = getCore();
-  const all = await core.listProspects(ws);
+  const all = ids.length ? await core.listProspects(ws) : [];
   const wanted = new Set(ids);
   const picked = all.filter((p) => wanted.has(p.id));
 
   let noPhone = 0;
   const contacts: OsTextContact[] = [];
+
+  // Candidates data-warehouse records (workspace-guarded by getRecord).
+  let dataMatched = 0;
+  for (const id of dataIds) {
+    const r = await getRecord(ws, id);
+    if (!r) continue;
+    dataMatched++;
+    const phone = r.phone || r.directPhone || "";
+    if (!phone) { noPhone++; continue; }
+    const parts = (r.fullName || "").trim().split(/\s+/);
+    const custom: Record<string, string> = {};
+    if (Array.isArray(r.tags) && r.tags.length) custom.tag = r.tags[0];
+    contacts.push({
+      firstName: parts[0] || "",
+      lastName: parts.slice(1).join(" "),
+      company: r.company || "",
+      jobTitle: r.title || "",
+      phone,
+      email: r.email || "",
+      linkedinUrl: r.linkedinUrl || "",
+      location: [r.city, r.state].filter(Boolean).join(", "),
+      customFields: custom,
+    });
+  }
+
   for (const p of picked) {
     // SMS wants the mobile line first; fall back to the general phone field.
     const phone = p.mobilePhone || p.phone || "";
@@ -96,5 +128,5 @@ export async function POST(req: Request) {
     return fail(code, code === "ostext_not_connected" ? 503 : 502, { detail: err.message });
   }
 
-  return ok({ ...data, requested: ids.length, matched: picked.length, noPhone });
+  return ok({ ...data, requested: ids.length + dataIds.length, matched: picked.length + dataMatched, noPhone });
 }

@@ -11,9 +11,9 @@
 
 import { requireSession, body, ok, fail } from "../../../lib/api";
 import {
-  listRecords, getRecord, upsertRecords, deleteRecords, enrichRecord, stats,
+  listRecords, getRecord, saveRecord, upsertRecords, deleteRecords, enrichRecord, stats,
   rowsToInputs, providerStatus, getProvider, ProviderNotConfigured,
-  type DataSource,
+  type DataSource, type DataRecord,
 } from "../../../lib/data";
 import { addProspect } from "../../../lib/prospects";
 import { ensureLumeSeed } from "../../../lib/data/autoseed";
@@ -108,6 +108,73 @@ export async function POST(req: Request) {
 
   if (b?.action === "delete" && Array.isArray(b.ids)) {
     return ok({ deleted: await deleteRecords(ws, b.ids) });
+  }
+
+  // Set the pipeline stage on a batch of records (empty string clears it).
+  if (b?.action === "update" && Array.isArray(b.ids)) {
+    if (typeof b.stage !== "string") return fail("missing_fields", 422, { detail: "stage required" });
+    const stage = b.stage.trim();
+    let updated = 0;
+    for (const id of b.ids) {
+      const rec = await getRecord(ws, id);
+      if (!rec) continue;
+      rec.stage = stage || undefined;
+      await saveRecord(rec);
+      updated++;
+    }
+    return ok({ updated, stage });
+  }
+
+  // One-off email to each selected record, through the full send layer
+  // (sender pool / MTA / Instantly with suppression, caps and warm-up all
+  // enforced — sendTouch is the same path campaign sends use). Tokens
+  // {first_name} {full_name} {company} {title} fill in per person.
+  if (b?.action === "email" && Array.isArray(b.ids)) {
+    const subject = String(b.subject || "").trim();
+    const bodyText = String(b.body || "").trim();
+    if (!subject || !bodyText) return fail("missing_fields", 422, { detail: "subject and body required" });
+    const ids: string[] = b.ids.filter(Boolean).slice(0, 500);
+    const { sendTouch } = await import("../../../lib/channels");
+    const fill = (tpl: string, r: DataRecord) => {
+      const first = (r.fullName || "").trim().split(/\s+/)[0] || "";
+      return tpl
+        .replace(/\{first_name\}/gi, first)
+        .replace(/\{full_name\}/gi, r.fullName || "")
+        .replace(/\{company\}/gi, r.company || "")
+        .replace(/\{title\}/gi, r.title || "");
+    };
+    let sent = 0, failed = 0, skipped = 0, dryRun = 0;
+    const errors: Record<string, number> = {};
+    for (const id of ids) {
+      const rec = await getRecord(ws, id);
+      if (!rec || !rec.email) { skipped++; continue; }
+      const first = (rec.fullName || "").trim().split(/\s+/)[0] || "";
+      const res = await sendTouch(ws, {
+        channel: "email",
+        prospect: {
+          id: rec.id,
+          workspaceId: ws,
+          campaignId: "candidates-direct",
+          motion: "recruiting",
+          fullName: rec.fullName,
+          firstName: first,
+          email: rec.email,
+          company: rec.company,
+          title: rec.title,
+          linkedinUrl: rec.linkedinUrl,
+          phone: rec.phone || rec.directPhone,
+          status: "queued",
+          dripStage: null,
+          warmth: 0,
+          createdAt: rec.createdAt || rec.updatedAt,
+        },
+        subject: fill(subject, rec),
+        text: fill(bodyText, rec),
+      });
+      if (res.ok) { sent++; if (res.dryRun) dryRun++; }
+      else { failed++; if (res.error) errors[res.error] = (errors[res.error] || 0) + 1; }
+    }
+    return ok({ sent, failed, skipped, dryRun, errors, requested: b.ids.length });
   }
 
   return fail("unknown_action", 400);
