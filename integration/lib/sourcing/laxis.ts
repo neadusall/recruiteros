@@ -27,11 +27,13 @@ export function laxisWorkerConfigured(): boolean {
 }
 
 /**
- * Laxis caps a single prospect-search import at 1,000 contacts. We never send more than
- * this in one job; a larger staged list is enriched in sequential 1,000-row chunks
- * (the route paginates with a `start` offset). Overridable if Laxis raises the limit.
+ * Chunk size for one Laxis job. Laxis's own import cap is 1,000, but a whole chunk's
+ * results live or die together (a completion timeout throws ALL of its rows away), so we
+ * send much smaller chunks: a stall costs at most 200 rows and finished chunks land
+ * durably 5x as often. A larger staged list is enriched in sequential chunks (the route
+ * paginates with a `start` offset). Overridable via LAXIS_MAX_UPLOAD.
  */
-export const MAX_LAXIS_UPLOAD = Number(process.env.LAXIS_MAX_UPLOAD || 1000);
+export const MAX_LAXIS_UPLOAD = Number(process.env.LAXIS_MAX_UPLOAD || 200);
 
 /**
  * The exact import format Laxis prospect-search expects — two columns, snake_case headers:

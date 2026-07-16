@@ -91,36 +91,44 @@ function rankByVerdict(rows: CandidateRow[]): void {
  * paid waterfall. Mutates the rows in place; the CALLER persists the run. Shared by the
  * `enrich` action and the Laxis gap-fill (Laxis runs first, this fills what it left blank).
  */
-async function gapFillContacts(ws: string, rows: CandidateRow[]): Promise<{ enriched: number; cacheHits: number }> {
+async function gapFillContacts(ws: string, rows: CandidateRow[]): Promise<{ enriched: number; phones: number; cacheHits: number }> {
   const plan = cheapFirstContactWaterfall({ includePhone: true });
+  // Rows that already hold an email still deserve a phone hunt: run a phone-only plan
+  // on them (the known email doubles as a lookup key) instead of skipping the row.
+  const phonePlan = { ...plan, steps: plan.steps.filter((s) => s.field !== "email") };
   let enriched = 0;
+  let phones = 0;
   let contactCacheHits = 0;
   for (const c of rows) {
-    if (c.email) continue;
+    const hasEmail = Boolean((c.email || "").trim());
+    const hasPhone = Boolean((c.phone || "").trim());
+    if (hasEmail && hasPhone) continue;
     const personKey = c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`;
     const cached = await getCachedContact(ws, personKey);
     if (cached && (cached.email || cached.phone)) {
-      if (cached.email) { c.email = cached.email; enriched++; }
-      if (cached.phone) c.phone = cached.phone;
+      if (cached.email && !hasEmail) { c.email = cached.email; enriched++; }
+      if (cached.phone && !hasPhone) { c.phone = cached.phone; phones++; }
       contactCacheHits++;
       continue;
     }
     const [first, ...rest] = (c.fullName || "").trim().split(/\s+/);
     try {
-      const report = await enrich(plan, {
+      const report = await enrich(hasEmail ? phonePlan : plan, {
         name: c.company, companyName: c.company, fullName: c.fullName,
         firstName: first, lastName: rest.join(" "), linkedinUrl: c.linkedinUrl, title: c.title,
+        email: (c.email || "").trim() || undefined,
       }, { now: nowIso() });
       const e = report.subject.email; const ph = report.subject.phone;
-      if (typeof e === "string") { c.email = e; enriched++; }
-      if (typeof ph === "string") c.phone = ph;
+      if (typeof e === "string" && !hasEmail) { c.email = e; enriched++; }
+      if (typeof ph === "string" && !hasPhone) { c.phone = ph; phones++; }
+      // Cache the row's settled answer (email + phone together), not just this lookup's.
       await putCachedContact(ws, personKey, {
-        email: typeof e === "string" ? e : undefined,
-        phone: typeof ph === "string" ? ph : undefined,
+        email: (c.email || "").trim() || undefined,
+        phone: (c.phone || "").trim() || undefined,
       });
     } catch { /* leave unresolved */ }
   }
-  return { enriched, cacheHits: contactCacheHits };
+  return { enriched, phones, cacheHits: contactCacheHits };
 }
 
 export async function GET(req: Request) {
@@ -293,9 +301,9 @@ export async function POST(req: Request) {
       // Include the phone rung — otherwise report.subject.phone is always undefined.
       // (Mobile direct-dial stays cap-gated separately; this is the cheap business-phone find.)
       const top = Math.max(1, Math.min(b.top ?? 50, run.candidates.length));
-      const { enriched, cacheHits } = await gapFillContacts(ws, run.candidates.slice(0, top));
+      const { enriched, phones, cacheHits } = await gapFillContacts(ws, run.candidates.slice(0, top));
       await saveSourcingRun(ws, { ...run });
-      return ok({ enriched, cacheHits, run });
+      return ok({ enriched, phones, cacheHits, run });
     }
 
     // KoldInfo is the FIRST enrichment rung (free CSV round-trip the operator drives):
@@ -512,7 +520,7 @@ export async function POST(req: Request) {
 
       // Laxis was the first pass; the cheap in-house waterfall fills whatever it left blank
       // (unless the caller opts out). One seamless flow from the recruiter's side.
-      let gapFill = { enriched: 0, cacheHits: 0 };
+      let gapFill = { enriched: 0, phones: 0, cacheHits: 0 };
       if (b.gapFill !== false) {
         try { gapFill = await gapFillContacts(ws, run.candidates.slice(start, start + count)); }
         catch (err) { warnings.push(`gap_fill_failed: ${(err as Error).message}`); }

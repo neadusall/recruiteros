@@ -223,32 +223,79 @@ async function downloadOurExport(page, outDir, log, inputCsv) {
     for (const id of wantIds) if (id && text.includes(id)) return true;
     return false;
   };
+  // A large enrichment paginates into SEVERAL export files (the page's "Export Next
+  // Batch" control materializes the next one). Returning the first matching file used
+  // to silently truncate big runs - so collect EVERY file that echoes our ros_ids,
+  // drive the next-batch control while it exists, and concatenate at the end.
+  const parts = [];            // matched file texts, in the order found
+  const seenParts = new Set(); // content signatures, so a re-scan can't double-append
+  const coveredIds = new Set();
+  const countCovered = (text) => {
+    for (const id of wantIds) if (!coveredIds.has(id) && text.includes(id)) coveredIds.add(id);
+  };
   const deadline = Date.now() + CONFIG.enrichTimeoutMs;
   let attempt = 0;
+  let fileIdx = 0;
   while (Date.now() < deadline) {
     attempt++;
     await page.goto(CONFIG.baseUrl + CONFIG.exportsPath, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(3000);
     const buttons = page.getByRole("button", { name: /download/i });
-    const n = Math.min(await buttons.count(), 10);
+    const n = Math.min(await buttons.count(), 30);
+    let newThisPass = 0;
     for (let i = 0; i < n; i++) {
       const waiter = page.waitForEvent("download", { timeout: 30_000 }).catch(() => null);
       await buttons.nth(i).click().catch(() => {});
       const download = await waiter;
       if (!download) continue;
-      const dest = path.join(outDir, "koldinfo-result-" + i + ".csv");
+      const dest = path.join(outDir, "koldinfo-result-" + fileIdx++ + ".csv");
       await download.saveAs(dest).catch(() => {});
       let text = "";
       try { text = fs.readFileSync(dest, "utf8"); } catch { continue; }
-      if (isOurs(text)) {
-        log("export: matched our rows in " + download.suggestedFilename());
-        return text;
+      if (!isOurs(text)) continue;
+      const sig = String(text.length) + ":" + text.slice(0, 500);
+      if (seenParts.has(sig)) continue;
+      seenParts.add(sig);
+      parts.push(text);
+      countCovered(text);
+      newThisPass++;
+      log("export: matched our rows in " + download.suggestedFilename() + " (file " + parts.length + ", " + coveredIds.size + "/" + wantIds.size + " ids covered)");
+    }
+    if (parts.length) {
+      // Everything covered → done. Otherwise, if the page offers another batch of OUR
+      // export, materialize it and rescan; a missing/disabled control means what we
+      // have IS the whole result (not every input row matches, so full id coverage
+      // is not required to finish).
+      if (coveredIds.size >= wantIds.size) break;
+      const nextBatch = page.getByRole("button", { name: /export next batch/i }).first();
+      const hasNext = (await nextBatch.count().catch(() => 0)) &&
+        !(await nextBatch.isDisabled().catch(() => false));
+      if (hasNext && newThisPass > 0) {
+        log("export: result paginates, requesting the next batch (" + coveredIds.size + "/" + wantIds.size + " ids so far)");
+        await nextBatch.click().catch(() => {});
+        await page.waitForTimeout(8000);
+        continue;
       }
+      break; // no further batches to ask for - ship what we collected
     }
     if (attempt === 1 || attempt % 6 === 0) log("export: our result not in the list yet, waiting (" + n + " other export(s) checked)");
     await page.waitForTimeout(8000);
   }
-  throw new Error("koldinfo_export_timeout: our export never appeared within the time limit");
+  if (!parts.length) throw new Error("koldinfo_export_timeout: our export never appeared within the time limit");
+  if (parts.length === 1) return parts[0];
+  // Concatenate: first file's header + every file's data rows (dedupe exact lines).
+  const header = parts[0].split(/\r?\n/, 1)[0];
+  const seenRows = new Set();
+  const rows = [];
+  for (const text of parts) {
+    for (const line of text.split(/\r?\n/).slice(1)) {
+      if (!line.trim() || seenRows.has(line)) continue;
+      seenRows.add(line);
+      rows.push(line);
+    }
+  }
+  log("export: combined " + parts.length + " batch files into " + rows.length + " rows");
+  return header + "\n" + rows.join("\n") + "\n";
 }
 
 /* ----------------------------------------------------------------------------- */

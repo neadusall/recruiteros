@@ -189,6 +189,24 @@ const PS_PATH_VARIANTS = [
 ];
 let healedPath: { host: string; path: string } | null = null;
 
+/**
+ * Ride out per-second/minute burst limits: the breadth dial fans out many queries and
+ * marketplace listings 429 the burst even with plenty of monthly credits left - each
+ * 429'd query used to be dropped outright (reported as "rate-limited N of the queries").
+ * Honor Retry-After when sent, otherwise back off 2s/5s/12s before giving the query up.
+ */
+async function fetchRetry429(doFetch: () => Promise<Response>): Promise<Response> {
+  const waits = [2000, 5000, 12000];
+  let res = await doFetch();
+  for (let i = 0; i < waits.length && res.status === 429; i++) {
+    const ra = Number(res.headers.get("retry-after"));
+    const wait = Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 30_000) : waits[i];
+    await new Promise((r) => setTimeout(r, wait));
+    res = await doFetch();
+  }
+  return res;
+}
+
 /** The effective GET path: the healed one for this host when a 404 was repaired. */
 function effectivePsPath(host: string): string {
   if (healedPath && healedPath.host === host) return healedPath.path;
@@ -211,7 +229,7 @@ export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRo
     if (p.geoLocation) bodyObj.geocode_location = p.geoLocation;
     if (p.pastCompany) bodyObj.past_company = p.pastCompany;
     if (p.headcount) bodyObj.company_headcount = p.headcount;
-    res = await fetch(url, { method: "POST", headers, body: JSON.stringify(bodyObj) });
+    res = await fetchRetry429(() => fetch(url, { method: "POST", headers, body: JSON.stringify(bodyObj) }));
   } else {
     const buildPath = (rawBase: string): string => {
       const templated = rawBase.includes("{query}") || rawBase.includes("{page}");
@@ -240,7 +258,7 @@ export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRo
     };
 
     const raw = effectivePsPath(host);
-    res = await fetch(`https://${host}${buildPath(raw)}`, { headers });
+    res = await fetchRetry429(() => fetch(`https://${host}${buildPath(raw)}`, { headers }));
 
     // SELF-HEAL: a 404 on the configured path usually means the listing renamed its
     // endpoint (or Setup carries a stale path). Probe the common variants ONCE on the

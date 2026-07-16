@@ -29,9 +29,12 @@ const path = require("path");
 const DIR = process.env.LAXIS_JOBS_DIR || "/data/laxis-jobs";
 
 // Fields that are safe + useful to persist. Bytes (csv/enrichedCsv) are stored as files.
+// `kind` MUST persist: without it a job recovered after a restart fell back to the
+// default Laxis flow - a koldinfo-db job would resume through the WRONG browser flow.
+// `checkpoint` is the flow's own resume state (e.g. the DB lookup's done-batch cursor).
 const META_FIELDS = [
-  "id", "token", "status", "stage", "phase", "count",
-  "createdAt", "startedAt", "finishedAt", "expiresAt", "error", "laxisViewUrl",
+  "id", "kind", "token", "status", "stage", "phase", "count", "attempts", "hash",
+  "createdAt", "startedAt", "finishedAt", "expiresAt", "error", "laxisViewUrl", "checkpoint",
 ];
 
 function ensureDir() {

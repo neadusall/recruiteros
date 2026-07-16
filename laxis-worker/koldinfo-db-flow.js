@@ -45,6 +45,13 @@ const CONFIG = {
   navTimeoutMs: Number(process.env.KOLDINFO_NAV_TIMEOUT_MS || 60_000),
   // Per-candidate query budget; a run of N rows takes ~N * a few seconds (single browser).
   perRowTimeoutMs: Number(process.env.KOLDINFO_DB_ROW_TIMEOUT_MS || 45_000),
+  // Batched lookups: how many candidate names ride one filter sweep (chips OR within a
+  // rule), the wall-clock budget for one sweep, and how many batches one browser serves
+  // before a preventive relaunch (the KoldInfo SPA leaks across many navigations; a
+  // browser that dies mid-run used to silently zero the whole job).
+  batchSize: Number(process.env.KOLDINFO_DB_BATCH || 15),
+  batchTimeoutMs: Number(process.env.KOLDINFO_DB_BATCH_TIMEOUT_MS || 240_000),
+  batchesPerBrowser: Number(process.env.KOLDINFO_DB_BATCHES_PER_BROWSER || 8),
 };
 
 /* ----------------------------------------------------------------------------- */
@@ -259,6 +266,176 @@ async function nextGridPage(page) {
 }
 
 /* ----------------------------------------------------------------------------- */
+/* name hygiene - LinkedIn names carry credentials the DBs never store            */
+/* ----------------------------------------------------------------------------- */
+
+// Credential/suffix tokens that follow a comma or ride the end of a LinkedIn name
+// ("Theodore Bender PhD, MBA", "Kelly Asato, LCSW"). The DBs store plain names, so a
+// query keyed on the raw string matches nothing - the single biggest silent miss.
+const CRED_TOKENS = new Set([
+  "phd", "md", "do", "mba", "jd", "esq", "cpa", "cfa", "cma", "cfe", "cia", "cisa",
+  "rn", "bsn", "msn", "dnp", "np", "pa-c", "lcsw", "licsw", "lmsw", "lmhc", "lpc",
+  "lmft", "bcba", "laba", "ot", "pt", "dpt", "ccc-slp", "cebs", "phr", "sphr",
+  "shrm-cp", "shrm-scp", "pmp", "crcr", "chc", "cphq", "fache", "cpc", "cscp",
+  "cpsm", "csm", "pe", "lssbb", "lssgb", "ms", "ma", "med", "mha", "mph", "msw",
+  "bs", "ba", "jr", "sr", "ii", "iii", "iv",
+]);
+
+/** "Robyn Manley Lees, M.Ed., BCBA, LABA" -> "Robyn Manley Lees". */
+function cleanPersonName(raw) {
+  let s = String(raw || "").trim().replace(/["“”]/g, "");
+  s = s.split(/[,(]/, 1)[0].trim(); // everything after a comma/paren is credentials/aka
+  const parts = s.split(/\s+/).filter((w) => !CRED_TOKENS.has(w.toLowerCase().replace(/\./g, "")));
+  return parts.join(" ").trim();
+}
+
+/** A name we can actually identify in a DB: at least first + last, last not an initial
+ *  ("Muhammad S." can never be matched safely - skip it instead of burning a query). */
+function usableName(name) {
+  const parts = (name || "").split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return false;
+  return parts[parts.length - 1].replace(/\./g, "").length >= 2;
+}
+
+// State corroboration must be abbreviation-aware: the DBs mix "NJ" and "New Jersey",
+// and a plain substring check matches neither from the other (the same trap the
+// discovery sweep's geoChips already works around).
+const US_STATES = {
+  alabama: "al", alaska: "ak", arizona: "az", arkansas: "ar", california: "ca", colorado: "co",
+  connecticut: "ct", delaware: "de", florida: "fl", georgia: "ga", hawaii: "hi", idaho: "id",
+  illinois: "il", indiana: "in", iowa: "ia", kansas: "ks", kentucky: "ky", louisiana: "la",
+  maine: "me", maryland: "md", massachusetts: "ma", michigan: "mi", minnesota: "mn",
+  mississippi: "ms", missouri: "mo", montana: "mt", nebraska: "ne", nevada: "nv",
+  "new hampshire": "nh", "new jersey": "nj", "new mexico": "nm", "new york": "ny",
+  "north carolina": "nc", "north dakota": "nd", ohio: "oh", oklahoma: "ok", oregon: "or",
+  pennsylvania: "pa", "rhode island": "ri", "south carolina": "sc", "south dakota": "sd",
+  tennessee: "tn", texas: "tx", utah: "ut", vermont: "vt", virginia: "va", washington: "wa",
+  "west virginia": "wv", wisconsin: "wi", wyoming: "wy", "district of columbia": "dc",
+};
+const US_STATE_CODES = new Set(Object.values(US_STATES));
+/** "New Jersey" / "NJ" / "nj." -> "nj"; anything unrecognized -> "". */
+function stateCode(s) {
+  const n = norm(s);
+  if (!n) return "";
+  if (US_STATES[n]) return US_STATES[n];
+  if (n.length === 2 && US_STATE_CODES.has(n)) return n;
+  return "";
+}
+/** True when `stated` (a state cell or an address blob) agrees with the wanted state. */
+function stateAgrees(wantStateNorm, wantCode, stated) {
+  if (!wantStateNorm || !stated) return false;
+  if (stated.includes(wantStateNorm) || wantStateNorm.includes(stated)) return true;
+  if (!wantCode) return false;
+  if (stateCode(stated) === wantCode) return true;
+  return new RegExp("\\b" + wantCode + "\\b").test(stated); // "..., nj 07731" inside an address
+}
+
+/* ----------------------------------------------------------------------------- */
+/* batched lookups - one filter sweep answers a whole group of candidates         */
+/* ----------------------------------------------------------------------------- */
+
+/**
+ * Collect grid rows for a batch: apply the given single chips-rule, then page through
+ * the grid until we have `maxPages` pages or the pager stops advancing.
+ */
+async function sweepGrid(page, url, column, condition, chips, maxPages, log) {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1200);
+  await openAndResetFilters(page, 1, log);
+  await setRuleChips(page, 0, column, condition, chips, undefined);
+  await applyFilters(page, log);
+  const rows = [];
+  let lastSig = "";
+  for (let p = 0; p < maxPages; p++) {
+    const { rows: got } = await readGrid(page, 100);
+    if (!got.length) break;
+    const sig = JSON.stringify(got[0]);
+    if (p > 0 && sig === lastSig) break; // pager didn't actually advance
+    lastSig = sig;
+    rows.push(...got);
+    if (got.length < 20) break; // short page = last page; don't probe the pager for nothing
+    if (!(await nextGridPage(page))) break;
+  }
+  return rows;
+}
+
+/**
+ * ONE Business Email DB sweep for a whole batch (person_name Contains [name chips,
+ * OR'd]), then per-candidate exact-name matching + the same corroboration rules the
+ * per-candidate lookup used. Fills cand._hit in place for every candidate it answers.
+ */
+async function batchBizEmailDb(page, batch, log) {
+  const chips = batch.map((c) => c.cleanName);
+  const rows = await sweepGrid(page, CONFIG.baseUrl + CONFIG.bizEmailPath, "person_name", "Contains", chips, 6, log);
+  for (const cand of batch) {
+    if (cand._hit && cand._hit.email && cand._hit.phone) continue;
+    const wantName = norm(cand.cleanName);
+    const wantCity = norm(cand.city);
+    const wantState = norm(cand.state);
+    const wantCode = stateCode(cand.state);
+    const wantCompany = norm(cand.company);
+    const exact = rows.filter((r) => norm(cleanPersonName(r.person_name)) === wantName);
+    const corroborated = exact.filter((r) => {
+      const city = norm(r.person_location_city);
+      const state = norm(r.person_location_state);
+      const company = norm(r["Company Name"]);
+      if (wantCity && city && city.includes(wantCity)) return true;
+      if (state && stateAgrees(wantState, wantCode, state)) return true;
+      if (wantCompany && company && (company.includes(wantCompany) || wantCompany.includes(company))) return true;
+      return false;
+    });
+    let pool = corroborated;
+    if (!pool.length && !wantCity && !wantState && !wantCompany && exact.length === 1) pool = exact;
+    if (!pool.length) continue;
+    pool.sort((a, b) => (/(verified)/i.test(b.person_email_status_cd) ? 1 : 0) - (/(verified)/i.test(a.person_email_status_cd) ? 1 : 0));
+    const p = pool[0];
+    const hit = cand._hit || {};
+    const email = RE_EMAIL.test((p.person_email || "").trim()) ? p.person_email.trim().toLowerCase() : "";
+    if (!hit.email && email) { hit.email = email; hit.status = p.person_email_status_cd || ""; hit.source = "biz_email_db"; }
+    if (!hit.phone) hit.phone = firstPhone(p.person_sanitized_phone || p.person_phone);
+    if (!hit.title) hit.title = p.person_title || "";
+    if (!hit.company) hit.company = p["Company Name"] || "";
+    if (!hit.seniority) hit.seniority = p.person_seniority || "";
+    if (!hit.source) hit.source = "biz_email_db";
+    cand._hit = hit;
+  }
+}
+
+/**
+ * ONE People DB sweep for the batch's still-unanswered candidates (name Equals [chips];
+ * People DB stores names lowercase). Location corroboration happens client-side against
+ * the address column, mirroring the per-candidate rules.
+ */
+async function batchPeopleDb(page, batch, log) {
+  const open = batch.filter((c) => !c._hit || !c._hit.email || !c._hit.phone);
+  if (!open.length) return;
+  const chips = open.map((c) => c.cleanName.toLowerCase());
+  const rows = await sweepGrid(page, CONFIG.baseUrl + CONFIG.peoplePath, "name", "Equals", chips, 6, log);
+  for (const cand of open) {
+    const wantName = norm(cand.cleanName);
+    const wantCity = norm(cand.city);
+    const wantState = norm(cand.state);
+    const wantCode = stateCode(cand.state);
+    const matches = rows.filter((r) => norm(r.name) === wantName);
+    const pick = matches.find((r) => {
+      if (!wantCity && !wantState) return matches.length === 1; // no location -> only trust a unique hit
+      const addr = norm(r.address);
+      return (wantCity && addr.includes(wantCity)) || stateAgrees(wantState, wantCode, addr);
+    });
+    if (!pick) continue;
+    const hit = cand._hit || {};
+    if (!hit.email) { const e = firstEmail(pick.email); if (e) { hit.email = e; if (!hit.source) hit.source = "people_db"; } }
+    if (!hit.phone) { const ph = firstPhone(pick.phone_number); if (ph) { hit.phone = ph; if (!hit.source) hit.source = "people_db"; } }
+    cand._hit = hit;
+  }
+}
+
+/** True when an error means the browser/page under us is gone (crash, OOM, closed). */
+function browserGone(err) {
+  return /has been closed|browser has been disconnected|target crashed|browser closed/i.test(String((err && err.message) || err));
+}
+
+/* ----------------------------------------------------------------------------- */
 /* per-candidate lookups                                                          */
 /* ----------------------------------------------------------------------------- */
 
@@ -275,7 +452,7 @@ async function lookupPeopleDb(page, cand, log) {
   await openAndResetFilters(page, rules.length, log);
   for (let i = 0; i < rules.length; i++) await setRule(page, i, rules[i].column, rules[i].condition, rules[i].value, rules[i].joiner);
   await applyFilters(page, log);
-  const { rows } = await readGrid(page);
+  const { rows } = await readGrid(page, 50);
   const wantName = norm(cand.fullName);
   const wantState = norm(cand.state);
   const matches = rows.filter((r) => norm(r.name) === wantName);
@@ -283,7 +460,7 @@ async function lookupPeopleDb(page, cand, log) {
   const pick = matches.find((r) => {
     if (!wantCity && !wantState) return matches.length === 1; // no location → only trust a unique hit
     const addr = norm(r.address);
-    return (wantCity && addr.includes(norm(wantCity))) || (wantState && addr.includes(wantState)) || Boolean(wantCity); // city already filtered
+    return (wantCity && addr.includes(norm(wantCity))) || stateAgrees(wantState, stateCode(cand.state), addr) || Boolean(wantCity); // city already filtered
   }) || (matches.length === 1 && (wantCity || wantState) ? matches[0] : undefined);
   if (!pick) return {};
   return { email: firstEmail(pick.email), phone: firstPhone(pick.phone_number), source: "people_db" };
@@ -300,7 +477,7 @@ async function lookupBizEmailDb(page, cand, log) {
   await openAndResetFilters(page, 1, log);
   await setRule(page, 0, "person_name", "Contains", cand.fullName, undefined);
   await applyFilters(page, log);
-  const { rows } = await readGrid(page);
+  const { rows } = await readGrid(page, 50);
   const wantName = norm(cand.fullName);
   const wantCity = norm(cand.city);
   const wantState = norm(cand.state);
@@ -311,7 +488,7 @@ async function lookupBizEmailDb(page, cand, log) {
     const state = norm(r.person_location_state);
     const company = norm(r["Company Name"]);
     if (wantCity && city && city.includes(wantCity)) return true;
-    if (wantState && state && (state.includes(wantState) || wantState.includes(state))) return true;
+    if (state && stateAgrees(wantState, stateCode(cand.state), state)) return true;
     if (wantCompany && company && (company.includes(wantCompany) || wantCompany.includes(company))) return true;
     return false;
   });
@@ -380,70 +557,102 @@ function outRow(rosId, hit) {
 function launchArgs() { return { headless: !CONFIG.headed, args: ["--no-sandbox", "--disable-dev-shm-usage"] }; }
 
 /**
- * Run a KoldInfo DB-lookup job: for each input candidate, query People DB then (to fill
- * any still-missing email/phone) Business Email DB, and emit an enriched CSV. Best-effort
- * per row: a row that errors is logged and skipped, never fatal to the batch. Resumable —
- * on a restart the whole batch re-runs (reads are free), so tokens are never double-spent.
+ * Run a KoldInfo DB-lookup job - BATCHED: candidates ride the filter rule as OR'd name
+ * chips, ~batchSize per sweep, one Business Email DB sweep + one People DB sweep per
+ * batch (2 queries per ~15 people instead of 2 per person; an 800-row job drops from
+ * hours to tens of minutes). Grid reads only - zero credits.
+ *
+ * Resilience (an early browser death used to fail 800 rows in a burst yet finish as
+ * "done, 0 enriched"):
+ *  - a dead browser/page ABORTS the run with a retryable error (the server requeues it)
+ *    instead of burning the remaining batches;
+ *  - progress checkpoints onto the job after every batch (persisted by the server's
+ *    store), so a retry RESUMES at the first unprocessed batch;
+ *  - the browser is relaunched every `batchesPerBrowser` batches to pre-empt SPA leaks.
  */
 async function runJob(job, { log = () => {}, setPhase = () => {} } = {}) {
   const inputCsv = job.csv;
   if (typeof inputCsv !== "string" || !inputCsv) throw new Error("koldinfo_no_input_csv");
-  const cands = parseInputCsv(inputCsv);
-  log("db-lookup: " + cands.length + " candidate(s) to look up");
+  const all = parseInputCsv(inputCsv);
+  for (const c of all) c.cleanName = cleanPersonName(c.fullName);
+  const cands = all.filter((c) => usableName(c.cleanName));
+  const skippedNames = all.length - cands.length;
+  log("db-lookup: " + all.length + " candidate(s), " + cands.length + " identifiable" +
+    (skippedNames ? " (" + skippedNames + " skipped: name too truncated to match safely)" : ""));
   if (!cands.length) return OUT_HEADER.join(",") + "\n";
 
-  const browser = await chromium.launch(launchArgs());
-  const outLines = [OUT_HEADER.join(",")];
-  let emails = 0, phones = 0, hitRows = 0;
-  try {
+  const size = Math.max(1, CONFIG.batchSize);
+  const batches = [];
+  for (let i = 0; i < cands.length; i += size) batches.push(cands.slice(i, i + size));
+
+  // Resume from the checkpoint a previous attempt left on the job (the server persists
+  // job.checkpoint through its store; a fresh job starts clean).
+  const ck = job.checkpoint && job.checkpoint.batchSize === size ? job.checkpoint : null;
+  const outLines = ck && Array.isArray(ck.outLines) ? ck.outLines.slice() : [OUT_HEADER.join(",")];
+  let firstBatch = ck ? Math.min(ck.doneBatches, batches.length) : 0;
+  let emails = ck ? ck.emails || 0 : 0, phones = ck ? ck.phones || 0 : 0, hitRows = ck ? ck.hitRows || 0 : 0;
+  if (firstBatch) log("db-lookup: resuming at batch " + (firstBatch + 1) + "/" + batches.length + " (checkpoint)");
+
+  let browser = null, page = null, batchesOnBrowser = 0;
+  async function freshBrowser() {
+    if (browser) await browser.close().catch(() => {});
+    browser = await chromium.launch(launchArgs());
     const haveState = fs.existsSync(CONFIG.statePath);
     const context = await browser.newContext(haveState ? { storageState: CONFIG.statePath } : {});
-    const page = await ensureSession(context, log);
+    page = await ensureSession(context, log);
+    batchesOnBrowser = 0;
+  }
+
+  try {
+    await freshBrowser();
     await setPhase("processing");
 
-    for (let n = 0; n < cands.length; n++) {
-      const cand = cands[n];
-      let hit = {};
+    for (let b = firstBatch; b < batches.length; b++) {
+      const batch = batches[b];
+      if (batchesOnBrowser >= CONFIG.batchesPerBrowser) { log("db-lookup: preventive browser relaunch"); await freshBrowser(); }
+      let batchErr = null;
       try {
-        const people = await Promise.race([
-          lookupPeopleDb(page, cand, log),
-          new Promise((res) => setTimeout(() => res({ _timeout: true }), CONFIG.perRowTimeoutMs)),
+        await Promise.race([
+          (async () => { await batchBizEmailDb(page, batch, log); await batchPeopleDb(page, batch, log); })(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("koldinfo_batch_timeout")), CONFIG.batchTimeoutMs)),
         ]);
-        if (!people._timeout) hit = { ...people };
-        // Fill any gap (or a name with company/title but no city) from the richer Business Email DB.
-        if (!hit.email || !hit.phone || cand.company || cand.title) {
-          const biz = await Promise.race([
-            lookupBizEmailDb(page, cand, log),
-            new Promise((res) => setTimeout(() => res({ _timeout: true }), CONFIG.perRowTimeoutMs)),
-          ]);
-          if (!biz._timeout) {
-            // Only carry ABO's verification status when the EMAIL itself is ABO's — a
-            // People DB email was never checked by ABO, so its status must stay blank.
-            if (!hit.email && biz.email) { hit.email = biz.email; hit.status = biz.status; hit.source = biz.source; }
-            if (!hit.phone && biz.phone) hit.phone = biz.phone;
-            if (!hit.title && biz.title) hit.title = biz.title;
-            if (!hit.company && biz.company) hit.company = biz.company;
-            if (!hit.seniority && biz.seniority) hit.seniority = biz.seniority;
-            if (!hit.source) hit.source = biz.source;
-          }
-        }
-      } catch (e) { log("row " + n + " (" + cand.fullName + ") error: " + (e.message || e).slice(0, 120)); }
+      } catch (e) { batchErr = e; }
 
-      if (hit.email || hit.phone) {
-        outLines.push(outRow(cand.rosId, hit));
-        hitRows++; if (hit.email) emails++; if (hit.phone) phones++;
+      if (batchErr && browserGone(batchErr)) {
+        // The browser under us is gone. Abort RETRYABLY - the server requeues and the
+        // checkpoint resumes here - rather than burning every remaining batch on a corpse.
+        throw new Error("koldinfo_db_browser_died at batch " + (b + 1) + "/" + batches.length + ": " + ((batchErr && batchErr.message) || batchErr).slice(0, 140));
       }
-      if ((n + 1) % 10 === 0 || n === cands.length - 1) {
-        log("db-lookup: " + (n + 1) + "/" + cands.length + " done — " + hitRows + " hit, " + emails + " email, " + phones + " phone");
-        setPhase("processing:" + (n + 1) + "/" + cands.length);
+      if (batchErr) {
+        // A timeout leaves in-flight page operations running; recycle the browser so the
+        // next batch starts on a clean session instead of a wedged page.
+        log("batch " + (b + 1) + "/" + batches.length + " error: " + ((batchErr && batchErr.message) || batchErr).slice(0, 140));
+        await freshBrowser();
       }
+
+      for (const cand of batch) {
+        const hit = cand._hit;
+        if (hit && (hit.email || hit.phone)) {
+          outLines.push(outRow(cand.rosId, hit));
+          hitRows++; if (hit.email) emails++; if (hit.phone) phones++;
+        }
+      }
+      batchesOnBrowser++;
+      const seen = Math.min((b + 1) * size, cands.length);
+      // Checkpoint AFTER the batch: the server's log hook persists the job (and with it
+      // this checkpoint) to the durable store on every log line.
+      job.checkpoint = { batchSize: size, doneBatches: b + 1, outLines, emails, phones, hitRows };
+      log("db-lookup: " + seen + "/" + cands.length + " done - " + hitRows + " hit, " + emails + " email, " + phones + " phone");
+      setPhase("processing:" + seen + "/" + cands.length);
     }
-    await context.storageState({ path: CONFIG.statePath }).catch(() => {});
+    if (page) await page.context().storageState({ path: CONFIG.statePath }).catch(() => {});
     await setPhase("exported");
   } finally {
-    await browser.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
   }
-  log("db-lookup DONE: " + hitRows + "/" + cands.length + " rows enriched (" + emails + " emails, " + phones + " phones)");
+  job.checkpoint = undefined; // job is complete; drop the (large) resume payload
+  log("db-lookup DONE: " + hitRows + "/" + cands.length + " rows enriched (" + emails + " emails, " + phones + " phones)" +
+    (skippedNames ? " · " + skippedNames + " unmatchable name(s) skipped" : ""));
   return outLines.join("\n") + "\n";
 }
 
@@ -558,4 +767,4 @@ async function selfTest({ log = () => {} } = {}) {
   } finally { await browser.close().catch(() => {}); }
 }
 
-module.exports = { runJob, runDiscoveryJob, selfTest, CONFIG, _internals: { parseInputCsv, parseSpecCsv, lookupPeopleDb, lookupBizEmailDb, firstEmail, firstPhone } };
+module.exports = { runJob, runDiscoveryJob, selfTest, CONFIG, _internals: { parseInputCsv, parseSpecCsv, lookupPeopleDb, lookupBizEmailDb, firstEmail, firstPhone, cleanPersonName, usableName, browserGone } };

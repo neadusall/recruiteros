@@ -233,8 +233,9 @@ async function ensureUploaded(page, csvPath, token, log, onUploaded) {
  * contains both our unique token AND a status word is our row (it bundles name + status),
  * so a neighbouring older "Completed" job can't trip a false positive.
  */
-async function waitForCompletion(page, token, log) {
-  log("enrich: waiting for completion (job token " + token + ")");
+async function waitForCompletion(page, token, log, timeoutMs) {
+  const budget = Math.max(Number(timeoutMs) || 0, CONFIG.enrichTimeoutMs);
+  log("enrich: waiting for completion (job token " + token + ", up to " + Math.round(budget / 60000) + " min)");
   await page.waitForFunction(
     (tk) => {
       const all = Array.from(document.querySelectorAll("*"));
@@ -253,7 +254,7 @@ async function waitForCompletion(page, token, log) {
       return /completed/i.test(bestTxt);
     },
     token,
-    { timeout: CONFIG.enrichTimeoutMs, polling: 4000 }
+    { timeout: budget, polling: 4000 }
   );
   log("enrich: completed");
   await page.waitForTimeout(1500);
@@ -310,7 +311,12 @@ async function runJob(job, { log = () => {}, setPhase = () => {} } = {}) {
     const page = await ensureSession(context, log);
     await ensureUploaded(page, csvPath, token, log, async () => { await setPhase("uploaded"); });
     await setPhase("processing");
-    await waitForCompletion(page, token, log);
+    // Completion budget scales with the chunk: Laxis works through an import row by row,
+    // so a fixed wait that fits 50 contacts silently abandons a 200-row chunk. Per-row
+    // pace is overridable (LAXIS_PER_ROW_MS); the env floor (LAXIS_ENRICH_TIMEOUT_MS) still wins when larger.
+    const rows = Math.max(0, inputCsv.split(/\r?\n/).filter((l) => l.trim()).length - 1);
+    const perRowMs = Number(process.env.LAXIS_PER_ROW_MS || 6000);
+    await waitForCompletion(page, token, log, rows * perRowMs + 120_000);
     await setPhase("completed");
     const enriched = await exportEnriched(page, token, workDir, log);
     await setPhase("exported");
