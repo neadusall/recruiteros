@@ -48,6 +48,7 @@ const jobs = new Map();
 const queue = [];
 let running = false;
 let lastCanary = null;
+let lastKoldinfoCanary = null;
 
 function newId() {
   return "laxisjob_" + crypto.randomBytes(8).toString("hex");
@@ -206,7 +207,7 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         hasCreds: Boolean(CONFIG.email && CONFIG.password),
         hasKoldinfoCreds: Boolean(koldinfo.CONFIG.email && koldinfo.CONFIG.password),
-        queued: queue.length, running, lastCanary,
+        queued: queue.length, running, lastCanary, lastKoldinfoCanary,
       });
     }
 
@@ -309,4 +310,31 @@ if (CANARY_HOURS > 0 && CONFIG.email && CONFIG.password) {
   };
   setTimeout(tick, 90_000).unref();                       // first run shortly after boot
   setInterval(tick, CANARY_HOURS * 3600_000).unref();     // then on the cadence
+}
+
+// KoldInfo canary: every KOLDINFO_CANARY_HOURS (default 24h = DAILY) log into KoldInfo and
+// confirm BOTH doors we drive are still reachable — the LinkedIn-URL enrichment page AND the
+// People DB + Business Email DB filter pages the name/city/state lookup depends on. The result
+// is exposed on /health (lastKoldinfoCanary) so a monitor/agent can react to drift the same
+// day it happens instead of finding out when a real enrichment job silently returns nothing.
+const KOLD_CANARY_HOURS = Number(process.env.KOLDINFO_CANARY_HOURS || 24);
+if (KOLD_CANARY_HOURS > 0 && koldinfo.CONFIG.email && koldinfo.CONFIG.password) {
+  const koldTick = async () => {
+    if (running) return; // one browser session at a time; try again next cadence
+    const at = new Date().toISOString();
+    const out = { at };
+    for (const kind of ["koldinfo", "koldinfo-db"]) {
+      try {
+        const r = await FLOWS[kind].selfTest({ log: (l) => console.log("[kold-canary:" + kind + "]", l) });
+        out[kind] = { ok: r.ok, resolvedTo: r.resolvedTo || null, detail: r.detail || null };
+        console.log("[kold-canary:" + kind + "]", r.ok ? "ok" : "FAILED — " + (r.detail || "entry point not reachable"));
+      } catch (err) {
+        out[kind] = { ok: false, error: (err && err.message) || String(err) };
+        console.log("[kold-canary:" + kind + "] error:", out[kind].error);
+      }
+    }
+    lastKoldinfoCanary = out;
+  };
+  setTimeout(koldTick, 150_000).unref();                        // first run a bit after the Laxis one
+  setInterval(koldTick, KOLD_CANARY_HOURS * 3600_000).unref();  // then daily
 }
