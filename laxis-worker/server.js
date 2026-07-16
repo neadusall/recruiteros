@@ -22,7 +22,15 @@
 const http = require("http");
 const crypto = require("crypto");
 const { runJob, selfTest, CONFIG } = require("./laxis-flow");
+const koldinfo = require("./koldinfo-flow");
 const store = require("./store");
+
+// Which browser flow runs a job. "laxis" is the default so every pre-`kind` caller
+// (and every job persisted before this field existed) behaves exactly as before.
+const FLOWS = {
+  laxis: { runJob, selfTest },
+  koldinfo: { runJob: koldinfo.runJob, selfTest: koldinfo.selfTest },
+};
 
 const PORT = Number(process.env.PORT || 3000);
 const TOKEN = process.env.LAXIS_WORKER_TOKEN || "";
@@ -70,7 +78,8 @@ async function drain() {
   store.save(job);
   try {
     if (!job.csv) throw new Error("laxis_input_lost: no input CSV on disk to resume from");
-    const enrichedCsv = await runJob(job, {
+    const flow = FLOWS[job.kind] || FLOWS.laxis;
+    const enrichedCsv = await flow.runJob(job, {
       log: (l) => { stampLog(job, l); store.save(job); },
       setPhase: (p) => { job.phase = p; store.save(job); },
     });
@@ -84,7 +93,7 @@ async function drain() {
     // Transient failure (the row already exists on Laxis, so a retry RESUMES — it won't
     // re-grab) → requeue up to MAX_RUN_ATTEMPTS before giving up. A "deep structural"
     // unresolved-step error is not worth retrying; surface it immediately.
-    const fatal = /laxis_step_unresolved|laxis_credentials_missing|laxis_login_failed|laxis_no_input_csv|laxis_input_lost/.test(msg);
+    const fatal = /(?:laxis|koldinfo)_(?:step_unresolved|credentials_missing|login_failed|login_form_not_found|no_input_csv|input_lost)/.test(msg);
     if (!fatal && job.attempts < MAX_RUN_ATTEMPTS) {
       job.status = "queued";
       job.error = undefined;
@@ -190,15 +199,22 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
 
     if (req.method === "GET" && url.pathname === "/health") {
-      return send(res, 200, { ok: true, hasCreds: Boolean(CONFIG.email && CONFIG.password), queued: queue.length, running, lastCanary });
+      return send(res, 200, {
+        ok: true,
+        hasCreds: Boolean(CONFIG.email && CONFIG.password),
+        hasKoldinfoCreds: Boolean(koldinfo.CONFIG.email && koldinfo.CONFIG.password),
+        queued: queue.length, running, lastCanary,
+      });
     }
 
     if (!authed(req)) return send(res, 401, { error: "unauthorized" });
 
     // On-demand canary: log in + confirm (and self-heal) the enrich entry point, no credit spent.
+    // ?kind=koldinfo exercises the KoldInfo flow instead of the default Laxis one.
     if (req.method === "GET" && url.pathname === "/selftest") {
       try {
-        const r = await selfTest({ log: (l) => console.log("[selftest]", l) });
+        const flow = FLOWS[url.searchParams.get("kind")] || FLOWS.laxis;
+        const r = await flow.selfTest({ log: (l) => console.log("[selftest]", l) });
         lastCanary = { ...r, at: new Date().toISOString() };
         return send(res, r.ok ? 200 : 503, lastCanary);
       } catch (err) {
@@ -213,9 +229,11 @@ const server = http.createServer(async (req, res) => {
       try { parsed = JSON.parse(raw); } catch { return send(res, 422, { error: "invalid_json" }); }
       const csv = parsed && parsed.csv;
       if (typeof csv !== "string" || !csv.trim()) return send(res, 422, { error: "missing_csv" });
+      const kind = parsed.kind === "koldinfo" ? "koldinfo" : "laxis";
       // Idempotent submit: if an identical CSV is already queued/running (a retried POST
       // after a lost response, say), hand back the SAME job instead of double-grabbing.
-      const hash = hashCsv(csv);
+      // The kind is part of the identity — the same CSV may legitimately go to both vendors.
+      const hash = hashCsv(kind + "\n" + csv);
       for (const j of jobs.values()) {
         if (j.hash === hash && (j.status === "queued" || j.status === "running")) {
           return send(res, 202, { jobId: j.id, deduped: true });
@@ -223,7 +241,7 @@ const server = http.createServer(async (req, res) => {
       }
       const id = newId();
       const job = {
-        id, token: newToken(), status: "queued", stage: "queued", phase: "new",
+        id, kind, token: newToken(), status: "queued", stage: "queued", phase: "new",
         csv, hash, attempts: 0, createdAt: new Date().toISOString(), log: [],
       };
       jobs.set(id, job);

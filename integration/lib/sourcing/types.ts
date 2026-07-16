@@ -143,6 +143,12 @@ export interface SourcingRun {
    */
   laxisJob?: LaxisJobRef;
   /**
+   * A KoldInfo bulk-find job (the FREE first enrichment rung) in flight on the browser
+   * worker. Present from submit until the result emails are merged back, then cleared.
+   * Parked on the run so a redeploy mid-job doesn't strand it.
+   */
+  koldJob?: KoldJobRef;
+  /**
    * Chunk-level progress for multi-batch Laxis enrichment (Laxis caps each import at
    * 1,000 rows, so a big list is enriched in sequential 1,000-row chunks). Records which
    * chunk offsets have already been enriched + merged so that re-running — after the tab
@@ -179,6 +185,15 @@ export interface LaxisJobRef {
   sent?: number;
   /** Stable candidate keys in the order they were serialized (diagnostics / re-attach). */
   targets: string[];
+}
+
+/** A KoldInfo bulk-find job in flight, parked on the run so polling survives a redeploy. */
+export interface KoldJobRef {
+  /** The worker's job id to poll. */
+  jobId: string;
+  submittedAt: string;
+  /** How many missing-email rows were sent to KoldInfo. */
+  count: number;
 }
 
 /** A deep-vet batch in flight, parked on the run so polling survives a redeploy. */

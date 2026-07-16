@@ -131,12 +131,16 @@ export interface LaxisJobStatus {
   error?: string;
 }
 
-/** Submit a CSV to the worker. Returns the worker's job id to poll. */
-export async function submitLaxisJob(csv: string): Promise<string> {
+/**
+ * Submit a CSV to the worker. Returns the worker's job id to poll. The same sidecar
+ * drives more than one vendor UI; `kind` picks the flow ("laxis" default, "koldinfo"
+ * for the free first-rung bulk email finder).
+ */
+export async function submitLaxisJob(csv: string, kind: "laxis" | "koldinfo" = "laxis"): Promise<string> {
   const res = await fetch(`${WORKER_URL}/jobs`, {
     method: "POST",
     headers: { "content-type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ csv }),
+    body: JSON.stringify({ csv, kind }),
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
@@ -145,6 +149,23 @@ export async function submitLaxisJob(csv: string): Promise<string> {
   const data = (await res.json()) as { jobId?: string };
   if (!data.jobId) throw Object.assign(new Error("laxis_worker_no_job_id"), { status: 502 });
   return data.jobId;
+}
+
+/**
+ * True when the worker is reachable AND holds KoldInfo credentials — the gate for the
+ * automated free first rung. Cheap health probe; false on any transport error so the
+ * auto-enrich chain just skips straight to Laxis instead of failing.
+ */
+export async function koldinfoWorkerReady(): Promise<boolean> {
+  if (!laxisWorkerConfigured()) return false;
+  try {
+    const res = await fetch(`${WORKER_URL}/health`);
+    if (!res.ok) return false;
+    const h = (await res.json()) as { hasKoldinfoCreds?: boolean };
+    return h.hasKoldinfoCreds === true;
+  } catch {
+    return false;
+  }
 }
 
 /** Poll a worker job. */

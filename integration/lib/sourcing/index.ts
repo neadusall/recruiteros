@@ -45,7 +45,7 @@ export {
   purgeWorkspaceSourcingRuns, type SaveRunInput,
 } from "./store";
 export {
-  laxisWorkerConfigured, serializeCandidatesCsv, parseCsv,
+  laxisWorkerConfigured, koldinfoWorkerReady, serializeCandidatesCsv, parseCsv,
   submitLaxisJob, getLaxisJob, mergeEnrichedCsv, laxisCandKey,
   LAXIS_CSV_COLUMNS, MAX_LAXIS_UPLOAD, type LaxisJobStatus, type LaxisMergeResult,
 } from "./laxis";

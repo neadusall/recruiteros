@@ -9166,7 +9166,8 @@
               '<button class="btn btn-ghost btn-sm" data-csv="' + esc(r.id) + '">Excel (URLs)</button>' +
               '<button class="btn btn-ghost btn-sm" data-rerank="' + esc(r.id) + '" title="AI re-ranks the top 100 by true relevance to the role before you deep-vet, sharper than the rule score.">Re-rank</button>' +
               '<button class="btn btn-ghost btn-sm" data-vet="' + esc(r.id) + '">Deep-vet</button>' +
-              '<button class="btn btn-ghost btn-sm" data-kiexp="' + esc(r.id) + '" title="FIRST rung (free): downloads a CSV of the candidates still missing an email, shaped for KoldInfo\'s upload. Enrich it in KoldInfo, then click Import KoldInfo — so Laxis credits are only spent on what KoldInfo could not fill.">KoldInfo CSV</button>' +
+              '<button class="btn btn-primary btn-sm" data-autoenrich="' + esc(r.id) + '" title="One click, fully automated: the browser worker runs the FREE KoldInfo email pass first, then Laxis for the remaining emails + cellphones, then the in-house waterfall fills any gaps. No CSV downloads, no drag and drop.">Auto-enrich</button>' +
+              '<button class="btn btn-ghost btn-sm" data-kiexp="' + esc(r.id) + '" title="Manual fallback for the FIRST rung (free): downloads a CSV of the candidates still missing an email, shaped for KoldInfo\'s upload. Enrich it in KoldInfo, then click Import KoldInfo, so Laxis credits are only spent on what KoldInfo could not fill.">KoldInfo CSV</button>' +
               '<button class="btn btn-ghost btn-sm" data-kiimp="' + esc(r.id) + '" title="Import KoldInfo\'s result CSV back onto this list. Fills emails on the matching candidates (blanks only, never overwrites).">Import KoldInfo…</button>' +
               '<button class="btn btn-ghost btn-sm" data-laxis="' + esc(r.id) + '" title="SECOND pass, after the free KoldInfo rung: uploads this list to app.laxis.tech for emails + cellphones, then fills any gaps with the in-house waterfall. Rows that already have an email and phone are skipped, so no credits go to rows KoldInfo already covered. Up to 1,000 contacts per pass.">Enrich via Laxis</button>' +
               '<button class="btn btn-primary btn-sm" data-promote="' + esc(r.id) + '">Send to Candidates →</button>' +
@@ -9278,6 +9279,119 @@
       xlsxDownload(csvSlug(run.name) + "-linkedin-urls.xlsx", "Candidates", matrix);
       var dropped = (run.candidates || []).length - rows.length;
       toast("Downloaded " + rows.length + " URLs to Excel" + (hasVet ? " (with deep-vet columns)" : "") + (dropped ? (" · " + dropped + " rows had no URL") : ""));
+    }
+
+    /* ---- Laxis chunk chain (shared by Enrich via Laxis and Auto-enrich) ----
+       Submit a 1,000-row chunk, poll laxisStatus until merged (which also runs the
+       in-house gap-fill waterfall), auto-continue to the next chunk. `t` is the button
+       driving the run; `resetLabel` is what it reads when the chain ends. */
+    function runLaxisChain(lid, t, resetLabel) {
+      var lxT = { emails: 0, phones: 0, matched: 0, gap: 0, chunks: 0, skipped: 0, complete: 0, warns: [] };
+      t.disabled = true; t.textContent = "Laxis: starting…";
+      function laxisReset() { t.disabled = false; t.textContent = resetLabel; }
+      function finishLaxis() {
+        laxisReset();
+        alert("Laxis enriched " + lxT.emails + " email" + (lxT.emails === 1 ? "" : "s") +
+          " and " + lxT.phones + " phone" + (lxT.phones === 1 ? "" : "s") +
+          " across " + lxT.matched + " matched contact" + (lxT.matched === 1 ? "" : "s") +
+          (lxT.chunks > 1 ? (" over " + lxT.chunks + " batches") : "") + "." +
+          (lxT.gap ? (" The in-house waterfall then filled " + lxT.gap + " more.") : "") +
+          (lxT.complete ? ("\n\n" + lxT.complete + " row(s) already had an email + phone and were not sent, no Laxis credits spent on them.") : "") +
+          (lxT.skipped ? ("\n\n" + lxT.skipped + " row(s) were skipped, no LinkedIn URL or email for Laxis to key off.") : "") +
+          (lxT.warns.length ? ("\n\n" + lxT.warns.slice(0, 3).join("\n")) : ""));
+        loadRuns();
+      }
+      function pollLaxis() {
+        send("/sourcing", "POST", { action: "laxisStatus", id: lid }).then(function (s) {
+          if (!s.ok) { laxisReset(); alert("Laxis status check failed: " + ((s.data && s.data.error) || s.status)); return; }
+          if (!s.data.done) {
+            t.textContent = "Laxis: " + (s.data.stage || s.data.status || "working") + "…";
+            setTimeout(pollLaxis, 10000); return;
+          }
+          if (s.data.status === "error") {
+            laxisReset();
+            alert("Laxis enrichment failed:\n" + ((s.data.warnings || []).join("\n") || "unknown error") +
+              "\n\nIf this mentions a selector (CALIBRATE), the Laxis UI changed and the worker needs re-calibrating." +
+              "\n\nAlready-enriched batches are saved, click Enrich via Laxis again to resume from where it stopped."); loadRuns(); return;
+          }
+          var lx = s.data.laxis || {}; var gf = s.data.gapFill || {};
+          lxT.emails += lx.emails || 0; lxT.phones += lx.phones || 0; lxT.matched += lx.matched || 0; lxT.gap += gf.enriched || 0;
+          (s.data.warnings || []).forEach(function (w) { lxT.warns.push(w); });
+          // More chunks left? Auto-continue, the backend skips done offsets, never re-grabs.
+          if (s.data.nextStart != null) { startChunk(s.data.nextStart); return; }
+          finishLaxis();
+        });
+      }
+      function startChunk(startOffset) {
+        var body = { action: "laxisEnrich", id: lid };
+        if (startOffset != null) body.start = startOffset;
+        t.textContent = "Laxis: starting" + (lxT.chunks ? (" batch " + (lxT.chunks + 1)) : "") + "…";
+        send("/sourcing", "POST", body).then(function (r) {
+          if (!r.ok) {
+            laxisReset();
+            var err = (r.data && r.data.error) || r.status;
+            if (err === "laxis_worker_not_configured") {
+              alert("Laxis isn't connected yet.\n\nOn the server, set LAXIS_EMAIL and LAXIS_PASSWORD in .env.production (the laxis-worker logs into Laxis with them), confirm LAXIS_WORKER_URL is set on the app, then redeploy."); return;
+            }
+            alert("Laxis enrich failed: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
+          }
+          // Chunk already enriched (resume landed on a done offset) → skip ahead or finish.
+          if (r.data.alreadyDone) {
+            if (r.data.nextStart != null) { startChunk(r.data.nextStart); } else { finishLaxis(); }
+            return;
+          }
+          lxT.chunks++; lxT.skipped += r.data.skipped || 0; lxT.complete += r.data.complete || 0;
+          t.textContent = "Laxis: uploading " + (r.data.sent || "") + "…";
+          setTimeout(pollLaxis, 8000);
+        });
+      }
+      startChunk(null); // null → backend resumes from the first un-enriched chunk (or 0 fresh)
+    }
+
+    /* ---- fully automated enrichment chain: KoldInfo (free) → Laxis → waterfall ----
+       Stage 1 sends the missing-email rows to the browser worker's KoldInfo flow and
+       polls until the found emails are merged back (blanks only). Stage 2 hands off to
+       the same Laxis chunk chain as the manual button, which ends with the in-house
+       gap-fill waterfall. If the KoldInfo rung is unavailable or has nothing to do, the
+       chain skips straight to Laxis, so the free-first order is enforced either way. */
+    function runAutoEnrich(aid, aBtn) {
+      aBtn.disabled = true; aBtn.textContent = "KoldInfo: submitting…";
+      function stageLaxis(note) {
+        if (note) toast(note);
+        runLaxisChain(aid, aBtn, "Auto-enrich");
+      }
+      function pollKold() {
+        send("/sourcing", "POST", { action: "koldinfoStatus", id: aid }).then(function (s) {
+          if (!s.ok) { stageLaxis("KoldInfo status check failed, continuing with Laxis."); return; }
+          if (!s.data.done) {
+            aBtn.textContent = "KoldInfo: " + (s.data.stage || s.data.status || "working") + "…";
+            setTimeout(pollKold, 10000); return;
+          }
+          if (s.data.status === "error") {
+            stageLaxis("KoldInfo pass failed (" + ((s.data.warnings || [])[0] || "unknown") + "). Continuing with Laxis so nothing blocks.");
+            return;
+          }
+          var m = s.data.merged || {};
+          stageLaxis("KoldInfo (free) filled " + (m.emails || 0) + " email" + ((m.emails || 0) === 1 ? "" : "s") + ". Now Laxis for the rest + cellphones…");
+        }).catch(function () { stageLaxis("KoldInfo status check failed, continuing with Laxis."); });
+      }
+      send("/sourcing", "POST", { action: "koldinfoEnrich", id: aid }).then(function (r) {
+        if (!r.ok) {
+          var err = (r.data && r.data.error) || r.status;
+          if (err === "koldinfo_worker_not_configured") {
+            stageLaxis("KoldInfo isn't connected yet (set KOLDINFO_EMAIL + KOLDINFO_PASSWORD on the server for the free rung). Running Laxis directly.");
+            return;
+          }
+          aBtn.disabled = false; aBtn.textContent = "Auto-enrich";
+          alert("Auto-enrich failed to start: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
+        }
+        if (r.data.nothingMissing) { stageLaxis("Every candidate already has an email. Straight to Laxis for cellphones…"); return; }
+        aBtn.textContent = "KoldInfo: finding " + (r.data.count || "") + " emails free…";
+        setTimeout(pollKold, 8000);
+      }).catch(function () {
+        aBtn.disabled = false; aBtn.textContent = "Auto-enrich";
+        alert("Could not reach the server.");
+      });
     }
 
     /* ---- Live deep-vet cost estimate (updates as the toggle / rates move) ----
@@ -9594,7 +9708,7 @@
           alert("Exported " + r.data.count + " candidate" + (r.data.count === 1 ? "" : "s") + " still missing an email" +
             (r.data.skipped ? (" (" + r.data.skipped + " already covered)") : "") + ".\n\n" +
             "Enrich the file in KoldInfo, then click Import KoldInfo… on this list. " +
-            "Run Enrich via Laxis after that for the cellphones — it skips whatever KoldInfo already filled.");
+            "Run Enrich via Laxis after that for the cellphones; it skips whatever KoldInfo already filled.");
         }).catch(function () { t.disabled = false; alert("KoldInfo export failed."); });
       } else if ((id = t.getAttribute("data-kiimp"))) {
         // Merge KoldInfo's result CSV back onto this run (fills blank emails only).
@@ -9620,82 +9734,27 @@
                 "emails filled      " + (d.emails || 0) + "\n" +
                 "vendor-invalid     " + (d.invalid || 0) + "\n" +
                 "unmatched          " + (d.unmatched || 0) + "\n\n" +
-                "Next: Enrich via Laxis for cellphones — rows KoldInfo completed are skipped automatically once they also have a phone.");
+                "Next: Enrich via Laxis for cellphones; rows KoldInfo completed are skipped automatically once they also have a phone.");
               loadRuns();
             }).catch(function () { kiReset(); alert("KoldInfo import failed."); });
           };
           rd.readAsText(f);
         };
         kiFile.click();
+      } else if ((id = t.getAttribute("data-autoenrich"))) {
+        // Fully automated chain: the FREE KoldInfo email pass first (browser worker),
+        // then the Laxis pass (emails + cellphones), then the in-house gap-fill
+        // waterfall. One click, no CSV round-trips, and the cheap-first order is
+        // enforced by the chain itself.
+        runAutoEnrich(id, t);
       } else if ((id = t.getAttribute("data-laxis"))) {
-        // Second-pass enrichment via the Laxis browser worker (KoldInfo CSV round-trip is
-        // the free first rung; the serializer skips rows that already have email + phone,
-        // so Laxis credits only go to the gaps). Async (a headless browser
-        // job), so it mirrors deep-vet: submit, then poll laxisStatus until done. Big lists
-        // go in 1,000-row chunks; we AUTO-CONTINUE to the next chunk (the backend resumes by
-        // offset and never re-grabs a chunk already pulled), so the whole pull is hands-off
-        // and safe to re-run if the tab is closed mid-way.
-        var lid = id;
-        var lxT = { emails: 0, phones: 0, matched: 0, gap: 0, chunks: 0, skipped: 0, complete: 0, warns: [] };
-        t.disabled = true; t.textContent = "Laxis: starting…";
-        function laxisReset() { t.disabled = false; t.textContent = "Enrich via Laxis"; }
-        function finishLaxis() {
-          laxisReset();
-          alert("Laxis enriched " + lxT.emails + " email" + (lxT.emails === 1 ? "" : "s") +
-            " and " + lxT.phones + " phone" + (lxT.phones === 1 ? "" : "s") +
-            " across " + lxT.matched + " matched contact" + (lxT.matched === 1 ? "" : "s") +
-            (lxT.chunks > 1 ? (" over " + lxT.chunks + " batches") : "") + "." +
-            (lxT.gap ? (" The in-house waterfall then filled " + lxT.gap + " more.") : "") +
-            (lxT.complete ? ("\n\n" + lxT.complete + " row(s) already had an email + phone and were not sent, no Laxis credits spent on them.") : "") +
-            (lxT.skipped ? ("\n\n" + lxT.skipped + " row(s) were skipped, no LinkedIn URL or email for Laxis to key off.") : "") +
-            (lxT.warns.length ? ("\n\n" + lxT.warns.slice(0, 3).join("\n")) : ""));
-          loadRuns();
-        }
-        function pollLaxis() {
-          send("/sourcing", "POST", { action: "laxisStatus", id: lid }).then(function (s) {
-            if (!s.ok) { laxisReset(); alert("Laxis status check failed: " + ((s.data && s.data.error) || s.status)); return; }
-            if (!s.data.done) {
-              t.textContent = "Laxis: " + (s.data.stage || s.data.status || "working") + "…";
-              setTimeout(pollLaxis, 10000); return;
-            }
-            if (s.data.status === "error") {
-              laxisReset();
-              alert("Laxis enrichment failed:\n" + ((s.data.warnings || []).join("\n") || "unknown error") +
-                "\n\nIf this mentions a selector (CALIBRATE), the Laxis UI changed and the worker needs re-calibrating." +
-                "\n\nAlready-enriched batches are saved, click Enrich via Laxis again to resume from where it stopped."); loadRuns(); return;
-            }
-            var lx = s.data.laxis || {}; var gf = s.data.gapFill || {};
-            lxT.emails += lx.emails || 0; lxT.phones += lx.phones || 0; lxT.matched += lx.matched || 0; lxT.gap += gf.enriched || 0;
-            (s.data.warnings || []).forEach(function (w) { lxT.warns.push(w); });
-            // More chunks left? Auto-continue, the backend skips done offsets, never re-grabs.
-            if (s.data.nextStart != null) { startChunk(s.data.nextStart); return; }
-            finishLaxis();
-          });
-        }
-        function startChunk(startOffset) {
-          var body = { action: "laxisEnrich", id: lid };
-          if (startOffset != null) body.start = startOffset;
-          t.textContent = "Laxis: starting" + (lxT.chunks ? (" batch " + (lxT.chunks + 1)) : "") + "…";
-          send("/sourcing", "POST", body).then(function (r) {
-            if (!r.ok) {
-              laxisReset();
-              var err = (r.data && r.data.error) || r.status;
-              if (err === "laxis_worker_not_configured") {
-                alert("Laxis isn't connected yet.\n\nOn the server, set LAXIS_EMAIL and LAXIS_PASSWORD in .env.production (the laxis-worker logs into Laxis with them), confirm LAXIS_WORKER_URL is set on the app, then redeploy."); return;
-              }
-              alert("Laxis enrich failed: " + err + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); return;
-            }
-            // Chunk already enriched (resume landed on a done offset) → skip ahead or finish.
-            if (r.data.alreadyDone) {
-              if (r.data.nextStart != null) { startChunk(r.data.nextStart); } else { finishLaxis(); }
-              return;
-            }
-            lxT.chunks++; lxT.skipped += r.data.skipped || 0; lxT.complete += r.data.complete || 0;
-            t.textContent = "Laxis: uploading " + (r.data.sent || "") + "…";
-            setTimeout(pollLaxis, 8000);
-          });
-        }
-        startChunk(null); // null → backend resumes from the first un-enriched chunk (or 0 fresh)
+        // Second-pass enrichment via the Laxis browser worker (the KoldInfo rung runs
+        // first; the serializer skips rows that already have email + phone, so Laxis
+        // credits only go to the gaps). Async (a headless browser job), so it mirrors
+        // deep-vet: submit, then poll laxisStatus until done. Big lists go in 1,000-row
+        // chunks with auto-continue; the backend resumes by offset and never re-grabs a
+        // chunk already pulled, so the whole pull is hands-off and safe to re-run.
+        runLaxisChain(id, t, "Enrich via Laxis");
       } else if ((id = t.getAttribute("data-enrich"))) {
         var grp = t.closest(".jd-run");
         var nEl = grp ? grp.querySelector(".jd-enrichn") : null;

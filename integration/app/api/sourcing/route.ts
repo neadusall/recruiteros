@@ -26,7 +26,7 @@ import {
   vetBatchAvailable, submitVetBatch, retrieveVetBatch, collectVetBatch,
   fetchFullProfileCached, getCachedContact, putCachedContact,
   reRankCandidates, getSeenKeys, addSeenKeys,
-  laxisWorkerConfigured, serializeCandidatesCsv, submitLaxisJob, getLaxisJob, mergeEnrichedCsv,
+  laxisWorkerConfigured, koldinfoWorkerReady, serializeCandidatesCsv, submitLaxisJob, getLaxisJob, mergeEnrichedCsv,
   MAX_LAXIS_UPLOAD,
   buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv,
   startBulkList, stepBulkList, bulkListStatus,
@@ -265,6 +265,56 @@ export async function POST(req: Request) {
       if (!merged.parsed) return fail("no_emails_in_csv", 422, { detail: "no email column (by name or content) found in that file — is it KoldInfo's result export?" });
       await saveSourcingRun(ws, { ...run });
       return ok({ ...merged, run });
+    }
+
+    // AUTOMATED KoldInfo first rung: same free-emails-first economics as the manual CSV
+    // round-trip, but the browser worker drives app.koldinfo.com itself (upload, wait,
+    // download): submit here, poll {action:"koldinfoStatus"}, and the result emails are
+    // merged automatically. The UI's Auto-enrich chain runs this, then Laxis.
+    if (action === "koldinfoEnrich") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      // Already running? Don't double-submit; tell the UI to keep polling.
+      if (run.koldJob) {
+        return ok({ submitted: true, jobId: run.koldJob.jobId, count: run.koldJob.count, alreadyRunning: true });
+      }
+      if (!laxisWorkerConfigured() || !(await koldinfoWorkerReady())) {
+        return fail("koldinfo_worker_not_configured", 409, {
+          detail: "set KOLDINFO_EMAIL and KOLDINFO_PASSWORD in .env.production (the enrichment worker logs into app.koldinfo.com with them), then redeploy the laxis-worker",
+        });
+      }
+      const { csv, count, skipped } = buildSourcingKoldInfoCsv(run.candidates);
+      // Nothing missing an email → the free rung has nothing to do; the chain goes to Laxis.
+      if (!count) return ok({ submitted: false, nothingMissing: true, skipped });
+      const jobId = await submitLaxisJob(csv, "koldinfo");
+      run.koldJob = { jobId, submittedAt: nowIso(), count };
+      await saveSourcingRun(ws, { ...run });
+      return ok({ submitted: true, jobId, count, skipped });
+    }
+
+    if (action === "koldinfoStatus") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      if (!run.koldJob) return ok({ done: true, status: "none" });
+      const job = await getLaxisJob(run.koldJob.jobId);
+      if (job.status === "queued" || job.status === "running") {
+        return ok({ done: false, status: job.status, stage: job.stage });
+      }
+      if (job.status === "error") {
+        delete run.koldJob;
+        await saveSourcingRun(ws, { ...run });
+        return ok({ done: true, status: "error", warnings: [`koldinfo_job_error: ${job.error ?? "unknown"}`], run });
+      }
+      // Done — merge the found emails onto the candidates (blanks only, vendor-invalid dropped).
+      const warnings: string[] = [];
+      let merged = { parsed: 0, matched: 0, emails: 0, invalid: 0, unmatched: 0 };
+      if (job.enrichedCsv) merged = mergeSourcingKoldInfoCsv(run.candidates, job.enrichedCsv);
+      else warnings.push("koldinfo_done_but_no_csv_returned");
+      delete run.koldJob;
+      await saveSourcingRun(ws, { ...run });
+      return ok({ done: true, status: "done", merged, warnings, run });
     }
 
     // Laxis is the SECOND enrichment pass (after the free KoldInfo rung). Serialize the
