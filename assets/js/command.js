@@ -556,6 +556,7 @@
     var busy = false;
     var liveOn = false;
     var liveTimer = null;
+    var rawDomById = {}; // raw domain records (nameservers + DNS checklist) for the detail view
     view.innerHTML = '<div class="empty">Loading fleet vitals…</div>';
 
     function stopLive() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
@@ -618,7 +619,19 @@
             var list = (cardEl.querySelector("#mbDomains").value || "").split(/[\s,]+/).map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
             if (!list.length) { toast("Enter at least one domain"); return; }
             close();
-            act({ action: "add-domains", domains: list }, "Domains queued for provisioning");
+            if (busy) return;
+            busy = true;
+            // Report the REAL per-domain outcome, never a blanket "queued" toast.
+            send("/sending", "POST", { action: "add-domains", domains: list }).then(function (r) {
+              busy = false;
+              if (!r.ok) { toast((r.data && r.data.error) || "Add failed"); return; }
+              var res = (r.data && r.data.results) || [];
+              var errs = res.filter(function (x) { return x.error; });
+              var okc = res.length - errs.length;
+              if (errs.length) toast(okc + " added, " + errs.length + " need attention (open the domain to see why)");
+              else toast(okc + " domain" + (okc === 1 ? "" : "s") + " added, provisioning");
+              load();
+            });
           });
         });
     }
@@ -639,6 +652,43 @@
             act({ action: "add-mailbox", domainId: domainId, address: local + "@" + domainName, displayName: display || undefined }, "Mailbox added, warming");
           });
         });
+    }
+
+    // Domain detail: the missing lifecycle surface. Shows the nameservers to set
+    // at the registrar, the live/pending DNS record checklist, and the actions to
+    // complete setup (verify, re-provision, pull the Postal config to paste).
+    function openDomain(id) {
+      var dm = rawDomById[id];
+      if (!dm) return;
+      var ns = dm.nameservers || [];
+      var chk = dm.checklist || [];
+      var sKind = dm.status === "active" ? "good" : (dm.status === "paused" || dm.status === "error") ? "bad" : "info";
+      var body = '<div style="margin-bottom:14px">' + chip(dm.status, sKind) + (dm.lastError ? ' <span style="color:var(--danger);font-size:12px">' + esc(dm.lastError) + "</span>" : "") + "</div>";
+      body += '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Nameservers · set these at your registrar</div>';
+      if (ns.length) body += '<div style="font-family:var(--mono,monospace);font-size:12.5px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:16px">' + ns.map(esc).join("<br>") + "</div>";
+      else body += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Nameservers appear after DNS is provisioned (needs the Hetzner DNS token). Until then this domain cannot verify or send.</div>';
+      body += '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">DNS records</div>';
+      if (chk.length) {
+        body += '<div style="margin-bottom:16px">' + chk.map(function (c) {
+          var col = c.present ? "var(--ok)" : "var(--text-dim)";
+          return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px"><span style="width:8px;height:8px;border-radius:50%;background:' + col + '"></span><span>' + esc(c.label) + "</span>" + (c.core ? ' <span style="font-size:10px;color:var(--text-dim)">core</span>' : "") + '<span style="flex:1"></span><span style="font-size:11px;color:' + col + '">' + (c.present ? "live" : "pending") + "</span></div>";
+        }).join("") + "</div>";
+      } else {
+        body += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Records are written once DNS is provisioned.</div>';
+      }
+      body += '<div id="dmSetup"></div>';
+      body += '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="dmPostal">Postal setup</button><button class="btn btn-ghost btn-sm" id="dmReprov">Re-provision DNS</button><button class="btn btn-primary btn-sm" id="dmVerify">Verify now</button></div>';
+      openModal("Domain · " + dm.domain, "Complete setup and verify", body, function (cardEl, close) {
+        cardEl.querySelector("#dmVerify").addEventListener("click", function () { close(); act({ action: "verify-domain", id: id }, "Verifying domain"); });
+        cardEl.querySelector("#dmReprov").addEventListener("click", function () { close(); act({ action: "provision-domain", id: id }, "Re-provisioning DNS"); });
+        cardEl.querySelector("#dmPostal").addEventListener("click", function () {
+          send("/sending", "POST", { action: "domain-setup", id: id }).then(function (r) {
+            if (!r.ok || !r.data || !r.data.setup) { toast((r.data && r.data.error) || "Could not load Postal setup"); return; }
+            var s = r.data.setup;
+            cardEl.querySelector("#dmSetup").innerHTML = '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin:2px 0 6px">Paste into Postal (DKIM + config)</div><pre style="white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:11.5px;max-height:220px;overflow:auto;margin:0 0 14px">' + esc(typeof s === "string" ? s : JSON.stringify(s, null, 2)) + "</pre>";
+          });
+        });
+      });
     }
 
     function paint(d) {
@@ -666,6 +716,7 @@
         view.querySelectorAll("[data-pause]").forEach(function (b) { b.addEventListener("click", function () { pauseMailbox(b.getAttribute("data-pause"), b.getAttribute("data-addr")); }); });
         view.querySelectorAll("[data-resume]").forEach(function (b) { b.addEventListener("click", function () { resumeMailbox(b.getAttribute("data-resume"), b.getAttribute("data-addr")); }); });
         view.querySelectorAll("[data-addmbox]").forEach(function (b) { b.addEventListener("click", function () { addMailboxTo(b.getAttribute("data-addmbox"), b.getAttribute("data-dom")); }); });
+        view.querySelectorAll("[data-domview]").forEach(function (b) { b.addEventListener("click", function () { openDomain(b.getAttribute("data-domview")); }); });
       }
 
       var health = d.health || { overall: {}, domains: [], mailboxes: [] };
@@ -674,7 +725,8 @@
       var mailboxes = health.mailboxes || [];
       var prov = d.providers || {};
       var domName = {};
-      (d.domains || []).forEach(function (dm) { domName[dm.id] = dm.domain; });
+      rawDomById = {};
+      (d.domains || []).forEach(function (dm) { domName[dm.id] = dm.domain; rawDomById[dm.id] = dm; });
       var pausedMailboxes = mailboxes.filter(function (m) { return m.paused; }).length;
 
       // Triage first: compute the ranked list of things that need the operator.
@@ -719,6 +771,26 @@
         html += '<div style="border:1px solid var(--border);border-left:3px solid var(--ok);background:var(--card,var(--surface));border-radius:12px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--text-muted)"><b style="color:var(--ok)">All clear.</b> No domains at risk, no paused mailboxes, warm-up healthy.</div>';
       }
 
+      // Go-live readiness: exactly what still has to be wired for submitted domains
+      // to provision, verify, and actually send. Shown until everything is set.
+      var steps = [
+        ["Hetzner DNS token", prov.dns, "auto-publishes SPF, DKIM, DMARC, MX per domain"],
+        ["Hetzner Cloud token", prov.cloud, "auto-provisions the Postal MTA server and rDNS"],
+        ["Postal MTA routing", prov.mta, "lets real cold sends leave the system"],
+        ["Smartlead warm-up", prov.smartlead, "pulls warm-up health onto every mailbox"],
+      ];
+      var notReady = steps.filter(function (s) { return !s[1]; }).length;
+      if (notReady) {
+        html += '<div style="border:1px solid var(--border);border-radius:12px;background:var(--card,var(--surface));padding:14px 16px;margin-bottom:16px">' +
+          '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-bottom:8px">Go-live readiness · ' + notReady + " step" + (notReady === 1 ? "" : "s") + " left</div>" +
+          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px">' +
+          steps.map(function (s) {
+            var col = s[1] ? "var(--ok)" : "var(--text-dim)";
+            return '<div style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px"><span style="width:9px;height:9px;border-radius:50%;background:' + col + ';margin-top:4px;flex:none"></span><span><b style="color:var(--text)">' + esc(s[0]) + "</b> <span style=\"color:var(--text-dim)\">" + esc(s[2]) + "</span></span></div>";
+          }).join("") +
+          '</div><div style="font-size:12px;color:var(--text-dim);margin-top:10px">After a domain provisions, point its nameservers at Hetzner at your registrar (open the domain to see them), then Verify. Nothing sends until Postal MTA routing is on.</div></div>';
+      }
+
       if (!domains.length && !mailboxes.length) {
         html += '<div class="card" style="text-align:center;padding:34px 20px">' +
           '<div style="font-size:15px;font-weight:600;margin-bottom:6px">No sending fleet yet</div>' +
@@ -750,7 +822,7 @@
           var w = (dm.warnings || []).join("; ");
           var cRate = Math.round((dm.complaintRatePct || 0) * 100) / 100;
           return '<tr style="border-top:1px solid var(--surface-2)">' +
-            '<td style="padding:9px 10px;font-weight:600">' + esc(dm.domain) + "</td>" +
+            '<td style="padding:9px 10px;font-weight:600"><span data-domview="' + esc(dm.id) + '" style="cursor:pointer;border-bottom:1px dotted var(--border-strong)">' + esc(dm.domain) + "</span></td>" +
             '<td style="padding:9px 10px">' + chip(dm.status, dm.status === "active" ? "good" : (dm.status === "paused" || dm.status === "error") ? "bad" : "info") + "</td>" +
             '<td style="padding:9px 10px">' + chip(dm.healthLabel, healthKind(dm.healthLabel)) + ' <span style="color:var(--text-dim);font-size:12px">' + n(dm.healthScore) + "</span></td>" +
             '<td style="padding:9px 10px;text-align:right;font-variant-numeric:tabular-nums">' + n(dm.sent) + "</td>" +

@@ -132,8 +132,14 @@ export async function verifyDomain(workspaceId: string, domainId: string): Promi
     rec.present = recordPresent(rec, answers);
   }
 
-  const core = d.records.filter((r) => ["mx", "spf", "dkim", "dmarc"].includes(r.purpose));
-  const allCore = core.length > 0 && core.every((r) => r.present);
+  // A domain only goes ACTIVE when all four deliverability-critical records both
+  // EXIST and resolve publicly. Requiring the set to be complete (not just "those
+  // that happen to be present") stops a domain flipping active with, e.g., DKIM
+  // missing, which would send with failing auth at receivers.
+  const REQUIRED = ["mx", "spf", "dkim", "dmarc"];
+  const core = d.records.filter((r) => REQUIRED.includes(r.purpose));
+  const haveAll = REQUIRED.every((p) => core.some((r) => r.purpose === p));
+  const allCore = haveAll && core.every((r) => r.present);
   if (allCore) {
     d.status = "active";
     d.verifiedAt = nowIso();
@@ -165,14 +171,24 @@ export async function provisionServer(workspaceId: string, serverId: string): Pr
       ? { callbackUrl: `${appUrl}/api/sending/bootstrap`, callbackToken: s.bootstrapToken, serverId: s.id }
       : undefined;
 
-    const created = await createServer({
-      name: s.name,
-      serverType: s.serverType || env("SENDING_SERVER_TYPE", "cx22"),
-      image: env("SENDING_IMAGE", "ubuntu-24.04"),
-      location: s.location || env("SENDING_LOCATION", "ash"),
-      userData: cloudInit(s.hostname, callback),   // installs Postal on first boot
-    });
-    s.hcloudServerId = created.id;
+    // Idempotent: if a box was already created on a prior attempt (e.g. the IPv4
+    // poll below timed out and this is a retry), REUSE it. Creating another would
+    // orphan the first and bill a duplicate. Otherwise create it and persist the
+    // id immediately so a crash before the final save can never orphan the box.
+    let created: Awaited<ReturnType<typeof createServer>>;
+    if (s.hcloudServerId) {
+      created = await getServer(s.hcloudServerId);
+    } else {
+      created = await createServer({
+        name: s.name,
+        serverType: s.serverType || env("SENDING_SERVER_TYPE", "cx22"),
+        image: env("SENDING_IMAGE", "ubuntu-24.04"),
+        location: s.location || env("SENDING_LOCATION", "ash"),
+        userData: cloudInit(s.hostname, callback),   // installs Postal on first boot
+      });
+      s.hcloudServerId = created.id;
+      await saveServer(s);
+    }
 
     // poll for the IPv4
     let ip = created.public_net?.ipv4?.ip;
