@@ -21,7 +21,9 @@ import {
   type CandidateEnrichment, type VettingCall, type QualifyingQuestion,
   type ResumeReview, type DeskLearning, type PromptRevision, type VoiceTuning, type SimRun,
   type TurnTuning, type ExtractionField, type InboxState, type InboxLogEntry,
-  DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD, DEFAULT_LEARNING, clampVoiceTuning, clampTurnTuning,
+  type DeskQA, type QACluster, type CallQuestion, type KnowledgeItem,
+  DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD, DEFAULT_LEARNING, DEFAULT_DESK_QA, KNOWLEDGE_CAP,
+  clampVoiceTuning, clampTurnTuning,
   normalizeExtraction, normalizeKnowledge,
 } from "./types";
 
@@ -295,6 +297,168 @@ export function bumpLearningCounter(d: VettingDesk): number {
   l.callsSinceLastRun += 1;
   persist();
   return l.callsSinceLastRun;
+}
+
+/* ---------------- question intelligence (self-learning candidate Q&A) ----------------
+   Candidate questions harvested off each call roll up here into per-desk topic
+   clusters. All mutations funnel through these so counts stay honest and an
+   approved answer always maps to exactly one KnowledgeItem the agent runs on. */
+
+/** The desk's question-intelligence state, defaulted in place. */
+export function deskQA(d: VettingDesk): DeskQA {
+  if (!d.qa) d.qa = { ...DEFAULT_DESK_QA, clusters: [] };
+  return d.qa;
+}
+
+/** Flip the desk's question-learning switches. */
+export function setDeskQASettings(
+  workspaceId: string, id: string,
+  patch: { autoTeach?: boolean; textBack?: boolean },
+): VettingDesk | undefined {
+  const d = getDesk(workspaceId, id);
+  if (!d) return undefined;
+  const qa = deskQA(d);
+  if (typeof patch.autoTeach === "boolean") qa.autoTeach = patch.autoTeach;
+  if (typeof patch.textBack === "boolean") qa.textBack = patch.textBack;
+  d.updatedAt = nowIso();
+  persist();
+  return d;
+}
+
+/** Case-insensitive topic match so "401k Match" and "401k match" cluster together. */
+function sameTopic(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/**
+ * Merge one call's harvested questions into the desk's clusters. Idempotent per
+ * call (a call already recorded in a cluster's asks is never double-counted).
+ */
+export function recordCallQuestions(d: VettingDesk, call: VettingCall, questions: CallQuestion[]): QACluster[] {
+  const qa = deskQA(d);
+  const now = nowIso();
+  const touched: QACluster[] = [];
+
+  for (const q of questions) {
+    const topic = q.topic.trim().slice(0, 80);
+    const text = q.question.trim().slice(0, 200);
+    if (!topic || !text) continue;
+
+    let cluster = qa.clusters.find((c) => sameTopic(c.topic, topic) && c.status !== "dismissed");
+    if (!cluster) {
+      cluster = {
+        id: rid("vqa"),
+        topic,
+        canonicalQuestion: text,
+        variants: [],
+        askCount: 0,
+        answeredCount: 0,
+        deferredCount: 0,
+        status: "open",
+        asks: [],
+        firstAskedAt: now,
+        lastAskedAt: now,
+      };
+      qa.clusters.push(cluster);
+    }
+
+    // Never double-count the same call re-harvested into the same cluster.
+    if (cluster.asks.some((a) => a.callId === call.id)) continue;
+
+    cluster.askCount += 1;
+    qa.totalAsked += 1;
+    if (q.outcome === "answered") cluster.answeredCount += 1;
+    else cluster.deferredCount += 1;
+    cluster.lastAskedAt = now;
+    if (!cluster.variants.some((v) => v.toLowerCase() === text.toLowerCase())) {
+      cluster.variants = [...cluster.variants, text].slice(-6);
+    }
+    cluster.asks.unshift({
+      callId: call.id,
+      candidateId: call.candidateId,
+      phone: call.callerPhone && call.callerPhone !== "unknown" ? call.callerPhone : undefined,
+      at: now,
+      question: text,
+    });
+    cluster.asks = cluster.asks.slice(0, 30);
+    touched.push(cluster);
+  }
+
+  // Keep the board readable: cap clusters, dropping the oldest dismissed first,
+  // then the oldest single-ask open ones. Approved clusters are never dropped.
+  if (qa.clusters.length > 60) {
+    const keep = new Set<QACluster>(qa.clusters.filter((c) => c.status === "approved"));
+    const rest = qa.clusters
+      .filter((c) => !keep.has(c))
+      .sort((a, b) => (b.askCount - a.askCount) || Date.parse(b.lastAskedAt) - Date.parse(a.lastAskedAt));
+    qa.clusters = [...keep, ...rest].slice(0, 60);
+  }
+
+  qa.lastHarvestAt = now;
+  d.updatedAt = now;
+  persist();
+  return touched;
+}
+
+/** Save a drafted answer on a cluster (grounded = safe to auto-teach). */
+export function setQADraft(d: VettingDesk, clusterId: string, draftAnswer: string, grounded: boolean): QACluster | undefined {
+  const c = deskQA(d).clusters.find((x) => x.id === clusterId);
+  if (!c) return undefined;
+  c.draftAnswer = draftAnswer.trim().slice(0, 400);
+  c.draftGrounded = grounded;
+  c.draftedAt = nowIso();
+  d.updatedAt = nowIso();
+  persist();
+  return c;
+}
+
+/**
+ * Teach the agent: the cluster's answer becomes a desk FAQ fact. Returns the
+ * new KnowledgeItem, or undefined when the cluster is missing / the answer is
+ * blank / the FAQ is at capacity (caller surfaces that as a clean error).
+ */
+export function approveQACluster(d: VettingDesk, clusterId: string, answer: string): { cluster: QACluster; item: KnowledgeItem } | undefined {
+  const c = deskQA(d).clusters.find((x) => x.id === clusterId);
+  const text = (answer || "").trim().slice(0, 400);
+  if (!c || !text) return undefined;
+
+  const knowledge = normalizeKnowledge(d.knowledge);
+  // Re-approving an already-taught cluster updates its existing fact in place.
+  const existing = c.approvedKnowledgeId ? knowledge.find((k) => k.id === c.approvedKnowledgeId) : undefined;
+  if (!existing && knowledge.length >= KNOWLEDGE_CAP) return undefined;
+
+  const item: KnowledgeItem = existing ?? { id: rid("kn"), question: c.canonicalQuestion.slice(0, 160), answer: text };
+  item.answer = text;
+  if (!existing) knowledge.push(item);
+  d.knowledge = knowledge;
+
+  c.status = "approved";
+  c.approvedAnswer = text;
+  c.approvedKnowledgeId = item.id;
+  c.approvedAt = nowIso();
+  d.updatedAt = nowIso();
+  persist();
+  return { cluster: c, item };
+}
+
+/** Recruiter decided this topic doesn't need teaching. */
+export function dismissQACluster(d: VettingDesk, clusterId: string): QACluster | undefined {
+  const c = deskQA(d).clusters.find((x) => x.id === clusterId);
+  if (!c) return undefined;
+  c.status = "dismissed";
+  c.dismissedAt = nowIso();
+  d.updatedAt = nowIso();
+  persist();
+  return c;
+}
+
+/** Stamp that the approved answer was texted back to one asker. */
+export function markQAAnswerTexted(d: VettingDesk, clusterId: string, callId: string): void {
+  const c = deskQA(d).clusters.find((x) => x.id === clusterId);
+  const ask = c?.asks.find((a) => a.callId === callId);
+  if (!ask) return;
+  ask.answerTextedAt = nowIso();
+  persist();
 }
 
 /* ---------------- candidate profiles (opt-in form) ---------------- */

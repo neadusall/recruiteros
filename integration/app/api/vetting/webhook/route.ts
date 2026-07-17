@@ -18,7 +18,7 @@ import { recordUsage } from "../../../../lib/billing/ledger";
 import { rateCost } from "../../../../lib/billing/rates";
 import {
   findCallByEngineId, getDeskById, updateCall, scoreCall, getCandidateById,
-  buildPostCallEmail, maybeAutoLearn,
+  buildPostCallEmail, maybeAutoLearn, maybeLearnQuestions,
   type TranscriptTurn,
 } from "../../../../lib/vetting";
 import { sendWorkspaceEmail } from "../../../../lib/auth";
@@ -159,6 +159,11 @@ export async function POST(req: Request) {
     // trigger; when the cadence is hit, an optimizer pass runs, applies, and
     // re-provisions the live agent. Fire-and-forget - never blocks the engine.
     void maybeAutoLearn(desk.id);
+
+    // Question intelligence: harvest what the CANDIDATE asked on this call,
+    // roll it into the desk's topic clusters, draft grounded answers for new
+    // gaps, and (auto-teach on) teach + text the answer back. Fire-and-forget.
+    void maybeLearnQuestions(desk.id, call.id);
 
     return NextResponse.json({
       ok: true, scored: true, total: s.totalScore,

@@ -12751,10 +12751,14 @@
         var kk = kn[i] || {};
         return '<div class="vt-qrow vt-krow">' +
           '<span class="vt-qn">' + (i + 1) + "</span>" +
-          '<input id="vtKq' + i + '" placeholder="' + K_HINT_Q[i] + '" value="' + esc(kk.question || "") + '" aria-label="FAQ question ' + (i + 1) + '" />' +
+          '<input id="vtKq' + i + '"' + (kk.id ? ' data-knid="' + esc(kk.id) + '"' : "") + ' placeholder="' + (K_HINT_Q[i] || "e.g. Anything else candidates ask") + '" value="' + esc(kk.question || "") + '" aria-label="FAQ question ' + (i + 1) + '" />' +
           '<input id="vtKa' + i + '" placeholder="The answer, the way you\'d say it on the phone" value="' + esc(kk.answer || "") + '" aria-label="FAQ answer ' + (i + 1) + '" />' +
           "<span></span></div>";
       }
+      // At least six rows; grows to fit every saved fact (incl. answers the
+      // question-intelligence loop taught) so a form save never drops them.
+      var kRows = "";
+      for (var kri = 0; kri < Math.min(24, Math.max(6, kn.length + 1)); kri++) kRows += krow(kri);
       function xrow(i) {
         var xf = x[i] || {};
         var types = [["text", "Text"], ["number", "Number"], ["boolean", "Yes / no"], ["enum", "Choices"]];
@@ -12816,7 +12820,7 @@
             '<button type="button" class="vt-btn vt-btn-primary vt-gen-btn" id="vtGenK"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg> Draft from JD</button>' +
           "</div>" +
           '<div class="vt-qhead"><span></span><span>If they ask</span><span>The agent may answer</span><span></span></div>' +
-          krow(0) + krow(1) + krow(2) + krow(3) + krow(4) + krow(5) +
+          kRows +
         "</div>" +
         '<div class="vt-section">Mid-call abilities <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- real actions the agent can take, both optional</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">With a scheduling link set, the agent can text it to a strong candidate DURING the call and lock the next step on the spot. With a transfer number set, it can hand an exceptional candidate (or anyone who asks for a human) straight to you, live.</div>' +
@@ -12856,9 +12860,13 @@
         });
       }
       var ks = [];
-      for (var k = 0; k < 6; k++) {
+      for (var k = 0; k < 24; k++) {
+        var kqEl2 = $("#vtKq" + k);
+        if (!kqEl2) break;
         var kq = vget("vtKq" + k), ka = vget("vtKa" + k);
-        if (kq && ka) ks.push({ question: kq, answer: ka });
+        // Keep each fact's id across the round-trip so answers taught by
+        // question intelligence stay linked to their clusters.
+        if (kq && ka) ks.push({ id: kqEl2.getAttribute("data-knid") || undefined, question: kq, answer: ka });
       }
       var payload = {
         name: vget("vtfName"), motion: motion, roleTitle: vget("vtfRole"), clientCompany: vget("vtfCompany"),

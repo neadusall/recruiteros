@@ -88,6 +88,101 @@ export interface KnowledgeItem {
   answer: string;
 }
 
+/* ---------------- question intelligence (self-learning candidate Q&A) ----------------
+   Every call, the questions the CANDIDATE asked are harvested from the transcript
+   and rolled up per desk into topic clusters. Clusters the agent had to defer
+   ("I'll flag it for the recruiter") become the desk's learning queue: an answer
+   is drafted from the JD when the JD supports one, the recruiter approves or
+   writes the real answer, the fact joins the desk FAQ, the live agent is
+   re-provisioned, and (the promise-keeping move) the candidates who asked get
+   the answer texted back from the desk's own number. */
+
+/** How the agent handled one candidate question on a call. */
+export type QAOutcome =
+  | "answered"  // answered on the spot from its role facts
+  | "partial"   // gave something, but hedged or was incomplete
+  | "deferred"; // didn't know: flagged it for the recruiter
+
+/** One question the candidate asked on one call (harvested post-call). */
+export interface CallQuestion {
+  /** The question as asked, lightly cleaned ("what's the 401k match?"). */
+  question: string;
+  /** Short canonical topic label the question rolls up under ("401k match"). */
+  topic: string;
+  outcome: QAOutcome;
+  /** What the agent actually said back, one line. */
+  answerGiven?: string;
+}
+
+/** One ask of a cluster's question: who asked it, on which call, when. */
+export interface QAAsk {
+  callId: string;
+  candidateId?: string;
+  /** Caller's number at ask time, kept so the answer can be texted back. */
+  phone?: string;
+  at: string;
+  /** The phrasing THIS caller used. */
+  question: string;
+  /** Stamped when the approved answer was texted back to this asker. */
+  answerTextedAt?: string;
+}
+
+export type QAClusterStatus =
+  | "open"      // live: still collecting asks / awaiting an approved answer
+  | "approved"  // answer approved and taught to the agent (in desk.knowledge)
+  | "dismissed"; // recruiter decided this doesn't need teaching
+
+/** One topic candidates ask about on this desk, with its learning state. */
+export interface QACluster {
+  id: string;
+  /** Canonical topic label, e.g. "401k match", "team size", "travel". */
+  topic: string;
+  /** Representative phrasing shown in the UI. */
+  canonicalQuestion: string;
+  /** Distinct phrasings seen (capped), newest last. */
+  variants: string[];
+  askCount: number;
+  /** Times the agent answered it on the spot from its facts. */
+  answeredCount: number;
+  /** Times the agent had to defer it (the gap signal). */
+  deferredCount: number;
+  status: QAClusterStatus;
+  /** AI-drafted answer, grounded ONLY in the JD + existing desk facts. */
+  draftAnswer?: string;
+  /** True when the draft is fully supported by the JD/desk facts (teachable). */
+  draftGrounded?: boolean;
+  draftedAt?: string;
+  /** The answer that was actually taught (may be recruiter-edited). */
+  approvedAnswer?: string;
+  /** The KnowledgeItem this cluster became once taught. */
+  approvedKnowledgeId?: string;
+  approvedAt?: string;
+  dismissedAt?: string;
+  /** Who asked (capped, newest first) so answers can be texted back. */
+  asks: QAAsk[];
+  firstAskedAt: string;
+  lastAskedAt: string;
+}
+
+/** The desk's question-intelligence state. */
+export interface DeskQA {
+  clusters: QACluster[];
+  /** Auto-teach: grounded drafts are approved + pushed live with no human step. */
+  autoTeach: boolean;
+  /** Default for "text the answer back to the candidates who asked". */
+  textBack: boolean;
+  /** Lifetime questions harvested on this desk. */
+  totalAsked: number;
+  lastHarvestAt?: string;
+}
+
+export const DEFAULT_DESK_QA: DeskQA = {
+  clusters: [],
+  autoTeach: false,
+  textBack: true,
+  totalAsked: 0,
+};
+
 /** One structured field the scorer extracts from every call's transcript. */
 export interface ExtractionField {
   id: string;
@@ -285,6 +380,8 @@ export interface VettingDesk {
   extraction?: ExtractionField[];
   /** Self-improvement state: applied learnings + revision history + auto-learn. */
   learning?: DeskLearning;
+  /** Question intelligence: what candidates ask + the self-learning FAQ queue. */
+  qa?: DeskQA;
 
   /* ---- engine binding (Telnyx AI Assistant by default) ---- */
   /** E.164 inbound number this desk answers on, e.g. "+13855551234". */
@@ -523,6 +620,10 @@ export interface VettingCall {
   qualifyRationale?: string;
   /** The next step the candidate was told at the end of the call. */
   nextStepGiven?: string;
+  /** Questions the CANDIDATE asked on this call (harvested post-call). */
+  candidateQuestions?: CallQuestion[];
+  /** Stamped once the question-intelligence harvest ran (idempotence guard). */
+  questionsHarvestedAt?: string;
 
   startedAt: string;
   endedAt?: string;
@@ -706,14 +807,21 @@ export function normalizeExtraction(fields?: ExtractionField[] | null): Extracti
 }
 
 /**
- * Normalize a desk's role/company FAQ: trimmed, capped at 12 items, answers
- * kept short enough to stay speakable (and to keep the prompt lean).
+ * Max FAQ facts a desk carries. Was 12; raised so question-intelligence can
+ * keep TEACHING approved answers without silently dropping earlier facts. The
+ * prompt stays lean because answers are capped at 400 chars each.
+ */
+export const KNOWLEDGE_CAP = 24;
+
+/**
+ * Normalize a desk's role/company FAQ: trimmed, capped at KNOWLEDGE_CAP items,
+ * answers kept short enough to stay speakable (and to keep the prompt lean).
  */
 export function normalizeKnowledge(items?: KnowledgeItem[] | null): KnowledgeItem[] {
   if (!Array.isArray(items)) return [];
   return items
     .filter((k) => k && typeof k.question === "string" && k.question.trim() && typeof k.answer === "string" && k.answer.trim())
-    .slice(0, 12)
+    .slice(0, KNOWLEDGE_CAP)
     .map((k, i) => ({
       id: k.id || `kn_${i}`,
       question: k.question.trim().slice(0, 160),

@@ -12751,10 +12751,14 @@
         var kk = kn[i] || {};
         return '<div class="vt-qrow vt-krow">' +
           '<span class="vt-qn">' + (i + 1) + "</span>" +
-          '<input id="vtKq' + i + '" placeholder="' + K_HINT_Q[i] + '" value="' + esc(kk.question || "") + '" aria-label="FAQ question ' + (i + 1) + '" />' +
+          '<input id="vtKq' + i + '"' + (kk.id ? ' data-knid="' + esc(kk.id) + '"' : "") + ' placeholder="' + (K_HINT_Q[i] || "e.g. Anything else candidates ask") + '" value="' + esc(kk.question || "") + '" aria-label="FAQ question ' + (i + 1) + '" />' +
           '<input id="vtKa' + i + '" placeholder="The answer, the way you\'d say it on the phone" value="' + esc(kk.answer || "") + '" aria-label="FAQ answer ' + (i + 1) + '" />' +
           "<span></span></div>";
       }
+      // At least six rows; grows to fit every saved fact (incl. answers the
+      // question-intelligence loop taught) so a form save never drops them.
+      var kRows = "";
+      for (var kri = 0; kri < Math.min(24, Math.max(6, kn.length + 1)); kri++) kRows += krow(kri);
       function xrow(i) {
         var xf = x[i] || {};
         var types = [["text", "Text"], ["number", "Number"], ["boolean", "Yes / no"], ["enum", "Choices"]];
@@ -12816,7 +12820,7 @@
             '<button type="button" class="vt-btn vt-btn-primary vt-gen-btn" id="vtGenK"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg> Draft from JD</button>' +
           "</div>" +
           '<div class="vt-qhead"><span></span><span>If they ask</span><span>The agent may answer</span><span></span></div>' +
-          krow(0) + krow(1) + krow(2) + krow(3) + krow(4) + krow(5) +
+          kRows +
         "</div>" +
         '<div class="vt-section">Mid-call abilities <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- real actions the agent can take, both optional</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">With a scheduling link set, the agent can text it to a strong candidate DURING the call and lock the next step on the spot. With a transfer number set, it can hand an exceptional candidate (or anyone who asks for a human) straight to you, live.</div>' +
@@ -12856,9 +12860,13 @@
         });
       }
       var ks = [];
-      for (var k = 0; k < 6; k++) {
+      for (var k = 0; k < 24; k++) {
+        var kqEl2 = $("#vtKq" + k);
+        if (!kqEl2) break;
         var kq = vget("vtKq" + k), ka = vget("vtKa" + k);
-        if (kq && ka) ks.push({ question: kq, answer: ka });
+        // Keep each fact's id across the round-trip so answers taught by
+        // question intelligence stay linked to their clusters.
+        if (kq && ka) ks.push({ id: kqEl2.getAttribute("data-knid") || undefined, question: kq, answer: ka });
       }
       var payload = {
         name: vget("vtfName"), motion: motion, roleTitle: vget("vtfRole"), clientCompany: vget("vtfCompany"),
@@ -13476,10 +13484,14 @@
         }).join("");
         api("/vetting/optimizer?deskId=" + encodeURIComponent(vt.deskId)).then(function (o) {
           var desk = desks.filter(function (d) { return d.id === vt.deskId; })[0] || {};
-          body.innerHTML =
-            optHeaderCard(o, opts, desk) +
-            optVoiceCard(o) + optTurnCard(o) + optRunCard(o) + optHistoryCard(o);
-          wireOptimizer(body, o);
+          // Question intelligence loads alongside; a hiccup there never blanks the tab.
+          api("/vetting/qa?deskId=" + encodeURIComponent(vt.deskId)).catch(function () { return null; }).then(function (qa) {
+            body.innerHTML =
+              optHeaderCard(o, opts, desk) +
+              optVoiceCard(o) + optTurnCard(o) + optRunCard(o) + optQACard(qa) + optHistoryCard(o);
+            wireOptimizer(body, o);
+            wireQA(body, qa);
+          });
         }).catch(function () { body.innerHTML = needsSetup(); });
       }).catch(function () { body.innerHTML = needsSetup(); });
     }
@@ -13651,6 +13663,168 @@
         '<label class="vt-must"><input type="checkbox" id="vtAutoLearn"' + (l.autoLearn ? " checked" : "") + ' /><span>Learn and improve automatically</span></label>' +
         '<select id="vtCadence">' + cad + "</select>" +
         '<span class="vt-hint">' + esc(status) + " With this on, every cadence of scored calls triggers an optimizer pass that applies itself and updates the live agent, all versioned and reversible below.</span></div></div>";
+    }
+
+    /* ---- question intelligence: what candidates ask + the self-learning FAQ ----
+       Talks to /api/vetting/qa. Every call, the candidate's questions are
+       harvested and clustered by topic; the ones the agent had to defer show up
+       here with a JD-grounded draft (or a "needs your answer" slot). Teaching an
+       answer pushes it into the live agent's facts, and the candidates who asked
+       get it texted back from the desk's own number. */
+    function optQACard(qa) {
+      var inner;
+      if (!qa) {
+        inner = '<div class="vt-hint" style="margin-top:8px">Question intelligence didn’t load. Refresh the tab to try again.</div>';
+        return '<div class="vt-card">' + cardHead("help", "Candidate questions", "What candidates ask on calls, and what the agent learns to answer.") + inner + "</div>";
+      }
+      var cov = qa.coverage || {};
+      var st = qa.settings || {};
+      var clusters = qa.clusters || [];
+      var open = clusters.filter(function (c) { return c.status === "open"; });
+      var gaps = open.filter(function (c) { return c.deferredCount > 0 || c.answeredCount === 0; });
+      var covered = open.filter(function (c) { return gaps.indexOf(c) < 0; });
+      var taught = clusters.filter(function (c) { return c.status === "approved"; });
+
+      var kpis =
+        '<div class="vt-kpi"><b>' + (cov.asked || 0) + "</b><span>questions asked</span></div>" +
+        '<div class="vt-kpi"><b>' + (cov.answeredPct != null ? cov.answeredPct + "%" : "–") + "</b><span>answered on the spot</span></div>" +
+        '<div class="vt-kpi"><b>' + (cov.openGaps || 0) + "</b><span>open gaps</span></div>" +
+        '<div class="vt-kpi"><b>' + (cov.taught || 0) + "</b><span>answers taught</span></div>" +
+        '<div class="vt-kpi"><b>' + (cov.textedBack || 0) + "</b><span>answers texted back</span></div>";
+
+      function askersDue(c) {
+        return (c.asks || []).filter(function (a) { return a.phone && !a.answerTextedAt; }).length;
+      }
+      function gapRow(c) {
+        var mix = [];
+        if (c.answeredCount) mix.push("answered on the spot " + c.answeredCount + "x");
+        if (c.deferredCount) mix.push("had to defer " + c.deferredCount + "x");
+        var grounded = !!(c.draftGrounded && c.draftAnswer);
+        var badge = grounded
+          ? '<span class="vt-pill live">drafted from the JD</span>'
+          : (c.draftedAt ? '<span class="vt-pill draft">needs your answer</span>' : '<span class="vt-pill draft">no draft yet</span>');
+        var due = askersDue(c);
+        var textRow = due
+          ? '<label class="vt-must" style="margin-top:8px"><input type="checkbox" data-vtqatext="' + c.id + '"' + (st.textBack ? " checked" : "") + ' /><span>Text the answer to the ' + due + " candidate" + (due === 1 ? "" : "s") + " who asked</span></label>"
+          : "";
+        return '<div class="vt-sim' + (grounded ? "" : " vt-sim-fail") + '" data-vtqarow="' + c.id + '">' +
+          '<div class="vt-sim-h"><b>' + esc(c.topic) + "</b>" + badge +
+          '<span class="vt-sim-real">asked ' + c.askCount + "x · last " + fmtDate(c.lastAskedAt) + "</span></div>" +
+          '<div class="vt-hint">“' + esc(c.canonicalQuestion) + "”" + (mix.length ? " · " + mix.join(", ") : "") + "</div>" +
+          '<div class="vt-field" style="margin-top:8px"><textarea rows="2" data-vtqaans="' + c.id + '" placeholder="Write the answer the way you’d say it on the phone.">' + esc(c.draftAnswer || "") + "</textarea></div>" +
+          textRow +
+          '<div style="margin-top:8px"><button class="vt-btn vt-btn-primary" data-vtqateach="' + c.id + '">Teach the agent</button> ' +
+          '<button class="vt-btn vt-btn-ghost" data-vtqadismiss="' + c.id + '">Dismiss</button></div></div>';
+      }
+      var gapsHtml = gaps.length
+        ? '<div class="vt-rev-h" style="margin-top:14px"><b>Gaps to close</b><span>' + gaps.length + " topic" + (gaps.length === 1 ? "" : "s") + " candidates asked that the agent couldn’t answer</span></div>" + gaps.map(gapRow).join("")
+        : '<div class="vt-hint" style="margin-top:12px">No open gaps. Every question candidates have asked, the agent could answer.</div>';
+
+      var coveredHtml = covered.length
+        ? '<details class="vt-rev-notes" style="margin-top:10px"><summary>Answered on the spot (' + covered.length + " topics)</summary>" +
+          covered.map(function (c) {
+            return '<div class="vt-hint" style="margin-top:6px"><b>' + esc(c.topic) + "</b> · asked " + c.askCount + "x · “" + esc(c.canonicalQuestion) + "”</div>";
+          }).join("") + "</details>"
+        : "";
+      var taughtHtml = taught.length
+        ? '<details class="vt-rev-notes" style="margin-top:10px"><summary>Taught to the agent (' + taught.length + ")</summary>" +
+          taught.map(function (c) {
+            var texted = (c.asks || []).filter(function (a) { return a.answerTextedAt; }).length;
+            return '<div class="vt-hint" style="margin-top:6px"><b>' + esc(c.topic) + "</b>: " + esc(c.approvedAnswer || "") + (texted ? " · texted back to " + texted : "") + "</div>";
+          }).join("") + "</details>"
+        : "";
+
+      var actions =
+        '<div class="vt-actions" style="border-top:0;padding-top:0;margin-top:12px">' +
+        '<button class="vt-btn" id="vtQaScan"><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg> Scan recent calls</button>' +
+        (gaps.some(function (c) { return !c.draftedAt; }) ? '<button class="vt-btn" id="vtQaDraft"><svg class="isvg" aria-hidden="true"><use href="#i-bulb"/></svg> Draft answers from the JD</button>' : "") +
+        "</div>";
+
+      var settings =
+        '<div class="vt-learnrow" style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px">' +
+        '<label class="vt-must"><input type="checkbox" id="vtQaAutoTeach"' + (st.autoTeach ? " checked" : "") + ' /><span>Teach itself automatically</span></label>' +
+        '<label class="vt-must"><input type="checkbox" id="vtQaTextBack"' + (st.textBack ? " checked" : "") + ' /><span>Text answers back by default</span></label>' +
+        '<span class="vt-hint">Auto-teach only ever uses answers grounded in the job description, never a guess. Anything the JD can’t answer still waits for you here.</span></div>';
+
+      inner =
+        '<div class="vt-hint" style="margin-top:6px">Every call, the questions candidates ask are logged and clustered. The ones the agent couldn’t answer become drafts below: approve one and the agent knows it on the very next call, and the candidates who asked get the answer texted from this desk’s number. The agent never invents an answer; this is how it earns the ones it doesn’t have.</div>' +
+        '<div class="vt-health" style="margin-top:10px">' + kpis + "</div>" +
+        gapsHtml + coveredHtml + taughtHtml + actions + settings;
+      return '<div class="vt-card">' + cardHead("help", "Candidate questions", "What candidates ask, and what the agent learns to answer.") + inner + "</div>";
+    }
+
+    function wireQA(body, qa) {
+      if (!qa) return;
+      function repaint() { paintOptimizer(body); }
+
+      function saveQaSettings() {
+        send("/vetting/qa", "POST", {
+          action: "settings", deskId: vt.deskId,
+          autoTeach: !!($("#vtQaAutoTeach") && $("#vtQaAutoTeach").checked),
+          textBack: !!($("#vtQaTextBack") && $("#vtQaTextBack").checked)
+        }).then(function (r) {
+          if (!r.ok) { toast("Save failed"); return; }
+          toast(($("#vtQaAutoTeach") && $("#vtQaAutoTeach").checked) ? "The agent will teach itself grounded answers" : "Answers wait for your approval");
+        });
+      }
+      if ($("#vtQaAutoTeach")) $("#vtQaAutoTeach").addEventListener("change", saveQaSettings);
+      if ($("#vtQaTextBack")) $("#vtQaTextBack").addEventListener("change", saveQaSettings);
+
+      function busyButton(btn, label, payload, doneMsg) {
+        if (!btn) return;
+        btn.addEventListener("click", function () {
+          var idle = btn.innerHTML;
+          btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> ' + label;
+          send("/vetting/qa", "POST", payload).then(function (r) {
+            btn.disabled = false; btn.innerHTML = idle;
+            if (!r.ok) {
+              var d = (r.data && r.data.detail) || "";
+              toast(d.indexOf("anthropic") >= 0 ? "Set ANTHROPIC_API_KEY on the server first." : "That didn’t work.");
+              return;
+            }
+            if (doneMsg) toast(doneMsg(r.data || {}));
+            repaint();
+          }).catch(function () { btn.disabled = false; btn.innerHTML = idle; toast("Couldn’t reach the server."); });
+        });
+      }
+      busyButton($("#vtQaScan"), "Scanning…", { action: "harvest", deskId: vt.deskId }, function (d) {
+        return d.processed ? "Scanned " + d.processed + " call" + (d.processed === 1 ? "" : "s") + " for questions" : "No new calls to scan";
+      });
+      busyButton($("#vtQaDraft"), "Drafting…", { action: "draft", deskId: vt.deskId }, function (d) {
+        return d.drafted ? "Drafted " + d.drafted + " answer" + (d.drafted === 1 ? "" : "s") + " from the JD" : "Nothing the JD could answer; write those ones in";
+      });
+
+      Array.prototype.forEach.call(body.querySelectorAll("[data-vtqateach]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var id = btn.getAttribute("data-vtqateach");
+          var ta = body.querySelector('[data-vtqaans="' + id + '"]');
+          var answer = ta ? ta.value.trim() : "";
+          if (!answer) { toast("Write the answer first."); if (ta) ta.focus(); return; }
+          var tb = body.querySelector('[data-vtqatext="' + id + '"]');
+          var idle = btn.innerHTML;
+          btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Teaching…';
+          send("/vetting/qa", "POST", {
+            action: "teach", deskId: vt.deskId, clusterId: id, answer: answer,
+            textBack: tb ? !!tb.checked : undefined
+          }).then(function (r) {
+            btn.disabled = false; btn.innerHTML = idle;
+            if (!r.ok) {
+              var d = (r.data && r.data.error) || "";
+              toast(d === "faq_full" ? "The role FAQ is full. Trim a fact on the desk first." : "That didn’t work.");
+              return;
+            }
+            var dd = r.data || {};
+            toast("Taught." + (dd.pushed ? " The live agent knows it now." : "") + (dd.texted ? " Texted back to " + dd.texted + "." : ""));
+            repaint();
+          }).catch(function () { btn.disabled = false; btn.innerHTML = idle; toast("Couldn’t reach the server."); });
+        });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-vtqadismiss]"), function (btn) {
+        btn.addEventListener("click", function () {
+          send("/vetting/qa", "POST", { action: "dismiss", deskId: vt.deskId, clusterId: btn.getAttribute("data-vtqadismiss") })
+            .then(function (r) { if (r.ok) { toast("Dismissed"); repaint(); } else toast("That didn’t work."); });
+        });
+      });
     }
 
     function revisionCard(r, isProposal) {
