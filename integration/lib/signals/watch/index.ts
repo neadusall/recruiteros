@@ -7,7 +7,8 @@
 export {
   listWatchlists, getWatchlist, upsertWatchlist, setWatchlistActive, deleteWatchlist,
   recordPollResult, fetchBudgetRemaining, dailyFetchCap,
-  type Watchlist, type WatchStats, type WatchlistInput,
+  getWatchHealth, recordTickHealth,
+  type Watchlist, type WatchStats, type WatchlistInput, type WatchHealth,
 } from "./store";
 
 export {

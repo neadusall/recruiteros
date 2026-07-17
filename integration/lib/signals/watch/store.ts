@@ -312,3 +312,48 @@ export async function reserveFetches(n: number, todayIso: string): Promise<numbe
 export function dailyFetchCap(): number {
   return dailyCap();
 }
+
+/* ------------------------------------------------------------------ */
+/* Tick heartbeat / health: lets a watchdog see a dead or sick tick    */
+/* ------------------------------------------------------------------ */
+/*
+ * Every tick stamps when it ran, how long it took, how many fresh signals it produced, and its
+ * last error. A monitor reads this via ?status=1: if `lastTickAt` is older than a couple of poll
+ * cadences the timer is dead; if `consecutiveErrors` is climbing the feed/enrichment is failing.
+ */
+
+const HEALTH_KEY = "signals_watch_health_v1";
+
+export interface WatchHealth {
+  lastTickAt?: string;       // when the last tick finished (ISO)
+  lastTickMs?: number;       // how long the last tick took
+  lastDue?: number;          // lists due on the last tick
+  lastPolled?: number;       // lists polled on the last tick
+  lastFreshTotal?: number;   // fresh companies actioned on the last tick
+  lastError?: string;        // last tick-level fault (not per-list)
+  consecutiveErrors: number; // ticks in a row that produced zero successful polls or threw
+  totalTicks: number;
+}
+
+export async function getWatchHealth(): Promise<WatchHealth> {
+  const h = await loadSnapshot<WatchHealth>(HEALTH_KEY);
+  return h && typeof h === "object" ? h : { consecutiveErrors: 0, totalTicks: 0 };
+}
+
+export async function recordTickHealth(patch: Partial<WatchHealth> & { errored?: boolean }): Promise<void> {
+  await withStoreLock(async () => {
+    const cur = (await loadSnapshot<WatchHealth>(HEALTH_KEY)) || { consecutiveErrors: 0, totalTicks: 0 };
+    const errored = patch.errored === true;
+    const next: WatchHealth = {
+      lastTickAt: patch.lastTickAt ?? cur.lastTickAt,
+      lastTickMs: patch.lastTickMs ?? cur.lastTickMs,
+      lastDue: patch.lastDue ?? cur.lastDue,
+      lastPolled: patch.lastPolled ?? cur.lastPolled,
+      lastFreshTotal: patch.lastFreshTotal ?? cur.lastFreshTotal,
+      lastError: errored ? (patch.lastError || "tick error") : undefined,
+      consecutiveErrors: errored ? (cur.consecutiveErrors || 0) + 1 : 0,
+      totalTicks: (cur.totalTicks || 0) + 1,
+    };
+    await saveSnapshot(HEALTH_KEY, next);
+  });
+}

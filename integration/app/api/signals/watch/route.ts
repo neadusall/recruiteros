@@ -25,7 +25,7 @@ import { requireSession, body, ok, fail } from "../../../../lib/api";
 import { jobFeedEnabled } from "../../../../lib/inmarket/jobFeed";
 import {
   listWatchlists, upsertWatchlist, setWatchlistActive, deleteWatchlist,
-  fetchBudgetRemaining, dailyFetchCap, tickWatchlists, pollWatchlistNow,
+  fetchBudgetRemaining, dailyFetchCap, tickWatchlists, pollWatchlistNow, getWatchHealth,
   type WatchlistInput,
 } from "../../../../lib/signals/watch";
 import { nowIso } from "../../../../lib/core/ids";
@@ -43,12 +43,16 @@ async function cronBranch(req: Request): Promise<NextResponse> {
   const params = new URL(req.url).searchParams;
 
   if (params.get("status") === "1") {
-    // Peek without doing work: budget + a compact per-list readout.
+    // Peek without doing work: heartbeat + budget + a compact per-list readout. A watchdog reads
+    // `health.lastTickAt` (stale => timer dead) and `health.consecutiveErrors` (climbing => outage).
     const lists = await listWatchlists();
     const remaining = await fetchBudgetRemaining(nowIso());
+    const health = await getWatchHealth();
     return NextResponse.json({
       ok: true,
+      health,
       budget: { remaining, cap: dailyFetchCap() },
+      activeWatchlists: lists.filter((w) => w.active).length,
       watchlists: lists.map((w) => ({
         id: w.id, name: w.name, active: w.active, everyMinutes: w.everyMinutes,
         lastPolledAt: w.lastPolledAt, stats: w.stats,

@@ -46,6 +46,7 @@ Optional tuning:
 |-----|---------|--------|
 | `SIGNALS_WATCH_DAILY_FETCH_CAP` | `500` | hard ceiling on feed fetches/day (spend guard) |
 | `SIGNALS_WATCH_MAX_LISTS_PER_TICK` | `50` | lists polled per 15-min tick |
+| `SIGNALS_WATCH_MAX_CURATE_PER_TICK` | `60` | companies curated per tick; caps tick duration so the timer never starves (rest stay due for the next tick, oldest-waiting first) |
 | `SIGNALS_WATCH_KICK_AUTOFILL` | on | set `0` to let the 5-min autofill timer handle enrollment instead of kicking it immediately |
 
 ### 2. The base video (once)
@@ -71,8 +72,21 @@ Verify:
 systemctl list-timers recruiteros-signals-watch.timer      # next fire time
 systemctl start recruiteros-signals-watch.service          # poll once now
 curl -s -H "x-cron-secret: $RECRUITEROS_CRON_SECRET" \
-  "http://127.0.0.1:3000/api/signals/watch?status=1" | jq  # budget + per-list stats
+  "http://127.0.0.1:3000/api/signals/watch?status=1" | jq  # health + budget + per-list stats
 ```
+
+### 5. Install the watchdog (recommended)
+
+```bash
+bash /opt/recruiteros/install-signals-watch-monitor.sh
+```
+
+Checks the poller heartbeat every 15 min and logs to the journal if the tick goes silent (timer
+dead / app down), starts failing (feed or enrichment outage), or exhausts the daily budget. Read
+its verdicts with `journalctl -t signals-watch-monitor -n 20 --no-pager`.
+
+The `?status=1` response carries a `health` block the watchdog reads: `lastTickAt` (stale => timer
+dead), `lastTickMs`, `consecutiveErrors` (climbing => outage), and `lastError`.
 
 ## Creating watchlists (the API the UI calls)
 

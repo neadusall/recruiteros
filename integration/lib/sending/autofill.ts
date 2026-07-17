@@ -95,7 +95,7 @@ async function readCounter(nowIso: string): Promise<DayCounter> {
 export interface AutofillResult {
   enrolled: number;
   skipped: number;
-  reason: "ok" | "disabled" | "no_campaign" | "daily_target_met" | "buffer_full" | "no_ready_supply";
+  reason: "ok" | "disabled" | "no_campaign" | "daily_target_met" | "buffer_full" | "no_ready_supply" | "busy";
   today: number;        // enrolled so far today
   dailyTarget: number;
 }
@@ -105,7 +105,22 @@ export interface AutofillResult {
  * the day's target is met or the rolling buffer is full. `force` runs it even when the toggle is off
  * (the "Fill now" button) — but never without a chosen campaign.
  */
+// Single-flight guard: the 5-min ensureAutofill timer, the Signal-Watchlist tick's kick, and the
+// "Fill now" button can all call this. Without serialization two runs could read the same day
+// counter and stage overlapping batches. enrollToBulk dedupes by email so no double enrollment, but
+// this keeps the counter honest and the work non-redundant.
+let autofillRunning = false;
 export async function runAutofill(nowIso: string, opts?: { force?: boolean }): Promise<AutofillResult> {
+  if (autofillRunning) return { enrolled: 0, skipped: 0, reason: "busy", today: 0, dailyTarget: 0 };
+  autofillRunning = true;
+  try {
+    return await runAutofillInner(nowIso, opts);
+  } finally {
+    autofillRunning = false;
+  }
+}
+
+async function runAutofillInner(nowIso: string, opts?: { force?: boolean }): Promise<AutofillResult> {
   const s = await getAutofillSettings();
   const dailyTarget = await resolveDailyTarget(s);
   const ctr = await readCounter(nowIso);
