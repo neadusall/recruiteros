@@ -39,10 +39,15 @@ export function ostextPushConfigured(): boolean {
 }
 
 /** Starter SMS template: only {first_name}, which every pushed contact has, so
- *  no contact gets failed for a missing merge field before the recruiter edits. */
+ *  no contact gets failed for a missing merge field before the recruiter edits.
+ *  Campaign names arrive as saved-list names ("VP of Operations · Howell, New
+ *  Jersey +50mi (combined)"); the text must say the ROLE, not the list name, so
+ *  strip the separator tail, parentheticals, and trailing state codes. */
 export function ostextStarterTemplate(recruiterName: string, roleName: string): string {
   const first = (recruiterName || "").trim().split(/\s+/)[0] || "";
-  return `Hi {first_name}, this is ${first || "a recruiter"} reaching out about a ${roleName} opening. Your background looks like a strong fit. Open to a quick text about it?`;
+  const role = roleName.split("·")[0].replace(/\(.*?\)/g, "").replace(/,\s*[A-Z]{2}\b.*$/, "").trim() || roleName.trim();
+  const article = /^[aeiou]/i.test(role) ? "an" : "a";
+  return `Hi {first_name}, this is ${first || "a recruiter"} reaching out about ${article} ${role} opening. Your background looks like a strong fit. Open to a quick text about it?`;
 }
 
 export interface OsTextImportArgs {
