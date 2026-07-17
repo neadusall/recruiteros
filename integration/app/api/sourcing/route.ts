@@ -42,6 +42,7 @@ import {
   landlineDbReady,
 } from "../../../lib/sourcing";
 import type { CandidateRow, SearchBreadth, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
+import { sendRunNow } from "../../../lib/sourcing/autoflow";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { withWorkspaceCreds } from "../../../lib/connected";
 import { cred } from "../../../lib/providers/http";
@@ -729,6 +730,12 @@ export async function POST(req: Request) {
         candidates,
         warnings: [],
         motion: anchor.motion,
+        // A combined list is born finished (its sources were already enriched), so it
+        // auto-sends to Candidates + OS Text immediately; combinedFrom makes the promote
+        // RETAG everyone it holds with the combined name, so one tag in Candidates pulls
+        // the whole refined set for campaign assignment.
+        sendAsap: anchor.motion !== "bd",
+        combinedFrom: ids,
       });
       // Optionally retire the sources — safe, the combined list holds every candidate.
       // A source with an enrich/vet job still in flight is kept so the job isn't stranded.
@@ -740,7 +747,15 @@ export async function POST(req: Request) {
           if (await deleteSourcingRun(ws, r.id)) deleted++;
         }
       }
-      return ok({ run: mergedRun, total: candidates.length, overlap, sources: runs.length, deleted, keptBusy });
+      // Fire the auto-send now, in-request but not awaited (Telnyx phone validation on
+      // the OS Text leg can take a minute). The nightqueue sweeper's sendAsap branch
+      // re-fires it within ~2 minutes if this process dies before the send lands.
+      const autoSend = mergedRun.sendAsap === true;
+      if (autoSend) {
+        void sendRunNow(mergedRun).catch((e) =>
+          console.warn(`[sourcing] combined-list auto-send of "${mergedRun.name}" failed (sweeper will retry): ${(e as Error).message}`));
+      }
+      return ok({ run: mergedRun, total: candidates.length, overlap, sources: runs.length, deleted, keptBusy, autoSend, tag: name });
     }
 
     if (action === "delete") {

@@ -38,6 +38,13 @@ export interface PromoteOptions {
   listName?: string;
   /** Tag stamped on every promoted candidate (their category) so you can pull them by tag. Defaults to the list name. */
   tag?: string;
+  /**
+   * Also restamp candidates ALREADY in the pipeline with this tag (and fill their
+   * blank contact fields from the run's row). Used by combined lists: the sources
+   * were usually promoted before, so without a retag the merged tag would only land
+   * on the handful of new people and the tag filter in Candidates would miss the rest.
+   */
+  retag?: boolean;
 }
 
 /**
@@ -86,7 +93,22 @@ export async function promoteSourcingRun(
     if (c.fitScore < minFit) continue;
     if (c.linkedinUrl) {
       const existing = await core.findProspectByLinkedin(workspaceId, c.linkedinUrl);
-      if (existing) { deduped++; prospectIds.push(existing.id); continue; }
+      if (existing) {
+        deduped++; prospectIds.push(existing.id);
+        if (opts.retag) {
+          // Combined-list promote: the person came in earlier under a source list's
+          // tag. Restamp with the combined tag and fill any contact blanks the merge
+          // found, so one tag pulls the WHOLE combined set in Candidates.
+          let dirty = false;
+          if (existing.category !== tag) { existing.category = tag; dirty = true; }
+          if (!existing.email && c.email) { existing.email = c.email; dirty = true; }
+          if (!existing.phone && c.phone) { existing.phone = c.phone; dirty = true; }
+          if (!existing.title && (c.title || c.headline)) { existing.title = c.title || c.headline; dirty = true; }
+          if (!existing.location && c.location) { existing.location = c.location; dirty = true; }
+          if (dirty) await core.saveProspect(existing);
+        }
+        continue;
+      }
     }
     const p = await addProspect({
       workspaceId,

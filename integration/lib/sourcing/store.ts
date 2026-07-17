@@ -71,6 +71,10 @@ export interface SaveRunInput {
   candidates: CandidateRow[];
   warnings?: string[];
   apiUsage?: SourcingRun["apiUsage"];
+  /** Auto-send on the next sweep with no settle wait (runs born finished, e.g. a combine). */
+  sendAsap?: boolean;
+  /** Source run ids when this run is a "Combine lists" merge. */
+  combinedFrom?: string[];
 }
 
 /** Create or update a named run. Re-saving by id replaces its candidate set. */
@@ -87,6 +91,8 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     existing.candidates = input.candidates ?? existing.candidates;
     if (input.warnings) existing.warnings = input.warnings;
     if (input.apiUsage) existing.apiUsage = input.apiUsage;
+    if (input.sendAsap !== undefined) existing.sendAsap = input.sendAsap;
+    if (input.combinedFrom) existing.combinedFrom = input.combinedFrom;
     existing.updatedAt = nowIso();
     await save();
     return existing;
@@ -104,6 +110,8 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     candidates: input.candidates || [],
     warnings: input.warnings || [],
     apiUsage: input.apiUsage,
+    sendAsap: input.sendAsap,
+    combinedFrom: input.combinedFrom,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };

@@ -80,6 +80,11 @@ function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | null 
   }
   if ((run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS) return null;
 
+  // Born-finished runs (a "Combine lists" merge of already-enriched lists) skip the
+  // settle/idle waits: the merge handler fires a send in-request, and this branch is
+  // the sweeper backstop in case that process died before the send landed.
+  if (run.sendAsap) return "send";
+
   const chainDone = run.laxisProgress?.nextStart === null;
   if (chainDone && now - touched >= SETTLE_MS) return "send";
   if (now - touched >= IDLE_MS) return "send"; // stalled or never-started: flow on with what it has
@@ -142,7 +147,12 @@ async function sendRun(run: SourcingRun): Promise<void> {
     if (!run.promotedListId || topup) {
       // Reuse the campaign a prior promote created — promote with no campaignId
       // always creates a new one, and a top-up must never duplicate the campaign.
-      await promoteSourcingRun(ws, run.id, { listName: run.name, tag: "", campaignId: run.promotedCampaignId });
+      // Combined lists retag: everyone the merge holds gets the combined list's
+      // name as their tag, even people the source lists promoted earlier.
+      await promoteSourcingRun(ws, run.id, {
+        listName: run.name, tag: "", campaignId: run.promotedCampaignId,
+        retag: Boolean(run.combinedFrom?.length),
+      });
     }
 
     // 2) OS Text. Zero phones is not a failure: the list is stamped sent with
@@ -182,6 +192,17 @@ async function sendRun(run: SourcingRun): Promise<void> {
   }
   run.autoflow = stamp;
   await saveSourcingRun(ws, { ...run });
+}
+
+/**
+ * Push one run to Candidates + OS Text right now, in-request. Used by the merge
+ * handler so a combined list lands everywhere within seconds of combining; the
+ * sweeper's sendAsap branch backstops it if this process dies mid-send. Safe to
+ * race the sweeper: promote dedupes by LinkedIn URL and stamps promotedListId,
+ * and the OS Text engine dedupes contacts by (campaign, phone).
+ */
+export async function sendRunNow(run: SourcingRun): Promise<void> {
+  await sendRun(run);
 }
 
 let sweeping = false;

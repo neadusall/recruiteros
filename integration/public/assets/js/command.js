@@ -6501,7 +6501,7 @@
           fullName: p.fullName || "", title: p.title || "", company: p.company || "",
           email: p.email || "", phone: p.mobilePhone || p.phone || "",
           linkedinUrl: p.linkedinUrl || "", location: p.location || "",
-          source: p.category || "Pipeline", owner: "", tags: [],
+          source: p.category || "Pipeline", owner: "", tags: p.category ? [p.category] : [],
           statusVal: p.status, statusLabel: statusLabel(p.status, lifecycle),
           photoUrl: p.photoUrl || "", exp: p.experienceSummary || p.experience || p.summary || "",
           seqName: p.sequenceName || "",
@@ -6725,7 +6725,7 @@
               '<select class="pr-bulk-sel" id="cnBulkStatus">' + statusOpts + "</select>" +
               '<span class="pr-seq-grp"><select class="pr-bulk-sel" id="cnBulkSeq">' + seqOpts + "</select>" +
                 '<button class="btn btn-ghost btn-sm" id="cnSeqAssign">Assign</button></span>' +
-              '<button class="btn btn-ghost btn-sm" id="cnAddCamp" title="Add the selected ATS people to a campaign you pick (they join the pipeline).">+ Add to campaign</button>' +
+              '<button class="btn btn-ghost btn-sm" id="cnAddCamp" title="Put everyone selected into a campaign you pick. Tip: filter by a list\'s tag first, then Select all.">+ Add to campaign</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnSaveList">Save as list</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnDelSel">Delete</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnClearSel">Clear</button></span></div>'
@@ -6908,14 +6908,21 @@
     }
     function addToCampaign(ids) {
       var sp = splitIds(ids);
-      if (!sp.dids.length) { toast("Pipeline candidates are already in campaigns; use Assign sequence for them."); return; }
+      if (!sp.dids.length && !sp.pids.length) { toast("Select candidates first."); return; }
       pickCampaign(function (cid) {
         if (!cid) return;
-        send("/data", "POST", { action: "promote", ids: sp.dids, campaignId: cid, motion: "recruiting" }).then(function (r) {
-          if (r.ok) {
-            toast("Added " + (r.data.added || sp.dids.length) + " to the campaign" + (sp.pids.length ? " (" + sp.pids.length + " already-pipeline rows skipped)" : ""));
-            state.sel = {}; load();
-          } else toast("Could not add (" + ((r.data && r.data.error) || r.status) + ")");
+        // ATS people join the pipeline in that campaign; pipeline rows are MOVED into
+        // it (that's how a tag-filtered set, e.g. a combined list, gets its campaign).
+        var jobs = [];
+        if (sp.dids.length) jobs.push(send("/data", "POST", { action: "promote", ids: sp.dids, campaignId: cid, motion: "recruiting" }));
+        if (sp.pids.length) jobs.push(send("/prospects", "POST", { action: "bulk-update", ids: sp.pids, campaignId: cid }));
+        Promise.all(jobs).then(function (rs) {
+          var bad = rs.filter(function (r) { return !r.ok; });
+          if (bad.length) { toast("Could not add (" + ((bad[0].data && bad[0].data.error) || bad[0].status) + ")"); return; }
+          var n = 0;
+          rs.forEach(function (r) { n += (r.data && (r.data.added || r.data.updated)) || 0; });
+          toast("Added " + (n || ids.length) + " to the campaign.");
+          state.sel = {}; load();
         }).catch(function () { toast("Could not reach the server."); });
       });
     }
@@ -10124,7 +10131,7 @@
       '<div class="card">' +
         '<div class="jd-cardhead"><h3 style="margin:0">Your saved candidate lists</h3>' +
           '<span id="jdQuota" class="jd-quota"></span>' +
-          '<button class="btn btn-ghost btn-sm" id="jdCombine" disabled title="Ran the same role a few times? Tick two or more lists below and combine them into one master list. Duplicates merge automatically and contact info found on any list is kept, so nobody slips through the cracks.">Combine lists</button>' +
+          '<button class="btn btn-ghost btn-sm" id="jdCombine" disabled title="Ran the same role a few times? Tick two or more lists below and combine them into one master list. Duplicates merge automatically, contact info found on any list is kept, and the combined list flows to Candidates + OS Text by itself under its own tag.">Combine lists</button>' +
         '</div>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
@@ -10872,7 +10879,7 @@
       var biggest = chosen.reduce(function (a, r) { return ((r.candidates || []).length > ((a.candidates || []).length) ? r : a); }, chosen[0]);
       var defName = ((biggest && biggest.name) || "Candidate search") + " (combined)";
       openModal("Combine " + chosen.length + " lists",
-        "Merges the ticked lists into one master list. The same person on two lists becomes one row (best score wins), and an email or phone found on any list is kept.",
+        "Merges the ticked lists into one master list. The same person on two lists becomes one row (best score wins), and an email or phone found on any list is kept. The combined list then flows to Candidates and OS Text by itself, tagged with the name below, so you can pull the whole set by tag in Candidates and assign it a campaign.",
         '<label class="fld"><span>Combined list name</span>' +
           '<input id="combineName" type="text" value="' + esc(defName) + '" /></label>' +
         '<div class="muted" style="font-size:12.5px;margin:6px 0 2px">' +
@@ -10895,6 +10902,7 @@
               var d = r.data || {};
               toast('Combined ' + (d.sources || chosen.length) + ' lists into "' + nm + '": ' + (d.total || 0) + ' unique candidates' +
                 (d.overlap ? (', ' + d.overlap + ' duplicates merged') : '') +
+                (d.autoSend ? ('. Sending to Candidates + OS Text now, tagged "' + nm + '": filter by that tag in Candidates to assign a campaign') : '') +
                 ((d.keptBusy && d.keptBusy.length) ? ('. Kept "' + d.keptBusy.join('", "') + '" (enrichment still running there)') : '') + '.');
               loadRuns(); syncCombine();
             }).catch(function () {

@@ -6501,7 +6501,7 @@
           fullName: p.fullName || "", title: p.title || "", company: p.company || "",
           email: p.email || "", phone: p.mobilePhone || p.phone || "",
           linkedinUrl: p.linkedinUrl || "", location: p.location || "",
-          source: p.category || "Pipeline", owner: "", tags: [],
+          source: p.category || "Pipeline", owner: "", tags: p.category ? [p.category] : [],
           statusVal: p.status, statusLabel: statusLabel(p.status, lifecycle),
           photoUrl: p.photoUrl || "", exp: p.experienceSummary || p.experience || p.summary || "",
           seqName: p.sequenceName || "",
@@ -6725,7 +6725,7 @@
               '<select class="pr-bulk-sel" id="cnBulkStatus">' + statusOpts + "</select>" +
               '<span class="pr-seq-grp"><select class="pr-bulk-sel" id="cnBulkSeq">' + seqOpts + "</select>" +
                 '<button class="btn btn-ghost btn-sm" id="cnSeqAssign">Assign</button></span>' +
-              '<button class="btn btn-ghost btn-sm" id="cnAddCamp" title="Add the selected ATS people to a campaign you pick (they join the pipeline).">+ Add to campaign</button>' +
+              '<button class="btn btn-ghost btn-sm" id="cnAddCamp" title="Put everyone selected into a campaign you pick. Tip: filter by a list\'s tag first, then Select all.">+ Add to campaign</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnSaveList">Save as list</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnDelSel">Delete</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnClearSel">Clear</button></span></div>'
@@ -6908,14 +6908,21 @@
     }
     function addToCampaign(ids) {
       var sp = splitIds(ids);
-      if (!sp.dids.length) { toast("Pipeline candidates are already in campaigns; use Assign sequence for them."); return; }
+      if (!sp.dids.length && !sp.pids.length) { toast("Select candidates first."); return; }
       pickCampaign(function (cid) {
         if (!cid) return;
-        send("/data", "POST", { action: "promote", ids: sp.dids, campaignId: cid, motion: "recruiting" }).then(function (r) {
-          if (r.ok) {
-            toast("Added " + (r.data.added || sp.dids.length) + " to the campaign" + (sp.pids.length ? " (" + sp.pids.length + " already-pipeline rows skipped)" : ""));
-            state.sel = {}; load();
-          } else toast("Could not add (" + ((r.data && r.data.error) || r.status) + ")");
+        // ATS people join the pipeline in that campaign; pipeline rows are MOVED into
+        // it (that's how a tag-filtered set, e.g. a combined list, gets its campaign).
+        var jobs = [];
+        if (sp.dids.length) jobs.push(send("/data", "POST", { action: "promote", ids: sp.dids, campaignId: cid, motion: "recruiting" }));
+        if (sp.pids.length) jobs.push(send("/prospects", "POST", { action: "bulk-update", ids: sp.pids, campaignId: cid }));
+        Promise.all(jobs).then(function (rs) {
+          var bad = rs.filter(function (r) { return !r.ok; });
+          if (bad.length) { toast("Could not add (" + ((bad[0].data && bad[0].data.error) || bad[0].status) + ")"); return; }
+          var n = 0;
+          rs.forEach(function (r) { n += (r.data && (r.data.added || r.data.updated)) || 0; });
+          toast("Added " + (n || ids.length) + " to the campaign.");
+          state.sel = {}; load();
         }).catch(function () { toast("Could not reach the server."); });
       });
     }
@@ -10124,7 +10131,7 @@
       '<div class="card">' +
         '<div class="jd-cardhead"><h3 style="margin:0">Your saved candidate lists</h3>' +
           '<span id="jdQuota" class="jd-quota"></span>' +
-          '<button class="btn btn-ghost btn-sm" id="jdCombine" disabled title="Ran the same role a few times? Tick two or more lists below and combine them into one master list. Duplicates merge automatically and contact info found on any list is kept, so nobody slips through the cracks.">Combine lists</button>' +
+          '<button class="btn btn-ghost btn-sm" id="jdCombine" disabled title="Ran the same role a few times? Tick two or more lists below and combine them into one master list. Duplicates merge automatically, contact info found on any list is kept, and the combined list flows to Candidates + OS Text by itself under its own tag.">Combine lists</button>' +
         '</div>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
@@ -10872,7 +10879,7 @@
       var biggest = chosen.reduce(function (a, r) { return ((r.candidates || []).length > ((a.candidates || []).length) ? r : a); }, chosen[0]);
       var defName = ((biggest && biggest.name) || "Candidate search") + " (combined)";
       openModal("Combine " + chosen.length + " lists",
-        "Merges the ticked lists into one master list. The same person on two lists becomes one row (best score wins), and an email or phone found on any list is kept.",
+        "Merges the ticked lists into one master list. The same person on two lists becomes one row (best score wins), and an email or phone found on any list is kept. The combined list then flows to Candidates and OS Text by itself, tagged with the name below, so you can pull the whole set by tag in Candidates and assign it a campaign.",
         '<label class="fld"><span>Combined list name</span>' +
           '<input id="combineName" type="text" value="' + esc(defName) + '" /></label>' +
         '<div class="muted" style="font-size:12.5px;margin:6px 0 2px">' +
@@ -10895,6 +10902,7 @@
               var d = r.data || {};
               toast('Combined ' + (d.sources || chosen.length) + ' lists into "' + nm + '": ' + (d.total || 0) + ' unique candidates' +
                 (d.overlap ? (', ' + d.overlap + ' duplicates merged') : '') +
+                (d.autoSend ? ('. Sending to Candidates + OS Text now, tagged "' + nm + '": filter by that tag in Candidates to assign a campaign') : '') +
                 ((d.keptBusy && d.keptBusy.length) ? ('. Kept "' + d.keptBusy.join('", "') + '" (enrichment still running there)') : '') + '.');
               loadRuns(); syncCombine();
             }).catch(function () {
@@ -13468,10 +13476,14 @@
         }).join("");
         api("/vetting/optimizer?deskId=" + encodeURIComponent(vt.deskId)).then(function (o) {
           var desk = desks.filter(function (d) { return d.id === vt.deskId; })[0] || {};
-          body.innerHTML =
-            optHeaderCard(o, opts, desk) +
-            optVoiceCard(o) + optTurnCard(o) + optRunCard(o) + optHistoryCard(o);
-          wireOptimizer(body, o);
+          // Question intelligence loads alongside; a hiccup there never blanks the tab.
+          api("/vetting/qa?deskId=" + encodeURIComponent(vt.deskId)).catch(function () { return null; }).then(function (qa) {
+            body.innerHTML =
+              optHeaderCard(o, opts, desk) +
+              optVoiceCard(o) + optTurnCard(o) + optRunCard(o) + optQACard(qa) + optHistoryCard(o);
+            wireOptimizer(body, o);
+            wireQA(body, qa);
+          });
         }).catch(function () { body.innerHTML = needsSetup(); });
       }).catch(function () { body.innerHTML = needsSetup(); });
     }
@@ -13643,6 +13655,168 @@
         '<label class="vt-must"><input type="checkbox" id="vtAutoLearn"' + (l.autoLearn ? " checked" : "") + ' /><span>Learn and improve automatically</span></label>' +
         '<select id="vtCadence">' + cad + "</select>" +
         '<span class="vt-hint">' + esc(status) + " With this on, every cadence of scored calls triggers an optimizer pass that applies itself and updates the live agent, all versioned and reversible below.</span></div></div>";
+    }
+
+    /* ---- question intelligence: what candidates ask + the self-learning FAQ ----
+       Talks to /api/vetting/qa. Every call, the candidate's questions are
+       harvested and clustered by topic; the ones the agent had to defer show up
+       here with a JD-grounded draft (or a "needs your answer" slot). Teaching an
+       answer pushes it into the live agent's facts, and the candidates who asked
+       get it texted back from the desk's own number. */
+    function optQACard(qa) {
+      var inner;
+      if (!qa) {
+        inner = '<div class="vt-hint" style="margin-top:8px">Question intelligence didn’t load. Refresh the tab to try again.</div>';
+        return '<div class="vt-card">' + cardHead("help", "Candidate questions", "What candidates ask on calls, and what the agent learns to answer.") + inner + "</div>";
+      }
+      var cov = qa.coverage || {};
+      var st = qa.settings || {};
+      var clusters = qa.clusters || [];
+      var open = clusters.filter(function (c) { return c.status === "open"; });
+      var gaps = open.filter(function (c) { return c.deferredCount > 0 || c.answeredCount === 0; });
+      var covered = open.filter(function (c) { return gaps.indexOf(c) < 0; });
+      var taught = clusters.filter(function (c) { return c.status === "approved"; });
+
+      var kpis =
+        '<div class="vt-kpi"><b>' + (cov.asked || 0) + "</b><span>questions asked</span></div>" +
+        '<div class="vt-kpi"><b>' + (cov.answeredPct != null ? cov.answeredPct + "%" : "–") + "</b><span>answered on the spot</span></div>" +
+        '<div class="vt-kpi"><b>' + (cov.openGaps || 0) + "</b><span>open gaps</span></div>" +
+        '<div class="vt-kpi"><b>' + (cov.taught || 0) + "</b><span>answers taught</span></div>" +
+        '<div class="vt-kpi"><b>' + (cov.textedBack || 0) + "</b><span>answers texted back</span></div>";
+
+      function askersDue(c) {
+        return (c.asks || []).filter(function (a) { return a.phone && !a.answerTextedAt; }).length;
+      }
+      function gapRow(c) {
+        var mix = [];
+        if (c.answeredCount) mix.push("answered on the spot " + c.answeredCount + "x");
+        if (c.deferredCount) mix.push("had to defer " + c.deferredCount + "x");
+        var grounded = !!(c.draftGrounded && c.draftAnswer);
+        var badge = grounded
+          ? '<span class="vt-pill live">drafted from the JD</span>'
+          : (c.draftedAt ? '<span class="vt-pill draft">needs your answer</span>' : '<span class="vt-pill draft">no draft yet</span>');
+        var due = askersDue(c);
+        var textRow = due
+          ? '<label class="vt-must" style="margin-top:8px"><input type="checkbox" data-vtqatext="' + c.id + '"' + (st.textBack ? " checked" : "") + ' /><span>Text the answer to the ' + due + " candidate" + (due === 1 ? "" : "s") + " who asked</span></label>"
+          : "";
+        return '<div class="vt-sim' + (grounded ? "" : " vt-sim-fail") + '" data-vtqarow="' + c.id + '">' +
+          '<div class="vt-sim-h"><b>' + esc(c.topic) + "</b>" + badge +
+          '<span class="vt-sim-real">asked ' + c.askCount + "x · last " + fmtDate(c.lastAskedAt) + "</span></div>" +
+          '<div class="vt-hint">“' + esc(c.canonicalQuestion) + "”" + (mix.length ? " · " + mix.join(", ") : "") + "</div>" +
+          '<div class="vt-field" style="margin-top:8px"><textarea rows="2" data-vtqaans="' + c.id + '" placeholder="Write the answer the way you’d say it on the phone.">' + esc(c.draftAnswer || "") + "</textarea></div>" +
+          textRow +
+          '<div style="margin-top:8px"><button class="vt-btn vt-btn-primary" data-vtqateach="' + c.id + '">Teach the agent</button> ' +
+          '<button class="vt-btn vt-btn-ghost" data-vtqadismiss="' + c.id + '">Dismiss</button></div></div>';
+      }
+      var gapsHtml = gaps.length
+        ? '<div class="vt-rev-h" style="margin-top:14px"><b>Gaps to close</b><span>' + gaps.length + " topic" + (gaps.length === 1 ? "" : "s") + " candidates asked that the agent couldn’t answer</span></div>" + gaps.map(gapRow).join("")
+        : '<div class="vt-hint" style="margin-top:12px">No open gaps. Every question candidates have asked, the agent could answer.</div>';
+
+      var coveredHtml = covered.length
+        ? '<details class="vt-rev-notes" style="margin-top:10px"><summary>Answered on the spot (' + covered.length + " topics)</summary>" +
+          covered.map(function (c) {
+            return '<div class="vt-hint" style="margin-top:6px"><b>' + esc(c.topic) + "</b> · asked " + c.askCount + "x · “" + esc(c.canonicalQuestion) + "”</div>";
+          }).join("") + "</details>"
+        : "";
+      var taughtHtml = taught.length
+        ? '<details class="vt-rev-notes" style="margin-top:10px"><summary>Taught to the agent (' + taught.length + ")</summary>" +
+          taught.map(function (c) {
+            var texted = (c.asks || []).filter(function (a) { return a.answerTextedAt; }).length;
+            return '<div class="vt-hint" style="margin-top:6px"><b>' + esc(c.topic) + "</b>: " + esc(c.approvedAnswer || "") + (texted ? " · texted back to " + texted : "") + "</div>";
+          }).join("") + "</details>"
+        : "";
+
+      var actions =
+        '<div class="vt-actions" style="border-top:0;padding-top:0;margin-top:12px">' +
+        '<button class="vt-btn" id="vtQaScan"><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg> Scan recent calls</button>' +
+        (gaps.some(function (c) { return !c.draftedAt; }) ? '<button class="vt-btn" id="vtQaDraft"><svg class="isvg" aria-hidden="true"><use href="#i-bulb"/></svg> Draft answers from the JD</button>' : "") +
+        "</div>";
+
+      var settings =
+        '<div class="vt-learnrow" style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px">' +
+        '<label class="vt-must"><input type="checkbox" id="vtQaAutoTeach"' + (st.autoTeach ? " checked" : "") + ' /><span>Teach itself automatically</span></label>' +
+        '<label class="vt-must"><input type="checkbox" id="vtQaTextBack"' + (st.textBack ? " checked" : "") + ' /><span>Text answers back by default</span></label>' +
+        '<span class="vt-hint">Auto-teach only ever uses answers grounded in the job description, never a guess. Anything the JD can’t answer still waits for you here.</span></div>';
+
+      inner =
+        '<div class="vt-hint" style="margin-top:6px">Every call, the questions candidates ask are logged and clustered. The ones the agent couldn’t answer become drafts below: approve one and the agent knows it on the very next call, and the candidates who asked get the answer texted from this desk’s number. The agent never invents an answer; this is how it earns the ones it doesn’t have.</div>' +
+        '<div class="vt-health" style="margin-top:10px">' + kpis + "</div>" +
+        gapsHtml + coveredHtml + taughtHtml + actions + settings;
+      return '<div class="vt-card">' + cardHead("help", "Candidate questions", "What candidates ask, and what the agent learns to answer.") + inner + "</div>";
+    }
+
+    function wireQA(body, qa) {
+      if (!qa) return;
+      function repaint() { paintOptimizer(body); }
+
+      function saveQaSettings() {
+        send("/vetting/qa", "POST", {
+          action: "settings", deskId: vt.deskId,
+          autoTeach: !!($("#vtQaAutoTeach") && $("#vtQaAutoTeach").checked),
+          textBack: !!($("#vtQaTextBack") && $("#vtQaTextBack").checked)
+        }).then(function (r) {
+          if (!r.ok) { toast("Save failed"); return; }
+          toast(($("#vtQaAutoTeach") && $("#vtQaAutoTeach").checked) ? "The agent will teach itself grounded answers" : "Answers wait for your approval");
+        });
+      }
+      if ($("#vtQaAutoTeach")) $("#vtQaAutoTeach").addEventListener("change", saveQaSettings);
+      if ($("#vtQaTextBack")) $("#vtQaTextBack").addEventListener("change", saveQaSettings);
+
+      function busyButton(btn, label, payload, doneMsg) {
+        if (!btn) return;
+        btn.addEventListener("click", function () {
+          var idle = btn.innerHTML;
+          btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> ' + label;
+          send("/vetting/qa", "POST", payload).then(function (r) {
+            btn.disabled = false; btn.innerHTML = idle;
+            if (!r.ok) {
+              var d = (r.data && r.data.detail) || "";
+              toast(d.indexOf("anthropic") >= 0 ? "Set ANTHROPIC_API_KEY on the server first." : "That didn’t work.");
+              return;
+            }
+            if (doneMsg) toast(doneMsg(r.data || {}));
+            repaint();
+          }).catch(function () { btn.disabled = false; btn.innerHTML = idle; toast("Couldn’t reach the server."); });
+        });
+      }
+      busyButton($("#vtQaScan"), "Scanning…", { action: "harvest", deskId: vt.deskId }, function (d) {
+        return d.processed ? "Scanned " + d.processed + " call" + (d.processed === 1 ? "" : "s") + " for questions" : "No new calls to scan";
+      });
+      busyButton($("#vtQaDraft"), "Drafting…", { action: "draft", deskId: vt.deskId }, function (d) {
+        return d.drafted ? "Drafted " + d.drafted + " answer" + (d.drafted === 1 ? "" : "s") + " from the JD" : "Nothing the JD could answer; write those ones in";
+      });
+
+      Array.prototype.forEach.call(body.querySelectorAll("[data-vtqateach]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var id = btn.getAttribute("data-vtqateach");
+          var ta = body.querySelector('[data-vtqaans="' + id + '"]');
+          var answer = ta ? ta.value.trim() : "";
+          if (!answer) { toast("Write the answer first."); if (ta) ta.focus(); return; }
+          var tb = body.querySelector('[data-vtqatext="' + id + '"]');
+          var idle = btn.innerHTML;
+          btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Teaching…';
+          send("/vetting/qa", "POST", {
+            action: "teach", deskId: vt.deskId, clusterId: id, answer: answer,
+            textBack: tb ? !!tb.checked : undefined
+          }).then(function (r) {
+            btn.disabled = false; btn.innerHTML = idle;
+            if (!r.ok) {
+              var d = (r.data && r.data.error) || "";
+              toast(d === "faq_full" ? "The role FAQ is full. Trim a fact on the desk first." : "That didn’t work.");
+              return;
+            }
+            var dd = r.data || {};
+            toast("Taught." + (dd.pushed ? " The live agent knows it now." : "") + (dd.texted ? " Texted back to " + dd.texted + "." : ""));
+            repaint();
+          }).catch(function () { btn.disabled = false; btn.innerHTML = idle; toast("Couldn’t reach the server."); });
+        });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-vtqadismiss]"), function (btn) {
+        btn.addEventListener("click", function () {
+          send("/vetting/qa", "POST", { action: "dismiss", deskId: vt.deskId, clusterId: btn.getAttribute("data-vtqadismiss") })
+            .then(function (r) { if (r.ok) { toast("Dismissed"); repaint(); } else toast("That didn’t work."); });
+        });
+      });
     }
 
     function revisionCard(r, isProposal) {

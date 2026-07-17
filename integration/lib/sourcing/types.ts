@@ -198,6 +198,19 @@ export interface SourcingRun {
     /** Last failure (kept for ops visibility); cleared on a clean send. */
     error?: string;
   };
+  /**
+   * Skip the settle/idle waits: auto-send this run on the very next sweep (and the
+   * merge handler fires one immediately in-request). Set on runs born finished,
+   * e.g. a "Combine lists" merge of already-enriched lists.
+   */
+  sendAsap?: boolean;
+  /**
+   * Source run ids this run was combined from (the "Combine lists" merge).
+   * Presence marks a combined master list: its promote retags every person it
+   * holds (even ones already in the pipeline from the source lists) with the
+   * combined list's name, so the whole set is pullable by one tag in Candidates.
+   */
+  combinedFrom?: string[];
   warnings: string[];
   createdAt: string;
   updatedAt: string;

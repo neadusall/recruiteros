@@ -81,7 +81,9 @@ export async function POST(req: Request) {
       return fail(e?.message ?? "verify_failed", e?.status ?? 400);
     }
   }
-  // Bulk patch selected prospects: set status and/or assign a saved sequence.
+  // Bulk patch selected prospects: set status, assign a saved sequence, and/or move
+  // them into a campaign (the Candidates tab's "+ Add to campaign" on pipeline rows,
+  // e.g. after filtering by a combined list's tag).
   if (b?.action === "bulk-update" && Array.isArray(b.ids)) {
     const core = getCore();
     let updated = 0;
@@ -89,6 +91,7 @@ export async function POST(req: Request) {
       const p = await core.getProspect(id);
       if (!p || p.workspaceId !== ws) continue;
       if (b.status) p.status = b.status;
+      if (typeof b.campaignId === "string" && b.campaignId) p.campaignId = b.campaignId;
       if (b.sequenceId !== undefined) {
         (p as any).sequenceId = b.sequenceId || undefined;
         (p as any).sequenceName = b.sequenceName || undefined;
