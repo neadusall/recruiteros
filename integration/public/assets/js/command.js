@@ -3705,6 +3705,7 @@
           '<label class="hs-field hs-grow"><span class="hs-fic" id="hsFic"><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg></span><input id="imqQuery" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Job title (e.g. controller, registered nurse, backend engineer)" /></label>' +
           '<label class="hs-field hs-loc"><span class="hs-fic"><svg class="isvg" aria-hidden="true"><use href="#i-pin"/></svg></span><input id="imqLoc" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Location (blank = nationwide)" /></label>' +
           '<button type="submit" class="btn btn-primary hs-go" id="imqAdd">Search <span class="hs-arrow">→</span></button>' +
+          '<button type="button" class="btn hs-watch" id="imqWatchBtn" data-act="watchadd" title="Poll this search every 15 min and auto-run the whole pipeline on new hits">Watch</button>' +
         "</form>" +
         // Company-size narrow (multi-select bands). Resolved free via Wikidata + heuristic.
         '<div class="hs-sizes">' +
@@ -3715,6 +3716,29 @@
           '<button type="button" class="hs-clear" data-act="sizeclear">Clear</button>' +
         "</div>" +
         '<div id="imqPreview" class="imq-preview hs-preview"></div>' +
+        '<div id="imqWatch" class="wl-wrap"></div>' +
+        '<style>' +
+          '.wl-wrap{margin-top:14px}' +
+          '.wl-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}' +
+          '.wl-h{font-weight:600;font-size:13px}' +
+          '.wl-budget{font-size:12px;color:var(--muted,#6b7280)}' +
+          '.wl-empty{font-size:13px;color:var(--muted,#6b7280);line-height:1.5;background:var(--surface,#f8fafc);border:1px solid var(--border,#e5e7eb);border-radius:10px;padding:12px}' +
+          '.wl-list{display:flex;flex-direction:column;gap:8px}' +
+          '.wl-row{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:10px;background:var(--card,#fff)}' +
+          '.wl-row.off{opacity:.55}' +
+          '.wl-main{flex:1;min-width:0}' +
+          '.wl-name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+          '.wl-q{font-size:12px;color:var(--muted,#6b7280);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+          '.wl-stats{display:flex;gap:12px;font-size:12px;color:var(--muted,#6b7280);white-space:nowrap}' +
+          '.wl-when{opacity:.8}' +
+          '.wl-err{color:#b45309}' +
+          '.wl-acts{display:flex;gap:6px}' +
+          '.wl-btn{font-size:12px;padding:4px 9px;border:1px solid var(--border,#e5e7eb);border-radius:7px;background:var(--surface,#f8fafc);cursor:pointer;color:var(--text,#111)}' +
+          '.wl-btn:hover{border-color:var(--brand,#2e5bd7)}' +
+          '.wl-del{color:#b91c1c}' +
+          '.hs-watch{background:var(--surface,#f1f5f9);border:1px solid var(--border,#e5e7eb);color:var(--text,#111)}' +
+          '@media (max-width:640px){.wl-stats{display:none}}' +
+        '</style>' +
       "</div>";
 
     // Selected company-size bands for the builder (multi-select). Reflected on the .imq-size chips.
@@ -3883,6 +3907,78 @@
       }).catch(function () { if (btn) { btn.disabled = false; } toast("Couldn’t pull those right now. Try again."); });
     }
 
+    // SIGNAL WATCHLISTS: turn the authored search into a standing watch. Once saved, the server
+    // polls it every 15 min and auto-runs the whole pipeline on new hits (enrich 3 contacts ->
+    // Clients -> first email + PiP video -> Send Queue), hands-free. This strip shows the live stats.
+    var imqWatch = null;
+    function relWhen(iso) {
+      if (!iso) return "not yet";
+      var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+      if (s < 90) return "just now";
+      if (s < 3600) return Math.round(s / 60) + "m ago";
+      if (s < 86400) return Math.round(s / 3600) + "h ago";
+      return Math.round(s / 86400) + "d ago";
+    }
+    function loadWatch() {
+      send("/signals/watch", "GET").then(function (r) {
+        if (r && r.ok) { imqWatch = r.data || {}; renderWatch(); }
+      }).catch(function () {});
+    }
+    function renderWatch() {
+      var el = host.querySelector("#imqWatch"); if (!el) return;
+      var d = imqWatch || {}, lists = d.watchlists || [], b = d.budget || null;
+      var head = '<div class="wl-head"><span class="wl-h">Watching ' + lists.length + '</span>' +
+        (b ? '<span class="wl-budget">' + b.remaining + '/' + b.cap + ' feed pulls left today</span>' : '') + '</div>';
+      if (d.feedEnabled === false) {
+        el.innerHTML = head + '<div class="wl-empty">Job feed isn’t connected yet. Add your JSearch key to <b>RAPID_JOBS_KEY</b> + <b>RAPID_JOBS_HOST</b>, then watches will start polling.</div>';
+        return;
+      }
+      if (!lists.length) {
+        el.innerHTML = head + '<div class="wl-empty">No standing watches yet. Author a search above and press <b>Watch</b>: it polls every 15 min and auto-runs the whole pipeline (Clients, emails, Send Queue) on new hits, so you reach out as roles post.</div>';
+        return;
+      }
+      var rows = lists.map(function (w) {
+        var s = w.stats || {};
+        var sub = (w.query || "") + (w.industry ? (w.query ? " " : "") + w.industry : "") + (w.location ? " · " + w.location : "");
+        var stat = s.lastError
+          ? '<span class="wl-err" title="' + esc(s.lastError) + '">needs attention</span>'
+          : '<span title="new companies actioned">' + (s.totalFresh || 0) + ' new</span><span title="contacts curated">' + (s.totalContactable || 0) + ' contacts</span>';
+        return '<div class="wl-row' + (w.active ? '' : ' off') + '">' +
+            '<div class="wl-main"><div class="wl-name">' + esc(w.name) + '</div><div class="wl-q">' + esc(sub || 'all roles') + '</div></div>' +
+            '<div class="wl-stats">' + stat + '<span class="wl-when">' + relWhen(w.lastPolledAt) + '</span></div>' +
+            '<div class="wl-acts">' +
+              '<button type="button" class="wl-btn" data-act="watchrun" data-id="' + esc(w.id) + '" title="Poll now">Run</button>' +
+              '<button type="button" class="wl-btn" data-act="watchtoggle" data-id="' + esc(w.id) + '">' + (w.active ? 'Pause' : 'Resume') + '</button>' +
+              '<button type="button" class="wl-btn wl-del" data-act="watchdel" data-id="' + esc(w.id) + '" title="Delete">✕</button>' +
+            '</div>' +
+          '</div>';
+      }).join("");
+      el.innerHTML = head + '<div class="wl-list">' + rows + '</div>';
+    }
+    function watchAdd() {
+      var s = imqGather(), term = s.query || s.industry;
+      if (!term) { toast("Type a job title or industry to watch first."); return; }
+      var name = term + (s.location ? " · " + s.location : "");
+      var wl = {
+        name: name, query: s.query || "", industry: s.industry || "", location: s.location || "",
+        remoteOnly: !!s.remoteOnly, employmentTypes: s.employmentTypes || [],
+        datePosted: "today", everyMinutes: 15, limit: 30
+      };
+      send("/signals/watch", "POST", { action: "save", watchlist: wl }).then(function (r) {
+        if (r && r.ok) { toast("Now watching “" + term + "”. New hits work themselves automatically."); loadWatch(); }
+        else { toast("Couldn’t start that watch. Try again."); }
+      }).catch(function () { toast("Couldn’t start that watch. Try again."); });
+    }
+    function watchToggle(id, active) { send("/signals/watch", "POST", { action: "toggle", id: id, active: active }).then(function (r) { if (r && r.ok) loadWatch(); }); }
+    function watchDel(id) { send("/signals/watch", "POST", { action: "delete", id: id }).then(function (r) { if (r && r.ok) loadWatch(); }); }
+    function watchRun(id) {
+      toast("Polling now…");
+      send("/signals/watch", "POST", { action: "run", id: id }).then(function (r) {
+        if (r && r.ok) { var o = (r.data && r.data.outcome) || {}; toast(o.fresh ? o.fresh + " new company(ies) found and queued" : "No new hits this run"); loadWatch(); }
+        else toast("Couldn’t poll that watch right now.");
+      }).catch(function () { toast("Couldn’t poll that watch right now."); });
+    }
+
     // Submit → run the search immediately (no save step) and show the company pick-list.
     host.querySelector("#imqForm").addEventListener("submit", function (e) {
       e.preventDefault();
@@ -3905,6 +4001,10 @@
       else if (act === "pvselall") imqSelect("all");
       else if (act === "pvselpool") imqSelect("pool");
       else if (act === "pvselnone") imqSelect("none");
+      else if (act === "watchadd") watchAdd();
+      else if (act === "watchrun") watchRun(t.getAttribute("data-id"));
+      else if (act === "watchtoggle") watchToggle(t.getAttribute("data-id"), t.textContent.trim() === "Resume");
+      else if (act === "watchdel") watchDel(t.getAttribute("data-id"));
     });
     // Delegated changes for the preview checkboxes (toggle one / select all).
     host.addEventListener("change", function (e) {
@@ -3914,6 +4014,7 @@
       else if (act === "pvall") { var on = t.checked, leads = imQPreview.leads || []; for (var i = 0; i < leads.length; i++) imQPreview.picks[i] = on; imqRenderPreview(); }
     });
     applyMode();
+    loadWatch();
   }
 
   // Portal-grade styling for the Hire Signals search + company pick-list. Kept inline (not in
