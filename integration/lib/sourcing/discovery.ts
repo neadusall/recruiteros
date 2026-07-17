@@ -918,6 +918,21 @@ export async function runDiscovery(
 
   if (geoDropped && !rescued) {
     warnings.push(`${geoDropped} matching people outside the target area were left out to keep this run geo-only (turn on "Also list out-of-area (separate list)" in Advanced controls to see them next run)`);
+    // The filter ate most of the run: show WHERE the dropped people actually are, so
+    // a misspelled or too-narrow City & state is visible instead of a silent thin
+    // list (a one-letter typo once geo-dropped an entire metro's worth of matches).
+    if (geoDropped >= 10 && geoDropped > inList.length * 2) {
+      const counts = new Map<string, number>();
+      for (const r of geoBuffer) {
+        const loc = (r.location || "").trim();
+        if (loc) counts.set(loc, (counts.get(loc) ?? 0) + 1);
+      }
+      const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+        .map(([loc, n]) => `${loc} (${n})`).join(", ");
+      if (top) {
+        warnings.push(`Heads up: the location filter removed far more people than it kept. The dropped people mostly state: ${top}. If your City & state box is misspelled or too narrow, fix it and re-run; the search itself was fine.`);
+      }
+    }
   }
   if (keepOut && outList.length && !rescued) {
     warnings.push(

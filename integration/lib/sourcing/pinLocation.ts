@@ -33,6 +33,24 @@ export function pinIcpLocation(icp: CandidateICP, location?: string): CandidateI
     if (STATE_ABBREV[part]) tokens.push(STATE_ABBREV[part]);            // "new york" -> also "ny"
     const full = Object.keys(STATE_ABBREV).find((k) => STATE_ABBREV[k] === part);
     if (full) tokens.push(full);                                        // "ny" -> also "new york"
+    // Comma-less "City ST" / "City Statename": recruiters often type "Garfield
+    // Heights OH". Without splitting off the trailing state, the whole string was
+    // one unmatchable token, every same-state metro the parse suggested got
+    // filtered out, and the pinned geo list collapsed to just the typed string.
+    const words = part.split(/\s+/);
+    const abbrevOf = (t: string) =>
+      STATE_ABBREV[t] ? STATE_ABBREV[t] : Object.values(STATE_ABBREV).includes(t) ? t : null;
+    const tail2 = words.slice(-2).join(" ");
+    const tail1 = words[words.length - 1];
+    const tail = words.length > 2 && abbrevOf(tail2) ? tail2 : words.length > 1 && abbrevOf(tail1) ? tail1 : null;
+    if (tail) {
+      const ab = abbrevOf(tail)!;
+      const city = part.slice(0, part.length - tail.length).trim();
+      if (city.length > 1) tokens.push(city);
+      tokens.push(ab);
+      const fullName = Object.keys(STATE_ABBREV).find((k) => STATE_ABBREV[k] === ab);
+      if (fullName) tokens.push(fullName);
+    }
   }
   const local = (icp.geos || []).filter((g) => {
     const gn = " " + g.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";

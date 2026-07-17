@@ -57,7 +57,86 @@ export const US_STATE_FULL: Record<string, string> = {
   wv: "west virginia", wi: "wisconsin", wy: "wyoming",
 };
 function expandUsStateAbbrevs(text: string): string {
-  return text.replace(/,\s*([a-z]{2})\b/g, (m, ab: string) => (US_STATE_FULL[ab] ? ", " + US_STATE_FULL[ab] + " " + ab : m));
+  const expanded = text.replace(/,\s*([a-z]{2})\b/g, (m, ab: string) => (US_STATE_FULL[ab] ? ", " + US_STATE_FULL[ab] + " " + ab : m));
+  // Comma-less "Garfield Heights OH": a bare trailing state abbrev is a state too.
+  // End-of-string only (prose words like "or"/"in"/"me" are never touched mid-text)
+  // and only when there is no comma, else "Yark, NY" would expand twice and the
+  // doubled "new york new york" invents a phantom "York" city to match against.
+  if (expanded.includes(",")) return expanded;
+  return expanded.replace(/(\s)([a-z]{2})$/, (m, sp: string, ab: string) => (US_STATE_FULL[ab] ? sp + US_STATE_FULL[ab] + " " + ab : m));
+}
+
+/* --- City-core + typo tolerance for the geo gate ---------------------------- */
+
+/** State names longest-first so "west virginia" wins before "virginia". */
+const STATE_NAMES_BY_LENGTH: Array<[string, string]> = Object.entries(US_STATE_FULL)
+  .map(([ab, name]) => [name, ab] as [string, string])
+  .sort((a, b) => b[0].length - a[0].length);
+
+/** The US state a location text names, as an abbrev, or null if none/ambiguous-free. */
+function usStateOf(text: string): string | null {
+  for (const [name, ab] of STATE_NAMES_BY_LENGTH) {
+    if (phraseHit(text, name) || phraseHit(text, ab)) return ab;
+  }
+  return null;
+}
+
+/**
+ * The bare city phrase of a location: the part before the first comma, minus
+ * trailing country/state words and a leading "greater". "Garfield Heights OH" and
+ * "Garfield Heights, Ohio, United States" both reduce to "garfield heights".
+ */
+function cityCore(text: string): string {
+  let w = tokens(text.split(",")[0]);
+  if (w[0] === "greater") w = w.slice(1);
+  const dropTail = (n: number) => { w = w.slice(0, w.length - n); };
+  for (let pass = 0; pass < 3 && w.length; pass++) {
+    const one = w[w.length - 1];
+    const two = w.slice(-2).join(" ");
+    if (one === "usa" || one === "us") { dropTail(1); continue; }
+    if (two === "united states") { dropTail(2); continue; }
+    if (US_STATE_FULL[one]) { dropTail(1); continue; } // trailing abbrev: "oh"
+    if (STATE_NAMES_BY_LENGTH.some(([name]) => name === two)) { dropTail(2); continue; }
+    if (STATE_NAMES_BY_LENGTH.some(([name]) => name === one)) { dropTail(1); continue; }
+    break;
+  }
+  return w.join(" ");
+}
+
+/** True when a and b are within ONE typo edit (insert/delete/substitute). */
+function withinOneEdit(a: string, b: string): boolean {
+  if (a === b) return true;
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  let i = 0, j = 0, edits = 0;
+  while (i < la && j < lb) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (la > lb) i++;
+    else if (lb > la) j++;
+    else { i++; j++; }
+  }
+  return edits + (la - i) + (lb - j) <= 1;
+}
+
+/**
+ * Typo-tolerant city-name equality: same word count, at most ONE word off by ONE
+ * edit, and only for words long enough (5+ chars) that a single edit still reads
+ * as the same place ("gairfield" ~ "garfield"). Short words must match exactly so
+ * "york" never fuzzes into "fork".
+ */
+function fuzzyCityEq(a: string, b: string): boolean {
+  const wa = a.split(" ").filter(Boolean);
+  const wb = b.split(" ").filter(Boolean);
+  if (!wa.length || wa.length !== wb.length) return false;
+  let fuzzed = 0;
+  for (let k = 0; k < wa.length; k++) {
+    if (wa[k] === wb[k]) continue;
+    if (Math.min(wa[k].length, wb[k].length) < 5) return false;
+    if (!withinOneEdit(wa[k], wb[k])) return false;
+    fuzzed++;
+  }
+  return fuzzed === 1;
 }
 
 /**
@@ -84,6 +163,25 @@ export function inTargetGeo(location: string | undefined, geos: string[]): boole
     const gCity = tokens(g.split(",")[0]).join(" ");
     if (gCity && phraseHit(locText, gCity)) return true;
     if (locCity && phraseHit(g, locCity)) return true;
+  }
+  // City-core pass: the same comparison with state/country words stripped, so a
+  // comma-less pin ("Garfield Heights OH") still matches "Garfield Heights, Ohio",
+  // plus a one-typo tolerance ("Gairfield" ~ "Garfield") gated on state agreement.
+  // A typo in the recruiter's City & state box used to silently geo-drop every
+  // real local, burning search credits on rows the filter then discarded.
+  const locCore = cityCore(locText);
+  const locState = usStateOf(locText);
+  for (const g of expandedGeos) {
+    const gCore = cityCore(g);
+    if (!gCore || !locCore) continue;
+    // Core-vs-core only: comparing a core against the full text would false-hit
+    // the expanded state name ("York" inside "New York").
+    if (phraseHit(locCore, gCore) || phraseHit(gCore, locCore)) return true;
+    // Fuzzy is the riskiest rung, so it also requires the states (when both sides
+    // name one) to agree: Springfield IL never fuzz-matches Springfield MO.
+    const gState = usStateOf(g);
+    if (locState && gState && locState !== gState) continue;
+    if (fuzzyCityEq(locCore, gCore)) return true;
   }
   return false;
 }
