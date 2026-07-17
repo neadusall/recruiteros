@@ -144,6 +144,21 @@ export interface Reputation {
 
 export type MailboxStatus = "warming" | "active" | "paused";
 
+/**
+ * External warm-up health for a mailbox. Warm-up is the one job we hand to
+ * Smartlead.ai; this snapshot is mirrored back onto the mailbox by the Smartlead
+ * bridge (lib/sending/smartlead.ts) so the console shows warm-up as a live vital
+ * alongside our own sending metrics. Everything else stays local.
+ */
+export interface WarmupSnapshot {
+  provider: "smartlead";
+  status: "active" | "paused" | "unknown";
+  reputationPct?: number;   // 0-100 warm-up health / deliverability from the warmer
+  sentTotal?: number;       // lifetime warm-up emails sent
+  spamCount?: number;       // warm-up emails that landed in spam
+  syncedAt: string;         // ISO of the last successful pull
+}
+
 export interface Mailbox {
   id: string;
   workspaceId: string;
@@ -159,6 +174,9 @@ export interface Mailbox {
   sent: number;
   bounced: number;
   complained: number;
+  // External warm-up (Smartlead) — mirrored in, never authoritative for sending.
+  smartleadId?: string;
+  warmup?: WarmupSnapshot;
   createdAt: string;
   updatedAt: string;
 }

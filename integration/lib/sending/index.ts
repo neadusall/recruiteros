@@ -42,6 +42,8 @@ export { refreshReputation, reputationConfigured } from "./reputation";
 export { runSeedTest, recordSeedResult } from "./seedtest";
 export { advanceWarmup, runWarmupRound } from "./warmup";
 export { runEngagement, engagementEnabled, engagementSummary } from "./engagement";
+export { smartleadConfigured, listSmartleadAccounts, syncSmartleadWarmup } from "./smartlead";
+export type { SmartleadAccount, WarmupSyncReport } from "./smartlead";
 export { listWarmupThreads } from "./store";
 export { pickMailbox, serverCapForDay, serverDailyCap, serverHasCapacity } from "./caps";
 export { runSendingDaily } from "./daily";
@@ -50,12 +52,13 @@ export { sendingHealth, domainHealth, mailboxHealth } from "./health";
 export type { SendingHealthSummary, DomainHealthScore, MailboxHealth, ServerHealth, HealthLabel, WarmthLabel } from "./health";
 
 /** One call for the UI: which automations are wired? */
-export function providerStatus(): { dns: boolean; cloud: boolean; snds: boolean; postmaster: boolean; mta: boolean } {
+export function providerStatus(): { dns: boolean; cloud: boolean; snds: boolean; postmaster: boolean; mta: boolean; smartlead: boolean } {
   return {
     dns: !!process.env.HETZNER_DNS_TOKEN,
     cloud: !!process.env.HCLOUD_TOKEN,
     snds: !!process.env.SNDS_KEY,
     postmaster: !!(process.env.POSTMASTER_CLIENT_ID && process.env.POSTMASTER_REFRESH_TOKEN),
     mta: (process.env.SENDING_EMAIL_PROVIDER || "").toLowerCase() === "mta",
+    smartlead: !!(process.env.SMARTLEAD_API_KEY || "").trim(),
   };
 }

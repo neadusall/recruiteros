@@ -28,6 +28,7 @@ import {
   listSuppression, recentEvents, listSeeds, getSeed, addSeed, setSeedVerification, deleteSeed, listSeedTests,
   runSeedTest, runSendingDaily, runGovernor, domainSetup, sendingHealth,
   listWarmupThreads, engagementSummary, engagementEnabled, runEngagement,
+  syncSmartleadWarmup,
   verifySeedLogin, reverifyAllSeeds, readDuePlacements, seedDrivable, encryptionEnabled,
   startAutoSetup, advanceAutoSetup, setupStatus, pauseAutoSetup,
 } from "../../../lib/sending";
@@ -257,6 +258,11 @@ export async function POST(req: Request) {
 
   if (b?.action === "run-engagement") {
     return ok({ report: await runEngagement(ws) });
+  }
+
+  // Pull the latest external warm-up health from Smartlead onto our mailboxes.
+  if (b?.action === "sync-smartlead") {
+    return ok({ report: await syncSmartleadWarmup(ws) });
   }
 
   return fail("unknown_action", 400);

@@ -554,7 +554,21 @@
         '<span style="width:8px;height:8px;border-radius:50%;background:' + (on ? "var(--ok)" : "var(--text-dim)") + '"></span>' + esc(label) + "</span>";
     }
     var busy = false;
+    var liveOn = false;
+    var liveTimer = null;
     view.innerHTML = '<div class="empty">Loading fleet vitals…</div>';
+
+    function stopLive() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
+    function startLive() {
+      stopLive();
+      liveTimer = setInterval(function () {
+        // Stop cleanly if the operator navigated away; never repaint over a route
+        // change or an open modal.
+        if ((location.hash || "").replace("#", "").split("?")[0] !== "mailboxops") { stopLive(); return; }
+        if (busy || document.querySelector(".modal-bg")) return;
+        load();
+      }, 30000);
+    }
 
     function act(payload, okMsg) {
       if (busy) return;
@@ -630,6 +644,14 @@
     function paint(d) {
       function th(t) { return '<th style="text-align:left;padding:8px 10px;font-weight:500">' + esc(t) + "</th>"; }
       function thR(t) { return '<th style="text-align:right;padding:8px 10px;font-weight:500">' + esc(t) + "</th>"; }
+      function warmupCell(m) {
+        if (typeof m.warmupReputationPct === "number") {
+          var k = m.warmupExternalStatus === "paused" ? "warn" : m.warmupReputationPct >= 90 ? "good" : "warn";
+          return chip(m.warmupReputationPct + "%", k) + (m.warmupExternalStatus === "paused" ? ' <span style="color:var(--warn);font-size:11px">paused</span>' : "");
+        }
+        if (m.warmupExternalStatus === "active") return chip("warming", "warn");
+        return '<span style="color:var(--text-dim);font-size:12px">n/a</span>';
+      }
       function protoCol(title, color, items) {
         return '<div><div style="font-size:13px;font-weight:600;color:' + color + ';margin-bottom:8px">' + esc(title) + '</div><ul style="margin:0;padding-left:16px;font-size:12.5px;color:var(--text-muted);line-height:1.6">' + items.map(function (i) { return "<li>" + esc(i) + "</li>"; }).join("") + "</ul></div>";
       }
@@ -638,6 +660,8 @@
         var ad = q("#mbAddDomains"); if (ad) ad.addEventListener("click", addDomains);
         var ea = q("#mbEmptyAdd"); if (ea) ea.addEventListener("click", addDomains);
         var rf = q("#mbRefresh"); if (rf) rf.addEventListener("click", load);
+        var sy = q("#mbSync"); if (sy) sy.addEventListener("click", function () { act({ action: "sync-smartlead" }, "Warm-up health synced from Smartlead"); });
+        var lv = q("#mbLive"); if (lv) lv.addEventListener("click", function () { liveOn = !liveOn; lv.textContent = liveOn ? "Live: on" : "Live: off"; if (liveOn) startLive(); else stopLive(); });
         var gv = q("#mbGovernor"); if (gv) gv.addEventListener("click", function () { act({ action: "run-governor" }, "Safety check complete"); });
         view.querySelectorAll("[data-pause]").forEach(function (b) { b.addEventListener("click", function () { pauseMailbox(b.getAttribute("data-pause"), b.getAttribute("data-addr")); }); });
         view.querySelectorAll("[data-resume]").forEach(function (b) { b.addEventListener("click", function () { resumeMailbox(b.getAttribute("data-resume"), b.getAttribute("data-addr")); }); });
@@ -653,17 +677,46 @@
       (d.domains || []).forEach(function (dm) { domName[dm.id] = dm.domain; });
       var pausedMailboxes = mailboxes.filter(function (m) { return m.paused; }).length;
 
+      // Triage first: compute the ranked list of things that need the operator.
+      var alerts = [];
+      if (!prov.mta) alerts.push(["info", "Sending stack configured but no live MTA yet. Connect Postal to send for real."]);
+      if (!prov.smartlead) alerts.push(["info", "Smartlead warm-up not connected. Add SMARTLEAD_API_KEY to pull warm-up health onto the fleet."]);
+      domains.forEach(function (dm) {
+        if (dm.status === "paused") alerts.push(["bad", "Domain " + dm.domain + " is paused: " + ((dm.warnings || [])[0] || dm.pausedReason || "governor")]);
+        else if (dm.healthLabel === "at_risk") alerts.push(["bad", "Domain " + dm.domain + " at risk: " + ((dm.warnings || []).join("; ") || "health low")]);
+        else if ((dm.complaintRatePct || 0) > 0.1) alerts.push(["bad", "Domain " + dm.domain + " complaints " + dm.complaintRatePct + "% over the 0.1% ceiling"]);
+        else if ((dm.bounceRatePct || 0) > 2) alerts.push(["warn", "Domain " + dm.domain + " bounce " + dm.bounceRatePct + "% approaching the limit"]);
+      });
+      mailboxes.forEach(function (m) {
+        if (m.paused) alerts.push(["warn", "Mailbox " + m.address + " paused" + (m.pausedReason ? ": " + m.pausedReason : "")]);
+        else if (m.warmupExternalStatus === "paused") alerts.push(["warn", "Warm-up paused on " + m.address + " (Smartlead)"]);
+        else if (typeof m.warmupReputationPct === "number" && m.warmupReputationPct < 90) alerts.push(["warn", "Low warm-up reputation on " + m.address + ": " + m.warmupReputationPct + "%"]);
+      });
+      var sevRank = { bad: 0, warn: 1, info: 2 };
+      alerts.sort(function (a, b) { return sevRank[a[0]] - sevRank[b[0]]; });
+
       var html = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">' +
         '<button class="btn btn-primary btn-sm" id="mbAddDomains">Add domains</button>' +
+        '<button class="btn btn-ghost btn-sm" id="mbSync">Sync warm-up</button>' +
         '<button class="btn btn-ghost btn-sm" id="mbGovernor">Run safety check</button>' +
         '<button class="btn btn-ghost btn-sm" id="mbRefresh">Refresh</button>' +
+        '<button class="btn btn-ghost btn-sm" id="mbLive">' + (liveOn ? "Live: on" : "Live: off") + "</button>" +
         '<span style="flex:1"></span>' +
-        provChip("MTA / Postal", prov.mta) + provChip("DNS", prov.dns) + provChip("Cloud", prov.cloud) + provChip("SNDS", prov.snds) + provChip("Postmaster", prov.postmaster) +
+        provChip("Smartlead warm-up", prov.smartlead) + provChip("MTA / Postal", prov.mta) + provChip("DNS", prov.dns) + provChip("SNDS", prov.snds) + provChip("Postmaster", prov.postmaster) +
         "</div>";
 
-      if (!prov.mta) {
-        html += '<div style="border:1px solid var(--warn-bg);border-left:3px solid var(--warn);background:var(--warn-bg);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:var(--text-muted)">' +
-          '<b style="color:var(--text)">Sending stack is configured but not live yet.</b> Connect a Postal MTA (a server plus its API key) to send for real. Fleet vitals, warm-up, and the pause/revive controls all work now; actual delivery turns on once the MTA is set.</div>';
+      if (alerts.length) {
+        var worst = alerts[0][0];
+        var bcol = worst === "bad" ? "var(--danger)" : worst === "warn" ? "var(--warn)" : "var(--info)";
+        var rows = alerts.slice(0, 6).map(function (a) {
+          var col = a[0] === "bad" ? "var(--danger)" : a[0] === "warn" ? "var(--warn)" : "var(--info)";
+          return '<div style="display:flex;gap:9px;align-items:flex-start;padding:5px 0;font-size:13px;color:var(--text-muted)"><span style="width:8px;height:8px;border-radius:50%;background:' + col + ';margin-top:5px;flex:none"></span><span>' + esc(a[1]) + "</span></div>";
+        }).join("");
+        html += '<div style="border:1px solid var(--border);border-left:3px solid ' + bcol + ';background:var(--card,var(--surface));border-radius:12px;padding:12px 16px;margin-bottom:16px">' +
+          '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-bottom:5px">Attention needed · ' + alerts.length + "</div>" + rows +
+          (alerts.length > 6 ? '<div style="font-size:12px;color:var(--text-dim);margin-top:4px">and ' + (alerts.length - 6) + " more</div>" : "") + "</div>";
+      } else {
+        html += '<div style="border:1px solid var(--border);border-left:3px solid var(--ok);background:var(--card,var(--surface));border-radius:12px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--text-muted)"><b style="color:var(--ok)">All clear.</b> No domains at risk, no paused mailboxes, warm-up healthy.</div>';
       }
 
       if (!domains.length && !mailboxes.length) {
@@ -684,6 +737,7 @@
         card("Sending capacity today", n(ov.capacityToday), ov.canSend ? "sends available now" : "no capacity", ov.canSend ? "var(--ok)" : "var(--warn)") +
         card("Mailboxes", n(ov.mailboxes), n(ov.activeMailboxes) + " active · " + n(ov.warmingMailboxes) + " warming · " + n(pausedMailboxes) + " paused") +
         card("Domains", n(ov.domains), n(ov.atRiskDomains) + " at risk · " + n(ov.pausedDomains) + " paused", (ov.atRiskDomains || ov.pausedDomains) ? "var(--danger)" : "var(--text)") +
+        card("Warm-up · Smartlead", prov.smartlead ? (n(ov.avgWarmupReputation || 0) + "%") : "off", prov.smartlead ? (n(ov.warmupExternalActive || 0) + " of " + n(ov.mailboxes) + " warming") : "connect Smartlead", prov.smartlead ? ((ov.avgWarmupReputation || 0) >= 90 ? "var(--ok)" : "var(--warn)") : "var(--text-dim)") +
         card("IP warmth", n(ov.ipWarmthScore || 0) + "%", "shared-IP ramp") +
         card("Human open rate", n(ov.humanOpenRatePct || 0) + "%", "machine opens removed") +
         "</div>";
@@ -727,6 +781,7 @@
             '<td style="padding:9px 10px;font-weight:600">' + esc(m.address) + (m.pausedReason ? '<div style="font-size:11px;color:var(--text-dim);font-weight:400">' + esc(m.pausedReason) + "</div>" : "") + "</td>" +
             '<td style="padding:9px 10px;color:var(--text-dim);font-size:12px">' + esc(dom) + "</td>" +
             '<td style="padding:9px 10px">' + chip(m.warmthLabel, m.warmthLabel === "warm" ? "good" : m.warmthLabel === "paused" ? "bad" : "warn") + "</td>" +
+            '<td style="padding:9px 10px">' + warmupCell(m) + "</td>" +
             '<td style="padding:9px 10px;min-width:120px"><div style="font-variant-numeric:tabular-nums;font-size:12px;margin-bottom:3px">' + n(m.sentToday) + " / " + n(m.dailyCap) + '</div><div style="height:5px;border-radius:99px;background:var(--surface-2);overflow:hidden"><i style="display:block;height:100%;width:' + capPct + '%;background:var(--brand)"></i></div></td>' +
             '<td style="padding:9px 10px">' + chip(m.status, mboxKind(m.status)) + "</td>" +
             '<td style="padding:9px 10px;text-align:right">' + actionBtn + "</td>" +
@@ -734,7 +789,7 @@
         }).join("");
         html += '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;overflow-x:auto">' +
           '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="font-size:11px;text-transform:uppercase;color:var(--text-dim)">' +
-          th("Mailbox") + th("Domain") + th("Warmth") + th("Sent / cap") + th("Status") + thR("") +
+          th("Mailbox") + th("Domain") + th("Warmth") + th("Warm-up") + th("Sent / cap") + th("Status") + thR("") +
           "</tr></thead><tbody>" + mrows + "</tbody></table></div>";
       }
 

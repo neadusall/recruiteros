@@ -54,6 +54,10 @@ export interface MailboxHealth {
   capRemaining: number;
   paused: boolean;
   pausedReason?: string;
+  /** External warm-up (Smartlead) mirrored in — the warmer of record. */
+  warmupProvider?: string;
+  warmupExternalStatus?: "active" | "paused" | "unknown";
+  warmupReputationPct?: number;
 }
 
 export function mailboxHealth(m: Mailbox): MailboxHealth {
@@ -80,6 +84,9 @@ export function mailboxHealth(m: Mailbox): MailboxHealth {
     capRemaining: Math.max(0, m.dailyCap - m.sentToday),
     paused: m.status === "paused",
     pausedReason: m.pausedReason,
+    warmupProvider: m.warmup?.provider,
+    warmupExternalStatus: m.warmup?.status,
+    warmupReputationPct: m.warmup?.reputationPct,
   };
 }
 
@@ -254,6 +261,10 @@ export interface SendingHealthSummary {
     capacityToday: number;
     /** Average shared-IP warmth (0-100) — the long-pole constraint. */
     ipWarmthScore: number;
+    /** Mailboxes with an ACTIVE external (Smartlead) warm-up running. */
+    warmupExternalActive: number;
+    /** Average external warm-up reputation over mailboxes that report one (0-100). */
+    avgWarmupReputation: number;
     /** Workspace HUMAN open rate (machine/proxy opens filtered out), % of delivered. */
     humanOpenRatePct: number;
     /** Workspace RAW open rate (incl. machine opens), % of delivered — for contrast. */
@@ -298,6 +309,12 @@ export function sendingHealth(domains: SendingDomain[], mailboxes: Mailbox[], se
   const ipWarmthScore = liveServers.length === 0 ? 0
     : round(liveServers.reduce((s, x) => s + x.warmthScore, 0) / liveServers.length);
 
+  // External warm-up (Smartlead): how many mailboxes are actively warming, and the
+  // average warm-up reputation across those reporting one.
+  const warmupExternalActive = mailboxes.filter((m) => m.warmup?.status === "active").length;
+  const repVals = mailboxes.map((m) => m.warmup?.reputationPct).filter((x): x is number => typeof x === "number");
+  const avgWarmupReputation = repVals.length ? round(repVals.reduce((s, x) => s + x, 0) / repVals.length) : 0;
+
   // Workspace open rates over delivered: human (machine/proxy opens removed) + raw.
   const totalDelivered = domains.reduce((s, d) => s + (d.metrics?.delivered ?? 0), 0);
   const totalHumanOpens = domains.reduce((s, d) => s + (d.metrics?.openedHuman ?? 0), 0);
@@ -324,6 +341,8 @@ export function sendingHealth(domains: SendingDomain[], mailboxes: Mailbox[], se
       pausedDomains, atRiskDomains,
       capacityToday,
       ipWarmthScore,
+      warmupExternalActive,
+      avgWarmupReputation,
       humanOpenRatePct,
       openRatePct,
       label,
