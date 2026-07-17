@@ -631,7 +631,11 @@
       area.focus();
     });
     overlay.querySelector("#bdpEndedLink").addEventListener("click", function () {
-      if (S.endedInfo) location.hash = "#bdphone/" + S.endedInfo.callId;
+      if (!S.endedInfo) return;
+      // Outside the portal SPA (the popup dialer page) the hash has no router;
+      // open the record in the full portal instead.
+      if (document.getElementById("view")) location.hash = "#bdphone/" + S.endedInfo.callId;
+      else window.open("/recruiter#bdphone/" + S.endedInfo.callId, "_blank");
     });
   }
   function togglePop(id) {
