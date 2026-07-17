@@ -10011,6 +10011,10 @@
       '.jd-quota .jd-qchip .isvg{width:12px;height:12px}' +
       '.jd-quota .jd-qmuted{color:var(--text-dim);background:var(--bg-soft);border-color:var(--border-strong)}' +
       '.jd-pick{flex:0 0 auto;width:15px;height:15px;margin:0;accent-color:var(--accent,#2e5bd7);cursor:pointer}' +
+      /* Combine looks resting until 2+ lists are ticked, but stays clickable so a
+         press always answers (it explains the tick step instead of playing dead). */
+      '.jd-combine-off{opacity:.55}' +
+      '.jd-pick-nudge{outline:2px solid var(--accent,#2e5bd7);outline-offset:2px;border-radius:3px}' +
       '@media (max-width:760px){.jd-run{flex-direction:column;align-items:stretch}.jd-run-actions{justify-content:flex-start}}' +
       '.jd-depth{border:1px solid var(--border-strong);border-radius:12px;background:var(--bg-soft);padding:14px 16px;margin-top:14px}' +
       '.jd-depth-h{font-weight:600;font-size:13.5px;color:var(--text)}' +
@@ -10131,7 +10135,7 @@
       '<div class="card">' +
         '<div class="jd-cardhead"><h3 style="margin:0">Your saved candidate lists</h3>' +
           '<span id="jdQuota" class="jd-quota"></span>' +
-          '<button class="btn btn-ghost btn-sm" id="jdCombine" disabled title="Ran the same role a few times? Tick two or more lists below and combine them into one master list. Duplicates merge automatically, contact info found on any list is kept, and the combined list flows to Candidates + OS Text by itself under its own tag.">Combine lists</button>' +
+          '<button class="btn btn-ghost btn-sm jd-combine-off" id="jdCombine" title="Ran the same role a few times? Tick two or more lists below and combine them into one master list. Duplicates merge automatically, contact info found on any list is kept, and the combined list flows to Candidates + OS Text by itself under its own tag.">Combine lists</button>' +
         '</div>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
@@ -10300,6 +10304,10 @@
           ? '<div class="card" style="border-color:#c0392b;background:#2a1414"><b>Saved lists are NOT being stored durably.</b><br><span class="muted">The server is running in memory-only mode, so saved searches will be lost on the next restart. Don\'t rely on saving until this is fixed (check the /data volume / persistence config).</span></div>'
           : '';
         if (!runs.length) { host.innerHTML = warn + '<p class="muted">No saved lists yet. Fill in the role above and press Initiate Search; the finished list lands here automatically, gets its contact info enriched, and is sent to Candidates and OS Text on its own.</p>'; return; }
+        // The overnight-queue poll re-renders this card every 30s; without this a
+        // half-finished combine selection silently unticks under the user's mouse.
+        var keepTicked = {};
+        host.querySelectorAll(".jd-pick:checked").forEach(function (el) { keepTicked[el.getAttribute("data-pick")] = 1; });
         host.innerHTML = warn + runs.map(function (r) {
           var n = r.candidates ? r.candidates.length : 0;
           var outN = (r.candidates || []).filter(function (c) { return c.outOfArea; }).length;
@@ -10352,7 +10360,10 @@
               '<button class="btn btn-ghost btn-sm" data-del="' + esc(r.id) + '">Delete</button>' +
             '</div></div>';
         }).join("");
-        // Re-render clears the combine ticks; reset the button to match.
+        // Restore the combine ticks the re-render just wiped, then sync the button.
+        host.querySelectorAll(".jd-pick").forEach(function (el) {
+          if (keepTicked[el.getAttribute("data-pick")]) el.checked = true;
+        });
         syncCombine();
       }).catch(function () { var host = $("#jdRuns"); if (host) host.innerHTML = '<p class="muted">Could not load saved lists.</p>'; });
     }
@@ -10857,7 +10868,9 @@
     function syncCombine() {
       var btn = $("#jdCombine"); if (!btn) return;
       var n = pickedIds().length;
-      btn.disabled = n < 2;
+      // Not disabled below 2 ticks: a dead-looking button that swallows clicks reads
+      // as broken. It stays pressable and the click handler explains the tick step.
+      btn.classList.toggle("jd-combine-off", n < 2);
       btn.textContent = n >= 2 ? ("Combine " + n + " lists") : "Combine lists";
     }
     $("#jdRuns").addEventListener("change", function (e) {
@@ -10865,7 +10878,19 @@
     });
     var combineBtn = $("#jdCombine");
     if (combineBtn) combineBtn.addEventListener("click", function () {
-      var ids = pickedIds(); if (ids.length < 2) return;
+      var ids = pickedIds();
+      if (ids.length < 2) {
+        // Pressed too early: say what to do and point at the tick boxes.
+        toast(ids.length === 1
+          ? "One list ticked. Tick at least one more below, then press Combine."
+          : "Tick the boxes next to two or more lists below, then press Combine.");
+        var picks = document.querySelectorAll("#jdRuns .jd-pick");
+        Array.prototype.forEach.call(picks, function (el) { el.classList.add("jd-pick-nudge"); });
+        setTimeout(function () {
+          Array.prototype.forEach.call(picks, function (el) { el.classList.remove("jd-pick-nudge"); });
+        }, 2500);
+        return;
+      }
       var chosen = (state.runs || []).filter(function (r) { return ids.indexOf(r.id) >= 0; });
       if (chosen.length < 2) return;
       // Preview with the same dedupe key the server uses, so the numbers match.
