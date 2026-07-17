@@ -19617,8 +19617,14 @@
           '<div class="field"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Number (E.164)</label>' +
           '<input id="bdpCnManual" placeholder="+13105551234" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px"></div>') +
         '<div class="field" style="margin-top:10px"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Label</label>' +
-        '<input id="bdpCnLabel" placeholder="BD main line" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px"></div>' +
-        '<p class="sub" style="margin:10px 0 0">Connecting points the number\'s inbound voice at RecruitersOS and makes it available as an outbound caller ID.</p>' +
+        '<input id="bdpCnLabel" placeholder="Ryan main line" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px"></div>' +
+        ((data.team && data.team.length)
+          ? '<div class="field" style="margin-top:10px"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Assign to</label>' +
+            '<select id="bdpCnAssign" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px">' +
+            data.team.map(function (m) { return '<option value="' + esc(m.userId) + '"' + (m.isYou ? " selected" : "") + ">" + esc(m.name || m.email) + (m.isYou ? " (you)" : "") + "</option>"; }).join("") +
+            "</select></div>"
+          : "") +
+        '<p class="sub" style="margin:10px 0 0">Whoever you assign this to calls from this number, receives its calls, and sends their OS Text messages from it. You can change the owner later under Manage.</p>' +
         '<div class="modal-foot"><button class="btn" id="bdpCnCancel">Cancel</button><button class="btn btn-primary" id="bdpCnGo">Connect</button></div>';
       openModal("Connect a number", "Add a Telnyx number as a BD line.", body, function (root, close) {
         root.querySelector("#bdpCnCancel").addEventListener("click", close);
@@ -19627,7 +19633,8 @@
           var e164 = sel ? sel.value : (root.querySelector("#bdpCnManual") || {}).value;
           if (!e164) return;
           var tid = sel ? sel.options[sel.selectedIndex].getAttribute("data-id") : "";
-          send("/phone/numbers", "POST", { action: "connect", e164: e164, telnyxNumberId: tid || undefined, label: (root.querySelector("#bdpCnLabel") || {}).value, motion: "bd" })
+          var assignEl = root.querySelector("#bdpCnAssign");
+          send("/phone/numbers", "POST", { action: "connect", e164: e164, telnyxNumberId: tid || undefined, label: (root.querySelector("#bdpCnLabel") || {}).value, motion: "bd", assignedUserIds: assignEl && assignEl.value ? [assignEl.value] : undefined })
             .then(function (r) {
               if (!r.ok) toast((r.data && r.data.error) || "Could not connect the number");
               else { toast(r.data.warning || "Number connected"); }
@@ -19645,7 +19652,7 @@
       var team = data.team || [];
       var body = '<div class="field"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Label</label>' +
         '<input id="bdpMlLabel" value="' + esc(line.label) + '" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px"></div>' +
-        '<div class="field" style="margin-top:12px"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Assigned users (can call from and receive on this line)</label>' +
+        '<div class="field" style="margin-top:12px"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Assigned users (call from, receive on, and send OS Text from this number)</label>' +
         '<div style="margin-top:6px;max-height:180px;overflow:auto">' +
         team.map(function (m) {
           var on = (line.assignedUserIds || []).indexOf(m.userId) >= 0;

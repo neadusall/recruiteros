@@ -119,12 +119,19 @@ export async function POST(req: Request) {
       const infra = await withWorkspaceCreds(ws, () => ensureInfra(ws)).catch((e: any) => {
         throw e;
       });
+      // Assign on connect so a number is tied to its agent in one step (their
+      // calls AND their OS Text campaigns then use it). Validate against the
+      // roster so a stray id can't be pinned to a line; default to the admin.
+      const memberIds = new Set(listMembers(ws, g.ctx.user.id).map((m) => m.userId));
+      const requested = Array.isArray(b.assignedUserIds)
+        ? b.assignedUserIds.map((x: unknown) => String(x)).filter((id: string) => memberIds.has(id))
+        : [];
       const line = upsertLine(ws, {
         e164,
         motion,
         label: String(b.label ?? "").trim() || e164,
         telnyxNumberId: b.telnyxNumberId ? String(b.telnyxNumberId) : undefined,
-        assignedUserIds: [g.ctx.user.id],
+        assignedUserIds: requested.length ? requested.slice(0, 50) : [g.ctx.user.id],
       });
       // Same number texts too: attach it to the messaging profile so OS Text
       // sends from this line when it's someone's assigned number. Best-effort;
