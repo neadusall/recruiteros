@@ -24,6 +24,54 @@ const STATE_ABBREV: Record<string, string> = {
   "west virginia": "wv", wisconsin: "wi", wyoming: "wy",
 };
 
+/**
+ * Single-state metro / region nicknames a recruiter may type WITHOUT a state.
+ * "Long Island" names no state to extract, so pinning collapsed to the literal
+ * string and every real local ("Melville, NY") got marked out-of-area, letting the
+ * never-empty rescue back-fill the list with out-of-area matches (a Long Island CFO
+ * search that returned Louisiana waste-company people). Mapping a nickname to its
+ * state lets the same-state parse geos survive, so "Long Island" behaves like
+ * "Long Island, NY". Only unambiguous single-state regions belong here (skip
+ * multi-state ones like "Tri-State" / "DMV").
+ */
+const METRO_STATE: Record<string, string> = {
+  "long island": "ny", "new york city": "ny", nyc: "ny", "hudson valley": "ny",
+  "silicon valley": "ca", "bay area": "ca", "sf bay area": "ca", "san francisco bay area": "ca",
+  "inland empire": "ca", "central valley": "ca", "orange county": "ca",
+  dfw: "tx", "dallas-fort worth": "tx", "dallas fort worth": "tx", metroplex: "tx",
+  "twin cities": "mn", chicagoland: "il", "south florida": "fl", "central florida": "fl",
+  "puget sound": "wa", "the triangle": "nc", "research triangle": "nc",
+};
+
+/** Full state name for an abbreviation, or undefined ("ny" -> "new york"). */
+function fullStateName(ab: string): string | undefined {
+  return Object.keys(STATE_ABBREV).find((k) => STATE_ABBREV[k] === ab);
+}
+
+/** Push a state's abbrev and full name onto the token list (deduped by caller's Set-free use). */
+function addStateTokens(tokens: string[], ab: string): void {
+  tokens.push(ab);
+  const full = fullStateName(ab);
+  if (full) tokens.push(full);
+}
+
+/** The US state an already-normalized location string names, as an abbrev, or null. */
+function stateAbbrevIn(text: string): string | null {
+  const t = " " + text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";
+  for (const [full, ab] of Object.entries(STATE_ABBREV)) {
+    if (t.includes(" " + full + " ") || t.includes(" " + ab + " ")) return ab;
+  }
+  return null;
+}
+
+/** Parse geos whose city or state token appears in the typed location's tokens. */
+function localGeos(geos: string[] | undefined, tokens: string[]): string[] {
+  return (geos || []).filter((g) => {
+    const gn = " " + g.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";
+    return tokens.some((t) => gn.includes(" " + t + " ") || t.includes(gn.trim()));
+  });
+}
+
 export function pinIcpLocation(icp: CandidateICP, location?: string): CandidateICP {
   const raw = (location || "").replace(/\s*\+\d+\s*mi\b/i, "").trim();
   if (!raw) return icp;
@@ -47,15 +95,30 @@ export function pinIcpLocation(icp: CandidateICP, location?: string): CandidateI
       const ab = abbrevOf(tail)!;
       const city = part.slice(0, part.length - tail.length).trim();
       if (city.length > 1) tokens.push(city);
-      tokens.push(ab);
-      const fullName = Object.keys(STATE_ABBREV).find((k) => STATE_ABBREV[k] === ab);
-      if (fullName) tokens.push(fullName);
+      addStateTokens(tokens, ab);
     }
   }
-  const local = (icp.geos || []).filter((g) => {
-    const gn = " " + g.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";
-    return tokens.some((t) => gn.includes(" " + t + " ") || t.includes(gn.trim()));
-  });
+
+  // Anchor state: a state named in the typed text (handled above) OR, for a
+  // state-less metro nickname, its state. Without this a bare "Long Island" keeps
+  // only geos literally containing "long island", dropping every metro town.
+  let anchorState = stateAbbrevIn(raw) || METRO_STATE[raw.toLowerCase().trim()] || null;
+  if (anchorState) addStateTokens(tokens, anchorState);
+
+  let local = localGeos(icp.geos, tokens);
+
+  // Still no state? Infer one from the parse geos that matched the typed CITY
+  // (e.g. typed "Melville" -> parse "Melville, NY" -> NY), but only when those
+  // matches agree on a single state, then re-pin so same-state metros survive too.
+  if (!anchorState) {
+    const states = local.map((g) => stateAbbrevIn(g)).filter((s): s is string => Boolean(s));
+    if (states.length && states.every((s) => s === states[0])) {
+      anchorState = states[0];
+      addStateTokens(tokens, anchorState);
+      local = localGeos(icp.geos, tokens);
+    }
+  }
+
   icp.geos = [raw, ...local.filter((g) => g.trim().toLowerCase() !== raw.toLowerCase())].slice(0, 8);
   return icp;
 }

@@ -65,5 +65,48 @@ ok(pinned.geos.some((g) => g.toLowerCase().includes("cleveland")),
 ok(!pinned.geos.some((g) => g.toLowerCase().includes("chicago")),
   "other-state metros are still pinned away (Chicago dropped)");
 
+/* ---- pinIcpLocation: state-less metro nickname keeps its metro (Long Island) ---- */
+
+// THE bug: a recruiter typed "Long Island" (no state). Pinning collapsed to the
+// literal string, every real local ("Melville, NY") was marked out-of-area, and the
+// never-empty rescue back-filled the list with out-of-area matches — a Long Island
+// CFO search that returned Louisiana waste-company people.
+const liIcp = {
+  label: "CFO", seniority: "exec", managesTeam: true, titles: ["CFO"],
+  geos: ["Long Island, NY", "Nassau County, NY", "Suffolk County, NY", "Melville, NY",
+    "Hauppauge, NY", "New York City Metropolitan Area", "New Orleans, LA", "Metairie, LA"],
+  remoteOk: false, industries: [], targetCompanies: [], sellsTo: [], verticals: [],
+  mustHave: [], niceToHave: [], disqualifiers: [],
+} as CandidateICP;
+
+const li = pinIcpLocation({ ...liIcp, geos: [...liIcp.geos] }, "Long Island");
+ok(li.geos[0] === "Long Island", "typed 'Long Island' leads the pinned geos");
+ok(li.geos.some((g) => g.toLowerCase().includes("nassau")),
+  "state-less nickname 'Long Island' keeps same-state metros (Nassau survives)");
+ok(li.geos.some((g) => g.toLowerCase().includes("melville")),
+  "same-state metro town Melville survives the pin (was the one that got rescued out)");
+ok(!li.geos.some((g) => g.toLowerCase().includes("orleans") || g.toLowerCase().includes("metairie")),
+  "Louisiana geos are pinned away for a Long Island search");
+
+// The rescued locals must now actually pass the strict-location gate.
+ok(inTargetGeo("Melville, NY", li.geos) === true,
+  "a real Long Islander (Melville, NY) now counts as in-area under the pinned geos");
+ok(inTargetGeo("New Orleans, LA", li.geos) === false,
+  "a Louisiana location still drops under the pinned geos");
+
+// Typing the state must keep working exactly as before.
+const liState = pinIcpLocation({ ...liIcp, geos: [...liIcp.geos] }, "Long Island, NY");
+ok(liState.geos.some((g) => g.toLowerCase().includes("nassau")),
+  "'Long Island, NY' still keeps same-state metros");
+
+// City-only inference: typed a real town with no state -> infer state from the parse.
+const inf = pinIcpLocation({
+  ...liIcp, geos: ["Melville, NY", "Hauppauge, NY", "Chicago, IL"],
+}, "Melville");
+ok(inf.geos.some((g) => g.toLowerCase().includes("hauppauge")),
+  "state-less city 'Melville' infers NY from the parse and keeps same-state metros");
+ok(!inf.geos.some((g) => g.toLowerCase().includes("chicago")),
+  "inference stays in-state (Chicago dropped for a 'Melville' search)");
+
 console.log(fails ? `\n${fails} FAILURE(S)` : "\nall green");
 process.exit(fails ? 1 : 0);
