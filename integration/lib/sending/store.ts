@@ -199,6 +199,37 @@ export async function saveMailbox(m: Mailbox): Promise<void> {
   save();
 }
 
+/**
+ * Manually pause or revive a single mailbox — the operator "doctor" control on
+ * the Mailbox Ops console. Pausing stops it sending and records the reason.
+ * Reviving never jumps back to full volume: it re-enters the warm-up ramp at the
+ * reduced starting cap, exactly like a fresh mailbox, so a recovered mailbox
+ * re-earns trust instead of slamming its cap cold. Returns the updated mailbox,
+ * or null when it is not in this workspace.
+ */
+export async function setMailboxStatus(
+  workspaceId: string,
+  id: string,
+  status: "paused" | "warming" | "active",
+  pausedReason?: string,
+): Promise<Mailbox | null> {
+  await hydrate();
+  const m = state.mailboxes.find((x) => x.id === id && x.workspaceId === workspaceId);
+  if (!m) return null;
+  if (status === "paused") {
+    m.status = "paused";
+    m.pausedReason = (pausedReason || "paused by operator").slice(0, 200);
+  } else {
+    m.status = "warming";
+    m.warmupDay = 0;
+    m.dailyCap = 10;
+    m.pausedReason = undefined;
+  }
+  m.updatedAt = nowIso();
+  save();
+  return m;
+}
+
 export async function stats(workspaceId: string): Promise<{ domains: number; active: number; servers: number; mailboxes: number; suppressed: number }> {
   await hydrate();
   const domains = state.domains.filter((d) => d.workspaceId === workspaceId);

@@ -14,7 +14,7 @@ export type { SuppressionEntry, SendEvent, SeedAccount, SeedTest, SeedResult, Pl
 export {
   listDomains, getDomain, findDomainByName, addDomain, saveDomain, deleteDomain,
   listServers, getServer, addServer, saveServer,
-  listMailboxes, addMailbox, saveMailbox, stats,
+  listMailboxes, addMailbox, saveMailbox, setMailboxStatus, stats,
   listSuppression, suppress, isSuppressed, recentEvents,
   listSeeds, getSeed, addSeed, setSeedVerification, deleteSeed, listSeedTests,
   listSendingWorkspaceIds,

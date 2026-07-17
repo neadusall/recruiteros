@@ -9,6 +9,8 @@
  *   { action: "provision-server", id }            -> create Hetzner box (Postal cloud-init) + set PTR
  *   { action: "set-postal", id, host, apiKey }    -> store Postal creds on a server
  *   { action: "add-mailbox", domainId, address, displayName?, dailyCap? }
+ *   { action: "pause-mailbox", id, reason? }      -> operator pause a single mailbox
+ *   { action: "resume-mailbox", id }              -> revive it on the warm-up ramp
  *   { action: "add-seed", provider, address, imapHost?, imapUser?, imapPass? }
  *   { action: "delete-seed", id }
  *   { action: "seed-test", domainId }             -> start an inbox-placement test
@@ -20,7 +22,7 @@ import { requireSession, body, ok, fail } from "../../../lib/api";
 import {
   listDomains, getDomain, addDomain, findDomainByName, deleteDomain,
   listServers, getServer, addServer, saveServer,
-  listMailboxes, addMailbox, stats,
+  listMailboxes, addMailbox, setMailboxStatus, stats,
   provisionDomainDns, verifyDomain, provisionServer,
   checklist, providerStatus, HetznerNotConfigured,
   listSuppression, recentEvents, listSeeds, getSeed, addSeed, setSeedVerification, deleteSeed, listSeedTests,
@@ -236,6 +238,21 @@ export async function POST(req: Request) {
 
   if (b?.action === "run-governor") {
     return ok({ paused: await runGovernor(ws) });
+  }
+
+  // Operator "doctor" controls: pause or revive a single mailbox by hand.
+  if (b?.action === "pause-mailbox") {
+    if (!b.id) return fail("missing_fields", 422);
+    const m = await setMailboxStatus(ws, b.id, "paused", b.reason);
+    if (!m) return fail("not_found", 404);
+    return ok({ mailbox: m });
+  }
+
+  if (b?.action === "resume-mailbox") {
+    if (!b.id) return fail("missing_fields", 422);
+    const m = await setMailboxStatus(ws, b.id, "warming");
+    if (!m) return fail("not_found", 404);
+    return ok({ mailbox: m });
   }
 
   if (b?.action === "run-engagement") {

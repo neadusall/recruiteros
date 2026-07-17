@@ -522,6 +522,244 @@
   syncMotionNav();
 
   /* ---------------- router ---------------- */
+  // ------------------------------------------------------------------
+  // Mailbox Ops: the deliverability command center over the owned sending
+  // stack (lib/sending). Live fleet vitals + the operator "doctor" controls:
+  // pause a mailbox, or revive it on the warm-up ramp (never straight back to
+  // full cap). Reads GET /api/sending; every mutation is a POST action on the
+  // same route. Reuses the Meridian tokens + openModal/toast/esc helpers.
+  // ------------------------------------------------------------------
+  function renderMailboxOps(view) {
+    function n(x) { return (x == null ? 0 : x).toLocaleString(); }
+    function pctTxt(x) { return (x == null ? 0 : Math.round(x * 10) / 10) + "%"; }
+    function chip(text, kind) {
+      var map = {
+        good: ["var(--ok)", "var(--ok-bg)"], warn: ["var(--warn)", "var(--warn-bg)"],
+        bad: ["var(--danger)", "var(--danger-bg)"], info: ["var(--info)", "var(--info-bg)"],
+        mute: ["var(--text-dim)", "var(--surface-2)"],
+      };
+      var c = map[kind] || map.mute;
+      return '<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;color:' + c[0] + ";background:" + c[1] + '">' + esc(text) + "</span>";
+    }
+    function healthKind(label) { return label === "healthy" ? "good" : label === "watch" ? "warn" : label === "new" ? "info" : "bad"; }
+    function mboxKind(status) { return status === "active" ? "good" : status === "warming" ? "warn" : "bad"; }
+    function card(label, value, sub, accent) {
+      return '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;padding:14px 16px;min-width:132px;flex:1">' +
+        '<div style="font-size:22px;font-weight:600;color:' + (accent || "var(--text)") + '">' + value + "</div>" +
+        '<div style="font-size:12px;color:var(--text-dim);margin-top:2px">' + esc(label) + "</div>" +
+        (sub ? '<div style="font-size:11px;color:var(--text-dim);margin-top:3px">' + esc(sub) + "</div>" : "") + "</div>";
+    }
+    function provChip(label, on) {
+      return '<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-dim);margin-left:8px">' +
+        '<span style="width:8px;height:8px;border-radius:50%;background:' + (on ? "var(--ok)" : "var(--text-dim)") + '"></span>' + esc(label) + "</span>";
+    }
+    var busy = false;
+    view.innerHTML = '<div class="empty">Loading fleet vitals…</div>';
+
+    function act(payload, okMsg) {
+      if (busy) return;
+      busy = true;
+      send("/sending", "POST", payload).then(function (r) {
+        busy = false;
+        if (!r.ok) { toast((r.data && r.data.error) || "Action failed"); return; }
+        if (okMsg) toast(okMsg);
+        load();
+      });
+    }
+
+    function pauseMailbox(id, address) {
+      openModal("Pause " + address, "Stops this mailbox sending immediately.",
+        '<label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:10px">Reason (optional)' +
+        '<input id="mbReason" type="text" placeholder="e.g. complaints creeping up" style="width:100%;margin-top:5px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text);padding:8px 9px"></label>' +
+        '<div style="font-size:12px;color:var(--text-dim);margin-bottom:12px">Reviving later re-enters it on the warm-up ramp at reduced volume, never straight back to full cap.</div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="mbCancel">Cancel</button><button class="btn btn-danger btn-sm" id="mbGo">Pause mailbox</button></div>',
+        function (cardEl, close) {
+          cardEl.querySelector("#mbCancel").addEventListener("click", close);
+          cardEl.querySelector("#mbGo").addEventListener("click", function () {
+            var reason = (cardEl.querySelector("#mbReason").value || "").trim();
+            close();
+            act({ action: "pause-mailbox", id: id, reason: reason }, "Mailbox paused");
+          });
+        });
+    }
+
+    function resumeMailbox(id, address) {
+      openModal("Revive " + address, "Bring this mailbox back online.",
+        '<div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">It re-enters the warm-up ramp at the reduced starting cap and climbs back to full volume over the ramp, so it re-earns trust instead of sending cold at full rate. Only revive once the root cause is fixed and the mailbox has rested.</div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="mbCancel">Cancel</button><button class="btn btn-primary btn-sm" id="mbGo">Revive on ramp</button></div>',
+        function (cardEl, close) {
+          cardEl.querySelector("#mbCancel").addEventListener("click", close);
+          cardEl.querySelector("#mbGo").addEventListener("click", function () { close(); act({ action: "resume-mailbox", id: id }, "Mailbox reviving on the ramp"); });
+        });
+    }
+
+    function addDomains() {
+      openModal("Add sending domains", "Feed bare domain names; DKIM, the full record set, and PTR are generated automatically.",
+        '<textarea id="mbDomains" rows="5" placeholder="trylumesp.com&#10;getlumesp.com" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text);padding:9px;font-family:var(--mono,monospace);font-size:13px"></textarea>' +
+        '<div style="font-size:12px;color:var(--text-dim);margin:8px 0 12px">One per line. Never use your primary brand domain for cold sending.</div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="mbCancel">Cancel</button><button class="btn btn-primary btn-sm" id="mbGo">Add and provision</button></div>',
+        function (cardEl, close) {
+          cardEl.querySelector("#mbCancel").addEventListener("click", close);
+          cardEl.querySelector("#mbGo").addEventListener("click", function () {
+            var list = (cardEl.querySelector("#mbDomains").value || "").split(/[\s,]+/).map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+            if (!list.length) { toast("Enter at least one domain"); return; }
+            close();
+            act({ action: "add-domains", domains: list }, "Domains queued for provisioning");
+          });
+        });
+    }
+
+    function addMailboxTo(domainId, domainName) {
+      openModal("Add mailbox on " + domainName, "A new mailbox starts warming at a low daily cap.",
+        '<label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:10px">Address' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-top:5px"><input id="mbLocal" type="text" placeholder="ryan" style="flex:1;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text);padding:8px 9px"><span style="color:var(--text-dim);font-size:13px">@' + esc(domainName) + "</span></div></label>" +
+        '<label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:12px">Display name (optional)<input id="mbName" type="text" placeholder="Ryan U" style="width:100%;margin-top:5px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text);padding:8px 9px"></label>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="mbCancel">Cancel</button><button class="btn btn-primary btn-sm" id="mbGo">Add mailbox</button></div>',
+        function (cardEl, close) {
+          cardEl.querySelector("#mbCancel").addEventListener("click", close);
+          cardEl.querySelector("#mbGo").addEventListener("click", function () {
+            var local = (cardEl.querySelector("#mbLocal").value || "").trim().toLowerCase();
+            if (!local) { toast("Enter a mailbox name"); return; }
+            var display = (cardEl.querySelector("#mbName").value || "").trim();
+            close();
+            act({ action: "add-mailbox", domainId: domainId, address: local + "@" + domainName, displayName: display || undefined }, "Mailbox added, warming");
+          });
+        });
+    }
+
+    function paint(d) {
+      function th(t) { return '<th style="text-align:left;padding:8px 10px;font-weight:500">' + esc(t) + "</th>"; }
+      function thR(t) { return '<th style="text-align:right;padding:8px 10px;font-weight:500">' + esc(t) + "</th>"; }
+      function protoCol(title, color, items) {
+        return '<div><div style="font-size:13px;font-weight:600;color:' + color + ';margin-bottom:8px">' + esc(title) + '</div><ul style="margin:0;padding-left:16px;font-size:12.5px;color:var(--text-muted);line-height:1.6">' + items.map(function (i) { return "<li>" + esc(i) + "</li>"; }).join("") + "</ul></div>";
+      }
+      function wire() {
+        var q = function (s) { return view.querySelector(s); };
+        var ad = q("#mbAddDomains"); if (ad) ad.addEventListener("click", addDomains);
+        var ea = q("#mbEmptyAdd"); if (ea) ea.addEventListener("click", addDomains);
+        var rf = q("#mbRefresh"); if (rf) rf.addEventListener("click", load);
+        var gv = q("#mbGovernor"); if (gv) gv.addEventListener("click", function () { act({ action: "run-governor" }, "Safety check complete"); });
+        view.querySelectorAll("[data-pause]").forEach(function (b) { b.addEventListener("click", function () { pauseMailbox(b.getAttribute("data-pause"), b.getAttribute("data-addr")); }); });
+        view.querySelectorAll("[data-resume]").forEach(function (b) { b.addEventListener("click", function () { resumeMailbox(b.getAttribute("data-resume"), b.getAttribute("data-addr")); }); });
+        view.querySelectorAll("[data-addmbox]").forEach(function (b) { b.addEventListener("click", function () { addMailboxTo(b.getAttribute("data-addmbox"), b.getAttribute("data-dom")); }); });
+      }
+
+      var health = d.health || { overall: {}, domains: [], mailboxes: [] };
+      var ov = health.overall || {};
+      var domains = health.domains || [];
+      var mailboxes = health.mailboxes || [];
+      var prov = d.providers || {};
+      var domName = {};
+      (d.domains || []).forEach(function (dm) { domName[dm.id] = dm.domain; });
+      var pausedMailboxes = mailboxes.filter(function (m) { return m.paused; }).length;
+
+      var html = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">' +
+        '<button class="btn btn-primary btn-sm" id="mbAddDomains">Add domains</button>' +
+        '<button class="btn btn-ghost btn-sm" id="mbGovernor">Run safety check</button>' +
+        '<button class="btn btn-ghost btn-sm" id="mbRefresh">Refresh</button>' +
+        '<span style="flex:1"></span>' +
+        provChip("MTA / Postal", prov.mta) + provChip("DNS", prov.dns) + provChip("Cloud", prov.cloud) + provChip("SNDS", prov.snds) + provChip("Postmaster", prov.postmaster) +
+        "</div>";
+
+      if (!prov.mta) {
+        html += '<div style="border:1px solid var(--warn-bg);border-left:3px solid var(--warn);background:var(--warn-bg);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:var(--text-muted)">' +
+          '<b style="color:var(--text)">Sending stack is configured but not live yet.</b> Connect a Postal MTA (a server plus its API key) to send for real. Fleet vitals, warm-up, and the pause/revive controls all work now; actual delivery turns on once the MTA is set.</div>';
+      }
+
+      if (!domains.length && !mailboxes.length) {
+        html += '<div class="card" style="text-align:center;padding:34px 20px">' +
+          '<div style="font-size:15px;font-weight:600;margin-bottom:6px">No sending fleet yet</div>' +
+          '<div style="font-size:13px;color:var(--text-dim);max-width:52ch;margin:0 auto 16px">Add secondary sending domains to begin. Each gets its DKIM keys, full DNS record set, and PTR generated automatically, then mailboxes warm up on a slow ramp before any cold send.</div>' +
+          '<button class="btn btn-primary" id="mbEmptyAdd">Add your first domains</button></div>';
+        view.innerHTML = html;
+        wire();
+        return;
+      }
+
+      var flabel = ov.label || "new";
+      var fkind = healthKind(flabel);
+      var fcolor = fkind === "good" ? "var(--ok)" : fkind === "warn" ? "var(--warn)" : fkind === "info" ? "var(--info)" : "var(--danger)";
+      html += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">' +
+        card("Fleet health", n(ov.healthScore || 0) + '<span style="font-size:13px;color:var(--text-dim)"> / 100</span>', flabel, fcolor) +
+        card("Sending capacity today", n(ov.capacityToday), ov.canSend ? "sends available now" : "no capacity", ov.canSend ? "var(--ok)" : "var(--warn)") +
+        card("Mailboxes", n(ov.mailboxes), n(ov.activeMailboxes) + " active · " + n(ov.warmingMailboxes) + " warming · " + n(pausedMailboxes) + " paused") +
+        card("Domains", n(ov.domains), n(ov.atRiskDomains) + " at risk · " + n(ov.pausedDomains) + " paused", (ov.atRiskDomains || ov.pausedDomains) ? "var(--danger)" : "var(--text)") +
+        card("IP warmth", n(ov.ipWarmthScore || 0) + "%", "shared-IP ramp") +
+        card("Human open rate", n(ov.humanOpenRatePct || 0) + "%", "machine opens removed") +
+        "</div>";
+
+      html += '<h3 style="margin:20px 0 8px;font-size:14px;color:var(--text-muted)">Domains</h3>';
+      if (!domains.length) {
+        html += '<div class="empty" style="padding:16px">No domains yet.</div>';
+      } else {
+        var drows = domains.map(function (dm) {
+          var w = (dm.warnings || []).join("; ");
+          var cRate = Math.round((dm.complaintRatePct || 0) * 100) / 100;
+          return '<tr style="border-top:1px solid var(--surface-2)">' +
+            '<td style="padding:9px 10px;font-weight:600">' + esc(dm.domain) + "</td>" +
+            '<td style="padding:9px 10px">' + chip(dm.status, dm.status === "active" ? "good" : (dm.status === "paused" || dm.status === "error") ? "bad" : "info") + "</td>" +
+            '<td style="padding:9px 10px">' + chip(dm.healthLabel, healthKind(dm.healthLabel)) + ' <span style="color:var(--text-dim);font-size:12px">' + n(dm.healthScore) + "</span></td>" +
+            '<td style="padding:9px 10px;text-align:right;font-variant-numeric:tabular-nums">' + n(dm.sent) + "</td>" +
+            '<td style="padding:9px 10px;text-align:right;font-variant-numeric:tabular-nums;color:' + ((dm.bounceRatePct || 0) > 2 ? "var(--danger)" : "var(--text-muted)") + '">' + pctTxt(dm.bounceRatePct) + "</td>" +
+            '<td style="padding:9px 10px;text-align:right;font-variant-numeric:tabular-nums;color:' + (cRate > 0.1 ? "var(--danger)" : "var(--text-muted)") + '">' + cRate + "%</td>" +
+            '<td style="padding:9px 10px">' + (dm.reputationTier ? chip(dm.reputationTier, dm.reputationTier === "high" ? "good" : dm.reputationTier === "medium" ? "warn" : "bad") : '<span style="color:var(--text-dim)">n/a</span>') + "</td>" +
+            '<td style="padding:9px 10px;font-size:12px;color:var(--warn)">' + esc(w) + "</td>" +
+            '<td style="padding:9px 10px;text-align:right"><button class="btn btn-ghost btn-sm" data-addmbox="' + esc(dm.id) + '" data-dom="' + esc(dm.domain) + '">+ Mailbox</button></td>' +
+            "</tr>";
+        }).join("");
+        html += '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;overflow-x:auto">' +
+          '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="font-size:11px;text-transform:uppercase;color:var(--text-dim)">' +
+          th("Domain") + th("Status") + th("Health") + thR("Sent") + thR("Bounce") + thR("Complaint") + th("Reputation") + th("Warnings") + th("") +
+          "</tr></thead><tbody>" + drows + "</tbody></table></div>";
+      }
+
+      html += '<h3 style="margin:22px 0 8px;font-size:14px;color:var(--text-muted)">Mailbox fleet <span style="font-weight:400;color:var(--text-dim)">the doctor\'s view</span></h3>';
+      if (!mailboxes.length) {
+        html += '<div class="empty" style="padding:16px">No mailboxes yet. Add one from a domain above.</div>';
+      } else {
+        var mrows = mailboxes.map(function (m) {
+          var dom = domName[m.domainId] || "";
+          var capPct = m.dailyCap ? Math.min(100, Math.round((m.sentToday / m.dailyCap) * 100)) : 0;
+          var actionBtn = m.paused
+            ? '<button class="btn btn-ghost btn-sm" data-resume="' + esc(m.id) + '" data-addr="' + esc(m.address) + '" style="color:var(--ok)">Revive</button>'
+            : '<button class="btn btn-ghost btn-sm" data-pause="' + esc(m.id) + '" data-addr="' + esc(m.address) + '" style="color:var(--danger)">Pause</button>';
+          return '<tr style="border-top:1px solid var(--surface-2)">' +
+            '<td style="padding:9px 10px;font-weight:600">' + esc(m.address) + (m.pausedReason ? '<div style="font-size:11px;color:var(--text-dim);font-weight:400">' + esc(m.pausedReason) + "</div>" : "") + "</td>" +
+            '<td style="padding:9px 10px;color:var(--text-dim);font-size:12px">' + esc(dom) + "</td>" +
+            '<td style="padding:9px 10px">' + chip(m.warmthLabel, m.warmthLabel === "warm" ? "good" : m.warmthLabel === "paused" ? "bad" : "warn") + "</td>" +
+            '<td style="padding:9px 10px;min-width:120px"><div style="font-variant-numeric:tabular-nums;font-size:12px;margin-bottom:3px">' + n(m.sentToday) + " / " + n(m.dailyCap) + '</div><div style="height:5px;border-radius:99px;background:var(--surface-2);overflow:hidden"><i style="display:block;height:100%;width:' + capPct + '%;background:var(--brand)"></i></div></td>' +
+            '<td style="padding:9px 10px">' + chip(m.status, mboxKind(m.status)) + "</td>" +
+            '<td style="padding:9px 10px;text-align:right">' + actionBtn + "</td>" +
+            "</tr>";
+        }).join("");
+        html += '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;overflow-x:auto">' +
+          '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="font-size:11px;text-transform:uppercase;color:var(--text-dim)">' +
+          th("Mailbox") + th("Domain") + th("Warmth") + th("Sent / cap") + th("Status") + thR("") +
+          "</tr></thead><tbody>" + mrows + "</tbody></table></div>";
+      }
+
+      html += '<details style="margin-top:22px;background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;padding:2px 16px">' +
+        '<summary style="cursor:pointer;padding:12px 0;font-size:14px;font-weight:600;color:var(--text-muted)">The doctor\'s protocol · when to pause, rest, and revive</summary>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;padding:6px 0 16px">' +
+        protoCol("Pause now", "var(--danger)", ["Complaints over 0.1% (pause the whole domain)", "Blocklist or spam-trap hit", "Bounce over 5%", "Reputation drops to Low", "SPF, DKIM, or DMARC failing", "Replies collapse to zero"]) +
+        protoCol("Rest and recover", "var(--warn)", ["Cold sends off, warm-up stays on", "Fix the root cause: delist, DNS, scrub the list", "48h for a soft wobble, 2 to 4 weeks for reputation damage", "Rotate a spare in to hold volume"]) +
+        protoCol("Revive", "var(--ok)", ["Only when the root cause is fixed", "Rested the full minimum", "Reputation back to Medium or High", "Seed test shows inbox", "Comes back on the ramp at reduced volume, never full cap"]) +
+        "</div></details>";
+
+      view.innerHTML = html;
+      wire();
+    }
+
+    function load() {
+      api("/sending").then(function (d) {
+        if (!d) { view.innerHTML = '<div class="empty">Couldn\'t load the sending stack.</div>'; return; }
+        paint(d);
+      }).catch(function () { view.innerHTML = '<div class="empty">Couldn\'t load the sending stack (admin session required).</div>'; });
+    }
+
+    load();
+  }
+
   var ROUTES = {
     overview: { title: "Dashboard", crumb: "Operate", action: null, render: renderOverview },
     clients: { title: "Clients", crumb: "Business Development", action: null, render: renderClients, motionOnly: "bd" },
@@ -529,6 +767,7 @@
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     sendqueue: { title: "Send Queue", crumb: "Operate", action: null, render: renderSendQueue, motionOnly: "bd" },
     senders: { title: "Senders", crumb: "Operate", action: null, render: renderSenders, motionOnly: "bd" },
+    mailboxops: { title: "Mailbox Ops", crumb: "Deliverability", action: null, render: renderMailboxOps, motionOnly: "bd" },
     // Recruiting gets the unified Candidates tab (pipeline + ATS people database
     // in one table); BD keeps the classic Prospects pipeline.
     prospects: { title: "Prospects", crumb: "Operate", action: "+ Add prospect", render: function (el) { return motion === "recruiting" ? renderCandidates(el) : renderProspects(el); } },
