@@ -25,6 +25,7 @@ import {
   DEFAULT_CHANNELS, DEFAULT_TRIGGERS, GOAL_ROLES, localDay, workspaceTz,
 } from "../../../lib/outbound";
 import type { GoalsPatch, GoalRole, NotifyPrefs } from "../../../lib/outbound";
+import { userSpendRollup, userSpend } from "../../../lib/billing/ledger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +54,9 @@ export async function GET(req: Request): Promise<Response> {
         userAssessment(ws, uid, { authRole: g.ctx.role }).catch(() => null),
         buildChecklist(ws, uid, g.ctx.role),
       ]);
-      return ok({ profile, assessment, checklist });
+      // The recruiter's own paid-enrichment spend (JD Sourcing phone boost), 30 days.
+      const premiumSpend = userSpend(ws, g.ctx.user.email || "", "30d", "premium_phone_boost");
+      return ok({ profile, assessment, checklist, premiumSpend });
     } catch (e) {
       return fail(e instanceof Error ? e.message : "outbound_me_failed", 500);
     }
@@ -85,7 +88,9 @@ export async function GET(req: Request): Promise<Response> {
   try {
     switch (view) {
       case "team":
-        return ok(await teamOverview(ws));
+        // premiumSpend: paid-enrichment ledger events (JD Sourcing phone boost),
+        // grouped by the recruiter who triggered them, last 30 days.
+        return ok({ ...(await teamOverview(ws)), premiumSpend: userSpendRollup(ws, "30d", "premium_phone_boost") });
       case "insights":
         return ok(await adminInsights(ws));
       case "goals": {

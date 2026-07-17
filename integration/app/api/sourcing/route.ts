@@ -8,6 +8,8 @@
  *   { action: "save", id?, name, jd, icp, queries, candidates } -> stage a named run
  *   { action: "promote", id, minFit? }             -> push a saved run into Candidates under its name
  *   { action: "enrich", id, top? }                 -> enrich contacts for the top N staged candidates
+ *   { action: "premiumPhoneQuote", id }            -> price the paid phone boost: rows still missing a phone, est cost from the rolling hit rate
+ *   { action: "premiumPhoneRun", id, max? }        -> RECRUITER-TRIGGERED paid phone rung (skip-trace listing) over the next `max` phone-less rows; ledger-attributed to the caller
  *   { action: "vet", id, top? }                    -> deep-vet the top N: submits a 50%-cheaper Message Batch (sync fallback)
  *   { action: "vetStatus", id }                    -> poll the in-flight vet batch; ingests results once it ends
  *   { action: "koldinfoExport", id, top? }         -> FIRST rung (free): CSV of candidates still missing an email, for KoldInfo
@@ -40,6 +42,7 @@ import {
   mergeSourcingRuns, getRapidQuota,
   gapFillContacts, listNightItems, addNightItem, removeNightItem,
   landlineDbReady,
+  premiumPhoneQuote, runPremiumPhoneBoost,
 } from "../../../lib/sourcing";
 import type { CandidateRow, SearchBreadth, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { sendRunNow } from "../../../lib/sourcing/autoflow";
@@ -314,6 +317,36 @@ export async function POST(req: Request) {
       const { enriched, phones, cacheHits } = await gapFillContacts(ws, run.candidates.slice(0, top));
       await saveSourcingRun(ws, { ...run });
       return ok({ enriched, phones, cacheHits, run });
+    }
+
+    // ---- Premium phone boost: the recruiter-triggered "$0.10 tool" ----
+    // NEVER automatic. The UI offers it once the free chain has finished, with an
+    // estimate priced from the workspace's own rolling hit rate; the recruiter
+    // decides, the spend lands in the billing ledger attributed to that recruiter.
+    if (action === "premiumPhoneQuote") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      return ok({ quote: await premiumPhoneQuote(ws, run) });
+    }
+
+    if (action === "premiumPhoneRun") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      // Don't buy numbers while the free chain is still (or resumably) mid-flight:
+      // it may be about to fill the same rows for nothing.
+      if (run.koldJob || run.koldDbJob || run.laxisJob) {
+        return fail("enrichment_in_flight", 409, {
+          detail: "free enrichment is still running on this list; let it finish (or press Enrich to resume it), then boost what is left",
+        });
+      }
+      const result = await runPremiumPhoneBoost(ws, run, {
+        max: b.max,
+        actor: { userId: g.ctx.user.id, userEmail: g.ctx.user.email || "" },
+      });
+      await saveSourcingRun(ws, { ...run });
+      return ok({ ...result, run });
     }
 
     // KoldInfo is the FIRST enrichment rung (free CSV round-trip the operator drives):

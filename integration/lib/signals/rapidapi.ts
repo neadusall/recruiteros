@@ -264,10 +264,18 @@ function makeLineFinder(
   hostKey: string,
   pathKey: string,
 ): EnrichmentProvider<string> {
+  // Real per-call price of the configured listing, so the dial-cap math and the
+  // budget ledger stay honest. RAPIDAPI_MOBILE_COST_USD / RAPIDAPI_LANDLINE_COST_USD;
+  // defaults to the $0.01 cheap-listing estimate. (Static by provider contract, so
+  // env-level, not workspace-level; the workspace-priced rung is the skip-trace one.)
+  const unitCost = (() => {
+    const v = Number(process.env[hostKey.replace(/_HOST$/, "_COST_USD")] ?? "");
+    return Number.isFinite(v) && v > 0 ? v : 0.01;
+  })();
   return makeProvider<string>({
     id,
     label,
-    cost: 0.01, // USD estimate per RapidAPI call (per-call billing; tune to your listing)
+    cost: unitCost,
     typicalConfidence: 0.45,
     envKeys: ["RAPIDAPI_KEY", hostKey, pathKey],
     fn: async ({ subject, resolved }: EnrichmentInput): Promise<ProviderOutcome<string>> => {
@@ -285,8 +293,8 @@ function makeLineFinder(
         .replace("{linkedin}", encodeURIComponent(linkedin));
       const data = await rapidGet<unknown>(host, path);
       const number = pick(data, ["mobile", "cell", "phone", "phone_number", "direct_dial", "number"]);
-      if (!number) return { status: "miss", cost: 0.01 }; // RapidAPI bills per call, even on a miss
-      return { status: "hit", value: number, confidence: 0.5, cost: 0.01, raw: data };
+      if (!number) return { status: "miss", cost: unitCost }; // RapidAPI bills per call, even on a miss
+      return { status: "hit", value: number, confidence: 0.5, cost: unitCost, raw: data };
     },
   });
 }

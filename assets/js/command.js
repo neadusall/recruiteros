@@ -896,6 +896,26 @@
 
         // Heatmap.
         html += obHeatmapHtml(t);
+
+        // Paid enrichment spend, attributed to the recruiter who triggered it
+        // (the JD Sourcing Boost phones button writes one ledger event per run).
+        var psp = t.premiumSpend || { rows: [], totalUsd: 0 };
+        html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Paid phone enrichment · last 30 days</b>' +
+          '<span style="flex:1"></span><b>$' + Number(psp.totalUsd || 0).toFixed(2) + '</b></div>';
+        if ((psp.rows || []).length) {
+          html += '<div style="overflow-x:auto"><table class="ob-heat"><thead><tr>' +
+            '<th style="text-align:left">Recruiter</th><th>Boost runs</th><th>Paid lookups</th><th>Phones found</th><th>Spend</th></tr></thead><tbody>' +
+            psp.rows.map(function (u) {
+              return "<tr><td style=\"text-align:left\">" + esc(u.userEmail || "Unattributed") + "</td>" +
+                "<td style=\"text-align:center\">" + (u.events || 0) + "</td>" +
+                "<td style=\"text-align:center\">" + (u.quantity || 0) + "</td>" +
+                "<td style=\"text-align:center\">" + (u.found || 0) + "</td>" +
+                "<td style=\"text-align:center\">$" + Number(u.costUsd || 0).toFixed(2) + "</td></tr>";
+            }).join("") + "</tbody></table></div>";
+        } else {
+          html += '<div class="muted" style="font-size:12.5px">No paid phone-boost spend yet. Recruiters trigger it per list in JD Sourcing (Boost phones) after the free enrichment finishes; every run lands here with who spent what and what it found.</div>';
+        }
+        html += "</div>";
         body.innerHTML = html;
         obWireHeatmap(body, t);
         Array.prototype.forEach.call(body.querySelectorAll("[data-ob-user]"), function (el) {
@@ -1446,6 +1466,17 @@
             '<div><div class="ob-num">' + Math.max(0, u.target - u.used) + '</div><div class="ob-num-l">Remaining</div></div></div>' +
             obBar(u.targetPct, m.fg) + "</div>";
         }).join("") + "</div>";
+
+        // Your own paid-enrichment spend (JD Sourcing Boost phones), so what you
+        // approved and what it bought is always visible to you, not just to admins.
+        var myPsp = me.premiumSpend;
+        if (myPsp && (myPsp.costUsd > 0 || myPsp.quantity > 0)) {
+          html += '<div class="panel-card ob-card ob-mini"><div class="ob-card-head"><b>Your paid phone lookups · last 30 days</b>' +
+            '<span style="flex:1"></span><b>$' + Number(myPsp.costUsd || 0).toFixed(2) + '</b></div>' +
+            '<div class="muted" style="font-size:12.5px">' + (myPsp.quantity || 0) + ' paid lookup' + ((myPsp.quantity || 0) === 1 ? "" : "s") +
+            ' across ' + (myPsp.events || 0) + ' boost run' + ((myPsp.events || 0) === 1 ? "" : "s") +
+            ' · ' + (myPsp.found || 0) + ' phone' + ((myPsp.found || 0) === 1 ? "" : "s") + ' added. Triggered only by you, per list, from JD Sourcing.</div></div>';
+        }
 
         // Daily checklist.
         var doneN = cl ? cl.completedSteps : 0, totN = cl ? cl.totalSteps : 0;
@@ -10049,6 +10080,7 @@
             '<p>Everything after the search is automatic. Enrichment fills business emails and phones cheapest-first (the free KoldInfo pass, then Laxis, then the in-house waterfall), the whole list is pushed into the <b>Candidates</b> tab (sidebar, under Build) under the same name, and an <b>OS Text</b> campaign is created from everyone with a phone number: contacts arrive formatted (first name, last name, company, title, location, email, LinkedIn URL) so every {token} fills in, with a starter message prefilled. Telnyx confirms every number on arrival; only real cell lines are kept for texting, and anyone already in an ATS conversation is protected from double-contact.</p>' +
             '<p><b>The enrichment chip on each list tells you if it finished.</b> Green "fully enriched" = every batch went through the whole chain; anyone still missing contact info is someone the sources genuinely had nothing for. Amber "enrichment unfinished" (with roughly how far it got) or "not enriched yet" = the run stopped early, so press Enrich until the chip turns green.</p>' +
             '<p><b>Enrich</b>: The resume switch; you normally never need it. If a run stops early (server update, closed tab), pressing it continues from the first unfinished batch (finished batches are never bought twice) and re-sends the refreshed contacts to Candidates and OS Text. Safe to press repeatedly.</p>' +
+            '<p><b>Boost phones (optional, paid)</b>: Once the free enrichment has finished, a list with candidates still missing a phone shows a Boost phones button. It runs a paid public-records lookup (about 10 cents per candidate) on just those rows to grow your textable market. Nothing is spent until you approve the estimate it shows first; when it finishes it reports the exact cost, the spend is logged to your account under Outbound Performance, and rows it already tried are never billed twice.</p>' +
             '<p><b>Delete</b>: Removes the saved list; the people themselves are not deleted.</p>' +
           '</div>' +
         '</div>' +
@@ -10320,6 +10352,15 @@
           // lingering job ref means a chain is (or was) mid-flight. Outcome words only.
           var ep = r.laxisProgress;
           var epDone = ep ? Math.min(n, ep.nextStart == null ? n : (ep.nextStart || 0)) : 0;
+          // Boost phones eligibility: only AFTER the free chain has run (a chunk ledger,
+          // an auto-send, or a promote proves it), never while a job is mid-flight, and
+          // only for rows the paid lookup can key (real name) that were not bought before.
+          var busyJobs = !!(r.koldJob || r.koldDbJob || r.laxisJob);
+          var enrichRan = !!(ep || (r.autoflow && r.autoflow.sentAt) || r.promotedCount);
+          var boostable = (!busyJobs && enrichRan) ? (r.candidates || []).filter(function (c) {
+            return !(c.phone || "").trim() && !c.premiumPhoneTriedAt &&
+              ((c.fullName || "").trim().split(/\s+/).length >= 2);
+          }).length : 0;
           var enrichChip;
           if (!n) enrichChip = "";
           else if (r.koldJob || r.koldDbJob || r.laxisJob) enrichChip =
@@ -10355,7 +10396,10 @@
             // run automatically when a search finishes. Enrich stays as a manual RESUME
             // for a chain that stopped early (deploy, worker crash); it re-sends the
             // refreshed contacts onward when it finishes. Delete is the only other action.
+            // Boost phones is the ONLY paid extra: it appears once the free chain has
+            // run, is recruiter-triggered, and always shows the estimated cost first.
             '<div class="jd-run-actions">' +
+              (boostable ? '<button class="btn btn-ghost btn-sm" data-boost="' + esc(r.id) + '" title="The free sources found phones for ' + phs + ' of ' + n + '. Boost runs a paid public-records lookup (about 10 cents each) on the ' + boostable + ' still missing one. You see the estimated cost and approve it before anything is spent; the actual spend is logged to your account.">Boost phones · ' + boostable + ' left</button>' : '') +
               '<button class="btn btn-ghost btn-sm" data-autoenrich="' + esc(r.id) + '" title="Enrichment runs automatically after every search. Press this only if a run stopped early: it resumes exactly where it left off (already-enriched batches are never re-bought) and re-sends the refreshed contacts to Candidates and OS Text when done.">Enrich</button>' +
               '<button class="btn btn-ghost btn-sm" data-del="' + esc(r.id) + '">Delete</button>' +
             '</div></div>';
@@ -10850,11 +10894,78 @@
       if ((id = t.getAttribute("data-autoenrich"))) {
         var erun = (state.runs || []).find(function (r) { return r.id === id; });
         runAutoPipeline(id, (erun && erun.name) || "Candidate list", t);
+      } else if ((id = t.getAttribute("data-boost"))) {
+        boostPhones(id, t);
       } else if ((id = t.getAttribute("data-del"))) {
         if (!confirm("Delete this saved list?")) return;
         send("/sourcing", "POST", { action: "delete", id: id }).then(loadRuns);
       }
     });
+
+    /* ---- Boost phones: the recruiter-triggered paid phone lookup ----
+       Strictly manual and estimate-first: quote the rows still missing a phone at
+       the configured per-lookup price (hit-rate from this workspace's own history),
+       ask, then buy in 20-row batches (deploy-proof via sendPatient; a missed row
+       is stamped and never re-billed). Ends with the ACTUAL cost, which is also
+       ledger-logged to this recruiter and visible under Outbound Performance. */
+    function boostPhones(rid2, btn) {
+      var brun = (state.runs || []).find(function (r) { return r.id === rid2; });
+      var rname = (brun && brun.name) || "this list";
+      var orig = btn.textContent;
+      btn.disabled = true; btn.textContent = "Pricing…";
+      sendPatient("/sourcing", "POST", { action: "premiumPhoneQuote", id: rid2 }).then(function (q) {
+        btn.disabled = false; btn.textContent = orig;
+        if (!q.ok) { alert("Could not price the boost: " + ((q.data && q.data.error) || gatewayMsg(q.status))); return; }
+        var quote = (q.data && q.data.quote) || {};
+        if (!quote.configured) {
+          alert("Boost phones is not set up yet.\n\nAsk your admin to open Setup > JD Sourcing and fill the Boost phones fields (the host + path of a RapidAPI skip-trace listing, about $0.10 per lookup). Once saved, this button prices and runs it.");
+          return;
+        }
+        if (!quote.missing) { toast("Nothing left to boost: everyone reachable already has a phone number."); loadRuns(); return; }
+        var per = "$" + Number(quote.unitCostUsd).toFixed(2);
+        var basis = quote.statsBasis
+          ? ("your team's real hit rate so far (" + Math.round(quote.hitRate * 100) + "% across " + quote.statsBasis + " lookups)")
+          : ("a typical " + Math.round(quote.hitRate * 100) + "% hit rate (it switches to your real rate as you use it)");
+        var ask = quote.missing + " candidate" + (quote.missing === 1 ? "" : "s") + " on \"" + rname + "\" still " + (quote.missing === 1 ? "has" : "have") + " no phone number after the free enrichment.\n\n" +
+          "Boost phones runs a paid public-records lookup on each of them at " + per + " per " + (quote.billing === "hit" ? "number FOUND (misses are free)" : "lookup, found or not") + ".\n\n" +
+          "Estimated cost: about $" + Number(quote.estCostUsd).toFixed(2) + " for an expected " + quote.estFinds + " new phone" + (quote.estFinds === 1 ? "" : "s") + ", based on " + basis + ".\n\n" +
+          "You will get the exact cost when it finishes, and the spend is logged to your account. Run it now?";
+        if (!confirm(ask)) return;
+        btn.disabled = true;
+        var tot = { called: 0, found: 0, cache: 0, cost: 0 };
+        var startMissing = quote.missing;
+        function batch() {
+          btn.textContent = "Boosting " + Math.min(startMissing, tot.called + tot.cache) + "/" + startMissing + "…";
+          sendPatient("/sourcing", "POST", { action: "premiumPhoneRun", id: rid2, max: 20 }).then(function (r) {
+            if (!r.ok) {
+              btn.disabled = false; btn.textContent = orig;
+              alert("Boost stopped: " + ((r.data && r.data.error) || gatewayMsg(r.status)) +
+                ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "") +
+                (tot.called ? ("\n\nSpent so far: $" + tot.cost.toFixed(2) + " for " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + ". Everything found is saved; press Boost again to continue.") : ""));
+              loadRuns(); return;
+            }
+            var d = r.data || {};
+            tot.called += d.called || 0; tot.found += d.found || 0;
+            tot.cache += d.cacheHits || 0; tot.cost += d.costUsd || 0;
+            if (d.stoppedEarly) {
+              btn.disabled = false; btn.textContent = orig;
+              alert("Boost stopped early: " + d.stoppedEarly + "\n\nActual spend so far: $" + tot.cost.toFixed(2) + " · " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added (all saved). Fix the listing settings, then press Boost again to continue; rows already bought are never re-billed.");
+              loadRuns(); return;
+            }
+            if (d.remaining > 0 && (d.called > 0 || d.cacheHits > 0)) { batch(); return; }
+            btn.disabled = false; btn.textContent = orig;
+            var read = "Boost finished on \"" + rname + "\".\n\n" +
+              "Phones added: " + tot.found + (tot.cache ? (" (" + tot.cache + " came free from your contact cache)") : "") + "\n" +
+              "Paid lookups: " + tot.called + "\n" +
+              "Actual cost: $" + tot.cost.toFixed(2) + " (estimate was $" + Number(quote.estCostUsd).toFixed(2) + ")\n\n" +
+              "The spend is logged to your account (Outbound Performance shows it), the refreshed list flows on to Candidates and OS Text by itself, and every new number still passes the cell-line check before any text goes out.";
+            alert(read);
+            loadRuns();
+          });
+        }
+        batch();
+      });
+    }
 
     /* ---- Combine lists: tick 2+ saved lists, merge into ONE deduped master list ----
        For the "I ran the same role three slightly different ways" case: duplicates

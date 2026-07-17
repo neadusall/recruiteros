@@ -164,6 +164,16 @@ const CATALOG: IntegrationMeta[] = [
       // first; this listing is only called for candidates they could not fill.
       { key: "RAPIDAPI_PHONE_HOST", label: "Phone finder · host", required: false, placeholder: "your-phone-listing.p.rapidapi.com", hint: "Optional. A RapidAPI phone/direct-dial listing's x-rapidapi-host. Fills phone numbers the free sources (KoldInfo, Laxis, in-house database) missed. Leave blank to skip the paid phone rung." },
       { key: "RAPIDAPI_PHONE_PATH", label: "Phone finder · path", required: false, placeholder: "/lookup?name={name}&company={company}&domain={domain}", hint: "Path template; {name} {company} {domain} are filled per candidate. Uses the same RapidAPI key above." },
+      // --- Boost phones (optional, recruiter-triggered): the ~$0.10 skip-trace rung ---
+      // Never automatic: after the free chain finishes, each JD Sourcing list offers
+      // "Boost phones" with an estimated cost; the recruiter decides, and the actual
+      // spend is tracked per recruiter in Outbound Performance.
+      { key: "RAPIDAPI_SKIPTRACE_HOST", label: "Boost phones · host", required: false, placeholder: "skip-tracing-working-api.p.rapidapi.com", hint: "Optional. A RapidAPI skip-trace / people-search listing's x-rapidapi-host. Keys on name + city/state (no LinkedIn URL needed) and returns cell numbers from US public records. Powers the recruiter-triggered Boost phones option on each list." },
+      { key: "RAPIDAPI_SKIPTRACE_PATH", label: "Boost phones · path", required: false, placeholder: "/search/byname?name={name}&citystatezip={citystatezip}&page=1", hint: "Copy the endpoint path from your listing's code example and put {name} {citystatezip} (or {city} {state} {company} {linkedin}) where its parameters go. Filled per candidate." },
+      { key: "RAPIDAPI_SKIPTRACE_METHOD", label: "Boost phones · method", required: false, placeholder: "GET", hint: "GET or POST, per the listing's example. Leave blank = GET." },
+      { key: "RAPIDAPI_SKIPTRACE_BODY", label: "Boost phones · POST body", required: false, placeholder: "{\"name\":\"{name}\",\"citystatezip\":\"{citystatezip}\"}", hint: "POST listings only: the JSON body template with the same placeholders. Ignore for GET." },
+      { key: "RAPIDAPI_SKIPTRACE_COST_USD", label: "Boost phones · price per lookup", required: false, placeholder: "0.10", hint: "What the listing bills per lookup, in USD. Drives the estimate the recruiter sees and the spend tracking. Default 0.10." },
+      { key: "RAPIDAPI_SKIPTRACE_BILLING", label: "Boost phones · billed per", required: false, placeholder: "call", hint: "call = every lookup bills, found or not (the RapidAPI norm). hit = pay-per-result listings that only charge when a number comes back." },
       // --- Free first pass (optional): Google Programmable Search over the X-ray boolean ---
       { key: "GOOGLE_CSE_KEY", label: "Free pass · Google API key", required: false, secret: true, placeholder: "AIza…", hint: "Optional. Google Custom Search JSON API key: gives 100 FREE searches/day that run before any paid lookup. Heads up: Google closed this API to new signups and retires it Jan 1, 2027; if you can't create a key, use the Serper wide pass below instead." },
       { key: "GOOGLE_CSE_CX", label: "Free pass · Search engine ID (cx)", required: false, placeholder: "xxxxxxxxxxxxx", hint: "Optional. Your Programmable Search Engine ID. Create one at programmablesearchengine.google.com set to search the entire web." },
@@ -178,6 +188,7 @@ const CATALOG: IntegrationMeta[] = [
       "FREE PASS (optional) → add a Google Custom Search key + engine ID (cx) to get 100 free searches/day that run before any paid lookup. Google retires this API Jan 1, 2027 and no longer accepts new signups.",
       "WIDE PASS (recommended) → add a serper.dev API key: real Google results at roughly $0.30-$1 per 1,000 searches, no daily cap, runs before the paid people search. New accounts start with 2,500 free credits.",
       "PHONE FINDER (optional) → subscribe to any RapidAPI phone/direct-dial lookup listing and fill its host + path. It only runs on candidates the free phone sources (KoldInfo, Laxis, the in-house database) could not fill, so it is pure top-up spend.",
+      "BOOST PHONES (optional) → subscribe to a RapidAPI skip-trace / people-search listing (about $0.10 per lookup) and fill its host + path. This one is recruiter-triggered: after the free enrichment finishes, each list shows a Boost phones option with an estimated cost, and every run's real spend is tracked per recruiter under Outbound Performance.",
       "Paste your RapidAPI key, fill the values above exactly, Save, then Test. It should go green.",
     ],
     docsUrl: "https://rapidapi.com/saleleads-saleleads-default/api/fresh-linkedin-scraper-api",

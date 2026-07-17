@@ -127,6 +127,15 @@ export const DEFAULT_RATES: CostRate[] = [
     scales: "per_prospect",
   },
   {
+    id: "premium_phone_boost",
+    label: "Premium phone boost (skip-trace, recruiter-triggered)",
+    category: "enrichment",
+    unitCostUsd: 0.1,
+    unit: "per lookup",
+    note: "The JD Sourcing 'Boost phones' rung: a RapidAPI skip-trace / people-search listing keyed on name + city/state (RAPIDAPI_SKIPTRACE_HOST/PATH; per-lookup price Setup-tunable via RAPIDAPI_SKIPTRACE_COST_USD, default $0.10). NEVER automatic: the recruiter triggers it per list after the free chain finishes, sees an estimate first (rolling workspace hit rate), and the actual spend is ledger-attributed to that recruiter (type premium_phone_boost). Numbers still pass the forced Telnyx cell check at OS Text push.",
+    scales: "per_prospect",
+  },
+  {
     id: "landline_premium_backup",
     label: "Landline, premium reveal (backup, on miss only)",
     category: "enrichment",

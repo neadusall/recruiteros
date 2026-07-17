@@ -126,6 +126,12 @@ export interface CandidateRow {
   vetRationale?: string;
   /** True once the full profile was fetched (vs vetted on shallow fields only). */
   profileFetched?: boolean;
+  /**
+   * When the paid phone boost last attempted this row (hit or miss). A missed
+   * lookup is never re-billed: boosted rows are excluded from later boost passes,
+   * so pressing Boost phones repeatedly only ever pays for fresh rows.
+   */
+  premiumPhoneTriedAt?: string;
 }
 
 /** A named, saved sourcing result that lives in the JD Sourcing tab (staging). */

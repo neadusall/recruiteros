@@ -120,6 +120,14 @@ export {
   cheapTier,
 } from "./rapidapi";
 export { apifyDirectDialFinder } from "./apify";
+export {
+  makeSkipTracePhoneProvider,
+  skipTraceConfigured,
+  skipTraceUnitCost,
+  skipTraceBilling,
+  extractSkipTracePhone,
+  SKIPTRACE_DEFAULT_COST_USD,
+} from "./skiptrace";
 export { classifyLine, classifyContactNumbers, mapLineType } from "./phoneClassify";
 export type { LineType, ClassifyResult, ClassifyOptions } from "./phoneClassify";
 export type {

@@ -208,6 +208,69 @@ export function workspaceCostByCategory(workspaceId: string, window: SpendWindow
   return out;
 }
 
+/* ---------------- per-recruiter attribution ---------------- */
+
+export interface UserSpendRow {
+  /** Recruiter identity as stamped on the event meta ("" = unattributed). */
+  userEmail: string;
+  userId?: string;
+  costUsd: number;
+  events: number;
+  /** Billable lookups across the events. */
+  quantity: number;
+  /** Results delivered (meta.found), where the event type reports one. */
+  found: number;
+}
+
+/**
+ * Spend grouped by the recruiter who triggered it (events carrying meta.userEmail /
+ * meta.userId), optionally filtered to one event type. Powers the "who is spending
+ * what on paid enrichment" analytics for admins and the self view for recruiters.
+ */
+export function userSpendRollup(
+  workspaceId: string,
+  window: SpendWindow = "30d",
+  type?: string,
+): { rows: UserSpendRow[]; totalUsd: number; window: SpendWindow } {
+  const since = windowStart(window);
+  const byUser = new Map<string, UserSpendRow>();
+  let total = 0;
+  for (const e of store.events) {
+    if (e.workspaceId !== workspaceId || Date.parse(e.at) < since) continue;
+    if (type && e.type !== type) continue;
+    const meta = (e.meta ?? {}) as Record<string, unknown>;
+    const email = String(meta.userEmail ?? "").toLowerCase();
+    const row = byUser.get(email) ?? {
+      userEmail: email, userId: typeof meta.userId === "string" ? meta.userId : undefined,
+      costUsd: 0, events: 0, quantity: 0, found: 0,
+    };
+    row.costUsd = round(row.costUsd + e.costUsd);
+    row.events += 1;
+    row.quantity += e.quantity;
+    row.found += Number(meta.found) || 0;
+    if (!row.userId && typeof meta.userId === "string") row.userId = meta.userId;
+    byUser.set(email, row);
+    total = round(total + e.costUsd);
+  }
+  return {
+    rows: [...byUser.values()].sort((a, b) => b.costUsd - a.costUsd),
+    totalUsd: total,
+    window,
+  };
+}
+
+/** One recruiter's own slice of the rollup (self-scoped analytics). */
+export function userSpend(
+  workspaceId: string,
+  userEmail: string,
+  window: SpendWindow = "30d",
+  type?: string,
+): UserSpendRow {
+  const email = userEmail.toLowerCase();
+  const hit = userSpendRollup(workspaceId, window, type).rows.find((r) => r.userEmail === email);
+  return hit ?? { userEmail: email, costUsd: 0, events: 0, quantity: 0, found: 0 };
+}
+
 /** Dev/tests only. */
 export function devLedger() {
   return store;
