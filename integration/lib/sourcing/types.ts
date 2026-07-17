@@ -193,6 +193,8 @@ export interface SourcingRun {
     /** Candidates holding a phone at the last send — the top-up trigger. */
     phonesAtSend: number;
     attempts: number;
+    /** When the sweeper queued a server-side resume for an orphaned chain. */
+    resumedAt?: string;
     /** Last failure (kept for ops visibility); cleared on a clean send. */
     error?: string;
   };

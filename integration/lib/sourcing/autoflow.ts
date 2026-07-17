@@ -8,7 +8,8 @@
  * does this live, but it runs in the browser: close the tab mid-chain, lose the
  * connection, or hit one failed request and the finished list just sits there
  * looking done while nothing was pushed. This sweeper is the server-side backstop
- * that makes the push unconditional:
+ * that makes the push unconditional (ticked from GET /api/sourcing/night by the ros
+ * nightqueue timer every 2 minutes — see the note there on why not instrumentation):
  *
  *   every few minutes, for every saved recruiting list:
  *     - enrichment chain finished (laxisProgress.nextStart === null), settled a
@@ -31,14 +32,16 @@ import { nowIso } from "../core/ids";
 import type { SourcingRun } from "./types";
 import { listAllSourcingRuns, saveSourcingRun } from "./store";
 import { promoteSourcingRun } from "./promote";
+import { listNightItems, addNightItem } from "./nightQueue";
 import { workspaceOwner } from "../auth";
 import {
   ostextImport, ostextStarterTemplate, ostextPushConfigured, type OsTextContact,
 } from "../ostextImport";
 
-const TICK_MS = 3 * 60_000;        // sweep cadence
 const SETTLE_MS = 5 * 60_000;      // chain-finished lists rest this long first (live tab pushes within seconds)
 const IDLE_MS = 45 * 60_000;       // a stalled / never-started chain still flows on after this
+const STUCK_MS = 60 * 60_000;      // a job ref idle this long = orphaned chain (tab died mid-job) -> resume it
+const RESUME_GRACE_MS = 2 * 3600_000; // a resumed chain gets this long to land before we force-send as-is
 const FRESH_MS = 7 * 24 * 3600_000; // only lists touched in the last 7 days are eligible
 const MAX_ATTEMPTS = 20;           // ~1 hour of retries on a hard failure, then park with the error
 const MAX_SENDS_PER_TICK = 3;      // bound one tick's work; the rest go next tick
@@ -52,12 +55,24 @@ function enrichmentInFlight(run: SourcingRun): boolean {
 }
 
 /** Should the sweeper act on this run right now? */
-function due(run: SourcingRun, now: number): "send" | "topup" | null {
+function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | null {
   if (!run.candidates.length) return null;
-  if (run.motion !== "recruiting") return null;
-  if (enrichmentInFlight(run)) return null; // the chain clears these refs when it lands
+  if (run.motion === "bd") return null; // undefined motion (pre-field runs) counts as recruiting
   const touched = Date.parse(run.updatedAt);
   if (!Number.isFinite(touched) || now - touched > FRESH_MS) return null;
+
+  if (enrichmentInFlight(run)) {
+    // A LIVE chain updates the run on every submit/merge; a job ref that has sat
+    // untouched for STUCK_MS is an orphan (the driving tab died mid-job). Hand it
+    // to the overnight queue's resume machinery once — it polls, merges, clears
+    // the refs and finishes the chain server-side. If even that hasn't landed the
+    // chain after RESUME_GRACE_MS, the list flows on with what it already has.
+    if (now - touched < STUCK_MS) return null;
+    if (run.autoflow?.sentAt) return null; // already sent; a landed resume re-triggers via top-up
+    const resumedAt = run.autoflow?.resumedAt ? Date.parse(run.autoflow.resumedAt) : NaN;
+    if (!Number.isFinite(resumedAt)) return "resume";
+    return now - resumedAt >= RESUME_GRACE_MS ? "send" : null;
+  }
 
   if (run.autoflow?.sentAt) {
     // Already sent: only a later enrichment that found MORE phones re-sends (top-up).
@@ -69,6 +84,25 @@ function due(run: SourcingRun, now: number): "send" | "topup" | null {
   if (chainDone && now - touched >= SETTLE_MS) return "send";
   if (now - touched >= IDLE_MS) return "send"; // stalled or never-started: flow on with what it has
   return null;
+}
+
+/** Queue an orphaned chain for the overnight processor to finish (once per run). */
+async function resumeRun(run: SourcingRun): Promise<void> {
+  const stamp = run.autoflow ?? { phonesAtSend: 0, attempts: 0 };
+  try {
+    // If the queue already holds an unfinished item for this run, just stamp and wait.
+    const items = await listNightItems(run.workspaceId);
+    const active = items.some((i) => i.runId === run.id && i.stage !== "done" && i.stage !== "error");
+    if (!active) {
+      await addNightItem(run.workspaceId, { kind: "enrich", name: run.name, runId: run.id });
+      console.log(`[sourcing-autoflow] "${run.name}" (${run.id}) chain orphaned mid-job — queued a server-side resume`);
+    }
+    stamp.resumedAt = nowIso();
+    run.autoflow = stamp;
+    await saveSourcingRun(run.workspaceId, { ...run });
+  } catch (e) {
+    console.error(`[sourcing-autoflow] resume of "${run.name}" failed: ${(e as Error).message}`);
+  }
 }
 
 /** Mirror of the sourcing route's "ostext" contact mapping — full merge-column set. */
@@ -151,6 +185,7 @@ async function sendRun(run: SourcingRun): Promise<void> {
 }
 
 let sweeping = false;
+let lastBeat = 0;
 
 /** One sweep over every saved run. Cheap when nothing is due; a mutex makes
  *  overlapping timer hits harmless. */
@@ -160,9 +195,16 @@ export async function tickSourcingAutoflow(): Promise<{ sent: number }> {
   let sent = 0;
   try {
     const now = Date.now();
-    for (const run of await listAllSourcingRuns()) {
+    const runs = await listAllSourcingRuns();
+    if (now - lastBeat > 3600_000) {
+      lastBeat = now;
+      console.log(`[sourcing-autoflow] sweeping ${runs.length} saved run(s) (hourly heartbeat)`);
+    }
+    for (const run of runs) {
       if (sent >= MAX_SENDS_PER_TICK) break;
-      if (!due(run, now)) continue;
+      const what = due(run, now);
+      if (!what) continue;
+      if (what === "resume") { await resumeRun(run); continue; }
       await sendRun(run);
       sent++;
     }
@@ -174,15 +216,7 @@ export async function tickSourcingAutoflow(): Promise<{ sent: number }> {
   return { sent };
 }
 
-let started = false;
-
-/** Arm the sweeper (instrumentation.ts calls this once per boot). Idempotent. */
-export function ensureSourcingAutoflow(): void {
-  if (started) return;
-  started = true;
-  // First pass shortly after boot (catches lists that finished during the deploy),
-  // then the steady tick forever.
-  setTimeout(() => { void tickSourcingAutoflow(); }, 20_000);
-  setInterval(() => { void tickSourcingAutoflow(); }, TICK_MS);
-  console.log("[sourcing-autoflow] armed: finished JD Sourcing lists auto-send to Candidates + OS Text server-side");
-}
+// No self-arming timer on purpose: arming from instrumentation.ts gave this module
+// a SEPARATE bundle instance whose hydrated store copy went stale (and whose saves
+// could clobber the live one). GET /api/sourcing/night fire-and-forgets the tick on
+// every hit of the ros nightqueue timer (every 2 min), inside the request graph.

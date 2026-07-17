@@ -15,6 +15,7 @@
 import { NextResponse } from "next/server";
 import { requireCronAuth } from "../../../../lib/linkedin/auth";
 import { tickNightQueue, listNightItems } from "../../../../lib/sourcing";
+import { tickSourcingAutoflow } from "../../../../lib/sourcing/autoflow";
 
 async function run(req: Request) {
   const auth = requireCronAuth(req);
@@ -30,6 +31,11 @@ async function run(req: Request) {
   // overlapping timer hits harmless. The response just reports the queue is being served.
   const ticked = tickNightQueue().catch((e) => console.warn("[night-queue] tick failed:", e?.message ?? e));
   void ticked;
+  // Same timer also sweeps the auto-send (lib/sourcing/autoflow): finished lists flow
+  // on to Candidates + OS Text server-side. It MUST run in the request module graph —
+  // instrumentation.ts gets its own bundle instance whose store copy goes stale (and
+  // whose saves could clobber live data), which is why the queue ticks via HTTP too.
+  void tickSourcingAutoflow().catch((e) => console.warn("[sourcing-autoflow] tick failed:", e?.message ?? e));
   return NextResponse.json({ ok: true, ticked: true });
 }
 

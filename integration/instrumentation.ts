@@ -114,16 +114,13 @@ export async function register(): Promise<void> {
     } catch {
       /* never let an instrumentation hiccup block server startup */
     }
-    // JD Sourcing auto-send: the server-side guarantee that a finished (or stalled)
-    // saved list flows on to Candidates + OS Text with no browser tab open. The
-    // tab's hands-free chain pushes live; this sweeper catches everything it misses
-    // (closed tab mid-enrichment, dropped request, deploy mid-chain).
-    try {
-      const { ensureSourcingAutoflow } = await import("./lib/sourcing/autoflow");
-      ensureSourcingAutoflow();
-    } catch {
-      /* never let an instrumentation hiccup block server startup */
-    }
+    // NOTE (learned the hard way): the JD Sourcing auto-send sweeper
+    // (lib/sourcing/autoflow) is deliberately NOT armed here. instrumentation.ts is
+    // compiled as its own bundle entry, so modules imported from here get their OWN
+    // instances — the sweeper saw a boot-time copy of the sourcing-runs store that
+    // never received the route handlers' live updates (and saving from that stale
+    // copy could clobber real data). It ticks from GET /api/sourcing/night instead,
+    // inside the request module graph, driven by the existing nightqueue timer.
     // The Automation clock: the in-process replacement for the external n8n
     // conductor. Gated by AUTOMATION_ENABLED (no-op when off), it ticks the
     // cadence / LinkedIn / voice / sending / nurture engines on intervals so
