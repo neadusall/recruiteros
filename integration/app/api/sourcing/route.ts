@@ -726,6 +726,9 @@ export async function POST(req: Request) {
           // conversation (DNC or contacted within the cooldown) are filtered by
           // the shared importer; tallies come back as protectedDnc/protectedRecent.
           workspaceId: g.ctx.workspace.id,
+          // The recruiter's assigned phone line (Numbers page) becomes the
+          // campaign's SMS from-number: same number for their calls and texts.
+          fromUserId: g.ctx.user.id,
         });
       } catch (e) {
         const err = e as Error & { code?: string };

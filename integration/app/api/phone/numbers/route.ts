@@ -126,6 +126,14 @@ export async function POST(req: Request) {
         telnyxNumberId: b.telnyxNumberId ? String(b.telnyxNumberId) : undefined,
         assignedUserIds: [g.ctx.user.id],
       });
+      // Same number texts too: attach it to the messaging profile so OS Text
+      // sends from this line when it's someone's assigned number. Best-effort;
+      // a number without messaging never blocks voice setup.
+      if (line.telnyxNumberId) {
+        await withWorkspaceCreds(ws, () =>
+          telnyx.setNumberMessagingProfile(line.telnyxNumberId!),
+        ).catch(() => {});
+      }
       // Point the number's voice at our app so inbound rings the portal.
       if (line.telnyxNumberId && infra.appId) {
         try {

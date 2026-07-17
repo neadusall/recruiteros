@@ -506,14 +506,14 @@ export function workspaceHasOwnerMember(workspaceId: string): boolean {
   return false;
 }
 
-/** A workspace's owner (name + email), for background jobs acting on its behalf —
+/** A workspace's owner (id + name + email), for background jobs acting on its behalf —
  *  e.g. the JD Sourcing auto-send stamping the OS Text campaign's recruiter fields. */
-export async function workspaceOwner(workspaceId: string): Promise<{ name: string; email: string } | null> {
+export async function workspaceOwner(workspaceId: string): Promise<{ userId: string; name: string; email: string } | null> {
   await ensureAuthReady();
   for (const m of store.memberships) {
     if (m.workspaceId !== workspaceId || m.role !== "owner") continue;
     const u = store.users.get(m.userId);
-    if (u) return { name: u.name || "", email: u.email };
+    if (u) return { userId: m.userId, name: u.name || "", email: u.email };
   }
   return null;
 }

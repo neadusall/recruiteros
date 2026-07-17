@@ -173,6 +173,9 @@ async function sendRun(run: SourcingRun): Promise<void> {
           validate: true,
           // NO-DOUBLE-CONTACT GUARD: DNC + recent-communication cooldown.
           workspaceId: ws,
+          // The owner's assigned phone line (Numbers page) becomes the
+          // campaign's SMS from-number: same number for their calls and texts.
+          fromUserId: owner?.userId,
         });
       } catch (e) {
         // Everyone on the list being protected is the guard WORKING, not a failure.

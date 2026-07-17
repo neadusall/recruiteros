@@ -169,6 +169,22 @@ export function linesForUser(
   );
 }
 
+/**
+ * A recruiter's outbound identity as one E.164: the line they picked as active,
+ * else their first assigned recruiting line, else any assigned line. This is
+ * the number every channel should present — the browser phone already dials
+ * from it, and OS Text pushes stamp it as the campaign's SMS from-number, so
+ * assigning a number on the Numbers page ties calls AND texts to it.
+ */
+export function numberForUser(workspaceId: string, userId: string): string | undefined {
+  const mine = listLines(workspaceId).filter((l) => l.assignedUserIds.includes(userId));
+  if (!mine.length) return undefined;
+  const st = getUserState(workspaceId, userId);
+  const active = mine.find((l) => l.id === st.activeLineId);
+  const recruiting = mine.find((l) => l.motion === "recruiting");
+  return (active ?? recruiting ?? mine[0]).e164;
+}
+
 /* ---------------- per-user state ---------------- */
 
 export function getUserState(workspaceId: string, userId: string): PhoneUserState {

@@ -60,6 +60,13 @@ export interface OsTextImportArgs {
    * protectedRecent on the result.
    */
   workspaceId?: string;
+  /**
+   * The recruiter this push belongs to. When they have a phone line assigned on
+   * the Numbers page, that line becomes the campaign's SMS from-number, so the
+   * same number the recruiter calls from also texts. Needs workspaceId too;
+   * without a line the engine falls back to its shared sending number.
+   */
+  fromUserId?: string;
 }
 
 /** Call the engine's /api/import. Returns the engine's response body on success;
@@ -99,6 +106,19 @@ export async function ostextImport(args: OsTextImportArgs): Promise<Record<strin
       throw e;
     }
   }
+  // ONE NUMBER PER RECRUITER: the line assigned to this recruiter on the
+  // Numbers page rides along as the campaign's SMS from-number, so their texts
+  // and calls present the same caller ID. Best-effort: no line assigned (or
+  // phone system unavailable) simply leaves the engine's shared number in play.
+  let fromNumber: string | undefined;
+  if (args.workspaceId && args.fromUserId) {
+    try {
+      const { ensurePhoneReady, numberForUser } = await import("./phone/store");
+      await ensurePhoneReady();
+      fromNumber = numberForUser(args.workspaceId, args.fromUserId);
+    } catch { /* phone store unavailable -> shared number */ }
+  }
+
   let res: Response;
   try {
     res = await fetch(ostextEngineBase() + "/api/import", {
@@ -111,6 +131,7 @@ export async function ostextImport(args: OsTextImportArgs): Promise<Record<strin
           positionSummary: args.positionSummary,
           recruiterName: args.recruiterName,
           recruiterEmail: args.recruiterEmail,
+          ...(fromNumber ? { fromNumber } : {}),
         },
         contacts: args.contacts,
         validate: args.validate === true,

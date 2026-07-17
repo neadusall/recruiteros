@@ -149,6 +149,9 @@ export async function POST(req: Request) {
       // per-row checks above; catches nothing new here but keeps the shared
       // importer's contract uniform across callers).
       workspaceId: ws,
+      // The recruiter's assigned phone line (Numbers page) becomes the
+      // campaign's SMS from-number: same number for their calls and texts.
+      fromUserId: g.ctx.user.id,
     });
   } catch (e) {
     const err = e as Error & { code?: string };

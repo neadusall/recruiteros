@@ -52,6 +52,23 @@ export class TelnyxClient extends ProviderClient {
     });
   }
 
+  /**
+   * Attach a phone number to the workspace's messaging profile so it can send
+   * SMS. Called when a number is connected as a phone line, so the recruiter's
+   * assigned calling number is also a working texting number. No-op when no
+   * messaging profile is configured.
+   *   PATCH /phone_numbers/{id}/messaging
+   */
+  setNumberMessagingProfile(numberId: string, profileId?: string) {
+    const profile = profileId || this.env("TELNYX_MESSAGING_PROFILE_ID");
+    if (!profile) return Promise.resolve(undefined);
+    return this.request({
+      method: "PATCH",
+      path: `/phone_numbers/${encodeURIComponent(numberId)}/messaging`,
+      body: { messaging_profile_id: profile },
+    });
+  }
+
   /** Send an SMS from the configured 10DLC number (or an explicit from-number). */
   sendSms(to: string, text: string, from?: string) {
     return this.request({
