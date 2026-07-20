@@ -10512,7 +10512,24 @@
       '.jd-table tbody tr:hover td{background:var(--surface-2)}' +
       '.jd-table th{position:sticky;top:0;background:var(--bg-soft);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);font-weight:600;white-space:nowrap}' +
       '.jd-table a{color:var(--brand-2);text-decoration:none}.jd-table a:hover{text-decoration:underline}' +
-      '.jd-run{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}.jd-run:last-child{border-bottom:0}' +
+      '.jd-run{padding:12px 0;border-bottom:1px solid var(--border)}.jd-run:last-child{border-bottom:0}' +
+      '.jd-run-top{display:flex;justify-content:space-between;align-items:center;gap:10px}' +
+      /* The visible journey: four stops every list travels (Searched, Enriched,
+         Candidates, OS Text) printed on the row itself, so the team can SEE where a
+         list is without hovering chips. Green = done, pulsing = happening now,
+         amber = needs a press, grey = coming up automatically. */
+      '.jd-journey{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;margin:10px 0 0 25px}' +
+      '.jd-step{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;border:1px solid var(--border-strong);color:var(--text-dim);background:var(--bg-soft);cursor:default;text-decoration:none}' +
+      'a.jd-step{cursor:pointer}a.jd-step:hover{border-color:var(--ok);filter:brightness(1.05)}' +
+      '.jd-step .isvg{width:12px;height:12px;flex:0 0 auto}' +
+      '.jd-step.js-done{color:var(--ok);background:color-mix(in srgb, var(--ok) 9%, transparent);border-color:color-mix(in srgb, var(--ok) 38%, transparent)}' +
+      '.jd-step.js-live{color:var(--brand-2);background:var(--brand-soft);border-color:color-mix(in srgb, var(--brand) 40%, transparent)}' +
+      '.jd-step.js-act{color:#8a5a00;background:color-mix(in srgb, #d97706 9%, transparent);border-color:color-mix(in srgb, #d97706 38%, transparent)}' +
+      '.jd-step-dot{width:7px;height:7px;border-radius:50%;background:var(--brand-2);animation:jdpulse 1.3s infinite;flex:0 0 auto}' +
+      '.jd-step-arrow{color:var(--text-dim);font-size:12px;line-height:1;flex:0 0 auto;user-select:none}' +
+      '.jd-journey-note{margin:6px 0 0 25px;font-size:12px;color:var(--text-muted);line-height:1.5;max-width:860px}' +
+      '.jd-journey-note b{color:var(--text)}' +
+      '@media (max-width:760px){.jd-journey,.jd-journey-note{margin-left:0}}' +
       '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}' +
       '.jd-run-main{display:flex;align-items:center;gap:10px;min-width:0}' +
       '.jd-reach{display:inline-flex;flex-wrap:wrap;row-gap:4px;gap:6px;margin:0 4px 0 2px;vertical-align:middle;max-width:100%}' +
@@ -10536,7 +10553,7 @@
          press always answers (it explains the tick step instead of playing dead). */
       '.jd-combine-off{opacity:.55}' +
       '.jd-pick-nudge{outline:2px solid var(--accent,#2e5bd7);outline-offset:2px;border-radius:3px}' +
-      '@media (max-width:760px){.jd-run{flex-direction:column;align-items:stretch}.jd-run-actions{justify-content:flex-start}}' +
+      '@media (max-width:760px){.jd-run-top{flex-direction:column;align-items:stretch}.jd-run-actions{justify-content:flex-start}}' +
       '.jd-depth{border:1px solid var(--border-strong);border-radius:12px;background:var(--bg-soft);padding:14px 16px;margin-top:14px}' +
       '.jd-depth-h{font-weight:600;font-size:13.5px;color:var(--text)}' +
       '.jd-depth-sub{font-size:12px;color:var(--text-muted);margin:2px 0 12px}' +
@@ -10880,33 +10897,75 @@
           // they ran): the chain kept moving on the other sources, and Enrich re-runs
           // exactly these batches once Laxis is reachable again.
           var lxSkipN = (r.laxisSkipped && r.laxisSkipped.offsets) ? r.laxisSkipped.offsets.length : 0;
-          var enrichChip;
-          if (!n) enrichChip = "";
-          else if (r.koldJob || r.koldDbJob || r.laxisJob) enrichChip =
-            '<span class="jr-part" title="An enrichment run is in progress, or was interrupted mid-batch. If no progress bar is moving, press Enrich to pick it back up; finished batches are never bought twice."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>enriching…</span>';
-          else if (ep && ep.nextStart == null && lxSkipN) enrichChip =
-            '<span class="jr-part" title="Every batch finished, but ' + lxSkipN + ' batch' + (lxSkipN === 1 ? '' : 'es') + ' ran while one enrichment source was unreachable, so they were filled by the other sources only. Press Enrich to give those batches their full pass; already-finished batches are never bought twice."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>enriched · ' + lxSkipN + ' batch' + (lxSkipN === 1 ? '' : 'es') + ' to redo</span>';
-          else if (ep && ep.nextStart == null) enrichChip =
-            '<span class="jr-done" title="Every batch of this list has been through the full enrichment chain. Anyone still missing an email or phone is someone the sources had no contact info for."><svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>fully enriched</span>';
-          else if (ep) enrichChip =
-            '<span class="jr-part" title="Enrichment stopped partway: about ' + epDone + ' of ' + (ep.total || n) + ' rows are done. Press Enrich to finish; it resumes exactly where it stopped and finished batches are never bought twice."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>enrichment unfinished · ~' + epDone + '/' + (ep.total || n) + '</span>';
-          else enrichChip =
-            '<span class="jr-part" title="This list has not been through the full enrichment chain yet. Press Enrich to run it; when it finishes the refreshed contacts are re-sent to Candidates and OS Text."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>not enriched yet</span>';
-          // A silent auto-send failure is invisible no more: the server sweeper stamps
-          // its outcome on the run, and a list that reached Candidates but NOT OS Text
-          // says so right on the row (outcome words only, no raw internals).
+          // ---- The visible journey: the four stops every list travels (Searched,
+          // Enriched, Candidates, OS Text), each derived from fields the server
+          // already stamps (chunk ledger, mid-flight job refs, autoflow bookkeeping).
+          // This replaces the old hover-only enrichment/send chips: same truth, but
+          // readable at a glance instead of hidden in tooltips. Outcome words only.
           var afErr = (r.autoflow && r.autoflow.error) || "";
-          var sendChip = "";
-          if (afErr) {
-            sendChip = afErr.indexOf("ostext_not_connected") === 0
-              ? '<span class="jr-part" title="This list reached Candidates, but this workspace has no OS Text engine connected, so no text campaign was created. Connect OS Text under Setup (or have the owner grant access); the phones on this list are then pushed automatically within a few minutes."><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>not in OS Text yet</span>'
-              : '<span class="jr-part" title="The automatic send of this list hit a problem. It keeps retrying on its own; if this chip stays up for more than an hour, ask your admin to check the send logs."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>send issue, retrying</span>';
+          var afNotConn = afErr.indexOf("ostext_not_connected") === 0;
+          var sentOk = !!(r.autoflow && r.autoflow.sentAt);
+          function jStep(cls, icon, label, tip) {
+            return '<span class="jd-step ' + cls + '" title="' + esc(tip || "") + '">' +
+              (icon === "dot" ? '<span class="jd-step-dot"></span>' :
+                icon ? '<svg class="isvg" aria-hidden="true"><use href="#' + icon + '"/></svg>' : '') +
+              label + '</span>';
           }
+          var jArrow = '<span class="jd-step-arrow" aria-hidden="true">&rsaquo;</span>';
+          var sSearch = jStep("js-done", "i-check", "Searched · " + n,
+            "The search finished and saved " + n + " candidate" + (n === 1 ? "" : "s") +
+            (outN ? (": " + (n - outN) + " in area and " + outN + " out of area") : "") + ".");
+          var sEnrich, jNote = "";
+          if (busyJobs) {
+            sEnrich = jStep("js-live", "dot", "Enriching" + (ep ? " · ~" + epDone + "/" + (ep.total || n) : "…"),
+              "Contact info (emails and phones) is being filled in right now, cheapest source first. This runs by itself; nothing to press.");
+            jNote = "<b>Working now:</b> contact info is being filled in. When it finishes, everyone lands in Candidates and a text campaign is built by itself. Nothing to press.";
+          } else if (ep && ep.nextStart == null && lxSkipN) {
+            sEnrich = jStep("js-act", "i-loop", "Enriched · " + lxSkipN + " batch" + (lxSkipN === 1 ? "" : "es") + " to redo",
+              "Every batch finished, but " + lxSkipN + " ran while one enrichment source was unreachable, so they were filled by the other sources only. Press Enrich to give them their full pass; finished batches are never bought twice.");
+            jNote = "<b>Almost done:</b> " + lxSkipN + " batch" + (lxSkipN === 1 ? "" : "es") + " ran while one source was unreachable. Press Enrich to give them their full pass; finished batches are never bought twice.";
+          } else if (ep && ep.nextStart == null) {
+            sEnrich = jStep("js-done", "i-check", "Enriched",
+              "Every batch went through the full enrichment chain. Anyone still missing an email or phone is someone the sources had no contact info for.");
+          } else if (ep) {
+            sEnrich = jStep("js-act", "i-loop", "Enrichment paused · ~" + epDone + "/" + (ep.total || n),
+              "Enrichment stopped partway, usually a server update mid-run. Press Enrich to continue exactly where it stopped; finished batches are never bought twice.");
+            jNote = "<b>Needs a press:</b> enrichment stopped partway (about " + epDone + " of " + (ep.total || n) + " rows done). Press Enrich to continue; it resumes where it stopped and finished batches are never bought twice.";
+          } else {
+            sEnrich = jStep("js-act", "i-loop", "Enrichment not run",
+              "This list has not been through the full enrichment chain yet. Press Enrich to run it; when it finishes the refreshed contacts are re-sent to Candidates and OS Text.");
+            jNote = "<b>Needs a press:</b> this list has not run enrichment yet. Press Enrich to start it; everything after that is automatic.";
+          }
+          var sCand = r.promotedCount
+            ? '<a class="jd-step js-done" href="#prospects" data-openlist="' + esc(r.promotedListId || "") + '" title="Everyone on this list is in the Candidates tab under this list name. Click to open them.">' +
+              '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>In Candidates · ' + r.promotedCount + '</a>'
+            : jStep("", null, "Candidates", "Everyone lands in the Candidates tab automatically once enrichment settles; no button to press.");
+          var sText;
+          if (afNotConn) sText = jStep("js-act", "i-phone", "OS Text · not connected",
+            "This list reached Candidates, but this workspace has no OS Text engine connected, so no text campaign was created. Connect OS Text under Setup (or have the owner grant access); the phones on this list are then pushed automatically within a few minutes.");
+          else if (afErr) sText = jStep("js-act", "i-loop", "OS Text · retrying",
+            "The automatic send of this list hit a problem. It keeps retrying on its own; if this stays up for more than an hour, ask your admin to check the send logs.");
+          else if (sentOk && phs > 0) sText = jStep("js-done", "i-check", "In OS Text",
+            "A text campaign was built from everyone with a phone number and is ready to review and launch in OS Text. Phones found later are topped up automatically.");
+          else if (sentOk) sText = jStep("", null, "OS Text · waiting on phones",
+            "The list was sent, but no one has a phone number yet. As enrichment or Boost phones finds numbers, they are pushed to OS Text automatically.");
+          else sText = jStep("", null, "OS Text",
+            "A text campaign is built automatically from everyone with a phone number once the list is sent.");
+          if (!jNote) {
+            if (afNotConn) jNote = "<b>One step left:</b> everyone is in Candidates, but no OS Text engine is connected, so the text campaign is waiting. Connect OS Text under Setup and the phones push over by themselves.";
+            else if (afErr) jNote = "The automatic send hit a problem and keeps retrying on its own. If this stays up for more than an hour, ask your admin.";
+            else if (sentOk && r.promotedCount) jNote = phs > 0
+              ? "<b>Done:</b> everyone is in Candidates and the text campaign is ready to review and launch in OS Text."
+              : "<b>Done:</b> everyone is in Candidates. No phone numbers were found to text yet; Boost phones can grow the textable count.";
+            else jNote = "Waiting for the automatic pipeline to pick this list up; it sweeps every few minutes and needs no button.";
+          }
+          var journey = n
+            ? '<div class="jd-journey">' + sSearch + jArrow + sEnrich + jArrow + sCand + jArrow + sText + '</div>' +
+              '<div class="jd-journey-note">' + jNote + '</div>'
+            : '<div class="jd-journey-note">This search saved no candidates, so there is nothing to enrich or send.</div>';
           var reach = '<span class="jd-reach">' +
             '<span class="' + (ems ? "jr-em" : "jr-zero") + '" title="Candidates on this list with a validated email: how many you can message by email right now."><svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>' + ems + ' email' + (ems === 1 ? "" : "s") + '</span>' +
             '<span class="' + (phs ? "jr-ph" : "jr-zero") + '" title="Candidates on this list with a phone number: how many you can text or call right now."><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' + phs + ' phone' + (phs === 1 ? "" : "s") + '</span>' +
-            enrichChip +
-            sendChip +
             // Credit stamp: what the search itself cost in paid people-search requests
             // (recorded from this run on; older lists saved before then have no stamp).
             (r.apiUsage ? (function (au) {
@@ -10922,13 +10981,12 @@
               ? '<span class="jr-zero" title="Phone numbers on this list come only from the free sources right now (KoldInfo, Laxis, the in-house database). Add a phone-finder listing under Setup to top up the misses automatically, or use Boost phones on the row as the pay-per-lookup alternative.">phone finder off</span>'
               : '') +
             '</span>';
-          return '<div class="jd-run"><div class="jd-run-main">' +
+          return '<div class="jd-run"><div class="jd-run-top"><div class="jd-run-main">' +
             '<input type="checkbox" class="jd-pick" data-pick="' + esc(r.id) + '" title="Tick lists to combine them into one" />' +
             '<div><b>' + esc(r.name) + '</b> ' + reach + '<span class="muted">· ' +
             (r.location ? (esc(r.location) + ' · ') : '') +
             (outN ? ((n - outN) + ' in area + ' + outN + ' out of area') : (n + ' candidates')) + ' · ' + urls + ' with LinkedIn URL' +
-            (vetted ? (' · ' + vetted + ' deep-vetted') : '') +
-            (r.promotedCount ? (' · sent ' + r.promotedCount + ' to Candidates · <a href="#prospects" data-openlist="' + esc(r.promotedListId || "") + '">Open in Candidates →</a>') : '') + '</span></div></div>' +
+            (vetted ? (' · ' + vetted + ' deep-vetted') : '') + '</span></div></div>' +
             // HANDS-FREE (user mandate): enrich + Send to Candidates + Send to OS Text all
             // run automatically when a search finishes. Enrich stays as a manual RESUME
             // for a chain that stopped early (deploy, worker crash); it re-sends the
@@ -10939,7 +10997,7 @@
               (boostable ? '<button class="btn btn-ghost btn-sm" data-boost="' + esc(r.id) + '" title="The free sources found phones for ' + phs + ' of ' + n + '. Boost runs a paid public-records lookup (about 10 cents each) on the ' + boostable + ' still missing one. You see the estimated cost and approve it before anything is spent; the actual spend is logged to your account.">Boost phones · ' + boostable + ' left</button>' : '') +
               '<button class="btn btn-ghost btn-sm" data-autoenrich="' + esc(r.id) + '" title="Enrichment runs automatically after every search. Press this only if a run stopped early: it resumes exactly where it left off (already-enriched batches are never re-bought) and re-sends the refreshed contacts to Candidates and OS Text when done.">Enrich</button>' +
               '<button class="btn btn-ghost btn-sm" data-del="' + esc(r.id) + '">Delete</button>' +
-            '</div></div>';
+            '</div></div>' + journey + '</div>';
         }).join("");
         // Restore the combine ticks the re-render just wiped, then sync the button.
         host.querySelectorAll(".jd-pick").forEach(function (el) {
