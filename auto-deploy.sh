@@ -126,6 +126,73 @@ if [ ! -f "$DIR/.ostext-token-sync-v1" ] && [ -f "$DIR/money-maker-sms/.env.prod
   fi
 fi
 
+# ------------------------------------------------------------------------------
+# NEVER-DOWN FAIL-SAFE (2026-07-20: "OS Text is not showing"). A deploy killed
+# mid-recreate leaves a service as a stopped "Created" duplicate with NO running
+# container (docker's failed-recreate artifact; lume-jobs died 137 the same way).
+# Autoheal cannot see that state (it only restarts running-but-unhealthy), and
+# this watcher used to early-exit when there was no new commit, so the OS Text
+# engine stayed dark until the NEXT push. This block runs on EVERY 2-minute tick,
+# BEFORE the up-to-date early-exit: any core service with no running container
+# is revived from its EXISTING image (--no-build: the old version up always beats
+# a broken build keeping it down), clearing stuck Created duplicates first.
+# Never fatal.
+for SVC in taltxt lume-jobs app db caddy searxng; do
+  if [ -z "$(docker compose ps -q --status running "$SVC" 2>/dev/null)" ]; then
+    echo "$(date -u) FAIL-SAFE: $SVC has no running container, reviving from existing image..." >> "$LOG"
+    docker ps -aq --filter "name=${SVC}" --filter status=created | xargs -r docker rm -f >> "$LOG" 2>&1 || true
+    if docker compose up -d --no-build --no-deps "$SVC" >> "$LOG" 2>&1; then
+      echo "$(date -u) FAIL-SAFE: $SVC revived" >> "$LOG"
+    else
+      echo "$(date -u) FAIL-SAFE: $SVC revive failed, will retry next tick" >> "$LOG"
+    fi
+  fi
+done
+
+# Deeper OS Text probe: the engine can be "running" yet unreachable through the
+# edge (stale Caddy config mount, wedged process the healthcheck misses). Probe
+# the REAL serving path recruiters use; any app-level answer (2xx/3xx/401/403)
+# counts as alive. On failure restart the engine then force-recreate Caddy, but
+# at most once per 10 minutes so a genuinely broken engine cannot restart-flap.
+OSTEXT_CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 10 -k \
+  --resolve recruitersos.co:443:127.0.0.1 https://recruitersos.co/ostext-app/ || echo 000)
+case "$OSTEXT_CODE" in
+  2*|3*|401|403) : ;;
+  *)
+    STAMP="$DIR/.ostext-probe-restart"
+    if [ -z "$(find "$STAMP" -mmin -10 2>/dev/null)" ]; then
+      touch "$STAMP"
+      echo "$(date -u) FAIL-SAFE: /ostext-app probe got $OSTEXT_CODE, restarting engine + caddy..." >> "$LOG"
+      docker compose restart taltxt >> "$LOG" 2>&1 || true
+      docker compose up -d --force-recreate caddy >> "$LOG" 2>&1 || true
+    else
+      echo "$(date -u) FAIL-SAFE: /ostext-app probe got $OSTEXT_CODE (restart cooldown active)" >> "$LOG"
+    fi
+    ;;
+esac
+
+# One-time: install the standalone OS Text watchdog (systemd timer, every 3 min).
+# Second, independent layer: if a future commit ever breaks THIS script (syntax
+# error, bad merge), the deploy timer dies silently and the in-script fail-safe
+# above dies with it. The watchdog lives OUTSIDE the git checkout
+# (/usr/local/bin) so no push can take it down. Marker-guarded.
+if [ ! -f "$DIR/.ostext-watchdog-v1" ] && [ -f "$DIR/ostext-watchdog.sh" ]; then
+  echo "$(date -u) one-time: installing standalone OS Text watchdog..." >> "$LOG"
+  if install -m 755 "$DIR/ostext-watchdog.sh" /usr/local/bin/ostext-watchdog.sh \
+     && printf '%s\n' '[Unit]' 'Description=OS Text never-down watchdog' \
+          '[Service]' 'Type=oneshot' 'ExecStart=/usr/local/bin/ostext-watchdog.sh' \
+          > /etc/systemd/system/ostext-watchdog.service \
+     && printf '%s\n' '[Unit]' 'Description=Run OS Text watchdog every 3 minutes' \
+          '[Timer]' 'OnBootSec=2min' 'OnUnitActiveSec=3min' '[Install]' 'WantedBy=timers.target' \
+          > /etc/systemd/system/ostext-watchdog.timer \
+     && systemctl daemon-reload && systemctl enable --now ostext-watchdog.timer >> "$LOG" 2>&1; then
+    touch "$DIR/.ostext-watchdog-v1"
+    echo "$(date -u) OS Text watchdog installed and armed" >> "$LOG"
+  else
+    echo "$(date -u) OS Text watchdog install failed, will retry next cycle" >> "$LOG"
+  fi
+fi
+
 # Fetch quietly; compare local vs remote.
 git fetch origin "$BRANCH" --quiet
 LOCAL=$(git rev-parse HEAD)
@@ -153,7 +220,10 @@ else
   echo "$(date -u) full build failed — deploying core only (skipping the OS Text service)" >> "$LOG"
   docker compose up -d --build --no-deps app >> "$LOG" 2>&1 || true
   docker compose up -d --no-deps db caddy >> "$LOG" 2>&1 || true
-  echo "$(date -u) deploy complete (core only)" >> "$LOG"
+  # A failed full build must NEVER leave OS Text (or lume-jobs) dark: bring both
+  # back up on their existing images (no build) so the old version keeps serving.
+  docker compose up -d --no-build --no-deps taltxt lume-jobs >> "$LOG" 2>&1 || true
+  echo "$(date -u) deploy complete (core only, side services on previous images)" >> "$LOG"
 fi
 
 # Apply Caddy's bind-mounted config after every deploy. TRAP (bit us 2026-07-16,
