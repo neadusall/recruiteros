@@ -10530,22 +10530,37 @@
       '.jd-table a{color:var(--brand-2);text-decoration:none}.jd-table a:hover{text-decoration:underline}' +
       '.jd-run{padding:12px 0;border-bottom:1px solid var(--border)}.jd-run:last-child{border-bottom:0}' +
       '.jd-run-top{display:flex;justify-content:space-between;align-items:center;gap:10px}' +
-      /* The visible journey: four stops every list travels (Searched, Enriched,
-         Candidates, OS Text) printed on the row itself, so the team can SEE where a
-         list is without hovering chips. Green = done, pulsing = happening now,
-         amber = needs a press, grey = coming up automatically. */
-      '.jd-journey{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;margin:10px 0 0 25px}' +
-      '.jd-step{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;border:1px solid var(--border-strong);color:var(--text-dim);background:var(--bg-soft);cursor:default;text-decoration:none}' +
-      'a.jd-step{cursor:pointer}a.jd-step:hover{border-color:var(--ok);filter:brightness(1.05)}' +
-      '.jd-step .isvg{width:12px;height:12px;flex:0 0 auto}' +
-      '.jd-step.js-done{color:var(--ok);background:color-mix(in srgb, var(--ok) 9%, transparent);border-color:color-mix(in srgb, var(--ok) 38%, transparent)}' +
-      '.jd-step.js-live{color:var(--brand-2);background:var(--brand-soft);border-color:color-mix(in srgb, var(--brand) 40%, transparent)}' +
-      '.jd-step.js-act{color:#8a5a00;background:color-mix(in srgb, #d97706 9%, transparent);border-color:color-mix(in srgb, #d97706 38%, transparent)}' +
-      '.jd-step-dot{width:7px;height:7px;border-radius:50%;background:var(--brand-2);animation:jdpulse 1.3s infinite;flex:0 0 auto}' +
-      '.jd-step-arrow{color:var(--text-dim);font-size:12px;line-height:1;flex:0 0 auto;user-select:none}' +
-      '.jd-journey-note{margin:6px 0 0 25px;font-size:12px;color:var(--text-muted);line-height:1.5;max-width:860px}' +
+      /* The visible journey, tracker form: four connected stops (Searched, Enriched,
+         Candidates, OS Text) with a progress line that fills stop by stop, so where a
+         list is reads at a glance across the room. Green check = done, pulsing blue =
+         happening now, amber = needs a press of Enrich, grey numbered = coming up
+         automatically. Each stop carries its own detail line (counts / what to do). */
+      '.jd-journey{display:flex;align-items:flex-start;margin:13px 0 0 25px;max-width:780px}' +
+      '.jd-tstop{flex:1 1 0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:5px;position:relative;min-width:0;padding:0 4px;text-decoration:none;cursor:default}' +
+      'a.jd-tstop{cursor:pointer}a.jd-tstop:hover .jd-tlabel{text-decoration:underline}' +
+      '.jd-tstop::before{content:"";position:absolute;top:11px;right:50%;left:-50%;height:3px;border-radius:2px;background:var(--border-strong)}' +
+      '.jd-tstop:first-child::before{content:none}' +
+      '.jd-tstop.jt-reach::before{background:var(--ok)}' +
+      '.jd-tdot{position:relative;width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;background:var(--bg);border:2px solid var(--border-strong);color:var(--text-dim);flex:0 0 auto}' +
+      '.jd-tdot .isvg{width:13px;height:13px}' +
+      '.jt-done .jd-tdot{background:var(--ok);border-color:var(--ok);color:#fff}' +
+      '.jt-live .jd-tdot{background:var(--brand);border-color:var(--brand);color:#fff;animation:jdpulse 1.3s infinite}' +
+      '.jt-act .jd-tdot{background:#d97706;border-color:#d97706;color:#fff}' +
+      '.jd-ttxt{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0}' +
+      '.jd-tlabel{font-size:12px;font-weight:700;color:var(--text);line-height:1.25}' +
+      '.jt-wait .jd-tlabel{color:var(--text-dim);font-weight:600}' +
+      '.jt-done .jd-tlabel{color:var(--ok)}' +
+      '.jt-live .jd-tlabel{color:var(--brand-2)}' +
+      '.jt-act .jd-tlabel{color:#8a5a00}' +
+      '.jd-tsub{font-size:11px;color:var(--text-muted);line-height:1.35;font-variant-numeric:tabular-nums}' +
+      '.jd-journey-note{margin:8px 0 0 25px;font-size:12px;color:var(--text-muted);line-height:1.5;max-width:860px}' +
       '.jd-journey-note b{color:var(--text)}' +
-      '@media (max-width:760px){.jd-journey,.jd-journey-note{margin-left:0}}' +
+      '@media (min-width:641px) and (max-width:760px){.jd-journey,.jd-journey-note{margin-left:0}}' +
+      '@media (max-width:640px){.jd-journey{flex-direction:column;align-items:stretch;margin-left:0;max-width:none}' +
+        '.jd-tstop{flex-direction:row;text-align:left;gap:10px;padding:5px 0}' +
+        '.jd-tstop::before{top:-12px;left:11px;right:auto;width:3px;height:20px}' +
+        '.jd-ttxt{flex-direction:row;align-items:baseline;gap:7px;flex-wrap:wrap}' +
+        '.jd-journey-note{margin-left:0}}' +
       '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}' +
       '.jd-run-main{display:flex;align-items:center;gap:10px;min-width:0}' +
       '.jd-reach{display:inline-flex;flex-wrap:wrap;row-gap:4px;gap:6px;margin:0 4px 0 2px;vertical-align:middle;max-width:100%}' +
@@ -10921,51 +10936,64 @@
           var afErr = (r.autoflow && r.autoflow.error) || "";
           var afNotConn = afErr.indexOf("ostext_not_connected") === 0;
           var sentOk = !!(r.autoflow && r.autoflow.sentAt);
-          function jStep(cls, icon, label, tip) {
-            return '<span class="jd-step ' + cls + '" title="' + esc(tip || "") + '">' +
-              (icon === "dot" ? '<span class="jd-step-dot"></span>' :
-                icon ? '<svg class="isvg" aria-hidden="true"><use href="#' + icon + '"/></svg>' : '') +
-              label + '</span>';
+          // Each stop: state class (jt-done / jt-live / jt-act / jt-wait), a dot
+          // (check, pulsing loop, alert "!", or the grey step number), a bold label,
+          // and its own one-line detail. linkId turns the stop into the open link.
+          var jIcons = {
+            check: '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>',
+            loop: '<svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>',
+            alert: '!'
+          };
+          function jStop(state, dot, label, sub, tip, linkId) {
+            var reach = state !== "jt-wait" ? " jt-reach" : "";
+            var open = linkId != null
+              ? '<a class="jd-tstop ' + state + reach + '" href="#prospects" data-openlist="' + esc(linkId) + '"'
+              : '<span class="jd-tstop ' + state + reach + '"';
+            return open + ' title="' + esc(tip || "") + '">' +
+              '<span class="jd-tdot">' + dot + '</span>' +
+              '<span class="jd-ttxt"><span class="jd-tlabel">' + label + '</span>' +
+              (sub ? '<span class="jd-tsub">' + sub + '</span>' : '') + '</span>' +
+              (linkId != null ? '</a>' : '</span>');
           }
-          var jArrow = '<span class="jd-step-arrow" aria-hidden="true">&rsaquo;</span>';
-          var sSearch = jStep("js-done", "i-check", "Searched · " + n,
+          var sSearch = jStop("jt-done", jIcons.check, "Searched", n + " found",
             "The search finished and saved " + n + " candidate" + (n === 1 ? "" : "s") +
             (outN ? (": " + (n - outN) + " in area and " + outN + " out of area") : "") + ".");
           var sEnrich, jNote = "";
           if (busyJobs) {
-            sEnrich = jStep("js-live", "dot", "Enriching" + (ep ? " · ~" + epDone + "/" + (ep.total || n) : "…"),
+            sEnrich = jStop("jt-live", jIcons.loop, "Enriching now", ep ? "~" + epDone + " of " + (ep.total || n) + " rows" : "working…",
               "Contact info (emails and phones) is being filled in right now, cheapest source first. This runs by itself; nothing to press.");
             jNote = "<b>Working now:</b> contact info is being filled in. When it finishes, everyone lands in Candidates and a text campaign is built by itself. Nothing to press.";
           } else if (ep && ep.nextStart == null && lxSkipN) {
-            sEnrich = jStep("js-act", "i-loop", "Enriched · " + lxSkipN + " batch" + (lxSkipN === 1 ? "" : "es") + " to redo",
+            sEnrich = jStop("jt-act", jIcons.alert, "Enriched", lxSkipN + " batch" + (lxSkipN === 1 ? "" : "es") + " to redo",
               "Every batch finished, but " + lxSkipN + " ran while one enrichment source was unreachable, so they were filled by the other sources only. Press Enrich to give them their full pass; finished batches are never bought twice.");
             jNote = "<b>Almost done:</b> " + lxSkipN + " batch" + (lxSkipN === 1 ? "" : "es") + " ran while one source was unreachable. Press Enrich to give them their full pass; finished batches are never bought twice.";
           } else if (ep && ep.nextStart == null) {
-            sEnrich = jStep("js-done", "i-check", "Enriched",
+            sEnrich = jStop("jt-done", jIcons.check, "Enriched", ems + " email" + (ems === 1 ? "" : "s") + " · " + phs + " phone" + (phs === 1 ? "" : "s"),
               "Every batch went through the full enrichment chain. Anyone still missing an email or phone is someone the sources had no contact info for.");
           } else if (ep) {
-            sEnrich = jStep("js-act", "i-loop", "Enrichment paused · ~" + epDone + "/" + (ep.total || n),
+            sEnrich = jStop("jt-act", jIcons.alert, "Enrich paused", "~" + epDone + " of " + (ep.total || n) + " · press Enrich",
               "Enrichment stopped partway, usually a server update mid-run. Press Enrich to continue exactly where it stopped; finished batches are never bought twice.");
             jNote = "<b>Needs a press:</b> enrichment stopped partway (about " + epDone + " of " + (ep.total || n) + " rows done). Press Enrich to continue; it resumes where it stopped and finished batches are never bought twice.";
           } else {
-            sEnrich = jStep("js-act", "i-loop", "Enrichment not run",
+            sEnrich = jStop("jt-act", jIcons.alert, "Enrich", "not run · press Enrich",
               "This list has not been through the full enrichment chain yet. Press Enrich to run it; when it finishes the refreshed contacts are re-sent to Candidates and OS Text.");
             jNote = "<b>Needs a press:</b> this list has not run enrichment yet. Press Enrich to start it; everything after that is automatic.";
           }
           var sCand = r.promotedCount
-            ? '<a class="jd-step js-done" href="#prospects" data-openlist="' + esc(r.promotedListId || "") + '" title="Everyone on this list is in the Candidates tab under this list name. Click to open them.">' +
-              '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>In Candidates · ' + r.promotedCount + '</a>'
-            : jStep("", null, "Candidates", "Everyone lands in the Candidates tab automatically once enrichment settles; no button to press.");
+            ? jStop("jt-done", jIcons.check, "In Candidates", r.promotedCount + " delivered · open",
+              "Everyone on this list is in the Candidates tab under this list name. Click to open them.", r.promotedListId || "")
+            : jStop("jt-wait", "3", "Candidates", "arrives automatically",
+              "Everyone lands in the Candidates tab automatically once enrichment settles; no button to press.");
           var sText;
-          if (afNotConn) sText = jStep("js-act", "i-phone", "OS Text · not connected",
+          if (afNotConn) sText = jStop("jt-act", jIcons.alert, "OS Text", "not connected · see Setup",
             "This list reached Candidates, but this workspace has no OS Text engine connected, so no text campaign was created. Connect OS Text under Setup (or have the owner grant access); the phones on this list are then pushed automatically within a few minutes.");
-          else if (afErr) sText = jStep("js-act", "i-loop", "OS Text · retrying",
+          else if (afErr) sText = jStop("jt-act", jIcons.alert, "OS Text", "send issue · retrying",
             "The automatic send of this list hit a problem. It keeps retrying on its own; if this stays up for more than an hour, ask your admin to check the send logs.");
-          else if (sentOk && phs > 0) sText = jStep("js-done", "i-check", "In OS Text",
+          else if (sentOk && phs > 0) sText = jStop("jt-done", jIcons.check, "In OS Text", "campaign ready to launch",
             "A text campaign was built from everyone with a phone number and is ready to review and launch in OS Text. Phones found later are topped up automatically.");
-          else if (sentOk) sText = jStep("", null, "OS Text · waiting on phones",
+          else if (sentOk) sText = jStop("jt-wait", "4", "OS Text", "waiting on phones",
             "The list was sent, but no one has a phone number yet. As enrichment or Boost phones finds numbers, they are pushed to OS Text automatically.");
-          else sText = jStep("", null, "OS Text",
+          else sText = jStop("jt-wait", "4", "OS Text", "builds automatically",
             "A text campaign is built automatically from everyone with a phone number once the list is sent.");
           if (!jNote) {
             if (afNotConn) jNote = "<b>One step left:</b> everyone is in Candidates, but no OS Text engine is connected, so the text campaign is waiting. Connect OS Text under Setup and the phones push over by themselves.";
@@ -10976,7 +11004,7 @@
             else jNote = "Waiting for the automatic pipeline to pick this list up; it sweeps every few minutes and needs no button.";
           }
           var journey = n
-            ? '<div class="jd-journey">' + sSearch + jArrow + sEnrich + jArrow + sCand + jArrow + sText + '</div>' +
+            ? '<div class="jd-journey">' + sSearch + sEnrich + sCand + sText + '</div>' +
               '<div class="jd-journey-note">' + jNote + '</div>'
             : '<div class="jd-journey-note">This search saved no candidates, so there is nothing to enrich or send.</div>';
           var reach = '<span class="jd-reach">' +
