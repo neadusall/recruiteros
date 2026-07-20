@@ -12,8 +12,9 @@
  * the whole state. That is why searches returned people hundreds of miles out.
  *
  * This module makes the radius real: every place resolves to a lat/lon from a bundled
- * GeoNames table (34.7k US places, no network, no API key, no per-call cost), and
+ * GeoNames table (~169k US places, no network, no API key, no per-call cost), and
  * membership is a great-circle distance test against the recruiter's typed center.
+ * Cost, measured: ~90ms to parse once per process, ~0.5us per row after that.
  *
  * DESIGN RULES
  * ------------
@@ -94,7 +95,6 @@ let byCity: Map<string, PlaceRec[]> | null = null;
 function ensureParsed(): void {
   if (byState) return;
   byState = new Map();
-  byCity = new Map();
   for (const line of US_PLACES_BLOB.split("\n")) {
     const colon = line.indexOf(":");
     if (colon < 0) continue;
@@ -111,13 +111,66 @@ function ensureParsed(): void {
       };
       if (!isFinite(rec.lat) || !isFinite(rec.lon)) continue;
       cities.set(parts[0], rec);
-      const list = byCity.get(parts[0]);
-      if (list) list.push(rec);
-      else byCity.set(parts[0], [rec]);
     }
     byState.set(st, cities);
   }
 }
+
+/**
+ * The cross-state city index, built on FIRST USE rather than alongside byState.
+ *
+ * It only serves bare city names with no state ("Springfield"), which almost never
+ * happens — a recruiter types a state and profiles state one. Building it eagerly meant
+ * every process that geocoded anything paid for a second index over all ~169k places,
+ * for a lookup most runs never make.
+ */
+function ensureCityIndex(): Map<string, PlaceRec[]> {
+  if (byCity) return byCity;
+  ensureParsed();
+  byCity = new Map();
+  for (const cities of byState!.values()) {
+    for (const [city, rec] of cities) {
+      const list = byCity.get(city);
+      if (list) list.push(rec);
+      else byCity.set(city, [rec]);
+    }
+  }
+  return byCity;
+}
+
+/**
+ * Strings that mean "no fixed location" in a profile's location field and must NEVER
+ * geocode, even though the gazetteer lists a tiny place by that name.
+ *
+ * The US gazetteer really does contain Remote, Oregon (and Home, Washington). Since
+ * "Remote" is what a person writes when they work from anywhere, resolving it would
+ * measure every remote candidate against rural Oregon and drop them as out-of-radius —
+ * a silent, systematic false drop on exactly the people a recruiter most wants to keep.
+ *
+ * Checked against the CITY part, so "Remote, OR" is refused too. That is the safe
+ * direction and costs nothing: an unresolvable location is "unknown", and unknown rows
+ * are always KEPT. The handful of genuine Remote-Oregon residents simply go unmeasured
+ * rather than being measured wrong.
+ */
+const NON_LOCATION = new Set([
+  "remote", "remote us", "remote usa", "fully remote", "work from home", "wfh", "home",
+  "anywhere", "worldwide", "global", "nationwide", "national", "international",
+  "virtual", "distributed", "telecommute", "hybrid", "on site", "onsite", "in office",
+  "unknown", "none", "other", "various", "multiple", "multiple locations", "confidential",
+  "private", "not specified", "n a", "tbd", "field", "corporate", "headquarters",
+  "united states", "usa", "us", "america", "north america",
+]);
+
+/**
+ * Minimum weight for a location that names NO state to be trusted.
+ *
+ * With the full gazetteer in the table, bare one-word inputs ("Central", "Uptown",
+ * "Active", "Independent") all match some hamlet somewhere. Requiring real municipal
+ * weight keeps genuine bare city names that happen to be common words — Mobile AL and
+ * West TX are actual cities — while refusing the hamlets. A location that names its
+ * state is exempt: "Home, WA" is unambiguous in a way bare "Home" is not.
+ */
+const BARE_CITY_MIN_WEIGHT = 1000;
 
 /* ------------------------------------------------------------------ */
 /* Text normalization                                                  */
@@ -269,6 +322,8 @@ function geocodeUncached(raw: string, stateHint?: string): GeoPoint | null {
   ensureParsed();
   let text = trimToPlace(norm(stripRadiusSuffix(raw)));
   if (!text) return null;
+  // "No fixed location" beats any place name that happens to spell the same way.
+  if (NON_LOCATION.has(text.replace(/,/g, " ").replace(/\s+/g, " ").trim())) return null;
 
   // Nicknames first — they are not city names and would otherwise fall through.
   const nickKey = text.replace(NOISE, " ").replace(/\s+/g, " ").trim();
@@ -281,6 +336,8 @@ function geocodeUncached(raw: string, stateHint?: string): GeoPoint | null {
   // City fragment = text before the first comma, with any trailing state removed.
   // "Dallas-Fort Worth" style hyphenated pairs resolve on their first half.
   let city = stripTrailingState((text.split(",")[0] || "").trim());
+  // "Remote, OR" / "Home, WA": the city itself says "no fixed location".
+  if (NON_LOCATION.has(city)) return null;
   if (!city) {
     // Pure state input ("New Jersey"): a state has no single point we can honestly call
     // its center for radius purposes, so decline rather than pin to a geographic centroid.
@@ -294,12 +351,14 @@ function geocodeUncached(raw: string, stateHint?: string): GeoPoint | null {
       if (rec) return { lat: rec.lat, lon: rec.lon, state: rec.state, city: c };
     }
     if (!state) {
-      const list = byCity!.get(c);
+      const list = ensureCityIndex().get(c);
       if (list && list.length) {
-        // Ambiguous bare city: take the most ZIP-heavy one, but only when it clearly
-        // dominates — otherwise "Springfield" would silently become Springfield, MO.
+        // Ambiguous bare city: take the heaviest, but only when it clearly dominates —
+        // otherwise "Springfield" would silently become Springfield, MO. It must also
+        // carry real municipal weight, or every common word matches some hamlet.
         const sorted = [...list].sort((a, b) => b.weight - a.weight);
-        if (sorted.length === 1 || sorted[0].weight >= sorted[1].weight * 2) {
+        const dominant = sorted.length === 1 || sorted[0].weight >= sorted[1].weight * 2;
+        if (dominant && sorted[0].weight >= BARE_CITY_MIN_WEIGHT) {
           return { lat: sorted[0].lat, lon: sorted[0].lon, state: sorted[0].state, city: c };
         }
       }

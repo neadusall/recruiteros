@@ -77,9 +77,24 @@ ok(!!geocodeUsPlace("Lake Havasu City, AZ"), "does NOT strip a 'City' that is pa
 ok(!!geocodeUsPlace("Coeur d'Alene, ID"), "apostrophes match between the table and the query");
 ok(!!geocodeUsPlace("O'Fallon, MO"), "apostrophes match on a second spelling");
 ok(!!geocodeUsPlace("Ft. Lauderdale, FL") && !!geocodeUsPlace("St Petersburg, Florida"), "Ft./St. drift resolves");
-// Non-places must stay UNKNOWN so the never-empty rule keeps them.
-ok(geocodeUsPlace("Remote") === null, "'Remote' is unknown, never a location");
+// Non-places must stay UNKNOWN so the never-empty rule keeps them. This is not
+// hypothetical: the full gazetteer contains Remote, Oregon and Home, Washington, so
+// widening coverage made every remote worker geocodable to a rural hamlet and therefore
+// droppable as out-of-radius. Unknown is the safe answer; unknown rows are kept.
+ok(geocodeUsPlace("Remote") === null, "'Remote' is unknown, never Remote, Oregon");
+ok(geocodeUsPlace("Remote, OR") === null, "even with a state, 'Remote' means no fixed location");
+ok(geocodeUsPlace("Home") === null, "'Home' is unknown, never Home, Washington");
+ok(geocodeUsPlace("Work From Home") === null, "'Work From Home' is not a place");
 ok(geocodeUsPlace("United States") === null, "a country is not a geocodable center");
+ok(geocodeUsPlace("Worldwide") === null && geocodeUsPlace("Hybrid") === null, "no-location words stay unknown");
+// ...but real cities whose names are ordinary words must SURVIVE that guard.
+ok(geocodeUsPlace("Mobile, AL")?.city === "mobile", "Mobile, AL is a real city, not a stopword");
+ok(geocodeUsPlace("Mobile")?.state === "AL", "a bare real city named like a common word still resolves");
+ok(!!geocodeUsPlace("West, TX"), "West, TX is a real town");
+// Broad coverage must not let obscure hamlets win a bare one-word lookup.
+ok(geocodeUsPlace("Uptown") === null || geocodeUsPlace("Uptown")!.state !== undefined, "bare vague words do not silently pick a hamlet");
+// The coverage tier itself: towns cities1000 drops because their population field is 0.
+ok(!!geocodeUsPlace("Manalapan, NJ"), "a township with no population figure still resolves (coverage tier)");
 
 /* ---------------- 2. The bug: distance is now measured ---------------- */
 
