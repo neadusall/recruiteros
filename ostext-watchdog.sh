@@ -25,7 +25,11 @@ LOG=/var/log/ostext-watchdog.log
 cd "$DIR" || exit 0
 
 # Never act mid-deploy: a recreate in progress looks "down" for a few seconds.
-if pgrep -f 'auto-deploy\.sh' >/dev/null 2>&1; then exit 0; fi
+# Check the systemd unit that actually runs the deploy, NOT pgrep: any stray
+# shell that merely mentions the script name in its command line would fool a
+# pgrep match forever and neuter this watchdog.
+DEPLOY_STATE=$(systemctl is-active recruiteros-deploy.service 2>/dev/null || true)
+case "$DEPLOY_STATE" in active|activating|deactivating) exit 0;; esac
 
 probe() {
   curl -s -o /dev/null -w '%{http_code}' -m 10 -k \
