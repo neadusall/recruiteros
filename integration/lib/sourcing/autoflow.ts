@@ -220,12 +220,52 @@ async function sendRun(run: SourcingRun): Promise<void> {
     stamp.phonesAtSend = phonesNow;
     if (stamp.error?.startsWith("ostext_not_connected") !== true) stamp.error = undefined;
     console.log(`[sourcing-autoflow] "${run.name}" (${run.id}) sent on: ${run.candidates.length} to Candidates, ${contacts.length} phone(s) to OS Text${topup ? " (top-up)" : ""}`);
+    // Tell the desk that owns this list RIGHT NOW: new candidates just landed and
+    // are waiting for their first outreach. Recipient = the promoted campaign's
+    // recruiter; with nobody assigned, every admin hears it instead. Best-effort:
+    // a notification failure must never fail the send.
+    try {
+      await notifyNewCandidates(run, contacts.length, topup);
+    } catch { /* delivery is best-effort */ }
   } catch (e) {
     stamp.error = (e as Error).message?.slice(0, 300) || "send failed";
     console.error(`[sourcing-autoflow] "${run.name}" (${run.id}) attempt ${stamp.attempts} failed: ${stamp.error}`);
   }
   run.autoflow = stamp;
   await saveSourcingRun(ws, { ...run });
+}
+
+/**
+ * "New candidates on your desk" ping, fired the moment a list lands in
+ * Candidates/OS Text (first send AND every top-up). Rides the Outbound
+ * notification stack (in-app inbox + email + optional SMS, per user prefs).
+ */
+async function notifyNewCandidates(run: SourcingRun, phonesPushed: number, topup: boolean): Promise<void> {
+  const ws = run.workspaceId;
+  const n = run.candidates.length;
+  if (!n) return;
+  const { pushNotification } = await import("../outbound/notify");
+  const { getCore } = await import("../core/repository");
+  const { listMembers } = await import("../auth/team");
+  const campaign = run.promotedCampaignId ? await getCore().getCampaign(run.promotedCampaignId) : null;
+  const members = listMembers(ws);
+  const owner = campaign?.recruiterId ? members.find((m) => m.userId === campaign.recruiterId) : undefined;
+  const recipients = owner ? [owner] : members.filter((m) => m.role === "owner" || m.role === "admin");
+  if (!recipients.length) return;
+  const title = topup
+    ? `More candidates just landed on "${run.name}"`
+    : `New candidate list ready: "${run.name}"`;
+  const body = [
+    `${n} candidate${n === 1 ? "" : "s"} are in Candidates under "${run.name}"` +
+      (phonesPushed ? `, ${phonesPushed} with a texting-ready phone in its OS Text campaign.` : "."),
+    owner ? "" : "This list's campaign has no recruiter assigned yet, so you are receiving this as an admin.",
+    "They are waiting for their first outreach: open Candidates, filter to Uncontacted, and work the list.",
+  ].filter(Boolean).join("\n");
+  for (const r of recipients) {
+    try {
+      await pushNotification(ws, { userId: r.userId, category: "campaign", severity: "opportunity", title, body });
+    } catch { /* one recipient's delivery */ }
+  }
 }
 
 /**

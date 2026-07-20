@@ -38,6 +38,7 @@ const KIND_TO_CATEGORY: Record<string, NotifyCategory> = {
   activity_drop: "underutilization",
   positive_rate_up: "achievement",
   full_utilization: "achievement",
+  uncontacted_candidates: "campaign",
 };
 
 export async function runOutboundTick(now: Date = new Date()): Promise<void> {

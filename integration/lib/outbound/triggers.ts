@@ -18,6 +18,7 @@ import { listMembers } from "../auth/team";
 import { userCapacity, expectedPaceByHour } from "./capacity";
 import { listRollups, sumCounts, workspaceTz } from "./rollup";
 import { localDay, localHour, localDow } from "./goals";
+import { uncontactedForWorkspace, listsLine } from "./uncontacted";
 import type { AlertSeverity, AlertAudience, OutboundAlert, UserDayRollup } from "./types";
 
 const KEY = "outbound_alerts_v1";
@@ -95,6 +96,10 @@ export async function evaluateTriggers(workspaceId: string): Promise<OutboundAle
     const r = await emit(workspaceId, today, a);
     if (r) created.push(r);
   };
+  // Uncontacted-candidate radar: computed at most once per evaluate call, and only
+  // when some member actually reaches that trigger (lazy).
+  let uncontactedCache: Awaited<ReturnType<typeof uncontactedForWorkspace>> | null = null;
+  const uncontactedSummary = async () => (uncontactedCache ??= await uncontactedForWorkspace(workspaceId));
 
   for (const m of members) {
     let cap;
@@ -187,6 +192,24 @@ export async function evaluateTriggers(workspaceId: string): Promise<OutboundAle
       });
     }
 
+    /* ------------------ candidates awaiting first outreach ---------------- */
+    // Computed once per workspace below the member loop would race the day-dedupe;
+    // the summary is fetched lazily (first member that needs it) and reused.
+    if (isWorkDay) {
+      try {
+        const summary = await uncontactedSummary();
+        const mine = summary.byUser[m.userId];
+        if (mine && mine.total > 0) {
+          await push({
+            userId: m.userId, audience: "user", severity: "opportunity", kind: "uncontacted_candidates",
+            title: `${mine.total} candidate${mine.total === 1 ? "" : "s"} waiting for first outreach`,
+            detail: `Your searches hold ${mine.total} candidate${mine.total === 1 ? "" : "s"} nobody has contacted on any channel yet: ${listsLine(mine.lists)}.`,
+            recommended: "Open Candidates, filter to Uncontacted, and start their first touch (or launch the list's OS Text campaign).",
+          });
+        }
+      } catch { /* radar is best-effort; the rest of the triggers still run */ }
+    }
+
     /* --------------------------- system health --------------------------- */
     for (const f of cap.systemFactors.filter((x) => x.severity === "critical" && x.scope !== "global")) {
       await push({
@@ -260,6 +283,23 @@ export async function evaluateTriggers(workspaceId: string): Promise<OutboundAle
       }
     }
   }
+
+  /* --------- candidates waiting on campaigns NOBODY owns (admin) ---------- */
+  // A recruiter can't act on a list that isn't theirs; unassigned supply is an
+  // admin problem, exactly like supply_constraint.
+  try {
+    if (members.length) {
+      const summary = uncontactedCache ?? await uncontactedForWorkspace(workspaceId);
+      if (summary.unassigned.total > 0) {
+        await push({
+          userId: null, audience: "admin", severity: "warning", kind: "uncontacted_unassigned",
+          title: `${summary.unassigned.total} uncontacted candidate${summary.unassigned.total === 1 ? "" : "s"} on unassigned campaigns`,
+          detail: `These candidates are waiting for a first touch but their campaigns have no recruiter assigned: ${listsLine(summary.unassigned.lists)}.`,
+          recommended: "Assign a recruiter to each campaign (Send Queue / campaign settings) so this supply lands on someone's daily plan.",
+        });
+      }
+    }
+  } catch { /* best-effort */ }
 
   return created;
 }
