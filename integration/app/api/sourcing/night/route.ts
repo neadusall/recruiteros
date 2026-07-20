@@ -16,6 +16,7 @@ import { NextResponse } from "next/server";
 import { requireCronAuth } from "../../../../lib/linkedin/auth";
 import { tickNightQueue, listNightItems } from "../../../../lib/sourcing";
 import { tickSourcingAutoflow } from "../../../../lib/sourcing/autoflow";
+import { backfillListPhones } from "../../../../lib/sourcing/phoneBackfill";
 
 async function run(req: Request) {
   const auth = requireCronAuth(req);
@@ -26,6 +27,14 @@ async function run(req: Request) {
     const ws = params.get("ws");
     const items = ws ? await listNightItems(ws) : [];
     return NextResponse.json({ ok: true, items: items.map((i) => ({ id: i.id, name: i.name, stage: i.stage, note: i.note, added: i.added })) });
+  }
+  if (params.get("phoneBackfill") === "1") {
+    // One-shot repair sweep (see lib/sourcing/phoneBackfill): re-run the free
+    // LandlineDB phone rung over every saved list after an outage left them
+    // phone-less. Synchronous on purpose — it is batched DB reads (seconds, no
+    // vendor calls), and the caller wants the counts back.
+    const result = await backfillListPhones();
+    return NextResponse.json({ ok: true, ...result });
   }
   // Fire-and-forget: a search step can run for minutes; the tick's own mutex makes
   // overlapping timer hits harmless. The response just reports the queue is being served.
