@@ -60,9 +60,20 @@ export interface NightItem {
   error?: string;
   /** Contacts gained across the whole chain (for the morning readout). */
   added: { emails: number; phones: number };
+  /** One-shot retry markers per rung, so a transient worker death (a deploy
+   *  recreating the container kills Chromium mid-job) re-runs the rung ONCE
+   *  instead of silently abandoning its remaining rows. */
+  retried?: Partial<Record<"kold" | "koldDb", boolean>>;
   createdAt: string;
   updatedAt: string;
   finishedAt?: string;
+}
+
+/** A worker error worth ONE rung re-run: the job vanished (retention/volume) or
+ *  the browser was killed under it (deploy recreate, crash) mid-run. Distinct
+ *  from data errors, which retrying would just repeat. */
+function retryableJobError(error: string): boolean {
+  return /job_not_found|browser_died|browser has been closed|target (page|crashed)|browser crashed/i.test(error);
 }
 
 let store: NightItem[] = [];
@@ -308,13 +319,18 @@ async function step(item: NightItem): Promise<void> {
       const m = mergeSourcingKoldInfoCsv(run.candidates, job.enrichedCsv);
       item.added.emails += m.emails; item.added.phones += m.phones;
     }
-    // job_not_found (retention expired / volume wiped): clearing the ref makes the next
-    // tick resubmit this rung once; any other error just moves the chain along.
+    // Transient worker failure (lost job, browser killed under it by a deploy):
+    // clearing the ref makes the next tick resubmit this rung ONCE; any other
+    // error, or a second transient failure, moves the chain along.
     delete run.koldJob;
     await saveSourcingRun(ws, { ...run });
-    if (job.status !== "error" || !/job_not_found/i.test(String(job.error || ""))) {
-      item.stage = "koldDb";
+    const koldErr = String(job.error || "");
+    if (job.status === "error" && retryableJobError(koldErr) && !item.retried?.kold) {
+      (item.retried ??= {}).kold = true;
+      touch(item, "free pass 1: the worker restarted mid-run, re-running this pass…");
+      return;
     }
+    item.stage = "koldDb";
     touch(item);
     return;
   }
@@ -338,9 +354,13 @@ async function step(item: NightItem): Promise<void> {
     }
     delete run.koldDbJob;
     await saveSourcingRun(ws, { ...run });
-    if (job.status !== "error" || !/job_not_found/i.test(String(job.error || ""))) {
-      item.stage = "laxis";
+    const koldDbErr = String(job.error || "");
+    if (job.status === "error" && retryableJobError(koldDbErr) && !item.retried?.koldDb) {
+      (item.retried ??= {}).koldDb = true;
+      touch(item, "free pass 2: the worker restarted mid-run, re-running this pass…");
+      return;
     }
+    item.stage = "laxis";
     touch(item);
     return;
   }
