@@ -17,11 +17,17 @@
 import type { CandidateICP, CandidateRow } from "./types";
 import { US_STATE_FULL } from "./score";
 import { submitLaxisJob, getLaxisJob, parseCsv } from "./laxis";
+import { citiesWithinRadius, geocodeUsPlace, parseRadiusMi, stripRadiusSuffix } from "./geoRadius";
 
 /** Full state name for an abbreviation, capitalized ("nj" → "New Jersey"). */
 function stateFullName(abbrev: string): string | undefined {
   const full = US_STATE_FULL[abbrev.toLowerCase()];
   return full ? full.replace(/\b[a-z]/g, (ch) => ch.toUpperCase()) : undefined;
+}
+
+/** "fair lawn" → "Fair Lawn", matching the casing the DB's city values use. */
+function titleCaseCity(city: string): string {
+  return city.replace(/\b[a-z]/g, (ch) => ch.toUpperCase());
 }
 const ABBREV_BY_FULL: Record<string, string> = Object.fromEntries(
   Object.entries(US_STATE_FULL).map(([ab, full]) => [full, ab.toUpperCase()]),
@@ -33,7 +39,37 @@ const ABBREV_BY_FULL: Record<string, string> = Object.fromEntries(
  * so neither form matches the other — both ride as chips). A geo with no comma is
  * treated as a state when it IS one ("New Jersey"), else as a city/metro name.
  */
-export function geoChips(geos: string[]): { cities: string[]; states: string[] } {
+export function geoChips(
+  geos: string[],
+  /** Recruiter's typed location + radius. When both resolve, they REPLACE the guesswork below. */
+  radius?: { location?: string; radiusMi?: number },
+): { cities: string[]; states: string[] } {
+  // Measured path: ask the place table which cities are actually within the radius and
+  // filter on those. This closes the widest leak in the whole pass — the worker ANDs the
+  // city and state rules, so an empty city list meant the sweep was "these titles,
+  // ANYWHERE IN THE STATE", which is how a +25mi search came back with people 200 miles
+  // out holding a database email. With real cities the AND finally constrains.
+  //
+  // NOT exact, and cannot be: the DB filters city and state as two independent rules, so
+  // a common city name ("Middletown" near Howell, NJ) also matches that name in another
+  // in-radius state. It is a big tightening, not a boundary — discovery still measures
+  // every returned row's own stated location, which is what actually enforces the radius.
+  const miles = parseRadiusMi(radius?.radiusMi, radius?.location);
+  if (miles > 0) {
+    const center = geocodeUsPlace(stripRadiusSuffix(radius?.location || ""));
+    if (center) {
+      const near = citiesWithinRadius(center, miles, 12, 0);
+      if (near.length) {
+        return {
+          cities: near.map((c) => titleCaseCity(c.city)),
+          // States still ride so the AND can exclude a same-named city in another state;
+          // a radius straddling a state line contributes every state it touches.
+          states: [...new Set(near.flatMap((c) => [c.state, stateFullName(c.state) || c.state]))].slice(0, 6),
+        };
+      }
+    }
+  }
+
   const cities = new Set<string>();
   const states = new Set<string>();
   const addState = (s: string) => {
@@ -73,10 +109,14 @@ function pipeCell(values: string[]): string {
  * The worker's one-row spec CSV, or null when the ICP has nothing the database can
  * filter on (no titles → a geo-only sweep would be noise, so we skip the pass).
  */
-export function buildDbDiscoverySpecCsv(icp: CandidateICP, limit: number): string | null {
+export function buildDbDiscoverySpecCsv(
+  icp: CandidateICP,
+  limit: number,
+  radius?: { location?: string; radiusMi?: number },
+): string | null {
   const titles = (icp.titles || []).map((t) => t.trim()).filter(Boolean).slice(0, 8);
   if (!titles.length) return null;
-  const { cities, states } = geoChips(icp.geos || []);
+  const { cities, states } = geoChips(icp.geos || [], radius);
   const capped = Math.max(1, Math.min(Math.floor(limit) || 200, 1000));
   return [
     "titles,cities,states,limit",
@@ -113,8 +153,12 @@ export function parseDbDiscoveryCsv(csv: string): CandidateRow[] {
 }
 
 /** Submit the discovery job. Returns the worker jobId, or null when the ICP can't feed it. */
-export async function submitDbDiscovery(icp: CandidateICP, limit: number): Promise<string | null> {
-  const spec = buildDbDiscoverySpecCsv(icp, limit);
+export async function submitDbDiscovery(
+  icp: CandidateICP,
+  limit: number,
+  radius?: { location?: string; radiusMi?: number },
+): Promise<string | null> {
+  const spec = buildDbDiscoverySpecCsv(icp, limit, radius);
   if (!spec) return null;
   return submitLaxisJob(spec, "koldinfo-db-search");
 }

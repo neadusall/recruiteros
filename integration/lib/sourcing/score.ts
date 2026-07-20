@@ -246,7 +246,20 @@ const SOFT_NEGATIVES = ["intern", "internship", "student", "trainee", "apprentic
 
 const WEIGHTS = { fn: 35, seniority: 20, company: 15, geo: 15, domain: 15 };
 
-export function scoreCandidate(row: CandidateRow, icp: CandidateICP): { fitScore: number; fitReasons: string[] } {
+/** Radius context, so the scorer can read `row.milesFromTarget` against the right budget. */
+export interface ScoreOptions {
+  /** The recruiter's radius pick in miles. 0 disables the measured branch. */
+  radiusMi?: number;
+  /** The typed location, for the human-readable "12 mi from Fair Lawn, NJ" reason. */
+  geoLabel?: string;
+}
+
+export function scoreCandidate(
+  row: CandidateRow,
+  icp: CandidateICP,
+  scoreOpts: ScoreOptions = {},
+): { fitScore: number; fitReasons: string[] } {
+  const opts = { radiusMi: scoreOpts.radiusMi ?? 0, geoLabel: scoreOpts.geoLabel };
   const fullText = [row.title, row.headline, row.company, row.location].filter(Boolean).join(" · ");
   const titleText = (row.title || row.headline || "").trim();
   const reasons: string[] = [];
@@ -305,17 +318,36 @@ export function scoreCandidate(row: CandidateRow, icp: CandidateICP): { fitScore
 
   /* 4. Geography (15 bonus, and a REAL penalty for a known out-of-area location). */
   const locText = expandUsStateAbbrevs((row.location || "").toLowerCase());
-  const geo = anyPhrase(locText, icp.geos.map((g) => expandUsStateAbbrevs(g.toLowerCase())));
-  if (geo) { score += WEIGHTS.geo; reasons.push(`In-target geo (${geo})`); }
-  else if (locText && icp.geos.length) {
-    // The candidate TELLS us where they are and it is not a target geo. For a
-    // location-pinned search that is disqualifying-adjacent, not neutral; without
-    // this, a strong title match anywhere in the country outranks a local.
-    score = Math.max(0, score - 18);
-    reasons.push(`Outside target geos (${row.location})`);
+  // MEASURED first: discovery stamps real miles when the recruiter picked a radius and
+  // both ends geocoded. A number beats name matching outright — it tells apart two rows
+  // the string test scores identically (a neighbouring town it never heard of vs. a
+  // same-state city three hours away) and lets the nearer of two equal candidates win.
+  const miles = row.milesFromTarget;
+  if (opts.radiusMi > 0 && typeof miles === "number") {
+    // Full geo credit inside the radius, tapering with distance so the local ranks above
+    // the commuter; beyond it, the same penalty the name-based branch applies.
+    if (miles <= opts.radiusMi) {
+      const near = 1 - Math.min(1, miles / Math.max(1, opts.radiusMi));
+      score += Math.round(WEIGHTS.geo * (0.6 + 0.4 * near));
+      reasons.push(`${Math.round(miles)} mi from ${opts.geoLabel || "target"}`);
+    } else {
+      score = Math.max(0, score - 18);
+      reasons.push(`${Math.round(miles)} mi away, outside the ${opts.radiusMi} mi radius`);
+    }
+  } else {
+    // Name-based fallback: no radius picked, or a location we could not put on a map.
+    const geo = anyPhrase(locText, icp.geos.map((g) => expandUsStateAbbrevs(g.toLowerCase())));
+    if (geo) { score += WEIGHTS.geo; reasons.push(`In-target geo (${geo})`); }
+    else if (locText && icp.geos.length) {
+      // The candidate TELLS us where they are and it is not a target geo. For a
+      // location-pinned search that is disqualifying-adjacent, not neutral; without
+      // this, a strong title match anywhere in the country outranks a local.
+      score = Math.max(0, score - 18);
+      reasons.push(`Outside target geos (${row.location})`);
+    }
+    // A row with NO location stays neutral: snippets often omit it, and the person
+    // may still be local. Remote vs on-site is not a qualification signal either.
   }
-  // A row with NO location stays neutral: snippets often omit it, and the person
-  // may still be local. Remote vs on-site is not a qualification signal either.
 
   /* 5. Domain / must-have signals (15). */
   let domain = 0;

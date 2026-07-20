@@ -109,6 +109,15 @@ export interface CandidateRow {
    */
   outOfArea?: boolean;
 
+  /**
+   * Straight-line miles from the recruiter's typed location, when both that location and
+   * the person's stated one could be resolved to coordinates. Undefined means "not
+   * measurable" (no radius picked, or a location the place table does not know) — it is
+   * never a stand-in for "far away". Surfaced so the recruiter can see WHY a row counted
+   * as local, and so ranking can prefer the nearer of two equally good people.
+   */
+  milesFromTarget?: number;
+
   /* --- Stage-2 deep-vet (LLM reads the full profile vs the JD) ------------- */
   /** 0..100 verified fit after reading the candidate's full work history. */
   verifiedScore?: number;
@@ -188,6 +197,19 @@ export interface SourcingRun {
    * never re-grabs data Laxis already pulled (no wasted credits / time).
    */
   laxisProgress?: LaxisProgress;
+  /**
+   * Chunks that were completed WITHOUT their Laxis pass because the worker was down
+   * (login wall, UI drift, credentials) when they ran: the in-house waterfall still
+   * filled them and their offsets were marked done so the chain never stalls. Pressing
+   * Enrich once Laxis is back re-opens exactly these offsets for a real Laxis pass.
+   */
+  laxisSkipped?: { offsets: number[]; error: string; at: string };
+  /**
+   * Short cooldown after a fatal Laxis worker failure (login wall etc.): until this
+   * time, enrichment skips the Laxis submit for this run (waterfall-only, chunks still
+   * marked done) instead of feeding every remaining chunk to a dead login.
+   */
+  laxisDownUntil?: string;
   /**
    * Server-side auto-send bookkeeping (lib/sourcing/autoflow): stamped once the
    * sweeper (or a retry of it) pushed this list on to Candidates + OS Text, so a
@@ -306,4 +328,14 @@ export interface DiscoveryOptions {
    * decided earlier, in generateQueries). Default "balanced".
    */
   breadth?: SearchBreadth;
+  /**
+   * The recruiter's drive-radius pick, in miles (0 / undefined = "Exact", no radius).
+   *
+   * Paired with `geoCenter`, this is what makes "in area" a MEASURED fact instead of a
+   * fuzzy place-name string match. Before this existed the radius was flattened into LLM
+   * prose and discarded, so the effective radius was "anywhere sharing a state token".
+   */
+  radiusMi?: number;
+  /** The typed location the radius is measured from ("Fair Lawn, NJ"). */
+  geoCenter?: string;
 }

@@ -522,6 +522,371 @@
   syncMotionNav();
 
   /* ---------------- router ---------------- */
+  // ------------------------------------------------------------------
+  // Mailbox Ops: the deliverability command center over the owned sending
+  // stack (lib/sending). Live fleet vitals + the operator "doctor" controls:
+  // pause a mailbox, or revive it on the warm-up ramp (never straight back to
+  // full cap). Reads GET /api/sending; every mutation is a POST action on the
+  // same route. Reuses the Meridian tokens + openModal/toast/esc helpers.
+  // ------------------------------------------------------------------
+  function renderMailboxOps(view) {
+    function n(x) { return (x == null ? 0 : x).toLocaleString(); }
+    function pctTxt(x) { return (x == null ? 0 : Math.round(x * 10) / 10) + "%"; }
+    function chip(text, kind) {
+      var map = {
+        good: ["var(--ok)", "var(--ok-bg)"], warn: ["var(--warn)", "var(--warn-bg)"],
+        bad: ["var(--danger)", "var(--danger-bg)"], info: ["var(--info)", "var(--info-bg)"],
+        mute: ["var(--text-dim)", "var(--surface-2)"],
+      };
+      var c = map[kind] || map.mute;
+      return '<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;color:' + c[0] + ";background:" + c[1] + '">' + esc(text) + "</span>";
+    }
+    function healthKind(label) { return label === "healthy" ? "good" : label === "watch" ? "warn" : label === "new" ? "info" : "bad"; }
+    function mboxKind(status) { return status === "active" ? "good" : status === "warming" ? "warn" : "bad"; }
+    function card(label, value, sub, accent) {
+      return '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;padding:14px 16px;min-width:132px;flex:1">' +
+        '<div style="font-size:22px;font-weight:600;color:' + (accent || "var(--text)") + '">' + value + "</div>" +
+        '<div style="font-size:12px;color:var(--text-dim);margin-top:2px">' + esc(label) + "</div>" +
+        (sub ? '<div style="font-size:11px;color:var(--text-dim);margin-top:3px">' + esc(sub) + "</div>" : "") + "</div>";
+    }
+    function provChip(label, on) {
+      return '<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-dim);margin-left:8px">' +
+        '<span style="width:8px;height:8px;border-radius:50%;background:' + (on ? "var(--ok)" : "var(--text-dim)") + '"></span>' + esc(label) + "</span>";
+    }
+    var busy = false;
+    var liveOn = false;
+    var liveTimer = null;
+    var rawDomById = {}; // raw domain records (nameservers + DNS checklist) for the detail view
+    view.innerHTML = '<div class="empty">Loading fleet vitals…</div>';
+
+    function stopLive() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
+    function startLive() {
+      stopLive();
+      liveTimer = setInterval(function () {
+        // Stop cleanly if the operator navigated away; never repaint over a route
+        // change or an open modal.
+        if ((location.hash || "").replace("#", "").split("?")[0] !== "mailboxops") { stopLive(); return; }
+        if (busy || document.querySelector(".modal-bg")) return;
+        load();
+      }, 30000);
+    }
+
+    function act(payload, okMsg) {
+      if (busy) return;
+      busy = true;
+      send("/sending", "POST", payload).then(function (r) {
+        busy = false;
+        if (!r.ok) { toast((r.data && r.data.error) || "Action failed"); return; }
+        if (okMsg) toast(okMsg);
+        load();
+      });
+    }
+
+    function pauseMailbox(id, address) {
+      openModal("Pause " + address, "Stops this mailbox sending immediately.",
+        '<label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:10px">Reason (optional)' +
+        '<input id="mbReason" type="text" placeholder="e.g. complaints creeping up" style="width:100%;margin-top:5px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text);padding:8px 9px"></label>' +
+        '<div style="font-size:12px;color:var(--text-dim);margin-bottom:12px">Reviving later re-enters it on the warm-up ramp at reduced volume, never straight back to full cap.</div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="mbCancel">Cancel</button><button class="btn btn-danger btn-sm" id="mbGo">Pause mailbox</button></div>',
+        function (cardEl, close) {
+          cardEl.querySelector("#mbCancel").addEventListener("click", close);
+          cardEl.querySelector("#mbGo").addEventListener("click", function () {
+            var reason = (cardEl.querySelector("#mbReason").value || "").trim();
+            close();
+            act({ action: "pause-mailbox", id: id, reason: reason }, "Mailbox paused");
+          });
+        });
+    }
+
+    function resumeMailbox(id, address) {
+      openModal("Revive " + address, "Bring this mailbox back online.",
+        '<div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">It re-enters the warm-up ramp at the reduced starting cap and climbs back to full volume over the ramp, so it re-earns trust instead of sending cold at full rate. Only revive once the root cause is fixed and the mailbox has rested.</div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="mbCancel">Cancel</button><button class="btn btn-primary btn-sm" id="mbGo">Revive on ramp</button></div>',
+        function (cardEl, close) {
+          cardEl.querySelector("#mbCancel").addEventListener("click", close);
+          cardEl.querySelector("#mbGo").addEventListener("click", function () { close(); act({ action: "resume-mailbox", id: id }, "Mailbox reviving on the ramp"); });
+        });
+    }
+
+    function addDomains() {
+      openModal("Add sending domains", "Feed bare domain names; DKIM, the full record set, and PTR are generated automatically.",
+        '<textarea id="mbDomains" rows="5" placeholder="trylumesp.com&#10;getlumesp.com" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text);padding:9px;font-family:var(--mono,monospace);font-size:13px"></textarea>' +
+        '<div style="font-size:12px;color:var(--text-dim);margin:8px 0 12px">One per line. Never use your primary brand domain for cold sending.</div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="mbCancel">Cancel</button><button class="btn btn-primary btn-sm" id="mbGo">Add and provision</button></div>',
+        function (cardEl, close) {
+          cardEl.querySelector("#mbCancel").addEventListener("click", close);
+          cardEl.querySelector("#mbGo").addEventListener("click", function () {
+            var list = (cardEl.querySelector("#mbDomains").value || "").split(/[\s,]+/).map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+            if (!list.length) { toast("Enter at least one domain"); return; }
+            close();
+            if (busy) return;
+            busy = true;
+            // Report the REAL per-domain outcome, never a blanket "queued" toast.
+            send("/sending", "POST", { action: "add-domains", domains: list }).then(function (r) {
+              busy = false;
+              if (!r.ok) { toast((r.data && r.data.error) || "Add failed"); return; }
+              var res = (r.data && r.data.results) || [];
+              var errs = res.filter(function (x) { return x.error; });
+              var okc = res.length - errs.length;
+              if (errs.length) toast(okc + " added, " + errs.length + " need attention (open the domain to see why)");
+              else toast(okc + " domain" + (okc === 1 ? "" : "s") + " added, provisioning");
+              load();
+            });
+          });
+        });
+    }
+
+    function addMailboxTo(domainId, domainName) {
+      openModal("Add mailbox on " + domainName, "A new mailbox starts warming at a low daily cap.",
+        '<label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:10px">Address' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-top:5px"><input id="mbLocal" type="text" placeholder="ryan" style="flex:1;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text);padding:8px 9px"><span style="color:var(--text-dim);font-size:13px">@' + esc(domainName) + "</span></div></label>" +
+        '<label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:12px">Display name (optional)<input id="mbName" type="text" placeholder="Ryan U" style="width:100%;margin-top:5px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text);padding:8px 9px"></label>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="mbCancel">Cancel</button><button class="btn btn-primary btn-sm" id="mbGo">Add mailbox</button></div>',
+        function (cardEl, close) {
+          cardEl.querySelector("#mbCancel").addEventListener("click", close);
+          cardEl.querySelector("#mbGo").addEventListener("click", function () {
+            var local = (cardEl.querySelector("#mbLocal").value || "").trim().toLowerCase();
+            if (!local) { toast("Enter a mailbox name"); return; }
+            var display = (cardEl.querySelector("#mbName").value || "").trim();
+            close();
+            act({ action: "add-mailbox", domainId: domainId, address: local + "@" + domainName, displayName: display || undefined }, "Mailbox added, warming");
+          });
+        });
+    }
+
+    // Domain detail: the missing lifecycle surface. Shows the nameservers to set
+    // at the registrar, the live/pending DNS record checklist, and the actions to
+    // complete setup (verify, re-provision, pull the Postal config to paste).
+    function openDomain(id) {
+      var dm = rawDomById[id];
+      if (!dm) return;
+      var ns = dm.nameservers || [];
+      var chk = dm.checklist || [];
+      var sKind = dm.status === "active" ? "good" : (dm.status === "paused" || dm.status === "error") ? "bad" : "info";
+      var body = '<div style="margin-bottom:14px">' + chip(dm.status, sKind) + (dm.lastError ? ' <span style="color:var(--danger);font-size:12px">' + esc(dm.lastError) + "</span>" : "") + "</div>";
+      body += '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Nameservers · set these at your registrar</div>';
+      if (ns.length) body += '<div style="font-family:var(--mono,monospace);font-size:12.5px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:16px">' + ns.map(esc).join("<br>") + "</div>";
+      else body += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Nameservers appear after DNS is provisioned (needs the Hetzner DNS token). Until then this domain cannot verify or send.</div>';
+      body += '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">DNS records</div>';
+      if (chk.length) {
+        body += '<div style="margin-bottom:16px">' + chk.map(function (c) {
+          var col = c.present ? "var(--ok)" : "var(--text-dim)";
+          return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px"><span style="width:8px;height:8px;border-radius:50%;background:' + col + '"></span><span>' + esc(c.label) + "</span>" + (c.core ? ' <span style="font-size:10px;color:var(--text-dim)">core</span>' : "") + '<span style="flex:1"></span><span style="font-size:11px;color:' + col + '">' + (c.present ? "live" : "pending") + "</span></div>";
+        }).join("") + "</div>";
+      } else {
+        body += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Records are written once DNS is provisioned.</div>';
+      }
+      body += '<div id="dmSetup"></div>';
+      body += '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="dmPostal">Postal setup</button><button class="btn btn-ghost btn-sm" id="dmReprov">Re-provision DNS</button><button class="btn btn-primary btn-sm" id="dmVerify">Verify now</button></div>';
+      openModal("Domain · " + dm.domain, "Complete setup and verify", body, function (cardEl, close) {
+        cardEl.querySelector("#dmVerify").addEventListener("click", function () { close(); act({ action: "verify-domain", id: id }, "Verifying domain"); });
+        cardEl.querySelector("#dmReprov").addEventListener("click", function () { close(); act({ action: "provision-domain", id: id }, "Re-provisioning DNS"); });
+        cardEl.querySelector("#dmPostal").addEventListener("click", function () {
+          send("/sending", "POST", { action: "domain-setup", id: id }).then(function (r) {
+            if (!r.ok || !r.data || !r.data.setup) { toast((r.data && r.data.error) || "Could not load Postal setup"); return; }
+            var s = r.data.setup;
+            cardEl.querySelector("#dmSetup").innerHTML = '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin:2px 0 6px">Paste into Postal (DKIM + config)</div><pre style="white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:11.5px;max-height:220px;overflow:auto;margin:0 0 14px">' + esc(typeof s === "string" ? s : JSON.stringify(s, null, 2)) + "</pre>";
+          });
+        });
+      });
+    }
+
+    function paint(d) {
+      function th(t) { return '<th style="text-align:left;padding:8px 10px;font-weight:500">' + esc(t) + "</th>"; }
+      function thR(t) { return '<th style="text-align:right;padding:8px 10px;font-weight:500">' + esc(t) + "</th>"; }
+      function warmupCell(m) {
+        if (typeof m.warmupReputationPct === "number") {
+          var k = m.warmupExternalStatus === "paused" ? "warn" : m.warmupReputationPct >= 90 ? "good" : "warn";
+          return chip(m.warmupReputationPct + "%", k) + (m.warmupExternalStatus === "paused" ? ' <span style="color:var(--warn);font-size:11px">paused</span>' : "");
+        }
+        if (m.warmupExternalStatus === "active") return chip("warming", "warn");
+        return '<span style="color:var(--text-dim);font-size:12px">n/a</span>';
+      }
+      function protoCol(title, color, items) {
+        return '<div><div style="font-size:13px;font-weight:600;color:' + color + ';margin-bottom:8px">' + esc(title) + '</div><ul style="margin:0;padding-left:16px;font-size:12.5px;color:var(--text-muted);line-height:1.6">' + items.map(function (i) { return "<li>" + esc(i) + "</li>"; }).join("") + "</ul></div>";
+      }
+      function wire() {
+        var q = function (s) { return view.querySelector(s); };
+        var ad = q("#mbAddDomains"); if (ad) ad.addEventListener("click", addDomains);
+        var ea = q("#mbEmptyAdd"); if (ea) ea.addEventListener("click", addDomains);
+        var rf = q("#mbRefresh"); if (rf) rf.addEventListener("click", load);
+        var sy = q("#mbSync"); if (sy) sy.addEventListener("click", function () { act({ action: "sync-smartlead" }, "Warm-up health synced from Smartlead"); });
+        var lv = q("#mbLive"); if (lv) lv.addEventListener("click", function () { liveOn = !liveOn; lv.textContent = liveOn ? "Live: on" : "Live: off"; if (liveOn) startLive(); else stopLive(); });
+        var gv = q("#mbGovernor"); if (gv) gv.addEventListener("click", function () { act({ action: "run-governor" }, "Safety check complete"); });
+        view.querySelectorAll("[data-pause]").forEach(function (b) { b.addEventListener("click", function () { pauseMailbox(b.getAttribute("data-pause"), b.getAttribute("data-addr")); }); });
+        view.querySelectorAll("[data-resume]").forEach(function (b) { b.addEventListener("click", function () { resumeMailbox(b.getAttribute("data-resume"), b.getAttribute("data-addr")); }); });
+        view.querySelectorAll("[data-addmbox]").forEach(function (b) { b.addEventListener("click", function () { addMailboxTo(b.getAttribute("data-addmbox"), b.getAttribute("data-dom")); }); });
+        view.querySelectorAll("[data-domview]").forEach(function (b) { b.addEventListener("click", function () { openDomain(b.getAttribute("data-domview")); }); });
+      }
+
+      var health = d.health || { overall: {}, domains: [], mailboxes: [] };
+      var ov = health.overall || {};
+      var domains = health.domains || [];
+      var mailboxes = health.mailboxes || [];
+      var prov = d.providers || {};
+      var domName = {};
+      rawDomById = {};
+      (d.domains || []).forEach(function (dm) { domName[dm.id] = dm.domain; rawDomById[dm.id] = dm; });
+      var pausedMailboxes = mailboxes.filter(function (m) { return m.paused; }).length;
+
+      // Triage first: compute the ranked list of things that need the operator.
+      var alerts = [];
+      if (!prov.mta) alerts.push(["info", "Sending stack configured but no live MTA yet. Connect Postal to send for real."]);
+      if (!prov.smartlead) alerts.push(["info", "Smartlead warm-up not connected. Add SMARTLEAD_API_KEY to pull warm-up health onto the fleet."]);
+      domains.forEach(function (dm) {
+        if (dm.status === "paused") alerts.push(["bad", "Domain " + dm.domain + " is paused: " + ((dm.warnings || [])[0] || dm.pausedReason || "governor")]);
+        else if (dm.healthLabel === "at_risk") alerts.push(["bad", "Domain " + dm.domain + " at risk: " + ((dm.warnings || []).join("; ") || "health low")]);
+        else if ((dm.complaintRatePct || 0) > 0.1) alerts.push(["bad", "Domain " + dm.domain + " complaints " + dm.complaintRatePct + "% over the 0.1% ceiling"]);
+        else if ((dm.bounceRatePct || 0) > 2) alerts.push(["warn", "Domain " + dm.domain + " bounce " + dm.bounceRatePct + "% approaching the limit"]);
+      });
+      mailboxes.forEach(function (m) {
+        if (m.paused) alerts.push(["warn", "Mailbox " + m.address + " paused" + (m.pausedReason ? ": " + m.pausedReason : "")]);
+        else if (m.warmupExternalStatus === "paused") alerts.push(["warn", "Warm-up paused on " + m.address + " (Smartlead)"]);
+        else if (typeof m.warmupReputationPct === "number" && m.warmupReputationPct < 90) alerts.push(["warn", "Low warm-up reputation on " + m.address + ": " + m.warmupReputationPct + "%"]);
+      });
+      var sevRank = { bad: 0, warn: 1, info: 2 };
+      alerts.sort(function (a, b) { return sevRank[a[0]] - sevRank[b[0]]; });
+
+      var html = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">' +
+        '<button class="btn btn-primary btn-sm" id="mbAddDomains">Add domains</button>' +
+        '<button class="btn btn-ghost btn-sm" id="mbSync">Sync warm-up</button>' +
+        '<button class="btn btn-ghost btn-sm" id="mbGovernor">Run safety check</button>' +
+        '<button class="btn btn-ghost btn-sm" id="mbRefresh">Refresh</button>' +
+        '<button class="btn btn-ghost btn-sm" id="mbLive">' + (liveOn ? "Live: on" : "Live: off") + "</button>" +
+        '<span style="flex:1"></span>' +
+        provChip("Smartlead warm-up", prov.smartlead) + provChip("MTA / Postal", prov.mta) + provChip("DNS", prov.dns) + provChip("SNDS", prov.snds) + provChip("Postmaster", prov.postmaster) +
+        "</div>";
+
+      if (alerts.length) {
+        var worst = alerts[0][0];
+        var bcol = worst === "bad" ? "var(--danger)" : worst === "warn" ? "var(--warn)" : "var(--info)";
+        var rows = alerts.slice(0, 6).map(function (a) {
+          var col = a[0] === "bad" ? "var(--danger)" : a[0] === "warn" ? "var(--warn)" : "var(--info)";
+          return '<div style="display:flex;gap:9px;align-items:flex-start;padding:5px 0;font-size:13px;color:var(--text-muted)"><span style="width:8px;height:8px;border-radius:50%;background:' + col + ';margin-top:5px;flex:none"></span><span>' + esc(a[1]) + "</span></div>";
+        }).join("");
+        html += '<div style="border:1px solid var(--border);border-left:3px solid ' + bcol + ';background:var(--card,var(--surface));border-radius:12px;padding:12px 16px;margin-bottom:16px">' +
+          '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-bottom:5px">Attention needed · ' + alerts.length + "</div>" + rows +
+          (alerts.length > 6 ? '<div style="font-size:12px;color:var(--text-dim);margin-top:4px">and ' + (alerts.length - 6) + " more</div>" : "") + "</div>";
+      } else {
+        html += '<div style="border:1px solid var(--border);border-left:3px solid var(--ok);background:var(--card,var(--surface));border-radius:12px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--text-muted)"><b style="color:var(--ok)">All clear.</b> No domains at risk, no paused mailboxes, warm-up healthy.</div>';
+      }
+
+      // Go-live readiness: exactly what still has to be wired for submitted domains
+      // to provision, verify, and actually send. Shown until everything is set.
+      var steps = [
+        ["Hetzner DNS token", prov.dns, "auto-publishes SPF, DKIM, DMARC, MX per domain"],
+        ["Hetzner Cloud token", prov.cloud, "auto-provisions the Postal MTA server and rDNS"],
+        ["Postal MTA routing", prov.mta, "lets real cold sends leave the system"],
+        ["Smartlead warm-up", prov.smartlead, "pulls warm-up health onto every mailbox"],
+      ];
+      var notReady = steps.filter(function (s) { return !s[1]; }).length;
+      if (notReady) {
+        html += '<div style="border:1px solid var(--border);border-radius:12px;background:var(--card,var(--surface));padding:14px 16px;margin-bottom:16px">' +
+          '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-bottom:8px">Go-live readiness · ' + notReady + " step" + (notReady === 1 ? "" : "s") + " left</div>" +
+          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px">' +
+          steps.map(function (s) {
+            var col = s[1] ? "var(--ok)" : "var(--text-dim)";
+            return '<div style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px"><span style="width:9px;height:9px;border-radius:50%;background:' + col + ';margin-top:4px;flex:none"></span><span><b style="color:var(--text)">' + esc(s[0]) + "</b> <span style=\"color:var(--text-dim)\">" + esc(s[2]) + "</span></span></div>";
+          }).join("") +
+          '</div><div style="font-size:12px;color:var(--text-dim);margin-top:10px">After a domain provisions, point its nameservers at Hetzner at your registrar (open the domain to see them), then Verify. Nothing sends until Postal MTA routing is on.</div></div>';
+      }
+
+      if (!domains.length && !mailboxes.length) {
+        html += '<div class="card" style="text-align:center;padding:34px 20px">' +
+          '<div style="font-size:15px;font-weight:600;margin-bottom:6px">No sending fleet yet</div>' +
+          '<div style="font-size:13px;color:var(--text-dim);max-width:52ch;margin:0 auto 16px">Add secondary sending domains to begin. Each gets its DKIM keys, full DNS record set, and PTR generated automatically, then mailboxes warm up on a slow ramp before any cold send.</div>' +
+          '<button class="btn btn-primary" id="mbEmptyAdd">Add your first domains</button></div>';
+        view.innerHTML = html;
+        wire();
+        return;
+      }
+
+      var flabel = ov.label || "new";
+      var fkind = healthKind(flabel);
+      var fcolor = fkind === "good" ? "var(--ok)" : fkind === "warn" ? "var(--warn)" : fkind === "info" ? "var(--info)" : "var(--danger)";
+      html += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">' +
+        card("Fleet health", n(ov.healthScore || 0) + '<span style="font-size:13px;color:var(--text-dim)"> / 100</span>', flabel, fcolor) +
+        card("Sending capacity today", n(ov.capacityToday), ov.canSend ? "sends available now" : "no capacity", ov.canSend ? "var(--ok)" : "var(--warn)") +
+        card("Mailboxes", n(ov.mailboxes), n(ov.activeMailboxes) + " active · " + n(ov.warmingMailboxes) + " warming · " + n(pausedMailboxes) + " paused") +
+        card("Domains", n(ov.domains), n(ov.atRiskDomains) + " at risk · " + n(ov.pausedDomains) + " paused", (ov.atRiskDomains || ov.pausedDomains) ? "var(--danger)" : "var(--text)") +
+        card("Warm-up · Smartlead", prov.smartlead ? (n(ov.avgWarmupReputation || 0) + "%") : "off", prov.smartlead ? (n(ov.warmupExternalActive || 0) + " of " + n(ov.mailboxes) + " warming") : "connect Smartlead", prov.smartlead ? ((ov.avgWarmupReputation || 0) >= 90 ? "var(--ok)" : "var(--warn)") : "var(--text-dim)") +
+        card("IP warmth", n(ov.ipWarmthScore || 0) + "%", "shared-IP ramp") +
+        card("Human open rate", n(ov.humanOpenRatePct || 0) + "%", "machine opens removed") +
+        "</div>";
+
+      html += '<h3 style="margin:20px 0 8px;font-size:14px;color:var(--text-muted)">Domains</h3>';
+      if (!domains.length) {
+        html += '<div class="empty" style="padding:16px">No domains yet.</div>';
+      } else {
+        var drows = domains.map(function (dm) {
+          var w = (dm.warnings || []).join("; ");
+          var cRate = Math.round((dm.complaintRatePct || 0) * 100) / 100;
+          return '<tr style="border-top:1px solid var(--surface-2)">' +
+            '<td style="padding:9px 10px;font-weight:600"><span data-domview="' + esc(dm.id) + '" style="cursor:pointer;border-bottom:1px dotted var(--border-strong)">' + esc(dm.domain) + "</span></td>" +
+            '<td style="padding:9px 10px">' + chip(dm.status, dm.status === "active" ? "good" : (dm.status === "paused" || dm.status === "error") ? "bad" : "info") + "</td>" +
+            '<td style="padding:9px 10px">' + chip(dm.healthLabel, healthKind(dm.healthLabel)) + ' <span style="color:var(--text-dim);font-size:12px">' + n(dm.healthScore) + "</span></td>" +
+            '<td style="padding:9px 10px;text-align:right;font-variant-numeric:tabular-nums">' + n(dm.sent) + "</td>" +
+            '<td style="padding:9px 10px;text-align:right;font-variant-numeric:tabular-nums;color:' + ((dm.bounceRatePct || 0) > 2 ? "var(--danger)" : "var(--text-muted)") + '">' + pctTxt(dm.bounceRatePct) + "</td>" +
+            '<td style="padding:9px 10px;text-align:right;font-variant-numeric:tabular-nums;color:' + (cRate > 0.1 ? "var(--danger)" : "var(--text-muted)") + '">' + cRate + "%</td>" +
+            '<td style="padding:9px 10px">' + (dm.reputationTier ? chip(dm.reputationTier, dm.reputationTier === "high" ? "good" : dm.reputationTier === "medium" ? "warn" : "bad") : '<span style="color:var(--text-dim)">n/a</span>') + "</td>" +
+            '<td style="padding:9px 10px;font-size:12px;color:var(--warn)">' + esc(w) + "</td>" +
+            '<td style="padding:9px 10px;text-align:right"><button class="btn btn-ghost btn-sm" data-addmbox="' + esc(dm.id) + '" data-dom="' + esc(dm.domain) + '">+ Mailbox</button></td>' +
+            "</tr>";
+        }).join("");
+        html += '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;overflow-x:auto">' +
+          '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="font-size:11px;text-transform:uppercase;color:var(--text-dim)">' +
+          th("Domain") + th("Status") + th("Health") + thR("Sent") + thR("Bounce") + thR("Complaint") + th("Reputation") + th("Warnings") + th("") +
+          "</tr></thead><tbody>" + drows + "</tbody></table></div>";
+      }
+
+      html += '<h3 style="margin:22px 0 8px;font-size:14px;color:var(--text-muted)">Mailbox fleet <span style="font-weight:400;color:var(--text-dim)">the doctor\'s view</span></h3>';
+      if (!mailboxes.length) {
+        html += '<div class="empty" style="padding:16px">No mailboxes yet. Add one from a domain above.</div>';
+      } else {
+        var mrows = mailboxes.map(function (m) {
+          var dom = domName[m.domainId] || "";
+          var capPct = m.dailyCap ? Math.min(100, Math.round((m.sentToday / m.dailyCap) * 100)) : 0;
+          var actionBtn = m.paused
+            ? '<button class="btn btn-ghost btn-sm" data-resume="' + esc(m.id) + '" data-addr="' + esc(m.address) + '" style="color:var(--ok)">Revive</button>'
+            : '<button class="btn btn-ghost btn-sm" data-pause="' + esc(m.id) + '" data-addr="' + esc(m.address) + '" style="color:var(--danger)">Pause</button>';
+          return '<tr style="border-top:1px solid var(--surface-2)">' +
+            '<td style="padding:9px 10px;font-weight:600">' + esc(m.address) + (m.pausedReason ? '<div style="font-size:11px;color:var(--text-dim);font-weight:400">' + esc(m.pausedReason) + "</div>" : "") + "</td>" +
+            '<td style="padding:9px 10px;color:var(--text-dim);font-size:12px">' + esc(dom) + "</td>" +
+            '<td style="padding:9px 10px">' + chip(m.warmthLabel, m.warmthLabel === "warm" ? "good" : m.warmthLabel === "paused" ? "bad" : "warn") + "</td>" +
+            '<td style="padding:9px 10px">' + warmupCell(m) + "</td>" +
+            '<td style="padding:9px 10px;min-width:120px"><div style="font-variant-numeric:tabular-nums;font-size:12px;margin-bottom:3px">' + n(m.sentToday) + " / " + n(m.dailyCap) + '</div><div style="height:5px;border-radius:99px;background:var(--surface-2);overflow:hidden"><i style="display:block;height:100%;width:' + capPct + '%;background:var(--brand)"></i></div></td>' +
+            '<td style="padding:9px 10px">' + chip(m.status, mboxKind(m.status)) + "</td>" +
+            '<td style="padding:9px 10px;text-align:right">' + actionBtn + "</td>" +
+            "</tr>";
+        }).join("");
+        html += '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;overflow-x:auto">' +
+          '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="font-size:11px;text-transform:uppercase;color:var(--text-dim)">' +
+          th("Mailbox") + th("Domain") + th("Warmth") + th("Warm-up") + th("Sent / cap") + th("Status") + thR("") +
+          "</tr></thead><tbody>" + mrows + "</tbody></table></div>";
+      }
+
+      html += '<details style="margin-top:22px;background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;padding:2px 16px">' +
+        '<summary style="cursor:pointer;padding:12px 0;font-size:14px;font-weight:600;color:var(--text-muted)">The doctor\'s protocol · when to pause, rest, and revive</summary>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;padding:6px 0 16px">' +
+        protoCol("Pause now", "var(--danger)", ["Complaints over 0.1% (pause the whole domain)", "Blocklist or spam-trap hit", "Bounce over 5%", "Reputation drops to Low", "SPF, DKIM, or DMARC failing", "Replies collapse to zero"]) +
+        protoCol("Rest and recover", "var(--warn)", ["Cold sends off, warm-up stays on", "Fix the root cause: delist, DNS, scrub the list", "48h for a soft wobble, 2 to 4 weeks for reputation damage", "Rotate a spare in to hold volume"]) +
+        protoCol("Revive", "var(--ok)", ["Only when the root cause is fixed", "Rested the full minimum", "Reputation back to Medium or High", "Seed test shows inbox", "Comes back on the ramp at reduced volume, never full cap"]) +
+        "</div></details>";
+
+      view.innerHTML = html;
+      wire();
+    }
+
+    function load() {
+      api("/sending").then(function (d) {
+        if (!d) { view.innerHTML = '<div class="empty">Couldn\'t load the sending stack.</div>'; return; }
+        paint(d);
+      }).catch(function () { view.innerHTML = '<div class="empty">Couldn\'t load the sending stack (admin session required).</div>'; });
+    }
+
+    load();
+  }
+
   var ROUTES = {
     overview: { title: "Dashboard", crumb: "Operate", action: null, render: renderOverview },
     clients: { title: "Clients", crumb: "Business Development", action: null, render: renderClients, motionOnly: "bd" },
@@ -529,6 +894,7 @@
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
     sendqueue: { title: "Send Queue", crumb: "Operate", action: null, render: renderSendQueue, motionOnly: "bd" },
     senders: { title: "Senders", crumb: "Operate", action: null, render: renderSenders, motionOnly: "bd" },
+    mailboxops: { title: "Mailbox Ops", crumb: "Deliverability", action: null, render: renderMailboxOps, motionOnly: "bd" },
     // Recruiting gets the unified Candidates tab (pipeline + ATS people database
     // in one table); BD keeps the classic Prospects pipeline.
     prospects: { title: "Prospects", crumb: "Operate", action: "+ Add prospect", render: function (el) { return motion === "recruiting" ? renderCandidates(el) : renderProspects(el); } },
@@ -10092,16 +10458,19 @@
       '.jd-or span{padding:0 12px}' +
       '.jd-buildbar{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:12px 0 2px}' +
       '.jd-buildbar .muted{font-size:12px}' +
-      '#jdName,#jdText,#jdbTitle,#jdbCompany,#jdbNotes,#jdbLocation{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 14px;margin:0;transition:border-color .12s,box-shadow .12s}' +
+      '#jdName,#jdText,#jdbTitle,#jdbCompany,#jdbNotes,#jdbLocation,#jdSnavUrl,#jdSnavName{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 14px;margin:0;transition:border-color .12s,box-shadow .12s}' +
       '#jdText{line-height:1.55;resize:vertical;min-height:104px}' +
-      '#jdName::placeholder,#jdText::placeholder,#jdbTitle::placeholder,#jdbCompany::placeholder,#jdbNotes::placeholder,#jdbLocation::placeholder{color:var(--text-dim)}' +
-      '#jdName:focus,#jdText:focus,#jdbTitle:focus,#jdbCompany:focus,#jdbNotes:focus,#jdbLocation:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
+      '#jdName::placeholder,#jdText::placeholder,#jdbTitle::placeholder,#jdbCompany::placeholder,#jdbNotes::placeholder,#jdbLocation::placeholder,#jdSnavUrl::placeholder,#jdSnavName::placeholder{color:var(--text-dim)}' +
+      '#jdName:focus,#jdText:focus,#jdbTitle:focus,#jdbCompany:focus,#jdbNotes:focus,#jdbLocation:focus,#jdSnavUrl:focus,#jdSnavName:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
       '.jd-field{margin-bottom:8px}' +
       '.jd-field>label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:600;margin-bottom:6px}' +
       '.jd-opt{font-weight:500;text-transform:none;letter-spacing:0;opacity:.75;margin-left:7px}' +
       '.jd-lead2{font-size:16px;font-weight:650;letter-spacing:.01em;margin:0 0 3px;background:linear-gradient(90deg,var(--brand),var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
       '.jd-lead-sub{font-size:12.5px;color:var(--text-muted);margin:0 0 12px}' +
       '.jd-locrow{display:flex;gap:8px}.jd-locrow #jdbLocation{flex:1}' +
+      '.jd-snavrow{display:flex;gap:8px}.jd-snavrow #jdSnavName{flex:1;min-width:0}' +
+      '#jdSnavTarget{background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:13px;padding:8px 9px;cursor:pointer;flex:1;min-width:0;max-width:100%}' +
+      '#jdSnavTarget:focus{outline:0;border-color:var(--brand)}' +
       '#jdbRadius{background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:13px;padding:0 9px;cursor:pointer;flex:0 0 auto}' +
       '#jdbRadius:focus{outline:0;border-color:var(--brand)}' +
       '.jd-tipsd{margin-top:10px;font-size:12.5px;color:var(--text-muted)}' +
@@ -10138,6 +10507,9 @@
       '.jd-reach .jr-api{color:#8a5a00;background:color-mix(in srgb, #d97706 10%, transparent);border:1px solid color-mix(in srgb, #d97706 38%, transparent)}' +
       '.jd-reach .jr-done{color:var(--ok);background:color-mix(in srgb, var(--ok) 10%, transparent);border:1px solid color-mix(in srgb, var(--ok) 38%, transparent)}' +
       '.jd-reach .jr-part{color:#8a5a00;background:color-mix(in srgb, #d97706 10%, transparent);border:1px solid color-mix(in srgb, #d97706 38%, transparent)}' +
+      // Measured distance from the recruiter's typed location. Muted on purpose: it is
+      // corroboration for the Location beside it, not a column of its own.
+      '.jd-miles{font-size:11px;font-weight:600;color:var(--text-dim);font-variant-numeric:tabular-nums;white-space:nowrap}' +
       '.jd-quota{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}' +
       '.jd-quota .jd-qchip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;color:#8a5a00;background:color-mix(in srgb, #d97706 8%, transparent);border:1px solid color-mix(in srgb, #d97706 34%, transparent);cursor:help}' +
       '.jd-quota .jd-qchip .isvg{width:12px;height:12px}' +
@@ -10172,6 +10544,10 @@
             '<p><b>1 &middot; Fill in the role</b>: Job title plus anything you know. Pasting a JD is optional; the AI writes a strong brief from the fields alone.</p>' +
             '<p><b>2 &middot; Press Initiate Search</b>: That one button runs everything: writes the brief (if the JD box is empty), builds the ideal-candidate profile, searches, ranks the strongest matches to the top, and saves the finished list below. There is nothing else to press.</p>' +
             '<p>Then the list keeps working on its own: contact info is enriched (emails and phones, cheapest source first), everyone lands in the <b>Candidates</b> tab under the same list name, and an <b>OS Text</b> SMS campaign is built from everyone with a phone number, ready to review and launch. No buttons, no extra steps.</p>' +
+          '</div>' +
+          '<div class="jd-helpsec"><h5>Search from Sales Navigator</h5>' +
+            '<p>Run a search inside LinkedIn Sales Navigator (or a regular LinkedIn people search), copy the URL from the address bar, and paste it into the Sales Navigator box below. The tool pulls the people that search matches through your connected LinkedIn account, reads the search\'s own filters (titles, locations, companies, keywords), and runs the same search waterfall on those filters to find more qualified people beyond what LinkedIn showed. The finished list then enriches and sends itself exactly like a normal run.</p>' +
+            '<p><b>Add results to</b>: pick a past search (either search type) and the new people are added to that list with no duplicates. Anyone already on it stays once, and any missing details or contact info the new pull found fill in their blanks, so pointing it at an older, thinly-enriched list is also how you top that list up and finish its enrichment. Choosing New list saves under the name you type; re-using an existing name adds to that list instead of creating a second one.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>Set the depth of the search</h5>' +
             '<p>The options above the button shape how wide a run goes; each is explained right where it sits. The defaults (Balanced breadth, scan 500, min fit 10, both boxes off) are right for most roles. Pick <b>Wide net</b> when you want the biggest possible pool: it runs every title variation, digs deeper on every search, and catches people whose profiles word the location differently, while the same location rules and ranking keep the list honest.</p>' +
@@ -10261,6 +10637,21 @@
         '</div>' +
         '<div id="jdMsg" class="muted" style="margin-top:8px"></div>' +
       '</div>' +
+      '<div class="card">' +
+        '<div class="jd-lead2">Search from LinkedIn Sales Navigator</div>' +
+        '<div class="jd-lead-sub">Paste a Sales Navigator (or LinkedIn people search) URL. The people it matches are pulled in, the same search waterfall finds more qualified matches beyond them, and the finished list enriches itself and flows to Candidates and OS Text like any other run.</div>' +
+        '<div class="jd-fieldgrid">' +
+          '<div class="jd-field"><label>Sales Navigator search URL</label><input id="jdSnavUrl" type="text" placeholder="https://www.linkedin.com/sales/search/people?..." /></div>' +
+          '<div class="jd-field"><label>Add results to</label><div class="jd-snavrow">' +
+            '<select id="jdSnavTarget" title="Where the results land. Pick a past search (from any search type) to add to it without creating duplicates, or keep New list to save under a new name."><option value="">New list…</option></select>' +
+            '<input id="jdSnavName" type="text" placeholder="Name the new list" /></div></div>' +
+        '</div>' +
+        '<div class="jd-actions">' +
+          '<button class="btn btn-primary" id="jdSnavGo">Search &amp; Enrich</button>' +
+          '<span class="muted" style="font-size:12.5px;max-width:560px">Adding to an existing list never creates duplicates: people already on it are kept once, anything the new pull knows (title, company, location, contact info) fills in their blanks, and the list re-enriches and re-sends on its own. Re-using an existing name does the same instead of creating a second list.</span>' +
+        '</div>' +
+        '<div id="jdSnavMsg" class="muted" style="margin-top:8px"></div>' +
+      '</div>' +
       '<div class="card jd-prog" id="jdProgress" style="display:none"></div>' +
       '<div id="jdNight"></div>' +
       '<div id="jdPlan"></div>' +
@@ -10310,7 +10701,12 @@
       function candTable(list, limit) {
         var rows = list.slice(0, limit).map(function (c) {
           return '<tr><td>' + c.fitScore + '</td><td>' + esc(c.fullName) + '</td><td>' + esc(c.title || c.headline || "") +
-            '</td><td>' + esc(c.company || "") + '</td><td>' + esc(c.location || "") + '</td>' +
+            '</td><td>' + esc(c.company || "") + '</td><td>' + esc(c.location || "") +
+            // Measured distance from the typed location, when we could place both ends.
+            // This is the recruiter's proof the radius was honoured, so it reads as a
+            // plain number next to the location rather than hiding in a tooltip.
+            (typeof c.milesFromTarget === "number"
+              ? ' <span class="jd-miles">' + Math.round(c.milesFromTarget) + ' mi</span>' : '') + '</td>' +
             '<td>' + (c.linkedinUrl ? '<a href="' + esc(c.linkedinUrl) + '" target="_blank" rel="noopener">view</a>' : '') + '</td></tr>';
         }).join("");
         return '<div class="jd-tablewrap"><table class="jd-table"><thead><tr><th>Fit</th><th>Name</th><th>Title</th><th>Company</th><th>Location</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
@@ -10431,6 +10827,7 @@
         state.runs = runs;
         renderQuota((d && d.apiQuota) || []);
         renderNight((d && d.nightQueue) || []);
+        renderSnavTargets();
         // FAILSAFE: if the backend reports non-durable storage, warn LOUDLY before the user
         // saves work that won't survive a restart. durable===false should never happen in prod.
         var warn = (d && d.durable === false)
@@ -10760,6 +11157,85 @@
       });
     }
 
+    /* ---- Sales Navigator URL search: paste a search, land it in a named list ----
+       The dropdown lists every saved run (either search type). Picking one merges the
+       new pull into it server-side with the Combine-lists dedupe (no duplicate people,
+       blanks filled both ways); "New list…" saves under the typed name, and re-using
+       an existing name merges into that list instead of creating a second one. */
+    function renderSnavTargets() {
+      var sel = $("#jdSnavTarget"); if (!sel) return;
+      var keep = sel.value;
+      sel.innerHTML = '<option value="">New list…</option>' + (state.runs || []).map(function (r) {
+        return '<option value="' + esc(r.id) + '">' + esc(r.name) + ' (' + ((r.candidates || []).length) + ')</option>';
+      }).join("");
+      if (keep) {
+        for (var i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].value === keep) { sel.value = keep; break; }
+        }
+      }
+      syncSnavName();
+    }
+    function syncSnavName() {
+      var sel = $("#jdSnavTarget"), nm = $("#jdSnavName");
+      if (sel && nm) nm.style.display = sel.value ? "none" : "";
+    }
+    function runSalesNav() {
+      var btn = $("#jdSnavGo"); if (!btn || btn.disabled) return;
+      var urlEl = $("#jdSnavUrl");
+      var url = urlEl ? urlEl.value.trim() : "";
+      function smsg(t) { var m = $("#jdSnavMsg"); if (m) m.textContent = t || ""; }
+      if (!/^https?:\/\/(www\.)?linkedin\.com\//i.test(url)) {
+        smsg("Paste a full LinkedIn Sales Navigator search URL (it starts with https://www.linkedin.com/).");
+        if (urlEl) urlEl.focus();
+        return;
+      }
+      var sel = $("#jdSnavTarget");
+      var targetId = sel ? sel.value : "";
+      var nameEl = $("#jdSnavName");
+      var name = targetId ? "" : ((nameEl && nameEl.value.trim()) || "");
+      btn.disabled = true; btn.textContent = "Searching…";
+      smsg("");
+      showProgress("Running the Sales Navigator search", 120, "Pulling the search's people from LinkedIn, then widening with the search waterfall…");
+      var payload = { action: "salesNav", url: url, breadth: jdBreadth() };
+      if (targetId) payload.targetRunId = targetId;
+      if (name) payload.name = name;
+      sendPatient("/sourcing", "POST", payload).then(function (r) {
+        btn.disabled = false; btn.textContent = "Search & Enrich";
+        if (!r.ok) {
+          finishProgress("Search stopped");
+          smsg("Sales Navigator search failed: " + ((r.data && (r.data.detail || r.data.error)) || gatewayMsg(r.status)));
+          return;
+        }
+        var d = r.data || {};
+        var run = d.run || {};
+        var bits = [];
+        if (d.linkedinFound) bits.push(d.linkedinFound + " pulled straight from the LinkedIn search");
+        if (d.expanded) bits.push(d.expanded + " more found by the search waterfall");
+        if (d.mode === "merged") {
+          bits.push((d.added || 0) + ' new added to "' + (d.name || "") + '"' +
+            (d.overlap ? (", " + d.overlap + " already on it merged in (blanks filled, no duplicates)") : ""));
+        } else {
+          bits.push('saved as "' + (d.name || "") + '" with ' + (d.total || 0) + " candidates");
+        }
+        smsg(bits.join(" · ") + ". Enriching contact info and sending everyone to Candidates and OS Text automatically…");
+        // A LinkedIn leg that could not run is worth a heads-up, but never blocks:
+        // the waterfall result above still landed.
+        var warn = (d.warnings || []).filter(function (w) { return /linkedin_not_connected|linkedin\(search\)/.test(w); })[0];
+        if (warn) toast("Note: " + warn);
+        if (urlEl) urlEl.value = "";
+        if (nameEl) nameEl.value = "";
+        if (sel) sel.value = "";
+        syncSnavName();
+        Promise.resolve(loadRuns()).then(function () {
+          if (run.id) runAutoPipeline(run.id, run.name || d.name || "Candidate list");
+        });
+      }).catch(function () {
+        btn.disabled = false; btn.textContent = "Search & Enrich";
+        finishProgress("Search stopped");
+        smsg("Could not reach the server. Nothing was lost: paste the URL and try again in a moment.");
+      });
+    }
+
     function numVal(id, dflt) { var e = $(id); var v = e ? parseFloat(e.value) : NaN; return isFinite(v) && v >= 0 ? v : dflt; }
     function bump(el) { if (!el) return; el.classList.add("bump"); setTimeout(function () { el.classList.remove("bump"); }, 130); }
     /** Search-run cost (people-search requests + the one Haiku JD parse), shown by Find. */
@@ -10841,12 +11317,15 @@
         // overwrite the refined profile, so skip straight to the search instead.
         var jdNow = ta ? ta.value.trim() : "";
         state.location = jdLocLabel();
+        // The radius as a NUMBER, alongside the "+25mi" label. The label is what gets
+        // saved on the run; this is what the backend actually measures distance with.
+        state.radiusMi = jdbRadius();
         if (state.refineNote && state.icp && state.jd === jdNow) {
           renderPlan(); updateRunCost();
           return;
         }
         state.jd = jdNow;
-        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location, breadth: jdBreadth() }).then(function (r) {
+        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location, radiusMi: state.radiusMi, breadth: jdBreadth() }).then(function (r) {
           if (!r.ok) throw { stage: "Analyze", r: r };
           state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
           renderPlan(); updateRunCost();
@@ -10859,7 +11338,7 @@
         // A refined profile is sent along so the search actually honors the
         // Dive-deeper instruction instead of re-deriving the profile from the JD.
         var refinedIcp = (state.refineNote && state.icp) ? state.icp : undefined;
-        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).then(function (r) {
+        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, radiusMi: state.radiusMi, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).then(function (r) {
           if (!r.ok) { finishProgress("Search failed"); throw { stage: "Search", r: r }; }
           state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
           state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
@@ -10977,6 +11456,8 @@
 
     $("#jdGo").addEventListener("click", runOneClick);
     if ($("#jdQueue")) $("#jdQueue").addEventListener("click", queueOvernight);
+    if ($("#jdSnavGo")) $("#jdSnavGo").addEventListener("click", runSalesNav);
+    if ($("#jdSnavTarget")) $("#jdSnavTarget").addEventListener("change", syncSnavName);
 
     $("#jdRuns").addEventListener("click", function (e) {
       var t = e.target;

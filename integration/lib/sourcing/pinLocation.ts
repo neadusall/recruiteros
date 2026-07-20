@@ -3,12 +3,21 @@
  * Pin the ICP's geography to the location the recruiter explicitly typed.
  *
  * The LLM parse is recall-biased and will happily emit a national metro list for a
- * senior role; the typed location is ground truth. geos become the typed location plus
- * ONLY the parsed geos that mention the same city or state, so every generated query
- * stays local. Pure function — no I/O (kept import-light so it is unit-testable).
+ * senior role; the typed location is ground truth.
+ *
+ * TWO STRATEGIES, in order:
+ *   1. MEASURED (preferred) — the recruiter picked a radius and the typed center
+ *      geocodes, so geos become the real cities within N miles (see geoRadius.ts).
+ *   2. TOKEN PIN (fallback) — no radius, or a center we cannot locate: keep only the
+ *      parsed geos naming the same city or state. This is the historical behavior and
+ *      is state-granular, i.e. looser than the radius the recruiter asked for.
+ *
+ * Still a pure function — no I/O, no network — so it stays unit-testable; the place
+ * table it consults is a bundled constant.
  */
 
 import type { CandidateICP } from "./types";
+import { citiesWithinRadius, formatPlace, geocodeUsPlace, parseRadiusMi, stripRadiusSuffix } from "./geoRadius";
 
 /** Compact US state name -> abbreviation map, for location token matching. */
 const STATE_ABBREV: Record<string, string> = {
@@ -72,9 +81,59 @@ function localGeos(geos: string[] | undefined, tokens: string[]): string[] {
   });
 }
 
-export function pinIcpLocation(icp: CandidateICP, location?: string): CandidateICP {
-  const raw = (location || "").replace(/\s*\+\d+\s*mi\b/i, "").trim();
+/**
+ * Replace the parsed geo list with the places ACTUALLY inside the radius.
+ *
+ * The LLM parse is prompted to be generous ("list EVERY metro within roughly that
+ * distance"), and the string-token pin below could only ever narrow that to "same state".
+ * Together those made a +25mi search behave like a statewide one. When we can geocode the
+ * typed center we no longer need either guess: the bundled place table knows exactly which
+ * cities are within N miles, which is simultaneously tighter (it stops at the boundary)
+ * and wider (it knows every suburb the LLM never thought to name) than the parse.
+ *
+ * Returns null when the center will not geocode, so the caller falls back to token pinning.
+ */
+function radiusGeos(typed: string, radiusMi: number): string[] | null {
+  const center = geocodeUsPlace(typed);
+  if (!center) return null;
+  const near = citiesWithinRadius(center, radiusMi, 24, 0);
+  if (!near.length) return null;
+  // The typed location leads, then the most prominent in-radius places. These become the
+  // query targets, so prominence (not proximity) is the right sort: we want the city names
+  // people actually put on a LinkedIn profile.
+  const out = [typed];
+  for (const c of near) {
+    const label = formatPlace(c.city, c.state);
+    if (label.toLowerCase() !== typed.toLowerCase()) out.push(label);
+  }
+  return out.slice(0, 12);
+}
+
+export function pinIcpLocation(icp: CandidateICP, location?: string, radiusMi?: number): CandidateICP {
+  const raw = stripRadiusSuffix(location || "");
   if (!raw) return icp;
+
+  // Radius defaults to whatever the location LABEL says ("Fair Lawn, NJ +25mi"), so
+  // callers that only have the label — saved-run re-runs, the overnight queue, plan —
+  // pin exactly the same way the original search did.
+  const miles = parseRadiusMi(radiusMi, location);
+
+  // Radius-first: when the recruiter picked a distance and we can locate the center,
+  // measured geography beats every heuristic below it.
+  if (miles > 0) {
+    const measured = radiusGeos(raw, miles);
+    if (measured) {
+      icp.geos = measured;
+      return icp;
+    }
+  }
+  // "Exact": the typed place only. Requires an explicit 0 AND a locatable place — a
+  // caller that simply passed no radius still gets the legacy token pin below.
+  if (radiusMi === 0 && !/\+\s*\d+\s*mi\b/i.test(location || "") && geocodeUsPlace(raw)) {
+    icp.geos = [raw];
+    return icp;
+  }
+
   const tokens: string[] = [];
   for (const part of raw.split(",").map((s) => s.trim().toLowerCase()).filter((t) => t.length > 1)) {
     tokens.push(part);

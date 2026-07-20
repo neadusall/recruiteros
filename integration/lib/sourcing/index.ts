@@ -88,11 +88,23 @@ export interface SourcingPlan {
 
 export { pinIcpLocation } from "./pinLocation";
 import { pinIcpLocation } from "./pinLocation";
+export {
+  geocodeUsPlace, haversineMi, withinRadius, distanceFromCenter, citiesWithinRadius,
+  statesWithinRadius, radiusBudgetMi, parseRadiusMi, stripRadiusSuffix, formatPlace,
+  MAX_RADIUS_MI,
+} from "./geoRadius";
+import { parseRadiusMi } from "./geoRadius";
 
 /** Parse a JD and generate its search set in one call (no discovery yet). */
-export async function planSourcing(jd: string, location?: string, breadth?: SearchBreadth): Promise<SourcingPlan> {
-  const icp = pinIcpLocation(await parseJobDescription(jd), location);
-  const queries = generateQueries(icp, { breadth });
+export async function planSourcing(
+  jd: string,
+  location?: string,
+  breadth?: SearchBreadth,
+  radiusMi?: number,
+): Promise<SourcingPlan> {
+  const miles = parseRadiusMi(radiusMi, location);
+  const icp = pinIcpLocation(await parseJobDescription(jd), location, miles);
+  const queries = generateQueries(icp, { breadth, radiusMi: miles });
   // Empty across the load-bearing fields means the profile couldn't be built from the
   // brief (e.g. the model returned unparseable output). Say so plainly rather than
   // silently handing back a profile of dashes that finds nobody.

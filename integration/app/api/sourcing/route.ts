@@ -28,7 +28,7 @@
 
 import { requireSession, body, ok, fail } from "../../../lib/api";
 import {
-  planSourcing, pinIcpLocation, parseJobDescription, generateQueries, runDiscovery,
+  planSourcing, pinIcpLocation, parseJobDescription, generateQueries, runDiscovery, parseRadiusMi,
   googleSearchConfigured, searxSearchConfigured, serperSearchConfigured, rapidApiSearchConfigured,
   listSourcingRuns, saveSourcingRun, deleteSourcingRun, getSourcingRun, promoteSourcingRun,
   profileFetchConfigured, deepVetCandidate, refineIcp, draftJobDescription,
@@ -64,6 +64,7 @@ function candKey(c: CandidateRow): string {
 function parseBreadth(v: unknown): SearchBreadth {
   return v === "focused" || v === "wide" ? v : "balanced";
 }
+
 
 /**
  * Chunks are laid out on a fixed grid of `step`-sized offsets (0, step, 2·step, …). Return
@@ -127,7 +128,7 @@ export async function POST(req: Request) {
   try {
     if (action === "plan") {
       if (!b?.jd) return fail("missing_jd", 422);
-      return ok(await planSourcing(b.jd, b.location, parseBreadth(b.breadth)));
+      return ok(await planSourcing(b.jd, b.location, parseBreadth(b.breadth), b.radiusMi as number));
     }
 
     /* Which discovery sources will actually run right now — the UI's "Search power"
@@ -173,11 +174,15 @@ export async function POST(req: Request) {
       // A client-supplied ICP (a Dive-deeper refinement) wins over re-parsing the JD,
       // so refined searches actually run on the refined profile.
       const clientIcp = b.icp && typeof b.icp === "object" && Array.isArray(b.icp.titles) ? b.icp : undefined;
-      const icp = pinIcpLocation(clientIcp ?? (await parseJobDescription(b.jd)), b.location);
+      // The radius the recruiter picked, as a NUMBER. The UI also bakes it into the
+      // location label ("Fair Lawn, NJ +25mi"), so fall back to reading it back out of
+      // there for older clients / re-runs of saved lists that only stored the label.
+      const radiusMi = parseRadiusMi(b.radiusMi, b.location);
+      const icp = pinIcpLocation(clientIcp ?? (await parseJobDescription(b.jd)), b.location, radiusMi);
       // Breadth drives the query FAN-OUT here (how many title-chunk × geo searches
       // run) and the per-query paging depth inside runDiscovery.
       const breadth = parseBreadth(b.breadth);
-      const queries = generateQueries(icp, { breadth });
+      const queries = generateQueries(icp, { breadth, radiusMi });
       // Cross-run "seen" memory: fresh-only excludes anyone surfaced in prior runs.
       const excludeKeys = b.freshOnly === true ? await getSeenKeys(ws) : undefined;
       // withWorkspaceCreds: the engines read their keys via cred(), which only sees
@@ -192,6 +197,8 @@ export async function POST(req: Request) {
         // OPT-IN: the separate out-of-area list only when the recruiter asked for it,
         // so a geo'd run stays geo-only (and credit-safe) by default.
         keepOutOfArea: b.outsideGeo === true,
+        radiusMi,
+        geoCenter: (b.location as string) || "",
       }));
       // Remember who we surfaced so a later fresh-only run skips them.
       await addSeenKeys(ws, result.candidates.map(candKey));
@@ -596,12 +603,41 @@ export async function POST(req: Request) {
       const limit = Math.min(b.top ?? MAX_LAXIS_UPLOAD, MAX_LAXIS_UPLOAD);
       const total = run.candidates.length;
       const progress = run.laxisProgress ?? { doneOffsets: [], total, nextStart: 0, updatedAt: nowIso() };
-      const resumeStart = nextLaxisOffset(progress.doneOffsets, total, step);
+      const laxisCooldownOn = run.laxisDownUntil ? Date.parse(run.laxisDownUntil) > Date.now() : false;
+      let resumeStart = nextLaxisOffset(progress.doneOffsets, total, step);
+      // A finished chain holding batches that ran WITHOUT Laxis (it was down at the
+      // time): pressing Enrich re-opens exactly those offsets so they get their real
+      // Laxis pass, now that the worker looks reachable again.
+      if (resumeStart === null && b.start == null && run.laxisSkipped?.offsets.length && !laxisCooldownOn) {
+        const reopen = new Set(run.laxisSkipped.offsets);
+        progress.doneOffsets = progress.doneOffsets.filter((o) => !reopen.has(o));
+        delete run.laxisSkipped;
+        resumeStart = nextLaxisOffset(progress.doneOffsets, total, step);
+        run.laxisProgress = { ...progress, total, nextStart: resumeStart, updatedAt: nowIso() };
+      }
       const start = b.start != null ? Math.max(0, Number(b.start) || 0) : (resumeStart ?? 0);
       // Already enriched this chunk (a resume landed on a done offset, or every chunk is
       // done)? Don't re-submit or re-grab — just report the next un-enriched offset.
       if (resumeStart === null || progress.doneOffsets.includes(start)) {
         return ok({ submitted: false, alreadyDone: true, start, nextStart: resumeStart, doneOffsets: progress.doneOffsets });
+      }
+      // Laxis went down mid-run (login wall, UI drift): while the short cooldown is on,
+      // don't feed this chunk to the dead worker. The in-house waterfall still runs, the
+      // chunk is marked done so the chain KEEPS MOVING, and the skip is remembered so
+      // Enrich can re-run these batches through Laxis once it is back.
+      if (laxisCooldownOn) {
+        const rows = run.candidates.slice(start, start + limit);
+        let gapFill = { enriched: 0, phones: 0, cacheHits: 0 };
+        try { gapFill = await gapFillContacts(ws, rows); } catch { /* waterfall is best-effort here */ }
+        const doneOffsets = Array.from(new Set([...progress.doneOffsets, start])).sort((a, b2) => a - b2);
+        const nextStart = nextLaxisOffset(doneOffsets, total, step);
+        run.laxisProgress = { doneOffsets, total, nextStart, updatedAt: nowIso() };
+        const skipped = run.laxisSkipped ?? { offsets: [], error: "laxis_down_cooldown", at: nowIso() };
+        if (!skipped.offsets.includes(start)) skipped.offsets.push(start);
+        skipped.at = nowIso();
+        run.laxisSkipped = skipped;
+        await saveSourcingRun(ws, { ...run });
+        return ok({ submitted: false, alreadyDone: true, laxisSkipped: true, gapFill, start, nextStart, doneOffsets });
       }
       const targetRows = run.candidates.slice(start, start + limit);
       if (!targetRows.length) return fail("no_candidates", 422, { detail: `no rows at offset ${start}` });
@@ -641,8 +677,36 @@ export async function POST(req: Request) {
       const count = run.laxisJob.count;
       if (job.status === "error") {
         delete run.laxisJob;
+        const errMsg = String(job.error ?? "unknown");
+        // A lost job (worker restarted, retention expired) is retryable: the client
+        // resubmits this chunk, nothing is marked done.
+        if (/job_not_found/i.test(errMsg)) {
+          await saveSourcingRun(ws, { ...run });
+          return ok({ done: true, status: "error", warnings: [`laxis_job_error: ${errMsg}`], run });
+        }
+        // Any other worker failure (login wall, UI drift, credentials) must NOT stall
+        // the chain: run the in-house waterfall over this chunk, mark its offset done,
+        // remember it ran without Laxis, and pause Laxis submits briefly so the rest of
+        // the list finishes fast instead of re-hitting a dead login chunk after chunk.
+        const warnings = [`laxis_job_error: ${errMsg}`];
+        let gapFill = { enriched: 0, phones: 0, cacheHits: 0 };
+        try { gapFill = await gapFillContacts(ws, run.candidates.slice(start, start + count)); }
+        catch (err) { warnings.push(`gap_fill_failed: ${(err as Error).message}`); }
+        const total = run.candidates.length;
+        const prog = run.laxisProgress ?? { doneOffsets: [], total, nextStart: 0, updatedAt: nowIso() };
+        const doneOffsets = Array.from(new Set([...prog.doneOffsets, start])).sort((a, b2) => a - b2);
+        const nextStart = nextLaxisOffset(doneOffsets, total, MAX_LAXIS_UPLOAD);
+        run.laxisProgress = { doneOffsets, total, nextStart, updatedAt: nowIso() };
+        const skipped = run.laxisSkipped ?? { offsets: [], error: errMsg, at: nowIso() };
+        if (!skipped.offsets.includes(start)) skipped.offsets.push(start);
+        skipped.error = errMsg;
+        skipped.at = nowIso();
+        run.laxisSkipped = skipped;
+        if (/login_failed|credentials_missing|login_form_not_found|step_unresolved/i.test(errMsg)) {
+          run.laxisDownUntil = new Date(Date.now() + 30 * 60_000).toISOString();
+        }
         await saveSourcingRun(ws, { ...run });
-        return ok({ done: true, status: "error", warnings: [`laxis_job_error: ${job.error ?? "unknown"}`], run });
+        return ok({ done: true, status: "done", laxis: { matched: 0, emails: 0, phones: 0, unmatched: 0 }, gapFill, warnings, laxisSkipped: true, nextStart, doneOffsets, run });
       }
 
       // Done — merge Laxis's enriched CSV back onto the rows (by LinkedIn URL → name+company).
@@ -654,6 +718,7 @@ export async function POST(req: Request) {
         warnings.push("laxis_done_but_no_csv_returned");
       }
       delete run.laxisJob;
+      delete run.laxisDownUntil; // a job came back: the worker is reachable again
 
       // Laxis was the first pass; the cheap in-house waterfall fills whatever it left blank
       // (unless the caller opts out). One seamless flow from the recruiter's side.

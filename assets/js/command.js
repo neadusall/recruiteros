@@ -10507,6 +10507,9 @@
       '.jd-reach .jr-api{color:#8a5a00;background:color-mix(in srgb, #d97706 10%, transparent);border:1px solid color-mix(in srgb, #d97706 38%, transparent)}' +
       '.jd-reach .jr-done{color:var(--ok);background:color-mix(in srgb, var(--ok) 10%, transparent);border:1px solid color-mix(in srgb, var(--ok) 38%, transparent)}' +
       '.jd-reach .jr-part{color:#8a5a00;background:color-mix(in srgb, #d97706 10%, transparent);border:1px solid color-mix(in srgb, #d97706 38%, transparent)}' +
+      // Measured distance from the recruiter's typed location. Muted on purpose: it is
+      // corroboration for the Location beside it, not a column of its own.
+      '.jd-miles{font-size:11px;font-weight:600;color:var(--text-dim);font-variant-numeric:tabular-nums;white-space:nowrap}' +
       '.jd-quota{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}' +
       '.jd-quota .jd-qchip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;color:#8a5a00;background:color-mix(in srgb, #d97706 8%, transparent);border:1px solid color-mix(in srgb, #d97706 34%, transparent);cursor:help}' +
       '.jd-quota .jd-qchip .isvg{width:12px;height:12px}' +
@@ -10698,7 +10701,12 @@
       function candTable(list, limit) {
         var rows = list.slice(0, limit).map(function (c) {
           return '<tr><td>' + c.fitScore + '</td><td>' + esc(c.fullName) + '</td><td>' + esc(c.title || c.headline || "") +
-            '</td><td>' + esc(c.company || "") + '</td><td>' + esc(c.location || "") + '</td>' +
+            '</td><td>' + esc(c.company || "") + '</td><td>' + esc(c.location || "") +
+            // Measured distance from the typed location, when we could place both ends.
+            // This is the recruiter's proof the radius was honoured, so it reads as a
+            // plain number next to the location rather than hiding in a tooltip.
+            (typeof c.milesFromTarget === "number"
+              ? ' <span class="jd-miles">' + Math.round(c.milesFromTarget) + ' mi</span>' : '') + '</td>' +
             '<td>' + (c.linkedinUrl ? '<a href="' + esc(c.linkedinUrl) + '" target="_blank" rel="noopener">view</a>' : '') + '</td></tr>';
         }).join("");
         return '<div class="jd-tablewrap"><table class="jd-table"><thead><tr><th>Fit</th><th>Name</th><th>Title</th><th>Company</th><th>Location</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
@@ -11309,12 +11317,15 @@
         // overwrite the refined profile, so skip straight to the search instead.
         var jdNow = ta ? ta.value.trim() : "";
         state.location = jdLocLabel();
+        // The radius as a NUMBER, alongside the "+25mi" label. The label is what gets
+        // saved on the run; this is what the backend actually measures distance with.
+        state.radiusMi = jdbRadius();
         if (state.refineNote && state.icp && state.jd === jdNow) {
           renderPlan(); updateRunCost();
           return;
         }
         state.jd = jdNow;
-        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location, breadth: jdBreadth() }).then(function (r) {
+        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location, radiusMi: state.radiusMi, breadth: jdBreadth() }).then(function (r) {
           if (!r.ok) throw { stage: "Analyze", r: r };
           state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
           renderPlan(); updateRunCost();
@@ -11327,7 +11338,7 @@
         // A refined profile is sent along so the search actually honors the
         // Dive-deeper instruction instead of re-deriving the profile from the JD.
         var refinedIcp = (state.refineNote && state.icp) ? state.icp : undefined;
-        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).then(function (r) {
+        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, radiusMi: state.radiusMi, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).then(function (r) {
           if (!r.ok) { finishProgress("Search failed"); throw { stage: "Search", r: r }; }
           state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
           state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];

@@ -45,6 +45,9 @@
 
 import type { CandidateICP, CandidateRow, DiscoveryOptions, SearchBreadth, SourcingQuery } from "./types";
 import { scoreCandidate, inTargetGeo, US_STATE_FULL } from "./score";
+import {
+  distanceFromCenter, geocodeUsPlace, stateOfPlace, statesWithinRadius, stripRadiusSuffix, withinRadius,
+} from "./geoRadius";
 import { scraperConfigured, scrapeSearchViaSidecar } from "../linkedin/scraperProvider";
 import { cred } from "../providers/http";
 import { koldinfoWorkerReady } from "./laxis";
@@ -657,7 +660,10 @@ export async function runDiscovery(
   let koldSubmittedAt = 0;
   if (useKold) {
     try {
-      koldJobId = await submitDbDiscovery(icp, Math.min(cap, 500));
+      koldJobId = await submitDbDiscovery(icp, Math.min(cap, 500), {
+        location: opts.geoCenter,
+        radiusMi: opts.radiusMi,
+      });
       koldSubmittedAt = Date.now();
     } catch (e) {
       warnings.push(`kolddb(submit): ${(e as Error).message}`);
@@ -674,6 +680,14 @@ export async function runDiscovery(
   const keepOut = opts.keepOutOfArea === true;
   const outByKey = new Map<string, CandidateRow>();
   const OUT_CAP = Math.min(300, cap); // the out-of-area block is a bounded appendix, not the list
+  // Radius state, resolved ONCE per run: the recruiter's mileage pick plus the coordinate
+  // of the location they typed. Both must be present for distance filtering to engage;
+  // a center we cannot geocode leaves every row on the legacy string matcher.
+  const radiusMi = opts.radiusMi ?? 0;
+  const geoLabel = stripRadiusSuffix(opts.geoCenter || icp.geos?.[0] || "");
+  const geoCenter = radiusMi > 0 ? geocodeUsPlace(geoLabel) : null;
+  // Every state the circle touches, for the coarse fallback on rows we cannot place.
+  const radiusStates = geoCenter ? statesWithinRadius(geoCenter, radiusMi) : [];
   let scanned = 0;
   let geoDropped = 0;
   // SAFEGUARD buffers: sub-fit-bar rows and (in default geo-only mode) the out-of-area
@@ -692,14 +706,38 @@ export async function runDiscovery(
       if (opts.excludeKeys && opts.excludeKeys.has(keyOf(r))) continue;
       scanned++;
       r.sourceGroup = r.sourceGroup || group;
-      const sc = scoreCandidate(r, icp);
+      // Measure BEFORE scoring: the scorer reads milesFromTarget to award geo credit on
+      // a sliding scale, so the distance has to be on the row by the time it runs.
+      r.milesFromTarget = distanceFromCenter(r.location, geoCenter);
+      const sc = scoreCandidate(r, icp, { radiusMi, geoLabel: geoLabel });
       r.fitScore = sc.fitScore; r.fitReasons = sc.fitReasons;
       // Strict location: a row that states a DIFFERENT location is marked for the
       // separate out-of-area list (unknown locations stay in the main list — the
       // scorer is neutral on those and enrichment can resolve them later).
-      const outside = Boolean(
-        opts.strictGeo && icp.geos && icp.geos.length && inTargetGeo(r.location, icp.geos) === false,
-      );
+      //
+      // MEASURED FIRST: when the recruiter picked a radius and we located both the
+      // center and this row, distance is the answer and the name matcher never runs —
+      // that matcher is deliberately keep-biased and was letting same-state people
+      // hundreds of miles out ride along as "in area". The string test stays as the
+      // fallback for rows whose stated location will not geocode.
+      let outside = false;
+      if (opts.strictGeo && icp.geos && icp.geos.length) {
+        const measured = withinRadius(r.location, geoCenter, radiusMi);
+        if (measured !== undefined) {
+          outside = !measured;
+        } else if (geoCenter) {
+          // Radius mode, but this row's location would not resolve. Do NOT fall back to
+          // the name matcher here: radius pinning replaced icp.geos with a short list of
+          // the most prominent in-radius cities, so matching against it would drop real
+          // locals from every town that did not make the list. Fall back one level of
+          // precision instead — the STATE — and keep anything we cannot even place that
+          // far, per the never-empty rule.
+          const st = stateOfPlace(r.location);
+          outside = Boolean(st && !radiusStates.includes(st));
+        } else {
+          outside = inTargetGeo(r.location, icp.geos) === false;
+        }
+      }
       if (outside) r.outOfArea = true; // marked BEFORE buffering so rescued rows stay labeled
       if (r.fitScore < minFit) {
         // Keep the strongest sub-threshold rows for the empty-run rescue (0 = disqualified, never kept).

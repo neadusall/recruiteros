@@ -89,14 +89,33 @@ const METRO_SYNONYMS: Record<string, string[]> = {
   "salt lake": ["Salt Lake City Metropolitan Area"],
 };
 
-/** The wordings profiles use for one target geo: as typed + metro aliases. */
-export function geoVariants(geo: string): string[] {
+/**
+ * The wordings profiles use for one target geo: as typed + metro aliases.
+ *
+ * `regional` gates the WIDENING aliases. METRO_SYNONYMS maps a city to a multi-county or
+ * even multi-state region ("Miami" -> "South Florida", "Oakland" -> "San Francisco Bay
+ * Area"), and "Greater <City> Area" does the same informally — useful when the recruiter
+ * asked for a broad radius, actively wrong on a tight one, where they pulled the search
+ * far outside the miles that were requested. On a tight radius we still search the
+ * neighbouring towns, but by NAME (pinIcpLocation supplies the real in-radius list)
+ * rather than by a region label that has no boundary.
+ */
+export function geoVariants(geo: string, regional = true): string[] {
   const city = (geo.split(",")[0] || "").trim();
   const out = [geo];
+  if (!regional) return out;
   for (const syn of METRO_SYNONYMS[city.toLowerCase()] || []) out.push(syn);
   if (city && !/greater|area|metro/i.test(geo)) out.push(`Greater ${city} Area`);
   return out.slice(0, 4);
 }
+
+/**
+ * Below this radius, region-wide geo aliases and the geo-free "deep pass" are switched
+ * off. 50 miles is the dropdown step at which a recruiter is plainly asking for a metro
+ * rather than a town, which is exactly when "Greater X Area" starts describing the area
+ * they meant instead of overshooting it.
+ */
+const REGIONAL_ALIAS_MIN_MI = 50;
 
 /**
  * Build the search set. `titleCap` / `geoCap` keep X-ray strings short enough that
@@ -104,11 +123,15 @@ export function geoVariants(geo: string): string[] {
  */
 export function generateQueries(
   icp: CandidateICP,
-  opts: { titleCap?: number; geoCap?: number; breadth?: SearchBreadth } = {},
+  opts: { titleCap?: number; geoCap?: number; breadth?: SearchBreadth; radiusMi?: number } = {},
 ): SourcingQuery[] {
   const titleCap = opts.titleCap ?? 4;
   const geoCap = opts.geoCap ?? 6;
   const breadth = opts.breadth ?? "balanced";
+  // No radius picked at all ("Exact", or a caller that does not know) leaves the historical
+  // wide behavior alone; only an explicitly TIGHT radius turns the regional widening off.
+  const radiusMi = opts.radiusMi ?? 0;
+  const regionalAliases = radiusMi === 0 || radiusMi >= REGIONAL_ALIAS_MIN_MI;
 
   const allTitles = icp.titles.length ? icp.titles : [leadTitle(icp)];
   const titleChunks = chunkList(allTitles, titleCap).slice(0, TITLE_CHUNKS[breadth]);
@@ -165,7 +188,7 @@ export function generateQueries(
   //    geocode_location needs a NUMERIC LinkedIn geo id (e.g. 103644278), not a city name,
   //    so the metro stays in the keyword for now; a geo-id resolver can switch it later.
   for (const geo of icp.geos.slice(0, geoCap)) {
-    const geoVar = orGroup(geoVariants(geo), 4);
+    const geoVar = orGroup(geoVariants(geo, regionalAliases), 4);
     titleGroups.forEach((tg, ci) => {
       const lead = titleChunks[ci][0] || leadTitle(icp);
       const xray = [`site:linkedin.com/in`, tg, industryGroup, geoVar].filter(Boolean).join(" ");
@@ -186,7 +209,10 @@ export function generateQueries(
   //    because discovery parses each row's stated location from the snippet and the
   //    strict-location filter still drops clear non-locals (unknowns are kept, as
   //    everywhere else).
-  if (breadth === "wide") {
+  //    Skipped on a TIGHT radius: correctness is fine either way (the distance filter
+  //    catches the strays), but a nationwide pass whose results are then almost entirely
+  //    discarded spends search credits to find people the recruiter cannot hire.
+  if (breadth === "wide" && regionalAliases) {
     titleGroups.forEach((tg, ci) => {
       const lead = titleChunks[ci][0] || leadTitle(icp);
       const xray = [`site:linkedin.com/in`, tg, industryGroup].filter(Boolean).join(" ");
