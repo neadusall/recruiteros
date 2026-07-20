@@ -122,10 +122,11 @@ export async function GET(req: Request) {
   // should warn loudly rather than let the user save into volatile memory and lose it silently.
   // apiQuota: the paid people-search/profile subscriptions' latest credit readings
   // (captured from RapidAPI's response headers; fills in after the first search).
+  // "people" only: the job-feed (JSearch) subscription has its own meter in Hire Signals.
   return ok({
     runs: await listSourcingRuns(g.ctx.workspace.id),
     durable: dbEnabled(),
-    apiQuota: await getRapidQuota(),
+    apiQuota: await getRapidQuota("people"),
     // The overnight queue (newest last), so the tab can show what is cooking.
     nightQueue: await listNightItems(g.ctx.workspace.id),
   });

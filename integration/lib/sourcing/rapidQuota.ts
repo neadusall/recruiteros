@@ -19,9 +19,17 @@ import { nowIso } from "../core/ids";
 
 const KEY = "rapidapi_quota_v1";
 
+/** Which product surface a listing's spend belongs to, so each UI meter shows only its
+ *  own subscriptions: "people" = JD Sourcing's people-search/profile listings, "jobs" =
+ *  the Hire Signals job feed (JSearch). Older stored snapshots predate this field and
+ *  are treated as "people" (they could only have come from the sourcing listings). */
+export type RapidQuotaKind = "people" | "jobs";
+
 export interface RapidQuotaSnapshot {
   /** The RapidAPI listing host this subscription belongs to. */
   host: string;
+  /** Which meter this listing belongs on (absent on old snapshots = "people"). */
+  kind?: RapidQuotaKind;
   /** Which quota object the listing reports (usually "requests" = the monthly plan). */
   object: string;
   /** Plan size for the current window. */
@@ -69,7 +77,7 @@ function scheduleSave(): void {
  * present, otherwise the object with the largest limit. No usable headers = no-op, so
  * calling this on every response (including errors, 429s still carry them) is safe.
  */
-export function noteRapidQuota(host: string, headers: Headers): void {
+export function noteRapidQuota(host: string, headers: Headers, kind: RapidQuotaKind = "people"): void {
   if (!host) return;
   const objects: Record<string, { limit?: number; remaining?: number; reset?: number }> = {};
   headers.forEach((value, name) => {
@@ -95,6 +103,7 @@ export function noteRapidQuota(host: string, headers: Headers): void {
   if (typeof o.limit !== "number" || typeof o.remaining !== "number") return;
   const snap: RapidQuotaSnapshot = {
     host,
+    kind,
     object: picked,
     limit: o.limit,
     remaining: o.remaining,
@@ -108,8 +117,12 @@ export function noteRapidQuota(host: string, headers: Headers): void {
   });
 }
 
-/** Latest reading per listing host, newest first (for the JD Sourcing credit meter). */
-export async function getRapidQuota(): Promise<RapidQuotaSnapshot[]> {
+/** Latest reading per listing host, newest first. Pass a kind so each credit meter
+ *  shows only its own subscriptions (JD Sourcing = "people", Hire Signals = "jobs");
+ *  omit it to get everything. */
+export async function getRapidQuota(kind?: RapidQuotaKind): Promise<RapidQuotaSnapshot[]> {
   await hydrate();
-  return Object.values(store).sort((a, b) => (b.updatedAt < a.updatedAt ? -1 : 1));
+  return Object.values(store)
+    .filter((s) => !kind || (s.kind || "people") === kind)
+    .sort((a, b) => (b.updatedAt < a.updatedAt ? -1 : 1));
 }

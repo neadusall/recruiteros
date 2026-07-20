@@ -4087,7 +4087,11 @@
           '.wl-wrap{margin-top:14px}' +
           '.wl-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}' +
           '.wl-h{font-weight:600;font-size:13px}' +
+          '.wl-meters{display:flex;align-items:center;gap:10px;flex-wrap:wrap}' +
           '.wl-budget{font-size:12px;color:var(--muted,#6b7280)}' +
+          // Same amber credit-pill look as the JD Sourcing meter, so the two read as siblings.
+          '.wl-credits{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;color:#8a5a00;background:color-mix(in srgb, #d97706 8%, transparent);border:1px solid color-mix(in srgb, #d97706 34%, transparent);cursor:help}' +
+          '.wl-credits .isvg{width:12px;height:12px}' +
           '.wl-empty{font-size:13px;color:var(--muted,#6b7280);line-height:1.5;background:var(--surface,#f8fafc);border:1px solid var(--border,#e5e7eb);border-radius:10px;padding:12px}' +
           '.wl-list{display:flex;flex-direction:column;gap:8px}' +
           '.wl-row{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:10px;background:var(--card,#fff)}' +
@@ -4293,8 +4297,21 @@
     function renderWatch() {
       var el = host.querySelector("#imqWatch"); if (!el) return;
       var d = imqWatch || {}, lists = d.watchlists || [], b = d.budget || null;
-      var head = '<div class="wl-head"><span class="wl-h">Watching ' + lists.length + '</span>' +
-        (b ? '<span class="wl-budget">' + b.remaining + '/' + b.cap + ' feed pulls left today</span>' : '') + '</div>';
+      // The JSearch subscription's live monthly balance, read from its own response
+      // headers on every feed pull (targeted searches and watch polls alike). Sits next
+      // to the app's own daily pull budget; absent until the first pull records it.
+      var q = (d.apiQuota || [])[0] || null;
+      var credits = "";
+      if (q) {
+        var qtip = "Live monthly credit balance for the JSearch job-feed subscription, read from its most recent response" +
+          (q.updatedAt ? " on " + new Date(q.updatedAt).toLocaleString() : "") + "." +
+          (q.resetAt ? " The allowance resets " + new Date(q.resetAt).toLocaleDateString() + "." : "") +
+          " Every targeted search and watch poll spends these credits.";
+        credits = '<span class="wl-credits" title="' + esc(qtip) + '"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>' +
+          'Credits used: ' + (q.used || 0).toLocaleString() + ' · Credits left: ' + (q.remaining || 0).toLocaleString() + '</span>';
+      }
+      var head = '<div class="wl-head"><span class="wl-h">Watching ' + lists.length + '</span><span class="wl-meters">' + credits +
+        (b ? '<span class="wl-budget">' + b.remaining + '/' + b.cap + ' feed pulls left today</span>' : '') + '</span></div>';
       if (d.feedEnabled === false) {
         el.innerHTML = head + '<div class="wl-empty">Job feed isn’t connected yet. Add your JSearch key to <b>RAPID_JOBS_KEY</b> + <b>RAPID_JOBS_HOST</b>, then watches will start polling.</div>';
         return;

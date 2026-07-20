@@ -23,6 +23,7 @@ import { NextResponse } from "next/server";
 import { requireCronAuth } from "../../../../lib/linkedin/auth";
 import { requireSession, body, ok, fail } from "../../../../lib/api";
 import { jobFeedEnabled } from "../../../../lib/inmarket/jobFeed";
+import { getRapidQuota } from "../../../../lib/sourcing/rapidQuota";
 import {
   listWatchlists, upsertWatchlist, setWatchlistActive, deleteWatchlist,
   fetchBudgetRemaining, dailyFetchCap, tickWatchlists, pollWatchlistNow, getWatchHealth,
@@ -77,6 +78,10 @@ export async function GET(req: Request) {
     watchlists: lists,
     feedEnabled: jobFeedEnabled(),
     budget: { remaining: await fetchBudgetRemaining(nowIso()), cap: dailyFetchCap() },
+    // The JSearch subscription's latest monthly-credit reading, captured from its own
+    // response headers on every feed pull (searches and watch polls alike). Empty until
+    // the first pull after this shipped.
+    apiQuota: await getRapidQuota("jobs"),
   });
 }
 

@@ -17,6 +17,7 @@
  */
 
 import type { InMarketLead } from "./index";
+import { noteRapidQuota } from "../sourcing/rapidQuota";
 
 const TIMEOUT_MS = 30_000;
 const MAX_ROLES_PER_COMPANY = 25;
@@ -182,6 +183,9 @@ export async function fetchJobFeedLeads(opts: JobFeedOpts): Promise<InMarketLead
   let arr: RawJob[] = [];
   try {
     const res = await fetch(u.toString(), { headers: { "X-RapidAPI-Key": process.env.RAPID_JOBS_KEY!, "X-RapidAPI-Host": host, Accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    // Credit meter: every response (errors included) carries the JSearch subscription's
+    // quota headers; remember the latest reading for the Hire Signals credit chip.
+    noteRapidQuota(host, res.headers, "jobs");
     if (!res.ok) return [];
     const data = (await res.json().catch(() => null)) as unknown;
     // Normalize across shapes: flat array, JSearch v2 `{data:{jobs:[…]}}`, legacy
