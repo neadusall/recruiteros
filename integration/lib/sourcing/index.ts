@@ -53,6 +53,7 @@ export {
 } from "./laxis";
 export { promoteSourcingRun, type PromoteResult, type PromoteOptions } from "./promote";
 export { mergeSourcingRuns, type MergedRuns } from "./mergeRuns";
+export { runSalesNavSourcing, parseSalesNavUrl, type SalesNavRunResult, type SalesNavRunOptions } from "./salesNav";
 export {
   buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, sourcingKoldId,
   buildKoldInfoDbCsv, splitLocation,

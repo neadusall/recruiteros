@@ -20,6 +20,7 @@
  *   { action: "laxisStatus", id, gapFill? }        -> poll the Laxis job; merges the enriched CSV + runs the gap-fill waterfall
  *   { action: "ostext", id, name?, validate? }     -> push the run's phone-holding candidates into an OS Text SMS campaign
  *   { action: "merge", ids, name?, deleteSources? } -> combine 2+ saved runs into one deduped list (fills blanks, keeps best row)
+ *   { action: "salesNav", url, name?, targetRunId?, limit?, expand?, breadth? } -> pull a pasted Sales Navigator search + waterfall expansion into a new or existing list (deduped)
  *   { action: "delete", id }                       -> remove a saved run
  *
  * Discovery-only until promote; contact lookup and deep-vet are on demand. Session-gated.
@@ -39,7 +40,7 @@ import {
   buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, buildKoldInfoDbCsv,
   startBulkList, stepBulkList, bulkListStatus,
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
-  mergeSourcingRuns, getRapidQuota,
+  mergeSourcingRuns, getRapidQuota, runSalesNavSourcing,
   gapFillContacts, listNightItems, addNightItem, removeNightItem,
   landlineDbReady,
   premiumPhoneQuote, runPremiumPhoneBoost,
@@ -195,6 +196,99 @@ export async function POST(req: Request) {
       // Remember who we surfaced so a later fresh-only run skips them.
       await addSeenKeys(ws, result.candidates.map(candKey));
       return ok({ icp, queries, ...result, freshOnly: b.freshOnly === true });
+    }
+
+    /* --- Sales Navigator search mode -------------------------------------
+     * Paste a Sales Navigator (or LinkedIn people-search) URL: its members are
+     * pulled through the connected LinkedIn seat, the URL's own filters become
+     * the ICP, and the standard discovery waterfall expands the pool. The result
+     * lands in a NAMED list: an explicit targetRunId, or a name matching an
+     * existing list (either search type), merges into that list with the same
+     * dedupe as Combine lists: blanks filled both ways, never a duplicate row
+     * and never a duplicate list. A fresh name creates a new list. */
+    if (action === "salesNav") {
+      const url = typeof b?.url === "string" ? b.url.trim() : "";
+      if (!url) return fail("missing_url", 422, { detail: "paste a LinkedIn Sales Navigator search URL" });
+      const result = await withWorkspaceCreds(ws, () => runSalesNavSourcing(ws, g.ctx.user.id, {
+        url,
+        limit: typeof b.limit === "number" ? b.limit : undefined,
+        expand: b.expand !== false,
+        breadth: parseBreadth(b.breadth),
+        cap: typeof b.cap === "number" ? b.cap : undefined,
+        minFit: typeof b.minFit === "number" ? b.minFit : undefined,
+      }));
+      if (!result.candidates.length) {
+        return fail("empty_salesnav_run", 422, {
+          detail: "nothing came back: the LinkedIn pull found no members and the waterfall had no usable filters to run on. " +
+            (result.warnings[0] || "check the URL and that LinkedIn/Unipile is connected under Setup"),
+          warnings: result.warnings,
+        });
+      }
+
+      // Resolve the destination list: explicit pick > case-insensitive name match
+      // (so re-using a name can never spawn a duplicate list) > brand-new list.
+      const existing = await listSourcingRuns(ws);
+      const typedName = typeof b.name === "string" ? b.name.trim() : "";
+      let target: SourcingRun | undefined;
+      if (typeof b.targetRunId === "string" && b.targetRunId) {
+        target = existing.find((r) => r.id === b.targetRunId);
+        if (!target) return fail("run_not_found", 404, { detail: b.targetRunId });
+      } else if (typedName) {
+        target = existing.find((r) => r.name.trim().toLowerCase() === typedName.toLowerCase());
+      }
+
+      if (target) {
+        // Merge into the existing list via the same regression-tested dedupe the
+        // Combine button uses: stronger row wins, blanks filled from the other
+        // side, so an under-enriched older list gains contact/identity data
+        // without ever gaining a duplicate person.
+        const incoming: SourcingRun = {
+          id: "salesnav_incoming", workspaceId: ws, name: target.name, motion: target.motion,
+          jd: "", jdUrl: url, icp: result.icp, queries: result.queries,
+          candidates: result.candidates, warnings: [], createdAt: nowIso(), updatedAt: nowIso(),
+        };
+        const before = target.candidates.length;
+        const { candidates, overlap } = mergeSourcingRuns([target, incoming]);
+        target.candidates = candidates;
+        // A list saved before its ICP could be built adopts the derived one, so
+        // scoring/vetting on the merged list has a real profile to work from.
+        if (!target.icp?.titles?.length && result.icp.titles.length) target.icp = result.icp;
+        if (!target.jdUrl) target.jdUrl = url;
+        target.queries = target.queries.concat(result.queries).slice(0, 200);
+        const saved = await saveSourcingRun(ws, { ...target });
+        await addSeenKeys(ws, result.candidates.map(candKey));
+        return ok({
+          run: saved, mode: "merged", name: saved.name,
+          linkedinFound: result.linkedinFound, expanded: result.expanded,
+          added: candidates.length - before, overlap, total: candidates.length,
+          warnings: result.warnings, account: result.account,
+        });
+      }
+
+      const name = typedName || result.icp.label || "Sales Navigator search";
+      const saved = await saveSourcingRun(ws, {
+        name,
+        jd: `Sourced from a LinkedIn Sales Navigator search.\nURL: ${url}\n` +
+          `Titles: ${result.icp.titles.join(", ") || "(from results)"}\n` +
+          `Locations: ${result.icp.geos.join(", ") || "(any)"}` +
+          (result.icp.mustHave.length ? `\nKeywords: ${result.icp.mustHave.join(", ")}` : ""),
+        jdUrl: url,
+        location: result.icp.geos[0],
+        icp: result.icp, queries: result.queries, candidates: result.candidates,
+        warnings: result.warnings, motion: "recruiting",
+        apiUsage: result.apiUsage ? {
+          rapidapi: Number(result.apiUsage.rapidapi) || 0,
+          serper: Number(result.apiUsage.serper) || 0,
+          google: Number(result.apiUsage.google) || 0,
+        } : undefined,
+      });
+      await addSeenKeys(ws, result.candidates.map(candKey));
+      return ok({
+        run: saved, mode: "created", name: saved.name,
+        linkedinFound: result.linkedinFound, expanded: result.expanded,
+        added: result.candidates.length, overlap: 0, total: result.candidates.length,
+        warnings: result.warnings, account: result.account,
+      });
     }
 
     /* --- Bulk decision-maker list builder (resumable) ---------------------

@@ -10458,16 +10458,19 @@
       '.jd-or span{padding:0 12px}' +
       '.jd-buildbar{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:12px 0 2px}' +
       '.jd-buildbar .muted{font-size:12px}' +
-      '#jdName,#jdText,#jdbTitle,#jdbCompany,#jdbNotes,#jdbLocation{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 14px;margin:0;transition:border-color .12s,box-shadow .12s}' +
+      '#jdName,#jdText,#jdbTitle,#jdbCompany,#jdbNotes,#jdbLocation,#jdSnavUrl,#jdSnavName{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 14px;margin:0;transition:border-color .12s,box-shadow .12s}' +
       '#jdText{line-height:1.55;resize:vertical;min-height:104px}' +
-      '#jdName::placeholder,#jdText::placeholder,#jdbTitle::placeholder,#jdbCompany::placeholder,#jdbNotes::placeholder,#jdbLocation::placeholder{color:var(--text-dim)}' +
-      '#jdName:focus,#jdText:focus,#jdbTitle:focus,#jdbCompany:focus,#jdbNotes:focus,#jdbLocation:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
+      '#jdName::placeholder,#jdText::placeholder,#jdbTitle::placeholder,#jdbCompany::placeholder,#jdbNotes::placeholder,#jdbLocation::placeholder,#jdSnavUrl::placeholder,#jdSnavName::placeholder{color:var(--text-dim)}' +
+      '#jdName:focus,#jdText:focus,#jdbTitle:focus,#jdbCompany:focus,#jdbNotes:focus,#jdbLocation:focus,#jdSnavUrl:focus,#jdSnavName:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
       '.jd-field{margin-bottom:8px}' +
       '.jd-field>label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:600;margin-bottom:6px}' +
       '.jd-opt{font-weight:500;text-transform:none;letter-spacing:0;opacity:.75;margin-left:7px}' +
       '.jd-lead2{font-size:16px;font-weight:650;letter-spacing:.01em;margin:0 0 3px;background:linear-gradient(90deg,var(--brand),var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
       '.jd-lead-sub{font-size:12.5px;color:var(--text-muted);margin:0 0 12px}' +
       '.jd-locrow{display:flex;gap:8px}.jd-locrow #jdbLocation{flex:1}' +
+      '.jd-snavrow{display:flex;gap:8px}.jd-snavrow #jdSnavName{flex:1;min-width:0}' +
+      '#jdSnavTarget{background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:13px;padding:8px 9px;cursor:pointer;flex:1;min-width:0;max-width:100%}' +
+      '#jdSnavTarget:focus{outline:0;border-color:var(--brand)}' +
       '#jdbRadius{background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:13px;padding:0 9px;cursor:pointer;flex:0 0 auto}' +
       '#jdbRadius:focus{outline:0;border-color:var(--brand)}' +
       '.jd-tipsd{margin-top:10px;font-size:12.5px;color:var(--text-muted)}' +
@@ -10538,6 +10541,10 @@
             '<p><b>1 &middot; Fill in the role</b>: Job title plus anything you know. Pasting a JD is optional; the AI writes a strong brief from the fields alone.</p>' +
             '<p><b>2 &middot; Press Initiate Search</b>: That one button runs everything: writes the brief (if the JD box is empty), builds the ideal-candidate profile, searches, ranks the strongest matches to the top, and saves the finished list below. There is nothing else to press.</p>' +
             '<p>Then the list keeps working on its own: contact info is enriched (emails and phones, cheapest source first), everyone lands in the <b>Candidates</b> tab under the same list name, and an <b>OS Text</b> SMS campaign is built from everyone with a phone number, ready to review and launch. No buttons, no extra steps.</p>' +
+          '</div>' +
+          '<div class="jd-helpsec"><h5>Search from Sales Navigator</h5>' +
+            '<p>Run a search inside LinkedIn Sales Navigator (or a regular LinkedIn people search), copy the URL from the address bar, and paste it into the Sales Navigator box below. The tool pulls the people that search matches through your connected LinkedIn account, reads the search\'s own filters (titles, locations, companies, keywords), and runs the same search waterfall on those filters to find more qualified people beyond what LinkedIn showed. The finished list then enriches and sends itself exactly like a normal run.</p>' +
+            '<p><b>Add results to</b>: pick a past search (either search type) and the new people are added to that list with no duplicates. Anyone already on it stays once, and any missing details or contact info the new pull found fill in their blanks, so pointing it at an older, thinly-enriched list is also how you top that list up and finish its enrichment. Choosing New list saves under the name you type; re-using an existing name adds to that list instead of creating a second one.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>Set the depth of the search</h5>' +
             '<p>The options above the button shape how wide a run goes; each is explained right where it sits. The defaults (Balanced breadth, scan 500, min fit 10, both boxes off) are right for most roles. Pick <b>Wide net</b> when you want the biggest possible pool: it runs every title variation, digs deeper on every search, and catches people whose profiles word the location differently, while the same location rules and ranking keep the list honest.</p>' +
@@ -10626,6 +10633,21 @@
           '<span class="muted" style="font-size:12.5px;max-width:520px">One press runs everything on its own: it analyzes the JD (writing one first if the box is empty), finds and ranks the candidates, and saves the finished list to Your saved candidate lists below.</span>' +
         '</div>' +
         '<div id="jdMsg" class="muted" style="margin-top:8px"></div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="jd-lead2">Search from LinkedIn Sales Navigator</div>' +
+        '<div class="jd-lead-sub">Paste a Sales Navigator (or LinkedIn people search) URL. The people it matches are pulled in, the same search waterfall finds more qualified matches beyond them, and the finished list enriches itself and flows to Candidates and OS Text like any other run.</div>' +
+        '<div class="jd-fieldgrid">' +
+          '<div class="jd-field"><label>Sales Navigator search URL</label><input id="jdSnavUrl" type="text" placeholder="https://www.linkedin.com/sales/search/people?..." /></div>' +
+          '<div class="jd-field"><label>Add results to</label><div class="jd-snavrow">' +
+            '<select id="jdSnavTarget" title="Where the results land. Pick a past search (from any search type) to add to it without creating duplicates, or keep New list to save under a new name."><option value="">New list…</option></select>' +
+            '<input id="jdSnavName" type="text" placeholder="Name the new list" /></div></div>' +
+        '</div>' +
+        '<div class="jd-actions">' +
+          '<button class="btn btn-primary" id="jdSnavGo">Search &amp; Enrich</button>' +
+          '<span class="muted" style="font-size:12.5px;max-width:560px">Adding to an existing list never creates duplicates: people already on it are kept once, anything the new pull knows (title, company, location, contact info) fills in their blanks, and the list re-enriches and re-sends on its own. Re-using an existing name does the same instead of creating a second list.</span>' +
+        '</div>' +
+        '<div id="jdSnavMsg" class="muted" style="margin-top:8px"></div>' +
       '</div>' +
       '<div class="card jd-prog" id="jdProgress" style="display:none"></div>' +
       '<div id="jdNight"></div>' +
@@ -10797,6 +10819,7 @@
         state.runs = runs;
         renderQuota((d && d.apiQuota) || []);
         renderNight((d && d.nightQueue) || []);
+        renderSnavTargets();
         // FAILSAFE: if the backend reports non-durable storage, warn LOUDLY before the user
         // saves work that won't survive a restart. durable===false should never happen in prod.
         var warn = (d && d.durable === false)
@@ -11126,6 +11149,85 @@
       });
     }
 
+    /* ---- Sales Navigator URL search: paste a search, land it in a named list ----
+       The dropdown lists every saved run (either search type). Picking one merges the
+       new pull into it server-side with the Combine-lists dedupe (no duplicate people,
+       blanks filled both ways); "New list…" saves under the typed name, and re-using
+       an existing name merges into that list instead of creating a second one. */
+    function renderSnavTargets() {
+      var sel = $("#jdSnavTarget"); if (!sel) return;
+      var keep = sel.value;
+      sel.innerHTML = '<option value="">New list…</option>' + (state.runs || []).map(function (r) {
+        return '<option value="' + esc(r.id) + '">' + esc(r.name) + ' (' + ((r.candidates || []).length) + ')</option>';
+      }).join("");
+      if (keep) {
+        for (var i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].value === keep) { sel.value = keep; break; }
+        }
+      }
+      syncSnavName();
+    }
+    function syncSnavName() {
+      var sel = $("#jdSnavTarget"), nm = $("#jdSnavName");
+      if (sel && nm) nm.style.display = sel.value ? "none" : "";
+    }
+    function runSalesNav() {
+      var btn = $("#jdSnavGo"); if (!btn || btn.disabled) return;
+      var urlEl = $("#jdSnavUrl");
+      var url = urlEl ? urlEl.value.trim() : "";
+      function smsg(t) { var m = $("#jdSnavMsg"); if (m) m.textContent = t || ""; }
+      if (!/^https?:\/\/(www\.)?linkedin\.com\//i.test(url)) {
+        smsg("Paste a full LinkedIn Sales Navigator search URL (it starts with https://www.linkedin.com/).");
+        if (urlEl) urlEl.focus();
+        return;
+      }
+      var sel = $("#jdSnavTarget");
+      var targetId = sel ? sel.value : "";
+      var nameEl = $("#jdSnavName");
+      var name = targetId ? "" : ((nameEl && nameEl.value.trim()) || "");
+      btn.disabled = true; btn.textContent = "Searching…";
+      smsg("");
+      showProgress("Running the Sales Navigator search", 120, "Pulling the search's people from LinkedIn, then widening with the search waterfall…");
+      var payload = { action: "salesNav", url: url, breadth: jdBreadth() };
+      if (targetId) payload.targetRunId = targetId;
+      if (name) payload.name = name;
+      sendPatient("/sourcing", "POST", payload).then(function (r) {
+        btn.disabled = false; btn.textContent = "Search & Enrich";
+        if (!r.ok) {
+          finishProgress("Search stopped");
+          smsg("Sales Navigator search failed: " + ((r.data && (r.data.detail || r.data.error)) || gatewayMsg(r.status)));
+          return;
+        }
+        var d = r.data || {};
+        var run = d.run || {};
+        var bits = [];
+        if (d.linkedinFound) bits.push(d.linkedinFound + " pulled straight from the LinkedIn search");
+        if (d.expanded) bits.push(d.expanded + " more found by the search waterfall");
+        if (d.mode === "merged") {
+          bits.push((d.added || 0) + ' new added to "' + (d.name || "") + '"' +
+            (d.overlap ? (", " + d.overlap + " already on it merged in (blanks filled, no duplicates)") : ""));
+        } else {
+          bits.push('saved as "' + (d.name || "") + '" with ' + (d.total || 0) + " candidates");
+        }
+        smsg(bits.join(" · ") + ". Enriching contact info and sending everyone to Candidates and OS Text automatically…");
+        // A LinkedIn leg that could not run is worth a heads-up, but never blocks:
+        // the waterfall result above still landed.
+        var warn = (d.warnings || []).filter(function (w) { return /linkedin_not_connected|linkedin\(search\)/.test(w); })[0];
+        if (warn) toast("Note: " + warn);
+        if (urlEl) urlEl.value = "";
+        if (nameEl) nameEl.value = "";
+        if (sel) sel.value = "";
+        syncSnavName();
+        Promise.resolve(loadRuns()).then(function () {
+          if (run.id) runAutoPipeline(run.id, run.name || d.name || "Candidate list");
+        });
+      }).catch(function () {
+        btn.disabled = false; btn.textContent = "Search & Enrich";
+        finishProgress("Search stopped");
+        smsg("Could not reach the server. Nothing was lost: paste the URL and try again in a moment.");
+      });
+    }
+
     function numVal(id, dflt) { var e = $(id); var v = e ? parseFloat(e.value) : NaN; return isFinite(v) && v >= 0 ? v : dflt; }
     function bump(el) { if (!el) return; el.classList.add("bump"); setTimeout(function () { el.classList.remove("bump"); }, 130); }
     /** Search-run cost (people-search requests + the one Haiku JD parse), shown by Find. */
@@ -11343,6 +11445,8 @@
 
     $("#jdGo").addEventListener("click", runOneClick);
     if ($("#jdQueue")) $("#jdQueue").addEventListener("click", queueOvernight);
+    if ($("#jdSnavGo")) $("#jdSnavGo").addEventListener("click", runSalesNav);
+    if ($("#jdSnavTarget")) $("#jdSnavTarget").addEventListener("change", syncSnavName);
 
     $("#jdRuns").addEventListener("click", function (e) {
       var t = e.target;
