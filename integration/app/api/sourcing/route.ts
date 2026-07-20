@@ -272,7 +272,7 @@ export async function POST(req: Request) {
         target.candidates = candidates;
         const added = candidates.length - before;
         // New people joined a list whose chunk ledger may already read "fully
-        // enriched" — left alone, the Laxis + gap-fill rungs would skip every new
+        // enriched"; left alone, the Laxis + gap-fill rungs would skip every new
         // row forever. Re-open the chain honestly: the KoldInfo rungs only ever
         // target blank-email rows, and the Laxis serializer never re-buys a row
         // holding both an email and a phone, so re-running the chain only spends
@@ -291,7 +291,7 @@ export async function POST(req: Request) {
         return ok({
           run: saved, mode: "merged", name: saved.name,
           linkedinFound: result.linkedinFound, expanded: result.expanded,
-          added: candidates.length - before, overlap, total: candidates.length,
+          added, overlap, total: candidates.length,
           warnings: result.warnings, account: result.account,
         });
       }
