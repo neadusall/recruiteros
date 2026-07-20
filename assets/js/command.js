@@ -10537,7 +10537,16 @@
          stop's color, and the plain-words note is the card's footer, so where a list
          is reads at a glance across the room. */
       '.jd-journeywrap{margin:14px 0 2px;max-width:860px;border:1px solid var(--border);border-radius:14px;background:var(--surface);box-shadow:var(--shadow-xs);overflow:hidden}' +
-      '.jd-journey{display:flex;align-items:flex-start;padding:16px 14px 12px}' +
+      '.jd-jhead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px 0}' +
+      '.jd-jstate{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:650;line-height:1;padding:4px 11px;border-radius:999px;overflow:hidden}' +
+      '.jd-jstate i{width:6px;height:6px;border-radius:50%;background:currentColor}' +
+      '.js-done{color:var(--ok);background:var(--ok-bg)}' +
+      '.js-live{color:var(--brand-2);background:var(--brand-soft)}' +
+      '.js-live i{animation:jdpulse 1.3s infinite}' +
+      '.js-act{color:var(--warn);background:var(--warn-bg)}' +
+      '.js-wait{color:var(--text-muted);background:color-mix(in srgb, var(--text-dim) 12%, transparent)}' +
+      '.jd-jsteps{font-size:11.5px;color:var(--text-muted);font-variant-numeric:tabular-nums;font-weight:600}' +
+      '.jd-journey{display:flex;align-items:flex-start;padding:10px 14px 12px}' +
       '.jd-tstop{flex:1 1 0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;position:relative;min-width:0;padding:6px 6px 8px;border-radius:12px;text-decoration:none;cursor:default}' +
       'a.jd-tstop{cursor:pointer;transition:background .16s ease,transform .16s ease}' +
       'a.jd-tstop:hover{background:var(--brand-soft);transform:translateY(-1px)}' +
@@ -10569,7 +10578,7 @@
       '@keyframes jdslide{from{margin-left:-12%}to{margin-left:74%}}' +
       '@keyframes jdspin{to{transform:rotate(360deg)}}' +
       '@keyframes jdlinepulse{0%,100%{opacity:1}50%{opacity:.45}}' +
-      '@media (prefers-reduced-motion: reduce){.jt-live .jd-tdot,.jt-live .jd-tdot .isvg,.jd-tstop.jt-live::before,.jd-tbar.ind b{animation:none}}' +
+      '@media (prefers-reduced-motion: reduce){.jt-live .jd-tdot,.jt-live .jd-tdot .isvg,.jd-tstop.jt-live::before,.jd-tbar.ind b,.js-live i{animation:none}}' +
       '.jd-journey-note{margin:8px 0 0;font-size:12px;color:var(--text-muted);line-height:1.55;max-width:860px}' +
       '.jd-journey-note b{color:var(--text);font-weight:650}' +
       '.jd-journeywrap .jd-journey-note{margin:0;padding:10px 18px 11px;border-top:1px solid var(--border);background:color-mix(in srgb, var(--bg) 55%, var(--surface))}' +
@@ -10962,9 +10971,12 @@
           var jIcons = { check: jIco("check"), loop: jIco("loop"), alert: jIco("alert"), users: jIco("users"), msg: jIco("message") };
           function jStop(state, dot, label, sub, tip, linkId, extra) {
             var reach = state !== "jt-wait" ? " jt-reach" : "";
-            var open = linkId != null
-              ? '<a class="jd-tstop ' + state + reach + '" href="#prospects" data-openlist="' + esc(linkId) + '"'
-              : '<span class="jd-tstop ' + state + reach + '"';
+            // linkId: a saved-list id opens that list in Candidates; a "#route"
+            // value is a plain tab link (the OS Text stop jumps to its tab).
+            var open;
+            if (linkId == null) open = '<span class="jd-tstop ' + state + reach + '"';
+            else if (String(linkId).charAt(0) === "#") open = '<a class="jd-tstop ' + state + reach + '" href="' + esc(linkId) + '"';
+            else open = '<a class="jd-tstop ' + state + reach + '" href="#prospects" data-openlist="' + esc(linkId) + '"';
             return open + ' title="' + esc(tip || "") + '">' +
               '<span class="jd-tdot">' + dot + '</span>' +
               '<span class="jd-ttxt"><span class="jd-tlabel">' + label + '</span>' +
@@ -11010,7 +11022,7 @@
           else if (afErr) sText = jStop("jt-act", jIcons.alert, "OS Text", "send issue · retrying",
             "The automatic send of this list hit a problem. It keeps retrying on its own; if this stays up for more than an hour, ask your admin to check the send logs.");
           else if (sentOk && phs > 0) sText = jStop("jt-done", jIcons.check, "In OS Text", "campaign ready to launch",
-            "A text campaign was built from everyone with a phone number and is ready to review and launch in OS Text. Phones found later are topped up automatically.");
+            "A text campaign was built from everyone with a phone number and is ready to review and launch. Phones found later are topped up automatically. Click to open OS Text.", "#ostext");
           else if (sentOk) sText = jStop("jt-wait", jIcons.msg, "OS Text", "waiting on phones",
             "The list was sent, but no one has a phone number yet. As enrichment or Boost phones finds numbers, they are pushed to OS Text automatically.");
           else sText = jStop("jt-wait", jIcons.msg, "OS Text", "builds automatically",
@@ -11023,8 +11035,18 @@
               : "<b>Done:</b> everyone is in Candidates. No phone numbers were found to text yet; Boost phones can grow the textable count.";
             else jNote = "Waiting for the automatic pipeline to pick this list up; it sweeps every few minutes and needs no button.";
           }
+          // The card's one-glance verdict: a status chip (worst state wins: amber
+          // needs-a-press beats blue working beats green done) + a step counter,
+          // both read straight off the state classes already baked into the stops.
+          function jStateOf(s) { return s.indexOf("jt-done") >= 0 ? "done" : s.indexOf("jt-live") >= 0 ? "live" : s.indexOf("jt-act") >= 0 ? "act" : "wait"; }
+          var jsArr = [sSearch, sEnrich, sCand, sText].map(jStateOf);
+          var jDoneN = jsArr.filter(function (x) { return x === "done"; }).length;
+          var jOverall = jsArr.indexOf("act") >= 0 ? "act" : jsArr.indexOf("live") >= 0 ? "live" : jDoneN === 4 ? "done" : "wait";
+          var jChipTxt = jOverall === "act" ? "Needs a press" : jOverall === "live" ? "Working now" : jOverall === "done" ? (phs > 0 ? "Ready to launch" : "All done") : "Runs by itself";
+          var jHead = '<div class="jd-jhead"><span class="jd-jstate js-' + jOverall + '"><i></i>' + jChipTxt + '</span>' +
+            '<span class="jd-jsteps">' + jDoneN + ' of 4 steps done</span></div>';
           var journey = n
-            ? '<div class="jd-journeywrap"><div class="jd-journey">' + sSearch + sEnrich + sCand + sText + '</div>' +
+            ? '<div class="jd-journeywrap">' + jHead + '<div class="jd-journey">' + sSearch + sEnrich + sCand + sText + '</div>' +
               '<div class="jd-journey-note">' + jNote + '</div></div>'
             : '<div class="jd-journey-note">This search saved no candidates, so there is nothing to enrich or send.</div>';
           var reach = '<span class="jd-reach">' +
