@@ -17,6 +17,7 @@
  * OS Text, and untouched lists stay outside autoflow's freshness window.
  */
 
+import { nowIso } from "../core/ids";
 import { listAllSourcingRuns, saveSourcingRun } from "./store";
 import { fillPhonesFromLandlineDb } from "./landlinePhones";
 
@@ -46,4 +47,29 @@ export async function backfillListPhones(): Promise<PhoneBackfillResult> {
   }
   console.log(`[phone-backfill] done: ${phones} phones across ${lists} lists (${rowsMissing} rows were phone-less)`);
   return { lists, phones, rowsMissing };
+}
+
+/**
+ * Operator repair: declare a run's enrichment chain OVER when its worker jobs are
+ * dead weight (worker out of credits / job lost) and the parked refs are blocking
+ * everything downstream: the chip spins "Enriching" forever, Boost phones 409s
+ * (enrichment_in_flight), and autoflow keeps waiting. Clears the job refs and
+ * closes the chunk ledger so the run reads finished-with-what-it-has; the normal
+ * machinery (Boost, top-up re-send) takes over from there.
+ */
+export async function unstickSourcingRun(runId: string): Promise<{ ok: boolean; cleared: string[] }> {
+  const runs = await listAllSourcingRuns();
+  const run = runs.find((r) => r.id === runId);
+  if (!run) return { ok: false, cleared: [] };
+  const cleared: string[] = [];
+  if (run.koldJob) { run.koldJob = undefined; cleared.push("koldJob"); }
+  if (run.koldDbJob) { run.koldDbJob = undefined; cleared.push("koldDbJob"); }
+  if (run.laxisJob) { run.laxisJob = undefined; cleared.push("laxisJob"); }
+  if (run.laxisProgress && run.laxisProgress.nextStart !== null) {
+    run.laxisProgress = { ...run.laxisProgress, nextStart: null, updatedAt: nowIso() };
+    cleared.push("laxisProgress");
+  }
+  if (cleared.length) await saveSourcingRun(run.workspaceId, { ...run });
+  console.log(`[phone-backfill] unstick ${run.name}: cleared ${cleared.join(", ") || "nothing"}`);
+  return { ok: true, cleared };
 }

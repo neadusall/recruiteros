@@ -18,12 +18,24 @@
  *                                {linkedin} {domain} {title}
  *   RAPIDAPI_SKIPTRACE_METHOD    GET (default) or POST
  *   RAPIDAPI_SKIPTRACE_BODY     POST only: JSON body template, same placeholders
- *   RAPIDAPI_SKIPTRACE_COST_USD  what the listing bills per lookup (default 0.10)
+ *   RAPIDAPI_SKIPTRACE_COST_USD  what the listing bills per REQUEST (default 0.10)
  *   RAPIDAPI_SKIPTRACE_BILLING   "call" (default: every request bills, hit or miss)
  *                                or "hit" (pay-per-result listings)
+ *   RAPIDAPI_SKIPTRACE_DETAILS_PATH  two-step listings only: the person-details path,
+ *                                {id} = the id from the search step (default fits
+ *                                Skip Tracing Working API: /search/detailsbyID?peo_id={id})
+ *
+ * TWO-STEP LISTINGS: directory-style listings (Skip Tracing Working API et al.)
+ * answer the name search with a people LIST (ids + addresses, no phones) and sell
+ * the phones behind a second per-person call. When the first response carries no
+ * phone but does carry that directory shape, the provider picks the ONE record the
+ * candidate's own city/state corroborates (its search ignores location server-side,
+ * verified 2026-07-20, and a wrong person's number is worse than none) and buys the
+ * details for just that record. A lookup is then TWO billed requests, which the
+ * quote and cost accounting reflect.
  *
  * Found numbers still pass the forced Telnyx cell-line check at OS Text push, so a
- * bad number costs a dime, never a wrong text.
+ * bad number costs pennies, never a wrong text.
  */
 
 import {
@@ -49,6 +61,19 @@ export function skipTraceBilling(): "call" | "hit" {
 
 export function skipTraceConfigured(): boolean {
   return Boolean(cred("RAPIDAPI_KEY") && cred("RAPIDAPI_SKIPTRACE_HOST") && cred("RAPIDAPI_SKIPTRACE_PATH"));
+}
+
+/** Directory hosts whose search step never returns phones — the details call always follows. */
+const TWO_STEP_HOST = /skip-tracing-working-api/i;
+
+/**
+ * Billed requests a completed lookup takes on the configured listing: 2 for
+ * two-step directory listings (search + details), 1 otherwise. Quotes and budget
+ * math use this so a two-step listing is never under-estimated.
+ */
+export function skipTraceCallsPerLookup(): number {
+  if (cred("RAPIDAPI_SKIPTRACE_DETAILS_PATH").trim()) return 2;
+  return TWO_STEP_HOST.test(cred("RAPIDAPI_SKIPTRACE_HOST")) ? 2 : 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -125,10 +150,98 @@ export function extractSkipTracePhone(data: unknown): { number: string; mobile: 
   const found: FoundPhone[] = [];
   collectPhones(data, "", found, 0);
   if (!found.length) return null;
-  const seen = new Set<string>();
-  const uniq = found.filter((f) => (seen.has(f.number) ? false : (seen.add(f.number), true)));
+  // Dedup keeps first-seen order but MERGES labels: payloads often list the same
+  // number twice (an unlabeled summary field + a typed phone-list entry), and the
+  // mobile flag must survive whichever copy came first.
+  const byNumber = new Map<string, FoundPhone>();
+  for (const f of found) {
+    const prev = byNumber.get(f.number);
+    if (!prev) byNumber.set(f.number, { ...f });
+    else prev.mobile = prev.mobile || f.mobile;
+  }
+  const uniq = Array.from(byNumber.values());
   return uniq.find((f) => f.mobile) ?? uniq[0];
 }
+
+/* ------------------------------------------------------------------ */
+/* Two-step directory listings: search answer -> pick person -> details */
+/* ------------------------------------------------------------------ */
+
+interface DirectoryRecord {
+  id: string;
+  name: string;
+  livesIn: string;       // "Brook Park, OH"
+  usedToLiveIn: string;  // "Cleveland OH, Lakewood OH"
+}
+
+/** The search step's people list, when the payload has one (TruePeopleSearch-shaped). */
+export function directoryRecords(data: unknown): DirectoryRecord[] {
+  if (!data || typeof data !== "object") return [];
+  const rows = (data as Record<string, unknown>)["PeopleDetails"];
+  if (!Array.isArray(rows)) return [];
+  const out: DirectoryRecord[] = [];
+  for (const r of rows) {
+    if (!r || typeof r !== "object") continue;
+    const o = r as Record<string, unknown>;
+    const id = String(o["Person ID"] ?? o["PersonID"] ?? o["person_id"] ?? "").trim();
+    if (!id) continue;
+    out.push({
+      id,
+      name: String(o["Name"] ?? "").trim(),
+      livesIn: String(o["Lives in"] ?? "").trim(),
+      usedToLiveIn: String(o["Used to live in"] ?? "").trim(),
+    });
+  }
+  return out;
+}
+
+const NAME_SUFFIX = /\s+(jr|sr|ii|iii|iv|v)\.?$/i;
+function normPersonName(s: string): string {
+  return s.toLowerCase().replace(NAME_SUFFIX, "").replace(/[^a-z\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** "Brook Park, OH" -> { city: "brook park", state: "OH" } (best effort). */
+function splitCityState(s: string): { city: string; state: string } {
+  const [c, st] = s.split(",").map((p) => p.trim());
+  return { city: (c || "").toLowerCase(), state: (st || "").toUpperCase() };
+}
+
+/**
+ * The ONE record the candidate's own location corroborates, else null. Exact
+ * (suffix-stripped) name match is mandatory; then current city+state, else the
+ * single same-state record, else a single past-address city+state hit. Ambiguity
+ * = no purchase: same rung philosophy as LandlineDB matching.
+ */
+export function matchDirectoryRecord(
+  records: DirectoryRecord[],
+  subject: { fullName?: unknown; city?: unknown; state?: unknown },
+): DirectoryRecord | null {
+  const wantName = normPersonName(String(subject.fullName ?? ""));
+  const city = String(subject.city ?? "").trim().toLowerCase();
+  const state = String(subject.state ?? "").trim().toUpperCase();
+  if (!wantName || !state) return null; // nothing to corroborate with -> never buy blind
+  const named = records.filter((r) => normPersonName(r.name) === wantName);
+  if (!named.length) return null;
+
+  const liveExact = city
+    ? named.filter((r) => { const l = splitCityState(r.livesIn); return l.state === state && l.city === city; })
+    : [];
+  if (liveExact.length === 1) return liveExact[0];
+  if (liveExact.length > 1) return null; // same name, same city: cannot tell them apart
+
+  const liveState = named.filter((r) => splitCityState(r.livesIn).state === state);
+  if (liveState.length === 1) return liveState[0];
+
+  if (city) {
+    // Past addresses come as "City ST, City ST" (no comma inside a pair).
+    const needle = `${city} ${state.toLowerCase()}`;
+    const past = named.filter((r) => r.usedToLiveIn.toLowerCase().includes(needle));
+    if (past.length === 1) return past[0];
+  }
+  return null;
+}
+
+const DEFAULT_DETAILS_PATH = "/search/detailsbyID?peo_id={id}";
 
 /* ------------------------------------------------------------------ */
 /* The provider                                                        */
@@ -212,13 +325,37 @@ export function makeSkipTracePhoneProvider(unitCostUsd: number): EnrichmentProvi
       if (!res.ok) return { status: "error", error: `RapidAPI ${host} ${res.status}`, cost: 0 };
       const data = (await res.json().catch(() => null)) as unknown;
       const best = data ? extractSkipTracePhone(data) : null;
-      if (!best) return { status: "miss", cost: missCost };
+      if (best) {
+        return {
+          status: "hit",
+          value: best.number,
+          confidence: best.mobile ? 0.6 : 0.5,
+          cost: unitCostUsd,
+          raw: data,
+        };
+      }
+
+      // No phone in the search answer: two-step directory listings put it behind a
+      // per-person details call. Only buy it for a location-corroborated match.
+      const dir = directoryRecords(data);
+      if (!dir.length) return { status: "miss", cost: missCost };
+      const match = matchDirectoryRecord(dir, subject as { fullName?: unknown; city?: unknown; state?: unknown });
+      if (!match) return { status: "miss", cost: missCost }; // search call billed, no confident person
+      const detailsTpl = cred("RAPIDAPI_SKIPTRACE_DETAILS_PATH").trim() || DEFAULT_DETAILS_PATH;
+      const detailsPath = detailsTpl.replace(/\{id\}/gi, encodeURIComponent(match.id));
+      const twoCallCost = billing === "call" ? unitCostUsd * 2 : 0;
+      const res2 = await fetch(`https://${host}${detailsPath}`, { headers });
+      if (res2.status === 404 || res2.status === 204) return { status: "miss", cost: twoCallCost };
+      if (!res2.ok) return { status: "error", error: `RapidAPI ${host} details ${res2.status}`, cost: missCost };
+      const data2 = (await res2.json().catch(() => null)) as unknown;
+      const best2 = data2 ? extractSkipTracePhone(data2) : null;
+      if (!best2) return { status: "miss", cost: twoCallCost };
       return {
         status: "hit",
-        value: best.number,
-        confidence: best.mobile ? 0.6 : 0.5,
-        cost: unitCostUsd,
-        raw: data,
+        value: best2.number,
+        confidence: best2.mobile ? 0.6 : 0.5,
+        cost: billing === "call" ? unitCostUsd * 2 : unitCostUsd,
+        raw: data2,
       };
     },
   });

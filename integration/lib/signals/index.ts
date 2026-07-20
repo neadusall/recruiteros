@@ -125,6 +125,7 @@ export {
   skipTraceConfigured,
   skipTraceUnitCost,
   skipTraceBilling,
+  skipTraceCallsPerLookup,
   extractSkipTracePhone,
   SKIPTRACE_DEFAULT_COST_USD,
 } from "./skiptrace";

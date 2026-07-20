@@ -20,6 +20,7 @@ import { stateFromLocation } from "./landlinePhones";
 import {
   enrich, rapidMobileFinder,
   makeSkipTracePhoneProvider, skipTraceConfigured, skipTraceUnitCost, skipTraceBilling,
+  skipTraceCallsPerLookup,
   type EnrichmentPlan, type EnrichmentProvider,
 } from "../signals";
 import { withWorkspaceCreds } from "../connected";
@@ -150,7 +151,9 @@ export async function premiumPhoneQuote(ws: string, run: SourcingRun, actorEmail
     const stats = await getPremiumPhoneStats(ws);
     const own = stats.calls >= MIN_CALLS_FOR_OWN_RATE;
     const hitRate = own ? stats.hits / Math.max(1, stats.calls) : DEFAULT_HIT_RATE;
-    const unit = skipTraceUnitCost();
+    // Two-step directory listings bill 2 requests per completed lookup; everything
+    // the recruiter sees is priced per LOOKUP so the estimate matches the invoice.
+    const perLookup = skipTraceUnitCost() * skipTraceCallsPerLookup();
     const billing = skipTraceBilling();
     const missing = boostableRows(run.candidates).length;
     const estFinds = Math.round(missing * hitRate);
@@ -159,13 +162,13 @@ export async function premiumPhoneQuote(ws: string, run: SourcingRun, actorEmail
     // How many of the missing rows this recruiter can still afford this month.
     // Priced at the per-lookup rate even for billed-per-hit listings: conservative
     // on purpose, the fail-safe never quotes more rows than the budget covers.
-    const affordable = unit > 0 ? Math.min(missing, Math.floor((budget.remainingUsd + 1e-9) / unit)) : missing;
+    const affordable = perLookup > 0 ? Math.min(missing, Math.floor((budget.remainingUsd + 1e-9) / perLookup)) : missing;
     return {
       configured: skipTraceConfigured(),
-      unitCostUsd: unit,
+      unitCostUsd: perLookup,
       billing,
       missing,
-      estCostUsd: Math.round(billedUnits * unit * 100) / 100,
+      estCostUsd: Math.round(billedUnits * perLookup * 100) / 100,
       estFinds,
       hitRate: Math.round(hitRate * 100) / 100,
       statsBasis: own ? stats.calls : 0,
@@ -220,6 +223,9 @@ export async function runPremiumPhoneBoost(
 ): Promise<PremiumPhoneBatchResult> {
   return withWorkspaceCreds(ws, async () => {
     const unit = skipTraceUnitCost();
+    // What one COMPLETED lookup can bill (2 requests on two-step listings): every
+    // budget decision uses this so the cap can never be overshot by a second call.
+    const perLookup = unit * skipTraceCallsPerLookup();
 
     // ---- Monthly allowance fail-safe (server-side, fail-closed) ----
     // The UI shows the budget and disables the button, but THIS is the guarantee:
@@ -235,7 +241,7 @@ export async function runPremiumPhoneBoost(
     if (!actorEmail) {
       return refuse("this spend could not be attributed to your account. Sign out, sign back in, and try again.", false);
     }
-    if (budgetBefore.remainingUsd < unit) {
+    if (budgetBefore.remainingUsd < perLookup) {
       return refuse(budgetCapMessage(budgetBefore), true);
     }
     const lockKey = `${ws}|${actorEmail.toLowerCase()}`;
@@ -259,6 +265,7 @@ async function runBoostBatch(
   budgetBefore: BoostBudget,
 ): Promise<PremiumPhoneBatchResult> {
   {
+    const perLookup = unit * skipTraceCallsPerLookup();
     const skipTrace = makeSkipTracePhoneProvider(unit);
     // The REAL mobile rung: the cheap generic finder first (skipped while
     // unconfigured), the skip-trace listing as the paid resolver. maxCost leaves
@@ -269,12 +276,12 @@ async function runBoostBatch(
         providers: [rapidMobileFinder as EnrichmentProvider, skipTrace as EnrichmentProvider],
         mode: "first",
         acceptConfidence: 0.5,
-        maxCost: unit + 0.02,
+        maxCost: perLookup + 0.02,
       }],
     };
 
     // The batch never exceeds what the remaining monthly allowance can pay for.
-    const affordable = unit > 0 ? Math.floor((budgetBefore.remainingUsd + 1e-9) / unit) : 50;
+    const affordable = perLookup > 0 ? Math.floor((budgetBefore.remainingUsd + 1e-9) / perLookup) : 50;
     const max = Math.max(1, Math.min(opts.max ?? 20, 50, affordable));
     const targets = boostableRows(run.candidates);
     const batch = targets.slice(0, max);
@@ -290,7 +297,7 @@ async function runBoostBatch(
       if (cached?.phone) { c.phone = cached.phone; cacheHits++; found++; continue; }
 
       // Hard stop at the cap: the next lookup would bill past this month's allowance.
-      if (costUsd + unit > budgetBefore.remainingUsd + 1e-9) {
+      if (costUsd + perLookup > budgetBefore.remainingUsd + 1e-9) {
         stoppedEarly = budgetCapMessage({
           capUsd: budgetBefore.capUsd,
           spentUsd: Math.round((budgetBefore.spentUsd + costUsd) * 100) / 100,
@@ -350,7 +357,7 @@ async function runBoostBatch(
         type: "premium_phone_boost",
         source: "rapidapi_skiptrace",
         quantity: called,
-        unitCostUsd: unit,
+        unitCostUsd: perLookup,
         costUsd,
         meta: {
           runId: run.id, runName: run.name,
