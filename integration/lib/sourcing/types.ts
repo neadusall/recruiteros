@@ -225,6 +225,13 @@ export interface SourcingRun {
     resumedAt?: string;
     /** Last failure (kept for ops visibility); cleared on a clean send. */
     error?: string;
+    /**
+     * Last time the parity backfill lane acted on this run. The parity lane
+     * covers what the fresh-window sweeper won't (lists idle past FRESH_MS,
+     * runs parked by MAX_ATTEMPTS) so no phone-bearing list ever stays out of
+     * OS Text; this stamp rate-limits it to one attempt per run per day.
+     */
+    parityAt?: string;
   };
   /**
    * Skip the settle/idle waits: auto-send this run on the very next sweep (and the

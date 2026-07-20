@@ -290,6 +290,13 @@ export async function POST(req: Request) {
         if (added > 0) {
           delete target.laxisProgress;
           delete target.laxisSkipped;
+          // Re-arm the autoflow sweeper's one-resume rule for the reopened
+          // chain: if the tab driving this merge dies before restarting
+          // enrichment, the sweeper may queue a fresh server-side resume (and
+          // its top-up rule then pushes whatever new phones it finds on to
+          // Candidates + OS Text). A resumedAt left over from a PREVIOUS
+          // orphaning would otherwise block that forever.
+          if (target.autoflow) delete target.autoflow.resumedAt;
         }
         // A list saved before its ICP could be built adopts the derived one, so
         // scoring/vetting on the merged list has a real profile to work from.

@@ -54,8 +54,26 @@ function enrichmentInFlight(run: SourcingRun): boolean {
   return Boolean(run.koldJob || run.koldDbJob || run.laxisJob);
 }
 
-/** Should the sweeper act on this run right now? */
-function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | "ostext-retry" | null {
+/**
+ * Rows the enrichment chain would still act on. Matters when a run has NO chunk
+ * ledger at all — either the chain never started (tab died right after save) or
+ * a Sales Nav / pasted-search merge wiped the ledger to re-open the chain for
+ * its new rows and the driving tab died before restarting it. Ledger presence
+ * alone can't distinguish "never ran" from "nothing to do", so ask the rows.
+ */
+function hasEnrichableRows(run: SourcingRun): boolean {
+  return run.candidates.some((c) => !c.email || !c.phone);
+}
+
+/** Is the enrichment chain unfinished? With a ledger, trust it; without one,
+ *  unfinished means there are rows the chain would still fill. */
+function chainUnfinished(run: SourcingRun): boolean {
+  if (run.laxisProgress) return run.laxisProgress.nextStart !== null;
+  return hasEnrichableRows(run);
+}
+
+/** Should the sweeper act on this run right now? (exported for the regression suite) */
+export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | "ostext-retry" | null {
   if (!run.candidates.length) return null;
   if (run.motion === "bd") return null; // undefined motion (pre-field runs) counts as recruiting
   const touched = Date.parse(run.updatedAt);
@@ -81,7 +99,10 @@ function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | "oste
     // worker was down mid-run) still deserves its enrichment: queue ONE server-side
     // resume; the top-up rule above then re-sends if the finished chain finds more
     // phones. Without this, a force-sent list stays "enrichment unfinished" forever.
-    const sentPartial = Boolean(run.laxisProgress && run.laxisProgress.nextStart !== null);
+    // Covers the wiped-ledger case too (a Sales Nav merge re-opened the chain for
+    // its new rows and the driving tab died): the merge clears resumedAt, so the
+    // one-resume rule re-arms for every reopen.
+    const sentPartial = chainUnfinished(run);
     if (sentPartial && !run.autoflow.resumedAt && now - touched >= SETTLE_MS) return "resume";
     // A send that reached Candidates but SKIPPED OS Text because the workspace had
     // no engine (ostext_not_connected) heals itself: the moment the workspace gets
@@ -99,13 +120,15 @@ function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | "oste
   // the sweeper backstop in case that process died before the send landed.
   if (run.sendAsap) return "send";
 
-  const chainDone = run.laxisProgress?.nextStart === null;
+  const chainDone = !chainUnfinished(run);
   if (chainDone && now - touched >= SETTLE_MS) return "send";
   // A chain that stopped PARTWAY with no job ref parked (the worker failed between
   // chunks, or the driving tab died between submit cycles) used to force-send and
-  // leave the list "enrichment unfinished" forever. Give it ONE server-side resume
-  // first; if that hasn't landed the chain within the grace window, send as-is.
-  const chainPartial = Boolean(run.laxisProgress && run.laxisProgress.nextStart !== null);
+  // leave the list "enrichment unfinished" forever. Same for a chain that never
+  // STARTED but has rows to fill (tab died after save, or a merge wiped the
+  // ledger). Give it ONE server-side resume first; if that hasn't landed the
+  // chain within the grace window, send as-is.
+  const chainPartial = chainUnfinished(run);
   if (chainPartial && now - touched >= IDLE_MS) {
     const resumedAt = run.autoflow?.resumedAt ? Date.parse(run.autoflow.resumedAt) : NaN;
     if (!Number.isFinite(resumedAt)) return "resume";
@@ -158,7 +181,7 @@ function toOsTextContacts(run: SourcingRun): OsTextContact[] {
   return out;
 }
 
-async function sendRun(run: SourcingRun): Promise<void> {
+async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<void> {
   const ws = run.workspaceId;
   const stamp = run.autoflow ?? { phonesAtSend: 0, attempts: 0 };
   stamp.attempts++;
@@ -225,7 +248,7 @@ async function sendRun(run: SourcingRun): Promise<void> {
     // recruiter; with nobody assigned, every admin hears it instead. Best-effort:
     // a notification failure must never fail the send.
     try {
-      await notifyNewCandidates(run, contacts.length, topup);
+      if (opts?.notify !== false) await notifyNewCandidates(run, contacts.length, topup);
     } catch { /* delivery is best-effort */ }
   } catch (e) {
     stamp.error = (e as Error).message?.slice(0, 300) || "send failed";
@@ -279,6 +302,67 @@ export async function sendRunNow(run: SourcingRun): Promise<void> {
   await sendRun(run);
 }
 
+/* --- Parity backfill lane ---------------------------------------------------
+ * THE PARITY GUARANTEE (user mandate 2026-07-20): EVERYTHING in JD Sourcing ends
+ * up in Candidates + OS Text — including what the fresh-window sweeper above will
+ * never touch: lists idle past FRESH_MS (pre-autoflow-era lists, or ones whose
+ * sends kept failing until they aged out) and runs parked by MAX_ATTEMPTS.
+ *
+ * Safe on old lists by construction: the engine's /api/import creates campaigns
+ * as DRAFT (nothing texts until a recruiter activates), Telnyx cell validation +
+ * the DNC/recent-contact guard still screen every contact, promote dedupes by
+ * LinkedIn URL, and the engine dedupes by (campaign, phone). Backfill sends are
+ * quiet (no "new candidates" ping) — these aren't fresh arrivals.
+ */
+const PARITY_EVERY_MS = 6 * 3600_000;   // one parity pass per process every 6h
+const PARITY_RETRY_MS = 20 * 3600_000;  // at most one attempt per run per ~day
+const PARITY_SENDS_PER_PASS = 5;        // backlog drains over passes, not in one
+
+/** Is this run out of parity in a way the fresh-window lane won't fix?
+ *  (exported for the regression suite) */
+export function parityDue(run: SourcingRun, now: number): boolean {
+  if (!run.candidates.length) return false;
+  if (run.motion === "bd") return false; // BD lists ride the email belt, not OS Text
+  const touched = Date.parse(run.updatedAt);
+  const staleOrParked =
+    !Number.isFinite(touched) || now - touched > FRESH_MS ||
+    (run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS;
+  if (!staleOrParked) return false; // the fresh-window lane owns this run
+  const parityAt = run.autoflow?.parityAt ? Date.parse(run.autoflow.parityAt) : NaN;
+  if (Number.isFinite(parityAt) && now - parityAt < PARITY_RETRY_MS) return false;
+  if (!run.autoflow?.sentAt) return true;                       // never sent at all
+  if (phoneCount(run) > run.autoflow.phonesAtSend) return true; // phones OS Text never got
+  return Boolean(run.autoflow.error?.startsWith("ostext_not_connected") && phoneCount(run) > 0);
+}
+
+let lastParity = 0;
+
+/** Drain a slice of the parity backlog. Caller holds the sweep mutex. */
+async function parityPass(runs: SourcingRun[], now: number): Promise<number> {
+  let sent = 0;
+  const due = runs.filter((r) => parityDue(r, now))
+    .sort((a, b) => Date.parse(a.updatedAt) - Date.parse(b.updatedAt));
+  if (!due.length) return 0;
+  console.log(`[sourcing-autoflow] parity: ${due.length} run(s) out of parity, sending up to ${PARITY_SENDS_PER_PASS}`);
+  for (const run of due) {
+    if (sent >= PARITY_SENDS_PER_PASS) break;
+    // Skip (do not burn the per-day stamp) while the workspace has no engine:
+    // the send would only re-stamp ostext_not_connected. Promote-only parity is
+    // pointless here — an unsent run in this state already failed on promote too.
+    if (!(await ostextConfiguredFor(run.workspaceId))) continue;
+    const stamp = run.autoflow ?? { phonesAtSend: 0, attempts: 0 };
+    stamp.parityAt = nowIso();
+    // Parity retries must not stay parked behind old failures forever, but one
+    // pass per day keeps a hard-failing run from looping: re-open the attempt
+    // budget just enough for this one send.
+    if (stamp.attempts >= MAX_ATTEMPTS) stamp.attempts = MAX_ATTEMPTS - 1;
+    run.autoflow = stamp;
+    await sendRun(run, { notify: false });
+    sent++;
+  }
+  return sent;
+}
+
 let sweeping = false;
 let lastBeat = 0;
 
@@ -303,6 +387,10 @@ export async function tickSourcingAutoflow(): Promise<{ sent: number }> {
       if (what === "ostext-retry" && !(await ostextConfiguredFor(run.workspaceId))) continue;
       await sendRun(run);
       sent++;
+    }
+    if (now - lastParity >= PARITY_EVERY_MS) {
+      lastParity = now;
+      sent += await parityPass(runs, now);
     }
   } catch (e) {
     console.error(`[sourcing-autoflow] sweep failed: ${(e as Error).message}`);
