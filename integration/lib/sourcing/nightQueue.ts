@@ -194,6 +194,11 @@ function notePhoneFinderOff(run: SourcingRun, gapFill: { phoneFinderOn?: boolean
 }
 
 let ticking = false;
+let tickingSince = 0;
+
+/** A step wedged past this is presumed hung (vendor call that never resolved); the
+ *  latch is stolen so the queue keeps moving instead of freezing until a redeploy. */
+const TICK_STEAL_MS = 15 * 60 * 1000;
 
 /**
  * Advance the queue: process the FIRST active item one bounded step (submit a job,
@@ -204,8 +209,13 @@ let ticking = false;
 export async function tickNightQueue(): Promise<{ active: number }> {
   await hydrate();
   const active = store.filter((i) => i.stage !== "done" && i.stage !== "error");
-  if (ticking || !active.length) return { active: active.length };
+  if (!active.length) return { active: 0 };
+  if (ticking) {
+    if (Date.now() - tickingSince < TICK_STEAL_MS) return { active: active.length };
+    console.warn("[night-queue] tick latch held >15min, stealing (a step hung mid-flight)");
+  }
   ticking = true;
+  tickingSince = Date.now();
   const item = await pickNext(active);
   try {
     await step(item);
@@ -213,9 +223,12 @@ export async function tickNightQueue(): Promise<{ active: number }> {
     // A step that throws is retried next tick; only a missing run is terminal (handled
     // inside step). Note the error so the queue card shows what is happening.
     touch(item, `retrying: ${(e as Error).message?.slice(0, 140) ?? "step failed"}`);
+  } finally {
+    // The latch MUST clear even if the snapshot write throws; a latched-true mutex
+    // silently no-ops every future tick and the queue freezes until the next deploy.
+    try { await save(); } catch (e) { console.warn("[night-queue] snapshot save failed:", (e as Error).message); }
+    ticking = false;
   }
-  await save();
-  ticking = false;
   return { active: store.filter((i) => i.stage !== "done" && i.stage !== "error").length };
 }
 
