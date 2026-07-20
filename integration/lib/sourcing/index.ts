@@ -67,6 +67,7 @@ export { getRapidQuota, noteRapidQuota, type RapidQuotaSnapshot } from "./rapidQ
 export { gapFillContacts, type GapFillResult } from "./gapfill";
 export {
   premiumPhoneQuote, runPremiumPhoneBoost, getPremiumPhoneStats, boostableRows,
+  boostBudget, boostMonthlyCapUsd,
   type PremiumPhoneQuote, type PremiumPhoneBatchResult, type PremiumPhoneStats,
 } from "./premiumPhone";
 export { landlineDbReady, fillPhonesFromLandlineDb } from "./landlinePhones";

@@ -23,7 +23,7 @@ import {
   type EnrichmentPlan, type EnrichmentProvider,
 } from "../signals";
 import { withWorkspaceCreds } from "../connected";
-import { recordUsage } from "../billing/ledger";
+import { recordUsage, userMonthSpend, ensureLedgerReady } from "../billing/ledger";
 import { nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 
@@ -74,6 +74,43 @@ function bumpStats(ws: string, calls: number, hits: number, spentUsd: number): v
 }
 
 /* ------------------------------------------------------------------ */
+/* Per-recruiter monthly budget                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Every recruiter gets a fixed Boost phones allowance per calendar month; the
+ * ledger (spend attributed by meta.userEmail) is the source of truth for what
+ * they have used. Enforcement lives HERE, on the server, not in the UI: the run
+ * loop refuses to start (and hard-stops mid-batch) once the allowance is spent,
+ * so no client can push a recruiter past the cap. Override the default with
+ * BOOST_PHONES_MONTHLY_CAP_USD if the business changes the number.
+ */
+const DEFAULT_MONTHLY_CAP_USD = 150;
+
+export function boostMonthlyCapUsd(): number {
+  const env = Number(process.env.BOOST_PHONES_MONTHLY_CAP_USD);
+  return Number.isFinite(env) && env > 0 ? env : DEFAULT_MONTHLY_CAP_USD;
+}
+
+export interface BoostBudget {
+  capUsd: number;
+  /** This recruiter's Boost spend so far this calendar month. */
+  spentUsd: number;
+  remainingUsd: number;
+}
+
+export async function boostBudget(ws: string, userEmail: string): Promise<BoostBudget> {
+  await ensureLedgerReady();
+  const capUsd = boostMonthlyCapUsd();
+  const spentUsd = userMonthSpend(ws, userEmail, "premium_phone_boost");
+  return { capUsd, spentUsd, remainingUsd: Math.max(0, Math.round((capUsd - spentUsd) * 100) / 100) };
+}
+
+/** One Boost run per recruiter at a time: two parallel runs would each read the
+ *  pre-run budget and could together overshoot the cap by a whole batch. */
+const activeBoosts = new Set<string>();
+
+/* ------------------------------------------------------------------ */
 /* Quote                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -102,9 +139,13 @@ export interface PremiumPhoneQuote {
   hitRate: number;
   /** How many billable lookups the hit rate is based on (0 = shipped default). */
   statsBasis: number;
+  /** The caller's monthly allowance (present when the quote knows who is asking). */
+  budget?: BoostBudget;
+  /** Rows the remaining allowance can still pay for (missing, clamped by budget). */
+  affordable?: number;
 }
 
-export async function premiumPhoneQuote(ws: string, run: SourcingRun): Promise<PremiumPhoneQuote> {
+export async function premiumPhoneQuote(ws: string, run: SourcingRun, actorEmail?: string): Promise<PremiumPhoneQuote> {
   return withWorkspaceCreds(ws, async () => {
     const stats = await getPremiumPhoneStats(ws);
     const own = stats.calls >= MIN_CALLS_FOR_OWN_RATE;
@@ -114,6 +155,11 @@ export async function premiumPhoneQuote(ws: string, run: SourcingRun): Promise<P
     const missing = boostableRows(run.candidates).length;
     const estFinds = Math.round(missing * hitRate);
     const billedUnits = billing === "call" ? missing : estFinds;
+    const budget = await boostBudget(ws, (actorEmail || "").trim());
+    // How many of the missing rows this recruiter can still afford this month.
+    // Priced at the per-lookup rate even for billed-per-hit listings: conservative
+    // on purpose, the fail-safe never quotes more rows than the budget covers.
+    const affordable = unit > 0 ? Math.min(missing, Math.floor((budget.remainingUsd + 1e-9) / unit)) : missing;
     return {
       configured: skipTraceConfigured(),
       unitCostUsd: unit,
@@ -123,6 +169,8 @@ export async function premiumPhoneQuote(ws: string, run: SourcingRun): Promise<P
       estFinds,
       hitRate: Math.round(hitRate * 100) / 100,
       statsBasis: own ? stats.calls : 0,
+      budget,
+      affordable,
     };
   });
 }
@@ -144,6 +192,10 @@ export interface PremiumPhoneBatchResult {
   remaining: number;
   /** Set when the listing errored repeatedly and the batch stopped early. */
   stoppedEarly?: string;
+  /** The caller's monthly allowance AFTER this batch's spend. */
+  budget: BoostBudget;
+  /** True when the batch stopped (or refused to start) because the allowance is used up. */
+  budgetExhausted?: boolean;
 }
 
 /** City = the text before the first comma of "Dallas, TX"-style locations. */
@@ -157,6 +209,10 @@ function cityFromLocation(location?: string): string {
  * the CALLER persists the run. `actor` attributes the ledger spend to the
  * recruiter who pressed the button.
  */
+function budgetCapMessage(b: BoostBudget): string {
+  return `your monthly Boost phones budget is used up: $${b.spentUsd.toFixed(2)} of $${b.capUsd.toFixed(2)} spent this month. The allowance resets on the 1st.`;
+}
+
 export async function runPremiumPhoneBoost(
   ws: string,
   run: SourcingRun,
@@ -164,6 +220,45 @@ export async function runPremiumPhoneBoost(
 ): Promise<PremiumPhoneBatchResult> {
   return withWorkspaceCreds(ws, async () => {
     const unit = skipTraceUnitCost();
+
+    // ---- Monthly allowance fail-safe (server-side, fail-closed) ----
+    // The UI shows the budget and disables the button, but THIS is the guarantee:
+    // no identity, no budget left, or a second concurrent run = no spend, whatever
+    // the client sends. remainingUsd is re-read from the ledger on every batch.
+    const actorEmail = (opts.actor?.userEmail || "").trim();
+    const budgetBefore = await boostBudget(ws, actorEmail);
+    const refuse = (why: string, exhausted: boolean): PremiumPhoneBatchResult => ({
+      called: 0, found: 0, cacheHits: 0, costUsd: 0,
+      remaining: boostableRows(run.candidates).length,
+      stoppedEarly: why, budget: budgetBefore, budgetExhausted: exhausted,
+    });
+    if (!actorEmail) {
+      return refuse("this spend could not be attributed to your account. Sign out, sign back in, and try again.", false);
+    }
+    if (budgetBefore.remainingUsd < unit) {
+      return refuse(budgetCapMessage(budgetBefore), true);
+    }
+    const lockKey = `${ws}|${actorEmail.toLowerCase()}`;
+    if (activeBoosts.has(lockKey)) {
+      return refuse("a Boost run is already in progress on your account; let it finish first.", false);
+    }
+    activeBoosts.add(lockKey);
+    try {
+      return await runBoostBatch(ws, run, opts, unit, budgetBefore);
+    } finally {
+      activeBoosts.delete(lockKey);
+    }
+  });
+}
+
+async function runBoostBatch(
+  ws: string,
+  run: SourcingRun,
+  opts: { max?: number; actor?: { userId?: string; userEmail?: string } },
+  unit: number,
+  budgetBefore: BoostBudget,
+): Promise<PremiumPhoneBatchResult> {
+  {
     const skipTrace = makeSkipTracePhoneProvider(unit);
     // The REAL mobile rung: the cheap generic finder first (skipped while
     // unconfigured), the skip-trace listing as the paid resolver. maxCost leaves
@@ -178,18 +273,32 @@ export async function runPremiumPhoneBoost(
       }],
     };
 
-    const max = Math.max(1, Math.min(opts.max ?? 20, 50));
+    // The batch never exceeds what the remaining monthly allowance can pay for.
+    const affordable = unit > 0 ? Math.floor((budgetBefore.remainingUsd + 1e-9) / unit) : 50;
+    const max = Math.max(1, Math.min(opts.max ?? 20, 50, affordable));
     const targets = boostableRows(run.candidates);
     const batch = targets.slice(0, max);
     let called = 0, found = 0, cacheHits = 0, costUsd = 0;
     let consecutiveErrors = 0;
     let stoppedEarly: string | undefined;
+    let budgetExhausted = false;
 
     for (const c of batch) {
       const personKey = c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`;
       // Free first, always: a phone bought (or found) for this person in ANY run is reused.
       const cached = await getCachedContact(ws, personKey).catch(() => null);
       if (cached?.phone) { c.phone = cached.phone; cacheHits++; found++; continue; }
+
+      // Hard stop at the cap: the next lookup would bill past this month's allowance.
+      if (costUsd + unit > budgetBefore.remainingUsd + 1e-9) {
+        stoppedEarly = budgetCapMessage({
+          capUsd: budgetBefore.capUsd,
+          spentUsd: Math.round((budgetBefore.spentUsd + costUsd) * 100) / 100,
+          remainingUsd: 0,
+        });
+        budgetExhausted = true;
+        break;
+      }
 
       const location = (c.location || "").trim() || (run.location || "").trim();
       const [first, ...rest] = (c.fullName || "").trim().split(/\s+/);
@@ -251,10 +360,17 @@ export async function runPremiumPhoneBoost(
       });
     }
 
+    const spentNow = Math.round((budgetBefore.spentUsd + costUsd) * 100) / 100;
     return {
       called, found, cacheHits, costUsd,
       remaining: boostableRows(run.candidates).length,
       stoppedEarly,
+      budget: {
+        capUsd: budgetBefore.capUsd,
+        spentUsd: spentNow,
+        remainingUsd: Math.max(0, Math.round((budgetBefore.capUsd - spentNow) * 100) / 100),
+      },
+      budgetExhausted: budgetExhausted || undefined,
     };
-  });
+  }
 }

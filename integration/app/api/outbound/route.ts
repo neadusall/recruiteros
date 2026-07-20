@@ -26,6 +26,7 @@ import {
 } from "../../../lib/outbound";
 import type { GoalsPatch, GoalRole, NotifyPrefs } from "../../../lib/outbound";
 import { userSpendRollup, userSpend } from "../../../lib/billing/ledger";
+import { boostBudget } from "../../../lib/sourcing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,9 +55,12 @@ export async function GET(req: Request): Promise<Response> {
         userAssessment(ws, uid, { authRole: g.ctx.role }).catch(() => null),
         buildChecklist(ws, uid, g.ctx.role),
       ]);
-      // The recruiter's own paid-enrichment spend (JD Sourcing phone boost), 30 days.
+      // The recruiter's own paid-enrichment spend (JD Sourcing phone boost), 30 days,
+      // plus their monthly Boost allowance (spent / cap / remaining, resets on the 1st)
+      // so every recruiter sees where they stand without asking an admin.
       const premiumSpend = userSpend(ws, g.ctx.user.email || "", "30d", "premium_phone_boost");
-      return ok({ profile, assessment, checklist, premiumSpend });
+      const premiumBudget = await boostBudget(ws, g.ctx.user.email || "");
+      return ok({ profile, assessment, checklist, premiumSpend, premiumBudget });
     } catch (e) {
       return fail(e instanceof Error ? e.message : "outbound_me_failed", 500);
     }

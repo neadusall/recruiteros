@@ -470,7 +470,7 @@ export async function POST(req: Request) {
       if (!b?.id) return fail("missing_id", 422);
       const run = await getSourcingRun(ws, b.id);
       if (!run) return fail("run_not_found", 404);
-      return ok({ quote: await premiumPhoneQuote(ws, run) });
+      return ok({ quote: await premiumPhoneQuote(ws, run, g.ctx.user.email || "") });
     }
 
     if (action === "premiumPhoneRun") {

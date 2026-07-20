@@ -1835,8 +1835,24 @@
 
         // Your own paid-enrichment spend (JD Sourcing Boost phones), so what you
         // approved and what it bought is always visible to you, not just to admins.
+        // The monthly budget card shows spent / cap / remaining; the server enforces
+        // the same cap, so what this card says is what Boost will actually allow.
         var myPsp = me.premiumSpend;
-        if (myPsp && (myPsp.costUsd > 0 || myPsp.quantity > 0)) {
+        var myBud = me.premiumBudget;
+        if (myBud && myBud.capUsd) {
+          var budPct = Math.min(100, (Number(myBud.spentUsd || 0) / myBud.capUsd) * 100);
+          var budColor = Number(myBud.remainingUsd || 0) <= 0 ? "#c0392b" : (budPct >= 80 ? "#d97706" : "var(--ok)");
+          html += '<div class="panel-card ob-card ob-mini"><div class="ob-card-head"><b>Your Boost phones budget · this month</b>' +
+            '<span style="flex:1"></span><b>$' + Number(myBud.spentUsd || 0).toFixed(2) + ' of $' + Number(myBud.capUsd).toFixed(0) + '</b></div>' +
+            obBar(budPct, budColor) +
+            '<div class="muted" style="font-size:12.5px">' +
+            (Number(myBud.remainingUsd || 0) > 0
+              ? ('$' + Number(myBud.remainingUsd).toFixed(2) + ' left for paid phone lookups this month; the allowance resets on the 1st.')
+              : 'Your allowance for this month is used up. Boost phones unlocks again on the 1st.') +
+            ((myPsp && myPsp.quantity) ? (' Last 30 days: ' + (myPsp.quantity || 0) + ' paid lookup' + ((myPsp.quantity || 0) === 1 ? "" : "s") +
+              ' · ' + (myPsp.found || 0) + ' phone' + ((myPsp.found || 0) === 1 ? "" : "s") + ' added.') : '') +
+            '</div></div>';
+        } else if (myPsp && (myPsp.costUsd > 0 || myPsp.quantity > 0)) {
           html += '<div class="panel-card ob-card ob-mini"><div class="ob-card-head"><b>Your paid phone lookups · last 30 days</b>' +
             '<span style="flex:1"></span><b>$' + Number(myPsp.costUsd || 0).toFixed(2) + '</b></div>' +
             '<div class="muted" style="font-size:12.5px">' + (myPsp.quantity || 0) + ' paid lookup' + ((myPsp.quantity || 0) === 1 ? "" : "s") +
@@ -11662,18 +11678,86 @@
           return;
         }
         if (!quote.missing) { toast("Nothing left to boost: everyone reachable already has a phone number."); loadRuns(); return; }
-        var per = "$" + Number(quote.unitCostUsd).toFixed(2);
-        var basis = quote.statsBasis
-          ? ("your team's real hit rate so far (" + Math.round(quote.hitRate * 100) + "% across " + quote.statsBasis + " lookups)")
-          : ("a typical " + Math.round(quote.hitRate * 100) + "% hit rate (it switches to your real rate as you use it)");
-        var ask = quote.missing + " candidate" + (quote.missing === 1 ? "" : "s") + " on \"" + rname + "\" still " + (quote.missing === 1 ? "has" : "have") + " no phone number after the free enrichment.\n\n" +
-          "Boost phones runs a paid public-records lookup on each of them at " + per + " per " + (quote.billing === "hit" ? "number FOUND (misses are free)" : "lookup, found or not") + ".\n\n" +
-          "Estimated cost: about $" + Number(quote.estCostUsd).toFixed(2) + " for an expected " + quote.estFinds + " new phone" + (quote.estFinds === 1 ? "" : "s") + ", based on " + basis + ".\n\n" +
-          "You will get the exact cost when it finishes, and the spend is logged to your account. Run it now?";
-        if (!confirm(ask)) return;
+        var bud = quote.budget || null;
+        var afford = (typeof quote.affordable === "number") ? quote.affordable : quote.missing;
+        // Budget gone: say so plainly (the server refuses anyway; this is the kind version).
+        if (bud && afford < 1) {
+          alert("Boost phones is paused for you this month.\n\nYou have spent $" + Number(bud.spentUsd).toFixed(2) +
+            " of your $" + Number(bud.capUsd).toFixed(0) + " monthly Boost budget. The allowance resets on the 1st.\n\n" +
+            "Your Daily Checklist page shows this budget at all times.");
+          return;
+        }
+        boostDialog(rid2, rname, btn, orig, quote);
+      });
+    }
+
+    /* Pre-flight dialog: the recruiter picks HOW MANY lookups to buy (fewer or
+       more, up to what their monthly budget still covers) and sees the price of
+       exactly that choice before anything is spent. */
+    function boostDialog(rid2, rname, btn, orig, quote) {
+      var per = Number(quote.unitCostUsd);
+      var bud = quote.budget || null;
+      var afford = (typeof quote.affordable === "number") ? quote.affordable : quote.missing;
+      var maxRows = Math.max(1, Math.min(quote.missing, afford));
+      var basis = quote.statsBasis
+        ? ("your team's real hit rate so far (" + Math.round(quote.hitRate * 100) + "% across " + quote.statsBasis + " lookups)")
+        : ("a typical " + Math.round(quote.hitRate * 100) + "% hit rate (it switches to your real rate as you use it)");
+      var body =
+        '<div style="font-size:13.5px;line-height:1.55">' +
+          '<p style="margin:0 0 12px">' + quote.missing + ' candidate' + (quote.missing === 1 ? '' : 's') + ' on &quot;' + esc(rname) + '&quot; still ' +
+            (quote.missing === 1 ? 'has' : 'have') + ' no phone number after the free enrichment. Each lookup costs <b>$' + per.toFixed(2) + '</b> per ' +
+            (quote.billing === "hit" ? 'number found (misses are free)' : 'lookup, found or not') +
+            (quote.missing > maxRows ? '. Your remaining budget covers up to ' + maxRows + ' of them this month.' : '.') + '</p>' +
+          '<label style="display:block;font-weight:600;margin:0 0 5px" for="boostN">How many candidates to look up</label>' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+            '<button type="button" class="btn btn-ghost btn-sm" id="boostLess" aria-label="Fewer">&minus; 10</button>' +
+            '<input id="boostN" type="number" inputmode="numeric" min="1" max="' + maxRows + '" value="' + maxRows + '" style="width:96px;text-align:center">' +
+            '<button type="button" class="btn btn-ghost btn-sm" id="boostMore" aria-label="More">+ 10</button>' +
+            '<button type="button" class="btn btn-ghost btn-sm" id="boostAll">All ' + maxRows + '</button>' +
+          '</div>' +
+          '<div id="boostCalc" style="margin:12px 0 0;padding:10px 12px;border:1px solid var(--border-strong);border-radius:10px;background:var(--bg-soft);font-variant-numeric:tabular-nums"></div>' +
+          (bud ? '<div class="muted" id="boostBudLine" style="margin-top:10px;font-size:12.5px"></div>' : '') +
+          '<div class="muted" style="margin-top:6px;font-size:12px">Estimate based on ' + basis + '. You see the exact cost when it finishes; the spend is logged to your account and counts against your monthly budget.</div>' +
+        '</div>' +
+        '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="boostCancel">Cancel</button><button class="btn btn-primary btn-sm" id="boostGo">Go</button></div>';
+      openModal("Boost phones", null, body, function (card, close) {
+        var inp = card.querySelector("#boostN"), calc = card.querySelector("#boostCalc");
+        var budLine = card.querySelector("#boostBudLine"), go = card.querySelector("#boostGo");
+        function chosen() {
+          var n = Math.round(Number(inp.value));
+          if (!Number.isFinite(n)) n = maxRows;
+          return Math.max(1, Math.min(maxRows, n));
+        }
+        function paint() {
+          var n = chosen();
+          var estFinds = Math.max(quote.hitRate > 0 ? 1 : 0, Math.round(n * quote.hitRate));
+          var estCost = (quote.billing === "hit" ? estFinds : n) * per;
+          calc.innerHTML = '<b>' + n + '</b> lookup' + (n === 1 ? '' : 's') + ' &middot; estimated cost <b>$' + estCost.toFixed(2) + '</b> for about <b>' + estFinds + '</b> new phone' + (estFinds === 1 ? '' : 's') + '.';
+          if (budLine && bud) {
+            budLine.innerHTML = 'Your Boost budget: <b>$' + Number(bud.spentUsd).toFixed(2) + '</b> of $' + Number(bud.capUsd).toFixed(0) +
+              ' spent this month &middot; <b>$' + Number(bud.remainingUsd).toFixed(2) + '</b> left. This run stops by itself before it can go over.';
+          }
+          go.textContent = "Go: run " + n + " lookup" + (n === 1 ? "" : "s");
+        }
+        inp.addEventListener("input", paint);
+        card.querySelector("#boostLess").addEventListener("click", function () { inp.value = String(Math.max(1, chosen() - 10)); paint(); });
+        card.querySelector("#boostMore").addEventListener("click", function () { inp.value = String(Math.min(maxRows, chosen() + 10)); paint(); });
+        card.querySelector("#boostAll").addEventListener("click", function () { inp.value = String(maxRows); paint(); });
+        card.querySelector("#boostCancel").addEventListener("click", close);
+        go.addEventListener("click", function () {
+          var wanted = chosen();
+          close();
+          runBoost(rid2, rname, btn, orig, quote, wanted);
+        });
+        paint();
+      });
+    }
+
+    /** The buying loop, in 20-row batches up to the count the recruiter chose. */
+    function runBoost(rid2, rname, btn, orig, quote, wanted) {
         btn.disabled = true;
         var tot = { called: 0, found: 0, cache: 0, cost: 0 };
-        var startMissing = quote.missing;
+        var startMissing = wanted;
         boostBarShow(rname, startMissing);
         function batch() {
           // A background list refresh can re-render the row mid-run; re-find the
@@ -11682,7 +11766,10 @@
           if (liveBtn && liveBtn !== btn) { btn = liveBtn; }
           btn.disabled = true;
           btn.textContent = "Boosting " + Math.min(startMissing, tot.called + tot.cache) + "/" + startMissing + "…";
-          sendPatient("/sourcing", "POST", { action: "premiumPhoneRun", id: rid2, max: 20 }).then(function (r) {
+          // Never ask the server for more than is left of the recruiter's CHOSEN
+          // amount; the server additionally clamps every batch to their budget.
+          var batchMax = Math.min(20, Math.max(1, wanted - (tot.called + tot.cache)));
+          sendPatient("/sourcing", "POST", { action: "premiumPhoneRun", id: rid2, max: batchMax }).then(function (r) {
             if (!r.ok) {
               btn.disabled = false; btn.textContent = orig;
               boostBarEnd("Boost stopped: everything found so far is saved", false);
@@ -11695,26 +11782,35 @@
             tot.called += d.called || 0; tot.found += d.found || 0;
             tot.cache += d.cacheHits || 0; tot.cost += d.costUsd || 0;
             boostBarBatch(Math.min(startMissing, tot.called + tot.cache), tot.found);
+            var budNote = d.budget ? ("\n\nYour Boost budget: $" + Number(d.budget.spentUsd).toFixed(2) + " of $" + Number(d.budget.capUsd).toFixed(0) + " spent this month · $" + Number(d.budget.remainingUsd).toFixed(2) + " left.") : "";
+            if (d.budgetExhausted) {
+              btn.disabled = false; btn.textContent = orig;
+              boostBarEnd("Stopped at your monthly budget: what it found is saved", false);
+              alert("Boost stopped at your monthly budget.\n\n" +
+                "This run: " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added for $" + tot.cost.toFixed(2) + " (all saved)." + budNote +
+                "\n\nThe allowance resets on the 1st; your Daily Checklist page shows this budget at all times.");
+              loadRuns(); return;
+            }
             if (d.stoppedEarly) {
               btn.disabled = false; btn.textContent = orig;
               boostBarEnd("Boost stopped early: what it found is saved", false);
-              alert("Boost stopped early: " + d.stoppedEarly + "\n\nActual spend so far: $" + tot.cost.toFixed(2) + " · " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added (all saved). Fix the listing settings, then press Boost again to continue; rows already bought are never re-billed.");
+              alert("Boost stopped early: " + d.stoppedEarly + "\n\nActual spend so far: $" + tot.cost.toFixed(2) + " · " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added (all saved). Fix the listing settings, then press Boost again to continue; rows already bought are never re-billed." + budNote);
               loadRuns(); return;
             }
-            if (d.remaining > 0 && (d.called > 0 || d.cacheHits > 0)) { batch(); return; }
+            var did = tot.called + tot.cache;
+            if (d.remaining > 0 && did < wanted && (d.called > 0 || d.cacheHits > 0)) { batch(); return; }
             btn.disabled = false; btn.textContent = orig;
             boostBarEnd("Done: " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added · actual cost $" + tot.cost.toFixed(2), true);
             var read = "Boost finished on \"" + rname + "\".\n\n" +
               "Phones added: " + tot.found + (tot.cache ? (" (" + tot.cache + " came free from your contact cache)") : "") + "\n" +
               "Paid lookups: " + tot.called + "\n" +
-              "Actual cost: $" + tot.cost.toFixed(2) + " (estimate was $" + Number(quote.estCostUsd).toFixed(2) + ")\n\n" +
+              "Actual cost: $" + tot.cost.toFixed(2) + budNote + "\n\n" +
               "The spend is logged to your account (Outbound Performance shows it), the refreshed list flows on to Candidates and OS Text by itself, and every new number still passes the cell-line check before any text goes out.";
             alert(read);
             loadRuns();
           });
         }
         batch();
-      });
     }
 
     /* ---- Combine lists: tick 2+ saved lists, merge into ONE deduped master list ----

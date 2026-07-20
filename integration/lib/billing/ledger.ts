@@ -259,6 +259,28 @@ export function userSpendRollup(
   };
 }
 
+/**
+ * One recruiter's spend on one event type since the start of the current calendar
+ * month (UTC). This is the number the per-recruiter monthly budget caps check
+ * against: unlike the rolling windows above, it resets on the 1st, matching how
+ * the budget is granted. Events with no matching meta.userEmail never count, so
+ * unattributed legacy spend cannot eat anyone's budget.
+ */
+export function userMonthSpend(workspaceId: string, userEmail: string, type: string): number {
+  const email = userEmail.trim().toLowerCase();
+  if (!email) return 0;
+  const now = new Date();
+  const since = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  let total = 0;
+  for (const e of store.events) {
+    if (e.workspaceId !== workspaceId || e.type !== type || Date.parse(e.at) < since) continue;
+    const meta = (e.meta ?? {}) as Record<string, unknown>;
+    if (String(meta.userEmail ?? "").trim().toLowerCase() !== email) continue;
+    total += e.costUsd;
+  }
+  return round(total);
+}
+
 /** One recruiter's own slice of the rollup (self-scoped analytics). */
 export function userSpend(
   workspaceId: string,
