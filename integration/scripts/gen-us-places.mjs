@@ -18,7 +18,10 @@ const out = process.argv[3] || "usPlacesData.ts";
 
 /** state -> city -> { lat, lon, weight } ; weight = population, or a ZIP-count proxy. */
 const byState = new Map();
-const clean = (s) => s.toLowerCase().replace(/[|,:\n\t]/g, " ").replace(/\s+/g, " ").trim();
+// Must match geoRadius.ts norm() EXACTLY or lookups silently miss: norm strips every
+// character outside [a-z0-9 -] to a space, so "Coeur d'Alene" is queried as
+// "coeur d alene" and the table has to store it under that spelling too.
+const clean = (s) => s.toLowerCase().replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
 
 function put(st, city, lat, lon, weight, authoritative) {
   if (!city || !/^[A-Z]{2}$/.test(st) || !isFinite(lat) || !isFinite(lon)) return;

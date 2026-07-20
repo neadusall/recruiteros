@@ -218,6 +218,18 @@ function trimToPlace(text: string): string {
   return cut.split(",").slice(0, 2).join(",").trim();
 }
 
+/**
+ * Drop a trailing municipal-status word ("howell township" -> "howell").
+ *
+ * Deliberately a SHORT list. "City" and "Town" are load-bearing parts of real place names
+ * (Lake Havasu City, Kansas City, Georgetown), so stripping them would break more than it
+ * fixes; township/borough/village/twp/boro never are.
+ */
+function stripMunicipalSuffix(city: string): string {
+  const trimmed = city.replace(/\s+\b(township|twp|borough|boro|village|municipality)\b\s*$/, "").trim();
+  return trimmed || city;
+}
+
 /** Remove a trailing state name/abbrev from a city fragment ("garfield heights oh" -> "garfield heights"). */
 function stripTrailingState(city: string): string {
   const words = city.split(" ").filter(Boolean);
@@ -306,12 +318,17 @@ function geocodeUncached(raw: string, stateHint?: string): GeoPoint | null {
     }
   }
 
-  // "Saint"/"St." and "Mount"/"Mt." spelling drift, plus a leading-noise retry.
+  // "Saint"/"St." and "Mount"/"Mt." spelling drift, plus municipal-suffix trimming.
   const variants = [
     city.replace(/\bst\b/g, "saint").replace(/\bmt\b/g, "mount"),
     city.replace(/\bsaint\b/g, "st").replace(/\bmount\b/g, "mt"),
     city.replace(/\bft\b/g, "fort"),
     city.replace(/\bfort\b/g, "ft"),
+    // LinkedIn routinely states the legal municipality ("Howell Township, New Jersey",
+    // "Marlboro Township, NJ") while the gazetteer files the place under its bare name.
+    // Only these suffixes are safe to drop: "City" and "Town" are part of real names
+    // ("Lake Havasu City", "Kansas City", "Georgetown"), so they stay.
+    stripMunicipalSuffix(city),
   ];
   for (const v of variants) {
     if (v === city) continue;

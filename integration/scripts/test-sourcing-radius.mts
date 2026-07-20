@@ -17,6 +17,8 @@ import { pinIcpLocation } from "../lib/sourcing/pinLocation";
 import { generateQueries } from "../lib/sourcing/generateQueries";
 import { geoChips } from "../lib/sourcing/koldinfoDiscovery";
 import { scoreCandidate } from "../lib/sourcing/score";
+import { rescueEmptyRun } from "../lib/sourcing/discovery";
+import { mergeSourcingRuns } from "../lib/sourcing/mergeRuns";
 import type { CandidateICP, CandidateRow } from "../lib/sourcing/types";
 
 let pass = 0;
@@ -58,6 +60,26 @@ ok(
 ok(stateOfPlace("Portland, OR") === "OR", "a real trailing state code still reads correctly");
 ok(stateOfPlace("VP of Operations in healthcare") === undefined, "prose with no location names no state");
 ok(!!geocodeUsPlace("St. Louis, MO. Regional lead."), "the sentence cut does not break 'St.' names");
+
+/* ---------------- 1c. Real-world LinkedIn location shapes ---------------- */
+
+// Straight from what LinkedIn / KoldInfo / RapidAPI actually emit.
+ok(!!geocodeUsPlace("Cleveland, Ohio, United States"), "trailing ', United States' does not break the lookup");
+ok(!!geocodeUsPlace("New York, NY 10001"), "a trailing ZIP does not break the lookup");
+ok(!!geocodeUsPlace("Greater New York City Area"), "resolves a 'Greater ... Area' metro label");
+ok(!!geocodeUsPlace("New York City Metropolitan Area"), "resolves a 'Metropolitan Area' label");
+// LinkedIn states the legal municipality; the gazetteer files the bare name.
+ok(geocodeUsPlace("Howell Township, New Jersey")?.city === "howell", "strips a 'Township' suffix");
+ok(geocodeUsPlace("Marlboro Township, NJ")?.city === "marlboro", "strips 'Township' with an abbreviated state");
+// "City"/"Town" are load-bearing in real names and must NOT be stripped.
+ok(!!geocodeUsPlace("Lake Havasu City, AZ"), "does NOT strip a 'City' that is part of the name");
+// The table and the query normalizer must agree on punctuation, or these miss silently.
+ok(!!geocodeUsPlace("Coeur d'Alene, ID"), "apostrophes match between the table and the query");
+ok(!!geocodeUsPlace("O'Fallon, MO"), "apostrophes match on a second spelling");
+ok(!!geocodeUsPlace("Ft. Lauderdale, FL") && !!geocodeUsPlace("St Petersburg, Florida"), "Ft./St. drift resolves");
+// Non-places must stay UNKNOWN so the never-empty rule keeps them.
+ok(geocodeUsPlace("Remote") === null, "'Remote' is unknown, never a location");
+ok(geocodeUsPlace("United States") === null, "a country is not a geocodable center");
 
 /* ---------------- 2. The bug: distance is now measured ---------------- */
 
@@ -184,6 +206,54 @@ ok(!near.fitReasons.concat(far.fitReasons).some((r) => r.includes("—")), "no e
 // No radius picked: the scorer must fall back to the name matcher, not to zero credit.
 const legacy = scoreCandidate(mkRow({ location: "Howell, NJ" }), pinned, {});
 ok(legacy.fitReasons.some((r) => /In-target geo/.test(r)), "with no radius the name-based geo credit still applies");
+
+/* ---------------- 8b. The rescue must not out-rank a far person over a near one ------------- */
+
+// The rescue re-scores geo-dropped rows. It used to do so WITHOUT radius context, so the
+// keep-biased name matcher could hand someone 300 miles out a better score than the
+// radius-aware pass gave them, and rescued rows carried a distance that contradicted
+// their own stated reasons.
+const rescueRows: CandidateRow[] = [
+  mkRow({ fullName: "Far Person", location: "San Diego, CA", milesFromTarget: 2400, linkedinUrl: "https://linkedin.com/in/far" }),
+  mkRow({ fullName: "Just Outside", location: "Newark, NJ", milesFromTarget: 41, linkedinUrl: "https://linkedin.com/in/near" }),
+];
+const rescued = rescueEmptyRun(rescueRows, [], pinned, 1, 50, { radiusMi: 25, geoLabel: "Howell, NJ" });
+ok(!!rescued, "a rescue still returns people rather than an empty run");
+ok(rescued!.candidates.every((c) => c.outOfArea), "every rescued row stays marked out of area");
+ok(
+  rescued!.candidates[0].fullName === "Just Outside",
+  "the NEAREST out-of-area person is ranked first, not an equally-scored distant one",
+);
+ok(
+  rescued!.candidates.every((c) =>
+    typeof c.milesFromTarget !== "number" || c.fitReasons.some((r) => /mi\b/.test(r))),
+  "a rescued row's reasons agree with its stamped distance",
+);
+
+/* ---------------- 8c. Combining lists must not launder out-of-area rows in ------------- */
+
+// The combined list is the one that auto-promotes to Candidates and OS Text, so a merge
+// that ignores outOfArea silently un-does the radius the recruiter set on one of its
+// sources.
+const mkRun = (name: string, cands: CandidateRow[]): any => ({
+  id: name, workspaceId: "ws", name, motion: "recruiting", jd: "", icp: pinned,
+  queries: [], candidates: cands, warnings: [], createdAt: "", updatedAt: "",
+});
+const merged = mergeSourcingRuns([
+  mkRun("tight", [mkRow({ fullName: "Local Person", location: "Freehold, NJ", fitScore: 60, milesFromTarget: 8, linkedinUrl: "https://linkedin.com/in/local" })]),
+  mkRun("loose", [
+    mkRow({ fullName: "Outsider", location: "Dallas, TX", fitScore: 95, outOfArea: true, linkedinUrl: "https://linkedin.com/in/outsider" }),
+    // the SAME person, but this looser list measured them as out of area
+    mkRow({ fullName: "Local Person", location: "Freehold, NJ", fitScore: 40, outOfArea: true, linkedinUrl: "https://linkedin.com/in/local" }),
+  ]),
+]);
+ok(
+  merged.candidates[0].fullName === "Local Person",
+  "an in-area person outranks a higher-scoring out-of-area one on the combined list",
+);
+const localAfterMerge = merged.candidates.find((c) => c.fullName === "Local Person");
+ok(!localAfterMerge?.outOfArea, "in-area on ANY source list wins: the merge does not inherit the loose verdict");
+ok(localAfterMerge?.milesFromTarget === 8, "the measured distance survives the merge");
 
 /* ---------------- 9. Cross-state radii and helper sanity ---------------- */
 

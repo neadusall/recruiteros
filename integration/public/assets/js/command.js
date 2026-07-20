@@ -11405,7 +11405,7 @@
       if (!instruction) { inp.focus(); return; }
       if (!state.icp) { msg("Analyze a JD first."); return; }
       var btn = $("#jdRefineBtn"); if (btn) { btn.disabled = true; btn.textContent = "Refining…"; }
-      send("/sourcing", "POST", { action: "refine", jd: state.jd, icp: state.icp, instruction: instruction }).then(function (r) {
+      send("/sourcing", "POST", { action: "refine", jd: state.jd, icp: state.icp, instruction: instruction, location: state.location, radiusMi: state.radiusMi }).then(function (r) {
         if (btn) { btn.disabled = false; btn.textContent = "Refine"; }
         if (!r.ok) { msg("Refine failed: " + ((r.data && r.data.error) || r.status)); return; }
         state.icp = r.data.icp || state.icp;

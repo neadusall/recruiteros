@@ -22,9 +22,20 @@ function mergeKey(c: CandidateRow): string {
   return (c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`).toLowerCase().replace(/\/+$/, "");
 }
 
-/** Verified-first ranking: vetted candidates by verified score, then the rest by fit. */
+/**
+ * Verified-first ranking, with the location split preserved ahead of everything.
+ *
+ * A merge can fold a tightly geo'd list into a loose or nationwide one. Ranking purely
+ * by score then let an out-of-area person outrank a local on the COMBINED list, which is
+ * the one that auto-promotes to Candidates and OS Text — so the radius the recruiter set
+ * on one search silently stopped applying once they combined it. In-area first mirrors
+ * what runDiscovery and rerank already guarantee for a single run.
+ */
 function rankByVerdict(rows: CandidateRow[]): void {
-  rows.sort((a, c) => (c.verifiedScore ?? -1) - (a.verifiedScore ?? -1) || c.fitScore - a.fitScore);
+  rows.sort((a, c) =>
+    Number(Boolean(a.outOfArea)) - Number(Boolean(c.outOfArea)) ||
+    (c.verifiedScore ?? -1) - (a.verifiedScore ?? -1) ||
+    c.fitScore - a.fitScore);
 }
 
 const FILL_FIELDS = [
@@ -60,6 +71,15 @@ export function mergeSourcingRuns(runs: SourcingRun[]): MergedRuns {
         if (!keep[f] && other[f]) keep[f] = other[f];
       }
       if (keep.llmScore == null && other.llmScore != null) keep.llmScore = other.llmScore;
+      // Location verdict is a MEASUREMENT, not a preference, so it must not be decided by
+      // whichever row happened to score higher. If either list placed this person inside
+      // its target area, they are genuinely local to that search; keep the nearer reading.
+      if (!other.outOfArea) keep.outOfArea = false;
+      if (keep.milesFromTarget == null && other.milesFromTarget != null) {
+        keep.milesFromTarget = other.milesFromTarget;
+      } else if (other.milesFromTarget != null && keep.milesFromTarget != null) {
+        keep.milesFromTarget = Math.min(keep.milesFromTarget, other.milesFromTarget);
+      }
       // A deep-vet verdict earned on either list carries over whole (not field-mixed).
       if (keep.verifiedScore == null && other.verifiedScore != null) {
         keep.verifiedScore = other.verifiedScore; keep.verdict = other.verdict;

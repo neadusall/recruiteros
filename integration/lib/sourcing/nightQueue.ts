@@ -26,6 +26,7 @@ import type { CandidateRow, SearchBreadth, SourcingRun } from "./types";
 import { getSourcingRun, saveSourcingRun } from "./store";
 import { parseJobDescription } from "./parseJobDescription";
 import { pinIcpLocation } from "./pinLocation";
+import { parseRadiusMi } from "./geoRadius";
 import { generateQueries } from "./generateQueries";
 import { runDiscovery } from "./discovery";
 import { getSeenKeys, addSeenKeys } from "./seen";
@@ -218,9 +219,17 @@ async function step(item: NightItem): Promise<void> {
 
   if (item.stage === "search") {
     if (!item.jd) { finish(item, "error", "no job description on the queued search"); return; }
-    const icp = pinIcpLocation(await parseJobDescription(item.jd), item.location);
+    // The queued label carries the recruiter's radius ("Howell, NJ +25mi"), so read it
+    // back and thread it EVERYWHERE the interactive path does. Pinning alone is not
+    // enough and is in fact worse than nothing: it narrows icp.geos to a short list of
+    // in-radius cities, and without radiusMi/geoCenter runDiscovery falls back to
+    // matching stated locations against that short list by NAME — dropping real locals
+    // from every town that missed the list while still waving through distant same-state
+    // people. Overnight runs must filter by the same measured miles as a live search.
+    const radiusMi = parseRadiusMi(undefined, item.location);
+    const icp = pinIcpLocation(await parseJobDescription(item.jd), item.location, radiusMi);
     const breadth: SearchBreadth = item.breadth === "focused" || item.breadth === "wide" ? item.breadth : "balanced";
-    const queries = generateQueries(icp, { breadth });
+    const queries = generateQueries(icp, { breadth, radiusMi });
     const excludeKeys = await getSeenKeys(ws); // overnight runs are additive: skip people already surfaced
     const result = await withWorkspaceCreds(ws, () => runDiscovery(queries, icp, {
       cap: 500,
@@ -229,6 +238,8 @@ async function step(item: NightItem): Promise<void> {
       excludeKeys: excludeKeys.size ? excludeKeys : undefined,
       strictGeo: Boolean((item.location || "").trim()),
       keepOutOfArea: item.outsideGeo === true,
+      radiusMi,
+      geoCenter: item.location,
     }));
     await addSeenKeys(ws, result.candidates.map((c) =>
       (c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`).toLowerCase().replace(/\/+$/, "")));

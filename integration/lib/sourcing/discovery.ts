@@ -44,7 +44,7 @@
  */
 
 import type { CandidateICP, CandidateRow, DiscoveryOptions, SearchBreadth, SourcingQuery } from "./types";
-import { scoreCandidate, inTargetGeo, US_STATE_FULL } from "./score";
+import { scoreCandidate, inTargetGeo, US_STATE_FULL, type ScoreOptions } from "./score";
 import {
   distanceFromCenter, geocodeUsPlace, stateOfPlace, statesWithinRadius, stripRadiusSuffix, withinRadius,
 } from "./geoRadius";
@@ -581,10 +581,17 @@ export function rescueEmptyRun(
   icp: CandidateICP,
   minFit: number,
   cap: number,
+  /** Radius context, so a rescue re-scores on the same terms the run itself used. */
+  scoreOpts: ScoreOptions = {},
 ): { candidates: CandidateRow[]; note: string } | null {
   const byK = new Map<string, CandidateRow>();
   for (const r of geoBuffer) {
-    const sc = scoreCandidate(r, icp);
+    // Re-score WITH the radius context. Dropping it here let the keep-biased name
+    // matcher hand a 300-mile person a better score than the radius-aware pass gave
+    // them, so the rescue could rank someone far away above someone merely just
+    // outside the line — and the row still carried a milesFromTarget that contradicted
+    // its own stated reasons.
+    const sc = scoreCandidate(r, icp, scoreOpts);
     r.fitScore = sc.fitScore;
     r.fitReasons = sc.fitReasons;
     r.outOfArea = true;
@@ -594,7 +601,9 @@ export function rescueEmptyRun(
   }
   const geoKept = [...byK.values()]
     .filter((r) => r.fitScore >= minFit && r.fitScore > 0)
-    .sort((a, b) => b.fitScore - a.fitScore)
+    // Nearest first among equals: when we are forced to show out-of-area people, the
+    // ones closest to the recruiter's target are the most salvageable.
+    .sort((a, b) => b.fitScore - a.fitScore || (a.milesFromTarget ?? 1e9) - (b.milesFromTarget ?? 1e9))
     .slice(0, cap);
   if (geoKept.length) {
     return {
@@ -943,7 +952,7 @@ export async function runDiscovery(
   // already fetched.
   let rescued = false;
   if (!inList.length && !outList.length && (geoBuffer.length || fitBuffer.length)) {
-    const rescue = rescueEmptyRun(geoBuffer, fitBuffer, icp, minFit, cap);
+    const rescue = rescueEmptyRun(geoBuffer, fitBuffer, icp, minFit, cap, { radiusMi, geoLabel });
     if (rescue) {
       rescued = true;
       inList = rescue.candidates.filter((r) => !r.outOfArea);

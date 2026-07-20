@@ -177,7 +177,17 @@ export async function POST(req: Request) {
     if (action === "refine") {
       if (!b?.icp || !b?.instruction) return fail("missing_fields", 422, { detail: "icp and instruction required" });
       const { icp, changes } = await refineIcp(b.jd ?? "", b.icp, b.instruction);
-      return ok({ icp, queries: generateQueries(icp, { breadth: parseBreadth(b.breadth) }), changes });
+      // Refine is prompted to "expand vague geography into concrete metros", so re-pin the
+      // typed location over its geos. Without this the previewed profile and queries show a
+      // wider area than the run will actually search (the run re-pins at `action: "run"`),
+      // which reads as the radius being ignored even when the results are correct.
+      const refineRadius = parseRadiusMi(b.radiusMi, b.location);
+      const pinned = pinIcpLocation(icp, b.location, refineRadius);
+      return ok({
+        icp: pinned,
+        queries: generateQueries(pinned, { breadth: parseBreadth(b.breadth), radiusMi: refineRadius }),
+        changes,
+      });
     }
 
     if (action === "run") {
