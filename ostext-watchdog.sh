@@ -25,9 +25,16 @@ LOG=/var/log/ostext-watchdog.log
 cd "$DIR" || exit 0
 
 # Never act mid-deploy: a recreate in progress looks "down" for a few seconds.
-# Check the systemd unit that actually runs the deploy, NOT pgrep: any stray
-# shell that merely mentions the script name in its command line would fool a
-# pgrep match forever and neuter this watchdog.
+# Two guards, both cheap:
+# 1. The shared deploy lock (auto-deploy.sh holds it for its whole run, however
+#    it was invoked: systemd tick or a manual run). Taking it non-blocking means
+#    we skip while a deploy runs, and holding it for the rest of THIS script
+#    means a deploy starting mid-recovery waits for us instead of racing compose.
+# 2. The systemd unit state, as a belt-and-suspenders check. NOT pgrep: any
+#    stray shell that merely mentions the script name in its command line would
+#    fool a pgrep match forever and neuter this watchdog.
+exec 9>/var/lock/recruiteros-deploy.lock
+flock -n 9 || exit 0
 DEPLOY_STATE=$(systemctl is-active recruiteros-deploy.service 2>/dev/null || true)
 case "$DEPLOY_STATE" in active|activating|deactivating) exit 0;; esac
 

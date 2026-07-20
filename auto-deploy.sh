@@ -14,6 +14,16 @@ BRANCH="main"
 
 cd "$DIR" || { echo "$(date -u) no $DIR" >> "$LOG"; exit 0; }
 
+# SERIALIZE every run of this script (systemd tick, manual invocation, anything)
+# behind one lock. Root cause of the 2026-07-20 OS Text outage: rapid-fire
+# pushes caused overlapping `docker compose up` recreates, and a recreate that
+# loses that race strands the service as a stopped "Created" duplicate with no
+# running container. The OS Text watchdog takes this same lock, so recovery and
+# deploy can never fight over compose either. Wait up to 5 min for the previous
+# run, then yield to the next timer tick.
+exec 9>/var/lock/recruiteros-deploy.lock
+flock -w 300 9 || { echo "$(date -u) another deploy still running after 5 min wait, yielding" >> "$LOG"; exit 0; }
+
 # One-time: MIGRATE persistence off Postgres onto the durable /data file volume.
 # The app now snapshots accounts/sessions to /data (the app_data named volume),
 # which survives every redeploy with no password to sync — see lib/db mode().
