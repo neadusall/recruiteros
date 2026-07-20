@@ -76,7 +76,14 @@ function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | null 
 
   if (run.autoflow?.sentAt) {
     // Already sent: only a later enrichment that found MORE phones re-sends (top-up).
-    return phoneCount(run) > run.autoflow.phonesAtSend ? "topup" : null;
+    if (phoneCount(run) > run.autoflow.phonesAtSend) return "topup";
+    // A sent list whose enrichment chain never FINISHED (it was force-sent while the
+    // worker was down mid-run) still deserves its enrichment: queue ONE server-side
+    // resume; the top-up rule above then re-sends if the finished chain finds more
+    // phones. Without this, a force-sent list stays "enrichment unfinished" forever.
+    const sentPartial = Boolean(run.laxisProgress && run.laxisProgress.nextStart !== null);
+    if (sentPartial && !run.autoflow.resumedAt && now - touched >= SETTLE_MS) return "resume";
+    return null;
   }
   if ((run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS) return null;
 
