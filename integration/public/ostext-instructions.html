@@ -227,13 +227,18 @@
   <h2 id="campaign">3. Launching your first campaign</h2>
   <p>OS Text organizes outreach into campaigns: one role, one list, one message template. Inside the app you will see four tabs: <strong>Campaigns</strong>, <strong>To-dos</strong>, <strong>Spend</strong>, and <strong>Create campaign</strong>.</p>
 
+  <div class="callout good">
+    <span class="tag">Coming from JD Sourcing?</span>
+    <p>Lists from JD Sourcing arrive here as campaigns that are already about 90% built: contacts loaded with every merge field, your name and email on the campaign, and a safe starter message prefilled. Skip to polishing the message, then <span class="ui">Activate</span>. The sections below cover campaigns you build from scratch.</p>
+  </div>
+
   <h3>Create the campaign</h3>
   <p>Click <span class="ui">Create campaign</span> and fill in:</p>
   <ul>
     <li><strong>Campaign name</strong>: name it after the role and client, for example "Sr. Maintenance Tech, Confidential Mfg, Dallas".</li>
     <li><strong>SMS template</strong>: your first-touch message (section 5 covers what to write).</li>
     <li><strong>Send window</strong>: the daily hours texts are allowed to go out. Default is 9:00 am to 7:00 pm. Sends pause outside the window and resume automatically.</li>
-    <li><strong>Schedule send</strong> (optional): a future start time. Otherwise use <span class="ui">Launch</span> to start now.</li>
+    <li><strong>Schedule send</strong> (optional): a future start time. Otherwise <span class="ui">Activate</span> starts it now.</li>
     <li><strong>Position summary / job description</strong>: paste the real JD. The AI uses this to score candidate fit and to draft replies, so the more real detail here, the better the drafts. That said, AI drafting is a nice-to-have: it's always best to respond manually so you come off more natural.</li>
     <li><strong>Recruiter name, email, and calendar link</strong>: these feed your merge fields and reply drafts.</li>
     <li><strong>LLM mode</strong>: keep <span class="ui">Draft only (recommended)</span>. The AI drafts every reply but you approve each one before it sends. Semi-auto (AI sends clear positive replies on its own) is for high-volume campaigns after you trust the drafts.</li>
@@ -263,13 +268,18 @@
     <p>If a contact is missing a field your template uses, that contact is skipped rather than sent a broken message. So only use a token if every row in your CSV has that field filled in.</p>
   </div>
 
-  <h3>Send</h3>
-  <p>Click <span class="ui">Send batch</span> to send the next batch of pending contacts (batches of 10, automatically paced). Statuses move from queued to sent to delivered; failures show the carrier error next to the contact with a retry link. <span class="ui">Pause</span> stops sending at any time.</p>
+  <h3>Launch</h3>
+  <p>Press <span class="ui">Activate</span>. That is the real launch: the campaign's numbers get cell-checked and fit-scored, then texting begins on its own inside your send window and keeps going, day after day, without you pressing anything else. <span class="ui">Pause</span> stops sending at any time; <span class="ui">Resume</span> picks up where it left off.</p>
+  <p>Want a batch out right now? <span class="ui">Send batch</span> pushes the next batch of pending contacts immediately (batches of 10, automatically paced). Statuses move from queued to sent to delivered; failures show the carrier error next to the contact with a retry link.</p>
+  <p class="soft">Running two campaigns whose lists overlap? Safe. A cross-campaign guard makes sure the same person is never cold-texted twice, no matter how many active campaigns they appear in.</p>
 
   <h2 id="replies">4. Working the inbox</h2>
   <p>Every reply lands in the campaign's inbox as a threaded conversation. The system reads each inbound and labels its sentiment (positive, curious, not interested, wrong person, asked about pay, asked for email, and so on), so you can work the hottest threads first. It also scores candidate fit against your job description.</p>
   <p>To respond: open the thread, click <span class="ui">Generate draft with Claude</span>, edit the draft so it sounds like you, and hit <span class="ui">Send</span>. Never send a draft you have not read. The AI is fast; you are the judgment.</p>
   <p class="soft">Work replies within minutes when you can. SMS is a live channel: a reply answered inside 5 minutes converts dramatically better than one answered the next morning.</p>
+
+  <h3>Call them from the thread</h3>
+  <p>When a text reply deserves a voice, use the call button right in the conversation: a popup dialer opens with the number already loaded, and you talk from the browser. The call goes out from the same business number your texts come from; you are assigned one line for both calls and texts, so the candidate sees one consistent number either way. Text first, call the warm replies: it is the highest-converting pattern in the tool.</p>
 
   <h2 id="writing">5. Writing texts that get responses</h2>
   <p>A cold text is not a small email. It lands in the most personal inbox a candidate has, sandwiched between their family group chat and their dentist reminder. The bar for earning a reply is: <strong>identify yourself, prove you are relevant to them specifically, and ask one small question</strong>. Everything else is cut.</p>
@@ -392,14 +402,16 @@
   <ul>
     <li>Real JD pasted in, pay range authorized by the client</li>
     <li>CSV clean; every merge-field column filled for every row; both validation checkboxes on</li>
-    <li>First touch: name, who you are, why them, one question, under 300 characters, no links</li>
+    <li>First touch: name, who you are, why them, one question, under 160 characters, no links</li>
     <li>LLM mode: Draft only</li>
     <li>Send window matched to the candidates' timezone</li>
+    <li>Press <span class="ui">Activate</span>: the engine cell-checks, scores, and sends on its own inside the window</li>
   </ul>
   <h3>Every day the campaign runs</h3>
   <ul>
     <li>Answer replies fast; hottest sentiment first</li>
     <li>Read and edit every AI draft before sending</li>
+    <li>Call the warm replies from the thread's call button</li>
     <li>Mark wrong-person replies; never reply after a STOP</li>
   </ul>
 
