@@ -106,6 +106,45 @@ check("sent list, enrichment later found a phone -> topup",
     autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, attempts: 1 },
   }), NOW), "topup");
 
+// ostext_not_connected self-heal (2026-07-20 Lume incident): a FRESH sent list
+// stamped not-connected retries through the fresh lane. The tick loop gates the
+// actual send on ostextConfiguredFor(ws), so returning ostext-retry while the
+// workspace is still unconnected costs one cheap check, never a send loop.
+check("fresh sent list stamped ostext_not_connected, holds phones -> ostext-retry",
+  due(run({
+    candidates: [enriched()],
+    updatedAt: new Date(NOW - 20 * MIN).toISOString(),
+    laxisProgress: { doneOffsets: [0], total: 1, nextStart: null, updatedAt: new Date(NOW - 20 * MIN).toISOString() } as SourcingRun["laxisProgress"],
+    autoflow: { sentAt: new Date(NOW - 20 * MIN).toISOString(), phonesAtSend: 1, attempts: 1, error: "ostext_not_connected: sent to Candidates only" },
+  }), NOW), "ostext-retry");
+
+// ...but a phoneless list has nothing to retry with (top-up covers it later).
+check("...same but zero phones -> no action",
+  due(run({
+    candidates: [cand({ email: "p@x.com" })],
+    updatedAt: new Date(NOW - 20 * MIN).toISOString(),
+    laxisProgress: { doneOffsets: [0], total: 1, nextStart: null, updatedAt: new Date(NOW - 20 * MIN).toISOString() } as SourcingRun["laxisProgress"],
+    autoflow: { sentAt: new Date(NOW - 20 * MIN).toISOString(), phonesAtSend: 0, attempts: 1, error: "ostext_not_connected: sent to Candidates only" },
+  }), NOW), null);
+
+// ...and the unfinished-chain resume still runs first (retry fires next sweep,
+// once resumedAt is stamped).
+check("...same with unfinished chain and no resume yet -> resume wins",
+  due(run({
+    candidates: [enriched(), cand()],
+    updatedAt: new Date(NOW - 20 * MIN).toISOString(),
+    autoflow: { sentAt: new Date(NOW - 20 * MIN).toISOString(), phonesAtSend: 1, attempts: 1, error: "ostext_not_connected: sent to Candidates only" },
+  }), NOW), "resume");
+
+// ...top-up outranks the retry: new phones re-send anyway, one send not two.
+check("...same but phones grew after send -> topup",
+  due(run({
+    candidates: [enriched(), enriched()],
+    updatedAt: new Date(NOW - 20 * MIN).toISOString(),
+    laxisProgress: { doneOffsets: [0], total: 2, nextStart: null, updatedAt: new Date(NOW - 20 * MIN).toISOString() } as SourcingRun["laxisProgress"],
+    autoflow: { sentAt: new Date(NOW - 20 * MIN).toISOString(), phonesAtSend: 1, attempts: 1, error: "ostext_not_connected: sent to Candidates only" },
+  }), NOW), "topup");
+
 // BD lists still never ride to OS Text.
 check("bd-motion run -> no action",
   due(run({ motion: "bd", candidates: [enriched()] }), NOW), null);
