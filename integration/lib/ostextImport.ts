@@ -113,7 +113,9 @@ export interface OsTextImportArgs {
   recruiterName: string;
   recruiterEmail: string;
   contacts: OsTextContact[];
-  validate: boolean;
+  /** IGNORED: Telnyx cell validation is forced on every push (see below). The
+   *  field survives only so existing callers keep compiling. */
+  validate?: boolean;
   /**
    * When set, every contact passes the no-double-contact guard (ATS DNC +
    * recent-communication cooldown) before it reaches the SMS engine. Both push
@@ -198,7 +200,13 @@ export async function ostextImport(args: OsTextImportArgs): Promise<Record<strin
           ...(fromNumber ? { fromNumber } : {}),
         },
         contacts: args.contacts,
-        validate: args.validate === true,
+        // SAFEGUARD (user mandate): Telnyx cell-line confirmation is FORCED on
+        // every push, whatever the caller says. Every phone from every source
+        // (free chain, skip-trace Boost, Sales Nav, manual push, parity
+        // backfill) lands as "validating" and only confirmed cells can be
+        // texted. Previously `args.validate === true` meant a caller that
+        // forgot the flag silently DISABLED the engine's own safe default.
+        validate: true,
       }),
       signal: AbortSignal.timeout(120_000),
     });
