@@ -10531,36 +10531,41 @@
       '.jd-run{padding:12px 0;border-bottom:1px solid var(--border)}.jd-run:last-child{border-bottom:0}' +
       '.jd-run-top{display:flex;justify-content:space-between;align-items:center;gap:10px}' +
       /* The visible journey, tracker form: four connected stops (Searched, Enriched,
-         Candidates, OS Text) with a progress line that fills stop by stop, so where a
-         list is reads at a glance across the room. Green check = done, pulsing blue =
-         happening now, amber = needs a press of Enrich, grey numbered = coming up
-         automatically. Each stop carries its own detail line (counts / what to do). */
-      '.jd-journey{display:flex;align-items:flex-start;margin:13px 0 0 25px;max-width:780px}' +
-      '.jd-tstop{flex:1 1 0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:5px;position:relative;min-width:0;padding:0 4px;text-decoration:none;cursor:default}' +
-      'a.jd-tstop{cursor:pointer}a.jd-tstop:hover .jd-tlabel{text-decoration:underline}' +
-      '.jd-tstop::before{content:"";position:absolute;top:11px;right:50%;left:-50%;height:3px;border-radius:2px;background:var(--border-strong)}' +
+         Candidates, OS Text) presented as one contained card. Dots wear a soft ring in
+         their status color (green done, pulsing brand-blue live, amber needs-a-press,
+         dashed grey coming up), the connector segment leading INTO a stop takes that
+         stop's color, and the plain-words note is the card's footer, so where a list
+         is reads at a glance across the room. */
+      '.jd-journeywrap{margin:14px 0 2px;max-width:860px;border:1px solid var(--border);border-radius:14px;background:var(--surface);box-shadow:var(--shadow-xs);overflow:hidden}' +
+      '.jd-journey{display:flex;align-items:flex-start;padding:16px 14px 12px}' +
+      '.jd-tstop{flex:1 1 0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;position:relative;min-width:0;padding:6px 6px 8px;border-radius:12px;text-decoration:none;cursor:default}' +
+      'a.jd-tstop{cursor:pointer;transition:background .16s ease,transform .16s ease}' +
+      'a.jd-tstop:hover{background:var(--brand-soft);transform:translateY(-1px)}' +
+      'a.jd-tstop:hover .jd-tlabel{color:var(--brand-2)}' +
+      '.jd-tstop::before{content:"";position:absolute;top:20px;right:50%;left:-50%;height:2px;border-radius:2px;background:var(--border-strong)}' +
       '.jd-tstop:first-child::before{content:none}' +
       '.jd-tstop.jt-reach::before{background:var(--ok)}' +
-      '.jd-tdot{position:relative;width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;background:var(--bg);border:2px solid var(--border-strong);color:var(--text-dim);flex:0 0 auto}' +
-      '.jd-tdot .isvg{width:13px;height:13px}' +
-      '.jt-done .jd-tdot{background:var(--ok);border-color:var(--ok);color:#fff}' +
-      '.jt-live .jd-tdot{background:var(--brand);border-color:var(--brand);color:#fff;animation:jdpulse 1.3s infinite}' +
-      '.jt-act .jd-tdot{background:#d97706;border-color:#d97706;color:#fff}' +
-      '.jd-ttxt{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0}' +
-      '.jd-tlabel{font-size:12px;font-weight:700;color:var(--text);line-height:1.25}' +
+      '.jd-tstop.jt-live::before{background:var(--brand)}' +
+      '.jd-tstop.jt-act::before{background:var(--warn)}' +
+      '.jd-tdot{position:relative;z-index:1;width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;background:var(--surface);border:2px dashed var(--border-strong);color:var(--text-dim);flex:0 0 auto;box-shadow:0 0 0 4px var(--surface)}' +
+      '.jd-tdot .isvg{width:14px;height:14px}' +
+      '.jt-done .jd-tdot{background:var(--ok);border-style:solid;border-color:var(--ok);color:#fff;box-shadow:0 0 0 4px var(--ok-bg)}' +
+      '.jt-live .jd-tdot{background:var(--brand);border-style:solid;border-color:var(--brand);color:#fff;animation:jdpulse 1.3s infinite}' +
+      '.jt-act .jd-tdot{background:var(--warn);border-style:solid;border-color:var(--warn);color:#fff;box-shadow:0 0 0 4px var(--warn-bg)}' +
+      '.jd-ttxt{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}' +
+      '.jd-tlabel{font-size:12.5px;font-weight:650;color:var(--text);line-height:1.25;letter-spacing:.01em}' +
       '.jt-wait .jd-tlabel{color:var(--text-dim);font-weight:600}' +
-      '.jt-done .jd-tlabel{color:var(--ok)}' +
-      '.jt-live .jd-tlabel{color:var(--brand-2)}' +
-      '.jt-act .jd-tlabel{color:#8a5a00}' +
-      '.jd-tsub{font-size:11px;color:var(--text-muted);line-height:1.35;font-variant-numeric:tabular-nums}' +
-      '.jd-journey-note{margin:8px 0 0 25px;font-size:12px;color:var(--text-muted);line-height:1.5;max-width:860px}' +
-      '.jd-journey-note b{color:var(--text)}' +
-      '@media (min-width:641px) and (max-width:760px){.jd-journey,.jd-journey-note{margin-left:0}}' +
-      '@media (max-width:640px){.jd-journey{flex-direction:column;align-items:stretch;margin-left:0;max-width:none}' +
-        '.jd-tstop{flex-direction:row;text-align:left;gap:10px;padding:5px 0}' +
-        '.jd-tstop::before{top:-12px;left:11px;right:auto;width:3px;height:20px}' +
-        '.jd-ttxt{flex-direction:row;align-items:baseline;gap:7px;flex-wrap:wrap}' +
-        '.jd-journey-note{margin-left:0}}' +
+      '.jd-tsub{font-size:11.5px;color:var(--text-muted);line-height:1.35;font-variant-numeric:tabular-nums}' +
+      '.jt-done .jd-tsub{color:var(--ok);font-weight:600}' +
+      '.jt-live .jd-tsub{color:var(--brand-2);font-weight:600}' +
+      '.jt-act .jd-tsub{color:var(--warn);background:var(--warn-bg);font-weight:650;padding:2px 9px;border-radius:999px}' +
+      '.jd-journey-note{margin:8px 0 0;font-size:12px;color:var(--text-muted);line-height:1.55;max-width:860px}' +
+      '.jd-journey-note b{color:var(--text);font-weight:650}' +
+      '.jd-journeywrap .jd-journey-note{margin:0;padding:10px 18px 11px;border-top:1px solid var(--border);background:color-mix(in srgb, var(--bg) 55%, var(--surface))}' +
+      '@media (max-width:640px){.jd-journey{flex-direction:column;align-items:stretch;padding:12px 14px}' +
+        '.jd-tstop{flex-direction:row;text-align:left;gap:12px;padding:7px 8px}' +
+        '.jd-tstop::before{top:-14px;left:22px;right:auto;width:2px;height:26px}' +
+        '.jd-ttxt{flex-direction:row;align-items:baseline;gap:8px;flex-wrap:wrap}}' +
       '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}' +
       '.jd-run-main{display:flex;align-items:center;gap:10px;min-width:0}' +
       '.jd-reach{display:inline-flex;flex-wrap:wrap;row-gap:4px;gap:6px;margin:0 4px 0 2px;vertical-align:middle;max-width:100%}' +
@@ -11004,8 +11009,8 @@
             else jNote = "Waiting for the automatic pipeline to pick this list up; it sweeps every few minutes and needs no button.";
           }
           var journey = n
-            ? '<div class="jd-journey">' + sSearch + sEnrich + sCand + sText + '</div>' +
-              '<div class="jd-journey-note">' + jNote + '</div>'
+            ? '<div class="jd-journeywrap"><div class="jd-journey">' + sSearch + sEnrich + sCand + sText + '</div>' +
+              '<div class="jd-journey-note">' + jNote + '</div></div>'
             : '<div class="jd-journey-note">This search saved no candidates, so there is nothing to enrich or send.</div>';
           var reach = '<span class="jd-reach">' +
             '<span class="' + (ems ? "jr-em" : "jr-zero") + '" title="Candidates on this list with a validated email: how many you can message by email right now."><svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>' + ems + ' email' + (ems === 1 ? "" : "s") + '</span>' +
