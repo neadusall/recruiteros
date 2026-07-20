@@ -16,6 +16,7 @@
 
 import type { CandidateRow, SourcingRun } from "./types";
 import { getCachedContact, putCachedContact } from "./cache";
+import { sourceFromProviderId } from "./phoneSources";
 import { stateFromLocation } from "./landlinePhones";
 import {
   enrich, rapidMobileFinder,
@@ -294,7 +295,7 @@ async function runBoostBatch(
       const personKey = c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`;
       // Free first, always: a phone bought (or found) for this person in ANY run is reused.
       const cached = await getCachedContact(ws, personKey).catch(() => null);
-      if (cached?.phone) { c.phone = cached.phone; cacheHits++; found++; continue; }
+      if (cached?.phone) { c.phone = cached.phone; c.phoneSource = cached.phoneSource; cacheHits++; found++; continue; }
 
       // Hard stop at the cap: the next lookup would bill past this month's allowance.
       if (costUsd + perLookup > budgetBefore.remainingUsd + 1e-9) {
@@ -335,9 +336,13 @@ async function runBoostBatch(
         const number = report.subject.mobilePhone;
         if (typeof number === "string" && number) {
           c.phone = number; found++;
+          // Which provider actually produced it: the cheap finder or the skip-trace
+          // listing. Rides to OS Text so send/response accuracy is tracked per source.
+          c.phoneSource = sourceFromProviderId(report.resolved?.mobilePhone?.providerId) ?? "skiptrace";
           await putCachedContact(ws, personKey, {
             email: (c.email || "").trim() || undefined,
             phone: number,
+            phoneSource: c.phoneSource,
           }).catch(() => {});
         }
       } catch {

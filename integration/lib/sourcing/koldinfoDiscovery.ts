@@ -144,6 +144,7 @@ export function parseDbDiscoveryCsv(csv: string): CandidateRow[] {
       linkedinUrl: (r.linkedin_url || "").trim() || undefined,
       email: emailOk ? (r.email || "").trim() || undefined : undefined,
       phone: (r.phone || "").trim() || undefined,
+      phoneSource: (r.phone || "").trim() ? "koldinfo" : undefined,
       fitScore: 0,
       fitReasons: [],
       provider: "koldinfo",

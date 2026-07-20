@@ -13,6 +13,7 @@
 
 import type { CandidateRow } from "./types";
 import { getCachedContact, putCachedContact } from "./cache";
+import { sourceFromProviderId } from "./phoneSources";
 import { enrich, cheapFirstContactWaterfall } from "../signals";
 import { fillPhonesFromLandlineDb } from "./landlinePhones";
 import { withWorkspaceCreds } from "../connected";
@@ -67,7 +68,7 @@ async function gapFillInner(ws: string, rows: CandidateRow[]): Promise<GapFillRe
     const cached = await getCachedContact(ws, personKey);
     if (cached && (cached.email || cached.phone)) {
       if (cached.email && !hasEmail) { c.email = cached.email; enrichedCount++; }
-      if (cached.phone && !hasPhone) { c.phone = cached.phone; phones++; }
+      if (cached.phone && !hasPhone) { c.phone = cached.phone; c.phoneSource = cached.phoneSource; phones++; }
       contactCacheHits++;
       continue;
     }
@@ -84,11 +85,21 @@ async function gapFillInner(ws: string, rows: CandidateRow[]): Promise<GapFillRe
       const ph = report.subject.phone
         ?? (report.resolved?.mobilePhone?.value as string | undefined);
       if (typeof e === "string" && !hasEmail) { c.email = e; enrichedCount++; }
-      if (typeof ph === "string" && !hasPhone) { c.phone = ph; phones++; }
+      if (typeof ph === "string" && !hasPhone) {
+        c.phone = ph;
+        // Which listing produced it (generic phone or mobile rung): provenance for
+        // the phone-accuracy metric.
+        c.phoneSource = sourceFromProviderId(
+          (report.resolved?.phone?.providerId as string | undefined) ??
+          (report.resolved?.mobilePhone?.providerId as string | undefined),
+        );
+        phones++;
+      }
       // Cache the row's settled answer (email + phone together), not just this lookup's.
       await putCachedContact(ws, personKey, {
         email: (c.email || "").trim() || undefined,
         phone: (c.phone || "").trim() || undefined,
+        phoneSource: c.phoneSource,
       });
     } catch { /* leave unresolved */ }
   }

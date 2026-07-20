@@ -896,6 +896,8 @@ export async function POST(req: Request) {
         const custom: Record<string, string> = {};
         if (c.headline) custom.headline = c.headline;
         if (typeof c.verifiedScore === "number") custom.tag = `vetted-${c.verdict ?? "scored"}`;
+        // Provenance for the phone-accuracy metric (tallied per source in OS Text).
+        if (c.phoneSource) custom.phone_source = c.phoneSource;
         contacts.push({
           firstName: parts[0] || "",
           lastName: parts.slice(1).join(" "),

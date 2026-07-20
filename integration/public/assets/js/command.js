@@ -1222,10 +1222,11 @@
     function load() {
       Promise.all([
         api("/outbound?view=team").catch(function () { return null; }),
-        api("/outbound?view=insights").catch(function () { return null; })
+        api("/outbound?view=insights").catch(function () { return null; }),
+        api("/ostext/accuracy").catch(function () { return null; })
       ]).then(function (res) {
         var body = $("#obBody"); if (!body) return;
-        var t = res[0], ins = res[1];
+        var t = res[0], ins = res[1], acc = res[2];
         if (!t) { body.innerHTML = '<div class="empty">Could not load the outbound overview (admin only, or a brief blip after a deploy).</div>'; return; }
         var tt = t.totals;
         var html = "";
@@ -1282,6 +1283,11 @@
           html += '<div class="muted" style="font-size:12.5px">No paid phone-boost spend yet. Recruiters trigger it per list in JD Sourcing (Boost phones) after the free enrichment finishes; every run lands here with who spent what and what it found.</div>';
         }
         html += "</div>";
+
+        // Phone number accuracy: the send-and-response scoreboard per phone
+        // source, straight from the OS Text engine (cell check, delivery,
+        // replies, AI-flagged wrong-number replies).
+        html += obPhoneAccuracyHtml(acc);
         body.innerHTML = html;
         obWireHeatmap(body, t);
         Array.prototype.forEach.call(body.querySelectorAll("[data-ob-user]"), function (el) {
@@ -1296,6 +1302,46 @@
     }
     load();
     viewTimers.push(setInterval(load, 60000));
+  }
+
+  /* Phone number accuracy: per phone source, how the numbers actually performed
+     once texted. Sources are stamped at enrichment time (JD Sourcing) and ride
+     into OS Text with each push; outcomes come back from the engine. */
+  var OB_PHONE_SOURCE_LABELS = {
+    skiptrace: "Boost (skip trace)",
+    koldinfo: "KoldInfo",
+    laxis: "Laxis",
+    landlinedb: "In-house phone DB",
+    finder: "Phone finder",
+    unknown: "Unknown source"
+  };
+  function obPhoneAccuracyHtml(acc) {
+    var html = '<div class="panel-card ob-card"><div class="ob-card-head"><b>Phone number accuracy by source</b>' +
+      '<span class="muted" style="font-size:12px;margin-left:10px">Cell check is the Telnyx line-type gate on every push; delivery, replies and wrong-number flags come from real sends.</span></div>';
+    var rows = acc && acc.sources ? acc.sources : null;
+    if (!rows || !rows.length) {
+      html += '<div class="muted" style="font-size:12.5px">No accuracy data yet. It starts accruing as pushed numbers go through the cell check and get texted; numbers pushed before this feature shipped count under "Unknown source".</div></div>';
+      return html;
+    }
+    function pct(n, d) { return d > 0 ? Math.round((100 * n) / d) + "%" : '<span class="muted">n/a</span>'; }
+    html += '<div style="overflow-x:auto"><table class="ob-heat"><thead><tr>' +
+      '<th style="text-align:left">Source</th><th>Checked</th><th>Confirmed cells</th><th>Texted</th><th>Delivered</th><th>Replied</th><th>Wrong number</th><th>Opt-outs</th></tr></thead><tbody>';
+    rows.forEach(function (s) {
+      var label = OB_PHONE_SOURCE_LABELS[s.source] || s.source;
+      var wrongPct = s.replied > 0 ? Math.round((100 * s.wrongNumber) / s.replied) : 0;
+      html += '<tr><td style="text-align:left">' + esc(label) + "</td>" +
+        '<td style="text-align:center">' + (s.checked || 0) + "</td>" +
+        '<td style="text-align:center">' + pct(s.cellConfirmed, s.checked) + "</td>" +
+        '<td style="text-align:center">' + (s.texted || 0) + "</td>" +
+        '<td style="text-align:center">' + pct(s.delivered, s.texted) + "</td>" +
+        '<td style="text-align:center">' + pct(s.replied, s.delivered) + "</td>" +
+        '<td style="text-align:center"' + (s.wrongNumber > 0 ? ' title="' + wrongPct + '% of replies"' : "") + ">" +
+          (s.wrongNumber > 0 ? '<span style="color:var(--danger)">' + s.wrongNumber + "</span>" : "0") + "</td>" +
+        '<td style="text-align:center">' + (s.optedOut || 0) + "</td></tr>";
+    });
+    html += "</tbody></table></div>" +
+      '<div class="ob-note">How to read it: Confirmed cells is the share of pushed numbers Telnyx verified as textable mobiles. Delivered is of texted contacts; Replied is of delivered. Wrong number counts replies the AI triage classified as "wrong person", the direct accuracy signal that a number belonged to someone else.</div></div>';
+    return html;
   }
 
   var OB_HEAT_COLS = [["email", "Email"], ["linkedin", "LinkedIn"], ["sms", "SMS"], ["followUp", "Follow-up"], ["content", "Content"], ["response", "Responses"], ["meetings", "Meetings"]];

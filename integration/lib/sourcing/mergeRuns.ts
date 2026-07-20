@@ -39,7 +39,7 @@ function rankByVerdict(rows: CandidateRow[]): void {
 }
 
 const FILL_FIELDS = [
-  "email", "phone", "linkedinUrl", "title", "headline", "company",
+  "email", "linkedinUrl", "title", "headline", "company",
   "location", "imageUrl", "provider", "sourceGroup",
 ] as const;
 
@@ -70,6 +70,9 @@ export function mergeSourcingRuns(runs: SourcingRun[]): MergedRuns {
       for (const f of FILL_FIELDS) {
         if (!keep[f] && other[f]) keep[f] = other[f];
       }
+      // Phone + its provenance move as a PAIR: taking one row's number with the other
+      // row's source label would corrupt the phone-accuracy metric.
+      if (!keep.phone && other.phone) { keep.phone = other.phone; keep.phoneSource = other.phoneSource; }
       if (keep.llmScore == null && other.llmScore != null) keep.llmScore = other.llmScore;
       // Location verdict is a MEASUREMENT, not a preference, so it must not be decided by
       // whichever row happened to score higher. If either list placed this person inside

@@ -102,7 +102,7 @@ export async function promoteSourcingRun(
           let dirty = false;
           if (existing.category !== tag) { existing.category = tag; dirty = true; }
           if (!existing.email && c.email) { existing.email = c.email; dirty = true; }
-          if (!existing.phone && c.phone) { existing.phone = c.phone; dirty = true; }
+          if (!existing.phone && c.phone) { existing.phone = c.phone; existing.phoneSource = c.phoneSource; dirty = true; }
           if (!existing.title && (c.title || c.headline)) { existing.title = c.title || c.headline; dirty = true; }
           if (!existing.location && c.location) { existing.location = c.location; dirty = true; }
           if (dirty) await core.saveProspect(existing);
@@ -123,6 +123,7 @@ export async function promoteSourcingRun(
       linkedinUrl: c.linkedinUrl,
       email: c.email,
       phone: c.phone,
+      phoneSource: c.phoneSource,
       category: tag, // <- the tag (defaults to the list name) — pull these back by tag in Candidates
     });
     prospectIds.push(p.id);

@@ -163,7 +163,7 @@ export function mergeSourcingKoldInfoCsv(rows: CandidateRow[], csvText: string):
     r.matched++;
     if (email && badEmail) r.invalid++;
     if (email && !badEmail && !c.email && !usedEmail.has(email)) { c.email = email; usedEmail.add(email); r.emails++; }
-    if (phone && !c.phone) { c.phone = phone; r.phones++; }
+    if (phone && !c.phone) { c.phone = phone; c.phoneSource = "koldinfo"; r.phones++; }
   }
   return r;
 }

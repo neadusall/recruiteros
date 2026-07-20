@@ -217,6 +217,9 @@ export interface Prospect {
   linkedinUrl?: string;
   /** Primary outreach number (SMS/voice). Defaults to mobile when known. */
   phone?: string;
+  /** Which rung produced `phone` (skiptrace / koldinfo / laxis / landlinedb / finder).
+   *  Rides into OS Text pushes so number accuracy is tracked per source. */
+  phoneSource?: string;
   /** Mobile number, enriched as its own field (separate provider rung). */
   mobilePhone?: string;
   /** Landline / direct-dial number, enriched separately from mobile. */

@@ -91,6 +91,14 @@ export interface CandidateRow {
   /** Contact info, populated only after enrichment. */
   email?: string;
   phone?: string;
+  /**
+   * Which rung produced the phone: "skiptrace" (Boost), "koldinfo", "laxis",
+   * "landlinedb", "finder" (generic RapidAPI phone/mobile listing). Travels with
+   * the number into OS Text (customFields.phone_source) so send/response outcomes
+   * can be tracked back to the source that supplied the number (the phone-accuracy
+   * metric). Absent = source unknown (legacy rows, CSV imports).
+   */
+  phoneSource?: string;
   /** 0..100 fit score against the ICP. */
   fitScore: number;
   /** Human-readable reasons the score landed where it did. */

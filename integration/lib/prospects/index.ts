@@ -37,6 +37,8 @@ export interface NewProspectInput {
   email?: string;
   linkedinUrl?: string;
   phone?: string;
+  /** Which rung produced `phone` (phone-accuracy provenance; travels with the number). */
+  phoneSource?: string;
   company?: string;
   /** Pairs the person to their company so outreach enrichment can resolve contact. */
   companyDomain?: string;
@@ -80,6 +82,11 @@ export async function addProspect(input: NewProspectInput): Promise<Prospect> {
     email: input.email ?? p.email,
     linkedinUrl: input.linkedinUrl ?? p.linkedinUrl,
     phone: input.phone ?? p.phone,
+    // Provenance travels WITH its number: a new number without a stated source is
+    // unknown, and an unchanged number keeps the label it already earned.
+    phoneSource: input.phone
+      ? input.phoneSource ?? (input.phone === p.phone ? p.phoneSource : undefined)
+      : p.phoneSource,
     company: input.company ?? p.company,
     companyDomain: input.companyDomain ?? p.companyDomain,
     title: input.title ?? p.title,
@@ -261,7 +268,12 @@ export async function enrichProspect(
   // email-dedupe would fork a second prospect when the original had no email yet).
   // Honor the requested field so "Enrich email" / "Enrich phone" stay individual.
   if (field !== "phone") p.email = email ?? p.email;
-  if (field !== "email") p.phone = phone ?? p.phone;
+  if (field !== "email") {
+    // A finder-resolved number replaces the old one; its provenance goes with it
+    // (phone-accuracy metric). An unchanged phone keeps its existing label.
+    if (phone && phone !== p.phone) p.phoneSource = "finder";
+    p.phone = phone ?? p.phone;
+  }
   if (p.email) {
     p.atsPersonId = await getAts().upsertPersonByEmail(p.email, {
       name: p.fullName,

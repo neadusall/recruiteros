@@ -166,6 +166,9 @@ function toOsTextContacts(run: SourcingRun): OsTextContact[] {
     const custom: Record<string, string> = {};
     if (c.headline) custom.headline = c.headline;
     if (typeof c.verifiedScore === "number") custom.tag = `vetted-${c.verdict ?? "scored"}`;
+    // Provenance for the phone-accuracy metric: the engine tallies validation,
+    // delivery, and wrong-number outcomes per phone source.
+    if (c.phoneSource) custom.phone_source = c.phoneSource;
     out.push({
       firstName: parts[0] || "",
       lastName: parts.slice(1).join(" "),

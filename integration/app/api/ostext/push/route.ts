@@ -104,6 +104,9 @@ export async function POST(req: Request) {
     const custom: Record<string, string> = {};
     if (p.category) custom.tag = p.category;
     if (p.headline) custom.headline = p.headline;
+    // Phone-accuracy provenance: only when the number being pushed IS the one the
+    // label describes (p.phoneSource labels p.phone, not the mobile field).
+    if (p.phoneSource && phone === p.phone) custom.phone_source = p.phoneSource;
     contacts.push({
       firstName: p.firstName || parts[0] || "",
       lastName: parts.slice(1).join(" "),

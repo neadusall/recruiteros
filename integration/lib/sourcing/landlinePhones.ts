@@ -141,6 +141,7 @@ export async function fillPhonesFromLandlineDb(rows: CandidateRow[]): Promise<nu
     const phone = (best.cell_e164 || best.phone_e164 || "").trim();
     if (!phone) continue;
     c.phone = phone;
+    c.phoneSource = "landlinedb";
     filled++;
   }
   return filled;

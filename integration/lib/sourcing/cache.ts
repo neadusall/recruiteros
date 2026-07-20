@@ -28,7 +28,7 @@ const PROFILE_TTL = () => ttlDays("RECRUITEROS_SOURCING_PROFILE_TTL_DAYS", 60);
 const CONTACT_TTL = () => ttlDays("RECRUITEROS_SOURCING_CONTACT_TTL_DAYS", 90);
 
 export interface CachedProfile { profile: FullProfile; fetchedAt: string }
-export interface CachedContact { email?: string; phone?: string; fetchedAt: string }
+export interface CachedContact { email?: string; phone?: string; phoneSource?: string; fetchedAt: string }
 interface CacheBlob {
   profiles: Record<string, CachedProfile>;
   contacts: Record<string, CachedContact>;
@@ -100,12 +100,16 @@ export async function getCachedContact(workspaceId: string, personKey: string): 
 }
 
 export async function putCachedContact(
-  workspaceId: string, personKey: string, contact: { email?: string; phone?: string },
+  workspaceId: string, personKey: string, contact: { email?: string; phone?: string; phoneSource?: string },
 ): Promise<void> {
   if (!personKey || (!contact.email && !contact.phone)) return; // don't cache empty results
   await hydrate();
   store.contacts[scopedKey(workspaceId, cacheKey(personKey))] = {
-    email: contact.email, phone: contact.phone, fetchedAt: nowIso(),
+    email: contact.email, phone: contact.phone,
+    // Provenance rides with the number so a cache-served phone still reports the
+    // rung that originally produced it (phone-accuracy metric).
+    phoneSource: contact.phone ? contact.phoneSource : undefined,
+    fetchedAt: nowIso(),
   };
   save();
 }

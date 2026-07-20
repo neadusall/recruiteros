@@ -276,7 +276,7 @@ export function mergeEnrichedCsv(rows: CandidateRow[], enrichedCsv: string): Lax
       if (v && /^[+\d\s().\-ext]+$/i.test(v) && digits.length >= 7 && digits.length <= 15) { phone = v; break; }
     }
     if (email && !c.email && /@/.test(email)) { c.email = email; result.emails++; }
-    if (phone && !c.phone) { c.phone = phone; result.phones++; }
+    if (phone && !c.phone) { c.phone = phone; c.phoneSource = "laxis"; result.phones++; }
   }
   return result;
 }
