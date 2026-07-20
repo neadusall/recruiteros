@@ -10875,10 +10875,21 @@
             '<span class="jr-part" title="Enrichment stopped partway: about ' + epDone + ' of ' + (ep.total || n) + ' rows are done. Press Enrich to finish; it resumes exactly where it stopped and finished batches are never bought twice."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>enrichment unfinished · ~' + epDone + '/' + (ep.total || n) + '</span>';
           else enrichChip =
             '<span class="jr-part" title="This list has not been through the full enrichment chain yet. Press Enrich to run it; when it finishes the refreshed contacts are re-sent to Candidates and OS Text."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>not enriched yet</span>';
+          // A silent auto-send failure is invisible no more: the server sweeper stamps
+          // its outcome on the run, and a list that reached Candidates but NOT OS Text
+          // says so right on the row (outcome words only, no raw internals).
+          var afErr = (r.autoflow && r.autoflow.error) || "";
+          var sendChip = "";
+          if (afErr) {
+            sendChip = afErr.indexOf("ostext_not_connected") === 0
+              ? '<span class="jr-part" title="This list reached Candidates, but this workspace has no OS Text engine connected, so no text campaign was created. Connect OS Text under Setup (or have the owner grant access); the phones on this list are then pushed automatically within a few minutes."><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>not in OS Text yet</span>'
+              : '<span class="jr-part" title="The automatic send of this list hit a problem. It keeps retrying on its own; if this chip stays up for more than an hour, ask your admin to check the send logs."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>send issue, retrying</span>';
+          }
           var reach = '<span class="jd-reach">' +
             '<span class="' + (ems ? "jr-em" : "jr-zero") + '" title="Candidates on this list with a validated email: how many you can message by email right now."><svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>' + ems + ' email' + (ems === 1 ? "" : "s") + '</span>' +
             '<span class="' + (phs ? "jr-ph" : "jr-zero") + '" title="Candidates on this list with a phone number: how many you can text or call right now."><svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' + phs + ' phone' + (phs === 1 ? "" : "s") + '</span>' +
             enrichChip +
+            sendChip +
             // Credit stamp: what the search itself cost in paid people-search requests
             // (recorded from this run on; older lists saved before then have no stamp).
             (r.apiUsage ? (function (au) {

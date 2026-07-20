@@ -55,7 +55,7 @@ function enrichmentInFlight(run: SourcingRun): boolean {
 }
 
 /** Should the sweeper act on this run right now? */
-function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | null {
+function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | "ostext-retry" | null {
   if (!run.candidates.length) return null;
   if (run.motion === "bd") return null; // undefined motion (pre-field runs) counts as recruiting
   const touched = Date.parse(run.updatedAt);
@@ -83,6 +83,13 @@ function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | null 
     // phones. Without this, a force-sent list stays "enrichment unfinished" forever.
     const sentPartial = Boolean(run.laxisProgress && run.laxisProgress.nextStart !== null);
     if (sentPartial && !run.autoflow.resumedAt && now - touched >= SETTLE_MS) return "resume";
+    // A send that reached Candidates but SKIPPED OS Text because the workspace had
+    // no engine (ostext_not_connected) heals itself: the moment the workspace gets
+    // an engine (own keys saved under Setup, or the owner grants the house one) its
+    // phones flow on without anyone re-arming the list. The tick loop acts on this
+    // only after ostextConfiguredFor(ws) turns true, so it never spins while
+    // unconnected (2026-07-20 incident: Lume lists silently stamped sent-with-error).
+    if (run.autoflow.error?.startsWith("ostext_not_connected") && phoneCount(run) > 0) return "ostext-retry";
     return null;
   }
   if ((run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS) return null;
@@ -161,6 +168,10 @@ async function sendRun(run: SourcingRun): Promise<void> {
     //    top-up only adds the people enrichment newly reached — dedupe by LinkedIn URL).
     const phonesNow = phoneCount(run);
     const topup = Boolean(stamp.sentAt);
+    // A stale outcome must not outlive this attempt: without this, a retry that
+    // SUCCEEDS still carries the old ostext_not_connected stamp (the clear below
+    // deliberately preserves it), leaving the list flagged and re-sent forever.
+    stamp.error = undefined;
     if (!run.promotedListId || topup) {
       // Reuse the campaign a prior promote created — promote with no campaignId
       // always creates a new one, and a top-up must never duplicate the campaign.
@@ -249,6 +260,7 @@ export async function tickSourcingAutoflow(): Promise<{ sent: number }> {
       const what = due(run, now);
       if (!what) continue;
       if (what === "resume") { await resumeRun(run); continue; }
+      if (what === "ostext-retry" && !(await ostextConfiguredFor(run.workspaceId))) continue;
       await sendRun(run);
       sent++;
     }
