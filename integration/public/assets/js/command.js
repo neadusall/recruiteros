@@ -10545,8 +10545,8 @@
             '<p><b>2 &middot; Press Initiate Search</b>: That one button runs everything: writes the brief (if the JD box is empty), builds the ideal-candidate profile, searches, ranks the strongest matches to the top, and saves the finished list below. There is nothing else to press.</p>' +
             '<p>Then the list keeps working on its own: contact info is enriched (emails and phones, cheapest source first), everyone lands in the <b>Candidates</b> tab under the same list name, and an <b>OS Text</b> SMS campaign is built from everyone with a phone number, ready to review and launch. No buttons, no extra steps.</p>' +
           '</div>' +
-          '<div class="jd-helpsec"><h5>Search from Sales Navigator</h5>' +
-            '<p>Run a search inside LinkedIn Sales Navigator (or a regular LinkedIn people search), copy the URL from the address bar, and paste it into the Sales Navigator box below. The tool pulls the people that search matches through your connected LinkedIn account, reads the search\'s own filters (titles, locations, companies, keywords), and runs the same search waterfall on those filters to find more qualified people beyond what LinkedIn showed. The finished list then enriches and sends itself exactly like a normal run.</p>' +
+          '<div class="jd-helpsec"><h5>Search from a LinkedIn URL (Sales Navigator or Recruiter)</h5>' +
+            '<p>Run a search inside LinkedIn Sales Navigator, LinkedIn Recruiter, or a regular LinkedIn people search, copy the URL from the address bar, and paste it into the LinkedIn search box below. The tool pulls the people that search matches through your connected LinkedIn account, reads the search\'s own filters (titles, locations, companies, keywords), and runs the same search waterfall on those filters to find more qualified people beyond what LinkedIn showed. The finished list then enriches and sends itself exactly like a normal run.</p>' +
             '<p><b>Add results to</b>: pick a past search (either search type) and the new people are added to that list with no duplicates. Anyone already on it stays once, and any missing details or contact info the new pull found fill in their blanks, so pointing it at an older, thinly-enriched list is also how you top that list up and finish its enrichment. Choosing New list saves under the name you type; re-using an existing name adds to that list instead of creating a second one.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>Set the depth of the search</h5>' +
@@ -10638,10 +10638,10 @@
         '<div id="jdMsg" class="muted" style="margin-top:8px"></div>' +
       '</div>' +
       '<div class="card">' +
-        '<div class="jd-lead2">Search from LinkedIn Sales Navigator</div>' +
-        '<div class="jd-lead-sub">Paste a Sales Navigator (or LinkedIn people search) URL. The people it matches are pulled in, the same search waterfall finds more qualified matches beyond them, and the finished list enriches itself and flows to Candidates and OS Text like any other run.</div>' +
+        '<div class="jd-lead2">Search from LinkedIn (Sales Navigator or Recruiter)</div>' +
+        '<div class="jd-lead-sub">Paste a Sales Navigator, Recruiter, or LinkedIn people-search URL. The people it matches are pulled in, the same search waterfall finds more qualified matches beyond them, and the finished list enriches itself and flows to Candidates and OS Text like any other run.</div>' +
         '<div class="jd-fieldgrid">' +
-          '<div class="jd-field"><label>Sales Navigator search URL</label><input id="jdSnavUrl" type="text" placeholder="https://www.linkedin.com/sales/search/people?..." /></div>' +
+          '<div class="jd-field"><label>LinkedIn search URL (Sales Navigator, Recruiter, or people search)</label><input id="jdSnavUrl" type="text" placeholder="https://www.linkedin.com/sales/search/people?... or /talent/search?..." /></div>' +
           '<div class="jd-field"><label>Add results to</label><div class="jd-snavrow">' +
             '<select id="jdSnavTarget" title="Where the results land. Pick a past search (from any search type) to add to it without creating duplicates, or keep New list to save under a new name."><option value="">New list…</option></select>' +
             '<input id="jdSnavName" type="text" placeholder="Name the new list" /></div></div>' +
@@ -11210,7 +11210,7 @@
       var url = urlEl ? urlEl.value.trim() : "";
       function smsg(t) { var m = $("#jdSnavMsg"); if (m) m.textContent = t || ""; }
       if (!/^https?:\/\/(www\.)?linkedin\.com\//i.test(url)) {
-        smsg("Paste a full LinkedIn Sales Navigator search URL (it starts with https://www.linkedin.com/).");
+        smsg("Paste a full LinkedIn search URL: Sales Navigator, Recruiter, or people search (it starts with https://www.linkedin.com/).");
         if (urlEl) urlEl.focus();
         return;
       }
@@ -11220,7 +11220,7 @@
       var name = targetId ? "" : ((nameEl && nameEl.value.trim()) || "");
       btn.disabled = true; btn.textContent = "Searching…";
       smsg("");
-      showProgress("Running the Sales Navigator search", 120, "Pulling the search's people from LinkedIn, then widening with the search waterfall…");
+      showProgress("Running the LinkedIn search", 120, "Pulling the search's people from LinkedIn, then widening with the search waterfall…");
       var payload = { action: "salesNav", url: url, breadth: jdBreadth() };
       if (targetId) payload.targetRunId = targetId;
       if (name) payload.name = name;

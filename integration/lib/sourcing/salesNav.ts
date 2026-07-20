@@ -40,6 +40,17 @@ function personKey(c: CandidateRow): string {
   return (c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`).toLowerCase().replace(/\/+$/, "");
 }
 
+/**
+ * Which LinkedIn surface a pasted search URL came from. Drives labels only (the
+ * pull + expansion machinery is identical): Recruiter URLs live under /talent/
+ * (modern) or /recruiter/ (legacy smartsearch), Sales Navigator under /sales/.
+ */
+export function searchKindOf(url: string): "LinkedIn Recruiter" | "Sales Navigator" | "LinkedIn" {
+  if (/linkedin\.com\/(talent|recruiter)\//i.test(url)) return "LinkedIn Recruiter";
+  if (/linkedin\.com\/sales\//i.test(url)) return "Sales Navigator";
+  return "LinkedIn";
+}
+
 const looksLikeId = (v: string) => /^(urn:|\d+$)/i.test(v.trim());
 
 function cleanValue(raw: string): string {
@@ -50,6 +61,12 @@ function pushUnique(list: string[], v: string): void {
   const val = cleanValue(v);
   if (!val || looksLikeId(val)) return;
   if (!list.some((x) => x.toLowerCase() === val.toLowerCase())) list.push(val);
+}
+
+/** Recruiter's legacy params pack alternates into one value ("RN OR Registered Nurse",
+ *  "A | B"): split them so each alternate becomes its own ICP entry. */
+function pushEach(list: string[], v: string): void {
+  for (const part of v.split(/\s+OR\s+|\|/i)) pushUnique(list, part);
 }
 
 /** Which ICP bucket a Sales Navigator filter `type:` feeds. */
@@ -94,16 +111,22 @@ export function parseSalesNavUrl(url: string): SalesNavCriteria {
     for (const m of seg.matchAll(/text:([^,()]+)/gi)) pushUnique(out[bucket], m[1]);
   }
 
-  // Classic people-search params.
+  // Classic people-search + Recruiter params. Recruiter's legacy smartsearch spells
+  // its filters as plain params (searchKeywords, title, locations, companies…);
+  // MODERN /talent/search URLs usually carry only opaque ids (the filters live on
+  // LinkedIn's side), which correctly parses to empty criteria here: the pulled
+  // members then shape the ICP instead.
   try {
     const params = new URL(url).searchParams;
     for (const [key, bucket] of [
-      ["titleFreeText", "titles"], ["title", "titles"],
-      ["company", "companies"], ["currentCompany", "companies"],
-      ["industry", "industries"], ["location", "geos"],
+      ["titleFreeText", "titles"], ["title", "titles"], ["titles", "titles"], ["jobTitle", "titles"],
+      ["company", "companies"], ["currentCompany", "companies"], ["companies", "companies"],
+      ["industry", "industries"], ["industries", "industries"],
+      ["location", "geos"], ["locations", "geos"], ["geo", "geos"],
+      ["searchKeywords", "keywords"],
     ] as Array<[string, keyof SalesNavCriteria]>) {
       const v = params.get(key);
-      if (v) pushUnique(out[bucket], v);
+      if (v) pushEach(out[bucket], v);
     }
   } catch { /* not a parseable URL shape; the DSL pass above already ran */ }
 
@@ -137,14 +160,14 @@ function inferSeniority(title: string): CandidateICP["seniority"] {
  * Build the ICP that drives scoring + the discovery-waterfall expansion: the URL's
  * own filters first (they ARE the recruiter's intent), profile facts as backfill.
  */
-export function icpFromSalesNav(criteria: SalesNavCriteria, profiles: CandidateRow[]): CandidateICP {
+export function icpFromSalesNav(criteria: SalesNavCriteria, profiles: CandidateRow[], kindLabel = "Sales Navigator"): CandidateICP {
   const titles = criteria.titles.length ? criteria.titles.slice(0, 8)
     : topValues(profiles, (c) => c.title || c.headline, 6);
   if (!titles.length && criteria.keywords.length) titles.push(...criteria.keywords.slice(0, 4));
   const geos = criteria.geos.length ? criteria.geos.slice(0, 8) : topValues(profiles, (c) => c.location, 4);
   const targetCompanies = criteria.companies.length ? criteria.companies.slice(0, 10)
     : topValues(profiles, (c) => c.company, 8);
-  const lead = titles[0] || criteria.keywords[0] || "Sales Navigator search";
+  const lead = titles[0] || criteria.keywords[0] || `${kindLabel} search`;
   const seniority = inferSeniority(lead);
   return {
     label: lead + (geos.length ? ` (${geos[0]})` : ""),
@@ -163,7 +186,7 @@ export function icpFromSalesNav(criteria: SalesNavCriteria, profiles: CandidateR
   };
 }
 
-function profileToRow(p: SearchProfile): CandidateRow {
+function profileToRow(p: SearchProfile, kindLabel: string): CandidateRow {
   return {
     fullName: p.fullName,
     title: p.title,
@@ -174,7 +197,7 @@ function profileToRow(p: SearchProfile): CandidateRow {
     imageUrl: p.imageUrl,
     fitScore: 0,
     fitReasons: [],
-    sourceGroup: "sales navigator",
+    sourceGroup: kindLabel.toLowerCase(),
     provider: "linkedin",
   };
 }
@@ -187,7 +210,7 @@ interface FetchResult { rows: CandidateRow[]; warnings: string[]; account?: stri
  * LinkedIn leg degrades to warnings and the waterfall expansion still runs, so the
  * bar always produces candidates when the URL carries usable filters.
  */
-async function fetchSearchMembers(ws: string, ownerUserId: string, url: string, limit: number): Promise<FetchResult> {
+async function fetchSearchMembers(ws: string, ownerUserId: string, url: string, limit: number, kindLabel: string): Promise<FetchResult> {
   const warnings: string[] = [];
   const core = listLinkedInAccounts(ws).find((a) => a.active && a.warmup !== "flagged");
   const unipileAccountId = cred("UNIPILE_ACCOUNT_ID") || process.env.UNIPILE_ACCOUNT_ID;
@@ -207,7 +230,7 @@ async function fetchSearchMembers(ws: string, ownerUserId: string, url: string, 
     try {
       const profiles = await getProvider().searchProfiles({ account, url, limit });
       if (profiles.length) {
-        return { rows: profiles.map(profileToRow), warnings, account: core?.handle || "Unipile LinkedIn" };
+        return { rows: profiles.map((p) => profileToRow(p, kindLabel)), warnings, account: core?.handle || "Unipile LinkedIn" };
       }
       warnings.push("linkedin(search): the connected account returned no members for this URL");
     } catch (err) {
@@ -222,7 +245,7 @@ async function fetchSearchMembers(ws: string, ownerUserId: string, url: string, 
     try {
       const { profiles, warnings: w } = await scrapeSearchViaSidecar(url, Math.min(limit, 100));
       if (w?.length) warnings.push(...w.map((x) => `scraper(salesnav): ${x}`));
-      if (profiles.length) return { rows: profiles.map(profileToRow), warnings, account: "scraper sidecar" };
+      if (profiles.length) return { rows: profiles.map((p) => profileToRow(p, kindLabel)), warnings, account: "scraper sidecar" };
     } catch (err) {
       warnings.push(`scraper(salesnav): ${(err as Error).message}`);
     }
@@ -269,17 +292,28 @@ export async function runSalesNavSourcing(ws: string, ownerUserId: string, opts:
     throw err;
   }
   const limit = Math.min(Math.max(opts.limit ?? 200, 1), 500);
+  const kind = searchKindOf(url);
   const criteria = parseSalesNavUrl(url);
-  const fetched = await fetchSearchMembers(ws, ownerUserId, url, limit);
+  const fetched = await fetchSearchMembers(ws, ownerUserId, url, limit, kind);
   const warnings = [...fetched.warnings];
-  const icp = icpFromSalesNav(criteria, fetched.rows);
+  // Recruiter's modern /talent/ URLs usually keep their filters on LinkedIn's side
+  // (the URL only carries opaque ids). When that happens AND the member pull came
+  // back empty, say exactly what to do instead of failing mysteriously.
+  const criteriaEmpty = !criteria.titles.length && !criteria.keywords.length
+    && !criteria.geos.length && !criteria.companies.length && !criteria.industries.length;
+  if (kind === "LinkedIn Recruiter" && criteriaEmpty && !fetched.rows.length) {
+    warnings.push(
+      "recruiter_url_note: Recruiter search URLs usually keep their filters on LinkedIn's side, so the URL alone can't seed the search waterfall. Connect the LinkedIn seat under Setup so the search's own members can be pulled, or use Recruiter's legacy smartsearch URL (it spells the filters out).",
+    );
+  }
+  const icp = icpFromSalesNav(criteria, fetched.rows, kind);
 
   // Score the LinkedIn members against the derived ICP, floored: they matched the
-  // recruiter's own Sales Navigator filters, so they never rank as strangers.
+  // recruiter's own search filters, so they never rank as strangers.
   for (const row of fetched.rows) {
     const s = scoreCandidate(row, icp);
     row.fitScore = Math.max(s.fitScore, 55);
-    row.fitReasons = ["Matched your Sales Navigator search", ...s.fitReasons];
+    row.fitReasons = [`Matched your ${kind} search`, ...s.fitReasons];
   }
 
   const byKey = new Map<string, CandidateRow>();

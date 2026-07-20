@@ -2,7 +2,7 @@
    ICP derivation traps, and the merge-into-existing-list guarantees the feature sells
    (no duplicate people, blanks filled both ways).
    Run from integration/:  npx tsx scripts/test-salesnav.mts */
-import { parseSalesNavUrl, icpFromSalesNav } from "../lib/sourcing/salesNav";
+import { parseSalesNavUrl, icpFromSalesNav, searchKindOf } from "../lib/sourcing/salesNav";
 import { mergeSourcingRuns } from "../lib/sourcing/mergeRuns";
 import type { CandidateRow, SourcingRun } from "../lib/sourcing/types";
 
@@ -86,6 +86,42 @@ function ok(cond: boolean, name: string, extra?: unknown) {
   const pat = candidates.find((c) => c.fullName === "Pat Jones")!;
   ok(pat.email === "pat@x.com" && pat.title === "Director of Radiology", "merge: blanks filled BOTH ways (kept email, gained title)", pat);
   ok(candidates.some((c) => c.fullName === "New Person"), "merge: new person added");
+}
+
+/* ---- 6. LinkedIn Recruiter URLs ---- */
+{
+  // Legacy smartsearch spells its filters as plain params, with OR-packed alternates.
+  const c = parseSalesNavUrl(
+    "https://www.linkedin.com/recruiter/smartsearch?searchKeywords=ICU%20Nurse&title=Registered%20Nurse%20OR%20RN&locations=Dallas%2C%20Texas&companies=HCA%20Healthcare",
+  );
+  ok(c.keywords.includes("ICU Nurse"), "recruiter legacy: searchKeywords", c.keywords);
+  ok(c.titles.length === 2 && c.titles.includes("RN") && c.titles.includes("Registered Nurse"), "recruiter legacy: OR-packed titles split", c.titles);
+  ok(c.geos[0] === "Dallas, Texas", "recruiter legacy: locations", c.geos);
+  ok(c.companies[0] === "HCA Healthcare", "recruiter legacy: companies", c.companies);
+}
+{
+  // Modern /talent/ URLs usually carry only opaque ids: clean empty criteria, no garbage.
+  const c = parseSalesNavUrl(
+    "https://www.linkedin.com/talent/search?searchContextId=8f2f0a&searchHistoryId=123456789&searchRequestId=abcdef",
+  );
+  ok(!c.titles.length && !c.geos.length && !c.companies.length && !c.keywords.length, "recruiter modern: opaque ids parse to clean empty", c);
+}
+{
+  // A talent URL that DOES carry readable params still yields criteria.
+  const c = parseSalesNavUrl("https://www.linkedin.com/talent/search?keywords=Clinic%20Director&locations=Wichita%2C%20Kansas");
+  ok(c.keywords[0] === "Clinic Director", "recruiter modern: keywords param", c.keywords);
+  ok(c.geos[0] === "Wichita, Kansas", "recruiter modern: locations param", c.geos);
+}
+{
+  ok(searchKindOf("https://www.linkedin.com/talent/search?x=1") === "LinkedIn Recruiter", "kind: /talent/ is Recruiter");
+  ok(searchKindOf("https://www.linkedin.com/recruiter/smartsearch?x=1") === "LinkedIn Recruiter", "kind: /recruiter/ is Recruiter");
+  ok(searchKindOf("https://www.linkedin.com/sales/search/people?x=1") === "Sales Navigator", "kind: /sales/ is Sales Navigator");
+  ok(searchKindOf("https://www.linkedin.com/search/results/people/?keywords=x") === "LinkedIn", "kind: people search is LinkedIn");
+}
+{
+  // ICP label fallback carries the surface name when the URL taught us nothing else.
+  const icp = icpFromSalesNav({ keywords: [], titles: [], geos: [], companies: [], industries: [] }, [], "LinkedIn Recruiter");
+  ok(icp.label.startsWith("LinkedIn Recruiter search"), "recruiter: ICP label fallback", icp.label);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -40,7 +40,7 @@ import {
   buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, buildKoldInfoDbCsv,
   startBulkList, stepBulkList, bulkListStatus,
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
-  mergeSourcingRuns, getRapidQuota, runSalesNavSourcing,
+  mergeSourcingRuns, getRapidQuota, runSalesNavSourcing, searchKindOf,
   gapFillContacts, listNightItems, addNightItem, removeNightItem,
   landlineDbReady,
   premiumPhoneQuote, runPremiumPhoneBoost,
@@ -238,7 +238,7 @@ export async function POST(req: Request) {
      * and never a duplicate list. A fresh name creates a new list. */
     if (action === "salesNav") {
       const url = typeof b?.url === "string" ? b.url.trim() : "";
-      if (!url) return fail("missing_url", 422, { detail: "paste a LinkedIn Sales Navigator search URL" });
+      if (!url) return fail("missing_url", 422, { detail: "paste a LinkedIn Sales Navigator, Recruiter, or people-search URL" });
       const result = await withWorkspaceCreds(ws, () => runSalesNavSourcing(ws, g.ctx.user.id, {
         url,
         limit: typeof b.limit === "number" ? b.limit : undefined,
@@ -306,10 +306,10 @@ export async function POST(req: Request) {
         });
       }
 
-      const name = typedName || result.icp.label || "Sales Navigator search";
+      const name = typedName || result.icp.label || `${searchKindOf(url)} search`;
       const saved = await saveSourcingRun(ws, {
         name,
-        jd: `Sourced from a LinkedIn Sales Navigator search.\nURL: ${url}\n` +
+        jd: `Sourced from a pasted ${searchKindOf(url)} search URL.\nURL: ${url}\n` +
           `Titles: ${result.icp.titles.join(", ") || "(from results)"}\n` +
           `Locations: ${result.icp.geos.join(", ") || "(any)"}` +
           (result.icp.mustHave.length ? `\nKeywords: ${result.icp.mustHave.join(", ")}` : ""),
