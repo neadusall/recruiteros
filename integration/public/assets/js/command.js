@@ -10542,15 +10542,17 @@
       'a.jd-tstop{cursor:pointer;transition:background .16s ease,transform .16s ease}' +
       'a.jd-tstop:hover{background:var(--brand-soft);transform:translateY(-1px)}' +
       'a.jd-tstop:hover .jd-tlabel{color:var(--brand-2)}' +
+      'a.jd-tstop:focus-visible{outline:none;box-shadow:var(--focus-ring)}' +
       '.jd-tstop::before{content:"";position:absolute;top:20px;right:50%;left:-50%;height:2px;border-radius:2px;background:var(--border-strong)}' +
       '.jd-tstop:first-child::before{content:none}' +
       '.jd-tstop.jt-reach::before{background:var(--ok)}' +
-      '.jd-tstop.jt-live::before{background:var(--brand)}' +
+      '.jd-tstop.jt-live::before{background:var(--brand);animation:jdlinepulse 1.3s ease-in-out infinite}' +
       '.jd-tstop.jt-act::before{background:var(--warn)}' +
       '.jd-tdot{position:relative;z-index:1;width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;background:var(--surface);border:2px dashed var(--border-strong);color:var(--text-dim);flex:0 0 auto;box-shadow:0 0 0 4px var(--surface)}' +
       '.jd-tdot .isvg{width:14px;height:14px}' +
       '.jt-done .jd-tdot{background:var(--ok);border-style:solid;border-color:var(--ok);color:#fff;box-shadow:0 0 0 4px var(--ok-bg)}' +
       '.jt-live .jd-tdot{background:var(--brand);border-style:solid;border-color:var(--brand);color:#fff;animation:jdpulse 1.3s infinite}' +
+      '.jt-live .jd-tdot .isvg{animation:jdspin 1.7s linear infinite}' +
       '.jt-act .jd-tdot{background:var(--warn);border-style:solid;border-color:var(--warn);color:#fff;box-shadow:0 0 0 4px var(--warn-bg)}' +
       '.jd-ttxt{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}' +
       '.jd-tlabel{font-size:12.5px;font-weight:650;color:var(--text);line-height:1.25;letter-spacing:.01em}' +
@@ -10559,6 +10561,15 @@
       '.jt-done .jd-tsub{color:var(--ok);font-weight:600}' +
       '.jt-live .jd-tsub{color:var(--brand-2);font-weight:600}' +
       '.jt-act .jd-tsub{color:var(--warn);background:var(--warn-bg);font-weight:650;padding:2px 9px;border-radius:999px}' +
+      /* Honest mini progress bar under the live stop: width = rows actually done
+         (chunk ledger); .ind = no ledger yet, a small segment glides instead. */
+      '.jd-tbar{display:block;width:88px;max-width:100%;height:4px;border-radius:999px;background:var(--brand-soft);overflow:hidden;margin-top:3px}' +
+      '.jd-tbar b{display:block;height:100%;border-radius:999px;background:var(--brand);transition:width .6s ease}' +
+      '.jd-tbar.ind b{width:38%;animation:jdslide 1.4s ease-in-out infinite alternate}' +
+      '@keyframes jdslide{from{margin-left:-12%}to{margin-left:74%}}' +
+      '@keyframes jdspin{to{transform:rotate(360deg)}}' +
+      '@keyframes jdlinepulse{0%,100%{opacity:1}50%{opacity:.45}}' +
+      '@media (prefers-reduced-motion: reduce){.jt-live .jd-tdot,.jt-live .jd-tdot .isvg,.jd-tstop.jt-live::before,.jd-tbar.ind b{animation:none}}' +
       '.jd-journey-note{margin:8px 0 0;font-size:12px;color:var(--text-muted);line-height:1.55;max-width:860px}' +
       '.jd-journey-note b{color:var(--text);font-weight:650}' +
       '.jd-journeywrap .jd-journey-note{margin:0;padding:10px 18px 11px;border-top:1px solid var(--border);background:color-mix(in srgb, var(--bg) 55%, var(--surface))}' +
@@ -10944,12 +10955,12 @@
           // Each stop: state class (jt-done / jt-live / jt-act / jt-wait), a dot
           // (check, pulsing loop, alert "!", or the grey step number), a bold label,
           // and its own one-line detail. linkId turns the stop into the open link.
-          var jIcons = {
-            check: '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>',
-            loop: '<svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>',
-            alert: '!'
-          };
-          function jStop(state, dot, label, sub, tip, linkId) {
+          // Every dot is an icon that says what the stop IS (magnifier, loop, people,
+          // chat bubble), not a step number; done swaps it for a check, trouble for
+          // the alert glyph, so state reads without any legend.
+          function jIco(id) { return '<svg class="isvg" aria-hidden="true"><use href="#i-' + id + '"/></svg>'; }
+          var jIcons = { check: jIco("check"), loop: jIco("loop"), alert: jIco("alert"), users: jIco("users"), msg: jIco("message") };
+          function jStop(state, dot, label, sub, tip, linkId, extra) {
             var reach = state !== "jt-wait" ? " jt-reach" : "";
             var open = linkId != null
               ? '<a class="jd-tstop ' + state + reach + '" href="#prospects" data-openlist="' + esc(linkId) + '"'
@@ -10957,7 +10968,7 @@
             return open + ' title="' + esc(tip || "") + '">' +
               '<span class="jd-tdot">' + dot + '</span>' +
               '<span class="jd-ttxt"><span class="jd-tlabel">' + label + '</span>' +
-              (sub ? '<span class="jd-tsub">' + sub + '</span>' : '') + '</span>' +
+              (sub ? '<span class="jd-tsub">' + sub + '</span>' : '') + (extra || "") + '</span>' +
               (linkId != null ? '</a>' : '</span>');
           }
           var sSearch = jStop("jt-done", jIcons.check, "Searched", n + " found",
@@ -10965,8 +10976,12 @@
             (outN ? (": " + (n - outN) + " in area and " + outN + " out of area") : "") + ".");
           var sEnrich, jNote = "";
           if (busyJobs) {
+            // Real progress under the live stop: the chunk ledger gives actual rows
+            // done, so the mini bar is honest; without a ledger yet it just glides.
+            var livePct = ep ? Math.max(4, Math.min(100, Math.round(epDone / (ep.total || n || 1) * 100))) : null;
+            var liveBar = '<span class="jd-tbar' + (livePct == null ? ' ind' : '') + '"><b' + (livePct != null ? ' style="width:' + livePct + '%"' : '') + '></b></span>';
             sEnrich = jStop("jt-live", jIcons.loop, "Enriching now", ep ? "~" + epDone + " of " + (ep.total || n) + " rows" : "working…",
-              "Contact info (emails and phones) is being filled in right now, cheapest source first. This runs by itself; nothing to press.");
+              "Contact info (emails and phones) is being filled in right now, cheapest source first. This runs by itself; nothing to press.", null, liveBar);
             jNote = "<b>Working now:</b> contact info is being filled in. When it finishes, everyone lands in Candidates and a text campaign is built by itself. Nothing to press.";
           } else if (ep && ep.nextStart == null && lxSkipN) {
             sEnrich = jStop("jt-act", jIcons.alert, "Enriched", lxSkipN + " batch" + (lxSkipN === 1 ? "" : "es") + " to redo",
@@ -10987,7 +11002,7 @@
           var sCand = r.promotedCount
             ? jStop("jt-done", jIcons.check, "In Candidates", r.promotedCount + " delivered · open",
               "Everyone on this list is in the Candidates tab under this list name. Click to open them.", r.promotedListId || "")
-            : jStop("jt-wait", "3", "Candidates", "arrives automatically",
+            : jStop("jt-wait", jIcons.users, "Candidates", "arrives automatically",
               "Everyone lands in the Candidates tab automatically once enrichment settles; no button to press.");
           var sText;
           if (afNotConn) sText = jStop("jt-act", jIcons.alert, "OS Text", "not connected · see Setup",
@@ -10996,9 +11011,9 @@
             "The automatic send of this list hit a problem. It keeps retrying on its own; if this stays up for more than an hour, ask your admin to check the send logs.");
           else if (sentOk && phs > 0) sText = jStop("jt-done", jIcons.check, "In OS Text", "campaign ready to launch",
             "A text campaign was built from everyone with a phone number and is ready to review and launch in OS Text. Phones found later are topped up automatically.");
-          else if (sentOk) sText = jStop("jt-wait", "4", "OS Text", "waiting on phones",
+          else if (sentOk) sText = jStop("jt-wait", jIcons.msg, "OS Text", "waiting on phones",
             "The list was sent, but no one has a phone number yet. As enrichment or Boost phones finds numbers, they are pushed to OS Text automatically.");
-          else sText = jStop("jt-wait", "4", "OS Text", "builds automatically",
+          else sText = jStop("jt-wait", jIcons.msg, "OS Text", "builds automatically",
             "A text campaign is built automatically from everyone with a phone number once the list is sent.");
           if (!jNote) {
             if (afNotConn) jNote = "<b>One step left:</b> everyone is in Candidates, but no OS Text engine is connected, so the text campaign is waiting. Connect OS Text under Setup and the phones push over by themselves.";
