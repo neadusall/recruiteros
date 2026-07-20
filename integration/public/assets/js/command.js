@@ -11526,6 +11526,64 @@
       }
     });
 
+    /* ---- Boost phones live ticker: the same prominent progress card the searches
+       use, but driven by REAL counts (rows actually bought) instead of a guessed
+       curve. It sits directly above the saved lists so the recruiter can watch the
+       run happen: filling bar, "N of M" counter, phones found so far, and a
+       time-left estimate measured from how fast this run's own batches complete. */
+    var boostProg = { timer: null, total: 0, done: 0, found: 0, perMs: 1800, runStart: 0, batchStart: 0, batchSize: 20 };
+    function boostBarEls() {
+      return { fill: $("#jdBoostFill"), pct: $("#jdBoostPct"), phase: $("#jdBoostPhase"), eta: $("#jdBoostEta") };
+    }
+    function boostBarTick() {
+      var e = boostBarEls(); if (!e.fill) return;
+      // Between batch results, creep forward at the measured per-lookup pace so the
+      // bar visibly moves instead of jumping once per 20-row batch.
+      var inBatch = Math.min(boostProg.batchSize, (Date.now() - boostProg.batchStart) / boostProg.perMs);
+      var est = Math.min(boostProg.total, boostProg.done + inBatch);
+      var p = boostProg.total ? Math.min(99, Math.round((est / boostProg.total) * 100)) : 0;
+      e.fill.style.width = p + "%"; if (e.pct) e.pct.textContent = p + "%";
+      if (e.phase) e.phase.textContent = "Looking up phone numbers: about " + Math.min(boostProg.total, Math.floor(est)) + " of " + boostProg.total + " done · " + boostProg.found + " phone" + (boostProg.found === 1 ? "" : "s") + " found so far";
+      if (e.eta) e.eta.textContent = "~" + fmtSecs(Math.max(0, (boostProg.total - est) * boostProg.perMs)) + " left · " + fmtSecs(Date.now() - boostProg.runStart) + " elapsed";
+    }
+    function boostBarShow(listName, total) {
+      var runsHost = $("#jdRuns"); if (!runsHost || !runsHost.parentNode) return;
+      var el = $("#jdBoostProg");
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "card jd-prog"; el.id = "jdBoostProg";
+        runsHost.parentNode.insertBefore(el, runsHost);
+      }
+      el.classList.remove("done"); el.style.display = "";
+      el.innerHTML =
+        '<div class="jd-prog-head"><span class="jd-prog-dot"></span><b>' + esc('Boosting phones on "' + listName + '"') + '</b>' +
+          '<span class="jd-prog-pct" id="jdBoostPct">0%</span></div>' +
+        '<div class="jd-prog-track"><div class="jd-prog-fill" id="jdBoostFill" style="width:0%"></div></div>' +
+        '<div class="jd-prog-meta muted"><span id="jdBoostPhase">Starting the paid lookups…</span><span id="jdBoostEta"></span></div>';
+      boostProg.total = total; boostProg.done = 0; boostProg.found = 0;
+      boostProg.perMs = 1800; boostProg.runStart = Date.now(); boostProg.batchStart = Date.now();
+      boostProg.batchSize = Math.min(20, total);
+      if (boostProg.timer) clearInterval(boostProg.timer);
+      boostProg.timer = setInterval(boostBarTick, 250); boostBarTick();
+      try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (err) {}
+    }
+    /** Fold a finished batch's real server counts in and re-measure the pace. */
+    function boostBarBatch(done, found) {
+      boostProg.done = Math.min(boostProg.total, done); boostProg.found = found;
+      if (done > 0) boostProg.perMs = Math.max(250, (Date.now() - boostProg.runStart) / done);
+      boostProg.batchStart = Date.now();
+      boostProg.batchSize = Math.min(20, Math.max(1, boostProg.total - boostProg.done));
+      boostBarTick();
+    }
+    function boostBarEnd(label, ok) {
+      if (boostProg.timer) { clearInterval(boostProg.timer); boostProg.timer = null; }
+      var el = $("#jdBoostProg"); if (!el) return;
+      var e = boostBarEls();
+      if (ok) { el.classList.add("done"); if (e.fill) e.fill.style.width = "100%"; if (e.pct) e.pct.textContent = "100%"; }
+      if (e.phase) e.phase.textContent = label || "Done"; if (e.eta) e.eta.textContent = "";
+      setTimeout(function () { var h = $("#jdBoostProg"); if (h && !boostProg.timer) h.style.display = "none"; }, 6000);
+    }
+
     /* ---- Boost phones: the recruiter-triggered paid phone lookup ----
        Strictly manual and estimate-first: quote the rows still missing a phone at
        the configured per-lookup price (hit-rate from this workspace's own history),
@@ -11558,11 +11616,18 @@
         btn.disabled = true;
         var tot = { called: 0, found: 0, cache: 0, cost: 0 };
         var startMissing = quote.missing;
+        boostBarShow(rname, startMissing);
         function batch() {
+          // A background list refresh can re-render the row mid-run; re-find the
+          // live button so the small per-row ticker keeps updating too.
+          var liveBtn = $("#jdRuns") && $("#jdRuns").querySelector('[data-boost="' + rid2 + '"]');
+          if (liveBtn && liveBtn !== btn) { btn = liveBtn; }
+          btn.disabled = true;
           btn.textContent = "Boosting " + Math.min(startMissing, tot.called + tot.cache) + "/" + startMissing + "…";
           sendPatient("/sourcing", "POST", { action: "premiumPhoneRun", id: rid2, max: 20 }).then(function (r) {
             if (!r.ok) {
               btn.disabled = false; btn.textContent = orig;
+              boostBarEnd("Boost stopped: everything found so far is saved", false);
               alert("Boost stopped: " + ((r.data && r.data.error) || gatewayMsg(r.status)) +
                 ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "") +
                 (tot.called ? ("\n\nSpent so far: $" + tot.cost.toFixed(2) + " for " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + ". Everything found is saved; press Boost again to continue.") : ""));
@@ -11571,13 +11636,16 @@
             var d = r.data || {};
             tot.called += d.called || 0; tot.found += d.found || 0;
             tot.cache += d.cacheHits || 0; tot.cost += d.costUsd || 0;
+            boostBarBatch(Math.min(startMissing, tot.called + tot.cache), tot.found);
             if (d.stoppedEarly) {
               btn.disabled = false; btn.textContent = orig;
+              boostBarEnd("Boost stopped early: what it found is saved", false);
               alert("Boost stopped early: " + d.stoppedEarly + "\n\nActual spend so far: $" + tot.cost.toFixed(2) + " · " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added (all saved). Fix the listing settings, then press Boost again to continue; rows already bought are never re-billed.");
               loadRuns(); return;
             }
             if (d.remaining > 0 && (d.called > 0 || d.cacheHits > 0)) { batch(); return; }
             btn.disabled = false; btn.textContent = orig;
+            boostBarEnd("Done: " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added · actual cost $" + tot.cost.toFixed(2), true);
             var read = "Boost finished on \"" + rname + "\".\n\n" +
               "Phones added: " + tot.found + (tot.cache ? (" (" + tot.cache + " came free from your contact cache)") : "") + "\n" +
               "Paid lookups: " + tot.called + "\n" +
