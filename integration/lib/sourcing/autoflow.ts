@@ -342,7 +342,12 @@ async function parityPass(runs: SourcingRun[], now: number): Promise<number> {
   let sent = 0;
   const due = runs.filter((r) => parityDue(r, now))
     .sort((a, b) => Date.parse(a.updatedAt) - Date.parse(b.updatedAt));
-  if (!due.length) return 0;
+  // Heartbeat even when clean: "parity ran and found nothing" must be
+  // distinguishable from "parity never ran" in the ops log.
+  if (!due.length) {
+    console.log(`[sourcing-autoflow] parity: all ${runs.length} saved run(s) in parity`);
+    return 0;
+  }
   console.log(`[sourcing-autoflow] parity: ${due.length} run(s) out of parity, sending up to ${PARITY_SENDS_PER_PASS}`);
   for (const run of due) {
     if (sent >= PARITY_SENDS_PER_PASS) break;
