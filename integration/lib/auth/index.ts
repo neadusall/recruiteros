@@ -362,8 +362,9 @@ export async function requestMagicLink(email: string): Promise<{ sent: true }> {
   const key = normEmail(email);
   const token: EmailToken = { token: randomToken(), email: key, purpose: "magic_link", expiresAt: isoPlusHours(1) };
   store.emailTokens.set(token.token, token);
-  await sendEmail(key, "Your RecruitersOS sign-in link",
-    `Sign in: ${appUrl()}/login?token=${token.token}`);
+  const brand = await mailBrandForRecipient(key);
+  await sendWorkspaceEmail(key, `Your ${brand.name} sign-in link`,
+    `Sign in: ${brand.base}/login?token=${token.token}`, brand.workspaceId);
   return { sent: true };
 }
 
@@ -378,8 +379,9 @@ export async function requestPasswordReset(email: string): Promise<{ sent: true 
   if (user) {
     const token: EmailToken = { token: randomToken(), email: key, purpose: "reset_password", expiresAt: isoPlusHours(1) };
     store.emailTokens.set(token.token, token);
-    await sendEmail(key, "Reset your RecruitersOS password",
-      `Reset your password: ${appUrl()}/reset-password.html?token=${token.token}`);
+    const brand = await mailBrandForRecipient(key);
+    await sendWorkspaceEmail(key, `Reset your ${brand.name} password`,
+      `Reset your password: ${brand.base}/reset-password.html?token=${token.token}`, brand.workspaceId);
   }
   return { sent: true };
 }
@@ -628,8 +630,9 @@ function issueSession(userId: string, workspaceId: string): Session {
 async function sendVerificationEmail(user: User): Promise<void> {
   const t: EmailToken = { token: randomToken(), email: user.email, purpose: "verify", expiresAt: isoPlusHours(24) };
   store.emailTokens.set(t.token, t);
-  await sendEmail(user.email, "Verify your RecruitersOS email",
-    `Confirm your email: ${appUrl()}/verify?token=${t.token}`);
+  const brand = await mailBrandForRecipient(user.email);
+  await sendWorkspaceEmail(user.email, `Verify your ${brand.name} email`,
+    `Confirm your email: ${brand.base}/verify?token=${t.token}`, brand.workspaceId);
 }
 
 /** Email seam. Wire SMTP / Resend / SES here; logs in the reference build. */
@@ -750,11 +753,14 @@ export function issueSessionForUser(userId: string, workspaceId: string): AuthRe
 }
 
 /**
- * Public email seam reused by team invites. When a workspaceId is given and that
- * workspace is white-labeled with a verified custom domain, the email is sent
- * FROM that workspace's own domain under its brand name — so a customer's
- * correspondence carries NO reference to the house (recruitersos.co). Falls back
- * to the house sender for the operator's own workspace / unbranded workspaces.
+ * Public email seam reused by team invites and candidate-facing mail. When a
+ * workspaceId is given and that workspace speaks as a white-label brand (its
+ * branding record OR a flagship host preset, e.g. Lume), the email is sent
+ * through the WORKSPACE'S OWN MAILBOX over SMTP, from its own domain under its
+ * brand name, so a customer's correspondence carries NO reference to the house
+ * (recruitersos.co). A white-label workspace with no mailbox creds gets the
+ * send BLOCKED (logged loudly); it NEVER falls back to the house sender.
+ * Unbranded workspaces use the house Resend sender as before.
  */
 export async function sendWorkspaceEmail(
   to: string,
@@ -762,25 +768,106 @@ export async function sendWorkspaceEmail(
   body: string,
   workspaceId?: string,
 ): Promise<void> {
-  let from: string | undefined;
   if (workspaceId) {
     try {
-      const { getBranding } = await import("../branding");
-      const b = await getBranding(workspaceId);
-      if (b.customDomain && (b.domainStatus === "verified" || b.domainStatus === "live")) {
-        const apex = registrableDomain(b.customDomain);
-        const name = b.brandName || store.workspaces.get(workspaceId)?.name || apex;
-        from = `${name} <no-reply@${apex}>`;
+      const { notifyBrand } = await import("../outbound/brand");
+      const brand = await notifyBrand(workspaceId);
+      if (brand.whiteLabel) {
+        await sendBrandedEmail(workspaceId, brand.name, to, subject, body);
+        return;
       }
-    } catch {}
+    } catch (e) {
+      console.error("[email] brand resolve failed, using house sender:", (e as Error).message);
+    }
   }
-  await sendEmail(to, subject, body, from);
+  await sendEmail(to, subject, body);
 }
 
-/** Reduce a host to its registrable domain (app.lumesp.com -> lumesp.com). */
-function registrableDomain(host: string): string {
-  const parts = (host || "").trim().toLowerCase().replace(/\.$/, "").split(".");
-  return parts.length <= 2 ? parts.join(".") : parts.slice(-2).join(".");
+/** Map an IMAP host / mailbox address to its SMTP submission host. */
+function smtpHostFor(imapHost: string, user: string): string {
+  const h = (imapHost || "").toLowerCase();
+  if (h === "imap.gmail.com") return "smtp.gmail.com";
+  if (h === "outlook.office365.com" || h === "imap-mail.outlook.com") return "smtp.office365.com";
+  if (h.startsWith("imap.")) return "smtp." + h.slice(5);
+  const domain = (user.split("@")[1] || "").toLowerCase();
+  if (domain === "gmail.com" || domain === "googlemail.com") return "smtp.gmail.com";
+  if (["outlook.com", "hotmail.com", "live.com", "office365.com"].includes(domain)) return "smtp.office365.com";
+  if (domain === "yahoo.com") return "smtp.mail.yahoo.com";
+  // Google Workspace / custom domains most often sit on Gmail's SMTP; an
+  // explicit BRAND_SMTP_HOST always wins over this guess.
+  return domain ? "smtp.gmail.com" : "";
+}
+
+/**
+ * White-label transport: the workspace's own mailbox over SMTP. Creds come from
+ * the workspace credential store (Setup): BRAND_SMTP_USER/PASS/HOST/PORT plus
+ * BRAND_MAIL_FROM, falling back to the RESUME_INBOX_* mailbox (the same app
+ * password works for SMTP on Gmail/Outlook). Failures are logged and the mail
+ * is dropped; a white-label send is never downgraded to the house sender.
+ */
+async function sendBrandedEmail(
+  workspaceId: string,
+  brandName: string,
+  to: string,
+  subject: string,
+  body: string,
+): Promise<void> {
+  const { withWorkspaceCreds } = await import("../connected");
+  const { cred } = await import("../providers/http");
+  const c = await withWorkspaceCreds(workspaceId, () => ({
+    user: (cred("BRAND_SMTP_USER") || cred("RESUME_INBOX_USER")).trim(),
+    pass: (cred("BRAND_SMTP_PASS") || cred("RESUME_INBOX_PASS")).trim(),
+    host: cred("BRAND_SMTP_HOST").trim(),
+    port: Number(cred("BRAND_SMTP_PORT")) || 0,
+    from: cred("BRAND_MAIL_FROM").trim(),
+    imapHost: cred("RESUME_INBOX_HOST").trim(),
+  }));
+  if (!c.user || !c.pass) {
+    console.error(
+      `[email] BLOCKED off-brand send -> ${to} :: "${subject}": white-label workspace ${workspaceId} has no mailbox creds (set BRAND_SMTP_USER/PASS or RESUME_INBOX_USER/PASS in Setup). The house sender is never used for white-label mail.`,
+    );
+    return;
+  }
+  const host = c.host || smtpHostFor(c.imapHost, c.user);
+  const port = c.port || 587;
+  try {
+    const nodemailer = (await import("nodemailer")).default;
+    const transport = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user: c.user, pass: c.pass },
+    });
+    await transport.sendMail({
+      from: c.from || `${brandName} <${c.user}>`,
+      to,
+      subject,
+      text: body,
+      html: body
+        .split("\n")
+        .map((line) => line.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>'))
+        .join("<br>"),
+    });
+    console.info(`[email] white-label send via ${host} as ${c.user} -> ${to} :: ${subject}`);
+  } catch (e) {
+    console.error(`[email] white-label SMTP send failed (${host}, ${c.user} -> ${to}):`, (e as Error).message);
+  }
+}
+
+/** The brand a recipient's auth mail should speak as (their primary workspace's). */
+async function mailBrandForRecipient(
+  email: string,
+): Promise<{ workspaceId?: string; name: string; base: string }> {
+  try {
+    const u = userByEmail(email);
+    const m = u ? store.memberships.find((x) => x.userId === u.id) : undefined;
+    if (m) {
+      const { notifyBrand } = await import("../outbound/brand");
+      const b = await notifyBrand(m.workspaceId);
+      return { workspaceId: m.workspaceId, name: b.name, base: b.appUrl };
+    }
+  } catch {}
+  return { name: "RecruitersOS", base: appUrl() };
 }
 function normEmail(e: string): string {
   return e.trim().toLowerCase();

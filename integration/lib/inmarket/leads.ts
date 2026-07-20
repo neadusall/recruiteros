@@ -110,22 +110,17 @@ export async function listLeads(workspaceId: string, limit = 200): Promise<Lead[
   return st.leads.filter((l) => l.workspaceId === workspaceId).slice(0, Math.max(1, Math.min(LEADS_CAP, limit)));
 }
 
-/** Lightweight Resend send (self-contained so we don't reach into the auth module). No-op w/o key. */
+/** Owner alert through the brand-true workspace sender (auth email seam), so a
+ *  white-label recruiter's reply alert never carries the house sender/brand. */
 async function notifyOwner(to: string, lead: Lead): Promise<void> {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM || "RecruitersOS <onboarding@resend.dev>";
   const who = lead.name || lead.email || "Someone";
   const subject = `${who} replied to your video${lead.company ? ` · ${lead.company}` : ""}`;
   const lines = [
     `${who}${lead.email ? ` (${lead.email})` : ""} responded to your personalized video.`,
-    lead.company ? `Company: ${lead.company}${lead.roleTitle ? ` — ${lead.roleTitle}` : ""}` : "",
+    lead.company ? `Company: ${lead.company}${lead.roleTitle ? ` · ${lead.roleTitle}` : ""}` : "",
     lead.message ? `\n"${lead.message}"` : "",
     `\nSee all replies in PiP Studio → Performance → Replies.`,
   ].filter(Boolean);
-  if (!apiKey) { console.info(`[leads] reply for ${to} :: ${subject}\n${lines.join("\n")}`); return; }
-  await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to: [to], subject, text: lines.join("\n") }),
-  }).catch(() => {});
+  const { sendWorkspaceEmail } = await import("../auth");
+  await sendWorkspaceEmail(to, subject, lines.join("\n"), lead.workspaceId).catch(() => {});
 }
