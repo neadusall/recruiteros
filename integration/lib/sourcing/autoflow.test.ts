@@ -45,17 +45,36 @@ const enriched = () => cand({ email: "p@x.com", phone: "+15551230000" });
 
 /* --- fresh-window lane: chain state without a ledger ----------------------- */
 
-// Never-started chain with unenriched rows: one server-side resume comes before
-// the old "force-send as-is" (gap 3: ledger-less runs force-sent unenriched).
-check("unsent ledger-less run with enrichable rows, idle 46min -> resume",
-  due(run({ candidates: [cand()], updatedAt: new Date(NOW - 46 * MIN).toISOString() }), NOW), "resume");
+// Never-started chain with unenriched rows: PARITY FIRST — deliver what it has
+// now AND queue the chain-finishing resume in the same tick (top-up sends the
+// rest later). Previously such runs force-sent unenriched with no resume at all.
+check("unsent ledger-less run with enrichable rows, idle 46min -> resume-send",
+  due(run({ candidates: [cand()], updatedAt: new Date(NOW - 46 * MIN).toISOString() }), NOW), "resume-send");
 
-// Once the resume was queued and the grace window passed, it still flows on.
-check("...same run, resume queued 3h ago -> send",
+// With the resume already queued (send leg must have failed), keep sending.
+check("...same run, resume already queued -> send",
   due(run({
     candidates: [cand()], updatedAt: new Date(NOW - 46 * MIN).toISOString(),
-    autoflow: { phonesAtSend: 0, attempts: 0, resumedAt: new Date(NOW - 3 * HOUR).toISOString() },
+    autoflow: { phonesAtSend: 0, attempts: 0, resumedAt: new Date(NOW - 5 * MIN).toISOString() },
   }), NOW), "send");
+
+// Orphaned in-flight chain (job refs untouched past STUCK_MS) on a NEVER-SENT
+// list: parity first — resume the chain AND send now, not after a grace window.
+const stuckJobs = { laxisJob: { jobId: "j1", submittedAt: new Date(NOW - 2 * HOUR).toISOString(), count: 10 } as never };
+check("unsent list with jobs stuck 61min -> resume-send",
+  due(run({ ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 61 * MIN).toISOString() }), NOW), "resume-send");
+check("...same but resume already queued -> send (no 2h grace)",
+  due(run({
+    ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 61 * MIN).toISOString(),
+    autoflow: { phonesAtSend: 0, attempts: 0, resumedAt: new Date(NOW - 10 * MIN).toISOString() },
+  }), NOW), "send");
+check("...same but already SENT -> no action (top-up handles the rest)",
+  due(run({
+    ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 61 * MIN).toISOString(),
+    autoflow: { sentAt: new Date(NOW - HOUR).toISOString(), phonesAtSend: 1, attempts: 1 },
+  }), NOW), null);
+check("...same but jobs only 30min stale -> no action (live chain owns it)",
+  due(run({ ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 30 * MIN).toISOString() }), NOW), null);
 
 // Fully-enriched ledger-less run (e.g. born of a merge of enriched lists):
 // nothing left to enrich, so it settles and sends without a resume detour.

@@ -41,7 +41,6 @@ import {
 const SETTLE_MS = 5 * 60_000;      // chain-finished lists rest this long first (live tab pushes within seconds)
 const IDLE_MS = 45 * 60_000;       // a stalled / never-started chain still flows on after this
 const STUCK_MS = 60 * 60_000;      // a job ref idle this long = orphaned chain (tab died mid-job) -> resume it
-const RESUME_GRACE_MS = 2 * 3600_000; // a resumed chain gets this long to land before we force-send as-is
 const FRESH_MS = 7 * 24 * 3600_000; // only lists touched in the last 7 days are eligible
 const MAX_ATTEMPTS = 20;           // ~1 hour of retries on a hard failure, then park with the error
 const MAX_SENDS_PER_TICK = 3;      // bound one tick's work; the rest go next tick
@@ -73,7 +72,7 @@ function chainUnfinished(run: SourcingRun): boolean {
 }
 
 /** Should the sweeper act on this run right now? (exported for the regression suite) */
-export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | "ostext-retry" | null {
+export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | "resume-send" | "ostext-retry" | null {
   if (!run.candidates.length) return null;
   if (run.motion === "bd") return null; // undefined motion (pre-field runs) counts as recruiting
   const touched = Date.parse(run.updatedAt);
@@ -83,13 +82,15 @@ export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" 
     // A LIVE chain updates the run on every submit/merge; a job ref that has sat
     // untouched for STUCK_MS is an orphan (the driving tab died mid-job). Hand it
     // to the overnight queue's resume machinery once — it polls, merges, clears
-    // the refs and finishes the chain server-side. If even that hasn't landed the
-    // chain after RESUME_GRACE_MS, the list flows on with what it already has.
+    // the refs and finishes the chain server-side. PARITY FIRST: a never-sent
+    // list also sends RIGHT NOW with what it already has (the resumed chain's
+    // finds flow on later via the top-up rule) — its people must not stay out of
+    // Candidates/OS Text for however long the queue takes to finish the chain.
     if (now - touched < STUCK_MS) return null;
     if (run.autoflow?.sentAt) return null; // already sent; a landed resume re-triggers via top-up
+    if ((run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS) return null;
     const resumedAt = run.autoflow?.resumedAt ? Date.parse(run.autoflow.resumedAt) : NaN;
-    if (!Number.isFinite(resumedAt)) return "resume";
-    return now - resumedAt >= RESUME_GRACE_MS ? "send" : null;
+    return Number.isFinite(resumedAt) ? "send" : "resume-send";
   }
 
   if (run.autoflow?.sentAt) {
@@ -126,13 +127,12 @@ export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" 
   // chunks, or the driving tab died between submit cycles) used to force-send and
   // leave the list "enrichment unfinished" forever. Same for a chain that never
   // STARTED but has rows to fill (tab died after save, or a merge wiped the
-  // ledger). Give it ONE server-side resume first; if that hasn't landed the
-  // chain within the grace window, send as-is.
+  // ledger). PARITY FIRST: send what it has NOW and queue ONE server-side resume
+  // to finish the chain — whose finds then flow on via the top-up rule.
   const chainPartial = chainUnfinished(run);
   if (chainPartial && now - touched >= IDLE_MS) {
     const resumedAt = run.autoflow?.resumedAt ? Date.parse(run.autoflow.resumedAt) : NaN;
-    if (!Number.isFinite(resumedAt)) return "resume";
-    return now - resumedAt >= RESUME_GRACE_MS ? "send" : null;
+    return Number.isFinite(resumedAt) ? "send" : "resume-send";
   }
   if (now - touched >= IDLE_MS) return "send"; // stalled or never-started: flow on with what it has
   return null;
@@ -389,6 +389,9 @@ export async function tickSourcingAutoflow(): Promise<{ sent: number }> {
       const what = due(run, now);
       if (!what) continue;
       if (what === "resume") { await resumeRun(run); continue; }
+      // Parity first: queue the chain-finishing resume AND deliver what the
+      // list already holds in the same tick (top-up re-sends the rest later).
+      if (what === "resume-send") await resumeRun(run);
       if (what === "ostext-retry" && !(await ostextConfiguredFor(run.workspaceId))) continue;
       await sendRun(run);
       sent++;

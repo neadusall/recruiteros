@@ -195,7 +195,7 @@ export async function tickNightQueue(): Promise<{ active: number }> {
   const active = store.filter((i) => i.stage !== "done" && i.stage !== "error");
   if (ticking || !active.length) return { active: active.length };
   ticking = true;
-  const item = active[0];
+  const item = await pickNext(active);
   try {
     await step(item);
   } catch (e) {
@@ -206,6 +206,30 @@ export async function tickNightQueue(): Promise<{ active: number }> {
   await save();
   ticking = false;
   return { active: store.filter((i) => i.stage !== "done" && i.stage !== "error").length };
+}
+
+/**
+ * Which active item gets this tick? An item that already STARTED (stage past
+ * "queued") keeps its claim until it finishes: the queue's one-item-at-a-time
+ * invariant is what keeps the browser worker to a single job stream. Among the
+ * still-queued, PARITY FIRST (user mandate 2026-07-20): work whose people are
+ * not in OS Text yet (new searches, and resumes of never-sent lists) jumps
+ * ahead of re-enrich top-ups for lists already delivered. Without this, a
+ * stranded never-sent list can sit for hours behind bulk re-enriches of lists
+ * that are already fully in the recruiters' hands.
+ */
+async function pickNext(active: NightItem[]): Promise<NightItem> {
+  const started = active.find((i) => i.stage !== "queued");
+  if (started) return started;
+  for (const i of active) {
+    if (i.kind === "search") return i; // unsaved list: certainly not delivered yet
+    if (!i.runId) continue;
+    try {
+      const run = await getSourcingRun(i.workspaceId, i.runId);
+      if (run && !run.autoflow?.sentAt) return i;
+    } catch { /* fall through to FIFO */ }
+  }
+  return active[0];
 }
 
 async function step(item: NightItem): Promise<void> {
