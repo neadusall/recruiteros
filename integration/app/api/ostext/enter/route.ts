@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "../../../../lib/api";
+import { resolveOstextTarget } from "../../../../lib/ostextImport";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -32,7 +33,11 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response; // not signed into the portal
 
   const url = new URL(req.url);
-  const token = process.env.RECRUITEROS_OSTEXT_TOKEN || "";
+  // Sign into THIS workspace's OS Text engine: its own token when it runs its
+  // own instance, else the shared house token when it rides the house engine.
+  // No token (a customer that has not connected its own OS Text) simply lands on
+  // the engine's own login rather than auto-SSO into shared data.
+  const token = (await resolveOstextTarget(g.ctx.workspace.id).catch(() => null))?.token || "";
 
   // Same-origin path into the engine, ALWAYS, in production. The old
   // RECRUITEROS_OSTEXT_URL (which pointed at the legacy taltxt subdomain) is

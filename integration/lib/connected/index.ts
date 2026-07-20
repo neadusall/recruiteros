@@ -214,16 +214,16 @@ const CATALOG: IntegrationMeta[] = [
   {
     id: "taltxt", // legacy wire id (DB rows + webhook source); the product name is OS Text
     label: "OS Text (SMS)",
-    blurb: "Post-engagement SMS + opt-out mirror for the recruiting motion.",
+    blurb: "Post-engagement SMS + opt-out mirror for the recruiting motion. Set your own API URL + key to run this workspace on its OWN OS Text engine, with its data and Telnyx account fully separate from every other client.",
     requiredFor: ["recruiting"],
     fields: [
-      { key: "TALTXT_API_KEY", label: "API key", required: true, secret: true, placeholder: "paste your OS Text API key" },
-      { key: "TALTXT_API_URL", label: "API URL", required: false, placeholder: "https://your-sms-endpoint", hint: "Optional: leave blank for the default endpoint." },
+      { key: "TALTXT_API_KEY", label: "API key", required: true, secret: true, placeholder: "paste your OS Text API key", hint: "The access token of your own OS Text engine. Sends and sign-in use it, so your SMS never rides another client's account." },
+      { key: "TALTXT_API_URL", label: "API URL", required: false, placeholder: "https://your-app-domain/ostext-app", hint: "Your own OS Text engine base URL. Set this to route this workspace to its own instance (separate data + Telnyx). Leave blank only if you intend to share the house engine." },
     ],
     steps: [
-      "Turn on OS Text and provision a 10DLC number.",
-      "Copy the API key from OS Text settings (and the API URL if self-hosted).",
-      "Paste below, Save, then Test.",
+      "Stand up your own OS Text engine (its own database + its own Telnyx 10DLC number).",
+      "Copy that engine's API key and its base URL (the /ostext-app address).",
+      "Paste both below, Save, then Test. From then on this workspace texts and signs in on its own separate engine.",
     ],
   },
   {

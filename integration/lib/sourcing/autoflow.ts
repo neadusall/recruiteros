@@ -35,7 +35,7 @@ import { promoteSourcingRun } from "./promote";
 import { listNightItems, addNightItem } from "./nightQueue";
 import { workspaceOwner } from "../auth";
 import {
-  ostextImport, ostextStarterTemplate, ostextPushConfigured, type OsTextContact,
+  ostextImport, ostextStarterTemplate, ostextConfiguredFor, type OsTextContact,
 } from "../ostextImport";
 
 const SETTLE_MS = 5 * 60_000;      // chain-finished lists rest this long first (live tab pushes within seconds)
@@ -159,7 +159,10 @@ async function sendRun(run: SourcingRun): Promise<void> {
     //    phonesAtSend 0, so the moment a later enrichment finds phones the top-up
     //    rule fires and the campaign gets built then.
     const contacts = toOsTextContacts(run);
-    if (contacts.length && ostextPushConfigured()) {
+    // Per-workspace: only push if THIS workspace has an OS Text engine (its own
+    // or, for house/granted, the shared one).
+    const ostextReady = contacts.length ? await ostextConfiguredFor(ws) : false;
+    if (contacts.length && ostextReady) {
       const owner = await workspaceOwner(ws);
       try {
         await ostextImport({
@@ -181,7 +184,7 @@ async function sendRun(run: SourcingRun): Promise<void> {
         // Everyone on the list being protected is the guard WORKING, not a failure.
         if ((e as Error & { code?: string }).code !== "all_contacts_protected") throw e;
       }
-    } else if (contacts.length && !ostextPushConfigured()) {
+    } else if (contacts.length && !ostextReady) {
       stamp.error = "ostext_not_connected: sent to Candidates only";
     }
 

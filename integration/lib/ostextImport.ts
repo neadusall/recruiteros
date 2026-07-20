@@ -38,6 +38,62 @@ export function ostextPushConfigured(): boolean {
   return Boolean(process.env.RECRUITEROS_OSTEXT_TOKEN);
 }
 
+/** The OS Text engine + token a workspace should use, isolation-correct. */
+export interface OstextTarget {
+  base: string;
+  token: string;
+  /** true when this is the workspace's OWN engine (separate data + Telnyx). */
+  own: boolean;
+}
+
+/** Normalize a saved engine URL to a base that ends at the /ostext-app app root. */
+function normalizeEngineBase(url: string): string {
+  const b = url.replace(/\/+$/, "");
+  return b.includes("/ostext-app") ? b : b + "/ostext-app";
+}
+
+/**
+ * Resolve which OS Text engine a workspace pushes to. OWN-INSTANCE-PER-CLIENT:
+ * a workspace that has connected its own OS Text (saved TALTXT_API_URL +
+ * TALTXT_API_KEY under Setup) hits ITS OWN engine, with its own database and its
+ * own Telnyx, fully isolated. A workspace with no own endpoint may ride the
+ * shared house engine ONLY if it is the house workspace or has been granted OS
+ * Text (the operator lending its engine during onboarding); any other workspace
+ * must connect its own OS Text first (returns null -> "not connected").
+ *
+ * Passing no workspaceId (background/global callers) resolves the house engine.
+ */
+export async function resolveOstextTarget(workspaceId?: string): Promise<OstextTarget | null> {
+  if (workspaceId) {
+    try {
+      const { getKeys } = await import("./connected/credentials");
+      const keys = await getKeys(workspaceId, "taltxt");
+      const url = (keys.TALTXT_API_URL || "").trim();
+      const key = (keys.TALTXT_API_KEY || "").trim();
+      if (url && key) return { base: normalizeEngineBase(url), token: key, own: true };
+    } catch {
+      /* credential store unavailable -> fall through to the house engine */
+    }
+    // No own endpoint: only the house workspace or a granted customer may ride
+    // the shared engine. Everyone else must connect their own OS Text.
+    try {
+      const { isHouseWorkspace, isGranted } = await import("./connected/access");
+      const mayShare = isHouseWorkspace(workspaceId) || (await isGranted(workspaceId, "taltxt"));
+      if (!mayShare) return null;
+    } catch {
+      /* access checks unavailable -> preserve today's house behavior (no break) */
+    }
+  }
+  const token = process.env.RECRUITEROS_OSTEXT_TOKEN || "";
+  if (!token) return null;
+  return { base: ostextEngineBase(), token, own: false };
+}
+
+/** Whether a workspace has a usable OS Text engine (own or shared). */
+export async function ostextConfiguredFor(workspaceId?: string): Promise<boolean> {
+  return (await resolveOstextTarget(workspaceId)) !== null;
+}
+
 /** Starter SMS template: only {first_name}, which every pushed contact has, so
  *  no contact gets failed for a missing merge field before the recruiter edits.
  *  Campaign names arrive as saved-list names ("VP of Operations · Howell, New
@@ -77,9 +133,12 @@ export interface OsTextImportArgs {
 /** Call the engine's /api/import. Returns the engine's response body on success;
  *  throws an Error whose `code` is a stable id the routes can surface. */
 export async function ostextImport(args: OsTextImportArgs): Promise<Record<string, unknown>> {
-  const token = process.env.RECRUITEROS_OSTEXT_TOKEN || "";
-  if (!token) {
-    const e = new Error("RECRUITEROS_OSTEXT_TOKEN is not set on this server, run enable-ostext-sso.sh to wire OS Text first.");
+  // Route this push to the workspace's OWN OS Text engine when it has one
+  // connected (separate data + Telnyx); else the shared house engine, but only
+  // for the house workspace or a workspace granted OS Text.
+  const target = await resolveOstextTarget(args.workspaceId);
+  if (!target) {
+    const e = new Error("OS Text is not connected for this workspace. Open Setup, connect OS Text (add its API URL and key), then push again.");
     (e as Error & { code?: string }).code = "ostext_not_connected";
     throw e;
   }
@@ -126,9 +185,9 @@ export async function ostextImport(args: OsTextImportArgs): Promise<Record<strin
 
   let res: Response;
   try {
-    res = await fetch(ostextEngineBase() + "/api/import", {
+    res = await fetch(target.base + "/api/import", {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      headers: { "content-type": "application/json", authorization: `Bearer ${target.token}` },
       body: JSON.stringify({
         campaign: {
           name: args.name,
