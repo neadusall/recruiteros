@@ -87,6 +87,16 @@ function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | null 
 
   const chainDone = run.laxisProgress?.nextStart === null;
   if (chainDone && now - touched >= SETTLE_MS) return "send";
+  // A chain that stopped PARTWAY with no job ref parked (the worker failed between
+  // chunks, or the driving tab died between submit cycles) used to force-send and
+  // leave the list "enrichment unfinished" forever. Give it ONE server-side resume
+  // first; if that hasn't landed the chain within the grace window, send as-is.
+  const chainPartial = Boolean(run.laxisProgress && run.laxisProgress.nextStart !== null);
+  if (chainPartial && now - touched >= IDLE_MS) {
+    const resumedAt = run.autoflow?.resumedAt ? Date.parse(run.autoflow.resumedAt) : NaN;
+    if (!Number.isFinite(resumedAt)) return "resume";
+    return now - resumedAt >= RESUME_GRACE_MS ? "send" : null;
+  }
   if (now - touched >= IDLE_MS) return "send"; // stalled or never-started: flow on with what it has
   return null;
 }

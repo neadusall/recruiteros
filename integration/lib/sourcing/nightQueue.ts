@@ -156,6 +156,31 @@ function nextOffset(doneOffsets: number[], total: number, step: number): number 
   return null;
 }
 
+/** Remember that a chunk was completed WITHOUT its Laxis pass (worker down), so the
+ *  Enrich button can re-open exactly these offsets once Laxis is back. */
+function rememberLaxisSkip(run: SourcingRun, start: number, error: string): void {
+  const skipped = run.laxisSkipped ?? { offsets: [], error, at: nowIso() };
+  if (!skipped.offsets.includes(start)) skipped.offsets.push(start);
+  skipped.error = error;
+  skipped.at = nowIso();
+  run.laxisSkipped = skipped;
+}
+
+/** A worker failure that will hit every subsequent chunk too (login wall, missing
+ *  credentials, structural UI change), as opposed to a one-off job hiccup. */
+function laxisFatal(error: string): boolean {
+  return /login_failed|credentials_missing|login_form_not_found|step_unresolved/i.test(error);
+}
+
+/** Mirror of the route's one-time run note when no paid phone rung is configured. */
+function notePhoneFinderOff(run: SourcingRun, gapFill: { phoneFinderOn?: boolean }): void {
+  if (gapFill.phoneFinderOn !== false) return;
+  if (run.warnings.some((w) => w.startsWith("phone_finder_off"))) return;
+  run.warnings.push(
+    "phone_finder_off: phone numbers currently come only from the free sources (KoldInfo, Laxis, the in-house database). Add a phone-finder listing under Setup to top up the misses automatically.",
+  );
+}
+
 let ticking = false;
 
 /**
@@ -291,6 +316,7 @@ async function step(item: NightItem): Promise<void> {
       // No worker: the in-house waterfall is still worth a pass, then we're done.
       const gf = await gapFillContacts(ws, run.candidates);
       item.added.emails += gf.enriched; item.added.phones += gf.phones;
+      notePhoneFinderOff(run, gf);
       await saveSourcingRun(ws, { ...run });
       finish(item, "done");
       return;
@@ -300,11 +326,27 @@ async function step(item: NightItem): Promise<void> {
       const start = nextOffset(progress.doneOffsets, total, MAX_LAXIS_UPLOAD);
       if (start === null) { finish(item, "done"); return; }
       const targetRows = run.candidates.slice(start, start + MAX_LAXIS_UPLOAD);
+      // Laxis down-cooldown (a fatal worker failure was just seen): don't feed chunks
+      // to a dead login. The waterfall still runs, the chunk is marked done so the
+      // night finishes, and the skip is remembered for a later real Laxis pass.
+      const downUntil = run.laxisDownUntil ? Date.parse(run.laxisDownUntil) : NaN;
+      if (Number.isFinite(downUntil) && downUntil > Date.now()) {
+        const gf = await gapFillContacts(ws, targetRows);
+        item.added.emails += gf.enriched; item.added.phones += gf.phones;
+        notePhoneFinderOff(run, gf);
+        rememberLaxisSkip(run, start, "laxis_down_cooldown");
+        run.laxisProgress = markOffsetDone(progress, start, total);
+        await saveSourcingRun(ws, { ...run });
+        if (run.laxisProgress.nextStart === null) { finish(item, "done"); return; }
+        touch(item, laxisNote(run, total));
+        return;
+      }
       const { csv, sent } = serializeCandidatesCsv(targetRows);
       if (!sent) {
         // Nothing enrichable in this chunk: run the gap-fill over it and mark it done.
         const gf = await gapFillContacts(ws, targetRows);
         item.added.emails += gf.enriched; item.added.phones += gf.phones;
+        notePhoneFinderOff(run, gf);
         run.laxisProgress = markOffsetDone(progress, start, total);
         await saveSourcingRun(ws, { ...run });
         touch(item, laxisNote(run, total));
@@ -327,6 +369,7 @@ async function step(item: NightItem): Promise<void> {
     if (job.status === "done" && job.enrichedCsv) {
       const m = mergeEnrichedCsv(run.candidates, job.enrichedCsv);
       item.added.emails += m.emails; item.added.phones += m.phones;
+      delete run.laxisDownUntil; // a job came back: the worker is reachable again
     }
     if (job.status === "error" && /job_not_found/i.test(String(job.error || ""))) {
       // Lost job: clear the ref so the next tick resubmits this chunk (offsets not done).
@@ -335,10 +378,20 @@ async function step(item: NightItem): Promise<void> {
       touch(item);
       return;
     }
+    if (job.status === "error") {
+      // This chunk ran without its Laxis pass. Remember it so Enrich can re-run it,
+      // and on a failure class that will hit every chunk (login wall), pause Laxis
+      // submits briefly so the rest of the night moves fast on the waterfall alone.
+      rememberLaxisSkip(run, start, String(job.error || "unknown"));
+      if (laxisFatal(String(job.error || ""))) {
+        run.laxisDownUntil = new Date(Date.now() + 30 * 60_000).toISOString();
+      }
+    }
     // Merged (or the worker gave up after its own retries): gap-fill the chunk and mark
     // its offset done either way, so one bad chunk can't wedge the whole night.
     const gf = await gapFillContacts(ws, run.candidates.slice(start, start + count));
     item.added.emails += gf.enriched; item.added.phones += gf.phones;
+    notePhoneFinderOff(run, gf);
     delete run.laxisJob;
     run.laxisProgress = markOffsetDone(run.laxisProgress ?? progress, start, total);
     await saveSourcingRun(ws, { ...run });

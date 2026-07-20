@@ -78,6 +78,19 @@ function nextLaxisOffset(doneOffsets: number[], total: number, step: number): nu
   return null;
 }
 
+/**
+ * Persist a one-time, recruiter-readable note on the run when every paid phone-lookup
+ * rung is unconfigured, so a low phone count is explained in the list UI instead of
+ * silently reading as "the sources had nothing".
+ */
+function notePhoneFinderOff(run: { warnings: string[] }, gapFill: { phoneFinderOn?: boolean }): void {
+  if (gapFill.phoneFinderOn !== false) return;
+  if (run.warnings.some((w) => w.startsWith("phone_finder_off"))) return;
+  run.warnings.push(
+    "phone_finder_off: phone numbers currently come only from the free sources (KoldInfo, Laxis, the in-house database). Add a phone-finder listing under Setup to top up the misses automatically.",
+  );
+}
+
 /** Apply a parsed verdict onto a candidate row (shared by sync + batch ingest).
  *  profileFetched is stamped by the caller (it knows whether a real profile was read). */
 function applyVerdict(c: CandidateRow, v: {
@@ -257,6 +270,17 @@ export async function POST(req: Request) {
         const before = target.candidates.length;
         const { candidates, overlap } = mergeSourcingRuns([target, incoming]);
         target.candidates = candidates;
+        const added = candidates.length - before;
+        // New people joined a list whose chunk ledger may already read "fully
+        // enriched" — left alone, the Laxis + gap-fill rungs would skip every new
+        // row forever. Re-open the chain honestly: the KoldInfo rungs only ever
+        // target blank-email rows, and the Laxis serializer never re-buys a row
+        // holding both an email and a phone, so re-running the chain only spends
+        // on rows that genuinely still need data.
+        if (added > 0) {
+          delete target.laxisProgress;
+          delete target.laxisSkipped;
+        }
         // A list saved before its ICP could be built adopts the derived one, so
         // scoring/vetting on the merged list has a real profile to work from.
         if (!target.icp?.titles?.length && result.icp.titles.length) target.icp = result.icp;
@@ -627,8 +651,10 @@ export async function POST(req: Request) {
       // Enrich can re-run these batches through Laxis once it is back.
       if (laxisCooldownOn) {
         const rows = run.candidates.slice(start, start + limit);
-        let gapFill = { enriched: 0, phones: 0, cacheHits: 0 };
+        let gapFill: { enriched: number; phones: number; cacheHits: number; phoneFinderOn?: boolean } =
+          { enriched: 0, phones: 0, cacheHits: 0 };
         try { gapFill = await gapFillContacts(ws, rows); } catch { /* waterfall is best-effort here */ }
+        notePhoneFinderOff(run, gapFill);
         const doneOffsets = Array.from(new Set([...progress.doneOffsets, start])).sort((a, b2) => a - b2);
         const nextStart = nextLaxisOffset(doneOffsets, total, step);
         run.laxisProgress = { doneOffsets, total, nextStart, updatedAt: nowIso() };
@@ -689,9 +715,11 @@ export async function POST(req: Request) {
         // remember it ran without Laxis, and pause Laxis submits briefly so the rest of
         // the list finishes fast instead of re-hitting a dead login chunk after chunk.
         const warnings = [`laxis_job_error: ${errMsg}`];
-        let gapFill = { enriched: 0, phones: 0, cacheHits: 0 };
+        let gapFill: { enriched: number; phones: number; cacheHits: number; phoneFinderOn?: boolean } =
+          { enriched: 0, phones: 0, cacheHits: 0 };
         try { gapFill = await gapFillContacts(ws, run.candidates.slice(start, start + count)); }
         catch (err) { warnings.push(`gap_fill_failed: ${(err as Error).message}`); }
+        notePhoneFinderOff(run, gapFill);
         const total = run.candidates.length;
         const prog = run.laxisProgress ?? { doneOffsets: [], total, nextStart: 0, updatedAt: nowIso() };
         const doneOffsets = Array.from(new Set([...prog.doneOffsets, start])).sort((a, b2) => a - b2);
@@ -722,10 +750,12 @@ export async function POST(req: Request) {
 
       // Laxis was the first pass; the cheap in-house waterfall fills whatever it left blank
       // (unless the caller opts out). One seamless flow from the recruiter's side.
-      let gapFill = { enriched: 0, phones: 0, cacheHits: 0 };
+      let gapFill: { enriched: number; phones: number; cacheHits: number; phoneFinderOn?: boolean } =
+        { enriched: 0, phones: 0, cacheHits: 0 };
       if (b.gapFill !== false) {
         try { gapFill = await gapFillContacts(ws, run.candidates.slice(start, start + count)); }
         catch (err) { warnings.push(`gap_fill_failed: ${(err as Error).message}`); }
+        notePhoneFinderOff(run, gapFill);
       }
       // Mark this chunk done and advance the resume cursor to the next un-enriched grid
       // offset, so re-running (or auto-continue) never re-grabs a chunk already pulled.

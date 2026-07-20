@@ -10859,10 +10859,16 @@
             return !(c.phone || "").trim() && !c.premiumPhoneTriedAt &&
               ((c.fullName || "").trim().split(/\s+/).length >= 2);
           }).length : 0;
+          // Batches that finished WITHOUT their Laxis pass (the source was down when
+          // they ran): the chain kept moving on the other sources, and Enrich re-runs
+          // exactly these batches once Laxis is reachable again.
+          var lxSkipN = (r.laxisSkipped && r.laxisSkipped.offsets) ? r.laxisSkipped.offsets.length : 0;
           var enrichChip;
           if (!n) enrichChip = "";
           else if (r.koldJob || r.koldDbJob || r.laxisJob) enrichChip =
             '<span class="jr-part" title="An enrichment run is in progress, or was interrupted mid-batch. If no progress bar is moving, press Enrich to pick it back up; finished batches are never bought twice."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>enriching…</span>';
+          else if (ep && ep.nextStart == null && lxSkipN) enrichChip =
+            '<span class="jr-part" title="Every batch finished, but ' + lxSkipN + ' batch' + (lxSkipN === 1 ? '' : 'es') + ' ran while one enrichment source was unreachable, so they were filled by the other sources only. Press Enrich to give those batches their full pass; already-finished batches are never bought twice."><svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>enriched · ' + lxSkipN + ' batch' + (lxSkipN === 1 ? '' : 'es') + ' to redo</span>';
           else if (ep && ep.nextStart == null) enrichChip =
             '<span class="jr-done" title="Every batch of this list has been through the full enrichment chain. Anyone still missing an email or phone is someone the sources had no contact info for."><svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>fully enriched</span>';
           else if (ep) enrichChip =
@@ -10882,6 +10888,11 @@
                 ". The free engines did the rest, and enrichment is metered separately.";
               return '<span class="' + (cr ? "jr-api" : "jr-zero") + '" title="' + esc(t) + '"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>' + cr + ' credit' + (cr === 1 ? "" : "s") + '</span>';
             })(r.apiUsage) : '') +
+            // Explains a low phone count instead of leaving it silent: no paid
+            // phone-lookup rung is connected, so phones come from the free sources only.
+            ((r.warnings || []).some(function (w) { return String(w).indexOf("phone_finder_off") === 0; })
+              ? '<span class="jr-zero" title="Phone numbers on this list come only from the free sources right now (KoldInfo, Laxis, the in-house database). Add a phone-finder listing under Setup to top up the misses automatically, or use Boost phones on the row as the pay-per-lookup alternative.">phone finder off</span>'
+              : '') +
             '</span>';
           return '<div class="jd-run"><div class="jd-run-main">' +
             '<input type="checkbox" class="jd-pick" data-pick="' + esc(r.id) + '" title="Tick lists to combine them into one" />' +
@@ -11020,6 +11031,9 @@
           }
           // Chunk already enriched (resume landed on a done offset) → skip ahead or finish.
           if (r.data.alreadyDone) {
+            // A batch the server completed WITHOUT Laxis (down-cooldown) still reports
+            // its waterfall pickups, so the finish line stays truthful.
+            if (r.data.gapFill) { lxT.gap += r.data.gapFill.enriched || 0; lxT.phones += r.data.gapFill.phones || 0; }
             if (r.data.nextStart != null) { startChunk(r.data.nextStart); } else { finishLaxis(); }
             return;
           }

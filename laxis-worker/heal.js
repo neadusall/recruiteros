@@ -88,18 +88,28 @@ async function llmPickText(intent, elements) {
   } catch { return null; }
 }
 
-/** Try to click `text` by visible text, then by exact-name button role. Returns true on success. */
+/**
+ * Try to click `text` — REAL interactive elements first (button, link, menuitem), plain
+ * visible text only as the last resort. Order matters: a page can render a heading with
+ * the same words as the button (Laxis's login screen gained an <h1>Sign In</h1> above
+ * the Sign In button in July 2026), and clicking the heading is a silent no-op that
+ * reads as success, which also stops the self-heal path from ever firing. Returns true
+ * on success.
+ */
 async function tryClick(page, text, timeout = 5000) {
+  const esc = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rx = new RegExp(esc, "i");
+  for (const role of ["button", "link", "menuitem"]) {
+    try {
+      const loc = page.getByRole(role, { name: rx }).first();
+      await loc.waitFor({ state: "visible", timeout: 2500 });
+      await loc.click();
+      return true;
+    } catch { /* next role */ }
+  }
   try {
     const loc = page.getByText(text, { exact: false }).first();
     await loc.waitFor({ state: "visible", timeout });
-    await loc.click();
-    return true;
-  } catch { /* fall through */ }
-  try {
-    const esc = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const loc = page.getByRole("button", { name: new RegExp("^" + esc + "$", "i") }).first();
-    await loc.waitFor({ state: "visible", timeout: 2000 });
     await loc.click();
     return true;
   } catch { return false; }

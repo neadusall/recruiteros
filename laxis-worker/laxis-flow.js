@@ -129,7 +129,17 @@ async function logIn(page, log) {
   ]);
   await page.waitForTimeout(5000);
   if (await onLoginPage(page)) {
-    throw new Error("laxis_login_failed: still on the login screen after submit — check credentials, or a 2FA/captcha challenge");
+    // Defense in depth: if the submit didn't take (a same-labelled heading swallowed the
+    // click, say), press the actual Sign In BUTTON once before concluding failure.
+    log("login: still on the login screen, pressing the Sign In button directly");
+    const btn = page.getByRole("button", { name: /sign\s?in/i }).first();
+    const clicked = await btn.waitFor({ state: "visible", timeout: 3000 })
+      .then(() => btn.click().then(() => true))
+      .catch(() => false);
+    if (clicked) await page.waitForTimeout(5000);
+  }
+  if (await onLoginPage(page)) {
+    throw new Error("laxis_login_failed: still on the login screen after submit (check credentials, or a 2FA/captcha challenge)");
   }
   log("login: success");
 }

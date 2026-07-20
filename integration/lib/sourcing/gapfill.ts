@@ -16,6 +16,7 @@ import { getCachedContact, putCachedContact } from "./cache";
 import { enrich, cheapFirstContactWaterfall } from "../signals";
 import { fillPhonesFromLandlineDb } from "./landlinePhones";
 import { withWorkspaceCreds } from "../connected";
+import { cred } from "../providers/http";
 import { nowIso } from "../core/ids";
 
 export interface GapFillResult {
@@ -25,6 +26,13 @@ export interface GapFillResult {
   phones: number;
   /** Rows answered from the contact cache (no lookup spent). */
   cacheHits: number;
+  /**
+   * Whether ANY paid phone-lookup rung was configured for this pass (generic phone
+   * finder or the dedicated mobile listing). False = phones could only come from the
+   * free sources, which callers surface on the run instead of leaving low phone
+   * counts unexplained.
+   */
+  phoneFinderOn: boolean;
 }
 
 export async function gapFillContacts(ws: string, rows: CandidateRow[]): Promise<GapFillResult> {
@@ -35,8 +43,16 @@ export async function gapFillContacts(ws: string, rows: CandidateRow[]): Promise
 }
 
 async function gapFillInner(ws: string, rows: CandidateRow[]): Promise<GapFillResult> {
-  const plan = cheapFirstContactWaterfall({ includePhone: true });
+  // includeMobile too: the dedicated mobile listing (RAPIDAPI_MOBILE_HOST/PATH) joins
+  // the waterfall the moment it is configured in Setup; unconfigured rungs self-skip.
+  const plan = cheapFirstContactWaterfall({ includePhone: true, includeMobile: true });
   const phonePlan = { ...plan, steps: plan.steps.filter((s) => s.field !== "email") };
+  // Truthfully report whether any paid phone rung could even fire this pass.
+  const phoneFinderOn = Boolean(
+    cred("RAPIDAPI_KEY") &&
+    ((cred("RAPIDAPI_PHONE_HOST") && cred("RAPIDAPI_PHONE_PATH")) ||
+     (cred("RAPIDAPI_MOBILE_HOST") && cred("RAPIDAPI_MOBILE_PATH"))),
+  );
   let enrichedCount = 0;
   let phones = 0;
   let contactCacheHits = 0;
@@ -62,7 +78,11 @@ async function gapFillInner(ws: string, rows: CandidateRow[]): Promise<GapFillRe
         firstName: first, lastName: rest.join(" "), linkedinUrl: c.linkedinUrl, title: c.title,
         email: (c.email || "").trim() || undefined,
       }, { now: nowIso() });
-      const e = report.subject.email; const ph = report.subject.phone;
+      const e = report.subject.email;
+      // A mobile-rung hit lands on its own field; for the candidate row it is simply
+      // the best phone we have, so it backfills the generic phone slot.
+      const ph = report.subject.phone
+        ?? (report.resolved?.mobilePhone?.value as string | undefined);
       if (typeof e === "string" && !hasEmail) { c.email = e; enrichedCount++; }
       if (typeof ph === "string" && !hasPhone) { c.phone = ph; phones++; }
       // Cache the row's settled answer (email + phone together), not just this lookup's.
@@ -72,5 +92,5 @@ async function gapFillInner(ws: string, rows: CandidateRow[]): Promise<GapFillRe
       });
     } catch { /* leave unresolved */ }
   }
-  return { enriched: enrichedCount, phones, cacheHits: contactCacheHits };
+  return { enriched: enrichedCount, phones, cacheHits: contactCacheHits, phoneFinderOn };
 }
