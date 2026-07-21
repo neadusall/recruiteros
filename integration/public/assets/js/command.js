@@ -11195,27 +11195,38 @@
       '.jd-opt2-def{font-size:12px;color:var(--text-muted);line-height:1.5;margin-top:4px}' +
                         '</style>' +
       head("JD Sourcing", "Upload a job description → find & rank candidates by geography, role, and qualifications → the finished list enriches itself and lands in Candidates and OS Text automatically.") +
-      '<details class="jd-tipsd jd-help"><summary>How this works <span class="muted">what each step, setting, and button does</span></summary>' +
+      '<details class="jd-tipsd jd-help"><summary>How this works <span class="muted">what JD Sourcing is for, and what every step, setting, and button does</span></summary>' +
         '<div class="jd-helpbody">' +
-          '<div class="jd-helpsec"><h5>The flow: two clicks, start to saved list</h5>' +
-            '<p><b>1 &middot; Fill in the role</b>: Job title plus anything you know. Pasting a JD is optional; the AI writes a strong brief from the fields alone.</p>' +
-            '<p><b>2 &middot; Press Initiate Search</b>: That one button runs everything: writes the brief (if the JD box is empty), builds the ideal-candidate profile, searches, ranks the strongest matches to the top, and saves the finished list below. There is nothing else to press.</p>' +
-            '<p>Then the list keeps working on its own: contact info is enriched (emails and phones, cheapest source first), everyone lands in the <b>Candidates</b> tab under the same list name, and an <b>OS Text</b> SMS campaign is built from everyone with a phone number, ready to review and launch. No buttons, no extra steps.</p>' +
+          '<div class="jd-helpsec"><h5>What JD Sourcing is for</h5>' +
+            '<p>JD Sourcing turns an open role into a worked, contactable candidate pipeline in one press. Give it the role (a full JD, or just a title and a company) and it builds an ideal-candidate profile, searches the live market, scores and ranks everyone it finds, fills in business emails and cell numbers, and delivers the finished list into <b>Candidates</b> and into <b>OS Text</b> as a ready-to-edit campaign. Your time goes where judgment matters: reviewing a ranked list and polishing the outreach message, not hunting and copy-pasting.</p>' +
+            '<p>It casts a wide net on purpose. A 500-person ranked list with the gold at the top beats a "perfect" 12-person list that silently missed 40 great people; skim top-down and stop when the quality drops.</p>' +
           '</div>' +
-          '<div class="jd-helpsec"><h5>Search from a LinkedIn URL (Sales Navigator or Recruiter)</h5>' +
-            '<p>Run a search inside LinkedIn Sales Navigator, LinkedIn Recruiter, or a regular LinkedIn people search, copy the URL from the address bar, and paste it into the LinkedIn search box below. The tool pulls the people that search matches through your connected LinkedIn account, reads the search\'s own filters (titles, locations, companies, keywords), and runs the same search waterfall on those filters to find more qualified people beyond what LinkedIn showed. The finished list then enriches and sends itself exactly like a normal run.</p>' +
-            '<p><b>Add results to</b>: pick a past search (either search type) and the new people are added to that list with no duplicates. Anyone already on it stays once, and any missing details or contact info the new pull found fill in their blanks, so pointing it at an older, thinly-enriched list is also how you top that list up and finish its enrichment. Choosing New list saves under the name you type; re-using an existing name adds to that list instead of creating a second one.</p>' +
+          '<div class="jd-helpsec"><h5>The flow: two clicks, start to finished list</h5>' +
+            '<p><b>1 &middot; Fill in the role</b>: Job title plus anything you know. Pasting a JD is optional; if the box is empty the AI writes a strong, sourcing-ready brief from your fields alone. The Company field is only used to find peer companies worth recruiting from; candidates never see it, so type it even on confidential searches.</p>' +
+            '<p><b>2 &middot; Press Initiate Search</b>: That one button runs everything: writes the brief, builds the ideal-candidate profile, searches, ranks the strongest matches to the top, and saves the finished list below. One progress bar with a time estimate covers the whole run; when it reaches 100%, the list is saved.</p>' +
+            '<p>Then the list keeps working on its own: business emails and cell numbers are filled in (free lookups first, best-ranked candidates first), everyone lands in the <b>Candidates</b> tab under the same list name, and an <b>OS Text</b> campaign is built from everyone with a phone number: contacts arrive fully formatted (first name, last name, company, title, location, email, LinkedIn URL) so every {token} fills in, with a starter message prefilled. Lookups are remembered across the workspace, so a person enriched once is never paid for twice.</p>' +
+            '<p><b>Queue for overnight</b>: the same run, but the server does all of it, no tab needed. Queue a desk\'s worth of roles at the end of the day and the finished lists, already enriched and delivered, are waiting in the morning. The Overnight queue card shows what is still in line.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>Set the depth of the search</h5>' +
             '<p>The options above the button shape how wide a run goes; each is explained right where it sits. The defaults (Balanced breadth, scan 500, min fit 10, both boxes off) are right for most roles. Pick <b>Wide net</b> when you want the biggest possible pool: it runs every title variation, digs deeper on every search, and catches people whose profiles word the location differently, while the same location rules and ranking keep the list honest.</p>' +
-            '<p><b>Dive deeper / Refine</b>: After a run, type a plain instruction (e.g. "only Director and up in medical devices, exclude agencies") to tighten or widen the profile, then press Initiate Search again; the refined profile drives the next run.</p>' +
+            '<p><b>Dive deeper / Refine</b>: After a run, type a plain instruction (e.g. "only Director and up in medical devices, exclude agencies") to tighten or widen the profile, then press Initiate Search again; the refined profile drives the next run. Refining and re-running is cheap; hand-reviewing a mistargeted 500-person list is not.</p>' +
           '</div>' +
-          '<div class="jd-helpsec"><h5>On a saved list</h5>' +
-            '<p>Everything after the search is automatic. Enrichment fills business emails and phones cheapest-first (the free KoldInfo pass, then Laxis, then the in-house waterfall), the whole list is pushed into the <b>Candidates</b> tab (sidebar, under Build) under the same name, and an <b>OS Text</b> campaign is created from everyone with a phone number: contacts arrive formatted (first name, last name, company, title, location, email, LinkedIn URL) so every {token} fills in, with a starter message prefilled. Telnyx confirms every number on arrival; only real cell lines are kept for texting, and anyone already in an ATS conversation is protected from double-contact.</p>' +
-            '<p><b>The enrichment chip on each list tells you if it finished.</b> Green "fully enriched" = every batch went through the whole chain; anyone still missing contact info is someone the sources genuinely had nothing for. Amber "enrichment unfinished" (with roughly how far it got) or "not enriched yet" = the run stopped early, so press Enrich until the chip turns green.</p>' +
-            '<p><b>Enrich</b>: The resume switch; you normally never need it. If a run stops early (server update, closed tab), pressing it continues from the first unfinished batch (finished batches are never bought twice) and re-sends the refreshed contacts to Candidates and OS Text. Safe to press repeatedly.</p>' +
-            '<p><b>Boost phones (optional, paid)</b>: Once the free enrichment has finished, a list with candidates still missing a phone shows a Boost phones button. It runs a paid public-records lookup (about 10 cents per candidate) on just those rows to grow your textable market. Nothing is spent until you approve the estimate it shows first; when it finishes it reports the exact cost, the spend is logged to your account under Outbound Performance, and rows it already tried are never billed twice.</p>' +
-            '<p><b>Delete</b>: Removes the saved list; the people themselves are not deleted.</p>' +
+          '<div class="jd-helpsec"><h5>Search from a LinkedIn URL (Sales Navigator or Recruiter)</h5>' +
+            '<p>Run a search inside LinkedIn Sales Navigator, LinkedIn Recruiter, or a regular LinkedIn people search, copy the URL from the address bar, and paste it into the LinkedIn search box below. The tool pulls the people that search matches through your connected LinkedIn account, reads the search\'s own filters (titles, locations, companies, keywords), and runs its full search process on those filters to find more qualified people beyond what LinkedIn showed. The finished list then enriches and sends itself exactly like a normal run.</p>' +
+            '<p><b>Add results to</b>: pick a past search (either search type) and the new people are added to that list with no duplicates. Anyone already on it stays once, and any missing details or contact info the new pull found fill in their blanks, so pointing it at an older, thinly-enriched list is also how you top that list up and finish its enrichment. Choosing New list saves under the name you type; re-using an existing name adds to that list instead of creating a second one.</p>' +
+          '</div>' +
+          '<div class="jd-helpsec"><h5>Reading a saved list</h5>' +
+            '<p>Every list card opens with a one-glance verdict chip: <b>Ready to launch</b> (done, with phones to text), <b>Working now</b> (something is running), <b>Needs a press</b> (amber: press the highlighted button), or <b>Runs by itself</b> (the next step happens automatically), next to how many of the 4 steps are done and when the list last moved. Under it, the four-stop tracker <b>Searched &rsaquo; Enriched &rsaquo; Candidates &rsaquo; OS Text</b> fills green as work completes: a green check is done, a pulsing blue dot is happening right now, an amber dot needs your press, and a grey dot is coming up on its own. The sentence under the tracker always says what is happening and what, if anything, to do next, so you never have to guess where a list is.</p>' +
+            '<p>The pills next to the list name are the quality readout: how many candidates hold a valid email, how many hold a phone, and what the search spent. The tracker answers "where is it"; the pills answer "how good is it".</p>' +
+          '</div>' +
+          '<div class="jd-helpsec"><h5>The buttons on a saved list</h5>' +
+            '<p><b>Boost phones (optional, paid)</b>: appears once the free enrichment has finished and candidates still lack a phone. It runs a deeper paid phone lookup on just those rows to grow your textable count. You choose how many lookups to buy and see the estimated cost first; nothing is spent until you press Go, and the run is handed to the server, so you can close the tab. Press Boost on several lists and they line up and run one after another, with live progress above your lists. Each lookup costs a fraction of a cent (priced from your team\'s plan), a row that has been tried is never billed twice, every run stops itself before it can pass your monthly Boost budget, and the exact spend is logged to your account under Outbound Performance. Numbers it finds flow on to OS Text by themselves.</p>' +
+            '<p><b>Enrich</b>: The resume switch; you normally never need it. If a run stops early (server update, closed tab), pressing it continues from the first unfinished batch (finished work is never redone or re-bought) and re-sends the refreshed contacts to Candidates and OS Text. Safe to press repeatedly.</p>' +
+            '<p><b>Combine lists</b>: Ran the same role a few different ways? Tick two or more lists and press Combine lists at the top: duplicates merge into one master list, contact info found on any list fills the blanks on the others, and the combined list flows to Candidates and OS Text by itself under its own tag.</p>' +
+            '<p><b>Delete</b>: Removes the saved list. The people themselves are not deleted, and the workspace still remembers it surfaced them, which is what powers Fresh only.</p>' +
+          '</div>' +
+          '<div class="jd-helpsec"><h5>Guardrails you never have to think about</h5>' +
+            '<p>Every number is checked on arrival in OS Text and only real cell lines are kept for texting; duplicate people are absorbed instead of re-added; opted-out numbers are never added; and anyone your team is already mid-conversation with is protected from double-contact on every channel.</p>' +
           '</div>' +
         '</div>' +
       '</details>' +
@@ -11692,7 +11703,7 @@
             // Boost phones is the ONLY paid extra: it appears once the free chain has
             // run, is recruiter-triggered, and always shows the estimated cost first.
             '<div class="jd-run-actions">' +
-              (boostable ? '<button class="btn btn-ghost btn-sm" data-boost="' + esc(r.id) + '" title="The free sources found phones for ' + phs + ' of ' + n + '. Boost runs a paid public-records lookup on the ' + boostable + ' still missing one, priced from your plan. You see the estimated cost and approve it before anything is spent; the actual spend is logged to your account.">Boost phones · ' + boostable + ' left</button>' : '') +
+              (boostable ? '<button class="btn btn-ghost btn-sm" data-boost="' + esc(r.id) + '" title="The free sources found phones for ' + phs + ' of ' + n + '. Boost runs a deeper paid phone lookup on the ' + boostable + ' still missing one, priced from your plan. You see the estimated cost and approve it before anything is spent; the actual spend is logged to your account.">Boost phones · ' + boostable + ' left</button>' : '') +
               '<button class="btn btn-ghost btn-sm" data-autoenrich="' + esc(r.id) + '" title="Enrichment runs automatically after every search. Press this only if a run stopped early: it resumes exactly where it left off (already-enriched batches are never re-bought) and re-sends the refreshed contacts to Candidates and OS Text when done.">Enrich</button>' +
               '<button class="btn btn-ghost btn-sm" data-del="' + esc(r.id) + '">Delete</button>' +
             '</div></div>' + journey + '</div>';
@@ -11791,8 +11802,7 @@
             }
             laxisReset(); finishProgress("Enrichment stopped");
             alert("Enrichment failed:\n" + (why || "unknown error") +
-              "\n\nIf this mentions a selector (CALIBRATE), the Laxis UI changed and the worker needs re-calibrating." +
-              "\n\nAlready-enriched batches are saved; the list is sent on to Candidates and OS Text with what it has. Press Enrich on the list to finish the rest."); loadRuns(); laxisBail(); return;
+              "\n\nAlready-enriched batches are saved; the list is sent on to Candidates and OS Text with what it has. Press Enrich on the list to finish the rest; if it keeps failing, ask your admin."); loadRuns(); laxisBail(); return;
           }
           var lx = s.data.laxis || {}; var gf = s.data.gapFill || {};
           lxT.emails += lx.emails || 0; lxT.phones += (lx.phones || 0) + (gf.phones || 0); lxT.gap += gf.enriched || 0;
@@ -12358,7 +12368,7 @@
         if (!q.ok) { alert("Could not price the boost: " + ((q.data && q.data.error) || gatewayMsg(q.status))); return; }
         var quote = (q.data && q.data.quote) || {};
         if (!quote.configured) {
-          alert("Boost phones is not set up yet.\n\nAsk your admin to open Setup > JD Sourcing and fill the Boost phones fields (the host + path of a RapidAPI skip-trace listing; the per-lookup price comes from your plan settings). Once saved, this button prices and runs it.");
+          alert("Boost phones is not set up yet.\n\nAsk your admin to open Setup > JD Sourcing and fill in the Boost phones fields (the per-lookup price comes from your plan settings). Once saved, this button prices and runs it.");
           return;
         }
         if (!quote.missing) { toast("Nothing left to boost: everyone reachable already has a phone number."); loadRuns(); return; }
@@ -12571,16 +12581,16 @@
         var p = (r.data && r.data.phoneSources) || {};
         host.style.display = "";
         host.innerHTML = '<span class="muted" style="font-size:11.5px;margin-right:2px">Search power:</span>' +
-          pill(e.database, "Contact database", "Off: the enrichment worker is not reachable, so the free 57M-person database sweep is skipped this run.") +
-          pill(e.wideWeb, "Wide web search", "Off: paste your Serper key in Setup under JD Sourcing to turn on the deep web pass (about a nickel per full run).") +
+          pill(e.database, "Contact database", "Off: the contact database is not reachable right now, so this run skips its free sweep.") +
+          pill(e.wideWeb, "Wide web search", "Off: ask your admin to fill in the wide web search key in Setup under JD Sourcing to turn on the deep web pass.") +
           pill(e.freeWeb, "Built-in web search", "Off: the built-in free pass is not responding right now. It comes back on its own; nothing to configure.") +
-          pill(e.peopleApi, "People search engine", "Off: connect a people-search subscription in Setup under JD Sourcing. This is the highest-volume source when active.") +
+          pill(e.peopleApi, "People search engine", "Off: ask your admin to connect the people-search subscription in Setup under JD Sourcing. This is the highest-volume source when active.") +
           // Phone rungs get their own pills: phones are the scarcest field, so a dead
           // source should be visible HERE, not discovered from a list with few phones.
           '<span class="muted" style="font-size:11.5px;margin:0 2px 0 8px">Phone sources:</span>' +
-          pill(p.vendorEnrich, "Contact enrichment", "Off: the enrichment worker is not reachable, so the two vendor passes that fill emails and phones are skipped.") +
-          pill(p.inHouseDb, "In-house phone database", "Off: the in-house phone database (about 2.5 million named people with numbers) is not reachable right now.") +
-          pill(p.paidFinder, "Paid phone finder", "Off: optional top-up. Add a phone-lookup listing (host + path) in Setup under JD Sourcing and it will run only on candidates the free phone sources could not fill.");
+          pill(p.vendorEnrich, "Contact enrichment", "Off: the enrichment service is not reachable right now, so the passes that fill emails and phones are skipped.") +
+          pill(p.inHouseDb, "In-house phone database", "Off: the in-house phone database is not reachable right now.") +
+          pill(p.paidFinder, "Paid phone finder", "Off: optional top-up. Ask your admin to fill in the phone-lookup fields in Setup under JD Sourcing; it then runs only on candidates the free phone sources could not fill.");
       }).catch(function () {});
     }
     loadEngines();

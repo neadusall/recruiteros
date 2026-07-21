@@ -190,7 +190,7 @@
     <div class="toc-title">In this document</div>
     <ol>
       <li><a href="#why">Why JD Sourcing matters</a></li>
-      <li><a href="#how">What happens under the hood</a></li>
+      <li><a href="#how">How a run works, start to finish</a></li>
       <li><a href="#where">Where to find it</a></li>
       <li><a href="#run">Running a search: two clicks</a></li>
       <li><a href="#settings">The settings that shape a run</a></li>
@@ -214,8 +214,8 @@
     <li><strong>A repeatable asset.</strong> Every run is saved. Rerun next quarter with <span class="ui">Fresh only</span> on and you get only the people who entered the market since.</li>
   </ul>
 
-  <h2 id="how">2. What happens under the hood</h2>
-  <p>You do not need to know this to use the tool, but knowing it makes you better at feeding it. A run moves through five stages:</p>
+  <h2 id="how">2. How a run works, start to finish</h2>
+  <p>You do not need to know this to use the tool, but knowing what each stage does makes you better at feeding it. A run moves through five stages:</p>
 
   <ol class="pipeline">
     <li>
@@ -273,7 +273,7 @@
     </li>
   </ol>
 
-  <p class="soft">Right above the button sits <strong>Set the depth of the search</strong>: the four choices that shape how wide the run goes (Scan up to, Min fit, Fresh only, Include out-of-area), each explained in place. The defaults are right for most roles; section 5 covers when to move them.</p>
+  <p class="soft">Right above the button sits <strong>Set the depth of the search</strong>: the choices that shape how wide the run goes (Search breadth, Scan up to, Min fit, Fresh only, and the out-of-area switches), each explained in place. The defaults are right for most roles; section 5 covers when to move them.</p>
 
   <p>Next to Initiate Search sits <span class="ui">Queue for overnight</span>: the same search, but the server runs it, and the full enrichment, entirely on its own. No tab needed. Queue a desk's worth of roles at the end of the day and the finished lists are waiting under Your saved candidate lists in the morning, already enriched and already delivered to Candidates and OS Text. An Overnight queue card on the page shows what is still cooking.</p>
 
@@ -281,6 +281,11 @@
   <div class="tbl-wrap">
     <table>
       <tr><th>Setting</th><th>What it does</th><th>How to set it</th></tr>
+      <tr>
+        <td><strong>Search breadth</strong></td>
+        <td>How wide the net is cast. Focused sticks to the closest title matches. Balanced also runs every title variation of the role. Wide net digs deepest and adds passes that catch people whose profiles word the location differently.</td>
+        <td>Balanced (the default) fits most roles. Pick Wide net when you want the biggest possible pool; the same location rules and ranking apply on every setting, so a wider net never means weaker matches at the top.</td>
+      </tr>
       <tr>
         <td><strong>Min fit</strong></td>
         <td>The match-strength bar, 0 to 100. Candidates scoring below it are filtered out.</td>
@@ -302,12 +307,18 @@
         <td>On for remote roles or when relocation is on the table; off otherwise.</td>
       </tr>
       <tr>
+        <td><strong>Also list out-of-area (separate list)</strong></td>
+        <td>Keeps a location search inside your area, but adds a clearly separated "Outside target area" section under the in-area results instead of throwing those people away.</td>
+        <td>Off by default so nothing is spent on non-local people. Turn it on when you want a relocation bench without mixing it into the local list.</td>
+      </tr>
+      <tr>
         <td><strong>Radius</strong></td>
         <td>Expands the location beyond the exact metro by estimated drive distance, pulling in all surrounding cities within it.</td>
         <td>Most on-site roles deserve at least +25. Exact-metro-only searches quietly starve the list.</td>
       </tr>
     </table>
   </div>
+  <p class="soft">A <strong>Search power</strong> row sits at the top of the depth panel: green pills for each search and phone source that will run, greyed pills for anything currently off, each with a plain-English note on what to do about it. Glance at it before a big run; a greyed pill explains a thin result before you burn time re-running.</p>
 
   <h2 id="refine">6. Dive deeper</h2>
 
@@ -343,12 +354,13 @@
   <p>Your job on a finished list is small: read the row, decide if the textable count is good enough, then open OS Text, polish the message so it sounds like you, and launch.</p>
 
   <h3>Reading a list row</h3>
-  <p>Every saved list carries a progress tracker: four connected stops, <span class="ui">Searched</span> &rsaquo; <span class="ui">Enriched</span> &rsaquo; <span class="ui">Candidates</span> &rsaquo; <span class="ui">OS Text</span>, with a line that fills green as work completes. A green check means that stop is done, a pulsing blue dot means it is happening right now, an amber dot means it needs a press of <span class="ui">Enrich</span>, and a grey numbered dot means it is coming up automatically on its own. Each stop shows its own detail line (how many found, how many emails and phones filled, how many delivered), and the plain sentence under the tracker says what is happening and whether anything needs a press, so you never have to guess where a list is.</p>
-  <p>Next to the list name, the reach pills give you the numbers: how many candidates it holds, how many have a valid email, how many have a phone, plus how many search credits the run used. The journey answers "where is it"; the reach pills answer "how good is it".</p>
+  <p>Every saved list opens with a one-glance verdict: a status chip that reads <strong>Ready to launch</strong> (done, with phones to text), <strong>Working now</strong> (something is running), <strong>Needs a press</strong> (a button below is highlighted amber), or <strong>Runs by itself</strong> (the next step happens automatically), next to a step counter and a freshness stamp ("3 of 4 steps &middot; updated 12 min ago") so you can tell a moving list from a stuck one without opening anything. When a finished list still has candidates missing a phone, a <span class="ui">Boost phones</span> suggestion appears right in that header showing how many more people it could unlock.</p>
+  <p>Under the verdict sits the progress tracker: four connected stops, <span class="ui">Searched</span> &rsaquo; <span class="ui">Enriched</span> &rsaquo; <span class="ui">Candidates</span> &rsaquo; <span class="ui">OS Text</span>, with a line that fills green as work completes. A green check means that stop is done, a pulsing blue dot means it is happening right now, an amber dot is a real button (press it to start or resume that step), and a grey dot means it is coming up automatically on its own. Each stop shows its own detail line (how many found, how many emails and phones filled, how many delivered), and the plain sentence under the tracker says what is happening and what, if anything, to do next, so you never have to guess where a list is.</p>
+  <p>Next to the list name, the reach pills give you the numbers: how many candidates it holds, how many have a valid email, how many have a phone, plus how many search credits the run used. The tracker answers "where is it"; the reach pills answer "how good is it".</p>
 
   <h3>The row buttons</h3>
   <ul>
-    <li><strong>Boost phones (optional, paid).</strong> Appears once the free enrichment has finished and candidates are still missing a phone. It runs a paid public-records lookup, about 10 cents per candidate, on just those rows to grow your textable market. You always see the estimated cost first and nothing is spent until you approve it; when it finishes it reports the exact cost, rows it already tried are never billed twice, and the spend is logged to your account under Outbound Performance.</li>
+    <li><strong>Boost phones (optional, paid).</strong> Appears once the free enrichment has finished and candidates are still missing a phone. It runs a deeper paid phone lookup on just those rows to grow your textable market. You pick how many lookups to buy and see the estimated cost before anything is spent; each lookup costs a fraction of a cent, priced straight from your team's plan. Press Go and the run is handed to the server: close the tab, press Boost on several lists, and they line up and run one after another with live progress above your saved lists. Rows it already tried are never billed twice, every run stops itself before it can pass your monthly Boost budget, the exact spend is logged to your account under Outbound Performance, and the numbers it finds flow on to OS Text by themselves.</li>
     <li><strong>Enrich.</strong> The resume switch; you normally never need it. If a run stops early (a server update, a closed tab), pressing it continues from the first unfinished batch (finished batches are never bought twice) and re-sends the refreshed contacts to Candidates and OS Text. Safe to press repeatedly.</li>
     <li><strong>Delete.</strong> Removes the saved list. The people themselves are not deleted, and the workspace still remembers it surfaced them (which is what powers Fresh only).</li>
   </ul>
@@ -361,7 +373,7 @@
 
   <div class="callout warn">
     <span class="tag">Spend smart</span>
-    <p>Discovery, scoring, and the standard enrichment chain run on the workspace's plan. The one button that spends extra money is <strong>Boost phones</strong>, and it always shows the estimate before a cent goes out. Use it when a strong list's textable count is thin, not on every list by default; your Boost spend is visible per recruiter in Outbound Performance.</p>
+    <p>Discovery, scoring, and the standard enrichment run on the workspace's plan. The one button that spends extra money is <strong>Boost phones</strong>, and it always shows the estimate before a cent goes out; lookups cost fractions of a cent each, and every run stops itself before it can pass your monthly Boost budget (your Daily Checklist shows that budget at all times). Use it when a strong list's textable count is thin, not on every list by default; Boost spend is visible per recruiter in Outbound Performance.</p>
   </div>
 
   <h2 id="sharpen">9. What makes a search stronger</h2>
@@ -499,7 +511,7 @@ Qualifications &amp; Experience
   <h3>Every finished list</h3>
   <ul>
     <li>Check the reach readout: candidates, valid emails, phones</li>
-    <li>Textable count thin? <span class="ui">Boost phones</span>, approve the estimate it shows</li>
+    <li>Textable count thin? <span class="ui">Boost phones</span>: pick how many lookups, approve the estimate, and let the server run it</li>
     <li>Ran the role more than once? Tick the lists and <span class="ui">Combine lists</span></li>
     <li>In OS Text: polish the prefilled message, then Activate</li>
   </ul>
