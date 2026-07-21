@@ -32,8 +32,11 @@ export async function GET(req: Request) {
   } catch {
     return fail("ostext_unreachable", 502);
   }
-  let data: { sources?: unknown } = {};
+  let data: { sources?: unknown; trend?: unknown } = {};
   try { data = await res.json(); } catch { /* non-JSON error body */ }
   if (!res.ok) return fail("ostext_accuracy_failed", 502);
-  return ok({ sources: Array.isArray(data.sources) ? data.sources : [] });
+  return ok({
+    sources: Array.isArray(data.sources) ? data.sources : [],
+    trend: Array.isArray(data.trend) ? data.trend : [],
+  });
 }
