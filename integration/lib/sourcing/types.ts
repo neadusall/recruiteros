@@ -241,6 +241,14 @@ export interface SourcingRun {
      * OS Text; this stamp rate-limits it to one attempt per run per day.
      */
     parityAt?: string;
+    /**
+     * What the OS Text engine said about the last push: how many contacts it
+     * actually took (added), how many it left out because a fresh Telnyx check
+     * already judged the number not a cell (knownNonMobile), and how many went
+     * straight to textable on a prior cell confirmation (confirmedCell). This
+     * is why a campaign can hold fewer people than the list has phones.
+     */
+    lastImport?: { at: string; added: number; knownNonMobile: number; confirmedCell: number };
   };
   /**
    * Skip the settle/idle waits: auto-send this run on the very next sweep (and the

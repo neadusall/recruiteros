@@ -219,7 +219,7 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
     if (contacts.length && ostextReady) {
       const owner = await workspaceOwner(ws);
       try {
-        await ostextImport({
+        const imported = await ostextImport({
           name: run.name,
           template: ostextStarterTemplate(owner?.name || "", run.name),
           positionSummary: `Pushed from JD Sourcing list "${run.name}" (${contacts.length} contacts, server auto-send).`,
@@ -234,6 +234,15 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
           // campaign's SMS from-number: same number for their calls and texts.
           fromUserId: owner?.userId,
         });
+        // Keep the engine's answer on the run: "list shows N phones but the
+        // campaign holds fewer" is almost always knownNonMobile (Telnyx already
+        // judged those numbers not cells), and this stamp makes that checkable.
+        stamp.lastImport = {
+          at: nowIso(),
+          added: Number(imported.added) || 0,
+          knownNonMobile: Number(imported.knownNonMobile) || 0,
+          confirmedCell: Number(imported.confirmedCell) || 0,
+        };
       } catch (e) {
         // Everyone on the list being protected is the guard WORKING, not a failure.
         if ((e as Error & { code?: string }).code !== "all_contacts_protected") throw e;
