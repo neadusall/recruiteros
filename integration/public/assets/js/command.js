@@ -11171,10 +11171,15 @@
       '.jd-quota .jd-qchip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;color:#8a5a00;background:color-mix(in srgb, #d97706 8%, transparent);border:1px solid color-mix(in srgb, #d97706 34%, transparent);cursor:help}' +
       '.jd-quota .jd-qchip .isvg{width:12px;height:12px}' +
       '.jd-quota .jd-qmuted{color:var(--text-dim);background:var(--bg-soft);border-color:var(--border-strong)}' +
-      '.jd-pick{flex:0 0 auto;width:15px;height:15px;margin:0;accent-color:var(--accent,#2e5bd7);cursor:pointer}' +
-      /* Combine looks resting until 2+ lists are ticked, but stays clickable so a
-         press always answers (it explains the tick step instead of playing dead). */
-      '.jd-combine-off{opacity:.55}' +
+      '.jd-pick{flex:0 0 auto;width:16px;height:16px;margin:0;accent-color:var(--accent,#2e5bd7);cursor:pointer}' +
+      /* The combine walkthrough bar sits above the lists whenever combining is even
+         possible (2+ saved lists), so the feature is discoverable without opening
+         the help accordion. It brightens once a tick arms the flow. The button is
+         always clickable so a press always answers (below 2 ticks the handler
+         explains the tick step instead of playing dead). */
+      '.jd-combine-bar{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:12.5px;line-height:1.5;color:var(--text-muted);margin:2px 0 12px;padding:9px 12px;border:1px dashed var(--border-strong);border-radius:10px;background:var(--bg-soft)}' +
+      '.jd-combine-bar b{color:var(--text)}' +
+      '.jd-combine-bar.on{border-style:solid;border-color:color-mix(in srgb, var(--brand) 42%, transparent);background:var(--brand-soft);color:var(--text)}' +
       '.jd-pick-nudge{outline:2px solid var(--accent,#2e5bd7);outline-offset:2px;border-radius:3px}' +
       '@media (max-width:760px){.jd-run-top{flex-direction:column;align-items:stretch}.jd-run-actions{justify-content:flex-start}}' +
       '.jd-depth{border:1px solid var(--border-strong);border-radius:12px;background:var(--bg-soft);padding:14px 16px;margin-top:14px}' +
@@ -11327,8 +11332,9 @@
       '<div class="card">' +
         '<div class="jd-cardhead"><h3 style="margin:0">Your saved candidate lists</h3>' +
           '<span id="jdQuota" class="jd-quota"></span>' +
-          '<button class="btn btn-ghost btn-sm jd-combine-off" id="jdCombine" title="Ran the same role a few times? Tick two or more lists below and combine them into one master list. Duplicates merge automatically, contact info found on any list is kept, and the combined list flows to Candidates + OS Text by itself under its own tag.">Combine lists</button>' +
+          '<button class="btn btn-ghost btn-sm" id="jdCombine" title="Ran the same role a few times? Tick two or more lists below and combine them into one master list. Duplicates merge automatically, contact info found on any list is kept, and the combined list flows to Candidates + OS Text by itself under its own tag.">Combine lists</button>' +
         '</div>' +
+        '<div id="jdCombineBar" class="jd-combine-bar" style="display:none"></div>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
     function msg(t) { var m = $("#jdMsg"); if (m) m.textContent = t || ""; }
@@ -12487,17 +12493,44 @@
     }
     function syncCombine() {
       var btn = $("#jdCombine"); if (!btn) return;
-      var n = pickedIds().length;
+      var ids = pickedIds();
+      var n = ids.length;
       // Not disabled below 2 ticks: a dead-looking button that swallows clicks reads
       // as broken. It stays pressable and the click handler explains the tick step.
-      btn.classList.toggle("jd-combine-off", n < 2);
+      // It stays ghost even when armed: the bar below carries the ONE primary CTA
+      // (two stacked primary buttons read as a rendering glitch).
       btn.textContent = n >= 2 ? ("Combine " + n + " lists") : "Combine lists";
+      // The walkthrough bar above the lists: advertises the feature when nothing is
+      // ticked, coaches the next step at 1 tick, and previews the merge at 2+ using
+      // the SAME dedupe key the server applies, so the promised numbers hold.
+      var bar = $("#jdCombineBar"); if (!bar) return;
+      if (((state.runs || []).length) < 2) { bar.style.display = "none"; bar.innerHTML = ""; return; }
+      bar.style.display = "";
+      bar.classList.toggle("on", n >= 1);
+      if (n >= 2) {
+        var seen = {}; var rows = 0;
+        (state.runs || []).forEach(function (r) {
+          if (ids.indexOf(r.id) < 0) return;
+          (r.candidates || []).forEach(function (c) {
+            rows++;
+            var k = (c.linkedinUrl || ((c.fullName || "") + "|" + (c.company || ""))).toLowerCase().replace(/\/+$/, "");
+            seen[k] = 1;
+          });
+        });
+        var uniq = Object.keys(seen).length; var dup = rows - uniq;
+        bar.innerHTML = '<b>' + n + ' lists ticked.</b><span>About ' + uniq + ' unique candidate' + (uniq === 1 ? '' : 's') + ' after merging' +
+          (dup > 0 ? (' (' + dup + ' duplicate row' + (dup === 1 ? '' : 's') + ' fold into one)') : '') + '.</span>' +
+          '<button class="btn btn-primary btn-sm" data-combine-go="1" style="margin-left:auto">Combine ' + n + ' lists</button>';
+      } else if (n === 1) {
+        bar.innerHTML = '<b>1 list ticked.</b><span>Tick at least one more list below, then press <b>Combine lists</b> above.</span>';
+      } else {
+        bar.innerHTML = '<span><b>Combine searches:</b> ran the same role a few different ways? Tick two or more lists below, then press <b>Combine lists</b> above. Duplicates merge into one master list, contact info found on any list fills the blanks, and the combined list flows to Candidates and OS Text on its own.</span>';
+      }
     }
     $("#jdRuns").addEventListener("change", function (e) {
       if (e.target && e.target.classList && e.target.classList.contains("jd-pick")) syncCombine();
     });
-    var combineBtn = $("#jdCombine");
-    if (combineBtn) combineBtn.addEventListener("click", function () {
+    function openCombineFlow() {
       var ids = pickedIds();
       if (ids.length < 2) {
         // Pressed too early: say what to do and point at the tick boxes.
@@ -12556,6 +12589,15 @@
             });
           });
         });
+    }
+    var combineBtn = $("#jdCombine");
+    if (combineBtn) combineBtn.addEventListener("click", openCombineFlow);
+    // The bar's inline Combine button is re-rendered on every tick; delegate the
+    // click from the bar itself so it always works without re-wiring listeners.
+    var combineBarEl = $("#jdCombineBar");
+    if (combineBarEl) combineBarEl.addEventListener("click", function (e) {
+      var t = e.target && e.target.closest ? e.target.closest("[data-combine-go]") : null;
+      if (t) openCombineFlow();
     });
     var capEl2 = $("#jdCap"); if (capEl2) capEl2.addEventListener("input", updateRunCost);
     var planHost = $("#jdPlan");
